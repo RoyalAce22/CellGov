@@ -309,6 +309,7 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         lines: &[
             "cellgov dev fuzz ppu-instruction --seed 7 --count 1000",
             "cellgov dev fuzz ppu-instruction --quiet --progress --count 100",
+            "cellgov dev fuzz ppu-instruction --seed 7 --count 1000 --reduction on-finding",
         ],
     },
     Examples {
@@ -336,7 +337,10 @@ pub(crate) const EXAMPLES: &[Examples] = &[
     },
     Examples {
         path: "dev fuzz replay",
-        lines: &["cellgov dev fuzz replay --artifact target/fuzz-findings/finding.json"],
+        lines: &[
+            "cellgov dev fuzz replay --artifact target/fuzz-findings/finding.json",
+            "cellgov dev fuzz replay --artifact target/fuzz-findings/finding.json --reduced",
+        ],
     },
 ];
 

@@ -54,13 +54,22 @@ pub(crate) enum FuzzCheck {
     Paths,
 }
 
-/// Reduction policy for findings.
+/// Whether to reduce retained findings.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub(crate) enum FuzzReduction {
     /// Preserve the original case only.
     None,
-    /// Request a same-fingerprint reduced case.
+    /// Reduce each retained finding to a smaller same-fingerprint case.
     OnFinding,
+}
+
+/// How a reducer chooses among reproducing candidates.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum FuzzReductionPolicy {
+    /// Accept the lowest-ordered reproducing candidate of each round.
+    Deterministic,
+    /// Accept the first reproducing candidate the driver reports.
+    Greedy,
 }
 
 /// Common settings for a generated interpreter campaign.
@@ -118,6 +127,12 @@ pub(crate) struct FuzzCampaignArgs {
     /// Request reduction of retained findings.
     #[arg(long, value_enum, default_value_t = FuzzReduction::None)]
     pub reduction: FuzzReduction,
+    /// Candidate selection policy for reduction.
+    #[arg(long, value_enum, default_value_t = FuzzReductionPolicy::Deterministic)]
+    pub reduction_policy: FuzzReductionPolicy,
+    /// Maximum candidate evaluations spent on each finding.
+    #[arg(long, default_value_t = cellgov_fuzz::reduce::DEFAULT_REDUCTION_BUDGET)]
+    pub reduction_budget: u64,
     /// Directory that receives one versioned artifact per retained finding.
     #[arg(long, value_name = "DIR", default_value = "target/fuzz-findings")]
     pub artifacts_dir: PathBuf,
@@ -208,4 +223,7 @@ pub(crate) struct FuzzReplayArgs {
     /// Versioned finding JSON to replay.
     #[arg(long, value_name = "PATH")]
     pub artifact: PathBuf,
+    /// Replay the recorded reduced case instead of the original.
+    #[arg(long)]
+    pub reduced: bool,
 }

@@ -177,6 +177,37 @@ pub enum ReductionError {
         /// Stable transform identity.
         transform: &'static str,
     },
+    /// The unreduced case no longer produces the recorded finding.
+    #[error("reduction found no finding at the original case")]
+    OriginalNotReproduced,
+    /// The engine classified the unreduced case as unsupported or architecturally undefined.
+    #[error("reduction refuses an unsupported or undefined original case")]
+    OriginalInapplicable,
+    /// The finding carries no case words a shrinker can transform.
+    #[error("reduction has no case words to transform")]
+    NothingToReduce,
+    /// The evaluation budget ended before any round settled.
+    #[error("reduction budget ended after {evaluations} evaluations with no round settled")]
+    BudgetExhausted {
+        /// Evaluations spent, the verification included.
+        evaluations: u64,
+    },
+    /// The campaign configuration does not describe the finding's case.
+    #[error("reduction configuration does not match the finding's replay coordinates")]
+    IncompatibleReplay,
+    /// The engine failed while it evaluated a candidate.
+    #[error("reduction candidate evaluation failed: {source}")]
+    CandidateEvaluation {
+        /// Engine failure.
+        #[source]
+        source: Box<FuzzError>,
+    },
+    /// The driver advanced the reducer session out of order.
+    #[error("reduction session expected {expected}")]
+    SessionOrder {
+        /// Step the session expected.
+        expected: &'static str,
+    },
 }
 
 /// Replay coordinates use an unsupported campaign version.

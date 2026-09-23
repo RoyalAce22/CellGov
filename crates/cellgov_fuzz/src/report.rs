@@ -200,8 +200,10 @@ pub struct Finding {
 pub enum ReductionOutcome {
     /// No reduction attempt exists.
     NotAttempted,
-    /// Reduction produced a smaller reproducer with the same fingerprint.
+    /// Reduction produced smaller case words with the same fingerprint.
     Reduced(Vec<u32>),
+    /// Every candidate lost the finding; the original case is already minimal.
+    Irreducible,
     /// Reduction failed; the finding still carries the original reproducer.
     Failed(crate::ReductionError),
 }

@@ -56,7 +56,13 @@ fn every_fuzz_mode_is_a_declarative_dev_subcommand() {
         parse(&["replay", "--artifact", "finding.json"])
             .expect("artifact mode")
             .command,
-        FuzzCommand::Replay(_)
+        FuzzCommand::Replay(FuzzReplayArgs { reduced: false, .. })
+    ));
+    assert!(matches!(
+        parse(&["replay", "--artifact", "finding.json", "--reduced"])
+            .expect("reduced artifact mode")
+            .command,
+        FuzzCommand::Replay(FuzzReplayArgs { reduced: true, .. })
     ));
 }
 
@@ -124,12 +130,20 @@ fn campaign_parser_keeps_replay_and_selection_fields_typed() {
         "--check",
         "all",
         "--reduction",
-        "none",
+        "on-finding",
+        "--reduction-policy",
+        "greedy",
+        "--reduction-budget",
+        "16",
     ])
     .expect("typed campaign");
     let FuzzCommand::SpuSequence(args) = parsed.command else {
         panic!("wrong mode")
     };
+    assert!(matches!(
+        (args.reduction, args.reduction_policy, args.reduction_budget),
+        (FuzzReduction::OnFinding, FuzzReductionPolicy::Greedy, 16)
+    ));
     assert_eq!(
         (args.campaign_version, args.seed, args.first, args.count),
         (4, 77, 12, 30)
@@ -179,15 +193,23 @@ fn host_validation_rejects_unsupported_and_invalid_options() {
         run_inner(&unsupported),
         Err(FuzzCliError::CheckUnavailable)
     ));
-    let reduction = parse(&["spu-sequence", "--reduction", "on-finding"]).expect("typed selection");
+    let raw_reduction = parse(&["raw", "spu", "--count", "1", "--reduction", "on-finding"])
+        .expect("typed selection");
     assert!(matches!(
-        run_inner(&reduction),
+        run_inner(&raw_reduction),
         Err(FuzzCliError::ReductionUnavailable)
     ));
     for args in [
         vec!["ppu-instruction", "--workers", "0"],
         vec!["ppu-instruction", "--deadline-ms", "0"],
         vec!["ppu-instruction", "--finding-limit", "0"],
+        vec![
+            "ppu-instruction",
+            "--reduction",
+            "on-finding",
+            "--reduction-budget",
+            "0",
+        ],
         vec!["ppu-instruction", "--sequence-words", "8"],
         vec!["ppu-instruction", "--count", "0"],
         vec!["ppu-instruction", "--shard", "2", "--shards", "2"],
@@ -339,8 +361,90 @@ fn short_campaigns_and_semantic_enumeration_reach_the_library() {
     ])
     .expect("campaign parses");
     assert!(matches!(run_inner(&campaign), Ok(CommandExitCode::SUCCESS)));
+    let reducing = parse(&[
+        "spu-sequence",
+        "--count",
+        "4",
+        "--workers",
+        "1",
+        "--sequence-words",
+        "4",
+        "--reduction",
+        "on-finding",
+        "--reduction-policy",
+        "greedy",
+    ])
+    .expect("reducing campaign parses");
+    assert!(matches!(run_inner(&reducing), Ok(CommandExitCode::SUCCESS)));
     let semantic = parse(&["semantic", "both"]).expect("semantic parses");
     assert!(matches!(run_inner(&semantic), Ok(CommandExitCode::SUCCESS)));
+}
+
+#[test]
+fn a_retained_finding_that_stops_reproducing_keeps_its_original_case() {
+    use cellgov_fuzz::reduce::{ReductionPolicy, ReductionRequest, DEFAULT_REDUCTION_BUDGET};
+    use cellgov_fuzz::report::{CheckIdentity, DivergenceClass, FindingKind, SemanticFingerprint};
+    use cellgov_fuzz::{FuzzConfig, ReductionError, ReductionOutcome};
+    let artifact = synthetic_finding_artifact();
+    let finding = Finding {
+        fingerprint: SemanticFingerprint {
+            target: FuzzTarget::PpuInstruction,
+            instruction_kind: None,
+            check: CheckIdentity::LegalOutcome,
+            divergence: DivergenceClass::Outcome,
+            outcome: None,
+            effect: None,
+        },
+        kind: FindingKind::IllegalOutcome,
+        replay: artifact.original.replay,
+        original_words: artifact.original.words.clone(),
+        observation: None,
+        reduction: ReductionOutcome::NotAttempted,
+        panic_payload: None,
+    };
+    let outcome = reduce_retained_finding(
+        FuzzConfig::default(),
+        &finding,
+        ReductionRequest {
+            policy: ReductionPolicy::Deterministic,
+            budget: DEFAULT_REDUCTION_BUDGET,
+        },
+    );
+    assert_eq!(
+        outcome,
+        ReductionOutcome::Failed(ReductionError::OriginalNotReproduced)
+    );
+}
+
+#[test]
+fn a_reduced_rerun_of_a_stored_finding_is_refused_with_its_reduced_case() {
+    use cellgov_fuzz::artifact::ArtifactReduction;
+    let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_artifact_reduced_rerun");
+    let path = scratch.join("finding.json");
+    let unreduced = synthetic_finding_artifact();
+    persist_finding(&path, unreduced.clone()).expect("first write");
+    let mut reduced = unreduced.clone();
+    reduced.reduction = ArtifactReduction::Reduced {
+        words: vec![0x3860_0006],
+    };
+    reduced.validate().expect("reduced artifact is complete");
+    let error =
+        persist_finding(&path, reduced.clone()).expect_err("the reduced case must not vanish");
+    assert!(matches!(
+        error,
+        FuzzCliError::ArtifactReductionNotStored {
+            stored: ArtifactReduction::NotAttempted,
+            artifact: retained,
+            ..
+        } if retained.reduction == reduced.reduction
+    ));
+    persist_finding(&path, unreduced.clone()).expect("an unreduced rerun is idempotent");
+
+    let reduced_path = scratch.join("reduced.json");
+    persist_finding(&reduced_path, reduced.clone()).expect("reduced first write");
+    persist_finding(&reduced_path, reduced).expect("an identical reduced rerun is idempotent");
+    persist_finding(&reduced_path, unreduced)
+        .expect("an unreduced rerun leaves the reduced file standing");
 }
 
 #[test]
@@ -709,15 +813,29 @@ fn artifact_replay_refuses_an_unreproduced_case_and_a_changed_schema() {
     let path = scratch.join("finding.json");
     let artifact = synthetic_finding_artifact();
     persist_finding(&path, artifact.clone()).expect("write artifact");
-    let args = FuzzReplayArgs { artifact: path };
+    let args = FuzzReplayArgs {
+        artifact: path.clone(),
+        reduced: false,
+    };
     assert!(matches!(
         run_replay(&args),
         Err(FuzzCliError::ArtifactReplay(
             ArtifactReplayError::NotReproduced { case_index: 0 }
         ))
     ));
+    let reduced = FuzzReplayArgs {
+        artifact: path,
+        reduced: true,
+    };
+    assert!(matches!(
+        run_replay(&reduced),
+        Err(FuzzCliError::ArtifactReplay(
+            ArtifactReplayError::NoReducedCase
+        ))
+    ));
     let newer = FuzzReplayArgs {
         artifact: scratch.join("future.json"),
+        reduced: false,
     };
     let mut changed = artifact;
     changed.schema_version += 1;
@@ -736,7 +854,10 @@ fn a_reproduced_finding_is_reported_as_a_failed_run() {
     let path = scratch.join("finding.json");
     let artifact = synthetic_finding_artifact();
     persist_finding(&path, artifact.clone()).expect("write artifact");
-    let args = FuzzReplayArgs { artifact: path };
+    let args = FuzzReplayArgs {
+        artifact: path,
+        reduced: false,
+    };
     let finding = Finding {
         fingerprint: SemanticFingerprint {
             target: FuzzTarget::PpuInstruction,

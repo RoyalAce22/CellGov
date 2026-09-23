@@ -6,17 +6,18 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::ppu_reference::{parse_reference_json as parse_ppu_reference, PpuReferenceError};
+use crate::reduce::{evaluate_case, ReductionMeasure, ReductionPolicy};
 use crate::report::{
-    Finding, FindingKind, FuzzReport, FuzzRun, ReductionOutcome, SemanticFingerprint,
+    Finding, FindingKind, FuzzReport, FuzzRun, ReductionOutcome, RunOutcome, SemanticFingerprint,
 };
 use crate::spu_reference::{parse_reference_json as parse_spu_reference, SpuReferenceError};
 use crate::{
     ppu, spu, CampaignSchedule, CampaignShard, CaseRange, ConfigurationError, FuzzConfig,
-    FuzzTarget, ReplayCoordinates, ReplayVersionError, TargetPanicPayload,
+    FuzzError, FuzzTarget, ReplayCoordinates, ReplayVersionError, TargetPanicPayload,
 };
 
 /// Schema version a finding artifact carries.
-pub const FINDING_ARTIFACT_VERSION: u32 = 1;
+pub const FINDING_ARTIFACT_VERSION: u32 = 2;
 
 /// Named independent source retained inside an artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,12 +237,17 @@ pub enum ArtifactCheckSelection {
 
 /// Requested reduction behavior, distinct from its recorded outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ArtifactReductionRequest {
     /// Do not run a reducer.
     None,
-    /// Reduce a finding while preserving its fingerprint.
-    OnFinding,
+    /// Reduce each finding while preserving its fingerprint.
+    OnFinding {
+        /// Candidate selection policy.
+        policy: ReductionPolicy,
+        /// Maximum candidate evaluations per finding.
+        budget: u64,
+    },
 }
 
 impl From<&FuzzReport> for ArtifactCoverage {
@@ -267,11 +273,13 @@ impl From<&FuzzReport> for ArtifactCoverage {
 pub enum ArtifactReduction {
     /// No reducer ran.
     NotAttempted,
-    /// Same-fingerprint reduction produced these words.
+    /// Same-fingerprint reduction produced these case words.
     Reduced {
-        /// Reduced words; the artifact still retains the original.
+        /// Reduced case words; the artifact still retains the original.
         words: Vec<u32>,
     },
+    /// Every candidate lost the finding; the original case is already minimal.
+    Irreducible,
     /// Reduction failed; the artifact still replays the original case.
     Failed {
         /// The reducer refusal, rendered as text.
@@ -286,6 +294,7 @@ impl From<&ReductionOutcome> for ArtifactReduction {
             ReductionOutcome::Reduced(words) => Self::Reduced {
                 words: words.clone(),
             },
+            ReductionOutcome::Irreducible => Self::Irreducible,
             ReductionOutcome::Failed(error) => Self::Failed {
                 reason: error.to_string(),
             },
@@ -368,6 +377,16 @@ pub enum ArtifactReplayError {
     NotReproduced {
         /// Original case index.
         case_index: u64,
+    },
+    /// The artifact records no reduced case to replay.
+    #[error("finding artifact holds no reduced case")]
+    NoReducedCase,
+    /// The engine failed while it replayed the case; the finding did not change.
+    #[error("finding replay harness failed: {source}")]
+    HarnessFailure {
+        /// Engine failure.
+        #[source]
+        source: FuzzError,
     },
     /// The recorded independent source no longer replays to a match.
     #[error("finding replay independent reference differs")]
@@ -529,11 +548,14 @@ impl FuzzFindingArtifact {
                 "non-panic finding has no original words",
             ));
         }
-        if matches!(&self.reduction, ArtifactReduction::Reduced { words } if words.is_empty() && !self.original.words.is_empty())
-        {
-            return Err(ArtifactError::Invalid(
-                "reduction erased a nonempty original case",
-            ));
+        if let ArtifactReduction::Reduced { words } = &self.reduction {
+            if words.is_empty()
+                || ReductionMeasure::of(words) >= ReductionMeasure::of(&self.original.words)
+            {
+                return Err(ArtifactError::Invalid(
+                    "reduction is not a smaller nonempty case",
+                ));
+            }
         }
         if self.replay_command.len() != 6
             || self.replay_command[..5] != ["cellgov", "dev", "fuzz", "replay", "--artifact"]
@@ -579,6 +601,9 @@ impl FuzzFindingArtifact {
             cancellation: None,
         };
         let replay = run(config);
+        if let RunOutcome::HarnessFailure(source) = replay.outcome {
+            return Err(ArtifactReplayError::HarnessFailure { source });
+        }
         // A target panic with a changed message is a different finding, so the payload compares
         // like the fingerprint. Engines never reduce, so the comparison skips the reduction and a
         // reduced artifact still replays its original case.
@@ -596,6 +621,54 @@ impl FuzzFindingArtifact {
         Err(ArtifactReplayError::NotReproduced {
             case_index: self.original.replay.case_index,
         })
+    }
+
+    /// Replays the reduced case words and requires the recorded finding identity.
+    ///
+    /// A reduced case keeps the original's generated state, so its observation
+    /// may differ. Its kind, fingerprint and panic payload stay the same.
+    ///
+    /// # Errors
+    ///
+    /// Refuses:
+    ///
+    /// - an artifact without a reduced case
+    /// - an incompatible version
+    /// - an engine failure
+    /// - reduced words that no longer reproduce the finding
+    pub fn replay_reduced(&self) -> Result<Finding, ArtifactReplayError> {
+        self.validate()?;
+        let ArtifactReduction::Reduced { words } = &self.reduction else {
+            return Err(ArtifactReplayError::NoReducedCase);
+        };
+        self.check_independent_reference()?;
+        let replay = evaluate_case(
+            self.original.replay.target,
+            self.campaign,
+            self.original.replay.case_index,
+            words,
+        );
+        self.reduced_finding(replay)
+    }
+
+    /// Finds the recorded finding identity in a reduced-case run.
+    fn reduced_finding(&self, replay: FuzzRun) -> Result<Finding, ArtifactReplayError> {
+        if let RunOutcome::HarnessFailure(source) = replay.outcome {
+            return Err(ArtifactReplayError::HarnessFailure { source });
+        }
+        replay
+            .report
+            .findings
+            .into_iter()
+            .find(|finding| {
+                finding.replay == self.original.replay
+                    && ArtifactFingerprint::from(&finding.fingerprint) == self.fingerprint
+                    && format!("{:?}", finding.kind) == self.finding_kind
+                    && finding.panic_payload == self.panic_payload
+            })
+            .ok_or(ArtifactReplayError::NotReproduced {
+                case_index: self.original.replay.case_index,
+            })
     }
 
     fn check_independent_reference(&self) -> Result<(), ArtifactReplayError> {

@@ -22,6 +22,7 @@ use cellgov_sync::ReservedLine;
 use crate::boundary::{call_harness, call_target};
 use crate::case::{CaseAssessment, CaseEligibility, CaseFeature, EligibilityReason};
 use crate::error::{FuzzError, GeneratorError, InvariantError};
+use crate::reduce::{ReductionCandidate, ReductionTransform};
 use crate::report::{
     CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
     InstructionIdentity, OutcomeIdentity, ReductionOutcome, SemanticFingerprint,
@@ -116,12 +117,138 @@ impl<'a> PpuTerminalObservation<'a> {
 
 /// Checks each decoded PPU instruction against its descriptor.
 pub fn run_instructions(config: FuzzConfig) -> FuzzRun {
+    run_instructions_with(config, None)
+}
+
+/// Runs the instruction engine; `words` replaces every case's generated word.
+pub(crate) fn run_instructions_with(config: FuzzConfig, words: Option<&[u32]>) -> FuzzRun {
     guarded_run(FuzzTarget::PpuInstruction, config, |report| {
-        run_instructions_inner(config, report)
+        run_instructions_inner(config, report, words)
     })
 }
 
-fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<(), FuzzError> {
+/// Generator words for one instruction case, before any check runs.
+pub(crate) fn instruction_case_words(
+    config: FuzzConfig,
+    case_index: u64,
+) -> Result<Vec<u32>, FuzzError> {
+    config.validate(None)?;
+    let descriptors = case_descriptors(config)?;
+    let mut rng = Rng::for_case(config.campaign_version, config.seed, case_index);
+    let raw = match config.strategy {
+        GenerationStrategy::Structured => {
+            call_target(|| structured_generated_word(&descriptors, &mut rng, None))
+                .map_err(|_| InvariantError::UnexpectedPanic {
+                    stage: "PPU case generation",
+                })??
+                .raw
+        }
+        GenerationStrategy::RawWords => rng.next_u32(),
+    };
+    Ok(vec![raw])
+}
+
+/// Generator words for one sequence case, before any check runs.
+pub(crate) fn sequence_case_words(
+    config: FuzzConfig,
+    case_index: u64,
+) -> Result<Vec<u32>, FuzzError> {
+    config.validate(Some(crate::MAX_SEQUENCE_WORDS))?;
+    let descriptors = case_descriptors(config)?;
+    let mut rng = Rng::for_case(config.campaign_version, config.seed, case_index);
+    let generated = match config.strategy {
+        GenerationStrategy::Structured => call_target(|| {
+            structured_sequence(&descriptors, &mut rng, config.sequence_words as usize)
+        })
+        .map_err(|_| InvariantError::UnexpectedPanic {
+            stage: "PPU case generation",
+        })??,
+        GenerationStrategy::RawWords => rng
+            .decoder_accepted_words(config.sequence_words as usize, |raw| {
+                call_target(|| cellgov_ppu::decode::decode(raw)).map(|decoded| decoded.is_ok())
+            })
+            .map(|words| GeneratedSequence {
+                words,
+                features: BTreeSet::new(),
+            })
+            .map_err(|failure| match failure {
+                WordGenerationFailure::DecoderPanic(_, _) => {
+                    FuzzError::from(InvariantError::UnexpectedPanic {
+                        stage: "PPU case generation",
+                    })
+                }
+                WordGenerationFailure::Exhausted(error) => error.into(),
+            })?,
+    };
+    Ok(generated.words)
+}
+
+/// Same-kind single-word candidates from the interpreter's operand shrink contract.
+pub(crate) fn shrink_instruction_words(words: &[u32]) -> Vec<ReductionCandidate> {
+    words
+        .first()
+        .map_or_else(Vec::new, |&raw| cleared_operand_bits(words, 0, raw))
+}
+
+/// Shorter or same-kind-smaller sequences; every word keeps its decoded kind.
+pub(crate) fn shrink_sequence_words(words: &[u32]) -> Vec<ReductionCandidate> {
+    let mut candidates = Vec::new();
+    if words.len() > 1 {
+        for index in 0..words.len() {
+            let mut shorter = words.to_vec();
+            shorter.remove(index);
+            candidates.push(ReductionCandidate {
+                transform: ReductionTransform::DropWord { index },
+                words: shorter,
+            });
+        }
+    }
+    for (index, &raw) in words.iter().enumerate() {
+        candidates.extend(cleared_operand_bits(words, index, raw));
+    }
+    candidates
+}
+
+fn cleared_operand_bits(words: &[u32], index: usize, raw: u32) -> Vec<ReductionCandidate> {
+    // The shrink contract decodes `raw`; a decoder panic there is the finding
+    // under reduction, so the word has no same-kind candidates.
+    call_target(|| cellgov_ppu::instruction::fuzz::simplify_encoding(raw))
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|candidate| {
+            let cleared = raw & !candidate;
+            (candidate & !raw == 0 && cleared.count_ones() == 1).then(|| {
+                let mut replaced = words.to_vec();
+                replaced[index] = candidate;
+                ReductionCandidate {
+                    transform: ReductionTransform::ClearOperandBit {
+                        index,
+                        bit: cleared.trailing_zeros(),
+                    },
+                    words: replaced,
+                }
+            })
+        })
+        .collect()
+}
+
+fn case_descriptors(config: FuzzConfig) -> Result<Vec<PpuGenerationDescriptor>, FuzzError> {
+    match config.strategy {
+        GenerationStrategy::Structured => call_target(generation_descriptors).map_err(|_| {
+            InvariantError::UnexpectedPanic {
+                stage: "PPU descriptor registry",
+            }
+            .into()
+        }),
+        GenerationStrategy::RawWords => Ok(Vec::new()),
+    }
+}
+
+fn run_instructions_inner(
+    config: FuzzConfig,
+    report: &mut FuzzReport,
+    override_words: Option<&[u32]>,
+) -> Result<(), FuzzError> {
     config.validate(None)?;
     let iterations = config.case_indices()?;
     let descriptors = match (config.strategy, iterations.clone().next()) {
@@ -170,7 +297,10 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                 features: BTreeSet::new(),
             },
         };
-        let raw = generated.raw;
+        // The generator draws first so a substituted word keeps the case's state.
+        let raw = override_words
+            .and_then(|words| words.first().copied())
+            .unwrap_or(generated.raw);
         let decoded = match call_target(|| cellgov_ppu::decode::decode(raw)) {
             Ok(decoded) => decoded,
             Err(payload) => {
@@ -544,12 +674,21 @@ fn metamorphic_divergence(
 
 /// Replays PPU instruction sequences to find nondeterministic outcomes.
 pub fn run_sequences(config: FuzzConfig) -> FuzzRun {
+    run_sequences_with(config, None)
+}
+
+/// Runs the sequence engine; `words` replaces every case's generated words.
+pub(crate) fn run_sequences_with(config: FuzzConfig, words: Option<&[u32]>) -> FuzzRun {
     guarded_run(FuzzTarget::PpuSequence, config, |report| {
-        run_sequences_inner(config, report)
+        run_sequences_inner(config, report, words)
     })
 }
 
-fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<(), FuzzError> {
+fn run_sequences_inner(
+    config: FuzzConfig,
+    report: &mut FuzzReport,
+    override_words: Option<&[u32]>,
+) -> Result<(), FuzzError> {
     config.validate(Some(crate::MAX_SEQUENCE_WORDS))?;
     let iterations = config.case_indices()?;
     let descriptors = match (config.strategy, iterations.clone().next()) {
@@ -609,7 +748,8 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
             }
             Err(WordGenerationFailure::Exhausted(error)) => return Err(error.into()),
         };
-        let words = generated.words;
+        // The generator draws first so substituted words keep the case's state.
+        let words = override_words.map_or(generated.words, <[u32]>::to_vec);
         let (mut initial, state_features) =
             state_aware_state_for_sequence(config.strategy, &mut rng)?;
         initial.pc = 0;

@@ -2,9 +2,9 @@ use super::*;
 
 use crate::report::{CheckIdentity, DivergenceClass, RunOutcome, SemanticFingerprint};
 use crate::{
-    CampaignVersion, CancellationBoundary, CaseEligibility, CrossReferenceAsymmetry,
-    GenerationStrategy, OperandAliasClass, SemanticObservation, StateTransitionClass,
-    CAMPAIGN_VERSION,
+    CampaignVersion, CancellationBoundary, CaseEligibility, CrossReferenceAsymmetry, FuzzError,
+    GenerationStrategy, InvariantError, OperandAliasClass, SemanticObservation,
+    StateTransitionClass, CAMPAIGN_VERSION,
 };
 
 fn sample() -> (FuzzFindingArtifact, FuzzRun) {
@@ -217,6 +217,75 @@ fn optional_observation_and_failed_reduction_keep_original_words() {
 }
 
 #[test]
+fn a_reduced_case_must_be_a_smaller_nonempty_case() {
+    let (artifact, _) = sample();
+    let mut irreducible = artifact.clone();
+    irreducible.reduction = ArtifactReduction::Irreducible;
+    let json = serde_json::to_string(&irreducible).expect("serializes");
+    assert_eq!(
+        FuzzFindingArtifact::parse_json(&json).expect("irreducible round trip"),
+        irreducible
+    );
+    for words in [Vec::new(), vec![0x3860_0007], vec![0x3860_0007, 0]] {
+        let mut larger = artifact.clone();
+        larger.reduction = ArtifactReduction::Reduced { words };
+        assert!(matches!(
+            larger.validate(),
+            Err(ArtifactError::Invalid(
+                "reduction is not a smaller nonempty case"
+            ))
+        ));
+    }
+    let mut smaller = artifact;
+    smaller.reduction = ArtifactReduction::Reduced {
+        words: vec![0x3860_0006],
+    };
+    smaller.validate().expect("one cleared bit is smaller");
+}
+
+#[test]
+fn reduced_replay_requires_a_reduced_case_that_still_reproduces() {
+    let (artifact, _) = sample();
+    assert!(matches!(
+        artifact.replay_reduced(),
+        Err(ArtifactReplayError::NoReducedCase)
+    ));
+    let mut reduced = artifact;
+    reduced.reduction = ArtifactReduction::Reduced {
+        words: vec![0x3860_0006],
+    };
+    assert!(matches!(
+        reduced.replay_reduced(),
+        Err(ArtifactReplayError::NotReproduced { case_index: 12 })
+    ));
+}
+
+#[test]
+fn a_reduced_replay_names_an_engine_failure_instead_of_a_missing_finding() {
+    let (artifact, run) = sample();
+    let mut reduced = artifact;
+    reduced.reduction = ArtifactReduction::Reduced {
+        words: vec![0x3860_0006],
+    };
+    let failed = FuzzRun::failed(
+        run.report,
+        FuzzError::from(InvariantError::EmptyGeneratedSequence),
+    );
+    assert!(matches!(
+        reduced.reduced_finding(failed.clone()),
+        Err(ArtifactReplayError::HarnessFailure {
+            source: FuzzError::Invariant(InvariantError::EmptyGeneratedSequence)
+        })
+    ));
+    assert!(matches!(
+        reduced.replay_with(|_| failed),
+        Err(ArtifactReplayError::HarnessFailure {
+            source: FuzzError::Invariant(InvariantError::EmptyGeneratedSequence)
+        })
+    ));
+}
+
+#[test]
 fn an_independent_vector_retains_versioned_provenance() {
     let fixture = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -243,12 +312,12 @@ fn artifact_key_order_is_pinned() {
     assert_eq!(
         serde_json::to_string(&artifact).expect("serializes"),
         concat!(
-            r#"{"schema_version":1,"#,
+            r#"{"schema_version":2,"#,
             r#""campaign":{"campaign_version":4,"seed":7,"strategy":"structured","#,
             r#""schedule":{"cases":{"first":12,"count":1},"shard":{"index":0,"count":1},"cancellation":null},"#,
             r#""retention":{"capacity":256,"per_kind_capacity":8,"novelty_weight":8,"rarity_weight":4,"asymmetry_weight":16,"policy":"balanced"},"#,
             r#""max_findings":4,"sequence_words":32},"#,
-            r#""execution":{"workers":2,"deadline_ms":500,"progress":true,"check":"all","reduction":"none"},"#,
+            r#""execution":{"workers":2,"deadline_ms":500,"progress":true,"check":"all","reduction":{"kind":"none"}},"#,
             r#""original":{"replay":{"campaign_version":4,"target":"PpuInstruction","strategy":"structured","seed":7,"case_index":12,"sequence_words":32},"#,
             r#""words":[945815559],"state_source":"versioned_generator"},"#,
             r#""finding_kind":"IllegalOutcome","#,

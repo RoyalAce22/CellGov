@@ -68,8 +68,18 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
         for (index, word) in words.iter().enumerate() {
             initial.ls[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
         }
-        let first = run_generated_sequence(&initial, words.len(), GenerationStrategy::Structured);
-        let replay = run_generated_sequence(&initial, words.len(), GenerationStrategy::Structured);
+        let first = run_generated_sequence(
+            &initial,
+            words.len(),
+            words.len(),
+            GenerationStrategy::Structured,
+        );
+        let replay = run_generated_sequence(
+            &initial,
+            words.len(),
+            words.len(),
+            GenerationStrategy::Structured,
+        );
         assert_eq!(
             spu_sequence_replay_asymmetry(&first, &replay),
             CrossReferenceAsymmetry::None,
@@ -224,7 +234,7 @@ fn an_spu_sequence_does_not_execute_beyond_its_generated_words() {
     initial.ls[..4].copy_from_slice(&branch_to_third_word.to_be_bytes());
     initial.ls[8..12].copy_from_slice(&branch.canonical_word.to_be_bytes());
 
-    let (_, decoded, _) = run_generated_sequence(&initial, 2, GenerationStrategy::Structured);
+    let (_, decoded, _) = run_generated_sequence(&initial, 2, 2, GenerationStrategy::Structured);
 
     assert_eq!(decoded, 1);
 }

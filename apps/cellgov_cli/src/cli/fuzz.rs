@@ -5,24 +5,25 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use cellgov_fuzz::artifact::{
-    ArtifactCheckSelection, ArtifactError, ArtifactExecutionPolicy, ArtifactReductionRequest,
-    ArtifactReference, ArtifactReplayError, FuzzFindingArtifact,
+    ArtifactCheckSelection, ArtifactError, ArtifactExecutionPolicy, ArtifactReduction,
+    ArtifactReductionRequest, ArtifactReference, ArtifactReplayError, FuzzFindingArtifact,
 };
 use cellgov_fuzz::raw_decode::{
     scan_raw_decoder, RawDecodeArtifact, RawDecodeDomain, RawDecodeError, RawDecodeStatus,
     RawDecoder, MAX_RAW_DECODE_CHUNK, MAX_RAW_DECODE_PANIC_SAMPLES, RAW_DECODE_SCHEMA_VERSION,
 };
+use cellgov_fuzz::reduce::{reduce_finding, ReductionPolicy, ReductionReport, ReductionRequest};
 use cellgov_fuzz::report::Finding;
 use cellgov_fuzz::semantic_sweep::{sweep_ppu, sweep_spu, SemanticSweepReport};
 use cellgov_fuzz::{
     ppu, spu, CampaignSchedule, CampaignShard, CampaignVersion, CaseRange, FuzzConfig, FuzzRun,
-    FuzzTarget, GenerationStrategy, RunOutcome,
+    FuzzTarget, GenerationStrategy, ReductionOutcome, RunOutcome,
 };
 
 use super::exit::{CommandError, CommandExitCode};
 use super::parse::{
     FuzzArgs, FuzzCampaignArgs, FuzzCheck, FuzzCommand, FuzzRawArgs, FuzzRawDecoder, FuzzReduction,
-    FuzzReplayArgs, FuzzSemanticArgs, FuzzSemanticTarget, FuzzStrategy,
+    FuzzReductionPolicy, FuzzReplayArgs, FuzzSemanticArgs, FuzzSemanticTarget, FuzzStrategy,
 };
 
 const CAMPAIGN_BATCH_CASES: u64 = 64;
@@ -36,7 +37,7 @@ pub(crate) enum FuzzCliError {
     Range { first: u64, count: u64 },
     #[error("fuzz: selected check is not independently switchable by this engine")]
     CheckUnavailable,
-    #[error("fuzz: requested reduction is unavailable until finding replay is installed")]
+    #[error("fuzz: raw decoder scans keep panic samples as scanned and do not reduce them")]
     ReductionUnavailable,
     #[error("fuzz: invalid campaign configuration: {0}")]
     Configuration(#[from] cellgov_fuzz::ConfigurationError),
@@ -111,6 +112,12 @@ pub(crate) enum FuzzCliError {
         path: PathBuf,
         artifact: Box<FuzzFindingArtifact>,
     },
+    #[error("fuzz: artifact path {} already holds this finding with reduction {stored:?}; reduction {:?} was not stored; original case {} words {:?}", path.display(), artifact.reduction, artifact.original.replay.case_index, artifact.original.words)]
+    ArtifactReductionNotStored {
+        path: PathBuf,
+        stored: ArtifactReduction,
+        artifact: Box<FuzzFindingArtifact>,
+    },
 }
 
 impl FuzzCliError {
@@ -141,7 +148,8 @@ impl FuzzCliError {
             | Self::ArtifactRead { .. }
             | Self::ArtifactEncoding { .. }
             | Self::ArtifactWrite { .. }
-            | Self::ArtifactCollision { .. } => false,
+            | Self::ArtifactCollision { .. }
+            | Self::ArtifactReductionNotStored { .. } => false,
         }
     }
 
@@ -241,8 +249,18 @@ fn run_campaign(
     if !matches!(args.check, FuzzCheck::All) {
         return Err(FuzzCliError::CheckUnavailable);
     }
-    if !matches!(args.reduction, FuzzReduction::None) {
-        return Err(FuzzCliError::ReductionUnavailable);
+    let reduction = match args.reduction {
+        FuzzReduction::None => None,
+        FuzzReduction::OnFinding => Some(ReductionRequest {
+            policy: match args.reduction_policy {
+                FuzzReductionPolicy::Deterministic => ReductionPolicy::Deterministic,
+                FuzzReductionPolicy::Greedy => ReductionPolicy::Greedy,
+            },
+            budget: args.reduction_budget,
+        }),
+    };
+    if reduction.is_some_and(|request| request.budget == 0) {
+        return Err(FuzzCliError::Invalid("reduction-budget must be positive"));
     }
     if args.finding_limit == 0 || args.finding_limit > 1_024 {
         return Err(FuzzCliError::Invalid(
@@ -372,6 +390,18 @@ fn run_campaign(
                     finding.replay.case_index,
                     artifact_index,
                 ));
+                let mut finding = finding.clone();
+                if let Some(request) = reduction {
+                    finding.reduction = reduce_retained_finding(campaign_config, &finding, request);
+                    // The artifact records the refusal; the terminal names it too,
+                    // like the artifact write failures below.
+                    if let ReductionOutcome::Failed(error) = &finding.reduction {
+                        eprintln!(
+                            "fuzz: reduction of case {} failed: {error}; original case kept",
+                            finding.replay.case_index
+                        );
+                    }
+                }
                 let stored = FuzzFindingArtifact::from_finding(
                     campaign_config,
                     ArtifactExecutionPolicy {
@@ -379,10 +409,15 @@ fn run_campaign(
                         deadline_ms: args.deadline_ms,
                         progress: args.progress,
                         check: ArtifactCheckSelection::All,
-                        reduction: ArtifactReductionRequest::None,
+                        reduction: reduction.map_or(ArtifactReductionRequest::None, |request| {
+                            ArtifactReductionRequest::OnFinding {
+                                policy: request.policy,
+                                budget: request.budget,
+                            }
+                        }),
                     },
                     &run.report,
-                    finding,
+                    &finding,
                     reference.clone(),
                     &path,
                 )
@@ -582,16 +617,28 @@ fn persist_finding(path: &PathBuf, artifact: FuzzFindingArtifact) -> Result<(), 
                 })?;
             // A rerun with another `ArtifactExecutionPolicy` or campaign range
             // produces the same finding, so the first file stands. Only
-            // different finding evidence collides.
-            return if FuzzFindingArtifact::parse_json(&existing)
-                .is_ok_and(|stored| stored.describes_same_finding(&artifact))
-            {
-                Ok(())
-            } else {
-                Err(FuzzCliError::ArtifactCollision {
+            // different finding evidence collides. A finding's identity
+            // excludes its reduction state, so a reduced rerun also matches
+            // the stored file. The refusal carries the reduced case, which
+            // no file holds.
+            return match FuzzFindingArtifact::parse_json(&existing) {
+                Ok(stored) if stored.describes_same_finding(&artifact) => {
+                    if artifact.reduction != ArtifactReduction::NotAttempted
+                        && stored.reduction != artifact.reduction
+                    {
+                        Err(FuzzCliError::ArtifactReductionNotStored {
+                            path: path.clone(),
+                            stored: stored.reduction,
+                            artifact: Box::new(artifact),
+                        })
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ => Err(FuzzCliError::ArtifactCollision {
                     path: path.clone(),
                     artifact: Box::new(artifact),
-                })
+                }),
             };
         }
         Err(source) => {
@@ -611,8 +658,23 @@ fn persist_finding(path: &PathBuf, artifact: FuzzFindingArtifact) -> Result<(), 
         })
 }
 
+fn reduce_retained_finding(
+    config: FuzzConfig,
+    finding: &Finding,
+    request: ReductionRequest,
+) -> ReductionOutcome {
+    reduce_finding(config, finding, request)
+        .map_or_else(ReductionOutcome::Failed, ReductionReport::into_outcome)
+}
+
 fn run_replay(args: &FuzzReplayArgs) -> Result<CommandExitCode, FuzzCliError> {
-    run_replay_with(args, FuzzFindingArtifact::replay)
+    run_replay_with(args, |artifact| {
+        if args.reduced {
+            artifact.replay_reduced()
+        } else {
+            artifact.replay()
+        }
+    })
 }
 
 fn run_replay_with(
@@ -627,8 +689,12 @@ fn run_replay_with(
     let artifact = FuzzFindingArtifact::parse_json(&json)?;
     let finding = replay(&artifact)?;
     write_stdout(&format!(
-        "fuzz replay: reproduced case={} kind={:?} fingerprint={:?}\n",
-        finding.replay.case_index, finding.kind, artifact.fingerprint
+        "fuzz replay: reproduced case={} reduced={} kind={:?} fingerprint={:?} words={:?}\n",
+        finding.replay.case_index,
+        args.reduced,
+        finding.kind,
+        artifact.fingerprint,
+        finding.original_words
     ))?;
     // A reproduced finding is still a finding. The campaign that stored it
     // exited with `FAILED` for the same fingerprint, and replay returns the

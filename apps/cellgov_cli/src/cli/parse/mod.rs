@@ -33,7 +33,7 @@ pub(crate) use entry::try_parse;
 pub(crate) use entry::{die_usage, parse_or_exit};
 pub(crate) use fuzz::{
     FuzzArgs, FuzzCampaignArgs, FuzzCheck, FuzzCommand, FuzzRawArgs, FuzzRawDecoder, FuzzReduction,
-    FuzzReplayArgs, FuzzSemanticArgs, FuzzSemanticTarget, FuzzStrategy,
+    FuzzReductionPolicy, FuzzReplayArgs, FuzzSemanticArgs, FuzzSemanticTarget, FuzzStrategy,
 };
 #[cfg(test)]
 pub(crate) use globals::global_refusal;
