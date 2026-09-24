@@ -1,7 +1,10 @@
 //! Observation-vs-observation diffing across regions, steps, events, and hashes, with pinned output formats.
 
 use super::*;
-use crate::observation::{ObservationMetadata, ObservedEvent, ObservedEventKind, ObservedOutcome};
+use crate::observation::{
+    NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,
+    ObservedHashes, ObservedOutcome,
+};
 use cellgov_trace::StateHash;
 
 fn obs(

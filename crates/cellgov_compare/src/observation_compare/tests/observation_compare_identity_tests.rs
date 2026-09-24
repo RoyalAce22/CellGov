@@ -1,7 +1,8 @@
 //! The identity triple carried through an observation comparison.
 
 use super::*;
-use crate::observation::ObservedOutcome;
+use crate::identity::RunIdentity;
+use crate::observation::{Observation, ObservedOutcome};
 use crate::test_support::{identity, obs};
 
 fn with_identity(id: RunIdentity) -> Observation {

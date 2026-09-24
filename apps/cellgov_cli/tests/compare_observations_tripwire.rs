@@ -97,7 +97,7 @@ fn divergence_classifier_cluster_fires_on_synthetic_pair() {
 
     let result = compare_observations(&a, &b);
 
-    // Format-time offset guard at observation_compare.rs:633.
+    // Format-time offset guard in observation_compare/format.rs.
     // Running format on a live divergent result is what makes the
     // debug_assert silence non-vacuous.
     let formatted = format_observation_compare_human(&result);
