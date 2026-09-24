@@ -67,6 +67,9 @@ impl fmt::Display for AppVersion {
     }
 }
 
+/// The `version` a [`GameIdentity`] names a title's base install by.
+pub const BASE_VERSION: &str = "base";
+
 /// Which of a title's installed versions the run composed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "GameIdentityWire", into = "GameIdentityWire")]
@@ -74,7 +77,7 @@ pub struct GameIdentity {
     /// The store key, and the guest directory name the title mounts
     /// under.
     pub title_id: String,
-    /// The selected version: `"base"`, or `"update:<ver>"`.
+    /// The selected version, as [`Self::version_of`] spells it.
     pub version: String,
     /// The version the executable's tree names in its PARAM.SFO.
     /// `None` when the table names none.
@@ -82,6 +85,18 @@ pub struct GameIdentity {
 }
 
 impl GameIdentity {
+    /// The `version` an identity carries for a game version as a
+    /// selection names it: [`BASE_VERSION`] stays itself, and any other
+    /// version is an update, spelled `update:<ver>`.
+    #[must_use]
+    pub fn version_of(game_ver: &str) -> String {
+        if game_ver == BASE_VERSION {
+            BASE_VERSION.to_string()
+        } else {
+            format!("update:{game_ver}")
+        }
+    }
+
     /// The version as a report prints it: the key and the value, or a
     /// note that the tree named none.
     #[must_use]

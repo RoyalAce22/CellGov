@@ -217,7 +217,7 @@ fn parse_manifest(
 fn game_identity(stored: &StoredGame) -> Result<GameIdentity, GameIdentityError> {
     let (version, recorded, path) = match &stored.version {
         GameVersion::Base => (
-            BASE_GAME_VER.to_string(),
+            GameIdentity::version_of(BASE_GAME_VER),
             &stored.base.version,
             stored.base.param_sfo_path(),
         ),
@@ -227,7 +227,7 @@ fn game_identity(stored: &StoredGame) -> Result<GameIdentity, GameIdentityError>
                 .as_ref()
                 .ok_or_else(|| GameIdentityError::SelectedUpdateMissing { version: v.clone() })?;
             (
-                format!("update:{v}"),
+                GameIdentity::version_of(v),
                 &update.version,
                 update.param_sfo_path(),
             )

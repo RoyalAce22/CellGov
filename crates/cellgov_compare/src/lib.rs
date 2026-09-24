@@ -52,7 +52,7 @@ pub use format::format_with_commas;
 pub use identity::{
     cross_identity_warning, cross_trace_identity_warning, identity_report, trace_identity,
     AppVersion, BootOverrides, FirmwareIdentity, GameIdentity, RunIdentity, SentinelParseError,
-    TraceIdentity, TwoVersionKeys, RUN_IDENTITY_SENTINEL,
+    TraceIdentity, TwoVersionKeys, BASE_VERSION, RUN_IDENTITY_SENTINEL,
 };
 pub use observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,

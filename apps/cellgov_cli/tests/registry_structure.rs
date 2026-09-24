@@ -14,7 +14,7 @@
 #[path = "common/registry.rs"]
 mod registry;
 
-use cellgov_compare::BootSummary;
+use cellgov_compare::{BootSummary, GameIdentity};
 use registry::{boot_anchor_path, firmware_exec_titles, titles, TitleUnderTest, BASE_GAME_VER};
 
 /// Every cell the registry gates on an anchor.
@@ -93,13 +93,11 @@ fn every_committed_anchor_names_the_cell_it_is_filed_under() {
         );
         // `GameIdentity::version` spells an update as `update:<ver>`
         // while the path segment is the bare version key.
-        let expected: Option<String> = t.reference.game_ver.as_deref().map(|v| {
-            if v == BASE_GAME_VER {
-                v.to_string()
-            } else {
-                format!("update:{v}")
-            }
-        });
+        let expected: Option<String> = t
+            .reference
+            .game_ver
+            .as_deref()
+            .map(GameIdentity::version_of);
         assert_eq!(
             summary.identity.game.as_ref().map(|g| g.version.as_str()),
             expected.as_deref(),

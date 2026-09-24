@@ -19,7 +19,7 @@ use cellgov_compare::runner_cellgov::BootOutcome;
 use cellgov_compare::witness_parse::parse_witness_lines;
 use cellgov_compare::witness_parse::UnsupportedSyscallWitness;
 use cellgov_compare::witnesses::{BOOT_STARTED_SENTINEL, TITLE_NOT_INSTALLED_SENTINEL};
-use cellgov_compare::{BootSummary, RunIdentity, RUN_IDENTITY_SENTINEL};
+use cellgov_compare::{BootSummary, GameIdentity, RunIdentity, RUN_IDENTITY_SENTINEL};
 use cellgov_terminal::caps::RenderFlags;
 use cellgov_terminal::progress::{ProgressBar, ProgressSink as _};
 use cellgov_time::Budget;
@@ -30,7 +30,7 @@ use crate::cli::declared_cells::{
 };
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
-use cellgov_boot::manifest::{CellKey, BASE_GAME_VER};
+use cellgov_boot::manifest::CellKey;
 
 use crate::paths::{boot_anchor_path, history_path, workspace_root};
 use crate::progress::RECORD_ANCHORS_TASK;
@@ -47,20 +47,6 @@ struct Measurement {
     budget: Budget,
     outcome: BootOutcome,
     identity: RunIdentity,
-}
-
-/// The `version` a run's identity carries for a cell's game-version
-/// axis.
-///
-/// The composition spells a selected update `update:<version>` and the
-/// base install `base`. A cell's `game_ver` and the identity's version
-/// are two spellings of one value.
-fn identity_game_version(game_ver: &str) -> String {
-    if game_ver == BASE_GAME_VER {
-        game_ver.to_string()
-    } else {
-        format!("update:{game_ver}")
-    }
 }
 
 /// Every way the run's own identity contradicts the cell that would
@@ -95,7 +81,7 @@ fn cell_disagreements(identity: &RunIdentity, cell: &CellKey) -> Vec<String> {
             cell.fw
         )),
     }
-    let want = cell.game_ver.as_deref().map(identity_game_version);
+    let want = cell.game_ver.as_deref().map(GameIdentity::version_of);
     let got = identity.game.as_ref().map(|g| g.version.clone());
     if want != got {
         out.push(format!(

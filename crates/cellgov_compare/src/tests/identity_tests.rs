@@ -406,3 +406,12 @@ fn the_report_names_an_unidentified_side() {
         "{lines:?}"
     );
 }
+
+/// The base keeps its own spelling; every other version is an update,
+/// whatever it looks like.
+#[test]
+fn a_game_version_spells_the_base_bare_and_an_update_with_its_prefix() {
+    assert_eq!(GameIdentity::version_of(BASE_VERSION), "base");
+    assert_eq!(GameIdentity::version_of("02.51"), "update:02.51");
+    assert_eq!(GameIdentity::version_of("Base"), "update:Base");
+}

@@ -3,8 +3,8 @@
 #[path = "common/registry.rs"]
 mod registry;
 
-use cellgov_compare::BootSummary;
-use registry::{boot_anchor_path, declared_cells, BASE_GAME_VER};
+use cellgov_compare::{BootSummary, GameIdentity};
+use registry::{boot_anchor_path, declared_cells};
 
 #[test]
 fn every_declared_matrix_cell_has_a_structurally_valid_anchor_or_reason() {
@@ -49,13 +49,11 @@ fn every_declared_matrix_cell_has_a_structurally_valid_anchor_or_reason() {
             cell.short_name,
             path.display()
         );
-        let expected_game = cell.reference.game_ver.as_deref().map(|version| {
-            if version == BASE_GAME_VER {
-                version.to_string()
-            } else {
-                format!("update:{version}")
-            }
-        });
+        let expected_game = cell
+            .reference
+            .game_ver
+            .as_deref()
+            .map(GameIdentity::version_of);
         assert_eq!(
             summary
                 .identity

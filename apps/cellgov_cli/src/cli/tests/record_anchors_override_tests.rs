@@ -3,6 +3,7 @@
 
 use super::*;
 use cellgov_compare::{BootOverrides, FirmwareIdentity, GameIdentity};
+use cellgov_install::store::BASE_GAME_VER;
 
 fn cell() -> CellKey {
     CellKey {

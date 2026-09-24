@@ -288,3 +288,13 @@ fn a_firmware_executable_names_no_game_half() {
         .expect("the firmware half still names the entry");
     assert_eq!(fw.version, "4.93");
 }
+
+/// The identity names the base by the version the store selects it by,
+/// so a `--game-ver base` cell and the run it records agree.
+#[test]
+fn the_identity_base_version_is_the_store_base_version() {
+    assert_eq!(
+        cellgov_compare::BASE_VERSION,
+        cellgov_install::store::BASE_GAME_VER
+    );
+}

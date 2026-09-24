@@ -24,7 +24,7 @@ use cellgov_compare::{
 
 use super::cell::{CellArtifacts, CellResult};
 use crate::paths::CROSS_RUNNER_SUMMARY_FILE;
-use cellgov_boot::manifest::{CellKey, TitleManifest, BASE_GAME_VER};
+use cellgov_boot::manifest::{CellKey, TitleManifest};
 
 /// The anchor file every cell's boot measurement is written to.
 const BOOT_SUMMARY_FILE: &str = "boot_summary.json";
@@ -448,7 +448,7 @@ fn check_cell_game_version(
     let Some(game) = recorded else {
         return Ok(());
     };
-    let want = cell.game_ver.as_deref().map(identity_game_version);
+    let want = cell.game_ver.as_deref().map(GameIdentity::version_of);
     if want.as_deref() == Some(game.version.as_str()) {
         return Ok(());
     }
@@ -457,16 +457,6 @@ fn check_cell_game_version(
         cell: want.unwrap_or_else(|| NO_GAME_VERSION.to_string()),
         recorded: game.version.clone(),
     })
-}
-
-/// The `version` a run's identity carries for a cell's game-version
-/// axis.
-fn identity_game_version(game_ver: &str) -> String {
-    if game_ver == BASE_GAME_VER {
-        game_ver.to_string()
-    } else {
-        format!("update:{game_ver}")
-    }
 }
 
 /// `Ok(None)` on ENOENT; every other I/O or parse failure returns a
