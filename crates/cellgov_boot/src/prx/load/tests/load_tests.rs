@@ -1,9 +1,8 @@
 use std::path::Path;
 
-use super::{
-    checked_prx_base, default_prx_base, load_firmware_set_bound, locate_and_parse_manifest,
-    manifest_rel_path, page_align_up_u64, resolve_prx_base, FirmwareLoadError,
-};
+use super::base::{checked_prx_base, default_prx_base, page_align_up_u64, resolve_prx_base};
+use super::discover::{locate_and_parse_manifest, manifest_rel_path};
+use super::{load_firmware_set_bound, FirmwareLoadError};
 
 /// The refusal reason a rejected `prx_base` override carries.
 fn refusal_reason(base: u64, code_floor: u32) -> String {
