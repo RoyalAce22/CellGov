@@ -282,24 +282,16 @@ pub fn promote(
 }
 
 fn write_new<T: Serialize>(path: &Path, value: &T) -> Result<(), RegressionError> {
-    let encoded = serde_json::to_vec_pretty(value).map_err(|source| RegressionError::Manifest {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .and_then(|mut file| {
-            use std::io::Write;
-            file.write_all(&encoded)?;
-            file.write_all(b"\n")?;
-            file.sync_all()
-        })
-        .map_err(|source| RegressionError::Write {
+    let mut encoded =
+        serde_json::to_vec_pretty(value).map_err(|source| RegressionError::Manifest {
             path: path.to_path_buf(),
             source,
-        })
+        })?;
+    encoded.push(b'\n');
+    crate::artifact::create_new(path, &encoded).map_err(|source| RegressionError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 fn write_new_or_replace<T: Serialize>(path: &Path, value: &T) -> Result<(), RegressionError> {

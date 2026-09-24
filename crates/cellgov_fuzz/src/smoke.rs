@@ -18,13 +18,19 @@
 
 use crate::report::{FuzzReport, FuzzRun};
 use crate::{
-    ppu, spu, CampaignSchedule, CampaignShard, CaseRange, FuzzConfig, FuzzTarget,
-    GenerationStrategy, RetentionConfig, CAMPAIGN_VERSION,
+    CampaignSchedule, CampaignShard, CaseRange, FuzzConfig, FuzzTarget, GenerationStrategy,
+    RetentionConfig, CAMPAIGN_VERSION,
 };
 
 /// Findings one smoke campaign retains in memory, enough to keep every class
 /// its budget can reach.
 const SMOKE_MAX_FINDINGS: u32 = 64;
+
+/// Instruction words per sequence case. Pinned here rather than taken
+/// from [`crate::DEFAULT_SEQUENCE_WORDS`]: the smoke campaigns' replay
+/// coordinates, and so the regressions they match, must not move with a
+/// caller's default.
+const SMOKE_SEQUENCE_WORDS: u32 = 32;
 
 /// The least coverage a smoke campaign must reach to count as a run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +68,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         strategy: GenerationStrategy::Structured,
         seed: 1,
         cases: 300,
-        sequence_words: 32,
+        sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             eligible: 150,
             instruction_kinds: 40,
@@ -74,7 +80,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         strategy: GenerationStrategy::RawWords,
         seed: 1,
         cases: 300,
-        sequence_words: 32,
+        sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             eligible: 150,
             instruction_kinds: 40,
@@ -86,7 +92,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         strategy: GenerationStrategy::Structured,
         seed: 1,
         cases: 300,
-        sequence_words: 32,
+        sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             eligible: 250,
             instruction_kinds: 40,
@@ -98,7 +104,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         strategy: GenerationStrategy::RawWords,
         seed: 1,
         cases: 300,
-        sequence_words: 32,
+        sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             eligible: 250,
             instruction_kinds: 40,
@@ -110,7 +116,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         strategy: GenerationStrategy::Structured,
         seed: 1,
         cases: 300,
-        sequence_words: 32,
+        sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             eligible: 200,
             instruction_kinds: 40,
@@ -122,7 +128,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         strategy: GenerationStrategy::RawWords,
         seed: 1,
         cases: 300,
-        sequence_words: 32,
+        sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             eligible: 60,
             instruction_kinds: 20,
@@ -134,7 +140,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         strategy: GenerationStrategy::Structured,
         seed: 1,
         cases: 300,
-        sequence_words: 32,
+        sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             eligible: 200,
             instruction_kinds: 40,
@@ -146,7 +152,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         strategy: GenerationStrategy::RawWords,
         seed: 1,
         cases: 300,
-        sequence_words: 32,
+        sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             eligible: 150,
             instruction_kinds: 40,
@@ -179,13 +185,7 @@ impl SmokeCampaign {
     /// Runs the campaign through its engine.
     #[must_use]
     pub fn run(&self) -> FuzzRun {
-        let config = self.config();
-        match self.target {
-            FuzzTarget::PpuInstruction => ppu::run_instructions(config),
-            FuzzTarget::PpuSequence => ppu::run_sequences(config),
-            FuzzTarget::SpuInstruction => spu::run_instructions(config),
-            FuzzTarget::SpuSequence => spu::run_sequences(config),
-        }
+        self.target.run(self.config())
     }
 
     /// Checks that a run of this campaign reached its coverage floor.

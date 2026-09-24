@@ -7,10 +7,10 @@ use cellgov_fuzz::evaluation::{
     comparable, compare, run_trial, EvaluationEnvironment, EvaluationPlan, EvaluationResults,
     TrialOutcome, TrialRecord, CRATE_VERSION,
 };
-use cellgov_fuzz::reduce::{ReductionPolicy, ReductionRequest};
-use cellgov_fuzz::{FuzzTarget, GenerationStrategy};
+use cellgov_fuzz::reduce::ReductionRequest;
+use cellgov_fuzz::FuzzTarget;
 
-use super::campaign::run_workers;
+use super::campaign::{check_finding_limit, run_workers};
 use super::entry::{reports_progress, worker_count, write_stdout};
 use super::error::FuzzCliError;
 use super::outcome::{
@@ -18,10 +18,7 @@ use super::outcome::{
     EvaluationOutcome,
 };
 use crate::cli::exit::CommandExitCode;
-use crate::cli::parse::{
-    FuzzCompareArgs, FuzzEvaluateArgs, FuzzEvaluateEngine, FuzzReduction, FuzzReductionPolicy,
-    FuzzStrategy,
-};
+use crate::cli::parse::{FuzzCompareArgs, FuzzEvaluateArgs, FuzzReduction};
 
 /// Runs one evaluation as a fixed sequence of stages.
 ///
@@ -85,33 +82,17 @@ pub(super) fn run_compare(args: &FuzzCompareArgs) -> Result<CommandExitCode, Fuz
 }
 
 fn plan(args: &FuzzEvaluateArgs) -> Result<EvaluationPlan, FuzzCliError> {
-    let target = match args.engine {
-        FuzzEvaluateEngine::PpuInstruction => FuzzTarget::PpuInstruction,
-        FuzzEvaluateEngine::PpuSequence => FuzzTarget::PpuSequence,
-        FuzzEvaluateEngine::SpuInstruction => FuzzTarget::SpuInstruction,
-        FuzzEvaluateEngine::SpuSequence => FuzzTarget::SpuSequence,
-    };
-    if matches!(
-        target,
-        FuzzTarget::PpuInstruction | FuzzTarget::SpuInstruction
-    ) && args.sequence_words.is_some()
-    {
+    let target = FuzzTarget::from(args.engine);
+    if !target.generates_sequences() && args.sequence_words.is_some() {
         return Err(FuzzCliError::Invalid(
             "sequence-words applies only to sequence engines",
         ));
     }
-    if args.finding_limit == 0 || args.finding_limit > 1_024 {
-        return Err(FuzzCliError::Invalid(
-            "finding-limit must be within 1..=1024",
-        ));
-    }
+    check_finding_limit(args.finding_limit)?;
     let reduction = match args.reduction {
         FuzzReduction::None => None,
         FuzzReduction::OnFinding => Some(ReductionRequest {
-            policy: match args.reduction_policy {
-                FuzzReductionPolicy::Deterministic => ReductionPolicy::Deterministic,
-                FuzzReductionPolicy::Greedy => ReductionPolicy::Greedy,
-            },
+            policy: args.reduction_policy.into(),
             budget: args.reduction_budget,
         }),
     };
@@ -122,15 +103,14 @@ fn plan(args: &FuzzEvaluateArgs) -> Result<EvaluationPlan, FuzzCliError> {
         return Err(FuzzCliError::Invalid("output must be valid UTF-8"));
     }
     let plan = EvaluationPlan {
-        sequence_words: args.sequence_words.unwrap_or(32),
+        sequence_words: args
+            .sequence_words
+            .unwrap_or(cellgov_fuzz::DEFAULT_SEQUENCE_WORDS),
         max_findings: args.finding_limit,
         reduction,
         ..EvaluationPlan::new(
             target,
-            match args.strategy {
-                FuzzStrategy::Structured => GenerationStrategy::Structured,
-                FuzzStrategy::RawWords => GenerationStrategy::RawWords,
-            },
+            args.strategy.into(),
             args.cases,
             args.first_seed,
             args.trials,

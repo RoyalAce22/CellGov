@@ -846,3 +846,34 @@ fn fingerprints_order_by_target_before_check() {
 
     assert!(earlier_target < later_target);
 }
+
+/// The one findings rule: a case the target classified as unsupported or
+/// undefined was not checked, so it fails nothing.
+#[test]
+fn only_a_checked_kind_fails_the_run() {
+    let unchecked = [FindingKind::Unsupported, FindingKind::Undefined];
+    let checked = [
+        FindingKind::TargetPanic,
+        FindingKind::Nondeterministic,
+        FindingKind::MetamorphicViolation,
+        FindingKind::IllegalOutcome,
+        FindingKind::IllegalEffect,
+        FindingKind::IllegalFootprint,
+        FindingKind::InvalidProgramCounter,
+    ];
+    for kind in unchecked {
+        assert!(!kind.fails_the_run(), "{kind:?}");
+    }
+    for kind in checked {
+        assert!(kind.fails_the_run(), "{kind:?}");
+    }
+    let counts: BTreeMap<FindingKind, u64> = [
+        (FindingKind::Unsupported, 5),
+        (FindingKind::Undefined, 7),
+        (FindingKind::IllegalEffect, 2),
+        (FindingKind::TargetPanic, 3),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(failing_findings(&counts), 5);
+}

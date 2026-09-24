@@ -362,3 +362,17 @@ fn artifact_key_order_is_pinned() {
         )
     );
 }
+
+/// The path is portable text: trailing separators of either kind are
+/// trimmed and one forward slash joins the file. The comparison reads
+/// the text, since a Windows path compares `\` and `/` as one separator.
+#[test]
+fn an_artifact_path_joins_the_directory_with_one_forward_slash() {
+    for dir in ["out", "out/", "out\\", "out//"] {
+        assert_eq!(
+            artifact_path(dir, "PpuSequence-Structured-7", 12, 3).to_str(),
+            Some("out/PpuSequence-Structured-7-12-3.json"),
+            "{dir}"
+        );
+    }
+}

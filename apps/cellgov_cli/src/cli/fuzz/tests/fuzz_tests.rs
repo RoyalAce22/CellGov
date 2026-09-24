@@ -1,7 +1,7 @@
 use super::artifact::{persist_finding, run_replay, run_replay_with};
 use super::campaign::{
-    drive, plan_campaign, reduce_retained_finding, run_workers, worker_shard_index, CampaignRun,
-    FuzzEngine,
+    check_finding_limit, drive, plan_campaign, reduce_retained_finding, run_workers,
+    worker_shard_index, CampaignRun,
 };
 use super::entry::{run, run_inner, run_inner_with_render, TEST_RENDER};
 use super::*;
@@ -168,7 +168,7 @@ fn drive_recorded(label: &str, argv: &[&str]) -> (CampaignRun, RecordingSink) {
     let FuzzCommand::PpuInstruction(args) = &parsed.command else {
         panic!("wrong mode")
     };
-    let plan = plan_campaign(args, FuzzEngine::PpuInstruction).expect("plan");
+    let plan = plan_campaign(args, FuzzTarget::PpuInstruction).expect("plan");
     let mut state = CampaignRun::default();
     let sink = RecordingSink::default();
     drive(&plan, &mut state, &sink).expect("drive");
@@ -355,6 +355,59 @@ fn host_validation_rejects_unsupported_and_invalid_options() {
         error.code().expect("status").value(),
         super::super::exit_codes::USAGE as u8
     );
+}
+
+#[test]
+fn finding_limit_holds_one_through_the_retained_maximum_and_refuses_either_side() {
+    let maximum = cellgov_fuzz::MAX_RETAINED_FINDINGS;
+    assert!(matches!(
+        check_finding_limit(0),
+        Err(FuzzCliError::FindingLimit)
+    ));
+    assert!(check_finding_limit(1).is_ok());
+    assert!(check_finding_limit(maximum).is_ok());
+    assert!(matches!(
+        check_finding_limit(maximum + 1),
+        Err(FuzzCliError::FindingLimit)
+    ));
+    assert_eq!(
+        FuzzCliError::FindingLimit.to_string(),
+        "fuzz: finding-limit must be within 1..=1024"
+    );
+    assert_eq!(
+        FuzzCliError::FindingLimit.exit_code(),
+        super::super::exit_codes::USAGE
+    );
+    // Both planners refuse above the maximum with this arm, before the
+    // library's own retained-findings bound answers with another.
+    let over = (maximum + 1).to_string();
+    let campaign = parse(&["ppu-instruction", "--finding-limit", &over]).expect("parse");
+    let FuzzCommand::PpuInstruction(args) = &campaign.command else {
+        panic!("PPU mode")
+    };
+    assert!(matches!(
+        plan_campaign(args, FuzzTarget::PpuInstruction),
+        Err(FuzzCliError::FindingLimit)
+    ));
+    let at_maximum =
+        parse(&["ppu-instruction", "--finding-limit", &maximum.to_string()]).expect("parse");
+    let FuzzCommand::PpuInstruction(args) = &at_maximum.command else {
+        panic!("PPU mode")
+    };
+    assert!(plan_campaign(args, FuzzTarget::PpuInstruction).is_ok());
+    let evaluate = parse(&[
+        "evaluate",
+        "ppu-instruction",
+        "--finding-limit",
+        &over,
+        "--output",
+        "never.json",
+    ])
+    .expect("parse");
+    assert!(matches!(
+        run_inner(&evaluate),
+        Err(FuzzCliError::FindingLimit)
+    ));
 }
 
 #[test]

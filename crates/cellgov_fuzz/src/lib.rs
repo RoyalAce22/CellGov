@@ -33,7 +33,16 @@ mod rng;
 mod seeded;
 
 const MAX_SEQUENCE_WORDS: usize = 65_536;
-const MAX_RETAINED_FINDINGS: usize = 1_024;
+
+/// Most detailed findings one campaign may retain in memory.
+pub const MAX_RETAINED_FINDINGS: u32 = 1_024;
+
+/// Detailed findings a campaign retains when the caller names no limit.
+pub const DEFAULT_MAX_FINDINGS: u32 = 20;
+
+/// Instruction words per case a sequence engine generates when the caller
+/// names no count.
+pub const DEFAULT_SEQUENCE_WORDS: u32 = 32;
 
 pub use boundary::TargetPanicPayload;
 pub use campaign::{
@@ -132,8 +141,8 @@ impl Default for FuzzConfig {
             strategy: GenerationStrategy::Structured,
             schedule: CampaignSchedule::default(),
             retention: RetentionConfig::default(),
-            max_findings: 20,
-            sequence_words: 32,
+            max_findings: DEFAULT_MAX_FINDINGS,
+            sequence_words: DEFAULT_SEQUENCE_WORDS,
         }
     }
 }
@@ -178,10 +187,10 @@ impl FuzzConfig {
                 });
             }
         }
-        if self.max_findings as usize > MAX_RETAINED_FINDINGS {
+        if self.max_findings > MAX_RETAINED_FINDINGS {
             return Err(ConfigurationError::TooManyRetainedFindings {
                 requested: self.max_findings as usize,
-                maximum: MAX_RETAINED_FINDINGS,
+                maximum: MAX_RETAINED_FINDINGS as usize,
             });
         }
         Ok(())
@@ -195,6 +204,24 @@ impl FuzzConfig {
             });
         }
         Ok(())
+    }
+}
+
+impl FuzzTarget {
+    /// Runs this target's engine over `config`.
+    pub fn run(self, config: FuzzConfig) -> FuzzRun {
+        match self {
+            Self::PpuInstruction => ppu::run_instructions(config),
+            Self::PpuSequence => ppu::run_sequences(config),
+            Self::SpuInstruction => spu::run_instructions(config),
+            Self::SpuSequence => spu::run_sequences(config),
+        }
+    }
+
+    /// Whether this target's cases are instruction sequences, the only
+    /// cases [`FuzzConfig::sequence_words`] sizes.
+    pub const fn generates_sequences(self) -> bool {
+        matches!(self, Self::PpuSequence | Self::SpuSequence)
     }
 }
 

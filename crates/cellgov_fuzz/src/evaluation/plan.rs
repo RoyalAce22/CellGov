@@ -68,8 +68,8 @@ impl EvaluationPlan {
             seeds: (0..trials)
                 .map(|offset| first_seed.wrapping_add(u64::from(offset)))
                 .collect(),
-            sequence_words: 32,
-            max_findings: 20,
+            sequence_words: crate::DEFAULT_SEQUENCE_WORDS,
+            max_findings: crate::DEFAULT_MAX_FINDINGS,
             retention: RetentionConfig::default(),
             reduction: None,
         }

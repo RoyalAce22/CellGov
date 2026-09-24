@@ -254,14 +254,11 @@ pub(crate) struct CampaignSummary {
 }
 
 impl CampaignSummary {
-    /// Findings that fail the campaign; `Unsupported` and `Undefined` classify
-    /// a case and count as none, as the engine's own outcome treats them.
+    /// Findings that fail the campaign; see
+    /// [`cellgov_fuzz::FindingKind::fails_the_run`].
     #[must_use]
     pub fn findings(&self) -> u64 {
-        self.finding_counts
-            .iter()
-            .filter(|(kind, _)| !matches!(kind, FindingKind::Unsupported | FindingKind::Undefined))
-            .fold(0u64, |total, (_, count)| total.saturating_add(*count))
+        cellgov_fuzz::report::failing_findings(&self.finding_counts)
     }
 }
 

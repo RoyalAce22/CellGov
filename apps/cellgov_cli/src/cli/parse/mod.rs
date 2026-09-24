@@ -33,10 +33,11 @@ pub(crate) use entry::try_parse;
 pub(crate) use entry::{die_usage, parse_or_exit};
 pub(crate) use fuzz::{
     FuzzArgs, FuzzCampaignArgs, FuzzCensusArgs, FuzzCensusMergeArgs, FuzzCheck, FuzzCommand,
-    FuzzCompareArgs, FuzzEvaluateArgs, FuzzEvaluateEngine, FuzzPromoteArgs, FuzzRawArgs,
-    FuzzRawDecoder, FuzzReduction, FuzzReductionPolicy, FuzzRegressionProfile, FuzzReplayArgs,
-    FuzzSemanticArgs, FuzzSemanticTarget, FuzzSmokeArgs, FuzzStrategy,
+    FuzzCompareArgs, FuzzEvaluateArgs, FuzzPromoteArgs, FuzzRawArgs, FuzzRawDecoder, FuzzReduction,
+    FuzzRegressionProfile, FuzzReplayArgs, FuzzSemanticArgs, FuzzSemanticTarget, FuzzSmokeArgs,
 };
+#[cfg(test)]
+pub(crate) use fuzz::{FuzzEvaluateEngine, FuzzReductionPolicy, FuzzStrategy};
 #[cfg(test)]
 pub(crate) use fuzz::{
     CAMPAIGN_EXIT_CODES, COMPARE_EXIT_CODES, EVALUATE_EXIT_CODES, PROMOTE_EXIT_CODES,

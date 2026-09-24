@@ -19,6 +19,11 @@ pub(crate) enum FuzzCliError {
     Invalid(&'static str),
     #[error("fuzz: campaign range starting at {first} cannot hold {count} cases")]
     Range { first: u64, count: u64 },
+    #[error(
+        "fuzz: finding-limit must be within 1..={}",
+        cellgov_fuzz::MAX_RETAINED_FINDINGS
+    )]
+    FindingLimit,
     #[error("fuzz: selected check is not independently switchable by this engine")]
     CheckUnavailable,
     #[error("fuzz: raw decoder scans keep panic samples as scanned and do not reduce them")]
@@ -143,6 +148,7 @@ impl FuzzCliError {
         match self {
             Self::Invalid(_)
             | Self::Range { .. }
+            | Self::FindingLimit
             | Self::CheckUnavailable
             | Self::ReductionUnavailable
             | Self::Configuration(_)
@@ -224,6 +230,7 @@ impl FuzzCliError {
             ) => exit_codes::USAGE,
             Self::Invalid(_)
             | Self::Range { .. }
+            | Self::FindingLimit
             | Self::CheckUnavailable
             | Self::ReductionUnavailable
             | Self::Configuration(_)

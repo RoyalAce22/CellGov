@@ -448,3 +448,60 @@ fn parameter_stream_mutation_is_structural_and_bounds_checked() {
         })
     );
 }
+
+#[test]
+fn a_target_runs_its_own_engine() {
+    let config = FuzzConfig {
+        schedule: CampaignSchedule {
+            cases: CaseRange { first: 0, count: 2 },
+            ..CampaignSchedule::default()
+        },
+        ..FuzzConfig::default()
+    };
+    assert_eq!(
+        FuzzTarget::PpuInstruction.run(config),
+        ppu::run_instructions(config)
+    );
+    assert_eq!(
+        FuzzTarget::PpuSequence.run(config),
+        ppu::run_sequences(config)
+    );
+    assert_eq!(
+        FuzzTarget::SpuInstruction.run(config),
+        spu::run_instructions(config)
+    );
+    assert_eq!(
+        FuzzTarget::SpuSequence.run(config),
+        spu::run_sequences(config)
+    );
+}
+
+#[test]
+fn only_a_sequence_target_generates_sequences() {
+    assert!(FuzzTarget::PpuSequence.generates_sequences());
+    assert!(FuzzTarget::SpuSequence.generates_sequences());
+    assert!(!FuzzTarget::PpuInstruction.generates_sequences());
+    assert!(!FuzzTarget::SpuInstruction.generates_sequences());
+}
+
+/// The library refuses a retention limit past its maximum on its own,
+/// whatever a caller checked first.
+#[test]
+fn the_retained_finding_limit_holds_at_its_maximum_and_refuses_past_it() {
+    let at = FuzzConfig {
+        max_findings: MAX_RETAINED_FINDINGS,
+        ..FuzzConfig::default()
+    };
+    assert!(at.validate_for_target(FuzzTarget::PpuInstruction).is_ok());
+    let past = FuzzConfig {
+        max_findings: MAX_RETAINED_FINDINGS + 1,
+        ..FuzzConfig::default()
+    };
+    assert!(matches!(
+        past.validate_for_target(FuzzTarget::PpuInstruction),
+        Err(ConfigurationError::TooManyRetainedFindings {
+            requested: 1_025,
+            maximum: 1_024,
+        })
+    ));
+}

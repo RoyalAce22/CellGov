@@ -4,77 +4,50 @@
 use std::time::{Duration, Instant};
 
 use cellgov_fuzz::artifact::{
-    ArtifactCheckSelection, ArtifactExecutionPolicy, ArtifactFingerprint, ArtifactReduction,
-    ArtifactReductionRequest, ArtifactReference, FuzzFindingArtifact,
+    artifact_path, ArtifactCheckSelection, ArtifactExecutionPolicy, ArtifactFingerprint,
+    ArtifactReduction, ArtifactReductionRequest, ArtifactReference, FuzzFindingArtifact,
 };
-use cellgov_fuzz::reduce::{reduce_finding, ReductionPolicy, ReductionReport, ReductionRequest};
+use cellgov_fuzz::reduce::{reduce_finding, ReductionReport, ReductionRequest};
 use cellgov_fuzz::report::Finding;
 use cellgov_fuzz::{
-    ppu, spu, CampaignSchedule, CampaignShard, CampaignVersion, CaseRange, FuzzConfig, FuzzReport,
-    FuzzRun, FuzzTarget, GenerationStrategy, ReductionOutcome, RunOutcome,
+    CampaignSchedule, CampaignShard, CampaignVersion, CaseRange, FuzzConfig, FuzzReport,
+    FuzzTarget, ReductionOutcome, RunOutcome,
 };
 use cellgov_terminal::caps::{RenderFlags, RenderMode};
 use cellgov_terminal::progress::{ProgressBar, ProgressSink};
 
-use super::artifact::{check_reference, persist_finding};
+use super::artifact::{persist_finding, read_reference};
 use super::entry::{deadline, worker_count, write_stdout};
 use super::error::FuzzCliError;
 use super::outcome::{render_campaign_summary, ArtifactRecord, CampaignOutcome, CampaignSummary};
 use crate::cli::exit::CommandExitCode;
-use crate::cli::parse::{
-    FuzzCampaignArgs, FuzzCheck, FuzzReduction, FuzzReductionPolicy, FuzzStrategy,
-};
+use crate::cli::parse::{FuzzCampaignArgs, FuzzCheck, FuzzReduction};
 use crate::progress::FUZZ_CAMPAIGN_TASK;
 
 const CAMPAIGN_BATCH_CASES: u64 = 64;
 
-/// One of the four generated-campaign engines.
-#[derive(Debug, Clone, Copy)]
-pub(super) enum FuzzEngine {
-    PpuInstruction,
-    PpuSequence,
-    SpuInstruction,
-    SpuSequence,
+/// The subcommand's name, as the progress bar labels the campaign.
+pub(super) const fn campaign_label(target: FuzzTarget) -> &'static str {
+    match target {
+        FuzzTarget::PpuInstruction => "ppu-instruction",
+        FuzzTarget::PpuSequence => "ppu-sequence",
+        FuzzTarget::SpuInstruction => "spu-instruction",
+        FuzzTarget::SpuSequence => "spu-sequence",
+    }
 }
 
-impl FuzzEngine {
-    fn run(self, config: FuzzConfig) -> FuzzRun {
-        match self {
-            Self::PpuInstruction => ppu::run_instructions(config),
-            Self::PpuSequence => ppu::run_sequences(config),
-            Self::SpuInstruction => spu::run_instructions(config),
-            Self::SpuSequence => spu::run_sequences(config),
-        }
+/// Refuses a `--finding-limit` outside what an engine retains.
+pub(super) fn check_finding_limit(limit: u32) -> Result<(), FuzzCliError> {
+    if limit == 0 || limit > cellgov_fuzz::MAX_RETAINED_FINDINGS {
+        return Err(FuzzCliError::FindingLimit);
     }
-
-    pub(super) const fn is_ppu(self) -> bool {
-        matches!(self, Self::PpuInstruction | Self::PpuSequence)
-    }
-
-    pub(super) const fn target(self) -> FuzzTarget {
-        match self {
-            Self::PpuInstruction => FuzzTarget::PpuInstruction,
-            Self::PpuSequence => FuzzTarget::PpuSequence,
-            Self::SpuInstruction => FuzzTarget::SpuInstruction,
-            Self::SpuSequence => FuzzTarget::SpuSequence,
-        }
-    }
-
-    /// The subcommand's name, as the progress bar labels the campaign.
-    pub(super) const fn label(self) -> &'static str {
-        match self {
-            Self::PpuInstruction => "ppu-instruction",
-            Self::PpuSequence => "ppu-sequence",
-            Self::SpuInstruction => "spu-instruction",
-            Self::SpuSequence => "spu-sequence",
-        }
-    }
+    Ok(())
 }
 
 /// A campaign's host settings, after every refusal check passes.
 pub(super) struct CampaignPlan<'a> {
     args: &'a FuzzCampaignArgs,
-    engine: FuzzEngine,
+    engine: FuzzTarget,
     /// First case index the schedule considers.
     first: u64,
     /// Case indices the schedule declares.
@@ -154,7 +127,7 @@ impl CampaignRun {
 /// Refuse or accept `args` for `engine` before the loop schedules a case.
 pub(super) fn plan_campaign<'a>(
     args: &'a FuzzCampaignArgs,
-    engine: FuzzEngine,
+    engine: FuzzTarget,
 ) -> Result<CampaignPlan<'a>, FuzzCliError> {
     // [Manes2021 p:3 s:2.3 Fuzz Testing Algorithm] The model fuzzer runs one preprocessing step before its iteration loop. Every refusal below lands in that step, before the loop schedules the first case.
     if !matches!(args.check, FuzzCheck::All) {
@@ -163,26 +136,15 @@ pub(super) fn plan_campaign<'a>(
     let reduction = match args.reduction {
         FuzzReduction::None => None,
         FuzzReduction::OnFinding => Some(ReductionRequest {
-            policy: match args.reduction_policy {
-                FuzzReductionPolicy::Deterministic => ReductionPolicy::Deterministic,
-                FuzzReductionPolicy::Greedy => ReductionPolicy::Greedy,
-            },
+            policy: args.reduction_policy.into(),
             budget: args.reduction_budget,
         }),
     };
     if reduction.is_some_and(|request| request.budget == 0) {
         return Err(FuzzCliError::Invalid("reduction-budget must be positive"));
     }
-    if args.finding_limit == 0 || args.finding_limit > 1_024 {
-        return Err(FuzzCliError::Invalid(
-            "finding-limit must be within 1..=1024",
-        ));
-    }
-    if matches!(
-        engine,
-        FuzzEngine::PpuInstruction | FuzzEngine::SpuInstruction
-    ) && args.sequence_words.is_some()
-    {
+    check_finding_limit(args.finding_limit)?;
+    if !engine.generates_sequences() && args.sequence_words.is_some() {
         return Err(FuzzCliError::Invalid(
             "sequence-words applies only to sequence campaigns",
         ));
@@ -224,10 +186,7 @@ pub(super) fn plan_campaign<'a>(
     let campaign_config = FuzzConfig {
         campaign_version: CampaignVersion(args.campaign_version),
         seed: args.seed,
-        strategy: match args.strategy {
-            FuzzStrategy::Structured => GenerationStrategy::Structured,
-            FuzzStrategy::RawWords => GenerationStrategy::RawWords,
-        },
+        strategy: args.strategy.into(),
         schedule: CampaignSchedule {
             cases: CaseRange { first, count },
             shard: CampaignShard {
@@ -238,11 +197,13 @@ pub(super) fn plan_campaign<'a>(
         },
         retention: Default::default(),
         max_findings: args.finding_limit,
-        sequence_words: args.sequence_words.unwrap_or(32),
+        sequence_words: args
+            .sequence_words
+            .unwrap_or(cellgov_fuzz::DEFAULT_SEQUENCE_WORDS),
     };
-    campaign_config.validate_for_target(engine.target())?;
+    campaign_config.validate_for_target(engine)?;
     let reference = if let Some(path) = &args.reference {
-        check_reference(path, engine)?
+        read_reference(path, engine)?
     } else {
         ArtifactReference::Local
     };
@@ -298,10 +259,7 @@ pub(super) fn drive(
             let config = FuzzConfig {
                 campaign_version: CampaignVersion(args.campaign_version),
                 seed: args.seed,
-                strategy: match args.strategy {
-                    FuzzStrategy::Structured => GenerationStrategy::Structured,
-                    FuzzStrategy::RawWords => GenerationStrategy::RawWords,
-                },
+                strategy: args.strategy.into(),
                 schedule: CampaignSchedule {
                     cases: CaseRange {
                         first: batch_first,
@@ -315,25 +273,24 @@ pub(super) fn drive(
                 },
                 retention: Default::default(),
                 max_findings: args.finding_limit,
-                sequence_words: args.sequence_words.unwrap_or(32),
+                sequence_words: args
+                    .sequence_words
+                    .unwrap_or(cellgov_fuzz::DEFAULT_SEQUENCE_WORDS),
             };
             work.push(move || engine.run(config));
         }
         let runs = run_workers(work)?;
         for run in runs {
             for finding in &run.report.findings {
-                // Portable text, spelled as `regression::promote` spells a
-                // stored replay path: the directory as the caller gave it,
-                // one forward slash, then the file.
-                let path = std::path::PathBuf::from(format!(
-                    "{}/{:?}-{:?}-{}-{}-{}.json",
+                let path = artifact_path(
                     plan.artifacts_dir,
-                    engine.target(),
-                    plan.campaign_config.strategy,
-                    args.seed,
+                    &format!(
+                        "{engine:?}-{:?}-{}",
+                        plan.campaign_config.strategy, args.seed
+                    ),
                     finding.replay.case_index,
                     state.artifact_index,
-                ));
+                );
                 let mut finding = finding.clone();
                 if let Some(request) = plan.reduction {
                     finding.reduction =
@@ -427,7 +384,7 @@ fn batch_label(first: u64, batch: u64, findings: u64) -> String {
 
 pub(super) fn run_campaign(
     args: &FuzzCampaignArgs,
-    engine: FuzzEngine,
+    engine: FuzzTarget,
     render: RenderFlags,
 ) -> Result<CommandExitCode, FuzzCliError> {
     let plan = plan_campaign(args, engine)?;
@@ -439,7 +396,7 @@ pub(super) fn run_campaign(
     }
     .caps();
     let mut state = CampaignRun::holding(caps.mode == RenderMode::Ansi);
-    let bar = ProgressBar::start(caps, &FUZZ_CAMPAIGN_TASK, engine.label());
+    let bar = ProgressBar::start(caps, &FUZZ_CAMPAIGN_TASK, campaign_label(engine));
     let sink = bar.sink();
     let driven = drive(&plan, &mut state, &*sink);
     // Bar down first: the render thread owns stderr while it runs, and
@@ -467,7 +424,7 @@ pub(super) fn run_campaign(
         artifact_failure.is_some(),
         harness_failure.is_some(),
     );
-    write_stdout(&render_campaign_summary(engine.target(), &summary, outcome))?;
+    write_stdout(&render_campaign_summary(engine, &summary, outcome))?;
     // The error-backed outcomes carry their diagnostic through the typed
     // error, whose exit code is the outcome's.
     if let Some(error) = artifact_failure {

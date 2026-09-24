@@ -178,6 +178,25 @@ pub enum FindingKind {
     Undefined,
 }
 
+impl FindingKind {
+    /// Whether a finding of this kind fails the run.
+    ///
+    /// [`FindingKind::Unsupported`] and [`FindingKind::Undefined`]
+    /// classify a case the target did not check, so they count as none.
+    pub const fn fails_the_run(self) -> bool {
+        !matches!(self, Self::Unsupported | Self::Undefined)
+    }
+}
+
+/// How many findings in `counts` fail the run; see
+/// [`FindingKind::fails_the_run`].
+pub fn failing_findings(counts: &BTreeMap<FindingKind, u64>) -> u64 {
+    counts
+        .iter()
+        .filter(|(kind, _)| kind.fails_the_run())
+        .fold(0u64, |total, (_, count)| total.saturating_add(*count))
+}
+
 /// One reproducible validation failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
@@ -547,7 +566,7 @@ impl FuzzRun {
         } else if report
             .finding_counts
             .keys()
-            .any(|kind| !matches!(kind, FindingKind::Unsupported | FindingKind::Undefined))
+            .any(|kind| kind.fails_the_run())
         {
             RunOutcome::SemanticFinding
         } else if report.is_clean() && report.eligible_cases != 0 {

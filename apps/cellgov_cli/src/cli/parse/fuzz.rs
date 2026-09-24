@@ -84,6 +84,24 @@ pub(crate) enum FuzzReductionPolicy {
     Greedy,
 }
 
+impl From<FuzzStrategy> for cellgov_fuzz::GenerationStrategy {
+    fn from(strategy: FuzzStrategy) -> Self {
+        match strategy {
+            FuzzStrategy::Structured => Self::Structured,
+            FuzzStrategy::RawWords => Self::RawWords,
+        }
+    }
+}
+
+impl From<FuzzReductionPolicy> for cellgov_fuzz::reduce::ReductionPolicy {
+    fn from(policy: FuzzReductionPolicy) -> Self {
+        match policy {
+            FuzzReductionPolicy::Deterministic => Self::Deterministic,
+            FuzzReductionPolicy::Greedy => Self::Greedy,
+        }
+    }
+}
+
 /// The outcomes a generated campaign has beyond the shared 0-5 contract.
 pub(crate) const CAMPAIGN_EXIT_CODES: &str = "Exit codes particular to this command:
   0   every scheduled case ran, with or without findings; the summary
@@ -197,7 +215,7 @@ pub(crate) struct FuzzCampaignArgs {
     #[arg(long)]
     pub progress: bool,
     /// Maximum detailed findings to retain.
-    #[arg(long, default_value_t = 20)]
+    #[arg(long, default_value_t = cellgov_fuzz::DEFAULT_MAX_FINDINGS)]
     pub finding_limit: u32,
     /// Number of words generated for each sequence case.
     #[arg(long)]
@@ -382,6 +400,17 @@ pub(crate) enum FuzzEvaluateEngine {
     SpuSequence,
 }
 
+impl From<FuzzEvaluateEngine> for cellgov_fuzz::FuzzTarget {
+    fn from(engine: FuzzEvaluateEngine) -> Self {
+        match engine {
+            FuzzEvaluateEngine::PpuInstruction => Self::PpuInstruction,
+            FuzzEvaluateEngine::PpuSequence => Self::PpuSequence,
+            FuzzEvaluateEngine::SpuInstruction => Self::SpuInstruction,
+            FuzzEvaluateEngine::SpuSequence => Self::SpuSequence,
+        }
+    }
+}
+
 /// Settings for repeated equal-budget trials of one engine.
 #[derive(Debug, Args)]
 #[command(after_help = EVALUATE_EXIT_CODES)]
@@ -405,7 +434,7 @@ pub(crate) struct FuzzEvaluateArgs {
     #[arg(long, value_enum, default_value_t = FuzzStrategy::Structured)]
     pub strategy: FuzzStrategy,
     /// Maximum detailed findings each trial retains.
-    #[arg(long, default_value_t = 20)]
+    #[arg(long, default_value_t = cellgov_fuzz::DEFAULT_MAX_FINDINGS)]
     pub finding_limit: u32,
     /// Reduce each trial's retained findings and record the cost.
     #[arg(long, value_enum, default_value_t = FuzzReduction::None)]

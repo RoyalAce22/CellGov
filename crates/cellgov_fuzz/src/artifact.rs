@@ -12,8 +12,8 @@ use crate::report::{
 };
 use crate::spu_reference::{parse_reference_json as parse_spu_reference, SpuReferenceError};
 use crate::{
-    ppu, spu, CampaignSchedule, CampaignShard, CaseRange, ConfigurationError, FuzzConfig,
-    FuzzError, FuzzTarget, ReplayCoordinates, ReplayVersionError, TargetPanicPayload,
+    CampaignSchedule, CampaignShard, CaseRange, ConfigurationError, FuzzConfig, FuzzError,
+    FuzzTarget, ReplayCoordinates, ReplayVersionError, TargetPanicPayload,
 };
 
 /// Schema version a finding artifact carries.
@@ -57,6 +57,63 @@ impl ArtifactReference {
         Ok(Self::Spu(serde_json::to_string(&parse_spu_reference(
             json,
         )?)?))
+    }
+
+    /// Parses an independent reference for `target`'s class, replays it
+    /// against the interpreter, and canonicalizes it for portable replay.
+    ///
+    /// # Errors
+    ///
+    /// The reference's own parse or replay refusal, and
+    /// [`ArtifactReplayError::ReferenceMismatch`] when any comparison
+    /// differs from the interpreter.
+    pub fn checked(json: &str, target: FuzzTarget) -> Result<Self, ArtifactReplayError> {
+        let reference = match target {
+            FuzzTarget::PpuInstruction | FuzzTarget::PpuSequence => Self::Ppu(
+                serde_json::to_string(&parse_ppu_reference(json)?).map_err(ArtifactError::from)?,
+            ),
+            FuzzTarget::SpuInstruction | FuzzTarget::SpuSequence => Self::Spu(
+                serde_json::to_string(&parse_spu_reference(json)?).map_err(ArtifactError::from)?,
+            ),
+        };
+        reference.check()?;
+        Ok(reference)
+    }
+
+    /// Replays this reference and refuses it unless it agrees with the
+    /// interpreter on every comparison. A local reference names no
+    /// independent source, so it holds.
+    ///
+    /// # Errors
+    ///
+    /// The reference's own parse or replay refusal, and
+    /// [`ArtifactReplayError::ReferenceMismatch`].
+    pub fn check(&self) -> Result<(), ArtifactReplayError> {
+        match self {
+            Self::Local => Ok(()),
+            Self::Ppu(json) => {
+                let source = parse_ppu_reference(json)?;
+                let replay = crate::ppu_reference::replay_reference(&source)?;
+                if replay.internal_divergence.is_some()
+                    || replay.comparisons.is_empty()
+                    || replay
+                        .comparisons
+                        .iter()
+                        .any(|comparison| !comparison.is_match())
+                {
+                    return Err(ArtifactReplayError::ReferenceMismatch);
+                }
+                Ok(())
+            }
+            Self::Spu(json) => {
+                let source = parse_spu_reference(json)?;
+                let replay = crate::spu_reference::replay_reference(&source)?;
+                if !replay.comparison.is_match() {
+                    return Err(ArtifactReplayError::ReferenceMismatch);
+                }
+                Ok(())
+            }
+        }
     }
 
     fn validate(&self, target: FuzzTarget) -> Result<(), ArtifactError> {
@@ -585,12 +642,7 @@ impl FuzzFindingArtifact {
     ///
     /// Refuses incompatible versions or any changed original fingerprint.
     pub fn replay(&self) -> Result<Finding, ArtifactReplayError> {
-        self.replay_with(|config| match self.original.replay.target {
-            FuzzTarget::PpuInstruction => ppu::run_instructions(config),
-            FuzzTarget::PpuSequence => ppu::run_sequences(config),
-            FuzzTarget::SpuInstruction => spu::run_instructions(config),
-            FuzzTarget::SpuSequence => spu::run_sequences(config),
-        })
+        self.replay_with(|config| self.original.replay.target.run(config))
     }
 
     /// Replays through a caller-supplied runner, behind the validation gate of [`Self::replay`].
@@ -687,32 +739,121 @@ impl FuzzFindingArtifact {
     }
 
     fn check_independent_reference(&self) -> Result<(), ArtifactReplayError> {
-        match &self.reference {
-            ArtifactReference::Local => Ok(()),
-            ArtifactReference::Ppu(json) => {
-                let source = parse_ppu_reference(json)?;
-                let replay = crate::ppu_reference::replay_reference(&source)?;
-                if replay.internal_divergence.is_some()
-                    || replay.comparisons.is_empty()
-                    || replay
-                        .comparisons
-                        .iter()
-                        .any(|comparison| !comparison.is_match())
-                {
-                    return Err(ArtifactReplayError::ReferenceMismatch);
+        self.reference.check()
+    }
+
+    /// Writes this artifact to `path`, creating the directory, unless
+    /// the path already holds it.
+    ///
+    /// The write is create-new. A file already at `path` that describes
+    /// the same finding stands: a rerun under another execution policy
+    /// or campaign range produces the same finding. A finding's identity
+    /// excludes its reduction state, so a reduced rerun matches a stored
+    /// unreduced file; that reduction is not stored, and the refusal says
+    /// so.
+    ///
+    /// # Errors
+    ///
+    /// [`ArtifactStoreError`] for a path with no parent, an encoding or
+    /// write failure, different evidence already at the path, or a
+    /// reduction the stored file does not hold.
+    pub fn store(&self, path: &Path) -> Result<(), ArtifactStoreError> {
+        let parent = path.parent().ok_or(ArtifactStoreError::NoParent)?;
+        let write = |source| ArtifactStoreError::Write {
+            path: path.to_path_buf(),
+            source,
+        };
+        std::fs::create_dir_all(parent).map_err(write)?;
+        let encoded = serde_json::to_vec_pretty(self).map_err(ArtifactStoreError::Encoding)?;
+        match create_new(path, &encoded) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+                let existing = std::fs::read_to_string(path).map_err(write)?;
+                match Self::parse_json(&existing) {
+                    Ok(stored) if stored.describes_same_finding(self) => {
+                        if self.reduction != ArtifactReduction::NotAttempted
+                            && stored.reduction != self.reduction
+                        {
+                            Err(ArtifactStoreError::ReductionNotStored {
+                                path: path.to_path_buf(),
+                                stored: stored.reduction,
+                            })
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ => Err(ArtifactStoreError::Collision {
+                        path: path.to_path_buf(),
+                    }),
                 }
-                Ok(())
             }
-            ArtifactReference::Spu(json) => {
-                let source = parse_spu_reference(json)?;
-                let replay = crate::spu_reference::replay_reference(&source)?;
-                if !replay.comparison.is_match() {
-                    return Err(ArtifactReplayError::ReferenceMismatch);
-                }
-                Ok(())
-            }
+            Err(source) => Err(write(source)),
         }
     }
+}
+
+/// Why [`FuzzFindingArtifact::store`] stored nothing.
+#[derive(Debug, thiserror::Error)]
+pub enum ArtifactStoreError {
+    /// The artifact path names no directory to write into.
+    #[error("artifact path has no parent")]
+    NoParent,
+    /// The artifact did not encode as JSON.
+    #[error("artifact encoding failed: {0}")]
+    Encoding(#[source] serde_json::Error),
+    /// The file system refused the directory, the write or the read-back.
+    #[error("artifact write {} failed: {source}", path.display())]
+    Write {
+        /// The artifact path.
+        path: std::path::PathBuf,
+        /// The file-system refusal.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The path already holds different finding evidence.
+    #[error("artifact path {} already holds different evidence", path.display())]
+    Collision {
+        /// The artifact path.
+        path: std::path::PathBuf,
+    },
+    /// The path already holds this finding under another reduction,
+    /// which the store did not replace.
+    #[error("artifact path {} already holds this finding with reduction {stored:?}", path.display())]
+    ReductionNotStored {
+        /// The artifact path.
+        path: std::path::PathBuf,
+        /// The reduction the stored file holds.
+        stored: ArtifactReduction,
+    },
+}
+
+/// Writes `bytes` to a file that must not exist yet, and syncs it.
+///
+/// # Errors
+///
+/// The file-system refusal, [`std::io::ErrorKind::AlreadyExists`] among
+/// them.
+pub(crate) fn create_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+/// The portable path the store writes a finding to: `dir` as the
+/// caller spelled it with trailing separators trimmed, one forward
+/// slash, then `<stem>-<case_index>-<index>.json`.
+///
+/// A forward slash opens the file on every host, so the path doubles as
+/// the replay command's text.
+pub fn artifact_path(dir: &str, stem: &str, case_index: u64, index: u64) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!(
+        "{}/{stem}-{case_index}-{index}.json",
+        dir.trim_end_matches(['/', '\\'])
+    ))
 }
 
 #[cfg(test)]

@@ -1,123 +1,70 @@
 //! Independent reference checks, finding artifact storage, and exact replay.
 
-use std::io::Write;
-use std::path::PathBuf;
+use std::path::Path;
 
 use cellgov_fuzz::artifact::{
-    ArtifactReduction, ArtifactReference, ArtifactReplayError, FuzzFindingArtifact,
+    ArtifactReference, ArtifactReplayError, ArtifactStoreError, FuzzFindingArtifact,
 };
 use cellgov_fuzz::report::Finding;
+use cellgov_fuzz::FuzzTarget;
 
-use super::campaign::FuzzEngine;
 use super::entry::write_stdout;
 use super::error::FuzzCliError;
 use super::outcome::{render_replay_outcome, ReplayOutcome};
 use crate::cli::exit::CommandExitCode;
 use crate::cli::parse::FuzzReplayArgs;
 
-pub(super) fn check_reference(
-    path: &PathBuf,
-    engine: FuzzEngine,
+/// Reads the `--reference` file and holds it against the interpreter;
+/// see [`ArtifactReference::checked`].
+pub(super) fn read_reference(
+    path: &Path,
+    target: FuzzTarget,
 ) -> Result<ArtifactReference, FuzzCliError> {
     let json = std::fs::read_to_string(path).map_err(|source| FuzzCliError::ReferenceRead {
-        path: path.clone(),
+        path: path.to_path_buf(),
         source,
     })?;
-    let reference = if engine.is_ppu() {
-        let artifact = cellgov_fuzz::ppu_reference::parse_reference_json(&json)?;
-        let replay = cellgov_fuzz::ppu_reference::replay_reference(&artifact)?;
-        if replay.comparisons.is_empty()
-            || replay.internal_divergence.is_some()
-            || replay
-                .comparisons
-                .iter()
-                .any(|comparison| !comparison.is_match())
-        {
-            return Err(FuzzCliError::ReferenceMismatch);
-        }
-        ArtifactReference::ppu(&json)?
-    } else {
-        let artifact = cellgov_fuzz::spu_reference::parse_reference_json(&json)?;
-        let replay = cellgov_fuzz::spu_reference::replay_reference(&artifact)?;
-        if !replay.comparison.is_match() {
-            return Err(FuzzCliError::ReferenceMismatch);
-        }
-        ArtifactReference::spu(&json)?
-    };
-    Ok(reference)
+    ArtifactReference::checked(&json, target).map_err(|error| match error {
+        ArtifactReplayError::ReferenceMismatch => FuzzCliError::ReferenceMismatch,
+        ArtifactReplayError::PpuReference(source) => FuzzCliError::PpuReference(source),
+        ArtifactReplayError::SpuReference(source) => FuzzCliError::SpuReference(source),
+        ArtifactReplayError::Artifact(source) => FuzzCliError::Artifact(source),
+        other => FuzzCliError::ArtifactReplay(other),
+    })
 }
 
+/// Stores `artifact` at `path`; see [`FuzzFindingArtifact::store`]. Every
+/// refusal carries the artifact, so the error names its case even when no
+/// file holds it.
 pub(super) fn persist_finding(
-    path: &PathBuf,
+    path: &Path,
     artifact: FuzzFindingArtifact,
 ) -> Result<(), FuzzCliError> {
-    let parent = path
-        .parent()
-        .ok_or(FuzzCliError::Invalid("artifact path has no parent"))?;
-    std::fs::create_dir_all(parent).map_err(|source| FuzzCliError::ArtifactWrite {
-        path: path.clone(),
-        source,
-        artifact: Box::new(artifact.clone()),
-    })?;
-    let encoded =
-        serde_json::to_vec_pretty(&artifact).map_err(|source| FuzzCliError::ArtifactEncoding {
-            source,
-            artifact: Box::new(artifact.clone()),
-        })?;
-    let mut file = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-    {
-        Ok(file) => file,
-        Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-            let existing =
-                std::fs::read_to_string(path).map_err(|source| FuzzCliError::ArtifactWrite {
-                    path: path.clone(),
-                    source,
-                    artifact: Box::new(artifact.clone()),
-                })?;
-            // A rerun with another `ArtifactExecutionPolicy` or campaign range
-            // produces the same finding, so the first file stands. Only
-            // different finding evidence collides. A finding's identity
-            // excludes its reduction state, so a reduced rerun also matches
-            // the stored file. The refusal carries the reduced case, which
-            // no file holds.
-            return match FuzzFindingArtifact::parse_json(&existing) {
-                Ok(stored) if stored.describes_same_finding(&artifact) => {
-                    if artifact.reduction != ArtifactReduction::NotAttempted
-                        && stored.reduction != artifact.reduction
-                    {
-                        Err(FuzzCliError::ArtifactReductionNotStored {
-                            path: path.clone(),
-                            stored: stored.reduction,
-                            artifact: Box::new(artifact),
-                        })
-                    } else {
-                        Ok(())
-                    }
-                }
-                _ => Err(FuzzCliError::ArtifactCollision {
-                    path: path.clone(),
-                    artifact: Box::new(artifact),
-                }),
-            };
-        }
-        Err(source) => {
-            return Err(FuzzCliError::ArtifactWrite {
-                path: path.clone(),
+    artifact.store(path).map_err(|error| {
+        let artifact = Box::new(artifact);
+        let path = path.to_path_buf();
+        match error {
+            ArtifactStoreError::NoParent => FuzzCliError::Invalid("artifact path has no parent"),
+            ArtifactStoreError::Encoding(source) => {
+                FuzzCliError::ArtifactEncoding { source, artifact }
+            }
+            ArtifactStoreError::Write { source, .. } => FuzzCliError::ArtifactWrite {
+                path,
                 source,
-                artifact: Box::new(artifact),
-            })
+                artifact,
+            },
+            ArtifactStoreError::Collision { .. } => {
+                FuzzCliError::ArtifactCollision { path, artifact }
+            }
+            ArtifactStoreError::ReductionNotStored { stored, .. } => {
+                FuzzCliError::ArtifactReductionNotStored {
+                    path,
+                    stored,
+                    artifact,
+                }
+            }
         }
-    };
-    file.write_all(&encoded)
-        .and_then(|()| file.sync_all())
-        .map_err(|source| FuzzCliError::ArtifactWrite {
-            path: path.clone(),
-            source,
-            artifact: Box::new(artifact),
-        })
+    })
 }
 
 pub(super) fn run_replay(args: &FuzzReplayArgs) -> Result<CommandExitCode, FuzzCliError> {

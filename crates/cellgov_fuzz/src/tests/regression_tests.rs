@@ -384,6 +384,11 @@ fn promotion_stores_the_artifact_under_its_name_and_lists_it_open() {
         "the stored replay path is spelled with forward slashes on every host"
     );
     assert!(!promoted_entry.artifact.replay_command[5].contains('\\'));
+    let stored = std::fs::read(dir.join("seeded.json")).expect("stored file reads");
+    assert!(
+        stored.ends_with(b"}\n") && !stored.ends_with(b"\n\n"),
+        "a promoted regression ends with exactly one newline"
+    );
     assert!(promoted_entry.artifact.describes_same_finding(&artifact));
     let loaded = load(dir).expect("loads");
     assert_eq!(loaded, vec![promoted_entry]);

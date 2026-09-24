@@ -7,7 +7,7 @@ use std::time::Duration;
 use cellgov_terminal::caps::RenderFlags;
 
 use super::artifact::run_replay;
-use super::campaign::{run_campaign, FuzzEngine};
+use super::campaign::run_campaign;
 use super::census::{run_census, run_census_merge};
 use super::error::FuzzCliError;
 use super::evaluate::{run_compare, run_evaluate};
@@ -52,10 +52,18 @@ pub(super) fn run_inner_with_render(
 ) -> Result<CommandExitCode, FuzzCliError> {
     let quiet = render.quiet;
     match &args.command {
-        FuzzCommand::PpuInstruction(args) => run_campaign(args, FuzzEngine::PpuInstruction, render),
-        FuzzCommand::PpuSequence(args) => run_campaign(args, FuzzEngine::PpuSequence, render),
-        FuzzCommand::SpuInstruction(args) => run_campaign(args, FuzzEngine::SpuInstruction, render),
-        FuzzCommand::SpuSequence(args) => run_campaign(args, FuzzEngine::SpuSequence, render),
+        FuzzCommand::PpuInstruction(args) => {
+            run_campaign(args, cellgov_fuzz::FuzzTarget::PpuInstruction, render)
+        }
+        FuzzCommand::PpuSequence(args) => {
+            run_campaign(args, cellgov_fuzz::FuzzTarget::PpuSequence, render)
+        }
+        FuzzCommand::SpuInstruction(args) => {
+            run_campaign(args, cellgov_fuzz::FuzzTarget::SpuInstruction, render)
+        }
+        FuzzCommand::SpuSequence(args) => {
+            run_campaign(args, cellgov_fuzz::FuzzTarget::SpuSequence, render)
+        }
         FuzzCommand::Semantic(args) => run_semantic(args, quiet),
         FuzzCommand::Raw(args) => run_raw(args, quiet),
         FuzzCommand::Census(args) => run_census(args, quiet),

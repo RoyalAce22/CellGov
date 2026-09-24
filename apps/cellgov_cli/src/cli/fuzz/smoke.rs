@@ -2,16 +2,15 @@
 //! every finding minimized and stored, and each held to a promoted
 //! regression.
 
-use std::path::PathBuf;
-
 use cellgov_fuzz::artifact::{
-    ArtifactCheckSelection, ArtifactExecutionPolicy, ArtifactFingerprint, ArtifactReduction,
-    ArtifactReductionRequest, ArtifactReference, FuzzFindingArtifact,
+    artifact_path, ArtifactCheckSelection, ArtifactExecutionPolicy, ArtifactFingerprint,
+    ArtifactReduction, ArtifactReductionRequest, ArtifactReference, FuzzFindingArtifact,
 };
 use cellgov_fuzz::reduce::{ReductionPolicy, ReductionRequest};
 use cellgov_fuzz::regression::{self, Regression, RegressionProfile};
+use cellgov_fuzz::report::failing_findings;
 use cellgov_fuzz::smoke::SMOKE_CAMPAIGNS;
-use cellgov_fuzz::{FindingKind, ReductionOutcome, RunOutcome};
+use cellgov_fuzz::{ReductionOutcome, RunOutcome};
 
 use super::artifact::persist_finding;
 use super::campaign::reduce_retained_finding;
@@ -65,10 +64,6 @@ pub(super) fn run_smoke(
     if artifacts_dir.is_empty() {
         return Err(FuzzCliError::Invalid("artifacts-dir must not be empty"));
     }
-    // An artifact path is portable text, spelled as `regression::promote`
-    // spells a stored replay path: the directory as the caller gave it, one
-    // forward slash, then the file.
-    let artifacts_dir = artifacts_dir.trim_end_matches(['/', '\\']);
     if args.reduction_budget == 0 {
         return Err(FuzzCliError::Invalid("reduction-budget must be positive"));
     }
@@ -102,10 +97,12 @@ pub(super) fn run_smoke(
                     campaign.name, finding.replay.case_index
                 );
             }
-            let path = PathBuf::from(format!(
-                "{artifacts_dir}/{}-{}-{index}.json",
-                campaign.name, finding.replay.case_index
-            ));
+            let path = artifact_path(
+                artifacts_dir,
+                campaign.name,
+                finding.replay.case_index,
+                index as u64,
+            );
             let mut record = ArtifactRecord {
                 path: path.clone(),
                 campaign_version: finding.replay.campaign_version.0,
@@ -173,12 +170,7 @@ pub(super) fn run_smoke(
         // rest. A counted finding the engine did not retain met no
         // regression, so it ranks as unpromoted.
         let retained = run.report.findings.len() as u64;
-        let findings = run
-            .report
-            .finding_counts
-            .iter()
-            .filter(|(kind, _)| !matches!(kind, FindingKind::Unsupported | FindingKind::Undefined))
-            .fold(0u64, |total, (_, count)| total.saturating_add(*count));
+        let findings = failing_findings(&run.report.finding_counts);
         unpromoted = unpromoted.saturating_add(findings.saturating_sub(retained));
         unpromoted_total = unpromoted_total
             .checked_add(unpromoted)

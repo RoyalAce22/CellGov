@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::plan::{EvaluationPlan, EvaluationPlanError};
 use crate::reduce::{reduce_finding, ReductionRequest, ReductionTransform};
 use crate::report::{Finding, FindingKind, FuzzReport, FuzzRun, RunOutcome};
-use crate::{ppu, spu, FuzzConfig, FuzzTarget};
+use crate::FuzzConfig;
 
 /// How a trial's campaign ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,12 +152,7 @@ impl TrialRecord {
 /// Refuses a plan no evaluation can run.
 pub fn run_trial(plan: &EvaluationPlan, seed: u64) -> Result<TrialRecord, EvaluationPlanError> {
     plan.validate()?;
-    Ok(run_trial_with(plan, seed, |config| match plan.target {
-        FuzzTarget::PpuInstruction => ppu::run_instructions(config),
-        FuzzTarget::PpuSequence => ppu::run_sequences(config),
-        FuzzTarget::SpuInstruction => spu::run_instructions(config),
-        FuzzTarget::SpuSequence => spu::run_sequences(config),
-    }))
+    Ok(run_trial_with(plan, seed, |config| plan.target.run(config)))
 }
 
 /// Runs one trial through a caller-supplied engine and records it.
