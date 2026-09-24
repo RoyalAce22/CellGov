@@ -598,6 +598,16 @@ impl KeyVault {
         missing
     }
 
+    /// Whether the vault holds any value a decrypt path could use: a
+    /// scalar slot, an SCE package key, or a SELF keyset of any class.
+    /// Preserved material alone does not count.
+    #[must_use]
+    pub fn holds_any_key(&self) -> bool {
+        !self.scalars.is_empty()
+            || !self.scepkg.is_empty()
+            || SelfClass::ALL.iter().any(|c| self.keyset_count(*c) > 0)
+    }
+
     /// One-line count summary.
     #[must_use]
     pub fn summary(&self) -> String {

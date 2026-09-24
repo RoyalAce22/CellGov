@@ -21,20 +21,19 @@ mod registry;
 use std::path::PathBuf;
 
 use cellgov_install::param_sfo;
-use cellgov_install::store::{Artifact, InstallRecord, StoreLayout, TitleId, DEFAULT_VFS_ROOT};
+use cellgov_install::store::{
+    installed_param_sfo as record_param_sfo, Artifact, InstallRecord, StoreLayout, TitleId,
+    DEFAULT_VFS_ROOT,
+};
 use cellgov_install::system_ver::firmware_version_key;
-use cellgov_ps3_abi::format::param_sfo::{PARAM_SFO_FILE, PS3_SYSTEM_VER_KEY};
-use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
+use cellgov_ps3_abi::format::param_sfo::PS3_SYSTEM_VER_KEY;
 use registry::{titles, workspace_root};
-
-/// The `distribution` a disc install records; its PARAM.SFO sits under
-/// `PS3_GAME/`.
-const DISC_DISTRIBUTION: &str = "disc-iso";
 
 /// The installed base tree's PARAM.SFO, or `None` when the title has no
 /// base record under the default store.
 fn installed_param_sfo(content_id: &str) -> Option<PathBuf> {
-    let layout = StoreLayout::new(workspace_root().join(DEFAULT_VFS_ROOT));
+    let store_root = workspace_root().join(DEFAULT_VFS_ROOT);
+    let layout = StoreLayout::new(&store_root);
     let title_id = TitleId::new(content_id)
         .unwrap_or_else(|e| panic!("{content_id}: the registry key is not a store key: {e}"));
     let record_path = layout.record_path(&Artifact::TitleBase { title_id });
@@ -49,12 +48,7 @@ fn installed_param_sfo(content_id: &str) -> Option<PathBuf> {
         .title
         .as_ref()
         .unwrap_or_else(|| panic!("{}: a base record names its title", record_path.display()));
-    let tree = layout.resolve_store_path(&record.artifact.store_path);
-    Some(if title.distribution == DISC_DISTRIBUTION {
-        tree.join(DISC_GAME_DIR).join(PARAM_SFO_FILE)
-    } else {
-        tree.join(PARAM_SFO_FILE)
-    })
+    Some(record_param_sfo(&store_root, &record, title))
 }
 
 #[test]

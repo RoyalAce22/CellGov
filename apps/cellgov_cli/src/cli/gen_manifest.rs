@@ -18,16 +18,12 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_install::manifest::{sha256_of, Sha256};
-use cellgov_install::param_sfo;
 use cellgov_install::store::{
-    preflight, record_rel_path, Artifact, ArtifactKind, InstallRecord, StoreLayout, TitleId,
-    TitleRecord, TitleTree, VersionKey, DISC_DISTRIBUTION,
+    base_system_ver, preflight, record_rel_path, Artifact, ArtifactKind, FloorReadError,
+    InstallRecord, StoreLayout, TitleId, TitleRecord, VersionKey, DISC_DISTRIBUTION,
 };
-use cellgov_install::system_ver::firmware_version_key;
 use cellgov_ps3_abi::format::dev_flash::{FLASH_MOUNT, VSH_MODULE_DIR, VSH_SELF};
-use cellgov_ps3_abi::format::param_sfo::{PARAM_SFO_FILE, PS3_SYSTEM_VER_KEY};
-use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
+use cellgov_ps3_abi::format::param_sfo::PS3_SYSTEM_VER_KEY;
 
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::keys::install_root_of;
@@ -248,9 +244,8 @@ impl Generated {
                 record.artifact.kind.as_str()
             ))),
             (ArtifactKind::TitleBase, Some(title)) => {
-                let sfo = param_sfo_path(&store_root()?, record, title);
-                let recorded = record.files.get(&param_sfo_rel(title));
-                let system_ver = read_system_ver(&sfo, recorded, record_path)?;
+                let system_ver = base_system_ver(&store_root()?, record, title)
+                    .map_err(|error| CommandError::failed(floor_refusal(&error, record_path)))?;
                 Ok(Self::Title(TitleFields::from_record(
                     record, title, system_ver,
                 )))
@@ -298,73 +293,42 @@ impl Generated {
     }
 }
 
-/// The PARAM.SFO's path inside the installed base tree, spelled the way
-/// the record's `[files]` keys it.
+/// The refusal for a base whose installed tree states no `system_ver`
+/// the stub can carry.
 ///
-/// A disc tree holds it under `PS3_GAME/`; an HDD tree holds it at the
-/// root.
-fn param_sfo_rel(title: &TitleRecord) -> String {
-    match title.tree() {
-        TitleTree::Disc => format!("{DISC_GAME_DIR}/{PARAM_SFO_FILE}"),
-        TitleTree::Game => PARAM_SFO_FILE.to_string(),
-    }
-}
-
-/// The PARAM.SFO the installed base tree carries, resolved from the
-/// record's `store_path` under `store_root`.
-fn param_sfo_path(store_root: &Path, record: &InstallRecord, title: &TitleRecord) -> PathBuf {
-    let mut path = StoreLayout::new(store_root).resolve_store_path(&record.artifact.store_path);
-    path.extend(param_sfo_rel(title).split('/'));
-    path
-}
-
-/// The `system_ver` the stub carries: the tree's `PS3_SYSTEM_VER` as a
-/// firmware version key.
-///
-/// The record does not carry the floor, so a tree that cannot answer
-/// refuses the generation by name. `recorded` is the digest the record
-/// holds for this table, when its `[files]` lists one.
-fn read_system_ver(
-    sfo: &Path,
-    recorded: Option<&Sha256>,
-    record_path: &Path,
-) -> Result<String, CommandError> {
-    let bytes = std::fs::read(sfo).map_err(|error| {
-        CommandError::failed(format!(
-            "read {}: {e}; the stub's system_ver is the PS3_SYSTEM_VER this table states, so \
+/// The floor is read from the tree's own table, so a tree that cannot
+/// answer refuses the generation by name.
+fn floor_refusal(error: &FloorReadError, record_path: &Path) -> String {
+    match error {
+        FloorReadError::Read { sfo, source } => format!(
+            "read {}: {source}; the stub's system_ver is the PS3_SYSTEM_VER this table states, so \
              the installed tree must be present under the store root (--vfs-root names it)",
             sfo.display(),
-            e = error,
-        ))
-    })?;
-    // The record digests every file it installed, and the uninstall
-    // gate holds the tree to those digests. A table that hashes
-    // differently belongs to some other install of this title id, so
-    // its floor is not this record's.
-    if let Some(recorded) = recorded {
-        let found = Sha256(sha256_of(&bytes));
-        if found.0 != recorded.0 {
-            return Err(CommandError::failed(format!(
-                "{}: SHA-256 {} is not the {} that {} recorded for it; the tree under the \
-                 store root is not the one the record describes, so its {PS3_SYSTEM_VER_KEY} \
-                 is not this record's floor (--vfs-root names the store root)",
-                sfo.display(),
-                found.to_hex(),
-                recorded.to_hex(),
-                record_path.display()
-            )));
-        }
-    }
-    let table = param_sfo::parse(&bytes)
-        .map_err(|error| CommandError::failed(format!("{}: {error}", sfo.display())))?;
-    let raw = table.get_string(PS3_SYSTEM_VER_KEY).ok_or_else(|| {
-        CommandError::failed(format!(
+        ),
+        // The record digests every file it installed, and the uninstall
+        // gate holds the tree to those digests. A table that hashes
+        // differently belongs to some other install of this title id, so
+        // its floor is not this record's.
+        FloorReadError::DigestMismatch {
+            sfo,
+            found,
+            recorded,
+        } => format!(
+            "{}: SHA-256 {} is not the {} that {} recorded for it; the tree under the \
+             store root is not the one the record describes, so its {PS3_SYSTEM_VER_KEY} \
+             is not this record's floor (--vfs-root names the store root)",
+            sfo.display(),
+            found.to_hex(),
+            recorded.to_hex(),
+            record_path.display()
+        ),
+        FloorReadError::Parse { sfo, source } => format!("{}: {source}", sfo.display()),
+        FloorReadError::NoSystemVer { sfo } => format!(
             "{}: no {PS3_SYSTEM_VER_KEY} string; the stub's system_ver has nothing to derive from",
             sfo.display()
-        ))
-    })?;
-    firmware_version_key(raw)
-        .map_err(|error| CommandError::failed(format!("{}: {error}", sfo.display())))
+        ),
+        FloorReadError::Shape { sfo, source } => format!("{}: {source}", sfo.display()),
+    }
 }
 
 /// The PARAM.SFO / install-derived fields of a title manifest.
@@ -374,7 +338,8 @@ struct TitleFields {
     distribution: String,
     eboot_candidate: String,
     rap_filename: Option<String>,
-    /// The floor as a firmware version key; see [`read_system_ver`].
+    /// The floor as a firmware version key, from
+    /// [`cellgov_install::store::base_system_ver`].
     system_ver: String,
 }
 

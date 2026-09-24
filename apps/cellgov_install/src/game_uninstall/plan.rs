@@ -97,7 +97,8 @@ impl UninstallPlan {
 /// - [`GameUninstallError::NoRecord`] when the title has no base and
 ///   the scope needs one. [`UninstallScope::Updates`] over an id that
 ///   names no entry at all refuses here rather than reading as a
-///   removal.
+///   removal: its plan is empty only for a title whose base record
+///   passes the same gates a removal of the base would.
 /// - [`GameUninstallError::NoUpdateRecord`] for an update version that
 ///   is not installed.
 /// - [`GameUninstallError::UpdatesInstalled`] when
@@ -140,7 +141,13 @@ pub fn plan(
         }
         UninstallScope::Updates => {
             if installed.is_empty() {
-                require_base_record(&layout, &key, title_id)?;
+                // With no update to take, the plan is empty only for a
+                // title whose base is installed: the base record is read
+                // and gated as a removal of it would be, and kept.
+                let base = Artifact::TitleBase {
+                    title_id: key.clone(),
+                };
+                planned_entry(title_id, &layout, &base, EntryVersion::Base)?;
             }
             (installed.clone(), false)
         }
@@ -193,29 +200,6 @@ pub fn plan(
         kept_updates,
         layout,
     })
-}
-
-/// Refuse an id that names no store entry at all.
-///
-/// A title with a base and no update has nothing for
-/// [`UninstallScope::Updates`] to take. An id that names no record is a
-/// miss, which every other scope also refuses by name.
-fn require_base_record(
-    layout: &StoreLayout,
-    key: &TitleId,
-    title_id: &str,
-) -> Result<(), GameUninstallError> {
-    let path = layout.record_path(&Artifact::TitleBase {
-        title_id: key.clone(),
-    });
-    let found = std::fs::metadata(&path);
-    match found {
-        Ok(_) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(GameUninstallError::NoRecord {
-            title_id: title_id.to_string(),
-        }),
-        Err(source) => Err(GameUninstallError::RecordRead { path, source }),
-    }
 }
 
 /// Load and gate one entry's record.

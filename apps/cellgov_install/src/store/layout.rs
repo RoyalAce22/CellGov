@@ -20,6 +20,8 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use cellgov_ps3_abi::format::hdd0::{EXDATA_DIR, HDD0_MOUNT, HOME_DIR, USER_DIR};
+use cellgov_ps3_abi::format::param_sfo::PARAM_SFO_FILE;
+use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
 use serde::{Deserialize, Serialize};
 
 /// Where the installers write, and where a reader looks for the
@@ -327,6 +329,32 @@ impl TitleTree {
             Self::Disc => "disc",
             Self::Game => "game",
         }
+    }
+
+    /// Where this tree keeps its PARAM.SFO, as path components below
+    /// the tree root: under `PS3_GAME/` on a disc, at the root of an
+    /// HDD tree.
+    #[must_use]
+    pub fn param_sfo_components(self) -> &'static [&'static str] {
+        match self {
+            Self::Disc => &[DISC_GAME_DIR, PARAM_SFO_FILE],
+            Self::Game => &[PARAM_SFO_FILE],
+        }
+    }
+
+    /// The PARAM.SFO's path below the tree root, `/`-separated, as an
+    /// install record's `[files]` keys it.
+    #[must_use]
+    pub fn param_sfo_rel(self) -> String {
+        self.param_sfo_components().join("/")
+    }
+
+    /// The PARAM.SFO inside the tree rooted at `tree_dir`.
+    #[must_use]
+    pub fn param_sfo_in(self, tree_dir: &Path) -> PathBuf {
+        let mut path = tree_dir.to_path_buf();
+        path.extend(self.param_sfo_components());
+        path
     }
 }
 

@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use cellgov_install::keys::{KeyImportError, KeyRemoveError};
+
 /// Why a store command's own resolution failed, before it reaches the
 /// library it drives.
 #[derive(Debug, thiserror::Error)]
@@ -67,4 +69,23 @@ pub(crate) enum StoreCliError {
     #[cfg(not(feature = "decrypt"))]
     #[error("`{command}` decrypts, and this cellgov was built without the `decrypt` cargo feature; rebuild with `cargo build -p cellgov_cli --features decrypt`")]
     DecryptFeatureDisabled { command: String },
+}
+
+impl From<KeyImportError> for StoreCliError {
+    fn from(error: KeyImportError) -> Self {
+        match error {
+            KeyImportError::Vault(error) => Self::Keys(error),
+            KeyImportError::NothingUsable { path } => Self::KeysNothingUsable { path },
+            KeyImportError::DirCreate { path, source } => {
+                Self::KeysDirCreateFailed { path, source }
+            }
+            KeyImportError::Write { path, source } => Self::KeysWriteFailed { path, source },
+        }
+    }
+}
+
+impl From<KeyRemoveError> for StoreCliError {
+    fn from(KeyRemoveError { path, source }: KeyRemoveError) -> Self {
+        Self::KeysRemoveFailed { path, source }
+    }
 }

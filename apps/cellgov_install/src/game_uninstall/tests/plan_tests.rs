@@ -184,6 +184,26 @@ fn the_updates_scope_over_an_id_that_names_no_entry_is_a_miss() {
     );
 }
 
+#[test]
+fn the_updates_scope_over_a_title_whose_base_record_names_another_tree_is_refused() {
+    let root = store_with(&[]);
+    let layout = StoreLayout::new(&*root);
+    write(
+        &layout.record_path(&Artifact::TitleBase {
+            title_id: TitleId::new(SYNTHETIC_TITLE_ID).expect("synthetic title id"),
+        }),
+        &record(ArtifactKind::TitleBase, "01.00", "dev_hdd0/game", &[])
+            .to_toml()
+            .expect("serialize"),
+    );
+    let err = plan(SYNTHETIC_TITLE_ID, &root, &UninstallScope::Updates)
+        .expect_err("the base record is not this title's");
+    assert!(
+        matches!(&err, GameUninstallError::RecordTreeForeign { store_path, .. } if store_path == "dev_hdd0/game"),
+        "got {err}"
+    );
+}
+
 /// The `store_path` aims the tombstone rename and the `remove_dir_all`.
 #[test]
 fn an_update_record_naming_another_versions_tree_is_refused() {

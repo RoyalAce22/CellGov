@@ -1,8 +1,10 @@
 //! `cellgov keys show | import | remove`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use cellgov_install::keys::{installed_keys_dir, KeyVault, SelfClass, Slot, INSTALLED_KEYS_FILE};
+use cellgov_install::keys::{
+    import_into, installed_keys_dir, remove_installed, KeyVault, SelfClass, Slot,
+};
 
 use crate::cli::parse::{KeysCommand, KeysPathArgs};
 
@@ -45,18 +47,15 @@ fn show(path: Option<&Path>, store: &Path) -> Result<CommandExitCode, CommandErr
 }
 
 fn import(args: &KeysPathArgs, store: &Path) -> Result<(), CommandError> {
-    let file = installed_keys_dir(store).join(INSTALLED_KEYS_FILE);
-    // This check runs before the import writes: "merged" is true only
-    // when a vault was already there to merge into.
-    let merged = !args.replace && file.is_file();
-    let vault = merge_into_installed(&args.path, store, args.replace)
-        .map_err(|error| CommandError::failed(error.to_string()))?;
+    let outcome = import_into(&args.path, store, args.replace)
+        .map_err(|error| CommandError::failed(StoreCliError::from(error).to_string()))?;
     println!(
         "cellgov: {} {} into {}",
-        if merged { "merged" } else { "wrote" },
+        if outcome.merged { "merged" } else { "wrote" },
         args.path.display(),
-        file.display()
+        outcome.file.display()
     );
+    let vault = &outcome.vault;
     println!("  {}", vault.summary());
     for ignored in vault.ignored() {
         println!("  set aside {}: {}", ignored.at, ignored.reason);
@@ -75,7 +74,7 @@ fn remove(store: &Path) -> Result<(), CommandError> {
     match remove_installed(store) {
         Ok(true) => println!("cellgov: removed {}", dir.display()),
         Ok(false) => println!("cellgov: nothing installed at {}", dir.display()),
-        Err(error) => return Err(CommandError::failed(error.to_string())),
+        Err(error) => return Err(CommandError::failed(StoreCliError::from(error).to_string())),
     }
     Ok(())
 }
@@ -121,75 +120,6 @@ fn render_inventory(location: &Path, vault: &KeyVault) -> String {
     let mut out = lines.join("\n");
     out.push('\n');
     out
-}
-
-/// Whether `vault` holds any value a decrypt path could use.
-fn holds_any_key(vault: &KeyVault) -> bool {
-    Slot::ALL
-        .iter()
-        .any(|s| vault.slot_provenance(*s).is_some())
-        || vault.scepkg_keys().is_ok()
-        || SelfClass::ALL.iter().any(|c| vault.keyset_count(*c) > 0)
-}
-
-/// Normalize the vault at `path` into `<store>/.cellgov/keys/keys.toml`.
-///
-/// Without `replace`, the import merges into the vault already there.
-///
-/// # Errors
-///
-/// - [`StoreCliError::Keys`] for a vault that will not load, or for a
-///   merge whose two definitions of one key disagree. The refusal names
-///   both definitions.
-/// - [`StoreCliError::KeysNothingUsable`] when `path` held no key.
-/// - [`StoreCliError::KeysDirCreateFailed`] and
-///   [`StoreCliError::KeysWriteFailed`] for the write refusals.
-fn merge_into_installed(
-    path: &Path,
-    store: &Path,
-    replace: bool,
-) -> Result<KeyVault, StoreCliError> {
-    let imported = KeyVault::load_from_path(path)?;
-    if !holds_any_key(&imported) {
-        return Err(StoreCliError::KeysNothingUsable {
-            path: path.to_path_buf(),
-        });
-    }
-    let dir = installed_keys_dir(store);
-    let file = dir.join(INSTALLED_KEYS_FILE);
-    let vault = if !replace && file.is_file() {
-        let mut existing = KeyVault::load_from_path(&file)?;
-        existing.merge(imported)?;
-        existing
-    } else {
-        imported
-    };
-    std::fs::create_dir_all(&dir).map_err(|source| StoreCliError::KeysDirCreateFailed {
-        path: dir.clone(),
-        source,
-    })?;
-    std::fs::write(&file, vault.to_toml()).map_err(|source| StoreCliError::KeysWriteFailed {
-        path: file.clone(),
-        source,
-    })?;
-    Ok(vault)
-}
-
-/// Delete `<store>/.cellgov/keys/`.
-///
-/// Returns `Ok(false)` when there was nothing to delete.
-///
-/// # Errors
-///
-/// [`StoreCliError::KeysRemoveFailed`] for any refusal other than
-/// absence.
-fn remove_installed(store: &Path) -> Result<bool, StoreCliError> {
-    let dir: PathBuf = installed_keys_dir(store);
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => Ok(true),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(StoreCliError::KeysRemoveFailed { path: dir, source }),
-    }
 }
 
 #[cfg(test)]

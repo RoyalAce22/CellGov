@@ -13,8 +13,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
-use cellgov_ps3_abi::format::param_sfo::PARAM_SFO_FILE;
-use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
 
 use crate::store::layout::{
     base_record_file, firmware_record_file, firmware_record_version, update_record_file,
@@ -217,10 +215,7 @@ impl BaseEntry {
     /// The PARAM.SFO the version was read from.
     #[must_use]
     pub fn param_sfo_path(&self) -> PathBuf {
-        match self.tree {
-            TitleTree::Disc => self.dir.join(DISC_GAME_DIR).join(PARAM_SFO_FILE),
-            TitleTree::Game => self.dir.join(PARAM_SFO_FILE),
-        }
+        self.tree.param_sfo_in(&self.dir)
     }
 }
 
@@ -246,7 +241,7 @@ impl UpdateEntry {
     /// The PARAM.SFO the version key was read from.
     #[must_use]
     pub fn param_sfo_path(&self) -> PathBuf {
-        self.dir.join(PARAM_SFO_FILE)
+        TitleTree::Game.param_sfo_in(&self.dir)
     }
 }
 

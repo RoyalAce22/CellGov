@@ -5,8 +5,9 @@
 //! The vault is located by [`KeyVault::load`]: the `CELLGOV_KEYS`
 //! environment variable names a file or directory used in place, and
 //! without it the keys `cellgov keys import` normalized into
-//! `<vfs>/.cellgov/keys/keys.toml` are read. Parsing lives in every
-//! build; only the `decrypt` feature reads the values.
+//! `<vfs>/.cellgov/keys/keys.toml` are read. [`import_into`] writes
+//! that file and [`remove_installed`] deletes it. Parsing lives in
+//! every build; only the `decrypt` feature reads the values.
 //!
 //! Accepted forms, by file:
 //!
@@ -33,6 +34,7 @@
 
 mod error;
 mod hex;
+mod installed;
 mod loader;
 mod lv2_version;
 mod names;
@@ -42,6 +44,7 @@ mod vault;
 
 pub use error::{HexError, KeyVaultError};
 pub use hex::decode_hex;
+pub use installed::{import_into, remove_installed, ImportOutcome, KeyImportError, KeyRemoveError};
 pub use lv2_version::{version_label, Lv2Versions};
 pub use types::{CryptoMaterial, IgnoreReason, Ignored, Provenance, SelfClass, SelfKey, Slot};
 pub use vault::{installed_keys_dir, KeyVault, ENV_KEYS, INSTALLED_KEYS_FILE};

@@ -152,35 +152,47 @@ fn the_stub_writes_the_floor_and_no_matrix_block() {
 }
 
 #[test]
-fn a_disc_trees_param_sfo_sits_under_ps3_game_and_an_hdd_trees_at_its_root() {
-    let root = Path::new("store");
-    let disc = disc_record();
-    assert_eq!(
-        param_sfo_path(root, &disc, title_of(&disc)),
-        root.join("dev_bdvd")
-            .join(DISC_TITLE_ID)
-            .join("PS3_GAME")
-            .join("PARAM.SFO")
+fn each_floor_refusal_names_the_table_and_what_it_lacks() {
+    let sfo = PathBuf::from("store").join("PARAM.SFO");
+    let record = Path::new("installs/base.install.toml");
+    let read = floor_refusal(
+        &FloorReadError::Read {
+            sfo: sfo.clone(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "gone"),
+        },
+        record,
     );
-    let hdd = hdd_record();
-    assert_eq!(
-        param_sfo_path(root, &hdd, title_of(&hdd)),
-        root.join("dev_hdd0")
-            .join("game")
-            .join(HDD_TITLE_ID)
-            .join("PARAM.SFO")
-    );
-}
-
-#[test]
-fn the_recorded_digest_key_of_the_param_sfo_follows_its_place_in_the_tree() {
-    let disc = disc_record();
-    assert_eq!(param_sfo_rel(title_of(&disc)), "PS3_GAME/PARAM.SFO");
-    let hdd = hdd_record();
-    assert_eq!(param_sfo_rel(title_of(&hdd)), "PARAM.SFO");
     assert!(
-        hdd.files.contains_key(&param_sfo_rel(title_of(&hdd))),
-        "the fixture records the digest under the key the check looks up"
+        read.starts_with(&format!("read {}: gone; ", sfo.display())),
+        "{read}"
+    );
+    assert!(read.ends_with("(--vfs-root names it)"), "{read}");
+
+    let digest = floor_refusal(
+        &FloorReadError::DigestMismatch {
+            sfo: sfo.clone(),
+            found: Sha256([1u8; 32]),
+            recorded: Sha256([2u8; 32]),
+        },
+        record,
+    );
+    assert!(
+        digest.contains(&format!(
+            "SHA-256 {} is not the {} that {} recorded for it",
+            Sha256([1u8; 32]).to_hex(),
+            Sha256([2u8; 32]).to_hex(),
+            record.display()
+        )),
+        "{digest}"
+    );
+
+    let none = floor_refusal(&FloorReadError::NoSystemVer { sfo: sfo.clone() }, record);
+    assert_eq!(
+        none,
+        format!(
+            "{}: no PS3_SYSTEM_VER string; the stub's system_ver has nothing to derive from",
+            sfo.display()
+        )
     );
 }
 

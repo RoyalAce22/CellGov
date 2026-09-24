@@ -5,7 +5,6 @@
 
 use std::path::Path;
 
-use cellgov_install::game_uninstall::UninstallScope;
 use cellgov_install::{firmware_uninstall, game_uninstall};
 
 use crate::cli::exit::{CommandError, CommandExitCode};
@@ -26,12 +25,9 @@ pub(crate) fn title(
         .map_err(|error| CommandError::failed(format!("uninstall failed: {error}")))?;
 
     if plan.entries.is_empty() {
-        // An empty plan means `--updates` found no update; every other
-        // scope names an entry or refuses. Re-plan at Base scope to
-        // tell that from a title with no record at all.
-        if let Err(e) = game_uninstall::plan(&args.title_id, store, &UninstallScope::Base) {
-            return Err(CommandError::failed(format!("uninstall failed: {e}")));
-        }
+        // An empty plan means `--updates` found no update on a title
+        // whose base is installed; the plan refuses a title with no
+        // record at all.
         println!(
             "cellgov: title {} has no entry this scope names; nothing to remove",
             plan.title_id

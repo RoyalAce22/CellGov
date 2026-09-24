@@ -356,6 +356,13 @@ impl TitleRecord {
             TitleTree::Game
         }
     }
+
+    /// The PARAM.SFO's path inside the installed base tree, as the
+    /// record's `[files]` keys it.
+    #[must_use]
+    pub fn param_sfo_rel(&self) -> String {
+        self.tree().param_sfo_rel()
+    }
 }
 
 /// A store entry's record: enough to verify a reinstall reproduces the
