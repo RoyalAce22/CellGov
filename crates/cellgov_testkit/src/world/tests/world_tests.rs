@@ -1,7 +1,13 @@
 //! Synthetic world units -- counting, writing, mailbox, and signal -- and the effects each emits per step.
 
 use super::*;
+use cellgov_effects::Effect;
+use cellgov_event::UnitId;
+use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::GuestMemory;
+use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_sync::{MailboxId, SignalId};
+use cellgov_time::Budget;
 
 #[test]
 fn counting_unit_finishes_after_max_steps() {
