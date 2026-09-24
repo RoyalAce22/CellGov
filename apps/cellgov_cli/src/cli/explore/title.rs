@@ -7,7 +7,6 @@
 //! a title-scale exploration costs one composition rather than one per
 //! schedule.
 
-use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -20,10 +19,12 @@ use cellgov_boot::step_loop::rsx_checkpoint_addr;
 use cellgov_boot::BootSink;
 use cellgov_compare::BootOverrides;
 use cellgov_core::Runtime;
-use cellgov_explore::{ExplorationConfig, ExplorationResult, OutcomeClass, StopClass, StopReason};
-use cellgov_testkit::fixtures::ScenarioFixture;
+use cellgov_explore::{
+    open_window, ExplorationConfig, ExplorationResult, OutcomeClass, StopClass, StopReason,
+    WindowStart,
+};
 
-use super::window::{open_window, start_past_cap, WindowStart};
+use super::window::{never_opened, start_past_cap};
 use crate::cli::boot_cmd::{firmware_module_dir, resolve_boot_inputs, ResolvedPlan};
 use crate::cli::compare::report_first_invariant_break;
 use crate::cli::exit::{CommandError, CommandExitCode};
@@ -103,12 +104,12 @@ pub(super) fn run(
         return Err(CommandError::status(exit_codes::USAGE, refusal));
     }
 
-    let opened_at = match open_window(&mut rt, start, checkpoint) {
+    let opened_at = match open_window(&mut rt, start) {
         Ok(step) => step,
         Err(error) => {
             return Err(CommandError::status(
                 EXIT_WINDOW_NEVER_OPENED,
-                error.to_string(),
+                never_opened(&error, checkpoint),
             ))
         }
     };
@@ -117,22 +118,7 @@ pub(super) fn run(
         max_schedules: args.max_schedules,
         max_steps_per_run: args.max_steps_per_run,
     };
-    let mut seed = Some(rt);
-    let reused = Cell::new(false);
-    let result = cellgov_explore::explore_window(
-        || {
-            seed.take().unwrap_or_else(|| {
-                reused.set(true);
-                ScenarioFixture::empty().build_runtime()
-            })
-        },
-        &config,
-    );
-    if reused.get() {
-        return Err(CommandError::failed(
-            "explore title: runtime factory was invoked more than once",
-        ));
-    }
+    let result = cellgov_explore::explore_window(move || rt, &config);
 
     report_first_invariant_break(result.first_invariant_break.as_deref());
     let window = Window {
@@ -275,9 +261,7 @@ impl Window {
         result: &ExplorationResult,
         mut names: impl FnMut(StopReason) -> bool,
     ) -> usize {
-        let baseline = usize::from(names(result.baseline_stop));
-        let alternates = result.schedules.iter().filter(|s| names(s.stop)).count();
-        baseline.saturating_add(alternates)
+        result.stops().filter(|stop| names(*stop)).count()
     }
 }
 

@@ -21,9 +21,16 @@ use crate::world::{
     CountingUnit, DmaSubmitter, MailboxProducer, MailboxResponder, MailboxSender, PollingUnit,
     SignalEmitter, WritingUnit,
 };
-use cellgov_core::Runtime;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use cellgov_core::{Runtime, SpuFactory};
 use cellgov_exec::{FakeIsaUnit, FakeOp};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_ppu::state::PpuState;
+use cellgov_ppu::PpuExecutionUnit;
+use cellgov_ps3_abi::codegen::trampoline::encode_li_sc;
+use cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT;
 use cellgov_time::Budget;
 
 /// One-shot callback populating a fresh runtime with units, mailboxes,
@@ -360,6 +367,79 @@ pub fn fake_isa_scenario() -> ScenarioFixture {
                         FakeOp::End,
                     ],
                 )
+            });
+        })
+        .build()
+}
+
+/// `li r11, sys_process_exit; sc`, placed at guest address 0: a
+/// microtest's `main` returns to LR 0, so returning exits the process.
+fn process_exit_stub() -> [u8; 8] {
+    encode_li_sc(PROCESS_EXIT as u16)
+}
+
+/// An LV2-driven microtest: a PPU ELF that creates its SPU threads
+/// through syscalls.
+///
+/// The PPU image loads into a 256 MiB-plus-128 KiB memory with its
+/// stack pointer 4 KiB below the top and LR 0, where a
+/// `li r11, sys_process_exit; sc` stub sits. The fixture registers
+/// `spu_elf` under `/app_home/spu_main.elf` for the PPU to load, and
+/// `spu_factory` materializes each SPU thread the guest creates.
+///
+/// A PPU image that does not load registers no unit, so the runtime
+/// this fixture builds has an empty registry; the caller checks it. A
+/// debug build names the loader's refusal first.
+pub fn lv2_driven_scenario(
+    ppu_elf: Vec<u8>,
+    spu_elf: Vec<u8>,
+    budget: Budget,
+    max_steps: usize,
+    spu_factory: SpuFactory,
+) -> ScenarioFixture {
+    const MEM_SIZE: usize = 0x1002_0000;
+    const STACK_GAP: u64 = 0x1000;
+    let primed: Rc<RefCell<Option<PpuState>>> = Rc::new(RefCell::new(None));
+    let primed_seed = Rc::clone(&primed);
+
+    ScenarioFixture::builder()
+        .memory_size(MEM_SIZE)
+        .budget(budget)
+        .max_steps(max_steps)
+        .seed_memory(move |mem| {
+            let stub = process_exit_stub();
+            // A refusal here cannot leave the callback, so it names its
+            // cause in a debug build; the empty registry it leaves is
+            // what a release caller checks.
+            let Some(stub_range) = ByteRange::new(GuestAddr::new(0), stub.len() as u64) else {
+                debug_assert!(false, "the exit stub's range does not fit guest memory");
+                return;
+            };
+            if let Err(error) = mem.apply_commit(stub_range, &stub) {
+                debug_assert!(false, "the exit stub could not be placed: {error}");
+                return;
+            }
+            let mut state = PpuState::new();
+            if let Err(error) = cellgov_ppu::loader::load_ppu_elf(&ppu_elf, mem, &mut state) {
+                debug_assert!(false, "the microtest PPU ELF failed to load: {error}");
+                return;
+            }
+            state.set_gpr(1, (MEM_SIZE as u64) - STACK_GAP);
+            state.set_lr(0);
+            *primed_seed.borrow_mut() = Some(state);
+        })
+        .register(move |rt: &mut Runtime| {
+            rt.lv2_host_mut()
+                .content_store_mut()
+                .register(b"/app_home/spu_main.elf", spu_elf);
+            rt.set_spu_factory(spu_factory);
+            let Some(ppu_state) = primed.borrow_mut().take() else {
+                return;
+            };
+            rt.register_unit_with(|id| {
+                let mut unit = PpuExecutionUnit::new(id);
+                *unit.state_mut() = ppu_state;
+                unit
             });
         })
         .build()

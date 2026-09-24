@@ -19,6 +19,7 @@ pub use entry::EntryError;
 pub use finish::PatchError;
 pub use host::HostBindError;
 pub use image::{ImageError, HLE_HEAP_BASE};
+pub use loaders::spu_unit;
 pub use params::ParamsError;
 pub use providers::ProviderError;
 pub use stages::prepare;

@@ -505,63 +505,27 @@ fn build_lv2_driven_fixture(
     max_steps: usize,
 ) -> cellgov_testkit::fixtures::ScenarioFixture {
     use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
-    use cellgov_testkit::fixtures::ScenarioFixture;
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
-    let mem_size = 0x1002_0000usize;
-    let stack_top = (mem_size as u64) - 0x1000;
-    let primed: Rc<RefCell<Option<state::PpuState>>> = Rc::new(RefCell::new(None));
-    let primed_seed = Rc::clone(&primed);
-    let primed_reg = Rc::clone(&primed);
-
-    ScenarioFixture::builder()
-        .memory_size(mem_size)
-        .budget(budget)
-        .max_steps(max_steps)
-        .seed_memory(move |mem| {
-            let li_r11_22: u32 = (14 << 26) | (11 << 21) | 22;
-            let sc: u32 = 0x4400_0002;
-            let stub_range = ByteRange::new(GuestAddr::new(0), 8).unwrap();
-            let mut stub_bytes = Vec::with_capacity(8);
-            stub_bytes.extend_from_slice(&li_r11_22.to_be_bytes());
-            stub_bytes.extend_from_slice(&sc.to_be_bytes());
-            mem.apply_commit(stub_range, &stub_bytes).unwrap();
-
-            let mut state = state::PpuState::new();
-            crate::loader::load_ppu_elf(&ppu_elf, mem, &mut state).unwrap();
-            state.set_gpr(1, stack_top);
-            state.set_lr(0);
-            *primed_seed.borrow_mut() = Some(state);
-        })
-        .register(move |rt| {
-            rt.lv2_host_mut()
-                .content_store_mut()
-                .register(b"/app_home/spu_main.elf", spu_elf.clone());
-
-            rt.set_spu_factory(move |id, init| {
-                let mut unit = SpuExecutionUnit::new(id);
-                let cellgov_lv2::SpuLoadImage::Elf(bytes) = &init.image else {
-                    panic!("path-registered image loads as an ELF");
-                };
-                spu_loader::load_spu_elf(bytes, unit.state_mut()).unwrap();
-                unit.state_mut().pc = init.entry_pc;
-                unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
-                unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
-                unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
-                unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
-                unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
-                Ok(Box::new(unit))
-            });
-
-            let ppu_state = primed_reg.borrow_mut().take().unwrap();
-            rt.register_unit_with(|id| {
-                let mut unit = PpuExecutionUnit::new(id);
-                *unit.state_mut() = ppu_state;
-                unit
-            });
-        })
-        .build()
+    cellgov_testkit::fixtures::lv2_driven_scenario(
+        ppu_elf,
+        spu_elf,
+        budget,
+        max_steps,
+        Box::new(|id, init| {
+            let mut unit = SpuExecutionUnit::new(id);
+            let cellgov_lv2::SpuLoadImage::Elf(bytes) = &init.image else {
+                panic!("path-registered image loads as an ELF");
+            };
+            spu_loader::load_spu_elf(bytes, unit.state_mut()).unwrap();
+            unit.state_mut().pc = init.entry_pc;
+            unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
+            unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
+            unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
+            unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
+            unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
+            Ok(Box::new(unit))
+        }),
+    )
 }
 
 #[test]

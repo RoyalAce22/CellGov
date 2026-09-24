@@ -18,13 +18,13 @@ use cellgov_core::Runtime;
 /// The search calls `make_runtime` once, snapshots the runtime it
 /// returns, and restores that snapshot per execution. A driver that
 /// hands over a runtime it already advanced -- a window of a title
-/// boot -- can explore from there.
+/// boot -- can explore from there, handing it over as `move || rt`.
 ///
 /// An execution that stopped short contributes no divergence; see
 /// [`crate::classify::ScheduleRecord::truncated`].
 pub fn explore<F>(make_runtime: F, config: &ExplorationConfig) -> Option<ExplorationResult>
 where
-    F: FnMut() -> Runtime,
+    F: FnOnce() -> Runtime,
 {
     let result = explore_window(make_runtime, config);
     (result.total_branching_points > 0).then_some(result)
@@ -43,7 +43,7 @@ where
 /// - inconclusive when it stopped short or committed no step.
 pub fn explore_window<F>(make_runtime: F, config: &ExplorationConfig) -> ExplorationResult
 where
-    F: FnMut() -> Runtime,
+    F: FnOnce() -> Runtime,
 {
     explore_optimal(make_runtime, config)
 }

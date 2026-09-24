@@ -7,6 +7,43 @@ use cellgov_event::UnitId;
 use cellgov_trace::{TraceReader, TraceRecord};
 use std::collections::BTreeMap;
 
+/// `li r11, 22` is `addi r11, r0, 22`: opcode 14, rD 11, rA 0.
+#[test]
+fn the_exit_stub_loads_sys_process_exit_into_r11_then_traps() {
+    assert_eq!(
+        process_exit_stub(),
+        [0x39, 0x60, 0x00, 0x16, 0x44, 0x00, 0x00, 0x02]
+    );
+}
+
+fn unloadable_lv2_scenario() -> ScenarioFixture {
+    let spu: cellgov_core::SpuFactory = Box::new(|_, _| {
+        Err(cellgov_core::SpuFactoryError::ImageLoad {
+            detail: "unused".to_string(),
+        })
+    });
+    lv2_driven_scenario(b"not an elf".to_vec(), Vec::new(), Budget::new(1), 1, spu)
+}
+
+/// The builder cannot refuse from inside its seed callback, so a debug
+/// build names the loader's refusal there.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "the microtest PPU ELF failed to load")]
+fn an_lv2_driven_scenario_whose_ppu_image_does_not_load_names_the_cause() {
+    let _ = unloadable_lv2_scenario().build_runtime();
+}
+
+/// A release build leaves the registry empty for the caller to check.
+#[cfg(not(debug_assertions))]
+#[test]
+fn an_lv2_driven_scenario_whose_ppu_image_does_not_load_registers_no_unit() {
+    assert!(unloadable_lv2_scenario()
+        .build_runtime()
+        .registry()
+        .is_empty());
+}
+
 #[test]
 fn empty_fixture_has_zero_defaults() {
     let f = ScenarioFixture::empty();

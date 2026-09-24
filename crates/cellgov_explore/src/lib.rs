@@ -28,9 +28,11 @@ pub use execution::{ClockCost, ClockVector, Event, EventId, Execution, HappensBe
 pub use explorer::{explore, explore_window};
 pub use observer::{observe_decisions, observe_decisions_bounded};
 pub use optimal::explore_optimal;
-pub use oracle::{explore_with_regions, MemoryRegionSpec, OracleExplorationResult};
+pub use oracle::{
+    explore_with_regions, MemoryRegionSpec, OracleExplorationResult, OracleRegions, OracleVerdict,
+};
 pub use prescribed::PrescribedScheduler;
-pub use util::{StopClass, StopReason};
+pub use util::{open_window, DrivenStop, StopClass, StopReason, WindowNeverOpened, WindowStart};
 
 #[cfg(test)]
 #[path = "tests/read_intent_tests.rs"]

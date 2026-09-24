@@ -167,6 +167,14 @@ pub struct ExplorationResult {
     pub first_invariant_break: Option<String>,
 }
 
+impl ExplorationResult {
+    /// Every stop the search recorded: the baseline's, then each
+    /// alternate's in [`Self::schedules`] order.
+    pub fn stops(&self) -> impl Iterator<Item = StopReason> + '_ {
+        std::iter::once(self.baseline_stop).chain(self.schedules.iter().map(|s| s.stop))
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/classify_tests.rs"]
 mod tests;

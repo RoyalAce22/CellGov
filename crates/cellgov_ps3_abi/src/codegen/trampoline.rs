@@ -67,6 +67,32 @@ pub const fn encode_lis_ori_sc(syscall_num: u32) -> [u8; 12] {
     ]
 }
 
+/// PPC64 instruction bytes for `li r11, syscall_num; sc 0`: the short
+/// form of [`encode_lis_ori_sc`] for a number that fits `li`'s signed
+/// 16-bit immediate without sign-extending.
+///
+/// Output is 8 bytes big-endian.
+///
+/// # Panics
+///
+/// In debug builds, panics if `syscall_num >= 0x8000`: `li`
+/// sign-extends bit 15 of its immediate into r11.
+#[inline]
+pub const fn encode_li_sc(syscall_num: u16) -> [u8; 8] {
+    debug_assert!(
+        syscall_num < 0x8000,
+        "syscall_num bit 15 set would sign-extend through r11; use encode_lis_ori_sc",
+    );
+    // [PPC-Book1 p:51 s:3.3 Add Immediate] addi primary opcode = 14, D-form; li is `addi Rx,0,value`, and RA=0 reads as the value 0.
+    let li: u32 = (14 << 26) | (11 << 21) | (syscall_num as u32);
+    let sc: u32 = SC_OPCODE | SC_LEV_USER | SC_BIT_30_MANDATORY;
+    let li_b = li.to_be_bytes();
+    let sc_b = sc.to_be_bytes();
+    [
+        li_b[0], li_b[1], li_b[2], li_b[3], sc_b[0], sc_b[1], sc_b[2], sc_b[3],
+    ]
+}
+
 /// PPC `blr` (branch to LR) as 4 bytes big-endian.
 #[inline]
 pub const fn encode_blr() -> [u8; 4] {

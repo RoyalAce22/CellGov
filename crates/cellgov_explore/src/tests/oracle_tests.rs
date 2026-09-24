@@ -135,3 +135,64 @@ fn a_spec_naming_a_space_the_run_never_created_is_unresolved() {
         assert!(snap.regions[0].data.is_empty());
     }
 }
+
+fn captured(name: &str, data: &[u8]) -> CapturedRegion {
+    CapturedRegion {
+        name: name.into(),
+        data: data.to_vec(),
+        resolved: true,
+    }
+}
+
+/// One observation has to carry every captured region; matching each
+/// region against a different observation is not a match.
+#[test]
+fn a_schedule_matches_only_when_one_observation_carries_every_region() {
+    let regions = [captured("a", &[1]), captured("b", &[2])];
+    let whole: OracleRegions<'_> = vec![("a", &[1][..]), ("b", &[2][..])];
+    let only_a: OracleRegions<'_> = vec![("a", &[1][..]), ("b", &[9][..])];
+    let only_b: OracleRegions<'_> = vec![("a", &[9][..]), ("b", &[2][..])];
+    assert!(matches_an_observation(&regions, &[only_a.clone(), whole]));
+    assert!(!matches_an_observation(&regions, &[only_a, only_b]));
+    assert!(
+        !matches_an_observation(&regions, &[vec![("a", &[1][..])]]),
+        "a region the observation does not name is a mismatch"
+    );
+}
+
+/// A race whose two answers the oracle holds one of: some schedule
+/// matches and not every one does.
+#[test]
+fn the_verdict_over_a_race_matches_some_schedules_and_not_all() {
+    let specs = vec![spec("shared", AddressSpaceId::BOOT, 0, 4)];
+    let r = explore_with_regions(
+        || {
+            let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(100), 100);
+            store_unit(&mut rt, 0xAA, 0);
+            store_unit(&mut rt, 0xBB, 0);
+            rt
+        },
+        &ExplorationConfig::default(),
+        &specs,
+    )
+    .expect("two racers must produce a branching point");
+    let observations: Vec<OracleRegions<'_>> = vec![vec![("shared", &[0xAA; 4][..])]];
+    let verdict = r.verdict(&observations);
+    assert_eq!(verdict.alternate_matches.len(), r.alternates.len());
+    assert!(verdict.any_match());
+    assert!(!verdict.all_match());
+}
+
+#[test]
+fn the_verdict_reads_all_and_any_over_the_baseline_and_every_alternate() {
+    let verdict = |baseline_matches, alternate_matches: &[bool]| OracleVerdict {
+        baseline_matches,
+        alternate_matches: alternate_matches.to_vec(),
+    };
+    assert!(verdict(true, &[true, true]).all_match());
+    assert!(!verdict(true, &[true, false]).all_match());
+    assert!(!verdict(false, &[true]).all_match());
+    assert!(verdict(false, &[false, true]).any_match());
+    assert!(verdict(true, &[]).any_match());
+    assert!(!verdict(false, &[false]).any_match());
+}

@@ -25,6 +25,8 @@ cellgov_effects = { path = "../cellgov_effects" }
 cellgov_event = { path = "../cellgov_event" }
 cellgov_exec = { path = "../cellgov_exec" }
 cellgov_mem = { path = "../cellgov_mem" }
+# The PPU loader and unit behind the LV2-driven microtest fixture.
+cellgov_ppu = { path = "../cellgov_ppu" }
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }

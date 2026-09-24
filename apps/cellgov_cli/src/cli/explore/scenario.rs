@@ -1,9 +1,7 @@
 //! Schedule exploration over a testkit scenario or an LV2-driven ELF
 //! microtest.
 
-use std::cell::Cell;
-
-use cellgov_explore::ExplorationConfig;
+use cellgov_explore::{ExplorationConfig, OracleRegions};
 use cellgov_testkit::fixtures::ScenarioFixture;
 
 use crate::cli::compare::{load_observations_from_dir, report_first_invariant_break};
@@ -57,23 +55,8 @@ pub(super) fn run_explore_micro(
             MICROTESTS.join(", ")
         )));
     }
-    let mut seed = Some(build_lv2_runtime(name)?);
-    let reused = Cell::new(false);
-    let config = ExplorationConfig::default();
-    let result = cellgov_explore::explore(
-        || {
-            seed.take().unwrap_or_else(|| {
-                reused.set(true);
-                ScenarioFixture::empty().build_runtime()
-            })
-        },
-        &config,
-    );
-    if reused.get() {
-        return Err(CommandError::failed(
-            "explore micro: runtime factory was invoked more than once",
-        ));
-    }
+    let rt = build_lv2_runtime(name)?;
+    let result = cellgov_explore::explore(move || rt, &ExplorationConfig::default());
     match result {
         Some(r) => {
             report_first_invariant_break(r.first_invariant_break.as_deref());
@@ -140,24 +123,12 @@ pub(super) fn run_explore_micro_oracle(
         })
         .collect();
 
-    let config = ExplorationConfig::default();
-    let mut seed = Some(build_lv2_runtime(name)?);
-    let reused = Cell::new(false);
+    let rt = build_lv2_runtime(name)?;
     let result = cellgov_explore::explore_with_regions(
-        || {
-            seed.take().unwrap_or_else(|| {
-                reused.set(true);
-                ScenarioFixture::empty().build_runtime()
-            })
-        },
-        &config,
+        move || rt,
+        &ExplorationConfig::default(),
         &region_specs,
     );
-    if reused.get() {
-        return Err(CommandError::failed(
-            "explore micro: runtime factory was invoked more than once",
-        ));
-    }
 
     let Some(r) = result else {
         println!("microtest: {name}");
@@ -182,15 +153,19 @@ pub(super) fn run_explore_micro_oracle(
         )));
     }
 
-    let baseline_matches = compare_regions_against_oracle(&r.baseline.regions, &baselines);
-    let alt_matches: Vec<bool> = r
-        .alternates
+    let observations: Vec<OracleRegions<'_>> = baselines
         .iter()
-        .map(|s| compare_regions_against_oracle(&s.regions, &baselines))
+        .map(|oracle| {
+            oracle
+                .memory_regions
+                .iter()
+                .map(|region| (region.name.as_str(), region.data.as_slice()))
+                .collect()
+        })
         .collect();
-
-    let all_match = baseline_matches && alt_matches.iter().all(|m| *m);
-    let any_match = baseline_matches || alt_matches.iter().any(|m| *m);
+    let verdict = r.verdict(&observations);
+    let (baseline_matches, alt_matches) = (verdict.baseline_matches, &verdict.alternate_matches);
+    let (all_match, any_match) = (verdict.all_match(), verdict.any_match());
 
     match format {
         OutputFormat::Human => {
@@ -264,21 +239,6 @@ fn unresolved_region_names(
                 .map(move |region| format!("{label}:{}", region.name))
         })
         .collect()
-}
-
-/// Returns true when a single oracle observation carries a matching
-/// name and bytes for every captured region.
-fn compare_regions_against_oracle(
-    captured: &[cellgov_explore::oracle::CapturedRegion],
-    baselines: &[cellgov_compare::Observation],
-) -> bool {
-    baselines.iter().any(|oracle| {
-        captured.iter().all(|region| {
-            oracle.memory_regions.iter().any(|oracle_region| {
-                oracle_region.name == region.name && oracle_region.data == region.data
-            })
-        })
-    })
 }
 
 #[cfg(test)]

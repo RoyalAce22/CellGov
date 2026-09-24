@@ -155,10 +155,11 @@ enum Halt {
 /// Run optimal DPOR on a workload.
 ///
 /// The search calls `make_runtime` once, snapshots the runtime it
-/// returns, and restores that snapshot per execution.
+/// returns, and restores that snapshot per execution. A driver that
+/// already holds the runtime hands it over as `move || rt`.
 pub fn explore_optimal<F>(make_runtime: F, config: &ExplorationConfig) -> ExplorationResult
 where
-    F: FnMut() -> Runtime,
+    F: FnOnce() -> Runtime,
 {
     explore_optimal_observed(make_runtime, config, |_, _| {})
 }
@@ -177,7 +178,7 @@ pub fn explore_optimal_observed<F, O>(
     observe: O,
 ) -> ExplorationResult
 where
-    F: FnMut() -> Runtime,
+    F: FnOnce() -> Runtime,
     O: FnMut(&Runtime, bool),
 {
     search(make_runtime, config, observe).0
@@ -186,12 +187,12 @@ where
 /// [`explore_optimal_observed`] beside the site each dropped branch
 /// came from ([`Drops`]).
 fn search<F, O>(
-    mut make_runtime: F,
+    make_runtime: F,
     config: &ExplorationConfig,
     mut observe: O,
 ) -> (ExplorationResult, Drops)
 where
-    F: FnMut() -> Runtime,
+    F: FnOnce() -> Runtime,
     O: FnMut(&Runtime, bool),
 {
     // One composition, one start state: a driver can hand over a

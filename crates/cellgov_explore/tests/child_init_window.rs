@@ -24,7 +24,7 @@ use cellgov_exec::{
 use cellgov_explore::config::ExplorationConfig;
 use cellgov_explore::explorer::explore_window;
 use cellgov_explore::observer::observe_decisions;
-use cellgov_explore::util::{run_to_stall, StopClass, StopReason};
+use cellgov_explore::util::{open_window, run_to_stall, StopClass, StopReason, WindowStart};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize};
 use cellgov_time::{Budget, InstructionCost};
 
@@ -273,6 +273,41 @@ fn a_pass_pending_at_entry_refuses_before_a_step_runs() {
     assert_eq!(
         result.outcome,
         cellgov_explore::classify::OutcomeClass::Inconclusive
+    );
+}
+
+/// The window driver refuses a pass the way [`run_to_stall`] does:
+/// one pending at entry before any step, and one a step stages mid-drive.
+#[test]
+fn a_window_drive_across_a_pending_child_init_is_refused_as_unserved() {
+    let mut rt = staged_child_init();
+    let at = rt.steps_taken();
+    let e = open_window(&mut rt, WindowStart::Step(at + 1)).unwrap_err();
+    assert_eq!(e.stop.reason, StopReason::ChildInitUnserved);
+    assert_eq!(e.steps, at);
+    assert_eq!(rt.steps_taken(), at, "no step ran under the parks");
+
+    // The pass outranks a start that already holds: a window opened
+    // here would hand the search a runtime it refuses at entry.
+    let mut rt = staged_child_init();
+    let e = open_window(&mut rt, WindowStart::Step(at)).unwrap_err();
+    assert_eq!(e.stop.reason, StopReason::ChildInitUnserved);
+
+    // Both units stay runnable up to the spawn, so a step-count start
+    // past it is the one that reaches the staging step.
+    let mut rt = spawns_a_child();
+    let e = open_window(&mut rt, WindowStart::Step(100)).unwrap_err();
+    assert_eq!(e.stop.reason, StopReason::ChildInitUnserved);
+    assert_eq!(e.stop.pc, Some(0x1000), "the spawn step's pc");
+    assert_eq!(
+        e.steps + 1,
+        rt.steps_taken(),
+        "the count stops short of the staging step",
+    );
+    assert_eq!(
+        e.stop.reason,
+        run_to_stall(&mut spawns_a_child(), 200),
+        "the window refuses what the search refuses",
     );
 }
 

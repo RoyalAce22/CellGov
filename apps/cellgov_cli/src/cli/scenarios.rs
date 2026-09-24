@@ -102,94 +102,16 @@ pub(crate) fn build_lv2_fixture_under(
     root: &std::path::Path,
     name: &str,
 ) -> Result<ScenarioFixture, CommandError> {
-    use cellgov_mem::ByteRange;
-    use cellgov_ppu::PpuExecutionUnit;
-    use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
-    use cellgov_time::Budget;
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
     let base = root.join(format!("tests/micro/{name}/build"));
     let ppu_elf = load_file(&base.join(format!("{name}.elf")).to_string_lossy())?;
     let spu_elf = load_file(&base.join("spu_main.elf").to_string_lossy())?;
-
-    let mem_size = 0x1002_0000usize;
-    let stack_top = (mem_size as u64) - 0x1000;
-    let primed: Rc<RefCell<Option<cellgov_ppu::state::PpuState>>> = Rc::new(RefCell::new(None));
-    let primed_seed = Rc::clone(&primed);
-    let primed_reg = Rc::clone(&primed);
-
-    Ok(ScenarioFixture::builder()
-        .memory_size(mem_size)
-        .budget(Budget::new(100_000))
-        .max_steps(10_000)
-        .seed_memory(move |mem| {
-            let li_r11_22: u32 = (14 << 26) | (11 << 21) | 22;
-            let sc: u32 = 0x4400_0002;
-            let stub_range = ByteRange::contiguous_u32(0, 8);
-            let mut stub_bytes = Vec::with_capacity(8);
-            stub_bytes.extend_from_slice(&li_r11_22.to_be_bytes());
-            stub_bytes.extend_from_slice(&sc.to_be_bytes());
-            if let Err(error) = mem.apply_commit(stub_range, &stub_bytes) {
-                debug_assert!(false, "scenario stub placement failed: {error}");
-                return;
-            }
-
-            let mut state = cellgov_ppu::state::PpuState::new();
-            if let Err(error) = cellgov_ppu::loader::load_ppu_elf(&ppu_elf, mem, &mut state) {
-                debug_assert!(false, "bundled microtest ELF failed to load: {error}");
-                return;
-            }
-            state.set_gpr(1, stack_top);
-            state.set_lr(0);
-            *primed_seed.borrow_mut() = Some(state);
-        })
-        .register(move |rt| {
-            rt.lv2_host_mut()
-                .content_store_mut()
-                .register(b"/app_home/spu_main.elf", spu_elf.clone());
-
-            rt.set_spu_factory(move |id, init| {
-                let mut unit = SpuExecutionUnit::new(id);
-                match &init.image {
-                    cellgov_lv2::SpuLoadImage::Elf(bytes) => {
-                        spu_loader::load_spu_elf(bytes, unit.state_mut()).map_err(|source| {
-                            cellgov_core::SpuFactoryError::ImageLoad {
-                                detail: source.to_string(),
-                            }
-                        })?;
-                    }
-                    cellgov_lv2::SpuLoadImage::Segments(segments) => {
-                        let placed: Vec<(u32, &[u8])> = segments
-                            .iter()
-                            .map(|s| (s.ls_start, s.bytes.as_slice()))
-                            .collect();
-                        spu_loader::load_ls_segments(&placed, init.entry_pc, unit.state_mut())
-                            .map_err(|source| cellgov_core::SpuFactoryError::ImageLoad {
-                                detail: source.to_string(),
-                            })?;
-                    }
-                }
-                unit.state_mut().pc = init.entry_pc;
-                unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
-                unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
-                unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
-                unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
-                unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
-                Ok(Box::new(unit))
-            });
-
-            let Some(ppu_state) = primed_reg.borrow_mut().take() else {
-                debug_assert!(false, "scenario seed did not produce a PPU state");
-                return;
-            };
-            rt.register_unit_with(|id| {
-                let mut unit = PpuExecutionUnit::new(id);
-                *unit.state_mut() = ppu_state;
-                unit
-            });
-        })
-        .build())
+    Ok(fixtures::lv2_driven_scenario(
+        ppu_elf,
+        spu_elf,
+        cellgov_time::Budget::new(100_000),
+        10_000,
+        Box::new(cellgov_boot::prepare::spu_unit),
+    ))
 }
 
 type MicrotestRegion = (&'static str, u64, u64);

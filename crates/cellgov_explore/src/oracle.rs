@@ -71,7 +71,7 @@ pub fn explore_with_regions<F>(
     regions: &[MemoryRegionSpec],
 ) -> Option<OracleExplorationResult>
 where
-    F: FnMut() -> Runtime,
+    F: FnOnce() -> Runtime,
 {
     let mut baseline_regions = Vec::new();
     let mut alternates = Vec::new();
@@ -106,6 +106,59 @@ where
         exploration,
         baseline,
         alternates,
+    })
+}
+
+/// One oracle observation's memory regions, as (name, bytes) pairs.
+pub type OracleRegions<'a> = Vec<(&'a str, &'a [u8])>;
+
+/// How the explored schedules compare against a set of oracle
+/// observations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OracleVerdict {
+    /// Whether the baseline matches an observation.
+    pub baseline_matches: bool,
+    /// Whether each alternate matches an observation, in exploration
+    /// order.
+    pub alternate_matches: Vec<bool>,
+}
+
+impl OracleVerdict {
+    /// Every schedule, the baseline included, matches an observation.
+    pub fn all_match(&self) -> bool {
+        self.baseline_matches && self.alternate_matches.iter().all(|m| *m)
+    }
+
+    /// At least one schedule matches an observation.
+    pub fn any_match(&self) -> bool {
+        self.baseline_matches || self.alternate_matches.iter().any(|m| *m)
+    }
+}
+
+impl OracleExplorationResult {
+    /// Compare each schedule's captured regions against `observations`.
+    ///
+    /// A schedule matches when a single observation carries a region of
+    /// the same name and bytes for every region the schedule captured.
+    pub fn verdict(&self, observations: &[OracleRegions<'_>]) -> OracleVerdict {
+        OracleVerdict {
+            baseline_matches: matches_an_observation(&self.baseline.regions, observations),
+            alternate_matches: self
+                .alternates
+                .iter()
+                .map(|s| matches_an_observation(&s.regions, observations))
+                .collect(),
+        }
+    }
+}
+
+fn matches_an_observation(captured: &[CapturedRegion], observations: &[OracleRegions<'_>]) -> bool {
+    observations.iter().any(|observation| {
+        captured.iter().all(|region| {
+            observation
+                .iter()
+                .any(|(name, bytes)| *name == region.name && *bytes == region.data.as_slice())
+        })
     })
 }
 

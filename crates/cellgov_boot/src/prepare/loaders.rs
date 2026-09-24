@@ -37,38 +37,53 @@ pub(super) fn install_unit_factories(rt: &mut Runtime, debug_opts: BootDebugOpti
         debug_opts.apply(&mut unit);
         Box::new(unit)
     });
-    // Cell BE convention: args 0..3 map to r3..r6 (arg0 -> r3, etc.).
-    rt.set_spu_factory(|id, init| {
-        use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
-        let mut unit = SpuExecutionUnit::new(id);
-        match &init.image {
-            cellgov_lv2::SpuLoadImage::Elf(bytes) => {
-                spu_loader::load_spu_elf(bytes, unit.state_mut()).map_err(|source| {
-                    cellgov_core::SpuFactoryError::ImageLoad {
-                        detail: source.to_string(),
-                    }
-                })?;
-            }
-            cellgov_lv2::SpuLoadImage::Segments(segments) => {
-                let placed: Vec<(u32, &[u8])> = segments
-                    .iter()
-                    .map(|s| (s.ls_start, s.bytes.as_slice()))
-                    .collect();
-                spu_loader::load_ls_segments(&placed, init.entry_pc, unit.state_mut()).map_err(
-                    |source| cellgov_core::SpuFactoryError::ImageLoad {
-                        detail: source.to_string(),
-                    },
-                )?;
-            }
+    rt.set_spu_factory(spu_unit);
+}
+
+/// The SPU unit a thread-group image materializes as, for
+/// [`Runtime::set_spu_factory`].
+///
+/// The image loads into local store, and the unit starts at the entry
+/// PC with its stack pointer in r1. Cell BE convention: args 0..3 map
+/// to r3..r6 (arg0 -> r3, etc.).
+///
+/// # Errors
+///
+/// [`cellgov_core::SpuFactoryError::ImageLoad`] when the image does not
+/// load.
+pub fn spu_unit(
+    id: cellgov_event::UnitId,
+    init: cellgov_lv2::SpuInitState,
+) -> Result<Box<dyn cellgov_core::RegisteredUnit>, cellgov_core::SpuFactoryError> {
+    use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
+    let mut unit = SpuExecutionUnit::new(id);
+    match &init.image {
+        cellgov_lv2::SpuLoadImage::Elf(bytes) => {
+            spu_loader::load_spu_elf(bytes, unit.state_mut()).map_err(|source| {
+                cellgov_core::SpuFactoryError::ImageLoad {
+                    detail: source.to_string(),
+                }
+            })?;
         }
-        unit.state_mut().pc = init.entry_pc;
-        unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
-        unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
-        unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
-        unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
-        unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
-        Ok(Box::new(unit))
-    });
+        cellgov_lv2::SpuLoadImage::Segments(segments) => {
+            let placed: Vec<(u32, &[u8])> = segments
+                .iter()
+                .map(|s| (s.ls_start, s.bytes.as_slice()))
+                .collect();
+            spu_loader::load_ls_segments(&placed, init.entry_pc, unit.state_mut()).map_err(
+                |source| cellgov_core::SpuFactoryError::ImageLoad {
+                    detail: source.to_string(),
+                },
+            )?;
+        }
+    }
+    unit.state_mut().pc = init.entry_pc;
+    unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
+    unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
+    unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
+    unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
+    unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
+    Ok(Box::new(unit))
 }
 
 /// Install the loader behind `_sys_process_spawn` /

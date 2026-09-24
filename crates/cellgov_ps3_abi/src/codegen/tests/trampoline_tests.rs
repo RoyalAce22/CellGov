@@ -3,6 +3,22 @@
 use super::*;
 
 #[test]
+fn encode_li_sc_for_process_exit_byte_pattern() {
+    assert_eq!(
+        encode_li_sc(22),
+        [
+            0x39, 0x60, 0x00, 0x16, // li r11, 22  (addi r11, 0, 22)
+            0x44, 0x00, 0x00, 0x02, // sc 0
+        ],
+    );
+}
+
+#[test]
+fn encode_li_sc_at_sign_safe_boundary_byte_pattern() {
+    assert_eq!(encode_li_sc(0x7FFF)[..4], [0x39, 0x60, 0x7F, 0xFF]);
+}
+
+#[test]
 fn encode_lis_ori_sc_for_callback_return_syscall_byte_pattern() {
     assert_eq!(
         encode_lis_ori_sc(0x80000),

@@ -57,6 +57,7 @@ graph BT
   lv2 --> core
   trace --> core
   core --> testkit
+  ppu --> testkit
   testkit --> compare
   core --> explore
   ppu --> fuzz
@@ -65,7 +66,6 @@ graph BT
   terminal --> install
   compare --> boot
   install --> boot
-  ppu --> boot
   spu --> boot
   boot --> cli
   explore --> cli
@@ -155,13 +155,13 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_core`         | strum, thiserror                                                           |
 | `cellgov_lv2`          | num_enum, strum, thiserror                                                 |
 | `cellgov_testkit`      | tempfile                                                                   |
+| `cellgov_ppu`          | derive_more, strum, thiserror                                              |
 | `cellgov_compare`      | serde, serde_json, strum, thiserror, toml                                  |
+| `cellgov_spu`          | strum, thiserror                                                           |
 | `cellgov_boot`         | serde, serde_json, strum, thiserror, toml                                  |
 | `cellgov_install`      | aes, cbc, ctr, flate2, hmac, serde, sha1, sha2, thiserror, toml            |
 | `cellgov_terminal`     | ctrlc, terminal_size                                                       |
-| `cellgov_ppu`          | derive_more, strum, thiserror                                              |
-| `cellgov_spu`          | strum, thiserror                                                           |
-| `cellgov_explore`      | serde, serde_json, strum                                                   |
+| `cellgov_explore`      | serde, serde_json, strum, thiserror                                        |
 | `cellgov_fuzz`         | serde, serde_json, thiserror                                               |
 | `cellgov_cli`          | clap, clap_complete, filebuffer, serde, serde_json, strum, thiserror, toml |
 | `cellgov_mkelf`        | none                                                                       |

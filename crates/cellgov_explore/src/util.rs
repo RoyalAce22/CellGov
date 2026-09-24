@@ -132,6 +132,55 @@ impl std::fmt::Display for StopReason {
     }
 }
 
+/// A [`StopReason`] with the PC the stopping step yielded at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrivenStop {
+    /// Why the drive stopped.
+    pub reason: StopReason,
+    /// The PC the stopping step yielded at; `None` when no step ran or
+    /// the unit reported none.
+    pub pc: Option<u64>,
+}
+
+impl DrivenStop {
+    fn before_a_step(reason: StopReason) -> Self {
+        Self { reason, pc: None }
+    }
+}
+
+/// Take one step of the default schedule and commit it.
+///
+/// Returns the PC the step yielded at. [`run_to_stall`] and
+/// [`open_window`] go through this. The observer and the optimal
+/// search keep their own loops and rank the ways a step ends the same
+/// way.
+fn take_step(rt: &mut Runtime) -> Result<Option<u64>, DrivenStop> {
+    match rt.step() {
+        Ok(mut step) => {
+            let pc = step.result.local_diagnostics.pc;
+            let stop = |reason| DrivenStop { reason, pc };
+            // The commit discards the batch and counts it, so the fault
+            // read comes after it. A refusal outranks a fault, as the
+            // boot's own step loop ranks them.
+            if let Err(e) = rt.commit_step_and_recycle(&mut step) {
+                return Err(stop(StopReason::CommitError(e)));
+            }
+            // Ahead of the fault for the same reason the commit refusal
+            // above is.
+            if rt.has_pending_child_init() {
+                return Err(stop(StopReason::ChildInitUnserved));
+            }
+            if let Some(kind) = step.result.fault {
+                return Err(stop(StopReason::Faulted(kind)));
+            }
+            Ok(pc)
+        }
+        Err(StepError::NoRunnableUnit) => Err(DrivenStop::before_a_step(StopReason::Stalled)),
+        Err(StepError::AllBlocked) => Err(DrivenStop::before_a_step(StopReason::Deadlocked)),
+        Err(e) => Err(DrivenStop::before_a_step(StopReason::StepError(e))),
+    }
+}
+
 /// Drive `rt` until it stops, committing each step immediately.
 ///
 /// `Runtime::step` decides when a run is over; an empty runnable set
@@ -152,34 +201,93 @@ pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
         if at_cap && rt.can_take_another_step() {
             return StopReason::StepBound;
         }
-        match rt.step() {
-            Ok(mut step) => {
-                // A step past the cap means `can_take_another_step` and
-                // `Runtime::step` disagree, and the cap then bounds
-                // nothing.
-                debug_assert!(
-                    !at_cap,
-                    "the cap was reached, the predicate saw no step left, and one ran",
-                );
-                // The commit discards the batch and counts it, so the
-                // fault read comes after it. A refusal outranks a
-                // fault, as the boot's own step loop ranks them.
-                if let Err(e) = rt.commit_step_and_recycle(&mut step) {
-                    return StopReason::CommitError(e);
-                }
-                // Ahead of the fault for the same reason the commit
-                // refusal above is.
-                if rt.has_pending_child_init() {
-                    return StopReason::ChildInitUnserved;
-                }
-                if let Some(kind) = step.result.fault {
-                    return StopReason::Faulted(kind);
-                }
-                steps += 1;
+        let before = rt.steps_taken();
+        let taken = take_step(rt);
+        // A step past the cap means `can_take_another_step` and
+        // `Runtime::step` disagree, and the cap then bounds nothing.
+        // `Runtime::step` counts every step it runs, so this also covers
+        // a step that then faulted, was refused or staged a pass.
+        debug_assert!(
+            !at_cap || rt.steps_taken() == before,
+            "the cap was reached, the predicate saw no step left, and one ran",
+        );
+        if let Err(stop) = taken {
+            return stop.reason;
+        }
+        steps += 1;
+    }
+}
+
+/// Where [`open_window`] opens a window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowStart {
+    /// The first step two or more units are runnable at.
+    FirstBranchingPoint,
+    /// A `Runtime::step()` count.
+    Step(usize),
+    /// A guest PC, matched against the PC a step yields at; a PC inside
+    /// a batch never matches.
+    Pc(u64),
+}
+
+impl std::fmt::Display for WindowStart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FirstBranchingPoint => f.write_str("first branching point"),
+            Self::Step(n) => write!(f, "step {n}"),
+            Self::Pc(addr) => write!(f, "pc 0x{addr:x}"),
+        }
+    }
+}
+
+/// The run ended before the window's start condition held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the window never opened at {start}: the run stopped after {steps} step(s) -- {} ({})", stop.reason, stop.reason.class().label())]
+pub struct WindowNeverOpened {
+    /// The condition the drive was running to.
+    pub start: WindowStart,
+    /// Steps the run took before the step that stopped it. A stop that
+    /// a step ran into leaves `Runtime::steps_taken` one past this.
+    pub steps: usize,
+    /// What stopped it.
+    pub stop: DrivenStop,
+}
+
+/// Run `rt` on its default schedule until it meets `start`.
+///
+/// Returns the `Runtime::step()` count the window opens at. This leaves
+/// the runtime one `step()` from the window's first step, so a search
+/// handed the runtime continues this same run. Each step ends the way
+/// it ends in [`run_to_stall`]; the runtime's own step cap is the only
+/// cap.
+///
+/// # Errors
+///
+/// [`WindowNeverOpened`] when the run stops before the condition holds,
+/// including a staged child-init pass pending before a step, which
+/// [`run_to_stall`] refuses the same way. The window then covers
+/// nothing.
+pub fn open_window(rt: &mut Runtime, start: WindowStart) -> Result<usize, WindowNeverOpened> {
+    loop {
+        let steps = rt.steps_taken();
+        let ended = |stop| WindowNeverOpened { start, steps, stop };
+        if rt.has_pending_child_init() {
+            return Err(ended(DrivenStop::before_a_step(
+                StopReason::ChildInitUnserved,
+            )));
+        }
+        match start {
+            WindowStart::FirstBranchingPoint if rt.registry().runnable_ids().count() >= 2 => {
+                return Ok(steps)
             }
-            Err(StepError::NoRunnableUnit) => return StopReason::Stalled,
-            Err(StepError::AllBlocked) => return StopReason::Deadlocked,
-            Err(e) => return StopReason::StepError(e),
+            WindowStart::Step(n) if steps >= n => return Ok(steps),
+            _ => {}
+        }
+        let pc = take_step(rt).map_err(ended)?;
+        if let (WindowStart::Pc(target), Some(pc)) = (start, pc) {
+            if pc == target {
+                return Ok(rt.steps_taken());
+            }
         }
     }
 }
@@ -263,3 +371,7 @@ pub fn classify_iteration(
 #[cfg(test)]
 #[path = "tests/util_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/open_window_tests.rs"]
+mod open_window_tests;
