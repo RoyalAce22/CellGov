@@ -1,4 +1,5 @@
-use super::*;
+use super::super::seeds::*;
+use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
 use cellgov_ppu::funcmap;
 use cellgov_ppu::loader::pt_load_segments;
@@ -141,75 +142,4 @@ fn the_bss_seed_declares_more_memory_than_file_bytes() {
     let segments = pt_load_segments(&seed("exec_bss_tail")).unwrap();
     assert_eq!(segments.len(), 2);
     assert_eq!((segments[1].filesz, segments[1].memsz), (0x40, 0x1000));
-}
-
-#[test]
-fn an_exhausted_stream_reads_zero_and_says_so() {
-    let mut s = FieldStream::new(&[7, 1, 0]);
-    assert_eq!(s.u8(), 7);
-    assert!(!s.is_exhausted());
-    assert_eq!(s.u32(), 1);
-    assert!(s.is_exhausted());
-    assert_eq!(s.u64(), 0);
-    assert_eq!(s.below(0), 0);
-    assert_eq!(s.bytes(3), [0, 0, 0]);
-}
-
-#[test]
-fn a_zero_stream_describes_an_executable_with_no_program_headers() {
-    let image = structured_image(&[]);
-    assert_eq!(
-        pt_load_segments(&image),
-        Err(cellgov_ppu::loader::LoadError::NoProgramHeaders)
-    );
-}
-
-#[test]
-fn a_short_stream_describes_a_module_the_parser_accepts() {
-    // Odd selector, e_type draw 2 (ET_PRX), a three-byte name, then
-    // zeros: no exports, no imports, placeholders and a parameter
-    // header, no corruption.
-    let stream = [1, 2, 0, 0, 0, 3, 0, 0, 0, b'a', b'b', b'c'];
-    let image = structured_image(&stream);
-    let prx = parse_prx(&image).unwrap();
-    assert_eq!(prx.name, "abc");
-    assert_eq!(prx.segment_vaddrs.len(), 4);
-    assert!(prx.exports.is_empty());
-    assert!(parse_imports(&image).unwrap().is_empty());
-}
-
-#[test]
-fn corruption_stops_when_the_stream_says_zero_rounds() {
-    let mut bytes = seed("prx_baseline");
-    let before = bytes.clone();
-    corrupt(&mut bytes, &mut FieldStream::new(&[]));
-    assert_eq!(bytes, before);
-    // One truncation round at position 10.
-    corrupt(
-        &mut bytes,
-        &mut FieldStream::new(&[1, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0]),
-    );
-    assert_eq!(bytes.len(), 10);
-}
-
-#[test]
-fn a_rendered_image_round_trips_its_program_headers() {
-    let image = ExecImage {
-        e_type: ET_EXEC,
-        entry: 0x40,
-        phentsize: ELF_PHENTSIZE as u16,
-        segments: vec![
-            exec_segment(0x1_0000, true, nops(0x20), 0x20),
-            exec_segment(0x2_0000, false, vec![1, 2, 3], 0x10),
-        ],
-        trailer: vec![9; 5],
-    };
-    let bytes = image.render();
-    let segments = pt_load_segments(&bytes).unwrap();
-    assert_eq!(segments.len(), 2);
-    assert_eq!(segments[0].vaddr, 0x1_0000);
-    assert!(segments[0].executable);
-    assert_eq!((segments[1].filesz, segments[1].memsz), (3, 0x10));
-    assert!(!segments[1].executable);
-    assert_eq!(&bytes[bytes.len() - 5..], &[9; 5]);
 }
