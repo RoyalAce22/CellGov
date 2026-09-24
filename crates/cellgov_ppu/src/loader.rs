@@ -101,8 +101,9 @@ pub enum LoadError {
 }
 
 use cellgov_ps3_abi::format::elf::{
-    ELF_EI_VERSION, ELF_E_MACHINE_OFFSET, ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, ELF_PN_XNUM,
-    EM_PPC64, EV_CURRENT, PT_LOAD,
+    ELFCLASS64, ELFDATA2MSB, ELF_EI_CLASS, ELF_EI_DATA, ELF_EI_VERSION, ELF_E_MACHINE_OFFSET,
+    ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, ELF_PHENTSIZE_OFFSET, ELF_PHNUM_OFFSET,
+    ELF_PHOFF_OFFSET, ELF_PN_XNUM, EM_PPC64, EV_CURRENT, PT_LOAD,
 };
 
 /// Byte offset of program-header slot `i`.
@@ -376,10 +377,10 @@ fn check_ppu_elf_header(data: &[u8]) -> Result<(), LoadError> {
     if data[0..4] != ELF_MAGIC {
         return Err(LoadError::BadMagic);
     }
-    if data[4] != 2 {
+    if data[ELF_EI_CLASS] != ELFCLASS64 {
         return Err(LoadError::Not64Bit);
     }
-    if data[5] != 2 {
+    if data[ELF_EI_DATA] != ELFDATA2MSB {
         return Err(LoadError::NotBigEndian);
     }
     if data[ELF_EI_VERSION] != EV_CURRENT {
@@ -394,14 +395,43 @@ fn check_ppu_elf_header(data: &[u8]) -> Result<(), LoadError> {
     Ok(())
 }
 
-/// Every PT_LOAD program header, in program-header order, zero-sized
-/// ones included, as the table declares them.
+/// Where a PPU executable's program-header table lies in the file.
 ///
-/// The one PT_LOAD reader: [`checked_pt_loads`] and
-/// [`pt_load_segments`] read through it. It validates the header and
-/// the table, not the segments: a segment may claim file bytes past the
-/// end of the file, or end at the top of the address space. A caller
-/// that copies or reads a segment's bytes takes [`checked_pt_loads`].
+/// [`program_header_table`] is the only constructor, and it returns one
+/// only after checking that every slot lies inside the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProgramHeaderTable {
+    offset: u64,
+    count: u16,
+}
+
+impl ProgramHeaderTable {
+    /// `e_phoff`: file offset of slot 0.
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    /// `e_phnum`: the number of slots, never 0 or `PN_XNUM`.
+    pub fn count(&self) -> u16 {
+        self.count
+    }
+
+    /// One past the table's last byte, as a file offset. It is at most
+    /// the file's length.
+    pub fn end(&self) -> u64 {
+        self.offset + u64::from(self.count) * ELF_PHENTSIZE as u64
+    }
+
+    /// File offset of slot `i`, for `i < count`.
+    fn slot(&self, i: usize) -> usize {
+        self.offset as usize + i * ELF_PHENTSIZE
+    }
+}
+
+/// The program-header table of a PPU executable.
+///
+/// The one reader of the table's extent: [`read_pt_loads`] walks the
+/// slots it locates.
 ///
 /// # Errors
 ///
@@ -413,23 +443,45 @@ fn check_ppu_elf_header(data: &[u8]) -> Result<(), LoadError> {
 ///   for a count the table cannot be walked with.
 /// - [`LoadError::BadPhentsize`], or [`LoadError::TooSmall`] for a table
 ///   running past the file.
-pub fn read_pt_loads(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
+pub fn program_header_table(data: &[u8]) -> Result<ProgramHeaderTable, LoadError> {
     check_ppu_elf_header(data)?;
-    let phoff = read_u64(data, 32) as usize;
-    let phentsize = read_u16(data, 54) as usize;
-    let phnum = read_u16(data, 56);
-    if phnum == ELF_PN_XNUM {
+    let offset = read_u64(data, ELF_PHOFF_OFFSET);
+    let phentsize = usize::from(read_u16(data, ELF_PHENTSIZE_OFFSET));
+    let count = read_u16(data, ELF_PHNUM_OFFSET);
+    if count == ELF_PN_XNUM {
         return Err(LoadError::PhdrCountExtended);
     }
     // A file with no program-header table writes e_phnum = 0, and a
     // zero count locates no entries for e_phentsize to size, so the
     // count is read first: an absent table gets its own refusal.
-    if phnum == 0 {
+    if count == 0 {
         return Err(LoadError::NoProgramHeaders);
     }
+    // The last slot lying inside the file puts every earlier one there.
+    // An offset past usize saturates, so the slot size is checked first
+    // and the extent check then refuses it as TooSmall.
+    let offset_usize = usize::try_from(offset).unwrap_or(usize::MAX);
+    ph_slot_base(data.len(), offset_usize, phentsize, usize::from(count) - 1)?;
+    Ok(ProgramHeaderTable { offset, count })
+}
+
+/// Every PT_LOAD program header, in program-header order, zero-sized
+/// ones included, as the table declares them.
+///
+/// The one PT_LOAD reader: [`checked_pt_loads`] and
+/// [`pt_load_segments`] read through it. It validates the header and
+/// the table, not the segments: a segment may claim file bytes past the
+/// end of the file, or end at the top of the address space. A caller
+/// that copies or reads a segment's bytes takes [`checked_pt_loads`].
+///
+/// # Errors
+///
+/// Any [`program_header_table`] refusal.
+pub fn read_pt_loads(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
+    let table = program_header_table(data)?;
     let mut out = Vec::new();
-    for i in 0..usize::from(phnum) {
-        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
+    for i in 0..usize::from(table.count) {
+        let base = table.slot(i);
         if read_u32(data, base) != PT_LOAD {
             continue;
         }

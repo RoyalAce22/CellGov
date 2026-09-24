@@ -1,8 +1,9 @@
-//! Fixture-gen template substitution, ELF header-range parsing, and classifier-context construction.
+//! Fixture-gen template substitution and report rendering.
 
 use super::*;
 use cellgov_compare::{
-    compare_observations, NamedMemoryRegion, ObservationMetadata, ObservedOutcome,
+    compare_observations, ClassifierContext, DivergenceClass, NamedMemoryRegion,
+    ObservationMetadata, ObservedOutcome,
 };
 
 fn obs(outcome: ObservedOutcome, regions: Vec<NamedMemoryRegion>) -> Observation {
@@ -27,25 +28,6 @@ fn region(name: &str, addr: u64, data: Vec<u8>) -> NamedMemoryRegion {
         addr,
         data,
     }
-}
-
-fn synthetic_elf64_be(phoff: u64, phentsize: u16, phnum: u16) -> Vec<u8> {
-    synthetic_elf64_be_sized(phoff, phentsize, phnum, 64)
-}
-
-/// Same header, padded out to `len` bytes so a declared PHDR table
-/// can legitimately fit inside the image.
-fn synthetic_elf64_be_sized(phoff: u64, phentsize: u16, phnum: u16, len: usize) -> Vec<u8> {
-    let mut eboot = vec![0u8; len.max(64)];
-    eboot[0..4].copy_from_slice(b"\x7fELF");
-    eboot[4] = 2; // ELFCLASS64
-    eboot[5] = 2; // ELFDATA2MSB
-    eboot[6] = 1; // EV_CURRENT
-    eboot[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
-    eboot[32..40].copy_from_slice(&phoff.to_be_bytes());
-    eboot[54..56].copy_from_slice(&phentsize.to_be_bytes());
-    eboot[56..58].copy_from_slice(&phnum.to_be_bytes());
-    eboot
 }
 
 #[test]
@@ -80,384 +62,6 @@ fn apply_subs_does_not_re_substitute_into_value() {
 fn apply_subs_handles_unterminated_token() {
     let out = apply_subs("trailing {{open", &[("open", "X")]);
     assert_eq!(out, "trailing {{open");
-}
-
-#[test]
-fn build_classifier_context_populates_elf_header_when_code_region_present() {
-    let observation = obs(
-        ObservedOutcome::Completed,
-        vec![region("code", 0x10000, vec![0u8; 4])],
-    );
-    let eboot = synthetic_elf64_be(0, 0, 0);
-    let ctx = build_classifier_context(&eboot, &observation).unwrap();
-    assert_eq!(ctx.elf_header_range, Some(0x10000..0x10040));
-}
-
-#[test]
-fn elf_header_range_widens_to_include_phdr_table() {
-    // phoff=0x40 + 5 * phentsize=0x38 -> PHDR end at 0x158.
-    let eboot = synthetic_elf64_be_sized(0x40, 0x38, 5, 0x158);
-    assert_eq!(elf_header_plus_phdr_table_end(&eboot).unwrap(), 0x158);
-}
-
-#[test]
-fn a_phdr_table_ending_exactly_at_the_eboot_end_is_accepted() {
-    let eboot = synthetic_elf64_be_sized(0x40, 0x38, 5, 0x158);
-    assert_eq!(elf_header_plus_phdr_table_end(&eboot).unwrap(), 0x158);
-}
-
-#[test]
-fn a_phdr_table_declared_past_the_eboot_end_is_refused() {
-    // One byte short of the declared 0x158 table end.
-    let eboot = synthetic_elf64_be_sized(0x40, 0x38, 5, 0x157);
-    assert!(matches!(
-        elf_header_plus_phdr_table_end(&eboot),
-        Err(ElfHeaderParseError::PhdrTableOutOfFile {
-            phdr_end: 0x158,
-            file_len: 0x157,
-            ..
-        })
-    ));
-}
-
-#[test]
-fn an_out_of_file_phdr_table_never_widens_the_elf_header_class_range() {
-    let observation = obs(
-        ObservedOutcome::Completed,
-        vec![region("code", 0x10000, vec![0u8; 4])],
-    );
-    // Declares a 0x38000-byte PHDR table in a 64-byte image: accepted,
-    // it would mark every divergent byte under 0x10000..0x48040 as
-    // non-semantic ElfHeader.
-    let eboot = synthetic_elf64_be(0x40, 0x38, 0x1000);
-    assert!(matches!(
-        build_classifier_context(&eboot, &observation),
-        Err(FixtureGenError::ElfHeaderParse(
-            ElfHeaderParseError::PhdrTableOutOfFile { .. }
-        ))
-    ));
-}
-
-#[test]
-fn elf_header_plus_phdr_helper_rejects_short_input() {
-    assert!(matches!(
-        elf_header_plus_phdr_table_end(&[0u8; 32]),
-        Err(ElfHeaderParseError::TooShort { len: 32 })
-    ));
-}
-
-#[test]
-fn elf_header_plus_phdr_helper_rejects_bad_magic() {
-    let mut eboot = synthetic_elf64_be(0, 0, 0);
-    eboot[0] = 0xCC;
-    assert!(matches!(
-        elf_header_plus_phdr_table_end(&eboot),
-        Err(ElfHeaderParseError::BadMagic { .. })
-    ));
-}
-
-#[test]
-fn elf_header_plus_phdr_helper_rejects_elf_class_32() {
-    let mut eboot = synthetic_elf64_be(0, 0, 0);
-    eboot[4] = 1; // ELFCLASS32
-    assert!(matches!(
-        elf_header_plus_phdr_table_end(&eboot),
-        Err(ElfHeaderParseError::WrongClass { found: 1 })
-    ));
-}
-
-#[test]
-fn elf_header_plus_phdr_helper_rejects_little_endian() {
-    let mut eboot = synthetic_elf64_be(0, 0, 0);
-    eboot[5] = 1; // ELFDATA2LSB
-    assert!(matches!(
-        elf_header_plus_phdr_table_end(&eboot),
-        Err(ElfHeaderParseError::WrongEndian { found: 1 })
-    ));
-}
-
-#[test]
-fn elf_header_plus_phdr_helper_rejects_phdr_overflow() {
-    let eboot = synthetic_elf64_be(u64::MAX, u16::MAX, u16::MAX);
-    assert!(matches!(
-        elf_header_plus_phdr_table_end(&eboot),
-        Err(ElfHeaderParseError::PhdrTableOverflow { .. })
-    ));
-}
-
-/// An initialized `sys_lwmutex_t`: free sentinel, no waiter, a valid
-/// attribute, zero recursion, the kernel id, zero pad.
-fn lwmutex_bytes(sleep_queue: u32) -> Vec<u8> {
-    let mut b = Vec::new();
-    for w in [0xffff_ffffu32, 0, 0x22, 0, sleep_queue, 0, 0, 0] {
-        b.extend_from_slice(&w.to_be_bytes());
-    }
-    b
-}
-
-#[test]
-fn build_classifier_context_scans_every_region_for_lwmutex_slots() {
-    let observation = obs(
-        ObservedOutcome::Completed,
-        vec![
-            region("data", 0x80000, lwmutex_bytes(7)),
-            region("data_hi", 0x1000_0000, lwmutex_bytes(8)),
-        ],
-    );
-    let eboot = synthetic_elf64_be(0, 0, 0);
-    let ctx = build_classifier_context(&eboot, &observation).unwrap();
-    assert_eq!(
-        ctx.sync_primitive_id_ranges,
-        vec![0x80010..0x80014, 0x1000_0010..0x1000_0014]
-    );
-}
-
-#[test]
-fn build_classifier_context_with_no_code_region_leaves_header_none() {
-    let observation = obs(
-        ObservedOutcome::Completed,
-        vec![region("data", 0x80000, vec![0u8; 4])],
-    );
-    let eboot = synthetic_elf64_be(0, 0, 0);
-    let ctx = build_classifier_context(&eboot, &observation).unwrap();
-    assert!(ctx.elf_header_range.is_none());
-}
-
-#[test]
-fn build_classifier_context_propagates_elf_parse_error() {
-    let observation = obs(
-        ObservedOutcome::Completed,
-        vec![region("code", 0x10000, vec![0u8; 4])],
-    );
-    let eboot = vec![0u8; 32];
-    assert!(matches!(
-        build_classifier_context(&eboot, &observation),
-        Err(FixtureGenError::ElfHeaderParse(
-            ElfHeaderParseError::TooShort { len: 32 }
-        ))
-    ));
-}
-
-#[test]
-fn compute_hle_opd_ranges_no_imports_table_is_empty_vec() {
-    let eboot = synthetic_elf64_be(0, 0, 0);
-    assert_eq!(
-        compute_hle_opd_ranges(&eboot).unwrap(),
-        Vec::<Range<u64>>::new()
-    );
-}
-
-#[test]
-fn compute_hle_opd_ranges_propagates_non_no_imports_table_errors() {
-    let eboot = vec![0u8; 32];
-    match compute_hle_opd_ranges(&eboot) {
-        Err(FixtureGenError::ImportParse(e)) => assert!(
-            !matches!(e, cellgov_ppu::prx::ImportParseError::NoImportsTable),
-            "NoImportsTable must be mapped to Ok(vec![]); got Err propagation"
-        ),
-        other => panic!("expected ImportParse error, got {other:?}"),
-    }
-}
-
-#[test]
-fn merge_adjacent_stub_ranges_empty_input_returns_empty() {
-    let mut stubs: Vec<u32> = vec![];
-    assert!(merge_adjacent_stub_ranges(&mut stubs).is_empty());
-}
-
-#[test]
-fn merge_adjacent_stub_ranges_single_stub_one_range() {
-    let mut stubs = vec![0x10_0000u32];
-    let ranges = merge_adjacent_stub_ranges(&mut stubs);
-    assert_eq!(ranges, vec![0x10_0000u64..0x10_0004u64]);
-}
-
-#[test]
-fn merge_adjacent_stub_ranges_two_adjacent_merge_to_one() {
-    let mut stubs = vec![0x10_0000u32, 0x10_0004u32];
-    let ranges = merge_adjacent_stub_ranges(&mut stubs);
-    assert_eq!(ranges, vec![0x10_0000u64..0x10_0008u64]);
-}
-
-#[test]
-fn merge_adjacent_stub_ranges_two_non_adjacent_stay_two() {
-    let mut stubs = vec![0x10_0000u32, 0x10_0010u32];
-    let ranges = merge_adjacent_stub_ranges(&mut stubs);
-    assert_eq!(
-        ranges,
-        vec![0x10_0000u64..0x10_0004u64, 0x10_0010u64..0x10_0014u64]
-    );
-}
-
-#[test]
-fn merge_adjacent_stub_ranges_unsorted_with_dupes_sorts_and_dedups() {
-    let mut stubs = vec![
-        0x10_0008u32,
-        0x10_0000u32,
-        0x10_0004u32,
-        0x10_0000u32,
-        0x10_0010u32,
-    ];
-    let ranges = merge_adjacent_stub_ranges(&mut stubs);
-    assert_eq!(
-        ranges,
-        vec![0x10_0000u64..0x10_000Cu64, 0x10_0010u64..0x10_0014u64]
-    );
-}
-
-#[cfg(debug_assertions)]
-#[test]
-#[should_panic(expected = "overlap")]
-fn classifier_context_overlap_panics_in_debug() {
-    let ctx = ClassifierContext {
-        elf_header_range: Some(0x1000..0x2000),
-        sys_proc_param_range: Some(0x1500..0x2500),
-        hle_opd_ranges: Vec::new(),
-        sync_primitive_id_ranges: Vec::new(),
-    };
-    ctx.debug_assert_disjoint();
-}
-
-#[test]
-fn build_classifier_context_overflows_on_code_region_addr_near_u64_max() {
-    let observation = obs(
-        ObservedOutcome::Completed,
-        vec![region("code", u64::MAX - 0x20, vec![0u8; 0x40])],
-    );
-    // phoff=0x40 + 5 * 0x38 = 0x158 PHDR end; adds to addr -> overflow.
-    let eboot = synthetic_elf64_be_sized(0x40, 0x38, 5, 0x158);
-    assert!(matches!(
-        build_classifier_context(&eboot, &observation),
-        Err(FixtureGenError::CodeRegionAddrOverflow { .. })
-    ));
-}
-
-/// Synthetic EBOOT with a single PT_LOAD covering a
-/// sys_proc_param magic struct at file offset 0x100.
-fn synthetic_eboot_with_sys_proc_param_at(p_vaddr: u64, struct_size: u32) -> Vec<u8> {
-    use cellgov_ps3_abi::format::elf::{PT_LOAD, SYS_PROCESS_PARAM_MAGIC};
-    let phoff: usize = 64;
-    let phentsize: usize = 56;
-    let pt_load_offset: usize = 0x100;
-    let pt_load_size: usize = 0x40;
-    let payload_offset: usize = pt_load_offset; // struct starts here
-    let total = payload_offset + pt_load_size + 32;
-    let mut data = vec![0u8; total];
-    data[0..4].copy_from_slice(b"\x7fELF");
-    data[4] = 2;
-    data[5] = 2;
-    data[6] = 1; // EV_CURRENT
-    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
-    data[32..40].copy_from_slice(&(phoff as u64).to_be_bytes());
-    data[54..56].copy_from_slice(&(phentsize as u16).to_be_bytes());
-    data[56..58].copy_from_slice(&1u16.to_be_bytes());
-    data[phoff..phoff + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
-    data[phoff + 8..phoff + 16].copy_from_slice(&(pt_load_offset as u64).to_be_bytes());
-    data[phoff + 16..phoff + 24].copy_from_slice(&p_vaddr.to_be_bytes());
-    data[phoff + 32..phoff + 40].copy_from_slice(&(pt_load_size as u64).to_be_bytes());
-    data[phoff + 40..phoff + 48].copy_from_slice(&(pt_load_size as u64).to_be_bytes());
-    let start = payload_offset;
-    data[start..start + 4].copy_from_slice(&struct_size.to_be_bytes());
-    data[start + 4..start + 8].copy_from_slice(&SYS_PROCESS_PARAM_MAGIC.to_be_bytes());
-    data
-}
-
-#[test]
-fn build_classifier_context_overflows_on_sys_proc_param_addr_near_u64_max() {
-    // Positive control so the overflow assertion below is not vacuous.
-    let normal_eboot = synthetic_eboot_with_sys_proc_param_at(0x10_0000, 0x30);
-    let normal_obs = obs(ObservedOutcome::Completed, vec![]);
-    let normal_ctx = build_classifier_context(&normal_eboot, &normal_obs).unwrap();
-    assert!(normal_ctx.sys_proc_param_range.is_some());
-
-    let observation = obs(ObservedOutcome::Completed, vec![]);
-    let eboot = synthetic_eboot_with_sys_proc_param_at(u64::MAX - 0x10, 0x30);
-    assert!(matches!(
-        build_classifier_context(&eboot, &observation),
-        Err(FixtureGenError::SysProcParamAddrOverflow { .. })
-    ));
-}
-
-#[cfg(debug_assertions)]
-#[test]
-#[should_panic(expected = "IdentityMismatch invariant violated")]
-fn classify_all_panics_on_addr_mismatch_in_debug() {
-    use cellgov_compare::{
-        ByteDivergence, EventCompare, RegionCompareSummary, StateHashCompare, StepCompare,
-    };
-    let cellgov = obs(
-        ObservedOutcome::Completed,
-        vec![region("code", 0x10000, vec![0u8; 4])],
-    );
-    let result = ObservationCompareResult {
-        outcome_match: true,
-        a_outcome: ObservedOutcome::Completed,
-        b_outcome: ObservedOutcome::Completed,
-        region_compare: RegionCompareSummary {
-            a_count: 1,
-            b_count: 1,
-            pairs: vec![RegionPairOutcome::ByteDivergence {
-                name: "code".to_string(),
-                addr: 0x20000, // != cellgov's 0x10000
-                length: 4,
-                bytes: vec![ByteDivergence {
-                    offset: 0,
-                    length: 1,
-                    a_byte: 0,
-                    b_byte: 0xFF,
-                }],
-            }],
-        },
-        event_compare: EventCompare::Equal { count: 0 },
-        state_hash_compare: StateHashCompare::NoHashInfo,
-        step_compare: StepCompare::NoStepInfo,
-        a_runner: "cellgov".to_string(),
-        b_runner: "rpcs3".to_string(),
-        a_identity: cellgov_compare::RunIdentity::default(),
-        b_identity: cellgov_compare::RunIdentity::default(),
-    };
-    let _ = classify_all(
-        &result,
-        &cellgov,
-        &cellgov.clone(),
-        &ClassifierContext::default(),
-    );
-}
-
-#[test]
-fn classify_all_returns_one_class_per_byte_divergence() {
-    let a = obs(
-        ObservedOutcome::Completed,
-        vec![region("code", 0x10000, vec![0u8; 0x40])],
-    );
-    let mut b_data = vec![0u8; 0x40];
-    b_data[0x17] = 0xAA;
-    let b = obs(
-        ObservedOutcome::Completed,
-        vec![region("code", 0x10000, b_data)],
-    );
-    let result = compare_observations(&a, &b);
-    let ctx = ClassifierContext {
-        elf_header_range: Some(0x10000..0x10040),
-        ..ClassifierContext::default()
-    };
-    let classes = classify_all(&result, &a, &b, &ctx);
-    assert_eq!(classes, vec![DivergenceClass::ElfHeader]);
-}
-
-#[test]
-fn classify_all_returns_unclassified_without_dying() {
-    let a = obs(
-        ObservedOutcome::Completed,
-        vec![region("data", 0x80000, vec![0u8; 8])],
-    );
-    let b = obs(
-        ObservedOutcome::Completed,
-        vec![region("data", 0x80000, vec![0xFFu8; 8])],
-    );
-    let result = compare_observations(&a, &b);
-    let classes = classify_all(&result, &a, &b, &ClassifierContext::default());
-    assert_eq!(classes, vec![DivergenceClass::Unclassified]);
 }
 
 #[test]
@@ -692,4 +296,108 @@ fn fixture_gen_produces_byte_deterministic_output_across_two_invocations() {
     assert_eq!(first, second, "two renders must produce identical bytes");
     assert!(first.contains("Convergence: Yes"));
     assert!(first.contains("Byte parity: 1 non-semantic"));
+}
+
+/// The oracle-gap count against a scratch VFS root and fixture tree.
+mod oracle_gap_count_reads {
+    use super::*;
+
+    const CONTENT_ID: &str = "TEST00000";
+
+    fn cell() -> CellKey {
+        CellKey {
+            fw: "4.93".to_string(),
+            game_ver: None,
+        }
+    }
+
+    fn write_overlay(root: &Path, text: &str) {
+        std::fs::create_dir_all(root.join(".cellgov")).unwrap();
+        std::fs::write(root.join(".cellgov/oracle-gap.tsv"), text).unwrap();
+    }
+
+    fn write_anchor(fixtures: &Path, text: &str) {
+        let path = crate::paths::boot_anchor_path_in(fixtures, CONTENT_ID, &cell());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    const OVERLAY: &str = "revision\tabc123\nordinal\n14\n";
+
+    #[test]
+    fn an_absent_overlay_is_no_count_even_beside_a_malformed_anchor() {
+        let tmp = cellgov_testkit::scratch::scratch_labeled("oracle_gap_absent");
+        write_anchor(&tmp.join("fixtures"), "{");
+        let got = oracle_gap_count(
+            &tmp.join("root"),
+            &tmp.join("fixtures"),
+            CONTENT_ID,
+            &cell(),
+        );
+        assert_eq!(got, Ok(None));
+    }
+
+    #[test]
+    fn an_absent_anchor_is_no_count() {
+        let tmp = cellgov_testkit::scratch::scratch_labeled("oracle_gap_no_anchor");
+        write_overlay(&tmp.join("root"), OVERLAY);
+        let got = oracle_gap_count(
+            &tmp.join("root"),
+            &tmp.join("fixtures"),
+            CONTENT_ID,
+            &cell(),
+        );
+        assert_eq!(got, Ok(None));
+    }
+
+    #[test]
+    fn an_overlay_path_that_cannot_be_read_is_refused() {
+        let tmp = cellgov_testkit::scratch::scratch_labeled("oracle_gap_unreadable");
+        std::fs::create_dir_all(tmp.join("root/.cellgov/oracle-gap.tsv")).unwrap();
+        let got = oracle_gap_count(
+            &tmp.join("root"),
+            &tmp.join("fixtures"),
+            CONTENT_ID,
+            &cell(),
+        );
+        assert!(
+            got.as_ref()
+                .is_err_and(|e| e.starts_with("read oracle-gap overlay")),
+            "got: {got:?}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_overlay_is_refused_by_line() {
+        let tmp = cellgov_testkit::scratch::scratch_labeled("oracle_gap_malformed");
+        write_overlay(&tmp.join("root"), "revision\tabc123\nordinal\nx\n");
+        let got = oracle_gap_count(
+            &tmp.join("root"),
+            &tmp.join("fixtures"),
+            CONTENT_ID,
+            &cell(),
+        );
+        assert!(
+            got.as_ref().is_err_and(|e| e.contains("line 3")),
+            "got: {got:?}"
+        );
+    }
+
+    #[test]
+    fn a_present_anchor_that_is_not_a_boot_summary_is_refused() {
+        let tmp = cellgov_testkit::scratch::scratch_labeled("oracle_gap_bad_anchor");
+        write_overlay(&tmp.join("root"), OVERLAY);
+        write_anchor(&tmp.join("fixtures"), "{");
+        let got = oracle_gap_count(
+            &tmp.join("root"),
+            &tmp.join("fixtures"),
+            CONTENT_ID,
+            &cell(),
+        );
+        assert!(
+            got.as_ref()
+                .is_err_and(|e| e.starts_with("parse boot anchor")),
+            "got: {got:?}"
+        );
+    }
 }

@@ -321,7 +321,8 @@ fn assert_every_ph_reader_refuses(data: &[u8], expected: LoadError) {
     let mut mem = GuestMemory::new(256);
     assert_eq!(load_ppu_elf(data, &mut mem, &mut s), Err(expected.clone()));
     assert_eq!(required_memory_size(data), Err(expected.clone()));
-    assert_eq!(pt_load_segments(data), Err(expected));
+    assert_eq!(pt_load_segments(data), Err(expected.clone()));
+    assert_eq!(program_header_table(data), Err(expected));
     assert!(find_tls_segment(data).is_none());
     assert!(find_tls_program_header(data).is_none());
 }
@@ -353,6 +354,23 @@ fn a_program_header_table_running_past_the_end_of_the_file_is_refused() {
     data[64..68].copy_from_slice(&PT_LOAD.to_be_bytes());
     data.truncate(64 + 55);
     assert_every_ph_reader_refuses(&data, LoadError::TooSmall);
+}
+
+#[test]
+fn the_program_header_table_ends_after_its_last_slot() {
+    // Three slots from offset 64, the file ending exactly at the last.
+    let data = mk_elf_header(3);
+    let table = program_header_table(&data).unwrap();
+    assert_eq!((table.offset(), table.count()), (64, 3));
+    assert_eq!(table.end(), 64 + 3 * 56);
+    assert_eq!(table.end(), data.len() as u64);
+}
+
+#[test]
+fn only_the_last_slot_running_past_the_file_refuses_the_table() {
+    let mut data = mk_elf_header(3);
+    data.truncate(data.len() - 1);
+    assert_eq!(program_header_table(&data), Err(LoadError::TooSmall));
 }
 
 /// One ELF64 section header slot, written at the architected offsets.

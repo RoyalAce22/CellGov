@@ -5,6 +5,62 @@ use std::path::Path;
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::paths::workspace_root;
 
+/// Key of the overlay's first line, which carries the checkout revision.
+const REVISION_KEY: &str = "revision";
+
+/// The overlay's second line: the header of its one column.
+const ORDINAL_HEADER: &str = "ordinal";
+
+/// Why an overlay's text is not one this command writes.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum OverlayParseError {
+    /// Line 1 is not `revision<TAB><revision>`.
+    #[error("line 1 is not `{REVISION_KEY}<TAB><revision>`")]
+    MissingRevision,
+    /// Line 2 is not the column header.
+    #[error("line 2 is not the `{ORDINAL_HEADER}` column header")]
+    MissingColumnHeader,
+    /// A row below the header is not a syscall ordinal.
+    #[error("line {line}: {row:?} is not a syscall ordinal")]
+    MalformedRow {
+        /// 1-based line number.
+        line: usize,
+        /// The row as written.
+        row: String,
+    },
+}
+
+/// The ordinals an overlay this command wrote lists.
+///
+/// # Errors
+///
+/// A missing revision line or column header, or the first row that is
+/// not a decimal `u64`.
+pub(crate) fn parse_overlay(
+    text: &str,
+) -> Result<std::collections::BTreeSet<u64>, OverlayParseError> {
+    let mut lines = text.lines();
+    if lines
+        .next()
+        .and_then(|line| line.split_once('\t'))
+        .is_none_or(|(key, _)| key != REVISION_KEY)
+    {
+        return Err(OverlayParseError::MissingRevision);
+    }
+    if lines.next() != Some(ORDINAL_HEADER) {
+        return Err(OverlayParseError::MissingColumnHeader);
+    }
+    lines
+        .enumerate()
+        .map(|(index, row)| {
+            row.parse().map_err(|_| OverlayParseError::MalformedRow {
+                line: index + 3,
+                row: row.to_string(),
+            })
+        })
+        .collect()
+}
+
 /// Writes the source revision and each unbound table slot.
 ///
 /// # Errors
@@ -62,7 +118,7 @@ pub(crate) fn run(vfs_flag: Option<&Path>) -> Result<CommandExitCode, CommandErr
     std::fs::create_dir_all(root.join(".cellgov"))
         .map_err(|error| CommandError::failed(format!("oracle gap: create overlay: {error}")))?;
     let mut text = format!(
-        "revision\t{}\nordinal\n",
+        "{REVISION_KEY}\t{}\n{ORDINAL_HEADER}\n",
         String::from_utf8_lossy(&revision.stdout).trim()
     );
     for ordinal in ordinals {
@@ -73,3 +129,7 @@ pub(crate) fn run(vfs_flag: Option<&Path>) -> Result<CommandExitCode, CommandErr
     println!("oracle gap: wrote {}", out.display());
     Ok(CommandExitCode::SUCCESS)
 }
+
+#[cfg(test)]
+#[path = "tests/oracle_gap_tests.rs"]
+mod tests;

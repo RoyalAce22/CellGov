@@ -24,6 +24,7 @@ mod prescan_format;
 mod sink;
 mod stack_walk;
 
+pub mod classifier_context;
 pub mod compose;
 pub mod diag;
 pub mod manifest;

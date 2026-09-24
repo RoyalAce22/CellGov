@@ -4,25 +4,19 @@
 //! manifest.
 
 use std::collections::BTreeMap;
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+use cellgov_boot::classifier_context::{build_classifier_context, classify_all};
 use cellgov_compare::{
-    classify, classify::ClassifierContext, summarize, BootOverrides, ByteParity, Convergence,
-    CrossRunnerSummary, DivergenceClass, Observation, ObservationCompareResult, ObservedOutcome,
-    RegionPairOutcome, RunIdentity, UnclassifiedRun, CODE_REGION_NAME, ELF_HEADER_SIZE,
+    summarize, BootOverrides, ByteParity, Convergence, CrossRunnerSummary, Observation,
+    ObservationCompareResult, ObservedOutcome, RunIdentity, UnclassifiedRun,
 };
-use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
 use super::exit::{CommandError, CommandExitCode};
 use super::exit_codes;
 use super::parse::FixtureGenArgs;
 use super::self_load::{load_file, load_ppu_image_with_title};
 use cellgov_boot::manifest::{CellKey, TitleManifest};
-
-/// `ELF_HEADER_SIZE >= 58` is required for the `e_phnum` (56..58)
-/// reads in [`elf_header_plus_phdr_table_end`] to be in bounds.
-const _: () = assert!(ELF_HEADER_SIZE >= 58);
 
 const COMPARE_REPORT_TEMPLATE: &str =
     include_str!("../../../../crates/cellgov_compare/templates/compare_report.txt.template");
@@ -40,41 +34,6 @@ const COMMITTED_CELL_DEPTH: usize = 6;
 /// covers.
 const CONTENT_ID_DEPTH: usize = 3;
 
-/// Why the ELF-header-plus-PHDR-table parser rejected the EBOOT.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum ElfHeaderParseError {
-    #[error(
-        "EBOOT shorter than ELF64 header (got {len} bytes, need {})",
-        ELF_HEADER_SIZE
-    )]
-    TooShort { len: usize },
-    #[error("EBOOT magic is not 0x7f 'E' 'L' 'F' (got {:02x} {:02x} {:02x} {:02x})", found[0], found[1], found[2], found[3])]
-    BadMagic { found: [u8; 4] },
-    #[error("EBOOT EI_CLASS is not ELFCLASS64 (got {found})")]
-    WrongClass { found: u8 },
-    #[error("EBOOT EI_DATA is not ELFDATA2MSB (got {found})")]
-    WrongEndian { found: u8 },
-    #[error(
-        "ELF PHDR table end overflows u64 (phoff={phoff}, phentsize={phentsize}, phnum={phnum})"
-    )]
-    PhdrTableOverflow {
-        phoff: u64,
-        phentsize: u64,
-        phnum: u64,
-    },
-    #[error(
-        "ELF PHDR table ends at {phdr_end} but the EBOOT is only {file_len} bytes \
-         (phoff={phoff}, phentsize={phentsize}, phnum={phnum})"
-    )]
-    PhdrTableOutOfFile {
-        phoff: u64,
-        phentsize: u64,
-        phnum: u64,
-        phdr_end: u64,
-        file_len: u64,
-    },
-}
-
 /// Errors `dev fixture-gen` raises before the report writers.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FixtureGenError {
@@ -89,16 +48,6 @@ pub(crate) enum FixtureGenError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("ELF header: {0}")]
-    ElfHeaderParse(#[from] ElfHeaderParseError),
-    #[error("parse imports: {0}")]
-    ImportParse(#[from] cellgov_ppu::prx::ImportParseError),
-    /// `r.addr + phdr_end` would overflow `u64`. Reachable from
-    /// user-provided observation JSON with `addr` near `u64::MAX`.
-    #[error("code region addr 0x{addr:016x} + PHDR-table end 0x{phdr_end:016x} overflows u64")]
-    CodeRegionAddrOverflow { addr: u64, phdr_end: u64 },
-    #[error("sys_process_param addr 0x{addr:016x} + struct_size {struct_size} overflows u64")]
-    SysProcParamAddrOverflow { addr: u64, struct_size: u64 },
 }
 
 /// Substitute `{{name}}` tokens in `template` with values from
@@ -285,7 +234,8 @@ pub(crate) fn run(
         .with_firmware(composition.identity.clone(), rpcs3_firmware)
         .map_err(|error| CommandError::failed(format!("fixture-gen: {error}")))?;
     summary.oracle_gap_ordinals =
-        oracle_gap_count(&vfs_root, &fixtures, &manifest.content_id, &cell);
+        oracle_gap_count(&vfs_root, &fixtures, &manifest.content_id, &cell)
+            .map_err(|error| CommandError::failed(format!("fixture-gen: {error}")))?;
 
     std::fs::create_dir_all(&out_dir).map_err(|error| {
         CommandError::failed(format!(
@@ -325,330 +275,51 @@ pub(crate) fn run(
     Ok(CommandExitCode::SUCCESS)
 }
 
+/// How many of the cell's unsupported syscalls the oracle's dispatch
+/// table also leaves unbound, or `None` when the overlay or the cell's
+/// anchor is absent.
+///
+/// # Errors
+///
+/// An overlay that is present but unreadable or malformed, naming the
+/// file and, for a malformed one, the row; or an anchor that is present
+/// but unreadable or not a boot summary, naming the file.
 fn oracle_gap_count(
     vfs_root: &Path,
     fixtures: &Path,
     content_id: &str,
     cell: &CellKey,
-) -> Option<u64> {
+) -> Result<Option<u64>, String> {
     let overlay = vfs_root.join(".cellgov/oracle-gap.tsv");
-    let gap = std::fs::read_to_string(overlay).ok()?;
-    let ordinals: std::collections::BTreeSet<u64> = gap
-        .lines()
-        .skip(2)
-        .filter_map(|line| line.parse().ok())
-        .collect();
+    let gap = match std::fs::read_to_string(&overlay) {
+        Ok(gap) => gap,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "read oracle-gap overlay {}: {error}",
+                overlay.display()
+            ))
+        }
+    };
+    let ordinals = crate::oracle_gap::parse_overlay(&gap)
+        .map_err(|error| format!("oracle-gap overlay {}: {error}", overlay.display()))?;
     let anchor = crate::paths::boot_anchor_path_in(fixtures, content_id, cell);
-    let summary: cellgov_compare::BootSummary =
-        serde_json::from_str(&std::fs::read_to_string(anchor).ok()?).ok()?;
-    Some(
+    // An anchor present but unreadable is refused, as the titles
+    // generator refuses it, rather than recorded as "no count".
+    let text = match std::fs::read_to_string(&anchor) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("read boot anchor {}: {error}", anchor.display())),
+    };
+    let summary: cellgov_compare::BootSummary = serde_json::from_str(&text)
+        .map_err(|error| format!("parse boot anchor {}: {error}", anchor.display()))?;
+    Ok(Some(
         summary
             .unsupported_syscalls
             .keys()
             .filter(|ordinal| ordinals.contains(ordinal))
             .count() as u64,
-    )
-}
-
-/// Build a [`ClassifierContext`] from EBOOT bytes + observation.
-///
-/// # Errors
-///
-/// `ElfHeaderParse` / `ImportParse` on malformed EBOOT structure;
-/// `CodeRegionAddrOverflow` / `SysProcParamAddrOverflow` on input
-/// addrs near `u64::MAX`.
-pub(crate) fn build_classifier_context(
-    eboot_bytes: &[u8],
-    observation: &Observation,
-) -> Result<ClassifierContext, FixtureGenError> {
-    let elf_header_range = observation
-        .memory_regions
-        .iter()
-        .find(|r| r.name == CODE_REGION_NAME)
-        .map(|r| -> Result<Range<u64>, FixtureGenError> {
-            let phdr_end = elf_header_plus_phdr_table_end(eboot_bytes)?;
-            let end =
-                r.addr
-                    .checked_add(phdr_end)
-                    .ok_or(FixtureGenError::CodeRegionAddrOverflow {
-                        addr: r.addr,
-                        phdr_end,
-                    })?;
-            Ok(r.addr..end)
-        })
-        .transpose()?;
-
-    let sys_proc_param_range = match cellgov_ppu::loader::find_sys_process_param(eboot_bytes) {
-        Some(p) => {
-            let size = p.struct_size as u64;
-            let end = p.guest_addr.checked_add(size).ok_or(
-                FixtureGenError::SysProcParamAddrOverflow {
-                    addr: p.guest_addr,
-                    struct_size: size,
-                },
-            )?;
-            Some(p.guest_addr..end)
-        }
-        None => None,
-    };
-
-    let hle_opd_ranges = compute_hle_opd_ranges(eboot_bytes)?;
-
-    // sys_lwmutex_t handle-slot scan runs on the runtime snapshot (not
-    // the EBOOT) because the lwmutex_free sentinel and attribute field
-    // are only populated post-init. Every captured region is walked: a
-    // title with several writable PT_LOADs keeps its lwmutexes in
-    // whichever one the linker chose; the preamble match guards
-    // against false positives.
-    let mut sync_primitive_id_ranges: Vec<std::ops::Range<u64>> = observation
-        .memory_regions
-        .iter()
-        .flat_map(|r| {
-            cellgov_compare::sync_primitive_scan::find_sys_lwmutex_handle_slots(&r.data, r.addr)
-        })
-        .collect();
-    // An lwcond names the lwmutex it binds, so its slots are found
-    // against the lwmutex set of the same snapshot.
-    let lwcond_slots: Vec<std::ops::Range<u64>> = observation
-        .memory_regions
-        .iter()
-        .flat_map(|r| {
-            cellgov_compare::sync_primitive_scan::find_sys_lwcond_handle_slots(
-                &r.data,
-                r.addr,
-                &sync_primitive_id_ranges,
-            )
-        })
-        .collect();
-    sync_primitive_id_ranges.extend(lwcond_slots);
-
-    let ctx = ClassifierContext {
-        elf_header_range,
-        sys_proc_param_range,
-        hle_opd_ranges,
-        sync_primitive_id_ranges,
-    };
-    ctx.debug_assert_disjoint();
-    Ok(ctx)
-}
-
-/// One-past-the-end of the loaded ELF header + PHDR table in guest
-/// memory. Returns at least [`ELF_HEADER_SIZE`].
-///
-/// # Errors
-///
-/// `TooShort`, `BadMagic`, `WrongClass` (must be ELFCLASS64),
-/// `WrongEndian` (must be ELFDATA2MSB), `PhdrTableOverflow`,
-/// `PhdrTableOutOfFile`.
-fn elf_header_plus_phdr_table_end(eboot_bytes: &[u8]) -> Result<u64, ElfHeaderParseError> {
-    if eboot_bytes.len() < ELF_HEADER_SIZE {
-        return Err(ElfHeaderParseError::TooShort {
-            len: eboot_bytes.len(),
-        });
-    }
-    let magic = [
-        eboot_bytes[0],
-        eboot_bytes[1],
-        eboot_bytes[2],
-        eboot_bytes[3],
-    ];
-    if magic != ELF_MAGIC {
-        return Err(ElfHeaderParseError::BadMagic { found: magic });
-    }
-    let class = eboot_bytes[4];
-    if class != 2 {
-        return Err(ElfHeaderParseError::WrongClass { found: class });
-    }
-    let endian = eboot_bytes[5];
-    if endian != 2 {
-        return Err(ElfHeaderParseError::WrongEndian { found: endian });
-    }
-    let phoff = u64::from_be_bytes([
-        eboot_bytes[32],
-        eboot_bytes[33],
-        eboot_bytes[34],
-        eboot_bytes[35],
-        eboot_bytes[36],
-        eboot_bytes[37],
-        eboot_bytes[38],
-        eboot_bytes[39],
-    ]);
-    let phentsize = u16::from_be_bytes([eboot_bytes[54], eboot_bytes[55]]) as u64;
-    let phnum = u16::from_be_bytes([eboot_bytes[56], eboot_bytes[57]]) as u64;
-    // phentsize * phnum cannot exceed u16::MAX * u16::MAX = 0xFFFE_0001,
-    // safely inside u64. Only the phoff add can overflow.
-    let tbl = phentsize * phnum;
-    let phdr_end = phoff
-        .checked_add(tbl)
-        .ok_or(ElfHeaderParseError::PhdrTableOverflow {
-            phoff,
-            phentsize,
-            phnum,
-        })?;
-    // The ELF specification places the program-header table inside
-    // the file: `e_phnum` entries of `e_phentsize` bytes at file
-    // offset `e_phoff`. A declared end past the image is a malformed
-    // header. The returned value also becomes a classifier range that
-    // marks every divergent byte under it non-semantic. A malformed
-    // end would therefore claim guest bytes the ELF header does not
-    // own. `cellgov_ppu::loader::read_pt_loads` refuses the same shape
-    // as `LoadError::TooSmall`.
-    let file_len = eboot_bytes.len() as u64;
-    if phdr_end > file_len {
-        return Err(ElfHeaderParseError::PhdrTableOutOfFile {
-            phoff,
-            phentsize,
-            phnum,
-            phdr_end,
-            file_len,
-        });
-    }
-    Ok(phdr_end.max(ELF_HEADER_SIZE as u64))
-}
-
-/// HLE-OPD-class slot ranges in the title's binary: one merged
-/// range per maximal run of adjacent function-stub addresses, plus
-/// one 4-byte range per variable-import `vref_addr`.
-///
-/// # Errors
-///
-/// `ImportParse` if `parse_imports` rejects the EBOOT. A parseable
-/// EBOOT that legitimately imports nothing returns
-/// `NoImportsTable`, which this function maps to an empty vec
-/// rather than an error.
-fn compute_hle_opd_ranges(eboot_bytes: &[u8]) -> Result<Vec<Range<u64>>, FixtureGenError> {
-    let modules = match cellgov_ppu::prx::parse_imports(eboot_bytes) {
-        Ok(m) => m,
-        Err(cellgov_ppu::prx::ImportParseError::NoImportsTable) => return Ok(Vec::new()),
-        Err(e) => return Err(FixtureGenError::ImportParse(e)),
-    };
-
-    let mut stubs: Vec<u32> = modules
-        .iter()
-        .flat_map(|m| m.functions.iter().map(|f| f.stub_addr))
-        .collect();
-    let mut ranges = merge_adjacent_stub_ranges(&mut stubs);
-
-    let mut var_addrs: Vec<u32> = modules
-        .iter()
-        .flat_map(|m| m.variables.iter().map(|v| v.vref_addr))
-        .collect();
-    var_addrs.sort_unstable();
-    var_addrs.dedup();
-    for addr in var_addrs {
-        // u32 cast bounds the arithmetic: u32::MAX + 4 fits in u64.
-        debug_assert!((addr as u64).checked_add(4).is_some());
-        ranges.push(addr as u64..addr as u64 + 4);
-    }
-
-    // Secondary OPD tables: adjacent tables collapse into one Range,
-    // non-adjacent stay separate. Scan in
-    // `cellgov_ppu::loader::find_secondary_opd_tables`.
-    let secondary: Vec<Range<u64>> = cellgov_ppu::loader::find_secondary_opd_tables(eboot_bytes)
-        .into_iter()
-        .map(|t| t.guest_addr..t.guest_addr + t.size)
-        .collect();
-    let mut merged: Option<Range<u64>> = None;
-    for r in secondary {
-        merged = Some(match merged {
-            Some(cur) if cur.end == r.start => cur.start..r.end,
-            Some(cur) => {
-                ranges.push(cur);
-                r
-            }
-            None => r,
-        });
-    }
-    if let Some(r) = merged {
-        ranges.push(r);
-    }
-
-    // Indirect OPD tables (12-byte (id, ptr, opd_slot) rows): each
-    // table contributes its OPD slot at row offset
-    // INDIRECT_OPD_TABLE_SLOT_OFFSET. Scan in
-    // `cellgov_ppu::loader::find_indirect_opd_tables`.
-    for table in cellgov_ppu::loader::find_indirect_opd_tables(eboot_bytes) {
-        let row_count = table.size / cellgov_ppu::loader::INDIRECT_OPD_TABLE_STRIDE;
-        for row in 0..row_count {
-            let slot_start = table.guest_addr
-                + row * cellgov_ppu::loader::INDIRECT_OPD_TABLE_STRIDE
-                + cellgov_ppu::loader::INDIRECT_OPD_TABLE_SLOT_OFFSET;
-            ranges.push(slot_start..slot_start + 4);
-        }
-    }
-
-    Ok(ranges)
-}
-
-/// Sort, dedup, and merge 4-byte stub addresses into the smallest
-/// set of non-overlapping ranges; abutting stubs merge.
-fn merge_adjacent_stub_ranges(stubs: &mut Vec<u32>) -> Vec<Range<u64>> {
-    stubs.sort_unstable();
-    stubs.dedup();
-    let mut ranges = Vec::new();
-    let mut cur: Option<Range<u64>> = None;
-    for s in stubs.iter() {
-        debug_assert!((*s as u64).checked_add(4).is_some());
-        let next = *s as u64..*s as u64 + 4;
-        cur = Some(match cur {
-            Some(r) if r.end == next.start => r.start..next.end,
-            Some(r) => {
-                ranges.push(r);
-                next
-            }
-            None => next,
-        });
-    }
-    if let Some(r) = cur {
-        ranges.push(r);
-    }
-    ranges
-}
-
-/// One class per [`cellgov_compare::ByteDivergence`] in `result`,
-/// in flatten order over regions and bytes-within-region.
-///
-/// `cellgov` must be the observation that seeded `ctx` via
-/// [`build_classifier_context`]; `rpcs3` supplies the second image
-/// the HleOpdSlot structural checks read.
-pub(crate) fn classify_all(
-    result: &ObservationCompareResult,
-    cellgov: &Observation,
-    rpcs3: &Observation,
-    ctx: &ClassifierContext,
-) -> Vec<DivergenceClass> {
-    let mut classes = Vec::new();
-    for pair in &result.region_compare.pairs {
-        if let RegionPairOutcome::ByteDivergence {
-            name, addr, bytes, ..
-        } = pair
-        {
-            let a_region = cellgov.memory_regions.iter().find(|r| &r.name == name);
-            debug_assert_eq!(
-                a_region.map(|r| r.addr),
-                Some(*addr),
-                "ByteDivergence pair addr disagrees with cellgov observation; \
-                 compare_observations IdentityMismatch invariant violated"
-            );
-            // A ByteDivergence pair exists only when both observations
-            // carry the region; a miss here is the same broken-invariant
-            // class as the addr mismatch above. The empty-slice fallback
-            // fails closed (the slot checks refuse and the run lands in
-            // Pending), but it must still announce itself in debug.
-            let b_region = rpcs3.memory_regions.iter().find(|r| &r.name == name);
-            debug_assert!(
-                a_region.is_some() && b_region.is_some(),
-                "ByteDivergence pair region {name:?} missing from an observation; \
-                 compare_observations invariant violated"
-            );
-            let a_data: &[u8] = a_region.map(|r| r.data.as_slice()).unwrap_or(&[]);
-            let b_data: &[u8] = b_region.map(|r| r.data.as_slice()).unwrap_or(&[]);
-            for div in bytes {
-                classes.push(classify(div, *addr, ctx, a_data, b_data));
-            }
-        }
-    }
-    classes
+    ))
 }
 
 fn write_compare_report(
