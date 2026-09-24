@@ -377,8 +377,8 @@ of the identity triple is read from the entry it names.
 
 **Title manifest.** The TOML under `title_manifests/<content-id>.toml`
 that registers a title: source kind, EBOOT candidates, checkpoint
-kind, RSX flags, content blobs. No crate below `cellgov_cli` knows
-titles exist.
+kind, RSX flags, content blobs. `cellgov_boot::manifest` loads every
+manifest into the title registry.
 [title_harness.md](../architecture/title_harness.md)
 
 **Trace.** The binary step-by-step execution record (thirteen

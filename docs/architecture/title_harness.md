@@ -1,9 +1,8 @@
 # Title harness (`cellgov_cli`)
 
 Title-specific configuration lives in TOML manifests under
-`title_manifests/<content-id>.toml`; no library crate below
-`cellgov_cli` knows that titles exist. `cellgov_cli` scans the
-directory at startup into a registry the CLI looks up by short
+`title_manifests/<content-id>.toml`. `cellgov_boot::manifest` loads
+the directory into a registry the CLI looks up by short
 name (`--title <name>`), content id (`--content-id <id>`), or
 manifest path (`--title-manifest <file>`). A manifest declares:
 
