@@ -4,8 +4,8 @@ use std::io::Write;
 use std::time::Instant;
 
 use cellgov_fuzz::raw_decode::{
-    scan_raw_decoder, RawDecodeArtifact, RawDecodeDomain, RawDecodeStatus, RawDecoder,
-    MAX_RAW_DECODE_CHUNK, MAX_RAW_DECODE_PANIC_SAMPLES, RAW_DECODE_SCHEMA_VERSION,
+    scan_raw_decoder_with, RawDecodeDomain, RawDecoder, RawScanHost, MAX_RAW_DECODE_CHUNK,
+    MAX_RAW_DECODE_PANIC_SAMPLES,
 };
 use cellgov_fuzz::semantic_sweep::{sweep_ppu, sweep_spu, SemanticSweepReport};
 
@@ -67,6 +67,27 @@ pub(super) fn run_semantic(
     })
 }
 
+/// The deadline and progress lines a raw scan runs under.
+struct ScanHost {
+    start: Instant,
+    timeout: Option<std::time::Duration>,
+    progress: bool,
+    domain_count: u64,
+}
+
+impl RawScanHost for ScanHost {
+    fn expired(&self) -> bool {
+        self.timeout
+            .is_some_and(|bound| self.start.elapsed() >= bound)
+    }
+
+    fn scanned(&mut self, processed: u64) {
+        if self.progress {
+            eprintln!("{}", render_raw_progress(processed, self.domain_count));
+        }
+    }
+}
+
 pub(super) fn run_raw(args: &FuzzRawArgs, quiet: bool) -> Result<CommandExitCode, FuzzCliError> {
     if !matches!(args.reduction, FuzzReduction::None) {
         return Err(FuzzCliError::ReductionUnavailable);
@@ -106,50 +127,20 @@ pub(super) fn run_raw(args: &FuzzRawArgs, quiet: bool) -> Result<CommandExitCode
             "cancel-after exceeds the selected range",
         ));
     }
-    let start = Instant::now();
-    let mut artifact = RawDecodeArtifact {
-        schema_version: RAW_DECODE_SCHEMA_VERSION,
+    let mut host = ScanHost {
+        start: Instant::now(),
+        timeout,
+        progress: reports_progress(args.progress, quiet),
+        domain_count: domain.count,
+    };
+    let artifact = scan_raw_decoder_with(
         decoder,
         domain,
-        status: RawDecodeStatus::Cancelled,
-        processed: 0,
-        accepted: 0,
-        refused: 0,
-        panics: 0,
-        panic_samples: Vec::new(),
-    };
-    while artifact.processed < limit {
-        if timeout.is_some_and(|bound| start.elapsed() >= bound) {
-            break;
-        }
-        let count = (limit - artifact.processed).min(args.chunk_size as u64);
-        let first = u64::from(domain.first) + artifact.processed;
-        let first =
-            u32::try_from(first).map_err(|_| FuzzCliError::Invalid("raw scan offset overflows"))?;
-        let part = scan_raw_decoder(
-            decoder,
-            RawDecodeDomain::new(first, count)?,
-            args.chunk_size,
-            workers,
-            None,
-        )?;
-        artifact.accepted += part.accepted;
-        artifact.refused += part.refused;
-        artifact.panics += part.panics;
-        artifact.processed += part.processed;
-        let available = MAX_RAW_DECODE_PANIC_SAMPLES.saturating_sub(artifact.panic_samples.len());
-        artifact
-            .panic_samples
-            .extend(part.panic_samples.into_iter().take(available));
-        if reports_progress(args.progress, quiet) {
-            eprintln!("{}", render_raw_progress(artifact.processed, domain.count));
-        }
-    }
-    artifact.status = if artifact.processed == domain.count {
-        RawDecodeStatus::Complete
-    } else {
-        RawDecodeStatus::Cancelled
-    };
+        args.chunk_size,
+        workers,
+        args.cancel_after,
+        &mut host,
+    )?;
     let json = serde_json::to_vec_pretty(&artifact)?;
     let summary = RawSummary {
         decoder,

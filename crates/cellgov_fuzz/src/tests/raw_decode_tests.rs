@@ -592,3 +592,38 @@ fn scan_reaches_the_last_word_of_the_space() {
         assert!(scanned.is_clean());
     }
 }
+
+/// A host that stops the scan after its first batch, recording each
+/// progress report.
+#[derive(Default)]
+struct StopAfterOne {
+    scanned: Vec<u64>,
+}
+
+impl RawScanHost for StopAfterOne {
+    fn expired(&self) -> bool {
+        !self.scanned.is_empty()
+    }
+
+    fn scanned(&mut self, processed: u64) {
+        self.scanned.push(processed);
+    }
+}
+
+/// The host's deadline ends a scan between batches, and a scan that
+/// stops short reports itself cancelled, not complete.
+#[test]
+fn a_host_that_stops_the_scan_leaves_it_cancelled_at_a_batch_boundary() {
+    let domain = RawDecodeDomain::new(0, 300).expect("domain");
+    let mut host = StopAfterOne::default();
+    let artifact =
+        scan_raw_decoder_with(RawDecoder::Ppu, domain, 128, 1, None, &mut host).expect("scans");
+    assert_eq!(host.scanned, vec![128]);
+    assert_eq!(artifact.processed, 128);
+    assert_eq!(artifact.status, RawDecodeStatus::Cancelled);
+    assert_eq!(artifact.accepted + artifact.refused, 128);
+
+    let whole = scan_raw_decoder(RawDecoder::Ppu, domain, 128, 1, None).expect("scans");
+    assert_eq!(whole.status, RawDecodeStatus::Complete);
+    assert_eq!(whole.processed, 300);
+}

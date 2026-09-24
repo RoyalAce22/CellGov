@@ -40,31 +40,35 @@ pub(super) fn persist_finding(
     path: &Path,
     artifact: FuzzFindingArtifact,
 ) -> Result<(), FuzzCliError> {
-    artifact.store(path).map_err(|error| {
-        let artifact = Box::new(artifact);
-        let path = path.to_path_buf();
-        match error {
-            ArtifactStoreError::NoParent => FuzzCliError::Invalid("artifact path has no parent"),
-            ArtifactStoreError::Encoding(source) => {
-                FuzzCliError::ArtifactEncoding { source, artifact }
-            }
-            ArtifactStoreError::Write { source, .. } => FuzzCliError::ArtifactWrite {
+    artifact
+        .store(path)
+        .map_err(|error| store_refusal(path, error, Box::new(artifact)))
+}
+
+/// The command's refusal for an artifact the store did not keep.
+pub(super) fn store_refusal(
+    path: &Path,
+    error: ArtifactStoreError,
+    artifact: Box<FuzzFindingArtifact>,
+) -> FuzzCliError {
+    let path = path.to_path_buf();
+    match error {
+        ArtifactStoreError::NoParent => FuzzCliError::Invalid("artifact path has no parent"),
+        ArtifactStoreError::Encoding(source) => FuzzCliError::ArtifactEncoding { source, artifact },
+        ArtifactStoreError::Write { source, .. } => FuzzCliError::ArtifactWrite {
+            path,
+            source,
+            artifact,
+        },
+        ArtifactStoreError::Collision { .. } => FuzzCliError::ArtifactCollision { path, artifact },
+        ArtifactStoreError::ReductionNotStored { stored, .. } => {
+            FuzzCliError::ArtifactReductionNotStored {
                 path,
-                source,
+                stored,
                 artifact,
-            },
-            ArtifactStoreError::Collision { .. } => {
-                FuzzCliError::ArtifactCollision { path, artifact }
-            }
-            ArtifactStoreError::ReductionNotStored { stored, .. } => {
-                FuzzCliError::ArtifactReductionNotStored {
-                    path,
-                    stored,
-                    artifact,
-                }
             }
         }
-    })
+    }
 }
 
 pub(super) fn run_replay(args: &FuzzReplayArgs) -> Result<CommandExitCode, FuzzCliError> {

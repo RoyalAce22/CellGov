@@ -613,6 +613,71 @@ impl DecodeCensusArtifact {
     }
 }
 
+/// Words one worker classifies between its progress reports.
+pub const CENSUS_PROGRESS_BATCH: u64 = 1 << 20;
+
+/// Why one worker's share of a census failed.
+#[derive(Debug, thiserror::Error)]
+pub enum CensusShareError {
+    /// The interval could not be split across the workers.
+    #[error("census partition: {0}")]
+    Partition(#[source] crate::FinitePartitionError),
+    /// A share's first word lies past the 32-bit word space.
+    #[error("census offset overflows the 32-bit word space")]
+    OffsetOverflow,
+    /// A share's batch is not a valid word interval.
+    #[error("census batch: {0}")]
+    Domain(#[source] RawDecodeError),
+    /// The census could not classify a batch.
+    #[error("{0}")]
+    Census(#[source] DecodeCensusError),
+    /// The caller stopped taking progress reports before the share finished.
+    #[error("census progress stopped before the share finished")]
+    ProgressClosed,
+}
+
+/// Workers a census over `domain` keeps busy: an interval shorter than
+/// the worker count leaves the surplus idle.
+pub fn census_workers(domain: RawDecodeDomain, workers: usize) -> usize {
+    usize::try_from(domain.count.min(workers as u64)).unwrap_or(workers)
+}
+
+/// Classifies one worker's share of `domain`, split `workers` ways.
+///
+/// The split assigns every word to a worker before any runs, so the
+/// merged shares do not depend on the worker count. The share runs in
+/// batches of [`CENSUS_PROGRESS_BATCH`] words, and `progress` hears each
+/// batch's word count; it answers `false` once the caller stops
+/// listening.
+///
+/// # Errors
+///
+/// [`CensusShareError`] when the split, a batch interval, a batch's
+/// classification, or the progress report fails.
+pub fn census_share(
+    domain: RawDecodeDomain,
+    workers: usize,
+    worker: usize,
+    mut progress: impl FnMut(u64) -> bool,
+) -> Result<Vec<DecodeCensusArtifact>, CensusShareError> {
+    let bounds = crate::finite_partition_bounds(domain.count as usize, workers, worker)
+        .map_err(CensusShareError::Partition)?;
+    let mut parts = Vec::new();
+    let mut offset = bounds.start as u64;
+    while offset < bounds.end as u64 {
+        let count = (bounds.end as u64 - offset).min(CENSUS_PROGRESS_BATCH);
+        let first = u32::try_from(u64::from(domain.first) + offset)
+            .map_err(|_| CensusShareError::OffsetOverflow)?;
+        let batch = RawDecodeDomain::new(first, count).map_err(CensusShareError::Domain)?;
+        parts.push(census(batch).map_err(CensusShareError::Census)?);
+        offset += count;
+        if !progress(count) {
+            return Err(CensusShareError::ProgressClosed);
+        }
+    }
+    Ok(parts)
+}
+
 #[cfg(test)]
 #[path = "tests/decode_census_tests.rs"]
 mod tests;

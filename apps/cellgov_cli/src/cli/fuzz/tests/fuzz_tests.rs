@@ -1,10 +1,8 @@
 use super::artifact::{persist_finding, run_replay, run_replay_with};
-use super::campaign::{
-    check_finding_limit, drive, plan_campaign, reduce_retained_finding, run_workers,
-    worker_shard_index, CampaignRun,
-};
+use super::campaign::{check_finding_limit, plan_campaign, run_workers, CliHost};
 use super::entry::{run, run_inner, run_inner_with_render, TEST_RENDER};
 use super::*;
+use cellgov_fuzz::runner::{reduce_retained_finding, run_campaign, CampaignRun, WorkerFailure};
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -168,12 +166,14 @@ fn drive_recorded(label: &str, argv: &[&str]) -> (CampaignRun, RecordingSink) {
     let FuzzCommand::PpuInstruction(args) = &parsed.command else {
         panic!("wrong mode")
     };
-    let plan = plan_campaign(args, FuzzTarget::PpuInstruction).expect("plan");
-    let mut state = CampaignRun::default();
+    let planned = plan_campaign(args, FuzzTarget::PpuInstruction).expect("plan");
     let sink = RecordingSink::default();
-    drive(&plan, &mut state, &sink).expect("drive");
-    assert_eq!(state.offset(), plan.limit());
-    (state, sink)
+    let run = {
+        let mut host = CliHost::new(&sink, None, false);
+        run_campaign(planned.plan(), &mut host).expect("drive")
+    };
+    assert_eq!(run.offset, planned.limit());
+    (run, sink)
 }
 
 #[test]
@@ -191,9 +191,12 @@ fn the_batch_loop_declares_the_range_as_its_denominator_and_advances_to_it() {
 
 #[test]
 fn a_failure_line_waits_for_an_in_place_bar_and_prints_at_once_otherwise() {
-    let held = CampaignRun::report_under(true, "fuzz: held");
+    let sink = RecordingSink::default();
+    let mut held = CliHost::new(&sink, None, true);
+    held.report_line("fuzz: held");
     assert_eq!(held.held(), ["fuzz: held".to_owned()]);
-    let printed = CampaignRun::report_under(false, "fuzz: printed");
+    let mut printed = CliHost::new(&sink, None, false);
+    printed.report_line("fuzz: printed");
     assert!(printed.held().is_empty());
 }
 
@@ -323,7 +326,53 @@ fn host_validation_rejects_unsupported_and_invalid_options() {
         vec!["ppu-instruction", "--shard", "2", "--shards", "2"],
     ] {
         let parsed = parse(&args).expect("typed flags parse");
-        assert!(run_inner(&parsed).is_err(), "{args:?}");
+        let error = run_inner(&parsed).expect_err("refused before any case runs");
+        assert_eq!(
+            error.exit_code(),
+            super::super::exit_codes::USAGE,
+            "{args:?}: {error}"
+        );
+    }
+    // With several bad flags, the refusal named is the first in the plan's
+    // order: shard, range and finding limit before workers, workers before
+    // the deadline, and the deadline before the engine configuration.
+    for (args, expected) in [
+        (
+            vec!["ppu-instruction", "--workers", "0", "--shards", "0"],
+            "fuzz: shard must be below a positive shards count",
+        ),
+        (
+            vec!["ppu-instruction", "--workers", "0", "--count", "0"],
+            "fuzz: campaign range starting at 0 cannot hold 0 cases",
+        ),
+        (
+            vec![
+                "ppu-instruction",
+                "--deadline-ms",
+                "0",
+                "--finding-limit",
+                "0",
+            ],
+            "fuzz: finding-limit must be within 1..=1024",
+        ),
+        (
+            vec!["ppu-instruction", "--deadline-ms", "0", "--workers", "0"],
+            "fuzz: workers must be within 1..=64",
+        ),
+        (
+            vec![
+                "ppu-instruction",
+                "--deadline-ms",
+                "0",
+                "--campaign-version",
+                "999",
+            ],
+            "fuzz: deadline-ms must be positive",
+        ),
+    ] {
+        let parsed = parse(&args).expect("typed flags parse");
+        let error = run_inner(&parsed).expect_err("refused before any case runs");
+        assert_eq!(error.to_string(), expected, "{args:?}");
     }
     let version = parse(&[
         "ppu-instruction",
@@ -802,7 +851,7 @@ fn a_panicking_worker_does_not_unwind_the_host_and_all_workers_join() {
             }
         })
         .collect();
-    assert!(matches!(run_workers(work), Err(FuzzCliError::WorkerPanic)));
+    assert!(matches!(run_workers(work), Err(WorkerFailure::Panicked)));
     assert_eq!(completed.load(Ordering::SeqCst), 1);
 }
 
@@ -822,36 +871,6 @@ fn every_generated_engine_dispatches_with_replay_coordinates() {
             "{mode}"
         );
     }
-}
-
-#[test]
-fn host_workers_preserve_the_selected_shard_across_batches() {
-    use cellgov_fuzz::{CampaignSchedule, CampaignShard, CaseRange};
-    let first = 100u64;
-    let count = 130u64;
-    let mut observed = std::collections::BTreeSet::new();
-    for offset in [0u64, 64, 128] {
-        let batch = (count - offset).min(64);
-        for worker in 0..3u32 {
-            let index = worker_shard_index(1, 2, worker, 6, (offset % 6) as u32)
-                .expect("valid worker partition");
-            let schedule = CampaignSchedule {
-                cases: CaseRange {
-                    first: first + offset,
-                    count: batch,
-                },
-                shard: CampaignShard { index, count: 6 },
-                cancellation: None,
-            };
-            for case in schedule.case_indices().expect("bounded schedule") {
-                assert!(observed.insert(case), "case {case} was assigned twice");
-            }
-        }
-    }
-    let expected = (first..first + count)
-        .filter(|case| (case - first) % 2 == 1)
-        .collect();
-    assert_eq!(observed, expected);
 }
 
 pub(super) fn synthetic_finding_artifact() -> FuzzFindingArtifact {

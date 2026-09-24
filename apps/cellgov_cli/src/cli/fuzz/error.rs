@@ -24,6 +24,8 @@ pub(crate) enum FuzzCliError {
         cellgov_fuzz::MAX_RETAINED_FINDINGS
     )]
     FindingLimit,
+    #[error("fuzz: {0}")]
+    Campaign(cellgov_fuzz::runner::CampaignError),
     #[error("fuzz: selected check is not independently switchable by this engine")]
     CheckUnavailable,
     #[error("fuzz: raw decoder scans keep panic samples as scanned and do not reduce them")]
@@ -143,9 +145,33 @@ pub(crate) enum FuzzCliError {
     Regressions(#[from] RegressionError),
 }
 
+impl From<cellgov_fuzz::runner::CampaignError> for FuzzCliError {
+    fn from(error: cellgov_fuzz::runner::CampaignError) -> Self {
+        use cellgov_fuzz::runner::CampaignError;
+        match error {
+            CampaignError::FindingLimit => Self::FindingLimit,
+            CampaignError::Range { first, count } => Self::Range { first, count },
+            CampaignError::Configuration(source) => Self::Configuration(source),
+            CampaignError::CounterOverflow => Self::CounterOverflow,
+            CampaignError::Worker(failure) => failure.into(),
+            other => Self::Campaign(other),
+        }
+    }
+}
+
+impl From<cellgov_fuzz::runner::WorkerFailure> for FuzzCliError {
+    fn from(failure: cellgov_fuzz::runner::WorkerFailure) -> Self {
+        match failure {
+            cellgov_fuzz::runner::WorkerFailure::Panicked => Self::WorkerPanic,
+            cellgov_fuzz::runner::WorkerFailure::Spawn(source) => Self::WorkerSpawn(source),
+        }
+    }
+}
+
 impl FuzzCliError {
     pub(crate) const fn is_usage(&self) -> bool {
         match self {
+            Self::Campaign(source) => source.is_request_refusal(),
             Self::Invalid(_)
             | Self::Range { .. }
             | Self::FindingLimit
@@ -229,6 +255,7 @@ impl FuzzCliError {
                 ArtifactReplayError::Artifact(_) | ArtifactReplayError::NoReducedCase,
             ) => exit_codes::USAGE,
             Self::Invalid(_)
+            | Self::Campaign(_)
             | Self::Range { .. }
             | Self::FindingLimit
             | Self::CheckUnavailable

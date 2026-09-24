@@ -17,6 +17,7 @@ pub mod reduce;
 pub mod reference;
 pub mod regression;
 pub mod report;
+pub mod runner;
 pub mod semantic_sweep;
 pub mod smoke;
 pub mod spu;

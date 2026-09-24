@@ -16,7 +16,9 @@ use super::smoke::{run_promote, run_smoke};
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::{FuzzArgs, FuzzCommand};
 
-pub(super) const MAX_HOST_WORKERS: usize = 64;
+/// The campaign runner's worker bound, which the scans and the census
+/// share.
+const MAX_HOST_WORKERS: usize = cellgov_fuzz::runner::MAX_CAMPAIGN_WORKERS;
 
 pub(crate) fn run_with_render(
     args: &FuzzArgs,
@@ -80,9 +82,15 @@ pub(super) const fn reports_progress(requested: bool, quiet: bool) -> bool {
     requested && !quiet
 }
 
-pub(super) fn worker_count(requested: Option<usize>) -> Result<usize, FuzzCliError> {
+/// The requested worker count, or this host's parallelism up to
+/// [`MAX_HOST_WORKERS`]; not yet checked against the bound.
+pub(super) fn requested_workers(requested: Option<usize>) -> usize {
     let available = std::thread::available_parallelism().map_or(1, |count| count.get());
-    let workers = requested.unwrap_or(available.min(MAX_HOST_WORKERS));
+    requested.unwrap_or(available.min(MAX_HOST_WORKERS))
+}
+
+pub(super) fn worker_count(requested: Option<usize>) -> Result<usize, FuzzCliError> {
+    let workers = requested_workers(requested);
     if workers == 0 || workers > MAX_HOST_WORKERS {
         return Err(FuzzCliError::Invalid("workers must be within 1..=64"));
     }

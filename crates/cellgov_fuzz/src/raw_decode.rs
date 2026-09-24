@@ -232,6 +232,23 @@ impl RawDecodeArtifact {
     }
 }
 
+/// What a raw scan asks of the caller between its bounded batches.
+pub trait RawScanHost {
+    /// Whether the caller's deadline has passed. The scan asks before each
+    /// batch.
+    fn expired(&self) -> bool {
+        false
+    }
+
+    /// A batch finished, leaving `processed` words scanned in all.
+    fn scanned(&mut self, _processed: u64) {}
+}
+
+/// The host of a scan the caller neither times nor watches.
+struct UnwatchedScan;
+
+impl RawScanHost for UnwatchedScan {}
+
 /// Scans bounded chunks without allocating the entire 32-bit word space.
 ///
 /// # Errors
@@ -243,6 +260,33 @@ pub fn scan_raw_decoder(
     chunk_size: usize,
     workers: usize,
     cancel_after: Option<u64>,
+) -> Result<RawDecodeArtifact, RawDecodeError> {
+    scan_raw_decoder_with(
+        decoder,
+        domain,
+        chunk_size,
+        workers,
+        cancel_after,
+        &mut UnwatchedScan,
+    )
+}
+
+/// [`scan_raw_decoder`] that asks `host` before each batch whether to go
+/// on, and tells it after each how far the scan has got.
+///
+/// A scan the host stops short is [`RawDecodeStatus::Cancelled`], like
+/// one `cancel_after` stops.
+///
+/// # Errors
+///
+/// Refuses invalid bounds, invalid worker settings, or a finite sweep failure.
+pub fn scan_raw_decoder_with(
+    decoder: RawDecoder,
+    domain: RawDecodeDomain,
+    chunk_size: usize,
+    workers: usize,
+    cancel_after: Option<u64>,
+    host: &mut dyn RawScanHost,
 ) -> Result<RawDecodeArtifact, RawDecodeError> {
     RawDecodeDomain::new(domain.first, domain.count)?;
     if chunk_size == 0 || chunk_size > MAX_RAW_DECODE_CHUNK {
@@ -261,11 +305,7 @@ pub fn scan_raw_decoder(
         schema_version: RAW_DECODE_SCHEMA_VERSION,
         decoder,
         domain,
-        status: if limit == domain.count {
-            RawDecodeStatus::Complete
-        } else {
-            RawDecodeStatus::Cancelled
-        },
+        status: RawDecodeStatus::Cancelled,
         processed: 0,
         accepted: 0,
         refused: 0,
@@ -276,6 +316,9 @@ pub fn scan_raw_decoder(
         return Err(RawDecodeError::Sweep(FiniteSweepError::ZeroWorkers));
     }
     while artifact.processed < limit {
+        if host.expired() {
+            break;
+        }
         let remaining = limit - artifact.processed;
         let batch = remaining.min(chunk_size as u64) as usize;
         let start = u64::from(domain.first) + artifact.processed;
@@ -313,6 +356,10 @@ pub fn scan_raw_decoder(
         artifact.refused += result.refused;
         artifact.panics += result.panics;
         artifact.processed += result.total;
+        host.scanned(artifact.processed);
+    }
+    if artifact.processed == domain.count {
+        artifact.status = RawDecodeStatus::Complete;
     }
     Ok(artifact)
 }

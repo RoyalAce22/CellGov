@@ -421,3 +421,40 @@ fn error_display_names_every_refusal() {
         format!("decode census domain is invalid: {inner_text}")
     );
 }
+
+/// Every worker's share, merged, is the one census of the interval.
+#[test]
+fn the_shares_of_a_census_merge_into_the_whole_interval() {
+    let domain = RawDecodeDomain::new(0x7c00_0000, 5_000).expect("domain");
+    let workers = census_workers(domain, 3);
+    assert_eq!(workers, 3);
+    let mut parts = Vec::new();
+    let mut reported = 0u64;
+    for worker in 0..workers {
+        parts.extend(
+            census_share(domain, workers, worker, |count| {
+                reported += count;
+                true
+            })
+            .expect("share"),
+        );
+    }
+    assert_eq!(reported, 5_000);
+    assert_eq!(
+        merge(&parts).expect("merges"),
+        census(domain).expect("census")
+    );
+    assert_eq!(
+        census_workers(RawDecodeDomain::new(0, 2).expect("domain"), 8),
+        2
+    );
+}
+
+#[test]
+fn a_share_whose_progress_listener_left_is_refused() {
+    let domain = RawDecodeDomain::new(0, 100).expect("domain");
+    assert!(matches!(
+        census_share(domain, 1, 0, |_| false),
+        Err(CensusShareError::ProgressClosed)
+    ));
+}

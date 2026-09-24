@@ -6,7 +6,7 @@
 //! [Chen2013 p:2 s:1 Introduction] A triage that filters failures by text
 //! patterns over their output is the ad hoc one the fuzzer-taming work replaces.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use cellgov_fuzz::artifact::{ArtifactFingerprint, ArtifactReduction};
@@ -40,34 +40,22 @@ pub(crate) const EXIT_REGRESSION: i32 = exit_codes::command_specific(16);
 /// Exit code: a smoke campaign reached less than its coverage floor.
 pub(crate) const EXIT_VACUOUS: i32 = exit_codes::command_specific(17);
 
-/// One retained finding's artifact, as the summary names it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ArtifactRecord {
-    /// Path the artifact write targeted.
-    pub path: PathBuf,
-    /// Generator version the finding replays under.
-    pub campaign_version: u32,
-    /// Master seed the finding replays under.
-    pub seed: u64,
-    /// Original case index.
-    pub case_index: u64,
-    pub finding_kind: FindingKind,
-    /// Stable fingerprint, as the artifact records it.
-    pub fingerprint: ArtifactFingerprint,
-    /// Reduction state stored with the finding.
-    pub reduction: ArtifactReduction,
-    /// Whether the artifact reached its path.
-    pub stored: bool,
+pub(crate) use cellgov_fuzz::runner::{ArtifactRecord, CampaignOutcome, CampaignSummary};
+
+/// How the terminal names one retained finding's artifact.
+pub(crate) trait ArtifactRecordText {
+    /// Exact command that replays this artifact's original case.
+    fn replay_command(&self) -> String;
+
+    /// One summary line for the finding, after `prefix`.
+    fn render(&self, prefix: &str) -> String;
 }
 
-impl ArtifactRecord {
-    /// Exact command that replays this artifact's original case.
-    #[must_use]
-    pub fn replay_command(&self) -> String {
+impl ArtifactRecordText for ArtifactRecord {
+    fn replay_command(&self) -> String {
         format!("cellgov dev fuzz replay --artifact {}", self.path.display())
     }
 
-    /// One summary line for the finding, after `prefix`.
     fn render(&self, prefix: &str) -> String {
         format!(
             "{prefix}version={} seed={} case={} kind={:?} check={} divergence={} reduction={} artifact={} {}\n",
@@ -230,86 +218,14 @@ pub(crate) fn render_promotion(regression: &Regression) -> String {
     )
 }
 
-/// Counts of one generated campaign, accumulated over every worker run.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct CampaignSummary {
-    /// Cases considered, decode refusals included.
-    pub cases: u64,
-    /// Decoded cases, or decoded instruction words for a sequence engine.
-    pub decoded: u64,
-    /// Cases eligible for their semantic check.
-    pub eligible: u64,
-    /// Cases the target refused as unmodeled.
-    pub unsupported: u64,
-    /// Cases the architecture leaves undefined.
-    pub undefined: u64,
-    /// Findings by kind, retained or not.
-    pub finding_counts: BTreeMap<FindingKind, u64>,
-    /// Retained findings, in storage order.
-    pub artifacts: Vec<ArtifactRecord>,
-    /// Retained findings whose reduction failed.
-    pub reductions_failed: u64,
-    /// Whether the range ended before the campaign considered every case index.
-    pub cancelled: bool,
-}
-
-impl CampaignSummary {
-    /// Findings that fail the campaign; see
-    /// [`cellgov_fuzz::FindingKind::fails_the_run`].
-    #[must_use]
-    pub fn findings(&self) -> u64 {
-        cellgov_fuzz::report::failing_findings(&self.finding_counts)
-    }
-}
-
-/// Terminal state of one generated campaign, in exit precedence order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CampaignOutcome {
-    /// The command could not store a finding's artifact.
-    EvidenceNotStored,
-    /// The engine failed inside the harness.
-    HarnessFailure,
-    /// A retained finding's reduction failed.
-    ReductionFailed,
-    /// The range ended before every case ran, findings or not.
-    Cancelled,
-    /// Every case ran and the campaign retained a finding or a target
-    /// panic. The artifacts are the campaign's product, so the run
-    /// succeeded; the summary line's outcome field carries the signal.
-    Findings,
-    /// Every case ran and none was eligible.
-    NoEligibleCases,
-    /// Every case ran clean.
-    Clean,
-}
-
-impl CampaignOutcome {
-    #[must_use]
-    pub fn classify(
-        summary: &CampaignSummary,
-        evidence_not_stored: bool,
-        harness_failure: bool,
-    ) -> Self {
-        if evidence_not_stored {
-            Self::EvidenceNotStored
-        } else if harness_failure {
-            Self::HarnessFailure
-        } else if summary.reductions_failed > 0 {
-            Self::ReductionFailed
-        } else if summary.cancelled {
-            Self::Cancelled
-        } else if summary.findings() > 0 {
-            Self::Findings
-        } else if summary.eligible == 0 {
-            Self::NoEligibleCases
-        } else {
-            Self::Clean
-        }
-    }
-
+/// The exit status each campaign outcome maps to.
+pub(crate) trait CampaignExit {
     /// The documented exit status for this outcome.
-    #[must_use]
-    pub const fn exit_code(self) -> CommandExitCode {
+    fn exit_code(self) -> CommandExitCode;
+}
+
+impl CampaignExit for CampaignOutcome {
+    fn exit_code(self) -> CommandExitCode {
         match self {
             Self::EvidenceNotStored => CommandExitCode::new(EXIT_EVIDENCE_NOT_STORED),
             Self::HarnessFailure => CommandExitCode::new(EXIT_HARNESS_FAILURE),

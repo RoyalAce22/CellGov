@@ -4,8 +4,9 @@ use std::io::Write;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use cellgov_fuzz::decode_census::{census, merge, DecodeCensusArtifact, DecodeCensusError};
-use cellgov_fuzz::finite_partition_bounds;
+use cellgov_fuzz::decode_census::{
+    census_share, census_workers, merge, CensusShareError, DecodeCensusArtifact, DecodeCensusError,
+};
 use cellgov_fuzz::raw_decode::RawDecodeDomain;
 
 use super::entry::{reports_progress, worker_count, write_stdout};
@@ -14,8 +15,6 @@ use super::outcome::{render_census_progress, render_census_summary, CensusSummar
 use crate::cli::exit::CommandExitCode;
 use crate::cli::parse::{FuzzCensusArgs, FuzzCensusMergeArgs};
 
-/// Words one worker classifies before it reports progress.
-const PROGRESS_BATCH: u64 = 1 << 20;
 /// Words in the whole 32-bit instruction space.
 const FULL_SPACE_WORDS: u64 = 1 << 32;
 
@@ -66,8 +65,7 @@ fn classify_in_parallel(
     progress: bool,
 ) -> Result<Vec<DecodeCensusArtifact>, FuzzCliError> {
     let total = domain.count;
-    // An interval shorter than the worker count leaves the surplus idle.
-    let active_workers = usize::try_from(total.min(workers as u64)).unwrap_or(workers);
+    let active_workers = census_workers(domain, workers);
     let (sender, receiver) = mpsc::channel::<u64>();
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(active_workers);
@@ -75,22 +73,16 @@ fn classify_in_parallel(
         for worker in 0..active_workers {
             let sender = sender.clone();
             let job = move || -> Result<Vec<DecodeCensusArtifact>, FuzzCliError> {
-                let bounds = finite_partition_bounds(total as usize, active_workers, worker)
-                    .map_err(FuzzCliError::CensusPartition)?;
-                let mut parts = Vec::new();
-                let mut offset = bounds.start as u64;
-                while offset < bounds.end as u64 {
-                    let count = (bounds.end as u64 - offset).min(PROGRESS_BATCH);
-                    let first = u64::from(domain.first) + offset;
-                    let first =
-                        u32::try_from(first).map_err(|_| FuzzCliError::CensusOffsetOverflow)?;
-                    parts.push(census(RawDecodeDomain::new(first, count)?)?);
-                    offset += count;
-                    sender
-                        .send(count)
-                        .map_err(|_| FuzzCliError::CensusProgressClosed)?;
-                }
-                Ok(parts)
+                census_share(domain, active_workers, worker, |count| {
+                    sender.send(count).is_ok()
+                })
+                .map_err(|error| match error {
+                    CensusShareError::Partition(source) => FuzzCliError::CensusPartition(source),
+                    CensusShareError::OffsetOverflow => FuzzCliError::CensusOffsetOverflow,
+                    CensusShareError::Domain(source) => FuzzCliError::Raw(source),
+                    CensusShareError::Census(source) => FuzzCliError::Census(source),
+                    CensusShareError::ProgressClosed => FuzzCliError::CensusProgressClosed,
+                })
             };
             match std::thread::Builder::new().spawn_scoped(scope, job) {
                 Ok(handle) => handles.push(handle),

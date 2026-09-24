@@ -9,11 +9,11 @@ use cellgov_fuzz::artifact::{
 use cellgov_fuzz::reduce::{ReductionPolicy, ReductionRequest};
 use cellgov_fuzz::regression::{self, Regression, RegressionProfile};
 use cellgov_fuzz::report::failing_findings;
+use cellgov_fuzz::runner::reduce_retained_finding;
 use cellgov_fuzz::smoke::SMOKE_CAMPAIGNS;
 use cellgov_fuzz::{ReductionOutcome, RunOutcome};
 
 use super::artifact::persist_finding;
-use super::campaign::reduce_retained_finding;
 use super::entry::{reports_progress, write_stdout};
 use super::error::FuzzCliError;
 use super::outcome::{
