@@ -1,6 +1,7 @@
 //! Wire shape of the identity header record.
 
-use super::*;
+use super::trace_record::*;
+use crate::level::TraceLevel;
 
 fn roundtrip(record: TraceRecord) {
     let mut buf = Vec::new();

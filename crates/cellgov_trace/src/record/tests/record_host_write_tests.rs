@@ -1,6 +1,10 @@
 //! Wire shape of the host-write record.
 
-use super::*;
+use super::codec::*;
+use super::error::*;
+use super::reasons::*;
+use super::trace_record::*;
+use crate::level::TraceLevel;
 
 fn roundtrip(record: TraceRecord) {
     let mut buf = Vec::new();

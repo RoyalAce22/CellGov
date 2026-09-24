@@ -1,7 +1,10 @@
 //! The format-3 header's layout, and the refusal by name of a header
 //! written under another trace format.
 
-use super::*;
+use super::codec::*;
+use super::error::*;
+use super::trace_record::*;
+use crate::hash::StateHash;
 
 #[test]
 fn the_header_is_tag_version_then_the_firmware_game_and_override_fingerprints() {

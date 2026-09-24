@@ -1,6 +1,13 @@
 //! TraceRecord wire format -- encode/decode roundtrips, locked tags and sizes, malformed-input rejection.
 
-use super::*;
+use super::codec::*;
+use super::error::*;
+use super::reasons::*;
+use super::trace_record::*;
+use crate::hash::StateHash;
+use crate::level::TraceLevel;
+use cellgov_event::UnitId;
+use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 
 fn roundtrip(r: TraceRecord) {
     let mut buf = Vec::new();
