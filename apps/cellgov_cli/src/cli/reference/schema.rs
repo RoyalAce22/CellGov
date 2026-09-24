@@ -6,7 +6,9 @@
 
 use std::path::Path;
 
-use cellgov_install::store::{Artifact, StoreLayout, TitleId, TitleTree, VersionKey};
+use cellgov_install::store::{
+    Artifact, StoreLayout, TitleId, TitleTree, VersionKey, PSN_HDD_DISTRIBUTION,
+};
 
 use crate::cli::store::read::model::{
     store_rel, AnchorDoc, BaseDoc, CoreOsDoc, CoreOsFileDoc, DivergenceDoc, FirmwareDoc,
@@ -141,7 +143,7 @@ fn title_doc(title_id: &TitleId, update_version: &VersionKey) -> TitleDoc {
             // names no entry for.
             dir: format!("dev_hdd0/game/{SAMPLE_TITLE_ID}"),
             tree: TitleTree::Game.dir_name().to_string(),
-            distribution: "psn-hdd".to_string(),
+            distribution: PSN_HDD_DISTRIBUTION.to_string(),
             source_sha256: SAMPLE_SHA.to_string(),
             system_ver: Some("01.5000".to_string()),
             shipped_firmware: None,

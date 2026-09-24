@@ -7,8 +7,8 @@ use cellgov_install::store::TitleTree;
 
 use super::*;
 use crate::cli::store::read::collect::StoreView;
-use crate::composition::inventory::{BaseEntry, StoreInventory, TitleEntry};
 use cellgov_boot::manifest::TitleRegistry;
+use cellgov_install::store::inventory::{BaseEntry, StoreInventory, TitleEntry};
 
 const TITLE_ID: &str = "TEST00000";
 

@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::composition::compose::GameChoice;
-use crate::composition::inventory::FirmwareEntry;
 use crate::composition::select::{FirmwareSelectedBy, ManagedFirmware};
+use cellgov_install::store::inventory::FirmwareEntry;
 
 fn selection(fw: Option<&str>, game_ver: Option<&str>, dir: Option<&str>) -> BootSelection {
     BootSelection {

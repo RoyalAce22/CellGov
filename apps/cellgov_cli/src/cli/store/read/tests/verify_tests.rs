@@ -14,7 +14,7 @@ fn hash(byte: u8) -> HexSha256 {
 fn view() -> StoreView {
     StoreView {
         root: PathBuf::from("vfs"),
-        inventory: crate::composition::inventory::StoreInventory::read(std::path::Path::new(
+        inventory: cellgov_install::store::inventory::StoreInventory::read(std::path::Path::new(
             "no-such-store-root",
         ))
         .expect("an absent root reads as an empty store"),

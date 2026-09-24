@@ -19,9 +19,8 @@ use std::path::{Path, PathBuf};
 /// Instruction cap for titles whose manifest does not set one.
 pub const DEFAULT_BENCH_MAX_STEPS: u64 = 100_000_000;
 
-/// The `game_ver` naming a title's base install.
-#[allow(dead_code, reason = "not every suite names a game version")]
-pub const BASE_GAME_VER: &str = "base";
+#[allow(unused_imports, reason = "not every suite names a game version")]
+pub use cellgov_install::store::BASE_GAME_VER;
 
 pub fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

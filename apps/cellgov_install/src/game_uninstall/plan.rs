@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::store::inventory::{update_record_versions, RecordDirError};
 use crate::store::layout::{Artifact, StoreLayout, TitleId, VersionKey};
 use crate::store::record::InstallRecord;
 
@@ -347,12 +348,6 @@ fn check_record_describes(
     Ok(())
 }
 
-/// Prefix an update record's filename carries before its version key.
-const UPDATE_RECORD_PREFIX: &str = "update-";
-
-/// Suffix every install-record filename carries.
-const INSTALL_RECORD_SUFFIX: &str = ".install.toml";
-
 /// The update versions installed for `title_id`.
 ///
 /// A version key is never normalized, so the keys sort in byte order:
@@ -361,27 +356,9 @@ fn installed_updates(
     layout: &StoreLayout,
     title_id: &TitleId,
 ) -> Result<Vec<String>, GameUninstallError> {
-    let dir = layout.installs_dir().join("titles").join(title_id.as_str());
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => return Err(GameUninstallError::RecordsReadDir { dir, source }),
-    };
-    let mut out = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|source| GameUninstallError::RecordsReadDir {
-            dir: dir.clone(),
-            source,
-        })?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if let Some(rest) = name.strip_prefix(UPDATE_RECORD_PREFIX) {
-            if let Some(version) = rest.strip_suffix(INSTALL_RECORD_SUFFIX) {
-                out.push(version.to_string());
-            }
-        }
-    }
-    out.sort();
-    Ok(out)
+    update_record_versions(layout, title_id).map_err(|RecordDirError { dir, source }| {
+        GameUninstallError::RecordsReadDir { dir, source }
+    })
 }
 
 #[cfg(test)]

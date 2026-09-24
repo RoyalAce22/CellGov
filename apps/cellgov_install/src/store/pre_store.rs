@@ -13,10 +13,8 @@ use std::path::{Path, PathBuf};
 
 use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNTS;
 
+use crate::store::inventory::{record_files, RecordDirError};
 use crate::store::layout::StoreLayout;
-
-/// Suffix a pre-store install record shares with a store one.
-const INSTALL_RECORD_SUFFIX: &str = ".install.toml";
 
 /// What a piece of pre-store residue was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,30 +156,15 @@ fn detect(root: &Path) -> Result<Vec<PreStoreResidue>, PreStoreError> {
 /// a firmware record sits under `firmware/`, a title record under
 /// `titles/<id>/`.
 fn flat_records(root: &Path, installs: &Path) -> Result<Vec<PathBuf>, PreStoreError> {
-    let entries = match std::fs::read_dir(installs) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => {
-            return Err(PreStoreError::Probe {
-                root: root.to_path_buf(),
-                probed: installs.to_path_buf(),
-                source,
-            })
-        }
-    };
-    let mut out = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|source| PreStoreError::Probe {
+    let named_like_a_record =
+        record_files(installs).map_err(|RecordDirError { dir, source }| PreStoreError::Probe {
             root: root.to_path_buf(),
-            probed: installs.to_path_buf(),
+            probed: dir,
             source,
         })?;
-        let path = entry.path();
-        let named_like_a_record = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.ends_with(INSTALL_RECORD_SUFFIX));
-        if named_like_a_record && probe(root, &path)?.is_some_and(|md| md.is_file()) {
+    let mut out = Vec::new();
+    for path in named_like_a_record {
+        if probe(root, &path)?.is_some_and(|md| md.is_file()) {
             out.push(path);
         }
     }

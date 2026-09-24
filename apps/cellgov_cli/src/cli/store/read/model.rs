@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use cellgov_install::store::components_under;
 use serde::Serialize;
 
 /// Schema version every read command's JSON document carries.
@@ -19,20 +20,16 @@ pub(crate) const STORE_FORMAT_VERSION: u32 = 2;
 /// A path outside the root keeps its own spelling, because rendering it
 /// relative would name a different file.
 pub(crate) fn store_rel(root: &Path, path: &Path) -> String {
-    let Ok(rel) = path.strip_prefix(root) else {
-        return path.display().to_string();
-    };
-    let mut parts = Vec::new();
-    for component in rel.components() {
-        match component {
-            std::path::Component::Normal(part) => parts.push(part.to_string_lossy()),
-            // A component that is not a plain name (`..`, a root, a
-            // Win32 prefix) cannot be dropped: the joined remainder
-            // would name a different file than the path does.
-            _ => return path.display().to_string(),
-        }
-    }
-    parts.join("/")
+    components_under(root, path).map_or_else(
+        || path.display().to_string(),
+        |parts| {
+            parts
+                .iter()
+                .map(|part| part.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        },
+    )
 }
 
 /// One installed firmware version.
@@ -160,7 +157,7 @@ pub(crate) struct BaseDoc {
     /// entry. Absent under the conditions [`BaseEntry::shipped_firmware`]
     /// lists.
     ///
-    /// [`BaseEntry::shipped_firmware`]: crate::composition::inventory::BaseEntry::shipped_firmware
+    /// [`BaseEntry::shipped_firmware`]: cellgov_install::store::inventory::BaseEntry::shipped_firmware
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shipped_firmware: Option<String>,
     /// The install record describing it, absent when the title id is

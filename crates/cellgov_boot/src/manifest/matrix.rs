@@ -14,16 +14,13 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use cellgov_install::store::VersionKey;
+pub use cellgov_install::store::BASE_GAME_VER;
 use cellgov_install::system_ver::firmware_version_key;
 
 use super::checkpoint::CheckpointTrigger;
 use super::loader::{mirror_makes_checkpoint_unreachable, parse_checkpoint, ManifestError};
 use super::model::GameSource;
 use super::schema::ManifestMatrixRow;
-
-/// The `game_ver` that names a title's base install; the `--game-ver`
-/// flag selects that install by this value.
-pub const BASE_GAME_VER: &str = "base";
 
 /// What the registry declares a cell to show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]

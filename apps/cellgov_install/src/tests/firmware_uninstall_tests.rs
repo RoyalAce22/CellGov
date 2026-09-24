@@ -2,6 +2,7 @@ use super::*;
 
 use crate::game_install::sha256_of;
 use crate::scratch_dir::{scratch, ScratchDir};
+use crate::store::layout::INSTALL_RECORD_SUFFIX;
 use crate::store::record::{ArtifactRecord, SourceRecord};
 use crate::store::INSTALL_RECORD_FORMAT_VERSION;
 

@@ -16,12 +16,14 @@ use cellgov_ps3_abi::format::dev_flash::GUEST_FLASH_MOUNT;
 use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
 
 use super::identity::{run_identity, IdentityError};
-use super::inventory::{dir_exists, BaseEntry, InventoryError, StoreInventory, UpdateEntry};
 use super::select::{
     select_firmware, select_game_version, FirmwareChoice, FirmwareSelectError, GameVersion,
     GameVersionSelectError,
 };
 use cellgov_boot::manifest::{GameSource, ResolveEbootError, TitleManifest};
+use cellgov_install::store::inventory::{
+    dir_exists, BaseEntry, InventoryError, StoreInventory, UpdateEntry,
+};
 
 /// Guest prefix a title's disc tree mounts under, joined with the
 /// title id.

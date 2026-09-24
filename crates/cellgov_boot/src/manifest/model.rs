@@ -3,6 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
+use cellgov_install::store::{DISC_DISTRIBUTION, PSN_HDD_DISTRIBUTION};
+
 use super::checkpoint::CheckpointTrigger;
 use super::matrix::{CellKey, MatrixCell};
 
@@ -72,11 +74,12 @@ impl Distribution {
     }
 
     /// Kebab-case wire form used in TOML `distribution = "..."` fields.
+    /// The two an install record also carries are the record's own tags.
     pub fn kebab_label(self) -> &'static str {
         match self {
-            Self::PsnHdd => "psn-hdd",
+            Self::PsnHdd => PSN_HDD_DISTRIBUTION,
             Self::RetailHdd => "retail-hdd",
-            Self::DiscIso => "disc-iso",
+            Self::DiscIso => DISC_DISTRIBUTION,
             Self::FirmwareExec => "firmware-exec",
             Self::Microtest => "microtest",
         }

@@ -25,7 +25,14 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::Sha256 as HexSha256;
-use crate::store::layout::{is_safe_component, store_path_is_safe, ArtifactKind};
+use crate::store::layout::{is_safe_component, store_path_is_safe, ArtifactKind, TitleTree};
+
+/// The `[title] distribution` tag a PKG base install records.
+pub const PSN_HDD_DISTRIBUTION: &str = "psn-hdd";
+
+/// The `[title] distribution` tag a disc-image install records, and
+/// the one value that makes a base a `dev_bdvd` tree.
+pub const DISC_DISTRIBUTION: &str = "disc-iso";
 
 /// Install-record schema version; a record declaring any other is refused.
 pub const INSTALL_RECORD_FORMAT_VERSION: u32 = 3;
@@ -273,7 +280,8 @@ pub struct TitleRecord {
     pub category: String,
     /// PARAM.SFO `TITLE`.
     pub title: String,
-    /// Install distribution tag (`psn-hdd` / `disc-iso`).
+    /// Install distribution tag: [`PSN_HDD_DISTRIBUTION`],
+    /// [`DISC_DISTRIBUTION`], or an update's own tag.
     pub distribution: String,
     /// PARAM.SFO `PS3_SYSTEM_VER`, spelled as the table spells it
     /// (`03.4000`): the lowest system software the title says it runs
@@ -298,6 +306,19 @@ pub struct TitleRecord {
     /// - the installer that wrote the record predates the field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub shipped_firmware: Option<String>,
+}
+
+impl TitleRecord {
+    /// The mount a base with this record's distribution backs:
+    /// `dev_bdvd` for a disc image, `dev_hdd0/game` for anything else.
+    #[must_use]
+    pub fn tree(&self) -> TitleTree {
+        if self.distribution == DISC_DISTRIBUTION {
+            TitleTree::Disc
+        } else {
+            TitleTree::Game
+        }
+    }
 }
 
 /// A store entry's record: enough to verify a reinstall reproduces the

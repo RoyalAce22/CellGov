@@ -267,26 +267,6 @@ impl SyntheticStore {
         self.root.join("firmware").join(version)
     }
 
-    /// Add the single `dev_flash` mount a pre-store firmware install
-    /// wrote, with its manifest inside.
-    pub(super) fn add_pre_store_firmware_mount(&self) -> &Self {
-        let dir = self.root.join("dev_flash");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("firmware.toml"), "format_version = 1\n").unwrap();
-        self
-    }
-
-    /// Add a `<title-id>.install.toml` where the pre-store layout filed
-    /// its records, directly under the records directory.
-    pub(super) fn add_flat_install_record(&self, title_id: &str) -> &Self {
-        self.write_record(
-            &[],
-            &format!("{title_id}.install.toml"),
-            "format_version = 2\n",
-        );
-        self
-    }
-
     fn write_record(&self, dirs: &[&str], name: &str, body: &str) {
         let dir = dirs
             .iter()

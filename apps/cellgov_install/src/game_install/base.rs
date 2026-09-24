@@ -39,7 +39,9 @@ use crate::sce;
 use crate::self_image::is_sce_wrapped;
 use crate::store::layout::{staging_sibling, Artifact, StoreLayout, TitleId};
 use crate::store::lock::lock_artifact;
-use crate::store::record::{ArtifactRecord, RapRecord, TitleRecord};
+use crate::store::record::{
+    ArtifactRecord, RapRecord, TitleRecord, DISC_DISTRIBUTION, PSN_HDD_DISTRIBUTION,
+};
 use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 use cellgov_ps3_abi::format::title_tree::DISC_UPDATE_PUP;
 
@@ -464,7 +466,7 @@ pub fn install_pkg(
             content_id: content_id.clone(),
             category,
             title,
-            distribution: "psn-hdd".to_string(),
+            distribution: PSN_HDD_DISTRIBUTION.to_string(),
             system_ver,
             shipped_firmware: None,
         },
@@ -644,7 +646,7 @@ pub fn install_iso(
             content_id: title_id.clone(),
             category,
             title,
-            distribution: "disc-iso".to_string(),
+            distribution: DISC_DISTRIBUTION.to_string(),
             system_ver,
             shipped_firmware: shipped.as_ref().map(|s| s.version.clone()),
         },

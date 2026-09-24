@@ -22,7 +22,7 @@ use cellgov_install::manifest::{sha256_of, Sha256};
 use cellgov_install::param_sfo;
 use cellgov_install::store::{
     preflight, record_rel_path, Artifact, ArtifactKind, InstallRecord, StoreLayout, TitleId,
-    TitleRecord, VersionKey,
+    TitleRecord, TitleTree, VersionKey, DISC_DISTRIBUTION,
 };
 use cellgov_install::system_ver::firmware_version_key;
 use cellgov_ps3_abi::format::dev_flash::{FLASH_MOUNT, VSH_MODULE_DIR, VSH_SELF};
@@ -34,10 +34,6 @@ use crate::cli::keys::install_root_of;
 use crate::cli::parse::GenManifestArgs;
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
 use cellgov_boot::manifest::TitleManifest;
-
-/// The `distribution` tag a disc install records; its PARAM.SFO sits
-/// under `PS3_GAME/`.
-const DISC_DISTRIBUTION: &str = "disc-iso";
 
 /// Registry key of the system software a firmware image ships.
 const VSH_CONTENT_ID: &str = "VSH";
@@ -308,10 +304,9 @@ impl Generated {
 /// A disc tree holds it under `PS3_GAME/`; an HDD tree holds it at the
 /// root.
 fn param_sfo_rel(title: &TitleRecord) -> String {
-    if title.distribution == DISC_DISTRIBUTION {
-        format!("{DISC_GAME_DIR}/{PARAM_SFO_FILE}")
-    } else {
-        PARAM_SFO_FILE.to_string()
+    match title.tree() {
+        TitleTree::Disc => format!("{DISC_GAME_DIR}/{PARAM_SFO_FILE}"),
+        TitleTree::Game => PARAM_SFO_FILE.to_string(),
     }
 }
 

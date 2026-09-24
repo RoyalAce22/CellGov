@@ -16,8 +16,8 @@ use cellgov_install::store::{
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
 use crate::cli::parse::OutputFormat;
-use crate::composition::inventory::FirmwareEntry;
 use cellgov_boot::manifest::BASE_GAME_VER;
+use cellgov_install::store::inventory::FirmwareEntry;
 
 use super::collect::StoreView;
 use super::model::{DivergenceDoc, VerifiedEntryDoc, VerifyDoc, KERNEL_NOT_RECORDED};

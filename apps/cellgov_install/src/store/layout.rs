@@ -41,6 +41,54 @@ pub fn hdd0_exdata_dir(dev_hdd0: &Path) -> PathBuf {
 /// store rather than in it.
 const CELLGOV_DIR: &str = ".cellgov";
 
+/// Directory holding the firmware entries, under the root and under the
+/// records and locks directories alike.
+const FIRMWARE_DIR: &str = "firmware";
+
+/// Directory holding the per-title entries, under the root and under the
+/// records and locks directories alike.
+const TITLES_DIR: &str = "titles";
+
+/// Suffix every install-record filename carries.
+pub(crate) const INSTALL_RECORD_SUFFIX: &str = ".install.toml";
+
+/// Prefix an update's record and lock filenames carry before its
+/// version key.
+const UPDATE_RECORD_PREFIX: &str = "update-";
+
+/// The version a title's base install answers to. `--game-ver` selects
+/// the base by it, and the store files the base record under it.
+pub const BASE_GAME_VER: &str = "base";
+
+/// The record filename of firmware `version`.
+pub(crate) fn firmware_record_file(version: &str) -> String {
+    format!("{version}{INSTALL_RECORD_SUFFIX}")
+}
+
+/// The record filename of a title's base install.
+pub(crate) fn base_record_file() -> String {
+    format!("{BASE_GAME_VER}{INSTALL_RECORD_SUFFIX}")
+}
+
+/// The record filename of a title's update `version`.
+pub(crate) fn update_record_file(version: &str) -> String {
+    format!("{UPDATE_RECORD_PREFIX}{version}{INSTALL_RECORD_SUFFIX}")
+}
+
+/// The version a firmware record filename carries, or `None` for a
+/// name that is no record.
+pub(crate) fn firmware_record_version(file_name: &str) -> Option<&str> {
+    file_name.strip_suffix(INSTALL_RECORD_SUFFIX)
+}
+
+/// The version an update record filename carries, or `None` for a name
+/// that is no update record.
+pub(crate) fn update_record_version(file_name: &str) -> Option<&str> {
+    file_name
+        .strip_prefix(UPDATE_RECORD_PREFIX)?
+        .strip_suffix(INSTALL_RECORD_SUFFIX)
+}
+
 /// Directory inside a firmware entry, beside `dev_flash/`, that holds
 /// what the install copied from the CoreOS package. No mount composes
 /// it, so nothing a boot loads comes from it.
@@ -387,15 +435,31 @@ fn hidden_sibling(final_dir: &Path, prefix: &str) -> Result<PathBuf, HiddenSibli
 pub fn record_rel_path(artifact: &Artifact) -> PathBuf {
     match artifact {
         Artifact::Firmware { version } => {
-            Path::new("firmware").join(format!("{}.install.toml", version.as_str()))
+            Path::new(FIRMWARE_DIR).join(firmware_record_file(version.as_str()))
         }
-        Artifact::TitleBase { title_id } => Path::new("titles")
+        Artifact::TitleBase { title_id } => Path::new(TITLES_DIR)
             .join(title_id.as_str())
-            .join("base.install.toml"),
-        Artifact::TitleUpdate { title_id, version } => Path::new("titles")
+            .join(base_record_file()),
+        Artifact::TitleUpdate { title_id, version } => Path::new(TITLES_DIR)
             .join(title_id.as_str())
-            .join(format!("update-{}.install.toml", version.as_str())),
+            .join(update_record_file(version.as_str())),
     }
+}
+
+/// The components of `path` below `root`, or `None` when `path` is not
+/// under `root` or climbs out of it. The walk skips a `.` component.
+#[must_use]
+pub fn components_under<'a>(root: &Path, path: &'a Path) -> Option<Vec<&'a std::ffi::OsStr>> {
+    let rel = path.strip_prefix(root).ok()?;
+    let mut parts = Vec::new();
+    for component in rel.components() {
+        match component {
+            std::path::Component::Normal(part) => parts.push(part),
+            std::path::Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    Some(parts)
 }
 
 /// Resolves store paths under one VFS root.
@@ -437,14 +501,14 @@ impl StoreLayout {
     pub fn lock_path(&self, artifact: &Artifact) -> PathBuf {
         let rel = match artifact {
             Artifact::Firmware { version } => {
-                Path::new("firmware").join(format!("{}.lock", version.as_str()))
+                Path::new(FIRMWARE_DIR).join(format!("{}.lock", version.as_str()))
             }
-            Artifact::TitleBase { title_id } => Path::new("titles")
+            Artifact::TitleBase { title_id } => Path::new(TITLES_DIR)
                 .join(title_id.as_str())
-                .join("base.lock"),
-            Artifact::TitleUpdate { title_id, version } => Path::new("titles")
+                .join(format!("{BASE_GAME_VER}.lock")),
+            Artifact::TitleUpdate { title_id, version } => Path::new(TITLES_DIR)
                 .join(title_id.as_str())
-                .join(format!("update-{}.lock", version.as_str())),
+                .join(format!("{UPDATE_RECORD_PREFIX}{}.lock", version.as_str())),
         };
         self.locks_dir().join(rel)
     }
@@ -457,14 +521,32 @@ impl StoreLayout {
     #[must_use]
     pub fn firmware_staging_lock_path(&self) -> PathBuf {
         self.locks_dir()
-            .join("firmware")
+            .join(FIRMWARE_DIR)
             .join(FIRMWARE_STAGING_LOCK)
+    }
+
+    /// The directory holding one record per installed firmware version.
+    #[must_use]
+    pub(crate) fn firmware_records_dir(&self) -> PathBuf {
+        self.installs_dir().join(FIRMWARE_DIR)
+    }
+
+    /// The directory holding one record directory per title.
+    #[must_use]
+    pub(crate) fn title_records_root(&self) -> PathBuf {
+        self.installs_dir().join(TITLES_DIR)
+    }
+
+    /// The directory holding one title's base and update records.
+    #[must_use]
+    pub(crate) fn title_records_dir(&self, title_id: &TitleId) -> PathBuf {
+        self.title_records_root().join(title_id.as_str())
     }
 
     /// Root of the versioned firmware entries.
     #[must_use]
     pub fn firmware_root(&self) -> PathBuf {
-        self.root.join("firmware")
+        self.root.join(FIRMWARE_DIR)
     }
 
     /// Where a firmware install stages before it knows its version.
@@ -480,7 +562,7 @@ impl StoreLayout {
     /// Root of the versioned title entries.
     #[must_use]
     pub fn titles_root(&self) -> PathBuf {
-        self.root.join("titles")
+        self.root.join(TITLES_DIR)
     }
 
     /// A title's entry directory, holding its base, updates, and RAPs.
@@ -547,35 +629,23 @@ impl StoreLayout {
     /// component is one the record gate would refuse on the way back
     /// in.
     pub fn store_path_of(&self, dir: &Path) -> Result<String, StorePathError> {
-        let rel = dir
-            .strip_prefix(&self.root)
-            .map_err(|_| StorePathError::OutsideRoot {
+        let components =
+            components_under(&self.root, dir).ok_or_else(|| StorePathError::OutsideRoot {
                 dir: dir.to_path_buf(),
                 root: self.root.clone(),
             })?;
         let mut parts = Vec::new();
-        for comp in rel.components() {
-            match comp {
-                std::path::Component::Normal(c) => {
-                    let part = c.to_str().ok_or_else(|| StorePathError::NonUtf8 {
-                        dir: dir.to_path_buf(),
-                    })?;
-                    if !is_safe_component(part) {
-                        return Err(StorePathError::UnsafeComponent {
-                            dir: dir.to_path_buf(),
-                            component: part.to_string(),
-                        });
-                    }
-                    parts.push(part);
-                }
-                std::path::Component::CurDir => {}
-                _ => {
-                    return Err(StorePathError::OutsideRoot {
-                        dir: dir.to_path_buf(),
-                        root: self.root.clone(),
-                    })
-                }
+        for component in components {
+            let part = component.to_str().ok_or_else(|| StorePathError::NonUtf8 {
+                dir: dir.to_path_buf(),
+            })?;
+            if !is_safe_component(part) {
+                return Err(StorePathError::UnsafeComponent {
+                    dir: dir.to_path_buf(),
+                    component: part.to_string(),
+                });
             }
+            parts.push(part);
         }
         if parts.is_empty() {
             return Err(StorePathError::IsRoot {

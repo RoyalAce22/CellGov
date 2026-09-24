@@ -16,8 +16,8 @@ use cellgov_ps3_abi::format::elf::{ELF_HEADER_SIZE, ELF_MAGIC, EM_PPC64};
 use crate::cli::boot_cmd::DISABLE_DEFAULT_ENV;
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::CallerCensusArgs;
-use crate::composition::inventory::{FirmwareEntry, InventoryError, StoreInventory};
 use crate::composition::{select, FirmwareSelectError};
+use cellgov_install::store::inventory::{FirmwareEntry, InventoryError, StoreInventory};
 
 const FIRMWARE_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),

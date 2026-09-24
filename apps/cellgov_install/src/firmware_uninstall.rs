@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::store::inventory::{firmware_record_versions, RecordDirError};
 use crate::store::layout::{tombstone_sibling, Artifact, ArtifactKind, StoreLayout, VersionKey};
 use crate::store::lock::lock_artifact;
 use crate::store::record::{InstallRecord, KernelRecord};
@@ -159,9 +160,6 @@ pub struct FirmwareUninstallOutcome {
     pub rename_retries: u32,
 }
 
-/// Suffix every install-record filename carries.
-const INSTALL_RECORD_SUFFIX: &str = ".install.toml";
-
 fn io_err<'a>(
     op: &'static str,
     path: &'a Path,
@@ -184,33 +182,15 @@ fn io_err<'a>(
 /// directory exists and cannot be enumerated. A missing directory is an
 /// empty list: nothing is installed yet.
 pub fn installed_versions(output_dir: &Path) -> Result<Vec<String>, FirmwareUninstallError> {
-    let dir = StoreLayout::new(output_dir)
-        .installs_dir()
-        .join(ArtifactKind::Firmware.as_str());
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => return Err(FirmwareUninstallError::RecordsReadDir { dir, source }),
-    };
-    let mut out = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|source| FirmwareUninstallError::RecordsReadDir {
-            dir: dir.clone(),
-            source,
-        })?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if let Some(version) = name.strip_suffix(INSTALL_RECORD_SUFFIX) {
-            // `to_string_lossy` turns a name this host cannot decode
-            // into one carrying U+FFFD, and a bare `.install.toml`
-            // strips to nothing. `VersionKey::new` accepts neither, so
-            // neither names an entry `plan` could reach.
-            if VersionKey::new(version).is_ok() {
-                out.push(version.to_string());
-            }
-        }
-    }
-    out.sort();
-    Ok(out)
+    let mut versions = firmware_record_versions(&StoreLayout::new(output_dir)).map_err(
+        |RecordDirError { dir, source }| FirmwareUninstallError::RecordsReadDir { dir, source },
+    )?;
+    // The walk reads names lossily, so a name this host cannot decode
+    // carries U+FFFD, and a bare `.install.toml` strips to nothing.
+    // `VersionKey::new` accepts neither, so neither names an entry
+    // `plan` could reach.
+    versions.retain(|version| VersionKey::new(version).is_ok());
+    Ok(versions)
 }
 
 /// Resolve what an uninstall of firmware `version` would remove.

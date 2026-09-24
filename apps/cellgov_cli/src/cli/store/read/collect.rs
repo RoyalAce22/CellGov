@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use cellgov_install::store::{Artifact, StoreLayout, TitleId, VersionKey};
 
 use crate::composition::identity::tree_app_version;
-use crate::composition::inventory::{FirmwareEntry, StoreInventory, TitleEntry};
 use cellgov_boot::manifest::{CellKey, GameSource, TitleManifest, TitleRegistry, BASE_GAME_VER};
+use cellgov_install::store::inventory::{FirmwareEntry, StoreInventory, TitleEntry};
 
 use super::model::{
     store_rel, AnchorDoc, BaseDoc, CoreOsDoc, CoreOsFileDoc, FirmwareDoc, KernelDoc, TitleDoc,

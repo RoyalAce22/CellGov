@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use cellgov_install::store::TitleTree;
 
-use crate::composition::inventory::{BaseEntry, UpdateEntry};
 use cellgov_boot::manifest::TitleRegistry;
+use cellgov_install::store::inventory::{BaseEntry, UpdateEntry};
 
 /// Placeholder identity: these cases build every entry by hand and name
 /// no installed content.

@@ -11,8 +11,8 @@ use crate::cli::boot_cmd::DISABLE_DEFAULT_ENV;
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::{Lv2ExtractArgs, OutputFormat};
 use crate::cli::store::read::model::STORE_FORMAT_VERSION;
-use crate::composition::inventory::{FirmwareEntry, InventoryError, StoreInventory};
 use crate::composition::{select, FirmwareSelectError};
+use cellgov_install::store::inventory::{FirmwareEntry, InventoryError, StoreInventory};
 
 #[derive(Debug, serde::Serialize)]
 struct Lv2ExtractDoc {

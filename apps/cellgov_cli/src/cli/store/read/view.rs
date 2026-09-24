@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::cli::exit::CommandError;
-use crate::composition::inventory::StoreInventory;
 use cellgov_boot::manifest::TitleRegistry;
+use cellgov_install::store::inventory::StoreInventory;
 
 use super::collect::StoreView;
 
