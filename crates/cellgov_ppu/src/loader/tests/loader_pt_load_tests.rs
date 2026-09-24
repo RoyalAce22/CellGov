@@ -2,6 +2,7 @@
 //! `checked_pt_loads` makes, and where an address's bytes come from.
 
 use super::*;
+use cellgov_ps3_abi::format::elf::{ELF_MAGIC, ELF_PN_XNUM, EM_PPC64, EV_CURRENT, PT_LOAD};
 
 /// One PT_LOAD: `(p_offset, p_vaddr, p_filesz, p_memsz)`.
 type Load = (u64, u64, u64, u64);

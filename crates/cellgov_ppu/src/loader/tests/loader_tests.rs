@@ -2,6 +2,10 @@
 
 use super::*;
 use crate::state::PpuState;
+use cellgov_mem::GuestMemory;
+use cellgov_ps3_abi::format::elf::{
+    ELF_MAGIC, PT_LOAD, PT_TLS, SHT_SYMTAB, SYS_PROCESS_PARAM_MAGIC,
+};
 
 #[test]
 fn rejects_too_small() {
