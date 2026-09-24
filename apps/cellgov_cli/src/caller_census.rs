@@ -11,7 +11,7 @@ use cellgov_install::sce::{self, SceError};
 use cellgov_lv2::archive::{self, ArchiveError, CALLER, CALLER_UNRESOLVED, FIRMWARE, PUP, REACH};
 use cellgov_ppu::caller_census::{scan_syscalls, CallerScanError};
 use cellgov_ppu::funcmap::{self, FuncMapError, FunctionName};
-use cellgov_ps3_abi::format::elf::{ELF_HEADER_SIZE, ELF_MAGIC, EM_PPC64};
+use cellgov_ps3_abi::format::elf::{ELF_E_MACHINE_OFFSET, ELF_HEADER_SIZE, ELF_MAGIC, EM_PPC64};
 
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::CallerCensusArgs;
@@ -330,7 +330,9 @@ fn selected_entries(
 }
 
 fn is_ppu_elf(elf: &[u8]) -> bool {
-    elf.len() >= ELF_HEADER_SIZE && u16::from_be_bytes([elf[18], elf[19]]) == EM_PPC64
+    elf.len() >= ELF_HEADER_SIZE
+        && u16::from_be_bytes([elf[ELF_E_MACHINE_OFFSET], elf[ELF_E_MACHINE_OFFSET + 1]])
+            == EM_PPC64
 }
 
 fn verify_module_hash(

@@ -12,6 +12,8 @@ fn synthetic_elf(loads: &[(u64, u64)]) -> Vec<u8> {
     buf[0..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
     buf[4] = 2; // ELFCLASS64
     buf[5] = 2; // ELFDATA2MSB (big-endian)
+    buf[6] = 1; // EV_CURRENT
+    buf[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     buf[32..40].copy_from_slice(&phoff.to_be_bytes());
     buf[54..56].copy_from_slice(&phentsize.to_be_bytes());
     buf[56..58].copy_from_slice(&phnum.to_be_bytes());

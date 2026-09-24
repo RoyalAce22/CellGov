@@ -156,9 +156,12 @@ fn an_exhausted_stream_reads_zero_and_says_so() {
 }
 
 #[test]
-fn a_zero_stream_describes_an_executable_the_loader_accepts() {
+fn a_zero_stream_describes_an_executable_with_no_program_headers() {
     let image = structured_image(&[]);
-    assert_eq!(pt_load_segments(&image).unwrap(), Vec::new());
+    assert_eq!(
+        pt_load_segments(&image),
+        Err(cellgov_ppu::loader::LoadError::NoProgramHeaders)
+    );
 }
 
 #[test]

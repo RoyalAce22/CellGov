@@ -24,6 +24,8 @@ fn exec_with_data_segment(data_vaddr: u64, claimed_filesz: u64) -> Vec<u8> {
     data[0..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[16..18].copy_from_slice(&2u16.to_be_bytes());
     data[32..40].copy_from_slice(&(phoff as u64).to_be_bytes());
     data[54..56].copy_from_slice(&(phentsize as u16).to_be_bytes());

@@ -33,6 +33,8 @@ fn rejects_32bit_elf() {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 1; // 32-bit
     data[5] = 2; // big-endian
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     assert_eq!(
         load_ppu_elf(&data, &mut mem, &mut s),
         Err(LoadError::Not64Bit)
@@ -58,6 +60,8 @@ fn mk_elf_header(phnum: u16) -> Vec<u8> {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[32..40].copy_from_slice(&64u64.to_be_bytes());
     data[54..56].copy_from_slice(&56u16.to_be_bytes());
     data[56..58].copy_from_slice(&phnum.to_be_bytes());
@@ -103,7 +107,12 @@ fn rejects_segment_truncated() {
     let mut mem = GuestMemory::new(256);
     assert_eq!(
         load_ppu_elf(&data, &mut mem, &mut s),
-        Err(LoadError::SegmentTruncated)
+        Err(LoadError::SegmentTruncated {
+            segment_index: 0,
+            file_offset: 120,
+            filesz: 100,
+            file_len: 120,
+        })
     );
 }
 
@@ -369,6 +378,8 @@ fn mk_elf_with_sections(shoff: usize, shnum: u16) -> Vec<u8> {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[40..48].copy_from_slice(&(shoff as u64).to_be_bytes());
     data[58..60].copy_from_slice(&64u16.to_be_bytes());
     data[60..62].copy_from_slice(&shnum.to_be_bytes());
@@ -438,6 +449,8 @@ fn make_elf_with_tls(tls_vaddr: u64, tls_filesz: u64, tls_memsz: u64) -> Vec<u8>
     buf[0..4].copy_from_slice(&ELF_MAGIC);
     buf[4] = 2;
     buf[5] = 2;
+    buf[6] = 1; // EV_CURRENT
+    buf[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     buf[32..40].copy_from_slice(&64u64.to_be_bytes());
     buf[54..56].copy_from_slice(&56u16.to_be_bytes());
     buf[56..58].copy_from_slice(&1u16.to_be_bytes());
@@ -470,6 +483,8 @@ fn make_elf_with_tls_payload(
     buf[0..4].copy_from_slice(&ELF_MAGIC);
     buf[4] = 2;
     buf[5] = 2;
+    buf[6] = 1; // EV_CURRENT
+    buf[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     buf[32..40].copy_from_slice(&64u64.to_be_bytes());
     buf[54..56].copy_from_slice(&56u16.to_be_bytes());
     buf[56..58].copy_from_slice(&1u16.to_be_bytes());
@@ -503,6 +518,8 @@ fn find_tls_returns_none_without_tls() {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[32..40].copy_from_slice(&64u64.to_be_bytes());
     data[54..56].copy_from_slice(&56u16.to_be_bytes());
     data[56..58].copy_from_slice(&1u16.to_be_bytes());
@@ -614,6 +631,8 @@ fn find_tls_rejects_non_64bit_elf() {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 1; // 32-bit
     data[5] = 2; // big-endian
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     assert!(find_tls_segment(&data).is_none());
     assert!(find_tls_program_header(&data).is_none());
 }
@@ -639,6 +658,8 @@ fn find_sys_process_param_rejects_magic_outside_pt_load() {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[32..40].copy_from_slice(&64u64.to_be_bytes());
     data[54..56].copy_from_slice(&56u16.to_be_bytes());
     data[56..58].copy_from_slice(&1u16.to_be_bytes());
@@ -666,6 +687,8 @@ fn find_sys_process_param_accepts_magic_inside_pt_load() {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[32..40].copy_from_slice(&64u64.to_be_bytes());
     data[54..56].copy_from_slice(&56u16.to_be_bytes());
     data[56..58].copy_from_slice(&1u16.to_be_bytes());
@@ -703,6 +726,8 @@ fn load_ppu_elf_populates_sys_proc_param_range_when_struct_present() {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[32..40].copy_from_slice(&64u64.to_be_bytes());
     data[54..56].copy_from_slice(&56u16.to_be_bytes());
     data[56..58].copy_from_slice(&1u16.to_be_bytes());
@@ -740,6 +765,8 @@ fn a_proc_param_whose_guest_address_would_wrap_is_not_reported() {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[32..40].copy_from_slice(&64u64.to_be_bytes());
     data[54..56].copy_from_slice(&56u16.to_be_bytes());
     data[56..58].copy_from_slice(&1u16.to_be_bytes());
@@ -778,6 +805,8 @@ fn mk_elf_with_pt_load(pt_off: usize, pt_sz: usize, pt_vaddr: u64) -> Vec<u8> {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[32..40].copy_from_slice(&64u64.to_be_bytes());
     data[54..56].copy_from_slice(&56u16.to_be_bytes());
     data[56..58].copy_from_slice(&1u16.to_be_bytes());
@@ -845,6 +874,8 @@ fn find_secondary_opd_tables_rejects_header_outside_pt_load() {
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[32..40].copy_from_slice(&64u64.to_be_bytes());
     data[54..56].copy_from_slice(&56u16.to_be_bytes());
     data[56..58].copy_from_slice(&1u16.to_be_bytes());
@@ -918,6 +949,8 @@ fn mk_elf_with_exec_and_data_pt_loads(
     data[0..4].copy_from_slice(&ELF_MAGIC);
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[32..40].copy_from_slice(&64u64.to_be_bytes());
     data[54..56].copy_from_slice(&56u16.to_be_bytes());
     data[56..58].copy_from_slice(&2u16.to_be_bytes());

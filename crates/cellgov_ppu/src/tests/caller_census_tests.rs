@@ -26,6 +26,8 @@ fn elf_with_exec_segment(vaddr: u64, filesz: u64, memsz: u64) -> Vec<u8> {
     elf[0..4].copy_from_slice(&ELF_MAGIC);
     elf[ELF_EI_CLASS] = ELFCLASS64;
     elf[ELF_EI_DATA] = ELFDATA2MSB;
+    elf[6] = 1; // EV_CURRENT
+    elf[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     elf[ELF_PHOFF_OFFSET..ELF_PHOFF_OFFSET + 8]
         .copy_from_slice(&(ELF_HEADER_SIZE as u64).to_be_bytes());
     elf[ELF_PHENTSIZE_OFFSET..ELF_PHENTSIZE_OFFSET + 2]

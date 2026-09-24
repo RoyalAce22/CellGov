@@ -1,19 +1,18 @@
-//! Instruction-stream emitter for `dev disasm`.
+//! Instruction-stream printer for `dev disasm`.
 //!
-//! Owns vaddr-to-file-offset resolution (`select_segment`) over the
-//! validated `PtLoad` list and the per-instruction print loop
-//! (`disassemble`). Real instruction lines go to stdout; past-segment
-//! markers, decode-error notes, and the data-not-code heuristic go to
-//! stderr so a downstream tool can pipe stdout cleanly. Caller
-//! supplies the segment list from [`super::elf::parse_pt_loads`];
-//! this module trusts that producer-side validation and skips
-//! per-byte bounds checks in the hot loop.
+//! `cellgov_ppu::loader::address_source` picks the segment a start
+//! address sits in, and `cellgov_ppu::disasm::Disassembly` walks its
+//! words; this module renders them. Instruction lines and the
+//! end-of-stream marker go to stdout; the overlap note and the
+//! data-not-code heuristic go to stderr so a downstream tool can pipe
+//! stdout cleanly.
 
 use std::io::{self, Write};
 
+use cellgov_ppu::disasm::{DisasmEnd, DisasmItem, Disassembly};
 use cellgov_ppu::funcmap::FunctionMap;
+use cellgov_ppu::loader::{address_source, AddressSource, LoadSegment};
 
-use super::elf::PtLoad;
 use crate::cli::parse::MAX_DISASM_COUNT as MAX_COUNT;
 
 /// Number of consecutive `decode` failures after which the user almost
@@ -42,12 +41,15 @@ pub(super) struct DisasmStats {
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub(super) enum DisasmError {
     #[error("{}", render_vaddr_not_in_pt_load(*vaddr, segments))]
-    VaddrNotInPtLoad { vaddr: u64, segments: Vec<PtLoad> },
+    VaddrNotInPtLoad {
+        vaddr: u64,
+        segments: Vec<LoadSegment>,
+    },
     #[error(
         "vaddr 0x{vaddr:016x} is in PT_LOAD vaddr=0x{:016x}+filesz=0x{:x} (memsz=0x{:x}) but past the file-backed range; nothing to disassemble (BSS / zero-fill)",
         seg.vaddr, seg.filesz, seg.memsz
     )]
-    VaddrInBssOnly { vaddr: u64, seg: PtLoad },
+    VaddrInBssOnly { vaddr: u64, seg: LoadSegment },
 }
 
 impl DisasmError {
@@ -56,64 +58,53 @@ impl DisasmError {
     }
 }
 
-fn render_vaddr_not_in_pt_load(vaddr: u64, segments: &[PtLoad]) -> String {
+fn render_vaddr_not_in_pt_load(vaddr: u64, segments: &[LoadSegment]) -> String {
     use std::fmt::Write as _;
     let mut s = format!("vaddr 0x{vaddr:016x} not in any PT_LOAD; segments:");
     for seg in segments {
         let _ = write!(
             s,
             "\n  vaddr=0x{:016x}+filesz=0x{:x} memsz=0x{:x} file=0x{:x}",
-            seg.vaddr, seg.filesz, seg.memsz, seg.offset
+            seg.vaddr, seg.filesz, seg.memsz, seg.file_offset
         );
     }
     s
 }
 
-/// Pick the PT_LOAD that file-backs `vaddr`. With overlapping
-/// segments, pick the smallest containing segment; ties break on
-/// lowest `p_offset`, then lowest `p_vaddr`. Emits a stderr note
-/// when more than one segment matches.
-fn select_segment(segments: &[PtLoad], vaddr: u64) -> Result<PtLoad, DisasmError> {
-    // saturating_add guards against hand-rolled test PtLoads whose
-    // vaddr range overflows u64; parse_pt_loads rejects those upstream.
-    let mut candidates: Vec<PtLoad> = segments
-        .iter()
-        .copied()
-        .filter(|s| vaddr >= s.vaddr && vaddr < s.vaddr.saturating_add(s.filesz))
-        .collect();
-    if candidates.is_empty() {
-        let bss_match = segments
-            .iter()
-            .copied()
-            .find(|s| vaddr >= s.vaddr && vaddr < s.vaddr.saturating_add(s.memsz));
-        if let Some(seg) = bss_match {
-            return Err(DisasmError::VaddrInBssOnly { vaddr, seg });
+/// Pick the PT_LOAD that file-backs `vaddr`: the smallest containing
+/// segment when several overlap (see
+/// `cellgov_ppu::loader::address_source`). Emits a stderr note when
+/// more than one segment matches.
+fn select_segment(segments: &[LoadSegment], vaddr: u64) -> Result<LoadSegment, DisasmError> {
+    match address_source(segments, vaddr, 1) {
+        AddressSource::FileBacked {
+            segment,
+            overlapping,
+            ..
+        } => {
+            if overlapping > 1 {
+                eprintln!(
+                    "note: vaddr 0x{vaddr:x} is in {overlapping} overlapping PT_LOADs; choosing the smallest containing segment"
+                );
+            }
+            Ok(segment)
         }
-        return Err(DisasmError::VaddrNotInPtLoad {
+        AddressSource::ZeroFill { segment } => Err(DisasmError::VaddrInBssOnly {
+            vaddr,
+            seg: segment,
+        }),
+        AddressSource::Unmapped => Err(DisasmError::VaddrNotInPtLoad {
             vaddr,
             segments: segments.to_vec(),
-        });
+        }),
     }
-    if candidates.len() > 1 {
-        eprintln!(
-            "note: vaddr 0x{vaddr:x} is in {} overlapping PT_LOADs; choosing the smallest containing segment",
-            candidates.len()
-        );
-    }
-    candidates.sort_by_key(|s| (s.filesz, s.offset, s.vaddr));
-    Ok(candidates[0])
 }
 
-/// Read `count` aligned 32-bit words starting at `vaddr`, decoding
-/// each and writing one line per word into `out`.
-///
-/// Cross-module contract: `parse_pt_loads` must have validated the
-/// segments. `seg.offset + off_in_seg + 4 <= elf_bytes.len()` whenever
-/// the per-iteration filesz check passes, so the hot loop indexes
-/// `elf_bytes` without further bounds checks.
+/// Write one line per word for `count` aligned 32-bit words starting at
+/// `vaddr`, and a marker line where the segment's file bytes end first.
 pub(super) fn disassemble<W: Write>(
     elf_bytes: &[u8],
-    segments: &[PtLoad],
+    segments: &[LoadSegment],
     vaddr: u64,
     count: usize,
     symbols: Option<&FunctionMap>,
@@ -133,65 +124,25 @@ pub(super) fn disassemble<W: Write>(
 
     let mut stats = DisasmStats::default();
     let mut consecutive = 0usize;
+    let mut words = 0usize;
+    let mut stream = Disassembly::new(elf_bytes, seg, vaddr, symbols);
 
-    for n in 0..count {
-        let Some(addr) = (n as u64)
-            .checked_mul(4)
-            .and_then(|delta| vaddr.checked_add(delta))
-        else {
-            writeln!(out, "<address overflow: vaddr+4*{n} exceeds u64::MAX>")
-                .map_err(StreamError::Io)?;
-            stats.lines_written += 1;
-            stats.markers_written += 1;
+    while words < count {
+        let Some(item) = stream.next() else {
             break;
         };
-        let off_in_seg = addr - seg.vaddr;
-        let needed_end = off_in_seg.checked_add(4);
-        match needed_end {
-            Some(end) if end <= seg.filesz => {}
-            Some(end) if end <= seg.memsz => {
+        match item {
+            DisasmItem::FunctionStart(span) => {
                 writeln!(
                     out,
-                    "0x{addr:016x}  --------  <in PT_LOAD but past filesz (BSS / zero-fill)>"
+                    "; -- function {} ({}) --",
+                    span.display_name(),
+                    span.origin.as_str()
                 )
                 .map_err(StreamError::Io)?;
-                stats.lines_written += 1;
-                stats.markers_written += 1;
-                break;
             }
-            _ => {
-                writeln!(out, "0x{addr:016x}  --------  <past segment end>")
-                    .map_err(StreamError::Io)?;
-                stats.lines_written += 1;
-                stats.markers_written += 1;
-                break;
-            }
-        }
-        let file_off = (seg.offset + off_in_seg) as usize;
-        let raw = u32::from_be_bytes([
-            elf_bytes[file_off],
-            elf_bytes[file_off + 1],
-            elf_bytes[file_off + 2],
-            elf_bytes[file_off + 3],
-        ]);
-        // Function separator when the stream crosses a span start.
-        if let Some(map) = symbols {
-            if let Ok(addr32) = u32::try_from(addr) {
-                if let Some(span) = map.span_at(addr32) {
-                    if span.start == addr32 {
-                        writeln!(
-                            out,
-                            "; -- function {} ({}) --",
-                            span.display_name(),
-                            span.origin.as_str()
-                        )
-                        .map_err(StreamError::Io)?;
-                    }
-                }
-            }
-        }
-        match cellgov_ppu::decode::decode(raw) {
-            Ok(insn) => {
+            DisasmItem::Instruction { addr, raw, insn } => {
+                words += 1;
                 consecutive = 0;
                 let text = cellgov_ppu::instruction::AsmText {
                     insn: &insn,
@@ -201,7 +152,8 @@ pub(super) fn disassemble<W: Write>(
                 writeln!(out, "0x{addr:016x}  {raw:08x}  {text}").map_err(StreamError::Io)?;
                 stats.lines_written += 1;
             }
-            Err(_) => {
+            DisasmItem::Undecodable { addr, raw } => {
+                words += 1;
                 consecutive += 1;
                 stats.decode_errors += 1;
                 // `.word` keeps the line greppable and parseable by
@@ -215,6 +167,24 @@ pub(super) fn disassemble<W: Write>(
                     );
                     stats.data_warning_emitted = true;
                 }
+            }
+            DisasmItem::End(end) => {
+                match end {
+                    DisasmEnd::AddressOverflow { words: n } => {
+                        writeln!(out, "<address overflow: vaddr+4*{n} exceeds u64::MAX>")
+                    }
+                    DisasmEnd::ZeroFill { addr } => writeln!(
+                        out,
+                        "0x{addr:016x}  --------  <in PT_LOAD but past filesz (BSS / zero-fill)>"
+                    ),
+                    DisasmEnd::SegmentEnd { addr } => {
+                        writeln!(out, "0x{addr:016x}  --------  <past segment end>")
+                    }
+                }
+                .map_err(StreamError::Io)?;
+                stats.lines_written += 1;
+                stats.markers_written += 1;
+                break;
             }
         }
     }

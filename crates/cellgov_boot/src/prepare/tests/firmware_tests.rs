@@ -15,6 +15,8 @@ fn elf64_be_with_load(vaddr: u64, memsz: u64) -> Vec<u8> {
     out[4] = 2; // ELFCLASS64
     out[5] = 2; // ELFDATA2MSB
     out[6] = 1; // EV_CURRENT
+    out[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
+    out[6] = 1; // EV_CURRENT
     out[32..40].copy_from_slice(&(EHDR as u64).to_be_bytes()); // e_phoff
     out[54..56].copy_from_slice(&(PHENT as u16).to_be_bytes()); // e_phentsize
     out[56..58].copy_from_slice(&1u16.to_be_bytes()); // e_phnum

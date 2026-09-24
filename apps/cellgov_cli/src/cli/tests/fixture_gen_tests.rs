@@ -40,6 +40,8 @@ fn synthetic_elf64_be_sized(phoff: u64, phentsize: u16, phnum: u16, len: usize) 
     eboot[0..4].copy_from_slice(b"\x7fELF");
     eboot[4] = 2; // ELFCLASS64
     eboot[5] = 2; // ELFDATA2MSB
+    eboot[6] = 1; // EV_CURRENT
+    eboot[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     eboot[32..40].copy_from_slice(&phoff.to_be_bytes());
     eboot[54..56].copy_from_slice(&phentsize.to_be_bytes());
     eboot[56..58].copy_from_slice(&phnum.to_be_bytes());
@@ -344,6 +346,8 @@ fn synthetic_eboot_with_sys_proc_param_at(p_vaddr: u64, struct_size: u32) -> Vec
     data[0..4].copy_from_slice(b"\x7fELF");
     data[4] = 2;
     data[5] = 2;
+    data[6] = 1; // EV_CURRENT
+    data[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     data[32..40].copy_from_slice(&(phoff as u64).to_be_bytes());
     data[54..56].copy_from_slice(&(phentsize as u16).to_be_bytes());
     data[56..58].copy_from_slice(&1u16.to_be_bytes());

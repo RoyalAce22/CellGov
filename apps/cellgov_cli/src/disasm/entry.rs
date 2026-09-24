@@ -8,7 +8,7 @@ use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
 use crate::cli::parse::DisasmArgs;
 use crate::disasm::stream::StreamError;
-use crate::disasm::{args, elf, stream};
+use crate::disasm::{args, stream};
 
 /// Process exit code when at least one decoded word was an unsupported
 /// encoding. A wrapper can then tell "bad inputs" from "decoded the
@@ -26,13 +26,13 @@ pub(crate) fn run(
     // Transparently decrypt an SCE/SELF wrapper (including NPDRM
     // EBOOTs); plaintext ELF input passes through unchanged.
     let elf_bytes = crate::cli::self_load::decrypt_ppu_self(&raw, &parsed.elf_path, &vfs_root)?;
-    let segments =
-        elf::parse_pt_loads(&elf_bytes).map_err(|error| CommandError::failed(error.message()))?;
+    let segments = cellgov_ppu::loader::checked_pt_loads(&elf_bytes)
+        .map_err(|error| CommandError::failed(error.to_string()))?;
 
     let symbols = if parsed.symbolize {
         let mut map = cellgov_ppu::funcmap::build(&elf_bytes)
             .map_err(|error| CommandError::failed(format!("disasm --symbolize: {error}")))?;
-        crate::funcs::resolve_nids(&mut map);
+        map.resolve_nids();
         Some(map)
     } else {
         None

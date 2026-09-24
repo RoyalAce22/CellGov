@@ -25,7 +25,7 @@ pub(crate) fn run(
     let elf = decrypt_ppu_self(&raw, &args.path, &vfs_root)?;
     let mut map = funcmap::build(&elf)
         .map_err(|error| CommandError::failed(format!("funcs: {}: {error}", args.path)))?;
-    resolve_nids(&mut map);
+    map.resolve_nids();
     if let Some(note) = truncation_note(&map) {
         eprintln!("{note}");
     }
@@ -46,18 +46,6 @@ pub(crate) fn run(
 fn truncation_note(map: &FunctionMap) -> Option<&'static str> {
     map.truncated
         .then_some("note: function discovery hit the span cap; output is a prefix")
-}
-
-/// Resolve NID-named spans to their symbol names via the workspace
-/// NID table. Unknown NIDs keep the `nid_<hex>` rendering.
-pub(crate) fn resolve_nids(map: &mut FunctionMap) {
-    for span in &mut map.functions {
-        if let FunctionName::Nid(nid) = span.name {
-            if let Some((_module, symbol)) = cellgov_ps3_abi::nid::lookup(nid) {
-                span.name = FunctionName::Known(symbol);
-            }
-        }
-    }
 }
 
 fn render_human(map: &FunctionMap) -> String {

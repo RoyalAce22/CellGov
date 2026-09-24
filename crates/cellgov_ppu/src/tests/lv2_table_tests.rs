@@ -51,6 +51,8 @@ fn kernel_with_table(include_table: bool) -> Vec<u8> {
     elf[..4].copy_from_slice(&ELF_MAGIC);
     elf[ELF_EI_CLASS] = ELFCLASS64;
     elf[ELF_EI_DATA] = ELFDATA2MSB;
+    elf[6] = 1; // EV_CURRENT
+    elf[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     write_u64(&mut elf, ELF_PHOFF_OFFSET, ELF_HEADER_SIZE as u64);
     write_u16(&mut elf, ELF_PHENTSIZE_OFFSET, ELF_PHENTSIZE as u16);
     write_u16(&mut elf, ELF_PHNUM_OFFSET, 2);

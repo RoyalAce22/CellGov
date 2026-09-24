@@ -9,85 +9,31 @@
 /// address space with `sys_memory_allocate` and do not advance the
 /// allocator base.
 ///
+/// The segments come from `cellgov_ppu::loader::read_pt_loads`.
 /// Returns 0, and warns which check refused, for:
 ///
-/// - an input too short for the ELF64 header
-/// - a bad magic
-/// - a program-header slot size that is not the ELF64 one
-/// - a program-header table past end-of-file
+/// - any refusal of that reader: a short or non-ELF input, a header of
+///   another class, byte order, version or machine, no or an extended
+///   program-header count, a slot size that is not the ELF64 one, or a
+///   table past end-of-file
 /// - a segment whose end leaves the 32-bit effective-address space
 ///
 /// An image with no segment in the range also returns 0, and warns
 /// nothing.
 pub(crate) fn elf_user_region_end(data: &[u8], sink: &dyn crate::BootSink) -> usize {
-    use cellgov_ps3_abi::format::elf::{ELF_PHENTSIZE, PT_LOAD};
-    fn u16_be(d: &[u8], o: usize) -> u16 {
-        u16::from_be_bytes([d[o], d[o + 1]])
-    }
-    fn u32_be(d: &[u8], o: usize) -> u32 {
-        u32::from_be_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]])
-    }
-    fn u64_be(d: &[u8], o: usize) -> u64 {
-        u64::from_be_bytes([
-            d[o],
-            d[o + 1],
-            d[o + 2],
-            d[o + 3],
-            d[o + 4],
-            d[o + 5],
-            d[o + 6],
-            d[o + 7],
-        ])
-    }
-    if data.len() < 64 {
-        sink.warn(&format!(
-            "elf_user_region_end: input too short for ELF64 header ({} bytes); returning 0",
-            data.len()
-        ));
-        return 0;
-    }
-    if data[0..4] != [0x7f, 0x45, 0x4c, 0x46] {
-        sink.warn("elf_user_region_end: ELF magic mismatch; returning 0");
-        return 0;
-    }
-    let phoff = u64_be(data, 32) as usize;
-    let phentsize = u16_be(data, 54) as usize;
-    let phnum = u16_be(data, 56) as usize;
-    // The slot reads below use the fixed ELF64 field offsets (p_type at
-    // 0, p_vaddr at 16, p_memsz at 40). A declared slot size other than
-    // the architected one puts those reads outside the slot the stride
-    // names. On the last entry they then read past end-of-file, where
-    // they panic instead of refusing. `cellgov_ppu::loader` raises
-    // `LoadError::BadPhentsize` for the same value; its
-    // `ph_slot_offset` rejects it instead of clamping.
-    if phentsize != ELF_PHENTSIZE {
-        sink.warn(&format!(
-            "elf_user_region_end: program-header entry size {phentsize} is not the ELF64 \
-             program header's {ELF_PHENTSIZE}; returning 0"
-        ));
-        return 0;
-    }
-    // Up-front bound check: a mid-scan `break` would silently truncate.
-    let ph_table_end = phoff.saturating_add(phentsize.saturating_mul(phnum));
-    if ph_table_end > data.len() {
-        sink.warn(&format!(
-            "elf_user_region_end: program header table (phoff=0x{phoff:x} phentsize={phentsize} phnum={phnum}) extends past end-of-file ({} bytes); returning 0",
-            data.len()
-        ));
-        return 0;
-    }
+    let segments = match cellgov_ppu::loader::read_pt_loads(data) {
+        Ok(segments) => segments,
+        Err(error) => {
+            sink.warn(&format!("elf_user_region_end: {error}; returning 0"));
+            return 0;
+        }
+    };
     let mut max_end: usize = 0;
-    for i in 0..phnum {
-        let base = phoff + i * phentsize;
-        if u32_be(data, base) != PT_LOAD {
+    for seg in segments {
+        if seg.memsz == 0 {
             continue;
         }
-        let p_vaddr = u64_be(data, base + 16);
-        let p_memsz = u64_be(data, base + 40);
-        if p_memsz == 0 {
-            continue;
-        }
-        if !(0x0001_0000..0x1000_0000).contains(&p_vaddr) {
+        if !(0x0001_0000..0x1000_0000).contains(&seg.vaddr) {
             continue;
         }
         // A PS3 effective address is 32 bits. `cellgov_ppu::loader`
@@ -96,13 +42,15 @@ pub(crate) fn elf_user_region_end(data: &[u8], sink: &dyn crate::BootSink) -> us
         // pair reaches here. A wrapped sum reads as a lower floor than
         // the segment it came from. That would place the guest heap on
         // top of the title's own code.
-        let Some(end) = p_vaddr
-            .checked_add(p_memsz)
+        let Some(end) = seg
+            .vaddr
+            .checked_add(seg.memsz)
             .filter(|&e| e <= u64::from(u32::MAX) + 1)
         else {
             sink.warn(&format!(
-                "elf_user_region_end: PT_LOAD[{i}] at 0x{p_vaddr:016x} size 0x{p_memsz:x} \
-                 leaves the 32-bit effective-address space; returning 0"
+                "elf_user_region_end: PT_LOAD[{}] at 0x{:016x} size 0x{:x} \
+                 leaves the 32-bit effective-address space; returning 0",
+                seg.index, seg.vaddr, seg.memsz
             ));
             return 0;
         };

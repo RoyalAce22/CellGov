@@ -32,9 +32,40 @@ pub enum LoadError {
     /// Not big-endian (PPU ELFs must be MSB).
     #[error("PPU ELF is not big-endian")]
     NotBigEndian,
-    /// A LOAD segment extends past the end of the file.
-    #[error("PPU ELF LOAD segment truncated")]
-    SegmentTruncated,
+    /// `EI_VERSION` is not `EV_CURRENT`.
+    #[error("PPU ELF EI_VERSION 0x{ei_version:02x} is not EV_CURRENT ({EV_CURRENT})")]
+    UnknownElfVersion {
+        /// Declared `EI_VERSION`.
+        ei_version: u8,
+    },
+    /// `e_machine` is not `EM_PPC64`.
+    #[error("PPU ELF e_machine {e_machine} (0x{e_machine:04x}) is not EM_PPC64 ({EM_PPC64})")]
+    NotPpc64 {
+        /// Declared `e_machine`.
+        e_machine: u16,
+    },
+    /// `e_phnum` is zero: the file has no program-header table, so
+    /// nothing in it is loadable.
+    #[error("PPU ELF declares no program header table (e_phnum=0); nothing in it is loadable")]
+    NoProgramHeaders,
+    /// `e_phnum` is `PN_XNUM`: the real count sits in section header 0,
+    /// an extension this loader does not read.
+    #[error("PPU ELF e_phnum=0x{ELF_PN_XNUM:04X} (PN_XNUM extension) is not supported")]
+    PhdrCountExtended,
+    /// A LOAD segment's file-backed bytes run past the end of the file.
+    #[error(
+        "PPU ELF LOAD segment[{segment_index}] at file offset 0x{file_offset:x} (size 0x{filesz:x}) runs past the file's 0x{file_len:x} bytes"
+    )]
+    SegmentTruncated {
+        /// Index of the offending PT_LOAD in the program-header table.
+        segment_index: usize,
+        /// Declared `p_offset`.
+        file_offset: u64,
+        /// Declared `p_filesz`.
+        filesz: u64,
+        /// Length of the file.
+        file_len: u64,
+    },
     /// A LOAD segment's virtual address + size exceeds guest memory,
     /// overflows a 32-bit PS3 effective address, or arithmetic on the
     /// vaddr/memsz pair overflowed.
@@ -69,7 +100,10 @@ pub enum LoadError {
     },
 }
 
-use cellgov_ps3_abi::format::elf::{ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, PT_LOAD};
+use cellgov_ps3_abi::format::elf::{
+    ELF_EI_VERSION, ELF_E_MACHINE_OFFSET, ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, ELF_PN_XNUM,
+    EM_PPC64, EV_CURRENT, PT_LOAD,
+};
 
 /// Byte offset of program-header slot `i`.
 ///
@@ -138,53 +172,34 @@ pub struct LoadResult {
 }
 
 /// Minimum guest memory needed to host every PT_LOAD (including BSS).
+///
+/// # Errors
+///
+/// Any [`read_pt_loads`] refusal, [`LoadError::SegmentFileszExceedsMemsz`],
+/// and [`LoadError::SegmentOutOfRange`] for a segment whose end
+/// overflows or lies above the 4 GiB effective-address ceiling. The
+/// sizing reads headers only, so a segment's file bytes are not held
+/// to the file.
 pub fn required_memory_size(data: &[u8]) -> Result<usize, LoadError> {
-    if data.len() < ELF_HEADER_SIZE {
-        return Err(LoadError::TooSmall);
-    }
-    if data[0..4] != ELF_MAGIC {
-        return Err(LoadError::BadMagic);
-    }
-    if data[4] != 2 {
-        return Err(LoadError::Not64Bit);
-    }
-    if data[5] != 2 {
-        return Err(LoadError::NotBigEndian);
-    }
-
-    let phoff = read_u64(data, 32) as usize;
-    let phentsize = read_u16(data, 54) as usize;
-    let phnum = read_u16(data, 56) as usize;
-
     let mut max_addr: u64 = 0;
-    for i in 0..phnum {
-        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
-        let p_type = read_u32(data, base);
-        if p_type != PT_LOAD {
+    for seg in read_pt_loads(data)? {
+        validate_load_segment_sizes(seg.index, seg.filesz, seg.memsz)?;
+        if seg.memsz == 0 {
             continue;
         }
-        let p_vaddr = read_u64(data, base + 16);
-        let p_filesz = read_u64(data, base + 32);
-        let p_memsz = read_u64(data, base + 40);
-        validate_load_segment_sizes(i, p_filesz, p_memsz)?;
-        if p_memsz == 0 {
-            continue;
-        }
-        let placement = SegmentPlacement {
-            addr: p_vaddr,
-            size: p_memsz,
+        let out_of_range = LoadError::SegmentOutOfRange {
+            placement: SegmentPlacement {
+                addr: seg.vaddr,
+                size: seg.memsz,
+            },
+            segment_index: seg.index,
         };
-        let end = p_vaddr
-            .checked_add(p_memsz)
-            .ok_or(LoadError::SegmentOutOfRange {
-                placement,
-                segment_index: i,
-            })?;
+        let end = seg
+            .vaddr
+            .checked_add(seg.memsz)
+            .ok_or(out_of_range.clone())?;
         if end > u64::from(u32::MAX) + 1 {
-            return Err(LoadError::SegmentOutOfRange {
-                placement,
-                segment_index: i,
-            });
+            return Err(out_of_range);
         }
         if end > max_addr {
             max_addr = end;
@@ -204,23 +219,8 @@ pub fn load_ppu_elf(
     memory: &mut GuestMemory,
     state: &mut PpuState,
 ) -> Result<LoadResult, LoadError> {
-    if data.len() < ELF_HEADER_SIZE {
-        return Err(LoadError::TooSmall);
-    }
-    if data[0..4] != ELF_MAGIC {
-        return Err(LoadError::BadMagic);
-    }
-    if data[4] != 2 {
-        return Err(LoadError::Not64Bit);
-    }
-    if data[5] != 2 {
-        return Err(LoadError::NotBigEndian);
-    }
-
+    let segments = checked_pt_loads(data)?;
     let entry = read_u64(data, 24);
-    let phoff = read_u64(data, 32) as usize;
-    let phentsize = read_u16(data, 54) as usize;
-    let phnum = read_u16(data, 56) as usize;
 
     let mem_size = memory.as_bytes().len();
     let mut max_addr: u64 = 0;
@@ -230,25 +230,19 @@ pub fn load_ppu_elf(
     // read back as a perfectly plausible descriptor naming pc 0.
     let mut loaded: Vec<std::ops::Range<u64>> = Vec::new();
 
-    for i in 0..phnum {
-        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
+    for seg in segments {
+        let i = seg.index;
+        let p_offset = seg.file_offset as usize;
+        let p_vaddr = seg.vaddr;
+        let p_filesz = seg.filesz;
+        let p_memsz = seg.memsz;
 
-        let p_type = read_u32(data, base);
-        if p_type != PT_LOAD {
-            continue;
-        }
-
-        let p_offset = read_u64(data, base + 8) as usize;
-        let p_vaddr = read_u64(data, base + 16);
-        let p_filesz = read_u64(data, base + 32);
-        let p_memsz = read_u64(data, base + 40);
-
-        // The ELF format forbids p_filesz > p_memsz for loadable
-        // segments. The bounds check below is memsz-derived, so a
-        // header claiming extra file bytes would route an oversized
-        // copy into apply_commit and panic instead of erroring.
-        validate_load_segment_sizes(i, p_filesz, p_memsz)?;
-
+        // `checked_pt_loads` refused p_filesz > p_memsz, which the ELF format
+        // forbids for loadable segments: the bounds check below is
+        // memsz-derived, so a header claiming extra file bytes would
+        // route an oversized copy into apply_commit and panic instead
+        // of erroring. It also refused file bytes past the end of the
+        // file.
         if p_memsz == 0 {
             continue;
         }
@@ -271,14 +265,6 @@ pub fn load_ppu_elf(
                 placement,
                 segment_index: i,
             });
-        }
-
-        if p_filesz > 0
-            && p_offset
-                .checked_add(p_filesz as usize)
-                .is_none_or(|e| e > data.len())
-        {
-            return Err(LoadError::SegmentTruncated);
         }
 
         let p_filesz_usz = p_filesz as usize;
@@ -380,9 +366,10 @@ pub struct LoadSegment {
     pub readable: bool,
 }
 
-/// Enumerate PT_LOAD segments in program-header order (zero-sized
-/// segments omitted). Matches the order `load_ppu_elf` copies them.
-pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
+/// Refuse a file that is not a big-endian ELF64 PPU object: too short
+/// for a header, or the wrong magic, class, byte order, version or
+/// machine.
+fn check_ppu_elf_header(data: &[u8]) -> Result<(), LoadError> {
     if data.len() < ELF_HEADER_SIZE {
         return Err(LoadError::TooSmall);
     }
@@ -395,25 +382,67 @@ pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
     if data[5] != 2 {
         return Err(LoadError::NotBigEndian);
     }
+    if data[ELF_EI_VERSION] != EV_CURRENT {
+        return Err(LoadError::UnknownElfVersion {
+            ei_version: data[ELF_EI_VERSION],
+        });
+    }
+    let e_machine = read_u16(data, ELF_E_MACHINE_OFFSET);
+    if e_machine != EM_PPC64 {
+        return Err(LoadError::NotPpc64 { e_machine });
+    }
+    Ok(())
+}
+
+/// Every PT_LOAD program header, in program-header order, zero-sized
+/// ones included, as the table declares them.
+///
+/// The one PT_LOAD reader: [`checked_pt_loads`] and
+/// [`pt_load_segments`] read through it. It validates the header and
+/// the table, not the segments: a segment may claim file bytes past the
+/// end of the file, or end at the top of the address space. A caller
+/// that copies or reads a segment's bytes takes [`checked_pt_loads`].
+///
+/// # Errors
+///
+/// - The header refusals: [`LoadError::TooSmall`],
+///   [`LoadError::BadMagic`], [`LoadError::Not64Bit`],
+///   [`LoadError::NotBigEndian`], [`LoadError::UnknownElfVersion`],
+///   [`LoadError::NotPpc64`].
+/// - [`LoadError::PhdrCountExtended`] and [`LoadError::NoProgramHeaders`]
+///   for a count the table cannot be walked with.
+/// - [`LoadError::BadPhentsize`], or [`LoadError::TooSmall`] for a table
+///   running past the file.
+pub fn read_pt_loads(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
+    check_ppu_elf_header(data)?;
     let phoff = read_u64(data, 32) as usize;
     let phentsize = read_u16(data, 54) as usize;
-    let phnum = read_u16(data, 56) as usize;
+    let phnum = read_u16(data, 56);
+    if phnum == ELF_PN_XNUM {
+        return Err(LoadError::PhdrCountExtended);
+    }
+    // A file with no program-header table writes e_phnum = 0, and a
+    // zero count locates no entries for e_phentsize to size, so the
+    // count is read first: an absent table gets its own refusal.
+    if phnum == 0 {
+        return Err(LoadError::NoProgramHeaders);
+    }
     let mut out = Vec::new();
-    for i in 0..phnum {
+    for i in 0..usize::from(phnum) {
         let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
         if read_u32(data, base) != PT_LOAD {
             continue;
         }
         let p_flags = read_u32(data, base + 4);
+        let file_offset = read_u64(data, base + 8);
+        let vaddr = read_u64(data, base + 16);
+        let filesz = read_u64(data, base + 32);
         let memsz = read_u64(data, base + 40);
-        if memsz == 0 {
-            continue;
-        }
         out.push(LoadSegment {
             index: i,
-            file_offset: read_u64(data, base + 8),
-            vaddr: read_u64(data, base + 16),
-            filesz: read_u64(data, base + 32),
+            file_offset,
+            vaddr,
+            filesz,
             memsz,
             executable: (p_flags & 0x1) != 0,
             writable: (p_flags & 0x2) != 0,
@@ -421,6 +450,142 @@ pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
         });
     }
     Ok(out)
+}
+
+/// [`read_pt_loads`], each segment checked against the file and the
+/// address space.
+///
+/// A segment it returns satisfies `filesz <= memsz`, `vaddr + memsz`
+/// fits u64, and, when `filesz > 0`, `[file_offset, file_offset +
+/// filesz)` lies inside the file. [`load_ppu_elf`] reads through it.
+///
+/// # Errors
+///
+/// Any [`read_pt_loads`] refusal, then per segment, in this order:
+/// [`LoadError::SegmentFileszExceedsMemsz`],
+/// [`LoadError::SegmentOutOfRange`] when `vaddr + memsz` overflows,
+/// and [`LoadError::SegmentTruncated`].
+pub fn checked_pt_loads(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
+    let segments = read_pt_loads(data)?;
+    for seg in &segments {
+        validate_load_segment_sizes(seg.index, seg.filesz, seg.memsz)?;
+        if seg.vaddr.checked_add(seg.memsz).is_none() {
+            return Err(LoadError::SegmentOutOfRange {
+                placement: SegmentPlacement {
+                    addr: seg.vaddr,
+                    size: seg.memsz,
+                },
+                segment_index: seg.index,
+            });
+        }
+        if seg.filesz > 0
+            && seg
+                .file_offset
+                .checked_add(seg.filesz)
+                .is_none_or(|end| end > data.len() as u64)
+        {
+            return Err(LoadError::SegmentTruncated {
+                segment_index: seg.index,
+                file_offset: seg.file_offset,
+                filesz: seg.filesz,
+                file_len: data.len() as u64,
+            });
+        }
+    }
+    Ok(segments)
+}
+
+/// Enumerate PT_LOAD segments in program-header order (zero-sized
+/// segments omitted). Matches the order `load_ppu_elf` copies them.
+///
+/// The segments are [`read_pt_loads`]'s, unchecked: see it for what a
+/// segment may claim.
+///
+/// # Errors
+///
+/// Any [`read_pt_loads`] refusal.
+pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
+    let mut segments = read_pt_loads(data)?;
+    segments.retain(|s| s.memsz != 0);
+    Ok(segments)
+}
+
+/// Where the bytes of a guest address range come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddressSource {
+    /// The file backs the whole range.
+    FileBacked {
+        /// The segment chosen to back it.
+        segment: LoadSegment,
+        /// File offset of the range's first byte.
+        file_offset: u64,
+        /// How many segments' file-backed bytes hold the range; more
+        /// than one when segments overlap.
+        overlapping: usize,
+    },
+    /// No segment's file bytes hold the range, but a segment maps its
+    /// first address past its file-backed bytes: zero-fill (BSS).
+    ZeroFill {
+        /// The first segment, in program-header order, that maps it.
+        segment: LoadSegment,
+    },
+    /// No segment maps the address.
+    Unmapped,
+}
+
+impl AddressSource {
+    /// The file offset of the range, when the file backs it.
+    #[must_use]
+    pub fn file_offset(&self) -> Option<u64> {
+        match self {
+            Self::FileBacked { file_offset, .. } => Some(*file_offset),
+            Self::ZeroFill { .. } | Self::Unmapped => None,
+        }
+    }
+}
+
+/// The file offset of the `len` bytes at `vaddr`, when the file backs
+/// them; see [`address_source`].
+pub(crate) fn file_offset_at(segments: &[LoadSegment], vaddr: u64, len: usize) -> Option<usize> {
+    let offset = address_source(segments, vaddr, u64::try_from(len).ok()?).file_offset()?;
+    usize::try_from(offset).ok()
+}
+
+/// Where the `len` bytes at `vaddr` come from, among `segments`.
+///
+/// The one virtual-address-to-file-offset lookup. Among the segments
+/// whose file-backed bytes hold `[vaddr, vaddr + len)`, it takes the
+/// smallest, then the lowest file offset, then the lowest address; in
+/// a file whose segments do not overlap that is the only one.
+#[must_use]
+pub fn address_source(segments: &[LoadSegment], vaddr: u64, len: u64) -> AddressSource {
+    let backing = |segment: &LoadSegment| -> Option<u64> {
+        let delta = vaddr.checked_sub(segment.vaddr)?;
+        if delta.checked_add(len)? > segment.filesz {
+            return None;
+        }
+        segment.file_offset.checked_add(delta)
+    };
+    let mut candidates: Vec<(LoadSegment, u64)> = segments
+        .iter()
+        .filter_map(|s| backing(s).map(|offset| (*s, offset)))
+        .collect();
+    let overlapping = candidates.len();
+    candidates.sort_by_key(|(s, _)| (s.filesz, s.file_offset, s.vaddr));
+    if let Some(&(segment, file_offset)) = candidates.first() {
+        return AddressSource::FileBacked {
+            segment,
+            file_offset,
+            overlapping,
+        };
+    }
+    let mapped = segments
+        .iter()
+        .find(|s| vaddr >= s.vaddr && s.vaddr.checked_add(s.memsz).is_some_and(|end| vaddr < end));
+    match mapped {
+        Some(segment) => AddressSource::ZeroFill { segment: *segment },
+        None => AddressSource::Unmapped,
+    }
 }
 
 use cellgov_ps3_abi::format::elf::PT_TLS;
@@ -527,26 +692,11 @@ pub struct SysProcessParam {
 /// the corresponding guest virtual address, or `None` if no PT_LOAD
 /// covers the offset.
 fn pt_load_file_to_guest(data: &[u8], file_off: usize) -> Option<u64> {
-    if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC || data[4] != 2 || data[5] != 2 {
-        return None;
-    }
-    let phoff = read_u64(data, 32) as usize;
-    let phentsize = read_u16(data, 54) as usize;
-    let phnum = read_u16(data, 56) as usize;
-    for i in 0..phnum {
-        let base = ph_slot_base(data.len(), phoff, phentsize, i).ok()?;
-        if read_u32(data, base) != PT_LOAD {
-            continue;
-        }
-        let p_offset = read_u64(data, base + 8) as usize;
-        let p_vaddr = read_u64(data, base + 16);
-        let p_filesz = read_u64(data, base + 32) as usize;
-        let p_end = p_offset.checked_add(p_filesz)?;
-        if file_off >= p_offset && file_off < p_end {
-            return p_vaddr.checked_add((file_off - p_offset) as u64);
-        }
-    }
-    None
+    let file_off = file_off as u64;
+    read_pt_loads(data).ok()?.into_iter().find_map(|seg| {
+        let delta = file_off.checked_sub(seg.file_offset)?;
+        (delta < seg.filesz).then(|| seg.vaddr.checked_add(delta))?
+    })
 }
 
 /// Locate `.sys_proc_param` by scanning for its magic (avoids parsing
@@ -833,3 +983,7 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
 #[cfg(test)]
 #[path = "tests/loader_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/loader_pt_load_tests.rs"]
+mod pt_load_tests;

@@ -6,7 +6,7 @@ use cellgov_ps3_abi::format::elf::ppc64_function_descriptor;
 use cellgov_ps3_abi::hw::ppu::SYSTEM_CALL_VECTOR_OFFSET;
 
 use crate::instruction::PpuInstruction;
-use crate::loader::{pt_load_segments, LoadError, LoadSegment};
+use crate::loader::{file_offset_at, pt_load_segments, LoadError, LoadSegment};
 
 const VECTOR_WORDS: usize = 64;
 const HANDLER_WORDS: usize = 512;
@@ -769,24 +769,6 @@ fn read_u64_at(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option<u64
 fn read_be_u64(bytes: &[u8], offset: usize) -> Option<u64> {
     let end = offset.checked_add(8)?;
     Some(u64::from_be_bytes(bytes.get(offset..end)?.try_into().ok()?))
-}
-
-fn file_offset_at(segments: &[LoadSegment], address: u64, len: usize) -> Option<usize> {
-    let len = len as u64;
-    for segment in segments {
-        let Some(delta) = address.checked_sub(segment.vaddr) else {
-            continue;
-        };
-        let Some(end) = delta.checked_add(len) else {
-            continue;
-        };
-        if end > segment.filesz {
-            continue;
-        }
-        let offset = segment.file_offset.checked_add(delta)?;
-        return usize::try_from(offset).ok();
-    }
-    None
 }
 
 fn is_executable_address(segments: &[LoadSegment], address: u64) -> bool {

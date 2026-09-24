@@ -1,4 +1,4 @@
-//! Synthetic ELF builders shared by `elf::tests` and `stream::tests`.
+//! Synthetic ELF builders for `stream::tests`.
 
 #![cfg(test)]
 

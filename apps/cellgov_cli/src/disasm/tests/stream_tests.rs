@@ -1,10 +1,24 @@
 //! Disassembly stream output -- decode stats, address formatting, and out-of-segment vaddr errors.
 
 use super::*;
-use crate::disasm::elf::parse_pt_loads;
 use crate::disasm::test_support::*;
+use cellgov_ppu::loader::checked_pt_loads as parse_pt_loads;
 
-fn nop_elf() -> (Vec<u8>, Vec<PtLoad>) {
+/// A segment as the loader would read it, for the selection tests.
+fn seg(vaddr: u64, file_offset: u64, filesz: u64, memsz: u64) -> LoadSegment {
+    LoadSegment {
+        index: 0,
+        file_offset,
+        vaddr,
+        filesz,
+        memsz,
+        executable: true,
+        writable: false,
+        readable: true,
+    }
+}
+
+fn nop_elf() -> (Vec<u8>, Vec<LoadSegment>) {
     let mut bytes = Vec::new();
     for _ in 0..4 {
         bytes.extend_from_slice(&PPC_NOP_BYTES);
@@ -144,42 +158,17 @@ fn disassemble_resets_consecutive_counter_on_success() {
 
 #[test]
 fn select_segment_picks_smallest_containing_when_overlapping() {
-    let big = PtLoad {
-        vaddr: 0x10000,
-        offset: 0x200,
-        filesz: 0x1000,
-        memsz: 0x1000,
-    };
-    let small = PtLoad {
-        vaddr: 0x10000,
-        offset: 0x4000,
-        filesz: 0x100,
-        memsz: 0x100,
-    };
+    let big = seg(0x10000, 0x200, 0x1000, 0x1000);
+    let small = seg(0x10000, 0x4000, 0x100, 0x100);
     let chosen = select_segment(&[big, small], 0x10000).unwrap();
     assert_eq!(chosen, small);
 }
 
 #[test]
 fn select_segment_breaks_filesz_ties_by_offset_then_vaddr() {
-    let a = PtLoad {
-        vaddr: 0x10000,
-        offset: 0x4000,
-        filesz: 0x100,
-        memsz: 0x100,
-    };
-    let b = PtLoad {
-        vaddr: 0x10000,
-        offset: 0x2000,
-        filesz: 0x100,
-        memsz: 0x100,
-    };
-    let c = PtLoad {
-        vaddr: 0x10000,
-        offset: 0x6000,
-        filesz: 0x100,
-        memsz: 0x100,
-    };
+    let a = seg(0x10000, 0x4000, 0x100, 0x100);
+    let b = seg(0x10000, 0x2000, 0x100, 0x100);
+    let c = seg(0x10000, 0x6000, 0x100, 0x100);
     let chosen = select_segment(&[a, b, c], 0x10000).unwrap();
     assert_eq!(chosen, b);
 }
@@ -347,18 +336,13 @@ fn disassemble_propagates_broken_pipe() {
 
 #[test]
 fn disassemble_address_overflow_marker_is_consistent() {
-    // Non-obvious invariant: parse_pt_loads rejects this geometry
-    // (vaddr+filesz overflows); hand-rolled here to reach the
+    // Non-obvious invariant: checked_pt_loads rejects this geometry
+    // (vaddr+memsz overflows); hand-rolled here to reach the
     // defensive marker path.
     let bytes = PPC_NOP_BYTES.to_vec();
-    let seg = PtLoad {
-        vaddr: u64::MAX - 3,
-        offset: 0,
-        filesz: 4,
-        memsz: 4,
-    };
+    let top = seg(u64::MAX - 3, 0, 4, 4);
     let mut out = Vec::new();
-    let stats = disassemble(&bytes, &[seg], u64::MAX - 3, 2, None, &mut out).unwrap();
+    let stats = disassemble(&bytes, &[top], u64::MAX - 3, 2, None, &mut out).unwrap();
     let text = String::from_utf8(out).unwrap();
     assert!(
         text.contains("<address overflow"),

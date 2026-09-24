@@ -18,6 +18,7 @@
 pub mod caller_census;
 pub mod decode;
 pub mod differential;
+pub mod disasm;
 pub mod exec;
 mod fp;
 pub mod funcmap;

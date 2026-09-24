@@ -87,7 +87,9 @@ fn exercise_runs_the_raw_bytes_and_the_image_they_describe() {
         outcome,
         CaseOutcome {
             raw: LoaderOutcome::Refused(LoaderRefusal::Elf(LoadError::TooSmall)),
-            structured: LoaderOutcome::Accepted,
+            // An empty stream describes an image with no program
+            // headers, which the reader refuses by name.
+            structured: LoaderOutcome::Refused(LoaderRefusal::Elf(LoadError::NoProgramHeaders)),
         }
     );
 }

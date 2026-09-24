@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cellgov_ps3_abi::lv2::syscall;
 
 use crate::instruction::PpuInstruction;
-use crate::loader::{pt_load_segments, LoadError, LoadSegment};
+use crate::loader::{file_offset_at, pt_load_segments, LoadError, LoadSegment};
 use crate::lv2_stub::{self, Lv2StubClassification, Lv2StubClassificationError};
 
 const MAX_FUNCTION_WORDS: usize = 384;
@@ -489,23 +489,6 @@ fn read_i32_at(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option<i32
     Some(i32::from_be_bytes(
         elf.get(offset..offset + 4)?.try_into().ok()?,
     ))
-}
-
-fn file_offset_at(segments: &[LoadSegment], address: u64, size: usize) -> Option<usize> {
-    let size = u64::try_from(size).ok()?;
-    for segment in segments {
-        let Some(relative) = address.checked_sub(segment.vaddr) else {
-            continue;
-        };
-        let Some(end) = relative.checked_add(size) else {
-            continue;
-        };
-        if end <= segment.filesz {
-            let offset = segment.file_offset.checked_add(relative)?;
-            return usize::try_from(offset).ok();
-        }
-    }
-    None
 }
 
 fn add_signed(base: u64, displacement: i64) -> Option<u64> {

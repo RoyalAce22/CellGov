@@ -1,5 +1,5 @@
-//! Read-only PowerPC disassembler that delegates decoding to
-//! `cellgov_ppu::decode::decode`.
+//! Read-only PowerPC disassembler over `cellgov_ppu`'s segment reader
+//! and disassembly stream.
 //!
 //! Used to investigate guest behavior at specific addresses without
 //! booting the title. Output format: `addr  raw  decoded` per
@@ -8,7 +8,6 @@
 //! go to stderr so a downstream tool can pipe stdout cleanly.
 
 mod args;
-mod elf;
 mod entry;
 mod stream;
 

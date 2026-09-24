@@ -41,6 +41,18 @@ impl FunctionMap {
         let span = self.functions.get(idx.checked_sub(1)?)?;
         (addr < span.end).then_some(span)
     }
+
+    /// Name every NID-named span the workspace NID table knows. A NID
+    /// the table does not know keeps its `nid_<hex>` rendering.
+    pub fn resolve_nids(&mut self) {
+        for span in &mut self.functions {
+            if let FunctionName::Nid(nid) = span.name {
+                if let Some((_module, symbol)) = cellgov_ps3_abi::nid::lookup(nid) {
+                    span.name = FunctionName::Known(symbol);
+                }
+            }
+        }
+    }
 }
 
 /// One discovered function: `[start, end)` in guest vaddr space.
@@ -82,8 +94,8 @@ impl fmt::Display for DisplayName<'_> {
 /// How a function is named.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FunctionName {
-    /// Export resolved via NID; symbol-name lookup is the caller's
-    /// concern.
+    /// Export resolved via NID; [`FunctionMap::resolve_nids`] names the
+    /// ones the NID table knows.
     Nid(u32),
     /// No name source; renders as `sub_<start>`.
     Synthetic,
@@ -368,3 +380,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/funcmap_finding_tests.rs"]
 mod finding_tests;
+
+#[cfg(test)]
+#[path = "tests/funcmap_resolve_tests.rs"]
+mod resolve_tests;

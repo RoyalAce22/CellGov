@@ -491,8 +491,8 @@ fn elf_header_plus_phdr_table_end(eboot_bytes: &[u8]) -> Result<u64, ElfHeaderPa
     // header. The returned value also becomes a classifier range that
     // marks every divergent byte under it non-semantic. A malformed
     // end would therefore claim guest bytes the ELF header does not
-    // own. `disasm::elf::parse_pt_loads` rejects the same shape as
-    // `PhdrOutOfFile`.
+    // own. `cellgov_ppu::loader::read_pt_loads` refuses the same shape
+    // as `LoadError::TooSmall`.
     let file_len = eboot_bytes.len() as u64;
     if phdr_end > file_len {
         return Err(ElfHeaderParseError::PhdrTableOutOfFile {

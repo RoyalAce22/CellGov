@@ -17,6 +17,8 @@ pub(crate) fn make_test_prx() -> Vec<u8> {
     buf[0..4].copy_from_slice(&ELF_MAGIC);
     buf[4] = 2;
     buf[5] = 2;
+    buf[6] = 1; // EV_CURRENT
+    buf[18..20].copy_from_slice(&21u16.to_be_bytes()); // EM_PPC64
     buf[16..18].copy_from_slice(&ET_PRX.to_be_bytes());
     buf[32..40].copy_from_slice(&64u64.to_be_bytes());
     buf[54..56].copy_from_slice(&56u16.to_be_bytes());
