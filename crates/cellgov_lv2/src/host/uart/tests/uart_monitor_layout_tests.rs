@@ -1,10 +1,15 @@
 //! Field placement in the two synthesised `ps3av_monitor_info`
 //! descriptors, pinned at the byte level against the offset table.
 
-use super::*;
+use crate::dispatch::Lv2Dispatch;
 use crate::host::test_support::FakeRuntime;
+use crate::host::Lv2Host;
 use crate::request::Lv2Request;
+use cellgov_effects::Effect;
+use cellgov_event::UnitId;
+use cellgov_mem::ByteRange;
 use cellgov_mem::{GuestAddr, GuestMemory};
+use cellgov_ps3_abi::lv2::uart as av;
 use cellgov_ps3_abi::lv2::uart::monitor_info as mi;
 
 const ROOT: u32 = 0x4000_0000;

@@ -2,12 +2,19 @@
 
 use std::collections::BTreeSet;
 
-use super::*;
+use super::state::{UartReader, UartState};
+use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse};
 use crate::host::process::ProcessEntry;
 use crate::host::test_support::{primary_attrs, seed_primary_ppu, FakeRuntime};
+use crate::host::Lv2Host;
+use crate::ppu_thread::PpuThreadId;
 use crate::request::Lv2Request;
+use cellgov_effects::Effect;
+use cellgov_event::UnitId;
+use cellgov_mem::ByteRange;
 use cellgov_mem::{GuestAddr, GuestMemory};
 use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
+use cellgov_ps3_abi::lv2::uart as av;
 
 const ROOT: u32 = 0x4000_0000;
 const PKT_PTR: u32 = 0x1000;

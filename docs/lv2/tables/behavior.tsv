@@ -87,10 +87,10 @@ ordinal	packet	same_as	selector_slot	provenance_kind	provenance_ref	witness	exce
 350	none	none	none	firmware_reading	libaudio.prx	crates/cellgov_lv2/src/host/tests/memory_container_tests.rs:an_unknown_container_id_is_esrch_after_the_argument_gates	none	crates/cellgov_lv2/src/host/memory.rs
 352	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/memory_tests.rs:user_memory_size_available_falls_with_allocation	none	crates/cellgov_lv2/src/host/dispatch_route/inline_arms.rs
 362	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/dispatch_route/tests/route_memory_tests.rs:syscall_362_records_handle_keyed_on_mem_id	none	crates/cellgov_lv2/src/host/dispatch_route/unsupported_arms/memory.rs
-367	none	none	none	firmware_reading	vsh.self	crates/cellgov_lv2/src/host/tests/uart_tests.rs:initialize_needs_root_and_claims_the_uart_once	none	crates/cellgov_lv2/src/host/uart.rs
-368	none	none	none	firmware_reading	vsh.self	crates/cellgov_lv2/src/host/tests/uart_tests.rs:a_blocking_receive_parks_and_the_next_send_wakes_it_with_the_reply	none	crates/cellgov_lv2/src/host/uart.rs
-369	none	none	none	firmware_reading	vsh.self	crates/cellgov_lv2/src/host/tests/uart_reader_queue_tests.rs:one_send_serves_two_parked_readers_in_park_order	none	crates/cellgov_lv2/src/host/uart.rs
-370	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/uart_tests.rs:get_params_reports_both_ring_sizes	none	crates/cellgov_lv2/src/host/uart.rs
+367	none	none	none	firmware_reading	vsh.self	crates/cellgov_lv2/src/host/uart/tests/uart_tests.rs:initialize_needs_root_and_claims_the_uart_once	none	crates/cellgov_lv2/src/host/uart/syscalls.rs
+368	none	none	none	firmware_reading	vsh.self	crates/cellgov_lv2/src/host/uart/tests/uart_tests.rs:a_blocking_receive_parks_and_the_next_send_wakes_it_with_the_reply	none	crates/cellgov_lv2/src/host/uart/syscalls.rs
+369	none	none	none	firmware_reading	vsh.self	crates/cellgov_lv2/src/host/uart/tests/uart_reader_queue_tests.rs:one_send_serves_two_parked_readers_in_park_order	none	crates/cellgov_lv2/src/host/uart/syscalls.rs
+370	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/uart/tests/uart_tests.rs:get_params_reports_both_ring_sizes	none	crates/cellgov_lv2/src/host/uart/syscalls.rs
 402	none	none	none	non_public	none	crates/cellgov_lv2/src/host/dispatch_route/tests/route_io_time_tests.rs:tty_read_returns_eio	none	crates/cellgov_lv2/src/host/dispatch_route/unsupported_arms/misc.rs
 403	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/dispatch_route/tests/route_io_time_tests.rs:tty_write_writes_nwritten_and_returns_ok	none	crates/cellgov_lv2/src/host/dispatch_route/helpers.rs
 462	none	none	none	firmware_reading	liblv2.sprx	crates/cellgov_lv2/src/host/dispatch_route/tests/route_prx_tests.rs:syscall_462_returns_enosys	none	crates/cellgov_lv2/src/host/dispatch_route/unsupported_arms/misc.rs

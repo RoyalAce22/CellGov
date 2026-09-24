@@ -1,9 +1,17 @@
 //! Virtual UART dispatch tests: privilege and lifecycle, packet parsing, per-CID replies, HDMI events, and the blocking reader.
 
-use super::*;
+use super::cid_table::{cid_spec, SizeRule, CID_TABLE};
+use super::packet::{rd16, rd32};
+use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse};
 use crate::host::test_support::{seed_primary_ppu, FakeRuntime};
+use crate::host::Lv2Host;
 use crate::request::Lv2Request;
+use cellgov_effects::Effect;
+use cellgov_event::UnitId;
+use cellgov_mem::ByteRange;
 use cellgov_mem::{GuestAddr, GuestMemory};
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::uart as av;
 
 const ROOT: u32 = 0x4000_0000;
 const PKT_PTR: u32 = 0x1000;
