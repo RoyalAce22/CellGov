@@ -1,4 +1,8 @@
-use super::*;
+use super::registry::*;
+use super::types::*;
+use crate::instruction::ops::*;
+use crate::instruction::{PpuInstruction, PpuInstructionKind};
+use crate::state::PpuState;
 
 fn descriptor_with(relation: PpuMetamorphicRelation) -> PpuGenerationDescriptor {
     generation_descriptors()

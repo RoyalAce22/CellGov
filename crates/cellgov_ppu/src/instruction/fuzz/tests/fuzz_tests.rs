@@ -1,4 +1,11 @@
-use super::*;
+use super::bits::*;
+use super::classify::*;
+use super::registry::*;
+use super::types::*;
+use crate::instruction::ops::*;
+use crate::instruction::{PpuInstruction, PpuInstructionKind};
+use cellgov_effects::EffectKind;
+use std::collections::BTreeSet;
 
 #[test]
 fn generation_registry_covers_every_standalone_exact_kind() {
