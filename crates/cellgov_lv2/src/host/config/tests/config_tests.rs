@@ -1,13 +1,25 @@
 //! `sys_config` dispatch tests: handle lifecycle, pad-manager replay filters, record layout, and receiver wake.
 
 use super::*;
+use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::test_support::{extract_write_u32, seed_primary_ppu, FakeRuntime};
+use crate::host::Lv2Host;
 use crate::request::Lv2Request;
+use crate::sync_primitives::EventPayload;
 use crate::sync_primitives::EventQueueReceive;
+use cellgov_effects::Effect;
+use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_ps3_abi::lv2::config::{
+    SYS_CONFIG_EVENT_SOURCE_SERVICE, SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR,
+    SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN, SYS_CONFIG_SERVICE_EVENT_HEAD_LEN,
+    SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN, SYS_CONFIG_SERVICE_LISTENER_ONCE,
+    SYS_CONFIG_SERVICE_PADMANAGER, SYS_CONFIG_SERVICE_PADMANAGER2,
+};
 use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_SERVICE_LISTENER_REPEATING, SYS_CONFIG_SERVICE_USER_LIBPAD,
 };
+use cellgov_ps3_abi::lv2::errno;
 
 const HANDLE_PTR: u32 = 0x104;
 const LISTENER_PTR: u32 = 0x108;
