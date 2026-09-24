@@ -1,7 +1,7 @@
 //! The rules that fold one PUP's extracted kernel rows into the archive.
 
 use super::*;
-use crate::archive::{CensusClass, GateState};
+use crate::{CensusClass, GateState};
 use sha2::Digest;
 
 fn sha256_hex(bytes: &[u8]) -> String {

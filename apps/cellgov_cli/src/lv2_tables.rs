@@ -1,7 +1,7 @@
 //! The committed `pup.tsv`, compiled in once for every command that
 //! reads it.
 
-use cellgov_lv2::archive::{self, PupRow, PupTsvError};
+use cellgov_lv2_archive::{self as archive, PupRow, PupTsvError};
 
 const PUP_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),

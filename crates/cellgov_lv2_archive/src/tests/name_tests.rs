@@ -3,9 +3,7 @@ use std::collections::BTreeSet;
 use cellgov_ps3_abi::lv2::syscall;
 
 use super::*;
-use crate::archive::{
-    arm_rows, arm_tsv, check_references, parse, route_rows, route_tsv, ARM, ROUTE,
-};
+use crate::{arm_rows, arm_tsv, check_references, parse, route_rows, route_tsv, ARM, ROUTE};
 
 fn row(ordinal: u64, name: &str, source: NameSource, reference: Option<&str>) -> NameRow {
     NameRow {

@@ -1,31 +1,31 @@
 //! `docs/lv2/` drift gate.
 //!
 //! The gate renders every generated file of the archive from
-//! `cellgov_lv2::archive` and compares it to the committed copy.
+//! `cellgov_lv2_archive` and compares it to the committed copy.
 //! Regenerate with:
 //!
 //! ```text
-//! cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate
+//! cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate
 //! ```
 //!
 //! The `cellgov` rows of `name.tsv` have their own gate (the test
 //! [`NAME_GATE`] names) and their own regenerate:
 //!
 //! ```text
-//! cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate_cellgov_names
+//! cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate_cellgov_names
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use cellgov_lv2::archive::{
-    self, CensusClass, ConflictRow, DispatchShape, FirmwareRole, FirmwareRow, GateRow, GateState,
-    HandlingCounts, KernelRow, NameRow, NameSource, OwnerClass, PupRow, Route, RouteRow, StubRow,
-    SubentryRow, CALLER, CALLER_GATE, CALLER_UNRESOLVED, CAPABILITY_GATE, CENSUS, CENSUS_GATE,
-    FIRMWARE, FIRMWARE_GATE, GATE, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PRIORITY, PUP,
-    PUP_GATE, REACH, REGENERATE, SCHEMA_VERSION, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION, TABLES,
-};
 use cellgov_lv2::request::fidelity::ArmFidelity;
+use cellgov_lv2_archive::{
+    self as archive, CensusClass, ConflictRow, DispatchShape, FirmwareRole, FirmwareRow, GateRow,
+    GateState, HandlingCounts, KernelRow, NameRow, NameSource, OwnerClass, PupRow, Route, RouteRow,
+    StubRow, SubentryRow, CALLER, CALLER_GATE, CALLER_UNRESOLVED, CAPABILITY_GATE, CENSUS,
+    CENSUS_GATE, FIRMWARE, FIRMWARE_GATE, GATE, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PRIORITY,
+    PUP, PUP_GATE, REACH, REGENERATE, SCHEMA_VERSION, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION, TABLES,
+};
 use cellgov_ps3_abi::lv2::census::{lookup, PupCensusClass};
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
 use sha2::Digest as _;
@@ -784,7 +784,7 @@ fn the_archive_directory_holds_exactly_the_manifest() {
     assert_eq!(
         present,
         archive::files(&census_files),
-        "docs/lv2/ and the manifest in cellgov_lv2::archive disagree"
+        "docs/lv2/ and the manifest in cellgov_lv2_archive disagree"
     );
 }
 

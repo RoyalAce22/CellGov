@@ -130,8 +130,8 @@ is recorded.
 Run the archive gate after every edit:
 
 ```console
-cargo test -p cellgov_lv2 --test lv2_archive pup_rows_are_well_formed
-cargo test -p cellgov_lv2 --test lv2_archive committed_tables_load_and_reference_each_other
+cargo test -p cellgov_lv2_archive --test lv2_archive pup_rows_are_well_formed
+cargo test -p cellgov_lv2_archive --test lv2_archive committed_tables_load_and_reference_each_other
 ```
 
 These tests check the row shapes, key order, uniqueness, and firmware

@@ -1,17 +1,17 @@
 //! Emits one LV2 kernel's deterministic archive rows.
 //!
 //! The command maps `cellgov_ppu`'s kernel classification into the
-//! archive's row types; `cellgov_lv2::archive` holds the rows and the
+//! archive's row types; `cellgov_lv2_archive` holds the rows and the
 //! rules that fold them into the archive.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use cellgov_install::manifest::{sha256_of, Sha256};
-use cellgov_lv2::archive::{
-    self, CensusClass, CensusRow, DispatchShape, ExtractedRows, ExtractionError, GateRow,
-    GateState, KernelRow, PupExtraction, StubRow, SubentryRow, CAPABILITY_GATE, CENSUS, KERNEL,
-    STUB, SUBENTRY,
+use cellgov_lv2_archive::{
+    self as archive, CensusClass, CensusRow, DispatchShape, ExtractedRows, ExtractionError,
+    GateRow, GateState, KernelRow, PupExtraction, StubRow, SubentryRow, CAPABILITY_GATE, CENSUS,
+    KERNEL, STUB, SUBENTRY,
 };
 use cellgov_ppu::lv2_gate::{self, Lv2Gate, Lv2GateRead};
 use cellgov_ppu::lv2_stub::Lv2OrdinalClass;

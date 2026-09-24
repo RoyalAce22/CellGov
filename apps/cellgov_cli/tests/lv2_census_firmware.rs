@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use cellgov_lv2::archive::{self, KERNEL, PUP};
+use cellgov_lv2_archive::{self as archive, KERNEL, PUP};
 use cellgov_testkit::scratch::scratch_labeled;
 
 fn workspace_root() -> PathBuf {

@@ -12,7 +12,6 @@
     )
 )]
 
-pub mod archive;
 pub mod dispatch;
 pub mod fs_store;
 pub mod host;

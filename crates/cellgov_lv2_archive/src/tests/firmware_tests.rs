@@ -1,5 +1,5 @@
 use super::*;
-use crate::archive::{parse, render};
+use crate::{parse, render};
 
 fn row(fw: &str, order: u64, date: Option<&str>, priority: u64, role: FirmwareRole) -> FirmwareRow {
     FirmwareRow {

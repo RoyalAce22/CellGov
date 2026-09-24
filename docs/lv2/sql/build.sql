@@ -1,5 +1,5 @@
--- Rendered from cellgov_lv2::archive by
---   cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate
+-- Rendered from cellgov_lv2_archive by
+--   cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate
 -- Do not edit by hand: committed_archive_matches_generator fails on drift.
 -- Run in docs/lv2/: sqlite3 lv2.db < sql/build.sql
 

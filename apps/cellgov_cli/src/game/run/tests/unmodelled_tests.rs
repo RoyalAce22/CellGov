@@ -1,5 +1,5 @@
 use super::*;
-use cellgov_lv2::archive::CallerRow;
+use cellgov_lv2_archive::CallerRow;
 use cellgov_ps3_abi::lv2::census::PupCensusClass;
 
 #[test]

@@ -1,6 +1,6 @@
 # LV2 archive
 
-<!-- Rendered from `cellgov_lv2::archive` by
+<!-- Rendered from `cellgov_lv2_archive` by
 `{{regenerate}}`.
 Do not edit by hand: `{{gate}}` fails on drift. -->
 
@@ -218,7 +218,7 @@ What the arm does lives in its rustdoc; nothing is restated here.
 | `arm_source` | The file holding the arm's implementation. |
 
 The gate (`{{behavior_gate}}` and its siblings in
-`cellgov_lv2::archive`) fails when the rows and the typed or routed
+`cellgov_lv2_archive`) fails when the rows and the typed or routed
 surface disagree, when a witness is not a non-ignored test in a
 self-contained crate, when a row without a witness is not in the
 baseline, when `arm_source` does not hold the arm, when a reference
@@ -279,7 +279,7 @@ carries whatever else is known. {{uncorroborated_count}} slots:
 
 ## Table rules
 
-The loader in `cellgov_lv2::archive` refuses a table that breaks any
+The loader in `cellgov_lv2_archive` refuses a table that breaks any
 of these. `sql/build.sql` re-checks only the column types, the enumerated
 labels and the foreign keys (STRICT tables, CHECK constraints,
 `PRAGMA foreign_keys`); the sqlite3 import pads a short row, drops a

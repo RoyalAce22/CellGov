@@ -4,8 +4,8 @@ use cellgov_ps3_abi::lv2::syscall;
 use strum::VariantArray;
 
 use super::*;
-use crate::archive::table::{check_references, parse};
-use crate::request::Lv2RequestKind;
+use crate::table::{check_references, parse};
+use cellgov_lv2::request::Lv2RequestKind;
 
 #[test]
 fn route_rows_cover_every_slot_once_in_order() {

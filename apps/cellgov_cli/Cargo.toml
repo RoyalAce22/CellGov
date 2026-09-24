@@ -28,6 +28,7 @@ cellgov_fuzz = { path = "../../crates/cellgov_fuzz" }
 cellgov_explore = { path = "../../crates/cellgov_explore" }
 cellgov_install = { path = "../cellgov_install" }
 cellgov_lv2 = { path = "../../crates/cellgov_lv2" }
+cellgov_lv2_archive = { path = "../../crates/cellgov_lv2_archive" }
 cellgov_mem = { path = "../../crates/cellgov_mem" }
 cellgov_ppu = { path = "../../crates/cellgov_ppu" }
 cellgov_ps3_abi = { path = "../../crates/cellgov_ps3_abi" }

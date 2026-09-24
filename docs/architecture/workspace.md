@@ -32,6 +32,9 @@ graph BT
   subgraph Runtime
     core
   end
+  subgraph Offline analysis
+    lv2_archive
+  end
   subgraph Host tooling
     terminal; testkit; compare; explore; fuzz; install; boot
   end
@@ -56,6 +59,7 @@ graph BT
   exec --> core
   lv2 --> core
   trace --> core
+  lv2 --> lv2_archive
   core --> testkit
   ppu --> testkit
   testkit --> compare
@@ -70,6 +74,7 @@ graph BT
   boot --> cli
   explore --> cli
   fuzz --> cli
+  lv2_archive --> cli
   ps3_abi --> mkelf
   compare --> rpcs3_to_observation
 ```
@@ -81,11 +86,14 @@ Seven structural rules:
 - `cellgov_lv2` does not depend on `cellgov_core`: the runtime calls
   the host through the narrow `Lv2Runtime` trait, and the host never
   reaches back. Nor does it share a build edge with `cellgov_ppu`;
-  only `cellgov_ppu`'s tests use it. The LV2 archive in
-  `cellgov_lv2::archive` defines its own row types and the rules that
-  merge and check them, and the mapping from `cellgov_ppu`'s kernel
-  and caller classifications into those rows sits above both crates,
-  in the commands that extract them.
+  only `cellgov_ppu`'s tests use it. The LV2 archive is its own crate,
+  `cellgov_lv2_archive`, which reads `cellgov_lv2`'s request
+  classification and fidelity map; nothing in `cellgov_lv2` depends on
+  it, so a census change does not rebuild the runtime. The archive
+  defines its own row types and the rules that merge and check them,
+  and the mapping from `cellgov_ppu`'s kernel and caller
+  classifications into those rows sits above both crates, in the
+  commands that extract them.
 - `cellgov_ppu` and `cellgov_spu` are leaves of the library DAG: they
   plug in through the `ExecutionUnit` trait in `cellgov_exec`, and
   the runtime drives any `T: ExecutionUnit` without naming concrete
@@ -166,6 +174,7 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_boot`         | serde, serde_json, strum, thiserror, toml                                  |
 | `cellgov_install`      | aes, cbc, ctr, flate2, hmac, serde, sha1, sha2, thiserror, toml            |
 | `cellgov_terminal`     | ctrlc, terminal_size                                                       |
+| `cellgov_lv2_archive`  | strum, thiserror                                                           |
 | `cellgov_explore`      | serde, serde_json, strum, thiserror                                        |
 | `cellgov_fuzz`         | serde, serde_json, thiserror                                               |
 | `cellgov_cli`          | clap, clap_complete, filebuffer, serde, serde_json, strum, thiserror, toml |
@@ -188,6 +197,7 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`: the boundary between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not the result struct.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `cellgov_trace`                | Binary trace format with a strict tag/layout contract (decision-level records, `PpuStateHash` / `PpuStateFull` per-step divergence trace, `HostInvariantBreak` side-channel, `SyscallEntered` / `SyscallReturned` syscall entry and return, `ReservedRegionRead` locating each provisional zero-read by step and address); see [runtime_pipeline.md](runtime_pipeline.md#effects-and-trace-records).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `cellgov_lv2`                  | LV2 model: image / content registry, loaded-PRX registry, thread-group table, PPU thread table, in-memory filesystem store, LV2 sync primitives (mutex, cond, semaphore, lwmutex, event-flag, event-queue), syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `cellgov_lv2_archive`          | The LV2 syscall archive under `docs/lv2/`: the table specs and their loader, the census, caller and name rows with the rules that merge and check them, the route and arm tables rendered from `cellgov_lv2`'s classification, the `pup.tsv` rows, the SQL forms and the operator-local oracle-gap overlay's text form. Text in, text out; no I/O. The runtime never calls it. `pup.rs` holds the `pup.tsv` rows only; the PUP container layout stays in `cellgov_ps3_abi::format::pup`. |
 | `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `cellgov_ppu`                  | PPU interpreter, ELF64 / SPRX / PRX loaders, and the PRX loader's dependency-ordered multi-module import resolution; the NID lookup database lives in `cellgov_ps3_abi`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `cellgov_spu`                  | SPU interpreter and SPU ELF loader; MFC / SPU channel-number constants live in `cellgov_ps3_abi::hw::spu`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |

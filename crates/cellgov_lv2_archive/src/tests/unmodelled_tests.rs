@@ -1,7 +1,7 @@
 //! The unmodelled-syscall join over the archive's rows.
 
 use super::*;
-use crate::archive::{GateState, NameSource};
+use crate::{GateState, NameSource};
 
 fn name(ordinal: u64, packet: Option<&str>, text: &str) -> NameRow {
     NameRow {

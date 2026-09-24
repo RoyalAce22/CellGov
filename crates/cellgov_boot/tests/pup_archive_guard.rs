@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use cellgov_compare::BootSummary;
-use cellgov_lv2::archive::{self, PUP};
+use cellgov_lv2_archive::{self as archive, PUP};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")

@@ -1,5 +1,5 @@
 use super::*;
-use crate::archive::DispatchShape;
+use crate::DispatchShape;
 
 fn census(fw: &str, classes: &[CensusClass]) -> Vec<CensusRow> {
     classes

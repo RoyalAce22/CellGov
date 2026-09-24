@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-use crate::archive::{parse, CAPABILITY_GATE, CENSUS, KERNEL, PRESENCE, STUB, SUBENTRY};
+use crate::{parse, CAPABILITY_GATE, CENSUS, KERNEL, PRESENCE, STUB, SUBENTRY};
 
 #[test]
 fn kernel_stub_and_census_rows_round_trip_byte_identically() {

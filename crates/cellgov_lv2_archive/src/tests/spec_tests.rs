@@ -1,8 +1,8 @@
 use super::*;
-use crate::archive::firmware::FirmwareRole;
-use crate::archive::handling::Route;
-use crate::archive::name::{Disagreement, NameSource};
-use crate::request::fidelity::ArmFidelity;
+use crate::firmware::FirmwareRole;
+use crate::handling::Route;
+use crate::name::{Disagreement, NameSource};
+use cellgov_lv2::request::fidelity::ArmFidelity;
 
 fn all_specs() -> Vec<&'static TableSpec> {
     TABLES.iter().chain(std::iter::once(&CENSUS)).collect()
@@ -69,7 +69,7 @@ fn the_enum_labels_are_the_code_labels_in_order() {
         .map(|r| r.label())
         .collect();
     assert_eq!(roles, FIRMWARE_ROLES);
-    assert_eq!(FirmwareRole::None.label(), crate::archive::NONE);
+    assert_eq!(FirmwareRole::None.label(), crate::NONE);
 }
 
 #[test]

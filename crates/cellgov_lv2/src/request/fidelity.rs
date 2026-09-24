@@ -6,8 +6,8 @@
 //!
 //! [`Lv2RequestKind::fidelity`] is an exhaustive match, so a new
 //! request variant fails to compile until it declares a tag.
-//! [`crate::archive`] renders this map into `docs/lv2/tables/arm.tsv`; the
-//! `lv2_archive` integration test fails when the committed table
+//! `cellgov_lv2_archive` renders this map into `docs/lv2/tables/arm.tsv`;
+//! its `lv2_archive` integration test fails when the committed table
 //! drifts.
 
 use super::Lv2RequestKind;

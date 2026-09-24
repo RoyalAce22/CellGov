@@ -8,7 +8,7 @@ pub const SQLITE_VERSION: &str = "3.53.0";
 
 fn banner() -> String {
     format!(
-        "-- Rendered from cellgov_lv2::archive by\n\
+        "-- Rendered from cellgov_lv2_archive by\n\
          --   {REGENERATE}\n\
          -- Do not edit by hand: {GATE} fails on drift.\n"
     )

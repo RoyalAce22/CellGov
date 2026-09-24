@@ -1,5 +1,5 @@
 use super::*;
-use crate::archive::{parse, render};
+use crate::{parse, render};
 
 fn table_text(rows: &[PupRow]) -> String {
     let cells: Vec<Vec<String>> = rows
@@ -54,17 +54,14 @@ fn an_empty_table_is_valid_and_round_trips() {
     let text = "pup_sha256\tfw\tsize_bytes\timage_version\tsource_note\tacquired\n";
     let table = parse(&PUP, text).unwrap_or_else(|error| panic!("{error}"));
     let firmware = parse(
-        &crate::archive::FIRMWARE,
+        &crate::FIRMWARE,
         "fw\torder\trelease_date\tpriority\trole\n\
          4.93\t493\t2026-03-17\t1\tfinal\n",
     )
     .unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(pup_rows(&table), Vec::new());
     assert_eq!(check_pup_rows(&[]), Ok(()));
-    assert_eq!(
-        crate::archive::check_references(&[firmware, table.clone()]),
-        Ok(())
-    );
+    assert_eq!(crate::check_references(&[firmware, table.clone()]), Ok(()));
     assert_eq!(render(&PUP, &table.rows), Ok(text.to_string()));
 }
 
@@ -157,7 +154,7 @@ fn a_source_note_cannot_be_a_url() {
     );
     assert!(matches!(
         parse(&PUP, &text),
-        Err(crate::archive::ArchiveError::BadCell {
+        Err(crate::ArchiveError::BadCell {
             column: "source_note",
             ..
         })

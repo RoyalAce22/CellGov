@@ -1,5 +1,5 @@
 use super::*;
-use crate::archive::spec::OwnerClass;
+use crate::spec::OwnerClass;
 
 static T: TableSpec = TableSpec {
     name: "t",

@@ -33,4 +33,5 @@ thiserror = "2"
 toml = "1"
 
 [dev-dependencies]
+cellgov_lv2_archive = { path = "../cellgov_lv2_archive" }
 cellgov_testkit = { path = "../cellgov_testkit", features = ["scratch"] }

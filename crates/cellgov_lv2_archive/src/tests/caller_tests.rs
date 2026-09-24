@@ -1,7 +1,7 @@
 //! The caller tables: typed rows, their renderers' order, and the merge.
 
 use super::*;
-use crate::archive::parse;
+use crate::parse;
 
 fn pup(n: u8) -> String {
     format!("{n:02x}").repeat(32)

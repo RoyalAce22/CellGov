@@ -15,7 +15,7 @@ fn archive_row(hash: &str, fw: &str) -> ArchivePup {
 
 #[test]
 fn an_empty_archive_and_empty_data_verify_cleanly() {
-    use cellgov_lv2::archive::{self, PUP};
+    use cellgov_lv2_archive::{self as archive, PUP};
 
     let empty = archive::render(&PUP, &[]).expect("render a zero-row PUP table");
     let rows = archive::checked_pup_rows(&empty).expect("a zero-row PUP table is valid");

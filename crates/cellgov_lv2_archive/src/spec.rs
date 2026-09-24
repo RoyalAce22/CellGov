@@ -1,7 +1,8 @@
 //! The table list: each table's name, owner class, columns and key.
 
 /// The command that rewrites every generated file of the archive.
-pub const REGENERATE: &str = "cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate";
+pub const REGENERATE: &str =
+    "cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate";
 
 /// The test that fails when a committed generated file is stale.
 pub const GATE: &str = "committed_archive_matches_generator";
@@ -1017,7 +1018,7 @@ pub const NAME_GATE: &str = "cellgov_name_rows_match_the_macro";
 /// The command that rewrites the `cellgov` rows of `name.tsv` and
 /// leaves every other row as it is.
 pub const NAME_REGENERATE: &str =
-    "cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate_cellgov_names";
+    "cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate_cellgov_names";
 
 /// `name.tsv`: every name a committed source gives an ordinal, one
 /// row per (ordinal, packet, source, name).

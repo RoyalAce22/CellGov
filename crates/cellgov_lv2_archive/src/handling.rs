@@ -5,8 +5,8 @@ use strum::VariantArray;
 
 use super::spec::{ARM, ROUTE};
 use super::table::{render, ArchiveError, NONE};
-use crate::request::fidelity::{ArmFidelity, ROUTED_UNSUPPORTED_ARMS};
-use crate::request::{classify, Lv2Request, Lv2RequestKind, RUNTIME_FAST_PATH};
+use cellgov_lv2::request::fidelity::{ArmFidelity, ROUTED_UNSUPPORTED_ARMS};
+use cellgov_lv2::request::{classify, Lv2Request, Lv2RequestKind, RUNTIME_FAST_PATH};
 
 /// The path a syscall number takes at dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

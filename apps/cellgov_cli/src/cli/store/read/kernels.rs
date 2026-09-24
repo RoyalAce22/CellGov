@@ -123,7 +123,7 @@ pub(crate) fn firmware_kernels(
 
 #[cfg(feature = "decrypt")]
 fn archive_versions() -> Result<Vec<String>, CommandError> {
-    use cellgov_lv2::archive::{self, FIRMWARE};
+    use cellgov_lv2_archive::{self as archive, FIRMWARE};
 
     let table = archive::parse(&FIRMWARE, FIRMWARE_TSV)
         .map_err(|error| CommandError::failed(format!("compiled firmware.tsv: {error}")))?;

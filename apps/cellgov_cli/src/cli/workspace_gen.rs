@@ -166,6 +166,7 @@ const LAYERS: &[(&str, &[&str])] = &[
     ("Execution boundary", &["exec", "trace"]),
     ("Models and interpreters", &["lv2", "ppu", "spu"]),
     ("Runtime", &["core"]),
+    ("Offline analysis", &["lv2_archive"]),
     (
         "Host tooling",
         &[

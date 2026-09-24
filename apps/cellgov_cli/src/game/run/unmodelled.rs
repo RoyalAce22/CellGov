@@ -1,11 +1,11 @@
 //! Structured context for syscalls the current model does not answer.
 //!
-//! `cellgov_lv2::archive::unmodelled_syscalls` joins the run's
+//! `cellgov_lv2_archive::unmodelled_syscalls` joins the run's
 //! unsupported syscalls with the committed archive; this module prints
 //! the join as one JSON line.
 
 use cellgov_core::Runtime;
-use cellgov_lv2::archive::{
+use cellgov_lv2_archive::{
     caller_rows, census_class_label, gate_rows, name_rows, parse, takes_caller_evidence,
     unmodelled_syscalls, UnmodelledSyscall, CALLER, CAPABILITY_GATE, NAME,
 };

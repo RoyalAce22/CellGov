@@ -1,5 +1,5 @@
 use super::*;
-use crate::archive::{DispatchShape, FirmwareRole};
+use crate::{DispatchShape, FirmwareRole};
 
 fn firmware(fw: &str, order: u64) -> FirmwareRow {
     FirmwareRow {

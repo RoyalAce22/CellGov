@@ -44,7 +44,7 @@ impl Fixture {
         std::fs::write(path, bytes).expect("write fixture file");
     }
 
-    fn install_archive_candidate(&self, row: &cellgov_lv2::archive::PupRow) {
+    fn install_archive_candidate(&self, row: &cellgov_lv2_archive::PupRow) {
         self.write(
             &format!(".cellgov/installs/firmware/{}.install.toml", row.fw),
             format!(
@@ -83,8 +83,8 @@ const PUP_TSV: &str = include_str!(concat!(
     "/../../docs/lv2/tables/pup.tsv"
 ));
 
-fn first_archive_row() -> cellgov_lv2::archive::PupRow {
-    cellgov_lv2::archive::checked_pup_rows(PUP_TSV)
+fn first_archive_row() -> cellgov_lv2_archive::PupRow {
+    cellgov_lv2_archive::checked_pup_rows(PUP_TSV)
         .expect("the committed PUP archive parses")
         .into_iter()
         .next()

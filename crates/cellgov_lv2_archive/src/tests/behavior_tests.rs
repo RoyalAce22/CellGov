@@ -2,13 +2,67 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use cellgov_event::UnitId;
+use cellgov_lv2::dispatch::Lv2Dispatch;
+use cellgov_lv2::host::{Lv2Host, Lv2Runtime};
+use cellgov_lv2::request::classify;
+use cellgov_mem::GuestMemory;
+use cellgov_time::GuestTicks;
 
 use super::*;
-use crate::archive::{parse, render, route_rows, ArchiveError, Route, RouteRow, BEHAVIOR, NONE};
-use crate::dispatch::Lv2Dispatch;
-use crate::host::test_support::FakeRuntime;
-use crate::host::Lv2Host;
-use crate::request::classify;
+use crate::{parse, render, route_rows, ArchiveError, Route, RouteRow, BEHAVIOR, NONE};
+
+/// The guest the zero probe dispatches against: flat zeroed memory from
+/// address 0, every in-bounds range writable, the clock at zero.
+struct ZeroProbeRuntime {
+    memory: GuestMemory,
+}
+
+impl ZeroProbeRuntime {
+    fn new(size: usize) -> Self {
+        Self {
+            memory: GuestMemory::new(size),
+        }
+    }
+}
+
+impl Lv2Runtime for ZeroProbeRuntime {
+    fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
+        let start = usize::try_from(addr).ok()?;
+        self.memory.as_bytes().get(start..start.checked_add(len)?)
+    }
+
+    fn current_tick(&self) -> GuestTicks {
+        GuestTicks::ZERO
+    }
+
+    fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]> {
+        let bytes = self.memory.as_bytes();
+        let start = usize::try_from(addr).ok()?;
+        let end = start.checked_add(max_len)?.min(bytes.len());
+        let window = bytes.get(start..end)?;
+        let nul = window.iter().position(|&b| b == terminator)?;
+        Some(&window[..nul])
+    }
+
+    fn writable(&self, addr: u64, len: usize) -> bool {
+        addr.checked_add(len as u64)
+            .is_some_and(|end| end <= self.memory.as_bytes().len() as u64)
+    }
+
+    fn committed_overlap_end(&self, addr: u64, size: u64) -> Option<u64> {
+        if size == 0 {
+            return None;
+        }
+        let Some(end) = addr.checked_add(size) else {
+            return Some(u64::MAX);
+        };
+        self.memory
+            .regions()
+            .filter(|r| r.base() < end && addr < r.base() + r.size())
+            .map(|r| r.base() + r.size())
+            .max()
+    }
+}
 
 /// Ordinals whose row carries no witness yet. The set only shrinks: a
 /// new row starts with a witness.
@@ -388,7 +442,7 @@ fn a_fabricated_success_row_fabricates_a_success() {
     for row in read_rows() {
         let flagged = row.exception.as_deref() == Some("fabricated_success");
         let mut host = Lv2Host::new();
-        let rt = FakeRuntime::new(0x10000);
+        let rt = ZeroProbeRuntime::new(0x10000);
         let before = host.observability().invariant_break_count;
         let out = host.dispatch(classify(row.ordinal, &[0u64; 8]), UnitId::new(0), &rt);
         let fabricates =

@@ -4,6 +4,22 @@
 //! Text in, text out: nothing here opens a file. The `lv2_archive`
 //! integration test does the I/O for the generated files: it writes
 //! them on `--ignored regenerate` and fails when they drift.
+//!
+//! The runtime never calls this crate. It reads the kernel model's
+//! request classification and fidelity map from `cellgov_lv2`, and
+//! nothing in `cellgov_lv2` depends on it.
+
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::disallowed_methods,
+        clippy::disallowed_macros,
+        clippy::print_stdout,
+        clippy::print_stderr,
+        clippy::dbg_macro
+    )
+)]
 
 mod behavior;
 mod caller;

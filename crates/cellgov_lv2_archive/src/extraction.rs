@@ -2,7 +2,7 @@
 //!
 //! `cellgov_ppu` classifies a kernel; the caller maps that
 //! classification into the row types in [`super::census`] and hands them
-//! here. `cellgov_lv2` does not depend on `cellgov_ppu`, so the caller
+//! here. The archive does not depend on `cellgov_ppu`, so the caller
 //! does the mapping. The archive's own encodings of a classification,
 //! such as a gate's `reads` cell, are [`selector_slot_name`] and
 //! [`control_flags1_read`].

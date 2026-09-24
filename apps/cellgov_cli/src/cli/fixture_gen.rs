@@ -301,7 +301,7 @@ fn oracle_gap_count(
             ))
         }
     };
-    let ordinals = cellgov_lv2::archive::parse_overlay(&gap)
+    let ordinals = cellgov_lv2_archive::parse_overlay(&gap)
         .map_err(|error| format!("oracle-gap overlay {}: {error}", overlay.display()))?;
     let anchor = crate::paths::boot_anchor_path_in(fixtures, content_id, cell);
     // An anchor present but unreadable is refused, as the titles

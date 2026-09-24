@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use cellgov_boot::manifest::TitleRegistry;
-use cellgov_lv2::archive::{self, FirmwareRole, FIRMWARE};
+use cellgov_lv2_archive::{self as archive, FirmwareRole, FIRMWARE};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")

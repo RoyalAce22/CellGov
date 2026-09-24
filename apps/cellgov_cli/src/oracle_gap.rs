@@ -1,12 +1,12 @@
 //! Builds the operator-local oracle dispatch-gap overlay.
 //!
-//! `cellgov_lv2::archive` parses the dispatch table and owns the
+//! `cellgov_lv2_archive` parses the dispatch table and owns the
 //! overlay's text form; this command finds the checkout, reads its
 //! revision and writes the file.
 
 use std::path::{Path, PathBuf};
 
-use cellgov_lv2::archive;
+use cellgov_lv2_archive as archive;
 
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::paths::workspace_root;

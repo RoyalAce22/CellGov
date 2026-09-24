@@ -12,8 +12,8 @@ use cellgov_install::firmware_verify::{
     self, FirmwareVerifyError, ModuleDivergence, ModuleFault, ModuleImage,
 };
 use cellgov_install::keys::{KeyVault, KeyVaultError};
-use cellgov_lv2::archive::{
-    self, ArchiveError, CallerCensus, CallerRow, CallerUnresolvedRow, ReachRow, CALLER,
+use cellgov_lv2_archive::{
+    self as archive, ArchiveError, CallerCensus, CallerRow, CallerUnresolvedRow, ReachRow, CALLER,
     CALLER_UNRESOLVED, FIRMWARE, REACH,
 };
 use cellgov_ppu::caller_census::{
@@ -94,7 +94,7 @@ enum CallerCensusError {
     #[error("compiled firmware.tsv: {0}")]
     FirmwareTable(#[source] ArchiveError),
     #[error("compiled firmware.tsv: {0}")]
-    FirmwareRows(#[source] cellgov_lv2::archive::FirmwareTableError),
+    FirmwareRows(#[source] cellgov_lv2_archive::FirmwareTableError),
     #[error(transparent)]
     PupTable(#[from] crate::lv2_tables::CommittedPupError),
     #[error("read existing {}: {source}", path.display())]
