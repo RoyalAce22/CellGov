@@ -3,6 +3,10 @@ use std::path::{Path, PathBuf};
 /// Source modules whose direct tests live beside another module's file.
 const TESTED_ELSEWHERE: &[(&str, &str)] = &[("retention", "lib")];
 
+/// The crate root, which holds declarations and re-exports and so has no
+/// direct test file of its own.
+const CRATE_ROOT: &str = "lib";
+
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
@@ -140,7 +144,7 @@ fn every_source_module_declares_a_direct_test_file_that_exists() {
         let direct = format!("{module}_tests.rs");
         let files = declares_test_file(owner);
         assert!(
-            files.contains(&direct),
+            module == CRATE_ROOT || files.contains(&direct),
             "{owner} does not declare tests/{direct} for {module}; it declares {files:?}"
         );
         for file in files {

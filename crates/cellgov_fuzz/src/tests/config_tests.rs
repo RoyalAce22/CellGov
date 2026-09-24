@@ -1,4 +1,4 @@
-use super::*;
+use crate::*;
 
 #[test]
 fn overflowing_case_ranges_are_typed_refusals() {
