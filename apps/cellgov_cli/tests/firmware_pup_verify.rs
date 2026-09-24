@@ -8,11 +8,6 @@ use cellgov_testkit::scratch::{scratch_labeled, ScratchDir};
 const EXIT_DIVERGED: i32 = 4;
 const EXIT_FAILED: i32 = 1;
 
-const PUP_TSV: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/lv2/tables/pup.tsv"
-));
-
 struct Fixture {
     root: ScratchDir,
     pup_directory: PathBuf,
@@ -83,10 +78,14 @@ impl Fixture {
     }
 }
 
+const PUP_TSV: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../docs/lv2/tables/pup.tsv"
+));
+
 fn first_archive_row() -> cellgov_lv2::archive::PupRow {
-    let table = cellgov_lv2::archive::parse(&cellgov_lv2::archive::PUP, PUP_TSV)
-        .expect("parse the committed PUP archive");
-    cellgov_lv2::archive::pup_rows(&table)
+    cellgov_lv2::archive::checked_pup_rows(PUP_TSV)
+        .expect("the committed PUP archive parses")
         .into_iter()
         .next()
         .expect("the committed PUP archive has a row")

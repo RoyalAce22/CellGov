@@ -3,17 +3,6 @@ use super::*;
 use cellgov_testkit::store::SyntheticStore;
 
 #[test]
-fn row_sorting_orders_decimal_cells_numerically() {
-    let mut rows = vec![
-        vec!["aa".to_string(), "m".to_string(), "22".to_string()],
-        vec!["aa".to_string(), "m".to_string(), "7".to_string()],
-    ];
-    sort_rows(&mut rows, &[0, 1], &[2]);
-    assert_eq!(rows[0][2], "7");
-    assert_eq!(rows[1][2], "22");
-}
-
-#[test]
 fn ppu_classification_rejects_other_elf_machines() {
     let mut elf = vec![0u8; ELF_HEADER_SIZE];
     elf[18..20].copy_from_slice(&EM_PPC64.to_be_bytes());
@@ -43,25 +32,6 @@ fn a_changed_plaintext_module_reports_both_hashes() {
 }
 
 #[test]
-fn empty_unresolved_sites_render_as_the_archive_null_cell() {
-    let tables = CensusTables {
-        caller: Vec::new(),
-        unresolved: vec![vec![
-            "00".repeat(32),
-            "sys/external/example.sprx".to_string(),
-            archive::NONE.to_string(),
-        ]],
-        reach: Vec::new(),
-        modules: 1,
-        resolved_sites: 0,
-        unresolved_sites: 0,
-    };
-    let text =
-        archive::render(&CALLER_UNRESOLVED, &tables.unresolved).expect("render unresolved table");
-    assert!(text.ends_with("\tnone\n"), "{text}");
-}
-
-#[test]
 fn all_scope_orders_title_firmware_before_the_rest() {
     let store = SyntheticStore::new("caller_census_order");
     for version in ["3.55", "4.93", "1.94", "3.70", "2.76", "1.50"] {
@@ -85,87 +55,87 @@ fn all_scope_orders_title_firmware_before_the_rest() {
 fn a_single_firmware_refresh_preserves_other_pup_rows() {
     use cellgov_testkit::scratch::scratch_labeled;
 
-    let pup_table = archive::parse(&PUP, PUP_TSV).expect("parse compiled PUP table");
-    let mut hashes: Vec<String> = archive::pup_rows(&pup_table)
+    let mut hashes: Vec<String> = crate::lv2_tables::committed_pup_rows()
+        .expect("committed PUP table")
         .into_iter()
         .take(2)
         .map(|row| row.pup_sha256)
         .collect();
     hashes.sort();
     let root = scratch_labeled("caller_census_merge");
-    let mut existing = CensusTables {
-        caller: hashes
-            .iter()
-            .map(|hash| {
-                vec![
-                    hash.clone(),
-                    "sys/a.sprx".to_string(),
-                    "22".to_string(),
-                    "100".to_string(),
-                ]
-            })
-            .collect(),
-        unresolved: hashes
-            .iter()
-            .map(|hash| {
-                vec![
-                    hash.clone(),
-                    "sys/a.sprx".to_string(),
-                    archive::NONE.to_string(),
-                ]
-            })
-            .collect(),
-        reach: hashes
-            .iter()
-            .map(|hash| {
-                vec![
-                    hash.clone(),
-                    "sys/a.sprx".to_string(),
-                    "33".to_string(),
-                    "22".to_string(),
-                ]
-            })
-            .collect(),
-        modules: 2,
-        resolved_sites: 2,
+    let tables = |census: CallerCensus| CensusTables {
+        census,
+        modules: 0,
+        resolved_sites: 0,
         unresolved_sites: 0,
     };
-    canonicalize(&mut existing);
-    write_tables(&root, &existing).expect("write existing tables");
+    let caller = |hash: &str, site: u64| CallerRow {
+        pup_sha256: hash.to_string(),
+        module: "sys/a.sprx".to_string(),
+        ordinal: 22,
+        sites: vec![site],
+    };
+    let unresolved = |hash: &str| CallerUnresolvedRow {
+        pup_sha256: hash.to_string(),
+        module: "sys/a.sprx".to_string(),
+        sites: Vec::new(),
+    };
+    let reach = |hash: &str, nid: u64| ReachRow {
+        pup_sha256: hash.to_string(),
+        module: "sys/a.sprx".to_string(),
+        export_nid: nid,
+        ordinal: 22,
+    };
+    let existing = CallerCensus {
+        caller: hashes.iter().map(|hash| caller(hash, 100)).collect(),
+        unresolved: hashes.iter().map(|hash| unresolved(hash)).collect(),
+        reach: hashes.iter().map(|hash| reach(hash, 33)).collect(),
+    };
+    write_tables(&root, &tables(existing)).expect("write existing tables");
 
-    let mut refreshed = CensusTables {
-        caller: vec![vec![
-            hashes[0].clone(),
-            "sys/a.sprx".to_string(),
-            "22".to_string(),
-            "200".to_string(),
-        ]],
-        unresolved: vec![vec![
-            hashes[0].clone(),
-            "sys/a.sprx".to_string(),
-            archive::NONE.to_string(),
-        ]],
-        reach: vec![vec![
-            hashes[0].clone(),
-            "sys/a.sprx".to_string(),
-            "44".to_string(),
-            "22".to_string(),
-        ]],
-        modules: 1,
-        resolved_sites: 1,
+    let mut refreshed = tables(CallerCensus {
+        caller: vec![caller(&hashes[0], 200)],
+        unresolved: vec![unresolved(&hashes[0])],
+        reach: vec![reach(&hashes[0], 44)],
+    });
+    merge_existing(&root, &mut refreshed).expect("merge existing tables");
+    write_tables(&root, &refreshed).expect("write merged tables");
+    let read = |spec| {
+        archive::parse(
+            spec,
+            &std::fs::read_to_string(root.join(spec.file())).expect("read table"),
+        )
+        .expect("parse table")
+    };
+    assert_eq!(
+        archive::caller_rows(&read(&CALLER)),
+        [caller(&hashes[0], 200), caller(&hashes[1], 100)]
+    );
+    assert_eq!(
+        archive::caller_unresolved_rows(&read(&CALLER_UNRESOLVED)),
+        [unresolved(&hashes[0]), unresolved(&hashes[1])]
+    );
+    assert_eq!(
+        archive::reach_rows(&read(&REACH)),
+        [reach(&hashes[0], 44), reach(&hashes[1], 33)]
+    );
+}
+
+#[test]
+fn a_partial_existing_census_is_refused() {
+    use cellgov_testkit::scratch::scratch_labeled;
+
+    let root = scratch_labeled("caller_census_partial");
+    let mut empty = CensusTables {
+        census: CallerCensus::default(),
+        modules: 0,
+        resolved_sites: 0,
         unresolved_sites: 0,
     };
-    merge_existing(&root, &mut refreshed).expect("merge existing tables");
-    assert_eq!(refreshed.caller.len(), 2);
-    assert_eq!(refreshed.caller[0][3], "200");
-    assert_eq!(refreshed.caller[1][0], hashes[1]);
-    assert_eq!(refreshed.caller[1][3], "100");
-    assert_eq!(refreshed.unresolved.len(), 2);
-    assert_eq!(refreshed.unresolved[0][0], hashes[0]);
-    assert_eq!(refreshed.unresolved[1][0], hashes[1]);
-    assert_eq!(refreshed.reach.len(), 2);
-    assert_eq!(refreshed.reach[0][0], hashes[0]);
-    assert_eq!(refreshed.reach[0][2], "44");
-    assert_eq!(refreshed.reach[1][0], hashes[1]);
-    assert_eq!(refreshed.reach[1][2], "33");
+    write_tables(&root, &empty).expect("write empty tables");
+    std::fs::remove_file(root.join(REACH.file())).expect("remove one table");
+    assert!(matches!(
+        merge_existing(&root, &mut empty),
+        Err(CallerCensusError::ExistingPartial { .. })
+    ));
 }

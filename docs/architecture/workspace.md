@@ -76,11 +76,16 @@ graph BT
 
 <!-- workspace-gen:dag:end -->
 
-Five structural rules:
+Seven structural rules:
 
 - `cellgov_lv2` does not depend on `cellgov_core`: the runtime calls
   the host through the narrow `Lv2Runtime` trait, and the host never
-  reaches back.
+  reaches back. Nor does it share a build edge with `cellgov_ppu`;
+  only `cellgov_ppu`'s tests use it. The LV2 archive in
+  `cellgov_lv2::archive` defines its own row types and the rules that
+  merge and check them, and the mapping from `cellgov_ppu`'s kernel
+  and caller classifications into those rows sits above both crates,
+  in the commands that extract them.
 - `cellgov_ppu` and `cellgov_spu` are leaves of the library DAG: they
   plug in through the `ExecutionUnit` trait in `cellgov_exec`, and
   the runtime drives any `T: ExecutionUnit` without naming concrete

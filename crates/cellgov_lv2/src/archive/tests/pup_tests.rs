@@ -1,6 +1,43 @@
 use super::*;
 use crate::archive::{parse, render};
 
+fn table_text(rows: &[PupRow]) -> String {
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| {
+            vec![
+                row.pup_sha256.clone(),
+                row.fw.clone(),
+                row.size_bytes.to_string(),
+                row.image_version.clone(),
+                row.source_note.clone(),
+                row.acquired.clone().unwrap_or_else(|| NONE.to_string()),
+            ]
+        })
+        .collect();
+    render(&PUP, &cells).unwrap()
+}
+
+#[test]
+fn checked_pup_rows_reads_a_table_and_holds_its_rows_to_the_invariants() {
+    assert_eq!(checked_pup_rows(&table_text(&[row()])), Ok(vec![row()]));
+    assert!(matches!(
+        checked_pup_rows("not a table\n"),
+        Err(PupTsvError::Parse(_))
+    ));
+    let bad = PupRow {
+        size_bytes: 0,
+        ..row()
+    };
+    // The schema admits the cell; the row invariant refuses it.
+    let text = table_text(&[bad]);
+    assert!(parse(&PUP, &text).is_ok());
+    assert!(matches!(
+        checked_pup_rows(&text),
+        Err(PupTsvError::Rows(PupTableError::ZeroSize { .. }))
+    ));
+}
+
 fn row() -> PupRow {
     PupRow {
         pup_sha256: "01".repeat(32),

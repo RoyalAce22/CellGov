@@ -1,8 +1,14 @@
 //! Structured context for syscalls the current model does not answer.
+//!
+//! `cellgov_lv2::archive::unmodelled_syscalls` joins the run's
+//! unsupported syscalls with the committed archive; this module prints
+//! the join as one JSON line.
 
 use cellgov_core::Runtime;
-use cellgov_lv2::archive::{gate_rows, name_rows, parse, GateState, CAPABILITY_GATE, NAME};
-use cellgov_ps3_abi::lv2::census::{lookup, PupCensusClass};
+use cellgov_lv2::archive::{
+    caller_rows, census_class_label, gate_rows, name_rows, parse, takes_caller_evidence,
+    unmodelled_syscalls, UnmodelledSyscall, CALLER, CAPABILITY_GATE, NAME,
+};
 use serde::Serialize;
 
 const NAME_TSV: &str = include_str!("../../../../../docs/lv2/tables/name.tsv");
@@ -26,7 +32,7 @@ struct Gate<'a> {
 #[derive(Serialize)]
 struct CallerEvidence<'a> {
     module: &'a str,
-    sites: u64,
+    sites: &'a [u64],
 }
 
 #[derive(Serialize)]
@@ -39,49 +45,36 @@ struct ReportRow<'a> {
     caller_evidence: Vec<CallerEvidence<'a>>,
 }
 
-fn census_label(class: PupCensusClass) -> &'static str {
-    match class {
-        PupCensusClass::Implemented => "implemented",
-        PupCensusClass::Stub => "stub",
-        PupCensusClass::Absent => "absent",
-        PupCensusClass::NotExtracted => "not_extracted",
-        PupCensusClass::OutOfRange => "out_of_range",
+impl<'a> From<UnmodelledSyscall<'a>> for ReportRow<'a> {
+    fn from(row: UnmodelledSyscall<'a>) -> Self {
+        ReportRow {
+            ordinal: row.ordinal,
+            hits: row.hits,
+            names: row
+                .names
+                .into_iter()
+                .map(|name| Name {
+                    name: &name.name,
+                    source: name.source.label(),
+                    reference: name.reference.as_deref(),
+                })
+                .collect(),
+            census: census_class_label(row.census),
+            gate: row.gate.map(|gate| Gate {
+                state: gate.state.label(),
+                reads: gate.reads.as_deref(),
+                fail_errno: gate.fail_errno,
+            }),
+            caller_evidence: row
+                .callers
+                .into_iter()
+                .map(|caller| CallerEvidence {
+                    module: &caller.module,
+                    sites: &caller.sites,
+                })
+                .collect(),
+        }
     }
-}
-
-fn gate_state_label(state: GateState) -> &'static str {
-    match state {
-        GateState::Gated => "gated",
-        GateState::Ungated => "ungated",
-        GateState::NotAnalysed => "not_analysed",
-    }
-}
-
-fn pup_hex(pup: &[u8; 32]) -> String {
-    pup.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn caller_evidence<'a>(pup: &str, ordinal: u64) -> Vec<CallerEvidence<'a>> {
-    CALLER_TSV
-        .lines()
-        .skip(1)
-        .filter_map(|line| {
-            let mut cells = line.split('\t');
-            let (Some(row_pup), Some(module), Some(row_ordinal), Some(sites)) =
-                (cells.next(), cells.next(), cells.next(), cells.next())
-            else {
-                return None;
-            };
-            if row_pup != pup || row_ordinal.parse().ok() != Some(ordinal) {
-                return None;
-            }
-            let Ok(sites) = sites.parse() else {
-                debug_assert!(false, "committed caller archive has non-integer sites");
-                return None;
-            };
-            Some(CallerEvidence { module, sites })
-        })
-        .collect()
 }
 
 /// Prints the model's unsupported-syscall inventory enriched with archive data.
@@ -90,62 +83,37 @@ fn caller_evidence<'a>(pup: &str, ordinal: u64) -> Vec<CallerEvidence<'a>> {
 /// It reads only observability state after the run; this report
 /// cannot affect dispatch or a state hash.
 pub(super) fn print(rt: &Runtime) {
-    let identity = rt.lv2_host().firmware_identity();
-    let pup = identity.map(|value| pup_hex(&value.pup_sha256_bytes));
-    let (Ok(names), Ok(gates)) = (parse(&NAME, NAME_TSV), parse(&CAPABILITY_GATE, GATE_TSV)) else {
+    let pup = rt
+        .lv2_host()
+        .firmware_identity()
+        .map(|identity| &identity.pup_sha256_bytes);
+    // The caller table is the archive's largest; `print` parses it only
+    // for a run whose PUP takes caller evidence.
+    let callers = if takes_caller_evidence(pup) {
+        parse(&CALLER, CALLER_TSV).map(|table| caller_rows(&table))
+    } else {
+        Ok(Vec::new())
+    };
+    let (Ok(names), Ok(gates), Ok(callers)) = (
+        parse(&NAME, NAME_TSV),
+        parse(&CAPABILITY_GATE, GATE_TSV),
+        callers,
+    ) else {
         debug_assert!(false, "committed LV2 report archives must parse");
         eprintln!("unmodelled_syscall_report_error: committed LV2 archive did not parse");
         return;
     };
     let names = name_rows(&names);
     let gates = gate_rows(&gates);
-    let rows: Vec<ReportRow<'_>> = rt
+    let unsupported = rt
         .lv2_host()
         .observability()
         .unsupported_syscalls
         .iter()
-        .map(|(&ordinal, witness)| {
-            let class = identity.map_or(PupCensusClass::NotExtracted, |identity| {
-                usize::try_from(ordinal)
-                    .ok()
-                    .map_or(PupCensusClass::OutOfRange, |value| {
-                        lookup(&identity.pup_sha256_bytes, value)
-                    })
-            });
-            let ordinal_index = usize::try_from(ordinal).ok();
-            let gate = gates
-                .iter()
-                .find(|row| {
-                    pup.as_deref().is_some_and(|pup| row.pup_sha256 == pup)
-                        && Some(row.ordinal) == ordinal_index
-                })
-                .map(|row| Gate {
-                    state: gate_state_label(row.state),
-                    reads: row.reads.as_deref(),
-                    fail_errno: row.fail_errno,
-                });
-            ReportRow {
-                ordinal,
-                hits: witness.hits,
-                names: names
-                    .iter()
-                    .filter(|row| row.ordinal == ordinal && row.packet.is_none())
-                    .map(|row| Name {
-                        name: &row.name,
-                        source: row.source.label(),
-                        reference: row.reference.as_deref(),
-                    })
-                    .collect(),
-                census: census_label(class),
-                gate,
-                caller_evidence: if class == PupCensusClass::NotExtracted {
-                    pup.as_deref()
-                        .map_or_else(Vec::new, |pup| caller_evidence(pup, ordinal))
-                } else {
-                    Vec::new()
-                },
-            }
-        })
+        .map(|(&ordinal, witness)| (ordinal, witness.hits));
+    let rows: Vec<ReportRow<'_>> = unmodelled_syscalls(unsupported, pup, &names, &gates, &callers)
+        .into_iter()
+        .map(ReportRow::from)
         .collect();
     if !rows.is_empty() {
         match serde_json::to_string(&rows) {

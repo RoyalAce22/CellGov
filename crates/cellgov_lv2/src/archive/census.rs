@@ -267,7 +267,8 @@ pub enum GateState {
 }
 
 impl GateState {
-    const fn label(self) -> &'static str {
+    /// The state's `gate.tsv` label.
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Gated => "gated",
             Self::Ungated => "ungated",

@@ -8,7 +8,10 @@ use cellgov_install::firmware_verify::{self, FirmwareVerifyError};
 use cellgov_install::keys::{KeyVault, KeyVaultError};
 use cellgov_install::manifest::{sha256_of, Sha256};
 use cellgov_install::sce::{self, SceError};
-use cellgov_lv2::archive::{self, ArchiveError, CALLER, CALLER_UNRESOLVED, FIRMWARE, PUP, REACH};
+use cellgov_lv2::archive::{
+    self, ArchiveError, CallerCensus, CallerRow, CallerUnresolvedRow, ReachRow, CALLER,
+    CALLER_UNRESOLVED, FIRMWARE, REACH,
+};
 use cellgov_ppu::caller_census::{scan_syscalls, CallerScanError};
 use cellgov_ppu::funcmap::{self, FuncMapError, FunctionName};
 use cellgov_ps3_abi::format::elf::{ELF_E_MACHINE_OFFSET, ELF_HEADER_SIZE, ELF_MAGIC, EM_PPC64};
@@ -24,15 +27,8 @@ const FIRMWARE_TSV: &str = include_str!(concat!(
     "/../../docs/lv2/tables/firmware.tsv"
 ));
 
-const PUP_TSV: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/lv2/tables/pup.tsv"
-));
-
 struct CensusTables {
-    caller: Vec<Vec<String>>,
-    unresolved: Vec<Vec<String>>,
-    reach: Vec<Vec<String>>,
+    census: CallerCensus,
     modules: usize,
     resolved_sites: usize,
     unresolved_sites: usize,
@@ -97,10 +93,8 @@ enum CallerCensusError {
     FirmwareTable(#[source] ArchiveError),
     #[error("compiled firmware.tsv: {0}")]
     FirmwareRows(#[source] cellgov_lv2::archive::FirmwareTableError),
-    #[error("compiled pup.tsv: {0}")]
-    PupTable(#[source] ArchiveError),
-    #[error("compiled pup.tsv: {0}")]
-    PupRows(#[source] cellgov_lv2::archive::PupTableError),
+    #[error(transparent)]
+    PupTable(#[from] crate::lv2_tables::CommittedPupError),
     #[error("read existing {}: {source}", path.display())]
     ExistingRead {
         path: PathBuf,
@@ -165,9 +159,7 @@ fn build(args: &CallerCensusArgs, vfs_root: &Path) -> Result<CensusTables, Calle
     let inventory = StoreInventory::read(&store)?;
     let entries = selected_entries(args, &inventory)?;
     let vault = KeyVault::load_for_vfs(&store)?;
-    let mut caller = Vec::new();
-    let mut unresolved = Vec::new();
-    let mut reach = Vec::new();
+    let mut census = CallerCensus::default();
     let mut modules = 0usize;
     let mut resolved_sites = 0usize;
     let mut unresolved_sites = 0usize;
@@ -251,42 +243,34 @@ fn build(args: &CallerCensusArgs, vfs_root: &Path) -> Result<CensusTables, Calle
                 }
             }
             for (ordinal, sites) in by_ordinal {
-                caller.push(vec![
-                    pup_sha256.clone(),
-                    file.path.clone(),
-                    ordinal.to_string(),
-                    integer_list(&sites),
-                ]);
+                census.caller.push(CallerRow {
+                    pup_sha256: pup_sha256.clone(),
+                    module: file.path.clone(),
+                    ordinal: usize::from(ordinal),
+                    sites,
+                });
             }
-            unresolved.push(vec![
-                pup_sha256.clone(),
-                file.path.clone(),
-                if unknown.is_empty() {
-                    archive::NONE.to_string()
-                } else {
-                    integer_list(&unknown)
-                },
-            ]);
+            census.unresolved.push(CallerUnresolvedRow {
+                pup_sha256: pup_sha256.clone(),
+                module: file.path.clone(),
+                sites: unknown,
+            });
             for (nid, ordinal) in module_reach {
-                reach.push(vec![
-                    pup_sha256.clone(),
-                    file.path.clone(),
-                    nid.to_string(),
-                    ordinal.to_string(),
-                ]);
+                census.reach.push(ReachRow {
+                    pup_sha256: pup_sha256.clone(),
+                    module: file.path.clone(),
+                    export_nid: u64::from(nid),
+                    ordinal: usize::from(ordinal),
+                });
             }
         }
     }
-    let mut tables = CensusTables {
-        caller,
-        unresolved,
-        reach,
+    Ok(CensusTables {
+        census,
         modules,
         resolved_sites,
         unresolved_sites,
-    };
-    canonicalize(&mut tables);
-    Ok(tables)
+    })
 }
 
 fn selected_entries(
@@ -353,41 +337,6 @@ fn verify_module_hash(
     })
 }
 
-fn integer_list(values: &[u64]) -> String {
-    values
-        .iter()
-        .map(u64::to_string)
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn sort_rows(rows: &mut [Vec<String>], text: &[usize], integers: &[usize]) {
-    rows.sort_by(|a, b| {
-        for index in text {
-            let order = a[*index].cmp(&b[*index]);
-            if !order.is_eq() {
-                return order;
-            }
-        }
-        for index in integers {
-            let order = a[*index]
-                .len()
-                .cmp(&b[*index].len())
-                .then_with(|| a[*index].cmp(&b[*index]));
-            if !order.is_eq() {
-                return order;
-            }
-        }
-        std::cmp::Ordering::Equal
-    });
-}
-
-fn canonicalize(tables: &mut CensusTables) {
-    sort_rows(&mut tables.caller, &[0, 1], &[2]);
-    sort_rows(&mut tables.unresolved, &[0, 1], &[]);
-    sort_rows(&mut tables.reach, &[0, 1], &[2, 3]);
-}
-
 fn merge_existing(output_dir: &Path, tables: &mut CensusTables) -> Result<(), CallerCensusError> {
     let specs = [&CALLER, &CALLER_UNRESOLVED, &REACH];
     let paths: Vec<PathBuf> = specs
@@ -403,31 +352,23 @@ fn merge_existing(output_dir: &Path, tables: &mut CensusTables) -> Result<(), Ca
             path: output_dir.to_path_buf(),
         });
     }
-    let pup_table = archive::parse(&PUP, PUP_TSV).map_err(CallerCensusError::PupTable)?;
-    let pups = archive::pup_rows(&pup_table);
-    archive::check_pup_rows(&pups).map_err(CallerCensusError::PupRows)?;
-    let valid: BTreeSet<String> = pups.into_iter().map(|row| row.pup_sha256).collect();
-    let selected: BTreeSet<String> = tables.unresolved.iter().map(|row| row[0].clone()).collect();
-    for ((spec, path), target) in specs.into_iter().zip(paths).zip([
-        &mut tables.caller,
-        &mut tables.unresolved,
-        &mut tables.reach,
-    ]) {
+    let pups = crate::lv2_tables::committed_pup_rows()?;
+    let valid: BTreeSet<&str> = pups.iter().map(|row| row.pup_sha256.as_str()).collect();
+    let read = |spec: &'static archive::TableSpec| {
+        let path = output_dir.join(spec.file());
         let text = std::fs::read_to_string(&path)
             .map_err(|source| CallerCensusError::ExistingRead { path, source })?;
-        let existing =
-            archive::parse(spec, &text).map_err(|source| CallerCensusError::ExistingParse {
-                table: spec.name,
-                source,
-            })?;
-        target.extend(
-            existing
-                .rows
-                .into_iter()
-                .filter(|row| valid.contains(&row[0]) && !selected.contains(&row[0])),
-        );
-    }
-    canonicalize(tables);
+        archive::parse(spec, &text).map_err(|source| CallerCensusError::ExistingParse {
+            table: spec.name,
+            source,
+        })
+    };
+    let existing = CallerCensus {
+        caller: archive::caller_rows(&read(&CALLER)?),
+        unresolved: archive::caller_unresolved_rows(&read(&CALLER_UNRESOLVED)?),
+        reach: archive::reach_rows(&read(&REACH)?),
+    };
+    tables.census.merge_existing(existing, &valid);
     Ok(())
 }
 
@@ -436,12 +377,16 @@ fn write_tables(output_dir: &Path, tables: &CensusTables) -> Result<(), CallerCe
         path: output_dir.to_path_buf(),
         source,
     })?;
-    for (spec, rows) in [
-        (&CALLER, &tables.caller),
-        (&CALLER_UNRESOLVED, &tables.unresolved),
-        (&REACH, &tables.reach),
+    let census = &tables.census;
+    for (spec, rendered) in [
+        (&CALLER, archive::caller_tsv(&census.caller)),
+        (
+            &CALLER_UNRESOLVED,
+            archive::caller_unresolved_tsv(&census.unresolved),
+        ),
+        (&REACH, archive::reach_tsv(&census.reach)),
     ] {
-        let text = archive::render(spec, rows).map_err(|source| CallerCensusError::Render {
+        let text = rendered.map_err(|source| CallerCensusError::Render {
             table: spec.name,
             source,
         })?;

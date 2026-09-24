@@ -2,20 +2,24 @@ use super::*;
 use crate::cli::parse::{Command, DevCommand};
 use cellgov_testkit::scratch::scratch_labeled;
 
-fn kernel(pup_sha256: &str, kernel_elf_sha256: &str, census_sha256: &str) -> KernelRow {
-    KernelRow {
-        pup_sha256: pup_sha256.to_string(),
-        kernel_elf_sha256: kernel_elf_sha256.to_string(),
-        table_base: 0x1000,
-        entry_width: 8,
-        entry_format: "ppc64_descriptor_pointer".to_string(),
-        entry_count: 1024,
-        discovery_method: "sc_vector_descriptor_array".to_string(),
-        confidence: "high".to_string(),
-        census_sha256: census_sha256.to_string(),
-        subentry_sha256: "00".repeat(32),
-        gate_sha256: "00".repeat(32),
-    }
+/// The library names no flag; the command adds the one that accepts
+/// the movement.
+#[test]
+fn a_moved_re_extraction_names_the_flag_that_accepts_it() {
+    let moved = merge_refusal(ExtractionError::ExtractionConflict {
+        pup_sha256: "pup-a".to_string(),
+    });
+    assert_eq!(
+        moved.to_string(),
+        "PUP pup-a re-extracted different kernel or stub rows; pass --replace-version to accept the movement"
+    );
+    let other = merge_refusal(ExtractionError::DigestConflict {
+        fw: "3.55".to_string(),
+    });
+    assert_eq!(
+        other.to_string(),
+        "firmware 3.55 kernel rows disagree on their census digest"
+    );
 }
 
 #[test]
@@ -61,13 +65,14 @@ fn emitter_refuses_a_pup_missing_from_the_archive_before_reading_the_elf() {
     };
     assert!(matches!(
         emit(&args, &[]),
-        Err(Lv2CensusError::UnknownPup { pup_sha256 }) if pup_sha256 == "00".repeat(32)
+        Err(Lv2CensusError::Extraction(ExtractionError::UnknownPup { pup_sha256 }))
+            if pup_sha256 == "00".repeat(32)
     ));
 }
 
 #[test]
 fn emitter_refuses_a_firmware_that_disagrees_with_pup_provenance() {
-    let pup = compiled_pups().expect("compiled PUP table")[0].clone();
+    let pup = crate::lv2_tables::committed_pup_rows().expect("compiled PUP table")[0].clone();
     let args = Lv2CensusArgs {
         path: "kernel.elf".into(),
         fw: "0.00".to_string(),
@@ -77,11 +82,11 @@ fn emitter_refuses_a_firmware_that_disagrees_with_pup_provenance() {
     };
     assert!(matches!(
         emit(&args, &[]),
-        Err(Lv2CensusError::FirmwareMismatch {
+        Err(Lv2CensusError::Extraction(ExtractionError::FirmwareMismatch {
             pup_sha256,
             recorded,
             requested,
-        }) if pup_sha256 == pup.pup_sha256 && recorded == pup.fw && requested == "0.00"
+        })) if pup_sha256 == pup.pup_sha256 && recorded == pup.fw && requested == "0.00"
     ));
 }
 
@@ -100,7 +105,7 @@ fn changed_census_requires_an_explicit_version_replacement() {
     };
     assert!(matches!(
         write_all(&args, "new\n", "kernel\n", "stub\n", "subentry\n", "gate\n"),
-        Err(Lv2CensusError::CensusConflict { .. })
+        Err(Lv2CensusError::CensusConflict { fw, path: named }) if fw == "3.55" && named == path
     ));
     assert_eq!(
         std::fs::read_to_string(&path).expect("read census"),
@@ -135,138 +140,4 @@ fn an_existing_archive_without_subentries_is_refused_as_partial() {
         load_existing(output.as_ref()),
         Err(Lv2CensusError::ExistingPartial { .. })
     ));
-}
-
-#[test]
-fn a_matching_version_census_does_not_hide_a_wrong_pup_kernel() {
-    let old = kernel("pup-a", "kernel-a", "same-census");
-    let replacement = kernel("pup-a", "kernel-b", "same-census");
-    let existing = ExistingRows {
-        kernels: vec![old],
-        ..ExistingRows::default()
-    };
-    assert!(matches!(
-        refuse_extraction_conflict("pup-a", &existing, &replacement, &[], &[], &[], false),
-        Err(Lv2CensusError::KernelDigestConflict { pup_sha256, .. }) if pup_sha256 == "pup-a"
-    ));
-}
-
-#[test]
-fn replace_version_cannot_reassign_a_pup_to_another_kernel() {
-    let old = kernel("pup-a", "kernel-a", "old-census");
-    let replacement = kernel("pup-a", "kernel-b", "new-census");
-    let existing = ExistingRows {
-        kernels: vec![old],
-        ..ExistingRows::default()
-    };
-    assert!(matches!(
-        refuse_extraction_conflict("pup-a", &existing, &replacement, &[], &[], &[], true),
-        Err(Lv2CensusError::KernelDigestConflict { pup_sha256, .. }) if pup_sha256 == "pup-a"
-    ));
-}
-
-#[test]
-fn existing_gate_rows_must_match_their_kernel_digest() {
-    let pups = vec![PupRow {
-        pup_sha256: "11".repeat(32),
-        fw: "3.56".to_string(),
-        size_bytes: 1,
-        image_version: "0x0000000000035600".to_string(),
-        source_note: "local".to_string(),
-        acquired: None,
-    }];
-    let mut recorded = kernel(&pups[0].pup_sha256, &"22".repeat(32), &"33".repeat(32));
-    recorded.gate_sha256 = sha256_hex(
-        archive::gate_tsv(&[GateRow {
-            pup_sha256: pups[0].pup_sha256.clone(),
-            ordinal: 0,
-            state: GateState::Ungated,
-            reads: None,
-            fail_errno: None,
-        }])
-        .expect("render recorded gates")
-        .as_bytes(),
-    );
-
-    assert!(matches!(
-        validate_existing(&[recorded], &[], &[], &[], &pups),
-        Err(Lv2CensusError::ExistingGateDigest { pup_sha256, .. })
-            if pup_sha256 == pups[0].pup_sha256
-    ));
-}
-
-#[test]
-fn version_replacement_removes_every_variant_and_reports_the_other_rows() {
-    let pups = vec![
-        PupRow {
-            pup_sha256: "pup-a".to_string(),
-            fw: "3.56".to_string(),
-            size_bytes: 1,
-            image_version: "0x0000000000035600".to_string(),
-            source_note: "local".to_string(),
-            acquired: None,
-        },
-        PupRow {
-            pup_sha256: "pup-b".to_string(),
-            fw: "3.56".to_string(),
-            size_bytes: 1,
-            image_version: "0x0000000000035600".to_string(),
-            source_note: "local".to_string(),
-            acquired: None,
-        },
-        PupRow {
-            pup_sha256: "pup-c".to_string(),
-            fw: "3.60".to_string(),
-            size_bytes: 1,
-            image_version: "0x0000000000036000".to_string(),
-            source_note: "local".to_string(),
-            acquired: None,
-        },
-    ];
-    let mut existing = ExistingRows {
-        kernels: vec![
-            kernel("pup-a", "kernel-a", "census"),
-            kernel("pup-b", "kernel-b", "census"),
-            kernel("pup-c", "kernel-c", "other"),
-        ],
-        stubs: vec![StubRow {
-            pup_sha256: "pup-b".to_string(),
-            descriptor: 1,
-            target: 2,
-            errno: 0x8001_0003,
-            errno_symbol: "CELL_ENOSYS".to_string(),
-            references: 1,
-            primary: true,
-        }],
-        subentries: vec![SubentryRow {
-            pup_sha256: "pup-b".to_string(),
-            ordinal: 621,
-            selector_slot: "r3".to_string(),
-            packet: 0,
-            class: CensusClass::Implemented,
-            target: 3,
-        }],
-        gates: vec![GateRow {
-            pup_sha256: "pup-b".to_string(),
-            ordinal: 621,
-            state: GateState::Ungated,
-            reads: None,
-            fail_errno: None,
-        }],
-    };
-    assert_eq!(
-        remove_version_rows("3.56", "pup-a", &pups, &mut existing),
-        1
-    );
-    assert_eq!(
-        existing
-            .kernels
-            .iter()
-            .map(|row| row.pup_sha256.as_str())
-            .collect::<Vec<_>>(),
-        ["pup-c"]
-    );
-    assert!(existing.stubs.is_empty());
-    assert!(existing.subentries.is_empty());
-    assert!(existing.gates.is_empty());
 }

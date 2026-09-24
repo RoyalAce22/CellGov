@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use cellgov_install::pup_verify::{
     classify, installed_mismatches, ArchivePup, InstalledClaims, PupMismatch, ScannedPup,
 };
-use cellgov_lv2::archive::{self, PUP};
 
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
@@ -19,24 +18,10 @@ use super::render::emit;
 use super::verify::{firmware_entry_doc, render_entry};
 use super::view;
 
-const PUP_TSV: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/lv2/tables/pup.tsv"
-));
-
 /// The compiled archive's PUP rows, as the verifier reads them.
 fn archive_rows() -> Result<Vec<ArchivePup>, CommandError> {
-    let table = archive::parse(&PUP, PUP_TSV).map_err(|error| {
-        CommandError::failed(format!(
-            "compiled docs/lv2/tables/pup.tsv is invalid: {error}"
-        ))
-    })?;
-    let rows = archive::pup_rows(&table);
-    archive::check_pup_rows(&rows).map_err(|error| {
-        CommandError::failed(format!(
-            "compiled docs/lv2/tables/pup.tsv is invalid: {error}"
-        ))
-    })?;
+    let rows = crate::lv2_tables::committed_pup_rows()
+        .map_err(|error| CommandError::failed(error.to_string()))?;
     Ok(rows
         .into_iter()
         .map(|row| ArchivePup {

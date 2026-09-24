@@ -30,6 +30,7 @@ mod lv2_census;
 mod lv2_discover;
 #[cfg(feature = "decrypt")]
 mod lv2_extract;
+mod lv2_tables;
 mod oracle_gap;
 mod paths;
 mod progress;

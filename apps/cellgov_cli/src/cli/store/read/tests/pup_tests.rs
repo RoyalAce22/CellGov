@@ -15,13 +15,10 @@ fn archive_row(hash: &str, fw: &str) -> ArchivePup {
 
 #[test]
 fn an_empty_archive_and_empty_data_verify_cleanly() {
-    let header = PUP_TSV
-        .lines()
-        .next()
-        .expect("the compiled table has a header");
-    let table = archive::parse(&PUP, &format!("{header}\n")).expect("parse a zero-row PUP table");
-    let rows = archive::pup_rows(&table);
-    archive::check_pup_rows(&rows).expect("a zero-row PUP table is valid");
+    use cellgov_lv2::archive::{self, PUP};
+
+    let empty = archive::render(&PUP, &[]).expect("render a zero-row PUP table");
+    let rows = archive::checked_pup_rows(&empty).expect("a zero-row PUP table is valid");
     assert!(rows.is_empty());
     assert!(pup_set_is_clean(&[], &[], &[]));
 }
@@ -59,8 +56,7 @@ fn the_set_is_clean_only_with_nothing_missing_mismatched_or_diverged() {
 #[test]
 fn the_compiled_archive_reaches_the_verifier_row_for_row() {
     let rows = archive_rows().expect("the compiled table is valid");
-    let table = archive::parse(&PUP, PUP_TSV).expect("parse the compiled table");
-    let raw = archive::pup_rows(&table);
+    let raw = crate::lv2_tables::committed_pup_rows().expect("parse the compiled table");
     assert_eq!(rows.len(), raw.len());
     for (row, raw) in rows.iter().zip(&raw) {
         assert_eq!(

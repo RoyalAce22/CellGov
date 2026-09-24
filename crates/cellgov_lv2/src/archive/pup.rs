@@ -2,7 +2,7 @@
 
 use super::firmware::is_date;
 use super::spec::PUP;
-use super::table::{Table, NONE};
+use super::table::{ArchiveError, Table, NONE};
 use cellgov_ps3_abi::format::pup::PUP_HEADER_SIZE;
 
 /// Describes one `pup.tsv` entry for a PUP image.
@@ -138,6 +138,30 @@ pub fn check_pup_rows(rows: &[PupRow]) -> Result<(), PupTableError> {
         }
     }
     Ok(())
+}
+
+/// Why a `pup.tsv` text is unusable.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PupTsvError {
+    /// The text breaks the table's schema.
+    #[error(transparent)]
+    Parse(ArchiveError),
+    /// A row breaks a PUP-row invariant.
+    #[error(transparent)]
+    Rows(PupTableError),
+}
+
+/// The rows of a `pup.tsv` text, parsed and checked.
+///
+/// # Errors
+///
+/// [`PupTsvError`] when the text does not parse or a row breaks
+/// [`check_pup_rows`].
+pub fn checked_pup_rows(text: &str) -> Result<Vec<PupRow>, PupTsvError> {
+    let table = super::table::parse(&PUP, text).map_err(PupTsvError::Parse)?;
+    let rows = pup_rows(&table);
+    check_pup_rows(&rows).map_err(PupTsvError::Rows)?;
+    Ok(rows)
 }
 
 #[cfg(test)]

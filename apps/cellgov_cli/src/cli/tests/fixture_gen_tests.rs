@@ -312,8 +312,9 @@ mod oracle_gap_count_reads {
     }
 
     fn write_overlay(root: &Path, text: &str) {
-        std::fs::create_dir_all(root.join(".cellgov")).unwrap();
-        std::fs::write(root.join(".cellgov/oracle-gap.tsv"), text).unwrap();
+        let path = crate::oracle_gap::overlay_path(root);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
     }
 
     fn write_anchor(fixtures: &Path, text: &str) {
@@ -353,7 +354,7 @@ mod oracle_gap_count_reads {
     #[test]
     fn an_overlay_path_that_cannot_be_read_is_refused() {
         let tmp = cellgov_testkit::scratch::scratch_labeled("oracle_gap_unreadable");
-        std::fs::create_dir_all(tmp.join("root/.cellgov/oracle-gap.tsv")).unwrap();
+        std::fs::create_dir_all(crate::oracle_gap::overlay_path(&tmp.join("root"))).unwrap();
         let got = oracle_gap_count(
             &tmp.join("root"),
             &tmp.join("fixtures"),
