@@ -80,25 +80,16 @@ fn cli_wire_form_emits_expected_strings() {
 fn markdown_wire_form_emits_expected_strings() {
     // Pin the markdown form (PascalCase) against the CLI form
     // (kebab) so the two cannot drift apart silently.
-    let cli_to_kind = |c: CheckpointTrigger| -> cellgov_compare::CheckpointKind {
-        match c {
-            CheckpointTrigger::ProcessExit => cellgov_compare::CheckpointKind::ProcessExit,
-            CheckpointTrigger::FirstRsxWrite => cellgov_compare::CheckpointKind::FirstRsxWrite,
-            CheckpointTrigger::Pc(addr) => cellgov_compare::CheckpointKind::Pc {
-                addr: cellgov_mem::GuestAddr::new(addr),
-            },
-        }
-    };
     assert_eq!(
-        cli_to_kind(CheckpointTrigger::ProcessExit).as_markdown_label(),
+        CheckpointTrigger::ProcessExit.kind().as_markdown_label(),
         "ProcessExit"
     );
     assert_eq!(
-        cli_to_kind(CheckpointTrigger::FirstRsxWrite).as_markdown_label(),
+        CheckpointTrigger::FirstRsxWrite.kind().as_markdown_label(),
         "FirstRsxWrite"
     );
     assert_eq!(
-        cli_to_kind(CheckpointTrigger::Pc(SAMPLE_PC)).as_markdown_label(),
+        CheckpointTrigger::Pc(SAMPLE_PC).kind().as_markdown_label(),
         "Pc=0x10381ce8"
     );
 }
@@ -117,18 +108,29 @@ fn all_three_wire_forms_cover_every_variant() {
             "CLI form collision: {cli:?} appears for two variants"
         );
 
-        let kind = match case {
-            CheckpointTrigger::ProcessExit => cellgov_compare::CheckpointKind::ProcessExit,
-            CheckpointTrigger::FirstRsxWrite => cellgov_compare::CheckpointKind::FirstRsxWrite,
-            CheckpointTrigger::Pc(addr) => cellgov_compare::CheckpointKind::Pc {
-                addr: cellgov_mem::GuestAddr::new(addr),
-            },
-        };
-        let md = kind.as_markdown_label();
+        let md = case.kind().as_markdown_label();
         assert!(!md.is_empty(), "markdown form empty for {case:?}");
         assert!(
             md_seen.insert(md.clone()),
             "markdown form collision: {md:?} appears for two variants"
         );
     }
+}
+
+#[test]
+fn each_trigger_maps_to_the_anchor_wire_form() {
+    // An anchor records the stop condition in this JSON shape; a new
+    // variant on either side fails here first.
+    assert_eq!(
+        serde_json::to_value(CheckpointTrigger::ProcessExit.kind()).unwrap(),
+        serde_json::json!({ "kind": "process_exit" }),
+    );
+    assert_eq!(
+        serde_json::to_value(CheckpointTrigger::FirstRsxWrite.kind()).unwrap(),
+        serde_json::json!({ "kind": "first_rsx_write" }),
+    );
+    assert_eq!(
+        serde_json::to_value(CheckpointTrigger::Pc(0x10381ce8).kind()).unwrap(),
+        serde_json::json!({ "kind": "pc", "addr": cellgov_mem::GuestAddr::new(0x10381ce8).raw() }),
+    );
 }

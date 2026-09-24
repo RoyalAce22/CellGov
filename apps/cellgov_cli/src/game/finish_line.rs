@@ -9,29 +9,12 @@
 //! - the cap, when it is below the anchor, since the run ends there;
 //! - nothing, otherwise: the bar counts steps and predicts nothing.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use cellgov_compare::BootSummary;
+use cellgov_compare::bench::load_anchor;
 
 use crate::paths::{boot_anchor_path, workspace_root};
 use cellgov_boot::manifest::CellKey;
-
-/// Why a committed anchor gave no step count.
-#[derive(Debug, thiserror::Error)]
-enum AnchorReadError {
-    #[error("read {}: {source}", .path.display())]
-    Read {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("parse {}: {source}", .path.display())]
-    Parse {
-        path: PathBuf,
-        #[source]
-        source: serde_json::Error,
-    },
-}
 
 /// The step count `cell`'s committed anchor recorded.
 ///
@@ -79,37 +62,18 @@ pub(crate) fn within_runtime_cap(
 }
 
 fn anchor_steps_under(root: &Path, content_id: &str, cell: &CellKey) -> Option<u64> {
-    match read_anchor_steps(&boot_anchor_path(root, content_id, cell)) {
-        Ok(steps) => Some(steps),
-        // The cell has no anchor, or the binary runs outside the tree
-        // it was built in. The anchor gate reads the same absence as
-        // "not recorded".
-        Err(AnchorReadError::Read { source, .. })
-            if source.kind() == std::io::ErrorKind::NotFound =>
-        {
-            None
-        }
+    match load_anchor(&boot_anchor_path(root, content_id, cell)) {
+        Ok(anchor) => anchor.map(|summary| summary.steps),
         // `boot bench` holds a malformed anchor against the gate;
         // `boot run` and a direct `boot bench-once` have no gate, so
-        // this line is their only report of it.
+        // this line is their only report of it. An absent anchor --
+        // the cell has none, or the binary runs outside the tree it was
+        // built in -- is `Ok(None)`, the gate's "not recorded".
         Err(e) => {
             eprintln!("anchor: {e}; the bar counts with no finish line");
             None
         }
     }
-}
-
-fn read_anchor_steps(path: &Path) -> Result<u64, AnchorReadError> {
-    let text = std::fs::read_to_string(path).map_err(|source| AnchorReadError::Read {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let summary: BootSummary =
-        serde_json::from_str(&text).map_err(|source| AnchorReadError::Parse {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    Ok(summary.steps)
 }
 
 #[cfg(test)]

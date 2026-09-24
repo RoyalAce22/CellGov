@@ -1,8 +1,10 @@
 //! The debug patches and dumps that land after every `module_start`,
-//! and the invariants the boot checks before handing the runtime to
-//! the step loop.
+//! the invariants the boot checks before handing the runtime to the
+//! step loop, and the title's RSX settings.
 
 use cellgov_core::{AddressSpaceId, Runtime};
+
+use crate::manifest::TitleManifest;
 
 use super::module_start::ModuleStartCounts;
 use super::types::{DiagnosticOptions, ExecutionOptions};
@@ -132,6 +134,22 @@ pub(super) fn assert_gating_state_coherent_with_host(rt: &Runtime, modules_were_
     );
 }
 
+/// Apply the RSX settings `title` opts into: a writable RSX region
+/// and the FIFO consumer. Both are off unless the manifest turns them
+/// on.
+pub(super) fn apply_rsx_settings(rt: &mut Runtime, title: &TitleManifest) {
+    if title.rsx_mirror() {
+        rt.set_rsx_mirror_writes(true);
+    }
+    if title.rsx_consume() {
+        rt.set_rsx_consume_fifo(true);
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/finish_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/rsx_settings_tests.rs"]
+mod rsx_settings_tests;

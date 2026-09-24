@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Instruction cap for titles whose manifest does not set one.
-pub const DEFAULT_BENCH_MAX_STEPS: u64 = 100_000_000;
+pub use cellgov_boot::manifest::DEFAULT_BENCH_MAX_STEPS;
 
 #[allow(unused_imports, reason = "not every suite names a game version")]
 pub use cellgov_install::store::BASE_GAME_VER;

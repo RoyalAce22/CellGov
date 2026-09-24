@@ -15,9 +15,8 @@ use cellgov_boot::manifest::CellKey;
 /// The anchor is measured by `dev record-anchors`, which boots the cell
 /// under what its manifest row declares and nothing else. An override
 /// that moves the trajectory yields a legitimately different run, so
-/// gating it would report a regression that is not one. `--prescan` is
-/// absent from the list because it only prints a decode report before
-/// execution.
+/// gating it would report a regression that is not one; those overrides
+/// are [`BenchOptions::trajectory_overrides`].
 pub(super) fn incomparable_reasons(opts: &BenchOptions<'_>) -> Vec<String> {
     let mut reasons = Vec::new();
     if let Some(dir) = opts.selection.firmware_dir {
@@ -38,33 +37,7 @@ pub(super) fn incomparable_reasons(opts: &BenchOptions<'_>) -> Vec<String> {
             opts.max_steps, opts.plan.max_steps
         ));
     }
-    if let Some(cp) = opts.checkpoint_override {
-        if cp != opts.plan.checkpoint {
-            reasons.push(format!(
-                "--checkpoint {} overrides the cell's checkpoint {}",
-                cp.as_cli_str(),
-                opts.plan.checkpoint.as_cli_str()
-            ));
-        }
-    }
-    if let Some(b) = opts.budget_override {
-        reasons.push(format!("--budget {b} overrides the manifest budget"));
-    }
-    if opts.strict_reserved {
-        reasons.push("--strict-reserved changes reserved-region write handling".to_string());
-    }
-    if !opts.guest_args.is_empty() {
-        reasons.push(format!(
-            "--guest-arg supplies {} guest argv entries; the anchor is recorded with none",
-            opts.guest_args.len()
-        ));
-    }
-    for (flag, value) in crate::cli::parse::override_flags(&opts.identity.overrides) {
-        let spelled = value.map_or_else(|| flag.to_string(), |v| format!("{flag} {v}"));
-        reasons.push(format!(
-            "{spelled} overrides boot behaviour; the anchor is recorded with no boot override"
-        ));
-    }
+    reasons.extend(opts.trajectory_overrides());
     reasons
 }
 

@@ -141,6 +141,9 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
     finish::assert_module_start_completeness(&counts);
     rt.clear_unit_status_override(primary_unit_id);
 
+    // 16. The RSX settings the manifest opts into, before the first step.
+    finish::apply_rsx_settings(&mut rt, title.manifest);
+
     Ok(PreparedBoot {
         rt,
         elf_data,

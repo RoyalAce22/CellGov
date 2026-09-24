@@ -279,22 +279,6 @@ pub fn save_boot_observation(inputs: ObservationInputs<'_>) -> Result<(), Observ
     Ok(())
 }
 
-/// Translate [`super::manifest::CheckpointTrigger`] to
-/// [`cellgov_compare::CheckpointKind`].
-fn checkpoint_to_kind(cp: super::manifest::CheckpointTrigger) -> cellgov_compare::CheckpointKind {
-    match cp {
-        super::manifest::CheckpointTrigger::ProcessExit => {
-            cellgov_compare::CheckpointKind::ProcessExit
-        }
-        super::manifest::CheckpointTrigger::FirstRsxWrite => {
-            cellgov_compare::CheckpointKind::FirstRsxWrite
-        }
-        super::manifest::CheckpointTrigger::Pc(addr) => cellgov_compare::CheckpointKind::Pc {
-            addr: cellgov_mem::GuestAddr::new(addr),
-        },
-    }
-}
-
 /// What one boot summary is built from.
 pub struct BootSummaryInputs<'a> {
     /// Where the JSON is written.
@@ -338,7 +322,7 @@ pub fn save_boot_summary_json(inputs: BootSummaryInputs<'_>) -> Result<(), Obser
         sink,
     } = inputs;
     let mut summary = cellgov_compare::BootSummary::new_with_breaks(
-        checkpoint_to_kind(title.checkpoint_trigger()),
+        title.checkpoint_trigger().kind(),
         outcome,
         steps as u64,
         step_budget,

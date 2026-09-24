@@ -2,8 +2,11 @@
 //! (throughput).
 //!
 //! Both loops share `verdict::classify_step_outcome` for verdict
-//! precedence.
+//! precedence. [`step_loop_ends_at`] says where a [`step_loop`] run
+//! stops, and [`RunAnomalies`] which counters make a finished run's
+//! own result suspect.
 
+mod anomalies;
 mod bench;
 mod block_reason;
 mod ctx;
@@ -24,9 +27,10 @@ pub(crate) use block_reason::block_reason_label;
 /// atomic add.
 pub const STEP_REPORT_BATCH: usize = 8192;
 
+pub use anomalies::RunAnomalies;
 pub use bench::bench_step_loop;
 pub use ctx::StepLoopCtx;
-pub use driver::step_loop;
+pub use driver::{step_loop, step_loop_ends_at};
 pub use ring::{PcRing, Ring, SyscallRing};
 pub use timing::{compute_untracked, pct, StepTiming};
 pub use verdict::rsx_checkpoint_addr;

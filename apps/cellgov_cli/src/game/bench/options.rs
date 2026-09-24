@@ -81,17 +81,48 @@ pub struct BenchOptions<'a> {
 
 impl BenchOptions<'_> {
     /// Whether an override moves this run off the trajectory its
-    /// cell's anchor recorded.
+    /// cell's anchor recorded; see [`Self::trajectory_overrides`].
+    pub(super) fn retargets_trajectory(&self) -> bool {
+        !self.trajectory_overrides().is_empty()
+    }
+
+    /// Every override that moves this run off the trajectory its cell's
+    /// anchor recorded, one reason each, in the words the anchor check
+    /// reports.
     ///
     /// The cap is a ceiling the run may hit short of the anchor, so it
-    /// is no retarget.
-    pub(super) fn retargets_trajectory(&self) -> bool {
-        self.checkpoint_override
-            .is_some_and(|cp| cp != self.plan.checkpoint)
-            || self.budget_override.is_some()
-            || self.strict_reserved
-            || !self.guest_args.is_empty()
-            || !self.identity.overrides.is_empty()
+    /// is no retarget. `--prescan` only prints a decode report before
+    /// execution, so it is none either.
+    pub(super) fn trajectory_overrides(&self) -> Vec<String> {
+        let mut reasons = Vec::new();
+        if let Some(cp) = self.checkpoint_override {
+            if cp != self.plan.checkpoint {
+                reasons.push(format!(
+                    "--checkpoint {} overrides the cell's checkpoint {}",
+                    cp.as_cli_str(),
+                    self.plan.checkpoint.as_cli_str()
+                ));
+            }
+        }
+        if let Some(b) = self.budget_override {
+            reasons.push(format!("--budget {b} overrides the manifest budget"));
+        }
+        if self.strict_reserved {
+            reasons.push("--strict-reserved changes reserved-region write handling".to_string());
+        }
+        if !self.guest_args.is_empty() {
+            reasons.push(format!(
+                "--guest-arg supplies {} guest argv entries; the anchor is recorded with none",
+                self.guest_args.len()
+            ));
+        }
+        for (flag, value) in crate::cli::parse::override_flags(&self.identity.overrides) {
+            let spelled = value.map_or_else(|| flag.to_string(), |v| format!("{flag} {v}"));
+            reasons.push(format!(
+                "{spelled} overrides boot behaviour; the anchor is recorded with no boot override"
+            ));
+        }
+        reasons
     }
 
     /// Append the `boot bench-once` CLI form of this struct onto `cmd`.

@@ -19,7 +19,7 @@ use cellgov_compare::runner_cellgov::BootOutcome;
 use cellgov_compare::witness_parse::parse_witness_lines;
 use cellgov_compare::witness_parse::UnsupportedSyscallWitness;
 use cellgov_compare::witnesses::{BOOT_STARTED_SENTINEL, TITLE_NOT_INSTALLED_SENTINEL};
-use cellgov_compare::{BootSummary, GameIdentity, RunIdentity, RUN_IDENTITY_SENTINEL};
+use cellgov_compare::{BootSummary, RunIdentity, RUN_IDENTITY_SENTINEL};
 use cellgov_terminal::caps::RenderFlags;
 use cellgov_terminal::progress::{ProgressBar, ProgressSink as _};
 use cellgov_time::Budget;
@@ -30,7 +30,7 @@ use crate::cli::declared_cells::{
 };
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
-use cellgov_boot::manifest::CellKey;
+use cellgov_boot::manifest::{CellDisagreement, CellKey};
 
 use crate::paths::{boot_anchor_path, history_path, workspace_root};
 use crate::progress::RECORD_ANCHORS_TASK;
@@ -61,36 +61,32 @@ struct Measurement {
 /// (`resolve_composition` in `boot_cmd`). The identity line reports what
 /// the run composed, so it decides which cell may receive the result.
 fn cell_disagreements(identity: &RunIdentity, cell: &CellKey) -> Vec<String> {
-    let mut out = Vec::new();
-    // `measure` passes no override flag, so this names a child that
-    // applied one anyway.
-    if !identity.overrides.is_empty() {
-        out.push(format!(
-            "applied boot override(s) {}, which no anchor is recorded under",
-            identity.overrides.names().join(" ")
-        ));
-    }
-    match &identity.firmware {
-        Some(f) if f.version == cell.fw => {}
-        Some(f) => out.push(format!(
-            "composed firmware {} rather than {}",
-            f.version, cell.fw
-        )),
-        None => out.push(format!(
-            "composed no managed firmware rather than firmware {}",
-            cell.fw
-        )),
-    }
-    let want = cell.game_ver.as_deref().map(GameIdentity::version_of);
-    let got = identity.game.as_ref().map(|g| g.version.clone());
-    if want != got {
-        out.push(format!(
-            "composed game version {} rather than {}",
-            got.as_deref().unwrap_or("(none)"),
-            want.as_deref().unwrap_or("(none)")
-        ));
-    }
-    out
+    // A fresh run states what it composed, so an identity naming no
+    // firmware or no game entry disagrees with a cell that names one.
+    cell.disagreements(identity)
+        .into_iter()
+        .map(|d| match d {
+            // `measure` passes no override flag, so this names a child
+            // that applied one anyway.
+            CellDisagreement::Overridden { names } => format!(
+                "applied boot override(s) {}, which no anchor is recorded under",
+                names.join(" ")
+            ),
+            CellDisagreement::FirmwareMismatch { cell, recorded } => {
+                format!("composed firmware {recorded} rather than {cell}")
+            }
+            CellDisagreement::NoFirmware { cell } => {
+                format!("composed no managed firmware rather than firmware {cell}")
+            }
+            CellDisagreement::GameVersionMismatch { cell, recorded } => format!(
+                "composed game version {recorded} rather than {}",
+                cell.as_deref().unwrap_or("(none)")
+            ),
+            CellDisagreement::NoGameVersion { cell } => {
+                format!("composed game version (none) rather than {cell}")
+            }
+        })
+        .collect()
 }
 
 /// Boots one cell, or returns `None` when its dump is not installed.

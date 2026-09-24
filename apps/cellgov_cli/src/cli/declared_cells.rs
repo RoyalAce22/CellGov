@@ -10,7 +10,6 @@
 use std::path::Path;
 
 use crate::cli::exit::CommandError;
-use crate::paths::cell_max_steps;
 use cellgov_boot::manifest::{CellKey, CheckpointTrigger, TitleManifest, TitleRegistry};
 
 /// One declared cell, with the step cap and checkpoint its measurement
@@ -41,7 +40,7 @@ pub(crate) fn declared_cells(title: &TitleManifest) -> Vec<DeclaredCell> {
             short_name: title.short_name.clone(),
             content_id: title.content_id.clone(),
             cell: cell.key.clone(),
-            max_steps: cell_max_steps(title, Some(cell)),
+            max_steps: title.cell_max_steps(Some(cell)),
             checkpoint: title.cell_checkpoint(Some(cell)),
             pending: cell.pending.clone(),
         })

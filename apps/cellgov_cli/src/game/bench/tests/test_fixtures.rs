@@ -99,7 +99,7 @@ pub(super) fn bench_options<'a>(
     cell: Option<&'a CellKey>,
     guest_args: &'a [String],
 ) -> BenchOptions<'a> {
-    let max_steps = crate::paths::cell_max_steps(title, None);
+    let max_steps = title.cell_max_steps(None);
     BenchOptions {
         title,
         elf_path: "EBOOT.BIN",

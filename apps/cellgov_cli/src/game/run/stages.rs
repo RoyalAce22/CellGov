@@ -9,31 +9,24 @@ use cellgov_boot::diag::{
 };
 use cellgov_boot::manifest::TitleManifest;
 use cellgov_boot::prepare::{prepare, BootServices, PrepareOptions, PreparedBoot};
-use cellgov_boot::step_loop::{step_loop, PcRing, StepLoopCtx, StepTiming, SyscallRing};
+use cellgov_boot::step_loop::{
+    step_loop, PcRing, RunAnomalies, StepLoopCtx, StepTiming, SyscallRing,
+};
 use cellgov_boot::{BootSink, ChildInitPlans};
 use cellgov_compare::BootOutcome;
 use cellgov_core::{AddressSpaceId, Runtime};
 
 use super::artifacts::{save_artifacts, RunError, RunFacts};
 use super::options::{RunArtifacts, RunExecution, RunReporting};
-use super::report::{self, InsnPair, RunCounters, RunSpans, FREQUENCY_ROWS};
+use super::report::{self, InsnPair, RunSpans, FREQUENCY_ROWS};
 
 /// Terminal-state summary from [`run_game`].
 pub struct RunSummary {
     /// The terminal state the step loop reached.
     pub outcome: BootOutcome,
     /// Whether a counter makes that result suspect; see
-    /// [`RunCounters::had_critical_anomaly`].
+    /// [`RunAnomalies::had_critical_anomaly`].
     pub had_critical_anomaly: bool,
-}
-
-pub(crate) fn configure_rsx_from_manifest(rt: &mut Runtime, title: &TitleManifest) {
-    if title.rsx_mirror() {
-        rt.set_rsx_mirror_writes(true);
-    }
-    if title.rsx_consume() {
-        rt.set_rsx_consume_fifo(true);
-    }
 }
 
 /// Boot a PS3 ELF and drive the PPU step loop until a terminal state.
@@ -67,7 +60,6 @@ pub fn run_game(
         child_init,
         ..
     } = prepared;
-    configure_rsx_from_manifest(&mut rt, title);
     if reporting.profile {
         report::print_out(&report::startup_timing_lines(&timings));
     }
@@ -264,8 +256,8 @@ fn drive_step_loop(
 }
 
 /// Report where the run ended and what the runtime counted on the way.
-fn report_outcome(rt: &mut Runtime, loop_out: &LoopOutput, sink: &dyn BootSink) -> RunCounters {
-    let counters = report::read_counters(rt, loop_out.tty_oob_dropped, loop_out.tty_bogus_fd);
+fn report_outcome(rt: &mut Runtime, loop_out: &LoopOutput, sink: &dyn BootSink) -> RunAnomalies {
+    let counters = RunAnomalies::read(rt, loop_out.tty_oob_dropped, loop_out.tty_bogus_fd);
     println!("outcome: {}", loop_out.outcome);
     println!("steps: {}", loop_out.steps);
     report::print_out(&report::anomaly_lines(&counters));

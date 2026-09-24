@@ -1,6 +1,7 @@
 //! Title registry driven by TOML manifests under `title_manifests/`.
 //! One TOML file per title.
 
+mod cell_check;
 mod checkpoint;
 mod eboot_load;
 mod loader;
@@ -13,10 +14,11 @@ mod schema;
 #[path = "tests/test_fixtures.rs"]
 mod test_fixtures;
 
+pub use cell_check::CellDisagreement;
 pub use checkpoint::{CheckpointParseError, CheckpointTrigger};
 pub use eboot_load::{EbootLoadError, TitleNotInstalled};
 pub use matrix::BASE_GAME_VER;
-pub use model::{ContentManifest, MountEntry, TitleManifest};
+pub use model::{ContentManifest, MountEntry, TitleManifest, DEFAULT_BENCH_MAX_STEPS};
 pub use registry::TitleRegistry;
 
 #[allow(

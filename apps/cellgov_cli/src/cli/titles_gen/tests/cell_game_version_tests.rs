@@ -2,6 +2,7 @@ use cellgov_compare::{AppVersion, BootOutcome};
 
 use super::super::test_fixtures::*;
 use super::*;
+use cellgov_compare::GameIdentity;
 
 /// An anchor stamped with both halves of the cell it was measured
 /// at; `game` takes the identity spelling of the game version.

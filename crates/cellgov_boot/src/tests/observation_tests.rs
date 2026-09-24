@@ -152,33 +152,3 @@ fn a_region_in_a_created_child_space_captures_that_space() {
         "the bytes come from space 1, whose boot-space twin at the same address is zero"
     );
 }
-
-mod boot_summary_cross_check {
-    //! Pin the JSON wire shape `cellgov_cli`'s `CheckpointTrigger`
-    //! produces against `cellgov_compare::CheckpointKind`. When a
-    //! new variant lands on either side, this test fails first.
-
-    use super::checkpoint_to_kind;
-    use cellgov_mem::GuestAddr;
-
-    #[test]
-    fn each_trigger_maps_to_matching_kind_json() {
-        let cli = crate::manifest::CheckpointTrigger::ProcessExit;
-        assert_eq!(
-            serde_json::to_value(checkpoint_to_kind(cli)).unwrap(),
-            serde_json::json!({ "kind": "process_exit" }),
-        );
-
-        let cli = crate::manifest::CheckpointTrigger::FirstRsxWrite;
-        assert_eq!(
-            serde_json::to_value(checkpoint_to_kind(cli)).unwrap(),
-            serde_json::json!({ "kind": "first_rsx_write" }),
-        );
-
-        let cli = crate::manifest::CheckpointTrigger::Pc(0x10381ce8);
-        assert_eq!(
-            serde_json::to_value(checkpoint_to_kind(cli)).unwrap(),
-            serde_json::json!({ "kind": "pc", "addr": GuestAddr::new(0x10381ce8).raw() }),
-        );
-    }
-}

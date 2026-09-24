@@ -5,6 +5,7 @@ use cellgov_compare::{AppVersion, BootOutcome, BootOverrides};
 
 use super::super::test_fixtures::*;
 use super::*;
+use cellgov_compare::GameIdentity;
 
 fn boot_under(overrides: BootOverrides) -> BootSummary {
     let mut b = boot(BootOutcome::ProcessExit, 1_000);

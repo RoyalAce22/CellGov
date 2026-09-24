@@ -294,6 +294,10 @@ fn render_not_found(
     s
 }
 
+/// Instruction cap a cell is measured under when neither it nor its
+/// title declares one.
+pub const DEFAULT_BENCH_MAX_STEPS: u64 = 100_000_000;
+
 impl TitleManifest {
     /// The short name `--title` takes.
     pub fn name(&self) -> &str {
@@ -334,6 +338,16 @@ impl TitleManifest {
     pub fn cell_checkpoint(&self, cell: Option<&MatrixCell>) -> CheckpointTrigger {
         cell.and_then(|c| c.checkpoint)
             .unwrap_or_else(|| self.checkpoint_trigger())
+    }
+
+    /// The instruction cap a run of `cell` is recorded and gated under:
+    /// the cell's own, else the title's, else
+    /// [`DEFAULT_BENCH_MAX_STEPS`].
+    #[must_use]
+    pub fn cell_max_steps(&self, cell: Option<&MatrixCell>) -> u64 {
+        cell.and_then(|c| c.bench_max_steps)
+            .or(self.bench_max_steps)
+            .unwrap_or(DEFAULT_BENCH_MAX_STEPS)
     }
 
     /// Whether the RSX region is writable for this title; see field doc.
@@ -430,3 +444,7 @@ impl TitleManifest {
 #[cfg(test)]
 #[path = "tests/model_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/cell_fallback_tests.rs"]
+mod cell_fallback_tests;

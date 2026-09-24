@@ -212,5 +212,8 @@ fn a_title_with_no_cap_anywhere_takes_the_recorder_default() {
         &title,
         &composition(managed("4.93"), stored(GameVersion::Base)),
     );
-    assert_eq!(plan.max_steps, crate::paths::DEFAULT_BENCH_MAX_STEPS);
+    assert_eq!(
+        plan.max_steps,
+        cellgov_boot::manifest::DEFAULT_BENCH_MAX_STEPS
+    );
 }

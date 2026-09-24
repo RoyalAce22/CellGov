@@ -6,29 +6,7 @@
 use std::time::{Duration, Instant};
 
 use cellgov_boot::prepare::StartupTimings;
-use cellgov_boot::step_loop::{compute_untracked, pct, StepTiming};
-use cellgov_core::Runtime;
-
-/// Counters the runtime kept that the run reports as anomalies.
-#[derive(Debug, Default)]
-pub(super) struct RunCounters {
-    /// Reads answered zero from a reserved RSX or SPU region.
-    pub provisional_reads: u64,
-    /// Pending wake responses overwritten before the guest drained them.
-    pub response_displacements: usize,
-    /// `sys_tty_write` calls whose buffer left mapped memory.
-    pub tty_oob_dropped: usize,
-    /// `sys_tty_write` calls whose fd did not fit in `u32`.
-    pub tty_bogus_fd: usize,
-}
-
-impl RunCounters {
-    /// A displaced response is the one counter that makes the run's own
-    /// result suspect; the others name work the run dropped.
-    pub(super) fn had_critical_anomaly(&self) -> bool {
-        self.response_displacements > 0
-    }
-}
+use cellgov_boot::step_loop::{compute_untracked, pct, RunAnomalies, StepTiming};
 
 /// `part` as a percentage of `total`; a zero total reads as 0.
 fn percent(part: u64, total: u64) -> f64 {
@@ -53,7 +31,7 @@ pub(super) fn startup_timing_lines(t: &StartupTimings) -> Vec<String> {
 }
 
 /// One line per counter that moved; a quiet run reports none.
-pub(super) fn anomaly_lines(c: &RunCounters) -> Vec<String> {
+pub(super) fn anomaly_lines(c: &RunAnomalies) -> Vec<String> {
     let mut out = Vec::new();
     if c.provisional_reads > 0 {
         out.push(format!(
@@ -219,20 +197,6 @@ impl RunSpans {
             ms(self.stepped, end),
             ms(self.start, end),
         ))
-    }
-}
-
-/// Read the counters the runtime kept during the loop.
-pub(super) fn read_counters(
-    rt: &Runtime,
-    tty_oob_dropped: usize,
-    tty_bogus_fd: usize,
-) -> RunCounters {
-    RunCounters {
-        provisional_reads: rt.memory().provisional_read_count(),
-        response_displacements: rt.syscall_responses().displacement_count(),
-        tty_oob_dropped,
-        tty_bogus_fd,
     }
 }
 

@@ -7,5 +7,4 @@ mod stages;
 mod unmodelled;
 
 pub use options::{RunArtifacts, RunExecution, RunReporting};
-pub(crate) use stages::configure_rsx_from_manifest;
 pub use stages::{run_game, RunSummary};

@@ -18,13 +18,11 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cellgov_compare::{
-    BootSummary, CrossRunnerSummary, FirmwareIdentity, GameIdentity, RunIdentity,
-};
+use cellgov_compare::{BootSummary, CrossRunnerSummary, RunIdentity};
 
 use super::cell::{CellArtifacts, CellResult};
 use crate::paths::CROSS_RUNNER_SUMMARY_FILE;
-use cellgov_boot::manifest::{CellKey, TitleManifest};
+use cellgov_boot::manifest::{CellDisagreement, CellKey, TitleManifest};
 
 /// The anchor file every cell's boot measurement is written to.
 const BOOT_SUMMARY_FILE: &str = "boot_summary.json";
@@ -402,61 +400,46 @@ fn dir_name(dir: &Path) -> Option<&str> {
 ///
 /// `dev record-anchors` refuses to file a mismatched result; nothing
 /// else stops one arriving by hand.
+///
+/// A file written before the store carried versions names no firmware
+/// or no game entry. That absence makes no claim, so it raises no
+/// mismatch. Of several disagreements the firmware is named first,
+/// then the game version, then the overrides.
 fn check_cell(path: &Path, cell: &CellKey, recorded: &RunIdentity) -> Result<(), SummaryLoadError> {
-    check_cell_firmware(path, cell, recorded.firmware.as_ref())?;
-    check_cell_game_version(path, cell, recorded.game.as_ref())?;
-    if !recorded.overrides.is_empty() {
-        return Err(SummaryLoadError::CellOverridden {
-            path: path.to_path_buf(),
-            overrides: recorded.overrides.names().join(" "),
-        });
+    let refusal = cell
+        .disagreements(recorded)
+        .into_iter()
+        .filter_map(|d| match d {
+            CellDisagreement::FirmwareMismatch { cell, recorded } => Some((
+                0,
+                SummaryLoadError::CellFirmwareMismatch {
+                    path: path.to_path_buf(),
+                    cell,
+                    recorded,
+                },
+            )),
+            CellDisagreement::GameVersionMismatch { cell, recorded } => Some((
+                1,
+                SummaryLoadError::CellGameVersionMismatch {
+                    path: path.to_path_buf(),
+                    cell: cell.unwrap_or_else(|| NO_GAME_VERSION.to_string()),
+                    recorded,
+                },
+            )),
+            CellDisagreement::Overridden { names } => Some((
+                2,
+                SummaryLoadError::CellOverridden {
+                    path: path.to_path_buf(),
+                    overrides: names.join(" "),
+                },
+            )),
+            CellDisagreement::NoFirmware { .. } | CellDisagreement::NoGameVersion { .. } => None,
+        })
+        .min_by_key(|(rank, _)| *rank);
+    match refusal {
+        Some((_, error)) => Err(error),
+        None => Ok(()),
     }
-    Ok(())
-}
-
-/// Both firmware spellings are the store key of a `vfs/firmware/<key>/`
-/// entry, so they compare directly.
-///
-/// A file written before the store carried versions names no firmware,
-/// and raises no mismatch.
-fn check_cell_firmware(
-    path: &Path,
-    cell: &CellKey,
-    recorded: Option<&FirmwareIdentity>,
-) -> Result<(), SummaryLoadError> {
-    match recorded {
-        Some(f) if f.version != cell.fw => Err(SummaryLoadError::CellFirmwareMismatch {
-            path: path.to_path_buf(),
-            cell: cell.fw.clone(),
-            recorded: f.version.clone(),
-        }),
-        Some(_) | None => Ok(()),
-    }
-}
-
-/// The two sides spell one value differently: a cell's `game_ver` is
-/// the bare key, and the composition records a selected update as
-/// `update:<key>`.
-///
-/// A file that names no store entry makes no claim, so it raises no
-/// mismatch. [`check_cell_firmware`] reads absence the same way.
-fn check_cell_game_version(
-    path: &Path,
-    cell: &CellKey,
-    recorded: Option<&GameIdentity>,
-) -> Result<(), SummaryLoadError> {
-    let Some(game) = recorded else {
-        return Ok(());
-    };
-    let want = cell.game_ver.as_deref().map(GameIdentity::version_of);
-    if want.as_deref() == Some(game.version.as_str()) {
-        return Ok(());
-    }
-    Err(SummaryLoadError::CellGameVersionMismatch {
-        path: path.to_path_buf(),
-        cell: want.unwrap_or_else(|| NO_GAME_VERSION.to_string()),
-        recorded: game.version.clone(),
-    })
 }
 
 /// `Ok(None)` on ENOENT; every other I/O or parse failure returns a
@@ -501,3 +484,7 @@ mod unkeyed_result_tests;
 #[cfg(test)]
 #[path = "tests/cell_override_tests.rs"]
 mod cell_override_tests;
+
+#[cfg(test)]
+#[path = "tests/cell_order_tests.rs"]
+mod cell_order_tests;

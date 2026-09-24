@@ -1,21 +1,18 @@
 use std::time::Duration;
 
 use cellgov_boot::prepare::StartupTimings;
-use cellgov_boot::step_loop::StepTiming;
+use cellgov_boot::step_loop::{RunAnomalies, StepTiming};
 
-use super::{
-    anomaly_lines, frequency_block, startup_timing_lines, step_profile_lines, RunCounters,
-};
+use super::{anomaly_lines, frequency_block, startup_timing_lines, step_profile_lines};
 
 #[test]
 fn quiet_run_reports_no_anomaly() {
-    assert!(anomaly_lines(&RunCounters::default()).is_empty());
-    assert!(!RunCounters::default().had_critical_anomaly());
+    assert!(anomaly_lines(&RunAnomalies::default()).is_empty());
 }
 
 #[test]
 fn each_counter_gets_its_own_line() {
-    let c = RunCounters {
+    let c = RunAnomalies {
         provisional_reads: 1,
         response_displacements: 2,
         tty_oob_dropped: 3,
@@ -27,22 +24,6 @@ fn each_counter_gets_its_own_line() {
     assert!(lines[1].starts_with("syscall_response_displacements: 2"));
     assert!(lines[2].starts_with("tty_oob_captures_dropped: 3"));
     assert!(lines[3].starts_with("tty_bogus_fd_calls: 4"));
-}
-
-#[test]
-fn only_a_displaced_response_is_critical() {
-    let displaced = RunCounters {
-        response_displacements: 1,
-        ..RunCounters::default()
-    };
-    assert!(displaced.had_critical_anomaly());
-    let dropped = RunCounters {
-        provisional_reads: 9,
-        tty_oob_dropped: 9,
-        tty_bogus_fd: 9,
-        ..RunCounters::default()
-    };
-    assert!(!dropped.had_critical_anomaly());
 }
 
 #[test]

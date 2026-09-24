@@ -32,10 +32,10 @@ pub enum BenchBootError {
 /// Run one boot with the minimum step-loop bookkeeping needed to
 /// detect termination.
 ///
-/// RSX-init coupling: `set_rsx_mirror_writes` is driven by the
-/// manifest's declared checkpoint, not the runtime-overridable
-/// `checkpoint`, so a `--checkpoint pc=ADDR` override does not change
-/// the boot trajectory's init path.
+/// RSX-init coupling: `prepare` applies the manifest's `[rsx]`
+/// settings, not the runtime-overridable `checkpoint`, so a
+/// `--checkpoint pc=ADDR` override does not change the boot
+/// trajectory's init path.
 ///
 /// `trace_path` puts the runtime in `DeterminismCheck` mode, which
 /// costs a state hash per step. No comparison reads a traced run's
@@ -97,7 +97,6 @@ fn bench_boot(
     let child_init = prepared.child_init;
     let step_budget = prepared.step_budget;
     let active_checkpoint = opts.checkpoint_override.unwrap_or(opts.plan.checkpoint);
-    crate::game::run::configure_rsx_from_manifest(&mut rt, opts.title);
 
     let mut steps: usize = 0;
     let t0 = Instant::now();

@@ -18,6 +18,20 @@ use crate::step_loop::verdict::{classify_step_outcome, StepVerdict};
 use crate::step_loop::STEP_REPORT_BATCH;
 use crate::BootError;
 
+/// Whether a [`step_loop`] run given `configured` as its checkpoint
+/// ends where `anchor` stops.
+///
+/// The driver sets no target PC (every step is classified with none),
+/// so a run passes a `pc=` checkpoint and does not stop there. A run
+/// ends at `anchor` only when the two agree and `anchor` is not a PC.
+#[must_use]
+pub fn step_loop_ends_at(
+    configured: crate::manifest::CheckpointTrigger,
+    anchor: crate::manifest::CheckpointTrigger,
+) -> bool {
+    configured == anchor && !matches!(anchor, crate::manifest::CheckpointTrigger::Pc(_))
+}
+
 /// Drive the runtime to a terminal state.
 ///
 /// The returned string is the diagnostic report for that terminal
@@ -292,3 +306,7 @@ fn handle_tty_capture(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/ends_at_tests.rs"]
+mod ends_at_tests;

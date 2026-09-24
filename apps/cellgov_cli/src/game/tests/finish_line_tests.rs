@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::paths::boot_anchor_path;
+use cellgov_compare::BootSummary;
 
 fn cell() -> CellKey {
     CellKey {
@@ -50,32 +51,13 @@ fn an_anchor_that_does_not_parse_is_no_finish_line() {
     assert_eq!(anchor_steps_under(&root, "CG_TEST", &cell()), None);
 }
 
-#[test]
-fn a_malformed_anchor_is_a_parse_refusal_and_an_absent_one_is_not_found() {
-    let root = root_with_anchor("{ \"steps\": \"forty\" }");
-    assert!(matches!(
-        read_anchor_steps(&boot_anchor_path(&root, "CG_TEST", &cell())),
-        Err(AnchorReadError::Parse { .. })
-    ));
-    assert!(matches!(
-        read_anchor_steps(&boot_anchor_path(&root, "CG_OTHER", &cell())),
-        Err(AnchorReadError::Read { ref source, .. })
-            if source.kind() == std::io::ErrorKind::NotFound
-    ));
-}
-
 /// A directory at the anchor path is unreadable on every platform and
 /// absent on none.
 #[test]
-fn an_unreadable_anchor_is_a_read_refusal_that_is_not_a_miss() {
+fn an_unreadable_anchor_is_no_finish_line() {
     let root = cellgov_testkit::scratch::scratch_labeled("finish_line_unreadable");
     let path = boot_anchor_path(&root, "CG_TEST", &cell());
     std::fs::create_dir_all(&path).expect("a directory at the anchor path");
-    assert!(matches!(
-        read_anchor_steps(&path),
-        Err(AnchorReadError::Read { ref source, .. })
-            if source.kind() != std::io::ErrorKind::NotFound
-    ));
     assert_eq!(anchor_steps_under(&root, "CG_TEST", &cell()), None);
 }
 

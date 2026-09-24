@@ -1,9 +1,9 @@
-//! Where a cell's committed artifacts live, and the two parameters its
-//! anchor is measured under.
+//! Where a cell's committed artifacts live.
 //!
 //! `dev record-anchors` writes the boot anchors and `boot bench` gates
-//! against them. They must agree on the cell an anchor is filed under,
-//! and on the cap and checkpoint it was measured at.
+//! against them. They must agree on the cell an anchor is filed under;
+//! the cap and checkpoint it is measured at are
+//! `TitleManifest::cell_max_steps` and `TitleManifest::cell_checkpoint`.
 //!
 //! A boot anchor is not a scenario observation: anchors are CellGov's
 //! own witnesses for a real title, under `tests/fixtures/<id>/`, while
@@ -12,11 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_boot::manifest::{CellKey, MatrixCell, TitleManifest};
-
-/// Instruction cap a cell is measured under when neither it nor its
-/// title declares one.
-pub(crate) const DEFAULT_BENCH_MAX_STEPS: u64 = 100_000_000;
+use cellgov_boot::manifest::CellKey;
 
 /// The cross-runner verdict `dev fixture-gen` writes and `dev
 /// titles-gen` renders from.
@@ -24,13 +20,6 @@ pub(crate) const CROSS_RUNNER_SUMMARY_FILE: &str = "cross_runner_summary.json";
 
 /// The committed fixture tree, relative to the workspace root.
 pub(crate) const DEFAULT_FIXTURES_DIR: &str = "tests/fixtures";
-
-/// Instruction cap `cell` is recorded and gated under.
-pub(crate) fn cell_max_steps(title: &TitleManifest, cell: Option<&MatrixCell>) -> u64 {
-    cell.and_then(|c| c.bench_max_steps)
-        .or(title.bench_max_steps)
-        .unwrap_or(DEFAULT_BENCH_MAX_STEPS)
-}
 
 /// Compiled-in workspace root.
 ///

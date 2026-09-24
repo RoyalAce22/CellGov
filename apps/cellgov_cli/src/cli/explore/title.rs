@@ -97,7 +97,6 @@ pub(super) fn run(
     };
     let checkpoint = plan.as_plan().checkpoint;
     let mut rt = prepared_runtime(&inputs, firmware_dir.as_deref(), max_steps)?;
-    crate::game::configure_rsx_from_manifest(&mut rt, &inputs.title);
     // Both counts are runtime steps; see the doc on `WindowStart::Step`.
     if let Some(refusal) = start_past_cap(start, rt.max_steps()) {
         // A flag value this boot cannot satisfy is a usage error.
