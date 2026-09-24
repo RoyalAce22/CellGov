@@ -16,9 +16,11 @@
 //! renders it from the `table.tsv` data file beside it and fails on
 //! drift.
 
+mod macros;
 mod modules;
 mod table;
 
+pub(crate) use macros::nid_module;
 pub use modules::{
     cell_gcm_sys, cell_save_data, cell_spurs, cell_sysutil, sys_fs, sys_prx_for_user, CURATED,
 };
