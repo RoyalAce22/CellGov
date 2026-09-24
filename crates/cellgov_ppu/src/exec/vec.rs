@@ -6,8 +6,8 @@ use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::ops::{VaOp, VxOp};
 use crate::state::PpuState;
 
-/// Execute a VX-form VMX instruction. `rc` is the VXR record bit;
-/// recording compare forms are not implemented yet and fault.
+/// Execute a VX-form VMX instruction. `rc` is the VXR record bit; a
+/// recording compare also sets CR6 from its result.
 ///
 /// Exhaustive over [`VxOp`]: adding an op fails compilation here
 /// until its execution (or explicit fault) is decided.
@@ -21,10 +21,11 @@ pub(crate) fn execute_vx(
 ) -> ExecuteVerdict {
     let a = state.vr[va as usize];
     let b = state.vr[vb as usize];
+    let fault_code = op as u64 + if rc { 1024 } else { 0 };
 
-    if rc {
-        // Rc=1 compare forms also update CR6; not modelled yet.
-        return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(op as u64 + 1024));
+    // Only a VXR compare has a record form.
+    if rc && !op.is_vxr_compare() {
+        return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(fault_code));
     }
 
     let result = match op {
@@ -204,12 +205,27 @@ pub(crate) fn execute_vx(
         | VxOp::Vsubshs
         | VxOp::Vsubsws
         | VxOp::Vsumsws => {
-            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(op as u64));
+            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(fault_code));
         }
     };
 
     state.set_vr(vt as usize, result);
+    if rc {
+        state.set_cr_field(6, record_cr6(op, result));
+    }
     ExecuteVerdict::Continue
+}
+
+/// CR6 of a recording vector compare, from its result vector.
+fn record_cr6(op: VxOp, result: u128) -> u8 {
+    if op == VxOp::Vcmpbfp {
+        // [AltiVec-PEM p:6-51 s:6.2] vcmpbfp.: CR6 = 0b00 || all_within_bounds || 0; an element is within bounds when its result is 0.
+        return if result == 0 { 0b0010 } else { 0 };
+    }
+    // [AltiVec-PEM p:6-56 s:6.2] vcmpequw.: CR6 = all_true || 0b0 || all_false || 0b0 over the result elements.
+    let all_true = u8::from(result == u128::MAX) << 3;
+    let all_false = u8::from(result == 0) << 1;
+    all_true | all_false
 }
 
 /// Execute a VA-form VMX instruction (primary=4, 6-bit sub-opcode, 4 registers).
@@ -614,3 +630,7 @@ fn vcfux(b: u128, uimm: u8) -> u128 {
 #[cfg(test)]
 #[path = "tests/vec_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/vec_record_tests.rs"]
+mod record_tests;

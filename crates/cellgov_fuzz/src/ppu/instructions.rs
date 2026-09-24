@@ -538,3 +538,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/store_wrap_tests.rs"]
 mod store_wrap_tests;
+
+#[cfg(test)]
+#[path = "tests/record_cr6_tests.rs"]
+mod record_cr6_tests;

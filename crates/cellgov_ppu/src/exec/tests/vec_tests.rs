@@ -620,10 +620,9 @@ fn vperm_indexes_concat_of_a_and_b_by_low_5_bits_of_c() {
 //   CR6.bit1 = 0
 //   CR6.bit2 = 1 iff no element compared true
 //   CR6.bit3 = 0
-// The `Vx` variant carries the VXR Rc bit, but the CR6-update path
-// is not implemented: an Rc=1 compare faults rather than silently
-// skipping the CR write. The tests below pin both halves and the
-// "no CR/XER side effect" invariant for every other VX/VA op.
+// The Rc=1 cases live in vec_record_tests.rs. The tests below pin the
+// Rc=0 half and the "no CR/XER side effect" invariant for every other
+// VX/VA op.
 
 #[test]
 fn vcmpequw_rc_zero_writes_vector_only() {
@@ -636,27 +635,6 @@ fn vcmpequw_rc_zero_writes_vector_only() {
     assert_eq!(s.vr[3], pack_u32x4([0xFFFF_FFFF; 4]));
     // CR is untouched on the Rc=0 form.
     assert_eq!(s.cr(), 0xABCD_EF01);
-}
-
-/// The Rc=1 form (`vcmpequw.`) also updates CR6; that path is
-/// unimplemented and must fault, never silently skip the CR write.
-/// An implementer should replace this with the four CR6 cases
-/// (all-equal, none-equal, partial, Rc=0 untouched) listed in
-/// [AltiVec-PEM p:6-56 s:6.2].
-#[test]
-fn vcmpequw_rc_one_faults_as_unimplemented() {
-    let mut s = PpuState::new();
-    s.set_vr(1, pack_u32x4([1, 2, 3, 4]));
-    s.set_vr(2, pack_u32x4([1, 2, 3, 4]));
-    let v = exec_no_mem(&vx(0x486, 3, 1, 2), &mut s);
-    assert!(
-        matches!(
-            v,
-            ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(0x486))
-        ),
-        "expected UnimplementedInstruction(0x486), got {v:?}"
-    );
-    assert_eq!(s.vr[3], 0, "faulting compare must not write the vector");
 }
 
 #[test]
