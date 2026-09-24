@@ -15,7 +15,7 @@
     },
     {
       "name": "ppu-raw-lmw-ra-in-load-range-debug-invariant",
-      "status": "open",
+      "status": "fixed",
       "profile": "debug",
       "summary": "A raw lmw word with RA inside the loaded range is an invalid form; the debug executor refuses it with an invariant and a release build executes it."
     },
@@ -39,7 +39,7 @@
     },
     {
       "name": "ppu-raw-sequence-lmw-ra-in-load-range-debug-invariant",
-      "status": "open",
+      "status": "fixed",
       "profile": "debug",
       "summary": "A raw PPU sequence that reaches lmw with RA inside the loaded range, an invalid form, trips the debug executor's invariant; a release build executes the form."
     }

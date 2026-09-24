@@ -40,17 +40,12 @@ pub(crate) fn execute(
     match *insn {
         // [PPC-Book1 p:46 s:3.3.5] lmw D-form: for r=RT..31, GPR[r] =
         // zero-extend(MEM(EA,4)); EA += 4. Invalid form if RA is in
-        // (RT..=31) or RA==0; the load would otherwise overwrite RA
-        // mid-loop, silently corrupting the base register.
+        // (RT..=31) or RA==0.
         PpuInstruction::Lmw { rt, ra, imm } => {
-            debug_assert!(
-                ra != 0 && (ra as usize) < (rt as usize),
-                "lmw invalid form: RA={} must be non-zero and outside [{}..=31]; \
-                 a guest encoding with RA in the load range would silently \
-                 corrupt RA mid-loop",
-                ra,
-                rt
-            );
+            // [CBE-Handbook p:254 s:9.5.9] The PPE loads up to the colliding register, then takes the illegal-instruction interrupt; the fault discards the partial loads, so no load runs first.
+            if ra == 0 || ra >= rt {
+                return ExecuteVerdict::Fault(PpuFault::InvalidForm("lmw"));
+            }
             let mut ea = state.ea_d_form(ra, imm);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             for r in (rt as usize)..32 {

@@ -1442,14 +1442,15 @@ fn effect_and_outcome(
     valid_form: bool,
 ) -> (&'static [EffectKind], &'static [PpuOutcomeClass]) {
     use PpuInstructionKind as K;
-    // [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update in an invalid form, so only the encoding decides whether an update form faults.
-    let (load_update, store_update) = if valid_form {
+    // [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update, or an lmw, in an invalid form, so only the encoding decides whether the form faults.
+    let (checked_load, checked_store) = if valid_form {
         ((READ_EFFECTS, LOAD), (WRITE_EFFECTS, STORE))
     } else {
         ((NO_EFFECTS, FAULT), (NO_EFFECTS, FAULT))
     };
     match kind {
-        K::Lhau
+        K::Lmw
+        | K::Lhau
         | K::Lwzu
         | K::Lbzu
         | K::Lhzu
@@ -1463,7 +1464,7 @@ fn effect_and_outcome(
         | K::Lfsu
         | K::Lfdu
         | K::Lfsux
-        | K::Lfdux => load_update,
+        | K::Lfdux => checked_load,
         K::Stwu
         | K::Stdu
         | K::Stbu
@@ -1475,12 +1476,11 @@ fn effect_and_outcome(
         | K::Stfsu
         | K::Stfdu
         | K::Stfsux
-        | K::Stfdux => store_update,
+        | K::Stfdux => checked_store,
         K::Lwz
         | K::Lbz
         | K::Lhz
         | K::Lha
-        | K::Lmw
         | K::Ld
         | K::Lwa
         | K::Lwzx

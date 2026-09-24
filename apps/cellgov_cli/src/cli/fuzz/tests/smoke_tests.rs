@@ -96,61 +96,20 @@ fn the_smoke_set_is_clean_against_the_tracked_regressions() {
 }
 
 #[test]
-fn a_finding_no_regression_covers_fails_the_set_and_stores_its_minimized_artifact() {
-    // The raw-word campaigns reach invalid load and store forms. A debug
-    // build's PPU executor refuses those with a debug invariant; a release
-    // build runs them silently. The promoted regressions name that profile,
-    // so a run with no regressions is the one way to see both paths: the
-    // finding path in a debug build, the clean path in a release build.
+fn the_smoke_set_without_regressions_is_clean_in_both_profiles() {
+    // An invalid load or store form faults in both build profiles, so no
+    // smoke campaign reaches a finding that needs a promoted regression.
     let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_smoke_unpromoted");
     let code = smoke(&scratch, &[]).expect("the set runs");
-    if cfg!(debug_assertions) {
-        assert_eq!(code.value(), exit_codes::FAILED as u8);
-        let mut stored = std::fs::read_dir(&*scratch)
-            .expect("the artifacts directory exists")
-            .map(|entry| entry.expect("entry").path())
-            .collect::<Vec<_>>();
-        stored.sort();
-        assert!(!stored.is_empty(), "a finding stores its artifact");
-        for path in stored {
-            let artifact = cellgov_fuzz::artifact::FuzzFindingArtifact::parse_json(
-                &std::fs::read_to_string(&path).expect("reads the artifact"),
-            )
-            .expect("the stored artifact validates");
-            assert!(
-                matches!(
-                    artifact.reduction,
-                    cellgov_fuzz::artifact::ArtifactReduction::Reduced { .. }
-                        | cellgov_fuzz::artifact::ArtifactReduction::Irreducible
-                ),
-                "{}: the smoke set stores minimized findings only",
-                path.display()
-            );
-            assert_eq!(artifact.finding_kind, "TargetPanic");
-            // The stored replay names the directory as the caller spelled
-            // it and the file after one forward slash, on either platform.
-            let file_name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .expect("a stored artifact has a UTF-8 file name");
-            assert_eq!(
-                artifact.replay_command[5],
-                format!("{}/{file_name}", path_arg(&scratch)),
-                "{}: the replay path is portable text",
-                path.display()
-            );
-        }
-    } else {
-        assert_eq!(code, CommandExitCode::SUCCESS);
-        assert!(
-            !scratch.exists()
-                || std::fs::read_dir(&*scratch)
-                    .expect("reads")
-                    .next()
-                    .is_none(),
-            "a clean set stores nothing"
-        );
-    }
+    assert_eq!(code, CommandExitCode::SUCCESS);
+    assert!(
+        !scratch.exists()
+            || std::fs::read_dir(&*scratch)
+                .expect("reads")
+                .next()
+                .is_none(),
+        "a clean set stores nothing"
+    );
 }
 
 #[test]

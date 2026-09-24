@@ -16,6 +16,8 @@ mod altivec;
 mod atomics;
 #[path = "mem_float_tests.rs"]
 mod floats;
+#[path = "mem_lmw_form_tests.rs"]
+mod lmw_form;
 #[path = "mem_load_tests.rs"]
 mod loads;
 #[path = "mem_read_intent_tests.rs"]
