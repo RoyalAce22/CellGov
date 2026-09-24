@@ -114,6 +114,32 @@ pub(crate) fn make_test_prx() -> Vec<u8> {
     buf
 }
 
+/// [`make_test_prx`] with an executable text segment and its three
+/// exports repointed at real OPD descriptors in the data segment.
+/// The shipped fixture leaves `p_flags` zero and aims the export
+/// stubs at raw text, neither of which the funcmap walk accepts.
+pub(crate) fn make_test_prx_with_export_opds() -> Vec<u8> {
+    // Data maps file 0x1F0 -> vaddr 0x100; file 0x380..0x398 is the
+    // unused tail, so the descriptors land at vaddr 0x290..0x2A8.
+    const OPD_FILE: usize = 0x380;
+    const OPD_VADDR: u32 = 0x290;
+    const STUB_TABLE_FILE: usize = 0x2D0;
+    const TOC: u32 = 0x200;
+    let codes = [0x40u32, 0x50, 0x60];
+
+    let mut buf = make_test_prx();
+    // PF_R | PF_X on the text PT_LOAD.
+    buf[64 + 4..64 + 8].copy_from_slice(&0x5u32.to_be_bytes());
+    for (i, code) in codes.iter().enumerate() {
+        let opd = OPD_FILE + i * 8;
+        buf[opd..opd + 4].copy_from_slice(&code.to_be_bytes());
+        buf[opd + 4..opd + 8].copy_from_slice(&TOC.to_be_bytes());
+        let stub = STUB_TABLE_FILE + i * 4;
+        buf[stub..stub + 4].copy_from_slice(&(OPD_VADDR + (i as u32) * 8).to_be_bytes());
+    }
+    buf
+}
+
 /// [`make_test_prx`] with the module and export-library names
 /// replaced, plus an optional single-function import entry naming
 /// `import_lib`. Both names must be exactly 7 bytes: they overwrite

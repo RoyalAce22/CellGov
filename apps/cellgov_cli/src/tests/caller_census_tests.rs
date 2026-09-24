@@ -2,33 +2,105 @@ use super::*;
 
 use cellgov_testkit::store::SyntheticStore;
 
-#[test]
-fn ppu_classification_rejects_other_elf_machines() {
-    let mut elf = vec![0u8; ELF_HEADER_SIZE];
-    elf[18..20].copy_from_slice(&EM_PPC64.to_be_bytes());
-    assert!(is_ppu_elf(&elf));
-    elf[18..20].copy_from_slice(&23u16.to_be_bytes());
-    assert!(!is_ppu_elf(&elf));
+fn sha(bytes: &[u8]) -> cellgov_install::manifest::Sha256 {
+    cellgov_install::manifest::Sha256(cellgov_install::manifest::sha256_of(bytes))
+}
+
+fn walked(image: Result<Vec<u8>, ModuleDivergence>) -> ModuleImage {
+    ModuleImage {
+        entry: "sys/a.sprx".to_string(),
+        path: PathBuf::from("mount/sys/a.sprx"),
+        image,
+    }
 }
 
 #[test]
-fn a_changed_plaintext_module_reports_both_hashes() {
-    let expected = Sha256(sha256_of(b"expected"));
-    let error = verify_module_hash("4.93", "sys/a.sprx", expected, b"changed")
-        .expect_err("the module hash changed");
+fn a_matching_module_yields_its_entry_path_and_image() {
+    let (module, elf) = matching_image("4.93", walked(Ok(b"elf".to_vec()))).expect("matches");
+    assert_eq!(
+        (module.as_str(), elf.as_slice()),
+        ("sys/a.sprx", &b"elf"[..])
+    );
+}
+
+#[test]
+fn a_changed_module_is_refused_with_both_hashes_under_its_entry_path() {
+    let (expected, found) = (sha(b"expected"), sha(b"changed"));
+    let error = matching_image(
+        "4.93",
+        walked(Err(ModuleDivergence::Modified { expected, found })),
+    )
+    .expect_err("the module changed");
     let CallerCensusError::ModuleModified {
         version,
         module,
         expected: reported_expected,
-        found,
+        found: reported_found,
     } = error
     else {
         panic!("expected a module-integrity error, got {error:?}");
     };
-    assert_eq!(version, "4.93");
-    assert_eq!(module, "sys/a.sprx");
+    assert_eq!((version.as_str(), module.as_str()), ("4.93", "sys/a.sprx"));
     assert_eq!(reported_expected, expected.to_hex());
-    assert_eq!(found, Sha256(sha256_of(b"changed")).to_hex());
+    assert_eq!(reported_found, found.to_hex());
+}
+
+#[test]
+fn a_missing_module_is_refused_by_its_path() {
+    let error = matching_image("4.93", walked(Err(ModuleDivergence::Missing)))
+        .expect_err("the module is missing");
+    assert!(
+        matches!(&error, CallerCensusError::ModuleDiverged { version, fault }
+            if version == "4.93" && fault.kind == ModuleDivergence::Missing),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_modules_callers_become_one_row_per_ordinal_one_unresolved_row_and_its_reach() {
+    let callers = ModuleCallers {
+        by_ordinal: [(7, vec![0x54]), (22, vec![0x44, 0x4C])]
+            .into_iter()
+            .collect(),
+        unresolved: Vec::new(),
+        reach: [(0xAAAA_AAAA, 22)].into_iter().collect(),
+    };
+    let mut census = CallerCensus::default();
+    push_rows(&mut census, "pup", "sys/a.sprx", callers);
+    assert_eq!(
+        census.caller,
+        [
+            CallerRow {
+                pup_sha256: "pup".to_string(),
+                module: "sys/a.sprx".to_string(),
+                ordinal: 7,
+                sites: vec![0x54],
+            },
+            CallerRow {
+                pup_sha256: "pup".to_string(),
+                module: "sys/a.sprx".to_string(),
+                ordinal: 22,
+                sites: vec![0x44, 0x4C],
+            },
+        ]
+    );
+    assert_eq!(
+        census.unresolved,
+        [CallerUnresolvedRow {
+            pup_sha256: "pup".to_string(),
+            module: "sys/a.sprx".to_string(),
+            sites: Vec::new(),
+        }]
+    );
+    assert_eq!(
+        census.reach,
+        [ReachRow {
+            pup_sha256: "pup".to_string(),
+            module: "sys/a.sprx".to_string(),
+            export_nid: 0xAAAA_AAAA,
+            ordinal: 22,
+        }]
+    );
 }
 
 #[test]

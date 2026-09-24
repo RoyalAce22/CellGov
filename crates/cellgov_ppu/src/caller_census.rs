@@ -1,7 +1,12 @@
-//! Finds LV2 syscall sites in a PPU ELF.
+//! Finds LV2 syscall sites in a PPU ELF, and groups one module's sites
+//! the way the caller tables record them.
 
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::funcmap::{self, FuncMapError, FunctionName};
 use crate::instruction::PpuInstruction;
 use crate::loader::{pt_load_segments, LoadError, LoadSegment};
+use cellgov_ps3_abi::format::elf::{ELF_E_MACHINE_OFFSET, ELF_HEADER_SIZE, EM_PPC64};
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
 
 /// Maximum instructions between a constant load into `r11` and `sc`.
@@ -87,6 +92,81 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
     }
     sites.sort_by_key(|site| site.address);
     Ok(sites)
+}
+
+/// One PPU module's syscall sites, grouped for the caller tables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModuleCallers {
+    /// Each resolved ordinal's site addresses, ascending.
+    pub by_ordinal: BTreeMap<u16, Vec<u64>>,
+    /// The sites whose ordinal the scan cannot prove, ascending.
+    pub unresolved: Vec<u64>,
+    /// Each `(export NID, ordinal)` pair where a resolved site lies in a
+    /// function the module exports by NID.
+    pub reach: BTreeSet<(u32, u16)>,
+}
+
+impl ModuleCallers {
+    /// How many sites resolved to an ordinal.
+    #[must_use]
+    pub fn resolved_sites(&self) -> usize {
+        self.by_ordinal.values().map(Vec::len).sum()
+    }
+}
+
+/// Why one module's callers could not be found.
+#[derive(Debug, thiserror::Error)]
+pub enum ModuleCallersError {
+    /// The syscall scan refused the image.
+    #[error(transparent)]
+    Scan(#[from] CallerScanError),
+    /// The function map refused the image.
+    #[error(transparent)]
+    FunctionMap(#[from] FuncMapError),
+}
+
+/// The syscall callers of one module image, or `None` for an image
+/// that is not a PPU ELF.
+///
+/// # Errors
+///
+/// [`ModuleCallersError`] when the syscall scan or the function map
+/// refuses the image.
+pub fn module_callers(elf: &[u8]) -> Result<Option<ModuleCallers>, ModuleCallersError> {
+    if !is_ppu_elf(elf) {
+        return Ok(None);
+    }
+    let sites = scan_syscalls(elf)?;
+    let functions = funcmap::build(elf)?;
+    let mut callers = ModuleCallers::default();
+    for site in sites {
+        let Some(ordinal) = site.ordinal else {
+            callers.unresolved.push(site.address);
+            continue;
+        };
+        callers
+            .by_ordinal
+            .entry(ordinal)
+            .or_default()
+            .push(site.address);
+        let export = u32::try_from(site.address)
+            .ok()
+            .and_then(|address| functions.span_at(address))
+            .and_then(|span| match span.name {
+                FunctionName::Nid(nid) => Some(nid),
+                FunctionName::Synthetic | FunctionName::Known(_) => None,
+            });
+        if let Some(nid) = export {
+            callers.reach.insert((nid, ordinal));
+        }
+    }
+    Ok(Some(callers))
+}
+
+fn is_ppu_elf(elf: &[u8]) -> bool {
+    elf.len() >= ELF_HEADER_SIZE
+        && u16::from_be_bytes([elf[ELF_E_MACHINE_OFFSET], elf[ELF_E_MACHINE_OFFSET + 1]])
+            == EM_PPC64
 }
 
 fn validate_segment(segment: &LoadSegment) -> Result<(), CallerScanError> {

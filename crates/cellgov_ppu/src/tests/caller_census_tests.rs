@@ -96,3 +96,44 @@ fn scanner_validation_matches_loader_segment_bounds() {
         Err(CallerScanError::SegmentOutOfRange { index: 0 })
     ));
 }
+
+/// Writes `words` into the fixture's text segment at `vaddr`; text
+/// maps file 0x0F0 to vaddr 0.
+fn put_words(elf: &mut [u8], vaddr: usize, words: &[u32]) {
+    for (i, word) in words.iter().enumerate() {
+        let at = 0x0F0 + vaddr + i * 4;
+        elf[at..at + 4].copy_from_slice(&word.to_be_bytes());
+    }
+}
+
+#[test]
+fn a_modules_sites_group_by_ordinal_and_reach_the_exports_holding_them() {
+    let mut elf = crate::sprx::test_fixtures::make_test_prx_with_export_opds();
+    // Exports: NID 0xAAAAAAAA at 0x40, 0xBBBBBBBB at 0x50, 0xCCCCCCCC at 0x60.
+    put_words(&mut elf, 0x40, &[li(11, 22), SC, li(11, 22), SC]);
+    put_words(&mut elf, 0x50, &[li(11, 7), SC]);
+    put_words(&mut elf, 0x60, &[branch(), SC]);
+    let callers = module_callers(&elf)
+        .expect("the module scans and maps")
+        .expect("a PPU module");
+    assert_eq!(
+        callers.by_ordinal,
+        [(7, vec![0x54]), (22, vec![0x44, 0x4C])]
+            .into_iter()
+            .collect()
+    );
+    assert_eq!(callers.unresolved, [0x64]);
+    assert_eq!(
+        callers.reach,
+        [(0xAAAA_AAAA, 22), (0xBBBB_BBBB, 7)].into_iter().collect()
+    );
+    assert_eq!(callers.resolved_sites(), 3);
+}
+
+#[test]
+fn an_image_for_another_machine_has_no_callers() {
+    let mut elf = crate::sprx::test_fixtures::make_test_prx_with_export_opds();
+    put_words(&mut elf, 0x40, &[li(11, 22), SC]);
+    elf[18..20].copy_from_slice(&23u16.to_be_bytes());
+    assert_eq!(module_callers(&elf).expect("no scan runs"), None);
+}

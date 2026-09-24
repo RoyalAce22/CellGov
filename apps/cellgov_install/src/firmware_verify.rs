@@ -299,8 +299,6 @@ pub fn verify_firmware_tree(
     dev_flash_dir: &Path,
     keys: &KeyVault,
 ) -> Result<FirmwareVerifyReport, FirmwareVerifyError> {
-    use cellgov_ps3_abi::format::elf::ELF_MAGIC;
-
     let firmware = load_manifest(dev_flash_dir)?;
     if firmware.files.is_empty() {
         return Err(FirmwareVerifyError::EmptyManifest {
@@ -308,70 +306,147 @@ pub fn verify_firmware_tree(
         });
     }
     let mut report = FirmwareVerifyReport::default();
-    for entry in &firmware.files {
-        let path = entry
-            .path
-            .split('/')
-            .fold(dev_flash_dir.to_path_buf(), |dir, part| dir.join(part));
-        let raw = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                report.divergences.push(ModuleFault {
-                    path,
-                    kind: ModuleDivergence::Missing,
-                });
-                continue;
-            }
-            Err(source) => return Err(FirmwareVerifyError::ModuleRead { path, source }),
-        };
-        let image = if crate::self_image::is_sce_wrapped(&raw) {
-            match crate::sce::decrypt_self_to_elf(&raw, keys) {
-                Ok(elf) => elf,
-                // A vault short of the key that installed this entry
-                // cannot tell an intact module from a replaced one.
-                Err(source) if is_vault_gap(&source) => {
-                    return Err(FirmwareVerifyError::ModuleKeyMissing {
-                        path,
-                        source: Box::new(source),
-                    })
-                }
-                Err(source) => {
-                    report.divergences.push(ModuleFault {
-                        path,
-                        kind: ModuleDivergence::NoImage {
-                            reason: source.to_string(),
-                        },
-                    });
-                    continue;
-                }
-            }
-        } else if raw.starts_with(&ELF_MAGIC) {
-            // A pre-decrypted `.prx` is its own post-decrypt image, as
-            // it was when the manifest recorded it.
-            raw
-        } else {
-            report.divergences.push(ModuleFault {
-                path,
-                kind: ModuleDivergence::NoImage {
-                    reason: format!("{} bytes, neither an SCE container nor an ELF", raw.len()),
-                },
-            });
-            continue;
-        };
-        let found = manifest::Sha256(manifest::sha256_of(&image));
-        if found == entry.sha256 {
-            report.matched += 1;
-        } else {
-            report.divergences.push(ModuleFault {
-                path,
-                kind: ModuleDivergence::Modified {
-                    expected: entry.sha256,
-                    found,
-                },
-            });
+    for module in module_images(dev_flash_dir, firmware.files, keys) {
+        let module = module?;
+        match module.image {
+            Ok(_) => report.matched += 1,
+            Err(kind) => report.divergences.push(ModuleFault {
+                path: module.path,
+                kind,
+            }),
         }
     }
     Ok(report)
+}
+
+/// One manifest entry's module, read, opened and held to its hash.
+#[cfg(feature = "decrypt")]
+#[derive(Debug)]
+pub struct ModuleImage {
+    /// The entry path the manifest names, `/`-separated under the mount.
+    pub entry: String,
+    /// Where the module lies on disk.
+    pub path: PathBuf,
+    /// The post-decrypt image, when it hashes to the manifest's digest,
+    /// or how the module diverged.
+    pub image: Result<Vec<u8>, ModuleDivergence>,
+}
+
+/// The modules of a firmware mount, one [`ModuleImage`] per manifest
+/// entry, in the order the caller gives the entries. [`module_images`]
+/// builds it.
+#[cfg(feature = "decrypt")]
+#[derive(Debug)]
+#[must_use = "the walk reads nothing until it is iterated"]
+pub struct ModuleImages<'a> {
+    dev_flash_dir: &'a Path,
+    keys: &'a KeyVault,
+    entries: std::vec::IntoIter<manifest::FirmwareFileEntry>,
+}
+
+/// Open each module `entries` names under `dev_flash_dir`.
+///
+/// The walk decrypts an SCE-wrapped module under `keys`; a plain ELF is
+/// its own post-decrypt image, as it was when the manifest recorded it.
+///
+/// Each item is an error when an entry path would leave the mount
+/// ([`FirmwareVerifyError::UnsafeModulePath`]), when the module can be
+/// neither read nor shown absent ([`FirmwareVerifyError::ModuleRead`]),
+/// or when the vault cannot open it
+/// ([`FirmwareVerifyError::ModuleKeyMissing`]).
+#[cfg(feature = "decrypt")]
+pub fn module_images<'a>(
+    dev_flash_dir: &'a Path,
+    entries: Vec<manifest::FirmwareFileEntry>,
+    keys: &'a KeyVault,
+) -> ModuleImages<'a> {
+    ModuleImages {
+        dev_flash_dir,
+        keys,
+        entries: entries.into_iter(),
+    }
+}
+
+#[cfg(feature = "decrypt")]
+impl Iterator for ModuleImages<'_> {
+    type Item = Result<ModuleImage, FirmwareVerifyError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let entry = self.entries.next()?;
+        if !crate::store::record::tree_rel_path_is_safe(&entry.path) {
+            return Some(Err(FirmwareVerifyError::UnsafeModulePath {
+                path: self.dev_flash_dir.join(MANIFEST_FILE),
+                entry: entry.path,
+            }));
+        }
+        let path = entry
+            .path
+            .split('/')
+            .fold(self.dev_flash_dir.to_path_buf(), |dir, part| dir.join(part));
+        let image = match open_module(&path, self.keys) {
+            Ok(Ok(image)) => {
+                let found = manifest::Sha256(manifest::sha256_of(&image));
+                if found == entry.sha256 {
+                    Ok(image)
+                } else {
+                    Err(ModuleDivergence::Modified {
+                        expected: entry.sha256,
+                        found,
+                    })
+                }
+            }
+            Ok(Err(kind)) => Err(kind),
+            Err(error) => return Some(Err(error)),
+        };
+        Some(Ok(ModuleImage {
+            entry: entry.path,
+            path,
+            image,
+        }))
+    }
+}
+
+/// The post-decrypt image of the module at `path`, or why it yields
+/// none.
+#[cfg(feature = "decrypt")]
+fn open_module(
+    path: &Path,
+    keys: &KeyVault,
+) -> Result<Result<Vec<u8>, ModuleDivergence>, FirmwareVerifyError> {
+    use cellgov_ps3_abi::format::elf::ELF_MAGIC;
+
+    let raw = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Err(ModuleDivergence::Missing))
+        }
+        Err(source) => {
+            return Err(FirmwareVerifyError::ModuleRead {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
+    if crate::self_image::is_sce_wrapped(&raw) {
+        return match crate::sce::decrypt_self_to_elf(&raw, keys) {
+            Ok(elf) => Ok(Ok(elf)),
+            // A vault short of the key that installed this entry
+            // cannot tell an intact module from a replaced one.
+            Err(source) if is_vault_gap(&source) => Err(FirmwareVerifyError::ModuleKeyMissing {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            }),
+            Err(source) => Ok(Err(ModuleDivergence::NoImage {
+                reason: source.to_string(),
+            })),
+        };
+    }
+    if raw.starts_with(&ELF_MAGIC) {
+        return Ok(Ok(raw));
+    }
+    Ok(Err(ModuleDivergence::NoImage {
+        reason: format!("{} bytes, neither an SCE container nor an ELF", raw.len()),
+    }))
 }
 
 /// Re-hash the stored kernel `kernel` names under `entry_dir`.

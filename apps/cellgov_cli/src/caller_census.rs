@@ -1,20 +1,25 @@
 //! Emits firmware PPU syscall caller tables.
+//!
+//! `cellgov_install` opens each verified firmware module and
+//! `cellgov_ppu` finds its syscall callers; this command maps those
+//! callers into the archive's rows, merges and writes the tables.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use cellgov_boot::manifest::TitleRegistry;
-use cellgov_install::firmware_verify::{self, FirmwareVerifyError};
+use cellgov_install::firmware_verify::{
+    self, FirmwareVerifyError, ModuleDivergence, ModuleFault, ModuleImage,
+};
 use cellgov_install::keys::{KeyVault, KeyVaultError};
-use cellgov_install::manifest::{sha256_of, Sha256};
-use cellgov_install::sce::{self, SceError};
 use cellgov_lv2::archive::{
     self, ArchiveError, CallerCensus, CallerRow, CallerUnresolvedRow, ReachRow, CALLER,
     CALLER_UNRESOLVED, FIRMWARE, REACH,
 };
-use cellgov_ppu::caller_census::{scan_syscalls, CallerScanError};
-use cellgov_ppu::funcmap::{self, FuncMapError, FunctionName};
-use cellgov_ps3_abi::format::elf::{ELF_E_MACHINE_OFFSET, ELF_HEADER_SIZE, ELF_MAGIC, EM_PPC64};
+use cellgov_ppu::caller_census::{
+    module_callers, CallerScanError, ModuleCallers, ModuleCallersError,
+};
+use cellgov_ppu::funcmap::FuncMapError;
 
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::CallerCensusArgs;
@@ -54,19 +59,16 @@ enum CallerCensusError {
         record: String,
         manifest: String,
     },
-    #[error("read firmware {version} module {}: {source}", path.display())]
-    ModuleRead {
+    #[error("firmware {version}: {source}")]
+    ModuleOpen {
         version: String,
-        path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: FirmwareVerifyError,
     },
-    #[error("decrypt firmware {version} module {module}: {source}")]
-    ModuleDecrypt {
+    #[error("firmware {version} module {fault}")]
+    ModuleDiverged {
         version: String,
-        module: String,
-        #[source]
-        source: SceError,
+        fault: Box<ModuleFault>,
     },
     #[error("firmware {version} module {module}: plaintext SHA-256 {found} disagrees with manifest {expected}")]
     ModuleModified {
@@ -183,86 +185,22 @@ fn build(args: &CallerCensusArgs, vfs_root: &Path) -> Result<CensusTables, Calle
         }
         let mut files = manifest.files;
         files.sort_by(|a, b| a.path.cmp(&b.path));
-        for file in files {
-            let path = file
-                .path
-                .split('/')
-                .fold(entry.dev_flash_dir(), |path, part| path.join(part));
-            let raw = std::fs::read(&path).map_err(|source| CallerCensusError::ModuleRead {
+        let dev_flash = entry.dev_flash_dir();
+        for module in firmware_verify::module_images(&dev_flash, files, &vault) {
+            let module = module.map_err(|source| CallerCensusError::ModuleOpen {
                 version: entry.version.clone(),
-                path: path.clone(),
                 source,
             })?;
-            let elf = if raw.starts_with(&ELF_MAGIC) {
-                raw
-            } else {
-                sce::decrypt_self_to_elf(&raw, &vault).map_err(|source| {
-                    CallerCensusError::ModuleDecrypt {
-                        version: entry.version.clone(),
-                        module: file.path.clone(),
-                        source,
-                    }
-                })?
-            };
-            verify_module_hash(&entry.version, &file.path, file.sha256, &elf)?;
-            if !is_ppu_elf(&elf) {
+            let (module, elf) = matching_image(&entry.version, module)?;
+            let Some(callers) = module_callers(&elf)
+                .map_err(|source| analysis_refusal(&entry.version, &module, source))?
+            else {
                 continue;
-            }
-            let sites = scan_syscalls(&elf).map_err(|source| CallerCensusError::ModuleScan {
-                version: entry.version.clone(),
-                module: file.path.clone(),
-                source,
-            })?;
-            let functions =
-                funcmap::build(&elf).map_err(|source| CallerCensusError::FunctionMap {
-                    version: entry.version.clone(),
-                    module: file.path.clone(),
-                    source,
-                })?;
+            };
             modules += 1;
-            let mut by_ordinal: BTreeMap<u16, Vec<u64>> = BTreeMap::new();
-            let mut unknown = Vec::new();
-            let mut module_reach = BTreeSet::new();
-            for site in sites {
-                match site.ordinal {
-                    Some(ordinal) => {
-                        resolved_sites += 1;
-                        by_ordinal.entry(ordinal).or_default().push(site.address);
-                        if let Ok(address) = u32::try_from(site.address) {
-                            if let Some(span) = functions.span_at(address) {
-                                if let FunctionName::Nid(nid) = span.name {
-                                    module_reach.insert((nid, ordinal));
-                                }
-                            }
-                        }
-                    }
-                    None => {
-                        unresolved_sites += 1;
-                        unknown.push(site.address);
-                    }
-                }
-            }
-            for (ordinal, sites) in by_ordinal {
-                census.caller.push(CallerRow {
-                    pup_sha256: pup_sha256.clone(),
-                    module: file.path.clone(),
-                    ordinal: usize::from(ordinal),
-                    sites,
-                });
-            }
-            census.unresolved.push(CallerUnresolvedRow {
-                pup_sha256: pup_sha256.clone(),
-                module: file.path.clone(),
-                sites: unknown,
-            });
-            for (nid, ordinal) in module_reach {
-                census.reach.push(ReachRow {
-                    pup_sha256: pup_sha256.clone(),
-                    module: file.path.clone(),
-                    export_nid: u64::from(nid),
-                    ordinal: usize::from(ordinal),
-                });
-            }
+            resolved_sites += callers.resolved_sites();
+            unresolved_sites += callers.unresolved.len();
+            push_rows(&mut census, &pup_sha256, &module, callers);
         }
     }
     Ok(CensusTables {
@@ -313,28 +251,72 @@ fn selected_entries(
     Ok(ordered)
 }
 
-fn is_ppu_elf(elf: &[u8]) -> bool {
-    elf.len() >= ELF_HEADER_SIZE
-        && u16::from_be_bytes([elf[ELF_E_MACHINE_OFFSET], elf[ELF_E_MACHINE_OFFSET + 1]])
-            == EM_PPC64
+/// A walked module's entry path and image, or the refusal for a module
+/// that does not match its manifest entry.
+fn matching_image(
+    version: &str,
+    module: ModuleImage,
+) -> Result<(String, Vec<u8>), CallerCensusError> {
+    match module.image {
+        Ok(elf) => Ok((module.entry, elf)),
+        Err(ModuleDivergence::Modified { expected, found }) => {
+            Err(CallerCensusError::ModuleModified {
+                version: version.to_string(),
+                module: module.entry,
+                expected: expected.to_hex(),
+                found: found.to_hex(),
+            })
+        }
+        Err(kind) => Err(CallerCensusError::ModuleDiverged {
+            version: version.to_string(),
+            fault: Box::new(ModuleFault {
+                path: module.path,
+                kind,
+            }),
+        }),
+    }
 }
 
-fn verify_module_hash(
-    version: &str,
-    module: &str,
-    expected: Sha256,
-    elf: &[u8],
-) -> Result<(), CallerCensusError> {
-    let found = Sha256(sha256_of(elf));
-    if found == expected {
-        return Ok(());
+fn analysis_refusal(version: &str, module: &str, error: ModuleCallersError) -> CallerCensusError {
+    let (version, module) = (version.to_string(), module.to_string());
+    match error {
+        ModuleCallersError::Scan(source) => CallerCensusError::ModuleScan {
+            version,
+            module,
+            source,
+        },
+        ModuleCallersError::FunctionMap(source) => CallerCensusError::FunctionMap {
+            version,
+            module,
+            source,
+        },
     }
-    Err(CallerCensusError::ModuleModified {
-        version: version.to_string(),
+}
+
+/// One module's callers as the archive's rows: a caller row per
+/// ordinal, one unresolved row, and a reach row per export and ordinal.
+fn push_rows(census: &mut CallerCensus, pup_sha256: &str, module: &str, callers: ModuleCallers) {
+    for (ordinal, sites) in callers.by_ordinal {
+        census.caller.push(CallerRow {
+            pup_sha256: pup_sha256.to_string(),
+            module: module.to_string(),
+            ordinal: usize::from(ordinal),
+            sites,
+        });
+    }
+    census.unresolved.push(CallerUnresolvedRow {
+        pup_sha256: pup_sha256.to_string(),
         module: module.to_string(),
-        expected: expected.to_hex(),
-        found: found.to_hex(),
-    })
+        sites: callers.unresolved,
+    });
+    for (nid, ordinal) in callers.reach {
+        census.reach.push(ReachRow {
+            pup_sha256: pup_sha256.to_string(),
+            module: module.to_string(),
+            export_nid: u64::from(nid),
+            ordinal: usize::from(ordinal),
+        });
+    }
 }
 
 fn merge_existing(output_dir: &Path, tables: &mut CensusTables) -> Result<(), CallerCensusError> {

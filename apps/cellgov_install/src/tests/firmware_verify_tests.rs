@@ -315,4 +315,55 @@ revision = 1
         );
         assert!(err.to_string().contains("liblv2.sprx"), "{err}");
     }
+
+    /// The walk yields every entry in the order given: the image of a
+    /// module that matches, and the divergence of one that does not.
+    #[test]
+    fn the_module_walk_yields_each_entry_in_order_with_its_image_or_divergence() {
+        let dir = mount_with(&[
+            ("sys/a.prx", &prx(b"a")),
+            ("sys/b.prx", &prx(b"b")),
+            ("sys/c.prx", &prx(b"c")),
+        ]);
+        std::fs::write(dir.join("sys/b.prx"), prx(b"changed")).expect("change b");
+        std::fs::remove_file(dir.join("sys/c.prx")).expect("remove c");
+        let mut entries = load_manifest(&dir).expect("manifest").files;
+        entries.reverse();
+        let keys = KeyVault::empty();
+        let walked: Vec<ModuleImage> = module_images(&dir, entries, &keys)
+            .collect::<Result<_, _>>()
+            .expect("every module reads");
+        let names: Vec<&str> = walked.iter().map(|module| module.entry.as_str()).collect();
+        assert_eq!(names, ["sys/c.prx", "sys/b.prx", "sys/a.prx"]);
+        assert_eq!(walked[0].image, Err(ModuleDivergence::Missing));
+        assert_eq!(
+            walked[1].image,
+            Err(ModuleDivergence::Modified {
+                expected: manifest::Sha256(manifest::sha256_of(&prx(b"b"))),
+                found: manifest::Sha256(manifest::sha256_of(&prx(b"changed"))),
+            })
+        );
+        assert_eq!(walked[2].image, Ok(prx(b"a")));
+        assert_eq!(walked[2].path, dir.join("sys").join("a.prx"));
+    }
+
+    /// The walk holds each entry to the mount itself, whoever built the
+    /// entry list.
+    #[test]
+    fn the_module_walk_refuses_an_entry_that_leaves_the_mount() {
+        let dir = mount_with(&[("sys/a.prx", &prx(b"a"))]);
+        let mut entries = load_manifest(&dir).expect("manifest").files;
+        entries[0].path = "../outside.prx".to_string();
+        let keys = KeyVault::empty();
+        let first = module_images(&dir, entries, &keys)
+            .next()
+            .expect("one entry");
+        assert!(
+            matches!(
+                &first,
+                Err(FirmwareVerifyError::UnsafeModulePath { entry, .. }) if entry == "../outside.prx"
+            ),
+            "{first:?}"
+        );
+    }
 }
