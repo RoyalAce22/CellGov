@@ -1,10 +1,17 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use super::validate::valid_spu_citation;
 use super::*;
 
 use cellgov_effects::Effect;
+use cellgov_event::UnitId;
 use cellgov_exec::YieldReason;
-use cellgov_spu::exec::SpuFault;
+use cellgov_spu::exec::{SpuFault, SpuStepOutcome};
 use cellgov_spu::instruction::SpuDecodeError;
+use cellgov_spu::state::{SpuObservableSnapshot, SpuState, SPU_LS_SIZE};
 use cellgov_sync::ReservedLine;
+
+use crate::reference::ReferenceField;
 
 const FIXTURE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),

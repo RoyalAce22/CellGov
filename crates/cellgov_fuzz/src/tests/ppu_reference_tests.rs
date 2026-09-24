@@ -1,9 +1,14 @@
+use std::collections::BTreeSet;
+
+use super::compare::{reference_yield, render_effects};
 use super::*;
 
-use cellgov_effects::FaultKind;
+use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
-use cellgov_exec::FaultRegisterDump;
+use cellgov_exec::{FaultRegisterDump, YieldReason};
 use cellgov_sync::ReservedLine;
+
+use crate::ppu_paths::PpuPathRun;
 
 const FIXTURE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
