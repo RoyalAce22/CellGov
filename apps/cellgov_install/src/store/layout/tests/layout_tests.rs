@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use super::*;
 
 fn title(id: &str) -> TitleId {
