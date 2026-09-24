@@ -2,8 +2,11 @@
 //!
 //! Game-side import parsing lives in [`crate::prx`].
 
+mod exports;
 mod load;
 mod parse;
+mod phdr;
+mod relocated_pointer;
 #[cfg(test)]
 #[path = "tests/test_fixtures.rs"]
 pub(crate) mod test_fixtures;
@@ -17,4 +20,4 @@ pub use parse::{
     module_identity, parse_prx, ParsedPrx, PrxExport, PrxExportLib, PrxOpd, PrxParseError,
     PrxRelocation, PrxSegment,
 };
-pub(crate) use parse::{relocated_pointer_image, RelocatedPointerError};
+pub(crate) use relocated_pointer::{relocated_pointer_image, RelocatedPointerError};

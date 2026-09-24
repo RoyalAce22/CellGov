@@ -3,15 +3,15 @@
 //! Produces a [`ParsedPrx`] that [`crate::sprx::load_prx`] consumes; no
 //! guest-memory dependency lives in this layer.
 
-use std::borrow::Cow;
-
 use cellgov_ps3_abi::format::elf::{
-    ELF64_RELA_SIZE, ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, ET_EXEC, ET_PRX,
-    EXPORT_ATTR_SYSTEM, EXPORT_ENTRY_MIN_SIZE, NID_MODULE_START, NID_MODULE_STOP,
-    PRX_RELOC_NO_VALUE_SEGMENT, PT_LOAD, PT_PRX_RELOC, R_PPC64_ADDR32,
+    ELF64_RELA_SIZE, ELF_HEADER_SIZE, ELF_MAGIC, ET_EXEC, ET_PRX, NID_MODULE_START, NID_MODULE_STOP,
 };
 
 use crate::loader;
+
+use super::exports::{find_system_opd, parse_export_table, parse_module_info};
+use super::phdr::{scan_phdrs, v2f, RawPhdr, SegEntry};
+use super::relocated_pointer::relocate_pointer_slots;
 
 /// Parsed decrypted PRX module ready for loading.
 ///
@@ -107,6 +107,8 @@ pub struct PrxOpd {
 /// - `sym & 0xFF` names the segment to patch.
 /// - `(sym >> 8) & 0xFF` names the segment whose vaddr the `addend` is
 ///   relative to, or [`PRX_RELOC_NO_VALUE_SEGMENT`] for a whole address.
+///
+/// [`PRX_RELOC_NO_VALUE_SEGMENT`]: cellgov_ps3_abi::format::elf::PRX_RELOC_NO_VALUE_SEGMENT
 #[derive(Debug, Clone, Copy)]
 pub struct PrxRelocation {
     /// Offset within the target segment to patch.
@@ -250,245 +252,11 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
     })
 }
 
-struct RawPhdr {
-    #[allow(dead_code)]
-    p_type: u32,
-    p_offset: usize,
-    p_vaddr: u64,
-    p_paddr: u64,
-    p_filesz: u64,
-    p_memsz: u64,
-}
-
-/// Every PT_LOAD in program-header order, plus the PT_PRX_RELOC segment.
-fn scan_phdrs(data: &[u8]) -> Result<(Vec<RawPhdr>, Option<RawPhdr>), PrxParseError> {
-    let phoff = loader::read_u64(data, 32) as usize;
-    let phentsize = loader::read_u16(data, 54) as usize;
-    let phnum = loader::read_u16(data, 56) as usize;
-    // ELF64 phdr is 56 bytes; smaller phentsize would alias entries.
-    if phentsize < 56 {
-        return Err(PrxParseError::OutOfBounds);
-    }
-
-    let mut loads: Vec<RawPhdr> = Vec::new();
-    let mut reloc_phdr: Option<RawPhdr> = None;
-
-    for i in 0..phnum {
-        let base = i
-            .checked_mul(phentsize)
-            .and_then(|off| phoff.checked_add(off))
-            .ok_or(PrxParseError::OutOfBounds)?;
-        let end = base
-            .checked_add(phentsize)
-            .ok_or(PrxParseError::OutOfBounds)?;
-        if end > data.len() {
-            return Err(PrxParseError::OutOfBounds);
-        }
-        let p_type = loader::read_u32(data, base);
-        let phdr = RawPhdr {
-            p_type,
-            p_offset: loader::read_u64(data, base + 8) as usize,
-            p_vaddr: loader::read_u64(data, base + 16),
-            p_paddr: loader::read_u64(data, base + 24),
-            p_filesz: loader::read_u64(data, base + 32),
-            p_memsz: loader::read_u64(data, base + 40),
-        };
-
-        match p_type {
-            PT_LOAD => loads.push(phdr),
-            PT_PRX_RELOC => reloc_phdr = Some(phdr),
-            _ => {}
-        }
-    }
-
-    Ok((loads, reloc_phdr))
-}
-
-struct SegEntry {
-    vaddr: usize,
-    file_offset: usize,
-    size: usize,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct VaddrRange {
-    start: u32,
-    end: u32,
-}
-
-fn v2f(seg_map: &[SegEntry], vaddr: usize) -> Option<usize> {
-    for seg in seg_map {
-        if vaddr >= seg.vaddr && vaddr < seg.vaddr + seg.size {
-            return Some(vaddr - seg.vaddr + seg.file_offset);
-        }
-    }
-    None
-}
-
-/// `data` with every `R_PPC64_ADDR32` slot resolved, for a caller that
-/// reads pointers out of a PRX without parsing one.
-///
-/// Copies the whole file to rewrite the slots. Borrows `data` instead
-/// when the file:
-///
-/// - declares no PT_PRX_RELOC segment,
-/// - declares fewer than two PT_LOADs, as a title executable does,
-/// - carries a program-header table that does not scan.
-///
-/// See `relocate_pointer_slots` for what the raw slot word holds.
-///
-/// # Errors
-///
-/// Returns [`RelocatedPointerError`] when relocation metadata escapes the
-/// file or an ADDR32 pointer-slot rewrite would lose data.
-pub(crate) fn relocated_pointer_image(data: &[u8]) -> Result<Cow<'_, [u8]>, RelocatedPointerError> {
-    if data.len() < ELF_HEADER_SIZE {
-        return Err(RelocatedPointerError::OutOfBounds);
-    }
-    if data[0..4] != ELF_MAGIC || loader::read_u16(data, 16) != ET_PRX {
-        return Ok(Cow::Borrowed(data));
-    }
-    let phentsize = loader::read_u16(data, 54) as usize;
-    if phentsize < ELF_PHENTSIZE {
-        return Err(RelocatedPointerError::BadPhentsize { phentsize });
-    }
-    let Ok((loads, reloc_phdr)) = scan_phdrs(data) else {
-        return Ok(Cow::Borrowed(data));
-    };
-    let Some(reloc_phdr) = reloc_phdr else {
-        return Ok(Cow::Borrowed(data));
-    };
-    if loads.len() < 2 {
-        return Ok(Cow::Borrowed(data));
-    }
-    let relocs =
-        parse_relocations(data, &reloc_phdr).map_err(|_| RelocatedPointerError::OutOfBounds)?;
-    Ok(Cow::Owned(relocate_pointer_slots(data, &loads, &relocs)?))
-}
-
-/// Failure while preparing the relocated metadata view used by import parsing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum RelocatedPointerError {
-    /// A declared relocation segment escapes the file.
-    #[error("declared relocation metadata escapes the file")]
-    OutOfBounds,
-    /// An ELF64 program-header slot is smaller than its fixed layout.
-    #[error("ELF64 program-header slot is {phentsize} bytes, below the required 56 bytes")]
-    BadPhentsize {
-        /// Declared slot size.
-        phentsize: usize,
-    },
-    /// An ADDR32 patch offset is not naturally aligned.
-    #[error("ADDR32 patch offset 0x{offset:x} is not 4-byte aligned")]
-    RelocPatchMisaligned {
-        /// Offset within the target segment.
-        offset: u64,
-    },
-    /// An ADDR32 value needs bits above bit 31.
-    #[error("ADDR32 relocation value 0x{value:x} does not fit in 32 bits")]
-    RelocOverflow {
-        /// Computed relocation value.
-        value: u64,
-    },
-}
-
-struct PointerRelocation {
-    slot: std::ops::Range<usize>,
-    value: u32,
-}
-
-fn pointer_relocation(
-    loads: &[RawPhdr],
-    r: &PrxRelocation,
-) -> Result<Option<PointerRelocation>, RelocatedPointerError> {
-    if r.rtype != R_PPC64_ADDR32 {
-        return Ok(None);
-    }
-    // The loader rejects such an index. Skip the slot so the loader
-    // reports the bad index once.
-    let Some(target) = loads.get((r.sym & 0xFF) as usize) else {
-        return Ok(None);
-    };
-    let Some(value_base) = value_segment_base(loads, r.sym) else {
-        return Ok(None);
-    };
-    if r.offset & 3 != 0 {
-        return Err(RelocatedPointerError::RelocPatchMisaligned { offset: r.offset });
-    }
-    let offset_end = r
-        .offset
-        .checked_add(4)
-        .ok_or(RelocatedPointerError::OutOfBounds)?;
-    // A slot past filesz is BSS: it has no file bytes to rewrite.
-    if offset_end > target.p_filesz {
-        return Ok(None);
-    }
-
-    let slot_start = (target.p_offset as u64)
-        .checked_add(r.offset)
-        .and_then(|slot| usize::try_from(slot).ok())
-        .ok_or(RelocatedPointerError::OutOfBounds)?;
-    let slot_end = slot_start
-        .checked_add(4)
-        .ok_or(RelocatedPointerError::OutOfBounds)?;
-    let value = value_base.wrapping_add(r.addend as u64);
-    if value >> 32 != 0 {
-        return Err(RelocatedPointerError::RelocOverflow { value });
-    }
-
-    Ok(Some(PointerRelocation {
-        slot: slot_start..slot_end,
-        value: value as u32,
-    }))
-}
-
-/// Copy of the file image with every `R_PPC64_ADDR32` slot holding the
-/// PRX-space address it resolves to.
-///
-/// PRX metadata pointers -- module-info, export tables, OPD words,
-/// import tables -- are relocation targets. Some SDK versions store the
-/// bare addend in the slot and let the relocation supply the value
-/// segment's vaddr; others store the sum. A raw read of the first kind
-/// lands short by that vaddr, in the wrong segment.
-///
-/// Only the metadata reads take this image; [`PrxSegment::data`] keeps
-/// the file's own bytes for [`crate::sprx::load_prx`] to relocate
-/// against the real base.
-fn relocate_pointer_slots(
+pub(super) fn extract_segment(
     data: &[u8],
-    loads: &[RawPhdr],
-    relocs: &[PrxRelocation],
-) -> Result<Vec<u8>, RelocatedPointerError> {
-    let mut image = data.to_vec();
-    for r in relocs {
-        let Some(pointer) = pointer_relocation(loads, r)? else {
-            continue;
-        };
-        let bytes = image
-            .get_mut(pointer.slot)
-            .ok_or(RelocatedPointerError::OutOfBounds)?;
-        bytes.copy_from_slice(&pointer.value.to_be_bytes());
-    }
-    Ok(image)
-}
-
-/// PRX-space base for a relocation's addend; zero when `sym` names no
-/// value segment.
-///
-/// Returns `None` when `sym` names a PT_LOAD the module does not
-/// declare, or one with no memory. The loader never allocates a
-/// zero-sized placeholder, so it has no address.
-fn value_segment_base(loads: &[RawPhdr], sym: u32) -> Option<u64> {
-    match (sym >> 8) & 0xFF {
-        PRX_RELOC_NO_VALUE_SEGMENT => Some(0),
-        idx => loads
-            .get(idx as usize)
-            .filter(|l| l.p_memsz > 0)
-            .map(|l| l.p_vaddr),
-    }
-}
-
-fn extract_segment(data: &[u8], phdr: &RawPhdr, index: usize) -> Result<PrxSegment, PrxParseError> {
+    phdr: &RawPhdr,
+    index: usize,
+) -> Result<PrxSegment, PrxParseError> {
     // ELF requires p_memsz >= p_filesz. The loader sizes its region
     // check against memsz, so filesz > memsz would write past the
     // validated range.
@@ -511,259 +279,11 @@ fn extract_segment(data: &[u8], phdr: &RawPhdr, index: usize) -> Result<PrxSegme
     })
 }
 
-/// Parse `sys_prx_module_info_t` at `file_off`.
-///
-/// Layout: `+0` u16 attrs, `+2` u8[2] version, `+4` char[28] name, `+32` u32
-/// toc, `+36/+40` u32 exports_{start,end} (vaddr), `+44/+48` u32
-/// imports_{start,end} (vaddr).
-fn parse_module_info(
-    data: &[u8],
-    file_off: usize,
-) -> Result<(String, u32, VaddrRange, VaddrRange), PrxParseError> {
-    let end = file_off
-        .checked_add(52)
-        .ok_or(PrxParseError::NoModuleInfo)?;
-    if end > data.len() {
-        return Err(PrxParseError::NoModuleInfo);
-    }
-    let name_bytes = &data[file_off + 4..file_off + 32];
-    let name_end = name_bytes.iter().position(|&b| b == 0).unwrap_or(28);
-    let raw = &name_bytes[..name_end];
-    // Printable ASCII + space only; ASCII control bytes in a module
-    // name would corrupt diagnostic strings downstream.
-    if raw.is_empty() || !raw.iter().all(|&b| b.is_ascii_graphic() || b == b' ') {
-        return Err(PrxParseError::NoModuleInfo);
-    }
-    let name = std::str::from_utf8(raw)
-        .map_err(|_| PrxParseError::NoModuleInfo)?
-        .to_owned();
-
-    let toc = loader::read_u32(data, file_off + 32);
-    let exp_start = loader::read_u32(data, file_off + 36);
-    let exp_end = loader::read_u32(data, file_off + 40);
-    let imp_start = loader::read_u32(data, file_off + 44);
-    let imp_end = loader::read_u32(data, file_off + 48);
-
-    Ok((
-        name,
-        toc,
-        VaddrRange {
-            start: exp_start,
-            end: exp_end,
-        },
-        VaddrRange {
-            start: imp_start,
-            end: imp_end,
-        },
-    ))
-}
-
-/// Walk the export table, returning every non-system library.
-fn parse_export_table(
-    data: &[u8],
-    seg_map: &[SegEntry],
-    range: VaddrRange,
-) -> Result<Vec<PrxExportLib>, PrxParseError> {
-    if range.start >= range.end {
-        return Ok(Vec::new());
-    }
-    let size = (range.end - range.start) as usize;
-    if size > 0x10000 {
-        return Err(PrxParseError::OutOfBounds);
-    }
-
-    let start_foff = v2f(seg_map, range.start as usize).ok_or(PrxParseError::OutOfBounds)?;
-    // range.end is exclusive; v2f's strict-less-than would reject a table
-    // whose end touches its segment boundary, so derive end_foff from size.
-    let end_foff = start_foff + size;
-
-    let mut libs = Vec::new();
-    let mut pos = start_foff;
-
-    while pos < end_foff {
-        if pos >= data.len() {
-            break;
-        }
-        let entry_size = data[pos];
-        if entry_size < EXPORT_ENTRY_MIN_SIZE {
-            break;
-        }
-        let entry_size = entry_size as usize;
-        if pos + entry_size > data.len() {
-            return Err(PrxParseError::OutOfBounds);
-        }
-
-        let attrs = loader::read_u16(data, pos + 4);
-        let num_func = loader::read_u16(data, pos + 6) as usize;
-        let num_var = loader::read_u16(data, pos + 8) as usize;
-        let lib_name_ptr = loader::read_u32(data, pos + 16);
-        let nid_table_ptr = loader::read_u32(data, pos + 20);
-        let stub_table_ptr = loader::read_u32(data, pos + 24);
-
-        if (attrs & EXPORT_ATTR_SYSTEM) == 0 {
-            let lib_name = if lib_name_ptr != 0 {
-                read_cstring(data, seg_map, lib_name_ptr as usize)
-            } else {
-                String::new()
-            };
-
-            let total = num_func + num_var;
-            let (functions, variables) = read_export_entries(
-                data,
-                seg_map,
-                nid_table_ptr,
-                stub_table_ptr,
-                num_func,
-                total,
-            )?;
-
-            libs.push(PrxExportLib {
-                name: lib_name,
-                attrs,
-                functions,
-                variables,
-            });
-        }
-
-        pos += entry_size;
-    }
-
-    Ok(libs)
-}
-
-/// Read the NID and stub tables into `(functions, variables)`.
-///
-/// Entries at `[0, num_func)` are functions; the remainder are variables.
-fn read_export_entries(
-    data: &[u8],
-    seg_map: &[SegEntry],
-    nid_ptr: u32,
-    stub_ptr: u32,
-    num_func: usize,
-    total: usize,
-) -> Result<(Vec<PrxExport>, Vec<PrxExport>), PrxParseError> {
-    // Short-circuit on nid_ptr == 0 OR stub_ptr == 0; the latter
-    // would otherwise resolve `v2f(0)` to the text segment's file
-    // offset (when text vaddr starts at 0) and read instruction
-    // bytes as stub vaddrs, binding exports to spurious in-text
-    // addresses.
-    if total == 0 || nid_ptr == 0 || stub_ptr == 0 {
-        return Ok((Vec::new(), Vec::new()));
-    }
-
-    let nid_foff = v2f(seg_map, nid_ptr as usize).ok_or(PrxParseError::OutOfBounds)?;
-    let stub_foff = v2f(seg_map, stub_ptr as usize).ok_or(PrxParseError::OutOfBounds)?;
-
-    let mut functions = Vec::with_capacity(num_func);
-    let mut variables = Vec::with_capacity(total - num_func);
-
-    for i in 0..total {
-        let n_off = nid_foff + i * 4;
-        let s_off = stub_foff + i * 4;
-        if n_off + 4 > data.len() || s_off + 4 > data.len() {
-            return Err(PrxParseError::OutOfBounds);
-        }
-        let nid = loader::read_u32(data, n_off);
-        let vaddr = loader::read_u32(data, s_off);
-        let entry = PrxExport { nid, vaddr };
-        if i < num_func {
-            functions.push(entry);
-        } else {
-            variables.push(entry);
-        }
-    }
-
-    Ok((functions, variables))
-}
-
-/// Find the OPD for a well-known NID in the system export entry.
-fn find_system_opd(
-    data: &[u8],
-    seg_map: &[SegEntry],
-    exports_range: &VaddrRange,
-    target_nid: u32,
-) -> Result<Option<PrxOpd>, PrxParseError> {
-    if exports_range.start >= exports_range.end {
-        return Ok(None);
-    }
-
-    let start_foff =
-        v2f(seg_map, exports_range.start as usize).ok_or(PrxParseError::OutOfBounds)?;
-    // See [`parse_export_table`] for why end_foff comes from size, not v2f.
-    let end_foff = start_foff + (exports_range.end - exports_range.start) as usize;
-
-    let mut pos = start_foff;
-    while pos < end_foff {
-        if pos >= data.len() {
-            break;
-        }
-        let entry_size = data[pos];
-        if entry_size < EXPORT_ENTRY_MIN_SIZE {
-            break;
-        }
-        let entry_size = entry_size as usize;
-        if pos + entry_size > data.len() {
-            break;
-        }
-
-        let attrs = loader::read_u16(data, pos + 4);
-        if (attrs & EXPORT_ATTR_SYSTEM) != 0 {
-            let num_func = loader::read_u16(data, pos + 6) as usize;
-            let nid_table_ptr = loader::read_u32(data, pos + 20);
-            let stub_table_ptr = loader::read_u32(data, pos + 24);
-
-            // Same hole as `read_export_entries`: a system export
-            // entry with stub_table_ptr = 0 would resolve stub_foff
-            // to the text segment's file offset and read instruction
-            // bytes as OPD vaddrs.
-            if nid_table_ptr != 0 && stub_table_ptr != 0 {
-                let nid_foff =
-                    v2f(seg_map, nid_table_ptr as usize).ok_or(PrxParseError::OutOfBounds)?;
-                let stub_foff =
-                    v2f(seg_map, stub_table_ptr as usize).ok_or(PrxParseError::OutOfBounds)?;
-
-                for i in 0..num_func {
-                    let n_off = nid_foff + i * 4;
-                    if n_off + 4 > data.len() {
-                        break;
-                    }
-                    let nid = loader::read_u32(data, n_off);
-                    if nid == target_nid {
-                        let opd_vaddr = loader::read_u32(data, stub_foff + i * 4) as usize;
-                        let opd_foff = v2f(seg_map, opd_vaddr).ok_or(PrxParseError::OutOfBounds)?;
-                        if opd_foff + 8 > data.len() {
-                            return Err(PrxParseError::OutOfBounds);
-                        }
-                        let code = loader::read_u32(data, opd_foff);
-                        let toc = loader::read_u32(data, opd_foff + 4);
-                        // Shipping firmware allows code = 0 (entry at
-                        // start of text) but always sets toc. toc = 0
-                        // is the corrupt-OPD signature; accepting it
-                        // would publish an entry whose first
-                        // GOT-relative load faults. `parse_real_liblv2`
-                        // (code=0, toc=0x1c620) is the regression
-                        // anchor for this branch.
-                        if toc == 0 {
-                            return Ok(None);
-                        }
-                        return Ok(Some(PrxOpd {
-                            opd_vaddr: opd_vaddr as u32,
-                            code,
-                            toc,
-                        }));
-                    }
-                }
-            }
-        }
-
-        pos += entry_size;
-    }
-
-    Ok(None)
-}
-
 /// Parse RELA entries from the 0x700000A4 relocation segment.
-fn parse_relocations(data: &[u8], phdr: &RawPhdr) -> Result<Vec<PrxRelocation>, PrxParseError> {
+pub(super) fn parse_relocations(
+    data: &[u8],
+    phdr: &RawPhdr,
+) -> Result<Vec<PrxRelocation>, PrxParseError> {
     let start = phdr.p_offset;
     let size = phdr.p_filesz as usize;
     // Both fields are unvalidated header words from an arbitrary file:
@@ -795,7 +315,7 @@ fn parse_relocations(data: &[u8], phdr: &RawPhdr) -> Result<Vec<PrxRelocation>, 
     Ok(relocs)
 }
 
-fn read_cstring(data: &[u8], seg_map: &[SegEntry], vaddr: usize) -> String {
+pub(super) fn read_cstring(data: &[u8], seg_map: &[SegEntry], vaddr: usize) -> String {
     // 256 is comfortably above any real PRX library / module name
     // and consistent with ELF SHT_STRTAB conventions. A corrupt
     // name pointer that aims at unterminated bytes would otherwise
@@ -825,10 +345,6 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/module_identity_tests.rs"]
 mod module_identity_tests;
-
-#[cfg(test)]
-#[path = "tests/relocated_pointer_tests.rs"]
-mod relocated_pointer_tests;
 
 #[cfg(test)]
 #[path = "tests/placeholder_segment_tests.rs"]
