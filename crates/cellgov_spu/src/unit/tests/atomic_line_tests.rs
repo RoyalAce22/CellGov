@@ -5,7 +5,8 @@
 //! address. Nothing refuses a misaligned address, so a guest that writes
 //! one gets the containing line.
 
-use crate::{SpuExecutionUnit, FAULT_MFC_READ_UNRESOLVED};
+use crate::fault_codes::FAULT_MFC_READ_UNRESOLVED;
+use crate::SpuExecutionUnit;
 use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};

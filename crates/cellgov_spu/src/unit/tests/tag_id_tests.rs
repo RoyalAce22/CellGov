@@ -8,7 +8,8 @@
 //! the shift panics a debug host, and under `--release` it wraps onto a
 //! tag group the guest never named.
 
-use crate::{SpuExecutionUnit, FAULT_MFC_TAG_ID_OUT_OF_RANGE};
+use crate::fault_codes::FAULT_MFC_TAG_ID_OUT_OF_RANGE;
+use crate::SpuExecutionUnit;
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};

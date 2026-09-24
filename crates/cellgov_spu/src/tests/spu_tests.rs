@@ -1,8 +1,12 @@
 //! Cross-cutting SPU execution-unit lifecycle -- run-until-yield, budgets, faults, and snapshots.
 
 use super::*;
-use cellgov_exec::ExecutionContext;
+use crate::fault_codes::{FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE};
+use cellgov_effects::FaultKind;
+use cellgov_event::UnitId;
+use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::GuestMemory;
+use cellgov_time::{Budget, InstructionCost};
 
 /// Read a micro-test build artifact.
 pub(crate) fn microtest_elf<P: AsRef<std::path::Path>>(path: P) -> Vec<u8> {
@@ -100,7 +104,7 @@ fn lqa_past_a_short_local_store_faults() {
         // was masked this path produced 0x0003_FFF8, whose class field
         // reads as FAULT_UNSUPPORTED_CHANNEL, and a one-bit test passed
         // against it anyway.
-        assert_eq!(code & !crate::FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE);
+        assert_eq!(code & !FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE);
     } else {
         panic!(
             "expected Guest(FAULT_LS_OUT_OF_RANGE) fault, got {:?}",

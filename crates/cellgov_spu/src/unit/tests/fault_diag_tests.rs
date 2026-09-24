@@ -1,10 +1,10 @@
 //! An address-bearing SPU fault carries its address whole in
 //! `faulting_ea`.
 
-use crate::{
-    SpuExecutionUnit, FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_GET_UNRESOLVED,
-    FAULT_MFC_READ_UNRESOLVED,
+use crate::fault_codes::{
+    FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_GET_UNRESOLVED, FAULT_MFC_READ_UNRESOLVED,
 };
+use crate::SpuExecutionUnit;
 use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, YieldReason};

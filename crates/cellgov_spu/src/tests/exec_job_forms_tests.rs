@@ -357,7 +357,8 @@ fn rchcnt_on_an_unmodeled_channel_faults_by_name() {
 
 #[test]
 fn a_refused_rchcnt_faults_in_its_own_class_not_the_rdch_one() {
-    use crate::{SpuExecutionUnit, FAULT_UNSUPPORTED_CHANNEL, FAULT_UNSUPPORTED_CHANNEL_COUNT};
+    use crate::fault_codes::{FAULT_UNSUPPORTED_CHANNEL, FAULT_UNSUPPORTED_CHANNEL_COUNT};
+    use crate::SpuExecutionUnit;
     use cellgov_effects::FaultKind;
     use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
     use cellgov_mem::GuestMemory;

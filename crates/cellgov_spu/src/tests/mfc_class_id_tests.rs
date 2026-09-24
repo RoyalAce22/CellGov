@@ -6,7 +6,8 @@
 //! that carries a class id, which is what the channel exists to let a
 //! guest set.
 
-use crate::{SpuExecutionUnit, FAULT_LS_OUT_OF_RANGE, FAULT_UNSUPPORTED_MFC_CMD};
+use crate::fault_codes::{FAULT_LS_OUT_OF_RANGE, FAULT_UNSUPPORTED_MFC_CMD};
+use crate::SpuExecutionUnit;
 use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};

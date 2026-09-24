@@ -13,12 +13,13 @@
 //! class survives the widest detail its field allows, and that the list
 //! the check reads names the classes the code actually raises.
 
-use crate::exec::SpuFault;
-use crate::{
-    SpuExecutionUnit, EVERY_FAULT_CLASS, FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE,
+use super::{
+    guest_fault_for, EVERY_FAULT_CLASS, FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE,
     FAULT_MFC_TAG_ID_OUT_OF_RANGE, FAULT_UNSUPPORTED_CHANNEL, FAULT_UNSUPPORTED_CHANNEL_COUNT,
     FAULT_UNSUPPORTED_MFC_CMD,
 };
+use crate::exec::SpuFault;
+use crate::SpuExecutionUnit;
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
@@ -30,7 +31,7 @@ const UNIT: u64 = 7;
 const MEM_BYTES: usize = 0x2000;
 
 fn code_for(fault: SpuFault) -> u32 {
-    match crate::guest_fault_for(fault) {
+    match guest_fault_for(fault) {
         FaultKind::Guest(code) => code,
         other => panic!("expected a guest fault, got {other:?}"),
     }

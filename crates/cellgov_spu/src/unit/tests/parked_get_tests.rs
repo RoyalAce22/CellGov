@@ -6,7 +6,8 @@
 //! and the tag bit stays clear: it is the guest's only signal that the
 //! transfer finished.
 
-use crate::{SpuExecutionUnit, FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_GET_UNRESOLVED};
+use crate::fault_codes::{FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_GET_UNRESOLVED};
+use crate::SpuExecutionUnit;
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
