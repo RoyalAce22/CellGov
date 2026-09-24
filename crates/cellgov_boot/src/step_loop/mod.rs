@@ -14,6 +14,7 @@ mod driver;
 mod ring;
 mod timing;
 mod verdict;
+mod witnesses;
 
 pub(crate) mod tty;
 
@@ -34,3 +35,4 @@ pub use driver::{step_loop, step_loop_ends_at};
 pub use ring::{PcRing, Ring, SyscallRing};
 pub use timing::{compute_untracked, pct, StepTiming};
 pub use verdict::rsx_checkpoint_addr;
+pub use witnesses::{BenchWitnesses, FinalUnit};

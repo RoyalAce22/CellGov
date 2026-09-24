@@ -13,7 +13,6 @@ mod runs;
 mod spawn;
 mod throughput;
 mod types;
-mod witnesses;
 
 #[cfg(test)]
 #[path = "tests/test_fixtures.rs"]

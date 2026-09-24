@@ -6,11 +6,10 @@ use std::time::Instant;
 use cellgov_compare::bench::{format_bench_result, BenchBootResult};
 
 use super::options::BenchOptions;
-use super::witnesses::print_witness_block;
 use cellgov_boot::prepare::{
     prepare, BootServices, DiagnosticOptions, ExecutionOptions, PrepareOptions, TitleOptions,
 };
-use cellgov_boot::step_loop::bench_step_loop;
+use cellgov_boot::step_loop::{bench_step_loop, BenchWitnesses};
 
 /// Carries a measured boot refusal to the command boundary.
 #[derive(Debug, thiserror::Error)]
@@ -126,7 +125,9 @@ fn bench_boot(
     progress.finished();
 
     warn_first_invariant_break(&rt, sink.as_ref());
-    print_witness_block(&rt, authid_source);
+    for line in BenchWitnesses::read(&rt, authid_source).lines() {
+        eprintln!("{line}");
+    }
 
     // After the witness block: the write is host I/O, and a reader
     // that scrapes stderr must not have to wait on a disk.

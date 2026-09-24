@@ -197,8 +197,9 @@ const LINE_TABLE: &[LineSpec] = &[
 /// A line belongs here when its key set varies by run (an inventory
 /// keyed by code, site, path, or key), when it repeats within one
 /// boot, or when it is suppressed on the quiet path so a baseline
-/// could not hold it `Absent`. The gate in the CLI's bench tests
-/// holds every emitted line to one of the two tables.
+/// could not hold it `Absent`. A test beside the writer in
+/// `cellgov_boot::step_loop` holds every emitted line to one of the two
+/// tables.
 const DIAGNOSTIC_LINES: &[(&str, &str)] = &[
     (
         "BENCH_HOST_INVARIANT_BREAK_SITES:",
