@@ -9,13 +9,16 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
-use std::str::FromStr;
 
+use cellgov_compare::bench::{
+    anchor_from_measurement, load_anchor, parse_bench_result, AnchorLoadError, AnchorMeasurement,
+    ParseBenchError,
+};
 use cellgov_compare::boot_history::{self, BootHistoryEntry};
 use cellgov_compare::runner_cellgov::BootOutcome;
 use cellgov_compare::witness_parse::parse_witness_lines;
 use cellgov_compare::witness_parse::UnsupportedSyscallWitness;
-use cellgov_compare::witnesses::{record, BOOT_STARTED_SENTINEL, TITLE_NOT_INSTALLED_SENTINEL};
+use cellgov_compare::witnesses::{BOOT_STARTED_SENTINEL, TITLE_NOT_INSTALLED_SENTINEL};
 use cellgov_compare::{BootSummary, RunIdentity, RUN_IDENTITY_SENTINEL};
 use cellgov_terminal::caps::RenderFlags;
 use cellgov_terminal::progress::{ProgressBar, ProgressSink as _};
@@ -29,7 +32,7 @@ use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
 use cellgov_boot::manifest::{CellKey, BASE_GAME_VER};
 
-use crate::paths::{boot_anchor_path, checkpoint_kind, history_path, workspace_root};
+use crate::paths::{boot_anchor_path, history_path, workspace_root};
 use crate::progress::RECORD_ANCHORS_TASK;
 
 use crate::cli::parse::RecordAnchorsArgs;
@@ -42,19 +45,8 @@ struct Measurement {
     unsupported_syscalls: BTreeMap<u64, UnsupportedSyscallWitness>,
     steps: u64,
     budget: Budget,
-    outcome: String,
+    outcome: BootOutcome,
     identity: RunIdentity,
-}
-
-/// One `u64` field of the `BENCH_RESULT` line.
-fn parse_result_field(job: &Job, name: &str, value: &str) -> Result<u64, CommandError> {
-    value.parse().map_err(|error| {
-        CommandError::failed(format!(
-            "{}: BENCH_RESULT {name}={value:?} did not parse: {e}",
-            job.label(),
-            e = error,
-        ))
-    })
 }
 
 /// The `version` a run's identity carries for a cell's game-version
@@ -175,41 +167,21 @@ fn measure(job: &Job) -> Result<Option<Measurement>, CommandError> {
         ))
     })?;
 
-    let mut results = stdout.lines().filter(|l| l.starts_with("BENCH_RESULT"));
-    let result = results
-        .next()
-        .ok_or_else(|| CommandError::failed(format!("{}: no BENCH_RESULT line", job.label())))?;
-    // One boot prints the line once. Two lines mean two runs' output
-    // reached one pipe, and neither can be attributed -- the same
-    // reason a repeated RUN_IDENTITY line is refused.
-    if results.next().is_some() {
-        return Err(CommandError::failed(format!(
+    let parsed = parse_bench_result(&stdout).map_err(|error| match error {
+        // One boot prints the line once. Two lines mean two runs'
+        // output reached one pipe, and neither can be attributed -- the
+        // same reason a repeated RUN_IDENTITY line is refused.
+        ParseBenchError::DuplicateResultLine => CommandError::failed(format!(
             "{}: more than one BENCH_RESULT line; refusing to record from output that \
              cannot be attributed to one run",
             job.label()
-        )));
+        )),
+        other => CommandError::failed(format!("{}: {other}", job.label())),
+    })?;
+    for warning in &parsed.warnings {
+        eprintln!("{}: warning: {warning}", job.label());
     }
-    let mut steps = None;
-    let mut budget = None;
-    let mut outcome = None;
-    for tok in result.split_whitespace() {
-        if let Some(v) = tok.strip_prefix("steps=") {
-            steps = Some(parse_result_field(job, "steps", v)?);
-        } else if let Some(v) = tok.strip_prefix("budget=") {
-            budget = Some(parse_result_field(job, "budget", v)?);
-        } else if let Some(v) = tok.strip_prefix("outcome=") {
-            outcome = Some(v.to_string());
-        }
-    }
-    let steps = steps.ok_or_else(|| {
-        CommandError::failed(format!("{}: BENCH_RESULT has no steps=", job.label()))
-    })?;
-    let budget = budget.ok_or_else(|| {
-        CommandError::failed(format!("{}: BENCH_RESULT has no budget=", job.label()))
-    })?;
-    let outcome = outcome.ok_or_else(|| {
-        CommandError::failed(format!("{}: BENCH_RESULT has no outcome=", job.label()))
-    })?;
+    let result = parsed.result;
     // The boot prints the line even when the store names nothing, with
     // an empty payload. A missing line therefore means the child was
     // not this binary, or its stderr never arrived.
@@ -236,9 +208,9 @@ fn measure(job: &Job) -> Result<Option<Measurement>, CommandError> {
     Ok(Some(Measurement {
         witnesses: witnesses.values,
         unsupported_syscalls: witnesses.unsupported_syscalls,
-        steps,
-        budget: Budget::new(budget),
-        outcome,
+        steps: result.steps as u64,
+        budget: result.budget,
+        outcome: result.outcome,
         identity,
     }))
 }
@@ -264,26 +236,16 @@ fn read_history(path: &Path) -> Result<String, CommandError> {
 /// Only an absent file means "never recorded". An unreadable or
 /// unparseable one names itself.
 fn read_previous_anchor(job: &Job, path: &Path) -> Result<Option<BootSummary>, CommandError> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(CommandError::failed(format!(
-                "{}: read {}: {e}; refusing to treat an unreadable anchor as absent",
-                job.label(),
-                path.display(),
-                e = error,
-            )))
-        }
-    };
-    serde_json::from_str(&text).map(Some).map_err(|error| {
-        CommandError::failed(format!(
-            "{}: parse {}: {e}; the anchor exists but is malformed. Repair it rather than \
+    load_anchor(path).map_err(|error| match error {
+        AnchorLoadError::Read { .. } => CommandError::failed(format!(
+            "{}: {error}; refusing to treat an unreadable anchor as absent",
+            job.label(),
+        )),
+        AnchorLoadError::Parse { .. } => CommandError::failed(format!(
+            "{}: {error}; the anchor exists but is malformed. Repair it rather than \
              letting this run recreate it without its recorded witness classes.",
             job.label(),
-            path.display(),
-            e = error,
-        ))
+        )),
     })
 }
 
@@ -296,7 +258,7 @@ fn record_one(job: &Job, strict: bool) -> Result<bool, CommandError> {
         unsupported_syscalls,
         steps,
         budget,
-        outcome,
+        outcome: measured_outcome,
         identity,
     }) = measure(job)?
     else {
@@ -325,6 +287,9 @@ fn record_one(job: &Job, strict: bool) -> Result<bool, CommandError> {
     let existing_history = read_history(&hist_path)?;
     let history_entries = boot_history::parse(&existing_history)
         .map_err(|error| CommandError::failed(format!("parse {}: {error}", hist_path.display())))?;
+    // The history spells an outcome the way `BootOutcome`'s `FromStr`
+    // reads it back: its Display form.
+    let outcome = measured_outcome.to_string();
     let history_entry = BootHistoryEntry::new_if_changed(
         history_entries.last(),
         steps,
@@ -333,19 +298,17 @@ fn record_one(job: &Job, strict: bool) -> Result<bool, CommandError> {
         identity.clone(),
     );
 
-    let outcome_parsed = BootOutcome::from_str(&outcome).map_err(|error| {
-        CommandError::failed(format!(
-            "{}: outcome {outcome:?} did not parse: {e}",
-            job.label(),
-            e = error,
-        ))
-    })?;
-    let mut summary = BootSummary::new_with_breaks(
-        checkpoint_kind(job.checkpoint),
-        outcome_parsed,
-        steps,
-        budget,
-        witnesses.get("host_invariant_breaks").copied().unwrap_or(0),
+    let summary = anchor_from_measurement(
+        previous.as_ref(),
+        AnchorMeasurement {
+            checkpoint: job.checkpoint.kind(),
+            outcome: measured_outcome,
+            steps,
+            budget,
+            witnesses,
+            unsupported_syscalls,
+            identity,
+        },
     )
     .map_err(|error| {
         CommandError::failed(format!(
@@ -354,9 +317,6 @@ fn record_one(job: &Job, strict: bool) -> Result<bool, CommandError> {
             e = error,
         ))
     })?;
-    summary.witnesses = record(previous.as_ref().map(|p| &p.witnesses), &witnesses);
-    summary.unsupported_syscalls = unsupported_syscalls;
-    summary.identity = identity;
 
     let dir = path.parent().ok_or_else(|| {
         CommandError::failed(format!("{} has no parent directory", path.display()))

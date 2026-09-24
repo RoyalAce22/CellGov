@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::*;
-use cellgov_boot::manifest::{CellExpectation, MatrixCell};
+use cellgov_boot::manifest::{CellExpectation, CheckpointTrigger, MatrixCell};
 
 fn key(fw: &str, game_ver: Option<&str>) -> CellKey {
     CellKey {
@@ -86,16 +86,10 @@ fn a_cell_override_wins_over_the_title_default_and_the_recorder_default() {
     assert_eq!(cell_max_steps(&title, None), 7_000);
     assert_eq!(cell_max_steps(&title, Some(&cell(Some(250), None))), 250);
     assert_eq!(
-        cell_checkpoint(
-            &title,
-            Some(&cell(None, Some(CheckpointTrigger::FirstRsxWrite)))
-        ),
+        title.cell_checkpoint(Some(&cell(None, Some(CheckpointTrigger::FirstRsxWrite)))),
         CheckpointTrigger::FirstRsxWrite
     );
-    assert_eq!(
-        cell_checkpoint(&title, None),
-        CheckpointTrigger::ProcessExit
-    );
+    assert_eq!(title.cell_checkpoint(None), CheckpointTrigger::ProcessExit);
 
     let mut bare = manifest();
     bare.bench_max_steps = None;
@@ -108,7 +102,7 @@ fn a_cell_declaring_no_override_falls_back_to_the_title() {
     let plain = cell(None, None);
     assert_eq!(cell_max_steps(&title, Some(&plain)), 7_000);
     assert_eq!(
-        cell_checkpoint(&title, Some(&plain)),
+        title.cell_checkpoint(Some(&plain)),
         CheckpointTrigger::ProcessExit
     );
 

@@ -12,9 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_compare::CheckpointKind;
-
-use cellgov_boot::manifest::{CellKey, CheckpointTrigger, MatrixCell, TitleManifest};
+use cellgov_boot::manifest::{CellKey, MatrixCell, TitleManifest};
 
 /// Instruction cap a cell is measured under when neither it nor its
 /// title declares one.
@@ -32,26 +30,6 @@ pub(crate) fn cell_max_steps(title: &TitleManifest, cell: Option<&MatrixCell>) -
     cell.and_then(|c| c.bench_max_steps)
         .or(title.bench_max_steps)
         .unwrap_or(DEFAULT_BENCH_MAX_STEPS)
-}
-
-/// Checkpoint `cell` is recorded and gated under.
-pub(crate) fn cell_checkpoint(
-    title: &TitleManifest,
-    cell: Option<&MatrixCell>,
-) -> CheckpointTrigger {
-    cell.and_then(|c| c.checkpoint)
-        .unwrap_or_else(|| title.checkpoint_trigger())
-}
-
-/// The wire form an anchor records a checkpoint in.
-pub(crate) fn checkpoint_kind(cp: CheckpointTrigger) -> CheckpointKind {
-    match cp {
-        CheckpointTrigger::ProcessExit => CheckpointKind::ProcessExit,
-        CheckpointTrigger::FirstRsxWrite => CheckpointKind::FirstRsxWrite,
-        CheckpointTrigger::Pc(addr) => CheckpointKind::Pc {
-            addr: cellgov_mem::GuestAddr::new(addr),
-        },
-    }
 }
 
 /// Compiled-in workspace root.

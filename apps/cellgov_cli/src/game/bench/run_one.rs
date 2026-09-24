@@ -3,9 +3,9 @@
 
 use std::time::Instant;
 
+use cellgov_compare::bench::{format_bench_result, BenchBootResult};
+
 use super::options::BenchOptions;
-use super::result_line::format_bench_result;
-use super::types::BenchBootResult;
 use super::witnesses::print_witness_block;
 use cellgov_boot::prepare::{
     prepare, BootServices, DiagnosticOptions, ExecutionOptions, PrepareOptions, TitleOptions,

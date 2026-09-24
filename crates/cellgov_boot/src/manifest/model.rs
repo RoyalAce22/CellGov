@@ -316,6 +316,14 @@ impl TitleManifest {
         self.matrix.iter().find(|c| c.key == *key)
     }
 
+    /// Where a run of `cell` stops: the cell's own checkpoint, else the
+    /// title's. `dev record-anchors` records an anchor at this stop
+    /// condition, and the gate holds a run there.
+    pub fn cell_checkpoint(&self, cell: Option<&MatrixCell>) -> CheckpointTrigger {
+        cell.and_then(|c| c.checkpoint)
+            .unwrap_or_else(|| self.checkpoint_trigger())
+    }
+
     /// Whether the RSX region is writable for this title; see field doc.
     pub fn rsx_mirror(&self) -> bool {
         self.rsx_mirror

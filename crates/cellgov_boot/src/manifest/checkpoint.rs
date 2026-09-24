@@ -53,6 +53,18 @@ impl CheckpointTrigger {
             Self::Pc(addr) => format!("pc=0x{addr:x}"),
         }
     }
+
+    /// The wire form an anchor records this stop condition in.
+    pub fn kind(self) -> cellgov_compare::CheckpointKind {
+        use cellgov_compare::CheckpointKind;
+        match self {
+            Self::ProcessExit => CheckpointKind::ProcessExit,
+            Self::FirstRsxWrite => CheckpointKind::FirstRsxWrite,
+            Self::Pc(addr) => CheckpointKind::Pc {
+                addr: cellgov_mem::GuestAddr::new(addr),
+            },
+        }
+    }
 }
 
 /// Shared between `--checkpoint pc=...` and manifest `pc = "..."`.

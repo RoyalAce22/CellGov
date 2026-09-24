@@ -22,7 +22,7 @@ use super::exit_codes;
 use super::parse::{BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector};
 use super::self_load::{LoadPpuImageError, LoadedPpuImage};
 use super::title::{resolve_ps3_vfs_root, resolve_title_manifest};
-use crate::paths::{cell_checkpoint, cell_max_steps};
+use crate::paths::cell_max_steps;
 
 /// The `sys/external` modules inside a firmware entry, relative to the
 /// entry's `dev_flash` mount.
@@ -575,7 +575,7 @@ impl ResolvedPlan {
         let declared = cell.as_ref().and_then(|k| title.cell(k));
         Self {
             max_steps: cell_max_steps(title, declared),
-            checkpoint: cell_checkpoint(title, declared),
+            checkpoint: title.cell_checkpoint(declared),
             cell,
         }
     }

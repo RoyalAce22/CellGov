@@ -1,14 +1,17 @@
 //! The `boot bench` run set: N subprocess measurements, the gate over
 //! what they must reproduce, and the report they print.
 
-use super::anchor::{check_anchor, incomparable_reasons, AnchorVerdict, MeasuredRun};
-use super::divergence::{determinism_disagreements, locate_divergence};
+use cellgov_compare::bench::{
+    classify_runs, determinism_disagreements, AnchorVerdict, BenchBootResult, BenchGate,
+    MeasuredRun,
+};
+
+use super::anchor::{check_anchor, incomparable_reasons};
+use super::divergence::locate_divergence;
 use super::options::BenchOptions;
 use super::spawn::{spawn_one_run, SpawnError};
-use super::throughput::{
-    print_throughput, throughput_verdict, ThroughputPolicy, ThroughputVerdict,
-};
-use super::types::{BenchBootResult, BenchGate, BenchRunsOutcome};
+use super::throughput::{print_throughput, throughput_verdict, ThroughputPolicy};
+use super::types::BenchRunsOutcome;
 use cellgov_boot::manifest::CellKey;
 
 /// Run [`bench_boot_one_run`](super::bench_boot_one_run) `policy.runs` times in separate
@@ -65,7 +68,7 @@ pub fn bench_boot_runs(
         progress.advanced(1);
         progress.item_finished();
         println!(
-            "  run {}: steps={} wall_ms={:.3} steps_per_sec={:.0} outcome={}",
+            "  run {}: steps={} wall_ms={:.3} steps_per_sec={} outcome={}",
             index + 1,
             result.steps,
             result.wall.as_secs_f64() * 1e3,
@@ -104,10 +107,13 @@ pub fn bench_boot_runs(
                 &opts.title.content_id,
                 cell,
                 &MeasuredRun {
-                    checkpoint: opts.checkpoint_override.unwrap_or(opts.plan.checkpoint),
+                    checkpoint: opts
+                        .checkpoint_override
+                        .unwrap_or(opts.plan.checkpoint)
+                        .kind(),
                     steps: first.steps as u64,
                     budget: first.budget,
-                    outcome: first.outcome.to_string(),
+                    outcome: first.outcome,
                     stderr: &streams[0],
                 },
             ),
@@ -149,7 +155,12 @@ pub fn bench_boot_runs(
 
     let throughput = throughput_verdict(&runs);
     print_throughput(throughput, policy);
-    let gate = classify_runs(&determinism_failures, &anchor, throughput, policy);
+    let gate = classify_runs(
+        &determinism_failures,
+        &anchor,
+        throughput.is_measured(),
+        policy.strict,
+    );
     progress.finished();
     if gate == BenchGate::DeterminismBreak {
         println!("  determinism: BREAK");
@@ -168,32 +179,3 @@ pub fn bench_boot_runs(
         determinism_failures,
     })
 }
-
-/// Order matters. A determinism break makes the witness stream
-/// meaningless. An anchor disagreement outranks the throughput
-/// verdict, so a contended host cannot mask a real regression behind a
-/// timing failure.
-///
-/// Throughput reaches the gate only under `policy.strict`: a busy host
-/// inflates the spread of a run that regressed nothing.
-pub(super) fn classify_runs(
-    determinism_failures: &[String],
-    anchor: &AnchorVerdict,
-    throughput: ThroughputVerdict,
-    policy: ThroughputPolicy,
-) -> BenchGate {
-    if !determinism_failures.is_empty() {
-        return BenchGate::DeterminismBreak;
-    }
-    if matches!(anchor, AnchorVerdict::Drift(_)) {
-        return BenchGate::AnchorDrift;
-    }
-    if policy.strict && !throughput.is_measured() {
-        return BenchGate::SpreadExceeded;
-    }
-    BenchGate::Pass
-}
-
-#[cfg(test)]
-#[path = "tests/runs_tests.rs"]
-mod tests;

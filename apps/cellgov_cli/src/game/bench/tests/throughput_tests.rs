@@ -1,9 +1,8 @@
 use std::time::Duration;
 
-use super::super::anchor::AnchorVerdict;
-use super::super::runs::classify_runs;
-use super::super::test_fixtures::{reporting, set_of};
-use super::super::types::BenchGate;
+use cellgov_compare::bench::{classify_runs, AnchorVerdict, BenchGate};
+
+use super::super::test_fixtures::{reporting, set_of, strict};
 use super::*;
 
 #[test]
@@ -101,26 +100,39 @@ fn a_set_with_no_runs_leaves_the_throughput_unmeasurable() {
     assert_eq!(throughput_verdict(&[]), ThroughputVerdict::Unmeasurable);
 }
 
+/// The gate reads only whether the set made a throughput claim, so
+/// both ways of reaching none must say so.
 #[test]
-fn a_spread_above_the_ceiling_reports_and_does_not_fail() {
-    let set = set_of(&[Duration::from_millis(100), Duration::from_millis(200)]);
-    let verdict = throughput_verdict(&set);
-    assert!(matches!(verdict, ThroughputVerdict::Inconclusive { .. }));
-    assert_eq!(
-        classify_runs(&[], &AnchorVerdict::Skipped, verdict, reporting()),
-        BenchGate::Pass
-    );
-}
-
-#[test]
-fn an_unmeasurable_wall_reports_and_does_not_fail() {
-    assert_eq!(
-        classify_runs(
-            &[],
-            &AnchorVerdict::Skipped,
-            ThroughputVerdict::Unmeasurable,
-            reporting()
-        ),
-        BenchGate::Pass
-    );
+fn either_way_of_reaching_no_verdict_makes_no_throughput_claim() {
+    let inconclusive = throughput_verdict(&set_of(&[
+        Duration::from_millis(100),
+        Duration::from_millis(200),
+    ]));
+    assert!(matches!(
+        inconclusive,
+        ThroughputVerdict::Inconclusive { .. }
+    ));
+    for verdict in [inconclusive, ThroughputVerdict::Unmeasurable] {
+        assert!(!verdict.is_measured(), "{verdict:?}");
+        assert_eq!(
+            classify_runs(
+                &[],
+                &AnchorVerdict::Skipped,
+                verdict.is_measured(),
+                reporting().strict
+            ),
+            BenchGate::Pass,
+            "a busy host fails nothing without --strict-perf: {verdict:?}"
+        );
+        assert_eq!(
+            classify_runs(
+                &[],
+                &AnchorVerdict::Skipped,
+                verdict.is_measured(),
+                strict().strict
+            ),
+            BenchGate::SpreadExceeded,
+            "--strict-perf fails a set that made no claim: {verdict:?}"
+        );
+    }
 }

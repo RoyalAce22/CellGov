@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use super::types::BenchBootResult;
+use cellgov_compare::bench::BenchBootResult;
 
 /// Cross-run wall spread above which a run set makes no throughput
 /// claim, as a percentage of the fastest run.

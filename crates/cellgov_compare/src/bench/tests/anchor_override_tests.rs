@@ -1,12 +1,9 @@
 //! The anchor check against a run whose boot override set differs from
 //! the anchor's.
 
-use cellgov_compare::BootOverrides;
 use cellgov_time::Budget;
 
-use super::super::test_fixtures::{
-    anchor_fixture, observed_stderr, test_identity, TEST_CHECKPOINT,
-};
+use super::super::test_fixtures::{anchor_fixture, test_identity, TEST_CHECKPOINT};
 use super::*;
 
 fn disagreements(recorded: &BootSummary, ran: &RunIdentity) -> Vec<String> {
@@ -16,8 +13,13 @@ fn disagreements(recorded: &BootSummary, ran: &RunIdentity) -> Vec<String> {
         TEST_CHECKPOINT,
         390099,
         Budget::new(256),
-        "MaxSteps",
-        &observed_stderr(73, 100),
+        BootOutcome::MaxSteps,
+        &parse_witness_lines(
+            "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73
+             BENCH_ATOMIC_WITNESS: ldarx=100 stdcx=0 lwarx=0 stwcx=0
+",
+        )
+        .expect("synthetic witness lines parse"),
     )
 }
 

@@ -13,6 +13,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod baseline;
+pub mod bench;
 pub mod boot_history;
 pub mod boot_summary;
 pub mod checkpoint_manifest;

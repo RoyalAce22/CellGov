@@ -1,9 +1,9 @@
 //! Runs the current binary as `boot bench-once` and reads the one
 //! result line back out of its streams.
 
+use cellgov_compare::bench::{parse_bench_result, BenchBootResult, ParseBenchError};
+
 use super::options::BenchOptions;
-use super::result_line::{parse_bench_result, ParseBenchError};
-use super::types::BenchBootResult;
 
 /// Subprocess invocation failure surfaced by [`spawn_one_run`].
 #[derive(Debug, thiserror::Error)]
@@ -76,7 +76,11 @@ pub(super) fn spawn_one_run(
         eprint!("{stderr}");
     }
     match parse_bench_result(&stdout) {
-        Ok(r) => {
+        Ok(parsed) => {
+            for warning in &parsed.warnings {
+                eprintln!("warning: {warning}");
+            }
+            let r = parsed.result;
             // The parent asked for this index on the command line. A
             // child that reports another index means `--run-index` no
             // longer reaches it. Every line would then read 0, and the

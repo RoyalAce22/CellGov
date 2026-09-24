@@ -3,14 +3,12 @@
 
 use std::time::Duration;
 
-use cellgov_compare::witness_parse::{parse_witness_lines, ParsedWitnesses};
-use cellgov_compare::{BootOutcome, BootSummary, RunIdentity};
+use cellgov_compare::bench::{BenchBootResult, MeasuredRun};
+use cellgov_compare::BootOutcome;
 use cellgov_time::Budget;
 
-use super::anchor::MeasuredRun;
 use super::options::{AnchorPlan, BenchOptions, SelectionArgs};
 use super::throughput::ThroughputPolicy;
-use super::types::BenchBootResult;
 use cellgov_boot::manifest::{self, CellKey};
 
 /// A run of `wall` that agrees with every other run this helper
@@ -49,74 +47,23 @@ pub(super) fn strict() -> ThroughputPolicy {
     }
 }
 
-/// The stop condition [`anchor_fixture`] records.
-pub(super) const TEST_CHECKPOINT: manifest::CheckpointTrigger =
-    manifest::CheckpointTrigger::ProcessExit;
-
-/// A run that reproduces [`anchor_fixture`] exactly, as the set hands
-/// it to the anchor check.
+/// A run of the anchor check's shape, over `stderr`.
 pub(super) fn measured_run(stderr: &str) -> MeasuredRun<'_> {
     MeasuredRun {
-        checkpoint: TEST_CHECKPOINT,
+        checkpoint: manifest::CheckpointTrigger::ProcessExit.kind(),
         steps: 1,
         budget: Budget::new(256),
-        outcome: "MaxSteps".to_string(),
+        outcome: BootOutcome::MaxSteps,
         stderr,
     }
 }
 
-/// The cell [`anchor_fixture`] is filed under.
+/// A cell of the committed fixture tree's shape.
 pub(super) fn test_cell() -> CellKey {
     CellKey {
         fw: "4.93".to_string(),
         game_ver: Some("base".to_string()),
     }
-}
-
-/// The identity triple [`anchor_fixture`] embeds.
-pub(super) fn test_identity() -> RunIdentity {
-    anchor_fixture(0).identity
-}
-
-/// Mirrors a committed `boot_summary.json`, so the fixture format and
-/// the comparison are exercised through the deserializer production
-/// uses.
-pub(super) fn anchor_fixture(breaks: u64) -> BootSummary {
-    serde_json::from_str(&format!(
-        r#"{{
-          "checkpoint": {{ "kind": "process_exit" }},
-          "outcome": "MaxSteps",
-          "steps": 390099,
-          "budget": 256,
-          "host_invariant_breaks": {breaks},
-          "witnesses": {{
-            "host_invariant_breaks": {{ "value": {breaks}, "class": "exact" }},
-            "ldarx": {{ "value": 100, "class": "at-least" }},
-            "stdcx": {{ "value": 0, "class": "at-least" }},
-            "lwarx": {{ "value": 0, "class": "at-least" }},
-            "stwcx": {{ "value": 0, "class": "at-least" }}
-          }},
-          "firmware": {{
-            "version": "4.93",
-            "image_version": "0x0000000000010b94",
-            "pup_sha256": "00"
-          }},
-          "game": {{
-            "title_id": "CG_TEST",
-            "version": "base",
-            "app_ver": "01.00"
-          }}
-        }}"#
-    ))
-    .expect("anchor fixture parses")
-}
-
-pub(super) fn observed_stderr(breaks: u64, ldarx: u64) -> ParsedWitnesses {
-    parse_witness_lines(&format!(
-        "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count={breaks}\n\
-         BENCH_ATOMIC_WITNESS: ldarx={ldarx} stdcx=0 lwarx=0 stwcx=0\n"
-    ))
-    .expect("synthetic witness lines parse")
 }
 
 pub(super) fn bench_manifest(

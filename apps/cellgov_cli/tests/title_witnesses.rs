@@ -32,24 +32,18 @@ mod registry;
 
 use std::process::Command;
 
-use cellgov_compare::witness_parse::{parse_witness_lines, ParsedWitnesses};
-use cellgov_compare::witnesses::{check_all, unrecorded, TITLE_NOT_INSTALLED_SENTINEL};
-use cellgov_compare::BootSummary;
+use cellgov_boot::manifest::{CellKey, TitleRegistry};
+use cellgov_compare::bench::{hold_against_anchor, load_anchor, parse_bench_result, MeasuredRun};
+use cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL;
+use cellgov_compare::CheckpointKind;
 use registry::{boot_anchor_path, firmware_exec_titles, titles, workspace_root, TitleUnderTest};
-
-struct Observed {
-    witnesses: ParsedWitnesses,
-    steps: u64,
-    /// Instructions per step; `steps * budget` is the instruction count.
-    budget: u64,
-    outcome: String,
-}
 
 /// How a boot attempt ended, separating "this operator does not have
 /// the title" from "the title booted wrong".
 enum Boot {
     NotInstalled,
-    Ran(Observed),
+    /// The child's stdout and stderr.
+    Ran(String, String),
     Failed(String),
 }
 
@@ -72,8 +66,8 @@ fn boot(title: &TitleUnderTest) -> Boot {
         .output()
         .expect("spawn cellgov boot bench-once");
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
 
     if !output.status.success() {
         // Only the explicit marker is a skip: a dump that exists but
@@ -88,123 +82,76 @@ fn boot(title: &TitleUnderTest) -> Boot {
             tail.join("\n  ")
         ));
     }
+    Boot::Ran(stdout, stderr)
+}
 
-    let witnesses = match parse_witness_lines(&stderr) {
-        Ok(w) => w,
-        Err(errs) => {
-            let lines: Vec<String> = errs.iter().map(ToString::to_string).collect();
-            return Boot::Failed(format!(
-                "malformed witness lines:\n  {}",
-                lines.join("\n  ")
-            ));
-        }
+/// The stop condition the registry declares for the cell `title` boots,
+/// which is the one `boot bench-once` ran at: the suite passes no
+/// `--checkpoint`.
+fn declared_checkpoint(title: &TitleUnderTest) -> CheckpointKind {
+    let registry = TitleRegistry::scan_dir(&workspace_root().join("title_manifests"))
+        .expect("the committed registry loads");
+    let manifest = registry
+        .by_short_name(&title.short_name)
+        .unwrap_or_else(|| panic!("{} is not in the registry", title.short_name));
+    let key = CellKey {
+        fw: title.reference.fw.clone(),
+        game_ver: title.reference.game_ver.clone(),
     };
-
-    let Some(result) = stdout.lines().find(|l| l.starts_with("BENCH_RESULT")) else {
-        return Boot::Failed("no BENCH_RESULT line on stdout".to_string());
-    };
-    let mut steps = None;
-    let mut budget = None;
-    let mut outcome = None;
-    for tok in result.split_whitespace() {
-        if let Some(v) = tok.strip_prefix("steps=") {
-            steps = v.parse::<u64>().ok();
-        } else if let Some(v) = tok.strip_prefix("budget=") {
-            budget = v.parse::<u64>().ok();
-        } else if let Some(v) = tok.strip_prefix("outcome=") {
-            outcome = Some(v.to_string());
-        }
-    }
-    let (Some(steps), Some(budget), Some(outcome)) = (steps, budget, outcome) else {
-        return Boot::Failed(format!(
-            "BENCH_RESULT missing steps=/budget=/outcome=: {result}"
-        ));
-    };
-    Boot::Ran(Observed {
-        witnesses,
-        steps,
-        budget,
-        outcome,
-    })
+    manifest.cell_checkpoint(manifest.cell(&key)).kind()
 }
 
 /// Compare one installed title against its baseline; `None` means the
 /// title is not installed on this machine.
 ///
 /// The boot runs before the baseline is read: a missing baseline only
-/// matters for a title this operator can actually record.
+/// matters for a title this operator can actually record. The
+/// comparison is the one `boot bench` gates with.
 fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
     // One short name can gate several cells (the system software gates
     // one per declared firmware), so a failure names the cell.
     let who = format!("{} ({})", title.short_name, title.reference.label());
-    let observed = match boot(title) {
+    let (stdout, stderr) = match boot(title) {
         Boot::NotInstalled => return None,
         Boot::Failed(e) => return Some(vec![format!("{who}: {e}")]),
-        Boot::Ran(o) => o,
+        Boot::Ran(stdout, stderr) => (stdout, stderr),
+    };
+    let result = match parse_bench_result(&stdout) {
+        Ok(parsed) => parsed.result,
+        Err(e) => return Some(vec![format!("{who}: {e}")]),
     };
 
     let path = boot_anchor_path(&title.content_id, &title.reference);
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Some(vec![format!(
-            "{who}: installed but no baseline at {}. Record it with:\n    \
-             cargo run --release -p cellgov_cli -- dev record-anchors --title {} --fw {}",
-            path.display(),
-            title.short_name,
-            title.reference.fw
-        )]);
-    };
-    let baseline: BootSummary = match serde_json::from_str(&text) {
-        Ok(b) => b,
-        Err(e) => {
+    let baseline = match load_anchor(&path) {
+        Ok(Some(b)) => b,
+        Ok(None) => {
             return Some(vec![format!(
-                "{who}: {} failed to parse: {e}",
-                path.display()
+                "{who}: installed but no baseline at {}. Record it with:\n    \
+                 cargo run --release -p cellgov_cli -- dev record-anchors --title {} --fw {}",
+                path.display(),
+                title.short_name,
+                title.reference.fw
             )])
         }
+        Err(e) => return Some(vec![format!("{who}: {e}")]),
     };
 
-    let mut failures = Vec::new();
-    if observed.steps != baseline.steps {
+    let run = MeasuredRun {
+        checkpoint: declared_checkpoint(title),
+        steps: result.steps as u64,
+        budget: result.budget,
+        outcome: result.outcome,
+        stderr: &stderr,
+    };
+    let mut failures: Vec<String> = hold_against_anchor(&baseline, &run)
+        .into_iter()
+        .map(|failure| format!("{who}: {failure}"))
+        .collect();
+    if !failures.is_empty() {
         failures.push(format!(
-            "{who}: steps {} != recorded {}",
-            observed.steps, baseline.steps
-        ));
-    }
-    // A cap-bounded anchor stops at the step count the run asked for.
-    // A changed budget then retires a different instruction count under
-    // an unchanged `steps` and outcome. The recorded witnesses are
-    // at-least bounds and do not catch it.
-    if observed.budget != baseline.budget.raw() {
-        failures.push(format!(
-            "{who}: budget {} != recorded {}",
-            observed.budget,
-            baseline.budget.raw()
-        ));
-    }
-    // Display, not Debug: BENCH_RESULT prints the Display form, and
-    // the two disagree for PcReached, whose Debug renders the address
-    // in decimal.
-    let recorded_outcome = baseline.outcome.to_string();
-    if observed.outcome != recorded_outcome {
-        failures.push(format!(
-            "{who}: outcome {} != recorded {recorded_outcome}",
-            observed.outcome
-        ));
-    }
-    if baseline.witnesses.is_empty() {
-        failures.push(format!(
-            "{who}: baseline records no witnesses. Re-record with:\n    \
+            "{who}: if the move is intended, re-record it with:\n    \
              cargo run --release -p cellgov_cli -- dev record-anchors --title {} --fw {}",
             title.short_name, title.reference.fw
-        ));
-        return Some(failures);
-    }
-    for failure in check_all(&baseline.witnesses, &observed.witnesses) {
-        failures.push(format!("{who}: {failure}"));
-    }
-    for name in unrecorded(&baseline.witnesses, &observed.witnesses.values) {
-        failures.push(format!(
-            "{who}: witness {name} is emitted but not recorded -- re-record the baseline"
         ));
     }
     Some(failures)

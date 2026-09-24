@@ -292,17 +292,7 @@ fn run_manifest_compare(
         None
     };
 
-    let regions: Vec<RegionDescriptor> = manifest
-        .observe
-        .memory_regions
-        .iter()
-        .map(|r| RegionDescriptor {
-            name: r.name.clone(),
-            space: cellgov_compare::AddressSpaceId::new(r.space),
-            addr: r.addr,
-            size: r.size,
-        })
-        .collect();
+    let regions: Vec<RegionDescriptor> = manifest.observe.region_descriptors();
 
     let cellgov_section = match &manifest.cellgov {
         Some(cg) => cg,
@@ -455,38 +445,8 @@ pub(crate) fn load_observations_from_dir(dir: &str) -> Result<Vec<Observation>, 
 fn load_observations_with_paths(
     dir: &str,
 ) -> Result<Vec<(std::path::PathBuf, Observation)>, CommandError> {
-    let rd = std::fs::read_dir(dir).map_err(|error| {
-        CommandError::failed(format!(
-            "failed to read observations directory {dir}: {error}"
-        ))
-    })?;
-    let mut entries: Vec<std::path::PathBuf> = Vec::new();
-    for entry in rd {
-        let entry = entry.map_err(|error| {
-            CommandError::failed(format!(
-                "observations directory {dir}: failed to read entry: {error}"
-            ))
-        })?;
-        let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "json") {
-            entries.push(path);
-        }
-    }
-    entries.sort();
-
-    entries
-        .into_iter()
-        .map(|path| {
-            cellgov_compare::baseline::load(&path)
-                .map(|obs| (path.clone(), obs))
-                .map_err(|error| {
-                    CommandError::failed(format!(
-                        "failed to load observation {}: {error:?}",
-                        path.display()
-                    ))
-                })
-        })
-        .collect()
+    cellgov_compare::baseline::load_dir(std::path::Path::new(dir))
+        .map_err(|error| CommandError::failed(error.to_string()))
 }
 
 // -- diff observations --
