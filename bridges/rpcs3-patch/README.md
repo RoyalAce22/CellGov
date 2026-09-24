@@ -329,7 +329,7 @@ Read-only with respect to guest state: snapshots use `vm::base()`
 The trace file format is little-endian and self-describing
 (magic + version). Format pinned in
 `tools/rpcs3-src/rpcs3/Emu/Cell/cellgov_hle_trace.h` and parsed by
-`apps/cellgov_cli/src/cli/rpcs3_attribute.rs`. Bumping the version
+`crates/cellgov_ppu/src/differential/rpcs3_hle_trace.rs`. Bumping the version
 is a coordinated change across both files.
 
 Not upstream-quality as written. Same gaps as 0001 (raw `FILE*`,

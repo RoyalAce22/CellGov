@@ -2,10 +2,8 @@
 //! the patched build (`bridges/rpcs3-patch/0002-cellgov-hle-trace.patch`)
 //! and answer "which HLE call wrote this guest address?"
 //!
-//! Trace format pinned in the patch's `cellgov_hle_trace.h` header.
-//! Records are emitted at every BIND_FUNC entry+exit pair; each record
-//! lists the writes the call made to a selected guest region
-//! (diff against the entry-time snapshot).
+//! `cellgov_ppu::differential::rpcs3_hle_trace` decodes the trace; this
+//! command renders what it finds.
 //!
 //! # Examples
 //!
@@ -14,225 +12,15 @@
 //! ```
 
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::BufReader;
 use std::path::Path;
+
+use cellgov_ppu::differential::rpcs3_hle_trace::{
+    HleCallRecord, HleTraceEvent, HleTraceReader, HleWriteTally,
+};
 
 use super::exit::CommandError;
 use super::parse::Rpcs3AttributeArgs;
-
-const HEADER_MAGIC: u32 = 0xC0E6_0001;
-const RECORD_MAGIC: u32 = 0xC0E6_0002;
-const TRACE_VERSION: u32 = 2;
-
-/// One emitted HLE-call record. Mirrors the binary record on disk.
-///
-/// `lr` is the PPU LR at HLE entry. For HLE module functions this is
-/// the user-code call site (a real PC in the title binary). For
-/// syscalls it is the syscall-stub return PC. For synthetic
-/// `<guest_code>` drift records it is the LR captured at the prior
-/// HLE call's exit (= the user-code site running between the two
-/// calls).
-#[derive(Debug, Clone)]
-pub struct CallRecord {
-    pub step: u64,
-    pub lr: u64,
-    pub thread_id: u32,
-    pub depth: u32,
-    pub name: String,
-    pub args: [u64; 8],
-    pub ret: u64,
-    pub writes: Vec<WriteEntry>,
-}
-
-#[derive(Debug, Clone)]
-pub struct WriteEntry {
-    pub addr: u64,
-    pub bytes: Vec<u8>,
-}
-
-/// Failure modes while parsing the HLE trace.
-#[derive(Debug, thiserror::Error)]
-pub enum ParseError {
-    #[error("I/O error: {0}")]
-    Io(#[source] std::io::Error),
-    #[error(
-        "trace header magic mismatch: got 0x{got:08x}, expected 0x{:08x}",
-        HEADER_MAGIC
-    )]
-    BadHeaderMagic { got: u32 },
-    #[error(
-        "trace version {got} unsupported (this build expects {})",
-        TRACE_VERSION
-    )]
-    BadVersion { got: u32 },
-    #[error("record name length {len} exceeds 1 KiB sanity cap")]
-    NameTooLong { len: u32 },
-    #[error("write payload size {size} exceeds 1 MiB sanity cap")]
-    WriteTooLarge { size: u32 },
-    #[error("unexpected EOF while reading {in_field}")]
-    UnexpectedEof { in_field: &'static str },
-}
-
-impl ParseError {
-    /// Whether this error is fatal (no resync possible). Streaming
-    /// parsers abort on fatal errors; non-fatal errors trigger
-    /// byte-by-byte resync to the next valid record magic.
-    pub fn is_fatal(&self) -> bool {
-        match self {
-            ParseError::Io(_) => true,
-            ParseError::BadHeaderMagic { .. }
-            | ParseError::BadVersion { .. }
-            | ParseError::NameTooLong { .. }
-            | ParseError::WriteTooLarge { .. }
-            | ParseError::UnexpectedEof { .. } => false,
-        }
-    }
-}
-
-/// Stream every record in the trace through `on_record`. Bounded
-/// memory regardless of trace size. The callback returns `Err` to
-/// abort early.
-pub fn parse_streaming<F>(path: &Path, mut on_record: F) -> Result<(), ParseError>
-where
-    F: FnMut(CallRecord) -> Result<(), ParseError>,
-{
-    let file = File::open(path).map_err(ParseError::Io)?;
-    let mut reader = BufReader::with_capacity(1 << 20, file); // 1 MiB buf
-
-    let header_magic = read_u32(&mut reader, "header magic")?;
-    if header_magic != HEADER_MAGIC {
-        return Err(ParseError::BadHeaderMagic { got: header_magic });
-    }
-    let version = read_u32(&mut reader, "trace version")?;
-    if version != TRACE_VERSION {
-        return Err(ParseError::BadVersion { got: version });
-    }
-
-    let mut resyncs = 0usize;
-    // Sliding 4-byte magic window. Read up to 4 bytes per attempt so
-    // a BufReader buffer boundary cannot short-circuit EOF detection;
-    // a real EOF returns 0 from the first read.
-    let mut window: [u8; 4] = [0; 4];
-    let mut have_window = false;
-    loop {
-        if !have_window {
-            // Read up to 4 bytes; loop on partials.
-            let mut filled = 0usize;
-            while filled < 4 {
-                let n = reader.read(&mut window[filled..]).map_err(ParseError::Io)?;
-                if n == 0 {
-                    break;
-                }
-                filled += n;
-            }
-            if filled == 0 {
-                break; // clean EOF on record boundary
-            }
-            if filled < 4 {
-                break; // genuinely partial trailing bytes
-            }
-            have_window = true;
-        }
-        let magic = u32::from_le_bytes(window);
-        if magic != RECORD_MAGIC {
-            // Slide the window left by one byte and read one fresh.
-            window[0] = window[1];
-            window[1] = window[2];
-            window[2] = window[3];
-            let mut one = [0u8; 1];
-            if reader.read(&mut one).map_err(ParseError::Io)? == 0 {
-                break;
-            }
-            window[3] = one[0];
-            resyncs += 1;
-            continue;
-        }
-        // Body-parse failures (NameTooLong, WriteTooLarge, EOF on a
-        // file still being written) resync to the next valid magic
-        // instead of aborting. `Io` errors still surface.
-        have_window = false;
-        match parse_one_record(&mut reader) {
-            Ok(rec) => on_record(rec)?,
-            Err(e) => {
-                if e.is_fatal() {
-                    return Err(e);
-                }
-                resyncs += 1;
-                continue;
-            }
-        }
-    }
-    if resyncs > 0 {
-        eprintln!(
-            "rpcs3-attribute: skipped {resyncs} byte(s) of corrupted/partial trace data while resyncing",
-        );
-    }
-    Ok(())
-}
-
-fn parse_one_record<R: Read>(reader: &mut R) -> Result<CallRecord, ParseError> {
-    let step = read_u64(reader, "step")?;
-    let lr = read_u64(reader, "lr")?;
-    let thread_id = read_u32(reader, "thread_id")?;
-    let depth = read_u32(reader, "depth")?;
-    let name_len = read_u32(reader, "name_len")?;
-    if name_len > 1024 {
-        return Err(ParseError::NameTooLong { len: name_len });
-    }
-    let mut name_bytes = vec![0u8; name_len as usize];
-    reader
-        .read_exact(&mut name_bytes)
-        .map_err(|_| ParseError::UnexpectedEof { in_field: "name" })?;
-    let name = String::from_utf8_lossy(&name_bytes).into_owned();
-
-    let mut args = [0u64; 8];
-    for slot in &mut args {
-        *slot = read_u64(reader, "args[i]")?;
-    }
-    let ret = read_u64(reader, "ret")?;
-
-    let num_writes = read_u32(reader, "num_writes")?;
-    let mut writes = Vec::with_capacity(num_writes as usize);
-    for _ in 0..num_writes {
-        let addr = read_u64(reader, "write.addr")?;
-        let size = read_u32(reader, "write.size")?;
-        if size > 1 << 20 {
-            return Err(ParseError::WriteTooLarge { size });
-        }
-        let mut bytes = vec![0u8; size as usize];
-        reader
-            .read_exact(&mut bytes)
-            .map_err(|_| ParseError::UnexpectedEof {
-                in_field: "write.bytes",
-            })?;
-        writes.push(WriteEntry { addr, bytes });
-    }
-
-    Ok(CallRecord {
-        step,
-        lr,
-        thread_id,
-        depth,
-        name,
-        args,
-        ret,
-        writes,
-    })
-}
-
-fn read_u32<R: Read>(r: &mut R, field: &'static str) -> Result<u32, ParseError> {
-    let mut buf = [0u8; 4];
-    r.read_exact(&mut buf)
-        .map_err(|_| ParseError::UnexpectedEof { in_field: field })?;
-    Ok(u32::from_le_bytes(buf))
-}
-
-fn read_u64<R: Read>(r: &mut R, field: &'static str) -> Result<u64, ParseError> {
-    let mut buf = [0u8; 8];
-    r.read_exact(&mut buf)
-        .map_err(|_| ParseError::UnexpectedEof { in_field: field })?;
-    Ok(u64::from_le_bytes(buf))
-}
 
 /// Streams an RPCS3 trace through the selected query mode.
 ///
@@ -257,11 +45,29 @@ pub fn run(args: &Rpcs3AttributeArgs) -> Result<(), CommandError> {
     let addr_filter: Option<(u64, u64)> = args.addr.map(|addr| (addr, args.len.unwrap_or(1)));
 
     let mut total_records = 0usize;
-    let mut hits: Vec<CallRecord> = Vec::new();
-    let mut name_hits: Vec<CallRecord> = Vec::new();
-    let mut tally: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+    let mut hits: Vec<HleCallRecord> = Vec::new();
+    let mut name_hits: Vec<HleCallRecord> = Vec::new();
+    let mut tally = HleWriteTally::default();
+    let mut resyncs = 0usize;
 
-    parse_streaming(path, |rec| {
+    let parse_failed = |error| CommandError::failed(format!("failed to parse trace: {error}"));
+    let file = File::open(path).map_err(|error| {
+        parse_failed(cellgov_ppu::differential::rpcs3_hle_trace::HleTraceError::Io(error))
+    })?;
+    let reader =
+        HleTraceReader::new(BufReader::with_capacity(1 << 20, file)).map_err(parse_failed)?;
+    for event in reader {
+        let rec = match event.map_err(parse_failed)? {
+            HleTraceEvent::Record(rec) => rec,
+            HleTraceEvent::SkippedBytes(n) => {
+                resyncs += n;
+                continue;
+            }
+            HleTraceEvent::DroppedRecord(_) => {
+                resyncs += 1;
+                continue;
+            }
+        };
         total_records += 1;
         if total_records.is_multiple_of(1_000_000) {
             eprintln!("rpcs3-attribute: streamed {total_records} records...");
@@ -270,16 +76,10 @@ pub fn run(args: &Rpcs3AttributeArgs) -> Result<(), CommandError> {
             print_record(&rec, "");
         }
         if want_ranked {
-            let entry = tally.entry(rec.name.clone()).or_insert((0, 0));
-            entry.0 += 1;
-            entry.1 += rec.writes.len();
+            tally.add(&rec);
         }
         if let Some((addr, len)) = addr_filter {
-            let end = addr.saturating_add(len);
-            if rec.writes.iter().any(|w| {
-                let w_end = w.addr.saturating_add(w.bytes.len() as u64);
-                w.addr < end && addr < w_end
-            }) {
+            if rec.writes_into(addr, len) {
                 hits.push(rec.clone());
             }
         }
@@ -288,21 +88,19 @@ pub fn run(args: &Rpcs3AttributeArgs) -> Result<(), CommandError> {
                 name_hits.push(rec);
             }
         }
-        Ok(())
-    })
-    .map_err(|error| CommandError::failed(format!("failed to parse trace: {error}")))?;
+    }
+    if resyncs > 0 {
+        eprintln!(
+            "rpcs3-attribute: skipped {resyncs} byte(s) of corrupted/partial trace data while resyncing",
+        );
+    }
 
     eprintln!("rpcs3-attribute: streamed {total_records} record(s) from {trace_path}",);
 
     if want_ranked {
-        let mut rows: Vec<(&str, usize, usize)> = tally
-            .iter()
-            .map(|(n, (c, w))| (n.as_str(), *c, *w))
-            .collect();
-        rows.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
         println!("{:>8}  {:>8}  name", "writes", "calls");
-        for (name, calls, writes) in rows {
-            println!("{writes:>8}  {calls:>8}  {name}");
+        for row in tally.ranked() {
+            println!("{:>8}  {:>8}  {}", row.writes, row.calls, row.name);
         }
     }
 
@@ -340,7 +138,7 @@ pub fn run(args: &Rpcs3AttributeArgs) -> Result<(), CommandError> {
     Ok(())
 }
 
-fn print_record(rec: &CallRecord, indent: &str) {
+fn print_record(rec: &HleCallRecord, indent: &str) {
     println!(
         "{indent}step=0x{:016x} lr=0x{:016x} tid={} depth={} {} ret=0x{:x}",
         rec.step, rec.lr, rec.thread_id, rec.depth, rec.name, rec.ret,
@@ -372,7 +170,3 @@ fn print_record(rec: &CallRecord, indent: &str) {
         );
     }
 }
-
-#[cfg(test)]
-#[path = "tests/rpcs3_attribute_tests.rs"]
-mod tests;

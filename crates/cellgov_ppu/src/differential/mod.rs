@@ -21,6 +21,7 @@ mod context;
 mod runner;
 
 pub mod rpcs3_capture;
+pub mod rpcs3_hle_trace;
 pub mod vectors;
 
 pub use case::{InstructionCase, MemorySnapshot, OracleSource, PpuStateSnapshot};
