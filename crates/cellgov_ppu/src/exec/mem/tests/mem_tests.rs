@@ -1,6 +1,10 @@
 //! Memory-access execution: string loads/stores, store effects, and reservations.
 
-use super::*;
+use crate::exec::{ExecuteVerdict, PpuFault};
+use crate::instruction::PpuInstruction;
+use crate::state::PpuState;
+use crate::store_buffer::StoreBuffer;
+use cellgov_effects::Effect;
 
 use crate::exec::execute;
 
