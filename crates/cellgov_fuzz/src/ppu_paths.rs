@@ -498,7 +498,8 @@ fn run_plain(
                     | cellgov_ppu::exec::PpuFault::AlignmentInterrupt(addr) => Some(*addr),
                     cellgov_ppu::exec::PpuFault::UnsupportedSyscall(_)
                     | cellgov_ppu::exec::PpuFault::UnimplementedInstruction(_)
-                    | cellgov_ppu::exec::PpuFault::ProgramTrap(_) => None,
+                    | cellgov_ppu::exec::PpuFault::ProgramTrap(_)
+                    | cellgov_ppu::exec::PpuFault::InvalidForm(_) => None,
                 };
                 let diagnostics = fault_diagnostics(&state, step_pc, ea);
                 state = initial.clone();

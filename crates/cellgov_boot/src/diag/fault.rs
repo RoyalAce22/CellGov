@@ -30,7 +30,7 @@ pub(crate) fn format_fault(
         .unwrap_or_else(|| "?".to_string());
     use cellgov_ppu::{
         FAULT_ALIGNMENT_INTERRUPT, FAULT_DEBUG_BREAK, FAULT_DECODE_ERROR, FAULT_INVALID_ADDRESS,
-        FAULT_PC_OUT_OF_RANGE, FAULT_PROGRAM_TRAP, FAULT_UNIMPLEMENTED_INSN,
+        FAULT_INVALID_FORM, FAULT_PC_OUT_OF_RANGE, FAULT_PROGRAM_TRAP, FAULT_UNIMPLEMENTED_INSN,
         FAULT_UNSUPPORTED_SYSCALL,
     };
     let ea_str = result
@@ -73,6 +73,7 @@ pub(crate) fn format_fault(
                     let to = code & 0x0000_FFFF;
                     format!("PROGRAM_TRAP (TO=0x{to:02x}) at PC={pc_str}")
                 }
+                FAULT_INVALID_FORM => format!("INVALID_FORM at PC={pc_str}"),
                 FAULT_DEBUG_BREAK => format!("DEBUG_BREAK at PC={pc_str}"),
                 // The SPU's classes land here: their constants are private
                 // to `cellgov_spu`. The detail half holds at most the low

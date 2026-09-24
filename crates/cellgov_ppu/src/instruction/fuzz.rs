@@ -617,7 +617,8 @@ impl PpuInstruction {
     pub fn fuzz_descriptor(&self, raw: u32) -> PpuFuzzDescriptor {
         let instruction_kind = PpuInstructionKind::from(*self);
         classify_kind(instruction_kind);
-        let (effects, outcomes) = effect_and_outcome(instruction_kind);
+        let (effects, outcomes) =
+            effect_and_outcome(instruction_kind, generation_operands_are_valid(*self));
         PpuFuzzDescriptor {
             kind: fuzz_kind(*self),
             form: form_for_word(instruction_kind, raw),
@@ -1438,33 +1439,56 @@ fn form_for_word(kind: PpuInstructionKind, raw: u32) -> PpuEncodingForm {
 
 fn effect_and_outcome(
     kind: PpuInstructionKind,
+    valid_form: bool,
 ) -> (&'static [EffectKind], &'static [PpuOutcomeClass]) {
     use PpuInstructionKind as K;
+    // [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update in an invalid form, so only the encoding decides whether an update form faults.
+    let (load_update, store_update) = if valid_form {
+        ((READ_EFFECTS, LOAD), (WRITE_EFFECTS, STORE))
+    } else {
+        ((NO_EFFECTS, FAULT), (NO_EFFECTS, FAULT))
+    };
     match kind {
-        K::Lwz
-        | K::Lbz
-        | K::Lhz
-        | K::Lha
-        | K::Lhau
-        | K::Lmw
+        K::Lhau
         | K::Lwzu
         | K::Lbzu
         | K::Lhzu
         | K::Ldu
+        | K::Lwzux
+        | K::Lbzux
+        | K::Lhzux
+        | K::Ldux
+        | K::Lhaux
+        | K::Lwaux
+        | K::Lfsu
+        | K::Lfdu
+        | K::Lfsux
+        | K::Lfdux => load_update,
+        K::Stwu
+        | K::Stdu
+        | K::Stbu
+        | K::Sthu
+        | K::Stdux
+        | K::Sthux
+        | K::Stwux
+        | K::Stbux
+        | K::Stfsu
+        | K::Stfdu
+        | K::Stfsux
+        | K::Stfdux => store_update,
+        K::Lwz
+        | K::Lbz
+        | K::Lhz
+        | K::Lha
+        | K::Lmw
         | K::Ld
         | K::Lwa
         | K::Lwzx
         | K::Lbzx
         | K::Ldx
         | K::Lhzx
-        | K::Lwzux
-        | K::Lbzux
-        | K::Lhzux
-        | K::Ldux
         | K::Lhax
-        | K::Lhaux
         | K::Lwax
-        | K::Lwaux
         | K::Lswi
         | K::Lswx
         | K::Ldbrx
@@ -1482,33 +1506,21 @@ fn effect_and_outcome(
         | K::Lvx
         | K::Lvxl
         | K::Lfs
-        | K::Lfsu
         | K::Lfd
-        | K::Lfdu
         | K::Lfsx
-        | K::Lfsux
         | K::Lfdx
-        | K::Lfdux
         | K::LwzCmpwi
         | K::LwzMtlr
         | K::LdMtlr => (READ_EFFECTS, LOAD),
         K::Stw
-        | K::Stwu
-        | K::Stdu
         | K::Stb
-        | K::Stbu
         | K::Stmw
         | K::Sth
-        | K::Sthu
         | K::Std
         | K::Stwx
         | K::Stdx
-        | K::Stdux
         | K::Stbx
         | K::Sthx
-        | K::Sthux
-        | K::Stwux
-        | K::Stbux
         | K::Stswi
         | K::Stswx
         | K::Sdbrx
@@ -1525,13 +1537,9 @@ fn effect_and_outcome(
         | K::Stvxl
         | K::Stfs
         | K::Stfd
-        | K::Stfsu
-        | K::Stfdu
         | K::Stfiwx
         | K::Stfsx
-        | K::Stfsux
         | K::Stfdx
-        | K::Stfdux
         | K::Dcbz
         | K::LiStw
         | K::MflrStw

@@ -28,6 +28,12 @@ pub enum PpuFault {
     /// is the misaligned EA.
     #[error("PPU alignment interrupt on misaligned reservation EA 0x{0:016x}")]
     AlignmentInterrupt(u64),
+    // [PPC-Book1 p:13 s:1.9.2] An invalid form either invokes the system illegal instruction error handler or yields boundedly undefined results. CellGov takes the handler arm so both build profiles refuse the form the same way.
+    // [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update in an invalid form.
+    /// Instruction encoded in an invalid form, such as a load with
+    /// update whose RA is 0 or RT. Payload is the mnemonic.
+    #[error("PPU invalid instruction form: {0}")]
+    InvalidForm(&'static str),
 }
 
 impl PpuFault {
@@ -44,6 +50,7 @@ impl PpuFault {
             }
             Self::ProgramTrap(to) => crate::FAULT_PROGRAM_TRAP | (u32::from(to) & 0xffff),
             Self::AlignmentInterrupt(_) => crate::FAULT_ALIGNMENT_INTERRUPT,
+            Self::InvalidForm(_) => crate::FAULT_INVALID_FORM,
         }
     }
 }

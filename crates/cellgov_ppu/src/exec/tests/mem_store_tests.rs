@@ -232,23 +232,26 @@ fn dcbz_pre_checks_capacity_for_full_block() {
     );
 }
 
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "stwu invalid form")]
-fn stwu_with_ra_zero_panics_in_debug() {
+fn stwu_with_ra_zero_faults_as_an_invalid_form() {
     let mut s = PpuState::new();
+    s.set_gpr(3, 0xDEAD_BEEF);
+    let before = *s.gpr.as_array();
     let mut effects = Vec::new();
-    exec_with_mem(
+    let v = exec_with_mem(
         &PpuInstruction::Stwu {
             rs: 3,
             ra: 0,
-            imm: 0,
+            imm: 0x10,
         },
         &mut s,
         0,
         &[0u8; 0x100],
         &mut effects,
     );
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("stwu")));
+    assert_eq!(*s.gpr.as_array(), before);
+    assert!(effects.is_empty(), "nothing is staged: {effects:?}");
 }
 
 // -----------------------------------------------------------------

@@ -742,7 +742,7 @@ enum Src {
 enum Update {
     No,
     /// Write EA to RA; the mnemonic names the instruction in the
-    /// invalid-form assertion.
+    /// invalid-form fault.
     Ra(&'static str),
 }
 
@@ -892,14 +892,15 @@ fn load(
 ) -> ExecuteVerdict {
     if let Update::Ra(insn) = update {
         let ra = ea.ra();
-        match dest {
+        let invalid = match dest {
             // [PPC-Book1 p:33 s:3.3.2] Fixed-point load with update: invalid form when RA=0 or RA=RT.
-            Dest::Zero(rt) | Dest::Sign(rt) | Dest::Reversed(rt) => {
-                debug_assert!(ra != 0 && ra != rt, "{insn} invalid form: RA={ra}, RT={rt}");
-            }
+            Dest::Zero(rt) | Dest::Sign(rt) | Dest::Reversed(rt) => ra == 0 || ra == rt,
             // [PPC-Book1 p:104 s:4.6.2] Floating-point load with update: the only invalid form is RA=0.
             // FRT indexes a different register file, so RA=FRT is a valid encoding.
-            Dest::Fpr(_) => debug_assert!(ra != 0, "{insn} invalid form: RA=0"),
+            Dest::Fpr(_) => ra == 0,
+        };
+        if invalid {
+            return ExecuteVerdict::Fault(PpuFault::InvalidForm(insn));
         }
     }
     let addr = ea.resolve(state);
@@ -943,7 +944,9 @@ fn store(
 ) -> ExecuteVerdict {
     if let Update::Ra(insn) = update {
         // [PPC-Book1 p:40 s:3.3.3] Store with update: invalid form when RA=0.
-        debug_assert!(ea.ra() != 0, "{insn} invalid form: RA=0");
+        if ea.ra() == 0 {
+            return ExecuteVerdict::Fault(PpuFault::InvalidForm(insn));
+        }
     }
     let addr = ea.resolve(state);
     let value = match src {

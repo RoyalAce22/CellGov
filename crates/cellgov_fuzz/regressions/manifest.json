@@ -3,13 +3,13 @@
   "regressions": [
     {
       "name": "ppu-raw-sthu-ra-zero-debug-invariant",
-      "status": "open",
+      "status": "fixed",
       "profile": "debug",
       "summary": "A raw sthu word with RA=0 is an invalid form; the debug executor refuses it with an invariant and a release build executes it."
     },
     {
       "name": "ppu-raw-lhzu-ra-equals-rt-debug-invariant",
-      "status": "open",
+      "status": "fixed",
       "profile": "debug",
       "summary": "A raw lhzu word with RA=RT is an invalid form; the debug executor refuses it with an invariant and a release build executes it."
     },
@@ -21,19 +21,19 @@
     },
     {
       "name": "ppu-raw-sequence-sthu-ra-zero-debug-invariant",
-      "status": "open",
+      "status": "fixed",
       "profile": "debug",
       "summary": "A raw PPU sequence that reaches sthu with RA=0, an invalid form, trips the debug executor's invariant; a release build executes the form."
     },
     {
       "name": "ppu-raw-sequence-lhzu-ra-equals-rt-debug-invariant",
-      "status": "open",
+      "status": "fixed",
       "profile": "debug",
       "summary": "A raw PPU sequence that reaches lhzu with RA=RT, an invalid form, trips the debug executor's invariant; a release build executes the form."
     },
     {
       "name": "ppu-raw-sequence-lhau-ra-zero-debug-invariant",
-      "status": "open",
+      "status": "fixed",
       "profile": "debug",
       "summary": "A raw PPU sequence that reaches lhau with RA=0, an invalid form, trips the debug executor's invariant; a release build executes the form."
     },

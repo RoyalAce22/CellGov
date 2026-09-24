@@ -542,3 +542,7 @@ mod store_wrap_tests;
 #[cfg(test)]
 #[path = "tests/record_cr6_tests.rs"]
 mod record_cr6_tests;
+
+#[cfg(test)]
+#[path = "tests/invalid_form_tests.rs"]
+mod invalid_form_tests;

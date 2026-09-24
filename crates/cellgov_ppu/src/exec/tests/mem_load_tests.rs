@@ -264,13 +264,13 @@ fn lhzu_loads_halfword_and_updates_base() {
     assert_eq!(s.gpr[4], 0x1010);
 }
 
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "lwzu invalid form")]
-fn lwzu_with_ra_zero_panics_in_debug() {
+fn lwzu_with_ra_zero_faults_as_an_invalid_form() {
     let mut s = PpuState::new();
+    s.set_gpr(3, 0x77);
+    let before = *s.gpr.as_array();
     let mut effects = Vec::new();
-    exec_with_mem(
+    let v = exec_with_mem(
         &PpuInstruction::Lwzu {
             rt: 3,
             ra: 0, // invalid: RA=0 has no base register to update
@@ -278,19 +278,21 @@ fn lwzu_with_ra_zero_panics_in_debug() {
         },
         &mut s,
         0,
-        &[0u8; 0x100],
+        &[0xAAu8; 0x100],
         &mut effects,
     );
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lwzu")));
+    assert_eq!(*s.gpr.as_array(), before);
+    assert!(effects.is_empty());
 }
 
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "lwzu invalid form")]
-fn lwzu_with_ra_eq_rt_panics_in_debug() {
+fn lwzu_with_ra_eq_rt_faults_as_an_invalid_form() {
     let mut s = PpuState::new();
     s.set_gpr(3, 0x10);
+    let before = *s.gpr.as_array();
     let mut effects = Vec::new();
-    exec_with_mem(
+    let v = exec_with_mem(
         &PpuInstruction::Lwzu {
             rt: 3,
             ra: 3, // invalid: EA-write to RA would clobber RT
@@ -298,9 +300,12 @@ fn lwzu_with_ra_eq_rt_panics_in_debug() {
         },
         &mut s,
         0,
-        &[0u8; 0x100],
+        &[0xAAu8; 0x100],
         &mut effects,
     );
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lwzu")));
+    assert_eq!(*s.gpr.as_array(), before);
+    assert!(effects.is_empty());
 }
 
 // -----------------------------------------------------------------
@@ -489,13 +494,13 @@ fn lfault_lhau_does_not_update_ra() {
     assert_eq!(s.gpr[1], original);
 }
 
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "lhau invalid form")]
-fn lhau_with_ra_zero_panics_in_debug() {
+fn lhau_with_ra_zero_faults_as_an_invalid_form() {
     let mut s = PpuState::new();
+    s.set_gpr(3, 0x77);
+    let before = *s.gpr.as_array();
     let mut effects = Vec::new();
-    exec_with_mem(
+    let v = exec_with_mem(
         &PpuInstruction::Lhau {
             rt: 3,
             ra: 0,
@@ -503,9 +508,12 @@ fn lhau_with_ra_zero_panics_in_debug() {
         },
         &mut s,
         0,
-        &[0u8; 0x100],
+        &[0xAAu8; 0x100],
         &mut effects,
     );
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lhau")));
+    assert_eq!(*s.gpr.as_array(), before);
+    assert!(effects.is_empty());
 }
 
 // -----------------------------------------------------------------

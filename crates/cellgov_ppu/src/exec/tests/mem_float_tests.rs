@@ -746,13 +746,13 @@ fn lfd_preserves_nan_payload_8_bytes_verbatim() {
     assert_eq!(s.fpr[5], snan);
 }
 
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "lfsu invalid form")]
-fn lfsu_with_ra_zero_panics_in_debug() {
+fn lfsu_with_ra_zero_faults_as_an_invalid_form() {
     let mut s = PpuState::new();
+    s.set_fpr(5, 0x77);
+    let (gpr, fpr) = (*s.gpr.as_array(), *s.fpr.as_array());
     let mut effects = Vec::new();
-    exec_with_mem(
+    let v = exec_with_mem(
         &PpuInstruction::Lfsu {
             frt: 5,
             ra: 0,
@@ -760,18 +760,21 @@ fn lfsu_with_ra_zero_panics_in_debug() {
         },
         &mut s,
         0,
-        &[0u8; 0x100],
+        &[0x3Fu8; 0x100],
         &mut effects,
     );
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lfsu")));
+    assert_eq!((*s.gpr.as_array(), *s.fpr.as_array()), (gpr, fpr));
+    assert!(effects.is_empty());
 }
 
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "lfdu invalid form")]
-fn lfdu_with_ra_zero_panics_in_debug() {
+fn lfdu_with_ra_zero_faults_as_an_invalid_form() {
     let mut s = PpuState::new();
+    s.set_fpr(5, 0x77);
+    let (gpr, fpr) = (*s.gpr.as_array(), *s.fpr.as_array());
     let mut effects = Vec::new();
-    exec_with_mem(
+    let v = exec_with_mem(
         &PpuInstruction::Lfdu {
             frt: 5,
             ra: 0,
@@ -779,7 +782,10 @@ fn lfdu_with_ra_zero_panics_in_debug() {
         },
         &mut s,
         0,
-        &[0u8; 0x100],
+        &[0x3Fu8; 0x100],
         &mut effects,
     );
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lfdu")));
+    assert_eq!((*s.gpr.as_array(), *s.fpr.as_array()), (gpr, fpr));
+    assert!(effects.is_empty());
 }

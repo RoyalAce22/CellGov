@@ -29,14 +29,14 @@ fn lfsux_with_ra_index_equal_to_frt_index_is_a_valid_form() {
     assert_eq!(s.gpr[3], 0x20);
 }
 
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "lfsux invalid form")]
-fn lfsux_with_ra_zero_panics_in_debug() {
+fn lfsux_with_ra_zero_faults_as_an_invalid_form() {
     let mut s = PpuState::new();
     s.set_gpr(5, 0x10);
+    s.set_fpr(3, 0x77);
+    let (gpr, fpr) = (*s.gpr.as_array(), *s.fpr.as_array());
     let mut effects = Vec::new();
-    exec_with_mem(
+    let v = exec_with_mem(
         &PpuInstruction::Lfsux {
             frt: 3,
             ra: 0,
@@ -44,9 +44,12 @@ fn lfsux_with_ra_zero_panics_in_debug() {
         },
         &mut s,
         0,
-        &[0u8; 0x100],
+        &[0x3Fu8; 0x100],
         &mut effects,
     );
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lfsux")));
+    assert_eq!((*s.gpr.as_array(), *s.fpr.as_array()), (gpr, fpr));
+    assert!(effects.is_empty());
 }
 
 #[test]

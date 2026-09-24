@@ -1929,6 +1929,7 @@ mod fault_class_tests {
             FAULT_UNIMPLEMENTED_INSN,
             FAULT_PROGRAM_TRAP,
             FAULT_ALIGNMENT_INTERRUPT,
+            FAULT_INVALID_FORM,
         ] {
             assert!(!is_decode_error(other), "spurious match for {other:#x}");
         }
