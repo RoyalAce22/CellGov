@@ -476,7 +476,7 @@ fn outcome_mismatch_reason() -> ConvergenceFailure {
 }
 
 fn empty_diverged(reason: ConvergenceFailure) -> CrossRunnerSummary {
-    crate::test_support::cross_runner_summary! {
+    crate::CrossRunnerSummary {
         convergence: Convergence::No {
             reason: reason.clone(),
         },
@@ -491,7 +491,7 @@ fn empty_diverged(reason: ConvergenceFailure) -> CrossRunnerSummary {
 }
 
 fn empty_converged_equivalent() -> CrossRunnerSummary {
-    crate::test_support::cross_runner_summary! {
+    crate::CrossRunnerSummary {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Equivalent,
         per_class_bytes: BTreeMap::new(),
@@ -517,7 +517,7 @@ fn validate_accepts_canonical_diverged() {
 
 #[test]
 fn validate_rejects_converged_with_diverge_byte_parity() {
-    let bad = crate::test_support::cross_runner_summary! {
+    let bad = crate::CrossRunnerSummary {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Diverge {
             reason: outcome_mismatch_reason(),
@@ -537,7 +537,7 @@ fn validate_rejects_converged_with_diverge_byte_parity() {
 
 #[test]
 fn validate_rejects_diverged_without_diverge_byte_parity() {
-    let bad = crate::test_support::cross_runner_summary! {
+    let bad = crate::CrossRunnerSummary {
         convergence: Convergence::No {
             reason: outcome_mismatch_reason(),
         },
@@ -557,7 +557,7 @@ fn validate_rejects_diverged_without_diverge_byte_parity() {
 
 #[test]
 fn validate_rejects_diverge_reasons_disagree() {
-    let bad = crate::test_support::cross_runner_summary! {
+    let bad = crate::CrossRunnerSummary {
         convergence: Convergence::No {
             reason: outcome_mismatch_reason(),
         },
@@ -633,7 +633,7 @@ fn validate_rejects_diverged_with_lowest_offset_some() {
 
 #[test]
 fn validate_rejects_unclassified_denormalization_mismatch() {
-    let bad = crate::test_support::cross_runner_summary! {
+    let bad = crate::CrossRunnerSummary {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Pending {
             non_semantic_bytes: 0,
@@ -661,7 +661,7 @@ fn validate_rejects_unclassified_denormalization_mismatch() {
 
 #[test]
 fn validate_rejects_unclassified_runs_sum_mismatch() {
-    let bad = crate::test_support::cross_runner_summary! {
+    let bad = crate::CrossRunnerSummary {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Pending {
             non_semantic_bytes: 0,
@@ -689,7 +689,7 @@ fn validate_rejects_unclassified_runs_sum_mismatch() {
 
 #[test]
 fn validate_rejects_equivalent_with_non_zero_totals() {
-    let bad = crate::test_support::cross_runner_summary! {
+    let bad = crate::CrossRunnerSummary {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Equivalent,
         per_class_bytes: BTreeMap::from([(DivergenceClass::ElfHeader, 1)]),
@@ -707,7 +707,7 @@ fn validate_rejects_equivalent_with_non_zero_totals() {
 
 #[test]
 fn validate_rejects_non_semantic_bytes_disagreement() {
-    let bad = crate::test_support::cross_runner_summary! {
+    let bad = crate::CrossRunnerSummary {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::NonSemantic { bytes: 5 },
         per_class_bytes: BTreeMap::from([(DivergenceClass::ElfHeader, 3)]),
@@ -728,7 +728,7 @@ fn validate_rejects_non_semantic_bytes_disagreement() {
 
 #[test]
 fn validate_rejects_non_semantic_with_unclassified_present() {
-    let bad = crate::test_support::cross_runner_summary! {
+    let bad = crate::CrossRunnerSummary {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::NonSemantic { bytes: 3 },
         per_class_bytes: BTreeMap::from([
@@ -753,7 +753,7 @@ fn validate_rejects_non_semantic_with_unclassified_present() {
 
 #[test]
 fn validate_rejects_pending_non_semantic_disagreement() {
-    let bad = crate::test_support::cross_runner_summary! {
+    let bad = crate::CrossRunnerSummary {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Pending {
             non_semantic_bytes: 10,
@@ -784,7 +784,7 @@ fn validate_rejects_pending_non_semantic_disagreement() {
 
 #[test]
 fn validate_rejects_pending_unclassified_disagreement() {
-    let bad = crate::test_support::cross_runner_summary! {
+    let bad = crate::CrossRunnerSummary {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Pending {
             non_semantic_bytes: 3,
@@ -844,6 +844,25 @@ fn divergent_summary_json_round_trips() {
     let json = serde_json::to_string_pretty(&s).unwrap();
     let parsed: CrossRunnerSummary = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed, s);
+}
+
+#[test]
+fn a_summary_carrying_an_oracle_gap_count_is_refused() {
+    // The count comes from an operator-local overlay, and a committed
+    // triple carries nothing local.
+    let s = diverged(outcome_mismatch_reason());
+    let mut value = serde_json::to_value(&s).unwrap();
+    value
+        .as_object_mut()
+        .unwrap()
+        .insert("oracle_gap_ordinals".to_string(), serde_json::json!(3));
+    let refused = serde_json::from_value::<CrossRunnerSummary>(value).unwrap_err();
+    assert!(
+        refused
+            .to_string()
+            .contains("unknown field `oracle_gap_ordinals`"),
+        "{refused}"
+    );
 }
 
 #[test]

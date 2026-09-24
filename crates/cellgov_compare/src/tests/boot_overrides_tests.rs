@@ -242,7 +242,7 @@ fn a_boot_summary_keeps_the_overrides_it_was_measured_under() {
 
 #[test]
 fn a_cross_runner_summary_keeps_the_overrides_it_was_written_under() {
-    let summary = crate::test_support::cross_runner_summary! {
+    let summary = crate::CrossRunnerSummary {
         convergence: crate::Convergence::Yes,
         byte_parity: crate::ByteParity::Equivalent,
         per_class_bytes: std::collections::BTreeMap::new(),

@@ -73,10 +73,6 @@ pub struct CrossRunnerSummary {
     /// own configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rpcs3_firmware: Option<String>,
-    /// Number of this cell's calls that fall in the locally computed oracle gap.
-    #[cfg(feature = "rpcs3-runner")]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub oracle_gap_ordinals: Option<u64>,
 }
 
 /// Serde shim so `try_from` runs [`CrossRunnerSummary::validate`] on
@@ -98,9 +94,6 @@ struct CrossRunnerSummaryShadow {
     overrides: BootOverrides,
     #[serde(default)]
     rpcs3_firmware: Option<String>,
-    #[cfg(feature = "rpcs3-runner")]
-    #[serde(default)]
-    oracle_gap_ordinals: Option<u64>,
 }
 
 /// Why [`CrossRunnerSummary::validate`] rejected a candidate.
@@ -235,8 +228,6 @@ impl TryFrom<CrossRunnerSummaryShadow> for CrossRunnerSummary {
                 overrides: s.overrides,
             },
             rpcs3_firmware: s.rpcs3_firmware,
-            #[cfg(feature = "rpcs3-runner")]
-            oracle_gap_ordinals: s.oracle_gap_ordinals,
         };
         out.validate()?;
         Ok(out)
@@ -660,8 +651,6 @@ pub fn summarize(
         lowest_offset_class,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        #[cfg(feature = "rpcs3-runner")]
-        oracle_gap_ordinals: None,
     }
 }
 
@@ -752,8 +741,6 @@ fn diverged(reason: ConvergenceFailure) -> CrossRunnerSummary {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        #[cfg(feature = "rpcs3-runner")]
-        oracle_gap_ordinals: None,
     }
 }
 

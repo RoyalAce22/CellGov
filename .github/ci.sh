@@ -33,8 +33,8 @@ test_suite() {
         --artifacts-dir target/fuzz-smoke/debug --regressions crates/cellgov_fuzz/regressions
     cargo run -p cellgov_cli --locked --release -- dev fuzz smoke \
         --artifacts-dir target/fuzz-smoke/release --regressions crates/cellgov_fuzz/regressions
-    cargo test -p cellgov_install --locked --features decrypt
-    cargo test -p cellgov_install --release --locked --features decrypt
+    cargo test -p cellgov_cli -p cellgov_install --locked --features cellgov_cli/decrypt
+    cargo test -p cellgov_cli -p cellgov_install --release --locked --features cellgov_cli/decrypt
     cargo test -p cellgov_compare --locked --no-default-features
     cargo bench --workspace --no-run --benches --locked
 }

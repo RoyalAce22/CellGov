@@ -230,12 +230,13 @@ pub(crate) fn run(
         CommandError::failed(format!("fixture-gen: build classifier context: {error}"))
     })?;
     let classes = classify_all(&result, &cellgov, &rpcs3, &ctx);
-    let mut summary = summarize(&result, &classes)
+    let summary = summarize(&result, &classes)
         .with_firmware(composition.identity.clone(), rpcs3_firmware)
         .map_err(|error| CommandError::failed(format!("fixture-gen: {error}")))?;
-    summary.oracle_gap_ordinals =
-        oracle_gap_count(&vfs_root, &fixtures, &manifest.content_id, &cell)
-            .map_err(|error| CommandError::failed(format!("fixture-gen: {error}")))?;
+    // The overlay is operator-local, so its count is reported here and
+    // never written into the committed triple.
+    let oracle_gap = oracle_gap_count(&vfs_root, &fixtures, &manifest.content_id, &cell)
+        .map_err(|error| CommandError::failed(format!("fixture-gen: {error}")))?;
 
     std::fs::create_dir_all(&out_dir).map_err(|error| {
         CommandError::failed(format!(
@@ -259,6 +260,12 @@ pub(crate) fn run(
         conv_str,
         parity_str,
     );
+    if let Some(count) = oracle_gap {
+        println!(
+            "fixture-gen: {count} of this cell's unsupported syscalls fall in the local oracle \
+             gap (not written to the fixture)"
+        );
+    }
 
     if let Convergence::No { reason } = &summary.convergence {
         if allow_divergence {

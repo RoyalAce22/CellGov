@@ -5,7 +5,7 @@ use super::*;
 use crate::identity::{AppVersion, FirmwareIdentity, GameIdentity};
 
 fn equivalent() -> CrossRunnerSummary {
-    crate::test_support::cross_runner_summary! {
+    crate::CrossRunnerSummary {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Equivalent,
         per_class_bytes: BTreeMap::new(),
