@@ -139,9 +139,10 @@ jobs:
     name: test (${{ matrix.name }}, ${{ matrix.os }})
     needs: config
     runs-on: ${{ matrix.os }}
-    # Windows builds run slower than Linux; the bound is for a hung
-    # job, not a slow one.
-    timeout-minutes: 45
+    # Windows builds run slower than Linux, and a cache miss adds a
+    # multi-minute save of the Windows target directory after the tests;
+    # the bound is for a hung job, not a slow one.
+    timeout-minutes: 60
     continue-on-error: ${{ matrix.informational }}
     strategy:
       fail-fast: false
