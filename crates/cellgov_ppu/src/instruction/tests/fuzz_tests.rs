@@ -543,7 +543,11 @@ fn synthetic_memory_descriptors_match_their_fused_operations() {
         assert_eq!(descriptor.effects, &[EffectKind::SharedWriteIntent]);
         assert_eq!(
             descriptor.outcomes,
-            &[PpuOutcomeClass::Continue, PpuOutcomeClass::BufferFull]
+            &[
+                PpuOutcomeClass::Continue,
+                PpuOutcomeClass::MemoryFault,
+                PpuOutcomeClass::BufferFull
+            ]
         );
     }
 }
@@ -577,7 +581,11 @@ fn descriptors_reject_verdicts_the_executor_cannot_return() {
     };
     assert_eq!(
         stw.fuzz_descriptor(36 << 26).outcomes,
-        &[PpuOutcomeClass::Continue, PpuOutcomeClass::BufferFull]
+        &[
+            PpuOutcomeClass::Continue,
+            PpuOutcomeClass::MemoryFault,
+            PpuOutcomeClass::BufferFull
+        ]
     );
 
     let branch = PpuInstruction::Bc {

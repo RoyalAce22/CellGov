@@ -534,3 +534,7 @@ fn record_invalid_metamorphic_partner(
 #[cfg(test)]
 #[path = "tests/instructions_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/store_wrap_tests.rs"]
+mod store_wrap_tests;
