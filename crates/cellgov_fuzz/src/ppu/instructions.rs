@@ -546,3 +546,7 @@ mod record_cr6_tests;
 #[cfg(test)]
 #[path = "tests/invalid_form_tests.rs"]
 mod invalid_form_tests;
+
+#[cfg(test)]
+#[path = "tests/reservation_ea_tests.rs"]
+mod reservation_ea_tests;

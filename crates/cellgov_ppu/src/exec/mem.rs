@@ -17,7 +17,7 @@ use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::ReservedLine;
 
-use cellgov_ps3_abi::hw::ppu::DCBZ_BLOCK_BYTES;
+use cellgov_ps3_abi::hw::ppu::{CELL_EA_LIMIT, DCBZ_BLOCK_BYTES};
 
 pub(crate) fn execute(
     insn: &PpuInstruction,
@@ -148,10 +148,7 @@ pub(crate) fn execute(
             if ea & 7 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
             }
-            let success = match state.reservation() {
-                Some(line) => line.addr() == ReservedLine::containing(ea).addr(),
-                None => false,
-            };
+            let success = holds_reservation_for(state, ea);
             // [PPC-Book2 p:25 s:3.3.2 Atomic Update Primitives] CR0 = 0b00 || n || XER[SO].
             let so = u8::from(state.xer_so());
             if success {
@@ -219,10 +216,7 @@ pub(crate) fn execute(
             if ea & 3 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
             }
-            let success = match state.reservation() {
-                Some(line) => line.addr() == ReservedLine::containing(ea).addr(),
-                None => false,
-            };
+            let success = holds_reservation_for(state, ea);
             let so = u8::from(state.xer_so());
             if success {
                 if ByteRange::new(GuestAddr::new(ea), 4).is_none() {
@@ -870,6 +864,17 @@ fn scalar(insn: &PpuInstruction) -> Option<Scalar> {
         PpuInstruction::Stfdux { frs, ra, rb } => Store(X(ra, rb), B8, Src::Fpr(frs), Ra("stfdux")),
         _ => return None,
     })
+}
+
+/// Whether the unit's reservation covers `ea`'s line.
+///
+/// A reservation comes from a load that succeeded, so its line lies
+/// inside the Cell EA space; an `ea` past that space names no held line.
+fn holds_reservation_for(state: &PpuState, ea: u64) -> bool {
+    match state.reservation() {
+        Some(line) => ea <= CELL_EA_LIMIT && line.addr() == ReservedLine::containing(ea).addr(),
+        None => false,
+    }
 }
 
 /// Runs one scalar load, then writes EA to RA for an update form.

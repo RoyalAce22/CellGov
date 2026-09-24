@@ -22,6 +22,8 @@ mod lmw_form;
 mod loads;
 #[path = "mem_read_intent_tests.rs"]
 mod read_intent;
+#[path = "mem_reservation_ea_tests.rs"]
+mod reservation_ea;
 #[path = "mem_scalar_tests.rs"]
 mod scalar;
 #[path = "mem_store_order_tests.rs"]
