@@ -169,6 +169,12 @@ impl SpuState {
             self.ls[addr + 3],
         ]))
     }
+
+    /// Step PC to the next sequential instruction.
+    // [SPU-ISA p:31 s:3] Every local-storage address is ANDed with the LSLR, so the word after the last one is word 0.
+    pub fn advance_pc(&mut self) {
+        self.pc = self.pc.wrapping_add(4) & (SPU_LS_SIZE as u32 - 4);
+    }
 }
 
 impl Default for SpuState {

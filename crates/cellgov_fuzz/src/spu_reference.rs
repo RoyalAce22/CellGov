@@ -307,7 +307,7 @@ pub fn replay_reference(
             &mut state.regs,
         );
         match outcome {
-            SpuStepOutcome::Continue => state.pc = state.pc.wrapping_add(4),
+            SpuStepOutcome::Continue => state.advance_pc(),
             SpuStepOutcome::Branch => {}
             SpuStepOutcome::Yield { .. } | SpuStepOutcome::MemoryRead { .. } => break,
             SpuStepOutcome::Fault(_) => {

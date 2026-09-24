@@ -300,7 +300,7 @@ fn run_sequence_with_limit(
         );
         terminal_outcome = Some(outcome.clone());
         match outcome {
-            SpuStepOutcome::Continue => state.pc = state.pc.wrapping_add(4),
+            SpuStepOutcome::Continue => state.advance_pc(),
             SpuStepOutcome::Branch => {}
             SpuStepOutcome::Yield { .. } | SpuStepOutcome::MemoryRead { .. } => break,
             SpuStepOutcome::Fault(_) => {

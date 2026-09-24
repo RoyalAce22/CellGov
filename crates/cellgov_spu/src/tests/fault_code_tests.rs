@@ -29,9 +29,6 @@ use cellgov_time::Budget;
 const UNIT: u64 = 7;
 const MEM_BYTES: usize = 0x2000;
 
-/// `nop`, RR opcode 0x201 in the high 11 bits.
-const NOP: u32 = 0x201 << 21;
-
 fn code_for(fault: SpuFault) -> u32 {
     match crate::guest_fault_for(fault) {
         FaultKind::Guest(code) => code,
@@ -101,30 +98,23 @@ fn every_raised_class_is_in_the_checked_list() {
     }
 }
 
-/// The reachable case, end to end: a guest that steps off the last
-/// instruction reports the out-of-range class, not another one.
+/// A fetch at a PC past local store reports the out-of-range class, not
+/// another one.
 ///
-/// The fetch path's detail is the raw `pc`, and branches mask `pc` to
-/// 0x3FFFC, so the value a step off the end produces is `SPU_LS_SIZE`.
-/// Unmasked it ORs into the class field and the code reads as
-/// `FAULT_UNSUPPORTED_CHANNEL_COUNT`.
+/// The fetch path's detail is the raw `pc`. Branches and fall-through
+/// mask `pc` into local store, so only a host-placed PC reaches this
+/// path; `SPU_LS_SIZE` is the smallest such value. Unmasked it ORs into
+/// the class field and the code reads as `FAULT_UNSUPPORTED_CHANNEL_COUNT`.
 #[test]
-fn a_guest_that_steps_off_local_store_keeps_its_own_class() {
+fn a_fetch_past_local_store_keeps_its_own_class() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(UNIT));
-    let last = SPU_LS_SIZE - 4;
-    unit.state_mut().ls[last..].copy_from_slice(&NOP.to_be_bytes());
-    unit.state_mut().pc = last as u32;
+    unit.state_mut().pc = SPU_LS_SIZE as u32;
 
     let mem = GuestMemory::new(MEM_BYTES);
     let ctx = ExecutionContext::new(&mem);
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
-    assert_eq!(
-        unit.state().pc,
-        SPU_LS_SIZE as u32,
-        "the nop retired and carried pc past the last instruction",
-    );
     assert_eq!(
         result.yield_reason,
         YieldReason::Fault,

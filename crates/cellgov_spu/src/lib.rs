@@ -265,7 +265,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         if let Some(&msg) = ctx.received_messages().first() {
             let rt = self.state.channels.pending_mbox_rt.take().unwrap_or(2);
             self.state.set_reg_word_splat(rt, msg);
-            self.state.pc += 4;
+            self.state.advance_pc();
         }
 
         // This step clears the effect vector below, so the parked
@@ -352,7 +352,7 @@ impl ExecutionUnit for SpuExecutionUnit {
 
             match exec::execute(&insn, &mut self.state, self.id) {
                 SpuStepOutcome::Continue => {
-                    self.state.pc += 4;
+                    self.state.advance_pc();
                 }
                 SpuStepOutcome::Branch => {}
                 SpuStepOutcome::Yield {
@@ -365,7 +365,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     } else if reason != YieldReason::MailboxAccess {
                         // PC stays on the rdch; the re-entry block at the
                         // top of `run_until_yield` advances it.
-                        self.state.pc += 4;
+                        self.state.advance_pc();
                     }
                     return ExecutionStepResult {
                         yield_reason: reason,
@@ -419,7 +419,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                             source: self.id,
                         });
                     }
-                    self.state.pc += 4;
+                    self.state.advance_pc();
                 }
                 SpuStepOutcome::Fault(f) => {
                     self.status = UnitStatus::Faulted;
@@ -480,6 +480,10 @@ mod parked_get_tests;
 #[cfg(test)]
 #[path = "tests/fault_code_tests.rs"]
 mod fault_code_tests;
+
+#[cfg(test)]
+#[path = "tests/fall_through_wrap_tests.rs"]
+mod fall_through_wrap_tests;
 
 #[cfg(test)]
 #[path = "tests/tag_id_tests.rs"]

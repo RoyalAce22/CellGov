@@ -350,3 +350,7 @@ fn run_sequences_inner(
 #[cfg(test)]
 #[path = "tests/sequences_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/fall_through_wrap_tests.rs"]
+mod fall_through_wrap_tests;
