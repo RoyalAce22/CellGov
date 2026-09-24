@@ -2,6 +2,7 @@
 //! One TOML file per title.
 
 mod cell_check;
+mod cell_paths;
 mod checkpoint;
 mod eboot_load;
 mod loader;
@@ -15,6 +16,11 @@ mod schema;
 mod test_fixtures;
 
 pub use cell_check::CellDisagreement;
+pub use cell_paths::{
+    boot_anchor_path_in, cell_anchor_dir_in, cell_cross_runner_dir_in,
+    cross_runner_summary_path_in, title_anchors_dir_in, title_cross_runner_dir_in,
+    BOOT_SUMMARY_FILE, CROSS_RUNNER_SUMMARY_FILE,
+};
 pub use checkpoint::{CheckpointParseError, CheckpointTrigger};
 pub use eboot_load::{EbootLoadError, TitleNotInstalled};
 pub use matrix::BASE_GAME_VER;

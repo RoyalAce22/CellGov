@@ -21,11 +21,10 @@ use std::path::{Path, PathBuf};
 use cellgov_compare::{BootSummary, CrossRunnerSummary, RunIdentity};
 
 use super::cell::{CellArtifacts, CellResult};
-use crate::paths::CROSS_RUNNER_SUMMARY_FILE;
-use cellgov_boot::manifest::{CellDisagreement, CellKey, TitleManifest};
-
-/// The anchor file every cell's boot measurement is written to.
-const BOOT_SUMMARY_FILE: &str = "boot_summary.json";
+use cellgov_boot::manifest::{
+    title_anchors_dir_in, title_cross_runner_dir_in, CellDisagreement, CellKey, TitleManifest,
+    BOOT_SUMMARY_FILE, CROSS_RUNNER_SUMMARY_FILE,
+};
 
 /// The `fw-` prefix a cell directory's firmware component carries.
 const FW_DIR_PREFIX: &str = "fw-";
@@ -254,11 +253,8 @@ fn load_cell(
 /// directory cannot be listed.
 fn refuse_undeclared_cells(title: &TitleManifest, fixtures: &Path) -> Result<(), SummaryLoadError> {
     let declared: BTreeSet<&CellKey> = title.matrix.iter().map(|c| &c.key).collect();
-    let anchors = fixtures
-        .join(&title.content_id)
-        .join("cellgov")
-        .join("anchors");
-    let cross = fixtures.join(&title.content_id).join("cross_runner");
+    let anchors = title_anchors_dir_in(fixtures, &title.content_id);
+    let cross = title_cross_runner_dir_in(fixtures, &title.content_id);
     for (root, file) in [
         (anchors, BOOT_SUMMARY_FILE),
         (cross, CROSS_RUNNER_SUMMARY_FILE),

@@ -96,13 +96,15 @@ fn boot_with_trace(title: &TitleUnderTest, trace_path: &PathBuf, null_sink: bool
 fn observability_is_inert_wiping_it_every_step_leaves_the_state_trace_byte_identical() {
     let scratch = scratch_labeled("obs_null_sink");
 
-    // Every registered title carries a committed baseline
-    // (`registry_structure` gates that), so an unreadable or malformed
-    // one is a input defect. Dropping it would quietly re-order the
-    // cheapest-first selection below and boot a different title than
-    // the one this gate is sized for.
+    // Every reference cell not marked pending carries a committed
+    // baseline (`registry_structure` gates that), so an unreadable or
+    // malformed one is an input defect. Dropping it would quietly
+    // re-order the cheapest-first selection below and boot a different
+    // title than the one this gate is sized for. A pending cell has no
+    // baseline to rank by.
     let mut by_cost: Vec<(u64, TitleUnderTest)> = titles()
         .into_iter()
+        .filter(|t| t.reference.pending.is_none())
         .map(|t| {
             let path = boot_anchor_path(&t.content_id, &t.reference);
             let text = std::fs::read_to_string(&path)
