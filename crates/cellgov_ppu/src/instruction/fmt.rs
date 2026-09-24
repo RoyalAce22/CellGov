@@ -157,14 +157,14 @@ impl fmt::Display for CrBit {
     }
 }
 
-/// Resolve a branch displacement to its absolute target.
-// [PPC-Book1 p:24 s:2.4.1] AA=1 takes the sign-extended displacement
-// as the absolute address; AA=0 adds it to the branch's own address.
-fn branch_target(addr: u64, offset: i64, abs: bool) -> u64 {
+/// A branch's target as the text shows it: [`super::branch_target`],
+/// with an absolute target shown in its low 32 bits.
+fn shown_target(addr: u64, offset: i32, abs: bool) -> u64 {
+    let target = super::branch_target(addr, offset, abs);
     if abs {
-        (offset as u64) & 0xFFFF_FFFF
+        target & 0xFFFF_FFFF
     } else {
-        addr.wrapping_add(offset as u64)
+        target
     }
 }
 
@@ -468,7 +468,7 @@ fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
             aa,
             link,
         } => {
-            let target = branch_target(addr, offset as i64, aa);
+            let target = shown_target(addr, i32::from(offset), aa);
             match branch_kind(bo, bi)? {
                 BranchKind::Always => None,
                 BranchKind::Ctr { nz } => {
@@ -1066,7 +1066,7 @@ fn render(
 
         // -- Branches (canonical; extended mnemonics live in simplify) --
         I::B { offset, aa, link } => {
-            let target = branch_target(addr, offset as i64, aa);
+            let target = shown_target(addr, offset, aa);
             op(
                 f,
                 mn_branch("b", link, aa).as_str(),
@@ -1080,7 +1080,7 @@ fn render(
             aa,
             link,
         } => {
-            let target = branch_target(addr, offset as i64, aa);
+            let target = shown_target(addr, i32::from(offset), aa);
             op(
                 f,
                 mn_branch("bc", link, aa).as_str(),
@@ -1492,7 +1492,7 @@ fn render(
             cmp!(f, "cmpwi", bf, "r{}, {}", ra, imm)?;
             // The fused bc occupies addr+4; its displacement is
             // relative to its own address.
-            let target = branch_target(addr.wrapping_add(4), target_offset as i64, false);
+            let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
             write!(f, "; bc {bo}, {bi}, 0x{target:x}")
         }
         I::CmpwBc {
@@ -1504,7 +1504,7 @@ fn render(
             target_offset,
         } => {
             cmp!(f, "cmpw", bf, "r{}, r{}", ra, rb)?;
-            let target = branch_target(addr.wrapping_add(4), target_offset as i64, false);
+            let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
             write!(f, "; bc {bo}, {bi}, 0x{target:x}")
         }
         I::Consumed => op0(f, ".consumed"),

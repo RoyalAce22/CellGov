@@ -193,6 +193,9 @@ fn fmt_branch_targets_resolve_absolute() {
     // ba 0x1234 absolute.
     let abs = (18 << 26) | 0x1234 | 2;
     assert_eq!(fmt_at(abs, 0xDEAD_0000), "ba         0x1234");
+    // ba backward: the sign-extended target shows in its low 32 bits.
+    let back_abs = (18 << 26) | (0x03FF_FFFC & (-0x100i32 as u32)) | 2;
+    assert_eq!(fmt_at(back_abs, 0x10000), "ba         0xffffff00");
     // bc 20, 0, 0x10010: branch-always via bc has no extended
     // mnemonic (Table 3 row is blank), so the canonical form stays.
     let bc = (16 << 26) | (20 << 21) | 0x10;

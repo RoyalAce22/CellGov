@@ -1,13 +1,6 @@
 //! The HLE return watch: entry, exit and body events of chosen guest
-//! functions.
-//!
-//! Env vars:
-//!
-//!   CELLGOV_HLE_RETURN_WATCH       Comma-separated hex NIDs.
-//!   CELLGOV_HLE_RETURN_WATCH_PCS   Comma-separated `pc=name` for
-//!                                  entries whose NID is not unique
-//!                                  across PRXes.
-//!   CELLGOV_HLE_RETURN_WATCH_PATH  Output file path.
+//! functions, named by NID or, for an entry whose NID is not unique
+//! across PRXes, by raw entry PC.
 //!
 //! File format (little-endian, no padding inside records): a "CGHW"
 //! version-1 header carrying the watched-ID directory (raw-PC
@@ -19,17 +12,15 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use cellgov_event::UnitId;
-use cellgov_ppu::instruction::PpuInstruction;
+use cellgov_ppu::instruction::{branch_target, PpuInstruction};
 use cellgov_ppu::state::PpuState;
 
-use super::error::TapError;
-use super::parse::hex_u32;
-use super::record_file::RecordFile;
+use super::record_file::{FirstFailure, RecordFile};
 
 /// Record layouts: one builder per kind returns the complete record,
 /// kind byte first, every field little-endian, no padding. A layout
 /// change is a change here and in the reader.
-pub(super) mod wire {
+pub(crate) mod wire {
     pub(super) const KIND_ENTRY: u8 = 1;
     pub(super) const KIND_EXIT: u8 = 2;
     pub(super) const KIND_RESOLUTION: u8 = 3;
@@ -185,20 +176,15 @@ pub(super) mod wire {
 }
 
 /// The bit that marks a raw-PC watch's synthetic on-wire ID.
-const RAW_PC_ID_BIT: u32 = 0x8000_0000;
+pub const RAW_PC_ID_BIT: u32 = 0x8000_0000;
 
-/// The non-empty comma-separated tokens of `value`.
-fn tokens(value: Option<&str>) -> impl Iterator<Item = &str> {
-    value
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-}
+/// The longest name a resolution record carries, behind its 1-byte
+/// length.
+pub const MAX_NAME_LEN: usize = u8::MAX as usize;
 
-/// What the three env vars ask the watch for.
+/// What the watch records and where.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct HleWatchSpec {
+pub struct HleWatchSpec {
     /// Real NIDs, resolved to entry PCs when a firmware set binds.
     pub nids: Vec<u32>,
     /// Entry PCs watched as given, with the name to report them under.
@@ -207,83 +193,7 @@ pub(super) struct HleWatchSpec {
     pub path: PathBuf,
 }
 
-const NIDS_VAR: &str = "CELLGOV_HLE_RETURN_WATCH";
-const PCS_VAR: &str = "CELLGOV_HLE_RETURN_WATCH_PCS";
-const PATH_VAR: &str = "CELLGOV_HLE_RETURN_WATCH_PATH";
-const WATCH_VARS: &str = "CELLGOV_HLE_RETURN_WATCH or CELLGOV_HLE_RETURN_WATCH_PCS";
-
 impl HleWatchSpec {
-    /// Read the spec from the three variables' values; `None` when no
-    /// watch and no path is set. An empty value reads as unset.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`TapError`] when:
-    ///
-    /// - a number or a `pc=name` pair does not parse
-    /// - a raw-PC name is longer than 255 bytes
-    /// - a raw-PC ID equals a NID or the ID of another raw PC
-    /// - a watch is set without a path, or a path without a watch
-    pub(super) fn parse(
-        nids: Option<&str>,
-        pcs: Option<&str>,
-        path: Option<&str>,
-    ) -> Result<Option<Self>, TapError> {
-        let path = path.unwrap_or_default();
-        let mut spec = Self {
-            nids: Vec::new(),
-            raw_pcs: Vec::new(),
-            path: PathBuf::from(path),
-        };
-        for tok in tokens(nids) {
-            spec.nids.push(hex_u32(NIDS_VAR, tok)?);
-        }
-        for tok in tokens(pcs) {
-            let (pc, name) = tok.split_once('=').ok_or_else(|| TapError::BadShape {
-                var: PCS_VAR,
-                expected: "<pc>=<name>",
-                got: tok.to_string(),
-            })?;
-            let pc = hex_u32(PCS_VAR, pc.trim())?;
-            // The resolution record carries the name behind a 1-byte
-            // length.
-            if name.len() > usize::from(u8::MAX) {
-                return Err(TapError::BadShape {
-                    var: PCS_VAR,
-                    expected: "<pc>=<name>, the name at most 255 bytes",
-                    got: tok.to_string(),
-                });
-            }
-            let id = pc | RAW_PC_ID_BIT;
-            if spec.nids.contains(&id) {
-                return Err(TapError::RawPcCollides { pc, id });
-            }
-            // The ID sets bit 31, so a repeated PC, or two PCs that
-            // differ in bit 31 alone, name one watch on the wire.
-            if let Some(&(first, _)) = spec.raw_pcs.iter().find(|(p, _)| p | RAW_PC_ID_BIT == id) {
-                return Err(TapError::RawPcsCollide {
-                    first,
-                    second: pc,
-                    id,
-                });
-            }
-            spec.raw_pcs.push((pc, name.to_string()));
-        }
-        let watches = !(spec.nids.is_empty() && spec.raw_pcs.is_empty());
-        match (watches, path.is_empty()) {
-            (false, true) => Ok(None),
-            (true, false) => Ok(Some(spec)),
-            (true, true) => Err(TapError::Unpaired {
-                set: WATCH_VARS,
-                missing: PATH_VAR,
-            }),
-            (false, false) => Err(TapError::Unpaired {
-                set: PATH_VAR,
-                missing: WATCH_VARS,
-            }),
-        }
-    }
-
     /// The header's watched-ID directory: real NIDs first, then the
     /// raw-PC synthetic IDs.
     fn on_wire_ids(&self) -> Vec<u32> {
@@ -295,7 +205,8 @@ impl HleWatchSpec {
     }
 
     /// The whole file header.
-    pub(super) fn header(&self) -> Vec<u8> {
+    #[must_use]
+    pub fn header(&self) -> Vec<u8> {
         let ids = self.on_wire_ids();
         let mut header = Vec::with_capacity(12 + 4 * ids.len());
         header.extend_from_slice(b"CGHW");
@@ -339,7 +250,7 @@ struct PendingSyscallReturn {
 
 /// The watch's state across every PPU unit: one call stack of watched
 /// functions, one record counter.
-pub(super) struct HleWatch<W: Write> {
+pub struct HleWatch<W: Write> {
     watched_nids: Vec<u32>,
     resolved: BTreeMap<WatchKey, Resolved>,
     out: RecordFile<W>,
@@ -347,12 +258,16 @@ pub(super) struct HleWatch<W: Write> {
     in_flight: Vec<InFlightCall>,
     pending_syscall_returns: Vec<PendingSyscallReturn>,
     last_dispatch: BTreeMap<UnitId, (u32, u32)>,
+    failure: FirstFailure,
 }
 
 impl<W: Write> HleWatch<W> {
     /// A watch writing to `out`, whose header is already written, with
     /// the raw-PC watches resolved.
-    pub(super) fn new(spec: &HleWatchSpec, out: RecordFile<W>) -> Self {
+    ///
+    /// A resolution record that `out` refuses stays held for
+    /// [`Self::take_write_failure`].
+    pub fn new(spec: &HleWatchSpec, out: RecordFile<W>) -> Self {
         let mut watch = Self {
             watched_nids: spec.nids.clone(),
             resolved: BTreeMap::new(),
@@ -361,6 +276,7 @@ impl<W: Write> HleWatch<W> {
             in_flight: Vec::new(),
             pending_syscall_returns: Vec::new(),
             last_dispatch: BTreeMap::new(),
+            failure: FirstFailure::default(),
         };
         for (pc, name) in &spec.raw_pcs {
             let on_wire_nid = pc | RAW_PC_ID_BIT;
@@ -371,7 +287,9 @@ impl<W: Write> HleWatch<W> {
                     entry_pc: *pc,
                 },
             );
-            watch.out.append(&wire::resolution(on_wire_nid, *pc, name));
+            watch
+                .failure
+                .note(watch.out.append(&wire::resolution(on_wire_nid, *pc, name)));
         }
         watch
     }
@@ -390,19 +308,20 @@ impl<W: Write> HleWatch<W> {
                 entry_pc,
             },
         );
-        self.out.append(&wire::resolution(nid, entry_pc, name));
+        self.failure
+            .note(self.out.append(&wire::resolution(nid, entry_pc, name)));
     }
 
     fn append(&mut self, build: impl FnOnce(u64) -> Vec<u8>) -> u64 {
         let record_no = self.record_counter;
         self.record_counter = self.record_counter.wrapping_add(1);
-        self.out.append(&build(record_no));
+        self.failure.note(self.out.append(&build(record_no)));
         record_no
     }
 
     /// Record what `insn`, about to execute in `state`, means for the
     /// watched functions.
-    pub(super) fn dispatch(&mut self, unit: UnitId, insn: &PpuInstruction, state: &PpuState) {
+    pub fn dispatch(&mut self, unit: UnitId, insn: &PpuInstruction, state: &PpuState) {
         let pc = state.pc as u32;
         let gpr = state.gpr.as_array();
         self.on_dispatch(unit, pc, gpr, state.lr());
@@ -413,11 +332,8 @@ impl<W: Write> HleWatch<W> {
                 aa,
                 link: true,
             } => {
-                let target = if aa {
-                    offset as u32
-                } else {
-                    (pc as i32).wrapping_add(offset) as u32
-                };
+                // The on-wire format carries 32-bit PCs.
+                let target = branch_target(u64::from(pc), offset, aa) as u32;
                 self.on_branch_link(unit, pc, gpr, target);
             }
             PpuInstruction::Bcctr { link: true, .. } => {
@@ -566,9 +482,15 @@ impl<W: Write> HleWatch<W> {
         });
     }
 
+    /// The first write failure since the last call, once. The capture
+    /// ends at it; the watch keeps tracking calls and writes nothing.
+    pub fn take_write_failure(&mut self) -> Option<std::io::Error> {
+        self.failure.take()
+    }
+
     /// The writer the records went to.
     #[cfg(test)]
-    pub(super) fn into_inner(self) -> W {
+    pub(crate) fn into_inner(self) -> W {
         self.out.into_inner()
     }
 }
@@ -582,7 +504,7 @@ impl<W: Write> HleWatch<W> {
     /// it unresolved. A NID that an earlier set resolved keeps that
     /// entry PC. When this set's entry for the NID is at a different
     /// address, a line names it, because the watch records no call to it.
-    pub(super) fn bind(
+    pub fn bind(
         &mut self,
         exports: &BTreeMap<String, BTreeMap<u32, u32>>,
         opd_code: impl Fn(u32) -> Option<u32>,

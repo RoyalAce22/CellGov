@@ -1,4 +1,4 @@
-//! The HLE return watch's record layouts, spec parsing, and the record
+//! The HLE return watch's record layouts and header, and the record
 //! stream a call to a watched function produces.
 
 use std::collections::BTreeMap;
@@ -8,9 +8,19 @@ use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::state::PpuState;
 
 use super::wire::*;
-use super::{HleWatch, HleWatchSpec};
-use crate::game::taps::error::TapError;
-use crate::game::taps::record_file::RecordFile;
+use super::{HleWatch, HleWatchSpec, RAW_PC_ID_BIT};
+use crate::taps::RecordFile;
+
+fn spec(nids: &[u32], raw_pcs: &[(u32, &str)]) -> HleWatchSpec {
+    HleWatchSpec {
+        nids: nids.to_vec(),
+        raw_pcs: raw_pcs
+            .iter()
+            .map(|(pc, n)| (*pc, (*n).to_string()))
+            .collect(),
+        path: "w".into(),
+    }
+}
 
 fn gpr() -> [u64; 32] {
     let mut g = [0u64; 32];
@@ -106,75 +116,8 @@ fn a_resolution_record_caps_the_name_at_255_bytes() {
 }
 
 #[test]
-fn nothing_set_is_no_watch() {
-    assert_eq!(HleWatchSpec::parse(None, None, None).unwrap(), None);
-    assert_eq!(
-        HleWatchSpec::parse(Some(""), Some(" , "), Some("")).unwrap(),
-        None
-    );
-}
-
-#[test]
-fn nids_and_raw_pcs_parse_with_or_without_the_hex_prefix() {
-    let spec = HleWatchSpec::parse(
-        Some("0xE6F2C1E7, 9a0e0d6e"),
-        Some("10010=entry_a,0X10020=entry_b"),
-        Some("watch.bin"),
-    )
-    .unwrap()
-    .unwrap();
-    assert_eq!(spec.nids, vec![0xE6F2_C1E7, 0x9A0E_0D6E]);
-    assert_eq!(
-        spec.raw_pcs,
-        vec![
-            (0x10010, "entry_a".to_string()),
-            (0x10020, "entry_b".to_string())
-        ]
-    );
-}
-
-#[test]
-fn a_watch_and_a_path_without_each_other_are_refused() {
-    assert!(matches!(
-        HleWatchSpec::parse(Some("1234"), None, None),
-        Err(TapError::Unpaired { .. })
-    ));
-    assert!(matches!(
-        HleWatchSpec::parse(None, None, Some("watch.bin")),
-        Err(TapError::Unpaired { .. })
-    ));
-}
-
-#[test]
-fn a_malformed_token_names_its_variable() {
-    let err = HleWatchSpec::parse(Some("zz"), None, Some("w")).unwrap_err();
-    assert!(
-        err.to_string().starts_with("CELLGOV_HLE_RETURN_WATCH:"),
-        "{err}"
-    );
-    let err = HleWatchSpec::parse(None, Some("10010"), Some("w")).unwrap_err();
-    assert!(matches!(err, TapError::BadShape { .. }), "{err}");
-    let err = HleWatchSpec::parse(Some("100000000"), None, Some("w")).unwrap_err();
-    assert!(matches!(err, TapError::OutOfRange { .. }), "{err}");
-}
-
-#[test]
-fn a_raw_pc_whose_on_wire_id_is_a_watched_nid_is_refused() {
-    let err = HleWatchSpec::parse(Some("80010010"), Some("10010=f"), Some("w")).unwrap_err();
-    assert!(matches!(
-        err,
-        TapError::RawPcCollides {
-            pc: 0x10010,
-            id: 0x8001_0010
-        }
-    ));
-}
-
-#[test]
 fn the_header_lists_nids_then_raw_pc_ids() {
-    let spec = HleWatchSpec::parse(Some("AA"), Some("10=f"), Some("w"))
-        .unwrap()
-        .unwrap();
+    let spec = spec(&[0xAA], &[(0x10, "f")]);
     let h = spec.header();
     assert_eq!(&h[0..4], b"CGHW");
     assert_eq!(le32(&h, 4), 1);
@@ -187,7 +130,7 @@ const ENTRY_PC: u64 = 0x1_0000;
 const RETURN_PC: u64 = 0x2_0004;
 
 fn watch(spec: &HleWatchSpec) -> HleWatch<Vec<u8>> {
-    HleWatch::new(spec, RecordFile::over("test", Vec::new(), &[]).unwrap())
+    HleWatch::new(spec, RecordFile::over(Vec::new(), &[]).unwrap())
 }
 
 fn at(pc: u64, lr: u64) -> PpuState {
@@ -221,9 +164,7 @@ fn records(mut bytes: &[u8]) -> Vec<(u8, Vec<u8>)> {
 
 #[test]
 fn a_watched_call_records_entry_body_events_and_exit_in_order() {
-    let spec = HleWatchSpec::parse(None, Some("10000=f"), Some("w"))
-        .unwrap()
-        .unwrap();
+    let spec = spec(&[], &[(0x10000, "f")]);
     let mut w = watch(&spec);
     let sc = PpuInstruction::Sc { lev: 0 };
     let bl = PpuInstruction::B {
@@ -278,9 +219,7 @@ fn a_watched_call_records_entry_body_events_and_exit_in_order() {
 
 #[test]
 fn interleaved_units_return_to_their_own_watched_calls() {
-    let spec = HleWatchSpec::parse(None, Some("10000=f"), Some("w"))
-        .unwrap()
-        .unwrap();
+    let spec = spec(&[], &[(0x10000, "f")]);
     let mut w = watch(&spec);
     let first = UnitId::new(1);
     let second = UnitId::new(2);
@@ -318,9 +257,7 @@ fn interleaved_units_return_to_their_own_watched_calls() {
 
 #[test]
 fn body_events_outside_a_watched_call_write_nothing() {
-    let spec = HleWatchSpec::parse(None, Some("10000=f"), Some("w"))
-        .unwrap()
-        .unwrap();
+    let spec = spec(&[], &[(0x10000, "f")]);
     let mut w = watch(&spec);
     w.dispatch(
         UnitId::new(0),
@@ -341,9 +278,7 @@ fn exports(pairs: &[(&str, u32, u32)]) -> BTreeMap<String, BTreeMap<u32, u32>> {
 
 #[test]
 fn a_nid_one_library_exports_resolves_through_its_opd() {
-    let spec = HleWatchSpec::parse(Some("AA"), None, Some("w"))
-        .unwrap()
-        .unwrap();
+    let spec = spec(&[0xAA], &[]);
     let mut w = watch(&spec);
     let lines = w.bind(&exports(&[("libA", 0xAA, 0x9000)]), |opd| {
         (opd == 0x9000).then_some(ENTRY_PC as u32)
@@ -366,9 +301,7 @@ fn a_nid_one_library_exports_resolves_through_its_opd() {
 
 #[test]
 fn a_nid_several_libraries_export_stays_unwatched() {
-    let spec = HleWatchSpec::parse(Some("AA"), None, Some("w"))
-        .unwrap()
-        .unwrap();
+    let spec = spec(&[0xAA], &[]);
     let mut w = watch(&spec);
     let lines = w.bind(
         &exports(&[("_cellAudio", 0xAA, 0x9000), ("cellAudio", 0xAA, 0x9100)]),
@@ -385,9 +318,7 @@ fn a_nid_several_libraries_export_stays_unwatched() {
 
 #[test]
 fn a_nid_resolves_once_across_firmware_sets() {
-    let spec = HleWatchSpec::parse(Some("AA"), None, Some("w"))
-        .unwrap()
-        .unwrap();
+    let spec = spec(&[0xAA], &[]);
     let mut w = watch(&spec);
     w.bind(&exports(&[("libA", 0xAA, 0x9000)]), |_| Some(0x1000));
     let same = w.bind(&exports(&[("libA", 0xAA, 0x9000)]), |_| Some(0x1000));
@@ -405,9 +336,7 @@ fn a_nid_resolves_once_across_firmware_sets() {
 
 #[test]
 fn a_nid_listed_twice_binds_and_reports_once() {
-    let spec = HleWatchSpec::parse(Some("AA,0xaa"), None, Some("w"))
-        .unwrap()
-        .unwrap();
+    let spec = spec(&[0xAA, 0xAA], &[]);
     let mut w = watch(&spec);
     let lines = w.bind(&exports(&[("libA", 0xAA, 0x9000)]), |_| Some(0x1000));
     assert_eq!(lines.len(), 1, "{lines:?}");
@@ -416,39 +345,8 @@ fn a_nid_listed_twice_binds_and_reports_once() {
 }
 
 #[test]
-fn raw_pcs_sharing_an_on_wire_id_are_refused() {
-    for pcs in ["10010=f,10010=g", "10010=f,80010010=g"] {
-        let err = HleWatchSpec::parse(None, Some(pcs), Some("w")).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                TapError::RawPcsCollide {
-                    first: 0x10010,
-                    id: 0x8001_0010,
-                    ..
-                }
-            ),
-            "{pcs}: {err}"
-        );
-    }
-}
-
-#[test]
-fn a_raw_pc_name_the_resolution_record_cannot_carry_is_refused() {
-    let fits = format!("10010={}", "n".repeat(255));
-    assert!(HleWatchSpec::parse(None, Some(&fits), Some("w")).is_ok());
-    let over = format!("10010={}", "n".repeat(256));
-    assert!(matches!(
-        HleWatchSpec::parse(None, Some(&over), Some("w")),
-        Err(TapError::BadShape { .. })
-    ));
-}
-
-#[test]
 fn a_retried_entry_instruction_records_one_entry_and_one_exit() {
-    let spec = HleWatchSpec::parse(None, Some("10000=f"), Some("w"))
-        .unwrap()
-        .unwrap();
+    let spec = spec(&[], &[(0x10000, "f")]);
     let mut w = watch(&spec);
     let store = PpuInstruction::Consumed;
     // A full store buffer sends the entry instruction back once.
@@ -464,9 +362,7 @@ fn a_retried_entry_instruction_records_one_entry_and_one_exit() {
 
 #[test]
 fn a_recursive_call_after_a_body_event_is_a_second_entry() {
-    let spec = HleWatchSpec::parse(None, Some("10000=f"), Some("w"))
-        .unwrap()
-        .unwrap();
+    let spec = spec(&[], &[(0x10000, "f")]);
     let mut w = watch(&spec);
     let bl = PpuInstruction::B {
         offset: -4,
@@ -488,5 +384,96 @@ fn a_recursive_call_after_a_body_event_is_a_second_entry() {
     assert_eq!(
         kinds,
         vec![KIND_RESOLUTION, KIND_ENTRY, KIND_BODY_CALL, KIND_ENTRY]
+    );
+}
+
+#[test]
+fn the_header_is_its_golden_bytes() {
+    assert_eq!(
+        spec(&[0xE6F2_C1E7], &[(0x10010, "f")]).header(),
+        [
+            b'C', b'G', b'H', b'W', 1, 0, 0, 0, 2, 0, 0, 0, // magic, version, id count
+            0xE7, 0xC1, 0xF2, 0xE6, // the NID
+            0x10, 0x00, 0x01, 0x80, // the raw PC's synthetic id
+        ]
+    );
+    assert_eq!(0x10010 | RAW_PC_ID_BIT, 0x8001_0010);
+}
+
+#[test]
+fn each_record_is_its_golden_bytes() {
+    let mut g = [0u64; 32];
+    for (r, v) in g.iter_mut().enumerate().skip(3).take(8) {
+        *v = 0x0101_0101_0101_0101 * r as u64;
+    }
+    let args: Vec<u8> = (3u64..=10)
+        .flat_map(|r| (0x0101_0101_0101_0101 * r).to_le_bytes())
+        .collect();
+    let with_args = |fixed: &[u8]| [fixed, &args].concat();
+
+    assert_eq!(
+        resolution(0x1122_3344, 0x5566_7788, "ab"),
+        [3, 0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55, 2, b'a', b'b']
+    );
+    assert_eq!(
+        entry(1, 0xA, 0xB, 0xC, 0xD, &g),
+        with_args(&[
+            1, 1, 0, 0, 0, 0, 0, 0, 0, // kind, record
+            0xA, 0, 0, 0, 0xB, 0, 0, 0, 0xC, 0, 0, 0, 0xD, 0, 0, 0, // nid, entry, pc, lr
+        ])
+    );
+    assert_eq!(
+        exit(2, 0xA, 1, 0xC, 0x0102_0304_0506_0708),
+        [
+            2, 2, 0, 0, 0, 0, 0, 0, 0, // kind, record
+            0xA, 0, 0, 0, // nid
+            1, 0, 0, 0, 0, 0, 0, 0, // entry record
+            0xC, 0, 0, 0, // pc
+            8, 7, 6, 5, 4, 3, 2, 1, // r3
+        ]
+    );
+    assert_eq!(
+        body_syscall(3, 0xA, 1, 0x81, 0xC, &g),
+        with_args(&[
+            4, 3, 0, 0, 0, 0, 0, 0, 0, 0xA, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0x81, 0, 0, 0, 0xC, 0,
+            0, 0,
+        ])
+    );
+    assert_eq!(
+        body_syscall_return(4, 0xA, 1, 0x81, 0x10, 0xFF),
+        [
+            5, 4, 0, 0, 0, 0, 0, 0, 0, 0xA, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0x81, 0, 0, 0, 0x10,
+            0, 0, 0, 0xFF, 0, 0, 0, 0, 0, 0, 0,
+        ]
+    );
+    assert_eq!(
+        body_call(5, 0xA, 1, 0xC, 0x3000, &g),
+        with_args(&[
+            6, 5, 0, 0, 0, 0, 0, 0, 0, 0xA, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0xC, 0, 0, 0, 0x00,
+            0x30, 0, 0,
+        ])
+    );
+}
+
+#[test]
+fn a_backward_absolute_bl_records_its_target_in_32_bits() {
+    let mut w = watch(&spec(&[], &[(0x10000, "f")]));
+    w.dispatch(
+        UnitId::new(0),
+        &PpuInstruction::Consumed,
+        &at(ENTRY_PC, RETURN_PC),
+    );
+    let bla = PpuInstruction::B {
+        offset: -0x100,
+        aa: true,
+        link: true,
+    };
+    w.dispatch(UnitId::new(0), &bla, &at(ENTRY_PC + 4, RETURN_PC));
+    let recs = records(&w.into_inner());
+    assert_eq!(recs[2].0, KIND_BODY_CALL);
+    assert_eq!(
+        le32(&recs[2].1, 25),
+        0xFFFF_FF00,
+        "the low 32 bits of EXTS(LI||00)"
     );
 }

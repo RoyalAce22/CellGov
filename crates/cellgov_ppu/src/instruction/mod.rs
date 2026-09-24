@@ -6,6 +6,7 @@
 //! spec-named [`PpuDecodeError::DecoderArmUnimplemented`] or to
 //! [`PpuDecodeError::EncodingNotRecognized`].
 
+mod branch;
 mod decode_error;
 pub mod encode;
 pub mod fmt;
@@ -14,6 +15,7 @@ mod insn;
 pub mod known_encodings;
 pub mod ops;
 
+pub use branch::branch_target;
 pub use decode_error::{Locator, PpuDecodeError};
 pub use fmt::AsmText;
 pub use insn::{PpuInstruction, PpuInstructionKind};

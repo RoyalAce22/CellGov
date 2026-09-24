@@ -1,28 +1,21 @@
 //! The watches the environment asks for, as the observers a boot
 //! installs.
 
-use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use cellgov_boot::taps::{
+    HleWatch, HleWatchSpec, RecordFile, StoreWatch, StoreWatchSpec, ValueSample, ValueSampleSpec,
+    WatchEvent, WatchKind, WatchTaps,
+};
 use cellgov_boot::{DebugTaps, NoTaps};
-use cellgov_core::RuntimeTap;
-use cellgov_event::UnitId;
-use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
-use cellgov_ppu::instruction::PpuInstruction;
-use cellgov_ppu::state::PpuState;
-use cellgov_ppu::PpuTap;
 
 use crate::env_vars;
 
 use super::error::TapError;
-use super::hle_watch::{HleWatch, HleWatchSpec};
-use super::record_file::RecordFile;
-use super::store_watch::{StoreWatch, StoreWatchSpec};
-use super::value_sample::{ValueSample, ValueSampleSpec};
+use super::specs::{parse_hle, parse_sample, parse_store};
 
 type Capture = BufWriter<File>;
 
@@ -69,16 +62,16 @@ pub(crate) fn set_watch_vars() -> Vec<&'static str> {
 /// - two watches name one capture file
 /// - the host refuses to create a capture or to write its header
 pub(crate) fn from_env() -> Result<Rc<dyn DebugTaps>, TapError> {
-    let hle = HleWatchSpec::parse(
+    let hle = parse_hle(
         var(env_vars::HLE_RETURN_WATCH)?.as_deref(),
         var(env_vars::HLE_RETURN_WATCH_PCS)?.as_deref(),
         var(env_vars::HLE_RETURN_WATCH_PATH)?.as_deref(),
     )?;
-    let store = StoreWatchSpec::parse(
+    let store = parse_store(
         var(env_vars::STORE_WATCH)?.as_deref(),
         var(env_vars::STORE_WATCH_PATH)?.as_deref(),
     )?;
-    let sample = ValueSampleSpec::parse(
+    let sample = parse_sample(
         var(env_vars::VALUE_SAMPLE)?.as_deref(),
         var(env_vars::VALUE_SAMPLE_PATH)?.as_deref(),
         var(env_vars::VALUE_SAMPLE_STRIDE)?.as_deref(),
@@ -86,55 +79,7 @@ pub(crate) fn from_env() -> Result<Rc<dyn DebugTaps>, TapError> {
     if hle.is_none() && store.is_none() && sample.is_none() {
         return Ok(Rc::new(NoTaps));
     }
-    Ok(Rc::new(EnvTaps::open(hle, store, sample)?))
-}
-
-/// The PPU half: the HLE return watch, and the last dispatched PC the
-/// store watch stamps its records with.
-struct PpuTaps {
-    hle: Option<RefCell<HleWatch<Capture>>>,
-    last_pc: Option<Rc<Cell<u32>>>,
-}
-
-impl PpuTap for PpuTaps {
-    fn dispatch(&self, unit: UnitId, insn: &PpuInstruction, state: &PpuState) {
-        if let Some(last_pc) = &self.last_pc {
-            last_pc.set(state.pc as u32);
-        }
-        if let Some(hle) = &self.hle {
-            hle.borrow_mut().dispatch(unit, insn, state);
-        }
-    }
-}
-
-/// The runtime half: the store watch and the value sample.
-struct RuntimeTaps {
-    store: Option<StoreWatch<Capture>>,
-    sample: Option<ValueSample<Capture>>,
-    last_pc: Rc<Cell<u32>>,
-}
-
-impl RuntimeTap for RuntimeTaps {
-    fn write(&mut self, space: u32, addr: u64, bytes: &[u8]) {
-        if space == 0 {
-            if let Some(store) = &mut self.store {
-                store.write(self.last_pc.get(), addr, bytes);
-            }
-        }
-    }
-
-    fn step(&mut self, step: u64, memory: &GuestMemory) {
-        if let Some(sample) = &mut self.sample {
-            sample.step(step, memory);
-        }
-    }
-}
-
-/// The watches one run installs.
-struct EnvTaps {
-    ppu: Option<Rc<PpuTaps>>,
-    /// The runtime half, until the boot's one [`DebugTaps::runtime`] call takes it.
-    runtime: RefCell<Option<RuntimeTaps>>,
+    Ok(Rc::new(open(hle, store, sample)?))
 }
 
 const HLE_LABEL: &str = "hle-return-watch";
@@ -164,116 +109,102 @@ fn refuse_shared_paths(paths: &[(&'static str, &Path)]) -> Result<(), TapError> 
     Ok(())
 }
 
-impl EnvTaps {
-    /// Create every capture the specs name and report each watch.
-    fn open(
-        hle: Option<HleWatchSpec>,
-        store: Option<StoreWatchSpec>,
-        sample: Option<ValueSampleSpec>,
-    ) -> Result<Self, TapError> {
-        let paths: Vec<(&'static str, &Path)> = [
-            hle.as_ref().map(|s| (HLE_LABEL, s.path.as_path())),
-            store.as_ref().map(|s| (STORE_LABEL, s.path.as_path())),
-            sample.as_ref().map(|s| (SAMPLE_LABEL, s.path.as_path())),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        refuse_shared_paths(&paths)?;
-        let hle = match hle {
-            Some(spec) => {
-                let out = RecordFile::create(HLE_LABEL, &spec.path, &spec.header())?;
-                eprintln!(
-                    "[cellgov] hle-return-watch active: {} NID(s), {} raw PC(s), path={}",
-                    spec.nids.len(),
-                    spec.raw_pcs.len(),
-                    spec.path.display()
-                );
-                Some(RefCell::new(HleWatch::new(&spec, out)))
-            }
-            None => None,
-        };
-        let store = match store {
-            Some(spec) => {
-                let out = RecordFile::create(STORE_LABEL, &spec.path, &spec.header())?;
-                eprintln!(
-                    "[cellgov] store-watch active: addr=0x{:x} len=0x{:x} path={}",
-                    spec.addr,
-                    spec.len,
-                    spec.path.display()
-                );
-                Some(StoreWatch::new(&spec, out))
-            }
-            None => None,
-        };
-        let sample = match sample {
-            Some(spec) => {
-                let out = RecordFile::create(SAMPLE_LABEL, &spec.path, &spec.header())?;
-                eprintln!(
-                    "[cellgov] value-sample active: addr=0x{:x} width={} stride={} path={}",
-                    spec.addr,
-                    spec.width,
-                    spec.stride,
-                    spec.path.display()
-                );
-                Some(ValueSample::new(&spec, out))
-            }
-            None => None,
-        };
-        let last_pc = Rc::new(Cell::new(0));
-        let ppu = (hle.is_some() || store.is_some()).then(|| {
-            Rc::new(PpuTaps {
-                hle,
-                last_pc: store.is_some().then(|| Rc::clone(&last_pc)),
-            })
-        });
-        let runtime = (store.is_some() || sample.is_some()).then(|| RuntimeTaps {
-            store,
-            sample,
-            last_pc,
-        });
-        Ok(Self {
-            ppu,
-            runtime: RefCell::new(runtime),
-        })
+/// The label a watch's stderr lines carry.
+fn label(watch: WatchKind) -> &'static str {
+    match watch {
+        WatchKind::HleReturn => HLE_LABEL,
+        WatchKind::Store => STORE_LABEL,
+        WatchKind::ValueSample => SAMPLE_LABEL,
     }
 }
 
-/// The code address the OPD at `opd` holds.
-fn opd_code(mem: &GuestMemory, opd: u32) -> Option<u32> {
-    let range = ByteRange::new(GuestAddr::new(u64::from(opd)), 4)?;
-    let bytes = mem.read(range)?;
-    Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+/// Print what a running watch reports.
+fn report(event: WatchEvent<'_>) {
+    match event {
+        WatchEvent::Bound(line) => eprintln!("[cellgov] {HLE_LABEL}: {line}"),
+        WatchEvent::WriteFailed { watch, error } => eprintln!(
+            "[cellgov] {}: write failed: {error}; the capture is truncated from here",
+            label(watch)
+        ),
+    }
 }
 
-impl DebugTaps for EnvTaps {
-    fn ppu(&self) -> Option<Rc<dyn PpuTap>> {
-        self.ppu.as_ref().map(|p| Rc::clone(p) as Rc<dyn PpuTap>)
-    }
+/// Create the capture at `path` and write its header.
+fn create(
+    label: &'static str,
+    path: &Path,
+    header: &[u8],
+) -> Result<RecordFile<Capture>, TapError> {
+    RecordFile::create(path, header).map_err(|source| TapError::Capture {
+        label,
+        path: path.to_path_buf(),
+        source,
+    })
+}
 
-    fn runtime(&self) -> Option<Box<dyn RuntimeTap>> {
-        self.runtime
-            .borrow_mut()
-            .take()
-            .map(|r| Box::new(r) as Box<dyn RuntimeTap>)
-    }
-
-    fn firmware_bound(
-        &self,
-        space: u32,
-        exports: &BTreeMap<String, BTreeMap<u32, u32>>,
-        mem: &GuestMemory,
-    ) {
-        if space != 0 {
-            return;
+/// Create every capture the specs name and report each watch.
+fn open(
+    hle: Option<HleWatchSpec>,
+    store: Option<StoreWatchSpec>,
+    sample: Option<ValueSampleSpec>,
+) -> Result<WatchTaps<Capture>, TapError> {
+    let paths: Vec<(&'static str, &Path)> = [
+        hle.as_ref().map(|s| (HLE_LABEL, s.path.as_path())),
+        store.as_ref().map(|s| (STORE_LABEL, s.path.as_path())),
+        sample.as_ref().map(|s| (SAMPLE_LABEL, s.path.as_path())),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    refuse_shared_paths(&paths)?;
+    let hle = match hle {
+        Some(spec) => {
+            let out = create(HLE_LABEL, &spec.path, &spec.header())?;
+            eprintln!(
+                "[cellgov] hle-return-watch active: {} NID(s), {} raw PC(s), path={}",
+                spec.nids.len(),
+                spec.raw_pcs.len(),
+                spec.path.display()
+            );
+            let mut watch = HleWatch::new(&spec, out);
+            if let Some(error) = watch.take_write_failure() {
+                report(WatchEvent::WriteFailed {
+                    watch: WatchKind::HleReturn,
+                    error: &error,
+                });
+            }
+            Some(watch)
         }
-        let Some(hle) = self.ppu.as_ref().and_then(|p| p.hle.as_ref()) else {
-            return;
-        };
-        for line in hle.borrow_mut().bind(exports, |opd| opd_code(mem, opd)) {
-            eprintln!("[cellgov] hle-return-watch: {line}");
+        None => None,
+    };
+    let store = match store {
+        Some(spec) => {
+            let out = create(STORE_LABEL, &spec.path, &spec.header())?;
+            eprintln!(
+                "[cellgov] store-watch active: addr=0x{:x} len=0x{:x} path={}",
+                spec.addr,
+                spec.len,
+                spec.path.display()
+            );
+            Some(StoreWatch::new(&spec, out))
         }
-    }
+        None => None,
+    };
+    let sample = match sample {
+        Some(spec) => {
+            let out = create(SAMPLE_LABEL, &spec.path, &spec.header())?;
+            eprintln!(
+                "[cellgov] value-sample active: addr=0x{:x} width={} stride={} path={}",
+                spec.addr,
+                spec.width,
+                spec.stride,
+                spec.path.display()
+            );
+            Some(ValueSample::new(&spec, out))
+        }
+        None => None,
+    };
+    Ok(WatchTaps::new(hle, store, sample, Rc::new(report)))
 }
 
 #[cfg(test)]

@@ -9,23 +9,14 @@
 // [PPC-Book1 p:20 s:2.4] Branch Processor Instructions overview.
 
 use crate::exec::ExecuteVerdict;
-use crate::instruction::PpuInstruction;
+use crate::instruction::{branch_target, PpuInstruction};
 use crate::state::PpuState;
 
 pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVerdict {
     match *insn {
         PpuInstruction::B { offset, aa, link } => {
-            // `offset as u64` sign-extends: i32 -> u64 widening from a
-            // signed source. This matches `EXTS(LI || 0b00)` so a
-            // negative absolute target lands at 0xFFFF_FFFF_FFFF_xxxx.
-            // Do not change the cast to `as u32 as u64`; that path
-            // would zero-extend.
             // [PPC-Book1 p:24 s:2.4] Branch I-form: NIA <- EXTS(LI||0b00) when AA, else CIA+EXTS(LI||0b00); LR<-CIA+4 when LK.
-            let target = if aa {
-                (offset as u64) & 0xFFFF_FFFF_FFFF_FFFC
-            } else {
-                (state.pc as i64).wrapping_add(offset as i64) as u64
-            };
+            let target = branch_target(state.pc, offset, aa);
             if link {
                 state.set_lr(state.pc + 4);
             }
@@ -45,11 +36,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
                 state.set_lr(state.pc + 4);
             }
             if cond {
-                state.pc = if aa {
-                    (offset as i64 as u64) & 0xFFFF_FFFF_FFFF_FFFC
-                } else {
-                    (state.pc as i64).wrapping_add(offset as i64) as u64
-                };
+                state.pc = branch_target(state.pc, i32::from(offset), aa);
                 ExecuteVerdict::Branch
             } else {
                 ExecuteVerdict::Continue

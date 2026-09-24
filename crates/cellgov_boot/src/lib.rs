@@ -23,7 +23,6 @@ mod mounts;
 mod prescan_format;
 mod sink;
 mod stack_walk;
-mod taps;
 
 pub mod compose;
 pub mod diag;
@@ -32,6 +31,7 @@ pub mod observation;
 pub mod prepare;
 pub mod prx;
 pub mod step_loop;
+pub mod taps;
 
 pub use child_init::{ChildInitError, ChildInitPlans};
 pub use content::{ContentBaseSource, ContentRegisterError};
