@@ -776,7 +776,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
 
 /// Write `result` to GPR `reg`, then run the shared OE and Rc tail.
 ///
-/// Pass `ov` as `Some` only for OE=1; OE=0 leaves XER[OV] untouched.
+/// Pass `ov` as `Some` only for OE=1; OE=0 leaves `XER[OV]` untouched.
 /// OV lands before CR0 because CR0 copies its SO bit from XER.
 // [PPC-Book1 p:18 s:2.3.1] fixed-point Rc=1 sets CR0[0:2] from a signed compare of the result with zero and copies XER[SO] into CR0[3].
 // [PPC-Book1 p:32 s:3.2.2] OE=1 writes XER[OV] and sets SO when OV is set; OE=0 leaves both alone.

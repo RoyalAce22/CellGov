@@ -12,7 +12,10 @@ lint() {
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo clippy --workspace --all-targets --locked --features "$external_data_features" -- -D warnings
     cargo clippy -p cellgov_compare --all-targets --locked --no-default-features -- -D warnings
-    RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked
+    # Private items too: a broken link in a private doc comment is as
+    # misleading as a public one, and the public build never resolves it.
+    RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --document-private-items --locked
+    RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --document-private-items --locked --features "$external_data_features"
 }
 
 test_suite() {

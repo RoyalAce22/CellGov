@@ -1,10 +1,9 @@
 //! The fuzz vocabulary: encoding forms, outcome and relation classes, operand fields and the descriptors.
 
 use cellgov_effects::EffectKind;
+use cellgov_exec::operand::{OperandClass, OperandField};
 
 use crate::instruction::SpuInstructionKind;
-
-use super::bits::low_mask;
 
 /// Encoding form used by an SPU instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,32 +172,11 @@ pub enum SpuSequenceFlow {
 }
 
 /// One packed operand field in an SPU encoding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SpuOperandField {
-    /// Semantic operand class.
-    pub class: SpuOperandClass,
-    /// Bits occupied by the field in the instruction word.
-    pub mask: u32,
-}
+pub type SpuOperandField = OperandField<SpuOperandClass>;
 
-impl SpuOperandField {
-    /// Returns the largest unpacked value this field accepts.
-    pub fn maximum(self) -> u32 {
-        low_mask(self.mask.count_ones())
-    }
-
-    /// Returns values at important signed and unsigned boundaries.
-    // [Jiang2022 p:5 s:3.1.1] The maximum and the minimum are the two boundary values an immediate must cover.
-    pub fn boundary_values(self) -> Vec<u32> {
-        let maximum = self.maximum();
-        let sign = 1u32
-            .checked_shl(self.mask.count_ones().saturating_sub(1))
-            .unwrap_or(0);
-        let mut values = vec![0, 1.min(maximum), sign.saturating_sub(1), sign, maximum];
-        values.sort_unstable();
-        values.dedup();
-        values
-    }
+impl OperandClass for SpuOperandClass {
+    const REGISTER: Self = Self::Register;
+    const IMMEDIATE: Self = Self::Immediate;
 }
 
 /// Interpreter-owned recipe for constructing one SPU instruction kind.

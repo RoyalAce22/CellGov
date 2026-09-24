@@ -6,6 +6,7 @@ use super::support::*;
 use super::types::*;
 use crate::instruction::{SpuInstruction, SpuInstructionKind};
 use cellgov_effects::EffectKind;
+use cellgov_exec::operand::extract_bits;
 use cellgov_ps3_abi::hw::spu;
 use std::collections::BTreeSet;
 

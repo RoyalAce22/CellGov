@@ -1,7 +1,7 @@
 //! The completion pass: adds the kernel a PUP carries to a firmware
 //! entry the store already holds, and leaves the entry's tree as it is.
 //!
-//! A fresh install ([`super::install_pup`]) stores the kernel with the
+//! A fresh install (`install_pup`, under the `decrypt` feature) stores the kernel with the
 //! `dev_flash` tree. This pass serves an entry that already exists: it
 //! opens one package of the same PUP and writes one file beside
 //! `dev_flash/`. The pass takes only the PUP the entry came from; the

@@ -102,7 +102,7 @@ pub struct PkgFile {
     /// File or directory.
     pub kind: PkgEntryKind,
     /// Byte range in the owning archive's decrypted region (empty for
-    /// a directory). Bounds-proved by [`extract`], which is the only
+    /// a directory). Bounds-proved by `extract`, which is the only
     /// constructor.
     region_range: core::ops::Range<usize>,
 }

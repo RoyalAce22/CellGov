@@ -114,13 +114,13 @@ impl Lv2Host {
     ///
     /// Block layout decoded from vsh 0x608950: `{ u64 table_off,
     /// u64, ptr table [8B entries], packed strings }`; the table is
-    /// argv (argv[0] = SELF path), NULL, envp, NULL.
+    /// argv (`argv[0]` = SELF path), NULL, envp, NULL.
     ///
     /// [CBE-Handbook p:397 s:14.3.1.3] The OS hands a program an
     /// argument-pointer array and an environment-pointer array, each
     /// terminated by a NULL pointer.
     ///
-    /// Only argv[0] is consumed here; argv/envp delivery to the
+    /// Only `argv[0]` is consumed here; argv/envp delivery to the
     /// child's entry is not modeled yet.
     ///
     /// `block_size` and [`SPAWN_TABLE_MAX_ENTRIES`] bound the
@@ -135,9 +135,9 @@ impl Lv2Host {
     /// - `CELL_EFAULT` when `table_off` is at or past `block_size`.
     /// - `CELL_EFAULT` when the walked bound holds no argv terminator;
     ///   a named break records it.
-    /// - `CELL_EFAULT` when argv is empty or argv[0] is unreadable.
+    /// - `CELL_EFAULT` when argv is empty or `argv[0]` is unreadable.
     /// - `CELL_ENOENT` when the content store holds no image at
-    ///   argv[0].
+    ///   `argv[0]`.
     /// - `CELL_EAGAIN` when the child pid space is exhausted.
     /// - `CELL_EFAULT` from the runtime when the spawn loader refuses
     ///   the image. The runtime unwinds the pid this arm minted and

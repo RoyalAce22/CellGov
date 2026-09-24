@@ -5,6 +5,7 @@ use super::types::*;
 use crate::instruction::ops::*;
 use crate::instruction::{PpuInstruction, PpuInstructionKind};
 use cellgov_effects::EffectKind;
+use cellgov_exec::operand::extract_bits;
 use std::collections::BTreeSet;
 
 #[test]

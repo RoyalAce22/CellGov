@@ -91,7 +91,7 @@ impl Lv2Host {
     /// Search for the first free, `align`-aligned range of `size`
     /// bytes inside `[MMAPPER_REGION_START, MMAPPER_REGION_END)` at
     /// or after `hint`, skipping every range recorded in
-    /// [`Self::mmapper_install_ledger`] and every window occupied in
+    /// [`mmapper_install_ledger`](crate::host::derived::Lv2Derived::mmapper_install_ledger) and every window occupied in
     /// the caller's committed layout. Loader regions are invisible to
     /// the ledger, so an occupied window is skipped rather than
     /// refused -- `sys_mmapper_search_and_map` searches, it does not

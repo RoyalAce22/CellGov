@@ -1,5 +1,5 @@
-//! Per-arm dispatch helpers for [`super::Lv2Host::dispatch`]'s typed
-//! [`Lv2Request`] variants plus the `Unsupported` / `Malformed` /
+//! Per-arm dispatch helpers for [`Lv2Host::dispatch`](crate::host::Lv2Host::dispatch)'s typed
+//! [`Lv2Request`](crate::request::Lv2Request) variants plus the `Unsupported` / `Malformed` /
 //! `Hypercall` catch-alls.
 
 use cellgov_effects::{Effect, WritePayload};

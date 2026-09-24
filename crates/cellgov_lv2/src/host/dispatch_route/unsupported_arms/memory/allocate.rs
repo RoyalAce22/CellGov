@@ -454,7 +454,7 @@ fn names_shared_segment(ipc_key: u64) -> bool {
 /// The page granule a `sys_mmapper` `flags` word selects, `None` when
 /// its granularity field holds an encoding the kernel refuses.
 ///
-/// The granularity field is `flags` bits [8,11]. 64 KiB and 1 MiB are
+/// The granularity field is `flags` bits 8 to 11. 64 KiB and 1 MiB are
 /// the only encodings it defines, and an unset field takes the
 /// default. liblv2.sprx's own 256 MiB reservation carries the 64 KiB
 /// encoding in exactly those bits. Anything else is refused rather

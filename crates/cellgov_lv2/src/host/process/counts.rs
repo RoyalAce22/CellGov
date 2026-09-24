@@ -1,5 +1,5 @@
 //! Per-class live-object counters that exist only to feed
-//! [`sys_process_get_number_of_object`](super::dispatch_process_get_number_of_object).
+//! [`sys_process_get_number_of_object`](crate::host::Lv2Host::dispatch_process_get_number_of_object).
 //!
 //! These primitives are stubbed at the ID-allocator level (no real
 //! kernel-side state), so the count is tracked here in a side-table

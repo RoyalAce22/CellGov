@@ -47,7 +47,7 @@ pub fn cases() -> Vec<InstructionCase> {
 }
 
 /// `lvsl`: permute control vector. Bytes 0..=15 of VRT = sh, sh+1, ..., sh+15
-/// where sh = EA[60:63]. No memory read.
+/// where `sh = EA[60:63]`. No memory read.
 // [AltiVec-PEM p:6-21 s:6.2] lvsl VRT, RA, RB: build shift-left permute control.
 fn lvsl_cases() -> Vec<InstructionCase> {
     let raw = xform(/*vt*/ 1, /*ra*/ 4, /*rb*/ 5, 6);
@@ -93,7 +93,7 @@ fn lvsl_cases() -> Vec<InstructionCase> {
     cases
 }
 
-/// `lvsr`: shift-right companion. VRT[i] = 16 + i - sh for i in 0..16.
+/// `lvsr`: shift-right companion. `VRT[i] = 16 + i - sh` for `i` in `0..16`.
 // [AltiVec-PEM p:6-22 s:6.2] lvsr VRT, RA, RB: build shift-right permute control.
 fn lvsr_cases() -> Vec<InstructionCase> {
     let raw = xform(2, 4, 5, 38);

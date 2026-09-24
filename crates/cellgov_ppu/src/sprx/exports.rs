@@ -9,7 +9,7 @@ use super::phdr::{v2f, SegEntry, VaddrRange};
 
 /// Parse `sys_prx_module_info_t` at `file_off`.
 ///
-/// Layout: `+0` u16 attrs, `+2` u8[2] version, `+4` char[28] name, `+32` u32
+/// Layout: `+0` u16 attrs, `+2` `u8[2]` version, `+4` `char[28]` name, `+32` u32
 /// toc, `+36/+40` u32 exports_{start,end} (vaddr), `+44/+48` u32
 /// imports_{start,end} (vaddr).
 pub(super) fn parse_module_info(

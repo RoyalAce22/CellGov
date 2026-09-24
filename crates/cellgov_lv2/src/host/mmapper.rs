@@ -5,7 +5,7 @@
 //! 332 / 362 mint a fresh `mem_id` and record `(size, align)` here;
 //! 334 looks the entry up and emits a pending region-install request
 //! the runtime drains after dispatch. Dispatch handlers live in
-//! [`crate::host::dispatch_route::unsupported_arms`]; this module is
+//! `host::dispatch_route::unsupported_arms::memory`; this module is
 //! data only.
 
 use std::collections::BTreeMap;

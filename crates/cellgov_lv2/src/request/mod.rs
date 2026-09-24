@@ -1,6 +1,6 @@
 //! Typed LV2 syscall requests decoded from PPU `sc` GPR state.
 //!
-//! [`classify`] returns an [`Lv2Request`] for every input. Host dispatch
+//! [`classify()`] returns an [`Lv2Request`] for every input. Host dispatch
 //! can therefore match all variants without a classifier panic.
 //!
 //! # Cross-crate contract

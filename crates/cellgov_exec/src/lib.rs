@@ -3,7 +3,8 @@
 //! Owns the `ExecutionUnit` trait, its input `ExecutionContext`, its
 //! return-shape `ExecutionStepResult`, the `YieldReason` vocabulary,
 //! and a `FakeIsaUnit` for pressure-testing the runtime contract
-//! without a real arch unit.
+//! without a real arch unit. [`operand`] holds the operand-field
+//! arithmetic the PPU and SPU fuzz descriptors share.
 //!
 //! No dependency on a concrete scheduler. Architecture-specific
 //! decoding lives in `cellgov_ppu` / `cellgov_spu`, not here.
@@ -22,6 +23,7 @@
 
 pub mod context;
 pub mod fake_isa;
+pub mod operand;
 pub mod step_result;
 pub mod unit;
 pub mod yield_reason;

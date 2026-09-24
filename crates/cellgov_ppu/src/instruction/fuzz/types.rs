@@ -1,11 +1,10 @@
 //! The fuzz vocabulary: encoding forms, fuzz kinds, outcome and relation classes, and the descriptors.
 
 use cellgov_effects::EffectKind;
+use cellgov_exec::operand::{OperandClass, OperandField};
 
 use crate::instruction::ops::{Fp59Op, Fp63Op, VaOp, VxOp};
 use crate::instruction::PpuInstructionKind;
-
-use super::bits::low_mask;
 
 /// Encoding form used by a decoded PPU instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,32 +249,11 @@ pub enum PpuSequenceDependency {
 }
 
 /// One packed operand field in a PPU encoding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PpuOperandField {
-    /// Semantic operand class.
-    pub class: PpuOperandClass,
-    /// Bits occupied by the field in the instruction word.
-    pub mask: u32,
-}
+pub type PpuOperandField = OperandField<PpuOperandClass>;
 
-impl PpuOperandField {
-    /// Returns the largest unpacked value this field accepts.
-    pub fn maximum(self) -> u32 {
-        low_mask(self.mask.count_ones())
-    }
-
-    /// Returns values at important signed and unsigned boundaries.
-    // [Jiang2022 p:5 s:3.1.1] The maximum and the minimum are the two boundary values an immediate must cover.
-    pub fn boundary_values(self) -> Vec<u32> {
-        let maximum = self.maximum();
-        let sign = 1u32
-            .checked_shl(self.mask.count_ones().saturating_sub(1))
-            .unwrap_or(0);
-        let mut values = vec![0, 1.min(maximum), sign.saturating_sub(1), sign, maximum];
-        values.sort_unstable();
-        values.dedup();
-        values
-    }
+impl OperandClass for PpuOperandClass {
+    const REGISTER: Self = Self::Register;
+    const IMMEDIATE: Self = Self::Immediate;
 }
 
 /// Interpreter-owned recipe for constructing one exact PPU instruction kind.

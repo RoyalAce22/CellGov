@@ -1,4 +1,4 @@
-//! Outcome of a single [`super::execute`](super::execute) call.
+//! Outcome of a single [`super::execute`] call.
 
 use crate::exec::fault::PpuFault;
 

@@ -108,10 +108,10 @@ pub struct Runtime {
     /// from before the restore.
     pub(super) scheduler_dirty_after_restore: bool,
     /// Per-unit accumulated DMA-completion tag bits awaiting consumption
-    /// by the issuer's next [`run_until_yield`]. Populated by
+    /// by the issuer's next [`run_until_yield`](cellgov_exec::ExecutionUnit::run_until_yield). Populated by
     /// [`Runtime::fire_dma_completions`]; drained per-unit by
     /// [`Runtime::step`] and threaded via
-    /// [`ExecutionContext::with_completed_dma_tags`]. Co-captured by
+    /// [`ExecutionContext::with_completed_dma_tags`](cellgov_exec::ExecutionContext::with_completed_dma_tags). Co-captured by
     /// [`Runtime::snapshot`].
     pub(super) pending_tag_completions: std::collections::BTreeMap<UnitId, u32>,
     /// Cumulative count of `Effect::RsxLabelWrite` entries

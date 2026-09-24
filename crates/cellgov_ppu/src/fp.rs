@@ -2,7 +2,7 @@
 // [PPC-Book1 p:206 s:Appendix J] Floating-point instruction set sorted by opcode, primaries 59 and 63.
 // [PPC-Book1 p:88 s:4.2.2] FPSCR bit definitions (FPRF, FR, FI, FX, OX, UX, XX, VXSNAN).
 //!
-//! FPSCR is not modeled: every arm here assumes FPSCR[RN] holds the
+//! FPSCR is not modeled: every arm here assumes `FPSCR[RN]` holds the
 //! round-to-nearest encoding and the FPSCR status flags (FPRF, FR, FI,
 //! FX, OX, UX, XX, VXSNAN ...) are never updated. `mffs` / `mcrfs` and
 //! dot-form CR1 updates therefore see stale state.
@@ -10,7 +10,7 @@
 //!
 //! TODO(fpscr): Plumb FPSCR through PpuState and update it from every
 //! computational arm here, plus wire `mffs` / `mcrfs` and dot-form
-//! CR1. Until then a guest that writes FPSCR[RN] to a directed mode
+//! CR1. Until then a guest that writes `FPSCR[RN]` to a directed mode
 //! gets round-to-nearest anyway, and the `fctiw` / `fctid` arms round
 //! to nearest unconditionally rather than honouring the register.
 
