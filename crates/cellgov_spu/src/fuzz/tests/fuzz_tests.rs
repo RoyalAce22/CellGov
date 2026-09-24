@@ -1,4 +1,13 @@
-use super::*;
+use super::bits::*;
+use super::classify::*;
+use super::fields::*;
+use super::registry::*;
+use super::support::*;
+use super::types::*;
+use crate::instruction::{SpuInstruction, SpuInstructionKind};
+use cellgov_effects::EffectKind;
+use cellgov_ps3_abi::hw::spu;
+use std::collections::BTreeSet;
 
 #[test]
 fn declared_spu_relations_have_executed_witnesses_and_detect_seeded_state_leaks() {
