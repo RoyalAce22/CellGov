@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::host::test_support::{primary_attrs, FakeRuntime};
+use crate::ppu_thread::PpuThreadId;
+use cellgov_event::UnitId;
 
 #[test]
 fn new_host_has_empty_ppu_thread_table() {

@@ -1,5 +1,7 @@
 use super::*;
 use crate::host::test_support::primary_attrs;
+use crate::ppu_thread::PpuThreadId;
+use cellgov_event::UnitId;
 
 #[test]
 fn a_transient_unit_aliases_to_a_spawned_childs_thread_not_the_primary() {
