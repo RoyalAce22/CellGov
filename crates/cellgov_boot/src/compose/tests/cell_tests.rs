@@ -4,16 +4,16 @@
 use std::path::PathBuf;
 
 use super::*;
-use cellgov_boot::compose::StoredGame;
-use cellgov_boot::manifest::{CellExpectation, MatrixCell};
+use crate::compose::StoredGame;
+use crate::manifest::{CellExpectation, MatrixCell};
 use cellgov_install::store::inventory::{BaseEntry, FirmwareEntry};
 use cellgov_install::store::select::{FirmwareSelectedBy, ManagedFirmware};
 
 fn manifest(
     bench_max_steps: Option<u64>,
     matrix: Vec<MatrixCell>,
-) -> cellgov_boot::manifest::TitleManifest {
-    use cellgov_boot::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
+) -> crate::manifest::TitleManifest {
+    use crate::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
     TitleManifest {
         content_id: "CG_TEST".to_string(),
         short_name: "test".to_string(),
@@ -40,7 +40,7 @@ fn declared(
     fw: &str,
     game_ver: Option<&str>,
     bench_max_steps: Option<u64>,
-    checkpoint: Option<cellgov_boot::manifest::CheckpointTrigger>,
+    checkpoint: Option<crate::manifest::CheckpointTrigger>,
 ) -> MatrixCell {
     MatrixCell {
         key: CellKey {
@@ -171,7 +171,7 @@ fn a_run_with_no_version_to_key_on_composes_no_cell() {
 
 #[test]
 fn a_declared_cells_overrides_are_what_the_run_and_the_anchor_are_taken_at() {
-    use cellgov_boot::manifest::CheckpointTrigger;
+    use crate::manifest::CheckpointTrigger;
     let title = manifest(
         Some(250_000_000),
         vec![declared(
@@ -187,12 +187,12 @@ fn a_declared_cells_overrides_are_what_the_run_and_the_anchor_are_taken_at() {
     );
     assert_eq!(plan.max_steps, 4_000);
     assert_eq!(plan.checkpoint, CheckpointTrigger::FirstRsxWrite);
-    assert_eq!(plan.max_steps_usize(&title).expect("cap fits usize"), 4_000);
+    assert_eq!(plan.max_steps_usize().expect("cap fits usize"), 4_000);
 }
 
 #[test]
 fn an_undeclared_cell_takes_the_title_defaults() {
-    use cellgov_boot::manifest::CheckpointTrigger;
+    use crate::manifest::CheckpointTrigger;
     let title = manifest(
         Some(250_000_000),
         vec![declared("3.55", Some("base"), Some(4_000), None)],
@@ -212,8 +212,5 @@ fn a_title_with_no_cap_anywhere_takes_the_recorder_default() {
         &title,
         &composition(managed("4.93"), stored(GameVersion::Base)),
     );
-    assert_eq!(
-        plan.max_steps,
-        cellgov_boot::manifest::DEFAULT_BENCH_MAX_STEPS
-    );
+    assert_eq!(plan.max_steps, crate::manifest::DEFAULT_BENCH_MAX_STEPS);
 }

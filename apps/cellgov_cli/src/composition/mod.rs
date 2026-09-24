@@ -12,10 +12,6 @@
 pub(crate) mod banner;
 pub(crate) mod refusal;
 
-pub(crate) use cellgov_boot::compose::{
-    compose_boot, BootComposition, ComposeInputs, FirmwareChoice, GameChoice,
-};
-pub(crate) use cellgov_install::store::select::{
-    FirmwareSelectError, GameVersion, GameVersionSelectError,
-};
+pub(crate) use cellgov_boot::compose::{compose_boot, BootComposition, ComposeInputs};
+pub(crate) use cellgov_install::store::select::{FirmwareSelectError, GameVersionSelectError};
 pub(crate) use refusal::ComposeError;

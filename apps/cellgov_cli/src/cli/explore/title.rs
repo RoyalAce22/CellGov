@@ -25,12 +25,13 @@ use cellgov_explore::{
 };
 
 use super::window::{never_opened, start_past_cap};
-use crate::cli::boot_cmd::{firmware_module_dir, resolve_boot_inputs, ResolvedPlan};
+use crate::cli::boot_cmd::{anchor_plan, firmware_module_dir, plan_max_steps, resolve_boot_inputs};
 use crate::cli::compare::report_first_invariant_break;
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
 use crate::cli::parse::{ExploreTitleArgs, OutputFormat};
 use crate::cli::title::resolve_ps3_vfs_root;
+use cellgov_boot::compose::ResolvedPlan;
 
 /// The subcommand name every refusal below carries.
 const SUBCMD: &str = "explore title";
@@ -93,9 +94,9 @@ pub(super) fn run(
     // window opens over the same prefix the anchor covers.
     let max_steps = match args.max_steps {
         Some(max_steps) => max_steps,
-        None => plan.max_steps_usize(&inputs.title)?,
+        None => plan_max_steps(&plan, &inputs.title)?,
     };
-    let checkpoint = plan.as_plan().checkpoint;
+    let checkpoint = anchor_plan(&plan).checkpoint;
     let mut rt = prepared_runtime(&inputs, firmware_dir.as_deref(), max_steps)?;
     // Both counts are runtime steps; see the doc on `WindowStart::Step`.
     if let Some(refusal) = start_past_cap(start, rt.max_steps()) {

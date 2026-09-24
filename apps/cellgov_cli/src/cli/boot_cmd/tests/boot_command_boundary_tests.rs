@@ -1,4 +1,9 @@
-use super::*;
+use super::bench::separate_spawn_command_error;
+use super::compose::CompositionResolutionError;
+use super::run::boot_run_error;
+use crate::cli::exit::CommandError;
+use crate::composition::ComposeError;
+use crate::game;
 
 #[test]
 fn an_environment_refusal_keeps_its_own_diagnostic_context() {

@@ -141,7 +141,7 @@ pub(crate) fn run(
         &manifest,
         BootOverrides::default(),
     )?;
-    let cell = super::boot_cmd::composed_cell(&composition).ok_or_else(|| {
+    let cell = cellgov_boot::compose::composed_cell(&composition).ok_or_else(|| {
         CommandError::failed(format!(
             "fixture-gen: {} composed no cell: a cross-runner result is filed under \
              (content id, firmware, game version), and this composition names none. An \

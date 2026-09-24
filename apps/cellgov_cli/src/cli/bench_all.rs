@@ -14,8 +14,9 @@ use cellgov_terminal::progress::ProgressBar;
 use cellgov_time::Budget;
 
 use super::boot_cmd::{
-    firmware_module_dir, selection_args, separate_spawn_command_error, try_resolve_cell_inputs,
-    try_resolve_composition, CompositionResolutionError, ResolvedPlan, EXIT_SPREAD_EXCEEDED,
+    anchor_plan, firmware_module_dir, plan_max_steps, selection_args, separate_spawn_command_error,
+    try_resolve_cell_inputs, try_resolve_composition, CompositionResolutionError,
+    EXIT_SPREAD_EXCEEDED,
 };
 use super::declared_cells::{
     declared_cells, filter_declared, read_registry, refuse_undeclared, DeclaredCell,
@@ -29,6 +30,7 @@ use crate::composition::{ComposeError, FirmwareSelectError, GameVersionSelectErr
 use crate::game;
 use crate::progress::BENCH_PAIR_TASK;
 use cellgov_boot::compose::ComposeError as Composition;
+use cellgov_boot::compose::ResolvedPlan;
 use cellgov_boot::manifest::TitleManifest;
 
 /// How a refusal and the report name this invocation.
@@ -354,7 +356,7 @@ fn gate_cell(
     }
     let max_steps = match args.max_steps {
         Some(max_steps) => max_steps,
-        None => plan.max_steps_usize(&inputs.title)?,
+        None => plan_max_steps(&plan, &inputs.title)?,
     };
     let firmware_dir = firmware_module_dir(&inputs.composition)?;
     let owned = selection_args(&selection, vfs_flag)?;
@@ -365,7 +367,7 @@ fn gate_cell(
             title: &inputs.title,
             elf_path: &inputs.elf_path,
             max_steps,
-            plan: plan.as_plan(),
+            plan: anchor_plan(&plan),
             firmware_dir: firmware_dir.as_deref(),
             composed_mounts: &inputs.composition.mounts,
             eboot_dirs: &inputs.composition.eboot_dirs,

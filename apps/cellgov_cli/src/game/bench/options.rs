@@ -3,6 +3,7 @@
 
 use cellgov_time::Budget;
 
+use cellgov_boot::compose::{ExecutionOverrides, TrajectoryOverride};
 use cellgov_boot::manifest::{self, CellKey, TitleManifest};
 
 /// Subprocess measurements one `boot bench` invocation takes.
@@ -92,7 +93,9 @@ impl BenchOptions<'_> {
     ///
     /// The cap is a ceiling the run may hit short of the anchor, so it
     /// is no retarget. `--prescan` only prints a decode report before
-    /// execution, so it is none either.
+    /// execution, so it is none either. Every input but `--checkpoint`
+    /// is judged by [`ExecutionOverrides::trajectory_overrides`], the
+    /// rule `boot run` shares.
     pub(super) fn trajectory_overrides(&self) -> Vec<String> {
         let mut reasons = Vec::new();
         if let Some(cp) = self.checkpoint_override {
@@ -104,23 +107,33 @@ impl BenchOptions<'_> {
                 ));
             }
         }
-        if let Some(b) = self.budget_override {
-            reasons.push(format!("--budget {b} overrides the manifest budget"));
-        }
-        if self.strict_reserved {
-            reasons.push("--strict-reserved changes reserved-region write handling".to_string());
-        }
-        if !self.guest_args.is_empty() {
-            reasons.push(format!(
-                "--guest-arg supplies {} guest argv entries; the anchor is recorded with none",
-                self.guest_args.len()
-            ));
-        }
-        for (flag, value) in crate::cli::parse::override_flags(&self.identity.overrides) {
-            let spelled = value.map_or_else(|| flag.to_string(), |v| format!("{flag} {v}"));
-            reasons.push(format!(
-                "{spelled} overrides boot behaviour; the anchor is recorded with no boot override"
-            ));
+        let shared = ExecutionOverrides {
+            budget: self.budget_override,
+            strict_reserved: self.strict_reserved,
+            guest_args: self.guest_args,
+            boot: &self.identity.overrides,
+        };
+        for input in shared.trajectory_overrides() {
+            match input {
+                TrajectoryOverride::Budget(b) => {
+                    reasons.push(format!("--budget {b} overrides the manifest budget"));
+                }
+                TrajectoryOverride::StrictReserved => reasons
+                    .push("--strict-reserved changes reserved-region write handling".to_string()),
+                TrajectoryOverride::GuestArgs(n) => reasons.push(format!(
+                    "--guest-arg supplies {n} guest argv entries; the anchor is recorded with none"
+                )),
+                TrajectoryOverride::Boot(overrides) => {
+                    for (flag, value) in crate::cli::parse::override_flags(overrides) {
+                        let spelled =
+                            value.map_or_else(|| flag.to_string(), |v| format!("{flag} {v}"));
+                        reasons.push(format!(
+                            "{spelled} overrides boot behaviour; the anchor is recorded with no \
+                             boot override"
+                        ));
+                    }
+                }
+            }
         }
         reasons
     }

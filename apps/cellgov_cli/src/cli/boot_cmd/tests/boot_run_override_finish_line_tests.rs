@@ -4,7 +4,9 @@
 use clap::Parser as _;
 
 use super::*;
-use crate::cli::parse::{BootCommand, Cli, Command};
+use crate::cli::boot_cmd::compose::try_resolve_composition;
+use crate::cli::parse::{BootCommand, BootSelection, Cli, Command};
+use cellgov_compare::BootOverrides;
 
 fn run_args(extra: &[&str]) -> BootRunArgs {
     let mut argv = vec!["cellgov", "boot", "run", "--title", "synthetic"];

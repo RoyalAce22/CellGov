@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use super::*;
-use cellgov_boot::compose::StoredGame;
-use cellgov_boot::manifest::{
+use crate::compose::StoredGame;
+use crate::manifest::{
     CellExpectation, CheckpointTrigger, Distribution, GameSource, MatrixCell, TitleManifest,
 };
 use cellgov_install::store::inventory::{BaseEntry, FirmwareEntry};
@@ -109,5 +109,5 @@ fn a_shipped_firmware_takes_the_declared_cells_cap_and_checkpoint() {
     assert_eq!(plan.cell, Some(shipped_cell()));
     assert_eq!(plan.max_steps, 4_000);
     assert_eq!(plan.checkpoint, CheckpointTrigger::FirstRsxWrite);
-    assert_eq!(plan.max_steps_usize(&title).expect("cap fits usize"), 4_000);
+    assert_eq!(plan.max_steps_usize().expect("cap fits usize"), 4_000);
 }

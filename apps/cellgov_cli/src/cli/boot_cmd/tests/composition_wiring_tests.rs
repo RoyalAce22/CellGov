@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use cellgov_boot::compose::GameChoice;
+use cellgov_boot::compose::{FirmwareChoice, GameChoice};
 use cellgov_install::store::inventory::FirmwareEntry;
 use cellgov_install::store::select::{FirmwareSelectedBy, ManagedFirmware};
 
