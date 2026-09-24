@@ -6,11 +6,9 @@ use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::SelfDecryptArgs;
 
 #[cfg(feature = "decrypt")]
-use cellgov_install::npdrm::{NpdHeaderInfo, Rap};
+use cellgov_install::store::hdd0_exdata_dir;
 #[cfg(feature = "decrypt")]
-use cellgov_install::{sce, self_image};
-#[cfg(feature = "decrypt")]
-use std::cell::RefCell;
+use cellgov_install::{npdrm, sce, self_image};
 
 #[cfg(not(feature = "decrypt"))]
 pub(crate) fn run(
@@ -54,32 +52,23 @@ pub(crate) fn run(
 
     // `Auto` covers both classes. Firmware and disc SELFs stay
     // APP-keyed; an NPDRM title finds its klicensee the way the boot
-    // path does.
-    let exdata = crate::cli::title::exdata_dir(vfs_root);
-    let resolve_error: RefCell<Option<super::StoreCliError>> = RefCell::new(None);
-    let resolver = |npd: &NpdHeaderInfo| -> Option<Rap> {
-        match super::rap::resolve(args.rap.as_deref(), &exdata, &npd.content_id) {
-            Ok(k) => k,
-            Err(e) => {
-                // A refused RAP is a hard error, but the resolver
-                // signature can only say "no key". Carry it out so the
-                // exit names the file instead of the missing key.
-                *resolve_error.borrow_mut() = Some(e);
-                None
-            }
+    // path does. The NPD header is plaintext, so the RAP is resolved
+    // before the decrypt, and a refused RAP exits naming the file
+    // rather than the license-3 free-key fallback succeeding.
+    let exdata = hdd0_exdata_dir(vfs_root);
+    let rap = match npdrm::find_npd_header_info(&data) {
+        Ok(Some(npd)) if self_image::is_sce_wrapped(&data) => {
+            super::rap::resolve(args.rap.as_deref(), &exdata, &npd.content_id)
+                .map_err(|e| CommandError::failed(e.to_string()))?
         }
+        // A plaintext image and an APP-keyed SELF ask for no RAP, and a
+        // chain that will not walk is the decrypt's own refusal.
+        Ok(Some(_) | None) | Err(_) => None,
     };
+    let lookup = |_: &npdrm::NpdHeaderInfo| Ok(rap);
 
     let decrypted =
-        self_image::to_plaintext_elf(&data, &keys, self_image::KeyPolicy::Auto(&resolver));
-
-    // This check runs whichever way the decrypt went. A license-3 SELF
-    // falls back to the vault's free klicensee when the resolver yields
-    // no key. That fallback would otherwise hide a refused RAP behind a
-    // "successful" decrypt.
-    if let Some(rap_err) = resolve_error.borrow_mut().take() {
-        return Err(CommandError::failed(rap_err.to_string()));
-    }
+        self_image::to_plaintext_elf(&data, &keys, self_image::KeyPolicy::Auto(&lookup));
 
     let elf = match decrypted {
         Ok(elf) => elf,

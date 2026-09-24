@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 
-use super::{into_plaintext_elf, is_sce_wrapped, to_plaintext_elf, KeyPolicy};
+use super::{into_plaintext_elf, is_sce_wrapped, open_ppu_image, to_plaintext_elf, KeyPolicy};
 use crate::keys::KeyVault;
 use crate::sce::SceError;
 use crate::test_support::build_npdrm_eboot_header;
@@ -204,7 +204,7 @@ fn an_npdrm_self_under_auto_policy_consults_the_rap_lookup_instead_of_refusing()
     let resolver = |npd: &crate::npdrm::NpdHeaderInfo| {
         consulted.set(consulted.get() + 1);
         assert_eq!(npd.content_id, "UP0001-CGOV00001_00-TESTTESTTESTTEST");
-        Some(crate::npdrm::Rap([0u8; 16]))
+        Ok(Some(crate::npdrm::Rap([0u8; 16])))
     };
     let err = to_plaintext_elf(&raw, &synthetic_vault(), KeyPolicy::Auto(&resolver))
         .expect_err("the synthetic header is not a decryptable SELF");
@@ -229,7 +229,7 @@ fn a_plaintext_image_under_auto_policy_is_borrowed_through_without_consulting_th
     let consulted = std::cell::Cell::new(0usize);
     let resolver = |_: &crate::npdrm::NpdHeaderInfo| {
         consulted.set(consulted.get() + 1);
-        Some(crate::npdrm::Rap([0u8; 16]))
+        Ok(Some(crate::npdrm::Rap([0u8; 16])))
     };
     let out = to_plaintext_elf(&raw, &KeyVault::empty(), KeyPolicy::Auto(&resolver))
         .expect("plaintext passes through");
@@ -242,13 +242,24 @@ fn a_plaintext_image_under_auto_policy_is_borrowed_through_without_consulting_th
     );
 }
 
+/// A plaintext image has no SELF headers to read an identity from, and
+/// never reaches the vault.
+#[test]
+fn a_plaintext_image_opens_with_no_identity_and_its_bytes_unchanged() {
+    let raw = plaintext_image();
+    let image = open_ppu_image(raw.clone(), &KeyVault::empty(), KeyPolicy::AppOnly)
+        .expect("plaintext passes through");
+    assert_eq!(image.elf, raw);
+    assert!(image.identity.is_none());
+}
+
 #[cfg(not(feature = "decrypt"))]
 #[test]
 fn without_the_decrypt_feature_every_sce_wrapper_is_refused_naming_the_feature() {
     let consulted = std::cell::Cell::new(0usize);
     let resolver = |_: &crate::npdrm::NpdHeaderInfo| {
         consulted.set(consulted.get() + 1);
-        Some(crate::npdrm::Rap([0u8; 16]))
+        Ok(Some(crate::npdrm::Rap([0u8; 16])))
     };
     let npdrm = build_npdrm_eboot_header(1, "UP0001-CGOV00001_00-TESTTESTTESTTEST");
     let mut app_keyed = vec![0u8; 0x68];

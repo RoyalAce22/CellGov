@@ -29,6 +29,14 @@ pub const DEFAULT_VFS_ROOT: &str = "vfs";
 /// `home/00000001/exdata` RAP lookup.
 const HDD0_USER: &str = "00000001";
 
+/// The exdata directory under a `dev_hdd0` mount, where an installed
+/// RAP lives: [`StoreLayout::live_exdata_dir`] for a store, or the
+/// directory a boot reads RAPs from under its PS3 VFS root.
+#[must_use]
+pub fn hdd0_exdata_dir(dev_hdd0: &Path) -> PathBuf {
+    dev_hdd0.join("home").join(HDD0_USER).join("exdata")
+}
+
 /// Directory under a VFS root that holds what CellGov keeps about the
 /// store rather than in it.
 const CELLGOV_DIR: &str = ".cellgov";
@@ -495,11 +503,7 @@ impl StoreLayout {
     /// across versions and never a store entry.
     #[must_use]
     pub fn live_exdata_dir(&self) -> PathBuf {
-        self.root
-            .join("dev_hdd0")
-            .join("home")
-            .join(HDD0_USER)
-            .join("exdata")
+        hdd0_exdata_dir(&self.root.join("dev_hdd0"))
     }
 
     /// The directory an install commits into with one rename, and an

@@ -16,70 +16,6 @@ fn the_rap_probe_reads_the_directory_a_title_install_commits_into() {
 }
 
 #[test]
-fn a_rap_that_is_not_sixteen_bytes_is_refused_by_name() {
-    let dir = scratch();
-    let rap = dir.join("short.rap");
-    std::fs::write(&rap, b"nope").unwrap();
-    let err = from_file(&rap).expect_err("wrong size");
-    assert!(
-        matches!(err, StoreCliError::RapWrongSize { len: 4, .. }),
-        "expected RapWrongSize, got {err:?}"
-    );
-    let rendered = err.to_string();
-    assert!(rendered.contains("short.rap"), "names the file: {rendered}");
-    // A bare `contains('4')` would also match a digit in the scratch
-    // path, so pin the phrasing around the size.
-    assert!(
-        rendered.contains("is 4 bytes"),
-        "names the size: {rendered}"
-    );
-    assert!(
-        rendered.contains("expected exactly 16"),
-        "names the requirement: {rendered}"
-    );
-}
-
-/// An absent RAP is the ordinary uninstalled case. The NPDRM layer
-/// turns `None` into the license-3 fallback or a named refusal.
-#[test]
-fn an_absent_rap_resolves_to_no_key_rather_than_an_error() {
-    let dir = scratch();
-    assert_eq!(from_file(&dir.join("absent.rap")).unwrap(), None);
-}
-
-#[test]
-fn a_sixteen_byte_rap_is_read_verbatim_from_disk() {
-    let dir = scratch();
-    let zeroes = dir.join("zeroes.rap");
-    let ones = dir.join("ones.rap");
-    std::fs::write(&zeroes, [0u8; 16]).unwrap();
-    std::fs::write(&ones, [0x11u8; 16]).unwrap();
-
-    assert_eq!(from_file(&zeroes).unwrap().expect("read"), Rap([0u8; 16]));
-    assert_eq!(from_file(&ones).unwrap().expect("read"), Rap([0x11u8; 16]));
-}
-
-/// Only absence may resolve to "no key". Any other read failure looks
-/// the same through the resolver's `Option`. It would then let a
-/// license-3 SELF decrypt on the free key.
-#[test]
-fn a_rap_that_is_present_but_unreadable_is_named_rather_than_read_as_absent() {
-    let dir = scratch();
-    let not_a_file = dir.join("a_directory.rap");
-    std::fs::create_dir_all(&not_a_file).unwrap();
-
-    let err = from_file(&not_a_file).expect_err("an unreadable RAP is not absence");
-    assert!(
-        matches!(err, StoreCliError::RapReadFailed { .. }),
-        "expected RapReadFailed, got {err:?}"
-    );
-    assert!(
-        err.to_string().contains("a_directory.rap"),
-        "the refusal names the file: {err}"
-    );
-}
-
-#[test]
 fn an_explicit_rap_that_does_not_exist_is_refused_rather_than_resolved_to_no_key() {
     let dir = scratch();
     let named = dir.join("absent.rap");
@@ -102,6 +38,33 @@ fn an_exdata_probe_that_misses_is_the_uninstalled_case_not_a_refusal() {
         resolve(None, &dir, "UP9000-NPAA00001_00-SYNTHETIC0").unwrap(),
         None
     );
+}
+
+/// Both lookups refuse by name a RAP the derivation cannot take,
+/// rather than reading it as absent.
+#[test]
+fn a_rap_that_is_not_sixteen_bytes_is_refused_by_name_on_either_lookup() {
+    let dir = scratch();
+    let exdata = dir.join("exdata");
+    std::fs::create_dir_all(&exdata).unwrap();
+    std::fs::write(exdata.join("CID.rap"), [0u8; 15]).unwrap();
+    let explicit = dir.join("long.rap");
+    std::fs::write(&explicit, [0u8; 17]).unwrap();
+
+    for (err, len, name) in [
+        (resolve(None, &exdata, "CID").unwrap_err(), 15, "CID.rap"),
+        (
+            resolve(Some(&explicit), &exdata, "CID").unwrap_err(),
+            17,
+            "long.rap",
+        ),
+    ] {
+        assert!(
+            matches!(&err, StoreCliError::Rap(RapReadError::WrongSize { len: got, .. }) if *got == len),
+            "expected a {len}-byte WrongSize, got {err:?}"
+        );
+        assert!(err.to_string().contains(name), "{err}");
+    }
 }
 
 #[test]

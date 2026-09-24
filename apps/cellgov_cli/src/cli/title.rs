@@ -14,15 +14,6 @@ use super::parse::TitleSelector;
 /// installed content, and this one holds the manifests that select it.
 pub(crate) const DEFAULT_TITLE_REGISTRY_DIR: &str = "title_manifests";
 
-/// The per-user license directory under a PS3 VFS root, where an
-/// installed RAP lives.
-pub(crate) fn exdata_dir(vfs_root: &Path) -> PathBuf {
-    vfs_root.join("home").join(HDD0_USER).join("exdata")
-}
-
-/// The single modelled user profile on the internal HDD.
-const HDD0_USER: &str = "00000001";
-
 /// Resolve the active [`cellgov_boot::manifest::TitleManifest`] for a
 /// subcommand, in priority order: `--title-manifest <path>`,
 /// `--content-id <SERIAL>`, `--title <shortname>`.

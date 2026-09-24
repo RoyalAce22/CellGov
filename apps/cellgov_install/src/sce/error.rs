@@ -227,6 +227,15 @@ pub enum SceError {
         /// `content_id` from the NPD supplemental header.
         content_id: String,
     },
+    /// The NPDRM klicensee lookup refused the title's RAP file.
+    #[error("SCE: RAP for NPDRM title {content_id}: {source}")]
+    RapRead {
+        /// `content_id` from the NPD supplemental header.
+        content_id: String,
+        /// Why the reader refused the RAP file.
+        #[source]
+        source: crate::npdrm::RapReadError,
+    },
     /// SELF is NPDRM-wrapped but the caller declared an APP-only key
     /// policy, so no klicensee is available to open it.
     #[error("SCE: SELF is NPDRM-wrapped (content_id {content_id}, license {license}); the caller's key policy is APP-only, so klicensee resolution is out of reach")]
@@ -256,8 +265,28 @@ pub enum SceError {
     DecryptFeatureDisabled,
 }
 
+impl SceError {
+    /// A refusal every SCE-wrapped image in the run answers the same:
+    /// the vault did not load, or holds no keyset for the image's class
+    /// and revision.
+    pub fn is_key_vault_refusal(&self) -> bool {
+        matches!(
+            self,
+            SceError::Keys(_)
+                | SceError::NoAppKey { .. }
+                | SceError::NoNpdrmKey { .. }
+                | SceError::NoLv2Key { .. }
+                | SceError::RapPboxNotAPermutation { .. }
+        )
+    }
+}
+
 impl From<crate::keys::KeyVaultError> for SceError {
     fn from(e: crate::keys::KeyVaultError) -> Self {
         SceError::Keys(Box::new(e))
     }
 }
+
+#[cfg(test)]
+#[path = "tests/key_vault_refusal_tests.rs"]
+mod tests;

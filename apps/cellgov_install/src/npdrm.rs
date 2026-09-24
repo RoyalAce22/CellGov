@@ -20,6 +20,8 @@
     clippy::cast_lossless
 )]
 
+use std::path::{Path, PathBuf};
+
 #[cfg(feature = "decrypt")]
 use aes::cipher::{BlockDecrypt, KeyInit};
 use cellgov_ps3_abi::format::sce::SCE_SUPPLEMENTAL_KIND_NPDRM;
@@ -74,6 +76,85 @@ pub struct NpdHeaderInfo {
 /// The 16 bytes of one title's RAP file, as read from disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rap(pub [u8; 16]);
+
+/// Whether [`read_rap`] may find no file at the path it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RapPresence {
+    /// The caller derived the path from the content id: no file there
+    /// is no RAP, and the license decides between the free klicensee
+    /// and a refusal.
+    MayBeAbsent,
+    /// The operator or the title manifest named the path: no file
+    /// there is a refusal.
+    Required,
+}
+
+/// Why [`read_rap`] refused a RAP file.
+#[derive(Debug, thiserror::Error)]
+pub enum RapReadError {
+    /// A [`RapPresence::Required`] path holds no file.
+    #[error("RAP {} does not exist", path.display())]
+    Missing {
+        /// The path read.
+        path: PathBuf,
+    },
+    /// The file is there and could not be read.
+    #[error("read RAP {}: {source}", path.display())]
+    Read {
+        /// The path read.
+        path: PathBuf,
+        /// The read failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The file is not the 16 bytes the klicensee derivation takes.
+    #[error("RAP {} is {len} bytes; expected exactly 16", path.display())]
+    WrongSize {
+        /// The path read.
+        path: PathBuf,
+        /// The file's length in bytes.
+        len: usize,
+    },
+}
+
+/// Read one RAP file.
+///
+/// Only a missing file under [`RapPresence::MayBeAbsent`] yields
+/// `Ok(None)`. Any other read failure would otherwise look like an
+/// absent RAP, and a license-3 title would decrypt on the vault's free
+/// klicensee without a word.
+///
+/// # Errors
+///
+/// [`RapReadError`] for a missing required file, an unreadable file, or
+/// a file that is not exactly 16 bytes.
+pub fn read_rap(path: &Path, presence: RapPresence) -> Result<Option<Rap>, RapReadError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return match presence {
+                RapPresence::MayBeAbsent => Ok(None),
+                RapPresence::Required => Err(RapReadError::Missing {
+                    path: path.to_path_buf(),
+                }),
+            }
+        }
+        Err(source) => {
+            return Err(RapReadError::Read {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
+    let rap: [u8; 16] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| RapReadError::WrongSize {
+            path: path.to_path_buf(),
+            len: bytes.len(),
+        })?;
+    Ok(Some(Rap(rap)))
+}
 
 /// Find and interpret an SELF's NPDRM (type 3) supplemental header.
 ///
@@ -235,14 +316,15 @@ pub fn decrypt_self_to_elf_npdrm(
 ///
 /// `rap_lookup` is invoked only for NPDRM-wrapped SELFs and returns
 /// the title's [`Rap`]; the klicensee is derived here. Returning
-/// `None` errors with [`SceError::NoRapForNpdrmTitle`] naming the
-/// `content_id`. License-3 (free) titles fall back to the vault's
-/// free klicensee when the lookup returns `None`.
+/// `Ok(None)` errors with [`SceError::NoRapForNpdrmTitle`] naming the
+/// `content_id`, except for license-3 (free) titles, which fall back
+/// to the vault's free klicensee. A lookup error is
+/// [`SceError::RapRead`] whatever the license.
 #[cfg(feature = "decrypt")]
 pub fn decrypt_self_to_elf_auto(
     data: &[u8],
     keys: &KeyVault,
-    rap_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<Rap>,
+    rap_lookup: impl FnOnce(&NpdHeaderInfo) -> Result<Option<Rap>, RapReadError>,
 ) -> Result<Vec<u8>, SceError> {
     match find_npd_header_info(data)? {
         None => crate::sce::decrypt_self_to_elf(data, keys),
@@ -258,9 +340,13 @@ pub fn decrypt_self_to_elf_auto(
 fn resolve_npdrm_klicensee(
     keys: &KeyVault,
     npd: &NpdHeaderInfo,
-    rap_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<Rap>,
+    rap_lookup: impl FnOnce(&NpdHeaderInfo) -> Result<Option<Rap>, RapReadError>,
 ) -> Result<[u8; 16], SceError> {
-    let klicensee = match rap_lookup(npd) {
+    let rap = rap_lookup(npd).map_err(|source| SceError::RapRead {
+        content_id: npd.content_id.clone(),
+        source,
+    })?;
+    let klicensee = match rap {
         Some(rap) => Some(rap_to_klic(keys, &rap.0)?),
         None => None,
     };
@@ -286,6 +372,10 @@ fn resolve_npdrm_klicensee(
 )]
 #[path = "tests/npdrm_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/rap_read_tests.rs"]
+mod rap_read_tests;
 
 #[cfg(all(test, feature = "decrypt"))]
 #[allow(

@@ -107,9 +107,10 @@ Five structural rules:
   `cellgov_terminal`'s sink trait. `cellgov_cli` depends on it both to
   drive those installers from the `firmware` / `title` / `keys` /
   `self` commands, attaching the renderer, and to decrypt SCE-wrapped
-  SELFs at boot through `self_image::to_plaintext_elf`, the one place
-  that probes for the SCE wrapper and routes to the APP-keyed or
-  klicensee-resolving decrypt per the caller's `KeyPolicy`. Only
+  SELFs at boot through `self_image`, the one module that probes for
+  the SCE wrapper and routes to the APP-keyed or klicensee-resolving
+  decrypt per the caller's `KeyPolicy`; `npdrm::read_rap` is the one
+  RAP reader, and the caller says whether its file may be absent. Only
   `cellgov_install` pulls the crypto crates (`aes`, `cbc`, `ctr`,
   `hmac`, `sha1`, `flate2` -- optional, linked by the default-off
   `decrypt` feature that also gates every key-consuming path;

@@ -14,18 +14,20 @@ use std::borrow::Cow;
 use cellgov_ps3_abi::format::sce::SCE_MAGIC;
 
 use crate::keys::KeyVault;
-use crate::npdrm::{NpdHeaderInfo, Rap};
+use crate::npdrm::{NpdHeaderInfo, Rap, RapReadError};
 use crate::sce::SceError;
 
 /// Which key path [`to_plaintext_elf`] may use to open a SELF.
+#[derive(Clone, Copy)]
 pub enum KeyPolicy<'a> {
     /// APP keys only. An NPDRM-wrapped SELF is refused with
     /// [`SceError::NpdrmUnderAppOnlyPolicy`] rather than attempted.
     AppOnly,
     /// Detect APP vs NPDRM, resolving the title's [`Rap`] through the
-    /// supplied lookup. Returning `None` falls back to the vault's
-    /// free klicensee for license-3 titles and fails for the others.
-    Auto(&'a dyn Fn(&NpdHeaderInfo) -> Option<Rap>),
+    /// supplied lookup. `Ok(None)` falls back to the vault's free
+    /// klicensee for license-3 titles and fails for the others; an
+    /// error fails every license.
+    Auto(&'a dyn Fn(&NpdHeaderInfo) -> Result<Option<Rap>, RapReadError>),
 }
 
 /// True when `bytes` opens with the SCE container magic.
@@ -111,6 +113,59 @@ fn open_sce_wrapper(
         }
     }
     Err(SceError::DecryptFeatureDisabled)
+}
+
+/// The boot identity a SELF wrapper carries in plaintext.
+///
+/// Each field is read on its own, so the caller decides whether a
+/// header that will not parse refuses the image or falls back.
+#[derive(Debug)]
+pub struct SelfIdentity {
+    /// Program authority id from the identification header.
+    pub authority_id: Result<u64, SceError>,
+    /// `ctrl_flags1` from the capability header; `Ok(None)` for a SELF
+    /// that carries none, which is the unprivileged case.
+    pub control_flags1: Result<Option<u32>, SceError>,
+}
+
+/// A PPU image opened for loading.
+#[derive(Debug)]
+pub struct PpuImage {
+    /// The plaintext ELF.
+    pub elf: Vec<u8>,
+    /// The SELF wrapper's identity; `None` for a plaintext input,
+    /// which has no SELF headers.
+    pub identity: Option<SelfIdentity>,
+}
+
+/// Open a PPU image: read the SELF wrapper's identity, then decrypt it
+/// under `policy` with `keys`. A plaintext input moves through with no
+/// identity and never consults the vault.
+///
+/// # Errors
+///
+/// Same as [`to_plaintext_elf`]. A header that will not parse is not
+/// an error here; [`SelfIdentity`] carries it.
+pub fn open_ppu_image(
+    bytes: Vec<u8>,
+    keys: &KeyVault,
+    policy: KeyPolicy<'_>,
+) -> Result<PpuImage, SceError> {
+    if !is_sce_wrapped(&bytes) {
+        return Ok(PpuImage {
+            elf: bytes,
+            identity: None,
+        });
+    }
+    let identity = SelfIdentity {
+        authority_id: crate::sce::parse_program_authority_id(&bytes),
+        control_flags1: crate::sce::parse_control_flags1(&bytes),
+    };
+    let elf = open_sce_wrapper(&bytes, keys, policy)?;
+    Ok(PpuImage {
+        elf,
+        identity: Some(identity),
+    })
 }
 
 /// Owned counterpart to [`to_plaintext_elf`] that moves an already

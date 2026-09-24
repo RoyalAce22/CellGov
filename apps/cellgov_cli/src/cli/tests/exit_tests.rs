@@ -1,5 +1,5 @@
-//! PPU-image decrypt helpers: plaintext passthrough and key-vault
-//! refusal classification.
+//! PPU-image decrypt helpers: plaintext passthrough and the empty vault
+//! a plaintext image is given.
 
 use super::*;
 
@@ -40,6 +40,29 @@ fn a_plaintext_image_is_given_an_empty_vault_without_reading_any_keys() {
     assert!(plain.sources().is_empty());
 }
 
+/// A stopped walk ends with the keys hint only when the vault refused;
+/// a refused RAP names the file, and a hint about keys would mislead.
+#[test]
+fn only_a_vault_refusal_that_stops_the_walk_carries_the_keys_hint() {
+    let stopped = |source| EbootLoadError::Stopped {
+        path: PathBuf::from("EBOOT.BIN"),
+        title: "t".to_string(),
+        source: Box::new(source),
+    };
+    assert!(stopped_by_the_vault(&stopped(SceError::NoAppKey {
+        revision: 0x0A
+    })));
+    assert!(!stopped_by_the_vault(&stopped(SceError::RapRead {
+        content_id: "NPAA00001".to_string(),
+        source: cellgov_install::npdrm::RapReadError::Missing {
+            path: PathBuf::from("NPAA00001.rap"),
+        },
+    })));
+    assert!(!stopped_by_the_vault(&stopped(
+        SceError::DecryptFeatureDisabled
+    )));
+}
+
 #[cfg(not(feature = "decrypt"))]
 #[test]
 fn without_the_decrypt_feature_an_sce_wrapper_is_given_an_empty_vault() {
@@ -49,48 +72,4 @@ fn without_the_decrypt_feature_an_sce_wrapper_is_given_an_empty_vault() {
     let same = crate::cli::keys::try_key_vault_for(&cellgov_ps3_abi::format::sce::SCE_MAGIC)
         .expect("no vault is consulted without the feature");
     assert!(same.sources().is_empty());
-}
-
-#[test]
-fn a_vault_that_lacks_the_keyset_is_a_run_level_refusal() {
-    use cellgov_install::keys::{KeyVaultError, Slot};
-    let refusals = [
-        SceError::Keys(Box::new(KeyVaultError::MissingSlot {
-            slot: Slot::NpKlicFree,
-        })),
-        SceError::Keys(Box::new(KeyVaultError::MissingScepkg)),
-        SceError::NoAppKey { revision: 0x0A },
-        SceError::NoLv2Key {
-            version: 0x0003_0055_0000_0000,
-        },
-        SceError::NoNpdrmKey { revision: 0x0A },
-        SceError::RapPboxNotAPermutation { index: 3 },
-    ];
-    for e in &refusals {
-        assert!(is_key_vault_refusal(e), "{e}");
-    }
-}
-
-#[test]
-fn a_refusal_that_names_the_image_or_its_rap_is_not_a_run_level_refusal() {
-    let image_side = [
-        SceError::KeyEnvelopePadding,
-        SceError::AesCbcDecryptFailed,
-        SceError::NoCandidateOpensEnvelope {
-            class: "APP",
-            revision: 0x0A,
-            tried: 2,
-        },
-        SceError::NoRapForNpdrmTitle {
-            content_id: "UP0001-CGOV00001_00-TESTTESTTESTTEST".into(),
-        },
-        SceError::DecryptFeatureDisabled,
-        SceError::DebugSelfUnsupported {
-            revision_flags: 0x8001,
-        },
-        SceError::BadMagic { got: 0 },
-    ];
-    for e in &image_side {
-        assert!(!is_key_vault_refusal(e), "{e}");
-    }
 }

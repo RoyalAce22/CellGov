@@ -6,18 +6,11 @@ use std::path::PathBuf;
 /// library it drives.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum StoreCliError {
-    /// A RAP file is not the 16 bytes the klicensee derivation needs.
+    /// A RAP file is unreadable or not the 16 bytes the klicensee
+    /// derivation needs.
     #[cfg(feature = "decrypt")]
-    #[error("RAP {} is {len} bytes; expected exactly 16", path.display())]
-    RapWrongSize { path: PathBuf, len: usize },
-    /// A RAP file exists but could not be read.
-    #[cfg(feature = "decrypt")]
-    #[error("read RAP {}: {source}", path.display())]
-    RapReadFailed {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
+    #[error(transparent)]
+    Rap(cellgov_install::npdrm::RapReadError),
     /// `--rap` named a file that is not there. Distinct from the
     /// exdata probe, whose miss is the ordinary uninstalled case.
     #[cfg(feature = "decrypt")]

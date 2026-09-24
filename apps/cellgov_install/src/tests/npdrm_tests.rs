@@ -109,7 +109,7 @@ fn resolve_klicensee_license_network_with_rap_derives_the_klic() {
     let keys = synthetic_vault();
     let rap = [0xABu8; 16];
     let got = resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Network, "NPUA80001"), |_| {
-        Some(Rap(rap))
+        Ok(Some(Rap(rap)))
     })
     .unwrap();
     assert_eq!(got, rap_to_klic(&keys, &rap).unwrap());
@@ -121,7 +121,7 @@ fn resolve_klicensee_license_local_with_rap_derives_the_klic() {
     let keys = synthetic_vault();
     let rap = [0xCDu8; 16];
     let got = resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Local, "NPUA80068"), |_| {
-        Some(Rap(rap))
+        Ok(Some(Rap(rap)))
     })
     .unwrap();
     assert_eq!(got, rap_to_klic(&keys, &rap).unwrap());
@@ -131,7 +131,7 @@ fn resolve_klicensee_license_local_with_rap_derives_the_klic() {
 #[test]
 fn resolve_klicensee_license_network_without_rap_errors_with_content_id() {
     let keys = synthetic_vault();
-    let err = resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Network, "NPUA80001"), |_| None)
+    let err = resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Network, "NPUA80001"), |_| Ok(None))
         .unwrap_err();
     match err {
         SceError::NoRapForNpdrmTitle { content_id } => {
@@ -145,8 +145,8 @@ fn resolve_klicensee_license_network_without_rap_errors_with_content_id() {
 #[test]
 fn resolve_klicensee_license_local_without_rap_errors_with_content_id() {
     let keys = synthetic_vault();
-    let err =
-        resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Local, "NPUA80068"), |_| None).unwrap_err();
+    let err = resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Local, "NPUA80068"), |_| Ok(None))
+        .unwrap_err();
     match err {
         SceError::NoRapForNpdrmTitle { content_id } => {
             assert_eq!(content_id, "NPUA80068");
@@ -160,7 +160,7 @@ fn resolve_klicensee_license_local_without_rap_errors_with_content_id() {
 fn resolve_klicensee_license_free_without_rap_returns_the_vaults_free_klicensee() {
     let keys = synthetic_vault();
     let got =
-        resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Free, "NPEA00000"), |_| None).unwrap();
+        resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Free, "NPEA00000"), |_| Ok(None)).unwrap();
     assert_eq!(got, *keys.np_klic_free().unwrap());
 }
 
@@ -170,7 +170,7 @@ fn resolve_klicensee_license_free_with_rap_derives_the_supplied_rap() {
     let keys = synthetic_vault();
     let rap = [0x77u8; 16];
     let got = resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Free, "NPEA00000"), |_| {
-        Some(Rap(rap))
+        Ok(Some(Rap(rap)))
     })
     .unwrap();
     assert_eq!(got, rap_to_klic(&keys, &rap).unwrap());

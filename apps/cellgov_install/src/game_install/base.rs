@@ -432,11 +432,11 @@ pub fn install_pkg(
         // content-id-keyed read -- but against the staged copy, so a
         // fault before commit touches no live exdata.
         let rap_staging = staging_root.join("rap");
-        let resolver = move |n: &NpdHeaderInfo| -> Option<npdrm::Rap> {
-            let rap_path = rap_staging.join(format!("{}.rap", n.content_id));
-            let bytes = std::fs::read(&rap_path).ok()?;
-            let arr: [u8; 16] = bytes.as_slice().try_into().ok()?;
-            Some(npdrm::Rap(arr))
+        let resolver = move |n: &NpdHeaderInfo| {
+            npdrm::read_rap(
+                &rap_staging.join(format!("{}.rap", n.content_id)),
+                npdrm::RapPresence::MayBeAbsent,
+            )
         };
         progress.phase(Phase::Proving.code());
         npdrm::decrypt_self_to_elf_auto(eboot_data, keys, resolver)

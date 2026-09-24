@@ -19,7 +19,7 @@ pub mod rename;
 pub mod verify;
 
 pub use layout::{
-    record_rel_path, staging_sibling, tombstone_sibling, Artifact, ArtifactKind,
+    hdd0_exdata_dir, record_rel_path, staging_sibling, tombstone_sibling, Artifact, ArtifactKind,
     HiddenSiblingError, StoreKeyError, StoreLayout, StorePathError, TitleId, TitleTree, VersionKey,
     CORE_OS_DIR, DEFAULT_VFS_ROOT,
 };
