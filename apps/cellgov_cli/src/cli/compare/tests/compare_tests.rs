@@ -2,7 +2,7 @@
 
 use cellgov_compare::{DeterminismError, ObserveError, RegionExtractError};
 
-use super::determinism_exit_status;
+use super::scenario::determinism_exit_status;
 use crate::cli::exit_codes;
 
 #[test]
