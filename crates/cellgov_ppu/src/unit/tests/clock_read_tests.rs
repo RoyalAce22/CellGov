@@ -1,10 +1,12 @@
 //! The per-step guest-clock flag: what sets it, which yield publishes
 //! it, and what a discarded batch leaves behind.
 
-use super::*;
-use cellgov_exec::ExecutionContext;
+use crate::*;
+use cellgov_effects::Effect;
+use cellgov_event::UnitId;
+use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
-use cellgov_time::GuestTicks;
+use cellgov_time::{Budget, GuestTicks};
 
 /// `mftb rT`: XFX with TBR 268, encoded low five bits first
 /// (`ra` = 12, `rb` = 8).

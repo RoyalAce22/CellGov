@@ -3,9 +3,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::*;
-use cellgov_exec::ExecutionContext;
+use crate::*;
+use cellgov_event::UnitId;
+use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_time::Budget;
 
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;

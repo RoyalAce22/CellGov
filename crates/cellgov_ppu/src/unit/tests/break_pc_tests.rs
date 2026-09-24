@@ -1,8 +1,11 @@
 //! `set_break_pc` accounting across the block-boundary yields.
 
-use super::*;
-use cellgov_exec::ExecutionContext;
+use crate::*;
+use cellgov_effects::FaultKind;
+use cellgov_event::UnitId;
+use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_time::{Budget, InstructionCost};
 
 const STORE_BUFFER_CAPACITY: usize = 64;
 

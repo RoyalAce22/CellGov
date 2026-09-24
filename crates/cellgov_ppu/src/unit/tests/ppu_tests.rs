@@ -1,9 +1,13 @@
 //! PPU execution-unit tests.
 
-use super::*;
+use crate::*;
 use cellgov_core::AddressSpaceId;
+use cellgov_effects::{Effect, FaultKind};
+use cellgov_event::UnitId;
 use cellgov_exec::ExecutionContext;
+use cellgov_exec::{ExecutionStepResult, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_time::{Budget, InstructionCost};
 
 use std::cell::RefCell;
 

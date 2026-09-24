@@ -1,9 +1,11 @@
 //! A mid-batch fault yields the fault site's registers while the unit
 //! rewinds to batch entry.
 
-use super::*;
-use cellgov_exec::ExecutionContext;
+use crate::*;
+use cellgov_event::UnitId;
+use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_time::Budget;
 
 fn place_insn(mem: &mut GuestMemory, offset: usize, raw: u32) {
     let range = ByteRange::new(GuestAddr::new(offset as u64), 4).unwrap();
