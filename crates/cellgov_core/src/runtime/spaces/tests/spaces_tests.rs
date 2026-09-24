@@ -8,6 +8,9 @@ use cellgov_sync::ReservedLine;
 use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
 use super::*;
+use crate::runtime::state::Runtime;
+use cellgov_event::UnitId;
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize};
 
 #[derive(Clone)]
 struct AddrWriter {

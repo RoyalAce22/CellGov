@@ -46,7 +46,7 @@ const NARROWED: [(&str, &str, &str); 5] = [
 const ACCESSORS: &str = "crates/cellgov_core/src/runtime/accessors.rs";
 
 /// The declaration site of the two space-scoped accessors.
-const SPACES: &str = "crates/cellgov_core/src/runtime/spaces.rs";
+const SPACES: &str = "crates/cellgov_core/src/runtime/spaces/lifecycle.rs";
 
 const OWNING_CRATE: &str = "crates/cellgov_core/";
 
