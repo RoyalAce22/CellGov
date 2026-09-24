@@ -206,22 +206,15 @@ fn verify_before_removal(
 ) -> Result<(), CommandError> {
     let keys = cellgov_install::keys::KeyVault::load_for_vfs(store)
         .map_err(|error| CommandError::failed(format!("firmware uninstall --verify: {error}")))?;
-    let dev_flash = plan
-        .entry_dir
-        .join(cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT);
-    let mut report = cellgov_install::firmware_verify::verify_firmware_tree(&dev_flash, &keys)
-        .map_err(|error| CommandError::failed(format!("firmware uninstall --verify: {error}")))?;
-    if let Some(kernel) = &plan.kernel {
-        match cellgov_install::firmware_verify::verify_stored_kernel(&plan.entry_dir, kernel) {
-            Ok(None) => report.matched += 1,
-            Ok(Some(fault)) => report.divergences.push(fault),
-            Err(error) => {
-                return Err(CommandError::failed(format!(
-                    "firmware uninstall --verify: {error}"
-                )))
-            }
-        }
-    }
+    // An entry that stores no kernel is checked on its modules alone;
+    // the removal takes the entry whatever the kernel's state.
+    let report = cellgov_install::firmware_verify::verify_firmware_entry(
+        &plan.entry_dir,
+        plan.core_os.as_ref(),
+        &keys,
+    )
+    .map_err(|error| CommandError::failed(format!("firmware uninstall --verify: {error}")))?
+    .report;
     for fault in &report.divergences {
         eprintln!("  {fault}");
     }

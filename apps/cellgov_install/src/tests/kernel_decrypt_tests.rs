@@ -219,3 +219,65 @@ fn every_key_gap_variant_is_one_and_the_container_refusals_are_not() {
     }));
     assert!(!is_key_gap(&SceError::NoUsableSection));
 }
+
+fn block(kernel: Option<KernelRecord>, omission: Option<&str>) -> CoreOsRecord {
+    CoreOsRecord {
+        kernel,
+        omission: omission.map(str::to_string),
+        files: Vec::new(),
+    }
+}
+
+/// An entry that stores no kernel says why, without a decrypt attempt;
+/// one that stores a kernel reports the decrypt's own state.
+#[test]
+fn an_entry_reports_why_it_stores_no_kernel_or_how_its_kernel_decrypted() {
+    let entry = scratch();
+    let keys = synthetic_vault();
+    assert_eq!(
+        entry_kernel_coverage(&entry, None, &keys),
+        EntryKernelCoverage::Absent(KernelAbsence::NotRecorded)
+    );
+    let omitted = block(None, Some("CORE_OS_PACKAGE.pkg names no lv2_kernel.self"));
+    assert_eq!(
+        entry_kernel_coverage(&entry, Some(&omitted), &keys),
+        EntryKernelCoverage::Absent(KernelAbsence::Omitted(Some(
+            "CORE_OS_PACKAGE.pkg names no lv2_kernel.self"
+        )))
+    );
+    let silent = block(None, None);
+    assert_eq!(
+        entry_kernel_coverage(&entry, Some(&silent), &keys),
+        EntryKernelCoverage::Absent(KernelAbsence::Omitted(None))
+    );
+    let stored = block(Some(record()), None);
+    assert!(
+        matches!(
+            entry_kernel_coverage(&entry, Some(&stored), &keys),
+            EntryKernelCoverage::Attempted(KernelCoverage::Unreadable { .. })
+        ),
+        "the entry holds no file at the recorded path"
+    );
+}
+
+/// Archive versions come first, in archive order, each with its entry
+/// when one is installed; installed versions the archive does not name
+/// follow in version-key order.
+#[test]
+fn coverage_rows_follow_the_archive_then_the_unknown_installs() {
+    let archive = ["1.00".to_string(), "1.02".to_string()];
+    let installed: BTreeMap<String, &str> =
+        [("9.99", "late"), ("1.02", "decrypted"), ("0.50", "early")]
+            .into_iter()
+            .map(|(version, state)| (version.to_string(), state))
+            .collect();
+    assert_eq!(
+        coverage_rows(&archive, installed),
+        [
+            ("1.00".to_string(), None),
+            ("1.02".to_string(), Some("decrypted")),
+            ("0.50".to_string(), Some("early")),
+            ("9.99".to_string(), Some("late")),
+        ]
+    );
+}

@@ -47,6 +47,7 @@ pub mod param_sfo;
 pub mod pkg;
 pub mod progress;
 pub mod pup;
+pub mod pup_verify;
 pub mod sce;
 pub mod self_image;
 pub mod store;

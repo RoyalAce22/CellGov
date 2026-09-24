@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use cellgov_install::kernel_decrypt::{decrypt_stored_kernel, DecryptedKernel, KernelDecryptError};
 use cellgov_install::keys::{version_label, KeyVault, KeyVaultError};
 use cellgov_install::manifest::{sha256_of, Sha256};
-use cellgov_install::store::KernelRecord;
+use cellgov_install::store::{KernelAbsence, KernelRecord};
 
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::{Lv2ExtractArgs, OutputFormat};
@@ -121,34 +121,23 @@ fn extract(args: &Lv2ExtractArgs, vfs_root: &Path) -> Result<Lv2ExtractDoc, Lv2E
                 source,
             }
         })?;
-    let source = stored_kernel_path(&managed.entry, kernel);
+    let source = kernel.path_in(&managed.entry.entry_dir);
     write_output(&args.output_dir, &managed.entry.version, &source, decrypted)
 }
 
 fn kernel_record(entry: &FirmwareEntry) -> Result<&KernelRecord, Lv2ExtractError> {
-    let Some(core_os) = &entry.core_os else {
-        return Err(Lv2ExtractError::NotUnpacked {
+    entry
+        .stored_kernel()
+        .map_err(|absence| Lv2ExtractError::NotUnpacked {
             version: entry.version.clone(),
-            reason: "the install record predates stored kernels".to_string(),
-        });
-    };
-    core_os
-        .kernel
-        .as_ref()
-        .ok_or_else(|| Lv2ExtractError::NotUnpacked {
-            version: entry.version.clone(),
-            reason: core_os
-                .omission
-                .clone()
-                .unwrap_or_else(|| "the install recorded no reason".to_string()),
+            reason: match absence {
+                KernelAbsence::NotRecorded => "the install record predates stored kernels",
+                KernelAbsence::Omitted(reason) => {
+                    reason.unwrap_or("the install recorded no reason")
+                }
+            }
+            .to_string(),
         })
-}
-
-fn stored_kernel_path(entry: &FirmwareEntry, kernel: &KernelRecord) -> PathBuf {
-    kernel
-        .path
-        .split('/')
-        .fold(entry.entry_dir.clone(), |path, part| path.join(part))
 }
 
 fn write_output(

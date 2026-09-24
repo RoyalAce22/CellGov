@@ -1,10 +1,12 @@
 //! Verifies acquired PUP files and installed firmware against the LV2 archive.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use cellgov_install::manifest::Sha256;
-use cellgov_lv2::archive::{self, PupRow, PUP};
+use cellgov_install::pup_verify::{
+    classify, installed_mismatches, ArchivePup, InstalledClaims, PupMismatch, ScannedPup,
+};
+use cellgov_lv2::archive::{self, PUP};
 
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
@@ -22,14 +24,8 @@ const PUP_TSV: &str = include_str!(concat!(
     "/../../docs/lv2/tables/pup.tsv"
 ));
 
-struct ScannedPup {
-    path: String,
-    sha256: String,
-    size_bytes: u64,
-    fw: Result<(String, String), String>,
-}
-
-fn archive_rows() -> Result<Vec<PupRow>, CommandError> {
+/// The compiled archive's PUP rows, as the verifier reads them.
+fn archive_rows() -> Result<Vec<ArchivePup>, CommandError> {
     let table = archive::parse(&PUP, PUP_TSV).map_err(|error| {
         CommandError::failed(format!(
             "compiled docs/lv2/tables/pup.tsv is invalid: {error}"
@@ -41,7 +37,15 @@ fn archive_rows() -> Result<Vec<PupRow>, CommandError> {
             "compiled docs/lv2/tables/pup.tsv is invalid: {error}"
         ))
     })?;
-    Ok(rows)
+    Ok(rows
+        .into_iter()
+        .map(|row| ArchivePup {
+            pup_sha256: row.pup_sha256,
+            fw: row.fw,
+            size_bytes: row.size_bytes,
+            image_version: row.image_version,
+        })
+        .collect())
 }
 
 fn pup_paths(dir: &Path) -> Result<Vec<PathBuf>, CommandError> {
@@ -85,22 +89,10 @@ fn pup_paths(dir: &Path) -> Result<Vec<PathBuf>, CommandError> {
 fn scan_pup(pup_directory: &Path, path: &Path) -> Result<ScannedPup, CommandError> {
     let bytes = filebuffer::FileBuffer::open(path)
         .map_err(|error| CommandError::failed(format!("read PUP {}: {error}", path.display())))?;
-    let sha256 = Sha256(cellgov_install::manifest::sha256_of(&bytes)).to_hex();
-    let fw = cellgov_install::pup::parse(&bytes)
-        .and_then(|pup| {
-            let version = cellgov_install::pup::version_key(&bytes, &pup)?;
-            Ok((version, format!("0x{:016x}", pup.image_version)))
-        })
-        .map_err(|error| error.to_string());
-    Ok(ScannedPup {
-        path: store_rel(pup_directory, path),
-        sha256,
-        size_bytes: bytes.len() as u64,
-        fw,
-    })
+    Ok(ScannedPup::of(store_rel(pup_directory, path), &bytes))
 }
 
-fn expected_doc(row: &PupRow, path: Option<String>) -> PupEntryDoc {
+fn expected_doc(row: &ArchivePup, path: Option<String>) -> PupEntryDoc {
     PupEntryDoc {
         fw: row.fw.clone(),
         pup_sha256: row.pup_sha256.clone(),
@@ -110,153 +102,15 @@ fn expected_doc(row: &PupRow, path: Option<String>) -> PupEntryDoc {
     }
 }
 
-fn classify(
-    rows: &[PupRow],
-    scanned: &[ScannedPup],
-) -> (Vec<PupEntryDoc>, Vec<PupEntryDoc>, Vec<PupMismatchDoc>) {
-    let by_hash: BTreeMap<&str, &PupRow> = rows
-        .iter()
-        .map(|row| (row.pup_sha256.as_str(), row))
-        .collect();
-    let mut by_fw: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for row in rows {
-        by_fw
-            .entry(row.fw.as_str())
-            .or_default()
-            .push(row.pup_sha256.as_str());
+fn mismatch_doc(mismatch: PupMismatch) -> PupMismatchDoc {
+    PupMismatchDoc {
+        subject: mismatch.subject,
+        kind: mismatch.kind.label().to_string(),
+        fw: mismatch.fw,
+        expected: mismatch.expected,
+        found: mismatch.found,
+        reason: mismatch.reason,
     }
-    let mut seen = BTreeSet::new();
-    let mut present = Vec::new();
-    let mut mismatched = Vec::new();
-    for found in scanned {
-        if let Some(row) = by_hash.get(found.sha256.as_str()) {
-            let first = seen.insert(row.pup_sha256.as_str());
-            match &found.fw {
-                Ok((fw, image_version))
-                    if fw == &row.fw
-                        && image_version == &row.image_version
-                        && found.size_bytes == row.size_bytes =>
-                {
-                    if first {
-                        present.push(expected_doc(row, Some(found.path.clone())));
-                    }
-                }
-                Ok((fw, image_version)) => mismatched.push(PupMismatchDoc {
-                    subject: found.path.clone(),
-                    kind: "metadata".to_string(),
-                    fw: Some(fw.clone()),
-                    expected: vec![format!(
-                        "fw {}, size {}, image {}",
-                        row.fw, row.size_bytes, row.image_version
-                    )],
-                    found: Some(format!(
-                        "fw {fw}, size {}, image {image_version}",
-                        found.size_bytes
-                    )),
-                    reason: None,
-                }),
-                Err(reason) => mismatched.push(PupMismatchDoc {
-                    subject: found.path.clone(),
-                    kind: "invalid-pup".to_string(),
-                    fw: None,
-                    expected: vec![row.pup_sha256.clone()],
-                    found: Some(found.sha256.clone()),
-                    reason: Some(reason.clone()),
-                }),
-            }
-            continue;
-        }
-        match &found.fw {
-            Ok((fw, _)) => mismatched.push(PupMismatchDoc {
-                subject: found.path.clone(),
-                kind: "sha256".to_string(),
-                fw: Some(fw.clone()),
-                expected: by_fw.get(fw.as_str()).map_or_else(Vec::new, |hashes| {
-                    hashes.iter().map(|hash| (*hash).to_string()).collect()
-                }),
-                found: Some(found.sha256.clone()),
-                reason: None,
-            }),
-            Err(reason) => mismatched.push(PupMismatchDoc {
-                subject: found.path.clone(),
-                kind: "invalid-pup".to_string(),
-                fw: None,
-                expected: Vec::new(),
-                found: Some(found.sha256.clone()),
-                reason: Some(reason.clone()),
-            }),
-        }
-    }
-    let missing = rows
-        .iter()
-        .filter(|row| !seen.contains(row.pup_sha256.as_str()))
-        .map(|row| expected_doc(row, None))
-        .collect();
-    present.sort_by(|a, b| a.pup_sha256.cmp(&b.pup_sha256));
-    mismatched.sort_by(|a, b| a.subject.cmp(&b.subject));
-    (present, missing, mismatched)
-}
-
-fn installed_identity_mismatches(
-    installed_version: &str,
-    record_hash: &str,
-    manifest_hash: &str,
-    manifest_image: &str,
-    row: &PupRow,
-) -> Vec<PupMismatchDoc> {
-    let subject = format!("installed firmware {installed_version}");
-    let mut mismatched = Vec::new();
-    if installed_version != row.fw {
-        mismatched.push(PupMismatchDoc {
-            subject: subject.clone(),
-            kind: "firmware-version".to_string(),
-            fw: Some(installed_version.to_string()),
-            expected: vec![row.fw.clone()],
-            found: Some(installed_version.to_string()),
-            reason: None,
-        });
-    }
-    if manifest_image != row.image_version {
-        mismatched.push(PupMismatchDoc {
-            subject: subject.clone(),
-            kind: "image-version".to_string(),
-            fw: Some(installed_version.to_string()),
-            expected: vec![row.image_version.clone()],
-            found: Some(manifest_image.to_string()),
-            reason: None,
-        });
-    }
-    if record_hash != manifest_hash {
-        mismatched.push(PupMismatchDoc {
-            subject,
-            kind: "source-sha256".to_string(),
-            fw: Some(installed_version.to_string()),
-            expected: vec![row.pup_sha256.clone()],
-            found: Some(record_hash.to_string()),
-            reason: None,
-        });
-    }
-    mismatched
-}
-
-fn installed_manifest_version_mismatch(
-    installed_version: &str,
-    manifest_version: &str,
-    row: &PupRow,
-) -> Option<PupMismatchDoc> {
-    if manifest_version == row.fw {
-        return None;
-    }
-    // The boot identity gate rejects this same stale-manifest state in
-    // `cellgov_boot::compose`.
-    Some(PupMismatchDoc {
-        subject: format!("installed firmware {installed_version}"),
-        kind: "manifest-version".to_string(),
-        fw: Some(manifest_version.to_string()),
-        expected: vec![row.fw.clone()],
-        found: Some(manifest_version.to_string()),
-        reason: None,
-    })
 }
 
 fn pup_set_is_clean(
@@ -279,8 +133,20 @@ pub(crate) fn firmware_verify_pups(
         .into_iter()
         .map(|path| scan_pup(pup_directory, &path))
         .collect::<Result<_, _>>()?;
-    let (present, missing, mut mismatched) = classify(&rows, &scanned);
-    let by_hash: BTreeMap<&str, &PupRow> = rows
+    let sorted = classify(&rows, &scanned);
+    let present = sorted
+        .present
+        .into_iter()
+        .map(|(row, path)| expected_doc(row, Some(path)))
+        .collect();
+    let missing: Vec<PupEntryDoc> = sorted
+        .missing
+        .into_iter()
+        .map(|row| expected_doc(row, None))
+        .collect();
+    let mut mismatched: Vec<PupMismatchDoc> =
+        sorted.mismatched.into_iter().map(mismatch_doc).collect();
+    let by_hash: BTreeMap<&str, &ArchivePup> = rows
         .iter()
         .map(|row| (row.pup_sha256.as_str(), row))
         .collect();
@@ -307,18 +173,20 @@ pub(crate) fn firmware_verify_pups(
     };
     let mut installed = Vec::new();
     for (entry, row, manifest, manifest_hash) in candidates {
-        if let Some(mismatch) =
-            installed_manifest_version_mismatch(&entry.version, &manifest.firmware.version, row)
-        {
-            mismatched.push(mismatch);
-        }
-        mismatched.extend(installed_identity_mismatches(
-            &entry.version,
-            &entry.pup_sha256,
-            &manifest_hash,
-            &manifest.firmware.image_version,
-            row,
-        ));
+        mismatched.extend(
+            installed_mismatches(
+                &InstalledClaims {
+                    version: &entry.version,
+                    record_sha256: &entry.pup_sha256,
+                    manifest_version: &manifest.firmware.version,
+                    manifest_sha256: &manifest_hash,
+                    manifest_image_version: &manifest.firmware.image_version,
+                },
+                row,
+            )
+            .into_iter()
+            .map(mismatch_doc),
+        );
         let Some(keys) = keys.as_ref() else {
             return Err(CommandError::failed(
                 "firmware verify-pups: installed candidates exist but the key vault was not loaded",

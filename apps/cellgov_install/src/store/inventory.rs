@@ -22,7 +22,10 @@ use crate::store::layout::{
     BASE_GAME_VER, INSTALL_RECORD_SUFFIX,
 };
 use crate::store::pre_store::{preflight, PreStoreError};
-use crate::store::record::{CoreOsRecord, InstallRecord, InstallRecordParseError};
+use crate::store::record::{
+    stored_kernel, CoreOsRecord, InstallRecord, InstallRecordParseError, KernelAbsence,
+    KernelRecord,
+};
 
 /// Why the store's install records could not be read.
 #[derive(Debug, thiserror::Error)]
@@ -167,6 +170,15 @@ impl FirmwareEntry {
     #[must_use]
     pub fn dev_flash_dir(&self) -> PathBuf {
         self.entry_dir.join(FLASH_MOUNT)
+    }
+
+    /// The kernel the entry stores, or why it stores none.
+    ///
+    /// # Errors
+    ///
+    /// [`KernelAbsence`] when the entry holds no stored kernel.
+    pub fn stored_kernel(&self) -> Result<&KernelRecord, KernelAbsence<'_>> {
+        stored_kernel(self.core_os.as_ref())
     }
 }
 

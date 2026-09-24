@@ -21,6 +21,7 @@
 //!   may leave empty.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -242,6 +243,42 @@ pub struct KernelRecord {
     /// key that opens the kernel, so the digest has a different basis
     /// from the post-decrypt ones `firmware.toml` records for modules.
     pub stored_sha256: HexSha256,
+}
+
+impl KernelRecord {
+    /// Where the stored kernel sits under the entry directory
+    /// `entry_dir`. The record gate proved the path stays inside it.
+    #[must_use]
+    pub fn path_in(&self, entry_dir: &Path) -> PathBuf {
+        self.path
+            .split('/')
+            .fold(entry_dir.to_path_buf(), |dir, part| dir.join(part))
+    }
+}
+
+/// Why a firmware entry holds no stored kernel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KernelAbsence<'a> {
+    /// The entry's record predates the `[core_os]` block, so it names
+    /// neither a kernel nor a reason.
+    NotRecorded,
+    /// The install stored no kernel. The reason it recorded, when it
+    /// named one.
+    Omitted(Option<&'a str>),
+}
+
+/// The kernel a record's `[core_os]` block names, or why it names none.
+/// `core_os` is `None` for a record that predates the block.
+///
+/// # Errors
+///
+/// [`KernelAbsence`] when the entry holds no stored kernel.
+pub fn stored_kernel(core_os: Option<&CoreOsRecord>) -> Result<&KernelRecord, KernelAbsence<'_>> {
+    let block = core_os.ok_or(KernelAbsence::NotRecorded)?;
+    block
+        .kernel
+        .as_ref()
+        .ok_or(KernelAbsence::Omitted(block.omission.as_deref()))
 }
 
 /// What the install read out of `CORE_OS_PACKAGE.pkg`: the table the

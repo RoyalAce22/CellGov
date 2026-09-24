@@ -16,7 +16,7 @@ use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::OutputFormat;
 
 #[cfg(feature = "decrypt")]
-use super::model::{KernelCoverageDoc, KernelCoverageEntryDoc, KERNEL_NOT_RECORDED};
+use super::model::{KernelCoverageDoc, KernelCoverageEntryDoc, KERNEL_NOT_RECORDED_REASON};
 #[cfg(feature = "decrypt")]
 use super::{emit, view};
 
@@ -76,8 +76,9 @@ pub(crate) fn firmware_kernels(
     root: &Path,
     format: OutputFormat,
 ) -> Result<CommandExitCode, CommandError> {
-    use cellgov_install::kernel_decrypt::{decrypt_stored_kernel, KernelCoverage};
+    use cellgov_install::kernel_decrypt::{entry_kernel_coverage, EntryKernelCoverage};
     use cellgov_install::keys::KeyVault;
+    use cellgov_install::store::KernelAbsence;
 
     let view = view(root)?;
     let location = KeyVault::locate_from(std::env::var_os(crate::env_vars::KEYS), root)
@@ -85,45 +86,28 @@ pub(crate) fn firmware_kernels(
     let keys = KeyVault::load_from_path(&location)
         .map_err(|error| CommandError::failed(error.to_string()))?;
 
-    let installed = view
+    let installed: BTreeMap<String, KernelCoverageEntryDoc> = view
         .inventory
         .firmware_entries()
         .map(|entry| {
-            let mut doc = KernelCoverageEntryDoc {
-                version: entry.version.clone(),
-                state: NOT_UNPACKED.to_string(),
-                detail: None,
-                kernel_version: None,
-                elf_bytes: None,
-                elf_sha256: None,
-            };
-            let kernel = match entry.core_os.as_ref() {
-                Some(block) => match &block.kernel {
-                    Some(kernel) => kernel,
-                    None => {
-                        doc.detail = Some(block.omission.clone().unwrap_or_else(|| {
-                            "the install stored no kernel and named no reason".to_string()
-                        }));
-                        return doc;
-                    }
-                },
-                None => {
-                    // The state column already says "not unpacked".
-                    let reason = KERNEL_NOT_RECORDED
-                        .strip_prefix("not unpacked (")
-                        .and_then(|r| r.strip_suffix(')'))
-                        .unwrap_or(KERNEL_NOT_RECORDED);
-                    doc.detail = Some(reason.to_string());
-                    return doc;
+            let mut doc = entry_doc(&entry.version, NOT_UNPACKED);
+            match entry_kernel_coverage(&entry.entry_dir, entry.core_os.as_ref(), &keys) {
+                EntryKernelCoverage::Attempted(coverage) => apply_coverage(&mut doc, coverage),
+                // The state column already says "not unpacked".
+                EntryKernelCoverage::Absent(KernelAbsence::NotRecorded) => {
+                    doc.detail = Some(KERNEL_NOT_RECORDED_REASON.to_string());
                 }
-            };
-            let coverage =
-                KernelCoverage::of(decrypt_stored_kernel(&entry.entry_dir, kernel, &keys));
-            apply_coverage(&mut doc, coverage);
-            doc
+                EntryKernelCoverage::Absent(KernelAbsence::Omitted(reason)) => {
+                    doc.detail = Some(reason.map_or_else(
+                        || "the install stored no kernel and named no reason".to_string(),
+                        str::to_string,
+                    ));
+                }
+            }
+            (entry.version.clone(), doc)
         })
         .collect();
-    let entries = complete_entries(&archive_versions()?, installed);
+    let entries = coverage_docs(&archive_versions()?, installed);
 
     let doc = KernelCoverageDoc {
         format_version: view.format_version(),
@@ -149,32 +133,31 @@ fn archive_versions() -> Result<Vec<String>, CommandError> {
     Ok(rows.into_iter().map(|row| row.fw).collect())
 }
 
+/// The report's rows: every archive version, filled with its installed
+/// entry or marked not installed, then the installs the archive does
+/// not name.
 #[cfg(feature = "decrypt")]
-fn complete_entries(
+fn coverage_docs(
     archive_versions: &[String],
-    installed: Vec<KernelCoverageEntryDoc>,
+    installed: BTreeMap<String, KernelCoverageEntryDoc>,
 ) -> Vec<KernelCoverageEntryDoc> {
-    let mut installed: BTreeMap<String, KernelCoverageEntryDoc> = installed
+    cellgov_install::kernel_decrypt::coverage_rows(archive_versions, installed)
         .into_iter()
-        .map(|entry| (entry.version.clone(), entry))
-        .collect();
-    let mut entries: Vec<KernelCoverageEntryDoc> = archive_versions
-        .iter()
-        .map(|version| {
-            installed
-                .remove(version)
-                .unwrap_or_else(|| KernelCoverageEntryDoc {
-                    version: version.clone(),
-                    state: NOT_INSTALLED.to_string(),
-                    detail: None,
-                    kernel_version: None,
-                    elf_bytes: None,
-                    elf_sha256: None,
-                })
-        })
-        .collect();
-    entries.extend(installed.into_values());
-    entries
+        .map(|(version, doc)| doc.unwrap_or_else(|| entry_doc(&version, NOT_INSTALLED)))
+        .collect()
+}
+
+/// A row naming `version` in `state`, with every other field empty.
+#[cfg(feature = "decrypt")]
+fn entry_doc(version: &str, state: &str) -> KernelCoverageEntryDoc {
+    KernelCoverageEntryDoc {
+        version: version.to_string(),
+        state: state.to_string(),
+        detail: None,
+        kernel_version: None,
+        elf_bytes: None,
+        elf_sha256: None,
+    }
 }
 
 #[cfg(feature = "decrypt")]

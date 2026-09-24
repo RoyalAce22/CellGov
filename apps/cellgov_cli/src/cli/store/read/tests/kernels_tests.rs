@@ -100,23 +100,23 @@ fn a_missing_key_is_not_an_exit_failure_and_a_failed_decrypt_is() {
 #[test]
 fn every_archive_version_appears_and_unknown_installs_follow() {
     let versions = vec!["1.00".to_string(), "1.02".to_string()];
-    let entries = complete_entries(
-        &versions,
-        vec![
-            row("1.02", "decrypted", None),
-            row("9.99", "no_key", Some("missing key")),
-        ],
-    );
-    let identity: Vec<(&str, &str)> = entries
-        .iter()
-        .map(|entry| (entry.version.as_str(), entry.state.as_str()))
+    let installed: BTreeMap<String, KernelCoverageEntryDoc> = [
+        row("1.02", "decrypted", None),
+        row("9.99", "no_key", Some("missing key")),
+    ]
+    .into_iter()
+    .map(|doc| (doc.version.clone(), doc))
+    .collect();
+    let identity: Vec<(String, String)> = coverage_docs(&versions, installed)
+        .into_iter()
+        .map(|entry| (entry.version, entry.state))
         .collect();
     assert_eq!(
         identity,
         [
-            ("1.00", "not_installed"),
-            ("1.02", "decrypted"),
-            ("9.99", "no_key"),
+            ("1.00".to_string(), "not_installed".to_string()),
+            ("1.02".to_string(), "decrypted".to_string()),
+            ("9.99".to_string(), "no_key".to_string()),
         ]
     );
 }
@@ -125,12 +125,25 @@ fn every_archive_version_appears_and_unknown_installs_follow() {
 fn the_committed_firmware_matrix_is_complete_when_nothing_is_installed() {
     let versions = archive_versions().expect("the committed firmware archive parses");
     assert!(!versions.is_empty(), "the firmware archive has no rows");
-    let entries = complete_entries(&versions, Vec::new());
+    let entries = coverage_docs(&versions, BTreeMap::new());
     assert_eq!(entries.len(), versions.len());
     for (entry, version) in entries.iter().zip(&versions) {
         assert_eq!(&entry.version, version);
         assert_eq!(entry.state, NOT_INSTALLED);
     }
+}
+
+#[test]
+fn a_record_from_before_stored_kernels_names_the_bare_reason() {
+    assert_eq!(
+        KERNEL_NOT_RECORDED_REASON,
+        "installed before the kernel was kept; add it with \
+         `cellgov firmware install <PS3UPDAT.PUP> --kernel-only`"
+    );
+    assert_eq!(
+        super::super::model::KERNEL_NOT_RECORDED,
+        format!("not unpacked ({KERNEL_NOT_RECORDED_REASON})")
+    );
 }
 
 #[test]

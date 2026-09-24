@@ -93,11 +93,27 @@ pub(crate) struct CoreOsFileDoc {
     pub size: u64,
 }
 
+/// Why a firmware entry whose record predates the `[core_os]` block
+/// holds no kernel, as one literal both constants below spell.
+macro_rules! kernel_not_recorded_reason {
+    () => {
+        "installed before the kernel was kept; add it with \
+         `cellgov firmware install <PS3UPDAT.PUP> --kernel-only`"
+    };
+}
+
+/// Why a firmware entry whose record predates the `[core_os]` block
+/// holds no kernel, where the report already says "not unpacked".
+#[cfg_attr(
+    not(feature = "decrypt"),
+    allow(dead_code, reason = "only `firmware kernels` prints the bare reason")
+)]
+pub(crate) const KERNEL_NOT_RECORDED_REASON: &str = kernel_not_recorded_reason!();
+
 /// What a human report prints for a firmware entry whose record
 /// predates the `[core_os]` block.
 pub(crate) const KERNEL_NOT_RECORDED: &str =
-    "not unpacked (installed before the kernel was kept; add it with \
-     `cellgov firmware install <PS3UPDAT.PUP> --kernel-only`)";
+    concat!("not unpacked (", kernel_not_recorded_reason!(), ")");
 
 /// What a human report prints for a base whose PARAM.SFO named no
 /// version. A boot summary's game identity prints the same words for

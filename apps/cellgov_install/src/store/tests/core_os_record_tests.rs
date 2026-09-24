@@ -171,3 +171,34 @@ fn a_misspelled_core_os_key_is_refused_rather_than_read_as_absent() {
     let err = InstallRecord::parse(&misspelled).unwrap_err();
     assert!(matches!(err, InstallRecordParseError::Toml(_)), "{err:?}");
 }
+
+/// A stored kernel's path joins onto the entry component by component,
+/// and the choice between a kernel and a reason is the block's.
+#[test]
+fn the_block_names_its_kernel_or_why_it_has_none() {
+    let kernel = KernelRecord {
+        path: "core_os/lv2_kernel.self".to_string(),
+        stored_sha256: crate::manifest::Sha256([0; 32]),
+    };
+    let entry = std::path::Path::new("store").join("firmware").join("4.93");
+    assert_eq!(
+        kernel.path_in(&entry),
+        entry.join("core_os").join("lv2_kernel.self")
+    );
+    let with_kernel = CoreOsRecord {
+        kernel: Some(kernel.clone()),
+        omission: None,
+        files: Vec::new(),
+    };
+    assert_eq!(stored_kernel(Some(&with_kernel)), Ok(&kernel));
+    let omitted = CoreOsRecord {
+        kernel: None,
+        omission: Some("no kernel".to_string()),
+        files: Vec::new(),
+    };
+    assert_eq!(
+        stored_kernel(Some(&omitted)),
+        Err(KernelAbsence::Omitted(Some("no kernel")))
+    );
+    assert_eq!(stored_kernel(None), Err(KernelAbsence::NotRecorded));
+}

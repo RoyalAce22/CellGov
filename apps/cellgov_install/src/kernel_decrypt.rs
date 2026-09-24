@@ -6,12 +6,13 @@
 //! it never files a missing key as a failed decrypt, or a failed
 //! decrypt as a missing key.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::keys::{version_label, KeyVault};
 use crate::manifest::{sha256_of, Sha256};
 use crate::sce::{self, SceError};
-use crate::store::record::KernelRecord;
+use crate::store::record::{stored_kernel, CoreOsRecord, KernelAbsence, KernelRecord};
 
 /// A kernel the vault opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,11 +58,7 @@ pub fn decrypt_stored_kernel(
     kernel: &KernelRecord,
     keys: &KeyVault,
 ) -> Result<DecryptedKernel, KernelDecryptError> {
-    // The record gate proved the path stays inside the entry.
-    let path = kernel
-        .path
-        .split('/')
-        .fold(entry_dir.to_path_buf(), |dir, part| dir.join(part));
+    let path = kernel.path_in(entry_dir);
     let raw = std::fs::read(&path).map_err(|source| KernelDecryptError::Read { path, source })?;
     let version = sce::parse_program_identification(&raw)
         .ok()
@@ -162,6 +159,53 @@ impl KernelCoverage {
             KernelCoverage::Failed { .. } => "failed",
         }
     }
+}
+
+/// How one installed firmware entry's kernel came out of a coverage run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryKernelCoverage<'a> {
+    /// The entry stores no kernel, so the run attempted no decrypt.
+    Absent(KernelAbsence<'a>),
+    /// The run attempted the decrypt.
+    Attempted(KernelCoverage),
+}
+
+/// The coverage state of the entry at `entry_dir`, whose record's
+/// `[core_os]` block is `core_os`: why it stores no kernel, or how the
+/// decrypt of the kernel it stores came out under `keys`.
+#[must_use]
+pub fn entry_kernel_coverage<'a>(
+    entry_dir: &Path,
+    core_os: Option<&'a CoreOsRecord>,
+    keys: &KeyVault,
+) -> EntryKernelCoverage<'a> {
+    match stored_kernel(core_os) {
+        Ok(kernel) => EntryKernelCoverage::Attempted(KernelCoverage::of(decrypt_stored_kernel(
+            entry_dir, kernel, keys,
+        ))),
+        Err(absence) => EntryKernelCoverage::Absent(absence),
+    }
+}
+
+/// One row per firmware version a coverage report lists: every version
+/// `archive_versions` names, in archive order, with its installed entry
+/// when the store holds one; then every installed version the archive
+/// does not name, in the byte order of their version strings.
+#[must_use]
+pub fn coverage_rows<T>(
+    archive_versions: &[String],
+    mut installed: BTreeMap<String, T>,
+) -> Vec<(String, Option<T>)> {
+    let mut rows: Vec<(String, Option<T>)> = archive_versions
+        .iter()
+        .map(|version| (version.clone(), installed.remove(version)))
+        .collect();
+    rows.extend(
+        installed
+            .into_iter()
+            .map(|(version, entry)| (version, Some(entry))),
+    );
+    rows
 }
 
 /// The key a refusal says the vault lacks, named by the firmware the

@@ -32,9 +32,9 @@ pub use layout::{
 pub use lock::{lock_artifact, lock_firmware_staging, StoreLock, StoreLockError};
 pub use pre_store::{preflight, PreStoreArtifact, PreStoreError, PreStoreResidue};
 pub use record::{
-    ArtifactRecord, CoreOsFileRecord, CoreOsRecord, InstallRecord, InstallRecordParseError,
-    KernelRecord, RapRecord, SourceRecord, TitleRecord, DISC_DISTRIBUTION,
-    INSTALL_RECORD_FORMAT_VERSION, PSN_HDD_DISTRIBUTION,
+    stored_kernel, ArtifactRecord, CoreOsFileRecord, CoreOsRecord, InstallRecord,
+    InstallRecordParseError, KernelAbsence, KernelRecord, RapRecord, SourceRecord, TitleRecord,
+    DISC_DISTRIBUTION, INSTALL_RECORD_FORMAT_VERSION, PSN_HDD_DISTRIBUTION,
 };
 pub use rename::{rename_with_retry, RenameRefused};
 pub use verify::{verify_record_tree, Divergence, DivergenceKind, VerifyReadError, VerifyReport};

@@ -119,6 +119,89 @@ fn a_build_without_decrypt_refuses_the_pass_by_name() {
 mod with_decrypt {
     use super::*;
 
+    /// A firmware entry: one plaintext module under `dev_flash/`, with
+    /// its `firmware.toml`.
+    fn entry_with_one_module() -> ScratchDir {
+        let entry = scratch();
+        let dev_flash = entry.join(FLASH_MOUNT);
+        let module = prx(b"lv2");
+        std::fs::create_dir_all(dev_flash.join("sys/external")).expect("create dev_flash");
+        std::fs::write(dev_flash.join("sys/external/liblv2.prx"), &module).expect("write");
+        let mut text = manifest_header();
+        text.push_str(&format!(
+            "[[files]]
+path = \"sys/external/liblv2.prx\"
+sha256 = \"{}\"
+revision = 1
+",
+            manifest::Sha256(manifest::sha256_of(&module)).to_hex()
+        ));
+        std::fs::write(dev_flash.join(MANIFEST_FILE), text).expect("write firmware.toml");
+        entry
+    }
+
+    /// The entry pass counts a stored kernel with the modules, and names
+    /// why it checked none when the entry stores none.
+    #[test]
+    fn an_entry_counts_its_kernel_with_its_modules_or_names_why_it_has_none() {
+        let entry = entry_with_one_module();
+        let kernel_bytes = b"stored kernel";
+        std::fs::create_dir_all(entry.join("core_os")).expect("create core_os");
+        std::fs::write(entry.join("core_os/lv2_kernel.self"), kernel_bytes).expect("write");
+        let stored = CoreOsRecord {
+            kernel: Some(KernelRecord {
+                path: "core_os/lv2_kernel.self".to_string(),
+                stored_sha256: manifest::Sha256(manifest::sha256_of(kernel_bytes)),
+            }),
+            omission: None,
+            files: Vec::new(),
+        };
+        let keys = KeyVault::empty();
+        let checked = verify_firmware_entry(&entry, Some(&stored), &keys).expect("verify");
+        assert_eq!(checked.report.matched, 2);
+        assert!(checked.report.is_clean());
+        assert_eq!(checked.kernel_absence, None);
+
+        let omitted = CoreOsRecord {
+            kernel: None,
+            omission: Some("no kernel in the package".to_string()),
+            files: Vec::new(),
+        };
+        let checked = verify_firmware_entry(&entry, Some(&omitted), &keys).expect("verify");
+        assert_eq!(checked.report.matched, 1);
+        assert_eq!(
+            checked.kernel_absence,
+            Some(KernelAbsence::Omitted(Some("no kernel in the package")))
+        );
+
+        let checked = verify_firmware_entry(&entry, None, &keys).expect("verify");
+        assert_eq!(checked.report.matched, 1);
+        assert_eq!(checked.kernel_absence, Some(KernelAbsence::NotRecorded));
+    }
+
+    #[test]
+    fn a_rewritten_stored_kernel_diverges_with_the_modules() {
+        let entry = entry_with_one_module();
+        std::fs::create_dir_all(entry.join("core_os")).expect("create core_os");
+        std::fs::write(entry.join("core_os/lv2_kernel.self"), b"rewritten").expect("write");
+        let stored = CoreOsRecord {
+            kernel: Some(KernelRecord {
+                path: "core_os/lv2_kernel.self".to_string(),
+                stored_sha256: manifest::Sha256(manifest::sha256_of(b"original")),
+            }),
+            omission: None,
+            files: Vec::new(),
+        };
+        let checked =
+            verify_firmware_entry(&entry, Some(&stored), &KeyVault::empty()).expect("verify");
+        assert_eq!(checked.report.matched, 1);
+        assert_eq!(checked.report.divergences.len(), 1);
+        assert_eq!(
+            checked.report.divergences[0].path,
+            entry.join("core_os").join("lv2_kernel.self")
+        );
+    }
+
     #[test]
     fn an_intact_tree_is_clean() {
         let dir = mount_with(&[

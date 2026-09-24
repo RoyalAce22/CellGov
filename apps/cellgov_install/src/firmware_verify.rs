@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 
 use crate::keys::KeyVault;
 use crate::manifest::{self, FirmwareManifest, ManifestError, Sha256 as HexSha256, MANIFEST_FILE};
-use crate::store::record::KernelRecord;
+use crate::store::record::{stored_kernel, CoreOsRecord, KernelAbsence, KernelRecord};
+use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
 
 /// Why one module did not match the manifest entry that names it.
 ///
@@ -386,11 +387,7 @@ pub fn verify_stored_kernel(
     entry_dir: &Path,
     kernel: &KernelRecord,
 ) -> Result<Option<ModuleFault>, FirmwareVerifyError> {
-    // The record gate proved the path stays inside the entry.
-    let path = kernel
-        .path
-        .split('/')
-        .fold(entry_dir.to_path_buf(), |dir, part| dir.join(part));
+    let path = kernel.path_in(entry_dir);
     let raw = match std::fs::read(&path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -412,6 +409,46 @@ pub fn verify_stored_kernel(
             found,
         },
     }))
+}
+
+/// One firmware entry held against its manifest and its record.
+#[derive(Debug)]
+pub struct EntryVerifyReport<'a> {
+    /// The modules, and the stored kernel when the entry holds one.
+    pub report: FirmwareVerifyReport,
+    /// Why the pass checked no kernel, when the entry stores none.
+    pub kernel_absence: Option<KernelAbsence<'a>>,
+}
+
+/// Holds the firmware entry at `entry_dir` against its record: every
+/// module the entry's `firmware.toml` lists, and the kernel its
+/// `[core_os]` block names. `core_os` is `None` for a record that
+/// predates the block.
+///
+/// # Errors
+///
+/// Every [`FirmwareVerifyError`] of [`verify_firmware_tree`] and
+/// [`verify_stored_kernel`].
+pub fn verify_firmware_entry<'a>(
+    entry_dir: &Path,
+    core_os: Option<&'a CoreOsRecord>,
+    keys: &KeyVault,
+) -> Result<EntryVerifyReport<'a>, FirmwareVerifyError> {
+    let mut report = verify_firmware_tree(&entry_dir.join(FLASH_MOUNT), keys)?;
+    let kernel_absence = match stored_kernel(core_os) {
+        Ok(kernel) => {
+            match verify_stored_kernel(entry_dir, kernel)? {
+                None => report.matched += 1,
+                Some(fault) => report.divergences.push(fault),
+            }
+            None
+        }
+        Err(absence) => Some(absence),
+    };
+    Ok(EntryVerifyReport {
+        report,
+        kernel_absence,
+    })
 }
 
 #[cfg(test)]

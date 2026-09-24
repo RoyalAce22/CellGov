@@ -6,11 +6,11 @@
 
 use std::path::Path;
 
-use cellgov_install::firmware_verify::{ModuleDivergence, ModuleFault};
+use cellgov_install::firmware_verify::{verify_firmware_entry, ModuleDivergence, ModuleFault};
 use cellgov_install::keys::KeyVault;
 use cellgov_install::store::{
-    verify_record_tree, Artifact, Divergence, DivergenceKind, InstallRecord, StoreLayout, TitleId,
-    VersionKey,
+    verify_record_tree, Artifact, Divergence, DivergenceKind, InstallRecord, KernelAbsence,
+    StoreLayout, TitleId, VersionKey,
 };
 
 use crate::cli::exit::{CommandError, CommandExitCode};
@@ -57,56 +57,24 @@ pub(super) fn firmware_entry_doc(
     keys: &KeyVault,
 ) -> Result<VerifiedEntryDoc, CommandError> {
     let version = &entry.version;
-    let mut report =
-        cellgov_install::firmware_verify::verify_firmware_tree(&entry.dev_flash_dir(), keys)
-            .map_err(|error| CommandError::failed(format!("firmware verify {version}: {error}")))?;
-
-    // The kernel is one more recorded artefact: hashed as stored, so it
-    // joins the manifest's modules in the same tally.
-    let kernel_omission = match entry.core_os.as_ref() {
-        Some(block) => match &block.kernel {
-            Some(kernel) => {
-                match cellgov_install::firmware_verify::verify_stored_kernel(
-                    &entry.entry_dir,
-                    kernel,
-                ) {
-                    Ok(None) => report.matched += 1,
-                    Ok(Some(fault)) => report.divergences.push(fault),
-                    Err(error) => {
-                        return Err(CommandError::failed(format!(
-                            "firmware verify {version}: {error}"
-                        )))
-                    }
-                }
-                None
-            }
-            None => Some(
-                block
-                    .omission
-                    .clone()
-                    .unwrap_or_else(|| "not unpacked".to_string()),
-            ),
-        },
-        None => Some(KERNEL_NOT_RECORDED.to_string()),
-    };
-
-    let doc = VerifiedEntryDoc {
+    // An empty manifest refuses as `EmptyManifest`, so an entry that
+    // verifies has examined at least one module.
+    let checked = verify_firmware_entry(&entry.entry_dir, entry.core_os.as_ref(), keys)
+        .map_err(|error| CommandError::failed(format!("firmware verify {version}: {error}")))?;
+    Ok(VerifiedEntryDoc {
         entry: version.to_string(),
-        matched: report.matched,
-        divergences: report
+        matched: checked.report.matched,
+        divergences: checked
+            .report
             .divergences
             .iter()
             .map(|f| module_fault_doc(view, f))
             .collect(),
-        kernel_omission,
-    };
-    if doc.matched + doc.divergences.len() == 0 {
-        return Err(CommandError::failed(format!(
-            "firmware {version}: the install record names no file, so the pass examined nothing; \
-             reinstall the entry to write a record that covers its tree"
-        )));
-    }
-    Ok(doc)
+        kernel_omission: checked.kernel_absence.map(|absence| match absence {
+            KernelAbsence::NotRecorded => KERNEL_NOT_RECORDED.to_string(),
+            KernelAbsence::Omitted(reason) => reason.unwrap_or("not unpacked").to_string(),
+        }),
+    })
 }
 
 /// `cellgov title verify <TITLE_ID> [--ver V]`
