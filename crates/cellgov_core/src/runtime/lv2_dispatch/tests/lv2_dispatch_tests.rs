@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::syscall_table::SyscallResponseTable;
-use cellgov_lv2::EventPayload;
+use cellgov_event::UnitId;
+use cellgov_lv2::{EventPayload, PendingResponse};
 
 #[test]
 #[should_panic(expected = "neither in woken_unit_ids nor parked")]
