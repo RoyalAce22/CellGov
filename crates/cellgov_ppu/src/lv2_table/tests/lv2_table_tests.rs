@@ -1,6 +1,8 @@
 //! Synthetic kernel shapes for LV2 dispatch-table discovery.
 
-use super::*;
+use super::discover::*;
+use super::types::*;
+use crate::loader::{file_offset_at, LoadSegment};
 use cellgov_ps3_abi::format::elf::{
     ELFCLASS64, ELFDATA2MSB, ELF_EI_CLASS, ELF_EI_DATA, ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE,
     ELF_PHENTSIZE_OFFSET, ELF_PHNUM_OFFSET, ELF_PHOFF_OFFSET, PF_R, PF_W, PF_X,
