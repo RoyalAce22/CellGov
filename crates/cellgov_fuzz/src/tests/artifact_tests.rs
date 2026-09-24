@@ -1,6 +1,12 @@
 use super::*;
+use std::path::Path;
 
 use crate::report::{CheckIdentity, DivergenceClass, RunOutcome, SemanticFingerprint};
+use crate::report::{Finding, FindingKind, FuzzReport, FuzzRun, ReductionOutcome};
+use crate::{
+    CampaignSchedule, CampaignShard, CaseRange, FuzzConfig, FuzzTarget, ReplayCoordinates,
+    TargetPanicPayload,
+};
 use crate::{
     CampaignVersion, CancellationBoundary, CaseEligibility, CrossReferenceAsymmetry, FuzzError,
     GenerationStrategy, InvariantError, OperandAliasClass, SemanticObservation,
