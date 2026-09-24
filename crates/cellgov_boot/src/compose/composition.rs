@@ -2,71 +2,55 @@
 //! version) produces.
 //!
 //! Composition is path arithmetic over the store's install records,
-//! plus one existence probe per root. It copies and merges nothing: an
+//! plus one existence probe per root, a byte comparison of the license
+//! files, and the identity reads. It copies and merges nothing: an
 //! update that patches a base becomes a second mount root ahead of the
 //! base.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use cellgov_boot::ComposedMount;
 use cellgov_compare::RunIdentity;
-use cellgov_install::store::TitleTree;
-use cellgov_ps3_abi::format::dev_flash::GUEST_FLASH_MOUNT;
-use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
-
-use super::identity::{run_identity, IdentityError};
-use super::select::{
-    select_firmware, select_game_version, FirmwareChoice, FirmwareSelectError, GameVersion,
-    GameVersionSelectError,
-};
-use cellgov_boot::manifest::{GameSource, ResolveEbootError, TitleManifest};
 use cellgov_install::store::inventory::{
     dir_exists, BaseEntry, InventoryError, StoreInventory, UpdateEntry,
 };
+use cellgov_install::store::select::{
+    select_firmware, select_game_version, FirmwareSelectError, GameVersion, GameVersionSelectError,
+    ManagedFirmware,
+};
+use cellgov_install::store::TitleTree;
+use cellgov_install::system_ver::SystemVersion;
+use cellgov_ps3_abi::format::dev_flash::GUEST_FLASH_MOUNT;
+use cellgov_ps3_abi::format::hdd0::{GUEST_EXDATA_DIR, GUEST_GAME_DIR};
+use cellgov_ps3_abi::format::title_tree::{DISC_GAME_DIR, GUEST_BDVD, USRDIR};
 
-/// Guest prefix a title's disc tree mounts under, joined with the
-/// title id.
-const GUEST_BDVD: &str = "/dev_bdvd";
-
-/// Guest prefix a title's HDD game tree mounts under, joined with the
-/// title id.
-const GUEST_GAME: &str = "/dev_hdd0/game";
-
-/// Guest path of the one modeled user profile's license directory.
-/// Names the same directory as `StoreLayout::live_exdata_dir`.
-const GUEST_EXDATA: &str = "/dev_hdd0/home/00000001/exdata";
+use super::identity::{run_identity, IdentityError};
+use crate::manifest::{GameSource, ResolveEbootError, TitleManifest};
+use crate::ComposedMount;
 
 /// Where a disc tree holds its executable, under the entry directory.
-const DISC_USRDIR: [&str; 2] = [DISC_GAME_DIR, "USRDIR"];
-
-/// Where an HDD game tree holds its executable.
-const GAME_USRDIR: &str = "USRDIR";
+const DISC_USRDIR: [&str; 2] = [DISC_GAME_DIR, USRDIR];
 
 /// Why a boot could not be composed.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ComposeError {
-    /// `--firmware-dir` does not name a readable module tree.
-    #[error("--firmware-dir: {path} is not an existing directory")]
-    FirmwareDirectory {
-        /// The supplied host path.
-        path: String,
-    },
-    /// A child run could not render the composed identity.
-    #[error("serializing the run identity: {message}")]
-    IdentityRender {
-        /// The rendering refusal.
-        message: String,
-    },
+pub enum ComposeError {
     /// The store's records could not be read.
     #[error("{0}")]
     Inventory(#[from] InventoryError),
-    /// `--fw` did not resolve to one installed firmware.
+    /// The firmware selection did not resolve to one installed entry.
     #[error("{0}")]
     Firmware(#[from] FirmwareSelectError),
-    /// `--game-ver` did not resolve to one installed version.
+    /// The game-version selection did not resolve to one installed
+    /// version.
     #[error("{0}")]
     GameVersion(#[from] GameVersionSelectError),
+    /// The caller asked a game version of a title that ships inside
+    /// the firmware.
+    #[error("{short_name} ships inside the firmware, so its version axis is the firmware's")]
+    GameVersionForFirmwareExec {
+        /// The title the caller asked the version of.
+        short_name: String,
+    },
     /// A composed half's tree disagrees with the record that names it,
     /// or cannot be read, so the run cannot name what it tests.
     #[error("{0}")]
@@ -76,11 +60,9 @@ pub(crate) enum ComposeError {
     /// carries four probe lists.
     #[error("{0}")]
     ResolveEboot(#[from] Box<ResolveEbootError>),
-    /// `--game-ver` was passed for a title the store does not hold.
-    #[error(
-        "--game-ver names an installed version, and {title_id} has no store entry under \
-         {root}; install it first, or drop the flag"
-    )]
+    /// The caller asked a game version of a title the store does not
+    /// hold.
+    #[error("{title_id} has no store entry under {root}")]
     TitleNotInStore {
         /// The title the store was searched for.
         title_id: String,
@@ -97,8 +79,7 @@ pub(crate) enum ComposeError {
     /// resolve it against.
     #[error(
         "{short_name} names its executable at {dir}, relative to a firmware entry, and this \
-         run selected no managed firmware. Pick one with --fw; --firmware-dir names a module \
-         directory, which is not the entry root this path is relative to"
+         run selected no managed firmware"
     )]
     FirmwareRelativeWithoutEntry {
         /// The title being booted.
@@ -109,22 +90,22 @@ pub(crate) enum ComposeError {
     /// A record names a tree that is gone.
     #[error("{title_id} {version} is recorded but its tree at {dir} is missing; reinstall it")]
     TreeMissing {
-        /// The title whose record was read.
+        /// The title whose record the composition read.
         title_id: String,
-        /// The version whose record was read.
+        /// The version whose record the composition read.
         version: String,
         /// The directory the record named.
         dir: String,
     },
-    /// A record names a tree that could be neither read nor shown
+    /// A record names a tree the probe could neither read nor show
     /// absent.
     #[error(
         "{title_id} {version} is recorded but its tree at {dir} could not be probed: {source}"
     )]
     TreeUnreadable {
-        /// The title whose record was read.
+        /// The title whose record the composition read.
         title_id: String,
-        /// The version whose record was read.
+        /// The version whose record the composition read.
         version: String,
         /// The directory the record named.
         dir: String,
@@ -132,10 +113,11 @@ pub(crate) enum ComposeError {
         #[source]
         source: std::io::Error,
     },
-    /// An exdata directory could not be enumerated or read.
+    /// The composition could not enumerate or read an exdata
+    /// directory.
     #[error("reading the license directory {dir}: {source}")]
     ReadExdata {
-        /// The directory that could not be read.
+        /// The directory the composition could not read.
         dir: String,
         /// The underlying failure.
         #[source]
@@ -158,9 +140,36 @@ pub(crate) enum ComposeError {
     },
 }
 
+/// What a boot answers `/dev_flash` from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FirmwareChoice {
+    /// A store entry.
+    Managed(ManagedFirmware),
+    /// A raw tree outside the store. The run carries no firmware
+    /// version, so nothing downstream can key on one.
+    Unmanaged {
+        /// The tree the caller named.
+        dir: PathBuf,
+    },
+    /// No firmware at all: every import answers through the
+    /// unresolved-import trampoline.
+    None,
+}
+
+impl FirmwareChoice {
+    /// The version key, or `None` for a run with no managed firmware.
+    #[must_use]
+    pub fn version(&self) -> Option<&str> {
+        match self {
+            Self::Managed(managed) => Some(managed.entry.version.as_str()),
+            Self::Unmanaged { .. } | Self::None => None,
+        }
+    }
+}
+
 /// The store entries one composition rests on.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct StoredGame {
+pub struct StoredGame {
     /// The store key.
     pub title_id: String,
     /// The selected version.
@@ -173,7 +182,7 @@ pub(crate) struct StoredGame {
 
 /// Which content the title's executable and data come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum GameChoice {
+pub enum GameChoice {
     /// Composed from the store.
     Stored(Box<StoredGame>),
     /// The executable ships inside the firmware, so the title has no
@@ -182,8 +191,9 @@ pub(crate) enum GameChoice {
         /// Where the executable sits, resolved against the selected
         /// firmware entry when the manifest named a relative path.
         dir: PathBuf,
-        /// True when the manifest's path was kept as written because
-        /// no managed firmware was selected to resolve it against.
+        /// True when the composition kept the manifest's path as
+        /// written, because no managed firmware was selected to resolve
+        /// it against.
         unmanaged_path: bool,
     },
     /// The title has no store entry: nothing is composed for it, and
@@ -193,13 +203,13 @@ pub(crate) enum GameChoice {
 
 /// The firmware, the content, and the guest tree they produce.
 #[derive(Debug, Clone)]
-pub(crate) struct BootComposition {
+pub struct BootComposition {
     /// Which firmware answers `/dev_flash`.
     pub firmware: FirmwareChoice,
     /// Which content answers the title's mounts.
     pub game: GameChoice,
-    /// Mounts to register before the title's own, so a composed mount
-    /// is never shadowed by a broader manifest prefix.
+    /// Mounts to register before the title's own, so a broader
+    /// manifest prefix never shadows a composed mount.
     pub mounts: Vec<ComposedMount>,
     /// Directories the EBOOT is probed in, first hit wins.
     pub eboot_dirs: Vec<PathBuf>,
@@ -212,9 +222,9 @@ pub(crate) struct BootComposition {
 }
 
 /// A composed entry whose declared minimum firmware the selection does
-/// not meet, or whose declared minimum [`version_key`] cannot order.
+/// not meet, or whose declared minimum [`SystemVersion`] cannot order.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct UnderstatedFirmware {
+pub struct UnderstatedFirmware {
     /// The entry that declared the minimum: the base, or the selected
     /// update.
     pub entry: GameVersion,
@@ -229,7 +239,8 @@ pub(crate) struct UnderstatedFirmware {
 }
 
 /// What a caller passes to [`compose_boot`].
-pub(crate) struct ComposeInputs<'a> {
+#[derive(Debug, Clone, Copy)]
+pub struct ComposeInputs<'a> {
     /// The title being booted.
     pub title: &'a TitleManifest,
     /// The `dev_hdd0` mount the caller named.
@@ -237,20 +248,18 @@ pub(crate) struct ComposeInputs<'a> {
     /// The directory holding the store and its records, one level
     /// above [`Self::vfs_root`].
     pub install_root: &'a Path,
-    /// `--fw`.
+    /// The firmware version the caller named.
     pub fw: Option<&'a str>,
-    /// `--game-ver`.
+    /// The game version the caller named.
     pub game_ver: Option<&'a str>,
-    /// `--firmware-dir`, already validated as an existing directory.
+    /// A raw firmware tree outside the store, already validated as an
+    /// existing directory.
     pub firmware_dir: Option<&'a Path>,
     /// A boot asked to run with no firmware at all.
     pub no_firmware: bool,
-    /// Variable that asks for a firmware-free boot, named in the
-    /// nothing-installed refusal.
-    pub disable_env: &'static str,
 }
 
-/// Resolve the selections and build the guest tree they produce.
+/// Resolves the selections and builds the guest tree they produce.
 ///
 /// # Errors
 ///
@@ -263,7 +272,7 @@ pub(crate) struct ComposeInputs<'a> {
 ///   disagrees with it;
 /// - a license-directory union that holds two different files of one
 ///   name.
-pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition, ComposeError> {
+pub fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition, ComposeError> {
     let inventory = StoreInventory::read(inputs.install_root)?;
     let firmware = match (inputs.firmware_dir, inputs.no_firmware) {
         (Some(dir), _) => FirmwareChoice::Unmanaged {
@@ -274,7 +283,6 @@ pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition
             &inventory,
             inputs.fw,
             shipped_firmware(&inventory, inputs.title),
-            inputs.disable_env,
         )?),
     };
 
@@ -315,7 +323,7 @@ pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition
     check_exdata_union(&exdata_roots)?;
     if !exdata_roots.is_empty() {
         mounts.push(ComposedMount {
-            prefix: GUEST_EXDATA.to_string(),
+            prefix: GUEST_EXDATA_DIR.to_string(),
             roots: exdata_roots,
         });
     }
@@ -337,7 +345,7 @@ pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition
 /// A title that ships inside the firmware has no record to name one,
 /// and its version axis is the firmware's.
 fn shipped_firmware<'a>(inventory: &'a StoreInventory, title: &TitleManifest) -> Option<&'a str> {
-    if matches!(title.source, GameSource::FirmwareExec { .. }) {
+    if title.ships_in_firmware() {
         return None;
     }
     inventory
@@ -348,7 +356,7 @@ fn shipped_firmware<'a>(inventory: &'a StoreInventory, title: &TitleManifest) ->
         .as_deref()
 }
 
-/// Apply the selection contract to the title's own version axis.
+/// Applies the selection contract to the title's own version axis.
 fn resolve_game(
     inputs: &ComposeInputs<'_>,
     inventory: &StoreInventory,
@@ -356,10 +364,9 @@ fn resolve_game(
 ) -> Result<GameChoice, ComposeError> {
     if let GameSource::FirmwareExec { dir } = &inputs.title.source {
         if inputs.game_ver.is_some() {
-            return Err(GameVersionSelectError::FirmwareExec {
+            return Err(ComposeError::GameVersionForFirmwareExec {
                 short_name: inputs.title.name().to_string(),
-            }
-            .into());
+            });
         }
         // A relative path resolves against the selected firmware
         // entry, so one manifest boots against every installed
@@ -422,7 +429,7 @@ fn title_mounts(
     update: Option<&UpdateEntry>,
 ) -> Vec<ComposedMount> {
     let mut mounts = Vec::new();
-    let game_prefix = format!("{GUEST_GAME}/{title_id}");
+    let game_prefix = format!("{GUEST_GAME_DIR}/{title_id}");
     match base.tree {
         TitleTree::Disc => {
             mounts.push(ComposedMount {
@@ -458,16 +465,16 @@ fn title_mounts(
 fn title_eboot_dirs(base: &BaseEntry, update: Option<&UpdateEntry>) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(u) = update {
-        dirs.push(u.dir.join(GAME_USRDIR));
+        dirs.push(u.dir.join(USRDIR));
     }
     dirs.push(match base.tree {
         TitleTree::Disc => DISC_USRDIR.iter().fold(base.dir.clone(), |d, p| d.join(p)),
-        TitleTree::Game => base.dir.join(GAME_USRDIR),
+        TitleTree::Game => base.dir.join(USRDIR),
     });
     dirs
 }
 
-/// Refuse a union in which one filename has two different contents.
+/// Refuses a union in which one filename has two different contents.
 ///
 /// Two titles that share a license each hold their own copy, so one
 /// name in two roots is normal. Two different byte strings under one
@@ -565,7 +572,7 @@ fn firmware_shortfalls(
 }
 
 /// A note when the selected firmware is older than `entry` declared it
-/// needs, or when [`version_key`] reads no order between the two.
+/// needs, or when [`SystemVersion`] reads no order between the two.
 fn firmware_shortfall(
     entry: GameVersion,
     declared: &str,
@@ -577,29 +584,14 @@ fn firmware_shortfall(
         selected: selected.to_string(),
         incomparable,
     };
-    match (version_key(declared), version_key(selected)) {
+    match (
+        SystemVersion::parse(declared),
+        SystemVersion::parse(selected),
+    ) {
         (Some(want), Some(have)) if have < want => Some(note(false)),
         (Some(_), Some(_)) => None,
         _ => Some(note(true)),
     }
-}
-
-/// A Sony version string as a comparable `(major, minor)` pair.
-///
-/// `4.93` and `04.9300` are one version written two ways: the
-/// console's `version.txt` form, and the form a PARAM.SFO and the
-/// update metadata share. This right-pads the fraction to the four-digit
-/// form, so both normalize to `(4, 9300)`.
-fn version_key(s: &str) -> Option<(u32, u32)> {
-    let (major, minor) = s.split_once('.')?;
-    if minor.is_empty() || minor.len() > 4 || !minor.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let mut padded = minor.to_string();
-    while padded.len() < 4 {
-        padded.push('0');
-    }
-    Some((major.parse().ok()?, padded.parse().ok()?))
 }
 
 #[cfg(test)]

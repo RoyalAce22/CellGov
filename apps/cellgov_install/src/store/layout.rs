@@ -19,22 +19,19 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use cellgov_ps3_abi::format::hdd0::{EXDATA_DIR, HDD0_MOUNT, HOME_DIR, USER_DIR};
 use serde::{Deserialize, Serialize};
 
 /// Where the installers write, and where a reader looks for the
 /// matching records, when no root is named.
 pub const DEFAULT_VFS_ROOT: &str = "vfs";
 
-/// The single modeled user profile, matching the boot path's
-/// `home/00000001/exdata` RAP lookup.
-const HDD0_USER: &str = "00000001";
-
 /// The exdata directory under a `dev_hdd0` mount, where an installed
 /// RAP lives: [`StoreLayout::live_exdata_dir`] for a store, or the
 /// directory a boot reads RAPs from under its PS3 VFS root.
 #[must_use]
 pub fn hdd0_exdata_dir(dev_hdd0: &Path) -> PathBuf {
-    dev_hdd0.join("home").join(HDD0_USER).join("exdata")
+    dev_hdd0.join(HOME_DIR).join(USER_DIR).join(EXDATA_DIR)
 }
 
 /// Directory under a VFS root that holds what CellGov keeps about the
@@ -585,7 +582,7 @@ impl StoreLayout {
     /// across versions and never a store entry.
     #[must_use]
     pub fn live_exdata_dir(&self) -> PathBuf {
-        hdd0_exdata_dir(&self.root.join("dev_hdd0"))
+        hdd0_exdata_dir(&self.root.join(HDD0_MOUNT))
     }
 
     /// The directory an install commits into with one rename, and an

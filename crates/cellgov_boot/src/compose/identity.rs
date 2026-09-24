@@ -6,23 +6,23 @@
 //! The `firmware.toml` inside its tree names the PUP-header
 //! `image_version`. A title entry names the version its record holds.
 //! The PARAM.SFO inside its tree says which key named it. A half the
-//! store did not compose -- an unmanaged `--firmware-dir` tree, a title
-//! with no store entry -- is `None`, because no version key names it.
+//! store did not compose -- an unmanaged firmware tree, a title with no
+//! store entry -- is `None`, because no version key names it.
 
 use std::path::{Path, PathBuf};
 
 use cellgov_compare::{AppVersion, BootOverrides, FirmwareIdentity, GameIdentity, RunIdentity};
 use cellgov_install::manifest::MANIFEST_FILE;
 use cellgov_install::param_sfo::{self, SfoVersionKey};
-
-use super::compose::{GameChoice, StoredGame};
-use super::select::{FirmwareChoice, GameVersion};
-use cellgov_boot::manifest::BASE_GAME_VER;
 use cellgov_install::store::inventory::FirmwareEntry;
+use cellgov_install::store::select::GameVersion;
+use cellgov_install::store::BASE_GAME_VER;
+
+use super::composition::{FirmwareChoice, GameChoice, StoredGame};
 
 /// Why a composed boot could not name the identity triple it runs.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum IdentityError {
+pub enum IdentityError {
     /// The selected firmware entry's identity could not be read, so
     /// the run cannot name the PUP it tests against. Boxed: its
     /// mismatch variant carries two version/digest pairs.
@@ -36,12 +36,13 @@ pub(crate) enum IdentityError {
 
 /// Why the selected firmware's identity could not be read.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum FirmwareIdentityError {
+pub enum FirmwareIdentityError {
     /// The manifest inside the entry's tree could not be read.
     #[error("read {}: {source}", path.display())]
     Read {
         /// The manifest file.
         path: PathBuf,
+        /// The underlying failure.
         #[source]
         source: std::io::Error,
     },
@@ -70,7 +71,7 @@ pub(crate) enum FirmwareIdentityError {
 /// What the record and the manifest each say the entry was installed
 /// from.
 #[derive(Debug)]
-pub(crate) struct FirmwareClaims {
+pub struct FirmwareClaims {
     /// The manifest file.
     pub path: PathBuf,
     /// Version the record declares.
@@ -85,12 +86,13 @@ pub(crate) struct FirmwareClaims {
 
 /// Why the selected title tree's version could not be read.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum GameIdentityError {
+pub enum GameIdentityError {
     /// The PARAM.SFO inside the tree could not be read.
     #[error("read {}: {source}", path.display())]
     Read {
         /// The PARAM.SFO file.
         path: PathBuf,
+        /// The underlying failure.
         #[source]
         source: std::io::Error,
     },
@@ -99,6 +101,7 @@ pub(crate) enum GameIdentityError {
     Parse {
         /// The PARAM.SFO file.
         path: PathBuf,
+        /// The parse refusal.
         #[source]
         source: param_sfo::SfoError,
     },
@@ -132,7 +135,7 @@ fn render_named_version(found: &Option<AppVersion>) -> String {
         .map_or_else(|| "no version key".to_string(), ToString::to_string)
 }
 
-/// Build the identity triple for a composed boot.
+/// Builds the identity triple for a composed boot.
 ///
 /// # Errors
 ///
@@ -145,7 +148,7 @@ fn render_named_version(found: &Option<AppVersion>) -> String {
 ///
 /// [`IdentityError::Game`] on the same three failures of the selected
 /// title tree's PARAM.SFO.
-pub(crate) fn run_identity(
+pub(super) fn run_identity(
     firmware: &FirmwareChoice,
     game: &GameChoice,
 ) -> Result<RunIdentity, IdentityError> {
@@ -160,8 +163,8 @@ pub(crate) fn run_identity(
             GameChoice::Stored(stored) => Some(game_identity(stored)?),
             GameChoice::Firmware { .. } | GameChoice::Unstored => None,
         },
-        // The store composes no override. `try_resolve_composition` in
-        // `boot_cmd` replaces this empty set with the boot's own flags.
+        // The store composes no override. The boot command replaces
+        // this empty set with the boot's own overrides.
         overrides: BootOverrides::default(),
     })
 }
@@ -251,7 +254,7 @@ fn game_identity(stored: &StoredGame) -> Result<GameIdentity, GameIdentityError>
 /// - [`GameIdentityError::Parse`] when the table does not parse.
 /// - [`GameIdentityError::Mismatch`] when the version the table names
 ///   is not `recorded`.
-pub(crate) fn tree_app_version(
+pub fn tree_app_version(
     path: PathBuf,
     recorded: &str,
 ) -> Result<Option<AppVersion>, GameIdentityError> {

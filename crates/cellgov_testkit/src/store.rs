@@ -1,32 +1,48 @@
-//! A synthetic store built in a scratch directory. The selection tests
-//! state what is installed rather than read what this machine holds.
+//! A synthetic content store built in a scratch directory, so a test
+//! states what is installed rather than reading what the machine holds.
+//!
+//! The fixture writes the records and `firmware.toml` files as text,
+//! in the schema the installers write; `cellgov_install`'s own tests read them
+//! back through the store inventory and pin the two format versions
+//! below against its constants.
 
 use std::path::{Path, PathBuf};
 
-use cellgov_testkit::param_sfo::build_param_sfo;
+use crate::param_sfo::build_param_sfo;
+use crate::scratch::{scratch_labeled, ScratchDir};
+
+/// The install-record schema version the synthetic records declare.
+pub const INSTALL_RECORD_FORMAT_VERSION: u32 = 3;
+
+/// The `firmware.toml` schema version a synthetic firmware tree
+/// declares.
+pub const FIRMWARE_MANIFEST_FORMAT_VERSION: u32 = 2;
 
 /// A store root removed when the guard drops.
-pub(crate) struct SyntheticStore {
-    root: cellgov_testkit::scratch::ScratchDir,
+pub struct SyntheticStore {
+    root: ScratchDir,
 }
 
 impl SyntheticStore {
     /// A store with nothing installed.
-    pub(crate) fn new(tag: &str) -> Self {
-        let root = cellgov_testkit::scratch::scratch_labeled(tag);
+    #[must_use]
+    pub fn new(tag: &str) -> Self {
+        let root = scratch_labeled(tag);
         std::fs::create_dir_all(root.join(".cellgov").join("installs")).unwrap();
         Self { root }
     }
 
-    pub(crate) fn root(&self) -> &Path {
+    /// The VFS root the store sits under.
+    #[must_use]
+    pub fn root(&self) -> &Path {
         &self.root
     }
 
-    /// Install a firmware version, with its `dev_flash` tree unless
+    /// Installs a firmware version, with its `dev_flash` tree unless
     /// `tree` is false.
-    pub(crate) fn add_firmware(&self, version: &str, tree: bool) -> &Self {
+    pub fn add_firmware(&self, version: &str, tree: bool) -> &Self {
         let record = format!(
-            "format_version = 3\n\n\
+            "format_version = {INSTALL_RECORD_FORMAT_VERSION}\n\n\
              [artifact]\n\
              kind = \"firmware\"\n\
              version = \"{version}\"\n\
@@ -43,12 +59,11 @@ impl SyntheticStore {
             std::fs::write(
                 dev_flash.join("firmware.toml"),
                 format!(
-                    "format_version = {}\n\n\
+                    "format_version = {FIRMWARE_MANIFEST_FORMAT_VERSION}\n\n\
                      [firmware]\n\
                      image_version = \"{}\"\n\
                      version = \"{version}\"\n\
                      pup_sha256 = \"{}\"\n",
-                    cellgov_install::manifest::SUPPORTED_FORMAT_VERSION,
                     image_version(version),
                     digest('f'),
                 ),
@@ -58,30 +73,25 @@ impl SyntheticStore {
         self
     }
 
-    /// Install a title's base tree; `disc` selects which mount it
+    /// Installs a title's base tree; `disc` selects which mount it
     /// backs. The tree's PARAM.SFO declares `version` under `APP_VER`,
     /// the shape a real install leaves, and no `PS3_SYSTEM_VER`.
-    pub(super) fn add_base(&self, title_id: &str, version: &str, disc: bool) -> &Self {
+    pub fn add_base(&self, title_id: &str, version: &str, disc: bool) -> &Self {
         self.write_base(title_id, version, disc, None, None)
     }
 
-    /// Install a disc title's base tree whose record names `shipped` as
-    /// the firmware its disc shipped, as a disc install that registered
-    /// its PUP writes it. The test adds the firmware entry itself, or
-    /// leaves it out.
-    pub(super) fn add_disc_base_shipping(
-        &self,
-        title_id: &str,
-        version: &str,
-        shipped: &str,
-    ) -> &Self {
+    /// Installs a disc title's base tree whose record names `shipped`
+    /// as the firmware its disc shipped, as a disc install that
+    /// registered its PUP writes it. The test adds the firmware entry
+    /// itself, or leaves it out.
+    pub fn add_disc_base_shipping(&self, title_id: &str, version: &str, shipped: &str) -> &Self {
         self.write_base(title_id, version, true, None, Some(shipped))
     }
 
-    /// Install a title's base tree whose PARAM.SFO declares
+    /// Installs a title's base tree whose PARAM.SFO declares
     /// `system_ver` under `PS3_SYSTEM_VER`, recorded as `[title]
     /// system_ver` the way the installer writes it.
-    pub(super) fn add_base_declaring(
+    pub fn add_base_declaring(
         &self,
         title_id: &str,
         version: &str,
@@ -111,7 +121,7 @@ impl SyntheticStore {
                 .map(|v| format!("shipped_firmware = \"{v}\"\n"))
                 .unwrap_or_default();
         let record = format!(
-            "format_version = 3\n\n\
+            "format_version = {INSTALL_RECORD_FORMAT_VERSION}\n\n\
              [artifact]\n\
              kind = \"title-base\"\n\
              version = \"{version}\"\n\
@@ -139,7 +149,8 @@ impl SyntheticStore {
     }
 
     /// The PARAM.SFO of a title's base tree.
-    pub(super) fn base_param_sfo(&self, title_id: &str, disc: bool) -> PathBuf {
+    #[must_use]
+    pub fn base_param_sfo(&self, title_id: &str, disc: bool) -> PathBuf {
         let tree = self.root.join("titles").join(title_id).join("base");
         if disc {
             tree.join("disc").join("PS3_GAME").join("PARAM.SFO")
@@ -148,8 +159,8 @@ impl SyntheticStore {
         }
     }
 
-    /// Replace a base tree's PARAM.SFO with one holding `entries`.
-    pub(super) fn write_base_param_sfo(
+    /// Replaces a base tree's PARAM.SFO with one holding `entries`.
+    pub fn write_base_param_sfo(
         &self,
         title_id: &str,
         disc: bool,
@@ -161,15 +172,15 @@ impl SyntheticStore {
         self
     }
 
-    /// Install one update version of a title.
-    pub(super) fn add_update(&self, title_id: &str, version: &str) -> &Self {
+    /// Installs one update version of a title.
+    pub fn add_update(&self, title_id: &str, version: &str) -> &Self {
         self.write_update(title_id, version, None, None)
     }
 
-    /// Install one update version whose publisher metadata declares a
+    /// Installs one update version whose publisher metadata declares a
     /// minimum firmware (`[source] min_system_ver`), and whose own
     /// PARAM.SFO declares none.
-    pub(super) fn add_update_needing(
+    pub fn add_update_needing(
         &self,
         title_id: &str,
         version: &str,
@@ -178,10 +189,10 @@ impl SyntheticStore {
         self.write_update(title_id, version, min_system_ver, None)
     }
 
-    /// Install one update version whose own PARAM.SFO declares
+    /// Installs one update version whose own PARAM.SFO declares
     /// `system_ver` under `PS3_SYSTEM_VER`, recorded as `[title]
     /// system_ver`, beside whatever the publisher metadata declares.
-    pub(super) fn add_update_declaring(
+    pub fn add_update_declaring(
         &self,
         title_id: &str,
         version: &str,
@@ -192,7 +203,7 @@ impl SyntheticStore {
     }
 
     /// The record names the entry directory; the tree sits under its
-    /// `game/` child, the shape `install_update` writes.
+    /// `game/` child, the shape the update installer writes.
     fn write_update(
         &self,
         title_id: &str,
@@ -208,7 +219,7 @@ impl SyntheticStore {
             .map(|v| format!("system_ver = \"{v}\"\n"))
             .unwrap_or_default();
         let record = format!(
-            "format_version = 3\n\n\
+            "format_version = {INSTALL_RECORD_FORMAT_VERSION}\n\n\
              [artifact]\n\
              kind = \"title-update\"\n\
              version = \"{version}\"\n\
@@ -242,7 +253,8 @@ impl SyntheticStore {
     }
 
     /// The `dev_hdd0/game` tree one installed update holds.
-    pub(super) fn update_tree(&self, title_id: &str, version: &str) -> PathBuf {
+    #[must_use]
+    pub fn update_tree(&self, title_id: &str, version: &str) -> PathBuf {
         self.root
             .join("titles")
             .join(title_id)
@@ -251,19 +263,23 @@ impl SyntheticStore {
             .join("game")
     }
 
-    /// Write one license file into a title's own license directory.
-    pub(super) fn add_title_rap(&self, title_id: &str, filename: &str, bytes: &[u8]) -> &Self {
+    /// Writes one license file into a title's own license directory.
+    pub fn add_title_rap(&self, title_id: &str, filename: &str, bytes: &[u8]) -> &Self {
         let dir = self.root.join("titles").join(title_id).join("exdata");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(filename), bytes).unwrap();
         self
     }
 
-    pub(super) fn firmware_dev_flash(&self, version: &str) -> PathBuf {
-        self.root.join("firmware").join(version).join("dev_flash")
+    /// The `dev_flash` tree of one installed firmware version.
+    #[must_use]
+    pub fn firmware_dev_flash(&self, version: &str) -> PathBuf {
+        self.firmware_entry(version).join("dev_flash")
     }
 
-    pub(super) fn firmware_entry(&self, version: &str) -> PathBuf {
+    /// The entry directory of one installed firmware version.
+    #[must_use]
+    pub fn firmware_entry(&self, version: &str) -> PathBuf {
         self.root.join("firmware").join(version)
     }
 
@@ -284,15 +300,17 @@ fn digest(fill: char) -> String {
     std::iter::repeat_n(fill, 64).collect()
 }
 
-/// The `image_version` the synthetic store's `firmware.toml` declares
-/// for one firmware version. Distinct per version, so a test can tell
-/// two entries apart.
-pub(super) fn image_version(version: &str) -> String {
+/// The `image_version` a synthetic `firmware.toml` declares for one
+/// firmware version. Distinct per version, so a test can tell two
+/// entries apart.
+#[must_use]
+pub fn image_version(version: &str) -> String {
     format!("0x{}", version.replace('.', ""))
 }
 
 /// The PUP digest every synthetic firmware entry records, and the one
 /// its `firmware.toml` repeats.
-pub(super) fn firmware_pup_sha256() -> String {
+#[must_use]
+pub fn firmware_pup_sha256() -> String {
     digest('f')
 }

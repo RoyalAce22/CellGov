@@ -84,10 +84,7 @@ pub(super) fn load_firmware_set(
         mem,
         code_floor,
         title.identity.overrides.prx_base,
-        matches!(
-            title.manifest.source,
-            crate::manifest::GameSource::FirmwareExec { .. }
-        ),
+        title.manifest.ships_in_firmware(),
         sink,
         services.keys.as_ref(),
     )?;

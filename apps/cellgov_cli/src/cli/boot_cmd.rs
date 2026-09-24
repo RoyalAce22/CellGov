@@ -137,8 +137,8 @@ pub(super) fn try_resolve_composition(
         // The value decides: `CELLGOV_NO_FIRMWARE_DIR=0` leaves the
         // default in place.
         no_firmware: parse_env_bool(DISABLE_DEFAULT_ENV)?,
-        disable_env: DISABLE_DEFAULT_ENV,
-    })?;
+    })
+    .map_err(ComposeError::from)?;
     composition.identity.overrides = overrides;
     for line in banner::render(title, &composition) {
         eprintln!("{line}");

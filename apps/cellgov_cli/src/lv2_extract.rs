@@ -7,12 +7,12 @@ use cellgov_install::keys::{version_label, KeyVault, KeyVaultError};
 use cellgov_install::manifest::{sha256_of, Sha256};
 use cellgov_install::store::KernelRecord;
 
-use crate::cli::boot_cmd::DISABLE_DEFAULT_ENV;
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::{Lv2ExtractArgs, OutputFormat};
 use crate::cli::store::read::model::STORE_FORMAT_VERSION;
-use crate::composition::{select, FirmwareSelectError};
+use crate::composition::refusal::firmware_refusal;
 use cellgov_install::store::inventory::{FirmwareEntry, InventoryError, StoreInventory};
+use cellgov_install::store::select::{select_firmware, FirmwareSelectError};
 
 #[derive(Debug, serde::Serialize)]
 struct Lv2ExtractDoc {
@@ -29,7 +29,7 @@ struct Lv2ExtractDoc {
 enum Lv2ExtractError {
     #[error("store inventory: {0}")]
     Inventory(#[from] InventoryError),
-    #[error("{0}")]
+    #[error("{}", firmware_refusal(.0))]
     Select(#[from] FirmwareSelectError),
     #[error(
         "no firmware is installed under {root}; install one with `cellgov firmware install \
@@ -105,16 +105,13 @@ fn extract(args: &Lv2ExtractArgs, vfs_root: &Path) -> Result<Lv2ExtractDoc, Lv2E
     let store = crate::cli::keys::install_root_of(vfs_root);
     let inventory = StoreInventory::read(&store)?;
     let managed =
-        select::select_firmware(&inventory, args.fw.as_deref(), None, DISABLE_DEFAULT_ENV)
-            .map_err(|source| match source {
-                FirmwareSelectError::NoneInstalled { root, .. } => {
-                    Lv2ExtractError::NoneInstalled { root }
-                }
-                FirmwareSelectError::Ambiguous { root, installed } => {
-                    Lv2ExtractError::Ambiguous { root, installed }
-                }
-                other => Lv2ExtractError::Select(other),
-            })?;
+        select_firmware(&inventory, args.fw.as_deref(), None).map_err(|source| match source {
+            FirmwareSelectError::NoneInstalled { root } => Lv2ExtractError::NoneInstalled { root },
+            FirmwareSelectError::Ambiguous { root, installed } => {
+                Lv2ExtractError::Ambiguous { root, installed }
+            }
+            other => Lv2ExtractError::Select(other),
+        })?;
     let kernel = kernel_record(&managed.entry)?;
     let vault = KeyVault::load_for_vfs(&store)?;
     let decrypted =

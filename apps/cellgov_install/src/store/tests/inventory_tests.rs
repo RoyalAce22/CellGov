@@ -408,6 +408,46 @@ fn the_record_listings_name_the_filed_versions_in_byte_order() {
     );
 }
 
+/// The workspace's shared synthetic store writes the schema this crate
+/// reads, so a test built on it cannot pass against a drifted record.
+#[test]
+fn the_shared_synthetic_store_writes_the_schema_the_store_reads() {
+    use cellgov_testkit::store as shared;
+    assert_eq!(
+        shared::INSTALL_RECORD_FORMAT_VERSION,
+        INSTALL_RECORD_FORMAT_VERSION
+    );
+    assert_eq!(
+        shared::FIRMWARE_MANIFEST_FORMAT_VERSION,
+        crate::manifest::SUPPORTED_FORMAT_VERSION
+    );
+    let store = shared::SyntheticStore::new("inv_shared_fixture");
+    store
+        .add_firmware("4.93", true)
+        .add_disc_base_shipping("BLAA00001", "02.00", "4.93")
+        .add_update_declaring("BLAA00001", "02.51", Some("04.2000"), "04.4000");
+    let inventory = StoreInventory::read(store.root()).expect("the shared store reads");
+    let firmware = inventory
+        .firmware("4.93")
+        .expect("the firmware entry reads");
+    assert_eq!(firmware.dev_flash_dir(), store.firmware_dev_flash("4.93"));
+    let manifest = std::fs::read_to_string(
+        store
+            .firmware_dev_flash("4.93")
+            .join(crate::manifest::MANIFEST_FILE),
+    )
+    .unwrap();
+    let manifest = crate::manifest::parse_manifest(&manifest).expect("firmware.toml parses");
+    assert_eq!(manifest.firmware.version, "4.93");
+    let title = inventory.title("BLAA00001").expect("the title reads");
+    let base = title.base.as_ref().expect("the base reads");
+    assert_eq!(base.tree, TitleTree::Disc);
+    assert_eq!(base.shipped_firmware.as_deref(), Some("4.93"));
+    let update = &title.updates["02.51"];
+    assert_eq!(update.min_system_ver.as_deref(), Some("04.2000"));
+    assert_eq!(update.system_ver.as_deref(), Some("04.4000"));
+}
+
 // The pre-store refusal at [`StoreInventory::read`], the entry point
 // every command that reads the store shares.
 

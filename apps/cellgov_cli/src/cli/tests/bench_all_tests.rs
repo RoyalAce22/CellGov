@@ -139,29 +139,29 @@ fn a_failing_set_is_classified_by_its_gate() {
 #[test]
 fn an_absent_store_half_is_not_installed_and_a_broken_one_is_not() {
     let absent = [
-        ComposeError::Firmware(FirmwareSelectError::NotInstalled {
+        Composition::Firmware(FirmwareSelectError::NotInstalled {
             asked: "1.50".to_string(),
             root: "store".to_string(),
             installed: vec!["4.93".to_string()],
         }),
-        ComposeError::Firmware(FirmwareSelectError::NoneInstalled {
+        Composition::Firmware(FirmwareSelectError::NoneInstalled {
             root: "store".to_string(),
-            disable_env: "X",
         }),
-        ComposeError::GameVersion(GameVersionSelectError::NotInstalled {
+        Composition::GameVersion(GameVersionSelectError::NotInstalled {
             asked: "01.02".to_string(),
             title_id: "CG_TEST".to_string(),
             installed: vec!["base".to_string()],
         }),
-        ComposeError::GameVersion(GameVersionSelectError::OrphanUpdates {
+        Composition::GameVersion(GameVersionSelectError::OrphanUpdates {
             title_id: "CG_TEST".to_string(),
             updates: vec!["01.02".to_string()],
         }),
-        ComposeError::TitleNotInStore {
+        Composition::TitleNotInStore {
             title_id: "CG_TEST".to_string(),
             root: "store".to_string(),
         },
-    ];
+    ]
+    .map(ComposeError::Compose);
     for e in &absent {
         assert_eq!(
             not_installed_reason(e).as_deref(),
@@ -169,21 +169,25 @@ fn an_absent_store_half_is_not_installed_and_a_broken_one_is_not() {
         );
     }
     let broken = [
-        ComposeError::Firmware(FirmwareSelectError::TreeMissing {
+        Composition::Firmware(FirmwareSelectError::TreeMissing {
             version: "4.93".to_string(),
             root: "store".to_string(),
             dir: "store/firmware/4.93".to_string(),
         }),
-        ComposeError::TreeMissing {
+        Composition::TreeMissing {
             title_id: "CG_TEST".to_string(),
             version: "base".to_string(),
             dir: "store/titles/CG_TEST".to_string(),
         },
-        ComposeError::FirmwareRelativeWithoutEntry {
+        Composition::FirmwareRelativeWithoutEntry {
             short_name: "shipped".to_string(),
             dir: "dev_flash/shipped/module".to_string(),
         },
-    ];
+        Composition::GameVersionForFirmwareExec {
+            short_name: "shipped".to_string(),
+        },
+    ]
+    .map(ComposeError::Compose);
     for e in &broken {
         assert_eq!(not_installed_reason(e), None, "{e}");
     }

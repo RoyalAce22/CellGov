@@ -4,9 +4,9 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::composition::compose::GameChoice;
-use crate::composition::select::{FirmwareSelectedBy, ManagedFirmware};
+use cellgov_boot::compose::GameChoice;
 use cellgov_install::store::inventory::FirmwareEntry;
+use cellgov_install::store::select::{FirmwareSelectedBy, ManagedFirmware};
 
 fn selection(fw: Option<&str>, game_ver: Option<&str>, dir: Option<&str>) -> BootSelection {
     BootSelection {
@@ -25,7 +25,7 @@ fn managed(entry_dir: &str) -> BootComposition {
                 pup_sha256: "0".repeat(64),
                 core_os: None,
             },
-            selected_by: FirmwareSelectedBy::Flag,
+            selected_by: FirmwareSelectedBy::Named,
         }),
         game: GameChoice::Unstored,
         mounts: Vec::new(),

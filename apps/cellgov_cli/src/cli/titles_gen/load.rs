@@ -24,7 +24,7 @@ use cellgov_compare::{
 
 use super::cell::{CellArtifacts, CellResult};
 use crate::paths::CROSS_RUNNER_SUMMARY_FILE;
-use cellgov_boot::manifest::{CellKey, GameSource, TitleManifest, BASE_GAME_VER};
+use cellgov_boot::manifest::{CellKey, TitleManifest, BASE_GAME_VER};
 
 /// The anchor file every cell's boot measurement is written to.
 const BOOT_SUMMARY_FILE: &str = "boot_summary.json";
@@ -183,7 +183,7 @@ impl TitleDocs<'_> {
     /// Whether the title belongs on the firmware page: it ships inside
     /// every firmware image, so its rows are firmware versions.
     pub(crate) fn ships_in_firmware(&self) -> bool {
-        matches!(self.title.source, GameSource::FirmwareExec { .. })
+        self.title.ships_in_firmware()
     }
 }
 

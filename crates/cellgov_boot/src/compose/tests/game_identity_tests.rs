@@ -5,12 +5,10 @@ use std::path::Path;
 
 use cellgov_compare::{AppVersion, RunIdentity};
 
+use super::super::composition::{compose_boot, ComposeError, ComposeInputs};
 use super::{GameIdentityError, IdentityError};
-use crate::composition::compose::{compose_boot, ComposeError, ComposeInputs};
-use crate::composition::test_support::SyntheticStore;
-use cellgov_boot::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
-
-const DISABLE_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
+use crate::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
+use cellgov_testkit::store::SyntheticStore;
 
 fn manifest(content_id: &str, source: GameSource) -> TitleManifest {
     TitleManifest {
@@ -49,7 +47,6 @@ fn compose(
         game_ver,
         firmware_dir: None,
         no_firmware: false,
-        disable_env: DISABLE_ENV,
     })
     .map(|c| c.identity)
 }

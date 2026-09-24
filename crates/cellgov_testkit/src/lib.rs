@@ -34,6 +34,8 @@ pub mod param_sfo;
 pub mod runner;
 #[cfg(feature = "scratch")]
 pub mod scratch;
+#[cfg(feature = "scratch")]
+pub mod store;
 pub mod world;
 
 pub use fixtures::ScenarioFixture;

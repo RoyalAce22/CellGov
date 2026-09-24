@@ -1,12 +1,10 @@
-//! A disc title's recorded shipped firmware as the default `--fw`.
+//! A disc title's recorded shipped firmware as the default firmware
+//! selection.
 
 use super::*;
-use crate::composition::banner::render;
-use crate::composition::select::{FirmwareSelectedBy, ManagedFirmware};
-use crate::composition::test_support::SyntheticStore;
-use cellgov_boot::manifest::{CheckpointTrigger, Distribution};
-
-const DISABLE_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
+use crate::manifest::{CheckpointTrigger, Distribution};
+use cellgov_install::store::select::{FirmwareSelectedBy, ManagedFirmware};
+use cellgov_testkit::store::SyntheticStore;
 
 const DISC: &str = "BLAA00001";
 
@@ -48,7 +46,6 @@ fn compose(
         game_ver,
         firmware_dir: None,
         no_firmware: false,
-        disable_env: DISABLE_ENV,
     })
 }
 
@@ -105,7 +102,7 @@ fn an_implicit_choice_is_stamped_on_the_identity_like_a_named_one() {
 }
 
 #[test]
-fn the_flag_outranks_the_shipped_firmware() {
+fn a_named_firmware_outranks_the_shipped_firmware() {
     let store = SyntheticStore::new("shipped_flag_wins");
     store.add_firmware("3.55", true);
     store.add_firmware("4.91", true);
@@ -113,7 +110,7 @@ fn the_flag_outranks_the_shipped_firmware() {
     let c = compose(&store, &disc_manifest(), Some("4.91"), None).unwrap();
     let selected = managed(&c);
     assert_eq!(selected.entry.version, "4.91");
-    assert_eq!(selected.selected_by, FirmwareSelectedBy::Flag);
+    assert_eq!(selected.selected_by, FirmwareSelectedBy::Named);
 }
 
 #[test]
@@ -132,14 +129,6 @@ fn a_shipped_firmware_that_is_not_installed_is_refused_by_name() {
         "got: {msg}"
     );
     assert!(msg.contains("installed: 4.91"), "got: {msg}");
-    // The disc tree is still there, so a reinstall without --force
-    // refuses as target-exists before it registers the disc's package.
-    assert!(
-        msg.contains("Reinstall the disc with `cellgov title install --force <ISO>`"),
-        "got: {msg}"
-    );
-    assert!(msg.contains("cellgov firmware install"), "got: {msg}");
-    assert!(msg.contains("--fw"), "got: {msg}");
 }
 
 #[test]
@@ -153,14 +142,10 @@ fn a_shipped_firmware_with_nothing_installed_is_refused_by_name_not_by_count() {
     );
     let msg = err.to_string();
     assert!(msg.contains("installed: (none)"), "got: {msg}");
-    assert!(
-        !msg.contains("--fw"),
-        "nothing is installed for --fw to name: {msg}"
-    );
 }
 
 #[test]
-fn the_flag_still_boots_another_version_when_the_shipped_one_is_gone() {
+fn a_named_firmware_still_boots_another_version_when_the_shipped_one_is_gone() {
     let store = SyntheticStore::new("shipped_missing_flag");
     store.add_firmware("4.91", true);
     store.add_disc_base_shipping(DISC, "01.00", "3.55");
@@ -210,28 +195,6 @@ fn nothing_installed_says_the_record_names_no_shipped_firmware() {
         msg.contains("no record names one this title shipped with"),
         "got: {msg}"
     );
-    assert!(msg.contains("cellgov firmware install"), "got: {msg}");
-}
-
-#[test]
-fn the_banner_says_the_firmware_shipped_with_the_disc() {
-    let store = SyntheticStore::new("shipped_banner");
-    store.add_firmware("3.55", true);
-    store.add_firmware("4.91", true);
-    store.add_disc_base_shipping(DISC, "01.00", "3.55");
-    let title = disc_manifest();
-    let lines = render(&title, &compose(&store, &title, None, None).unwrap());
-    assert!(lines[2].starts_with("firmware 3.55"), "got: {}", lines[2]);
-    assert!(
-        lines[2].contains("(shipped with this disc;"),
-        "got: {}",
-        lines[2]
-    );
-    let lines = render(
-        &title,
-        &compose(&store, &title, Some("4.91"), None).unwrap(),
-    );
-    assert!(lines[2].contains("(--fw;"), "got: {}", lines[2]);
 }
 
 #[test]
@@ -252,7 +215,7 @@ fn an_update_over_a_disc_base_boots_the_shipped_firmware_and_warns_when_it_decla
 }
 
 /// `compose` with the two selections that bypass the store's firmware
-/// axis: `--firmware-dir`, and the no-firmware variable.
+/// axis: an unmanaged firmware tree, and a firmware-free boot.
 fn compose_overriding(
     store: &SyntheticStore,
     title: &TitleManifest,
@@ -268,7 +231,6 @@ fn compose_overriding(
         game_ver: None,
         firmware_dir,
         no_firmware,
-        disable_env: DISABLE_ENV,
     })
 }
 
@@ -302,7 +264,7 @@ fn firmware_dir_does_not_consult_the_shipped_record_at_all() {
 }
 
 #[test]
-fn the_no_firmware_variable_outranks_the_shipped_record() {
+fn a_firmware_free_boot_outranks_the_shipped_record() {
     let store = SyntheticStore::new("shipped_no_firmware");
     store.add_disc_base_shipping(DISC, "01.00", "3.55");
     let c = compose_overriding(&store, &disc_manifest(), None, true).unwrap();

@@ -4,9 +4,12 @@
 //!
 //! The crate owns image placement, firmware PRX loading and import
 //! resolution, TLS and kernel-context setup, the `module_start` pass,
-//! and the two step loops with their fault classifiers. It writes to no
-//! console and ends no process: every refusal is a [`BootError`] and
-//! every line of narration goes to a caller-supplied [`BootSink`].
+//! and the two step loops with their fault classifiers. [`compose`]
+//! resolves the store's firmware and title selections into the guest
+//! tree a boot runs against. The crate writes to no console and ends no
+//! process: every refusal is a typed error, [`BootError`] for the boot
+//! itself, and every line of narration goes to a caller-supplied
+//! [`BootSink`].
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
@@ -22,6 +25,7 @@ mod sink;
 mod stack_walk;
 mod taps;
 
+pub mod compose;
 pub mod diag;
 pub mod manifest;
 pub mod observation;

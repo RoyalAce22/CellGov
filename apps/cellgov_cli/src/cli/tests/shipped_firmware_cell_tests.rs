@@ -3,12 +3,12 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::composition::compose::StoredGame;
-use crate::composition::select::{FirmwareSelectedBy, ManagedFirmware};
+use cellgov_boot::compose::StoredGame;
 use cellgov_boot::manifest::{
     CellExpectation, CheckpointTrigger, Distribution, GameSource, MatrixCell, TitleManifest,
 };
 use cellgov_install::store::inventory::{BaseEntry, FirmwareEntry};
+use cellgov_install::store::select::{FirmwareSelectedBy, ManagedFirmware};
 
 const DISC: &str = "BLAA00001";
 
@@ -86,7 +86,7 @@ fn disc_manifest_declaring(bench_max_steps: u64, checkpoint: CheckpointTrigger) 
 
 #[test]
 fn a_shipped_firmware_keys_the_cell_like_a_named_one() {
-    let named = composed_cell(&disc_composition(FirmwareSelectedBy::Flag));
+    let named = composed_cell(&disc_composition(FirmwareSelectedBy::Named));
     assert_eq!(named, Some(shipped_cell()));
     assert_eq!(
         composed_cell(&disc_composition(FirmwareSelectedBy::Shipped)),
@@ -98,7 +98,7 @@ fn a_shipped_firmware_keys_the_cell_like_a_named_one() {
 fn a_sole_firmware_keys_the_cell_like_a_named_one() {
     assert_eq!(
         composed_cell(&disc_composition(FirmwareSelectedBy::Sole)),
-        composed_cell(&disc_composition(FirmwareSelectedBy::Flag)),
+        composed_cell(&disc_composition(FirmwareSelectedBy::Named)),
     );
 }
 

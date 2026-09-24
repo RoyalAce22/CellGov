@@ -248,7 +248,7 @@ fn installed_manifest_version_mismatch(
         return None;
     }
     // The boot identity gate rejects this same stale-manifest state in
-    // `composition::identity::firmware_identity`.
+    // `cellgov_boot::compose`.
     Some(PupMismatchDoc {
         subject: format!("installed firmware {installed_version}"),
         kind: "manifest-version".to_string(),

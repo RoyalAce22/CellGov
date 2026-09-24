@@ -4,11 +4,9 @@ use std::path::Path;
 
 use cellgov_compare::AppVersion;
 
-use crate::composition::compose::{compose_boot, BootComposition, ComposeInputs};
-use crate::composition::test_support::{firmware_pup_sha256, image_version, SyntheticStore};
-use cellgov_boot::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
-
-const DISABLE_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
+use super::super::composition::{compose_boot, BootComposition, ComposeInputs};
+use crate::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
+use cellgov_testkit::store::{firmware_pup_sha256, image_version, SyntheticStore};
 
 fn manifest(content_id: &str, source: GameSource) -> TitleManifest {
     TitleManifest {
@@ -48,7 +46,6 @@ fn compose<'a>(
         game_ver,
         firmware_dir: None,
         no_firmware: false,
-        disable_env: DISABLE_ENV,
     })
     .expect("composes")
 }
@@ -138,7 +135,6 @@ fn an_unmanaged_firmware_tree_names_no_firmware_half() {
         game_ver: None,
         firmware_dir: Some(&dir),
         no_firmware: false,
-        disable_env: DISABLE_ENV,
     })
     .expect("composes");
     assert!(
@@ -164,7 +160,6 @@ fn a_firmware_entry_with_no_manifest_is_refused() {
         game_ver: None,
         firmware_dir: None,
         no_firmware: false,
-        disable_env: DISABLE_ENV,
     })
     .expect_err("a firmware entry that cannot name its PUP is not composable");
     assert!(
@@ -199,7 +194,6 @@ fn compose_err(store: &SyntheticStore, title: &TitleManifest, vfs_root: &Path) -
         game_ver: None,
         firmware_dir: None,
         no_firmware: false,
-        disable_env: DISABLE_ENV,
     })
     .expect_err("the entry cannot name its PUP")
     .to_string()
@@ -267,7 +261,6 @@ fn a_firmware_free_boot_names_no_firmware_half() {
         game_ver: None,
         firmware_dir: None,
         no_firmware: true,
-        disable_env: DISABLE_ENV,
     })
     .expect("composes");
     assert!(c.identity.firmware.is_none());

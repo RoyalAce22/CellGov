@@ -1,8 +1,6 @@
 use super::*;
-use crate::composition::test_support::SyntheticStore;
-use cellgov_boot::manifest::{CheckpointTrigger, Distribution};
-
-const DISABLE_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
+use crate::manifest::{CheckpointTrigger, Distribution};
+use cellgov_testkit::store::SyntheticStore;
 
 fn manifest(content_id: &str, source: GameSource) -> TitleManifest {
     TitleManifest {
@@ -40,7 +38,6 @@ fn inputs<'a>(
         game_ver: None,
         firmware_dir: None,
         no_firmware: false,
-        disable_env: DISABLE_ENV,
     }
 }
 
@@ -191,9 +188,11 @@ fn a_firmware_exec_title_refuses_game_ver() {
     let vfs = store.root().join("dev_hdd0");
     let mut i = inputs(&title, &store, &vfs);
     i.game_ver = Some("base");
-    let msg = compose_boot(&i).unwrap_err().to_string();
-    assert!(msg.contains("--game-ver does not apply"), "got: {msg}");
-    assert!(msg.contains("--fw"), "got: {msg}");
+    let err = compose_boot(&i).unwrap_err();
+    assert!(
+        matches!(&err, ComposeError::GameVersionForFirmwareExec { short_name } if short_name == "t"),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -240,9 +239,11 @@ fn a_firmware_relative_path_with_no_managed_firmware_is_refused() {
     let vfs = store.root().join("dev_hdd0");
     let mut i = inputs(&title, &store, &vfs);
     i.firmware_dir = Some(&raw);
-    let msg = compose_boot(&i).unwrap_err().to_string();
-    assert!(msg.contains("relative to a firmware entry"), "got: {msg}");
-    assert!(msg.contains("--fw"), "got: {msg}");
+    let err = compose_boot(&i).unwrap_err();
+    assert!(
+        matches!(&err, ComposeError::FirmwareRelativeWithoutEntry { dir, .. } if dir == "dev_flash/vsh/module"),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -494,22 +495,6 @@ fn a_firmware_that_meets_the_declared_minimum_reports_nothing() {
     i.game_ver = Some("02.51");
     let c = compose_boot(&i).unwrap();
     assert!(c.understated_firmware.is_empty());
-}
-
-#[test]
-fn version_key_normalizes_the_two_written_forms_of_one_version() {
-    assert_eq!(version_key("4.93"), version_key("04.9300"));
-    assert!(version_key("4.9") < version_key("4.93"));
-    assert!(version_key("04.9300") < version_key("04.9312"));
-    assert_eq!(version_key("latest"), None);
-    assert_eq!(version_key("4."), None);
-}
-
-#[test]
-fn a_version_string_no_order_can_be_read_from_yields_no_key() {
-    for malformed in ["", ".93", "4.930000", "4.9a", "99999999999.9300", "493"] {
-        assert_eq!(version_key(malformed), None, "for {malformed:?}");
-    }
 }
 
 #[test]

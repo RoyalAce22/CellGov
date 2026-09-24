@@ -1,9 +1,7 @@
 use super::*;
-use crate::composition::compose::{compose_boot, ComposeInputs};
-use crate::composition::test_support::SyntheticStore;
+use cellgov_boot::compose::{compose_boot, ComposeInputs};
 use cellgov_boot::manifest::{CheckpointTrigger, Distribution, GameSource};
-
-const DISABLE_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
+use cellgov_testkit::store::SyntheticStore;
 
 fn manifest(content_id: &str, source: GameSource) -> TitleManifest {
     TitleManifest {
@@ -42,9 +40,37 @@ fn compose(
         game_ver,
         firmware_dir: None,
         no_firmware: false,
-        disable_env: DISABLE_ENV,
     })
     .unwrap()
+}
+
+#[test]
+fn the_banner_says_the_firmware_shipped_with_the_disc() {
+    let store = SyntheticStore::new("ban_shipped");
+    store.add_firmware("3.55", true);
+    store.add_firmware("4.91", true);
+    store.add_disc_base_shipping("BLAA00001", "01.00", "3.55");
+    let title = manifest("BLAA00001", GameSource::Disc);
+    let lines = render(&title, &compose(&store, &title, None));
+    assert!(lines[2].starts_with("firmware 3.55"), "got: {}", lines[2]);
+    assert!(
+        lines[2].contains("(shipped with this disc;"),
+        "got: {}",
+        lines[2]
+    );
+    let vfs = store.root().join("dev_hdd0");
+    let named = compose_boot(&ComposeInputs {
+        title: &title,
+        vfs_root: &vfs,
+        install_root: store.root(),
+        fw: Some("4.91"),
+        game_ver: None,
+        firmware_dir: None,
+        no_firmware: false,
+    })
+    .unwrap();
+    let lines = render(&title, &named);
+    assert!(lines[2].contains("(--fw;"), "got: {}", lines[2]);
 }
 
 #[test]
@@ -102,7 +128,6 @@ fn an_unmanaged_firmware_is_marked_as_such() {
         game_ver: None,
         firmware_dir: Some(&raw),
         no_firmware: false,
-        disable_env: DISABLE_ENV,
     })
     .unwrap();
     let lines = render(&title, &composition);

@@ -4,6 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use cellgov_install::store::{DISC_DISTRIBUTION, PSN_HDD_DISTRIBUTION};
+use cellgov_ps3_abi::format::hdd0::GAME_DIR;
+use cellgov_ps3_abi::format::title_tree::{BDVD_MOUNT, DISC_GAME_DIR, USRDIR};
 
 use super::checkpoint::CheckpointTrigger;
 use super::matrix::{CellKey, MatrixCell};
@@ -298,6 +300,13 @@ impl TitleManifest {
         &self.short_name
     }
 
+    /// Whether the title ships inside the firmware image, so its
+    /// version axis is the firmware's and it has no store entry.
+    #[must_use]
+    pub fn ships_in_firmware(&self) -> bool {
+        matches!(self.source, GameSource::FirmwareExec { .. })
+    }
+
     /// The name the matrix and the boot banner show.
     pub fn display_name(&self) -> &str {
         &self.display_name
@@ -361,7 +370,7 @@ impl TitleManifest {
             });
         }
         Ok(vec![match &self.source {
-            GameSource::Hdd => vfs_root.join("game").join(&self.content_id).join("USRDIR"),
+            GameSource::Hdd => vfs_root.join(GAME_DIR).join(&self.content_id).join(USRDIR),
             GameSource::Disc => {
                 let parent = match vfs_root.parent() {
                     Some(p) if !p.as_os_str().is_empty() => p,
@@ -373,10 +382,10 @@ impl TitleManifest {
                     }
                 };
                 parent
-                    .join("dev_bdvd")
+                    .join(BDVD_MOUNT)
                     .join(&self.content_id)
-                    .join("PS3_GAME")
-                    .join("USRDIR")
+                    .join(DISC_GAME_DIR)
+                    .join(USRDIR)
             }
             GameSource::FirmwareExec { dir } | GameSource::ManifestRelative { dir } => dir.clone(),
         }])

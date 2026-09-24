@@ -28,6 +28,7 @@ use super::title::{resolve_ps3_vfs_root, DEFAULT_TITLE_REGISTRY_DIR};
 use crate::composition::{ComposeError, FirmwareSelectError, GameVersionSelectError};
 use crate::game;
 use crate::progress::BENCH_PAIR_TASK;
+use cellgov_boot::compose::ComposeError as Composition;
 use cellgov_boot::manifest::TitleManifest;
 
 /// How a refusal and the report name this invocation.
@@ -240,28 +241,33 @@ pub(super) fn tally_line(verdicts: &[CellVerdict]) -> String {
 /// not installed for the same reason (`game_version_is_installed` in
 /// `cli::store::read::collect`). Every other refusal is a store error.
 pub(super) fn not_installed_reason(e: &ComposeError) -> Option<String> {
-    match e {
-        ComposeError::Firmware(
+    let composition = match e {
+        ComposeError::Compose(composition) => composition,
+        ComposeError::FirmwareDirectory { .. } | ComposeError::IdentityRender { .. } => {
+            return None
+        }
+    };
+    match composition {
+        Composition::Firmware(
             FirmwareSelectError::NotInstalled { .. } | FirmwareSelectError::NoneInstalled { .. },
         )
-        | ComposeError::GameVersion(
+        | Composition::GameVersion(
             GameVersionSelectError::NotInstalled { .. }
             | GameVersionSelectError::OrphanUpdates { .. },
         )
-        | ComposeError::TitleNotInStore { .. }
-        | ComposeError::BaseRecordMissing { .. } => Some(e.to_string()),
-        ComposeError::Firmware(_)
-        | ComposeError::GameVersion(_)
-        | ComposeError::Inventory(_)
-        | ComposeError::FirmwareDirectory { .. }
-        | ComposeError::IdentityRender { .. }
-        | ComposeError::Identity(_)
-        | ComposeError::ResolveEboot(_)
-        | ComposeError::FirmwareRelativeWithoutEntry { .. }
-        | ComposeError::TreeMissing { .. }
-        | ComposeError::TreeUnreadable { .. }
-        | ComposeError::ReadExdata { .. }
-        | ComposeError::ExdataConflict { .. } => None,
+        | Composition::TitleNotInStore { .. }
+        | Composition::BaseRecordMissing { .. } => Some(e.to_string()),
+        Composition::Firmware(_)
+        | Composition::GameVersion(_)
+        | Composition::GameVersionForFirmwareExec { .. }
+        | Composition::Inventory(_)
+        | Composition::Identity(_)
+        | Composition::ResolveEboot(_)
+        | Composition::FirmwareRelativeWithoutEntry { .. }
+        | Composition::TreeMissing { .. }
+        | Composition::TreeUnreadable { .. }
+        | Composition::ReadExdata { .. }
+        | Composition::ExdataConflict { .. } => None,
     }
 }
 

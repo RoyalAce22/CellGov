@@ -4,7 +4,7 @@ use cellgov_install::store::CoreOsRecord;
 use cellgov_ps3_abi::format::sce::self_version;
 use cellgov_testkit::scratch::scratch_labeled;
 
-use crate::composition::test_support::SyntheticStore;
+use cellgov_testkit::store::SyntheticStore;
 
 fn entry(core_os: Option<CoreOsRecord>) -> FirmwareEntry {
     FirmwareEntry {
@@ -40,7 +40,7 @@ fn an_empty_store_names_the_install_command_without_boot_only_advice() {
     assert!(text.contains("no firmware is installed"), "{text}");
     assert!(text.contains("cellgov firmware install"), "{text}");
     assert!(!text.contains("--firmware-dir"), "{text}");
-    assert!(!text.contains(DISABLE_DEFAULT_ENV), "{text}");
+    assert!(!text.contains(crate::env_vars::NO_FIRMWARE_DIR), "{text}");
 }
 
 #[test]

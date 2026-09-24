@@ -13,11 +13,11 @@ use cellgov_ppu::caller_census::{scan_syscalls, CallerScanError};
 use cellgov_ppu::funcmap::{self, FuncMapError, FunctionName};
 use cellgov_ps3_abi::format::elf::{ELF_HEADER_SIZE, ELF_MAGIC, EM_PPC64};
 
-use crate::cli::boot_cmd::DISABLE_DEFAULT_ENV;
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::CallerCensusArgs;
-use crate::composition::{select, FirmwareSelectError};
+use crate::composition::refusal::firmware_refusal;
 use cellgov_install::store::inventory::{FirmwareEntry, InventoryError, StoreInventory};
+use cellgov_install::store::select::{select_firmware, FirmwareSelectError};
 
 const FIRMWARE_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -42,7 +42,7 @@ struct CensusTables {
 enum CallerCensusError {
     #[error("store inventory: {0}")]
     Inventory(#[from] InventoryError),
-    #[error("{0}")]
+    #[error("{}", firmware_refusal(.0))]
     Select(#[from] FirmwareSelectError),
     #[error("title registry: {0}")]
     Registry(#[from] cellgov_boot::manifest::ManifestError),
@@ -294,7 +294,7 @@ fn selected_entries(
     inventory: &StoreInventory,
 ) -> Result<Vec<FirmwareEntry>, CallerCensusError> {
     if let Some(fw) = &args.fw {
-        let managed = select::select_firmware(inventory, Some(fw), None, DISABLE_DEFAULT_ENV)?;
+        let managed = select_firmware(inventory, Some(fw), None)?;
         return Ok(vec![managed.entry]);
     }
     let registry = TitleRegistry::scan_dir(&crate::cli::store::registry_dir())?;

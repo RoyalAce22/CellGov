@@ -1,25 +1,21 @@
-//! Store-driven boot composition: which firmware and which title
-//! version a boot runs against, and the guest-visible tree that pair
-//! produces.
+//! The boot command's face on store-driven composition.
 //!
-//! - [`select`] resolves `--fw` and `--game-ver` against the store's
-//!   [`StoreInventory`] to one choice or one refusal.
-//! - [`compose`] builds the ordered host roots the mount table and the
-//!   EBOOT probe use.
-//! - [`identity`] names the choice in the form every machine artifact
-//!   the boot writes embeds.
+//! `cellgov_boot::compose` resolves `--fw` and `--game-ver` against the
+//! store's [`StoreInventory`] and builds the guest tree the pair
+//! produces. This module keeps what only the command owns:
+//!
+//! - [`refusal`] words each typed refusal around the flags;
 //! - [`banner`] prints the choice before any other output.
 //!
 //! [`StoreInventory`]: cellgov_install::store::StoreInventory
 
 pub(crate) mod banner;
-pub(crate) mod compose;
-pub(crate) mod identity;
-pub(crate) mod select;
+pub(crate) mod refusal;
 
-#[cfg(test)]
-#[path = "tests/test_support.rs"]
-pub(crate) mod test_support;
-
-pub(crate) use compose::{compose_boot, BootComposition, ComposeError, ComposeInputs, GameChoice};
-pub(crate) use select::{FirmwareChoice, FirmwareSelectError, GameVersion, GameVersionSelectError};
+pub(crate) use cellgov_boot::compose::{
+    compose_boot, BootComposition, ComposeInputs, FirmwareChoice, GameChoice,
+};
+pub(crate) use cellgov_install::store::select::{
+    FirmwareSelectError, GameVersion, GameVersionSelectError,
+};
+pub(crate) use refusal::ComposeError;

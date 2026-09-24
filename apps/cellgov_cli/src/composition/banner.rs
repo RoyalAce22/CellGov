@@ -3,9 +3,11 @@
 //! The banner writes to stderr before any other output. Its lines never
 //! land on stdout beside the measurements a consumer parses.
 
-use super::compose::{BootComposition, GameChoice, UnderstatedFirmware};
-use super::select::{FirmwareChoice, GameVersion};
+use cellgov_boot::compose::{BootComposition, FirmwareChoice, GameChoice, UnderstatedFirmware};
 use cellgov_boot::manifest::TitleManifest;
+use cellgov_install::store::select::GameVersion;
+
+use super::refusal::selected_by_label;
 
 /// A digest as `head..tail`, enough to tell two installs apart at a
 /// glance without carrying 64 characters across three lines.
@@ -75,7 +77,7 @@ fn render_firmware(firmware: &FirmwareChoice) -> String {
         FirmwareChoice::Managed(managed) => format!(
             "firmware {}  ({}; pup sha256 {})",
             managed.entry.version,
-            managed.selected_by,
+            selected_by_label(managed.selected_by),
             short_digest(&managed.entry.pup_sha256)
         ),
         FirmwareChoice::Unmanaged { dir } => {

@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::composition::test_support::SyntheticStore;
+use cellgov_testkit::store::SyntheticStore;
 
 #[test]
 fn row_sorting_orders_decimal_cells_numerically() {

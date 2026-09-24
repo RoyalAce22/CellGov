@@ -43,6 +43,8 @@ use crate::store::record::{
     ArtifactRecord, RapRecord, TitleRecord, DISC_DISTRIBUTION, PSN_HDD_DISTRIBUTION,
 };
 use cellgov_ps3_abi::format::elf::ELF_MAGIC;
+use cellgov_ps3_abi::format::hdd0::{GAME_DIR, HDD0_MOUNT};
+use cellgov_ps3_abi::format::title_tree::BDVD_MOUNT;
 use cellgov_ps3_abi::format::title_tree::DISC_UPDATE_PUP;
 
 /// PARAM.SFO categories that mark a disc title (`DG` disc game,
@@ -376,7 +378,7 @@ pub fn install_pkg(
     // `tree/` is the game tree, `rap/` holds the staged RAP.
     let layout = StoreLayout::new(output_dir);
     let exdata = layout.live_exdata_dir();
-    let final_dir = output_dir.join("dev_hdd0").join("game").join(&title_id);
+    let final_dir = output_dir.join(HDD0_MOUNT).join(GAME_DIR).join(&title_id);
     let staging_root = staging_sibling(&final_dir)?;
     let tree_staging = staging_root.join("tree");
     // Resolved before staging: only `run_or_clean` discards the staging
@@ -589,7 +591,7 @@ pub fn install_iso(
     }
 
     let layout = StoreLayout::new(output_dir);
-    let final_dir = output_dir.join("dev_bdvd").join(&title_id);
+    let final_dir = output_dir.join(BDVD_MOUNT).join(&title_id);
     let staging_dir = staging_sibling(&final_dir)?;
     // Resolved before staging, as in `install_pkg`.
     let artifact = Artifact::TitleBase {

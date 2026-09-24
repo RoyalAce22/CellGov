@@ -2,7 +2,7 @@ use super::*;
 
 use std::collections::BTreeMap;
 
-use cellgov_install::store::TitleTree;
+use cellgov_install::store::{TitleTree, BASE_GAME_VER};
 
 use cellgov_boot::manifest::TitleRegistry;
 use cellgov_install::store::inventory::{BaseEntry, UpdateEntry};

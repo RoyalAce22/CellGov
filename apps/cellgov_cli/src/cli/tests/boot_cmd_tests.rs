@@ -4,10 +4,10 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::composition::compose::StoredGame;
-use crate::composition::select::{FirmwareSelectedBy, ManagedFirmware};
+use cellgov_boot::compose::StoredGame;
 use cellgov_boot::manifest::{CellExpectation, MatrixCell};
 use cellgov_install::store::inventory::{BaseEntry, FirmwareEntry};
+use cellgov_install::store::select::{FirmwareSelectedBy, ManagedFirmware};
 
 fn manifest(
     bench_max_steps: Option<u64>,
@@ -73,7 +73,7 @@ fn managed(version: &str) -> FirmwareChoice {
             pup_sha256: "0".repeat(64),
             core_os: None,
         },
-        selected_by: FirmwareSelectedBy::Flag,
+        selected_by: FirmwareSelectedBy::Named,
     })
 }
 

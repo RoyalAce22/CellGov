@@ -18,6 +18,7 @@ pub mod lock;
 pub mod pre_store;
 pub mod record;
 pub mod rename;
+pub mod select;
 pub mod verify;
 
 pub use inventory::{

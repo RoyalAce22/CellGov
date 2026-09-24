@@ -7,9 +7,10 @@ use std::path::{Path, PathBuf};
 
 use cellgov_install::store::{Artifact, StoreLayout, TitleId, VersionKey};
 
-use crate::composition::identity::tree_app_version;
-use cellgov_boot::manifest::{CellKey, GameSource, TitleManifest, TitleRegistry, BASE_GAME_VER};
+use cellgov_boot::compose::tree_app_version;
+use cellgov_boot::manifest::{CellKey, TitleManifest, TitleRegistry};
 use cellgov_install::store::inventory::{FirmwareEntry, StoreInventory, TitleEntry};
+use cellgov_install::store::select::select_game_version;
 
 use super::model::{
     store_rel, AnchorDoc, BaseDoc, CoreOsDoc, CoreOsFileDoc, FirmwareDoc, KernelDoc, TitleDoc,
@@ -153,7 +154,7 @@ impl StoreView {
             title_id: entry.title_id.clone(),
             short_name: manifest.map(|m| m.short_name.clone()),
             display_name: manifest.map(|m| m.display_name.clone()),
-            ships_in_firmware: manifest.is_some_and(ships_in_firmware),
+            ships_in_firmware: manifest.is_some_and(TitleManifest::ships_in_firmware),
             base,
             updates,
             anchors: manifest.map_or_else(Vec::new, |m| self.anchor_docs(m, Some(entry))),
@@ -172,7 +173,7 @@ impl StoreView {
             title_id: manifest.content_id.clone(),
             short_name: Some(manifest.short_name.clone()),
             display_name: Some(manifest.display_name.clone()),
-            ships_in_firmware: ships_in_firmware(manifest),
+            ships_in_firmware: manifest.ships_in_firmware(),
             base: None,
             updates: Vec::new(),
             anchors: self.anchor_docs(manifest, None),
@@ -230,23 +231,11 @@ fn version_key(param_sfo: PathBuf, recorded: &str) -> (Option<String>, Option<St
 }
 
 /// Whether one title entry holds the game version a cell names, in a
-/// form that composes into a boot.
-///
-/// An update tree patches a base and cannot be composed alone
-/// (`crate::composition::select::select_game_version`). An update
-/// archived over an uninstalled base is not a version this machine can
-/// boot.
+/// form that composes into a boot: the selection a boot naming that
+/// version makes. An update archived over an uninstalled base is not a
+/// version this machine can boot.
 fn game_version_is_installed(game_ver: &str, entry: &TitleEntry) -> bool {
-    if entry.base.is_none() {
-        return false;
-    }
-    game_ver == BASE_GAME_VER || entry.updates.contains_key(game_ver)
-}
-
-/// Whether the registry declares `manifest` as a title shipped inside
-/// the firmware image.
-fn ships_in_firmware(manifest: &TitleManifest) -> bool {
-    matches!(manifest.source, GameSource::FirmwareExec { .. })
+    select_game_version(entry, Some(game_ver)).is_ok()
 }
 
 #[cfg(test)]
