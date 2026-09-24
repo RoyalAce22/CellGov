@@ -22,7 +22,6 @@ fn fit_name_column(name: &str) -> String {
 }
 
 use cellgov_ps3_abi::format::elf::ELF_MAGIC;
-use cellgov_ps3_abi::format::sce::SCE_MAGIC;
 
 #[derive(Debug, PartialEq, Eq)]
 enum SourceKind {
@@ -84,44 +83,22 @@ fn load_elf_bytes(
     }
 }
 
-/// Classify `raw`'s first 4 bytes as ELF or SCE magic.
+/// Classify `raw` as a plaintext ELF or an SCE wrapper.
+///
+/// The SCE test is the SELF loader's own, so an input this command
+/// decrypts is one the loader would decrypt.
 fn classify_source(raw: &[u8]) -> Result<SourceKind, LoadError> {
     if raw.len() < cellgov_ps3_abi::format::elf::ELF_HEADER_SIZE {
         return Err(LoadError::TooSmall { len: raw.len() });
+    }
+    if cellgov_install::self_image::is_sce_wrapped(raw) {
+        return Ok(SourceKind::SceWrapped);
     }
     let magic = [raw[0], raw[1], raw[2], raw[3]];
     if magic == ELF_MAGIC {
         return Ok(SourceKind::Elf);
     }
-    if magic == SCE_MAGIC {
-        return Ok(SourceKind::SceWrapped);
-    }
     Err(LoadError::BadMagic { magic })
-}
-
-/// The module-identity block for the listing header, or the reason
-/// there is none.
-///
-/// `Ok(None)` is the title-executable case: `e_type` is ET_EXEC, so
-/// no `sys_prx_module_info_t` exists and none is expected. A PPU
-/// object on this platform carries one of exactly two ELF types, both
-/// in [`cellgov_ps3_abi::format::elf`]. `ET_EXEC` names a title executable.
-/// The PS3 relocatable-module type names every firmware module under
-/// `dev_flash/sys/external`. Every other `e_type` is a structural
-/// anomaly in a file whose import table the caller prints as
-/// authoritative, so this returns the refusal for the caller to name.
-fn module_identity(
-    elf_bytes: &[u8],
-) -> Result<Option<cellgov_ppu::sprx::ParsedPrx>, cellgov_ppu::sprx::PrxParseError> {
-    match cellgov_ppu::sprx::parse_prx(elf_bytes) {
-        Ok(p) => Ok(Some(p)),
-        Err(cellgov_ppu::sprx::PrxParseError::NotPrx(t))
-            if t == cellgov_ps3_abi::format::elf::ET_EXEC =>
-        {
-            Ok(None)
-        }
-        Err(e) => Err(e),
-    }
 }
 
 pub(crate) fn run(
@@ -145,7 +122,9 @@ pub(crate) fn run(
         );
     }
 
-    let sprx_parsed = match module_identity(&elf_bytes) {
+    // A module-info refusal is named, since the import table below is
+    // printed as authoritative.
+    let sprx_parsed = match cellgov_ppu::sprx::module_identity(&elf_bytes) {
         Ok(p) => p,
         Err(e) => {
             eprintln!(
@@ -245,7 +224,7 @@ pub(crate) fn run(
             let name = cellgov_ps3_abi::nid::lookup(f.nid)
                 .map(|(_m, n)| n)
                 .unwrap_or("<unknown>");
-            let class_cell = crate::stub_class::stub_classification(f.nid).as_str();
+            let class_cell = cellgov_ppu::prx::stub_classification(f.nid).as_str();
             println!(
                 "| 0x{:08x} | 0x{:08x}  | {:<width$} | {:<15} |",
                 f.nid,
@@ -280,7 +259,7 @@ pub(crate) fn run(
                 Some(want) => modules.iter().filter(|m| m.name == *want).collect(),
                 None => modules.iter().collect(),
             };
-            if let Some(hint) = nearest_stub_hint(&scope, target) {
+            if let Some(hint) = nearest_stub_hint(scope, target) {
                 eprintln!("prx-imports: {hint}");
             }
         }
@@ -321,20 +300,15 @@ fn describe_opd(opd: Option<cellgov_ppu::sprx::PrxOpd>) -> String {
 /// Build a single-line hint pointing at the closest declared
 /// `stub_addr` to `target`. Useful when a user types a fault PC
 /// mid-stub and gets no exact match.
-fn nearest_stub_hint(modules: &[&cellgov_ppu::prx::ImportedModule], target: u32) -> Option<String> {
-    let mut best: Option<(u32, &str, u32)> = None; // (distance, module, stub_addr)
-    for m in modules {
-        for f in &m.functions {
-            let dist = f.stub_addr.abs_diff(target);
-            if best.is_none_or(|(d, _, _)| dist < d) {
-                best = Some((dist, m.name.as_str(), f.stub_addr));
-            }
-        }
-    }
-    best.map(|(dist, module, stub_addr)| {
+fn nearest_stub_hint<'a>(
+    modules: impl IntoIterator<Item = &'a cellgov_ppu::prx::ImportedModule>,
+    target: u32,
+) -> Option<String> {
+    cellgov_ppu::prx::nearest_stub(modules, target).map(|nearest| {
         format!(
             "no exact match for 0x{target:08x}; nearest declared stub is \
-             {module}::0x{stub_addr:08x} (distance {dist} byte(s))",
+             {}::0x{:08x} (distance {} byte(s))",
+            nearest.module, nearest.stub_addr, nearest.distance,
         )
     })
 }

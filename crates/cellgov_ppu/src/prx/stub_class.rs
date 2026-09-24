@@ -1,5 +1,5 @@
-//! Triage verdict for a PRX import that `dev prx-imports` lists: whether
-//! a stub that returns 0 in its place is safe for a short run.
+//! Triage verdict for a PRX import: whether a stub that returns 0 in
+//! its place is safe for a short run.
 //!
 //! The verdicts are CellGov's own review notes over the curated NIDs
 //! in `cellgov_ps3_abi::nid`. CellGov substitutes no Rust handler for

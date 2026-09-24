@@ -33,7 +33,6 @@ mod lv2_extract;
 mod oracle_gap;
 mod paths;
 mod progress;
-mod stub_class;
 
 use std::path::Path;
 

@@ -1,4 +1,4 @@
-//! PS3 PRX import-table parser.
+//! The import-table parser.
 //!
 //! Walks `PrxParamHeader` in PT_0x60000002 to enumerate imported
 //! modules / NIDs / GOT slots. Downstream callers patch the GOT slots
@@ -410,6 +410,41 @@ pub fn import_summary(modules: &[ImportedModule]) -> String {
     out
 }
 
+/// The declared function stub nearest an address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NearestStub<'a> {
+    /// Name of the module that declares the stub.
+    pub module: &'a str,
+    /// The stub's address.
+    pub stub_addr: u32,
+    /// `|stub_addr - target|` in bytes.
+    pub distance: u32,
+}
+
+/// The function stub among `modules` nearest `target`, or `None` when
+/// they declare no function.
+///
+/// On a tie the first stub in module and declaration order wins.
+pub fn nearest_stub<'a>(
+    modules: impl IntoIterator<Item = &'a ImportedModule>,
+    target: u32,
+) -> Option<NearestStub<'a>> {
+    let mut best: Option<NearestStub<'a>> = None;
+    for m in modules {
+        for f in &m.functions {
+            let distance = f.stub_addr.abs_diff(target);
+            if best.is_none_or(|b| distance < b.distance) {
+                best = Some(NearestStub {
+                    module: m.name.as_str(),
+                    stub_addr: f.stub_addr,
+                    distance,
+                });
+            }
+        }
+    }
+    best
+}
+
 // -- Internal helpers --
 
 /// Outcome of the `PT_PRX_PARAM` search.
@@ -661,9 +696,9 @@ fn read_cstring(data: &[u8], segments: &[Segment], vaddr: u32) -> Result<String,
 }
 
 #[cfg(test)]
-#[path = "tests/prx_tests.rs"]
+#[path = "tests/imports_tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "tests/prx_finding_tests.rs"]
+#[path = "tests/imports_finding_tests.rs"]
 mod finding_tests;

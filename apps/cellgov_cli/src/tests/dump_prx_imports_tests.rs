@@ -42,7 +42,7 @@ fn pad_with_elf_magic(len: usize) -> Vec<u8> {
 
 fn pad_with_sce_magic(len: usize) -> Vec<u8> {
     let mut v = vec![0u8; len];
-    v[0..4].copy_from_slice(&SCE_MAGIC);
+    v[0..4].copy_from_slice(&cellgov_ps3_abi::format::sce::SCE_MAGIC);
     v
 }
 
@@ -91,67 +91,22 @@ fn module(name: &str, stubs: &[(u32, u32)]) -> cellgov_ppu::prx::ImportedModule 
 }
 
 #[test]
-fn nearest_stub_hint_finds_closest_across_modules() {
+fn the_nearest_stub_hint_names_the_target_module_stub_and_distance() {
     let mods = [
         module("A", &[(0x1, 0x009b_f000), (0x2, 0x009b_f100)]),
         module("B", &[(0x3, 0x009b_ff00)]),
     ];
-    let scope: Vec<&_> = mods.iter().collect();
-    let hint = nearest_stub_hint(&scope, 0x009b_ff10).unwrap();
-    assert!(hint.contains("B::0x009bff00"), "got: {hint}");
-    assert!(hint.contains("distance 16"), "got: {hint}");
+    assert_eq!(
+        nearest_stub_hint(&mods, 0x009b_ff10).as_deref(),
+        Some(
+            "no exact match for 0x009bff10; nearest declared stub is \
+             B::0x009bff00 (distance 16 byte(s))"
+        )
+    );
 }
 
 #[test]
-fn nearest_stub_hint_honors_pre_filtered_scope() {
-    let mods = [
-        module("A", &[(0x1, 0x009b_f000), (0x2, 0x009b_f100)]),
-        module("B", &[(0x3, 0x009b_ff00)]),
-    ];
-    let scope_a: Vec<&_> = mods.iter().filter(|m| m.name == "A").collect();
-    let hint = nearest_stub_hint(&scope_a, 0x009b_ff10).unwrap();
-    assert!(hint.contains("A::0x009bf100"), "got: {hint}");
-    assert!(!hint.contains("B::"), "scope leaked: {hint}");
-}
-
-#[test]
-fn nearest_stub_hint_returns_none_on_empty_scope() {
-    let empty: Vec<&cellgov_ppu::prx::ImportedModule> = Vec::new();
-    assert!(nearest_stub_hint(&empty, 0x100).is_none());
+fn no_declared_stub_gives_no_hint() {
     let mods = [module("X", &[])];
-    let scope: Vec<&_> = mods.iter().collect();
-    assert!(nearest_stub_hint(&scope, 0x100).is_none());
-}
-
-// -- module_identity ---------------------------------------------------
-
-/// Minimal ELF64-BE header carrying `e_type`, enough for `parse_prx`
-/// to reach its e_type check.
-fn elf64_be_of_type(e_type: u16) -> Vec<u8> {
-    let mut data = vec![0u8; 128];
-    data[0..4].copy_from_slice(&cellgov_ps3_abi::format::elf::ELF_MAGIC);
-    data[4] = 2; // ELFCLASS64
-    data[5] = 2; // ELFDATA2MSB
-    data[16..18].copy_from_slice(&e_type.to_be_bytes());
-    data
-}
-
-#[test]
-fn a_title_executable_has_no_module_info_and_that_is_not_a_refusal() {
-    let eboot = elf64_be_of_type(cellgov_ps3_abi::format::elf::ET_EXEC);
-    assert!(module_identity(&eboot)
-        .expect("ET_EXEC is the EBOOT case")
-        .is_none());
-}
-
-#[test]
-fn a_container_that_is_neither_prx_nor_exec_is_named_not_read_as_an_eboot() {
-    // ET_REL: no sys_prx_module_info_t and not a title executable
-    // either, so printing its import table as authoritative without a
-    // word is the failure this arm exists to prevent.
-    let rel = elf64_be_of_type(1);
-    assert!(matches!(
-        module_identity(&rel),
-        Err(cellgov_ppu::sprx::PrxParseError::NotPrx(1))
-    ));
+    assert!(nearest_stub_hint(&mods, 0x100).is_none());
 }

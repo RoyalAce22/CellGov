@@ -14,6 +14,7 @@ pub use load::{
     R_PPC64_REL24,
 };
 pub use parse::{
-    parse_prx, ParsedPrx, PrxExport, PrxExportLib, PrxOpd, PrxParseError, PrxRelocation, PrxSegment,
+    module_identity, parse_prx, ParsedPrx, PrxExport, PrxExportLib, PrxOpd, PrxParseError,
+    PrxRelocation, PrxSegment,
 };
 pub(crate) use parse::{relocated_pointer_image, RelocatedPointerError};

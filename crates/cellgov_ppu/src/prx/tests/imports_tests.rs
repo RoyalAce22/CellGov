@@ -761,3 +761,55 @@ fn prx_param_with_a_body_still_rejects_bad_magic() {
         "the bodyless guard must not weaken the magic check on a segment that has a body"
     );
 }
+
+fn stub_module(name: &str, stubs: &[u32]) -> ImportedModule {
+    ImportedModule {
+        name: name.to_string(),
+        functions: stubs
+            .iter()
+            .map(|&stub_addr| ImportedFunction { nid: 0, stub_addr })
+            .collect(),
+        variables: Vec::new(),
+    }
+}
+
+#[test]
+fn nearest_stub_finds_the_closest_across_modules() {
+    let mods = [
+        stub_module("A", &[0x009b_f000, 0x009b_f100]),
+        stub_module("B", &[0x009b_ff00]),
+    ];
+    assert_eq!(
+        nearest_stub(&mods, 0x009b_ff10),
+        Some(NearestStub {
+            module: "B",
+            stub_addr: 0x009b_ff00,
+            distance: 16,
+        })
+    );
+}
+
+#[test]
+fn nearest_stub_searches_only_the_modules_it_is_given() {
+    let mods = [
+        stub_module("A", &[0x009b_f000, 0x009b_f100]),
+        stub_module("B", &[0x009b_ff00]),
+    ];
+    let got = nearest_stub(mods.iter().filter(|m| m.name == "A"), 0x009b_ff10);
+    assert_eq!(
+        got.map(|n| (n.module, n.stub_addr)),
+        Some(("A", 0x009b_f100))
+    );
+}
+
+#[test]
+fn nearest_stub_keeps_the_first_of_two_equidistant_stubs() {
+    let mods = [stub_module("A", &[0x100]), stub_module("B", &[0x120])];
+    assert_eq!(nearest_stub(&mods, 0x110).map(|n| n.module), Some("A"));
+}
+
+#[test]
+fn nearest_stub_over_no_function_is_none() {
+    assert_eq!(nearest_stub(&[] as &[ImportedModule], 0x100), None);
+    assert_eq!(nearest_stub(&[stub_module("X", &[])], 0x100), None);
+}

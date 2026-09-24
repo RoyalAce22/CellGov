@@ -6,9 +6,9 @@
 use std::borrow::Cow;
 
 use cellgov_ps3_abi::format::elf::{
-    ELF64_RELA_SIZE, ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, ET_PRX, EXPORT_ATTR_SYSTEM,
-    EXPORT_ENTRY_MIN_SIZE, NID_MODULE_START, NID_MODULE_STOP, PRX_RELOC_NO_VALUE_SEGMENT, PT_LOAD,
-    PT_PRX_RELOC, R_PPC64_ADDR32,
+    ELF64_RELA_SIZE, ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, ET_EXEC, ET_PRX,
+    EXPORT_ATTR_SYSTEM, EXPORT_ENTRY_MIN_SIZE, NID_MODULE_START, NID_MODULE_STOP,
+    PRX_RELOC_NO_VALUE_SEGMENT, PT_LOAD, PT_PRX_RELOC, R_PPC64_ADDR32,
 };
 
 use crate::loader;
@@ -144,6 +144,29 @@ pub enum PrxParseError {
     /// `sys_prx_module_info_t` was missing or unreadable.
     #[error("PRX sys_prx_module_info_t missing")]
     NoModuleInfo,
+}
+
+/// The module identity a PPU object carries, or `None` for a title
+/// executable.
+///
+/// `Ok(None)` is the title-executable case: `e_type` is `ET_EXEC`, so
+/// no `sys_prx_module_info_t` exists and none is expected. A PPU
+/// object on this platform carries one of exactly two ELF types, both
+/// in [`cellgov_ps3_abi::format::elf`]. `ET_EXEC` names a title
+/// executable. The PS3 relocatable-module type names every firmware
+/// module under `dev_flash/sys/external`.
+///
+/// # Errors
+///
+/// Any [`parse_prx`] refusal of a file whose type is not `ET_EXEC`.
+/// Every other `e_type` is a structural anomaly, so it answers
+/// [`PrxParseError::NotPrx`] rather than reading as an executable.
+pub fn module_identity(data: &[u8]) -> Result<Option<ParsedPrx>, PrxParseError> {
+    match parse_prx(data) {
+        Ok(parsed) => Ok(Some(parsed)),
+        Err(PrxParseError::NotPrx(e_type)) if e_type == ET_EXEC => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// Parse a decrypted PRX (ELF64 type 0xFFA4) into its components.
@@ -798,6 +821,10 @@ fn read_cstring(data: &[u8], seg_map: &[SegEntry], vaddr: usize) -> String {
 #[cfg(test)]
 #[path = "tests/parse_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/module_identity_tests.rs"]
+mod module_identity_tests;
 
 #[cfg(test)]
 #[path = "tests/relocated_pointer_tests.rs"]
