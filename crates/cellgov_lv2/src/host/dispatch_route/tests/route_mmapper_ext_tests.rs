@@ -77,7 +77,7 @@ fn a_fresh_key_mints_a_handle_and_registers_the_key() {
     let d = ext(&mut host, &rt, KEY, SIZE_64K, page_size::FLAG_64K, 3);
     let id = mem_id_of(&d);
     assert_ne!(id, 0);
-    assert_eq!(host.state.mmapper_ipc.get(&KEY), Some(&id));
+    assert_eq!(host.state.mmapper_ipc.get_by(&KEY), Some(&id));
     let handle = host.state.mmapper_handles.get(id).unwrap();
     assert_eq!(handle.size, SIZE_64K as u32);
     assert_eq!(handle.align, page_size::GRANULE_64K);
@@ -117,8 +117,8 @@ fn a_registered_key_is_eexist_and_the_caller_probes_the_next_key() {
         1,
     ));
     assert_ne!(first, second);
-    assert_eq!(host.state.mmapper_ipc.get(&KEY), Some(&first));
-    assert_eq!(host.state.mmapper_ipc.get(&(KEY + 1)), Some(&second));
+    assert_eq!(host.state.mmapper_ipc.get_by(&KEY), Some(&first));
+    assert_eq!(host.state.mmapper_ipc.get_by(&(KEY + 1)), Some(&second));
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn a_keyless_create_registers_nothing_and_repeats_without_colliding() {
         let first = mem_id_of(&ext(&mut host, &rt, key, SIZE_64K, page_size::FLAG_64K, 1));
         let second = mem_id_of(&ext(&mut host, &rt, key, SIZE_64K, page_size::FLAG_64K, 1));
         assert_ne!(first, second);
-        assert_eq!(host.state.mmapper_ipc.get(&key), None);
+        assert_eq!(host.state.mmapper_ipc.get_by(&key), None);
         // A keyless create still mints a handle: 334 / 337 reach the
         // segment through the handle table under the returned id.
         for id in [first, second] {

@@ -1,4 +1,4 @@
-//! FsStore tests covering blob registration, fd/dir lifecycle, seek semantics, and state-hash sensitivity.
+//! FsStore tests covering blob registration, fd/dir lifecycle, seek semantics, and sync-partial sensitivity.
 
 use super::*;
 
@@ -135,26 +135,26 @@ fn whence_decoder_rejects_out_of_range() {
 }
 
 #[test]
-fn state_hash_changes_on_blob_registration() {
+fn sync_partial_changes_on_blob_registration() {
     let s0 = FsStore::new();
     let mut s1 = FsStore::new();
     s1.register_blob("/foo".into(), b"x".to_vec()).unwrap();
-    assert_ne!(s0.state_hash(), s1.state_hash());
+    assert_ne!(s0.sync_partial(), s1.sync_partial());
 }
 
 #[test]
-fn state_hash_changes_on_content_swap() {
+fn sync_partial_changes_on_content_swap() {
     let mut s1 = FsStore::new();
     s1.register_blob("/foo".into(), b"x".to_vec()).unwrap();
-    let h1 = s1.state_hash();
+    let h1 = s1.sync_partial();
     let mut s2 = FsStore::new();
     s2.register_blob("/foo".into(), b"y".to_vec()).unwrap();
-    let h2 = s2.state_hash();
+    let h2 = s2.sync_partial();
     assert_ne!(h1, h2);
 }
 
 #[test]
-fn state_hash_is_insertion_order_independent() {
+fn sync_partial_is_insertion_order_independent() {
     let paths = ["/z", "/a", "/m", "/b", "/y", "/c"];
     let mut a = FsStore::new();
     for p in paths {
@@ -164,7 +164,7 @@ fn state_hash_is_insertion_order_independent() {
     for p in paths.iter().rev() {
         b.register_blob((*p).into(), p.as_bytes().to_vec()).unwrap();
     }
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
@@ -191,9 +191,9 @@ fn fd_exhaustion_at_u32_max_is_explicit() {
 #[test]
 fn unknown_path_open_does_not_burn_an_fd() {
     let mut s = fs_with("/foo", b"x");
-    let h0 = s.state_hash();
+    let h0 = s.sync_partial();
     assert_eq!(s.open_fd("/missing"), Err(FsError::UnknownPath));
-    assert_eq!(s.state_hash(), h0);
+    assert_eq!(s.sync_partial(), h0);
 }
 
 #[test]
@@ -236,24 +236,24 @@ fn empty_blob_open_read_stat() {
 }
 
 #[test]
-fn state_hash_changes_on_fd_offset_advance() {
+fn sync_partial_changes_on_fd_offset_advance() {
     let mut s = fs_with("/foo", b"abc");
     let fd = s.open_fd("/foo").unwrap();
-    let h0 = s.state_hash();
+    let h0 = s.sync_partial();
     let _ = s.read_at(fd, 1).unwrap();
-    let h1 = s.state_hash();
+    let h1 = s.sync_partial();
     assert_ne!(h0, h1);
 }
 
 #[test]
-fn state_hash_changes_on_open_close_pair() {
+fn sync_partial_changes_on_open_close_pair() {
     let mut s = fs_with("/foo", b"x");
-    let h0 = s.state_hash();
+    let h0 = s.sync_partial();
     let fd = s.open_fd("/foo").unwrap();
-    let h1 = s.state_hash();
+    let h1 = s.sync_partial();
     assert_ne!(h0, h1);
     s.close_fd(fd).unwrap();
-    let h2 = s.state_hash();
+    let h2 = s.sync_partial();
     // Pins the never-recycle property: next_fd advance is
     // observable even after the fd is closed.
     assert_ne!(h0, h2);
@@ -356,19 +356,19 @@ fn open_dir_with_empty_entries_immediately_eofs() {
 }
 
 #[test]
-fn state_hash_changes_on_dir_open_and_advance() {
+fn sync_partial_changes_on_dir_open_and_advance() {
     let mut s = FsStore::new();
-    let h0 = s.state_hash();
+    let h0 = s.sync_partial();
     let fd = s
         .open_dir(vec![dir_entry("a", false), dir_entry("b", false)])
         .unwrap();
-    let h1 = s.state_hash();
-    assert_ne!(h0, h1, "open_dir must contribute to state_hash");
+    let h1 = s.sync_partial();
+    assert_ne!(h0, h1, "open_dir must move the sync partial");
     let _ = s.read_dir_entry(fd).unwrap();
-    let h2 = s.state_hash();
+    let h2 = s.sync_partial();
     assert_ne!(h1, h2, "advancing the cursor must contribute");
     s.close_dir(fd).unwrap();
-    let h3 = s.state_hash();
+    let h3 = s.sync_partial();
     assert_ne!(h2, h3);
     assert_ne!(h0, h3);
 }

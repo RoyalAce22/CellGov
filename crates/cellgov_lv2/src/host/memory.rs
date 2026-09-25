@@ -105,7 +105,7 @@ impl Lv2Host {
         if !size.is_multiple_of(u64::from(align)) {
             return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
-        if !self.state.memory_containers.contains(&cid) {
+        if !self.state.memory_containers.contains_key(cid) {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         let Ok(size) = u32::try_from(size) else {

@@ -788,20 +788,19 @@ fn a_full_queue_drops_the_event_and_counts_it() {
 }
 
 #[test]
-fn config_state_folds_into_the_host_hash_only_once_touched() {
+fn config_state_moves_the_host_partial_once_touched() {
     let mut host = Lv2Host::new();
     let rt = runtime();
-    let pristine = host.state_hash();
     let queue = create_queue(&mut host, &rt, 8);
-    let after_queue = host.state_hash();
-    assert_ne!(pristine, after_queue);
+    let after_queue = host.sync_partial();
     let mut twin = host.clone();
     open(&mut host, &rt, queue);
-    assert_ne!(host.state_hash(), after_queue);
+    assert_ne!(host.sync_partial(), after_queue);
+    assert_eq!(host.sync_partial(), host.sync_partial_from_scratch());
     open(&mut twin, &rt, queue);
     assert_eq!(
-        host.state_hash(),
-        twin.state_hash(),
-        "same steps, same hash"
+        host.sync_partial(),
+        twin.sync_partial(),
+        "same steps, same partial"
     );
 }

@@ -8,7 +8,7 @@
 //! `host::dispatch_route::unsupported_arms::memory`; this module is
 //! data only.
 
-use std::collections::BTreeMap;
+use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 
 /// One shared-memory handle recorded by 332 or 362.
 ///
@@ -21,14 +21,23 @@ pub(crate) struct MmapperHandle {
     pub align: u32,
 }
 
-#[derive(Debug, Clone, Default)]
+impl LaneValue for MmapperHandle {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.size));
+        lanes.lane(2, 0, u64::from(self.align));
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct MmapperHandleTable {
-    handles: BTreeMap<u32, MmapperHandle>,
+    handles: LaneMap<u32, MmapperHandle>,
 }
 
 impl MmapperHandleTable {
     pub(crate) fn new() -> Self {
-        Self::default()
+        Self {
+            handles: LaneMap::new(source::MMAPPER_HANDLE, u64::from),
+        }
     }
 
     /// Caller (332 / 362 dispatch) owns `mem_id` allocation via
@@ -44,24 +53,22 @@ impl MmapperHandleTable {
     /// `None` is the caller's CELL_ESRCH arm: a `mem_id` no create
     /// minted names nothing.
     pub(crate) fn get(&self, mem_id: u32) -> Option<MmapperHandle> {
-        self.handles.get(&mem_id).copied()
+        self.handles.get(mem_id).copied()
     }
 
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.handles.is_empty()
     }
 
-    /// FNV-1a over every handle's id, size, and align, via raw
-    /// little-endian bytes per the host state-hash contract.
-    pub(crate) fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&(self.handles.len() as u64).to_le_bytes());
-        for (mem_id, handle) in &self.handles {
-            hasher.write(&mem_id.to_le_bytes());
-            hasher.write(&handle.size.to_le_bytes());
-            hasher.write(&handle.align.to_le_bytes());
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum.
+    pub(crate) fn sync_partial(&self) -> u128 {
+        self.handles.partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub(crate) fn sync_partial_from_scratch(&self) -> u128 {
+        self.handles.partial_from_scratch()
     }
 }
 

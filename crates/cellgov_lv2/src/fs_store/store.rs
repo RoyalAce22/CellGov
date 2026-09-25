@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-
-use cellgov_mem::Fnv1aHasher;
+use cellgov_mem::lanes::{self, object_digest, source, LaneMap, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv2::fs::LV2_FS_OBJECT_ID_BASE;
 use num_enum::TryFromPrimitive;
 
@@ -49,9 +47,16 @@ pub struct DirEntry {
 #[derive(Debug, Clone)]
 struct BlobEntry {
     bytes: Vec<u8>,
-    /// Pre-computed so [`FsStore::state_hash`] does not re-hash the
-    /// full blob on every step.
-    content_hash: u64,
+    /// Digest of `bytes`, computed once at registration so a lane of
+    /// the blob does not re-read the whole blob.
+    content_digest: u64,
+}
+
+impl LaneValue for BlobEntry {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.bytes.len() as u64);
+        lanes.lane(2, 0, self.content_digest);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -60,12 +65,30 @@ struct FdEntry {
     offset: u64,
 }
 
+impl LaneValue for FdEntry {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.bytes(1, &[], self.path.as_bytes());
+        lanes.lane(2, 0, self.offset);
+    }
+}
+
 #[derive(Debug, Clone)]
 struct DirSnapshot {
     /// Frozen at `open_dir` time; never re-read from disk.
     entries: Vec<DirEntry>,
     /// Equal to `entries.len()` at EOF.
     cursor: usize,
+}
+
+impl LaneValue for DirSnapshot {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.cursor as u64);
+        lanes.lane(2, 0, self.entries.len() as u64);
+        for (slot, entry) in self.entries.iter().enumerate() {
+            lanes.bytes(3, &[slot as u64], entry.name.as_bytes());
+            lanes.lane(4, slot as u64, u64::from(entry.is_directory));
+        }
+    }
 }
 
 /// Path-indexed in-memory blob store with per-fd open-file and
@@ -79,9 +102,10 @@ struct DirSnapshot {
 /// would set `next_fd = 0`, violating the never-zero invariant.
 #[derive(Debug, Clone)]
 pub struct FsStore {
-    blobs: BTreeMap<String, BlobEntry>,
-    open_fds: BTreeMap<u32, FdEntry>,
-    open_dirs: BTreeMap<u32, DirSnapshot>,
+    /// Keyed by path; each blob's lane object is the path's digest.
+    blobs: LaneMap<String, BlobEntry>,
+    open_fds: LaneMap<u32, FdEntry>,
+    open_dirs: LaneMap<u32, DirSnapshot>,
     next_fd: u32,
 }
 
@@ -95,9 +119,11 @@ impl FsStore {
     /// Construct an empty store.
     pub fn new() -> Self {
         Self {
-            blobs: BTreeMap::new(),
-            open_fds: BTreeMap::new(),
-            open_dirs: BTreeMap::new(),
+            blobs: LaneMap::new_keyed_by_ref(source::FS_BLOB, |path: &String| {
+                object_digest(path.as_bytes())
+            }),
+            open_fds: LaneMap::new(source::FS_FD, u64::from),
+            open_dirs: LaneMap::new(source::FS_DIR, u64::from),
             next_fd: LV2_FS_OBJECT_ID_BASE,
         }
     }
@@ -111,34 +137,31 @@ impl FsStore {
     /// - [`FsError::PathAlreadyRegistered`] if `path` already has
     ///   a blob.
     pub fn register_blob(&mut self, path: String, bytes: Vec<u8>) -> Result<(), FsError> {
-        if self.blobs.contains_key(&path) {
+        if self.blobs.contains_by(path.as_str()) {
             return Err(FsError::PathAlreadyRegistered);
         }
-        let mut hasher = Fnv1aHasher::new();
-        hasher.write(&(bytes.len() as u64).to_le_bytes());
-        hasher.write(&bytes);
-        let content_hash = hasher.finish();
+        let content_digest = object_digest(&bytes);
         self.blobs.insert(
             path,
             BlobEntry {
                 bytes,
-                content_hash,
+                content_digest,
             },
         );
         Ok(())
     }
 
     /// Host-side introspection only. Guest reads must go through
-    /// [`Self::open_fd`] + [`Self::read_at`] so the offset advance
-    /// and state-hash contribution are observable.
+    /// [`Self::open_fd`] + [`Self::read_at`] so the sync partial sees
+    /// the offset advance.
     pub fn lookup_blob(&self, path: &str) -> Option<&[u8]> {
-        self.blobs.get(path).map(|b| b.bytes.as_slice())
+        self.blobs.get_by(path).map(|b| b.bytes.as_slice())
     }
 
     /// Cheaper than [`Self::lookup_blob`] when the caller does not
     /// need the bytes; does not borrow the blob.
     pub fn has_path(&self, path: &str) -> bool {
-        self.blobs.contains_key(path)
+        self.blobs.contains_by(path)
     }
 
     /// Whether the store has any registered blobs or open fds / dirs.
@@ -170,7 +193,7 @@ impl FsStore {
     /// - [`FsError::FdExhausted`] if the allocator has handed out
     ///   the full `u32::MAX - LV2_FS_OBJECT_ID_BASE` fd range.
     pub fn open_fd(&mut self, path: &str) -> Result<u32, FsError> {
-        if !self.blobs.contains_key(path) {
+        if !self.blobs.contains_by(path) {
             return Err(FsError::UnknownPath);
         }
         let fd = self.next_fd;
@@ -189,7 +212,7 @@ impl FsStore {
     /// Release the fd; subsequent ops on it return `UnknownFd`.
     pub fn close_fd(&mut self, fd: u32) -> Result<(), FsError> {
         self.open_fds
-            .remove(&fd)
+            .remove(fd)
             .map(|_| ())
             .ok_or(FsError::UnknownFd)
     }
@@ -199,8 +222,11 @@ impl FsStore {
     /// EOF. A 0-byte read does not move the offset; only bytes
     /// actually returned advance the cursor.
     pub fn read_at(&mut self, fd: u32, max_bytes: usize) -> Result<Vec<u8>, FsError> {
-        let entry = self.open_fds.get_mut(&fd).ok_or(FsError::UnknownFd)?;
-        let blob = self.blobs.get(&entry.path).ok_or(FsError::UnknownPath)?;
+        let mut entry = self.open_fds.get_mut(fd).ok_or(FsError::UnknownFd)?;
+        let blob = self
+            .blobs
+            .get_by(entry.path.as_str())
+            .ok_or(FsError::UnknownPath)?;
         let len = blob.bytes.len();
         // Clamp before the usize cast: a 32-bit host would otherwise
         // wrap a >4 GiB offset to a small in-range value.
@@ -220,10 +246,10 @@ impl FsStore {
     /// - [`FsError::SeekOutOfRange`] when the result lands outside
     ///   `[0, u64::MAX]` (negative-past-zero or positive overflow).
     pub fn seek(&mut self, fd: u32, offset: i64, whence: SeekWhence) -> Result<u64, FsError> {
-        let entry = self.open_fds.get_mut(&fd).ok_or(FsError::UnknownFd)?;
+        let mut entry = self.open_fds.get_mut(fd).ok_or(FsError::UnknownFd)?;
         let size = self
             .blobs
-            .get(&entry.path)
+            .get_by(entry.path.as_str())
             .ok_or(FsError::UnknownPath)?
             .bytes
             .len() as u64;
@@ -243,7 +269,7 @@ impl FsStore {
 
     /// Path-based stat.
     pub fn stat_path(&self, path: &str) -> Result<FileStat, FsError> {
-        let blob = self.blobs.get(path).ok_or(FsError::UnknownPath)?;
+        let blob = self.blobs.get_by(path).ok_or(FsError::UnknownPath)?;
         Ok(FileStat {
             size: blob.bytes.len() as u64,
         })
@@ -251,8 +277,11 @@ impl FsStore {
 
     /// Fd-based stat.
     pub fn fstat(&self, fd: u32) -> Result<FileStat, FsError> {
-        let entry = self.open_fds.get(&fd).ok_or(FsError::UnknownFd)?;
-        let blob = self.blobs.get(&entry.path).ok_or(FsError::UnknownPath)?;
+        let entry = self.open_fds.get(fd).ok_or(FsError::UnknownFd)?;
+        let blob = self
+            .blobs
+            .get_by(entry.path.as_str())
+            .ok_or(FsError::UnknownPath)?;
         Ok(FileStat {
             size: blob.bytes.len() as u64,
         })
@@ -282,7 +311,7 @@ impl FsStore {
     ///
     /// - [`FsError::UnknownDir`] if `fd` is not an open directory.
     pub fn read_dir_entry(&mut self, fd: u32) -> Result<Option<DirEntry>, FsError> {
-        let snap = self.open_dirs.get_mut(&fd).ok_or(FsError::UnknownDir)?;
+        let mut snap = self.open_dirs.get_mut(fd).ok_or(FsError::UnknownDir)?;
         if snap.cursor >= snap.entries.len() {
             return Ok(None);
         }
@@ -297,45 +326,32 @@ impl FsStore {
     ///   including the case where `fd` is a file fd.
     pub fn close_dir(&mut self, fd: u32) -> Result<(), FsError> {
         self.open_dirs
-            .remove(&fd)
+            .remove(fd)
             .map(|_| ())
             .ok_or(FsError::UnknownDir)
     }
 
-    /// Determinism-stable hash of content per path, current fd
-    /// offsets, and the next-fd counter. Folded into
-    /// [`crate::host::Lv2Host::state_hash`].
-    ///
-    /// Iteration uses [`BTreeMap`] sort order; the
-    /// `state_hash_is_insertion_order_independent` test pins this.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = Fnv1aHasher::new();
-        hasher.write(&(self.blobs.len() as u64).to_le_bytes());
-        for (path, entry) in &self.blobs {
-            hasher.write(&(path.len() as u64).to_le_bytes());
-            hasher.write(path.as_bytes());
-            hasher.write(&entry.content_hash.to_le_bytes());
-        }
-        hasher.write(&(self.open_fds.len() as u64).to_le_bytes());
-        for (fd, entry) in &self.open_fds {
-            hasher.write(&fd.to_le_bytes());
-            hasher.write(&(entry.path.len() as u64).to_le_bytes());
-            hasher.write(entry.path.as_bytes());
-            hasher.write(&entry.offset.to_le_bytes());
-        }
-        hasher.write(&(self.open_dirs.len() as u64).to_le_bytes());
-        for (fd, snap) in &self.open_dirs {
-            hasher.write(&fd.to_le_bytes());
-            hasher.write(&(snap.cursor as u64).to_le_bytes());
-            hasher.write(&(snap.entries.len() as u64).to_le_bytes());
-            for entry in &snap.entries {
-                hasher.write(&(entry.name.len() as u64).to_le_bytes());
-                hasher.write(entry.name.as_bytes());
-                hasher.write(&[u8::from(entry.is_directory)]);
-            }
-        }
-        hasher.write(&self.next_fd.to_le_bytes());
-        hasher.finish()
+    /// The store's partial of the sync-state sum: the blobs, the open
+    /// file and directory fds, and the fd allocator's cursor.
+    pub fn sync_partial(&self) -> u128 {
+        self.blobs
+            .partial()
+            .wrapping_add(self.open_fds.partial())
+            .wrapping_add(self.open_dirs.partial())
+            .wrapping_add(self.next_fd_term())
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.blobs
+            .partial_from_scratch()
+            .wrapping_add(self.open_fds.partial_from_scratch())
+            .wrapping_add(self.open_dirs.partial_from_scratch())
+            .wrapping_add(self.next_fd_term())
+    }
+
+    fn next_fd_term(&self) -> u128 {
+        lanes::value_term(source::FS_NEXT_FD, 0, &self.next_fd)
     }
 }
 

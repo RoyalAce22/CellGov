@@ -18,7 +18,7 @@ impl Lv2Host {
             .mmapper_ipc
             .iter()
             .find(|&(_, &id)| id == mem_id)
-            .map(|(&k, _)| k)
+            .map(|(k, _)| k)
     }
 
     /// Seed effects for the first map of an ipc-keyed shm with a

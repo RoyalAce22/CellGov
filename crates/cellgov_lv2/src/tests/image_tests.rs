@@ -106,50 +106,49 @@ fn lookup_by_handle_unknown_returns_none() {
 }
 
 #[test]
-fn state_hash_is_deterministic() {
+fn sync_partial_is_deterministic() {
     let mut a = ContentStore::new();
     let mut b = ContentStore::new();
     a.register(b"/a.elf", vec![1]);
     a.register(b"/b.elf", vec![2]);
     b.register(b"/a.elf", vec![1]);
     b.register(b"/b.elf", vec![2]);
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_differs_on_path() {
+fn sync_partial_differs_on_path() {
     let mut a = ContentStore::new();
     let mut b = ContentStore::new();
     a.register(b"/a.elf", vec![1]);
     b.register(b"/b.elf", vec![1]);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_differs_on_elf_bytes() {
+fn sync_partial_differs_on_elf_bytes() {
     let mut a = ContentStore::new();
     let mut b = ContentStore::new();
     a.register(b"/spu.elf", vec![0xAA, 0xBB, 0xCC]);
     b.register(b"/spu.elf", vec![0xAA, 0xBB, 0xCD]);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_length_prefix_prevents_boundary_collision() {
-    // Without length prefixes, ("/a", "bc") and ("/ab", "c") collide.
+fn sync_partial_separates_path_from_elf_bytes() {
     let mut a = ContentStore::new();
     let mut b = ContentStore::new();
     a.register(b"/a", vec![b'b', b'c']);
     b.register(b"/ab", vec![b'c']);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_empty_vs_populated_differ() {
+fn sync_partial_empty_vs_populated_differ() {
     let empty = ContentStore::new();
     let mut populated = ContentStore::new();
     populated.register(b"/a.elf", vec![]);
-    assert_ne!(empty.state_hash(), populated.state_hash());
+    assert_ne!(empty.sync_partial(), populated.sync_partial());
 }
 
 fn seg(ls_start: u32, bytes: Vec<u8>) -> LsSegment {
@@ -157,18 +156,18 @@ fn seg(ls_start: u32, bytes: Vec<u8>) -> LsSegment {
 }
 
 #[test]
-fn state_hash_folds_user_images() {
+fn sync_partial_folds_user_images() {
     let hash_of = |entry: u32, segments: Vec<LsSegment>| {
         let mut s = ContentStore::new();
         s.register_user_image(entry, segments);
-        s.state_hash()
+        s.sync_partial()
     };
     let base = hash_of(0x80, vec![seg(0x100, vec![1, 2])]);
     assert_eq!(base, hash_of(0x80, vec![seg(0x100, vec![1, 2])]));
     assert_ne!(base, hash_of(0x80, vec![seg(0x100, vec![1, 3])]));
     assert_ne!(base, hash_of(0x84, vec![seg(0x100, vec![1, 2])]));
     assert_ne!(base, hash_of(0x80, vec![seg(0x110, vec![1, 2])]));
-    assert_ne!(base, ContentStore::new().state_hash());
+    assert_ne!(base, ContentStore::new().sync_partial());
 }
 
 #[test]
@@ -246,11 +245,8 @@ impl ContentStore {
     /// register-panic sites `new` makes unreachable.
     fn seeded_at(next_handle: u32) -> Self {
         Self {
-            by_path: BTreeMap::new(),
-            by_handle: BTreeMap::new(),
-            user_images: BTreeMap::new(),
             next_handle,
-            register_invocations: 0,
+            ..Self::new()
         }
     }
 }

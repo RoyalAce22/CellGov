@@ -290,10 +290,10 @@ cross-runner matrix in [titles.md](../titles.md) shares it.
 
 The read-side `sys_fs_*` surface routes through an in-memory blob
 store at `Lv2Host::fs_store` (`cellgov_lv2::fs_store::FsStore`),
-backed by three `BTreeMap`s:
+backed by three lane maps:
 
 - a path-keyed blob table (`String -> Vec<u8>` plus a pre-computed
-  FNV-1a content hash);
+  content digest);
 - a per-fd open-file table (`u32 -> { path, offset }`);
 - a per-fd open-directory table (`u32 -> { entries, cursor }`).
 
@@ -301,8 +301,8 @@ Fds come from a monotonic `next_fd` counter starting at `3`,
 matching real PS3's `lv2_fs_object::id_base = 3`, so the
 kernel-returned fd fits the `[3, 255)` range the inline
 `cellFsRead` wrapper truncates on. Fds are never recycled within a
-boot, so a stale fd cannot alias a fresh one. The state hash folds
-the content hashes, fd offsets, directory cursors, and next-fd
+boot, so a stale fd cannot alias a fresh one. The sync-state hash
+covers the content digests, fd offsets, directory cursors, and next-fd
 counter, so a content swap, an unintended re-allocation, or a bogus
 extra read shows up as a state-hash divergence in post-step
 assertions. Blob registration is single-write: a second

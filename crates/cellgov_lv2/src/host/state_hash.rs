@@ -20,7 +20,8 @@ impl Lv2Host {
     }
 
     /// The sum of the host's sync-state partials: the sync-primitive,
-    /// thread, process and identity state.
+    /// thread, process, identity, file, content, PRX, config and
+    /// shared-memory state.
     pub fn sync_partial(&self) -> u128 {
         self.state.sync_partial(false)
     }
@@ -44,11 +45,15 @@ impl Lv2State {
                 }
             };
         }
-        let lwmutex_holds = if from_scratch {
-            self.lwmutex_holds.partial_from_scratch()
-        } else {
-            self.lwmutex_holds.partial()
-        };
+        macro_rules! map_partial {
+            ($map:expr) => {
+                if from_scratch {
+                    $map.partial_from_scratch()
+                } else {
+                    $map.partial()
+                }
+            };
+        }
         let firmware_identity = self
             .firmware_identity
             .as_ref()
@@ -66,8 +71,15 @@ impl Lv2State {
             partial!(self.processes),
             self.stack_allocator.sync_term(),
             self.process_counts.sync_term(),
-            lwmutex_holds,
+            map_partial!(self.lwmutex_holds),
             firmware_identity,
+            partial!(self.content),
+            partial!(self.fs_store),
+            partial!(self.prx_registry),
+            partial!(self.config),
+            partial!(self.mmapper_handles),
+            map_partial!(self.mmapper_ipc),
+            map_partial!(self.memory_containers),
         ]
         .into_iter()
         .fold(0u128, u128::wrapping_add)
@@ -79,9 +91,8 @@ impl Lv2State {
     ///
     /// # Gating
     ///
-    /// - The sync-primitive, thread, process and identity state stays
-    ///   out of this fold. It keeps partials of its own
-    ///   ([`Self::sync_partial`]).
+    /// - The state that [`Self::sync_partial`] sums stays out of this
+    ///   fold.
     /// - `next_kernel_id`, `mem_alloc_ptr` and `mmapper_addr_cursor`
     ///   always contribute. A primitive whose id comes from
     ///   `next_kernel_id` moves this hash even after its destroy.
@@ -92,7 +103,7 @@ impl Lv2State {
     /// commit boundary.
     pub(in crate::host) fn state_hash(&self) -> u64 {
         let Self {
-            content,
+            content: _,
             groups: _,
             ppu_threads: _,
             stack_allocator: _,
@@ -102,12 +113,12 @@ impl Lv2State {
             rsx_mem_alloc_ptr,
             rsx_mem_handle_counter,
             rsx_context,
-            mmapper_handles,
-            mmapper_ipc,
-            config,
+            mmapper_handles: _,
+            mmapper_ipc: _,
+            config: _,
             uart,
             usbd,
-            memory_containers,
+            memory_containers: _,
             lwmutexes: _,
             mutexes: _,
             semaphores: _,
@@ -116,59 +127,24 @@ impl Lv2State {
             event_flags: _,
             conds: _,
             lwmutex_holds: _,
-            fs_store,
-            prx_registry,
+            fs_store: _,
+            prx_registry: _,
             firmware_identity: _,
             processes: _,
             process_counts: _,
         } = self;
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&content.state_hash().to_le_bytes());
         hasher.write(&next_kernel_id.to_le_bytes());
         hasher.write(&mem_alloc_ptr.to_le_bytes());
         hasher.write(&mmapper_addr_cursor.to_le_bytes());
         hasher.write(&rsx_mem_alloc_ptr.to_le_bytes());
         hasher.write(&rsx_mem_handle_counter.to_le_bytes());
         hasher.write(&rsx_context.state_hash().to_le_bytes());
-        if !fs_store.is_empty() {
-            hasher.write(&fs_store.state_hash().to_le_bytes());
-        }
-        if !mmapper_handles.is_empty() {
-            hasher.write(&mmapper_handles.state_hash().to_le_bytes());
-        }
-        if !mmapper_ipc.is_empty() {
-            hasher.write(&(mmapper_ipc.len() as u64).to_le_bytes());
-            for (key, mem_id) in mmapper_ipc {
-                hasher.write(&key.to_le_bytes());
-                hasher.write(&mem_id.to_le_bytes());
-            }
-        }
-        if !config.is_pristine() {
-            hasher.write(&config.state_hash().to_le_bytes());
-        }
         if !uart.is_pristine() {
             hasher.write(&uart.state_hash().to_le_bytes());
         }
         if !usbd.is_pristine() {
             hasher.write(&usbd.state_hash().to_le_bytes());
-        }
-        if !memory_containers.is_empty() {
-            hasher.write(&(memory_containers.len() as u64).to_le_bytes());
-            for cid in memory_containers {
-                hasher.write(&cid.to_le_bytes());
-            }
-        }
-        if !prx_registry.is_empty() {
-            hasher.write(&(prx_registry.len() as u64).to_le_bytes());
-            for id in prx_registry.ids() {
-                hasher.write(&id.to_le_bytes());
-                let entry = prx_registry
-                    .lookup_by_id(id)
-                    .expect("ids() yields present entries");
-                hasher.write(&[entry.state() as u8]);
-                hasher.write(entry.stem().as_bytes());
-                hasher.write(&[0u8]);
-            }
         }
         hasher.finish()
     }
@@ -185,3 +161,7 @@ mod sync_partial_tests;
 #[cfg(test)]
 #[path = "tests/thread_process_lanes_tests.rs"]
 mod thread_process_lanes_tests;
+
+#[cfg(test)]
+#[path = "tests/file_content_lanes_tests.rs"]
+mod file_content_lanes_tests;

@@ -22,7 +22,7 @@ impl Runtime {
     ///
     /// - The runtime-owned tables keep their partials in lane maps.
     /// - The RSX scalars compute their terms on read.
-    /// - The LV2 host's sync-primitive tables add the host's partial.
+    /// - The LV2 host's tables add the host's partial.
     /// - The rest of the LV2 host's state enters as one transitional lane.
     ///
     /// Replay tooling compares pairs via the `SyncState` checkpoint

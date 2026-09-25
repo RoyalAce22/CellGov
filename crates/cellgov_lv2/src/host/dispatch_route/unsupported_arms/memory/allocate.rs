@@ -49,7 +49,7 @@ impl Lv2Host {
             return d;
         }
         let cid = self.alloc_id();
-        self.state.memory_containers.insert(cid);
+        self.state.memory_containers.insert(cid, ());
         let write = Effect::shared_write(
             ByteRange::contiguous_u32(cid_ptr, 4),
             WritePayload::from_slice(&cid.to_be_bytes()),
@@ -204,7 +204,7 @@ impl Lv2Host {
         }
         let keyed = names_shared_segment(ipc_key);
         let in_namespace = keyed && crate::host::is_system_ipc_key(ipc_key);
-        let mem_id = match self.state.mmapper_ipc.get(&ipc_key) {
+        let mem_id = match self.state.mmapper_ipc.get(ipc_key) {
             Some(&existing) if keyed => {
                 if in_namespace {
                     self.obs.system_ipc_witness.shm_attaches += 1;
@@ -371,7 +371,7 @@ impl Lv2Host {
             return d;
         }
         let keyed = names_shared_segment(ipc_key);
-        if keyed && self.state.mmapper_ipc.contains_key(&ipc_key) {
+        if keyed && self.state.mmapper_ipc.contains_key(ipc_key) {
             return Lv2Dispatch::immediate(errno::CELL_EEXIST.into());
         }
         let mem_id = self.mint_shared_memory(handle);

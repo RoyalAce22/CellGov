@@ -18,3 +18,7 @@ pub(crate) use table::*;
 #[cfg(test)]
 #[path = "tests/config_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/config_lanes_tests.rs"]
+mod config_lanes_tests;

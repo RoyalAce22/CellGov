@@ -1,6 +1,7 @@
 //! SPU image registry: path-keyed ELF records and user-type segment
 //! images, sharing one monotonic non-zero handle counter.
 
+use cellgov_mem::lanes::{self, object_digest, source, LaneMap, LaneValue, ObjectLanes};
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
@@ -59,6 +60,24 @@ pub struct UserSpuImage {
     pub segments: Vec<LsSegment>,
 }
 
+impl LaneValue for SpuImageRecord {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.handle.raw()));
+        lanes.bytes(2, &[], &self.elf_bytes);
+    }
+}
+
+impl LaneValue for UserSpuImage {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.entry));
+        lanes.lane(2, 0, self.segments.len() as u64);
+        for (slot, segment) in self.segments.iter().enumerate() {
+            lanes.lane(3, slot as u64, u64::from(segment.ls_start));
+            lanes.bytes(4, &[slot as u64], &segment.bytes);
+        }
+    }
+}
+
 /// Store for registered SPU images.
 ///
 /// # Invariants
@@ -71,9 +90,11 @@ pub struct UserSpuImage {
 ///   handles, so a handle resolves in at most one of the two maps.
 #[derive(Debug, Clone)]
 pub struct ContentStore {
-    by_path: BTreeMap<Vec<u8>, SpuImageRecord>,
+    /// Keyed by path; each image's lane object is the path's digest.
+    by_path: LaneMap<Vec<u8>, SpuImageRecord>,
+    /// The inverse of `by_path`, derived from it and not hashed.
     by_handle: BTreeMap<SpuImageHandle, Vec<u8>>,
-    user_images: BTreeMap<SpuImageHandle, UserSpuImage>,
+    user_images: LaneMap<SpuImageHandle, UserSpuImage>,
     next_handle: u32,
     /// Cumulative count of [`Self::register`] invocations.
     /// Non-vacuity witness: the path-shape `debug_assert!`s in `register`
@@ -94,9 +115,13 @@ impl ContentStore {
     /// Construct an empty store.
     pub fn new() -> Self {
         Self {
-            by_path: BTreeMap::new(),
+            by_path: LaneMap::new_keyed_by_ref(source::IMAGE_PATH, |path: &Vec<u8>| {
+                object_digest(path)
+            }),
             by_handle: BTreeMap::new(),
-            user_images: BTreeMap::new(),
+            user_images: LaneMap::new(source::IMAGE_USER, |handle: SpuImageHandle| {
+                u64::from(handle.raw())
+            }),
             next_handle: 1,
             register_invocations: 0,
         }
@@ -131,14 +156,14 @@ impl ContentStore {
 
     /// Look up a user-type image by handle.
     pub fn lookup_user_image(&self, handle: SpuImageHandle) -> Option<&UserSpuImage> {
-        self.user_images.get(&handle)
+        self.user_images.get(handle)
     }
 
     /// Drop a user-type image registered by [`Self::register_user_image`]
     /// whose thread initialize was refused after registration. The
     /// handle is not reused.
     pub fn withdraw_user_image(&mut self, handle: SpuImageHandle) -> Option<UserSpuImage> {
-        self.user_images.remove(&handle)
+        self.user_images.remove(handle)
     }
 
     /// Number of registered user-type images.
@@ -171,7 +196,7 @@ impl ContentStore {
             "ContentStore::register: path {:?} contains '//'",
             String::from_utf8_lossy(path),
         );
-        if let Some(existing) = self.by_path.get(path) {
+        if let Some(existing) = self.by_path.get_by(path) {
             assert_eq!(
                 existing.elf_bytes,
                 elf_bytes,
@@ -208,13 +233,13 @@ impl ContentStore {
 
     /// Look up an image by path.
     pub fn lookup_by_path(&self, path: &[u8]) -> Option<&SpuImageRecord> {
-        self.by_path.get(path)
+        self.by_path.get_by(path)
     }
 
     /// Look up an image by handle.
     pub fn lookup_by_handle(&self, handle: SpuImageHandle) -> Option<&SpuImageRecord> {
         let path = self.by_handle.get(&handle)?;
-        let record = self.by_path.get(path);
+        let record = self.by_path.get_by(path.as_slice());
         debug_assert!(
             record.is_some(),
             "desync: by_handle has {handle:?} but by_path does not",
@@ -235,30 +260,25 @@ impl ContentStore {
         self.by_path.is_empty()
     }
 
-    /// Length-prefixed FNV-1a over `(path, handle, elf_bytes)` in
-    /// path order, then `(handle, entry, segments)` of each user image
-    /// in handle order; prefixes prevent boundary collisions between
-    /// adjacent fields.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        for (path, record) in &self.by_path {
-            hasher.write(&(path.len() as u64).to_le_bytes());
-            hasher.write(path);
-            hasher.write(&record.handle.raw().to_le_bytes());
-            hasher.write(&(record.elf_bytes.len() as u64).to_le_bytes());
-            hasher.write(&record.elf_bytes);
-        }
-        for (handle, image) in &self.user_images {
-            hasher.write(&handle.raw().to_le_bytes());
-            hasher.write(&image.entry.to_le_bytes());
-            hasher.write(&(image.segments.len() as u64).to_le_bytes());
-            for seg in &image.segments {
-                hasher.write(&seg.ls_start.to_le_bytes());
-                hasher.write(&(seg.bytes.len() as u64).to_le_bytes());
-                hasher.write(&seg.bytes);
-            }
-        }
-        hasher.finish()
+    /// The store's partial of the sync-state sum: the path-keyed images,
+    /// the user images and the handle counter.
+    pub fn sync_partial(&self) -> u128 {
+        self.by_path
+            .partial()
+            .wrapping_add(self.user_images.partial())
+            .wrapping_add(self.next_handle_term())
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.by_path
+            .partial_from_scratch()
+            .wrapping_add(self.user_images.partial_from_scratch())
+            .wrapping_add(self.next_handle_term())
+    }
+
+    fn next_handle_term(&self) -> u128 {
+        lanes::value_term(source::IMAGE_NEXT_HANDLE, 0, &self.next_handle)
     }
 }
 

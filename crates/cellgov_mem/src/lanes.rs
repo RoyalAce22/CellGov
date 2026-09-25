@@ -46,6 +46,7 @@
 //! entries cannot stand in for each other [Lewi2019 p:8 s:2.1]; and an
 //! update costs only the entries it changes [Lewi2019 p:5 s:1.2].
 
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 
 use crate::hash::{indexed_key, splitmix64_mix};
@@ -125,6 +126,40 @@ pub mod source {
     pub const LWMUTEX_HOLDS: u8 = 32;
     /// The firmware identity.
     pub const FIRMWARE_IDENTITY: u8 = 33;
+    /// Registered file blobs, one object per path digest.
+    pub const FS_BLOB: u8 = 34;
+    /// Open file descriptors, one object per fd.
+    pub const FS_FD: u8 = 35;
+    /// Open directory descriptors, one object per fd.
+    pub const FS_DIR: u8 = 36;
+    /// The file-descriptor allocator's cursor.
+    pub const FS_NEXT_FD: u8 = 37;
+    /// Path-keyed SPU images, one object per path digest.
+    pub const IMAGE_PATH: u8 = 38;
+    /// User SPU images, one object per handle.
+    pub const IMAGE_USER: u8 = 39;
+    /// The SPU image handle allocator's cursor.
+    pub const IMAGE_NEXT_HANDLE: u8 = 40;
+    /// Loaded PRX modules, one object per kernel id.
+    pub const PRX: u8 = 41;
+    /// The PRX kernel-id allocator's cursor.
+    pub const PRX_NEXT_ID: u8 = 42;
+    /// Config handles, one object per id.
+    pub const CONFIG_HANDLE: u8 = 43;
+    /// Config services, one object per id.
+    pub const CONFIG_SERVICE: u8 = 44;
+    /// Config listeners, one object per id.
+    pub const CONFIG_LISTENER: u8 = 45;
+    /// Config events, one object per id.
+    pub const CONFIG_EVENT: u8 = 46;
+    /// The config table's counters and seed flag.
+    pub const CONFIG_COUNTERS: u8 = 47;
+    /// Shared-memory handles, one object per mem id.
+    pub const MMAPPER_HANDLE: u8 = 48;
+    /// Shared-memory IPC keys, one object per key.
+    pub const MMAPPER_IPC: u8 = 49;
+    /// Memory containers, one object per container id.
+    pub const MEMORY_CONTAINER: u8 = 50;
     /// The sources that no partial covers yet, folded as one value.
     pub const TRANSITIONAL: u8 = 255;
 }
@@ -330,16 +365,38 @@ pub fn value_term<V: LaneValue>(source: u8, object: u64, value: &V) -> u128 {
     Shape {
         source,
         slot_base: 0,
-        object_of: |object: u64| object,
+        object_of: ObjectOf::Value(|object: u64| object),
     }
-    .term(object, value)
+    .term(&object, value)
 }
+
+/// A 64-bit digest of `bytes` for use as an object id: a key such as a
+/// path that is not an integer names its object by this digest.
+pub fn object_digest(bytes: &[u8]) -> u64 {
+    (bytes_term(0, &[], bytes) >> 64) as u64
+}
+
+/// How a map's key becomes an object id.
+enum ObjectOf<K> {
+    /// From a key taken by value.
+    Value(fn(K) -> u64),
+    /// From a borrowed key.
+    Ref(fn(&K) -> u64),
+}
+
+impl<K> Clone for ObjectOf<K> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<K> Copy for ObjectOf<K> {}
 
 /// Where the lanes of a map's entries sit.
 struct Shape<K> {
     source: u8,
     slot_base: u64,
-    object_of: fn(K) -> u64,
+    object_of: ObjectOf<K>,
 }
 
 impl<K> Clone for Shape<K> {
@@ -359,13 +416,17 @@ impl<K> core::fmt::Debug for Shape<K> {
     }
 }
 
-impl<K> Shape<K> {
+impl<K: Clone> Shape<K> {
     /// The contribution of the entry `key` -> `value`: its presence lane
     /// and the value's own lanes.
-    fn term<V: LaneValue>(self, key: K, value: &V) -> u128 {
+    fn term<V: LaneValue>(self, key: &K, value: &V) -> u128 {
+        let object = match self.object_of {
+            ObjectOf::Value(object_of) => object_of(key.clone()),
+            ObjectOf::Ref(object_of) => object_of(key),
+        };
         let mut lanes = ObjectLanes {
             source: self.source,
-            object: (self.object_of)(key),
+            object,
             slot_base: self.slot_base,
             sum: 0,
         };
@@ -400,10 +461,20 @@ impl<K: PartialEq, V: PartialEq> PartialEq for LaneMap<K, V> {
 
 impl<K: Eq, V: Eq> Eq for LaneMap<K, V> {}
 
-impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
+impl<K: Ord + Clone, V: LaneValue> LaneMap<K, V> {
     /// An empty map of `source` whose entry `key` is object
     /// `object_of(key)`.
     pub fn new(source: u8, object_of: fn(K) -> u64) -> Self {
+        Self::with_object(source, ObjectOf::Value(object_of))
+    }
+
+    /// [`Self::new`] for a key the object function borrows, such as a
+    /// path.
+    pub fn new_keyed_by_ref(source: u8, object_of: fn(&K) -> u64) -> Self {
+        Self::with_object(source, ObjectOf::Ref(object_of))
+    }
+
+    fn with_object(source: u8, object_of: ObjectOf<K>) -> Self {
         Self {
             entries: BTreeMap::new(),
             shape: Shape {
@@ -447,20 +518,43 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
         self.entries.get(&key)
     }
 
+    /// Borrow the value at a borrowed form of its key.
+    #[inline]
+    pub fn get_by<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+    {
+        self.entries.get(key)
+    }
+
     /// Whether the map holds `key`.
     #[inline]
     pub fn contains_key(&self, key: K) -> bool {
         self.entries.contains_key(&key)
     }
 
+    /// Whether the map holds a borrowed form of a key.
+    #[inline]
+    pub fn contains_by<Q: Ord + ?Sized>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+    {
+        self.entries.contains_key(key)
+    }
+
     /// Iterate the entries in key order.
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (K, &V)> + '_ {
-        self.entries.iter().map(|(k, v)| (*k, v))
+        self.entries.iter().map(|(k, v)| (k.clone(), v))
+    }
+
+    /// Iterate the entries in key order without cloning the keys.
+    pub fn iter_by_ref(&self) -> impl DoubleEndedIterator<Item = (&K, &V)> + '_ {
+        self.entries.iter()
     }
 
     /// Iterate the keys in ascending order.
     pub fn keys(&self) -> impl DoubleEndedIterator<Item = K> + '_ {
-        self.entries.keys().copied()
+        self.entries.keys().cloned()
     }
 
     /// Iterate the values in key order.
@@ -471,30 +565,41 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
     /// The entry with the smallest key.
     #[inline]
     pub fn first(&self) -> Option<(K, &V)> {
-        self.entries.first_key_value().map(|(k, v)| (*k, v))
+        self.entries.first_key_value().map(|(k, v)| (k.clone(), v))
     }
 
     /// Insert `value` at `key` and return the value it replaces.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        self.partial = self.partial.wrapping_add(self.shape.term(key, &value));
-        let prior = self.entries.insert(key, value);
-        if let Some(old) = &prior {
-            self.partial = self.partial.wrapping_sub(self.shape.term(key, old));
+        let shape = self.shape;
+        self.partial = self.partial.wrapping_add(shape.term(&key, &value));
+        let removed = self.entries.remove_entry(&key);
+        if let Some((old_key, old)) = &removed {
+            self.partial = self.partial.wrapping_sub(shape.term(old_key, old));
         }
-        prior
+        self.entries.insert(key, value);
+        removed.map(|(_, old)| old)
     }
 
     /// Remove the entry at `key` and return its value.
     pub fn remove(&mut self, key: K) -> Option<V> {
-        let removed = self.entries.remove(&key)?;
-        self.partial = self.partial.wrapping_sub(self.shape.term(key, &removed));
+        self.remove_by(&key)
+    }
+
+    /// Remove the entry at a borrowed form of its key and return its
+    /// value.
+    pub fn remove_by<Q: Ord + ?Sized>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+    {
+        let (key, removed) = self.entries.remove_entry(key)?;
+        self.partial = self.partial.wrapping_sub(self.shape.term(&key, &removed));
         Some(removed)
     }
 
     /// Remove the entry with the smallest key.
     pub fn pop_first(&mut self) -> Option<(K, V)> {
         let (key, value) = self.entries.pop_first()?;
-        self.partial = self.partial.wrapping_sub(self.shape.term(key, &value));
+        self.partial = self.partial.wrapping_sub(self.shape.term(&key, &value));
         Some((key, value))
     }
 
@@ -507,9 +612,18 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
     /// Mutably borrow the value at `key` through a guard that updates the
     /// partial when it drops.
     pub fn get_mut(&mut self, key: K) -> Option<LaneEntryMut<'_, K, V>> {
+        self.get_mut_by(&key)
+    }
+
+    /// [`Self::get_mut`] at a borrowed form of the key.
+    pub fn get_mut_by<Q: Ord + ?Sized>(&mut self, key: &Q) -> Option<LaneEntryMut<'_, K, V>>
+    where
+        K: Borrow<Q>,
+    {
         let shape = self.shape;
-        let value = self.entries.get_mut(&key)?;
-        self.partial = self.partial.wrapping_sub(shape.term(key, &*value));
+        let key = self.entries.get_key_value(key)?.0.clone();
+        let value = self.entries.get_mut::<K>(&key)?;
+        self.partial = self.partial.wrapping_sub(shape.term(&key, &*value));
         Some(LaneEntryMut {
             key,
             value,
@@ -524,10 +638,10 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
         let shape = self.shape;
         let partial = &mut self.partial;
         self.entries.retain(|key, value| {
-            *partial = partial.wrapping_sub(shape.term(*key, &*value));
-            let kept = keep(*key, value);
+            *partial = partial.wrapping_sub(shape.term(key, &*value));
+            let kept = keep(key.clone(), value);
             if kept {
-                *partial = partial.wrapping_add(shape.term(*key, &*value));
+                *partial = partial.wrapping_add(shape.term(key, &*value));
             }
             kept
         });
@@ -556,7 +670,7 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
     /// [`Self::partial`] computed from every entry.
     pub fn partial_from_scratch(&self) -> u128 {
         self.entries.iter().fold(0u128, |acc, (key, value)| {
-            acc.wrapping_add(self.shape.term(*key, value))
+            acc.wrapping_add(self.shape.term(key, value))
         })
     }
 }
@@ -566,14 +680,14 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
 /// [`LaneMap::get_mut`] subtracts the entry's contribution from the
 /// partial when it makes the guard. The guard adds the recomputed
 /// contribution back when it drops.
-pub struct LaneEntryMut<'a, K: Copy, V: LaneValue> {
+pub struct LaneEntryMut<'a, K: Clone, V: LaneValue> {
     key: K,
     value: &'a mut V,
     partial: &'a mut u128,
     shape: Shape<K>,
 }
 
-impl<K: Copy, V: LaneValue> core::ops::Deref for LaneEntryMut<'_, K, V> {
+impl<K: Clone, V: LaneValue> core::ops::Deref for LaneEntryMut<'_, K, V> {
     type Target = V;
 
     #[inline]
@@ -582,18 +696,18 @@ impl<K: Copy, V: LaneValue> core::ops::Deref for LaneEntryMut<'_, K, V> {
     }
 }
 
-impl<K: Copy, V: LaneValue> core::ops::DerefMut for LaneEntryMut<'_, K, V> {
+impl<K: Clone, V: LaneValue> core::ops::DerefMut for LaneEntryMut<'_, K, V> {
     #[inline]
     fn deref_mut(&mut self) -> &mut V {
         self.value
     }
 }
 
-impl<K: Copy, V: LaneValue> Drop for LaneEntryMut<'_, K, V> {
+impl<K: Clone, V: LaneValue> Drop for LaneEntryMut<'_, K, V> {
     fn drop(&mut self) {
         *self.partial = self
             .partial
-            .wrapping_add(self.shape.term(self.key, &*self.value));
+            .wrapping_add(self.shape.term(&self.key, &*self.value));
     }
 }
 

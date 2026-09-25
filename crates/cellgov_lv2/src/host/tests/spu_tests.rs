@@ -1,4 +1,4 @@
-//! SPU image import/open and thread-group dispatch tests: handle allocation, group lifecycle through RegisterSpu, and state-hash folding.
+//! SPU image import/open and thread-group dispatch tests: handle allocation, group lifecycle through RegisterSpu, and sync-partial folding.
 
 use super::*;
 use crate::host::test_support::FakeRuntime;
@@ -304,20 +304,20 @@ fn content_store_accessible_through_host() {
 }
 
 #[test]
-fn state_hash_changes_when_image_registered() {
+fn sync_partial_changes_when_image_registered() {
     let empty = Lv2Host::new();
     let mut populated = Lv2Host::new();
     populated.content_store_mut().register(b"/spu.elf", vec![]);
-    assert_ne!(empty.state_hash(), populated.state_hash());
+    assert_ne!(empty.sync_partial(), populated.sync_partial());
 }
 
 #[test]
-fn state_hash_deterministic_across_instances() {
+fn sync_partial_deterministic_across_instances() {
     let mut a = Lv2Host::new();
     let mut b = Lv2Host::new();
     a.content_store_mut().register(b"/spu.elf", vec![1, 2]);
     b.content_store_mut().register(b"/spu.elf", vec![1, 2]);
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]

@@ -76,7 +76,7 @@ impl Lv2Host {
 
     /// Record a namespace-keyed shm mapping and bump the map witness.
     pub(in crate::host) fn note_system_ipc_map(&mut self, mem_id: u32, base: u32, size: u32) {
-        let Some((&ipc_key, _)) = self.state.mmapper_ipc.iter().find(|&(_, &id)| id == mem_id)
+        let Some((ipc_key, _)) = self.state.mmapper_ipc.iter().find(|&(_, &id)| id == mem_id)
         else {
             return;
         };

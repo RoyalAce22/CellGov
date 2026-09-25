@@ -801,7 +801,7 @@ fn syscall_332_keyed_create_registers_ipc_entry() {
     let rt = FakeRuntime::new(0x10000);
     let mem_id = dispatch_332_keyed(&mut host, &rt, 0x8006_0100_0000_0010, 0x10000);
     assert_eq!(
-        host.mmapper_ipc().get(&0x8006_0100_0000_0010),
+        host.mmapper_ipc().get_by(&0x8006_0100_0000_0010),
         Some(&mem_id)
     );
 }

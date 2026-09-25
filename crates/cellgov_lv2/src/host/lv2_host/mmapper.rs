@@ -1,7 +1,5 @@
 //! Memory allocation: the allocation base, the RSX seeds, the id allocator and the mmapper handout, search and ledger.
 
-use std::collections::BTreeMap;
-
 use crate::host::rsx::SysRsxContext;
 
 use super::model::Lv2Host;
@@ -180,7 +178,7 @@ impl Lv2Host {
     }
 
     /// `ipc_key -> mem_id` registrations made by keyed 332 calls.
-    pub fn mmapper_ipc(&self) -> &BTreeMap<u64, u32> {
+    pub fn mmapper_ipc(&self) -> &cellgov_mem::lanes::LaneMap<u64, u32> {
         &self.state.mmapper_ipc
     }
 }

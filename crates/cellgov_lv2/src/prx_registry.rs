@@ -3,6 +3,7 @@
 //! Populated at firmware-set boot; lookups resolve by path-stem
 //! or by kernel id.
 
+use cellgov_mem::lanes::{self, source, LaneMap, LaneValue, ObjectLanes};
 use std::collections::BTreeMap;
 
 /// First kernel id handed out. The range
@@ -15,8 +16,8 @@ pub const FIRST_KERNEL_ID: u32 = 0x4002_0000;
 ///
 /// `STARTING` and `DESTROYED` are omitted: start phase 1 persists no
 /// transition in this model, and withdrawal removes the entry
-/// outright. Discriminants feed the host state hash; `Initialized`
-/// and `Started` keep the byte values the pre-enum boolean hashed.
+/// outright. The explicit discriminants are the module's state lane,
+/// less one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PrxState {
@@ -96,6 +97,21 @@ impl LoadedPrxEntry {
     }
 }
 
+impl LaneValue for LoadedPrxEntry {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.bytes(1, &[], self.stem.as_bytes());
+        lanes.bytes(2, &[], self.name.as_bytes());
+        lanes.lane(3, 0, u64::from(self.base));
+        lanes.lane(4, 0, u64::from(self.data_end));
+        lanes.lane(5, 0, u64::from(self.toc));
+        lanes.lane(6, 0, u64::from(self.start_opd.is_some()));
+        lanes.lane(7, 0, self.start_opd.map_or(0, u64::from));
+        lanes.lane(8, 0, u64::from(self.stop_opd.is_some()));
+        lanes.lane(9, 0, self.stop_opd.map_or(0, u64::from));
+        lanes.lane(10, 0, self.state as u64 + 1);
+    }
+}
+
 /// Table of loaded PRXs keyed by both kernel id and stem.
 ///
 /// Invariant: every key in `stem_to_id` resolves to a present
@@ -108,7 +124,8 @@ impl LoadedPrxEntry {
 /// the invariant.
 #[derive(Debug, Clone)]
 pub struct LoadedPrxRegistry {
-    entries: BTreeMap<u32, LoadedPrxEntry>,
+    entries: LaneMap<u32, LoadedPrxEntry>,
+    /// The inverse of `entries` by stem, derived and not hashed.
     stem_to_id: BTreeMap<String, u32>,
     next_id: u32,
 }
@@ -118,7 +135,7 @@ impl LoadedPrxRegistry {
     /// [`FIRST_KERNEL_ID`].
     pub fn new() -> Self {
         Self {
-            entries: BTreeMap::new(),
+            entries: LaneMap::new(source::PRX, u64::from),
             stem_to_id: BTreeMap::new(),
             next_id: FIRST_KERNEL_ID,
         }
@@ -206,7 +223,7 @@ impl LoadedPrxRegistry {
     /// Mark `id`'s module started (`module_start` ran, or the guest
     /// completed the sc 481 handshake). No-op for an unknown id.
     pub fn mark_started(&mut self, id: u32) {
-        if let Some(e) = self.entries.get_mut(&id) {
+        if let Some(mut e) = self.entries.get_mut(id) {
             e.state = PrxState::Started;
         }
     }
@@ -217,7 +234,7 @@ impl LoadedPrxRegistry {
     /// non-`Started` state to its error code; `None` for an unknown
     /// id. Only the `Started` state transitions.
     pub fn begin_stop(&mut self, id: u32) -> Option<PrxState> {
-        let e = self.entries.get_mut(&id)?;
+        let mut e = self.entries.get_mut(id)?;
         let old = e.state;
         if old == PrxState::Started {
             e.state = PrxState::Stopping;
@@ -230,8 +247,8 @@ impl LoadedPrxRegistry {
     /// Returns whether the transition applied; `false` for an unknown
     /// id or any other state.
     pub fn finish_stop(&mut self, id: u32) -> bool {
-        match self.entries.get_mut(&id) {
-            Some(e) if e.state == PrxState::Stopping => {
+        match self.entries.get_mut(id) {
+            Some(mut e) if e.state == PrxState::Stopping => {
                 e.state = PrxState::Stopped;
                 true
             }
@@ -244,11 +261,11 @@ impl LoadedPrxRegistry {
     /// the module is `Started` / `Stopping` (LV2 withdraws only
     /// `INITIALIZED` / `STOPPED` states).
     pub fn withdraw_removable(&mut self, id: u32) -> Option<LoadedPrxEntry> {
-        match self.entries.get(&id)?.state {
+        match self.entries.get(id)?.state {
             PrxState::Initialized | PrxState::Stopped => {}
             PrxState::Started | PrxState::Stopping => return None,
         }
-        let entry = self.entries.remove(&id)?;
+        let entry = self.entries.remove(id)?;
         self.stem_to_id.remove(&entry.stem);
         Some(entry)
     }
@@ -261,7 +278,7 @@ impl LoadedPrxRegistry {
             return None;
         }
         let id = self.stem_to_id.get(stem.as_str())?;
-        let entry = self.entries.get(id);
+        let entry = self.entries.get(*id);
         debug_assert!(
             entry.is_some(),
             "LoadedPrxRegistry: stem_to_id and entries out of sync (id={id:#x})"
@@ -271,7 +288,7 @@ impl LoadedPrxRegistry {
 
     /// Look up an entry by kernel id.
     pub fn lookup_by_id(&self, id: u32) -> Option<&LoadedPrxEntry> {
-        self.entries.get(&id)
+        self.entries.get(id)
     }
 
     /// Number of registered PRXs.
@@ -284,9 +301,26 @@ impl LoadedPrxRegistry {
         self.entries.is_empty()
     }
 
-    /// Iterate kernel ids in monotonic (BTreeMap key) order.
+    /// Iterate kernel ids in ascending order.
     pub fn ids(&self) -> impl Iterator<Item = u32> + '_ {
-        self.entries.keys().copied()
+        self.entries.keys()
+    }
+
+    /// The registry's partial of the sync-state sum: the modules and the
+    /// kernel-id allocator's cursor.
+    pub fn sync_partial(&self) -> u128 {
+        self.entries.partial().wrapping_add(self.next_id_term())
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.entries
+            .partial_from_scratch()
+            .wrapping_add(self.next_id_term())
+    }
+
+    fn next_id_term(&self) -> u128 {
+        lanes::value_term(source::PRX_NEXT_ID, 0, &self.next_id)
     }
 }
 

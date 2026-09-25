@@ -1,7 +1,5 @@
 //! [`Lv2State`]: the hashed partition of [`super::Lv2Host`].
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use cellgov_ps3_abi::hw::address_space::{
     PS3_CHILD_STACKS_BASE, PS3_CHILD_STACKS_SIZE, PS3_SPU_RESERVED_BASE,
 };
@@ -61,7 +59,7 @@ pub(in crate::host) struct Lv2State {
     /// `mem_id`; an unregistered key mints and registers. The
     /// association steers a future 332's answer and is recorded
     /// nowhere else.
-    pub(in crate::host) mmapper_ipc: BTreeMap<u64, u32>,
+    pub(in crate::host) mmapper_ipc: cellgov_mem::lanes::LaneMap<u64, u32>,
     /// `sys_config` handles, services, listeners, and the events a
     /// listener may still read back (516-522).
     pub(in crate::host) config: ConfigTable,
@@ -73,7 +71,7 @@ pub(in crate::host) struct Lv2State {
     pub(in crate::host) usbd: UsbdState,
     /// Container ids minted by `sys_memory_container_create`; the
     /// membership `sys_memory_allocate_from_container` checks.
-    pub(in crate::host) memory_containers: BTreeSet<u32>,
+    pub(in crate::host) memory_containers: cellgov_mem::lanes::LaneMap<u32, ()>,
     pub(in crate::host) lwmutexes: LwMutexTable,
     pub(in crate::host) mutexes: MutexTable,
     pub(in crate::host) semaphores: SemaphoreTable,

@@ -71,7 +71,7 @@ fn a_container_id_the_process_minted_allocates_at_the_page_size_named() {
     let rt = FakeRuntime::with_memory(GuestMemory::new(0x10000));
     let mut host = Lv2Host::new();
     let cid = create_container(&mut host, &rt);
-    assert!(host.state.memory_containers.contains(&cid));
+    assert!(host.state.memory_containers.contains_by(&cid));
 
     let d = allocate(&mut host, &rt, 0x1_0000, cid, page_size::FLAG_64K);
     assert_eq!(code_of(&d), 0);
@@ -188,10 +188,17 @@ fn an_exhausted_budget_is_enomem_and_leaves_the_cursor() {
 }
 
 #[test]
-fn the_container_set_folds_into_the_state_hash() {
+fn the_container_set_moves_the_host_partial() {
     let rt = FakeRuntime::with_memory(GuestMemory::new(0x10000));
     let mut host = Lv2Host::new();
-    let before = host.state.state_hash();
-    create_container(&mut host, &rt);
-    assert_ne!(host.state.state_hash(), before);
+    let before = host.sync_partial();
+    let cid = create_container(&mut host, &rt);
+    assert_ne!(host.sync_partial(), before);
+    assert_eq!(host.sync_partial(), host.sync_partial_from_scratch());
+    host.state.memory_containers.remove(cid);
+    assert_eq!(
+        host.sync_partial(),
+        before,
+        "the container is the only partial the create moved"
+    );
 }

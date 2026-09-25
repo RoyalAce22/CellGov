@@ -264,7 +264,7 @@ fn an_entry_count_that_is_no_sign_extension_refuses_a_call_that_would_otherwise_
         matches!(out, Lv2Dispatch::Immediate { code: 0, .. }),
         "the call the gate must refuse has to succeed without it: {out:?}"
     );
-    assert!(host.state.mmapper_ipc.contains_key(&KEY));
+    assert!(host.state.mmapper_ipc.contains_by(&KEY));
 
     let mut aliased = well_formed;
     aliased[4] = 0x1_0000_0001;

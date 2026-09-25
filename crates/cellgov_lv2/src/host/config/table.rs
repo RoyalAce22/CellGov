@@ -1,6 +1,6 @@
 //! The config subscription store: handles, listeners, services and the events they queue.
 
-use std::collections::BTreeMap;
+use cellgov_mem::lanes::{self, source, LaneMap, LaneValue, ObjectLanes};
 
 use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_EVENT_SOURCE_SERVICE, SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN,
@@ -90,6 +90,44 @@ pub(crate) struct ConfigEvent {
     pub registered: bool,
 }
 
+impl LaneValue for ConfigHandle {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.queue_id));
+    }
+}
+
+impl LaneValue for ConfigService {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.service_id);
+        lanes.lane(2, 0, self.user_id);
+        lanes.lane(3, 0, self.verbosity);
+        lanes.lane(4, 0, u64::from(self.registered));
+        lanes.lane(5, 0, self.order);
+        lanes.bytes(6, &[], &self.data);
+    }
+}
+
+impl LaneValue for ConfigListener {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.handle));
+        lanes.lane(2, 0, u64::from(self.queue_id));
+        lanes.lane(3, 0, self.service_id);
+        lanes.lane(4, 0, self.min_verbosity);
+        lanes.lane(5, 0, u64::from(self.listener_type));
+        lanes.lane(6, 0, u64::from(self.delivered));
+        lanes.bytes(7, &[], &self.data);
+    }
+}
+
+impl LaneValue for ConfigEvent {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.handle));
+        lanes.lane(2, 0, u64::from(self.listener));
+        lanes.lane(3, 0, u64::from(self.service));
+        lanes.lane(4, 0, u64::from(self.registered));
+    }
+}
+
 /// Listener parameters decoded from `sys_config_add_service_listener`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::host) struct ListenerSpec {
@@ -115,16 +153,30 @@ pub(in crate::host) struct ServiceSpec {
 ///
 /// A service stays while it is registered or any event still refers
 /// to it; an event stays until its listener is removed.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigTable {
-    pub(super) handles: BTreeMap<u32, ConfigHandle>,
-    pub(super) services: BTreeMap<u32, ConfigService>,
-    pub(super) listeners: BTreeMap<u32, ConfigListener>,
-    pub(super) events: BTreeMap<u32, ConfigEvent>,
+    pub(super) handles: LaneMap<u32, ConfigHandle>,
+    pub(super) services: LaneMap<u32, ConfigService>,
+    pub(super) listeners: LaneMap<u32, ConfigListener>,
+    pub(super) events: LaneMap<u32, ConfigEvent>,
     next_event_id: u32,
     next_order: u64,
     /// The pad-manager services have been registered (first open).
     pub(super) seeded: bool,
+}
+
+impl Default for ConfigTable {
+    fn default() -> Self {
+        Self {
+            handles: LaneMap::new(source::CONFIG_HANDLE, u64::from),
+            services: LaneMap::new(source::CONFIG_SERVICE, u64::from),
+            listeners: LaneMap::new(source::CONFIG_LISTENER, u64::from),
+            events: LaneMap::new(source::CONFIG_EVENT, u64::from),
+            next_event_id: 0,
+            next_order: 0,
+            seeded: false,
+        }
+    }
 }
 
 impl ConfigTable {
@@ -132,8 +184,8 @@ impl ConfigTable {
         Self::default()
     }
 
-    /// True until the first `sys_config_open`; the state hash skips a
-    /// pristine table.
+    /// True until the first `sys_config_open`.
+    #[cfg(test)]
     pub(crate) fn is_pristine(&self) -> bool {
         *self == Self::default()
     }
@@ -144,15 +196,15 @@ impl ConfigTable {
     }
 
     pub(crate) fn handle(&self, id: u32) -> Option<ConfigHandle> {
-        self.handles.get(&id).copied()
+        self.handles.get(id).copied()
     }
 
     pub(crate) fn service(&self, id: u32) -> Option<&ConfigService> {
-        self.services.get(&id)
+        self.services.get(id)
     }
 
     pub(crate) fn event(&self, id: u32) -> Option<ConfigEvent> {
-        self.events.get(&id).copied()
+        self.events.get(id).copied()
     }
 
     #[cfg(test)]
@@ -199,14 +251,14 @@ impl ConfigTable {
     /// listener still holds events for it. Unregistering withdraws the
     /// service before any notification goes out.
     pub(super) fn matching_services(&self, listener: u32) -> Vec<u32> {
-        let Some(l) = self.listeners.get(&listener) else {
+        let Some(l) = self.listeners.get(listener) else {
             return vec![];
         };
         let mut hits: Vec<(u64, u32)> = self
             .services
             .iter()
             .filter(|(_, s)| s.registered && l.matches(s))
-            .map(|(id, s)| (s.order, *id))
+            .map(|(id, s)| (s.order, id))
             .collect();
         hits.sort_unstable();
         hits.into_iter().map(|(_, id)| id).collect()
@@ -214,13 +266,13 @@ impl ConfigTable {
 
     /// Listeners `service` matches, in listener-id order.
     pub(super) fn matching_listeners(&self, service: u32) -> Vec<u32> {
-        let Some(s) = self.services.get(&service) else {
+        let Some(s) = self.services.get(service) else {
             return vec![];
         };
         self.listeners
             .iter()
             .filter(|(_, l)| l.matches(s))
-            .map(|(id, _)| *id)
+            .map(|(id, _)| id)
             .collect()
     }
 
@@ -232,23 +284,21 @@ impl ConfigTable {
         listener: u32,
         service: u32,
     ) -> Option<(u32, u32, EventPayload)> {
-        let (queue_id, handle) = {
-            let l = self.listeners.get(&listener)?;
-            let s = self.services.get(&service)?;
+        let (queue_id, handle, registered, announced_len) = {
+            let l = self.listeners.get(listener)?;
+            let s = self.services.get(service)?;
             if !l.matches(s) {
                 return None;
             }
-            (l.queue_id, l.handle)
+            (l.queue_id, l.handle, s.registered, s.announced_len())
         };
         let id = self.next_event_id;
         self.next_event_id = self.next_event_id.wrapping_add(1);
-        let s = &self.services[&service];
-        let registered = s.registered;
         let payload = EventPayload {
             source: SYS_CONFIG_EVENT_SOURCE_SERVICE,
             data1: u64::from(handle),
             data2: (u64::from(registered) << 32) | u64::from(id),
-            data3: s.announced_len() as u64,
+            data3: announced_len as u64,
         };
         let prior = self.events.insert(
             id,
@@ -261,18 +311,22 @@ impl ConfigTable {
         );
         // The event counter wrapped onto an id a listener still holds.
         debug_assert!(prior.is_none(), "config event {id:#x} minted twice");
-        let l = self
-            .listeners
-            .get_mut(&listener)
-            .expect("listener present: looked up above");
-        l.delivered += 1;
+        if let Some(mut l) = self.listeners.get_mut(listener) {
+            l.delivered += 1;
+        } else {
+            // The lookup at the top found the listener, and nothing since removes one.
+            debug_assert!(
+                false,
+                "config listener {listener:#x} vanished while staging"
+            );
+        }
         Some((id, queue_id, payload))
     }
 
     /// Undo [`Self::stage_event`] after the queue refused the send.
     pub(super) fn discard_event(&mut self, event: u32) {
-        if let Some(ev) = self.events.remove(&event) {
-            if let Some(l) = self.listeners.get_mut(&ev.listener) {
+        if let Some(ev) = self.events.remove(event) {
+            if let Some(mut l) = self.listeners.get_mut(ev.listener) {
                 l.delivered = l.delivered.saturating_sub(1);
             }
             self.collect_service(ev.service);
@@ -282,28 +336,28 @@ impl ConfigTable {
     /// Drop an unregistered service nothing refers to any more.
     pub(super) fn collect_service(&mut self, service: u32) {
         let unreferenced = !self.events.values().any(|e| e.service == service);
-        if unreferenced && self.services.get(&service).is_some_and(|s| !s.registered) {
-            self.services.remove(&service);
+        if unreferenced && self.services.get(service).is_some_and(|s| !s.registered) {
+            self.services.remove(service);
         }
     }
 
     pub(super) fn remove_handle(&mut self, id: u32) -> bool {
-        self.handles.remove(&id).is_some()
+        self.handles.remove(id).is_some()
     }
 
     /// Removing a listener drops every event it was sent.
     pub(super) fn remove_listener(&mut self, id: u32) -> bool {
-        if self.listeners.remove(&id).is_none() {
+        if self.listeners.remove(id).is_none() {
             return false;
         }
         let dropped: Vec<(u32, u32)> = self
             .events
             .iter()
             .filter(|(_, e)| e.listener == id)
-            .map(|(ev, e)| (*ev, e.service))
+            .map(|(ev, e)| (ev, e.service))
             .collect();
         for (ev, service) in dropped {
-            self.events.remove(&ev);
+            self.events.remove(ev);
             self.collect_service(service);
         }
         true
@@ -313,8 +367,8 @@ impl ConfigTable {
     /// refers to it. `false` for an unknown or already-unregistered
     /// service.
     pub(super) fn unregister(&mut self, id: u32) -> bool {
-        match self.services.get_mut(&id) {
-            Some(s) if s.registered => {
+        match self.services.get_mut(id) {
+            Some(mut s) if s.registered => {
                 s.registered = false;
                 true
             }
@@ -328,8 +382,8 @@ impl ConfigTable {
     /// The `registered` field and the record's length follow the
     /// service's state at read time; see `ConfigEvent::registered`.
     pub(super) fn record(&self, event: u32) -> Option<Vec<u8>> {
-        let ev = self.events.get(&event)?;
-        let s = self.services.get(&ev.service)?;
+        let ev = self.events.get(event)?;
+        let s = self.services.get(ev.service)?;
         let mut out = Vec::with_capacity(s.record_len());
         out.extend_from_slice(&ev.listener.to_be_bytes());
         out.extend_from_slice(&u32::from(s.registered).to_be_bytes());
@@ -347,59 +401,39 @@ impl ConfigTable {
         Some(out)
     }
 
-    /// FNV-1a over every table, length-prefixed, plus the counters
-    /// and the seed flag, via raw little-endian bytes per the host
-    /// state-hash contract.
-    pub(crate) fn state_hash(&self) -> u64 {
-        let Self {
-            handles,
-            services,
-            listeners,
-            events,
-            next_event_id,
-            next_order,
-            seeded,
-        } = self;
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&(handles.len() as u64).to_le_bytes());
-        for (id, h) in handles {
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&h.queue_id.to_le_bytes());
-        }
-        hasher.write(&(services.len() as u64).to_le_bytes());
-        for (id, s) in services {
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&s.service_id.to_le_bytes());
-            hasher.write(&s.user_id.to_le_bytes());
-            hasher.write(&s.verbosity.to_le_bytes());
-            hasher.write(&[u8::from(s.registered)]);
-            hasher.write(&s.order.to_le_bytes());
-            hasher.write(&(s.data.len() as u64).to_le_bytes());
-            hasher.write(&s.data);
-        }
-        hasher.write(&(listeners.len() as u64).to_le_bytes());
-        for (id, l) in listeners {
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&l.handle.to_le_bytes());
-            hasher.write(&l.queue_id.to_le_bytes());
-            hasher.write(&l.service_id.to_le_bytes());
-            hasher.write(&l.min_verbosity.to_le_bytes());
-            hasher.write(&l.listener_type.to_le_bytes());
-            hasher.write(&l.delivered.to_le_bytes());
-            hasher.write(&(l.data.len() as u64).to_le_bytes());
-            hasher.write(&l.data);
-        }
-        hasher.write(&(events.len() as u64).to_le_bytes());
-        for (id, e) in events {
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&e.handle.to_le_bytes());
-            hasher.write(&e.listener.to_le_bytes());
-            hasher.write(&e.service.to_le_bytes());
-            hasher.write(&[u8::from(e.registered)]);
-        }
-        hasher.write(&next_event_id.to_le_bytes());
-        hasher.write(&next_order.to_le_bytes());
-        hasher.write(&[u8::from(*seeded)]);
-        hasher.finish()
+    /// The table's partial of the sync-state sum: the handles, services,
+    /// listeners and events, plus the two counters and the seed flag.
+    pub(crate) fn sync_partial(&self) -> u128 {
+        self.handles
+            .partial()
+            .wrapping_add(self.services.partial())
+            .wrapping_add(self.listeners.partial())
+            .wrapping_add(self.events.partial())
+            .wrapping_add(self.counters_term())
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub(crate) fn sync_partial_from_scratch(&self) -> u128 {
+        self.handles
+            .partial_from_scratch()
+            .wrapping_add(self.services.partial_from_scratch())
+            .wrapping_add(self.listeners.partial_from_scratch())
+            .wrapping_add(self.events.partial_from_scratch())
+            .wrapping_add(self.counters_term())
+    }
+
+    /// The counters and the seed flag, objects 0 to 2.
+    fn counters_term(&self) -> u128 {
+        lanes::value_term(source::CONFIG_COUNTERS, 0, &self.next_event_id)
+            .wrapping_add(lanes::value_term(
+                source::CONFIG_COUNTERS,
+                1,
+                &self.next_order,
+            ))
+            .wrapping_add(lanes::value_term(
+                source::CONFIG_COUNTERS,
+                2,
+                &u64::from(self.seeded),
+            ))
     }
 }
