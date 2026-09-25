@@ -35,6 +35,44 @@ pub(crate) struct UsbdWaiter {
     pub out_ptrs: [u32; 3],
 }
 
+/// Lane layout of the USB driver:
+///
+/// - Field 1 is the handle count.
+/// - Field 2 is handle `i`, at slot `i`.
+/// - Field 3 is the product-string count.
+/// - Field 4 is product string `i`, under key `i`.
+/// - Field 5 is the reader count.
+/// - Fields 6 to 10 are parked reader `i`, at slot `i`.
+///
+/// The exhaustive destructure makes a new field without a lane a
+/// compile error.
+impl cellgov_mem::lanes::LaneValue for UsbdState {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
+        let Self {
+            handles,
+            ldds,
+            waiters,
+        } = self;
+        lanes.lane(1, 0, handles.len() as u64);
+        for (slot, handle) in handles.iter().enumerate() {
+            lanes.lane(2, slot as u64, u64::from(*handle));
+        }
+        lanes.lane(3, 0, ldds.len() as u64);
+        for (slot, product) in ldds.iter().enumerate() {
+            lanes.bytes(4, &[slot as u64], product);
+        }
+        lanes.lane(5, 0, waiters.len() as u64);
+        for (slot, w) in waiters.iter().enumerate() {
+            let slot = slot as u64;
+            lanes.lane(6, slot, w.thread.raw());
+            lanes.lane(7, slot, u64::from(w.handle));
+            for (i, ptr) in w.out_ptrs.iter().enumerate() {
+                lanes.lane(8 + i as u8, slot, u64::from(*ptr));
+            }
+        }
+    }
+}
+
 /// Driver handles, registered logical device drivers, and parked
 /// event readers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,10 +100,15 @@ impl UsbdState {
         &self.ldds
     }
 
-    /// True until `sys_usbd_initialize`; the state hash skips a
-    /// pristine driver.
+    /// True until `sys_usbd_initialize`.
+    #[cfg(test)]
     pub(crate) fn is_pristine(&self) -> bool {
         *self == Self::new()
+    }
+
+    /// The driver's term of the sync-state sum, computed on read.
+    pub(crate) fn sync_term(&self) -> u128 {
+        cellgov_mem::lanes::value_term(cellgov_mem::lanes::source::USBD, 0, self)
     }
 
     #[cfg(test)]
@@ -76,35 +119,6 @@ impl UsbdState {
     #[cfg(test)]
     pub(crate) fn waiters(&self) -> &VecDeque<UsbdWaiter> {
         &self.waiters
-    }
-
-    /// FNV-1a over every field via raw little-endian bytes per the
-    /// host state-hash contract.
-    pub(crate) fn state_hash(&self) -> u64 {
-        let Self {
-            handles,
-            ldds,
-            waiters,
-        } = self;
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&(handles.len() as u64).to_le_bytes());
-        for handle in handles {
-            hasher.write(&handle.to_le_bytes());
-        }
-        hasher.write(&(ldds.len() as u64).to_le_bytes());
-        for product in ldds {
-            hasher.write(&(product.len() as u64).to_le_bytes());
-            hasher.write(product);
-        }
-        hasher.write(&(waiters.len() as u64).to_le_bytes());
-        for w in waiters {
-            hasher.write(&w.thread.raw().to_le_bytes());
-            hasher.write(&w.handle.to_le_bytes());
-            for ptr in w.out_ptrs {
-                hasher.write(&ptr.to_le_bytes());
-            }
-        }
-        hasher.finish()
     }
 
     /// Remove every parked reader whose thread is in `threads`,
@@ -395,3 +409,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/usbd_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/usbd_lanes_tests.rs"]
+mod lanes_tests;

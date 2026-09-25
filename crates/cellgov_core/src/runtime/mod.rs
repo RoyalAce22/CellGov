@@ -61,3 +61,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/sync_state_lanes_tests.rs"]
 mod sync_state_lanes_tests;
+
+#[cfg(test)]
+#[path = "tests/sync_state_golden_tests.rs"]
+mod sync_state_golden_tests;

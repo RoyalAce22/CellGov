@@ -234,13 +234,13 @@ fn the_state_hash_distinguishes_one_parked_reader_from_two() {
     let p = hw_conf_packet();
     let (mut host, rt) = two_thread_host(&p);
     park(&mut host, &rt, first(), FIRST_BUF, 0x100);
-    let one = host.state.uart.state_hash();
+    let one = host.state.uart.sync_term();
     park(&mut host, &rt, second(), SECOND_BUF, 0x100);
-    let two = host.state.uart.state_hash();
+    let two = host.state.uart.sync_term();
     assert_ne!(one, two);
     let d = send_hw_conf(&mut host, &rt, p.len());
     assert!(matches!(d, Lv2Dispatch::WakeAndReturn { .. }));
-    assert_ne!(host.state.uart.state_hash(), two);
+    assert_ne!(host.state.uart.sync_term(), two);
 }
 
 /// A thread id the table never issued, parked at the front of the

@@ -23,7 +23,7 @@ use crate::host::{derived, observability, state};
 #[derive(Debug, Clone)]
 pub struct Lv2Host {
     /// Hashed guest-visible state: every field enters
-    /// [`Self::sync_partial`] or [`Self::state_hash`] by construction.
+    /// [`Self::sync_partial`].
     pub(in crate::host) state: state::Lv2State,
     /// Unhashed guest-visible state; each field's doc names where a
     /// divergence in it is caught instead.
@@ -39,7 +39,7 @@ pub struct Lv2Host {
 /// PUP the install came from; both enter `Lv2Host::sync_partial`.
 #[derive(Debug, Clone)]
 pub struct FirmwareIdentity {
-    /// FNV-1a hash of the verified `image_version` string.
+    /// Digest of the verified `image_version` string.
     pub image_version_hash: u64,
     /// Raw SHA-256 of the originating PUP file.
     pub pup_sha256_bytes: [u8; 32],
@@ -284,10 +284,8 @@ impl Lv2Host {
             self.state.firmware_identity.is_none(),
             "firmware identity already set; boot is one-shot",
         );
-        let mut h = cellgov_mem::Fnv1aHasher::new();
-        h.write(image_version.as_bytes());
         self.state.firmware_identity = Some(FirmwareIdentity {
-            image_version_hash: h.finish(),
+            image_version_hash: cellgov_mem::lanes::object_digest(image_version.as_bytes()),
             pup_sha256_bytes,
         });
     }

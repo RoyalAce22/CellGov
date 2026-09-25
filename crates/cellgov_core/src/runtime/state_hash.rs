@@ -21,9 +21,9 @@ impl Runtime {
     /// [`cellgov_mem::lanes`]. The sources enter the sum as follows:
     ///
     /// - The runtime-owned tables keep their partials in lane maps.
-    /// - The RSX scalars compute their terms on read.
-    /// - The LV2 host's tables add the host's partial.
-    /// - The rest of the LV2 host's state enters as one transitional lane.
+    /// - The RSX scalars and the RSX call stack compute their terms on
+    ///   read.
+    /// - The LV2 host adds its partial.
     ///
     /// Replay tooling compares pairs via the `SyncState` checkpoint
     /// emitted at every commit boundary.
@@ -37,8 +37,7 @@ impl Runtime {
         (self.sync_sum(Partials::FromScratch) >> 64) as u64
     }
 
-    /// The sum of the additive key, every source's partial and the
-    /// transitional lane.
+    /// The sum of the additive key and every source's partial.
     fn sync_sum(&self, partials: Partials) -> u128 {
         // A rebuild walks every entry, so the kept path does not call it.
         macro_rules! partial {
@@ -65,10 +64,7 @@ impl Runtime {
                 0,
                 &u64::from(self.rsx_sem_offset),
             ),
-            lanes::contribution(
-                lanes::LaneIndex::new(lanes::source::TRANSITIONAL, 0, 0, 0),
-                self.lv2_host.state_hash(),
-            ),
+            self.rsx_call_stack.sync_term(),
         ] {
             sum = sum.wrapping_add(term);
         }

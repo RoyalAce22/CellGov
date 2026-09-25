@@ -1,18 +1,17 @@
-//! Lv2Host state-hash and sync-partial sensitivity: each hashed field moves its hash.
+//! Lv2Host sync-partial sensitivity: each hashed field moves the partial.
 
 use super::*;
 use crate::host::test_support::primary_attrs;
 use cellgov_event::UnitId;
 
-/// The host's whole sync-state contribution: the transitional fold and
-/// the partials.
+/// The host's whole sync-state contribution.
 trait Fingerprint {
-    fn fingerprint(&self) -> (u64, u128);
+    fn fingerprint(&self) -> u128;
 }
 
 impl Fingerprint for Lv2Host {
-    fn fingerprint(&self) -> (u64, u128) {
-        (self.state_hash(), self.sync_partial())
+    fn fingerprint(&self) -> u128 {
+        self.sync_partial()
     }
 }
 
@@ -295,8 +294,8 @@ fn fingerprint_changes_after_a_process_count_increment() {
 
 #[test]
 fn fingerprint_stays_off_baseline_after_alloc_id_backed_port_create_then_destroy() {
-    // The create used an id from next_kernel_id, which always enters
-    // the state hash. The port table's partial returns to its baseline.
+    // The create used an id from next_kernel_id, whose cursor lane
+    // stays moved. The port table's term returns to its baseline.
     let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     let id = host.alloc_id();

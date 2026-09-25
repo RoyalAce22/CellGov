@@ -56,8 +56,8 @@ impl UartState {
         }
     }
 
-    /// True until `sys_uart_initialize`; the state hash skips a
-    /// pristine UART.
+    /// True until `sys_uart_initialize`.
+    #[cfg(test)]
     pub(crate) fn is_pristine(&self) -> bool {
         *self == Self::new()
     }
@@ -99,9 +99,25 @@ impl UartState {
         self.hdmi_events
     }
 
-    /// FNV-1a over every field via raw little-endian bytes per the
-    /// host state-hash contract.
-    pub(crate) fn state_hash(&self) -> u64 {
+    /// The UART's term of the sync-state sum, computed on read.
+    pub(crate) fn sync_term(&self) -> u128 {
+        cellgov_mem::lanes::value_term(cellgov_mem::lanes::source::UART, 0, self)
+    }
+}
+
+/// Lane layout of the UART:
+///
+/// - Fields 1 to 3 are the initialized flag, the reply length and the
+///   reply bytes.
+/// - Field 4 is the reader count.
+/// - Fields 5 to 7 are parked reader `i`, at slot `i`.
+/// - Fields 8 to 14 are the HDMI state. Each two-port array has one
+///   slot per port.
+///
+/// The exhaustive destructure makes a new field without a lane a
+/// compile error.
+impl cellgov_mem::lanes::LaneValue for UartState {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
         let Self {
             initialized,
             rx,
@@ -114,22 +130,28 @@ impl UartState {
             hdcp_first_auth,
             hdmi_to_state,
         } = self;
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&[u8::from(*initialized)]);
-        hasher.write(&(rx.len() as u64).to_le_bytes());
-        hasher.write(rx);
-        hasher.write(&(readers.len() as u64).to_le_bytes());
-        for r in readers {
-            hasher.write(&r.thread.raw().to_le_bytes());
-            hasher.write(&r.buf_ptr.to_le_bytes());
-            hasher.write(&r.size.to_le_bytes());
+        lanes.lane(1, 0, u64::from(*initialized));
+        lanes.lane(2, 0, rx.len() as u64);
+        lanes.bytes(3, &[], rx);
+        lanes.lane(4, 0, readers.len() as u64);
+        for (slot, r) in readers.iter().enumerate() {
+            let slot = slot as u64;
+            lanes.lane(5, slot, r.thread.raw());
+            lanes.lane(6, slot, u64::from(r.buf_ptr));
+            lanes.lane(7, slot, r.size);
         }
-        hasher.write(&av_cmd_ver.to_le_bytes());
-        hasher.write(&hdmi_events.to_le_bytes());
-        hasher.write(&[*hdmi_behavior, u8::from(*head_b_initialized)]);
-        hasher.write(&[u8::from(hdmi_res_set[0]), u8::from(hdmi_res_set[1])]);
-        hasher.write(&[u8::from(hdcp_first_auth[0]), u8::from(hdcp_first_auth[1])]);
-        hasher.write(&[*hdmi_to_state]);
-        hasher.finish()
+        lanes.lane(8, 0, u64::from(*av_cmd_ver));
+        lanes.lane(9, 0, u64::from(*hdmi_events));
+        lanes.lane(10, 0, u64::from(*hdmi_behavior));
+        lanes.lane(11, 0, u64::from(*head_b_initialized));
+        for port in 0..2 {
+            lanes.lane(12, port as u64, u64::from(hdmi_res_set[port]));
+            lanes.lane(13, port as u64, u64::from(hdcp_first_auth[port]));
+        }
+        lanes.lane(14, 0, u64::from(*hdmi_to_state));
     }
 }
+
+#[cfg(test)]
+#[path = "tests/uart_lanes_tests.rs"]
+mod lanes_tests;

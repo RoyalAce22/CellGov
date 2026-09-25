@@ -238,7 +238,7 @@ fn receive_event_parks_and_finalize_wakes_every_reader_with_the_terminate_triple
     assert_parked(&receive(&mut host, &rt, src(), handle, ARGS), handle);
     assert_parked(&receive(&mut host, &rt, second, handle, ARGS_B), handle);
     assert_eq!(host.state.usbd.waiters().len(), 2);
-    let parked_hash = host.state.usbd.state_hash();
+    let parked_hash = host.state.usbd.sync_term();
 
     let d = host.dispatch(Lv2Request::UsbdFinalize { handle }, src(), &rt);
     let Lv2Dispatch::WakeAndReturn {
@@ -273,7 +273,7 @@ fn receive_event_parks_and_finalize_wakes_every_reader_with_the_terminate_triple
     }
     assert!(host.state.usbd.waiters().is_empty());
     assert!(host.state.usbd.handles().is_empty());
-    assert_ne!(host.state.usbd.state_hash(), parked_hash);
+    assert_ne!(host.state.usbd.sync_term(), parked_hash);
     assert!(
         host.state.usbd.is_pristine(),
         "no handles and no readers reads as pristine again"

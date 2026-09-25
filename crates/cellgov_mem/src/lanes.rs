@@ -160,8 +160,16 @@ pub mod source {
     pub const MMAPPER_IPC: u8 = 49;
     /// Memory containers, one object per container id.
     pub const MEMORY_CONTAINER: u8 = 50;
-    /// The sources that no partial covers yet, folded as one value.
-    pub const TRANSITIONAL: u8 = 255;
+    /// The RSX FIFO call stack.
+    pub const RSX_CALL_STACK: u8 = 51;
+    /// The `sys_rsx` context.
+    pub const RSX_CONTEXT: u8 = 52;
+    /// The UART reply stream, parked readers and HDMI state.
+    pub const UART: u8 = 53;
+    /// The USB driver handles, product strings and parked readers.
+    pub const USBD: u8 = 54;
+    /// The LV2 kernel-id and allocator cursors, one object per cursor.
+    pub const KERNEL_CURSORS: u8 = 55;
 }
 
 const OBJECT_BITS: u32 = 32;

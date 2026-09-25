@@ -1,11 +1,5 @@
-//! The FNV-1a state hash and the sync-state partial of [`Lv2Host`].
-//!
-//! # Cross-module contract
-//!
-//! Types that contribute to the host's `state_hash` must be folded
-//! through FNV-1a via their `.raw()` (or `.to_le_bytes()`) accessor,
-//! not via `std::hash::Hash`: the runtime's `sync_state_hash` must
-//! stay stable across compiler versions and build configurations.
+//! The sync-state partial of [`Lv2Host`]: the Multilinear-128 sum of
+//! the partials and terms of every `Lv2State` field.
 
 use cellgov_mem::lanes::{self, source};
 
@@ -13,15 +7,7 @@ use super::state::Lv2State;
 use super::Lv2Host;
 
 impl Lv2Host {
-    /// FNV-1a of the committed LV2 host state that keeps no partial;
-    /// the runtime adds it to `sync_state_hash` as the transitional lane.
-    pub fn state_hash(&self) -> u64 {
-        self.state.state_hash()
-    }
-
-    /// The sum of the host's sync-state partials: the sync-primitive,
-    /// thread, process, identity, file, content, PRX, config and
-    /// shared-memory state.
+    /// The host's partial of the runtime's sync-state sum.
     pub fn sync_partial(&self) -> u128 {
         self.state.sync_partial(false)
     }
@@ -35,6 +21,9 @@ impl Lv2Host {
 impl Lv2State {
     /// [`Lv2Host::sync_partial`]; `from_scratch` rebuilds each table's
     /// partial from every entry.
+    ///
+    /// The exhaustive destructure has no rest pattern: a new field of
+    /// `Lv2State` without a term here is a compile error.
     fn sync_partial(&self, from_scratch: bool) -> u128 {
         macro_rules! partial {
             ($table:expr) => {
@@ -54,99 +43,81 @@ impl Lv2State {
                 }
             };
         }
-        let firmware_identity = self
-            .firmware_identity
-            .as_ref()
-            .map_or(0, |fw| lanes::value_term(source::FIRMWARE_IDENTITY, 0, fw));
-        [
-            partial!(self.lwmutexes),
-            partial!(self.mutexes),
-            partial!(self.semaphores),
-            partial!(self.conds),
-            partial!(self.event_queues),
-            partial!(self.event_ports),
-            partial!(self.event_flags),
-            partial!(self.groups),
-            partial!(self.ppu_threads),
-            partial!(self.processes),
-            self.stack_allocator.sync_term(),
-            self.process_counts.sync_term(),
-            map_partial!(self.lwmutex_holds),
-            firmware_identity,
-            partial!(self.content),
-            partial!(self.fs_store),
-            partial!(self.prx_registry),
-            partial!(self.config),
-            partial!(self.mmapper_handles),
-            map_partial!(self.mmapper_ipc),
-            map_partial!(self.memory_containers),
-        ]
-        .into_iter()
-        .fold(0u128, u128::wrapping_add)
-    }
-
-    /// FNV-1a of the fields that keep no partial, via an exhaustive
-    /// destructure with no rest pattern: adding a field to `Lv2State`
-    /// without a fold decision here is a compile error.
-    ///
-    /// # Gating
-    ///
-    /// - The state that [`Self::sync_partial`] sums stays out of this
-    ///   fold.
-    /// - `next_kernel_id`, `mem_alloc_ptr` and `mmapper_addr_cursor`
-    ///   always contribute. A primitive whose id comes from
-    ///   `next_kernel_id` moves this hash even after its destroy.
-    ///
-    /// # Cost
-    ///
-    /// Linear in the entries of the folded tables; runs once per
-    /// commit boundary.
-    pub(in crate::host) fn state_hash(&self) -> u64 {
         let Self {
-            content: _,
-            groups: _,
-            ppu_threads: _,
-            stack_allocator: _,
+            content,
+            groups,
+            ppu_threads,
+            stack_allocator,
             next_kernel_id,
             mem_alloc_ptr,
             mmapper_addr_cursor,
             rsx_mem_alloc_ptr,
             rsx_mem_handle_counter,
             rsx_context,
-            mmapper_handles: _,
-            mmapper_ipc: _,
-            config: _,
+            mmapper_handles,
+            mmapper_ipc,
+            config,
             uart,
             usbd,
-            memory_containers: _,
-            lwmutexes: _,
-            mutexes: _,
-            semaphores: _,
-            event_queues: _,
-            event_ports: _,
-            event_flags: _,
-            conds: _,
-            lwmutex_holds: _,
-            fs_store: _,
-            prx_registry: _,
-            firmware_identity: _,
-            processes: _,
-            process_counts: _,
+            memory_containers,
+            lwmutexes,
+            mutexes,
+            semaphores,
+            event_queues,
+            event_ports,
+            event_flags,
+            conds,
+            lwmutex_holds,
+            fs_store,
+            prx_registry,
+            firmware_identity,
+            processes,
+            process_counts,
         } = self;
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&next_kernel_id.to_le_bytes());
-        hasher.write(&mem_alloc_ptr.to_le_bytes());
-        hasher.write(&mmapper_addr_cursor.to_le_bytes());
-        hasher.write(&rsx_mem_alloc_ptr.to_le_bytes());
-        hasher.write(&rsx_mem_handle_counter.to_le_bytes());
-        hasher.write(&rsx_context.state_hash().to_le_bytes());
-        if !uart.is_pristine() {
-            hasher.write(&uart.state_hash().to_le_bytes());
-        }
-        if !usbd.is_pristine() {
-            hasher.write(&usbd.state_hash().to_le_bytes());
-        }
-        hasher.finish()
+        let cursors = [
+            next_kernel_id,
+            mem_alloc_ptr,
+            mmapper_addr_cursor,
+            rsx_mem_alloc_ptr,
+            rsx_mem_handle_counter,
+        ]
+        .into_iter()
+        .zip(0u64..)
+        .fold(0u128, |acc, (cursor, object)| {
+            acc.wrapping_add(lanes::value_term(source::KERNEL_CURSORS, object, cursor))
+        });
+        let firmware_identity = firmware_identity
+            .as_ref()
+            .map_or(0, |fw| lanes::value_term(source::FIRMWARE_IDENTITY, 0, fw));
+        [
+            partial!(lwmutexes),
+            partial!(mutexes),
+            partial!(semaphores),
+            partial!(conds),
+            partial!(event_queues),
+            partial!(event_ports),
+            partial!(event_flags),
+            partial!(groups),
+            partial!(ppu_threads),
+            partial!(processes),
+            stack_allocator.sync_term(),
+            process_counts.sync_term(),
+            map_partial!(lwmutex_holds),
+            firmware_identity,
+            partial!(content),
+            partial!(fs_store),
+            partial!(prx_registry),
+            partial!(config),
+            partial!(mmapper_handles),
+            map_partial!(mmapper_ipc),
+            map_partial!(memory_containers),
+            lanes::value_term(source::RSX_CONTEXT, 0, rsx_context),
+            uart.sync_term(),
+            usbd.sync_term(),
+            cursors,
+        ]
+        .into_iter()
+        .fold(0u128, u128::wrapping_add)
     }
 }
 
@@ -165,3 +136,7 @@ mod thread_process_lanes_tests;
 #[cfg(test)]
 #[path = "tests/file_content_lanes_tests.rs"]
 mod file_content_lanes_tests;
+
+#[cfg(test)]
+#[path = "tests/device_lanes_tests.rs"]
+mod device_lanes_tests;

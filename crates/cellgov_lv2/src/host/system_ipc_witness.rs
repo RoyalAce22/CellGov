@@ -32,7 +32,7 @@ pub(super) struct SystemIpcMapping {
 
 /// Per-event counters for the system-IPC namespace, split by channel.
 ///
-/// Instrument-only: no field is folded into `Lv2Host::state_hash` and
+/// Instrument-only: no field enters `Lv2Host::sync_partial` and
 /// no dispatch arm branches on one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SystemIpcWitness {

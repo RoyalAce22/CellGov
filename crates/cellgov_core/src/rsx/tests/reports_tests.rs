@@ -1,4 +1,4 @@
-//! Guest-facing RSX report and driver-info layout pins plus RsxContext allocation-state hashing.
+//! Guest-facing RSX report and driver-info layout pins plus RsxContext allocation state.
 
 use super::*;
 use core::mem::offset_of;
@@ -173,50 +173,11 @@ fn dma_control_base_plus_offset_equals_put_addr() {
 }
 
 #[test]
-fn rsx_context_pristine_state_hash_golden() {
-    let mut h = cellgov_mem::Fnv1aHasher::new();
-    h.write(&[STATE_HASH_FORMAT_VERSION]);
-    h.write(&[u8::from(false)]);
-    h.write(&[u8::from(false)]);
-    for _ in 0..8 {
-        h.write(&0u32.to_le_bytes());
-    }
-    assert_eq!(RsxContext::new().state_hash(), h.finish());
-}
-
-#[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "pristine sentinel")]
 fn set_memory_allocated_rejects_zero_mem_addr() {
     let mut ctx = RsxContext::new();
     ctx.set_memory_allocated(0xA001, 0);
-}
-
-#[test]
-fn rsx_context_state_hash_deterministic() {
-    let a = RsxContext::new();
-    let b = RsxContext::new();
-    assert_eq!(a.state_hash(), b.state_hash());
-}
-
-#[test]
-fn rsx_context_state_hash_distinguishes_every_field() {
-    fn hash_with(f: impl FnOnce(&mut RsxContext)) -> u64 {
-        let mut ctx = RsxContext::new();
-        f(&mut ctx);
-        ctx.state_hash()
-    }
-    let base = hash_with(|_| {});
-    assert_ne!(base, hash_with(|c| c.memory_allocated = true));
-    assert_ne!(base, hash_with(|c| c.allocated = true));
-    assert_ne!(base, hash_with(|c| c.context_id = 1));
-    assert_ne!(base, hash_with(|c| c.dma_control_addr = 1));
-    assert_ne!(base, hash_with(|c| c.driver_info_addr = 1));
-    assert_ne!(base, hash_with(|c| c.reports_addr = 1));
-    assert_ne!(base, hash_with(|c| c.event_queue_id = 1));
-    assert_ne!(base, hash_with(|c| c.event_port_id = 1));
-    assert_ne!(base, hash_with(|c| c.mem_handle = 1));
-    assert_ne!(base, hash_with(|c| c.mem_addr = 1));
 }
 
 #[test]
@@ -308,34 +269,4 @@ fn label_address_helper_matches_manual_arithmetic() {
 #[should_panic(expected = "out of range")]
 fn label_address_helper_rejects_index_256() {
     let _ = label_address(0x3020_0000, 256);
-}
-
-#[test]
-fn rsx_context_fully_populated_state_hash_golden() {
-    let mut ctx = RsxContext::new();
-    ctx.memory_allocated = true;
-    ctx.allocated = true;
-    ctx.context_id = 0x1111_1111;
-    ctx.dma_control_addr = 0x2222_2222;
-    ctx.driver_info_addr = 0x3333_3333;
-    ctx.reports_addr = 0x4444_4440;
-    ctx.event_queue_id = 0x5555_5555;
-    ctx.event_port_id = 0x6666_6666;
-    ctx.mem_handle = 0x7777_7777;
-    ctx.mem_addr = 0x8888_8880;
-
-    let mut h = cellgov_mem::Fnv1aHasher::new();
-    h.write(&[STATE_HASH_FORMAT_VERSION]);
-    h.write(&[u8::from(true)]); // memory_allocated
-    h.write(&[u8::from(true)]); // allocated
-    h.write(&0x1111_1111u32.to_le_bytes());
-    h.write(&0x2222_2222u32.to_le_bytes());
-    h.write(&0x3333_3333u32.to_le_bytes());
-    h.write(&0x4444_4440u32.to_le_bytes());
-    h.write(&0x5555_5555u32.to_le_bytes());
-    h.write(&0x6666_6666u32.to_le_bytes());
-    h.write(&0x7777_7777u32.to_le_bytes());
-    h.write(&0x8888_8880u32.to_le_bytes());
-
-    assert_eq!(ctx.state_hash(), h.finish());
 }

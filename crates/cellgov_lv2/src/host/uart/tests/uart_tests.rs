@@ -804,13 +804,13 @@ fn every_cid_table_row_answers_a_packet_of_its_declared_size() {
 }
 
 #[test]
-fn uart_state_folds_into_the_host_hash_only_once_initialized() {
+fn uart_initialize_moves_the_host_partial_the_same_way_twice() {
     let rt = runtime_with_packets(&[]);
     let mut host = root_host();
-    let before = host.state_hash();
+    let before = host.sync_partial();
     let mut twin = host.clone();
     init(&mut host, &rt);
-    assert_ne!(host.state_hash(), before);
+    assert_ne!(host.sync_partial(), before);
     init(&mut twin, &rt);
-    assert_eq!(host.state_hash(), twin.state_hash());
+    assert_eq!(host.sync_partial(), twin.sync_partial());
 }

@@ -35,8 +35,8 @@ const _: () =
     assert!(FIRST_KERNEL_ID as u64 > PS3_CHILD_STACKS_BASE + PS3_CHILD_STACKS_SIZE as u64);
 const _: () = assert!((FIRST_KERNEL_ID as u64) < PS3_SPU_RESERVED_BASE);
 
-/// Guest-visible LV2 state; every field enters the sync partial or the
-/// host state hash per [`Self::state_hash`]'s exhaustive destructure.
+/// Guest-visible LV2 state; every field enters the host's sync partial
+/// per the exhaustive destructure in `Lv2State::sync_partial`.
 #[derive(Debug, Clone)]
 pub(in crate::host) struct Lv2State {
     pub(in crate::host) content: ContentStore,

@@ -37,11 +37,11 @@ fn runtime_with_units(n: usize) -> Runtime {
 }
 
 fn bench_lv2_host(c: &mut Criterion) {
-    let mut group = c.benchmark_group("checkpoint/lv2_host_state_hash");
+    let mut group = c.benchmark_group("checkpoint/lv2_host_sync_partial");
     for n in OBJECT_COUNTS {
         let rt = runtime_with_lwmutexes(n);
         group.bench_with_input(BenchmarkId::from_parameter(n), &rt, |b, rt| {
-            b.iter(|| black_box(rt).lv2_host().state_hash())
+            b.iter(|| black_box(rt).lv2_host().sync_partial())
         });
     }
     group.finish();

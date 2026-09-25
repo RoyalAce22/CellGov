@@ -441,7 +441,7 @@ fn a_null_mutex_id_ptr_is_efault_before_any_state_change() {
     let rt = FakeRuntime::new(0x10000);
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
-    let pre = (host.state_hash(), host.sync_partial());
+    let pre = host.sync_partial();
     let r = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0,
@@ -453,7 +453,7 @@ fn a_null_mutex_id_ptr_is_efault_before_any_state_change() {
     assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
     assert_eq!(
         pre,
-        (host.state_hash(), host.sync_partial()),
+        host.sync_partial(),
         "an EFAULT create must not mint an id or a table entry",
     );
 }

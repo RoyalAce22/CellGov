@@ -1,4 +1,4 @@
-//! RSX call-stack LIFO discipline, typed overflow/underflow channels, and state-hash goldens.
+//! RSX call-stack LIFO discipline, typed overflow/underflow channels, and sync-term goldens.
 
 use super::*;
 
@@ -73,18 +73,18 @@ fn overflow_and_underflow_are_distinct_typed_channels() {
 }
 
 #[test]
-fn clear_resets_to_pristine_state_hash() {
+fn clear_resets_to_the_pristine_term() {
     let mut s = RsxCallStack::new();
     s.push(0x1234).unwrap();
     s.push(0x5678).unwrap();
     s.clear();
     let fresh = RsxCallStack::new();
     assert_eq!(s, fresh);
-    assert_eq!(s.state_hash(), fresh.state_hash());
+    assert_eq!(s.sync_term(), fresh.sync_term());
 }
 
 #[test]
-fn state_hash_ignores_stale_slots_past_depth() {
+fn sync_term_ignores_stale_slots_past_depth() {
     let mut a = RsxCallStack::new();
     a.push(0x111).unwrap();
     a.push(0x222).unwrap();
@@ -94,14 +94,14 @@ fn state_hash_ignores_stale_slots_past_depth() {
     b.push(0xDEAD).unwrap();
     b.pop().unwrap();
     assert_eq!(
-        a.state_hash(),
-        b.state_hash(),
-        "depth-2 hash must not depend on bytes beneath the visible top",
+        a.sync_term(),
+        b.sync_term(),
+        "the depth-2 term must not depend on bytes beneath the visible top",
     );
 }
 
 #[test]
-fn partial_eq_is_stricter_than_state_hash() {
+fn partial_eq_is_stricter_than_the_term() {
     let mut a = RsxCallStack::new();
     a.push(0x111).unwrap();
     a.push(0xDEAD).unwrap();
@@ -109,55 +109,41 @@ fn partial_eq_is_stricter_than_state_hash() {
     let mut b = RsxCallStack::new();
     b.push(0x111).unwrap();
     assert_eq!(
-        a.state_hash(),
-        b.state_hash(),
-        "hash-equality holds modulo stale slots",
+        a.sync_term(),
+        b.sync_term(),
+        "term equality holds modulo stale slots",
     );
     assert_ne!(a, b, "derived PartialEq surfaces the stale-byte difference");
 }
 
 #[test]
-fn state_hash_distinguishes_depths() {
+fn sync_term_distinguishes_depths() {
     let mut a = RsxCallStack::new();
     a.push(0x100).unwrap();
     let mut b = RsxCallStack::new();
     b.push(0x100).unwrap();
     b.push(0x200).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_term(), b.sync_term());
 }
 
 #[test]
-fn state_hash_distinguishes_entry_values() {
+fn sync_term_distinguishes_entry_values() {
     let mut a = RsxCallStack::new();
     a.push(0x100).unwrap();
     let mut b = RsxCallStack::new();
     b.push(0x200).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_term(), b.sync_term());
 }
 
+/// Computed outside the crate from the SplitMix64 key stream of the
+/// sync-state lanes.
 #[test]
-fn empty_stack_state_hash_golden() {
-    // Doubles as a fixed-seed canary for `cellgov_mem::Fnv1aHasher`:
-    // stable only if `Fnv1aHasher::new()` uses the FNV offset basis
-    // with no host or run seeding.
-    const EXPECTED: u64 = 0x082f_2207_b4e8_8cc4;
-    let actual = RsxCallStack::new().state_hash();
+fn call_stack_term_wire_format_golden() {
     assert_eq!(
-        actual, EXPECTED,
-        "empty-stack hash drift: got 0x{actual:016x}, expected 0x{EXPECTED:016x}; \
-         if CALL_STACK_HASH_FORMAT_VERSION was bumped this golden must move too",
+        RsxCallStack::new().sync_term(),
+        0xd772_3413_58b5_c5e0_85ef_bbc5_0f63_7587
     );
-}
-
-#[test]
-fn single_entry_state_hash_golden() {
-    const EXPECTED: u64 = 0xff54_00f1_b413_16bc;
     let mut s = RsxCallStack::new();
     s.push(0x100).unwrap();
-    let actual = s.state_hash();
-    assert_eq!(
-        actual, EXPECTED,
-        "depth-1 hash drift: got 0x{actual:016x}, expected 0x{EXPECTED:016x}; \
-         field-order or entry-encoding drift in state_hash",
-    );
+    assert_eq!(s.sync_term(), 0x31d1_605f_0a17_d975_2d03_5729_7ca3_b128);
 }

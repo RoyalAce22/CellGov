@@ -190,12 +190,12 @@ second allocation while a context is live returns
 `CELL_EINVAL`.
 
 **State-hash contribution.** The `RsxContext` committed state
-folds its scalar fields (allocation addresses, counters,
-display-buffer table, flip mode, handler OPDs) into
-`sync_state_hash` at every commit boundary. Pristine state (no
-`SysRsxContextAllocate`) and populated post-allocate state
-have distinct golden hashes, so a cross-runner regression
-surfaces at once as a hash divergence.
+adds its scalar fields (allocation addresses, counters,
+display-buffer table, flip mode, handler OPDs) to
+`sync_state_hash` as lanes at every commit boundary. Pristine
+state (no `SysRsxContextAllocate`) and populated post-allocate
+state have distinct lanes, so a cross-runner regression surfaces
+at once as a hash divergence.
 
 **Scope boundary.** sys_rsx does not do:
 

@@ -7,9 +7,10 @@ classification, syscall dispatch.
 The host's fields live in three buckets. `Lv2State` is the hashed
 guest-visible state: every primitive table, allocator cursor, and
 dispatch-steering map folds into the runtime's `sync_state_hash` at
-each commit boundary, and `state_hash` opens with an exhaustive
-destructure (no rest pattern), so adding a field without a fold
-decision is a compile error. `Lv2Derived` is guest-visible but
+each commit boundary as Multilinear-128 lanes, and
+`Lv2State::sync_partial` opens with an exhaustive destructure (no
+rest pattern), so adding a field without a lane decision is a
+compile error. `Lv2Derived` is guest-visible but
 unhashed; each field's doc names where a divergence in it is caught
 instead (typically the hashed guest memory its effects settle
 into). `Lv2Observability` holds witness counters and diagnostic

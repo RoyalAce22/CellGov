@@ -195,10 +195,13 @@ fn the_container_set_moves_the_host_partial() {
     let cid = create_container(&mut host, &rt);
     assert_ne!(host.sync_partial(), before);
     assert_eq!(host.sync_partial(), host.sync_partial_from_scratch());
+    let with = host.sync_partial();
     host.state.memory_containers.remove(cid);
-    assert_eq!(
+    assert_ne!(
         host.sync_partial(),
-        before,
-        "the container is the only partial the create moved"
+        with,
+        "removing the container moves it back"
     );
+    host.state.memory_containers.insert(cid, ());
+    assert_eq!(host.sync_partial(), with);
 }

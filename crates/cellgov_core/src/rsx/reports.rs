@@ -8,20 +8,14 @@
 //! - the reports block, holding the semaphore, notify and report
 //!   arrays.
 //!
-//! The Rust structs are layout descriptors; the bytes live in guest
-//! memory and are covered by the memory-state hash. Only
-//! [`RsxContext`]'s base addresses and allocation flags fold into the
-//! sync-state hash.
+//! The Rust structs are layout descriptors. The bytes live in guest
+//! memory, and the memory-state hash covers them.
 //!
 //! Field names follow libgcm's published structures where one covers
 //! the same bytes: `gcmControlRegister`, `gcmReportData` and
 //! `gcmNotifyData`.
 
 use core::mem::size_of;
-
-/// Hash-input shape version. Bump when the layout of
-/// [`RsxContext::state_hash`] changes.
-pub const STATE_HASH_FORMAT_VERSION: u8 = 2;
 
 pub use cellgov_lv2::host::rsx::RSX_CONTEXT_ID;
 pub use cellgov_ps3_abi::lv2::rsx::{control_register, driver_info_init, region};
@@ -210,8 +204,6 @@ pub fn label_address(reports_base: u32, index: u32) -> u32 {
 /// Committed state for the single sys_rsx context.
 ///
 /// Only one context is supported; [`RSX_CONTEXT_ID`] is fixed.
-/// Every field folds into [`Self::state_hash`] via destructure, so
-/// adding a field is a compile error until the hash is updated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RsxContext {
     /// `sys_rsx_memory_allocate` has fired.
@@ -333,36 +325,6 @@ impl RsxContext {
         self.reports_addr = reports_addr;
         self.event_queue_id = event_queue_id;
         self.event_port_id = event_port_id;
-    }
-
-    /// FNV-1a hash over every field prefixed with
-    /// [`STATE_HASH_FORMAT_VERSION`]. Folds into the sync-state hash.
-    pub fn state_hash(&self) -> u64 {
-        let Self {
-            memory_allocated,
-            allocated,
-            context_id,
-            dma_control_addr,
-            driver_info_addr,
-            reports_addr,
-            event_queue_id,
-            event_port_id,
-            mem_handle,
-            mem_addr,
-        } = *self;
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&[STATE_HASH_FORMAT_VERSION]);
-        hasher.write(&[u8::from(memory_allocated)]);
-        hasher.write(&[u8::from(allocated)]);
-        hasher.write(&context_id.to_le_bytes());
-        hasher.write(&dma_control_addr.to_le_bytes());
-        hasher.write(&driver_info_addr.to_le_bytes());
-        hasher.write(&reports_addr.to_le_bytes());
-        hasher.write(&event_queue_id.to_le_bytes());
-        hasher.write(&event_port_id.to_le_bytes());
-        hasher.write(&mem_handle.to_le_bytes());
-        hasher.write(&mem_addr.to_le_bytes());
-        hasher.finish()
     }
 }
 

@@ -317,9 +317,8 @@ fn sys_rsx_context_attribute_set_display_buffer_records_slot() {
 #[test]
 fn sys_rsx_context_attribute_set_display_buffer_sparse_registration_leaves_count_dense() {
     // Spec: `display_buffers_count = max(id + 1, count)`. The
-    // state hash captures the full slot array including
-    // uninitialized entries; a future compaction would break
-    // determinism.
+    // sync-state hash covers every slot, including the
+    // uninitialized entries.
     let mut host = Lv2Host::new();
     let source = UnitId::new(0);
     allocate_context(&mut host, source);

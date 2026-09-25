@@ -12,12 +12,10 @@
 //!
 //! ## Determinism contract
 //!
-//! [`RsxCallStack::state_hash`] is the equality witness for replay.
+//! [`RsxCallStack::sync_term`] is the equality witness for replay.
 //! Derived [`PartialEq`] also compares stale bytes past `depth` and
-//! is stricter than the hash. Snapshot/restore preserves stale bytes
+//! is stricter than the term. Snapshot/restore preserves stale bytes
 //! via `Copy`.
-
-use cellgov_mem::Fnv1aHasher;
 
 /// Maximum simultaneous Call/Return nesting before
 /// [`RsxCallStack::push`] returns [`CallStackOverflow`]. Heuristic
@@ -30,10 +28,6 @@ const _: () = assert!(
     CALL_STACK_DEPTH <= u8::MAX as usize,
     "depth: u8 cannot hold CALL_STACK_DEPTH; widen `depth` or lower the cap",
 );
-
-/// Hash-input shape version; bump when [`RsxCallStack::state_hash`]
-/// changes field order, count, endianness, or hasher family.
-pub const CALL_STACK_HASH_FORMAT_VERSION: u8 = 1;
 
 /// Synthetic raw word emitted as `Malformed { raw }` when
 /// [`RsxCallStack::push`] reports overflow.
@@ -106,27 +100,30 @@ impl RsxCallStack {
         Ok(self.entries[self.depth as usize])
     }
 
-    /// Reset to pristine; the full `entries` zero matters for
-    /// derived [`PartialEq`], not for `state_hash`.
+    /// Reset to pristine. Only derived [`PartialEq`] reads the zeroed
+    /// slots above the depth.
     #[inline]
     pub fn clear(&mut self) {
         self.depth = 0;
         self.entries = [0u32; CALL_STACK_DEPTH];
     }
 
-    /// FNV-1a digest of `(format_version, depth, entries[0..depth])`.
-    /// Excludes the trailing slots so a stack at depth 2 hashes the
-    /// same regardless of stale bytes in slots 2..[`CALL_STACK_DEPTH`].
-    /// The version byte is written FIRST so a format bump
-    /// invalidates every otherwise-identical stack uniformly.
-    pub fn state_hash(&self) -> u64 {
-        let mut h = Fnv1aHasher::new();
-        h.write(&[CALL_STACK_HASH_FORMAT_VERSION]);
-        h.write(&[self.depth]);
-        for slot in 0..self.depth as usize {
-            h.write(&self.entries[slot].to_le_bytes());
+    /// The stack's term of the sync-state sum, computed on read.
+    pub fn sync_term(&self) -> u128 {
+        cellgov_mem::lanes::value_term(cellgov_mem::lanes::source::RSX_CALL_STACK, 0, self)
+    }
+}
+
+/// Field 1 holds the depth, and slot `i` of field 2 holds entry `i`.
+///
+/// Only the live entries add a lane, so stale bytes above the depth
+/// leave the term unchanged.
+impl cellgov_mem::lanes::LaneValue for RsxCallStack {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.depth));
+        for (slot, entry) in self.entries[..self.depth as usize].iter().enumerate() {
+            lanes.lane(2, slot as u64, u64::from(*entry));
         }
-        h.finish()
     }
 }
 

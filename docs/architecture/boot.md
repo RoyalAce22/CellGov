@@ -115,8 +115,8 @@ post-decrypt SHA-256 must match the manifest entry; a file
 missing from the manifest, a digest mismatch, or a firmware dir
 without a manifest is a fatal boot error, so unusable installed firmware
 never degrades silently into a firmware-less run. The verified
-identity (PUP hash + image version) binds into
-`Lv2Host::sync_state_hash`: two runs over the same firmware
+identity (PUP hash + image version) enters `Lv2Host::sync_partial`
+and so `sync_state_hash`: two runs over the same firmware
 install produce byte-identical state hashes, and a different
 install moves them.
 

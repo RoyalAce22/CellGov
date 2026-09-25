@@ -126,8 +126,8 @@ impl Lv2Host {
     ///
     /// Sparse registration is guest-legal: writing id=3 then id=1
     /// leaves `count == 4` with slots 0/2 holding their init-fill
-    /// values, and the `RsxContext` state hash captures the full
-    /// slot array including uninitialized entries.
+    /// values. The sync-state hash covers every slot, including the
+    /// uninitialized entries.
     fn sys_rsx_attribute_set_display_buffer(&mut self, a3: u64, a4: u64, a5: u64) -> Lv2Dispatch {
         let id = (a3 & 0xFF) as usize;
         if id >= display_buffer::COUNT_MAX {

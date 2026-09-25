@@ -12,7 +12,7 @@ use crate::fs_store::FsMountTable;
 
 use super::mmapper::{PendingRegionInstall, SystemStateSeed};
 
-/// Guest-visible state excluded from the host state hash, each field
+/// Guest-visible state excluded from the host's sync partial, each field
 /// with the reason a divergence in it is caught elsewhere.
 #[derive(Debug, Clone)]
 pub(in crate::host) struct Lv2Derived {
@@ -83,8 +83,8 @@ pub(in crate::host) struct Lv2Derived {
     /// a caller's import NIDs against it under the library each import
     /// entry names; empty for a boot with no firmware set, which makes
     /// every import unresolved rather than wrong. Immutable
-    /// boot-derived data: the firmware identity it derives from folds
-    /// into the hash, and the GOT writes it steers settle via
+    /// boot-derived data: the firmware identity it derives from enters
+    /// the sync partial, and the GOT writes it steers settle via
     /// `GuestMemory`.
     pub(in crate::host) firmware_exports: BTreeMap<String, BTreeMap<u32, u32>>,
 }

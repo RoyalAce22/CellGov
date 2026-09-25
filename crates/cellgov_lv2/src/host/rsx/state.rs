@@ -103,9 +103,18 @@ impl SysRsxContext {
             fifo_put: 0,
         }
     }
+}
 
-    /// FNV-1a hash over every field.
-    pub fn state_hash(&self) -> u64 {
+/// Lane layout of the RSX context:
+///
+/// - Fields 1 to 20 are the scalar fields, one lane each.
+/// - Fields 21 to 24 are the offset, pitch, width and height of display
+///   buffer `i`, at slot `i`.
+///
+/// The exhaustive destructure makes a new field without a lane a
+/// compile error.
+impl cellgov_mem::lanes::LaneValue for SysRsxContext {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
         let Self {
             allocated,
             context_id,
@@ -129,34 +138,38 @@ impl SysRsxContext {
             fifo_get,
             fifo_put,
         } = *self;
-        let mut h = cellgov_mem::Fnv1aHasher::new();
-        h.write(&[u8::from(allocated)]);
-        h.write(&context_id.to_le_bytes());
-        h.write(&dma_control_addr.to_le_bytes());
-        h.write(&driver_info_addr.to_le_bytes());
-        h.write(&reports_addr.to_le_bytes());
-        h.write(&event_queue_id.to_le_bytes());
-        h.write(&event_port_id.to_le_bytes());
-        h.write(&mem_ctx.to_le_bytes());
-        h.write(&system_mode.to_le_bytes());
-        h.write(&pending_mem_addr.to_le_bytes());
-        h.write(&flip_handler_addr.to_le_bytes());
-        h.write(&vblank_handler_addr.to_le_bytes());
-        h.write(&user_handler_addr.to_le_bytes());
-        h.write(&display_buffers_count.to_le_bytes());
-        h.write(&flip_mode.to_le_bytes());
-        h.write(&iomap_io.to_le_bytes());
-        h.write(&iomap_ea.to_le_bytes());
-        h.write(&iomap_size.to_le_bytes());
-        h.write(&fifo_get.to_le_bytes());
-        h.write(&fifo_put.to_le_bytes());
-        for buf in display_buffers.iter() {
-            h.write(&buf.offset.to_le_bytes());
-            h.write(&buf.pitch.to_le_bytes());
-            h.write(&buf.width.to_le_bytes());
-            h.write(&buf.height.to_le_bytes());
+        let scalars = [
+            u64::from(allocated),
+            u64::from(context_id),
+            u64::from(dma_control_addr),
+            u64::from(driver_info_addr),
+            u64::from(reports_addr),
+            u64::from(event_queue_id),
+            u64::from(event_port_id),
+            mem_ctx,
+            system_mode,
+            u64::from(pending_mem_addr),
+            u64::from(flip_handler_addr),
+            u64::from(vblank_handler_addr),
+            u64::from(user_handler_addr),
+            u64::from(display_buffers_count),
+            u64::from(flip_mode),
+            u64::from(iomap_io),
+            u64::from(iomap_ea),
+            u64::from(iomap_size),
+            u64::from(fifo_get),
+            u64::from(fifo_put),
+        ];
+        for (field, value) in (1..).zip(scalars) {
+            lanes.lane(field, 0, value);
         }
-        h.finish()
+        for (slot, buf) in display_buffers.iter().enumerate() {
+            let slot = slot as u64;
+            lanes.lane(21, slot, u64::from(buf.offset));
+            lanes.lane(22, slot, u64::from(buf.pitch));
+            lanes.lane(23, slot, u64::from(buf.width));
+            lanes.lane(24, slot, u64::from(buf.height));
+        }
     }
 }
 
