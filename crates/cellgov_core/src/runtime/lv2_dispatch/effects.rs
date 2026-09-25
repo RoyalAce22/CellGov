@@ -147,7 +147,7 @@ impl Runtime {
                 Effect::MailboxSend {
                     mailbox, message, ..
                 } => {
-                    if let Some(mbox) = self.mailbox_registry.get_mut(*mailbox) {
+                    if let Some(mut mbox) = self.mailbox_registry.get_mut(*mailbox) {
                         // [CBE-Handbook p:541 s:19.6.6.2] outbound
                         // write-blocking path is not wired here yet.
                         mbox.force_send(message.raw());

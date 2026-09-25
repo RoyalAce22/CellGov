@@ -20,6 +20,7 @@ pub mod addr;
 pub mod be;
 pub mod guest;
 pub mod hash;
+pub mod lanes;
 pub mod range;
 pub mod staging;
 

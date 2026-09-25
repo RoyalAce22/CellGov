@@ -44,9 +44,10 @@ impl crate::registry::RegistryId for SignalId {
     }
 }
 
-impl crate::registry::RegistryValueHash for SignalRegister {
-    fn hash_into(&self, hasher: &mut cellgov_mem::Fnv1aHasher) {
-        hasher.write(&self.value.to_le_bytes());
+/// Field 1 is the register value.
+impl cellgov_mem::lanes::LaneValue for SignalRegister {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.value));
     }
 }
 

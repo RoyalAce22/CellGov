@@ -221,19 +221,19 @@ fn clear_covering_write_ending_at_next_line_start_does_not_touch_it() {
 fn state_hash_empty_is_stable() {
     let a = ReservationTable::new();
     let b = ReservationTable::new();
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
 fn state_hash_is_idempotent() {
     let mut t = ReservationTable::new();
     t.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
-    let h1 = t.state_hash();
-    let h2 = t.state_hash();
+    let h1 = t.sync_partial();
+    let h2 = t.sync_partial();
     assert_eq!(h1, h2);
     t.insert_or_replace(unit(2), ReservedLine::containing(0x2000));
-    let h3 = t.state_hash();
-    let h4 = t.state_hash();
+    let h3 = t.sync_partial();
+    let h4 = t.sync_partial();
     assert_eq!(h3, h4);
     assert_ne!(h1, h3);
 }
@@ -243,17 +243,17 @@ fn state_hash_differs_on_content() {
     let mut a = ReservationTable::new();
     let b = ReservationTable::new();
     a.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
 fn state_hash_round_trips_after_clear() {
     let mut t = ReservationTable::new();
-    let h0 = t.state_hash();
+    let h0 = t.sync_partial();
     t.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
-    assert_ne!(t.state_hash(), h0);
+    assert_ne!(t.sync_partial(), h0);
     t.remove_if_present(unit(1));
-    assert_eq!(t.state_hash(), h0);
+    assert_eq!(t.sync_partial(), h0);
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn state_hash_distinguishes_line_addresses() {
     a.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
     let mut b = ReservationTable::new();
     b.insert_or_replace(unit(1), ReservedLine::containing(0x2000));
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn state_hash_distinguishes_unit_ids() {
     a.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
     let mut b = ReservationTable::new();
     b.insert_or_replace(unit(2), ReservedLine::containing(0x1000));
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
@@ -286,12 +286,12 @@ fn state_hash_insensitive_to_insertion_order() {
     b.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
     b.insert_or_replace(unit(2), ReservedLine::containing(0x2000));
 
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
 fn pseudo_random_workload_is_deterministic() {
-    fn run() -> (ReservationTable, u64) {
+    fn run() -> (ReservationTable, u128) {
         let mut t = ReservationTable::new();
         let mut rng: u64 = 0xDEADBEEF_CAFEBABE;
         for _ in 0..256 {
@@ -316,7 +316,7 @@ fn pseudo_random_workload_is_deterministic() {
                 }
             }
         }
-        let h = t.state_hash();
+        let h = t.sync_partial();
         (t, h)
     }
 

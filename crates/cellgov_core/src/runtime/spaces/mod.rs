@@ -42,3 +42,7 @@ pub use table::{AddressSpaceId, SpaceError};
 #[cfg(test)]
 #[path = "tests/spaces_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/space_reservation_lanes_tests.rs"]
+mod space_reservation_lanes_tests;

@@ -25,7 +25,11 @@ pub mod signal_registry;
 pub use barrier::BarrierId;
 pub use mailbox::{Mailbox, MailboxId};
 pub use mailbox_registry::MailboxRegistry;
-pub use registry::{Registry, RegistryId, RegistryValueHash};
+pub use registry::{Registry, RegistryId};
 pub use reservation::{ReservationTable, ReservedLine, RESERVATION_LINE_BYTES};
 pub use signal::{SignalId, SignalRegister};
 pub use signal_registry::SignalRegistry;
+
+#[cfg(test)]
+#[path = "tests/sync_lanes_tests.rs"]
+mod sync_lanes_tests;

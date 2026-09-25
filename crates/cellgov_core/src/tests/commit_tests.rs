@@ -352,7 +352,7 @@ fn multiple_mailbox_sends_apply_in_emission_order() {
     );
     let outcome = bed.process(&r, &e).unwrap();
     assert_eq!(outcome.mailbox_sends_committed, 3);
-    let m = bed.mailboxes.get_mut(mb).unwrap();
+    let mut m = bed.mailboxes.get_mut(mb).unwrap();
     assert_eq!(m.try_receive(), Some(1));
     assert_eq!(m.try_receive(), Some(2));
     assert_eq!(m.try_receive(), Some(3));

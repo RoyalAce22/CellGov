@@ -45,11 +45,13 @@ impl crate::registry::RegistryId for MailboxId {
     }
 }
 
-impl crate::registry::RegistryValueHash for Mailbox {
-    fn hash_into(&self, hasher: &mut cellgov_mem::Fnv1aHasher) {
-        hasher.write(&(self.len() as u64).to_le_bytes());
-        for &word in self.iter() {
-            hasher.write(&word.to_le_bytes());
+/// Field 1 is the queue length; field 2 slot `i` is the `i`-th queued
+/// message from the front.
+impl cellgov_mem::lanes::LaneValue for Mailbox {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
+        lanes.lane(1, 0, self.len() as u64);
+        for (slot, &word) in self.iter().enumerate() {
+            lanes.lane(2, slot as u64, u64::from(word));
         }
     }
 }

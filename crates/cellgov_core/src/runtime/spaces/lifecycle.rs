@@ -40,7 +40,7 @@ impl Runtime {
         self.spaces.extra.insert(space, memory);
         self.spaces
             .extra_reservations
-            .insert(space, ReservationTable::new());
+            .insert(space, ReservationTable::in_space(space.raw()));
         Ok(())
     }
 

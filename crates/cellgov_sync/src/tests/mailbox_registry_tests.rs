@@ -24,7 +24,7 @@ fn get_mut_lets_caller_send_into_a_mailbox() {
 fn register_then_try_send_until_full_returns_false() {
     let mut r = MailboxRegistry::new();
     let id = r.register(2);
-    let m = r.get_mut(id).unwrap();
+    let mut m = r.get_mut(id).unwrap();
     assert!(m.try_send(1));
     assert!(m.try_send(2));
     assert!(!m.try_send(3));
@@ -35,9 +35,9 @@ fn register_then_try_send_until_full_returns_false() {
 fn state_hash_changes_when_a_mailbox_receives_a_send() {
     let mut r = MailboxRegistry::new();
     let id = r.register(4);
-    let h0 = r.state_hash();
+    let h0 = r.sync_partial();
     r.get_mut(id).unwrap().force_send(7);
-    let h1 = r.state_hash();
+    let h1 = r.sync_partial();
     assert_ne!(h0, h1);
 }
 
@@ -51,7 +51,7 @@ fn state_hash_distinguishes_message_contents() {
     let id_b = b.register(4);
     b.get_mut(id_b).unwrap().force_send(2);
 
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
@@ -66,18 +66,18 @@ fn state_hash_distinguishes_message_order() {
     b.get_mut(id_b).unwrap().force_send(2);
     b.get_mut(id_b).unwrap().force_send(1);
 
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
 fn state_hash_round_trips_after_drain() {
     let mut r = MailboxRegistry::new();
     let id = r.register(4);
-    let h0 = r.state_hash();
+    let h0 = r.sync_partial();
     r.get_mut(id).unwrap().force_send(1);
     r.get_mut(id).unwrap().force_send(2);
-    assert_ne!(r.state_hash(), h0);
+    assert_ne!(r.sync_partial(), h0);
     assert_eq!(r.get_mut(id).unwrap().try_receive(), Some(1));
     assert_eq!(r.get_mut(id).unwrap().try_receive(), Some(2));
-    assert_eq!(r.state_hash(), h0);
+    assert_eq!(r.sync_partial(), h0);
 }

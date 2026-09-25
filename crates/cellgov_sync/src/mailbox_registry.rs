@@ -6,11 +6,20 @@
 
 use crate::mailbox::{Mailbox, MailboxId};
 use crate::registry::Registry;
+use cellgov_mem::lanes::LaneEntryMut;
 
 /// Runtime mailbox registry.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MailboxRegistry {
     inner: Registry<MailboxId, Mailbox>,
+}
+
+impl Default for MailboxRegistry {
+    fn default() -> Self {
+        Self {
+            inner: Registry::new(cellgov_mem::lanes::source::MAILBOX),
+        }
+    }
 }
 
 impl MailboxRegistry {
@@ -53,7 +62,7 @@ impl MailboxRegistry {
 
     /// Mutably borrow a mailbox by id.
     #[inline]
-    pub fn get_mut(&mut self, id: MailboxId) -> Option<&mut Mailbox> {
+    pub fn get_mut(&mut self, id: MailboxId) -> Option<LaneEntryMut<'_, u64, Mailbox>> {
         self.inner.get_mut(id)
     }
 
@@ -67,10 +76,16 @@ impl MailboxRegistry {
         self.inner.ids()
     }
 
-    /// FNV-1a hash over `(id, len, messages...)` in id order.
+    /// The registry's partial of the sync-state sum: per mailbox a
+    /// presence lane, the queue length and one lane per queued message.
     #[inline]
-    pub fn state_hash(&self) -> u64 {
-        self.inner.state_hash()
+    pub fn sync_partial(&self) -> u128 {
+        self.inner.sync_partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every mailbox.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.inner.sync_partial_from_scratch()
     }
 }
 

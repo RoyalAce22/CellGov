@@ -21,9 +21,9 @@ fn get_mut_lets_caller_or_in_bits() {
 fn state_hash_changes_when_a_register_value_changes() {
     let mut r = SignalRegistry::new();
     let id = r.register();
-    let h0 = r.state_hash();
+    let h0 = r.sync_partial();
     r.get_mut(id).unwrap().or_in(1);
-    let h1 = r.state_hash();
+    let h1 = r.sync_partial();
     assert_ne!(h0, h1);
 }
 
@@ -37,18 +37,18 @@ fn state_hash_distinguishes_register_values() {
     let id_b = b.register();
     b.get_mut(id_b).unwrap().or_in(2);
 
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
 fn state_hash_round_trips_after_clear() {
     let mut r = SignalRegistry::new();
     let id = r.register();
-    let h0 = r.state_hash();
+    let h0 = r.sync_partial();
     r.get_mut(id).unwrap().or_in(0xff);
-    assert_ne!(r.state_hash(), h0);
+    assert_ne!(r.sync_partial(), h0);
     r.get_mut(id).unwrap().clear();
-    assert_eq!(r.state_hash(), h0);
+    assert_eq!(r.sync_partial(), h0);
 }
 
 #[test]
@@ -63,5 +63,5 @@ fn or_in_is_commutative_at_registry_level() {
     b.get_mut(id_b).unwrap().or_in(0xf0);
     b.get_mut(id_b).unwrap().or_in(0x0f);
 
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }

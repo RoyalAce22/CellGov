@@ -17,9 +17,9 @@ impl RegistryId for TestId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TestValue(u32);
 
-impl RegistryValueHash for TestValue {
-    fn hash_into(&self, hasher: &mut cellgov_mem::Fnv1aHasher) {
-        hasher.write(&self.0.to_le_bytes());
+impl LaneValue for TestValue {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.0));
     }
 }
 
@@ -29,7 +29,7 @@ fn id(raw: u64) -> TestId {
 
 #[test]
 fn new_is_empty() {
-    let r: Registry<TestId, TestValue> = Registry::new();
+    let r: Registry<TestId, TestValue> = Registry::new(1);
     assert!(r.is_empty());
     assert_eq!(r.len(), 0);
     assert_eq!(r.ids().count(), 0);
@@ -37,7 +37,7 @@ fn new_is_empty() {
 
 #[test]
 fn register_assigns_sequential_ids() {
-    let mut r: Registry<TestId, TestValue> = Registry::new();
+    let mut r: Registry<TestId, TestValue> = Registry::new(1);
     let a = r.register(TestValue(0));
     let b = r.register(TestValue(0));
     let c = r.register(TestValue(0));
@@ -49,20 +49,20 @@ fn register_assigns_sequential_ids() {
 
 #[test]
 fn get_missing_is_none() {
-    let r: Registry<TestId, TestValue> = Registry::new();
+    let r: Registry<TestId, TestValue> = Registry::new(1);
     assert!(r.get(id(99)).is_none());
 }
 
 #[test]
 fn get_mut_missing_is_none() {
-    let mut r: Registry<TestId, TestValue> = Registry::new();
+    let mut r: Registry<TestId, TestValue> = Registry::new(1);
     assert!(r.get_mut(id(0)).is_none());
     assert!(r.get_mut(id(99)).is_none());
 }
 
 #[test]
 fn register_at_inserts_and_advances_counter() {
-    let mut r: Registry<TestId, TestValue> = Registry::new();
+    let mut r: Registry<TestId, TestValue> = Registry::new(1);
     assert!(r.register_at(id(5), TestValue(42)));
     assert_eq!(r.len(), 1);
     assert_eq!(r.get(id(5)), Some(&TestValue(42)));
@@ -72,7 +72,7 @@ fn register_at_inserts_and_advances_counter() {
 #[test]
 #[cfg_attr(debug_assertions, ignore = "debug_assert! fires before the bool path")]
 fn register_at_returns_false_on_double_registration_in_release() {
-    let mut r: Registry<TestId, TestValue> = Registry::new();
+    let mut r: Registry<TestId, TestValue> = Registry::new(1);
     assert!(r.register_at(id(3), TestValue(1)));
     let second = r.register_at(id(3), TestValue(99));
     assert!(!second);
@@ -83,7 +83,7 @@ fn register_at_returns_false_on_double_registration_in_release() {
 
 #[test]
 fn iter_is_in_id_order() {
-    let mut r: Registry<TestId, TestValue> = Registry::new();
+    let mut r: Registry<TestId, TestValue> = Registry::new(1);
     for v in 0..4u32 {
         r.register(TestValue(v));
     }
@@ -93,7 +93,7 @@ fn iter_is_in_id_order() {
 
 #[test]
 fn iter_skips_gaps_left_by_register_at() {
-    let mut r: Registry<TestId, TestValue> = Registry::new();
+    let mut r: Registry<TestId, TestValue> = Registry::new(1);
     let _ = r.register_at(id(2), TestValue(20));
     let _ = r.register_at(id(5), TestValue(50));
     let collected: Vec<u64> = r.iter().map(|(i, _)| i.raw()).collect();
@@ -102,35 +102,35 @@ fn iter_skips_gaps_left_by_register_at() {
 
 #[test]
 fn state_hash_is_idempotent() {
-    let mut r: Registry<TestId, TestValue> = Registry::new();
+    let mut r: Registry<TestId, TestValue> = Registry::new(1);
     let i = r.register(TestValue(7));
-    let h1 = r.state_hash();
-    let h2 = r.state_hash();
+    let h1 = r.sync_partial();
+    let h2 = r.sync_partial();
     assert_eq!(h1, h2);
-    if let Some(v) = r.get_mut(i) {
+    if let Some(mut v) = r.get_mut(i) {
         *v = TestValue(8);
     }
-    let h3 = r.state_hash();
-    let h4 = r.state_hash();
+    let h3 = r.sync_partial();
+    let h4 = r.sync_partial();
     assert_eq!(h3, h4);
     assert_ne!(h1, h3);
 }
 
 #[test]
 fn state_hash_distinguishes_id_position() {
-    let mut a: Registry<TestId, TestValue> = Registry::new();
+    let mut a: Registry<TestId, TestValue> = Registry::new(1);
     let _ = a.register(TestValue(99));
 
-    let mut b: Registry<TestId, TestValue> = Registry::new();
+    let mut b: Registry<TestId, TestValue> = Registry::new(1);
     let _ = b.register(TestValue(0));
     let _ = b.register(TestValue(99));
 
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
 fn state_hash_empty_is_stable() {
-    let a: Registry<TestId, TestValue> = Registry::new();
-    let b: Registry<TestId, TestValue> = Registry::new();
-    assert_eq!(a.state_hash(), b.state_hash());
+    let a: Registry<TestId, TestValue> = Registry::new(1);
+    let b: Registry<TestId, TestValue> = Registry::new(1);
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }

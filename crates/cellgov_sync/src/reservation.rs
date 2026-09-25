@@ -14,7 +14,7 @@
 //! byte-granular addresses; the table canonicalizes on insert.
 
 use cellgov_event::UnitId;
-use std::collections::BTreeMap;
+use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 
 // [CBE-Handbook p:577 s:20.2] CBE reservation granule is 128 bytes = PPE cache line.
 pub use cellgov_ps3_abi::hw::ppu::RESERVATION_LINE_BYTES;
@@ -82,6 +82,13 @@ impl ReservedLine {
     }
 }
 
+/// Field 1 is the line address.
+impl LaneValue for ReservedLine {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.addr);
+    }
+}
+
 impl core::fmt::Display for ReservedLine {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:#x}", self.addr)
@@ -92,19 +99,35 @@ impl core::fmt::Display for ReservedLine {
 /// A second `insert_or_replace` for the same unit drops the prior
 /// entry (a second reserve invalidates the first).
 // [PPC-Book2 p:10 s:1.7.3.1] "another lwarx/ldarx clears the first reservation".
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ReservationTable {
-    /// `BTreeMap` keeps `state_hash` invariant under permutation by
-    /// walking unit ids in order. `UnitId: Ord` is what makes that
-    /// determinism hold; it is not an incidental derive.
-    entries: BTreeMap<UnitId, ReservedLine>,
+    /// Walks unit ids in order, so `iter` is invariant under insertion
+    /// order. `UnitId: Ord` is what makes that determinism hold; it is
+    /// not an incidental derive. The unit is the lane object and the
+    /// address space is the slot base.
+    entries: LaneMap<UnitId, ReservedLine>,
+}
+
+impl Default for ReservationTable {
+    fn default() -> Self {
+        Self::in_space(0)
+    }
 }
 
 impl ReservationTable {
-    /// Construct an empty table.
+    /// Construct an empty table for the boot address space.
     #[inline]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Construct an empty table for address space `space`.
+    #[inline]
+    pub fn in_space(space: u32) -> Self {
+        Self {
+            entries: LaneMap::new(source::RESERVATION, UnitId::raw)
+                .with_slot_base(u64::from(space)),
+        }
     }
 
     /// Number of units holding a reservation.
@@ -128,25 +151,25 @@ impl ReservationTable {
     /// Drop `unit`'s entry. Returns `Some` iff an entry was present.
     #[inline]
     pub fn remove_if_present(&mut self, unit: UnitId) -> Option<ReservedLine> {
-        self.entries.remove(&unit)
+        self.entries.remove(unit)
     }
 
     /// Read `unit`'s entry without mutating the table.
     #[inline]
     pub fn get(&self, unit: UnitId) -> Option<ReservedLine> {
-        self.entries.get(&unit).copied()
+        self.entries.get(unit).copied()
     }
 
     /// Committed-state half of the conditional-store verdict; the
     /// local-reservation-register check lives on the unit.
     #[inline]
     pub fn is_held_by(&self, unit: UnitId) -> bool {
-        self.entries.contains_key(&unit)
+        self.entries.contains_key(unit)
     }
 
     /// Iterate held reservations in unit-id order.
     pub fn iter(&self) -> impl Iterator<Item = (UnitId, ReservedLine)> + '_ {
-        self.entries.iter().map(|(u, l)| (*u, *l))
+        self.entries.iter().map(|(u, l)| (u, *l))
     }
 
     /// Drop every entry whose line overlaps `[addr, addr + len)`,
@@ -165,24 +188,21 @@ impl ReservationTable {
             return 0;
         }
         let before = self.entries.len();
-        self.entries.retain(|unit, line| {
-            if Some(*unit) == except {
-                return true;
-            }
-            !line.overlaps_range(addr, len)
-        });
+        self.entries
+            .retain(|unit, line| Some(unit) == except || !line.overlaps_range(addr, len));
         before - self.entries.len()
     }
 
-    /// FNV-1a hash over `(unit_id, line_addr)` pairs in unit-id order.
-    /// Empty table hashes to the FNV-1a empty-input value.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        for (unit, line) in self.entries.iter() {
-            hasher.write(&unit.raw().to_le_bytes());
-            hasher.write(&line.addr().to_le_bytes());
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum: per held reservation a
+    /// presence lane and the line address.
+    #[inline]
+    pub fn sync_partial(&self) -> u128 {
+        self.entries.partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.entries.partial_from_scratch()
     }
 }
 

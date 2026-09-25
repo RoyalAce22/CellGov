@@ -5,11 +5,20 @@
 
 use crate::registry::Registry;
 use crate::signal::{SignalId, SignalRegister};
+use cellgov_mem::lanes::LaneEntryMut;
 
 /// Runtime signal-notification register registry.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SignalRegistry {
     inner: Registry<SignalId, SignalRegister>,
+}
+
+impl Default for SignalRegistry {
+    fn default() -> Self {
+        Self {
+            inner: Registry::new(cellgov_mem::lanes::source::SIGNAL),
+        }
+    }
 }
 
 impl SignalRegistry {
@@ -44,7 +53,7 @@ impl SignalRegistry {
 
     /// Mutably borrow a register by id.
     #[inline]
-    pub fn get_mut(&mut self, id: SignalId) -> Option<&mut SignalRegister> {
+    pub fn get_mut(&mut self, id: SignalId) -> Option<LaneEntryMut<'_, u64, SignalRegister>> {
         self.inner.get_mut(id)
     }
 
@@ -58,10 +67,16 @@ impl SignalRegistry {
         self.inner.ids()
     }
 
-    /// FNV-1a hash over `(id, value)` pairs in id order.
+    /// The registry's partial of the sync-state sum: per register a
+    /// presence lane and its value.
     #[inline]
-    pub fn state_hash(&self) -> u64 {
-        self.inner.state_hash()
+    pub fn sync_partial(&self) -> u128 {
+        self.inner.sync_partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every register.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.inner.sync_partial_from_scratch()
     }
 }
 

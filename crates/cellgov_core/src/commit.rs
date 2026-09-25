@@ -581,11 +581,12 @@ impl CommitPipeline {
                 Effect::MailboxReceiveAttempt {
                     mailbox, source, ..
                 } => {
-                    let mb = ctx
+                    let received = ctx
                         .mailboxes
                         .get_mut(*mailbox)
-                        .expect("pre-validated mailbox id");
-                    match mb.try_receive() {
+                        .expect("pre-validated mailbox id")
+                        .try_receive();
+                    match received {
                         Some(msg) => {
                             ctx.units.push_receive(*source, msg);
                             receives += 1;
