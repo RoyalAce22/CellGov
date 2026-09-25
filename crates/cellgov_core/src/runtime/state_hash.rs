@@ -22,7 +22,8 @@ impl Runtime {
     ///
     /// - The runtime-owned tables keep their partials in lane maps.
     /// - The RSX scalars compute their terms on read.
-    /// - The LV2 host's state enters as one transitional lane.
+    /// - The LV2 host's sync-primitive tables add the host's partial.
+    /// - The rest of the LV2 host's state enters as one transitional lane.
     ///
     /// Replay tooling compares pairs via the `SyncState` checkpoint
     /// emitted at every commit boundary.
@@ -56,6 +57,7 @@ impl Runtime {
             partial!(self.syscall_responses),
             partial!(self.timer_wakes),
             partial!(self.spaces),
+            partial!(self.lv2_host),
             self.rsx_cursor.sync_term(),
             self.rsx_flip.sync_term(),
             lanes::value_term(

@@ -331,7 +331,7 @@ fn is_inert_reflects_both_axes() {
 }
 
 #[test]
-fn state_hash_distinguishes_payload_order() {
+fn sync_partial_distinguishes_payload_order() {
     let mut a = EventQueueTable::new();
     let mut b = EventQueueTable::new();
     a.create_with_id(1, 4);
@@ -340,7 +340,7 @@ fn state_hash_distinguishes_payload_order() {
     a.send_and_wake_or_enqueue(1, pl(2));
     b.send_and_wake_or_enqueue(1, pl(2));
     b.send_and_wake_or_enqueue(1, pl(1));
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]

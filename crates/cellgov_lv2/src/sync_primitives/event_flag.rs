@@ -5,7 +5,7 @@
 //! patterns.
 
 use crate::ppu_thread::{EventFlagWaitMode, PpuThreadId};
-use std::collections::BTreeMap;
+use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 
 /// One parked waiter on an event flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,9 +115,32 @@ fn should_clear(mode: EventFlagWaitMode) -> bool {
 }
 
 /// Table of event flags.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EventFlagTable {
-    entries: BTreeMap<u32, EventFlagEntry>,
+    entries: LaneMap<u32, EventFlagEntry>,
+}
+
+impl Default for EventFlagTable {
+    fn default() -> Self {
+        Self {
+            entries: LaneMap::new(source::EVENT_FLAG, u64::from),
+        }
+    }
+}
+
+impl LaneValue for EventFlagEntry {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.bits);
+        lanes.lane(2, 0, self.init);
+        lanes.lane(3, 0, self.waiters.len() as u64);
+        for (slot, w) in self.waiters.iter().enumerate() {
+            let slot = slot as u64;
+            lanes.lane(4, slot, w.thread.raw());
+            lanes.lane(5, slot, w.mask);
+            lanes.lane(6, slot, u64::from(w.mode.stable_tag()) + 1);
+            lanes.lane(7, slot, u64::from(w.result_ptr));
+        }
+    }
 }
 
 impl EventFlagTable {
@@ -128,7 +151,7 @@ impl EventFlagTable {
 
     /// Insert a fresh entry. See [`EventFlagCreateError`].
     pub fn create_with_id(&mut self, id: u32, init: u64) -> Result<(), EventFlagCreateError> {
-        if let Some(existing) = self.entries.get(&id) {
+        if let Some(existing) = self.entries.get(id) {
             debug_assert!(
                 false,
                 "event flag {:#x} already present (existing init={:#x} bits={:#x} waiters={}, new init={:#x})",
@@ -151,7 +174,7 @@ impl EventFlagTable {
     /// release, callers **must** drain `entry.waiters()` and wake
     /// each parked thread; skipping this strands them forever.
     pub fn destroy(&mut self, id: u32) -> Option<EventFlagEntry> {
-        let entry = self.entries.remove(&id)?;
+        let entry = self.entries.remove(id)?;
         debug_assert!(
             entry.waiters.is_empty(),
             "event flag {:#x} destroyed with {} parked waiter(s)",
@@ -163,7 +186,7 @@ impl EventFlagTable {
 
     /// Read-only lookup.
     pub fn lookup(&self, id: u32) -> Option<&EventFlagEntry> {
-        self.entries.get(&id)
+        self.entries.get(id)
     }
 
     /// Number of tracked event flags.
@@ -183,7 +206,7 @@ impl EventFlagTable {
         mask: u64,
         mode: EventFlagWaitMode,
     ) -> Option<EventFlagWait> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         if mask_matches(entry.bits, mask, mode) {
             let observed = entry.bits;
             if should_clear(mode) {
@@ -210,9 +233,9 @@ impl EventFlagTable {
         mode: EventFlagWaitMode,
         result_ptr: u32,
     ) -> Result<(), EventFlagEnqueueError> {
-        let entry = self
+        let mut entry = self
             .entries
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or(EventFlagEnqueueError::UnknownId)?;
         debug_assert!(
             !mask_matches(entry.bits, mask, mode),
@@ -243,7 +266,7 @@ impl EventFlagTable {
     /// OR `bits_to_set` into the flag and wake every matching
     /// waiter in FIFO order; `None` if `id` is unknown.
     pub fn set_and_wake(&mut self, id: u32, bits_to_set: u64) -> Option<Vec<EventFlagWake>> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         entry.bits |= bits_to_set;
         let mut woken: Vec<EventFlagWake> = Vec::new();
         let mut i = 0;
@@ -273,7 +296,7 @@ impl EventFlagTable {
     /// Timeout-expiry cancel, unlike the all-or-nothing
     /// [`Self::cancel_waiters`].
     pub fn remove_waiter(&mut self, id: u32, thread: PpuThreadId) -> Option<EventFlagWaiter> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         let pos = entry.waiters.iter().position(|w| w.thread == thread)?;
         Some(entry.waiters.remove(pos))
     }
@@ -288,16 +311,16 @@ impl EventFlagTable {
         threads: &std::collections::BTreeSet<PpuThreadId>,
     ) -> Vec<(u32, PpuThreadId)> {
         let mut removed = Vec::new();
-        for (id, entry) in &mut self.entries {
+        self.entries.for_each_mut(|id, entry| {
             entry.waiters.retain(|w| {
                 if threads.contains(&w.thread) {
-                    removed.push((*id, w.thread));
+                    removed.push((id, w.thread));
                     false
                 } else {
                     true
                 }
             });
-        }
+        });
         removed
     }
 
@@ -307,7 +330,7 @@ impl EventFlagTable {
     /// Caller must wake each returned waiter, typically with
     /// `CELL_ECANCELED`.
     pub fn cancel_waiters(&mut self, id: u32) -> Option<Vec<EventFlagWaiter>> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         Some(std::mem::take(&mut entry.waiters))
     }
 
@@ -321,30 +344,21 @@ impl EventFlagTable {
     ///
     /// Returns `false` if `id` is unknown.
     pub fn clear_bits(&mut self, id: u32, mask: u64) -> bool {
-        let Some(entry) = self.entries.get_mut(&id) else {
+        let Some(mut entry) = self.entries.get_mut(id) else {
             return false;
         };
         entry.bits &= mask;
         true
     }
 
-    /// FNV-1a digest of the table's state.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&(self.entries.len() as u64).to_le_bytes());
-        for (id, entry) in &self.entries {
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&entry.bits.to_le_bytes());
-            hasher.write(&entry.init.to_le_bytes());
-            hasher.write(&(entry.waiters.len() as u64).to_le_bytes());
-            for w in &entry.waiters {
-                hasher.write(&w.thread.raw().to_le_bytes());
-                hasher.write(&w.mask.to_le_bytes());
-                hasher.write(&[w.mode.stable_tag()]);
-                hasher.write(&w.result_ptr.to_le_bytes());
-            }
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum.
+    pub fn sync_partial(&self) -> u128 {
+        self.entries.partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.entries.partial_from_scratch()
     }
 }
 

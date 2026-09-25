@@ -1,4 +1,4 @@
-//! Lv2Host state-hash sensitivity: each hashed field shifts the hash deterministically.
+//! Lv2Host state-hash and sync-partial sensitivity: each hashed field moves its hash.
 
 use super::*;
 use crate::host::test_support::primary_attrs;
@@ -169,7 +169,7 @@ fn state_hash_differs_between_two_distinct_control_flags() {
 }
 
 #[test]
-fn state_hash_changes_when_a_recursive_mutex_relock_is_outstanding() {
+fn sync_partial_changes_when_a_recursive_mutex_relock_is_outstanding() {
     use crate::ppu_thread::PpuThreadId;
     use crate::sync_primitives::{MutexAcquireOrEnqueue, MutexAttrs};
     let build = |relock: bool| {
@@ -191,21 +191,21 @@ fn state_hash_changes_when_a_recursive_mutex_relock_is_outstanding() {
                 MutexAcquireOrEnqueue::Recursed,
             );
         }
-        host.state_hash()
+        host.sync_partial()
     };
     assert_ne!(build(false), build(true));
 }
 
 #[test]
-fn state_hash_changes_after_event_port_create() {
-    let pre = Lv2Host::new().state_hash();
+fn sync_partial_changes_after_event_port_create() {
+    let pre = Lv2Host::new().sync_partial();
     let mut host = Lv2Host::new();
     host.state.event_ports.create_with_id(0x100, 1, 0);
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.sync_partial());
 }
 
 #[test]
-fn state_hash_changes_when_an_event_port_connects() {
+fn sync_partial_changes_when_an_event_port_connects() {
     let mut unconnected = Lv2Host::new();
     unconnected.state.event_ports.create_with_id(0x100, 1, 0);
     let mut connected = Lv2Host::new();
@@ -215,19 +215,16 @@ fn state_hash_changes_when_an_event_port_connects() {
         .event_ports
         .connect(0x100, 0x200, 1)
         .unwrap();
-    assert_ne!(unconnected.state_hash(), connected.state_hash());
+    assert_ne!(unconnected.sync_partial(), connected.sync_partial());
 }
 
 #[test]
-fn state_hash_returns_to_table_baseline_after_event_port_destroy() {
-    // The port table gates on non-empty, and destroy does not touch
-    // the shared id allocator here, so create-then-destroy with a
-    // fixed id reads as the fresh table again.
-    let pre = Lv2Host::new().state_hash();
+fn sync_partial_returns_to_table_baseline_after_event_port_destroy() {
+    let pre = Lv2Host::new().sync_partial();
     let mut host = Lv2Host::new();
     host.state.event_ports.create_with_id(0x100, 1, 0);
     host.state.event_ports.destroy(0x100).unwrap();
-    assert_eq!(pre, host.state_hash());
+    assert_eq!(pre, host.sync_partial());
 }
 
 #[test]
@@ -280,8 +277,8 @@ fn state_hash_changes_after_a_process_count_increment() {
 
 #[test]
 fn state_hash_stays_off_baseline_after_alloc_id_backed_port_create_then_destroy() {
-    // The port table gates out once empty again, but the id the
-    // create consumed advanced next_kernel_id, which always folds.
+    // The create consumed an id from next_kernel_id, which always
+    // folds. The port table stays out of this fold.
     let pre = Lv2Host::new().state_hash();
     let mut host = Lv2Host::new();
     let id = host.alloc_id();

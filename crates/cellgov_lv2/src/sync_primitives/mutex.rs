@@ -5,7 +5,7 @@
 
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::WaiterList;
-use std::collections::BTreeMap;
+use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 
 /// Outcome of a `try_acquire` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,11 +131,32 @@ impl MutexEntry {
 }
 
 /// Table of heavy mutexes.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MutexTable {
-    entries: BTreeMap<u32, MutexEntry>,
+    entries: LaneMap<u32, MutexEntry>,
     /// See [`Self::recursion_discards_count`].
     recursion_discards_count: u64,
+}
+
+impl Default for MutexTable {
+    fn default() -> Self {
+        Self {
+            entries: LaneMap::new(source::MUTEX, u64::from),
+            recursion_discards_count: 0,
+        }
+    }
+}
+
+impl LaneValue for MutexEntry {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.owner.is_some()));
+        lanes.lane(2, 0, self.owner.map_or(0, |owner| owner.raw()));
+        lanes.lane(3, 0, u64::from(self.lock_count));
+        lanes.lane(4, 0, u64::from(self.attrs.priority_policy));
+        lanes.lane(5, 0, u64::from(self.attrs.recursive));
+        lanes.lane(6, 0, u64::from(self.attrs.protocol));
+        self.waiters.push_lanes(lanes, 7);
+    }
 }
 
 impl MutexTable {
@@ -152,8 +173,8 @@ impl MutexTable {
     /// zeroes the recursion depth across the park and writes the
     /// saved value back after the re-acquire. Nothing carries the
     /// saved depth across the park here yet, so a nonzero counter
-    /// means some guest's recursion depth was lost. Not folded into
-    /// [`Self::state_hash`].
+    /// means some guest's recursion depth was lost. Not part of
+    /// [`Self::sync_partial`].
     #[inline]
     pub fn recursion_discards_count(&self) -> u64 {
         self.recursion_discards_count
@@ -161,7 +182,7 @@ impl MutexTable {
 
     /// Insert a fresh entry. See [`MutexCreateError`].
     pub fn create_with_id(&mut self, id: u32, attrs: MutexAttrs) -> Result<(), MutexCreateError> {
-        if let Some(existing) = self.entries.get(&id) {
+        if let Some(existing) = self.entries.get(id) {
             debug_assert!(
                 false,
                 "mutex id {:#x} already present (existing {:?} owner={:?}, new {:?})",
@@ -181,7 +202,7 @@ impl MutexTable {
     /// wake each parked thread; skipping this strands them
     /// forever.
     pub fn destroy(&mut self, id: u32) -> Option<MutexEntry> {
-        let entry = self.entries.remove(&id)?;
+        let entry = self.entries.remove(id)?;
         debug_assert!(
             entry.owner.is_none(),
             "mutex {:#x} destroyed while held by {:?}",
@@ -199,7 +220,7 @@ impl MutexTable {
 
     /// Read-only lookup.
     pub fn lookup(&self, id: u32) -> Option<&MutexEntry> {
-        self.entries.get(&id)
+        self.entries.get(id)
     }
 
     /// Number of tracked mutexes.
@@ -215,7 +236,7 @@ impl MutexTable {
     /// Check-and-set without enqueueing. Non-recursive: the
     /// owner re-acquiring sees `Contended`, not `WouldDeadlock`.
     pub fn try_acquire(&mut self, id: u32, caller: PpuThreadId) -> Option<MutexAcquire> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         if entry.owner.is_none() {
             entry.owner = Some(caller);
             Some(MutexAcquire::Acquired)
@@ -228,7 +249,7 @@ impl MutexTable {
     ///
     /// O(n) scan over the waiter list on the already-parked check.
     pub fn acquire_or_enqueue(&mut self, id: u32, caller: PpuThreadId) -> MutexAcquireOrEnqueue {
-        let Some(entry) = self.entries.get_mut(&id) else {
+        let Some(mut entry) = self.entries.get_mut(id) else {
             return MutexAcquireOrEnqueue::Unknown;
         };
         match entry.owner {
@@ -281,9 +302,9 @@ impl MutexTable {
         id: u32,
         waiter: PpuThreadId,
     ) -> Result<(), MutexEnqueueError> {
-        let entry = self
+        let mut entry = self
             .entries
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or(MutexEnqueueError::UnknownId)?;
         if entry.owner == Some(waiter) {
             return Err(MutexEnqueueError::WaiterIsOwner);
@@ -298,7 +319,7 @@ impl MutexTable {
     /// ownership; `false` if the id is unknown or the thread is not
     /// parked. Timeout-expiry cancel; order-preserving for the rest.
     pub fn remove_waiter(&mut self, id: u32, waiter: PpuThreadId) -> bool {
-        let Some(entry) = self.entries.get_mut(&id) else {
+        let Some(mut entry) = self.entries.get_mut(id) else {
             return false;
         };
         entry.waiters.remove(waiter)
@@ -313,11 +334,11 @@ impl MutexTable {
         threads: &std::collections::BTreeSet<PpuThreadId>,
     ) -> Vec<(u32, PpuThreadId)> {
         let mut removed = Vec::new();
-        for (id, entry) in &mut self.entries {
+        self.entries.for_each_mut(|id, entry| {
             for thread in entry.waiters.remove_set(threads) {
-                removed.push((*id, thread));
+                removed.push((id, thread));
             }
-        }
+        });
         removed
     }
 
@@ -330,7 +351,7 @@ impl MutexTable {
         self.entries
             .iter()
             .filter(|(_, e)| e.owner.is_some_and(|o| threads.contains(&o)))
-            .map(|(id, _)| *id)
+            .map(|(id, _)| id)
             .collect()
     }
 
@@ -341,7 +362,7 @@ impl MutexTable {
     /// A counted recursive hold needs a matching unlock, so a
     /// nonzero count decrements and returns without waking a waiter.
     pub fn unlock_decrement(&mut self, id: u32, caller: PpuThreadId) -> bool {
-        let Some(entry) = self.entries.get_mut(&id) else {
+        let Some(mut entry) = self.entries.get_mut(id) else {
             return false;
         };
         if entry.owner != Some(caller) || entry.lock_count == 0 {
@@ -353,7 +374,7 @@ impl MutexTable {
 
     /// Release on behalf of `caller`.
     pub fn release_and_wake_next(&mut self, id: u32, caller: PpuThreadId) -> MutexRelease {
-        let Some(entry) = self.entries.get_mut(&id) else {
+        let Some(mut entry) = self.entries.get_mut(id) else {
             return MutexRelease::Unknown;
         };
         if entry.owner != Some(caller) {
@@ -383,41 +404,19 @@ impl MutexTable {
     #[cfg(test)]
     pub(crate) fn set_lock_count_for_test(&mut self, id: u32, count: u32) {
         self.entries
-            .get_mut(&id)
+            .get_mut(id)
             .expect("test mutex id must exist")
             .lock_count = count;
     }
 
-    /// FNV-1a digest of the table's state, including attrs.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&(self.entries.len() as u64).to_le_bytes());
-        for (id, entry) in &self.entries {
-            hasher.write(&id.to_le_bytes());
-            match entry.owner {
-                Some(owner) => {
-                    hasher.write(&[1u8]);
-                    hasher.write(&owner.raw().to_le_bytes());
-                }
-                None => hasher.write(&[0u8]),
-            }
-            // Gated on a live recursion count so byte streams from
-            // runs that never recursively re-lock stay identical;
-            // the tag byte keeps the 4-byte count distinct from the
-            // owner fold above.
-            if entry.lock_count != 0 {
-                hasher.write(&[2u8]);
-                hasher.write(&entry.lock_count.to_le_bytes());
-            }
-            hasher.write(&(entry.waiters.len() as u64).to_le_bytes());
-            for waiter in entry.waiters.iter() {
-                hasher.write(&waiter.raw().to_le_bytes());
-            }
-            hasher.write(&entry.attrs.priority_policy.to_le_bytes());
-            hasher.write(&[entry.attrs.recursive as u8]);
-            hasher.write(&entry.attrs.protocol.to_le_bytes());
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum.
+    pub fn sync_partial(&self) -> u128 {
+        self.entries.partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.entries.partial_from_scratch()
     }
 }
 

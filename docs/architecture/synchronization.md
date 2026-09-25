@@ -7,8 +7,9 @@ contract. Each has its own table inside `Lv2Host`
 (`LwMutexTable`, `MutexTable`, `SemaphoreTable`,
 `EventQueueTable`, `EventFlagTable`, `CondTable`) keyed by the
 guest-visible id. Every table composes the shared `WaiterList`
--- a strict FIFO queue of `PpuThreadId` -- and contributes to
-the host's `state_hash` only when non-empty.
+-- a strict FIFO queue of `PpuThreadId` -- and keeps its objects
+in a lane map whose partial enters `sync_state_hash`; an empty
+table contributes nothing.
 
 ### Block / wake protocol
 

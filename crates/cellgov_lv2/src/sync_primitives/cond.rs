@@ -8,7 +8,7 @@
 use crate::dispatch::CondMutexKind;
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::WaiterList;
-use std::collections::BTreeMap;
+use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 
 /// A single condition variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,9 +93,25 @@ pub enum CondSignalToError {
 }
 
 /// Table of condition variables.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CondTable {
-    entries: BTreeMap<u32, CondEntry>,
+    entries: LaneMap<u32, CondEntry>,
+}
+
+impl Default for CondTable {
+    fn default() -> Self {
+        Self {
+            entries: LaneMap::new(source::COND, u64::from),
+        }
+    }
+}
+
+impl LaneValue for CondEntry {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.mutex_id));
+        lanes.lane(2, 0, self.mutex_kind as u64 + 1);
+        self.waiters.push_lanes(lanes, 3);
+    }
 }
 
 impl CondTable {
@@ -112,7 +128,7 @@ impl CondTable {
         mutex_id: u32,
         mutex_kind: CondMutexKind,
     ) -> Result<(), CondCreateError> {
-        if let Some(existing) = self.entries.get(&id) {
+        if let Some(existing) = self.entries.get(id) {
             if existing.mutex_id == mutex_id && existing.mutex_kind == mutex_kind {
                 debug_assert!(
                     false,
@@ -144,7 +160,7 @@ impl CondTable {
     /// release, callers **must** drain `entry.waiters()` and wake
     /// each parked thread; skipping this strands them forever.
     pub fn destroy(&mut self, id: u32) -> Option<CondEntry> {
-        let entry = self.entries.remove(&id)?;
+        let entry = self.entries.remove(id)?;
         debug_assert!(
             entry.waiters.is_empty(),
             "cond {:#x} destroyed with {} parked waiter(s)",
@@ -156,7 +172,7 @@ impl CondTable {
 
     /// Read-only lookup.
     pub fn lookup(&self, id: u32) -> Option<&CondEntry> {
-        self.entries.get(&id)
+        self.entries.get(id)
     }
 
     /// Number of tracked conds.
@@ -171,9 +187,9 @@ impl CondTable {
 
     /// Enqueue a waiter. See [`CondEnqueueError`].
     pub fn enqueue_waiter(&mut self, id: u32, waiter: PpuThreadId) -> Result<(), CondEnqueueError> {
-        let entry = self
+        let mut entry = self
             .entries
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or(CondEnqueueError::UnknownId)?;
         if entry.waiters.enqueue(waiter).is_err() {
             debug_assert!(false, "duplicate enqueue of {:?} on cond {:#x}", waiter, id,);
@@ -185,7 +201,7 @@ impl CondTable {
     /// Pop the head of the waiter list. `None` if the cond is
     /// unknown or empty.
     pub fn signal_one(&mut self, id: u32) -> Option<PpuThreadId> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         entry.waiters.dequeue_one()
     }
 
@@ -195,7 +211,7 @@ impl CondTable {
     /// present-but-empty; the ABI surfaces different errors for
     /// each.
     pub fn signal_all(&mut self, id: u32) -> Option<Vec<PpuThreadId>> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         Some(entry.waiters.drain_all().collect())
     }
 
@@ -208,19 +224,19 @@ impl CondTable {
         threads: &std::collections::BTreeSet<PpuThreadId>,
     ) -> Vec<(u32, PpuThreadId)> {
         let mut removed = Vec::new();
-        for (id, entry) in &mut self.entries {
+        self.entries.for_each_mut(|id, entry| {
             for thread in entry.waiters.remove_set(threads) {
-                removed.push((*id, thread));
+                removed.push((id, thread));
             }
-        }
+        });
         removed
     }
 
     /// Remove `target` from the waiter list.
     pub fn signal_to(&mut self, id: u32, target: PpuThreadId) -> Result<(), CondSignalToError> {
-        let entry = self
+        let mut entry = self
             .entries
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or(CondSignalToError::UnknownId)?;
         if entry.waiters.remove(target) {
             Ok(())
@@ -229,24 +245,14 @@ impl CondTable {
         }
     }
 
-    /// FNV-1a digest of the table's state.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&(self.entries.len() as u64).to_le_bytes());
-        for (id, entry) in &self.entries {
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&entry.mutex_id.to_le_bytes());
-            let kind_tag: u8 = match entry.mutex_kind {
-                CondMutexKind::LwMutex => 0,
-                CondMutexKind::Mutex => 1,
-            };
-            hasher.write(&[kind_tag]);
-            hasher.write(&(entry.waiters.len() as u64).to_le_bytes());
-            for waiter in entry.waiters.iter() {
-                hasher.write(&waiter.raw().to_le_bytes());
-            }
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum.
+    pub fn sync_partial(&self) -> u128 {
+        self.entries.partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.entries.partial_from_scratch()
     }
 }
 

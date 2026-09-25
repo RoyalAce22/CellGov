@@ -201,7 +201,7 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
 
 #[test]
 fn multi_primitive_determinism_canary() {
-    fn canonical_run() -> Vec<(String, u64)> {
+    fn canonical_run() -> Vec<(String, u64, u128)> {
         let mut host = Lv2Host::new();
         let rt = fake_runtime_with_valid_sync_attr(0x10000);
         let u0 = UnitId::new(0);
@@ -373,7 +373,11 @@ fn multi_primitive_determinism_canary() {
                 Lv2Dispatch::ProcessSpawn { pid, .. } => format!("Spawn({pid:#x})"),
                 Lv2Dispatch::ProcessExitChild { pid, .. } => format!("ExitChild({pid:#x})"),
             };
-            trace.push((format!("{label}:{tag}"), host.state_hash()));
+            trace.push((
+                format!("{label}:{tag}"),
+                host.state_hash(),
+                host.sync_partial(),
+            ));
         }
         trace
     }

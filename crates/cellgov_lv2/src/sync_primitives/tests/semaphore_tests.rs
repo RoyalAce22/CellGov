@@ -278,23 +278,23 @@ fn remove_waiter_unknown_id_or_unparked_thread_is_false() {
 }
 
 #[test]
-fn state_hash_empty_is_stable() {
+fn sync_partial_empty_is_stable() {
     let a = SemaphoreTable::new();
     let b = SemaphoreTable::new();
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_distinguishes_count() {
+fn sync_partial_distinguishes_count() {
     let mut a = SemaphoreTable::new();
     let mut b = SemaphoreTable::new();
     a.create_with_id(1, 3, 10).unwrap();
     b.create_with_id(1, 4, 10).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_distinguishes_waiter_order() {
+fn sync_partial_distinguishes_waiter_order() {
     let mut a = SemaphoreTable::new();
     let mut b = SemaphoreTable::new();
     a.create_with_id(1, 0, 10).unwrap();
@@ -303,7 +303,7 @@ fn state_hash_distinguishes_waiter_order() {
     a.enqueue_waiter(1, tid(0x0100_0002)).unwrap();
     b.enqueue_waiter(1, tid(0x0100_0002)).unwrap();
     b.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[cfg(debug_assertions)]

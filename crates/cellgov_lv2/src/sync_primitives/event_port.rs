@@ -5,7 +5,7 @@
 //! Sends resolve through the binding, so an unconnected port cannot
 //! deliver.
 
-use std::collections::BTreeMap;
+use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 
 /// One event port.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,9 +70,26 @@ pub enum EventPortDestroyError {
 }
 
 /// Every live event port, keyed by kernel id.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EventPortTable {
-    ports: BTreeMap<u32, EventPortEntry>,
+    ports: LaneMap<u32, EventPortEntry>,
+}
+
+impl Default for EventPortTable {
+    fn default() -> Self {
+        Self {
+            ports: LaneMap::new(source::EVENT_PORT, u64::from),
+        }
+    }
+}
+
+impl LaneValue for EventPortEntry {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.port_type);
+        lanes.lane(2, 0, self.name);
+        lanes.lane(3, 0, u64::from(self.queue.is_some()));
+        lanes.lane(4, 0, self.queue.map_or(0, u64::from));
+    }
 }
 
 impl EventPortTable {
@@ -99,7 +116,7 @@ impl EventPortTable {
 
     /// `None` when no port carries `id`.
     pub fn lookup(&self, id: u32) -> Option<&EventPortEntry> {
-        self.ports.get(&id)
+        self.ports.get(id)
     }
 
     /// True when no ports are live.
@@ -107,24 +124,14 @@ impl EventPortTable {
         self.ports.is_empty()
     }
 
-    /// FNV-1a over every port's id, type, name, and queue binding,
-    /// via raw little-endian bytes per the host state-hash contract.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&(self.ports.len() as u64).to_le_bytes());
-        for (id, port) in &self.ports {
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&port.port_type.to_le_bytes());
-            hasher.write(&port.name.to_le_bytes());
-            match port.queue {
-                Some(queue_id) => {
-                    hasher.write(&[1]);
-                    hasher.write(&queue_id.to_le_bytes());
-                }
-                None => hasher.write(&[0]),
-            }
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum.
+    pub fn sync_partial(&self) -> u128 {
+        self.ports.partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.ports.partial_from_scratch()
     }
 
     /// Bind `id` to `queue_id`.
@@ -144,9 +151,9 @@ impl EventPortTable {
         queue_id: u32,
         required_type: u64,
     ) -> Result<(), EventPortConnectError> {
-        let port = self
+        let mut port = self
             .ports
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or(EventPortConnectError::UnknownPort)?;
         if port.port_type != required_type {
             return Err(EventPortConnectError::WrongType);
@@ -163,9 +170,9 @@ impl EventPortTable {
     /// [`EventPortDisconnectError::NotConnected`] when the port has no
     /// binding to drop.
     pub fn disconnect(&mut self, id: u32) -> Result<(), EventPortDisconnectError> {
-        let port = self
+        let mut port = self
             .ports
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or(EventPortDisconnectError::UnknownPort)?;
         if port.queue.take().is_none() {
             return Err(EventPortDisconnectError::NotConnected);
@@ -178,11 +185,11 @@ impl EventPortTable {
     /// [`EventPortDestroyError::Connected`] keeps the port alive; the
     /// guest must disconnect first.
     pub fn destroy(&mut self, id: u32) -> Result<(), EventPortDestroyError> {
-        match self.ports.get(&id) {
+        match self.ports.get(id) {
             None => Err(EventPortDestroyError::UnknownPort),
             Some(port) if port.queue.is_some() => Err(EventPortDestroyError::Connected),
             Some(_) => {
-                self.ports.remove(&id);
+                self.ports.remove(id);
                 Ok(())
             }
         }
@@ -198,11 +205,11 @@ impl EventPortTable {
     ///
     /// O(n) over the port table.
     pub fn unbind_queue(&mut self, queue_id: u32) {
-        for port in self.ports.values_mut() {
+        self.ports.for_each_mut(|_, port| {
             if port.queue == Some(queue_id) {
                 port.queue = None;
             }
-        }
+        });
     }
 }
 

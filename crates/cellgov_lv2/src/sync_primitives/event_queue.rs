@@ -6,7 +6,9 @@
 //! `debug_assert!`s the payload list is empty before parking.
 
 use crate::ppu_thread::PpuThreadId;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
+
+use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 
 /// One queued event. Matches the `sys_event_t` layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,9 +128,36 @@ impl EventQueueEntry {
 }
 
 /// Table of event queues.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EventQueueTable {
-    entries: BTreeMap<u32, EventQueueEntry>,
+    entries: LaneMap<u32, EventQueueEntry>,
+}
+
+impl Default for EventQueueTable {
+    fn default() -> Self {
+        Self {
+            entries: LaneMap::new(source::EVENT_QUEUE, u64::from),
+        }
+    }
+}
+
+impl LaneValue for EventQueueEntry {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.size));
+        lanes.lane(2, 0, self.payloads.len() as u64);
+        for (slot, p) in self.payloads.iter().enumerate() {
+            let slot = slot as u64;
+            lanes.lane(3, slot, p.source);
+            lanes.lane(4, slot, p.data1);
+            lanes.lane(5, slot, p.data2);
+            lanes.lane(6, slot, p.data3);
+        }
+        lanes.lane(7, 0, self.waiters.len() as u64);
+        for (slot, w) in self.waiters.iter().enumerate() {
+            lanes.lane(8, slot as u64, w.thread.raw());
+            lanes.lane(9, slot as u64, u64::from(w.out_ptr));
+        }
+    }
 }
 
 impl EventQueueTable {
@@ -140,7 +169,7 @@ impl EventQueueTable {
     /// Insert a fresh entry. Returns `false` if `id` is already
     /// present or `size == 0`.
     pub fn create_with_id(&mut self, id: u32, size: u32) -> bool {
-        if self.entries.contains_key(&id) || size == 0 {
+        if self.entries.contains_key(id) || size == 0 {
             return false;
         }
         self.entries.insert(id, EventQueueEntry::new(size));
@@ -154,7 +183,7 @@ impl EventQueueTable {
     /// release, callers **must** drain `entry.waiters()` and wake
     /// each parked thread; skipping this strands them forever.
     pub fn destroy(&mut self, id: u32) -> Option<EventQueueEntry> {
-        let entry = self.entries.remove(&id)?;
+        let entry = self.entries.remove(id)?;
         debug_assert!(
             entry.waiters.is_empty(),
             "event queue {:#x} destroyed with {} parked waiter(s)",
@@ -166,7 +195,7 @@ impl EventQueueTable {
 
     /// Read-only lookup.
     pub fn lookup(&self, id: u32) -> Option<&EventQueueEntry> {
-        self.entries.get(&id)
+        self.entries.get(id)
     }
 
     /// Number of tracked queues.
@@ -185,14 +214,14 @@ impl EventQueueTable {
     /// strands a parked waiter on a drained queue. [`Self::try_receive`]
     /// and [`Self::try_receive_batch`] debug-assert the invariant.
     pub fn mutual_exclusion_break(&self, id: u32) -> Option<(usize, usize)> {
-        let entry = self.entries.get(&id)?;
+        let entry = self.entries.get(id)?;
         (!entry.waiters.is_empty() && !entry.payloads.is_empty())
             .then_some((entry.payloads.len(), entry.waiters.len()))
     }
 
     /// Try to pop a payload; `None` if `id` is unknown.
     pub fn try_receive(&mut self, id: u32) -> Option<EventQueueReceive> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         debug_assert!(
             entry.waiters.is_empty() || entry.payloads.is_empty(),
             "event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s)",
@@ -209,7 +238,7 @@ impl EventQueueTable {
     /// Drain up to `max` payloads in arrival order; `None` if
     /// `id` is unknown.
     pub fn try_receive_batch(&mut self, id: u32, max: usize) -> Option<Vec<EventPayload>> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         debug_assert!(
             entry.waiters.is_empty() || entry.payloads.is_empty(),
             "event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s)",
@@ -237,9 +266,9 @@ impl EventQueueTable {
         thread: PpuThreadId,
         out_ptr: u32,
     ) -> Result<(), EventQueueEnqueueError> {
-        let entry = self
+        let mut entry = self
             .entries
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or(EventQueueEnqueueError::UnknownId)?;
         debug_assert!(
             entry.payloads.is_empty(),
@@ -266,7 +295,7 @@ impl EventQueueTable {
     /// `None` if the id is unknown or the thread is not parked.
     /// Timeout-expiry cancel; order-preserving for the rest.
     pub fn remove_waiter(&mut self, id: u32, thread: PpuThreadId) -> Option<EventQueueWaiter> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         let pos = entry.waiters.iter().position(|w| w.thread == thread)?;
         entry.waiters.remove(pos)
     }
@@ -281,23 +310,23 @@ impl EventQueueTable {
         threads: &std::collections::BTreeSet<PpuThreadId>,
     ) -> Vec<(u32, PpuThreadId)> {
         let mut removed = Vec::new();
-        for (id, entry) in &mut self.entries {
+        self.entries.for_each_mut(|id, entry| {
             entry.waiters.retain(|w| {
                 if threads.contains(&w.thread) {
-                    removed.push((*id, w.thread));
+                    removed.push((id, w.thread));
                     false
                 } else {
                     true
                 }
             });
-        }
+        });
         removed
     }
 
     /// Send a payload. Hands off to the head waiter, or buffers,
     /// or returns `Full` at `size`.
     pub fn send_and_wake_or_enqueue(&mut self, id: u32, payload: EventPayload) -> EventQueueSend {
-        let Some(entry) = self.entries.get_mut(&id) else {
+        let Some(mut entry) = self.entries.get_mut(id) else {
             return EventQueueSend::Unknown;
         };
         match entry.waiters.pop_front() {
@@ -317,27 +346,14 @@ impl EventQueueTable {
         }
     }
 
-    /// FNV-1a digest of the table's state.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&(self.entries.len() as u64).to_le_bytes());
-        for (id, entry) in &self.entries {
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&entry.size.to_le_bytes());
-            hasher.write(&(entry.payloads.len() as u64).to_le_bytes());
-            for p in entry.payloads.iter() {
-                hasher.write(&p.source.to_le_bytes());
-                hasher.write(&p.data1.to_le_bytes());
-                hasher.write(&p.data2.to_le_bytes());
-                hasher.write(&p.data3.to_le_bytes());
-            }
-            hasher.write(&(entry.waiters.len() as u64).to_le_bytes());
-            for w in entry.waiters.iter() {
-                hasher.write(&w.thread.raw().to_le_bytes());
-                hasher.write(&w.out_ptr.to_le_bytes());
-            }
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum.
+    pub fn sync_partial(&self) -> u128 {
+        self.entries.partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.entries.partial_from_scratch()
     }
 }
 

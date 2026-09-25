@@ -2,6 +2,8 @@
 
 use std::collections::VecDeque;
 
+use cellgov_mem::lanes::ObjectLanes;
+
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::errors::DuplicateEnqueue;
 
@@ -90,6 +92,19 @@ impl WaiterList {
     /// Read-only iterator in enqueue order.
     pub fn iter(&self) -> impl Iterator<Item = PpuThreadId> + '_ {
         self.queue.iter().copied()
+    }
+
+    /// Add the list's lanes to `lanes` and return the next free field.
+    ///
+    /// The list uses two fields:
+    /// - `field` holds the length.
+    /// - `field + 1` holds waiter `i` at slot `i`.
+    pub fn push_lanes(&self, lanes: &mut ObjectLanes, field: u8) -> u8 {
+        lanes.lane(field, 0, self.queue.len() as u64);
+        for (slot, id) in self.queue.iter().enumerate() {
+            lanes.lane(field + 1, slot as u64, id.raw());
+        }
+        field + 2
     }
 }
 

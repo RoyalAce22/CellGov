@@ -54,14 +54,14 @@ fn a_purged_cond_waiter_is_no_longer_signalable() {
 }
 
 #[test]
-fn purge_waiters_of_an_untouched_table_leaves_the_state_hash_alone() {
+fn purge_waiters_of_an_untouched_table_leaves_the_partial_alone() {
     let mut t = CondTable::new();
     t.create_with_id(1, 2, CondMutexKind::Mutex).unwrap();
     t.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
-    let before = t.state_hash();
+    let before = t.sync_partial();
     let miss: std::collections::BTreeSet<_> = [tid(0x0100_0099)].into_iter().collect();
     assert!(t.purge_waiters_of(&miss).is_empty());
-    assert_eq!(t.state_hash(), before);
+    assert_eq!(t.sync_partial(), before);
 }
 
 #[test]
@@ -292,32 +292,32 @@ fn heavy_mutex_binding_is_preserved() {
 }
 
 #[test]
-fn state_hash_empty_is_stable() {
+fn sync_partial_empty_is_stable() {
     let a = CondTable::new();
     let b = CondTable::new();
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_distinguishes_mutex_kind() {
+fn sync_partial_distinguishes_mutex_kind() {
     let mut a = CondTable::new();
     let mut b = CondTable::new();
     a.create_with_id(5, 1, CondMutexKind::LwMutex).unwrap();
     b.create_with_id(5, 1, CondMutexKind::Mutex).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_distinguishes_mutex_id() {
+fn sync_partial_distinguishes_mutex_id() {
     let mut a = CondTable::new();
     let mut b = CondTable::new();
     a.create_with_id(5, 1, CondMutexKind::LwMutex).unwrap();
     b.create_with_id(5, 2, CondMutexKind::LwMutex).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_distinguishes_waiter_order() {
+fn sync_partial_distinguishes_waiter_order() {
     let mut a = CondTable::new();
     let mut b = CondTable::new();
     a.create_with_id(5, 1, CondMutexKind::LwMutex).unwrap();
@@ -326,11 +326,11 @@ fn state_hash_distinguishes_waiter_order() {
     a.enqueue_waiter(5, tid(0x0100_0002)).unwrap();
     b.enqueue_waiter(5, tid(0x0100_0002)).unwrap();
     b.enqueue_waiter(5, tid(0x0100_0001)).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_ignores_ephemeral_signal_attempts() {
+fn sync_partial_ignores_ephemeral_signal_attempts() {
     let mut a = CondTable::new();
     let mut b = CondTable::new();
     a.create_with_id(5, 1, CondMutexKind::LwMutex).unwrap();
@@ -338,5 +338,5 @@ fn state_hash_ignores_ephemeral_signal_attempts() {
     let _ = a.signal_one(5);
     let _ = a.signal_all(5);
     let _ = a.signal_to(5, tid(0x0100_0099));
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }

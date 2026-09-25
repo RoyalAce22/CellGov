@@ -1,4 +1,4 @@
-//! FNV-1a state-hash contribution for [`Lv2Host`].
+//! The FNV-1a state hash and the sync-state partial of [`Lv2Host`].
 //!
 //! # Cross-module contract
 //!
@@ -13,30 +13,66 @@ use super::state::Lv2State;
 use super::Lv2Host;
 
 impl Lv2Host {
-    /// FNV-1a of all committed LV2 host state; folded into the
-    /// runtime's `sync_state_hash` at every commit boundary.
+    /// FNV-1a of the committed LV2 host state that keeps no partial;
+    /// the runtime adds it to `sync_state_hash` as the transitional lane.
     pub fn state_hash(&self) -> u64 {
         self.state.state_hash()
+    }
+
+    /// The sum of the sync-primitive tables' partials.
+    pub fn sync_partial(&self) -> u128 {
+        self.state.sync_partial(false)
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.state.sync_partial(true)
     }
 }
 
 impl Lv2State {
-    /// FNV-1a of every field, via an exhaustive destructure with no
-    /// rest pattern: adding a field to `Lv2State` without a fold
-    /// decision here is a compile error.
+    /// [`Lv2Host::sync_partial`]; `from_scratch` rebuilds each table's
+    /// partial from every entry.
+    fn sync_partial(&self, from_scratch: bool) -> u128 {
+        macro_rules! partial {
+            ($table:expr) => {
+                if from_scratch {
+                    $table.sync_partial_from_scratch()
+                } else {
+                    $table.sync_partial()
+                }
+            };
+        }
+        [
+            partial!(self.lwmutexes),
+            partial!(self.mutexes),
+            partial!(self.semaphores),
+            partial!(self.conds),
+            partial!(self.event_queues),
+            partial!(self.event_ports),
+            partial!(self.event_flags),
+        ]
+        .into_iter()
+        .fold(0u128, u128::wrapping_add)
+    }
+
+    /// FNV-1a of the fields that keep no partial, via an exhaustive
+    /// destructure with no rest pattern: adding a field to `Lv2State`
+    /// without a fold decision here is a compile error.
     ///
     /// # Gating
     ///
-    /// Per-primitive tables and the child-stack allocator contribute
-    /// only when non-empty / past their sentinel. `next_kernel_id`,
-    /// `mem_alloc_ptr`, and `mmapper_addr_cursor` always contribute,
-    /// so a created-then-destroyed primitive still advances the hash
-    /// via allocator state once the table empties again.
+    /// - The sync-primitive tables stay out of this fold. They keep
+    ///   partials of their own ([`Self::sync_partial`]).
+    /// - The child-stack allocator contributes only past its sentinel.
+    /// - `next_kernel_id`, `mem_alloc_ptr` and `mmapper_addr_cursor`
+    ///   always contribute. A primitive whose id comes from
+    ///   `next_kernel_id` moves this hash even after its destroy.
     ///
     /// # Cost
     ///
-    /// Linear in the number of live primitives plus the per-thread
-    /// lwmutex-hold map size; runs once per commit boundary.
+    /// Linear in the entries of the folded tables; runs once per
+    /// commit boundary.
     pub(in crate::host) fn state_hash(&self) -> u64 {
         let Self {
             content,
@@ -55,13 +91,13 @@ impl Lv2State {
             uart,
             usbd,
             memory_containers,
-            lwmutexes,
-            mutexes,
-            semaphores,
-            event_queues,
-            event_ports,
-            event_flags,
-            conds,
+            lwmutexes: _,
+            mutexes: _,
+            semaphores: _,
+            event_queues: _,
+            event_ports: _,
+            event_flags: _,
+            conds: _,
             lwmutex_holds,
             fs_store,
             prx_registry,
@@ -86,27 +122,6 @@ impl Lv2State {
             if peek != ThreadStackAllocator::CHILD_STACK_BASE {
                 hasher.write(&peek.to_le_bytes());
             }
-        }
-        if !lwmutexes.is_empty() {
-            hasher.write(&lwmutexes.state_hash().to_le_bytes());
-        }
-        if !mutexes.is_empty() {
-            hasher.write(&mutexes.state_hash().to_le_bytes());
-        }
-        if !semaphores.is_empty() {
-            hasher.write(&semaphores.state_hash().to_le_bytes());
-        }
-        if !event_queues.is_empty() {
-            hasher.write(&event_queues.state_hash().to_le_bytes());
-        }
-        if !event_ports.is_empty() {
-            hasher.write(&event_ports.state_hash().to_le_bytes());
-        }
-        if !event_flags.is_empty() {
-            hasher.write(&event_flags.state_hash().to_le_bytes());
-        }
-        if !conds.is_empty() {
-            hasher.write(&conds.state_hash().to_le_bytes());
         }
         if !lwmutex_holds.is_empty() {
             hasher.write(&(lwmutex_holds.len() as u64).to_le_bytes());
@@ -232,3 +247,7 @@ impl Lv2State {
 #[cfg(test)]
 #[path = "tests/state_hash_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/sync_partial_tests.rs"]
+mod sync_partial_tests;

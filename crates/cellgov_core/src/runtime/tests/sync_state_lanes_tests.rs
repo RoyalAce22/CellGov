@@ -87,6 +87,12 @@ fn every_runtime_source_moves_the_hash_and_keeps_its_partial() {
         )
         .unwrap()
     });
+    step(&mut rt, &mut h, "lv2 mutex create", |rt| {
+        rt.lv2_host_mut()
+            .mutexes_mut()
+            .create_with_id(0x10, Default::default())
+            .unwrap()
+    });
     step(&mut rt, &mut h, "unit untag", |rt| {
         rt.assign_unit_space(unit, AddressSpaceId::BOOT).unwrap()
     });

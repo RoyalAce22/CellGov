@@ -303,25 +303,25 @@ fn unlock_then_acquire_via_signal() {
 }
 
 #[test]
-fn state_hash_empty_is_stable() {
+fn sync_partial_empty_is_stable() {
     let a = LwMutexTable::new();
     let b = LwMutexTable::new();
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_distinguishes_signaled_state() {
+fn sync_partial_distinguishes_signaled_state() {
     let mut a = LwMutexTable::new();
     let mut b = LwMutexTable::new();
     let id_a = a.create().unwrap();
     b.create().unwrap();
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
     a.release_and_wake_next(id_a, tid(0x0100_0001));
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_distinguishes_waiter_order() {
+fn sync_partial_distinguishes_waiter_order() {
     let mut a = LwMutexTable::new();
     let mut b = LwMutexTable::new();
     let id_a = a.create().unwrap();
@@ -332,11 +332,11 @@ fn state_hash_distinguishes_waiter_order() {
     a.enqueue_waiter(id_a, tid(0x0100_0003)).unwrap();
     b.enqueue_waiter(id_b, tid(0x0100_0003)).unwrap();
     b.enqueue_waiter(id_b, tid(0x0100_0002)).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_distinguishes_allocator_cursor() {
+fn sync_partial_distinguishes_allocator_cursor() {
     let mut a = LwMutexTable::new();
     let mut b = LwMutexTable::new();
     a.create().unwrap();
@@ -344,7 +344,7 @@ fn state_hash_distinguishes_allocator_cursor() {
     a.destroy(a_temp);
     b.create().unwrap();
     assert_eq!(a.len(), b.len());
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]

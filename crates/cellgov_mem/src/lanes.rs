@@ -81,6 +81,22 @@ pub mod source {
     pub const SPACE_SHARED: u8 = 10;
     /// Child address spaces, one object per space id.
     pub const SPACE: u8 = 11;
+    /// Lightweight mutexes, one object per id.
+    pub const LWMUTEX: u8 = 12;
+    /// Heavy mutexes, one object per id.
+    pub const MUTEX: u8 = 13;
+    /// Semaphores, one object per id.
+    pub const SEMAPHORE: u8 = 14;
+    /// Condition variables, one object per id.
+    pub const COND: u8 = 15;
+    /// Event queues, one object per id.
+    pub const EVENT_QUEUE: u8 = 16;
+    /// Event ports, one object per id.
+    pub const EVENT_PORT: u8 = 17;
+    /// Event flags, one object per id.
+    pub const EVENT_FLAG: u8 = 18;
+    /// The lightweight-mutex id allocator's cursor.
+    pub const LWMUTEX_IDS: u8 = 19;
     /// The sources that no partial covers yet, folded as one value.
     pub const TRANSITIONAL: u8 = 255;
 }
@@ -387,6 +403,11 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
         self.entries.iter().map(|(k, v)| (*k, v))
     }
 
+    /// Iterate the keys in ascending order.
+    pub fn keys(&self) -> impl DoubleEndedIterator<Item = K> + '_ {
+        self.entries.keys().copied()
+    }
+
     /// Iterate the values in key order.
     pub fn values(&self) -> impl DoubleEndedIterator<Item = &V> + '_ {
         self.entries.values()
@@ -454,6 +475,16 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
                 *partial = partial.wrapping_add(shape.term(*key, &*value));
             }
             kept
+        });
+    }
+
+    /// Call `change` on every entry in key order.
+    ///
+    /// Computes two terms per entry, whether or not `change` changes it.
+    pub fn for_each_mut(&mut self, mut change: impl FnMut(K, &mut V)) {
+        self.retain(|key, value| {
+            change(key, value);
+            true
         });
     }
 

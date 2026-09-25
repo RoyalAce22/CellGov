@@ -7,7 +7,7 @@
 
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::WaiterList;
-use std::collections::BTreeMap;
+use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 
 /// Outcome of a `try_wait` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,9 +97,25 @@ impl SemaphoreEntry {
 }
 
 /// Table of counting semaphores.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SemaphoreTable {
-    entries: BTreeMap<u32, SemaphoreEntry>,
+    entries: LaneMap<u32, SemaphoreEntry>,
+}
+
+impl Default for SemaphoreTable {
+    fn default() -> Self {
+        Self {
+            entries: LaneMap::new(source::SEMAPHORE, u64::from),
+        }
+    }
+}
+
+impl LaneValue for SemaphoreEntry {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.count as u32));
+        lanes.lane(2, 0, u64::from(self.max as u32));
+        self.waiters.push_lanes(lanes, 3);
+    }
 }
 
 impl SemaphoreTable {
@@ -115,7 +131,7 @@ impl SemaphoreTable {
         initial: i32,
         max: i32,
     ) -> Result<(), SemaphoreCreateError> {
-        if self.entries.contains_key(&id) {
+        if self.entries.contains_key(id) {
             debug_assert!(
                 false,
                 "semaphore {:#x} already present at create_with_id",
@@ -137,7 +153,7 @@ impl SemaphoreTable {
     /// bypassed in release, callers **must** drain
     /// `entry.waiters()` and wake each parked thread.
     pub fn destroy(&mut self, id: u32) -> Option<SemaphoreEntry> {
-        let entry = self.entries.remove(&id)?;
+        let entry = self.entries.remove(id)?;
         debug_assert!(
             entry.waiters.is_empty(),
             "semaphore {:#x} destroyed with {} parked waiter(s)",
@@ -149,7 +165,7 @@ impl SemaphoreTable {
 
     /// Read-only lookup.
     pub fn lookup(&self, id: u32) -> Option<&SemaphoreEntry> {
-        self.entries.get(&id)
+        self.entries.get(id)
     }
 
     /// Number of tracked semaphores.
@@ -164,7 +180,7 @@ impl SemaphoreTable {
 
     /// Try to consume a slot; `None` if `id` is unknown.
     pub fn try_wait(&mut self, id: u32) -> Option<SemaphoreWait> {
-        let entry = self.entries.get_mut(&id)?;
+        let mut entry = self.entries.get_mut(id)?;
         if entry.count > 0 {
             entry.count -= 1;
             debug_assert!(
@@ -185,9 +201,9 @@ impl SemaphoreTable {
         id: u32,
         waiter: PpuThreadId,
     ) -> Result<(), SemaphoreEnqueueError> {
-        let entry = self
+        let mut entry = self
             .entries
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or(SemaphoreEnqueueError::UnknownId)?;
         if entry.waiters.enqueue(waiter).is_err() {
             debug_assert!(
@@ -211,11 +227,11 @@ impl SemaphoreTable {
         threads: &std::collections::BTreeSet<PpuThreadId>,
     ) -> Vec<(u32, PpuThreadId)> {
         let mut removed = Vec::new();
-        for (id, entry) in &mut self.entries {
+        self.entries.for_each_mut(|id, entry| {
             for thread in entry.waiters.remove_set(threads) {
-                removed.push((*id, thread));
+                removed.push((id, thread));
             }
-        }
+        });
         removed
     }
 
@@ -225,7 +241,7 @@ impl SemaphoreTable {
     /// rest, and no count repair is needed for the reason given on
     /// [`Self::purge_waiters_of`].
     pub fn remove_waiter(&mut self, id: u32, waiter: PpuThreadId) -> bool {
-        let Some(entry) = self.entries.get_mut(&id) else {
+        let Some(mut entry) = self.entries.get_mut(id) else {
             return false;
         };
         entry.waiters.remove(waiter)
@@ -243,7 +259,7 @@ impl SemaphoreTable {
     /// `(0, 2)` semaphore that holds one waiter, and leaves that
     /// waiter parked.
     pub fn post_and_wake_n(&mut self, id: u32, count: u32) -> SemaphorePostN {
-        let Some(entry) = self.entries.get_mut(&id) else {
+        let Some(mut entry) = self.entries.get_mut(id) else {
             return SemaphorePostN::Unknown;
         };
         let waiters_to_wake = (entry.waiters.len() as u32).min(count);
@@ -271,20 +287,14 @@ impl SemaphoreTable {
         }
     }
 
-    /// FNV-1a digest of the table's state.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&(self.entries.len() as u64).to_le_bytes());
-        for (id, entry) in &self.entries {
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&entry.count.to_le_bytes());
-            hasher.write(&entry.max.to_le_bytes());
-            hasher.write(&(entry.waiters.len() as u64).to_le_bytes());
-            for waiter in entry.waiters.iter() {
-                hasher.write(&waiter.raw().to_le_bytes());
-            }
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum.
+    pub fn sync_partial(&self) -> u128 {
+        self.entries.partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.entries.partial_from_scratch()
     }
 }
 

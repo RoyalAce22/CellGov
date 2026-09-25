@@ -315,16 +315,16 @@ fn a_purged_waiter_never_inherits_the_mutex_on_release() {
 }
 
 #[test]
-fn purge_waiters_of_an_empty_set_is_a_no_op_on_the_state_hash() {
+fn purge_waiters_of_an_empty_set_is_a_no_op_on_the_partial() {
     let mut t = MutexTable::new();
     t.create_with_id(1, default_attrs()).unwrap();
     t.try_acquire(1, tid(0x0100_0001));
     t.enqueue_waiter(1, tid(0x0100_0002)).unwrap();
-    let before = t.state_hash();
+    let before = t.sync_partial();
     assert!(t
         .purge_waiters_of(&std::collections::BTreeSet::new())
         .is_empty());
-    assert_eq!(t.state_hash(), before);
+    assert_eq!(t.sync_partial(), before);
 }
 
 #[test]
@@ -547,7 +547,7 @@ fn destroy_unknown_id_is_none() {
 }
 
 #[test]
-fn state_hash_distinguishes_attrs() {
+fn sync_partial_distinguishes_attrs() {
     let mut a = MutexTable::new();
     let mut b = MutexTable::new();
     a.create_with_id(
@@ -566,11 +566,11 @@ fn state_hash_distinguishes_attrs() {
         },
     )
     .unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_distinguishes_waiter_order() {
+fn sync_partial_distinguishes_waiter_order() {
     let mut a = MutexTable::new();
     let mut b = MutexTable::new();
     a.create_with_id(1, default_attrs()).unwrap();
@@ -582,11 +582,11 @@ fn state_hash_distinguishes_waiter_order() {
     a.enqueue_waiter(1, tid(0x0100_0003)).unwrap();
     b.enqueue_waiter(1, tid(0x0100_0003)).unwrap();
     b.enqueue_waiter(1, tid(0x0100_0002)).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_distinguishes_an_outstanding_recursion_count() {
+fn sync_partial_distinguishes_an_outstanding_recursion_count() {
     let mut a = MutexTable::new();
     let mut b = MutexTable::new();
     a.create_with_id(1, recursive_attrs()).unwrap();
@@ -595,22 +595,22 @@ fn state_hash_distinguishes_an_outstanding_recursion_count() {
     a.acquire_or_enqueue(1, owner);
     b.acquire_or_enqueue(1, owner);
     b.acquire_or_enqueue(1, owner);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_returns_to_baseline_after_relock_then_decrement() {
-    // Gate edge: a count back at zero folds no bytes, so the hash
-    // reads as if the re-lock never happened.
+fn sync_partial_returns_to_baseline_after_relock_then_decrement() {
+    // A zero lock-count lane adds nothing, so the partial reads as if
+    // the re-lock never happened.
     let mut t = MutexTable::new();
     t.create_with_id(1, recursive_attrs()).unwrap();
     let owner = tid(0x0100_0001);
     t.acquire_or_enqueue(1, owner);
-    let baseline = t.state_hash();
+    let baseline = t.sync_partial();
     t.acquire_or_enqueue(1, owner);
-    assert_ne!(baseline, t.state_hash());
+    assert_ne!(baseline, t.sync_partial());
     assert!(t.unlock_decrement(1, owner));
-    assert_eq!(baseline, t.state_hash());
+    assert_eq!(baseline, t.sync_partial());
 }
 
 #[test]

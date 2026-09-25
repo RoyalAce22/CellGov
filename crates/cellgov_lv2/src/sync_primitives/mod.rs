@@ -39,3 +39,7 @@ pub use semaphore::{
     SemaphoreWait,
 };
 pub use waiter_list::WaiterList;
+
+#[cfg(test)]
+#[path = "tests/sync_lanes_tests.rs"]
+mod sync_lanes_tests;

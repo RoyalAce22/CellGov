@@ -73,15 +73,15 @@ fn a_purged_waiters_mask_no_longer_clears_bits_on_a_later_set() {
 }
 
 #[test]
-fn purge_waiters_of_a_miss_leaves_the_state_hash_alone() {
+fn purge_waiters_of_a_miss_leaves_the_partial_alone() {
     let mut t = EventFlagTable::new();
     t.create_with_id(1, 0).unwrap();
     t.enqueue_waiter(1, tid(0x0100_0001), 1, EventFlagWaitMode::OrNoClear, 0x10)
         .unwrap();
-    let before = t.state_hash();
+    let before = t.sync_partial();
     let miss: std::collections::BTreeSet<_> = [tid(0x0100_0099)].into_iter().collect();
     assert!(t.purge_waiters_of(&miss).is_empty());
-    assert_eq!(t.state_hash(), before);
+    assert_eq!(t.sync_partial(), before);
 }
 
 #[test]
@@ -370,7 +370,7 @@ fn set_wakes_each_waiter_with_its_own_result_ptr() {
 }
 
 #[test]
-fn state_hash_distinguishes_waiter_mode() {
+fn sync_partial_distinguishes_waiter_mode() {
     let mut a = EventFlagTable::new();
     let mut b = EventFlagTable::new();
     a.create_with_id(1, 0).unwrap();
@@ -391,7 +391,7 @@ fn state_hash_distinguishes_waiter_mode() {
         0x2000,
     )
     .unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
