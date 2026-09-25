@@ -48,6 +48,7 @@ pub fn observe(
         memory: result.final_memory_hash,
         unit_status: result.final_unit_status_hash,
         sync: result.final_sync_hash,
+        scheme: crate::observation::CHECKPOINT_HASH_SCHEME,
     });
 
     Ok(Observation {

@@ -94,6 +94,8 @@ pub(crate) fn run_compare_observations(
     }
     Ok(CommandExitCode::new(if result.has_divergence() {
         exit_codes::FAILED
+    } else if result.scheme_mismatch().is_some() {
+        super::scenario::EXIT_SCHEME_MISMATCH
     } else {
         0
     }))

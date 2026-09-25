@@ -29,17 +29,21 @@ pub enum Classification {
     Unsupported,
     /// Baselines disagree with each other; CellGov result is inconclusive.
     UnsettledOracle,
+    /// The other compared fields agree, and the two sides hold state
+    /// hashes of two schemes. The comparison skips the hashes and claims
+    /// no divergence.
+    SchemeMismatch,
 }
 
 impl Classification {
-    /// Whether this classification should produce a non-zero CLI
-    /// exit code. `Match` and `Unsupported` exit 0; `Divergence` and
-    /// `UnsettledOracle` exit 1.
+    /// Whether this classification produces a non-zero CLI exit code.
     ///
     /// Exhaustive: every variant must declare its CI exit intent.
     pub fn exits_failure(&self) -> bool {
         match self {
-            Classification::Divergence | Classification::UnsettledOracle => true,
+            Classification::Divergence
+            | Classification::UnsettledOracle
+            | Classification::SchemeMismatch => true,
             Classification::Match | Classification::Unsupported => false,
         }
     }
@@ -105,6 +109,9 @@ pub struct CompareResult {
     pub event_divergence: Option<EventDivergence>,
     /// Same-runner state-hash mismatch; checked under every mode.
     pub state_hash_divergence: Option<StateHashDivergence>,
+    /// The (expected, actual) scheme ids when the same-runner state
+    /// hashes use two schemes; see [`Classification::SchemeMismatch`].
+    pub scheme_mismatch: Option<(u64, u64)>,
 }
 
 /// Result of comparing CellGov against multiple baselines.

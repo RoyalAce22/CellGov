@@ -180,6 +180,10 @@ fn cleanup_traces(paths: &[PathBuf]) {
 fn format_diverge(report: &cellgov_compare::DivergeReport) -> String {
     use cellgov_compare::{DivergeField, DivergeReport};
     match report {
+        DivergeReport::SchemeMismatch { a, b } => format!(
+            "diverge: the two traced re-runs recorded two state-hash schemes \
+             (a=0x{a:016x}, b=0x{b:016x}); no record was compared"
+        ),
         DivergeReport::Identical { count } => format!(
             "diverge: the two traced re-runs matched over {count} PpuStateHash record(s); \
              the break did not reproduce under DeterminismCheck mode"

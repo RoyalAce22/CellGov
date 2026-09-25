@@ -45,6 +45,9 @@ fn a_command_whose_help_lists_an_exit_code_lists_it_in_the_shared_form() {
         (vec!["diff", "compare"], "3", "disagreed"),
         (vec!["keys", "show"], "40", "key missing"),
         (vec!["diff", "zoom"], "30", "step"),
+        (vec!["diff", "compare"], "32", "schemes"),
+        (vec!["diff", "diverge"], "32", "schemes"),
+        (vec!["diff", "observations"], "32", "schemes"),
     ] {
         let text = help(&args);
         assert!(
@@ -76,7 +79,12 @@ fn a_command_whose_help_lists_an_exit_code_lists_it_in_the_shared_form() {
 /// command, so only those commands may say so.
 #[test]
 fn only_a_command_specific_code_is_labelled_particular_to_that_command() {
-    for args in [vec!["keys", "show"], vec!["diff", "zoom"]] {
+    for args in [
+        vec!["keys", "show"],
+        vec!["diff", "zoom"],
+        vec!["diff", "diverge"],
+        vec!["diff", "observations"],
+    ] {
         let text = help(&args);
         assert!(
             text.contains("Exit codes particular to this command"),
@@ -87,11 +95,7 @@ fn only_a_command_specific_code_is_labelled_particular_to_that_command() {
     // 4 (a verification diverged) and 3 (runs that had to reproduce
     // each other disagreed) are shared statuses. A command that gives
     // one does not claim it as its own.
-    for args in [
-        vec!["firmware", "verify"],
-        vec!["title", "verify"],
-        vec!["diff", "compare"],
-    ] {
+    for args in [vec!["firmware", "verify"], vec!["title", "verify"]] {
         let text = help(&args);
         assert!(
             !text.contains("particular to this command"),
@@ -99,6 +103,38 @@ fn only_a_command_specific_code_is_labelled_particular_to_that_command() {
 {text}"
         );
     }
+    // `diff compare` gives shared statuses and one of its own. Its help
+    // lists each kind under its own heading.
+    let text = help(&["diff", "compare"]);
+    let (shared, own) = text
+        .split_once("Exit codes particular to this command")
+        .unwrap_or_else(|| {
+            panic!(
+                "diff compare does not label its own code:
+{text}"
+            )
+        });
+    assert!(
+        shared.contains(
+            "
+  3   "
+        ),
+        "{text}"
+    );
+    assert!(
+        !shared.contains(
+            "
+  32  "
+        ),
+        "{text}"
+    );
+    assert!(
+        own.contains(
+            "
+  32  "
+        ),
+        "{text}"
+    );
 }
 
 /// Two manifests that name no scenario this runner has: one without a

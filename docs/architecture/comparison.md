@@ -98,7 +98,9 @@ differ:
   filters each to `PpuStateHash` records, and reports the first
   index where they disagree: the first *scalar-visible*
   disagreement, per the [per-step coverage caveat](runtime_pipeline.md#effects-and-trace-records).
-  Four outcomes: `Identical { count }`,
+  Five outcomes: `SchemeMismatch { a, b }` when the two streams'
+  state-hash scheme records name two schemes (no record is compared),
+  `Identical { count }`,
   `LengthDiffers { common_count, a_count, b_count }`,
   `Differs { step, a_pc, b_pc, a_hash, b_hash, field }` with `field`
   in `{Pc, Hash}`, or `CorruptTrace { common_count, a_error, b_error }`
@@ -107,7 +109,7 @@ differ:
   Checks run step count -> PC -> hash, so the report names the
   highest-level divergence first. Surfaced via
   `cellgov diff diverge <a.state> <b.state>` (exit 31 on a corrupt
-  trace). The scan is linear in record count.
+  trace, 32 on a scheme mismatch). The scan is linear in record count.
 - `cellgov_compare::zoom_lookup(a_zoom, b_zoom, step)` consumes
   separate zoom-trace files (`PpuStateFull` records emitted only
   inside the unit's window) and returns
@@ -135,6 +137,7 @@ flowchart LR
   dv -->|Identical / LengthDiffers| done["verdict"]
   dv -->|"Differs at step N, field Pc or Hash"| win["re-capture both with a full-state window around N"]
   dv -->|CorruptTrace| bad["exit 31, no verdict"]
+  dv -->|SchemeMismatch| sch["exit 32, no hash compared"]
   win --> zm["cellgov diff zoom a.zoom b.zoom N"]
   zm --> rd["RegDiff list: the fingerprint fields that differ"]
 ```

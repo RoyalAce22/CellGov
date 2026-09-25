@@ -26,6 +26,7 @@ pub(super) const TAG_RESERVED_REGION_READ: u8 = 0x0b;
 pub(super) const TAG_SYSCALL_RETURNED: u8 = 0x0c;
 pub(super) const TAG_RUN_IDENTITY: u8 = 0x0d;
 pub(super) const TAG_HOST_WRITE: u8 = 0x0e;
+pub(super) const TAG_STATE_HASH_SCHEME: u8 = 0x0f;
 
 impl TraceRecord {
     /// Append the binary encoding to `buf`.
@@ -181,6 +182,9 @@ impl TraceRecord {
                 write_u64(buf, *addr);
                 write_u32(buf, *len);
                 write_u32(buf, *reservations_cleared);
+            }
+            TraceRecord::StateHashScheme { ppu } => {
+                write_u64(buf, *ppu);
             }
         }
         debug_assert_eq!(
@@ -397,6 +401,10 @@ impl TraceRecord {
                     len,
                     reservations_cleared,
                 }
+            }
+            TAG_STATE_HASH_SCHEME => {
+                let ppu = read_u64(bytes, &mut pos)?;
+                TraceRecord::StateHashScheme { ppu }
             }
             other => return Err(DecodeError::UnknownTag(other)),
         };

@@ -10,10 +10,11 @@ use super::types::{
 /// Fields are walked in fixed order (outcome -> regions -> events ->
 /// state hashes -> steps); every divergent section emits its own
 /// DIVERGE line. The MATCH summary line at the end appears only when
-/// `has_divergence()` is false. The caller is responsible for the
-/// stderr WARN / NOTE lines around vacuous comparisons and
-/// cross-runner notes; see [`ObservationCompareResult::is_vacuous`]
-/// and [`ObservationCompareResult::cross_runner_step_note`].
+/// `has_divergence()` is false and the result holds no scheme mismatch.
+/// The caller is responsible for the stderr WARN / NOTE lines around
+/// vacuous comparisons and cross-runner notes; see
+/// [`ObservationCompareResult::is_vacuous`] and
+/// [`ObservationCompareResult::cross_runner_step_note`].
 pub fn format_observation_compare_human(result: &ObservationCompareResult) -> String {
     let mut out = String::new();
     if !result.outcome_match {
@@ -103,13 +104,18 @@ pub fn format_observation_compare_human(result: &ObservationCompareResult) -> St
             result.a_runner,
         ));
     }
+    if let Some((a, b)) = result.scheme_mismatch() {
+        out.push_str(&format!(
+            "SCHEME_MISMATCH state hashes: scheme 0x{a:016x} vs 0x{b:016x}; the hashes were not compared\n",
+        ));
+    }
     if let StepCompare::SameRunnerMismatch { a, b } = result.step_compare {
         out.push_str(&format!(
             "DIVERGE step count: {a} vs {b} within runner '{}' (byte-equal state reached via different work -- a determinism failure)\n",
             result.a_runner,
         ));
     }
-    if !result.has_divergence() {
+    if !result.has_divergence() && result.scheme_mismatch().is_none() {
         let (sa, sb) = steps_pair(&result.step_compare);
         let event_count = match &result.event_compare {
             EventCompare::Equal { count } => *count,
@@ -122,9 +128,9 @@ pub fn format_observation_compare_human(result: &ObservationCompareResult) -> St
             StateHashCompare::NoHashInfo => "no state hashes",
             StateHashCompare::OneMissing { .. } => "state hashes one-sided",
             StateHashCompare::CrossRunnerNote { .. } => "state hashes differ (cross-runner)",
-            StateHashCompare::SameRunnerMismatch { .. } => {
-                unreachable!("has_divergence() filters out same-runner hash mismatches")
-            }
+            // The guard above lets neither variant reach this match.
+            StateHashCompare::SameRunnerMismatch { .. } => "state hashes differ",
+            StateHashCompare::SchemeMismatch { .. } => "state hashes of two schemes",
         };
         out.push_str(&format!(
             "MATCH outcome={:?}, {} regions ({} bytes) identical, {} events, {}, steps {:?} vs {:?}\n",

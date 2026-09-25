@@ -11,8 +11,8 @@ use super::labels::{classification_slug, mode_str};
 ///
 /// Top-level shape: `classification`, `mode`, optional `outcome_mismatch`,
 /// optional `memory_divergence`, optional `event_divergence`, optional
-/// `state_hash_divergence`, `expected`, `actual`. Consumers rely on this
-/// schema.
+/// `state_hash_divergence`, optional `scheme_mismatch`, `expected`,
+/// `actual`. Consumers rely on this schema.
 pub fn format_json(
     result: &CompareResult,
     expected: &Observation,
@@ -79,6 +79,9 @@ fn build_body(result: &CompareResult) -> CompareReportBody<'_> {
             expected: d.expected,
             actual: d.actual,
         }),
+        scheme_mismatch: result
+            .scheme_mismatch
+            .map(|(expected, actual)| SchemePair { expected, actual }),
     }
 }
 
@@ -98,6 +101,15 @@ struct CompareReportBody<'a> {
     event_divergence: Option<EventDiv>,
     #[serde(skip_serializing_if = "Option::is_none")]
     state_hash_divergence: Option<StateHashDiv>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scheme_mismatch: Option<SchemePair>,
+}
+
+/// The (expected, actual) scheme ids of the hashes the comparison skipped.
+#[derive(Serialize)]
+struct SchemePair {
+    expected: u64,
+    actual: u64,
 }
 
 /// `ObservedHashes` serializes each hash as a raw `u64`, matching the

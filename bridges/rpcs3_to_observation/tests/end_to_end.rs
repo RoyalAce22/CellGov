@@ -108,6 +108,7 @@ size = "0x8"
             memory: StateHash::new(0xdead_beef_0000_0001),
             unit_status: StateHash::new(0xdead_beef_0000_0002),
             sync: StateHash::new(0xdead_beef_0000_0003),
+            scheme: 0x5eed,
         }),
         metadata: ObservationMetadata {
             runner: "cellgov".into(),

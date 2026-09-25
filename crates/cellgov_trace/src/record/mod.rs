@@ -38,3 +38,7 @@ mod host_write_tests;
 #[cfg(test)]
 #[path = "tests/record_format_version_tests.rs"]
 mod format_version_tests;
+
+#[cfg(test)]
+#[path = "tests/record_scheme_tests.rs"]
+mod scheme_tests;

@@ -49,6 +49,7 @@ fn hashes(memory: u64, unit_status: u64, sync: u64) -> ObservedHashes {
         memory: StateHash::new(memory),
         unit_status: StateHash::new(unit_status),
         sync: StateHash::new(sync),
+        scheme: crate::observation::CHECKPOINT_HASH_SCHEME,
     }
 }
 
@@ -951,6 +952,7 @@ fn state_hash_compare_kind(v: &StateHashCompare) -> &'static str {
         StateHashCompare::Equal => "equal",
         StateHashCompare::OneMissing { .. } => "one_missing",
         StateHashCompare::SameRunnerMismatch { .. } => "same_runner_mismatch",
+        StateHashCompare::SchemeMismatch { .. } => "scheme_mismatch",
         StateHashCompare::CrossRunnerNote { .. } => "cross_runner_note",
     }
 }
@@ -968,6 +970,7 @@ fn state_hash_compare_serde_round_trips_per_variant() {
             a: hashes(1, 2, 3),
             b: hashes(4, 5, 6),
         },
+        StateHashCompare::SchemeMismatch { a: 7, b: 8 },
         StateHashCompare::CrossRunnerNote {
             a: hashes(1, 2, 3),
             b: hashes(4, 5, 6),

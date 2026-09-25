@@ -11,6 +11,7 @@ fn hashes(memory: u64, unit_status: u64, sync: u64) -> ObservedHashes {
         memory: StateHash::new(memory),
         unit_status: StateHash::new(unit_status),
         sync: StateHash::new(sync),
+        scheme: crate::observation::CHECKPOINT_HASH_SCHEME,
     }
 }
 

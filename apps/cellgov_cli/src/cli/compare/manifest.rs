@@ -2,16 +2,15 @@
 
 use cellgov_compare::{
     compare, compare_multi, format_human, format_json, format_multi_human, format_multi_json,
-    Classification, CompareMode, Observation, RegionDescriptor,
+    CompareMode, Observation, RegionDescriptor,
 };
 
 use crate::cli::exit::{CommandError, CommandExitCode};
-use crate::cli::exit_codes;
 use crate::cli::parse::OutputFormat;
 use crate::cli::scenarios::scenario_factory;
 
 use super::observations::load_observations_with_paths;
-use super::scenario::{report_identity, require_determinism, save_baseline};
+use super::scenario::{classification_exit, report_identity, require_determinism, save_baseline};
 
 /// Report, or refuse, a manifest that names no scenario this runner has.
 ///
@@ -137,7 +136,9 @@ pub(super) fn run_manifest_compare(
             }
         }
         if result.classification.exits_failure() {
-            return Ok(CommandExitCode::new(exit_codes::FAILED));
+            return Ok(CommandExitCode::new(classification_exit(
+                result.classification,
+            )));
         }
     } else if let Some(path) = against_path {
         let baseline =
@@ -163,8 +164,10 @@ pub(super) fn run_manifest_compare(
                 );
             }
         }
-        if result.classification == Classification::Divergence {
-            return Ok(CommandExitCode::new(exit_codes::FAILED));
+        if result.classification.exits_failure() {
+            return Ok(CommandExitCode::new(classification_exit(
+                result.classification,
+            )));
         }
     } else {
         match format {

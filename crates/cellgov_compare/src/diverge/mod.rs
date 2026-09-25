@@ -11,5 +11,5 @@
 mod scan;
 mod zoom;
 
-pub use scan::{diverge, DivergeField, DivergeReport};
+pub use scan::{diverge, trace_scheme, DivergeField, DivergeReport};
 pub use zoom::{zoom_lookup, RegDiff, ZoomLookup};

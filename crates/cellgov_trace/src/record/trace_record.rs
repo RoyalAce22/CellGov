@@ -8,8 +8,8 @@ use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 use super::codec::{
     TAG_COMMIT_APPLIED, TAG_EFFECT_EMITTED, TAG_HOST_INVARIANT_BREAK, TAG_HOST_WRITE,
     TAG_PPU_STATE_FULL, TAG_PPU_STATE_HASH, TAG_RESERVED_REGION_READ, TAG_RUN_IDENTITY,
-    TAG_STATE_HASH_CHECKPOINT, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED, TAG_SYSCALL_RETURNED,
-    TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_WOKEN,
+    TAG_STATE_HASH_CHECKPOINT, TAG_STATE_HASH_SCHEME, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED,
+    TAG_SYSCALL_RETURNED, TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_WOKEN,
 };
 use super::reasons::{
     HashCheckpointKind, HostWriter, TracedBlockReason, TracedEffectKind,
@@ -224,6 +224,16 @@ pub enum TraceRecord {
         /// Reservations the write's clear sweep dropped.
         reservations_cleared: u32,
     },
+    /// The scheme id of the stream's per-step state hashes.
+    ///
+    /// A run writes it once, directly after the
+    /// [`RunIdentity`](Self::RunIdentity) header. A stream without it
+    /// holds hashes of the FNV-1a scheme.
+    StateHashScheme {
+        /// Scheme id of every [`PpuStateHash`](Self::PpuStateHash) in the
+        /// stream.
+        ppu: u64,
+    },
 }
 
 impl TraceRecord {
@@ -245,6 +255,7 @@ impl TraceRecord {
             TraceRecord::ReservedRegionRead { .. } => TAG_RESERVED_REGION_READ,
             TraceRecord::SyscallReturned { .. } => TAG_SYSCALL_RETURNED,
             TraceRecord::HostWrite { .. } => TAG_HOST_WRITE,
+            TraceRecord::StateHashScheme { .. } => TAG_STATE_HASH_SCHEME,
         }
     }
 
@@ -267,6 +278,7 @@ impl TraceRecord {
             TAG_SYSCALL_RETURNED => 1 + 8 * 3,
             TAG_RUN_IDENTITY => 1 + 4 + 8 * 3,
             TAG_HOST_WRITE => 1 + 1 + 4 + 8 + 4 + 4,
+            TAG_STATE_HASH_SCHEME => 1 + 8,
             _ => return None,
         })
     }
@@ -289,6 +301,7 @@ impl TraceRecord {
             TraceRecord::ReservedRegionRead { .. } => TraceLevel::Hashes,
             TraceRecord::SyscallReturned { .. } => TraceLevel::Scheduling,
             TraceRecord::HostWrite { .. } => TraceLevel::Commits,
+            TraceRecord::StateHashScheme { .. } => TraceLevel::Hashes,
         }
     }
 }

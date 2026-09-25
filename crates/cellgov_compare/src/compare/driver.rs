@@ -32,16 +32,23 @@ pub fn compare(expected: &Observation, actual: &Observation, mode: CompareMode) 
         CompareMode::Memory => None,
     };
 
-    let state_hash_divergence = find_state_hash_divergence(expected, actual);
-
-    let classification = if outcome_mismatch.is_none()
-        && memory_divergence.is_none()
-        && event_divergence.is_none()
-        && state_hash_divergence.is_none()
-    {
-        Classification::Match
+    let scheme_mismatch = find_scheme_mismatch(expected, actual);
+    let state_hash_divergence = if scheme_mismatch.is_some() {
+        None
     } else {
+        find_state_hash_divergence(expected, actual)
+    };
+
+    let classification = if outcome_mismatch.is_some()
+        || memory_divergence.is_some()
+        || event_divergence.is_some()
+        || state_hash_divergence.is_some()
+    {
         Classification::Divergence
+    } else if scheme_mismatch.is_some() {
+        Classification::SchemeMismatch
+    } else {
+        Classification::Match
     };
 
     CompareResult {
@@ -51,7 +58,16 @@ pub fn compare(expected: &Observation, actual: &Observation, mode: CompareMode) 
         memory_divergence,
         event_divergence,
         state_hash_divergence,
+        scheme_mismatch,
     }
+}
+
+/// The (expected, actual) scheme ids when a same-runner pair holds state
+/// hashes of two schemes.
+fn find_scheme_mismatch(expected: &Observation, actual: &Observation) -> Option<(u64, u64)> {
+    let (e, a) = (expected.state_hashes?, actual.state_hashes?);
+    (expected.metadata.runner == actual.metadata.runner && e.scheme != a.scheme)
+        .then_some((e.scheme, a.scheme))
 }
 
 /// Same-runner pairs only; see [`StateHashDivergence`].
@@ -83,7 +99,12 @@ pub fn compare_multi(
 
     for i in 1..baselines.len() {
         let oracle_cmp = compare(&baselines[0], &baselines[i], mode);
-        if oracle_cmp.classification == Classification::Divergence {
+        // The driver compares no hash between two baselines of two
+        // schemes, so the pair settles nothing.
+        if matches!(
+            oracle_cmp.classification,
+            Classification::Divergence | Classification::SchemeMismatch
+        ) {
             return MultiCompareResult {
                 classification: Classification::UnsettledOracle,
                 mode,

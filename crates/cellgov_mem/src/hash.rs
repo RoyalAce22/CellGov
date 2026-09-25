@@ -33,16 +33,18 @@ pub struct Fnv1aHasher {
 impl Fnv1aHasher {
     /// Create a new hasher seeded with the FNV offset basis.
     #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { state: FNV_OFFSET }
     }
 
     /// Feed bytes into the hash.
     #[inline]
-    pub fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.state ^= b as u64;
+    pub const fn write(&mut self, bytes: &[u8]) {
+        let mut i = 0;
+        while i < bytes.len() {
+            self.state ^= bytes[i] as u64;
             self.state = self.state.wrapping_mul(FNV_PRIME);
+            i += 1;
         }
     }
 
@@ -55,7 +57,7 @@ impl Fnv1aHasher {
     /// multi-byte values must serialize them in a fixed byte order
     /// (CellGov uses little-endian) before invoking [`Self::write`].
     #[inline]
-    pub fn finish(&self) -> u64 {
+    pub const fn finish(&self) -> u64 {
         self.state
     }
 }

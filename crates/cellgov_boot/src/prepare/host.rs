@@ -113,6 +113,22 @@ pub(super) fn report_boot_banner(
     sink.note("");
 }
 
+/// The writer a run's trace starts in: the identity header, then the
+/// scheme id of the PPU state hash.
+///
+/// The header leads the stream, so the writer takes it before the
+/// runtime that appends to it exists.
+pub(super) fn run_trace_writer(
+    identity: &cellgov_compare::RunIdentity,
+) -> cellgov_trace::TraceWriter {
+    let mut trace = cellgov_trace::TraceWriter::new();
+    trace.record_header(&identity.trace_header());
+    trace.record(&cellgov_trace::TraceRecord::StateHashScheme {
+        ppu: cellgov_ppu::state::STATE_HASH_SCHEME,
+    });
+    trace
+}
+
 /// Build the runtime and bind the boot's identity into its LV2 host.
 ///
 /// Runs before any `module_start` so every PRX's init runs in the same
@@ -126,10 +142,7 @@ pub(super) fn build_runtime(
     verified_firmware: Option<&VerifiedFirmware>,
     host_link: HostLinkMaps,
 ) -> (Runtime, AuthorityIdSource) {
-    // The header leads the stream, so the writer takes it before the
-    // runtime that appends to it exists.
-    let mut trace = cellgov_trace::TraceWriter::new();
-    trace.record_header(&title.identity.trace_header());
+    let trace = run_trace_writer(title.identity);
     let mut rt =
         Runtime::with_trace_writer(mem, params.step_budget, params.adjusted_max_steps, trace);
     rt.set_mode(params.mode);
@@ -273,3 +286,7 @@ pub(super) fn register_prx_modules(
 #[cfg(test)]
 #[path = "tests/host_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/run_trace_tests.rs"]
+mod run_trace_tests;

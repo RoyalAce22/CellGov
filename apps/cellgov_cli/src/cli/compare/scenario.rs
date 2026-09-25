@@ -10,6 +10,19 @@ use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
 use crate::cli::parse::OutputFormat;
 
+/// Exit code: the two sides hold state hashes of two schemes, so the
+/// comparison skips the hashes.
+pub(super) const EXIT_SCHEME_MISMATCH: i32 = exit_codes::command_specific(32);
+
+/// The exit status a comparison classification gives.
+pub(super) fn classification_exit(classification: Classification) -> i32 {
+    match classification {
+        Classification::SchemeMismatch => EXIT_SCHEME_MISMATCH,
+        c if c.exits_failure() => exit_codes::FAILED,
+        _ => 0,
+    }
+}
+
 /// Checks that two observations of `name` match.
 ///
 /// # Errors
@@ -114,13 +127,9 @@ pub(super) fn compare_against_baseline(
             );
         }
     }
-    Ok(CommandExitCode::new(
-        if result.classification == Classification::Divergence {
-            exit_codes::FAILED
-        } else {
-            0
-        },
-    ))
+    Ok(CommandExitCode::new(classification_exit(
+        result.classification,
+    )))
 }
 
 pub(super) fn report_identity(a: &Observation, a_label: &str, b: &Observation, b_label: &str) {

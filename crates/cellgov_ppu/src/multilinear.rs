@@ -123,6 +123,30 @@ pub const KEYS: [u128; KEY_COUNT] = [
     0x2925_66ff_7240_3c08_c4dd_302a_1bfa_1137,
 ];
 
+/// The domain tag [`SCHEME_ID`] starts from.
+///
+/// The derivation sees the lane count and the keys, but not [`lanes`],
+/// [`accumulate_with`] or [`finish`]. A change to one of those needs a
+/// new version suffix when the lane count and the keys stay the same.
+pub const SCHEME_TAG: &[u8] = b"cellgov-ppu-multilinear/v1";
+
+/// The id of the multilinear hash scheme.
+pub const SCHEME_ID: u64 = scheme_id(SCHEME_TAG, &KEYS);
+
+/// FNV-1a over `tag`, then [`LANE_COUNT`] as eight LE bytes, then each
+/// key in order as sixteen LE bytes.
+pub const fn scheme_id(tag: &[u8], keys: &[u128; KEY_COUNT]) -> u64 {
+    let mut h = cellgov_mem::Fnv1aHasher::new();
+    h.write(tag);
+    h.write(&(LANE_COUNT as u64).to_le_bytes());
+    let mut i = 0;
+    while i < KEY_COUNT {
+        h.write(&keys[i].to_le_bytes());
+        i += 1;
+    }
+    h.finish()
+}
+
 /// The next output of a SplitMix64 stream, whose state is `state`.
 fn splitmix64(state: &mut u64) -> u64 {
     *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);

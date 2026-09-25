@@ -242,6 +242,14 @@ pub enum StateHashCompare {
         /// Hashes from observation `b`.
         b: ObservedHashes,
     },
+    /// Same-runner pair whose hashes use two schemes. The comparison
+    /// skips the hashes and claims no divergence.
+    SchemeMismatch {
+        /// Scheme id of observation `a`.
+        a: u64,
+        /// Scheme id of observation `b`.
+        b: u64,
+    },
     /// Cross-runner pair with differing hashes; informational only
     /// (state-hash shape is CellGov-defined).
     CrossRunnerNote {
@@ -325,6 +333,7 @@ impl StateHashCompare {
             StateHashCompare::NoHashInfo
             | StateHashCompare::Equal
             | StateHashCompare::OneMissing { .. }
+            | StateHashCompare::SchemeMismatch { .. }
             | StateHashCompare::CrossRunnerNote { .. } => false,
         }
     }
@@ -351,6 +360,15 @@ impl StepCompare {
 }
 
 impl ObservationCompareResult {
+    /// The two scheme ids when the state hashes use two schemes; see
+    /// [`StateHashCompare::SchemeMismatch`].
+    pub fn scheme_mismatch(&self) -> Option<(u64, u64)> {
+        match self.state_hash_compare {
+            StateHashCompare::SchemeMismatch { a, b } => Some((a, b)),
+            _ => None,
+        }
+    }
+
     /// True iff anything in this result drives a non-zero exit code:
     /// outcome mismatch, any region-side mismatch, an event-sequence
     /// mismatch, a same-runner step mismatch, or a same-runner

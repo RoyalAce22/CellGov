@@ -13,6 +13,7 @@ fn hashes(memory: u64, unit_status: u64, sync: u64) -> ObservedHashes {
         memory: StateHash::new(memory),
         unit_status: StateHash::new(unit_status),
         sync: StateHash::new(sync),
+        scheme: crate::observation::CHECKPOINT_HASH_SCHEME,
     }
 }
 
@@ -27,6 +28,7 @@ fn divergent_result() -> CompareResult {
             expected: hashes(0x1, 0x2, 0x3),
             actual: hashes(0x1, 0x2, 0xabcd),
         }),
+        scheme_mismatch: None,
     }
 }
 

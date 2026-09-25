@@ -30,6 +30,14 @@ pub enum DivergeField {
 /// Outcome of comparing two per-step state-hash streams.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DivergeReport {
+    /// The two streams hold hashes of two schemes; see [`trace_scheme`].
+    /// The scan compares no record and claims no divergence.
+    SchemeMismatch {
+        /// Scheme id of side A.
+        a: u64,
+        /// Scheme id of side B.
+        b: u64,
+    },
     /// All `count` records matched pairwise and both streams ended.
     Identical {
         /// Records matched on each side.
@@ -73,12 +81,53 @@ pub enum DivergeReport {
     },
 }
 
+/// The scheme id of a stream's `PpuStateHash` records.
+///
+/// The id comes from the `StateHashScheme` record after the header. A
+/// stream without that record uses the FNV-1a scheme. A stream whose
+/// leading records do not decode also reads as FNV-1a; [`diverge`]
+/// reports the decode failure for that stream.
+pub fn trace_scheme(bytes: &[u8]) -> u64 {
+    leading_scheme(bytes).unwrap_or(cellgov_ppu::state::FNV1A_SCHEME_ID)
+}
+
+/// The scheme id of a stream, or `None` when a leading record does not
+/// decode and so the scheme is unknown.
+fn leading_scheme(bytes: &[u8]) -> Option<u64> {
+    let mut reader = TraceReader::new(bytes);
+    let mut first = reader.next();
+    if matches!(first, Some(Ok(TraceRecord::RunIdentity { .. }))) {
+        first = reader.next();
+    }
+    match first {
+        Some(Err(_)) => None,
+        Some(Ok(TraceRecord::StateHashScheme { ppu })) => Some(ppu),
+        _ => Some(cellgov_ppu::state::FNV1A_SCHEME_ID),
+    }
+}
+
 /// Walk two trace byte slices and report the first `PpuStateHash` divergence.
 ///
-/// A record that fails to decode on either side ends the scan with
-/// [`DivergeReport::CorruptTrace`] rather than a step or length
-/// verdict, even when it lies past the other side's clean end.
+/// The scan ends early in two cases:
+///
+/// - The two streams name two schemes. The scan returns
+///   [`DivergeReport::SchemeMismatch`] and reads no `PpuStateHash`.
+/// - A record on either side fails to decode. The scan returns
+///   [`DivergeReport::CorruptTrace`], even when the record lies past the
+///   other side's clean end.
+///
+/// A side whose leading records do not decode has no known scheme, so
+/// the scan reports the decode failure. That failure comes before any
+/// `PpuStateHash`, so the scan compares no hash.
 pub fn diverge(a: &[u8], b: &[u8]) -> DivergeReport {
+    if let (Some(a_scheme), Some(b_scheme)) = (leading_scheme(a), leading_scheme(b)) {
+        if a_scheme != b_scheme {
+            return DivergeReport::SchemeMismatch {
+                a: a_scheme,
+                b: b_scheme,
+            };
+        }
+    }
     let mut ai = state_hash_iter(a);
     let mut bi = state_hash_iter(b);
     let mut step: u64 = 0;

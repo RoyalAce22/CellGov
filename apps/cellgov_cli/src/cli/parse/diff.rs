@@ -33,7 +33,8 @@ impl From<CompareModeArg> for cellgov_compare::CompareMode {
     }
 }
 
-/// Which of the shared statuses `diff compare` gives, and for what.
+/// The shared statuses `diff compare` gives, its own status 32, and
+/// what each one means.
 ///
 /// The command runs its target twice before any comparison, so a
 /// disagreement between those two runs is the shared status 3. The 0
@@ -47,11 +48,22 @@ const COMPARE_EXIT_CODES: &str = "Exit codes:
       --observations-dir the baselines disagreed with each other
       (UNSETTLED_ORACLE)
   3   the two runs that had to reproduce each other disagreed, on a
-      field or on whether an observation exists at all";
+      field or on whether an observation exists at all
+
+Exit codes particular to this command:
+  32  the two sides hold state hashes of two schemes and every other
+      compared field agreed, so the hashes were not compared";
 
 /// The outcomes `diff diverge` has beyond the shared 0-5 contract.
 const DIVERGE_EXIT_CODES: &str = "Exit codes particular to this command:
-  31  a trace failed to decode, so nothing past the cut was compared";
+  31  a trace failed to decode, so nothing past the cut was compared
+  32  the two traces hold state hashes of two schemes, so no record was
+      compared";
+
+/// The outcomes `diff observations` has beyond the shared 0-5 contract.
+const OBSERVATIONS_EXIT_CODES: &str = "Exit codes particular to this command:
+  32  the two observations hold state hashes of two schemes and no
+      compared field diverged, so the hashes were not compared";
 
 /// The outcomes `diff zoom` has beyond the shared 0-5 contract.
 const ZOOM_EXIT_CODES: &str = "Exit codes particular to this command:
@@ -65,6 +77,7 @@ pub(crate) enum DiffCommand {
     #[command(after_help = COMPARE_EXIT_CODES)]
     Compare(CompareArgs),
     /// Diff two saved observation JSONs.
+    #[command(after_help = OBSERVATIONS_EXIT_CODES)]
     Observations {
         /// First observation JSON.
         #[arg(value_name = "A.json")]

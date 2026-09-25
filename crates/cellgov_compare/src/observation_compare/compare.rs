@@ -161,6 +161,12 @@ fn compare_state_hashes(
     match (a, b) {
         (None, None) => StateHashCompare::NoHashInfo,
         (Some(ha), Some(hb)) if ha == hb => StateHashCompare::Equal,
+        (Some(ha), Some(hb)) if a_runner == b_runner && ha.scheme != hb.scheme => {
+            StateHashCompare::SchemeMismatch {
+                a: ha.scheme,
+                b: hb.scheme,
+            }
+        }
         (Some(ha), Some(hb)) if a_runner == b_runner => {
             StateHashCompare::SameRunnerMismatch { a: *ha, b: *hb }
         }

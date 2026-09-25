@@ -1038,6 +1038,10 @@ Exit codes:
       (UNSETTLED_ORACLE)
   3   the two runs that had to reproduce each other disagreed, on a
       field or on whether an observation exists at all
+
+Exit codes particular to this command:
+  32  the two sides hold state hashes of two schemes and every other
+      compared field agreed, so the hashes were not compared
 ```
 
 #### `cellgov diff observations`
@@ -1056,6 +1060,12 @@ Usage: cellgov diff observations [OPTIONS] <A.json> <B.json>
 | --- | --- |
 | `A.json` | First observation JSON. Required. |
 | `B.json` | Second observation JSON. Required. |
+
+```
+Exit codes particular to this command:
+  32  the two observations hold state hashes of two schemes and no
+      compared field diverged, so the hashes were not compared
+```
 
 #### `cellgov diff diverge`
 
@@ -1077,6 +1087,8 @@ Usage: cellgov diff diverge [OPTIONS] <A.state> <B.state>
 ```
 Exit codes particular to this command:
   31  a trace failed to decode, so nothing past the cut was compared
+  32  the two traces hold state hashes of two schemes, so no record was
+      compared
 ```
 
 #### `cellgov diff zoom`

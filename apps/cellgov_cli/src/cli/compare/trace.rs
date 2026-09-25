@@ -19,6 +19,8 @@ const EXIT_MISSING_STEP: i32 = exit_codes::command_specific(30);
 /// - Status 1 means the step or trace length differs.
 /// - [`EXIT_CORRUPT_TRACE`] means a trace failed to decode before the
 ///   scan finished. The scan prints no verdict for that file.
+/// - `EXIT_SCHEME_MISMATCH` means the two traces hold state hashes of
+///   two schemes, so the scan compares no record.
 ///
 /// # Errors
 ///
@@ -29,6 +31,12 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) -> Result<CommandExitCode,
     let b_bytes = load_file(b_path)?;
     report_trace_identity(&a_bytes, a_path, &b_bytes, b_path);
     match diverge(&a_bytes, &b_bytes) {
+        DivergeReport::SchemeMismatch { a, b } => {
+            println!(
+                "SCHEME_MISMATCH  a_scheme=0x{a:016x} b_scheme=0x{b:016x}  (the two captures hold state hashes of two schemes; no record was compared)"
+            );
+            Ok(CommandExitCode::new(super::scenario::EXIT_SCHEME_MISMATCH))
+        }
         DivergeReport::Identical { count } => {
             println!("IDENTICAL  {count} PpuStateHash records matched");
             if count == 0 {

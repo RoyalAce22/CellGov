@@ -81,6 +81,13 @@ pub fn format_human(result: &CompareResult) -> String {
         );
     }
 
+    if let Some((expected, actual)) = result.scheme_mismatch {
+        let _ = writeln!(
+            out,
+            "state_hashes: scheme expected=0x{expected:016x} actual=0x{actual:016x}; not compared"
+        );
+    }
+
     out
 }
 

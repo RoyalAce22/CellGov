@@ -17,6 +17,7 @@ pub(super) fn classification_label(c: Classification) -> &'static str {
         Classification::Divergence => "DIVERGENCE",
         Classification::Unsupported => "UNSUPPORTED",
         Classification::UnsettledOracle => "UNSETTLED_ORACLE",
+        Classification::SchemeMismatch => "SCHEME_MISMATCH",
     }
 }
 
@@ -26,6 +27,7 @@ pub(super) fn classification_slug(c: Classification) -> &'static str {
         Classification::Divergence => "divergence",
         Classification::Unsupported => "unsupported",
         Classification::UnsettledOracle => "unsettled_oracle",
+        Classification::SchemeMismatch => "scheme_mismatch",
     }
 }
 

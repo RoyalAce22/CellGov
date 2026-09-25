@@ -82,6 +82,7 @@ pub fn sample_observation() -> Observation {
             memory: StateHash::new(0xaabb_ccdd_eeff_0011),
             unit_status: StateHash::new(0x1122_3344_5566_7788),
             sync: StateHash::new(0x99aa_bbcc_ddee_ff00),
+            scheme: crate::observation::CHECKPOINT_HASH_SCHEME,
         }),
         metadata: ObservationMetadata {
             runner: "cellgov".into(),

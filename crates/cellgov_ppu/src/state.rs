@@ -3,6 +3,22 @@
 use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;
 
+/// The id of the FNV-1a scheme: FNV-1a over its domain tag.
+///
+/// A trace or an observation without a scheme id holds hashes of this
+/// scheme.
+pub const FNV1A_SCHEME_ID: u64 = {
+    let mut h = cellgov_mem::Fnv1aHasher::new();
+    h.write(b"cellgov-ppu-fnv1a/v1");
+    h.finish()
+};
+
+/// The id of the scheme [`PpuState::state_hash`] computes.
+///
+/// Traces and observations record it. A comparison of two sides under
+/// two schemes reports a scheme mismatch in place of a divergence.
+pub const STATE_HASH_SCHEME: u64 = FNV1A_SCHEME_ID;
+
 /// Register-bank storage with read-only indexing.
 ///
 /// There is no `IndexMut` and no `Clone`: every write lands in an
@@ -537,3 +553,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/fingerprint_tests.rs"]
 mod fingerprint_tests;
+
+#[cfg(test)]
+#[path = "tests/scheme_tests.rs"]
+mod scheme_tests;

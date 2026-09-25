@@ -39,6 +39,10 @@ pub mod witnesses;
 #[path = "tests/test_support.rs"]
 mod test_support;
 
+#[cfg(test)]
+#[path = "tests/scheme_mismatch_tests.rs"]
+mod scheme_mismatch_tests;
+
 pub use boot_summary::{BootSummary, BootSummaryError, CheckpointKind};
 pub use cellgov_core::AddressSpaceId;
 pub use checkpoint_manifest::{CheckpointManifest, CheckpointManifestError, CheckpointRegion};
@@ -47,7 +51,9 @@ pub use compare::{
     compare, compare_multi, Classification, CompareMode, CompareResult, EventDivergence,
     MemoryDivergence, MultiCompareResult, StateHashDivergence,
 };
-pub use diverge::{diverge, zoom_lookup, DivergeField, DivergeReport, RegDiff, ZoomLookup};
+pub use diverge::{
+    diverge, trace_scheme, zoom_lookup, DivergeField, DivergeReport, RegDiff, ZoomLookup,
+};
 pub use format::format_with_commas;
 pub use identity::{
     cross_identity_warning, cross_trace_identity_warning, identity_report, trace_identity,
@@ -56,7 +62,7 @@ pub use identity::{
 };
 pub use observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,
-    ObservedHashes, ObservedOutcome, CODE_REGION_NAME,
+    ObservedHashes, ObservedOutcome, CHECKPOINT_HASH_SCHEME, CODE_REGION_NAME,
 };
 pub use observation_compare::{
     compare_observations, format_observation_compare_human, format_observation_compare_json,
