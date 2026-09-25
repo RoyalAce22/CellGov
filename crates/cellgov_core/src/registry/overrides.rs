@@ -31,6 +31,7 @@ impl UnitRegistry {
     pub fn set_status_override(&mut self, id: UnitId, status: UnitStatus) {
         if self.units.contains_key(&id) {
             self.status_overrides.insert(id, status);
+            self.status_lanes.get_mut().mark(id);
         }
     }
 
@@ -41,7 +42,9 @@ impl UnitRegistry {
         if self.status_overrides.is_empty() {
             return;
         }
-        self.status_overrides.remove(&id);
+        if self.status_overrides.remove(&id).is_some() {
+            self.status_lanes.get_mut().mark(id);
+        }
     }
 }
 

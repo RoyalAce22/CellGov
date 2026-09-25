@@ -7,6 +7,7 @@ mod overrides;
 mod pending;
 mod registration;
 mod state;
+mod status_lanes;
 mod unit_trait;
 
 #[cfg(test)]

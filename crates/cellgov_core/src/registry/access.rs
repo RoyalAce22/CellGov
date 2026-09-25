@@ -14,9 +14,14 @@ impl UnitRegistry {
     }
 
     /// Mutably borrow a unit by id, if present.
+    ///
+    /// The unit's status lane goes stale, since the borrower can change
+    /// what `status()` reports.
     #[inline]
     pub fn get_mut(&mut self, id: UnitId) -> Option<&mut dyn RegisteredUnit> {
-        self.units.get_mut(&id).map(|u| u.as_mut())
+        let unit = self.units.get_mut(&id)?;
+        self.status_lanes.get_mut().mark(id);
+        Some(unit.as_mut())
     }
 
     /// Iterate registered units in id order.
@@ -25,8 +30,27 @@ impl UnitRegistry {
     }
 
     /// Iterate registered units mutably in id order.
+    ///
+    /// Every unit's status lane goes stale, since the borrower can change
+    /// what `status()` reports.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (UnitId, &mut dyn RegisteredUnit)> + '_ {
-        self.units.iter_mut().map(|(id, u)| (*id, u.as_mut()))
+        let lanes = self.status_lanes.get_mut();
+        self.units.iter_mut().map(move |(id, u)| {
+            lanes.mark(*id);
+            (*id, u.as_mut())
+        })
+    }
+
+    /// Iterate, in id order, the units that cache decoded guest code, so
+    /// the caller can call `invalidate_code` on each.
+    ///
+    /// No status lane goes stale. The caller must not change what a
+    /// unit's `status()` reports; `invalidate_code` does not change it.
+    pub(crate) fn code_caches_mut(&mut self) -> impl Iterator<Item = &mut dyn RegisteredUnit> + '_ {
+        self.units
+            .values_mut()
+            .map(|u| u.as_mut())
+            .filter(|u| u.caches_code())
     }
 
     /// Iterate registered ids in id order.

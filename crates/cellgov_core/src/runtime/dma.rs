@@ -70,10 +70,7 @@ impl Runtime {
         // the same invalidation runs over every unit.
         let aliases = self.shared_alias_ranges_in(AddressSpaceId::BOOT, c.destination());
         let (dst, len) = (c.destination().start().raw(), c.destination().length());
-        for (_, unit) in self.registry.iter_mut() {
-            if !unit.caches_code() {
-                continue;
-            }
+        for unit in self.registry.code_caches_mut() {
             unit.invalidate_code(dst, len);
             for alias in &aliases {
                 unit.invalidate_code(alias.start().raw(), alias.length());

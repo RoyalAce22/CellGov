@@ -28,6 +28,6 @@ pub use guest::{
     FaultContext, GuestMemory, MemError, PageSize, ProvisionalRead, Region, RegionAccess,
     RegionView,
 };
-pub use hash::{fnv1a, Fnv1aHasher};
+pub use hash::{fnv1a, indexed_key, Fnv1aHasher};
 pub use range::ByteRange;
 pub use staging::{StagedWrite, StagingMemory};

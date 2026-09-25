@@ -207,10 +207,7 @@ impl Runtime {
                     merged.push(range);
                 }
             }
-            for (_, unit) in self.registry.iter_mut() {
-                if !unit.caches_code() {
-                    continue;
-                }
+            for unit in self.registry.code_caches_mut() {
                 for range in &merged {
                     unit.invalidate_code(range.start().raw(), range.length());
                 }

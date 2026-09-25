@@ -245,3 +245,7 @@ pub fn hash(lanes: &[u64; LANE_COUNT]) -> u64 {
 #[cfg(test)]
 #[path = "tests/multilinear_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/multilinear_indexed_key_tests.rs"]
+mod indexed_key_tests;

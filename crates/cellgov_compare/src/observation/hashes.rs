@@ -45,7 +45,7 @@ pub struct ObservedHashes {
 /// producers changes a hash value, increase the tag's version suffix.
 pub const CHECKPOINT_HASH_SCHEME: u64 = {
     let mut h = cellgov_mem::Fnv1aHasher::new();
-    h.write(b"cellgov-checkpoint-fnv1a/v2");
+    h.write(b"cellgov-checkpoint-fnv1a/v3");
     h.finish()
 };
 

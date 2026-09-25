@@ -68,6 +68,40 @@ impl Default for Fnv1aHasher {
     }
 }
 
+/// The SplitMix64 state increment.
+const SPLITMIX64_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
+
+/// The SplitMix64 finalizer of one state.
+#[inline]
+const fn splitmix64_mix(state: u64) -> u64 {
+    let mut z = state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// Key `k` of a Multilinear-128 key stream, computed in O(1).
+///
+/// The stream is the SplitMix64 stream that starts at `seed`: key `k`
+/// holds output `2k + 1` in its high half and output `2k + 2` in its low
+/// half, where output `n` is the finalizer of `seed + n * GAMMA`
+/// (wrapping). A table built by walking the stream in order holds the
+/// same key at index `k`. `2k` wraps, so key `k + 2^63` equals key `k`.
+///
+/// A lane space with no fixed size, such as one lane per unit id, takes
+/// its keys from here instead of from a table.
+#[inline]
+pub const fn indexed_key(seed: u64, k: u64) -> u128 {
+    let n = k.wrapping_mul(2);
+    let hi = splitmix64_mix(seed.wrapping_add(n.wrapping_add(1).wrapping_mul(SPLITMIX64_GAMMA)));
+    let lo = splitmix64_mix(seed.wrapping_add(n.wrapping_add(2).wrapping_mul(SPLITMIX64_GAMMA)));
+    ((hi as u128) << 64) | lo as u128
+}
+
 #[cfg(test)]
 #[path = "tests/hash_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/indexed_key_tests.rs"]
+mod indexed_key_tests;

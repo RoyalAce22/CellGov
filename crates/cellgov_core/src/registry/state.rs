@@ -3,8 +3,10 @@
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+use crate::registry::status_lanes::StatusLanes;
 use crate::registry::RegisteredUnit;
 
 /// The runtime's unit registry.
@@ -31,6 +33,10 @@ pub struct UnitRegistry {
     /// Per-unit register writes injected by HLE dispatch; drained
     /// alongside syscall returns.
     pub(super) pending_register_writes: BTreeMap<UnitId, Vec<(u8, u64)>>,
+    /// The unit-status hash accumulator. Every path that can change a
+    /// unit's effective status marks the unit stale here; the hash read
+    /// refreshes only the stale lanes.
+    pub(super) status_lanes: RefCell<StatusLanes>,
 }
 
 impl Clone for UnitRegistry {
@@ -47,6 +53,7 @@ impl Clone for UnitRegistry {
             pending_receives: self.pending_receives.clone(),
             pending_syscall_returns: self.pending_syscall_returns.clone(),
             pending_register_writes: self.pending_register_writes.clone(),
+            status_lanes: RefCell::new(self.status_lanes.borrow().clone()),
         }
     }
 }

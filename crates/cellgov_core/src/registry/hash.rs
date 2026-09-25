@@ -4,6 +4,7 @@
 
 use cellgov_exec::UnitStatus;
 
+use super::status_lanes::{status_key, status_lane};
 use super::UnitRegistry;
 
 impl UnitRegistry {
@@ -22,37 +23,37 @@ impl UnitRegistry {
         hasher.finish()
     }
 
-    /// FNV-1a over (`id.raw()` LE, `status_byte(status)`) for every unit
-    /// in id order. Uses effective status so overrides are hashed.
+    /// Multilinear-128 hash of the effective status of every unit.
+    ///
+    /// The construction and its collision bound are in the
+    /// `status_lanes` module. The call refreshes only the lanes marked
+    /// stale since the previous call, so a commit pays for the units
+    /// whose status can change, not for every unit.
     ///
     /// Wire-format contract: pinned by `status_hash_wire_format_golden`.
-    /// `status_byte` is the explicit mapping (not `as u8`) so a future
-    /// `#[repr]` change cannot silently drift the hash.
     pub fn status_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        for (id, unit) in self.units.iter() {
-            hasher.write(&id.raw().to_le_bytes());
-            let status = self
-                .status_overrides
-                .get(id)
-                .copied()
-                .unwrap_or_else(|| unit.status());
-            hasher.write(&[status_byte(status)]);
-        }
-        hasher.finish()
+        let acc = self
+            .status_lanes
+            .borrow_mut()
+            .refresh(|id| status_lane(self.effective_status(id)));
+        let h = (acc >> 64) as u64;
+        debug_assert_eq!(
+            h,
+            self.status_hash_from_scratch(),
+            "incremental unit-status hash out of date"
+        );
+        h
     }
-}
 
-/// Explicit `UnitStatus -> u8` mapping for [`UnitRegistry::status_hash`].
-///
-/// Exhaustive (no `_ =>`): adding a `UnitStatus` variant without updating
-/// this is a compile error, not a silent hash drift.
-fn status_byte(status: UnitStatus) -> u8 {
-    match status {
-        UnitStatus::Runnable => 0,
-        UnitStatus::Blocked => 1,
-        UnitStatus::Faulted => 2,
-        UnitStatus::Finished => 3,
+    /// [`Self::status_hash`] computed from every registered unit,
+    /// without the accumulator the registry keeps.
+    pub fn status_hash_from_scratch(&self) -> u64 {
+        let mut acc = status_key(0);
+        for id in self.units.keys() {
+            let lane = status_lane(self.effective_status(*id));
+            acc = acc.wrapping_add(status_key(id.raw() + 1).wrapping_mul(u128::from(lane)));
+        }
+        (acc >> 64) as u64
     }
 }
 

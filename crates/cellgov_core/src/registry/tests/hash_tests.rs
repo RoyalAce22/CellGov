@@ -14,11 +14,13 @@ fn status_hash_of_empty_registry_is_stable() {
 fn status_hash_changes_when_a_unit_status_changes() {
     let mut r = UnitRegistry::new();
     let (handle, factory) = status_unit(UnitStatus::Runnable);
-    r.register_with(factory);
+    let id = r.register_with(factory);
     let h0 = r.status_hash();
     handle.set(UnitStatus::Blocked);
+    r.get_mut(id);
     let h1 = r.status_hash();
     handle.set(UnitStatus::Finished);
+    r.get_mut(id);
     let h2 = r.status_hash();
     assert_ne!(h0, h1);
     assert_ne!(h1, h2);
@@ -93,8 +95,11 @@ fn status_hash_is_id_position_sensitive() {
     assert_ne!(a.status_hash(), b.status_hash());
 }
 
-/// Pins the `status_hash` wire format; catches reorders within
-/// [`status_byte`] that the exhaustive match cannot.
+/// Pins the `status_hash` wire format; catches reorders within the
+/// status-code mapping that the exhaustive match cannot.
+///
+/// Lanes 1, 2 and 4 (Runnable, Blocked, Finished, each code + 1) at ids
+/// 0, 1 and 2, under the unit-status keys; computed outside the crate.
 #[test]
 fn status_hash_wire_format_golden() {
     let mut r = UnitRegistry::new();
@@ -104,7 +109,7 @@ fn status_hash_wire_format_golden() {
     r.register_with(f0);
     r.register_with(f1);
     r.register_with(f2);
-    const EXPECTED_STATUS_HASH: u64 = 0xE465_5B46_398E_DE44;
+    const EXPECTED_STATUS_HASH: u64 = 0xD3EA_5C2E_13EF_3B18;
     assert_eq!(
         r.status_hash(),
         EXPECTED_STATUS_HASH,

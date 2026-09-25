@@ -57,6 +57,9 @@ pub trait RegisteredUnit: 'static {
 
     /// Notify the unit that guest memory in `[addr, addr+len)` was written.
     /// See [`ExecutionUnit::invalidate_code`] for the must-override contract.
+    ///
+    /// The call must not change what [`Self::status`] reports: the
+    /// registry calls it without marking the unit's status lane stale.
     fn invalidate_code(&mut self, addr: u64, len: u64);
 
     /// Whether this unit caches decoded guest code.
