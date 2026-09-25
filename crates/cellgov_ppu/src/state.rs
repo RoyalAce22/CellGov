@@ -3,6 +3,11 @@
 use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;
 
+use crate::multilinear::{
+    lane_delta, reservation_lanes, LANE_CR, LANE_CTR, LANE_LR, LANE_RESERVATION_LINE,
+    LANE_RESERVATION_TAG, LANE_XER,
+};
+
 /// The id of the FNV-1a scheme: FNV-1a over its domain tag.
 ///
 /// A trace or an observation without a scheme id holds hashes of this
@@ -121,6 +126,10 @@ pub struct PpuState {
     /// when this and [`cellgov_sync::ReservationTable`] agree.
     // [PPC-Book2 p:10 s:1.7.3.1] Reservation state: lwarx/ldarx sets, stwcx./stdcx. tests + clears.
     reservation: Option<ReservedLine>,
+    /// The Multilinear-128 accumulator of the hashed lanes. Each setter
+    /// of a hashed lane adds that lane's change, so [`Self::state_hash`]
+    /// reads it without a rehash.
+    acc: u128,
 }
 
 pub(crate) struct PpuSnapshotFields {
@@ -173,6 +182,7 @@ impl PpuState {
             dcbz_executed: _,
             tb: _,
             reservation,
+            acc: _,
         } = self;
         PpuSnapshotFields {
             gpr: *gpr.as_array(),
@@ -209,6 +219,7 @@ impl PpuState {
             dcbz_executed: _,
             tb,
             reservation,
+            acc: _,
         } = self;
         PpuObservationFields {
             gpr: *gpr.as_array(),
@@ -249,6 +260,7 @@ impl PpuState {
             dcbz_executed: 0,
             tb: 0,
             reservation: None,
+            acc: crate::multilinear::KEYS[0],
         }
     }
 
@@ -256,6 +268,8 @@ impl PpuState {
     #[inline]
     #[track_caller]
     pub fn set_gpr(&mut self, k: usize, v: u64) {
+        let old = self.gpr.0[k];
+        self.acc = self.acc.wrapping_add(lane_delta(k, old, v));
         self.gpr.0[k] = v;
     }
 
@@ -276,7 +290,9 @@ impl PpuState {
     /// Replace the whole GPR bank (snapshot restore).
     #[inline]
     pub fn set_gpr_all(&mut self, regs: [u64; GPR_COUNT]) {
-        self.gpr.0 = regs;
+        for (k, &v) in regs.iter().enumerate() {
+            self.set_gpr(k, v);
+        }
     }
 
     /// Replace the whole FPR bank (snapshot restore).
@@ -300,6 +316,9 @@ impl PpuState {
     /// Write the full condition register.
     #[inline]
     pub fn set_cr(&mut self, v: u32) {
+        self.acc = self
+            .acc
+            .wrapping_add(lane_delta(LANE_CR, u64::from(self.cr), u64::from(v)));
         self.cr = v;
     }
 
@@ -312,6 +331,7 @@ impl PpuState {
     /// Write the link register.
     #[inline]
     pub fn set_lr(&mut self, v: u64) {
+        self.acc = self.acc.wrapping_add(lane_delta(LANE_LR, self.lr, v));
         self.lr = v;
     }
 
@@ -324,6 +344,7 @@ impl PpuState {
     /// Write the count register.
     #[inline]
     pub fn set_ctr(&mut self, v: u64) {
+        self.acc = self.acc.wrapping_add(lane_delta(LANE_CTR, self.ctr, v));
         self.ctr = v;
     }
 
@@ -336,6 +357,7 @@ impl PpuState {
     /// Write the full XER.
     #[inline]
     pub fn set_xer(&mut self, v: u64) {
+        self.acc = self.acc.wrapping_add(lane_delta(LANE_XER, self.xer, v));
         self.xer = v;
     }
 
@@ -348,6 +370,12 @@ impl PpuState {
     /// Set or clear the reservation.
     #[inline]
     pub fn set_reservation(&mut self, r: Option<ReservedLine>) {
+        let (old_tag, old_line) = reservation_lanes(self.reservation.map(|l| l.addr()));
+        let (tag, line) = reservation_lanes(r.map(|l| l.addr()));
+        self.acc = self
+            .acc
+            .wrapping_add(lane_delta(LANE_RESERVATION_TAG, old_tag, tag))
+            .wrapping_add(lane_delta(LANE_RESERVATION_LINE, old_line, line));
         self.reservation = r;
     }
 
@@ -467,23 +495,38 @@ impl PpuState {
     /// The Multilinear-128 hash of the [`Self::fingerprint`] field set.
     ///
     /// [`crate::multilinear`] defines the lanes, the keys and the
-    /// collision bound. The hash reads each lane from `self` and copies
-    /// no register bank.
+    /// collision bound. The hash is the high half of an accumulator the
+    /// setters keep current, so reading it costs a shift.
+    #[inline]
     pub fn state_hash(&self) -> u64 {
-        use crate::multilinear::{finish, KEYS};
+        crate::multilinear::finish(self.acc)
+    }
+
+    /// [`Self::state_hash`] computed from every lane, without the
+    /// accumulator the setters keep.
+    pub fn state_hash_from_scratch(&self) -> u64 {
+        crate::multilinear::finish(self.accumulate_from_scratch())
+    }
+
+    /// Whether the accumulator equals the one every lane gives now.
+    pub fn hash_is_current(&self) -> bool {
+        self.acc == self.accumulate_from_scratch()
+    }
+
+    /// The Multilinear-128 accumulator of every lane, read from `self`
+    /// with no register bank copied.
+    fn accumulate_from_scratch(&self) -> u128 {
+        use crate::multilinear::KEYS;
         let mut acc = KEYS[0];
         for (key, &r) in KEYS[1..=GPR_COUNT].iter().zip(self.gpr.as_array()) {
             acc = acc.wrapping_add(key.wrapping_mul(u128::from(r)));
         }
-        let (tag, line) = match self.reservation {
-            None => (0, 0),
-            Some(l) => (1, l.addr()),
-        };
+        let (tag, line) = reservation_lanes(self.reservation.map(|l| l.addr()));
         let rest = [self.lr, self.ctr, self.xer, u64::from(self.cr), tag, line];
         for (key, &lane) in KEYS[GPR_COUNT + 1..].iter().zip(&rest) {
             acc = acc.wrapping_add(key.wrapping_mul(u128::from(lane)));
         }
-        finish(acc)
+        acc
     }
 }
 
@@ -518,6 +561,7 @@ impl Clone for PpuState {
             dcbz_executed: self.dcbz_executed,
             tb: self.tb,
             reservation: self.reservation,
+            acc: self.acc,
         }
     }
 }
@@ -549,3 +593,7 @@ mod fingerprint_tests;
 #[cfg(test)]
 #[path = "tests/scheme_tests.rs"]
 mod scheme_tests;
+
+#[cfg(test)]
+#[path = "tests/accumulator_tests.rs"]
+mod accumulator_tests;

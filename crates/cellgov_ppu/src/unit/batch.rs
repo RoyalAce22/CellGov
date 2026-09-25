@@ -181,6 +181,10 @@ impl PpuExecutionUnit {
                         ));
                     }
                 }
+                debug_assert!(
+                    self.state.hash_is_current(),
+                    "state-hash accumulator out of date after retirement at 0x{step_pc:x}"
+                );
                 self.retirement_counter += 1;
                 remaining = remaining.saturating_sub(1);
                 if remaining == 0 {
@@ -325,6 +329,10 @@ impl PpuExecutionUnit {
                     ));
                 }
             }
+            debug_assert!(
+                self.state.hash_is_current(),
+                "state-hash accumulator out of date after retirement at 0x{step_pc:x}"
+            );
             self.retirement_counter += 1;
 
             remaining = remaining.saturating_sub(1);

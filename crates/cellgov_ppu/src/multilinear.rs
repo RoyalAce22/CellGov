@@ -67,6 +67,19 @@ use cellgov_ps3_abi::hw::ppu::GPR_COUNT;
 /// Number of 64-bit lanes the hash reads from one state.
 pub const LANE_COUNT: usize = 38;
 
+/// Lane of the link register; GPR `k` is lane `k`.
+pub const LANE_LR: usize = GPR_COUNT;
+/// Lane of the count register.
+pub const LANE_CTR: usize = GPR_COUNT + 1;
+/// Lane of the fixed-point exception register.
+pub const LANE_XER: usize = GPR_COUNT + 2;
+/// Lane of the condition register, zero-extended.
+pub const LANE_CR: usize = GPR_COUNT + 3;
+/// Lane of the reservation tag: 0 for none, 1 for a held line.
+pub const LANE_RESERVATION_TAG: usize = GPR_COUNT + 4;
+/// Lane of the reservation line address, 0 for none.
+pub const LANE_RESERVATION_LINE: usize = GPR_COUNT + 5;
+
 /// Number of keys: one additive key and one multiplier per lane.
 pub const KEY_COUNT: usize = LANE_COUNT + 1;
 
@@ -176,15 +189,32 @@ pub fn derive_keys(seed: u64) -> [u128; KEY_COUNT] {
 pub fn lanes(fp: &PpuFingerprint) -> [u64; LANE_COUNT] {
     let mut out = [0u64; LANE_COUNT];
     out[..GPR_COUNT].copy_from_slice(&fp.gpr);
-    out[32] = fp.lr;
-    out[33] = fp.ctr;
-    out[34] = fp.xer;
-    out[35] = u64::from(fp.cr);
-    if let Some(addr) = fp.reservation_line {
-        out[36] = 1;
-        out[37] = addr;
-    }
+    out[LANE_LR] = fp.lr;
+    out[LANE_CTR] = fp.ctr;
+    out[LANE_XER] = fp.xer;
+    out[LANE_CR] = u64::from(fp.cr);
+    (out[LANE_RESERVATION_TAG], out[LANE_RESERVATION_LINE]) =
+        reservation_lanes(fp.reservation_line);
     out
+}
+
+/// The tag and line-address lanes of a reservation.
+#[inline]
+pub fn reservation_lanes(line: Option<u64>) -> (u64, u64) {
+    match line {
+        None => (0, 0),
+        Some(addr) => (1, addr),
+    }
+}
+
+/// The change to an accumulator under [`KEYS`] when lane `lane` moves
+/// from `old` to `new`.
+///
+/// The accumulator is linear in each lane modulo 2^128, so the change
+/// is exact, and changes to several lanes add in any order.
+#[inline]
+pub fn lane_delta(lane: usize, old: u64, new: u64) -> u128 {
+    KEYS[lane + 1].wrapping_mul(u128::from(new).wrapping_sub(u128::from(old)))
 }
 
 /// The 128-bit accumulator of `lanes` under `keys`.
