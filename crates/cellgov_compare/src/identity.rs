@@ -610,3 +610,7 @@ mod app_version_tests;
 #[cfg(test)]
 #[path = "tests/boot_overrides_tests.rs"]
 mod boot_overrides_tests;
+
+#[cfg(test)]
+#[path = "tests/identity_golden_tests.rs"]
+mod identity_golden_tests;
