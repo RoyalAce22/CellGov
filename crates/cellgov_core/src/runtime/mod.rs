@@ -57,3 +57,7 @@ pub use types::{
 #[cfg(test)]
 #[path = "tests/runtime_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/sync_state_lanes_tests.rs"]
+mod sync_state_lanes_tests;

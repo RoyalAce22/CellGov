@@ -13,6 +13,7 @@
 )]
 
 pub mod dispatch;
+mod dispatch_lanes;
 pub mod fs_store;
 pub mod host;
 pub mod image;

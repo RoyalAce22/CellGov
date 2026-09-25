@@ -328,9 +328,7 @@ fn sync_state_hash_moves_when_a_unit_is_tagged() {
     rt.assign_unit_space(UnitId::new(0), S1).unwrap();
     assert_ne!(pre, rt.sync_state_hash());
     // Untagging alone does not restore the baseline: the empty child
-    // space still folds via the mapping metadata gate only when
-    // non-empty state remains -- an extra space with no tags still
-    // counts as non-empty table.
+    // space still has its presence lane.
     rt.assign_unit_space(UnitId::new(0), AddressSpaceId::BOOT)
         .unwrap();
     assert_ne!(pre, rt.sync_state_hash());

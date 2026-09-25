@@ -92,8 +92,8 @@ fn map() -> LaneMap<u64, Word> {
     LaneMap::new(1, |k| k)
 }
 
-/// The partial the map keeps against the one it rebuilds, read in
-/// release too, where `partial()` does not check itself.
+/// Check the kept partial against a rebuilt one, and return it.
+/// `partial()` checks itself only in debug builds.
 fn kept(m: &LaneMap<u64, Word>) -> u128 {
     assert_eq!(m.partial, m.partial_from_scratch());
     m.partial

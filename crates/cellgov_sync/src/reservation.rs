@@ -102,9 +102,8 @@ impl core::fmt::Display for ReservedLine {
 #[derive(Debug, Clone)]
 pub struct ReservationTable {
     /// Walks unit ids in order, so `iter` is invariant under insertion
-    /// order. `UnitId: Ord` is what makes that determinism hold; it is
-    /// not an incidental derive. The unit is the lane object and the
-    /// address space is the slot base.
+    /// order. The unit is the lane object and the address space is the
+    /// slot base.
     entries: LaneMap<UnitId, ReservedLine>,
 }
 

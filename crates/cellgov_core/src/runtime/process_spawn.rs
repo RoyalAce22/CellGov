@@ -156,13 +156,13 @@ impl Runtime {
             .is_none()
         {
             // Mirror the loader-failure rollback: the child space and
-            // the unit's space tag feed metadata_hash /
+            // the unit's space tag feed sync_state_hash /
             // committed_memory_hash and must not outlive the failed
             // spawn. The registered unit cannot be removed; it stays
             // Finished (inert) in the boot space.
             self.registry
                 .set_status_override(child_unit, UnitStatus::Finished);
-            self.spaces.unit_spaces.remove(&child_unit);
+            self.spaces.unit_spaces.remove(child_unit);
             self.spaces.extra.remove(&space);
             self.spaces.extra_reservations.remove(&space);
             self.lv2_host.log_invariant_break(

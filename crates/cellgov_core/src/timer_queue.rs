@@ -10,6 +10,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_lv2::Lv2BlockReason;
+use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 use cellgov_time::GuestTicks;
 use std::collections::BTreeMap;
 
@@ -35,24 +36,58 @@ pub struct TimerWake {
 /// Debug-only runaway guard mirroring the syscall-response table's cap.
 const MAX_TIMER_WAKES: usize = 65_536;
 
-/// Wire-format version prepended to [`TimerWakeQueue::state_hash`].
-/// Bump whenever the per-entry serialization in `state_hash` changes
-/// shape, so old and new formats can never collide.
-const STATE_HASH_FORMAT_VERSION: u64 = 2;
+/// A queued wake with its deadline, which is also the first half of its
+/// key.
+#[derive(Debug, Clone, Copy)]
+struct Queued {
+    deadline: GuestTicks,
+    wake: TimerWake,
+}
+
+/// Lane fields of one wake:
+///
+/// 1. the deadline
+/// 2. the unit
+/// 3. the kind: 1 for a sleep, 2 for a sync wait
+/// 4. and up: the block reason of a sync wait
+impl LaneValue for Queued {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.deadline.raw());
+        lanes.lane(2, 0, self.wake.unit.raw());
+        match self.wake.kind {
+            TimerWakeKind::Sleep => lanes.lane(3, 0, 1),
+            TimerWakeKind::SyncWait(reason) => {
+                lanes.lane(3, 0, 2);
+                reason.push_lanes(lanes, 4);
+            }
+        }
+    }
+}
 
 /// Deterministic priority queue of pending timer wakes.
 ///
 /// At most one live entry per unit: a unit is blocked on at most one
 /// wait at a time, so a second insert before a cancel is an upstream
 /// wake-path bug. Participates in the runtime's `sync_state_hash`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TimerWakeQueue {
-    entries: BTreeMap<(GuestTicks, u64), TimerWake>,
+    entries: LaneMap<(GuestTicks, u64), Queued>,
     /// Reverse index for O(log n) cancel on early wake.
     by_unit: BTreeMap<UnitId, (GuestTicks, u64)>,
     next_seq: u64,
-    /// Release-mode displacement count; not part of `state_hash`.
+    /// Release-mode displacement count; not part of the sync-state hash.
     displacement_count: usize,
+}
+
+impl Default for TimerWakeQueue {
+    fn default() -> Self {
+        Self {
+            entries: LaneMap::new(source::TIMER_WAKE, |(_, seq)| seq),
+            by_unit: BTreeMap::new(),
+            next_seq: 0,
+            displacement_count: 0,
+        }
+    }
 }
 
 impl TimerWakeQueue {
@@ -105,13 +140,18 @@ impl TimerWakeQueue {
         );
         let mut displaced = None;
         if let Some(prior_key) = self.by_unit.remove(&unit) {
-            displaced = self.entries.remove(&prior_key);
+            displaced = self.entries.remove(prior_key).map(|q| q.wake);
             self.displacement_count = self.displacement_count.saturating_add(1);
         }
         let seq = self.next_seq;
         self.next_seq += 1;
-        self.entries
-            .insert((deadline, seq), TimerWake { unit, kind });
+        self.entries.insert(
+            (deadline, seq),
+            Queued {
+                deadline,
+                wake: TimerWake { unit, kind },
+            },
+        );
         self.by_unit.insert(unit, (deadline, seq));
         displaced
     }
@@ -128,7 +168,7 @@ impl TimerWakeQueue {
     pub fn cancel(&mut self, unit: UnitId) -> bool {
         match self.by_unit.remove(&unit) {
             Some(key) => {
-                let removed = self.entries.remove(&key);
+                let removed = self.entries.remove(key);
                 debug_assert!(
                     removed.is_some(),
                     "TimerWakeQueue::cancel: by_unit index pointed at a missing entry \
@@ -142,23 +182,22 @@ impl TimerWakeQueue {
 
     /// Earliest pending deadline, if any.
     pub fn peek_deadline(&self) -> Option<GuestTicks> {
-        self.entries.keys().next().map(|(deadline, _)| *deadline)
+        self.entries.first().map(|((deadline, _), _)| deadline)
     }
 
     /// Drain every wake with `deadline <= now`, in `(deadline,
     /// sequence)` order.
     pub fn pop_due(&mut self, now: GuestTicks) -> Vec<TimerWake> {
-        let due: Vec<TimerWake> = match now.raw().checked_add(1) {
-            Some(split_time) => {
-                let after = self.entries.split_off(&(GuestTicks::new(split_time), 0));
-                let due = std::mem::replace(&mut self.entries, after);
-                due.into_values().collect()
+        let mut due = Vec::new();
+        while self
+            .entries
+            .first()
+            .is_some_and(|((deadline, _), _)| deadline <= now)
+        {
+            if let Some((_, queued)) = self.entries.pop_first() {
+                due.push(queued.wake);
             }
-            None => {
-                let all = std::mem::take(&mut self.entries);
-                all.into_values().collect()
-            }
-        };
+        }
         for wake in &due {
             let removed = self.by_unit.remove(&wake.unit);
             debug_assert!(
@@ -171,84 +210,16 @@ impl TimerWakeQueue {
         due
     }
 
-    /// FNV-1a hash of the queue contents.
-    ///
-    /// Wire format: `STATE_HASH_FORMAT_VERSION` (u64 LE), entry count
-    /// (u64 LE), then for each entry in `(deadline, sequence)` order
-    /// the deadline's u64 LE bytes, the sequence's u64 LE bytes, the
-    /// unit id's u64 LE bytes, a 1-byte kind tag, and for `SyncWait`
-    /// a 1-byte reason tag plus the reason's fixed-size fields. Any
-    /// variable-length field added to a kind requires a new format
-    /// version.
-    ///
-    /// Drift is pinned by `state_hash_wire_format_golden`.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&STATE_HASH_FORMAT_VERSION.to_le_bytes());
-        hasher.write(&(self.entries.len() as u64).to_le_bytes());
-        for ((deadline, seq), wake) in &self.entries {
-            hasher.write(&deadline.raw().to_le_bytes());
-            hasher.write(&seq.to_le_bytes());
-            hasher.write(&wake.unit.raw().to_le_bytes());
-            match wake.kind {
-                TimerWakeKind::Sleep => hasher.write(&[0u8]),
-                TimerWakeKind::SyncWait(reason) => {
-                    hasher.write(&[1u8]);
-                    hash_block_reason(&mut hasher, reason);
-                }
-            }
-        }
-        hasher.finish()
+    /// The queue's partial of the sync-state sum, with the sequence
+    /// number of each pending wake as its object.
+    #[inline]
+    pub fn sync_partial(&self) -> u128 {
+        self.entries.partial()
     }
-}
 
-/// Serialize a block reason for the state hash: 1-byte variant tag
-/// plus the variant's fixed-size fields, all LE.
-fn hash_block_reason(hasher: &mut cellgov_mem::Fnv1aHasher, reason: Lv2BlockReason) {
-    match reason {
-        Lv2BlockReason::ThreadGroupJoin { group_id } => {
-            hasher.write(&[0u8]);
-            hasher.write(&group_id.to_le_bytes());
-        }
-        Lv2BlockReason::PpuThreadJoin { target } => {
-            hasher.write(&[1u8]);
-            hasher.write(&target.to_le_bytes());
-        }
-        Lv2BlockReason::LwMutex { id } => {
-            hasher.write(&[2u8]);
-            hasher.write(&id.to_le_bytes());
-        }
-        Lv2BlockReason::Mutex { id } => {
-            hasher.write(&[3u8]);
-            hasher.write(&id.to_le_bytes());
-        }
-        Lv2BlockReason::Semaphore { id } => {
-            hasher.write(&[4u8]);
-            hasher.write(&id.to_le_bytes());
-        }
-        Lv2BlockReason::EventQueue { id } => {
-            hasher.write(&[5u8]);
-            hasher.write(&id.to_le_bytes());
-        }
-        Lv2BlockReason::EventFlag { id } => {
-            hasher.write(&[6u8]);
-            hasher.write(&id.to_le_bytes());
-        }
-        Lv2BlockReason::Cond {
-            id,
-            mutex_id,
-            mutex_kind,
-        } => {
-            hasher.write(&[7u8]);
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&mutex_id.to_le_bytes());
-            hasher.write(&[mutex_kind as u8]);
-        }
-        Lv2BlockReason::Uart => hasher.write(&[8u8]),
-        Lv2BlockReason::UsbdEvent { handle } => {
-            hasher.write(&[9u8]);
-            hasher.write(&handle.to_le_bytes());
-        }
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.entries.partial_from_scratch()
     }
 }
 

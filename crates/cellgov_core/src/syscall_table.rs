@@ -7,26 +7,32 @@
 
 use cellgov_event::UnitId;
 use cellgov_lv2::PendingResponse;
-use std::collections::BTreeMap;
+use cellgov_mem::lanes::{source, LaneMap};
 
 /// Pending-response table for blocked syscall callers.
 ///
 /// At most one response per unit. Participates in the runtime's
 /// `sync_state_hash`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SyscallResponseTable {
-    pending: BTreeMap<UnitId, PendingResponse>,
-    /// Release-mode displacement count surfaced via
-    /// [`Self::displacement_count`]; not part of `state_hash`.
+    pending: LaneMap<UnitId, PendingResponse>,
+    /// Release-mode displacement count, read through
+    /// [`Self::displacement_count`]. It is outside the sync-state hash.
     displacement_count: usize,
+}
+
+impl Default for SyscallResponseTable {
+    fn default() -> Self {
+        Self {
+            pending: LaneMap::new(source::SYSCALL_RESPONSE, UnitId::raw),
+            displacement_count: 0,
+        }
+    }
 }
 
 /// Debug-only runaway guard for [`SyscallResponseTable::insert`].
 /// Parallel to the scheduler's runnables cap.
 const MAX_PENDING_RESPONSES: usize = 65_536;
-
-/// Wire-format version prepended to [`SyscallResponseTable::state_hash`].
-const STATE_HASH_FORMAT_VERSION: u64 = 5;
 
 impl SyscallResponseTable {
     /// Construct an empty table.
@@ -50,7 +56,7 @@ impl SyscallResponseTable {
                   writes that will otherwise be silently lost)"]
     pub fn insert(&mut self, unit: UnitId, response: PendingResponse) -> Option<PendingResponse> {
         debug_assert!(
-            !self.pending.contains_key(&unit),
+            !self.pending.contains_key(unit),
             "SyscallResponseTable::insert: unit {unit:?} already has a pending response; \
              a silent overwrite would lose the original r3 and any owed out-pointer writes. \
              Call try_take() first if this replacement is intentional."
@@ -79,7 +85,7 @@ impl SyscallResponseTable {
     /// [`Self::take_expected`] at call sites where presence is a
     /// runtime contract.
     pub fn try_take(&mut self, unit: UnitId) -> Option<PendingResponse> {
-        self.pending.remove(&unit)
+        self.pending.remove(unit)
     }
 
     /// Remove and return the pending response for `unit`.
@@ -89,7 +95,7 @@ impl SyscallResponseTable {
     /// Panics if no response is present; a missing entry indicates a
     /// double-wake or a missing upstream insert.
     pub fn take_expected(&mut self, unit: UnitId) -> PendingResponse {
-        self.pending.remove(&unit).unwrap_or_else(|| {
+        self.pending.remove(unit).unwrap_or_else(|| {
             panic!(
                 "SyscallResponseTable::take_expected: no pending response for {unit:?}; \
                  probable double-wake or missing insert"
@@ -99,12 +105,12 @@ impl SyscallResponseTable {
 
     /// Borrow the pending response for `unit` without removing it.
     pub fn peek(&self, unit: UnitId) -> Option<&PendingResponse> {
-        self.pending.get(&unit)
+        self.pending.get(unit)
     }
 
     /// Check whether `unit` has a pending response.
     pub fn contains(&self, unit: UnitId) -> bool {
-        self.pending.contains_key(&unit)
+        self.pending.contains_key(unit)
     }
 
     /// Number of pending responses.
@@ -119,91 +125,19 @@ impl SyscallResponseTable {
 
     /// Iterate pending unit ids in ascending order.
     pub fn pending_ids(&self) -> impl Iterator<Item = UnitId> + '_ {
-        self.pending.keys().copied()
+        self.pending.iter().map(|(unit, _)| unit)
     }
 
-    /// FNV-1a hash of the table contents.
-    ///
-    /// Wire format: `STATE_HASH_FORMAT_VERSION` (u64 LE), entry count
-    /// (u64 LE), then for each `(UnitId, PendingResponse)` pair in
-    /// ascending id order the id's u64 LE bytes, the variant's
-    /// [`PendingResponse::variant_tag`] byte, and its fixed-size
-    /// fields. This hash folds into `Runtime::sync_state_hash` and
-    /// every recorded state-hash stream.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&STATE_HASH_FORMAT_VERSION.to_le_bytes());
-        hasher.write(&(self.pending.len() as u64).to_le_bytes());
-        for (unit, response) in &self.pending {
-            hasher.write(&unit.raw().to_le_bytes());
-            hasher.write(&[response.variant_tag()]);
-            match response {
-                PendingResponse::ReturnCode { code } => {
-                    hasher.write(&code.to_le_bytes());
-                }
-                PendingResponse::ThreadGroupJoin {
-                    group_id,
-                    code,
-                    cause_ptr,
-                    status_ptr,
-                    cause,
-                    status,
-                } => {
-                    hasher.write(&group_id.to_le_bytes());
-                    hasher.write(&code.to_le_bytes());
-                    hasher.write(&cause_ptr.to_le_bytes());
-                    hasher.write(&status_ptr.to_le_bytes());
-                    hasher.write(&cause.to_le_bytes());
-                    hasher.write(&status.to_le_bytes());
-                }
-                PendingResponse::PpuThreadJoin {
-                    target,
-                    status_out_ptr,
-                } => {
-                    hasher.write(&target.to_le_bytes());
-                    hasher.write(&status_out_ptr.to_le_bytes());
-                }
-                PendingResponse::EventQueueReceive { out_ptr, payload } => {
-                    hasher.write(&out_ptr.to_le_bytes());
-                    match payload {
-                        None => hasher.write(&[0u8]),
-                        Some(p) => {
-                            hasher.write(&[1u8]);
-                            hasher.write(&p.source.to_le_bytes());
-                            hasher.write(&p.data1.to_le_bytes());
-                            hasher.write(&p.data2.to_le_bytes());
-                            hasher.write(&p.data3.to_le_bytes());
-                        }
-                    }
-                }
-                PendingResponse::CondWakeReacquire {
-                    mutex_id,
-                    mutex_kind,
-                } => {
-                    hasher.write(&mutex_id.to_le_bytes());
-                    hasher.write(&[*mutex_kind as u8]);
-                }
-                PendingResponse::EventFlagWake {
-                    result_ptr,
-                    observed,
-                } => {
-                    hasher.write(&result_ptr.to_le_bytes());
-                    hasher.write(&observed.to_le_bytes());
-                }
-                PendingResponse::LwMutexWake { mutex_ptr, caller } => {
-                    hasher.write(&mutex_ptr.to_le_bytes());
-                    hasher.write(&caller.to_le_bytes());
-                }
-                PendingResponse::EventFlagCancelWake {
-                    result_ptr,
-                    observed,
-                } => {
-                    hasher.write(&result_ptr.to_le_bytes());
-                    hasher.write(&observed.to_le_bytes());
-                }
-            }
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum, with the unit of each
+    /// pending response as its object.
+    #[inline]
+    pub fn sync_partial(&self) -> u128 {
+        self.pending.partial()
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.pending.partial_from_scratch()
     }
 }
 

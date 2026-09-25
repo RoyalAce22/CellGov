@@ -131,7 +131,7 @@ impl Runtime {
         space: AddressSpaceId,
     ) -> Result<(), SpaceError> {
         if space == AddressSpaceId::BOOT {
-            self.spaces.unit_spaces.remove(&unit);
+            self.spaces.unit_spaces.remove(unit);
             return Ok(());
         }
         if !self.spaces.extra.contains_key(&space) {

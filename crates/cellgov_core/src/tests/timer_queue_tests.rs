@@ -136,43 +136,43 @@ fn sequence_survives_drain_so_later_inserts_stay_ordered() {
 }
 
 #[test]
-fn state_hash_is_deterministic() {
+fn sync_partial_is_deterministic() {
     let mut a = TimerWakeQueue::new();
     let mut b = TimerWakeQueue::new();
     a.insert(tick(100), UnitId::new(1), TimerWakeKind::Sleep);
     b.insert(tick(100), UnitId::new(1), TimerWakeKind::Sleep);
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_covers_deadline_unit_and_count() {
+fn sync_partial_covers_deadline_unit_and_count() {
     let mut base = TimerWakeQueue::new();
     base.insert(tick(100), UnitId::new(1), TimerWakeKind::Sleep);
-    let base_hash = base.state_hash();
+    let base_hash = base.sync_partial();
 
     let empty = TimerWakeQueue::new();
-    assert_ne!(empty.state_hash(), base_hash);
+    assert_ne!(empty.sync_partial(), base_hash);
 
     let mut other_deadline = TimerWakeQueue::new();
     other_deadline.insert(tick(200), UnitId::new(1), TimerWakeKind::Sleep);
-    assert_ne!(other_deadline.state_hash(), base_hash);
+    assert_ne!(other_deadline.sync_partial(), base_hash);
 
     let mut other_unit = TimerWakeQueue::new();
     other_unit.insert(tick(100), UnitId::new(2), TimerWakeKind::Sleep);
-    assert_ne!(other_unit.state_hash(), base_hash);
+    assert_ne!(other_unit.sync_partial(), base_hash);
 
     let mut two = TimerWakeQueue::new();
     two.insert(tick(100), UnitId::new(1), TimerWakeKind::Sleep);
     two.insert(tick(300), UnitId::new(2), TimerWakeKind::Sleep);
-    assert_ne!(two.state_hash(), base_hash);
+    assert_ne!(two.sync_partial(), base_hash);
 }
 
-/// The sequence component is part of the wire format: two queues
-/// reaching the same (deadline, unit) set through different insert /
-/// cancel histories hash differently, which is correct -- fire order
-/// among equal deadlines depends on it.
+/// The sequence number is the lane object of each wake.
+///
+/// Fire order among equal deadlines depends on the sequence, so two
+/// histories that reach one (deadline, unit) set hash differently.
 #[test]
-fn state_hash_covers_sequence_history() {
+fn sync_partial_covers_sequence_history() {
     let mut fresh = TimerWakeQueue::new();
     fresh.insert(tick(100), UnitId::new(1), TimerWakeKind::Sleep);
 
@@ -181,36 +181,36 @@ fn state_hash_covers_sequence_history() {
     churned.cancel(UnitId::new(9));
     churned.insert(tick(100), UnitId::new(1), TimerWakeKind::Sleep);
 
-    assert_ne!(fresh.state_hash(), churned.state_hash());
+    assert_ne!(fresh.sync_partial(), churned.sync_partial());
 }
 
 #[test]
-fn state_hash_stable_after_cancel_roundtrip_from_empty() {
+fn sync_partial_stable_after_cancel_roundtrip_from_empty() {
     let mut q = TimerWakeQueue::new();
-    let h_empty = q.state_hash();
+    let h_empty = q.sync_partial();
     q.insert(tick(100), UnitId::new(1), TimerWakeKind::Sleep);
-    assert_ne!(q.state_hash(), h_empty);
+    assert_ne!(q.sync_partial(), h_empty);
     // Cancel returns the ENTRY SET to empty but next_seq advanced;
     // the hash covers only live entries, so it returns to the empty
     // value -- entry-set equality is what replay comparison needs.
     q.cancel(UnitId::new(1));
-    assert_eq!(q.state_hash(), h_empty);
+    assert_eq!(q.sync_partial(), h_empty);
 }
 
 #[test]
-fn state_hash_distinguishes_wake_kind_and_block_reason() {
+fn sync_partial_distinguishes_wake_kind_and_block_reason() {
     let entries = [
         TimerWakeKind::Sleep,
         TimerWakeKind::SyncWait(Lv2BlockReason::Semaphore { id: 5 }),
         TimerWakeKind::SyncWait(Lv2BlockReason::Mutex { id: 5 }),
         TimerWakeKind::SyncWait(Lv2BlockReason::Semaphore { id: 6 }),
     ];
-    let hashes: Vec<u64> = entries
+    let hashes: Vec<u128> = entries
         .iter()
         .map(|kind| {
             let mut q = TimerWakeQueue::new();
             q.insert(tick(100), UnitId::new(1), *kind);
-            q.state_hash()
+            q.sync_partial()
         })
         .collect();
     for (i, a) in hashes.iter().enumerate() {
@@ -226,10 +226,13 @@ fn state_hash_distinguishes_wake_kind_and_block_reason() {
     }
 }
 
-/// Pinned FNV-1a value over a fixture that covers both kind tags and
-/// every `Lv2BlockReason` variant.
+/// Literal pin over both kind tags and every block reason except
+/// `Uart` and `UsbdEvent`.
+///
+/// The literal comes from the SplitMix64 key stream of the sync-state
+/// lanes, computed outside the crate.
 #[test]
-fn state_hash_wire_format_golden() {
+fn sync_partial_wire_format_golden() {
     let mut q = TimerWakeQueue::new();
     q.insert(tick(1_000_000), UnitId::new(0), TimerWakeKind::Sleep);
     q.insert(
@@ -276,12 +279,5 @@ fn state_hash_wire_format_golden() {
             mutex_kind: cellgov_lv2::CondMutexKind::Mutex,
         }),
     );
-    const EXPECTED: u64 = 917_142_914_607_979_740;
-    assert_eq!(
-        q.state_hash(),
-        EXPECTED,
-        "TimerWakeQueue::state_hash wire format drifted; a versioned format \
-         change must bump STATE_HASH_FORMAT_VERSION and update EXPECTED \
-         in the same commit"
-    );
+    assert_eq!(q.sync_partial(), 0x70bd_ca4e_762d_f0f8_c2af_d3cb_294f_07ba);
 }

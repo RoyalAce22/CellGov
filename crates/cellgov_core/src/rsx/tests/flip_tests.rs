@@ -70,28 +70,28 @@ fn restore_overwrites_all_fields() {
 }
 
 #[test]
-fn state_hash_is_deterministic() {
+fn sync_term_is_deterministic() {
     let a = RsxFlipState::new();
     let b = RsxFlipState::new();
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_term(), b.sync_term());
 }
 
 #[test]
-fn state_hash_distinguishes_status() {
+fn sync_term_distinguishes_status() {
     let mut a = RsxFlipState::new();
     let mut b = RsxFlipState::new();
     b.request_flip(0);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_term(), b.sync_term());
     a.restore(CELL_GCM_DISPLAY_FLIP_STATUS_WAITING, 0, true, 0);
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_term(), b.sync_term());
 }
 
 #[test]
-fn state_hash_distinguishes_each_field() {
-    fn hash_with(status: u8, handler: u32, pending: bool, buffer_index: u8) -> u64 {
+fn sync_term_distinguishes_each_field() {
+    fn hash_with(status: u8, handler: u32, pending: bool, buffer_index: u8) -> u128 {
         let mut s = RsxFlipState::new();
         s.restore(status, handler, pending, buffer_index);
-        s.state_hash()
+        s.sync_term()
     }
     let base = hash_with(0, 0, false, 0);
     assert_ne!(base, hash_with(1, 0, false, 0), "status field folds in");
@@ -104,17 +104,17 @@ fn state_hash_distinguishes_each_field() {
     );
 }
 
+/// Computed outside the crate from the SplitMix64 key stream of the
+/// sync-state lanes.
 #[test]
-fn empty_flip_state_hash_golden() {
-    let s = RsxFlipState::new();
-    let got = s.state_hash();
-    let mut h = cellgov_mem::Fnv1aHasher::new();
-    h.write(&[STATE_HASH_FORMAT_VERSION]);
-    h.write(&[CELL_GCM_DISPLAY_FLIP_STATUS_DONE]);
-    h.write(&0u32.to_le_bytes());
-    h.write(&[0u8]);
-    h.write(&[0u8]);
-    assert_eq!(got, h.finish());
+fn flip_term_wire_format_golden() {
+    assert_eq!(
+        RsxFlipState::new().sync_term(),
+        0x4e7e_4ff1_bb1f_4aad_66be_3e92_de27_9cc5
+    );
+    let mut s = RsxFlipState::new();
+    s.restore(CELL_GCM_DISPLAY_FLIP_STATUS_WAITING, 0x1234_5678, true, 7);
+    assert_eq!(s.sync_term(), 0xa6c4_e9ae_bc7f_1bf6_1fc0_0b8f_e0c3_0f81);
 }
 
 #[test]

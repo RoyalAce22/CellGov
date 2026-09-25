@@ -168,9 +168,9 @@ set by an atomic load and cleared by a conditional-store
 retirement or by another unit's write to the line; the holder's
 own plain stores leave it in place. The committed
 cross-unit view is `cellgov_sync::ReservationTable`, a
-`BTreeMap<UnitId, ReservedLine>` owned by the commit pipeline
-and folded into `sync_state_hash` with mailboxes, signals, LV2
-host state, and syscall responses.
+unit-ordered map from `UnitId` to `ReservedLine` owned by the
+commit pipeline, whose lanes enter `sync_state_hash` with
+mailboxes, signals, LV2 host state, and syscall responses.
 
 **Verdict rule.** `stwcx.` / `stdcx.` / `MFC_PUTLLC` succeed
 when BOTH the local register is set AND its line matches the

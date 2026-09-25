@@ -10,6 +10,8 @@
 //! `handler` records the `cellGcmSetFlipHandler` address but PPU
 //! dispatch into it is not modelled.
 
+use cellgov_mem::lanes::{self, source, LaneValue, ObjectLanes};
+
 pub use cellgov_ps3_abi::hw::rsx::{
     CELL_GCM_DISPLAY_FLIP_STATUS_DONE, CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
 };
@@ -22,10 +24,6 @@ pub use cellgov_ps3_abi::hw::rsx::{
 /// not [`RsxFlipState`]; this constant lives here for semantic
 /// ownership of the flip-status domain.
 pub const RSX_FLIP_STATUS_MIRROR_ADDR: u32 = 0xC000_0050;
-
-/// Hash-input shape version. Bump when [`RsxFlipState::state_hash`]
-/// changes field order, endianness, or hasher family.
-pub const STATE_HASH_FORMAT_VERSION: u8 = 1;
 
 /// RSX flip-status state tracked across commit boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,7 +110,8 @@ impl RsxFlipState {
     /// Complete a pending flip at a commit boundary; no-op when
     /// `pending == false`. Must run one commit after the
     /// `RsxFlipRequest` so a PPU step can observe WAITING.
-    /// `buffer_index` is preserved for state-hash stability.
+    /// The completion keeps `buffer_index`, so its sync-state lane
+    /// does not move.
     #[inline]
     pub fn complete_pending_flip(&mut self) -> bool {
         if self.pending {
@@ -124,17 +123,24 @@ impl RsxFlipState {
         }
     }
 
-    /// FNV-1a hash prefixed with [`STATE_HASH_FORMAT_VERSION`].
-    /// Field order: status, handler (LE), pending, buffer_index.
-    /// Folds into the runtime's sync-state hash.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&[STATE_HASH_FORMAT_VERSION]);
-        hasher.write(&[self.status]);
-        hasher.write(&self.handler.to_le_bytes());
-        hasher.write(&[u8::from(self.pending)]);
-        hasher.write(&[self.buffer_index]);
-        hasher.finish()
+    /// The flip state's term of the sync-state sum, computed on read.
+    pub fn sync_term(&self) -> u128 {
+        lanes::value_term(source::RSX_FLIP, 0, self)
+    }
+}
+
+/// One lane field per stored value:
+///
+/// 1. `status`
+/// 2. `handler`
+/// 3. `pending`
+/// 4. `buffer_index`
+impl LaneValue for RsxFlipState {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.status));
+        lanes.lane(2, 0, u64::from(self.handler));
+        lanes.lane(3, 0, u64::from(self.pending));
+        lanes.lane(4, 0, u64::from(self.buffer_index));
     }
 }
 

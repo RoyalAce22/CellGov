@@ -46,3 +46,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/space_reservation_lanes_tests.rs"]
 mod space_reservation_lanes_tests;
+
+#[cfg(test)]
+#[path = "tests/shared_view_refusal_tests.rs"]
+mod shared_view_refusal_tests;

@@ -1,4 +1,4 @@
-//! RSX FIFO cursor put/get/reference semantics and per-field state-hash sensitivity.
+//! RSX FIFO cursor put/get/reference semantics, and the sensitivity of the sync-state term to each field.
 
 use super::*;
 
@@ -65,18 +65,18 @@ fn reference_zero_is_indistinguishable_from_pristine() {
     let mut set_to_zero = RsxFifoCursor::new();
     set_to_zero.set_reference(0);
     assert_eq!(pristine, set_to_zero);
-    assert_eq!(pristine.state_hash(), set_to_zero.state_hash());
+    assert_eq!(pristine.sync_term(), set_to_zero.sync_term());
 }
 
 #[test]
 fn empty_cursor_hash_is_stable() {
     let a = RsxFifoCursor::new();
     let b = RsxFifoCursor::new();
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_term(), b.sync_term());
 }
 
 #[test]
-fn state_hash_deterministic_across_identical_cursors() {
+fn sync_term_deterministic_across_identical_cursors() {
     let mut a = RsxFifoCursor::new();
     a.set_put(0xABCD);
     a.set_get(0x100);
@@ -87,19 +87,19 @@ fn state_hash_deterministic_across_identical_cursors() {
     b.set_get(0x100);
     b.set_reference(0xFEEDFACE);
 
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_term(), b.sync_term());
 }
 
 #[test]
-fn state_hash_distinguishes_each_field() {
+fn sync_term_distinguishes_each_field() {
     let mut base = RsxFifoCursor::new();
     base.set_put(1);
 
     let mut put_different = RsxFifoCursor::new();
     put_different.set_put(2);
     assert_ne!(
-        put_different.state_hash(),
-        base.state_hash(),
+        put_different.sync_term(),
+        base.sync_term(),
         "put distinguishes"
     );
 
@@ -107,8 +107,8 @@ fn state_hash_distinguishes_each_field() {
     get_different.set_put(1);
     get_different.set_get(1);
     assert_ne!(
-        get_different.state_hash(),
-        base.state_hash(),
+        get_different.sync_term(),
+        base.sync_term(),
         "get distinguishes"
     );
 
@@ -116,43 +116,32 @@ fn state_hash_distinguishes_each_field() {
     ref_different.set_put(1);
     ref_different.set_reference(1);
     assert_ne!(
-        ref_different.state_hash(),
-        base.state_hash(),
+        ref_different.sync_term(),
+        base.sync_term(),
         "reference distinguishes"
     );
 }
 
 #[test]
-fn state_hash_distinguishes_raw_put_from_masked_equivalent() {
+fn sync_term_distinguishes_raw_put_from_masked_equivalent() {
     let mut raw = RsxFifoCursor::new();
     raw.set_put(0x7FFF_FFFF);
     let mut masked = RsxFifoCursor::new();
     masked.set_put(0x7FFF_FFFF & 0xFFFF);
-    assert_ne!(raw.state_hash(), masked.state_hash());
+    assert_ne!(raw.sync_term(), masked.sync_term());
 }
 
+/// Computed outside the crate from the SplitMix64 key stream of the
+/// sync-state lanes.
 #[test]
-fn empty_cursor_hash_golden() {
-    const EXPECTED: u64 = 0xeca4_bd25_1670_946c;
-    let actual = RsxFifoCursor::new().state_hash();
+fn cursor_term_wire_format_golden() {
     assert_eq!(
-        actual, EXPECTED,
-        "empty cursor hash drift: got 0x{:016x}, expected 0x{:016x}",
-        actual, EXPECTED
+        RsxFifoCursor::new().sync_term(),
+        0x5ca5_cf3e_1811_cddb_b6b9_c23d_789c_9c53
     );
-}
-
-#[test]
-fn populated_cursor_hash_golden() {
-    const EXPECTED: u64 = 0x3fed_cabe_847c_2bac;
     let mut cur = RsxFifoCursor::new();
     cur.set_put(1);
     cur.set_get(2);
     cur.set_reference(3);
-    let actual = cur.state_hash();
-    assert_eq!(
-        actual, EXPECTED,
-        "populated cursor hash drift: got 0x{:016x}, expected 0x{:016x}",
-        actual, EXPECTED
-    );
+    assert_eq!(cur.sync_term(), 0x320a_0c24_8040_003d_9c1e_5c0f_c97f_82fd);
 }

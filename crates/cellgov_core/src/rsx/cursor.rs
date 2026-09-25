@@ -3,9 +3,7 @@
 //! Pure-data committed state for the cursor; ring-buffer geometry
 //! and drain conditions live in the advance pass.
 
-/// Hash-input shape version. Bump when [`RsxFifoCursor::state_hash`]
-/// changes field order, count, endianness, or hasher family.
-pub const STATE_HASH_FORMAT_VERSION: u8 = 1;
+use cellgov_mem::lanes::{self, source, LaneValue, ObjectLanes};
 
 /// Put / get / reference triple backing the RSX FIFO.
 ///
@@ -16,8 +14,8 @@ pub const STATE_HASH_FORMAT_VERSION: u8 = 1;
 ///   restore).
 /// - `get <= put` modulo the ring size known to the advance pass.
 ///
-/// Field mutators have no cross-field side effects; the state hash
-/// captures raw stored values.
+/// Field mutators have no cross-field side effects; the sync-state
+/// lanes carry raw stored values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RsxFifoCursor {
     put: u32,
@@ -72,16 +70,22 @@ impl RsxFifoCursor {
         self.current_reference = value;
     }
 
-    /// FNV-1a hash prefixed with [`STATE_HASH_FORMAT_VERSION`], each
-    /// field little-endian u32. Folds into the runtime's committed
-    /// memory-state hash.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&[STATE_HASH_FORMAT_VERSION]);
-        hasher.write(&self.put.to_le_bytes());
-        hasher.write(&self.get.to_le_bytes());
-        hasher.write(&self.current_reference.to_le_bytes());
-        hasher.finish()
+    /// The cursor's term of the sync-state sum, computed on read.
+    pub fn sync_term(&self) -> u128 {
+        lanes::value_term(source::RSX_CURSOR, 0, self)
+    }
+}
+
+/// One lane field per stored value:
+///
+/// 1. `put`
+/// 2. `get`
+/// 3. `current_reference`
+impl LaneValue for RsxFifoCursor {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.put));
+        lanes.lane(2, 0, u64::from(self.get));
+        lanes.lane(3, 0, u64::from(self.current_reference));
     }
 }
 

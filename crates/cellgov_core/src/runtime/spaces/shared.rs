@@ -27,7 +27,7 @@ impl Runtime {
         size: u64,
         views: &[(AddressSpaceId, u64)],
     ) -> Result<(), SpaceError> {
-        if self.spaces.shared.contains_key(&key) {
+        if self.spaces.shared.contains_key(key) {
             return Err(SpaceError::KeyExists(key));
         }
         for &(space, _) in views {
@@ -110,7 +110,7 @@ impl Runtime {
     ) {
         // A view of another length is not a view of this segment;
         // appending it would break every later containment test.
-        if let Some(mapping) = self.spaces.shared.get(&key) {
+        if let Some(mapping) = self.spaces.shared.get(key) {
             if mapping.size != size {
                 self.lv2_host.log_invariant_break(
                     "spaces.keyed_shm_size_drift",
@@ -140,7 +140,7 @@ impl Runtime {
             return;
         }
         entry.1.push((space, base));
-        if self.spaces.shared.contains_key(&key) {
+        if self.spaces.shared.contains_key(key) {
             self.adopt_shared_view(key, size, space, base);
             return;
         }
@@ -197,14 +197,26 @@ impl Runtime {
             );
             return;
         }
-        let first = self.spaces.shared[&key].views[0];
-        self.copy_shared_segment(first, (space, base), size);
-        self.spaces
+        // A mapping registered with no views has nothing to seed from.
+        let Some(first) = self
+            .spaces
             .shared
-            .get_mut(&key)
-            .expect("caller checked the key is live")
-            .views
-            .push((space, base));
+            .get(key)
+            .and_then(|mapping| mapping.views.first().copied())
+        else {
+            self.lv2_host.log_invariant_break(
+                "spaces.keyed_shm_mapping_viewless",
+                format_args!(
+                    "keyed shm 0x{key:016x}: live mapping has no view to seed from; view at                      0x{base:x} in space {} not added",
+                    space.raw(),
+                ),
+            );
+            return;
+        };
+        self.copy_shared_segment(first, (space, base), size);
+        if let Some(mut mapping) = self.spaces.shared.get_mut(key) {
+            mapping.views.push((space, base));
+        }
     }
 
     /// Whether `space` has one `ReadWrite` region wholly containing

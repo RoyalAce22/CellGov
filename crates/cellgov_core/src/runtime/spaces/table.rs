@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use cellgov_event::UnitId;
+use cellgov_mem::lanes::{self, source, LaneMap, LaneValue, ObjectLanes};
 use cellgov_mem::{GuestMemory, MemError};
 use cellgov_sync::ReservationTable;
 
@@ -25,6 +26,13 @@ impl AddressSpaceId {
     }
 }
 
+/// Field 1 is the space id.
+impl LaneValue for AddressSpaceId {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.0));
+    }
+}
+
 /// One process-shared segment: a size and its per-space views.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::runtime) struct SharedMapping {
@@ -34,22 +42,39 @@ pub(in crate::runtime) struct SharedMapping {
     pub(super) views: Vec<(AddressSpaceId, u64)>,
 }
 
+/// Lane fields of one mapping:
+///
+/// 1. `size`
+/// 2. the view count
+/// 3. slot `i`: the space of view `i`
+/// 4. slot `i`: the base of view `i`
+impl LaneValue for SharedMapping {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.size);
+        lanes.lane(2, 0, self.views.len() as u64);
+        for (i, (space, base)) in self.views.iter().enumerate() {
+            lanes.lane(3, i as u64, u64::from(space.0));
+            lanes.lane(4, i as u64, *base);
+        }
+    }
+}
+
 /// Child spaces, per-unit space tags, and shared mappings.
 ///
 /// Empty tables contribute nothing to any hash channel, so
 /// single-process boots hash identically whether or not the spaces
 /// API is ever touched.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(in crate::runtime) struct SpaceTable {
     /// Child spaces only; space 0 is `Runtime::memory`.
     pub(in crate::runtime) extra: BTreeMap<AddressSpaceId, GuestMemory>,
     /// Shared segments keyed by IPC key.
-    pub(in crate::runtime) shared: BTreeMap<u64, SharedMapping>,
+    pub(in crate::runtime) shared: LaneMap<u64, SharedMapping>,
     /// Unit -> space; absent means space 0.
-    pub(in crate::runtime) unit_spaces: BTreeMap<UnitId, AddressSpaceId>,
+    pub(in crate::runtime) unit_spaces: LaneMap<UnitId, AddressSpaceId>,
     /// Keyed-shm install history: IPC key -> (segment size, views in
     /// map order). A keyed map promotes into `shared` when a second
-    /// space attaches. Outside `metadata_hash` and `is_empty`, so a
+    /// space attaches. Outside the sync-state lanes, so a
     /// single-process boot's hash does not move.
     pub(in crate::runtime) keyed_installs: BTreeMap<u64, (u64, Vec<(AddressSpaceId, u64)>)>,
     /// Child-space reservation tables, keyed 1:1 with `extra`;
@@ -74,42 +99,59 @@ pub enum SpaceError {
     ViewInstall(#[source] MemError),
 }
 
-impl SpaceTable {
-    /// Whether any child space, tag, or mapping exists.
-    pub(in crate::runtime) fn is_empty(&self) -> bool {
-        self.extra.is_empty() && self.shared.is_empty() && self.unit_spaces.is_empty()
+impl Default for SpaceTable {
+    fn default() -> Self {
+        Self {
+            extra: BTreeMap::new(),
+            shared: LaneMap::new(source::SPACE_SHARED, |key| key),
+            unit_spaces: LaneMap::new(source::SPACE_TAG, UnitId::raw),
+            keyed_installs: BTreeMap::new(),
+            extra_reservations: BTreeMap::new(),
+        }
     }
+}
 
+impl SpaceTable {
     /// The space `unit` belongs to.
     pub(in crate::runtime) fn space_of(&self, unit: UnitId) -> AddressSpaceId {
         self.unit_spaces
-            .get(&unit)
+            .get(unit)
             .copied()
             .unwrap_or(AddressSpaceId::BOOT)
     }
 
-    /// FNV-1a over tags and mapping metadata (content hashes of the
-    /// child spaces travel on the committed-memory hash channel).
-    pub(in crate::runtime) fn metadata_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&(self.unit_spaces.len() as u64).to_le_bytes());
-        for (unit, space) in &self.unit_spaces {
-            hasher.write(&unit.raw().to_le_bytes());
-            hasher.write(&space.raw().to_le_bytes());
-        }
-        hasher.write(&(self.shared.len() as u64).to_le_bytes());
-        for (key, mapping) in &self.shared {
-            hasher.write(&key.to_le_bytes());
-            hasher.write(&mapping.size.to_le_bytes());
-            // The length prefix keeps a view entry distinct from the
-            // next mapping's key and size in the hash stream.
-            hasher.write(&(mapping.views.len() as u64).to_le_bytes());
-            for (space, base) in &mapping.views {
-                hasher.write(&space.raw().to_le_bytes());
-                hasher.write(&base.to_le_bytes());
-            }
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum.
+    ///
+    /// The partial is the sum of:
+    ///
+    /// - a presence lane per child space, computed on read;
+    /// - the partial of the unit tags;
+    /// - the partial of the shared mappings.
+    ///
+    /// The committed-memory hash channel carries the content of the
+    /// child spaces.
+    pub(in crate::runtime) fn sync_partial(&self) -> u128 {
+        self.spaces_term()
+            .wrapping_add(self.unit_spaces.partial())
+            .wrapping_add(self.shared.partial())
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub(in crate::runtime) fn sync_partial_from_scratch(&self) -> u128 {
+        self.spaces_term()
+            .wrapping_add(self.unit_spaces.partial_from_scratch())
+            .wrapping_add(self.shared.partial_from_scratch())
+    }
+
+    /// The presence lanes of the child spaces.
+    fn spaces_term(&self) -> u128 {
+        self.extra.keys().fold(0u128, |acc, space| {
+            acc.wrapping_add(lanes::value_term(
+                source::SPACE,
+                u64::from(space.raw()),
+                &(),
+            ))
+        })
     }
 }
 

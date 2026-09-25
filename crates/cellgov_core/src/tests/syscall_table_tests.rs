@@ -122,7 +122,7 @@ fn contains_returns_false_after_take() {
 }
 
 #[test]
-fn state_hash_is_deterministic() {
+fn sync_partial_is_deterministic() {
     let mut a = SyscallResponseTable::new();
     let mut b = SyscallResponseTable::new();
     ins(
@@ -135,11 +135,11 @@ fn state_hash_is_deterministic() {
         UnitId::new(1),
         PendingResponse::ReturnCode { code: 42 },
     );
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_differs_on_content() {
+fn sync_partial_differs_on_content() {
     let mut a = SyscallResponseTable::new();
     let mut b = SyscallResponseTable::new();
     ins(
@@ -152,11 +152,11 @@ fn state_hash_differs_on_content() {
         UnitId::new(1),
         PendingResponse::ReturnCode { code: 2 },
     );
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_empty_vs_populated_differ() {
+fn sync_partial_empty_vs_populated_differ() {
     let empty = SyscallResponseTable::new();
     let mut populated = SyscallResponseTable::new();
     ins(
@@ -164,11 +164,11 @@ fn state_hash_empty_vs_populated_differ() {
         UnitId::new(0),
         PendingResponse::ReturnCode { code: 0 },
     );
-    assert_ne!(empty.state_hash(), populated.state_hash());
+    assert_ne!(empty.sync_partial(), populated.sync_partial());
 }
 
 #[test]
-fn state_hash_covers_join_response() {
+fn sync_partial_covers_join_response() {
     let mut a = SyscallResponseTable::new();
     let mut b = SyscallResponseTable::new();
     ins(
@@ -195,25 +195,25 @@ fn state_hash_covers_join_response() {
             status: 0,
         },
     );
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_stable_after_try_take() {
+fn sync_partial_stable_after_try_take() {
     let mut t = SyscallResponseTable::new();
-    let empty_hash = t.state_hash();
+    let empty_hash = t.sync_partial();
     ins(
         &mut t,
         UnitId::new(0),
         PendingResponse::ReturnCode { code: 0 },
     );
-    assert_ne!(t.state_hash(), empty_hash);
+    assert_ne!(t.sync_partial(), empty_hash);
     t.try_take(UnitId::new(0));
-    assert_eq!(t.state_hash(), empty_hash);
+    assert_eq!(t.sync_partial(), empty_hash);
 }
 
 #[test]
-fn state_hash_thread_group_join_distinguishes_every_field() {
+fn sync_partial_thread_group_join_distinguishes_every_field() {
     use cellgov_event::UnitId;
     let base = PendingResponse::ThreadGroupJoin {
         group_id: 1,
@@ -294,13 +294,13 @@ fn state_hash_thread_group_join_distinguishes_every_field() {
     let base_hash = {
         let mut t = SyscallResponseTable::new();
         ins(&mut t, UnitId::new(0), base);
-        t.state_hash()
+        t.sync_partial()
     };
     for (field, mutated) in mutations {
         let mut t = SyscallResponseTable::new();
         ins(&mut t, UnitId::new(0), mutated);
         assert_ne!(
-            t.state_hash(),
+            t.sync_partial(),
             base_hash,
             "hash did not change when ThreadGroupJoin.{field} was mutated \
              -- field order drift or missing hash write"
@@ -310,7 +310,7 @@ fn state_hash_thread_group_join_distinguishes_every_field() {
 
 /// Per-field mutation coverage for the remaining variants.
 #[test]
-fn state_hash_covers_every_variant_and_field() {
+fn sync_partial_covers_every_variant_and_field() {
     use cellgov_event::UnitId;
     use cellgov_lv2::CondMutexKind;
 
@@ -501,13 +501,13 @@ fn state_hash_covers_every_variant_and_field() {
         let base_hash = {
             let mut t = SyscallResponseTable::new();
             ins(&mut t, UnitId::new(0), base);
-            t.state_hash()
+            t.sync_partial()
         };
         for (field, mutated) in mutations {
             let mut t = SyscallResponseTable::new();
             ins(&mut t, UnitId::new(0), mutated);
             assert_ne!(
-                t.state_hash(),
+                t.sync_partial(),
                 base_hash,
                 "hash did not change when {variant}.{field} was mutated"
             );
@@ -515,10 +515,8 @@ fn state_hash_covers_every_variant_and_field() {
     }
 }
 
-/// Picks two variants whose payload bytes collide if the tag byte
-/// is dropped, so the tag's disambiguation is exercised directly.
 #[test]
-fn state_hash_distinguishes_variants_with_overlapping_payloads() {
+fn sync_partial_distinguishes_variants_with_overlapping_payloads() {
     use cellgov_event::UnitId;
     let mut a = SyscallResponseTable::new();
     ins(
@@ -536,15 +534,15 @@ fn state_hash_distinguishes_variants_with_overlapping_payloads() {
         },
     );
     assert_ne!(
-        a.state_hash(),
-        b.state_hash(),
-        "variant tag byte is not discriminating -- a ReturnCode and PpuThreadJoin with \
+        a.sync_partial(),
+        b.sync_partial(),
+        "variant tag lane is not discriminating -- a ReturnCode and PpuThreadJoin with \
          identical numeric payloads hashed the same"
     );
 }
 
 #[test]
-fn state_hash_is_insertion_order_independent() {
+fn sync_partial_is_insertion_order_independent() {
     use cellgov_event::UnitId;
     let mut ascending = SyscallResponseTable::new();
     ins(
@@ -581,16 +579,14 @@ fn state_hash_is_insertion_order_independent() {
     );
 
     assert_eq!(
-        ascending.state_hash(),
-        descending.state_hash(),
-        "insertion order affected state_hash -- BTreeMap ordering invariant broken"
+        ascending.sync_partial(),
+        descending.sync_partial(),
+        "insertion order affected the partial"
     );
 }
 
-/// The count prefix disambiguates tables whose concatenated entry
-/// bytes would otherwise collide under a per-entry-only hash.
 #[test]
-fn state_hash_count_prefix_distinguishes_entry_counts() {
+fn sync_partial_distinguishes_entry_counts() {
     use cellgov_event::UnitId;
     let empty = SyscallResponseTable::new();
     let mut one = SyscallResponseTable::new();
@@ -612,18 +608,16 @@ fn state_hash_count_prefix_distinguishes_entry_counts() {
     );
 
     // All three counts must produce distinct hashes.
-    let h0 = empty.state_hash();
-    let h1 = one.state_hash();
-    let h2 = two.state_hash();
+    let h0 = empty.sync_partial();
+    let h1 = one.sync_partial();
+    let h2 = two.sync_partial();
     assert_ne!(h0, h1);
     assert_ne!(h0, h2);
     assert_ne!(h1, h2);
 }
 
-/// Every variant's tag byte must be unique; zero-payload instances
-/// pairwise hashed to catch a copy-pasted tag write.
 #[test]
-fn state_hash_every_variant_tag_is_unique() {
+fn sync_partial_every_variant_tag_is_unique() {
     use cellgov_event::UnitId;
     use cellgov_lv2::CondMutexKind;
     let variants: &[(&str, PendingResponse)] = &[
@@ -682,15 +676,15 @@ fn state_hash_every_variant_tag_is_unique() {
             },
         ),
     ];
-    let mut seen: std::collections::BTreeMap<u64, &str> = std::collections::BTreeMap::new();
+    let mut seen: std::collections::BTreeMap<u128, &str> = std::collections::BTreeMap::new();
     for (name, v) in variants {
         let mut t = SyscallResponseTable::new();
         ins(&mut t, UnitId::new(0), *v);
-        let h = t.state_hash();
+        let h = t.sync_partial();
         if let Some(prev) = seen.insert(h, name) {
             panic!(
-                "state_hash tag-byte collision: {name} and {prev} \
-                 hashed identically ({h:#018x}) under zero-payload construction"
+                "tag-lane collision: {name} and {prev} \
+                 hashed identically ({h:#034x}) under zero-payload construction"
             );
         }
     }
@@ -698,7 +692,10 @@ fn state_hash_every_variant_tag_is_unique() {
     assert_eq!(variants.len(), PendingResponse::VARIANT_COUNT);
 }
 
-/// Independent reconstruction of the per-variant wire bytes.
+/// Independent reconstruction of each response's lanes.
+///
+/// Field 1 is the variant tag plus 1, and fields 2 to 7 are the
+/// payload.
 ///
 /// `encode` is wildcard-free, so a new `PendingResponse` or
 /// `CondMutexKind` variant -- or a new `EventPayload` field -- stops
@@ -706,17 +703,14 @@ fn state_hash_every_variant_tag_is_unique() {
 /// time. That force reaches `encode` only; `cases` below stays
 /// hand-maintained.
 #[test]
-fn state_hash_wire_bytes_match_the_hash() {
+fn sync_partial_matches_the_documented_lanes() {
     use cellgov_event::UnitId;
     use cellgov_lv2::CondMutexKind;
+    use cellgov_mem::lanes::{contribution, source, LaneIndex};
 
-    fn encode(r: &PendingResponse) -> Vec<u8> {
-        let mut b = Vec::new();
-        match r {
-            PendingResponse::ReturnCode { code } => {
-                b.push(0);
-                b.extend_from_slice(&code.to_le_bytes());
-            }
+    fn encode(r: &PendingResponse) -> (u64, [u64; 6]) {
+        match *r {
+            PendingResponse::ReturnCode { code } => (0, [code, 0, 0, 0, 0, 0]),
             PendingResponse::ThreadGroupJoin {
                 group_id,
                 code,
@@ -724,78 +718,54 @@ fn state_hash_wire_bytes_match_the_hash() {
                 status_ptr,
                 cause,
                 status,
-            } => {
-                b.push(1);
-                b.extend_from_slice(&group_id.to_le_bytes());
-                b.extend_from_slice(&code.to_le_bytes());
-                b.extend_from_slice(&cause_ptr.to_le_bytes());
-                b.extend_from_slice(&status_ptr.to_le_bytes());
-                b.extend_from_slice(&cause.to_le_bytes());
-                b.extend_from_slice(&status.to_le_bytes());
-            }
+            } => (
+                1,
+                [
+                    u64::from(group_id),
+                    code,
+                    u64::from(cause_ptr),
+                    u64::from(status_ptr),
+                    u64::from(cause),
+                    u64::from(status),
+                ],
+            ),
             PendingResponse::PpuThreadJoin {
                 target,
                 status_out_ptr,
-            } => {
-                b.push(2);
-                b.extend_from_slice(&target.to_le_bytes());
-                b.extend_from_slice(&status_out_ptr.to_le_bytes());
-            }
-            PendingResponse::EventQueueReceive { out_ptr, payload } => {
-                b.push(3);
-                b.extend_from_slice(&out_ptr.to_le_bytes());
-                match payload {
-                    None => b.push(0),
-                    Some(cellgov_lv2::EventPayload {
-                        source,
-                        data1,
-                        data2,
-                        data3,
-                    }) => {
-                        b.push(1);
-                        b.extend_from_slice(&source.to_le_bytes());
-                        b.extend_from_slice(&data1.to_le_bytes());
-                        b.extend_from_slice(&data2.to_le_bytes());
-                        b.extend_from_slice(&data3.to_le_bytes());
-                    }
-                }
-            }
+            } => (2, [target, u64::from(status_out_ptr), 0, 0, 0, 0]),
+            PendingResponse::EventQueueReceive { out_ptr, payload } => match payload {
+                None => (3, [u64::from(out_ptr), 0, 0, 0, 0, 0]),
+                Some(cellgov_lv2::EventPayload {
+                    source,
+                    data1,
+                    data2,
+                    data3,
+                }) => (3, [u64::from(out_ptr), 1, source, data1, data2, data3]),
+            },
+            PendingResponse::EventFlagWake {
+                result_ptr,
+                observed,
+            } => (4, [u64::from(result_ptr), observed, 0, 0, 0, 0]),
             PendingResponse::CondWakeReacquire {
                 mutex_id,
                 mutex_kind,
             } => {
-                b.push(5);
-                b.extend_from_slice(&mutex_id.to_le_bytes());
-                // Pins the impl's `*mutex_kind as u8`: prepending a
+                // Pins the impl's `mutex_kind as u64 + 1`: prepending a
                 // CondMutexKind variant would silently renumber it.
-                b.push(match mutex_kind {
-                    CondMutexKind::LwMutex => 0,
-                    CondMutexKind::Mutex => 1,
-                });
-            }
-            PendingResponse::EventFlagWake {
-                result_ptr,
-                observed,
-            } => {
-                b.push(4);
-                b.extend_from_slice(&result_ptr.to_le_bytes());
-                b.extend_from_slice(&observed.to_le_bytes());
+                let kind = match mutex_kind {
+                    CondMutexKind::LwMutex => 1,
+                    CondMutexKind::Mutex => 2,
+                };
+                (5, [u64::from(mutex_id), kind, 0, 0, 0, 0])
             }
             PendingResponse::LwMutexWake { mutex_ptr, caller } => {
-                b.push(6);
-                b.extend_from_slice(&mutex_ptr.to_le_bytes());
-                b.extend_from_slice(&caller.to_le_bytes());
+                (6, [u64::from(mutex_ptr), u64::from(caller), 0, 0, 0, 0])
             }
             PendingResponse::EventFlagCancelWake {
                 result_ptr,
                 observed,
-            } => {
-                b.push(7);
-                b.extend_from_slice(&result_ptr.to_le_bytes());
-                b.extend_from_slice(&observed.to_le_bytes());
-            }
+            } => (7, [u64::from(result_ptr), observed, 0, 0, 0, 0]),
         }
-        b
     }
 
     let cases: &[PendingResponse] = &[
@@ -848,41 +818,41 @@ fn state_hash_wire_bytes_match_the_hash() {
     ];
 
     let unit = UnitId::new(0x1234);
+    let lane = |field, value| {
+        contribution(
+            LaneIndex::new(source::SYSCALL_RESPONSE, unit.raw(), field, 0),
+            value,
+        )
+    };
     let mut tags = std::collections::BTreeSet::new();
     for r in cases {
-        let wire = encode(r);
-        tags.insert(wire[0]);
+        let (tag, payload) = encode(r);
+        tags.insert(tag);
+        let mut expected = lane(0, 1).wrapping_add(lane(1, tag + 1));
+        for (i, value) in payload.into_iter().enumerate() {
+            expected = expected.wrapping_add(lane(2 + i as u8, value));
+        }
 
         let mut t = SyscallResponseTable::new();
         ins(&mut t, unit, *r);
-
-        let mut h = cellgov_mem::Fnv1aHasher::new();
-        h.write(&STATE_HASH_FORMAT_VERSION.to_le_bytes());
-        h.write(&1u64.to_le_bytes());
-        h.write(&unit.raw().to_le_bytes());
-        h.write(&wire);
         assert_eq!(
-            t.state_hash(),
-            h.finish(),
-            "state_hash disagrees with the documented wire bytes for {r:?}",
+            t.sync_partial(),
+            expected,
+            "sync_partial disagrees with the documented lanes for {r:?}",
         );
     }
 
-    assert_eq!(
-        tags.len(),
-        PendingResponse::VARIANT_COUNT,
-        "wire cases do not cover every PendingResponse variant",
-    );
-    let expected: std::collections::BTreeSet<u8> =
-        (0..PendingResponse::VARIANT_COUNT as u8).collect();
-    assert_eq!(tags, expected, "state-hash wire tags are not contiguous");
+    let expected: std::collections::BTreeSet<u64> =
+        (0..PendingResponse::VARIANT_COUNT as u64).collect();
+    assert_eq!(tags, expected, "lane cases do not cover every variant tag");
 }
 
-/// Golden hash over every variant; catches tag-byte reallocation,
-/// within-variant field reorders, FNV-1a byte-order drift, and any
-/// `STATE_HASH_FORMAT_VERSION` bump not propagated to `EXPECTED`.
+/// Literal pin over every variant except the cancel wake (tag 7).
+///
+/// The literal comes from the SplitMix64 key stream of the sync-state
+/// lanes, computed outside the crate.
 #[test]
-fn state_hash_wire_format_golden() {
+fn sync_partial_wire_format_golden() {
     use cellgov_event::UnitId;
     use cellgov_lv2::CondMutexKind;
     let mut t = SyscallResponseTable::new();
@@ -948,20 +918,14 @@ fn state_hash_wire_format_golden() {
             caller: 0x0100_0001,
         },
     );
-    const EXPECTED: u64 = 4_393_602_243_601_789_630;
-    let h = t.state_hash();
-    assert_eq!(
-        h, EXPECTED,
-        "syscall-table state-hash wire format drifted (got {h}); a versioned \
-         format change must update EXPECTED in the same commit"
-    );
+    assert_eq!(t.sync_partial(), 0xce75_21d0_bfde_4d17_257f_ee0f_6c85_9d2d);
 }
 
 /// Golden for the cancel-wake variant (tag 7), separate from
-/// [`state_hash_wire_format_golden`] so adding a variant leaves that
-/// golden's `EXPECTED` untouched.
+/// [`sync_partial_wire_format_golden`] so adding a variant leaves that
+/// golden's pin untouched.
 #[test]
-fn state_hash_wire_format_golden_event_flag_cancel_wake() {
+fn sync_partial_wire_format_golden_event_flag_cancel_wake() {
     use cellgov_event::UnitId;
     let mut t = SyscallResponseTable::new();
     ins(
@@ -972,11 +936,5 @@ fn state_hash_wire_format_golden_event_flag_cancel_wake() {
             observed: 0x0F0F_0F0F,
         },
     );
-    const EXPECTED: u64 = 16_294_822_156_021_057_518;
-    let h = t.state_hash();
-    assert_eq!(
-        h, EXPECTED,
-        "cancel-wake state-hash wire format drifted (got {h}); a versioned \
-         format change must update EXPECTED in the same commit"
-    );
+    assert_eq!(t.sync_partial(), 0x3c7c_0f3c_e0e3_153f_58bd_4221_c9e7_6b20);
 }

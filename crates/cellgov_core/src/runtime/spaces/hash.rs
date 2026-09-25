@@ -7,8 +7,8 @@ impl Runtime {
     ///
     /// Child spaces fold in so a cross-process divergence in one is
     /// witnessed; with no child space this is space 0's content hash.
-    /// Mapping metadata stays outside it and reaches the sync-channel
-    /// state hash through `metadata_hash`.
+    /// Mapping metadata stays outside it and reaches the sync-state
+    /// hash as the space table's lanes.
     pub fn committed_memory_hash(&self) -> u64 {
         if self.spaces.extra.is_empty() {
             return self.memory.content_hash();

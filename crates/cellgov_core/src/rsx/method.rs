@@ -203,8 +203,8 @@ pub fn nv406e_semaphore_release(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
 }
 
 /// `NV406E_SET_REFERENCE`: write the arg into the cursor's
-/// `current_reference` slot. Emits no effect; the slot is folded
-/// into [`crate::rsx::RsxFifoCursor::state_hash`].
+/// `current_reference` slot. Emits no effect; the slot reaches the
+/// sync-state hash through [`crate::rsx::RsxFifoCursor::sync_term`].
 pub fn nv406e_set_reference(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&value) = args.first() {
         ctx.cursor.set_reference(value);

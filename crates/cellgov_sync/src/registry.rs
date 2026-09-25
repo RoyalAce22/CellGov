@@ -1,8 +1,8 @@
 //! Generic id-keyed registry shared by `MailboxRegistry` and
 //! `SignalRegistry`.
 //!
-//! Values live in a [`LaneMap`] keyed by `id.raw()`: deterministic
-//! id-order iteration and a sync-state partial kept on every change.
+//! Values live in a [`LaneMap`] keyed by `id.raw()`. The map iterates
+//! in id order and keeps a sync-state partial on every change.
 //! `next_id` advances under `checked_add` so a saturating wrap cannot
 //! mint an id that aliases an existing one.
 
@@ -14,7 +14,8 @@ use cellgov_mem::lanes::{LaneEntryMut, LaneMap, LaneValue};
 pub trait RegistryId: Copy + Eq {
     /// Construct from a raw `u64`.
     fn new(raw: u64) -> Self;
-    /// Underlying `u64`, the value's object id in the sync-state lanes.
+    /// The raw `u64`, which is also the value's object id in the
+    /// sync-state lanes.
     fn raw(self) -> u64;
 }
 

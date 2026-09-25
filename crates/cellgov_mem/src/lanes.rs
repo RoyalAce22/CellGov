@@ -77,8 +77,10 @@ pub mod source {
     pub const RSX_SEM_OFFSET: u8 = 8;
     /// Unit-to-address-space tags, one object per unit.
     pub const SPACE_TAG: u8 = 9;
-    /// Shared segments, one object per segment in key order.
+    /// Shared segments, one object per segment key.
     pub const SPACE_SHARED: u8 = 10;
+    /// Child address spaces, one object per space id.
+    pub const SPACE: u8 = 11;
     /// The sources that no partial covers yet, folded as one value.
     pub const TRANSITIONAL: u8 = 255;
 }
@@ -214,7 +216,7 @@ impl Digest {
     }
 }
 
-/// The lanes of one object, summed as they are added.
+/// One object's lanes, which [`Self::lane`] adds to a running sum.
 #[derive(Debug, Clone, Copy)]
 pub struct ObjectLanes {
     source: u8,
@@ -245,6 +247,30 @@ pub trait LaneValue {
     /// Add the value's lanes to `lanes`. Fields start at 1: the map adds
     /// the presence lane, field 0, itself.
     fn lanes(&self, lanes: &mut ObjectLanes);
+}
+
+/// The `()` value has only the presence lane.
+impl LaneValue for () {
+    fn lanes(&self, _lanes: &mut ObjectLanes) {}
+}
+
+/// A bare word is one lane, field 1.
+impl LaneValue for u64 {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, *self);
+    }
+}
+
+/// The contribution of one value held outside a [`LaneMap`]: object
+/// `object` of `source`, with its presence lane. A source whose state is
+/// a few fixed fields computes this on read instead of keeping a partial.
+pub fn value_term<V: LaneValue>(source: u8, object: u64, value: &V) -> u128 {
+    Shape {
+        source,
+        slot_base: 0,
+        object_of: |object: u64| object,
+    }
+    .term(object, value)
 }
 
 /// Where the lanes of a map's entries sit.
@@ -321,9 +347,14 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
     /// The same map with every lane moved `slot_base` slots up. Two
     /// maps of one source with different slot bases occupy disjoint
     /// lanes while their values use slot 0 only.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, panics if the map holds an entry.
     pub fn with_slot_base(mut self, slot_base: u64) -> Self {
         debug_assert!(self.entries.is_empty(), "slot base set on a filled map");
         self.shape.slot_base = slot_base;
+        self.partial = self.partial_from_scratch();
         self
     }
 
@@ -356,13 +387,18 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
         self.entries.iter().map(|(k, v)| (*k, v))
     }
 
+    /// Iterate the values in key order.
+    pub fn values(&self) -> impl DoubleEndedIterator<Item = &V> + '_ {
+        self.entries.values()
+    }
+
     /// The entry with the smallest key.
     #[inline]
     pub fn first(&self) -> Option<(K, &V)> {
         self.entries.first_key_value().map(|(k, v)| (*k, v))
     }
 
-    /// Insert `value` at `key`, returning the value it replaces.
+    /// Insert `value` at `key` and return the value it replaces.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         self.partial = self.partial.wrapping_add(self.shape.term(key, &value));
         let prior = self.entries.insert(key, value);
@@ -372,7 +408,7 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
         prior
     }
 
-    /// Remove the entry at `key`, returning its value.
+    /// Remove the entry at `key` and return its value.
     pub fn remove(&mut self, key: K) -> Option<V> {
         let removed = self.entries.remove(&key)?;
         self.partial = self.partial.wrapping_sub(self.shape.term(key, &removed));
@@ -439,9 +475,11 @@ impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
     }
 }
 
-/// A mutable borrow of one [`LaneMap`] value. The entry's contribution
-/// leaves the partial when the guard is made and returns, recomputed,
-/// when it drops.
+/// A mutable borrow of one [`LaneMap`] value.
+///
+/// [`LaneMap::get_mut`] subtracts the entry's contribution from the
+/// partial when it makes the guard. The guard adds the recomputed
+/// contribution back when it drops.
 pub struct LaneEntryMut<'a, K: Copy, V: LaneValue> {
     key: K,
     value: &'a mut V,

@@ -111,14 +111,13 @@ stateDiagram-v2
   WAITING --> DONE : next commit boundary, pending = false
 ```
 
-**State-hash contribution.** The RSX committed state folds three
-sub-hashes into `sync_state_hash` at every commit boundary:
-`RsxFifoCursor::state_hash` (put / get / current_reference),
-`RsxFlipState::state_hash` (status / handler / pending /
-buffer_index), and the transient `sem_offset` as a u64, which
+**State-hash contribution.** The RSX committed state adds three
+terms to `sync_state_hash` at every commit boundary, each a set
+of Multilinear-128 lanes computed on read: the FIFO cursor (put /
+get / current_reference), the flip state (status / handler /
+pending / buffer_index), and the transient `sem_offset`, which
 carries the offset from an `NV406E_SEMAPHORE_OFFSET` parse to
-its paired `NV406E_SEMAPHORE_RELEASE`. Each `state_hash` carries
-its own `STATE_HASH_FORMAT_VERSION` byte.
+its paired `NV406E_SEMAPHORE_RELEASE`.
 
 **Scope boundary.** The model does not do:
 
