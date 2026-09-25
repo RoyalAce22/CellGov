@@ -4,15 +4,66 @@ use super::block_reason::block_reason_payload;
 use super::id::{PpuThreadId, PpuThreadIdAllocator};
 use super::thread::{AddJoinWaiter, PpuThread, PpuThreadAttrs, PpuThreadState};
 use cellgov_event::UnitId;
-use std::collections::BTreeMap;
+use cellgov_mem::lanes::{self, source, LaneEntryMut, LaneMap, LaneValue, ObjectLanes};
+
+impl LaneValue for PpuThread {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.unit_id.raw());
+        let (state, reason) = match &self.state {
+            PpuThreadState::Runnable => (1, None),
+            PpuThreadState::Blocked(reason) => (2, Some(reason)),
+            PpuThreadState::Finished => (3, None),
+            PpuThreadState::Detached => (4, None),
+        };
+        lanes.lane(2, 0, state);
+        if let Some(reason) = reason {
+            lanes.lane(3, 0, u64::from(reason.stable_tag()));
+            let payload = block_reason_payload(reason);
+            for (i, chunk) in payload.chunks_exact(8).enumerate() {
+                let mut word = [0u8; 8];
+                word.copy_from_slice(chunk);
+                lanes.lane(4, i as u64, u64::from_le_bytes(word));
+            }
+        }
+        let a = &self.attrs;
+        lanes.lane(5, 0, a.entry);
+        lanes.lane(6, 0, a.arg);
+        lanes.lane(7, 0, u64::from(a.stack_base));
+        lanes.lane(8, 0, u64::from(a.stack_size));
+        lanes.lane(9, 0, u64::from(a.priority));
+        lanes.lane(10, 0, u64::from(a.tls_base));
+        lanes.lane(11, 0, u64::from(self.exit_value.is_some()));
+        lanes.lane(12, 0, self.exit_value.unwrap_or(0));
+        lanes.lane(13, 0, self.join_waiters.len() as u64);
+        for (slot, waiter) in self.join_waiters.iter().enumerate() {
+            lanes.lane(14, slot as u64, waiter.raw());
+        }
+    }
+}
+
+impl LaneValue for PpuThreadId {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.raw());
+    }
+}
 
 /// Table of PPU threads; lookup by `PpuThreadId` (guest-facing)
 /// or `UnitId` (runtime).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PpuThreadTable {
     allocator: PpuThreadIdAllocator,
-    threads: BTreeMap<PpuThreadId, PpuThread>,
-    unit_to_thread: BTreeMap<UnitId, PpuThreadId>,
+    threads: LaneMap<PpuThreadId, PpuThread>,
+    unit_to_thread: LaneMap<UnitId, PpuThreadId>,
+}
+
+impl Default for PpuThreadTable {
+    fn default() -> Self {
+        Self {
+            allocator: PpuThreadIdAllocator::new(),
+            threads: LaneMap::new(source::PPU_THREAD, PpuThreadId::raw),
+            unit_to_thread: LaneMap::new(source::PPU_THREAD_UNIT, UnitId::raw),
+        }
+    }
 }
 
 impl PpuThreadTable {
@@ -30,7 +81,7 @@ impl PpuThreadTable {
     /// - Debug-only if `unit_id` already maps to another thread.
     pub fn insert_primary(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) {
         assert!(
-            !self.threads.contains_key(&PpuThreadId::PRIMARY),
+            !self.threads.contains_key(PpuThreadId::PRIMARY),
             "primary thread already inserted",
         );
         assert!(
@@ -39,7 +90,7 @@ impl PpuThreadTable {
             self.threads.len(),
         );
         debug_assert!(
-            !self.unit_to_thread.contains_key(&unit_id),
+            !self.unit_to_thread.contains_key(unit_id),
             "insert_primary: UnitId {unit_id:?} already mapped to another thread",
         );
         let thread = PpuThread {
@@ -61,7 +112,7 @@ impl PpuThreadTable {
     /// Debug-only if `unit_id` already maps to another thread.
     pub fn create(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) -> Option<PpuThreadId> {
         debug_assert!(
-            !self.unit_to_thread.contains_key(&unit_id),
+            !self.unit_to_thread.contains_key(unit_id),
             "create: UnitId {unit_id:?} already mapped to another thread",
         );
         let id = self.allocator.allocate()?;
@@ -94,10 +145,10 @@ impl PpuThreadTable {
     /// `unit_id` is already mapped (the caller is responsible
     /// for not double-aliasing).
     pub fn alias_unit(&mut self, unit_id: UnitId, existing: PpuThreadId) -> bool {
-        if !self.threads.contains_key(&existing) {
+        if !self.threads.contains_key(existing) {
             return false;
         }
-        if self.unit_to_thread.contains_key(&unit_id) {
+        if self.unit_to_thread.contains_key(unit_id) {
             return false;
         }
         self.unit_to_thread.insert(unit_id, existing);
@@ -111,35 +162,38 @@ impl PpuThreadTable {
     /// post-boot lookups against the retired transient `UnitId`s
     /// fall through to the strict ESRCH path.
     pub fn drop_alias(&mut self, unit_id: UnitId) -> bool {
-        self.unit_to_thread.remove(&unit_id).is_some()
+        self.unit_to_thread.remove(unit_id).is_some()
     }
 
     /// Look up a thread by id.
     pub fn get(&self, id: PpuThreadId) -> Option<&PpuThread> {
-        self.threads.get(&id)
+        self.threads.get(id)
     }
 
     /// Mutably look up a thread by id.
-    pub fn get_mut(&mut self, id: PpuThreadId) -> Option<&mut PpuThread> {
-        self.threads.get_mut(&id)
+    pub fn get_mut(&mut self, id: PpuThreadId) -> Option<LaneEntryMut<'_, PpuThreadId, PpuThread>> {
+        self.threads.get_mut(id)
     }
 
     /// Look up a thread by its runtime unit id.
     pub fn get_by_unit(&self, unit_id: UnitId) -> Option<&PpuThread> {
         self.unit_to_thread
-            .get(&unit_id)
-            .and_then(|id| self.threads.get(id))
+            .get(unit_id)
+            .and_then(|id| self.threads.get(*id))
     }
 
     /// Mutably look up a thread by its runtime unit id.
-    pub fn get_by_unit_mut(&mut self, unit_id: UnitId) -> Option<&mut PpuThread> {
-        let id = *self.unit_to_thread.get(&unit_id)?;
-        self.threads.get_mut(&id)
+    pub fn get_by_unit_mut(
+        &mut self,
+        unit_id: UnitId,
+    ) -> Option<LaneEntryMut<'_, PpuThreadId, PpuThread>> {
+        let id = *self.unit_to_thread.get(unit_id)?;
+        self.threads.get_mut(id)
     }
 
     /// Translate a runtime unit id to its guest thread id.
     pub fn thread_id_for_unit(&self, unit_id: UnitId) -> Option<PpuThreadId> {
-        self.unit_to_thread.get(&unit_id).copied()
+        self.unit_to_thread.get(unit_id).copied()
     }
 
     /// Remove every thread in `threads` from every thread's
@@ -162,16 +216,16 @@ impl PpuThreadTable {
         threads: &std::collections::BTreeSet<PpuThreadId>,
     ) -> Vec<(PpuThreadId, PpuThreadId)> {
         let mut removed = Vec::new();
-        for (target, thread) in &mut self.threads {
+        self.threads.for_each_mut(|target, thread| {
             thread.join_waiters.retain(|&waiter| {
                 if threads.contains(&waiter) {
-                    removed.push((*target, waiter));
+                    removed.push((target, waiter));
                     false
                 } else {
                     true
                 }
             });
-        }
+        });
         removed
     }
 
@@ -188,7 +242,7 @@ impl PpuThreadTable {
     /// Debug-only if called on a thread already `Finished` or
     /// `Detached`.
     pub fn mark_finished(&mut self, id: PpuThreadId, exit_value: u64) -> Vec<PpuThreadId> {
-        let Some(thread) = self.threads.get_mut(&id) else {
+        let Some(mut thread) = self.threads.get_mut(id) else {
             return Vec::new();
         };
         debug_assert!(
@@ -210,8 +264,8 @@ impl PpuThreadTable {
     /// Destructively take the joiner list without changing
     /// thread state.
     pub fn take_join_waiters(&mut self, id: PpuThreadId) -> Vec<PpuThreadId> {
-        match self.threads.get_mut(&id) {
-            Some(t) => std::mem::take(&mut t.join_waiters),
+        match self.threads.get_mut(id) {
+            Some(mut t) => std::mem::take(&mut t.join_waiters),
             None => Vec::new(),
         }
     }
@@ -223,7 +277,7 @@ impl PpuThreadTable {
         if target == waiter {
             return AddJoinWaiter::SelfJoin;
         }
-        let Some(t) = self.threads.get_mut(&target) else {
+        let Some(mut t) = self.threads.get_mut(target) else {
             return AddJoinWaiter::UnknownTarget;
         };
         match t.state {
@@ -239,8 +293,8 @@ impl PpuThreadTable {
     /// Mark a thread `Detached` so it garbage-collects on
     /// finish without a join; `true` if the target exists.
     pub fn detach(&mut self, id: PpuThreadId) -> bool {
-        match self.threads.get_mut(&id) {
-            Some(t) => {
+        match self.threads.get_mut(id) {
+            Some(mut t) => {
                 t.state = PpuThreadState::Detached;
                 true
             }
@@ -258,9 +312,9 @@ impl PpuThreadTable {
         self.threads.is_empty()
     }
 
-    /// Iterate all thread ids in BTreeMap order.
+    /// Iterate all thread ids in ascending order.
     pub fn iter_ids(&self) -> impl Iterator<Item = PpuThreadId> + '_ {
-        self.threads.keys().copied()
+        self.threads.keys()
     }
 
     /// Whether any thread whose low-32-bit id matches `raw_low32` is
@@ -285,46 +339,26 @@ impl PpuThreadTable {
         thread.state.is_alive()
     }
 
-    /// FNV-1a fold for determinism checking.
-    ///
-    /// The join-waiter list is length-prefixed so `([X,Y], [])`
-    /// cannot collide with `([X], [Y])`.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        for (id, thread) in &self.threads {
-            hasher.write(&id.raw().to_le_bytes());
-            hasher.write(&thread.unit_id.raw().to_le_bytes());
-            let state_byte = match &thread.state {
-                PpuThreadState::Runnable => 0u8,
-                PpuThreadState::Blocked(_) => 1,
-                PpuThreadState::Finished => 2,
-                PpuThreadState::Detached => 3,
-            };
-            hasher.write(&[state_byte]);
-            if let PpuThreadState::Blocked(reason) = &thread.state {
-                hasher.write(&[reason.stable_tag()]);
-                let payload = block_reason_payload(reason);
-                hasher.write(&payload);
-            }
-            let a = &thread.attrs;
-            hasher.write(&a.entry.to_le_bytes());
-            hasher.write(&a.arg.to_le_bytes());
-            hasher.write(&a.stack_base.to_le_bytes());
-            hasher.write(&a.stack_size.to_le_bytes());
-            hasher.write(&a.priority.to_le_bytes());
-            hasher.write(&a.tls_base.to_le_bytes());
-            if let Some(v) = thread.exit_value {
-                hasher.write(&[1]);
-                hasher.write(&v.to_le_bytes());
-            } else {
-                hasher.write(&[0]);
-            }
-            hasher.write(&(thread.join_waiters.len() as u64).to_le_bytes());
-            for waiter in &thread.join_waiters {
-                hasher.write(&waiter.raw().to_le_bytes());
-            }
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum: the threads, the unit
+    /// bindings and the id allocator's cursor.
+    pub fn sync_partial(&self) -> u128 {
+        self.threads
+            .partial()
+            .wrapping_add(self.unit_to_thread.partial())
+            .wrapping_add(self.allocator_term())
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.threads
+            .partial_from_scratch()
+            .wrapping_add(self.unit_to_thread.partial_from_scratch())
+            .wrapping_add(self.allocator_term())
+    }
+
+    /// The id allocator's term.
+    fn allocator_term(&self) -> u128 {
+        lanes::value_term(source::PPU_THREAD_IDS, 0, &self.allocator)
     }
 }
 

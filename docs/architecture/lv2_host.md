@@ -194,7 +194,8 @@ process (ppid, authority id, capability flags, exit status); the
 boot process is pre-seeded under the pid LV2 assigns the first user
 process (`cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID`). Units
 bind to a pid after spawn; unbound units belong to the boot
-process. Every entry field folds into the host state hash.
+process. Every entry field and every unit binding is a lane of the
+host's partial of `sync_state_hash`.
 
 `_sys_process_spawn` and `sys_process_spawns_a_self2` decode the
 caller's marshalled argument block (pointer table, path and argv

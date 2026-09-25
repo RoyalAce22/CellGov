@@ -134,6 +134,18 @@ impl ThreadStackAllocator {
     }
 }
 
+impl ThreadStackAllocator {
+    /// The allocator's term of the sync-state sum: its cursor XOR
+    /// [`Self::CHILD_STACK_BASE`], so a fresh allocator's lane is zero.
+    pub(crate) fn sync_term(&self) -> u128 {
+        cellgov_mem::lanes::value_term(
+            cellgov_mem::lanes::source::THREAD_STACKS,
+            0,
+            &(self.next ^ Self::CHILD_STACK_BASE),
+        )
+    }
+}
+
 impl Default for ThreadStackAllocator {
     fn default() -> Self {
         Self::new()

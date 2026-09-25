@@ -3,9 +3,10 @@
 //! Owns group lifecycle from create through finish. Group ids are
 //! monotonic u32 tokens starting at 1; 0 is reserved.
 
-use crate::dispatch::SpuInitState;
+use crate::dispatch::{SpuInitState, SpuLoadImage};
 use crate::image::SpuImageHandle;
 use cellgov_event::UnitId;
+use cellgov_mem::lanes::{self, source, LaneEntryMut, LaneMap, LaneValue, ObjectLanes};
 use std::collections::BTreeMap;
 
 /// Cap on slots per group; the `group_id * 256 + slot` thread-id
@@ -54,6 +55,56 @@ pub struct ThreadGroup {
     /// Drives the terminal transition to [`GroupState::Finished`]
     /// when it reaches 0.
     pub remaining_unfinished: u32,
+}
+
+impl LaneValue for ThreadGroup {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.id));
+        lanes.lane(2, 0, u64::from(self.num_threads));
+        lanes.lane(3, 0, u64::from(self.remaining_unfinished));
+        let state = match self.state {
+            GroupState::Created => 1,
+            GroupState::Running => 2,
+            GroupState::Finished => 3,
+        };
+        lanes.lane(4, 0, state);
+        lanes.lane(5, 0, self.slots.len() as u64);
+        for (&index, slot) in &self.slots {
+            let index = u64::from(index);
+            lanes.lane(6, index, 1);
+            lanes.lane(7, index, u64::from(slot.image_handle.raw()));
+            for (i, arg) in slot.args.iter().enumerate() {
+                lanes.lane(8 + i as u8, index, *arg);
+            }
+            let Some(init) = &slot.init else {
+                continue;
+            };
+            lanes.lane(12, index, 1);
+            lanes.lane(13, index, u64::from(init.entry_pc));
+            lanes.lane(14, index, u64::from(init.stack_ptr));
+            for (i, arg) in init.args.iter().enumerate() {
+                lanes.lane(15 + i as u8, index, *arg);
+            }
+            lanes.lane(19, index, u64::from(init.group_id));
+            match &init.image {
+                SpuLoadImage::Elf(bytes) => {
+                    lanes.lane(20, index, 1);
+                    lanes.bytes(21, &[index, 0], bytes);
+                }
+                SpuLoadImage::Segments(segments) => {
+                    lanes.lane(20, index, 2);
+                    lanes.lane(22, index, segments.len() as u64);
+                    for (j, segment) in segments.iter().enumerate() {
+                        lanes.bytes(
+                            21,
+                            &[index, 1 + j as u64, u64::from(segment.ls_start)],
+                            &segment.bytes,
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Failure modes of [`ThreadGroupTable::initialize_thread`].
@@ -158,24 +209,30 @@ pub enum DestroyGroupError {
 /// latter. Keeping them distinct is what lets a double-notify
 /// surface as [`NotifySpuFinishedError::AlreadyFinished`] rather
 /// than re-decrementing the counter.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ThreadGroupTable {
-    groups: BTreeMap<u32, ThreadGroup>,
-    unit_to_group: BTreeMap<UnitId, u32>,
-    finished_units: BTreeMap<UnitId, u32>,
-    /// Synthetic `group_id * 256 + slot` -> runtime `UnitId`.
-    thread_id_to_unit: BTreeMap<u32, UnitId>,
+    groups: LaneMap<u32, ThreadGroup>,
+    unit_to_group: LaneMap<UnitId, u32>,
+    finished_units: LaneMap<UnitId, u32>,
+    /// Synthetic `group_id * 256 + slot` -> raw runtime `UnitId`.
+    thread_id_to_unit: LaneMap<u32, u64>,
     next_id: u32,
+}
+
+impl Default for ThreadGroupTable {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ThreadGroupTable {
     /// Construct an empty table.
     pub fn new() -> Self {
         Self {
-            groups: BTreeMap::new(),
-            unit_to_group: BTreeMap::new(),
-            finished_units: BTreeMap::new(),
-            thread_id_to_unit: BTreeMap::new(),
+            groups: LaneMap::new(source::THREAD_GROUP, u64::from),
+            unit_to_group: LaneMap::new(source::GROUP_UNIT, UnitId::raw),
+            finished_units: LaneMap::new(source::GROUP_FINISHED_UNIT, UnitId::raw),
+            thread_id_to_unit: LaneMap::new(source::GROUP_THREAD_ID, u64::from),
             next_id: 1,
         }
     }
@@ -211,9 +268,9 @@ impl ThreadGroupTable {
         image_handle: SpuImageHandle,
         args: [u64; 4],
     ) -> Result<(), InitializeThreadError> {
-        let group = self
+        let mut group = self
             .groups
-            .get_mut(&group_id)
+            .get_mut(group_id)
             .ok_or(InitializeThreadError::UnknownGroup)?;
         if group.state != GroupState::Created {
             return Err(InitializeThreadError::GroupAlreadyStarted { state: group.state });
@@ -247,12 +304,12 @@ impl ThreadGroupTable {
 
     /// Look up a group by id.
     pub fn get(&self, group_id: u32) -> Option<&ThreadGroup> {
-        self.groups.get(&group_id)
+        self.groups.get(group_id)
     }
 
     /// Mutably look up a group by id.
-    pub fn get_mut(&mut self, group_id: u32) -> Option<&mut ThreadGroup> {
-        self.groups.get_mut(&group_id)
+    pub fn get_mut(&mut self, group_id: u32) -> Option<LaneEntryMut<'_, u32, ThreadGroup>> {
+        self.groups.get_mut(group_id)
     }
 
     /// Withdraw a group whose state allows destruction.
@@ -264,12 +321,12 @@ impl ThreadGroupTable {
     /// the group's slots are scrubbed so a future `create` reusing
     /// the same id starts clean.
     pub fn destroy(&mut self, group_id: u32) -> Result<(), DestroyGroupError> {
-        match self.groups.get(&group_id) {
+        match self.groups.get(group_id) {
             None => return Err(DestroyGroupError::Unknown),
             Some(g) if g.state == GroupState::Running => return Err(DestroyGroupError::Busy),
             Some(_) => {}
         }
-        self.groups.remove(&group_id);
+        self.groups.remove(group_id);
         self.unit_to_group.retain(|_, gid| *gid != group_id);
         self.finished_units.retain(|_, gid| *gid != group_id);
         self.thread_id_to_unit
@@ -303,7 +360,7 @@ impl ThreadGroupTable {
         {
             let group = self
                 .groups
-                .get(&group_id)
+                .get(group_id)
                 .ok_or(RecordSpuError::UnknownGroup)?;
             if group.state == GroupState::Finished {
                 return Err(RecordSpuError::GroupAlreadyFinished);
@@ -316,17 +373,17 @@ impl ThreadGroupTable {
             .checked_mul(MAX_SLOTS_PER_GROUP)
             .and_then(|x| x.checked_add(slot))
             .ok_or(RecordSpuError::ThreadIdOverflow)?;
-        if self.unit_to_group.contains_key(&unit_id) || self.finished_units.contains_key(&unit_id) {
+        if self.unit_to_group.contains_key(unit_id) || self.finished_units.contains_key(unit_id) {
             return Err(RecordSpuError::DuplicateUnit);
         }
-        if self.thread_id_to_unit.contains_key(&thread_id) {
+        if self.thread_id_to_unit.contains_key(thread_id) {
             return Err(RecordSpuError::ThreadIdCollision);
         }
         self.unit_to_group.insert(unit_id, group_id);
-        self.thread_id_to_unit.insert(thread_id, unit_id);
-        let group = self
+        self.thread_id_to_unit.insert(thread_id, unit_id.raw());
+        let mut group = self
             .groups
-            .get_mut(&group_id)
+            .get_mut(group_id)
             .expect("group existence checked above and table is &mut");
         group.remaining_unfinished = group
             .remaining_unfinished
@@ -343,7 +400,7 @@ impl ThreadGroupTable {
     pub(crate) fn cancel_unregistered_start(&mut self, group_id: u32) -> bool {
         let has_units = self.unit_to_group.values().any(|&gid| gid == group_id)
             || self.finished_units.values().any(|&gid| gid == group_id);
-        let Some(group) = self.groups.get_mut(&group_id) else {
+        let Some(mut group) = self.groups.get_mut(group_id) else {
             return false;
         };
         if group.state != GroupState::Running || group.remaining_unfinished != 0 || has_units {
@@ -355,7 +412,9 @@ impl ThreadGroupTable {
 
     /// Look up the runtime UnitId for a synthetic thread_id.
     pub fn unit_for_thread(&self, thread_id: u32) -> Option<UnitId> {
-        self.thread_id_to_unit.get(&thread_id).copied()
+        self.thread_id_to_unit
+            .get(thread_id)
+            .map(|&raw| UnitId::new(raw))
     }
 
     /// Thread-id lookup filtered to [`GroupState::Running`].
@@ -365,8 +424,8 @@ impl ThreadGroupTable {
     /// surface as `ESRCH` rather than queuing in a dead mailbox.
     pub fn running_unit_for_thread(&self, thread_id: u32) -> Option<UnitId> {
         let unit_id = self.unit_for_thread(thread_id)?;
-        let group_id = self.unit_to_group.get(&unit_id)?;
-        let group = self.groups.get(group_id)?;
+        let group_id = self.unit_to_group.get(unit_id)?;
+        let group = self.groups.get(*group_id)?;
         if group.state == GroupState::Running {
             Some(unit_id)
         } else {
@@ -387,19 +446,19 @@ impl ThreadGroupTable {
         &mut self,
         unit_id: UnitId,
     ) -> Result<Option<u32>, NotifySpuFinishedError> {
-        if let Some(&group_id) = self.finished_units.get(&unit_id) {
+        if let Some(&group_id) = self.finished_units.get(unit_id) {
             return Err(NotifySpuFinishedError::AlreadyFinished { group_id });
         }
         let group_id = *self
             .unit_to_group
-            .get(&unit_id)
+            .get(unit_id)
             .ok_or(NotifySpuFinishedError::UnknownUnit)?;
         // Existence is guaranteed: `record_spu` checks the group
         // before inserting into `unit_to_group`, and the table
         // exposes no group-destroy path.
-        let group = self
+        let mut group = self
             .groups
-            .get_mut(&group_id)
+            .get_mut(group_id)
             .expect("unit_to_group references a nonexistent group");
         if group.state != GroupState::Running {
             return Err(NotifySpuFinishedError::GroupNotRunning { state: group.state });
@@ -414,7 +473,7 @@ impl ThreadGroupTable {
         }
         // Move across the unit_to_group/finished_units boundary so
         // a second notify hits AlreadyFinished, not re-decrement.
-        self.unit_to_group.remove(&unit_id);
+        self.unit_to_group.remove(unit_id);
         self.finished_units.insert(unit_id, group_id);
         if terminal {
             Ok(Some(group_id))
@@ -423,77 +482,30 @@ impl ThreadGroupTable {
         }
     }
 
-    /// FNV-1a hash of the table for determinism checking.
-    ///
-    /// `unit_to_group`, `finished_units`, and `thread_id_to_unit`
-    /// are each folded independently: they are separately mutable,
-    /// so a desync between them is only catchable by hashing each
-    /// on its own.
-    pub fn state_hash(&self) -> u64 {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        for (id, group) in &self.groups {
-            hasher.write(&id.to_le_bytes());
-            hasher.write(&group.num_threads.to_le_bytes());
-            hasher.write(&group.remaining_unfinished.to_le_bytes());
-            let state_byte = match group.state {
-                GroupState::Created => 0u8,
-                GroupState::Running => 1,
-                GroupState::Finished => 2,
-            };
-            hasher.write(&[state_byte]);
-            hasher.write(&(group.slots.len() as u64).to_le_bytes());
-            for (slot_idx, slot) in &group.slots {
-                hasher.write(&slot_idx.to_le_bytes());
-                hasher.write(&slot.image_handle.raw().to_le_bytes());
-                for a in &slot.args {
-                    hasher.write(&a.to_le_bytes());
-                }
-                match &slot.init {
-                    None => hasher.write(&[0u8]),
-                    Some(init) => {
-                        hasher.write(&[1u8]);
-                        match &init.image {
-                            crate::dispatch::SpuLoadImage::Elf(bytes) => {
-                                hasher.write(&[0u8]);
-                                hasher.write(&(bytes.len() as u64).to_le_bytes());
-                                hasher.write(bytes);
-                            }
-                            crate::dispatch::SpuLoadImage::Segments(segments) => {
-                                hasher.write(&[1u8]);
-                                hasher.write(&(segments.len() as u64).to_le_bytes());
-                                for seg in segments {
-                                    hasher.write(&seg.ls_start.to_le_bytes());
-                                    hasher.write(&(seg.bytes.len() as u64).to_le_bytes());
-                                    hasher.write(&seg.bytes);
-                                }
-                            }
-                        }
-                        hasher.write(&init.entry_pc.to_le_bytes());
-                        hasher.write(&init.stack_ptr.to_le_bytes());
-                        for a in &init.args {
-                            hasher.write(&a.to_le_bytes());
-                        }
-                        hasher.write(&init.group_id.to_le_bytes());
-                    }
-                }
-            }
-        }
-        hasher.write(&(self.unit_to_group.len() as u64).to_le_bytes());
-        for (uid, gid) in &self.unit_to_group {
-            hasher.write(&uid.raw().to_le_bytes());
-            hasher.write(&gid.to_le_bytes());
-        }
-        hasher.write(&(self.finished_units.len() as u64).to_le_bytes());
-        for (uid, gid) in &self.finished_units {
-            hasher.write(&uid.raw().to_le_bytes());
-            hasher.write(&gid.to_le_bytes());
-        }
-        hasher.write(&(self.thread_id_to_unit.len() as u64).to_le_bytes());
-        for (tid, uid) in &self.thread_id_to_unit {
-            hasher.write(&tid.to_le_bytes());
-            hasher.write(&uid.raw().to_le_bytes());
-        }
-        hasher.finish()
+    /// The table's partial of the sync-state sum: the groups, the three
+    /// unit maps and the id allocator's cursor.
+    pub fn sync_partial(&self) -> u128 {
+        self.groups
+            .partial()
+            .wrapping_add(self.unit_to_group.partial())
+            .wrapping_add(self.finished_units.partial())
+            .wrapping_add(self.thread_id_to_unit.partial())
+            .wrapping_add(self.ids_term())
+    }
+
+    /// [`Self::sync_partial`] computed from every entry.
+    pub fn sync_partial_from_scratch(&self) -> u128 {
+        self.groups
+            .partial_from_scratch()
+            .wrapping_add(self.unit_to_group.partial_from_scratch())
+            .wrapping_add(self.finished_units.partial_from_scratch())
+            .wrapping_add(self.thread_id_to_unit.partial_from_scratch())
+            .wrapping_add(self.ids_term())
+    }
+
+    /// The id allocator's term.
+    fn ids_term(&self) -> u128 {
+        lanes::value_term(source::GROUP_IDS, 0, &self.next_id)
     }
 }
 

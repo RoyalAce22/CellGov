@@ -9,7 +9,7 @@ use super::model::Lv2Host;
 impl Lv2Host {
     /// Distinct lwmutexes currently held by `tid`.
     pub fn lwmutex_holds_for(&self, tid: PpuThreadId) -> u32 {
-        self.state.lwmutex_holds.get(&tid).copied().unwrap_or(0)
+        self.state.lwmutex_holds.get(tid).copied().unwrap_or(0)
     }
 
     /// Bumps the count for a first-acquire (FREE -> tid) or a
@@ -17,19 +17,25 @@ impl Lv2Host {
     /// the owner) are tracked elsewhere and must not pass through
     /// this entry.
     pub fn lwmutex_holds_inc(&mut self, tid: PpuThreadId) {
-        let slot = self.state.lwmutex_holds.entry(tid).or_insert(0);
-        debug_assert!(*slot < u32::MAX, "lwmutex hold count overflow on {tid:?}",);
-        *slot += 1;
+        let count = self.lwmutex_holds_for(tid);
+        debug_assert!(count < u32::MAX, "lwmutex hold count overflow on {tid:?}",);
+        self.state
+            .lwmutex_holds
+            .insert(tid, count.saturating_add(1));
     }
 
     /// Release builds saturate at 0 so a leak does not corrupt
     /// downstream counters.
     pub fn lwmutex_holds_dec(&mut self, tid: PpuThreadId) {
-        if let Some(slot) = self.state.lwmutex_holds.get_mut(&tid) {
-            debug_assert!(*slot > 0, "lwmutex hold count underflow on {tid:?}",);
-            *slot = slot.saturating_sub(1);
-            if *slot == 0 {
-                self.state.lwmutex_holds.remove(&tid);
+        if let Some(&count) = self.state.lwmutex_holds.get(tid) {
+            debug_assert!(count > 0, "lwmutex hold count underflow on {tid:?}",);
+            match count.saturating_sub(1) {
+                0 => {
+                    self.state.lwmutex_holds.remove(tid);
+                }
+                left => {
+                    self.state.lwmutex_holds.insert(tid, left);
+                }
             }
         } else {
             debug_assert!(
@@ -42,7 +48,7 @@ impl Lv2Host {
     /// Used at thread-exit and stale-owner recovery so a dead
     /// thread's count does not leak.
     pub fn lwmutex_holds_clear(&mut self, tid: PpuThreadId) {
-        self.state.lwmutex_holds.remove(&tid);
+        self.state.lwmutex_holds.remove(tid);
     }
 
     /// `false` when `unit` has no PPU thread mapping.

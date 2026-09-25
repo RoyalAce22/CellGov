@@ -110,35 +110,35 @@ fn initialize_thread_rejects_started_group() {
 }
 
 #[test]
-fn state_hash_is_deterministic() {
+fn sync_partial_is_deterministic() {
     let mut a = ThreadGroupTable::new();
     let mut b = ThreadGroupTable::new();
     let ga = a.create(2).unwrap();
     let gb = b.create(2).unwrap();
     a.initialize_thread(ga, 0, img(1), [0; 4]).unwrap();
     b.initialize_thread(gb, 0, img(1), [0; 4]).unwrap();
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_differs_on_content() {
+fn sync_partial_differs_on_content() {
     let mut a = ThreadGroupTable::new();
     let mut b = ThreadGroupTable::new();
     a.create(2).unwrap();
     b.create(3).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_empty_vs_populated_differ() {
+fn sync_partial_empty_vs_populated_differ() {
     let empty = ThreadGroupTable::new();
     let mut populated = ThreadGroupTable::new();
     populated.create(1).unwrap();
-    assert_ne!(empty.state_hash(), populated.state_hash());
+    assert_ne!(empty.sync_partial(), populated.sync_partial());
 }
 
 #[test]
-fn state_hash_folds_slot_args() {
+fn sync_partial_folds_slot_args() {
     let mut a = ThreadGroupTable::new();
     let mut b = ThreadGroupTable::new();
     let ga = a.create(1).unwrap();
@@ -147,11 +147,11 @@ fn state_hash_folds_slot_args() {
         .unwrap();
     b.initialize_thread(gb, 0, img(1), [0x2222, 0, 0, 0])
         .unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_folds_slot_init() {
+fn sync_partial_folds_slot_init() {
     let init_a = SpuInitState {
         image: crate::dispatch::SpuLoadImage::Elf(vec![0xAA; 16]),
         entry_pc: 0,
@@ -171,11 +171,11 @@ fn state_hash_folds_slot_init() {
     b.initialize_thread(gb, 0, img(1), [0; 4]).unwrap();
     a.get_mut(ga).unwrap().slots.get_mut(&0).unwrap().init = Some(init_a);
     b.get_mut(gb).unwrap().slots.get_mut(&0).unwrap().init = Some(init_b);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_folds_segment_images() {
+fn sync_partial_folds_segment_images() {
     use crate::dispatch::SpuLoadImage;
     use crate::image::LsSegment;
     let seg = |ls_start: u32, bytes: Vec<u8>| LsSegment { ls_start, bytes };
@@ -199,7 +199,7 @@ fn state_hash_folds_segment_images() {
         let g = t.create(1).unwrap();
         t.initialize_thread(g, 0, img(1), [0; 4]).unwrap();
         t.get_mut(g).unwrap().slots.get_mut(&0).unwrap().init = Some(init);
-        t.state_hash()
+        t.sync_partial()
     };
     assert_eq!(hash_of(base.clone()), hash_of(base.clone()));
     assert_ne!(hash_of(base.clone()), hash_of(moved));
@@ -207,16 +207,17 @@ fn state_hash_folds_segment_images() {
 }
 
 #[test]
-fn state_hash_folds_thread_id_to_unit() {
+fn sync_partial_folds_thread_id_to_unit() {
     let mut a = ThreadGroupTable::new();
     let mut b = ThreadGroupTable::new();
     let ga = a.create(1).unwrap();
     let gb = b.create(1).unwrap();
     a.get_mut(ga).unwrap().state = GroupState::Running;
     b.get_mut(gb).unwrap().state = GroupState::Running;
+    // Same unit, same group, other slot: only the thread-id map differs.
     a.record_spu(UnitId::new(10), ga, 0).unwrap();
-    b.record_spu(UnitId::new(11), gb, 0).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    b.record_spu(UnitId::new(10), gb, 1).unwrap();
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
@@ -430,7 +431,7 @@ fn record_spu_rejects_re_registering_finished_unit() {
 }
 
 #[test]
-fn state_hash_folds_finished_units() {
+fn sync_partial_folds_finished_units() {
     // Regression: post-move vs never-populated must hash apart
     // even though unit_to_group is empty in both.
     let mut a = ThreadGroupTable::new();
@@ -442,7 +443,7 @@ fn state_hash_folds_finished_units() {
     a.record_spu(UnitId::new(10), ga, 0).unwrap();
     b.record_spu(UnitId::new(10), gb, 0).unwrap();
     a.notify_spu_finished(UnitId::new(10)).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]

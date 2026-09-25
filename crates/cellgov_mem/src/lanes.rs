@@ -97,6 +97,34 @@ pub mod source {
     pub const EVENT_FLAG: u8 = 18;
     /// The lightweight-mutex id allocator's cursor.
     pub const LWMUTEX_IDS: u8 = 19;
+    /// SPU thread groups, one object per group id.
+    pub const THREAD_GROUP: u8 = 20;
+    /// Live SPU units, one object per unit, valued by group.
+    pub const GROUP_UNIT: u8 = 21;
+    /// Finished SPU units, one object per unit, valued by group.
+    pub const GROUP_FINISHED_UNIT: u8 = 22;
+    /// SPU thread ids, one object per thread id, valued by unit.
+    pub const GROUP_THREAD_ID: u8 = 23;
+    /// The thread-group id allocator's cursor.
+    pub const GROUP_IDS: u8 = 24;
+    /// PPU threads, one object per thread id.
+    pub const PPU_THREAD: u8 = 25;
+    /// Unit-to-PPU-thread bindings, one object per unit.
+    pub const PPU_THREAD_UNIT: u8 = 26;
+    /// The PPU thread id allocator's cursor.
+    pub const PPU_THREAD_IDS: u8 = 27;
+    /// The child-stack allocator's cursor.
+    pub const THREAD_STACKS: u8 = 28;
+    /// Processes, one object per pid.
+    pub const PROCESS: u8 = 29;
+    /// Unit-to-process bindings, one object per unit.
+    pub const PROCESS_UNIT: u8 = 30;
+    /// The per-process object counters.
+    pub const PROCESS_COUNTS: u8 = 31;
+    /// Lightweight-mutex holds, one object per PPU thread.
+    pub const LWMUTEX_HOLDS: u8 = 32;
+    /// The firmware identity.
+    pub const FIRMWARE_IDENTITY: u8 = 33;
     /// The sources that no partial covers yet, folded as one value.
     pub const TRANSITIONAL: u8 = 255;
 }
@@ -256,6 +284,17 @@ impl ObjectLanes {
             value,
         ));
     }
+
+    /// Add byte content at `field`, named within the field by `key`: one
+    /// mixer term over the object, the field, the slot base, the key and
+    /// the bytes.
+    pub fn bytes(&mut self, field: u8, key: &[u64], bytes: &[u8]) {
+        let mut words = vec![self.object, u64::from(field), self.slot_base];
+        words.extend_from_slice(key);
+        self.sum = self
+            .sum
+            .wrapping_add(bytes_term(self.source, &words, bytes));
+    }
 }
 
 /// A value a [`LaneMap`] stores.
@@ -274,6 +313,13 @@ impl LaneValue for () {
 impl LaneValue for u64 {
     fn lanes(&self, lanes: &mut ObjectLanes) {
         lanes.lane(1, 0, *self);
+    }
+}
+
+/// A bare 32-bit word is one lane, field 1.
+impl LaneValue for u32 {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(*self));
     }
 }
 
@@ -344,6 +390,15 @@ pub struct LaneMap<K, V> {
     shape: Shape<K>,
     partial: u128,
 }
+
+/// Two maps are equal when they hold equal entries.
+impl<K: PartialEq, V: PartialEq> PartialEq for LaneMap<K, V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries
+    }
+}
+
+impl<K: Eq, V: Eq> Eq for LaneMap<K, V> {}
 
 impl<K: Ord + Copy, V: LaneValue> LaneMap<K, V> {
     /// An empty map of `source` whose entry `key` is object

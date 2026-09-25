@@ -275,12 +275,12 @@ fn purging_an_empty_set_leaves_every_join_list_intact() {
     t.insert_primary(UnitId::new(1), dummy_attrs());
     let target = t.create(UnitId::new(2), dummy_attrs()).unwrap();
     t.add_join_waiter(target, PpuThreadId::PRIMARY);
-    let before = t.state_hash();
+    let before = t.sync_partial();
 
     assert!(t
         .purge_join_waiters_of(&std::collections::BTreeSet::new())
         .is_empty());
-    assert_eq!(t.state_hash(), before);
+    assert_eq!(t.sync_partial(), before);
 }
 
 #[test]
@@ -318,12 +318,12 @@ fn detach_unknown_returns_false() {
 }
 
 #[test]
-fn state_hash_distinguishes_every_guest_block_reason() {
-    fn table_with_reason(reason: GuestBlockReason) -> u64 {
+fn sync_partial_distinguishes_every_guest_block_reason() {
+    fn table_with_reason(reason: GuestBlockReason) -> u128 {
         let mut t = PpuThreadTable::new();
         let id = t.create(UnitId::new(1), dummy_attrs()).unwrap();
         t.get_mut(id).unwrap().state = PpuThreadState::Blocked(reason);
-        t.state_hash()
+        t.sync_partial()
     }
     let hashes = [
         table_with_reason(GuestBlockReason::WaitingOnJoin {
@@ -351,8 +351,8 @@ fn state_hash_distinguishes_every_guest_block_reason() {
 }
 
 #[test]
-fn state_hash_distinguishes_event_flag_wait_modes() {
-    fn hash_with_mode(mode: EventFlagWaitMode) -> u64 {
+fn sync_partial_distinguishes_event_flag_wait_modes() {
+    fn hash_with_mode(mode: EventFlagWaitMode) -> u128 {
         let mut t = PpuThreadTable::new();
         let id = t.create(UnitId::new(1), dummy_attrs()).unwrap();
         t.get_mut(id).unwrap().state =
@@ -361,7 +361,7 @@ fn state_hash_distinguishes_event_flag_wait_modes() {
                 mask: 0xAA,
                 mode,
             });
-        t.state_hash()
+        t.sync_partial()
     }
     let a = hash_with_mode(EventFlagWaitMode::AndNoClear);
     let b = hash_with_mode(EventFlagWaitMode::AndClear);
@@ -376,35 +376,35 @@ fn state_hash_distinguishes_event_flag_wait_modes() {
 }
 
 #[test]
-fn state_hash_empty_table_is_stable() {
+fn sync_partial_empty_table_is_stable() {
     let a = PpuThreadTable::new();
     let b = PpuThreadTable::new();
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_differs_when_thread_added() {
+fn sync_partial_differs_when_thread_added() {
     let empty = PpuThreadTable::new();
     let mut populated = PpuThreadTable::new();
     populated.create(UnitId::new(1), dummy_attrs()).unwrap();
-    assert_ne!(empty.state_hash(), populated.state_hash());
+    assert_ne!(empty.sync_partial(), populated.sync_partial());
 }
 
 #[test]
-fn state_hash_changes_on_finish() {
+fn sync_partial_changes_on_finish() {
     let mut a = PpuThreadTable::new();
     let mut b = PpuThreadTable::new();
     let id_a = a.create(UnitId::new(1), dummy_attrs()).unwrap();
     let id_b = b.create(UnitId::new(1), dummy_attrs()).unwrap();
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
     a.mark_finished(id_a, 42);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
     b.mark_finished(id_b, 42);
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_folds_tls_base() {
+fn sync_partial_folds_tls_base() {
     let mut a = PpuThreadTable::new();
     let mut b = PpuThreadTable::new();
     let mut attrs_a = dummy_attrs();
@@ -413,13 +413,11 @@ fn state_hash_folds_tls_base() {
     attrs_b.tls_base = 0x0030_0000;
     a.create(UnitId::new(1), attrs_a).unwrap();
     b.create(UnitId::new(1), attrs_b).unwrap();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]
-fn state_hash_join_waiter_list_length_is_load_bearing() {
-    // Without a length prefix, ([X,Y], []) collides with
-    // ([X], [Y]).
+fn sync_partial_join_waiter_list_length_is_load_bearing() {
     let mut a = PpuThreadTable::new();
     let mut b = PpuThreadTable::new();
     a.insert_primary(UnitId::new(1), dummy_attrs());
@@ -432,7 +430,7 @@ fn state_hash_join_waiter_list_length_is_load_bearing() {
     a.add_join_waiter(a_child1, PpuThreadId::new(0x43));
     b.add_join_waiter(b_child1, PpuThreadId::new(0x42));
     b.add_join_waiter(b_child2, PpuThreadId::new(0x43));
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.sync_partial(), b.sync_partial());
 }
 
 #[test]

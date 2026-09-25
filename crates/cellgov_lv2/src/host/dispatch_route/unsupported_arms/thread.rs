@@ -102,7 +102,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let id = crate::ppu_thread::PpuThreadId::new(args[0]);
-        let Some(thread) = self.state.ppu_threads.get_mut(id) else {
+        let Some(mut thread) = self.state.ppu_threads.get_mut(id) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         thread.attrs.priority = prio as u32;

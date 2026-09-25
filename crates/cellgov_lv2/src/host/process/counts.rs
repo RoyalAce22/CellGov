@@ -16,9 +16,9 @@ use crate::host::Lv2Host;
 
 /// Counters for primitives stubbed as ID allocators only.
 ///
-/// Folded into [`Lv2Host::state_hash`] when non-zero: the counters
-/// feed `sys_process_get_number_of_object`'s return value and,
-/// except `event_port`, are tracked nowhere else.
+/// The counters enter [`Lv2Host::sync_partial`] as one term. They feed
+/// the return value of `sys_process_get_number_of_object` and, except
+/// `event_port`, are tracked nowhere else.
 #[derive(Debug, Clone, Default)]
 pub(in crate::host) struct ProcessCounts {
     timer: u32,
@@ -33,39 +33,31 @@ pub(in crate::host) struct ProcessCounts {
     fs_fd: u32,
 }
 
+/// One lane per counter; the exhaustive destructure makes a new counter
+/// without a lane a compile error.
+impl cellgov_mem::lanes::LaneValue for ProcessCounts {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
+        let Self {
+            timer,
+            rwlock,
+            event_port,
+            lwcond,
+            fs_fd,
+        } = self;
+        for (field, counter) in (1..).zip([timer, rwlock, event_port, lwcond, fs_fd]) {
+            lanes.lane(field, 0, u64::from(*counter));
+        }
+    }
+}
+
 impl ProcessCounts {
     pub(in crate::host) fn new() -> Self {
         Self::default()
     }
 
-    /// True when every counter is zero.
-    pub(in crate::host) fn is_empty(&self) -> bool {
-        let Self {
-            timer,
-            rwlock,
-            event_port,
-            lwcond,
-            fs_fd,
-        } = self;
-        *timer == 0 && *rwlock == 0 && *event_port == 0 && *lwcond == 0 && *fs_fd == 0
-    }
-
-    /// FNV-1a over every counter, via raw little-endian bytes per the
-    /// host state-hash contract. The exhaustive destructure makes an
-    /// unfolded new counter a compile error.
-    pub(in crate::host) fn state_hash(&self) -> u64 {
-        let Self {
-            timer,
-            rwlock,
-            event_port,
-            lwcond,
-            fs_fd,
-        } = self;
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        for counter in [timer, rwlock, event_port, lwcond, fs_fd] {
-            hasher.write(&counter.to_le_bytes());
-        }
-        hasher.finish()
+    /// The counters' term of the sync-state sum, computed on read.
+    pub(in crate::host) fn sync_term(&self) -> u128 {
+        cellgov_mem::lanes::value_term(cellgov_mem::lanes::source::PROCESS_COUNTS, 0, self)
     }
 
     pub(in crate::host) fn timer_inc(&mut self) {

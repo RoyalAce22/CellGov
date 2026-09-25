@@ -161,7 +161,7 @@ stateDiagram-v2
   Promoted --> Refused : length disagrees or no backing region
 ```
 
-`SpaceTable` is pure data: it rides in `RuntimeSnapshot`, folds
-into the sync-channel state hash (tags, mappings, child
-reservations) and the committed-memory hash (child contents), and
-adds nothing to either byte stream while empty.
+`SpaceTable` is pure data: it rides in `RuntimeSnapshot`, enters
+the sync-state hash as lanes (child-space presence, tags, mappings,
+child reservations) and the committed-memory hash (child contents),
+and adds nothing to either while empty.

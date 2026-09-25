@@ -22,8 +22,8 @@ use crate::host::{derived, observability, state};
 /// LV2 host model driven by [`Self::dispatch`].
 #[derive(Debug, Clone)]
 pub struct Lv2Host {
-    /// Hashed guest-visible state: every field folds into
-    /// [`Self::state_hash`] by construction.
+    /// Hashed guest-visible state: every field enters
+    /// [`Self::sync_partial`] or [`Self::state_hash`] by construction.
     pub(in crate::host) state: state::Lv2State,
     /// Unhashed guest-visible state; each field's doc names where a
     /// divergence in it is caught instead.
@@ -36,13 +36,26 @@ pub struct Lv2Host {
 /// Captured at boot via the verified `firmware.toml` manifest.
 ///
 /// `image_version_hash` and `pup_sha256_bytes` together identify the
-/// PUP the install came from; both fold into `Lv2Host::state_hash`.
+/// PUP the install came from; both enter `Lv2Host::sync_partial`.
 #[derive(Debug, Clone)]
 pub struct FirmwareIdentity {
     /// FNV-1a hash of the verified `image_version` string.
     pub image_version_hash: u64,
     /// Raw SHA-256 of the originating PUP file.
     pub pup_sha256_bytes: [u8; 32],
+}
+
+/// Field 1 is the version hash; the PUP digest is field 2, one slot per
+/// 8-byte word.
+impl cellgov_mem::lanes::LaneValue for FirmwareIdentity {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
+        lanes.lane(1, 0, self.image_version_hash);
+        for (slot, chunk) in self.pup_sha256_bytes.chunks_exact(8).enumerate() {
+            let mut word = [0u8; 8];
+            word.copy_from_slice(chunk);
+            lanes.lane(2, slot as u64, u64::from_le_bytes(word));
+        }
+    }
 }
 
 impl Default for Lv2Host {
@@ -112,7 +125,10 @@ impl Lv2Host {
                 event_ports: EventPortTable::new(),
                 event_flags: EventFlagTable::new(),
                 conds: CondTable::new(),
-                lwmutex_holds: BTreeMap::new(),
+                lwmutex_holds: cellgov_mem::lanes::LaneMap::new(
+                    cellgov_mem::lanes::source::LWMUTEX_HOLDS,
+                    crate::ppu_thread::PpuThreadId::raw,
+                ),
                 fs_store,
                 prx_registry: LoadedPrxRegistry::new(),
                 firmware_identity: None,

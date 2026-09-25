@@ -130,6 +130,6 @@ fn iter_yields_pid_order() {
             exit_status: None,
         },
     );
-    let pids: Vec<u32> = t.iter().map(|(pid, _)| *pid).collect();
+    let pids: Vec<u32> = t.iter().map(|(pid, _)| pid).collect();
     assert_eq!(pids, vec![BOOT_PROCESS_PID, 0x0100_0501]);
 }

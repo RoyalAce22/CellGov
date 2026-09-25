@@ -37,8 +37,8 @@ const _: () =
     assert!(FIRST_KERNEL_ID as u64 > PS3_CHILD_STACKS_BASE + PS3_CHILD_STACKS_SIZE as u64);
 const _: () = assert!((FIRST_KERNEL_ID as u64) < PS3_SPU_RESERVED_BASE);
 
-/// Guest-visible LV2 state; every field folds into the host state
-/// hash per [`Self::state_hash`]'s exhaustive-destructure contract.
+/// Guest-visible LV2 state; every field enters the sync partial or the
+/// host state hash per [`Self::state_hash`]'s exhaustive destructure.
 #[derive(Debug, Clone)]
 pub(in crate::host) struct Lv2State {
     pub(in crate::host) content: ContentStore,
@@ -85,18 +85,16 @@ pub(in crate::host) struct Lv2State {
     /// re-acquires of the same lwmutex do not bump the count; only
     /// first-acquire (FREE -> me) and kernel-side transfer
     /// (LwMutexWake) do.
-    pub(in crate::host) lwmutex_holds: BTreeMap<PpuThreadId, u32>,
+    pub(in crate::host) lwmutex_holds: cellgov_mem::lanes::LaneMap<PpuThreadId, u32>,
     pub(in crate::host) fs_store: FsStore,
     /// Firmware modules loaded at boot. Empty when no firmware-dir
     /// was configured. Guest-mutable (sc 480 mints miss stubs).
     pub(in crate::host) prx_registry: LoadedPrxRegistry,
-    /// Folded when set.
     pub(in crate::host) firmware_identity: Option<FirmwareIdentity>,
     /// Per-process identity ([`process::ProcessEntry`]). Boot seeds
     /// the boot entry from the title SELF's plaintext headers;
     /// raw-ELF inputs keep the retail-application fallback.
     pub(in crate::host) processes: process::ProcessTable,
-    /// Feeds `sys_process_get_number_of_object`. Folded when
-    /// non-zero.
+    /// Feeds `sys_process_get_number_of_object`.
     pub(in crate::host) process_counts: process::ProcessCounts,
 }

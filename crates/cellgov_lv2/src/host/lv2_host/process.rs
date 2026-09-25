@@ -24,7 +24,7 @@ impl Lv2Host {
             .state
             .processes
             .unit_bindings()
-            .find(|(u, _)| **u == unit)
+            .find(|(u, _)| *u == unit)
             .map(|(_, p)| *p);
         if let Some(prev) = prior {
             if prev != pid {
@@ -130,7 +130,7 @@ impl Lv2Host {
     ///
     /// A process exits once; a second call for the same pid keeps the
     /// first status (overwriting it would retroactively change what
-    /// `sys_process_get_status` and the state hash already served)
+    /// `sys_process_get_status` and the sync-state hash already served)
     /// and is logged as a runtime sequencing bug.
     ///
     /// A fresh exit also purges the pid's threads from every LV2

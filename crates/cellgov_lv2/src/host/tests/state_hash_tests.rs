@@ -4,116 +4,134 @@ use super::*;
 use crate::host::test_support::primary_attrs;
 use cellgov_event::UnitId;
 
-#[test]
-fn state_hash_unchanged_when_ppu_table_empty() {
-    let fresh = Lv2Host::new();
-    assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
+/// The host's whole sync-state contribution: the transitional fold and
+/// the partials.
+trait Fingerprint {
+    fn fingerprint(&self) -> (u64, u128);
+}
+
+impl Fingerprint for Lv2Host {
+    fn fingerprint(&self) -> (u64, u128) {
+        (self.state_hash(), self.sync_partial())
+    }
 }
 
 #[test]
-fn state_hash_changes_after_primary_seed() {
-    let pre_seed = Lv2Host::new().state_hash();
+fn fingerprint_unchanged_when_a_thread_operation_misses() {
+    let mut host = Lv2Host::new();
+    let pre = host.fingerprint();
+    assert!(!host
+        .state
+        .ppu_threads
+        .detach(crate::ppu_thread::PpuThreadId::new(0x9999)));
+    assert_eq!(pre, host.fingerprint());
+}
+
+#[test]
+fn fingerprint_changes_after_primary_seed() {
+    let pre_seed = Lv2Host::new().fingerprint();
     let mut seeded = Lv2Host::new();
     seeded.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-    assert_ne!(pre_seed, seeded.state_hash());
+    assert_ne!(pre_seed, seeded.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_when_holds_inserted_then_returns_to_baseline() {
+fn fingerprint_changes_when_holds_inserted_then_returns_to_baseline() {
     let mut host = Lv2Host::new();
     host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
-    let baseline = host.state_hash();
+    let baseline = host.fingerprint();
     let tid = host.ppu_thread_id_for_unit(UnitId::new(0)).unwrap();
     host.lwmutex_holds_inc(tid);
-    assert_ne!(baseline, host.state_hash());
+    assert_ne!(baseline, host.fingerprint());
     host.lwmutex_holds_dec(tid);
-    assert_eq!(baseline, host.state_hash());
+    assert_eq!(baseline, host.fingerprint());
 }
 
 #[test]
-fn state_hash_unchanged_when_no_child_stack_allocated() {
-    let fresh = Lv2Host::new();
-    assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
+fn fingerprint_unchanged_when_a_child_stack_is_refused() {
+    let mut host = Lv2Host::new();
+    let pre = host.fingerprint();
+    assert!(host.allocate_child_stack(0, 0x10).is_none());
+    assert_eq!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_after_child_stack_allocated() {
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_changes_after_child_stack_allocated() {
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     let _ = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_after_firmware_identity_set() {
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_changes_after_firmware_identity_set() {
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.set_firmware_identity("4.85", [0u8; 32]);
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_differs_between_two_firmware_versions() {
+fn fingerprint_differs_between_two_firmware_versions() {
     let mut a = Lv2Host::new();
     let mut b = Lv2Host::new();
     a.set_firmware_identity("4.85", [0u8; 32]);
     b.set_firmware_identity("4.86", [0u8; 32]);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.fingerprint(), b.fingerprint());
 }
 
 #[test]
-fn state_hash_equal_across_two_runs_of_same_firmware() {
+fn fingerprint_equal_across_two_runs_of_same_firmware() {
     let mut a = Lv2Host::new();
     let mut b = Lv2Host::new();
     let digest: [u8; 32] = [0x42; 32];
     a.set_firmware_identity("4.85", digest);
     b.set_firmware_identity("4.85", digest);
-    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(a.fingerprint(), b.fingerprint());
 }
 
 #[test]
-fn state_hash_unchanged_when_authority_id_is_the_retail_fallback() {
-    // The default (retail-application) authid is gated out of the
-    // hash so a raw-ELF boot reads identically to one that never
-    // set an authid.
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_unchanged_when_authority_id_is_the_retail_fallback() {
+    // The boot entry starts at the retail-application authid, so a
+    // raw-ELF boot hashes identically to one set to that fallback.
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.set_program_authority_id(cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID);
-    assert_eq!(pre, host.state_hash());
+    assert_eq!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_for_a_non_fallback_authority_id() {
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_changes_for_a_non_fallback_authority_id() {
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.set_program_authority_id(0x1070_0000_3A00_0001);
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_differs_between_two_distinct_authority_ids() {
+fn fingerprint_differs_between_two_distinct_authority_ids() {
     let mut a = Lv2Host::new();
     let mut b = Lv2Host::new();
     a.set_program_authority_id(0x1070_0000_3A00_0001);
     b.set_program_authority_id(0x1070_0000_5600_0001);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.fingerprint(), b.fingerprint());
 }
 
 #[test]
-fn state_hash_unchanged_for_unprivileged_control_flags() {
-    // Retail SELFs carry ctrl_flags1 == 0, so introducing the field
-    // must not move their hash.
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_unchanged_for_unprivileged_control_flags() {
+    // Retail SELFs carry ctrl_flags1 == 0, the boot entry's start
+    // value, so they hash as a SELF without the record.
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.set_control_flags1(0);
-    assert_eq!(pre, host.state_hash());
+    assert_eq!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_when_a_child_process_is_inserted() {
+fn fingerprint_changes_when_a_child_process_is_inserted() {
     use crate::host::process::{ProcessEntry, ProcessTable};
     use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
-    let pre = Lv2Host::new().state_hash();
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     let mut table = ProcessTable::new_boot();
     table.insert_child(
@@ -126,11 +144,11 @@ fn state_hash_changes_when_a_child_process_is_inserted() {
         },
     );
     host.state.processes = table;
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_differs_between_two_child_authority_ids() {
+fn fingerprint_differs_between_two_child_authority_ids() {
     use crate::host::process::{ProcessEntry, ProcessTable};
     use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
     let build = |authid: u64| {
@@ -146,26 +164,26 @@ fn state_hash_differs_between_two_child_authority_ids() {
             },
         );
         host.state.processes = table;
-        host.state_hash()
+        host.fingerprint()
     };
     assert_ne!(build(0x1070_0000_5600_0001), build(0x1070_0000_5600_0002));
 }
 
 #[test]
-fn state_hash_changes_for_root_control_flags() {
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_changes_for_root_control_flags() {
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.set_control_flags1(0x4000_0000);
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_differs_between_two_distinct_control_flags() {
+fn fingerprint_differs_between_two_distinct_control_flags() {
     let mut a = Lv2Host::new();
     let mut b = Lv2Host::new();
     a.set_control_flags1(0x4000_0000);
     b.set_control_flags1(0x8000_0000);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.fingerprint(), b.fingerprint());
 }
 
 #[test]
@@ -228,9 +246,9 @@ fn sync_partial_returns_to_table_baseline_after_event_port_destroy() {
 }
 
 #[test]
-fn state_hash_changes_after_mmapper_handle_insert() {
+fn fingerprint_changes_after_mmapper_handle_insert() {
     use crate::host::mmapper::MmapperHandle;
-    let pre = Lv2Host::new().state_hash();
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.state.mmapper_handles.insert(
         5,
@@ -239,77 +257,76 @@ fn state_hash_changes_after_mmapper_handle_insert() {
             align: 0x10_0000,
         },
     );
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_after_mmapper_cursor_advance() {
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_changes_after_mmapper_cursor_advance() {
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.mmapper_alloc(0x1000).unwrap();
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_after_mmapper_ipc_registration() {
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_changes_after_mmapper_ipc_registration() {
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.state.mmapper_ipc.insert(0x8006_0100_0000_0010, 7);
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_differs_when_one_ipc_key_maps_to_two_mem_ids() {
+fn fingerprint_differs_when_one_ipc_key_maps_to_two_mem_ids() {
     let mut a = Lv2Host::new();
     let mut b = Lv2Host::new();
     a.state.mmapper_ipc.insert(0x8006_0100_0000_0010, 7);
     b.state.mmapper_ipc.insert(0x8006_0100_0000_0010, 8);
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.fingerprint(), b.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_after_a_process_count_increment() {
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_changes_after_a_process_count_increment() {
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.state.process_counts.fs_fd_inc();
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_stays_off_baseline_after_alloc_id_backed_port_create_then_destroy() {
-    // The create consumed an id from next_kernel_id, which always
-    // folds. The port table stays out of this fold.
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_stays_off_baseline_after_alloc_id_backed_port_create_then_destroy() {
+    // The create used an id from next_kernel_id, which always enters
+    // the state hash. The port table's partial returns to its baseline.
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     let id = host.alloc_id();
     host.state.event_ports.create_with_id(id, 1, 0);
     host.state.event_ports.destroy(id).unwrap();
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_differs_between_two_distinct_process_count_classes() {
-    // Counters fold positionally with no per-field tag, so the same
-    // value in different classes must still read differently.
+fn fingerprint_differs_between_two_distinct_process_count_classes() {
+    // Each counter has its own field lane, so the same value in
+    // different classes must still read differently.
     let mut a = Lv2Host::new();
     let mut b = Lv2Host::new();
     a.state.process_counts.timer_inc();
     b.state.process_counts.rwlock_inc();
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.fingerprint(), b.fingerprint());
 }
 
 #[test]
-fn state_hash_returns_to_baseline_after_process_count_inc_then_dec() {
-    // Counter-level gate edge: back at all-zero the fold drops out.
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_returns_to_baseline_after_process_count_inc_then_dec() {
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.state.process_counts.timer_inc();
     host.state.process_counts.timer_dec();
-    assert_eq!(pre, host.state_hash());
+    assert_eq!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_differs_when_mmapper_size_and_align_are_transposed() {
+fn fingerprint_differs_when_mmapper_size_and_align_are_transposed() {
     use crate::host::mmapper::MmapperHandle;
     let mut a = Lv2Host::new();
     let mut b = Lv2Host::new();
@@ -327,33 +344,32 @@ fn state_hash_differs_when_mmapper_size_and_align_are_transposed() {
             align: 0x10_0000,
         },
     );
-    assert_ne!(a.state_hash(), b.state_hash());
+    assert_ne!(a.fingerprint(), b.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_when_the_boot_exit_status_is_recorded() {
+fn fingerprint_changes_when_the_boot_exit_status_is_recorded() {
     use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
-    let pre = Lv2Host::new().state_hash();
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.mark_process_exited(BOOT_PROCESS_PID, 0);
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_distinguishes_boot_control_flags_from_a_boot_exit_status() {
-    // Both fields are gated 4-byte folds on the boot entry; without a
-    // discriminant on the exit status, {ctrl_flags1=5, alive} and
-    // {ctrl_flags1=0, exited(5)} would produce the same byte stream.
+fn fingerprint_distinguishes_boot_control_flags_from_a_boot_exit_status() {
+    // {ctrl_flags1=5, alive} and {ctrl_flags1=0, exited(5)} put the
+    // same value in different field lanes of the boot entry.
     use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
     let mut flags = Lv2Host::new();
     flags.set_control_flags1(5);
     let mut exited = Lv2Host::new();
     exited.mark_process_exited(BOOT_PROCESS_PID, 5);
-    assert_ne!(flags.state_hash(), exited.state_hash());
+    assert_ne!(flags.fingerprint(), exited.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_when_a_child_exit_status_is_recorded() {
+fn fingerprint_changes_when_a_child_exit_status_is_recorded() {
     use crate::host::process::ProcessEntry;
     use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
     let child = BOOT_PROCESS_PID + 0x100;
@@ -367,27 +383,24 @@ fn state_hash_changes_when_a_child_exit_status_is_recorded() {
             exit_status: None,
         },
     );
-    let alive = host.state_hash();
+    let alive = host.fingerprint();
     host.mark_process_exited(child, 0);
-    assert_ne!(alive, host.state_hash());
+    assert_ne!(alive, host.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_when_a_unit_binding_is_added() {
+fn fingerprint_changes_when_a_unit_binding_is_added() {
     use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
-    let pre = Lv2Host::new().state_hash();
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.bind_unit_process(UnitId::new(3), BOOT_PROCESS_PID + 0x100);
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_distinguishes_boot_identity_fields_from_a_unit_binding() {
-    // Adversarial injection check: a boot entry folding
-    // {authority_id (8 bytes), ctrl_flags1 (4 bytes)} and a bindings
-    // fold of one {unit (8 bytes), pid (4 bytes)} entry occupy the
-    // same stream position with the same widths. The bindings length
-    // prefix keeps them apart even when the raw values coincide.
+fn fingerprint_distinguishes_boot_identity_fields_from_a_unit_binding() {
+    // A boot entry {authority_id, ctrl_flags1} and one binding
+    // {unit, pid} with the same raw values sit in different sources.
     let authid: u64 = 0x1070_0000_5600_0001;
     let flags: u32 = 0x4000_0000;
     let mut identity = Lv2Host::new();
@@ -395,28 +408,26 @@ fn state_hash_distinguishes_boot_identity_fields_from_a_unit_binding() {
     identity.set_control_flags1(flags);
     let mut binding = Lv2Host::new();
     binding.bind_unit_process(UnitId::new(authid), flags);
-    assert_ne!(identity.state_hash(), binding.state_hash());
+    assert_ne!(identity.fingerprint(), binding.fingerprint());
 }
 
 #[test]
-fn state_hash_changes_when_the_boot_ppid_deviates() {
-    // Every ProcessEntry field must fold; ppid is gated on the
-    // constructor default so the pre-table byte stream survives, but
-    // a mutated boot ppid may not hash as the default.
-    let pre = Lv2Host::new().state_hash();
+fn fingerprint_changes_when_the_boot_ppid_deviates() {
+    // Every ProcessEntry field has a lane, the boot ppid included.
+    let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
     host.state.processes.boot_mut().ppid = 0x0100_0301;
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]
-fn state_hash_distinguishes_a_boot_ppid_deviation_from_boot_control_flags() {
-    // Both are gated 4-byte folds on the boot entry; the ppid tag
-    // byte keeps {ppid=X, flags=0} apart from {ppid=default, flags=X}.
+fn fingerprint_distinguishes_a_boot_ppid_deviation_from_boot_control_flags() {
+    // {ppid=X, flags=0} and {ppid=default, flags=X} put the same
+    // value in different field lanes of the boot entry.
     let value: u32 = 0x0100_0301;
     let mut ppid = Lv2Host::new();
     ppid.state.processes.boot_mut().ppid = value;
     let mut flags = Lv2Host::new();
     flags.set_control_flags1(value);
-    assert_ne!(ppid.state_hash(), flags.state_hash());
+    assert_ne!(ppid.fingerprint(), flags.fingerprint());
 }

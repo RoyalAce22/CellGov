@@ -556,11 +556,11 @@ fn firmware_identity_distinct_versions_produce_distinct_hashes() {
 }
 
 #[test]
-fn firmware_identity_set_shifts_state_hash() {
+fn firmware_identity_set_shifts_the_sync_partial() {
     let mut host = Lv2Host::new();
-    let pre = host.state_hash();
+    let pre = host.sync_partial();
     host.set_firmware_identity("4.85", [0u8; 32]);
-    assert_ne!(pre, host.state_hash());
+    assert_ne!(pre, host.sync_partial());
 }
 
 #[cfg(debug_assertions)]

@@ -382,7 +382,7 @@ impl Lv2Host {
     /// The runtime creates the SPUs from the returned init states.
     /// Each slot enters at the entry [`Self::load_image_for`] reports.
     pub(super) fn dispatch_group_start(&mut self, group_id: u32) -> Lv2Dispatch {
-        let group = match self.state.groups.get_mut(group_id) {
+        let group = match self.state.groups.get(group_id) {
             Some(g) => g,
             None => {
                 return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());

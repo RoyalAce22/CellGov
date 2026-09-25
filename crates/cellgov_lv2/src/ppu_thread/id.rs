@@ -29,6 +29,14 @@ pub struct PpuThreadIdAllocator {
     next: Option<u64>,
 }
 
+/// Field 1 is 1 until the id space is exhausted; field 2 is the next id.
+impl cellgov_mem::lanes::LaneValue for PpuThreadIdAllocator {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.next.is_some()));
+        lanes.lane(2, 0, self.next.unwrap_or(0));
+    }
+}
+
 impl PpuThreadIdAllocator {
     /// Construct a fresh allocator; first `allocate` returns
     /// `PpuThreadId(0x0100_0001)`.
