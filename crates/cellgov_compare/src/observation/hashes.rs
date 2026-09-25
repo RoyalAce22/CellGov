@@ -38,14 +38,16 @@ pub struct ObservedHashes {
     pub scheme: u64,
 }
 
-/// Scheme id of the three commit-checkpoint hashes: FNV-1a over a tag.
+/// Scheme id of the commit-checkpoint hashes: FNV-1a over a tag.
 ///
-/// The PPU per-step hash is not one of the three, so a change to the
-/// PPU scheme leaves this id as it is. When a change to one of the three
-/// producers changes a hash value, increase the tag's version suffix.
+/// The id covers the three hashes above and the runnable-queue hash,
+/// which only a trace's `StateHashCheckpoint` records carry. The PPU
+/// per-step hash is not one of these, so a change to the PPU scheme
+/// leaves this id as it is. When a change to one of these producers
+/// changes a hash value, increase the tag's version suffix.
 pub const CHECKPOINT_HASH_SCHEME: u64 = {
     let mut h = cellgov_mem::Fnv1aHasher::new();
-    h.write(b"cellgov-checkpoint-fnv1a/v3");
+    h.write(b"cellgov-checkpoint-fnv1a/v4");
     h.finish()
 };
 

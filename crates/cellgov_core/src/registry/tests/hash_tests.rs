@@ -63,12 +63,14 @@ fn status_override_affects_status_hash() {
 fn runnable_queue_hash_changes_when_unit_becomes_blocked() {
     let mut r = UnitRegistry::new();
     let (handle, factory) = status_unit(UnitStatus::Runnable);
-    let _id = r.register_with(factory);
+    let id = r.register_with(factory);
     let h_runnable = r.runnable_queue_hash();
     handle.set(UnitStatus::Blocked);
+    r.get_mut(id);
     let h_blocked = r.runnable_queue_hash();
     assert_ne!(h_runnable, h_blocked);
     handle.set(UnitStatus::Runnable);
+    r.get_mut(id);
     assert_eq!(r.runnable_queue_hash(), h_runnable);
 }
 
@@ -118,8 +120,8 @@ fn status_hash_wire_format_golden() {
     );
 }
 
-/// Pins the `runnable_queue_hash` wire format; catches drift in the
-/// runnable-predicate shape that `status_byte` cannot.
+/// Pins the `runnable_queue_hash` wire format: the runnable set {0, 2}
+/// under the runnable-set keys, computed outside the crate.
 #[test]
 fn runnable_queue_hash_wire_format_golden() {
     let mut r = UnitRegistry::new();
@@ -131,7 +133,7 @@ fn runnable_queue_hash_wire_format_golden() {
     r.register_with(f1);
     r.register_with(f2);
     r.register_with(f3);
-    const EXPECTED_RUNNABLE_QUEUE_HASH: u64 = 0xC615_ADCB_76DD_F8A7;
+    const EXPECTED_RUNNABLE_QUEUE_HASH: u64 = 0xD1C0_A640_CC27_DBEF;
     assert_eq!(
         r.runnable_queue_hash(),
         EXPECTED_RUNNABLE_QUEUE_HASH,
