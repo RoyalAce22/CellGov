@@ -114,6 +114,30 @@ pub struct PendingChildInit {
     pub init_token: u64,
 }
 
+/// Lane fields of one pending child init:
+///
+/// 1. the pid
+/// 2. the space
+/// 3. the primary unit
+/// 4. the init token
+///
+/// The exhaustive destructure makes a new field without a lane a
+/// compile error.
+impl cellgov_mem::lanes::LaneValue for PendingChildInit {
+    fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
+        let Self {
+            pid,
+            space,
+            primary_unit,
+            init_token,
+        } = *self;
+        lanes.lane(1, 0, u64::from(pid));
+        lanes.lane(2, 0, u64::from(space.raw()));
+        lanes.lane(3, 0, primary_unit.raw());
+        lanes.lane(4, 0, init_token);
+    }
+}
+
 /// Failure surface of a [`ProcessSpawnLoader`].
 ///
 /// Architecture-specific parse/load errors are rendered to text by

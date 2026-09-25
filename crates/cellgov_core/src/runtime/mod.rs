@@ -65,3 +65,7 @@ mod sync_state_lanes_tests;
 #[cfg(test)]
 #[path = "tests/sync_state_golden_tests.rs"]
 mod sync_state_golden_tests;
+
+#[cfg(test)]
+#[path = "tests/sync_state_pending_fields_tests.rs"]
+mod sync_state_pending_fields_tests;

@@ -170,6 +170,18 @@ pub mod source {
     pub const USBD: u8 = 54;
     /// The LV2 kernel-id and allocator cursors, one object per cursor.
     pub const KERNEL_CURSORS: u8 = 55;
+    /// Pending DMA completions, one object per queue sequence number.
+    pub const DMA_QUEUE: u8 = 56;
+    /// Completed DMA tag bits not yet delivered, one object per unit.
+    pub const DMA_TAG_COMPLETIONS: u8 = 57;
+    /// RSX effects the FIFO advance pass queued for the next batch, one
+    /// object per queue position.
+    pub const RSX_PENDING_EFFECTS: u8 = 58;
+    /// The seeded RSX label base.
+    pub const RSX_LABEL_BASE: u8 = 59;
+    /// Spawned children that wait for their init pass, one object per
+    /// queue position.
+    pub const PENDING_CHILD_INIT: u8 = 60;
 }
 
 const OBJECT_BITS: u32 = 32;

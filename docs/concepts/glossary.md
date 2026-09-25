@@ -354,7 +354,8 @@ to all. Formed from the guest's own keyed `sys_mmapper` calls.
 
 **State hash.** The per-commit digest of committed memory and sync
 state (`sync_state_hash`: mailboxes, signals, reservations, LV2 host
-state, RSX state, syscall responses). Every `Lv2State` field folds
+state, RSX state, syscall responses, pending DMA transfers and tag
+bits, pending child inits). Every `Lv2State` field folds
 into it or is a compile error.
 [lv2_host.md](../architecture/lv2_host.md)
 
