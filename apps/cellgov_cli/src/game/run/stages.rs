@@ -12,7 +12,8 @@ use cellgov_boot::prepare::{prepare, BootServices, PrepareOptions, PreparedBoot}
 use cellgov_boot::step_loop::{
     step_loop, PcRing, RunAnomalies, StepLoopCtx, StepTiming, SyscallRing,
 };
-use cellgov_boot::{BootSink, ChildInitPlans};
+use cellgov_boot::taps::{StateHashCensus, WithPpuTap};
+use cellgov_boot::{BootSink, ChildInitPlans, DebugTaps};
 use cellgov_compare::BootOutcome;
 use cellgov_core::{AddressSpaceId, Runtime};
 
@@ -50,7 +51,10 @@ pub fn run_game(
     let title = execution.title.manifest;
     let identity = execution.title.identity;
 
-    let prepared = prepare_boot(execution, &reporting, &sink)?;
+    let census = reporting
+        .state_hash_census
+        .then(|| Rc::new(StateHashCensus::new(CENSUS_SAMPLE_EVERY)));
+    let prepared = prepare_boot(execution, &reporting, &sink, census.as_ref())?;
     spans.mark_prepared();
     let PreparedBoot {
         mut rt,
@@ -78,6 +82,9 @@ pub fn run_game(
     }
     if reporting.boot.profile_pairs {
         report_unit_profiles(&mut rt);
+    }
+    if let Some(census) = &census {
+        report::print_out(&report::census_lines(&census.report()));
     }
 
     save_artifacts(
@@ -145,18 +152,25 @@ fn debug_assert_dumpable(ranges: &[(u64, u64)]) {
     }
 }
 
+/// Dispatches between two samples of the state-hash census.
+const CENSUS_SAMPLE_EVERY: u64 = 1 << 20;
+
 fn prepare_boot(
     execution: RunExecution<'_>,
     reporting: &RunReporting<'_>,
     sink: &Rc<dyn BootSink>,
+    census: Option<&Rc<StateHashCensus>>,
 ) -> Result<PreparedBoot, RunError> {
     eprintln!(
         "boot run: title = {} ({})",
         execution.title.manifest.name(),
         execution.title.manifest.display_name()
     );
-    let taps = crate::game::debug_taps_from_env()
+    let mut taps = crate::game::debug_taps_from_env()
         .map_err(|error| RunError::DebugTaps(error.to_string()))?;
+    if let Some(census) = census {
+        taps = Rc::new(WithPpuTap::new(taps, Rc::clone(census) as _)) as Rc<dyn DebugTaps>;
+    }
     reporting
         .progress
         .phase(crate::progress::BootPhase::Loading.code());

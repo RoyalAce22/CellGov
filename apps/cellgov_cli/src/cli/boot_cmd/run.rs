@@ -112,6 +112,7 @@ pub(crate) fn run_game(
             },
             trace: args.trace,
             profile: args.profile,
+            state_hash_census: args.state_hash_census,
             progress: &*sink,
             finish_line,
         },

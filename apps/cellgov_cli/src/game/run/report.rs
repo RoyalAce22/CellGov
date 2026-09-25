@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use cellgov_boot::prepare::StartupTimings;
 use cellgov_boot::step_loop::{compute_untracked, pct, RunAnomalies, StepTiming};
+use cellgov_boot::taps::CensusReport;
 
 /// `part` as a percentage of `total`; a zero total reads as 0.
 fn percent(part: u64, total: u64) -> f64 {
@@ -144,6 +145,25 @@ pub(super) fn frequency_block<T: std::fmt::Display>(
 /// Rows the per-unit instruction and adjacent-pair blocks report.
 pub(super) const FREQUENCY_ROWS: usize = 40;
 
+/// The `--state-hash-census` block: the counts, then one row of lanes
+/// per sample.
+pub(super) fn census_lines(r: &CensusReport) -> Vec<String> {
+    let mut out = vec![
+        String::new(),
+        "state-hash census:".to_string(),
+        format!("  dispatches:             {}", r.dispatches),
+        format!("  distinct states:        {}", r.distinct_states),
+        format!("  state_hash collisions:  {}", r.state_hash_collisions),
+        format!("  multilinear collisions: {}", r.multilinear_collisions),
+        format!("  identity conflicts:     {}", r.identity_conflicts),
+    ];
+    for (index, lanes) in &r.samples {
+        let row: Vec<String> = lanes.iter().map(|l| format!("0x{l:x}")).collect();
+        out.push(format!("  sample {index}: [{}]", row.join(", ")));
+    }
+    out
+}
+
 /// Wall-clock spans of one `boot run`, reported under
 /// `CELLGOV_RUNGAME_PROFILE`.
 ///
@@ -217,3 +237,7 @@ pub(super) fn print_err(lines: &[String]) {
 #[cfg(test)]
 #[path = "tests/report_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/census_report_tests.rs"]
+mod census_report_tests;

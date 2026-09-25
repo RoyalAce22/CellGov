@@ -880,6 +880,7 @@ Usage: cellgov boot run [OPTIONS] <--title <NAME>|--content-id <ID>|--title-mani
 | `--trace` | -- | Emit the binary trace stream. |
 | `--profile` | -- | Report per-opcode execution counts. |
 | `--profile-pairs` | -- | Report the hottest consecutive opcode pairs. |
+| `--state-hash-census` | -- | Count the PPU states the run passes through and how many share a state hash. Holds 32 bytes per dispatched instruction until the run ends. |
 | `--strict-reserved` | -- | Fault on a read of a reserved region instead of serving zeroes. |
 | `--prescan` | -- | Scan the title for unimplemented opcodes before booting. |
 | `--dump-at-pc` | `HEX` | Dump PPU state each time this guest PC retires. |

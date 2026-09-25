@@ -185,6 +185,11 @@ pub(crate) struct BootRunArgs {
     /// Report the hottest consecutive opcode pairs.
     #[arg(long)]
     pub profile_pairs: bool,
+    /// Count the PPU states the run passes through and how many share a
+    /// state hash. Holds 32 bytes per dispatched instruction until the run
+    /// ends.
+    #[arg(long)]
+    pub state_hash_census: bool,
     /// Fault on a read of a reserved region instead of serving zeroes.
     #[arg(long)]
     pub strict_reserved: bool,

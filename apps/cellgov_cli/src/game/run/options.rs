@@ -41,6 +41,9 @@ pub struct RunReporting<'a> {
     pub trace: bool,
     /// Measure the startup stages and the step loop, and report both.
     pub profile: bool,
+    /// Count the PPU states the run passes through and the state-hash
+    /// collisions among them; see [`cellgov_boot::taps::StateHashCensus`].
+    pub state_hash_census: bool,
     /// Where the boot reports its phases and retired steps.
     pub progress: &'a dyn crate::progress::ProgressSink,
     /// The step count the run should end at, when its cell's anchor
