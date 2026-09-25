@@ -116,9 +116,10 @@ pub enum TraceRecord {
     },
     /// Per-step PPU state fingerprint at instruction retire.
     ///
-    /// `hash` covers GPR + LR + CTR + XER + CR under a canonical tooling-local
-    /// byte layout. Emitted once per retired instruction when per-step tracing
-    /// is active.
+    /// `hash` covers GPR + LR + CTR + XER + CR and the reservation, under
+    /// the scheme the stream's [`StateHashScheme`](Self::StateHashScheme)
+    /// record names. The stream carries one per retired instruction
+    /// while per-step tracing is active.
     ///
     /// FPR, VMX, and FPSCR are outside the covered set. A divergence confined
     /// to float or vector state stays invisible until it reaches a covered

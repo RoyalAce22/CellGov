@@ -37,9 +37,8 @@ pub struct LocalDiagnostics {
 
 /// PPU register snapshot at fault time.
 ///
-/// The field set matches `PpuStateHash`'s FNV-1a fingerprint
-/// (GPR + LR + CTR + XER + CR) so CLI fault formatting and divergence
-/// traces hash the same state.
+/// It holds the register fields of the `PpuStateHash` fingerprint
+/// (GPR + LR + CTR + XER + CR), without the reservation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FaultRegisterDump {
     /// General-purpose registers r0..r31.

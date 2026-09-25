@@ -5,7 +5,7 @@
 //! Multi-byte values must be serialized in a fixed byte order before
 //! being fed in -- the byte stream is the contract, not the in-memory
 //! representation. CellGov uses little-endian for state-hash payloads
-//! (see `PpuStateHash` and `sync_state_hash` for the canonical layouts).
+//! (see `sync_state_hash` for the canonical layout).
 
 /// FNV-1a offset basis (64-bit).
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;

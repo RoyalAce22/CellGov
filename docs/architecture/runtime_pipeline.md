@@ -199,8 +199,8 @@ The per-call `ExecutionContext::trace_per_step` flag gates the two
 per-step variants; `RuntimeMode::FullTrace` and
 `RuntimeMode::DeterminismCheck` set it, `FaultDriven` does not.
 When set, the unit emits one `PpuStateHash` (25 bytes: step + pc +
-64-bit FNV-1a fingerprint of GPR + LR + CTR + XER + CR +
-reservation) per retired instruction. The fingerprint input set is
+64-bit Multilinear-128 hash of GPR + LR + CTR + XER + CR +
+reservation, `cellgov_ppu::multilinear`) per retired instruction. The fingerprint input set is
 one field list, `cellgov_exec::PpuFingerprint`, shared by the
 hash, the `PpuStateFull` snapshot, and the zoom diff walker, so a
 hash divergence always names a field in the zoom diff. After each

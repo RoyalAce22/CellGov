@@ -10,8 +10,8 @@ fn scheme_id_wire_format_golden() {
 }
 
 #[test]
-fn the_state_hash_records_the_fnv1a_scheme() {
-    assert_eq!(STATE_HASH_SCHEME, FNV1A_SCHEME_ID);
+fn the_state_hash_records_the_multilinear_scheme() {
+    assert_eq!(STATE_HASH_SCHEME, SCHEME_ID);
     assert_ne!(SCHEME_ID, FNV1A_SCHEME_ID);
 }
 

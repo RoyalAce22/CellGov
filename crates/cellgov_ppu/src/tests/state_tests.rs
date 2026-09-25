@@ -12,12 +12,8 @@ fn new_state_is_zeroed() {
     assert!(s.gpr.as_array().iter().all(|&r| r == 0));
 }
 
-/// Golden pin on the hash byte stream: reordering the fingerprint
-/// fold (field order or per-field encoding) shifts every recorded
-/// per-step hash in every trace and anchor, so it must fail HERE with
-/// a named cause, not later as an unexplained cross-runner mismatch.
-#[test]
-fn state_hash_byte_stream_is_pinned() {
+/// A state with a value in every hashed register.
+fn pinned_state() -> PpuState {
     let mut s = PpuState::new();
     for i in 0..32 {
         s.set_gpr(i, 0x0101_0101_0101_0101u64.wrapping_mul(i as u64 + 1));
@@ -27,7 +23,36 @@ fn state_hash_byte_stream_is_pinned() {
     s.set_xer((1 << 29) | (1 << 31));
     s.set_cr(0xA5A5_5A5A);
     s.set_reservation(Some(ReservedLine::containing(0x3000_1080)));
-    assert_eq!(s.state_hash(), 0xCDB1_0BA6_1479_AD7A);
+    s
+}
+
+#[test]
+fn state_hash_lane_vector_golden() {
+    let lanes = crate::multilinear::lanes(&pinned_state().fingerprint());
+    for (i, &lane) in lanes[..32].iter().enumerate() {
+        assert_eq!(lane, 0x0101_0101_0101_0101u64.wrapping_mul(i as u64 + 1));
+    }
+    assert_eq!(
+        lanes[32..],
+        [
+            0x1122_3344_5566_7788,
+            0x99AA_BBCC_DDEE_FF00,
+            (1 << 29) | (1 << 31),
+            0xA5A5_5A5A,
+            1,
+            0x3000_1080
+        ],
+        "the lane order is part of the hash scheme"
+    );
+}
+
+#[test]
+fn state_hash_wire_format_golden() {
+    assert_eq!(
+        pinned_state().state_hash(),
+        0xB1AC_AF60_3A13_F197,
+        "written by hand in the same commit as the change that moves it"
+    );
 }
 
 #[test]

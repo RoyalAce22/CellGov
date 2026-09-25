@@ -455,7 +455,7 @@ fn counter_sequences_hash_pairwise_distinct() {
 
 // --- The FNV-1a baseline ---
 
-/// The `PpuState::state_hash` of the state that `l` describes; `l` holds
+/// The FNV-1a scheme's hash of the state that `l` describes; `l` holds
 /// only values a state can hold.
 fn fnv_of_lanes(l: &[u64; LANE_COUNT]) -> u64 {
     let mut h = cellgov_mem::Fnv1aHasher::new();
@@ -473,9 +473,41 @@ fn fnv_of_lanes(l: &[u64; LANE_COUNT]) -> u64 {
 }
 
 #[test]
-fn fnv_of_lanes_is_the_state_hash_of_the_state() {
-    for s in single_bit_states() {
-        assert_eq!(fnv_of_lanes(&lanes(&s.fingerprint())), s.state_hash());
+fn fnv_of_lanes_reproduces_the_former_fnv1a_state_hash_pin() {
+    // The lanes of `state_tests::pinned_state` and their hash under the
+    // FNV-1a scheme.
+    let mut lanes = [0u64; LANE_COUNT];
+    for (i, lane) in lanes[..32].iter_mut().enumerate() {
+        *lane = 0x0101_0101_0101_0101u64.wrapping_mul(i as u64 + 1);
+    }
+    lanes[32..].copy_from_slice(&[
+        0x1122_3344_5566_7788,
+        0x99AA_BBCC_DDEE_FF00,
+        (1 << 29) | (1 << 31),
+        0xA5A5_5A5A,
+        1,
+        0x3000_1080,
+    ]);
+    assert_eq!(fnv_of_lanes(&lanes), 0xCDB1_0BA6_1479_AD7A);
+}
+
+#[test]
+fn state_hash_is_the_multilinear_hash_of_its_lanes() {
+    let mut states = single_bit_states();
+    for base in bases() {
+        let mut s = PpuState::new();
+        for (k, &v) in base[..32].iter().enumerate() {
+            s.set_gpr(k, v);
+        }
+        s.set_lr(base[32]);
+        s.set_ctr(base[33]);
+        s.set_xer(base[34]);
+        s.set_cr(base[35] as u32);
+        states.push(s);
+    }
+    assert_eq!(states.len(), 2315);
+    for s in &states {
+        assert_eq!(s.state_hash(), hash(&lanes(&s.fingerprint())));
     }
 }
 

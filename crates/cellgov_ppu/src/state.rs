@@ -15,9 +15,9 @@ pub const FNV1A_SCHEME_ID: u64 = {
 
 /// The id of the scheme [`PpuState::state_hash`] computes.
 ///
-/// Traces and observations record it. A comparison of two sides under
-/// two schemes reports a scheme mismatch in place of a divergence.
-pub const STATE_HASH_SCHEME: u64 = FNV1A_SCHEME_ID;
+/// Traces record it. A comparison of two traces under two schemes
+/// reports a scheme mismatch in place of a divergence.
+pub const STATE_HASH_SCHEME: u64 = crate::multilinear::SCHEME_ID;
 
 /// Register-bank storage with read-only indexing.
 ///
@@ -450,7 +450,7 @@ impl PpuState {
 
     /// The canonical fingerprint input set for this state.
     ///
-    /// [`Self::state_hash`] folds exactly these fields and the zoom
+    /// [`Self::state_hash`] hashes exactly these fields and the zoom
     /// trace carries them, so a per-step hash divergence always names
     /// a field in the zoom diff.
     pub fn fingerprint(&self) -> cellgov_exec::PpuFingerprint {
@@ -464,34 +464,26 @@ impl PpuState {
         }
     }
 
-    /// FNV-1a over the [`Self::fingerprint`] field set. PC, FPR, VR,
-    /// TB excluded (PC is paired at the trace level; FP/VR/TB
-    /// divergences surface through GPR/CR).
+    /// The Multilinear-128 hash of the [`Self::fingerprint`] field set.
+    ///
+    /// [`crate::multilinear`] defines the lanes, the keys and the
+    /// collision bound. The hash reads each lane from `self` and copies
+    /// no register bank.
     pub fn state_hash(&self) -> u64 {
-        let cellgov_exec::PpuFingerprint {
-            gpr,
-            lr,
-            ctr,
-            xer,
-            cr,
-            reservation_line,
-        } = self.fingerprint();
-        let mut h = cellgov_mem::Fnv1aHasher::new();
-        for r in &gpr {
-            h.write(&r.to_le_bytes());
+        use crate::multilinear::{finish, KEYS};
+        let mut acc = KEYS[0];
+        for (key, &r) in KEYS[1..=GPR_COUNT].iter().zip(self.gpr.as_array()) {
+            acc = acc.wrapping_add(key.wrapping_mul(u128::from(r)));
         }
-        h.write(&lr.to_le_bytes());
-        h.write(&ctr.to_le_bytes());
-        h.write(&xer.to_le_bytes());
-        h.write(&cr.to_le_bytes());
-        match reservation_line {
-            None => h.write(&[0u8]),
-            Some(addr) => {
-                h.write(&[1u8]);
-                h.write(&addr.to_le_bytes());
-            }
+        let (tag, line) = match self.reservation {
+            None => (0, 0),
+            Some(l) => (1, l.addr()),
+        };
+        let rest = [self.lr, self.ctr, self.xer, u64::from(self.cr), tag, line];
+        for (key, &lane) in KEYS[GPR_COUNT + 1..].iter().zip(&rest) {
+            acc = acc.wrapping_add(key.wrapping_mul(u128::from(lane)));
         }
-        h.finish()
+        finish(acc)
     }
 }
 
