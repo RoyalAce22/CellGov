@@ -30,7 +30,7 @@ pub enum DivergeField {
 /// Outcome of comparing two per-step state-hash streams.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DivergeReport {
-    /// The two streams hold hashes of two schemes; see [`trace_scheme`].
+    /// The two streams hold PPU hashes of two schemes; see [`trace_scheme`].
     /// The scan compares no record and claims no divergence.
     SchemeMismatch {
         /// Scheme id of side A.
@@ -81,19 +81,39 @@ pub enum DivergeReport {
     },
 }
 
-/// The scheme id of a stream's `PpuStateHash` records.
+/// The scheme ids a trace stream names for its state hashes.
 ///
-/// The id comes from the `StateHashScheme` record after the header. A
-/// stream without that record uses the FNV-1a scheme. A stream whose
-/// leading records do not decode also reads as FNV-1a; [`diverge`]
-/// reports the decode failure for that stream.
-pub fn trace_scheme(bytes: &[u8]) -> u64 {
-    leading_scheme(bytes).unwrap_or(cellgov_ppu::state::FNV1A_SCHEME_ID)
+/// A tool that compares one record kind across two streams checks that
+/// kind's id first, and reports a scheme mismatch when the ids differ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraceSchemes {
+    /// Scheme id of the stream's `PpuStateHash` records.
+    pub ppu: u64,
+    /// Scheme id of the stream's `StateHashCheckpoint` records.
+    pub checkpoint: u64,
 }
 
-/// The scheme id of a stream, or `None` when a leading record does not
-/// decode and so the scheme is unknown.
-fn leading_scheme(bytes: &[u8]) -> Option<u64> {
+impl TraceSchemes {
+    /// The schemes of a stream that has no `StateHashScheme` record.
+    pub const UNSTAMPED: Self = Self {
+        ppu: cellgov_ppu::state::FNV1A_SCHEME_ID,
+        checkpoint: crate::observation::LEGACY_CHECKPOINT_HASH_SCHEME,
+    };
+}
+
+/// The scheme ids of a stream's state hashes.
+///
+/// The ids come from the `StateHashScheme` record after the header. A
+/// stream without that record reads as [`TraceSchemes::UNSTAMPED`]. A
+/// stream whose leading records do not decode reads the same way;
+/// [`diverge`] reports the decode failure for that stream.
+pub fn trace_scheme(bytes: &[u8]) -> TraceSchemes {
+    leading_scheme(bytes).unwrap_or(TraceSchemes::UNSTAMPED)
+}
+
+/// The scheme ids of a stream, or `None` when a leading record does not
+/// decode and so the schemes are unknown.
+fn leading_scheme(bytes: &[u8]) -> Option<TraceSchemes> {
     let mut reader = TraceReader::new(bytes);
     let mut first = reader.next();
     if matches!(first, Some(Ok(TraceRecord::RunIdentity { .. }))) {
@@ -101,8 +121,10 @@ fn leading_scheme(bytes: &[u8]) -> Option<u64> {
     }
     match first {
         Some(Err(_)) => None,
-        Some(Ok(TraceRecord::StateHashScheme { ppu })) => Some(ppu),
-        _ => Some(cellgov_ppu::state::FNV1A_SCHEME_ID),
+        Some(Ok(TraceRecord::StateHashScheme { ppu, checkpoint })) => {
+            Some(TraceSchemes { ppu, checkpoint })
+        }
+        _ => Some(TraceSchemes::UNSTAMPED),
     }
 }
 
@@ -110,8 +132,10 @@ fn leading_scheme(bytes: &[u8]) -> Option<u64> {
 ///
 /// The scan ends early in two cases:
 ///
-/// - The two streams name two schemes. The scan returns
-///   [`DivergeReport::SchemeMismatch`] and reads no `PpuStateHash`.
+/// - The two streams name two PPU schemes. The scan returns
+///   [`DivergeReport::SchemeMismatch`] and reads no `PpuStateHash`. The
+///   checkpoint schemes do not stop the scan, since it reads no
+///   checkpoint record.
 /// - A record on either side fails to decode. The scan returns
 ///   [`DivergeReport::CorruptTrace`], even when the record lies past the
 ///   other side's clean end.
@@ -121,10 +145,10 @@ fn leading_scheme(bytes: &[u8]) -> Option<u64> {
 /// `PpuStateHash`, so the scan compares no hash.
 pub fn diverge(a: &[u8], b: &[u8]) -> DivergeReport {
     if let (Some(a_scheme), Some(b_scheme)) = (leading_scheme(a), leading_scheme(b)) {
-        if a_scheme != b_scheme {
+        if a_scheme.ppu != b_scheme.ppu {
             return DivergeReport::SchemeMismatch {
-                a: a_scheme,
-                b: b_scheme,
+                a: a_scheme.ppu,
+                b: b_scheme.ppu,
             };
         }
     }

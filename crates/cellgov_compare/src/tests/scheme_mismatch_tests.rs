@@ -28,7 +28,10 @@ fn trace(scheme: Option<u64>) -> Vec<u8> {
     let mut w = TraceWriter::new();
     w.record_header(&header());
     if let Some(ppu) = scheme {
-        w.record(&TraceRecord::StateHashScheme { ppu });
+        w.record(&TraceRecord::StateHashScheme {
+            ppu,
+            checkpoint: crate::CHECKPOINT_HASH_SCHEME,
+        });
     }
     for step in 0..3 {
         w.record(&TraceRecord::PpuStateHash {
@@ -42,21 +45,30 @@ fn trace(scheme: Option<u64>) -> Vec<u8> {
 
 #[test]
 fn a_stream_names_its_scheme_after_the_header() {
-    assert_eq!(trace_scheme(&trace(Some(SCHEME_ID))), SCHEME_ID);
-    assert_eq!(trace_scheme(&trace(Some(7))), 7);
+    assert_eq!(trace_scheme(&trace(Some(SCHEME_ID))).ppu, SCHEME_ID);
+    assert_eq!(trace_scheme(&trace(Some(7))).ppu, 7);
 }
 
 #[test]
 fn a_stream_without_a_scheme_record_reads_as_fnv1a() {
-    assert_eq!(trace_scheme(&trace(None)), FNV1A_SCHEME_ID);
-    assert_eq!(trace_scheme(&[]), FNV1A_SCHEME_ID);
+    assert_eq!(trace_scheme(&trace(None)).ppu, FNV1A_SCHEME_ID);
+    assert_eq!(trace_scheme(&[]).ppu, FNV1A_SCHEME_ID);
 }
 
 #[test]
 fn a_headerless_stream_may_lead_with_its_scheme() {
     let mut w = TraceWriter::new();
-    w.record(&TraceRecord::StateHashScheme { ppu: 5 });
-    assert_eq!(trace_scheme(&w.take_bytes()), 5);
+    w.record(&TraceRecord::StateHashScheme {
+        ppu: 5,
+        checkpoint: 6,
+    });
+    assert_eq!(
+        trace_scheme(&w.take_bytes()),
+        crate::TraceSchemes {
+            ppu: 5,
+            checkpoint: 6
+        }
+    );
 }
 
 #[test]
@@ -166,13 +178,17 @@ fn diff_compare_keeps_a_real_divergence_beside_a_scheme_mismatch() {
 }
 
 #[test]
-fn an_observation_without_a_scheme_reads_as_the_checkpoint_scheme() {
+fn an_observation_without_a_scheme_reads_as_the_legacy_checkpoint_scheme() {
     let mut json: serde_json::Value = serde_json::to_value(sample_observation()).unwrap();
     let hashes = json["state_hashes"].as_object_mut().unwrap();
     assert!(hashes.remove("scheme").is_some());
     let back: Observation = serde_json::from_value(json).unwrap();
     assert_eq!(
         back.state_hashes.unwrap().scheme,
+        crate::LEGACY_CHECKPOINT_HASH_SCHEME
+    );
+    assert_ne!(
+        crate::LEGACY_CHECKPOINT_HASH_SCHEME,
         crate::CHECKPOINT_HASH_SCHEME
     );
 }

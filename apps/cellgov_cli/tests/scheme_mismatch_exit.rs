@@ -38,7 +38,10 @@ fn cellgov(args: &[&str], paths: &[&Path]) -> Output {
 fn state_trace(scheme: Option<u64>) -> Vec<u8> {
     let mut writer = TraceWriter::new();
     if let Some(ppu) = scheme {
-        writer.record(&TraceRecord::StateHashScheme { ppu });
+        writer.record(&TraceRecord::StateHashScheme {
+            ppu,
+            checkpoint: CHECKPOINT_HASH_SCHEME,
+        });
     }
     writer.record(&TraceRecord::PpuStateHash {
         step: 0,

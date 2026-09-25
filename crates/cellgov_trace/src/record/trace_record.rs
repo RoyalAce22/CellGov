@@ -225,15 +225,20 @@ pub enum TraceRecord {
         /// Reservations the write's clear sweep dropped.
         reservations_cleared: u32,
     },
-    /// The scheme id of the stream's per-step state hashes.
+    /// The scheme ids of the stream's state hashes.
     ///
     /// A run writes it once, directly after the
     /// [`RunIdentity`](Self::RunIdentity) header. A stream without it
-    /// holds hashes of the FNV-1a scheme.
+    /// holds hashes of the FNV-1a PPU scheme and of the first checkpoint
+    /// scheme.
     StateHashScheme {
         /// Scheme id of every [`PpuStateHash`](Self::PpuStateHash) in the
         /// stream.
         ppu: u64,
+        /// Scheme id of every
+        /// [`StateHashCheckpoint`](Self::StateHashCheckpoint) in the
+        /// stream.
+        checkpoint: u64,
     },
 }
 
@@ -279,7 +284,7 @@ impl TraceRecord {
             TAG_SYSCALL_RETURNED => 1 + 8 * 3,
             TAG_RUN_IDENTITY => 1 + 4 + 8 * 3,
             TAG_HOST_WRITE => 1 + 1 + 4 + 8 + 4 + 4,
-            TAG_STATE_HASH_SCHEME => 1 + 8,
+            TAG_STATE_HASH_SCHEME => 1 + 8 + 8,
             _ => return None,
         })
     }

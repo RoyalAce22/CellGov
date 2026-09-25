@@ -206,8 +206,10 @@ fn dump_trace(result: &ScenarioResult) -> Result<(), CommandError> {
                      addr=0x{addr:x} len={len} cleared={reservations_cleared}"
                 );
             }
-            TraceRecord::StateHashScheme { ppu } => {
-                println!("{i:4}  StateHashScheme    ppu=0x{ppu:016x}");
+            TraceRecord::StateHashScheme { ppu, checkpoint } => {
+                println!(
+                    "{i:4}  StateHashScheme    ppu=0x{ppu:016x} checkpoint=0x{checkpoint:016x}"
+                );
             }
         }
     }

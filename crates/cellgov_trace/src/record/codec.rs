@@ -183,8 +183,9 @@ impl TraceRecord {
                 write_u32(buf, *len);
                 write_u32(buf, *reservations_cleared);
             }
-            TraceRecord::StateHashScheme { ppu } => {
+            TraceRecord::StateHashScheme { ppu, checkpoint } => {
                 write_u64(buf, *ppu);
+                write_u64(buf, *checkpoint);
             }
         }
         debug_assert_eq!(
@@ -404,7 +405,8 @@ impl TraceRecord {
             }
             TAG_STATE_HASH_SCHEME => {
                 let ppu = read_u64(bytes, &mut pos)?;
-                TraceRecord::StateHashScheme { ppu }
+                let checkpoint = read_u64(bytes, &mut pos)?;
+                TraceRecord::StateHashScheme { ppu, checkpoint }
             }
             other => return Err(DecodeError::UnknownTag(other)),
         };

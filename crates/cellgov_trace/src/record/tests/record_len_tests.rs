@@ -99,7 +99,10 @@ fn one_of_each() -> Vec<TraceRecord> {
             len: 35,
             reservations_cleared: 36,
         },
-        TraceRecord::StateHashScheme { ppu: 37 },
+        TraceRecord::StateHashScheme {
+            ppu: 37,
+            checkpoint: 38,
+        },
     ]
 }
 

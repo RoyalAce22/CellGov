@@ -1,5 +1,5 @@
-//! A run's trace leads with its identity header, then the scheme of its
-//! PPU state hash.
+//! A run's trace leads with its identity header, then the schemes of its
+//! PPU state hash and its commit checkpoints.
 
 use super::*;
 use cellgov_trace::{TraceReader, TraceRecord};
@@ -15,11 +15,15 @@ fn the_scheme_record_follows_the_header() {
             identity.trace_header(),
             TraceRecord::StateHashScheme {
                 ppu: cellgov_ppu::state::STATE_HASH_SCHEME,
+                checkpoint: cellgov_compare::CHECKPOINT_HASH_SCHEME,
             },
         ]
     );
     assert_eq!(
         cellgov_compare::trace_scheme(&bytes),
-        cellgov_ppu::state::STATE_HASH_SCHEME
+        cellgov_compare::TraceSchemes {
+            ppu: cellgov_ppu::state::STATE_HASH_SCHEME,
+            checkpoint: cellgov_compare::CHECKPOINT_HASH_SCHEME,
+        }
     );
 }

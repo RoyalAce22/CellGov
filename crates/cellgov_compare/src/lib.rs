@@ -43,6 +43,10 @@ mod test_support;
 #[path = "tests/scheme_mismatch_tests.rs"]
 mod scheme_mismatch_tests;
 
+#[cfg(test)]
+#[path = "tests/checkpoint_scheme_tests.rs"]
+mod checkpoint_scheme_tests;
+
 pub use boot_summary::{BootSummary, BootSummaryError, CheckpointKind};
 pub use cellgov_core::AddressSpaceId;
 pub use checkpoint_manifest::{CheckpointManifest, CheckpointManifestError, CheckpointRegion};
@@ -52,7 +56,8 @@ pub use compare::{
     MemoryDivergence, MultiCompareResult, StateHashDivergence,
 };
 pub use diverge::{
-    diverge, trace_scheme, zoom_lookup, DivergeField, DivergeReport, RegDiff, ZoomLookup,
+    diverge, trace_scheme, zoom_lookup, DivergeField, DivergeReport, RegDiff, TraceSchemes,
+    ZoomLookup,
 };
 pub use format::format_with_commas;
 pub use identity::{
@@ -63,6 +68,7 @@ pub use identity::{
 pub use observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,
     ObservedHashes, ObservedOutcome, CHECKPOINT_HASH_SCHEME, CODE_REGION_NAME,
+    LEGACY_CHECKPOINT_HASH_SCHEME,
 };
 pub use observation_compare::{
     compare_observations, format_observation_compare_human, format_observation_compare_json,

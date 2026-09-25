@@ -166,9 +166,10 @@ The full vocabulary of guest-visible operations:
     empty stream -- a header a reader would not find is worse than
     none, because absence reads as a run that made no claim;
   - `StateHashScheme`, written directly after the header: the scheme
-    id of the stream's `PpuStateHash` records, so two captures of two
-    schemes compare as a scheme mismatch; a stream without it reads
-    as the FNV-1a scheme;
+    ids of the stream's `PpuStateHash` records and of its
+    `StateHashCheckpoint` records, so two captures of two schemes
+    compare as a scheme mismatch; a stream without it reads as the
+    FNV-1a PPU scheme and the first checkpoint scheme;
   - decision-level: `UnitScheduled`, `StepCompleted`,
     `CommitApplied`, `StateHashCheckpoint`, `EffectEmitted`,
     `UnitBlocked`, `UnitWoken`;

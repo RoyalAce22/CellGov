@@ -32,8 +32,9 @@ pub struct ObservedHashes {
     #[serde(with = "state_hash_serde")]
     pub sync: StateHash,
     /// Scheme id of the three hashes above. Deserialization supplies
-    /// [`CHECKPOINT_HASH_SCHEME`] when an observation omits the field.
-    #[serde(default = "checkpoint_hash_scheme")]
+    /// [`LEGACY_CHECKPOINT_HASH_SCHEME`] when an observation omits the
+    /// field: such an observation predates the stamp.
+    #[serde(default = "legacy_checkpoint_hash_scheme")]
     pub scheme: u64,
 }
 
@@ -44,11 +45,19 @@ pub struct ObservedHashes {
 /// producers changes a hash value, increase the tag's version suffix.
 pub const CHECKPOINT_HASH_SCHEME: u64 = {
     let mut h = cellgov_mem::Fnv1aHasher::new();
+    h.write(b"cellgov-checkpoint-fnv1a/v2");
+    h.finish()
+};
+
+/// Scheme id of the commit-checkpoint hashes before the per-page memory
+/// hash, and so of every observation that names no scheme.
+pub const LEGACY_CHECKPOINT_HASH_SCHEME: u64 = {
+    let mut h = cellgov_mem::Fnv1aHasher::new();
     h.write(b"cellgov-checkpoint-fnv1a/v1");
     h.finish()
 };
 
 /// The scheme of an observation that names none.
-fn checkpoint_hash_scheme() -> u64 {
-    CHECKPOINT_HASH_SCHEME
+fn legacy_checkpoint_hash_scheme() -> u64 {
+    LEGACY_CHECKPOINT_HASH_SCHEME
 }

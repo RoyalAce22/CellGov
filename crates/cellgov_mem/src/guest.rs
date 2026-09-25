@@ -78,6 +78,118 @@ impl DirtyPages {
     }
 }
 
+/// The incremental half of [`GuestMemory::content_hash`] for one
+/// region: one term per page, their sum, and the pages written since the
+/// terms were last brought up to date.
+#[derive(Debug, Clone)]
+struct PageHashes {
+    /// Term of each page: 0 for an all-zero page, else a mix of the
+    /// region base, the page index and the page bytes.
+    terms: Arc<Vec<u64>>,
+    /// Sum of `terms`, mod 2^64.
+    acc: u64,
+    /// Pages written since `terms` was last brought up to date.
+    stale: DirtyPages,
+}
+
+impl PageHashes {
+    fn new(num_pages: usize) -> Self {
+        Self {
+            terms: Arc::new(vec![0u64; num_pages]),
+            acc: 0,
+            stale: DirtyPages::new(num_pages),
+        }
+    }
+
+    /// Bring every stale page's term up to date; O(stale pages).
+    fn refresh(&mut self, region: &Region) {
+        let len = region.bytes.len();
+        let mut pages = Vec::new();
+        self.stale.for_each_set(|p| pages.push(p));
+        if pages.is_empty() {
+            return;
+        }
+        let terms = Arc::make_mut(&mut self.terms);
+        for p in pages {
+            let off = p << RESET_PAGE_BITS;
+            let end = (off + RESET_PAGE_SIZE).min(len);
+            let new = page_term(region.base, p, &region.bytes[off..end]);
+            self.acc = self.acc.wrapping_sub(terms[p]).wrapping_add(new);
+            terms[p] = new;
+        }
+        self.stale.clear();
+    }
+}
+
+/// Words in one page, each 8 bytes read little-endian.
+const PAGE_WORDS: usize = RESET_PAGE_SIZE / 8;
+
+/// The SplitMix64 seed of [`PAGE_KEYS`], distinct from the PPU state
+/// hash's seed.
+const PAGE_KEY_SEED: u64 = 0x6365_6c6c_6d65_6d31;
+
+/// Multilinear keys of the page digest: one additive key, then one per
+/// word. Key `i` is SplitMix64 output `2i` in its high half and output
+/// `2i + 1` in its low half.
+const PAGE_KEYS: [u128; PAGE_WORDS + 1] = {
+    let mut keys = [0u128; PAGE_WORDS + 1];
+    let mut state = PAGE_KEY_SEED;
+    let mut i = 0;
+    while i < keys.len() {
+        let mut halves = [0u64; 2];
+        let mut h = 0;
+        while h < 2 {
+            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            halves[h] = z ^ (z >> 31);
+            h += 1;
+        }
+        keys[i] = ((halves[0] as u128) << 64) | halves[1] as u128;
+        i += 1;
+    }
+    keys
+};
+
+/// Multilinear-128 digest of one page: the high half of
+/// `PAGE_KEYS[0] + sum PAGE_KEYS[i + 1] * word_i` (mod 2^128) over the
+/// page's words, a short last page read as zero-padded.
+///
+/// The construction and its collision bound are the PPU state hash's:
+/// two distinct pages give one digest with a probability of at most
+/// 2^-64 over the key draw.
+fn page_digest(bytes: &[u8]) -> u64 {
+    let mut acc = PAGE_KEYS[0];
+    for (key, chunk) in PAGE_KEYS[1..].iter().zip(bytes.chunks(8)) {
+        let mut word = [0u8; 8];
+        word[..chunk.len()].copy_from_slice(chunk);
+        acc = acc.wrapping_add(key.wrapping_mul(u128::from(u64::from_le_bytes(word))));
+    }
+    (acc >> 64) as u64
+}
+
+/// The contribution of one page to its region's sum: 0 for an all-zero
+/// page, so an unwritten page and a page written back to zeros agree.
+///
+/// The term mixes the region base and the page index with the page's
+/// digest, so two pages that exchange contents change the sum. The
+/// SplitMix64 finalizer makes the term non-linear in its inputs, since
+/// the terms are added.
+fn page_term(region_base: u64, page: usize, bytes: &[u8]) -> u64 {
+    if bytes.iter().all(|&b| b == 0) {
+        return 0;
+    }
+    let mut h = crate::hash::Fnv1aHasher::new();
+    h.write(&region_base.to_le_bytes());
+    h.write(&(page as u64).to_le_bytes());
+    h.write(&page_digest(bytes).to_le_bytes());
+    let mut z = h.finish();
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
 /// A single contiguous guest memory region.
 ///
 /// `bytes` is `Arc<Vec<u8>>`: clone is a refcount bump,
@@ -244,6 +356,8 @@ pub struct ProvisionalRead {
 #[derive(Debug, Clone)]
 pub struct GuestMemory {
     regions: Vec<Region>,
+    /// One entry per region, in the order of `regions`.
+    page_hashes: RefCell<Vec<PageHashes>>,
     /// `None` iff a successful commit has happened since the last
     /// computation. Errors leave it untouched.
     cached_hash: Cell<Option<u64>>,
@@ -364,8 +478,19 @@ impl GuestMemory {
                 return Err(MemError::OverlappingRegions);
             }
         }
+        // A region cloned out of a written memory arrives with dirty
+        // pages; they start stale so their terms join the sum.
+        let page_hashes = regions
+            .iter()
+            .map(|r| {
+                let mut h = PageHashes::new(r.bytes.len().div_ceil(RESET_PAGE_SIZE));
+                h.stale.bits.clone_from(&r.dirty_pages.bits);
+                h
+            })
+            .collect();
         Ok(Self {
             regions,
+            page_hashes: RefCell::new(page_hashes),
             cached_hash: Cell::new(None),
             provisional_read_count: Cell::new(0),
             provisional_reads: RefCell::new(BTreeMap::new()),
@@ -409,6 +534,9 @@ impl GuestMemory {
         }
         self.regions
             .insert(insertion, Region::new(base, size, label, page_size));
+        self.page_hashes
+            .get_mut()
+            .insert(insertion, PageHashes::new(size.div_ceil(RESET_PAGE_SIZE)));
         self.cached_hash.set(None);
         Ok(())
     }
@@ -577,9 +705,10 @@ impl GuestMemory {
         self.validate_write(range, bytes.len())?;
         let start = range.start().raw();
         let length = range.length();
-        let region = self
-            .containing_region_mut(start, length)
+        let idx = self
+            .containing_region_index(start, length)
             .expect("validate_write proved the range lies in a ReadWrite region");
+        let region = &mut self.regions[idx];
         let offset = (start - region.base()) as usize;
         let end = offset + length as usize;
         Arc::make_mut(&mut region.bytes)[offset..end].copy_from_slice(bytes);
@@ -587,6 +716,9 @@ impl GuestMemory {
             let first_page = offset >> RESET_PAGE_BITS;
             let last_page = (end - 1) >> RESET_PAGE_BITS;
             region.dirty_pages.mark_range(first_page, last_page);
+            self.page_hashes.get_mut()[idx]
+                .stale
+                .mark_range(first_page, last_page);
         }
         self.cached_hash.set(None);
         Ok(())
@@ -628,7 +760,11 @@ impl GuestMemory {
     /// Panics if any region's backing `Arc<Vec<u8>>` is not uniquely
     /// owned. See [`Region::reset_for_reuse`].
     pub fn reset_for_reuse(&mut self) {
-        for r in &mut self.regions {
+        // Every page the reset zeroes goes stale, so its term drops out.
+        for (r, h) in self.regions.iter_mut().zip(self.page_hashes.get_mut()) {
+            for (stale, dirty) in h.stale.bits.iter_mut().zip(&r.dirty_pages.bits) {
+                *stale |= dirty;
+            }
             r.reset_for_reuse();
         }
         self.cached_hash.set(None);
@@ -648,30 +784,53 @@ impl GuestMemory {
         self.cached_hash.get().is_some()
     }
 
-    /// 64-bit FNV-1a digest of the byte content + region map. All-zero
-    /// pages are skipped. Cached; first call is `O(dirty pages)`.
+    /// 64-bit digest of the byte content and the region map.
+    ///
+    /// Each region contributes its base, its size and the sum of its
+    /// page terms; an all-zero page adds nothing. The call brings up to
+    /// date only the pages written since the previous call, so a commit
+    /// pays for the pages it wrote, not for every page the run wrote.
+    /// The result is cached until the next write.
     pub fn content_hash(&self) -> u64 {
         if let Some(h) = self.cached_hash.get() {
             return h;
         }
+        let mut page_hashes = self.page_hashes.borrow_mut();
         let mut hasher = crate::hash::Fnv1aHasher::new();
-        for region in &self.regions {
+        for (region, hashes) in self.regions.iter().zip(page_hashes.iter_mut()) {
+            hashes.refresh(region);
             hasher.write(&region.base.to_le_bytes());
             hasher.write(&(region.bytes.len() as u64).to_le_bytes());
+            hasher.write(&hashes.acc.to_le_bytes());
+        }
+        let h = hasher.finish();
+        drop(page_hashes);
+        debug_assert_eq!(
+            h,
+            self.content_hash_from_scratch(),
+            "incremental memory hash out of date"
+        );
+        self.cached_hash.set(Some(h));
+        h
+    }
+
+    /// [`Self::content_hash`] computed from every written page, without
+    /// the per-page terms the incremental path keeps.
+    pub fn content_hash_from_scratch(&self) -> u64 {
+        let mut hasher = crate::hash::Fnv1aHasher::new();
+        for region in &self.regions {
             let len = region.bytes.len();
+            let mut acc = 0u64;
             region.dirty_pages.for_each_set(|p| {
                 let off = p << RESET_PAGE_BITS;
                 let end = (off + RESET_PAGE_SIZE).min(len);
-                let page_bytes = &region.bytes[off..end];
-                if !page_bytes.iter().all(|&b| b == 0) {
-                    hasher.write(&(p as u64).to_le_bytes());
-                    hasher.write(page_bytes);
-                }
+                acc = acc.wrapping_add(page_term(region.base, p, &region.bytes[off..end]));
             });
+            hasher.write(&region.base.to_le_bytes());
+            hasher.write(&(len as u64).to_le_bytes());
+            hasher.write(&acc.to_le_bytes());
         }
-        let h = hasher.finish();
-        self.cached_hash.set(Some(h));
-        h
+        hasher.finish()
     }
 
     /// Region that entirely contains `[addr, addr+length)`.
@@ -688,17 +847,14 @@ impl GuestMemory {
         }
     }
 
-    fn containing_region_mut(&mut self, addr: u64, length: u64) -> Option<&mut Region> {
+    fn containing_region_index(&self, addr: u64, length: u64) -> Option<usize> {
         let idx = self.regions.partition_point(|r| r.base() <= addr);
         if idx == 0 {
             return None;
         }
-        let region = &mut self.regions[idx - 1];
-        if region.contains(addr, length) {
-            Some(region)
-        } else {
-            None
-        }
+        self.regions[idx - 1]
+            .contains(addr, length)
+            .then_some(idx - 1)
     }
 
     /// Build a [`FaultContext`] for a faulting access whose range
@@ -728,3 +884,7 @@ impl GuestMemory {
 #[cfg(test)]
 #[path = "tests/guest_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/incremental_hash_tests.rs"]
+mod incremental_hash_tests;

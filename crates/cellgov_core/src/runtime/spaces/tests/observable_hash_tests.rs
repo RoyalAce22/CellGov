@@ -108,7 +108,7 @@ fn observable_hash_wire_format_golden() {
     assert_eq!(rt.observable_hash(), expected.finish());
     assert_eq!(
         rt.observable_hash(),
-        2_787_682_204_781_940_856,
+        12_791_493_419_028_375_796,
         "literal pin; rewrite it by hand with the new value in the same commit that moves the stream",
     );
 }

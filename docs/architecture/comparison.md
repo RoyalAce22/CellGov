@@ -99,7 +99,9 @@ differ:
   index where they disagree: the first *scalar-visible*
   disagreement, per the [per-step coverage caveat](runtime_pipeline.md#effects-and-trace-records).
   Five outcomes: `SchemeMismatch { a, b }` when the two streams'
-  state-hash scheme records name two schemes (no record is compared),
+  state-hash scheme records name two PPU schemes (no record is
+  compared; a checkpoint-scheme difference alone does not stop the
+  scan, which reads no checkpoint record),
   `Identical { count }`,
   `LengthDiffers { common_count, a_count, b_count }`,
   `Differs { step, a_pc, b_pc, a_hash, b_hash, field }` with `field`
