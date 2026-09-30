@@ -406,7 +406,8 @@ diagnostic instead of a jump into junk.
 (the boot does not reach this path), or `informational`.
 [title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
 
-**Zoom.** The bounded-window `PpuStateFull` stream and the
+**Zoom.** The bounded-window full-state stream (`PpuStateFull`, or an
+SPU's `SpuStateFull` with its `SpuRegisters`) and the
 `cellgov diff zoom` lookup that names which fingerprint fields differ
 at a step `diverge` flagged.
 [comparison.md](../architecture/comparison.md#per-step-divergence-localization)

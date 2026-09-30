@@ -1,4 +1,5 @@
-//! Trace-stream divergence scanning over PPU state-hash records: PC, hash, and length differences.
+//! Trace-stream divergence scanning over the per-step state-hash records: PC, hash, and length
+//! differences, and the PPU and SPU streams compared apart.
 
 use super::*;
 use cellgov_trace::{StateHash, TraceRecord, TraceWriter};
@@ -58,6 +59,7 @@ fn hash_difference_at_same_pc_reports_field_hash() {
     let b = encode(&[h(0, 0x100, 0xaa), h(1, 0x104, 0xff)]);
     match diverge(&a, &b) {
         DivergeReport::Differs {
+            stream,
             step,
             a_pc,
             b_pc,
@@ -65,6 +67,7 @@ fn hash_difference_at_same_pc_reports_field_hash() {
             b_hash,
             field,
         } => {
+            assert_eq!(stream, StateStream::Ppu);
             assert_eq!(step, 1);
             assert_eq!(a_pc, b_pc);
             assert_eq!(a_hash, 0xbb);
@@ -93,6 +96,7 @@ fn shorter_a_reports_length_mismatch() {
     assert_eq!(
         r,
         DivergeReport::LengthDiffers {
+            stream: StateStream::Ppu,
             common_count: 1,
             a_count: 1,
             b_count: 2,
@@ -108,6 +112,7 @@ fn shorter_b_reports_length_mismatch() {
     assert_eq!(
         r,
         DivergeReport::LengthDiffers {
+            stream: StateStream::Ppu,
             common_count: 1,
             a_count: 2,
             b_count: 1,
@@ -256,4 +261,134 @@ fn the_failing_index_counts_every_record_kind() {
         }
         other => panic!("expected side A corrupt after one matched record, got {other:?}"),
     }
+}
+
+fn spu(unit: u64, step: u64, pc: u64, hash: u64) -> TraceRecord {
+    TraceRecord::SpuStateHash {
+        unit: cellgov_event::UnitId::new(unit),
+        step,
+        pc,
+        hash: StateHash::new(hash),
+    }
+}
+
+#[test]
+fn an_spu_only_divergence_names_its_unit_while_the_ppu_matches() {
+    let a = encode(&[
+        h(0, 0x100, 0xaa),
+        spu(3, 0, 0x0, 0x10),
+        h(1, 0x104, 0xbb),
+        spu(3, 1, 0x4, 0x11),
+    ]);
+    let b = encode(&[
+        h(0, 0x100, 0xaa),
+        spu(3, 0, 0x0, 0x10),
+        h(1, 0x104, 0xbb),
+        spu(3, 1, 0x4, 0x99),
+    ]);
+    assert_eq!(
+        diverge(&a, &b),
+        DivergeReport::Differs {
+            stream: StateStream::Spu(cellgov_event::UnitId::new(3)),
+            step: 1,
+            a_pc: 0x4,
+            b_pc: 0x4,
+            a_hash: 0x11,
+            b_hash: 0x99,
+            field: DivergeField::Hash,
+        }
+    );
+}
+
+#[test]
+fn two_runs_that_interleave_their_units_differently_still_match() {
+    let a = encode(&[
+        spu(1, 0, 0, 1),
+        spu(2, 0, 0, 2),
+        spu(1, 1, 4, 3),
+        spu(2, 1, 4, 4),
+    ]);
+    let b = encode(&[
+        spu(2, 0, 0, 2),
+        spu(2, 1, 4, 4),
+        spu(1, 0, 0, 1),
+        spu(1, 1, 4, 3),
+    ]);
+    assert_eq!(diverge(&a, &b), DivergeReport::Identical { count: 4 });
+}
+
+#[test]
+fn the_disagreement_first_in_side_a_is_reported() {
+    // Unit 1 disagrees at its step 1 (record 2 of side A); unit 2 at its
+    // step 0 (record 1).
+    let a = encode(&[spu(1, 0, 0, 1), spu(2, 0, 0, 2), spu(1, 1, 4, 3)]);
+    let b = encode(&[spu(1, 0, 0, 1), spu(2, 0, 0, 7), spu(1, 1, 4, 8)]);
+    match diverge(&a, &b) {
+        DivergeReport::Differs { stream, step, .. } => {
+            assert_eq!(stream, StateStream::Spu(cellgov_event::UnitId::new(2)));
+            assert_eq!(step, 0);
+        }
+        other => panic!("expected a differ, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_shorter_spu_stream_reports_its_unit() {
+    let a = encode(&[h(0, 0x100, 0xaa), spu(5, 0, 0, 1), spu(5, 1, 4, 2)]);
+    let b = encode(&[h(0, 0x100, 0xaa), spu(5, 0, 0, 1)]);
+    assert_eq!(
+        diverge(&a, &b),
+        DivergeReport::LengthDiffers {
+            stream: StateStream::Spu(cellgov_event::UnitId::new(5)),
+            common_count: 1,
+            a_count: 2,
+            b_count: 1,
+        }
+    );
+}
+
+#[test]
+fn a_unit_on_one_side_only_is_a_length_difference() {
+    let a = encode(&[h(0, 0x100, 0xaa), spu(6, 0, 0, 1)]);
+    let b = encode(&[h(0, 0x100, 0xaa)]);
+    assert_eq!(
+        diverge(&a, &b),
+        DivergeReport::LengthDiffers {
+            stream: StateStream::Spu(cellgov_event::UnitId::new(6)),
+            common_count: 0,
+            a_count: 1,
+            b_count: 0,
+        }
+    );
+}
+
+#[test]
+fn two_spu_schemes_are_a_scheme_mismatch() {
+    let with_scheme = |spu_scheme: u64| {
+        let mut w = TraceWriter::new();
+        w.record(&TraceRecord::StateHashScheme {
+            ppu: 1,
+            checkpoint: 2,
+            spu: spu_scheme,
+        });
+        w.record(&spu(0, 0, 0, 1));
+        w.take_bytes()
+    };
+    assert_eq!(
+        diverge(&with_scheme(7), &with_scheme(8)),
+        DivergeReport::SchemeMismatch {
+            kind: StateHashKind::Spu,
+            a: 7,
+            b: 8,
+        }
+    );
+}
+
+#[test]
+fn a_stream_displays_as_its_kind_and_unit() {
+    assert_eq!(StateStream::Ppu.to_string(), "ppu");
+    assert_eq!(
+        StateStream::Spu(cellgov_event::UnitId::new(12)).to_string(),
+        "spu:12"
+    );
 }

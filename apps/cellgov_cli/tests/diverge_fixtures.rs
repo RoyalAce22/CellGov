@@ -6,7 +6,7 @@
     reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
 )]
 
-use cellgov_compare::{diverge, DivergeField, DivergeReport};
+use cellgov_compare::{diverge, DivergeField, DivergeReport, StateStream};
 
 /// `diff zoom` was asked for a step neither window covers.
 const EXIT_MISSING_STEP: i32 = 30;
@@ -134,7 +134,7 @@ fn cli_diverge_subcommand_reports_identical_on_match() {
         "expected IDENTICAL in output, got: {stdout}"
     );
     assert!(
-        stdout.contains("8 PpuStateHash records"),
+        stdout.contains("8 state-hash records"),
         "expected matched-count, got: {stdout}"
     );
 }
@@ -437,14 +437,244 @@ fn truncated_b_reports_length_mismatch_at_truncation_point() {
 
     match diverge(&a, &b) {
         DivergeReport::LengthDiffers {
+            stream,
             common_count,
             a_count,
             b_count,
         } => {
+            assert_eq!(stream, StateStream::Ppu);
             assert_eq!(common_count, 7);
             assert_eq!(a_count, 20);
             assert_eq!(b_count, 7);
         }
         other => panic!("expected LengthDiffers, got {other:?}"),
     }
+}
+
+// -- SPU streams --
+
+/// The SPU unit the fixtures trace.
+const SPU_UNIT: u64 = 1;
+
+/// `il rt, imm`.
+const fn spu_il(rt: u32, imm: u32) -> u32 {
+    (0x081 << 23) | (imm << 7) | rt
+}
+
+/// Five loads into r3..r7, then `stop 0`; `mutate` makes the third load
+/// write 9 in place of 3, so only r5's value changes.
+fn spu_unit(mutate: bool) -> cellgov_spu::SpuExecutionUnit {
+    let mut spu = cellgov_spu::SpuExecutionUnit::new(UnitId::new(SPU_UNIT));
+    let third = if mutate { 9 } else { 3 };
+    let program = [
+        spu_il(3, 1),
+        spu_il(4, 2),
+        spu_il(5, third),
+        spu_il(6, 4),
+        spu_il(7, 5),
+        0,
+    ];
+    for (i, word) in program.iter().enumerate() {
+        spu.state_mut().ls[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    spu
+}
+
+/// A state trace that interleaves the PPU records of an 8-instruction
+/// run with the SPU records of `spu_unit(mutate)`, cut to its first
+/// `spu_records` SPU records.
+fn mixed_trace_bytes(mutate: bool, spu_records: usize) -> Vec<u8> {
+    let mut spu = spu_unit(mutate);
+    let mem = GuestMemory::new(16);
+    let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
+    let _ = spu.run_until_yield(Budget::new(64), &ctx, &mut Vec::new());
+    let spu_hashes = spu.drain_retired_spu_state_hashes();
+    let ppu = cellgov_trace::TraceReader::new(&ppu_trace_bytes(&linear_addi_program(8), 8))
+        .map(Result::unwrap)
+        .collect::<Vec<_>>();
+    let mut writer = TraceWriter::new();
+    let mut spu_iter = spu_hashes.into_iter().take(spu_records);
+    for record in ppu {
+        writer.record(&record);
+        if let Some((step, pc, hash)) = spu_iter.next() {
+            writer.record(&TraceRecord::SpuStateHash {
+                unit: UnitId::new(SPU_UNIT),
+                step,
+                pc,
+                hash: StateHash::new(hash),
+            });
+        }
+    }
+    writer.take_bytes()
+}
+
+/// The SPU zoom trace of `spu_unit(mutate)` over `window`.
+fn spu_zoom_bytes(mutate: bool, window: (u64, u64)) -> Vec<u8> {
+    let mut spu = spu_unit(mutate);
+    spu.set_full_state_window(Some(window));
+    let mem = GuestMemory::new(16);
+    let _ = spu.run_until_yield(
+        Budget::new(64),
+        &ExecutionContext::new(&mem),
+        &mut Vec::new(),
+    );
+    let mut writer = TraceWriter::new();
+    for (step, pc, fingerprint) in spu.drain_retired_spu_state_full() {
+        let cellgov_exec::SpuFingerprint {
+            regs,
+            fpscr,
+            lslr,
+            interrupts_enabled,
+            srr0,
+            reservation_line,
+        } = fingerprint;
+        writer.record(&TraceRecord::SpuStateFull {
+            unit: UnitId::new(SPU_UNIT),
+            step,
+            pc,
+            fpscr,
+            lslr,
+            interrupts_enabled,
+            srr0,
+            reservation_line,
+        });
+        for block in 0..8 {
+            let mut chunk = [0u128; 16];
+            chunk.copy_from_slice(&regs[block * 16..block * 16 + 16]);
+            writer.record(&TraceRecord::SpuRegisters {
+                unit: UnitId::new(SPU_UNIT),
+                step,
+                first: (block * 16) as u8,
+                regs: chunk,
+            });
+        }
+    }
+    writer.take_bytes()
+}
+
+fn cellgov(args: &[&str]) -> (Option<i32>, String) {
+    let bin = std::path::PathBuf::from(env!("CARGO_BIN_EXE_cellgov"));
+    let out = std::process::Command::new(bin)
+        .args(args)
+        .output()
+        .expect("cli runs");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
+}
+
+#[test]
+fn an_spu_only_divergence_is_located_while_the_ppu_matches() {
+    let a = mixed_trace_bytes(false, 6);
+    let b = mixed_trace_bytes(true, 6);
+    assert_eq!(diverge(&a, &a), DivergeReport::Identical { count: 14 });
+    match diverge(&a, &b) {
+        DivergeReport::Differs {
+            stream,
+            step,
+            a_pc,
+            b_pc,
+            field,
+            ..
+        } => {
+            assert_eq!(stream, StateStream::Spu(UnitId::new(SPU_UNIT)));
+            assert_eq!(step, 2);
+            assert_eq!((a_pc, b_pc), (8, 8));
+            assert_eq!(field, DivergeField::Hash);
+        }
+        other => panic!("expected an SPU differ, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_truncated_spu_stream_reports_its_length_at_the_cut() {
+    let a = mixed_trace_bytes(false, 6);
+    let b = mixed_trace_bytes(false, 4);
+    assert_eq!(
+        diverge(&a, &b),
+        DivergeReport::LengthDiffers {
+            stream: StateStream::Spu(UnitId::new(SPU_UNIT)),
+            common_count: 4,
+            a_count: 6,
+            b_count: 4,
+        }
+    );
+}
+
+#[test]
+fn cli_diverge_names_the_spu_unit() {
+    let dir = scratch_labeled("spu-diverge");
+    let a = dir.join("a.state");
+    let b = dir.join("b.state");
+    std::fs::write(&a, mixed_trace_bytes(false, 6)).unwrap();
+    std::fs::write(&b, mixed_trace_bytes(true, 6)).unwrap();
+    let (code, stdout) = cellgov(&["diff", "diverge", a.to_str().unwrap(), b.to_str().unwrap()]);
+    assert_eq!(code, Some(1), "{stdout}");
+    assert!(
+        stdout.contains("DIVERGE step=2 unit=spu:1 field=hash"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn cli_zoom_names_the_spu_register_that_differs() {
+    let dir = scratch_labeled("spu-zoom");
+    let a = dir.join("a.zoom.state");
+    let b = dir.join("b.zoom.state");
+    std::fs::write(&a, spu_zoom_bytes(false, (1, 3))).unwrap();
+    std::fs::write(&b, spu_zoom_bytes(true, (1, 3))).unwrap();
+    let (code, stdout) = cellgov(&[
+        "diff",
+        "zoom",
+        a.to_str().unwrap(),
+        b.to_str().unwrap(),
+        "2",
+        "--unit",
+        "1",
+    ]);
+    assert_eq!(code, Some(1), "{stdout}");
+    assert!(
+        stdout.contains("ZOOM unit=spu:1 step=2 a_pc=0x8 b_pc=0x8  1 field(s) differ:"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "  r5         a=0x00000003000000030000000300000003  b=0x00000009000000090000000900000009"
+        ),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn cli_zoom_reports_agreeing_spu_snapshots_and_a_step_outside_the_window() {
+    let dir = scratch_labeled("spu-zoom-agree");
+    let a = dir.join("a.zoom.state");
+    let b = dir.join("b.zoom.state");
+    let z = spu_zoom_bytes(false, (1, 3));
+    std::fs::write(&a, &z).unwrap();
+    std::fs::write(&b, &z).unwrap();
+    let zoom = |step: &str| {
+        cellgov(&[
+            "diff",
+            "zoom",
+            a.to_str().unwrap(),
+            b.to_str().unwrap(),
+            step,
+            "--unit",
+            "1",
+        ])
+    };
+    let (code, stdout) = zoom("2");
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(
+        stdout.contains("NO_FIELD_DIFF unit=spu:1 step=2"),
+        "{stdout}"
+    );
+    let (code, stdout) = zoom("5");
+    assert_eq!(code, Some(EXIT_MISSING_STEP), "{stdout}");
+    assert!(
+        stdout.contains("MISSING_STEP unit=spu:1 step=5"),
+        "{stdout}"
+    );
 }

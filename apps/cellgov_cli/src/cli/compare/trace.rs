@@ -15,8 +15,9 @@ const EXIT_MISSING_STEP: i32 = exit_codes::command_specific(30);
 ///
 /// # Exit status
 ///
-/// - Status 0 means every `PpuStateHash` record matches.
-/// - Status 1 means the step or trace length differs.
+/// - Status 0 means every `PpuStateHash` and `SpuStateHash` record
+///   matches, stream by stream.
+/// - Status 1 means a stream's step or length differs.
 /// - [`EXIT_CORRUPT_TRACE`] means a trace failed to decode before the
 ///   scan finished. The scan prints no verdict for that file.
 /// - `EXIT_SCHEME_MISMATCH` means the two traces hold state hashes of
@@ -31,22 +32,23 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) -> Result<CommandExitCode,
     let b_bytes = load_file(b_path)?;
     report_trace_identity(&a_bytes, a_path, &b_bytes, b_path);
     match diverge(&a_bytes, &b_bytes) {
-        DivergeReport::SchemeMismatch { a, b } => {
+        DivergeReport::SchemeMismatch { kind, a, b } => {
             println!(
-                "SCHEME_MISMATCH  a_scheme=0x{a:016x} b_scheme=0x{b:016x}  (the two captures hold state hashes of two schemes; no record was compared)"
+                "SCHEME_MISMATCH  kind={kind} a_scheme=0x{a:016x} b_scheme=0x{b:016x}  (the two captures hold state hashes of two schemes; no record was compared)"
             );
             Ok(CommandExitCode::new(super::scenario::EXIT_SCHEME_MISMATCH))
         }
         DivergeReport::Identical { count } => {
-            println!("IDENTICAL  {count} PpuStateHash records matched");
+            println!("IDENTICAL  {count} state-hash records matched");
             if count == 0 {
                 eprintln!(
-                    "WARN: zero PpuStateHash records matched; trace files may be empty or truncated"
+                    "WARN: zero state-hash records matched; trace files may be empty or truncated"
                 );
             }
             Ok(CommandExitCode::SUCCESS)
         }
         DivergeReport::Differs {
+            stream,
             step,
             a_pc,
             b_pc,
@@ -59,17 +61,18 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) -> Result<CommandExitCode,
                 DivergeField::Hash => "hash",
             };
             println!(
-                "DIVERGE step={step} field={field_str}  a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  a_hash=0x{a_hash:x} b_hash=0x{b_hash:x}"
+                "DIVERGE step={step} unit={stream} field={field_str}  a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  a_hash=0x{a_hash:x} b_hash=0x{b_hash:x}"
             );
             Ok(CommandExitCode::new(exit_codes::FAILED))
         }
         DivergeReport::LengthDiffers {
+            stream,
             common_count,
             a_count,
             b_count,
         } => {
             println!(
-                "LENGTH_DIFFERS  common={common_count}  a={a_count}  b={b_count}  ({a_path} vs {b_path})"
+                "LENGTH_DIFFERS  unit={stream}  common={common_count}  a={a_count}  b={b_count}  ({a_path} vs {b_path})"
             );
             Ok(CommandExitCode::new(exit_codes::FAILED))
         }
@@ -101,7 +104,8 @@ fn report_trace_identity(a: &[u8], a_path: &str, b: &[u8], b_path: &str) {
     }
 }
 
-/// Per-field register diff at the named step.
+/// Per-field register diff at the named step: the PPU's, or with `unit`
+/// that SPU's.
 ///
 /// # Exit status
 ///
@@ -117,10 +121,19 @@ pub(crate) fn run_zoom(
     a_path: &str,
     b_path: &str,
     step: u64,
+    unit: Option<u64>,
 ) -> Result<CommandExitCode, CommandError> {
     use cellgov_compare::{zoom_lookup, ZoomLookup};
     let a_bytes = load_file(a_path)?;
     let b_bytes = load_file(b_path)?;
+    if let Some(unit) = unit {
+        return Ok(spu_zoom(
+            &a_bytes,
+            &b_bytes,
+            cellgov_event::UnitId::new(unit),
+            step,
+        ));
+    }
     match zoom_lookup(&a_bytes, &b_bytes, step) {
         ZoomLookup::Found {
             step,
@@ -171,6 +184,68 @@ pub(crate) fn run_zoom(
                 describe(b_error)
             );
             Ok(CommandExitCode::new(EXIT_CORRUPT_TRACE))
+        }
+    }
+}
+
+/// `diff zoom --unit`: the SPU snapshot diff, rendered as the PPU one is.
+fn spu_zoom(
+    a_bytes: &[u8],
+    b_bytes: &[u8],
+    unit: cellgov_event::UnitId,
+    step: u64,
+) -> CommandExitCode {
+    use cellgov_compare::{spu_zoom_lookup, SpuZoomLookup};
+    let name = cellgov_compare::StateStream::Spu(unit);
+    match spu_zoom_lookup(a_bytes, b_bytes, unit, step) {
+        SpuZoomLookup::Found {
+            a_pc, b_pc, diffs, ..
+        } => {
+            if !diffs.is_empty() {
+                println!(
+                    "ZOOM unit={name} step={step} a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  {} field(s) differ:",
+                    diffs.len()
+                );
+                for d in &diffs {
+                    println!(
+                        "  {:<9}  a=0x{:032x}  b=0x{:032x}",
+                        d.field.to_string(),
+                        d.a,
+                        d.b
+                    );
+                }
+                return CommandExitCode::new(exit_codes::FAILED);
+            }
+            // The PC is outside the fingerprint, as on the PPU.
+            if a_pc != b_pc {
+                println!(
+                    "PC_DIFF unit={name} step={step} a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  registers agree but control flow diverged; the PC split is the divergence"
+                );
+                return CommandExitCode::new(exit_codes::FAILED);
+            }
+            println!("NO_FIELD_DIFF unit={name} step={step} pc=0x{a_pc:x}  snapshots agree on every fingerprint field and PC; if the hash stream diverged at this step, the harness is skewing snapshots against hashes -- investigate, do not resume the scan");
+            CommandExitCode::SUCCESS
+        }
+        SpuZoomLookup::MissingStep {
+            a_missing,
+            b_missing,
+            ..
+        } => {
+            let a_has_step = !a_missing;
+            let b_has_step = !b_missing;
+            println!(
+                "MISSING_STEP unit={name} step={step}  a_has_step={a_has_step}  b_has_step={b_has_step}  (zoom window did not cover this step on at least one side)"
+            );
+            CommandExitCode::new(EXIT_MISSING_STEP)
+        }
+        SpuZoomLookup::CorruptTrace { a_error, b_error } => {
+            let describe = |e: Option<String>| e.unwrap_or_else(|| "ok".into());
+            println!(
+                "CORRUPT_TRACE  a: {}  b: {}  (zoom file damaged; widening the window will not help)",
+                describe(a_error),
+                describe(b_error)
+            );
+            CommandExitCode::new(EXIT_CORRUPT_TRACE)
         }
     }
 }

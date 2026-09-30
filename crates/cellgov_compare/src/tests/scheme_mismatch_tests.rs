@@ -81,6 +81,7 @@ fn diverge_reports_a_scheme_mismatch_before_it_reads_a_record() {
     assert_eq!(
         diverge(&old, &new),
         DivergeReport::SchemeMismatch {
+            kind: crate::StateHashKind::Ppu,
             a: FNV1A_SCHEME_ID,
             b: SCHEME_ID,
         }
@@ -207,6 +208,7 @@ fn a_changed_key_turns_a_comparison_into_a_scheme_mismatch() {
     assert_eq!(
         diverge(&a, &b),
         DivergeReport::SchemeMismatch {
+            kind: crate::StateHashKind::Ppu,
             a: SCHEME_ID,
             b: moved,
         }

@@ -1,22 +1,77 @@
 //! Streaming per-step state-hash divergence scanner.
 //!
-//! Walks two binary trace streams, filters each to its `PpuStateHash`
-//! records, and reports the first index where they disagree. Scan is
-//! O(min(len_a, len_b)) with constant auxiliary memory: both streams
-//! are consumed as iterators and never materialized.
+//! Walks two binary trace streams and compares their per-step hash
+//! records stream by stream: the `PpuStateHash` records as one stream,
+//! and the `SpuStateHash` records of each SPU unit as one stream each.
+//! Two runs can interleave their units differently, so each stream is
+//! compared on its own. The traces are consumed as iterators and never
+//! materialized: memory is one entry per stream, and time is one pass
+//! over each trace per stream.
 //!
 //! [Armstrong2019 p:71:24 s:7] A trace comparison between two
 //! simulators checks that they execute matching instructions and make
 //! matching register writes; here the PC is checked before the hash.
 //!
-//! `PpuStateHash` covers scalar integer state only, so the reported step
-//! is the first *scalar-visible* disagreement. Two runs diverging in a
+//! `PpuStateHash` covers scalar integer state only, so a PPU step is
+//! the first *scalar-visible* disagreement. Two runs diverging in a
 //! float or vector register agree here until that value reaches a covered
-//! register, which can be arbitrarily far downstream.
+//! register, which can be arbitrarily far downstream. `SpuStateHash`
+//! covers the SPU's registers, so the same caveat holds for the SPU
+//! state it leaves out: channels, signals and the stopped state.
 
+use std::collections::BTreeSet;
+use std::fmt;
+
+use cellgov_event::UnitId;
 use cellgov_trace::{TraceReader, TraceRecord};
 
 use crate::trace_decode::TraceDecodeError;
+
+/// One per-step hash stream of a trace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StateStream {
+    /// The `PpuStateHash` records. They name no unit.
+    Ppu,
+    /// The `SpuStateHash` records of one SPU unit.
+    Spu(UnitId),
+}
+
+impl StateStream {
+    /// The kind of unit the stream's records come from.
+    pub fn kind(self) -> StateHashKind {
+        match self {
+            Self::Ppu => StateHashKind::Ppu,
+            Self::Spu(_) => StateHashKind::Spu,
+        }
+    }
+}
+
+impl fmt::Display for StateStream {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ppu => f.write_str("ppu"),
+            Self::Spu(unit) => write!(f, "spu:{}", unit.raw()),
+        }
+    }
+}
+
+/// The kind of unit a state hash covers, which names its scheme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StateHashKind {
+    /// A PPU state hash.
+    Ppu,
+    /// An SPU state hash.
+    Spu,
+}
+
+impl fmt::Display for StateHashKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Ppu => "ppu",
+            Self::Spu => "spu",
+        })
+    }
+}
 
 /// Which field disagreed at the first differing step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,23 +85,30 @@ pub enum DivergeField {
 /// Outcome of comparing two per-step state-hash streams.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DivergeReport {
-    /// The two streams hold PPU hashes of two schemes; see [`trace_scheme`].
-    /// The scan compares no record and claims no divergence.
+    /// The two traces hold hashes of one kind under two schemes; see
+    /// [`trace_scheme`]. The scan compares no record and claims no
+    /// divergence.
     SchemeMismatch {
+        /// The kind of hash whose schemes differ.
+        kind: StateHashKind,
         /// Scheme id of side A.
         a: u64,
         /// Scheme id of side B.
         b: u64,
     },
-    /// All `count` records matched pairwise and both streams ended.
+    /// All `count` records matched pairwise and every stream ended on
+    /// both sides.
     Identical {
-        /// Records matched on each side.
+        /// Records matched on each side, over every stream.
         count: u64,
     },
-    /// Both sides reached `step` but disagreed on `field`.
+    /// Both sides reached `step` of `stream` but disagreed on `field`.
     Differs {
-        /// 0-based index of the first scalar-visible disagreement; see the
-        /// module docs for why that is not always the first divergence.
+        /// The stream that disagreed first.
+        stream: StateStream,
+        /// 0-based index within `stream` of the first scalar-visible
+        /// disagreement; see the module docs for why that is not always
+        /// the first divergence.
         step: u64,
         /// PC on side A.
         a_pc: u64,
@@ -59,20 +121,23 @@ pub enum DivergeReport {
         /// Which field broke first.
         field: DivergeField,
     },
-    /// One side ended before the other; `common_count` records matched.
+    /// One side of `stream` ended before the other; `common_count` of
+    /// its records matched.
     LengthDiffers {
-        /// Records matched before either side ended.
+        /// The stream whose sides ran to two lengths.
+        stream: StateStream,
+        /// Records of `stream` matched before either side ended.
         common_count: u64,
-        /// Total `PpuStateHash` records in side A.
+        /// Records of `stream` in side A.
         a_count: u64,
-        /// Total `PpuStateHash` records in side B.
+        /// Records of `stream` in side B.
         b_count: u64,
     },
     /// A trace stopped decoding before the scan finished. Not a verdict
     /// on the runs: the `common_count` records before the failure
     /// matched, and nothing past it was compared.
     CorruptTrace {
-        /// Records matched before the failure.
+        /// Records matched before the failure, over every stream.
         common_count: u64,
         /// Decode failure on side A, if that side failed.
         a_error: Option<TraceDecodeError>,
@@ -139,55 +204,166 @@ fn leading_scheme(bytes: &[u8]) -> Option<TraceSchemes> {
     }
 }
 
-/// Walk two trace byte slices and report the first `PpuStateHash` divergence.
+/// Walk two trace byte slices and report the first per-step hash
+/// divergence.
 ///
-/// The scan ends early in two cases:
+/// Each stream is compared on its own, and the reports combine in this
+/// order:
 ///
-/// - The two streams name two PPU schemes. The scan returns
-///   [`DivergeReport::SchemeMismatch`] and reads no `PpuStateHash`. The
-///   checkpoint schemes do not stop the scan, since it reads no
-///   checkpoint record.
-/// - A record on either side fails to decode. The scan returns
-///   [`DivergeReport::CorruptTrace`], even when the record lies past the
-///   other side's clean end.
+/// 1. A two-scheme pair of one hash kind ends the scan before it reads a
+///    record: [`DivergeReport::SchemeMismatch`]. The checkpoint schemes
+///    do not stop the scan, since it reads no checkpoint record.
+/// 2. A disagreement in any stream: [`DivergeReport::Differs`] for the
+///    one whose record comes first in side A. A stream's scan stops at a
+///    decode failure, so every disagreement lies before any failure.
+/// 3. A record on either side that fails to decode:
+///    [`DivergeReport::CorruptTrace`], even when the record lies past
+///    the other side's clean end.
+/// 4. A stream whose two sides end at two lengths:
+///    [`DivergeReport::LengthDiffers`], for the first such stream in
+///    [`StateStream`] order.
 ///
 /// A side whose leading records do not decode has no known scheme, so
 /// the scan reports the decode failure. That failure comes before any
-/// `PpuStateHash`, so the scan compares no hash.
+/// state hash, so the scan compares no hash.
 pub fn diverge(a: &[u8], b: &[u8]) -> DivergeReport {
     if let (Some(a_scheme), Some(b_scheme)) = (leading_scheme(a), leading_scheme(b)) {
-        if a_scheme.ppu != b_scheme.ppu {
-            return DivergeReport::SchemeMismatch {
-                a: a_scheme.ppu,
-                b: b_scheme.ppu,
-            };
+        for (kind, a_id, b_id) in [
+            (StateHashKind::Ppu, a_scheme.ppu, b_scheme.ppu),
+            (StateHashKind::Spu, a_scheme.spu, b_scheme.spu),
+        ] {
+            if a_id != b_id {
+                return DivergeReport::SchemeMismatch {
+                    kind,
+                    a: a_id,
+                    b: b_id,
+                };
+            }
         }
     }
-    let mut ai = state_hash_iter(a);
-    let mut bi = state_hash_iter(b);
+    let mut streams = streams_in(a);
+    streams.extend(streams_in(b));
+    if streams.is_empty() {
+        // Nothing to compare still has to decode.
+        streams.insert(StateStream::Ppu);
+    }
+    let outcomes: Vec<(StateStream, StreamOutcome)> = streams
+        .into_iter()
+        .map(|stream| (stream, scan_stream(a, b, stream)))
+        .collect();
+    let matched: u64 = outcomes.iter().map(|(_, o)| o.matched()).sum();
+    let first_differ = outcomes
+        .iter()
+        .filter_map(|(_, o)| match o {
+            StreamOutcome::Differs { ordinal, report } => Some((*ordinal, report)),
+            _ => None,
+        })
+        .min_by_key(|(ordinal, _)| *ordinal);
+    if let Some((_, report)) = first_differ {
+        return report.clone();
+    }
+    if let Some((a_error, b_error)) = outcomes.iter().find_map(|(_, o)| match o {
+        StreamOutcome::Corrupt {
+            a_error, b_error, ..
+        } => Some((*a_error, *b_error)),
+        _ => None,
+    }) {
+        return DivergeReport::CorruptTrace {
+            common_count: matched,
+            a_error,
+            b_error,
+        };
+    }
+    if let Some(report) = outcomes.iter().find_map(|(_, o)| match o {
+        StreamOutcome::LengthDiffers(report) => Some(report.clone()),
+        _ => None,
+    }) {
+        return report;
+    }
+    DivergeReport::Identical { count: matched }
+}
+
+/// How the scan of one stream ended.
+enum StreamOutcome {
+    /// Every record matched and both sides ended.
+    Identical { matched: u64 },
+    /// A record disagreed; `ordinal` is its record index in side A.
+    Differs {
+        ordinal: usize,
+        report: DivergeReport,
+    },
+    /// One side ended first.
+    LengthDiffers(DivergeReport),
+    /// A record failed to decode after `matched` records matched.
+    Corrupt {
+        matched: u64,
+        a_error: Option<TraceDecodeError>,
+        b_error: Option<TraceDecodeError>,
+    },
+}
+
+impl StreamOutcome {
+    /// Records of the stream that matched.
+    fn matched(&self) -> u64 {
+        match self {
+            Self::Identical { matched } | Self::Corrupt { matched, .. } => *matched,
+            Self::Differs { report, .. } | Self::LengthDiffers(report) => match report {
+                DivergeReport::Differs { step, .. } => *step,
+                DivergeReport::LengthDiffers { common_count, .. } => *common_count,
+                _ => 0,
+            },
+        }
+    }
+}
+
+/// The streams a trace holds records of, read up to its end or its first
+/// record that does not decode.
+fn streams_in(bytes: &[u8]) -> BTreeSet<StateStream> {
+    TraceReader::new(bytes)
+        .map_while(Result::ok)
+        .filter_map(|record| stream_of(&record).map(|(stream, ..)| stream))
+        .collect()
+}
+
+/// The stream, PC and hash of a per-step hash record.
+fn stream_of(record: &TraceRecord) -> Option<(StateStream, u64, u64)> {
+    match *record {
+        TraceRecord::PpuStateHash { pc, hash, .. } => Some((StateStream::Ppu, pc, hash.raw())),
+        TraceRecord::SpuStateHash { unit, pc, hash, .. } => {
+            Some((StateStream::Spu(unit), pc, hash.raw()))
+        }
+        _ => None,
+    }
+}
+
+/// Compare the records of `stream` in two traces.
+fn scan_stream(a: &[u8], b: &[u8], stream: StateStream) -> StreamOutcome {
+    let mut ai = state_hash_iter(a, stream);
+    let mut bi = state_hash_iter(b, stream);
     let mut step: u64 = 0;
     loop {
         let (a_next, b_next) = match (ai.next().transpose(), bi.next().transpose()) {
             (Ok(a_next), Ok(b_next)) => (a_next, b_next),
             (a_next, b_next) => {
-                return DivergeReport::CorruptTrace {
-                    common_count: step,
+                return StreamOutcome::Corrupt {
+                    matched: step,
                     a_error: a_next.err(),
                     b_error: b_next.err(),
                 }
             }
         };
         match (a_next, b_next) {
-            (None, None) => return DivergeReport::Identical { count: step },
+            (None, None) => return StreamOutcome::Identical { matched: step },
             (Some(_), None) => {
                 return match remaining(ai) {
-                    Ok(rest) => DivergeReport::LengthDiffers {
+                    Ok(rest) => StreamOutcome::LengthDiffers(DivergeReport::LengthDiffers {
+                        stream,
                         common_count: step,
                         a_count: step + 1 + rest,
                         b_count: step,
-                    },
-                    Err(error) => DivergeReport::CorruptTrace {
-                        common_count: step,
+                    }),
+                    Err(error) => StreamOutcome::Corrupt {
+                        matched: step,
                         a_error: Some(error),
                         b_error: None,
                     },
@@ -195,37 +371,39 @@ pub fn diverge(a: &[u8], b: &[u8]) -> DivergeReport {
             }
             (None, Some(_)) => {
                 return match remaining(bi) {
-                    Ok(rest) => DivergeReport::LengthDiffers {
+                    Ok(rest) => StreamOutcome::LengthDiffers(DivergeReport::LengthDiffers {
+                        stream,
                         common_count: step,
                         a_count: step,
                         b_count: step + 1 + rest,
-                    },
-                    Err(error) => DivergeReport::CorruptTrace {
-                        common_count: step,
+                    }),
+                    Err(error) => StreamOutcome::Corrupt {
+                        matched: step,
                         a_error: None,
                         b_error: Some(error),
                     },
                 };
             }
-            (Some((a_pc, a_hash)), Some((b_pc, b_hash))) => {
-                if a_pc != b_pc {
-                    return DivergeReport::Differs {
-                        step,
-                        a_pc,
-                        b_pc,
-                        a_hash,
-                        b_hash,
-                        field: DivergeField::Pc,
-                    };
-                }
-                if a_hash != b_hash {
-                    return DivergeReport::Differs {
-                        step,
-                        a_pc,
-                        b_pc,
-                        a_hash,
-                        b_hash,
-                        field: DivergeField::Hash,
+            (Some(a_rec), Some(b_rec)) => {
+                let field = if a_rec.pc != b_rec.pc {
+                    Some(DivergeField::Pc)
+                } else if a_rec.hash != b_rec.hash {
+                    Some(DivergeField::Hash)
+                } else {
+                    None
+                };
+                if let Some(field) = field {
+                    return StreamOutcome::Differs {
+                        ordinal: a_rec.ordinal,
+                        report: DivergeReport::Differs {
+                            stream,
+                            step,
+                            a_pc: a_rec.pc,
+                            b_pc: b_rec.pc,
+                            a_hash: a_rec.hash,
+                            b_hash: b_rec.hash,
+                            field,
+                        },
                     };
                 }
                 step += 1;
@@ -234,10 +412,10 @@ pub fn diverge(a: &[u8], b: &[u8]) -> DivergeReport {
     }
 }
 
-/// Count the `PpuStateHash` records left on one side after the other
+/// Count the records of a stream left on one side after the other
 /// ended, failing at the first record that does not decode.
 fn remaining(
-    iter: impl Iterator<Item = Result<(u64, u64), TraceDecodeError>>,
+    iter: impl Iterator<Item = Result<HashRecord, TraceDecodeError>>,
 ) -> Result<u64, TraceDecodeError> {
     let mut count = 0;
     for record in iter {
@@ -247,22 +425,35 @@ fn remaining(
     Ok(count)
 }
 
-/// Iterate `PpuStateHash` records as `(pc, hash)`, skipping other record
-/// kinds; a decode failure is yielded once, positioned by the index and
-/// byte offset of the record that failed, and then the stream ends.
+/// One per-step hash record and its record index in the trace.
+#[derive(Debug, Clone, Copy)]
+struct HashRecord {
+    ordinal: usize,
+    pc: u64,
+    hash: u64,
+}
+
+/// Iterate the records of `stream`, skipping every other record; a
+/// decode failure is yielded once, positioned by the index and byte
+/// offset of the record that failed, and then the stream ends.
 fn state_hash_iter(
     bytes: &[u8],
-) -> impl Iterator<Item = Result<(u64, u64), TraceDecodeError>> + '_ {
+    stream: StateStream,
+) -> impl Iterator<Item = Result<HashRecord, TraceDecodeError>> + '_ {
     let mut reader = TraceReader::new(bytes);
     let mut index = 0usize;
     std::iter::from_fn(move || loop {
         let offset = reader.position();
         match reader.next()? {
-            Ok(TraceRecord::PpuStateHash { pc, hash, .. }) => {
+            Ok(record) => {
+                let ordinal = index;
                 index += 1;
-                return Some(Ok((pc, hash.raw())));
+                if let Some((s, pc, hash)) = stream_of(&record) {
+                    if s == stream {
+                        return Some(Ok(HashRecord { ordinal, pc, hash }));
+                    }
+                }
             }
-            Ok(_) => index += 1,
             Err(source) => {
                 return Some(Err(TraceDecodeError {
                     index,

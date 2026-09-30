@@ -105,9 +105,13 @@ pub(crate) enum DiffCommand {
         /// Second zoom capture.
         #[arg(value_name = "B.zoom.state")]
         b: String,
-        /// Step to zoom into; `0x` for hex.
+        /// Step to zoom into; `0x` for hex. With --unit, the SPU's own
+        /// step.
         #[arg(value_name = "STEP", value_parser = value::step_count)]
         step: u64,
+        /// Zoom into this SPU unit's snapshot instead of the PPU's.
+        #[arg(long, value_name = "ID")]
+        unit: Option<u64>,
     },
 }
 

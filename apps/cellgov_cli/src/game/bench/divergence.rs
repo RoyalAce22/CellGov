@@ -180,15 +180,16 @@ fn cleanup_traces(paths: &[PathBuf]) {
 fn format_diverge(report: &cellgov_compare::DivergeReport) -> String {
     use cellgov_compare::{DivergeField, DivergeReport};
     match report {
-        DivergeReport::SchemeMismatch { a, b } => format!(
-            "diverge: the two traced re-runs recorded two state-hash schemes \
+        DivergeReport::SchemeMismatch { kind, a, b } => format!(
+            "diverge: the two traced re-runs recorded two {kind} state-hash schemes \
              (a=0x{a:016x}, b=0x{b:016x}); no record was compared"
         ),
         DivergeReport::Identical { count } => format!(
-            "diverge: the two traced re-runs matched over {count} PpuStateHash record(s); \
+            "diverge: the two traced re-runs matched over {count} state-hash record(s); \
              the break did not reproduce under DeterminismCheck mode"
         ),
         DivergeReport::Differs {
+            stream,
             step,
             a_pc,
             b_pc,
@@ -201,17 +202,18 @@ fn format_diverge(report: &cellgov_compare::DivergeReport) -> String {
                 DivergeField::Hash => "hash",
             };
             format!(
-                "diverge: first divergent step={step} field={field} \
+                "diverge: first divergent step={step} unit={stream} field={field} \
                  a_pc=0x{a_pc:x} b_pc=0x{b_pc:x} a_hash=0x{a_hash:x} b_hash=0x{b_hash:x}"
             )
         }
         DivergeReport::LengthDiffers {
+            stream,
             common_count,
             a_count,
             b_count,
         } => format!(
-            "diverge: the traced re-runs agreed over {common_count} record(s) then ran to \
-             different lengths (a={a_count}, b={b_count})"
+            "diverge: the traced re-runs agreed over {common_count} {stream} record(s) then \
+             ran to different lengths (a={a_count}, b={b_count})"
         ),
         // Both sides render, as `cellgov diff diverge` renders them.
         DivergeReport::CorruptTrace {

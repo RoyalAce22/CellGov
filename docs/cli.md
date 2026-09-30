@@ -1107,7 +1107,11 @@ Usage: cellgov diff zoom [OPTIONS] <A.zoom.state> <B.zoom.state> <STEP>
 | --- | --- |
 | `A.zoom.state` | First zoom capture. Required. |
 | `B.zoom.state` | Second zoom capture. Required. |
-| `STEP` | Step to zoom into; `0x` for hex. Required. |
+| `STEP` | Step to zoom into; `0x` for hex. With --unit, the SPU's own step. Required. |
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--unit` | `ID` | Zoom into this SPU unit's snapshot instead of the PPU's. |
 
 ```
 Exit codes particular to this command:

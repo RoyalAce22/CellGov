@@ -145,7 +145,9 @@ fn dispatch(command: &Command, globals: &Globals) -> Result<CommandExitCode, Com
             cli::compare::run_compare_observations(a, b, globals.format)
         }
         Command::Diff(DiffCommand::Diverge { a, b }) => cli::compare::run_diverge(a, b),
-        Command::Diff(DiffCommand::Zoom { a, b, step }) => cli::compare::run_zoom(a, b, *step),
+        Command::Diff(DiffCommand::Zoom { a, b, step, unit }) => {
+            cli::compare::run_zoom(a, b, *step, *unit)
+        }
         Command::Explore(args) => cli::explore::run(args, globals.format, SCENARIOS, vfs_flag),
         Command::Scenario(ScenarioCommand::List) => {
             for name in SCENARIOS {

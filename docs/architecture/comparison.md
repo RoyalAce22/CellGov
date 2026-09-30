@@ -157,14 +157,14 @@ the full state is exposed only around the step where the hashes
 differ:
 
 - [`cellgov_compare::diverge`](#diverge) reports the first index
-  where two traces' `PpuStateHash` records disagree: the first
-  *scalar-visible* disagreement.
-- [`cellgov_compare::zoom_lookup`](#zoom_lookup) consumes two
-  zoom-trace files and returns the per-field fingerprint differences
-  at one step, or `MissingStep`.
+  where two traces' per-step hash records disagree, stream by stream:
+  the first *scalar-visible* disagreement.
+- [`cellgov_compare::zoom_lookup`](#zoom_lookup) and
+  `spu_zoom_lookup` consume two zoom-trace files and return the
+  per-field fingerprint differences at one step, or `MissingStep`.
 
 `boot run --save-state-trace <path>` writes the runtime's per-step
-`PpuStateHash` trace to disk. It switches the runtime mode from
+`PpuStateHash` and `SpuStateHash` trace to disk. It switches the runtime mode from
 `FaultDriven` to `DeterminismCheck` for the run. That file is what
 `diverge` and `zoom` consume. With `--patch-byte` for boot-time memory
 injection, diffing two CellGov traces (unpatched + patched) answers
@@ -176,35 +176,43 @@ flowchart LR
   a["boot run --save-state-trace a.state"] --> dv["cellgov diff diverge a b"]
   b["boot run --save-state-trace b.state (e.g. with --patch-byte)"] --> dv
   dv -->|Identical / LengthDiffers| done["verdict"]
-  dv -->|"Differs at step N, field Pc or Hash"| win["re-capture both with a full-state window around N"]
+  dv -->|"Differs at step N of a unit, field Pc or Hash"| win["re-capture both with a full-state window around N"]
   dv -->|CorruptTrace| bad["exit 31, no verdict"]
   dv -->|SchemeMismatch| sch["exit 32, no hash compared"]
-  win --> zm["cellgov diff zoom a.zoom b.zoom N"]
+  win --> zm["cellgov diff zoom a.zoom b.zoom N [--unit ID]"]
   zm --> rd["RegDiff list: the fingerprint fields that differ"]
 ```
 
 ### diverge
 
-`cellgov_compare::diverge(a, b)` walks two trace byte buffers, filters
-each to `PpuStateHash` records, and reports the first index where they
-disagree. That index is the first *scalar-visible* disagreement, per
-the [per-step coverage caveat](runtime_pipeline.md#per-step-coverage-caveat).
+`cellgov_compare::diverge(a, b)` walks two trace byte buffers and
+compares them stream by stream (`StateStream`): the `PpuStateHash`
+records form one stream, and each SPU unit's `SpuStateHash` records
+form another. Two runs can interleave their units differently, so no
+stream's order depends on another's. Within a stream, the index where
+the two sides first disagree is the first *scalar-visible*
+disagreement, per the
+[per-step coverage caveat](runtime_pipeline.md#per-step-coverage-caveat).
 `diverge` has five outcomes:
 
-- `SchemeMismatch { a, b }` when the two streams' state-hash scheme
-  records name two PPU schemes. No record is compared. A
-  checkpoint-scheme difference alone does not stop the scan, which
-  reads no checkpoint record.
-- `Identical { count }`
-- `LengthDiffers { common_count, a_count, b_count }`
-- `Differs { step, a_pc, b_pc, a_hash, b_hash, field }` with `field`
-  in `{Pc, Hash}`
+- `SchemeMismatch { kind, a, b }` when the two traces' state-hash
+  scheme records name two PPU schemes or two SPU schemes. No record is
+  compared. A checkpoint-scheme difference alone does not stop the
+  scan, which reads no checkpoint record.
+- `Identical { count }`, over every stream.
+- `Differs { stream, step, a_pc, b_pc, a_hash, b_hash, field }` with
+  `field` in `{Pc, Hash}`. Of the streams that disagree, the report
+  names the one whose disagreeing record comes first in side A.
 - `CorruptTrace { common_count, a_error, b_error }` when a record on
   either side fails to decode. This is no verdict on the runs, since
   nothing past the cut was compared.
+- `LengthDiffers { stream, common_count, a_count, b_count }` for the
+  first stream whose two sides end at two lengths. A unit present on
+  one side only is such a stream.
 
-Checks run step count -> PC -> hash, so the report names the
-highest-level divergence first. The scan is surfaced via
+The outcomes take precedence in that order, after the scheme check.
+Within a stream, checks run step count -> PC -> hash, so the report
+names the highest-level divergence first. The scan is surfaced via
 `cellgov diff diverge <a.state> <b.state>` (exit 31 on a corrupt
 trace, 32 on a scheme mismatch). The scan is linear in record count.
 
@@ -216,6 +224,17 @@ unit's window). It returns `Found { step, a_pc, b_pc, diffs }` with
 per-field `RegDiff { field, a, b }` entries, or
 `MissingStep { step, a_missing, b_missing }`. It is surfaced via
 `cellgov diff zoom <a> <b> <step>`.
+
+`cellgov_compare::spu_zoom_lookup(a_zoom, b_zoom, unit, step)` does the
+same for one SPU: it rebuilds the unit's snapshot from its
+`SpuStateFull` record and the eight `SpuRegisters` records after it,
+and returns `SpuRegDiff { field, a, b }` entries. Each changed register
+is one 128-bit entry, and FPSCR, LSLR, IE, SRR0 and the reservation
+follow. A header without all eight register records is a
+`CorruptTrace`. It is surfaced via
+`cellgov diff zoom <a> <b> <step> --unit <id>`, where `step` is the
+unit's own retirement counter. Channel, signal and stopped state are
+outside the SPU fingerprint, so no zoom names them.
 
 The snapshot contains the full fingerprint input set, so an empty
 `diffs` means the states agree on everything the hash folds. If

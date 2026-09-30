@@ -56,8 +56,8 @@ pub use compare::{
     MemoryDivergence, MultiCompareResult, StateHashDivergence,
 };
 pub use diverge::{
-    diverge, trace_scheme, zoom_lookup, DivergeField, DivergeReport, RegDiff, TraceSchemes,
-    ZoomLookup,
+    diverge, spu_zoom_lookup, trace_scheme, zoom_lookup, DivergeField, DivergeReport, RegDiff,
+    SpuField, SpuRegDiff, SpuZoomLookup, StateHashKind, StateStream, TraceSchemes, ZoomLookup,
 };
 pub use format::format_with_commas;
 pub use identity::{
