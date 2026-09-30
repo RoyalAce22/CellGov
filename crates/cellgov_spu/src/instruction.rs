@@ -723,6 +723,43 @@ pub enum SpuInstruction {
         /// 7-bit immediate that holds the two's complement of the shift count.
         imm: u8,
     },
+    // [SPU-ISA p:129 s:6 Word rotates: Rot p.129, Roti p.130, Rotm p.138, Rotma p.147]
+    /// Rotate word: per slot, `ra` rotated left by `rb & 0x1F`.
+    Rot {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Per-slot count register.
+        rb: u8,
+    },
+    /// Rotate word immediate: per slot, `ra` rotated left by `imm & 0x1F`.
+    Roti {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate.
+        imm: u8,
+    },
+    /// Rotate and mask word: per slot, a logical right shift by `(0 - rb) & 0x3F`, zero when the count exceeds 31.
+    Rotm {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Per-slot count register.
+        rb: u8,
+    },
+    /// Rotate and mask algebraic word: per slot, an arithmetic right shift by `(0 - rb) & 0x3F`, all sign bits when the count exceeds 31.
+    Rotma {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Per-slot count register.
+        rb: u8,
+    },
     // [SPU-ISA p:118 s:6 Halfword shifts and rotates: Shlh p.118, Shlhi p.119, Roth p.127, Rothi p.128, Rothm p.136, Rothmi p.137, Rotmah p.145, Rotmahi p.146]
     /// Shift left halfword: per slot, `ra << (rb & 0x1F)`, zero when the count exceeds 15.
     Shlh {

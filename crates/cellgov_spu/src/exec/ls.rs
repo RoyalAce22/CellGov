@@ -74,7 +74,12 @@ pub(super) fn store_quad(state: &mut SpuState, rt: u8, lsa: Lsa) -> SpuStepOutco
 // [SPU-ISA p:139 s:6. Shift and Rotate Instructions] The rotate-and-mask immediates carry the two's complement of the right-shift count: count = (0 - sign_extend(I7)) mod 64.
 pub(super) fn rotate_mask_count(imm: u8) -> u32 {
     let signed = ((imm as u32) << 25) as i32 >> 25;
-    (0i32.wrapping_sub(signed) as u32) & 0x3F
+    negated_count(signed as u32, 0x3F)
+}
+
+// [SPU-ISA p:138 s:6. Shift and Rotate Instructions] A rotate-and-mask count is the two's complement of its operand, reduced by the mask its form's RTL gives.
+pub(super) fn negated_count(value: u32, mask: u32) -> u32 {
+    0u32.wrapping_sub(value) & mask
 }
 
 /// The shufb mask the generate-controls forms build.

@@ -294,6 +294,10 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Shli { rt, .. }
             | SpuInstruction::Rotmi { rt, .. }
             | SpuInstruction::Rotmai { rt, .. }
+            | SpuInstruction::Rot { rt, .. }
+            | SpuInstruction::Roti { rt, .. }
+            | SpuInstruction::Rotm { rt, .. }
+            | SpuInstruction::Rotma { rt, .. }
             | SpuInstruction::Shlh { rt, .. }
             | SpuInstruction::Shlhi { rt, .. }
             | SpuInstruction::Roth { rt, .. }

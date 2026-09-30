@@ -477,6 +477,30 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 rb: rb7,
             })
         }
+        // [SPU-ISA p:129 s:6 Rot] RR opcode 0x058.
+        0x058 => {
+            return Ok(SpuInstruction::Rot {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:138 s:6 Rotm] RR opcode 0x059.
+        0x059 => {
+            return Ok(SpuInstruction::Rotm {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:147 s:6 Rotma] RR opcode 0x05A.
+        0x05A => {
+            return Ok(SpuInstruction::Rotma {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
         // [SPU-ISA p:120 s:6 Shl] RR opcode 0x05B.
         0x05B => {
             return Ok(SpuInstruction::Shl {
@@ -567,6 +591,14 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         // [SPU-ISA p:146 s:6 Rotmahi] RI7 opcode 0x07E.
         0x07E => {
             return Ok(SpuInstruction::Rotmahi {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        // [SPU-ISA p:130 s:6 Roti] RI7 opcode 0x078.
+        0x078 => {
+            return Ok(SpuInstruction::Roti {
                 rt: rt7,
                 ra: ra7,
                 imm: i7,

@@ -7,7 +7,7 @@ use cellgov_event::UnitId;
 
 use super::channel::{execute_rchcnt, execute_rdch, execute_wrch};
 use super::lanes::{from_halfwords, from_words, halfwords, words};
-use super::ls::{insertion_controls, load_quad, rotate_mask_count, store_quad, Lsa};
+use super::ls::{insertion_controls, load_quad, negated_count, rotate_mask_count, store_quad, Lsa};
 use super::outcome::SpuStepOutcome;
 
 /// The shared body of the indirect conditional branches.
@@ -114,6 +114,19 @@ fn halfwords2(
 fn shift_right_algebraic_halfword(half: u16, count: u32) -> u16 {
     let signed = half as i16;
     signed.checked_shr(count).unwrap_or(signed >> 15) as u16
+}
+
+/// `word` shifted right `count` bits with zero fill; zero once the count
+/// exceeds 31.
+fn shift_right_logical_word(word: u32, count: u32) -> u32 {
+    word.checked_shr(count).unwrap_or(0)
+}
+
+/// `word` shifted right `count` bits with its sign bit replicated; every bit
+/// is the sign bit once the count exceeds 31.
+fn shift_right_algebraic_word(word: u32, count: u32) -> u32 {
+    let signed = word as i32;
+    signed.checked_shr(count).unwrap_or(signed >> 31) as u32
 }
 
 /// Execute a single decoded SPU instruction.
@@ -602,7 +615,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         }
         // [SPU-ISA p:141 s:6. Shift and Rotate Instructions] Rotate and Mask Quadword by Bytes Immediate: shift right by (0 - I7) mod 32 bytes with zero fill; a count of 16 or more clears the register.
         SpuInstruction::Rotqmbyi { rt, ra, imm } => {
-            let shift = (0u8.wrapping_sub(imm) & 0x1F) as usize;
+            let shift = negated_count(u32::from(imm), 0x1F) as usize;
             let src = state.regs[ra as usize];
             let mut dst = [0u8; 16];
             for (i, byte) in dst.iter_mut().enumerate() {
@@ -612,42 +625,41 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:120 s:6. Shift and Rotate Instructions] Shift Left Word: per-slot count is the low 6 bits of the RB slot; a count above 31 yields zero.
-        SpuInstruction::Shl { rt, ra, rb } => {
-            for slot in 0..4 {
-                let a = state.reg_word_slot(ra, slot);
-                let s = state.reg_word_slot(rb, slot) & 0x3F;
-                state.set_reg_word_slot(rt, slot, a.checked_shl(s).unwrap_or(0));
-            }
-            SpuStepOutcome::Continue
-        }
+        SpuInstruction::Shl { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| {
+            a.checked_shl(b & 0x3F).unwrap_or(0)
+        }),
         // [SPU-ISA p:121 s:6. Shift and Rotate Instructions] Shift Left Word Immediate: count is the low 6 bits of sign-extended I7; a count above 31 yields zero.
         SpuInstruction::Shli { rt, ra, imm } => {
-            let s = (imm as u32) & 0x3F;
-            for slot in 0..4 {
-                let a = state.reg_word_slot(ra, slot);
-                state.set_reg_word_slot(rt, slot, a.checked_shl(s).unwrap_or(0));
-            }
-            SpuStepOutcome::Continue
+            let s = u32::from(imm & 0x3F);
+            words2(state, rt, ra, ra, |a, _| a.checked_shl(s).unwrap_or(0))
         }
         // [SPU-ISA p:139 s:6. Shift and Rotate Instructions] Rotate and Mask Word Immediate: logical right shift by (0 - I7) mod 64; a count above 31 yields zero.
         SpuInstruction::Rotmi { rt, ra, imm } => {
             let s = rotate_mask_count(imm);
-            for slot in 0..4 {
-                let a = state.reg_word_slot(ra, slot);
-                state.set_reg_word_slot(rt, slot, a.checked_shr(s).unwrap_or(0));
-            }
-            SpuStepOutcome::Continue
+            words2(state, rt, ra, ra, |a, _| shift_right_logical_word(a, s))
         }
         // [SPU-ISA p:148 s:6. Shift and Rotate Instructions] Rotate and Mask Algebraic Word Immediate: arithmetic right shift by (0 - I7) mod 64; a count above 31 fills with the sign bit.
         SpuInstruction::Rotmai { rt, ra, imm } => {
             let s = rotate_mask_count(imm);
-            for slot in 0..4 {
-                let a = state.reg_word_slot(ra, slot) as i32;
-                let shifted = a.checked_shr(s).unwrap_or(a >> 31);
-                state.set_reg_word_slot(rt, slot, shifted as u32);
-            }
-            SpuStepOutcome::Continue
+            words2(state, rt, ra, ra, |a, _| shift_right_algebraic_word(a, s))
         }
+        // [SPU-ISA p:129 s:6. Shift and Rotate Instructions] Rotate Word: each word's count is bits 27 to 31 of its RB word.
+        SpuInstruction::Rot { rt, ra, rb } => {
+            words2(state, rt, ra, rb, |a, b| a.rotate_left(b & 0x1F))
+        }
+        // [SPU-ISA p:130 s:6. Shift and Rotate Instructions] Rotate Word Immediate: count is the low 5 bits of sign-extended I7.
+        SpuInstruction::Roti { rt, ra, imm } => {
+            let s = u32::from(imm & 0x1F);
+            words2(state, rt, ra, ra, |a, _| a.rotate_left(s))
+        }
+        // [SPU-ISA p:138 s:6. Shift and Rotate Instructions] Rotate and Mask Word: logical right shift by (0 - RB) mod 64 per word; a count above 31 yields zero.
+        SpuInstruction::Rotm { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| {
+            shift_right_logical_word(a, negated_count(b, 0x3F))
+        }),
+        // [SPU-ISA p:147 s:6. Shift and Rotate Instructions] Rotate and Mask Algebraic Word: arithmetic right shift by (0 - RB) mod 64 per word; a count above 31 fills with the sign bit.
+        SpuInstruction::Rotma { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| {
+            shift_right_algebraic_word(a, negated_count(b, 0x3F))
+        }),
 
         // [SPU-ISA p:118 s:6. Shift and Rotate Instructions] Shift Left Halfword: each halfword's count is bits 11 to 15 of its RB halfword; a count above 15 yields zero.
         SpuInstruction::Shlh { rt, ra, rb } => halfwords2(state, rt, ra, rb, |a, b| {
@@ -669,7 +681,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         }
         // [SPU-ISA p:136 s:6. Shift and Rotate Instructions] Rotate and Mask Halfword: logical right shift by (0 - RB) mod 32 per halfword; a count above 15 yields zero.
         SpuInstruction::Rothm { rt, ra, rb } => halfwords2(state, rt, ra, rb, |a, b| {
-            a.checked_shr(u32::from(0u16.wrapping_sub(b) & 0x1F))
+            a.checked_shr(negated_count(u32::from(b), 0x1F))
                 .unwrap_or(0)
         }),
         // [SPU-ISA p:137 s:6. Shift and Rotate Instructions] Rotate and Mask Halfword Immediate: logical right shift by (0 - I7) mod 32; a count above 15 yields zero.
@@ -679,7 +691,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         }
         // [SPU-ISA p:145 s:6. Shift and Rotate Instructions] Rotate and Mask Algebraic Halfword: arithmetic right shift by (0 - RB) mod 32 per halfword; a count above 15 fills with the sign bit.
         SpuInstruction::Rotmah { rt, ra, rb } => halfwords2(state, rt, ra, rb, |a, b| {
-            shift_right_algebraic_halfword(a, u32::from(0u16.wrapping_sub(b) & 0x1F))
+            shift_right_algebraic_halfword(a, negated_count(u32::from(b), 0x1F))
         }),
         // [SPU-ISA p:146 s:6. Shift and Rotate Instructions] Rotate and Mask Algebraic Halfword Immediate: arithmetic right shift by (0 - I7) mod 32; a count above 15 fills with the sign bit.
         SpuInstruction::Rotmahi { rt, ra, imm } => {
@@ -1017,3 +1029,7 @@ mod logical_tests;
 #[cfg(test)]
 #[path = "tests/halfword_shift_tests.rs"]
 mod halfword_shift_tests;
+
+#[cfg(test)]
+#[path = "tests/word_rotate_tests.rs"]
+mod word_rotate_tests;
