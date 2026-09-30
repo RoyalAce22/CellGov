@@ -5,6 +5,11 @@
 # and every group one more, `ci.sh: <group> <seconds>s`. They are the record
 # of where a run spends its time. Under GitHub Actions the same lines are
 # also written to the step summary.
+#
+# The workflow runs these groups with CARGO_PROFILE_DEV_DEBUG=0, and
+# rust-cache sets CARGO_INCREMENTAL=0. Neither changes what a command
+# checks. Apart from the toolchain each job installs, they are the only
+# differences from a local run.
 
 set -euo pipefail
 

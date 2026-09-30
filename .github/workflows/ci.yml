@@ -40,6 +40,13 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  # No debuginfo in the dev and test profiles: no CI step runs a debugger
+  # or sets RUST_BACKTRACE, and a panic message carries its file and line
+  # without it. A cold debug test build at 4 jobs took 378 s with none,
+  # 423 s with line tables and 538 s with the full debuginfo Cargo.toml
+  # keeps for local builds. `fuzz.yml` sets the same value, so its cache
+  # key matches this workflow's.
+  CARGO_PROFILE_DEV_DEBUG: "0"
   # External-data suites compile here; operators execute them separately.
   EXTERNAL_DATA_FEATURES: >-
     cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/installed-title-tests,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/npdrm-oracle-vectors,cellgov_install/installed-title-tests,cellgov_install/title-dumps,cellgov_install/installed-firmware-tests,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner

@@ -38,6 +38,10 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  # The `ci` workflow's value. The release builds here ignore it; the
+  # cache key reads every CARGO* variable, so it has to match for the
+  # restore to hit.
+  CARGO_PROFILE_DEV_DEBUG: "0"
   FUZZ_CASES: ${{ inputs.cases || '20000' }}
   FUZZ_TRIALS: ${{ inputs.trials || '10' }}
   FUZZ_RAW_WORDS: ${{ inputs.raw_words || '16777216' }}
