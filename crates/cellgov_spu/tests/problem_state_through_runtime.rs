@@ -80,6 +80,31 @@ fn an_inbound_mailbox_write_wakes_the_spu_parked_on_it() {
     assert_eq!(rt.unit_spu_status(unit), Some(SPU_STATUS_P));
 }
 
+/// [CBE-Handbook p:541 s:19.6.6.2] a PPE write to a full inbound mailbox does not stall; a message is lost.
+/// [CBE-Handbook p:535 s:19.6.2] the write overwrites the last value written to the mailbox.
+#[test]
+fn a_write_to_a_full_inbound_mailbox_overwrites_its_newest_message() {
+    let rdch = |rt: u32| (0x00D << 21) | (u32::from(SPU_RD_IN_MBOX) << 7) | rt;
+    let (mut rt, unit) = runtime_running(&[rdch(5), rdch(6), rdch(7), rdch(8), 0]);
+    for message in [0x11, 0x22, 0x33, 0x44, 0x55] {
+        rt.write_unit_in_mbox(unit, message)
+            .expect("the write does not stall");
+    }
+    for _ in 0..16 {
+        if rt.unit_spu_status(unit) != Some(SPU_STATUS_R) {
+            break;
+        }
+        step(&mut rt).expect("the SPU runs");
+    }
+    assert_eq!(rt.unit_spu_status(unit), Some(SPU_STATUS_P));
+    let state = spu(&rt, unit).state();
+    assert_eq!(
+        [5, 6, 7, 8].map(|r| state.reg_word(r)),
+        [0x11, 0x22, 0x33, 0x55],
+        "the fifth write replaced the fourth message",
+    );
+}
+
 /// [CBEA p:92 s:8.5.1] a stop request stops instruction issue until a run request.
 /// [CBEA p:94 s:8.5.2] an SPU stopped while waiting on a blocked channel reports W.
 #[test]

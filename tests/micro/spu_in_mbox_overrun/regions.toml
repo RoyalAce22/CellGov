@@ -1,0 +1,9 @@
+[[regions]]
+name = "counts"
+addr = "0x0"
+size = "0x10"
+
+[[regions]]
+name = "messages"
+addr = "0x10"
+size = "0x10"

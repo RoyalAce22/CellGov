@@ -125,11 +125,12 @@ impl Runtime {
     }
 
     /// Write `SPU_In_Mbox` of `unit`. A write to a full mailbox
-    /// replaces its oldest message (CellGov's choice of which message
-    /// is lost), and a unit parked on the mailbox becomes runnable.
+    /// replaces its newest message, and a unit parked on the mailbox
+    /// becomes runnable.
     ///
     /// [CBEA p:99 s:8.6.2] an MMIO write puts 32 bits into the SPU inbound mailbox queue.
     /// [CBE-Handbook p:541 s:19.6.6.2] a PPE write to a full inbound mailbox does not stall; a message is lost.
+    /// [CBE-Handbook p:535 s:19.6.2] the write overwrites the last value written to the mailbox.
     ///
     /// # Errors
     ///

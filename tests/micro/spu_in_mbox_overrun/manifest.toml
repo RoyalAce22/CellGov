@@ -1,0 +1,39 @@
+[test]
+name = "spu_in_mbox_overrun"
+
+[rpcs3]
+binary = "build/spu_in_mbox_overrun.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# the status and the two mailbox counts, then the four messages the SPU
+# read after the PPU wrote five
+memory_regions = [
+  { name = "counts", addr = 0, size = 16 },
+  { name = "messages", addr = 16, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Build + run:
+#   docker run --rm #     -v "$(pwd)/tests/micro/spu_in_mbox_overrun:/src" #     -v "$(pwd)/tests/micro/common:/common" #     -e COMMON=/common ps3dev bash /src/build.sh
+#
+#   cargo run --release -p cellgov_cli -- boot run #     --title-manifest tests/micro/spu_in_mbox_overrun/manifest.toml #     --max-steps 1000000
+
+[cellgov.title]
+short_name = "spumboxovr"
+display_name = "CellGov SPU inbound mailbox overrun microtest"
+eboot_candidates = ["spu_in_mbox_overrun.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"

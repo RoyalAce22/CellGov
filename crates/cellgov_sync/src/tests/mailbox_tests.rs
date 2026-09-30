@@ -77,15 +77,16 @@ fn try_send_returns_false_when_full() {
     assert_eq!(m.try_receive(), Some(20));
 }
 
+/// [CBE-Handbook p:535 s:19.6.2] a write to a full inbound mailbox overwrites the last value written to it.
 #[test]
-fn force_send_overruns_oldest_on_full() {
+fn force_send_overwrites_the_newest_entry_on_full() {
     let mut m = Mailbox::with_capacity(2);
     m.force_send(1);
     m.force_send(2);
-    m.force_send(3); // overrun: drops 1
+    m.force_send(3);
     assert_eq!(m.len(), 2);
-    assert_eq!(m.try_receive(), Some(2));
-    assert_eq!(m.try_receive(), Some(3));
+    assert_eq!(m.try_receive(), Some(1), "the oldest message survives");
+    assert_eq!(m.try_receive(), Some(3), "the overrun replaced 2");
 }
 
 #[test]

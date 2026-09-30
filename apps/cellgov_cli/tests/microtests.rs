@@ -256,6 +256,23 @@ const CASES: &[Case] = &[
         ],
     },
     Case {
+        name: "spu_in_mbox_overrun",
+        max_steps: 1_000_000,
+        fields: &[
+            ("status", Exact(0)),
+            // Five writes into four entries leave the mailbox full, and
+            // the four reads empty it.
+            ("count_before", Exact(4)),
+            ("count_after", Exact(0)),
+            ("pad", Exact(0)),
+            // The fifth write (0x55) overwrote the newest entry (0x44).
+            ("message0", Exact(0x11)),
+            ("message1", Exact(0x22)),
+            ("message2", Exact(0x33)),
+            ("message3", Exact(0x55)),
+        ],
+    },
+    Case {
         name: "spu_atomic_misaligned_lsa",
         max_steps: 1_000_000,
         fields: &MISALIGNED_LSA_FIELDS,

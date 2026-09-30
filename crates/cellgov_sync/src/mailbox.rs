@@ -99,15 +99,15 @@ impl Mailbox {
         true
     }
 
-    /// Force-enqueue, dropping the oldest entry on full. Models PPE
-    /// writes to the SPU Read Inbound Mailbox: the spec says no PPE
-    /// stall, mailbox message data is lost.
+    /// Force-enqueue, overwriting the newest entry on full. Models PPE
+    /// writes to the SPU Read Inbound Mailbox.
     ///
-    /// [CBE-Handbook p:541 s:19.6.6.2 PPE Side] PPE write to a full SPU_RdInMbox does not stall; oldest message is overwritten.
+    /// [CBE-Handbook p:541 s:19.6.6.2 PPE Side] a PPE write to a full SPU_RdInMbox does not stall, and mailbox message data is lost.
+    /// [CBE-Handbook p:535 s:19.6.2] a write to a full inbound mailbox overwrites the last value written to it.
     #[inline]
     pub fn force_send(&mut self, message: u32) {
         if self.queue.len() >= self.capacity {
-            self.queue.pop_front();
+            self.queue.pop_back();
         }
         self.queue.push_back(message);
     }

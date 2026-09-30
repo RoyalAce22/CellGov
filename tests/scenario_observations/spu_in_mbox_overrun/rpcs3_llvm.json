@@ -1,0 +1,56 @@
+{
+  "outcome": "Completed",
+  "memory_regions": [
+    {
+      "name": "counts",
+      "addr": 0,
+      "data": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "messages",
+      "addr": 16,
+      "data": [
+        0,
+        0,
+        0,
+        17,
+        0,
+        0,
+        0,
+        34,
+        0,
+        0,
+        0,
+        51,
+        0,
+        0,
+        0,
+        85
+      ]
+    }
+  ],
+  "events": [],
+  "state_hashes": null,
+  "metadata": {
+    "runner": "rpcs3-llvm",
+    "steps": null
+  },
+  "tty_log": []
+}
