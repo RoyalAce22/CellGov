@@ -19,3 +19,4 @@ cellgov_mem = { path = "../cellgov_mem" }
 cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }
 strum = { version = "0.26", default-features = false, features = ["derive"] }
+thiserror = "2"

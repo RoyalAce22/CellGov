@@ -48,6 +48,8 @@ pub enum SpuOutcomeClass {
     MemoryRead,
     /// Architectural fault.
     Fault,
+    /// The instruction stopped the SPU.
+    Stop,
 }
 
 impl SpuOutcomeClass {
@@ -59,6 +61,7 @@ impl SpuOutcomeClass {
             crate::exec::SpuStepOutcome::Yield { .. } => Self::Yield,
             crate::exec::SpuStepOutcome::MemoryRead { .. } => Self::MemoryRead,
             crate::exec::SpuStepOutcome::Fault(_) => Self::Fault,
+            crate::exec::SpuStepOutcome::Stop { .. } => Self::Stop,
         }
     }
 }

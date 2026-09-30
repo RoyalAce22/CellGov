@@ -89,12 +89,6 @@ pub(super) fn execution_supported(instruction: SpuInstruction) -> bool {
         // stop execution, but the current instruction representation retains
         // neither source register needed to decide that outcome.
         SpuInstruction::Heq => false,
-        // [SPU-ISA p:238 s:10 Control Instructions] STOP signals its 14-bit
-        // value to the external environment, while the executor only records
-        // that the unit finished.
-        // [SPU-ISA p:239 s:10 Control Instructions] STOPD stops the SPU as a
-        // breakpoint, which the executor records only as a finish.
-        SpuInstruction::Stop { .. } | SpuInstruction::Stopd => false,
         _ => true,
     }
 }

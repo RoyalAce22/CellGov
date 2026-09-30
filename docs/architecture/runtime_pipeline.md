@@ -172,7 +172,8 @@ The full vocabulary of guest-visible operations:
     FNV-1a PPU scheme and the first checkpoint scheme;
   - decision-level: `UnitScheduled`, `StepCompleted`,
     `CommitApplied`, `StateHashCheckpoint`, `EffectEmitted`,
-    `UnitBlocked`, `UnitWoken`;
+    `UnitBlocked`, `UnitWoken`, `UnitStopped` (the status and
+    resume address of a unit its own instruction stopped);
   - two per-step variants for the divergence trace:
     `PpuStateHash`, `PpuStateFull`;
   - one diagnostic side-channel for host-side invariant breaks:

@@ -1,6 +1,8 @@
-//! SPU architectural state (registers, LS, PC, limit register, channels, reservation).
+//! SPU architectural state (registers, LS, PC, limit register, channels, reservation, stopped state).
 
 use cellgov_sync::ReservedLine;
+
+use crate::stop::SpuStop;
 
 pub use cellgov_ps3_abi::hw::spu::{SPU_LSLR_FULL, SPU_LS_SIZE, SPU_REG_COUNT};
 
@@ -33,6 +35,10 @@ pub struct SpuState {
     /// `ExecutionContext::reservation_held`) still holds the line.
     // [CBEA p:91 s:8.4.3] Reservation granule is the 128-byte lock line.
     pub reservation: Option<ReservedLine>,
+    /// Why the SPU stopped, or `None` while it can run. A restart clears
+    /// it.
+    // [CBEA p:94 s:8.5.2] the C, I, S, H and P status bits clear when the SPU restarts.
+    pub stop: Option<SpuStop>,
 }
 
 /// Architectural state for instruction comparison.
@@ -50,6 +56,8 @@ pub struct SpuObservableSnapshot {
     pub channels: SpuChannelSnapshot,
     /// Atomic reservation state.
     pub reservation: Option<ReservedLine>,
+    /// Stopped state.
+    pub stop: Option<SpuStop>,
 }
 
 /// Channel state for instruction comparison.
@@ -87,6 +95,7 @@ impl SpuObservableSnapshot {
             lslr,
             channels,
             reservation,
+            stop,
         } = state;
         let ChannelState {
             mfc_lsa,
@@ -118,6 +127,7 @@ impl SpuObservableSnapshot {
                 pending_get: *pending_get,
             },
             reservation: *reservation,
+            stop: *stop,
         }
     }
 }
@@ -132,6 +142,7 @@ impl SpuState {
             lslr: SPU_LSLR_FULL,
             channels: ChannelState::new(),
             reservation: None,
+            stop: None,
         }
     }
 
@@ -218,6 +229,17 @@ impl SpuState {
             self.ls[addr + 2],
             self.ls[addr + 3],
         ]))
+    }
+
+    /// Record the stop an instruction at `pc` raised and move `pc` to the
+    /// address the SPU resumes at: what a caller of
+    /// [`crate::exec::execute`] does with a
+    /// [`crate::exec::SpuStepOutcome::Stop`].
+    // [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR.
+    pub fn record_stop(&mut self, kind: crate::stop::SpuStopKind, signal: u16) {
+        let stop = SpuStop::new(kind, signal, self.pc, self.lslr);
+        self.pc = stop.npc;
+        self.stop = Some(stop);
     }
 
     /// Step PC to the next sequential instruction.

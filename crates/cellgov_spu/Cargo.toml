@@ -35,3 +35,4 @@ spu-microtests = []
 cellgov_compare = { path = "../cellgov_compare" }
 cellgov_core = { path = "../cellgov_core" }
 cellgov_testkit = { path = "../cellgov_testkit" }
+cellgov_trace = { path = "../cellgov_trace" }

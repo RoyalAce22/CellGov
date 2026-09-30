@@ -42,6 +42,7 @@ mod tap;
 mod timer;
 mod trace_bridge;
 mod types;
+mod unit_stop;
 
 pub use construction::DEFAULT_DMA_LATENCY_TICKS;
 pub use snapshot::RuntimeSnapshot;

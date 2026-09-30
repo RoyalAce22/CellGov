@@ -303,6 +303,11 @@ fn run_sequence_with_limit(
             SpuStepOutcome::Continue => state.advance_pc(),
             SpuStepOutcome::Branch => {}
             SpuStepOutcome::Yield { .. } | SpuStepOutcome::MemoryRead { .. } => break,
+            // [SPU-ISA p:238 s:10. Control Instructions] a stop leaves PC at the next word, masked by LSLR.
+            SpuStepOutcome::Stop { kind, signal } => {
+                state.record_stop(kind, signal);
+                break;
+            }
             SpuStepOutcome::Fault(_) => {
                 // The runtime fault-discard rule hides state from a faulting batch.
                 state = initial.clone();
@@ -338,6 +343,7 @@ pub(super) fn outcome_identity(outcome: SpuOutcomeClass) -> OutcomeIdentity {
         SpuOutcomeClass::Yield => OutcomeIdentity::SpuYield,
         SpuOutcomeClass::MemoryRead => OutcomeIdentity::SpuMemoryRead,
         SpuOutcomeClass::Fault => OutcomeIdentity::SpuFault,
+        SpuOutcomeClass::Stop => OutcomeIdentity::SpuStop,
     }
 }
 
@@ -347,7 +353,8 @@ pub(super) fn outcome_effects(outcome: &SpuStepOutcome) -> &[Effect] {
         SpuStepOutcome::Continue
         | SpuStepOutcome::Branch
         | SpuStepOutcome::MemoryRead { .. }
-        | SpuStepOutcome::Fault(_) => &[],
+        | SpuStepOutcome::Fault(_)
+        | SpuStepOutcome::Stop { .. } => &[],
     }
 }
 

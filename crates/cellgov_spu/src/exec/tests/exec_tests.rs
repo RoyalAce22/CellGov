@@ -158,16 +158,16 @@ fn fsmbi_creates_byte_mask() {
 }
 
 #[test]
-fn stop_yields_finished() {
+fn stop_reports_a_stop_with_its_signal() {
     let mut s = SpuState::new();
-    let outcome = execute(&SpuInstruction::Stop { signal: 0 }, &mut s, uid());
-    assert!(matches!(
+    let outcome = execute(&SpuInstruction::Stop { signal: 0x102 }, &mut s, uid());
+    assert_eq!(
         outcome,
-        SpuStepOutcome::Yield {
-            reason: YieldReason::Finished,
-            ..
+        SpuStepOutcome::Stop {
+            kind: crate::stop::SpuStopKind::Stop,
+            signal: 0x102,
         }
-    ));
+    );
 }
 
 #[test]

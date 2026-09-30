@@ -2,8 +2,8 @@
 
 use crate::instruction::SpuInstruction;
 use crate::state::SpuState;
+use crate::stop::SpuStopKind;
 use cellgov_event::UnitId;
-use cellgov_exec::YieldReason;
 
 use super::channel::{execute_rchcnt, execute_rdch, execute_wrch};
 use super::ls::{insertion_controls, load_quad, rotate_mask_count, store_quad, Lsa};
@@ -500,9 +500,13 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
 
         // [SPU-ISA p:238 s:10. Control Instructions] Stop and Signal halts the SPU and raises the stop signal to the PPE.
         // [SPU-ISA p:239 s:10. Control Instructions] Stop and Signal with Dependencies stops the SPU as stop does.
-        SpuInstruction::Stop { signal: _ } | SpuInstruction::Stopd => SpuStepOutcome::Yield {
-            effects: vec![],
-            reason: YieldReason::Finished,
+        SpuInstruction::Stop { signal } => SpuStepOutcome::Stop {
+            kind: SpuStopKind::Stop,
+            signal,
+        },
+        SpuInstruction::Stopd => SpuStepOutcome::Stop {
+            kind: SpuStopKind::Stopd,
+            signal: 0,
         },
     }
 }

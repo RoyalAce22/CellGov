@@ -14,6 +14,7 @@ const WRCH_EFFECTS: &[EffectKind] = &[EffectKind::DmaEnqueue, EffectKind::Condit
 const CONTINUE: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue];
 const FAULT: &[SpuOutcomeClass] = &[SpuOutcomeClass::Fault];
 const YIELD: &[SpuOutcomeClass] = &[SpuOutcomeClass::Yield];
+const STOP: &[SpuOutcomeClass] = &[SpuOutcomeClass::Stop];
 const CONTINUE_OR_YIELD: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Yield];
 const LOAD_STORE: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Fault];
 const CONDITIONAL_BRANCH: &[SpuOutcomeClass] =
@@ -43,7 +44,7 @@ pub(super) fn sequence_flow(
     }
     if outcomes.contains(&SpuOutcomeClass::Branch) {
         SpuSequenceFlow::ControlTransfer
-    } else if outcomes == FAULT || outcomes == YIELD {
+    } else if outcomes == FAULT || outcomes == YIELD || outcomes == STOP {
         SpuSequenceFlow::Terminal
     } else if outcomes != CONTINUE {
         SpuSequenceFlow::StateDependent
@@ -111,7 +112,7 @@ pub(super) fn effect_and_outcome(
         | SpuInstruction::Binz { .. }
         | SpuInstruction::Bihz { .. }
         | SpuInstruction::Bihnz { .. } => (NO_EFFECTS, CONDITIONAL_BRANCH),
-        SpuInstruction::Stop { .. } | SpuInstruction::Stopd => (NO_EFFECTS, YIELD),
+        SpuInstruction::Stop { .. } | SpuInstruction::Stopd => (NO_EFFECTS, STOP),
         _ => (NO_EFFECTS, CONTINUE),
     }
 }

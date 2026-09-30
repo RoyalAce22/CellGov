@@ -38,3 +38,7 @@ mod fault_diag_tests;
 #[cfg(test)]
 #[path = "tests/local_memory_hash_tests.rs"]
 mod local_memory_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/stop_restart_tests.rs"]
+mod stop_restart_tests;

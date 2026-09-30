@@ -526,6 +526,7 @@ fn outcome_names_are_snake_case() {
         (SpuReferenceOutcome::Yield, "yield"),
         (SpuReferenceOutcome::MemoryRead, "memory_read"),
         (SpuReferenceOutcome::Fault, "fault"),
+        (SpuReferenceOutcome::Stop, "stop"),
     ];
     for (outcome, name) in cases {
         assert_eq!(
@@ -759,6 +760,13 @@ fn outcome_classes_map_from_step_outcomes() {
         (
             SpuStepOutcome::Fault(SpuFault::LsOutOfRange(0)),
             SpuReferenceOutcome::Fault,
+        ),
+        (
+            SpuStepOutcome::Stop {
+                kind: cellgov_spu::stop::SpuStopKind::Stop,
+                signal: 0,
+            },
+            SpuReferenceOutcome::Stop,
         ),
     ];
     for (outcome, class) in &cases {
@@ -1083,19 +1091,29 @@ fn replay_places_words_at_a_nonzero_pc_and_applies_initial_overrides() {
 }
 
 #[test]
-fn replay_stops_at_a_yield_before_later_words_execute() {
+fn replay_stops_at_a_stop_before_later_words_execute() {
     let mut altered = artifact();
     altered.words = vec![STOP_WORD, IL_R3_1];
     altered.expected.regs_hex = value(BTreeMap::new());
-    altered.expected.pc = value(0);
-    altered.expected.outcome = value(SpuReferenceOutcome::Yield);
+    // [SPU-ISA p:238 s:10. Control Instructions] a stop leaves PC at the next word.
+    altered.expected.pc = value(4);
+    altered.expected.outcome = value(SpuReferenceOutcome::Stop);
     let replay = replay_reference(&altered).expect("stop replays");
     assert!(
-        matches!(replay.outcome, SpuStepOutcome::Yield { .. }),
+        matches!(replay.outcome, SpuStepOutcome::Stop { .. }),
         "{:?}",
         replay.outcome
     );
-    assert_eq!(replay.state.pc, 0);
+    assert_eq!(replay.state.pc, 4);
+    assert_eq!(
+        replay.state.stop,
+        Some(cellgov_spu::stop::SpuStop::new(
+            cellgov_spu::stop::SpuStopKind::Stop,
+            0,
+            0,
+            cellgov_spu::state::SPU_LSLR_FULL
+        ))
+    );
     assert_eq!(replay.state.regs[3], [0; 16]);
     assert!(replay.comparison.is_match(), "{:?}", replay.comparison);
 
@@ -1106,8 +1124,8 @@ fn replay_stops_at_a_yield_before_later_words_execute() {
         "3".to_string(),
         "00000001000000010000000100000001".to_string(),
     )]));
-    altered.expected.pc = value(4);
-    altered.expected.outcome = value(SpuReferenceOutcome::Yield);
+    altered.expected.pc = value(8);
+    altered.expected.outcome = value(SpuReferenceOutcome::Stop);
     let replay = replay_reference(&altered).expect("il then stop replays");
     assert!(replay.comparison.is_match(), "{:?}", replay.comparison);
 }

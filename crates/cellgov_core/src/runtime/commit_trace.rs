@@ -3,6 +3,7 @@
 
 use cellgov_dma::DmaCompletion;
 use cellgov_event::UnitId;
+use cellgov_exec::StopRegisters;
 use cellgov_trace::{
     HashCheckpointKind, StateHash, TraceRecord, TracedBlockReason, TracedWakeReason,
 };
@@ -21,6 +22,7 @@ impl Runtime {
         outcome: &Result<CommitOutcome, CommitError>,
         due: &[(DmaCompletion, Option<Vec<u8>>)],
         timer_due: &[crate::timer_queue::TimerWake],
+        stopped: Option<StopRegisters>,
     ) {
         if self.mode == RuntimeMode::FaultDriven {
             return;
@@ -64,6 +66,13 @@ impl Runtime {
                     reason: TracedWakeReason::WakeEffect,
                 });
             }
+        }
+        if let Some(StopRegisters { status, npc }) = stopped {
+            self.trace.record(&TraceRecord::UnitStopped {
+                unit: source,
+                status,
+                npc,
+            });
         }
         self.record_dma_wakes(due);
         self.record_timer_wakes(timer_due);

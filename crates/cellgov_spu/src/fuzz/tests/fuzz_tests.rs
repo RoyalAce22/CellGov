@@ -111,10 +111,7 @@ fn every_supported_spu_kind_has_a_decodable_executable_witness() {
 
     let mut unreachable = BTreeSet::new();
     for descriptor in generation_descriptors() {
-        let candidate = if descriptor.kind == SpuInstructionKind::Heq
-            || descriptor.kind == SpuInstructionKind::Stop
-            || descriptor.kind == SpuInstructionKind::Stopd
-        {
+        let candidate = if descriptor.kind == SpuInstructionKind::Heq {
             unreachable.insert(descriptor.kind);
             continue;
         } else if let Some((index, field)) = descriptor
@@ -158,18 +155,9 @@ fn every_supported_spu_kind_has_a_decodable_executable_witness() {
             descriptor.kind
         );
     }
-    // HEQ lacks its source operands in the decoded model; STOP's signal is not emitted.
+    // HEQ lacks its source operands in the decoded model.
     // [SPU-ISA p:150 s:7 Compare, Branch, and Halt Instructions] HEQ compares two source operands.
-    // [SPU-ISA p:238 s:10 Control Instructions] STOP signals its encoded value externally.
-    // [SPU-ISA p:239 s:10 Control Instructions] STOPD stops the SPU as STOP does.
-    assert_eq!(
-        unreachable,
-        BTreeSet::from([
-            SpuInstructionKind::Heq,
-            SpuInstructionKind::Stop,
-            SpuInstructionKind::Stopd
-        ])
-    );
+    assert_eq!(unreachable, BTreeSet::from([SpuInstructionKind::Heq]));
 }
 
 #[test]
@@ -669,7 +657,7 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
             .decoded_execution_supported
     );
     let stop = SpuInstruction::Stop { signal: 0 }.fuzz_descriptor();
-    assert!(!stop.decoded_execution_supported);
+    assert!(stop.decoded_execution_supported);
 
     assert_eq!(
         SpuInstruction::Br { offset: 0 }.fuzz_descriptor().outcomes,
@@ -685,6 +673,6 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
         SpuInstruction::Stop { signal: 0 }
             .fuzz_descriptor()
             .outcomes,
-        &[SpuOutcomeClass::Yield]
+        &[SpuOutcomeClass::Stop]
     );
 }

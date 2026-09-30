@@ -129,6 +129,8 @@ pub enum OutcomeIdentity {
     SpuFault,
     /// SPU sequence stopped when its next word did not decode.
     SpuDecodeRefusal,
+    /// SPU stopped by its own instruction.
+    SpuStop,
 }
 
 /// Stable identity used to bucket and rank semantically equal findings.

@@ -194,6 +194,35 @@ pub const SPU_LS_SIZE: usize = 256 * 1024;
 // [SPU-ISA p:31 s:3 Table 3-1] the LSLR is 2^n - 1 for an effective size of 2^n bytes, and 0x0003FFFF selects 256 KB.
 pub const SPU_LSLR_FULL: u32 = SPU_LS_SIZE as u32 - 1;
 
+/// Mask of the stop-and-signal code: the low 14 bits of a `stop` word.
+// [SPU-ISA p:238 s:10] stop carries its signal type in bits 18:31.
+pub const SPU_STOP_CODE_MASK: u32 = 0x3FFF;
+
+/// The stop code a `stopd` reports, whatever its operand fields hold.
+// [CBEA p:93 s:8.5.2] a stopd always sets the StopCode field to x'3FFF'.
+pub const SPU_STOPD_CODE: u16 = 0x3FFF;
+
+/// Shift of the `SPU_Status` StopCode field, which holds bits 0:15 of
+/// the big-endian word.
+// [CBEA p:93 s:8.5.2] StopCode is bits 0:15; a stop's 14-bit code lands in bits 2:15.
+pub const SPU_STATUS_STOP_CODE_SHIFT: u32 = 16;
+
+/// `SPU_Status` C: an invalid channel instruction stopped the SPU (bit 25).
+// [CBEA p:93 s:8.5.2] bit 25 C: invalid channel instruction detected, SPU halted.
+pub const SPU_STATUS_C: u32 = 1 << (31 - 25);
+
+/// `SPU_Status` I: an invalid instruction stopped the SPU (bit 26).
+// [CBEA p:93 s:8.5.2] bit 26 I: invalid instruction detected, SPU halted.
+pub const SPU_STATUS_I: u32 = 1 << (31 - 26);
+
+/// `SPU_Status` H: a halt instruction stopped the SPU (bit 29).
+// [CBEA p:94 s:8.5.2] bit 29 H: SPU halted due to a halt instruction.
+pub const SPU_STATUS_H: u32 = 1 << (31 - 29);
+
+/// `SPU_Status` P: a stop or stopd stopped the SPU (bit 30).
+// [CBEA p:94 s:8.5.2] bit 30 P: SPU stopped due to a stop-and-signal instruction, stop or stopd.
+pub const SPU_STATUS_P: u32 = 1 << (31 - 30);
+
 /// Number of SPU general-purpose 128-bit registers (r0..r127).
 // [SPU-ISA p:25 s:2] The SPU architecture defines 128 general-purpose
 // registers, each holding 128 data bits.

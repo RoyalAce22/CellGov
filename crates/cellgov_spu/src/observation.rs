@@ -128,7 +128,8 @@ impl SpuObservation {
             SpuStepOutcome::Continue
             | SpuStepOutcome::Branch
             | SpuStepOutcome::MemoryRead { .. }
-            | SpuStepOutcome::Fault(_) => Vec::new(),
+            | SpuStepOutcome::Fault(_)
+            | SpuStepOutcome::Stop { .. } => Vec::new(),
         };
         Self {
             state,

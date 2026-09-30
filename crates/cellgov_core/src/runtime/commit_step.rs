@@ -266,9 +266,15 @@ impl Runtime {
             .extend(due.iter().map(|(c, payload)| (*c, payload.is_some())));
         let timer_due = self.fire_timer_wakes();
 
-        if result.yield_reason == YieldReason::Finished {
+        // A unit that stopped itself reports the stop it can resume from.
+        let stopped = if result.yield_reason == YieldReason::Finished {
             self.resolve_join_wakes(source);
-        }
+            self.registry
+                .get(source)
+                .and_then(|unit| unit.stop_registers())
+        } else {
+            None
+        };
 
         // RSX FIFO advance: after unit effects commit and DMA completions
         // fire, before state-hash checkpoints emit. Emitted effects land
@@ -363,7 +369,7 @@ impl Runtime {
         // LV2 arm or the RSX model reading guest memory) attribute to
         // the committing unit.
         self.drain_provisional_reads_to_trace(source);
-        self.emit_commit_trace(source, &outcome, &due, &timer_due);
+        self.emit_commit_trace(source, &outcome, &due, &timer_due, stopped);
 
         let holds_cs = self.lv2_host.unit_holds_lwmutex(source);
         self.scheduler

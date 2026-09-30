@@ -211,6 +211,12 @@ fn dump_trace(result: &ScenarioResult) -> Result<(), CommandError> {
                     "{i:4}  StateHashScheme    ppu=0x{ppu:016x} checkpoint=0x{checkpoint:016x}"
                 );
             }
+            TraceRecord::UnitStopped { unit, status, npc } => {
+                println!(
+                    "{i:4}  UnitStopped        unit={} status=0x{status:08x} npc=0x{npc:05x}",
+                    unit.raw()
+                );
+            }
         }
     }
     println!("--- {count} records total ---");

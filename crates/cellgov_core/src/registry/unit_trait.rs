@@ -9,7 +9,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump, PpuFingerprint,
-    UnitStatus,
+    RestartError, StopRegisters, UnitStatus,
 };
 use cellgov_time::Budget;
 
@@ -75,6 +75,17 @@ pub trait RegisteredUnit: 'static {
     /// Current register snapshot for diagnostic dumps. See
     /// [`ExecutionUnit::register_dump`].
     fn register_dump(&self) -> Option<FaultRegisterDump>;
+
+    /// The unit's self-stopped state. See
+    /// [`ExecutionUnit::stop_registers`].
+    fn stop_registers(&self) -> Option<StopRegisters>;
+
+    /// Resume a self-stopped unit. See [`ExecutionUnit::restart`].
+    ///
+    /// # Errors
+    ///
+    /// [`RestartError::NotStopped`] when the unit holds no stopped state.
+    fn restart(&mut self) -> Result<(), RestartError>;
 
     /// Upcast for callers that need to downcast to a concrete unit
     /// type to inspect state the trait does not expose.
@@ -150,6 +161,16 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn register_dump(&self) -> Option<FaultRegisterDump> {
         ExecutionUnit::register_dump(self)
+    }
+
+    #[inline]
+    fn stop_registers(&self) -> Option<StopRegisters> {
+        ExecutionUnit::stop_registers(self)
+    }
+
+    #[inline]
+    fn restart(&mut self) -> Result<(), RestartError> {
+        ExecutionUnit::restart(self)
     }
 
     #[inline]

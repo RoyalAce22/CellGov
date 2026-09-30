@@ -312,8 +312,8 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
             }
             SpuSequenceInteraction::Stop => {
                 assert_eq!(first.2.len(), 2);
-                assert!(first.0.has_unmodeled_execution);
-                // STOP raises an external signal the campaign does not model, so the case is unsupported.
+                // STOP's outcome carries its signal, so the campaign models the case.
+                assert!(!first.0.has_unmodeled_execution);
                 assert_eq!(
                     assess_sequence_case(
                         GenerationStrategy::Structured,
@@ -323,11 +323,20 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                         BTreeSet::new()
                     )
                     .eligibility,
-                    CaseEligibility::Unsupported
+                    CaseEligibility::Eligible
+                );
+                // [SPU-ISA p:238 s:10. Control Instructions] the stop at 4 leaves PC at 8.
+                assert_eq!(first.0.state.pc, 8);
+                assert_eq!(
+                    first.0.state.stop.map(|stop| (stop.kind, stop.npc)),
+                    Some((cellgov_spu::stop::SpuStopKind::Stop, 8))
                 );
                 assert!(matches!(
                     first.0.terminal_outcome,
-                    Some(SpuStepOutcome::Yield { .. })
+                    Some(SpuStepOutcome::Stop {
+                        kind: cellgov_spu::stop::SpuStopKind::Stop,
+                        ..
+                    })
                 ));
             }
         }

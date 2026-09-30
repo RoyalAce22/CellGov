@@ -25,6 +25,7 @@ pub mod instruction;
 pub mod loader;
 pub mod observation;
 pub mod state;
+pub mod stop;
 mod unit;
 
 pub use unit::{SpuExecutionUnit, SpuSnapshot};

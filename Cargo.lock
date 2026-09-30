@@ -280,6 +280,7 @@ dependencies = [
  "cellgov_sync",
  "cellgov_time",
  "strum",
+ "thiserror",
 ]
 
 [[package]]
@@ -436,6 +437,7 @@ dependencies = [
  "cellgov_sync",
  "cellgov_testkit",
  "cellgov_time",
+ "cellgov_trace",
  "strum",
  "thiserror",
 ]

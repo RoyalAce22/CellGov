@@ -3,6 +3,8 @@
 use cellgov_effects::Effect;
 use cellgov_exec::YieldReason;
 
+use crate::stop::SpuStopKind;
+
 /// Outcome of executing a single SPU instruction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpuStepOutcome {
@@ -37,6 +39,15 @@ pub enum SpuStepOutcome {
     },
     /// Instruction caused an architecture fault.
     Fault(SpuFault),
+    /// The instruction stopped the SPU. The caller records the stop in
+    /// [`crate::state::SpuState::stop`] and moves the PC to the resume
+    /// address.
+    Stop {
+        /// What stopped the SPU.
+        kind: SpuStopKind,
+        /// The instruction's 14-bit signal field, or zero.
+        signal: u16,
+    },
 }
 
 /// SPU-specific fault categories.

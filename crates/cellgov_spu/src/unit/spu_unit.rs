@@ -18,6 +18,8 @@ pub struct SpuSnapshot {
     /// Canonical line address of the atomic reservation; `None` when
     /// no reservation is held.
     pub reservation_line: Option<u64>,
+    /// Stopped state, or `None` while the unit can run.
+    pub stop: Option<crate::stop::SpuStop>,
 }
 
 /// A Synergistic Processing Unit execution unit.

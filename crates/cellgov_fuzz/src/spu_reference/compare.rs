@@ -44,6 +44,11 @@ pub fn replay_reference(
             SpuStepOutcome::Continue => state.advance_pc(),
             SpuStepOutcome::Branch => {}
             SpuStepOutcome::Yield { .. } | SpuStepOutcome::MemoryRead { .. } => break,
+            // [SPU-ISA p:238 s:10. Control Instructions] a stop leaves PC at the next word, masked by LSLR.
+            SpuStepOutcome::Stop { kind, signal } => {
+                state.record_stop(kind, signal);
+                break;
+            }
             SpuStepOutcome::Fault(_) => {
                 state = loaded.clone();
                 break;
@@ -145,7 +150,8 @@ pub fn compare_reference(
         SpuStepOutcome::Continue
         | SpuStepOutcome::Branch
         | SpuStepOutcome::MemoryRead { .. }
-        | SpuStepOutcome::Fault(_) => true,
+        | SpuStepOutcome::Fault(_)
+        | SpuStepOutcome::Stop { .. } => true,
     };
     compare_field(
         &mut comparison,

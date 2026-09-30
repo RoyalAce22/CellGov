@@ -29,9 +29,11 @@ pub enum UnitStatus {
     /// Has raised a fault; kept out of the runnable set. Return to
     /// `Runnable` is architecture-specific.
     Faulted = 2,
-    /// Terminal. Must be removed from the runnable set after the
-    /// runtime observes this; snapshots may still be retained for
-    /// trace purposes.
+    /// Out of the runnable set after the runtime observes this; the
+    /// runtime can keep its snapshots for the trace. Terminal
+    /// unless the unit reports a stopped state through
+    /// [`ExecutionUnit::stop_registers`], which [`ExecutionUnit::restart`]
+    /// resumes from.
     Finished = 3,
 }
 
@@ -169,6 +171,25 @@ pub trait ExecutionUnit {
     /// post-step register state.
     fn register_dump(&self) -> Option<crate::FaultRegisterDump> {
         None
+    }
+
+    /// The stopped state the unit's own instruction left it in, or
+    /// `None`. An SPU reports it after a stop, a halt or an SPU error;
+    /// other units never stop themselves this way.
+    fn stop_registers(&self) -> Option<crate::StopRegisters> {
+        None
+    }
+
+    /// Resume a unit that stopped itself, at the address its stopped
+    /// state names. The unit becomes `Runnable` and its stopped state
+    /// clears.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::RestartError::NotStopped`] when the unit holds no
+    /// stopped state.
+    fn restart(&mut self) -> Result<(), crate::RestartError> {
+        Err(crate::RestartError::NotStopped)
     }
 }
 

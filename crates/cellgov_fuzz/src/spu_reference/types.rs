@@ -99,6 +99,8 @@ pub enum SpuReferenceOutcome {
     MemoryRead,
     /// Architectural fault.
     Fault,
+    /// The instruction stopped the SPU.
+    Stop,
 }
 
 impl From<&SpuStepOutcome> for SpuReferenceOutcome {
@@ -109,6 +111,7 @@ impl From<&SpuStepOutcome> for SpuReferenceOutcome {
             SpuStepOutcome::Yield { .. } => Self::Yield,
             SpuStepOutcome::MemoryRead { .. } => Self::MemoryRead,
             SpuStepOutcome::Fault(_) => Self::Fault,
+            SpuStepOutcome::Stop { .. } => Self::Stop,
         }
     }
 }

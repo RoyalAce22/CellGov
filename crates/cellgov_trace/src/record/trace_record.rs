@@ -9,7 +9,7 @@ use super::codec::{
     TAG_COMMIT_APPLIED, TAG_EFFECT_EMITTED, TAG_HOST_INVARIANT_BREAK, TAG_HOST_WRITE,
     TAG_PPU_STATE_FULL, TAG_PPU_STATE_HASH, TAG_RESERVED_REGION_READ, TAG_RUN_IDENTITY,
     TAG_STATE_HASH_CHECKPOINT, TAG_STATE_HASH_SCHEME, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED,
-    TAG_SYSCALL_RETURNED, TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_WOKEN,
+    TAG_SYSCALL_RETURNED, TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_STOPPED, TAG_UNIT_WOKEN,
 };
 use super::reasons::{
     HashCheckpointKind, HostWriter, TracedBlockReason, TracedEffectKind,
@@ -240,6 +240,16 @@ pub enum TraceRecord {
         /// stream.
         checkpoint: u64,
     },
+    /// A unit's own instruction stopped it with a restartable state.
+    /// Emitted once per stop, after `CommitApplied`.
+    UnitStopped {
+        /// Unit that stopped.
+        unit: UnitId,
+        /// The `SPU_Status` word: the stop code and the cause bits.
+        status: u32,
+        /// The `SPU_NPC` word: the address the unit resumes at.
+        npc: u32,
+    },
 }
 
 impl TraceRecord {
@@ -262,6 +272,7 @@ impl TraceRecord {
             TraceRecord::SyscallReturned { .. } => TAG_SYSCALL_RETURNED,
             TraceRecord::HostWrite { .. } => TAG_HOST_WRITE,
             TraceRecord::StateHashScheme { .. } => TAG_STATE_HASH_SCHEME,
+            TraceRecord::UnitStopped { .. } => TAG_UNIT_STOPPED,
         }
     }
 
@@ -285,6 +296,7 @@ impl TraceRecord {
             TAG_RUN_IDENTITY => 1 + 4 + 8 * 3,
             TAG_HOST_WRITE => 1 + 1 + 4 + 8 + 4 + 4,
             TAG_STATE_HASH_SCHEME => 1 + 8 + 8,
+            TAG_UNIT_STOPPED => 1 + 8 + 4 + 4,
             _ => return None,
         })
     }
@@ -296,7 +308,8 @@ impl TraceRecord {
             TraceRecord::UnitScheduled { .. }
             | TraceRecord::StepCompleted { .. }
             | TraceRecord::UnitBlocked { .. }
-            | TraceRecord::UnitWoken { .. } => TraceLevel::Scheduling,
+            | TraceRecord::UnitWoken { .. }
+            | TraceRecord::UnitStopped { .. } => TraceLevel::Scheduling,
             TraceRecord::CommitApplied { .. } => TraceLevel::Commits,
             TraceRecord::StateHashCheckpoint { .. }
             | TraceRecord::PpuStateHash { .. }

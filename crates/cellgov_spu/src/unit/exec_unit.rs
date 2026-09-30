@@ -12,7 +12,8 @@ use crate::{decode, exec};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
+    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, RestartError,
+    StopRegisters, UnitStatus, YieldReason,
 };
 use cellgov_ps3_abi::hw::spu::MFC_ATOMIC_STAT_G;
 use cellgov_time::{Budget, InstructionCost};
@@ -129,14 +130,23 @@ impl ExecutionUnit for SpuExecutionUnit {
                     self.state.advance_pc();
                 }
                 SpuStepOutcome::Branch => {}
+                SpuStepOutcome::Stop { kind, signal } => {
+                    self.state.record_stop(kind, signal);
+                    self.status = UnitStatus::Finished;
+                    return ExecutionStepResult {
+                        yield_reason: YieldReason::Finished,
+                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                        fault: None,
+                        syscall_args: None,
+                    };
+                }
                 SpuStepOutcome::Yield {
                     effects: step_effects,
                     reason,
                 } => {
                     effects.extend(step_effects);
-                    if reason == YieldReason::Finished {
-                        self.status = UnitStatus::Finished;
-                    } else if reason != YieldReason::MailboxAccess {
+                    if reason != YieldReason::MailboxAccess {
                         // PC stays on the rdch; the re-entry block at the
                         // top of `run_until_yield` advances it.
                         self.state.advance_pc();
@@ -234,7 +244,23 @@ impl ExecutionUnit for SpuExecutionUnit {
             lslr: self.state.lslr,
             ls: self.state.ls.clone(),
             reservation_line: self.state.reservation.map(|l| l.addr()),
+            stop: self.state.stop,
         }
+    }
+
+    fn stop_registers(&self) -> Option<StopRegisters> {
+        self.state.stop.map(|stop| StopRegisters {
+            status: stop.status_word(),
+            npc: stop.npc,
+        })
+    }
+
+    // [CBEA p:95 s:8.5.3] a restart resumes at SPU_NPC; [CBEA p:94 s:8.5.2] it clears the C, I, S, H and P bits.
+    fn restart(&mut self) -> Result<(), RestartError> {
+        let stop = self.state.stop.take().ok_or(RestartError::NotStopped)?;
+        self.state.pc = stop.npc;
+        self.status = UnitStatus::Runnable;
+        Ok(())
     }
 
     fn local_memory_hash(&self) -> Option<u64> {
