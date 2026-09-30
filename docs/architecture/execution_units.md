@@ -93,6 +93,19 @@ operations. Communicates with the runtime only through effects;
 never reads or writes committed shared memory directly. Includes an
 SPU ELF loader.
 
+SPU isolation facility: out of scope. It is the CBEA's one optional
+facility [CBEA p:34 s:2.2.3]: isolated load and exit states, an
+isolated area of local store no other unit can reach, an authentication
+and decryption master key, and a random-number function
+[CBEA p:178 s:11.1], [CBEA p:179 s:11.2]. On the PS3 it runs the
+platform's own secure modules; no game-visible SPU program enters it,
+and CellGov keeps key material and decryption out of its default build.
+The SPU unit therefore always runs nonisolated: the IS bit of
+`SPU_RdMachStat` reads zero [CBEA p:141 s:9.8], no isolation state or
+isolated area exists, and the run-control isolation exit and load
+requests are not modelled, which is how a CBE without the facility
+treats them [CBEA p:92 s:8.5.1].
+
 SPU local-store ordering: an SPU load always sees the SPU's own most
 recent store, but instruction fetches and external local-store writes
 are weakly consistent with SPU loads and stores. A store into the

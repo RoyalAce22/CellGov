@@ -102,6 +102,7 @@ pub(super) fn execute_rdch(
             SpuStepOutcome::Continue
         }
         // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] Two status bits: IS (bit 30) isolation and IE (bit 31) interrupt enable; the model runs nonisolated with interrupts never enabled, so both read as zero.
+        // The isolation facility is out of scope; docs/architecture/execution_units.md records why.
         spu::SPU_RD_MACH_STAT => {
             state.set_reg_word_splat(rt, 0);
             SpuStepOutcome::Continue
