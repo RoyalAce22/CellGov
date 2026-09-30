@@ -273,6 +273,14 @@ impl SpuState {
         }
     }
 
+    /// Write a 32-bit channel read result: `val` in the preferred slot,
+    /// zero in the other three slots.
+    // [SPU-ISA p:248 s:11] a 32-bit channel value occupies the preferred slot and the other slots return zeros.
+    pub fn set_reg_channel_word(&mut self, r: u8, val: u32) {
+        self.regs[r as usize] = [0u8; 16];
+        self.set_reg_word_slot(r, 0, val);
+    }
+
     /// Read word slot `slot` (0-3) of a register as big-endian u32.
     pub fn reg_word_slot(&self, r: u8, slot: usize) -> u32 {
         let base = slot * 4;

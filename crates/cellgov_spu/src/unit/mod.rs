@@ -50,3 +50,7 @@ mod invalid_instruction_tests;
 #[cfg(test)]
 #[path = "tests/problem_state_tests.rs"]
 mod problem_state_tests;
+
+#[cfg(test)]
+#[path = "tests/channel_read_slot_tests.rs"]
+mod channel_read_slot_tests;

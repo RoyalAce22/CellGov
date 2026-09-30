@@ -88,7 +88,7 @@ pub(super) fn execute_rdch(
         spu::MFC_RD_TAG_STAT => {
             let masked = state.channels.tag_status & state.channels.tag_mask;
             if masked == state.channels.tag_mask {
-                state.set_reg_word_splat(rt, state.channels.tag_status);
+                state.set_reg_channel_word(rt, state.channels.tag_status);
                 state.channels.tag_update_pending = false;
                 SpuStepOutcome::Continue
             } else {
@@ -111,14 +111,14 @@ pub(super) fn execute_rdch(
         }
         // [CBE-Handbook p:462 s:17. SPE Channel and Related MMIO Interface sub:17.11 MFC Read Atomic Command Status Channel] Reports success/failure status for the most recent atomic command (e.g. putllc).
         spu::MFC_RD_ATOMIC_STAT => {
-            state.set_reg_word_splat(rt, state.channels.atomic_status);
+            state.set_reg_channel_word(rt, state.channels.atomic_status);
             state.channels.atomic_status_ready = false;
             SpuStepOutcome::Continue
         }
         // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] Two status bits: IS (bit 30) isolation and IE (bit 31) interrupt enable; the model runs nonisolated with interrupts never enabled, so both read as zero.
         // The isolation facility is out of scope; docs/architecture/execution_units.md records why.
         spu::SPU_RD_MACH_STAT => {
-            state.set_reg_word_splat(rt, 0);
+            state.set_reg_channel_word(rt, 0);
             SpuStepOutcome::Continue
         }
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
@@ -132,8 +132,8 @@ pub(super) fn execute_rchcnt(rt: u8, channel: u8, state: &mut SpuState) -> SpuSt
     let Some(count) = channel_count(channel, state) else {
         return SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(channel));
     };
-    state.regs[rt as usize] = [0u8; 16];
-    state.set_reg_word_slot(rt, 0, count);
+    // [SPU-ISA p:249 s:11] rchcnt places the channel count in the preferred slot and zeros bytes 4 to 15.
+    state.set_reg_channel_word(rt, count);
     SpuStepOutcome::Continue
 }
 

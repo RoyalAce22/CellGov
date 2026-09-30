@@ -42,7 +42,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         // instruction; resume by writing the message and stepping past it.
         if let Some(&msg) = ctx.received_messages().first() {
             let rt = self.state.channels.pending_mbox_rt.take().unwrap_or(2);
-            self.state.set_reg_word_splat(rt, msg);
+            self.state.set_reg_channel_word(rt, msg);
             self.state.advance_pc();
         }
 
