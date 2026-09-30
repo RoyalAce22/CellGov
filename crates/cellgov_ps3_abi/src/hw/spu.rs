@@ -130,6 +130,18 @@ pub const SPU_RD_EVENT_STAT: u8 = 0;
 // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] SPU_RdMachStat, channel x'D' = 13, nonblocking.
 pub const SPU_RD_MACH_STAT: u8 = 13;
 
+// Reserved channels
+
+/// True for a channel number the CBE leaves reserved: 5, 6, 10, and 31
+/// upward to the top of the 7-bit channel field.
+// [CBEA p:299 s:Appendix B, Table B-1] channels 5, 6 and 10 are reserved.
+// [CBEA p:301 s:Appendix B, Table B-1] channels 31 to 63 are reserved.
+// [CBE-Handbook p:446 s:17.1.4, Table 17-2] on the CBE, channels 31 to 127 are reserved.
+pub const fn is_reserved_channel(channel: u8) -> bool {
+    // [CBE-Handbook p:446 s:17.1.4, Table 17-2] the 7-bit channel field names 128 channels, so 128 and up name none.
+    matches!(channel, 5 | 6 | 10 | 31..=127)
+}
+
 // MFC DMA command opcodes (written to MFC_CMD)
 
 /// DMA put: local store -> main memory.

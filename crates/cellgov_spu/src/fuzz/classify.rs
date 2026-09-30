@@ -70,6 +70,9 @@ pub(super) fn effect_and_outcome(
             channel: spu::MFC_RD_ATOMIC_STAT | spu::SPU_RD_MACH_STAT,
             ..
         } => (NO_EFFECTS, CONTINUE),
+        SpuInstruction::Rdch { channel, .. } if spu::is_reserved_channel(channel) => {
+            (NO_EFFECTS, CONTINUE)
+        }
         SpuInstruction::Rdch { .. } => (NO_EFFECTS, FAULT),
         SpuInstruction::Wrch {
             channel: spu::MFC_CMD,
@@ -87,9 +90,13 @@ pub(super) fn effect_and_outcome(
                 | spu::SPU_WR_OUT_MBOX,
             ..
         } => (NO_EFFECTS, CONTINUE),
+        SpuInstruction::Wrch { channel, .. } if spu::is_reserved_channel(channel) => {
+            (NO_EFFECTS, CONTINUE)
+        }
         SpuInstruction::Wrch { .. } => (NO_EFFECTS, FAULT),
         SpuInstruction::Rchcnt { channel, .. }
-            if super::support::RCHCNT_CHANNELS.contains(&u32::from(channel)) =>
+            if super::support::RCHCNT_CHANNELS.contains(&u32::from(channel))
+                || spu::is_reserved_channel(channel) =>
         {
             (NO_EFFECTS, CONTINUE)
         }

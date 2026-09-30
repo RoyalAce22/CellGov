@@ -6,7 +6,7 @@ use crate::exec::SpuFault;
 use crate::state::{SignalNotifyMode, SpuObservableSnapshot, SpuState};
 
 /// Every count a fresh SPU's `rchcnt` reads, by channel number; a
-/// channel absent here refuses its count.
+/// channel absent here and from `RESERVED` refuses its count.
 // [CBEA p:238 s:16.3.3] the counts of x'0', x'3', x'4', x'18', x'19', x'1B' and x'1D' start at 0; x'17', x'1C' and x'1E' at 1; MFC_Cmd at the queue depth.
 // [CBEA p:109 s:9] a nonblocking channel counts 1.
 // [CBE-Handbook p:445 s:17.1 Table 17-2] MFC_Cmd holds 16 entries.
@@ -31,11 +31,19 @@ const START_COUNTS: [(u8, u32); 18] = [
     (0x1E, 1),
 ];
 
+/// The reserved channels below 0x1F; the test adds 0x1F to 0x7F.
+// [CBEA p:299 s:Appendix B, Table B-1] channels 5, 6 and 10 are reserved.
+// [CBE-Handbook p:443 s:17.1.3] rchcnt on a reserved channel returns 0.
+const RESERVED: [u8; 3] = [0x05, 0x06, 0x0A];
+
 #[test]
 fn rchcnt_on_a_fresh_unit_reads_the_start_count_of_every_channel_number() {
     let mut expected = [None; 128];
     for (channel, count) in START_COUNTS {
         expected[channel as usize] = Some(count);
+    }
+    for channel in RESERVED.into_iter().chain(0x1F..=0x7F) {
+        expected[channel as usize] = Some(0);
     }
     let mut s = SpuState::new();
     for channel in 0..128u8 {

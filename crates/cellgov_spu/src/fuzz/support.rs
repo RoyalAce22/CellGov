@@ -82,9 +82,15 @@ pub(super) fn state_input(instruction: SpuInstruction) -> Option<SpuStateInput> 
 
 pub(super) fn execution_supported(instruction: SpuInstruction) -> bool {
     match instruction {
-        SpuInstruction::Rdch { channel, .. } => RDCH_CHANNELS.contains(&u32::from(channel)),
-        SpuInstruction::Wrch { channel, .. } => WRCH_CHANNELS.contains(&u32::from(channel)),
-        SpuInstruction::Rchcnt { channel, .. } => RCHCNT_CHANNELS.contains(&u32::from(channel)),
+        SpuInstruction::Rdch { channel, .. } => {
+            RDCH_CHANNELS.contains(&u32::from(channel)) || spu::is_reserved_channel(channel)
+        }
+        SpuInstruction::Wrch { channel, .. } => {
+            WRCH_CHANNELS.contains(&u32::from(channel)) || spu::is_reserved_channel(channel)
+        }
+        SpuInstruction::Rchcnt { channel, .. } => {
+            RCHCNT_CHANNELS.contains(&u32::from(channel)) || spu::is_reserved_channel(channel)
+        }
         _ => true,
     }
 }

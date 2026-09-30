@@ -600,3 +600,7 @@ mod start_state_tests;
 #[cfg(test)]
 #[path = "tests/shufb_tests.rs"]
 mod shufb_tests;
+
+#[cfg(test)]
+#[path = "tests/reserved_channel_tests.rs"]
+mod reserved_channel_tests;

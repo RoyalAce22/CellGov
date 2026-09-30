@@ -70,6 +70,8 @@ pub(super) fn execute_wrch(
             state.channels.out_mbox = Some(val);
             SpuStepOutcome::Continue
         }
+        // [CBE-Handbook p:443 s:17.1.4] a write to a reserved channel has no effect and raises no interrupt.
+        _ if spu::is_reserved_channel(channel) => SpuStepOutcome::Continue,
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
             channel,
             is_write: true,
@@ -118,6 +120,11 @@ pub(super) fn execute_rdch(
         // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] Two status bits: IS (bit 30) isolation and IE (bit 31) interrupt enable; the model runs nonisolated with interrupts never enabled, so both read as zero.
         // The isolation facility is out of scope; docs/architecture/execution_units.md records why.
         spu::SPU_RD_MACH_STAT => {
+            state.set_reg_channel_word(rt, 0);
+            SpuStepOutcome::Continue
+        }
+        // [CBE-Handbook p:443 s:17.1.4] a read of a reserved channel returns zeros and raises no interrupt.
+        _ if spu::is_reserved_channel(channel) => {
             state.set_reg_channel_word(rt, 0);
             SpuStepOutcome::Continue
         }
@@ -184,6 +191,8 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         // [CBEA p:134 s:9.5.2] SPU_WrOutIntrMbox counts its free entries.
         // The model writes nothing to it, so the one entry is free.
         spu::SPU_WR_OUT_INTR_MBOX => spu::SPU_OUT_INTR_MBOX_DEPTH,
+        // [CBE-Handbook p:443 s:17.1.3] rchcnt on a reserved channel returns 0.
+        _ if spu::is_reserved_channel(channel) => 0,
         _ => return None,
     })
 }
