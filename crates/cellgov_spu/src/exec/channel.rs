@@ -59,8 +59,17 @@ pub(super) fn execute_wrch(
             state.channels.tag_update_pending = true;
             SpuStepOutcome::Continue
         }
-        // [CBE-Handbook p:463 s:17. SPE Channel and Related MMIO Interface sub:17.12 SPU Mailbox Channels] SPU Write Outbound Mailbox sends a 32-bit message to the PPE; values are discarded here.
-        spu::SPU_WR_OUT_MBOX => SpuStepOutcome::Continue,
+        // [CBE-Handbook p:463 s:17. SPE Channel and Related MMIO Interface sub:17.12 SPU Mailbox Channels] SPU Write Outbound Mailbox sends a 32-bit message to the PPE.
+        // [CBEA p:98 s:8.6.1] a write to a full outbound mailbox stalls the SPU until another processor reads it.
+        // The model does not park the SPU on it, so the write is refused
+        // by name.
+        spu::SPU_WR_OUT_MBOX => {
+            if state.channels.out_mbox.is_some() {
+                return SpuStepOutcome::Fault(SpuFault::ChannelStall(channel));
+            }
+            state.channels.out_mbox = Some(val);
+            SpuStepOutcome::Continue
+        }
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
             channel,
             is_write: true,
@@ -159,17 +168,16 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         ),
         // [CBEA p:131 s:9.4] MFC_RdAtomicStat counts 1 once an immediate atomic command completes.
         spu::MFC_RD_ATOMIC_STAT => u32::from(channels.atomic_status_ready),
-        // [CBEA p:133 s:9.5.1] SPU_WrOutMbox counts its free entries. The model drops each
-        // message as it is written, so the one entry is always free.
-        spu::SPU_WR_OUT_MBOX => spu::SPU_OUT_MBOX_DEPTH,
+        // [CBEA p:133 s:9.5.1] SPU_WrOutMbox counts its free entries.
+        spu::SPU_WR_OUT_MBOX => spu::SPU_OUT_MBOX_DEPTH - u32::from(channels.out_mbox.is_some()),
         // [CBEA p:135 s:9.5.3] SPU_RdInMbox counts the messages in the inbound mailbox.
         spu::SPU_RD_IN_MBOX => channels.in_mbox_count.min(spu::SPU_IN_MBOX_DEPTH),
         // [CBEA p:147 s:9.11.1] SPU_RdEventStat counts 1 once an enabled event is pending.
         // The model raises no SPU event.
         spu::SPU_RD_EVENT_STAT => 0,
         // [CBEA p:137 s:9.6.1], [CBEA p:138 s:9.6.2] a signal-notification channel counts 1 while unread signals are pending.
-        // The model delivers no signal to an SPU.
-        spu::SPU_RD_SIG_NOTIFY_1 | spu::SPU_RD_SIG_NOTIFY_2 => 0,
+        spu::SPU_RD_SIG_NOTIFY_1 => u32::from(state.signals[0].pending),
+        spu::SPU_RD_SIG_NOTIFY_2 => u32::from(state.signals[1].pending),
         // [CBEA p:129 s:9.3.7] MFC_RdListStallStat counts 1 once a list element with the stall-and-notify flag completes.
         // The model runs no list command.
         spu::MFC_RD_LIST_STALL_STAT => 0,

@@ -191,6 +191,63 @@ pub trait ExecutionUnit {
     fn restart(&mut self) -> Result<(), crate::RestartError> {
         Err(crate::RestartError::NotStopped)
     }
+
+    /// The `SPU_Status` word, or `None` for a unit without SPE
+    /// problem-state registers.
+    fn spu_status(&self) -> Option<u32> {
+        None
+    }
+
+    /// An `SPU_RunCntl` stop request. `waiting` says the unit waits on a
+    /// blocked channel. A stopped unit stays as it is.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ProblemStateError::NoProblemState`] for a unit without
+    /// SPE problem-state registers.
+    fn request_stop(&mut self, waiting: bool) -> Result<(), crate::ProblemStateError> {
+        let _ = waiting;
+        Err(crate::ProblemStateError::NoProblemState)
+    }
+
+    /// Write `SPU_NPC`: the address a restart resumes at.
+    ///
+    /// # Errors
+    ///
+    /// - [`crate::ProblemStateError::NoProblemState`] for a unit without
+    ///   SPE problem-state registers.
+    /// - [`crate::ProblemStateError::Running`] while the unit runs.
+    fn write_npc(&mut self, npc: u32) -> Result<(), crate::ProblemStateError> {
+        let _ = npc;
+        Err(crate::ProblemStateError::NoProblemState)
+    }
+
+    /// Write one signal-notification register, in the mode its
+    /// configuration selects.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ProblemStateError::NoProblemState`] for a unit without
+    /// SPE problem-state registers.
+    fn write_signal(
+        &mut self,
+        register: crate::SignalNotifier,
+        value: u32,
+    ) -> Result<(), crate::ProblemStateError> {
+        let _ = (register, value);
+        Err(crate::ProblemStateError::NoProblemState)
+    }
+
+    /// Read `SPU_Out_Mbox`: the oldest message the unit wrote, which
+    /// leaves the mailbox, or `None` when it is empty.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ProblemStateError::NoProblemState`] for a unit without
+    /// SPE problem-state registers.
+    fn read_out_mbox(&mut self) -> Result<Option<u32>, crate::ProblemStateError> {
+        Err(crate::ProblemStateError::NoProblemState)
+    }
 }
 
 #[cfg(test)]

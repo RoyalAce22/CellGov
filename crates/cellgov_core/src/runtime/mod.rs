@@ -31,6 +31,7 @@ mod host_write;
 mod lv2_dispatch;
 mod mem_helpers;
 mod ppu_create;
+mod problem_state;
 mod process_spawn;
 mod snapshot;
 mod spaces;

@@ -1,8 +1,6 @@
 //! Applying an LV2 dispatch's effects batch, and the all-or-none validation of its memory writes.
 
 use cellgov_effects::Effect;
-use cellgov_event::UnitId;
-use cellgov_exec::UnitStatus;
 use cellgov_mem::MemError;
 use cellgov_trace::HostWriter;
 
@@ -147,11 +145,7 @@ impl Runtime {
                 Effect::MailboxSend {
                     mailbox, message, ..
                 } => {
-                    if let Some(mut mbox) = self.mailbox_registry.get_mut(*mailbox) {
-                        // [CBE-Handbook p:541 s:19.6.6.2] outbound
-                        // write-blocking path is not wired here yet.
-                        mbox.force_send(message.raw());
-                    } else {
+                    if !self.deliver_mailbox_message(*mailbox, message.raw()) {
                         // `handle_register_spu` mints the mailbox
                         // beside the unit, so a miss here names a
                         // host-side disagreement between the thread
@@ -165,11 +159,6 @@ impl Runtime {
                                 mailbox.raw(),
                             ),
                         );
-                    }
-                    let target = UnitId::new(mailbox.raw());
-                    if self.registry.effective_status(target) == Some(UnitStatus::Blocked) {
-                        self.registry
-                            .set_status_override(target, UnitStatus::Runnable);
                     }
                     self.last_lv2_effects.push(effect.clone());
                     continue;

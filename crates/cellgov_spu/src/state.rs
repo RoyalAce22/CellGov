@@ -1,5 +1,5 @@
 //! SPU architectural state (registers, LS, PC, limit register, signal
-//! modes, channels, reservation, stopped state).
+//! registers, channels, reservation, stopped state).
 
 use cellgov_sync::ReservedLine;
 
@@ -28,10 +28,9 @@ pub struct SpuState {
     // [CBEA p:235 s:16.2] privileged software sets SPU_LSLR; an access past it occurs at the wrapped address.
     // [CBE-Handbook p:395 s:14.3 Table 14-4] the spu_env note's ls_size is the SPU_LSLR setting an image needs, and zero asks for the whole local store.
     pub lslr: u32,
-    /// The `SPU_Cfg` modes of signal-notification registers 1 and 2, in
-    /// that order.
-    // [CBEA p:239 s:16.4] SPU_Cfg sets each signal-notification register to overwrite or logical OR.
-    pub signal_modes: [SignalNotifyMode; 2],
+    /// Signal-notification registers 1 and 2, in that order.
+    // [CBEA p:101 s:8.7] each SPU has two signal-notification facilities, each one register and one channel.
+    pub signals: [SignalNotifyRegister; 2],
     /// MFC/channel state for DMA, mailbox, and tag operations.
     pub channels: ChannelState,
     /// Local half of the atomic reservation. MFC_PUTLLC succeeds only
@@ -57,8 +56,8 @@ pub struct SpuObservableSnapshot {
     pub pc: u32,
     /// Local storage limit register.
     pub lslr: u32,
-    /// Signal-notification modes.
-    pub signal_modes: [SignalNotifyMode; 2],
+    /// Signal-notification registers.
+    pub signals: [SignalNotifyRegister; 2],
     /// Architectural channel state.
     pub channels: SpuChannelSnapshot,
     /// Atomic reservation state.
@@ -96,6 +95,8 @@ pub struct SpuChannelSnapshot {
     pub atomic_status_ready: bool,
     /// Messages in the inbound mailbox at the start of the step.
     pub in_mbox_count: u32,
+    /// The message in the outbound mailbox.
+    pub out_mbox: Option<u32>,
 }
 
 impl SpuObservableSnapshot {
@@ -106,7 +107,7 @@ impl SpuObservableSnapshot {
             ls,
             pc,
             lslr,
-            signal_modes,
+            signals,
             channels,
             reservation,
             stop,
@@ -125,13 +126,14 @@ impl SpuObservableSnapshot {
             tag_update_pending,
             atomic_status_ready,
             in_mbox_count,
+            out_mbox,
         } = channels;
         Self {
             regs: *regs,
             ls: ls.clone(),
             pc: *pc,
             lslr: *lslr,
-            signal_modes: *signal_modes,
+            signals: *signals,
             channels: SpuChannelSnapshot {
                 mfc_lsa: *mfc_lsa,
                 mfc_eah: *mfc_eah,
@@ -146,6 +148,7 @@ impl SpuObservableSnapshot {
                 tag_update_pending: *tag_update_pending,
                 atomic_status_ready: *atomic_status_ready,
                 in_mbox_count: *in_mbox_count,
+                out_mbox: *out_mbox,
             },
             reservation: *reservation,
             stop: *stop,
@@ -163,6 +166,48 @@ pub enum SignalNotifyMode {
     LogicalOr,
 }
 
+/// One signal-notification register: its `SPU_Cfg` mode, its
+/// signal-control word, and whether a write is unread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SignalNotifyRegister {
+    /// How a write changes `word`.
+    // [CBEA p:239 s:16.4] SPU_Cfg sets each signal-notification register to overwrite or logical OR.
+    pub mode: SignalNotifyMode,
+    /// The signal-control word the channel reads.
+    pub word: u32,
+    /// A write is unread, so the channel counts 1.
+    pub pending: bool,
+}
+
+impl SignalNotifyRegister {
+    /// A register at the power-on reset state.
+    // [CBEA p:239 s:16.4] each register starts in overwrite mode, the power-on reset value.
+    // [CBEA p:237 s:16.3.2], [CBEA p:238 s:16.3.3] channels x'3' and x'4' start with data 0 and count 0.
+    pub const fn new() -> Self {
+        Self {
+            mode: SignalNotifyMode::Overwrite,
+            word: 0,
+            pending: false,
+        }
+    }
+
+    /// Take a write from another processor.
+    // [CBEA p:101 s:8.7] overwrite mode sets the channel to the data and logical OR mode ORs the data in; both set the count to 1.
+    pub fn write(&mut self, value: u32) {
+        self.word = match self.mode {
+            SignalNotifyMode::Overwrite => value,
+            SignalNotifyMode::LogicalOr => self.word | value,
+        };
+        self.pending = true;
+    }
+}
+
+impl Default for SignalNotifyRegister {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpuState {
     /// The state an SPU starts a new context in.
     pub fn new() -> Self {
@@ -172,8 +217,7 @@ impl SpuState {
             ls: vec![0u8; SPU_LS_SIZE],
             pc: 0,
             lslr: SPU_LSLR_FULL,
-            // [CBEA p:239 s:16.4] both signal-notification registers start in overwrite mode, the power-on reset value.
-            signal_modes: [SignalNotifyMode::Overwrite; 2],
+            signals: [SignalNotifyRegister::new(); 2],
             channels: ChannelState::new(),
             reservation: None,
             stop: None,
@@ -336,6 +380,11 @@ pub struct ChannelState {
     /// which the runtime reports: the `SPU_RdInMbox` count.
     // [CBEA p:135 s:9.5.3] the SPU_RdInMbox count is the number of messages in the inbound mailbox and starts at 0.
     pub in_mbox_count: u32,
+    /// The message the SPU wrote to `SPU_WrOutMbox` and no processor
+    /// has read. The mailbox holds one.
+    // [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox returns the messages in the order the SPU wrote them.
+    // [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_WrOutMbox has 1 maximum entry.
+    pub out_mbox: Option<u32>,
 }
 
 impl ChannelState {
@@ -365,6 +414,8 @@ impl ChannelState {
             atomic_status_ready: false,
             // x'1D' count 0.
             in_mbox_count: 0,
+            // x'1C' count 1.
+            out_mbox: None,
         }
     }
 }

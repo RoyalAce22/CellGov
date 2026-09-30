@@ -80,4 +80,8 @@ pub enum SpuFault {
     /// tag-status word, so a value past the range has no bit to set.
     #[error("SPU MFC command tag id {0} is outside 0..31")]
     TagIdOutOfRange(u32),
+    /// A channel access that stalls the SPU, on a channel whose stall
+    /// the model does not park.
+    #[error("SPU channel 0x{0:02x} access stalls")]
+    ChannelStall(u8),
 }

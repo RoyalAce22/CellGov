@@ -53,6 +53,9 @@ pub(crate) const FAULT_MFC_TAG_ID_OUT_OF_RANGE: u32 = 0x0008_0000;
 ///
 /// [`LocalDiagnostics::faulting_ea`]: cellgov_exec::LocalDiagnostics::faulting_ea
 pub(crate) const FAULT_MFC_READ_UNRESOLVED: u32 = 0x0009_0000;
+/// A channel access that stalls the SPU on a channel whose stall the
+/// model does not park. The detail is the channel number.
+pub(crate) const FAULT_CHANNEL_STALL: u32 = 0x000A_0000;
 
 /// The half of a fault code that carries the detail.
 ///
@@ -63,7 +66,7 @@ pub(crate) const FAULT_DETAIL_MASK: u32 = 0xFFFF;
 
 /// Every class this crate raises, so the layout checks and the layout
 /// tests cover one set.
-const EVERY_FAULT_CLASS: [u32; 8] = [
+const EVERY_FAULT_CLASS: [u32; 9] = [
     FAULT_LS_OUT_OF_RANGE,
     FAULT_UNSUPPORTED_CHANNEL,
     FAULT_UNSUPPORTED_MFC_CMD,
@@ -72,6 +75,7 @@ const EVERY_FAULT_CLASS: [u32; 8] = [
     FAULT_MFC_GET_UNRESOLVED,
     FAULT_MFC_TAG_ID_OUT_OF_RANGE,
     FAULT_MFC_READ_UNRESOLVED,
+    FAULT_CHANNEL_STALL,
 ];
 
 // The debug assertion in `guest_fault` compiles out under `--release`,
@@ -111,6 +115,7 @@ pub(crate) fn guest_fault_for(fault: SpuFault) -> FaultKind {
             guest_fault(FAULT_UNSUPPORTED_CHANNEL_COUNT, channel as u32)
         }
         SpuFault::TagIdOutOfRange(tag) => guest_fault(FAULT_MFC_TAG_ID_OUT_OF_RANGE, tag),
+        SpuFault::ChannelStall(channel) => guest_fault(FAULT_CHANNEL_STALL, u32::from(channel)),
     }
 }
 
@@ -133,6 +138,7 @@ pub fn describe_guest_fault(code: u32) -> Option<String> {
         FAULT_MFC_GET_UNRESOLVED => "SPU_MFC_GET_UNRESOLVED",
         FAULT_MFC_TAG_ID_OUT_OF_RANGE => "SPU_MFC_TAG_ID_OUT_OF_RANGE",
         FAULT_MFC_READ_UNRESOLVED => "SPU_MFC_READ_UNRESOLVED",
+        FAULT_CHANNEL_STALL => "SPU_CHANNEL_STALL",
         _ => return None,
     };
     Some(format!("{name} (detail=0x{detail:04x})"))

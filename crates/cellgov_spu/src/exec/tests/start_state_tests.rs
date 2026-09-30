@@ -62,7 +62,10 @@ fn rchcnt_on_a_fresh_unit_reads_the_start_count_of_every_channel_number() {
 #[test]
 fn a_fresh_unit_starts_with_zero_data_and_overwrite_signal_modes() {
     let s = SpuObservableSnapshot::capture(&SpuState::new());
-    assert_eq!(s.signal_modes, [SignalNotifyMode::Overwrite; 2]);
+    assert_eq!(
+        s.signals.map(|r| (r.mode, r.word, r.pending)),
+        [(SignalNotifyMode::Overwrite, 0, false); 2]
+    );
     let c = &s.channels;
     assert_eq!(
         [
@@ -79,6 +82,7 @@ fn a_fresh_unit_starts_with_zero_data_and_overwrite_signal_modes() {
         [0; 9]
     );
     assert_eq!(c.pending_mbox_rt, None);
+    assert_eq!(c.out_mbox, None);
     assert_eq!(c.pending_get, None);
     assert!(!c.tag_update_pending);
     assert!(!c.atomic_status_ready);

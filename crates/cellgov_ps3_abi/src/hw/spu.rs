@@ -250,6 +250,11 @@ pub const SPU_STATUS_C: u32 = 1 << (31 - 25);
 // [CBEA p:93 s:8.5.2] bit 26 I: invalid instruction detected, SPU halted.
 pub const SPU_STATUS_I: u32 = 1 << (31 - 26);
 
+/// `SPU_Status` W: the SPU stopped while waiting on a blocked channel
+/// (bit 28).
+// [CBEA p:94 s:8.5.2] bit 28 W: SPU waiting on a blocked channel, set with the stopped status when the PPE stops a waiting SPU.
+pub const SPU_STATUS_W: u32 = 1 << (31 - 28);
+
 /// `SPU_Status` H: a halt instruction stopped the SPU (bit 29).
 // [CBEA p:94 s:8.5.2] bit 29 H: SPU halted due to a halt instruction.
 pub const SPU_STATUS_H: u32 = 1 << (31 - 29);
@@ -257,6 +262,11 @@ pub const SPU_STATUS_H: u32 = 1 << (31 - 29);
 /// `SPU_Status` P: a stop or stopd stopped the SPU (bit 30).
 // [CBEA p:94 s:8.5.2] bit 30 P: SPU stopped due to a stop-and-signal instruction, stop or stopd.
 pub const SPU_STATUS_P: u32 = 1 << (31 - 30);
+
+/// `SPU_Status` R: the SPU is running (bit 31, the least significant
+/// bit).
+// [CBEA p:94 s:8.5.2] bit 31 R: 0 SPU stopped or halted, 1 SPU running.
+pub const SPU_STATUS_R: u32 = 1;
 
 /// Number of SPU general-purpose 128-bit registers (r0..r127).
 // [SPU-ISA p:25 s:2] The SPU architecture defines 128 general-purpose

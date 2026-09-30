@@ -9,7 +9,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump, PpuFingerprint,
-    RestartError, StopRegisters, UnitStatus,
+    ProblemStateError, RestartError, SignalNotifier, StopRegisters, UnitStatus,
 };
 use cellgov_time::Budget;
 
@@ -86,6 +86,46 @@ pub trait RegisteredUnit: 'static {
     ///
     /// [`RestartError::NotStopped`] when the unit holds no stopped state.
     fn restart(&mut self) -> Result<(), RestartError>;
+
+    /// The `SPU_Status` word. See [`ExecutionUnit::spu_status`].
+    fn spu_status(&self) -> Option<u32>;
+
+    /// An `SPU_RunCntl` stop request. See [`ExecutionUnit::request_stop`].
+    ///
+    /// # Errors
+    ///
+    /// [`ProblemStateError::NoProblemState`] for a unit without SPE
+    /// problem-state registers.
+    fn request_stop(&mut self, waiting: bool) -> Result<(), ProblemStateError>;
+
+    /// Write `SPU_NPC`. See [`ExecutionUnit::write_npc`].
+    ///
+    /// # Errors
+    ///
+    /// [`ProblemStateError::NoProblemState`] or
+    /// [`ProblemStateError::Running`].
+    fn write_npc(&mut self, npc: u32) -> Result<(), ProblemStateError>;
+
+    /// Write a signal-notification register. See
+    /// [`ExecutionUnit::write_signal`].
+    ///
+    /// # Errors
+    ///
+    /// [`ProblemStateError::NoProblemState`] for a unit without SPE
+    /// problem-state registers.
+    fn write_signal(
+        &mut self,
+        register: SignalNotifier,
+        value: u32,
+    ) -> Result<(), ProblemStateError>;
+
+    /// Read `SPU_Out_Mbox`. See [`ExecutionUnit::read_out_mbox`].
+    ///
+    /// # Errors
+    ///
+    /// [`ProblemStateError::NoProblemState`] for a unit without SPE
+    /// problem-state registers.
+    fn read_out_mbox(&mut self) -> Result<Option<u32>, ProblemStateError>;
 
     /// Upcast for callers that need to downcast to a concrete unit
     /// type to inspect state the trait does not expose.
@@ -171,6 +211,35 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn restart(&mut self) -> Result<(), RestartError> {
         ExecutionUnit::restart(self)
+    }
+
+    #[inline]
+    fn spu_status(&self) -> Option<u32> {
+        ExecutionUnit::spu_status(self)
+    }
+
+    #[inline]
+    fn request_stop(&mut self, waiting: bool) -> Result<(), ProblemStateError> {
+        ExecutionUnit::request_stop(self, waiting)
+    }
+
+    #[inline]
+    fn write_npc(&mut self, npc: u32) -> Result<(), ProblemStateError> {
+        ExecutionUnit::write_npc(self, npc)
+    }
+
+    #[inline]
+    fn write_signal(
+        &mut self,
+        register: SignalNotifier,
+        value: u32,
+    ) -> Result<(), ProblemStateError> {
+        ExecutionUnit::write_signal(self, register, value)
+    }
+
+    #[inline]
+    fn read_out_mbox(&mut self) -> Result<Option<u32>, ProblemStateError> {
+        ExecutionUnit::read_out_mbox(self)
     }
 
     #[inline]

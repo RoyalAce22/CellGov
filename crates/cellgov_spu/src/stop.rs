@@ -3,11 +3,11 @@
 
 use cellgov_ps3_abi::hw::spu::{
     SPU_STATUS_C, SPU_STATUS_H, SPU_STATUS_I, SPU_STATUS_P, SPU_STATUS_STOP_CODE_SHIFT,
-    SPU_STOPD_CODE, SPU_STOP_CODE_MASK,
+    SPU_STATUS_W, SPU_STOPD_CODE, SPU_STOP_CODE_MASK,
 };
 
 /// What stopped the SPU.
-// [CBEA p:95 s:8.5.3] a halt, an SPU error and a stop-and-signal each stop the SPU.
+// [CBEA p:95 s:8.5.3] a halt, an SPU error, a stop-and-signal and a stop request each stop the SPU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SpuStopKind {
     /// A `stop` instruction.
@@ -20,6 +20,12 @@ pub enum SpuStopKind {
     InvalidInstruction,
     /// A channel instruction the channel does not allow.
     InvalidChannel,
+    /// A stop request from another processor. `waiting` says the SPU
+    /// waited on a blocked channel.
+    Requested {
+        /// The SPU was waiting on a blocked channel.
+        waiting: bool,
+    },
 }
 
 /// The state a stopped SPU reports and resumes from.
@@ -40,7 +46,8 @@ impl SpuStop {
     /// A stop, stopd or halt ran, so the SPU resumes at the next word.
     /// An invalid instruction or channel instruction did not run, so the
     /// SPU resumes at that same word; the documents leave an SPU error's
-    /// resume address open, and this is CellGov's choice.
+    /// resume address open, and this is CellGov's choice. A stop request
+    /// lands between instructions, so `pc` is the next one to run.
     // [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR, precise stop.
     // [SPU-ISA p:239 s:10] stopd: the same RTL.
     // [CBEA p:93 s:8.5.2] stopd always reports code x'3FFF'.
@@ -49,11 +56,16 @@ impl SpuStop {
         let code = match kind {
             SpuStopKind::Stop => signal & SPU_STOP_CODE_MASK as u16,
             SpuStopKind::Stopd => SPU_STOPD_CODE,
-            SpuStopKind::Halt | SpuStopKind::InvalidInstruction | SpuStopKind::InvalidChannel => 0,
+            SpuStopKind::Halt
+            | SpuStopKind::InvalidInstruction
+            | SpuStopKind::InvalidChannel
+            | SpuStopKind::Requested { .. } => 0,
         };
         let resume = match kind {
             SpuStopKind::Stop | SpuStopKind::Stopd | SpuStopKind::Halt => pc.wrapping_add(4),
-            SpuStopKind::InvalidInstruction | SpuStopKind::InvalidChannel => pc,
+            SpuStopKind::InvalidInstruction
+            | SpuStopKind::InvalidChannel
+            | SpuStopKind::Requested { .. } => pc,
         };
         Self {
             kind,
@@ -72,6 +84,14 @@ impl SpuStop {
             SpuStopKind::Halt => SPU_STATUS_H,
             SpuStopKind::InvalidInstruction => SPU_STATUS_I,
             SpuStopKind::InvalidChannel => SPU_STATUS_C,
+            // [CBEA p:94 s:8.5.2] a stop request sets no cause bit; W reports an SPU stopped while it waited on a blocked channel.
+            SpuStopKind::Requested { waiting } => {
+                if waiting {
+                    SPU_STATUS_W
+                } else {
+                    0
+                }
+            }
         }
     }
 }

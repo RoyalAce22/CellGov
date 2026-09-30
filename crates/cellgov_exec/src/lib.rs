@@ -24,6 +24,7 @@
 pub mod context;
 pub mod fake_isa;
 pub mod operand;
+pub mod problem_state;
 pub mod step_result;
 pub mod stop;
 pub mod unit;
@@ -31,6 +32,7 @@ pub mod yield_reason;
 
 pub use context::ExecutionContext;
 pub use fake_isa::{FakeIsaUnit, FakeOp};
+pub use problem_state::{ProblemStateError, SignalNotifier};
 pub use step_result::{ExecutionStepResult, FaultRegisterDump, LocalDiagnostics};
 pub use stop::{RestartError, StopRegisters};
 pub use unit::{ExecutionUnit, PpuFingerprint, UnitStatus};

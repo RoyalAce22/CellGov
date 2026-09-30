@@ -14,10 +14,10 @@ use crate::{decode, exec};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, RestartError,
-    StopRegisters, UnitStatus, YieldReason,
+    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, ProblemStateError,
+    RestartError, SignalNotifier, StopRegisters, UnitStatus, YieldReason,
 };
-use cellgov_ps3_abi::hw::spu::MFC_ATOMIC_STAT_G;
+use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, SPU_STATUS_R};
 use cellgov_ps3_abi::hw::spu_isa;
 use cellgov_time::{Budget, InstructionCost};
 
@@ -280,6 +280,62 @@ impl ExecutionUnit for SpuExecutionUnit {
         self.state.pc = stop.npc;
         self.status = UnitStatus::Runnable;
         Ok(())
+    }
+
+    // [CBEA p:94 s:8.5.2] R is set while the SPU runs and clear once it stops.
+    // A unit CellGov refused issues no instructions, so it reports R clear
+    // with no stop cause.
+    fn spu_status(&self) -> Option<u32> {
+        if self.status == UnitStatus::Faulted {
+            return Some(0);
+        }
+        Some(
+            self.state
+                .stop
+                .map_or(SPU_STATUS_R, |stop| stop.status_word()),
+        )
+    }
+
+    // [CBEA p:92 s:8.5.1] a stop request stops instruction issue; [CBEA p:95 s:8.5.3] SPU_NPC then names the next instruction.
+    // A unit CellGov refused keeps its refusal, and a stopped unit its
+    // stop.
+    fn request_stop(&mut self, waiting: bool) -> Result<(), ProblemStateError> {
+        if self.state.stop.is_none() && self.status != UnitStatus::Faulted {
+            self.state
+                .record_stop(SpuStopKind::Requested { waiting }, 0);
+            self.status = UnitStatus::Finished;
+        }
+        Ok(())
+    }
+
+    // [CBEA p:95 s:8.5.3] a write updates SPU_NPC only while the SPU is stopped; its least significant bit is the interrupt-enable state, which the model does not carry.
+    // A new SPU_NPC abandons a parked rdch; the runtime returns any
+    // message it already took.
+    fn write_npc(&mut self, npc: u32) -> Result<(), ProblemStateError> {
+        if self.status == UnitStatus::Faulted {
+            return Err(ProblemStateError::Refused);
+        }
+        let stop = self.state.stop.as_mut().ok_or(ProblemStateError::Running)?;
+        stop.npc = npc & self.state.lslr & !3;
+        Ok(())
+    }
+
+    fn write_signal(
+        &mut self,
+        register: SignalNotifier,
+        value: u32,
+    ) -> Result<(), ProblemStateError> {
+        let index = match register {
+            SignalNotifier::One => 0,
+            SignalNotifier::Two => 1,
+        };
+        self.state.signals[index].write(value);
+        Ok(())
+    }
+
+    // [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox takes the oldest message out of the queue.
+    fn read_out_mbox(&mut self) -> Result<Option<u32>, ProblemStateError> {
+        Ok(self.state.channels.out_mbox.take())
     }
 
     fn local_memory_hash(&self) -> Option<u64> {

@@ -118,6 +118,18 @@ impl Mailbox {
         self.queue.pop_front()
     }
 
+    /// Put back a message [`Self::try_receive`] took, as the oldest.
+    /// Returns `false`, with the queue unchanged, when it is full.
+    #[inline]
+    #[must_use = "a false return means the message was not put back"]
+    pub fn return_front(&mut self, message: u32) -> bool {
+        if self.queue.len() >= self.capacity {
+            return false;
+        }
+        self.queue.push_front(message);
+        true
+    }
+
     /// Inspect the oldest queued message without removing it.
     #[inline]
     pub fn peek(&self) -> Option<u32> {

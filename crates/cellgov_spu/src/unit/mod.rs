@@ -46,3 +46,7 @@ mod stop_restart_tests;
 #[cfg(test)]
 #[path = "tests/invalid_instruction_tests.rs"]
 mod invalid_instruction_tests;
+
+#[cfg(test)]
+#[path = "tests/problem_state_tests.rs"]
+mod problem_state_tests;

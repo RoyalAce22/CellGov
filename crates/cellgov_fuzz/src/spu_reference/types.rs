@@ -63,6 +63,9 @@ pub struct SpuReferenceChannels {
     /// Messages in the inbound mailbox.
     #[serde(default)]
     pub in_mbox_count: u32,
+    /// The message in the outbound mailbox.
+    #[serde(default)]
+    pub out_mbox: Option<u32>,
 }
 
 impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
@@ -81,6 +84,7 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             tag_update_pending,
             atomic_status_ready,
             in_mbox_count,
+            out_mbox,
         } = value;
         Self {
             mfc_lsa: *mfc_lsa,
@@ -96,6 +100,7 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             tag_update_pending: *tag_update_pending,
             atomic_status_ready: *atomic_status_ready,
             in_mbox_count: *in_mbox_count,
+            out_mbox: *out_mbox,
         }
     }
 }

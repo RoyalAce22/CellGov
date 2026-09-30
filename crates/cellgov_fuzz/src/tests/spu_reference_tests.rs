@@ -115,7 +115,8 @@ fn all_channels() -> serde_json::Value {
         "mfc_lsa": 1, "mfc_eah": 2, "mfc_eal": 3, "mfc_size": 4, "mfc_tag_id": 5,
         "tag_mask": 6, "tag_status": 7, "atomic_status": 8,
         "pending_mbox_rt": 127, "pending_get": [9, 10, 11, 12],
-        "tag_update_pending": true, "atomic_status_ready": true, "in_mbox_count": 3
+        "tag_update_pending": true, "atomic_status_ready": true, "in_mbox_count": 3,
+        "out_mbox": 5
     })
 }
 
@@ -517,6 +518,7 @@ fn artifact_types_round_trip_through_json() {
             tag_update_pending: true,
             atomic_status_ready: true,
             in_mbox_count: 3,
+            out_mbox: Some(5),
         })
     );
     assert_eq!(capture.expected.reservation, value(None));
@@ -680,7 +682,7 @@ fn each_component_is_named_when_it_differs() {
 
 #[test]
 fn every_channel_field_participates_in_the_channel_comparison() {
-    let mutations: [fn(&mut SpuReferenceChannels); 13] = [
+    let mutations: [fn(&mut SpuReferenceChannels); 14] = [
         |channels| channels.mfc_lsa ^= 1,
         |channels| channels.mfc_eah ^= 1,
         |channels| channels.mfc_eal ^= 1,
@@ -694,6 +696,7 @@ fn every_channel_field_participates_in_the_channel_comparison() {
         |channels| channels.tag_update_pending ^= true,
         |channels| channels.atomic_status_ready ^= true,
         |channels| channels.in_mbox_count ^= 1,
+        |channels| channels.out_mbox = Some(0xAB),
     ];
     let loaded = snapshot();
     let outcome = SpuStepOutcome::Continue;
@@ -728,6 +731,7 @@ fn channel_snapshots_convert_field_by_field() {
     state.channels.tag_update_pending = true;
     state.channels.atomic_status_ready = true;
     state.channels.in_mbox_count = 14;
+    state.channels.out_mbox = Some(15);
     let converted = SpuReferenceChannels::from(&SpuObservableSnapshot::capture(&state).channels);
     assert_eq!(
         converted,
@@ -745,6 +749,7 @@ fn channel_snapshots_convert_field_by_field() {
             tag_update_pending: true,
             atomic_status_ready: true,
             in_mbox_count: 14,
+            out_mbox: Some(15),
         }
     );
 }
@@ -1084,6 +1089,7 @@ fn replay_places_words_at_a_nonzero_pc_and_applies_initial_overrides() {
         tag_update_pending: true,
         atomic_status_ready: true,
         in_mbox_count: 3,
+        out_mbox: Some(5),
     });
     altered.expected.pc = value(0x104);
     altered.expected.reservation = value(Some(0x80));
