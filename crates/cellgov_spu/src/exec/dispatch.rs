@@ -95,6 +95,27 @@ fn halfword_mask(imm: i16) -> u32 {
     u32::from(imm as u16) * 0x0001_0001
 }
 
+/// Applies `f` to each halfword slot of `ra` and `rb` and writes the eight
+/// results to `rt`, reading both sources before the write.
+fn halfwords2(
+    state: &mut SpuState,
+    rt: u8,
+    ra: u8,
+    rb: u8,
+    f: impl Fn(u16, u16) -> u16,
+) -> SpuStepOutcome {
+    let [a, b] = [ra, rb].map(|r| halfwords(state.regs[r as usize]));
+    state.regs[rt as usize] = from_halfwords(std::array::from_fn(|i| f(a[i], b[i])));
+    SpuStepOutcome::Continue
+}
+
+/// `half` shifted right `count` bits with its sign bit replicated; every bit
+/// is the sign bit once the count exceeds 15.
+fn shift_right_algebraic_halfword(half: u16, count: u32) -> u16 {
+    let signed = half as i16;
+    signed.checked_shr(count).unwrap_or(signed >> 15) as u16
+}
+
 /// Execute a single decoded SPU instruction.
 pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match *insn {
@@ -628,6 +649,46 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             SpuStepOutcome::Continue
         }
 
+        // [SPU-ISA p:118 s:6. Shift and Rotate Instructions] Shift Left Halfword: each halfword's count is bits 11 to 15 of its RB halfword; a count above 15 yields zero.
+        SpuInstruction::Shlh { rt, ra, rb } => halfwords2(state, rt, ra, rb, |a, b| {
+            a.checked_shl(u32::from(b & 0x1F)).unwrap_or(0)
+        }),
+        // [SPU-ISA p:119 s:6. Shift and Rotate Instructions] Shift Left Halfword Immediate: count is the low 5 bits of sign-extended I7; a count above 15 yields zero.
+        SpuInstruction::Shlhi { rt, ra, imm } => {
+            let s = u32::from(imm & 0x1F);
+            halfwords2(state, rt, ra, ra, |a, _| a.checked_shl(s).unwrap_or(0))
+        }
+        // [SPU-ISA p:127 s:6. Shift and Rotate Instructions] Rotate Halfword: each halfword's count is bits 12 to 15 of its RB halfword.
+        SpuInstruction::Roth { rt, ra, rb } => {
+            halfwords2(state, rt, ra, rb, |a, b| a.rotate_left(u32::from(b & 0x0F)))
+        }
+        // [SPU-ISA p:128 s:6. Shift and Rotate Instructions] Rotate Halfword Immediate: count is the low 4 bits of I7.
+        SpuInstruction::Rothi { rt, ra, imm } => {
+            let s = u32::from(imm & 0x0F);
+            halfwords2(state, rt, ra, ra, |a, _| a.rotate_left(s))
+        }
+        // [SPU-ISA p:136 s:6. Shift and Rotate Instructions] Rotate and Mask Halfword: logical right shift by (0 - RB) mod 32 per halfword; a count above 15 yields zero.
+        SpuInstruction::Rothm { rt, ra, rb } => halfwords2(state, rt, ra, rb, |a, b| {
+            a.checked_shr(u32::from(0u16.wrapping_sub(b) & 0x1F))
+                .unwrap_or(0)
+        }),
+        // [SPU-ISA p:137 s:6. Shift and Rotate Instructions] Rotate and Mask Halfword Immediate: logical right shift by (0 - I7) mod 32; a count above 15 yields zero.
+        SpuInstruction::Rothmi { rt, ra, imm } => {
+            let s = rotate_mask_count(imm) & 0x1F;
+            halfwords2(state, rt, ra, ra, |a, _| a.checked_shr(s).unwrap_or(0))
+        }
+        // [SPU-ISA p:145 s:6. Shift and Rotate Instructions] Rotate and Mask Algebraic Halfword: arithmetic right shift by (0 - RB) mod 32 per halfword; a count above 15 fills with the sign bit.
+        SpuInstruction::Rotmah { rt, ra, rb } => halfwords2(state, rt, ra, rb, |a, b| {
+            shift_right_algebraic_halfword(a, u32::from(0u16.wrapping_sub(b) & 0x1F))
+        }),
+        // [SPU-ISA p:146 s:6. Shift and Rotate Instructions] Rotate and Mask Algebraic Halfword Immediate: arithmetic right shift by (0 - I7) mod 32; a count above 15 fills with the sign bit.
+        SpuInstruction::Rotmahi { rt, ra, imm } => {
+            let s = rotate_mask_count(imm) & 0x1F;
+            halfwords2(state, rt, ra, ra, |a, _| {
+                shift_right_algebraic_halfword(a, s)
+            })
+        }
+
         // [SPU-ISA p:40 s:3. Memory-Load/Store Instructions] Generate Controls for Byte Insertion (d-form): build shufb mask whose target byte position holds 0x03.
         SpuInstruction::Cbd { rt, ra, imm } => {
             state.regs[rt as usize] =
@@ -952,3 +1013,7 @@ mod sign_extend_tests;
 #[cfg(test)]
 #[path = "tests/logical_tests.rs"]
 mod logical_tests;
+
+#[cfg(test)]
+#[path = "tests/halfword_shift_tests.rs"]
+mod halfword_shift_tests;

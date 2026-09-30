@@ -184,7 +184,11 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
         | K::Rotqmbyi
         | K::Shli
         | K::Rotmi
-        | K::Rotmai => SpuEncodingForm::Ri7,
+        | K::Rotmai
+        | K::Shlhi
+        | K::Rothi
+        | K::Rothmi
+        | K::Rotmahi => SpuEncodingForm::Ri7,
         K::Lqa | K::Stqa | K::Lqr | K::Stqr | K::Il | K::Ilh | K::Ilhu | K::Iohl | K::Fsmbi => {
             SpuEncodingForm::Ri16
         }
@@ -300,6 +304,14 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Shli
         | SpuInstructionKind::Rotmi
         | SpuInstructionKind::Rotmai
+        | SpuInstructionKind::Shlh
+        | SpuInstructionKind::Shlhi
+        | SpuInstructionKind::Roth
+        | SpuInstructionKind::Rothi
+        | SpuInstructionKind::Rothm
+        | SpuInstructionKind::Rothmi
+        | SpuInstructionKind::Rotmah
+        | SpuInstructionKind::Rotmahi
         | SpuInstructionKind::Cbd
         | SpuInstructionKind::Cbx
         | SpuInstructionKind::Chd

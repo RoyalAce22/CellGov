@@ -445,6 +445,38 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         0x2AE => return Ok(SpuInstruction::Xshw { rt: rt7, ra: ra7 }),
         // [SPU-ISA p:96 s:5 Xswd] RR opcode 0x2A6; RB field unused.
         0x2A6 => return Ok(SpuInstruction::Xswd { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:118 s:6 Shlh] RR opcode 0x05F.
+        0x05F => {
+            return Ok(SpuInstruction::Shlh {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:127 s:6 Roth] RR opcode 0x05C.
+        0x05C => {
+            return Ok(SpuInstruction::Roth {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:136 s:6 Rothm] RR opcode 0x05D.
+        0x05D => {
+            return Ok(SpuInstruction::Rothm {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:145 s:6 Rotmah] RR opcode 0x05E.
+        0x05E => {
+            return Ok(SpuInstruction::Rotmah {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
         // [SPU-ISA p:120 s:6 Shl] RR opcode 0x05B.
         0x05B => {
             return Ok(SpuInstruction::Shl {
@@ -503,6 +535,38 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         // [SPU-ISA p:46 s:3 Cdd] RI7 opcode 0x1F7.
         0x1F7 => {
             return Ok(SpuInstruction::Cdd {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        // [SPU-ISA p:119 s:6 Shlhi] RI7 opcode 0x07F.
+        0x07F => {
+            return Ok(SpuInstruction::Shlhi {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        // [SPU-ISA p:128 s:6 Rothi] RI7 opcode 0x07C.
+        0x07C => {
+            return Ok(SpuInstruction::Rothi {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        // [SPU-ISA p:137 s:6 Rothmi] RI7 opcode 0x07D.
+        0x07D => {
+            return Ok(SpuInstruction::Rothmi {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        // [SPU-ISA p:146 s:6 Rotmahi] RI7 opcode 0x07E.
+        0x07E => {
+            return Ok(SpuInstruction::Rotmahi {
                 rt: rt7,
                 ra: ra7,
                 imm: i7,

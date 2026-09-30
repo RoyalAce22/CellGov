@@ -723,6 +723,79 @@ pub enum SpuInstruction {
         /// 7-bit immediate that holds the two's complement of the shift count.
         imm: u8,
     },
+    // [SPU-ISA p:118 s:6 Halfword shifts and rotates: Shlh p.118, Shlhi p.119, Roth p.127, Rothi p.128, Rothm p.136, Rothmi p.137, Rotmah p.145, Rotmahi p.146]
+    /// Shift left halfword: per slot, `ra << (rb & 0x1F)`, zero when the count exceeds 15.
+    Shlh {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Per-halfword count register.
+        rb: u8,
+    },
+    /// Shift left halfword immediate: per slot, `ra << (imm & 0x1F)`, zero when the count exceeds 15.
+    Shlhi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate.
+        imm: u8,
+    },
+    /// Rotate halfword: per slot, `ra` rotated left by `rb & 0x0F`.
+    Roth {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Per-halfword count register.
+        rb: u8,
+    },
+    /// Rotate halfword immediate: per slot, `ra` rotated left by `imm & 0x0F`.
+    Rothi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate.
+        imm: u8,
+    },
+    /// Rotate and mask halfword: per slot, a logical right shift by `(0 - rb) & 0x1F`, zero when the count exceeds 15.
+    Rothm {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Per-halfword count register.
+        rb: u8,
+    },
+    /// Rotate and mask halfword immediate: a logical right shift by `(0 - imm) & 0x1F`.
+    Rothmi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate that holds the two's complement of the shift count.
+        imm: u8,
+    },
+    /// Rotate and mask algebraic halfword: per slot, an arithmetic right shift by `(0 - rb) & 0x1F`, all sign bits when the count exceeds 15.
+    Rotmah {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Per-halfword count register.
+        rb: u8,
+    },
+    /// Rotate and mask algebraic halfword immediate: an arithmetic right shift by `(0 - imm) & 0x1F`.
+    Rotmahi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate that holds the two's complement of the shift count.
+        imm: u8,
+    },
 
     // [SPU-ISA p:40 s:3 Generate Controls for Insertion: Cbd p.40, Cbx p.41, Chd p.42, Chx p.43, Cwd p.44, Cwx p.45, Cdd p.46, Cdx p.47]
     /// Generate controls for byte insertion d-form (shufb mask).
