@@ -130,6 +130,9 @@ fn field_candidates(
             K::Hbra => vec![(0x0180_007f, C::Immediate), (0x007f_ff80, C::Immediate)],
             // [SPU-ISA p:194 s:8 Hint-for-Branch Instructions] HBRR uses the HBRA field layout.
             K::Hbrr => vec![(0x0180_007f, C::Immediate), (0x007f_ff80, C::Immediate)],
+            // [SPU-ISA p:244 s:10 Control Instructions] MFSPR carries RT and the SPR number SA in the RA field.
+            // [SPU-ISA p:245 s:10 Control Instructions] MTSPR uses the same fields.
+            K::Mfspr | K::Mtspr => vec![(0x0000_007f, C::Register), (0x0000_3f80, C::Immediate)],
             // [SPU-ISA p:242 s:10 Control Instructions] SYNC's C bit is an encoding option.
             K::Sync => vec![(0x0010_0000, C::Flag)],
             _ => Vec::new(),

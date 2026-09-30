@@ -160,9 +160,17 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
         | K::Bihz
         | K::Bihnz => SpuEncodingForm::Branch,
         K::Rdch | K::Wrch | K::Rchcnt => SpuEncodingForm::Channel,
-        K::Nop | K::Lnop | K::Hbr | K::Hbra | K::Hbrr | K::Sync | K::Dsync | K::Stop | K::Stopd => {
-            SpuEncodingForm::Control
-        }
+        K::Nop
+        | K::Lnop
+        | K::Hbr
+        | K::Hbra
+        | K::Hbrr
+        | K::Sync
+        | K::Dsync
+        | K::Stop
+        | K::Stopd
+        | K::Mfspr
+        | K::Mtspr => SpuEncodingForm::Control,
         _ => SpuEncodingForm::Rrr,
     }
 }
@@ -246,6 +254,8 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Hlgt
         | SpuInstructionKind::Hlgti
         | SpuInstructionKind::Stop
-        | SpuInstructionKind::Stopd => {}
+        | SpuInstructionKind::Stopd
+        | SpuInstructionKind::Mfspr
+        | SpuInstructionKind::Mtspr => {}
     }
 }

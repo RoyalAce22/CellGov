@@ -251,7 +251,8 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Clgt { rt, .. }
             | SpuInstruction::Brsl { rt, .. }
             | SpuInstruction::Bisl { rt, .. }
-            | SpuInstruction::Rchcnt { rt, .. } => Some(rt),
+            | SpuInstruction::Rchcnt { rt, .. }
+            | SpuInstruction::Mfspr { rt, .. } => Some(rt),
             // [CBE-Handbook p:542 s:19.6.6.3 SPU Side] An empty inbound mailbox stalls the read.
             // The executor writes RT only when a message arrives on re-entry.
             SpuInstruction::Rdch {
@@ -314,7 +315,8 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Hlgt { .. }
             | SpuInstruction::Hlgti { .. }
             | SpuInstruction::Stop { .. }
-            | SpuInstruction::Stopd => None,
+            | SpuInstruction::Stopd
+            | SpuInstruction::Mtspr { .. } => None,
         };
         if let Some(register) = register {
             footprint.registers.insert(register);

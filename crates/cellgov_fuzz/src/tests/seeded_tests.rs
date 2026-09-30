@@ -35,7 +35,7 @@ use crate::{
     GenerationStrategy, ReductionError, StateTransitionClass, TargetPanicPayload,
 };
 
-const CASES: u64 = 32;
+const CASES: u64 = 128;
 const SEQUENCE_WORDS: u32 = 6;
 const SEARCH_LIMIT: u64 = 512;
 

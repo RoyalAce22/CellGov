@@ -616,6 +616,20 @@ pub enum SpuInstruction {
     },
     /// Stop and signal with dependencies: a debugger breakpoint.
     Stopd,
+    /// Move from special-purpose register SA into RT.
+    Mfspr {
+        /// Destination register.
+        rt: u8,
+        /// Special-purpose register number.
+        sa: u8,
+    },
+    /// Move RT into special-purpose register SA.
+    Mtspr {
+        /// Special-purpose register number.
+        sa: u8,
+        /// Source register.
+        rt: u8,
+    },
 }
 
 /// Decode failure.

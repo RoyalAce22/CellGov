@@ -513,6 +513,16 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         | SpuInstruction::Sync
         | SpuInstruction::Dsync => SpuStepOutcome::Continue,
 
+        // [SPU-ISA p:244 s:10. Control Instructions] Move from SPR: an undefined SPR supplies zeros.
+        // [CBE-Handbook p:67 s:3.1.2] the SPU has no special-purpose registers, so every SA reads zero.
+        SpuInstruction::Mfspr { rt, sa: _ } => {
+            state.regs[rt as usize] = [0u8; 16];
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:245 s:10. Control Instructions] Move to SPR: writing an undefined SPR performs no operation.
+        // [CBE-Handbook p:67 s:3.1.2] the SPU has no special-purpose registers, so every write is dropped.
+        SpuInstruction::Mtspr { sa: _, rt: _ } => SpuStepOutcome::Continue,
+
         // [SPU-ISA p:150 s:7. Compare, Branch, and Halt Instructions] Halt If Equal: stop when RA's preferred word equals RB's.
         SpuInstruction::Heq { ra, rb } => halt_if(state.reg_word(ra) == state.reg_word(rb)),
         // [SPU-ISA p:151 s:7. Compare, Branch, and Halt Instructions] Halt If Equal Immediate: I10 sign-extended to 32 bits.
@@ -560,3 +570,7 @@ mod lslr_tests;
 #[cfg(test)]
 #[path = "tests/halt_tests.rs"]
 mod halt_tests;
+
+#[cfg(test)]
+#[path = "tests/spr_tests.rs"]
+mod spr_tests;

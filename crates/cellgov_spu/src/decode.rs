@@ -74,6 +74,10 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         }
         // [SPU-ISA p:239 s:10 Stopd] RR opcode 0x140; its RB, RA and RC fields only carry dependencies.
         0x140 => return Ok(SpuInstruction::Stopd),
+        // [SPU-ISA p:244 s:10 Mfspr] RR opcode 0x00C; SA sits in the RA field.
+        0x00C => return Ok(SpuInstruction::Mfspr { rt: rt7, sa: ra7 }),
+        // [SPU-ISA p:245 s:10 Mtspr] RR opcode 0x10C; SA sits in the RA field.
+        0x10C => return Ok(SpuInstruction::Mtspr { sa: ra7, rt: rt7 }),
         // [SPU-ISA p:33 s:3 Lqx] RR opcode 0x1C4.
         0x1C4 => {
             return Ok(SpuInstruction::Lqx {
