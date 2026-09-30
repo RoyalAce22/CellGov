@@ -164,8 +164,17 @@ impl ExecutionUnit for SpuExecutionUnit {
                         // line it never read. One an earlier getllar took
                         // stands, in the register as in the committed
                         // table that getllar's acquire reaches.
+                        // The record names the line the command moves.
+                        let params = cellgov_dma::MfcParameters {
+                            lsa,
+                            eah: (ea >> 32) as u32,
+                            eal: ea as u32,
+                            size,
+                            tag: self.state.channels.mfc_tag_id,
+                        };
                         effects.push(crate::exec::invalid_command(
                             spu::MFC_GETLLAR,
+                            params,
                             cellgov_dma::MfcCommandError::DataStorage { ea },
                             &mut self.state,
                             self.id,

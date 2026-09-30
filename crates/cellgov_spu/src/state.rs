@@ -399,6 +399,14 @@ impl Default for SpuState {
 }
 
 /// MFC and channel state read/written by rdch/wrch/rchcnt.
+///
+/// The MFC command parameter channels keep their last-written values
+/// after the SPU enqueues a command, except `MFC_EAH`, which returns to 0. A
+/// program that does not rewrite a required parameter issues a command
+/// with the previous one's value; the architecture calls that value
+/// invalid and leaves what the channel holds unstated.
+/// [CBEA p:121 s:9.2] after a command is queued the parameter values become invalid, and omitting a required parameter can make the queue operate improperly.
+/// [CBEA p:52 s:7] when EAH is not specified on a command, hardware must set EAH to '0'.
 #[derive(Clone)]
 pub struct ChannelState {
     /// MFC_LSA: local store address for next DMA command.

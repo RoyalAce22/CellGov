@@ -79,7 +79,25 @@ pub(super) fn execute_wrch(
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:457 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] Writing the Class ID and MFC Command Opcode enqueues the command into the SPU MFC command queue.
-        spu::MFC_CMD => execute_mfc_cmd(val, state, unit_id),
+        spu::MFC_CMD => {
+            let outcome = execute_mfc_cmd(val, state, unit_id);
+            // A command that did not write MFC_EAH names the high word 0,
+            // so the MFC takes EAH back to 0 once a command has used it.
+            // A write that stalls on a full queue used nothing, and so did
+            // a command the model does not run.
+            // [CBEA p:52 s:7] when EAH is not specified on a command, hardware must set EAH to '0'.
+            // [CBEA p:121 s:9.2] footnote 1: EAH is optional and is set to zero if not written.
+            if !matches!(
+                outcome,
+                SpuStepOutcome::Yield {
+                    reason: YieldReason::ChannelStall,
+                    ..
+                } | SpuStepOutcome::Fault(_)
+            ) {
+                state.channels.mfc_eah = 0;
+            }
+            outcome
+        }
         // [CBE-Handbook p:458 s:17. SPE Channel and Related MMIO Interface sub:17.10 MFC Tag-Group Management Channels] MFC_WrTagMask selects the tag groups included in subsequent tag-status queries.
         spu::MFC_WR_TAG_MASK => {
             state.channels.tag_mask = val;
@@ -287,11 +305,11 @@ fn latched_parameters(state: &SpuState) -> MfcParameters {
 /// `error`. It takes a slot like any queued command.
 pub(crate) fn invalid_command(
     cmd: u32,
+    params: MfcParameters,
     error: MfcCommandError,
     state: &mut SpuState,
     unit_id: UnitId,
 ) -> Effect {
-    let params = latched_parameters(state);
     state.channels.cmd_queue_free -= 1;
     Effect::MfcInvalidCommand {
         issuer: unit_id,
@@ -311,7 +329,13 @@ fn queue_invalid(
     unit_id: UnitId,
 ) -> SpuStepOutcome {
     SpuStepOutcome::Yield {
-        effects: vec![invalid_command(cmd, error, state, unit_id)],
+        effects: vec![invalid_command(
+            cmd,
+            latched_parameters(state),
+            error,
+            state,
+            unit_id,
+        )],
         reason: YieldReason::DmaSubmitted,
     }
 }
@@ -504,3 +528,7 @@ mod mfc_class_id_tests;
 #[cfg(test)]
 #[path = "tests/mfc_opcode_class_tests.rs"]
 mod mfc_opcode_class_tests;
+
+#[cfg(test)]
+#[path = "tests/mfc_parameter_latch_tests.rs"]
+mod mfc_parameter_latch_tests;

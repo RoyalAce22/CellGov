@@ -428,6 +428,8 @@ impl SpuAllowedFootprint {
                 }
                 if channel == spu::MFC_CMD {
                     footprint.channels.insert(SpuChannelField::AtomicStatus);
+                    // A command that consumed MFC_EAH takes it back to 0.
+                    footprint.channels.insert(SpuChannelField::MfcEah);
                     footprint.reservation = true;
                 }
                 if channel == spu::MFC_WR_TAG_UPDATE {
