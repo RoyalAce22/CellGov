@@ -400,6 +400,8 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Stop
         | SpuInstructionKind::Stopd
         | SpuInstructionKind::Mfspr
-        | SpuInstructionKind::Mtspr => {}
+        | SpuInstructionKind::Mtspr
+        | SpuInstructionKind::Fscrwr
+        | SpuInstructionKind::Fscrrd => {}
     }
 }

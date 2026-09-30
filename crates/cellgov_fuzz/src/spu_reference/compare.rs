@@ -84,6 +84,15 @@ pub fn compare_reference(
             field: "expected.effects",
         });
     }
+    if expected
+        .fpscr
+        .as_value()
+        .is_some_and(|hex| parse_register(hex).is_none())
+    {
+        return Err(SpuReferenceError::Invalid {
+            field: "expected.fpscr",
+        });
+    }
     let mut comparison = SpuReferenceComparison {
         compared: BTreeSet::new(),
         differences: BTreeSet::new(),
@@ -164,6 +173,14 @@ pub fn compare_reference(
         SpuReferenceComponent::FaultDiscard,
         &expected.fault_discarded,
         |value| (*value != matches!(outcome, SpuStepOutcome::Fault(_))).then_some(()),
+    );
+    compare_field(
+        &mut comparison,
+        SpuReferenceComponent::Fpscr,
+        &expected.fpscr,
+        |value| {
+            (parse_register(value).map(u128::from_be_bytes) != Some(observed.fpscr)).then_some(())
+        },
     );
     Ok(comparison)
 }

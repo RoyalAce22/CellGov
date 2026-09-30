@@ -143,6 +143,14 @@ impl SpuReferenceArtifact {
             return Err(invalid("expected.local_store"));
         }
         if self
+            .expected
+            .fpscr
+            .as_value()
+            .is_some_and(|hex| parse_register(hex).is_none())
+        {
+            return Err(invalid("expected.fpscr"));
+        }
+        if self
             .initial_state
             .reservation
             .is_some_and(|addr| cellgov_sync::ReservedLine::containing(addr).addr() != addr)
@@ -243,6 +251,7 @@ impl SpuReferenceArtifact {
                 "expected.fault_discarded",
                 self.expected.fault_discarded.blank_reason(),
             ),
+            ("expected.fpscr", self.expected.fpscr.blank_reason()),
         ] {
             if blank.is_some() {
                 return Err(invalid(field));

@@ -69,15 +69,15 @@ fn a_shared_spu_executor_defect_escapes_replay_but_not_the_independent_vector() 
 #[test]
 fn unknown_schema_fields_and_versions_are_refused() {
     let mut json: serde_json::Value = serde_json::from_str(ROTATION).expect("valid JSON");
+    for found in [1, 3] {
+        // Version 1 predates the FPSCR axis; version 3 is not written yet.
+        json["schema_version"] = found.into();
+        assert!(matches!(
+            parse_reference_json(&json.to_string()),
+            Err(SpuReferenceError::Version { found: f, supported: 2 }) if f == found
+        ));
+    }
     json["schema_version"] = 2.into();
-    assert!(matches!(
-        parse_reference_json(&json.to_string()),
-        Err(SpuReferenceError::Version {
-            found: 2,
-            supported: 1
-        })
-    ));
-    json["schema_version"] = 1.into();
     json["expected"]["untracked_axis"] = true.into();
     assert!(matches!(
         parse_reference_json(&json.to_string()),

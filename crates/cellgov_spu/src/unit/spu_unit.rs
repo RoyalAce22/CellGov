@@ -20,6 +20,8 @@ pub struct SpuSnapshot {
     pub reservation_line: Option<u64>,
     /// Stopped state, or `None` while the unit can run.
     pub stop: Option<crate::stop::SpuStop>,
+    /// Floating-point status and control register.
+    pub fpscr: u128,
 }
 
 /// A Synergistic Processing Unit execution unit.

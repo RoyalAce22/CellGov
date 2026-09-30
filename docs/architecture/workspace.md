@@ -56,6 +56,7 @@ graph BT
   effects --> lv2
   exec --> ppu
   exec --> spu
+  float --> spu
   exec --> core
   lv2 --> core
   trace --> core

@@ -103,6 +103,8 @@ pub enum SpuObservationComponent {
     Effects,
     /// Fault-discard classification.
     FaultDiscard,
+    /// Floating-point status and control register.
+    Fpscr,
 }
 
 /// Complete SPU state, outcome, and effect observation.
@@ -154,22 +156,7 @@ impl SpuObservation {
     /// Compares every architectural and outcome component.
     // [Martignoni2009 p:127 s:2.2] Two executions agree only when the program counter, registers, memory and exception state all match afterwards.
     pub fn compare(&self, other: &Self) -> SpuObservationComparison {
-        let mut differences = BTreeSet::new();
-        if self.state.regs != other.state.regs {
-            differences.insert(SpuObservationComponent::Registers);
-        }
-        if self.state.ls != other.state.ls {
-            differences.insert(SpuObservationComponent::LocalStore);
-        }
-        if self.state.pc != other.state.pc {
-            differences.insert(SpuObservationComponent::ProgramCounter);
-        }
-        if self.state.channels != other.state.channels {
-            differences.insert(SpuObservationComponent::Channels);
-        }
-        if self.state.reservation != other.state.reservation {
-            differences.insert(SpuObservationComponent::Reservation);
-        }
+        let mut differences = state_differences(&self.state, &other.state);
         if self.outcome != other.outcome {
             differences.insert(SpuObservationComponent::Outcome);
         }
@@ -181,6 +168,42 @@ impl SpuObservation {
         }
         SpuObservationComparison { differences }
     }
+}
+
+/// The architectural components on which two snapshots differ.
+///
+/// Every field is named, so a new one fails to compile here until it is
+/// compared or marked as not a component.
+fn state_differences(
+    a: &SpuObservableSnapshot,
+    b: &SpuObservableSnapshot,
+) -> BTreeSet<SpuObservationComponent> {
+    let SpuObservableSnapshot {
+        regs,
+        ls,
+        pc,
+        // Not components of an instruction observation.
+        lslr: _,
+        signals: _,
+        stop: _,
+        channels,
+        reservation,
+        fpscr,
+    } = a;
+    [
+        (*regs != b.regs, SpuObservationComponent::Registers),
+        (*ls != b.ls, SpuObservationComponent::LocalStore),
+        (*pc != b.pc, SpuObservationComponent::ProgramCounter),
+        (*channels != b.channels, SpuObservationComponent::Channels),
+        (
+            *reservation != b.reservation,
+            SpuObservationComponent::Reservation,
+        ),
+        (*fpscr != b.fpscr, SpuObservationComponent::Fpscr),
+    ]
+    .into_iter()
+    .filter_map(|(differs, component)| differs.then_some(component))
+    .collect()
 }
 
 /// Interpreter-owned allowed write and effect footprint for one instruction.
@@ -196,6 +219,8 @@ pub struct SpuAllowedFootprint {
     pub reservation: bool,
     /// Whether the instruction may select a non-sequential program counter.
     pub control_transfer: bool,
+    /// Whether the instruction may replace FPSCR bits.
+    pub fpscr: bool,
     /// Effect classes declared by the instruction descriptor.
     pub effects: BTreeSet<EffectKind>,
 }
@@ -209,6 +234,7 @@ impl SpuAllowedFootprint {
             channels: BTreeSet::new(),
             reservation: false,
             control_transfer: false,
+            fpscr: matches!(instruction, SpuInstruction::Fscrwr { .. }),
             effects: instruction
                 .fuzz_descriptor()
                 .effects
@@ -416,7 +442,9 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Hlgti { .. }
             | SpuInstruction::Stop { .. }
             | SpuInstruction::Stopd
-            | SpuInstruction::Mtspr { .. } => None,
+            | SpuInstruction::Mtspr { .. }
+            | SpuInstruction::Fscrwr { .. } => None,
+            SpuInstruction::Fscrrd { rt } => Some(rt),
         };
         if let Some(register) = register {
             footprint.registers.insert(register);
@@ -469,21 +497,7 @@ impl SpuAllowedFootprint {
         let mut violations = BTreeSet::new();
         // [Martignoni2009 p:127 s:2.2] After an exception the program counter, the registers and the memory stay as they were, so a discarded step may change none of them.
         if observed.fault_discarded {
-            if before.regs != observed.state.regs {
-                violations.insert(SpuObservationComponent::Registers);
-            }
-            if before.ls != observed.state.ls {
-                violations.insert(SpuObservationComponent::LocalStore);
-            }
-            if before.pc != observed.state.pc {
-                violations.insert(SpuObservationComponent::ProgramCounter);
-            }
-            if before.channels != observed.state.channels {
-                violations.insert(SpuObservationComponent::Channels);
-            }
-            if before.reservation != observed.state.reservation {
-                violations.insert(SpuObservationComponent::Reservation);
-            }
+            violations = state_differences(&before, &observed.state);
         } else {
             for (index, (previous, current)) in
                 before.regs.iter().zip(&observed.state.regs).enumerate()
@@ -509,6 +523,9 @@ impl SpuAllowedFootprint {
             }
             if before.reservation != observed.state.reservation && !self.reservation {
                 violations.insert(SpuObservationComponent::Reservation);
+            }
+            if before.fpscr != observed.state.fpscr && !self.fpscr {
+                violations.insert(SpuObservationComponent::Fpscr);
             }
         }
         // A fault discards effects even when their kind is otherwise allowed.

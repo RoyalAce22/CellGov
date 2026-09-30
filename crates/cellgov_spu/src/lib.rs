@@ -22,6 +22,7 @@
 pub mod decode;
 pub mod exec;
 mod fault_codes;
+mod fpscr;
 pub mod fuzz;
 pub mod instruction;
 pub mod loader;

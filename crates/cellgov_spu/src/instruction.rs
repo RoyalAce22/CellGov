@@ -1428,6 +1428,17 @@ pub enum SpuInstruction {
         /// Source register.
         rt: u8,
     },
+    // [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
+    /// Write RA's defined bits into the FPSCR; RT is a false target.
+    Fscrwr {
+        /// Source register.
+        ra: u8,
+    },
+    /// Read the FPSCR into RT, its unused bits zero.
+    Fscrrd {
+        /// Destination register.
+        rt: u8,
+    },
 }
 
 /// Decode failure.

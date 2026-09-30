@@ -291,7 +291,8 @@ fn run_instructions_inner(
                 | SpuObservationComponent::Channels
                 | SpuObservationComponent::Reservation
                 | SpuObservationComponent::Outcome
-                | SpuObservationComponent::FaultDiscard => DivergenceClass::ArchitecturalState,
+                | SpuObservationComponent::FaultDiscard
+                | SpuObservationComponent::Fpscr => DivergenceClass::ArchitecturalState,
             };
             asymmetry = asymmetry.max(CrossReferenceAsymmetry::State);
             record(

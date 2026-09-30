@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::reference::{ReferenceField, ReferenceOmission, ReferenceProvenance};
 
 /// Current offline SPU reference schema.
-pub const SPU_REFERENCE_SCHEMA_VERSION: u32 = 1;
+pub const SPU_REFERENCE_SCHEMA_VERSION: u32 = 2;
 
 /// Independent source of an SPU observation.
 pub type SpuReferenceProvenance = ReferenceProvenance;
@@ -167,6 +167,8 @@ pub struct SpuReferenceExpected {
     pub effects: ReferenceField<Vec<String>>,
     /// Whether the fault discarded the instruction state.
     pub fault_discarded: ReferenceField<bool>,
+    /// Final FPSCR as 32 lowercase hexadecimal digits, bit 0 first.
+    pub fpscr: ReferenceField<String>,
 }
 
 /// One bounded committed vector or hardware capture.
@@ -206,6 +208,8 @@ pub enum SpuReferenceComponent {
     Effects,
     /// Fault-discard marker.
     FaultDiscard,
+    /// Floating-point status and control register.
+    Fpscr,
 }
 
 /// Reason an independent source cannot constrain a component.

@@ -46,6 +46,10 @@ pub struct SpuState {
     /// it.
     // [CBEA p:94 s:8.5.2] the C, I, S, H and P status bits clear when the SPU restarts.
     pub stop: Option<SpuStop>,
+    /// Floating-point status and control register, bit 0 the most
+    /// significant; only the defined bits are ever set.
+    // [SPU-ISA p:200 s:9.3] the FPSCR holds the double-precision rounding modes and the sticky exception flags.
+    pub fpscr: u128,
 }
 
 /// Architectural state for instruction comparison.
@@ -67,6 +71,8 @@ pub struct SpuObservableSnapshot {
     pub reservation: Option<ReservedLine>,
     /// Stopped state.
     pub stop: Option<SpuStop>,
+    /// Floating-point status and control register.
+    pub fpscr: u128,
 }
 
 /// Channel state for instruction comparison.
@@ -117,6 +123,7 @@ impl SpuObservableSnapshot {
             channels,
             reservation,
             stop,
+            fpscr,
         } = state;
         let ChannelState {
             mfc_lsa,
@@ -160,6 +167,7 @@ impl SpuObservableSnapshot {
             },
             reservation: *reservation,
             stop: *stop,
+            fpscr: *fpscr,
         }
     }
 }
@@ -229,6 +237,12 @@ impl SpuState {
             channels: ChannelState::new(),
             reservation: None,
             stop: None,
+            // No document names the FPSCR's start value. It starts at zero
+            // like the registers the loader clears, which reads as round to
+            // nearest even with every status bit clear.
+            // [CBE-Handbook p:421 s:14.6.3.4] the loader clears the SPE's registers before the program is copied in.
+            // [SPU-ISA p:200 s:9.3] RN 00 is round to nearest even; a status bit stays clear until an operation sets it.
+            fpscr: 0,
         }
     }
 

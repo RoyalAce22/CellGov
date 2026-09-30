@@ -18,7 +18,7 @@ const FIXTURE: &str = include_str!(concat!(
     "/tests/fixtures/spu_reference/rotqbyi_12_v1.json"
 ));
 
-const ALL_COMPONENTS: [SpuReferenceComponent; 8] = [
+const ALL_COMPONENTS: [SpuReferenceComponent; 9] = [
     SpuReferenceComponent::Registers,
     SpuReferenceComponent::LocalStore,
     SpuReferenceComponent::ProgramCounter,
@@ -27,6 +27,7 @@ const ALL_COMPONENTS: [SpuReferenceComponent; 8] = [
     SpuReferenceComponent::Outcome,
     SpuReferenceComponent::Effects,
     SpuReferenceComponent::FaultDiscard,
+    SpuReferenceComponent::Fpscr,
 ];
 
 const SEQUENTIAL: &str = "000102030405060708090a0b0c0d0e0f";
@@ -74,6 +75,7 @@ fn expectation_of(
         outcome: value(SpuReferenceOutcome::from(outcome)),
         effects: value(Vec::new()),
         fault_discarded: value(matches!(outcome, SpuStepOutcome::Fault(_))),
+        fpscr: value(format!("{:032x}", observed.fpscr)),
     }
 }
 
@@ -265,6 +267,14 @@ fn parse_refuses_non_canonical_register_keys_and_values_on_both_sides() {
         json.pointer_mut(pointer).expect(pointer)["127"] = SEQUENTIAL.into();
         parse(&json).unwrap_or_else(|error| panic!("{field}: {error}"));
     }
+    let mut json = fixture();
+    json["expected"]["fpscr"] = serde_json::json!({"status": "value", "value": "short"});
+    assert!(matches!(
+        parse(&json),
+        Err(SpuReferenceError::Invalid {
+            field: "expected.fpscr"
+        })
+    ));
 }
 
 #[test]
@@ -340,6 +350,7 @@ fn parse_refuses_a_blank_omission_reason_on_every_axis() {
         ("/expected/outcome", "expected.outcome"),
         ("/expected/effects", "expected.effects"),
         ("/expected/fault_discarded", "expected.fault_discarded"),
+        ("/expected/fpscr", "expected.fpscr"),
     ];
     assert_eq!(fields.len(), ALL_COMPONENTS.len());
     for (pointer, field) in fields {
@@ -642,7 +653,7 @@ fn a_complete_value_expectation_compares_every_component() {
 
 #[test]
 fn each_component_is_named_when_it_differs() {
-    let cases: [(SpuReferenceComponent, Mutation); 8] = [
+    let cases: [(SpuReferenceComponent, Mutation); 9] = [
         (SpuReferenceComponent::Registers, |_, observed, _| {
             observed.regs[4][0] ^= 1;
         }),
@@ -676,6 +687,9 @@ fn each_component_is_named_when_it_differs() {
                 *outcome = SpuStepOutcome::Fault(SpuFault::LsOutOfRange(0));
             },
         ),
+        (SpuReferenceComponent::Fpscr, |_, observed, _| {
+            observed.fpscr ^= 1;
+        }),
     ];
     for (component, mutate) in cases {
         single_difference(component, mutate);
@@ -931,6 +945,14 @@ fn compare_refuses_malformed_expected_keys_before_comparing() {
             "{key}: {error}"
         );
     }
+    let mut expected = base.clone();
+    expected.fpscr = value(SEQUENTIAL.to_uppercase());
+    assert!(matches!(
+        compare_reference(&expected, &loaded, &loaded, &outcome),
+        Err(SpuReferenceError::Invalid {
+            field: "expected.fpscr"
+        })
+    ));
     let mut expected = base;
     expected.effects = value(vec!["untyped".into()]);
     assert!(matches!(
@@ -1010,7 +1032,7 @@ fn replay_of_the_committed_fixture_loads_words_and_compares_six_components() {
     let replay = replay_reference(&artifact).expect("fixture replays");
     assert!(replay.comparison.is_match(), "{:?}", replay.comparison);
     assert_eq!(replay.comparison.compared.len(), 6);
-    assert_eq!(replay.comparison.unrepresented.len(), 2);
+    assert_eq!(replay.comparison.unrepresented.len(), 3);
     assert_eq!(replay.outcome, SpuStepOutcome::Continue);
     assert_eq!(
         replay.initial.ls[..4],
@@ -1060,12 +1082,12 @@ fn replay_names_the_mismatch_of_an_altered_fixture() {
 #[test]
 fn replay_validates_the_artifact_before_executing() {
     let mut altered = artifact();
-    altered.schema_version = 2;
+    altered.schema_version = 3;
     assert!(matches!(
         replay_reference(&altered),
         Err(SpuReferenceError::Version {
-            found: 2,
-            supported: 1
+            found: 3,
+            supported: 2
         })
     ));
     let mut altered = artifact();
@@ -1105,6 +1127,7 @@ fn replay_places_words_at_a_nonzero_pc_and_applies_initial_overrides() {
     altered.expected.pc = value(0x104);
     altered.expected.reservation = value(Some(0x80));
     altered.expected.channels = value(altered.initial_state.channels.clone().expect("set"));
+    altered.expected.fpscr = value("0".repeat(32));
     let replay = replay_reference(&altered).expect("relocated vector replays");
     assert!(replay.comparison.is_match(), "{:?}", replay.comparison);
     assert_eq!(replay.comparison.compared.len(), ALL_COMPONENTS.len());

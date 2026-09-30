@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "case_id": "spu-isa-rotqbyi-12",
   "provenance": {
     "kind": "documented_vector",
@@ -22,6 +22,7 @@
     "reservation": { "status": "unsupported", "reason": "the cited instruction rule does not specify initial reservation state" },
     "outcome": { "status": "value", "value": "continue" },
     "effects": { "status": "value", "value": [] },
-    "fault_discarded": { "status": "value", "value": false }
+    "fault_discarded": { "status": "value", "value": false },
+    "fpscr": { "status": "unsupported", "reason": "the cited instruction rule does not specify FPSCR state" }
   }
 }

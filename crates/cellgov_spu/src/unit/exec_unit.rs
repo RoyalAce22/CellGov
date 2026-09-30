@@ -269,13 +269,28 @@ impl ExecutionUnit for SpuExecutionUnit {
     }
 
     fn snapshot(&self) -> SpuSnapshot {
+        // Every field is named, so a new one fails to compile here until
+        // the snapshot takes it or says why not.
+        let crate::state::SpuState {
+            regs,
+            ls,
+            pc,
+            lslr,
+            // The replay snapshot does not carry these.
+            signals: _,
+            channels: _,
+            reservation,
+            stop,
+            fpscr,
+        } = &self.state;
         SpuSnapshot {
-            regs: self.state.regs,
-            pc: self.state.pc,
-            lslr: self.state.lslr,
-            ls: self.state.ls.clone(),
-            reservation_line: self.state.reservation.map(|l| l.addr()),
-            stop: self.state.stop,
+            regs: *regs,
+            pc: *pc,
+            lslr: *lslr,
+            ls: ls.clone(),
+            reservation_line: reservation.map(|l| l.addr()),
+            stop: *stop,
+            fpscr: *fpscr,
         }
     }
 

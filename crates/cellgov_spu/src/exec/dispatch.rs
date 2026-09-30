@@ -1075,6 +1075,18 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:245 s:10. Control Instructions] Move to SPR: writing an undefined SPR performs no operation.
         // [CBE-Handbook p:67 s:3.1.2] the SPU has no special-purpose registers, so every write is dropped.
         SpuInstruction::Mtspr { sa: _, rt: _ } => SpuStepOutcome::Continue,
+        // [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
+        SpuInstruction::Fscrwr { ra } => {
+            state.fpscr = u128::from_be_bytes(state.regs[ra as usize])
+                & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED;
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:236 s:9. Floating-Point Instructions] FPSCR Read: the FPSCR with its unused bits forced to zero.
+        SpuInstruction::Fscrrd { rt } => {
+            state.regs[rt as usize] =
+                (state.fpscr & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED).to_be_bytes();
+            SpuStepOutcome::Continue
+        }
 
         // [SPU-ISA p:150 s:7. Compare, Branch, and Halt Instructions] Halt If Equal: stop when RA's preferred word equals RB's.
         SpuInstruction::Heq { ra, rb } => halt_if(state.reg_word(ra) == state.reg_word(rb)),

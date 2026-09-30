@@ -820,6 +820,9 @@ fn spu_reference(truth: &SpuObservableSnapshot) -> SpuReferenceExpected {
         },
         effects: ReferenceField::Value { value: Vec::new() },
         fault_discarded: ReferenceField::Value { value: false },
+        fpscr: ReferenceField::Value {
+            value: format!("{:032x}", truth.fpscr),
+        },
     }
 }
 
@@ -835,6 +838,7 @@ fn a_common_mode_spu_defect_is_visible_to_an_independent_reference() {
         outcome: unsupported(),
         effects: unsupported(),
         fault_discarded: unsupported(),
+        fpscr: unsupported(),
     };
     let truth = replay_spu_reference(&spu_artifact(placeholder)).expect("replays");
     assert_eq!(truth.outcome, SpuStepOutcome::Continue);
