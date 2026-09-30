@@ -1,4 +1,5 @@
-//! SPU architectural state (registers, LS, PC, limit register, channels, reservation, stopped state).
+//! SPU architectural state (registers, LS, PC, limit register, signal
+//! modes, channels, reservation, stopped state).
 
 use cellgov_sync::ReservedLine;
 
@@ -27,6 +28,10 @@ pub struct SpuState {
     // [CBEA p:235 s:16.2] privileged software sets SPU_LSLR; an access past it occurs at the wrapped address.
     // [CBE-Handbook p:395 s:14.3 Table 14-4] the spu_env note's ls_size is the SPU_LSLR setting an image needs, and zero asks for the whole local store.
     pub lslr: u32,
+    /// The `SPU_Cfg` modes of signal-notification registers 1 and 2, in
+    /// that order.
+    // [CBEA p:239 s:16.4] SPU_Cfg sets each signal-notification register to overwrite or logical OR.
+    pub signal_modes: [SignalNotifyMode; 2],
     /// MFC/channel state for DMA, mailbox, and tag operations.
     pub channels: ChannelState,
     /// Local half of the atomic reservation. MFC_PUTLLC succeeds only
@@ -52,6 +57,8 @@ pub struct SpuObservableSnapshot {
     pub pc: u32,
     /// Local storage limit register.
     pub lslr: u32,
+    /// Signal-notification modes.
+    pub signal_modes: [SignalNotifyMode; 2],
     /// Architectural channel state.
     pub channels: SpuChannelSnapshot,
     /// Atomic reservation state.
@@ -99,6 +106,7 @@ impl SpuObservableSnapshot {
             ls,
             pc,
             lslr,
+            signal_modes,
             channels,
             reservation,
             stop,
@@ -123,6 +131,7 @@ impl SpuObservableSnapshot {
             ls: ls.clone(),
             pc: *pc,
             lslr: *lslr,
+            signal_modes: *signal_modes,
             channels: SpuChannelSnapshot {
                 mfc_lsa: *mfc_lsa,
                 mfc_eah: *mfc_eah,
@@ -144,14 +153,27 @@ impl SpuObservableSnapshot {
     }
 }
 
+/// How a signal-notification register takes a write.
+// [CBEA p:239 s:16.4] each register either overwrites its contents or ORs the data written into them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalNotifyMode {
+    /// A write replaces the contents.
+    Overwrite,
+    /// A write ORs its data into the contents.
+    LogicalOr,
+}
+
 impl SpuState {
-    /// Create a new SPU state with zeroed registers, zeroed LS, PC at 0.
+    /// The state an SPU starts a new context in.
     pub fn new() -> Self {
         Self {
+            // [CBE-Handbook p:421 s:14.6.3.4] the loader clears the SPE's registers and local store before the program is copied in.
             regs: [[0u8; 16]; SPU_REG_COUNT],
             ls: vec![0u8; SPU_LS_SIZE],
             pc: 0,
             lslr: SPU_LSLR_FULL,
+            // [CBEA p:239 s:16.4] both signal-notification registers start in overwrite mode, the power-on reset value.
+            signal_modes: [SignalNotifyMode::Overwrite; 2],
             channels: ChannelState::new(),
             reservation: None,
             stop: None,
@@ -268,7 +290,7 @@ impl Default for SpuState {
 }
 
 /// MFC and channel state read/written by rdch/wrch/rchcnt.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ChannelState {
     /// MFC_LSA: local store address for next DMA command.
     // [CBEA p:110 s:9] MFC_LSA channel x'10': local storage address command parameter.
@@ -286,17 +308,17 @@ pub struct ChannelState {
     // [CBEA p:111 s:9] MFC_TagID channel x'14': tag identifier command parameter.
     pub mfc_tag_id: u32,
     /// Tag mask written by mfc_write_tag_mask.
-    // [CBEA p:113 s:9] MFC_WrTagMask channel x'1E': tag-group query mask.
+    // [CBEA p:111 s:9] MFC_WrTagMask channel x'16': tag-group query mask.
     pub tag_mask: u32,
     /// Tag completion status bits, set on DMA completion.
-    // [CBEA p:114 s:9] MFC_RdTagStat channel x'18': tag-group status bits.
+    // [CBEA p:111 s:9] MFC_RdTagStat channel x'18': tag-group status bits.
     pub tag_status: u32,
     /// Atomic operation status set after getllar/putllc.
-    // [CBEA p:115 s:9] MFC_RdAtomicStat channel x'1B': atomic-command completion status.
+    // [CBEA p:111 s:9] MFC_RdAtomicStat channel x'1B': atomic-command completion status.
     pub atomic_status: u32,
     /// Target register for a pending rdch SPU_RdInMbox yield; consumed
     /// by `run_until_yield` on message delivery.
-    // [CBEA p:117 s:9] SPU_RdInMbox channel x'1D': PPE-to-SPU mailbox read.
+    // [CBEA p:111 s:9] SPU_RdInMbox channel x'1D': PPE-to-SPU mailbox read.
     pub pending_mbox_rt: Option<u8>,
     /// Pending DMA Get (ea, lsa, size, tag_id); serviced at the start of
     /// the next `run_until_yield` from the committed memory snapshot, with
@@ -317,9 +339,39 @@ pub struct ChannelState {
 }
 
 impl ChannelState {
-    /// Create zeroed channel state.
+    /// The channel state of a new context.
+    ///
+    /// Every channel count follows from these values; `rchcnt` on a
+    /// fresh SPU reads the counts the architecture requires.
+    // [CBEA p:237 s:16.3.2] the data of channels x'0', x'1', x'3', x'4', x'18', x'19', x'1B' and x'1D' is zero before a new context starts.
+    // [CBEA p:238 s:16.3.3] the counts of x'0', x'3', x'4', x'18', x'19', x'1B' and x'1D' start at 0; x'17', x'1C' and x'1E' at 1; MFC_Cmd at the queue depth.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            mfc_lsa: 0,
+            mfc_eah: 0,
+            mfc_eal: 0,
+            mfc_size: 0,
+            mfc_tag_id: 0,
+            tag_mask: 0,
+            // x'18' data.
+            tag_status: 0,
+            // x'1B' data.
+            atomic_status: 0,
+            pending_mbox_rt: None,
+            pending_get: None,
+            // x'18' count 0.
+            tag_update_pending: false,
+            // x'1B' count 0.
+            atomic_status_ready: false,
+            // x'1D' count 0.
+            in_mbox_count: 0,
+        }
+    }
+}
+
+impl Default for ChannelState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

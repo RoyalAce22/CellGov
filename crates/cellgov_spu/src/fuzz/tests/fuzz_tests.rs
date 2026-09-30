@@ -246,6 +246,11 @@ fn channel_operands_prefer_interpreter_owned_architected_selectors() {
             spu::MFC_RD_ATOMIC_STAT as u32,
             spu::SPU_WR_OUT_MBOX as u32,
             spu::SPU_RD_IN_MBOX as u32,
+            spu::SPU_RD_EVENT_STAT as u32,
+            spu::SPU_RD_SIG_NOTIFY_1 as u32,
+            spu::SPU_RD_SIG_NOTIFY_2 as u32,
+            spu::MFC_RD_LIST_STALL_STAT as u32,
+            spu::SPU_WR_OUT_INTR_MBOX as u32,
         ]
     );
     assert!(channels(SpuInstructionKind::Ai).is_empty());

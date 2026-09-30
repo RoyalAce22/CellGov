@@ -97,7 +97,7 @@ fn spu_replay_asymmetry_uses_the_strongest_changed_axis() {
     );
 
     let second = observed_step(SpuStepOutcome::Fault(
-        cellgov_spu::exec::SpuFault::UnsupportedChannelCount(0),
+        cellgov_spu::exec::SpuFault::UnsupportedChannelCount(7),
     ));
     assert_eq!(
         spu_step_replay_asymmetry(&first, &second),

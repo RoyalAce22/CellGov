@@ -164,6 +164,18 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         spu::SPU_WR_OUT_MBOX => spu::SPU_OUT_MBOX_DEPTH,
         // [CBEA p:135 s:9.5.3] SPU_RdInMbox counts the messages in the inbound mailbox.
         spu::SPU_RD_IN_MBOX => channels.in_mbox_count.min(spu::SPU_IN_MBOX_DEPTH),
+        // [CBEA p:147 s:9.11.1] SPU_RdEventStat counts 1 once an enabled event is pending.
+        // The model raises no SPU event.
+        spu::SPU_RD_EVENT_STAT => 0,
+        // [CBEA p:137 s:9.6.1], [CBEA p:138 s:9.6.2] a signal-notification channel counts 1 while unread signals are pending.
+        // The model delivers no signal to an SPU.
+        spu::SPU_RD_SIG_NOTIFY_1 | spu::SPU_RD_SIG_NOTIFY_2 => 0,
+        // [CBEA p:129 s:9.3.7] MFC_RdListStallStat counts 1 once a list element with the stall-and-notify flag completes.
+        // The model runs no list command.
+        spu::MFC_RD_LIST_STALL_STAT => 0,
+        // [CBEA p:134 s:9.5.2] SPU_WrOutIntrMbox counts its free entries.
+        // The model writes nothing to it, so the one entry is free.
+        spu::SPU_WR_OUT_INTR_MBOX => spu::SPU_OUT_INTR_MBOX_DEPTH,
         _ => return None,
     })
 }

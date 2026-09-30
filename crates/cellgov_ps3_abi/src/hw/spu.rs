@@ -80,6 +80,9 @@ pub const MFC_TAG_UPDATE_ALL: u32 = 2;
 /// Read tag status; blocks until masked tags complete.
 // [CBEA p:122 s:9.3 MFC Tag-Group Status Channels] MFC_RdTagStat, channel 24, read-blocking.
 pub const MFC_RD_TAG_STAT: u8 = 24;
+/// Read list stall-and-notify tag status.
+// [CBEA p:129 s:9.3.7 MFC Read List Stall-and-Notify Tag Status Channel] MFC_RdListStallStat, channel 25, read-blocking.
+pub const MFC_RD_LIST_STALL_STAT: u8 = 25;
 
 // MFC atomic channels
 
@@ -105,6 +108,21 @@ pub const SPU_WR_OUT_MBOX: u8 = 28;
 /// SPU write outbound interrupt mailbox.
 // [CBEA p:134 s:9.5 SPU Mailbox Channels] SPU_WrOutIntrMbox, channel 30.
 pub const SPU_WR_OUT_INTR_MBOX: u8 = 30;
+
+// SPU signal notification channels
+
+/// SPU signal notification 1.
+// [CBEA p:137 s:9.6.1 SPU Signal Notification 1 Channel] SPU_RdSigNotify1, channel x'3', read-blocking.
+pub const SPU_RD_SIG_NOTIFY_1: u8 = 3;
+/// SPU signal notification 2.
+// [CBEA p:138 s:9.6.2 SPU Signal Notification 2 Channel] SPU_RdSigNotify2, channel x'4', read-blocking.
+pub const SPU_RD_SIG_NOTIFY_2: u8 = 4;
+
+// SPU event channels
+
+/// SPU read event status: the pending events the event mask enables.
+// [CBEA p:147 s:9.11.1 SPU Read Event Status Channel] SPU_RdEventStat, channel x'0', read-blocking.
+pub const SPU_RD_EVENT_STAT: u8 = 0;
 
 // SPU state management channels
 
@@ -206,6 +224,10 @@ pub const SPU_IN_MBOX_DEPTH: u32 = 4;
 /// Entries in the SPU outbound mailbox.
 // [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_WrOutMbox has 1 maximum entry.
 pub const SPU_OUT_MBOX_DEPTH: u32 = 1;
+
+/// Entries in the SPU outbound interrupt mailbox.
+// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_WrOutIntrMbox has 1 maximum entry.
+pub const SPU_OUT_INTR_MBOX_DEPTH: u32 = 1;
 
 /// Mask of the stop-and-signal code: the low 14 bits of a `stop` word.
 // [SPU-ISA p:238 s:10] stop carries its signal type in bits 18:31.

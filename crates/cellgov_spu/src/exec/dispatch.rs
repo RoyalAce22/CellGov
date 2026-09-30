@@ -593,3 +593,7 @@ mod sync_tests;
 #[cfg(test)]
 #[path = "tests/channel_count_tests.rs"]
 mod channel_count_tests;
+
+#[cfg(test)]
+#[path = "tests/start_state_tests.rs"]
+mod start_state_tests;

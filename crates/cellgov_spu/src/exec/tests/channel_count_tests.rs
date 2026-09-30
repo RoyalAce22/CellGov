@@ -1,5 +1,4 @@
-//! `rchcnt` returns the architected count of every implemented channel,
-//! and each facility's count moves with its state.
+//! Each facility's `rchcnt` count moves with its state.
 
 use super::*;
 use crate::exec::SpuFault;
@@ -19,32 +18,6 @@ fn count(s: &mut SpuState, channel: u8) -> u32 {
         "rchcnt {channel} zeroes the other slots"
     );
     s.reg_word(3)
-}
-
-// [CBEA p:109 s:9] a nonblocking channel counts 1; a blocking channel counts its free capacity or occupancy.
-// [CBEA p:128 s:9.3.6], [CBEA p:131 s:9.4], [CBEA p:135 s:9.5.3] the tag-status, atomic-status and inbound-mailbox counts start at 0.
-// [CBE-Handbook p:445 s:17.1 Table 17-2] MFC_Cmd holds 16 entries and SPU_WrOutMbox 1.
-#[test]
-fn a_fresh_unit_counts_every_implemented_channel() {
-    let table = [
-        (spu::SPU_RD_MACH_STAT, 1),
-        (spu::MFC_LSA, 1),
-        (spu::MFC_EAH, 1),
-        (spu::MFC_EAL, 1),
-        (spu::MFC_SIZE, 1),
-        (spu::MFC_TAG_ID, 1),
-        (spu::MFC_CMD, 16),
-        (spu::MFC_WR_TAG_MASK, 1),
-        (spu::MFC_WR_TAG_UPDATE, 1),
-        (spu::MFC_RD_TAG_STAT, 0),
-        (spu::MFC_RD_ATOMIC_STAT, 0),
-        (spu::SPU_WR_OUT_MBOX, 1),
-        (spu::SPU_RD_IN_MBOX, 0),
-    ];
-    let mut s = SpuState::new();
-    for (channel, want) in table {
-        assert_eq!(count(&mut s, channel), want, "channel {channel}");
-    }
 }
 
 #[test]
