@@ -100,16 +100,11 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
 
+      # See the note on the test job's cache step.
       - name: Cache cargo
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-lint-${{ matrix.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-lint-${{ matrix.toolchain }}-
+          save-if: ${{ github.ref == 'refs/heads/main' && !matrix.informational }}
 
       - name: repository lint
         run: bash .github/ci.sh lint
@@ -175,16 +170,22 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
 
+      # Third-party dependency artifacts only. A checkout resets source
+      # mtimes, so every workspace crate rebuilds whatever a cache holds;
+      # rust-cache drops them, incremental output and stale files before
+      # it saves, and sets CARGO_INCREMENTAL=0. GitHub keeps 10 GB per
+      # repository and evicts the least recently used entry, so only a
+      # run on main saves, and only from the pinned lint leg and the two
+      # stable test legs: three entries. The key names the OS, the
+      # toolchain, Cargo.lock and the CARGO*/RUST* environment, so the
+      # other toolchains' legs find no entry and build uncached.
+      # `shared-key` drops the job name, so `fuzz.yml` restores the
+      # stable entry by the same key and saves nothing.
       - name: Cache cargo
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-test-${{ matrix.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-test-${{ matrix.toolchain }}-
+          shared-key: test
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.name == 'stable' }}
 
       - name: repository tests
         run: bash .github/ci.sh test
