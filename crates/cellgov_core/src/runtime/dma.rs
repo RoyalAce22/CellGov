@@ -94,6 +94,13 @@ impl Runtime {
             // - `Faulted`: the commit pipeline's `pre_validate` refused
             //   a later DmaEnqueue from the issuer, and that mark keeps
             //   the unit off the scheduler.
+            // The tag bit still lands, so an SPU that restarts sees its
+            // transfer complete. Whether the MFC runs on while its SPU
+            // is stopped is unestablished; this is CellGov's choice.
+            // [CBEA p:92 s:8.5.1] a stop request stops the SPU's instruction issue; the page says nothing of the MFC.
+            if let Some(tag_id) = c.request().tag_id() {
+                *self.pending_tag_completions.entry(c.issuer()).or_insert(0) |= tag_id.status_bit();
+            }
             if matches!(
                 self.registry.effective_status(c.issuer()),
                 Some(UnitStatus::Finished | UnitStatus::Faulted)
@@ -102,9 +109,6 @@ impl Runtime {
             }
             self.registry
                 .set_status_override(c.issuer(), UnitStatus::Runnable);
-            if let Some(tag_id) = c.request().tag_id() {
-                *self.pending_tag_completions.entry(c.issuer()).or_insert(0) |= tag_id.status_bit();
-            }
         }
         due
     }

@@ -587,7 +587,8 @@ fn the_shortest_prefix_holding_e_entry_still_reports_it() {
     assert_eq!(kernel_image_entry_pc(elf), 0);
 }
 
-/// Group 1 created, driven to Running, and its single SPU finished.
+/// Group 1 created, driven to Running, and its single SPU finished,
+/// so a join reads `ALL_THREADS_EXIT` with status 0.
 fn host_with_finished_group() -> Lv2Host {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x4000);
@@ -656,7 +657,7 @@ fn a_finished_group_join_with_null_status_writes_cause_only_and_returns_efault()
             assert_eq!(range.length(), 4);
             assert_eq!(
                 bytes.bytes(),
-                &spu::group_join_cause::GROUP_EXIT.to_be_bytes()
+                &spu::group_join_cause::ALL_THREADS_EXIT.to_be_bytes()
             );
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -675,7 +676,7 @@ fn a_finished_group_join_with_both_pointers_writes_both_and_returns_ok() {
             assert_eq!(range.start().raw(), 0x300);
             assert_eq!(
                 bytes.bytes(),
-                &spu::group_join_cause::GROUP_EXIT.to_be_bytes()
+                &spu::group_join_cause::ALL_THREADS_EXIT.to_be_bytes()
             );
             let Effect::SharedWriteIntent { range, bytes, .. } = &effects[1] else {
                 panic!("expected SharedWriteIntent, got {:?}", effects[1]);

@@ -150,6 +150,11 @@ fn drive(
                     }
                     StepVerdict::Continue => {}
                 }
+                if let Some(failure) = rt.take_spu_thread_failure() {
+                    let mut diag = format!("SPU_THREAD_ERROR at step {}: {failure}", ctx.steps);
+                    append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
+                    return Ok((diag, BootOutcome::Fault));
+                }
 
                 // Post-commit counters: only advance when the batch was applied.
                 if let Some(pc) = step.result.local_diagnostics.pc {

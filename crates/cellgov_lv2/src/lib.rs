@@ -20,6 +20,7 @@ pub mod image;
 pub mod ppu_thread;
 pub mod prx_registry;
 pub mod request;
+pub mod spu_stop;
 pub mod sync_primitives;
 pub mod syscall_classification;
 pub mod thread_group;
@@ -44,6 +45,7 @@ pub use ppu_thread::{
 };
 pub use prx_registry::{LoadedPrxEntry, LoadedPrxRegistry};
 pub use request::Lv2Request;
+pub use spu_stop::{SpuThreadError, SpuThreadStop};
 pub use sync_primitives::{
     CondEntry, CondTable, DuplicateEnqueue, EventFlagCreateError, EventFlagEnqueueError,
     EventFlagEntry, EventFlagTable, EventFlagWait, EventFlagWaiter, EventFlagWake, EventPayload,

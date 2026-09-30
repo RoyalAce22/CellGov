@@ -81,7 +81,41 @@ pub mod segment {
 
 /// `cause` enum returned by `sys_spu_thread_group_join`.
 pub mod group_join_cause {
-    /// `SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT`: the group exited
-    /// because every thread reached `sys_spu_thread_exit`.
+    /// `SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT`: a thread of the group
+    /// called `sys_spu_thread_group_exit`, which ended every thread.
     pub const GROUP_EXIT: u32 = 0x0001;
+    /// `SYS_SPU_THREAD_GROUP_JOIN_ALL_THREADS_EXIT`: every thread of the
+    /// group reached `sys_spu_thread_exit`.
+    pub const ALL_THREADS_EXIT: u32 = 0x0002;
+    /// `SYS_SPU_THREAD_GROUP_JOIN_TERMINATED`:
+    /// `sys_spu_thread_group_terminate` ended the group.
+    pub const TERMINATED: u32 = 0x0004;
+}
+
+/// The stop-and-signal codes an SPU thread stops with to ask LV2 for a
+/// service. The SPU puts the service's argument in `SPU_WrOutMbox`
+/// first.
+///
+/// No public document names these values; they are unestablished. The
+/// open PS3 toolchain's `spu_thread_exit` writes its status to
+/// `SPU_WrOutMbox` and stops with [`THREAD_EXIT`](stop_code::THREAD_EXIT),
+/// as every SPU program under `tests/micro` shows once its `build.sh`
+/// has run. Nothing in the tree witnesses the other values.
+// [CBEA p:94 s:8.5.2] a stop-and-signal copies its 14-bit code into bits 2 through 15 of SPU_Status.
+pub mod stop_code {
+    /// `spu_thread_group_yield`: the thread group gives up its SPUs and
+    /// resumes.
+    pub const YIELD: u16 = 0x0100;
+    /// `sys_spu_thread_group_exit`: end every thread of the group, with
+    /// the status in `SPU_WrOutMbox`.
+    pub const GROUP_EXIT: u16 = 0x0101;
+    /// `sys_spu_thread_exit`: end this thread, with the status in
+    /// `SPU_WrOutMbox`.
+    pub const THREAD_EXIT: u16 = 0x0102;
+    /// `sys_spu_thread_receive_event`: wait on the event queue named in
+    /// `SPU_WrOutMbox`.
+    pub const RECEIVE_EVENT: u16 = 0x0110;
+    /// `sys_spu_thread_tryreceive_event`: poll the event queue named in
+    /// `SPU_WrOutMbox`.
+    pub const TRY_RECEIVE_EVENT: u16 = 0x0111;
 }

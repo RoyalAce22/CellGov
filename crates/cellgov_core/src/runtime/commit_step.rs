@@ -268,10 +268,12 @@ impl Runtime {
 
         // A unit that stopped itself reports the stop it can resume from.
         let stopped = if result.yield_reason == YieldReason::Finished {
-            self.resolve_join_wakes(source);
-            self.registry
+            let stopped = self
+                .registry
                 .get(source)
-                .and_then(|unit| unit.stop_registers())
+                .and_then(|unit| unit.stop_registers());
+            self.settle_finished_unit(source, stopped);
+            stopped
         } else {
             None
         };

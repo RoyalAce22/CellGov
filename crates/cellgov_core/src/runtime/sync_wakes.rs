@@ -248,6 +248,13 @@ impl Runtime {
                 return;
             }
         };
+        self.wake_group_joiners(finished_group);
+    }
+
+    /// Wake every PPU joined on the finished group `finished_group`
+    /// with the cause and status the group finished with.
+    pub(super) fn wake_group_joiners(&mut self, finished_group: u32) {
+        let recorded = self.lv2_host.spu_group_join_result(finished_group);
         let waiters: Vec<UnitId> = self.syscall_responses.pending_ids().collect();
         for waiter_id in waiters {
             let is_match = self
@@ -275,10 +282,13 @@ impl Runtime {
             } = pending
             else {
                 unreachable!(
-                    "resolve_join_wakes: peek matched ThreadGroupJoin but take_expected \
+                    "wake_group_joiners: peek matched ThreadGroupJoin but take_expected \
                      returned {pending:?} for {waiter_id:?}",
                 );
             };
+            // The group's record is the answer; the parked values stand
+            // in only where the host keeps no finished group.
+            let (cause, status) = recorded.unwrap_or((cause, status));
             // Both out-pointers came from the joiner's syscall
             // arguments, so they address the joiner's space. The join
             // itself completes regardless, but NULL out-pointers

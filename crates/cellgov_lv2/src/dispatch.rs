@@ -368,9 +368,11 @@ pub enum PendingResponse {
         cause_ptr: u32,
         /// Guest out-pointer receiving `status` (u32 BE).
         status_ptr: u32,
-        /// Filled in at wake time.
+        /// The group's cause when the joiner parks; the wake writes the
+        /// cause the group finishes with.
         cause: u32,
-        /// Filled in at wake time.
+        /// The group's status when the joiner parks; the wake writes
+        /// the status the group finishes with.
         status: u32,
     },
     /// On wake, write the exit value (u64 BE) to `status_out_ptr`

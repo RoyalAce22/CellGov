@@ -636,8 +636,9 @@ impl Lv2Host {
 
     /// `sys_spu_thread_group_join`: park the caller on a running group
     /// until every SPU in it finishes; a finished group answers at
-    /// once. The cause is always `GROUP_EXIT` with status 0, since
-    /// CellGov tracks no abnormal termination cause.
+    /// once. The cause and status are the ones the group finished
+    /// with: `ALL_THREADS_EXIT` and 0 when every thread exited, or
+    /// `GROUP_EXIT` and the status a `sys_spu_thread_group_exit` gave.
     ///
     /// # Errors
     ///
@@ -664,9 +665,6 @@ impl Lv2Host {
             }
         };
 
-        // TODO(spu): source cause/status from the group's recorded
-        // termination reason once abnormal causes are tracked, instead
-        // of hard-coding GROUP_EXIT / status 0 for both branches below.
         match group.state {
             GroupState::Created => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             GroupState::Running => Lv2Dispatch::Block {
@@ -676,8 +674,10 @@ impl Lv2Host {
                     code: 0,
                     cause_ptr,
                     status_ptr,
-                    cause: spu::group_join_cause::GROUP_EXIT,
-                    status: 0,
+                    // The wake writes the cause and status the group
+                    // finishes with; these hold until then.
+                    cause: group.join_cause,
+                    status: group.exit_status,
                 },
                 effects: vec![],
             },
@@ -694,7 +694,7 @@ impl Lv2Host {
                 }
                 let mut effects = vec![Effect::shared_write(
                     ByteRange::contiguous_u32(cause_ptr, 4),
-                    WritePayload::from_slice(&spu::group_join_cause::GROUP_EXIT.to_be_bytes()),
+                    WritePayload::from_slice(&group.join_cause.to_be_bytes()),
                     requester,
                     tick,
                 )];
@@ -706,7 +706,7 @@ impl Lv2Host {
                 }
                 effects.push(Effect::shared_write(
                     ByteRange::contiguous_u32(status_ptr, 4),
-                    WritePayload::from_slice(&0u32.to_be_bytes()),
+                    WritePayload::from_slice(&group.exit_status.to_be_bytes()),
                     requester,
                     tick,
                 ));

@@ -154,8 +154,13 @@ fn resolve_join_wakes_wakes_every_joiner_on_a_finished_group() {
             Some(code),
             "{waiter:?} must receive its per-pending code",
         );
-        assert_eq!(read_guest_u32_be(&rt, cause_ptr), 0xDEAD_BEEF);
-        assert_eq!(read_guest_u32_be(&rt, status_ptr), 0xCAFE_BABE);
+        // The group's recorded cause and status replace the parked
+        // placeholders.
+        assert_eq!(
+            read_guest_u32_be(&rt, cause_ptr),
+            cellgov_ps3_abi::lv2::spu::group_join_cause::ALL_THREADS_EXIT
+        );
+        assert_eq!(read_guest_u32_be(&rt, status_ptr), 0);
     }
 }
 
@@ -217,8 +222,11 @@ fn resolve_join_wakes_leaves_joiners_on_a_different_group_untouched() {
         rt.registry_mut().drain_syscall_return(waiter_match),
         Some(0xAA),
     );
-    assert_eq!(read_guest_u32_be(&rt, 0x100), 1);
-    assert_eq!(read_guest_u32_be(&rt, 0x108), 2);
+    assert_eq!(
+        read_guest_u32_be(&rt, 0x100),
+        cellgov_ps3_abi::lv2::spu::group_join_cause::ALL_THREADS_EXIT
+    );
+    assert_eq!(read_guest_u32_be(&rt, 0x108), 0);
 
     assert_eq!(
         rt.registry().effective_status(waiter_other),
@@ -330,7 +338,10 @@ fn a_group_join_wake_with_null_status_writes_cause_and_returns_efault() {
     );
     rt.resolve_join_wakes_for_test(spu);
 
-    assert_eq!(read_guest_u32_be(&rt, 0x100), 0xDEAD_BEEF);
+    assert_eq!(
+        read_guest_u32_be(&rt, 0x100),
+        cellgov_ps3_abi::lv2::spu::group_join_cause::ALL_THREADS_EXIT
+    );
     assert_eq!(
         rt.registry_mut().drain_syscall_return(waiter),
         Some(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into()),

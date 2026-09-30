@@ -61,4 +61,36 @@ impl Lv2Host {
     ) -> Result<Option<u32>, crate::thread_group::NotifySpuFinishedError> {
         self.state.groups.notify_spu_finished(unit_id)
     }
+
+    /// The group of an SPU thread that has not finished, or `None` for
+    /// a unit no thread group holds.
+    pub fn live_spu_group(&self, unit_id: cellgov_event::UnitId) -> Option<u32> {
+        self.state.groups.live_group_of(unit_id)
+    }
+
+    /// The SPU thread `unit_id` called `sys_spu_thread_exit` with
+    /// `status`. See [`crate::thread_group::ThreadGroupTable::thread_exit`].
+    pub fn spu_thread_exit(
+        &mut self,
+        unit_id: cellgov_event::UnitId,
+        status: u32,
+    ) -> Result<Option<u32>, crate::thread_group::NotifySpuFinishedError> {
+        self.state.groups.thread_exit(unit_id, status)
+    }
+
+    /// The SPU thread `unit_id` called `sys_spu_thread_group_exit` with
+    /// `status`. See [`crate::thread_group::ThreadGroupTable::group_exit`].
+    pub fn spu_group_exit(
+        &mut self,
+        unit_id: cellgov_event::UnitId,
+        status: u32,
+    ) -> Result<(u32, Vec<cellgov_event::UnitId>), crate::thread_group::NotifySpuFinishedError>
+    {
+        self.state.groups.group_exit(unit_id, status)
+    }
+
+    /// The `cause` and `status` a join of the finished group reads.
+    pub fn spu_group_join_result(&self, group_id: u32) -> Option<(u32, u32)> {
+        self.state.groups.join_result(group_id)
+    }
 }

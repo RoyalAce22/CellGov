@@ -308,7 +308,7 @@ fn thread_group_partial_wire_format_golden() {
         args: [0; 4],
         group_id: gid,
     });
-    assert_eq!(t.sync_partial(), 0x940e_d36c_bc77_085d_3baa_68d6_5925_27f9);
+    assert_eq!(t.sync_partial(), 0xbffd_4bf8_38e0_6cb0_52d5_1aaa_2cfd_9c3b);
 }
 
 /// The difference the counters, the lwmutex holds and the firmware

@@ -7,6 +7,7 @@ use crate::dispatch::{SpuInitState, SpuLoadImage};
 use crate::image::SpuImageHandle;
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{self, source, LaneEntryMut, LaneMap, LaneValue, ObjectLanes};
+use cellgov_ps3_abi::lv2::spu::group_join_cause;
 use std::collections::BTreeMap;
 
 /// Cap on slots per group; the `group_id * 256 + slot` thread-id
@@ -55,6 +56,13 @@ pub struct ThreadGroup {
     /// Drives the terminal transition to [`GroupState::Finished`]
     /// when it reaches 0.
     pub remaining_unfinished: u32,
+    /// The `cause` a join of the finished group reads.
+    pub join_cause: u32,
+    /// The `status` a join of the finished group reads.
+    pub exit_status: u32,
+    /// The status each thread gave `sys_spu_thread_exit`, by raw unit
+    /// id.
+    pub thread_exit_status: BTreeMap<u64, u32>,
 }
 
 impl LaneValue for ThreadGroup {
@@ -69,6 +77,11 @@ impl LaneValue for ThreadGroup {
         };
         lanes.lane(4, 0, state);
         lanes.lane(5, 0, self.slots.len() as u64);
+        lanes.lane(23, 0, u64::from(self.join_cause));
+        lanes.lane(24, 0, u64::from(self.exit_status));
+        for (&unit, &status) in &self.thread_exit_status {
+            lanes.lane(25, unit, u64::from(status));
+        }
         for (&index, slot) in &self.slots {
             let index = u64::from(index);
             lanes.lane(6, index, 1);
@@ -252,6 +265,9 @@ impl ThreadGroupTable {
             slots: BTreeMap::new(),
             state: GroupState::Created,
             remaining_unfinished: 0,
+            join_cause: group_join_cause::ALL_THREADS_EXIT,
+            exit_status: 0,
+            thread_exit_status: BTreeMap::new(),
         };
         self.groups.insert(id, group);
         Some(id)
@@ -417,6 +433,11 @@ impl ThreadGroupTable {
             .map(|&raw| UnitId::new(raw))
     }
 
+    /// The group of a registered SPU that has not finished.
+    pub fn live_group_of(&self, unit_id: UnitId) -> Option<u32> {
+        self.unit_to_group.get(unit_id).copied()
+    }
+
     /// Thread-id lookup filtered to [`GroupState::Running`].
     ///
     /// Mailbox writes and other state-sensitive paths must use this
@@ -480,6 +501,81 @@ impl ThreadGroupTable {
         } else {
             Ok(None)
         }
+    }
+
+    /// Record that the SPU `unit_id` called `sys_spu_thread_exit` with
+    /// `status`, then notify its finish as
+    /// [`Self::notify_spu_finished`] does.
+    ///
+    /// # Errors
+    /// See [`NotifySpuFinishedError`]; an error records nothing.
+    pub fn thread_exit(
+        &mut self,
+        unit_id: UnitId,
+        status: u32,
+    ) -> Result<Option<u32>, NotifySpuFinishedError> {
+        let group_id = self.unit_to_group.get(unit_id).copied();
+        let finished = self.notify_spu_finished(unit_id)?;
+        if let Some(mut group) = group_id.and_then(|gid| self.groups.get_mut(gid)) {
+            group.thread_exit_status.insert(unit_id.raw(), status);
+        }
+        Ok(finished)
+    }
+
+    /// End the group of the SPU `unit_id`, which called
+    /// `sys_spu_thread_group_exit` with `status`. Every thread of the
+    /// group finishes, and a join reads [`group_join_cause::GROUP_EXIT`]
+    /// with `status`. Returns the group id and the group's other units
+    /// that had not finished.
+    ///
+    /// # Errors
+    /// See [`NotifySpuFinishedError`]; an error changes nothing.
+    pub fn group_exit(
+        &mut self,
+        unit_id: UnitId,
+        status: u32,
+    ) -> Result<(u32, Vec<UnitId>), NotifySpuFinishedError> {
+        if let Some(&group_id) = self.finished_units.get(unit_id) {
+            return Err(NotifySpuFinishedError::AlreadyFinished { group_id });
+        }
+        let group_id = *self
+            .unit_to_group
+            .get(unit_id)
+            .ok_or(NotifySpuFinishedError::UnknownUnit)?;
+        // `destroy` scrubs a group's units with it, so a miss here
+        // answers as the unit being unknown.
+        let Some(mut group) = self.groups.get_mut(group_id) else {
+            return Err(NotifySpuFinishedError::UnknownUnit);
+        };
+        if group.state != GroupState::Running {
+            return Err(NotifySpuFinishedError::GroupNotRunning { state: group.state });
+        }
+        group.state = GroupState::Finished;
+        group.remaining_unfinished = 0;
+        group.join_cause = group_join_cause::GROUP_EXIT;
+        group.exit_status = status;
+        let members: Vec<UnitId> = self
+            .unit_to_group
+            .iter()
+            .filter(|(_, &gid)| gid == group_id)
+            .map(|(unit, _)| unit)
+            .collect();
+        for &unit in &members {
+            self.unit_to_group.remove(unit);
+            self.finished_units.insert(unit, group_id);
+        }
+        let others = members
+            .into_iter()
+            .filter(|&unit| unit != unit_id)
+            .collect();
+        Ok((group_id, others))
+    }
+
+    /// The `cause` and `status` a join of the finished group
+    /// `group_id` reads, or `None` for a group that is not finished.
+    pub fn join_result(&self, group_id: u32) -> Option<(u32, u32)> {
+        let group = self.groups.get(group_id)?;
+        (group.state == GroupState::Finished).then_some((group.join_cause, group.exit_status))
     }
 
     /// The table's partial of the sync-state sum: the groups, the three

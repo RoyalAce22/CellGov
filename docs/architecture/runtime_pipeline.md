@@ -52,8 +52,11 @@ nine-step deterministic loop:
 7. Advance the commit epoch, then fire due DMA completions (ready
    tick reached) and due timer wakes (guest-tick deadline reached;
    a parked sleep wakes with CELL_OK, a timed sync wait expires
-   with CELL_ETIMEDOUT through `Lv2Host::expire_wait`); resolve
-   join wakes if the unit finished; run the RSX FIFO advance pass,
+   with CELL_ETIMEDOUT through `Lv2Host::expire_wait`); settle a
+   finished unit: an SPU thread's stop is read as an LV2 request (an
+   exit resolves join wakes, a yield resumes the thread, anything else
+   faults it as a thread-group error), and any other finish resolves
+   join wakes; run the RSX FIFO advance pass,
    whose emitted effects queue for the next batch that can commit
    them, under the atomic-batch contract. That is the next space-0
    batch which does not fault: those effects belong to no unit's
@@ -87,7 +90,7 @@ flowchart TD
   val -->|ok| drain["5. drain staging atomically, apply effects in emission order"]
   drain --> sc{"yield reason Syscall?"}
   sc -->|yes| lv2["6. Lv2Host dispatch"] --> epoch
-  sc -->|no| epoch["7. advance epoch; fire due DMA completions and timer wakes; join wakes; RSX advance"]
+  sc -->|no| epoch["7. advance epoch; fire due DMA completions and timer wakes; settle finished unit; RSX advance"]
   epoch --> rec["8. emit commit records, notify scheduler"] --> sel
 ```
 

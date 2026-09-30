@@ -76,6 +76,9 @@ fn drive(
                     }
                     StepVerdict::PcReached(addr) => return Ok(BootOutcome::PcReached(addr)),
                 }
+                if rt.take_spu_thread_failure().is_some() {
+                    return Ok(BootOutcome::Fault);
+                }
             }
             Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
                 return Ok(BootOutcome::ProcessExit);
