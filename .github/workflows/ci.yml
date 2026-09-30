@@ -188,12 +188,26 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' && matrix.name == 'stable' }}
 
       - name: repository tests
+        id: tests
         run: bash .github/ci.sh test
 
-      # A fuzz finding's artifact names its exact replay; the log prints
-      # the same line, and the file is what a reader replays from.
+      # Builds whose result does not depend on the platform or the
+      # toolchain run once, on one leg.
+      - name: repository tests (Linux-only builds)
+        if: matrix.os == 'ubuntu-latest' && matrix.name == 'stable'
+        run: bash .github/ci.sh test-linux
+
+      # A red test step may be the fuzz smoke set. Its finding artifacts
+      # name their exact replay, and the test's scratch copy is gone, so
+      # the deterministic set runs again to store them for the upload.
+      # It explains a red leg; it never decides one.
+      - name: Store fuzz smoke artifacts
+        if: failure() && steps.tests.outcome == 'failure'
+        continue-on-error: true
+        run: bash .github/ci.sh smoke-artifacts
+
       - name: Upload fuzz smoke artifacts
-        if: failure()
+        if: failure() && steps.tests.outcome == 'failure'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-smoke-${{ matrix.name }}-${{ matrix.os }}

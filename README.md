@@ -62,9 +62,9 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-it
 ```
 
 CI runs those on both platforms and additionally `cargo test
---release`, the `cellgov_install` tests with `--features decrypt`,
-`cellgov_compare` with `--no-default-features`, and the bounded fuzz
-smoke set (`cellgov dev fuzz smoke`) in both build profiles. A weekly
+--release --features cellgov_cli/decrypt`. Both test runs include the
+bounded fuzz smoke set (`cellgov dev fuzz smoke`). On Linux, CI also
+tests `cellgov_compare` with `--no-default-features`. A weekly
 workflow runs the `cargo fuzz` targets over the ELF, PRX and SPU image
 parsers from [fuzz/](fuzz/README.md) on a nightly toolchain.
 

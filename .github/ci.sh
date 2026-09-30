@@ -66,28 +66,52 @@ lint() {
     timed doc-external-data env RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --document-private-items --locked --features "$external_data_features"
 }
 
+# Every test group runs cargo under a feature and package selection of its
+# own, and each distinct selection recompiles the crates whose features
+# change. So the groups the workflow runs on both platforms hold three
+# compile passes, and the rest run where they cost least:
+#
+#   test        both platforms: the external-data check, the debug
+#               workspace tests (the decrypt-off build the README
+#               promises), and the release workspace tests with
+#               `cellgov_cli/decrypt` (the key-consuming paths, and every
+#               `debug_assert!`-free path the release build compiles)
+#   test-linux  the Linux stable leg: builds whose result does not depend
+#               on the platform
+#   local       the pre-push gate only: the decrypt-off release tests and
+#               the decrypt-on debug tests of the two crates that declare
+#               the feature, so every pairing of profile and `decrypt`
+#               still runs before a push
+#
+# The bounded fuzz smoke set runs inside the workspace tests, in both
+# profiles (`cli::fuzz::smoke_tests`), against the tracked regressions.
 test_suite() {
     timed check-external-data cargo check --workspace --all-targets --locked --features "$external_data_features"
     timed test-debug cargo test --workspace --locked
+    timed test-release-decrypt cargo test --workspace --release --locked --features cellgov_cli/decrypt
+}
+
+test_linux() {
+    timed test-compare-no-default cargo test -p cellgov_compare --locked --no-default-features
+    timed bench-build cargo bench --workspace --no-run --benches --locked
+}
+
+test_local() {
     timed test-release cargo test --workspace --release --locked
-    # The bounded fuzz smoke set, in both profiles: a debug invariant a raw
-    # word trips is a finding only in the debug build. Every finding is
-    # held to a promoted regression; an unpromoted one fails the build with
-    # its artifact and exact replay printed.
-    #
-    # The artifacts directory starts empty. CI restores `target` from its
-    # cache, and a stored artifact refuses a later finding at the same path
-    # whose evidence differs, which would fail the set for a stale file
-    # rather than for the run.
+    timed test-decrypt-debug cargo test -p cellgov_cli -p cellgov_install --locked --features cellgov_cli/decrypt
+}
+
+# The smoke set's finding artifacts, written where the workflow uploads
+# them after a red test step. The set is deterministic, so this run
+# stores what the failing test found; the test's scratch directory is
+# gone by then. The directory starts empty, because a stored artifact
+# refuses a later finding at the same path whose evidence differs.
+smoke_artifacts() {
     rm -rf target/fuzz-smoke
     timed fuzz-smoke-debug cargo run -p cellgov_cli --locked -- dev fuzz smoke \
         --artifacts-dir target/fuzz-smoke/debug --regressions crates/cellgov_fuzz/regressions
     timed fuzz-smoke-release cargo run -p cellgov_cli --locked --release -- dev fuzz smoke \
         --artifacts-dir target/fuzz-smoke/release --regressions crates/cellgov_fuzz/regressions
-    timed test-decrypt-debug cargo test -p cellgov_cli -p cellgov_install --locked --features cellgov_cli/decrypt
-    timed test-decrypt-release cargo test -p cellgov_cli -p cellgov_install --release --locked --features cellgov_cli/decrypt
-    timed test-compare-no-default cargo test -p cellgov_compare --locked --no-default-features
-    timed bench-build cargo bench --workspace --no-run --benches --locked
 }
 
 deny() {
@@ -97,14 +121,20 @@ deny() {
 case "${1:-full}" in
     lint) run_group lint lint ;;
     test) run_group test test_suite ;;
+    test-linux) run_group test-linux test_linux ;;
+    local) run_group local test_local ;;
+    smoke-artifacts) run_group smoke-artifacts smoke_artifacts ;;
     deny) run_group deny deny ;;
+    # The pre-push gate: every group the workflow runs, plus `local`.
     full)
         run_group lint lint
         run_group deny deny
         run_group test test_suite
+        run_group test-linux test_linux
+        run_group local test_local
         ;;
     *)
-        echo "usage: $0 {lint|test|deny|full}" >&2
+        echo "usage: $0 {lint|test|test-linux|local|smoke-artifacts|deny|full}" >&2
         exit 2
         ;;
 esac
