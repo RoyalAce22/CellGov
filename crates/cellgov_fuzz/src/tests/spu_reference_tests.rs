@@ -36,9 +36,9 @@ const ROTATED_12: &str = "0c0d0e0f000102030405060708090a0b";
 const STOP_WORD: u32 = 0;
 /// [SPU-ISA p:52 s:4. Constant-Formation Instructions] il RI16-form: opcode 0x081, I16 = 1, RT = 3.
 const IL_R3_1: u32 = 0x4080_0083;
-/// [SPU-ISA p:249 s:11. Channel Instructions] rchcnt RR-form: opcode 0x00F, CA = 1, RT = 3.
-/// Channel 1, SPU_WrEventMask, is implemented but the model does not answer its count, so it faults.
-const RCHCNT_R3_CH1: u32 = 0x01e0_0083;
+/// [SPU-ISA p:249 s:11. Channel Instructions] rchcnt RR-form: opcode 0x00F, CA = 7, RT = 3.
+/// The model does not answer the count of channel 7, SPU_WrDec, so the instruction faults.
+const RCHCNT_R3_CH7: u32 = 0x01e0_0383;
 
 type Mutation = fn(&mut SpuReferenceExpected, &mut SpuObservableSnapshot, &mut SpuStepOutcome);
 
@@ -1195,7 +1195,7 @@ fn replay_stops_at_a_stop_before_later_words_execute() {
 #[test]
 fn replay_restores_the_loaded_state_after_a_fault() {
     let mut altered = artifact();
-    altered.words = vec![IL_R3_1, RCHCNT_R3_CH1];
+    altered.words = vec![IL_R3_1, RCHCNT_R3_CH7];
     altered.expected.regs_hex = value(BTreeMap::new());
     altered.expected.pc = value(0);
     altered.expected.outcome = value(SpuReferenceOutcome::Fault);

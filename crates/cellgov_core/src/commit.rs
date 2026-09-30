@@ -194,6 +194,9 @@ pub enum BlockReason {
     /// SPU `MFC_RD_ATOMIC_STAT` found no status; only an immediate atomic
     /// command of the unit itself gives it one, so the park does not end.
     AtomicStatusEmpty,
+    /// SPU `SPU_RD_EVENT_STAT` found no enabled event; runtime parks the
+    /// unit until an event source fires.
+    EventWait,
 }
 
 /// Mutable references to every subsystem the commit pipeline touches.

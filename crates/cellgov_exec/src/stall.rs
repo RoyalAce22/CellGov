@@ -38,6 +38,12 @@ pub enum StallWake {
     ///
     /// [CBEA p:143 s:9.10] a second write of MFC_WrMSSyncReq stalls until the transfers the first write tracks complete.
     MultisourceSync,
+    /// An event the unit's mask enables occurs. Every event source's
+    /// producer ends this park, and a unit whose event is still masked
+    /// parks again.
+    ///
+    /// [CBEA p:147 s:9.11.1] a read of SPU_RdEventStat with count 0 stalls, a wait on event.
+    Event,
 }
 
 impl StallWake {
@@ -46,7 +52,7 @@ impl StallWake {
     pub const fn ends_on_dma_completion(self) -> bool {
         matches!(
             self,
-            Self::DmaCompletion | Self::CommandQueueSlot | Self::MultisourceSync
+            Self::DmaCompletion | Self::CommandQueueSlot | Self::MultisourceSync | Self::Event
         )
     }
 }

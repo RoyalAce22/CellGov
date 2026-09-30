@@ -129,6 +129,26 @@ pub(super) fn execute_wrch(
             state.channels.out_mbox = Some(val);
             SpuStepOutcome::Continue
         }
+        // [CBEA p:151 s:9.11.2] the mask selects the pending events SPU_RdEventStat reports; enabling a pending event updates the channel.
+        // [CBEA p:153 s:9.11.3] SPU_RdEventMask returns the last data written, so the model keeps it whole.
+        spu::SPU_WR_EVENT_MASK => {
+            let c = &mut state.channels;
+            c.event_mask = val;
+            if c.pending_events & val != 0 {
+                c.event_count = true;
+            }
+            SpuStepOutcome::Continue
+        }
+        // [CBEA p:155 s:9.11.4] a 1 bit resets that pending event, enabled or not.
+        // [CBEA p:147 s:9.11.1] the count is set to 1 when enabled events are pending after the write.
+        spu::SPU_WR_EVENT_ACK => {
+            let c = &mut state.channels;
+            c.pending_events &= !val;
+            if c.pending_events & c.event_mask != 0 {
+                c.event_count = true;
+            }
+            SpuStepOutcome::Continue
+        }
         // [CBEA p:143 s:9.10] a write starts tracking the transfers outstanding to the MFC, and a second write stalls until those complete; the data written is ignored.
         // [CBEA p:104 s:8.8] the tracked transfers are those to or from the associated MFC received before the request.
         // A command the unit issues ends its step, so the queue the step
@@ -138,6 +158,10 @@ pub(super) fn execute_wrch(
                 return stall();
             }
             state.channels.mssync_tracking = state.channels.mssync_horizon;
+            // [CBEA p:148 s:9.11.1] Ms is triggered at once when no transfer is pending at the write.
+            if state.channels.mssync_tracking.is_none() {
+                state.raise_events(spu::event::MS);
+            }
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:443 s:17.1.4] a write to a reserved channel has no effect and raises no interrupt.
@@ -195,6 +219,22 @@ pub(super) fn execute_rdch(
         // The read takes the oldest message and the commit removes it
         // from the mailbox; the step then yields so the next step sees
         // the mailbox without it.
+        // [CBEA p:147 s:9.11.1] a read with count 0 stalls; a read with count 1 returns the enabled pending events and sets the count to 0.
+        spu::SPU_RD_EVENT_STAT => {
+            if !state.channels.event_count {
+                return stall();
+            }
+            let c = &mut state.channels;
+            c.event_count = false;
+            let status = c.pending_events & c.event_mask;
+            state.set_reg_channel_word(rt, status);
+            SpuStepOutcome::Continue
+        }
+        // [CBEA p:153 s:9.11.3] a read returns the last data written to SPU_WrEventMask.
+        spu::SPU_RD_EVENT_MASK => {
+            state.set_reg_channel_word(rt, state.channels.event_mask);
+            SpuStepOutcome::Continue
+        }
         spu::SPU_RD_IN_MBOX => {
             if state.channels.in_mbox.is_empty() {
                 return stall();
@@ -301,8 +341,9 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
             .unwrap_or(u32::MAX)
             .min(spu::SPU_IN_MBOX_DEPTH),
         // [CBEA p:147 s:9.11.1] SPU_RdEventStat counts 1 once an enabled event is pending.
-        // The model raises no SPU event.
-        spu::SPU_RD_EVENT_STAT => 0,
+        spu::SPU_RD_EVENT_STAT => u32::from(channels.event_count),
+        // [CBEA p:151 s:9.11.2], [CBEA p:153 s:9.11.3], [CBEA p:155 s:9.11.4] the mask and acknowledgment channels always count 1.
+        spu::SPU_WR_EVENT_MASK | spu::SPU_RD_EVENT_MASK | spu::SPU_WR_EVENT_ACK => 1,
         // [CBEA p:137 s:9.6.1], [CBEA p:138 s:9.6.2] a signal-notification channel counts 1 while unread signals are pending.
         spu::SPU_RD_SIG_NOTIFY_1 => u32::from(state.signals[0].pending),
         spu::SPU_RD_SIG_NOTIFY_2 => u32::from(state.signals[1].pending),

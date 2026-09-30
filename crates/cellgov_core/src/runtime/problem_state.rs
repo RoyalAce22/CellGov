@@ -189,15 +189,18 @@ impl Runtime {
     }
 
     /// Whether `wake` ends the park of `unit`: the unit is blocked and
-    /// its channel stall names `wake`. `unstalled` answers for a blocked
-    /// unit that names no channel stall.
+    /// its channel stall names `wake`, or waits on an event, which every
+    /// producer can raise. `unstalled` answers for a blocked unit that
+    /// names no channel stall.
     pub(super) fn stall_ends(&self, unit: UnitId, wake: StallWake, unstalled: bool) -> bool {
         self.registry.effective_status(unit) == Some(UnitStatus::Blocked)
             && self
                 .registry
                 .get(unit)
                 .and_then(|unit| unit.channel_stall())
-                .map_or(unstalled, |stall| stall.wake == wake)
+                .map_or(unstalled, |stall| {
+                    stall.wake == wake || stall.wake == StallWake::Event
+                })
     }
 
     fn refuse_retired(&self, unit: UnitId) -> Result<(), ProblemStateError> {

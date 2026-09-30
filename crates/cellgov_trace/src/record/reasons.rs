@@ -81,6 +81,8 @@ pub enum TracedBlockReason {
     /// SPU blocked on `MFC_RD_ATOMIC_STAT` with no immediate atomic
     /// command completed.
     AtomicStatusEmpty = 5,
+    /// SPU blocked on `SPU_RD_EVENT_STAT` with no enabled event pending.
+    EventWait = 6,
 }
 
 /// Why a unit was woken, as the trace records it.

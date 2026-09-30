@@ -150,6 +150,12 @@ impl SpuObservableSnapshot {
             // completes as it is made.
             mssync_tracking: _,
             mssync_horizon: _,
+            // Instruction comparison draws no event channel, and no
+            // event source changes within one instruction it runs.
+            pending_events: _,
+            event_mask: _,
+            event_count: _,
+            event_levels: _,
         } = channels;
         Self {
             regs: *regs,
@@ -397,6 +403,43 @@ impl SpuState {
     pub fn advance_pc(&mut self) {
         self.pc = self.insn_addr(self.pc.wrapping_add(4));
     }
+
+    /// The event sources whose channel count is nonzero now, one event
+    /// bit each.
+    ///
+    /// [CBEA p:149 s:9.11.1] Tg follows the MFC_RdTagStat count.
+    /// [CBEA p:150 s:9.11.1] Mb, S1, S2 and Ms follow the SPU_RdInMbox, signal-notification and MFC_WrMSSyncReq counts.
+    fn event_source_levels(&self) -> u32 {
+        use cellgov_ps3_abi::hw::spu::event;
+        let c = &self.channels;
+        let level = |on: bool, bit: u32| if on { bit } else { 0 };
+        level(c.tag_status_read.is_some(), event::TG)
+            | level(!c.in_mbox.is_empty(), event::MB)
+            | level(self.signals[0].pending, event::S1)
+            | level(self.signals[1].pending, event::S2)
+            | level(c.mssync_tracking.is_none(), event::MS)
+    }
+
+    /// Record the events whose source count changed from 0 to nonzero
+    /// since the unit last looked.
+    pub fn update_events(&mut self) {
+        let levels = self.event_source_levels();
+        let rising = levels & !self.channels.event_levels;
+        self.channels.event_levels = levels;
+        self.raise_events(rising);
+    }
+
+    /// Set `events` in the pending-event register. An event the mask
+    /// enables sets the `SPU_RdEventStat` count.
+    ///
+    /// [CBEA p:147 s:9.11.1] the count is set to 1 when an event occurs and its mask bit is 1.
+    pub fn raise_events(&mut self, events: u32) {
+        let c = &mut self.channels;
+        c.pending_events |= events;
+        if events & c.event_mask != 0 {
+            c.event_count = true;
+        }
+    }
 }
 
 impl Default for SpuState {
@@ -512,6 +555,25 @@ pub struct ChannelState {
     /// outstanding at the step's start, and `None` when none is, so the
     /// request completes at once.
     pub mssync_horizon: Option<u64>,
+    /// The pending-event register: events that occurred and are not
+    /// acknowledged, masked or not.
+    ///
+    /// [CBEA p:146 s:9.11] an edge-triggered event sets its bit in the SPU Pending Event Register, and a write of 1 to that bit of SPU_WrEventAck resets it.
+    pub pending_events: u32,
+    /// The events `SPU_RdEventStat` reports.
+    ///
+    /// [CBEA p:146 s:9.11] a read of SPU_RdEventStat returns the pending-event register ANDed with the SPU_WrEventMask value.
+    pub event_mask: u32,
+    /// The `SPU_RdEventStat` count, which saturates at 1.
+    ///
+    /// [CBEA p:147 s:9.11.1] the count is 1 after an enabled event occurs, after a mask write enables a pending event, or after an acknowledgment leaves enabled events pending; a read sets it to 0.
+    pub event_count: bool,
+    /// The event sources whose channel count was nonzero when the unit
+    /// last looked, one event bit each. A bit set now and clear here is
+    /// that event's edge.
+    ///
+    /// [CBEA p:149 s:9.11.1] hardware determines events by detecting the channel counts that change from 0 to a nonzero value.
+    pub event_levels: u32,
 }
 
 /// Where a list command resumes after its stall.
@@ -575,6 +637,12 @@ impl ChannelState {
             // x'9' count 1.
             mssync_tracking: None,
             mssync_horizon: None,
+            pending_events: 0,
+            event_mask: 0,
+            // x'0' count 0.
+            event_count: false,
+            // The one source whose count starts nonzero.
+            event_levels: cellgov_ps3_abi::hw::spu::event::MS,
         }
     }
 }

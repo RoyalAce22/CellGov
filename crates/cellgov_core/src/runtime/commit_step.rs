@@ -275,6 +275,7 @@ impl Runtime {
                     cellgov_exec::StallWake::AtomicCommandCompletion => {
                         BlockReason::AtomicStatusEmpty
                     }
+                    cellgov_exec::StallWake::Event => BlockReason::EventWait,
                 },
                 None => {
                     self.lv2_host.log_invariant_break(

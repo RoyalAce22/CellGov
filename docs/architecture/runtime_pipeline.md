@@ -216,7 +216,10 @@ one of:
 - a read of its outbound mailbox;
 - a write to the signal-notification register it reads;
 - for an atomic-status read with no status, an immediate atomic
-  command of its own, which cannot come while it stalls.
+  command of its own, which cannot come while it stalls;
+- for an event-status read with no enabled event, any of the events'
+  producers: a mailbox delivery, a signal write, or a DMA completion.
+  A unit whose event is still masked parks again.
 
 ### Batch atomicity
 

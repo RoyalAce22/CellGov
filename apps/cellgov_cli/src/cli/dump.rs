@@ -115,6 +115,7 @@ fn dump_trace(result: &ScenarioResult) -> Result<(), CommandError> {
                     TracedBlockReason::OutboundMailboxFull => "OutboundMailboxFull",
                     TracedBlockReason::SignalEmpty => "SignalEmpty",
                     TracedBlockReason::AtomicStatusEmpty => "AtomicStatusEmpty",
+                    TracedBlockReason::EventWait => "EventWait",
                 };
                 println!(
                     "{i:4}  UnitBlocked        unit={} reason={}",

@@ -190,6 +190,58 @@ pub const MFC_WR_MSSYNC_REQ: u8 = 9;
 ///
 /// [CBEA p:299 s:Appendix B, Table B-1] SPU_RdEventMask, channel x'B', read.
 pub const SPU_RD_EVENT_MASK: u8 = 11;
+
+/// The SPU event bits, as `SPU_RdEventStat`, `SPU_WrEventMask`,
+/// `SPU_WrEventAck` and the pending-event register lay them out. The
+/// architecture numbers bits from 0 at the most significant end.
+///
+/// [CBEA p:147 s:9.11.1] the event bits occupy bits 19 to 31 of the channel; bits 0 to 18 are reserved.
+pub mod event {
+    /// The mask of architected bit `n`, counted from 0 at the most
+    /// significant end.
+    const fn bit(n: u32) -> u32 {
+        1 << (31 - n)
+    }
+
+    /// Multisource synchronization, bit 19.
+    ///
+    /// [CBEA p:148 s:9.11.1] the multisource synchronization request completing triggers Ms.
+    pub const MS: u32 = bit(19);
+    /// Privileged attention, bit 20.
+    pub const A: u32 = bit(20);
+    /// Lock-line reservation lost, bit 21.
+    pub const LR: u32 = bit(21);
+    /// Signal notification 1 available, bit 22.
+    ///
+    /// [CBEA p:148 s:9.11.1] a processor or device writing SPU Signal Notification 1 triggers S1.
+    pub const S1: u32 = bit(22);
+    /// Signal notification 2 available, bit 23.
+    pub const S2: u32 = bit(23);
+    /// Outbound mailbox available, bit 24.
+    pub const LE: u32 = bit(24);
+    /// Outbound interrupt mailbox available, bit 25.
+    pub const ME: u32 = bit(25);
+    /// Decrementer, bit 26.
+    pub const TM: u32 = bit(26);
+    /// Inbound mailbox available, bit 27.
+    ///
+    /// [CBEA p:150 s:9.11.1] Mb is set when the SPU_RdInMbox count changes from 0 to nonzero.
+    pub const MB: u32 = bit(27);
+    /// Command queue available, bit 28.
+    ///
+    /// [CBEA p:149 s:9.11.1] the MFC SPU command queue going from full to not full triggers Qv.
+    pub const QV: u32 = bit(28);
+    /// List command stall-and-notify, bit 30.
+    ///
+    /// [CBEA p:149 s:9.11.1] bit 29 is reserved and Sn is bit 30.
+    pub const SN: u32 = bit(30);
+    /// Tag-group status update, bit 31.
+    ///
+    /// [CBEA p:149 s:9.11.1] Tg is set when the MFC_RdTagStat count changes from 0 to nonzero.
+    pub const TG: u32 = bit(31);
+    /// Every defined event bit.
+    pub const ALL: u32 = MS | A | LR | S1 | S2 | LE | ME | TM | MB | QV | SN | TG;
+}
 /// MFC read tag-group query mask.
 ///
 /// [CBEA p:300 s:Appendix B, Table B-1] MFC_RdTagMask, channel x'C', read.

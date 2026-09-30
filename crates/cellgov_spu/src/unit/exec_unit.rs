@@ -85,6 +85,8 @@ impl ExecutionUnit for SpuExecutionUnit {
             channels.mssync_tracking = None;
         }
         channels.mssync_horizon = oldest.map(|_| ctx.dma_next_sequence());
+        // Every source count the step entry refreshed can have risen.
+        self.state.update_events();
 
         // Mirror cross-unit reservation invalidation. The context view is
         // frozen for the step, so a single entry-time check suffices.
@@ -140,7 +142,17 @@ impl ExecutionUnit for SpuExecutionUnit {
                 }
             };
 
-            match exec::execute(&insn, &mut self.state, self.id) {
+            let outcome = exec::execute(&insn, &mut self.state, self.id);
+            // A channel access is the one instruction that moves an event
+            // source's count within a step.
+            if matches!(
+                insn,
+                crate::instruction::SpuInstruction::Rdch { .. }
+                    | crate::instruction::SpuInstruction::Wrch { .. }
+            ) {
+                self.state.update_events();
+            }
+            match outcome {
                 SpuStepOutcome::Continue => {
                     if ctx.trace_per_step() {
                         if let Some(kind) = barrier_kind(&insn) {
@@ -471,6 +483,7 @@ fn channel_stall(insn: &crate::instruction::SpuInstruction) -> Option<ChannelSta
         spu::SPU_RD_SIG_NOTIFY_2 => StallWake::SignalWrite(SignalNotifier::Two),
         spu::MFC_RD_ATOMIC_STAT => StallWake::AtomicCommandCompletion,
         spu::MFC_WR_MSSYNC_REQ => StallWake::MultisourceSync,
+        spu::SPU_RD_EVENT_STAT => StallWake::Event,
         _ => return None,
     };
     Some(ChannelStall { channel, wake })
