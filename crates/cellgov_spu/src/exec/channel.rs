@@ -409,7 +409,10 @@ fn issue_transfer(
             }
         }
     }
-    let request = request.with_tag_id(tag).with_ordering(ordering);
+    let request = request
+        .with_tag_id(tag)
+        .with_ordering(ordering)
+        .with_command_word(cmd);
     state.channels.cmd_queue_free -= 1;
     SpuStepOutcome::Yield {
         effects: vec![Effect::DmaEnqueue {
@@ -472,7 +475,8 @@ fn issue_ordering_command(
     let request = DmaRequest::new(DmaDirection::Put, none, none, unit_id)
         .expect("matching sizes")
         .with_tag_id(tag)
-        .with_ordering(ordering);
+        .with_ordering(ordering)
+        .with_command_word(cmd);
     state.channels.cmd_queue_free -= 1;
     SpuStepOutcome::Yield {
         effects: vec![Effect::DmaEnqueue {
@@ -520,7 +524,8 @@ fn issue_queued_lock_line(
     }
     let request = local_store_transfer(DmaDirection::Put, local, main, unit_id)
         .with_tag_id(tag)
-        .with_ordering(MfcOrdering::Fence);
+        .with_ordering(MfcOrdering::Fence)
+        .with_command_word(cmd);
     state.channels.cmd_queue_free -= 1;
     SpuStepOutcome::Yield {
         effects: vec![Effect::DmaEnqueue {
@@ -579,7 +584,8 @@ fn issue_storage_control(
     let request = DmaRequest::new(DmaDirection::Put, none, blocks, unit_id)
         .expect("matching sizes")
         .with_tag_id(tag)
-        .with_ordering(MfcOrdering::TagBarrier);
+        .with_ordering(MfcOrdering::TagBarrier)
+        .with_command_word(cmd);
     state.channels.cmd_queue_free -= 1;
     SpuStepOutcome::Yield {
         effects: vec![Effect::DmaEnqueue {
@@ -638,7 +644,7 @@ fn issue_list(
     };
     state.channels.cmd_queue_free -= 1;
     let effects = if list.remaining == 0 {
-        vec![ordered_empty_command(tag, ordering, unit_id)]
+        vec![ordered_empty_command(cmd, tag, ordering, unit_id)]
     } else {
         queue_list_segment(cmd, &mut list, state, unit_id)
     };
@@ -651,14 +657,20 @@ fn issue_list(
     }
 }
 
-/// A queued command of no length under `tag`: it holds a slot and its
-/// tag group until the queue completes it.
-fn ordered_empty_command(tag: MfcTagId, ordering: MfcOrdering, unit_id: UnitId) -> Effect {
+/// A queued command `cmd` of no length under `tag`: it holds a slot and
+/// its tag group until the queue completes it.
+fn ordered_empty_command(
+    cmd: u32,
+    tag: MfcTagId,
+    ordering: MfcOrdering,
+    unit_id: UnitId,
+) -> Effect {
     let none = ByteRange::new(GuestAddr::new(0), 0).expect("an empty range");
     let request = DmaRequest::new(DmaDirection::Put, none, none, unit_id)
         .expect("matching sizes")
         .with_tag_id(tag)
-        .with_ordering(ordering);
+        .with_ordering(ordering)
+        .with_command_word(cmd);
     Effect::DmaEnqueue {
         request,
         payload: Some(Vec::new()),
@@ -756,7 +768,8 @@ fn queue_list_segment(
         }
         let mut request = local_store_transfer(list.direction, local, main, unit_id)
             .with_tag_id(list.tag)
-            .with_ordering(list.ordering);
+            .with_ordering(list.ordering)
+            .with_command_word(list.word);
         if stall {
             request = request.with_stall_notify().without_slot();
         } else if list.remaining > 0 {

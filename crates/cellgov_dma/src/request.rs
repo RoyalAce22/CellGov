@@ -55,6 +55,7 @@ pub struct DmaRequest {
     stall_notify: bool,
     holds_slot: bool,
     local_store_source: bool,
+    command_word: Option<u32>,
 }
 
 impl DmaRequest {
@@ -84,6 +85,7 @@ impl DmaRequest {
             stall_notify: false,
             holds_slot: true,
             local_store_source: false,
+            command_word: None,
         })
     }
 
@@ -165,6 +167,23 @@ impl DmaRequest {
             DmaDirection::Put if self.local_store_source => Some(self.source),
             DmaDirection::Put => None,
         }
+    }
+
+    /// Attach the MFC command word the program wrote to issue the
+    /// transfer, which a refusal of the transfer reports.
+    ///
+    /// [CBEA p:113 s:9.1.1] the MFC_Cmd word names the operation the command performs.
+    #[inline]
+    pub const fn with_command_word(mut self, word: u32) -> Self {
+        self.command_word = Some(word);
+        self
+    }
+
+    /// The MFC command word the program issued; `None` for a transfer no
+    /// program command issued.
+    #[inline]
+    pub const fn command_word(self) -> Option<u32> {
+        self.command_word
     }
 
     /// MFC tag-id the SPU issued under; `None` for PPU/host-initiated DMA.

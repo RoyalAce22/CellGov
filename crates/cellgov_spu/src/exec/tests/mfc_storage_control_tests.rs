@@ -61,16 +61,19 @@ fn queued(cmd: u32, ea: u32, size: u32) -> (Request, Vec<u8>) {
         [Effect::DmaEnqueue {
             request,
             payload: Some(payload),
-        }] if request.source().start().raw() == 0 => (
+        }] if request.source().start().raw() == 0 => {
+            assert_eq!(request.command_word(), Some(cmd), "0x{cmd:02x}");
             (
-                request.direction(),
-                request.destination().start().raw(),
-                request.length(),
-                request.tag_id().map(|t| t.raw()),
-                request.ordering(),
-            ),
-            payload.clone(),
-        ),
+                (
+                    request.direction(),
+                    request.destination().start().raw(),
+                    request.length(),
+                    request.tag_id().map(|t| t.raw()),
+                    request.ordering(),
+                ),
+                payload.clone(),
+            )
+        }
         other => panic!("0x{cmd:02x}: expected one enqueue, got {other:?}"),
     }
 }

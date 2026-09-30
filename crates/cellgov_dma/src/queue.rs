@@ -65,6 +65,7 @@ struct QueueEntry {
 /// 11. 1 for a list element with the stall-and-notify flag
 /// 12. 1 for a list element that holds no command-queue slot
 /// 13. 1 for a put whose source is its issuer's local store
+/// 14. the MFC command word, when a program command issued the transfer
 impl LaneValue for QueueEntry {
     fn lanes(&self, lanes: &mut ObjectLanes) {
         let c = self.completion;
@@ -92,6 +93,9 @@ impl LaneValue for QueueEntry {
         }
         if c.request().local_store_source() {
             lanes.lane(13, 0, 1);
+        }
+        if let Some(word) = c.request().command_word() {
+            lanes.lane(14, 0, u64::from(word));
         }
     }
 }
@@ -161,9 +165,11 @@ impl LaneValue for InvalidEntry {
 
 /// The refused command that a queued transfer stands for, with `error`.
 ///
+/// The word is the command word the program issued. A transfer that no
+/// program command issued reports the plain put or get of its direction.
 /// The queue keeps a transfer as ranges, so this function rebuilds the
-/// opcode and the two addresses from them. A put whose source is main
-/// storage names no local-store address, so its `lsa` is 0.
+/// two addresses from them. A put whose source is main storage names no
+/// local-store address, so its `lsa` is 0.
 fn refused_transfer(
     c: &DmaCompletion,
     payloaded: bool,
@@ -181,7 +187,7 @@ fn refused_transfer(
     };
     let ea = main.start().raw();
     InvalidMfcCommand {
-        word,
+        word: c.request().command_word().unwrap_or(word),
         params: crate::command::MfcParameters {
             // A local-store range starts below 2^32.
             lsa: ls.map_or(0, |r| r.start().raw() as u32),

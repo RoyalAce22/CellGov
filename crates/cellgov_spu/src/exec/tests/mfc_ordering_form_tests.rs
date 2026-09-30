@@ -216,9 +216,47 @@ fn each_result_hint_form_queues_what_its_plain_form_queues() {
         let (plain_reason, plain_effects, plain_barriers) = issue_traced(plain, 16, TAG, true);
         assert_eq!(hint_reason, YieldReason::DmaSubmitted, "0x{hint:02x}");
         assert_eq!(hint_reason, plain_reason, "0x{hint:02x}");
-        assert_eq!(hint_effects, plain_effects, "0x{hint:02x}");
+        for (effects, word) in [(&hint_effects, hint), (&plain_effects, plain)] {
+            let words = command_words(effects);
+            assert!(!words.is_empty(), "0x{word:02x} queues a transfer");
+            assert!(
+                words.iter().all(|w| *w == Some(word)),
+                "0x{word:02x}: {words:?}"
+            );
+        }
+        assert_eq!(
+            with_word_zeroed(hint_effects),
+            with_word_zeroed(plain_effects),
+            "0x{hint:02x}"
+        );
         assert_eq!(hint_barriers, plain_barriers, "0x{hint:02x}");
     }
+}
+
+/// The command word each queued transfer of `effects` carries.
+fn command_words(effects: &[Effect]) -> Vec<Option<u32>> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::DmaEnqueue { request, .. } => Some(request.command_word()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `effects` with each queued transfer's command word set to 0: the form
+/// a refusal reports is the one difference a result hint makes.
+fn with_word_zeroed(effects: Vec<Effect>) -> Vec<Effect> {
+    effects
+        .into_iter()
+        .map(|effect| match effect {
+            Effect::DmaEnqueue { request, payload } => Effect::DmaEnqueue {
+                request: request.with_command_word(0),
+                payload,
+            },
+            other => other,
+        })
+        .collect()
 }
 
 /// [CBEA p:68 s:7.8.4] putqlluc is a queued put of one cache line with an implied tag-specific fence.
@@ -236,6 +274,7 @@ fn putqlluc_queues_a_fenced_put_of_the_line_from_local_store() {
     assert_eq!(request.direction(), DmaDirection::Put);
     assert!(request.local_store_source());
     assert_eq!(request.ordering(), MfcOrdering::Fence);
+    assert_eq!(request.command_word(), Some(MFC_PUTQLLUC));
     assert_eq!(request.tag_id().map(|t| t.raw()), Some(TAG as u8));
     assert_eq!(
         (

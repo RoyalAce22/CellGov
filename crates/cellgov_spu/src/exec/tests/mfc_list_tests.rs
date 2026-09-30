@@ -230,6 +230,7 @@ fn an_empty_list_holds_a_slot_and_its_tag_and_moves_nothing() {
     assert_eq!(queued[0].length(), 0);
     assert!(queued[0].holds_slot());
     assert_eq!(queued[0].tag_id().map(|t| t.raw()), Some(5));
+    assert_eq!(queued[0].command_word(), Some(MFC_GETL));
 }
 
 /// The refusal of the one invalid command in `effects`.

@@ -188,3 +188,67 @@ fn a_suspended_issuer_raises_no_second_command() {
     assert_eq!(q.next_event_time(), None, "the second is held");
     assert!(q.process_due(GuestTicks::new(u64::MAX)).raised.is_empty());
 }
+
+/// The word a refused queued transfer reports.
+fn refused_word(completion: DmaCompletion) -> u32 {
+    let mut q = DmaQueue::new();
+    q.enqueue(completion, None);
+    let due = q.process_due_translating(GuestTicks::new(100), |_, _| {
+        Some(MfcCommandError::DataStorage { ea: 0x9000 })
+    });
+    assert_eq!(due.raised.len(), 1);
+    due.raised[0].command.word
+}
+
+/// [CBEA p:113 s:9.1.1] the MFC_Cmd word names the operation the command performs.
+#[test]
+fn a_refused_transfer_reports_the_command_word_its_program_issued() {
+    use cellgov_ps3_abi::hw::spu::{MFC_GETF, MFC_PUTRB};
+    let putrb = put_at(100, A);
+    let putrb = DmaCompletion::new(
+        putrb.request().with_command_word(MFC_PUTRB),
+        GuestTicks::new(100),
+    );
+    assert_eq!(refused_word(putrb), MFC_PUTRB);
+    let getf = DmaRequest::new(
+        DmaDirection::Get,
+        ByteRange::new(GuestAddr::new(0x9000), 0x10).unwrap(),
+        ByteRange::new(GuestAddr::new(0x1000), 0x10).unwrap(),
+        A,
+    )
+    .unwrap()
+    .with_command_word(MFC_GETF);
+    assert_eq!(
+        refused_word(DmaCompletion::new(getf, GuestTicks::new(100))),
+        MFC_GETF
+    );
+}
+
+#[test]
+fn a_refused_transfer_no_program_command_issued_reports_its_plain_direction() {
+    assert_eq!(
+        refused_word(put_at(100, A)),
+        cellgov_ps3_abi::hw::spu::MFC_PUT
+    );
+}
+
+#[test]
+fn the_command_word_is_a_lane_of_its_queued_transfer() {
+    let queued = |completion: DmaCompletion| {
+        let mut q = DmaQueue::new();
+        q.enqueue(completion, None);
+        q
+    };
+    let plain = queued(put_at(100, A));
+    let issued = queued(DmaCompletion::new(
+        put_at(100, A).request().with_command_word(0x22),
+        GuestTicks::new(100),
+    ));
+    let other = queued(DmaCompletion::new(
+        put_at(100, A).request().with_command_word(0x21),
+        GuestTicks::new(100),
+    ));
+    assert_ne!(plain.sync_partial(), issued.sync_partial());
+    assert_ne!(issued.sync_partial(), other.sync_partial());
+    assert_eq!(issued.sync_partial(), issued.sync_partial_from_scratch());
+}
