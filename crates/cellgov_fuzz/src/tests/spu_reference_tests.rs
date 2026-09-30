@@ -510,6 +510,7 @@ fn artifact_types_round_trip_through_json() {
     json["provenance"] = hardware_capture(&"a".repeat(64));
     json["initial_state"]["channels"] = all_channels();
     json["initial_state"]["reservation"] = 0x80.into();
+    json["initial_state"]["fpscr"] = "00000700000004000000000000000000".into();
     json["expected"]["channels"] = serde_json::json!({"status": "value", "value": all_channels()});
     json["expected"]["reservation"] = serde_json::json!({"status": "value", "value": null});
     let capture = parse(&json).expect("capture parses");
@@ -535,6 +536,10 @@ fn artifact_types_round_trip_through_json() {
         })
     );
     assert_eq!(capture.expected.reservation, value(None));
+    assert_eq!(
+        capture.initial_state.fpscr.as_deref(),
+        Some("00000700000004000000000000000000")
+    );
 }
 
 #[test]
@@ -1082,12 +1087,12 @@ fn replay_names_the_mismatch_of_an_altered_fixture() {
 #[test]
 fn replay_validates_the_artifact_before_executing() {
     let mut altered = artifact();
-    altered.schema_version = 3;
+    altered.schema_version = 4;
     assert!(matches!(
         replay_reference(&altered),
         Err(SpuReferenceError::Version {
-            found: 3,
-            supported: 2
+            found: 4,
+            supported: 3
         })
     ));
     let mut altered = artifact();

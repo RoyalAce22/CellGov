@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::reference::{ReferenceField, ReferenceOmission, ReferenceProvenance};
 
 /// Current offline SPU reference schema.
-pub const SPU_REFERENCE_SCHEMA_VERSION: u32 = 2;
+pub const SPU_REFERENCE_SCHEMA_VERSION: u32 = 3;
 
 /// Independent source of an SPU observation.
 pub type SpuReferenceProvenance = ReferenceProvenance;
@@ -29,6 +29,12 @@ pub struct SpuReferenceInput {
     pub channels: Option<SpuReferenceChannels>,
     /// Reserved-line address, if present.
     pub reservation: Option<u64>,
+    /// Initial FPSCR as 32 lowercase hexadecimal digits, bit 0 first;
+    /// absent means zero. Only the defined bits may be set.
+    ///
+    /// [SPU-ISA p:197 s:9.2] RN0 and RN1 select how each double-precision slice rounds, so a vector under a directed mode states them here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fpscr: Option<String>,
 }
 
 /// Channel fields represented by the SPU observation contract.
@@ -167,7 +173,8 @@ pub struct SpuReferenceExpected {
     pub effects: ReferenceField<Vec<String>>,
     /// Whether the fault discarded the instruction state.
     pub fault_discarded: ReferenceField<bool>,
-    /// Final FPSCR as 32 lowercase hexadecimal digits, bit 0 first.
+    /// Final FPSCR as 32 lowercase hexadecimal digits, bit 0 first. Only
+    /// the defined bits may be set.
     pub fpscr: ReferenceField<String>,
 }
 

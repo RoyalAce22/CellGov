@@ -1,0 +1,32 @@
+{
+  "schema_version": 3,
+  "case_id": "spu-isa-dfa-directed-rounding",
+  "provenance": {
+    "kind": "documented_vector",
+    "citation": "SPU-ISA p:197 s:9.2",
+    "vector_id": "dfa-r3-r4-r5-rn0-toward-zero-rn1-toward-minus-infinity"
+  },
+  "words": [1501643267],
+  "initial_state": {
+    "regs_hex": {
+      "4": "3ff0000000000000bff0000000000000",
+      "5": "3ca8000000000000bc90000000000000"
+    },
+    "local_store": {},
+    "pc": 0,
+    "channels": null,
+    "reservation": null,
+    "fpscr": "00000700000004000000000000000000"
+  },
+  "expected": {
+    "regs_hex": { "status": "value", "value": { "3": "3ff0000000000000bff0000000000001" } },
+    "local_store": { "status": "value", "value": {} },
+    "pc": { "status": "value", "value": 4 },
+    "channels": { "status": "unsupported", "reason": "the cited rounding rule does not specify MFC channel state" },
+    "reservation": { "status": "unsupported", "reason": "the cited rounding rule does not specify reservation state" },
+    "outcome": { "status": "value", "value": "continue" },
+    "effects": { "status": "value", "value": [] },
+    "fault_discarded": { "status": "value", "value": false },
+    "fpscr": { "status": "value", "value": "0000070000000c000000080000000000" }
+  }
+}

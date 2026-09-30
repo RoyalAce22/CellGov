@@ -793,6 +793,7 @@ fn spu_artifact(expected: SpuReferenceExpected) -> SpuReferenceArtifact {
             pc: 0,
             channels: None,
             reservation: None,
+            fpscr: None,
         },
         expected,
     }

@@ -1,6 +1,7 @@
 //! Parsing and validation of an SPU reference artifact, and its initial state.
 
 use cellgov_ps3_abi::hw::spu::{MfcTagId, MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY};
+use cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED;
 use cellgov_spu::state::{SpuState, TagUpdateCondition, SPU_LS_SIZE, SPU_REG_COUNT};
 
 use crate::reference::is_lower_hex;
@@ -32,6 +33,16 @@ pub(super) fn parse_register(hex: &str) -> Option<[u8; 16]> {
     Some(result)
 }
 
+/// The FPSCR a hex field names, or `None` for a malformed value or one
+/// that sets a bit the FPSCR does not define.
+///
+/// [SPU-ISA p:235 s:9] fscrwr leaves the unused bits undefined; [SPU-ISA p:236 s:9] fscrrd reads them as zero, so no observed FPSCR sets one.
+pub(super) fn parse_fpscr(hex: &str) -> Option<u128> {
+    parse_register(hex)
+        .map(u128::from_be_bytes)
+        .filter(|fpscr| fpscr & !FPSCR_DEFINED == 0)
+}
+
 pub(super) fn parse_index(key: &str, limit: usize) -> Option<usize> {
     let index = key.parse::<usize>().ok()?;
     (index < limit && index.to_string() == key).then_some(index)
@@ -41,6 +52,11 @@ impl SpuReferenceInput {
     pub(super) fn to_state(&self) -> Result<SpuState, SpuReferenceError> {
         let mut state = SpuState::new();
         state.pc = self.pc;
+        if let Some(hex) = &self.fpscr {
+            state.fpscr = parse_fpscr(hex).ok_or(SpuReferenceError::Invalid {
+                field: "initial_state.fpscr",
+            })?;
+        }
         for (index, hex) in &self.regs_hex {
             let index = parse_index(index, SPU_REG_COUNT).ok_or(SpuReferenceError::Invalid {
                 field: "initial_state.regs_hex",
@@ -144,10 +160,18 @@ impl SpuReferenceArtifact {
             return Err(invalid("expected.local_store"));
         }
         if self
+            .initial_state
+            .fpscr
+            .as_deref()
+            .is_some_and(|hex| parse_fpscr(hex).is_none())
+        {
+            return Err(invalid("initial_state.fpscr"));
+        }
+        if self
             .expected
             .fpscr
             .as_value()
-            .is_some_and(|hex| parse_register(hex).is_none())
+            .is_some_and(|hex| parse_fpscr(hex).is_none())
         {
             return Err(invalid("expected.fpscr"));
         }

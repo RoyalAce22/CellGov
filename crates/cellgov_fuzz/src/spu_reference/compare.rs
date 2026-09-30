@@ -8,7 +8,7 @@ use cellgov_spu::state::{SpuObservableSnapshot, SPU_REG_COUNT};
 
 use crate::reference::{compare_field, ReferenceComparison, ReferenceField, ReferenceOmission};
 
-use super::validate::{parse_index, parse_register};
+use super::validate::{parse_fpscr, parse_index, parse_register};
 
 use super::types::{
     SpuReferenceArtifact, SpuReferenceChannels, SpuReferenceComparison, SpuReferenceComponent,
@@ -89,7 +89,7 @@ pub fn compare_reference(
     if expected
         .fpscr
         .as_value()
-        .is_some_and(|hex| parse_register(hex).is_none())
+        .is_some_and(|hex| parse_fpscr(hex).is_none())
     {
         return Err(SpuReferenceError::Invalid {
             field: "expected.fpscr",
@@ -180,9 +180,7 @@ pub fn compare_reference(
         &mut comparison,
         SpuReferenceComponent::Fpscr,
         &expected.fpscr,
-        |value| {
-            (parse_register(value).map(u128::from_be_bytes) != Some(observed.fpscr)).then_some(())
-        },
+        |value| (parse_fpscr(value) != Some(observed.fpscr)).then_some(()),
     );
     Ok(comparison)
 }
