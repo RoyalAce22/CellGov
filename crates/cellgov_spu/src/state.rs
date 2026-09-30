@@ -257,13 +257,37 @@ impl SpuState {
     /// - every load and store address
     /// - every instruction fetch
     /// - every branch target and link value
-    ///
-    /// The MFC local-store address does not.
+    /// - every byte an MFC command moves to or from local store
     ///
     /// [SPU-ISA p:31 s:3] every effective address is ANDed with the LSLR, so a reference past the effective size wraps.
+    /// [CBEA p:221 s:15.6] the MFC's local-store address compare occurs before the SPU Local Storage Limit Register wrap is applied, so MFC accesses wrap too.
     #[inline]
     pub fn ls_wrap(&self, addr: u32) -> u32 {
         addr & self.lslr
+    }
+
+    /// `len` bytes of local store from `lsa`, each address wrapped by the
+    /// limit register: the bytes an MFC put or putllc reads.
+    ///
+    /// [CBEA p:235 s:16.2] an access beyond the range of the SPU Local Storage Limit Register occurs at the wrapped address.
+    pub fn read_ls_wrapped(&self, lsa: u32, len: u32) -> Vec<u8> {
+        (0..len)
+            .map(|i| {
+                let at = self.ls_wrap(lsa.wrapping_add(i)) as usize;
+                self.ls.get(at).copied().unwrap_or(0)
+            })
+            .collect()
+    }
+
+    /// Write `bytes` into local store from `lsa`, each address wrapped by
+    /// the limit register: the landing of an MFC get or getllar.
+    pub fn write_ls_wrapped(&mut self, lsa: u32, bytes: &[u8]) {
+        for (i, &byte) in (0u32..).zip(bytes) {
+            let at = self.ls_wrap(lsa.wrapping_add(i)) as usize;
+            if let Some(slot) = self.ls.get_mut(at) {
+                *slot = byte;
+            }
+        }
     }
 
     /// The instruction address `addr` names: wrapped, with the

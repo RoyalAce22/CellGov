@@ -108,7 +108,8 @@ fn extract_events(trace_bytes: &[u8]) -> Result<Vec<ObservedEvent>, TraceDecodeE
                 | TracedEffectKind::RsxLabelWrite
                 | TracedEffectKind::RsxFlipRequest
                 | TracedEffectKind::SharedReadIntent
-                | TracedEffectKind::ClockRead => None,
+                | TracedEffectKind::ClockRead
+                | TracedEffectKind::MfcInvalidCommand => None,
             },
             TraceRecord::UnitBlocked { unit, .. } => {
                 Some((ObservedEventKind::UnitBlock, unit.raw()))

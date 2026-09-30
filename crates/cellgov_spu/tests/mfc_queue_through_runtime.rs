@@ -29,6 +29,11 @@ fn rchcnt(rt: u32, channel: u8) -> u32 {
     (0x00F << 21) | (u32::from(channel) << 7) | rt
 }
 
+/// `il rt, imm`: RI16 opcode 0x081.
+fn il(rt: u32, imm: u32) -> u32 {
+    (0x081 << 23) | (imm << 7) | rt
+}
+
 /// `rdch rt, channel`: RR opcode 0x00D.
 fn rdch(rt: u32, channel: u8) -> u32 {
     (0x00D << 21) | (u32::from(channel) << 7) | rt
@@ -181,18 +186,24 @@ fn a_get_from_an_unmapped_address_is_refused_and_faults_the_issuer() {
     );
 }
 
-/// A get whose local-store end escapes the store faults at issue, and
-/// one that ends at the last byte lands.
+/// A get that ends at the last byte of local store lands there, and one
+/// that runs past it wraps its tail to the start.
+///
+/// [CBEA p:221 s:15.6] the MFC's local-store accesses take the SPU Local Storage Limit Register wrap.
 #[test]
-fn a_get_at_the_end_of_local_store_lands_and_one_byte_further_faults() {
+fn a_get_past_the_end_of_local_store_wraps_to_its_start() {
     let end = (cellgov_spu::state::SPU_LS_SIZE as u32) - TRANSFER_BYTES;
     let (mut rt, unit) = runtime_with(&get_and_wait(), MFC_GET, AUX_EA, end, TRANSFER_BYTES);
     assert_eq!(run(&mut rt).last(), Some(&YieldReason::Finished));
     assert!(landed(&rt, unit, end));
 
-    let (mut rt, unit) = runtime_with(&get_and_wait(), MFC_GET, AUX_EA, end + 1, TRANSFER_BYTES);
-    assert_eq!(run(&mut rt), [YieldReason::Fault]);
-    assert_eq!(spu(&rt, unit).status(), UnitStatus::Faulted);
+    // 16 bytes on: 48 bytes land at the end, the last 16 at address 0,
+    // over the program's first four words.
+    let (mut rt, unit) = runtime_with(&get_and_wait(), MFC_GET, AUX_EA, end + 16, TRANSFER_BYTES);
+    run(&mut rt);
+    let ls = &spu(&rt, unit).state().ls;
+    assert!(ls[(end + 16) as usize..].iter().all(|&b| b == MARK));
+    assert!(ls[..16].iter().all(|&b| b == MARK), "the tail wrapped to 0");
 }
 
 /// A get queued before its SPU stops still lands.
@@ -233,4 +244,50 @@ fn a_seventeenth_command_waits_for_a_slot() {
         [YieldReason::DmaSubmitted, YieldReason::Finished],
         "a completion frees a slot and the write runs again"
     );
+}
+
+/// [CBEA p:57 s:7.2] an unaligned DMA suspends queue processing and raises a DMA alignment interrupt.
+#[test]
+fn an_invalid_command_suspends_the_queue_and_names_the_exception() {
+    // A 3-byte put, which the MFC refuses; a valid 16-byte put after it;
+    // then a wait on the tag group, which the held put never completes.
+    let program = [
+        il(8, 16),
+        wrch(MFC_CMD, 2),
+        wrch(cellgov_ps3_abi::hw::spu::MFC_SIZE, 8),
+        wrch(MFC_CMD, 2),
+        wrch(MFC_WR_TAG_UPDATE, 7),
+        rdch(5, MFC_RD_TAG_STAT),
+        0,
+    ];
+    let (mut rt, unit) = runtime_with(&program, MFC_PUT, 0x1000, LSA, 3);
+    let reasons = run(&mut rt);
+    assert_eq!(
+        reasons,
+        [
+            YieldReason::DmaSubmitted,
+            YieldReason::DmaSubmitted,
+            YieldReason::ChannelStall
+        ],
+        "the SPU runs past the refused command and parks on the tag"
+    );
+    let exception = rt
+        .take_mfc_exception()
+        .expect("the queue reached the command");
+    assert_eq!(exception.unit, unit);
+    assert_eq!(
+        exception.command.error,
+        cellgov_dma::MfcCommandError::SizeUnaligned(3)
+    );
+    assert!(
+        exception.to_string().contains("DMA alignment"),
+        "{exception}"
+    );
+    let landed = rt
+        .memory()
+        .read(ByteRange::new(GuestAddr::new(0x1000), 16).expect("a 16-byte range"))
+        .expect("the base region")
+        .to_vec();
+    assert_eq!(landed, [0; 16], "the put after it never lands");
+    assert_eq!(spu(&rt, unit).state().reg_word(5), 0, "the wait never ends");
 }

@@ -1,23 +1,21 @@
-//! A tag id the tag-status word has no bit for refuses its command.
+//! A put or get whose parameters the MFC refuses still retires: it joins
+//! the command queue as an invalid command, and the queue suspends when
+//! it reaches it.
 //!
-//! The channel write itself stands: the architecture checks the staged
-//! parameter asynchronous to the instruction stream, and what it names
-//! is a suspended MFC command queue, not a faulted `wrch`. So the
-//! refusal sits on the command. The tag-status word has one bit for
-//! each of the 32 tag groups, and a value past 31 names none of them.
-//! The refusal keeps such a value away from the put path, which expects
-//! a valid `MfcTagId`. It also keeps a queued get's tag inside the 32
-//! groups.
+//! The architecture checks the staged parameters asynchronous to the
+//! instruction stream, so the `wrch` retires and the MFC command queue
+//! suspends. A staged tag id past 31 sets a reserved bit above the tag
+//! field, so it never reaches a transfer.
 
 // [CBEA p:115 s:9.1.3 MFC Command Tag Identification Channel] the identification tag is any value between x'0' and x'1F'.
 
-use crate::fault_codes::FAULT_MFC_TAG_ID_OUT_OF_RANGE;
 use crate::SpuExecutionUnit;
-use cellgov_effects::{Effect, FaultKind};
+use cellgov_dma::MfcCommandError;
+use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::GuestMemory;
-use cellgov_ps3_abi::hw::spu::{MFC_CMD, MFC_GET, MFC_TAG_ID};
+use cellgov_ps3_abi::hw::spu::{MFC_CMD, MFC_GET, MFC_GETLLAR, MFC_PUT, MFC_TAG_ID};
 use cellgov_time::Budget;
 
 const UNIT: u64 = 7;
@@ -147,87 +145,99 @@ fn the_highest_architected_tag_id_issues_its_command() {
     );
 }
 
-/// One past it refuses the command by name.
-#[test]
-fn a_tag_id_past_the_architected_range_refuses_its_command() {
-    let mut unit = unit_getting_with_tag(FIRST_INVALID_TAG);
-    let (result, effects) = run_once(&mut unit);
-
-    assert_eq!(
-        result.yield_reason,
-        YieldReason::Fault,
-        "a tag id with no bit in the status word cannot be carried",
-    );
-    assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(
-            FAULT_MFC_TAG_ID_OUT_OF_RANGE | FIRST_INVALID_TAG
-        )),
-        "the refusal names itself and the value the guest wrote",
-    );
-    assert_eq!(
-        enqueued_tag(&effects),
-        None,
-        "no transfer was queued with a tag outside the 32 groups",
-    );
-    assert_eq!(
-        unit.state().channels.tag_status,
-        u32::MAX,
-        "and no tag group was left outstanding",
-    );
-    assert_eq!(
-        unit.status(),
-        UnitStatus::Faulted,
-        "the unit stops rather than carrying a command it cannot report",
-    );
+/// The error of the invalid command the step queued.
+fn invalid_error(effects: &[Effect]) -> Option<MfcCommandError> {
+    effects.iter().find_map(|effect| match effect {
+        Effect::MfcInvalidCommand { command, .. } => Some(command.error),
+        _ => None,
+    })
 }
 
-/// A staged value whose low byte is a valid tag id is still refused.
-///
-/// The channel holds 32 bits and a tag id fits in 8. A narrowing that
-/// dropped the high bits would read 0x100 as tag 0 and issue the command.
+/// [CBEA p:57 s:7.2 Table 7-6] a reserved tag bit is an invalid DMA command.
+/// [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] A set bit above the tag field suspends MFC command queue processing.
 #[test]
-fn a_wide_tag_id_whose_low_byte_is_in_range_refuses_its_command() {
-    const LOW_BYTE_ZERO: u32 = 0x100;
-    let mut unit = unit_getting_with_tag(LOW_BYTE_ZERO);
-    let (result, effects) = run_once(&mut unit);
-
-    assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(
-            FAULT_MFC_TAG_ID_OUT_OF_RANGE | LOW_BYTE_ZERO
-        )),
-        "the whole staged value is checked, not its low byte",
-    );
-    assert_eq!(
-        enqueued_tag(&effects),
-        None,
-        "no transfer was queued under tag 0"
-    );
+fn a_tag_id_past_the_architected_range_queues_an_invalid_command() {
+    for tag in [FIRST_INVALID_TAG, 0x100, u32::MAX] {
+        let mut unit = unit_getting_with_tag(tag);
+        let (result, effects) = run_once(&mut unit);
+        assert_eq!(
+            result.yield_reason,
+            YieldReason::DmaSubmitted,
+            "tag 0x{tag:x}"
+        );
+        assert_eq!(
+            invalid_error(&effects),
+            Some(MfcCommandError::ReservedTagBits(tag)),
+            "the whole staged value is checked, not its low byte"
+        );
+        assert_eq!(enqueued_tag(&effects), None, "no transfer was queued");
+        assert_eq!(unit.status(), UnitStatus::Runnable, "the SPU runs on");
+        assert_eq!(unit.state().pc, 16, "the wrch retired");
+        assert_eq!(
+            unit.state().channels.cmd_queue_free,
+            cellgov_ps3_abi::hw::spu::MFC_SPU_QUEUE_DEPTH - 1,
+            "the command holds a slot"
+        );
+    }
 }
 
-/// The detail bits cannot reach the class field, whatever the guest
-/// wrote.
-///
-/// `u32::MAX` is the worst case: unmasked it would set every class bit
-/// and decode as some other fault entirely.
-#[test]
-fn a_refused_tag_id_cannot_smear_into_the_fault_class() {
-    let mut unit = unit_getting_with_tag(u32::MAX);
-    let (result, _) = run_once(&mut unit);
+/// A unit whose channels name a transfer of `size` bytes between `lsa`
+/// and `eal` under tag 3, and which issues `command`.
+fn unit_issuing(command: u32, lsa: u32, eal: u32, size: u32) -> SpuExecutionUnit {
+    let mut unit = unit_running(&[il(11, command), wrch(MFC_CMD, 11)]);
+    let s = unit.state_mut();
+    s.channels.mfc_lsa = lsa;
+    s.channels.mfc_eal = eal;
+    s.channels.mfc_size = size;
+    s.channels.mfc_tag_id = 3;
+    unit
+}
 
-    assert_eq!(
-        unit.state().channels.mfc_tag_id,
-        u32::MAX,
-        "the premise: every bit of the staged tag is set",
-    );
-    let Some(FaultKind::Guest(code)) = result.fault else {
-        panic!("expected a guest fault, got {:?}", result.fault);
-    };
-    assert_eq!(
-        code & 0xFFFF_0000,
-        FAULT_MFC_TAG_ID_OUT_OF_RANGE,
-        "the class the reader decodes is the class that was raised: \
-         0x{code:08x}",
-    );
+/// [CBEA p:57 s:7.2 Table 7-6] a size, local-store alignment or effective-address alignment error queues an invalid command for a put or a get.
+#[test]
+fn an_alignment_error_queues_an_invalid_command_for_a_put_or_a_get() {
+    for command in [MFC_PUT, MFC_GET] {
+        for (lsa, eal, size, error) in [
+            (0x100, 0x40, 3, MfcCommandError::SizeUnaligned(3)),
+            (
+                0x102,
+                0x42,
+                4,
+                MfcCommandError::LocalStoreUnaligned {
+                    lsa: 0x102,
+                    size: 4,
+                },
+            ),
+            (
+                0x100,
+                0x44,
+                16,
+                MfcCommandError::AddressLowBitsDiffer {
+                    lsa: 0x100,
+                    ea: 0x44,
+                },
+            ),
+            (0x100, 0x40, 0x4010, MfcCommandError::SizeTooLarge(0x4010)),
+        ] {
+            let mut unit = unit_issuing(command, lsa, eal, size);
+            let (result, effects) = run_once(&mut unit);
+            assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
+            assert_eq!(
+                invalid_error(&effects),
+                Some(error),
+                "command 0x{command:x}"
+            );
+            assert_eq!(unit.status(), UnitStatus::Runnable);
+        }
+    }
+}
+
+/// [CBEA p:57 s:7.2 Table 7-6] footnote 1: the alignment checks do not apply to the atomic commands; [CBEA p:66 s:7.8.1] getllar takes no tag.
+#[test]
+fn getllar_runs_whatever_the_tag_size_and_alignment_say() {
+    let mut unit = unit_issuing(MFC_GETLLAR, 0x103, 0x80, 3);
+    unit.state_mut().channels.mfc_tag_id = u32::MAX;
+    let (result, effects) = run_once(&mut unit);
+    assert_eq!(invalid_error(&effects), None);
+    assert_ne!(result.yield_reason, YieldReason::Fault);
 }

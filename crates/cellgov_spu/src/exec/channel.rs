@@ -2,7 +2,9 @@
 
 use crate::state::SpuState;
 use crate::stop::SpuStopKind;
-use cellgov_dma::{DmaDirection, DmaRequest};
+use cellgov_dma::{
+    DmaDirection, DmaRequest, InvalidMfcCommand, MfcCommandClass, MfcCommandError, MfcParameters,
+};
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_exec::YieldReason;
@@ -243,22 +245,54 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
     })
 }
 
+/// Checks a put or get's latched parameters and returns its tag group.
+///
+/// A command the MFC refuses still retires. It joins the queue as an
+/// invalid command and takes a slot. The queue suspends when it reaches
+/// that command. The `Err` is that step's outcome.
+///
+/// [CBEA p:113 s:9.1.1] the parameters' validity is checked asynchronous to the instruction stream.
+fn checked_transfer(
+    cmd: u32,
+    state: &mut SpuState,
+    unit_id: UnitId,
+) -> Result<MfcTagId, SpuStepOutcome> {
+    let c = &state.channels;
+    let params = MfcParameters {
+        lsa: c.mfc_lsa,
+        eah: c.mfc_eah,
+        eal: c.mfc_eal,
+        size: c.mfc_size,
+        tag: c.mfc_tag_id,
+    };
+    let error = match cellgov_dma::validate(MfcCommandClass::Transfer, params) {
+        Ok(()) => match u8::try_from(params.tag).ok().and_then(MfcTagId::new) {
+            Some(tag) => return Ok(tag),
+            // [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] A set bit above the tag field suspends MFC command queue processing
+            None => MfcCommandError::ReservedTagBits(params.tag),
+        },
+        Err(error) => error,
+    };
+    state.channels.cmd_queue_free -= 1;
+    Err(SpuStepOutcome::Yield {
+        effects: vec![Effect::MfcInvalidCommand {
+            issuer: unit_id,
+            command: InvalidMfcCommand {
+                word: cmd,
+                params,
+                error,
+            },
+        }],
+        reason: YieldReason::DmaSubmitted,
+    })
+}
+
 fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     // [CBEA p:113 s:9.1.1] a write to MFC_Cmd with the command queue full stalls until a slot frees.
     // [CBEA p:65 s:7.8] the immediate atomic commands also need a free slot, though they are not queued behind other commands.
     if state.channels.cmd_queue_free == 0 {
         return stall();
     }
-    // [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] A set bit above the tag field suspends MFC command queue processing, so no command naming that tag is processed.
-    // The model has no suspended queue to hold the command in, and a
-    // value past 31 names no group in the tag-status word. The command
-    // is refused by name instead.
-    let Some(tag) = u8::try_from(state.channels.mfc_tag_id)
-        .ok()
-        .and_then(MfcTagId::new)
-    else {
-        return SpuStepOutcome::Fault(SpuFault::TagIdOutOfRange(state.channels.mfc_tag_id));
-    };
     let word = MfcCmd::new(cmd);
     // [CBEA p:113 s:9.1.1 MFC Command Opcode Channel] an invalid command suspends queue processing and raises an invalid-command interrupt, and the leading bit of the command halfword marks the opcode reserved.
     // The reserved bit outranks the low byte, so this check runs ahead
@@ -275,28 +309,29 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
     let ea = ((state.channels.mfc_eah as u64) << 32) | state.channels.mfc_eal as u64;
     let lsa = state.channels.mfc_lsa;
     let size = state.channels.mfc_size;
+    // [CBEA p:66 s:7.8.1] the getllar data transfer is one cache line.
+    // Which local-store line an unaligned MFC_LSA names is unestablished.
+    // This model takes the line that contains it, as it does for the
+    // effective address. A line therefore never straddles the end of
+    // local store.
+    let line_lsa = lsa & !(RESERVATION_LINE_BYTES as u32 - 1);
 
     match word.opcode() {
         // [CBEA p:61 s:7. MFC Commands sub:7.6 Put Commands (Local Storage to Main Storage)] put: copy LS bytes to main storage.
         spu::MFC_PUT => {
-            let lsa_usize = lsa as usize;
-            let size_usize = size as usize;
-            // MFC_LSA and MFC_Size arrive on separate channels and
-            // neither write bounds the pair, so the source range is the
-            // guest's to choose. The get side refuses the same shape
-            // through `get_mut`. A direct index of local store here
-            // panics the host on a range it cannot hold.
-            let Some(ls_bytes) = lsa_usize
-                .checked_add(size_usize)
-                .and_then(|end| state.ls.get(lsa_usize..end))
-                .map(|slice| slice.to_vec())
-            else {
-                return SpuStepOutcome::Fault(SpuFault::LsOutOfRange(lsa));
+            let tag = match checked_transfer(cmd, state, unit_id) {
+                Ok(tag) => tag,
+                Err(queued) => return queued,
             };
+            // Each local-store byte's address wraps by the limit register,
+            // so no range the guest stages escapes local store.
+            let ls_bytes = state.read_ls_wrapped(lsa, size);
 
             let src =
                 ByteRange::new(GuestAddr::new(lsa as u64), size as u64).expect("valid LS range");
-            let dst = ByteRange::new(GuestAddr::new(ea), size as u64).expect("valid EA range");
+            let Some(dst) = ByteRange::new(GuestAddr::new(ea), size as u64) else {
+                return SpuStepOutcome::Fault(SpuFault::MfcAddressWraps(tag.raw()));
+            };
             let request = DmaRequest::new(DmaDirection::Put, src, dst, unit_id)
                 .expect("matching sizes")
                 .with_tag_id(tag);
@@ -317,17 +352,15 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
         }
         // [CBEA p:60 s:7. MFC Commands sub:7.5 Get Commands (Main Storage to Local Storage)] get: copy main-storage bytes into LS.
         // The get joins the command queue. The runtime reads its source
-        // when it completes and lands the bytes in local store, so the
-        // local-store end is checked here, where the unit can refuse it.
+        // when it completes and lands the bytes in local store. The limit
+        // register wraps each local-store address.
         spu::MFC_GET => {
-            let fits = (lsa as usize)
-                .checked_add(size as usize)
-                .is_some_and(|end| end <= state.ls.len());
-            if !fits {
-                return SpuStepOutcome::Fault(SpuFault::LsOutOfRange(lsa));
-            }
+            let tag = match checked_transfer(cmd, state, unit_id) {
+                Ok(tag) => tag,
+                Err(queued) => return queued,
+            };
             let Some(src) = ByteRange::new(GuestAddr::new(ea), size as u64) else {
-                return SpuStepOutcome::Fault(SpuFault::MfcGetAddressWraps(tag.raw()));
+                return SpuStepOutcome::Fault(SpuFault::MfcAddressWraps(tag.raw()));
             };
             let dst =
                 ByteRange::new(GuestAddr::new(lsa as u64), size as u64).expect("valid LS range");
@@ -354,7 +387,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             let line = cellgov_sync::ReservedLine::containing(ea);
             SpuStepOutcome::MemoryRead {
                 ea: line.addr(),
-                lsa,
+                lsa: line_lsa,
                 size: RESERVATION_LINE_BYTES as u32,
                 acquire_line: Some(line.addr()),
             }
@@ -367,16 +400,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 None => false,
             };
             if success {
-                let lsa_usize = lsa as usize;
-                // The line is 128 bytes wherever MFC_LSA points, and
-                // nothing bounds that channel either.
-                let Some(ls_bytes) = lsa_usize
-                    .checked_add(RESERVATION_LINE_BYTES as usize)
-                    .and_then(|end| state.ls.get(lsa_usize..end))
-                    .map(|slice| slice.to_vec())
-                else {
-                    return SpuStepOutcome::Fault(SpuFault::LsOutOfRange(lsa));
-                };
+                let ls_bytes = state.read_ls_wrapped(line_lsa, RESERVATION_LINE_BYTES as u32);
                 state.reservation = None;
                 // The store covers the line the reservation named, as
                 // the getllar arm's read did.

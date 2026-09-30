@@ -329,6 +329,10 @@ impl StepFootprint {
                     // every attempt records the park it may take.
                     fp.wait_units.push(*source);
                 }
+                // An invalid command moves no bytes. The exception it raises
+                // orders the issuer's later transfers, and the in-flight
+                // ranges hold that order.
+                Effect::MfcInvalidCommand { .. } => {}
                 Effect::MailboxPop { mailbox, .. } => {
                     // A pop takes a message the unit already read and
                     // never parks: an empty mailbox stalls instead.

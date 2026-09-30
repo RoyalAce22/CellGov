@@ -73,17 +73,10 @@ pub enum SpuFault {
     /// A channel whose capacity the model does not know.
     #[error("SPU unsupported channel rchcnt 0x{0:02x}")]
     UnsupportedChannelCount(u8),
-    /// An MFC command whose staged tag id is outside the architected
-    /// range.
-    ///
-    /// The tag-status word holds one bit per tag group, so a value past
-    /// the range names no group.
-    #[error("SPU MFC command tag id {0} is outside 0..31")]
-    TagIdOutOfRange(u32),
-    /// An MFC get whose effective-address range runs past the end of
-    /// the address space; the field is the tag id.
-    #[error("SPU MFC get under tag {0} names a source past the address space")]
-    MfcGetAddressWraps(u8),
+    /// An MFC put or get whose effective-address range runs past the end
+    /// of the address space; the field is the tag id.
+    #[error("SPU MFC transfer under tag {0} names an address past the address space")]
+    MfcAddressWraps(u8),
     /// A channel access whose stall no event can end: a tag-status
     /// read with no update request, which only an interrupt could end.
     #[error("SPU channel 0x{0:02x} access stalls")]

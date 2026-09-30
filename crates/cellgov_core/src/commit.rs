@@ -159,7 +159,8 @@ pub struct CommitOutcome {
     pub mailbox_receives_committed: usize,
     /// Number of `MailboxReceiveAttempt` effects that blocked on an empty mailbox.
     pub mailbox_receives_blocked: usize,
-    /// Number of `DmaEnqueue` effects committed onto the DMA queue.
+    /// Number of `DmaEnqueue` and `MfcInvalidCommand` effects committed
+    /// onto the DMA queue.
     pub dma_enqueued: usize,
     /// Number of `WakeUnit` effects committed.
     pub wakes_committed: usize,
@@ -500,6 +501,15 @@ impl CommitPipeline {
                         }
                         dma_count += 1;
                     }
+                    Effect::MfcInvalidCommand { issuer, .. } => {
+                        if ctx.units.get(*issuer).is_none() {
+                            return Err(CommitError::UnknownSourceUnit {
+                                effect_index: idx,
+                                source_unit: *issuer,
+                            });
+                        }
+                        dma_count += 1;
+                    }
                     Effect::WakeUnit { target, .. } => {
                         if ctx.units.get(*target).is_none() {
                             return Err(CommitError::UnknownWakeTarget {
@@ -671,6 +681,15 @@ impl CommitPipeline {
                             receives_blocked += 1;
                         }
                     }
+                }
+                Effect::MfcInvalidCommand { issuer, command } => {
+                    // The queue reaches the command where a transfer
+                    // issued now would complete, in queue order with the
+                    // issuer's other commands.
+                    let time = ctx
+                        .dma_latency
+                        .invalid_command_time(ctx.now, &*ctx.dma_queue);
+                    ctx.dma_queue.enqueue_invalid(time, *issuer, *command);
                 }
                 Effect::MailboxPop {
                     mailbox, message, ..

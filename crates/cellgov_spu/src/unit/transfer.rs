@@ -4,37 +4,30 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 
-/// Which end of a main-memory-to-local-store copy refused it.
+/// The source of a main-memory-to-local-store copy resolves to no
+/// region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CopyRefusal {
-    /// No region backs the source range.
-    Unresolved,
-    /// The destination range escapes local store.
-    LocalStoreEscapes,
-}
+pub(super) struct Unresolved;
 
-/// Copy `size` bytes of committed memory at `ea` into local store at
-/// `lsa`, or name the end that refused.
+/// Copy `size` bytes of committed memory at `ea` into local store at `lsa`.
 ///
-/// The source is tested first, so an escaping destination refuses only
-/// where the source resolves. Either refusal leaves local store
-/// untouched.
+/// The limit register wraps each local-store address.
+///
+/// # Errors
+///
+/// Returns [`Unresolved`] when no region backs the source. A refusal
+/// leaves local store untouched.
 pub(super) fn copy_into_local_store(
-    ls: &mut [u8],
+    state: &mut crate::state::SpuState,
     memory: &cellgov_mem::GuestMemory,
     ea: u64,
     lsa: u32,
     size: u32,
-) -> Result<(), CopyRefusal> {
+) -> Result<(), Unresolved> {
     let bytes = ByteRange::new(GuestAddr::new(ea), u64::from(size))
         .and_then(|src| memory.read(src))
-        .ok_or(CopyRefusal::Unresolved)?;
-    let dst_start = lsa as usize;
-    let slot = dst_start
-        .checked_add(size as usize)
-        .and_then(|end| ls.get_mut(dst_start..end))
-        .ok_or(CopyRefusal::LocalStoreEscapes)?;
-    slot.copy_from_slice(bytes);
+        .ok_or(Unresolved)?;
+    state.write_ls_wrapped(lsa, bytes);
     Ok(())
 }
 

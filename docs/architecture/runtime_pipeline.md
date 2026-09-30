@@ -66,7 +66,9 @@ nine-step deterministic loop:
    and commands complete in (completion time, enqueue order), the
    latency model having seen the commands queued ahead. A completing
    get reads its source then and lands the bytes in its issuer's local
-   store. A DMA completion leaves the queue at fire time, and an
+   store. A command whose parameters the MFC refuses holds its slot
+   too; when the queue reaches it, its issuer's queue suspends and the
+   runtime records the MFC exception for the host to take. A DMA completion leaves the queue at fire time, and an
    SPU's tag group reads complete at its next step once none of its
    transfers with that tag is queued. A unit yielding `DmaWait` or
    `ChannelStall` out of a batch that applied is parked `Blocked`
@@ -164,11 +166,13 @@ The full vocabulary of guest-visible operations:
   `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`,
   `FaultRaised`, `TraceMarker`, `ReservationAcquire`,
   `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`,
-  `SharedReadIntent`, `ClockRead`, `MailboxPop`. `SharedReadIntent`
+  `SharedReadIntent`, `ClockRead`, `MailboxPop`, `MfcInvalidCommand`.
+  `SharedReadIntent`
   and `ClockRead` declare what a step read so dependency analysis can
   pair it; the commit pipeline stages nothing for either. `MailboxPop`
   removes a message the unit already read, and the commit refuses the
   batch when the message is not the one at that place in the mailbox.
+  `MfcInvalidCommand` queues a command the MFC refuses.
 - **Trace record variants** in `cellgov_trace::TraceRecord`:
   - one header, `RunIdentity`, written first and never repeated:
     the format version plus a fingerprint of each half of the

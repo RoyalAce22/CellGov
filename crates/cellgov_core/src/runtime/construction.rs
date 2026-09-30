@@ -73,6 +73,7 @@ impl Runtime {
             last_lv2_effects: Vec::new(),
             last_mailbox_read: None,
             spu_thread_failure: None,
+            mfc_exception: None,
             lv2_host: Lv2Host::new(),
             syscall_responses: SyscallResponseTable::new(),
             spu_factory: None,

@@ -97,11 +97,12 @@ fn a_transfer_reaching_past_the_address_space_records_no_read() {
     assert_eq!(result.yield_reason, YieldReason::Fault);
 }
 
+/// An `MFC_LSA` in the last half-line takes the line that contains it,
+/// so nothing wraps and the read is recorded.
 #[test]
-fn a_transfer_whose_local_store_destination_escapes_records_no_read() {
+fn a_getllar_near_the_end_of_local_store_records_its_read() {
     let mut unit = unit_issuing(MFC_GETLLAR);
     let ls_len = unit.state().ls.len() as u32;
-    // The final 64 bytes of local store cannot hold a 128-byte line.
     unit.state_mut().channels.mfc_lsa = ls_len - TRANSFER_BYTES / 2;
     let mem = GuestMemory::new(MEM_BYTES);
     let ctx = ExecutionContext::new(&mem);
@@ -109,8 +110,8 @@ fn a_transfer_whose_local_store_destination_escapes_records_no_read() {
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
-    assert!(read_ranges(&effects).is_empty(), "{effects:?}");
-    assert_eq!(result.yield_reason, YieldReason::Fault);
+    assert_ne!(result.yield_reason, YieldReason::Fault);
+    assert_eq!(read_ranges(&effects).len(), 1, "{effects:?}");
 }
 
 #[test]

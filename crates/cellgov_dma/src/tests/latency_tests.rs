@@ -92,3 +92,10 @@ fn a_model_sees_the_commands_queued_ahead() {
     let second = model.completion_time(&r, GuestTicks::new(0), &queue);
     assert_eq!((first, second), (GuestTicks::new(10), GuestTicks::new(20)));
 }
+
+#[test]
+fn an_invalid_command_near_the_end_of_time_is_reached_at_the_last_tick() {
+    let model = FixedLatency::new(10);
+    let t = model.invalid_command_time(GuestTicks::new(u64::MAX - 3), &DmaQueue::new());
+    assert_eq!(t, GuestTicks::new(u64::MAX));
+}

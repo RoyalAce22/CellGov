@@ -9,14 +9,12 @@ use cellgov_effects::FaultKind;
 /// The detail is one of:
 ///
 /// - the program counter, on the fetch path;
-/// - the raw address operand, on the load/store path;
-/// - the staged `MFC_LSA`, where an MFC put, get, getllar or putllc
-///   names a range local store cannot hold.
+/// - the raw address operand, on the load/store path.
 ///
-/// Local store spans 18 bits, so none of them fits the detail half and
-/// the masked value is the address modulo 64 KB. [`LocalDiagnostics`]
-/// carries the whole value beside the code: the fetch path's program
-/// counter as `pc`, the other two as `faulting_ea`.
+/// Local store spans 18 bits, so neither fits the detail half and the
+/// masked value is the address modulo 64 KB. [`LocalDiagnostics`]
+/// carries the whole value beside the code: the program counter as
+/// `pc`, the address operand as `faulting_ea`.
 ///
 /// [`LocalDiagnostics`]: cellgov_exec::LocalDiagnostics
 ///
@@ -38,15 +36,12 @@ pub(crate) const FAULT_UNIMPLEMENTED_INSN: u32 = 0x0005_0000;
 /// A refused `rchcnt`, distinct from a refused `rdch` / `wrch` on the
 /// same channel.
 pub(crate) const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
-/// An MFC GET whose effective-address range runs past the end of the
-/// address space. Its low bits carry the transfer's tag id. A source no
-/// region backs is the commit's refusal of the enqueue, and a
-/// destination that escapes local store is [`FAULT_LS_OUT_OF_RANGE`], as
-/// it is for a put.
-pub(crate) const FAULT_MFC_GET_UNRESOLVED: u32 = 0x0007_0000;
-/// An MFC command whose staged tag id is outside 0..31. The low bits
-/// carry the value the guest wrote, masked to 16 bits.
-pub(crate) const FAULT_MFC_TAG_ID_OUT_OF_RANGE: u32 = 0x0008_0000;
+/// An MFC put or get whose effective-address range runs past the end
+/// of the address space. Its low bits carry the transfer's tag id. A
+/// range no region backs is the commit's refusal of the enqueue.
+pub(crate) const FAULT_MFC_ADDRESS_WRAPS: u32 = 0x0007_0000;
+// No class uses 0x0008_0000, so an old code with that class decodes as
+// no current fault.
 /// A synchronous MFC read -- `getllar` -- whose effective address
 /// resolves to no region. The detail is the low 16 bits of the
 /// effective address; [`LocalDiagnostics::faulting_ea`] carries it
@@ -72,14 +67,13 @@ pub(crate) const FAULT_DETAIL_MASK: u32 = 0xFFFF;
 
 /// Every class this crate raises, so the layout checks and the layout
 /// tests cover one set.
-const EVERY_FAULT_CLASS: [u32; 11] = [
+const EVERY_FAULT_CLASS: [u32; 10] = [
     FAULT_LS_OUT_OF_RANGE,
     FAULT_UNSUPPORTED_CHANNEL,
     FAULT_UNSUPPORTED_MFC_CMD,
     FAULT_UNIMPLEMENTED_INSN,
     FAULT_UNSUPPORTED_CHANNEL_COUNT,
-    FAULT_MFC_GET_UNRESOLVED,
-    FAULT_MFC_TAG_ID_OUT_OF_RANGE,
+    FAULT_MFC_ADDRESS_WRAPS,
     FAULT_MFC_READ_UNRESOLVED,
     FAULT_CHANNEL_STALL,
     FAULT_RESERVED_TAG_UPDATE,
@@ -122,8 +116,7 @@ pub(crate) fn guest_fault_for(fault: SpuFault) -> FaultKind {
         SpuFault::UnsupportedChannelCount(channel) => {
             guest_fault(FAULT_UNSUPPORTED_CHANNEL_COUNT, channel as u32)
         }
-        SpuFault::TagIdOutOfRange(tag) => guest_fault(FAULT_MFC_TAG_ID_OUT_OF_RANGE, tag),
-        SpuFault::MfcGetAddressWraps(tag) => guest_fault(FAULT_MFC_GET_UNRESOLVED, u32::from(tag)),
+        SpuFault::MfcAddressWraps(tag) => guest_fault(FAULT_MFC_ADDRESS_WRAPS, u32::from(tag)),
         SpuFault::ChannelStall(channel) => guest_fault(FAULT_CHANNEL_STALL, u32::from(channel)),
         SpuFault::ReservedTagUpdate(value) => guest_fault(FAULT_RESERVED_TAG_UPDATE, value),
         SpuFault::UndefinedConversionScale(imm) => {
@@ -148,8 +141,7 @@ pub fn describe_guest_fault(code: u32) -> Option<String> {
         FAULT_UNSUPPORTED_CHANNEL => "SPU_UNSUPPORTED_CHANNEL",
         FAULT_UNSUPPORTED_MFC_CMD => "SPU_UNSUPPORTED_MFC_CMD",
         FAULT_UNSUPPORTED_CHANNEL_COUNT => "SPU_UNSUPPORTED_CHANNEL_COUNT",
-        FAULT_MFC_GET_UNRESOLVED => "SPU_MFC_GET_UNRESOLVED",
-        FAULT_MFC_TAG_ID_OUT_OF_RANGE => "SPU_MFC_TAG_ID_OUT_OF_RANGE",
+        FAULT_MFC_ADDRESS_WRAPS => "SPU_MFC_ADDRESS_WRAPS",
         FAULT_MFC_READ_UNRESOLVED => "SPU_MFC_READ_UNRESOLVED",
         FAULT_CHANNEL_STALL => "SPU_CHANNEL_STALL",
         FAULT_RESERVED_TAG_UPDATE => "SPU_RESERVED_TAG_UPDATE",

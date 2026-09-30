@@ -30,6 +30,7 @@ mod dma;
 mod host_write;
 mod lv2_dispatch;
 mod mem_helpers;
+mod mfc_exception;
 mod ppu_create;
 mod problem_state;
 mod process_spawn;
@@ -47,6 +48,7 @@ mod types;
 mod unit_stop;
 
 pub use construction::DEFAULT_DMA_LATENCY_TICKS;
+pub use mfc_exception::MfcException;
 pub use snapshot::RuntimeSnapshot;
 pub use spaces::{AddressSpaceId, SpaceError};
 pub use spu_thread_stop::SpuThreadFailure;

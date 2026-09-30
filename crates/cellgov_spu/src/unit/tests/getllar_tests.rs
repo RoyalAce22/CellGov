@@ -6,7 +6,7 @@
 //! `putllc` would otherwise succeed against a comparison the guest made
 //! on stale local store.
 
-use crate::fault_codes::{FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_READ_UNRESOLVED};
+use crate::fault_codes::FAULT_MFC_READ_UNRESOLVED;
 use crate::SpuExecutionUnit;
 use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
@@ -209,43 +209,26 @@ fn a_getllar_ending_at_the_last_byte_of_local_store_lands() {
     );
 }
 
-/// One byte further and the destination escapes the store. The line
-/// itself resolves, so the refusal is local store's and names the
-/// local-store address, not the line.
+/// One byte further and the address sits inside the last line of the
+/// store: the line containing it lands, and nothing wraps to the start.
 #[test]
-fn a_getllar_whose_local_store_destination_escapes_refuses() {
+fn a_getllar_takes_the_local_store_line_containing_its_address() {
     let mem = memory_with_marked_aux();
     let mut unit = unit_getllar(AUX_EA);
-    let lsa = unit.state().ls.len() - LINE_BYTES as usize + 1;
-    unit.state_mut().channels.mfc_lsa = lsa as u32;
-    let before = unit.state().ls.clone();
+    let ls_len = unit.state().ls.len();
+    let line = ls_len - LINE_BYTES as usize;
+    unit.state_mut().channels.mfc_lsa = line as u32 + 1;
     let mut effects = Vec::new();
     let result = run_once(&mut unit, &mem, &mut effects);
 
+    assert_ne!(result.yield_reason, YieldReason::Fault);
+    let ls = &unit.state().ls;
+    assert!(ls[line..].iter().all(|&b| b == MARK), "the whole last line");
+    assert_ne!(ls[0], MARK, "and address 0 keeps the program");
     assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(
-            FAULT_LS_OUT_OF_RANGE | (lsa as u32 & FAULT_DETAIL_MASK)
-        )),
-        "a destination the store cannot hold is refused, not truncated",
-    );
-    assert_eq!(
-        result.local_diagnostics.faulting_ea,
-        Some(lsa as u64),
-        "and the address that escaped rides whole",
-    );
-    assert!(
-        acquired_lines(&effects).is_empty(),
-        "a line local store never received is not reserved: {effects:?}",
-    );
-    assert!(
-        unit.state().reservation.is_none(),
-        "and the unit's own register holds none either",
-    );
-    // Compared without dumping either side: local store is 256 KB.
-    assert!(
-        unit.state().ls == before,
-        "the refused line left local store untouched",
+        acquired_lines(&effects).len(),
+        1,
+        "and the line is reserved"
     );
 }
 

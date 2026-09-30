@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use crate::fixtures::ScenarioFixture;
-use cellgov_core::{AddressSpaceId, Runtime, StepError};
+use cellgov_core::{AddressSpaceId, MfcException, Runtime, StepError};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, Region, RegionAccess};
 use cellgov_trace::StateHash;
 
@@ -50,6 +50,11 @@ pub struct ScenarioResult {
     /// `Lv2Observability::first_invariant_break_line`. The runtime ends
     /// here, so a driver that never sees it cannot report the break.
     pub first_invariant_break: Option<String>,
+    /// The first MFC exception the run raised.
+    ///
+    /// A refused command suspends its SPU's command queue, and the run
+    /// then stalls like any other. Only this field names the cause.
+    pub mfc_exception: Option<MfcException>,
 }
 
 /// Copy a space's regions into fresh backing, keeping each region's
@@ -180,6 +185,7 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
             .map(|(id, mem)| (id, deep_copy(mem)))
             .collect(),
         first_invariant_break: rt.lv2_host().observability().first_invariant_break_line(),
+        mfc_exception: rt.take_mfc_exception(),
     };
     let mem = rt.into_memory();
     (result, mem)

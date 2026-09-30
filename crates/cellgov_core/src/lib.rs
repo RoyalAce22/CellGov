@@ -26,7 +26,7 @@ pub mod timer_queue;
 pub use commit::{BlockReason, CommitContext, CommitError, CommitOutcome, CommitPipeline};
 pub use registry::{RegisteredUnit, UnitRegistry};
 pub use runtime::{
-    default_budget_for_mode, AddressSpaceId, PendingChildInit, ProcessSpawnLoadError,
+    default_budget_for_mode, AddressSpaceId, MfcException, PendingChildInit, ProcessSpawnLoadError,
     ProcessSpawnLoader, Runtime, RuntimeMode, RuntimeSnapshot, RuntimeStep, RuntimeTap, SpaceError,
     SpawnedProcessImage, SpuFactory, SpuFactoryError, SpuThreadFailure, StepError,
     DEFAULT_DMA_LATENCY_TICKS,

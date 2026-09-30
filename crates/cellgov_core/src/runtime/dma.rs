@@ -1,7 +1,7 @@
 //! DMA completion handling. [`Runtime::fire_dma_completions`] runs per
 //! commit and wakes issuers whose modeled-latency window arrived.
 //! [`Runtime::drain_pending_dma`] runs at scenario termination and
-//! forces every outstanding transfer into the final memory snapshot.
+//! lands every outstanding transfer that no suspended queue holds.
 
 use cellgov_dma::DmaCompletion;
 use cellgov_exec::UnitStatus;
@@ -114,10 +114,14 @@ impl Runtime {
         }
     }
 
-    /// Pop and apply DMA completions whose modeled time has arrived;
-    /// returns the fired list for trace recording.
+    /// Apply the DMA completions due now and record each refused command
+    /// the queue reaches; returns the fired completions for the trace.
     pub(super) fn fire_dma_completions(&mut self) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
-        let due = self.dma_queue.pop_due(self.time);
+        let processed = self.dma_queue.process_due(self.time);
+        for raised in processed.raised {
+            self.record_mfc_exception(raised);
+        }
+        let due = processed.completions;
         for (c, payload) in &due {
             self.apply_dma_transfer(c, payload.as_deref());
             // The transfer still commits, so the terminal memory
@@ -171,11 +175,18 @@ impl Runtime {
         self.unit_dma_view(unit).1
     }
 
-    /// Drain all pending DMA completions regardless of scheduled time;
-    /// used at scenario termination to flush in-flight transfers into
-    /// the final memory snapshot.
+    /// Land the queued transfers, whatever their scheduled time, for the
+    /// final memory snapshot at scenario termination.
+    ///
+    /// The drain reaches a refused command in queue order. That command
+    /// suspends its issuer's queue, and the issuer's later transfers never
+    /// land.
     pub fn drain_pending_dma(&mut self) {
-        let due = self.dma_queue.pop_due(GuestTicks::new(u64::MAX));
+        let processed = self.dma_queue.process_due(GuestTicks::new(u64::MAX));
+        for raised in processed.raised {
+            self.record_mfc_exception(raised);
+        }
+        let due = processed.completions;
         for (c, payload) in &due {
             self.apply_dma_transfer(c, payload.as_deref());
         }

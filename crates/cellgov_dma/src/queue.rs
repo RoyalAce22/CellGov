@@ -13,13 +13,25 @@
 //! complete in any order, so that one is permitted. The model has no
 //! fenced or barrier form: the SPU refuses one as an unsupported command.
 //!
+//! A command with a parameter the MFC refuses enters the queue as an
+//! invalid entry. The queue reaches it in the same order as a transfer
+//! and raises it. Then:
+//!
+//! - the issuer's queue suspends
+//! - the entry keeps its slot and its tag
+//! - no later command of that issuer completes
+//!
+//! [CBEA p:113 s:9.1.1] an invalid command or parameter suspends SPU command queue processing and raises an invalid-command interrupt.
+//!
 //! [CBEA p:53 s:7.1.1] unless a form says otherwise, data-transfer commands execute in any order.
 //
 // [CBE-Handbook p:509 s:19] MFC command queues; out-of-order execution; tag-group ordering via fence/barrier.
 // [CBE-Handbook p:504 s:18.10.4] 16-entry MFC SPU command queue depth.
 // [CBE-Handbook p:522 s:19.3.3.2] 8-entry MFC proxy command queue for PPE-issued commands.
 
+use crate::command::InvalidMfcCommand;
 use crate::completion::DmaCompletion;
+use cellgov_event::UnitId;
 use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 use cellgov_time::GuestTicks;
 
@@ -60,13 +72,83 @@ impl LaneValue for QueueEntry {
     }
 }
 
+/// A queued command the MFC refuses when it processes it.
+#[derive(Debug, Clone)]
+struct InvalidEntry {
+    issuer: UnitId,
+    command: InvalidMfcCommand,
+    /// When the queue reaches the command.
+    time: GuestTicks,
+    /// The queue reached the command, and the issuer's queue suspended.
+    raised: bool,
+}
+
+impl InvalidEntry {
+    /// The status bit of the tag group the command holds outstanding, 0
+    /// when its tag is the parameter it fails on.
+    fn tag_bit(&self) -> u32 {
+        u8::try_from(self.command.params.tag)
+            .ok()
+            .and_then(cellgov_ps3_abi::hw::spu::MfcTagId::new)
+            .map_or(0, |tag| tag.status_bit())
+    }
+}
+
+/// Lane fields of one invalid command:
+///
+/// 1. the issuer
+/// 2. the tag's status bit, 0 without a valid tag
+/// 3. the error code
+/// 4. 1 once raised
+/// 5. the command word
+/// 6. the time the queue reaches it
+/// 7. the local-store address
+/// 8. the effective address
+/// 9. the size
+/// 10. the tag channel value
+impl LaneValue for InvalidEntry {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        let params = self.command.params;
+        lanes.lane(1, 0, self.issuer.raw());
+        lanes.lane(2, 0, u64::from(self.tag_bit()));
+        lanes.lane(3, 0, u64::from(self.command.error.code()));
+        lanes.lane(4, 0, u64::from(self.raised));
+        lanes.lane(5, 0, u64::from(self.command.word));
+        lanes.lane(6, 0, self.time.raw());
+        lanes.lane(7, 0, u64::from(params.lsa));
+        lanes.lane(8, 0, params.ea());
+        lanes.lane(9, 0, u64::from(params.size));
+        lanes.lane(10, 0, u64::from(params.tag));
+    }
+}
+
+/// A command the queue raised: its issuer's queue suspended on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RaisedMfcCommand {
+    /// The unit whose queue suspended.
+    pub issuer: UnitId,
+    /// The command and the check it failed.
+    pub command: InvalidMfcCommand,
+}
+
+/// What one drain of the queue did.
+#[derive(Debug, Default)]
+pub struct DueCommands {
+    /// Transfers that completed, in queue order, each with its inline
+    /// payload.
+    pub completions: Vec<(DmaCompletion, Option<Vec<u8>>)>,
+    /// Invalid commands the queue reached, in queue order.
+    pub raised: Vec<RaisedMfcCommand>,
+}
+
 /// Deterministic priority queue of modeled DMA completions.
 ///
-/// Drains in `(completion_time, sequence)` order. Sequence is assigned
-/// at [`DmaQueue::enqueue`] time.
+/// Drains in `(completion_time, sequence)` order. [`DmaQueue::enqueue`]
+/// and [`DmaQueue::enqueue_invalid`] assign the sequence from one counter.
 #[derive(Debug, Clone)]
 pub struct DmaQueue {
     entries: LaneMap<(GuestTicks, u64), QueueEntry>,
+    invalid: LaneMap<(GuestTicks, u64), InvalidEntry>,
     next_seq: u64,
 }
 
@@ -74,6 +156,7 @@ impl Default for DmaQueue {
     fn default() -> Self {
         Self {
             entries: LaneMap::new(source::DMA_QUEUE, |(_, seq)| seq),
+            invalid: LaneMap::new(source::MFC_INVALID_COMMAND, |(_, seq)| seq),
             next_seq: 0,
         }
     }
@@ -86,16 +169,65 @@ impl DmaQueue {
         Self::default()
     }
 
-    /// Number of pending completions.
+    /// Number of queued commands, invalid ones included.
     #[inline]
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.entries.len() + self.invalid.len()
     }
 
-    /// Whether the queue holds any completions.
+    /// Whether the queue holds no command.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.is_empty() && self.invalid.is_empty()
+    }
+
+    /// Queue `command`, which the MFC refuses, for `issuer`; the queue
+    /// reaches it at `time`. Returns the assigned sequence number.
+    pub fn enqueue_invalid(
+        &mut self,
+        time: GuestTicks,
+        issuer: UnitId,
+        command: InvalidMfcCommand,
+    ) -> u64 {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.invalid.insert(
+            (time, seq),
+            InvalidEntry {
+                issuer,
+                command,
+                time,
+                raised: false,
+            },
+        );
+        seq
+    }
+
+    /// Whether `issuer`'s queue is suspended on a raised command.
+    pub fn suspended(&self, issuer: UnitId) -> bool {
+        self.invalid
+            .values()
+            .any(|entry| entry.raised && entry.issuer == issuer)
+    }
+
+    /// The earliest time the queue completes or raises a command.
+    ///
+    /// It skips every command of a suspended issuer: the queue holds it.
+    pub fn next_event_time(&self) -> Option<GuestTicks> {
+        let transfer = self
+            .entries
+            .iter()
+            .find(|(_, e)| !self.suspended(e.completion.issuer()))
+            .map(|((time, _), _)| time);
+        let invalid = self
+            .invalid
+            .iter()
+            .find(|(_, e)| !e.raised && !self.suspended(e.issuer))
+            .map(|((time, _), _)| time);
+        match (transfer, invalid) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// Enqueue `completion` with optional inline `payload`, returning
@@ -120,18 +252,27 @@ impl DmaQueue {
 
     /// For one issuer: how many of its commands are queued, and the
     /// status bit of every tag group one of them holds outstanding.
-    pub fn issuer_view(&self, issuer: cellgov_event::UnitId) -> (u32, u32) {
-        self.entries
+    ///
+    /// An invalid command holds a slot and its tag like a transfer does.
+    pub fn issuer_view(&self, issuer: UnitId) -> (u32, u32) {
+        let transfers = self
+            .entries
             .values()
             .filter(|e| e.completion.issuer() == issuer)
-            .fold((0, 0), |(count, tags), e| {
-                let tag = e
-                    .completion
+            .map(|e| {
+                e.completion
                     .request()
                     .tag_id()
-                    .map_or(0, |tag| tag.status_bit());
-                (count + 1, tags | tag)
-            })
+                    .map_or(0, |tag| tag.status_bit())
+            });
+        let invalid = self
+            .invalid
+            .values()
+            .filter(|e| e.issuer == issuer)
+            .map(InvalidEntry::tag_bit);
+        transfers
+            .chain(invalid)
+            .fold((0, 0), |(count, tags), tag| (count + 1, tags | tag))
     }
 
     /// Borrow the earliest pending completion without removing it.
@@ -159,31 +300,76 @@ impl DmaQueue {
     }
 
     /// Drain every completion with `completion_time <= now`, in
-    /// `(time, sequence)` order.
+    /// `(time, sequence)` order. The completions of a suspended issuer
+    /// stay queued; see [`Self::process_due`] for the invalid commands.
     pub fn pop_due(&mut self, now: GuestTicks) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
-        let mut due = Vec::new();
-        while self
-            .entries
-            .first()
-            .is_some_and(|((time, _), _)| time <= now)
-        {
-            if let Some((_, e)) = self.entries.pop_first() {
-                due.push((e.completion, e.payload));
+        self.process_due(now).completions
+    }
+
+    /// Process everything due by `now`, in `(time, sequence)` order.
+    ///
+    /// For each issuer whose queue is not suspended:
+    ///
+    /// - a transfer completes and leaves the queue
+    /// - the queue raises an invalid command, and the issuer's queue
+    ///   suspends from there on
+    ///
+    /// A raised command and every later command of its issuer stay queued.
+    pub fn process_due(&mut self, now: GuestTicks) -> DueCommands {
+        let mut due = DueCommands::default();
+        loop {
+            let transfer = self
+                .entries
+                .iter()
+                .find(|(_, e)| !self.suspended(e.completion.issuer()))
+                .map(|(key, _)| key)
+                .filter(|(time, _)| *time <= now);
+            let invalid = self
+                .invalid
+                .iter()
+                .find(|(_, e)| !e.raised && !self.suspended(e.issuer))
+                .map(|(key, _)| key)
+                .filter(|(time, _)| *time <= now);
+            match (transfer, invalid) {
+                (None, None) => return due,
+                (Some(t), Some(i)) if t < i => self.complete(t, &mut due),
+                (Some(t), None) => self.complete(t, &mut due),
+                (_, Some(i)) => self.raise(i, &mut due),
             }
         }
-        due
+    }
+
+    fn complete(&mut self, key: (GuestTicks, u64), due: &mut DueCommands) {
+        if let Some(e) = self.entries.remove(key) {
+            due.completions.push((e.completion, e.payload));
+        }
+    }
+
+    fn raise(&mut self, key: (GuestTicks, u64), due: &mut DueCommands) {
+        if let Some(mut entry) = self.invalid.get_mut(key) {
+            entry.raised = true;
+            due.raised.push(RaisedMfcCommand {
+                issuer: entry.issuer,
+                command: entry.command,
+            });
+        }
     }
 
     /// The queue's partial of the sync-state sum, with the sequence
-    /// number of each pending completion as its object.
+    /// number of each queued command as its object.
+    ///
+    /// A queue that never held an invalid command has the partial of its
+    /// transfers alone: an empty lane map adds nothing.
     #[inline]
     pub fn sync_partial(&self) -> u128 {
-        self.entries.partial()
+        self.entries.partial().wrapping_add(self.invalid.partial())
     }
 
     /// [`Self::sync_partial`] computed from every entry.
     pub fn sync_partial_from_scratch(&self) -> u128 {
-        self.entries.partial_from_scratch()
+        self.entries
+            .partial_from_scratch()
+            .wrapping_add(self.invalid.partial_from_scratch())
     }
 }
 
@@ -194,3 +380,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/queue_lanes_tests.rs"]
 mod lanes_tests;
+
+#[cfg(test)]
+#[path = "tests/queue_invalid_tests.rs"]
+mod invalid_tests;

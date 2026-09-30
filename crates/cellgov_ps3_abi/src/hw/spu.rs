@@ -364,6 +364,48 @@ pub const SPU_LSLR_FULL: u32 = SPU_LS_SIZE as u32 - 1;
 /// [CBE-Handbook p:445 s:17.1 Table 17-2] MFC_Cmd has 16 maximum entries; [CBE-Handbook p:528 s:19.4.3.2] each MFC has a 16-entry SPU command queue.
 pub const MFC_SPU_QUEUE_DEPTH: u32 = 16;
 
+/// The largest MFC transfer, and the largest list, in bytes.
+///
+/// [CBEA p:57 s:7.2 Table 7-6] a transfer size or a list transfer size greater than 16K bytes is an alignment error.
+pub const MFC_TRANSFER_SIZE_MAX: u32 = 0x4000;
+
+/// The reserved bits of the MFC_Size channel, bits 0:16.
+///
+/// [CBEA p:116 s:9.1.4] MFC_Size bits 0:16 are reserved; the transfer size is bits 17:31.
+pub const MFC_SIZE_RESERVED_MASK: u32 = 0xFFFF_8000;
+
+/// The reserved bits of the MFC_TagID channel, bits 0:26.
+///
+/// [CBEA p:115 s:9.1.3] MFC_TagID bits 0:26 are reserved; the tag is bits 27:31.
+pub const MFC_TAG_ID_RESERVED_MASK: u32 = 0xFFFF_FFE0;
+
+/// The low four address bits a transfer's local-store and effective
+/// addresses must share.
+///
+/// [CBEA p:57 s:7.2 Table 7-6] bits 60:63 of the effective address must equal LSA bits 28:31 for every put and get and for sndsig.
+pub const MFC_ADDRESS_LOW_BITS: u32 = 0xF;
+
+/// The low bits of a list address that must be zero: a list is
+/// doubleword aligned.
+///
+/// [CBEA p:57 s:7.2 Table 7-6] bits 29:31 of the list address must be 000.
+pub const MFC_LIST_ADDRESS_LOW_BITS: u32 = 0x7;
+
+/// The one transfer size a sndsig command takes.
+///
+/// [CBEA p:57 s:7.2 Table 7-6] a sndsig transfer size other than 4 bytes is an alignment error.
+pub const MFC_SNDSIG_SIZE: u32 = 4;
+
+/// The class 0 interrupt status bit for a DMA alignment error, bit 63
+/// of the 64-bit register.
+///
+/// [CBEA p:274 s:21.7.1] INT_Stat_class0 bit 63 (A) is the DMA alignment interrupt, bit 62 (C) the invalid DMA command interrupt.
+pub const MFC_CLASS0_ALIGNMENT: u64 = 1;
+
+/// The class 0 interrupt status bit for an invalid DMA command, bit 62
+/// of the 64-bit register.
+pub const MFC_CLASS0_INVALID_COMMAND: u64 = 1 << 1;
+
 /// Entries in the SPU inbound mailbox.
 ///
 /// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_RdInMbox has 4 maximum entries.

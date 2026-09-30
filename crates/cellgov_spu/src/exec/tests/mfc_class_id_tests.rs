@@ -6,7 +6,7 @@
 //! that carries a class id, which is what the channel exists to let a
 //! guest set.
 
-use crate::fault_codes::{FAULT_LS_OUT_OF_RANGE, FAULT_UNSUPPORTED_MFC_CMD};
+use crate::fault_codes::FAULT_UNSUPPORTED_MFC_CMD;
 use crate::SpuExecutionUnit;
 use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
@@ -207,49 +207,65 @@ fn an_unmodelled_opcode_is_refused_whatever_its_class_ids() {
     assert!(effects.is_empty(), "and nothing was enqueued: {effects:?}");
 }
 
+/// Marks the last 16 bytes of local store 0xAA, and returns the `len`
+/// bytes a transfer from there reads: those 16, then the start of local
+/// store, which holds the program.
+fn mark_the_wrap(unit: &mut SpuExecutionUnit, len: usize) -> Vec<u8> {
+    let ls = &mut unit.state_mut().ls;
+    ls[SPU_LS_SIZE - 16..].fill(0xAA);
+    let mut wrapped = ls[SPU_LS_SIZE - 16..].to_vec();
+    wrapped.extend_from_slice(&ls[..len - 16]);
+    wrapped
+}
+
 /// `MFC_LSA` and `MFC_Size` arrive on separate channels and neither
-/// write bounds the pair, so the range is the guest's to choose. A
-/// direct index of local store here panics the host on a range it
-/// cannot hold.
+/// write bounds the pair, so the range is the guest's to choose.
+///
+/// [CBEA p:221 s:15.6] the MFC's local-store accesses take the SPU Local Storage Limit Register wrap.
 #[test]
-fn a_put_reaching_past_local_store_is_refused() {
+fn a_put_reaching_past_local_store_wraps_to_its_start() {
     let lsa = (SPU_LS_SIZE - 16) as u32;
     let mut unit = unit_issuing(TCLASS << 24 | RCLASS << 16 | MFC_PUT);
+    let want = mark_the_wrap(&mut unit, 64);
     {
         let s = unit.state_mut();
         s.channels.mfc_lsa = lsa;
+        s.channels.mfc_eal = 0x100;
         s.channels.mfc_size = 64;
     }
     let (result, effects) = run_once(&mut unit);
 
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(FAULT_LS_OUT_OF_RANGE | (lsa & 0xFFFF))),
-        "refused by name, carrying the staged local-store address",
+    assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::DmaEnqueue { payload: Some(bytes), .. }] if *bytes == want
+        ),
+        "the payload is the wrapped bytes: {effects:?}"
     );
-    assert!(effects.is_empty(), "and nothing was enqueued: {effects:?}");
 }
 
-/// The same bound on the conditional store, whose line is a fixed 128
-/// bytes wherever `MFC_LSA` points.
+/// The conditional store moves the local-store line containing
+/// `MFC_LSA`, so an address near the end never wraps to the start.
 #[test]
-fn a_putllc_reaching_past_local_store_is_refused() {
+fn a_putllc_stores_the_local_store_line_containing_its_address() {
     let lsa = (SPU_LS_SIZE - 16) as u32;
     let line = ReservedLine::containing(u64::from(TRANSFER_EAL));
     let mut unit = unit_issuing(MFC_PUTLLC);
+    let want: Vec<u8> = (0..128).map(|i| i as u8 ^ 0x5A).collect();
     {
         let s = unit.state_mut();
+        s.ls[SPU_LS_SIZE - 128..].copy_from_slice(&want);
         s.channels.mfc_lsa = lsa;
         s.reservation = Some(line);
     }
-    let (result, effects) = run_once_holding(&mut unit, line);
+    let (_, effects) = run_once_holding(&mut unit, line);
 
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(FAULT_LS_OUT_OF_RANGE | (lsa & 0xFFFF))),
-        "refused by name, carrying the staged local-store address",
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::ConditionalStore { bytes, .. }] if bytes.bytes() == want.as_slice()
+        ),
+        "the line is the last 128 bytes: {effects:?}"
     );
-    assert!(effects.is_empty(), "and nothing was enqueued: {effects:?}");
 }

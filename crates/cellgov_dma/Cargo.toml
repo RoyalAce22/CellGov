@@ -19,3 +19,4 @@ cellgov_event = { path = "../cellgov_event" }
 # constants, so a request cannot carry a tag the completion cannot
 # publish.
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
+thiserror = "2"

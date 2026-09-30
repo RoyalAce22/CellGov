@@ -155,6 +155,11 @@ fn drive(
                     append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
                     return Ok((diag, BootOutcome::Fault));
                 }
+                if let Some(exception) = rt.take_mfc_exception() {
+                    let mut diag = format!("SPU_MFC_EXCEPTION at step {}: {exception}", ctx.steps);
+                    append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
+                    return Ok((diag, BootOutcome::Fault));
+                }
 
                 // Post-commit counters: only advance when the batch was applied.
                 if let Some(pc) = step.result.local_diagnostics.pc {
@@ -203,6 +208,11 @@ fn drive(
                 }
             }
             Err(StepError::NoRunnableUnit) => {
+                if let Some(exception) = rt.take_mfc_exception() {
+                    let mut diag = format!("SPU_MFC_EXCEPTION at step {}: {exception}", ctx.steps);
+                    append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
+                    return Ok((diag, BootOutcome::Fault));
+                }
                 if let Some(ref exit) = ctx.last_exit {
                     return Ok((
                         format_process_exit(
@@ -224,6 +234,13 @@ fn drive(
                 ));
             }
             Err(StepError::AllBlocked) => {
+                // The time warp can raise an MFC exception and then find
+                // nothing runnable, so the exception names the stop.
+                if let Some(exception) = rt.take_mfc_exception() {
+                    let mut diag = format!("SPU_MFC_EXCEPTION at step {}: {exception}", ctx.steps);
+                    append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
+                    return Ok((diag, BootOutcome::Fault));
+                }
                 let mut diag = format_deadlock(rt, *ctx.steps, &ctx.pc_ring);
                 append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
                 return Ok((diag, BootOutcome::Fault));

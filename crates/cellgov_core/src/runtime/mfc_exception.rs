@@ -1,0 +1,62 @@
+//! An MFC exception the host has not taken: a queued command the MFC
+//! refused, which suspended its SPU's command queue.
+//!
+//! The MFC reports the refusal to the PPE as a class 0 interrupt, which
+//! LV2 turns into the SPU thread-group exception event. CellGov keeps the
+//! first such exception for the host, which ends the run on it.
+//!
+//! [CBEA p:263 s:21.4 Table 21-3] the DMA alignment and invalid DMA command interrupts are class 0.
+
+use cellgov_dma::{InvalidMfcCommand, RaisedMfcCommand};
+use cellgov_event::UnitId;
+
+use super::Runtime;
+
+/// A command the MFC refused, and the SPU it suspended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MfcException {
+    /// The SPU unit whose queue suspended.
+    pub unit: UnitId,
+    /// The SPU thread group holding the unit, if one does.
+    pub group: Option<u32>,
+    /// The command and the check it failed.
+    pub command: InvalidMfcCommand,
+}
+
+impl core::fmt::Display for MfcException {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let class = match self.command.error.class() {
+            cellgov_dma::MfcExceptionClass::Alignment => "DMA alignment",
+            cellgov_dma::MfcExceptionClass::InvalidCommand => "invalid DMA command",
+        };
+        let p = self.command.params;
+        write!(f, "SPU unit {}", self.unit.raw())?;
+        if let Some(group) = self.group {
+            write!(f, " (group 0x{group:08x})")?;
+        }
+        write!(
+            f,
+            ": {class}: {} (cmd 0x{:08x} lsa 0x{:08x} eah 0x{:08x} eal 0x{:08x} size 0x{:08x} tag 0x{:08x})",
+            self.command.error, self.command.word, p.lsa, p.eah, p.eal, p.size, p.tag
+        )
+    }
+}
+
+impl Runtime {
+    /// The first MFC exception since the last take, which the host acts
+    /// on after a commit.
+    pub fn take_mfc_exception(&mut self) -> Option<MfcException> {
+        self.mfc_exception.take()
+    }
+
+    /// Record a command the queue raised. The first one stands until the
+    /// host takes it.
+    pub(super) fn record_mfc_exception(&mut self, raised: RaisedMfcCommand) {
+        let group = self.lv2_host.live_spu_group(raised.issuer);
+        self.mfc_exception.get_or_insert(MfcException {
+            unit: raised.issuer,
+            group,
+            command: raised.command,
+        });
+    }
+}

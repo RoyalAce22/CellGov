@@ -9,7 +9,11 @@ use super::types::{SpuEncodingForm, SpuOutcomeClass, SpuSequenceFlow};
 
 const NO_EFFECTS: &[EffectKind] = &[];
 const RDCH_EFFECTS: &[EffectKind] = &[EffectKind::MailboxPop];
-const WRCH_EFFECTS: &[EffectKind] = &[EffectKind::DmaEnqueue, EffectKind::ConditionalStore];
+const WRCH_EFFECTS: &[EffectKind] = &[
+    EffectKind::DmaEnqueue,
+    EffectKind::ConditionalStore,
+    EffectKind::MfcInvalidCommand,
+];
 // The fuzz engine rejects outcomes outside these executor-derived sets.
 const CONTINUE: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue];
 const FAULT: &[SpuOutcomeClass] = &[SpuOutcomeClass::Fault];

@@ -2,14 +2,14 @@
 //! `faulting_ea`.
 
 use crate::fault_codes::{
-    FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_GET_UNRESOLVED, FAULT_MFC_READ_UNRESOLVED,
+    FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_ADDRESS_WRAPS, FAULT_MFC_READ_UNRESOLVED,
 };
 use crate::SpuExecutionUnit;
 use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, YieldReason};
 use cellgov_mem::GuestMemory;
-use cellgov_ps3_abi::hw::spu::{MFC_CMD, MFC_GET, MFC_GETLLAR, MFC_PUT};
+use cellgov_ps3_abi::hw::spu::{MFC_CMD, MFC_GET, MFC_GETLLAR};
 use cellgov_time::Budget;
 
 const UNIT: u64 = 7;
@@ -18,11 +18,6 @@ const MEM_BYTES: usize = 0x2000;
 /// An address no region backs, with its low half clear so the masked
 /// detail alone cannot name it.
 const UNMAPPED_EA: u64 = 0x9_0000;
-
-/// A local-store address past the 16-bit detail half but inside the
-/// store, so a transfer of `OVERRUN_BYTES` from it escapes the store.
-const HIGH_LSA: u32 = 0x3_FF00;
-const OVERRUN_BYTES: u32 = 0x200;
 
 /// `il $rt, imm`.
 fn il(rt: u32, imm: u32) -> [u8; 4] {
@@ -93,32 +88,12 @@ fn a_get_whose_source_runs_past_the_address_space_is_refused_at_issue() {
     let mut unit = unit_issuing(MFC_GET, u64::MAX - 0x3F, 0x200, 64);
     let issued = run_once(&mut unit, &mem);
     assert_eq!(issued.yield_reason, YieldReason::Fault);
-    assert_eq!(class_of(&issued), FAULT_MFC_GET_UNRESOLVED);
+    assert_eq!(class_of(&issued), FAULT_MFC_ADDRESS_WRAPS);
     assert_eq!(issued.local_diagnostics.pc, Some(4), "the wrch");
     assert_eq!(
         issued.local_diagnostics.faulting_ea,
         Some(u64::MAX - 0x3F),
         "the detail half carries the tag id, so the address rides here",
-    );
-}
-
-#[test]
-fn a_put_from_past_local_store_carries_the_local_store_address_whole() {
-    let mem = GuestMemory::new(MEM_BYTES);
-    let mut unit = unit_issuing(MFC_PUT, 0x1000, HIGH_LSA, OVERRUN_BYTES);
-    let result = run_once(&mut unit, &mem);
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(class_of(&result), FAULT_LS_OUT_OF_RANGE);
-    assert_eq!(
-        detail_of(&result),
-        HIGH_LSA & FAULT_DETAIL_MASK,
-        "the detail half holds the address modulo 64 KB",
-    );
-    assert_eq!(
-        result.local_diagnostics.faulting_ea,
-        Some(u64::from(HIGH_LSA)),
-        "and the diagnostics hold all 18 bits",
     );
 }
 

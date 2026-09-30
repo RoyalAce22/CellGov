@@ -74,13 +74,13 @@ pub(super) fn structured_sequence(
             })?
             .canonical_word;
         words.resize(count, nop);
-        // [Feng2026 p:32 s:4.3.3] An expected termination keeps its own code so it is not confused with a behavioural divergence; the fault the LocalStoreFault family intends is marked as a named boundary.
+        // [Feng2026 p:32 s:4.3.3] An expected termination keeps its own code so it is not confused with a behavioural divergence; the fault the MfcAddressFault family intends is marked as a named boundary.
         let features = match interaction {
             SpuSequenceInteraction::Branch | SpuSequenceInteraction::Stop => {
                 BTreeSet::from([CaseFeature::ControlledFlow])
             }
             SpuSequenceInteraction::LocalStore => BTreeSet::from([CaseFeature::MappedMemory]),
-            SpuSequenceInteraction::LocalStoreFault => {
+            SpuSequenceInteraction::MfcAddressFault => {
                 BTreeSet::from([CaseFeature::ChannelState, CaseFeature::NamedFaultBoundary])
             }
             SpuSequenceInteraction::Channel

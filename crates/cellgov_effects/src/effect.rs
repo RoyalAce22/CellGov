@@ -2,7 +2,7 @@
 //! runtime-visible work.
 
 use crate::payload::{FaultKind, MailboxMessage, WaitTarget, WritePayload};
-use cellgov_dma::DmaRequest;
+use cellgov_dma::{DmaRequest, InvalidMfcCommand};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_sync::{MailboxId, SignalId};
@@ -210,6 +210,17 @@ pub enum Effect {
         /// Reading unit.
         source: UnitId,
     },
+    /// Queue an MFC command whose parameters the MFC refuses.
+    ///
+    /// The command holds a slot in its issuer's command queue. When the
+    /// queue reaches it, the issuer's queue suspends and the host gets
+    /// the exception.
+    MfcInvalidCommand {
+        /// The unit that queued the command.
+        issuer: UnitId,
+        /// The command and the check it fails.
+        command: InvalidMfcCommand,
+    },
 }
 
 /// Stable identity for an [`Effect`] variant used by validation tools.
@@ -247,6 +258,8 @@ pub enum EffectKind {
     ClockRead,
     /// [`Effect::MailboxPop`].
     MailboxPop,
+    /// [`Effect::MfcInvalidCommand`].
+    MfcInvalidCommand,
 }
 
 impl Effect {
@@ -269,6 +282,7 @@ impl Effect {
             Self::SharedReadIntent { .. } => EffectKind::SharedReadIntent,
             Self::ClockRead { .. } => EffectKind::ClockRead,
             Self::MailboxPop { .. } => EffectKind::MailboxPop,
+            Self::MfcInvalidCommand { .. } => EffectKind::MfcInvalidCommand,
         }
     }
 

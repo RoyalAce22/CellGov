@@ -76,11 +76,16 @@ fn drive(
                     }
                     StepVerdict::PcReached(addr) => return Ok(BootOutcome::PcReached(addr)),
                 }
-                if rt.take_spu_thread_failure().is_some() {
+                if rt.take_spu_thread_failure().is_some() || rt.take_mfc_exception().is_some() {
                     return Ok(BootOutcome::Fault);
                 }
             }
             Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
+                // The time warp can raise an MFC exception and then find
+                // nothing runnable.
+                if rt.take_mfc_exception().is_some() {
+                    return Ok(BootOutcome::Fault);
+                }
                 return Ok(BootOutcome::ProcessExit);
             }
             Err(StepError::MaxStepsExceeded) => return Ok(BootOutcome::MaxSteps),

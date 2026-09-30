@@ -198,6 +198,9 @@ impl Runtime {
                 }
                 Effect::ClockRead { .. } => "runtime.apply_lv2_effects_unsupported_clock_read",
                 Effect::MailboxPop { .. } => "runtime.apply_lv2_effects_unsupported_mailbox_pop",
+                Effect::MfcInvalidCommand { .. } => {
+                    "runtime.apply_lv2_effects_unsupported_mfc_invalid_command"
+                }
             };
             self.lv2_host.log_invariant_break(
                 site,

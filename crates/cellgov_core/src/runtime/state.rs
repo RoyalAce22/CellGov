@@ -65,6 +65,9 @@ pub struct Runtime {
     /// The first SPU thread-group error the host has not taken; see
     /// [`Runtime::take_spu_thread_failure`].
     pub(super) spu_thread_failure: Option<crate::runtime::spu_thread_stop::SpuThreadFailure>,
+    /// The first MFC exception the host has not taken; see
+    /// [`Runtime::take_mfc_exception`].
+    pub(super) mfc_exception: Option<crate::runtime::mfc_exception::MfcException>,
     pub(super) lv2_host: Lv2Host,
     pub(super) syscall_responses: SyscallResponseTable,
     pub(super) spu_factory: Option<SpuFactory>,

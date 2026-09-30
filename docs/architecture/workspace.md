@@ -163,7 +163,7 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_event`        | strum                                                                      |
 | `cellgov_mem`          | derive_more, serde, thiserror                                              |
 | `cellgov_effects`      | none                                                                       |
-| `cellgov_dma`          | none                                                                       |
+| `cellgov_dma`          | thiserror                                                                  |
 | `cellgov_sync`         | derive_more                                                                |
 | `cellgov_exec`         | strum, thiserror                                                           |
 | `cellgov_trace`        | num_enum, strum, thiserror                                                 |

@@ -471,6 +471,7 @@ fn apply_committed_effects(
             Effect::MailboxSend { .. }
             | Effect::MailboxReceiveAttempt { .. }
             | Effect::MailboxPop { .. }
+            | Effect::MfcInvalidCommand { .. }
             | Effect::DmaEnqueue { .. }
             | Effect::WaitOnEvent { .. }
             | Effect::WakeUnit { .. }

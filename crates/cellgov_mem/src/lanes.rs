@@ -181,6 +181,9 @@ pub mod source {
     /// Spawned children that wait for their init pass, one object per
     /// queue position.
     pub const PENDING_CHILD_INIT: u8 = 60;
+    /// MFC commands queued with a parameter the MFC refuses, one object
+    /// per queue sequence number.
+    pub const MFC_INVALID_COMMAND: u8 = 61;
 }
 
 const OBJECT_BITS: u32 = 32;

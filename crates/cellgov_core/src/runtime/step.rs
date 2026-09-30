@@ -42,7 +42,8 @@ impl Runtime {
             self.registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Blocked)
         });
         any_blocked
-            && (self.dma_queue.peek().is_some() || self.timer_wakes.peek_deadline().is_some())
+            && (self.dma_queue.next_event_time().is_some()
+                || self.timer_wakes.peek_deadline().is_some())
     }
 
     /// Select a unit, grant budget, run it to yield, advance guest time.
@@ -91,7 +92,9 @@ impl Runtime {
                     return Err(StepError::NoRunnableUnit);
                 }
                 loop {
-                    let next_dma = self.dma_queue.peek().map(|c| c.completion_time());
+                    // A transfer a suspended queue holds never completes,
+                    // so it is no wake source.
+                    let next_dma = self.dma_queue.next_event_time();
                     let next_timer = self.timer_wakes.peek_deadline();
                     let next_time = match (next_dma, next_timer) {
                         (Some(d), Some(t)) => d.min(t),

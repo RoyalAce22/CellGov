@@ -2,7 +2,7 @@
 //! with the fetch-decode-execute loop in `run_until_yield`.
 
 use super::spu_unit::{SpuExecutionUnit, SpuSnapshot};
-use super::transfer::{copy_into_local_store, shared_read, CopyRefusal};
+use super::transfer::{copy_into_local_store, shared_read};
 use crate::exec::{SpuFault, SpuStepOutcome};
 use crate::fault_codes::{
     guest_fault, guest_fault_for, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_READ_UNRESOLVED,
@@ -155,28 +155,19 @@ impl ExecutionUnit for SpuExecutionUnit {
                     // `ea` comes from MFC_EAH and MFC_EAL, so the guest can
                     // name an address no region backs.
                     // [CBEA p:111 s:9 SPU Channel Map] MFC_EAL is a write channel carrying the low-order SPU effective-address command parameter.
-                    let read =
-                        copy_into_local_store(&mut self.state.ls, ctx.memory(), ea, lsa, size);
-                    if let Err(refusal) = read {
+                    let read = copy_into_local_store(&mut self.state, ctx.memory(), ea, lsa, size);
+                    if read.is_err() {
                         // A reservation over bytes that never arrived
                         // would let a later putllc succeed against stale
                         // local store, so a refused copy takes none.
-                        let (fault, address) = match refusal {
-                            CopyRefusal::Unresolved => {
-                                (guest_fault(FAULT_MFC_READ_UNRESOLVED, ea as u32), ea)
-                            }
-                            CopyRefusal::LocalStoreEscapes => {
-                                (guest_fault(FAULT_LS_OUT_OF_RANGE, lsa), u64::from(lsa))
-                            }
-                        };
                         self.state.reservation = None;
                         effects.clear();
                         self.status = UnitStatus::Faulted;
                         return ExecutionStepResult {
                             yield_reason: YieldReason::Fault,
                             consumed_cost: InstructionCost::new(budget.raw() - remaining),
-                            local_diagnostics: LocalDiagnostics::with_pc_ea(step_pc, address),
-                            fault: Some(fault),
+                            local_diagnostics: LocalDiagnostics::with_pc_ea(step_pc, ea),
+                            fault: Some(guest_fault(FAULT_MFC_READ_UNRESOLVED, ea as u32)),
                             syscall_args: None,
                         };
                     }
@@ -202,7 +193,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         }
                         // The detail half carries the tag, so the address
                         // rides here.
-                        SpuFault::MfcGetAddressWraps(_) => {
+                        SpuFault::MfcAddressWraps(_) => {
                             let c = &self.state.channels;
                             let ea = (u64::from(c.mfc_eah) << 32) | u64::from(c.mfc_eal);
                             LocalDiagnostics::with_pc_ea(step_pc, ea)
@@ -336,13 +327,11 @@ impl ExecutionUnit for SpuExecutionUnit {
     }
 
     /// [CBEA p:60 s:7.5] a get moves main-storage bytes into local storage.
+    ///
+    /// Each byte's address wraps by the limit register, so a landing never
+    /// escapes local store.
     fn land_local_store(&mut self, lsa: u32, bytes: &[u8]) -> Result<(), ProblemStateError> {
-        let start = lsa as usize;
-        let target = start
-            .checked_add(bytes.len())
-            .and_then(|end| self.state.ls.get_mut(start..end))
-            .ok_or(ProblemStateError::Refused)?;
-        target.copy_from_slice(bytes);
+        self.state.write_ls_wrapped(lsa, bytes);
         Ok(())
     }
 

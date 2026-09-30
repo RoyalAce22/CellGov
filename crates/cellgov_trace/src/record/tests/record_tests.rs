@@ -102,9 +102,10 @@ fn effect_emitted_discriminants_locked() {
     assert_eq!(TracedEffectKind::SharedReadIntent as u8, 13);
     assert_eq!(TracedEffectKind::ClockRead as u8, 14);
     assert_eq!(TracedEffectKind::MailboxPop as u8, 15);
-    // Without this, a variant appended below MailboxPop keeps every
+    assert_eq!(TracedEffectKind::MfcInvalidCommand as u8, 16);
+    // Without this, a variant appended below MfcInvalidCommand keeps every
     // assertion above green and ships with an unpinned discriminant.
-    assert_eq!(TracedEffectKind::VARIANTS.len(), 16);
+    assert_eq!(TracedEffectKind::VARIANTS.len(), 17);
 }
 
 #[test]

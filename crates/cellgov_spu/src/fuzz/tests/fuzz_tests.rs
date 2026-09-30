@@ -636,7 +636,11 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
     .fuzz_descriptor();
     assert_eq!(
         wrch.effects,
-        &[EffectKind::DmaEnqueue, EffectKind::ConditionalStore]
+        &[
+            EffectKind::DmaEnqueue,
+            EffectKind::ConditionalStore,
+            EffectKind::MfcInvalidCommand
+        ]
     );
     assert_eq!(
         wrch.outcomes,

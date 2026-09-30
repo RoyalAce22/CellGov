@@ -137,6 +137,8 @@ pub enum TracedEffectKind {
     ClockRead = 14,
     /// Removal of a mailbox message the unit already read.
     MailboxPop = 15,
+    /// An MFC command queued with a parameter the MFC refuses.
+    MfcInvalidCommand = 16,
 }
 
 /// Reason a host-side invariant break was recorded into the trace

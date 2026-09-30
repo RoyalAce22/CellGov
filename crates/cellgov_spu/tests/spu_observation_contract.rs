@@ -157,9 +157,9 @@ fn fault_observation_rejects_a_seeded_post_fault_write() {
 #[test]
 fn conditional_store_fault_keeps_its_reservation_until_commit() {
     let mut initial = SpuState::new();
-    initial.ls.truncate(8);
     initial.reservation = Some(cellgov_sync::ReservedLine::containing(0));
-    initial.set_reg_word_splat(3, cellgov_ps3_abi::hw::spu::MFC_PUTLLC);
+    // An opcode the model does not execute faults the command.
+    initial.set_reg_word_splat(3, 0x21);
     let instruction = SpuInstruction::Wrch {
         channel: cellgov_ps3_abi::hw::spu::MFC_CMD,
         rt: 3,
@@ -175,7 +175,7 @@ fn conditional_store_fault_keeps_its_reservation_until_commit() {
     assert_eq!(observed.state.reservation, initial.reservation);
 
     let mut successful = initial.clone();
-    successful.ls.resize(128, 0);
+    successful.set_reg_word_splat(3, cellgov_ps3_abi::hw::spu::MFC_PUTLLC);
     let SpuStepOutcome::Yield { effects, .. } =
         execute(&instruction, &mut successful, UnitId::new(0))
     else {

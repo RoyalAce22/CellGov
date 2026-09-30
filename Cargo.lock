@@ -248,6 +248,7 @@ dependencies = [
  "cellgov_mem",
  "cellgov_ps3_abi",
  "cellgov_time",
+ "thiserror",
 ]
 
 [[package]]

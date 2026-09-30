@@ -33,12 +33,19 @@ impl DmaLatencyModel for FixedLatency {
         now.checked_add(GuestTicks::new(self.ticks))
             .expect("completion time within u64 range")
     }
+
+    /// Saturates at the end of guest time: the command moves no bytes,
+    /// so a clamped time loses nothing.
+    fn invalid_command_time(&self, now: GuestTicks, _queued: &DmaQueue) -> GuestTicks {
+        now.saturating_add(GuestTicks::new(self.ticks))
+    }
 }
 
-/// Computes the modeled completion time for a DMA request.
+/// Computes when the queue completes a DMA request or reaches a command
+/// the MFC refuses.
 ///
-/// Implementations must be a pure function of `(request, now, queued)`
-/// and implementation-owned state, deterministic across runs and hosts,
+/// Each method must be a pure function of its arguments and
+/// implementation-owned state, deterministic across runs and hosts,
 /// and monotone in `now`. The event queue relies on monotonicity to stay
 /// sorted without re-validation.
 ///
@@ -48,6 +55,15 @@ pub trait DmaLatencyModel {
     /// Guest tick at which `req` is considered complete, given issue at
     /// `now` behind the commands in `queued`. Must satisfy `>= now`.
     fn completion_time(&self, req: &DmaRequest, now: GuestTicks, queued: &DmaQueue) -> GuestTicks;
+
+    /// Guest tick at which the queue reaches a refused command issued at `now`.
+    ///
+    /// The command moves no bytes. A model places it where a transfer
+    /// issued at `now` completes. The result is at least `now`, and the
+    /// default returns `now`.
+    fn invalid_command_time(&self, now: GuestTicks, _queued: &DmaQueue) -> GuestTicks {
+        now
+    }
 }
 
 #[cfg(test)]

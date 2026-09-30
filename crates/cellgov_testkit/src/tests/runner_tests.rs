@@ -3,8 +3,87 @@
 use super::*;
 use crate::world::CountingUnit;
 use cellgov_core::Runtime;
-use cellgov_time::Budget;
+use cellgov_dma::{InvalidMfcCommand, MfcCommandError, MfcParameters};
+use cellgov_effects::Effect;
+use cellgov_event::UnitId;
+use cellgov_exec::{
+    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
+};
+use cellgov_time::{Budget, InstructionCost};
 use cellgov_trace::{TraceReader, TraceRecord};
+
+/// Queues one command the MFC refuses, then finishes.
+#[derive(Clone)]
+struct RefusedCommandUnit {
+    id: UnitId,
+    done: bool,
+}
+
+const REFUSED: InvalidMfcCommand = InvalidMfcCommand {
+    word: 0x20,
+    params: MfcParameters {
+        lsa: 0x100,
+        eah: 0,
+        eal: 0x2000,
+        size: 3,
+        tag: 1,
+    },
+    error: MfcCommandError::SizeUnaligned(3),
+};
+
+impl ExecutionUnit for RefusedCommandUnit {
+    type Snapshot = bool;
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+    fn status(&self) -> UnitStatus {
+        if self.done {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+    fn run_until_yield(
+        &mut self,
+        _budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        self.done = true;
+        effects.push(Effect::MfcInvalidCommand {
+            issuer: self.id,
+            command: REFUSED,
+        });
+        ExecutionStepResult {
+            yield_reason: YieldReason::Finished,
+            consumed_cost: InstructionCost::new(1),
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+    fn snapshot(&self) -> bool {
+        self.done
+    }
+}
+
+#[test]
+fn a_result_names_the_mfc_exception_its_run_stalled_on() {
+    let clean = run(ScenarioFixture::empty());
+    assert_eq!(clean.mfc_exception, None);
+
+    let refused = run(ScenarioFixture::builder()
+        .memory_size(16)
+        .max_steps(100)
+        .register(|rt: &mut Runtime| {
+            rt.register_unit_with(|id| RefusedCommandUnit { id, done: false });
+        })
+        .build());
+    assert_eq!(refused.outcome, ScenarioOutcome::Stalled);
+    let exception = refused.mfc_exception.expect("the run raised the command");
+    assert_eq!(exception.unit, UnitId::new(0));
+    assert_eq!(exception.command, REFUSED);
+}
 
 #[test]
 fn a_result_carries_the_run_s_first_invariant_break_for_its_driver_to_report() {
