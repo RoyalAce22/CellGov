@@ -54,6 +54,7 @@ pub struct DmaRequest {
     ordering: MfcOrdering,
     stall_notify: bool,
     holds_slot: bool,
+    local_store_source: bool,
 }
 
 impl DmaRequest {
@@ -82,6 +83,7 @@ impl DmaRequest {
             ordering: MfcOrdering::None,
             stall_notify: false,
             holds_slot: true,
+            local_store_source: false,
         })
     }
 
@@ -136,6 +138,35 @@ impl DmaRequest {
         self.holds_slot
     }
 
+    /// Mark a put's source as a range of its issuer's local store, which
+    /// the runtime reads when the transfer completes.
+    ///
+    /// [CBEA p:173 s:10.3] the local-storage access of a queued command is complete when its tag group reads complete.
+    #[inline]
+    pub const fn with_local_store_source(mut self) -> Self {
+        self.local_store_source = true;
+        self
+    }
+
+    /// Whether the put reads its source from its issuer's local store at
+    /// completion.
+    #[inline]
+    pub const fn local_store_source(self) -> bool {
+        self.local_store_source
+    }
+
+    /// The range of the issuer's local store the transfer reads or
+    /// writes at completion: a get's destination, or the source of a put
+    /// from local store.
+    #[inline]
+    pub const fn local_store_range(self) -> Option<ByteRange> {
+        match self.direction {
+            DmaDirection::Get => Some(self.destination),
+            DmaDirection::Put if self.local_store_source => Some(self.source),
+            DmaDirection::Put => None,
+        }
+    }
+
     /// MFC tag-id the SPU issued under; `None` for PPU/host-initiated DMA.
     #[inline]
     pub const fn tag_id(self) -> Option<MfcTagId> {
@@ -178,12 +209,13 @@ impl DmaRequest {
     }
 
     /// The main-storage range the transfer reads: a get's source, or a
-    /// put's source when no inline payload already carries its bytes.
+    /// put's source when neither an inline payload nor local store holds
+    /// its bytes.
     #[inline]
     pub const fn main_storage_read(self, payloaded: bool) -> Option<ByteRange> {
         match self.direction {
             DmaDirection::Get => Some(self.source),
-            DmaDirection::Put if payloaded => None,
+            DmaDirection::Put if payloaded || self.local_store_source => None,
             DmaDirection::Put => Some(self.source),
         }
     }

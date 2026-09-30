@@ -136,9 +136,14 @@ fn a_put_list_carries_each_element_bytes_from_its_local_store_address() {
         .iter()
         .map(|e| match e {
             Effect::DmaEnqueue {
-                payload: Some(p), ..
-            } => p.clone(),
-            other => panic!("expected a put, got {other:?}"),
+                request,
+                payload: None,
+            } if request.local_store_source() => {
+                let source = request.source();
+                unit.state()
+                    .read_ls_wrapped(source.start().raw() as u32, source.length() as u32)
+            }
+            other => panic!("expected a put from local store, got {other:?}"),
         })
         .collect();
     assert_eq!(payloads[0], (0u8..0x10).collect::<Vec<_>>());

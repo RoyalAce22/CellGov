@@ -324,14 +324,7 @@ fn issue_transfer(
     };
     let local =
         ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size)).expect("valid LS range");
-    let (src, dst, payload) = match direction {
-        // Each local-store byte's address wraps by the limit register, so
-        // no range the guest stages escapes local store.
-        DmaDirection::Put => (local, main, Some(state.read_ls_wrapped(lsa, size))),
-        // The runtime reads a get's source when it completes and lands the
-        // bytes in local store.
-        DmaDirection::Get => (main, local, None),
-    };
+    let request = local_store_transfer(direction, local, main, unit_id);
     // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
     if direction == DmaDirection::Put {
         if let Some(line) = state.reservation {
@@ -340,14 +333,40 @@ fn issue_transfer(
             }
         }
     }
-    let request = DmaRequest::new(direction, src, dst, unit_id)
-        .expect("matching sizes")
-        .with_tag_id(tag)
-        .with_ordering(ordering);
+    let request = request.with_tag_id(tag).with_ordering(ordering);
     state.channels.cmd_queue_free -= 1;
     SpuStepOutcome::Yield {
-        effects: vec![Effect::DmaEnqueue { request, payload }],
+        effects: vec![Effect::DmaEnqueue {
+            request,
+            payload: None,
+        }],
         reason: YieldReason::DmaSubmitted,
+    }
+}
+
+/// A transfer between `local` in the issuer's local store and `main`.
+///
+/// The runtime reads the source and writes the destination when the
+/// transfer completes. A store the issuer makes to a put's source while
+/// the put is in flight reaches the put, and the landing of a get
+/// replaces a store to its destination. A program that orders its own
+/// accesses against a transfer waits for the tag group first.
+///
+/// [CBEA p:173 s:10.3] the local-storage access of a queued command is complete when its tag group reads complete.
+/// [SPU-ISA p:253 s:13] an external device's local-storage accesses can expose the SPU's reordering of its own, and the section names how to order the two.
+fn local_store_transfer(
+    direction: DmaDirection,
+    local: ByteRange,
+    main: ByteRange,
+    unit_id: UnitId,
+) -> DmaRequest {
+    match direction {
+        DmaDirection::Put => DmaRequest::new(direction, local, main, unit_id)
+            .expect("matching sizes")
+            .with_local_store_source(),
+        DmaDirection::Get => {
+            DmaRequest::new(direction, main, local, unit_id).expect("matching sizes")
+        }
     }
 }
 
@@ -598,10 +617,7 @@ fn queue_list_segment(
         }
         let local = ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size))
             .expect("valid LS range");
-        let (src, dst, payload) = match list.direction {
-            DmaDirection::Put => (local, main, Some(state.read_ls_wrapped(lsa, size))),
-            DmaDirection::Get => (main, local, None),
-        };
+
         // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
         if list.direction == DmaDirection::Put {
             if let Some(line) = state.reservation {
@@ -610,8 +626,7 @@ fn queue_list_segment(
                 }
             }
         }
-        let mut request = DmaRequest::new(list.direction, src, dst, unit_id)
-            .expect("matching sizes")
+        let mut request = local_store_transfer(list.direction, local, main, unit_id)
             .with_tag_id(list.tag)
             .with_ordering(list.ordering);
         if stall {
@@ -619,7 +634,10 @@ fn queue_list_segment(
         } else if list.remaining > 0 {
             request = request.without_slot();
         }
-        effects.push(Effect::DmaEnqueue { request, payload });
+        effects.push(Effect::DmaEnqueue {
+            request,
+            payload: None,
+        });
         if stall {
             break;
         }

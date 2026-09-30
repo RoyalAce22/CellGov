@@ -42,8 +42,8 @@ use cellgov_event::UnitId;
 use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 use cellgov_time::GuestTicks;
 
-/// Completion plus optional inline bytes for transfers from
-/// unit-private memory.
+/// Completion plus the inline bytes the transfer writes, if it carries
+/// them.
 #[derive(Debug, Clone)]
 struct QueueEntry {
     completion: DmaCompletion,
@@ -64,6 +64,7 @@ struct QueueEntry {
 /// 10. the ordering, when the command sets one
 /// 11. 1 for a list element with the stall-and-notify flag
 /// 12. 1 for a list element that holds no command-queue slot
+/// 13. 1 for a put whose source is its issuer's local store
 impl LaneValue for QueueEntry {
     fn lanes(&self, lanes: &mut ObjectLanes) {
         let c = self.completion;
@@ -88,6 +89,9 @@ impl LaneValue for QueueEntry {
         }
         if !c.request().holds_slot() {
             lanes.lane(12, 0, 1);
+        }
+        if c.request().local_store_source() {
+            lanes.lane(13, 0, 1);
         }
     }
 }
@@ -158,8 +162,8 @@ impl LaneValue for InvalidEntry {
 /// The refused command that a queued transfer stands for, with `error`.
 ///
 /// The queue keeps a transfer as ranges, so this function rebuilds the
-/// opcode and the two addresses from them. A put with no inline payload
-/// names no local-store address, so its `lsa` is 0.
+/// opcode and the two addresses from them. A put whose source is main
+/// storage names no local-store address, so its `lsa` is 0.
 fn refused_transfer(
     c: &DmaCompletion,
     payloaded: bool,
@@ -168,7 +172,11 @@ fn refused_transfer(
     use crate::request::DmaDirection;
     use cellgov_ps3_abi::hw::spu::{MFC_GET, MFC_PUT};
     let (word, ls, main) = match c.direction() {
-        DmaDirection::Put => (MFC_PUT, payloaded.then(|| c.source()), c.destination()),
+        DmaDirection::Put => (
+            MFC_PUT,
+            (payloaded || c.request().local_store_source()).then(|| c.source()),
+            c.destination(),
+        ),
         DmaDirection::Get => (MFC_GET, Some(c.destination()), c.source()),
     };
     let ea = main.start().raw();
@@ -301,8 +309,6 @@ impl DmaQueue {
     ///
     /// When `payload` is `Some`, the commit pipeline uses those bytes
     /// at completion time instead of reading from the source address.
-    /// This supports transfers from unit-private memory (e.g. SPU local
-    /// store) that is not mapped into the guest address space.
     pub fn enqueue(&mut self, completion: DmaCompletion, payload: Option<Vec<u8>>) -> u64 {
         let seq = self.next_seq;
         self.next_seq += 1;

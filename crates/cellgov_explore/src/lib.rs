@@ -39,5 +39,9 @@ pub use util::{open_window, DrivenStop, StopClass, StopReason, WindowNeverOpened
 mod read_intent_tests;
 
 #[cfg(test)]
+#[path = "tests/local_store_tests.rs"]
+mod local_store_tests;
+
+#[cfg(test)]
 #[path = "tests/truncation_tests.rs"]
 mod truncation_tests;

@@ -71,8 +71,9 @@ nine-step deterministic loop:
    command queues one transfer per element under one slot and its tag,
    and stops after a stall-and-notify element until the SPU
    acknowledges the stall. A completing
-   get reads its source then and lands the bytes in its issuer's local
-   store. A transfer into the SPU thread window of its issuer's group
+   transfer reads its source and writes its destination then: a get
+   lands its bytes in its issuer's local store, and a put reads its
+   issuer's local store. A transfer into the SPU thread window of its issuer's group
    reaches the target thread instead: its local store, or, for a
    4-byte put, a signal-notification register or its inbound mailbox;
    any other access into the window faults. A command whose opcode or parameters the MFC refuses holds

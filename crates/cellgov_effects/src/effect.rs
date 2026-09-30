@@ -54,9 +54,9 @@ pub enum Effect {
     DmaEnqueue {
         /// The DMA request packet.
         request: DmaRequest,
-        /// Inline bytes from unit-private memory (e.g. SPU local
-        /// store); when present the commit pipeline writes these at
-        /// completion instead of reading the source range.
+        /// Bytes the command fixes when the unit issues it, such as the zeros
+        /// of a zeroing storage-control command. When present, the
+        /// completion writes them instead of reading the source range.
         payload: Option<Vec<u8>>,
     },
     /// Block this unit until the named event fires.

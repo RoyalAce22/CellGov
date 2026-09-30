@@ -115,9 +115,11 @@ govern the next instruction before a `sync.c` [SPU-ISA p:254 s:13.1],
 [SPU-ISA p:255 s:13.3], [SPU-ISA p:256 s:13.5], [SPU-ISA p:258 s:13.9].
 The SPU unit executes one instruction at a time against its own local
 store, so every store is visible to the next load and the next fetch.
-The bytes of an MFC get land in local store when the transfer
-completes, between two of the unit's steps, so a load or fetch sees
-them once the tag group reads complete. Every
+An MFC transfer reads and writes local store when it completes,
+between two of the unit's steps [CBEA p:173 s:10.3]: a get's bytes
+land then, and a put reads its source then. A load or fetch sees a
+get's bytes once the tag group reads complete, and a store to a put's
+source before then reaches the put. Every
 channel write the unit accepts governs the next instruction, and the
 channels that set execution state refuse with an unsupported-channel
 fault. That is one of the outcomes the

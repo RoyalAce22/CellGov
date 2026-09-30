@@ -110,12 +110,19 @@ step touching no shared resource still moves it. Four things read it,
 and the relation answers for each differently.
 
 A transfer's landing is the first. A step carries what each transfer in
-flight during it will touch at completion -- its destination, and its
-source unless an inline payload already holds the bytes -- and those
-ranges conflict with another step's access to them. A step that touches
-the bytes of a transfer in flight during itself conflicts with every
-step instead, because every step carries ticks and so decides which
-side of the landing that step falls on.
+flight during it will touch at completion -- its main-storage
+destination, its main-storage source unless an inline payload already
+holds the bytes, and each local-store range with the unit that owns it
+-- and those ranges conflict with another step's access to them. A step
+that touches the bytes of a transfer in flight during itself conflicts
+with every step instead, because every step carries ticks and so
+decides which side of the landing that step falls on. An SPU's loads
+and stores reach no footprint, so a step of the unit that owns a
+local-store range counts as touching it, whether the range is in
+flight during that step or during the other step of the pair. The
+issuer's end of
+a transfer the step itself queued does not count: the step's
+instructions all ran before the commit that queued it.
 
 A guest read of the time base is the second. A PPU `mftb` or `mftbu`
 puts the clock into a guest register, which the guest can store

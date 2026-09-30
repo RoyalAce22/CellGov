@@ -384,11 +384,13 @@ impl CommitPipeline {
                         signal_updates += 1;
                     }
                     Effect::DmaEnqueue { request, payload } => {
-                        // A get writes its issuer's local store, which only
-                        // the issuer can land, so the issuer must exist and
-                        // the bytes come from the source at completion.
+                        // A get writes its issuer's local store and a put
+                        // from local store reads it, both at completion, so
+                        // the issuer must exist.
                         let get = request.direction() == DmaDirection::Get;
-                        if get && ctx.units.get(request.issuer()).is_none() {
+                        if request.local_store_range().is_some()
+                            && ctx.units.get(request.issuer()).is_none()
+                        {
                             return Err(CommitError::UnknownSourceUnit {
                                 effect_index: idx,
                                 source_unit: request.issuer(),

@@ -362,9 +362,9 @@ fn wrch_mfc_cmd_yields_dma_submitted() {
     assert!(matches!(
         &effects[0],
         cellgov_effects::Effect::DmaEnqueue {
-            payload: Some(_),
-            ..
-        }
+            request,
+            payload: None,
+        } if request.local_store_source()
     ));
 }
 
@@ -390,12 +390,14 @@ fn run_spu_fixed_value_binary() {
     let ctx = ExecutionContext::new(&mem);
 
     let mut all_effects = Vec::new();
+    let mut put_bytes = Vec::new();
     let max_steps = 50;
     for _ in 0..max_steps {
         let mut step_effects = Vec::new();
         let result = unit.run_until_yield(Budget::new(10000), &ctx, &mut step_effects);
         let reason = result.yield_reason;
         let fault = result.fault;
+        put_bytes.extend(step_effects.iter().filter_map(|e| completed_put(&unit, e)));
         all_effects.extend(step_effects);
 
         match reason {
@@ -438,12 +440,9 @@ fn run_spu_fixed_value_binary() {
         .iter()
         .find(|e| matches!(e, cellgov_effects::Effect::DmaEnqueue { .. }))
         .expect("expected DmaEnqueue");
-    if let cellgov_effects::Effect::DmaEnqueue {
-        request, payload, ..
-    } = dma
-    {
+    if let cellgov_effects::Effect::DmaEnqueue { request, .. } = dma {
         assert_eq!(request.destination().start().raw(), result_ea as u64);
-        let data = payload.as_ref().expect("DMA put should carry payload");
+        let data = &put_bytes[0];
         // Fixed by the micro-test's own source: status 0 followed by
         // FIXED_VALUE (`tests/micro/spu_fixed_value/spu/main.c`).
         // Compiled binary may round up the DMA length past 8 bytes.
@@ -854,6 +853,21 @@ fn ls_to_shared_matches_rpcs3_baseline() {
     );
 }
 
+/// The bytes a put from local store writes when it completes. A direct
+/// loop has no DMA queue, so the put completes before the next step.
+fn completed_put(unit: &SpuExecutionUnit, effect: &cellgov_effects::Effect) -> Option<Vec<u8>> {
+    match effect {
+        cellgov_effects::Effect::DmaEnqueue { request, .. } if request.local_store_source() => {
+            let source = request.source();
+            Some(
+                unit.state()
+                    .read_ls_wrapped(source.start().raw() as u32, source.length() as u32),
+            )
+        }
+        _ => None,
+    }
+}
+
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
@@ -876,14 +890,11 @@ fn dma_completion_payloads_are_correct() {
         let mut step_effects = Vec::new();
         let result = unit.run_until_yield(Budget::new(100_000), &ctx, &mut step_effects);
         for e in &step_effects {
-            if let cellgov_effects::Effect::DmaEnqueue {
-                request, payload, ..
-            } = e
-            {
+            if let cellgov_effects::Effect::DmaEnqueue { request, .. } = e {
                 dma_payloads.push((
                     request.destination().start().raw(),
                     request.length(),
-                    payload.clone(),
+                    completed_put(&unit, e),
                 ));
             }
         }

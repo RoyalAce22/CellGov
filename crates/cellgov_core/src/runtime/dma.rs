@@ -3,6 +3,8 @@
 //! [`Runtime::drain_pending_dma`] runs at scenario termination and
 //! lands every outstanding transfer that no suspended queue holds.
 
+use std::borrow::Cow;
+
 use cellgov_dma::{DmaCompletion, MfcCommandError};
 use cellgov_exec::UnitStatus;
 use cellgov_mem::{ByteRange, GuestMemory};
@@ -86,25 +88,21 @@ impl Runtime {
         if c.length() == 0 {
             return;
         }
-        if let Some(Ok(target)) = window_target(self.lv2_host.thread_groups(), c) {
-            self.land_in_window(c, target, payload);
-            return;
-        }
+        let window = window_target(self.lv2_host.thread_groups(), c);
         if c.direction() == cellgov_dma::DmaDirection::Get {
-            self.land_get(c);
+            match window {
+                Some(Ok(target)) => self.land_in_window(c, target, &[]),
+                _ => self.land_get(c),
+            }
             return;
         }
-        let owned;
-        let bytes = if let Some(data) = payload {
-            data
-        } else {
-            owned = self
-                .memory
-                .read(c.source())
-                .expect("the queue translated the DMA source when it reached the transfer")
-                .to_vec();
-            &owned
+        let Some(bytes) = self.put_source(c, payload) else {
+            return;
         };
+        if let Some(Ok(target)) = window {
+            self.land_in_window(c, target, &bytes);
+            return;
+        }
         // Both ends resolve in space 0 (see the `spaces` module docs);
         // the fanout below is the only part of a transfer that reaches
         // another space.
@@ -112,7 +110,7 @@ impl Runtime {
             HostWriter::DmaCompletion,
             AddressSpaceId::BOOT,
             c.destination(),
-            bytes,
+            &bytes,
             Some(c.issuer()),
         )
         .expect("the queue translated the DMA destination when it reached the transfer");
@@ -140,16 +138,58 @@ impl Runtime {
         }
     }
 
+    /// The bytes a completed put writes, read now: its inline payload, the
+    /// issuer's local store, or main storage.
+    ///
+    /// `None` when the issuer has no local store to read.
+    fn put_source<'a>(
+        &mut self,
+        c: &DmaCompletion,
+        payload: Option<&'a [u8]>,
+    ) -> Option<Cow<'a, [u8]>> {
+        if let Some(data) = payload {
+            return Some(Cow::Borrowed(data));
+        }
+        if !c.request().local_store_source() {
+            let bytes = self
+                .memory
+                .read(c.source())
+                .expect("the queue translated the DMA source when it reached the transfer");
+            return Some(Cow::Owned(bytes.to_vec()));
+        }
+        // The source is a local-store offset, below 2^32.
+        let (lsa, len) = (c.source().start().raw() as u32, c.length() as u32);
+        let read = self
+            .registry
+            .get(c.issuer())
+            .ok_or(cellgov_exec::ProblemStateError::UnknownUnit)
+            .and_then(|unit| unit.read_local_store(lsa, len));
+        match read {
+            Ok(bytes) => Some(Cow::Owned(bytes)),
+            Err(err) => {
+                self.lv2_host.log_invariant_break(
+                    "runtime.dma_put_unread",
+                    format_args!(
+                        "{:?}: a completed MFC put of {len} bytes from local store 0x{lsa:08x} \
+                         read no source ({err:?})",
+                        c.issuer(),
+                    ),
+                );
+                None
+            }
+        }
+    }
+
     /// Land a completed transfer whose effective address is in the SPU
     /// thread window of its issuer's group.
     ///
-    /// A put into a local store writes the bytes it carries; a get from
-    /// one reads the target's local store now. A put into a signal
-    /// register or the inbound mailbox is that problem-state write,
-    /// which wakes a target parked on it.
+    /// A put writes `bytes`, which its source held at completion, into
+    /// the target's local store; a get reads the target's local store
+    /// now. A put into a signal register or the inbound mailbox is that
+    /// problem-state write, which wakes a target parked on it.
     ///
     /// [CBEA p:72 s:7.9.4] sndsig writes another SPU's signal-notification register through its effective address.
-    fn land_in_window(&mut self, c: &DmaCompletion, target: WindowTarget, payload: Option<&[u8]>) {
+    fn land_in_window(&mut self, c: &DmaCompletion, target: WindowTarget, bytes: &[u8]) {
         let landed = match (c.direction(), target) {
             (cellgov_dma::DmaDirection::Get, WindowTarget::LocalStore { unit, lsa }) => {
                 // The destination is a local-store offset, below 2^32.
@@ -168,19 +208,7 @@ impl Runtime {
             }
             (cellgov_dma::DmaDirection::Get, _) => Ok(()),
             (cellgov_dma::DmaDirection::Put, target) => {
-                let Some(bytes) = payload else {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.dma_window_put_unpayloaded",
-                        format_args!(
-                            "{:?}: a put into the SPU thread window carries no payload; \
-                             only an SPU queues one, and an SPU put always carries its bytes",
-                            c.issuer(),
-                        ),
-                    );
-                    return;
-                };
-                // A register put is 4 bytes; the commit refuses a payload
-                // of any other length than its destination.
+                // A register put is 4 bytes.
                 let word = || {
                     let mut value = [0; 4];
                     for (slot, byte) in value.iter_mut().zip(bytes) {
@@ -297,6 +325,27 @@ impl Runtime {
                 .set_status_override(c.issuer(), UnitStatus::Runnable);
         }
         due
+    }
+
+    /// Each local-store range `c` reads or writes when it completes, with
+    /// the unit that owns it: the issuer's end, and the target's end of
+    /// a transfer through the SPU thread window.
+    pub fn dma_local_store_ends(
+        &self,
+        c: &DmaCompletion,
+    ) -> Vec<(cellgov_event::UnitId, ByteRange)> {
+        let own = c
+            .request()
+            .local_store_range()
+            .map(|range| (c.issuer(), range));
+        let window = match window_target(self.lv2_host.thread_groups(), c) {
+            Some(Ok(WindowTarget::LocalStore { unit, lsa })) => {
+                ByteRange::new(cellgov_mem::GuestAddr::new(u64::from(lsa)), c.length())
+                    .map(|range| (unit, range))
+            }
+            _ => None,
+        };
+        own.into_iter().chain(window).collect()
     }
 
     /// For `unit`: how many of its MFC commands are queued, and one bit

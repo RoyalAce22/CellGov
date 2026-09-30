@@ -21,9 +21,8 @@
 //!   `RsxLabelWrite` effects it queues. Its MMIO mirrors do reach
 //!   [`StepFootprint::note_host_writes`].
 //! - A DMA completion's wake of its issuer, which the commit applies
-//!   as a status override and no `WakeUnit` effect carries, and a get's
-//!   landing in its issuer's local store, which no range names. The
-//!   park the wake ends does reach [`StepFootprint::wait_units`].
+//!   as a status override and no `WakeUnit` effect carries. The park
+//!   the wake ends does reach [`StepFootprint::wait_units`].
 //! - An LV2 handler's park of its caller and the wake that ends it.
 //!   The one park a workload here reaches is the spawn's staged pass
 //!   (`tests/child_init_window.rs`), which every driver refuses with
@@ -59,13 +58,20 @@ pub struct StepFootprint {
     /// A get lands in its issuer's local store, which is not committed
     /// memory, so a get adds nothing here.
     pub dma_writes: Vec<ByteRange>,
-    /// Ranges a transfer reads at completion: the source of a
-    /// transfer no inline payload carries.
+    /// Ranges a transfer reads at completion: the main-storage source
+    /// of a transfer no inline payload carries.
     ///
-    /// A payloaded transfer copied its bytes at enqueue, and an SPU
-    /// put's source is a local-store address. Neither is a main-memory
-    /// range, so neither belongs here.
+    /// A put from local store reads
+    /// [`StepFootprint::dma_local_stores`] instead.
     pub dma_reads: Vec<ByteRange>,
+    /// Local-store ranges the transfers this step queued read or write
+    /// at completion, each with the unit that owns it: a get's
+    /// destination and a put's source, in the issuer's local store.
+    ///
+    /// [`StepFootprint::note_inflight`] records the end in another
+    /// unit's local store, which a transfer through the SPU thread
+    /// window reaches, as an in-flight range.
+    pub dma_local_stores: Vec<(cellgov_event::UnitId, ByteRange)>,
     /// Signals updated.
     pub signal_updates: Vec<SignalId>,
     /// Mailbox wait targets.
@@ -97,6 +103,20 @@ pub struct StepFootprint {
     /// relative to every other step. A step taken before the enqueue
     /// moves the enqueue and the landing alike, and needs no record.
     pub inflight_dma_ranges: Vec<ByteRange>,
+    /// Local-store ranges the transfers in flight during this step read
+    /// or write at completion, each with the unit that owns it.
+    ///
+    /// The issuer's end of a transfer this step queued is not here: the
+    /// step's own instructions all run before the commit that queues it.
+    pub inflight_local_stores: Vec<(cellgov_event::UnitId, ByteRange)>,
+    /// The unit that stepped, whose local store, if it has one, the
+    /// step's own loads and stores reach.
+    ///
+    /// Those accesses reach no footprint, so the relation reads the step
+    /// as touching every byte of its unit's local store: against a
+    /// landing in flight during the step itself, or during the other
+    /// step of a pair. [`StepFootprint::note_commit`] sets it.
+    pub local_store_owner: Option<cellgov_event::UnitId>,
     /// Whether the step read the guest clock.
     ///
     /// One clock advances by each step's cost, so the ticks every other
@@ -134,6 +154,7 @@ impl StepFootprint {
     pub fn note_commit(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
         self.mailbox_counts.extend(rt.last_mailbox_read());
         self.note_inflight(rt);
+        self.local_store_owner = Some(unit);
         self.note_lv2_effects(rt);
         self.expand_aliases(rt, unit);
         self.note_host_writes(rt);
@@ -174,10 +195,20 @@ impl StepFootprint {
             .last_dma_completions()
             .iter()
             .map(|(completion, payloaded)| (completion, *payloaded));
+        // One queued end per transfer this step queued is its own, and
+        // an identical one an earlier step queued stays in flight.
+        let mut own = self.dma_local_stores.clone();
         for (completion, payloaded) in queued.chain(fired) {
-            // A get lands in its issuer's local store, not in memory, so
-            // only the main-storage ends are ranges here. See the doc on
-            // `dma_reads` for the payloaded put.
+            for end in rt.dma_local_store_ends(completion) {
+                match own.iter().position(|queued| *queued == end) {
+                    Some(at) => {
+                        own.swap_remove(at);
+                    }
+                    None => self.inflight_local_stores.push(end),
+                }
+            }
+            // The main-storage ends. See the doc on `dma_reads` for the
+            // payloaded put.
             let request = completion.request();
             self.inflight_dma_ranges
                 .extend(request.main_storage_write());
@@ -221,6 +252,7 @@ impl StepFootprint {
             mailbox_counts,
             dma_writes,
             dma_reads,
+            dma_local_stores,
             signal_updates,
             wait_mailboxes,
             wait_signals,
@@ -229,6 +261,8 @@ impl StepFootprint {
             wait_units,
             reservation_lines,
             inflight_dma_ranges,
+            inflight_local_stores,
+            local_store_owner,
             reads_clock,
         } = other;
         self.shared_writes.extend(shared_writes);
@@ -238,6 +272,7 @@ impl StepFootprint {
         self.mailbox_counts.extend(mailbox_counts);
         self.dma_writes.extend(dma_writes);
         self.dma_reads.extend(dma_reads);
+        self.dma_local_stores.extend(dma_local_stores);
         self.signal_updates.extend(signal_updates);
         self.wait_mailboxes.extend(wait_mailboxes);
         self.wait_signals.extend(wait_signals);
@@ -246,6 +281,8 @@ impl StepFootprint {
         self.wait_units.extend(wait_units);
         self.reservation_lines.extend(reservation_lines);
         self.inflight_dma_ranges.extend(inflight_dma_ranges);
+        self.inflight_local_stores.extend(inflight_local_stores);
+        self.local_store_owner = self.local_store_owner.or(local_store_owner);
         self.reads_clock |= reads_clock;
     }
 
@@ -342,6 +379,11 @@ impl StepFootprint {
                     fp.dma_writes.extend(request.main_storage_write());
                     fp.dma_reads
                         .extend(request.main_storage_read(payload.is_some()));
+                    fp.dma_local_stores.extend(
+                        request
+                            .local_store_range()
+                            .map(|range| (request.issuer(), range)),
+                    );
                 }
                 Effect::WaitOnEvent { target, source } => {
                     fp.wait_units.push(*source);
@@ -537,6 +579,8 @@ impl StepFootprint {
             && self.wake_targets.is_empty()
             && self.reservation_lines.is_empty()
             && self.inflight_dma_ranges.is_empty()
+            && self.dma_local_stores.is_empty()
+            && self.inflight_local_stores.is_empty()
             && !self.reads_clock
     }
 
@@ -553,6 +597,7 @@ impl StepFootprint {
         ranges_overlap(&self.inflight_dma_ranges, &self.shared_writes)
             || ranges_overlap(&self.inflight_dma_ranges, &self.shared_reads)
             || write_covers_any_line(&self.inflight_dma_ranges, &self.reservation_lines)
+            || owns_inflight_local_store(self, self)
     }
 }
 
@@ -569,6 +614,29 @@ fn touches_inflight(during: &StepFootprint, accessor: &StepFootprint) -> bool {
         || ranges_overlap(&during.inflight_dma_ranges, &accessor.dma_writes)
         || ranges_overlap(&during.inflight_dma_ranges, &accessor.dma_reads)
         || write_covers_any_line(&during.inflight_dma_ranges, &accessor.reservation_lines)
+        || local_stores_overlap(&during.inflight_local_stores, &accessor.dma_local_stores)
+        || owns_inflight_local_store(during, accessor)
+}
+
+/// True when a transfer in flight during `during`'s step reads or writes
+/// the local store of the unit that took `accessor`'s step.
+fn owns_inflight_local_store(during: &StepFootprint, accessor: &StepFootprint) -> bool {
+    accessor.local_store_owner.is_some_and(|unit| {
+        during
+            .inflight_local_stores
+            .iter()
+            .any(|(owner, _)| *owner == unit)
+    })
+}
+
+/// True when a range in `a` and a range in `b` are bytes of one unit's
+/// local store.
+fn local_stores_overlap(
+    a: &[(cellgov_event::UnitId, ByteRange)],
+    b: &[(cellgov_event::UnitId, ByteRange)],
+) -> bool {
+    a.iter()
+        .any(|(ua, ra)| b.iter().any(|(ub, rb)| ua == ub && ra.overlaps(*rb)))
 }
 
 fn ranges_overlap(a: &[ByteRange], b: &[ByteRange]) -> bool {

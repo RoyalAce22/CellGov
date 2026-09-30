@@ -206,12 +206,20 @@ fn a_put_reaching_past_local_store_wraps_to_its_start() {
     let (result, effects) = run_once(&mut unit);
 
     assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::DmaEnqueue { payload: Some(bytes), .. }] if *bytes == want
-        ),
-        "the payload is the wrapped bytes: {effects:?}"
+    let [Effect::DmaEnqueue {
+        request,
+        payload: None,
+    }] = effects.as_slice()
+    else {
+        panic!("one put that reads local store: {effects:?}");
+    };
+    assert!(request.local_store_source());
+    let source = request.source();
+    assert_eq!(
+        unit.state()
+            .read_ls_wrapped(source.start().raw() as u32, source.length() as u32),
+        want,
+        "the source reads the wrapped bytes"
     );
 }
 

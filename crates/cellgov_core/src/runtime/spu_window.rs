@@ -9,9 +9,9 @@
 //! and the inbound mailbox. Any other access into a slot is refused as
 //! a data-storage fault.
 //!
-//! A transfer into the issuer's own slot is a local-store copy. Its
-//! result is deterministic: a put writes the bytes it read at issue,
-//! and a get reads the bytes the local store holds when it completes.
+//! A transfer into the issuer's own slot is a local-store copy. It
+//! reads its source and writes its destination when it completes, as
+//! every transfer does.
 //!
 //! [CBEA p:37 s:3.2] a local store can be aliased into the main storage domain.
 //! [CBEA p:38 s:3.2.1] an MFC effective address can name an aliased local store, its own included.

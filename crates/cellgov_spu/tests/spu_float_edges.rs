@@ -269,26 +269,29 @@ fn the_built_program_stores_every_expected_result() {
     unit.state_mut().set_reg_word_splat(4, result_ea);
     let mem = cellgov_mem::GuestMemory::new(0x2_0000);
     let ctx = ExecutionContext::new(&mem);
-    let mut effects = Vec::new();
+    // A direct loop has no DMA queue, so a put completes before the next
+    // step and reads its local-store source then.
+    let mut payload = None;
     for _ in 0..1_000 {
         let mut step = Vec::new();
         let result = unit.run_until_yield(Budget::new(100_000), &ctx, &mut step);
-        effects.extend(step);
+        for effect in &step {
+            if let cellgov_effects::Effect::DmaEnqueue { request, .. } = effect {
+                if request.destination().start().raw() == u64::from(result_ea) {
+                    let source = request.source();
+                    payload = unit
+                        .read_local_store(source.start().raw() as u32, source.length() as u32)
+                        .ok();
+                }
+            }
+        }
         match result.yield_reason {
             YieldReason::Finished => break,
             YieldReason::DmaSubmitted | YieldReason::BudgetExhausted | YieldReason::DmaWait => {}
             other => panic!("unexpected yield {other:?}: {:?}", result.fault),
         }
     }
-    let payload = effects
-        .iter()
-        .find_map(|effect| match effect {
-            cellgov_effects::Effect::DmaEnqueue {
-                request, payload, ..
-            } if request.destination().start().raw() == u64::from(result_ea) => payload.clone(),
-            _ => None,
-        })
-        .expect("the results DMA put");
+    let payload = payload.expect("the results DMA put");
     for (index, case) in cases.iter().enumerate() {
         let (want_r3, want_fpscr) = case.expect.expect("expected results");
         let at = |offset: usize| {
