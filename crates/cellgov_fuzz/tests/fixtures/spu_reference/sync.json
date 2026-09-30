@@ -1,0 +1,568 @@
+{
+  "schema_version": 6,
+  "unit": {
+    "kind": "instruction",
+    "mnemonic": "sync"
+  },
+  "vectors": [
+    {
+      "name": "next-instruction-only",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:242 s:10. Control Instructions",
+        "vector_id": "sync-next-instruction-only"
+      },
+      "words": [
+        4194304
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "cccccccccccccccccccccccccccccccc"
+        },
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 4
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "with-c-next-instruction-only",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:242 s:10. Control Instructions",
+        "vector_id": "sync-with-c-next-instruction-only"
+      },
+      "words": [
+        5242880
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "cccccccccccccccccccccccccccccccc"
+        },
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 4
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "store-to-instruction-stream-then-sync",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:242 s:10. Control Instructions",
+        "vector_id": "sync-store-to-instruction-stream-then-sync"
+      },
+      "words": [
+        603980419,
+        4194304,
+        1
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "24000283004000000000000200000000",
+          "5": "00000000000000000000000000000000"
+        },
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 3,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stopped"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 0,
+              "hex": "24000283004000000000000200000000"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": {
+            "kind": "stop",
+            "code": 2,
+            "npc": 12,
+            "interrupts_enabled": false
+          }
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "store-to-instruction-stream-then-sync-c",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:242 s:10. Control Instructions",
+        "vector_id": "sync-store-to-instruction-stream-then-sync-c"
+      },
+      "words": [
+        603980419,
+        5242880,
+        1
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "24000283005000000000000200000000",
+          "5": "00000000000000000000000000000000"
+        },
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 3,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stopped"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 0,
+              "hex": "24000283005000000000000200000000"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": {
+            "kind": "stop",
+            "code": 2,
+            "npc": 12,
+            "interrupts_enabled": false
+          }
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "store-to-instruction-stream-without-a-barrier",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:242 s:10. Control Instructions",
+        "vector_id": "sync-store-to-instruction-stream-without-a-barrier"
+      },
+      "words": [
+        603980419,
+        2097152,
+        1
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "24000283002000000000000200000000",
+          "5": "00000000000000000000000000000000"
+        },
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 3,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stopped"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 0,
+              "hex": "24000283002000000000000200000000"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "one_of",
+          "values": [
+            {
+              "kind": "stop",
+              "code": 1,
+              "npc": 12,
+              "interrupts_enabled": false
+            },
+            {
+              "kind": "stop",
+              "code": 2,
+              "npc": 12,
+              "interrupts_enabled": false
+            }
+          ],
+          "chosen": 1,
+          "reason": "without sync, a fetch after a store to the instruction stream may see the old word or the new one (SPU-ISA p:242); CellGov runs one instruction at a time and fetches the new word"
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    }
+  ]
+}
