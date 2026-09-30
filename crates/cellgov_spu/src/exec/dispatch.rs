@@ -85,6 +85,16 @@ fn mask_bit(word: u32, bit: usize) -> u32 {
     0u32.wrapping_sub((word >> bit) & 1)
 }
 
+/// `imm` in every byte of a word.
+fn byte_mask(imm: u8) -> u32 {
+    u32::from(imm) * 0x0101_0101
+}
+
+/// `imm`, sign-extended to 16 bits, in both halfwords of a word.
+fn halfword_mask(imm: i16) -> u32 {
+    u32::from(imm as u16) * 0x0001_0001
+}
+
 /// Execute a single decoded SPU instruction.
 pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match *insn {
@@ -368,6 +378,57 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                 state.set_reg_word_slot(rt, slot, a | v);
             }
             SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:98 s:5. Integer and Logical Instructions] And with Complement: RA AND the complement of RB.
+        SpuInstruction::Andc { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| a & !b),
+        // [SPU-ISA p:103 s:5. Integer and Logical Instructions] Or with Complement: RA OR the complement of RB.
+        SpuInstruction::Orc { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| a | !b),
+        // [SPU-ISA p:108 s:5. Integer and Logical Instructions] Exclusive Or: RA XOR RB.
+        SpuInstruction::Xor { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| a ^ b),
+        // [SPU-ISA p:112 s:5. Integer and Logical Instructions] Nand: the complement of RA AND RB.
+        SpuInstruction::Nand { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| !(a & b)),
+        // [SPU-ISA p:114 s:5. Integer and Logical Instructions] Equivalent: RA XOR the complement of RB.
+        SpuInstruction::Eqv { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| !(a ^ b)),
+        // [SPU-ISA p:107 s:5. Integer and Logical Instructions] Or Across: the OR of RA's four words in the preferred slot; the other slots are zero.
+        SpuInstruction::Orx { rt, ra } => {
+            let w = words(state.regs[ra as usize]);
+            state.regs[rt as usize] = from_words([w[0] | w[1] | w[2] | w[3], 0, 0, 0]);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:99 s:5. Integer and Logical Instructions] And Byte Immediate: the rightmost 8 bits of I10, replicated into every byte.
+        SpuInstruction::Andbi { rt, ra, imm } => {
+            let mask = byte_mask(imm);
+            words2(state, rt, ra, ra, |a, _| a & mask)
+        }
+        // [SPU-ISA p:100 s:5. Integer and Logical Instructions] And Halfword Immediate: I10 sign-extended to 16 bits, replicated into every halfword.
+        SpuInstruction::Andhi { rt, ra, imm } => {
+            let mask = halfword_mask(imm);
+            words2(state, rt, ra, ra, |a, _| a & mask)
+        }
+        // [SPU-ISA p:104 s:5. Integer and Logical Instructions] Or Byte Immediate: the rightmost 8 bits of I10, replicated into every byte.
+        SpuInstruction::Orbi { rt, ra, imm } => {
+            let mask = byte_mask(imm);
+            words2(state, rt, ra, ra, |a, _| a | mask)
+        }
+        // [SPU-ISA p:105 s:5. Integer and Logical Instructions] Or Halfword Immediate: I10 sign-extended to 16 bits, replicated into every halfword.
+        SpuInstruction::Orhi { rt, ra, imm } => {
+            let mask = halfword_mask(imm);
+            words2(state, rt, ra, ra, |a, _| a | mask)
+        }
+        // [SPU-ISA p:109 s:5. Integer and Logical Instructions] Exclusive Or Byte Immediate: the rightmost 8 bits of I10, replicated into every byte.
+        SpuInstruction::Xorbi { rt, ra, imm } => {
+            let mask = byte_mask(imm);
+            words2(state, rt, ra, ra, |a, _| a ^ mask)
+        }
+        // [SPU-ISA p:110 s:5. Integer and Logical Instructions] Exclusive Or Halfword Immediate: I10 sign-extended to 16 bits, replicated into every halfword.
+        SpuInstruction::Xorhi { rt, ra, imm } => {
+            let mask = halfword_mask(imm);
+            words2(state, rt, ra, ra, |a, _| a ^ mask)
+        }
+        // [SPU-ISA p:111 s:5. Integer and Logical Instructions] Exclusive Or Word Immediate: I10 sign-extended to 32 bits.
+        SpuInstruction::Xori { rt, ra, imm } => {
+            let mask = imm as i32 as u32;
+            words2(state, rt, ra, ra, |a, _| a ^ mask)
         }
         // [SPU-ISA p:113 s:5. Integer and Logical Instructions] Nor: bitwise NOR across the full 128-bit register.
         SpuInstruction::Nor { rt, ra, rb } => {
@@ -887,3 +948,7 @@ mod byte_arith_tests;
 #[cfg(test)]
 #[path = "tests/sign_extend_tests.rs"]
 mod sign_extend_tests;
+
+#[cfg(test)]
+#[path = "tests/logical_tests.rs"]
+mod logical_tests;

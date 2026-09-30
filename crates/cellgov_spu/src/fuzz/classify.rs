@@ -158,6 +158,13 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
         | K::Ahi
         | K::Mpyi
         | K::Mpyui
+        | K::Andbi
+        | K::Andhi
+        | K::Orbi
+        | K::Orhi
+        | K::Xorbi
+        | K::Xorhi
+        | K::Xori
         | K::Sfhi
         | K::Sfi
         | K::Ori
@@ -269,6 +276,19 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Gb
         | SpuInstructionKind::Gbh
         | SpuInstructionKind::Ori
+        | SpuInstructionKind::Andc
+        | SpuInstructionKind::Orc
+        | SpuInstructionKind::Xor
+        | SpuInstructionKind::Nand
+        | SpuInstructionKind::Eqv
+        | SpuInstructionKind::Orx
+        | SpuInstructionKind::Andbi
+        | SpuInstructionKind::Andhi
+        | SpuInstructionKind::Orbi
+        | SpuInstructionKind::Orhi
+        | SpuInstructionKind::Xorbi
+        | SpuInstructionKind::Xorhi
+        | SpuInstructionKind::Xori
         | SpuInstructionKind::Nor
         | SpuInstructionKind::Andi
         | SpuInstructionKind::Shufb

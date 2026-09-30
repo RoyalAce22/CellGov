@@ -518,6 +518,122 @@ pub enum SpuInstruction {
         /// 10-bit signed immediate.
         imm: i16,
     },
+    // [SPU-ISA p:98 s:5 Logical: Andc p.98, Andbi p.99, Andhi p.100, Orc p.103, Orbi p.104, Orhi p.105, Orx p.107, Xor p.108, Xorbi p.109, Xorhi p.110, Xori p.111, Nand p.112, Eqv p.114]
+    /// AND with complement: `ra & !rb`.
+    Andc {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// OR with complement: `ra | !rb`.
+    Orc {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Exclusive OR: `ra ^ rb`.
+    Xor {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// NAND: `!(ra & rb)`.
+    Nand {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Equivalent: `!(ra ^ rb)`.
+    Eqv {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// OR across: the OR of `ra`'s four words in the preferred slot, the other slots zero.
+    Orx {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// AND byte immediate: each byte of `ra` ANDed with the low 8 bits of I10.
+    Andbi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// The rightmost 8 bits of the I10 field.
+        imm: u8,
+    },
+    /// AND halfword immediate: each halfword of `ra` ANDed with I10 sign-extended to 16 bits.
+    Andhi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
+    /// OR byte immediate: each byte of `ra` ORed with the low 8 bits of I10.
+    Orbi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// The rightmost 8 bits of the I10 field.
+        imm: u8,
+    },
+    /// OR halfword immediate: each halfword of `ra` ORed with I10 sign-extended to 16 bits.
+    Orhi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
+    /// XOR byte immediate: each byte of `ra` XORed with the low 8 bits of I10.
+    Xorbi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// The rightmost 8 bits of the I10 field.
+        imm: u8,
+    },
+    /// XOR halfword immediate: each halfword of `ra` XORed with I10 sign-extended to 16 bits.
+    Xorhi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
+    /// XOR word immediate: each word of `ra` XORed with I10 sign-extended to 32 bits.
+    Xori {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
 
     // [SPU-ISA p:116 s:5 Shuffle Bytes (Shufb)]
     // [SPU-ISA p:124 s:6 Shift/Rotate Quadword by Bytes: Shlqbyi p.125, Rotqby p.131]

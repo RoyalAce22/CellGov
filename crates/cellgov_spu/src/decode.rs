@@ -346,6 +346,48 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 rb: rb7,
             })
         }
+        // [SPU-ISA p:98 s:5 Andc] RR opcode 0x2C1.
+        0x2C1 => {
+            return Ok(SpuInstruction::Andc {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:103 s:5 Orc] RR opcode 0x2C9.
+        0x2C9 => {
+            return Ok(SpuInstruction::Orc {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:108 s:5 Xor] RR opcode 0x241.
+        0x241 => {
+            return Ok(SpuInstruction::Xor {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:112 s:5 Nand] RR opcode 0x0C9.
+        0x0C9 => {
+            return Ok(SpuInstruction::Nand {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:114 s:5 Eqv] RR opcode 0x249.
+        0x249 => {
+            return Ok(SpuInstruction::Eqv {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:107 s:5 Orx] RR opcode 0x1F0; RB field unused.
+        0x1F0 => return Ok(SpuInstruction::Orx { rt: rt7, ra: ra7 }),
         0x049 => {
             return Ok(SpuInstruction::Nor {
                 rt: rt7,
@@ -505,6 +547,62 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         }
         0x24 => {
             return Ok(SpuInstruction::Stqd {
+                rt: rt7,
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:99 s:5 Andbi] RI10 opcode 0x16.
+        0x16 => {
+            return Ok(SpuInstruction::Andbi {
+                rt: rt7,
+                ra: ra7,
+                imm: (i10 & 0xFF) as u8,
+            })
+        }
+        // [SPU-ISA p:100 s:5 Andhi] RI10 opcode 0x15.
+        0x15 => {
+            return Ok(SpuInstruction::Andhi {
+                rt: rt7,
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:104 s:5 Orbi] RI10 opcode 0x06.
+        0x06 => {
+            return Ok(SpuInstruction::Orbi {
+                rt: rt7,
+                ra: ra7,
+                imm: (i10 & 0xFF) as u8,
+            })
+        }
+        // [SPU-ISA p:105 s:5 Orhi] RI10 opcode 0x05.
+        0x05 => {
+            return Ok(SpuInstruction::Orhi {
+                rt: rt7,
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:109 s:5 Xorbi] RI10 opcode 0x46.
+        0x46 => {
+            return Ok(SpuInstruction::Xorbi {
+                rt: rt7,
+                ra: ra7,
+                imm: (i10 & 0xFF) as u8,
+            })
+        }
+        // [SPU-ISA p:110 s:5 Xorhi] RI10 opcode 0x45.
+        0x45 => {
+            return Ok(SpuInstruction::Xorhi {
+                rt: rt7,
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:111 s:5 Xori] RI10 opcode 0x44.
+        0x44 => {
+            return Ok(SpuInstruction::Xori {
                 rt: rt7,
                 ra: ra7,
                 imm: sign_extend_10(i10),

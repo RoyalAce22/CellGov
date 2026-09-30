@@ -270,6 +270,19 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Gb { rt, .. }
             | SpuInstruction::Gbh { rt, .. }
             | SpuInstruction::Ori { rt, .. }
+            | SpuInstruction::Andc { rt, .. }
+            | SpuInstruction::Orc { rt, .. }
+            | SpuInstruction::Xor { rt, .. }
+            | SpuInstruction::Nand { rt, .. }
+            | SpuInstruction::Eqv { rt, .. }
+            | SpuInstruction::Orx { rt, .. }
+            | SpuInstruction::Andbi { rt, .. }
+            | SpuInstruction::Andhi { rt, .. }
+            | SpuInstruction::Orbi { rt, .. }
+            | SpuInstruction::Orhi { rt, .. }
+            | SpuInstruction::Xorbi { rt, .. }
+            | SpuInstruction::Xorhi { rt, .. }
+            | SpuInstruction::Xori { rt, .. }
             | SpuInstruction::Nor { rt, .. }
             | SpuInstruction::Andi { rt, .. }
             | SpuInstruction::Shufb { rt, .. }
