@@ -61,10 +61,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 ```
 
-CI runs those on both platforms and additionally `cargo test
---release --features cellgov_cli/decrypt`. Both test runs include the
-bounded fuzz smoke set (`cellgov dev fuzz smoke`). On Linux, CI also
-tests `cellgov_compare` with `--no-default-features`. A weekly
+CI runs those on both platforms and additionally the release tests with
+`--features cellgov_cli/decrypt`, both test runs through `cargo-nextest`
+with a per-test timeout. Both include the bounded fuzz smoke set
+(`cellgov dev fuzz smoke`). On Linux, CI also tests `cellgov_compare`
+with `--no-default-features`. A weekly
 workflow runs the `cargo fuzz` targets over the ELF, PRX and SPU image
 parsers from [fuzz/](fuzz/README.md) on a nightly toolchain.
 

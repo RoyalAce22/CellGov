@@ -190,6 +190,10 @@ jobs:
     name: test (stable, ${{ matrix.os }}, blocking)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
+    # nextest gives each test a timeout and records its duration; the
+    # beta leg keeps plain `cargo test` (see .config/nextest.toml).
+    env:
+      CELLGOV_TEST_RUNNER: nextest
     strategy:
       fail-fast: false
       matrix:
@@ -221,9 +225,23 @@ jobs:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-nextest@0.9.146
+
       - name: repository tests
         id: tests
         run: bash .github/ci.sh test
+
+      # Every test's duration, on a red run too.
+      - name: Upload test durations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: junit-stable-${{ matrix.os }}
+          path: target/nextest/*/junit.xml
+          if-no-files-found: warn
 
       # Builds whose result does not depend on the platform or the
       # toolchain run once, on one leg.

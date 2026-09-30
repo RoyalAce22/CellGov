@@ -8,7 +8,8 @@
 #
 # The workflow runs these groups with CARGO_PROFILE_DEV_DEBUG=0, and
 # rust-cache sets CARGO_INCREMENTAL=0. Neither changes what a command
-# checks. Apart from the toolchain each job installs, they are the only
+# checks. Apart from the toolchain each job installs and the test runner
+# the blocking test legs select (see test_suite), they are the only
 # differences from a local run.
 
 set -euo pipefail
@@ -90,10 +91,23 @@ lint() {
 #
 # The bounded fuzz smoke set runs inside the workspace tests, in both
 # profiles (`cli::fuzz::smoke_tests`), against the tracked regressions.
+#
+# CELLGOV_TEST_RUNNER=nextest (the workflow's blocking test legs) runs the
+# test binaries through cargo-nextest's `ci` and `ci-release` profiles
+# (.config/nextest.toml): a per-test timeout and a JUnit record of every
+# test's duration. nextest does not run doctests, so a `cargo test --doc`
+# run replaces them. Unset, the group runs plain `cargo test`.
 test_suite() {
     timed check-external-data cargo check --workspace --all-targets --locked --features "$external_data_features"
-    timed test-debug cargo test --workspace --locked
-    timed test-release-decrypt cargo test --workspace --release --locked --features cellgov_cli/decrypt
+    if [ "${CELLGOV_TEST_RUNNER:-cargo}" = nextest ]; then
+        timed test-debug cargo nextest run --workspace --locked --profile ci
+        timed test-doc cargo test --workspace --locked --doc
+        timed test-release-decrypt cargo nextest run --workspace --release --locked \
+            --features cellgov_cli/decrypt --profile ci-release
+    else
+        timed test-debug cargo test --workspace --locked
+        timed test-release-decrypt cargo test --workspace --release --locked --features cellgov_cli/decrypt
+    fi
 }
 
 test_linux() {

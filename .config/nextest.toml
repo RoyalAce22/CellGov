@@ -1,0 +1,29 @@
+# cargo-nextest profiles. The workflow's blocking test legs run the
+# workspace tests through `ci` (debug) and `ci-release`; see
+# .github/ci.sh. Local runs and the pre-push gate use plain `cargo test`,
+# which runs a binary's tests as threads of one process, so a race over
+# process-global state stays visible there.
+#
+# The two profiles differ only in name: each writes its JUnit report to
+# its own target/nextest/<profile>/ directory.
+
+[profile.ci]
+# A retry turns an intermittent failure green and hides its cause.
+retries = 0
+# Report every failing test in the run, not only the first.
+fail-fast = false
+# The per-test budget is 10 s. A test still running at 10 s is reported
+# SLOW, and at 20 s it is killed and fails by name, well inside the job's
+# timeout. The second period absorbs runner-to-runner variance.
+slow-timeout = { period = "10s", terminate-after = 2 }
+
+[profile.ci.junit]
+path = "junit.xml"
+
+[profile.ci-release]
+retries = 0
+fail-fast = false
+slow-timeout = { period = "10s", terminate-after = 2 }
+
+[profile.ci-release.junit]
+path = "junit.xml"
