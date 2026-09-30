@@ -18,6 +18,7 @@ use super::generate::{
     case_descriptors, random_state, state_aware_state, structured_sequence, GeneratedSequence,
 };
 use super::record::{guarded_run, record, record_target_panic};
+use super::sequence_relations::run_relation_check;
 use crate::boundary::call_target;
 use crate::case::CaseEligibility;
 use crate::error::{FuzzError, InvariantError};
@@ -334,6 +335,7 @@ fn run_sequences_inner(
                 iteration,
             )?;
         }
+        asymmetry = asymmetry.max(run_relation_check(report, &mut rng, iteration)?);
         report.observe_case(
             iteration,
             spu_observation(

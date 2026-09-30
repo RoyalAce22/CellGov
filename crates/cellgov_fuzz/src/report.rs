@@ -75,6 +75,8 @@ pub enum CheckIdentity {
     SpuSlotPermutation,
     /// Checks that a conditional branch goes where the opposite branch goes on the zero-compare mask.
     SpuCompareBranch,
+    /// Checks that an SPU sequence and its partner leave the same observed state.
+    SpuSequenceRelation(cellgov_spu::fuzz::SpuSequenceRelationId),
     /// Interpreter-owned legal-outcome contract.
     LegalOutcome,
     /// Interpreter-owned legal-effect contract.
@@ -284,8 +286,28 @@ pub struct FuzzReport {
     pub finding_counts: BTreeMap<FindingKind, u64>,
     /// First bounded set of reproducible findings.
     pub findings: Vec<Finding>,
+    /// What each retained sequence-relation finding diverged in, bounded
+    /// like the findings.
+    pub sequence_relation_divergences: Vec<SequenceRelationDivergence>,
     max_findings: usize,
     pub(crate) sequence_words: u32,
+}
+
+/// How an SPU sequence and its partner differed from one start state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceRelationDivergence {
+    /// The relation row.
+    pub relation: cellgov_spu::fuzz::SpuSequenceRelationId,
+    /// The case that found it.
+    pub case_index: u64,
+    /// The first component, in comparison order, that differs.
+    pub first_component: cellgov_spu::observation::SpuObservationComponent,
+    /// The registers both sides started from.
+    pub start_registers: Box<[[u8; 16]; cellgov_spu::state::SPU_REG_COUNT]>,
+    /// The real register of each symbolic register.
+    pub assignment: Vec<u8>,
+    /// Each differing register, with its number of differing bits.
+    pub bit_distance: Vec<(u8, u32)>,
 }
 
 impl FuzzReport {
@@ -318,8 +340,16 @@ impl FuzzReport {
             instruction_kinds: BTreeSet::new(),
             finding_counts: BTreeMap::new(),
             findings: Vec::new(),
+            sequence_relation_divergences: Vec::new(),
             max_findings,
             sequence_words,
+        }
+    }
+
+    /// Keeps `divergence` while fewer than the retained-finding bound are held.
+    pub(crate) fn sequence_relation_diverged(&mut self, divergence: SequenceRelationDivergence) {
+        if self.sequence_relation_divergences.len() < self.max_findings {
+            self.sequence_relation_divergences.push(divergence);
         }
     }
 

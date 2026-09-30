@@ -3,13 +3,15 @@
 //! The instruction engine and the sequence engine draw their cases from
 //! `generate` and run them through `execute`. Each engine takes a case's
 //! eligibility from `assess` and records what it finds through `record`.
-//! `shrink` supplies the reduction candidates.
+//! `shrink` supplies the reduction candidates. The sequence engine also
+//! checks one sequence relation per case through `sequence_relations`.
 
 mod assess;
 mod execute;
 mod generate;
 mod instructions;
 mod record;
+mod sequence_relations;
 mod sequences;
 mod shrink;
 

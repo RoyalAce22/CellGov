@@ -101,7 +101,7 @@ fn shufb_class_partner(control: u8) -> u8 {
 }
 
 /// The word of `kind` with every operand field zero.
-fn opcode_word(kind: SpuInstructionKind) -> Option<u32> {
+pub(super) fn opcode_word(kind: SpuInstructionKind) -> Option<u32> {
     SPU_OPCODE_MAP
         .iter()
         .map(|row| row.canonical_word())

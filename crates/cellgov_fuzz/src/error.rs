@@ -246,6 +246,12 @@ pub enum InvariantError {
     /// A validated nonempty generated sequence was unexpectedly empty.
     #[error("generated instruction sequence was unexpectedly empty")]
     EmptyGeneratedSequence,
+    /// A sequence-relation row has a word that does not encode or decode.
+    #[error("sequence relation {relation:?} has a word that does not encode or decode")]
+    UnencodableSequenceRelation {
+        /// The row.
+        relation: cellgov_spu::fuzz::SpuSequenceRelationId,
+    },
 }
 
 /// Failure of the fuzz harness rather than the target under test.

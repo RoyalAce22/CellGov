@@ -8,12 +8,14 @@ mod metamorphic;
 mod registry;
 mod relations;
 mod sequence;
+mod sequence_relations;
 mod support;
 mod types;
 
 pub use bits::{shrink_instruction, simplify_instruction_bit};
 pub use registry::{expected_generation_kinds, generation_descriptor, generation_descriptors};
 pub use sequence::{SpuSequenceInteraction, REFUSED_MFC_OPCODE, SEQUENCE_MAILBOX_MESSAGE};
+pub use sequence_relations::*;
 pub use support::{encoding_execution_is_supported, encoding_has_undefined_operands};
 pub use types::*;
 
