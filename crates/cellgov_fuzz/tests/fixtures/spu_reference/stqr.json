@@ -1,0 +1,473 @@
+{
+  "schema_version": 6,
+  "unit": {
+    "kind": "instruction",
+    "mnemonic": "stqr"
+  },
+  "vectors": [
+    {
+      "name": "aligned",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:39 s:3. Memory-Load/Store Instructions",
+        "vector_id": "stqr-aligned"
+      },
+      "words": [
+        595599363
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "21282f363d444b525960676e757c838a"
+        },
+        "local_store": [
+          {
+            "at": 8432,
+            "hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
+          },
+          {
+            "at": 8464,
+            "hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        ],
+        "pc": 8192
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 8448,
+              "hex": "21282f363d444b525960676e757c838a"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 8196
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "low-bits-ignored",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:39 s:3. Memory-Load/Store Instructions",
+        "vector_id": "stqr-low-bits-ignored"
+      },
+      "words": [
+        595599747
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "424950575e656c737a81888f969da4ab"
+        },
+        "local_store": [
+          {
+            "at": 8432,
+            "hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
+          },
+          {
+            "at": 8464,
+            "hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        ],
+        "pc": 8192
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 8448,
+              "hex": "424950575e656c737a81888f969da4ab"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 8196
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "negative",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:39 s:3. Memory-Load/Store Instructions",
+        "vector_id": "stqr-negative"
+      },
+      "words": [
+        603971587
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "636a71787f868d949ba2a9b0b7bec5cc"
+        },
+        "local_store": [
+          {
+            "at": 7920,
+            "hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
+          },
+          {
+            "at": 7952,
+            "hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        ],
+        "pc": 8192
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 7936,
+              "hex": "636a71787f868d949ba2a9b0b7bec5cc"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 8196
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "wraps-past-lslr",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:39 s:3. Memory-Load/Store Instructions",
+        "vector_id": "stqr-wraps-past-lslr"
+      },
+      "words": [
+        603455491
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "848b9299a0a7aeb5bcc3cad1d8dfe6ed"
+        },
+        "local_store": [
+          {
+            "at": 253936,
+            "hex": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
+          },
+          {
+            "at": 253968,
+            "hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+          }
+        ],
+        "pc": 8192
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 253952,
+              "hex": "848b9299a0a7aeb5bcc3cad1d8dfe6ed"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 8196
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    }
+  ]
+}
