@@ -8,7 +8,8 @@ on:
   workflow_dispatch:
 
 # Nothing in this workflow writes to the repository: no release, no
-# comment, no push. A leaked token from any step can only read.
+# comment, no push. A leaked token from any step can only read. The `CI`
+# job alone also reads this run's job records, to class each failure.
 permissions:
   contents: read
 
@@ -17,6 +18,13 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# The budget: every blocking lint and test leg finishes in 30 minutes.
+# Each such leg's `timeout-minutes` is 40, a margin above the budget, so a
+# leg that overruns it goes red as `infrastructure` in the `CI` summary
+# instead of running on. `.github/ci.sh` prints the time of every command
+# group; those lines show which group took the time. Raise the budget
+# here, in this one comment and the two timeouts, not per leg.
 
 defaults:
   run:
@@ -57,7 +65,7 @@ jobs:
       - name: Validate workflow and shell syntax
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          bash -n .github/ci.sh .github/external-data.sh .github/fuzz.sh .github/loader_fuzz.sh
+          bash -n .github/ci.sh .github/ci_verdict.sh .github/external-data.sh .github/fuzz.sh .github/loader_fuzz.sh
 
   # The only job that denies warnings. The pinned entry is blocking, on
   # a version that moves only when this file does; the stable entry is
@@ -69,7 +77,7 @@ jobs:
   lint:
     name: lint (${{ matrix.informational && 'stable, informational' || format('pinned {0}', matrix.toolchain) }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     continue-on-error: ${{ matrix.informational }}
     strategy:
       fail-fast: false
@@ -139,10 +147,7 @@ jobs:
     name: test (${{ matrix.name }}, ${{ matrix.os }})
     needs: config
     runs-on: ${{ matrix.os }}
-    # Windows builds run slower than Linux, and a cache miss adds a
-    # multi-minute save of the Windows target directory after the tests;
-    # the bound is for a hung job, not a slow one.
-    timeout-minutes: 60
+    timeout-minutes: 40
     continue-on-error: ${{ matrix.informational }}
     strategy:
       fail-fast: false
@@ -200,7 +205,25 @@ jobs:
     needs: [config, lint, deny, test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      # One row per leg: its result and, when it is not green, whether
+      # the cause is infrastructure, a test, compile/lint, or a newer push.
+      # The table explains the verdict; it never changes it.
+      - name: Class every leg
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/ci_verdict.sh "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" CI \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Require all blocking checks
         env:
           RESULTS: ${{ toJSON(needs) }}
