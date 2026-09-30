@@ -256,6 +256,12 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Or { rt, .. }
             | SpuInstruction::Selb { rt, .. }
             | SpuInstruction::Xsbh { rt, .. }
+            | SpuInstruction::Clz { rt, .. }
+            | SpuInstruction::Cntb { rt, .. }
+            | SpuInstruction::Fsmb { rt, .. }
+            | SpuInstruction::Fsmh { rt, .. }
+            | SpuInstruction::Fsm { rt, .. }
+            | SpuInstruction::Gbb { rt, .. }
             | SpuInstruction::Gb { rt, .. }
             | SpuInstruction::Gbh { rt, .. }
             | SpuInstruction::Ori { rt, .. }

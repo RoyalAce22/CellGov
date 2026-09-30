@@ -121,6 +121,18 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         0x2D8 => return Ok(SpuInstruction::Hlgt { ra: ra7, rb: rb7 }),
         // [SPU-ISA p:192 s:8 Hbr] RR opcode 0x1AC; the P bit selects hbrp on the same opcode.
         0x1AC => return Ok(SpuInstruction::Hbr),
+        // [SPU-ISA p:83 s:5 Clz] RR opcode 0x2A5; RB field unused.
+        0x2A5 => return Ok(SpuInstruction::Clz { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:84 s:5 Cntb] RR opcode 0x2B4; RB field unused.
+        0x2B4 => return Ok(SpuInstruction::Cntb { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:85 s:5 Fsmb] RR opcode 0x1B6; RB field unused.
+        0x1B6 => return Ok(SpuInstruction::Fsmb { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:86 s:5 Fsmh] RR opcode 0x1B5; RB field unused.
+        0x1B5 => return Ok(SpuInstruction::Fsmh { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:87 s:5 Fsm] RR opcode 0x1B4; RB field unused.
+        0x1B4 => return Ok(SpuInstruction::Fsm { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:88 s:5 Gbb] RR opcode 0x1B2; RB field unused.
+        0x1B2 => return Ok(SpuInstruction::Gbb { rt: rt7, ra: ra7 }),
         // [SPU-ISA p:90 s:5 Gb] RR opcode 0x1B0; RB field unused.
         0x1B0 => return Ok(SpuInstruction::Gb { rt: rt7, ra: ra7 }),
         // [SPU-ISA p:89 s:5 Gbh] RR opcode 0x1B1; RB field unused.

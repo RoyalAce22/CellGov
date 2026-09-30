@@ -80,6 +80,11 @@ fn high_signed(word: u32) -> i32 {
     i32::from((word >> 16) as u16 as i16)
 }
 
+/// All ones when bit `bit` of `word`, counted from the right, is set; zero otherwise.
+fn mask_bit(word: u32, bit: usize) -> u32 {
+    0u32.wrapping_sub((word >> bit) & 1)
+}
+
 /// Execute a single decoded SPU instruction.
 pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match *insn {
@@ -379,6 +384,41 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                 state.regs[rt as usize][slot * 2] = hw[0];
                 state.regs[rt as usize][slot * 2 + 1] = hw[1];
             }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:83 s:5. Integer and Logical Instructions] Count Leading Zeros: per word, 32 for a zero word.
+        SpuInstruction::Clz { rt, ra } => words2(state, rt, ra, ra, |a, _| a.leading_zeros()),
+        // [SPU-ISA p:84 s:5. Integer and Logical Instructions] Count Ones in Bytes: the population count of each byte.
+        SpuInstruction::Cntb { rt, ra } => {
+            state.regs[rt as usize] = state.regs[ra as usize].map(|b| b.count_ones() as u8);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:85 s:5. Integer and Logical Instructions] Form Select Mask for Bytes: the preferred slot's rightmost 16 bits, leftmost bit to byte 0, each replicated eight times.
+        SpuInstruction::Fsmb { rt, ra } => {
+            let s = state.reg_word_slot(ra, 0);
+            state.regs[rt as usize] = std::array::from_fn(|j| mask_bit(s, 15 - j) as u8);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:86 s:5. Integer and Logical Instructions] Form Select Mask for Halfwords: the preferred slot's rightmost 8 bits, leftmost bit to halfword 0, each replicated 16 times.
+        SpuInstruction::Fsmh { rt, ra } => {
+            let s = state.reg_word_slot(ra, 0);
+            state.regs[rt as usize] =
+                from_halfwords(std::array::from_fn(|j| mask_bit(s, 7 - j) as u16));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:87 s:5. Integer and Logical Instructions] Form Select Mask for Words: the preferred slot's rightmost 4 bits, leftmost bit to word 0, each replicated 32 times.
+        SpuInstruction::Fsm { rt, ra } => {
+            let s = state.reg_word_slot(ra, 0);
+            state.regs[rt as usize] = from_words(std::array::from_fn(|j| mask_bit(s, 3 - j)));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:88 s:5. Integer and Logical Instructions] Gather Bits from Bytes: the rightmost bit of each byte, byte 0 leftmost, forms the right half of the preferred slot; every other bit of RT is zero.
+        SpuInstruction::Gbb { rt, ra } => {
+            let bits = state.regs[ra as usize]
+                .iter()
+                .fold(0u32, |bits, b| (bits << 1) | u32::from(b & 1));
+            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg_word_slot(rt, 0, bits);
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:90 s:5. Integer and Logical Instructions] Gather Bits from Words: the low bit of each word, word 0 leftmost, forms a nibble in the preferred slot; every other bit of RT is zero.
@@ -800,3 +840,7 @@ mod carry_borrow_tests;
 #[cfg(test)]
 #[path = "tests/multiply_tests.rs"]
 mod multiply_tests;
+
+#[cfg(test)]
+#[path = "tests/bit_mask_tests.rs"]
+mod bit_mask_tests;

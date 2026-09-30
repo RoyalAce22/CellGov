@@ -390,6 +390,49 @@ pub enum SpuInstruction {
         /// Source register.
         ra: u8,
     },
+    // [SPU-ISA p:83 s:5 Bit counts, select masks and byte gather: Clz p.83 .. Gbb p.88]
+    /// Count leading zeros: per word, 32 for a zero word.
+    Clz {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// Count ones in bytes: the population count of each byte.
+    Cntb {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// Form select mask for bytes: bit j of the preferred slot's low 16 bits, leftmost first, fills byte j.
+    Fsmb {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// Form select mask for halfwords: bit j of the preferred slot's low 8 bits, leftmost first, fills halfword j.
+    Fsmh {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// Form select mask for words: bit j of the preferred slot's low 4 bits, leftmost first, fills word j.
+    Fsm {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// Gather bits from bytes: the low bit of each byte, byte 0 leftmost, into the low halfword of the preferred slot.
+    Gbb {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
     // [SPU-ISA p:90 s:5 Gather Bits from Words p.90, Gather Bits from Halfwords p.89]
     /// Gather bits from words: the low bit of each word, word 0 leftmost, into the low nibble of the preferred slot.
     Gb {
