@@ -22,6 +22,9 @@ pub enum SpuSequenceRelationId {
     CeqNotEqualFused,
     /// `ceq c,a,b; ceqi rt,c,0` against `ceq c,a,b; nor rt,c,c`.
     CeqNotEqualNor,
+    /// `ceq c,a,b; ceqi rt,c,0` against a fused `sext(a != b)` that writes
+    /// only `rt`: valid only while `c` is dead.
+    CeqNotEqualResultOnly,
 }
 
 /// How exactly a relation's partner matches its sequence.
@@ -103,6 +106,13 @@ pub struct SpuSequenceRelation {
     pub precondition: Option<SpuSequencePrecondition>,
     /// How exactly B matches A.
     pub float_class: SpuFloatClass,
+    /// The symbolic registers B may leave with another value: the claim
+    /// holds only while they are dead at exit. Empty means the complete
+    /// observation.
+    ///
+    /// [Mullen2016 p:449 s:1] A rewrite names the registers that must be
+    /// dead for it to apply.
+    pub dead: &'static [u8],
 }
 
 impl SpuSequenceRelation {
@@ -123,6 +133,31 @@ impl SpuSequenceRelation {
             .chain(fused_writes.iter().copied())
             .max()
             .map_or(0, |highest| usize::from(highest) + 1)
+    }
+
+    /// The real registers a comparison under the dead set `dead` leaves
+    /// out: each dead register's, unless a live register sequence A writes
+    /// shares it.
+    ///
+    /// [Bansal2006 p:395 s:2] Equivalence holds under the set of registers
+    /// live at exit; a physical register that also holds a live result
+    /// stays live.
+    pub fn excluded_registers(&self, assignment: &[u8], dead: &[u8]) -> Vec<u8> {
+        let real = |symbolic: u8| assignment.get(usize::from(symbolic)).copied();
+        let live_written: Vec<u8> = self
+            .sequence
+            .iter()
+            .filter(|word| !dead.contains(&word.rt))
+            .filter_map(|word| real(word.rt))
+            .collect();
+        let mut out: Vec<u8> = dead
+            .iter()
+            .filter_map(|&symbolic| real(symbolic))
+            .filter(|register| !live_written.contains(register))
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
     }
 }
 
@@ -177,6 +212,17 @@ fn ceq_not_equal_fused(state: &mut SpuState, assignment: &[u8]) {
     );
 }
 
+/// The fused `sext(a != b)` that writes only `rt`, leaving `c` as it was.
+fn ceq_not_equal_result_only(state: &mut SpuState, assignment: &[u8]) {
+    let c = usize::from(assignment[usize::from(C)]);
+    let kept = state.regs[c];
+    ceq_not_equal_fused(state, assignment);
+    let rt = usize::from(assignment[usize::from(RT)]);
+    if rt != c {
+        state.set_reg(c, kept);
+    }
+}
+
 const RELATIONS: &[SpuSequenceRelation] = &[
     SpuSequenceRelation {
         id: SpuSequenceRelationId::CeqNotEqualFused,
@@ -187,6 +233,7 @@ const RELATIONS: &[SpuSequenceRelation] = &[
         }),
         precondition: None,
         float_class: SpuFloatClass::BitExact,
+        dead: &[],
     },
     SpuSequenceRelation {
         id: SpuSequenceRelationId::CeqNotEqualNor,
@@ -194,6 +241,18 @@ const RELATIONS: &[SpuSequenceRelation] = &[
         partner: SpuSequencePartner::Guest(CEQ_NOR),
         precondition: None,
         float_class: SpuFloatClass::BitExact,
+        dead: &[],
+    },
+    SpuSequenceRelation {
+        id: SpuSequenceRelationId::CeqNotEqualResultOnly,
+        sequence: CEQ_NOT_EQUAL,
+        partner: SpuSequencePartner::Fused(SpuFusedReference {
+            writes: &[RT],
+            apply: ceq_not_equal_result_only,
+        }),
+        precondition: None,
+        float_class: SpuFloatClass::BitExact,
+        dead: &[C],
     },
 ];
 

@@ -25,7 +25,7 @@ fn preferred_words_equal(instance: &RelationInstance) -> bool {
 }
 
 #[test]
-fn both_rows_hold_over_aliased_and_equal_lane_instantiations() {
+fn every_row_holds_over_aliased_and_equal_lane_instantiations() {
     for relation in sequence_relations() {
         let mut aliased = 0;
         let mut equal = 0;
@@ -190,5 +190,124 @@ fn each_spu_sequence_smoke_campaign_executes_every_relation_row_and_finds_nothin
                 run.report.metamorphic_executions
             );
         }
+    }
+}
+
+/// The result-only row with the dead set `dead` in place of its own.
+fn result_only(dead: &'static [u8]) -> SpuSequenceRelation {
+    SpuSequenceRelation {
+        dead,
+        ..row(SpuSequenceRelationId::CeqNotEqualResultOnly)
+    }
+}
+
+#[test]
+fn a_result_only_partner_fails_with_no_dead_set_and_holds_with_its_intermediate_dead() {
+    let complete = result_only(&[]);
+    let mut diverged = 0;
+    for index in 0..DRAWS {
+        let instance = draw(&complete, index);
+        let c = instance.assignment[0];
+        if let RelationVerdict::Diverged(divergence) =
+            compare_relation(&complete, &instance, index).expect("the row encodes")
+        {
+            diverged += 1;
+            assert_eq!(
+                divergence.first_component,
+                SpuObservationComponent::Registers
+            );
+            assert!(
+                divergence
+                    .bit_distance
+                    .iter()
+                    .all(|(register, _)| *register == c),
+                "only c differs: {:?}",
+                divergence.bit_distance
+            );
+        }
+        // With `c` dead, the same draw matches.
+        let row = row(SpuSequenceRelationId::CeqNotEqualResultOnly);
+        assert_eq!(
+            compare_relation(&row, &instance, index).expect("the row encodes"),
+            RelationVerdict::Match,
+            "draw {index}: {:?}",
+            instance.assignment
+        );
+    }
+    assert!(
+        diverged > DRAWS / 2,
+        "only {diverged} of {DRAWS} draws diverged"
+    );
+}
+
+#[test]
+fn a_dead_set_one_register_too_large_is_reported_and_the_catalog_is_minimal() {
+    // A is an input nothing writes: neither side can leave it stale.
+    let oversized = result_only(&[0, 1]);
+    assert_eq!(
+        unneeded_dead_registers(&oversized, 1447, DRAWS).expect("draws run"),
+        [1]
+    );
+    assert_eq!(
+        unneeded_dead_registers(&result_only(&[0]), 1447, DRAWS).expect("draws run"),
+        [0u8; 0]
+    );
+    assert_eq!(check_dead_sets(1447, DRAWS).expect("draws run"), []);
+}
+
+#[test]
+fn a_reader_tail_names_no_register_a_partner_writes_correctly() {
+    // The full fused row and the guest row both write c; naming c dead is
+    // too generous, and a read of c then sees the same value on both sides.
+    for id in [
+        SpuSequenceRelationId::CeqNotEqualFused,
+        SpuSequenceRelationId::CeqNotEqualNor,
+    ] {
+        let generous = SpuSequenceRelation {
+            dead: &[0],
+            ..row(id)
+        };
+        for index in 0..DRAWS {
+            let instance = draw(&generous, index);
+            assert_eq!(
+                reader_tail_reads(&generous, &instance).expect("the tail encodes"),
+                [0u8; 0],
+                "{id:?} draw {index}: {:?}",
+                instance.assignment
+            );
+        }
+    }
+}
+
+#[test]
+fn a_reader_tail_makes_every_dead_set_row_diverge_on_the_register_it_read() {
+    let with_dead: Vec<_> = sequence_relations()
+        .iter()
+        .filter(|relation| !relation.dead.is_empty())
+        .collect();
+    assert!(!with_dead.is_empty());
+    for relation in with_dead {
+        let mut named = 0;
+        for index in 0..DRAWS {
+            let instance = draw(relation, index);
+            let excluded = relation.excluded_registers(&instance.assignment, relation.dead);
+            let reads = reader_tail_reads(relation, &instance).expect("the tail encodes");
+            assert!(
+                reads.iter().all(|read| excluded.contains(read)),
+                "{:?} draw {index}: read {reads:?}, excluded {excluded:?}",
+                relation.id
+            );
+            named += u32::from(!reads.is_empty());
+            // Without the tail the same draw matches: the read is what exposes it.
+            assert_eq!(
+                compare_relation(relation, &instance, index).expect("the row encodes"),
+                RelationVerdict::Match
+            );
+        }
+        assert!(
+            named > DRAWS as u32 / 2,
+            "{:?}: the tail named a register on only {named} of {DRAWS} draws",
+            relation.id
+        );
     }
 }

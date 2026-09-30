@@ -12,6 +12,7 @@ use cellgov_spu::fuzz::{
     sequence_relations, SpuSequencePartner, SpuSequenceRelation, SpuSequenceRelationId,
     SpuSymbolicWord,
 };
+use cellgov_spu::instruction::SpuInstructionKind;
 use cellgov_spu::observation::{SpuObservation, SpuObservationComponent};
 use cellgov_spu::state::{SpuState, SPU_REG_COUNT};
 
@@ -23,6 +24,7 @@ use crate::report::{
 };
 use crate::retention::CrossReferenceAsymmetry;
 use crate::rng::Rng;
+use crate::CAMPAIGN_VERSION;
 
 const UNIT: UnitId = UnitId::new(0);
 
@@ -104,34 +106,56 @@ pub(crate) fn instantiate(
     Ok(RelationInstance { assignment, start })
 }
 
-/// Runs both sides of `relation` from `instance` and compares them.
-///
-/// [Le2014 p:219 s:3.1.1] The partner is equivalent only over the inputs on
-/// which both have a defined result. The precondition names that domain, and
-/// the runner does not compare a start state outside it.
+/// Runs both sides of `relation` from `instance` and compares them under
+/// the row's dead set.
 pub(crate) fn compare_relation(
     relation: &SpuSequenceRelation,
     instance: &RelationInstance,
     case_index: u64,
+) -> Result<RelationVerdict, FuzzError> {
+    compare_under(relation, instance, case_index, relation.dead, &[])
+}
+
+/// Runs both sides with `tail` after each and compares them, leaving out
+/// the registers the dead set `dead` excludes.
+///
+/// [Le2014 p:219 s:3.1.1] The partner is equivalent only over the inputs on
+/// which both have a defined result. The precondition names that domain, and
+/// the runner does not compare a start state outside it.
+fn compare_under(
+    relation: &SpuSequenceRelation,
+    instance: &RelationInstance,
+    case_index: u64,
+    dead: &[u8],
+    tail: &[u32],
 ) -> Result<RelationVerdict, FuzzError> {
     if let Some(precondition) = relation.precondition {
         if !precondition(&instance.start, &instance.assignment) {
             return Ok(RelationVerdict::Inapplicable);
         }
     }
-    let words = encode(relation.id, relation.sequence, &instance.assignment)?;
+    let mut words = encode(relation.id, relation.sequence, &instance.assignment)?;
+    words.extend_from_slice(tail);
     let original = run_side(relation.id, &words, &instance.start)?;
-    let partner = match relation.partner {
+    let mut partner = match relation.partner {
         SpuSequencePartner::Guest(partner) => {
-            let partner = encode(relation.id, partner, &instance.assignment)?;
+            let mut partner = encode(relation.id, partner, &instance.assignment)?;
+            partner.extend_from_slice(tail);
             run_side(relation.id, &partner, &instance.start)?
         }
         SpuSequencePartner::Fused(fused) => {
             let mut state = instance.start.clone();
             (fused.apply)(&mut state, &instance.assignment);
-            run_side(relation.id, &[], &state)?
+            run_side(relation.id, tail, &state)?
         }
     };
+    // [Mullen2016 p:449 s:1] A dead register may hold another value; the
+    // Registers comparison leaves it out, and LS, channels, PC and effects
+    // stay compared.
+    for register in relation.excluded_registers(&instance.assignment, dead) {
+        let register = usize::from(register);
+        partner.state.regs[register] = original.state.regs[register];
+    }
     // [Martignoni2009 p:127 s:2.2] The comparison covers the complete state
     // after execution.
     let differences = original.compare(&partner).differences;
@@ -148,6 +172,153 @@ pub(crate) fn compare_relation(
             bit_distance: bit_distance(&original, &partner),
         },
     )))
+}
+
+/// The dead registers of `relation` no draw needs: with one removed from
+/// the dead set, none of `draws` instantiations diverges. A dead set larger
+/// than its fusion needs overstates what a recompiler may leave stale.
+pub(crate) fn unneeded_dead_registers(
+    relation: &SpuSequenceRelation,
+    seed: u64,
+    draws: u64,
+) -> Result<Vec<u8>, FuzzError> {
+    let mut unneeded = Vec::new();
+    for &register in relation.dead {
+        let reduced: Vec<u8> = relation
+            .dead
+            .iter()
+            .copied()
+            .filter(|dead| *dead != register)
+            .collect();
+        let mut needed = false;
+        for index in 0..draws {
+            let mut rng = Rng::for_case(CAMPAIGN_VERSION, seed, index);
+            let instance = instantiate(relation, &mut rng)?;
+            let verdict = compare_under(relation, &instance, index, &reduced, &[])?;
+            if matches!(verdict, RelationVerdict::Diverged(_)) {
+                needed = true;
+                break;
+            }
+        }
+        if !needed {
+            unneeded.push(register);
+        }
+    }
+    Ok(unneeded)
+}
+
+/// The excluded dead registers whose value a read after sequence A carries
+/// into a live register and so into the comparison.
+///
+/// The tail copies each excluded register into a fresh scratch register
+/// (`ori scratch, dead, 0`); a partner that left the dead register stale
+/// then differs in the scratch register, which names the register read.
+pub(crate) fn reader_tail_reads(
+    relation: &SpuSequenceRelation,
+    instance: &RelationInstance,
+) -> Result<Vec<u8>, FuzzError> {
+    let excluded = relation.excluded_registers(&instance.assignment, relation.dead);
+    let mut assignment = instance.assignment.clone();
+    let mut reads = Vec::new();
+    let mut tail = Vec::new();
+    for dead in excluded {
+        let Some(scratch) =
+            (0..SPU_REG_COUNT as u8).find(|register| !assignment.contains(register))
+        else {
+            break;
+        };
+        let (source, target) = (assignment.len() as u8, assignment.len() as u8 + 1);
+        assignment.extend([dead, scratch]);
+        // [SPU-ISA p:106 s:5 Ori] `ori rt,ra,0` copies RA into RT.
+        let read = SpuSymbolicWord {
+            kind: SpuInstructionKind::Ori,
+            rt: target,
+            ra: source,
+            rb: 0,
+            imm: 0,
+        };
+        tail.extend(encode(relation.id, &[read], &assignment)?);
+        reads.push((dead, scratch));
+    }
+    let verdict = compare_under(relation, instance, 0, relation.dead, &tail)?;
+    let RelationVerdict::Diverged(divergence) = verdict else {
+        return Ok(Vec::new());
+    };
+    Ok(reads
+        .into_iter()
+        .filter(|(_, scratch)| {
+            divergence
+                .bit_distance
+                .iter()
+                .any(|(register, _)| register == scratch)
+        })
+        .map(|(dead, _)| dead)
+        .collect())
+}
+
+/// What the dead-set checks found wrong with one catalog row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeadSetFinding {
+    /// No draw needs this symbolic register dead: with it removed from the
+    /// dead set, the partner still matches.
+    Unneeded {
+        /// The row.
+        relation: SpuSequenceRelationId,
+        /// The symbolic register.
+        register: u8,
+    },
+    /// No draw's reader tail diverges on this symbolic register, so a
+    /// later read of it cannot tell the partner from sequence A.
+    NeverRead {
+        /// The row.
+        relation: SpuSequenceRelationId,
+        /// The symbolic register.
+        register: u8,
+    },
+}
+
+/// Runs the minimality and reader-tail checks on every catalog row with a
+/// dead set, over `draws` instantiations drawn from `seed`.
+///
+/// # Errors
+///
+/// [`FuzzError`] when a draw fails or a row does not encode.
+pub fn check_dead_sets(seed: u64, draws: u64) -> Result<Vec<DeadSetFinding>, FuzzError> {
+    let mut findings = Vec::new();
+    for relation in sequence_relations() {
+        if relation.dead.is_empty() {
+            continue;
+        }
+        for register in unneeded_dead_registers(relation, seed, draws)? {
+            findings.push(DeadSetFinding::Unneeded {
+                relation: relation.id,
+                register,
+            });
+        }
+        let mut read = Vec::new();
+        for index in 0..draws {
+            let mut rng = Rng::for_case(CAMPAIGN_VERSION, seed, index);
+            let instance = instantiate(relation, &mut rng)?;
+            for real in reader_tail_reads(relation, &instance)? {
+                read.extend(
+                    relation
+                        .dead
+                        .iter()
+                        .copied()
+                        .filter(|&symbolic| instance.assignment[usize::from(symbolic)] == real),
+                );
+            }
+        }
+        for &register in relation.dead {
+            if !read.contains(&register) {
+                findings.push(DeadSetFinding::NeverRead {
+                    relation: relation.id,
+                    register,
+                });
+            }
+        }
+    }
+    Ok(findings)
 }
 
 /// Checks one catalog row, drawn with the case's generator, and records
