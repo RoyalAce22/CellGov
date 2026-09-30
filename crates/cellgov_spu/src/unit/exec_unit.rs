@@ -72,6 +72,19 @@ impl ExecutionUnit for SpuExecutionUnit {
         }
         self.state.channels.settle_tag_update();
         self.state.channels.in_mbox = ctx.inbound_mailbox().to_vec();
+        // A multisource synchronization request completes once the queue
+        // holds none of the transfers it tracks. A request this step makes
+        // tracks the transfers the queue holds now.
+        // [CBEA p:143 s:9.10] the count returns to 1 when the tracked transfers complete.
+        let oldest = ctx.oldest_mfc_transfer();
+        let channels = &mut self.state.channels;
+        if channels
+            .mssync_tracking
+            .is_some_and(|upto| oldest.is_none_or(|seq| seq >= upto))
+        {
+            channels.mssync_tracking = None;
+        }
+        channels.mssync_horizon = oldest.map(|_| ctx.dma_next_sequence());
 
         // Mirror cross-unit reservation invalidation. The context view is
         // frozen for the step, so a single entry-time check suffices.
@@ -439,6 +452,7 @@ fn channel_stall(insn: &crate::instruction::SpuInstruction) -> Option<ChannelSta
         spu::SPU_RD_SIG_NOTIFY_1 => StallWake::SignalWrite(SignalNotifier::One),
         spu::SPU_RD_SIG_NOTIFY_2 => StallWake::SignalWrite(SignalNotifier::Two),
         spu::MFC_RD_ATOMIC_STAT => StallWake::AtomicCommandCompletion,
+        spu::MFC_WR_MSSYNC_REQ => StallWake::MultisourceSync,
         _ => return None,
     };
     Some(ChannelStall { channel, wake })

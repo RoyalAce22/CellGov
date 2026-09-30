@@ -440,6 +440,19 @@ impl DmaQueue {
             .map(|e| (&e.completion, e.payload.is_some()))
     }
 
+    /// Every pending completion with the sequence the queue gave it, in
+    /// the order the queue drains them.
+    pub fn pending_sequenced(&self) -> impl Iterator<Item = (u64, &DmaCompletion)> + '_ {
+        self.entries
+            .iter()
+            .map(|((_, seq), e)| (seq, &e.completion))
+    }
+
+    /// The sequence the queue gives the next command it takes.
+    pub fn next_sequence(&self) -> u64 {
+        self.next_seq
+    }
+
     /// Remove and return the earliest pending completion.
     pub fn pop_next(&mut self) -> Option<(DmaCompletion, Option<Vec<u8>>)> {
         self.entries

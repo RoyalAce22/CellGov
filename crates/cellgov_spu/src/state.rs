@@ -146,6 +146,10 @@ impl SpuObservableSnapshot {
             // Instruction comparison runs no list command.
             lists: _,
             list_stall_status: _,
+            // Instruction comparison runs no DMA queue, so a request
+            // completes as it is made.
+            mssync_tracking: _,
+            mssync_horizon: _,
         } = channels;
         Self {
             regs: *regs,
@@ -496,6 +500,18 @@ pub struct ChannelState {
     ///
     /// [CBEA p:129 s:9.3.7] the channel reports the tag groups with a stalled list; a read clears it and sets the count to 0.
     pub list_stall_status: u32,
+    /// The DMA queue sequence a multisource synchronization request
+    /// tracks up to: the request completes once no transfer to or from
+    /// the unit's local store that the queue took before that sequence
+    /// is outstanding. `None` is a channel count of 1.
+    ///
+    /// [CBEA p:143 s:9.10] a write of MFC_WrMSSyncReq starts tracking the transfers outstanding to the MFC, and the count returns to 1 when they complete.
+    pub mssync_tracking: Option<u64>,
+    /// The sequence a request made in this step tracks up to: the queue's
+    /// next sequence when a transfer to or from the unit's local store is
+    /// outstanding at the step's start, and `None` when none is, so the
+    /// request completes at once.
+    pub mssync_horizon: Option<u64>,
 }
 
 /// Where a list command resumes after its stall.
@@ -556,6 +572,9 @@ impl ChannelState {
             lists: Vec::new(),
             // x'19' count 0.
             list_stall_status: 0,
+            // x'9' count 1.
+            mssync_tracking: None,
+            mssync_horizon: None,
         }
     }
 }

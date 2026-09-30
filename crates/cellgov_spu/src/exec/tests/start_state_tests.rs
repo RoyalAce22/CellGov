@@ -12,10 +12,12 @@ use crate::state::{SignalNotifyMode, SpuObservableSnapshot, SpuState};
 /// [CBEA p:109 s:9] a nonblocking channel counts 1.
 /// [CBEA p:130 s:9.3.8] MFC_WrListStallAck counts 1.
 /// [CBE-Handbook p:445 s:17.1 Table 17-2] MFC_Cmd holds 16 entries.
-const START_COUNTS: [(u8, u32); 20] = [
+/// [CBEA p:143 s:9.10] software initializes the MFC_WrMSSyncReq count to 1.
+const START_COUNTS: [(u8, u32); 21] = [
     (0x00, 0),
     (0x03, 0),
     (0x04, 0),
+    (0x09, 1),
     (0x0C, 1),
     (0x0D, 1),
     (0x10, 1),

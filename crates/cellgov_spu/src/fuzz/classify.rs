@@ -124,8 +124,9 @@ pub(super) fn effect_and_outcome(
                 | spu::MFC_WR_TAG_MASK,
             ..
         } => (NO_EFFECTS, CONTINUE),
+        // So does a second multisource synchronization request.
         SpuInstruction::Wrch {
-            channel: spu::SPU_WR_OUT_MBOX,
+            channel: spu::SPU_WR_OUT_MBOX | spu::MFC_WR_MSSYNC_REQ,
             ..
         } => (NO_EFFECTS, CONTINUE_OR_YIELD),
         // The channel refuses a reserved update request.

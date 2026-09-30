@@ -290,6 +290,17 @@ impl Runtime {
         let due = processed.completions;
         for (c, payload) in &due {
             self.apply_dma_transfer(c, payload.as_deref());
+            // A transfer through the SPU thread window is one the target's
+            // multisource synchronization tracks, so its completion ends
+            // that park as the issuer's own transfers do.
+            for (owner, _) in self.dma_local_store_ends(c) {
+                if owner != c.issuer()
+                    && self.stall_ends(owner, cellgov_exec::StallWake::MultisourceSync, false)
+                {
+                    self.registry
+                        .set_status_override(owner, UnitStatus::Runnable);
+                }
+            }
             // The transfer still commits, so the terminal memory
             // snapshot holds the payload. The `Runnable` override below
             // would replace either of these issuer states:
@@ -354,6 +365,28 @@ impl Runtime {
     /// [CBEA p:128 s:9.3.6] a tag group reads complete when it has no outstanding operations.
     pub(super) fn unit_dma_view(&self, unit: cellgov_event::UnitId) -> (u32, u32) {
         self.dma_queue.issuer_view(unit)
+    }
+
+    /// For `unit`: the sequence the queue gives its next command, and the
+    /// sequence of the oldest queued transfer that moves bytes to or from
+    /// the unit's local store, whoever issued it.
+    ///
+    /// [CBEA p:104 s:8.8] the multisource synchronization facility covers the transfers to or from the associated MFC.
+    pub(super) fn mfc_transfer_view(&self, unit: cellgov_event::UnitId) -> (u64, Option<u64>) {
+        let oldest = if self.dma_queue.is_empty() {
+            None
+        } else {
+            self.dma_queue
+                .pending_sequenced()
+                .filter(|(_, c)| {
+                    self.dma_local_store_ends(c)
+                        .iter()
+                        .any(|(owner, _)| *owner == unit)
+                })
+                .map(|(seq, _)| seq)
+                .min()
+        };
+        (self.dma_queue.next_sequence(), oldest)
     }
 
     /// One bit for each tag group with a `unit` transfer in the queue.

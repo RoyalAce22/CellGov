@@ -32,6 +32,8 @@ pub struct ExecutionContext<'a> {
     outstanding_dma_tags: u32,
     list_stall_tags: u32,
     dma_queue_occupancy: u32,
+    dma_next_sequence: u64,
+    oldest_mfc_transfer: Option<u64>,
     inbound_mailbox: &'a [u32],
     /// Set when the unit reads [`Self::inbound_mailbox`], so the
     /// runtime knows the step read its mailbox. It records what the
@@ -54,6 +56,8 @@ impl<'a> ExecutionContext<'a> {
             outstanding_dma_tags: 0,
             list_stall_tags: 0,
             dma_queue_occupancy: 0,
+            dma_next_sequence: 0,
+            oldest_mfc_transfer: None,
             inbound_mailbox: &[],
             mailbox_read: None,
         }
@@ -74,6 +78,8 @@ impl<'a> ExecutionContext<'a> {
             outstanding_dma_tags: 0,
             list_stall_tags: 0,
             dma_queue_occupancy: 0,
+            dma_next_sequence: 0,
+            oldest_mfc_transfer: None,
             inbound_mailbox: &[],
             mailbox_read: None,
         }
@@ -96,6 +102,8 @@ impl<'a> ExecutionContext<'a> {
             outstanding_dma_tags: 0,
             list_stall_tags: 0,
             dma_queue_occupancy: 0,
+            dma_next_sequence: 0,
+            oldest_mfc_transfer: None,
             inbound_mailbox: &[],
             mailbox_read: None,
         }
@@ -122,6 +130,8 @@ impl<'a> ExecutionContext<'a> {
             outstanding_dma_tags: 0,
             list_stall_tags: 0,
             dma_queue_occupancy: 0,
+            dma_next_sequence: 0,
+            oldest_mfc_transfer: None,
             inbound_mailbox: &[],
             mailbox_read: None,
         }
@@ -190,6 +200,19 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
+    /// The DMA queue's view of the unit's MFC at the start of the step:
+    /// the sequence the queue gives the next command it takes, and the
+    /// sequence of the oldest command still queued that moves bytes to
+    /// or from the unit's local store, whoever issued it.
+    #[inline]
+    pub const fn with_mfc_transfer_view(self, next_sequence: u64, oldest: Option<u64>) -> Self {
+        Self {
+            dma_next_sequence: next_sequence,
+            oldest_mfc_transfer: oldest,
+            ..self
+        }
+    }
+
     /// The messages waiting in the unit's own inbound mailbox at the
     /// start of the step, oldest first.
     #[inline]
@@ -244,6 +267,19 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn dma_queue_occupancy(&self) -> u32 {
         self.dma_queue_occupancy
+    }
+
+    /// The sequence the DMA queue gives the next command it takes.
+    #[inline]
+    pub const fn dma_next_sequence(&self) -> u64 {
+        self.dma_next_sequence
+    }
+
+    /// The sequence of the oldest queued command that moves bytes to or
+    /// from this unit's local store, whoever issued it.
+    #[inline]
+    pub const fn oldest_mfc_transfer(&self) -> Option<u64> {
+        self.oldest_mfc_transfer
     }
 
     /// Committed memory view, borrowed for the step's lifetime.

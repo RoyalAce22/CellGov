@@ -210,6 +210,9 @@ one of:
 
 - a mailbox delivery;
 - a DMA completion (for a tag-status wait or a full command queue);
+- for a second multisource synchronization request, the completion
+  of a transfer to or from its local store, including another unit's
+  transfer through the SPU thread window;
 - a read of its outbound mailbox;
 - a write to the signal-notification register it reads;
 - for an atomic-status read with no status, an immediate atomic

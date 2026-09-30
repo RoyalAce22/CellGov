@@ -231,6 +231,7 @@ fn channel_operands_prefer_interpreter_owned_architected_selectors() {
             spu::MFC_CMD as u32,
             spu::MFC_WR_TAG_MASK as u32,
             spu::MFC_WR_TAG_UPDATE as u32,
+            spu::MFC_WR_MSSYNC_REQ as u32,
         ]
     );
     assert_eq!(
@@ -255,6 +256,7 @@ fn channel_operands_prefer_interpreter_owned_architected_selectors() {
             spu::SPU_RD_SIG_NOTIFY_2 as u32,
             spu::MFC_RD_LIST_STALL_STAT as u32,
             spu::SPU_WR_OUT_INTR_MBOX as u32,
+            spu::MFC_WR_MSSYNC_REQ as u32,
         ]
     );
     assert!(channels(SpuInstructionKind::Ai).is_empty());

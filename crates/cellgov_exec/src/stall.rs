@@ -32,13 +32,22 @@ pub enum StallWake {
     ///
     /// [CBEA p:131 s:9.4] a read of MFC_RdAtomicStat before the unit issues an immediate atomic command is a software-induced deadlock.
     AtomicCommandCompletion,
+    /// A transfer to or from the unit's local store completes, one the
+    /// unit's MFC issued or one another unit sent through the SPU thread
+    /// window.
+    ///
+    /// [CBEA p:143 s:9.10] a second write of MFC_WrMSSyncReq stalls until the transfers the first write tracks complete.
+    MultisourceSync,
 }
 
 impl StallWake {
     /// Whether a completion of one of the unit's DMA transfers ends the
     /// stall.
     pub const fn ends_on_dma_completion(self) -> bool {
-        matches!(self, Self::DmaCompletion | Self::CommandQueueSlot)
+        matches!(
+            self,
+            Self::DmaCompletion | Self::CommandQueueSlot | Self::MultisourceSync
+        )
     }
 }
 

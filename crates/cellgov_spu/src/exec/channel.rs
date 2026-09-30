@@ -129,6 +129,17 @@ pub(super) fn execute_wrch(
             state.channels.out_mbox = Some(val);
             SpuStepOutcome::Continue
         }
+        // [CBEA p:143 s:9.10] a write starts tracking the transfers outstanding to the MFC, and a second write stalls until those complete; the data written is ignored.
+        // [CBEA p:104 s:8.8] the tracked transfers are those to or from the associated MFC received before the request.
+        // A command the unit issues ends its step, so the queue the step
+        // began with holds every transfer received before this write.
+        spu::MFC_WR_MSSYNC_REQ => {
+            if state.channels.mssync_tracking.is_some() {
+                return stall();
+            }
+            state.channels.mssync_tracking = state.channels.mssync_horizon;
+            SpuStepOutcome::Continue
+        }
         // [CBE-Handbook p:443 s:17.1.4] a write to a reserved channel has no effect and raises no interrupt.
         _ if spu::is_reserved_channel(channel) => SpuStepOutcome::Continue,
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
@@ -283,6 +294,8 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         spu::MFC_RD_ATOMIC_STAT => u32::from(channels.atomic_status_ready),
         // [CBEA p:133 s:9.5.1] SPU_WrOutMbox counts its free entries.
         spu::SPU_WR_OUT_MBOX => spu::SPU_OUT_MBOX_DEPTH - u32::from(channels.out_mbox.is_some()),
+        // [CBEA p:143 s:9.10] the channel counts 1 until a write, and returns to 1 when the synchronization completes.
+        spu::MFC_WR_MSSYNC_REQ => u32::from(channels.mssync_tracking.is_none()),
         // [CBEA p:135 s:9.5.3] SPU_RdInMbox counts the messages in the inbound mailbox.
         spu::SPU_RD_IN_MBOX => u32::try_from(channels.in_mbox.len())
             .unwrap_or(u32::MAX)

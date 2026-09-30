@@ -158,6 +158,7 @@ impl Runtime {
                 ExecutionContext::with_received(unit_mem, &received)
             };
             let (queued_commands, outstanding_tags) = self.unit_dma_view(unit_id);
+            let (next_sequence, oldest_transfer) = self.mfc_transfer_view(unit_id);
             let unit_reservations = crate::runtime::spaces::resolve_unit_reservations(
                 &self.reservations,
                 &self.spaces,
@@ -176,6 +177,7 @@ impl Runtime {
                 .with_outstanding_dma_tags(outstanding_tags)
                 .with_list_stall_tags(self.dma_queue.stall_notify_tags(unit_id))
                 .with_dma_queue_occupancy(queued_commands)
+                .with_mfc_transfer_view(next_sequence, oldest_transfer)
                 .with_inbound_mailbox(&inbound_mailbox)
                 .with_mailbox_read_flag(&mailbox_read);
             let unit = self
