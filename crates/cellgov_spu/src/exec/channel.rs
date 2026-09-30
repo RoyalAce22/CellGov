@@ -132,18 +132,15 @@ pub(super) fn execute_wrch(
         // [CBEA p:151 s:9.11.2] the mask selects the pending events SPU_RdEventStat reports; enabling a pending event updates the channel.
         // [CBEA p:153 s:9.11.3] SPU_RdEventMask returns the last data written, so the model keeps it whole.
         spu::SPU_WR_EVENT_MASK => {
-            let c = &mut state.channels;
-            c.event_mask = val;
-            if c.pending_events & val != 0 {
-                c.event_count = true;
-            }
+            let pending = state.channels.pending_events;
+            state.channels.set_event_state(pending, val);
             SpuStepOutcome::Continue
         }
         // [CBEA p:155 s:9.11.4] a 1 bit resets that pending event, enabled or not.
-        // [CBEA p:147 s:9.11.1] the count is set to 1 when enabled events are pending after the write.
+        // [CBEA p:146 s:9.11] the count also increments if an event is still set in the status after the write.
         spu::SPU_WR_EVENT_ACK => {
             let c = &mut state.channels;
-            c.pending_events &= !val;
+            c.set_event_state(c.pending_events & !val, c.event_mask);
             if c.pending_events & c.event_mask != 0 {
                 c.event_count = true;
             }

@@ -429,16 +429,11 @@ impl SpuState {
         self.raise_events(rising);
     }
 
-    /// Set `events` in the pending-event register. An event the mask
-    /// enables sets the `SPU_RdEventStat` count.
-    ///
-    /// [CBEA p:147 s:9.11.1] the count is set to 1 when an event occurs and its mask bit is 1.
+    /// Set `events` in the pending-event register.
     pub fn raise_events(&mut self, events: u32) {
-        let c = &mut self.channels;
-        c.pending_events |= events;
-        if events & c.event_mask != 0 {
-            c.event_count = true;
-        }
+        let pending = self.channels.pending_events | events;
+        self.channels
+            .set_event_state(pending, self.channels.event_mask);
     }
 }
 
@@ -648,6 +643,20 @@ impl ChannelState {
 }
 
 impl ChannelState {
+    /// Replace the pending-event register and the mask. A bit of the
+    /// event status, pending AND mask, that turns on sets the
+    /// `SPU_RdEventStat` count.
+    ///
+    /// [CBEA p:146 s:9.11] any transition of a bit from 0 to 1 in SPU_RdEventStat increments its count, which saturates at 1.
+    pub fn set_event_state(&mut self, pending: u32, mask: u32) {
+        let before = self.pending_events & self.event_mask;
+        self.pending_events = pending;
+        self.event_mask = mask;
+        if pending & mask & !before != 0 {
+            self.event_count = true;
+        }
+    }
+
     /// Applies a write to `MFC_WrTagUpdate`.
     ///
     /// - An immediate request latches the masked status now.

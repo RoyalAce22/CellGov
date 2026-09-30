@@ -287,3 +287,75 @@ fn a_source_count_raises_its_event_on_the_rising_edge_alone() {
     s.update_events();
     assert_eq!(s.channels.pending_events, spu::event::MB, "a new edge");
 }
+
+/// [CBEA p:146 s:9.11] the count increments on a 0-to-1 transition of a SPU_RdEventStat bit, so an event whose bit is still pending does not raise it again.
+#[test]
+fn a_repeat_event_on_a_bit_still_pending_does_not_set_the_count() {
+    use spu::event::S1;
+    let mut s = SpuState::new();
+    write_channel(&mut s, spu::SPU_WR_EVENT_MASK, S1);
+    s.raise_events(S1);
+    read_channel(&mut s, spu::SPU_RD_EVENT_STAT);
+    assert_eq!(s.reg_word(5), S1);
+    assert_eq!(count(&mut s, spu::SPU_RD_EVENT_STAT), 0);
+
+    s.raise_events(S1);
+    assert_eq!(
+        count(&mut s, spu::SPU_RD_EVENT_STAT),
+        0,
+        "S1 was never acknowledged, so its status bit did not change"
+    );
+    write_channel(&mut s, spu::SPU_WR_EVENT_ACK, S1);
+    s.raise_events(S1);
+    assert_eq!(
+        count(&mut s, spu::SPU_RD_EVENT_STAT),
+        1,
+        "after the acknowledgment the bit turns on again"
+    );
+}
+
+/// [CBEA p:149 s:9.11.1] the first phantom event: an event acknowledged or masked after it raised the count and before the status read.
+#[test]
+fn an_event_acknowledged_or_masked_before_the_read_leaves_a_phantom_count() {
+    use spu::event::S1;
+    for undo in [spu::SPU_WR_EVENT_ACK, spu::SPU_WR_EVENT_MASK] {
+        let mut s = SpuState::new();
+        write_channel(&mut s, spu::SPU_WR_EVENT_MASK, S1);
+        s.raise_events(S1);
+        let value = if undo == spu::SPU_WR_EVENT_ACK { S1 } else { 0 };
+        write_channel(&mut s, undo, value);
+        assert_eq!(
+            count(&mut s, spu::SPU_RD_EVENT_STAT),
+            1,
+            "channel {undo}: the count stays"
+        );
+        assert_eq!(
+            read_channel(&mut s, spu::SPU_RD_EVENT_STAT),
+            SpuStepOutcome::Continue
+        );
+        assert_eq!(
+            s.reg_word(5),
+            0,
+            "channel {undo}: the read shows no event present"
+        );
+    }
+}
+
+/// [CBEA p:149 s:9.11.1] the second phantom event: a condition reset before the status read still reads as pending, and still needs its acknowledgment.
+#[test]
+fn a_mailbox_read_before_the_status_read_leaves_mb_pending() {
+    use spu::event::MB;
+    let mut s = SpuState::new();
+    write_channel(&mut s, spu::SPU_WR_EVENT_MASK, MB);
+    s.channels.in_mbox = vec![7];
+    s.update_events();
+    read_channel(&mut s, spu::SPU_RD_IN_MBOX);
+    s.update_events();
+    assert!(s.channels.in_mbox.is_empty(), "the condition is gone");
+
+    read_channel(&mut s, spu::SPU_RD_EVENT_STAT);
+    assert_eq!(s.reg_word(5), MB, "the event still reads as pending");
+    assert_eq!(s.channels.pending_events, MB);
+    write_channel(&mut s, spu::SPU_WR_EVENT_ACK, MB);
+    assert_eq!(s.channels.pending_events, 0);
+}
