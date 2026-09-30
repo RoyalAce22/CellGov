@@ -54,6 +54,32 @@ fn shufb_byte(a: &[u8; 16], b: &[u8; 16], control: u8) -> u8 {
     }
 }
 
+/// Applies `f` to each word slot of `ra` and `rb` and writes the four
+/// results to `rt`.
+///
+/// It reads both sources before the write, so `rt` can alias `ra` or `rb`.
+fn words2(
+    state: &mut SpuState,
+    rt: u8,
+    ra: u8,
+    rb: u8,
+    f: impl Fn(u32, u32) -> u32,
+) -> SpuStepOutcome {
+    let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
+    state.regs[rt as usize] = from_words(std::array::from_fn(|i| f(a[i], b[i])));
+    SpuStepOutcome::Continue
+}
+
+/// The low halfword of a word, sign-extended.
+fn low_signed(word: u32) -> i32 {
+    i32::from(word as u16 as i16)
+}
+
+/// The high halfword of a word, sign-extended.
+fn high_signed(word: u32) -> i32 {
+    i32::from((word >> 16) as u16 as i16)
+}
+
 /// Execute a single decoded SPU instruction.
 pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match *insn {
@@ -155,6 +181,62 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                 let b = state.reg_word_slot(rb, slot);
                 state.set_reg_word_slot(rt, slot, b.wrapping_sub(a));
             }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:72 s:5. Integer and Logical Instructions] Multiply: signed low halfwords, 32-bit product.
+        SpuInstruction::Mpy { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| {
+            (low_signed(a) * low_signed(b)) as u32
+        }),
+        // [SPU-ISA p:73 s:5. Integer and Logical Instructions] Multiply Unsigned: unsigned low halfwords.
+        SpuInstruction::Mpyu { rt, ra, rb } => {
+            words2(state, rt, ra, rb, |a, b| (a & 0xFFFF) * (b & 0xFFFF))
+        }
+        // [SPU-ISA p:74 s:5. Integer and Logical Instructions] Multiply Immediate: I10 sign-extended to 16 bits times the signed low halfword.
+        SpuInstruction::Mpyi { rt, ra, imm } => words2(state, rt, ra, ra, |a, _| {
+            (low_signed(a) * i32::from(imm)) as u32
+        }),
+        // [SPU-ISA p:75 s:5. Integer and Logical Instructions] Multiply Unsigned Immediate: I10 extended to 16 bits, both operands unsigned.
+        SpuInstruction::Mpyui { rt, ra, imm } => words2(state, rt, ra, ra, |a, _| {
+            (a & 0xFFFF) * u32::from(imm as u16)
+        }),
+        // [SPU-ISA p:76 s:5. Integer and Logical Instructions] Multiply and Add: the signed low-halfword product plus RC.
+        SpuInstruction::Mpya { rt, ra, rb, rc } => {
+            let [a, b, c] = [ra, rb, rc].map(|r| words(state.regs[r as usize]));
+            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
+                ((low_signed(a[i]) * low_signed(b[i])) as u32).wrapping_add(c[i])
+            }));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:77 s:5. Integer and Logical Instructions] Multiply High: the high halfword of RA times the low halfword of RB; the product's low 16 bits move to the high half.
+        SpuInstruction::Mpyh { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| {
+            (a >> 16).wrapping_mul(b & 0xFFFF) << 16
+        }),
+        // [SPU-ISA p:78 s:5. Integer and Logical Instructions] Multiply and Shift Right: the product's high 16 bits, sign-extended.
+        SpuInstruction::Mpys { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| {
+            ((low_signed(a) * low_signed(b)) >> 16) as u32
+        }),
+        // [SPU-ISA p:79 s:5. Integer and Logical Instructions] Multiply High High: signed high halfwords.
+        SpuInstruction::Mpyhh { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| {
+            (high_signed(a) * high_signed(b)) as u32
+        }),
+        // [SPU-ISA p:80 s:5. Integer and Logical Instructions] Multiply High High and Add: the signed high-halfword product plus RT.
+        SpuInstruction::Mpyhha { rt, ra, rb } => {
+            let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
+            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
+                ((high_signed(a[i]) * high_signed(b[i])) as u32).wrapping_add(t[i])
+            }));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:81 s:5. Integer and Logical Instructions] Multiply High High Unsigned: unsigned high halfwords.
+        SpuInstruction::Mpyhhu { rt, ra, rb } => {
+            words2(state, rt, ra, rb, |a, b| (a >> 16) * (b >> 16))
+        }
+        // [SPU-ISA p:82 s:5. Integer and Logical Instructions] Multiply High High Unsigned and Add: the unsigned high-halfword product plus RT.
+        SpuInstruction::Mpyhhau { rt, ra, rb } => {
+            let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
+            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
+                ((a[i] >> 16) * (b[i] >> 16)).wrapping_add(t[i])
+            }));
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:66 s:5. Integer and Logical Instructions] Add Extended: RA + RB + the low bit of each RT word.
@@ -714,3 +796,7 @@ mod halfword_arith_tests;
 #[cfg(test)]
 #[path = "tests/carry_borrow_tests.rs"]
 mod carry_borrow_tests;
+
+#[cfg(test)]
+#[path = "tests/multiply_tests.rs"]
+mod multiply_tests;

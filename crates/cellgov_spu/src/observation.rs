@@ -230,6 +230,17 @@ impl SpuAllowedFootprint {
             | SpuInstruction::A { rt, .. }
             | SpuInstruction::Ai { rt, .. }
             | SpuInstruction::Sf { rt, .. }
+            | SpuInstruction::Mpy { rt, .. }
+            | SpuInstruction::Mpyu { rt, .. }
+            | SpuInstruction::Mpyi { rt, .. }
+            | SpuInstruction::Mpyui { rt, .. }
+            | SpuInstruction::Mpya { rt, .. }
+            | SpuInstruction::Mpyh { rt, .. }
+            | SpuInstruction::Mpys { rt, .. }
+            | SpuInstruction::Mpyhh { rt, .. }
+            | SpuInstruction::Mpyhha { rt, .. }
+            | SpuInstruction::Mpyhhu { rt, .. }
+            | SpuInstruction::Mpyhhau { rt, .. }
             | SpuInstruction::Addx { rt, .. }
             | SpuInstruction::Cg { rt, .. }
             | SpuInstruction::Cgx { rt, .. }

@@ -148,6 +148,108 @@ pub enum SpuInstruction {
         /// Source register B (minuend).
         rb: u8,
     },
+    // [SPU-ISA p:72 s:5 16-bit multiplies: Mpy p.72 .. Mpyhhau p.82]
+    /// Multiply: the signed low halfwords of each word, a 32-bit product.
+    Mpy {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Multiply unsigned: the unsigned low halfwords of each word.
+    Mpyu {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Multiply immediate: each signed low halfword times the sign-extended I10.
+    Mpyi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
+    /// Multiply unsigned immediate: each unsigned low halfword times the I10 extended to 16 bits.
+    Mpyui {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
+    /// Multiply and add: the signed low-halfword product plus `rc`.
+    Mpya {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+        /// The addend register.
+        rc: u8,
+    },
+    /// Multiply high: the high halfword of `ra` times the low halfword of `rb`, the product's low 16 bits in the high half.
+    Mpyh {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Multiply and shift right: the high 16 bits of the signed low-halfword product, sign-extended.
+    Mpys {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Multiply high high: the signed high halfwords of each word.
+    Mpyhh {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Multiply high high and add: the signed high-halfword product plus `rt`.
+    Mpyhha {
+        /// Destination register, and the addend.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Multiply high high unsigned: the unsigned high halfwords of each word.
+    Mpyhhu {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Multiply high high unsigned and add: the unsigned high-halfword product plus `rt`.
+    Mpyhhau {
+        /// Destination register, and the addend.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
     // [SPU-ISA p:66 s:5 Carry and borrow: Addx p.66, Cg p.67, Cgx p.68, Sfx p.69, Bg p.70, Bgx p.71]
     /// Add extended: all 4 word slots, `rt[i] = ra[i] + rb[i] + (rt[i] & 1)`.
     Addx {
