@@ -96,9 +96,9 @@ impl SpuSequenceInteraction {
                 state.regs[1] = std::array::from_fn(|index| index as u8 + 1);
             }
             Self::UnmodelledMfcCommand => {
-                // A put with a barrier: the SPU queue accepts it, and the
-                // model runs no barrier form, so it faults.
-                state.set_reg_word_splat(2, spu::MFC_PUTB);
+                // An SL1 zeroing write: the SPU queue accepts it, and the
+                // model runs no storage-control command, so it faults.
+                state.set_reg_word_splat(2, spu::MFC_SDCRZ);
             }
             Self::Mailbox => state.channels.in_mbox = vec![SEQUENCE_MAILBOX_MESSAGE],
             Self::Branch | Self::Stop => {}

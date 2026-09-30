@@ -271,3 +271,7 @@ mod dma_invalidation_tests;
 #[cfg(test)]
 #[path = "tests/dma_translation_tests.rs"]
 mod dma_translation_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_ordering_tests.rs"]
+mod dma_ordering_tests;

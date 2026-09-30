@@ -2,12 +2,16 @@
 
 use crate::state::SpuState;
 use crate::stop::SpuStopKind;
+use cellgov_dma::DmaDirection::{Get, Put};
+use cellgov_dma::MfcCommandClass::{SendSignal, Transfer};
+use cellgov_dma::MfcOrdering as Order;
 use cellgov_dma::{
-    DmaDirection, DmaRequest, InvalidMfcCommand, MfcCommandClass, MfcCommandError, MfcParameters,
+    DmaDirection, DmaRequest, InvalidMfcCommand, MfcCommandClass, MfcCommandError, MfcOrdering,
+    MfcParameters,
 };
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
-use cellgov_exec::YieldReason;
+use cellgov_exec::{BarrierKind, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::hw::ppu::CELL_EA_LIMIT;
 use cellgov_ps3_abi::hw::spu;
@@ -265,7 +269,94 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
     })
 }
 
-/// Checks a put or get's latched parameters and returns its tag group.
+/// Checks a transfer's latched parameters against `class`, then queues it with `ordering`.
+fn issue_transfer(
+    cmd: u32,
+    direction: DmaDirection,
+    class: MfcCommandClass,
+    ordering: MfcOrdering,
+    state: &mut SpuState,
+    unit_id: UnitId,
+) -> SpuStepOutcome {
+    let tag = match checked_transfer(cmd, class, state, unit_id) {
+        Ok(tag) => tag,
+        Err(queued) => return queued,
+    };
+    let c = &state.channels;
+    let ea = (u64::from(c.mfc_eah) << 32) | u64::from(c.mfc_eal);
+    let (lsa, size) = (c.mfc_lsa, c.mfc_size);
+    // A range past 2^64 names no segment: the queue raises it like any
+    // address past the effective-address space.
+    let Some(main) = ByteRange::new(GuestAddr::new(ea), u64::from(size)) else {
+        return queue_invalid(cmd, MfcCommandError::DataSegment { ea }, state, unit_id);
+    };
+    let local =
+        ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size)).expect("valid LS range");
+    let (src, dst, payload) = match direction {
+        // Each local-store byte's address wraps by the limit register, so
+        // no range the guest stages escapes local store.
+        DmaDirection::Put => (local, main, Some(state.read_ls_wrapped(lsa, size))),
+        // The runtime reads a get's source when it completes and lands the
+        // bytes in local store.
+        DmaDirection::Get => (main, local, None),
+    };
+    // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
+    if direction == DmaDirection::Put {
+        if let Some(line) = state.reservation {
+            if line.overlaps_range(ea, u64::from(size)) {
+                state.reservation = None;
+            }
+        }
+    }
+    let request = DmaRequest::new(direction, src, dst, unit_id)
+        .expect("matching sizes")
+        .with_tag_id(tag)
+        .with_ordering(ordering);
+    state.channels.cmd_queue_free -= 1;
+    SpuStepOutcome::Yield {
+        effects: vec![Effect::DmaEnqueue { request, payload }],
+        reason: YieldReason::DmaSubmitted,
+    }
+}
+
+/// Queues an ordering command, a command that moves no bytes.
+///
+/// The command holds a queue slot and its tag group until the queue
+/// completes it. The queue completes it after the commands its ordering
+/// names:
+///
+/// - mfcsync and mfceieio order their tag group.
+/// - The barrier command orders the whole queue.
+///
+/// [CBEA p:72 s:7.9.3] the barrier command is not tag-specific, and its tag says when it is complete.
+/// [CBEA p:308 s:Appendix D Table D-4] the barrier does not order the immediate atomic commands.
+fn issue_ordering_command(
+    cmd: u32,
+    ordering: MfcOrdering,
+    state: &mut SpuState,
+    unit_id: UnitId,
+) -> SpuStepOutcome {
+    let raw = state.channels.mfc_tag_id;
+    let Some(tag) = u8::try_from(raw).ok().and_then(MfcTagId::new) else {
+        // [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] A set bit above the tag field suspends MFC command queue processing
+        return queue_invalid(cmd, MfcCommandError::ReservedTagBits(raw), state, unit_id);
+    };
+    let none = ByteRange::new(GuestAddr::new(0), 0).expect("an empty range");
+    let request = DmaRequest::new(DmaDirection::Put, none, none, unit_id)
+        .expect("matching sizes")
+        .with_tag_id(tag)
+        .with_ordering(ordering);
+    state.channels.cmd_queue_free -= 1;
+    SpuStepOutcome::Yield {
+        effects: vec![Effect::DmaEnqueue {
+            request,
+            payload: Some(Vec::new()),
+        }],
+        reason: YieldReason::DmaSubmitted,
+    }
+}
+
+/// Checks a transfer's latched parameters against `class` and returns its tag group.
 ///
 /// A command the MFC refuses still retires. It joins the queue as an
 /// invalid command and takes a slot. The queue suspends when it reaches
@@ -274,11 +365,12 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
 /// [CBEA p:113 s:9.1.1] the parameters' validity is checked asynchronous to the instruction stream.
 fn checked_transfer(
     cmd: u32,
+    class: MfcCommandClass,
     state: &mut SpuState,
     unit_id: UnitId,
 ) -> Result<MfcTagId, SpuStepOutcome> {
     let params = latched_parameters(state);
-    let error = match cellgov_dma::validate(MfcCommandClass::Transfer, params) {
+    let error = match cellgov_dma::validate(class, params) {
         Ok(()) => match u8::try_from(params.tag).ok().and_then(MfcTagId::new) {
             Some(tag) => return Ok(tag),
             // [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] A set bit above the tag field suspends MFC command queue processing
@@ -367,6 +459,19 @@ fn opcode_error(word: MfcCmd) -> Option<MfcCommandError> {
     }
 }
 
+/// The barrier a queued MFC command word is, if its opcode orders the
+/// queue.
+pub(crate) fn mfc_barrier_kind(cmd: u32) -> Option<BarrierKind> {
+    Some(match MfcCmd::new(cmd).opcode() {
+        spu::MFC_PUTF | spu::MFC_GETF | spu::MFC_SNDSIGF => BarrierKind::MfcFence,
+        spu::MFC_PUTB | spu::MFC_GETB | spu::MFC_SNDSIGB => BarrierKind::MfcTagBarrier,
+        spu::MFC_SYNC => BarrierKind::MfcSync,
+        spu::MFC_EIEIO => BarrierKind::MfcEieio,
+        spu::MFC_BARRIER => BarrierKind::MfcBarrier,
+        _ => return None,
+    })
+}
+
 fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     // [CBEA p:113 s:9.1.1] a write to MFC_Cmd with the command queue full stalls until a slot frees.
     // [CBEA p:65 s:7.8] the immediate atomic commands also need a free slot, though they are not queued behind other commands.
@@ -387,7 +492,6 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
     // [CBEA p:114 s:9.1.2 MFC Class ID Channel] a class id is never checked, an unrecognised one falls back to the default, and none of them raises an exception.
     let ea = ((state.channels.mfc_eah as u64) << 32) | state.channels.mfc_eal as u64;
     let lsa = state.channels.mfc_lsa;
-    let size = state.channels.mfc_size;
     // [CBEA p:66 s:7.8.1] the getllar data transfer is one cache line.
     // Which local-store line an unaligned MFC_LSA names is unestablished.
     // This model takes the line that contains it, as it does for the
@@ -397,66 +501,28 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
 
     match word.opcode() {
         // [CBEA p:61 s:7. MFC Commands sub:7.6 Put Commands (Local Storage to Main Storage)] put: copy LS bytes to main storage.
-        spu::MFC_PUT => {
-            let tag = match checked_transfer(cmd, state, unit_id) {
-                Ok(tag) => tag,
-                Err(queued) => return queued,
-            };
-            // Each local-store byte's address wraps by the limit register,
-            // so no range the guest stages escapes local store.
-            let ls_bytes = state.read_ls_wrapped(lsa, size);
-
-            let src =
-                ByteRange::new(GuestAddr::new(lsa as u64), size as u64).expect("valid LS range");
-            let Some(dst) = ByteRange::new(GuestAddr::new(ea), size as u64) else {
-                return queue_invalid(cmd, MfcCommandError::DataSegment { ea }, state, unit_id);
-            };
-            let request = DmaRequest::new(DmaDirection::Put, src, dst, unit_id)
-                .expect("matching sizes")
-                .with_tag_id(tag);
-            // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
-            if let Some(line) = state.reservation {
-                if line.overlaps_range(ea, size as u64) {
-                    state.reservation = None;
-                }
-            }
-            state.channels.cmd_queue_free -= 1;
-            SpuStepOutcome::Yield {
-                effects: vec![Effect::DmaEnqueue {
-                    request,
-                    payload: Some(ls_bytes),
-                }],
-                reason: YieldReason::DmaSubmitted,
-            }
-        }
         // [CBEA p:60 s:7. MFC Commands sub:7.5 Get Commands (Main Storage to Local Storage)] get: copy main-storage bytes into LS.
-        // The get joins the command queue. The runtime reads its source
-        // when it completes and lands the bytes in local store. The limit
-        // register wraps each local-store address.
-        spu::MFC_GET => {
-            let tag = match checked_transfer(cmd, state, unit_id) {
-                Ok(tag) => tag,
-                Err(queued) => return queued,
-            };
-            // A range past 2^64 names no segment: the queue raises it like
-            // any address past the effective-address space.
-            let Some(src) = ByteRange::new(GuestAddr::new(ea), size as u64) else {
-                return queue_invalid(cmd, MfcCommandError::DataSegment { ea }, state, unit_id);
-            };
-            let dst =
-                ByteRange::new(GuestAddr::new(lsa as u64), size as u64).expect("valid LS range");
-            let request = DmaRequest::new(DmaDirection::Get, src, dst, unit_id)
-                .expect("matching sizes")
-                .with_tag_id(tag);
-            state.channels.cmd_queue_free -= 1;
-            SpuStepOutcome::Yield {
-                effects: vec![Effect::DmaEnqueue {
-                    request,
-                    payload: None,
-                }],
-                reason: YieldReason::DmaSubmitted,
-            }
+        // The fence and barrier forms move the same bytes and differ only
+        // in when the queue may complete them.
+        spu::MFC_PUT => issue_transfer(cmd, Put, Transfer, Order::None, state, unit_id),
+        spu::MFC_PUTF => issue_transfer(cmd, Put, Transfer, Order::Fence, state, unit_id),
+        spu::MFC_PUTB => issue_transfer(cmd, Put, Transfer, Order::TagBarrier, state, unit_id),
+        spu::MFC_GET => issue_transfer(cmd, Get, Transfer, Order::None, state, unit_id),
+        spu::MFC_GETF => issue_transfer(cmd, Get, Transfer, Order::Fence, state, unit_id),
+        spu::MFC_GETB => issue_transfer(cmd, Get, Transfer, Order::TagBarrier, state, unit_id),
+        // [CBEA p:308 s:Appendix D Table D-4] sndsig is a 4-byte DMA put that can go to any address.
+        // Delivery to another SPU's signal-notification register needs
+        // that SPU's problem-state alias. This model does not map that
+        // alias, so the put lands at its effective address in main storage.
+        spu::MFC_SNDSIG => issue_transfer(cmd, Put, SendSignal, Order::None, state, unit_id),
+        spu::MFC_SNDSIGF => issue_transfer(cmd, Put, SendSignal, Order::Fence, state, unit_id),
+        spu::MFC_SNDSIGB => issue_transfer(cmd, Put, SendSignal, Order::TagBarrier, state, unit_id),
+        // [CBEA p:71 s:7.9.1] mfcsync creates a tag-specific barrier even though it has no b modifier.
+        // [CBEA p:72 s:7.9.2] so does mfceieio.
+        spu::MFC_SYNC | spu::MFC_EIEIO => {
+            issue_ordering_command(cmd, Order::TagBarrier, state, unit_id)
         }
+        spu::MFC_BARRIER => issue_ordering_command(cmd, Order::QueueBarrier, state, unit_id),
         // [CBEA p:66 s:7.8.1 Get Lock Line and Reserve Command] getllar: the transfer is one cache line, placed in local storage, with a reservation over it.
         // The effective address names the line by any byte inside it.
         // [CBEA p:57 s:7.2 Command Exceptions] alignment is not checked for the atomic commands, so a misaligned address refuses nothing.
@@ -532,3 +598,7 @@ mod mfc_opcode_class_tests;
 #[cfg(test)]
 #[path = "tests/mfc_parameter_latch_tests.rs"]
 mod mfc_parameter_latch_tests;
+
+#[cfg(test)]
+#[path = "tests/mfc_ordering_form_tests.rs"]
+mod mfc_ordering_form_tests;

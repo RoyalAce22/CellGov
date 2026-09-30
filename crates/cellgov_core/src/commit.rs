@@ -566,9 +566,13 @@ impl CommitPipeline {
                         .or_in(*value);
                 }
                 Effect::DmaEnqueue { request, payload } => {
-                    let completion_time =
-                        ctx.dma_latency
-                            .completion_time(request, ctx.now, &*ctx.dma_queue);
+                    // A fence or barrier holds the command behind the
+                    // queued commands its ordering names, whatever the
+                    // latency model says of the transfer alone.
+                    let completion_time = ctx
+                        .dma_latency
+                        .completion_time(request, ctx.now, &*ctx.dma_queue)
+                        .max(ctx.dma_queue.ordering_floor(request));
                     let completion = DmaCompletion::new(*request, completion_time);
                     ctx.dma_queue.enqueue(completion, payload.clone());
                 }

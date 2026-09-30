@@ -120,7 +120,12 @@ fn barrier_kind_discriminants_locked() {
     assert_eq!(TracedBarrierKind::SpuSync as u8, 6);
     assert_eq!(TracedBarrierKind::SpuSyncC as u8, 7);
     assert_eq!(TracedBarrierKind::SpuDsync as u8, 8);
-    assert_eq!(TracedBarrierKind::VARIANTS.len(), 9);
+    assert_eq!(TracedBarrierKind::MfcFence as u8, 9);
+    assert_eq!(TracedBarrierKind::MfcTagBarrier as u8, 10);
+    assert_eq!(TracedBarrierKind::MfcSync as u8, 11);
+    assert_eq!(TracedBarrierKind::MfcEieio as u8, 12);
+    assert_eq!(TracedBarrierKind::MfcBarrier as u8, 13);
+    assert_eq!(TracedBarrierKind::VARIANTS.len(), 14);
 }
 
 #[test]

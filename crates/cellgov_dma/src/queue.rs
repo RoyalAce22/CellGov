@@ -10,8 +10,10 @@
 //! slots are the queue depth less that count. Commands complete in
 //! `(completion_time, sequence)` order, which with a fixed latency is
 //! issue order for each issuer. Commands without a fence or barrier may
-//! complete in any order, so that one is permitted. The model has no
-//! fenced or barrier form: the SPU refuses one as an unsupported command.
+//! complete in any order, so the architecture allows this order. A
+//! fence or barrier raises a command's completion time to the floor its
+//! ordering sets ([`DmaQueue::ordering_floor`]), whatever the latency
+//! model gives.
 //!
 //! A command with a parameter the MFC refuses enters the queue as an
 //! invalid entry. The queue reaches it in the same order as a transfer
@@ -34,6 +36,7 @@
 
 use crate::command::{InvalidMfcCommand, MfcCommandError};
 use crate::completion::DmaCompletion;
+use crate::request::{DmaRequest, MfcOrdering};
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 use cellgov_time::GuestTicks;
@@ -57,6 +60,7 @@ struct QueueEntry {
 /// 7. the tag's status bit, 0 without a tag
 /// 8. 1 when an inline payload is present
 /// 9. the payload bytes
+/// 10. the ordering, when the command sets one
 impl LaneValue for QueueEntry {
     fn lanes(&self, lanes: &mut ObjectLanes) {
         let c = self.completion;
@@ -71,6 +75,10 @@ impl LaneValue for QueueEntry {
         if let Some(payload) = &self.payload {
             lanes.lane(8, 0, 1);
             lanes.bytes(9, &[], payload);
+        }
+        let ordering = c.request().ordering();
+        if ordering != MfcOrdering::None {
+            lanes.lane(10, 0, ordering as u64);
         }
     }
 }
@@ -284,6 +292,57 @@ impl DmaQueue {
         seq
     }
 
+    /// The earliest completion time that fence and barrier ordering allows `request`.
+    ///
+    /// The floor is the latest completion time of these queued commands
+    /// of the same issuer:
+    ///
+    /// - a fence or a tag barrier: every command of its tag group
+    /// - the barrier command: every command
+    /// - behind a queued tag barrier of its group: every command of the
+    ///   group that precedes that barrier
+    /// - behind a queued barrier command: that barrier command and every
+    ///   command that precedes it
+    ///
+    /// A completed command left the queue at or before the present, so it
+    /// sets no floor.
+    pub fn ordering_floor(&self, request: &DmaRequest) -> GuestTicks {
+        let issuer = request.issuer();
+        let tag = request.tag_id();
+        let mine = || {
+            self.entries
+                .iter()
+                .filter(move |(_, e)| e.completion.issuer() == issuer)
+        };
+        let latest = |upto: Option<u64>, same_tag: bool| {
+            mine()
+                .filter(|((_, seq), e)| {
+                    upto.is_none_or(|limit| *seq < limit)
+                        && (!same_tag || e.completion.request().tag_id() == tag)
+                })
+                .map(|((time, _), _)| time)
+                .max()
+                .unwrap_or(GuestTicks::ZERO)
+        };
+        let own = match request.ordering() {
+            MfcOrdering::None => GuestTicks::ZERO,
+            MfcOrdering::Fence | MfcOrdering::TagBarrier => latest(None, true),
+            MfcOrdering::QueueBarrier => latest(None, false),
+        };
+        mine()
+            .filter_map(|((_, seq), e)| match e.completion.request().ordering() {
+                MfcOrdering::TagBarrier if e.completion.request().tag_id() == tag => {
+                    Some(latest(Some(seq), true))
+                }
+                // Later commands begin when the barrier command itself
+                // completes.
+                // [CBEA p:72 s:7.9.3] subsequent commands in the queue begin when the barrier command completes.
+                MfcOrdering::QueueBarrier => Some(latest(Some(seq + 1), false)),
+                _ => None,
+            })
+            .fold(own, GuestTicks::max)
+    }
+
     /// For one issuer: how many of its commands are queued, and the
     /// status bit of every tag group one of them holds outstanding.
     ///
@@ -456,3 +515,7 @@ mod lanes_tests;
 #[cfg(test)]
 #[path = "tests/queue_invalid_tests.rs"]
 mod invalid_tests;
+
+#[cfg(test)]
+#[path = "tests/queue_ordering_tests.rs"]
+mod ordering_tests;

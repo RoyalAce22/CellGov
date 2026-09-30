@@ -222,6 +222,16 @@ pub enum TracedBarrierKind {
     SpuSyncC = 7,
     /// SPU `dsync`.
     SpuDsync = 8,
+    /// An MFC transfer with the fence modifier.
+    MfcFence = 9,
+    /// An MFC transfer with the barrier modifier.
+    MfcTagBarrier = 10,
+    /// The MFC `mfcsync` command.
+    MfcSync = 11,
+    /// The MFC `mfceieio` command.
+    MfcEieio = 12,
+    /// The MFC `barrier` command.
+    MfcBarrier = 13,
 }
 
 /// Which dispatch arm a [`TraceRecord::SyscallEntered`](super::TraceRecord::SyscallEntered) record was

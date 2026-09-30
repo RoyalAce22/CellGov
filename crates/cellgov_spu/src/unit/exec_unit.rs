@@ -135,6 +135,12 @@ impl ExecutionUnit for SpuExecutionUnit {
                     effects: step_effects,
                     reason,
                 } => {
+                    if ctx.trace_per_step() {
+                        if let Some(kind) = queued_mfc_barrier(&insn, &self.state, &step_effects) {
+                            self.barriers
+                                .push(cellgov_exec::RetiredBarrier { pc: step_pc, kind });
+                        }
+                    }
                     effects.extend(step_effects);
                     if reason == YieldReason::ChannelStall {
                         // The access did not retire: PC stays on it, and
@@ -371,6 +377,27 @@ fn barrier_kind(insn: &crate::instruction::SpuInstruction) -> Option<BarrierKind
         SpuInstruction::Dsync => Some(BarrierKind::SpuDsync),
         _ => None,
     }
+}
+
+/// The barrier an `MFC_Cmd` write queued, if its command orders the
+/// queue. A refused command queues an invalid command, not a transfer,
+/// and orders nothing.
+fn queued_mfc_barrier(
+    insn: &crate::instruction::SpuInstruction,
+    state: &crate::state::SpuState,
+    effects: &[Effect],
+) -> Option<BarrierKind> {
+    let crate::instruction::SpuInstruction::Wrch {
+        channel: spu::MFC_CMD,
+        rt,
+    } = *insn
+    else {
+        return None;
+    };
+    if !matches!(effects, [Effect::DmaEnqueue { .. }]) {
+        return None;
+    }
+    exec::mfc_barrier_kind(state.reg_word(rt))
 }
 
 /// The channel a stalled instruction names and the event that ends the

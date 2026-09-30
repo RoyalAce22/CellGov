@@ -64,7 +64,10 @@ nine-step deterministic loop:
    them. The DMA queue is every SPU's MFC command queue: a queued
    put or get holds one of its issuer's 16 slots until it completes,
    and commands complete in (completion time, enqueue order), the
-   latency model having seen the commands queued ahead. A completing
+   latency model having seen the commands queued ahead, and a fence or
+   barrier holding a command behind the queued commands it orders
+   after. The ordering commands (barrier, mfcsync, mfceieio) move no
+   bytes and hold a slot and their tag until they complete. A completing
    get reads its source then and lands the bytes in its issuer's local
    store. A command whose opcode or parameters the MFC refuses holds
    its slot too; when the queue reaches it, its issuer's queue suspends and the

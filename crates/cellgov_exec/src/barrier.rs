@@ -46,11 +46,31 @@ pub enum BarrierKind {
     ///
     /// [SPU-ISA p:243 s:10] dsync completes earlier loads, stores and channel accesses before later ones start.
     SpuDsync = 8,
+    /// An MFC put, get or sndsig with the fence modifier (`f`).
+    ///
+    /// [CBEA p:69 s:7.9] a fence orders the command after every preceding command in its tag group.
+    MfcFence = 9,
+    /// An MFC put, get or sndsig with the barrier modifier (`b`).
+    ///
+    /// [CBEA p:69 s:7.9] a barrier orders the command and every later command of its tag group after the preceding commands of the group.
+    MfcTagBarrier = 10,
+    /// The MFC `mfcsync` command.
+    ///
+    /// [CBEA p:71 s:7.9.1] mfcsync creates a tag-specific barrier.
+    MfcSync = 11,
+    /// The MFC `mfceieio` command.
+    ///
+    /// [CBEA p:72 s:7.9.2] mfceieio creates a tag-specific barrier.
+    MfcEieio = 12,
+    /// The MFC `barrier` command, which orders the whole command queue.
+    ///
+    /// [CBEA p:72 s:7.9.3] subsequent commands in the queue begin when the barrier command completes.
+    MfcBarrier = 13,
 }
 
 impl BarrierKind {
     /// Every kind, in discriminant order.
-    pub const VARIANTS: [Self; 9] = [
+    pub const VARIANTS: [Self; 14] = [
         Self::Sync,
         Self::Lwsync,
         Self::Ptesync,
@@ -60,6 +80,11 @@ impl BarrierKind {
         Self::SpuSync,
         Self::SpuSyncC,
         Self::SpuDsync,
+        Self::MfcFence,
+        Self::MfcTagBarrier,
+        Self::MfcSync,
+        Self::MfcEieio,
+        Self::MfcBarrier,
     ];
 
     /// The PPU `sync` kind for L field `l`; only the low two bits count.

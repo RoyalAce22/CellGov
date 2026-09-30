@@ -163,7 +163,7 @@ fn a_put_carrying_no_class_id_is_unchanged() {
 /// above it.
 #[test]
 fn an_unmodelled_opcode_is_refused_whatever_its_class_ids() {
-    let unmodelled: u32 = 0x21;
+    let unmodelled: u32 = 0x89;
     let word = TCLASS << 24 | RCLASS << 16 | unmodelled;
     let mut unit = unit_issuing(word);
     let (result, effects) = run_once(&mut unit);

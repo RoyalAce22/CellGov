@@ -21,6 +21,25 @@ pub enum DmaDirection {
     Get = 1,
 }
 
+/// How a queued command orders against its issuer's other queued
+/// commands.
+///
+/// [CBEA p:69 s:7.9] a tag-specific fence orders a command after every preceding command in its tag group; a tag-specific barrier orders the command and every later command of its tag group after every preceding command in the group.
+/// [CBEA p:308 s:Appendix D Table D-4] the barrier command orders every preceding nonimmediate command before every following command in the queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(u8)]
+pub enum MfcOrdering {
+    /// No ordering: the command may complete in any order.
+    #[default]
+    None = 0,
+    /// A tag-specific fence.
+    Fence = 1,
+    /// A tag-specific barrier.
+    TagBarrier = 2,
+    /// The barrier command, over every command in the queue.
+    QueueBarrier = 3,
+}
+
 /// An immutable DMA request packet.
 ///
 /// Invariant: `source.length() == destination.length()`. Enforced by
@@ -32,6 +51,7 @@ pub struct DmaRequest {
     destination: ByteRange,
     issuer: UnitId,
     tag_id: Option<MfcTagId>,
+    ordering: MfcOrdering,
 }
 
 impl DmaRequest {
@@ -57,6 +77,7 @@ impl DmaRequest {
             destination,
             issuer,
             tag_id: None,
+            ordering: MfcOrdering::None,
         })
     }
 
@@ -66,6 +87,19 @@ impl DmaRequest {
     pub const fn with_tag_id(mut self, tag_id: MfcTagId) -> Self {
         self.tag_id = Some(tag_id);
         self
+    }
+
+    /// Attach the ordering the command's form sets.
+    #[inline]
+    pub const fn with_ordering(mut self, ordering: MfcOrdering) -> Self {
+        self.ordering = ordering;
+        self
+    }
+
+    /// The ordering the command's form sets.
+    #[inline]
+    pub const fn ordering(self) -> MfcOrdering {
+        self.ordering
     }
 
     /// MFC tag-id the SPU issued under; `None` for PPU/host-initiated DMA.

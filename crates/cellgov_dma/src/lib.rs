@@ -25,4 +25,5 @@ pub use command::{
 pub use completion::DmaCompletion;
 pub use latency::{DmaLatencyModel, FixedLatency};
 pub use queue::{DmaQueue, DueCommands, RaisedMfcCommand};
+pub use request::MfcOrdering;
 pub use request::{DmaDirection, DmaRequest};

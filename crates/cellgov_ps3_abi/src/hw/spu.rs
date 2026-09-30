@@ -280,6 +280,38 @@ pub const MFC_GET: u32 = 0x40;
 ///
 /// [CBEA p:306 s:Appendix D Table D-2] putb opcode x'0021', supported on the proxy queue and the SPU queue.
 pub const MFC_PUTB: u32 = 0x21;
+/// DMA put with a tag-specific fence.
+///
+/// [CBEA p:306 s:Appendix D Table D-2] putf opcode x'0022'.
+pub const MFC_PUTF: u32 = 0x22;
+/// DMA get with a tag-specific barrier.
+///
+/// [CBEA p:307 s:Appendix D Table D-2] getb opcode x'0041'.
+pub const MFC_GETB: u32 = 0x41;
+/// DMA get with a tag-specific fence.
+///
+/// [CBEA p:307 s:Appendix D Table D-2] getf opcode x'0042'.
+pub const MFC_GETF: u32 = 0x42;
+/// Send signal: a 4-byte put.
+///
+/// [CBEA p:308 s:Appendix D Table D-4] sndsig x'00A0', sndsigb x'00A1', sndsigf x'00A2'.
+pub const MFC_SNDSIG: u32 = 0xA0;
+/// Send signal with a tag-specific barrier.
+pub const MFC_SNDSIGB: u32 = 0xA1;
+/// Send signal with a tag-specific fence.
+pub const MFC_SNDSIGF: u32 = 0xA2;
+/// The barrier command.
+///
+/// [CBEA p:308 s:Appendix D Table D-4] barrier x'00C0', mfceieio x'00C8', mfcsync x'00CC'.
+pub const MFC_BARRIER: u32 = 0xC0;
+/// The mfceieio command.
+pub const MFC_EIEIO: u32 = 0xC8;
+/// The mfcsync command.
+pub const MFC_SYNC: u32 = 0xCC;
+/// SL1 storage control: write zeros over a range of effective addresses.
+///
+/// [CBEA p:307 s:Appendix D Table D-3] sdcrz opcode x'0089', supported on the proxy queue and the SPU queue.
+pub const MFC_SDCRZ: u32 = 0x89;
 /// Atomic: get with reservation (getllar).
 ///
 /// [CBEA p:65 s:7.8 MFC Atomic Update Commands] getllar opcode 0xD0.

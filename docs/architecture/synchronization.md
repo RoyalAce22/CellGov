@@ -243,7 +243,11 @@ each step commits as one batch, which orders more than any barrier
 does. A traced run records each retired barrier as a `Barrier`
 record (unit, address, kind), so a consumer that runs the program
 on reordering hardware has the location of every barrier
-instruction the run retired. [Schedule exploration](schedule_exploration.md) over
+instruction the run retired. The SPU's MFC ordering commands
+(`mfcsync`, `mfceieio`, `barrier`) and the fence and barrier forms
+of put, get and sndsig record the same way when they queue; unlike
+the instructions, they also order the MFC command queue, which
+completes commands out of order. [Schedule exploration](schedule_exploration.md) over
 contention workloads is conservative:
 `StepFootprint::reservation_lines` marks a step dependent on any
 other step whose writes cover the reserved line.

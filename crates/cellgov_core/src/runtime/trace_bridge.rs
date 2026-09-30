@@ -43,6 +43,11 @@ pub(super) fn traced_barrier_kind(kind: BarrierKind) -> TracedBarrierKind {
         BarrierKind::SpuSync => TracedBarrierKind::SpuSync,
         BarrierKind::SpuSyncC => TracedBarrierKind::SpuSyncC,
         BarrierKind::SpuDsync => TracedBarrierKind::SpuDsync,
+        BarrierKind::MfcFence => TracedBarrierKind::MfcFence,
+        BarrierKind::MfcTagBarrier => TracedBarrierKind::MfcTagBarrier,
+        BarrierKind::MfcSync => TracedBarrierKind::MfcSync,
+        BarrierKind::MfcEieio => TracedBarrierKind::MfcEieio,
+        BarrierKind::MfcBarrier => TracedBarrierKind::MfcBarrier,
     }
 }
 

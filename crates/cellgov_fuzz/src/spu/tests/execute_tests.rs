@@ -315,7 +315,7 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                         first.0.terminal_outcome,
                         Some(SpuStepOutcome::Fault(
                             cellgov_spu::exec::SpuFault::UnsupportedMfcCommand(word)
-                        )) if word & 0xFFFF == cellgov_ps3_abi::hw::spu::MFC_PUTB
+                        )) if word & 0xFFFF == cellgov_ps3_abi::hw::spu::MFC_SDCRZ
                     ),
                     "{:?}",
                     first.0.terminal_outcome

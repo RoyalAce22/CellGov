@@ -103,14 +103,14 @@ fn class_ids_do_not_change_the_opcode_class() {
     );
 }
 
-/// Opcode 0x21 is putb, which the SPU queue accepts.
+/// Opcode 0x89 is sdcrz, which the SPU queue accepts.
 #[test]
 fn a_defined_command_the_model_does_not_run_faults() {
-    let (_, result, effects) = issue(0x0021);
+    let (_, result, effects) = issue(0x0089);
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(
         result.fault,
-        Some(FaultKind::Guest(FAULT_UNSUPPORTED_MFC_CMD | 0x21))
+        Some(FaultKind::Guest(FAULT_UNSUPPORTED_MFC_CMD | 0x89))
     );
     assert!(effects.is_empty(), "{effects:?}");
 }
