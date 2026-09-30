@@ -197,3 +197,26 @@ fn an_unordered_or_refused_command_records_no_barrier() {
         assert!(barriers.is_empty(), "0x{cmd:02x} tag {tag}: {barriers:?}");
     }
 }
+
+/// [CBEA p:62 s:7.6.5] the result modifier is a cache hint that the CBE does not implement, so each r form runs as its plain form.
+#[test]
+fn each_result_hint_form_queues_what_its_plain_form_queues() {
+    use cellgov_ps3_abi::hw::spu::{
+        MFC_PUTL, MFC_PUTLB, MFC_PUTR, MFC_PUTRB, MFC_PUTRF, MFC_PUTRL, MFC_PUTRLB, MFC_PUTRLF,
+    };
+    for (hint, plain) in [
+        (MFC_PUTR, MFC_PUT),
+        (MFC_PUTRF, MFC_PUTF),
+        (MFC_PUTRB, MFC_PUTB),
+        (MFC_PUTRL, MFC_PUTL),
+        (MFC_PUTRLF, MFC_PUTLF),
+        (MFC_PUTRLB, MFC_PUTLB),
+    ] {
+        let (hint_reason, hint_effects, hint_barriers) = issue_traced(hint, 16, TAG, true);
+        let (plain_reason, plain_effects, plain_barriers) = issue_traced(plain, 16, TAG, true);
+        assert_eq!(hint_reason, YieldReason::DmaSubmitted, "0x{hint:02x}");
+        assert_eq!(hint_reason, plain_reason, "0x{hint:02x}");
+        assert_eq!(hint_effects, plain_effects, "0x{hint:02x}");
+        assert_eq!(hint_barriers, plain_barriers, "0x{hint:02x}");
+    }
+}

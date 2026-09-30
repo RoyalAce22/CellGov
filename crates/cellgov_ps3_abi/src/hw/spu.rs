@@ -292,6 +292,14 @@ pub const MFC_GETB: u32 = 0x41;
 ///
 /// [CBEA p:307 s:Appendix D Table D-2] getf opcode x'0042'.
 pub const MFC_GETF: u32 = 0x42;
+/// DMA put with the replace-cache hint.
+///
+/// [CBEA p:54 s:7.1 Table 7-2] putr x'0030', putrb x'0031', putrf x'0032'.
+pub const MFC_PUTR: u32 = 0x30;
+/// DMA put with the replace-cache hint and a tag-specific barrier.
+pub const MFC_PUTRB: u32 = 0x31;
+/// DMA put with the replace-cache hint and a tag-specific fence.
+pub const MFC_PUTRF: u32 = 0x32;
 /// DMA list put: each list element names one transfer from local store
 /// to main storage.
 ///

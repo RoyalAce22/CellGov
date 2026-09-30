@@ -655,9 +655,11 @@ fn opcode_error(word: MfcCmd) -> Option<MfcCommandError> {
 /// queue.
 pub(crate) fn mfc_barrier_kind(cmd: u32) -> Option<BarrierKind> {
     Some(match MfcCmd::new(cmd).opcode() {
-        spu::MFC_PUTF | spu::MFC_GETF | spu::MFC_SNDSIGF => BarrierKind::MfcFence,
+        spu::MFC_PUTF | spu::MFC_PUTRF | spu::MFC_GETF | spu::MFC_SNDSIGF => BarrierKind::MfcFence,
         spu::MFC_PUTLF | spu::MFC_PUTRLF | spu::MFC_GETLF => BarrierKind::MfcFence,
-        spu::MFC_PUTB | spu::MFC_GETB | spu::MFC_SNDSIGB => BarrierKind::MfcTagBarrier,
+        spu::MFC_PUTB | spu::MFC_PUTRB | spu::MFC_GETB | spu::MFC_SNDSIGB => {
+            BarrierKind::MfcTagBarrier
+        }
         spu::MFC_PUTLB | spu::MFC_PUTRLB | spu::MFC_GETLB => BarrierKind::MfcTagBarrier,
         spu::MFC_SYNC => BarrierKind::MfcSync,
         spu::MFC_EIEIO => BarrierKind::MfcEieio,
@@ -698,9 +700,16 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
         // [CBEA p:60 s:7. MFC Commands sub:7.5 Get Commands (Main Storage to Local Storage)] get: copy main-storage bytes into LS.
         // The fence and barrier forms move the same bytes and differ only
         // in when the queue may complete them.
-        spu::MFC_PUT => issue_transfer(cmd, Put, Transfer, Order::None, state, unit_id),
-        spu::MFC_PUTF => issue_transfer(cmd, Put, Transfer, Order::Fence, state, unit_id),
-        spu::MFC_PUTB => issue_transfer(cmd, Put, Transfer, Order::TagBarrier, state, unit_id),
+        // [CBEA p:62 s:7.6.5] the CBE does not implement the result hint and runs putr, putrf and putrb as put, putf and putb.
+        spu::MFC_PUT | spu::MFC_PUTR => {
+            issue_transfer(cmd, Put, Transfer, Order::None, state, unit_id)
+        }
+        spu::MFC_PUTF | spu::MFC_PUTRF => {
+            issue_transfer(cmd, Put, Transfer, Order::Fence, state, unit_id)
+        }
+        spu::MFC_PUTB | spu::MFC_PUTRB => {
+            issue_transfer(cmd, Put, Transfer, Order::TagBarrier, state, unit_id)
+        }
         spu::MFC_GET => issue_transfer(cmd, Get, Transfer, Order::None, state, unit_id),
         spu::MFC_GETF => issue_transfer(cmd, Get, Transfer, Order::Fence, state, unit_id),
         spu::MFC_GETB => issue_transfer(cmd, Get, Transfer, Order::TagBarrier, state, unit_id),
