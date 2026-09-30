@@ -1,0 +1,20 @@
+[test]
+name = "spu_float_edges"
+
+# The gate compares CellGov case by case against cases.tsv
+# (crates/cellgov_spu/tests/spu_float_edges.rs); this manifest drives the
+# RPCS3 peer run of the built program.
+
+[rpcs3]
+binary = "build/spu_float_edges.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# The CGOV TTY payload: per case, $3 then the FPSCR, 16 bytes each.
+memory_regions = [
+  { name = "result", addr = 0, size = 800 },
+]
+
+[expect]
+outcome = "completed"

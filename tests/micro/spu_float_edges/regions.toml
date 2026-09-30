@@ -1,0 +1,6 @@
+# The bridge's region list for the CGOV TTY payload: per case, $3 then
+# the FPSCR, 16 bytes each, in cases.tsv order (25 cases).
+[[regions]]
+name = "result"
+addr = "0x0"
+size = "0x320"

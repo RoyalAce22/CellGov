@@ -1,0 +1,40 @@
+# spu_float_edges: each SPU floating-point instruction class over its hardest cases.
+#
+# Columns, tab-separated. Registers and the FPSCR are 128-bit hex, most
+# significant word first; "_" separators are ignored.
+#   case    a name
+#   asm     the case's instructions, ";"-separated, SPU assembler syntax;
+#           the result is $3
+#   fpscr   the FPSCR written with fscrwr before the case
+#   r3..r6  the initial $3, $4, $5 and $6
+#   expect_r3, expect_fpscr
+#           $3 and the FPSCR read with fscrrd after the case
+#   source  where the expected value comes from. "documented" means the
+#           cited rule and the engine's exact computation, not yet measured
+#           on hardware; a hardware vector replaces it with "measured".
+case	asm	fpscr	r3	r4	r5	r6	expect_r3	expect_fpscr	source
+fa_overflow_saturates	fa $3,$4,$5	0	0	7fffffff_ffffffff_3f800000_00800000	7fffffff_ffffffff_3f800000_80800000	0	7fffffff_ffffffff_40000000_00000000	00000005_00000005_00000000_00000000	documented [SPU-ISA p:196 s:9.1] overflow to +/-Smax with OVF and DIFF; x - x is +0
+fm_underflow_flushes	fm $3,$4,$5	0	0	00800000_80800000_1f800000_3f800000	00800000_00800000_1f800000_3f800000	0	00000000_00000000_00000000_3f800000	00000003_00000003_00000003_00000000	documented [SPU-ISA p:196 s:9.1] a result below Smin is +0 with UNF and DIFF
+fa_denormal_and_exponent_255_operands	fa $3,$4,$5	0	0	00000001_807fffff_7f800000_7f800000	3f800000_3f800000_3f800000_7f800000	0	3f800000_3f800000_7f800000_7fffffff	00000001_00000001_00000001_00000005	documented [SPU-ISA p:196 s:9.1] a denormal operand is zero and exponent 255 a number, each with DIFF
+fa_truncates_where_nearest_rounds_up	fa $3,$4,$5	0	0	3f800000_bf800000_3f800001_40490fdb	33c00000_b3c00000_33ffffff_34000000	0	3f800000_bf800000_3f800001_40490fdb	00000000_00000000_00000000_00000000	documented [SPU-ISA p:196 s:9.1] truncation is the only rounding
+fs_x_less_x_is_positive_zero	fs $3,$4,$4	0	0	3f800000_bf800000_80000000_7fffffff	0	0	00000000_00000000_00000000_00000000	00000000_00000000_00000000_00000001	documented [SPU-ISA p:195 s:9.1] every zero result is +0
+fma_product_out_of_range_comes_back	fma $3,$4,$5,$6	0	0	7fffffff_1f800000_7fffffff_3f800001	40000000_1f800000_40000000_3f800001	ffffffff_00800000_7fffffff_bf800002	7fffffff_00a00000_7fffffff_28800000	00000001_00000000_00000005_00000000	documented [SPU-ISA p:208 s:9] the multiplication is exact and not subject to limits on its range
+fm_exponent_255_result_raises_diff	fm $3,$4,$5	0	0	7f000000_3f800000_7f7fffff_00800001	40000000_7f800000_40000000_3f000000	0	7f800000_7f800000_7fffffff_00000000	00000001_00000001_00000001_00000003	documented [SPU-ISA p:196 s:9.1] DIFF for an input or a result with exponent 255 and for an underflow
+reciprocal_sequence	frest $7,$4;fi $8,$4,$7;fnms $9,$4,$8,$6;fma $3,$9,$8,$8	0	0	40000000_40400000_00000000_7e800000	0	3f800000_3f800000_3f800000_3f800000	3effffff_3eaaaaaa_7fffffff_00000000	00000000_00000000_00000005_00000203	documented [SPU-ISA p:215 s:9] 1/0 gives 0x7FFFFFFF; [SPU-ISA p:216 s:9] |x| >= 2^126 gives 0; the table is CellGov's own, not measured
+reciprocal_sqrt_sequence	frsqest $7,$4;ilhu $11,0x7fff;iohl $11,0xffff;and $10,$4,$11;fi $8,$10,$7;fm $9,$10,$8;ilhu $12,0x3f00;fm $12,$8,$12;fnms $9,$9,$8,$6;fma $3,$9,$12,$8	0	0	000ff53c_000ff53d_40800000_40000000	0	3f800000_3f800000_3f800000_3f800000	7fffffff_7ffffffd_3effffff_3f3504f2	00000001_00000001_00000000_00000c00	documented [SPU-ISA p:217 s:9] with a zero exponent, fraction <= 0x000ff53c gives 0x7fffffff and above it >= 0x7fc00000; the table is CellGov's own, not measured
+cflts_saturates_at_both_borders	cflts $3,$4,0	0	0	4f000000_cf000001_bfffffff_7f800000	0	0	7fffffff_80000000_ffffffff_7fffffff	00000000_00000000_00000000_00000000	documented [SPU-ISA p:221 s:9] saturation above 2^31 - 1 and below -2^31, truncation toward zero
+cfltu_saturates_at_both_borders	cfltu $3,$4,0	0	0	4f800000_bf800000_3fffffff_4f7fffff	0	0	ffffffff_00000000_00000001_ffffff00	00000000_00000000_00000000_00000000	documented [SPU-ISA p:223 s:9] saturation above 2^32 - 1, negative products to 0
+csflt_scale_0	csflt $3,$4,0	0	0	80000000_ffffffff_00ffffff_01000001	0	0	cf000000_bf800000_4b7fffff_4b800000	00000000_00000000_00000000_00000000	documented [SPU-ISA p:220 s:9] truncation to 24 bits
+cuflt_scale_127_underflows	cuflt $3,$4,127	0	0	00000001_00000002_ffffffff_00000000	0	0	00000000_00800000_0fffffff_00000000	00000003_00000000_00000000_00000000	documented [SPU-ISA p:222 s:9] divided by 2^127, below Smin is +0 with UNF and DIFF
+fceq_zeros_and_exponent_255	fceq $3,$4,$5	0	0	00000001_00000000_7f800000_7fffffff	00000000_80000000_7f7fffff_7fffffff	0	ffffffff_ffffffff_00000000_ffffffff	00000000_00000000_00000000_00000000	documented [SPU-ISA p:231 s:9] two zeros compare equal whatever their fractions and signs
+fcgt_zeros_and_exponent_255	fcgt $3,$4,$5	0	0	00000001_00000000_7f800000_7fffffff	80000000_80000000_7f7fffff_7fffff00	0	00000000_00000000_ffffffff_ffffffff	00000000_00000000_00000000_00000000	documented [SPU-ISA p:233 s:9] and [CBE-Handbook p:69 s:3.1.4] zeros are never greater; exponent 255 is a number
+dfa_slices_round_by_their_own_mode	dfa $3,$4,$5	00000b00_00000000_00000000_00000000	0	3ff00000_00000000_3ff00000_00000000	3c300000_00000000_3c300000_00000000	0	3ff00000_00000001_3ff00000_00000000	00000b00_00000800_00000800_00000000	documented [SPU-ISA p:197 s:9.2] slice 0 rounds by RN0 (toward +inf here) and slice 1 by RN1 (toward -inf)
+dfa_x_less_x_toward_minus_infinity	dfa $3,$4,$5	00000f00_00000000_00000000_00000000	0	3ff00000_00000000_3ff00000_00000000	bff00000_00000000_bff00000_00000000	0	80000000_00000000_80000000_00000000	00000f00_00000000_00000000_00000000	documented IEEE 754: an exact zero sum is -0 under round toward -inf
+dfa_toward_zero_and_to_nearest	dfa $3,$4,$5	00000400_00000000_00000000_00000000	0	3ff00000_00000000_3ff00000_00000000	3ca80000_00000000_3ca80000_00000000	0	3ff00000_00000000_3ff00000_00000001	00000400_00000800_00000800_00000000	documented [SPU-ISA p:197 s:9.2] slice 0 rounds by RN0 (toward zero here) and slice 1 by RN1 (to nearest); the addend is 0.75 ulp
+dfs_infinity_less_infinity	dfs $3,$4,$5	0	0	7ff00000_00000000_7ff00000_00000000	7ff00000_00000000_fff00000_00000000	0	7ff80000_00000000_7ff00000_00000000	00000000_00000400_00000000_00000000	documented [SPU-ISA p:199 s:9.2.2] INV and the default QNaN
+dfm_snan_and_denormal_operands	dfm $3,$4,$5	0	0	7ff00000_00000001_000fffff_ffffffff	3ff00000_00000000_bff00000_00000000	0	7ff80000_00000000_80000000_00000000	00000000_00000600_00000100_00000000	documented [SPU-ISA p:199 s:9.2.2] an SNaN sets INV and NaN; a denormal operand is a signed zero with DENORM
+dfnma_nan_result_keeps_sign_0	dfnma $3,$4,$5	0	fff80000_00000000_7ff00000_00000000	fff80000_00000000_7ff00000_00000000	3ff00000_00000000_00000000_00000000	0	7ff80000_00000000_7ff80000_00000000	00000000_00000200_00000400_00000000	documented [SPU-ISA p:214 s:9] a QNaN result has sign bit 0; infinity times zero is INV
+frds_overflow_and_denormal_results	frds $3,$4	00000000_00000000_00000000_00000000	0	47f00000_00000000_380fffff_e0000000	0	0	7f800000_00000000_00800000_00000000	00000000_00002800_00001800_00000000	documented [SPU-ISA p:198 s:9.2.1] IEEE 754: overflow to infinity, denormal results with UNF when tiny and inexact
+fesd_of_an_infinity	fesd $3,$4	0	0	7f800000_12345678_ff800001_00000000	0	0	7ff00000_00000000_7ff80000_00000000	00000000_00000000_00000600_00000000	documented [SPU-ISA p:198 s:9.2.1] a single infinity is a double infinity; an SNaN gives INV and NaN
+fpscr_round_trip	fa $3,$4,$4	ffffffff_ffffffff_ffffffff_ffffffff	0	3f800000_3f800000_3f800000_3f800000	0	0	40000000_40000000_40000000_40000000	00000f07_00003f07_00003f07_00000f07	documented [SPU-ISA p:235 s:9] fscrwr stores the defined bits; [SPU-ISA p:236 s:9] fscrrd reads the unused bits as zero
+flags_stay_set_across_two_instructions	fa $3,$4,$4;fa $3,$5,$5	0	0	7fffffff_7fffffff_7fffffff_7fffffff	3f800000_3f800000_3f800000_3f800000	0	40000000_40000000_40000000_40000000	00000005_00000005_00000005_00000005	documented [SPU-ISA p:200 s:9.3] every status bit stays set until fscrwr

@@ -19,9 +19,9 @@ tests/scenario_observations/<scenario>/rpcs3_interpreter.json
 tests/scenario_observations/<scenario>/rpcs3_llvm.json
 ```
 
-Six scenarios: `atomic_reservation`, `barrier_wakeup`,
+Seven scenarios: `atomic_reservation`, `barrier_wakeup`,
 `dma_completion`, `ls_to_shared`, `mailbox_roundtrip`,
-`spu_fixed_value`.
+`spu_fixed_value`, `spu_float_edges`.
 
 Each name matches a directory under `tests/micro/`. That directory's
 `manifest.toml` lists the `[observe] memory_regions` a dump contains.
@@ -30,7 +30,8 @@ Each name matches a directory under `tests/micro/`. That directory's
 
 | Consumer                                                       | Scenarios         |
 | -------------------------------------------------------------- | ----------------- |
-| `crates/cellgov_spu/src/tests/spu_tests.rs`                    | all six           |
+| `crates/cellgov_spu/src/tests/spu_tests.rs`                    | the first six     |
+| `crates/cellgov_spu/tests/spu_float_edges.rs`                  | `spu_float_edges` |
 | `crates/cellgov_ppu/src/tests/ppu_tests.rs`                    | by microtest name |
 | `crates/cellgov_compare/src/tests/baseline_tests.rs`           | `spu_fixed_value` |
 | `cellgov diff compare <manifest.toml> --observations-dir <dir>` | any               |
@@ -117,7 +118,7 @@ produce the sibling. The two must agree: the bridge rejects a
 
 The checkpoint dump hook plays no part here. `--dump` exists for
 captures taken through it, which is how a real title's fixture is
-recorded; these six scenarios report through TTY instead.
+recorded; these scenarios report through TTY instead.
 
 ### Why the decoder sits outside the config hash
 
