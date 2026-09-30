@@ -28,10 +28,12 @@
 )]
 #![cfg_attr(not(test), forbid(clippy::float_arithmetic))]
 
+mod arith;
 mod format;
 mod operand;
 mod round;
 
+pub use arith::{add, mul};
 pub use format::{Binary32, Binary64, Format};
 pub use operand::{default_nan, unpack, Operand};
 pub use round::{round_pack, Exact, Flags, Packed, Policy, Rounding};
@@ -43,3 +45,7 @@ mod oracle;
 #[cfg(test)]
 #[path = "tests/round_tests.rs"]
 mod round_tests;
+
+#[cfg(test)]
+#[path = "tests/arith_tests.rs"]
+mod arith_tests;

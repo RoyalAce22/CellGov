@@ -14,13 +14,62 @@ use crate::format::Format;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Exact {
     /// The value's sign; a zero value keeps it for the IEEE policy.
-    pub negative: bool,
+    pub(crate) negative: bool,
     /// The integer significand.
-    pub significand: u128,
+    pub(crate) significand: u128,
     /// The power of two the significand is scaled by.
-    pub exponent: i32,
+    pub(crate) exponent: i32,
     /// Nonzero bits lie below the significand's lowest bit.
-    pub sticky: bool,
+    pub(crate) sticky: bool,
+}
+
+/// The widest significand a value built outside this crate may carry: one
+/// bit below the 126-bit precision `add` aligns to, so a sum that drops
+/// bits keeps at least 124.
+pub(crate) const MAX_SIGNIFICAND_BITS: u32 = 125;
+
+impl Exact {
+    /// The exact value `(-1)^negative * significand * 2^exponent`, or `None`
+    /// when the significand is wider than 125 bits. Only this crate builds
+    /// sticky values, so the invariant above holds for every value.
+    pub fn new(negative: bool, significand: u128, exponent: i32) -> Option<Exact> {
+        (u128::BITS - significand.leading_zeros() <= MAX_SIGNIFICAND_BITS)
+            .then(|| Exact::from_parts(negative, significand, exponent, false))
+    }
+
+    /// The value's sign.
+    pub fn negative(&self) -> bool {
+        self.negative
+    }
+
+    /// The integer significand.
+    pub fn significand(&self) -> u128 {
+        self.significand
+    }
+
+    /// The power of two the significand is scaled by.
+    pub fn exponent(&self) -> i32 {
+        self.exponent
+    }
+
+    pub(crate) fn from_parts(
+        negative: bool,
+        significand: u128,
+        exponent: i32,
+        sticky: bool,
+    ) -> Exact {
+        Exact {
+            negative,
+            significand,
+            exponent,
+            sticky,
+        }
+    }
+
+    /// Whether nonzero bits lie below the significand's lowest bit.
+    pub fn sticky(&self) -> bool {
+        self.sticky
+    }
 }
 
 /// A rounding direction.
