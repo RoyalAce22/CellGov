@@ -18,6 +18,7 @@ pub(crate) mod keys;
 pub(crate) mod parse;
 pub(crate) mod record_anchors;
 pub(crate) mod reference;
+pub(crate) mod relations;
 pub(crate) mod rpcs3_attribute;
 pub(crate) mod scenarios;
 pub(crate) mod self_load;

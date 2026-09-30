@@ -293,6 +293,14 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         lines: &["cellgov dev workspace-gen"],
     },
     Examples {
+        path: "dev relations-gen",
+        lines: &["cellgov dev relations-gen"],
+    },
+    Examples {
+        path: "dev relations-check",
+        lines: &["cellgov dev relations-check fused_results.json"],
+    },
+    Examples {
         path: "dev completions",
         lines: &[
             "cellgov dev completions bash",

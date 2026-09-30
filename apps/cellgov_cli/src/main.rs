@@ -218,6 +218,11 @@ fn dispatch_dev(
             cli::workspace_gen::run(args)?;
             Ok(CommandExitCode::SUCCESS)
         }
+        DevCommand::RelationsGen(args) => {
+            cli::relations::generate(args)?;
+            Ok(CommandExitCode::SUCCESS)
+        }
+        DevCommand::RelationsCheck(args) => cli::relations::check(args),
         DevCommand::Completions(args) => cli::cli_gen::completions(args),
         DevCommand::GenManifest(args) => cli::gen_manifest::run(args, vfs_flag),
         DevCommand::RecordAnchors(args) => cli::record_anchors::run(args, globals.render()),

@@ -28,7 +28,7 @@ const LINE: usize = 16;
 const STORE: &str = include_str!("../../counterexamples/spu_sequence_relations.json");
 
 /// Every observation component, in comparison order, by fixture name.
-const COMPONENTS: [(SpuObservationComponent, &str); 11] = [
+pub(crate) const COMPONENTS: [(SpuObservationComponent, &str); 11] = [
     (SpuObservationComponent::Registers, "Registers"),
     (SpuObservationComponent::LocalStore, "LocalStore"),
     (SpuObservationComponent::ProgramCounter, "ProgramCounter"),
@@ -60,9 +60,9 @@ pub struct RelationCounterexample {
     pub first_component: SpuObservationComponent,
 }
 
-/// A fixture that does not parse.
+/// A start state or fixture that does not parse.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CounterexampleError {
+pub enum CounterexampleError {
     /// The text is not the fixture's JSON.
     #[error("counterexample JSON does not parse: {source}")]
     Json {
@@ -120,7 +120,7 @@ pub(crate) enum CounterexampleError {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CounterexampleJson {
+pub(crate) struct CounterexampleJson {
     schema_version: u32,
     name: String,
     row: String,
@@ -162,7 +162,7 @@ pub(crate) fn row_by_name(name: &str) -> Option<&'static SpuSequenceRelation> {
         .find(|row| row_name(row.id) == name)
 }
 
-fn component_name(component: SpuObservationComponent) -> &'static str {
+pub(crate) fn component_name(component: SpuObservationComponent) -> &'static str {
     use SpuObservationComponent as C;
     match component {
         C::Registers => "Registers",
@@ -177,6 +177,114 @@ fn component_name(component: SpuObservationComponent) -> &'static str {
         C::Signals => "Signals",
         C::Interrupts => "Interrupts",
     }
+}
+
+/// The catalog row `row`, checked against the assignment `assignment` of
+/// the start state `name`.
+pub(crate) fn parse_row(
+    name: &str,
+    row: &str,
+    assignment: &[u8],
+) -> Result<&'static SpuSequenceRelation, CounterexampleError> {
+    let relation = row_by_name(row).ok_or_else(|| CounterexampleError::UnknownRow {
+        row: row.to_owned(),
+    })?;
+    let expected = relation.register_count();
+    if assignment.len() != expected
+        || assignment
+            .iter()
+            .any(|&register| usize::from(register) >= SPU_REG_COUNT)
+    {
+        return Err(CounterexampleError::Assignment {
+            name: name.to_owned(),
+            expected,
+            found: assignment.len(),
+        });
+    }
+    Ok(relation)
+}
+
+/// The registers a state map lists, by register number.
+pub(crate) fn parse_registers(
+    map: &BTreeMap<String, String>,
+) -> Result<BTreeMap<u8, [u8; 16]>, CounterexampleError> {
+    let mut registers = BTreeMap::new();
+    for (key, value) in map {
+        let register = key
+            .parse::<u8>()
+            .ok()
+            .filter(|&register| usize::from(register) < SPU_REG_COUNT);
+        match (register, parse_hex(value)) {
+            (Some(register), Some(value)) => {
+                registers.insert(register, value);
+            }
+            _ => {
+                return Err(CounterexampleError::Register {
+                    register: key.clone(),
+                })
+            }
+        }
+    }
+    Ok(registers)
+}
+
+/// The local-store lines a state map lists, by address.
+pub(crate) fn parse_lines(
+    map: &BTreeMap<String, String>,
+) -> Result<BTreeMap<u32, [u8; 16]>, CounterexampleError> {
+    let mut lines = BTreeMap::new();
+    for (key, value) in map {
+        let address = key
+            .strip_prefix("0x")
+            .and_then(|digits| u32::from_str_radix(digits, 16).ok())
+            .filter(|&address| {
+                (address as usize).is_multiple_of(LINE) && (address as usize) < SPU_LS_SIZE
+            });
+        match (address, parse_hex(value)) {
+            (Some(address), Some(value)) => {
+                lines.insert(address, value);
+            }
+            _ => {
+                return Err(CounterexampleError::Line {
+                    address: key.clone(),
+                })
+            }
+        }
+    }
+    Ok(lines)
+}
+
+/// The state map of `registers`, keyed by register number.
+fn register_map(registers: &BTreeMap<u8, [u8; 16]>) -> BTreeMap<String, String> {
+    registers
+        .iter()
+        .map(|(register, value)| (register.to_string(), hex(value)))
+        .collect()
+}
+
+/// The state map of `lines`, keyed by local-store address.
+fn line_map(lines: &BTreeMap<u32, [u8; 16]>) -> BTreeMap<String, String> {
+    lines
+        .iter()
+        .map(|(address, value)| (format!("0x{address:05x}"), hex(value)))
+        .collect()
+}
+
+/// The state that holds `registers` and the local-store `lines`, and zero
+/// everywhere else.
+pub(crate) fn state_of(
+    registers: &BTreeMap<u8, [u8; 16]>,
+    lines: &BTreeMap<u32, [u8; 16]>,
+) -> SpuState {
+    let mut state = SpuState::new();
+    for (&register, &value) in registers {
+        state.set_reg(usize::from(register), value);
+    }
+    for (&address, value) in lines {
+        let at = address as usize;
+        state.ls[at..at + LINE].copy_from_slice(value);
+    }
+    state
 }
 
 impl RelationCounterexample {
@@ -216,43 +324,31 @@ impl RelationCounterexample {
 
     /// The instance both sides start from.
     pub(crate) fn instance(&self) -> RelationInstance {
-        let mut start = SpuState::new();
-        for (&register, &value) in &self.registers {
-            start.set_reg(usize::from(register), value);
-        }
-        for (&address, value) in &self.local_store {
-            let at = address as usize;
-            start.ls[at..at + LINE].copy_from_slice(value);
-        }
         RelationInstance {
             assignment: self.assignment.clone(),
-            start,
+            start: state_of(&self.registers, &self.local_store),
+        }
+    }
+
+    /// The fixture's JSON form.
+    pub(crate) fn json(&self) -> CounterexampleJson {
+        CounterexampleJson {
+            schema_version: COUNTEREXAMPLE_SCHEMA_VERSION,
+            name: self.name.clone(),
+            row: row_name(self.relation),
+            assignment: self.assignment.clone(),
+            registers: register_map(&self.registers),
+            local_store: line_map(&self.local_store),
+            first_component: component_name(self.first_component).to_owned(),
         }
     }
 
     /// The fixture as pretty-printed JSON.
     #[must_use]
     pub fn to_json(&self) -> String {
-        let json = CounterexampleJson {
-            schema_version: COUNTEREXAMPLE_SCHEMA_VERSION,
-            name: self.name.clone(),
-            row: row_name(self.relation),
-            assignment: self.assignment.clone(),
-            registers: self
-                .registers
-                .iter()
-                .map(|(register, value)| (register.to_string(), hex(value)))
-                .collect(),
-            local_store: self
-                .local_store
-                .iter()
-                .map(|(address, value)| (format!("0x{address:05x}"), hex(value)))
-                .collect(),
-            first_component: component_name(self.first_component).to_owned(),
-        };
         // The fixture's fields are strings, integers and string maps, which
         // always serialize.
-        let mut text = serde_json::to_string_pretty(&json).unwrap_or_default();
+        let mut text = serde_json::to_string_pretty(&self.json()).unwrap_or_default();
         text.push('\n');
         text
     }
@@ -275,22 +371,7 @@ impl RelationCounterexample {
                 found: json.schema_version,
             });
         }
-        let row = row_by_name(&json.row).ok_or(CounterexampleError::UnknownRow {
-            row: json.row.clone(),
-        })?;
-        let expected = row.register_count();
-        if json.assignment.len() != expected
-            || json
-                .assignment
-                .iter()
-                .any(|&register| usize::from(register) >= SPU_REG_COUNT)
-        {
-            return Err(CounterexampleError::Assignment {
-                name: json.name,
-                expected,
-                found: json.assignment.len(),
-            });
-        }
+        let row = parse_row(&json.name, &json.row, &json.assignment)?;
         let first_component = COMPONENTS
             .iter()
             .find(|(_, name)| *name == json.first_component)
@@ -298,48 +379,12 @@ impl RelationCounterexample {
             .ok_or(CounterexampleError::UnknownComponent {
                 component: json.first_component.clone(),
             })?;
-        let mut registers = BTreeMap::new();
-        for (key, value) in &json.registers {
-            let register = key
-                .parse::<u8>()
-                .ok()
-                .filter(|&register| usize::from(register) < SPU_REG_COUNT);
-            match (register, parse_hex(value)) {
-                (Some(register), Some(value)) => {
-                    registers.insert(register, value);
-                }
-                _ => {
-                    return Err(CounterexampleError::Register {
-                        register: key.clone(),
-                    })
-                }
-            }
-        }
-        let mut local_store = BTreeMap::new();
-        for (key, value) in &json.local_store {
-            let address = key
-                .strip_prefix("0x")
-                .and_then(|digits| u32::from_str_radix(digits, 16).ok())
-                .filter(|&address| {
-                    (address as usize).is_multiple_of(LINE) && (address as usize) < SPU_LS_SIZE
-                });
-            match (address, parse_hex(value)) {
-                (Some(address), Some(value)) => {
-                    local_store.insert(address, value);
-                }
-                _ => {
-                    return Err(CounterexampleError::Line {
-                        address: key.clone(),
-                    })
-                }
-            }
-        }
         Ok(Self {
             name: json.name,
             relation: row.id,
             assignment: json.assignment,
-            registers,
-            local_store,
+            registers: parse_registers(&json.registers)?,
+            local_store: parse_lines(&json.local_store)?,
             first_component,
         })
     }

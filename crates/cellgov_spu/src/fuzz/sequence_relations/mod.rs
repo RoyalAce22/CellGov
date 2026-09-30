@@ -12,6 +12,7 @@
 //! root, division and minimum or maximum fusions.
 
 mod catalog;
+mod describe;
 mod lanes;
 mod rows_branch;
 mod rows_compare;
@@ -22,6 +23,7 @@ mod rows_shuffle;
 mod types;
 
 pub use catalog::sequence_relations;
+pub use describe::{isa_citation, SpuSequenceRelationText};
 pub use lanes::ulp_distance;
 pub use types::*;
 

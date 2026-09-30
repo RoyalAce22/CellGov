@@ -1,0 +1,3929 @@
+{
+  "schema_version": 1,
+  "program_base": "0x20000",
+  "taken_landing": "0x20100",
+  "terminator": "0x00003ffe",
+  "taken_terminator": "0x00003ffd",
+  "components": [
+    "Registers",
+    "LocalStore",
+    "ProgramCounter",
+    "Channels",
+    "Reservation",
+    "Outcome",
+    "Effects",
+    "FaultDiscard",
+    "Fpscr",
+    "Signals",
+    "Interrupts"
+  ],
+  "rows": [
+    {
+      "name": "CeqNotEqualFused",
+      "registers": [
+        "c",
+        "a",
+        "b",
+        "rt"
+      ],
+      "sequence": [
+        "ceq c,a,b",
+        "ceqi rt,c,0"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the word compare a == b; rt = its complement, sext(a != b)"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:160 s:7 Ceq]",
+        "[SPU-ISA p:161 s:7 Ceqi]"
+      ],
+      "counterexamples": [
+        {
+          "schema_version": 1,
+          "name": "seeded-partner-write",
+          "row": "CeqNotEqualFused",
+          "assignment": [
+            126,
+            33,
+            33,
+            96
+          ],
+          "registers": {},
+          "local_store": {},
+          "first_component": "Registers"
+        }
+      ]
+    },
+    {
+      "name": "CeqNotEqualNor",
+      "registers": [
+        "c",
+        "a",
+        "b",
+        "rt"
+      ],
+      "sequence": [
+        "ceq c,a,b",
+        "ceqi rt,c,0"
+      ],
+      "partner": {
+        "kind": "Guest",
+        "sequence": [
+          "ceq c,a,b",
+          "nor rt,c,c"
+        ]
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:160 s:7 Ceq]",
+        "[SPU-ISA p:161 s:7 Ceqi]",
+        "[SPU-ISA p:113 s:5 Nor]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "CeqNotEqualResultOnly",
+      "registers": [
+        "c",
+        "a",
+        "b",
+        "rt"
+      ],
+      "sequence": [
+        "ceq c,a,b",
+        "ceqi rt,c,0"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = sext(a != b) per word; c keeps its start value"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [
+        "c"
+      ],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "c"
+        ],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:160 s:7 Ceq]",
+        "[SPU-ISA p:161 s:7 Ceqi]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "CeqhNotEqualFused",
+      "registers": [
+        "c",
+        "a",
+        "b",
+        "rt"
+      ],
+      "sequence": [
+        "ceqh c,a,b",
+        "ceqhi rt,c,0"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the halfword compare a == b; rt = its complement, sext(a != b) per halfword"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:158 s:7 Ceqh]",
+        "[SPU-ISA p:159 s:7 Ceqhi]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "Mpy32",
+      "registers": [
+        "t1",
+        "a",
+        "b",
+        "t2",
+        "s",
+        "u",
+        "rt"
+      ],
+      "sequence": [
+        "mpyh t1,a,b",
+        "mpyh t2,b,a",
+        "a s,t1,t2",
+        "mpyu u,a,b",
+        "a rt,s,u"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "t1",
+          "t2",
+          "s",
+          "u",
+          "rt"
+        ],
+        "computes": "rt = the low 32 bits of a * b, per word; t1, t2, s and u = the sequence's intermediates"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "t1, t2, s and u are four registers, and none of them is a or b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:77 s:5 Mpyh]",
+        "[SPU-ISA p:60 s:5 A]",
+        "[SPU-ISA p:73 s:5 Mpyu]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "Mpy32Swapped",
+      "registers": [
+        "t1",
+        "a",
+        "b",
+        "t2",
+        "s",
+        "u",
+        "rt"
+      ],
+      "sequence": [
+        "mpyh t1,a,b",
+        "mpyh t2,b,a",
+        "a s,t1,t2",
+        "mpyu u,a,b",
+        "a rt,u,s"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "t1",
+          "t2",
+          "s",
+          "u",
+          "rt"
+        ],
+        "computes": "rt = the low 32 bits of a * b, per word; t1, t2, s and u = the sequence's intermediates"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "t1, t2, s and u are four registers, and none of them is a or b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:77 s:5 Mpyh]",
+        "[SPU-ISA p:60 s:5 A]",
+        "[SPU-ISA p:73 s:5 Mpyu]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCeq",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "ceq c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:160 s:7 Ceq]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCeqh",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "ceqh c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:158 s:7 Ceqh]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCeqb",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "ceqb c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:156 s:7 Ceqb]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCeqi",
+      "registers": [
+        "c",
+        "x",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "ceqi c,x,-5",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:161 s:7 Ceqi]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCeqhi",
+      "registers": [
+        "c",
+        "x",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "ceqhi c,x,-5",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:159 s:7 Ceqhi]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCeqbi",
+      "registers": [
+        "c",
+        "x",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "ceqbi c,x,133",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:157 s:7 Ceqbi]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCgt",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cgt c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:166 s:7 Cgt]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCgth",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cgth c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:164 s:7 Cgth]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCgtb",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cgtb c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:162 s:7 Cgtb]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCgti",
+      "registers": [
+        "c",
+        "x",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cgti c,x,-5",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:167 s:7 Cgti]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCgthi",
+      "registers": [
+        "c",
+        "x",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cgthi c,x,-5",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:165 s:7 Cgthi]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectCgtbi",
+      "registers": [
+        "c",
+        "x",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cgtbi c,x,133",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:163 s:7 Cgtbi]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectClgt",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "clgt c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:172 s:7 Clgt]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectClgth",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "clgth c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:170 s:7 Clgth]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectClgtb",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "clgtb c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:168 s:7 Clgtb]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectClgti",
+      "registers": [
+        "c",
+        "x",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "clgti c,x,-5",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:173 s:7 Clgti]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectClgthi",
+      "registers": [
+        "c",
+        "x",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "clgthi c,x,-5",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:171 s:7 Clgthi]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectClgtbi",
+      "registers": [
+        "c",
+        "x",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "clgtbi c,x,133",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:169 s:7 Clgtbi]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectFceq",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "fceq c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:231 s:9 Fceq]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectFcgt",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "fcgt c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:233 s:9 Fcgt]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectFcmeq",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "fcmeq c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:232 s:9 Fcmeq]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SelectFcmgt",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "fcmgt c,x,y",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the compare's lane mask; each lane of rt = b where the mask is set, a elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:234 s:9 Fcmgt]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SplatCeq",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt"
+      ],
+      "sequence": [
+        "ceq c,x,y",
+        "fsm rt,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the word compare's lane mask; every word of rt = its preferred word"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:160 s:7 Ceq]",
+        "[SPU-ISA p:87 s:5 Fsm]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SplatCgt",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt"
+      ],
+      "sequence": [
+        "cgt c,x,y",
+        "fsm rt,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the word compare's lane mask; every word of rt = its preferred word"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:166 s:7 Cgt]",
+        "[SPU-ISA p:87 s:5 Fsm]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SplatClgt",
+      "registers": [
+        "c",
+        "x",
+        "y",
+        "rt"
+      ],
+      "sequence": [
+        "clgt c,x,y",
+        "fsm rt,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the word compare's lane mask; every word of rt = its preferred word"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:172 s:7 Clgt]",
+        "[SPU-ISA p:87 s:5 Fsm]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "InsertCbd",
+      "registers": [
+        "m",
+        "p",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cbd m,5(p)",
+        "shufb rt,a,b,m"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "m",
+          "rt"
+        ],
+        "computes": "m = the shuffle control; rt = b with the preferred element of a inserted at byte (p + 5), aligned down to the element size"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:40 s:3 Cbd]",
+        "[SPU-ISA p:116 s:5 Shufb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "InsertChd",
+      "registers": [
+        "m",
+        "p",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "chd m,5(p)",
+        "shufb rt,a,b,m"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "m",
+          "rt"
+        ],
+        "computes": "m = the shuffle control; rt = b with the preferred element of a inserted at byte (p + 5), aligned down to the element size"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:42 s:3 Chd]",
+        "[SPU-ISA p:116 s:5 Shufb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "InsertCwd",
+      "registers": [
+        "m",
+        "p",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cwd m,5(p)",
+        "shufb rt,a,b,m"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "m",
+          "rt"
+        ],
+        "computes": "m = the shuffle control; rt = b with the preferred element of a inserted at byte (p + 5), aligned down to the element size"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:44 s:3 Cwd]",
+        "[SPU-ISA p:116 s:5 Shufb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "InsertCdd",
+      "registers": [
+        "m",
+        "p",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cdd m,5(p)",
+        "shufb rt,a,b,m"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "m",
+          "rt"
+        ],
+        "computes": "m = the shuffle control; rt = b with the preferred element of a inserted at byte (p + 5), aligned down to the element size"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:46 s:3 Cdd]",
+        "[SPU-ISA p:116 s:5 Shufb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "InsertCbx",
+      "registers": [
+        "m",
+        "p",
+        "q",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cbx m,p,q",
+        "shufb rt,a,b,m"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "m",
+          "rt"
+        ],
+        "computes": "m = the shuffle control; rt = b with the preferred element of a inserted at byte (p + q), aligned down to the element size"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:41 s:3 Cbx]",
+        "[SPU-ISA p:116 s:5 Shufb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "InsertChx",
+      "registers": [
+        "m",
+        "p",
+        "q",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "chx m,p,q",
+        "shufb rt,a,b,m"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "m",
+          "rt"
+        ],
+        "computes": "m = the shuffle control; rt = b with the preferred element of a inserted at byte (p + q), aligned down to the element size"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:43 s:3 Chx]",
+        "[SPU-ISA p:116 s:5 Shufb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "InsertCwx",
+      "registers": [
+        "m",
+        "p",
+        "q",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cwx m,p,q",
+        "shufb rt,a,b,m"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "m",
+          "rt"
+        ],
+        "computes": "m = the shuffle control; rt = b with the preferred element of a inserted at byte (p + q), aligned down to the element size"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:45 s:3 Cwx]",
+        "[SPU-ISA p:116 s:5 Shufb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "InsertCdx",
+      "registers": [
+        "m",
+        "p",
+        "q",
+        "rt",
+        "a",
+        "b"
+      ],
+      "sequence": [
+        "cdx m,p,q",
+        "shufb rt,a,b,m"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "m",
+          "rt"
+        ],
+        "computes": "m = the shuffle control; rt = b with the preferred element of a inserted at byte (p + q), aligned down to the element size"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:47 s:3 Cdx]",
+        "[SPU-ISA p:116 s:5 Shufb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "NegatedCountRotm",
+      "registers": [
+        "n",
+        "x",
+        "rt",
+        "a"
+      ],
+      "sequence": [
+        "sfi n,x,0",
+        "rotm rt,a,n"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "n",
+          "rt"
+        ],
+        "computes": "n = 0 - x per word; rt = a shifted right logically by x & 0x3F per word, zero at 32 or more"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "n is not a",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:65 s:5 Sfi]",
+        "[SPU-ISA p:138 s:6 Rotm]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "NegatedCountRotma",
+      "registers": [
+        "n",
+        "x",
+        "rt",
+        "a"
+      ],
+      "sequence": [
+        "sfi n,x,0",
+        "rotma rt,a,n"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "n",
+          "rt"
+        ],
+        "computes": "n = 0 - x per word; rt = a shifted right arithmetically by x & 0x3F per word, the sign at 32 or more"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "n is not a",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:65 s:5 Sfi]",
+        "[SPU-ISA p:147 s:6 Rotma]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "NegatedCountRothm",
+      "registers": [
+        "n",
+        "x",
+        "rt",
+        "a"
+      ],
+      "sequence": [
+        "sfhi n,x,0",
+        "rothm rt,a,n"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "n",
+          "rt"
+        ],
+        "computes": "n = 0 - x per halfword; rt = a shifted right logically by x & 0x1F per halfword, zero at 16 or more"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "n is not a",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:63 s:5 Sfhi]",
+        "[SPU-ISA p:136 s:6 Rothm]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "NegatedCountRotmah",
+      "registers": [
+        "n",
+        "x",
+        "rt",
+        "a"
+      ],
+      "sequence": [
+        "sfhi n,x,0",
+        "rotmah rt,a,n"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "n",
+          "rt"
+        ],
+        "computes": "n = 0 - x per halfword; rt = a shifted right arithmetically by x & 0x1F per halfword, the sign at 16 or more"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "n is not a",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:63 s:5 Sfhi]",
+        "[SPU-ISA p:145 s:6 Rotmah]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "NegatedCountRotqmbi",
+      "registers": [
+        "n",
+        "x",
+        "rt",
+        "a"
+      ],
+      "sequence": [
+        "sfi n,x,0",
+        "rotqmbi rt,a,n"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "n",
+          "rt"
+        ],
+        "computes": "n = 0 - x per word; rt = the quadword a shifted right by the preferred word of x & 7 bits"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "n is not a",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:65 s:5 Sfi]",
+        "[SPU-ISA p:143 s:6 Rotqmbi]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "NegatedCountRotqmby",
+      "registers": [
+        "n",
+        "x",
+        "rt",
+        "a"
+      ],
+      "sequence": [
+        "sfi n,x,0",
+        "rotqmby rt,a,n"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "n",
+          "rt"
+        ],
+        "computes": "n = 0 - x per word; rt = the quadword a shifted right by the preferred word of x & 0x1F bytes, zero at 16 or more"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "n is not a",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:65 s:5 Sfi]",
+        "[SPU-ISA p:140 s:6 Rotqmby]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "FunnelShift",
+      "registers": [
+        "v",
+        "x",
+        "s",
+        "rt"
+      ],
+      "sequence": [
+        "rotqbybi v,x,s",
+        "rotqbi rt,v,s"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "v",
+          "rt"
+        ],
+        "computes": "v = the quadword x rotated left by (s >> 3) & 0xF bytes; rt = x rotated left by s & 0x7F bits; s is read from its preferred word"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "v is not s",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:133 s:6 Rotqbybi]",
+        "[SPU-ISA p:134 s:6 Rotqbi]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "BranchOrxBrz",
+      "registers": [
+        "o",
+        "v"
+      ],
+      "sequence": [
+        "orx o,v",
+        "brz o,taken"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "o"
+        ],
+        "computes": "o = the OR of the four words of v in its preferred word, zero in the others; control goes to the taken landing when the OR is zero"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:107 s:5 Orx]",
+        "[SPU-ISA p:183 s:7 Brz]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "BranchOrxBrnz",
+      "registers": [
+        "o",
+        "v"
+      ],
+      "sequence": [
+        "orx o,v",
+        "brnz o,taken"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "o"
+        ],
+        "computes": "o = the OR of the four words of v in its preferred word, zero in the others; control goes to the taken landing when the OR is not zero"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:107 s:5 Orx]",
+        "[SPU-ISA p:182 s:7 Brnz]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "BranchOrxBiz",
+      "registers": [
+        "o",
+        "v",
+        "t"
+      ],
+      "sequence": [
+        "orx o,v",
+        "biz o,t"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "o"
+        ],
+        "computes": "o = the OR of the four words of v in its preferred word, zero in the others; control goes to the taken landing when the OR is zero"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": "o is not t",
+      "dead": [],
+      "pins": [
+        {
+          "register": "t",
+          "word": "0x00020100",
+          "lanes": "preferred"
+        }
+      ],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:107 s:5 Orx]",
+        "[SPU-ISA p:186 s:7 Biz]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "BranchOrxBinz",
+      "registers": [
+        "o",
+        "v",
+        "t"
+      ],
+      "sequence": [
+        "orx o,v",
+        "binz o,t"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "o"
+        ],
+        "computes": "o = the OR of the four words of v in its preferred word, zero in the others; control goes to the taken landing when the OR is not zero"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": "o is not t",
+      "dead": [],
+      "pins": [
+        {
+          "register": "t",
+          "word": "0x00020100",
+          "lanes": "preferred"
+        }
+      ],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:107 s:5 Orx]",
+        "[SPU-ISA p:187 s:7 Binz]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "Popcount",
+      "registers": [
+        "c",
+        "a",
+        "rt"
+      ],
+      "sequence": [
+        "cntb c,a",
+        "sumb rt,c,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the count of one bits in each byte of a; each word of rt = the count of one bits in its word of a, in both halfwords"
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:84 s:5 Cntb]",
+        "[SPU-ISA p:93 s:5 Sumb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SplitAddressLoad",
+      "registers": [
+        "x",
+        "y",
+        "r"
+      ],
+      "sequence": [
+        "ai x,y,48",
+        "lqd r,32(x)"
+      ],
+      "partner": {
+        "kind": "Guest",
+        "sequence": [
+          "ai x,y,48",
+          "lqd r,80(y)"
+        ]
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "x is not y, and the accessed quadword lies outside the program and the taken landing",
+      "dead": [],
+      "pins": [],
+      "local_store": true,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:61 s:5 Ai]",
+        "[SPU-ISA p:32 s:3 Lqd]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SplitAddressStore",
+      "registers": [
+        "x",
+        "y",
+        "r"
+      ],
+      "sequence": [
+        "ai x,y,48",
+        "stqd r,32(x)"
+      ],
+      "partner": {
+        "kind": "Guest",
+        "sequence": [
+          "ai x,y,48",
+          "stqd r,80(y)"
+        ]
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "x is not y, and the accessed quadword lies outside the program and the taken landing",
+      "dead": [],
+      "pins": [],
+      "local_store": true,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:61 s:5 Ai]",
+        "[SPU-ISA p:36 s:3 Stqd]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "MoveOriAi",
+      "registers": [
+        "m",
+        "x",
+        "rt",
+        "y"
+      ],
+      "sequence": [
+        "ori m,x,0",
+        "a rt,m,y"
+      ],
+      "partner": {
+        "kind": "Guest",
+        "sequence": [
+          "ai m,x,0",
+          "a rt,m,y"
+        ]
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:106 s:5 Ori]",
+        "[SPU-ISA p:60 s:5 A]",
+        "[SPU-ISA p:61 s:5 Ai]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "MoveOriAndi",
+      "registers": [
+        "m",
+        "x",
+        "rt",
+        "y"
+      ],
+      "sequence": [
+        "ori m,x,0",
+        "a rt,m,y"
+      ],
+      "partner": {
+        "kind": "Guest",
+        "sequence": [
+          "andi m,x,-1",
+          "a rt,m,y"
+        ]
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:106 s:5 Ori]",
+        "[SPU-ISA p:60 s:5 A]",
+        "[SPU-ISA p:101 s:5 Andi]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "MoveOriShlqbyi",
+      "registers": [
+        "m",
+        "x",
+        "rt",
+        "y"
+      ],
+      "sequence": [
+        "ori m,x,0",
+        "a rt,m,y"
+      ],
+      "partner": {
+        "kind": "Guest",
+        "sequence": [
+          "shlqbyi m,x,0",
+          "a rt,m,y"
+        ]
+      },
+      "class": {
+        "kind": "BitExact",
+        "ulp": null
+      },
+      "precondition": null,
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:106 s:5 Ori]",
+        "[SPU-ISA p:60 s:5 A]",
+        "[SPU-ISA p:125 s:6 Shlqbyi]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "EstimateReciprocal",
+      "registers": [
+        "t",
+        "x",
+        "rt"
+      ],
+      "sequence": [
+        "frest t,x",
+        "fi rt,x,t"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = the truncated reciprocal of x, per word"
+      },
+      "class": {
+        "kind": "Inexact",
+        "ulp": null
+      },
+      "precondition": "every symbolic register names its own register; every word of x has an exponent in 1..=252",
+      "dead": [
+        "t"
+      ],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "t"
+        ],
+        "approximate": [
+          "rt"
+        ],
+        "ulp": null
+      },
+      "citations": [
+        "[SPU-ISA p:215 s:9 Frest]",
+        "[SPU-ISA p:219 s:9 Fi]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "EstimateRsqrt",
+      "registers": [
+        "t",
+        "x",
+        "rt"
+      ],
+      "sequence": [
+        "frsqest t,x",
+        "fi rt,x,t"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = the truncated reciprocal square root of |x|, per word"
+      },
+      "class": {
+        "kind": "Inexact",
+        "ulp": null
+      },
+      "precondition": "every symbolic register names its own register; every word of x has an exponent in 1..=254",
+      "dead": [
+        "t"
+      ],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "t"
+        ],
+        "approximate": [
+          "rt"
+        ],
+        "ulp": null
+      },
+      "citations": [
+        "[SPU-ISA p:217 s:9 Frsqest]",
+        "[SPU-ISA p:219 s:9 Fi]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "NewtonReciprocal",
+      "registers": [
+        "y0",
+        "d",
+        "y",
+        "e",
+        "one",
+        "rt"
+      ],
+      "sequence": [
+        "frest y0,d",
+        "fi y,d,y0",
+        "fnms e,d,y,one",
+        "fma rt,e,y,y"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = the truncated reciprocal of d, per word"
+      },
+      "class": {
+        "kind": "Inexact",
+        "ulp": 1
+      },
+      "precondition": "every symbolic register names its own register; every word of d has an exponent in 1..=252",
+      "dead": [
+        "y0",
+        "y",
+        "e"
+      ],
+      "pins": [
+        {
+          "register": "one",
+          "word": "0x3f800000",
+          "lanes": "every"
+        }
+      ],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "y0",
+          "y",
+          "e"
+        ],
+        "approximate": [
+          "rt"
+        ],
+        "ulp": 1
+      },
+      "citations": [
+        "[SPU-ISA p:215 s:9 Frest]",
+        "[SPU-ISA p:219 s:9 Fi]",
+        "[SPU-ISA p:210 s:9 Fnms]",
+        "[SPU-ISA p:208 s:9 Fma]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "NewtonReciprocalOnePlus",
+      "registers": [
+        "y0",
+        "d",
+        "y",
+        "e",
+        "one",
+        "rt"
+      ],
+      "sequence": [
+        "frest y0,d",
+        "fi y,d,y0",
+        "fnms e,d,y,one",
+        "fma rt,e,y,y"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = the truncated reciprocal of d, per word"
+      },
+      "class": {
+        "kind": "Inexact",
+        "ulp": null
+      },
+      "precondition": "every symbolic register names its own register; every word of d has an exponent in 1..=252",
+      "dead": [
+        "y0",
+        "y",
+        "e"
+      ],
+      "pins": [
+        {
+          "register": "one",
+          "word": "0x3f800001",
+          "lanes": "every"
+        }
+      ],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "y0",
+          "y",
+          "e"
+        ],
+        "approximate": [
+          "rt"
+        ],
+        "ulp": null
+      },
+      "citations": [
+        "[SPU-ISA p:215 s:9 Frest]",
+        "[SPU-ISA p:219 s:9 Fi]",
+        "[SPU-ISA p:210 s:9 Fnms]",
+        "[SPU-ISA p:208 s:9 Fma]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "RsqrtNewton",
+      "registers": [
+        "ax",
+        "x",
+        "mask",
+        "y0",
+        "y1",
+        "t1",
+        "t2",
+        "half",
+        "t3",
+        "one",
+        "rt"
+      ],
+      "sequence": [
+        "and ax,x,mask",
+        "frsqest y0,x",
+        "fi y1,ax,y0",
+        "fm t1,ax,y1",
+        "fm t2,y1,half",
+        "fnms t3,t1,y1,one",
+        "fma rt,t3,t2,y1"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = the truncated reciprocal square root of |x|, per word"
+      },
+      "class": {
+        "kind": "Inexact",
+        "ulp": 1
+      },
+      "precondition": "every symbolic register names its own register; every word of x has an exponent in 1..=254",
+      "dead": [
+        "ax",
+        "y0",
+        "y1",
+        "t1",
+        "t2",
+        "t3"
+      ],
+      "pins": [
+        {
+          "register": "mask",
+          "word": "0x7fffffff",
+          "lanes": "every"
+        },
+        {
+          "register": "half",
+          "word": "0x3f000000",
+          "lanes": "every"
+        },
+        {
+          "register": "one",
+          "word": "0x3f800000",
+          "lanes": "every"
+        }
+      ],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "ax",
+          "y0",
+          "y1",
+          "t1",
+          "t2",
+          "t3"
+        ],
+        "approximate": [
+          "rt"
+        ],
+        "ulp": 1
+      },
+      "citations": [
+        "[SPU-ISA p:97 s:5 And]",
+        "[SPU-ISA p:217 s:9 Frsqest]",
+        "[SPU-ISA p:219 s:9 Fi]",
+        "[SPU-ISA p:206 s:9 Fm]",
+        "[SPU-ISA p:210 s:9 Fnms]",
+        "[SPU-ISA p:208 s:9 Fma]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "SquareRoot",
+      "registers": [
+        "y0",
+        "x",
+        "y",
+        "g",
+        "h",
+        "half",
+        "t",
+        "one",
+        "rt"
+      ],
+      "sequence": [
+        "frsqest y0,x",
+        "fi y,x,y0",
+        "fm g,y,x",
+        "fm h,g,half",
+        "fnms t,y,g,one",
+        "fma rt,t,h,g"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = the IEEE single-precision sqrt(|x|), rounded to nearest, per word"
+      },
+      "class": {
+        "kind": "Inexact",
+        "ulp": 2
+      },
+      "precondition": "every symbolic register names its own register; every word of x is positive with an exponent in 1..=254",
+      "dead": [
+        "y0",
+        "y",
+        "g",
+        "h",
+        "t"
+      ],
+      "pins": [
+        {
+          "register": "half",
+          "word": "0x3f000000",
+          "lanes": "every"
+        },
+        {
+          "register": "one",
+          "word": "0x3f800000",
+          "lanes": "every"
+        }
+      ],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "y0",
+          "y",
+          "g",
+          "h",
+          "t"
+        ],
+        "approximate": [
+          "rt"
+        ],
+        "ulp": 2
+      },
+      "citations": [
+        "[SPU-ISA p:217 s:9 Frsqest]",
+        "[SPU-ISA p:219 s:9 Fi]",
+        "[SPU-ISA p:206 s:9 Fm]",
+        "[SPU-ISA p:210 s:9 Fnms]",
+        "[SPU-ISA p:208 s:9 Fma]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "Division",
+      "registers": [
+        "y0",
+        "b",
+        "y",
+        "q",
+        "a",
+        "t",
+        "rt"
+      ],
+      "sequence": [
+        "frest y0,b",
+        "fi y,b,y0",
+        "fm q,a,y",
+        "fnms t,q,b,a",
+        "fma rt,t,y,q"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = the IEEE single-precision a / b, rounded to nearest, per word"
+      },
+      "class": {
+        "kind": "Inexact",
+        "ulp": null
+      },
+      "precondition": "every symbolic register names its own register; in each word, the exponent of a is in 50..=254, that of b in 1..=252, and the exponent of a plus 127 less that of b in 2..=253",
+      "dead": [
+        "y0",
+        "y",
+        "q",
+        "t"
+      ],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "y0",
+          "y",
+          "q",
+          "t"
+        ],
+        "approximate": [
+          "rt"
+        ],
+        "ulp": null
+      },
+      "citations": [
+        "[SPU-ISA p:215 s:9 Frest]",
+        "[SPU-ISA p:219 s:9 Fi]",
+        "[SPU-ISA p:206 s:9 Fm]",
+        "[SPU-ISA p:210 s:9 Fnms]",
+        "[SPU-ISA p:208 s:9 Fma]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "FloatMax",
+      "registers": [
+        "c",
+        "a",
+        "b",
+        "rt"
+      ],
+      "sequence": [
+        "fcgt c,a,b",
+        "selb rt,b,a,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = the IEEE maximum of a and b per word: the other operand where one is a NaN"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c, a and b are three registers; no word of a or b has exponent 255, and no lane pairs two zero exponents",
+      "dead": [
+        "c"
+      ],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "c"
+        ],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:233 s:9 Fcgt]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "FloatMin",
+      "registers": [
+        "c",
+        "a",
+        "b",
+        "rt"
+      ],
+      "sequence": [
+        "fcgt c,a,b",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = the IEEE minimum of a and b per word: the other operand where one is a NaN"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c, a and b are three registers; no word of a or b has exponent 255, and no lane pairs two zero exponents",
+      "dead": [
+        "c"
+      ],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "c"
+        ],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:233 s:9 Fcgt]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "MagnitudeMax",
+      "registers": [
+        "c",
+        "a",
+        "b",
+        "rt"
+      ],
+      "sequence": [
+        "fcmgt c,a,b",
+        "selb rt,b,a,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = a where |a| > |b| in IEEE order, b elsewhere, per word"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c, a and b are three registers; no word of a or b has exponent 255, and no lane pairs two zero exponents",
+      "dead": [
+        "c"
+      ],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "c"
+        ],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:234 s:9 Fcmgt]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "MagnitudeMin",
+      "registers": [
+        "c",
+        "a",
+        "b",
+        "rt"
+      ],
+      "sequence": [
+        "fcmgt c,a,b",
+        "selb rt,a,b,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = b where |a| > |b| in IEEE order, a elsewhere, per word"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c, a and b are three registers; no word of a or b has exponent 255, and no lane pairs two zero exponents",
+      "dead": [
+        "c"
+      ],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "c"
+        ],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:234 s:9 Fcmgt]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "EqualPick",
+      "registers": [
+        "c",
+        "a",
+        "b",
+        "rt"
+      ],
+      "sequence": [
+        "fceq c,a,b",
+        "selb rt,b,a,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "rt"
+        ],
+        "computes": "rt = a where a equals b in IEEE order, or both are zeros, b elsewhere, per word"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c, a and b are three registers; no word of a or b has exponent 255, and no lane pairs two zero exponents",
+      "dead": [
+        "c"
+      ],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "refinement",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [
+          "c"
+        ],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:231 s:9 Fceq]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    },
+    {
+      "name": "FloatMaxSelect",
+      "registers": [
+        "c",
+        "a",
+        "b",
+        "rt"
+      ],
+      "sequence": [
+        "fcgt c,a,b",
+        "selb rt,b,a,c"
+      ],
+      "partner": {
+        "kind": "Fused",
+        "writes": [
+          "c",
+          "rt"
+        ],
+        "computes": "c = the fcgt lane mask of a > b; rt = a where the mask is set, b elsewhere"
+      },
+      "class": {
+        "kind": "BitExactUnderPrecondition",
+        "ulp": null
+      },
+      "precondition": "c is neither a nor b",
+      "dead": [],
+      "pins": [],
+      "local_store": false,
+      "compares": {
+        "claim": "equality",
+        "components": [
+          "Registers",
+          "LocalStore",
+          "ProgramCounter",
+          "Channels",
+          "Reservation",
+          "Outcome",
+          "Effects",
+          "FaultDiscard",
+          "Fpscr",
+          "Signals",
+          "Interrupts"
+        ],
+        "registers_left_out": [],
+        "approximate": [],
+        "ulp": 0
+      },
+      "citations": [
+        "[SPU-ISA p:233 s:9 Fcgt]",
+        "[SPU-ISA p:115 s:5 Selb]"
+      ],
+      "counterexamples": []
+    }
+  ]
+}

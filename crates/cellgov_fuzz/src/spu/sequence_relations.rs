@@ -36,10 +36,10 @@ const UNIT: UnitId = UnitId::new(0);
 /// `stop 0x3FFE`: the terminator both sides of a relation stop at when the
 /// sequence takes no branch.
 /// [SPU-ISA p:238 s:10 Stop] opcode 0x000 with the signal type in bits 18:31.
-const TERMINATOR: u32 = 0x0000_3FFE;
+pub(crate) const TERMINATOR: u32 = 0x0000_3FFE;
 
 /// `stop 0x3FFD`: the terminator at the taken landing.
-const TAKEN_TERMINATOR: u32 = 0x0000_3FFD;
+pub(crate) const TAKEN_TERMINATOR: u32 = 0x0000_3FFD;
 
 /// Draws one case makes of a row before it leaves the row unexercised.
 const PRECONDITION_DRAWS: u32 = 16;
@@ -308,6 +308,53 @@ fn compare_sides(
         &instance.assignment,
         &instance.start,
     );
+    Ok(judge(
+        relation, instance, case_index, dead, &original, partner,
+    ))
+}
+
+/// Runs sequence A of `relation` from `instance` and compares it against
+/// `result`, the state a fused form leaves, under the row's precondition,
+/// dead set and ULP bound. `taken` says that the fused form leaves control
+/// at the taken landing.
+///
+/// [Martignoni2012 p:338 s:2] Two implementations differ when they start in
+/// one test state and end in different final states.
+pub(crate) fn compare_result_state(
+    relation: &SpuSequenceRelation,
+    instance: &RelationInstance,
+    result: &SpuState,
+    taken: bool,
+) -> Result<RelationVerdict, FuzzError> {
+    if let Some(precondition) = relation.precondition {
+        if !precondition(&instance.start, &instance.assignment) {
+            return Ok(RelationVerdict::Inapplicable);
+        }
+    }
+    let words = encode(relation.id, relation.sequence, &instance.assignment)?;
+    let original = run_side(relation.id, &words, &instance.start, false)?;
+    let partner = run_side(relation.id, &[], result, taken)?;
+    Ok(judge(
+        relation,
+        instance,
+        0,
+        relation.dead,
+        &original,
+        partner,
+    ))
+}
+
+/// Compares the observation sequence A left with the partner's, leaving
+/// out the registers the dead set `dead` excludes and the lanes within the
+/// row's ULP bound.
+fn judge(
+    relation: &SpuSequenceRelation,
+    instance: &RelationInstance,
+    case_index: u64,
+    dead: &[u8],
+    original: &SpuObservation,
+    mut partner: SpuObservation,
+) -> RelationVerdict {
     // [Mullen2016 p:449 s:1] A dead register may hold another value; the
     // Registers comparison leaves it out, and LS, channels, PC and effects
     // stay compared.
@@ -339,19 +386,17 @@ fn compare_sides(
     // after execution.
     let differences = original.compare(&partner).differences;
     let Some(&first_component) = differences.iter().next() else {
-        return Ok(RelationVerdict::Match);
+        return RelationVerdict::Match;
     };
-    Ok(RelationVerdict::Diverged(Box::new(
-        SequenceRelationDivergence {
-            relation: relation.id,
-            case_index,
-            first_component,
-            start_registers: Box::new(*instance.start.regs.as_array()),
-            assignment: instance.assignment.clone(),
-            bit_distance: bit_distance(&original, &partner),
-            differing_words: differing_words(&original, &partner),
-        },
-    )))
+    RelationVerdict::Diverged(Box::new(SequenceRelationDivergence {
+        relation: relation.id,
+        case_index,
+        first_component,
+        start_registers: Box::new(*instance.start.regs.as_array()),
+        assignment: instance.assignment.clone(),
+        bit_distance: bit_distance(original, &partner),
+        differing_words: differing_words(original, &partner),
+    }))
 }
 
 /// The largest ULP distance in any lane of the registers `relation`

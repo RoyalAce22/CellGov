@@ -6,11 +6,15 @@
 //! `shrink` supplies the reduction candidates. The sequence engine also
 //! checks one sequence relation per case through `sequence_relations`, and
 //! `counterexample` keeps each relation finding's start state as a fixture
-//! the engine replays first.
+//! the engine replays first. `catalog` writes the rows as a reference, and
+//! `fused_results` checks an external fused form's result states against
+//! them.
 
 mod assess;
+mod catalog;
 mod counterexample;
 mod execute;
+mod fused_results;
 mod generate;
 mod instructions;
 mod record;
@@ -18,7 +22,9 @@ mod sequence_relations;
 mod sequences;
 mod shrink;
 
-pub use counterexample::{CounterexampleStoreError, RelationCounterexample};
+pub use catalog::{relation_catalog, RelationCatalog, CATALOG_JSON, CATALOG_MARKDOWN};
+pub use counterexample::{CounterexampleError, CounterexampleStoreError, RelationCounterexample};
+pub use fused_results::{check_fused_results, FusedResult, FusedResultVerdict, FusedResultsError};
 
 pub(crate) use counterexample::counterexample_path;
 pub use instructions::run_instructions;

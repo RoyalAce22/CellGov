@@ -81,6 +81,8 @@ const DISPATCHED: &[&str] = &[
     "dev titles-gen",
     "dev cli-gen",
     "dev workspace-gen",
+    "dev relations-gen",
+    "dev relations-check",
     "dev completions",
     "dev gen-manifest",
     "dev record-anchors",

@@ -52,6 +52,10 @@ pub(crate) enum DevCommand {
     CliGen(CliGenArgs),
     /// Regenerate Cargo-derived regions of `docs/architecture/workspace.md`.
     WorkspaceGen(WorkspaceGenArgs),
+    /// Regenerate the SPU sequence-relation catalog from its rows.
+    RelationsGen(RelationsGenArgs),
+    /// Check a fused form's result states against the relation catalog.
+    RelationsCheck(RelationsCheckArgs),
     /// Print a shell completion script for this command tree.
     Completions(CompletionsArgs),
     /// Emit a title-manifest stub from an install record.
@@ -352,6 +356,32 @@ pub(crate) struct WorkspaceGenArgs {
     /// Architecture document to update.
     #[arg(long, value_name = "PATH")]
     pub output: Option<PathBuf>,
+}
+
+/// `cellgov dev relations-gen`
+#[derive(Debug, clap::Args)]
+pub(crate) struct RelationsGenArgs {
+    /// Directory that receives the catalog's Markdown and JSON files.
+    #[arg(long, value_name = "DIR")]
+    pub output_dir: Option<PathBuf>,
+}
+
+/// What `dev relations-check` reads and reports.
+const RELATIONS_CHECK_NOTE: &str = "Input:
+  FILE holds result states. Each entry names a catalog row, a register
+  assignment, a start state, and the state a fused form leaves from it;
+  docs/spu_sequence_relations.md gives the form. The command runs the
+  row's sequence A from each start state and compares the complete
+  observed state. It runs nothing from the file. A result state that
+  differs gives status 4.";
+
+/// `cellgov dev relations-check`
+#[derive(Debug, clap::Args)]
+#[command(after_help = RELATIONS_CHECK_NOTE)]
+pub(crate) struct RelationsCheckArgs {
+    /// The result-state file.
+    #[arg(value_name = "FILE")]
+    pub path: PathBuf,
 }
 
 /// Where each shell reads a completion script from, and the outcome

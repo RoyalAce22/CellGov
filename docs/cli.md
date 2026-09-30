@@ -1577,6 +1577,48 @@ Usage: cellgov dev workspace-gen [OPTIONS]
 | --- | --- | --- |
 | `--output` | `PATH` | Architecture document to update. |
 
+#### `cellgov dev relations-gen`
+
+Regenerate the SPU sequence-relation catalog from its rows.
+
+```console
+$ cellgov dev relations-gen
+```
+
+```
+Usage: cellgov dev relations-gen [OPTIONS]
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--output-dir` | `DIR` | Directory that receives the catalog's Markdown and JSON files. |
+
+#### `cellgov dev relations-check`
+
+Check a fused form's result states against the relation catalog.
+
+```console
+$ cellgov dev relations-check fused_results.json
+```
+
+```
+Usage: cellgov dev relations-check [OPTIONS] <FILE>
+```
+
+| Argument | Description |
+| --- | --- |
+| `FILE` | The result-state file. Required. |
+
+```
+Input:
+  FILE holds result states. Each entry names a catalog row, a register
+  assignment, a start state, and the state a fused form leaves from it;
+  docs/spu_sequence_relations.md gives the form. The command runs the
+  row's sequence A from each start state and compares the complete
+  observed state. It runs nothing from the file. A result state that
+  differs gives status 4.
+```
+
 #### `cellgov dev completions`
 
 Print a shell completion script for this command tree.

@@ -244,3 +244,99 @@ fn the_truncated_estimates_meet_their_defining_inequalities() {
         assert!(exact(y) && !exact(next), "1/sqrt {x:#010x}");
     }
 }
+
+#[test]
+fn every_row_names_each_symbolic_register_once_and_its_text_matches_its_partner() {
+    for row in sequence_relations() {
+        let text = row.id.text();
+        assert_eq!(text.registers.len(), row.register_count(), "{:?}", row.id);
+        for (index, name) in text.registers.iter().enumerate() {
+            assert!(
+                !text.registers[index + 1..].contains(name),
+                "{:?} names {name} twice",
+                row.id
+            );
+        }
+        assert_eq!(
+            text.fused.is_some(),
+            matches!(row.partner, SpuSequencePartner::Fused(_)),
+            "{:?}",
+            row.id
+        );
+        assert_eq!(
+            text.precondition.is_some(),
+            row.precondition.is_some(),
+            "{:?}",
+            row.id
+        );
+    }
+}
+
+#[test]
+fn every_row_word_renders_as_assembly_and_cites_its_isa_page() {
+    for row in sequence_relations() {
+        let names = row.id.text().registers;
+        let partner: &[SpuSymbolicWord] = match row.partner {
+            SpuSequencePartner::Guest(words) => words,
+            SpuSequencePartner::Fused(_) => &[],
+        };
+        for word in row.sequence.iter().chain(partner) {
+            assert!(
+                word.assembly(names).is_some(),
+                "{:?} {:?}",
+                row.id,
+                word.kind
+            );
+            assert!(isa_citation(word.kind).is_some(), "{:?}", word.kind);
+        }
+    }
+}
+
+fn assembly(id: SpuSequenceRelationId) -> Vec<String> {
+    let row = relation(id);
+    row.sequence
+        .iter()
+        .map(|word| word.assembly(id.text().registers).expect("renders"))
+        .collect()
+}
+
+#[test]
+fn assembly_writes_each_operand_shape_the_rows_use() {
+    use SpuSequenceRelationId as Id;
+    assert_eq!(assembly(Id::CeqNotEqualFused), ["ceq c,a,b", "ceqi rt,c,0"]);
+    assert_eq!(assembly(Id::SelectCgt), ["cgt c,x,y", "selb rt,a,b,c"]);
+    assert_eq!(assembly(Id::SplatCeq), ["ceq c,x,y", "fsm rt,c"]);
+    assert_eq!(assembly(Id::InsertCwd), ["cwd m,5(p)", "shufb rt,a,b,m"]);
+    assert_eq!(assembly(Id::SplitAddressLoad), ["ai x,y,48", "lqd r,32(x)"]);
+    assert_eq!(assembly(Id::BranchOrxBrz), ["orx o,v", "brz o,taken"]);
+    assert_eq!(assembly(Id::BranchOrxBiz), ["orx o,v", "biz o,t"]);
+    let SpuSequencePartner::Guest(andi) = relation(Id::MoveOriAndi).partner else {
+        panic!("a guest row");
+    };
+    assert_eq!(
+        andi[0]
+            .assembly(Id::MoveOriAndi.text().registers)
+            .as_deref(),
+        Some("andi m,x,-1")
+    );
+    assert_eq!(
+        CEQ_NOT_EQUAL[0].assembly(&["c"]),
+        None,
+        "a register past the names"
+    );
+}
+
+#[test]
+fn a_citation_names_the_page_and_chapter_the_rows_cite_by_hand() {
+    use SpuInstructionKind as K;
+    for (kind, citation) in [
+        (K::Ceq, "[SPU-ISA p:160 s:7 Ceq]"),
+        (K::Selb, "[SPU-ISA p:115 s:5 Selb]"),
+        (K::Lqd, "[SPU-ISA p:32 s:3 Lqd]"),
+        (K::Rotm, "[SPU-ISA p:138 s:6 Rotm]"),
+        (K::Frest, "[SPU-ISA p:215 s:9 Frest]"),
+        (K::Fceq, "[SPU-ISA p:231 s:9 Fceq]"),
+    ] {
+        assert_eq!(isa_citation(kind).as_deref(), Some(citation));
+    }
+}
