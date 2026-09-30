@@ -130,6 +130,87 @@ pub const SPU_RD_EVENT_STAT: u8 = 0;
 // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] SPU_RdMachStat, channel x'D' = 13, nonblocking.
 pub const SPU_RD_MACH_STAT: u8 = 13;
 
+// The other architected channels
+
+/// SPU write event mask.
+// [CBEA p:299 s:Appendix B, Table B-1] SPU_WrEventMask, channel x'1', write.
+pub const SPU_WR_EVENT_MASK: u8 = 1;
+/// SPU write event acknowledgment.
+// [CBEA p:299 s:Appendix B, Table B-1] SPU_WrEventAck, channel x'2', write.
+pub const SPU_WR_EVENT_ACK: u8 = 2;
+/// SPU write decrementer.
+// [CBEA p:299 s:Appendix B, Table B-1] SPU_WrDec, channel x'7', write.
+pub const SPU_WR_DEC: u8 = 7;
+/// SPU read decrementer.
+// [CBEA p:299 s:Appendix B, Table B-1] SPU_RdDec, channel x'8', read.
+pub const SPU_RD_DEC: u8 = 8;
+/// MFC write multisource synchronization request.
+// [CBEA p:299 s:Appendix B, Table B-1] MFC_WrMSSyncReq, channel x'9', write-blocking.
+pub const MFC_WR_MSSYNC_REQ: u8 = 9;
+/// SPU read event mask.
+// [CBEA p:299 s:Appendix B, Table B-1] SPU_RdEventMask, channel x'B', read.
+pub const SPU_RD_EVENT_MASK: u8 = 11;
+/// MFC read tag-group query mask.
+// [CBEA p:300 s:Appendix B, Table B-1] MFC_RdTagMask, channel x'C', read.
+pub const MFC_RD_TAG_MASK: u8 = 12;
+/// SPU write state save-and-restore.
+// [CBEA p:300 s:Appendix B, Table B-1] SPU_WrSRR0, channel x'E', write.
+pub const SPU_WR_SRR0: u8 = 14;
+/// SPU read state save-and-restore.
+// [CBEA p:300 s:Appendix B, Table B-1] SPU_RdSRR0, channel x'F', read.
+pub const SPU_RD_SRR0: u8 = 15;
+/// MFC write list stall-and-notify tag acknowledgment.
+// [CBEA p:300 s:Appendix B, Table B-1] MFC_WrListStallAck, channel x'1A', write.
+pub const MFC_WR_LIST_STALL_ACK: u8 = 26;
+
+/// Whether a channel takes rdch or wrch.
+// [CBEA p:109 s:9] each channel is read-only or write-only, never both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChannelDirection {
+    /// A read or read-blocking channel.
+    Read,
+    /// A write or write-blocking channel.
+    Write,
+}
+
+/// The direction of an implemented channel; `None` for a reserved one.
+// [CBEA p:299 s:Appendix B, Table B-1] the access type of channels x'0' to x'B'.
+// [CBEA p:300 s:Appendix B, Table B-1] the access type of channels x'C' to x'1C'.
+// [CBEA p:301 s:Appendix B, Table B-1] the access type of channels x'1D' and x'1E'.
+pub const fn channel_direction(channel: u8) -> Option<ChannelDirection> {
+    match channel {
+        SPU_RD_EVENT_STAT
+        | SPU_RD_SIG_NOTIFY_1
+        | SPU_RD_SIG_NOTIFY_2
+        | SPU_RD_DEC
+        | SPU_RD_EVENT_MASK
+        | MFC_RD_TAG_MASK
+        | SPU_RD_MACH_STAT
+        | SPU_RD_SRR0
+        | MFC_RD_TAG_STAT
+        | MFC_RD_LIST_STALL_STAT
+        | MFC_RD_ATOMIC_STAT
+        | SPU_RD_IN_MBOX => Some(ChannelDirection::Read),
+        SPU_WR_EVENT_MASK
+        | SPU_WR_EVENT_ACK
+        | SPU_WR_DEC
+        | MFC_WR_MSSYNC_REQ
+        | SPU_WR_SRR0
+        | MFC_LSA
+        | MFC_EAH
+        | MFC_EAL
+        | MFC_SIZE
+        | MFC_TAG_ID
+        | MFC_CMD
+        | MFC_WR_TAG_MASK
+        | MFC_WR_TAG_UPDATE
+        | MFC_WR_LIST_STALL_ACK
+        | SPU_WR_OUT_MBOX
+        | SPU_WR_OUT_INTR_MBOX => Some(ChannelDirection::Write),
+        _ => None,
+    }
+}
+
 // Reserved channels
 
 /// True for a channel number the CBE leaves reserved: 5, 6, 10, and 31

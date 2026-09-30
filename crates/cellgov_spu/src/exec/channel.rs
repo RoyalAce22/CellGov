@@ -1,17 +1,28 @@
 //! The channel reads and writes and the MFC command path.
 
 use crate::state::SpuState;
+use crate::stop::SpuStopKind;
 use cellgov_dma::{DmaDirection, DmaRequest};
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::hw::spu;
-use cellgov_ps3_abi::hw::spu::{MfcCmd, MfcTagId, MFC_ATOMIC_STAT_S, MFC_MAX_TAG_ID};
+use cellgov_ps3_abi::hw::spu::{
+    ChannelDirection, MfcCmd, MfcTagId, MFC_ATOMIC_STAT_S, MFC_MAX_TAG_ID,
+};
 use cellgov_sync::RESERVATION_LINE_BYTES;
 use cellgov_time::GuestTicks;
 
 use super::outcome::{SpuFault, SpuStepOutcome};
+
+/// The stop a channel instruction in the wrong direction takes.
+fn invalid_channel() -> SpuStepOutcome {
+    SpuStepOutcome::Stop {
+        kind: SpuStopKind::InvalidChannel,
+        signal: 0,
+    }
+}
 
 pub(super) fn execute_wrch(
     channel: u8,
@@ -19,6 +30,11 @@ pub(super) fn execute_wrch(
     state: &mut SpuState,
     unit_id: UnitId,
 ) -> SpuStepOutcome {
+    // [CBEA p:109 s:9] a channel instruction the channel's definition does not allow raises an invalid channel instruction interrupt.
+    // [CBEA p:93 s:8.5.2] SPU_Status[C]: an invalid channel instruction was detected and the SPU stopped.
+    if spu::channel_direction(channel) == Some(ChannelDirection::Read) {
+        return invalid_channel();
+    }
     let val = state.reg_word(rt);
     match channel {
         // [CBE-Handbook p:453 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] MFC_LSA stores the local-store address for the MFC command being formed.
@@ -85,6 +101,10 @@ pub(super) fn execute_rdch(
     state: &mut SpuState,
     unit_id: UnitId,
 ) -> SpuStepOutcome {
+    // [CBEA p:109 s:9] an rdch to a write or write-blocking channel raises an invalid channel instruction interrupt.
+    if spu::channel_direction(channel) == Some(ChannelDirection::Write) {
+        return invalid_channel();
+    }
     match channel {
         // [CBE-Handbook p:460 s:17. SPE Channel and Related MMIO Interface sub:17.10 MFC Tag-Group Management Channels] Read Tag-Group Status Channel: returns tag-status word; blocks until masked tags complete.
         spu::MFC_RD_TAG_STAT => {

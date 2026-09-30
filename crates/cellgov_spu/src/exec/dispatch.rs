@@ -604,3 +604,7 @@ mod shufb_tests;
 #[cfg(test)]
 #[path = "tests/reserved_channel_tests.rs"]
 mod reserved_channel_tests;
+
+#[cfg(test)]
+#[path = "tests/channel_direction_tests.rs"]
+mod channel_direction_tests;
