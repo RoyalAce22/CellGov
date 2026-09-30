@@ -2,45 +2,63 @@
 
 ## RSX CPU-side completion
 
-CellGov models the CPU-visible completion values a PS3 guest
-polls -- label bytes, flip-status transitions, and GPU
-semaphore / report posts -- as a deterministic state machine
-that method parsing advances at commit boundaries. The model
-lives in the commit pipeline's committed state beside the
+CellGov models the CPU-visible completion values a PS3 guest polls
+as a deterministic state machine. Method parsing advances the
+machine at commit boundaries. The modelled values are:
+
+- label bytes;
+- flip-status transitions;
+- GPU semaphore / report posts.
+
+The model lives in the commit pipeline's committed state beside the
 reservation table and folds into `sync_state_hash`.
 
-**FIFO cursor.** `RsxFifoCursor` holds three scalar fields:
-`put`, set only by guest writes to the control register at
-`0xC0000040`; `get`, advanced only by the method-advance pass;
-and `current_reference`, the last `NV406E_SET_REFERENCE` value,
-readable through `cellGcmGetCurrentReference`. Invariant:
-`get <= put` modulo the FIFO size.
+**FIFO cursor.** `RsxFifoCursor` has three scalar fields:
+
+- `put`: set only by guest writes to the control register at
+  `0xC0000040`.
+- `get`: advanced only by the method-advance pass.
+- `current_reference`: the last `NV406E_SET_REFERENCE` value,
+  readable through `cellGcmGetCurrentReference`.
+
+Invariant: `get <= put` modulo the FIFO size.
 
 **NV method decoder.** The decoder parses the 32-bit Fermi /
-NV4097 method header (Increment, NonIncrement, Call, Return,
-Jump, NewJump, plus a Malformed sentinel), then walks the
-argument list from the FIFO. Registered handlers:
-`NV406E_SEMAPHORE_OFFSET`, `NV406E_SEMAPHORE_RELEASE`,
-`NV406E_SET_REFERENCE`, `NV4097_GET_REPORT`,
-`GCM_FLIP_COMMAND` (Sony extension 0xFEAC),
-`NV4097_SET_SEMAPHORE_OFFSET`,
-`NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE`. An unknown method
-takes the fallback: advance `get` past its declared argument
-count, tick `methods_unknown`, emit a one-shot warning. Call /
-Return push and pop frames on an `RsxCallStack` bounded to
-CALL_STACK_DEPTH frames; Jump / NewJump redirect `get` to the
-target address. A malformed header (out-of-range read, address
-overflow, wrapped cursor) stops the advance with a typed stop
-reason instead of desynchronizing. A self-jump terminator,
-`RSX_ADVANCE_ITERATION_CAP` (1_000_000), bounds runaway FIFOs;
-on trip the pass emits a synthetic raw stop word
-(`CALL_STACK_OVERFLOW_RAW`, `RSX_ADVANCE_UNDERFLOW_RAW`, or
-`RSX_ADVANCE_ITERATION_CAP_RAW`).
+NV4097 method header, then walks the argument list from the FIFO.
+The header forms are Increment, NonIncrement, Call, Return, Jump,
+NewJump, plus a Malformed sentinel.
 
-**Method-advance pass.** The `rsx_consume_fifo` runtime flag
-(per-title opt-in via the manifest `[rsx] consume = true`) gates
-the pass. When enabled it runs at every commit boundary after the
-reservation clear-sweep:
+Registered handlers:
+
+- `NV406E_SEMAPHORE_OFFSET`
+- `NV406E_SEMAPHORE_RELEASE`
+- `NV406E_SET_REFERENCE`
+- `NV4097_GET_REPORT`
+- `GCM_FLIP_COMMAND` (Sony extension 0xFEAC)
+- `NV4097_SET_SEMAPHORE_OFFSET`
+- `NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE`
+
+The decoder handles each case as follows:
+
+| Case                   | Action                                                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Unknown method         | The fallback: advance `get` past its declared argument count, tick `methods_unknown`, emit a one-shot warning.          |
+| Call / Return          | Push and pop frames on an `RsxCallStack` bounded to CALL_STACK_DEPTH frames.                                            |
+| Jump / NewJump         | Redirect `get` to the target address.                                                                                   |
+| Malformed header       | Stop the advance with a typed stop reason instead of desynchronizing. Malformed includes, for example, an out-of-range read, an address overflow, or a wrapped cursor. |
+
+A self-jump terminator, `RSX_ADVANCE_ITERATION_CAP` (1_000_000),
+bounds runaway FIFOs. On trip, the pass emits a synthetic raw stop
+word, one of:
+
+- `CALL_STACK_OVERFLOW_RAW`
+- `RSX_ADVANCE_UNDERFLOW_RAW`
+- `RSX_ADVANCE_ITERATION_CAP_RAW`
+
+**Method-advance pass.** The `rsx_consume_fifo` runtime flag gates
+the pass. A title opts in through the manifest
+(`[rsx] consume = true`). When enabled, the pass runs at every
+commit boundary after the reservation clear-sweep:
 
 1. Catch GET up to the MMIO control-register GET slot
    (monotonic; never pulls the cursor backward).
@@ -50,11 +68,15 @@ reservation clear-sweep:
    back to MMIO at `0xC000_0048` / `0xC000_0044` so libgcm's
    `cellGcmGetCurrentReference` poll clears.
 
-The pass is a no-op when `get == put` and the call stack is
-empty. Handler effects (`RsxLabelWrite`, `RsxFlipRequest`) enter
-the NEXT commit batch, a one-batch delay that preserves
-atomic-batch semantics. FIFO memory is frozen at batch start, so
-the pass cannot read writes committed in the same batch.
+The pass is a no-op when `get == put` and the call stack is empty.
+
+Handler effects (`RsxLabelWrite`, `RsxFlipRequest`) enter the NEXT
+commit batch.
+
+*Why:* the one-batch delay preserves atomic-batch semantics.
+
+The pass cannot read writes committed in the same batch, because
+FIFO memory is frozen at batch start.
 
 ```mermaid
 flowchart TD
@@ -79,29 +101,43 @@ flowchart TD
   more -->|yes| proj["project (current_reference, get) to 0xC000_0048 / 0xC000_0044"]
 ```
 
-**Effect variants.** `RsxLabelWrite { offset, value }` wraps a
-32-bit big-endian write to the RSX label area through the
-standard `SharedWriteIntent` path, so the reservation clear
-sweep and the state-hash contribution run automatically. It
-stays a typed variant so traces can tell FIFO-origin label
-writes from PPU / SPU / DMA writes. The commit resolves `offset`
-against the label base the LV2 RSX context supplies, and the
-guard that keeps a write inside the label area measures from
-the same base. A report offset resolves against the report
-block base, so report entry 0 and semaphore slot 0 sit at
-distinct addresses. `RsxFlipRequest { buffer_index }` has no
-memory side-effect; it drives only the flip state machine.
+**Effect variants.** The handlers emit two effect variants:
 
-**Flip-status state machine.** `RsxFlipState` carries three
-fields: `status` (0 = DONE, 1 = WAITING), `handler` (the
-callback address `cellGcmSetFlipHandler` registers; recorded,
-not dispatched), and `pending`. Status starts DONE. An
-`RsxFlipRequest` commit moves it to WAITING with
-`pending = true`; the next commit boundary moves it back to DONE
-with `pending = false`. Any PPU step between the two boundaries
-observes WAITING. Multiple `RsxFlipRequest`s before the next
-DONE transition collapse: last writer wins on `buffer_index`,
-and one WAITING-to-DONE transition follows.
+- `RsxLabelWrite { offset, value }` wraps a 32-bit big-endian
+  write to the RSX label area through the standard
+  `SharedWriteIntent` path. The reservation clear sweep and the
+  state-hash contribution therefore run automatically.
+- `RsxFlipRequest { buffer_index }` has no memory side-effect. It
+  drives only the flip state machine.
+
+`RsxLabelWrite` stays a typed variant.
+
+*Why:* traces can then tell FIFO-origin label writes from PPU / SPU
+/ DMA writes.
+
+The commit resolves `offset` against the label base the LV2 RSX
+context supplies. The guard that keeps a write inside the label
+area measures from the same base. A report offset resolves against
+the report block base, so report entry 0 and semaphore slot 0 sit
+at distinct addresses.
+
+**Flip-status state machine.** `RsxFlipState` has three fields:
+
+- `status` (0 = DONE, 1 = WAITING);
+- `handler` (the callback address `cellGcmSetFlipHandler`
+  registers; recorded, not dispatched);
+- `pending`.
+
+Status starts DONE. An `RsxFlipRequest` commit moves it to WAITING
+with `pending = true`. The next commit boundary moves it back to
+DONE with `pending = false`. Any PPU step between the two
+boundaries observes WAITING.
+
+Multiple `RsxFlipRequest`s before the next DONE transition
+collapse:
+
+- last writer wins on `buffer_index`;
+- one WAITING-to-DONE transition follows.
 
 ```mermaid
 stateDiagram-v2
@@ -112,14 +148,32 @@ stateDiagram-v2
 ```
 
 **State-hash contribution.** The RSX committed state adds these
-terms to `sync_state_hash` at every commit boundary, each a set
-of Multilinear-128 lanes computed on read: the FIFO cursor (put /
-get / current_reference), the flip state (status / handler /
-pending / buffer_index), the transient `sem_offset`, which
-carries the offset from an `NV406E_SEMAPHORE_OFFSET` parse to
-its paired `NV406E_SEMAPHORE_RELEASE`, the call stack, the seeded
-label base, and the effects the advance pass queued for the next
-batch, in queue order.
+terms to `sync_state_hash` at every commit boundary. Each term is a
+set of Multilinear-128 lanes computed on read. The terms are:
+
+- the FIFO cursor (put / get / current_reference);
+- the flip state (status / handler / pending / buffer_index);
+- the transient `sem_offset`, which holds the offset from an
+  `NV406E_SEMAPHORE_OFFSET` parse to its paired
+  `NV406E_SEMAPHORE_RELEASE`;
+- the call stack;
+- the seeded label base;
+- the effects the advance pass queued for the next batch, in queue
+  order.
+
+**Manifest flags.** Two independent manifest flags gate
+participation:
+
+- `[rsx] mirror = true` maps the RSX region ReadWrite and enables
+  the flip-status / cursor MMIO mirror. Without it, the region stays
+  `ReservedZeroReadable` (see
+  [Guest memory layout](guest_memory.md#region-access-modes)) and
+  put-pointer writes fault as `FirstRsxWrite`.
+- `[rsx] consume = true` (requires `mirror`) also enables the FIFO
+  consumer: the GET catch-up, method-advance drain, and
+  `(current_reference, get)` MMIO writeback described above.
+
+Each title's manifest records which flags it sets.
 
 **Scope boundary.** The model does not do:
 
@@ -136,24 +190,13 @@ The only fidelity claim is "the value the CPU polls is the
 deterministic CPU-visible completion value CellGov defines for
 the equivalent commit-boundary model."
 
-Two independent manifest flags gate participation.
-`[rsx] mirror = true` maps the region ReadWrite and enables the
-flip-status / cursor MMIO mirror; without it the region stays
-`ReservedZeroReadable` (see [Guest memory
-layout](guest_memory.md#region-access-modes)) and put-pointer
-writes fault as `FirstRsxWrite`. `[rsx] consume = true` (requires
-`mirror`) also enables the FIFO consumer: the GET catch-up,
-method-advance drain, and `(current_reference, get)` MMIO
-writeback described above. Each title's manifest records which
-flags it sets.
-
 ## LV2 sys_rsx syscall surface
 
 `cellgov_lv2::host::rsx` models the kernel-side surface PS3 LV2
 exposes under syscall numbers 668, 669, 670, 671, 672, 674, and
-675; 677 exists as a routed stub. The surface is one allocated
-RSX context, a bump-allocated memory region, and the structures
-the guest poll paths read:
+675. 677 exists as a routed stub. The surface is one allocated RSX
+context, a bump-allocated memory region, and the structures the
+guest poll paths read:
 
 - `RsxReports` (37 KB: semaphore array, notify array, report
   array);
@@ -163,41 +206,56 @@ the guest poll paths read:
   0x40 / 0x44 / 0x48 from the MMIO base
   `control_register::DMA_CONTROL_BASE = 0xC000_0000`).
 
-The iomap region `[PS3_RSX_IOMAP_BASE, +PS3_RSX_IOMAP_SIZE)`
-(85 MiB from `0x4000_0000`) is composed at boot as ReadWrite
-(see [Guest memory layout](guest_memory.md)) so the IO offsets
-`sys_rsx_context_iomap` records back the title's later writes.
-The init-time fill zeroes the whole region, then stamps every
-notify and report entry's timestamp field with `u64::MAX` and each
-report entry's trailing word with `u32::MAX`. What hardware leaves
-in the semaphore block is undocumented, so it keeps the zero fill.
+**Iomap region.** The iomap region
+`[PS3_RSX_IOMAP_BASE, +PS3_RSX_IOMAP_SIZE)` (85 MiB from
+`0x4000_0000`) is composed at boot as ReadWrite (see
+[Guest memory layout](guest_memory.md)).
 
-Each of these ordinals has a row in the
+*Why:* the IO offsets `sys_rsx_context_iomap` records then back the
+title's later writes.
+
+The init-time fill:
+
+1. zeroes the whole region;
+2. stamps every notify and report entry's timestamp field with
+   `u64::MAX`;
+3. stamps each report entry's trailing word with `u32::MAX`.
+
+The semaphore block keeps the zero fill.
+
+*Why:* what hardware leaves in the semaphore block is undocumented.
+
+**Archive rows.** Each of these ordinals has a row in the
 [LV2 archive](../lv2/README.md) (`route.tsv`, `arm.tsv`,
-`behavior.tsv`), and what each arm does is the rustdoc under
-`crates/cellgov_lv2/src/host/rsx/`. 677 (`sys_rsx_attribute`)
-dispatches through the routed `Unsupported` table in
-[LV2 host](lv2_host.md), not a typed sys_rsx request, and answers
-CELL_OK with an invariant break.
+`behavior.tsv`). The rustdoc under `crates/cellgov_lv2/src/host/rsx/`
+describes what each arm does. 677 (`sys_rsx_attribute`) dispatches
+through the routed `Unsupported` table in [LV2 host](lv2_host.md),
+not a typed sys_rsx request. It returns CELL_OK with an invariant
+break.
 
 **MMIO sentinel checkpoint.** Titles whose harness expects the
 [`FirstRsxWrite`](../concepts/README.md#checkpoints-where-an-observation-stops)
-checkpoint hit the pre-sys_rsx MMIO sentinel at `0xC0000040`;
-firmware cellGcmSys.prx's `_cellGcmInitBody` runs through the
+checkpoint hit the pre-sys_rsx MMIO sentinel at `0xC0000040`.
+Firmware cellGcmSys.prx's `_cellGcmInitBody` runs through the
 `sys_rsx` surface above.
 
 **Single-context constraint.** At most one
-`SysRsxContextAllocate` is live at a time, as on PS3 LV2; a
-second allocation while a context is live returns
-`CELL_EINVAL`.
+`SysRsxContextAllocate` is live at a time, as on PS3 LV2. A second
+allocation while a context is live returns `CELL_EINVAL`.
 
-**State-hash contribution.** The `RsxContext` committed state
-adds its scalar fields (allocation addresses, counters,
-display-buffer table, flip mode, handler OPDs) to
-`sync_state_hash` as lanes at every commit boundary. Pristine
-state (no `SysRsxContextAllocate`) and populated post-allocate
-state have distinct lanes, so a cross-runner regression surfaces
-at once as a hash divergence.
+**State-hash contribution.** The `RsxContext` committed state adds
+its scalar fields to `sync_state_hash` as lanes at every commit
+boundary. The fields include:
+
+- allocation addresses;
+- counters;
+- display-buffer table;
+- flip mode;
+- handler OPDs.
+
+Pristine state (no `SysRsxContextAllocate`) and populated
+post-allocate state have distinct lanes. A cross-runner regression
+therefore surfaces at once as a hash divergence.
 
 **Scope boundary.** sys_rsx does not do:
 

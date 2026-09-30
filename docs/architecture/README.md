@@ -48,12 +48,14 @@ flowchart LR
 | [title_harness.md](title_harness.md)               | Title manifests, anchors and witnesses, EBOOT resolution, the diagnostic CLI surface.                                                                   |
 | [microtests.md](microtests.md)                     | The PSL1GHT microtest suite.                                                                                                                           |
 
-Related, outside this directory: [concepts/](../concepts/README.md) for
-the shared vocabulary, [titles.md](../titles.md) for the
-compatibility matrix, [firmware.md](../firmware.md) for the system
-software measured firmware by firmware, and the generated
-[LV2 archive](../lv2/README.md) for the drift-gated per-slot
-routing and per-arm fidelity tables.
+Related documents outside this directory:
+
+- [concepts/](../concepts/README.md): the shared vocabulary.
+- [titles.md](../titles.md): the compatibility matrix.
+- [firmware.md](../firmware.md): the system software, measured
+  firmware by firmware.
+- The generated [LV2 archive](../lv2/README.md): the drift-gated
+  per-slot routing and per-arm fidelity tables.
 
 For per-crate detail and module layout, run
 `cargo doc --no-deps --open` and read the crate-level doc comments.

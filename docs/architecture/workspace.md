@@ -3,15 +3,8 @@
 ## Workspace shape
 
 The library crates, the application binaries under `apps/`, and the
-bridge binary under `bridges/` form a strict layered DAG: primitives at the
-bottom, consumers at the top, no backward edges. `cellgov_ps3_abi` is
-the leaf for PS3 ABI source-of-truth values (NIDs, errnos, struct
-layouts, syscall numbers, ELF/PRX layout, hardware constants) and the
-pure functions over them (the NID derivation, the syscall-namespace
-split, the stub instruction encoders). It holds no guest state and
-does no I/O; it depends on nothing in the workspace; every layer that consumes PS3
-ABI literals depends on it, and `cellgov_install` and `cellgov_mkelf`
-depend on it alone.
+bridge binary under `bridges/` form a strict layered DAG: primitives at
+the bottom, consumers at the top, no backward edges.
 
 <!-- workspace-gen:dag:start -->
 
@@ -82,76 +75,142 @@ graph BT
 
 <!-- workspace-gen:dag:end -->
 
+### The ABI leaf
+
+`cellgov_ps3_abi` is the leaf for PS3 ABI source-of-truth values and
+the pure functions over them. It holds no guest state, does no I/O
+and depends on nothing in the workspace. It contains:
+
+- the values: NIDs, errnos, struct layouts, syscall numbers, ELF/PRX
+  layout, hardware constants
+- the pure functions over them: the NID derivation, the
+  syscall-namespace split, the stub instruction encoders
+
+Every layer that consumes PS3 ABI literals depends on it.
+`cellgov_install` and `cellgov_mkelf` depend on it alone.
+
+### Structural rules
+
 Seven structural rules:
 
-- `cellgov_lv2` does not depend on `cellgov_core`: the runtime calls
+- `cellgov_lv2` does not depend on `cellgov_core`. The runtime calls
   the host through the narrow `Lv2Runtime` trait, and the host never
-  reaches back. Nor does it share a build edge with `cellgov_ppu`;
-  only `cellgov_ppu`'s tests use it. The LV2 archive is its own crate,
-  `cellgov_lv2_archive`, which reads `cellgov_lv2`'s request
-  classification and fidelity map; nothing in `cellgov_lv2` depends on
-  it, so a census change does not rebuild the runtime. The archive
-  defines its own row types and the rules that merge and check them,
-  and the mapping from `cellgov_ppu`'s kernel and caller
-  classifications into those rows sits above both crates, in the
-  commands that extract them.
-- `cellgov_ppu` and `cellgov_spu` are leaves of the library DAG: they
-  plug in through the `ExecutionUnit` trait in `cellgov_exec`, and
-  the runtime drives any `T: ExecutionUnit` without naming concrete
-  types.
-- `cellgov_explore` sits above `cellgov_core` and drives the runtime
-  through `Runtime::step` / `commit_step` / `set_scheduler`; it never
-  modifies the runtime model.
-- `cellgov_terminal` is a host-tooling leaf with no workspace
-  dependency, and no runtime crate depends on it -- the same standing
-  as `cellgov_testkit`: in the tree, outside the runtime DAG. It reads
-  the host clock, the process environment and the console size, so no
-  guest-visible path reaches it.
-- `cellgov_boot` owns the PS3 process boot and the two step drivers,
-  above `cellgov_core` and `cellgov_install` and below `cellgov_cli`.
-  It writes to no console and ends no process: a refusal is a
-  `BootError` and every line of narration goes to a caller-supplied
-  `BootSink`, so the CLI decides where each channel lands and what
-  status a refusal exits with. Its dependency on `cellgov_install`
-  points at a library that happens to live under `apps/` -- the edge
-  runs the same direction as `cellgov_cli`'s.
-- `cellgov_install` is a library: the PUP / SCE / SELF / TAR
-  primitives, the operator key-vault loader (`keys`), and the firmware
-  and game installers, which report progress through
-  `cellgov_terminal`'s sink trait. `cellgov_cli` depends on it both to
-  drive those installers from the `firmware` / `title` / `keys` /
-  `self` commands, attaching the renderer, and to decrypt SCE-wrapped
-  SELFs at boot through `self_image`, the one module that probes for
-  the SCE wrapper and routes to the APP-keyed or klicensee-resolving
-  decrypt per the caller's `KeyPolicy`; `npdrm::read_rap` is the one
-  RAP reader, and the caller says whether its file may be absent. Only
-  `cellgov_install` pulls the crypto crates (`aes`, `cbc`, `ctr`,
-  `hmac`, `sha1`, `flate2` -- optional, linked by the default-off
-  `decrypt` feature that also gates every key-consuming path;
-  `sha2` for hashing in every build); `cellgov_cli/decrypt` forwards to
-  it. `cellgov_cli` takes `filebuffer`, whose safe read-only file
-  mapping lets an install walk disc images larger than host memory.
-- `cellgov_cli` builds the workspace's one binary, `cellgov`: a
-  two-level noun-verb tree parsed by `clap` in `cli::parse`, with
-  every command's behavior a function over the plain structs that
-  module produces. `cli::reference` renders that same tree three ways
-  -- the examples each command's help leads with, the committed
-  `docs/cli.md`, and the `clap_complete` shell scripts -- so a
-  command the binary accepts and a command the reference documents
-  cannot differ. The crate is a thin shim. It keeps four concerns:
-  presentation (report text, tables, JSON shaping, the progress bar,
-  colour, generated markdown), process concerns (exit codes, the
-  stdout/stderr split, signals, child processes, and locating the VFS
-  root and key vault from flags and the environment), argument shape,
-  and dispatch. A function that could move into a library crate
-  without importing `clap`, printing, ending the process, or naming the
-  CLI's own error and exit types lives in the library crate that owns
-  its domain. The anchor-fixture layout and the title-page generator
-  stay in the CLI by decision.
+  reaches back. Nor does `cellgov_lv2` share a build edge with
+  `cellgov_ppu`; only `cellgov_ppu`'s tests use it. The LV2 archive is
+  a separate crate; see [The LV2 archive crate](#the-lv2-archive-crate).
+- `cellgov_ppu` and `cellgov_spu` are leaves of the library DAG. They
+  plug in through the `ExecutionUnit` trait in `cellgov_exec`. The
+  runtime drives any `T: ExecutionUnit` without naming concrete types.
+- `cellgov_explore` sits above `cellgov_core` and never modifies the
+  runtime model. It drives the runtime through `Runtime::step` /
+  `commit_step` / `set_scheduler`.
+- `cellgov_terminal` is a host-tooling leaf, in the tree but outside
+  the runtime DAG -- the same standing as `cellgov_testkit`. It has no
+  workspace dependency, and no runtime crate depends on it.
+  *Why:* it reads the host clock, the process environment and the
+  console size, so no guest-visible path reaches it.
+- `cellgov_boot` owns the PS3 process boot and the two step drivers.
+  It sits above `cellgov_core` and `cellgov_install` and below
+  `cellgov_cli`. `cellgov_boot`'s dependency on `cellgov_install`
+  points at a library that happens to live under `apps/`; the edge
+  runs the same direction as `cellgov_cli`'s. `cellgov_boot` writes to
+  no console and ends no process:
+  - a refusal is a `BootError`
+  - every line of narration goes to a caller-supplied `BootSink`
 
-The direct external dependencies below come from `cargo metadata`; test-only,
-build-only, and target-specific dependencies are intentionally absent. The
-workspace compiles under `unsafe_code = "forbid"`.
+  *Why:* the CLI decides where each channel lands and what status a
+  refusal exits with.
+- `cellgov_install` is a library, and the only crate that pulls the
+  crypto crates; see [The install library](#the-install-library).
+- `cellgov_cli` builds the workspace's one binary, `cellgov`, and is a
+  thin shim; see [The CLI binary](#the-cli-binary).
+
+### The LV2 archive crate
+
+The LV2 archive is its own crate, `cellgov_lv2_archive`. It reads
+`cellgov_lv2`'s request classification and fidelity map, and nothing
+in `cellgov_lv2` depends on it.
+*Why:* a census change does not rebuild the runtime.
+
+The archive defines its own row types and the rules that merge and
+check them. The mapping from `cellgov_ppu`'s kernel and caller
+classifications into those rows sits above both crates, in the
+commands that extract them.
+
+### The install library
+
+`cellgov_install` is a library. It contains:
+
+- the PUP / SCE / SELF / TAR primitives
+- the operator key-vault loader (`keys`)
+- the firmware and game installers, which report progress through
+  `cellgov_terminal`'s sink trait
+
+`cellgov_cli` depends on it for two jobs:
+
+- to drive those installers from the `firmware` / `title` / `keys` /
+  `self` commands, attaching the renderer
+- to decrypt SCE-wrapped SELFs at boot through `self_image`
+
+`self_image` is the one module that probes for the SCE wrapper. It
+routes to the APP-keyed or klicensee-resolving decrypt per the
+caller's `KeyPolicy`. `npdrm::read_rap` is the one RAP reader, and
+the caller says whether its file may be absent.
+
+Only `cellgov_install` pulls the crypto crates:
+
+- `aes`, `cbc`, `ctr`, `hmac`, `sha1`, `flate2` -- optional, linked by
+  the default-off `decrypt` feature that also gates every
+  key-consuming path
+- `sha2`, for hashing in every build
+
+`cellgov_cli/decrypt` forwards to it. `cellgov_cli` takes
+`filebuffer`, whose safe read-only file mapping lets an install walk
+disc images larger than host memory.
+
+### The CLI binary
+
+`cellgov_cli` builds the workspace's one binary, `cellgov`. Its
+commands form a two-level noun-verb tree parsed by `clap` in
+`cli::parse`. Every command's behavior is a function over the plain
+structs that module produces.
+
+`cli::reference` renders that same tree three ways:
+
+- the examples each command's help leads with
+- the committed `docs/cli.md`
+- the `clap_complete` shell scripts
+
+*Why:* a command the binary accepts and a command the reference
+documents cannot differ.
+
+The crate is a thin shim. It keeps four concerns:
+
+- presentation: report text, tables, JSON shaping, the progress bar,
+  colour, generated markdown
+- process concerns: exit codes, the stdout/stderr split, signals,
+  child processes, and locating the VFS root and key vault from flags
+  and the environment
+- argument shape
+- dispatch
+
+A function lives in the library crate that owns its domain if it
+could move there without any of these:
+
+- importing `clap`
+- printing
+- ending the process
+- naming the CLI's own error and exit types
+
+The anchor-fixture layout and the title-page generator stay in the
+CLI by decision.
+
+### Direct external dependencies
+
+The table below lists each crate's direct external dependencies, taken
+from `cargo metadata`. Test-only, build-only, and target-specific
+dependencies are intentionally absent. The workspace compiles under
+`unsafe_code = "forbid"`.
 
 <!-- workspace-gen:external:start -->
 
@@ -212,5 +271,5 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `cellgov_cli`                  | The workspace's one binary, `cellgov`: `firmware`, `title`, `keys`, `self`, `boot`, `diff`, `explore`, `scenario`, and the `dev` tools.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `cellgov_mkelf`                | Standalone generator of PPU ELF fixtures for the microtest suite. Depends on `cellgov_ps3_abi` only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `cellgov_install`              | PS3 firmware and SELF decrypter library. Its firmware installer peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction) and writes per-module SELFs into a store entry keyed on the version the extracted tree's own `vsh/etc/version.txt` names, holding the `dev_flash` mount with `dev_flash2` / `dev_flash3` as siblings beside it, and `core_os/` with the LV2 kernel the PUP's CoreOS package carries, kept SCE-wrapped and hashed as stored in the install record. The extraction stages under one hidden sibling of the firmware root and commits with a rename, since the version that names the entry is unreadable until the tree is out. A SELF decrypts one at a time behind `cellgov self decrypt`. `cellgov_cli`'s boot path calls the library's `sce::decrypt_self_to_elf` to peel encrypted SELFs at load time. Every decrypt path takes a `keys::KeyVault` the operator supplies (`CELLGOV_KEYS`, or the vault `keys import` normalized into `vfs/.cellgov/keys/keys.toml`); no build carries a key value, and a SELF whose key revision the vault lacks is refused by name. Firmware modules from the user's PUP decrypt bit-identically to committed per-module reference digests, held by a parity gate over the stems the reference set covers; the user supplies the PUP, since CellGov ships no firmware. Nothing in the decrypt path depends on another runner. |
+| `cellgov_install`              | PS3 firmware and SELF decrypter library. Its firmware installer peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction) and writes per-module SELFs into a store entry keyed on the version the extracted tree's own `vsh/etc/version.txt` names, holding the `dev_flash` mount with `dev_flash2` / `dev_flash3` as siblings beside it, and `core_os/` with the LV2 kernel the PUP's CoreOS package contains, kept SCE-wrapped and hashed as stored in the install record. The extraction stages under one hidden sibling of the firmware root and commits with a rename, since the version that names the entry is unreadable until the tree is out. A SELF decrypts one at a time behind `cellgov self decrypt`. `cellgov_cli`'s boot path calls the library's `sce::decrypt_self_to_elf` to peel encrypted SELFs at load time. Every decrypt path takes a `keys::KeyVault` the operator supplies (`CELLGOV_KEYS`, or the vault `keys import` normalized into `vfs/.cellgov/keys/keys.toml`); no build carries a key value, and a SELF whose key revision the vault lacks is refused by name. Firmware modules from the user's PUP decrypt bit-identically to committed per-module reference digests, held by a parity gate over the stems the reference set covers; the user supplies the PUP, since CellGov ships no firmware. Nothing in the decrypt path depends on another runner. |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/`, excluded from the workspace's `default-members`, so a plain `cargo build` pulls in no RPCS3-aware code; build with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |

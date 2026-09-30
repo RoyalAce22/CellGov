@@ -1,78 +1,15 @@
 # Comparison harness
 
 `cellgov_compare` reduces a run of any runner (CellGov, RPCS3, future
-recompiled output) to a normalized `Observation`: outcome, named
-memory regions, ordered events, optional state hashes, runner
-metadata, and the identity triple the run was composed from. Each named region carries its `AddressSpaceId` (space 0 for
-the boot process, spawned children numbered from 1 in spawn order;
-see [guest_memory.md](guest_memory.md#per-process-address-spaces)),
-so a checkpoint manifest can observe a child's memory; RPCS3 captures
-hold space 0 only, and the bridge refuses a manifest naming any
-other or declaring a region of zero bytes. A region the CellGov run
-cannot read -- one whose name an earlier region already declared,
-one declaring zero bytes, a space it never
-created, a range no single mapped region holds, a reserved range
-that refuses reads, or a `ReservedZeroReadable` range whose reads are
-provisional zeros the run never wrote -- refuses the whole
-observation and names the region, so an observation never carries
-bytes nobody read and a same-runner round trip cannot match on them.
-The RSX and SPU-reserved windows are therefore unobservable under the
-default access mode as well as under `--strict-reserved`. The refusal
-names the reserved region, and it applies on the CellGov side of a
-cross-runner pair too: a manifest naming one of those windows is
-refused before the other runner's capture is read against it. The comparison layer diffs two observations field by field in
-four modes: strict (outcome + memory + events), memory-only,
-events-only, prefix. Under every mode, two observations from the same
-runner that both carry CellGov state hashes must agree on them: a
-saved CellGov baseline whose hashes no longer match a fresh run of the
-same scenario is a divergence, so a baseline captured under an older
-hash construction fails instead of re-blessing itself. Cross-runner
-pairs never compare hashes (the RPCS3 adapter records none).
-Multi-baseline mode checks oracle agreement across, e.g., the RPCS3
-interpreter and LLVM before declaring a CellGov divergence.
+recompiled output) to a normalized `Observation`, then diffs two
+observations field by field. An `Observation` contains:
 
-For long boot snapshots, `observe_from_boot` builds observations
-from `boot run` outputs; `cellgov diff observations` reads
-two JSON files and reports MATCH or the first differing field. The
-determinism check requires two CellGov runs of the same ELF to
-produce byte-identical observations.
-
-Which firmware answered a run, and which of a title's installed
-versions it composed, travel with the observation rather than beside
-it, and so do the boot overrides the run applied (`--skip-module-start`
-and its siblings on `boot run` / `boot bench`). Every comparator prints
-both sides' identities before its verdict and says out loud when the
-two differ, because a divergence between two differently-composed runs
-is a difference between compositions until it is shown otherwise. The
-identity triple is context, not a
-verdict: a mismatch never drives an exit code on its own. The game half
-carries the title's version under the `PARAM.SFO` key its tree named it
-by, so a warning names the key beside the value. State traces carry the
-same identity as a fixed-width fingerprint in their header record, so
-`diverge` reports two identity triples disagreeing from the stream
-alone. An artifact naming no identity triple was written before the
-store carried versions, or by a runner that reports none; absence never
-reads as a mismatch.
-
-A runner CellGov does not compose for names no identity triple, because
-no store entry describes it. It still names a firmware. Its capture carries
-`runner_firmware`, the version read out of that runner's own
-installation -- the guest-path mapping in its configuration, then the
-console version file in whichever tree that mapping names. The read
-happens where the capture becomes an observation, not where a report is
-later generated: a runner's installation can change between the two, and
-a version read late names a library the capture never saw. A capture
-whose conversion was given no installation to read names no version, and
-a verdict built from it is refused rather than assumed.
-
-A byte-parity verdict is a statement about two runs of one firmware
-library, so `CrossRunnerSummary` carries CellGov's identity triple and
-the other runner's version together. Three shapes are refused on load rather than
-rendered: the two versions disagreeing, either side named alone, and a
-file whose recorded firmware differs from the cell its directory names.
-A summary naming neither side predates the schema and makes no claim to
-contradict. A cross-firmware comparison remains a legitimate experiment;
-what it is not is a parity verdict, and nothing renders it as one.
+- outcome
+- named memory regions
+- ordered events
+- optional state hashes
+- runner metadata
+- the identity triple the run was composed from
 
 ```mermaid
 flowchart LR
@@ -87,6 +24,131 @@ flowchart LR
   cmp --> out["MATCH, or the first differing field"]
 ```
 
+## Named regions
+
+Each named region has its `AddressSpaceId`: space 0 for the boot
+process, spawned children numbered from 1 in spawn order (see
+[guest_memory.md](guest_memory.md#per-process-address-spaces)). A
+checkpoint manifest can therefore observe a child's memory; RPCS3
+captures hold space 0 only, and the bridge refuses a manifest naming
+any other or declaring a region of zero bytes.
+
+**The whole observation is refused if the CellGov run cannot read a
+region.** The refusal names the region. A region is unreadable if it:
+
+- has a name an earlier region already declared
+- declares zero bytes
+- is in a space the run never created
+- is a range no single mapped region contains
+- is a reserved range that refuses reads
+- is a `ReservedZeroReadable` range, whose reads are provisional zeros
+  the run never wrote
+
+*Why:* an observation never contains bytes nobody read, and a
+same-runner round trip cannot match on them.
+
+The RSX and SPU-reserved windows are therefore unobservable under the
+default access mode as well as under `--strict-reserved`. The refusal
+names the reserved region. It applies on the CellGov side of a
+cross-runner pair too: a manifest naming one of those windows is
+refused before the other runner's capture is read against it.
+
+## Comparison modes
+
+The comparison layer diffs two observations field by field in four
+modes:
+
+- strict (outcome + memory + events)
+- memory-only
+- events-only
+- prefix
+
+**Under every mode, two observations from the same runner that both
+contain CellGov state hashes must agree on them.** A saved CellGov
+baseline whose hashes no longer match a fresh run of the same scenario
+is a divergence.
+
+*Why:* a baseline captured under an older hash construction then fails
+instead of re-blessing itself.
+
+Cross-runner pairs never compare hashes (the RPCS3 adapter records
+none). Multi-baseline mode checks oracle agreement across, e.g., the
+RPCS3 interpreter and LLVM before declaring a CellGov divergence.
+
+For long boot snapshots, `observe_from_boot` builds observations from
+`boot run` outputs. `cellgov diff observations` reads two JSON files
+and reports MATCH or the first differing field. The determinism check
+requires two CellGov runs of the same ELF to produce byte-identical
+observations.
+
+## Run identity
+
+These facts about a run's composition travel with the observation
+rather than beside it:
+
+- which firmware answered the run
+- which of a title's installed versions it composed
+- the boot overrides the run applied (`--skip-module-start` and its
+  siblings on `boot run` / `boot bench`)
+
+Every comparator prints both sides' identities before its verdict and
+says out loud when the two differ.
+
+*Why:* a divergence between two differently-composed runs is a
+difference between compositions until it is shown otherwise.
+
+**The identity triple is context, not a verdict.** A mismatch never
+drives an exit code on its own.
+
+The game half contains the title's version under the `PARAM.SFO` key
+its tree named it by, so a warning names the key beside the value.
+State traces contain the same identity as a fixed-width fingerprint in
+their header record. `diverge` therefore reports two identity triples
+disagreeing from the stream alone.
+
+An artifact naming no identity triple was written before the store
+had versions, or by a runner that reports none. Absence is never
+treated as a mismatch.
+
+### Runners CellGov does not compose for
+
+A runner CellGov does not compose for has no identity triple, because
+no store entry describes it. It still reports a firmware. Its capture
+contains `runner_firmware`, the version read out of that runner's own
+installation: the guest-path mapping in its configuration, then the
+console version file in whichever tree that mapping names.
+
+The read happens where the capture becomes an observation, not where a
+report is later generated.
+
+*Why:* a runner's installation can change between the two, and a
+version read late identifies a library the capture never saw.
+
+A capture whose conversion was given no installation to read has no
+version, and a verdict built from it is refused rather than assumed.
+
+### Cross-runner summaries
+
+`CrossRunnerSummary` contains CellGov's identity triple and the other
+runner's version together.
+
+*Why:* a byte-parity verdict is a statement about two runs of one
+firmware library.
+
+Three shapes are refused on load rather than rendered:
+
+- the two versions disagreeing
+- either side named alone
+- a file whose recorded firmware differs from the cell its directory
+  names
+
+A summary naming neither side makes no claim to contradict. A
+cross-firmware comparison is a legitimate experiment, but it is not a
+parity verdict, and nothing renders it as one.
+
+> **Compatibility:** a summary naming neither side predates the
+> schema.
+
 ## Per-step divergence localization
 
 Two scanners turn per-step state-trace files into diff reports.
@@ -94,43 +156,20 @@ Two scanners turn per-step state-trace files into diff reports.
 the full state is exposed only around the step where the hashes
 differ:
 
-- `cellgov_compare::diverge(a, b)` walks two trace byte buffers,
-  filters each to `PpuStateHash` records, and reports the first
-  index where they disagree: the first *scalar-visible*
-  disagreement, per the [per-step coverage caveat](runtime_pipeline.md#effects-and-trace-records).
-  Five outcomes: `SchemeMismatch { a, b }` when the two streams'
-  state-hash scheme records name two PPU schemes (no record is
-  compared; a checkpoint-scheme difference alone does not stop the
-  scan, which reads no checkpoint record),
-  `Identical { count }`,
-  `LengthDiffers { common_count, a_count, b_count }`,
-  `Differs { step, a_pc, b_pc, a_hash, b_hash, field }` with `field`
-  in `{Pc, Hash}`, or `CorruptTrace { common_count, a_error, b_error }`
-  when a record on either side fails to decode; the last is no
-  verdict on the runs, since nothing past the cut was compared.
-  Checks run step count -> PC -> hash, so the report names the
-  highest-level divergence first. Surfaced via
-  `cellgov diff diverge <a.state> <b.state>` (exit 31 on a corrupt
-  trace, 32 on a scheme mismatch). The scan is linear in record count.
-- `cellgov_compare::zoom_lookup(a_zoom, b_zoom, step)` consumes
-  separate zoom-trace files (`PpuStateFull` records emitted only
-  inside the unit's window) and returns
-  `Found { step, a_pc, b_pc, diffs }` with per-field
-  `RegDiff { field, a, b }` entries, or
-  `MissingStep { step, a_missing, b_missing }`. The snapshot carries
-  the full fingerprint input set, so an empty `diffs` means the
-  states agree on everything the hash folds; if `PpuStateHash`
-  diverged at that step, the harness is skewing snapshots against
-  hashes and the scan must not resume past it. Surfaced via
-  `cellgov diff zoom <a> <b> <step>`.
+- [`cellgov_compare::diverge`](#diverge) reports the first index
+  where two traces' `PpuStateHash` records disagree: the first
+  *scalar-visible* disagreement.
+- [`cellgov_compare::zoom_lookup`](#zoom_lookup) consumes two
+  zoom-trace files and returns the per-field fingerprint differences
+  at one step, or `MissingStep`.
 
 `boot run --save-state-trace <path>` writes the runtime's per-step
-`PpuStateHash` trace to disk, switching the runtime mode from
-`FaultDriven` to `DeterminismCheck` for the run; that file is what
-`diverge` and `zoom` consume. With `--patch-byte` for boot-time
-memory injection, diffing two CellGov traces (unpatched + patched)
-answers "do these N bytes propagate into any tracked PPU register
-during the boot?"
+`PpuStateHash` trace to disk. It switches the runtime mode from
+`FaultDriven` to `DeterminismCheck` for the run. That file is what
+`diverge` and `zoom` consume. With `--patch-byte` for boot-time memory
+injection, diffing two CellGov traces (unpatched + patched) answers
+"do these N bytes propagate into any tracked PPU register during the
+boot?"
 
 ```mermaid
 flowchart LR
@@ -143,6 +182,45 @@ flowchart LR
   win --> zm["cellgov diff zoom a.zoom b.zoom N"]
   zm --> rd["RegDiff list: the fingerprint fields that differ"]
 ```
+
+### diverge
+
+`cellgov_compare::diverge(a, b)` walks two trace byte buffers, filters
+each to `PpuStateHash` records, and reports the first index where they
+disagree. That index is the first *scalar-visible* disagreement, per
+the [per-step coverage caveat](runtime_pipeline.md#per-step-coverage-caveat).
+`diverge` has five outcomes:
+
+- `SchemeMismatch { a, b }` when the two streams' state-hash scheme
+  records name two PPU schemes. No record is compared. A
+  checkpoint-scheme difference alone does not stop the scan, which
+  reads no checkpoint record.
+- `Identical { count }`
+- `LengthDiffers { common_count, a_count, b_count }`
+- `Differs { step, a_pc, b_pc, a_hash, b_hash, field }` with `field`
+  in `{Pc, Hash}`
+- `CorruptTrace { common_count, a_error, b_error }` when a record on
+  either side fails to decode. This is no verdict on the runs, since
+  nothing past the cut was compared.
+
+Checks run step count -> PC -> hash, so the report names the
+highest-level divergence first. The scan is surfaced via
+`cellgov diff diverge <a.state> <b.state>` (exit 31 on a corrupt
+trace, 32 on a scheme mismatch). The scan is linear in record count.
+
+### zoom_lookup
+
+`cellgov_compare::zoom_lookup(a_zoom, b_zoom, step)` consumes separate
+zoom-trace files (`PpuStateFull` records emitted only inside the
+unit's window). It returns `Found { step, a_pc, b_pc, diffs }` with
+per-field `RegDiff { field, a, b }` entries, or
+`MissingStep { step, a_missing, b_missing }`. It is surfaced via
+`cellgov diff zoom <a> <b> <step>`.
+
+The snapshot contains the full fingerprint input set, so an empty
+`diffs` means the states agree on everything the hash folds. If
+`PpuStateHash` diverged at that step, the harness is skewing snapshots
+against hashes and the scan must not resume past it.
 
 ## RPCS3 bridge
 
@@ -157,8 +235,7 @@ dump plus a shared region manifest into the same `Observation` JSON
 
 The user builds the patched RPCS3 binary; the CellGov library has no
 Cargo or runtime dependency on RPCS3, and the bridge is a
-verification-time tool. See
-a cell's `REPRODUCTION.md` under
+verification-time tool. See a cell's `REPRODUCTION.md` under
 `tests/fixtures/<content-id>/cross_runner/fw-<ver>/<game-ver>/` for the
 build commands and the build-config workarounds.
 
@@ -166,17 +243,24 @@ build commands and the build-config workarounds.
 
 An RPCS3 observation serves as an oracle only when RPCS3 is
 configured for deterministic PPU/SPU behavior and no RSX/audio
-output: `Video.Renderer = "Null"`, `Audio.Renderer = "Null"`,
-`Core.PPU Decoder = Recompiler (LLVM)`, and `Core.SPU Decoder =
-Recompiler (LLVM)`. The canonical YAML for these four fields is
-embedded in `bridges/rpcs3_to_observation/`; the adapter hashes it
-(FNV-1a) at build time and requires a matching `--config-hash` on
-every invocation, so a dump produced under a different RPCS3 config
-is rejected at adapter entry instead of feeding a wrong-config
+output:
+
+- `Video.Renderer = "Null"`
+- `Audio.Renderer = "Null"`
+- `Core.PPU Decoder = Recompiler (LLVM)`
+- `Core.SPU Decoder = Recompiler (LLVM)`
+
+The canonical YAML for these four fields is embedded in
+`bridges/rpcs3_to_observation/`. The adapter hashes it (FNV-1a) at
+build time and requires a matching `--config-hash` on every
+invocation. A dump produced under a different RPCS3 config is
+therefore rejected at adapter entry instead of feeding a wrong-config
 observation into the comparator.
+
 [Wang2024 p:340:17 s:3.8 Ensuring Determinism] A backend that may
 legitimately produce different results on the same input is unsuited
 to differential testing; the hash pins the settings that remove that
 freedom.
+
 `rpcs3_to_observation --print-expected-config-hash` prints the
 expected hash for scripting.

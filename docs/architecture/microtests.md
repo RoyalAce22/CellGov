@@ -1,12 +1,18 @@
 # Microtest suite
 
-PSL1GHT-compiled C microtests live under `tests/micro/<name>/`,
-each with its own `manifest.toml` and `build.sh`, and run
-end-to-end as LV2-driven scenarios from the PPU's own compiled
-code. SPU-bearing tests drive the full SPU lifecycle through
-syscalls with no harness pre-registration of SPU execution units;
-PPU-only (`ppu_*`) and RSX-focused (`rsx_*`) microtests exercise
-those subsystems without SPU threads. A representative selection:
+**PSL1GHT-compiled C microtests run end-to-end as LV2-driven
+scenarios from the PPU's own compiled code.** They live under
+`tests/micro/<name>/`, each with its own `manifest.toml` and
+`build.sh`. Kinds of test include:
+
+- SPU-bearing tests, which drive the full SPU lifecycle through
+  syscalls, with no harness pre-registration of SPU execution units;
+- PPU-only (`ppu_*`) and RSX-focused (`rsx_*`) microtests, which
+  exercise those subsystems without SPU threads.
+
+## Representative tests
+
+A representative selection:
 
 | Test                   | What it proves                                                 |
 | ---------------------- | -------------------------------------------------------------- |
@@ -24,13 +30,26 @@ those subsystems without SPU threads. A representative selection:
 | rsx_semaphore_post     | NV4097 semaphore release polled by PPU.                        |
 | process_spawn_wait     | Parent spawns an SCE-wrapped child into its own address space and waits while the child runs a PPU thread on a stack there. |
 
-See `tests/micro/` for the full set. The toolchain that builds them
-is pinned by `tests/micro/toolchain/Dockerfile`, which wraps a named
-ps3dev nightly release (PPU and SPU gcc, PSL1GHT, make_self); each
-`build.sh` header carries the `docker build` and `docker run` recipe.
+See `tests/micro/` for the full set.
 
-Each test has interpreter and LLVM scenario observations under
-`tests/scenario_observations/`, settled when both decoders agree.
-CellGov runs each through `observe_with_determinism_check` (two
-runs must produce identical results) and compares against both
-via `compare_multi --mode memory`.
+## Toolchain
+
+**`tests/micro/toolchain/Dockerfile` pins the toolchain that builds
+the microtests.** It wraps a named ps3dev nightly release (PPU and SPU
+gcc, PSL1GHT, make_self).
+
+Each `build.sh` header contains the `docker build` and `docker run`
+recipe.
+
+## Observations
+
+**Each test has interpreter and LLVM scenario observations** under
+`tests/scenario_observations/`. The observations are settled when
+both decoders agree.
+
+CellGov checks each test in two steps:
+
+1. Run it through `observe_with_determinism_check` (two runs must
+   produce identical results).
+2. Compare the result against both observations via
+   `compare_multi --mode memory`.

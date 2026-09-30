@@ -2,9 +2,14 @@
 
 `cellgov_mem::GuestMemory` is a sorted `Vec<Region>` keyed by
 region base address. Each `Region` owns a `Vec<u8>` sized to the
-region, plus a label, page-size class, and access mode.
+region, plus:
+
+- a label;
+- a page-size class;
+- an access mode.
+
 `containing_region(addr, length)` translates addresses by binary
-search, returning the region entirely containing the range, or
+search. It returns the region entirely containing the range, or
 `None` if the access straddles a boundary or falls in an unmapped
 gap.
 
@@ -21,60 +26,78 @@ PS3 LV2 virtual-address layout:
 | 0xE0000000-0xFFFFFFFF      | 512 MB     | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX; an MFC transfer into its SPU thread window reaches the target thread, as the runtime pipeline describes           |
 
 The region map does not track `main`'s internal sub-layout; the
-region stays flat. Within it, `sys_memory_allocate` starts above
-the loaded ELF footprint (the ELF's highest user-region PT_LOAD end
-plus 64 KB alignment, computed at startup), TLS sits at
-`0x10400000`, and firmware PRX images load above that. The
-allocator base sits above the ELF because real PS3 LV2 shares
-`0x00010000-0x0FFFFFFF` between the loaded binary and the allocator
-pool; matching that layout lines guest pointer values up across
-runners.
+region stays flat. Within it:
+
+- `sys_memory_allocate` starts above the loaded ELF footprint (the
+  ELF's highest user-region PT_LOAD end plus 64 KB alignment,
+  computed at startup);
+- TLS sits at `0x10400000`;
+- firmware PRX images load above that.
+
+*Why:* the allocator base sits above the ELF because real PS3 LV2
+shares `0x00010000-0x0FFFFFFF` between the loaded binary and the
+allocator pool. Matching that layout lines guest pointer values up
+across runners.
 
 ## Region access modes
 
-`RegionAccess` is a three-variant enum, not a boolean flag, so the
-variants cannot be collapsed by accident:
+`RegionAccess` is a three-variant enum, not a boolean flag.
 
-- **`ReadWrite`**: normal user memory; reads and writes go through
-  the region's backing `Vec<u8>`.
-- **`ReservedZeroReadable`**: reads return the region's zero-init
-  bytes and bump `GuestMemory::provisional_read_count`; writes fault
-  with `MemError::ReservedWrite`. The default for RSX and
-  SPU-reserved: it maps the address space without real semantics
-  and surfaces silent zero-reads in `boot run`'s end-of-boot
-  summary. An observation region over such a range is refused
-  ([comparison.md](comparison.md)).
-- **`ReservedStrict`**: reads via the legacy `GuestMemory::read`
-  return `None`; reads via `GuestMemory::read_checked` fault with
-  `MemError::ReservedStrictRead { addr, region }`; writes fault
-  with `MemError::ReservedWrite`. Opted into with the CLI's
-  `--strict-reserved`; used by tests asserting no code path touches
-  the region.
+*Why:* an enum prevents the variants from being collapsed by
+accident.
 
-An access in no region faults with `MemError::Unmapped(FaultContext)`;
-`FaultContext` carries the faulting address and the labels of the
-nearest mapped regions below and above it, so a fault at
-`0xB0000000` reports "between `main` and `rsx`".
+| Variant                    | Reads                                                                                                                                               | Writes                            | Used for                                                                                                 |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **`ReadWrite`**            | Go through the region's backing `Vec<u8>`.                                                                                                          | Go through the backing `Vec<u8>`. | Normal user memory.                                                                                      |
+| **`ReservedZeroReadable`** | Return the region's zero-init bytes and bump `GuestMemory::provisional_read_count`.                                                                 | Fault with `MemError::ReservedWrite`. | The default for RSX and SPU-reserved.                                                                |
+| **`ReservedStrict`**       | Via the legacy `GuestMemory::read`, return `None`. Via `GuestMemory::read_checked`, fault with `MemError::ReservedStrictRead { addr, region }`.       | Fault with `MemError::ReservedWrite`. | Opted into with the CLI's `--strict-reserved`; used by tests asserting no code path touches the region. |
+
+`ReservedZeroReadable` maps the address space without real
+semantics and surfaces silent zero-reads in `boot run`'s end-of-boot
+summary. An observation region over such a range is refused
+([comparison.md](comparison.md)).
+
+An access in no region faults with `MemError::Unmapped(FaultContext)`.
+`FaultContext` contains the faulting address and the labels of the
+nearest mapped regions below and above it. A fault at `0xB0000000`
+therefore reports "between `main` and `rsx`".
 
 ## PPU access routing
 
-The PPU interpreter fetches through `GuestMemory::as_bytes()`, a
-legacy accessor returning the base-0 region's bytes; code always
-lives in `main`, so this is safe. Loads (`ld`, `lwz`, `lfs`, `lvx`,
-etc.) use the `load_slice` helper, which scans a region-view table
-built at the top of `run_until_yield` from
-`GuestMemory::region_views()`: one `RegionView` per region (base,
-bytes, and the memory that logs a read when the region is
-`ReservedZeroReadable`), in an eight-slot stack table that spills
-to the heap when a guest maps more regions. Every provisional-view
-hit is logged, so a raw-slice read of the reserved-zero RSX / SPU
-ranges reaches the trace as a `ReservedRegionRead` record, as a
-host-side `GuestMemory::read` does. Linear scan beats `BTreeMap`
-lookup because the region count stays single-digit under the PS3
-layout: the regions above plus one per shared-memory mapping.
-Stores go through `Effect::SharedWriteIntent`; the commit
-pipeline's `apply_commit` is region-aware, so stores to any mapped
-region land correctly.
+The PPU interpreter routes fetches, loads and stores by three
+different paths:
+
+- **Fetches** go through `GuestMemory::as_bytes()`, a legacy
+  accessor returning the base-0 region's bytes. This is safe
+  because code always lives in `main`.
+- **Loads** (`ld`, `lwz`, `lfs`, `lvx`, etc.) use the `load_slice`
+  helper, which scans a region-view table.
+- **Stores** go through `Effect::SharedWriteIntent`. The commit
+  pipeline's `apply_commit` is region-aware, so stores to any
+  mapped region land correctly.
+
+The region-view table is built at the top of `run_until_yield` from
+`GuestMemory::region_views()`. It has one `RegionView` per region,
+containing:
+
+- the base;
+- the bytes;
+- the memory that logs a read when the region is
+  `ReservedZeroReadable`.
+
+The table is an eight-slot stack table that spills to the heap when
+a guest maps more regions.
+
+Every provisional-view hit is logged. A raw-slice read of the
+reserved-zero RSX / SPU ranges therefore reaches the trace as a
+`ReservedRegionRead` record, as a host-side `GuestMemory::read`
+does.
+
+`load_slice` scans the table linearly.
+
+*Why:* linear scan beats `BTreeMap` lookup because the region count
+stays single-digit under the PS3 layout: the regions above plus one
+per shared-memory mapping.
 
 ## Per-process address spaces
 
@@ -87,33 +110,63 @@ window into the boot map. `Runtime::spaces` (`SpaceTable`) holds:
 - the child spaces' reservation tables, and
 - the registered shared mappings.
 
-Equal numeric addresses in different spaces never alias: every
-consumer touching guest memory for a unit resolves through the
-unit's space tag, and the LV2 direct-commit channel resolves one
-too: `apply_lv2_effects` takes the space, the syscall caller's for
-dispatch effects and the expiring waiter's for expiry effects,
-while `commit_bytes_at` takes the unit whose pointer it writes
-through and resolves that unit's space itself.
+`SpaceTable` is pure data. It is part of `RuntimeSnapshot` and
+enters two hashes:
 
-Cross-process shared memory is an explicit registration: a shared
-mapping names a segment size and a set of `(space, base)` views,
-installed all-or-nothing. A committed write through one view fans
-out to every sibling view (including a second view in the same
-space), clears reservations on covered lines in the sibling
-spaces, and invalidates predecoded code at the translated alias
-ranges. The storing unit keeps its own reservation over those
-lines, as it keeps it over the view it stored through: every view
-names one reservation granule. A DMA landing inside a view fans out
-the same way, clears the same lines, and invalidates predecoded code
-at its destination and at every alias, on every unit, as a committed
-store does; a transfer can deliver the code a unit runs next. The
-fanout and the invalidation cover two writers, the committed store
-and the DMA landing. Atomic `ConditionalStore`
-through a shared view is unmodeled and refuses loudly. A DMA
-transfer outside the SPU thread window resolves both its ends in space 0, so the fanout is the
-only part of one that reaches another space. The RSX subsystem
-reads and mirrors space 0 only; deferred RSX effects never join a
-child-space commit batch.
+- the sync-state hash, as lanes (child-space presence, tags,
+  mappings, child reservations);
+- the committed-memory hash (child contents).
+
+An empty `SpaceTable` adds nothing to either.
+
+Equal numeric addresses in different spaces never alias. Every
+consumer touching guest memory for a unit resolves through the
+unit's space tag. The LV2 direct-commit channel resolves one too:
+
+- `apply_lv2_effects` takes the space: the syscall caller's for
+  dispatch effects, and the expiring waiter's for expiry effects.
+- `commit_bytes_at` takes the unit whose pointer it writes through
+  and resolves that unit's space itself.
+
+### Shared mappings
+
+Cross-process shared memory is an explicit registration. A shared
+mapping specifies a segment size and a set of `(space, base)` views,
+installed all-or-nothing.
+
+The fanout and the invalidation cover two writers: the committed
+store and the DMA landing.
+
+A committed write through one view:
+
+- fans out to every sibling view (including a second view in the
+  same space);
+- clears reservations on covered lines in the sibling spaces;
+- invalidates predecoded code at the translated alias ranges.
+
+The storing unit keeps its own reservation over those lines, as it
+keeps it over the view it stored through.
+
+*Why:* every view identifies one reservation granule.
+
+A DMA landing inside a view:
+
+- fans out the same way;
+- clears the same lines;
+- invalidates predecoded code at its destination and at every
+  alias, on every unit, as a committed store does.
+
+*Why:* a transfer can deliver the code a unit runs next.
+
+Atomic `ConditionalStore` through a shared view is unmodeled and
+refuses loudly.
+
+A DMA transfer outside the SPU thread window resolves both its ends
+in space 0. The fanout is therefore the only part of such a transfer
+that reaches another space.
+
+The RSX subsystem reads and mirrors space 0 only. Deferred RSX
+effects never join a child-space commit batch.
 
 ```mermaid
 flowchart LR
@@ -132,22 +185,35 @@ flowchart LR
   dma["DMA landing in view A"] --> va
 ```
 
+### Keyed sys_mmapper mappings
+
 An ipc-keyed `sys_mmapper` map registers its window as a view of
-that key's segment. The guest never declares the mapping: each map
-of a keyed handle carries its key into the region-install drain,
-which records the window against the key. A key mapped inside only
-one address space stays bookkeeping and never enters the shared
-table, so a single-process boot's hash channels are byte-identical
-to a run with no keyed maps. When a second address space attaches,
-the key promotes: every recorded window becomes a view, each
-seeded from the first view's bytes with the reservations it
-overwrites cleared. Seeding covers all views, not only the
-attaching one, because until promotion each window was an
-independent zero-filled region and a repeat map inside the first
-space would otherwise stay stale forever. Later attaches append to
-the live mapping and seed the same way. A view whose length
-disagrees with the segment, or a window with no backing region, is
-refused with a named witness and never joins the mapping.
+that key's segment. The guest never declares the mapping. Instead,
+each map of a keyed handle passes its key into the region-install
+drain, which records the window against the key.
+
+A key mapped inside only one address space stays bookkeeping and
+never enters the shared table. A single-process boot's hash
+channels are therefore byte-identical to a run with no keyed maps.
+
+When a second address space attaches, the key promotes:
+
+- every recorded window becomes a view;
+- each view is seeded from the first view's bytes, with the
+  reservations it overwrites cleared.
+
+Seeding covers all views, not only the attaching one.
+
+*Why:* until promotion each window was an independent zero-filled
+region, and a repeat map inside the first space would otherwise
+stay stale forever.
+
+Later attaches append to the live mapping and seed the same way.
+
+These are refused with a named witness and never join the mapping:
+
+- a view whose length disagrees with the segment;
+- a window with no backing region.
 
 ```mermaid
 stateDiagram-v2
@@ -160,8 +226,3 @@ stateDiagram-v2
   Bookkeeping --> Refused : length disagrees or no backing region
   Promoted --> Refused : length disagrees or no backing region
 ```
-
-`SpaceTable` is pure data: it rides in `RuntimeSnapshot`, enters
-the sync-state hash as lanes (child-space presence, tags, mappings,
-child reservations) and the committed-memory hash (child contents),
-and adds nothing to either while empty.
