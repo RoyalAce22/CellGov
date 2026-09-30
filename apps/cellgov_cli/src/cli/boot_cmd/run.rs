@@ -99,6 +99,12 @@ pub(crate) fn run_game(
             observation_regions: observation_regions.as_deref(),
             boot_summary: args.save_boot_summary.as_deref(),
             state_trace: args.save_state_trace.as_deref(),
+            spu_local_store: args.save_spu_local_store.as_deref().map(|path| {
+                game::SpuLocalStoreRequest {
+                    path,
+                    unit: args.spu_unit,
+                }
+            }),
         },
         game::RunReporting {
             boot: cellgov_boot::prepare::DiagnosticOptions {

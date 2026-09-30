@@ -1,5 +1,5 @@
-//! `dev spu-disasm` end to end: an SPU ELF, a file holding two, and a
-//! raw local-store image.
+//! `dev spu-disasm` end to end: an SPU ELF, a file holding two, a raw
+//! local-store image, and a local-store capture.
 
 #![allow(
     clippy::unwrap_used,
@@ -123,4 +123,52 @@ fn a_raw_image_places_its_bytes_at_the_base_and_a_data_word_exits_20() {
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines[0], "0x04000  40800483  il       $3,0x9");
     assert_eq!(lines[1], format!("0x04004  {data:08x}  .word 0x{data:08x}"));
+}
+
+/// A capture of a unit stopped at 0x2000 with `il $3,0x1; il $4,0x2`
+/// there.
+fn capture_file(dir: &std::path::Path) -> PathBuf {
+    let mut state = cellgov_spu::state::SpuState::new();
+    state.pc = 0x2000;
+    state.ls[0x2000..0x2004].copy_from_slice(&il(3, 1).to_be_bytes());
+    state.ls[0x2004..0x2008].copy_from_slice(&il(4, 2).to_be_bytes());
+    let path = dir.join("unit.spuls");
+    let capture = cellgov_spu::capture::LocalStoreCapture::of(&state);
+    std::fs::write(&path, capture.to_bytes()).unwrap();
+    path
+}
+
+#[test]
+fn a_local_store_capture_disassembles_from_the_units_pc() {
+    let dir = scratch_labeled("spu-capture");
+    let path = capture_file(&dir);
+    let (code, stdout) = cellgov(&["dev", "spu-disasm", path.to_str().unwrap(), "--count", "2"]);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert_eq!(
+        stdout,
+        "0x02000  40800083  il       $3,0x1\n\
+         0x02004  40800104  il       $4,0x2\n"
+    );
+    let (code, stdout) = cellgov(&[
+        "dev",
+        "spu-disasm",
+        path.to_str().unwrap(),
+        "--lsa",
+        "2004",
+        "--count",
+        "1",
+    ]);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert_eq!(stdout, "0x02004  40800104  il       $4,0x2\n");
+}
+
+#[test]
+fn a_truncated_local_store_capture_is_refused() {
+    let dir = scratch_labeled("spu-capture-short");
+    let path = capture_file(&dir);
+    let bytes = std::fs::read(&path).unwrap();
+    std::fs::write(&path, &bytes[..bytes.len() - 16]).unwrap();
+    let (code, stdout) = cellgov(&["dev", "spu-disasm", path.to_str().unwrap()]);
+    assert_eq!(code, Some(1), "{stdout}");
+    assert_eq!(stdout, "");
 }

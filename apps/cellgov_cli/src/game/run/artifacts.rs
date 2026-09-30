@@ -4,6 +4,9 @@ use cellgov_boot::manifest::TitleManifest;
 use cellgov_boot::observation::{self, save_boot_observation};
 use cellgov_compare::BootOutcome;
 use cellgov_core::Runtime;
+use cellgov_spu::capture::LocalStoreCapture;
+use cellgov_spu::state::SpuState;
+use cellgov_spu::SpuExecutionUnit;
 use cellgov_time::Budget;
 
 use super::options::RunArtifacts;
@@ -40,6 +43,73 @@ pub enum RunError {
         #[source]
         source: std::io::Error,
     },
+    /// The run holds no SPU unit to capture.
+    #[error("save-spu-local-store: the run holds no SPU unit")]
+    NoSpuUnit,
+    /// The run holds several SPU units and the command named none.
+    #[error(
+        "save-spu-local-store: the run holds SPU units {}; pass --spu-unit to pick one",
+        listed(units)
+    )]
+    SeveralSpuUnits {
+        /// The ids of the run's SPU units.
+        units: Vec<u64>,
+    },
+    /// The named unit is not one of the run's SPU units.
+    #[error(
+        "save-spu-local-store: unit {unit} is no SPU unit of the run; its SPU units are {}",
+        listed(units)
+    )]
+    NotAnSpuUnit {
+        /// The id the command named.
+        unit: u64,
+        /// The ids of the run's SPU units.
+        units: Vec<u64>,
+    },
+    /// The `--save-spu-local-store` write failed.
+    #[error("save-spu-local-store: failed to write {path}: {source}")]
+    SaveSpuLocalStore {
+        /// The output path the command received.
+        path: String,
+        /// The host write failure.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// `units` as a comma-separated list, or `none`.
+fn listed(units: &[u64]) -> String {
+    if units.is_empty() {
+        return "none".to_owned();
+    }
+    units
+        .iter()
+        .map(u64::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The capture of the SPU unit `wanted` names among `spus`, or of the
+/// only one, with its id.
+pub(super) fn capture_spu_unit(
+    spus: &[(u64, &SpuState)],
+    wanted: Option<u64>,
+) -> Result<(u64, LocalStoreCapture), RunError> {
+    let units = || spus.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+    let (id, state) = match (wanted, spus) {
+        (Some(unit), _) => {
+            spus.iter()
+                .find(|(id, _)| *id == unit)
+                .ok_or_else(|| RunError::NotAnSpuUnit {
+                    unit,
+                    units: units(),
+                })?
+        }
+        (None, []) => return Err(RunError::NoSpuUnit),
+        (None, [only]) => only,
+        (None, _) => return Err(RunError::SeveralSpuUnits { units: units() }),
+    };
+    Ok((*id, LocalStoreCapture::of(state)))
 }
 
 impl RunError {
@@ -122,5 +192,29 @@ pub(super) fn save_artifacts(
         })?;
         eprintln!("save-state-trace: wrote {} bytes to {path}", bytes.len());
     }
+    if let Some(request) = &artifacts.spu_local_store {
+        let spus: Vec<(u64, &SpuState)> = rt
+            .registry()
+            .iter()
+            .filter_map(|(id, unit)| {
+                let spu = unit.as_any().downcast_ref::<SpuExecutionUnit>()?;
+                Some((id.raw(), spu.state()))
+            })
+            .collect();
+        let (unit, capture) = capture_spu_unit(&spus, request.unit)?;
+        let path = request.path;
+        std::fs::write(path, capture.to_bytes()).map_err(|source| RunError::SaveSpuLocalStore {
+            path: path.to_string(),
+            source,
+        })?;
+        eprintln!(
+            "save-spu-local-store: unit {unit} at pc 0x{:05x}: wrote {path}",
+            capture.pc
+        );
+    }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/artifacts_tests.rs"]
+mod tests;

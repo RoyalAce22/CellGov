@@ -148,8 +148,10 @@ const SPU_DISASM_EXIT_CODES: &str = "Exit codes particular to this command:
 const SPU_DISASM_INPUT_NOTE: &str = "Input:
   An SPU ELF is disassembled from its entry point, or from --lsa. A file
   that holds SPU ELFs inside it (a PPU executable or PRX) lists them;
-  --image N picks one. --raw reads the file, past --skip bytes, as a
-  local-store image placed at --base.";
+  --image N picks one. A local-store capture that boot run
+  --save-spu-local-store wrote is disassembled from the unit's PC, or from
+  --lsa. --raw reads the file, past --skip bytes, as a local-store image
+  placed at --base.";
 
 /// `cellgov dev spu-disasm`
 #[derive(Debug, clap::Args)]

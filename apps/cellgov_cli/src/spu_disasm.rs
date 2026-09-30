@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::Path;
 
 use cellgov_install::self_image::is_sce_wrapped;
+use cellgov_spu::capture::LocalStoreCapture;
 use cellgov_spu::disasm::{SpuWord, SpuWordClass};
 use cellgov_spu::image::find_embedded_spu_elfs;
 
@@ -33,7 +34,19 @@ pub(crate) fn run(
         file
     };
     let images;
-    let (spans, start) = if parsed.raw {
+    let capture;
+    let (spans, start) = if !parsed.raw && LocalStoreCapture::is_capture(&data) {
+        capture = LocalStoreCapture::parse(&data).map_err(|error| {
+            CommandError::failed(format!("spu-disasm: {}: {error}", parsed.path))
+        })?;
+        (
+            vec![Span {
+                lsa: 0,
+                bytes: &capture.local_store,
+            }],
+            parsed.lsa.unwrap_or(capture.pc),
+        )
+    } else if parsed.raw {
         let skip = parsed.skip as usize;
         let bytes = data.get(skip..).ok_or_else(|| {
             CommandError::failed(format!(

@@ -31,6 +31,16 @@ pub struct RunArtifacts<'a> {
     /// run's mode. [`crate::game::run_game`] refuses the two in
     /// disagreement.
     pub state_trace: Option<&'a str>,
+    /// `--save-spu-local-store`: one SPU unit's local store and PC.
+    pub spu_local_store: Option<SpuLocalStoreRequest<'a>>,
+}
+
+/// Where a local-store capture goes, and which SPU unit it captures.
+pub struct SpuLocalStoreRequest<'a> {
+    /// The capture file.
+    pub path: &'a str,
+    /// The unit's id; `None` takes the run's only SPU unit.
+    pub unit: Option<u64>,
 }
 
 /// Where the run reports, and what it reports.

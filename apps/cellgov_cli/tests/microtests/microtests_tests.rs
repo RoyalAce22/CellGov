@@ -257,3 +257,63 @@ fn the_cgov_reader_finds_a_frame_behind_a_verdict_line() {
     tty.extend_from_slice(&0x0000_0001u32.to_be_bytes());
     assert_eq!(cgov_words(case, &tty), vec![0xDEAD_BEEF, 1]);
 }
+
+/// A run stopped with its SPU mid-program writes the unit's local store,
+/// and `dev spu-disasm` reads the capture from the word at the unit's PC.
+#[test]
+fn a_running_spu_units_local_store_disassembles_at_its_pc() {
+    let scratch = workspace_root()
+        .join("target")
+        .join("microtests_scratch")
+        .join(std::process::id().to_string())
+        .join("spu_capture");
+    std::fs::create_dir_all(&scratch).expect("create scratch");
+    let capture_path = scratch.join("unit.spuls");
+    std::fs::remove_file(&capture_path).ok();
+    // The signal-notify microtest's SPU is still running 4000
+    // instructions in; its thread group ends near 7000.
+    let boot = Command::new(env!("CARGO_BIN_EXE_cellgov"))
+        .args(["boot", "run", "--title-manifest"])
+        .arg(manifest_path("spu_signal_notify"))
+        .args(["--max-steps", "4000", "--save-spu-local-store"])
+        .arg(&capture_path)
+        .current_dir(workspace_root())
+        .env("CELLGOV_NO_FIRMWARE_DIR", "1")
+        .output()
+        .expect("spawn cellgov boot run");
+    let stdout = String::from_utf8_lossy(&boot.stdout);
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line.starts_with("outcome: MAX_STEPS")),
+        "the run stops at its step cap: {stdout}"
+    );
+    let bytes = std::fs::read(&capture_path).unwrap_or_else(|e| {
+        panic!(
+            "read {}: {e}
+{}",
+            capture_path.display(),
+            String::from_utf8_lossy(&boot.stderr)
+        )
+    });
+    let capture = cellgov_spu::capture::LocalStoreCapture::parse(&bytes).expect("a capture");
+    let at = capture.pc as usize;
+    let word = u32::from_be_bytes(capture.local_store[at..at + 4].try_into().unwrap());
+    assert!(
+        cellgov_spu::decode::decode(word).is_ok(),
+        "the word at the unit's PC 0x{:05x} is an instruction: {word:08x}",
+        capture.pc
+    );
+    let disasm = Command::new(env!("CARGO_BIN_EXE_cellgov"))
+        .args(["dev", "spu-disasm"])
+        .arg(&capture_path)
+        .args(["--count", "1"])
+        .output()
+        .expect("spawn cellgov dev spu-disasm");
+    assert!(disasm.status.success(), "{disasm:?}");
+    let listing = String::from_utf8_lossy(&disasm.stdout);
+    assert!(
+        listing.starts_with(&format!("0x{:05x}  {word:08x}  ", capture.pc)),
+        "{listing}"
+    );
+}

@@ -19,6 +19,7 @@
 // [SPU-ISA p:195 s:9.1] SPU single precision does not compute IEEE 754 results, so host floating point cannot stand in for it; cellgov_float computes it.
 #![cfg_attr(not(test), forbid(clippy::float_arithmetic))]
 
+pub mod capture;
 pub mod census;
 pub mod decode;
 pub mod disasm;

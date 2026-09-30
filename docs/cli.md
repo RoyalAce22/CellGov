@@ -892,6 +892,8 @@ Usage: cellgov boot run [OPTIONS] <--title <NAME>|--content-id <ID>|--title-mani
 | `--observation-manifest` | `PATH` | Checkpoint manifest naming the regions the observation covers. |
 | `--save-boot-summary` | `PATH` | Write the run's boot summary JSON here. |
 | `--save-state-trace` | `PATH` | Write the run's state trace here. |
+| `--save-spu-local-store` | `PATH` | Write one SPU unit's local store and PC here when the run stops. |
+| `--spu-unit` | `ID` | The SPU unit --save-spu-local-store captures, when the run holds several. |
 | `--guest-arg` | `VALUE` | One guest argv entry; repeat for more. Values may spell a flag. |
 | `--skip-module-start` | -- | Run no firmware module's module_start in the boot process. |
 | `--force-system-authid` | -- | Serve the system-class bdj.self program authority id instead of the one the title's SELF names. |
@@ -1331,8 +1333,10 @@ Usage: cellgov dev spu-disasm [OPTIONS] <PATH>
 Input:
   An SPU ELF is disassembled from its entry point, or from --lsa. A file
   that holds SPU ELFs inside it (a PPU executable or PRX) lists them;
-  --image N picks one. --raw reads the file, past --skip bytes, as a
-  local-store image placed at --base.
+  --image N picks one. A local-store capture that boot run
+  --save-spu-local-store wrote is disassembled from the unit's PC, or from
+  --lsa. --raw reads the file, past --skip bytes, as a local-store image
+  placed at --base.
 
 SCE-wrapped input:
   this build has no decrypt support: plaintext ELF / PRX only. An

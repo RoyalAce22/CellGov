@@ -223,6 +223,13 @@ pub(crate) struct BootRunArgs {
     /// Write the run's state trace here.
     #[arg(long, value_name = "PATH")]
     pub save_state_trace: Option<String>,
+    /// Write one SPU unit's local store and PC here when the run stops.
+    #[arg(long, value_name = "PATH")]
+    pub save_spu_local_store: Option<String>,
+    /// The SPU unit --save-spu-local-store captures, when the run holds
+    /// several.
+    #[arg(long, value_name = "ID", requires = "save_spu_local_store")]
+    pub spu_unit: Option<u64>,
     /// One guest argv entry; repeat for more. Values may spell a flag.
     #[arg(long, value_name = "VALUE", allow_hyphen_values = true, action = clap::ArgAction::Append)]
     pub guest_arg: Vec<String>,

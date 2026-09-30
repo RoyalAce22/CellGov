@@ -6,5 +6,5 @@ mod report;
 mod stages;
 mod unmodelled;
 
-pub use options::{RunArtifacts, RunExecution, RunReporting};
+pub use options::{RunArtifacts, RunExecution, RunReporting, SpuLocalStoreRequest};
 pub use stages::{run_game, RunSummary};
