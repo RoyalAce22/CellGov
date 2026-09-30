@@ -1,4 +1,5 @@
 use super::*;
+use cellgov_spu::fuzz::generation_descriptors;
 
 #[test]
 fn the_final_aligned_local_store_pc_is_generatable() {

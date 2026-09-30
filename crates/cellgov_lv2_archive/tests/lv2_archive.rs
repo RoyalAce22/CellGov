@@ -821,15 +821,43 @@ fn committed_tables_load_and_reference_each_other() {
         })
         .collect();
     archive::check_references(&tables).unwrap_or_else(|e| panic!("{e}"));
+    // The check above covers the whole set. The loop checks each census
+    // against only the tables it references, directly or through them:
+    // the full set is about 70 MB of cells, too much to copy per census.
+    let mut targets = referenced_tables(&CENSUS, &tables);
     let kernels = committed_kernels();
     let pups = committed_pups();
     for file in census_files(&kernels, &pups) {
         let census = archive::parse(&CENSUS, &read(&dir.join(file)))
             .unwrap_or_else(|error| panic!("{error}"));
-        let mut with_census = tables.clone();
-        with_census.push(census);
-        archive::check_references(&with_census).unwrap_or_else(|error| panic!("{error}"));
+        targets.push(census);
+        archive::check_references(&targets).unwrap_or_else(|error| panic!("{error}"));
+        targets.pop();
     }
+}
+
+/// The tables `spec` references, and every table those reference in turn.
+fn referenced_tables(spec: &archive::TableSpec, tables: &[archive::Table]) -> Vec<archive::Table> {
+    let mut names: BTreeSet<&str> = BTreeSet::new();
+    let mut pending: Vec<&archive::TableSpec> = vec![spec];
+    while let Some(next) = pending.pop() {
+        for (target, _) in next.columns.iter().filter_map(|column| column.references) {
+            if names.insert(target) {
+                let table = tables
+                    .iter()
+                    .find(|table| table.spec.name == target)
+                    .unwrap_or_else(|| {
+                        panic!("{} references {target}, which is not committed", next.name)
+                    });
+                pending.push(table.spec);
+            }
+        }
+    }
+    tables
+        .iter()
+        .filter(|table| names.contains(table.spec.name))
+        .cloned()
+        .collect()
 }
 
 #[test]

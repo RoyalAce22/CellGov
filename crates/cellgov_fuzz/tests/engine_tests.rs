@@ -403,46 +403,35 @@ fn dependency_chain_metrics_require_two_generated_consumers() {
     assert!(dependency_cases < 192);
 }
 
-#[test]
-fn structured_state_bias_reaches_effect_classes_with_named_preconditions() {
-    // The generator draws kinds uniformly, so the case count grows with the
-    // number of SPU descriptors. Each kind then keeps the same expected
-    // number of draws. A put needs all of these:
-    // - a wrch kind
-    // - the MFC_Cmd channel
-    // - a put command
-    // About one case in 128 per kind meets them and enqueues, so 768 per
-    // kind expects six.
-    let spu_kinds = cellgov_spu::fuzz::generation_descriptors().len() as u64;
-    let structured = FuzzConfig {
+/// Cases each fixed-size state-bias campaign runs. At this seed the
+/// campaigns reach every PPU effect class and the SPU mailbox pop within
+/// 256 cases, so 4096 leaves a sixteenfold margin. The count does not
+/// grow with the descriptor registry.
+const STATE_BIAS_CASES: u64 = 4_096;
+
+fn state_bias_config(strategy: GenerationStrategy, count: u64) -> FuzzConfig {
+    FuzzConfig {
+        strategy,
         schedule: CampaignSchedule {
-            cases: CaseRange {
-                first: 0,
-                count: spu_kinds * 768,
-            },
+            cases: CaseRange { first: 0, count },
             ..CampaignSchedule::default()
         },
         ..small_config()
-    };
-    let raw = FuzzConfig {
-        strategy: GenerationStrategy::RawWords,
-        ..structured
-    };
-    let ppu_run = ppu::run_instructions(structured);
-    let spu_run = spu::run_instructions(structured);
-    let raw_ppu = ppu::run_instructions(raw);
-    let raw_spu = spu::run_instructions(raw);
-
-    for feature in [CaseFeature::MappedMemory, CaseFeature::Reservation] {
-        assert!(ppu_run.report.case_features.contains_key(&feature));
-        assert!(spu_run.report.case_features.contains_key(&feature));
-        assert!(!raw_ppu.report.case_features.contains_key(&feature));
-        assert!(!raw_spu.report.case_features.contains_key(&feature));
     }
-    assert!(spu_run
-        .report
-        .case_features
-        .contains_key(&CaseFeature::ChannelState));
+}
+
+#[test]
+fn structured_ppu_state_bias_reaches_its_effect_classes() {
+    let run = ppu::run_instructions(state_bias_config(
+        GenerationStrategy::Structured,
+        STATE_BIAS_CASES,
+    ));
+    for feature in [CaseFeature::MappedMemory, CaseFeature::Reservation] {
+        assert!(
+            run.report.case_features.contains_key(&feature),
+            "{feature:?}"
+        );
+    }
     for effect in [
         EffectKind::SharedReadIntent,
         EffectKind::SharedWriteIntent,
@@ -450,17 +439,76 @@ fn structured_state_bias_reaches_effect_classes_with_named_preconditions() {
         EffectKind::ClockRead,
     ] {
         assert!(
-            ppu_run.report.effect_classes.contains_key(&effect),
+            run.report.effect_classes.contains_key(&effect),
             "structured PPU campaign missed {effect:?}"
         );
     }
-    for effect in [
-        EffectKind::MailboxPop,
-        EffectKind::DmaEnqueue,
-        EffectKind::ConditionalStore,
+}
+
+#[test]
+fn structured_spu_state_bias_reaches_channel_state_and_a_mailbox_pop() {
+    let run = spu::run_instructions(state_bias_config(
+        GenerationStrategy::Structured,
+        STATE_BIAS_CASES,
+    ));
+    for feature in [
+        CaseFeature::MappedMemory,
+        CaseFeature::Reservation,
+        CaseFeature::ChannelState,
     ] {
         assert!(
-            spu_run.report.effect_classes.contains_key(&effect),
+            run.report.case_features.contains_key(&feature),
+            "{feature:?}"
+        );
+    }
+    assert!(
+        run.report
+            .effect_classes
+            .contains_key(&EffectKind::MailboxPop),
+        "structured SPU campaign missed MailboxPop"
+    );
+}
+
+#[test]
+fn raw_words_carry_no_state_bias_feature() {
+    let raw = state_bias_config(GenerationStrategy::RawWords, STATE_BIAS_CASES);
+    let ppu_run = ppu::run_instructions(raw);
+    let spu_run = spu::run_instructions(raw);
+    for feature in [CaseFeature::MappedMemory, CaseFeature::Reservation] {
+        assert!(
+            !ppu_run.report.case_features.contains_key(&feature),
+            "{feature:?}"
+        );
+        assert!(
+            !spu_run.report.case_features.contains_key(&feature),
+            "{feature:?}"
+        );
+    }
+}
+
+/// The SPU DMA put and conditional store need a scaled campaign, so this
+/// test runs on the scheduled fuzz workflow, not in the gate.
+///
+/// The generator draws kinds uniformly, so the case count grows with the
+/// number of SPU descriptors. Each kind then keeps the same expected
+/// number of draws. A put needs all of these:
+/// - a wrch kind
+/// - the MFC_Cmd channel
+/// - a put command
+///
+/// About one case in 128 per kind meets them and enqueues, so 768 per
+/// kind expects six. A conditional store is rarer still.
+#[test]
+#[ignore = "scales with the SPU descriptor count; the scheduled fuzz workflow runs it"]
+fn structured_spu_state_bias_reaches_a_dma_put_and_a_conditional_store() {
+    let spu_kinds = cellgov_spu::fuzz::generation_descriptors().len() as u64;
+    let run = spu::run_instructions(state_bias_config(
+        GenerationStrategy::Structured,
+        spu_kinds * 768,
+    ));
+    for effect in [EffectKind::DmaEnqueue, EffectKind::ConditionalStore] {
+        assert!(
+            run.report.effect_classes.contains_key(&effect),
             "structured SPU campaign missed {effect:?}"
         );
     }

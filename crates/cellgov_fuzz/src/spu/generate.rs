@@ -4,8 +4,8 @@
 use std::collections::BTreeSet;
 
 use cellgov_spu::fuzz::{
-    generation_descriptors, SpuGenerationDescriptor, SpuGenerationError, SpuOperandClass,
-    SpuSequenceFlow, SpuSequenceInteraction, SpuStateInput,
+    SpuGenerationDescriptor, SpuGenerationError, SpuOperandClass, SpuSequenceFlow,
+    SpuSequenceInteraction, SpuStateInput,
 };
 use cellgov_spu::state::{SpuState, SPU_LS_SIZE, SPU_REG_COUNT};
 use cellgov_sync::{ReservedLine, RESERVATION_LINE_BYTES};
@@ -13,6 +13,7 @@ use cellgov_sync::{ReservedLine, RESERVATION_LINE_BYTES};
 use crate::boundary::call_target;
 use crate::case::CaseFeature;
 use crate::error::{FuzzError, GeneratorError, InvariantError};
+use crate::registry::spu_descriptors;
 use crate::rng::Rng;
 use crate::{FuzzConfig, GenerationStrategy, ParameterStream};
 
@@ -42,7 +43,7 @@ pub(super) fn case_descriptors(
     config: FuzzConfig,
 ) -> Result<Vec<SpuGenerationDescriptor>, FuzzError> {
     match config.strategy {
-        GenerationStrategy::Structured => call_target(generation_descriptors).map_err(|_| {
+        GenerationStrategy::Structured => call_target(spu_descriptors).map_err(|_| {
             InvariantError::UnexpectedPanic {
                 stage: "SPU descriptor registry",
             }

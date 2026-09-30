@@ -1,7 +1,8 @@
 name: fuzz
 
-# The long fuzz runs: full-budget campaigns, bounded raw decoder scans and
-# repeated-trial evaluations. None of these belongs in the continuous
+# The long fuzz runs: full-budget campaigns, bounded raw decoder scans,
+# repeated-trial evaluations, and the engine reach tests whose campaigns
+# scale with the descriptor registry. None of these belongs in the continuous
 # build, which runs only the bounded smoke set from ci.sh. Every job here
 # reads the same library, result and artifact contracts as that set.
 on:
@@ -86,7 +87,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        job: [campaigns, raw, evaluate]
+        job: [campaigns, raw, evaluate, reach]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:

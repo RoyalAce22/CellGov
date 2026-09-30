@@ -5,9 +5,7 @@ use std::collections::BTreeSet;
 
 use cellgov_effects::Effect;
 use cellgov_ppu::exec::ExecuteVerdict;
-use cellgov_ppu::instruction::fuzz::{
-    generation_descriptors, PpuMetamorphicRelation, PpuOutcomeClass, PpuRelationRefusal,
-};
+use cellgov_ppu::instruction::fuzz::{PpuMetamorphicRelation, PpuOutcomeClass, PpuRelationRefusal};
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::observation::PpuObservationComponent;
 use cellgov_ppu::state::PpuState;
@@ -25,6 +23,7 @@ use super::record::{guarded_run, record, record_target_panic};
 use crate::boundary::call_target;
 use crate::case::CaseEligibility;
 use crate::error::{FuzzError, InvariantError};
+use crate::registry::ppu_descriptors;
 use crate::report::{
     CheckIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
     InstructionIdentity, OutcomeIdentity, SemanticFingerprint,
@@ -75,23 +74,21 @@ fn run_instructions_inner(
     config.validate(None)?;
     let iterations = config.case_indices()?;
     let descriptors = match (config.strategy, iterations.clone().next()) {
-        (GenerationStrategy::Structured, Some(first)) => {
-            match call_target(generation_descriptors) {
-                Ok(descriptors) => descriptors,
-                Err(payload) => {
-                    report.considered()?;
-                    record_target_panic(
-                        report,
-                        CheckIdentity::PpuDecoder,
-                        None,
-                        Vec::new(),
-                        first,
-                        payload,
-                    )?;
-                    return Ok(());
-                }
+        (GenerationStrategy::Structured, Some(first)) => match call_target(ppu_descriptors) {
+            Ok(descriptors) => descriptors,
+            Err(payload) => {
+                report.considered()?;
+                record_target_panic(
+                    report,
+                    CheckIdentity::PpuDecoder,
+                    None,
+                    Vec::new(),
+                    first,
+                    payload,
+                )?;
+                return Ok(());
             }
-        }
+        },
         (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
     };
     for iteration in iterations {

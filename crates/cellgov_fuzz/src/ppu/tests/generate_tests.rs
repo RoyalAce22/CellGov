@@ -1,5 +1,5 @@
 use super::*;
-use cellgov_ppu::instruction::fuzz::{PpuFuzzKind, PpuSequenceDependency};
+use cellgov_ppu::instruction::fuzz::{generation_descriptors, PpuFuzzKind, PpuSequenceDependency};
 use cellgov_ppu::instruction::PpuInstructionKind;
 
 use crate::ppu::execute::run_once;

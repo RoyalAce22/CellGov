@@ -1,5 +1,5 @@
 use super::*;
-use cellgov_ppu::instruction::fuzz::PpuFuzzKind;
+use cellgov_ppu::instruction::fuzz::{generation_descriptors, PpuFuzzKind};
 use cellgov_ppu::instruction::PpuInstructionKind;
 
 use crate::campaign::{CampaignSchedule, CaseRange};

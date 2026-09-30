@@ -5,7 +5,6 @@ use std::cell::Cell;
 use std::collections::BTreeSet;
 
 use cellgov_effects::Effect;
-use cellgov_ppu::instruction::fuzz::generation_descriptors;
 
 use super::assess::assess_sequence_case;
 use super::execute::{
@@ -20,6 +19,7 @@ use super::record::{guarded_run, record, record_target_panic};
 use crate::boundary::call_target;
 use crate::case::CaseEligibility;
 use crate::error::{FuzzError, InvariantError};
+use crate::registry::ppu_descriptors;
 use crate::report::{
     CheckIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
     SemanticFingerprint,
@@ -84,23 +84,21 @@ fn run_sequences_inner(
     config.validate(Some(crate::MAX_SEQUENCE_WORDS))?;
     let iterations = config.case_indices()?;
     let descriptors = match (config.strategy, iterations.clone().next()) {
-        (GenerationStrategy::Structured, Some(first)) => {
-            match call_target(generation_descriptors) {
-                Ok(descriptors) => descriptors,
-                Err(payload) => {
-                    report.considered()?;
-                    record_target_panic(
-                        report,
-                        CheckIdentity::PpuDecoder,
-                        None,
-                        Vec::new(),
-                        first,
-                        payload,
-                    )?;
-                    return Ok(());
-                }
+        (GenerationStrategy::Structured, Some(first)) => match call_target(ppu_descriptors) {
+            Ok(descriptors) => descriptors,
+            Err(payload) => {
+                report.considered()?;
+                record_target_panic(
+                    report,
+                    CheckIdentity::PpuDecoder,
+                    None,
+                    Vec::new(),
+                    first,
+                    payload,
+                )?;
+                return Ok(());
             }
-        }
+        },
         (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
     };
     for iteration in iterations {

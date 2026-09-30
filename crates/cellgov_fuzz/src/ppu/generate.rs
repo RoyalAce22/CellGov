@@ -4,8 +4,7 @@
 use std::collections::BTreeSet;
 
 use cellgov_ppu::instruction::fuzz::{
-    generation_descriptors, PpuGenerationDescriptor, PpuGenerationError, PpuOperandClass,
-    PpuSequenceClass, PpuSequenceFlow,
+    PpuGenerationDescriptor, PpuGenerationError, PpuOperandClass, PpuSequenceClass, PpuSequenceFlow,
 };
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::state::PpuState;
@@ -14,6 +13,7 @@ use cellgov_sync::ReservedLine;
 use crate::boundary::call_target;
 use crate::case::CaseFeature;
 use crate::error::{FuzzError, GeneratorError, InvariantError};
+use crate::registry::ppu_descriptors;
 use crate::rng::Rng;
 use crate::{FuzzConfig, GenerationStrategy, ParameterStream};
 
@@ -44,7 +44,7 @@ pub(super) fn case_descriptors(
     config: FuzzConfig,
 ) -> Result<Vec<PpuGenerationDescriptor>, FuzzError> {
     match config.strategy {
-        GenerationStrategy::Structured => call_target(generation_descriptors).map_err(|_| {
+        GenerationStrategy::Structured => call_target(ppu_descriptors).map_err(|_| {
             InvariantError::UnexpectedPanic {
                 stage: "PPU descriptor registry",
             }

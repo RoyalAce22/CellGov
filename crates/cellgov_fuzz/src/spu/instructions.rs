@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 
 use cellgov_effects::Effect;
 use cellgov_spu::fuzz::{
-    encoding_execution_is_supported, encoding_has_undefined_operands, generation_descriptors,
-    SpuFuzzDescriptor, SpuMetamorphicRelation, SpuOutcomeClass, SpuRelationRefusal,
+    encoding_execution_is_supported, encoding_has_undefined_operands, SpuFuzzDescriptor,
+    SpuMetamorphicRelation, SpuOutcomeClass, SpuRelationRefusal,
 };
 use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation, SpuObservationComponent};
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState};
@@ -23,6 +23,7 @@ use super::record::{guarded_run, record, record_target_panic};
 use crate::boundary::call_target;
 use crate::case::CaseEligibility;
 use crate::error::{FuzzError, InvariantError};
+use crate::registry::spu_descriptors;
 use crate::report::{
     CheckIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
     InstructionIdentity, SemanticFingerprint,
@@ -73,23 +74,21 @@ fn run_instructions_inner(
     config.validate(None)?;
     let iterations = config.case_indices()?;
     let descriptors = match (config.strategy, iterations.clone().next()) {
-        (GenerationStrategy::Structured, Some(first)) => {
-            match call_target(generation_descriptors) {
-                Ok(descriptors) => descriptors,
-                Err(payload) => {
-                    report.considered()?;
-                    record_target_panic(
-                        report,
-                        CheckIdentity::SpuDecoder,
-                        None,
-                        Vec::new(),
-                        first,
-                        payload,
-                    )?;
-                    return Ok(());
-                }
+        (GenerationStrategy::Structured, Some(first)) => match call_target(spu_descriptors) {
+            Ok(descriptors) => descriptors,
+            Err(payload) => {
+                report.considered()?;
+                record_target_panic(
+                    report,
+                    CheckIdentity::SpuDecoder,
+                    None,
+                    Vec::new(),
+                    first,
+                    payload,
+                )?;
+                return Ok(());
             }
-        }
+        },
         (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
     };
     for iteration in iterations {

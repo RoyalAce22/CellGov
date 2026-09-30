@@ -602,14 +602,17 @@ fn comparisons_refuse_unequal_engines_budgets_trial_counts_and_incomplete_result
 }
 
 #[test]
-fn seeded_defects_populate_findings_time_to_defect_and_reduction_cost() {
-    // A small budget: every seeded case is a finding, and each one reduces.
+fn a_reduction_request_records_its_cost_on_every_trial() {
+    // Each reduction step is a whole one-case run, so this plan keeps to
+    // two trials of four cases: enough for a finding in each, and for the
+    // clean run's cost to read zero.
     let plan = EvaluationPlan {
-        budget: TrialBudget { cases: 8 },
+        budget: TrialBudget { cases: 4 },
         reduction: Some(ReductionRequest {
             policy: ReductionPolicy::Deterministic,
             budget: 24,
         }),
+        seeds: vec![FIRST_SEED, FIRST_SEED + 1],
         ..plan(FuzzTarget::PpuInstruction, GenerationStrategy::Structured)
     };
     let clean = results(plan.clone());
@@ -623,6 +626,35 @@ fn seeded_defects_populate_findings_time_to_defect_and_reduction_cost() {
             words_before: 0,
             words_after: 0,
         })));
+
+    let _guard = seed(SeededDefect::IllegalOutcome);
+    let seeded = results(plan);
+    for trial in &seeded.trials {
+        let cost = trial.reduction.expect("reduction requested");
+        assert!(cost.findings > 0);
+        assert_eq!(cost.reduced + cost.irreducible + cost.failed, cost.findings);
+        assert!(cost.evaluations >= cost.findings);
+        // An instruction finding reduces one case word, and no shrinker drops
+        // a lone word: every finished finding counts one word on each side.
+        assert_eq!(cost.words_before, cost.findings);
+        assert_eq!(cost.words_after, cost.findings);
+    }
+    assert_eq!(
+        distribution(&seeded, Metric::ReductionEvaluations)
+            .samples
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn seeded_defects_populate_findings_and_time_to_defect() {
+    // A small budget: every seeded case is a finding.
+    let plan = EvaluationPlan {
+        budget: TrialBudget { cases: 8 },
+        ..plan(FuzzTarget::PpuInstruction, GenerationStrategy::Structured)
+    };
+    let clean = results(plan.clone());
     assert!(!clean
         .summary
         .distributions
@@ -635,20 +667,11 @@ fn seeded_defects_populate_findings_time_to_defect_and_reduction_cost() {
         assert!(trial.finding_total() > 0);
         assert!(trial.unique_fingerprints > 0);
         assert!(trial.first_finding_offset.is_some_and(|offset| offset < 8));
-        let cost = trial.reduction.expect("reduction requested");
-        assert!(cost.findings > 0);
-        assert_eq!(cost.reduced + cost.irreducible + cost.failed, cost.findings);
-        assert!(cost.evaluations >= cost.findings);
-        // An instruction finding reduces one case word, and no shrinker drops
-        // a lone word: every finished finding counts one word on each side.
-        assert_eq!(cost.words_before, cost.findings);
-        assert_eq!(cost.words_after, cost.findings);
     }
     for metric in [
         Metric::Findings,
         Metric::UniqueFingerprints,
         Metric::FirstFindingOffset,
-        Metric::ReductionEvaluations,
     ] {
         assert_eq!(
             distribution(&seeded, metric).samples.len(),

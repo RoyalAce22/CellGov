@@ -51,6 +51,13 @@ evaluate() {
     done
 }
 
+# The engine's reach claims whose campaigns scale with the descriptor
+# registry: too long for the continuous build, so they are ignored there
+# and run here.
+reach() {
+    cargo test --release -p cellgov_fuzz --locked --test engine_tests -- --ignored
+}
+
 smoke() {
     fresh "$out/smoke"
     cellgov dev fuzz smoke --artifacts-dir "$out/smoke" --regressions "$regressions"
@@ -79,9 +86,10 @@ case "${1:-}" in
     campaigns) campaigns ;;
     raw) raw ;;
     evaluate) evaluate ;;
+    reach) reach ;;
     smoke) smoke ;;
     *)
-        echo "usage: $0 {campaigns|raw|evaluate|smoke|outcome <job> <status> <artifact>}" >&2
+        echo "usage: $0 {campaigns|raw|evaluate|reach|smoke|outcome <job> <status> <artifact>}" >&2
         exit 2
         ;;
 esac

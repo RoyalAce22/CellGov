@@ -30,6 +30,7 @@ mod case;
 mod config;
 mod error;
 mod parameters;
+mod registry;
 mod retention;
 mod rng;
 mod seeded;
