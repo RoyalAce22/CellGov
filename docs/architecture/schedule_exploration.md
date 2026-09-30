@@ -116,7 +116,7 @@ Compare each number against zero, not against the other. The
 backtrack-set search claims no class count in any case, so its number
 reports cover given up beside a count it never held.
 
-[`exhaustive_cover`](../../crates/cellgov_explore/tests/exhaustive_cover.rs)
+[`exhaustive_cover`](../../crates/cellgov_explore/tests/it/exhaustive_cover.rs)
 walks the choice tree of a small workload and finds both committed
 memories it can reach. It compares the search against them: the
 search reaches both, reports no count, and reports the drops that

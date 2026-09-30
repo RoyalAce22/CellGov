@@ -2,7 +2,7 @@
 # Build the spu_float_edges microtest.
 #
 # spu/cases.S and cases.h are generated from cases.tsv by the ignored
-# `regenerate` test in crates/cellgov_spu/tests/spu_float_edges.rs; run it
+# `regenerate` test in crates/cellgov_spu/tests/it/spu_float_edges.rs; run it
 # after editing cases.tsv, then build.
 #
 # Requirements -- any environment providing:

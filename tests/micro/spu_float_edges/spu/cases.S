@@ -1,5 +1,5 @@
 # Generated from ../cases.tsv by the regenerate test in
-# crates/cellgov_spu/tests/spu_float_edges.rs. Do not edit.
+# crates/cellgov_spu/tests/it/spu_float_edges.rs. Do not edit.
 	.data
 	.align 4
 inputs:

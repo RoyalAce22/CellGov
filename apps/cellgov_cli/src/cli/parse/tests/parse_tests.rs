@@ -451,7 +451,7 @@ fn a_run_count_that_is_not_a_decimal_is_refused() {
 
 /// Both bench commands share `BenchArgs`, so clap parses these on the
 /// set. `boot_cmd::bench_boot` refuses them, and
-/// `tests/exit_code_contract.rs` covers that refusal.
+/// `tests/it/exit_code_contract.rs` covers that refusal.
 #[test]
 fn the_child_only_flags_still_parse_on_the_set() {
     assert!(parse(&[

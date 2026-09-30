@@ -31,7 +31,7 @@ Each name matches a directory under `tests/micro/`. That directory's
 | Consumer                                                       | Scenarios         |
 | -------------------------------------------------------------- | ----------------- |
 | `crates/cellgov_spu/src/tests/spu_tests.rs`                    | all but the last  |
-| `crates/cellgov_spu/tests/spu_float_edges.rs`                  | `spu_float_edges` |
+| `crates/cellgov_spu/tests/it/spu_float_edges.rs`               | `spu_float_edges` |
 | `crates/cellgov_ppu/src/tests/ppu_tests.rs`                    | by microtest name |
 | `crates/cellgov_compare/src/tests/baseline_tests.rs`           | `spu_fixed_value` |
 | `cellgov diff compare <manifest.toml> --observations-dir <dir>` | any               |

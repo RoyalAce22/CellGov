@@ -6,7 +6,7 @@ use cellgov_fuzz::ppu_reference::{
     PpuReferenceError, PpuReferenceFieldStatus,
 };
 
-const LI_REFERENCE: &str = include_str!("fixtures/ppu_reference/li_r3_7_v1.json");
+const LI_REFERENCE: &str = include_str!("../fixtures/ppu_reference/li_r3_7_v1.json");
 
 #[test]
 fn a_committed_documented_vector_replays_offline_on_every_path() {

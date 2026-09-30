@@ -199,7 +199,7 @@ fn program(cases: &[Case]) -> String {
     }
     format!(
         "# Generated from ../cases.tsv by the regenerate test in\n\
-         # crates/cellgov_spu/tests/spu_float_edges.rs. Do not edit.\n\
+         # crates/cellgov_spu/tests/it/spu_float_edges.rs. Do not edit.\n\
          \t.data\n\t.align 4\ninputs:\n{data}\
          \t.align 4\n\t.global results\nresults:\n\t.space {}\n\
          \t.text\n\t.align 3\n\t.global run_cases\nrun_cases:\n{text}\tbi $0\n",

@@ -1,7 +1,6 @@
 //! Self-contained structural checks for every declared title cell.
 
-#[path = "common/registry.rs"]
-mod registry;
+use crate::registry;
 
 use cellgov_compare::{BootSummary, GameIdentity};
 use registry::{boot_anchor_path, declared_cells};

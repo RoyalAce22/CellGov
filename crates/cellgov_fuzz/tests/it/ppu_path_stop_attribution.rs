@@ -81,7 +81,7 @@ fn a_seeded_fault_site_diagnostic_difference_names_the_exact_paths() {
 
 #[test]
 fn independent_reference_can_compare_represented_syscall_diagnostics() {
-    let fixture = include_str!("fixtures/ppu_reference/li_r3_7_v1.json");
+    let fixture = include_str!("../fixtures/ppu_reference/li_r3_7_v1.json");
     let mut reference = parse_reference_json(fixture).expect("committed reference must parse");
     let mut state = PpuState::new();
     state.set_lr(0xabcd);

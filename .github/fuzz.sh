@@ -55,7 +55,7 @@ evaluate() {
 # registry: too long for the continuous build, so they are ignored there
 # and run here.
 reach() {
-    cargo test --release -p cellgov_fuzz --locked --test engine_tests -- --ignored
+    cargo test --release -p cellgov_fuzz --locked --test it -- --ignored engine_tests::
 }
 
 smoke() {

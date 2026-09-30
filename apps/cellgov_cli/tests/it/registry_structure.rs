@@ -11,8 +11,7 @@
 //! A game title's other rows carry no gate: a manifest declares a cell
 //! for free.
 
-#[path = "common/registry.rs"]
-mod registry;
+use crate::registry;
 
 use cellgov_compare::{BootSummary, GameIdentity};
 use registry::{boot_anchor_path, firmware_exec_titles, titles, TitleUnderTest, BASE_GAME_VER};

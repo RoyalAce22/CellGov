@@ -11,7 +11,7 @@ use cellgov_spu::fuzz::{SpuMetamorphicRelation, SpuOutcomeClass};
 use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation};
 use cellgov_spu::state::SpuState;
 
-const VECTOR: &str = include_str!("fixtures/spu_reference_single/rotqbyi_12_v1.json");
+const VECTOR: &str = include_str!("../fixtures/spu_reference_single/rotqbyi_12_v1.json");
 
 #[test]
 fn a_common_mode_spu_defect_crosses_internal_checks_but_not_a_documented_vector() {

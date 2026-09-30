@@ -2,7 +2,7 @@
 name = "spu_float_edges"
 
 # The gate compares CellGov case by case against cases.tsv
-# (crates/cellgov_spu/tests/spu_float_edges.rs); this manifest drives the
+# (crates/cellgov_spu/tests/it/spu_float_edges.rs); this manifest drives the
 # RPCS3 peer run of the built program.
 
 [rpcs3]

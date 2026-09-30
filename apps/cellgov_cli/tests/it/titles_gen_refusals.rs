@@ -30,7 +30,7 @@ fn run_with_manifest(label: &str, manifest: &str) -> (Option<i32>, String) {
 
 #[test]
 fn table_breaking_manifest_text_exits_one_not_a_panic() {
-    let manifest = include_str!("../../../title_manifests/BCES00664.toml")
+    let manifest = include_str!("../../../../title_manifests/BCES00664.toml")
         .replace("WipEout HD Fury", "WipEout | HD Fury");
     let (code, stderr) = run_with_manifest("titles-gen-table-text", &manifest);
     assert_eq!(code, Some(1), "stderr:\n{stderr}");
@@ -39,8 +39,8 @@ fn table_breaking_manifest_text_exits_one_not_a_panic() {
 
 #[test]
 fn unsafe_content_id_exits_one_not_a_panic() {
-    let manifest =
-        include_str!("../../../title_manifests/BCES00664.toml").replace("BCES00664", "../outside");
+    let manifest = include_str!("../../../../title_manifests/BCES00664.toml")
+        .replace("BCES00664", "../outside");
     let (code, stderr) = run_with_manifest("titles-gen-page-name", &manifest);
     assert_eq!(code, Some(1), "stderr:\n{stderr}");
     assert!(stderr.contains("not a safe page name"), "{stderr}");

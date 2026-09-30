@@ -16,7 +16,7 @@ fn generated_sequence_replays_identically_but_external_authority_detects_common_
     let replay = replay_dependency_sequence(generated.clone()).expect("generated case must run");
     assert!(first_path_divergence(&replay.runs).is_none());
 
-    let fixture = include_str!("fixtures/ppu_reference/li_r3_7_v1.json");
+    let fixture = include_str!("../fixtures/ppu_reference/li_r3_7_v1.json");
     let mut reference = parse_reference_json(fixture).expect("committed fixture must parse");
     reference.case_id = "ppc-book1-addi-r3-alias-twice".to_string();
     reference.words = generated.words;
