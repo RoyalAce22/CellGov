@@ -310,6 +310,11 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Rotqbii
         | SpuInstructionKind::Rotqmbi
         | SpuInstructionKind::Rotqmbii
+        | SpuInstructionKind::Shlqby
+        | SpuInstructionKind::Shlqbybi
+        | SpuInstructionKind::Rotqbybi
+        | SpuInstructionKind::Rotqmby
+        | SpuInstructionKind::Rotqmbybi
         | SpuInstructionKind::Shl
         | SpuInstructionKind::Shli
         | SpuInstructionKind::Rotmi

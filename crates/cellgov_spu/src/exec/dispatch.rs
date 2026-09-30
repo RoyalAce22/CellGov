@@ -590,47 +590,23 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         }
         // [SPU-ISA p:125 s:6. Shift and Rotate Instructions] Shift Left Quadword by Bytes Immediate: shift register left by I7 bytes, fill zero.
         SpuInstruction::Shlqbyi { rt, ra, imm } => {
-            let shift = (imm & 0x1F) as usize;
-            let src = state.regs[ra as usize];
-            let mut dst = [0u8; 16];
-            for i in 0..16 {
-                dst[i] = if i + shift < 16 { src[i + shift] } else { 0 };
-            }
-            state.regs[rt as usize] = dst;
-            SpuStepOutcome::Continue
+            let s = u32::from(imm & 0x1F);
+            quad(state, rt, ra, |q| q.checked_shl(8 * s).unwrap_or(0))
         }
         // [SPU-ISA p:131 s:6. Shift and Rotate Instructions] Rotate Quadword by Bytes: byte rotate count taken from low nibble of RB preferred slot.
         SpuInstruction::Rotqby { rt, ra, rb } => {
-            let shift = (state.reg_word(rb) & 0xF) as usize;
-            let src = state.regs[ra as usize];
-            let mut dst = [0u8; 16];
-            for i in 0..16 {
-                dst[i] = src[(i + shift) & 0xF];
-            }
-            state.regs[rt as usize] = dst;
-            SpuStepOutcome::Continue
+            let s = state.reg_word_slot(rb, 0) & 0x0F;
+            quad(state, rt, ra, |q| q.rotate_left(8 * s))
         }
         // [SPU-ISA p:132 s:6. Shift and Rotate Instructions] Rotate Quadword by Bytes Immediate: byte rotate count is the low nibble of I7.
         SpuInstruction::Rotqbyi { rt, ra, imm } => {
-            let shift = (imm & 0xF) as usize;
-            let src = state.regs[ra as usize];
-            let mut dst = [0u8; 16];
-            for i in 0..16 {
-                dst[i] = src[(i + shift) & 0xF];
-            }
-            state.regs[rt as usize] = dst;
-            SpuStepOutcome::Continue
+            let s = u32::from(imm & 0x0F);
+            quad(state, rt, ra, |q| q.rotate_left(8 * s))
         }
         // [SPU-ISA p:141 s:6. Shift and Rotate Instructions] Rotate and Mask Quadword by Bytes Immediate: shift right by (0 - I7) mod 32 bytes with zero fill; a count of 16 or more clears the register.
         SpuInstruction::Rotqmbyi { rt, ra, imm } => {
-            let shift = negated_count(u32::from(imm), 0x1F) as usize;
-            let src = state.regs[ra as usize];
-            let mut dst = [0u8; 16];
-            for (i, byte) in dst.iter_mut().enumerate() {
-                *byte = if i >= shift { src[i - shift] } else { 0 };
-            }
-            state.regs[rt as usize] = dst;
-            SpuStepOutcome::Continue
+            let s = negated_count(u32::from(imm), 0x1F);
+            quad(state, rt, ra, |q| q.checked_shr(8 * s).unwrap_or(0))
         }
         // [SPU-ISA p:122 s:6. Shift and Rotate Instructions] Shift Left Quadword by Bits: count is bits 29 to 31 of RB's preferred slot.
         SpuInstruction::Shlqbi { rt, ra, rb } => {
@@ -661,6 +637,31 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         SpuInstruction::Rotqmbii { rt, ra, imm } => {
             let s = negated_count(u32::from(imm), 0x07);
             quad(state, rt, ra, |q| q >> s)
+        }
+        // [SPU-ISA p:124 s:6. Shift and Rotate Instructions] Shift Left Quadword by Bytes: count is bits 27 to 31 of RB's preferred slot; a count above 15 yields zero.
+        SpuInstruction::Shlqby { rt, ra, rb } => {
+            let s = state.reg_word_slot(rb, 0) & 0x1F;
+            quad(state, rt, ra, |q| q.checked_shl(8 * s).unwrap_or(0))
+        }
+        // [SPU-ISA p:126 s:6. Shift and Rotate Instructions] Shift Left Quadword by Bytes from Bit Shift Count: count is bits 24 to 28 of RB's preferred slot; a count above 15 yields zero.
+        SpuInstruction::Shlqbybi { rt, ra, rb } => {
+            let s = (state.reg_word_slot(rb, 0) >> 3) & 0x1F;
+            quad(state, rt, ra, |q| q.checked_shl(8 * s).unwrap_or(0))
+        }
+        // [SPU-ISA p:133 s:6. Shift and Rotate Instructions] Rotate Quadword by Bytes from Bit Shift Count: the RTL reads bits 24 to 28 and rotates modulo 16, so bits 25 to 28 decide.
+        SpuInstruction::Rotqbybi { rt, ra, rb } => {
+            let s = (state.reg_word_slot(rb, 0) >> 3) & 0x0F;
+            quad(state, rt, ra, |q| q.rotate_left(8 * s))
+        }
+        // [SPU-ISA p:140 s:6. Shift and Rotate Instructions] Rotate and Mask Quadword by Bytes: right shift by (0 - RB's preferred slot) mod 32 bytes; a count above 15 yields zero.
+        SpuInstruction::Rotqmby { rt, ra, rb } => {
+            let s = negated_count(state.reg_word_slot(rb, 0), 0x1F);
+            quad(state, rt, ra, |q| q.checked_shr(8 * s).unwrap_or(0))
+        }
+        // [SPU-ISA p:142 s:6. Shift and Rotate Instructions] Rotate and Mask Quadword Bytes from Bit Shift Count: right shift by (0 - bits 24 to 28 of RB's preferred slot) mod 32 bytes.
+        SpuInstruction::Rotqmbybi { rt, ra, rb } => {
+            let s = negated_count(state.reg_word_slot(rb, 0) >> 3, 0x1F);
+            quad(state, rt, ra, |q| q.checked_shr(8 * s).unwrap_or(0))
         }
         // [SPU-ISA p:120 s:6. Shift and Rotate Instructions] Shift Left Word: per-slot count is the low 6 bits of the RB slot; a count above 31 yields zero.
         SpuInstruction::Shl { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| {
@@ -1075,3 +1076,7 @@ mod word_rotate_tests;
 #[cfg(test)]
 #[path = "tests/quad_bit_shift_tests.rs"]
 mod quad_bit_shift_tests;
+
+#[cfg(test)]
+#[path = "tests/quad_byte_shift_tests.rs"]
+mod quad_byte_shift_tests;

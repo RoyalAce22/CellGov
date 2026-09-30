@@ -742,6 +742,53 @@ pub enum SpuInstruction {
         imm: u8,
     },
 
+    // [SPU-ISA p:124 s:6 Quadword byte shifts by register: Shlqby p.124, Shlqbybi p.126, Rotqbybi p.133, Rotqmby p.140, Rotqmbybi p.142]
+    /// Shift left quadword by bytes: `ra` shifted left by `rb`'s byte count, zero above 15.
+    Shlqby {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Count register; bits 27 to 31 of its preferred slot.
+        rb: u8,
+    },
+    /// Shift left quadword by bytes from bit shift count: `ra` shifted left by `rb`'s bit count divided by 8.
+    Shlqbybi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Count register; bits 24 to 28 of its preferred slot, a bit count divided by 8.
+        rb: u8,
+    },
+    /// Rotate quadword by bytes from bit shift count: `ra` rotated left by `rb`'s bit count divided by 8, modulo 16.
+    Rotqbybi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Count register; bits 24 to 28 of its preferred slot, a bit count divided by 8.
+        rb: u8,
+    },
+    /// Rotate and mask quadword by bytes: `ra` shifted right by `(0 - rb) & 0x1F` bytes, zero above 15.
+    Rotqmby {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Count register; bits 27 to 31 of its preferred slot.
+        rb: u8,
+    },
+    /// Rotate and mask quadword bytes from bit shift count: `ra` shifted right by `(0 - (rb >> 3)) & 0x1F` bytes.
+    Rotqmbybi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Count register; bits 24 to 28 of its preferred slot, a bit count divided by 8.
+        rb: u8,
+    },
+
     // [SPU-ISA p:120 s:6 Shift/Rotate Word: Shl p.120, Shli p.121, Rotmi p.139, Rotmai p.148]
     /// Shift left word: per slot, `rt[i] = ra[i] << (rb[i] & 0x3F)`, zero when the count exceeds 31.
     Shl {
