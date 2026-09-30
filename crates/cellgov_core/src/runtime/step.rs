@@ -68,6 +68,7 @@ impl Runtime {
         // lands their guest writes, so the clear runs ahead of it.
         self.last_host_writes.clear();
         self.last_lv2_effects.clear();
+        self.last_mailbox_read = None;
 
         let unit_id = match self.scheduler.select_next(&self.registry) {
             Some(id) => id,
@@ -133,6 +134,8 @@ impl Runtime {
         let reg_writes = self.registry.drain_register_writes(unit_id);
         let mut effects_buf = std::mem::take(&mut self.effects_buf);
         effects_buf.clear();
+        let mailbox_read = core::cell::Cell::new(false);
+        let own_mailbox = cellgov_sync::MailboxId::new(unit_id.raw());
         let (result, retired_hashes, retired_full) = {
             let unit_mem =
                 crate::runtime::spaces::resolve_unit_memory(&self.memory, &self.spaces, unit_id);
@@ -159,14 +162,15 @@ impl Runtime {
             // A unit's own inbound mailbox shares its id.
             let mailbox_occupancy = self
                 .mailbox_registry
-                .get(cellgov_sync::MailboxId::new(unit_id.raw()))
+                .get(own_mailbox)
                 .map_or(0, |mailbox| mailbox.len() as u32);
             let ctx = ctx
                 .with_reservations(unit_reservations)
                 .with_current_tick(self.time)
                 .with_trace_per_step(self.mode != RuntimeMode::FaultDriven)
                 .with_completed_dma_tags(completed_tags)
-                .with_mailbox_occupancy(mailbox_occupancy);
+                .with_mailbox_occupancy(mailbox_occupancy)
+                .with_mailbox_read_flag(&mailbox_read);
             let unit = self
                 .registry
                 .get_mut(unit_id)
@@ -182,6 +186,9 @@ impl Runtime {
             };
             (res, retired_hashes, retired_full)
         };
+        if mailbox_read.get() && self.mailbox_registry.get(own_mailbox).is_some() {
+            self.last_mailbox_read = Some(own_mailbox);
+        }
 
         // PpuStateHash and PpuStateFull pair by step index so the diff
         // printer matches a hash divergence with its full-state snapshot.

@@ -49,6 +49,10 @@ pub struct StepFootprint {
     pub mailbox_sends: Vec<MailboxId>,
     /// Mailboxes read from.
     pub mailbox_receives: Vec<MailboxId>,
+    /// Mailboxes whose occupancy the step read without taking a
+    /// message: the unit's own inbound mailbox, when the step asked for
+    /// its count. An SPU asks at the start of every step.
+    pub mailbox_counts: Vec<MailboxId>,
     /// Ranges a transfer writes at completion: its destination.
     ///
     /// The commit pipeline admits puts alone, so the destination is the
@@ -126,6 +130,7 @@ impl StepFootprint {
     /// the space each landed in, which need not be the stepping unit's
     /// (see `Runtime::last_host_writes`).
     pub fn note_commit(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
+        self.mailbox_counts.extend(rt.last_mailbox_read());
         self.note_inflight(rt);
         self.note_lv2_effects(rt);
         self.expand_aliases(rt, unit);
@@ -207,6 +212,7 @@ impl StepFootprint {
             shared_reads,
             mailbox_sends,
             mailbox_receives,
+            mailbox_counts,
             dma_writes,
             dma_reads,
             signal_updates,
@@ -223,6 +229,7 @@ impl StepFootprint {
         self.shared_reads.extend(shared_reads);
         self.mailbox_sends.extend(mailbox_sends);
         self.mailbox_receives.extend(mailbox_receives);
+        self.mailbox_counts.extend(mailbox_counts);
         self.dma_writes.extend(dma_writes);
         self.dma_reads.extend(dma_reads);
         self.signal_updates.extend(signal_updates);
@@ -409,6 +416,15 @@ impl StepFootprint {
             return true;
         }
 
+        // A send or a receive moves the occupancy a count read reports.
+        if ids_overlap(&self.mailbox_counts, &other.mailbox_sends)
+            || ids_overlap(&other.mailbox_counts, &self.mailbox_sends)
+            || ids_overlap(&self.mailbox_counts, &other.mailbox_receives)
+            || ids_overlap(&other.mailbox_counts, &self.mailbox_receives)
+        {
+            return true;
+        }
+
         // Two receive attempts on one mailbox are order-dependent with
         // no step sending: the pipeline pops the FIFO for whichever
         // commits first and blocks the other, so the swap decides which
@@ -496,6 +512,7 @@ impl StepFootprint {
             && self.shared_reads.is_empty()
             && self.mailbox_sends.is_empty()
             && self.mailbox_receives.is_empty()
+            && self.mailbox_counts.is_empty()
             && self.dma_writes.is_empty()
             && self.dma_reads.is_empty()
             && self.signal_updates.is_empty()

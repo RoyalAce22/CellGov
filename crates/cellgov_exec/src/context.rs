@@ -13,7 +13,9 @@ use cellgov_time::GuestTicks;
 /// Readonly view of runtime state passed into `run_until_yield`.
 ///
 /// Units publish changes only by emitting `Effect` packets in their
-/// step result; there is no mutable access through the context.
+/// step result. The one write through the context is the flag
+/// [`Self::mailbox_occupancy`] sets, which records a read and carries
+/// no guest state.
 #[derive(Debug, Clone, Copy)]
 pub struct ExecutionContext<'a> {
     memory: &'a GuestMemory,
@@ -29,6 +31,10 @@ pub struct ExecutionContext<'a> {
     trace_per_step: bool,
     completed_dma_tags: u32,
     mailbox_occupancy: u32,
+    /// Set when the unit reads [`Self::mailbox_occupancy`], so the
+    /// runtime knows the step read its mailbox. It records what the
+    /// unit observed and carries no guest state.
+    mailbox_read: Option<&'a core::cell::Cell<bool>>,
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -45,6 +51,7 @@ impl<'a> ExecutionContext<'a> {
             trace_per_step: false,
             completed_dma_tags: 0,
             mailbox_occupancy: 0,
+            mailbox_read: None,
         }
     }
 
@@ -62,6 +69,7 @@ impl<'a> ExecutionContext<'a> {
             trace_per_step: false,
             completed_dma_tags: 0,
             mailbox_occupancy: 0,
+            mailbox_read: None,
         }
     }
 
@@ -81,6 +89,7 @@ impl<'a> ExecutionContext<'a> {
             trace_per_step: false,
             completed_dma_tags: 0,
             mailbox_occupancy: 0,
+            mailbox_read: None,
         }
     }
 
@@ -104,6 +113,7 @@ impl<'a> ExecutionContext<'a> {
             trace_per_step: false,
             completed_dma_tags: 0,
             mailbox_occupancy: 0,
+            mailbox_read: None,
         }
     }
 
@@ -159,10 +169,23 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
+    /// Attach the flag [`Self::mailbox_occupancy`] sets when the unit
+    /// reads it.
+    #[inline]
+    pub const fn with_mailbox_read_flag(self, flag: &'a core::cell::Cell<bool>) -> Self {
+        Self {
+            mailbox_read: Some(flag),
+            ..self
+        }
+    }
+
     /// Messages waiting in the unit's own inbound mailbox at the start
     /// of the step.
     #[inline]
-    pub const fn mailbox_occupancy(&self) -> u32 {
+    pub fn mailbox_occupancy(&self) -> u32 {
+        if let Some(flag) = self.mailbox_read {
+            flag.set(true);
+        }
         self.mailbox_occupancy
     }
 

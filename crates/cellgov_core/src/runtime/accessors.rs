@@ -314,6 +314,19 @@ impl Runtime {
         &self.last_lv2_effects
     }
 
+    /// The mailbox whose occupancy the last step's unit read: its own
+    /// inbound mailbox, which shares its id, when the registry holds one
+    /// and the unit asked for its count. An SPU asks at the start of
+    /// every step.
+    ///
+    /// The order of this step and a send or receive on that mailbox
+    /// decides the count the unit saw, though the step emits no effect
+    /// naming the mailbox.
+    // [CBEA p:135 s:9.5.3] the SPU_RdInMbox count is the number of messages in the inbound mailbox.
+    pub fn last_mailbox_read(&self) -> Option<cellgov_sync::MailboxId> {
+        self.last_mailbox_read
+    }
+
     // -- scheduler --
 
     /// Replace the runtime scheduler.

@@ -59,6 +59,9 @@ pub struct Runtime {
     /// [`Runtime::step`] began, read through
     /// [`Runtime::last_lv2_effects`].
     pub(super) last_lv2_effects: Vec<Effect>,
+    /// The mailbox whose occupancy the last step's unit read; see
+    /// [`Runtime::last_mailbox_read`].
+    pub(super) last_mailbox_read: Option<cellgov_sync::MailboxId>,
     /// The first SPU thread-group error the host has not taken; see
     /// [`Runtime::take_spu_thread_failure`].
     pub(super) spu_thread_failure: Option<crate::runtime::spu_thread_stop::SpuThreadFailure>,

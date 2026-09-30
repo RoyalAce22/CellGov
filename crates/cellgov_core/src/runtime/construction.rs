@@ -71,6 +71,7 @@ impl Runtime {
             last_dma_completions: Vec::new(),
             last_host_writes: Vec::new(),
             last_lv2_effects: Vec::new(),
+            last_mailbox_read: None,
             spu_thread_failure: None,
             lv2_host: Lv2Host::new(),
             syscall_responses: SyscallResponseTable::new(),
