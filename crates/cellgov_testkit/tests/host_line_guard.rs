@@ -24,6 +24,7 @@ use proc_macro2::{TokenStream, TokenTree};
 const RUNTIME: &[&str] = &[
     "crates/cellgov_ps3_abi",
     "crates/cellgov_time",
+    "crates/cellgov_float",
     "crates/cellgov_event",
     "crates/cellgov_mem",
     "crates/cellgov_effects",

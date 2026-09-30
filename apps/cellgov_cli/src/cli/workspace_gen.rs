@@ -161,7 +161,7 @@ const LAYERS: &[(&str, &[&str])] = &[
     ("ABI", &["ps3_abi"]),
     (
         "Primitives",
-        &["time", "event", "mem", "dma", "sync", "effects"],
+        &["time", "float", "event", "mem", "dma", "sync", "effects"],
     ),
     ("Execution boundary", &["exec", "trace"]),
     ("Models and interpreters", &["lv2", "ppu", "spu"]),

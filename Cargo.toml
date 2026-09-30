@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/cellgov_ps3_abi",
     "crates/cellgov_time",
+    "crates/cellgov_float",
     "crates/cellgov_event",
     "crates/cellgov_mem",
     "crates/cellgov_effects",
@@ -37,6 +38,7 @@ exclude = ["fuzz"]
 default-members = [
     "crates/cellgov_ps3_abi",
     "crates/cellgov_time",
+    "crates/cellgov_float",
     "crates/cellgov_event",
     "crates/cellgov_mem",
     "crates/cellgov_effects",

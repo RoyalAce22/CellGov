@@ -307,6 +307,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "cellgov_float"
+version = "0.0.0"
+
+[[package]]
 name = "cellgov_fuzz"
 version = "0.0.0"
 dependencies = [
