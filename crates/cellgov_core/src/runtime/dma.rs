@@ -11,6 +11,7 @@ use cellgov_time::GuestTicks;
 use cellgov_trace::HostWriter;
 
 use super::spaces::AddressSpaceId;
+use super::spu_window::{window_target, WindowTarget};
 use super::Runtime;
 
 /// The fault a transfer raises when the queue reaches it, or `None`.
@@ -85,6 +86,10 @@ impl Runtime {
         if c.length() == 0 {
             return;
         }
+        if let Some(Ok(target)) = window_target(self.lv2_host.thread_groups(), c) {
+            self.land_in_window(c, target, payload);
+            return;
+        }
         if c.direction() == cellgov_dma::DmaDirection::Get {
             self.land_get(c);
             return;
@@ -135,6 +140,80 @@ impl Runtime {
         }
     }
 
+    /// Land a completed transfer whose effective address is in the SPU
+    /// thread window of its issuer's group.
+    ///
+    /// A put into a local store writes the bytes it carries; a get from
+    /// one reads the target's local store now. A put into a signal
+    /// register or the inbound mailbox is that problem-state write,
+    /// which wakes a target parked on it.
+    ///
+    /// [CBEA p:72 s:7.9.4] sndsig writes another SPU's signal-notification register through its effective address.
+    fn land_in_window(&mut self, c: &DmaCompletion, target: WindowTarget, payload: Option<&[u8]>) {
+        let landed = match (c.direction(), target) {
+            (cellgov_dma::DmaDirection::Get, WindowTarget::LocalStore { unit, lsa }) => {
+                // The destination is a local-store offset, below 2^32.
+                let into = c.destination().start().raw() as u32;
+                let len = c.length() as u32;
+                self.registry
+                    .get(unit)
+                    .ok_or(cellgov_exec::ProblemStateError::UnknownUnit)
+                    .and_then(|source| source.read_local_store(lsa, len))
+                    .and_then(|bytes| {
+                        self.registry
+                            .get_mut(c.issuer())
+                            .ok_or(cellgov_exec::ProblemStateError::UnknownUnit)?
+                            .land_local_store(into, &bytes)
+                    })
+            }
+            (cellgov_dma::DmaDirection::Get, _) => Ok(()),
+            (cellgov_dma::DmaDirection::Put, target) => {
+                let Some(bytes) = payload else {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.dma_window_put_unpayloaded",
+                        format_args!(
+                            "{:?}: a put into the SPU thread window carries no payload; \
+                             only an SPU queues one, and an SPU put always carries its bytes",
+                            c.issuer(),
+                        ),
+                    );
+                    return;
+                };
+                // A register put is 4 bytes; the commit refuses a payload
+                // of any other length than its destination.
+                let word = || {
+                    let mut value = [0; 4];
+                    for (slot, byte) in value.iter_mut().zip(bytes) {
+                        *slot = *byte;
+                    }
+                    u32::from_be_bytes(value)
+                };
+                match target {
+                    WindowTarget::LocalStore { unit, lsa } => self
+                        .registry
+                        .get_mut(unit)
+                        .ok_or(cellgov_exec::ProblemStateError::UnknownUnit)
+                        .and_then(|unit| unit.land_local_store(lsa, bytes)),
+                    WindowTarget::Signal { unit, register } => {
+                        self.write_unit_signal(unit, register, word())
+                    }
+                    WindowTarget::InboundMailbox { unit } => self.write_unit_in_mbox(unit, word()),
+                }
+            }
+        };
+        if let Err(err) = landed {
+            self.lv2_host.log_invariant_break(
+                "runtime.dma_window_unlanded",
+                format_args!(
+                    "{:?}: a completed MFC transfer of {} bytes into the SPU thread window \
+                     did not land ({err:?})",
+                    c.issuer(),
+                    c.length(),
+                ),
+            );
+        }
+    }
+
     /// Land a completed get: read its source now and write the bytes
     /// into the issuer's local store.
     ///
@@ -170,11 +249,12 @@ impl Runtime {
     /// Apply the DMA completions due now and record each refused command
     /// the queue reaches; returns the fired completions for the trace.
     pub(super) fn fire_dma_completions(&mut self) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
-        let memory = &self.memory;
+        let (memory, groups) = (&self.memory, self.lv2_host.thread_groups());
         let processed = self
             .dma_queue
-            .process_due_translating(self.time, |c, payloaded| {
-                translation_fault(memory, c, payloaded)
+            .process_due_translating(self.time, |c, payloaded| match window_target(groups, c) {
+                Some(target) => target.err(),
+                None => translation_fault(memory, c, payloaded),
             });
         for raised in processed.raised {
             self.record_mfc_exception(raised);
@@ -240,12 +320,15 @@ impl Runtime {
     /// suspends its issuer's queue, and the issuer's later transfers never
     /// land.
     pub fn drain_pending_dma(&mut self) {
-        let memory = &self.memory;
-        let processed = self
-            .dma_queue
-            .process_due_translating(GuestTicks::new(u64::MAX), |c, payloaded| {
-                translation_fault(memory, c, payloaded)
-            });
+        let (memory, groups) = (&self.memory, self.lv2_host.thread_groups());
+        let processed =
+            self.dma_queue
+                .process_due_translating(GuestTicks::new(u64::MAX), |c, payloaded| {
+                    match window_target(groups, c) {
+                        Some(target) => target.err(),
+                        None => translation_fault(memory, c, payloaded),
+                    }
+                });
         for raised in processed.raised {
             self.record_mfc_exception(raised);
         }

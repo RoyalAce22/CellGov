@@ -438,6 +438,14 @@ impl ThreadGroupTable {
         self.unit_to_group.get(unit_id).copied()
     }
 
+    /// The group of a registered SPU, finished or not.
+    pub fn group_of(&self, unit_id: UnitId) -> Option<u32> {
+        self.unit_to_group
+            .get(unit_id)
+            .or_else(|| self.finished_units.get(unit_id))
+            .copied()
+    }
+
     /// Thread-id lookup filtered to [`GroupState::Running`].
     ///
     /// Mailbox writes and other state-sensitive paths must use this

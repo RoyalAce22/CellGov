@@ -37,6 +37,7 @@ mod process_spawn;
 mod snapshot;
 mod spaces;
 mod spu_thread_stop;
+mod spu_window;
 mod state;
 mod state_hash;
 mod step;

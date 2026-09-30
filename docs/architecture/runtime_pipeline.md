@@ -72,7 +72,10 @@ nine-step deterministic loop:
    and stops after a stall-and-notify element until the SPU
    acknowledges the stall. A completing
    get reads its source then and lands the bytes in its issuer's local
-   store. A command whose opcode or parameters the MFC refuses holds
+   store. A transfer into the SPU thread window of its issuer's group
+   reaches the target thread instead: its local store, or, for a
+   4-byte put, a signal-notification register or its inbound mailbox;
+   any other access into the window faults. A command whose opcode or parameters the MFC refuses holds
    its slot too; when the queue reaches it, its issuer's queue suspends and the
    runtime records the MFC exception for the host to take. A DMA completion leaves the queue at fire time, and an
    SPU's tag group reads complete at its next step once none of its

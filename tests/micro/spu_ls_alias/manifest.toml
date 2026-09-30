@@ -1,0 +1,39 @@
+[test]
+name = "spu_ls_alias"
+
+[rpcs3]
+binary = "build/spu_ls_alias.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# 16-byte header (status, signal word, receiver slot, pad) + the 16
+# bytes the receiver found in its local store
+memory_regions = [
+  { name = "header", addr = 0, size = 16 },
+  { name = "received", addr = 16, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Build + run:
+#   docker run --rm #     -v "$(pwd)/tests/micro/spu_ls_alias:/src" #     -v "$(pwd)/tests/micro/common:/common" #     -e COMMON=/common ps3dev bash /src/build.sh
+#
+#   cargo run --release -p cellgov_cli -- boot run #     --title-manifest tests/micro/spu_ls_alias/manifest.toml #     --max-steps 1000000
+
+[cellgov.title]
+short_name = "spulsalias"
+display_name = "CellGov SPU thread window microtest"
+eboot_candidates = ["spu_ls_alias.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"

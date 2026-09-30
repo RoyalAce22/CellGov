@@ -232,6 +232,17 @@ pub trait ExecutionUnit {
         Err(crate::ProblemStateError::NoProblemState)
     }
 
+    /// Read `len` bytes of the unit's local store from `lsa`: the source
+    /// of another unit's MFC get through the unit's alias.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ProblemStateError::NoProblemState`] for a unit without a
+    /// local store.
+    fn read_local_store(&self, _lsa: u32, _len: u32) -> Result<Vec<u8>, crate::ProblemStateError> {
+        Err(crate::ProblemStateError::NoProblemState)
+    }
+
     /// An `SPU_RunCntl` stop request. `waiting` says the unit waits on a
     /// blocked channel. A stopped unit stays as it is.
     ///

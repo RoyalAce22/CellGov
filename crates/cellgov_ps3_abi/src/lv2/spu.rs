@@ -12,6 +12,23 @@ pub const IMAGE_PATH_MAX: usize = 256;
 /// [CBE-Handbook p:64 s:3.1.1] each SPE local store is 256 KB.
 pub const LS_SIZE: u32 = crate::hw::spu::SPU_LS_SIZE as u32;
 
+/// The effective-address window in which LV2 maps each thread of an SPU
+/// thread group: slot `n` takes `STRIDE` bytes from `BASE + n * STRIDE`,
+/// its local store first and its problem-state area at `PROBLEM_STATE`.
+///
+/// No public document gives this layout. The values are the ones the
+/// oracle's MFC transfer path decodes (SPUThread.cpp
+/// `spu_thread::do_dma_transfer`).
+pub mod thread_window {
+    /// The window's first effective address.
+    pub const BASE: u64 = 0xF000_0000;
+    /// The bytes each thread slot takes.
+    pub const STRIDE: u64 = 0x10_0000;
+    /// The offset of a slot's problem-state area; its local store is at
+    /// offset 0.
+    pub const PROBLEM_STATE: u64 = 0x4_0000;
+}
+
 /// The 16-byte `sys_spu_image` record `sys_spu_thread_initialize`
 /// reads: `type`, `entry_point`, `segs`, `nsegs`, each a big-endian
 /// 32-bit word.

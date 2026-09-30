@@ -379,6 +379,11 @@ impl ExecutionUnit for SpuExecutionUnit {
         Ok(())
     }
 
+    /// Each byte's address wraps by the limit register, as for a landing.
+    fn read_local_store(&self, lsa: u32, len: u32) -> Result<Vec<u8>, ProblemStateError> {
+        Ok(self.state.read_ls_wrapped(lsa, len))
+    }
+
     fn local_memory_hash(&self) -> Option<u64> {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&self.state.ls);

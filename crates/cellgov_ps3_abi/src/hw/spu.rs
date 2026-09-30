@@ -454,6 +454,18 @@ impl MfcCmd {
     }
 }
 
+/// `SPU_In_Mbox`'s offset in an SPE's problem-state area.
+///
+/// [CBEA p:99 s:8.6.2] SPU_In_Mbox is at offset x'0400C' of the SPE's problem-state area.
+pub const SPU_IN_MBOX_OFFSET: u32 = 0x0400C;
+/// `SPU_Sig_Notify_1`'s offset in an SPE's problem-state area.
+///
+/// [CBEA p:102 s:8.7.1] SPU_Sig_Notify_1 is at offset x'1400C' of the SPE's problem-state area.
+pub const SPU_SIG_NOTIFY_1_OFFSET: u32 = 0x1400C;
+/// `SPU_Sig_Notify_2`'s offset in an SPE's problem-state area.
+///
+/// [CBEA p:103 s:8.7.2] SPU_Sig_Notify_2 is at offset x'1C00C' of the SPE's problem-state area.
+pub const SPU_SIG_NOTIFY_2_OFFSET: u32 = 0x1C00C;
 /// SPU local store size in bytes (256 KiB).
 ///
 /// [CBE-Handbook p:64 s:3.1.1] Local Store is a 256 KB single-ported memory.

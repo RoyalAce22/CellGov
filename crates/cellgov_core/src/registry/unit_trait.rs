@@ -106,6 +106,14 @@ pub trait RegisteredUnit: 'static {
     /// As for [`ExecutionUnit::land_local_store`].
     fn land_local_store(&mut self, lsa: u32, bytes: &[u8]) -> Result<(), ProblemStateError>;
 
+    /// Read bytes of the unit's local store. See
+    /// [`ExecutionUnit::read_local_store`].
+    ///
+    /// # Errors
+    ///
+    /// As for [`ExecutionUnit::read_local_store`].
+    fn read_local_store(&self, lsa: u32, len: u32) -> Result<Vec<u8>, ProblemStateError>;
+
     /// An `SPU_RunCntl` stop request. See [`ExecutionUnit::request_stop`].
     ///
     /// # Errors
@@ -247,6 +255,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn land_local_store(&mut self, lsa: u32, bytes: &[u8]) -> Result<(), ProblemStateError> {
         ExecutionUnit::land_local_store(self, lsa, bytes)
+    }
+
+    #[inline]
+    fn read_local_store(&self, lsa: u32, len: u32) -> Result<Vec<u8>, ProblemStateError> {
+        ExecutionUnit::read_local_store(self, lsa, len)
     }
 
     #[inline]

@@ -72,6 +72,9 @@ const PPU_INCREMENTS: u32 = 64;
 /// `INCREMENTS_PER_THREAD` for the two-SPU atomic test.
 const SPU_INCREMENTS: u32 = 32;
 
+/// `SIGNAL_WORD` the SPU thread window test's sender signals.
+const SPU_ALIAS_SIGNAL_WORD: u32 = 0xC0DE_0001;
+
 /// `FLIP_STATUS_DONE` -- the terminal value of the flip-status mirror.
 const FLIP_STATUS_DONE: u32 = 0;
 
@@ -215,6 +218,21 @@ const CASES: &[Case] = &[
             ("final_counter", Exact(2 * SPU_INCREMENTS)),
             ("final_pad2", Exact(0)),
             ("final_pad3", Exact(0)),
+        ],
+    },
+    Case {
+        name: "spu_ls_alias",
+        max_steps: 1_000_000,
+        fields: &[
+            ("status", Exact(0)),
+            ("signal_word", Exact(SPU_ALIAS_SIGNAL_WORD)),
+            ("receiver_slot", Exact(1)),
+            ("pad", Exact(0)),
+            // The sender's buffer holds 0xA0 + i at byte i.
+            ("received0", Exact(0xA0A1_A2A3)),
+            ("received1", Exact(0xA4A5_A6A7)),
+            ("received2", Exact(0xA8A9_AAAB)),
+            ("received3", Exact(0xACAD_AEAF)),
         ],
     },
 ];
@@ -422,7 +440,7 @@ fn check_outcome(case: &Case, observation: &Observation) -> Option<String> {
 /// On a manifest that does not parse: silently classifying it as
 /// non-bootable is the same hole under a different cause.
 fn declares_a_cellgov_title(path: &std::path::Path, text: &str) -> bool {
-    let doc: toml::Value = text
+    let doc: toml::Table = text
         .parse()
         .unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
     match doc.get("cellgov") {

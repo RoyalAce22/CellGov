@@ -18,7 +18,7 @@ PS3 LV2 virtual-address layout:
 | 0xC0000000-0xCFFFFFFF      | 256 MB     | `rsx`          | `ReservedZeroReadable` (default) | Video / RSX local memory -- placeholder, reads zero and are counted                                                                                                      |
 | 0xD0000000-0xD00FFFFF      | 1 MB       | `stack`        | `ReadWrite`                      | Primary-thread stack (page-4K); matches `PROC_PARAM.primary_stacksize` typical for retail titles                                                                         |
 | 0xD0100000-0xD0FFFFFF      | 15 MB      | `child_stacks` | `ReadWrite`                      | Stack pool for PPU threads spawned by `sys_ppu_thread_create`                                                                                                            |
-| 0xE0000000-0xFFFFFFFF      | 512 MB     | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX                                                                                                                    |
+| 0xE0000000-0xFFFFFFFF      | 512 MB     | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX; an MFC transfer into its SPU thread window reaches the target thread, as the runtime pipeline describes           |
 
 The region map does not track `main`'s internal sub-layout; the
 region stays flat. Within it, `sys_memory_allocate` starts above
@@ -110,7 +110,7 @@ store does; a transfer can deliver the code a unit runs next. The
 fanout and the invalidation cover two writers, the committed store
 and the DMA landing. Atomic `ConditionalStore`
 through a shared view is unmodeled and refuses loudly. A DMA
-transfer resolves both its ends in space 0, so the fanout is the
+transfer outside the SPU thread window resolves both its ends in space 0, so the fanout is the
 only part of one that reaches another space. The RSX subsystem
 reads and mirrors space 0 only; deferred RSX effects never join a
 child-space commit batch.
