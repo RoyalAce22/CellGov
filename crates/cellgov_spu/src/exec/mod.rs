@@ -3,6 +3,7 @@
 
 mod channel;
 mod dispatch;
+mod estimate;
 mod float;
 mod lanes;
 mod ls;

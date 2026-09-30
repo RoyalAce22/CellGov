@@ -39,6 +39,45 @@ pub(super) fn single<const N: usize>(
     SpuStepOutcome::Continue
 }
 
+/// Applies `op` to each word slot of `ra`, writes the results to `rt`,
+/// and sets DBZ for each slot whose operand has a zero exponent.
+// [SPU-ISA p:215 s:9] and [SPU-ISA p:217 s:9]: a zero exponent flags divide by zero; [SPU-ISA p:196 s:9.1] frest and frsqest set DBZ only.
+pub(super) fn estimate(state: &mut SpuState, rt: u8, ra: u8, op: fn(u32) -> u32) -> SpuStepOutcome {
+    let a = words(state.regs[ra as usize]);
+    state.regs[rt as usize] = from_words(a.map(op));
+    state.fpscr_accumulate_dbz(a.map(|x| x >> 23 & 0xFF == 0));
+    SpuStepOutcome::Continue
+}
+
+/// `fi` on each word slot: RB's base less its step times RA's fraction,
+/// truncated to extended-range single precision.
+// [SPU-ISA p:219 s:9] RT = (-1)^S x (1.BaseFraction - 0.000StepFraction x Y) x 2^(BiasedExponent - 127), Y = 0.RA[13:31]; [SPU-ISA p:196 s:9.1] fi sets OVF, UNF and DIFF.
+pub(super) fn interpolate(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
+    let mut flags = [Flags::default(); 4];
+    let results = std::array::from_fn(|slot| {
+        let (y, packed_estimate) = (a[slot] & 0x7_FFFF, b[slot]);
+        let exponent = (packed_estimate >> 23 & 0xFF) as i32;
+        let base = packed_estimate >> 10 & 0x1FFF;
+        let step = packed_estimate & 0x3FF;
+        // In units of 2^-32: 1.BaseFraction is (2^13 + base) x 2^19 and
+        // 0.000StepFraction x Y is step x y, so the value is exact.
+        let value = (u128::from(0x2000 | base) << 19) - u128::from(step) * u128::from(y);
+        let exact = Exact::new(packed_estimate >> 31 == 1, value, exponent - 127 - 32)
+            .expect("invariant: the interpolated significand is at most 33 bits wide");
+        let packed = round_pack::<Binary32>(Policy::SpuExtended, Rounding::TowardZero, exact);
+        // An RB exponent of 255 is an input with exponent 255.
+        flags[slot] = packed.flags.or(Flags {
+            diff: exponent == 255,
+            ..Flags::default()
+        });
+        packed.bits as u32
+    });
+    state.regs[rt as usize] = from_words(results);
+    state.fpscr_accumulate_single(flags);
+    SpuStepOutcome::Continue
+}
+
 /// `a + b` for two exact operands: decoded single-precision values or
 /// one of their products.
 pub(super) fn sum(a: Exact, b: Exact) -> Exact {

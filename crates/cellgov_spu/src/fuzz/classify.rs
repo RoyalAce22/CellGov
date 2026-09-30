@@ -408,6 +408,9 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Fm
         | SpuInstructionKind::Fma
         | SpuInstructionKind::Fms
-        | SpuInstructionKind::Fnms => {}
+        | SpuInstructionKind::Fnms
+        | SpuInstructionKind::Frest
+        | SpuInstructionKind::Frsqest
+        | SpuInstructionKind::Fi => {}
     }
 }

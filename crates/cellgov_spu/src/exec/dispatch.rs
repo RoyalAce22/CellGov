@@ -1106,6 +1106,16 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                 super::float::sum(c, super::float::product(a, b).negated())
             })
         }
+        // [SPU-ISA p:215 s:9. Floating-Point Instructions] Floating Reciprocal Estimate: a base and step for 1/RA per slot.
+        SpuInstruction::Frest { rt, ra } => {
+            super::float::estimate(state, rt, ra, super::estimate::frest)
+        }
+        // [SPU-ISA p:217 s:9. Floating-Point Instructions] Floating Reciprocal Absolute Square Root Estimate: a base and step for 1/sqrt(abs(RA)) per slot.
+        SpuInstruction::Frsqest { rt, ra } => {
+            super::float::estimate(state, rt, ra, super::estimate::frsqest)
+        }
+        // [SPU-ISA p:219 s:9. Floating-Point Instructions] Floating Interpolate: RB's base less its step times 0.RA[13:31] per slot.
+        SpuInstruction::Fi { rt, ra, rb } => super::float::interpolate(state, rt, ra, rb),
         // [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
         SpuInstruction::Fscrwr { ra } => {
             state.fpscr = u128::from_be_bytes(state.regs[ra as usize])
@@ -1262,3 +1272,7 @@ mod single_float_tests;
 #[cfg(test)]
 #[path = "tests/fused_float_tests.rs"]
 mod fused_float_tests;
+
+#[cfg(test)]
+#[path = "tests/estimate_tests.rs"]
+mod estimate_tests;

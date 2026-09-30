@@ -1490,6 +1490,32 @@ pub enum SpuInstruction {
         /// Source register C, the minuend.
         rc: u8,
     },
+    // [SPU-ISA p:215 s:9 Estimates: Frest p.215, Frsqest p.217, Fi p.219]
+    /// Floating reciprocal estimate: per slot, a base and step for `1 / ra`.
+    Frest {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// Floating reciprocal absolute square root estimate: per slot, a base
+    /// and step for `1 / sqrt(abs(ra))`.
+    Frsqest {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// Floating interpolate: per slot, RB's base less its step times the
+    /// fraction in RA's bits 13:31.
+    Fi {
+        /// Destination register.
+        rt: u8,
+        /// Source register A, the interpolation fraction.
+        ra: u8,
+        /// Source register B, the base and step.
+        rb: u8,
+    },
     // [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
     /// Write RA's defined bits into the FPSCR; RT is a false target.
     Fscrwr {
