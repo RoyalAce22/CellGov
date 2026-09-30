@@ -132,7 +132,7 @@ fn a_refused_getllar_records_its_line() {
 /// parameter and the high word stays.
 #[test]
 fn a_command_the_model_does_not_run_keeps_the_high_word() {
-    let mut unit = unit_issuing_twice(cellgov_ps3_abi::hw::spu::MFC_SDCRZ, 1);
+    let mut unit = unit_issuing_twice(cellgov_ps3_abi::hw::spu::MFC_PUTLLUC, 1);
     assert_eq!(step(&mut unit).0, YieldReason::Fault);
     assert_eq!(unit.state().channels.mfc_eah, 1);
 }

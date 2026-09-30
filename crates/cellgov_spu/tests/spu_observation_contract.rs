@@ -159,7 +159,7 @@ fn conditional_store_fault_keeps_its_reservation_until_commit() {
     let mut initial = SpuState::new();
     initial.reservation = Some(cellgov_sync::ReservedLine::containing(0));
     // An opcode the model does not execute faults the command.
-    initial.set_reg_word_splat(3, cellgov_ps3_abi::hw::spu::MFC_SDCRZ);
+    initial.set_reg_word_splat(3, cellgov_ps3_abi::hw::spu::MFC_PUTLLUC);
     let instruction = SpuInstruction::Wrch {
         channel: cellgov_ps3_abi::hw::spu::MFC_CMD,
         rt: 3,

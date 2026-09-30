@@ -350,10 +350,29 @@ pub const MFC_BARRIER: u32 = 0xC0;
 pub const MFC_EIEIO: u32 = 0xC8;
 /// The mfcsync command.
 pub const MFC_SYNC: u32 = 0xCC;
-/// SL1 storage control: write zeros over a range of effective addresses.
+/// SL1 storage control: touch a range of effective addresses, a hint
+/// for a later get.
 ///
-/// [CBEA p:307 s:Appendix D Table D-3] sdcrz opcode x'0089', supported on the proxy queue and the SPU queue.
+/// [CBEA p:307 s:Appendix D Table D-3] sdcrt x'0080', sdcrtst x'0081', sdcrz x'0089', sdcrst x'008D', sdcrf x'008F', each supported on the proxy queue and the SPU queue.
+pub const MFC_SDCRT: u32 = 0x80;
+/// SL1 storage control: touch a range for store, a hint for a later put.
+pub const MFC_SDCRTST: u32 = 0x81;
+/// SL1 storage control: write zeros over a range of effective addresses.
 pub const MFC_SDCRZ: u32 = 0x89;
+/// SL1 storage control: write the modified blocks of a range to main
+/// storage.
+pub const MFC_SDCRST: u32 = 0x8D;
+/// SL1 storage control: write the modified blocks of a range to main
+/// storage and invalidate them.
+pub const MFC_SDCRF: u32 = 0x8F;
+/// Bytes in the data block an SL1 storage control command acts on.
+///
+/// The CBE has no SL1. The commands that are not nops act on the SPE's
+/// atomic cache, whose lines are 128 bytes.
+///
+/// [CBE-Handbook p:151 s:6.2.2.4 Table 6-1] the CBE does not implement an SL1; sdcrt and sdcrtst are nops, and sdcrz, sdcrst and sdcrf act on the atomic cache.
+/// [CBE-Handbook p:149 s:6.2.2] the atomic cache stores six 128-byte cache lines.
+pub const MFC_SL1_DATA_BLOCK_BYTES: u64 = 128;
 /// Atomic: get with reservation (getllar).
 ///
 /// [CBEA p:65 s:7.8 MFC Atomic Update Commands] getllar opcode 0xD0.
@@ -362,6 +381,10 @@ pub const MFC_GETLLAR: u32 = 0xD0;
 ///
 /// [CBEA p:65 s:7.8 MFC Atomic Update Commands] putllc opcode 0xB4.
 pub const MFC_PUTLLC: u32 = 0xB4;
+/// Atomic: put unconditional (putlluc).
+///
+/// [CBEA p:308 s:Appendix D Table D-5] putlluc opcode x'00B0'.
+pub const MFC_PUTLLUC: u32 = 0xB0;
 
 /// One word written to [`MFC_CMD`]: an opcode and two class ids.
 ///

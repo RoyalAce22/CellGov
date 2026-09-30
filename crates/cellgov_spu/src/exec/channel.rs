@@ -373,6 +373,63 @@ fn issue_ordering_command(
     }
 }
 
+/// Queues an SL1 storage control command as a tag-specific barrier.
+///
+/// With `zero`, the command writes zeros over every data block its
+/// range touches. Otherwise it moves no bytes: CellGov's main storage has
+/// no cache for a store or flush to write back.
+///
+/// [CBEA p:62 s:7.7] the storage control commands affect the bytes the transfer size names, and each creates a tag-specific barrier.
+/// [CBEA p:64 s:7.7.3] sdcrz sets to zero every byte of the data block that contains an addressed byte.
+fn issue_storage_control(
+    cmd: u32,
+    zero: bool,
+    state: &mut SpuState,
+    unit_id: UnitId,
+) -> SpuStepOutcome {
+    let tag = match checked_transfer(cmd, MfcCommandClass::StorageControl, state, unit_id) {
+        Ok(tag) => tag,
+        Err(queued) => return queued,
+    };
+    let c = &state.channels;
+    let ea = (u64::from(c.mfc_eah) << 32) | u64::from(c.mfc_eal);
+    let size = if zero { u64::from(c.mfc_size) } else { 0 };
+    let start = ea & !(spu::MFC_SL1_DATA_BLOCK_BYTES - 1);
+    let end = if size == 0 {
+        Some(start)
+    } else {
+        ea.checked_add(size)
+            .and_then(|end| end.checked_next_multiple_of(spu::MFC_SL1_DATA_BLOCK_BYTES))
+    };
+    // A block past 2^64 names no segment.
+    let Some(blocks) = end.and_then(|end| ByteRange::new(GuestAddr::new(start), end - start))
+    else {
+        return queue_invalid(cmd, MfcCommandError::DataSegment { ea }, state, unit_id);
+    };
+    // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
+    if let Some(line) = state.reservation {
+        if blocks.length() > 0 && line.overlaps_range(start, blocks.length()) {
+            state.reservation = None;
+        }
+    }
+    // The zeros ride as the put's payload, so no local store is read. The
+    // source names local-store address 0, the address a record of the
+    // command gives when it names none.
+    let none = ByteRange::new(GuestAddr::new(0), blocks.length()).expect("valid LS range");
+    let request = DmaRequest::new(DmaDirection::Put, none, blocks, unit_id)
+        .expect("matching sizes")
+        .with_tag_id(tag)
+        .with_ordering(MfcOrdering::TagBarrier);
+    state.channels.cmd_queue_free -= 1;
+    SpuStepOutcome::Yield {
+        effects: vec![Effect::DmaEnqueue {
+            request,
+            payload: Some(vec![0; blocks.length() as usize]),
+        }],
+        reason: YieldReason::DmaSubmitted,
+    }
+}
+
 /// Validate a list command's latched parameters, then queue its elements
 /// up to the first stall-and-notify element.
 ///
@@ -695,6 +752,8 @@ pub(crate) fn mfc_barrier_kind(cmd: u32) -> Option<BarrierKind> {
             BarrierKind::MfcTagBarrier
         }
         spu::MFC_PUTLB | spu::MFC_PUTRLB | spu::MFC_GETLB => BarrierKind::MfcTagBarrier,
+        spu::MFC_SDCRT | spu::MFC_SDCRTST | spu::MFC_SDCRZ => BarrierKind::MfcTagBarrier,
+        spu::MFC_SDCRST | spu::MFC_SDCRF => BarrierKind::MfcTagBarrier,
         spu::MFC_SYNC => BarrierKind::MfcSync,
         spu::MFC_EIEIO => BarrierKind::MfcEieio,
         spu::MFC_BARRIER => BarrierKind::MfcBarrier,
@@ -760,6 +819,19 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             issue_ordering_command(cmd, Order::TagBarrier, state, unit_id)
         }
         spu::MFC_BARRIER => issue_ordering_command(cmd, Order::QueueBarrier, state, unit_id),
+        // [CBE-Handbook p:151 s:6.2.2.4 Table 6-1] the CBE runs sdcrt and sdcrtst as nops.
+        // [CBEA p:63 s:7.7.1] a touch is a hint, and it does not invoke the system error handler.
+        // The model checks only their tag, as for the other commands that
+        // move no bytes.
+        spu::MFC_SDCRT | spu::MFC_SDCRTST => {
+            issue_ordering_command(cmd, Order::TagBarrier, state, unit_id)
+        }
+        spu::MFC_SDCRZ => issue_storage_control(cmd, true, state, unit_id),
+        // [CBEA p:64 s:7.7.4] sdcrst writes modified blocks to main storage; [CBEA p:64 s:7.7.5] sdcrf also invalidates them.
+        // Whether invalidating a line in the atomic cache loses a
+        // reservation on it is unestablished. The model keeps the
+        // reservation.
+        spu::MFC_SDCRST | spu::MFC_SDCRF => issue_storage_control(cmd, false, state, unit_id),
         // [CBEA p:58 s:7.4] a list command runs a sequence of transfers, one per list element, under one tag group.
         // [CBEA p:62 s:7.6.5] on the CBE the putrl forms behave as the putl forms.
         spu::MFC_PUTL | spu::MFC_PUTRL => issue_list(cmd, Put, Order::None, state, unit_id),
@@ -847,6 +919,10 @@ mod mfc_parameter_latch_tests;
 #[cfg(test)]
 #[path = "tests/mfc_ordering_form_tests.rs"]
 mod mfc_ordering_form_tests;
+
+#[cfg(test)]
+#[path = "tests/mfc_storage_control_tests.rs"]
+mod mfc_storage_control_tests;
 
 #[cfg(test)]
 #[path = "tests/mfc_list_tests.rs"]

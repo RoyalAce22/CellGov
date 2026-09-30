@@ -56,6 +56,9 @@ pub enum MfcCommandClass {
     Atomic,
     /// mfcsync, mfceieio and barrier.
     Synchronization,
+    /// The SL1 storage control commands that check their parameters:
+    /// sdcrz, sdcrst and sdcrf.
+    StorageControl,
 }
 
 /// Which MFC interrupt a refused command raises.
@@ -298,6 +301,11 @@ pub fn validate(class: MfcCommandClass, params: MfcParameters) -> Result<(), Mfc
             }
             Ok(())
         }
+        // [CBEA p:57 s:7.2 Table 7-6] the size and address requirements of the SL1 commands are implementation specific.
+        // No document gives the CBE's, so the model checks the reserved
+        // bits and the 16 KB limit of every sized command, and no
+        // alignment.
+        MfcCommandClass::StorageControl => Ok(()),
         MfcCommandClass::Atomic | MfcCommandClass::Synchronization => Ok(()),
     }
 }
