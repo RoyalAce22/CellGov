@@ -29,7 +29,7 @@ pub struct ExecutionContext<'a> {
     /// retired instruction so the runtime can drain them via
     /// `drain_retired_state_hashes`.
     trace_per_step: bool,
-    completed_dma_tags: u32,
+    outstanding_dma_tags: u32,
     mailbox_occupancy: u32,
     /// Set when the unit reads [`Self::mailbox_occupancy`], so the
     /// runtime knows the step read its mailbox. It records what the
@@ -49,7 +49,7 @@ impl<'a> ExecutionContext<'a> {
             reservations: None,
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
-            completed_dma_tags: 0,
+            outstanding_dma_tags: 0,
             mailbox_occupancy: 0,
             mailbox_read: None,
         }
@@ -67,7 +67,7 @@ impl<'a> ExecutionContext<'a> {
             reservations: None,
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
-            completed_dma_tags: 0,
+            outstanding_dma_tags: 0,
             mailbox_occupancy: 0,
             mailbox_read: None,
         }
@@ -87,7 +87,7 @@ impl<'a> ExecutionContext<'a> {
             reservations: None,
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
-            completed_dma_tags: 0,
+            outstanding_dma_tags: 0,
             mailbox_occupancy: 0,
             mailbox_read: None,
         }
@@ -111,7 +111,7 @@ impl<'a> ExecutionContext<'a> {
             reservations: None,
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
-            completed_dma_tags: 0,
+            outstanding_dma_tags: 0,
             mailbox_occupancy: 0,
             mailbox_read: None,
         }
@@ -146,15 +146,14 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
-    /// Tag-status bitmap the runtime drained for this unit since its
-    /// last step: completed-DMA tag bits ready to OR into the unit's
-    /// own `tag_status` channel at step entry. SPU `MFC_RD_TAG_STAT`
-    /// reads `tag_status` after this OR, so the bit becomes visible
-    /// on the step that consumes it.
+    /// Tag groups with a transfer of this unit's still outstanding at the
+    /// start of the step, one bit per group.
+    ///
+    /// A transfer stays outstanding until it leaves the DMA queue.
     #[inline]
-    pub const fn with_completed_dma_tags(self, bits: u32) -> Self {
+    pub const fn with_outstanding_dma_tags(self, bits: u32) -> Self {
         Self {
-            completed_dma_tags: bits,
+            outstanding_dma_tags: bits,
             ..self
         }
     }
@@ -189,10 +188,10 @@ impl<'a> ExecutionContext<'a> {
         self.mailbox_occupancy
     }
 
-    /// Completed-DMA-tag bitmap for this step.
+    /// Tag groups with a transfer of this unit's still outstanding.
     #[inline]
-    pub const fn completed_dma_tags(&self) -> u32 {
-        self.completed_dma_tags
+    pub const fn outstanding_dma_tags(&self) -> u32 {
+        self.outstanding_dma_tags
     }
 
     /// Committed memory view, borrowed for the step's lifetime.

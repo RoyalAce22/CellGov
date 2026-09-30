@@ -172,8 +172,7 @@ pub mod source {
     pub const KERNEL_CURSORS: u8 = 55;
     /// Pending DMA completions, one object per queue sequence number.
     pub const DMA_QUEUE: u8 = 56;
-    /// Completed DMA tag bits not yet delivered, one object per unit.
-    pub const DMA_TAG_COMPLETIONS: u8 = 57;
+    // Tag 57 is unused.
     /// RSX effects the FIFO advance pass queued for the next batch, one
     /// object per queue position.
     pub const RSX_PENDING_EFFECTS: u8 = 58;

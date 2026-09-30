@@ -243,7 +243,7 @@ fn a_stop_from_a_unit_no_group_holds_is_no_lv2_request() {
 
 // [CBEA p:92 s:8.5.1] a stop request stops the SPU's instruction issue; the page says nothing of the MFC.
 #[test]
-fn a_transfer_that_completes_while_its_issuer_is_stopped_keeps_its_tag_bit() {
+fn a_transfer_that_completes_while_its_issuer_is_stopped_leaves_its_tag_group_complete() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_ps3_abi::hw::spu::MfcTagId;
@@ -263,11 +263,9 @@ fn a_transfer_that_completes_while_its_issuer_is_stopped_keeps_its_tag_bit() {
     .with_tag_id(MfcTagId::new(3).expect("tag 3"));
     rt.dma_queue
         .enqueue(DmaCompletion::new(request, GuestTicks::ZERO), None);
+    assert_eq!(rt.outstanding_dma_tags(issuer), 1 << 3);
     rt.fire_dma_completions();
-    assert_eq!(
-        rt.pending_tag_completions.get(&issuer).copied(),
-        Some(1 << 3)
-    );
+    assert_eq!(rt.outstanding_dma_tags(issuer), 0);
     assert_eq!(
         rt.registry.effective_status(issuer),
         Some(UnitStatus::Finished)

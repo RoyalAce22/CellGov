@@ -94,13 +94,11 @@ impl Runtime {
             // - `Faulted`: the commit pipeline's `pre_validate` refused
             //   a later DmaEnqueue from the issuer, and that mark keeps
             //   the unit off the scheduler.
-            // The tag bit still lands, so an SPU that restarts sees its
-            // transfer complete. Whether the MFC runs on while its SPU
-            // is stopped is unestablished; this is CellGov's choice.
+            // The transfer leaves the queue either way, so an SPU that
+            // restarts sees its tag group complete. Whether the MFC
+            // continues while its SPU is stopped is unestablished; this
+            // is CellGov's choice.
             // [CBEA p:92 s:8.5.1] a stop request stops the SPU's instruction issue; the page says nothing of the MFC.
-            if let Some(tag_id) = c.request().tag_id() {
-                *self.pending_tag_completions.entry(c.issuer()).or_insert(0) |= tag_id.status_bit();
-            }
             if matches!(
                 self.registry.effective_status(c.issuer()),
                 Some(UnitStatus::Finished | UnitStatus::Faulted)
@@ -111,6 +109,16 @@ impl Runtime {
                 .set_status_override(c.issuer(), UnitStatus::Runnable);
         }
         due
+    }
+
+    /// Returns one bit for each tag group with a `unit` transfer in the queue.
+    // [CBEA p:128 s:9.3.6] a tag group reads complete when it has no outstanding operations.
+    pub(super) fn outstanding_dma_tags(&self, unit: cellgov_event::UnitId) -> u32 {
+        self.dma_queue
+            .pending()
+            .filter(|(c, _)| c.issuer() == unit)
+            .filter_map(|(c, _)| c.request().tag_id())
+            .fold(0, |bits, tag| bits | tag.status_bit())
     }
 
     /// Drain all pending DMA completions regardless of scheduled time;

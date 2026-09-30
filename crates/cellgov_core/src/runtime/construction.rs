@@ -97,7 +97,6 @@ impl Runtime {
             per_step_index: 0,
             zoom_trace,
             scheduler_dirty_after_restore: false,
-            pending_tag_completions: std::collections::BTreeMap::new(),
             rsx_label_writes_committed: 0,
             rsx_set_reference_dispatches: 0,
             timer_sleep_dispatches: 0,

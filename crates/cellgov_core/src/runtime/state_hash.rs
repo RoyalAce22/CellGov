@@ -54,7 +54,6 @@ impl Runtime {
     ///   - the RSX scalars
     ///   - the RSX call stack
     ///   - the deferred RSX effects
-    ///   - the pending DMA tag bits
     ///   - the pending child inits
     /// - The LV2 host adds its partial.
     ///
@@ -107,13 +106,6 @@ impl Runtime {
                 source::RSX_PENDING_EFFECTS,
                 i as u64,
                 &DeferredRsxEffect(effect),
-            ));
-        }
-        for (unit, &bits) in &self.pending_tag_completions {
-            sum = sum.wrapping_add(lanes::value_term(
-                source::DMA_TAG_COMPLETIONS,
-                unit.raw(),
-                &bits,
             ));
         }
         for (i, init) in self.pending_child_inits.iter().enumerate() {

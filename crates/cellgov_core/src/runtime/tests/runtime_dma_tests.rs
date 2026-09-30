@@ -65,14 +65,6 @@ fn dma_completion_wakes_issuer() {
     );
 }
 
-/// An untagged transfer publishes no tag bit, and wakes its issuer
-/// anyway.
-///
-/// `dma_completion_wakes_issuer` above already holds the wake half.
-/// This adds the two halves it leaves implicit: that the request
-/// carries no tag, said out loud rather than left to the constructor,
-/// and that nothing reaches the tag-completion map for it. The wake and
-/// the tag bit are separate writes, and only this says so.
 #[test]
 fn an_untagged_completion_wakes_its_issuer_with_no_tag_bit() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
@@ -96,6 +88,11 @@ fn an_untagged_completion_wakes_its_issuer_with_no_tag_bit() {
     assert_eq!(req.tag_id(), None, "the premise is an untagged request");
     rt.dma_queue
         .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
+    assert_eq!(
+        rt.outstanding_dma_tags(issuer),
+        0,
+        "a queued transfer with no tag holds no tag group outstanding",
+    );
 
     let s = rt.step().unwrap();
     rt.commit_step(&s.result, &s.effects).unwrap();
@@ -105,22 +102,12 @@ fn an_untagged_completion_wakes_its_issuer_with_no_tag_bit() {
         Some(cellgov_exec::UnitStatus::Runnable),
         "the completion un-parks the issuer whether or not it carried a tag",
     );
-    assert_eq!(
-        rt.pending_tag_completions.get(&issuer),
-        None,
-        "and publishes no tag bit, because the request named no tag",
-    );
 }
 
-/// A tagged completion publishes the bit of that tag's weight, not the
-/// low bit.
-///
-/// Every other case in the suite uses tag 0, where `1 << 0` is 1 and the
-/// shift cannot be told from a constant. Tag group `n` carries weight
-/// `2^n`, so tag 5 must publish `0x20`.
+/// Uses tag 5 because at tag 0 the shift `1 << 0` equals the constant 1.
 // [CBEA p:126 s:9.3.4 MFC Read Tag-Group Query Mask Channel] the mask's bit positions run g1F..g0, so tag group n is the bit of weight 2^n.
 #[test]
-fn a_tagged_completion_publishes_that_tag_groups_bit() {
+fn a_queued_tagged_transfer_holds_that_tag_groups_bit_until_it_completes() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_ps3_abi::hw::spu::MfcTagId;
@@ -144,15 +131,75 @@ fn a_tagged_completion_publishes_that_tag_groups_bit() {
     .with_tag_id(tag);
     rt.dma_queue
         .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
+    assert_eq!(
+        rt.outstanding_dma_tags(issuer),
+        0x20,
+        "tag group 5 is the bit of weight 32",
+    );
 
     let s = rt.step().unwrap();
     rt.commit_step(&s.result, &s.effects).unwrap();
 
     assert_eq!(
-        rt.pending_tag_completions.get(&issuer).copied(),
-        Some(0x20),
-        "tag group 5 is the bit of weight 32",
+        rt.outstanding_dma_tags(issuer),
+        0,
+        "the completed transfer leaves its group with nothing outstanding",
     );
+}
+
+// [CBEA p:128 s:9.3.6] a tag group reads complete when it has no outstanding operations.
+#[test]
+fn outstanding_tag_groups_count_only_the_units_own_transfers_and_a_reused_tag_stays_outstanding() {
+    use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
+    use cellgov_mem::{ByteRange, GuestAddr};
+    use cellgov_ps3_abi::hw::spu::MfcTagId;
+    let mut rt = build(256, 5, 100);
+    let a = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    let b = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    let tagged = |issuer, tag| {
+        DmaRequest::new(
+            DmaDirection::Put,
+            ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+            ByteRange::new(GuestAddr::new(128), 4).unwrap(),
+            issuer,
+        )
+        .unwrap()
+        .with_tag_id(MfcTagId::new(tag).expect("tag in range"))
+    };
+    rt.dma_queue
+        .enqueue(DmaCompletion::new(tagged(a, 2), GuestTicks::new(3)), None);
+    rt.dma_queue
+        .enqueue(DmaCompletion::new(tagged(a, 2), GuestTicks::new(50)), None);
+    rt.dma_queue
+        .enqueue(DmaCompletion::new(tagged(b, 4), GuestTicks::new(3)), None);
+    assert_eq!(
+        rt.outstanding_dma_tags(a),
+        1 << 2,
+        "unit b's tag 4 is not a's"
+    );
+    assert_eq!(
+        rt.outstanding_dma_tags(b),
+        1 << 4,
+        "unit a's tag 2 is not b's"
+    );
+
+    rt.time = GuestTicks::new(3);
+    let fired = rt.fire_dma_completions();
+    assert_eq!(
+        fired.len(),
+        2,
+        "the premise is that both time-3 transfers land"
+    );
+    assert_eq!(
+        rt.outstanding_dma_tags(a),
+        1 << 2,
+        "a's second tag-2 transfer is still queued, so the group stays outstanding",
+    );
+    assert_eq!(rt.outstanding_dma_tags(b), 0);
 }
 
 #[test]
@@ -536,7 +583,7 @@ fn dma_wait_same_commit_completion_overrides_blocked_to_runnable() {
     use cellgov_exec::UnitStatus;
     use cellgov_mem::{ByteRange, GuestAddr};
 
-    fn run() -> (UnitStatus, Vec<u8>) {
+    fn run() -> (UnitStatus, bool, Vec<u8>) {
         // Budget 20 > FixedLatency(10): step-1's DmaWait yield consumes
         // 20 ticks, so the PUT issued in step 0 (completion_time = 1 + 10)
         // is already due at the moment step 1's commit_step runs
@@ -553,9 +600,11 @@ fn dma_wait_same_commit_completion_overrides_blocked_to_runnable() {
         });
 
         let mut final_status = UnitStatus::Runnable;
+        let mut parked = false;
         for _ in 0..50 {
             match rt.step() {
                 Ok(step) => {
+                    parked |= step.result.yield_reason == YieldReason::DmaWait;
                     rt.commit_step(&step.result, &step.effects).unwrap();
                     final_status = rt
                         .registry()
@@ -568,12 +617,18 @@ fn dma_wait_same_commit_completion_overrides_blocked_to_runnable() {
                 Err(_) => break,
             }
         }
-        (final_status, rt.trace().bytes().to_vec())
+        (final_status, parked, rt.trace().bytes().to_vec())
     }
 
-    let (final_a, trace_a) = run();
-    let (final_b, trace_b) = run();
+    let (final_a, parked_a, trace_a) = run();
+    let (final_b, _, trace_b) = run();
 
+    // A transfer that never reaches the queue reads complete at once,
+    // so the unit finishes with no DmaWait park.
+    assert!(
+        parked_a,
+        "the premise is a DmaWait park on the queued transfer"
+    );
     assert_eq!(
         final_a,
         UnitStatus::Finished,

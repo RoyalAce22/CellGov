@@ -153,7 +153,7 @@ impl Runtime {
             } else {
                 ExecutionContext::with_received(unit_mem, &received)
             };
-            let completed_tags = self.pending_tag_completions.remove(&unit_id).unwrap_or(0);
+            let outstanding_tags = self.outstanding_dma_tags(unit_id);
             let unit_reservations = crate::runtime::spaces::resolve_unit_reservations(
                 &self.reservations,
                 &self.spaces,
@@ -168,7 +168,7 @@ impl Runtime {
                 .with_reservations(unit_reservations)
                 .with_current_tick(self.time)
                 .with_trace_per_step(self.mode != RuntimeMode::FaultDriven)
-                .with_completed_dma_tags(completed_tags)
+                .with_outstanding_dma_tags(outstanding_tags)
                 .with_mailbox_occupancy(mailbox_occupancy)
                 .with_mailbox_read_flag(&mailbox_read);
             let unit = self

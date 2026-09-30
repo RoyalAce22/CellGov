@@ -17,7 +17,7 @@ use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, ProblemStateError,
     RestartError, SignalNotifier, StopRegisters, UnitStatus, YieldReason,
 };
-use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, SPU_STATUS_R};
+use cellgov_ps3_abi::hw::spu::{MfcTagId, MFC_ATOMIC_STAT_G, SPU_STATUS_R};
 use cellgov_ps3_abi::hw::spu_isa;
 use cellgov_time::{Budget, InstructionCost};
 
@@ -49,6 +49,18 @@ impl ExecutionUnit for SpuExecutionUnit {
         // This step clears the effect vector below, so the parked
         // transfer's read enters it after the clear.
         let mut parked_get_read = None;
+        // A group reads complete when this unit has no outstanding
+        // transfer with its tag. A reused tag therefore reads incomplete
+        // until its new transfer lands. A parked get stays outstanding
+        // until its copy below lands. A refused copy leaves it outstanding.
+        // [CBEA p:128 s:9.3.6] a set bit means the group has no outstanding operations.
+        let parked_get_group = self
+            .state
+            .channels
+            .pending_get
+            .and_then(|(_, _, _, tag_id)| MfcTagId::new(tag_id))
+            .map_or(0, MfcTagId::status_bit);
+        self.state.channels.tag_status = !(ctx.outstanding_dma_tags() | parked_get_group);
         if let Some((ea, lsa, size, tag_id)) = self.state.channels.pending_get.take() {
             // `ea` comes from MFC_EAH and MFC_EAL, so the guest can name
             // an address no region backs.
@@ -84,9 +96,8 @@ impl ExecutionUnit for SpuExecutionUnit {
                 };
             }
             parked_get_read = shared_read(ea, size, self.id);
-            self.state.channels.tag_status |= 1u32 << tag_id;
+            self.state.channels.tag_status = !ctx.outstanding_dma_tags();
         }
-        self.state.channels.tag_status |= ctx.completed_dma_tags();
         self.state.channels.in_mbox_count = ctx.mailbox_occupancy();
 
         // Mirror cross-unit reservation invalidation. The context view is

@@ -61,14 +61,14 @@ nine-step deterministic loop:
    them, under the atomic-batch contract. That is the next space-0
    batch which does not fault: those effects belong to no unit's
    step, so neither a child-space batch nor a faulting one carries
-   them. DMA completions publish per-tag
-   completion bits to the issuing SPU's tag-status channel at fire
-   time, not at enqueue. An SPU yielding `DmaWait` out of a batch
-   that applied is parked `Blocked` before completions fire, so a
-   same-commit completion's `Runnable` override overwrites the fresh
-   `Blocked` and the wake fires in the same batch. A refused batch
-   parks nobody: it queued no completion, so the park would wait on
-   a tag bit nothing will publish.
+   them. A DMA completion leaves the queue at fire time, and an
+   SPU's tag group reads complete at its next step once none of its
+   transfers with that tag is queued. An SPU yielding `DmaWait` out
+   of a batch that applied is parked `Blocked` before completions
+   fire, so a same-commit completion's `Runnable` override
+   overwrites the fresh `Blocked` and the wake fires in the same
+   batch. A refused batch parks nobody: it queued no completion, so
+   the park would wait on a transfer that will never land.
 8. Emit the batch's commit trace records and notify the scheduler
    of the yield with whether other units woke and whether the
    source still holds an lwmutex.

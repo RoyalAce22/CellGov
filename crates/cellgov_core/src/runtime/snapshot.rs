@@ -77,7 +77,6 @@ pub struct RuntimeSnapshot {
     pub(super) last_scheduled_unit: Option<UnitId>,
     pub(super) step_woke_others: bool,
     pub(super) per_step_index: u64,
-    pub(super) pending_tag_completions: std::collections::BTreeMap<UnitId, u32>,
     pub(super) pending_child_inits: Vec<crate::runtime::types::PendingChildInit>,
     pub(super) rsx_label_base: u32,
 
@@ -117,7 +116,6 @@ fn snapshot_field_categories(rt: &Runtime) {
         last_scheduled_unit: _,
         step_woke_others: _,
         per_step_index: _,
-        pending_tag_completions: _,
         pending_child_inits: _,
         rsx_call_stack: _,
         rsx_consume_fifo: _,
@@ -193,7 +191,6 @@ impl Runtime {
             last_scheduled_unit: self.last_scheduled_unit,
             step_woke_others: self.step_woke_others,
             per_step_index: self.per_step_index,
-            pending_tag_completions: self.pending_tag_completions.clone(),
             pending_child_inits: self.pending_child_inits.clone(),
             rsx_label_base: self.rsx_label_base,
 
@@ -249,7 +246,6 @@ impl Runtime {
         self.last_scheduled_unit = snap.last_scheduled_unit;
         self.step_woke_others = snap.step_woke_others;
         self.per_step_index = snap.per_step_index;
-        self.pending_tag_completions = snap.pending_tag_completions.clone();
         self.pending_child_inits = snap.pending_child_inits.clone();
         self.rsx_label_base = snap.rsx_label_base;
         self.effects_buf.clear();

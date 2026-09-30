@@ -686,11 +686,13 @@ impl ExecutionUnit for Lv2SyscallEmitterUnit {
     }
 }
 
-/// Synthetic SPU-shape unit. Step 1 emits a `DmaEnqueue` with `tag_id=0`
-/// and yields `DmaSubmitted`. Step 2+ checks `ctx.completed_dma_tags()`:
-/// if bit 0 is set, accumulate `seen_tag_bits` and finish; else yield
-/// `DmaWait`. Mirrors the production SPU's `MFC_PUT` + `MFC_RD_TAG_STAT`
-/// pattern at the runtime level without needing an SPU ELF.
+/// Synthetic SPU-shape unit for the `MFC_PUT` + `MFC_RD_TAG_STAT` pattern.
+///
+/// - Step 1 emits a `DmaEnqueue` with `tag_id=0` and yields
+///   `DmaSubmitted`.
+/// - Each later step reads `ctx.outstanding_dma_tags()`. When tag 0 has
+///   nothing outstanding, the unit sets bit 0 of `seen_tag_bits` and
+///   finishes. Otherwise it yields `DmaWait`.
 #[derive(Clone)]
 struct TagPollUnit {
     id: UnitId,
@@ -746,9 +748,8 @@ impl ExecutionUnit for TagPollUnit {
                 }
             }
             _ => {
-                let bits = ctx.completed_dma_tags();
-                if bits & 1 != 0 {
-                    self.seen_tag_bits.set(self.seen_tag_bits.get() | bits);
+                if ctx.outstanding_dma_tags() & 1 == 0 {
+                    self.seen_tag_bits.set(self.seen_tag_bits.get() | 1);
                     self.step.set(3);
                     ExecutionStepResult {
                         yield_reason: YieldReason::Finished,

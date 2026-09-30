@@ -1,7 +1,6 @@
 //! These runtime fields enter the sync-state hash:
 //!
 //! - the DMA queue
-//! - the pending DMA tag bits
 //! - the deferred RSX effects
 //! - the pending child inits
 //! - the seeded RSX label base
@@ -46,11 +45,8 @@ fn every_pending_runtime_field_moves_the_hash_alone() {
         });
     }
     type Set = fn(&mut Runtime, u64);
-    let cases: [(&str, Set); 10] = [
+    let cases: [(&str, Set); 9] = [
         ("dma queue", dma),
-        ("dma tag completion", |rt, k| {
-            rt.pending_tag_completions.insert(UnitId::new(1), 1 << k);
-        }),
         ("rsx label write offset", |rt, k| {
             rt.pending_rsx_effects.push(Effect::RsxLabelWrite {
                 offset: k as u32,

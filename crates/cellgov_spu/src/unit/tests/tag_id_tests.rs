@@ -3,10 +3,11 @@
 //! The channel write itself stands: the architecture checks the staged
 //! parameter asynchronous to the instruction stream, and what it names
 //! is a suspended MFC command queue, not a faulted `wrch`. So the
-//! refusal sits on the command, whose completion path publishes
-//! `1 << tag_id` into a 32-bit word. A value past 31 has no bit there:
-//! the shift panics a debug host, and under `--release` it wraps onto a
-//! tag group the guest never named.
+//! refusal sits on the command. The tag-status word has one bit for
+//! each of the 32 tag groups, and a value past 31 names none of them.
+//! The refusal keeps such a value away from the put path, which expects
+//! a valid `MfcTagId`. It also keeps a parked get's tag inside the 32
+//! groups.
 
 use crate::fault_codes::FAULT_MFC_TAG_ID_OUT_OF_RANGE;
 use crate::SpuExecutionUnit;
@@ -21,7 +22,7 @@ const UNIT: u64 = 7;
 const MEM_BYTES: usize = 0x2000;
 
 /// The highest tag id the architecture allows, and the first one past
-/// it. Shifting by the second is what panics a debug host.
+/// it.
 const LAST_VALID_TAG: u32 = 31;
 const FIRST_INVALID_TAG: u32 = 32;
 
@@ -138,8 +139,7 @@ fn the_highest_architected_tag_id_issues_its_command() {
     );
 }
 
-/// One past it refuses the command by name, rather than reaching the
-/// shift.
+/// One past it refuses the command by name.
 #[test]
 fn a_tag_id_past_the_architected_range_refuses_its_command() {
     let mut unit = unit_getting_with_tag(FIRST_INVALID_TAG);
@@ -163,8 +163,8 @@ fn a_tag_id_past_the_architected_range_refuses_its_command() {
     );
     assert_eq!(
         unit.state().channels.tag_status,
-        0,
-        "and no completion was published",
+        u32::MAX,
+        "and no tag group was left outstanding",
     );
     assert_eq!(
         unit.status(),
