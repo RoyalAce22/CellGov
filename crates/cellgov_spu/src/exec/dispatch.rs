@@ -19,6 +19,23 @@ fn branch_indirect_if(state: &mut SpuState, ra: u8, taken: bool) -> SpuStepOutco
     }
 }
 
+/// A halt instruction's outcome: a stop of kind `Halt` when its condition
+/// holds, else the next instruction.
+///
+/// The ISA lets the SPU run zero or more instructions past a met halt;
+/// CellGov runs none, so the resume address is the word after the halt.
+// [SPU-ISA p:149 s:7] a halt stops imprecisely, at or after the halt instruction.
+fn halt_if(condition: bool) -> SpuStepOutcome {
+    if condition {
+        SpuStepOutcome::Stop {
+            kind: SpuStopKind::Halt,
+            signal: 0,
+        }
+    } else {
+        SpuStepOutcome::Continue
+    }
+}
+
 /// Execute a single decoded SPU instruction.
 pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match *insn {
@@ -488,15 +505,28 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:193 s:8. Hint-for-Branch Instructions] Hint for Branch (a-form) is a hint with no architectural effect.
         // [SPU-ISA p:242 s:10. Control Instructions] Synchronize is a barrier; modeled as a no-op given in-order semantics.
         // [SPU-ISA p:243 s:10. Control Instructions] Synchronize Data orders local-store accesses; a no-op given in-order semantics.
-        // [SPU-ISA p:150 s:7. Compare, Branch, and Halt Instructions] Halt If Equal traps when condition holds; here treated as continue.
         SpuInstruction::Nop
         | SpuInstruction::Lnop
         | SpuInstruction::Hbr
         | SpuInstruction::Hbra
         | SpuInstruction::Hbrr
         | SpuInstruction::Sync
-        | SpuInstruction::Dsync
-        | SpuInstruction::Heq => SpuStepOutcome::Continue,
+        | SpuInstruction::Dsync => SpuStepOutcome::Continue,
+
+        // [SPU-ISA p:150 s:7. Compare, Branch, and Halt Instructions] Halt If Equal: stop when RA's preferred word equals RB's.
+        SpuInstruction::Heq { ra, rb } => halt_if(state.reg_word(ra) == state.reg_word(rb)),
+        // [SPU-ISA p:151 s:7. Compare, Branch, and Halt Instructions] Halt If Equal Immediate: I10 sign-extended to 32 bits.
+        SpuInstruction::Heqi { ra, imm } => halt_if(state.reg_word(ra) == imm as i32 as u32),
+        // [SPU-ISA p:152 s:7. Compare, Branch, and Halt Instructions] Halt If Greater Than: an algebraic compare.
+        SpuInstruction::Hgt { ra, rb } => {
+            halt_if(state.reg_word(ra) as i32 > state.reg_word(rb) as i32)
+        }
+        // [SPU-ISA p:153 s:7. Compare, Branch, and Halt Instructions] Halt If Greater Than Immediate: algebraic, against the sign-extended I10.
+        SpuInstruction::Hgti { ra, imm } => halt_if(state.reg_word(ra) as i32 > i32::from(imm)),
+        // [SPU-ISA p:154 s:7. Compare, Branch, and Halt Instructions] Halt If Logically Greater Than: an unsigned compare.
+        SpuInstruction::Hlgt { ra, rb } => halt_if(state.reg_word(ra) > state.reg_word(rb)),
+        // [SPU-ISA p:155 s:7. Compare, Branch, and Halt Instructions] Halt If Logically Greater Than Immediate: unsigned, against the sign-extended I10.
+        SpuInstruction::Hlgti { ra, imm } => halt_if(state.reg_word(ra) > imm as i32 as u32),
 
         // [SPU-ISA p:238 s:10. Control Instructions] Stop and Signal halts the SPU and raises the stop signal to the PPE.
         // [SPU-ISA p:239 s:10. Control Instructions] Stop and Signal with Dependencies stops the SPU as stop does.
@@ -526,3 +556,7 @@ mod job_forms_tests;
 #[cfg(test)]
 #[path = "tests/lslr_tests.rs"]
 mod lslr_tests;
+
+#[cfg(test)]
+#[path = "tests/halt_tests.rs"]
+mod halt_tests;

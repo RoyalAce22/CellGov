@@ -85,10 +85,6 @@ pub(super) fn execution_supported(instruction: SpuInstruction) -> bool {
         SpuInstruction::Rdch { channel, .. } => RDCH_CHANNELS.contains(&u32::from(channel)),
         SpuInstruction::Wrch { channel, .. } => WRCH_CHANNELS.contains(&u32::from(channel)),
         SpuInstruction::Rchcnt { channel, .. } => RCHCNT_CHANNELS.contains(&u32::from(channel)),
-        // [SPU-ISA p:150 s:7 Compare, Branch, and Halt Instructions] HEQ can
-        // stop execution, but the current instruction representation retains
-        // neither source register needed to decide that outcome.
-        SpuInstruction::Heq => false,
         _ => true,
     }
 }

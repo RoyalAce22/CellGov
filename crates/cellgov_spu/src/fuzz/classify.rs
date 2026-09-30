@@ -15,6 +15,7 @@ const CONTINUE: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue];
 const FAULT: &[SpuOutcomeClass] = &[SpuOutcomeClass::Fault];
 const YIELD: &[SpuOutcomeClass] = &[SpuOutcomeClass::Yield];
 const STOP: &[SpuOutcomeClass] = &[SpuOutcomeClass::Stop];
+const CONTINUE_OR_STOP: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Stop];
 const CONTINUE_OR_YIELD: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Yield];
 const LOAD_STORE: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Fault];
 const CONDITIONAL_BRANCH: &[SpuOutcomeClass] =
@@ -33,15 +34,7 @@ pub(super) fn exact_kind(raw: u32) -> Option<SpuInstructionKind> {
         .map(SpuInstructionKind::from)
 }
 
-pub(super) fn sequence_flow(
-    kind: SpuInstructionKind,
-    outcomes: &[SpuOutcomeClass],
-) -> SpuSequenceFlow {
-    // [SPU-ISA p:150 s:7 Compare, Branch, and Halt Instructions] HEQ can stop
-    // execution when its two source values compare equal.
-    if kind == SpuInstructionKind::Heq {
-        return SpuSequenceFlow::StateDependent;
-    }
+pub(super) fn sequence_flow(outcomes: &[SpuOutcomeClass]) -> SpuSequenceFlow {
     if outcomes.contains(&SpuOutcomeClass::Branch) {
         SpuSequenceFlow::ControlTransfer
     } else if outcomes == FAULT || outcomes == YIELD || outcomes == STOP {
@@ -113,6 +106,13 @@ pub(super) fn effect_and_outcome(
         | SpuInstruction::Bihz { .. }
         | SpuInstruction::Bihnz { .. } => (NO_EFFECTS, CONDITIONAL_BRANCH),
         SpuInstruction::Stop { .. } | SpuInstruction::Stopd => (NO_EFFECTS, STOP),
+        // [SPU-ISA p:149 s:7 Compare, Branch, and Halt Instructions] a halt stops the SPU only when its condition holds.
+        SpuInstruction::Heq { .. }
+        | SpuInstruction::Heqi { .. }
+        | SpuInstruction::Hgt { .. }
+        | SpuInstruction::Hgti { .. }
+        | SpuInstruction::Hlgt { .. }
+        | SpuInstruction::Hlgti { .. } => (NO_EFFECTS, CONTINUE_OR_STOP),
         _ => (NO_EFFECTS, CONTINUE),
     }
 }
@@ -122,9 +122,17 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
     match kind {
         K::Selb | K::Shufb => SpuEncodingForm::Rrrr,
         // [SPU-ISA p:29 s:2.3 Instruction Formats] RI10 carries I10 between its opcode and RA fields.
-        K::Lqd | K::Stqd | K::Ai | K::Ori | K::Andi | K::Ceqi | K::Ceqbi | K::Cgti => {
-            SpuEncodingForm::Ri10
-        }
+        K::Lqd
+        | K::Stqd
+        | K::Ai
+        | K::Ori
+        | K::Andi
+        | K::Ceqi
+        | K::Ceqbi
+        | K::Cgti
+        | K::Heqi
+        | K::Hgti
+        | K::Hlgti => SpuEncodingForm::Ri10,
         K::Cbd
         | K::Chd
         | K::Cwd
@@ -152,16 +160,9 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
         | K::Bihz
         | K::Bihnz => SpuEncodingForm::Branch,
         K::Rdch | K::Wrch | K::Rchcnt => SpuEncodingForm::Channel,
-        K::Nop
-        | K::Lnop
-        | K::Hbr
-        | K::Hbra
-        | K::Hbrr
-        | K::Sync
-        | K::Dsync
-        | K::Heq
-        | K::Stop
-        | K::Stopd => SpuEncodingForm::Control,
+        K::Nop | K::Lnop | K::Hbr | K::Hbra | K::Hbrr | K::Sync | K::Dsync | K::Stop | K::Stopd => {
+            SpuEncodingForm::Control
+        }
         _ => SpuEncodingForm::Rrr,
     }
 }
@@ -239,6 +240,11 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Sync
         | SpuInstructionKind::Dsync
         | SpuInstructionKind::Heq
+        | SpuInstructionKind::Heqi
+        | SpuInstructionKind::Hgt
+        | SpuInstructionKind::Hgti
+        | SpuInstructionKind::Hlgt
+        | SpuInstructionKind::Hlgti
         | SpuInstructionKind::Stop
         | SpuInstructionKind::Stopd => {}
     }

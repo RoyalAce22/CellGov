@@ -566,8 +566,49 @@ pub enum SpuInstruction {
     Sync,
     /// Data barrier; no-op in the interpreter.
     Dsync,
-    /// Halt if equal; no-op outside debug.
-    Heq,
+    /// Halt if RA's preferred word equals RB's.
+    Heq {
+        /// First compared register.
+        ra: u8,
+        /// Second compared register.
+        rb: u8,
+    },
+    /// Halt if RA's preferred word equals the sign-extended immediate.
+    Heqi {
+        /// Compared register.
+        ra: u8,
+        /// Sign-extended I10.
+        imm: i16,
+    },
+    /// Halt if RA's preferred word is greater than RB's, signed.
+    Hgt {
+        /// First compared register.
+        ra: u8,
+        /// Second compared register.
+        rb: u8,
+    },
+    /// Halt if RA's preferred word is greater than the immediate, signed.
+    Hgti {
+        /// Compared register.
+        ra: u8,
+        /// Sign-extended I10.
+        imm: i16,
+    },
+    /// Halt if RA's preferred word is greater than RB's, unsigned.
+    Hlgt {
+        /// First compared register.
+        ra: u8,
+        /// Second compared register.
+        rb: u8,
+    },
+    /// Halt if RA's preferred word is greater than the sign-extended
+    /// immediate, both read unsigned.
+    Hlgti {
+        /// Compared register.
+        ra: u8,
+        /// Sign-extended I10.
+        imm: i16,
+    },
     /// Stop and signal.
     Stop {
         /// Signal type field.

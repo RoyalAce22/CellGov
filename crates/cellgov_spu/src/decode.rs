@@ -94,7 +94,12 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         0x201 => return Ok(SpuInstruction::Nop),
         0x001 => return Ok(SpuInstruction::Lnop),
         0x002 => return Ok(SpuInstruction::Sync),
-        0x3D8 => return Ok(SpuInstruction::Heq),
+        // [SPU-ISA p:150 s:7 Heq] RR opcode 0x3D8; RT is a false target.
+        0x3D8 => return Ok(SpuInstruction::Heq { ra: ra7, rb: rb7 }),
+        // [SPU-ISA p:152 s:7 Hgt] RR opcode 0x258.
+        0x258 => return Ok(SpuInstruction::Hgt { ra: ra7, rb: rb7 }),
+        // [SPU-ISA p:154 s:7 Hlgt] RR opcode 0x2D8.
+        0x2D8 => return Ok(SpuInstruction::Hlgt { ra: ra7, rb: rb7 }),
         // [SPU-ISA p:192 s:8 Hbr] RR opcode 0x1AC; the P bit selects hbrp on the same opcode.
         0x1AC => return Ok(SpuInstruction::Hbr),
         // [SPU-ISA p:90 s:5 Gb] RR opcode 0x1B0; RB field unused.
@@ -350,6 +355,27 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         0x4C => {
             return Ok(SpuInstruction::Cgti {
                 rt: rt7,
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:151 s:7 Heqi] RI10 opcode 0x7F.
+        0x7F => {
+            return Ok(SpuInstruction::Heqi {
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:153 s:7 Hgti] RI10 opcode 0x4F.
+        0x4F => {
+            return Ok(SpuInstruction::Hgti {
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:155 s:7 Hlgti] RI10 opcode 0x5F.
+        0x5F => {
+            return Ok(SpuInstruction::Hlgti {
                 ra: ra7,
                 imm: sign_extend_10(i10),
             })

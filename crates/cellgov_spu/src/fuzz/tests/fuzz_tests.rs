@@ -109,12 +109,8 @@ fn every_supported_spu_kind_has_a_decodable_executable_witness() {
     use crate::state::SpuState;
     use cellgov_event::UnitId;
 
-    let mut unreachable = BTreeSet::new();
     for descriptor in generation_descriptors() {
-        let candidate = if descriptor.kind == SpuInstructionKind::Heq {
-            unreachable.insert(descriptor.kind);
-            continue;
-        } else if let Some((index, field)) = descriptor
+        let candidate = if let Some((index, field)) = descriptor
             .operands
             .iter()
             .enumerate()
@@ -155,9 +151,6 @@ fn every_supported_spu_kind_has_a_decodable_executable_witness() {
             descriptor.kind
         );
     }
-    // HEQ lacks its source operands in the decoded model.
-    // [SPU-ISA p:150 s:7 Compare, Branch, and Halt Instructions] HEQ compares two source operands.
-    assert_eq!(unreachable, BTreeSet::from([SpuInstructionKind::Heq]));
 }
 
 #[test]
@@ -269,7 +262,13 @@ fn generated_witnesses_and_structural_operations_preserve_kind() {
             | SpuInstructionKind::Binz
             | SpuInstructionKind::Bihz
             | SpuInstructionKind::Bihnz => 0x000c_0000,
-            SpuInstructionKind::Heq => 0x001f_ffff,
+            // [SPU-ISA p:150 s:7] RT is a false target the halts never write.
+            SpuInstructionKind::Heq
+            | SpuInstructionKind::Heqi
+            | SpuInstructionKind::Hgt
+            | SpuInstructionKind::Hgti
+            | SpuInstructionKind::Hlgt
+            | SpuInstructionKind::Hlgti => 0x0000_007f,
             SpuInstructionKind::Hbr => 0x0010_ffff,
             SpuInstructionKind::Hbra | SpuInstructionKind::Hbrr => 0x01ff_ffff,
             SpuInstructionKind::Sync => 0x0010_0000,
@@ -651,10 +650,11 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
     .fuzz_descriptor();
     assert!(!unmodeled_outbound_mailbox.decoded_execution_supported);
     assert!(wrch.decoded_execution_supported);
-    assert!(
-        !SpuInstruction::Heq
-            .fuzz_descriptor()
-            .decoded_execution_supported
+    let heq = SpuInstruction::Heq { ra: 0, rb: 0 }.fuzz_descriptor();
+    assert!(heq.decoded_execution_supported);
+    assert_eq!(
+        heq.outcomes,
+        &[SpuOutcomeClass::Continue, SpuOutcomeClass::Stop]
     );
     let stop = SpuInstruction::Stop { signal: 0 }.fuzz_descriptor();
     assert!(stop.decoded_execution_supported);

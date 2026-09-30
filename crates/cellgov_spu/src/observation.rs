@@ -307,7 +307,12 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Hbrr
             | SpuInstruction::Sync
             | SpuInstruction::Dsync
-            | SpuInstruction::Heq
+            | SpuInstruction::Heq { .. }
+            | SpuInstruction::Heqi { .. }
+            | SpuInstruction::Hgt { .. }
+            | SpuInstruction::Hgti { .. }
+            | SpuInstruction::Hlgt { .. }
+            | SpuInstruction::Hlgti { .. }
             | SpuInstruction::Stop { .. }
             | SpuInstruction::Stopd => None,
         };

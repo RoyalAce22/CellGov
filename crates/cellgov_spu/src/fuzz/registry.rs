@@ -23,7 +23,7 @@ pub fn generation_descriptor(raw: u32) -> Option<SpuGenerationDescriptor> {
     Some(SpuGenerationDescriptor {
         kind: contract.kind,
         form: contract.form,
-        sequence_flow: sequence_flow(contract.kind, contract.outcomes),
+        sequence_flow: sequence_flow(contract.outcomes),
         channel_values: channel_values(contract.kind),
         canonical_word: raw,
         operands: operand_fields(raw, instruction, contract),
@@ -51,7 +51,7 @@ fn build_generation_descriptors() -> Vec<SpuGenerationDescriptor> {
             Some(SpuGenerationDescriptor {
                 kind,
                 form: contract.form,
-                sequence_flow: sequence_flow(kind, contract.outcomes),
+                sequence_flow: sequence_flow(contract.outcomes),
                 channel_values: channel_values(kind),
                 canonical_word,
                 operands: operand_fields(canonical_word, instruction, contract),

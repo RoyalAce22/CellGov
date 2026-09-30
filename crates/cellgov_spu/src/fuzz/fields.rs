@@ -26,6 +26,11 @@ pub(super) fn operand_fields(
                     | SpuInstructionKind::Hbrr
                     | SpuInstructionKind::Sync
                     | SpuInstructionKind::Heq
+                    | SpuInstructionKind::Heqi
+                    | SpuInstructionKind::Hgt
+                    | SpuInstructionKind::Hgti
+                    | SpuInstructionKind::Hlgt
+                    | SpuInstructionKind::Hlgti
             );
             let active = if decoded_field_is_ignored {
                 mask
@@ -115,12 +120,6 @@ fn field_candidates(
             K::Stop => vec![(0x0000_3fff, C::Immediate)],
             // [SPU-ISA p:241 s:10 Control Instructions] NOP carries an RT false target.
             K::Nop => vec![(0x0000_007f, C::Register)],
-            // [SPU-ISA p:150 s:7 Compare, Branch, and Halt Instructions] HEQ encodes RB, RA, and a false RT.
-            K::Heq => vec![
-                (0x0000_007f, C::Register),
-                (0x0000_3f80, C::Register),
-                (0x001f_c000, C::Register),
-            ],
             // [SPU-ISA p:192 s:8 Hint-for-Branch Instructions] HBR encodes RO around RA and a P option.
             K::Hbr => vec![
                 (0x0000_c07f, C::Immediate),

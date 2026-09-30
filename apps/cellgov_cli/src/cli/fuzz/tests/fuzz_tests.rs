@@ -863,7 +863,7 @@ fn every_generated_engine_dispatches_with_replay_coordinates() {
         "spu-instruction",
         "spu-sequence",
     ] {
-        let parsed = parse(&[mode, "--replay-case", "0", "--seed", "11", "--workers", "1"])
+        let parsed = parse(&[mode, "--replay-case", "0", "--seed", "7", "--workers", "1"])
             .expect("exact case parses");
         assert_eq!(
             run_inner(&parsed).expect("replayed case must run"),
