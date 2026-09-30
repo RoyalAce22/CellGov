@@ -172,6 +172,30 @@ const DECODERS: &[(&str, Builder)] = &[
         ra: f.ra,
         rb: f.rb,
     }),
+    // [SPU-ISA p:220 s:9 Csflt] RI8 opcode 0x1DA; I8 in bits [10:17].
+    ("csflt", |f| SpuInstruction::Csflt {
+        rt: f.rt,
+        ra: f.ra,
+        imm: ((f.raw >> 14) & 0xFF) as u8,
+    }),
+    // [SPU-ISA p:221 s:9 Cflts] RI8 opcode 0x1D8; I8 in bits [10:17].
+    ("cflts", |f| SpuInstruction::Cflts {
+        rt: f.rt,
+        ra: f.ra,
+        imm: ((f.raw >> 14) & 0xFF) as u8,
+    }),
+    // [SPU-ISA p:222 s:9 Cuflt] RI8 opcode 0x1DB; I8 in bits [10:17].
+    ("cuflt", |f| SpuInstruction::Cuflt {
+        rt: f.rt,
+        ra: f.ra,
+        imm: ((f.raw >> 14) & 0xFF) as u8,
+    }),
+    // [SPU-ISA p:223 s:9 Cfltu] RI8 opcode 0x1D9; I8 in bits [10:17].
+    ("cfltu", |f| SpuInstruction::Cfltu {
+        rt: f.rt,
+        ra: f.ra,
+        imm: ((f.raw >> 14) & 0xFF) as u8,
+    }),
     // [SPU-ISA p:235 s:9 Fscrwr] RR opcode 0x3BA; RT is a false target.
     ("fscrwr", |f| SpuInstruction::Fscrwr { ra: f.ra }),
     // [SPU-ISA p:236 s:9 Fscrrd] RR opcode 0x398; RA and RB are unused.

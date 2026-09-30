@@ -1116,6 +1116,16 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         }
         // [SPU-ISA p:219 s:9. Floating-Point Instructions] Floating Interpolate: RB's base less its step times 0.RA[13:31] per slot.
         SpuInstruction::Fi { rt, ra, rb } => super::float::interpolate(state, rt, ra, rb),
+        // [SPU-ISA p:220 s:9. Floating-Point Instructions] Convert Signed Integer to Floating: RA / 2^(155 - I8) per slot.
+        SpuInstruction::Csflt { rt, ra, imm } => super::float::to_float(state, rt, ra, imm, true),
+        // [SPU-ISA p:221 s:9. Floating-Point Instructions] Convert Floating to Signed Integer: RA x 2^(173 - I8) per slot, saturated.
+        SpuInstruction::Cflts { rt, ra, imm } => super::float::to_integer(state, rt, ra, imm, true),
+        // [SPU-ISA p:222 s:9. Floating-Point Instructions] Convert Unsigned Integer to Floating: RA / 2^(155 - I8) per slot.
+        SpuInstruction::Cuflt { rt, ra, imm } => super::float::to_float(state, rt, ra, imm, false),
+        // [SPU-ISA p:223 s:9. Floating-Point Instructions] Convert Floating to Unsigned Integer: RA x 2^(173 - I8) per slot, saturated.
+        SpuInstruction::Cfltu { rt, ra, imm } => {
+            super::float::to_integer(state, rt, ra, imm, false)
+        }
         // [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
         SpuInstruction::Fscrwr { ra } => {
             state.fpscr = u128::from_be_bytes(state.regs[ra as usize])
@@ -1276,3 +1286,7 @@ mod fused_float_tests;
 #[cfg(test)]
 #[path = "tests/estimate_tests.rs"]
 mod estimate_tests;
+
+#[cfg(test)]
+#[path = "tests/conversion_tests.rs"]
+mod conversion_tests;

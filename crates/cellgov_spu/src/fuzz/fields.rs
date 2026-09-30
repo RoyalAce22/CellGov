@@ -1,5 +1,7 @@
 //! Operand fields, their candidate values, and operand validity.
 
+use cellgov_ps3_abi::hw::spu_isa;
+
 use crate::instruction::{SpuInstruction, SpuInstructionKind};
 
 use super::types::{SpuEncodingForm, SpuFuzzDescriptor, SpuOperandClass, SpuOperandField};
@@ -77,6 +79,11 @@ fn field_candidates(
             (0x0000_3f80, C::Register),
             (0x001f_c000, C::Immediate),
         ],
+        F::Ri8 => vec![
+            (0x0000_007f, C::Register),
+            (0x0000_3f80, C::Register),
+            (0x003f_c000, C::Immediate),
+        ],
         F::Ri10 => vec![
             (0x0000_007f, C::Register),
             (0x0000_3f80, C::Register),
@@ -149,6 +156,13 @@ pub(super) fn operand_combination_is_valid(kind: SpuInstructionKind, word: u32) 
         K::Bisl | K::Biz | K::Binz | K::Bihz | K::Bihnz => word & 0x000c_0000 != 0x000c_0000,
         // [SPU-ISA p:192 s:8 Hint-for-Branch Instructions] P requires the split RO field to be zero.
         K::Hbr => word & 0x0010_0000 == 0 || word & 0x0000_c07f == 0,
+        // [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9]: an I8 whose scale falls outside 0..=127 has an undefined result.
+        K::Csflt | K::Cuflt => {
+            crate::exec::scale(spu_isa::TO_FLOAT_SCALE_BIAS, (word >> 14) as u8).is_some()
+        }
+        K::Cflts | K::Cfltu => {
+            crate::exec::scale(spu_isa::TO_INTEGER_SCALE_BIAS, (word >> 14) as u8).is_some()
+        }
         _ => true,
     }
 }

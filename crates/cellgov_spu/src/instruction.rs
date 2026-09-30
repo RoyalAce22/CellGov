@@ -1516,6 +1516,43 @@ pub enum SpuInstruction {
         /// Source register B, the base and step.
         rb: u8,
     },
+    // [SPU-ISA p:220 s:9 Conversions: Csflt p.220, Cflts p.221, Cuflt p.222, Cfltu p.223]
+    /// Convert signed integer to floating: per slot, `ra / 2^scale`.
+    Csflt {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// The I8 field; the scale is 155 less it.
+        imm: u8,
+    },
+    /// Convert floating to signed integer: per slot, `ra * 2^scale`, saturated.
+    Cflts {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// The I8 field; the scale is 173 less it.
+        imm: u8,
+    },
+    /// Convert unsigned integer to floating: per slot, `ra / 2^scale`.
+    Cuflt {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// The I8 field; the scale is 155 less it.
+        imm: u8,
+    },
+    /// Convert floating to unsigned integer: per slot, `ra * 2^scale`, saturated.
+    Cfltu {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// The I8 field; the scale is 173 less it.
+        imm: u8,
+    },
     // [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
     /// Write RA's defined bits into the FPSCR; RT is a false target.
     Fscrwr {

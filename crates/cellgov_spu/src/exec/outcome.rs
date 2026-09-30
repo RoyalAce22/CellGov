@@ -89,4 +89,10 @@ pub enum SpuFault {
     /// The word is the value the guest wrote.
     #[error("SPU reserved tag-status update request 0x{0:08x}")]
     ReservedTagUpdate(u32),
+    /// A conversion whose I8 field gives a scale outside 0..=127, where
+    /// the result is undefined.
+    ///
+    /// The byte is the I8 field.
+    #[error("SPU conversion I8 {0} gives an undefined scale")]
+    UndefinedConversionScale(u8),
 }

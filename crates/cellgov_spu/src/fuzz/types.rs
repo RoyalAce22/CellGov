@@ -14,6 +14,8 @@ pub enum SpuEncodingForm {
     Rrrr,
     /// Register plus 7-bit immediate.
     Ri7,
+    /// Register plus 8-bit immediate.
+    Ri8,
     /// Register plus 10-bit immediate.
     Ri10,
     /// Register plus 16-bit immediate.

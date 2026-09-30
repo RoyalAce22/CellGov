@@ -4,8 +4,8 @@
 use super::*;
 use cellgov_ps3_abi::hw::spu_isa::{row_named, SpuForm, SPU_OPCODE_MAP};
 
-/// The generator form an ISA format maps to, or `None` for a format with no
-/// generator form: RI8, and the hint format only the control family uses.
+/// The generator form an ISA format maps to, or `None` for the hint format
+/// only the control family uses.
 fn generator_form(form: SpuForm) -> Option<SpuEncodingForm> {
     match form {
         SpuForm::Rr => Some(SpuEncodingForm::Rrr),
@@ -14,11 +14,13 @@ fn generator_form(form: SpuForm) -> Option<SpuEncodingForm> {
         SpuForm::Ri10 => Some(SpuEncodingForm::Ri10),
         SpuForm::Ri16 => Some(SpuEncodingForm::Ri16),
         SpuForm::Ri18 => Some(SpuEncodingForm::Ri18),
-        SpuForm::Ri8 | SpuForm::Hint => None,
+        SpuForm::Ri8 => Some(SpuEncodingForm::Ri8),
+        SpuForm::Hint => None,
     }
 }
 
 // [SPU-ISA p:28 s:2.3] RR, RRR and RI7; [SPU-ISA p:29 s:2.3] RI10, RI16 and RI18.
+// [SPU-ISA p:220 s:9] RI8 is not a basic format; the conversions place I8 after a 10-bit opcode.
 #[test]
 fn every_kind_has_the_form_its_opcode_row_records() {
     for descriptor in generation_descriptors() {

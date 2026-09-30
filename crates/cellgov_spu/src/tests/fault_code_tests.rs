@@ -15,8 +15,8 @@
 
 use super::{
     guest_fault_for, EVERY_FAULT_CLASS, FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE,
-    FAULT_MFC_TAG_ID_OUT_OF_RANGE, FAULT_UNSUPPORTED_CHANNEL, FAULT_UNSUPPORTED_CHANNEL_COUNT,
-    FAULT_UNSUPPORTED_MFC_CMD,
+    FAULT_MFC_TAG_ID_OUT_OF_RANGE, FAULT_UNDEFINED_CONVERSION_SCALE, FAULT_UNSUPPORTED_CHANNEL,
+    FAULT_UNSUPPORTED_CHANNEL_COUNT, FAULT_UNSUPPORTED_MFC_CMD,
 };
 use crate::exec::SpuFault;
 use crate::SpuExecutionUnit;
@@ -70,6 +70,10 @@ fn every_variant_at_its_widest_detail() -> Vec<(SpuFault, u32)> {
         (
             SpuFault::TagIdOutOfRange(u32::MAX),
             FAULT_MFC_TAG_ID_OUT_OF_RANGE,
+        ),
+        (
+            SpuFault::UndefinedConversionScale(u8::MAX),
+            FAULT_UNDEFINED_CONVERSION_SCALE,
         ),
     ]
 }

@@ -317,10 +317,21 @@ fn generated_witnesses_and_structural_operations_preserve_kind() {
             probes.push(values);
         }
         for values in probes {
-            let word = descriptor
-                .encode(&values)
-                .expect("typed SPU operands must encode their selected kind");
-            assert_eq!(exact_kind(word), Some(descriptor.kind));
+            let packed = descriptor
+                .pack_operands(&values)
+                .expect("in-range operands pack");
+            if descriptor.operands_are_defined(packed) {
+                let word = descriptor
+                    .encode(&values)
+                    .expect("typed SPU operands must encode their selected kind");
+                assert_eq!(exact_kind(word), Some(descriptor.kind));
+            } else {
+                // An undefined combination, such as a conversion's I8 outside its scale range.
+                assert_eq!(
+                    descriptor.encode(&values),
+                    Err(SpuGenerationError::InvalidOperands)
+                );
+            }
         }
         if let Some(alias) = descriptor.alias_word(7) {
             saw_alias = true;
@@ -732,4 +743,38 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
             .outcomes,
         &[SpuOutcomeClass::Stop]
     );
+}
+
+// [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9]: a conversion's scale outside 0..=127 is undefined.
+#[test]
+fn a_conversion_is_generated_only_with_a_defined_scale() {
+    use cellgov_ps3_abi::hw::spu_isa::{TO_FLOAT_SCALE_BIAS, TO_INTEGER_SCALE_BIAS};
+    for descriptor in generation_descriptors() {
+        let bias = match descriptor.kind {
+            SpuInstructionKind::Csflt | SpuInstructionKind::Cuflt => TO_FLOAT_SCALE_BIAS,
+            SpuInstructionKind::Cflts | SpuInstructionKind::Cfltu => TO_INTEGER_SCALE_BIAS,
+            _ => continue,
+        };
+        let with_imm = |imm: u8| descriptor.canonical_word & !0x003f_c000 | u32::from(imm) << 14;
+        assert!(descriptor.operands_are_defined(descriptor.canonical_word));
+        assert_eq!(
+            descriptor.sequence_flow,
+            crate::fuzz::types::SpuSequenceFlow::Linear,
+            "{:?}",
+            descriptor.kind
+        );
+        for (imm, defined) in [
+            (bias - 127, true),
+            (bias, true),
+            (bias - 128, false),
+            (bias + 1, false),
+        ] {
+            assert_eq!(
+                descriptor.operands_are_defined(with_imm(imm)),
+                defined,
+                "{:?} I8 {imm}",
+                descriptor.kind
+            );
+        }
+    }
 }

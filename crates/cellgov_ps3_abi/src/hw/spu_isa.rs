@@ -78,6 +78,16 @@ const fn row(
     }
 }
 
+/// The I8 that gives `csflt` and `cuflt` scale 0: their scale is this
+/// value less I8.
+// [SPU-ISA p:220 s:9] csflt's scale is 155 minus I8; [SPU-ISA p:222 s:9] cuflt's is the same.
+pub const TO_FLOAT_SCALE_BIAS: u8 = 155;
+
+/// The I8 that gives `cflts` and `cfltu` scale 0: their scale is this
+/// value less I8.
+// [SPU-ISA p:221 s:9] cflts's scale is 173 minus I8; [SPU-ISA p:223 s:9] cfltu's is the same.
+pub const TO_INTEGER_SCALE_BIAS: u8 = 173;
+
 /// Every SPU ISA 1.2 instruction, ordered by opcode. No row's opcode is
 /// a prefix of another's, so a word matches at most one row.
 // [SPU-ISA p:259 s:A] Table A-1 lists every SPU instruction and the page that shows its encoding; each row carries that page, except where the table misprints it.

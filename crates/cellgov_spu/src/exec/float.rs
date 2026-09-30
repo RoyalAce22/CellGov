@@ -6,7 +6,9 @@
 use cellgov_float::{round_pack, unpack_extended, Binary32, Exact, Flags, Policy, Rounding};
 
 use super::lanes::{from_words, words};
-use super::outcome::SpuStepOutcome;
+use cellgov_ps3_abi::hw::spu_isa::{TO_FLOAT_SCALE_BIAS, TO_INTEGER_SCALE_BIAS};
+
+use super::outcome::{SpuFault, SpuStepOutcome};
 use crate::state::SpuState;
 
 /// Applies `op` to each word slot of the `sources` registers as
@@ -75,6 +77,86 @@ pub(super) fn interpolate(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuSt
     });
     state.regs[rt as usize] = from_words(results);
     state.fpscr_accumulate_single(flags);
+    SpuStepOutcome::Continue
+}
+
+/// The scale `bias - imm`, or `None` outside 0..=127, where every
+/// conversion's result is undefined.
+// [SPU-ISA p:220 s:9] a scale outside 0..=127 is undefined; [SPU-ISA p:221 s:9] the same for the integer conversions.
+pub(crate) fn scale(bias: u8, imm: u8) -> Option<u32> {
+    let scale = i32::from(bias) - i32::from(imm);
+    (0..=127).contains(&scale).then_some(scale as u32)
+}
+
+/// `csflt` / `cuflt`: each slot's integer divided by 2^scale, truncated
+/// to extended-range single precision.
+// [SPU-ISA p:196 s:9.1] csflt and cuflt set OVF, UNF and DIFF, truncating.
+pub(super) fn to_float(
+    state: &mut SpuState,
+    rt: u8,
+    ra: u8,
+    imm: u8,
+    signed: bool,
+) -> SpuStepOutcome {
+    let Some(scale) = scale(TO_FLOAT_SCALE_BIAS, imm) else {
+        return SpuStepOutcome::Fault(SpuFault::UndefinedConversionScale(imm));
+    };
+    let a = words(state.regs[ra as usize]);
+    let mut flags = [Flags::default(); 4];
+    let results = std::array::from_fn(|slot| {
+        let (negative, magnitude) = if signed {
+            let value = a[slot] as i32;
+            (value < 0, value.unsigned_abs())
+        } else {
+            (false, a[slot])
+        };
+        let exact = Exact::new(negative, u128::from(magnitude), -(scale as i32))
+            .expect("invariant: a 32-bit integer fits the exact significand");
+        let packed = round_pack::<Binary32>(Policy::SpuExtended, Rounding::TowardZero, exact);
+        flags[slot] = packed.flags;
+        packed.bits as u32
+    });
+    state.regs[rt as usize] = from_words(results);
+    state.fpscr_accumulate_single(flags);
+    SpuStepOutcome::Continue
+}
+
+/// `cflts` / `cfltu`: each slot's value times 2^scale, truncated toward
+/// zero and saturated to the integer range.
+// [SPU-ISA p:221 s:9] cflts saturates above 2^31 - 1 and below -2^31; [SPU-ISA p:223 s:9] cfltu saturates above 2^32 - 1 and every negative product to zero; [SPU-ISA p:196 s:9.1] truncation is the only single-precision rounding, and neither sets a flag.
+pub(super) fn to_integer(
+    state: &mut SpuState,
+    rt: u8,
+    ra: u8,
+    imm: u8,
+    signed: bool,
+) -> SpuStepOutcome {
+    let Some(scale) = scale(TO_INTEGER_SCALE_BIAS, imm) else {
+        return SpuStepOutcome::Fault(SpuFault::UndefinedConversionScale(imm));
+    };
+    let a = words(state.regs[ra as usize]);
+    state.regs[rt as usize] = from_words(a.map(|word| {
+        let (x, _) = unpack_extended::<Binary32>(u64::from(word));
+        // The magnitude truncated toward zero, or `None` at 2^33 and above.
+        let shift = x.exponent() + scale as i32;
+        let significand = x.significand();
+        let magnitude = if significand == 0 {
+            Some(0)
+        } else if shift >= 0 {
+            (128 - significand.leading_zeros() as i32 + shift <= 33).then(|| significand << shift)
+        } else {
+            Some(significand.checked_shr(shift.unsigned_abs()).unwrap_or(0))
+        };
+        match (signed, x.negative(), magnitude) {
+            (true, false, Some(m)) if m <= i32::MAX as u128 => m as u32,
+            (true, false, _) => i32::MAX as u32,
+            (true, true, Some(m)) if m <= 1 << 31 => (m as u32).wrapping_neg(),
+            (true, true, _) => i32::MIN as u32,
+            (false, false, Some(m)) if m <= u128::from(u32::MAX) => m as u32,
+            (false, false, _) => u32::MAX,
+            (false, true, _) => 0,
+        }
+    }));
     SpuStepOutcome::Continue
 }
 

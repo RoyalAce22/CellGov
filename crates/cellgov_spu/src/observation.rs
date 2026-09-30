@@ -246,6 +246,8 @@ impl SpuAllowedFootprint {
                     | SpuInstruction::Frest { .. }
                     | SpuInstruction::Frsqest { .. }
                     | SpuInstruction::Fi { .. }
+                    | SpuInstruction::Csflt { .. }
+                    | SpuInstruction::Cuflt { .. }
             ),
             effects: instruction
                 .fuzz_descriptor()
@@ -465,7 +467,11 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Fnms { rt, .. }
             | SpuInstruction::Frest { rt, .. }
             | SpuInstruction::Frsqest { rt, .. }
-            | SpuInstruction::Fi { rt, .. } => Some(rt),
+            | SpuInstruction::Fi { rt, .. }
+            | SpuInstruction::Csflt { rt, .. }
+            | SpuInstruction::Cflts { rt, .. }
+            | SpuInstruction::Cuflt { rt, .. }
+            | SpuInstruction::Cfltu { rt, .. } => Some(rt),
         };
         if let Some(register) = register {
             footprint.registers.insert(register);

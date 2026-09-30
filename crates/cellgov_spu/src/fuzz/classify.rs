@@ -1,7 +1,7 @@
 //! The encoding-form, effect and outcome classifiers, and the sequence-flow helper.
 
 use cellgov_effects::EffectKind;
-use cellgov_ps3_abi::hw::spu;
+use cellgov_ps3_abi::hw::{spu, spu_isa};
 
 use crate::instruction::{SpuInstruction, SpuInstructionKind};
 
@@ -51,6 +51,15 @@ pub(super) fn sequence_flow(outcomes: &[SpuOutcomeClass]) -> SpuSequenceFlow {
         SpuSequenceFlow::StateDependent
     } else {
         SpuSequenceFlow::Linear
+    }
+}
+
+/// The outcome of a conversion whose scale is `scale`.
+fn scaled(scale: Option<u32>) -> &'static [SpuOutcomeClass] {
+    if scale.is_some() {
+        CONTINUE
+    } else {
+        FAULT
     }
 }
 
@@ -145,6 +154,15 @@ pub(super) fn effect_and_outcome(
         | SpuInstruction::Hgti { .. }
         | SpuInstruction::Hlgt { .. }
         | SpuInstruction::Hlgti { .. } => (NO_EFFECTS, CONTINUE_OR_STOP),
+        // An I8 outside the defined scale range is a refusal.
+        SpuInstruction::Csflt { imm, .. } | SpuInstruction::Cuflt { imm, .. } => (
+            NO_EFFECTS,
+            scaled(crate::exec::scale(spu_isa::TO_FLOAT_SCALE_BIAS, imm)),
+        ),
+        SpuInstruction::Cflts { imm, .. } | SpuInstruction::Cfltu { imm, .. } => (
+            NO_EFFECTS,
+            scaled(crate::exec::scale(spu_isa::TO_INTEGER_SCALE_BIAS, imm)),
+        ),
         _ => (NO_EFFECTS, CONTINUE),
     }
 }
@@ -205,6 +223,7 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
             SpuEncodingForm::Ri16
         }
         K::Ila => SpuEncodingForm::Ri18,
+        K::Csflt | K::Cflts | K::Cuflt | K::Cfltu => SpuEncodingForm::Ri8,
         K::Br
         | K::Brsl
         | K::Bra
@@ -411,6 +430,10 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Fnms
         | SpuInstructionKind::Frest
         | SpuInstructionKind::Frsqest
-        | SpuInstructionKind::Fi => {}
+        | SpuInstructionKind::Fi
+        | SpuInstructionKind::Csflt
+        | SpuInstructionKind::Cflts
+        | SpuInstructionKind::Cuflt
+        | SpuInstructionKind::Cfltu => {}
     }
 }

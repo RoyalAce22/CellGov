@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use cellgov_ps3_abi::hw::spu_isa;
 use strum::VariantArray;
 
 use crate::instruction::SpuInstructionKind;
@@ -34,14 +35,14 @@ fn build_generation_descriptors() -> Vec<SpuGenerationDescriptor> {
     let mut words = BTreeMap::new();
     // Each opcode-map row's opcode with every field zero supplies the
     // canonical register values; a row CellGov does not decode has no kind.
-    for row in cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP {
-        let raw = row.canonical_word();
-        let Ok(instruction) = crate::decode::decode(raw) else {
+    for row in spu_isa::SPU_OPCODE_MAP {
+        let Ok(instruction) = crate::decode::decode(row.canonical_word()) else {
             continue;
         };
+        let kind = SpuInstructionKind::from(instruction);
         words
-            .entry(SpuInstructionKind::from(instruction))
-            .or_insert(raw);
+            .entry(kind)
+            .or_insert(row.canonical_word() | canonical_immediate(kind));
     }
     words
         .into_iter()
@@ -58,6 +59,21 @@ fn build_generation_descriptors() -> Vec<SpuGenerationDescriptor> {
             })
         })
         .collect()
+}
+
+/// The immediate bits a kind's canonical word carries beside its opcode.
+///
+/// A conversion's zero I8 names an undefined scale, so its canonical word
+/// takes scale 0, where the result is defined.
+fn canonical_immediate(kind: SpuInstructionKind) -> u32 {
+    use SpuInstructionKind as K;
+    let imm = match kind {
+        K::Csflt | K::Cuflt => spu_isa::TO_FLOAT_SCALE_BIAS,
+        K::Cflts | K::Cfltu => spu_isa::TO_INTEGER_SCALE_BIAS,
+        _ => return 0,
+    };
+    // [SPU-ISA p:220 s:9] I8 sits in bits 10:17.
+    u32::from(imm) << 14
 }
 
 /// Lists every decoded SPU kind without consulting generator recipes.
