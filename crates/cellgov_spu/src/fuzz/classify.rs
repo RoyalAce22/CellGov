@@ -438,6 +438,9 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Fceq
         | SpuInstructionKind::Fcmeq
         | SpuInstructionKind::Fcgt
-        | SpuInstructionKind::Fcmgt => {}
+        | SpuInstructionKind::Fcmgt
+        | SpuInstructionKind::Dfa
+        | SpuInstructionKind::Dfs
+        | SpuInstructionKind::Dfm => {}
     }
 }

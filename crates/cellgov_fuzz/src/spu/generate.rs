@@ -275,6 +275,9 @@ pub(super) fn random_state(rng: &mut Rng) -> Result<SpuState, FuzzError> {
     } else {
         None
     };
+    // The rounding fields and sticky flags vary like the registers do.
+    let fpscr = u128::from(rng.next_u64()) << 64 | u128::from(rng.next_u64());
+    state.fpscr = fpscr & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED;
     Ok(state)
 }
 

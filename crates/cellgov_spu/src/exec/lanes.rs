@@ -1,4 +1,5 @@
-//! A 128-bit register as its eight halfwords or four words, slot 0 the
+//! A 128-bit register as its eight halfwords, four words or two
+//! doublewords, slot 0 the
 //! leftmost, each big-endian.
 
 // [SPU-ISA p:16 s:Preface] bytes are numbered in ascending order from left to right, big-endian.
@@ -24,6 +25,16 @@ pub(super) fn words(reg: [u8; 16]) -> [u32; 4] {
 /// The register whose words are `w`.
 pub(super) fn from_words(w: [u32; 4]) -> [u8; 16] {
     std::array::from_fn(|i| w[i / 4].to_be_bytes()[i % 4])
+}
+
+/// The two doublewords of `reg`.
+pub(super) fn doublewords(reg: [u8; 16]) -> [u64; 2] {
+    std::array::from_fn(|i| u64::from_be_bytes(std::array::from_fn(|byte| reg[8 * i + byte])))
+}
+
+/// The register whose doublewords are `d`.
+pub(super) fn from_doublewords(d: [u64; 2]) -> [u8; 16] {
+    std::array::from_fn(|i| d[i / 8].to_be_bytes()[i % 8])
 }
 
 #[cfg(test)]

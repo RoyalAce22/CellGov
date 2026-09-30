@@ -1590,6 +1590,34 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
+    // [SPU-ISA p:203 s:9 Double-precision arithmetic: Dfa p.203, Dfs p.205, Dfm p.207]
+    /// Double floating add: per doubleword slot, `ra + rb`, rounded by the slot's FPSCR mode.
+    Dfa {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Double floating subtract: per doubleword slot, `ra - rb`, rounded by the slot's FPSCR mode.
+    Dfs {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Double floating multiply: per doubleword slot, `ra * rb`, rounded by the slot's FPSCR mode.
+    Dfm {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
     // [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
     /// Write RA's defined bits into the FPSCR; RT is a false target.
     Fscrwr {

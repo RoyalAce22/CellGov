@@ -1143,6 +1143,18 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         SpuInstruction::Fcmgt { rt, ra, rb } => super::float::compare(state, rt, ra, rb, |a, b| {
             extended_magnitude_key(a) > extended_magnitude_key(b)
         }),
+        // [SPU-ISA p:203 s:9. Floating-Point Instructions] Double Floating Add: RA + RB per doubleword slot.
+        SpuInstruction::Dfa { rt, ra, rb } => {
+            super::double::double(state, rt, ra, rb, super::double::DoubleOp::Add)
+        }
+        // [SPU-ISA p:205 s:9. Floating-Point Instructions] Double Floating Subtract: RA - RB per doubleword slot.
+        SpuInstruction::Dfs { rt, ra, rb } => {
+            super::double::double(state, rt, ra, rb, super::double::DoubleOp::Subtract)
+        }
+        // [SPU-ISA p:207 s:9. Floating-Point Instructions] Double Floating Multiply: RA x RB per doubleword slot.
+        SpuInstruction::Dfm { rt, ra, rb } => {
+            super::double::double(state, rt, ra, rb, super::double::DoubleOp::Multiply)
+        }
         // [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
         SpuInstruction::Fscrwr { ra } => {
             state.fpscr = u128::from_be_bytes(state.regs[ra as usize])
@@ -1311,3 +1323,7 @@ mod conversion_tests;
 #[cfg(test)]
 #[path = "tests/float_compare_tests.rs"]
 mod float_compare_tests;
+
+#[cfg(test)]
+#[path = "tests/double_float_tests.rs"]
+mod double_float_tests;

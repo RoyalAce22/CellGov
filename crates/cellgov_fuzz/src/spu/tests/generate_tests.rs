@@ -71,3 +71,23 @@ fn structured_generation_selects_every_interaction_with_bounded_linked_parameter
     }
     assert_eq!(reached, BTreeSet::from(SpuSequenceInteraction::ALL));
 }
+
+// [SPU-ISA p:200 s:9.3] RN0 and RN1 each name one of four modes.
+#[test]
+fn random_states_draw_every_rounding_mode_in_both_slices() {
+    use cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED;
+    let mut seen = [[false; 4]; 2];
+    for case in 0..64 {
+        let mut rng = Rng::for_case(crate::CAMPAIGN_VERSION, 11, case);
+        let state = random_state(&mut rng).unwrap();
+        assert_eq!(
+            state.fpscr & !FPSCR_DEFINED,
+            0,
+            "only defined bits are drawn"
+        );
+        for (slice, mode) in state.fpscr_rounding().into_iter().enumerate() {
+            seen[slice][mode as usize] = true;
+        }
+    }
+    assert_eq!(seen, [[true; 4]; 2]);
+}
