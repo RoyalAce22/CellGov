@@ -32,10 +32,10 @@ pub fn generation_descriptor(raw: u32) -> Option<SpuGenerationDescriptor> {
 
 fn build_generation_descriptors() -> Vec<SpuGenerationDescriptor> {
     let mut words = BTreeMap::new();
-    // Scanning every upper 18-bit value covers each opcode family.
-    // Zero in the low 14 bits supplies canonical register values.
-    for upper in 0..(1u32 << 18) {
-        let raw = upper << 14;
+    // Each opcode-map row's opcode with every field zero supplies the
+    // canonical register values; a row CellGov does not decode has no kind.
+    for row in cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP {
+        let raw = row.canonical_word();
         let Ok(instruction) = crate::decode::decode(raw) else {
             continue;
         };
