@@ -9,6 +9,7 @@ mod entry;
 mod error;
 mod evaluate;
 mod outcome;
+mod reference;
 mod scan;
 mod smoke;
 
@@ -38,3 +39,7 @@ mod smoke_tests;
 #[cfg(test)]
 #[path = "tests/census_tests.rs"]
 mod census_tests;
+
+#[cfg(test)]
+#[path = "tests/reference_tests.rs"]
+mod reference_tests;

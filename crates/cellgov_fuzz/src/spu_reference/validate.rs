@@ -275,8 +275,16 @@ impl SpuReferenceArtifact {
 }
 
 pub(super) fn valid_spu_citation(citation: &str) -> bool {
-    let Some((page, section)) = citation
-        .strip_prefix("SPU-ISA p:")
+    citation
+        .strip_prefix("SPU-ISA ")
+        .is_some_and(valid_page_and_section)
+}
+
+/// Whether `rest` is `p:N s:SECTION`, with a canonical nonzero page
+/// number and a trimmed, nonblank section.
+pub(super) fn valid_page_and_section(rest: &str) -> bool {
+    let Some((page, section)) = rest
+        .strip_prefix("p:")
         .and_then(|remainder| remainder.split_once(" s:"))
     else {
         return false;

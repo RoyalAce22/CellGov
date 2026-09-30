@@ -11,6 +11,7 @@ use super::campaign::run_campaign;
 use super::census::{run_census, run_census_merge};
 use super::error::FuzzCliError;
 use super::evaluate::{run_compare, run_evaluate};
+use super::reference::run_spu_reference;
 use super::scan::{run_raw, run_semantic};
 use super::smoke::{run_promote, run_smoke};
 use crate::cli::exit::{CommandError, CommandExitCode};
@@ -75,6 +76,7 @@ pub(super) fn run_inner_with_render(
         FuzzCommand::Compare(args) => run_compare(args),
         FuzzCommand::Smoke(args) => run_smoke(args, quiet),
         FuzzCommand::Promote(args) => run_promote(args),
+        FuzzCommand::SpuReference(args) => run_spu_reference(args),
     }
 }
 

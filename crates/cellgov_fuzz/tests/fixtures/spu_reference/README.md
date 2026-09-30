@@ -22,6 +22,30 @@ For a hardware capture:
 A valid hash alone does not prove the source. You can compare an external
 emulator separately, but its name does not make it hardware evidence.
 
+## Completeness
+
+Every SPU unit has exactly one file here or one line in `pending.txt`.
+The units come from their sources:
+
+- every row of the SPU opcode map, and the unassigned words;
+- every defined channel, and the reserved channel numbers;
+- every MFC command the SPU queue accepts, and every other opcode;
+- every multi-step facility.
+
+A file for a unit deletes that unit's line from `pending.txt`. A file
+for no unit, two files for one unit, and a pending line for a unit that
+has a file each fail. A single-vector file of one instruction word
+covers the opcode-map row that word selects.
+
+`cellgov dev fuzz spu-reference <DIR>` replays every file, prints each
+vector's result and the units with no file, and exits nonzero on any
+difference or gap. The `spu_reference_campaign` test runs the same
+check over this directory.
+
+A documented vector cites SPU-ISA, CBEA or CBE-Handbook by printed page
+and section. Resolve each citation with the citation resolver before
+commit.
+
 ## File layout
 
 One file covers one architectural unit, named in `unit`:

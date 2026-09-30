@@ -100,6 +100,44 @@ pub enum SpuReferenceFacility {
     DmaLocalStoreWindow,
 }
 
+impl SpuReferenceFacility {
+    /// Every facility, in declaration order.
+    pub const ALL: [Self; 13] = [
+        Self::StartState,
+        Self::LslrWrap,
+        Self::CommandQueue,
+        Self::ParameterValidation,
+        Self::TranslationErrors,
+        Self::ListDma,
+        Self::Reservation,
+        Self::TagGroups,
+        Self::Events,
+        Self::Interrupts,
+        Self::ProblemState,
+        Self::CrossSpuAliases,
+        Self::DmaLocalStoreWindow,
+    ];
+
+    /// The name a reference file writes.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::StartState => "start_state",
+            Self::LslrWrap => "lslr_wrap",
+            Self::CommandQueue => "command_queue",
+            Self::ParameterValidation => "parameter_validation",
+            Self::TranslationErrors => "translation_errors",
+            Self::ListDma => "list_dma",
+            Self::Reservation => "reservation",
+            Self::TagGroups => "tag_groups",
+            Self::Events => "events",
+            Self::Interrupts => "interrupts",
+            Self::ProblemState => "problem_state",
+            Self::CrossSpuAliases => "cross_spu_aliases",
+            Self::DmaLocalStoreWindow => "dma_local_store_window",
+        }
+    }
+}
+
 /// One named vector: a program, its start state and world, a step
 /// bound, and the expected end.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

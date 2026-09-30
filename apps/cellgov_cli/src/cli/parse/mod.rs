@@ -35,6 +35,7 @@ pub(crate) use fuzz::{
     FuzzArgs, FuzzCampaignArgs, FuzzCensusArgs, FuzzCensusMergeArgs, FuzzCheck, FuzzCommand,
     FuzzCompareArgs, FuzzEvaluateArgs, FuzzPromoteArgs, FuzzRawArgs, FuzzRawDecoder, FuzzReduction,
     FuzzRegressionProfile, FuzzReplayArgs, FuzzSemanticArgs, FuzzSemanticTarget, FuzzSmokeArgs,
+    FuzzSpuReferenceArgs,
 };
 #[cfg(test)]
 pub(crate) use fuzz::{FuzzEvaluateEngine, FuzzReductionPolicy, FuzzStrategy};

@@ -21,8 +21,22 @@ use super::set_types::{
 };
 use super::types::{SpuReferenceError, SPU_REFERENCE_SCHEMA_VERSION};
 use super::validate::{
-    parse_fpscr, parse_index, parse_reference_json, parse_register, valid_spu_citation,
+    parse_fpscr, parse_index, parse_reference_json, parse_register, valid_page_and_section,
 };
+
+/// Documents an SPU vector cites, each paged by printed page number.
+const REFERENCE_DOCUMENTS: [&str; 3] = ["SPU-ISA", "CBEA", "CBE-Handbook"];
+
+/// Whether `citation` is `KEY p:N s:SECTION` for one of the SPU
+/// documents, with a canonical page number and a trimmed section.
+pub(super) fn valid_reference_citation(citation: &str) -> bool {
+    REFERENCE_DOCUMENTS.iter().any(|key| {
+        citation
+            .strip_prefix(key)
+            .and_then(|rest| rest.strip_prefix(' '))
+            .is_some_and(valid_page_and_section)
+    })
+}
 
 /// Parses and validates a vector set.
 pub fn parse_reference_set_json(json: &str) -> Result<SpuReferenceSet, SpuReferenceError> {
@@ -212,7 +226,7 @@ impl SpuReferenceUnit {
 impl SpuReferenceVector {
     fn validate(&self) -> Result<(), SpuReferenceError> {
         self.provenance
-            .check(valid_spu_citation)
+            .check(valid_reference_citation)
             .map_err(|_| invalid("provenance"))?;
         let start = &self.initial_state;
         require(

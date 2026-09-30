@@ -211,7 +211,7 @@ fn every_new_field_refuses_a_malformed_value_by_name() {
         }),
         ("vectors.name", |j| j["vectors"][0]["name"] = " ".into()),
         ("provenance", |j| {
-            j["vectors"][0]["provenance"]["citation"] = "CBEA p:1 s:1".into()
+            j["vectors"][0]["provenance"]["citation"] = "PPC-Book1 p:1 s:1".into()
         }),
         ("words", |j| j["vectors"][0]["words"] = json!([])),
         ("words", |j| {
