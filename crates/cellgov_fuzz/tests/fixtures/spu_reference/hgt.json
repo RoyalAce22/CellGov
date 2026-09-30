@@ -1,0 +1,338 @@
+{
+  "schema_version": 6,
+  "unit": {
+    "kind": "instruction",
+    "mnemonic": "hgt"
+  },
+  "vectors": [
+    {
+      "name": "met-by-preferred-slot",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:152 s:7. Compare, Branch, and Halt Instructions",
+        "vector_id": "hgt-met-by-preferred-slot"
+      },
+      "words": [
+        1258356995
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "2": "80000000000000010000000200000003",
+          "4": "7fffffff000000010000000200000003"
+        },
+        "local_store": [],
+        "pc": 256
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 260
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "not-met",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:152 s:7. Compare, Branch, and Halt Instructions",
+        "vector_id": "hgt-not-met"
+      },
+      "words": [
+        1258356995
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "2": "7fffffff000000010000000200000003",
+          "4": "80000000000000010000000200000003"
+        },
+        "local_store": [],
+        "pc": 256
+      },
+      "step_limit": 2,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stopped"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "one_of",
+          "values": [
+            260,
+            264
+          ],
+          "chosen": 0,
+          "reason": "a halt stops at or after the halt (SPU-ISA p:152); the word after it is a stop, so the halt or that stop is the recorded stop"
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "one_of",
+          "values": [
+            {
+              "kind": "halt",
+              "code": 0,
+              "npc": 260,
+              "interrupts_enabled": false
+            },
+            {
+              "kind": "stop",
+              "code": 0,
+              "npc": 264,
+              "interrupts_enabled": false
+            }
+          ],
+          "chosen": 0,
+          "reason": "a halt stops at or after the halt (SPU-ISA p:152); the word after it is a stop, so the halt or that stop is the recorded stop"
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "equal-preferred-slot",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:152 s:7. Compare, Branch, and Halt Instructions",
+        "vector_id": "hgt-equal-preferred-slot"
+      },
+      "words": [
+        1258356995
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "2": "00001234000000090000000900000009",
+          "4": "00001234000000080000000800000008"
+        },
+        "local_store": [],
+        "pc": 256
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 260
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    }
+  ]
+}
