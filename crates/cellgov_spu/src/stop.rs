@@ -34,22 +34,31 @@ pub struct SpuStop {
 }
 
 impl SpuStop {
-    /// The stop an instruction at `pc` records. The SPU resumes at the
-    /// next word, masked by `lslr`. `signal` is the instruction's stop
-    /// code; only `Stop` keeps it.
+    /// The stop an instruction at `pc` records, masked by `lslr`.
+    /// `signal` is the instruction's stop code; only `Stop` keeps it.
+    ///
+    /// A stop, stopd or halt ran, so the SPU resumes at the next word.
+    /// An invalid instruction or channel instruction did not run, so the
+    /// SPU resumes at that same word; the documents leave an SPU error's
+    /// resume address open, and this is CellGov's choice.
     // [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR, precise stop.
     // [SPU-ISA p:239 s:10] stopd: the same RTL.
     // [CBEA p:93 s:8.5.2] stopd always reports code x'3FFF'.
+    // [CBEA p:95 s:8.5.3] SPU_NPC holds the next instruction to run when the SPU restarts.
     pub fn new(kind: SpuStopKind, signal: u16, pc: u32, lslr: u32) -> Self {
         let code = match kind {
             SpuStopKind::Stop => signal & SPU_STOP_CODE_MASK as u16,
             SpuStopKind::Stopd => SPU_STOPD_CODE,
             SpuStopKind::Halt | SpuStopKind::InvalidInstruction | SpuStopKind::InvalidChannel => 0,
         };
+        let resume = match kind {
+            SpuStopKind::Stop | SpuStopKind::Stopd | SpuStopKind::Halt => pc.wrapping_add(4),
+            SpuStopKind::InvalidInstruction | SpuStopKind::InvalidChannel => pc,
+        };
         Self {
             kind,
             code,
-            npc: pc.wrapping_add(4) & lslr & !3,
+            npc: resume & lslr & !3,
         }
     }
 

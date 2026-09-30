@@ -10,9 +10,11 @@ use cellgov_exec::{ExecutionStepResult, LocalDiagnostics, YieldReason};
 use cellgov_mem::GuestMemory;
 use cellgov_time::{Budget, InstructionCost};
 
-/// A class no PPU arm names. The SPU's local-store class has this
-/// value; its constant is private to `cellgov_spu`.
-const UNNAMED_CLASS: u32 = 0x0002_0000;
+/// A class neither the PPU arms nor `cellgov_spu` names.
+const UNNAMED_CLASS: u32 = 0x000F_0000;
+
+/// The SPU's local-store class; its constant is private to `cellgov_spu`.
+const SPU_LS_CLASS: u32 = 0x0002_0000;
 
 fn render(diag: LocalDiagnostics, code: u32) -> String {
     let rt = Runtime::new(GuestMemory::new(0x1000), Budget::new(1), 100);
@@ -33,7 +35,7 @@ fn an_unnamed_fault_renders_the_address_its_detail_half_truncated() {
         LocalDiagnostics::with_pc_ea(0x4, 0x3_FF00),
         UNNAMED_CLASS | 0xFF00,
     );
-    let want = "Guest(0x0002ff00) at PC=0x00000004 (ea=0x0003ff00)";
+    let want = "Guest(0x000fff00) at PC=0x00000004 (ea=0x0003ff00)";
     assert!(out.contains(want), "got {out}");
 }
 
@@ -50,7 +52,7 @@ fn an_unnamed_fault_renders_a_64_bit_address_whole() {
 fn an_unnamed_fault_without_an_address_names_none() {
     let out = render(LocalDiagnostics::with_pc(0x3_FFFC), UNNAMED_CLASS);
     assert!(
-        out.contains("Guest(0x00020000) at PC=0x0003fffc"),
+        out.contains("Guest(0x000f0000) at PC=0x0003fffc"),
         "got {out}"
     );
     assert!(!out.contains("(ea="), "got {out}");
@@ -66,4 +68,15 @@ fn an_alignment_interrupt_names_itself_and_its_address() {
         out.contains("ALIGNMENT_INTERRUPT at PC=0x00000010 (ea=0x00020003)"),
         "got {out}"
     );
+}
+
+#[test]
+fn an_spu_fault_class_is_named_by_the_spu_crate() {
+    let out = render(
+        LocalDiagnostics::with_pc_ea(0x4, 0x3_FF00),
+        SPU_LS_CLASS | 0xFF00,
+    );
+    let want =
+        "Guest(0x0002ff00) SPU_LS_OUT_OF_RANGE (detail=0xff00) at PC=0x00000004 (ea=0x0003ff00)";
+    assert!(out.contains(want), "got {out}");
 }

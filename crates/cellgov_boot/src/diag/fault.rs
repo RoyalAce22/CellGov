@@ -76,12 +76,20 @@ pub(crate) fn format_fault(
                 FAULT_INVALID_FORM => format!("INVALID_FORM at PC={pc_str}"),
                 FAULT_DEBUG_BREAK => format!("DEBUG_BREAK at PC={pc_str}"),
                 // The SPU's classes land here: their constants are private
-                // to `cellgov_spu`. The detail half holds at most the low
-                // 16 bits of an address; `faulting_ea` holds it whole.
-                _ => match result.local_diagnostics.faulting_ea {
-                    Some(_) => format!("Guest(0x{code:08x}) at PC={pc_str} (ea={ea_str})"),
-                    None => format!("Guest(0x{code:08x}) at PC={pc_str}"),
-                },
+                // to `cellgov_spu`, which names them. The detail half holds
+                // at most the low 16 bits of an address; `faulting_ea`
+                // holds it whole.
+                _ => {
+                    let name = cellgov_spu::describe_guest_fault(*code)
+                        .map(|name| format!(" {name}"))
+                        .unwrap_or_default();
+                    match result.local_diagnostics.faulting_ea {
+                        Some(_) => {
+                            format!("Guest(0x{code:08x}){name} at PC={pc_str} (ea={ea_str})")
+                        }
+                        None => format!("Guest(0x{code:08x}){name} at PC={pc_str}"),
+                    }
+                }
             }
         }
         _ => format!("Validation at PC={pc_str}"),

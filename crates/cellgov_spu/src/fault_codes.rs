@@ -28,7 +28,11 @@ pub(crate) const FAULT_UNSUPPORTED_CHANNEL: u32 = 0x0003_0000;
 /// the low byte, so the masked detail still names the command.
 // [CBE-Handbook p:457 s:17.9.6 MFC Class ID and MFC Command Opcode Channel] The word written to this channel carries the transfer and replacement class ids in its high half and the MFC command opcode in its low byte.
 pub(crate) const FAULT_UNSUPPORTED_MFC_CMD: u32 = 0x0004_0000;
-pub(crate) const FAULT_DECODE_ERROR: u32 = 0x0005_0000;
+/// An SPU instruction CellGov does not implement. The detail is the
+/// instruction's row in [`cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP`], which
+/// [`describe_guest_fault`] names. A word that is not an SPU instruction
+/// is not a fault: it stops the SPU.
+pub(crate) const FAULT_UNIMPLEMENTED_INSN: u32 = 0x0005_0000;
 /// A refused `rchcnt`, distinct from a refused `rdch` / `wrch` on the
 /// same channel.
 pub(crate) const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
@@ -63,7 +67,7 @@ const EVERY_FAULT_CLASS: [u32; 8] = [
     FAULT_LS_OUT_OF_RANGE,
     FAULT_UNSUPPORTED_CHANNEL,
     FAULT_UNSUPPORTED_MFC_CMD,
-    FAULT_DECODE_ERROR,
+    FAULT_UNIMPLEMENTED_INSN,
     FAULT_UNSUPPORTED_CHANNEL_COUNT,
     FAULT_MFC_GET_UNRESOLVED,
     FAULT_MFC_TAG_ID_OUT_OF_RANGE,
@@ -110,6 +114,30 @@ pub(crate) fn guest_fault_for(fault: SpuFault) -> FaultKind {
     }
 }
 
+/// A reader's name for an SPU guest fault code, or `None` for a code
+/// this crate does not raise. An unimplemented instruction is named by
+/// its mnemonic.
+pub fn describe_guest_fault(code: u32) -> Option<String> {
+    let detail = code & FAULT_DETAIL_MASK;
+    let name = match code & !FAULT_DETAIL_MASK {
+        FAULT_UNIMPLEMENTED_INSN => {
+            let mnemonic = cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP
+                .get(detail as usize)
+                .map_or("<unknown row>", |row| row.mnemonic);
+            return Some(format!("SPU_UNIMPLEMENTED_INSN ({mnemonic})"));
+        }
+        FAULT_LS_OUT_OF_RANGE => "SPU_LS_OUT_OF_RANGE",
+        FAULT_UNSUPPORTED_CHANNEL => "SPU_UNSUPPORTED_CHANNEL",
+        FAULT_UNSUPPORTED_MFC_CMD => "SPU_UNSUPPORTED_MFC_CMD",
+        FAULT_UNSUPPORTED_CHANNEL_COUNT => "SPU_UNSUPPORTED_CHANNEL_COUNT",
+        FAULT_MFC_GET_UNRESOLVED => "SPU_MFC_GET_UNRESOLVED",
+        FAULT_MFC_TAG_ID_OUT_OF_RANGE => "SPU_MFC_TAG_ID_OUT_OF_RANGE",
+        FAULT_MFC_READ_UNRESOLVED => "SPU_MFC_READ_UNRESOLVED",
+        _ => return None,
+    };
+    Some(format!("{name} (detail=0x{detail:04x})"))
+}
+
 /// One guest fault: `class` in the high half of the code, `detail`
 /// masked into the low half.
 ///
@@ -127,3 +155,7 @@ pub(crate) fn guest_fault(class: u32, detail: u32) -> FaultKind {
 #[cfg(test)]
 #[path = "tests/fault_code_tests.rs"]
 mod fault_code_tests;
+
+#[cfg(test)]
+#[path = "tests/describe_fault_tests.rs"]
+mod describe_fault_tests;

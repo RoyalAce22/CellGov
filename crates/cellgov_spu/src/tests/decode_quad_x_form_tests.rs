@@ -32,7 +32,7 @@ fn only_lqx_decodes_under_its_prefix() {
             );
         } else {
             assert!(
-                matches!(decoded, Err(SpuDecodeError::Unsupported(_))),
+                matches!(decoded, Err(SpuDecodeError::Unassigned(_))),
                 "op11 0x{op11:03x} decoded as {decoded:?}",
             );
         }
@@ -55,7 +55,7 @@ fn only_stqx_and_stopd_decode_under_their_prefix() {
             ),
             0x140 => assert_eq!(decoded, Ok(SpuInstruction::Stopd)),
             _ => assert!(
-                matches!(decoded, Err(SpuDecodeError::Unsupported(_))),
+                matches!(decoded, Err(SpuDecodeError::Unassigned(_))),
                 "op11 0x{op11:03x} decoded as {decoded:?}",
             ),
         }

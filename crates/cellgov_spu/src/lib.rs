@@ -28,6 +28,7 @@ pub mod state;
 pub mod stop;
 mod unit;
 
+pub use fault_codes::describe_guest_fault;
 pub use unit::{SpuExecutionUnit, SpuSnapshot};
 
 #[cfg(test)]

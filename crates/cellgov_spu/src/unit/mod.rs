@@ -42,3 +42,7 @@ mod local_memory_hash_tests;
 #[cfg(test)]
 #[path = "tests/stop_restart_tests.rs"]
 mod stop_restart_tests;
+
+#[cfg(test)]
+#[path = "tests/invalid_instruction_tests.rs"]
+mod invalid_instruction_tests;

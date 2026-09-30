@@ -443,7 +443,7 @@ fn documented_vector_citations_are_exact_spu_isa_references() {
 
 #[test]
 fn error_display_text_is_pinned() {
-    let decode_source = SpuDecodeError::Unsupported(u32::MAX);
+    let decode_source = SpuDecodeError::for_word(u32::MAX);
     let cases = [
         (
             SpuReferenceError::Version {
@@ -463,7 +463,7 @@ fn error_display_text_is_pinned() {
         (
             SpuReferenceError::Decode {
                 pc: 4,
-                source: SpuDecodeError::Unsupported(u32::MAX),
+                source: SpuDecodeError::for_word(u32::MAX),
             },
             format!("SPU reference instruction at PC 0x00000004 did not decode: {decode_source}"),
         ),
@@ -473,7 +473,7 @@ fn error_display_text_is_pinned() {
     }
     let decode = SpuReferenceError::Decode {
         pc: 4,
-        source: SpuDecodeError::Unsupported(u32::MAX),
+        source: SpuDecodeError::for_word(u32::MAX),
     };
     assert_eq!(
         std::error::Error::source(&decode).map(ToString::to_string),
@@ -1164,7 +1164,10 @@ fn replay_names_the_program_counter_of_a_later_undecodable_word() {
         error,
         SpuReferenceError::Decode {
             pc: 4,
-            source: SpuDecodeError::Unsupported(u32::MAX)
+            source: SpuDecodeError::Unimplemented {
+                raw: u32::MAX,
+                mnemonic: "fms"
+            }
         }
     ));
 }

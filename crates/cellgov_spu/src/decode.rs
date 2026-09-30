@@ -19,8 +19,9 @@ use crate::instruction::{SpuDecodeError, SpuInstruction};
 ///
 /// # Errors
 ///
-/// Returns [`SpuDecodeError::Unsupported`] for encodings not
-/// implemented.
+/// Returns [`SpuDecodeError::Unassigned`] for a word that is not an SPU
+/// instruction and [`SpuDecodeError::Unimplemented`] for an instruction
+/// CellGov does not implement.
 pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
     let op4 = (raw >> 28) & 0xF;
     let op7 = (raw >> 25) & 0x7F;
@@ -513,7 +514,7 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         return Ok(SpuInstruction::Hbrr);
     }
 
-    Err(SpuDecodeError::Unsupported(raw))
+    Err(SpuDecodeError::for_word(raw))
 }
 
 // [SPU-ISA p:32 s:3 Lqd] RI10 imm10 is sign-extended before address compute.
@@ -540,3 +541,7 @@ mod job_forms_tests;
 #[cfg(test)]
 #[path = "tests/decode_quad_x_form_tests.rs"]
 mod quad_x_form_tests;
+
+#[cfg(test)]
+#[path = "tests/decode_opcode_map_tests.rs"]
+mod opcode_map_tests;

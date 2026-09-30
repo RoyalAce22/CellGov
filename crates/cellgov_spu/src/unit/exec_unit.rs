@@ -5,9 +5,11 @@ use super::spu_unit::{SpuExecutionUnit, SpuSnapshot};
 use super::transfer::{copy_into_local_store, shared_read, CopyRefusal};
 use crate::exec::{SpuFault, SpuStepOutcome};
 use crate::fault_codes::{
-    guest_fault, guest_fault_for, FAULT_DECODE_ERROR, FAULT_LS_OUT_OF_RANGE,
-    FAULT_MFC_GET_UNRESOLVED, FAULT_MFC_READ_UNRESOLVED,
+    guest_fault, guest_fault_for, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_GET_UNRESOLVED,
+    FAULT_MFC_READ_UNRESOLVED, FAULT_UNIMPLEMENTED_INSN,
 };
+use crate::instruction::SpuDecodeError;
+use crate::stop::SpuStopKind;
 use crate::{decode, exec};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -16,6 +18,7 @@ use cellgov_exec::{
     StopRegisters, UnitStatus, YieldReason,
 };
 use cellgov_ps3_abi::hw::spu::MFC_ATOMIC_STAT_G;
+use cellgov_ps3_abi::hw::spu_isa;
 use cellgov_time::{Budget, InstructionCost};
 
 impl ExecutionUnit for SpuExecutionUnit {
@@ -113,13 +116,27 @@ impl ExecutionUnit for SpuExecutionUnit {
 
             let insn = match decode::decode(raw) {
                 Ok(i) => i,
-                Err(_) => {
+                // [CBEA p:33 s:2.1.2] an SPU that meets an invalid instruction halts and records the event in its status register.
+                // [CBEA p:93 s:8.5.2] I: invalid instruction detected, SPU stopped imprecisely.
+                Err(SpuDecodeError::Unassigned(_)) => {
+                    self.state.record_stop(SpuStopKind::InvalidInstruction, 0);
+                    self.status = UnitStatus::Finished;
+                    return ExecutionStepResult {
+                        yield_reason: YieldReason::Finished,
+                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                        fault: None,
+                        syscall_args: None,
+                    };
+                }
+                Err(SpuDecodeError::Unimplemented { .. }) => {
+                    let row = spu_isa::row_for(raw).map_or(0, |(index, _)| index as u32);
                     self.status = UnitStatus::Faulted;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: Some(guest_fault(FAULT_DECODE_ERROR, 0)),
+                        fault: Some(guest_fault(FAULT_UNIMPLEMENTED_INSN, row)),
                         syscall_args: None,
                     };
                 }

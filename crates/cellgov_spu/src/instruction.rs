@@ -639,7 +639,30 @@ pub enum SpuInstruction {
 /// Decode failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SpuDecodeError {
-    /// No matching encoding for this 32-bit word.
-    #[error("unsupported SPU instruction 0x{0:08x}")]
-    Unsupported(u32),
+    /// No instruction the CBE provides has this word's opcode, so the
+    /// word is not an SPU instruction.
+    #[error("0x{0:08x} is not an SPU instruction")]
+    Unassigned(u32),
+    /// The word is the named instruction, which CellGov does not
+    /// implement.
+    #[error("SPU instruction {mnemonic} (0x{raw:08x}) is not implemented")]
+    Unimplemented {
+        /// The refused word.
+        raw: u32,
+        /// The instruction's mnemonic.
+        mnemonic: &'static str,
+    },
+}
+
+impl SpuDecodeError {
+    /// The refusal for a word the decoder has no arm for.
+    pub fn for_word(raw: u32) -> Self {
+        match cellgov_ps3_abi::hw::spu_isa::row_for(raw) {
+            Some((_, row)) if row.on_cbe => SpuDecodeError::Unimplemented {
+                raw,
+                mnemonic: row.mnemonic,
+            },
+            _ => SpuDecodeError::Unassigned(raw),
+        }
+    }
 }

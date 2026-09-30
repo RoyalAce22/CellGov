@@ -234,7 +234,10 @@ fn decode_refusals_keep_the_raw_word_and_program_counter() {
         error,
         SpuReferenceError::Decode {
             pc: 0,
-            source: cellgov_spu::instruction::SpuDecodeError::Unsupported(u32::MAX)
+            source: cellgov_spu::instruction::SpuDecodeError::Unimplemented {
+                raw: u32::MAX,
+                mnemonic: "fms"
+            }
         }
     ));
 }
