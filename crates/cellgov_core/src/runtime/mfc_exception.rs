@@ -57,6 +57,33 @@ impl Runtime {
         self.mfc_exception.take()
     }
 
+    /// The run's MFC exception as a drain would leave it: the one the
+    /// queue raised, or else the first one it would raise if it drained
+    /// now. Nothing in the runtime changes.
+    ///
+    /// A run whose units have all finished stops with commands still
+    /// queued, and a refused one among them is still the run's
+    /// exception. A caller that must not land the queued transfers --
+    /// one comparing the run's state -- reads it here instead of
+    /// draining. Translation depends on the region layout alone, which a
+    /// completion never changes, so the answer is the drain's.
+    pub fn mfc_exception_at_drain(&self) -> Option<MfcException> {
+        if self.mfc_exception.is_some() {
+            return self.mfc_exception;
+        }
+        let memory = &self.memory;
+        let mut queue = self.dma_queue.clone();
+        let due = queue
+            .process_due_translating(cellgov_time::GuestTicks::new(u64::MAX), |c, payloaded| {
+                super::dma::translation_fault(memory, c, payloaded)
+            });
+        due.raised.first().map(|raised| MfcException {
+            unit: raised.issuer,
+            group: self.lv2_host.live_spu_group(raised.issuer),
+            command: raised.command,
+        })
+    }
+
     /// Record a command the queue raised. The first one stands until the
     /// host takes it.
     pub(super) fn record_mfc_exception(&mut self, raised: RaisedMfcCommand) {
@@ -68,3 +95,7 @@ impl Runtime {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "tests/mfc_exception_at_drain_tests.rs"]
+mod mfc_exception_at_drain_tests;

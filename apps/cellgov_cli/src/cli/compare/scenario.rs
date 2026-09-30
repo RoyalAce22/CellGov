@@ -56,6 +56,14 @@ pub(in crate::cli) fn report_first_invariant_break(line: Option<&str>) {
     }
 }
 
+/// Report the MFC exception a run raised, which its stall does not name,
+/// on stderr beside the invariant-break line.
+pub(in crate::cli) fn report_first_mfc_exception(line: Option<&str>) {
+    if let Some(line) = line {
+        eprintln!("warning: SPU_MFC_EXCEPTION: {line}");
+    }
+}
+
 /// Distinguishes an observation refusal from disagreement between two runs.
 pub(super) fn determinism_exit_status(e: &DeterminismError) -> i32 {
     match e {

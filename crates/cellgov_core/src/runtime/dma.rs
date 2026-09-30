@@ -25,7 +25,7 @@ use super::Runtime;
 /// real-address bound as one that no segment names, because no region
 /// can back it. The architecture does not fix that bound; CellGov does.
 /// [CBEA p:120 s:9.1.7] a segment fault raises the MFC data-segment interrupt; a mapping fault or a protection violation raises the MFC data-storage interrupt.
-fn translation_fault(
+pub(super) fn translation_fault(
     memory: &GuestMemory,
     c: &DmaCompletion,
     payloaded: bool,

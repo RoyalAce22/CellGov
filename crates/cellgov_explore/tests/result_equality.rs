@@ -98,6 +98,7 @@ fn every_field_of_a_finished_result_is_named() {
         schedules_truncated,
         schedules_refused,
         first_invariant_break,
+        first_mfc_exception,
     } = result;
 
     assert_ne!(baseline_hash, 0);
@@ -124,6 +125,7 @@ fn every_field_of_a_finished_result_is_named() {
     assert_eq!(schedules_truncated, 0);
     assert_eq!(schedules_refused, 0);
     assert_eq!(first_invariant_break, None);
+    assert_eq!(first_mfc_exception, None);
     assert!(
         schedules
             .iter()

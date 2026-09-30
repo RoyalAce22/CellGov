@@ -26,7 +26,7 @@ use cellgov_explore::{
 
 use super::window::{never_opened, start_past_cap};
 use crate::cli::boot_cmd::{anchor_plan, firmware_module_dir, plan_max_steps, resolve_boot_inputs};
-use crate::cli::compare::report_first_invariant_break;
+use crate::cli::compare::{report_first_invariant_break, report_first_mfc_exception};
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
 use crate::cli::parse::{ExploreTitleArgs, OutputFormat};
@@ -121,6 +121,7 @@ pub(super) fn run(
     let result = cellgov_explore::explore_window(move || rt, &config);
 
     report_first_invariant_break(result.first_invariant_break.as_deref());
+    report_first_mfc_exception(result.first_mfc_exception.as_deref());
     let window = Window {
         title: inputs.title.name().to_string(),
         start,

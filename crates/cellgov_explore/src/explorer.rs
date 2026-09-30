@@ -51,3 +51,7 @@ where
 #[cfg(test)]
 #[path = "tests/explorer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/mfc_exception_tests.rs"]
+mod mfc_exception_tests;

@@ -277,6 +277,7 @@ fn withdrawn_record(replay_stop: StopReason) -> ExplorationResult {
         schedules_truncated: 1,
         schedules_refused: 0,
         first_invariant_break: None,
+        first_mfc_exception: None,
     }
 }
 

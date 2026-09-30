@@ -365,6 +365,7 @@ pub fn classify_iteration(
         schedules_truncated: iter.schedules_truncated,
         schedules_refused: iter.schedules_refused,
         first_invariant_break,
+        first_mfc_exception: None,
     }
 }
 

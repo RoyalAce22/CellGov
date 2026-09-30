@@ -29,6 +29,9 @@ struct Run {
     log: DecisionLog,
     hash: u64,
     invariant_break: Option<String>,
+    /// The MFC exception the execution leaves at a drain, read before the
+    /// next restore clears it.
+    mfc_exception: Option<String>,
     /// Unit this execution ran at the depth it re-decided at.
     ///
     /// `run_one` reads this before it truncates the frame stack: a
@@ -205,6 +208,7 @@ where
     let mut baseline: Option<BaselineRun> = None;
     let mut baseline_branching = 0usize;
     let mut first_invariant_break: Option<String> = None;
+    let mut first_mfc_exception: Option<String> = None;
     let mut bounds_hit = false;
     let mut truncated_runs = 0usize;
     let mut refused_runs = 0usize;
@@ -221,6 +225,9 @@ where
         dropped.add(run.dropped);
         if first_invariant_break.is_none() {
             first_invariant_break = run.invariant_break;
+        }
+        if first_mfc_exception.is_none() {
+            first_mfc_exception = run.mfc_exception;
         }
 
         match halt {
@@ -302,6 +309,7 @@ where
     let mut result = classify_iteration(iter, baseline, baseline_branching, first_invariant_break);
     result.classes_explored = complete.then_some(classes);
     result.reversals_dropped = dropped.total();
+    result.first_mfc_exception = first_mfc_exception;
     (result, dropped)
 }
 
@@ -481,6 +489,7 @@ fn run_one(
     let run = Run {
         hash: rt.observable_hash(),
         invariant_break: rt.lv2_host().observability().first_invariant_break_line(),
+        mfc_exception: rt.mfc_exception_at_drain().map(|e| e.to_string()),
         log,
         alternate_choice,
         dropped,

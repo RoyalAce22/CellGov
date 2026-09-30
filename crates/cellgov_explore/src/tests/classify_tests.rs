@@ -41,6 +41,7 @@ fn exploration_result_construction() {
         schedules_truncated: 0,
         schedules_refused: 0,
         first_invariant_break: None,
+        first_mfc_exception: None,
     };
     assert_eq!(res.outcome, OutcomeClass::ScheduleStable);
     assert!(!res.bounds_hit);

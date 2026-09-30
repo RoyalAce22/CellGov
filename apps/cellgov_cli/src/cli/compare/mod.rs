@@ -10,7 +10,7 @@ mod trace;
 
 pub(crate) use dispatch::run;
 pub(crate) use observations::{load_observations_from_dir, run_compare_observations};
-pub(super) use scenario::report_first_invariant_break;
+pub(super) use scenario::{report_first_invariant_break, report_first_mfc_exception};
 pub(crate) use trace::{run_diverge, run_zoom};
 
 #[cfg(test)]

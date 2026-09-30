@@ -4,7 +4,9 @@
 use cellgov_explore::{ExplorationConfig, OracleRegions};
 use cellgov_testkit::fixtures::ScenarioFixture;
 
-use crate::cli::compare::{load_observations_from_dir, report_first_invariant_break};
+use crate::cli::compare::{
+    load_observations_from_dir, report_first_invariant_break, report_first_mfc_exception,
+};
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::OutputFormat;
 use crate::cli::scenarios::{build_lv2_runtime, microtest_region_defs, MICROTESTS};
@@ -20,6 +22,7 @@ pub(super) fn run_explore(
     match result {
         Some(r) => {
             report_first_invariant_break(r.first_invariant_break.as_deref());
+            report_first_mfc_exception(r.first_mfc_exception.as_deref());
             match format {
                 OutputFormat::Human => {
                     println!("scenario: {name}");
@@ -60,6 +63,7 @@ pub(super) fn run_explore_micro(
     match result {
         Some(r) => {
             report_first_invariant_break(r.first_invariant_break.as_deref());
+            report_first_mfc_exception(r.first_mfc_exception.as_deref());
             match format {
                 OutputFormat::Human => {
                     println!("microtest: {name}");
@@ -138,6 +142,7 @@ pub(super) fn run_explore_micro_oracle(
     };
 
     report_first_invariant_break(r.exploration.first_invariant_break.as_deref());
+    report_first_mfc_exception(r.exploration.first_mfc_exception.as_deref());
 
     // An unresolved capture (see `CapturedRegion::resolved`) holds
     // empty bytes regardless of what the run produced, so comparing it

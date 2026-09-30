@@ -28,6 +28,7 @@ fn result(outcome: OutcomeClass) -> ExplorationResult {
         schedules_truncated: 0,
         schedules_refused: 0,
         first_invariant_break: None,
+        first_mfc_exception: None,
     }
 }
 

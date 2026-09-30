@@ -165,6 +165,15 @@ pub struct ExplorationResult {
     /// A replay's restore overwrites the LV2 host's own line, so this
     /// field is where it survives the run.
     pub first_invariant_break: Option<String>,
+    /// The exploration's first MFC exception as one line for the caller
+    /// to report: the first execution's, in the order the search ran
+    /// them, that left one.
+    ///
+    /// Each run's is read as a drain would leave it, so a refused command
+    /// still queued when the run stopped counts. A run that raises one
+    /// stalls like any other, and a replay's restore clears the runtime's
+    /// own record, so this field is the only place the cause survives.
+    pub first_mfc_exception: Option<String>,
 }
 
 impl ExplorationResult {

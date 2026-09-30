@@ -61,6 +61,7 @@ where
     // Each replay builds and drops its own runtime, so a break that
     // only one replay found is readable in that iteration alone.
     let mut first_invariant_break = rt.lv2_host().observability().first_invariant_break_line();
+    let mut first_mfc_exception = rt.mfc_exception_at_drain().map(|e| e.to_string());
 
     // Every candidate ends with the unit it forces, so the baseline's
     // empty prefix is not one of them and needs no entry here.
@@ -108,6 +109,9 @@ where
         let hash = rt.observable_hash();
         if first_invariant_break.is_none() {
             first_invariant_break = rt.lv2_host().observability().first_invariant_break_line();
+        }
+        if first_mfc_exception.is_none() {
+            first_mfc_exception = rt.mfc_exception_at_drain().map(|e| e.to_string());
         }
         let truncated = stop.is_truncated();
         // The fallback can drift a replay off its prefix, and the
@@ -165,6 +169,7 @@ where
         first_invariant_break,
     );
     result.reversals_dropped = dropped_reversals;
+    result.first_mfc_exception = first_mfc_exception;
     result
 }
 
