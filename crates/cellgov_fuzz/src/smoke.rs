@@ -16,7 +16,9 @@
 //! ground truth, since the run knows which defect a finding hit.
 //! [Klees2018 p:2132 s:7.1 Ground Truth: Bugs Found]
 
-use crate::report::{FuzzReport, FuzzRun};
+use cellgov_spu::fuzz::sequence_relations;
+
+use crate::report::{CheckIdentity, FuzzReport, FuzzRun};
 use crate::{
     CampaignSchedule, CampaignShard, CaseRange, FuzzConfig, FuzzTarget, GenerationStrategy,
     RetentionConfig, CAMPAIGN_VERSION,
@@ -39,6 +41,9 @@ pub struct CoverageFloor {
     pub eligible: u64,
     /// Distinct instruction kinds the campaign executed.
     pub instruction_kinds: u64,
+    /// Whether every sequence-relation row of the catalog must execute;
+    /// the floor is then the catalog's length, so it follows the catalog.
+    pub every_relation_row: bool,
 }
 
 /// One bounded campaign of the smoke set.
@@ -72,6 +77,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         floor: CoverageFloor {
             eligible: 150,
             instruction_kinds: 40,
+            every_relation_row: false,
         },
     },
     SmokeCampaign {
@@ -84,6 +90,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         floor: CoverageFloor {
             eligible: 150,
             instruction_kinds: 40,
+            every_relation_row: false,
         },
     },
     SmokeCampaign {
@@ -96,6 +103,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         floor: CoverageFloor {
             eligible: 250,
             instruction_kinds: 40,
+            every_relation_row: false,
         },
     },
     SmokeCampaign {
@@ -108,6 +116,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         floor: CoverageFloor {
             eligible: 250,
             instruction_kinds: 40,
+            every_relation_row: false,
         },
     },
     SmokeCampaign {
@@ -120,6 +129,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         floor: CoverageFloor {
             eligible: 200,
             instruction_kinds: 40,
+            every_relation_row: false,
         },
     },
     SmokeCampaign {
@@ -132,6 +142,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         floor: CoverageFloor {
             eligible: 60,
             instruction_kinds: 20,
+            every_relation_row: false,
         },
     },
     SmokeCampaign {
@@ -144,6 +155,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         floor: CoverageFloor {
             eligible: 200,
             instruction_kinds: 40,
+            every_relation_row: true,
         },
     },
     SmokeCampaign {
@@ -156,6 +168,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         floor: CoverageFloor {
             eligible: 150,
             instruction_kinds: 40,
+            every_relation_row: true,
         },
     },
 ];
@@ -204,6 +217,27 @@ impl SmokeCampaign {
                     name: self.name,
                     metric,
                     found,
+                    floor,
+                });
+            }
+        }
+        if self.floor.every_relation_row {
+            let catalog = sequence_relations();
+            let executed = catalog
+                .iter()
+                .filter(|row| {
+                    report
+                        .metamorphic_executions
+                        .get(&CheckIdentity::SpuSequenceRelation(row.id))
+                        .is_some_and(|&count| count > 0)
+                })
+                .count() as u64;
+            let floor = catalog.len() as u64;
+            if executed < floor {
+                return Err(SmokeError::Vacuous {
+                    name: self.name,
+                    metric: "sequence_relation_rows",
+                    found: executed,
                     floor,
                 });
             }

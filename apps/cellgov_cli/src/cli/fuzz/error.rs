@@ -127,6 +127,13 @@ pub(crate) enum FuzzCliError {
         stored: ArtifactReduction,
         artifact: Box<FuzzFindingArtifact>,
     },
+    #[error("fuzz: {source}; the fixture:
+{}", counterexample.to_json())]
+    CounterexampleStore {
+        #[source]
+        source: cellgov_fuzz::spu::CounterexampleStoreError,
+        counterexample: Box<cellgov_fuzz::spu::RelationCounterexample>,
+    },
     #[error("fuzz: evaluation plan: {0}")]
     EvaluationPlan(#[from] EvaluationPlanError),
     #[error("fuzz: evaluation results: {0}")]
@@ -221,7 +228,8 @@ impl FuzzCliError {
             | Self::ArtifactEncoding { .. }
             | Self::ArtifactWrite { .. }
             | Self::ArtifactCollision { .. }
-            | Self::ArtifactReductionNotStored { .. } => false,
+            | Self::ArtifactReductionNotStored { .. }
+            | Self::CounterexampleStore { .. } => false,
         }
     }
 
@@ -247,7 +255,8 @@ impl FuzzCliError {
             Self::ArtifactEncoding { .. }
             | Self::ArtifactWrite { .. }
             | Self::ArtifactCollision { .. }
-            | Self::ArtifactReductionNotStored { .. } => outcome::EXIT_EVIDENCE_NOT_STORED,
+            | Self::ArtifactReductionNotStored { .. }
+            | Self::CounterexampleStore { .. } => outcome::EXIT_EVIDENCE_NOT_STORED,
             Self::ArtifactReplay(ArtifactReplayError::NotReproduced { .. }) => {
                 outcome::EXIT_NOT_REPRODUCED
             }

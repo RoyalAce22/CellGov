@@ -257,7 +257,8 @@ pub(crate) struct FuzzCampaignArgs {
     /// Maximum candidate evaluations spent on each finding.
     #[arg(long, default_value_t = cellgov_fuzz::reduce::DEFAULT_REDUCTION_BUDGET)]
     pub reduction_budget: u64,
-    /// Directory that receives one versioned artifact per retained finding.
+    /// Directory that receives one versioned artifact per retained finding,
+    /// and one counterexample fixture per sequence-relation finding.
     #[arg(long, value_name = "DIR", default_value = "target/fuzz-findings")]
     pub artifacts_dir: PathBuf,
 }

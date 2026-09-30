@@ -252,6 +252,9 @@ pub enum InvariantError {
         /// The row.
         relation: cellgov_spu::fuzz::SpuSequenceRelationId,
     },
+    /// The committed sequence-relation counterexample store does not parse.
+    #[error("the stored sequence-relation counterexamples do not parse")]
+    StoredCounterexamples,
 }
 
 /// Failure of the fuzz harness rather than the target under test.

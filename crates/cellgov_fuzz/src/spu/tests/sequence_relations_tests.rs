@@ -709,6 +709,118 @@ fn a_word_that_does_not_decode_errors_in_the_program_and_ends_a_run_elsewhere() 
 }
 
 #[test]
+fn a_relation_check_is_named_by_its_row_and_no_other_check_shares_the_name() {
+    use CheckIdentity as C;
+    let others = [
+        C::PpuDecoder,
+        C::SpuDecoder,
+        C::PpuExecutor,
+        C::SpuExecutor,
+        C::DeterministicReplay,
+        C::PpuRecordCr0,
+        C::PpuRecordCr1,
+        C::PpuRecordCr6,
+        C::PpuOverflowEnable,
+        C::SpuIgnoredField,
+        C::SpuCountMasking,
+        C::SpuShufbControlClass,
+        C::SpuImmediateRegister,
+        C::SpuCommutative,
+        C::SpuSlotPermutation,
+        C::SpuCompareBranch,
+        C::LegalOutcome,
+        C::LegalEffect,
+        C::AllowedFootprint,
+        C::ProgramCounter,
+        C::ExternalReference,
+    ];
+    // A new check fails this match until the list above names it.
+    for check in others {
+        match check {
+            C::SpuSequenceRelation(_) => panic!("the list holds only the other checks"),
+            C::PpuDecoder
+            | C::SpuDecoder
+            | C::PpuExecutor
+            | C::SpuExecutor
+            | C::DeterministicReplay
+            | C::PpuRecordCr0
+            | C::PpuRecordCr1
+            | C::PpuRecordCr6
+            | C::PpuOverflowEnable
+            | C::SpuIgnoredField
+            | C::SpuCountMasking
+            | C::SpuShufbControlClass
+            | C::SpuImmediateRegister
+            | C::SpuCommutative
+            | C::SpuSlotPermutation
+            | C::SpuCompareBranch
+            | C::LegalOutcome
+            | C::LegalEffect
+            | C::AllowedFootprint
+            | C::ProgramCounter
+            | C::ExternalReference => {}
+        }
+    }
+    let names: std::collections::BTreeSet<String> = others.iter().map(C::name).collect();
+    assert_eq!(names.len(), others.len());
+    for relation in sequence_relations() {
+        let name = C::SpuSequenceRelation(relation.id).name();
+        assert_eq!(name, format!("{:?}", relation.id));
+        assert!(!names.contains(&name), "{name} names another check");
+    }
+}
+
+/// The symbolic register a sequence-partner defect corrupts: the first
+/// write of a fused partner for the write defect, the last write of any
+/// partner for the lane defect; none when the defect does not apply.
+fn corrupted(relation: &SpuSequenceRelation, defect: crate::seeded::SeededDefect) -> Option<u8> {
+    use crate::seeded::SeededDefect;
+    match (defect, relation.partner) {
+        (SeededDefect::SequencePartnerWrite, SpuSequencePartner::Fused(fused)) => {
+            fused.writes.first().copied()
+        }
+        (SeededDefect::SequencePartnerLane, SpuSequencePartner::Fused(fused)) => {
+            fused.writes.last().copied()
+        }
+        (SeededDefect::SequencePartnerLane, SpuSequencePartner::Guest(words)) => {
+            words.last().map(|word| word.rt)
+        }
+        _ => None,
+    }
+}
+
+#[test]
+fn each_sequence_partner_defect_is_caught_by_every_row_it_reaches() {
+    use crate::seeded::{seed, SeededDefect};
+    for defect in [
+        SeededDefect::SequencePartnerWrite,
+        SeededDefect::SequencePartnerLane,
+    ] {
+        let _guard = seed(defect);
+        let mut missed = Vec::new();
+        for relation in sequence_relations() {
+            // A row that only measures a register cannot see any change in
+            // it: that gap is the row's claim, and the rule names it here.
+            let reached = corrupted(relation, defect).is_some_and(|register| {
+                !(relation.float_class == SpuFloatClass::Inexact { ulp: None }
+                    && relation.approximate.contains(&register))
+            });
+            let caught = (0..DRAWS).any(|index| {
+                matches!(
+                    compare_relation(relation, &draw(relation, index), index)
+                        .expect("the row encodes"),
+                    RelationVerdict::Diverged(_)
+                )
+            });
+            if reached != caught {
+                missed.push((relation.id, reached, caught));
+            }
+        }
+        assert_eq!(missed, [], "{defect:?}: (row, reached, caught)");
+    }
+}
+
+#[test]
 fn every_inexact_row_reports_a_ulp_bound_within_its_claim() {
     for relation in sequence_relations() {
         let SpuFloatClass::Inexact { ulp } = relation.float_class else {

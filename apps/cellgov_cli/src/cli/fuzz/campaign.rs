@@ -213,6 +213,13 @@ impl CampaignHost for CliHost<'_> {
                 error,
                 artifact,
             } => self.artifact_failed(store_refusal(&path, error, artifact)),
+            CampaignFailure::CounterexampleStore {
+                error,
+                counterexample,
+            } => self.artifact_failed(FuzzCliError::CounterexampleStore {
+                source: error,
+                counterexample,
+            }),
         }
     }
 }

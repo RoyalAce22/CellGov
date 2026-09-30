@@ -4,8 +4,9 @@ use cellgov_effects::EffectKind;
 use cellgov_ppu::instruction::fuzz::PpuOutcomeClass;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::observation::PpuObservation;
-use cellgov_spu::fuzz::SpuOutcomeClass;
+use cellgov_spu::fuzz::{SpuOutcomeClass, SpuSequenceRelation};
 use cellgov_spu::instruction::SpuInstruction;
+use cellgov_spu::observation::SpuObservation;
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState};
 
 /// Decodes a PPU word at the decoder boundary.
@@ -92,3 +93,13 @@ pub(crate) fn ppu_partner(_observation: &mut PpuObservation) {}
 /// Corrupts the SPU metamorphic partner only.
 #[inline(always)]
 pub(crate) fn spu_partner(_state: &mut SpuObservableSnapshot) {}
+
+/// Corrupts an SPU sequence relation's partner only.
+#[inline(always)]
+pub(crate) fn spu_sequence_partner(
+    _partner: &mut SpuObservation,
+    _relation: &SpuSequenceRelation,
+    _assignment: &[u8],
+    _start: &SpuState,
+) {
+}

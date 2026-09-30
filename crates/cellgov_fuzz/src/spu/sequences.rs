@@ -18,7 +18,7 @@ use super::generate::{
     case_descriptors, random_state, state_aware_state, structured_sequence, GeneratedSequence,
 };
 use super::record::{guarded_run, record, record_target_panic};
-use super::sequence_relations::run_relation_check;
+use super::sequence_relations::{replay_stored, run_relation_check};
 use crate::boundary::call_target;
 use crate::case::CaseEligibility;
 use crate::error::{FuzzError, InvariantError};
@@ -107,6 +107,11 @@ fn run_sequences_inner(
         (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
     };
     for iteration in iterations {
+        // The run that holds case 0 replays the stored counterexamples
+        // before it samples a state; a reduction candidate does not.
+        if iteration == 0 && override_words.is_none() {
+            replay_stored(report)?;
+        }
         report.considered()?;
         let mut rng = Rng::for_case(config.campaign_version, config.seed, iteration);
         let generated = match config.strategy {

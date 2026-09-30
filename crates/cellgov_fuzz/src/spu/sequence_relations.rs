@@ -4,7 +4,9 @@
 //!
 //! The runner executes the row words directly and not through the seeded
 //! hooks the other tiers own, so a seeded replay, footprint or common-mode
-//! defect stays a finding of its own check.
+//! defect stays a finding of its own check. The one seeded hook it calls
+//! corrupts the partner's observation, and only the sequence-partner
+//! defects drive it.
 
 use cellgov_event::UnitId;
 use cellgov_spu::exec::{execute, SpuStepOutcome};
@@ -17,14 +19,16 @@ use cellgov_spu::instruction::SpuInstructionKind;
 use cellgov_spu::observation::{SpuObservation, SpuObservationComponent};
 use cellgov_spu::state::{SpuState, SPU_REG_COUNT};
 
+use super::counterexample::{reduce_instance, stored_counterexamples, RelationCounterexample};
 use super::record::record;
 use crate::error::{FuzzError, InvariantError};
 use crate::report::{
     CheckIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzTarget, SemanticFingerprint,
-    SequenceRelationDivergence,
+    SequenceRelationDivergence, StoredReplay,
 };
 use crate::retention::CrossReferenceAsymmetry;
 use crate::rng::Rng;
+use crate::seeded;
 use crate::CAMPAIGN_VERSION;
 
 const UNIT: UnitId = UnitId::new(0);
@@ -298,6 +302,12 @@ fn compare_sides(
 ) -> Result<RelationVerdict, FuzzError> {
     let (original, mut partner) = run_sides(relation, instance, tail)?;
     hook(&mut partner, instance);
+    seeded::spu_sequence_partner(
+        &mut partner,
+        relation,
+        &instance.assignment,
+        &instance.start,
+    );
     // [Mullen2016 p:449 s:1] A dead register may hold another value; the
     // Registers comparison leaves it out, and LS, channels, PC and effects
     // stay compared.
@@ -652,10 +662,48 @@ pub(super) fn run_relation_check(
                 words,
                 case_index,
             )?;
+            // Only a retained finding keeps a fixture, so only it pays for
+            // the reduction.
+            if report.retains_relation_counterexample() {
+                let reduced = reduce_instance(relation, &instance, divergence.first_component)?;
+                report.relation_counterexample(RelationCounterexample::from_instance(
+                    format!(
+                        "{:?}-{:?}-{}-{case_index}",
+                        relation.id, report.strategy, report.seed
+                    ),
+                    relation,
+                    &reduced,
+                    divergence.first_component,
+                ));
+            }
             report.sequence_relation_diverged(*divergence);
             Ok(CrossReferenceAsymmetry::State)
         }
     }
+}
+
+/// Replays every stored counterexample and records what each shows.
+///
+/// [Schkufza2013 p:308 s:4.1] A counterexample from a failed check joins
+/// the testcases a later check runs, and runs before any new sample.
+pub(super) fn replay_stored(report: &mut FuzzReport) -> Result<(), FuzzError> {
+    let stored = stored_counterexamples().map_err(|_| InvariantError::StoredCounterexamples)?;
+    replay_counterexamples(report, &stored)
+}
+
+/// Replays `counterexamples` in order and records what each shows.
+pub(crate) fn replay_counterexamples(
+    report: &mut FuzzReport,
+    counterexamples: &[RelationCounterexample],
+) -> Result<(), FuzzError> {
+    for counterexample in counterexamples {
+        report.stored_replayed(StoredReplay {
+            name: counterexample.name.clone(),
+            relation: counterexample.relation,
+            divergence: counterexample.replay()?,
+        })?;
+    }
+    Ok(())
 }
 
 /// The class of a divergence whose first differing component is `component`.

@@ -44,7 +44,39 @@ fn the_set_names_every_engine_and_strategy_once() {
         assert_eq!(config.schedule.cases.count, campaign.cases);
         assert_eq!(config.seed, campaign.seed);
         assert!(campaign.floor.eligible > 0 && campaign.floor.instruction_kinds > 0);
+        assert_eq!(
+            campaign.floor.every_relation_row,
+            campaign.target == FuzzTarget::SpuSequence,
+            "{}: the sequence campaigns run the relation rows",
+            campaign.name
+        );
     }
+}
+
+#[test]
+fn a_sequence_campaign_fails_its_floor_when_a_relation_row_stops_executing() {
+    let campaign = SMOKE_CAMPAIGNS
+        .iter()
+        .find(|campaign| campaign.target == FuzzTarget::SpuSequence)
+        .expect("the smoke set has an SPU sequence campaign");
+    let mut report = campaign.run().report;
+    campaign
+        .check_coverage(&report)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let catalog = cellgov_spu::fuzz::sequence_relations();
+    let last = catalog.last().expect("the catalog has rows");
+    report
+        .metamorphic_executions
+        .remove(&crate::report::CheckIdentity::SpuSequenceRelation(last.id));
+    assert!(matches!(
+        campaign.check_coverage(&report),
+        Err(SmokeError::Vacuous {
+            metric: "sequence_relation_rows",
+            found,
+            floor,
+            ..
+        }) if found + 1 == floor && floor == catalog.len() as u64
+    ));
 }
 
 #[test]

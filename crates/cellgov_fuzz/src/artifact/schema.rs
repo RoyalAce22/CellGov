@@ -31,7 +31,7 @@ impl From<&SemanticFingerprint> for ArtifactFingerprint {
         Self {
             target: source.target,
             instruction_kind: source.instruction_kind.map(|kind| format!("{kind:?}")),
-            check: format!("{:?}", source.check),
+            check: source.check.name(),
             divergence: format!("{:?}", source.divergence),
             outcome: source.outcome.map(|outcome| format!("{outcome:?}")),
             effect: source.effect.map(|effect| format!("{effect:?}")),

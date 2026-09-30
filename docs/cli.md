@@ -1717,7 +1717,7 @@ Usage: cellgov dev fuzz ppu-instruction [OPTIONS]
 | `--reduction` | `REDUCTION` | Request reduction of retained findings. One of `none`, `on-finding`. Default `none`. |
 | `--reduction-policy` | `REDUCTION_POLICY` | Candidate selection policy for reduction. One of `deterministic`, `greedy`. Default `deterministic`. |
 | `--reduction-budget` | `REDUCTION_BUDGET` | Maximum candidate evaluations spent on each finding. Default `4096`. |
-| `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding. Default `target/fuzz-findings`. |
+| `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding, and one counterexample fixture per sequence-relation finding. Default `target/fuzz-findings`. |
 
 ```
 Exit codes particular to this command:
@@ -1768,7 +1768,7 @@ Usage: cellgov dev fuzz ppu-sequence [OPTIONS]
 | `--reduction` | `REDUCTION` | Request reduction of retained findings. One of `none`, `on-finding`. Default `none`. |
 | `--reduction-policy` | `REDUCTION_POLICY` | Candidate selection policy for reduction. One of `deterministic`, `greedy`. Default `deterministic`. |
 | `--reduction-budget` | `REDUCTION_BUDGET` | Maximum candidate evaluations spent on each finding. Default `4096`. |
-| `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding. Default `target/fuzz-findings`. |
+| `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding, and one counterexample fixture per sequence-relation finding. Default `target/fuzz-findings`. |
 
 ```
 Exit codes particular to this command:
@@ -1819,7 +1819,7 @@ Usage: cellgov dev fuzz spu-instruction [OPTIONS]
 | `--reduction` | `REDUCTION` | Request reduction of retained findings. One of `none`, `on-finding`. Default `none`. |
 | `--reduction-policy` | `REDUCTION_POLICY` | Candidate selection policy for reduction. One of `deterministic`, `greedy`. Default `deterministic`. |
 | `--reduction-budget` | `REDUCTION_BUDGET` | Maximum candidate evaluations spent on each finding. Default `4096`. |
-| `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding. Default `target/fuzz-findings`. |
+| `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding, and one counterexample fixture per sequence-relation finding. Default `target/fuzz-findings`. |
 
 ```
 Exit codes particular to this command:
@@ -1870,7 +1870,7 @@ Usage: cellgov dev fuzz spu-sequence [OPTIONS]
 | `--reduction` | `REDUCTION` | Request reduction of retained findings. One of `none`, `on-finding`. Default `none`. |
 | `--reduction-policy` | `REDUCTION_POLICY` | Candidate selection policy for reduction. One of `deterministic`, `greedy`. Default `deterministic`. |
 | `--reduction-budget` | `REDUCTION_BUDGET` | Maximum candidate evaluations spent on each finding. Default `4096`. |
-| `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding. Default `target/fuzz-findings`. |
+| `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding, and one counterexample fixture per sequence-relation finding. Default `target/fuzz-findings`. |
 
 ```
 Exit codes particular to this command:

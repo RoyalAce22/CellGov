@@ -548,6 +548,20 @@ pub(crate) fn render_campaign_summary(
     for group in finding_groups(&summary.artifacts) {
         text.push_str(&group.render());
     }
+    for replay in &summary.stored_reproduced {
+        text.push_str(&format!(
+            "fuzz: stored counterexample {} still diverges check={:?}\n",
+            replay.name, replay.relation
+        ));
+    }
+    for record in &summary.counterexamples {
+        text.push_str(&format!(
+            "fuzz: counterexample check={:?} stored={} path={}\n",
+            record.relation,
+            record.stored,
+            record.path.display()
+        ));
+    }
     if let Some(first) = summary.artifacts.first() {
         let stored = summary.artifacts.iter().filter(|a| a.stored).count();
         let dir = first.path.parent().unwrap_or_else(|| Path::new(""));

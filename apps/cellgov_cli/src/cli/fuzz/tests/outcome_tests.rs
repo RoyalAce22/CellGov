@@ -53,8 +53,51 @@ fn summary_with_findings(findings: u64) -> CampaignSummary {
             BTreeMap::from([(FindingKind::IllegalOutcome, findings)])
         },
         artifacts: Vec::new(),
+        counterexamples: Vec::new(),
+        stored_reproduced: Vec::new(),
         reductions_failed: 0,
         cancelled: false,
+    }
+}
+
+#[test]
+fn a_relation_finding_and_its_counterexamples_print_the_row_name_as_the_check() {
+    use cellgov_fuzz::report::{CheckIdentity, DivergenceClass, SemanticFingerprint, StoredReplay};
+    use cellgov_fuzz::runner::CounterexampleRecord;
+    use cellgov_spu::fuzz::SpuSequenceRelationId;
+    let fingerprint = ArtifactFingerprint::from(&SemanticFingerprint {
+        target: FuzzTarget::SpuSequence,
+        instruction_kind: None,
+        check: CheckIdentity::SpuSequenceRelation(SpuSequenceRelationId::Mpy32),
+        divergence: DivergenceClass::ArchitecturalState,
+        outcome: None,
+        effect: None,
+    });
+    assert_eq!(fingerprint.check, "Mpy32");
+    let mut summary = summary_with_findings(1);
+    summary.artifacts.push(ArtifactRecord {
+        fingerprint,
+        finding_kind: FindingKind::MetamorphicViolation,
+        ..record(true, ArtifactReduction::NotAttempted)
+    });
+    summary.counterexamples.push(CounterexampleRecord {
+        path: PathBuf::from("out/Mpy32-Structured-1-5.json"),
+        relation: SpuSequenceRelationId::Mpy32,
+        stored: true,
+    });
+    summary.stored_reproduced.push(StoredReplay {
+        name: "kept".to_owned(),
+        relation: SpuSequenceRelationId::Mpy32,
+        divergence: None,
+    });
+    let text =
+        render_campaign_summary(FuzzTarget::SpuSequence, &summary, CampaignOutcome::Findings);
+    for line in [
+        "kind=MetamorphicViolation check=Mpy32 divergence=ArchitecturalState",
+        "fuzz: stored counterexample kept still diverges check=Mpy32\n",
+        "fuzz: counterexample check=Mpy32 stored=true path=out/Mpy32-Structured-1-5.json\n",
+    ] {
+        assert!(text.contains(line), "{line}\n{text}");
     }
 }
 

@@ -242,3 +242,41 @@ fn host_workers_preserve_the_selected_shard_across_batches() {
         .collect();
     assert_eq!(observed, expected);
 }
+
+/// A sequence campaign writes one fixture per retained relation finding,
+/// and each fixture parses back and still separates its row.
+#[test]
+fn a_sequence_campaign_stores_each_relation_finding_as_a_replayable_fixture() {
+    use crate::seeded::{seed, SeededDefect};
+    use crate::spu::RelationCounterexample;
+    let _guard = seed(SeededDefect::SequencePartnerWrite);
+    let scratch = cellgov_testkit::scratch::scratch_labeled("runner_relation_fixtures");
+    let plan = CampaignRequest {
+        target: FuzzTarget::SpuSequence,
+        count: 64,
+        ..request(&scratch)
+    }
+    .plan()
+    .expect("plans");
+    let mut host = RecordingHost::default();
+    let run = run_campaign(&plan, &mut host).expect("runs");
+    assert!(host.failures.is_empty(), "{:?}", host.failures);
+    assert!(!run.summary.counterexamples.is_empty());
+    for record in &run.summary.counterexamples {
+        assert!(record.stored, "{}", record.path.display());
+        let text = std::fs::read_to_string(&record.path).expect("the fixture reads");
+        let fixture = RelationCounterexample::parse_json(&text).expect("the fixture parses");
+        assert_eq!(fixture.relation, record.relation);
+        assert!(fixture.replay().expect("the row runs").is_some());
+    }
+    assert!(run
+        .summary
+        .stored_reproduced
+        .iter()
+        .any(|replay| replay.name == "seeded-partner-write"));
+    // Two runs of the same campaign write the same fixtures, and the
+    // second finds each already in place.
+    let mut again = RecordingHost::default();
+    run_campaign(&plan, &mut again).expect("runs");
+    assert!(again.failures.is_empty(), "{:?}", again.failures);
+}

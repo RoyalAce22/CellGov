@@ -35,4 +35,9 @@ pub(crate) enum SeededDefect {
     FirstSlot,
     /// A not-taken branch on a zero preferred word advances past the next word.
     BranchFallThrough,
+    /// A sequence relation's fused reference drops its first write.
+    SequencePartnerWrite,
+    /// One word of a sequence relation partner's last written register
+    /// changes.
+    SequencePartnerLane,
 }

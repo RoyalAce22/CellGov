@@ -6,9 +6,9 @@ use cellgov_effects::EffectKind;
 use cellgov_ppu::instruction::fuzz::PpuOutcomeClass;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::observation::PpuObservation;
-use cellgov_spu::fuzz::SpuOutcomeClass;
+use cellgov_spu::fuzz::{SpuOutcomeClass, SpuSequencePartner, SpuSequenceRelation};
 use cellgov_spu::instruction::SpuInstruction;
-use cellgov_spu::observation::SpuAllowedFootprint;
+use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation};
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState, SPU_REG_COUNT};
 
 use super::SeededDefect;
@@ -253,5 +253,32 @@ pub(crate) fn ppu_partner(observation: &mut PpuObservation) {
 pub(crate) fn spu_partner(state: &mut SpuObservableSnapshot) {
     if active() == Some(SeededDefect::MetamorphicMismatch) {
         state.regs[0][15] ^= CORRUPTION;
+    }
+}
+
+/// Corrupts an SPU sequence relation's partner only.
+pub(crate) fn spu_sequence_partner(
+    partner: &mut SpuObservation,
+    relation: &SpuSequenceRelation,
+    assignment: &[u8],
+    start: &SpuState,
+) {
+    let real = |symbolic: u8| usize::from(assignment[usize::from(symbolic)]);
+    match (active(), relation.partner) {
+        (Some(SeededDefect::SequencePartnerWrite), SpuSequencePartner::Fused(fused)) => {
+            let register = real(fused.writes[0]);
+            partner.state.regs[register] = start.regs[register];
+        }
+        (Some(SeededDefect::SequencePartnerLane), SpuSequencePartner::Fused(fused)) => {
+            if let Some(&last) = fused.writes.last() {
+                partner.state.regs[real(last)][3] ^= CORRUPTION;
+            }
+        }
+        (Some(SeededDefect::SequencePartnerLane), SpuSequencePartner::Guest(words)) => {
+            if let Some(last) = words.last() {
+                partner.state.regs[real(last.rt)][3] ^= CORRUPTION;
+            }
+        }
+        _ => {}
     }
 }

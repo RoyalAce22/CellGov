@@ -35,6 +35,13 @@
 //! |                               | `OperandOrder`                       | commutativity relation      |
 //! |                               | `FirstSlot`                          | slot-permutation relation   |
 //! |                               | `BranchFallThrough`                  | compare-branch relation     |
+//! | sequence-relation partner     | `SequencePartnerWrite`,              | the row's sequence relation |
+//! |                               | `SequencePartnerLane`                |                             |
+//!
+//! [Chen2018 p:4:8 s:4.1] Faults seeded into a program measure how many a
+//! metamorphic relation detects. [JiaHarman2011 p:4 s:II.B] A seeded
+//! defect that no check catches marks a gap in the checks, not a weak
+//! defect.
 
 #[cfg(test)]
 mod defect;
@@ -57,3 +64,7 @@ mod tests;
 #[cfg(test)]
 #[path = "../tests/seeded_relation_tests.rs"]
 mod relation_tests;
+
+#[cfg(test)]
+#[path = "../tests/seeded_sequence_tests.rs"]
+mod sequence_tests;

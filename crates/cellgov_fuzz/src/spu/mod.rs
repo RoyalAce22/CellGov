@@ -4,9 +4,12 @@
 //! `generate` and run them through `execute`. Each engine takes a case's
 //! eligibility from `assess` and records what it finds through `record`.
 //! `shrink` supplies the reduction candidates. The sequence engine also
-//! checks one sequence relation per case through `sequence_relations`.
+//! checks one sequence relation per case through `sequence_relations`, and
+//! `counterexample` keeps each relation finding's start state as a fixture
+//! the engine replays first.
 
 mod assess;
+mod counterexample;
 mod execute;
 mod generate;
 mod instructions;
@@ -15,6 +18,9 @@ mod sequence_relations;
 mod sequences;
 mod shrink;
 
+pub use counterexample::{CounterexampleStoreError, RelationCounterexample};
+
+pub(crate) use counterexample::counterexample_path;
 pub use instructions::run_instructions;
 pub use sequence_relations::{
     check_dead_sets, check_preconditions, measured_ulp, DeadSetFinding, PreconditionFinding,

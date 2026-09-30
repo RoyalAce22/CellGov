@@ -89,6 +89,17 @@ pub enum CheckIdentity {
     ExternalReference,
 }
 
+impl CheckIdentity {
+    /// The check's stable name: a sequence relation's row name, or the
+    /// variant name of any other check.
+    pub fn name(&self) -> String {
+        match self {
+            Self::SpuSequenceRelation(relation) => format!("{relation:?}"),
+            other => format!("{other:?}"),
+        }
+    }
+}
+
 /// Semantic class of a disagreement or target failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DivergenceClass {
@@ -289,6 +300,11 @@ pub struct FuzzReport {
     /// What each retained sequence-relation finding diverged in, bounded
     /// like the findings.
     pub sequence_relation_divergences: Vec<SequenceRelationDivergence>,
+    /// The reduced start state of each retained sequence-relation finding,
+    /// bounded like the findings.
+    pub relation_counterexamples: Vec<crate::spu::RelationCounterexample>,
+    /// Each stored counterexample the run replayed before its first case.
+    pub stored_replays: Vec<StoredReplay>,
     max_findings: usize,
     pub(crate) sequence_words: u32,
 }
@@ -310,6 +326,18 @@ pub struct SequenceRelationDivergence {
     pub bit_distance: Vec<(u8, u32)>,
     /// Each differing word, as `(register, word)`.
     pub differing_words: Vec<(u8, u8)>,
+}
+
+/// One stored counterexample replayed before a campaign's first case.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredReplay {
+    /// The fixture's name.
+    pub name: String,
+    /// The fixture's row.
+    pub relation: cellgov_spu::fuzz::SpuSequenceRelationId,
+    /// How the row still diverges from the stored start state; `None` when
+    /// the two sides now match there.
+    pub divergence: Option<SequenceRelationDivergence>,
 }
 
 impl FuzzReport {
@@ -343,6 +371,8 @@ impl FuzzReport {
             finding_counts: BTreeMap::new(),
             findings: Vec::new(),
             sequence_relation_divergences: Vec::new(),
+            relation_counterexamples: Vec::new(),
+            stored_replays: Vec::new(),
             max_findings,
             sequence_words,
         }
@@ -353,6 +383,41 @@ impl FuzzReport {
         if self.sequence_relation_divergences.len() < self.max_findings {
             self.sequence_relation_divergences.push(divergence);
         }
+    }
+
+    /// Whether the next relation counterexample is still retained.
+    pub(crate) fn retains_relation_counterexample(&self) -> bool {
+        self.relation_counterexamples.len() < self.max_findings
+    }
+
+    /// Keeps `counterexample` while fewer than the retained-finding bound
+    /// are held.
+    pub(crate) fn relation_counterexample(
+        &mut self,
+        counterexample: crate::spu::RelationCounterexample,
+    ) {
+        if self.relation_counterexamples.len() < self.max_findings {
+            self.relation_counterexamples.push(counterexample);
+        }
+    }
+
+    /// Records a stored replay. One that still diverges counts as a
+    /// metamorphic violation; the fixture is its reproducer, so the report
+    /// retains no finding for it.
+    pub(crate) fn stored_replayed(&mut self, replay: StoredReplay) -> Result<(), InvariantError> {
+        if replay.divergence.is_some() {
+            let count = self
+                .finding_counts
+                .entry(FindingKind::MetamorphicViolation)
+                .or_insert(0);
+            *count = count
+                .checked_add(1)
+                .ok_or(InvariantError::CounterOverflow {
+                    counter: "finding count",
+                })?;
+        }
+        self.stored_replays.push(replay);
+        Ok(())
     }
 
     pub(crate) fn considered(&mut self) -> Result<(), InvariantError> {

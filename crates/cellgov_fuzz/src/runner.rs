@@ -10,13 +10,16 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use cellgov_spu::fuzz::SpuSequenceRelationId;
+
 use crate::artifact::{
     artifact_path, ArtifactCheckSelection, ArtifactError, ArtifactExecutionPolicy,
     ArtifactFingerprint, ArtifactReduction, ArtifactReductionRequest, ArtifactReference,
     ArtifactStoreError, FuzzFindingArtifact,
 };
 use crate::reduce::{reduce_finding, ReductionReport, ReductionRequest};
-use crate::report::{failing_findings, Finding, FindingKind, FuzzReport, FuzzRun};
+use crate::report::{failing_findings, Finding, FindingKind, FuzzReport, FuzzRun, StoredReplay};
+use crate::spu::{counterexample_path, CounterexampleStoreError, RelationCounterexample};
 use crate::{
     CampaignSchedule, CampaignShard, CampaignVersion, CancellationBoundary, CaseRange,
     ConfigurationError, FuzzConfig, FuzzError, FuzzTarget, GenerationStrategy, ReductionError,
@@ -168,6 +171,13 @@ pub enum CampaignFailure {
         error: ArtifactStoreError,
         /// The evidence no file holds.
         artifact: Box<FuzzFindingArtifact>,
+    },
+    /// The store refused a sequence-relation counterexample.
+    CounterexampleStore {
+        /// The refusal, which names the path.
+        error: CounterexampleStoreError,
+        /// The fixture no file holds.
+        counterexample: Box<RelationCounterexample>,
     },
 }
 
@@ -352,6 +362,17 @@ pub struct ArtifactRecord {
     pub stored: bool,
 }
 
+/// One retained sequence-relation counterexample, as the summary names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CounterexampleRecord {
+    /// Path the fixture write targeted.
+    pub path: PathBuf,
+    /// The row the fixture separates.
+    pub relation: SpuSequenceRelationId,
+    /// Whether the fixture reached its path.
+    pub stored: bool,
+}
+
 /// Counts of one generated campaign, accumulated over every worker run.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CampaignSummary {
@@ -369,6 +390,10 @@ pub struct CampaignSummary {
     pub finding_counts: BTreeMap<FindingKind, u64>,
     /// Retained findings, in storage order.
     pub artifacts: Vec<ArtifactRecord>,
+    /// Retained sequence-relation counterexamples, in storage order.
+    pub counterexamples: Vec<CounterexampleRecord>,
+    /// Each stored counterexample that still separates its row.
+    pub stored_reproduced: Vec<StoredReplay>,
     /// Retained findings whose reduction failed.
     pub reductions_failed: u64,
     /// Whether the range ended before the campaign considered every case
@@ -402,6 +427,13 @@ impl CampaignSummary {
         for (kind, count) in &report.finding_counts {
             add(self.finding_counts.entry(*kind).or_insert(0), *count)?;
         }
+        self.stored_reproduced.extend(
+            report
+                .stored_replays
+                .iter()
+                .filter(|replay| replay.divergence.is_some())
+                .cloned(),
+        );
         Ok(())
     }
 }
@@ -591,6 +623,9 @@ fn drive(
                     .checked_add(1)
                     .ok_or(CampaignError::CounterOverflow)?;
             }
+            for counterexample in &worker_run.report.relation_counterexamples {
+                store_counterexample(plan, host, run, counterexample);
+            }
             run.summary.accumulate(&worker_run.report)?;
             if let RunOutcome::HarnessFailure(source) = &worker_run.outcome {
                 if run.harness_failure.is_none() {
@@ -694,6 +729,33 @@ fn store_finding(
     }
     run.summary.artifacts.push(record);
     Ok(())
+}
+
+/// Stores one retained sequence-relation counterexample as a fixture, and
+/// records it in the summary whether or not it reached its file.
+fn store_counterexample(
+    plan: &CampaignPlan,
+    host: &mut dyn CampaignHost,
+    run: &mut CampaignRun,
+    counterexample: &RelationCounterexample,
+) {
+    let path = counterexample_path(&plan.artifacts_dir, &counterexample.name);
+    let stored = match counterexample.store(&path) {
+        Ok(()) => true,
+        Err(error) => {
+            run.evidence_not_stored = true;
+            host.failed(CampaignFailure::CounterexampleStore {
+                error,
+                counterexample: Box::new(counterexample.clone()),
+            });
+            false
+        }
+    };
+    run.summary.counterexamples.push(CounterexampleRecord {
+        path,
+        relation: counterexample.relation,
+        stored,
+    });
 }
 
 #[cfg(test)]

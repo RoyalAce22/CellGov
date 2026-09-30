@@ -1,0 +1,18 @@
+{
+  "counterexamples": [
+    {
+      "schema_version": 1,
+      "name": "seeded-partner-write",
+      "row": "CeqNotEqualFused",
+      "assignment": [
+        126,
+        33,
+        33,
+        96
+      ],
+      "registers": {},
+      "local_store": {},
+      "first_component": "Registers"
+    }
+  ]
+}
