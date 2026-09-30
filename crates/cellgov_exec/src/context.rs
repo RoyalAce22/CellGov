@@ -28,6 +28,7 @@ pub struct ExecutionContext<'a> {
     /// `drain_retired_state_hashes`.
     trace_per_step: bool,
     completed_dma_tags: u32,
+    mailbox_occupancy: u32,
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -43,6 +44,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             completed_dma_tags: 0,
+            mailbox_occupancy: 0,
         }
     }
 
@@ -59,6 +61,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             completed_dma_tags: 0,
+            mailbox_occupancy: 0,
         }
     }
 
@@ -77,6 +80,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             completed_dma_tags: 0,
+            mailbox_occupancy: 0,
         }
     }
 
@@ -99,6 +103,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             completed_dma_tags: 0,
+            mailbox_occupancy: 0,
         }
     }
 
@@ -142,6 +147,23 @@ impl<'a> ExecutionContext<'a> {
             completed_dma_tags: bits,
             ..self
         }
+    }
+
+    /// Number of messages waiting in the unit's own inbound mailbox at
+    /// the start of the step.
+    #[inline]
+    pub const fn with_mailbox_occupancy(self, count: u32) -> Self {
+        Self {
+            mailbox_occupancy: count,
+            ..self
+        }
+    }
+
+    /// Messages waiting in the unit's own inbound mailbox at the start
+    /// of the step.
+    #[inline]
+    pub const fn mailbox_occupancy(&self) -> u32 {
+        self.mailbox_occupancy
     }
 
     /// Completed-DMA-tag bitmap for this step.

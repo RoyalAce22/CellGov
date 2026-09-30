@@ -64,6 +64,9 @@ impl SpuReferenceInput {
             state.channels.atomic_status = channels.atomic_status;
             state.channels.pending_mbox_rt = channels.pending_mbox_rt;
             state.channels.pending_get = channels.pending_get;
+            state.channels.tag_update_pending = channels.tag_update_pending;
+            state.channels.atomic_status_ready = channels.atomic_status_ready;
+            state.channels.in_mbox_count = channels.in_mbox_count;
         }
         state.reservation = self.reservation.map(cellgov_sync::ReservedLine::containing);
         Ok(state)

@@ -107,7 +107,21 @@ const WRCH_CHANNELS: &[u32] = &[
     spu::MFC_WR_TAG_MASK as u32,
     spu::MFC_WR_TAG_UPDATE as u32,
 ];
-const RCHCNT_CHANNELS: &[u32] = &[spu::SPU_RD_MACH_STAT as u32];
+pub(super) const RCHCNT_CHANNELS: &[u32] = &[
+    spu::SPU_RD_MACH_STAT as u32,
+    spu::MFC_LSA as u32,
+    spu::MFC_EAH as u32,
+    spu::MFC_EAL as u32,
+    spu::MFC_SIZE as u32,
+    spu::MFC_TAG_ID as u32,
+    spu::MFC_CMD as u32,
+    spu::MFC_WR_TAG_MASK as u32,
+    spu::MFC_WR_TAG_UPDATE as u32,
+    spu::MFC_RD_TAG_STAT as u32,
+    spu::MFC_RD_ATOMIC_STAT as u32,
+    spu::SPU_WR_OUT_MBOX as u32,
+    spu::SPU_RD_IN_MBOX as u32,
+];
 
 pub(super) fn channel_values(kind: SpuInstructionKind) -> &'static [u32] {
     match kind {

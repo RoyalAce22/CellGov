@@ -54,6 +54,15 @@ pub struct SpuReferenceChannels {
     pub pending_mbox_rt: Option<u8>,
     /// Pending DMA GET as `(effective address, local address, size, tag)`.
     pub pending_get: Option<(u64, u32, u32, u8)>,
+    /// A tag-status update request is outstanding.
+    #[serde(default)]
+    pub tag_update_pending: bool,
+    /// An atomic command's status is waiting to be read.
+    #[serde(default)]
+    pub atomic_status_ready: bool,
+    /// Messages in the inbound mailbox.
+    #[serde(default)]
+    pub in_mbox_count: u32,
 }
 
 impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
@@ -69,6 +78,9 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             atomic_status,
             pending_mbox_rt,
             pending_get,
+            tag_update_pending,
+            atomic_status_ready,
+            in_mbox_count,
         } = value;
         Self {
             mfc_lsa: *mfc_lsa,
@@ -81,6 +93,9 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             atomic_status: *atomic_status,
             pending_mbox_rt: *pending_mbox_rt,
             pending_get: *pending_get,
+            tag_update_pending: *tag_update_pending,
+            atomic_status_ready: *atomic_status_ready,
+            in_mbox_count: *in_mbox_count,
         }
     }
 }

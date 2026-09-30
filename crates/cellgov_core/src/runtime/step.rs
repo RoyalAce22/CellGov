@@ -156,11 +156,17 @@ impl Runtime {
                 &self.spaces,
                 unit_id,
             );
+            // A unit's own inbound mailbox shares its id.
+            let mailbox_occupancy = self
+                .mailbox_registry
+                .get(cellgov_sync::MailboxId::new(unit_id.raw()))
+                .map_or(0, |mailbox| mailbox.len() as u32);
             let ctx = ctx
                 .with_reservations(unit_reservations)
                 .with_current_tick(self.time)
                 .with_trace_per_step(self.mode != RuntimeMode::FaultDriven)
-                .with_completed_dma_tags(completed_tags);
+                .with_completed_dma_tags(completed_tags)
+                .with_mailbox_occupancy(mailbox_occupancy);
             let unit = self
                 .registry
                 .get_mut(unit_id)

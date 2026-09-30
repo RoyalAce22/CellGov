@@ -346,11 +346,12 @@ fn rchcnt_on_an_unmodeled_channel_faults_by_name() {
         run(
             SpuInstruction::Rchcnt {
                 rt: 2,
-                channel: spu::SPU_RD_IN_MBOX
+                // SPU_WrDec: the decrementer is not modeled.
+                channel: 7
             },
             &mut s
         ),
-        SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(29))
+        SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(7))
     ));
     assert_eq!(s.regs[2], PATTERN);
 }

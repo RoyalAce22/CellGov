@@ -83,6 +83,12 @@ pub struct SpuChannelSnapshot {
     pub pending_mbox_rt: Option<u8>,
     /// Pending MFC GET request.
     pub pending_get: Option<(u64, u32, u32, u8)>,
+    /// A tag-status update request is outstanding.
+    pub tag_update_pending: bool,
+    /// An atomic command's status is waiting to be read.
+    pub atomic_status_ready: bool,
+    /// Messages in the inbound mailbox at the start of the step.
+    pub in_mbox_count: u32,
 }
 
 impl SpuObservableSnapshot {
@@ -108,6 +114,9 @@ impl SpuObservableSnapshot {
             atomic_status,
             pending_mbox_rt,
             pending_get,
+            tag_update_pending,
+            atomic_status_ready,
+            in_mbox_count,
         } = channels;
         Self {
             regs: *regs,
@@ -125,6 +134,9 @@ impl SpuObservableSnapshot {
                 atomic_status: *atomic_status,
                 pending_mbox_rt: *pending_mbox_rt,
                 pending_get: *pending_get,
+                tag_update_pending: *tag_update_pending,
+                atomic_status_ready: *atomic_status_ready,
+                in_mbox_count: *in_mbox_count,
             },
             reservation: *reservation,
             stop: *stop,
@@ -290,6 +302,18 @@ pub struct ChannelState {
     /// the next `run_until_yield` from the committed memory snapshot, with
     /// the tag bit published to `tag_status` after the copy lands.
     pub pending_get: Option<(u64, u32, u32, u8)>,
+    /// A tag-status update request is outstanding, so `MFC_RdTagStat`
+    /// counts 1 once the request's condition holds. A read clears it.
+    // [CBEA p:128 s:9.3.6] the MFC_RdTagStat count starts at 0 and turns 1 when the requested tag status is available.
+    pub tag_update_pending: bool,
+    /// An atomic command completed and `MFC_RdAtomicStat` has not been
+    /// read since, so the channel counts 1.
+    // [CBEA p:131 s:9.4] the MFC_RdAtomicStat count starts at 0 and is 1 once an immediate atomic command completes.
+    pub atomic_status_ready: bool,
+    /// Messages in the unit's inbound mailbox at the start of the step,
+    /// which the runtime reports: the `SPU_RdInMbox` count.
+    // [CBEA p:135 s:9.5.3] the SPU_RdInMbox count is the number of messages in the inbound mailbox and starts at 0.
+    pub in_mbox_count: u32,
 }
 
 impl ChannelState {

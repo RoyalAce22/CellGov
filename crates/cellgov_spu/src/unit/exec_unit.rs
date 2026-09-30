@@ -87,6 +87,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             self.state.channels.tag_status |= 1u32 << tag_id;
         }
         self.state.channels.tag_status |= ctx.completed_dma_tags();
+        self.state.channels.in_mbox_count = ctx.mailbox_occupancy();
 
         // Mirror cross-unit reservation invalidation. The context view is
         // frozen for the step, so a single entry-time check suffices.
@@ -213,6 +214,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     if let Some(line_addr) = acquire_line {
                         // [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] the channel holds the status of the last completed immediate atomic command.
                         self.state.channels.atomic_status = MFC_ATOMIC_STAT_G;
+                        self.state.channels.atomic_status_ready = true;
                         self.state.reservation =
                             Some(cellgov_sync::ReservedLine::containing(line_addr));
                         effects.push(Effect::ReservationAcquire {

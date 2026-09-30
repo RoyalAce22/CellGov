@@ -589,3 +589,7 @@ mod spr_tests;
 #[cfg(test)]
 #[path = "tests/sync_tests.rs"]
 mod sync_tests;
+
+#[cfg(test)]
+#[path = "tests/channel_count_tests.rs"]
+mod channel_count_tests;

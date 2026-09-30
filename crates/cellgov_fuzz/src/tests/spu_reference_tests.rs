@@ -114,7 +114,8 @@ fn all_channels() -> serde_json::Value {
     serde_json::json!({
         "mfc_lsa": 1, "mfc_eah": 2, "mfc_eal": 3, "mfc_size": 4, "mfc_tag_id": 5,
         "tag_mask": 6, "tag_status": 7, "atomic_status": 8,
-        "pending_mbox_rt": 127, "pending_get": [9, 10, 11, 12]
+        "pending_mbox_rt": 127, "pending_get": [9, 10, 11, 12],
+        "tag_update_pending": true, "atomic_status_ready": true, "in_mbox_count": 3
     })
 }
 
@@ -513,6 +514,9 @@ fn artifact_types_round_trip_through_json() {
             atomic_status: 8,
             pending_mbox_rt: Some(127),
             pending_get: Some((9, 10, 11, 12)),
+            tag_update_pending: true,
+            atomic_status_ready: true,
+            in_mbox_count: 3,
         })
     );
     assert_eq!(capture.expected.reservation, value(None));
@@ -676,7 +680,7 @@ fn each_component_is_named_when_it_differs() {
 
 #[test]
 fn every_channel_field_participates_in_the_channel_comparison() {
-    let mutations: [fn(&mut SpuReferenceChannels); 10] = [
+    let mutations: [fn(&mut SpuReferenceChannels); 13] = [
         |channels| channels.mfc_lsa ^= 1,
         |channels| channels.mfc_eah ^= 1,
         |channels| channels.mfc_eal ^= 1,
@@ -687,6 +691,9 @@ fn every_channel_field_participates_in_the_channel_comparison() {
         |channels| channels.atomic_status ^= 1,
         |channels| channels.pending_mbox_rt = Some(3),
         |channels| channels.pending_get = Some((1, 2, 3, 4)),
+        |channels| channels.tag_update_pending ^= true,
+        |channels| channels.atomic_status_ready ^= true,
+        |channels| channels.in_mbox_count ^= 1,
     ];
     let loaded = snapshot();
     let outcome = SpuStepOutcome::Continue;
@@ -718,6 +725,9 @@ fn channel_snapshots_convert_field_by_field() {
     state.channels.atomic_status = 8;
     state.channels.pending_mbox_rt = Some(9);
     state.channels.pending_get = Some((10, 11, 12, 13));
+    state.channels.tag_update_pending = true;
+    state.channels.atomic_status_ready = true;
+    state.channels.in_mbox_count = 14;
     let converted = SpuReferenceChannels::from(&SpuObservableSnapshot::capture(&state).channels);
     assert_eq!(
         converted,
@@ -732,6 +742,9 @@ fn channel_snapshots_convert_field_by_field() {
             atomic_status: 8,
             pending_mbox_rt: Some(9),
             pending_get: Some((10, 11, 12, 13)),
+            tag_update_pending: true,
+            atomic_status_ready: true,
+            in_mbox_count: 14,
         }
     );
 }
@@ -1068,6 +1081,9 @@ fn replay_places_words_at_a_nonzero_pc_and_applies_initial_overrides() {
         atomic_status: 8,
         pending_mbox_rt: Some(9),
         pending_get: Some((10, 11, 12, 13)),
+        tag_update_pending: true,
+        atomic_status_ready: true,
+        in_mbox_count: 3,
     });
     altered.expected.pc = value(0x104);
     altered.expected.reservation = value(Some(0x80));

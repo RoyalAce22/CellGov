@@ -194,6 +194,19 @@ pub const SPU_LS_SIZE: usize = 256 * 1024;
 // [SPU-ISA p:31 s:3 Table 3-1] the LSLR is 2^n - 1 for an effective size of 2^n bytes, and 0x0003FFFF selects 256 KB.
 pub const SPU_LSLR_FULL: u32 = SPU_LS_SIZE as u32 - 1;
 
+/// Entries in the MFC SPU command queue: the MFC_Cmd channel's count on
+/// an empty queue.
+// [CBE-Handbook p:445 s:17.1 Table 17-2] MFC_Cmd has 16 maximum entries; [CBE-Handbook p:528 s:19.4.3.2] each MFC has a 16-entry SPU command queue.
+pub const MFC_SPU_QUEUE_DEPTH: u32 = 16;
+
+/// Entries in the SPU inbound mailbox.
+// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_RdInMbox has 4 maximum entries.
+pub const SPU_IN_MBOX_DEPTH: u32 = 4;
+
+/// Entries in the SPU outbound mailbox.
+// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_WrOutMbox has 1 maximum entry.
+pub const SPU_OUT_MBOX_DEPTH: u32 = 1;
+
 /// Mask of the stop-and-signal code: the low 14 bits of a `stop` word.
 // [SPU-ISA p:238 s:10] stop carries its signal type in bits 18:31.
 pub const SPU_STOP_CODE_MASK: u32 = 0x3FFF;

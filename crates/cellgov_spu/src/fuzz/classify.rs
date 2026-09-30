@@ -88,10 +88,11 @@ pub(super) fn effect_and_outcome(
             ..
         } => (NO_EFFECTS, CONTINUE),
         SpuInstruction::Wrch { .. } => (NO_EFFECTS, FAULT),
-        SpuInstruction::Rchcnt {
-            channel: spu::SPU_RD_MACH_STAT,
-            ..
-        } => (NO_EFFECTS, CONTINUE),
+        SpuInstruction::Rchcnt { channel, .. }
+            if super::support::RCHCNT_CHANNELS.contains(&u32::from(channel)) =>
+        {
+            (NO_EFFECTS, CONTINUE)
+        }
         SpuInstruction::Rchcnt { .. } => (NO_EFFECTS, FAULT),
         SpuInstruction::Br { .. }
         | SpuInstruction::Brsl { .. }

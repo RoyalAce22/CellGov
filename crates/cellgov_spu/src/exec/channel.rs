@@ -55,7 +55,10 @@ pub(super) fn execute_wrch(
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:459 s:17. SPE Channel and Related MMIO Interface sub:17.10 MFC Tag-Group Management Channels] MFC_WrTagUpdate triggers when MFC_RdTagStat refreshes; immediate completion in this model.
-        spu::MFC_WR_TAG_UPDATE => SpuStepOutcome::Continue,
+        spu::MFC_WR_TAG_UPDATE => {
+            state.channels.tag_update_pending = true;
+            SpuStepOutcome::Continue
+        }
         // [CBE-Handbook p:463 s:17. SPE Channel and Related MMIO Interface sub:17.12 SPU Mailbox Channels] SPU Write Outbound Mailbox sends a 32-bit message to the PPE; values are discarded here.
         spu::SPU_WR_OUT_MBOX => SpuStepOutcome::Continue,
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
@@ -77,6 +80,7 @@ pub(super) fn execute_rdch(
             let masked = state.channels.tag_status & state.channels.tag_mask;
             if masked == state.channels.tag_mask {
                 state.set_reg_word_splat(rt, state.channels.tag_status);
+                state.channels.tag_update_pending = false;
                 SpuStepOutcome::Continue
             } else {
                 SpuStepOutcome::Yield {
@@ -99,6 +103,7 @@ pub(super) fn execute_rdch(
         // [CBE-Handbook p:462 s:17. SPE Channel and Related MMIO Interface sub:17.11 MFC Read Atomic Command Status Channel] Reports success/failure status for the most recent atomic command (e.g. putllc).
         spu::MFC_RD_ATOMIC_STAT => {
             state.set_reg_word_splat(rt, state.channels.atomic_status);
+            state.channels.atomic_status_ready = false;
             SpuStepOutcome::Continue
         }
         // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] Two status bits: IS (bit 30) isolation and IE (bit 31) interrupt enable; the model runs nonisolated with interrupts never enabled, so both read as zero.
@@ -115,14 +120,52 @@ pub(super) fn execute_rdch(
 }
 
 pub(super) fn execute_rchcnt(rt: u8, channel: u8, state: &mut SpuState) -> SpuStepOutcome {
-    let count = match channel {
-        // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] The channel has no count; rchcnt on it always returns 1.
-        spu::SPU_RD_MACH_STAT => 1,
-        _ => return SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(channel)),
+    let Some(count) = channel_count(channel, state) else {
+        return SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(channel));
     };
     state.regs[rt as usize] = [0u8; 16];
     state.set_reg_word_slot(rt, 0, count);
     SpuStepOutcome::Continue
+}
+
+/// The count `rchcnt` reads for `channel`, or `None` for a channel the
+/// model does not implement.
+///
+/// A nonblocking channel counts 1. A blocking channel counts its free
+/// capacity (a write channel) or its occupancy (a read channel). Where
+/// the model keeps no queue for a channel, the count is the one that
+/// model implies, as each arm states.
+// [CBEA p:109 s:9] a nonblocking channel's rchcnt returns 1; a blocking channel's count is its free capacity or occupancy.
+pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
+    let channels = &state.channels;
+    Some(match channel {
+        // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] The channel has no count; rchcnt on it always returns 1.
+        spu::SPU_RD_MACH_STAT => 1,
+        // [CBEA p:112 s:9.1] the MFC command parameter channels are nonblocking and count 1.
+        spu::MFC_LSA | spu::MFC_EAH | spu::MFC_EAL | spu::MFC_SIZE | spu::MFC_TAG_ID => 1,
+        // [CBEA p:113 s:9.1.1] MFC_Cmd counts the free command-queue slots. The model keeps no
+        // bounded queue and its wrch never stalls on a full one, so every slot counts as free.
+        spu::MFC_CMD => spu::MFC_SPU_QUEUE_DEPTH,
+        // [CBEA p:125 s:9.3.3] MFC_WrTagMask is nonblocking and has no count.
+        spu::MFC_WR_TAG_MASK => 1,
+        // [CBEA p:127 s:9.3.5] MFC_WrTagUpdate counts 0 until the MFC takes the request, then 1.
+        // The model takes each request as it is written.
+        spu::MFC_WR_TAG_UPDATE => 1,
+        // [CBEA p:128 s:9.3.6] MFC_RdTagStat counts 1 once the requested tag status is available.
+        // The model makes it available when every masked tag has completed, as its read does.
+        spu::MFC_RD_TAG_STAT => u32::from(
+            channels.tag_update_pending
+                && channels.tag_status & channels.tag_mask == channels.tag_mask,
+        ),
+        // [CBEA p:131 s:9.4] MFC_RdAtomicStat counts 1 once an immediate atomic command completes.
+        spu::MFC_RD_ATOMIC_STAT => u32::from(channels.atomic_status_ready),
+        // [CBEA p:133 s:9.5.1] SPU_WrOutMbox counts its free entries. The model drops each
+        // message as it is written, so the one entry is always free.
+        spu::SPU_WR_OUT_MBOX => spu::SPU_OUT_MBOX_DEPTH,
+        // [CBEA p:135 s:9.5.3] SPU_RdInMbox counts the messages in the inbound mailbox.
+        spu::SPU_RD_IN_MBOX => channels.in_mbox_count.min(spu::SPU_IN_MBOX_DEPTH),
+        _ => return None,
+    })
 }
 
 fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
@@ -243,6 +286,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 let range = ByteRange::new(GuestAddr::new(line.addr()), RESERVATION_LINE_BYTES)
                     .expect("valid EA range");
                 state.channels.atomic_status = 0;
+                state.channels.atomic_status_ready = true;
                 SpuStepOutcome::Yield {
                     effects: vec![Effect::ConditionalStore {
                         range,
@@ -255,6 +299,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             } else {
                 state.reservation = None;
                 state.channels.atomic_status = MFC_ATOMIC_STAT_S;
+                state.channels.atomic_status_ready = true;
                 SpuStepOutcome::Continue
             }
         }
