@@ -63,15 +63,15 @@ fn artifact_parser_refuses_version_drift_and_impossible_completion() {
     )
     .expect("scan must finish");
     let mut json = serde_json::to_value(&source).expect("artifact serializes");
-    json["schema_version"] = 2.into();
+    json["schema_version"] = 1.into();
     assert!(matches!(
         RawDecodeArtifact::parse_json(&json.to_string()),
         Err(RawDecodeError::Version {
-            found: 2,
-            supported: 1
+            found: 1,
+            supported: 2
         })
     ));
-    json["schema_version"] = 1.into();
+    json["schema_version"] = 2.into();
     json["processed"] = 8.into();
     assert!(matches!(
         RawDecodeArtifact::parse_json(&json.to_string()),

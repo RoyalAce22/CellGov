@@ -67,6 +67,52 @@ impl SpuWord {
     }
 }
 
+impl SpuWord {
+    /// The bits the text shows as operand fields: every field position of
+    /// the word's form, or none for a word no row selects.
+    pub fn rendered_field_mask(&self) -> u32 {
+        let Some((_, row)) = self.row else {
+            return 0;
+        };
+        match row.form {
+            SpuForm::Rr | SpuForm::Ri7 => 0x001f_ffff,
+            SpuForm::Rrr => 0x0fff_ffff,
+            SpuForm::Ri8 => 0x003f_ffff,
+            SpuForm::Ri10 => 0x00ff_ffff,
+            SpuForm::Ri16 => 0x007f_ffff,
+            SpuForm::Ri18 => 0x01ff_ffff,
+            SpuForm::Hint => 0x01ff_ffff,
+        }
+    }
+}
+
+/// Whether the text of `raw` agrees with the decoder: the word renders,
+/// and a word that decodes names the mnemonic of the instruction the
+/// decoder builds.
+pub fn agrees_with_decode(raw: u32) -> bool {
+    let word = SpuWord::of(raw);
+    // Rendering to a sink that keeps nothing still runs every field read.
+    let _ = fmt::write(&mut Discard, format_args!("{word}"));
+    match crate::decode::decode(raw) {
+        Ok(instruction) => {
+            let kind: &'static str =
+                crate::instruction::SpuInstructionKind::from(instruction).into();
+            word.row
+                .is_some_and(|(_, row)| kind.eq_ignore_ascii_case(row.mnemonic))
+        }
+        Err(_) => true,
+    }
+}
+
+/// A text sink that keeps nothing.
+struct Discard;
+
+impl fmt::Write for Discard {
+    fn write_str(&mut self, _: &str) -> fmt::Result {
+        Ok(())
+    }
+}
+
 impl fmt::Display for SpuWord {
     /// `mnemonic operands`, or `.word 0x...` for a word no row selects.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

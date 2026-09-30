@@ -294,6 +294,8 @@ pub(crate) struct RawSummary {
     pub refused: u64,
     /// Words the decoder panicked on.
     pub panics: u64,
+    /// Decoded words whose disassembly disagrees with the decoder.
+    pub disagreements: u64,
     /// Path the scan wrote the versioned result to.
     pub output: Option<PathBuf>,
 }
@@ -302,7 +304,7 @@ impl RawSummary {
     /// The documented exit status for this scan.
     #[must_use]
     pub const fn exit_code(&self) -> CommandExitCode {
-        if self.panics > 0 {
+        if self.panics > 0 || self.disagreements > 0 {
             CommandExitCode::new(exit_codes::FAILED)
         } else if matches!(self.status, RawDecodeStatus::Cancelled) {
             CommandExitCode::new(EXIT_CANCELLED)
@@ -624,12 +626,14 @@ pub(crate) fn render_raw_summary(summary: &RawSummary) -> String {
         .as_ref()
         .map_or_else(String::new, |path| format!(" -> {}", path.display()));
     format!(
-        "fuzz raw: {:?} {} of {} words; accepted={} refused={} panics={}{destination}\n",
+        "fuzz raw: {:?} {} of {} words; accepted={} refused={} panics={} \
+         disagreements={}{destination}\n",
         summary.status,
         summary.processed,
         summary.domain,
         summary.accepted,
         summary.refused,
         summary.panics,
+        summary.disagreements,
     )
 }

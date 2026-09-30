@@ -60,3 +60,43 @@ fn every_row_has_the_class_the_decoder_gives_it() {
         SpuWordClass::AbsentOnCbe
     );
 }
+
+#[test]
+fn every_decoded_row_names_its_own_mnemonic() {
+    for row in SPU_OPCODE_MAP {
+        assert!(agrees_with_decode(row.canonical_word()), "{}", row.mnemonic);
+    }
+}
+
+#[test]
+fn every_field_the_decoder_reads_is_a_field_the_text_shows() {
+    // The decoder reads each row's operands at fixed bit positions, so
+    // the row's canonical word stands for every word of the row.
+    let mut checked = 0;
+    for row in SPU_OPCODE_MAP {
+        let Some(descriptor) = crate::fuzz::generation_descriptor(row.canonical_word()) else {
+            continue;
+        };
+        checked += 1;
+        let read = descriptor
+            .operands
+            .iter()
+            .fold(0u32, |mask, field| mask | field.mask);
+        let shown = SpuWord::of(row.canonical_word()).rendered_field_mask();
+        assert_eq!(
+            read & !shown,
+            0,
+            "{}: the decoder reads bits {:#010x} the text does not show",
+            row.mnemonic,
+            read & !shown
+        );
+    }
+    let implemented = SPU_OPCODE_MAP
+        .iter()
+        .filter(|row| crate::decode::decode(row.canonical_word()).is_ok())
+        .count();
+    assert_eq!(
+        checked, implemented,
+        "every implemented row has a descriptor"
+    );
+}

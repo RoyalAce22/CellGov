@@ -150,6 +150,7 @@ pub(super) fn run_raw(args: &FuzzRawArgs, quiet: bool) -> Result<CommandExitCode
         accepted: artifact.accepted,
         refused: artifact.refused,
         panics: artifact.panics,
+        disagreements: artifact.disagreements,
         output: args.output.clone(),
     };
     if let Some(path) = &args.output {

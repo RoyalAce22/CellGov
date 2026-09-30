@@ -57,7 +57,7 @@ fn sample_manifest() -> DecoderCampaignManifest {
 fn regenerate_committed_decoder_manifest() {
     let json = serde_json::to_string(&sample_manifest()).expect("manifest serializes");
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/decoder_campaign_v1.json");
+        .join("tests/fixtures/decoder_campaign_v2.json");
     std::fs::write(path, format!("{json}\n")).expect("writes fixture");
 }
 
@@ -65,7 +65,7 @@ fn regenerate_committed_decoder_manifest() {
 fn committed_manifest_detects_witness_and_reserved_class_drift() {
     let baseline = DecoderCampaignManifest::parse_json(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/decoder_campaign_v1.json"
+        "/tests/fixtures/decoder_campaign_v2.json"
     )))
     .expect("committed versioned manifest");
     let current = sample_manifest();
@@ -297,6 +297,9 @@ fn typed_raw_and_semantic_failures_keep_original_replays_and_distinct_buckets() 
                 payload: TargetPanicPayload::NonString,
             })
             .collect(),
+
+        disagreements: 0,
+        disagreement_samples: Vec::new(),
     };
     let manifest = DecoderCampaignManifest::build(&[artifact], &ppu, &spu).expect("typed findings");
     assert_eq!(manifest.failures.len(), 4);
@@ -321,4 +324,53 @@ fn typed_raw_and_semantic_failures_keep_original_replays_and_distinct_buckets() 
             |finding| finding.fingerprint.class == DecoderFailureClass::RoundTripFailure
                 && finding.fingerprint.kind.as_deref() == Some(format!("{kind:?}").as_str())
         ));
+}
+
+#[test]
+fn every_spu_row_has_its_witness_and_a_wrong_one_is_refused() {
+    let baseline = sample_manifest();
+    assert_eq!(
+        baseline.spu_rows.len(),
+        cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP.len()
+    );
+    let stops: Vec<&str> = baseline
+        .spu_rows
+        .iter()
+        .filter(|row| row.outcome == SpuRowOutcome::InvalidInstructionStop)
+        .filter_map(|row| row.mnemonic.as_deref())
+        .collect();
+    assert_eq!(stops, ["dfcgt", "dfcmgt", "dftsv", "dfceq", "dfcmeq"]);
+    assert_eq!(
+        baseline.spu_unassigned.outcome,
+        SpuRowOutcome::InvalidInstructionStop
+    );
+
+    let reparse = |manifest: &DecoderCampaignManifest| {
+        DecoderCampaignManifest::parse_json(&serde_json::to_string(manifest).expect("serializes"))
+    };
+    let mut lost = baseline.clone();
+    lost.spu_rows.pop();
+    assert!(matches!(
+        reparse(&lost),
+        Err(DecoderManifestError::SemanticCoverage)
+    ));
+    let mut runs = baseline.clone();
+    let absent = runs
+        .spu_rows
+        .iter_mut()
+        .find(|row| row.outcome == SpuRowOutcome::InvalidInstructionStop)
+        .expect("an absent row");
+    absent.outcome = SpuRowOutcome::Decoded {
+        kind: "Spu(Il)".to_string(),
+    };
+    assert!(matches!(
+        reparse(&runs),
+        Err(DecoderManifestError::SemanticCoverage)
+    ));
+    let mut named = baseline;
+    named.spu_unassigned.mnemonic = Some("stop".to_string());
+    assert!(matches!(
+        reparse(&named),
+        Err(DecoderManifestError::SemanticCoverage)
+    ));
 }

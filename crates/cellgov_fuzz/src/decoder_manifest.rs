@@ -15,7 +15,7 @@ use crate::spu_reference::{parse_reference_json as parse_spu_reference, SpuRefer
 use crate::{InstructionIdentity, TargetPanicPayload};
 
 /// Version of the decoder campaign manifest.
-pub const DECODER_MANIFEST_VERSION: u32 = 1;
+pub const DECODER_MANIFEST_VERSION: u32 = 2;
 
 /// Stable replay coordinate for one decoder case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -67,6 +67,8 @@ pub enum DecoderFailureClass {
     TargetPanic,
     /// Raw decoder panics.
     RawPanic,
+    /// The disassembly of a decoded word names another mnemonic.
+    DisassemblyDisagreement,
 }
 
 /// Machine-readable semantic identity for failure grouping.
@@ -145,6 +147,34 @@ pub struct DecoderRawTotals {
     pub refused: u64,
     /// Decoder panics, including unretained samples.
     pub panics: u64,
+    /// Decoded words whose disassembly disagrees with the decoder.
+    pub disagreements: u64,
+}
+
+/// What one SPU instruction word does when the SPU meets it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum SpuRowOutcome {
+    /// The decoder builds this instruction kind.
+    Decoded {
+        /// Exact instruction-kind identity, as the witnesses name it.
+        kind: String,
+    },
+    /// The SPU stops with the invalid-instruction status bit set.
+    InvalidInstructionStop,
+}
+
+/// One SPU instruction word and what it does: a witness for one row of
+/// the SPU opcode map, or for the words no row selects.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpuRowWitness {
+    /// The row's mnemonic; `None` for a word no row selects.
+    pub mnemonic: Option<String>,
+    /// The word: the row's opcode with every other field zero.
+    pub raw: u32,
+    /// What the word does.
+    pub outcome: SpuRowOutcome,
 }
 
 /// Validated independent vector or capture, separate from local decoder checks.
@@ -177,6 +207,10 @@ pub struct DecoderCampaignManifest {
     pub expected_refusals: u64,
     /// Independent reference artifacts, never inferred from descriptor agreement.
     pub authoritative_references: Vec<DecoderReferenceEvidence>,
+    /// One witness per row of the SPU opcode map, in map order.
+    pub spu_rows: Vec<SpuRowWitness>,
+    /// A witness for the SPU words no row selects.
+    pub spu_unassigned: SpuRowWitness,
 }
 
 /// Refusal to construct or validate a decoder campaign manifest.
@@ -267,6 +301,28 @@ impl DecoderCampaignManifest {
                 .ok_or(DecoderManifestError::SemanticCoverage)?;
         }
         for artifact in &raw_partitions {
+            failures.extend(
+                artifact
+                    .disagreement_samples
+                    .iter()
+                    .map(|&raw| DecoderFailure {
+                        fingerprint: DecoderFailureFingerprint {
+                            class: DecoderFailureClass::DisassemblyDisagreement,
+                            kind: None,
+                            other_kind: None,
+                            field: None,
+                            payload: None,
+                            stage: None,
+                            case_class: None,
+                        },
+                        original: Some(DecoderReplay {
+                            decoder: artifact.decoder,
+                            raw,
+                        }),
+                        descriptor_replay: None,
+                        minimized: None,
+                    }),
+            );
             failures.extend(artifact.panic_samples.iter().map(|sample| DecoderFailure {
                 fingerprint: DecoderFailureFingerprint {
                     class: DecoderFailureClass::RawPanic,
@@ -294,6 +350,8 @@ impl DecoderCampaignManifest {
             )
         });
         failures = rank_failures(failures);
+        let (spu_rows, spu_unassigned) =
+            spu_row_witnesses().ok_or(DecoderManifestError::SemanticCoverage)?;
         let manifest = Self {
             schema_version: DECODER_MANIFEST_VERSION,
             raw_partitions,
@@ -303,6 +361,8 @@ impl DecoderCampaignManifest {
             failures,
             expected_refusals,
             authoritative_references: Vec::new(),
+            spu_rows,
+            spu_unassigned,
         };
         manifest.validate()?;
         Ok(manifest)
@@ -433,6 +493,9 @@ impl DecoderCampaignManifest {
         {
             return Err(DecoderManifestError::SemanticCoverage);
         }
+        if !self.spu_rows_are_complete() {
+            return Err(DecoderManifestError::SemanticCoverage);
+        }
         for reference in &self.authoritative_references {
             match reference.decoder {
                 RawDecoder::Ppu => {
@@ -451,6 +514,88 @@ impl DecoderCampaignManifest {
         }
         Ok(())
     }
+}
+
+impl DecoderCampaignManifest {
+    /// Whether every row of the SPU opcode map has its witness, in map
+    /// order:
+    ///
+    /// - a row the CBE provides is a decoded kind the manifest witnesses;
+    /// - a row the CBE lacks is an invalid-instruction stop;
+    /// - the unassigned witness selects no row and is an
+    ///   invalid-instruction stop.
+    fn spu_rows_are_complete(&self) -> bool {
+        use cellgov_ps3_abi::hw::spu_isa::{row_for, SPU_OPCODE_MAP};
+        self.spu_rows.len() == SPU_OPCODE_MAP.len()
+            && self
+                .spu_rows
+                .iter()
+                .zip(SPU_OPCODE_MAP)
+                .all(|(witness, row)| {
+                    witness.mnemonic.as_deref() == Some(row.mnemonic)
+                        && witness.raw == row.canonical_word()
+                        && match (&witness.outcome, row.on_cbe) {
+                            (SpuRowOutcome::Decoded { kind }, true) => self
+                                .witnesses
+                                .iter()
+                                .any(|w| &w.kind == kind && w.replay.decoder == RawDecoder::Spu),
+                            (SpuRowOutcome::InvalidInstructionStop, false) => true,
+                            _ => false,
+                        }
+                })
+            && self.spu_unassigned.mnemonic.is_none()
+            && row_for(self.spu_unassigned.raw).is_none()
+            && self.spu_unassigned.outcome == SpuRowOutcome::InvalidInstructionStop
+    }
+}
+
+/// A witness for every row of the SPU opcode map, and one for the first
+/// word no row selects, or `None` when a word does neither of the two
+/// things the map allows: decode, or stop the SPU as an invalid
+/// instruction.
+fn spu_row_witnesses() -> Option<(Vec<SpuRowWitness>, SpuRowWitness)> {
+    use cellgov_ps3_abi::hw::spu_isa::{row_for, SPU_OPCODE_MAP};
+    let rows = SPU_OPCODE_MAP
+        .iter()
+        .map(|row| {
+            let raw = row.canonical_word();
+            Some(SpuRowWitness {
+                mnemonic: Some(row.mnemonic.to_string()),
+                raw,
+                outcome: spu_word_outcome(raw)?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let unassigned = (0..1u32 << 11)
+        .map(|opcode| opcode << 21)
+        .find(|&raw| row_for(raw).is_none())?;
+    let unassigned = SpuRowWitness {
+        mnemonic: None,
+        raw: unassigned,
+        outcome: spu_word_outcome(unassigned)?,
+    };
+    Some((rows, unassigned))
+}
+
+/// What `raw` does: the kind it decodes to, or, run as the first word of
+/// a fresh SPU, an invalid-instruction stop. `None` for anything else.
+fn spu_word_outcome(raw: u32) -> Option<SpuRowOutcome> {
+    use cellgov_exec::ExecutionUnit;
+    if let Ok(instruction) = cellgov_spu::decode::decode(raw) {
+        let kind = cellgov_spu::instruction::SpuInstructionKind::from(instruction);
+        return Some(SpuRowOutcome::Decoded {
+            kind: format!("{:?}", InstructionIdentity::Spu(kind)),
+        });
+    }
+    // [CBEA p:93 s:8.5.2] I: invalid instruction detected, SPU stopped.
+    let mut unit = cellgov_spu::SpuExecutionUnit::new(cellgov_event::UnitId::new(0));
+    unit.state_mut().ls[..4].copy_from_slice(&raw.to_be_bytes());
+    let memory = cellgov_mem::GuestMemory::new(16);
+    let context = cellgov_exec::ExecutionContext::new(&memory);
+    let _ = unit.run_until_yield(cellgov_time::Budget::new(1), &context, &mut Vec::new());
+    unit.stop_registers()
+        .is_some_and(|stop| stop.status & cellgov_ps3_abi::hw::spu::SPU_STATUS_I != 0)
+        .then_some(SpuRowOutcome::InvalidInstructionStop)
 }
 
 fn decoder_order(decoder: RawDecoder) -> u8 {
@@ -550,6 +695,20 @@ fn merged_totals(
             || u64::from(artifact.domain.first)
                 .checked_add(artifact.domain.count)
                 .is_none_or(|end| end > u64::from(u32::MAX) + 1)
+            || artifact.disagreements > artifact.accepted
+            || artifact.disagreement_samples.len() as u64
+                != artifact
+                    .disagreements
+                    .min(crate::raw_decode::MAX_RAW_DECODE_DISAGREEMENT_SAMPLES as u64)
+            || !artifact
+                .disagreement_samples
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+            || artifact.disagreement_samples.iter().any(|&raw| {
+                u64::from(raw)
+                    .checked_sub(u64::from(artifact.domain.first))
+                    .is_none_or(|offset| offset >= artifact.domain.count)
+            })
         {
             return Err(DecoderManifestError::RawPartitions);
         }
@@ -577,6 +736,10 @@ fn merged_totals(
                 .panics
                 .checked_add(artifact.panics)
                 .ok_or(DecoderManifestError::RawPartitions)?;
+            total.disagreements = total
+                .disagreements
+                .checked_add(artifact.disagreements)
+                .ok_or(DecoderManifestError::RawPartitions)?;
         } else {
             totals.insert(
                 key.0,
@@ -587,6 +750,7 @@ fn merged_totals(
                     accepted: artifact.accepted,
                     refused: artifact.refused,
                     panics: artifact.panics,
+                    disagreements: artifact.disagreements,
                 },
             );
         }

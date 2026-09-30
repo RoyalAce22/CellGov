@@ -37,6 +37,9 @@ fn artifact(
                 payload: TargetPanicPayload::NonString,
             })
             .collect(),
+
+        disagreements: 0,
+        disagreement_samples: Vec::new(),
     }
 }
 
@@ -362,8 +365,8 @@ fn artifact_parser_checks_version_then_domain_then_counts() {
     assert!(matches!(
         reparse(&source),
         Err(RawDecodeError::Version {
-            found: 2,
-            supported: 1
+            found: 3,
+            supported: 2
         })
     ));
     source.schema_version = RAW_DECODE_SCHEMA_VERSION;
@@ -626,4 +629,47 @@ fn a_host_that_stops_the_scan_leaves_it_cancelled_at_a_batch_boundary() {
     let whole = scan_raw_decoder(RawDecoder::Ppu, domain, 128, 1, None).expect("scans");
     assert_eq!(whole.status, RawDecodeStatus::Complete);
     assert_eq!(whole.processed, 300);
+}
+
+#[test]
+fn disagreement_counts_must_match_their_samples_and_lie_inside_the_scan() {
+    let mut source = artifact(0x100, 4, RawDecodeStatus::Complete, 4, 4, 0, 0, &[]);
+    source.disagreements = 1;
+    source.disagreement_samples = vec![0x102];
+    assert_eq!(reparse(&source).expect("consistent"), source);
+    assert!(!source.is_clean(), "a disagreement is a finding");
+    let mut unsampled = source.clone();
+    unsampled.disagreement_samples.clear();
+    assert!(matches!(
+        reparse(&unsampled),
+        Err(RawDecodeError::InvalidArtifact)
+    ));
+    let mut outside = source.clone();
+    outside.disagreement_samples = vec![0x200];
+    assert!(matches!(
+        reparse(&outside),
+        Err(RawDecodeError::InvalidArtifact)
+    ));
+    let mut more_than_decoded = source;
+    more_than_decoded.accepted = 0;
+    more_than_decoded.refused = 4;
+    assert!(matches!(
+        reparse(&more_than_decoded),
+        Err(RawDecodeError::InvalidArtifact)
+    ));
+}
+
+#[test]
+fn an_spu_scan_checks_every_decoded_word_against_the_disassembler() {
+    let artifact = scan_raw_decoder(
+        RawDecoder::Spu,
+        RawDecodeDomain::new(0x4080_0000, 4096).expect("il words"),
+        512,
+        2,
+        None,
+    )
+    .expect("scan");
+    assert_eq!(artifact.accepted, 4096, "every word is an il");
+    assert_eq!(artifact.disagreements, 0);
+    assert!(artifact.is_clean());
 }

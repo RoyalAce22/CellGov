@@ -444,11 +444,12 @@ fn replay_semantic_and_raw_lines_render_from_their_records() {
         accepted: 3,
         refused: 0,
         panics: 0,
+        disagreements: 0,
         output: Some(PathBuf::from("raw.json")),
     };
     assert_eq!(
         render_raw_summary(&raw),
-        "fuzz raw: Cancelled 3 of 10 words; accepted=3 refused=0 panics=0 -> raw.json\n"
+        "fuzz raw: Cancelled 3 of 10 words; accepted=3 refused=0 panics=0 disagreements=0 -> raw.json\n"
     );
     assert_eq!(raw.exit_code(), CommandExitCode::new(EXIT_CANCELLED));
     let mut panicked = raw.clone();
@@ -456,7 +457,7 @@ fn replay_semantic_and_raw_lines_render_from_their_records() {
     panicked.output = None;
     assert_eq!(
         render_raw_summary(&panicked),
-        "fuzz raw: Cancelled 3 of 10 words; accepted=3 refused=0 panics=1\n"
+        "fuzz raw: Cancelled 3 of 10 words; accepted=3 refused=0 panics=1 disagreements=0\n"
     );
     assert_eq!(
         panicked.exit_code(),
@@ -465,4 +466,11 @@ fn replay_semantic_and_raw_lines_render_from_their_records() {
     let mut complete = raw;
     complete.status = RawDecodeStatus::Complete;
     assert_eq!(complete.exit_code(), CommandExitCode::SUCCESS);
+    let mut disagreeing = complete;
+    disagreeing.disagreements = 1;
+    assert_eq!(
+        disagreeing.exit_code(),
+        CommandExitCode::new(exit_codes::FAILED),
+        "a disassembly that disagrees with the decoder fails the scan"
+    );
 }

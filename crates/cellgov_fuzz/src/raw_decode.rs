@@ -7,11 +7,13 @@ use serde::{Deserialize, Serialize};
 use crate::sweep::{sweep_finite, DecodePanic, FiniteCase, FiniteSweepError, FiniteVerdict};
 
 /// Version of the normalized raw-word sweep artifact.
-pub const RAW_DECODE_SCHEMA_VERSION: u32 = 1;
+pub const RAW_DECODE_SCHEMA_VERSION: u32 = 2;
 /// Largest chunk retained by one finite-domain sweep.
 pub const MAX_RAW_DECODE_CHUNK: usize = 1 << 16;
 /// Maximum detailed panic samples retained in one result.
 pub const MAX_RAW_DECODE_PANIC_SAMPLES: usize = 128;
+/// Maximum disassembler-disagreement words retained in one result.
+pub const MAX_RAW_DECODE_DISAGREEMENT_SAMPLES: usize = 128;
 
 /// Interpreter decoder whose identity a replay must preserve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -174,6 +176,12 @@ pub struct RawDecodeArtifact {
     pub panics: u64,
     /// First bounded set of raw words and typed panic payloads.
     pub panic_samples: Vec<DecodePanic>,
+    /// Decoded words whose disassembly names another mnemonic than the
+    /// decoder's instruction. The SPU scan checks every word; the PPU
+    /// scan has no disassembler check and counts none.
+    pub disagreements: u64,
+    /// The first disagreeing words, in word order.
+    pub disagreement_samples: Vec<u32>,
 }
 
 impl RawDecodeArtifact {
@@ -210,15 +218,35 @@ impl RawDecodeArtifact {
                     .checked_sub(u64::from(artifact.domain.first))
                     .is_some_and(|offset| offset < artifact.processed)
             });
-        if !valid_status || covered != Some(artifact.processed) || !valid_samples {
+        let valid_disagreements = artifact.disagreements <= artifact.accepted
+            && artifact.disagreement_samples.len() as u64
+                == artifact
+                    .disagreements
+                    .min(MAX_RAW_DECODE_DISAGREEMENT_SAMPLES as u64)
+            && artifact
+                .disagreement_samples
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+            && artifact.disagreement_samples.iter().all(|&raw| {
+                u64::from(raw)
+                    .checked_sub(u64::from(artifact.domain.first))
+                    .is_some_and(|offset| offset < artifact.processed)
+            });
+        if !valid_status
+            || covered != Some(artifact.processed)
+            || !valid_samples
+            || !valid_disagreements
+        {
             return Err(RawDecodeError::InvalidArtifact);
         }
         Ok(artifact)
     }
-    /// Reports whether the entire interval finished without a target panic.
+    /// Reports whether the entire interval finished without a target panic
+    /// or a disassembler disagreement.
     pub fn is_clean(&self) -> bool {
         self.status == RawDecodeStatus::Complete
             && self.panics == 0
+            && self.disagreements == 0
             && self.processed == self.domain.count
             && self.accepted.checked_add(self.refused) == Some(self.domain.count)
     }
@@ -311,6 +339,8 @@ pub fn scan_raw_decoder_with(
         refused: 0,
         panics: 0,
         panic_samples: Vec::new(),
+        disagreements: 0,
+        disagreement_samples: Vec::new(),
     };
     if workers == 0 {
         return Err(RawDecodeError::Sweep(FiniteSweepError::ZeroWorkers));
@@ -330,24 +360,42 @@ pub fn scan_raw_decoder_with(
             workers,
             None,
             |&raw| {
-                let accepted = match decoder {
-                    RawDecoder::Ppu => cellgov_ppu::decode::decode(raw).is_ok(),
-                    RawDecoder::Spu => cellgov_spu::decode::decode(raw).is_ok(),
+                // The SPU disassembler renders every word, and a decoded
+                // word's text must name the decoder's instruction.
+                let (accepted, agrees) = match decoder {
+                    RawDecoder::Ppu => (cellgov_ppu::decode::decode(raw).is_ok(), true),
+                    RawDecoder::Spu => (
+                        cellgov_spu::decode::decode(raw).is_ok(),
+                        cellgov_spu::disasm::agrees_with_decode(raw),
+                    ),
                 };
                 Ok::<_, Infallible>(if accepted {
-                    FiniteVerdict::Accepted(())
+                    FiniteVerdict::Accepted(agrees)
                 } else {
                     FiniteVerdict::Refused
                 })
             },
             |case| {
-                if let FiniteCase::Panicked { index, payload } = case {
-                    if artifact.panic_samples.len() < MAX_RAW_DECODE_PANIC_SAMPLES {
+                match case {
+                    FiniteCase::Panicked { index, payload }
+                        if artifact.panic_samples.len() < MAX_RAW_DECODE_PANIC_SAMPLES =>
+                    {
                         artifact.panic_samples.push(DecodePanic {
                             raw: words[*index],
                             payload: payload.clone(),
                         });
                     }
+                    FiniteCase::Accepted {
+                        index,
+                        value: false,
+                    } => {
+                        artifact.disagreements += 1;
+                        if artifact.disagreement_samples.len() < MAX_RAW_DECODE_DISAGREEMENT_SAMPLES
+                        {
+                            artifact.disagreement_samples.push(words[*index]);
+                        }
+                    }
+                    _ => {}
                 }
                 Ok::<_, Infallible>(())
             },
