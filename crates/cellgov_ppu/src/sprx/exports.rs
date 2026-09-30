@@ -225,7 +225,11 @@ pub(super) fn find_system_opd(
                     }
                     let nid = loader::read_u32(data, n_off);
                     if nid == target_nid {
-                        let opd_vaddr = loader::read_u32(data, stub_foff + i * 4) as usize;
+                        let s_off = stub_foff + i * 4;
+                        if s_off + 4 > data.len() {
+                            return Err(PrxParseError::OutOfBounds);
+                        }
+                        let opd_vaddr = loader::read_u32(data, s_off) as usize;
                         let opd_foff = v2f(seg_map, opd_vaddr).ok_or(PrxParseError::OutOfBounds)?;
                         if opd_foff + 8 > data.len() {
                             return Err(PrxParseError::OutOfBounds);
@@ -257,3 +261,7 @@ pub(super) fn find_system_opd(
 
     Ok(None)
 }
+
+#[cfg(test)]
+#[path = "tests/exports_tests.rs"]
+mod tests;
