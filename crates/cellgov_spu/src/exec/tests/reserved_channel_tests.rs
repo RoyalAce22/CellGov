@@ -89,17 +89,17 @@ fn rchcnt_of_a_reserved_channel_counts_zero() {
 
 #[test]
 fn an_implemented_channel_without_an_arm_still_refuses_by_name() {
-    // SPU_RdSigNotify1 is an architected read channel the model has not written.
+    // SPU_RdEventMask is an architected read channel the model has not written.
     let mut s = SpuState::new();
     let out = execute(
-        &SpuInstruction::Rdch { rt: 7, channel: 3 },
+        &SpuInstruction::Rdch { rt: 7, channel: 11 },
         &mut s,
         UnitId::new(0),
     );
     assert!(matches!(
         out,
         SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
-            channel: 3,
+            channel: 11,
             is_write: false
         })
     ));

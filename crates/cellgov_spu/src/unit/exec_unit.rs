@@ -431,6 +431,8 @@ fn channel_stall(insn: &crate::instruction::SpuInstruction) -> Option<ChannelSta
         spu::MFC_RD_TAG_STAT | spu::MFC_RD_LIST_STALL_STAT => StallWake::DmaCompletion,
         spu::SPU_WR_OUT_MBOX => StallWake::OutboundMailboxRead,
         spu::MFC_CMD => StallWake::CommandQueueSlot,
+        spu::SPU_RD_SIG_NOTIFY_1 => StallWake::SignalWrite(SignalNotifier::One),
+        spu::SPU_RD_SIG_NOTIFY_2 => StallWake::SignalWrite(SignalNotifier::Two),
         _ => return None,
     };
     Some(ChannelStall { channel, wake })

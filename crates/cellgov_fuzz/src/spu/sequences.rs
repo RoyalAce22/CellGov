@@ -310,7 +310,8 @@ fn run_sequences_inner(
                 | SpuObservationComponent::LocalStore
                 | SpuObservationComponent::Channels
                 | SpuObservationComponent::Reservation
-                | SpuObservationComponent::Fpscr => DivergenceClass::ArchitecturalState,
+                | SpuObservationComponent::Fpscr
+                | SpuObservationComponent::Signals => DivergenceClass::ArchitecturalState,
             };
             asymmetry = asymmetry.max(CrossReferenceAsymmetry::State);
             record(

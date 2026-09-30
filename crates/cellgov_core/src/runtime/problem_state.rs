@@ -73,7 +73,8 @@ impl Runtime {
             .write_npc(npc)
     }
 
-    /// Write one signal-notification register of `unit`.
+    /// Write one signal-notification register of `unit`. A unit parked
+    /// reading that register becomes runnable and runs its read again.
     ///
     /// # Errors
     ///
@@ -90,7 +91,12 @@ impl Runtime {
         self.registry
             .get_mut(unit)
             .ok_or(ProblemStateError::UnknownUnit)?
-            .write_signal(register, value)
+            .write_signal(register, value)?;
+        if self.stall_ends(unit, StallWake::SignalWrite(register), false) {
+            self.registry
+                .set_status_override(unit, UnitStatus::Runnable);
+        }
+        Ok(())
     }
 
     /// Read `SPU_Out_Mbox` of `unit`: the message it wrote, or `None`

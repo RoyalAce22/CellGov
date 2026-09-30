@@ -75,6 +75,9 @@ pub enum TracedBlockReason {
     /// SPU blocked on `SPU_WR_OUT_MBOX` until another unit reads the
     /// message waiting in its outbound mailbox.
     OutboundMailboxFull = 3,
+    /// SPU blocked on a signal-notification channel until another
+    /// processor writes the register.
+    SignalEmpty = 4,
 }
 
 /// Why a unit was woken, as the trace records it.

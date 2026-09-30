@@ -4,8 +4,8 @@
 ///
 /// The runtime wakes a stalled unit only on its channel's own event, and
 /// the unit then runs the stalled access again. Later producers join as
-/// the model gains them: a signal-notification write, an SPU event, a
-/// free MFC command-queue slot, and an interrupt, which ends any stall.
+/// the model gains them: an SPU event and an interrupt, which ends any
+/// stall.
 ///
 /// [CBE-Handbook p:447 s:17.1.6] a blocked access stalls until the channel changes or the SPU is interrupted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -21,6 +21,9 @@ pub enum StallWake {
     ///
     /// [CBEA p:113 s:9.1.1] a write to MFC_Cmd with the command queue full stalls until a slot frees.
     CommandQueueSlot,
+    /// Another processor writes the signal-notification register the
+    /// unit reads.
+    SignalWrite(crate::SignalNotifier),
 }
 
 impl StallWake {

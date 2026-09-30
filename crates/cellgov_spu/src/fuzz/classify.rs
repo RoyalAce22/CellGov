@@ -93,6 +93,11 @@ pub(super) fn effect_and_outcome(
             channel: spu::MFC_RD_ATOMIC_STAT | spu::SPU_RD_MACH_STAT | spu::MFC_RD_TAG_MASK,
             ..
         } => (NO_EFFECTS, CONTINUE),
+        // A signal read with nothing written stalls.
+        SpuInstruction::Rdch {
+            channel: spu::SPU_RD_SIG_NOTIFY_1 | spu::SPU_RD_SIG_NOTIFY_2,
+            ..
+        } => (NO_EFFECTS, CONTINUE_OR_YIELD),
         SpuInstruction::Rdch { channel, .. }
             if spu::channel_direction(channel) == Some(spu::ChannelDirection::Write) =>
         {

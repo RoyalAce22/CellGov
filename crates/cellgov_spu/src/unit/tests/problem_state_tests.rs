@@ -173,3 +173,59 @@ fn a_write_to_a_full_outbound_mailbox_stalls_on_the_write() {
         })
     );
 }
+
+/// `rdch rt, channel`.
+fn rdch(rt: u32, channel: u8) -> u32 {
+    (0x00D << 21) | (u32::from(channel) << 7) | rt
+}
+
+/// [CBEA p:136 s:9.6] a read with count 1 returns the contents and resets the contents and the count to 0.
+/// [CBEA p:137 s:9.6.1], [CBEA p:138 s:9.6.2] the read resets the bits that were set.
+#[test]
+fn a_signal_read_returns_the_word_and_clears_the_register() {
+    let mut unit = unit_with(&[
+        rdch(3, SPU_RD_SIG_NOTIFY_1),
+        rdch(4, SPU_RD_SIG_NOTIFY_2),
+        rchcnt(5, SPU_RD_SIG_NOTIFY_1),
+        rchcnt(6, SPU_RD_SIG_NOTIFY_2),
+        0,
+    ]);
+    unit.state_mut().signals[1].mode = SignalNotifyMode::LogicalOr;
+    for value in [0b01, 0b10] {
+        unit.write_signal(SignalNotifier::One, value)
+            .expect("signal");
+        unit.write_signal(SignalNotifier::Two, value << 4)
+            .expect("signal");
+    }
+    assert_eq!(run(&mut unit).yield_reason, YieldReason::Finished);
+    let state = unit.state();
+    assert_eq!(
+        [3, 4, 5, 6].map(|r| state.reg_word(r)),
+        [0b10, 0b11 << 4, 0, 0]
+    );
+    assert_eq!(state.signals.map(|r| (r.word, r.pending)), [(0, false); 2]);
+}
+
+/// [CBEA p:136 s:9.6] a read with count 0 stalls the SPU.
+#[test]
+fn a_signal_read_with_nothing_written_stalls_on_its_register() {
+    for (channel, register) in [
+        (SPU_RD_SIG_NOTIFY_1, SignalNotifier::One),
+        (SPU_RD_SIG_NOTIFY_2, SignalNotifier::Two),
+    ] {
+        let mut unit = unit_with(&[rdch(3, channel), 0]);
+        let result = run(&mut unit);
+        assert_eq!(result.yield_reason, YieldReason::ChannelStall);
+        assert_eq!(unit.state().pc, 0, "the read did not retire");
+        assert_eq!(
+            unit.channel_stall(),
+            Some(cellgov_exec::ChannelStall {
+                channel,
+                wake: cellgov_exec::StallWake::SignalWrite(register),
+            })
+        );
+        unit.write_signal(register, 7).expect("signal");
+        assert_eq!(run(&mut unit).yield_reason, YieldReason::Finished);
+        assert_eq!(unit.state().reg_word(3), 7, "the read runs again");
+    }
+}

@@ -199,6 +199,21 @@ pub(super) fn execute_rdch(
                 reason: YieldReason::MailboxAccess,
             }
         }
+        // [CBEA p:136 s:9.6] a read with count 1 returns the contents and resets the contents and the count to 0; a read with count 0 stalls.
+        // [CBEA p:137 s:9.6.1], [CBEA p:138 s:9.6.2] the read resets the bits that were set, in either mode.
+        // A write from another processor lands between steps, so a read
+        // never meets a write that is part done.
+        spu::SPU_RD_SIG_NOTIFY_1 | spu::SPU_RD_SIG_NOTIFY_2 => {
+            let signal = &mut state.signals[usize::from(channel == spu::SPU_RD_SIG_NOTIFY_2)];
+            if !signal.pending {
+                return stall();
+            }
+            let word = signal.word;
+            signal.word = 0;
+            signal.pending = false;
+            state.set_reg_channel_word(rt, word);
+            SpuStepOutcome::Continue
+        }
         // [CBE-Handbook p:462 s:17. SPE Channel and Related MMIO Interface sub:17.11 MFC Read Atomic Command Status Channel] Reports success/failure status for the most recent atomic command (e.g. putllc).
         spu::MFC_RD_ATOMIC_STAT => {
             state.set_reg_channel_word(rt, state.channels.atomic_status);

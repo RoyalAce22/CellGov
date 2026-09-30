@@ -105,6 +105,8 @@ const RDCH_CHANNELS: &[u32] = &[
     spu::MFC_RD_ATOMIC_STAT as u32,
     spu::SPU_RD_IN_MBOX as u32,
     spu::SPU_RD_MACH_STAT as u32,
+    spu::SPU_RD_SIG_NOTIFY_1 as u32,
+    spu::SPU_RD_SIG_NOTIFY_2 as u32,
 ];
 /// [CBE-Handbook p:463 s:17.12 SPU Mailbox Channels] Outbound mailbox writes
 /// send guest-visible messages, and the generators do not draw them.

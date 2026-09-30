@@ -270,6 +270,7 @@ impl Runtime {
                     cellgov_exec::StallWake::OutboundMailboxRead => {
                         BlockReason::OutboundMailboxFull
                     }
+                    cellgov_exec::StallWake::SignalWrite(_) => BlockReason::SignalEmpty,
                 },
                 None => {
                     self.lv2_host.log_invariant_break(

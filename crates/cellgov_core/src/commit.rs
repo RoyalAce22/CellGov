@@ -188,6 +188,9 @@ pub enum BlockReason {
     /// SPU `SPU_WR_OUT_MBOX` found its outbound mailbox full; runtime
     /// parks the unit until another unit reads the waiting message.
     OutboundMailboxFull,
+    /// SPU `SPU_RD_SIG_NOTIFY_1` or `_2` found no signal; runtime parks
+    /// the unit until another processor writes the register.
+    SignalEmpty,
 }
 
 /// Mutable references to every subsystem the commit pipeline touches.

@@ -216,6 +216,8 @@ fn channel_operands_prefer_interpreter_owned_architected_selectors() {
             spu::MFC_RD_ATOMIC_STAT as u32,
             spu::SPU_RD_IN_MBOX as u32,
             spu::SPU_RD_MACH_STAT as u32,
+            spu::SPU_RD_SIG_NOTIFY_1 as u32,
+            spu::SPU_RD_SIG_NOTIFY_2 as u32,
         ]
     );
     assert_eq!(

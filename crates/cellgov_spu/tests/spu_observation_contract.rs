@@ -211,3 +211,27 @@ fn channel_write_allows_only_its_named_channel_field() {
         .violations(&initial, &corrupted)
         .contains(&SpuObservationComponent::Channels));
 }
+
+/// [CBEA p:136 s:9.6] a signal read resets the register it reads; no other instruction changes one.
+#[test]
+fn only_a_signal_read_may_clear_a_signal_register() {
+    let mut initial = SpuState::new();
+    initial.signals[0].write(0x5);
+    let read = SpuInstruction::Rdch { rt: 3, channel: 3 };
+    let mut state = initial.clone();
+    let outcome = execute(&read, &mut state, UnitId::new(0));
+    assert_eq!(outcome, SpuStepOutcome::Continue);
+    let observed = SpuObservation::capture(&state, &outcome);
+    assert!(SpuAllowedFootprint::for_instruction(&read)
+        .violations(&initial, &observed)
+        .is_empty());
+
+    let other = SpuInstruction::Il { rt: 3, imm: 5 };
+    let mut state = initial.clone();
+    let outcome = execute(&other, &mut state, UnitId::new(0));
+    let mut observed = SpuObservation::capture(&state, &outcome);
+    observed.state.signals[0].pending = false;
+    assert!(SpuAllowedFootprint::for_instruction(&other)
+        .violations(&initial, &observed)
+        .contains(&SpuObservationComponent::Signals));
+}

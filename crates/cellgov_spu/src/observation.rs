@@ -105,6 +105,8 @@ pub enum SpuObservationComponent {
     FaultDiscard,
     /// Floating-point status and control register.
     Fpscr,
+    /// Signal-notification registers.
+    Signals,
 }
 
 /// Complete SPU state, outcome, and effect observation.
@@ -187,8 +189,8 @@ fn state_differences(
         pc,
         // Not components of an instruction observation.
         lslr: _,
-        signals: _,
         stop: _,
+        signals,
         channels,
         reservation,
         fpscr,
@@ -203,6 +205,7 @@ fn state_differences(
             SpuObservationComponent::Reservation,
         ),
         (*fpscr != b.fpscr, SpuObservationComponent::Fpscr),
+        (*signals != b.signals, SpuObservationComponent::Signals),
     ]
     .into_iter()
     .filter_map(|(differs, component)| differs.then_some(component))
@@ -224,6 +227,8 @@ pub struct SpuAllowedFootprint {
     pub control_transfer: bool,
     /// Whether the instruction may replace FPSCR bits.
     pub fpscr: bool,
+    /// Whether the instruction may clear a signal-notification register.
+    pub signals: bool,
     /// Effect classes declared by the instruction descriptor.
     pub effects: BTreeSet<EffectKind>,
 }
@@ -237,6 +242,14 @@ impl SpuAllowedFootprint {
             channels: BTreeSet::new(),
             reservation: false,
             control_transfer: false,
+            signals: matches!(
+                instruction,
+                SpuInstruction::Rdch {
+                    channel: cellgov_ps3_abi::hw::spu::SPU_RD_SIG_NOTIFY_1
+                        | cellgov_ps3_abi::hw::spu::SPU_RD_SIG_NOTIFY_2,
+                    ..
+                }
+            ),
             fpscr: matches!(
                 instruction,
                 SpuInstruction::Fscrwr { .. }
@@ -580,6 +593,9 @@ impl SpuAllowedFootprint {
             }
             if before.fpscr != observed.state.fpscr && !self.fpscr {
                 violations.insert(SpuObservationComponent::Fpscr);
+            }
+            if before.signals != observed.state.signals && !self.signals {
+                violations.insert(SpuObservationComponent::Signals);
             }
         }
         // A fault discards effects even when their kind is otherwise allowed.
