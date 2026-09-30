@@ -7,7 +7,7 @@ use crate::exec::lanes::{doublewords, from_doublewords};
 use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu_fpscr::{fpscr_field, FPSCR_DOUBLE_FIRST, FPSCR_RN_FIRST};
 
-// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
+/// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
 fn rr(op: u32, rt: u32, ra: u32, rb: u32) -> u32 {
     op << 21 | rb << 14 | ra << 7 | rt
 }
@@ -146,7 +146,7 @@ impl Val {
     }
 }
 
-// [SPU-ISA p:199 s:9.2.2] a denormal operand reads as zero with DENORM; a NaN operand sets NaN.
+/// [SPU-ISA p:199 s:9.2.2] a denormal operand reads as zero with DENORM; a NaN operand sets NaN.
 fn decode(bits: u64, flags: &mut DFlags) -> Val {
     let neg = bits >> 63 == 1;
     let e = (bits >> 52 & 0x7FF) as i32;
@@ -172,7 +172,8 @@ fn decode(bits: u64, flags: &mut DFlags) -> Val {
 }
 
 /// Rounds `(-1)^neg * (mag + s) * 2^exp`, `s` in (0, 1) when `sticky`.
-// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with an inexact result.
+///
+/// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with an inexact result.
 fn round(neg: bool, mag: U256, exp: i32, sticky: bool, mode: Mode) -> (u64, DFlags) {
     let sign = u64::from(neg) << 63;
     let binade = exp + mag.top();
@@ -499,7 +500,7 @@ fn round_to_nearest_agrees_with_the_host_fused_multiply_add() {
     }
 }
 
-// [SPU-ISA p:209 s:9] the multiplication is exact and not subject to limits on its range.
+/// [SPU-ISA p:209 s:9] the multiplication is exact and not subject to limits on its range.
 #[test]
 fn the_product_is_not_rounded_before_the_add() {
     // (1 + 2^-52)^2 = 1 + 2^-51 + 2^-104; less 1 + 2^-51 leaves 2^-104,
@@ -522,7 +523,7 @@ fn the_product_is_not_rounded_before_the_add() {
     assert_eq!(got, [0x7FEF_FFFF_FFFF_FFFF; 2]);
 }
 
-// [SPU-ISA p:214 s:9] dfnma negates the rounded dfma result, so the direction applies before the sign flip.
+/// [SPU-ISA p:214 s:9] dfnma negates the rounded dfma result, so the direction applies before the sign flip.
 #[test]
 fn the_negated_forms_round_before_they_negate() {
     // (1 + 2^-52)^2 + 0 is 1 + 2^-51 + 2^-104, between two doubles.
@@ -542,7 +543,7 @@ fn the_negated_forms_round_before_they_negate() {
     assert_eq!(got, [1 << 63; 2]);
 }
 
-// [SPU-ISA p:211 s:9] and [SPU-ISA p:214 s:9]: a QNaN result has sign bit 0.
+/// [SPU-ISA p:211 s:9] and [SPU-ISA p:214 s:9]: a QNaN result has sign bit 0.
 #[test]
 fn a_nan_result_keeps_sign_0_through_the_negated_forms() {
     for op in [DFNMS, DFNMA] {

@@ -3,8 +3,9 @@
 
 /// A unit's stopped state, in the two words the SPE problem-state
 /// registers report it in.
-// [CBEA p:93 s:8.5.2] SPU_Status reports why the SPU stopped and the stop code.
-// [CBEA p:95 s:8.5.3] SPU_NPC holds the address the SPU resumes at.
+///
+/// [CBEA p:93 s:8.5.2] SPU_Status reports why the SPU stopped and the stop code.
+/// [CBEA p:95 s:8.5.3] SPU_NPC holds the address the SPU resumes at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StopRegisters {
     /// The `SPU_Status` word, with the run bit clear.

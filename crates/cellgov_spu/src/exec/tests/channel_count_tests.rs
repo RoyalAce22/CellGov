@@ -29,7 +29,7 @@ fn a_channel_the_model_does_not_implement_refuses_its_count() {
     );
 }
 
-// [CBEA p:128 s:9.3.6] MFC_RdTagStat counts 1 once the requested status is available, and 0 again after it is read.
+/// [CBEA p:128 s:9.3.6] MFC_RdTagStat counts 1 once the requested status is available, and 0 again after it is read.
 #[test]
 fn the_tag_status_count_follows_a_request_and_its_read() {
     let mut s = SpuState::new();
@@ -57,7 +57,7 @@ fn the_tag_status_count_follows_a_request_and_its_read() {
     assert_eq!(count(&mut s, spu::MFC_RD_TAG_STAT), 0);
 }
 
-// [CBEA p:131 s:9.4] MFC_RdAtomicStat counts 1 once an atomic command completes, and a read consumes it.
+/// [CBEA p:131 s:9.4] MFC_RdAtomicStat counts 1 once an atomic command completes, and a read consumes it.
 #[test]
 fn the_atomic_status_count_follows_a_putllc_and_its_read() {
     let mut s = SpuState::new();
@@ -82,7 +82,7 @@ fn the_atomic_status_count_follows_a_putllc_and_its_read() {
     assert_eq!(count(&mut s, spu::MFC_RD_ATOMIC_STAT), 0);
 }
 
-// [CBEA p:131 s:9.4] a successful putllc and a getllar are immediate atomic commands too, so each makes the count 1.
+/// [CBEA p:131 s:9.4] a successful putllc and a getllar are immediate atomic commands too, so each makes the count 1.
 #[test]
 fn a_successful_putllc_and_a_getllar_each_make_the_atomic_status_count_1() {
     let mut s = SpuState::new();
@@ -124,7 +124,7 @@ fn a_successful_putllc_and_a_getllar_each_make_the_atomic_status_count_1() {
     assert_eq!(unit.state().reg_word(3), 1);
 }
 
-// [CBEA p:135 s:9.5.3] SPU_RdInMbox counts the messages waiting; [CBE-Handbook p:445 s:17.1 Table 17-2] it holds at most 4.
+/// [CBEA p:135 s:9.5.3] SPU_RdInMbox counts the messages waiting; [CBE-Handbook p:445 s:17.1 Table 17-2] it holds at most 4.
 #[test]
 fn the_inbound_mailbox_count_is_the_runtime_occupancy_up_to_the_depth() {
     use cellgov_exec::{ExecutionContext, ExecutionUnit};

@@ -114,7 +114,8 @@ impl PpuOutcomeClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PpuMetamorphicRelation {
     /// Identical inputs give identical outputs.
-    // [Le2014 p:219 s:3.1] The comparison assumes deterministic semantics, where repeated executions on the same input yield the same result, and this relation checks that assumption.
+    ///
+    /// [Le2014 p:219 s:3.1] The comparison assumes deterministic semantics, where repeated executions on the same input yield the same result, and this relation checks that assumption.
     Deterministic,
     /// Rc permits changes only to CR field 0.
     RecordCr0,

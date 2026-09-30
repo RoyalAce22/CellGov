@@ -8,8 +8,9 @@ use crate::exec::SpuFault;
 use crate::state::{SpuObservableSnapshot, SpuState};
 
 /// Every channel number the CBE leaves reserved.
-// [CBEA p:299 s:Appendix B, Table B-1] channels 5, 6 and 10 are reserved.
-// [CBE-Handbook p:446 s:17.1.4, Table 17-2] channels 31 to 127 are reserved.
+///
+/// [CBEA p:299 s:Appendix B, Table B-1] channels 5, 6 and 10 are reserved.
+/// [CBE-Handbook p:446 s:17.1.4, Table 17-2] channels 31 to 127 are reserved.
 fn reserved() -> impl Iterator<Item = u8> {
     [0x05, 0x06, 0x0A].into_iter().chain(0x1F..=0x7F)
 }

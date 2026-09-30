@@ -14,7 +14,7 @@ const HBRA: u32 = 0x08 << 25;
 const HBRR: u32 = 0x09 << 25;
 const NOP: u32 = 0x201 << 21;
 
-// [SPU-ISA p:178 s:7] D is instruction bit 12 and E is bit 13.
+/// [SPU-ISA p:178 s:7] D is instruction bit 12 and E is bit 13.
 const D: u32 = 1 << (31 - 12);
 const E: u32 = 1 << (31 - 13);
 
@@ -46,7 +46,7 @@ fn every_branch_indirect_form_carries_d_and_e() {
     }
 }
 
-// [SPU-ISA p:192 s:8] hbr: P at bit 11, ROH at bits 16 and 17, RA, ROL in the RT field.
+/// [SPU-ISA p:192 s:8] hbr: P at bit 11, ROH at bits 16 and 17, RA, ROL in the RT field.
 #[test]
 fn hbr_carries_p_ra_and_its_split_offset() {
     let hbr = |raw| decode(HBR | raw).expect("decodes");
@@ -86,8 +86,8 @@ fn hbr_carries_p_ra_and_its_split_offset() {
     );
 }
 
-// [SPU-ISA p:193 s:8] hbra: ROH at bits 7 and 8, I16, ROL in the RT field.
-// [SPU-ISA p:194 s:8] hbrr: the same fields.
+/// [SPU-ISA p:193 s:8] hbra: ROH at bits 7 and 8, I16, ROL in the RT field.
+/// [SPU-ISA p:194 s:8] hbrr: the same fields.
 #[test]
 fn hbra_and_hbrr_carry_their_split_offset_and_target() {
     assert_eq!(
@@ -110,7 +110,7 @@ fn hbra_and_hbrr_carry_their_split_offset_and_target() {
     );
 }
 
-// [SPU-ISA p:241 s:10] nop's RT is a false target the encoding still names.
+/// [SPU-ISA p:241 s:10] nop's RT is a false target the encoding still names.
 #[test]
 fn nop_carries_its_false_target() {
     assert_eq!(decode(NOP | 42), Ok(SpuInstruction::Nop { rt: 42 }));

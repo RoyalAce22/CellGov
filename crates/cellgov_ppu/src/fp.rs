@@ -243,8 +243,9 @@ use cellgov_ps3_abi::hw::ppc_isa::{PPC_F64_QUIET_BIT, PPC_GENERATED_QNAN_F64};
 /// names FRB, and every invalid operation there yields a sign-bit-set
 /// QNaN. The two-operand arms happen to agree today; routing them
 /// through here stops the answer depending on codegen.
-// [PPC-Book1 p:91 s:4.3.2] NaN-operand result: FRA, else FRB, else FRC, stored with the high-order fraction bit set.
-// [PPC-Book1 p:114 s:4.6.5.2] A generated QNaN has sign 0; an SNaN quieted in its place keeps the SNaN's sign.
+///
+/// [PPC-Book1 p:91 s:4.3.2] NaN-operand result: FRA, else FRB, else FRC, stored with the high-order fraction bit set.
+/// [PPC-Book1 p:114 s:4.6.5.2] A generated QNaN has sign 0; an SNaN quieted in its place keeps the SNaN's sign.
 #[inline]
 fn nan_resolved_bits(result: f64, operands: &[f64]) -> u64 {
     if let Some(first) = operands.iter().copied().find(|v| v.is_nan()) {
@@ -259,7 +260,8 @@ fn nan_resolved_bits(result: f64, operands: &[f64]) -> u64 {
 /// Negate `r` unless it is NaN. PPC fnmadd / fnmsub define the
 /// negation as preserving the QNaN sign bit; Rust's unary `-` on a
 /// NaN flips it.
-// [PPC-Book1 p:114 s:4.6.5.2] fnmadd / fnmsub: QNaNs propagate with no effect on their sign bit.
+///
+/// [PPC-Book1 p:114 s:4.6.5.2] fnmadd / fnmsub: QNaNs propagate with no effect on their sign bit.
 #[inline]
 fn negate_unless_nan(r: f64) -> f64 {
     if r.is_nan() {

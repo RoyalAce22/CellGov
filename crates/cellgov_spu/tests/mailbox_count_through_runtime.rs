@@ -7,7 +7,7 @@ use cellgov_ps3_abi::hw::spu::{SPU_IN_MBOX_DEPTH, SPU_RD_IN_MBOX};
 use cellgov_spu::SpuExecutionUnit;
 use cellgov_time::Budget;
 
-// [CBEA p:135 s:9.5.3] SPU_RdInMbox counts the messages in the inbound mailbox.
+/// [CBEA p:135 s:9.5.3] SPU_RdInMbox counts the messages in the inbound mailbox.
 #[test]
 fn rchcnt_reads_the_messages_waiting_in_the_units_mailbox() {
     let mut rt = Runtime::new(GuestMemory::new(0x1000), Budget::new(100), 100);

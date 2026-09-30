@@ -6,7 +6,7 @@ use super::*;
 use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu_fpscr::fpscr_field;
 
-// [SPU-ISA p:28 s:2.3] RRR: 4-bit opcode, RT, RB, RA, RC.
+/// [SPU-ISA p:28 s:2.3] RRR: 4-bit opcode, RT, RB, RA, RC.
 fn rrr(op: u32, rt: u32, rb: u32, ra: u32, rc: u32) -> u32 {
     op << 28 | rt << 21 | rb << 14 | ra << 7 | rc
 }
@@ -56,7 +56,8 @@ fn exact_sum(x: (bool, i128, i32), y: (bool, i128, i32)) -> (u32, SpFlags) {
 }
 
 /// The oracle's result for one slot of `op` on `a`, `b` and `c`.
-// [SPU-ISA p:208 s:9] fma is RA x RB + RC; [SPU-ISA p:212 s:9] fms is RA x RB - RC; [SPU-ISA p:210 s:9] fnms is RC - RA x RB.
+///
+/// [SPU-ISA p:208 s:9] fma is RA x RB + RC; [SPU-ISA p:212 s:9] fms is RA x RB - RC; [SPU-ISA p:210 s:9] fnms is RC - RA x RB.
 fn oracle(op: u32, a: u32, b: u32, c: u32) -> (u32, SpFlags) {
     let (an, am, ae, ad) = decode_operand(a);
     let (bn, bm, be, bd) = decode_operand(b);
@@ -148,7 +149,7 @@ fn every_exponent_gap_between_product_and_addend_matches_the_oracle() {
     }
 }
 
-// [SPU-ISA p:208 s:9] the multiplication is exact and not subject to limits on its range.
+/// [SPU-ISA p:208 s:9] the multiplication is exact and not subject to limits on its range.
 #[test]
 fn a_product_out_of_range_is_not_saturated_or_flushed_before_the_add() {
     // Slot 0: Smax x 2 is above Smax, and less Smax it is Smax again (DIFF,
@@ -172,7 +173,7 @@ fn a_product_out_of_range_is_not_saturated_or_flushed_before_the_add() {
     assert_eq!(fpscr, fpscr_field(31, 1) | fpscr_field(95, 1));
 }
 
-// [SPU-ISA p:195 s:9.1] every zero result is +0.
+/// [SPU-ISA p:195 s:9.1] every zero result is +0.
 #[test]
 fn a_product_that_cancels_the_addend_gives_positive_zero() {
     // 3 x 2 against 6 in each sign arrangement that cancels.

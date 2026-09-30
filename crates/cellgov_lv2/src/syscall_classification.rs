@@ -25,10 +25,11 @@ pub enum SyscallClassification {
         /// dispatch time.
         index: u32,
     },
-    // [PPC-Book3 p:73 s:5.5.13 System Call Interrupt] sc with LEV=1 in
-    // problem state should be treated as a programming error (hypervisor
-    // call from unprivileged context is not permitted).
     /// Routes to the hypercall fault path; LEV >= 1 cannot originate from PS3 usermode.
+    ///
+    /// [PPC-Book3 p:73 s:5.5.13 System Call Interrupt] sc with LEV=1 in
+    /// problem state should be treated as a programming error (hypervisor
+    /// call from unprivileged context is not permitted).
     Hypercall {
         /// Privilege level from the `sc` operand.
         lev: u8,

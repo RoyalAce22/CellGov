@@ -9,7 +9,8 @@ use crate::stop::SpuStopKind;
 use cellgov_ps3_abi::hw::spu::{channel_direction, ChannelDirection};
 
 /// The read and read-blocking channels.
-// [CBEA p:299 s:Appendix B, Table B-1], [CBEA p:300 s:Appendix B, Table B-1], [CBEA p:301 s:Appendix B, Table B-1] the access type of each channel.
+///
+/// [CBEA p:299 s:Appendix B, Table B-1], [CBEA p:300 s:Appendix B, Table B-1], [CBEA p:301 s:Appendix B, Table B-1] the access type of each channel.
 const READ: [u8; 12] = [
     0x00, 0x03, 0x04, 0x08, 0x0B, 0x0C, 0x0D, 0x0F, 0x18, 0x19, 0x1B, 0x1D,
 ];
@@ -99,7 +100,7 @@ const RDCH_R7_MFC_LSA: u32 = (0x00D << 21) | (0x10 << 7) | 7;
 /// `nop`: RR opcode 0x201.
 const NOP: u32 = 0x201 << 21;
 
-// [CBEA p:93 s:8.5.2] SPU_Status[C]: an invalid channel instruction was detected and the SPU stopped.
+/// [CBEA p:93 s:8.5.2] `SPU_Status[C]`: an invalid channel instruction was detected and the SPU stopped.
 #[test]
 fn a_unit_that_meets_a_wrong_direction_rdch_stops_with_c_on_that_word() {
     use crate::stop::SpuStop;

@@ -16,22 +16,25 @@ pub enum PpuFault {
     /// offending sub-opcode.
     #[error("PPU unimplemented instruction sub-opcode 0x{0:x}")]
     UnimplementedInstruction(u64),
-    // [PPC-Book1 p:62 s:3.3.10 Fixed-Point Trap Instructions] tw/td invoke the system trap handler when any TO-selected condition holds.
     /// Program trap fired (e.g. `tw` / `td` with a TO-selected
     /// condition met). Payload is the TO field.
+    ///
+    /// [PPC-Book1 p:62 s:3.3.10 Fixed-Point Trap Instructions] tw/td invoke the system trap handler when any TO-selected condition holds.
     #[error("PPU program trap (TO=0x{0:02x})")]
     ProgramTrap(u8),
-    // [PPC-Book2 p:24 s:3.3] lwarx/ldarx: "EA must be a multiple of [4/8]"; misaligned raises an alignment interrupt.
-    // [PPC-Book2 p:25 s:3.3] stwcx./stdcx.: same alignment contract; the architecture permits either the alignment error handler or boundedly undefined results. CellGov takes the handler arm so a misaligned reservation is a named fault instead of a silent divergence.
     /// Reservation operand (`lwarx` / `ldarx` / `stwcx.` / `stdcx.`)
     /// EA not aligned to the operand size (4 or 8 bytes). Payload
     /// is the misaligned EA.
+    ///
+    /// [PPC-Book2 p:24 s:3.3] lwarx/ldarx: "EA must be a multiple of [4/8]"; misaligned raises an alignment interrupt.
+    /// [PPC-Book2 p:25 s:3.3] stwcx./stdcx.: same alignment contract; the architecture permits either the alignment error handler or boundedly undefined results. CellGov takes the handler arm so a misaligned reservation is a named fault instead of a silent divergence.
     #[error("PPU alignment interrupt on misaligned reservation EA 0x{0:016x}")]
     AlignmentInterrupt(u64),
-    // [PPC-Book1 p:13 s:1.9.2] An invalid form either invokes the system illegal instruction error handler or yields boundedly undefined results. CellGov takes the handler arm so both build profiles refuse the form the same way.
-    // [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update in an invalid form.
     /// Instruction encoded in an invalid form, such as a load with
     /// update whose RA is 0 or RT. Payload is the mnemonic.
+    ///
+    /// [PPC-Book1 p:13 s:1.9.2] An invalid form either invokes the system illegal instruction error handler or yields boundedly undefined results. CellGov takes the handler arm so both build profiles refuse the form the same way.
+    /// [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update in an invalid form.
     #[error("PPU invalid instruction form: {0}")]
     InvalidForm(&'static str),
 }

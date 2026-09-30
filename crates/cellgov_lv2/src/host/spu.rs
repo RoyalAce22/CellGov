@@ -362,7 +362,8 @@ impl Lv2Host {
     /// than an ELF32 header, and refuses an entry with no whole
     /// instruction word left in local store, so the 0 this reports for
     /// a truncated header never reaches a fetch.
-    // [CBE-Handbook p:421 s:14.6.3.3] control is transferred to the entry-point address the image's parameter area names.
+    ///
+    /// [CBE-Handbook p:421 s:14.6.3.3] control is transferred to the entry-point address the image's parameter area names.
     fn load_image_for(&self, handle: crate::image::SpuImageHandle) -> Option<(SpuLoadImage, u32)> {
         if let Some(record) = self.state.content.lookup_by_handle(handle) {
             let entry = record

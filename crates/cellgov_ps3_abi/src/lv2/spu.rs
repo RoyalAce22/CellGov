@@ -8,7 +8,8 @@ pub const IMAGE_PATH_MAX: usize = 256;
 
 /// Local-store size in bytes at the width of the kernel's 32-bit image
 /// fields; it bounds segment placement.
-// [CBE-Handbook p:64 s:3.1.1] each SPE local store is 256 KB.
+///
+/// [CBE-Handbook p:64 s:3.1.1] each SPE local store is 256 KB.
 pub const LS_SIZE: u32 = crate::hw::spu::SPU_LS_SIZE as u32;
 
 /// The 16-byte `sys_spu_image` record `sys_spu_thread_initialize`
@@ -101,7 +102,8 @@ pub mod group_join_cause {
 /// `SPU_WrOutMbox` and stops with [`THREAD_EXIT`](stop_code::THREAD_EXIT),
 /// as every SPU program under `tests/micro` shows once its `build.sh`
 /// has run. Nothing in the tree witnesses the other values.
-// [CBEA p:94 s:8.5.2] a stop-and-signal copies its 14-bit code into bits 2 through 15 of SPU_Status.
+///
+/// [CBEA p:94 s:8.5.2] a stop-and-signal copies its 14-bit code into bits 2 through 15 of SPU_Status.
 pub mod stop_code {
     /// `spu_thread_group_yield`: the thread group gives up its SPUs and
     /// resumes.

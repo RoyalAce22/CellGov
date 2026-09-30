@@ -3,8 +3,8 @@
 
 use super::*;
 
-// [SPU-ISA p:28 s:2.3] RR and RI7 carry an 11-bit opcode and RRR a 4-bit one.
-// [SPU-ISA p:29 s:2.3] RI10, RI16 and RI18 carry 8-, 9- and 7-bit opcodes.
+/// [SPU-ISA p:28 s:2.3] RR and RI7 carry an 11-bit opcode and RRR a 4-bit one.
+/// [SPU-ISA p:29 s:2.3] RI10, RI16 and RI18 carry 8-, 9- and 7-bit opcodes.
 #[test]
 fn every_form_matches_its_opcode_width() {
     for row in SPU_OPCODE_MAP {

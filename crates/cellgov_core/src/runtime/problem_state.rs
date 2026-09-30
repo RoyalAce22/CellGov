@@ -26,6 +26,9 @@ impl Runtime {
     /// it no longer schedules it. A unit CellGov refused keeps its
     /// refusal.
     ///
+    /// [CBEA p:92 s:8.5.1] run control 00 is a stop request: no further instructions issue.
+    /// [CBEA p:94 s:8.5.2] an SPU stopped while it waits on a blocked channel sets W with the stopped status.
+    ///
     /// # Errors
     ///
     /// - [`ProblemStateError::UnknownUnit`] when no unit has the id.
@@ -33,8 +36,6 @@ impl Runtime {
     ///   holds the unit.
     /// - [`ProblemStateError::NoProblemState`] for a unit without SPE
     ///   problem-state registers.
-    // [CBEA p:92 s:8.5.1] run control 00 is a stop request: no further instructions issue.
-    // [CBEA p:94 s:8.5.2] an SPU stopped while it waits on a blocked channel sets W with the stopped status.
     pub fn request_unit_stop(&mut self, unit: UnitId) -> Result<(), ProblemStateError> {
         self.refuse_retired(unit)?;
         let status = self.registry.effective_status(unit);
@@ -134,14 +135,15 @@ impl Runtime {
     /// replaces its oldest message (CellGov's choice of which message
     /// is lost), and a unit parked on the mailbox becomes runnable.
     ///
+    /// [CBEA p:99 s:8.6.2] an MMIO write puts 32 bits into the SPU inbound mailbox queue.
+    /// [CBE-Handbook p:541 s:19.6.6.2] a PPE write to a full inbound mailbox does not stall; a message is lost.
+    ///
     /// # Errors
     ///
     /// [`ProblemStateError::UnknownUnit`], [`ProblemStateError::Retired`]
     /// and [`ProblemStateError::NoProblemState`] as for
     /// [`Runtime::request_unit_stop`]. A unit without an inbound mailbox
     /// takes the `NoProblemState` refusal.
-    // [CBEA p:99 s:8.6.2] an MMIO write puts 32 bits into the SPU inbound mailbox queue.
-    // [CBE-Handbook p:541 s:19.6.6.2] a PPE write to a full inbound mailbox does not stall; a message is lost.
     pub fn write_unit_in_mbox(
         &mut self,
         unit: UnitId,

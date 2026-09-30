@@ -181,7 +181,8 @@ pub(super) fn execute_rchcnt(rt: u8, channel: u8, state: &mut SpuState) -> SpuSt
 /// capacity (a write channel) or its occupancy (a read channel). Where
 /// the model keeps no queue for a channel, the count is the one that
 /// model implies, as each arm states.
-// [CBEA p:109 s:9] a nonblocking channel's rchcnt returns 1; a blocking channel's count is its free capacity or occupancy.
+///
+/// [CBEA p:109 s:9] a nonblocking channel's rchcnt returns 1; a blocking channel's count is its free capacity or occupancy.
 pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
     let channels = &state.channels;
     Some(match channel {

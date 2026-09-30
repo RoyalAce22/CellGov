@@ -5,7 +5,7 @@ use super::single_float_tests::decode_operand;
 use super::*;
 use crate::state::SpuState;
 
-// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
+/// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
 fn rr(op: u32, rt: u32, ra: u32, rb: u32) -> u32 {
     op << 21 | rb << 14 | ra << 7 | rt
 }
@@ -93,7 +93,7 @@ fn every_value_pair_orders_as_its_value() {
     }
 }
 
-// [SPU-ISA p:231 s:9] two zeros compare equal independent of their fractions and signs; [SPU-ISA p:233 s:9] and never greater.
+/// [SPU-ISA p:231 s:9] two zeros compare equal independent of their fractions and signs; [SPU-ISA p:233 s:9] and never greater.
 #[test]
 fn every_zero_is_equal_and_never_greater() {
     let zeros = [0x0000_0000, 0x8000_0000, 0x0000_0001, 0x807F_FFFF];
@@ -118,7 +118,7 @@ fn every_zero_is_equal_and_never_greater() {
     );
 }
 
-// [CBE-Handbook p:69 s:3.1.4] exponent 255 is a number, greater than every smaller magnitude.
+/// [CBE-Handbook p:69 s:3.1.4] exponent 255 is a number, greater than every smaller magnitude.
 #[test]
 fn exponent_255_orders_as_a_number() {
     let (got, _) = run(

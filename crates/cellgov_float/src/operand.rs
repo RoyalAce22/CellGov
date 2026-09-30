@@ -32,9 +32,10 @@ pub enum Operand {
 /// fraction, and one with a nonzero fraction or with exponent 255 raises
 /// DIFF. Under [`Policy::Ieee754Cbe`] a denormal operand is a zero of its
 /// sign and raises DENORM, and a NaN raises NaN.
-// [SPU-ISA p:195 s:9.1] a zero exponent is zero and exponent 255 is a normal binade in single precision.
-// [SPU-ISA p:196 s:9.1] a denormal single operand reads as zero; DIFF marks an input with a maximal exponent or a zero exponent and nonzero fraction.
-// [SPU-ISA p:199 s:9.2.2] a denormal double operand is read as zero and sets DENORM; a NaN operand sets NaN.
+///
+/// [SPU-ISA p:195 s:9.1] a zero exponent is zero and exponent 255 is a normal binade in single precision.
+/// [SPU-ISA p:196 s:9.1] a denormal single operand reads as zero; DIFF marks an input with a maximal exponent or a zero exponent and nonzero fraction.
+/// [SPU-ISA p:199 s:9.2.2] a denormal double operand is read as zero and sets DENORM; a NaN operand sets NaN.
 pub fn unpack<F: Format>(policy: Policy, bits: u64) -> (Operand, Flags) {
     let negative = bits >> F::SIGN_SHIFT & 1 == 1;
     let exponent = (bits >> F::FRAC_BITS) as u32 & F::EXP_MAX;
@@ -88,7 +89,8 @@ pub fn unpack<F: Format>(policy: Policy, bits: u64) -> (Operand, Flags) {
 /// Decodes `bits` in format `F` under [`Policy::SpuExtended`], which reads
 /// every pattern as a zero or a finite value, with the flags reading it
 /// raises.
-// [SPU-ISA p:195 s:9.1] single precision has no infinity or NaN: exponent 255 is a normal binade.
+///
+/// [SPU-ISA p:195 s:9.1] single precision has no infinity or NaN: exponent 255 is a normal binade.
 pub fn unpack_extended<F: Format>(bits: u64) -> (Exact, Flags) {
     let (operand, flags) = unpack::<F>(Policy::SpuExtended, bits);
     let exact = match operand {
@@ -104,7 +106,8 @@ pub fn unpack_extended<F: Format>(bits: u64) -> (Exact, Flags) {
 
 /// The magnitude an extended-range single-precision word compares by: its
 /// low 31 bits, or 0 when its exponent is 0.
-// [SPU-ISA p:231 s:9] two zeros compare equal independent of their fractions and signs.
+///
+/// [SPU-ISA p:231 s:9] two zeros compare equal independent of their fractions and signs.
 pub fn extended_magnitude_key(bits: u32) -> u32 {
     if bits >> 23 & 0xFF == 0 {
         0
@@ -115,7 +118,8 @@ pub fn extended_magnitude_key(bits: u32) -> u32 {
 
 /// The signed value an extended-range single-precision word compares by:
 /// its magnitude key, negated when the sign is set. Every zero keys to 0.
-// [SPU-ISA p:233 s:9] fcgt compares the values; [CBE-Handbook p:69 s:3.1.4] exponent 255 is a number, so the ordering has no unordered case.
+///
+/// [SPU-ISA p:233 s:9] fcgt compares the values; [CBE-Handbook p:69 s:3.1.4] exponent 255 is a number, so the ordering has no unordered case.
 pub fn extended_order_key(bits: u32) -> i64 {
     let magnitude = i64::from(extended_magnitude_key(bits));
     if bits >> 31 == 1 {
@@ -127,8 +131,9 @@ pub fn extended_order_key(bits: u32) -> i64 {
 
 /// The default quiet NaN every NaN result takes: a positive sign, an
 /// all-ones exponent and only the fraction's leading bit set.
-// [SPU-ISA p:197 s:9.2] the default QNaN has a zero sign, an all-ones exponent and only the fraction's leading bit set (0x7FF8000000000000 for double precision); an implementation may return it for any NaN result.
-// [Mueller2005 p:61 s:3.2] the CBE double-precision unit returns the generic NaN for every NaN result.
+///
+/// [SPU-ISA p:197 s:9.2] the default QNaN has a zero sign, an all-ones exponent and only the fraction's leading bit set (0x7FF8000000000000 for double precision); an implementation may return it for any NaN result.
+/// [Mueller2005 p:61 s:3.2] the CBE double-precision unit returns the generic NaN for every NaN result.
 pub fn default_nan<F: Format>() -> u64 {
     (F::EXP_MAX as u64) << F::FRAC_BITS | 1 << (F::FRAC_BITS - 1)
 }

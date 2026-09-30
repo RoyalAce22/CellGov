@@ -4,8 +4,8 @@
 use super::*;
 use crate::state::SpuState;
 
-// [SPU-ISA p:28 s:2.3] RR and RI7: 11-bit opcode, RB or I7, RA, RT.
-// [SPU-ISA p:29 s:2.3] RI10: 8-bit opcode, I10, RA, RT.
+/// [SPU-ISA p:28 s:2.3] RR and RI7: 11-bit opcode, RB or I7, RA, RT.
+/// [SPU-ISA p:29 s:2.3] RI10: 8-bit opcode, I10, RA, RT.
 fn rr(op: u32, rt: u32, ra: u32, rb: u32) -> u32 {
     op << 21 | rb << 14 | ra << 7 | rt
 }
@@ -62,8 +62,8 @@ fn rotm_and_rotma_shift_right_by_the_negated_count_modulo_64() {
     );
 }
 
-// [SPU-ISA p:138 s:6. Shift and Rotate Instructions] A logical right shift by
-// a register count is sfi to negate the count, then rotm.
+/// [SPU-ISA p:138 s:6. Shift and Rotate Instructions] A logical right shift by
+/// a register count is sfi to negate the count, then rotm.
 #[test]
 fn sfi_then_rotm_is_a_logical_right_shift_by_a_register_count() {
     let mut s = SpuState::new();

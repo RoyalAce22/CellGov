@@ -303,6 +303,170 @@ fn scanned_files(root: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Whether `line` opens an item a doc comment documents: a function,
+/// constant, static, type, trait, impl, module or union.
+fn opens_an_item(line: &str) -> bool {
+    let mut rest = line.trim_start();
+    if let Some(after) = rest.strip_prefix("pub") {
+        rest = match after.strip_prefix('(') {
+            Some(scoped) => scoped.split_once(')').map_or("", |(_, tail)| tail),
+            None => after,
+        };
+    }
+    let mut words = rest.split_whitespace().peekable();
+    while let Some(word) = words.next() {
+        let qualifier = matches!(word, "const" | "async" | "unsafe" | "default" | "extern")
+            || word.starts_with('"');
+        let next_qualifies = words.peek().is_some_and(|next| {
+            matches!(
+                *next,
+                "fn" | "const" | "async" | "unsafe" | "extern" | "impl" | "trait"
+            ) || next.starts_with('"')
+        });
+        if qualifier && next_qualifies {
+            continue;
+        }
+        let keyword = word.split(['<', '(', '{']).next().unwrap_or_default();
+        return matches!(
+            keyword,
+            "fn" | "const"
+                | "static"
+                | "struct"
+                | "enum"
+                | "trait"
+                | "impl"
+                | "type"
+                | "mod"
+                | "union"
+        );
+    }
+    false
+}
+
+/// First lines (1-based) of `//` comment blocks that carry a citation
+/// and sit directly on an item, past its `///` docs and attributes.
+fn line_comment_citations_on_items(source: &str) -> Vec<usize> {
+    let lines: Vec<&str> = source.lines().collect();
+    let plain = |line: &str| {
+        let s = line.trim_start();
+        s.starts_with("//") && !s.starts_with("///") && !s.starts_with("//!")
+    };
+    let mut found = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if !plain(lines[i]) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < lines.len() && plain(lines[i]) {
+            i += 1;
+        }
+        // A safety argument stays a comment even when it cites a page.
+        if lines[start].trim_start().starts_with("// SAFETY")
+            || !lines[start..i].iter().any(|l| scan_line(l).0 > 0)
+        {
+            continue;
+        }
+        fn code(line: &str) -> &str {
+            line.split(" //").next().unwrap_or_default().trim_end()
+        }
+        let mut j = i;
+        while j < lines.len() {
+            let s = lines[j].trim_start();
+            if s.starts_with("///") {
+                j += 1;
+            } else if s.starts_with("#[") {
+                while j < lines.len() && !code(lines[j]).ends_with(']') {
+                    j += 1;
+                }
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        if lines.get(j).is_some_and(|l| opens_an_item(l)) {
+            found.push(start + 1);
+        }
+    }
+    found
+}
+
+#[test]
+fn a_citation_block_on_an_item_is_found_past_docs_and_attributes() {
+    for (source, line) in [
+        ("// [SPU-ISA p:197 s:9.2] the rule\nfn f() {}", 1),
+        (
+            "/// Docs.\n// [SPU-ISA p:197 s:9.2] the rule\n#[inline]\npub(crate) const fn f() {}",
+            2,
+        ),
+        (
+            "    // [CBEA p:109 s:9] the rule\n    pub const X: u32 = 1;",
+            1,
+        ),
+        (
+            "// [PPC-Book1 p:34] the rule\n// more prose\nimpl<T> Foo for T {}",
+            1,
+        ),
+        (
+            "// [PPC-Book1 p:34] the rule\npub unsafe extern \"C\" fn f() {}",
+            1,
+        ),
+        (
+            "// prose first\n// [PPC-Book1 p:34] the rule\n#[derive(\n    Debug,\n)]\nstruct S;",
+            1,
+        ),
+        (
+            "// [PPC-Book1 p:34] the rule\n#[allow(dead_code)] // why\nfn f() {\n    let x = 1;\n}",
+            1,
+        ),
+    ] {
+        assert_eq!(
+            line_comment_citations_on_items(source),
+            vec![line],
+            "{source}"
+        );
+    }
+    for source in [
+        "/// [SPU-ISA p:197 s:9.2] the rule\nfn f() {}",
+        "    // [CBEA p:109 s:9] a statement\n    let x = 1;",
+        "        // [CBEA p:109 s:9] an arm\n        spu::MFC_LSA => 1,",
+        "// [SPU-ISA p:197 s:9.2] a gap\n\nfn f() {}",
+        "// no citation here\nfn f() {}",
+        "// [SPU-ISA p:197 s:9.2] a call\nconstant_folding();",
+        "// [SPU-ISA p:197 s:9.2] a crate\nextern crate alloc;",
+        "// SAFETY: [PPC-Book1 p:34] the rule holds\nunsafe fn f() {}",
+    ] {
+        assert!(
+            line_comment_citations_on_items(source).is_empty(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn no_citation_on_an_item_is_a_line_comment() {
+    let root = workspace_root();
+    let mut violations = Vec::new();
+    for file in scanned_files(&root) {
+        if file.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&file)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
+        for line in line_comment_citations_on_items(&source) {
+            let shown = file.strip_prefix(&root).unwrap_or(&file);
+            violations.push(format!("  {}:{line}\n", shown.display()));
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} `//` citation block(s) sit on an item, where rustdoc drops them; write them as `///`:\n{}",
+        violations.len(),
+        violations.concat()
+    );
+}
+
 #[test]
 fn every_page_grammar_accepts_its_own_forms_and_rejects_the_others() {
     for (page, ok) in [

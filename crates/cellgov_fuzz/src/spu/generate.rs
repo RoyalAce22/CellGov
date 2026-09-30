@@ -193,7 +193,7 @@ fn structured_generated_word_for_descriptor(
     })
 }
 
-// [Padhye2019 p:332 s:3.1] Each random draw becomes one typed operand value, so every draw sequence encodes a structured word.
+/// [Padhye2019 p:332 s:3.1] Each random draw becomes one typed operand value, so every draw sequence encodes a structured word.
 fn generated_spu_parameters(
     descriptor: &SpuGenerationDescriptor,
     rng: &mut Rng,
@@ -250,7 +250,7 @@ fn generated_spu_parameters(
     })
 }
 
-// [Martignoni2009 p:128 s:3.1] A test case is code plus data, and the data are the register values and the remaining memory bytes, so both are drawn at random here.
+/// [Martignoni2009 p:128 s:3.1] A test case is code plus data, and the data are the register values and the remaining memory bytes, so both are drawn at random here.
 pub(super) fn random_state(rng: &mut Rng) -> Result<SpuState, FuzzError> {
     let mut state = SpuState::new();
     for register in &mut state.regs {

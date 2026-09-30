@@ -17,9 +17,10 @@ pub const PS3_CHILD_STACKS_SIZE: usize = 0x00F0_0000;
 
 /// Smallest stack frame a PPE 64-bit callee may be handed: the
 /// 48-byte fixed header plus the 64-byte minimum parameter save area.
-// [CBE-Handbook p:398 s:14.3] The PPE 64-bit standard stack frame holds the
-// back chain at R1+0 and the rest of the fixed slots below R1+48, above which
-// the parameter save area is at least 64 bytes.
+///
+/// [CBE-Handbook p:398 s:14.3] The PPE 64-bit standard stack frame holds the
+/// back chain at R1+0 and the rest of the fixed slots below R1+48, above which
+/// the parameter save area is at least 64 bytes.
 pub const PS3_ABI_MIN_STACK_FRAME: u64 = 0x70;
 
 /// Initial stack pointer of the primary thread: one minimum stack
@@ -29,9 +30,10 @@ pub const PS3_ABI_MIN_STACK_FRAME: u64 = 0x70;
 /// stores CR at 8(r1) and LR at 16(r1) into linkage slots its caller
 /// is required to have provided, so anything less than a whole
 /// minimum frame puts those stores past the end of the region.
-// [CBE-Handbook p:396 s:14.3.1.3] The loader hands the entry point an R1 that
-// is quadword-aligned and already points at a reserved initial frame carrying a
-// null back chain, so the top of the stack region is never itself the SP.
+///
+/// [CBE-Handbook p:396 s:14.3.1.3] The loader hands the entry point an R1 that
+/// is quadword-aligned and already points at a reserved initial frame carrying a
+/// null back chain, so the top of the stack region is never itself the SP.
 pub const PS3_PRIMARY_STACK_TOP: u64 =
     PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 - PS3_ABI_MIN_STACK_FRAME;
 

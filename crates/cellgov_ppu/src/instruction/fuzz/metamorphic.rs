@@ -48,7 +48,8 @@ impl PpuInstruction {
     }
 
     /// Builds an eligible partner for one declared relation.
-    // [Le2014 p:219 s:3.1.1] The partner is equivalent to the original only over inputs on which both are defined.
+    ///
+    /// [Le2014 p:219 s:3.1.1] The partner is equivalent to the original only over inputs on which both are defined.
     pub fn metamorphic_case(
         &self,
         raw: u32,

@@ -10,7 +10,7 @@ use cellgov_time::Budget;
 /// `nop`, RR opcode 0x201 in the high 11 bits.
 const NOP: u32 = 0x201 << 21;
 
-// [SPU-ISA p:31 s:3] Every local-storage address is ANDed with the LSLR, so the word after 0x3FFFC is 0.
+/// [SPU-ISA p:31 s:3] Every local-storage address is ANDed with the LSLR, so the word after 0x3FFFC is 0.
 #[test]
 fn a_non_branch_at_the_last_local_store_word_falls_through_to_word_0() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(7));

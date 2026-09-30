@@ -42,7 +42,7 @@ fn seed_with_cr6(cr6: u32) -> u32 {
     (CR_SEED & !0x0000_00F0) | (cr6 << 4)
 }
 
-// [AltiVec-PEM p:6-56 s:6.2] vcmpequw.: CR6 = all_equal || 0b0 || none_equal || 0b0.
+/// [AltiVec-PEM p:6-56 s:6.2] vcmpequw.: CR6 = all_equal || 0b0 || none_equal || 0b0.
 #[test]
 fn vcmpequw_dot_all_equal_sets_cr6_bit_0() {
     let s = vcmpequw_dot([1, 2, 3, 4], [1, 2, 3, 4]);
@@ -85,7 +85,7 @@ fn an_unimplemented_recording_compare_faults_without_writing_cr() {
     assert_eq!(s.cr(), CR_SEED);
 }
 
-// [AltiVec-PEM p:6-51 s:6.2] vcmpbfp.: CR6 = 0b00 || all_within_bounds || 0.
+/// [AltiVec-PEM p:6-51 s:6.2] vcmpbfp.: CR6 = 0b00 || all_within_bounds || 0.
 #[test]
 fn vcmpbfp_record_sets_only_the_within_bounds_bit() {
     assert_eq!(record_cr6(VxOp::Vcmpbfp, 0), 0b0010);

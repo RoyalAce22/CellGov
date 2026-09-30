@@ -72,7 +72,7 @@ fn structured_generation_selects_every_interaction_with_bounded_linked_parameter
     assert_eq!(reached, BTreeSet::from(SpuSequenceInteraction::ALL));
 }
 
-// [SPU-ISA p:200 s:9.3] RN0 and RN1 each name one of four modes.
+/// [SPU-ISA p:200 s:9.3] RN0 and RN1 each name one of four modes.
 #[test]
 fn random_states_draw_every_rounding_mode_in_both_slices() {
     use cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED;

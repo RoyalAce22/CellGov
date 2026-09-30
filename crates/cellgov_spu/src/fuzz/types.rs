@@ -72,7 +72,8 @@ impl SpuOutcomeClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpuMetamorphicRelation {
     /// Identical inputs give identical outputs.
-    // [Le2014 p:219 s:3.1] The comparison assumes deterministic semantics, where repeated executions on the same input yield the same result, and this relation checks that assumption.
+    ///
+    /// [Le2014 p:219 s:3.1] The comparison assumes deterministic semantics, where repeated executions on the same input yield the same result, and this relation checks that assumption.
     Deterministic,
     /// NOP's false target field leaves the complete observation unchanged.
     NopFalseTarget,

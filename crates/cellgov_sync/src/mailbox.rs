@@ -87,7 +87,8 @@ impl Mailbox {
     /// Enqueue if room exists. Returns `false` (queue unchanged)
     /// when full. The integration layer translates `false` into the
     /// SPU-stall path for write-blocking outbound channels.
-    // [CBE-Handbook p:533 s:19.6 Mailboxes Table 19-15] outbound channels are write-blocking; full-send returns false here so the SPU exec layer can yield.
+    ///
+    /// [CBE-Handbook p:533 s:19.6 Mailboxes Table 19-15] outbound channels are write-blocking; full-send returns false here so the SPU exec layer can yield.
     #[inline]
     #[must_use = "a false return means the message was dropped or the SPU should stall"]
     pub fn try_send(&mut self, message: u32) -> bool {
@@ -101,7 +102,8 @@ impl Mailbox {
     /// Force-enqueue, dropping the oldest entry on full. Models PPE
     /// writes to the SPU Read Inbound Mailbox: the spec says no PPE
     /// stall, mailbox message data is lost.
-    // [CBE-Handbook p:541 s:19.6.6.2 PPE Side] PPE write to a full SPU_RdInMbox does not stall; oldest message is overwritten.
+    ///
+    /// [CBE-Handbook p:541 s:19.6.6.2 PPE Side] PPE write to a full SPU_RdInMbox does not stall; oldest message is overwritten.
     #[inline]
     pub fn force_send(&mut self, message: u32) {
         if self.queue.len() >= self.capacity {
@@ -157,7 +159,8 @@ impl Mailbox {
     /// Number of free slots. Maps to the channel count an `rchcnt`
     /// on a write channel returns, or the `SPU_In_Mbox_Count` field
     /// the PPE reads from `SPU_Mbox_Stat` before writing.
-    // [CBE-Handbook p:541 s:19.6.6.2 PPE Side] SPU_In_Mbox_Count is the number of available entries the PPE may safely write before overrun.
+    ///
+    /// [CBE-Handbook p:541 s:19.6.6.2 PPE Side] SPU_In_Mbox_Count is the number of available entries the PPE may safely write before overrun.
     #[inline]
     pub fn remaining_capacity(&self) -> usize {
         self.capacity - self.queue.len()

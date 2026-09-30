@@ -778,8 +778,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
 ///
 /// Pass `ov` as `Some` only for OE=1; OE=0 leaves `XER[OV]` untouched.
 /// OV lands before CR0 because CR0 copies its SO bit from XER.
-// [PPC-Book1 p:18 s:2.3.1] fixed-point Rc=1 sets CR0[0:2] from a signed compare of the result with zero and copies XER[SO] into CR0[3].
-// [PPC-Book1 p:32 s:3.2.2] OE=1 writes XER[OV] and sets SO when OV is set; OE=0 leaves both alone.
+///
+/// [PPC-Book1 p:18 s:2.3.1] fixed-point Rc=1 sets `CR0[0:2]` from a signed compare of the result with zero and copies `XER[SO]` into `CR0[3]`.
+/// [PPC-Book1 p:32 s:3.2.2] OE=1 writes `XER[OV]` and sets SO when OV is set; OE=0 leaves both alone.
 #[inline]
 fn retire(
     state: &mut PpuState,
@@ -805,7 +806,8 @@ fn retire(
 /// bit 0 = signed less, bit 1 = signed greater, bit 2 = equal,
 /// bit 3 = unsigned less, bit 4 = unsigned greater. Our `to: u8`
 /// holds the field with bit 4 (the MSB) = signed-less.
-// [PPC-Book1 p:62 s:3.3.10] TO-bit-to-condition mapping for tw / td.
+///
+/// [PPC-Book1 p:62 s:3.3.10] TO-bit-to-condition mapping for tw / td.
 fn trap_condition_matches(
     to: u8,
     a_signed: i64,
@@ -823,7 +825,8 @@ fn trap_condition_matches(
 /// Build a 4-bit CR field for compare instructions: `LT|GT|EQ|SO`.
 /// Exactly one of `lt`/`gt`/`eq` is set; `so` is the sticky overflow
 /// bit copied unchanged from XER.
-// [PPC-Book1 p:60 s:3.3.9] CR field encoding c||XER[SO] -> {LT,GT,EQ,SO} nibble.
+///
+/// [PPC-Book1 p:60 s:3.3.9] CR field encoding c||`XER[SO]` -> {LT,GT,EQ,SO} nibble.
 fn cmp_cr_field(lt: bool, gt: bool, so: bool) -> u8 {
     let mut nib = if lt {
         0b1000
@@ -838,7 +841,7 @@ fn cmp_cr_field(lt: bool, gt: bool, so: bool) -> u8 {
     nib
 }
 
-// [PPC-Book1 p:71 s:3.3.12] ROTL32 duplicates the rotated word in both halves.
+/// [PPC-Book1 p:71 s:3.3.12] ROTL32 duplicates the rotated word in both halves.
 fn rotl32(value: u32, shift: u32) -> u64 {
     let rotated = u64::from(value.rotate_left(shift));
     rotated | (rotated << 32)
@@ -846,7 +849,8 @@ fn rotl32(value: u32, shift: u32) -> u64 {
 
 /// 64-bit PPC mask from MSB-numbered bits `mb..=me`; `mb > me` wraps
 /// to `[0..me]` and `[mb..63]`.
-// [PPC-Book1 p:71 s:3.3.12] MD/MDS-form 64-bit MASK function: bits[mb:me] = 1, wrapping.
+///
+/// [PPC-Book1 p:71 s:3.3.12] MD/MDS-form 64-bit MASK function: `bits[mb:me]` = 1, wrapping.
 fn mask64(mb: u8, me: u8) -> u64 {
     let all = 0xFFFF_FFFF_FFFF_FFFFu64;
     if mb <= me {

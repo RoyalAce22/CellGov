@@ -26,7 +26,7 @@ fn run(insn: SpuInstruction, s: &mut SpuState) -> SpuStepOutcome {
     execute(&insn, s, uid())
 }
 
-// [SPU-ISA p:41 s:3. Memory-Load/Store Instructions] cbx: the byte at RA + RB holds selector 0x03.
+/// [SPU-ISA p:41 s:3. Memory-Load/Store Instructions] cbx: the byte at RA + RB holds selector 0x03.
 #[test]
 fn cbx_marks_the_addressed_byte() {
     let mut s = SpuState::new();
@@ -50,7 +50,7 @@ fn cbx_marks_the_addressed_byte() {
     assert_eq!(s.regs[16], want);
 }
 
-// [SPU-ISA p:42 s:3. Memory-Load/Store Instructions] chd: the aligned halfword at RA + I7 holds 0x02 0x03.
+/// [SPU-ISA p:42 s:3. Memory-Load/Store Instructions] chd: the aligned halfword at RA + I7 holds 0x02 0x03.
 #[test]
 fn chd_marks_the_aligned_halfword() {
     let mut s = SpuState::new();
@@ -71,7 +71,7 @@ fn chd_marks_the_aligned_halfword() {
     assert_eq!(s.regs[6], want);
 }
 
-// [SPU-ISA p:43 s:3. Memory-Load/Store Instructions] chx: the same mask from RA + RB.
+/// [SPU-ISA p:43 s:3. Memory-Load/Store Instructions] chx: the same mask from RA + RB.
 #[test]
 fn chx_marks_the_aligned_halfword() {
     let mut s = SpuState::new();
@@ -92,7 +92,7 @@ fn chx_marks_the_aligned_halfword() {
     assert_eq!(s.regs[7], want);
 }
 
-// [SPU-ISA p:45 s:3. Memory-Load/Store Instructions] cwx: the aligned word at RA + RB holds 0x00..0x03.
+/// [SPU-ISA p:45 s:3. Memory-Load/Store Instructions] cwx: the aligned word at RA + RB holds 0x00..0x03.
 #[test]
 fn cwx_marks_the_aligned_word() {
     let mut s = SpuState::new();
@@ -111,7 +111,7 @@ fn cwx_marks_the_aligned_word() {
     assert_eq!(s.regs[7], want);
 }
 
-// [SPU-ISA p:46 s:3. Memory-Load/Store Instructions] cdd: the aligned doubleword at RA + I7 holds 0x00..0x07.
+/// [SPU-ISA p:46 s:3. Memory-Load/Store Instructions] cdd: the aligned doubleword at RA + I7 holds 0x00..0x07.
 #[test]
 fn cdd_marks_the_aligned_doubleword() {
     let mut s = SpuState::new();
@@ -131,7 +131,7 @@ fn cdd_marks_the_aligned_doubleword() {
     assert_eq!(s.regs[6], want);
 }
 
-// [SPU-ISA p:47 s:3. Memory-Load/Store Instructions] cdx: the same mask from RA + RB.
+/// [SPU-ISA p:47 s:3. Memory-Load/Store Instructions] cdx: the same mask from RA + RB.
 #[test]
 fn cdx_marks_the_upper_doubleword() {
     let mut s = SpuState::new();
@@ -152,7 +152,7 @@ fn cdx_marks_the_upper_doubleword() {
     assert_eq!(s.regs[7], want);
 }
 
-// [SPU-ISA p:141 s:6. Shift and Rotate Instructions] rotqmbyi: shift right by (0 - I7) mod 32 bytes; 16 or more clears.
+/// [SPU-ISA p:141 s:6. Shift and Rotate Instructions] rotqmbyi: shift right by (0 - I7) mod 32 bytes; 16 or more clears.
 #[test]
 fn rotqmbyi_shifts_right_by_the_negated_count_and_zero_fills() {
     let mut s = SpuState::new();
@@ -196,7 +196,7 @@ fn rotqmbyi_shifts_right_by_the_negated_count_and_zero_fills() {
     assert_eq!(s.regs[5], src);
 }
 
-// [SPU-ISA p:157 s:7. Compare, Branch, and Halt Instructions] ceqbi: all ones per byte that equals the immediate.
+/// [SPU-ISA p:157 s:7. Compare, Branch, and Halt Instructions] ceqbi: all ones per byte that equals the immediate.
 #[test]
 fn ceqbi_marks_each_matching_byte() {
     let mut s = SpuState::new();
@@ -217,7 +217,7 @@ fn ceqbi_marks_each_matching_byte() {
     );
 }
 
-// [SPU-ISA p:185 s:7. Compare, Branch, and Halt Instructions] brhz: taken on a zero low halfword.
+/// [SPU-ISA p:185 s:7. Compare, Branch, and Halt Instructions] brhz: taken on a zero low halfword.
 #[test]
 fn brhz_branches_only_when_the_low_halfword_is_zero() {
     let mut s = SpuState::new();
@@ -236,7 +236,7 @@ fn brhz_branches_only_when_the_low_halfword_is_zero() {
     assert_eq!(s.pc, 0x114);
 }
 
-// [SPU-ISA p:186 s:7. Compare, Branch, and Halt Instructions] biz: PC <- RA masked when RT's preferred word is zero.
+/// [SPU-ISA p:186 s:7. Compare, Branch, and Halt Instructions] biz: PC <- RA masked when RT's preferred word is zero.
 #[test]
 fn biz_and_binz_test_the_preferred_word() {
     let mut s = SpuState::new();
@@ -286,7 +286,7 @@ fn biz_and_binz_test_the_preferred_word() {
     assert_eq!(s.pc, 0x3ffc0);
 }
 
-// [SPU-ISA p:188 s:7. Compare, Branch, and Halt Instructions] bihz / bihnz: the low halfword decides, the high halfword does not.
+/// [SPU-ISA p:188 s:7. Compare, Branch, and Halt Instructions] bihz / bihnz: the low halfword decides, the high halfword does not.
 #[test]
 fn bihz_and_bihnz_test_only_the_low_halfword() {
     let mut s = SpuState::new();
@@ -335,7 +335,7 @@ fn bihz_and_bihnz_test_only_the_low_halfword() {
     assert_eq!(s.pc, 0x200);
 }
 
-// [SPU-ISA p:90 s:5. Integer and Logical Instructions] gb: word 0's low bit is the leftmost of the nibble.
+/// [SPU-ISA p:90 s:5. Integer and Logical Instructions] gb: word 0's low bit is the leftmost of the nibble.
 #[test]
 fn gb_gathers_word_low_bits_word_zero_leftmost() {
     let mut s = SpuState::new();
@@ -349,7 +349,7 @@ fn gb_gathers_word_low_bits_word_zero_leftmost() {
     assert_eq!(s.regs[3], want);
 }
 
-// [SPU-ISA p:89 s:5. Integer and Logical Instructions] gbh: halfword 0's low bit is the leftmost of the byte.
+/// [SPU-ISA p:89 s:5. Integer and Logical Instructions] gbh: halfword 0's low bit is the leftmost of the byte.
 #[test]
 fn gbh_gathers_halfword_low_bits_halfword_zero_leftmost() {
     let mut s = SpuState::new();
@@ -366,7 +366,7 @@ fn gbh_gathers_halfword_low_bits_halfword_zero_leftmost() {
     assert_eq!(s.regs[3], want);
 }
 
-// [SPU-ISA p:249 s:11. Channel Instructions] rchcnt: the capacity in the preferred slot, other slots zero.
+/// [SPU-ISA p:249 s:11. Channel Instructions] rchcnt: the capacity in the preferred slot, other slots zero.
 #[test]
 fn rchcnt_answers_one_for_machine_status() {
     let mut s = SpuState::new();
@@ -431,7 +431,7 @@ fn a_refused_rchcnt_faults_in_its_own_class_not_the_rdch_one() {
     );
 }
 
-// [CBEA p:141 s:9.8 SPU Read Machine Status Channel] Both status bits read as zero in this model.
+/// [CBEA p:141 s:9.8 SPU Read Machine Status Channel] Both status bits read as zero in this model.
 #[test]
 fn rdch_machine_status_reads_zero() {
     let mut s = SpuState::new();

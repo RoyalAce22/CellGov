@@ -46,7 +46,8 @@ pub enum PpuInstruction {
         imm: i16,
     },
     /// Load halfword algebraic with update. Requires `ra != 0 && ra != rt`.
-    // [PPC-Book1 p:36 s:3.3 Fixed-Point Load Instructions] lhau D-form.
+    ///
+    /// [PPC-Book1 p:36 s:3.3 Fixed-Point Load Instructions] lhau D-form.
     Lhau {
         rt: u8,
         ra: u8,
@@ -54,7 +55,8 @@ pub enum PpuInstruction {
     },
     /// Load multiple word. Loads `32 - rt` words starting at EA into
     /// `gpr[rt..=31]`, each zero-extended into 64 bits.
-    // [PPC-Book1 p:54 s:3.3 Fixed-Point Load Multiple Instruction] lmw D-form; EA word-aligned.
+    ///
+    /// [PPC-Book1 p:54 s:3.3 Fixed-Point Load Multiple Instruction] lmw D-form; EA word-aligned.
     Lmw {
         rt: u8,
         ra: u8,
@@ -138,7 +140,8 @@ pub enum PpuInstruction {
     },
     /// Store multiple word. Stores the low 32 bits of
     /// `gpr[rs..=31]` into successive words at EA.
-    // [PPC-Book1 p:54 s:3.3 Fixed-Point Store Multiple Instruction] stmw D-form; EA word-aligned.
+    ///
+    /// [PPC-Book1 p:54 s:3.3 Fixed-Point Store Multiple Instruction] stmw D-form; EA word-aligned.
     Stmw {
         rs: u8,
         ra: u8,
@@ -177,19 +180,19 @@ pub enum PpuInstruction {
         ra: u8,
         imm: i16,
     },
-    // [PPC-Book1 p:53 s:3.3.8 Fixed-Point Arithmetic Instructions] subfic.
+    /// [PPC-Book1 p:53 s:3.3.8 Fixed-Point Arithmetic Instructions] subfic.
     Subfic {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    // [PPC-Book1 p:56 s:3.3.9 Fixed-Point Multiply Instructions] mulli D-form.
+    /// [PPC-Book1 p:56 s:3.3.9 Fixed-Point Multiply Instructions] mulli D-form.
     Mulli {
         rt: u8,
         ra: u8,
         imm: i16,
     },
-    // [PPC-Book1 p:52 s:3.3.8 Fixed-Point Arithmetic Instructions] addic / addic. (primary 12 / 13).
+    /// [PPC-Book1 p:52 s:3.3.8 Fixed-Point Arithmetic Instructions] addic / addic. (primary 12 / 13).
     Addic {
         rt: u8,
         ra: u8,
@@ -203,7 +206,7 @@ pub enum PpuInstruction {
         ra: u8,
         imm: i16,
     },
-    // [PPC-Book1 p:52 s:3.3.8 Fixed-Point Arithmetic Instructions] add XO-form.
+    /// [PPC-Book1 p:52 s:3.3.8 Fixed-Point Arithmetic Instructions] add XO-form.
     Add {
         rt: u8,
         ra: u8,
@@ -211,14 +214,14 @@ pub enum PpuInstruction {
         oe: bool,
         rc: bool,
     },
-    // [PPC-Book1 p:67 s:3.3.13 Fixed-Point Logical Instructions] or X-form.
+    /// [PPC-Book1 p:67 s:3.3.13 Fixed-Point Logical Instructions] or X-form.
     Or {
         ra: u8,
         rs: u8,
         rb: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:52 s:3.3.8 Fixed-Point Arithmetic Instructions] subf XO-form.
+    /// [PPC-Book1 p:52 s:3.3.8 Fixed-Point Arithmetic Instructions] subf XO-form.
     Subf {
         rt: u8,
         ra: u8,
@@ -226,7 +229,7 @@ pub enum PpuInstruction {
         oe: bool,
         rc: bool,
     },
-    // [PPC-Book1 p:53 s:3.3.8 Fixed-Point Arithmetic Instructions] subfc.
+    /// [PPC-Book1 p:53 s:3.3.8 Fixed-Point Arithmetic Instructions] subfc.
     Subfc {
         rt: u8,
         ra: u8,
@@ -234,7 +237,7 @@ pub enum PpuInstruction {
         oe: bool,
         rc: bool,
     },
-    // [PPC-Book1 p:54 s:3.3.8 Fixed-Point Arithmetic Instructions] subfe (Subtract From Extended).
+    /// [PPC-Book1 p:54 s:3.3.8 Fixed-Point Arithmetic Instructions] subfe (Subtract From Extended).
     Subfe {
         rt: u8,
         ra: u8,
@@ -242,14 +245,14 @@ pub enum PpuInstruction {
         oe: bool,
         rc: bool,
     },
-    // [PPC-Book1 p:55 s:3.3.8 Fixed-Point Arithmetic Instructions] neg XO-form.
+    /// [PPC-Book1 p:55 s:3.3.8 Fixed-Point Arithmetic Instructions] neg XO-form.
     Neg {
         rt: u8,
         ra: u8,
         oe: bool,
         rc: bool,
     },
-    // [PPC-Book1 p:56 s:3.3.9 Fixed-Point Multiply Instructions] mullw / mulld; mulhw* / mulhd* at p:57.
+    /// [PPC-Book1 p:56 s:3.3.9 Fixed-Point Multiply Instructions] mullw / mulld; mulhw* / mulhd* at p:57.
     Mullw {
         rt: u8,
         ra: u8,
@@ -281,7 +284,7 @@ pub enum PpuInstruction {
         rb: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:54 s:3.3.8 Fixed-Point Arithmetic Instructions] adde XO-form.
+    /// [PPC-Book1 p:54 s:3.3.8 Fixed-Point Arithmetic Instructions] adde XO-form.
     Adde {
         rt: u8,
         ra: u8,
@@ -289,7 +292,7 @@ pub enum PpuInstruction {
         oe: bool,
         rc: bool,
     },
-    // [PPC-Book1 p:55 s:3.3.8 Fixed-Point Arithmetic Instructions] addze (Add to Zero Extended).
+    /// [PPC-Book1 p:55 s:3.3.8 Fixed-Point Arithmetic Instructions] addze (Add to Zero Extended).
     Addze {
         rt: u8,
         ra: u8,
@@ -297,7 +300,8 @@ pub enum PpuInstruction {
         rc: bool,
     },
     /// Subtract from zero extended: `RT = ~RA + CA`. Sets CA out.
-    // [PPC-Book1 p:55 s:3.3.8] subfze XO-form.
+    ///
+    /// [PPC-Book1 p:55 s:3.3.8] subfze XO-form.
     Subfze {
         rt: u8,
         ra: u8,
@@ -305,7 +309,8 @@ pub enum PpuInstruction {
         rc: bool,
     },
     /// Subtract from minus one extended: `RT = ~RA + CA + (-1)`.
-    // [PPC-Book1 p:55 s:3.3.8] subfme XO-form.
+    ///
+    /// [PPC-Book1 p:55 s:3.3.8] subfme XO-form.
     Subfme {
         rt: u8,
         ra: u8,
@@ -313,7 +318,8 @@ pub enum PpuInstruction {
         rc: bool,
     },
     /// Add to minus one extended: `RT = RA + CA + (-1)`.
-    // [PPC-Book1 p:55 s:3.3.8] addme XO-form.
+    ///
+    /// [PPC-Book1 p:55 s:3.3.8] addme XO-form.
     Addme {
         rt: u8,
         ra: u8,
@@ -327,9 +333,10 @@ pub enum PpuInstruction {
         oe: bool,
         rc: bool,
     },
-    // [PPC-Book2 p:24 s:3.3 Atomic Update Primitives] lwarx / ldarx X-form; stwcx. / stdcx. at p:25.
     /// Load-doubleword-and-reserve. Under the single-threaded model
     /// this is equivalent to `Ldx`.
+    ///
+    /// [PPC-Book2 p:24 s:3.3 Atomic Update Primitives] lwarx / ldarx X-form; stwcx. / stdcx. at p:25.
     Ldarx {
         rt: u8,
         ra: u8,
@@ -356,7 +363,7 @@ pub enum PpuInstruction {
         ra: u8,
         rb: u8,
     },
-    // [PPC-Book1 p:66 s:3.3.13 Fixed-Point Logical Instructions] xori / xoris D-form.
+    /// [PPC-Book1 p:66 s:3.3.13 Fixed-Point Logical Instructions] xori / xoris D-form.
     Xori {
         ra: u8,
         rs: u8,
@@ -367,7 +374,7 @@ pub enum PpuInstruction {
         rs: u8,
         imm: u16,
     },
-    // [PPC-Book1 p:58 s:3.3.10 Fixed-Point Divide Instructions] divw / divd; unsigned variants at p:59.
+    /// [PPC-Book1 p:58 s:3.3.10 Fixed-Point Divide Instructions] divw / divd; unsigned variants at p:59.
     Divw {
         rt: u8,
         ra: u8,
@@ -396,7 +403,7 @@ pub enum PpuInstruction {
         oe: bool,
         rc: bool,
     },
-    // [PPC-Book1 p:67 s:3.3.13 Fixed-Point Logical Instructions] and / andc / nor / xor / orc X-form (p:67-68).
+    /// [PPC-Book1 p:67 s:3.3.13 Fixed-Point Logical Instructions] and / andc / nor / xor / orc X-form (p:67-68).
     And {
         ra: u8,
         rs: u8,
@@ -422,7 +429,8 @@ pub enum PpuInstruction {
         rc: bool,
     },
     /// Equivalent (XNOR): `RA = ~(RS XOR RB)`.
-    // [PPC-Book1 p:65 s:3.3.13 Fixed-Point Logical Instructions] eqv X-form.
+    ///
+    /// [PPC-Book1 p:65 s:3.3.13 Fixed-Point Logical Instructions] eqv X-form.
     Eqv {
         ra: u8,
         rs: u8,
@@ -430,14 +438,15 @@ pub enum PpuInstruction {
         rc: bool,
     },
     /// NAND: `RA = ~(RS & RB)`.
-    // [PPC-Book1 p:65 s:3.3.13 Fixed-Point Logical Instructions] nand X-form.
+    ///
+    /// [PPC-Book1 p:65 s:3.3.13 Fixed-Point Logical Instructions] nand X-form.
     Nand {
         ra: u8,
         rs: u8,
         rb: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:65 s:3.3.13 Fixed-Point Logical Instructions] andi. / andis. D-form (always record).
+    /// [PPC-Book1 p:65 s:3.3.13 Fixed-Point Logical Instructions] andi. / andis. D-form (always record).
     AndiDot {
         ra: u8,
         rs: u8,
@@ -451,28 +460,28 @@ pub enum PpuInstruction {
         rs: u8,
         imm: u16,
     },
-    // [PPC-Book1 p:77 s:3.3.14 Fixed-Point Shift Instructions] slw / sld X-form (sld also p:77).
+    /// [PPC-Book1 p:77 s:3.3.14 Fixed-Point Shift Instructions] slw / sld X-form (sld also p:77).
     Slw {
         ra: u8,
         rs: u8,
         rb: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:78 s:3.3.14 Fixed-Point Shift Instructions] srw / srd X-form.
+    /// [PPC-Book1 p:78 s:3.3.14 Fixed-Point Shift Instructions] srw / srd X-form.
     Srw {
         ra: u8,
         rs: u8,
         rb: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:79 s:3.3.14 Fixed-Point Shift Instructions] srawi / sradi (immediate forms).
+    /// [PPC-Book1 p:79 s:3.3.14 Fixed-Point Shift Instructions] srawi / sradi (immediate forms).
     Srawi {
         ra: u8,
         rs: u8,
         sh: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:80 s:3.3.14 Fixed-Point Shift Instructions] sraw / srad X-form.
+    /// [PPC-Book1 p:80 s:3.3.14 Fixed-Point Shift Instructions] sraw / srad X-form.
     Sraw {
         ra: u8,
         rs: u8,
@@ -503,7 +512,7 @@ pub enum PpuInstruction {
         rb: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:70 s:3.3.13 Fixed-Point Logical Instructions] cntlzw / cntlzd X-form.
+    /// [PPC-Book1 p:70 s:3.3.13 Fixed-Point Logical Instructions] cntlzw / cntlzd X-form.
     Cntlzw {
         ra: u8,
         rs: u8,
@@ -514,18 +523,20 @@ pub enum PpuInstruction {
         rs: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:70 s:3.3.13 Fixed-Point Logical Instructions] popcntb X-form, primary 31 XO 122; no Rc.
     /// Population Count Bytes. For each of the 8 bytes of RS,
     /// count the number of 1-bits and place the count
     /// (0..=8) into the corresponding byte of RA.
+    ///
+    /// [PPC-Book1 p:70 s:3.3.13 Fixed-Point Logical Instructions] popcntb X-form, primary 31 XO 122; no Rc.
     Popcntb {
         ra: u8,
         rs: u8,
     },
-    // [PPC-Book1 p:64 s:3.3.10 Fixed-Point Trap Instructions] tw / td X-form, primary 31 XO 4 / 68; TO field selects up to five conditions.
     /// Trap Word. Compares `RA[32:63]` against `RB[32:63]` as
     /// signed 32-bit values; invokes the trap handler if any
     /// TO-selected condition holds, otherwise advances.
+    ///
+    /// [PPC-Book1 p:64 s:3.3.10 Fixed-Point Trap Instructions] tw / td X-form, primary 31 XO 4 / 68; TO field selects up to five conditions.
     Tw {
         to: u8,
         ra: u8,
@@ -538,22 +549,23 @@ pub enum PpuInstruction {
         ra: u8,
         rb: u8,
     },
-    // [PPC-Book1 p:135 s:6.1 Move To Condition Register from XER] mcrxr X-form, primary 31 XO 512; phased out of the architecture.
     /// Move to Condition Register from XER. Copies `XER[32:35]`
     /// (SO, OV, CA, reserved) into CR field `BF`, then zeroes
     /// `XER[32:35]`. Phased out in later ISAs but defined for
     /// PPC v2.02 (Cell PPU).
+    ///
+    /// [PPC-Book1 p:135 s:6.1 Move To Condition Register from XER] mcrxr X-form, primary 31 XO 512; phased out of the architecture.
     Mcrxr {
         bf: u8,
     },
-    // [PPC-Book1 p:68 s:3.3.13 Fixed-Point Logical Instructions] orc / nand / equivalent X-form.
+    /// [PPC-Book1 p:68 s:3.3.13 Fixed-Point Logical Instructions] orc / nand / equivalent X-form.
     Orc {
         ra: u8,
         rs: u8,
         rb: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:69 s:3.3.13 Fixed-Point Logical Instructions] extsb / extsh / extsw X-form.
+    /// [PPC-Book1 p:69 s:3.3.13 Fixed-Point Logical Instructions] extsb / extsh / extsw X-form.
     Extsh {
         ra: u8,
         rs: u8,
@@ -569,8 +581,9 @@ pub enum PpuInstruction {
         rs: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:66 s:3.3.13 Fixed-Point Logical Instructions] ori / oris D-form.
     /// `imm == 0 && ra == rs` encodes `nop`.
+    ///
+    /// [PPC-Book1 p:66 s:3.3.13 Fixed-Point Logical Instructions] ori / oris D-form.
     Ori {
         ra: u8,
         rs: u8,
@@ -656,14 +669,16 @@ pub enum PpuInstruction {
     },
 
     // -- CR-logical (XL-form, opcode 19) --
-    // [PPC-Book1 p:30 s:2.4.4 Condition Register Field Instruction] mcrf XL-form (move CR field).
     /// `mcrf BF, BFA`: copy 4-bit CR field `crfs` into field `crfd`.
+    ///
+    /// [PPC-Book1 p:30 s:2.4.4 Condition Register Field Instruction] mcrf XL-form (move CR field).
     Mcrf {
         crfd: u8,
         crfs: u8,
     },
-    // [PPC-Book1 p:28 s:2.4.3 Condition Register Logical Instructions] crand / cror / crxor / crnand XL-form; crnor / creqv / crandc / crorc at p:29.
     /// `crand BT, BA, BB`: `CR[bt] = CR[ba] AND CR[bb]`.
+    ///
+    /// [PPC-Book1 p:28 s:2.4.3 Condition Register Logical Instructions] crand / cror / crxor / crnand XL-form; crnor / creqv / crandc / crorc at p:29.
     Crand {
         bt: u8,
         ba: u8,
@@ -866,40 +881,41 @@ pub enum PpuInstruction {
     },
 
     // -- Byte-reverse indexed loads and stores --
-    // [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] ldbrx X-form: little-endian 8-byte load to RT.
+    /// [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] ldbrx X-form: little-endian 8-byte load to RT.
     Ldbrx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    // [PPC-Book1 p:50 s:3.3.4 Byte-Reverse Instructions] lwbrx X-form: little-endian 4-byte load, zero-extended to RT.
+    /// [PPC-Book1 p:50 s:3.3.4 Byte-Reverse Instructions] lwbrx X-form: little-endian 4-byte load, zero-extended to RT.
     Lwbrx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    // [PPC-Book1 p:50 s:3.3.4 Byte-Reverse Instructions] lhbrx X-form: little-endian 2-byte load, zero-extended to RT.
+    /// [PPC-Book1 p:50 s:3.3.4 Byte-Reverse Instructions] lhbrx X-form: little-endian 2-byte load, zero-extended to RT.
     Lhbrx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    // [CBE-Handbook p:734 s:A.2.1] sdbrx (Cell PPE name; the spec also writes `stdbrx`): little-endian 8-byte store from RS low 64.
     /// Store Doubleword Byte Reverse Indexed. The Handbook's
     /// definition page uses the `sdbrx` spelling; the same encoding
     /// is also spelled `stdbrx` elsewhere in upstream PPC literature.
+    ///
+    /// [CBE-Handbook p:734 s:A.2.1] sdbrx (Cell PPE name; the spec also writes `stdbrx`): little-endian 8-byte store from RS low 64.
     Sdbrx {
         rs: u8,
         ra: u8,
         rb: u8,
     },
-    // [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] stwbrx X-form: little-endian 4-byte store from RS low 32.
+    /// [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] stwbrx X-form: little-endian 4-byte store from RS low 32.
     Stwbrx {
         rs: u8,
         ra: u8,
         rb: u8,
     },
-    // [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] sthbrx X-form: little-endian 2-byte store from RS low 16.
+    /// [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] sthbrx X-form: little-endian 2-byte store from RS low 16.
     Sthbrx {
         rs: u8,
         ra: u8,
@@ -907,8 +923,9 @@ pub enum PpuInstruction {
     },
 
     // -- Special-purpose register moves --
-    // [PPC-Book2 p:30 s:4.1 Time Base Instructions] mftb XFX-form; SPR encoding TBR=268 (TB), 269 (TBU).
     /// Move-from-time-base. The model advances TB by 1 per read.
+    ///
+    /// [PPC-Book2 p:30 s:4.1 Time Base Instructions] mftb XFX-form; SPR encoding TBR=268 (TB), 269 (TBU).
     Mftb {
         rt: u8,
     },
@@ -916,7 +933,7 @@ pub enum PpuInstruction {
     Mftbu {
         rt: u8,
     },
-    // [PPC-Book1 p:83 s:3.3.16 Move To/From System Register Instructions] mfcr XFX-form; mtcrf at p:83.
+    /// [PPC-Book1 p:83 s:3.3.16 Move To/From System Register Instructions] mfcr XFX-form; mtcrf at p:83.
     Mfcr {
         rt: u8,
     },
@@ -924,13 +941,14 @@ pub enum PpuInstruction {
         rs: u8,
         crm: u8,
     },
-    // [CBE-Handbook p:738 s:A.2.3.1 Book I Optional Instructions Implemented] mfocrf / mtocrf share XOs 19 / 144 with mfcr / mtcrf; bit 11 = 1 selects the one-field form. Cell PPE implements both.
     /// Move From One Condition Register Field. `crm` is one-hot; the
     /// set bit selects which CR field gets copied into the
     /// corresponding 4 bits of RT (other bits boundedly undefined per
     /// spec; CellGov produces the same nibble layout as mfcr for the
     /// selected field and zero elsewhere). Non-one-hot `crm` leaves RT
     /// undefined, and CellGov faults.
+    ///
+    /// [CBE-Handbook p:738 s:A.2.3.1 Book I Optional Instructions Implemented] mfocrf / mtocrf share XOs 19 / 144 with mfcr / mtcrf; bit 11 = 1 selects the one-field form. Cell PPE implements both.
     Mfocrf {
         rt: u8,
         crm: u8,
@@ -943,7 +961,7 @@ pub enum PpuInstruction {
         rs: u8,
         crm: u8,
     },
-    // [PPC-Book1 p:81 s:3.3.16 Move To/From System Register Instructions] mtspr (mtlr/mtctr extended); mfspr (mflr/mfctr) at p:82.
+    /// [PPC-Book1 p:81 s:3.3.16 Move To/From System Register Instructions] mtspr (mtlr/mtctr extended); mfspr (mflr/mfctr) at p:82.
     Mflr {
         rt: u8,
     },
@@ -956,8 +974,9 @@ pub enum PpuInstruction {
     Mtctr {
         rs: u8,
     },
-    // [PPC-Book1 p:42 s:3.2.2 Fixed-Point Exception Register] XER is SPR 1, problem-state read/write via mfspr/mtspr.
     /// Move From XER (`mfspr rT, 1`).
+    ///
+    /// [PPC-Book1 p:42 s:3.2.2 Fixed-Point Exception Register] XER is SPR 1, problem-state read/write via mfspr/mtspr.
     Mfxer {
         rt: u8,
     },
@@ -965,8 +984,9 @@ pub enum PpuInstruction {
     Mtxer {
         rs: u8,
     },
-    // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] VRSAVE is SPR 256, 32-bit, problem-state read/write via mfspr/mtspr.
     /// Move From VRSAVE (`mfspr rT, 256`).
+    ///
+    /// [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] VRSAVE is SPR 256, 32-bit, problem-state read/write via mfspr/mtspr.
     Mfvrsave {
         rt: u8,
     },
@@ -1002,8 +1022,9 @@ pub enum PpuInstruction {
         me: u8,
         rc: bool,
     },
-    // [PPC-Book1 p:72 s:3.3.12.1 Fixed-Point Rotate Instructions] rldicl / rldicr / rldic / rldimi MD-form (64-bit rotate w/ mask).
     /// `sh` and `mb` are 6-bit MD-form fields; mask covers `mb..=63`.
+    ///
+    /// [PPC-Book1 p:72 s:3.3.12.1 Fixed-Point Rotate Instructions] rldicl / rldicr / rldic / rldimi MD-form (64-bit rotate w/ mask).
     Rldicl {
         ra: u8,
         rs: u8,
@@ -1038,7 +1059,8 @@ pub enum PpuInstruction {
     },
     /// Rotate left doubleword by RB (low 6 bits) then clear left of
     /// `mb`. MDS-form.
-    // [PPC-Book1 p:75 s:3.3.12 Fixed-Point Rotate and Shift Instructions] rldcl MDS-form.
+    ///
+    /// [PPC-Book1 p:75 s:3.3.12 Fixed-Point Rotate and Shift Instructions] rldcl MDS-form.
     Rldcl {
         ra: u8,
         rs: u8,
@@ -1048,7 +1070,8 @@ pub enum PpuInstruction {
     },
     /// Rotate left doubleword by RB (low 6 bits) then clear right of
     /// `me`. MDS-form.
-    // [PPC-Book1 p:75 s:3.3.12 Fixed-Point Rotate and Shift Instructions] rldcr MDS-form.
+    ///
+    /// [PPC-Book1 p:75 s:3.3.12 Fixed-Point Rotate and Shift Instructions] rldcr MDS-form.
     Rldcr {
         ra: u8,
         rs: u8,
@@ -1058,10 +1081,11 @@ pub enum PpuInstruction {
     },
 
     // -- Vector (AltiVec / VMX) --
-    // [AltiVec-PEM p:6-1 s:6.1 Instruction Formats] VX/VA-form encoding under primary opcode 4.
     /// Generic VX-form (and VXR-form with `rc`). Execution
     /// dispatches on [`op`](crate::instruction::ops::VxOp) rather
     /// than opening a new variant per VMX op.
+    ///
+    /// [AltiVec-PEM p:6-1 s:6.1 Instruction Formats] VX/VA-form encoding under primary opcode 4.
     Vx {
         op: crate::instruction::ops::VxOp,
         /// VXR record bit; only ever `true` for compare ops.
@@ -1078,22 +1102,24 @@ pub enum PpuInstruction {
         vb: u8,
         vc: u8,
     },
-    // [AltiVec-PEM p:6-177 s:6.2 AltiVec Instruction Set] vxor VX-form (XO=1220 / 0x4c4).
     /// Vector XOR. Also decodable as `Vx { xo: 0x4c4, .. }`.
+    ///
+    /// [AltiVec-PEM p:6-177 s:6.2 AltiVec Instruction Set] vxor VX-form (XO=1220 / 0x4c4).
     Vxor {
         vt: u8,
         va: u8,
         vb: u8,
     },
-    // [AltiVec-PEM p:6-136 s:6.2 AltiVec Instruction Set] vsldoi VA-form (Shift Left Double by Octet Immediate, 4-bit SHB).
     /// Vector shift left double by octet immediate. `shb` is a 4-bit byte shift.
+    ///
+    /// [AltiVec-PEM p:6-136 s:6.2 AltiVec Instruction Set] vsldoi VA-form (Shift Left Double by Octet Immediate, 4-bit SHB).
     Vsldoi {
         vt: u8,
         va: u8,
         vb: u8,
         shb: u8,
     },
-    // [CBE-Handbook p:744] lvlx / lvrx Cell-specific VXU misaligned vector load (left/right indexed).
+    /// [CBE-Handbook p:744] lvlx / lvrx Cell-specific VXU misaligned vector load (left/right indexed).
     Lvlx {
         vt: u8,
         ra: u8,
@@ -1107,7 +1133,8 @@ pub enum PpuInstruction {
     /// Load Vector Left Indexed Last. Architecturally identical to
     /// [`PpuInstruction::Lvlx`]; the "Last" hint is a cache LRU
     /// directive only and CellGov has no cache model.
-    // [CBE-Handbook p:744 s:A.3.3] lvlxl Cell-specific VXU misaligned vector load with LRU hint.
+    ///
+    /// [CBE-Handbook p:744 s:A.3.3] lvlxl Cell-specific VXU misaligned vector load with LRU hint.
     Lvlxl {
         vt: u8,
         ra: u8,
@@ -1115,7 +1142,8 @@ pub enum PpuInstruction {
     },
     /// Load Vector Right Indexed Last. Architecturally identical to
     /// [`PpuInstruction::Lvrx`].
-    // [CBE-Handbook p:744 s:A.3.3] lvrxl Cell-specific VXU misaligned vector load with LRU hint.
+    ///
+    /// [CBE-Handbook p:744 s:A.3.3] lvrxl Cell-specific VXU misaligned vector load with LRU hint.
     Lvrxl {
         vt: u8,
         ra: u8,
@@ -1123,7 +1151,8 @@ pub enum PpuInstruction {
     },
     /// Store Vector Left Indexed. Partial vector store; bytes
     /// `[0..16-EA_mod16]` of `vr[vs]` are written to `MEM(EA, 16-m)`.
-    // [CBE-Handbook p:744 s:A.3.3] stvlx Cell-specific VXU misaligned vector store.
+    ///
+    /// [CBE-Handbook p:744 s:A.3.3] stvlx Cell-specific VXU misaligned vector store.
     Stvlx {
         vs: u8,
         ra: u8,
@@ -1131,7 +1160,8 @@ pub enum PpuInstruction {
     },
     /// Store Vector Right Indexed. Partial vector store; bytes
     /// `[16-m..16]` of `vr[vs]` are written to `MEM(aligned, m)`.
-    // [CBE-Handbook p:744 s:A.3.3] stvrx Cell-specific VXU misaligned vector store.
+    ///
+    /// [CBE-Handbook p:744 s:A.3.3] stvrx Cell-specific VXU misaligned vector store.
     Stvrx {
         vs: u8,
         ra: u8,
@@ -1139,7 +1169,8 @@ pub enum PpuInstruction {
     },
     /// Store Vector Left Indexed Last. Architecturally identical to
     /// [`PpuInstruction::Stvlx`].
-    // [CBE-Handbook p:744 s:A.3.3] stvlxl with LRU hint.
+    ///
+    /// [CBE-Handbook p:744 s:A.3.3] stvlxl with LRU hint.
     Stvlxl {
         vs: u8,
         ra: u8,
@@ -1147,7 +1178,8 @@ pub enum PpuInstruction {
     },
     /// Store Vector Right Indexed Last. Architecturally identical to
     /// [`PpuInstruction::Stvrx`].
-    // [CBE-Handbook p:744 s:A.3.3] stvrxl with LRU hint.
+    ///
+    /// [CBE-Handbook p:744 s:A.3.3] stvrxl with LRU hint.
     Stvrxl {
         vs: u8,
         ra: u8,
@@ -1155,95 +1187,107 @@ pub enum PpuInstruction {
     },
 
     // -- AltiVec-memory family (X-form, primary 31) --
-    // [AltiVec-PEM p:6-21 s:6.2] lvsl XO=6: shift-left permute control vector from EA low 4 bits.
     /// Load Vector for Shift Left. Builds a 16-byte permute-control
     /// vector from the low 4 bits of EA = (RA|0) + RB.
+    ///
+    /// [AltiVec-PEM p:6-21 s:6.2] lvsl XO=6: shift-left permute control vector from EA low 4 bits.
     Lvsl {
         vt: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-15 s:6.2] lvebx XO=7: single-byte element load to byte EA mod 16 of vT.
     /// Load Vector Element Byte Indexed.
+    ///
+    /// [AltiVec-PEM p:6-15 s:6.2] lvebx XO=7: single-byte element load to byte EA mod 16 of vT.
     Lvebx {
         vt: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-22 s:6.2] lvsr XO=38: shift-right permute control vector from EA low 4 bits.
     /// Load Vector for Shift Right. Builds a 16-byte permute-control
     /// vector from the low 4 bits of EA = (RA|0) + RB.
+    ///
+    /// [AltiVec-PEM p:6-22 s:6.2] lvsr XO=38: shift-right permute control vector from EA low 4 bits.
     Lvsr {
         vt: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-16 s:6.2] lvehx XO=39: halfword element load to halfword EA mod 16 of vT.
     /// Load Vector Element Halfword Indexed. EA is aligned down to a
     /// 2-byte boundary before the load.
+    ///
+    /// [AltiVec-PEM p:6-16 s:6.2] lvehx XO=39: halfword element load to halfword EA mod 16 of vT.
     Lvehx {
         vt: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-17 s:6.2] lvewx XO=71: word element load to word EA mod 16 of vT.
     /// Load Vector Element Word Indexed. EA is aligned down to a
     /// 4-byte boundary before the load.
+    ///
+    /// [AltiVec-PEM p:6-17 s:6.2] lvewx XO=71: word element load to word EA mod 16 of vT.
     Lvewx {
         vt: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-21 s:6.2] lvx XO=103: 16-byte aligned vector load (EA & ~0xF).
     /// Load Vector Indexed. EA is aligned down to a 16-byte boundary
     /// before the load.
+    ///
+    /// [AltiVec-PEM p:6-21 s:6.2] lvx XO=103: 16-byte aligned vector load (EA & ~0xF).
     Lvx {
         vt: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-29 s:6.2] stvebx XO=135: single-byte element store from byte EA mod 16 of vS.
     /// Store Vector Element Byte Indexed.
+    ///
+    /// [AltiVec-PEM p:6-29 s:6.2] stvebx XO=135: single-byte element store from byte EA mod 16 of vS.
     Stvebx {
         vs: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-30 s:6.2] stvehx XO=167: halfword element store from halfword EA mod 16 of vS.
     /// Store Vector Element Halfword Indexed. EA is aligned down to
     /// a 2-byte boundary before the store.
+    ///
+    /// [AltiVec-PEM p:6-30 s:6.2] stvehx XO=167: halfword element store from halfword EA mod 16 of vS.
     Stvehx {
         vs: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-31 s:6.2] stvewx XO=199: word element store from word EA mod 16 of vS.
     /// Store Vector Element Word Indexed. EA is aligned down to a
     /// 4-byte boundary before the store.
+    ///
+    /// [AltiVec-PEM p:6-31 s:6.2] stvewx XO=199: word element store from word EA mod 16 of vS.
     Stvewx {
         vs: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-23 s:6.2] lvxl XO=359: lvx with cache-locality "last use" hint.
     /// Load Vector Indexed Last. Same semantics as `Lvx`; the LRU
     /// hint is architecturally a cache directive only.
+    ///
+    /// [AltiVec-PEM p:6-23 s:6.2] lvxl XO=359: lvx with cache-locality "last use" hint.
     Lvxl {
         vt: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-28 s:6.2 AltiVec Instruction Set] stvx X-form (EA aligned down to 16-byte boundary).
     /// Store-vector-indexed. The effective address is aligned down to
     /// a 16-byte boundary before the store.
+    ///
+    /// [AltiVec-PEM p:6-28 s:6.2 AltiVec Instruction Set] stvx X-form (EA aligned down to 16-byte boundary).
     Stvx {
         vs: u8,
         ra: u8,
         rb: u8,
     },
-    // [AltiVec-PEM p:6-33 s:6.2] stvxl XO=487: stvx with cache-locality "last use" hint.
     /// Store Vector Indexed Last. Same semantics as `Stvx`; the LRU
     /// hint is architecturally a cache directive only.
+    ///
+    /// [AltiVec-PEM p:6-33 s:6.2] stvxl XO=487: stvx with cache-locality "last use" hint.
     Stvxl {
         vs: u8,
         ra: u8,
@@ -1259,7 +1303,8 @@ pub enum PpuInstruction {
     },
     /// Load floating-point single with update. Converts the loaded
     /// single to double in `fpr[frt]`. Requires `ra != 0`.
-    // [PPC-Book1 p:104 s:4.6.2 Floating-Point Load Instructions] lfsu D-form.
+    ///
+    /// [PPC-Book1 p:104 s:4.6.2 Floating-Point Load Instructions] lfsu D-form.
     Lfsu {
         frt: u8,
         ra: u8,
@@ -1271,13 +1316,14 @@ pub enum PpuInstruction {
         imm: i16,
     },
     /// Load floating-point double with update. Requires `ra != 0`.
-    // [PPC-Book1 p:105 s:4.6.2 Floating-Point Load Instructions] lfdu D-form.
+    ///
+    /// [PPC-Book1 p:105 s:4.6.2 Floating-Point Load Instructions] lfdu D-form.
     Lfdu {
         frt: u8,
         ra: u8,
         imm: i16,
     },
-    // [PPC-Book1 p:107 s:4.6.3 Floating-Point Store Instructions] stfs / stfsu D-form; stfd / stfdu at p:108.
+    /// [PPC-Book1 p:107 s:4.6.3 Floating-Point Store Instructions] stfs / stfsu D-form; stfd / stfdu at p:108.
     Stfs {
         frs: u8,
         ra: u8,
@@ -1298,9 +1344,10 @@ pub enum PpuInstruction {
         ra: u8,
         imm: i16,
     },
-    // [PPC-Book1 p:109 s:4.6.3 Floating-Point Store Instructions] stfiwx X-form (low 32 bits stored verbatim).
     /// Store-float-as-integer-word. The low 32 bits of `fpr[frs]` are
     /// written verbatim -- there is no float-to-int conversion.
+    ///
+    /// [PPC-Book1 p:109 s:4.6.3 Floating-Point Store Instructions] stfiwx X-form (low 32 bits stored verbatim).
     Stfiwx {
         frs: u8,
         ra: u8,
@@ -1358,10 +1405,11 @@ pub enum PpuInstruction {
         rb: u8,
     },
 
-    // [PPC-Book1 p:111 s:4.6.5 Floating-Point Arithmetic Instructions] primary 63 / 59 dispatch (fadd / fsub / fmul / fdiv / fmadd at p:111-113).
     /// Generic double-precision FP (primary 63). `rc` is preserved
     /// at decode but not yet honored by the executor (FPSCR/CR1
     /// plumbing pending).
+    ///
+    /// [PPC-Book1 p:111 s:4.6.5 Floating-Point Arithmetic Instructions] primary 63 / 59 dispatch (fadd / fsub / fmul / fdiv / fmadd at p:111-113).
     Fp63 {
         op: crate::instruction::ops::Fp63Op,
         frt: u8,
@@ -1491,23 +1539,25 @@ pub enum PpuInstruction {
     Consumed,
 
     // -- Cache block management --
-    // [PPC-Book2 p:20 s:3.2.1 Cache Management Instructions] dcbz X-form (block-set-to-zero, no caching modeled).
     /// Data cache block set to zero. The 128-byte block containing
     /// `(RA|0)+(RB)` is written with zeros. No cache modelling is
     /// implied; under the deterministic model the visible effect is
     /// a 128-byte zero store at the aligned EA.
+    ///
+    /// [PPC-Book2 p:20 s:3.2.1 Cache Management Instructions] dcbz X-form (block-set-to-zero, no caching modeled).
     Dcbz {
         ra: u8,
         rb: u8,
     },
 
     // -- System --
-    // [PPC-Book1 p:26 s:2.4.2 System Linkage Instructions] sc SC-form; LEV field selects hypervisor (1) vs kernel (0).
     /// System call. LV2 convention: syscall number in r11. The 7-bit
     /// LEV field selects the privilege level: PS3 usermode always
     /// issues LEV=0 (kernel syscall); LEV=1 would target an LV1
     /// hypercall. Preserved at decode so the executor can route on
     /// it when hypercall dispatch is wired.
+    ///
+    /// [PPC-Book1 p:26 s:2.4.2 System Linkage Instructions] sc SC-form; LEV field selects hypervisor (1) vs kernel (0).
     Sc {
         lev: u8,
     },

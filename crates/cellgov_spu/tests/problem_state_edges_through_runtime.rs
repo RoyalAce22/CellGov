@@ -57,7 +57,7 @@ fn occupancy(rt: &mut Runtime, unit: UnitId) -> usize {
         .len()
 }
 
-// [CBEA p:95 s:8.5.3] a restart resumes at SPU_NPC, which a write while the SPU is stopped replaces.
+/// [CBEA p:95 s:8.5.3] a restart resumes at SPU_NPC, which a write while the SPU is stopped replaces.
 #[test]
 fn an_npc_write_returns_the_message_an_abandoned_read_took() {
     let (mut rt, unit) = runtime_with_spu();
@@ -91,7 +91,7 @@ fn an_npc_write_returns_the_message_an_abandoned_read_took() {
     assert_eq!(state.stop.map(|stop| stop.npc), Some(0x10));
 }
 
-// [CBEA p:94 s:8.5.2] R is 1 only while the SPU runs.
+/// [CBEA p:94 s:8.5.2] R is 1 only while the SPU runs.
 #[test]
 fn a_refused_spu_reports_itself_stopped_and_refuses_an_npc_write() {
     let (mut rt, unit) = runtime_with_spu();

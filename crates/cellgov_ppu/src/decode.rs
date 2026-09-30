@@ -49,7 +49,8 @@ fn reject_spr(raw: u32, direction: SprDirection, spr: u16) -> PpuDecodeError {
 }
 
 /// Extract D-form fields as `(rt/rs, ra, signed imm16)`.
-// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD(0:5) RT/RS(6:10) RA(11:15) D/SI(16:31).
+///
+/// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD(0:5) RT/RS(6:10) RA(11:15) D/SI(16:31).
 #[inline]
 fn d_form(raw: u32) -> (u8, u8, i16) {
     (
@@ -60,7 +61,8 @@ fn d_form(raw: u32) -> (u8, u8, i16) {
 }
 
 /// Extract D-form fields as `(rt/rs, ra, unsigned imm16)`.
-// [PPC-Book1 p:8 s:1.7.4 D-Form] UI variant; immediate at bits 16:31, zero-extended.
+///
+/// [PPC-Book1 p:8 s:1.7.4 D-Form] UI variant; immediate at bits 16:31, zero-extended.
 #[inline]
 fn d_form_u(raw: u32) -> (u8, u8, u16) {
     (
@@ -71,7 +73,8 @@ fn d_form_u(raw: u32) -> (u8, u8, u16) {
 }
 
 /// Extract X-form fields as `(rt/rs, ra, rb)`.
-// [PPC-Book1 p:9 s:1.7.6 X-Form] OPCD(0:5) RT/RS(6:10) RA(11:15) RB(16:20) XO(21:30) Rc(31).
+///
+/// [PPC-Book1 p:9 s:1.7.6 X-Form] OPCD(0:5) RT/RS(6:10) RA(11:15) RB(16:20) XO(21:30) Rc(31).
 #[inline]
 fn x_form(raw: u32) -> (u8, u8, u8) {
     (
@@ -495,7 +498,8 @@ fn decode_vx(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 /// MD-form splits the 6-bit SH across bits 16..20 (low) and bit 30
 /// (high); the 6-bit mask bound splits across bits 21..25 (low) and
 /// bit 26 (high). Sub-opcode lives in bits 27..29.
-// [PPC-Book1 p:10 s:1.7.14 MD-Form] OPCD RS RA sh(16:20) mb(21:25,26) XO(27:29) sh(30) Rc.
+///
+/// [PPC-Book1 p:10 s:1.7.14 MD-Form] OPCD RS RA sh(16:20) mb(21:25,26) XO(27:29) sh(30) Rc.
 fn decode_md(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let rs = ((raw >> 21) & 0x1F) as u8;
     let ra = ((raw >> 16) & 0x1F) as u8;
@@ -587,7 +591,8 @@ fn decode_md(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 }
 
 /// Decode primary opcode 19 (XL-form: bclr, bcctr, isync, CR-logical).
-// [PPC-Book1 p:9 s:1.7.7 XL-Form] OPCD BT/BO BA/BI BB(16:20) XO(21:30) LK(31).
+///
+/// [PPC-Book1 p:9 s:1.7.7 XL-Form] OPCD BT/BO BA/BI BB(16:20) XO(21:30) LK(31).
 fn decode_xl(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let xo = (raw >> 1) & 0x3FF;
     // Branch fields: bo at bits 6-10, bi at bits 11-15, lk at bit 31.
@@ -628,8 +633,9 @@ fn decode_xl(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 /// XO-form uses a 9-bit extended opcode at bits 22..30; X-form uses
 /// a 10-bit extended opcode at bits 21..30. The 9-bit match runs
 /// first; on miss the 10-bit match takes over.
-// [PPC-Book1 p:9 s:1.7.11 XO-Form] OPCD RT RA RB OE(21) XO(22:30) Rc(31).
-// [PPC-Book1 p:208 s:Appendix I Opcode Maps] Primary 31 extended opcodes at bits 21:30.
+///
+/// [PPC-Book1 p:9 s:1.7.11 XO-Form] OPCD RT RA RB OE(21) XO(22:30) Rc(31).
+/// [PPC-Book1 p:208 s:Appendix I Opcode Maps] Primary 31 extended opcodes at bits 21:30.
 fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     let xo_10 = (raw >> 1) & 0x3FF;
     let xo_9 = (raw >> 1) & 0x1FF;

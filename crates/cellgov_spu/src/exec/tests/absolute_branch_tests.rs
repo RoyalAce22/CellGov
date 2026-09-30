@@ -4,7 +4,7 @@
 use super::*;
 use crate::state::SpuState;
 
-// [SPU-ISA p:29 s:2.3] RI16: 9-bit opcode, I16, RT.
+/// [SPU-ISA p:29 s:2.3] RI16: 9-bit opcode, I16, RT.
 fn ri16(op: u32, rt: u32, i16: u32) -> u32 {
     op << 23 | (i16 & 0xFFFF) << 7 | rt
 }

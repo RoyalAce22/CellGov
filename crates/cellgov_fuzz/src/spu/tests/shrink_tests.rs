@@ -7,8 +7,9 @@ use super::*;
 /// `il r3, 5`: the RI16 form with rt = 3 (bits 0 and 1) and i16 = 5 (bits 7
 /// and 9). The word has four set operand bits, and each one clears to the
 /// same kind.
-// [SPU-ISA p:52 s:Immediate Load Word] il is RI16: the nine-bit opcode
-// 0x081 first, then the sixteen I16 bits, then RT in the low seven bits.
+///
+/// [SPU-ISA p:52 s:Immediate Load Word] il is RI16: the nine-bit opcode
+/// 0x081 first, then the sixteen I16 bits, then RT in the low seven bits.
 const IL_R3_FIVE: u32 = (0x081u32 << 23) | (5 << 7) | 3;
 const NOP: u32 = 0x4020_007f;
 

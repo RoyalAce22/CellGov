@@ -23,8 +23,8 @@ fn run_word_at_0x20(word: u32) -> (SpuExecutionUnit, ExecutionStepResult) {
     (unit, result)
 }
 
-// [CBEA p:33 s:2.1.2] an SPU that meets an invalid instruction halts and records it in its status register.
-// [CBEA p:93 s:8.5.2] I (bit 26): invalid instruction detected, SPU stopped.
+/// [CBEA p:33 s:2.1.2] an SPU that meets an invalid instruction halts and records it in its status register.
+/// [CBEA p:93 s:8.5.2] I (bit 26): invalid instruction detected, SPU stopped.
 #[test]
 fn an_unassigned_word_stops_the_unit_as_an_invalid_instruction_at_that_word() {
     let (unit, result) = run_word_at_0x20(0x9000_0000);
@@ -48,9 +48,9 @@ fn an_unassigned_word_stops_the_unit_as_an_invalid_instruction_at_that_word() {
     );
 }
 
-// [SPU-ISA p:226 s:9] dfceq, [SPU-ISA p:227 s:9] dfcmeq, [SPU-ISA p:228 s:9] dfcgt, [SPU-ISA p:229 s:9] dfcmgt and [SPU-ISA p:230 s:9] dftsv are optional in ISA 1.2.
-// [CBE-Handbook p:765 s:B.1] through [CBE-Handbook p:767 s:B.1]: the CBE's SPU instruction table lists none of the five.
-// [CBEA p:34 s:2.2.3] an optional instruction the implementation does not provide invokes the illegal-instruction handler.
+/// [SPU-ISA p:226 s:9] dfceq, [SPU-ISA p:227 s:9] dfcmeq, [SPU-ISA p:228 s:9] dfcgt, [SPU-ISA p:229 s:9] dfcmgt and [SPU-ISA p:230 s:9] dftsv are optional in ISA 1.2.
+/// [CBE-Handbook p:765 s:B.1] through [CBE-Handbook p:767 s:B.1]: the CBE's SPU instruction table lists none of the five.
+/// [CBEA p:34 s:2.2.3] an optional instruction the implementation does not provide invokes the illegal-instruction handler.
 #[test]
 fn each_optional_double_compare_is_an_invalid_instruction_on_the_cbe() {
     for mnemonic in ["dfceq", "dfcmeq", "dfcgt", "dfcmgt", "dftsv"] {

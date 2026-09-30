@@ -55,9 +55,10 @@ pub(super) fn read_aligned_16(
 
 #[inline]
 #[track_caller]
-// [PPC-Book1 p:103 s:4.6.2] DOUBLE(WORD): single-precision to double-precision conversion pseudocode (normalized / denormalized / Zero / Infinity / NaN branches).
 /// PPC `DOUBLE(WORD)`: 32-bit single -> 64-bit double; preserves NaN
 /// payloads bit-exactly so SNaNs survive stfsx -> lfsx round-trips.
+///
+/// [PPC-Book1 p:103 s:4.6.2] DOUBLE(WORD): single-precision to double-precision conversion pseudocode (normalized / denormalized / Zero / Infinity / NaN branches).
 pub(super) fn double_word(w: u32) -> u64 {
     let exp = (w >> 23) & 0xFF;
     let frac23 = w & 0x007F_FFFF;
@@ -70,9 +71,10 @@ pub(super) fn double_word(w: u32) -> u64 {
     (f32::from_bits(w) as f64).to_bits()
 }
 
-// [PPC-Book1 p:106 s:4.6.3] SINGLE(FRS): double-precision to single-precision conversion pseudocode (No Denormalization Required vs Denormalization Required branches).
 /// PPC `SINGLE(FRS)`: 64-bit double -> 32-bit single; preserves NaN
 /// payloads bit-exactly.
+///
+/// [PPC-Book1 p:106 s:4.6.3] SINGLE(FRS): double-precision to single-precision conversion pseudocode (No Denormalization Required vs Denormalization Required branches).
 pub(super) fn single_frs(d: u64) -> u32 {
     let exp = ((d >> 52) & 0x7FF) as u32;
     let frac52 = d & 0x000F_FFFF_FFFF_FFFF;

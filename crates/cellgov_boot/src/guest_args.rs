@@ -34,9 +34,10 @@ const STRING_ALIGN: u64 = 0x10;
 /// 0x70-byte minimum frame -- the header plus the parameter save area.
 /// With r1 == block base, the entry function's prologue would overwrite
 /// the argv pointer table.
-// [CBE-Handbook p:398 s:14.3] A callee reaches its caller's parameter save
-// area 48 bytes off the back chain, and that area is at least 64 bytes, so
-// the smallest frame a caller must have provided is 0x70.
+///
+/// [CBE-Handbook p:398 s:14.3] A callee reaches its caller's parameter save
+/// area 48 bytes off the back chain, and that area is at least 64 bytes, so
+/// the smallest frame a caller must have provided is 0x70.
 const ENTRY_FRAME_RESERVE: u64 = 0x70;
 
 /// Why `build_args_block` could not lay out the guest argv block.

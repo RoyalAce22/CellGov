@@ -30,7 +30,8 @@ const RELATIONS: &[SpuMetamorphicRelation] = &[SpuMetamorphicRelation::Determini
 /// Returns another shufb control byte in the same class as `control`.
 ///
 /// A constant pattern keeps its high three bits. A selector keeps its low five.
-// [SPU-ISA p:116 s:5 Table 5-1] 10xxxxxx, 110xxxxx and 111xxxxx each give one constant; any other byte selects by its rightmost 5 bits.
+///
+/// [SPU-ISA p:116 s:5 Table 5-1] 10xxxxxx, 110xxxxx and 111xxxxx each give one constant; any other byte selects by its rightmost 5 bits.
 fn shufb_class_partner(control: u8) -> u8 {
     if control & 0x80 != 0 {
         control ^ 0x1F

@@ -15,7 +15,7 @@ fn store_conditional(insn: PpuInstruction) -> (ExecuteVerdict, PpuState, Vec<Eff
     (v, s, effects)
 }
 
-// [PPC-Book2 p:25 s:3.3] A store-conditional whose EA is outside the reserved line fails: CR0 = 0b00 || 0 || XER[SO], and the reservation clears.
+/// [PPC-Book2 p:25 s:3.3] A store-conditional whose EA is outside the reserved line fails: CR0 = 0b00 || 0 || `XER[SO]`, and the reservation clears.
 #[test]
 fn a_store_conditional_past_the_ea_space_fails_without_storing() {
     for insn in [

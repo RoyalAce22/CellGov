@@ -16,7 +16,8 @@ use super::types::{
 };
 
 /// Replays a reference without a device, network, or external runner.
-// [Martignoni2009 p:127 s:2.3] Both CPUs start from the same synthetic state and execute the case; the comparison reads only their final states.
+///
+/// [Martignoni2009 p:127 s:2.3] Both CPUs start from the same synthetic state and execute the case; the comparison reads only their final states.
 pub fn replay_reference(
     artifact: &SpuReferenceArtifact,
 ) -> Result<SpuReferenceReplay, SpuReferenceError> {
@@ -67,8 +68,9 @@ pub fn replay_reference(
 }
 
 /// Compares the independent source against the complete internal observation.
-// [Watt2023 p:110:2 s:1] A reference earns its trust from its proven correspondence to the specification, independent of the implementation it checks.
-// [Martignoni2009 p:127 s:2.2] The compared state is the program counter, the registers, the memory, and the exception. After an exception the other three stay as they were.
+///
+/// [Watt2023 p:110:2 s:1] A reference earns its trust from its proven correspondence to the specification, independent of the implementation it checks.
+/// [Martignoni2009 p:127 s:2.2] The compared state is the program counter, the registers, the memory, and the exception. After an exception the other three stay as they were.
 pub fn compare_reference(
     expected: &SpuReferenceExpected,
     loaded: &SpuObservableSnapshot,

@@ -176,7 +176,8 @@ pub enum PpuPathError {
 }
 
 /// Compares internal paths with the same instruction sequence, PPU state, and data.
-// [McKeeman1998 p:101 s:Differential Testing] One generated test goes to several comparable systems, and a differing result is a candidate bug.
+///
+/// [McKeeman1998 p:101 s:Differential Testing] One generated test goes to several comparable systems, and a differing result is a candidate bug.
 pub fn run_all_paths(
     words: &[u32],
     initial: &PpuState,
@@ -269,7 +270,8 @@ fn run_paths(
 }
 
 /// Scans runs in caller order and returns their first disagreement.
-// [Wang2024 p:340:3 s:2.1] Optimization settings of one implementation count as separate testing backends. A differing result on a well defined deterministic program means at least one backend is wrong.
+///
+/// [Wang2024 p:340:3 s:2.1] Optimization settings of one implementation count as separate testing backends. A differing result on a well defined deterministic program means at least one backend is wrong.
 pub fn first_path_divergence(runs: &[PpuPathRun]) -> Option<PpuPathDivergence> {
     for (index, left) in runs.iter().enumerate() {
         for right in runs.iter().skip(index + 1) {

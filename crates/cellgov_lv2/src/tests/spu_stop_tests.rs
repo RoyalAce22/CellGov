@@ -35,8 +35,8 @@ fn any_other_stop_code_is_an_unserved_service() {
     }
 }
 
-// [CBEA p:93 s:8.5.2] C is bit 25 and I bit 26.
-// [CBEA p:94 s:8.5.2] H is bit 29.
+/// [CBEA p:93 s:8.5.2] C is bit 25 and I bit 26.
+/// [CBEA p:94 s:8.5.2] H is bit 29.
 #[test]
 fn an_spu_error_and_a_halt_are_errors_named_by_their_status_bit() {
     assert_eq!(

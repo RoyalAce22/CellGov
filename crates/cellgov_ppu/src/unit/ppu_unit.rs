@@ -8,7 +8,8 @@ use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 
 /// PPU architectural state snapshot for replay.
-// [PPC-Book1 p:18 s:2.3 Branch Processor Registers] CR is 32 bits in eight 4-bit fields; LR and CTR are 64-bit branch registers.
+///
+/// [PPC-Book1 p:18 s:2.3 Branch Processor Registers] CR is 32 bits in eight 4-bit fields; LR and CTR are 64-bit branch registers.
 #[derive(Debug, Clone)]
 pub struct PpuSnapshot {
     /// General-purpose registers.
@@ -27,8 +28,9 @@ pub struct PpuSnapshot {
     pub ctr: u64,
     /// Fixed-point exception register.
     pub xer: u64,
-    // [PPC-Book2 p:29 s:Chapter 4. Time Base] TB is a 64-bit unsigned counter incremented monotonically.
     /// Time base register.
+    ///
+    /// [PPC-Book2 p:29 s:Chapter 4. Time Base] TB is a 64-bit unsigned counter incremented monotonically.
     pub tb: u64,
     /// Canonical reservation-line address, or `None` when no reservation is held.
     pub reservation_line: Option<u64>,

@@ -200,7 +200,8 @@ pub(crate) fn load_se(
 ///
 /// A store whose last byte lies past the end of the address space
 /// faults as unmapped: no region can hold it.
-// [PPC-Book2 p:10 s:1.7.3.1] a reservation is lost to another processor's store or dcbz to the granule, not to the holder's own stores.
+///
+/// [PPC-Book2 p:10 s:1.7.3.1] a reservation is lost to another processor's store or dcbz to the granule, not to the holder's own stores.
 #[inline]
 pub(crate) fn buffer_store(
     store_buf: &mut StoreBuffer,

@@ -258,7 +258,7 @@ fn the_coverage_results_match_their_golden_hash() {
 
 const GOLDEN: u64 = 0xf18c_7871_88cd_df2f;
 
-// [SPU-ISA p:195 s:9.1] a zero exponent reads as zero and exponent 255 is a normal binade.
+/// [SPU-ISA p:195 s:9.1] a zero exponent reads as zero and exponent 255 is a normal binade.
 #[test]
 fn single_precision_operands_read_zero_and_the_extended_binade() {
     let (zero, flags) = unpack::<Binary32>(Policy::SpuExtended, 0x0000_0001);
@@ -281,8 +281,8 @@ fn single_precision_operands_read_zero_and_the_extended_binade() {
     );
 }
 
-// [SPU-ISA p:199 s:9.2.2] a denormal operand reads as a zero of its sign and sets DENORM.
-// [SPU-ISA p:197 s:9.2] the default QNaN is 0x7FF8000000000000.
+/// [SPU-ISA p:199 s:9.2.2] a denormal operand reads as a zero of its sign and sets DENORM.
+/// [SPU-ISA p:197 s:9.2] the default QNaN is 0x7FF8000000000000.
 #[test]
 fn double_precision_operands_read_denormals_as_zero_and_classify_nans() {
     let (zero, flags) = unpack::<Binary64>(Policy::Ieee754Cbe, 0x8000_0000_0000_0001);
@@ -306,7 +306,8 @@ fn double_precision_operands_read_denormals_as_zero_and_classify_nans() {
 /// Every single-precision pattern reads back to itself: `unpack` then
 /// `round_pack` is the identity on each finite value, under both policies,
 /// with DIFF exactly on the extended binade.
-// [SPU-ISA p:195 s:9.1] every exponent from 1 to 255 is a normal single-precision binade.
+///
+/// [SPU-ISA p:195 s:9.1] every exponent from 1 to 255 is a normal single-precision binade.
 #[test]
 #[ignore = "exhaustive over 2^32 patterns; run with --release -- --ignored"]
 fn every_single_precision_pattern_round_trips() {

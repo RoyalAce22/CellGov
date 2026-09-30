@@ -223,10 +223,11 @@ pub struct CampaignPlan {
 impl CampaignRequest {
     /// Refuses or accepts this request before the run schedules a case.
     ///
+    /// [Manes2021 p:3 s:2.3 Fuzz Testing Algorithm] The model fuzzer runs one preprocessing step before its iteration loop. Every refusal below lands in that step, before the loop schedules the first case.
+    ///
     /// # Errors
     ///
     /// [`CampaignError`] for every request no run could serve.
-    // [Manes2021 p:3 s:2.3 Fuzz Testing Algorithm] The model fuzzer runs one preprocessing step before its iteration loop. Every refusal below lands in that step, before the loop schedules the first case.
     pub fn plan(self) -> Result<CampaignPlan, CampaignError> {
         if self.reduction.is_some_and(|request| request.budget == 0) {
             return Err(CampaignError::ReductionBudget);

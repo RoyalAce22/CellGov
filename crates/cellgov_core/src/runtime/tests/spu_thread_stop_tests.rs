@@ -188,7 +188,7 @@ fn a_yield_resumes_the_thread_and_finishes_nothing() {
     );
 }
 
-// [CBEA p:94 s:8.5.2] H (bit 29) reports a halt.
+/// [CBEA p:94 s:8.5.2] H (bit 29) reports a halt.
 #[test]
 fn an_error_stop_faults_the_thread_leaves_the_join_parked_and_is_taken_once() {
     let (mut rt, units, joiner) = group_of(&[(1 << 2, None)]);
@@ -241,7 +241,7 @@ fn a_stop_from_a_unit_no_group_holds_is_no_lv2_request() {
     assert_eq!(rt.registry.status_override(unit), None);
 }
 
-// [CBEA p:92 s:8.5.1] a stop request stops the SPU's instruction issue; the page says nothing of the MFC.
+/// [CBEA p:92 s:8.5.1] a stop request stops the SPU's instruction issue; the page says nothing of the MFC.
 #[test]
 fn a_transfer_that_completes_while_its_issuer_is_stopped_leaves_its_tag_group_complete() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};

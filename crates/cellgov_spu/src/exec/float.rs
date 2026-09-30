@@ -14,7 +14,8 @@ use crate::state::SpuState;
 /// Applies `op` to each word slot of the `sources` registers as
 /// single-precision values, writes the packed results to `rt`, and ORs
 /// each slot's flags into the FPSCR.
-// [SPU-ISA p:196 s:9.1] fa, fs, fm, fma, fms and fnms set OVF, UNF and DIFF in the slice of each slot.
+///
+/// [SPU-ISA p:196 s:9.1] fa, fs, fm, fma, fms and fnms set OVF, UNF and DIFF in the slice of each slot.
 pub(super) fn single<const N: usize>(
     state: &mut SpuState,
     rt: u8,
@@ -43,7 +44,8 @@ pub(super) fn single<const N: usize>(
 
 /// Applies `op` to each word slot of `ra`, writes the results to `rt`,
 /// and sets DBZ for each slot whose operand has a zero exponent.
-// [SPU-ISA p:215 s:9] and [SPU-ISA p:217 s:9]: a zero exponent flags divide by zero; [SPU-ISA p:196 s:9.1] frest and frsqest set DBZ only.
+///
+/// [SPU-ISA p:215 s:9] and [SPU-ISA p:217 s:9]: a zero exponent flags divide by zero; [SPU-ISA p:196 s:9.1] frest and frsqest set DBZ only.
 pub(super) fn estimate(state: &mut SpuState, rt: u8, ra: u8, op: fn(u32) -> u32) -> SpuStepOutcome {
     let a = words(state.regs[ra as usize]);
     state.regs[rt as usize] = from_words(a.map(op));
@@ -53,7 +55,8 @@ pub(super) fn estimate(state: &mut SpuState, rt: u8, ra: u8, op: fn(u32) -> u32)
 
 /// `fi` on each word slot: RB's base less its step times RA's fraction,
 /// truncated to extended-range single precision.
-// [SPU-ISA p:219 s:9] RT = (-1)^S x (1.BaseFraction - 0.000StepFraction x Y) x 2^(BiasedExponent - 127), Y = 0.RA[13:31]; [SPU-ISA p:196 s:9.1] fi sets OVF, UNF and DIFF.
+///
+/// [SPU-ISA p:219 s:9] RT = (-1)^S x (1.BaseFraction - 0.000StepFraction x Y) x 2^(BiasedExponent - 127), Y = 0.`RA[13:31]`; [SPU-ISA p:196 s:9.1] fi sets OVF, UNF and DIFF.
 pub(super) fn interpolate(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
     let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
     let mut flags = [Flags::default(); 4];
@@ -82,7 +85,8 @@ pub(super) fn interpolate(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuSt
 
 /// The scale `bias - imm`, or `None` outside 0..=127, where every
 /// conversion's result is undefined.
-// [SPU-ISA p:220 s:9] a scale outside 0..=127 is undefined; [SPU-ISA p:221 s:9] the same for the integer conversions.
+///
+/// [SPU-ISA p:220 s:9] a scale outside 0..=127 is undefined; [SPU-ISA p:221 s:9] the same for the integer conversions.
 pub(crate) fn scale(bias: u8, imm: u8) -> Option<u32> {
     let scale = i32::from(bias) - i32::from(imm);
     (0..=127).contains(&scale).then_some(scale as u32)
@@ -90,7 +94,8 @@ pub(crate) fn scale(bias: u8, imm: u8) -> Option<u32> {
 
 /// `csflt` / `cuflt`: each slot's integer divided by 2^scale, truncated
 /// to extended-range single precision.
-// [SPU-ISA p:196 s:9.1] csflt and cuflt set OVF, UNF and DIFF, truncating.
+///
+/// [SPU-ISA p:196 s:9.1] csflt and cuflt set OVF, UNF and DIFF, truncating.
 pub(super) fn to_float(
     state: &mut SpuState,
     rt: u8,
@@ -123,7 +128,8 @@ pub(super) fn to_float(
 
 /// `cflts` / `cfltu`: each slot's value times 2^scale, truncated toward
 /// zero and saturated to the integer range.
-// [SPU-ISA p:221 s:9] cflts saturates above 2^31 - 1 and below -2^31; [SPU-ISA p:223 s:9] cfltu saturates above 2^32 - 1 and every negative product to zero; [SPU-ISA p:196 s:9.1] truncation is the only single-precision rounding, and neither sets a flag.
+///
+/// [SPU-ISA p:221 s:9] cflts saturates above 2^31 - 1 and below -2^31; [SPU-ISA p:223 s:9] cfltu saturates above 2^32 - 1 and every negative product to zero; [SPU-ISA p:196 s:9.1] truncation is the only single-precision rounding, and neither sets a flag.
 pub(super) fn to_integer(
     state: &mut SpuState,
     rt: u8,
@@ -162,7 +168,8 @@ pub(super) fn to_integer(
 
 /// Writes all ones to each word slot of `rt` where `holds` is true of the
 /// slot's `ra` and `rb` words, and zero elsewhere.
-// [SPU-ISA p:196 s:9.1] the compares set no flag.
+///
+/// [SPU-ISA p:196 s:9.1] the compares set no flag.
 pub(super) fn compare(
     state: &mut SpuState,
     rt: u8,

@@ -6,7 +6,7 @@ use crate::exec::lanes::{doublewords, from_doublewords};
 use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu_fpscr::{fpscr_field, FPSCR_DOUBLE_FIRST, FPSCR_RN_FIRST};
 
-// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
+/// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
 fn rr(op: u32, rt: u32, ra: u32) -> u32 {
     op << 21 | ra << 7 | rt
 }
@@ -38,7 +38,8 @@ struct DFlags {
 
 /// Rounds `(-1)^neg * mag * 2^exp` into a format with `frac` fraction
 /// bits and exponent `bias`, in `mode`.
-// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with an inexact result.
+///
+/// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with an inexact result.
 fn round_ieee(neg: bool, mag: u128, exp: i32, mode: Mode, frac: i32, bias: i32) -> (u64, DFlags) {
     let sign = u64::from(neg) << (frac + (bias + 1).trailing_zeros() as i32 + 1);
     let top = 127 - mag.leading_zeros() as i32;
@@ -109,7 +110,8 @@ fn round_ieee(neg: bool, mag: u128, exp: i32, mode: Mode, frac: i32, bias: i32) 
 }
 
 /// The frds oracle: a double rounded to a single word.
-// [SPU-ISA p:198 s:9.2.1] IEEE 754 but for denormal inputs, which an implementation may read as zero with DENORM; [Mueller2005 p:61 s:3.2] the CBE's double unit, which does the conversions, reads denormal operands as zero.
+///
+/// [SPU-ISA p:198 s:9.2.1] IEEE 754 but for denormal inputs, which an implementation may read as zero with DENORM; [Mueller2005 p:61 s:3.2] the CBE's double unit, which does the conversions, reads denormal operands as zero.
 fn frds_oracle(bits: u64, mode: Mode) -> (u64, DFlags) {
     let neg = bits >> 63 == 1;
     let e = (bits >> 52 & 0x7FF) as i32;
@@ -252,7 +254,7 @@ fn frds_matches_the_oracle_in_every_mode() {
     }
 }
 
-// [Verdonk2001Conversions p:124 s:3] every last, round and sticky combination at the 24-bit boundary.
+/// [Verdonk2001Conversions p:124 s:3] every last, round and sticky combination at the 24-bit boundary.
 #[test]
 fn frds_rounds_every_position_like_the_oracle() {
     // A single significand's last bit even or odd, or all ones (a carry),
@@ -371,7 +373,7 @@ fn frds_agrees_with_the_host_in_every_directed_mode() {
     }
 }
 
-// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding: a result that rounds up into the normal range still raises it.
+/// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding: a result that rounds up into the normal range still raises it.
 #[test]
 fn frds_underflow_is_tininess_before_rounding() {
     let slice = |offset: u32| fpscr_field(FPSCR_DOUBLE_FIRST[0] + offset, 1);
@@ -388,7 +390,7 @@ fn frds_underflow_is_tininess_before_rounding() {
     assert_ne!(fpscr & slice(0), 0, "OVF");
 }
 
-// [SPU-ISA p:225 s:9] the left word converts and the right word is ignored.
+/// [SPU-ISA p:225 s:9] the left word converts and the right word is ignored.
 #[test]
 fn fesd_extends_the_left_word_and_ignores_the_right() {
     let words = [

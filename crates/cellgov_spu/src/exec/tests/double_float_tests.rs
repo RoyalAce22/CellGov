@@ -7,7 +7,7 @@ use crate::exec::lanes::{doublewords, from_doublewords};
 use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu_fpscr::{fpscr_field, FPSCR_DOUBLE_FIRST, FPSCR_RN_FIRST};
 
-// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
+/// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
 fn rr(op: u32, rt: u32, ra: u32, rb: u32) -> u32 {
     op << 21 | rb << 14 | ra << 7 | rt
 }
@@ -48,7 +48,7 @@ enum Val {
     NaN { quiet: bool },
 }
 
-// [SPU-ISA p:199 s:9.2.2] a denormal operand reads as zero and sets DENORM; a NaN operand sets NaN.
+/// [SPU-ISA p:199 s:9.2.2] a denormal operand reads as zero and sets DENORM; a NaN operand sets NaN.
 fn decode(bits: u64, flags: &mut DFlags) -> Val {
     let neg = bits >> 63 == 1;
     let e = (bits >> 52 & 0x7FF) as i32;
@@ -75,7 +75,8 @@ fn decode(bits: u64, flags: &mut DFlags) -> Val {
 
 /// Rounds `(-1)^neg * (mag + s) * 2^exp`, where `s` is in (0, 1) when
 /// `sticky`, to a double in `mode`.
-// [SPU-ISA p:199 s:9.2.2] UNF is a tiny result before rounding that is also inexact.
+///
+/// [SPU-ISA p:199 s:9.2.2] UNF is a tiny result before rounding that is also inexact.
 fn round(neg: bool, mag: u128, exp: i32, sticky: bool, mode: Mode) -> (u64, DFlags) {
     let sign = u64::from(neg) << 63;
     let top = 127 - mag.leading_zeros() as i32;
@@ -389,7 +390,7 @@ fn round_to_nearest_agrees_with_the_host() {
     }
 }
 
-// [Verdonk2001Basic p:104 s:4.2] every last, round and sticky combination, with and without a carry.
+/// [Verdonk2001Basic p:104 s:4.2] every last, round and sticky combination, with and without a carry.
 #[test]
 fn every_rounding_position_matches_the_oracle() {
     // 1.0 (even last bit) and 1 + ulp (odd), plus 2 - ulp, which carries.
@@ -457,7 +458,7 @@ fn every_rounding_position_matches_the_oracle() {
     }
 }
 
-// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with an inexact result.
+/// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with an inexact result.
 #[test]
 fn underflow_is_tininess_before_rounding() {
     let [unf, inx] = [1, 2].map(|offset| fpscr_field(FPSCR_DOUBLE_FIRST[0] + offset, 1));
@@ -513,7 +514,7 @@ fn underflow_is_tininess_before_rounding() {
     assert_eq!(fpscr, inx);
 }
 
-// [SPU-ISA p:197 s:9.2] the default QNaN for every NaN result; [SPU-ISA p:199 s:9.2.2] INV for an SNaN, infinity less infinity and infinity times zero, NaN for a NaN operand, DENORM for a denormal operand.
+/// [SPU-ISA p:197 s:9.2] the default QNaN for every NaN result; [SPU-ISA p:199 s:9.2.2] INV for an SNaN, infinity less infinity and infinity times zero, NaN for a NaN operand, DENORM for a denormal operand.
 #[test]
 fn the_special_cases_follow_the_cbe() {
     let slice = |offset: u32| fpscr_field(FPSCR_DOUBLE_FIRST[0] + offset, 1);
@@ -577,7 +578,7 @@ fn the_special_cases_follow_the_cbe() {
     assert_eq!((got[0], fpscr), (0x3FF0_0000_0000_0000, denorm));
 }
 
-// [SPU-ISA p:197 s:9.2] slice 0 rounds by RN0 and slice 1 by RN1; [SPU-ISA p:200 s:9.3] each slice has its own flags.
+/// [SPU-ISA p:197 s:9.2] slice 0 rounds by RN0 and slice 1 by RN1; [SPU-ISA p:200 s:9.3] each slice has its own flags.
 #[test]
 fn each_slice_rounds_by_its_own_mode_and_keeps_its_own_flags() {
     // 1 + 2^-60 rounds up toward +inf and down toward -inf.

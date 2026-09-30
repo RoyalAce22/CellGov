@@ -2,7 +2,8 @@
 //! unit, and the refusals they can meet.
 
 /// One of the two SPU signal-notification registers.
-// [CBEA p:101 s:8.7] each SPU has two independent signal-notification facilities, each one register and one channel.
+///
+/// [CBEA p:101 s:8.7] each SPU has two independent signal-notification facilities, each one register and one channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SignalNotifier {
     /// `SPU_Sig_Notify_1`, read by channel x'3'.

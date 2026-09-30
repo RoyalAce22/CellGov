@@ -54,7 +54,7 @@ fn a_parked_get_tag_of_31_parses_and_loads_as_that_group() {
     assert_eq!(tag.status_bit(), 1 << 31);
 }
 
-// [CBE-Handbook p:459 s:17.10] TS 00 updates at once and 11 is reserved, so only 01 and 10 leave a request waiting.
+/// [CBE-Handbook p:459 s:17.10] TS 00 updates at once and 11 is reserved, so only 01 and 10 leave a request waiting.
 #[test]
 fn a_waiting_tag_update_other_than_any_or_all_is_refused_on_either_side() {
     for (side, field) in [

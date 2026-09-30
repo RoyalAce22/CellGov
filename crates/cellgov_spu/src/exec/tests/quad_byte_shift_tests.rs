@@ -4,7 +4,7 @@
 use super::*;
 use crate::state::SpuState;
 
-// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
+/// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
 fn rr(op: u32, rt: u32, ra: u32, rb: u32) -> u32 {
     op << 21 | rb << 14 | ra << 7 | rt
 }
@@ -53,8 +53,8 @@ fn shlqby_reads_a_5_bit_byte_count_and_zeroes_above_15() {
     assert_eq!(run(SHLQBY, 16), [0; 16]);
 }
 
-// [SPU-ISA p:131 s:6. Shift and Rotate Instructions] rotqby rotates left by
-// bits 28 to 31 of RB's preferred slot.
+/// [SPU-ISA p:131 s:6. Shift and Rotate Instructions] rotqby rotates left by
+/// bits 28 to 31 of RB's preferred slot.
 #[test]
 fn rotqby_rotates_left_by_the_low_4_bits() {
     let rotated: [u8; 16] = std::array::from_fn(|i| A[(i + 3) % 16]);

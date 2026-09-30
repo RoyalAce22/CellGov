@@ -5,7 +5,7 @@ use super::*;
 use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu_fpscr::fpscr_field;
 
-// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
+/// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
 fn rr(op: u32, rt: u32, ra: u32, rb: u32) -> u32 {
     op << 21 | rb << 14 | ra << 7 | rt
 }
@@ -24,7 +24,8 @@ pub(super) struct SpFlags {
 
 /// A decoded operand: sign, 24-bit significand (0 for zero), exponent of
 /// its lowest bit, and whether reading it raised DIFF.
-// [SPU-ISA p:196 s:9.1] a zero exponent reads as zero and raises DIFF with a nonzero fraction; exponent 255 is a number and raises DIFF.
+///
+/// [SPU-ISA p:196 s:9.1] a zero exponent reads as zero and raises DIFF with a nonzero fraction; exponent 255 is a number and raises DIFF.
 pub(super) fn decode_operand(bits: u32) -> (bool, i128, i32, bool) {
     let negative = bits >> 31 == 1;
     let exponent = (bits >> 23 & 0xFF) as i32;
@@ -43,7 +44,8 @@ pub(super) fn decode_operand(bits: u32) -> (bool, i128, i32, bool) {
 
 /// Truncates `(-1)^negative * magnitude * 2^exponent`, where `sticky`
 /// marks nonzero bits below `magnitude`, to extended-range single precision.
-// [SPU-ISA p:196 s:9.1] truncation only; below Smin the result is +0 with UNF and DIFF; above Smax it is Smax with OVF; exponent 255 raises DIFF.
+///
+/// [SPU-ISA p:196 s:9.1] truncation only; below Smin the result is +0 with UNF and DIFF; above Smax it is Smax with OVF; exponent 255 raises DIFF.
 pub(super) fn truncate(
     negative: bool,
     magnitude: u128,
@@ -244,7 +246,7 @@ fn every_exponent_gap_matches_the_oracle() {
     }
 }
 
-// [SPU-ISA p:195 s:9.1] every zero result is +0.
+/// [SPU-ISA p:195 s:9.1] every zero result is +0.
 #[test]
 fn every_zero_result_is_positive_zero() {
     let (words, fpscr) = run(
@@ -260,7 +262,7 @@ fn every_zero_result_is_positive_zero() {
     assert_eq!(words, [0; 4]);
 }
 
-// [SPU-ISA p:196 s:9.1] overflow saturates to Smax with the result's sign and sets OVF and DIFF; underflow gives +0 with UNF and DIFF.
+/// [SPU-ISA p:196 s:9.1] overflow saturates to Smax with the result's sign and sets OVF and DIFF; underflow gives +0 with UNF and DIFF.
 #[test]
 fn overflow_saturates_and_underflow_flushes_in_their_own_slot() {
     let (words, fpscr) = run(
@@ -276,7 +278,7 @@ fn overflow_saturates_and_underflow_flushes_in_their_own_slot() {
     );
 }
 
-// [SPU-ISA p:196 s:9.1] a large gap truncates: a power of two less a tiny value is the all-ones significand one binade down.
+/// [SPU-ISA p:196 s:9.1] a large gap truncates: a power of two less a tiny value is the all-ones significand one binade down.
 #[test]
 fn a_power_of_two_less_a_tiny_value_truncates_one_binade_down() {
     let (words, _) = run(FS, [0x4000_0000; 4], [0x0080_0000; 4]);

@@ -16,7 +16,8 @@ use super::types::{
 };
 
 /// Replays one artifact without hardware, a network, or an external executable.
-// [Martignoni2009 p:127 s:2.3] Both CPUs start from the same synthetic state and execute the case; the comparison reads only their final states.
+///
+/// [Martignoni2009 p:127 s:2.3] Both CPUs start from the same synthetic state and execute the case; the comparison reads only their final states.
 pub fn replay_reference(
     artifact: &PpuReferenceArtifact,
 ) -> Result<PpuReferenceReplay, PpuReferenceError> {
@@ -36,8 +37,9 @@ pub fn replay_reference(
 }
 
 /// Compares only fields represented by both the reference and CellGov.
-// [Watt2023 p:110:2 s:1] A reference earns its trust from its proven correspondence to the specification, independent of the implementation it checks.
-// [Jiang2022 p:5 s:3.2.1] The compared final state is the program counter, the registers, only the memory the case can write, the status bits, and the signal raised.
+///
+/// [Watt2023 p:110:2 s:1] A reference earns its trust from its proven correspondence to the specification, independent of the implementation it checks.
+/// [Jiang2022 p:5 s:3.2.1] The compared final state is the program counter, the registers, only the memory the case can write, the status bits, and the signal raised.
 pub fn compare_reference(
     expected: &PpuReferenceObservation,
     run: &PpuPathRun,

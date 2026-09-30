@@ -81,8 +81,9 @@ impl Exact {
 }
 
 /// A rounding direction.
-// [SPU-ISA p:197 s:9.2] double precision offers round to nearest even, toward zero, toward +infinity and toward -infinity.
-// [SPU-ISA p:200 s:9.3] the FPSCR RN0 and RN1 fields name those four modes per slot.
+///
+/// [SPU-ISA p:197 s:9.2] double precision offers round to nearest even, toward zero, toward +infinity and toward -infinity.
+/// [SPU-ISA p:200 s:9.3] the FPSCR RN0 and RN1 fields name those four modes per slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rounding {
     /// Round to nearest, ties to even.
@@ -101,13 +102,15 @@ pub enum Policy {
     /// SPU extended-range single precision: truncation whatever the
     /// requested mode, zero below Smin, saturation above Smax, exponent
     /// 255 an ordinary binade, and +0 for every zero result.
-    // [SPU-ISA p:195 s:9.1] the extended range to Smax and +0 for every zero result.
-    // [SPU-ISA p:196 s:9.1] truncation only, denormal results to +0, saturation to Smax, and the OVF, UNF and DIFF flags.
+    ///
+    /// [SPU-ISA p:195 s:9.1] the extended range to Smax and +0 for every zero result.
+    /// [SPU-ISA p:196 s:9.1] truncation only, denormal results to +0, saturation to Smax, and the OVF, UNF and DIFF flags.
     SpuExtended,
     /// IEEE 754 with the CBE's deviations: rounding per the requested mode,
     /// denormal results, overflow per the mode, and UNF only for a tiny
     /// result that is also inexact.
-    // [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with inexactness.
+    ///
+    /// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with inexactness.
     Ieee754Cbe,
 }
 

@@ -10,8 +10,9 @@ use crate::{
     FuzzTarget, GenerationStrategy, RetentionConfig, CAMPAIGN_VERSION,
 };
 
-// [Klees2018 p:2127 s:4 Statistically Sound Comparisons] A randomized fuzzer run once per side supports no ranking; both sides need many trials, and two is only the floor.
 /// Fewest trials an evaluation runs; one trial gives no distribution.
+///
+/// [Klees2018 p:2127 s:4 Statistically Sound Comparisons] A randomized fuzzer run once per side supports no ranking; both sides need many trials, and two is only the floor.
 pub const MIN_TRIALS: usize = 2;
 
 /// Cases every trial attempts.

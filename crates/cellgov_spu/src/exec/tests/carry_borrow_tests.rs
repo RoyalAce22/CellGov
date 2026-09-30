@@ -5,7 +5,8 @@ use super::*;
 use crate::state::SpuState;
 
 /// `op rt, ra, rb` in the RR form.
-// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
+///
+/// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
 fn rr(op: u32, rt: u32, ra: u32, rb: u32) -> u32 {
     op << 21 | rb << 14 | ra << 7 | rt
 }

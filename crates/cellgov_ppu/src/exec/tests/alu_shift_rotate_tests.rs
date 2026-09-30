@@ -239,7 +239,7 @@ fn srw_dot_reads_gt_when_bit_31_is_set() {
     assert_eq!(s.cr_field(0), 0b0100);
 }
 
-// [PPC-Book1 p:77 s:3.3.12.2] slw: shift amounts from 32 to 63 give a zero result.
+/// [PPC-Book1 p:77 s:3.3.12.2] slw: shift amounts from 32 to 63 give a zero result.
 #[test]
 fn slw_dot_reads_eq_at_the_32_bit_shift_boundary() {
     let mut s = PpuState::new();
@@ -258,7 +258,7 @@ fn slw_dot_reads_eq_at_the_32_bit_shift_boundary() {
     assert_eq!(s.cr_field(0), 0b0010);
 }
 
-// [PPC-Book1 p:78 s:3.3.12.2] srw: shift amounts from 32 to 63 give a zero result.
+/// [PPC-Book1 p:78 s:3.3.12.2] srw: shift amounts from 32 to 63 give a zero result.
 #[test]
 fn srw_dot_reads_eq_at_the_32_bit_shift_boundary() {
     let mut s = PpuState::new();
@@ -277,7 +277,7 @@ fn srw_dot_reads_eq_at_the_32_bit_shift_boundary() {
     assert_eq!(s.cr_field(0), 0b0010);
 }
 
-// [PPC-Book1 p:77 s:3.3.12.2] slw reads the shift count from RB[58:63]; RS[0:31] never reaches RA.
+/// [PPC-Book1 p:77 s:3.3.12.2] slw reads the shift count from `RB[58:63]`; `RS[0:31]` never reaches RA.
 #[test]
 fn slw_dot_ignores_the_high_half_of_rs_and_still_reads_gt() {
     let mut s = PpuState::new();

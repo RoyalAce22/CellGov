@@ -21,7 +21,8 @@ pub trait Format {
 }
 
 /// The 32-bit format, single precision on the SPU.
-// [SPU-ISA p:195 s:9.1] single precision: 1 sign bit, 8 exponent bits biased by 127, 23 fraction bits.
+///
+/// [SPU-ISA p:195 s:9.1] single precision: 1 sign bit, 8 exponent bits biased by 127, 23 fraction bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Binary32;
 
@@ -31,7 +32,8 @@ impl Format for Binary32 {
 }
 
 /// The 64-bit format, double precision on the SPU.
-// [SPU-ISA p:197 s:9.2] double precision follows the IEEE 754 double format.
+///
+/// [SPU-ISA p:197 s:9.2] double precision follows the IEEE 754 double format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Binary64;
 

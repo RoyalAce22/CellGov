@@ -98,7 +98,8 @@ impl core::fmt::Display for ReservedLine {
 /// Committed atomic-reservation state, at most one entry per unit.
 /// A second `insert_or_replace` for the same unit drops the prior
 /// entry (a second reserve invalidates the first).
-// [PPC-Book2 p:10 s:1.7.3.1] "another lwarx/ldarx clears the first reservation".
+///
+/// [PPC-Book2 p:10 s:1.7.3.1] "another lwarx/ldarx clears the first reservation".
 #[derive(Debug, Clone)]
 pub struct ReservationTable {
     /// Walks unit ids in order, so `iter` is invariant under insertion
@@ -180,8 +181,9 @@ impl ReservationTable {
     /// emitter's entry was dropped before this call (commit-side
     /// `ConditionalStore` path) or the writer is not a unit
     /// (privileged / external snoop).
-    // [PPC-Book2 p:10 s:1.7.3.1] "some other processor executes a Store" -- own-unit stores do not clear.
-    // [CBE-Handbook p:589 s:20.3] MFC atomic unit clears reservation on cross-processor snoop of granule.
+    ///
+    /// [PPC-Book2 p:10 s:1.7.3.1] "some other processor executes a Store" -- own-unit stores do not clear.
+    /// [CBE-Handbook p:589 s:20.3] MFC atomic unit clears reservation on cross-processor snoop of granule.
     pub fn clear_covering(&mut self, addr: u64, len: u64, except: Option<UnitId>) -> usize {
         if self.entries.is_empty() || len == 0 {
             return 0;

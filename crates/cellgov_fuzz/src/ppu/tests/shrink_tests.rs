@@ -6,14 +6,15 @@ use super::*;
 
 /// `addi r3, r4, 5`: the D form with rt = 3 (bits 21 and 22), ra = 4 (bit
 /// 18) and si = 5 (bits 0 and 2). Each rt and si bit clears to the same kind.
-// [PPC-Book1 p:8 s:1.7.4] A D-form word is the six-bit primary opcode first,
-// then two five-bit register fields (RT or RS, then RA), then a sixteen-bit
-// immediate (SI, UI or D) in the last sixteen bits of the word.
-// [PPC-Book1 p:203 s:Appendix J] Primary opcode 14 is addi and 24 is ori;
-// both are D-form.
-// [PPC-Book1 p:51 s:3.3.8] addi with RA = 0 loads the sign-extended
-// immediate on its own, which the interpreter files under another kind, so
-// the ra bit is not a same-kind candidate.
+///
+/// [PPC-Book1 p:8 s:1.7.4] A D-form word is the six-bit primary opcode first,
+/// then two five-bit register fields (RT or RS, then RA), then a sixteen-bit
+/// immediate (SI, UI or D) in the last sixteen bits of the word.
+/// [PPC-Book1 p:203 s:Appendix J] Primary opcode 14 is addi and 24 is ori;
+/// both are D-form.
+/// [PPC-Book1 p:51 s:3.3.8] addi with RA = 0 loads the sign-extended
+/// immediate on its own, which the interpreter files under another kind, so
+/// the ra bit is not a same-kind candidate.
 const ADDI_R3_R4_FIVE: u32 = (14 << 26) | (3 << 21) | (4 << 16) | 5;
 const ORI_R5_R5_ONE: u32 = (24 << 26) | (5 << 21) | (5 << 16) | 1;
 

@@ -10,7 +10,8 @@ use super::outcome::{SpuFault, SpuStepOutcome};
 /// limit register selects. A guest cannot reach past that range,
 /// however it computes the address. The bound below covers a `ls`
 /// shorter than the limit, which only a test builds.
-// [SPU-ISA p:31 s:3. Memory-Load/Store Instructions] Every load/store address is first ANDed with the limit register, whose 256 KB value is 0x0003FFFF, and its low four bits are then dropped because only aligned quadwords move.
+///
+/// [SPU-ISA p:31 s:3. Memory-Load/Store Instructions] Every load/store address is first ANDed with the limit register, whose 256 KB value is 0x0003FFFF, and its low four bits are then dropped because only aligned quadwords move.
 fn ls_addr(state: &SpuState, raw: u32) -> Result<usize, SpuFault> {
     let a = state.quad_addr(raw) as usize;
     if a + 16 > state.ls.len() {
@@ -71,13 +72,13 @@ pub(super) fn store_quad(state: &mut SpuState, rt: u8, lsa: Lsa) -> SpuStepOutco
     }
 }
 
-// [SPU-ISA p:139 s:6. Shift and Rotate Instructions] The rotate-and-mask immediates carry the two's complement of the right-shift count: count = (0 - sign_extend(I7)) mod 64.
+/// [SPU-ISA p:139 s:6. Shift and Rotate Instructions] The rotate-and-mask immediates carry the two's complement of the right-shift count: count = (0 - sign_extend(I7)) mod 64.
 pub(super) fn rotate_mask_count(imm: u8) -> u32 {
     let signed = ((imm as u32) << 25) as i32 >> 25;
     negated_count(signed as u32, 0x3F)
 }
 
-// [SPU-ISA p:138 s:6. Shift and Rotate Instructions] A rotate-and-mask count is the two's complement of its operand, reduced by the mask its form's RTL gives.
+/// [SPU-ISA p:138 s:6. Shift and Rotate Instructions] A rotate-and-mask count is the two's complement of its operand, reduced by the mask its form's RTL gives.
 pub(super) fn negated_count(value: u32, mask: u32) -> u32 {
     0u32.wrapping_sub(value) & mask
 }
@@ -87,7 +88,8 @@ pub(super) fn negated_count(value: u32, mask: u32) -> u32 {
 /// Identity bytes fill `0x10..=0x1F`. The `width`-byte slot at `addr`
 /// holds selectors for the rightmost `width` bytes of the preferred
 /// slot, except a doubleword, which uses the leftmost 8.
-// [SPU-ISA p:265 s:B. Details of the Generate Controls Instructions] The insertion mask shape per width.
+///
+/// [SPU-ISA p:265 s:B. Details of the Generate Controls Instructions] The insertion mask shape per width.
 pub(super) fn insertion_controls(addr: u32, width: usize) -> [u8; 16] {
     let pos = (addr as usize) & (0xF & !(width - 1));
     let first = if width == 8 { 0 } else { 4 - width as u8 };

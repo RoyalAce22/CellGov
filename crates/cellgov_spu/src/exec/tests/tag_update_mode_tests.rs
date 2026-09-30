@@ -112,7 +112,7 @@ fn a_new_request_replaces_an_unread_result() {
     assert!(matches!(read(&mut s), SpuStepOutcome::Yield { .. }));
 }
 
-// [CBEA p:128 s:9.3.5] an immediate request cancels a waiting conditional request.
+/// [CBEA p:128 s:9.3.5] an immediate request cancels a waiting conditional request.
 #[test]
 fn an_immediate_request_cancels_a_waiting_conditional_one() {
     // Group 1 is enabled and still queued.
@@ -199,7 +199,7 @@ fn a_waiting_request_settles_at_step_entry_from_the_outstanding_groups() {
     assert_eq!(step_entry(TagUpdateCondition::All, 0b110, 0), Some(0b110));
 }
 
-// [CBEA p:126 s:9.3.4] MFC_RdTagMask returns the current query mask, and its count is always 1.
+/// [CBEA p:126 s:9.3.4] MFC_RdTagMask returns the current query mask, and its count is always 1.
 #[test]
 fn the_query_mask_reads_back_and_counts_one() {
     let mut s = state(0x8000_0011, 0);

@@ -61,7 +61,8 @@ pub fn cases() -> Vec<InstructionCase> {
 }
 
 /// `stvebx`: byte at lane (EA & 0xF) of VS -> MEM(EA, 1).
-// [AltiVec-PEM p:6-29 s:6.2] stvebx VS, RA, RB.
+///
+/// [AltiVec-PEM p:6-29 s:6.2] stvebx VS, RA, RB.
 fn stvebx_cases() -> Vec<InstructionCase> {
     let raw = xform(/*vs*/ 7, /*ra*/ 4, /*rb*/ 5, 135);
     let mut cases = Vec::new();
@@ -97,7 +98,8 @@ fn stvebx_cases() -> Vec<InstructionCase> {
 }
 
 /// `stvehx`: halfword at lane (EA & 0xE) of VS -> MEM(EA & ~1, 2).
-// [AltiVec-PEM p:6-30 s:6.2] stvehx VS, RA, RB.
+///
+/// [AltiVec-PEM p:6-30 s:6.2] stvehx VS, RA, RB.
 fn stvehx_cases() -> Vec<InstructionCase> {
     let raw = xform(8, 4, 5, 167);
     let mut cases = Vec::new();
@@ -134,7 +136,8 @@ fn stvehx_cases() -> Vec<InstructionCase> {
 }
 
 /// `stvewx`: word at lane (EA & 0xC) of VS -> MEM(EA & ~3, 4).
-// [AltiVec-PEM p:6-31 s:6.2] stvewx VS, RA, RB.
+///
+/// [AltiVec-PEM p:6-31 s:6.2] stvewx VS, RA, RB.
 fn stvewx_cases() -> Vec<InstructionCase> {
     let raw = xform(9, 4, 5, 199);
     let mut cases = Vec::new();
@@ -171,7 +174,8 @@ fn stvewx_cases() -> Vec<InstructionCase> {
 }
 
 /// `stvxl`: identical to stvx.
-// [AltiVec-PEM p:6-33 s:6.2] stvxl VS, RA, RB.
+///
+/// [AltiVec-PEM p:6-33 s:6.2] stvxl VS, RA, RB.
 fn stvxl_cases() -> Vec<InstructionCase> {
     let raw = xform(10, 4, 5, 487);
     let vs_pattern: u128 = 0xFFEE_DDCC_BBAA_9988_7766_5544_3322_1100;

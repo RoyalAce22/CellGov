@@ -62,7 +62,8 @@ pub fn mul(a: Exact, b: Exact) -> Option<Exact> {
 /// operand `unpack` decodes and every product `mul` forms is neither. An exact zero sum
 /// is +0 unless both operands are negative; a caller that rounds toward
 /// negative infinity supplies its own -0 for `x - x`.
-// [SPU-ISA p:199 s:9.2.2] underflow is tininess together with an inexact result, so the bits below the kept precision must survive as a sticky bit.
+///
+/// [SPU-ISA p:199 s:9.2.2] underflow is tininess together with an inexact result, so the bits below the kept precision must survive as a sticky bit.
 pub fn add(a: Exact, b: Exact) -> Option<Exact> {
     if !operand(a) || !operand(b) {
         return None;

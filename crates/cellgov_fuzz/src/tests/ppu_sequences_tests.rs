@@ -9,7 +9,7 @@ fn kind_of(word: u32) -> PpuFuzzKind {
         .kind
 }
 
-// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] sc SC-form: OPCD 17, LEV at instruction bits 20:26, bit 30 set.
+/// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] sc SC-form: OPCD 17, LEV at instruction bits 20:26, bit 30 set.
 fn sc(lev: u32) -> u32 {
     (17 << 26) | (lev << 5) | 2
 }

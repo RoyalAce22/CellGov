@@ -8,9 +8,9 @@ use cellgov_ps3_abi::hw::spu_fpscr::{fpscr_field, FPSCR_DEFINED, FPSCR_RN_FIRST}
 use crate::exec::{execute, SpuStepOutcome};
 use crate::state::SpuState;
 
-// [SPU-ISA p:235 s:9] fscrwr: RR opcode 0x3BA, RA the source.
-// [SPU-ISA p:236 s:9] fscrrd: RR opcode 0x398, RT the destination.
+/// [SPU-ISA p:235 s:9] fscrwr: RR opcode 0x3BA, RA the source.
 const FSCRWR: u32 = 0x3BA << 21;
+/// [SPU-ISA p:236 s:9] fscrrd: RR opcode 0x398, RT the destination.
 const FSCRRD: u32 = 0x398 << 21;
 
 fn step(s: &mut SpuState, raw: u32) {
@@ -23,8 +23,8 @@ fn a_new_context_starts_with_a_zero_fpscr() {
     assert_eq!(SpuState::new().fpscr, 0);
 }
 
-// [SPU-ISA p:235 s:9] the unused bits fscrwr writes are undefined.
-// [SPU-ISA p:236 s:9] fscrrd reads every unused bit as zero.
+/// [SPU-ISA p:235 s:9] the unused bits fscrwr writes are undefined.
+/// [SPU-ISA p:236 s:9] fscrrd reads every unused bit as zero.
 #[test]
 fn writing_all_ones_reads_back_exactly_the_defined_bits() {
     let mut s = SpuState::new();
@@ -37,7 +37,7 @@ fn writing_all_ones_reads_back_exactly_the_defined_bits() {
     assert_eq!(u128::from_be_bytes(s.regs[3]), FPSCR_DEFINED);
 }
 
-// [SPU-ISA p:200 s:9.3] 00 nearest even, 01 toward zero, 10 toward +infinity, 11 toward -infinity.
+/// [SPU-ISA p:200 s:9.3] 00 nearest even, 01 toward zero, 10 toward +infinity, 11 toward -infinity.
 #[test]
 fn the_rounding_fields_decode_all_four_modes_for_both_slices() {
     let modes = [
@@ -64,7 +64,7 @@ fn only<const N: usize>(slice: usize, set: Flags) -> [Flags; N] {
     flags
 }
 
-// [SPU-ISA p:200 s:9.3] and [SPU-ISA p:201 s:9.3]: each slice has its own flag bits.
+/// [SPU-ISA p:200 s:9.3] and [SPU-ISA p:201 s:9.3]: each slice has its own flag bits.
 #[test]
 fn accumulating_one_slice_leaves_every_other_bit_unchanged() {
     let all = Flags {
@@ -118,7 +118,7 @@ fn accumulating_one_slice_leaves_every_other_bit_unchanged() {
     assert_eq!(s.fpscr, fpscr_field(55, 1));
 }
 
-// [SPU-ISA p:200 s:9.3] every status bit stays set until fscrwr clears it.
+/// [SPU-ISA p:200 s:9.3] every status bit stays set until fscrwr clears it.
 #[test]
 fn flags_stay_set_across_an_operation_that_raises_none() {
     let mut s = SpuState::new();

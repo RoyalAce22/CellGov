@@ -322,7 +322,8 @@ impl Runtime {
     /// The order of this step and a send or receive on that mailbox
     /// decides the count the unit saw, though the step emits no effect
     /// naming the mailbox.
-    // [CBEA p:135 s:9.5.3] the SPU_RdInMbox count is the number of messages in the inbound mailbox.
+    ///
+    /// [CBEA p:135 s:9.5.3] the SPU_RdInMbox count is the number of messages in the inbound mailbox.
     pub fn last_mailbox_read(&self) -> Option<cellgov_sync::MailboxId> {
         self.last_mailbox_read
     }

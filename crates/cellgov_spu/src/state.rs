@@ -14,7 +14,8 @@ pub use cellgov_ps3_abi::hw::spu::{SPU_LSLR_FULL, SPU_LS_SIZE, SPU_REG_COUNT};
 #[derive(Clone)]
 pub struct SpuState {
     /// 128 x 128-bit GPRs; each register is 16 bytes, byte 0 is MSB.
-    // [SPU-ISA p:28 s:2.2] All GPRs are 128 bits wide; leftmost word (bytes 0-3) is preferred slot.
+    ///
+    /// [SPU-ISA p:28 s:2.2] All GPRs are 128 bits wide; leftmost word (bytes 0-3) is preferred slot.
     pub regs: [[u8; 16]; SPU_REG_COUNT],
     /// 256 KB local store.
     pub ls: Vec<u8>,
@@ -27,12 +28,14 @@ pub struct SpuState {
     /// image can ask for a smaller value in its environment note. The
     /// loader reads only the `PT_LOAD` segments, and no LV2 SPU
     /// interface carries a size.
-    // [SPU-ISA p:31 s:3] every effective address is ANDed with the LSLR before use, and the LSLR must not change while the SPU runs.
-    // [CBEA p:235 s:16.2] privileged software sets SPU_LSLR; an access past it occurs at the wrapped address.
-    // [CBE-Handbook p:395 s:14.3 Table 14-4] the spu_env note's ls_size is the SPU_LSLR setting an image needs, and zero asks for the whole local store.
+    ///
+    /// [SPU-ISA p:31 s:3] every effective address is ANDed with the LSLR before use, and the LSLR must not change while the SPU runs.
+    /// [CBEA p:235 s:16.2] privileged software sets SPU_LSLR; an access past it occurs at the wrapped address.
+    /// [CBE-Handbook p:395 s:14.3 Table 14-4] the spu_env note's ls_size is the SPU_LSLR setting an image needs, and zero asks for the whole local store.
     pub lslr: u32,
     /// Signal-notification registers 1 and 2, in that order.
-    // [CBEA p:101 s:8.7] each SPU has two signal-notification facilities, each one register and one channel.
+    ///
+    /// [CBEA p:101 s:8.7] each SPU has two signal-notification facilities, each one register and one channel.
     pub signals: [SignalNotifyRegister; 2],
     /// MFC/channel state for DMA, mailbox, and tag operations.
     pub channels: ChannelState,
@@ -40,15 +43,18 @@ pub struct SpuState {
     /// when this is `Some(line)` *and* the committed
     /// [`cellgov_sync::ReservationTable`] entry (queried via
     /// `ExecutionContext::reservation_held`) still holds the line.
-    // [CBEA p:91 s:8.4.3] Reservation granule is the 128-byte lock line.
+    ///
+    /// [CBEA p:91 s:8.4.3] Reservation granule is the 128-byte lock line.
     pub reservation: Option<ReservedLine>,
     /// Why the SPU stopped, or `None` while it can run. A restart clears
     /// it.
-    // [CBEA p:94 s:8.5.2] the C, I, S, H and P status bits clear when the SPU restarts.
+    ///
+    /// [CBEA p:94 s:8.5.2] the C, I, S, H and P status bits clear when the SPU restarts.
     pub stop: Option<SpuStop>,
     /// Floating-point status and control register, bit 0 the most
     /// significant; only the defined bits are ever set.
-    // [SPU-ISA p:200 s:9.3] the FPSCR holds the double-precision rounding modes and the sticky exception flags.
+    ///
+    /// [SPU-ISA p:200 s:9.3] the FPSCR holds the double-precision rounding modes and the sticky exception flags.
     pub fpscr: u128,
 }
 
@@ -173,7 +179,8 @@ impl SpuObservableSnapshot {
 }
 
 /// How a signal-notification register takes a write.
-// [CBEA p:239 s:16.4] each register either overwrites its contents or ORs the data written into them.
+///
+/// [CBEA p:239 s:16.4] each register either overwrites its contents or ORs the data written into them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignalNotifyMode {
     /// A write replaces the contents.
@@ -187,7 +194,8 @@ pub enum SignalNotifyMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SignalNotifyRegister {
     /// How a write changes `word`.
-    // [CBEA p:239 s:16.4] SPU_Cfg sets each signal-notification register to overwrite or logical OR.
+    ///
+    /// [CBEA p:239 s:16.4] SPU_Cfg sets each signal-notification register to overwrite or logical OR.
     pub mode: SignalNotifyMode,
     /// The signal-control word the channel reads.
     pub word: u32,
@@ -197,8 +205,9 @@ pub struct SignalNotifyRegister {
 
 impl SignalNotifyRegister {
     /// A register at the power-on reset state.
-    // [CBEA p:239 s:16.4] each register starts in overwrite mode, the power-on reset value.
-    // [CBEA p:237 s:16.3.2], [CBEA p:238 s:16.3.3] channels x'3' and x'4' start with data 0 and count 0.
+    ///
+    /// [CBEA p:239 s:16.4] each register starts in overwrite mode, the power-on reset value.
+    /// [CBEA p:237 s:16.3.2], [CBEA p:238 s:16.3.3] channels x'3' and x'4' start with data 0 and count 0.
     pub const fn new() -> Self {
         Self {
             mode: SignalNotifyMode::Overwrite,
@@ -208,7 +217,8 @@ impl SignalNotifyRegister {
     }
 
     /// Take a write from another processor.
-    // [CBEA p:101 s:8.7] overwrite mode sets the channel to the data and logical OR mode ORs the data in; both set the count to 1.
+    ///
+    /// [CBEA p:101 s:8.7] overwrite mode sets the channel to the data and logical OR mode ORs the data in; both set the count to 1.
     pub fn write(&mut self, value: u32) {
         self.word = match self.mode {
             SignalNotifyMode::Overwrite => value,
@@ -254,7 +264,8 @@ impl SpuState {
     /// - every branch target and link value
     ///
     /// The MFC local-store address does not.
-    // [SPU-ISA p:31 s:3] every effective address is ANDed with the LSLR, so a reference past the effective size wraps.
+    ///
+    /// [SPU-ISA p:31 s:3] every effective address is ANDed with the LSLR, so a reference past the effective size wraps.
     #[inline]
     pub fn ls_wrap(&self, addr: u32) -> u32 {
         addr & self.lslr
@@ -262,7 +273,8 @@ impl SpuState {
 
     /// The instruction address `addr` names: wrapped, with the
     /// rightmost two bits dropped.
-    // [SPU-ISA p:178 s:7] the branch target is RA & LSLR & 0xFFFFFFFC.
+    ///
+    /// [SPU-ISA p:178 s:7] the branch target is RA & LSLR & 0xFFFFFFFC.
     #[inline]
     pub fn insn_addr(&self, addr: u32) -> u32 {
         self.ls_wrap(addr) & !3
@@ -270,7 +282,8 @@ impl SpuState {
 
     /// The quadword address `addr` names: wrapped, with the rightmost
     /// four bits dropped.
-    // [SPU-ISA p:32 s:3] the load address is the sum & LSLR & 0xFFFFFFF0.
+    ///
+    /// [SPU-ISA p:32 s:3] the load address is the sum & LSLR & 0xFFFFFFF0.
     #[inline]
     pub fn quad_addr(&self, addr: u32) -> u32 {
         self.ls_wrap(addr) & !0xF
@@ -297,7 +310,8 @@ impl SpuState {
 
     /// Write a 32-bit channel read result: `val` in the preferred slot,
     /// zero in the other three slots.
-    // [SPU-ISA p:248 s:11] a 32-bit channel value occupies the preferred slot and the other slots return zeros.
+    ///
+    /// [SPU-ISA p:248 s:11] a 32-bit channel value occupies the preferred slot and the other slots return zeros.
     pub fn set_reg_channel_word(&mut self, r: u8, val: u32) {
         self.regs[r as usize] = [0u8; 16];
         self.set_reg_word_slot(r, 0, val);
@@ -343,7 +357,8 @@ impl SpuState {
     /// address the SPU resumes at: what a caller of
     /// [`crate::exec::execute`] does with a
     /// [`crate::exec::SpuStepOutcome::Stop`].
-    // [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR.
+    ///
+    /// [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR.
     pub fn record_stop(&mut self, kind: crate::stop::SpuStopKind, signal: u16) {
         let stop = SpuStop::new(kind, signal, self.pc, self.lslr);
         self.pc = stop.npc;
@@ -351,7 +366,8 @@ impl SpuState {
     }
 
     /// Step PC to the next sequential instruction.
-    // [SPU-ISA p:31 s:3] Every local-storage address is ANDed with the LSLR, so the word after the last one is word 0.
+    ///
+    /// [SPU-ISA p:31 s:3] Every local-storage address is ANDed with the LSLR, so the word after the last one is word 0.
     pub fn advance_pc(&mut self) {
         self.pc = self.insn_addr(self.pc.wrapping_add(4));
     }
@@ -367,59 +383,73 @@ impl Default for SpuState {
 #[derive(Clone)]
 pub struct ChannelState {
     /// MFC_LSA: local store address for next DMA command.
-    // [CBEA p:110 s:9] MFC_LSA channel x'10': local storage address command parameter.
+    ///
+    /// [CBEA p:110 s:9] MFC_LSA channel x'10': local storage address command parameter.
     pub mfc_lsa: u32,
     /// MFC_EAH: effective address high word.
-    // [CBEA p:110 s:9] MFC_EAH channel x'11': high-order EA command parameter.
+    ///
+    /// [CBEA p:110 s:9] MFC_EAH channel x'11': high-order EA command parameter.
     pub mfc_eah: u32,
     /// MFC_EAL: effective address low word.
-    // [CBEA p:111 s:9] MFC_EAL channel x'12': low-order EA / list address command parameter.
+    ///
+    /// [CBEA p:111 s:9] MFC_EAL channel x'12': low-order EA / list address command parameter.
     pub mfc_eal: u32,
     /// MFC_Size: transfer size for next DMA command.
-    // [CBEA p:111 s:9] MFC_Size channel x'13': transfer size / list size command parameter.
+    ///
+    /// [CBEA p:111 s:9] MFC_Size channel x'13': transfer size / list size command parameter.
     pub mfc_size: u32,
     /// MFC_TagID: tag for next DMA command.
-    // [CBEA p:111 s:9] MFC_TagID channel x'14': tag identifier command parameter.
+    ///
+    /// [CBEA p:111 s:9] MFC_TagID channel x'14': tag identifier command parameter.
     pub mfc_tag_id: u32,
     /// Tag mask written by mfc_write_tag_mask.
-    // [CBEA p:111 s:9] MFC_WrTagMask channel x'16': tag-group query mask.
+    ///
+    /// [CBEA p:111 s:9] MFC_WrTagMask channel x'16': tag-group query mask.
     pub tag_mask: u32,
     /// Tag groups with no outstanding transfer, one bit per group,
     /// rebuilt at the start of each `run_until_yield`. A new context
     /// holds 0 until its first step.
-    // [CBEA p:111 s:9] MFC_RdTagStat channel x'18': tag-group status bits.
+    ///
+    /// [CBEA p:111 s:9] MFC_RdTagStat channel x'18': tag-group status bits.
     pub tag_status: u32,
     /// Atomic operation status set after getllar/putllc.
-    // [CBEA p:111 s:9] MFC_RdAtomicStat channel x'1B': atomic-command completion status.
+    ///
+    /// [CBEA p:111 s:9] MFC_RdAtomicStat channel x'1B': atomic-command completion status.
     pub atomic_status: u32,
     /// Target register for a pending rdch SPU_RdInMbox yield; consumed
     /// by `run_until_yield` on message delivery.
-    // [CBEA p:111 s:9] SPU_RdInMbox channel x'1D': PPE-to-SPU mailbox read.
+    ///
+    /// [CBEA p:111 s:9] SPU_RdInMbox channel x'1D': PPE-to-SPU mailbox read.
     pub pending_mbox_rt: Option<u8>,
     /// Pending DMA Get (ea, lsa, size, tag); the next `run_until_yield`
     /// copies it at its start from the committed memory snapshot. Its
     /// tag group reads outstanding in `tag_status` until the copy lands.
     pub pending_get: Option<(u64, u32, u32, MfcTagId)>,
     /// A waiting conditional tag-status update request.
-    // [CBEA p:127 s:9.3.5] an update request updates the status immediately, when any enabled group completes, or when all enabled groups complete.
+    ///
+    /// [CBEA p:127 s:9.3.5] an update request updates the status immediately, when any enabled group completes, or when all enabled groups complete.
     pub tag_update: Option<TagUpdateCondition>,
     /// The `MFC_RdTagStat` data a met update request latched.
     ///
     /// `Some` is a channel count of 1. A read takes the data.
-    // [CBEA p:128 s:9.3.6] the channel holds the status of the groups enabled at the time of the last update; its count turns 1 when that status is available.
+    ///
+    /// [CBEA p:128 s:9.3.6] the channel holds the status of the groups enabled at the time of the last update; its count turns 1 when that status is available.
     pub tag_status_read: Option<u32>,
     /// An atomic command completed and `MFC_RdAtomicStat` has not been
     /// read since, so the channel counts 1.
-    // [CBEA p:131 s:9.4] the MFC_RdAtomicStat count starts at 0 and is 1 once an immediate atomic command completes.
+    ///
+    /// [CBEA p:131 s:9.4] the MFC_RdAtomicStat count starts at 0 and is 1 once an immediate atomic command completes.
     pub atomic_status_ready: bool,
     /// Messages in the unit's inbound mailbox at the start of the step,
     /// which the runtime reports: the `SPU_RdInMbox` count.
-    // [CBEA p:135 s:9.5.3] the SPU_RdInMbox count is the number of messages in the inbound mailbox and starts at 0.
+    ///
+    /// [CBEA p:135 s:9.5.3] the SPU_RdInMbox count is the number of messages in the inbound mailbox and starts at 0.
     pub in_mbox_count: u32,
     /// The message the SPU wrote to `SPU_WrOutMbox` and no processor
     /// has read. The mailbox holds one.
-    // [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox returns the messages in the order the SPU wrote them.
-    // [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_WrOutMbox has 1 maximum entry.
+    ///
+    /// [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox returns the messages in the order the SPU wrote them.
+    /// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_WrOutMbox has 1 maximum entry.
     pub out_mbox: Option<u32>,
 }
 
@@ -428,8 +458,9 @@ impl ChannelState {
     ///
     /// Every channel count follows from these values; `rchcnt` on a
     /// fresh SPU reads the counts the architecture requires.
-    // [CBEA p:237 s:16.3.2] the data of channels x'0', x'1', x'3', x'4', x'18', x'19', x'1B' and x'1D' is zero before a new context starts.
-    // [CBEA p:238 s:16.3.3] the counts of x'0', x'3', x'4', x'18', x'19', x'1B' and x'1D' start at 0; x'17', x'1C' and x'1E' at 1; MFC_Cmd at the queue depth.
+    ///
+    /// [CBEA p:237 s:16.3.2] the data of channels x'0', x'1', x'3', x'4', x'18', x'19', x'1B' and x'1D' is zero before a new context starts.
+    /// [CBEA p:238 s:16.3.3] the counts of x'0', x'3', x'4', x'18', x'19', x'1B' and x'1D' start at 0; x'17', x'1C' and x'1E' at 1; MFC_Cmd at the queue depth.
     pub fn new() -> Self {
         Self {
             mfc_lsa: 0,
@@ -466,7 +497,8 @@ impl ChannelState {
     /// A new request replaces an earlier one and its unread result.
     /// The caller refuses a reserved value first. A reserved value that
     /// reaches this function makes no request.
-    // [CBE-Handbook p:459 s:17.10] TS 00 updates immediately, 01 when any enabled group completes, 10 when all do; 11 is reserved.
+    ///
+    /// [CBE-Handbook p:459 s:17.10] TS 00 updates immediately, 01 when any enabled group completes, 10 when all do; 11 is reserved.
     pub fn request_tag_update(&mut self, value: u32) {
         let condition = match value & 3 {
             MFC_TAG_UPDATE_IMMEDIATE => None,
@@ -491,7 +523,8 @@ impl ChannelState {
     ///
     /// With an empty mask, "all enabled groups" holds at once and "any
     /// enabled group" never does.
-    // [CBEA p:128 s:9.3.6] a set bit means the group has no outstanding operations and the query mask enables it.
+    ///
+    /// [CBEA p:128 s:9.3.6] a set bit means the group has no outstanding operations and the query mask enables it.
     pub fn settle_tag_update(&mut self) {
         let masked = self.tag_status & self.tag_mask;
         let met = match self.tag_update {

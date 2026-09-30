@@ -15,8 +15,9 @@ pub const EVALUATION_SCHEMA_VERSION: u32 = 1;
 /// Version of this crate, for a caller that records the library that ran.
 pub const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-// [Klees2018 p:2126 s:3 Overview] The paper pins each benchmark to one machine across every fuzzer it compares, and records the platform and the trials run in parallel. This record keeps the same facts, so a comparison can tell a same-host pair from a cross-host one.
 /// The host that ran the trials, as the caller describes it.
+///
+/// [Klees2018 p:2126 s:3 Overview] The paper pins each benchmark to one machine across every fuzzer it compares, and records the platform and the trials run in parallel. This record keeps the same facts, so a comparison can tell a same-host pair from a cross-host one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvaluationEnvironment {
@@ -60,13 +61,15 @@ pub enum Metric {
     Retained,
     /// Findings, the inapplicability kinds excluded.
     Findings,
-    // [Klees2018 p:2131 s:7 Performance Measures] Many inputs can trigger one bug, so a count of failing inputs overstates the bugs found. A distinct count under a heuristic key is a second sample beside the raw count.
     /// Distinct fingerprints among retained findings.
+    ///
+    /// [Klees2018 p:2131 s:7 Performance Measures] Many inputs can trigger one bug, so a count of failing inputs overstates the bugs found. A distinct count under a heuristic key is a second sample beside the raw count.
     UniqueFingerprints,
     /// Unsupported and undefined cases.
     InvalidCases,
-    // [Klees2018 p:2131 s:6 Timeouts] A measure that credits an early finding complements the end-of-run count. The offset to the first finding is that measure, and a lower value is better.
     /// Cases before the first finding; only trials with a finding sample it.
+    ///
+    /// [Klees2018 p:2131 s:6 Timeouts] A measure that credits an early finding complements the end-of-run count. The offset to the first finding is that measure, and a lower value is better.
     FirstFindingOffset,
     /// Candidate evaluations the reducer spent; only reducing trials sample it.
     ReductionEvaluations,

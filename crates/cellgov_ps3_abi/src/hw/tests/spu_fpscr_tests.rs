@@ -2,8 +2,8 @@
 
 use super::*;
 
-// [SPU-ISA p:200 s:9.3] and [SPU-ISA p:201 s:9.3]: 4 control bits, 4 x 3
-// single-precision flags, 2 x 6 double-precision flags and 4 DBZ flags.
+/// [SPU-ISA p:200 s:9.3] and [SPU-ISA p:201 s:9.3]: 4 control bits, 4 x 3
+/// single-precision flags, 2 x 6 double-precision flags and 4 DBZ flags.
 #[test]
 fn the_defined_mask_is_the_listed_fields() {
     assert_eq!(FPSCR_DEFINED.count_ones(), 4 + 12 + 12 + 4);

@@ -23,7 +23,7 @@ fn retire_without_oe_leaves_ov_and_so_untouched() {
     assert!(s.xer_so());
 }
 
-// [PPC-Book1 p:32 s:3.2.2] OE=1 with no overflow writes OV to 0; SO stays set until mtspr or mcrxr clears it.
+/// [PPC-Book1 p:32 s:3.2.2] OE=1 with no overflow writes OV to 0; SO stays set until mtspr or mcrxr clears it.
 #[test]
 fn retire_with_oe_false_clears_ov_but_keeps_so_sticky() {
     let mut s = PpuState::new();
@@ -41,7 +41,7 @@ fn retire_without_rc_leaves_cr0_untouched() {
     assert_eq!(s.cr_field(0), 0b0100);
 }
 
-// [PPC-Book1 p:18 s:2.3.1] CR0[0:2] is LT / GT / EQ from a signed compare of the 64-bit result with zero; CR0[3] copies XER[SO].
+/// [PPC-Book1 p:18 s:2.3.1] `CR0[0:2]` is LT / GT / EQ from a signed compare of the 64-bit result with zero; `CR0[3]` copies `XER[SO]`.
 #[test]
 fn retire_with_rc_records_lt_gt_eq_from_the_signed_result() {
     let mut s = PpuState::new();

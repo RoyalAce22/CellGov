@@ -15,23 +15,27 @@
 //!   See [PPC-Book1 p:25 s:2.4 Branch Conditional to Link Register].
 
 /// Opcode field of `sc` (bits 0..6 from MSB).
-// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] sc primary opcode = 17, SC-form.
+///
+/// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] sc primary opcode = 17, SC-form.
 const SC_OPCODE: u32 = 17 << 26;
 
 /// LEV=0 (user-mode syscall). The LEV field occupies instruction
 /// bits 20:26 (7 bits, MSB-numbered); bits 20:25 are reserved,
 /// leaving bit 26 as the only active LEV bit. Bit 26 from MSB is
 /// bit 5 from LSB in the 32-bit word.
-// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] bits 20:25 reserved; LEV occupies bit 26 (in app programs LEV=0).
+///
+/// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] bits 20:25 reserved; LEV occupies bit 26 (in app programs LEV=0).
 const SC_LEV_USER: u32 = 0 << 5;
 
 /// Mandatory `1` at bit 30 from MSB (bit 1 from LSB).
-// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] SC-form layout pins a 1 at bit 30.
+///
+/// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] SC-form layout pins a 1 at bit 30.
 const SC_BIT_30_MANDATORY: u32 = 1 << 1;
 
 /// Highest `lis` SIMM input before sign-extension contaminates the
 /// upper 32 bits of the destination GPR.
-// [PPC-Book1 p:51 s:3.3 Add Immediate Shifted] addis result is EXTS(SI||0x0000); SI bit 0 set sign-extends through the upper 32 bits in 64-bit mode.
+///
+/// [PPC-Book1 p:51 s:3.3 Add Immediate Shifted] addis result is EXTS(SI||0x0000); SI bit 0 set sign-extends through the upper 32 bits in 64-bit mode.
 const LIS_SIGN_SAFE_LIMIT: u32 = 0x8000_0000;
 
 /// PPC64 instruction bytes for `lis r11, hi; ori r11, r11, lo; sc 0`

@@ -12,7 +12,8 @@ use super::types::{
 const REFERENCE_DATA_BASE: u64 = 0x1000_0000;
 
 /// Parses and validates a repository-data artifact.
-// [Jiang2022 p:4 s:3] Cases come from the machine-readable specification, and a separate engine compares them on real devices and emulators.
+///
+/// [Jiang2022 p:4 s:3] Cases come from the machine-readable specification, and a separate engine compares them on real devices and emulators.
 pub fn parse_reference_json(json: &str) -> Result<PpuReferenceArtifact, PpuReferenceError> {
     let artifact: PpuReferenceArtifact = serde_json::from_str(json)?;
     artifact.validate()?;

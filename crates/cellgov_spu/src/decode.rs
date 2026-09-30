@@ -1098,7 +1098,7 @@ fn word_offset_9(roh: u32, rol: u32) -> i16 {
     (((roh << 7 | rol) as i16) << 7) >> 7
 }
 
-// [SPU-ISA p:32 s:3 Lqd] RI10 imm10 is sign-extended before address compute.
+/// [SPU-ISA p:32 s:3 Lqd] RI10 imm10 is sign-extended before address compute.
 fn sign_extend_10(val: u16) -> i16 {
     if val & 0x200 != 0 {
         (val | 0xFC00) as i16

@@ -107,14 +107,16 @@ pub fn cases() -> Vec<InstructionCase> {
 const VS_PATTERN: u128 = 0x0011_2233_4455_6677_8899_AABB_CCDD_EEFF;
 
 /// `stvlx`: write the high `16 - m` bytes of VS starting at EA.
-// [CBE-Handbook p:744 s:A.3.3] stvlx VS, RA, RB.
+///
+/// [CBE-Handbook p:744 s:A.3.3] stvlx VS, RA, RB.
 fn stvlx_cases() -> Vec<InstructionCase> {
     let raw = xform(VS_IDX_STVLX, RA_IDX, RB_IDX, XO_STVLX);
     stvl_cases_for_xo(raw, "stvlx", VS_PATTERN, VS_IDX_STVLX as usize)
 }
 
 /// `stvrx`: write the low `m` bytes of VS at the aligned line below EA.
-// [CBE-Handbook p:744 s:A.3.3] stvrx VS, RA, RB.
+///
+/// [CBE-Handbook p:744 s:A.3.3] stvrx VS, RA, RB.
 fn stvrx_cases() -> Vec<InstructionCase> {
     let raw = xform(VS_IDX_STVRX, RA_IDX, RB_IDX, XO_STVRX);
     stvr_cases_for_xo(raw, "stvrx", VS_PATTERN, VS_IDX_STVRX as usize)

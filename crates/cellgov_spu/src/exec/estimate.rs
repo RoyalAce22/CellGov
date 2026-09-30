@@ -76,7 +76,8 @@ const FRSQEST_ODD_EXPONENT: [(u16, u16); 1 << FRSQEST_INDEX_BITS] = [
 
 /// `frsqest` entries for an even biased exponent (an odd power of two):
 /// 2/sqrt(2m) over each segment of m.
-// [SPU-ISA p:217 s:9] with an exponent-0 input, y2 is 0x7fffffff exactly up to fraction 0x000ff53c; entry 1 is the one line near its segment's minimax line that does so.
+///
+/// [SPU-ISA p:217 s:9] with an exponent-0 input, y2 is 0x7fffffff exactly up to fraction 0x000ff53c; entry 1 is the one line near its segment's minimax line that does so.
 const FRSQEST_EVEN_EXPONENT: [(u16, u16); 1 << FRSQEST_INDEX_BITS] = [
     (3391, 346),
     (3046, 317),
@@ -101,7 +102,7 @@ fn index(x: u32, bits: u32) -> usize {
     (x >> (23 - bits) & ((1 << bits) - 1)) as usize
 }
 
-// [SPU-ISA p:215 s:9] S in bit 0, the biased exponent in bits 1:8, BaseFraction in 9:21 and StepFraction in 22:31.
+/// [SPU-ISA p:215 s:9] S in bit 0, the biased exponent in bits 1:8, BaseFraction in 9:21 and StepFraction in 22:31.
 fn pack(negative: bool, exponent: u32, (base, step): (u16, u16)) -> u32 {
     u32::from(negative) << 31 | exponent << 23 | u32::from(base) << 10 | u32::from(step)
 }
@@ -112,7 +113,8 @@ fn exponent(x: u32) -> u32 {
 }
 
 /// The `frest` result for one slot.
-// [SPU-ISA p:215 s:9] 1/0 gives 0x7FFFFFFF after the sequence, so a zero exponent maps to 255; [SPU-ISA p:216 s:9] every |x| >= 2^126 underflows, so exponents from 253 up map to 0.
+///
+/// [SPU-ISA p:215 s:9] 1/0 gives 0x7FFFFFFF after the sequence, so a zero exponent maps to 255; [SPU-ISA p:216 s:9] every |x| >= 2^126 underflows, so exponents from 253 up map to 0.
 pub(super) fn frest(x: u32) -> u32 {
     let e = exponent(x);
     // 1/(m x 2^(e-127)) = (2/m) x 2^((253-e)-127).
@@ -129,7 +131,8 @@ pub(super) fn frest(x: u32) -> u32 {
 }
 
 /// The `frsqest` result for one slot; the sign is always 0.
-// [SPU-ISA p:217 s:9] the estimate is of 1/sqrt(abs(x)), and a zero exponent gives y2 >= 0x7fc00000 after the sequence, so it maps to 255.
+///
+/// [SPU-ISA p:217 s:9] the estimate is of 1/sqrt(abs(x)), and a zero exponent gives y2 >= 0x7fc00000 after the sequence, so it maps to 255.
 pub(super) fn frsqest(x: u32) -> u32 {
     let e = exponent(x);
     // 1/sqrt(m x 2^E) = (2/sqrt(m)) x 2^(-E/2 - 1) for even E, and

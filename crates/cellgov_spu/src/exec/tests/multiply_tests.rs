@@ -4,12 +4,12 @@
 use super::*;
 use crate::state::SpuState;
 
-// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT; RRR: 4-bit opcode, RT, RB, RA, RC.
-// [SPU-ISA p:29 s:2.3] RI10: 8-bit opcode, I10, RA, RT.
+/// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT; RRR: 4-bit opcode, RT, RB, RA, RC.
 fn rr(op: u32, rt: u32, ra: u32, rb: u32) -> u32 {
     op << 21 | rb << 14 | ra << 7 | rt
 }
 
+/// [SPU-ISA p:29 s:2.3] RI10: 8-bit opcode, I10, RA, RT.
 fn ri10(op: u32, rt: u32, ra: u32, i10: u32) -> u32 {
     op << 24 | (i10 & 0x3FF) << 14 | ra << 7 | rt
 }
@@ -141,7 +141,7 @@ fn mpyh_moves_the_low_product_half_into_the_high_half() {
     );
 }
 
-// [SPU-ISA p:77 s:5] a 32-bit multiply is mpyh t1,ra,rb; mpyh t2,rb,ra; mpyu t3,ra,rb; a rt,t1,t2; a rt,rt,t3.
+/// [SPU-ISA p:77 s:5] a 32-bit multiply is mpyh t1,ra,rb; mpyh t2,rb,ra; mpyu t3,ra,rb; a rt,t1,t2; a rt,rt,t3.
 #[test]
 fn the_isa_sequence_builds_a_full_32_bit_product() {
     let a = [0x1234_5678, 0xFFFF_FFFF, 0x0001_0001, 0x8000_0000];

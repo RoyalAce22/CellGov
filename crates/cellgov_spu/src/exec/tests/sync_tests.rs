@@ -4,7 +4,7 @@
 use super::*;
 use crate::decode::decode;
 
-// [SPU-ISA p:242 s:10] sync is 00000000010 with the C feature bit at bit 11; [SPU-ISA p:243 s:10] dsync is 00000000011.
+/// [SPU-ISA p:242 s:10] sync is 00000000010 with the C feature bit at bit 11; [SPU-ISA p:243 s:10] dsync is 00000000011.
 #[test]
 fn sync_sync_c_and_dsync_decode_apart() {
     assert_eq!(decode(0x002 << 21), Ok(SpuInstruction::Sync { c: false }));
@@ -18,7 +18,8 @@ fn sync_sync_c_and_dsync_decode_apart() {
 /// A store into the instruction stream runs as the stored instruction,
 /// with no barrier after the store or with any of the three: CellGov
 /// picks the outcome in which the fetch sees the store.
-// [SPU-ISA p:255 s:13.3] without a sync the SPU might or might not execute the newly stored instruction.
+///
+/// [SPU-ISA p:255 s:13.3] without a sync the SPU might or might not execute the newly stored instruction.
 #[test]
 fn a_store_into_the_instruction_stream_is_fetched_with_or_without_a_barrier() {
     /// `sync`, `sync.c` and `dsync`.

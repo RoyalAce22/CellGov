@@ -19,8 +19,8 @@ fn generator_form(form: SpuForm) -> Option<SpuEncodingForm> {
     }
 }
 
-// [SPU-ISA p:28 s:2.3] RR, RRR and RI7; [SPU-ISA p:29 s:2.3] RI10, RI16 and RI18.
-// [SPU-ISA p:220 s:9] RI8 is not a basic format; the conversions place I8 after a 10-bit opcode.
+/// [SPU-ISA p:28 s:2.3] RR, RRR and RI7; [SPU-ISA p:29 s:2.3] RI10, RI16 and RI18.
+/// [SPU-ISA p:220 s:9] RI8 is not a basic format; the conversions place I8 after a 10-bit opcode.
 #[test]
 fn every_kind_has_the_form_its_opcode_row_records() {
     for descriptor in generation_descriptors() {

@@ -9,9 +9,10 @@
     derive(PartialOrd, Ord, strum::VariantArray, strum::IntoStaticStr)
 )]
 pub enum SpuInstruction {
-    // [SPU-ISA p:32 s:3 Load/Store Quadword and Generate-Controls family]
-    // Lqd/Lqx/Lqa/Lqr/Stqd/Stqx/Stqa/Stqr pp.32-39; Cbd/Cwd pp.40-45.
     /// Load quadword, d-form: rt = LS[(ra + imm*16) & ~0xF].
+    ///
+    /// [SPU-ISA p:32 s:3 Load/Store Quadword and Generate-Controls family]
+    /// Lqd/Lqx/Lqa/Lqr/Stqd/Stqx/Stqa/Stqr pp.32-39; Cbd/Cwd pp.40-45.
     Lqd {
         /// Destination register.
         rt: u8,
@@ -76,8 +77,9 @@ pub enum SpuInstruction {
         imm: i16,
     },
 
-    // [SPU-ISA p:50 s:4 Constant-Formation: Il/Ila/Ilh/Ilhu/Iohl/Fsmbi pp.50-56]
     /// Immediate load word: all 4 word slots = sign_extend(imm16).
+    ///
+    /// [SPU-ISA p:50 s:4 Constant-Formation: Il/Ila/Ilh/Ilhu/Iohl/Fsmbi pp.50-56]
     Il {
         /// Destination register.
         rt: u8,
@@ -120,8 +122,9 @@ pub enum SpuInstruction {
         imm: u16,
     },
 
-    // [SPU-ISA p:60 s:5 Integer arithmetic: A p.60, Ai p.61, Sf p.64]
     /// Add word: all 4 word slots, `rt[i] = ra[i] + rb[i]`.
+    ///
+    /// [SPU-ISA p:60 s:5 Integer arithmetic: A p.60, Ai p.61, Sf p.64]
     A {
         /// Destination register.
         rt: u8,
@@ -148,8 +151,9 @@ pub enum SpuInstruction {
         /// Source register B (minuend).
         rb: u8,
     },
-    // [SPU-ISA p:91 s:5 Byte arithmetic: Avgb p.91, Absdb p.92, Sumb p.93]
     /// Average bytes: `(ra + rb + 1) >> 1` per unsigned byte, without loss of precision.
+    ///
+    /// [SPU-ISA p:91 s:5 Byte arithmetic: Avgb p.91, Absdb p.92, Sumb p.93]
     Avgb {
         /// Destination register.
         rt: u8,
@@ -176,8 +180,9 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
-    // [SPU-ISA p:72 s:5 16-bit multiplies: Mpy p.72 .. Mpyhhau p.82]
     /// Multiply: the signed low halfwords of each word, a 32-bit product.
+    ///
+    /// [SPU-ISA p:72 s:5 16-bit multiplies: Mpy p.72 .. Mpyhhau p.82]
     Mpy {
         /// Destination register.
         rt: u8,
@@ -278,8 +283,9 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
-    // [SPU-ISA p:66 s:5 Carry and borrow: Addx p.66, Cg p.67, Cgx p.68, Sfx p.69, Bg p.70, Bgx p.71]
     /// Add extended: all 4 word slots, `rt[i] = ra[i] + rb[i] + (rt[i] & 1)`.
+    ///
+    /// [SPU-ISA p:66 s:5 Carry and borrow: Addx p.66, Cg p.67, Cgx p.68, Sfx p.69, Bg p.70, Bgx p.71]
     Addx {
         /// Destination register, and the carry or borrow input in each word's low bit.
         rt: u8,
@@ -333,8 +339,9 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
-    // [SPU-ISA p:58 s:5 Halfword add and subtract: Ah p.58, Ahi p.59, Sfh p.62, Sfhi p.63; Sfi p.65]
     /// Add halfword: all 8 halfword slots, `rt[i] = ra[i] + rb[i]`.
+    ///
+    /// [SPU-ISA p:58 s:5 Halfword add and subtract: Ah p.58, Ahi p.59, Sfh p.62, Sfhi p.63; Sfi p.65]
     Ah {
         /// Destination register.
         rt: u8,
@@ -381,8 +388,9 @@ pub enum SpuInstruction {
     },
 
     // [SPU-ISA p:101 s:5 Logical: Ori (Or Word Immediate) p.106, Nor p.113, Andi p.101]
-    // [SPU-ISA p:97 s:5 Logical: And p.97, Or p.102, Selb p.115, Xsbh p.94]
     /// AND: rt = ra & rb over the full 128 bits.
+    ///
+    /// [SPU-ISA p:97 s:5 Logical: And p.97, Or p.102, Selb p.115, Xsbh p.94]
     And {
         /// Destination register.
         rt: u8,
@@ -418,8 +426,9 @@ pub enum SpuInstruction {
         /// Source register.
         ra: u8,
     },
-    // [SPU-ISA p:95 s:5 Xshw p.95, Xswd p.96]
     /// Extend sign halfword to word: each word slot = sign_extend(its low halfword).
+    ///
+    /// [SPU-ISA p:95 s:5 Xshw p.95, Xswd p.96]
     Xshw {
         /// Destination register.
         rt: u8,
@@ -433,8 +442,9 @@ pub enum SpuInstruction {
         /// Source register.
         ra: u8,
     },
-    // [SPU-ISA p:83 s:5 Bit counts, select masks and byte gather: Clz p.83 .. Gbb p.88]
     /// Count leading zeros: per word, 32 for a zero word.
+    ///
+    /// [SPU-ISA p:83 s:5 Bit counts, select masks and byte gather: Clz p.83 .. Gbb p.88]
     Clz {
         /// Destination register.
         rt: u8,
@@ -476,8 +486,9 @@ pub enum SpuInstruction {
         /// Source register.
         ra: u8,
     },
-    // [SPU-ISA p:90 s:5 Gather Bits from Words p.90, Gather Bits from Halfwords p.89]
     /// Gather bits from words: the low bit of each word, word 0 leftmost, into the low nibble of the preferred slot.
+    ///
+    /// [SPU-ISA p:90 s:5 Gather Bits from Words p.90, Gather Bits from Halfwords p.89]
     Gb {
         /// Destination register.
         rt: u8,
@@ -518,8 +529,9 @@ pub enum SpuInstruction {
         /// 10-bit signed immediate.
         imm: i16,
     },
-    // [SPU-ISA p:98 s:5 Logical: Andc p.98, Andbi p.99, Andhi p.100, Orc p.103, Orbi p.104, Orhi p.105, Orx p.107, Xor p.108, Xorbi p.109, Xorhi p.110, Xori p.111, Nand p.112, Eqv p.114]
     /// AND with complement: `ra & !rb`.
+    ///
+    /// [SPU-ISA p:98 s:5 Logical: Andc p.98, Andbi p.99, Andhi p.100, Orc p.103, Orbi p.104, Orhi p.105, Orx p.107, Xor p.108, Xorbi p.109, Xorhi p.110, Xori p.111, Nand p.112, Eqv p.114]
     Andc {
         /// Destination register.
         rt: u8,
@@ -635,9 +647,10 @@ pub enum SpuInstruction {
         imm: i16,
     },
 
-    // [SPU-ISA p:116 s:5 Shuffle Bytes (Shufb)]
     // [SPU-ISA p:124 s:6 Shift/Rotate Quadword by Bytes: Shlqbyi p.125, Rotqby p.131]
     /// Shuffle bytes: rt = shufb(ra, rb, rc).
+    ///
+    /// [SPU-ISA p:116 s:5 Shuffle Bytes (Shufb)]
     Shufb {
         /// Destination register.
         rt: u8,
@@ -675,8 +688,9 @@ pub enum SpuInstruction {
         /// 7-bit immediate; only the low 4 bits count.
         imm: u8,
     },
-    // [SPU-ISA p:141 s:6 Rotate and Mask Quadword by Bytes Immediate]
     /// Rotate and mask quadword by bytes immediate: a right shift by `(-imm) & 0x1F` bytes, zero fill.
+    ///
+    /// [SPU-ISA p:141 s:6 Rotate and Mask Quadword by Bytes Immediate]
     Rotqmbyi {
         /// Destination register.
         rt: u8,
@@ -686,8 +700,9 @@ pub enum SpuInstruction {
         imm: u8,
     },
 
-    // [SPU-ISA p:122 s:6 Quadword bit shifts: Shlqbi p.122, Shlqbii p.123, Rotqbi p.134, Rotqbii p.135, Rotqmbi p.143, Rotqmbii p.144]
     /// Shift left quadword by bits: `ra` shifted left by bits 29 to 31 of `rb`'s preferred slot.
+    ///
+    /// [SPU-ISA p:122 s:6 Quadword bit shifts: Shlqbi p.122, Shlqbii p.123, Rotqbi p.134, Rotqbii p.135, Rotqmbi p.143, Rotqmbii p.144]
     Shlqbi {
         /// Destination register.
         rt: u8,
@@ -742,8 +757,9 @@ pub enum SpuInstruction {
         imm: u8,
     },
 
-    // [SPU-ISA p:124 s:6 Quadword byte shifts by register: Shlqby p.124, Shlqbybi p.126, Rotqbybi p.133, Rotqmby p.140, Rotqmbybi p.142]
     /// Shift left quadword by bytes: `ra` shifted left by `rb`'s byte count, zero above 15.
+    ///
+    /// [SPU-ISA p:124 s:6 Quadword byte shifts by register: Shlqby p.124, Shlqbybi p.126, Rotqbybi p.133, Rotqmby p.140, Rotqmbybi p.142]
     Shlqby {
         /// Destination register.
         rt: u8,
@@ -789,8 +805,9 @@ pub enum SpuInstruction {
         rb: u8,
     },
 
-    // [SPU-ISA p:120 s:6 Shift/Rotate Word: Shl p.120, Shli p.121, Rotmi p.139, Rotmai p.148]
     /// Shift left word: per slot, `rt[i] = ra[i] << (rb[i] & 0x3F)`, zero when the count exceeds 31.
+    ///
+    /// [SPU-ISA p:120 s:6 Shift/Rotate Word: Shl p.120, Shli p.121, Rotmi p.139, Rotmai p.148]
     Shl {
         /// Destination register.
         rt: u8,
@@ -826,8 +843,9 @@ pub enum SpuInstruction {
         /// 7-bit immediate that holds the two's complement of the shift count.
         imm: u8,
     },
-    // [SPU-ISA p:129 s:6 Word rotates: Rot p.129, Roti p.130, Rotm p.138, Rotma p.147]
     /// Rotate word: per slot, `ra` rotated left by `rb & 0x1F`.
+    ///
+    /// [SPU-ISA p:129 s:6 Word rotates: Rot p.129, Roti p.130, Rotm p.138, Rotma p.147]
     Rot {
         /// Destination register.
         rt: u8,
@@ -863,8 +881,9 @@ pub enum SpuInstruction {
         /// Per-slot count register.
         rb: u8,
     },
-    // [SPU-ISA p:118 s:6 Halfword shifts and rotates: Shlh p.118, Shlhi p.119, Roth p.127, Rothi p.128, Rothm p.136, Rothmi p.137, Rotmah p.145, Rotmahi p.146]
     /// Shift left halfword: per slot, `ra << (rb & 0x1F)`, zero when the count exceeds 15.
+    ///
+    /// [SPU-ISA p:118 s:6 Halfword shifts and rotates: Shlh p.118, Shlhi p.119, Roth p.127, Rothi p.128, Rothm p.136, Rothmi p.137, Rotmah p.145, Rotmahi p.146]
     Shlh {
         /// Destination register.
         rt: u8,
@@ -937,8 +956,9 @@ pub enum SpuInstruction {
         imm: u8,
     },
 
-    // [SPU-ISA p:40 s:3 Generate Controls for Insertion: Cbd p.40, Cbx p.41, Chd p.42, Chx p.43, Cwd p.44, Cwx p.45, Cdd p.46, Cdx p.47]
     /// Generate controls for byte insertion d-form (shufb mask).
+    ///
+    /// [SPU-ISA p:40 s:3 Generate Controls for Insertion: Cbd p.40, Cbx p.41, Chd p.42, Chx p.43, Cwd p.44, Cwx p.45, Cdd p.46, Cdx p.47]
     Cbd {
         /// Destination register.
         rt: u8,
@@ -1011,8 +1031,9 @@ pub enum SpuInstruction {
         rb: u8,
     },
 
-    // [SPU-ISA p:160 s:7 Compare Equal Word (Ceq) p.160, Compare Equal Word Immediate (Ceqi) p.161]
     /// Compare equal word: `rt[i] = (ra[i] == rb[i]) ? 0xFFFFFFFF : 0`.
+    ///
+    /// [SPU-ISA p:160 s:7 Compare Equal Word (Ceq) p.160, Compare Equal Word Immediate (Ceqi) p.161]
     Ceq {
         /// Destination register.
         rt: u8,
@@ -1030,8 +1051,9 @@ pub enum SpuInstruction {
         /// 10-bit signed immediate.
         imm: i16,
     },
-    // [SPU-ISA p:157 s:7 Compare Equal Byte Immediate]
     /// Compare equal byte immediate: `rt[i] = (ra[i] == imm) ? 0xFF : 0` over 16 bytes.
+    ///
+    /// [SPU-ISA p:157 s:7 Compare Equal Byte Immediate]
     Ceqbi {
         /// Destination register.
         rt: u8,
@@ -1040,8 +1062,9 @@ pub enum SpuInstruction {
         /// The rightmost 8 bits of the I10 field.
         imm: u8,
     },
-    // [SPU-ISA p:156 s:7 Byte, halfword and word compares: Ceqb p.156, Ceqh p.158, Ceqhi p.159, Cgtb p.162, Cgtbi p.163, Cgth p.164, Cgthi p.165, Cgt p.166, Clgtb p.168, Clgtbi p.169, Clgth p.170, Clgthi p.171, Clgti p.173]
     /// Compare equal byte: each byte all ones where `ra` equals `rb`.
+    ///
+    /// [SPU-ISA p:156 s:7 Byte, halfword and word compares: Ceqb p.156, Ceqh p.158, Ceqhi p.159, Cgtb p.162, Cgtbi p.163, Cgth p.164, Cgthi p.165, Cgt p.166, Clgtb p.168, Clgtbi p.169, Clgth p.170, Clgthi p.171, Clgti p.173]
     Ceqb {
         /// Destination register.
         rt: u8,
@@ -1158,8 +1181,9 @@ pub enum SpuInstruction {
         /// 10-bit signed immediate.
         imm: i16,
     },
-    // [SPU-ISA p:167 s:7 Compare Greater Than Word Immediate (Cgti) p.167, Compare Logical Greater Than Word (Clgt) p.172]
     /// Compare greater than word immediate, signed: `rt[i] = (ra[i] > sign_extend(imm)) ? 0xFFFFFFFF : 0`.
+    ///
+    /// [SPU-ISA p:167 s:7 Compare Greater Than Word Immediate (Cgti) p.167, Compare Logical Greater Than Word (Clgt) p.172]
     Cgti {
         /// Destination register.
         rt: u8,
@@ -1178,8 +1202,9 @@ pub enum SpuInstruction {
         rb: u8,
     },
 
-    // [SPU-ISA p:174 s:7 Branch family: Br p.174, Brsl p.176, Brz p.183, Brnz p.182, Bi p.178]
     /// Branch relative: PC = PC + offset * 4.
+    ///
+    /// [SPU-ISA p:174 s:7 Branch family: Br p.174, Brsl p.176, Brz p.183, Brnz p.182, Bi p.178]
     Br {
         /// Signed word offset.
         offset: i32,
@@ -1191,8 +1216,9 @@ pub enum SpuInstruction {
         /// Signed word offset.
         offset: i32,
     },
-    // [SPU-ISA p:175 s:7 Absolute branches: Bra p.175, Brasl p.177]
     /// Branch absolute: PC = address * 4, masked by the limit register.
+    ///
+    /// [SPU-ISA p:175 s:7 Absolute branches: Bra p.175, Brasl p.177]
     Bra {
         /// Signed word address.
         address: i32,
@@ -1227,8 +1253,9 @@ pub enum SpuInstruction {
         /// The E feature bit: enable interrupts at the target.
         e: bool,
     },
-    // [SPU-ISA p:181 s:7 Branch Indirect and Set Link (Bisl) p.181, Branch If Not Zero Halfword (Brhnz) p.184]
     /// Branch indirect and set link: rt = (PC + 4, 0, 0, 0), PC = ra.
+    ///
+    /// [SPU-ISA p:181 s:7 Branch Indirect and Set Link (Bisl) p.181, Branch If Not Zero Halfword (Brhnz) p.184]
     Bisl {
         /// Link register destination.
         rt: u8,
@@ -1246,8 +1273,9 @@ pub enum SpuInstruction {
         /// Signed word offset.
         offset: i32,
     },
-    // [SPU-ISA p:185 s:7 Branch If Zero Halfword p.185, Branch Indirect If Zero p.186, If Not Zero p.187, If Zero Halfword p.188, If Not Zero Halfword p.189]
     /// Branch relative if the low halfword of rt's preferred slot is zero.
+    ///
+    /// [SPU-ISA p:185 s:7 Branch If Zero Halfword p.185, Branch Indirect If Zero p.186, If Not Zero p.187, If Zero Halfword p.188, If Not Zero Halfword p.189]
     Brhz {
         /// Register to test.
         rt: u8,
@@ -1299,8 +1327,9 @@ pub enum SpuInstruction {
         e: bool,
     },
 
-    // [SPU-ISA p:248 s:11 Channel Instructions: Rdch p.248, Wrch p.250]
     /// Read channel: `rt = channel[channel]`.
+    ///
+    /// [SPU-ISA p:248 s:11 Channel Instructions: Rdch p.248, Wrch p.250]
     Rdch {
         /// Destination register.
         rt: u8,
@@ -1314,8 +1343,9 @@ pub enum SpuInstruction {
         /// Source register.
         rt: u8,
     },
-    // [SPU-ISA p:249 s:11 Read Channel Count]
     /// Read channel count: the preferred slot of rt = the channel's capacity, other slots zero.
+    ///
+    /// [SPU-ISA p:249 s:11 Read Channel Count]
     Rchcnt {
         /// Destination register.
         rt: u8,
@@ -1323,9 +1353,10 @@ pub enum SpuInstruction {
         channel: u8,
     },
 
-    // [SPU-ISA p:240 s:10 Control: Nop p.241, Lnop p.240, Sync p.242, Dsync p.243, Stop p.238, Heq p.150]
     // [SPU-ISA p:192 s:8 Hint-for-Branch: Hbr p.192, Hbra p.193, Hbrr p.194]
     /// No operation (even pipeline).
+    ///
+    /// [SPU-ISA p:240 s:10 Control: Nop p.241, Lnop p.240, Sync p.242, Dsync p.243, Stop p.238, Heq p.150]
     Nop {
         /// The false target: named by the encoding, never written.
         rt: u8,
@@ -1428,8 +1459,9 @@ pub enum SpuInstruction {
         /// Source register.
         rt: u8,
     },
-    // [SPU-ISA p:202 s:9 Single-precision arithmetic: Fa p.202, Fs p.204, Fm p.206]
     /// Floating add: per slot, `ra + rb` in extended-range single precision, truncated.
+    ///
+    /// [SPU-ISA p:202 s:9 Single-precision arithmetic: Fa p.202, Fs p.204, Fm p.206]
     Fa {
         /// Destination register.
         rt: u8,
@@ -1456,8 +1488,9 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
-    // [SPU-ISA p:208 s:9 Fused multiply-add: Fma p.208, Fnms p.210, Fms p.212]
     /// Floating multiply and add: per slot, `ra * rb + rc` with one truncation.
+    ///
+    /// [SPU-ISA p:208 s:9 Fused multiply-add: Fma p.208, Fnms p.210, Fms p.212]
     Fma {
         /// Destination register.
         rt: u8,
@@ -1490,8 +1523,9 @@ pub enum SpuInstruction {
         /// Source register C, the minuend.
         rc: u8,
     },
-    // [SPU-ISA p:215 s:9 Estimates: Frest p.215, Frsqest p.217, Fi p.219]
     /// Floating reciprocal estimate: per slot, a base and step for `1 / ra`.
+    ///
+    /// [SPU-ISA p:215 s:9 Estimates: Frest p.215, Frsqest p.217, Fi p.219]
     Frest {
         /// Destination register.
         rt: u8,
@@ -1516,8 +1550,9 @@ pub enum SpuInstruction {
         /// Source register B, the base and step.
         rb: u8,
     },
-    // [SPU-ISA p:220 s:9 Conversions: Csflt p.220, Cflts p.221, Cuflt p.222, Cfltu p.223]
     /// Convert signed integer to floating: per slot, `ra / 2^scale`.
+    ///
+    /// [SPU-ISA p:220 s:9 Conversions: Csflt p.220, Cflts p.221, Cuflt p.222, Cfltu p.223]
     Csflt {
         /// Destination register.
         rt: u8,
@@ -1553,8 +1588,9 @@ pub enum SpuInstruction {
         /// The I8 field; the scale is 173 less it.
         imm: u8,
     },
-    // [SPU-ISA p:231 s:9 Compares: Fceq p.231, Fcmeq p.232, Fcgt p.233, Fcmgt p.234]
     /// Floating compare equal: per slot, all ones when `ra == rb`.
+    ///
+    /// [SPU-ISA p:231 s:9 Compares: Fceq p.231, Fcmeq p.232, Fcgt p.233, Fcmgt p.234]
     Fceq {
         /// Destination register.
         rt: u8,
@@ -1590,8 +1626,9 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
-    // [SPU-ISA p:203 s:9 Double-precision arithmetic: Dfa p.203, Dfs p.205, Dfm p.207]
     /// Double floating add: per doubleword slot, `ra + rb`, rounded by the slot's FPSCR mode.
+    ///
+    /// [SPU-ISA p:203 s:9 Double-precision arithmetic: Dfa p.203, Dfs p.205, Dfm p.207]
     Dfa {
         /// Destination register.
         rt: u8,
@@ -1618,8 +1655,9 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
-    // [SPU-ISA p:209 s:9 Double-precision fused forms: Dfma p.209, Dfnms p.211, Dfms p.213, Dfnma p.214]
     /// Double floating multiply and add: per doubleword slot, `ra * rb + rt`, rounded once.
+    ///
+    /// [SPU-ISA p:209 s:9 Double-precision fused forms: Dfma p.209, Dfnms p.211, Dfms p.213, Dfnma p.214]
     Dfma {
         /// Destination register, and the addend.
         rt: u8,
@@ -1655,9 +1693,10 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
-    // [SPU-ISA p:224 s:9 Precision conversions: Frds p.224, Fesd p.225]
     /// Floating round double to single: per doubleword slot, `ra` rounded
     /// to single precision in the left word, the right word zero.
+    ///
+    /// [SPU-ISA p:224 s:9 Precision conversions: Frds p.224, Fesd p.225]
     Frds {
         /// Destination register.
         rt: u8,
@@ -1672,8 +1711,9 @@ pub enum SpuInstruction {
         /// Source register.
         ra: u8,
     },
-    // [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
     /// Write RA's defined bits into the FPSCR; RT is a false target.
+    ///
+    /// [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
     Fscrwr {
         /// Source register.
         ra: u8,

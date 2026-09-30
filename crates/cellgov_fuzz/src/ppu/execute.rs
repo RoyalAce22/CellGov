@@ -175,7 +175,7 @@ pub(super) fn ppu_sequence_changed(initial: &PpuState, observed: &ObservedSequen
     observed.observation.state != PpuArchitecturalState::capture(initial)
 }
 
-// [Wang2024 p:340:17 s:3.8] A program whose two runs can legitimately differ is unfit for differential comparison, so the engine records replay disagreement as its own finding.
+/// [Wang2024 p:340:17 s:3.8] A program whose two runs can legitimately differ is unfit for differential comparison, so the engine records replay disagreement as its own finding.
 pub(super) fn ppu_step_replay_asymmetry(
     first: &ObservedStep,
     second: &ObservedStep,
@@ -269,7 +269,7 @@ pub(super) fn ppu_sequence_replay_asymmetry(
     )
 }
 
-// [Feng2026 p:32 s:4.3.2] The comparison reduces each run's termination to a normalized signature before it compares the pair.
+/// [Feng2026 p:32 s:4.3.2] The comparison reduces each run's termination to a normalized signature before it compares the pair.
 fn ppu_verdict_asymmetry(
     first: Option<&ExecuteVerdict>,
     second: Option<&ExecuteVerdict>,
@@ -308,7 +308,7 @@ fn ppu_observed_outcome_asymmetry(
     }
 }
 
-// [Jiang2022 p:7 s:4.2] Most device and emulator inconsistencies differ in the signal raised and few in register or memory values alone, so a fault on either side outranks a state or outcome difference.
+/// [Jiang2022 p:7 s:4.2] Most device and emulator inconsistencies differ in the signal raised and few in register or memory values alone, so a fault on either side outranks a state or outcome difference.
 pub(super) fn ppu_outcome_asymmetry(outcome: PpuOutcomeClass) -> CrossReferenceAsymmetry {
     if matches!(
         outcome,

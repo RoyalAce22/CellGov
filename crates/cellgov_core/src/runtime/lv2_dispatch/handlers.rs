@@ -127,11 +127,11 @@ impl Runtime {
                 "record_spu rejected a freshly allocated unit: dispatch-layer \
                  corruption in the RegisterSpu path",
             );
-            // SPU Read Inbound Mailbox depth is 4 per
-            // [CBE-Handbook p:533 s:19.6 Table 19-15]; we use it
-            // as the default capacity for dispatch-allocated
-            // mailboxes until the SPU exec layer differentiates
-            // outbound (depth 1) from inbound (depth 4).
+            /// SPU Read Inbound Mailbox depth is 4 per
+            /// [CBE-Handbook p:533 s:19.6 Table 19-15]; we use it
+            /// as the default capacity for dispatch-allocated
+            /// mailboxes until the SPU exec layer differentiates
+            /// outbound (depth 1) from inbound (depth 4).
             const SPU_INBOUND_MBOX_DEPTH: usize = 4;
             let inserted = self.mailbox_registry.register_at(
                 cellgov_sync::MailboxId::new(uid.raw()),

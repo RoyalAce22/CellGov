@@ -11,7 +11,8 @@
 
 /// Full encoding of `blr` (branch to link register). Used as a
 /// terminator in synthetic test ELFs and as a marker in stack walks.
-// [PPC-Book1 p:25 s:Branch Conditional to Link Register] BO=20, BH=0, lk=0.
+///
+/// [PPC-Book1 p:25 s:Branch Conditional to Link Register] BO=20, BH=0, lk=0.
 pub const PPC_BLR: u32 = 0x4E80_0020;
 
 /// Big-endian byte encoding of [`PPC_BLR`].
@@ -26,7 +27,8 @@ pub const PPC_NOP_BYTES: [u8; 4] = [0x60, 0x00, 0x00, 0x00];
 /// `bl` opcode template with the link bit (LK) set but the
 /// displacement field zeroed. Patching tools OR in the signed
 /// 26-bit displacement.
-// [PPC-Book1 p:24 s:Branch] B-form, AA=0, LK=1.
+///
+/// [PPC-Book1 p:24 s:Branch] B-form, AA=0, LK=1.
 pub const PPC_BL_OPCODE_LK: u32 = 0x4800_0001;
 
 /// `b` opcode template without the link bit. Patching tools OR in
@@ -40,40 +42,47 @@ pub const PPC_ADDI_R3_R3_1: u32 = 0x3863_0001;
 /// `BO` field bit 2 (the bit that disables the CTR decrement for
 /// conditional-branch-to-CTR variants; the bcctr variant requires
 /// it set).
-// [PPC-Book1 p:25 s:Branch Conditional to Count Register] BO2=0 invalid for bcctr.
+///
+/// [PPC-Book1 p:25 s:Branch Conditional to Count Register] BO2=0 invalid for bcctr.
 pub const PPC_BO_BIT2: u8 = 0b0_0100;
 
 /// Extended opcode (XO) for `bcctr` (Branch Conditional to Count
 /// Register). Used inside the `19 << 26` major-opcode group.
-// [PPC-Book1 p:25 s:Branch Conditional to Count Register]
+///
+/// [PPC-Book1 p:25 s:Branch Conditional to Count Register]
 pub const PPC_BCCTR_XO: u32 = 528;
 
 /// Extended opcode (XO) for `bclr` (Branch Conditional to Link
 /// Register). Used inside the `19 << 26` major-opcode group.
-// [PPC-Book1 p:25 s:Branch Conditional to Link Register]
+///
+/// [PPC-Book1 p:25 s:Branch Conditional to Link Register]
 pub const PPC_BCLR_XO: u32 = 16;
 
 /// Extended opcode (XO) for `isync`. Used inside the `19 << 26`
 /// major-opcode group.
-// [PPC-Book2 p:22 s:3.3.1] isync XL-form XO 150.
+///
+/// [PPC-Book2 p:22 s:3.3.1] isync XL-form XO 150.
 pub const PPC_ISYNC_XO: u32 = 150;
 
 /// Extended opcodes under primary 31 of the storage-control hints and
 /// barriers: dcbst, dcbf, dcbtst, dcbt, dst, dstst, sync, dss, eieio
 /// and icbi, in ascending order.
-// [PPC-Book2 p:21 s:3.2.2] dcbst 54 and dcbf 86.
-// [PPC-Book2 p:19 s:3.2.2] dcbt 278 and dcbtst 246.
-// [PPC-Book2 p:18 s:3.2.1] icbi 982.
-// [PPC-Book2 p:26 s:3.3.3] sync 598.
-// [PPC-Book2 p:28 s:3.3.3] eieio 854.
-// [AltiVec-PEM p:6-10 s:6.2] dst 342; [AltiVec-PEM p:6-12 s:6.2] dstst 374; [AltiVec-PEM p:6-9 s:6.2] dss 822.
+///
+/// [PPC-Book2 p:21 s:3.2.2] dcbst 54 and dcbf 86.
+/// [PPC-Book2 p:19 s:3.2.2] dcbt 278 and dcbtst 246.
+/// [PPC-Book2 p:18 s:3.2.1] icbi 982.
+/// [PPC-Book2 p:26 s:3.3.3] sync 598.
+/// [PPC-Book2 p:28 s:3.3.3] eieio 854.
+/// [AltiVec-PEM p:6-10 s:6.2] dst 342; [AltiVec-PEM p:6-12 s:6.2] dstst 374; [AltiVec-PEM p:6-9 s:6.2] dss 822.
 pub const PPC_STORAGE_HINT_XOS: [u32; 10] = [54, 86, 246, 278, 342, 374, 598, 822, 854, 982];
 
 /// High-order fraction bit that distinguishes a QNaN from an SNaN in
 /// double format; setting it quiets a propagated SNaN.
-// [PPC-Book1 p:91 s:4.3.2] An SNaN becomes a QNaN by setting the high-order fraction bit.
+///
+/// [PPC-Book1 p:91 s:4.3.2] An SNaN becomes a QNaN by setting the high-order fraction bit.
 pub const PPC_F64_QUIET_BIT: u64 = 0x0008_0000_0000_0000;
 
 /// The single QNaN every disabled Invalid Operation Exception yields.
-// [PPC-Book1 p:91 s:4.3.2] Generated QNaN: sign 0, exponent all 1s, high-order fraction bit 1, rest 0.
+///
+/// [PPC-Book1 p:91 s:4.3.2] Generated QNaN: sign 0, exponent all 1s, high-order fraction bit 1, rest 0.
 pub const PPC_GENERATED_QNAN_F64: u64 = 0x7FF8_0000_0000_0000;

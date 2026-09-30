@@ -14,7 +14,8 @@ pub enum ReferenceField<T> {
         value: T,
     },
     /// The architecture leaves this field undefined.
-    // [Jiang2022 p:7 s:4.2] Most device and emulator inconsistencies trace to behaviour the manual leaves undefined, so the comparison skips such a field.
+    ///
+    /// [Jiang2022 p:7 s:4.2] Most device and emulator inconsistencies trace to behaviour the manual leaves undefined, so the comparison skips such a field.
     Undefined {
         /// Source-specific reason.
         reason: String,
@@ -171,8 +172,9 @@ pub(crate) trait ReferenceComparison {
 
 /// Records one field: compared, and checked with `difference`, when the
 /// source represents it; omitted with its reason otherwise.
-// [Jiang2022 p:7 s:4.2] Most device and emulator inconsistencies trace to behaviour the manual leaves undefined, so a component the documentation marks undefined is excluded rather than counted as a difference.
-// [McKeeman1998 p:101 s:Differential Testing] Two results can differ and both be correct where the standard leaves a construct undefined, so a field the documentation marks undefined is excluded from the comparison.
+///
+/// [Jiang2022 p:7 s:4.2] Most device and emulator inconsistencies trace to behaviour the manual leaves undefined, so a component the documentation marks undefined is excluded rather than counted as a difference.
+/// [McKeeman1998 p:101 s:Differential Testing] Two results can differ and both be correct where the standard leaves a construct undefined, so a field the documentation marks undefined is excluded from the comparison.
 pub(crate) fn compare_field<C: ReferenceComparison, T>(
     comparison: &mut C,
     component: C::Component,

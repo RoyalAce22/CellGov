@@ -7,7 +7,8 @@ use cellgov_ps3_abi::hw::spu::{
 };
 
 /// What stopped the SPU.
-// [CBEA p:95 s:8.5.3] a halt, an SPU error, a stop-and-signal and a stop request each stop the SPU.
+///
+/// [CBEA p:95 s:8.5.3] a halt, an SPU error, a stop-and-signal and a stop request each stop the SPU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SpuStopKind {
     /// A `stop` instruction.
@@ -48,10 +49,11 @@ impl SpuStop {
     /// SPU resumes at that same word; the documents leave an SPU error's
     /// resume address open, and this is CellGov's choice. A stop request
     /// lands between instructions, so `pc` is the next one to run.
-    // [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR, precise stop.
-    // [SPU-ISA p:239 s:10] stopd: the same RTL.
-    // [CBEA p:93 s:8.5.2] stopd always reports code x'3FFF'.
-    // [CBEA p:95 s:8.5.3] SPU_NPC holds the next instruction to run when the SPU restarts.
+    ///
+    /// [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR, precise stop.
+    /// [SPU-ISA p:239 s:10] stopd: the same RTL.
+    /// [CBEA p:93 s:8.5.2] stopd always reports code x'3FFF'.
+    /// [CBEA p:95 s:8.5.3] SPU_NPC holds the next instruction to run when the SPU restarts.
     pub fn new(kind: SpuStopKind, signal: u16, pc: u32, lslr: u32) -> Self {
         let code = match kind {
             SpuStopKind::Stop => signal & SPU_STOP_CODE_MASK as u16,
@@ -75,7 +77,8 @@ impl SpuStop {
     }
 
     /// The `SPU_Status` word for this stop, with R clear.
-    // [CBEA p:93 s:8.5.2] StopCode holds bits 0:15 and is valid only with P; C, I, H and P each name one stop cause.
+    ///
+    /// [CBEA p:93 s:8.5.2] StopCode holds bits 0:15 and is valid only with P; C, I, H and P each name one stop cause.
     pub fn status_word(&self) -> u32 {
         match self.kind {
             SpuStopKind::Stop | SpuStopKind::Stopd => {

@@ -48,7 +48,8 @@ pub fn cases() -> Vec<InstructionCase> {
 
 /// `lvsl`: permute control vector. Bytes 0..=15 of VRT = sh, sh+1, ..., sh+15
 /// where `sh = EA[60:63]`. No memory read.
-// [AltiVec-PEM p:6-21 s:6.2] lvsl VRT, RA, RB: build shift-left permute control.
+///
+/// [AltiVec-PEM p:6-21 s:6.2] lvsl VRT, RA, RB: build shift-left permute control.
 fn lvsl_cases() -> Vec<InstructionCase> {
     let raw = xform(/*vt*/ 1, /*ra*/ 4, /*rb*/ 5, 6);
     let mut cases = Vec::new();
@@ -94,7 +95,8 @@ fn lvsl_cases() -> Vec<InstructionCase> {
 }
 
 /// `lvsr`: shift-right companion. `VRT[i] = 16 + i - sh` for `i` in `0..16`.
-// [AltiVec-PEM p:6-22 s:6.2] lvsr VRT, RA, RB: build shift-right permute control.
+///
+/// [AltiVec-PEM p:6-22 s:6.2] lvsr VRT, RA, RB: build shift-right permute control.
 fn lvsr_cases() -> Vec<InstructionCase> {
     let raw = xform(2, 4, 5, 38);
     let mut cases = Vec::new();
@@ -142,7 +144,8 @@ fn lvsr_cases() -> Vec<InstructionCase> {
 /// `lvebx`: byte load at EA into byte position (EA & 0xF) of VRT.
 /// CellGov preserves the other 15 byte lanes (deterministic policy
 /// for the architecturally-undefined bytes).
-// [AltiVec-PEM p:6-15 s:6.2] lvebx VRT, RA, RB: 1-byte element load.
+///
+/// [AltiVec-PEM p:6-15 s:6.2] lvebx VRT, RA, RB: 1-byte element load.
 fn lvebx_cases() -> Vec<InstructionCase> {
     let raw = xform(3, 4, 5, 7);
     let mut cases = Vec::new();
@@ -184,7 +187,8 @@ fn lvebx_cases() -> Vec<InstructionCase> {
 
 /// `lvehx`: halfword load at (EA & ~1) into halfword position
 /// `(EA & 0xE)` of VRT.
-// [AltiVec-PEM p:6-16 s:6.2] lvehx VRT, RA, RB: 2-byte element load, EA aligned down to halfword.
+///
+/// [AltiVec-PEM p:6-16 s:6.2] lvehx VRT, RA, RB: 2-byte element load, EA aligned down to halfword.
 fn lvehx_cases() -> Vec<InstructionCase> {
     let raw = xform(4, 4, 5, 39);
     let mut cases = Vec::new();
@@ -225,7 +229,8 @@ fn lvehx_cases() -> Vec<InstructionCase> {
 }
 
 /// `lvewx`: word load at (EA & ~3) into word position `(EA & 0xC)` of VRT.
-// [AltiVec-PEM p:6-17 s:6.2] lvewx VRT, RA, RB: 4-byte element load, EA aligned down to word.
+///
+/// [AltiVec-PEM p:6-17 s:6.2] lvewx VRT, RA, RB: 4-byte element load, EA aligned down to word.
 fn lvewx_cases() -> Vec<InstructionCase> {
     let raw = xform(5, 4, 5, 71);
     let mut cases = Vec::new();
@@ -265,7 +270,8 @@ fn lvewx_cases() -> Vec<InstructionCase> {
 }
 
 /// `lvxl`: identical to `lvx` -- the "Last" suffix is a cache LRU hint.
-// [AltiVec-PEM p:6-23 s:6.2] lvxl VRT, RA, RB: same semantics as lvx with LRU hint.
+///
+/// [AltiVec-PEM p:6-23 s:6.2] lvxl VRT, RA, RB: same semantics as lvx with LRU hint.
 fn lvxl_cases() -> Vec<InstructionCase> {
     let raw = xform(6, 4, 5, 359);
     let payload = [

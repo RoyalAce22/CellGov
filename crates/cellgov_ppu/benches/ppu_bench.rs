@@ -355,97 +355,97 @@ fn bench_run_until_yield_per_step_on(c: &mut Criterion) {
 // in `shadow::test_support`; the bench crate has no access to
 // module-private helpers.
 
-// [PPC-Book1 p:51 s:3.3.8] addi: RT <- (RA|0) + EXTS(SI); RA=0 yields the
-// `li RT,simm` extended mnemonic that the quickening pass rewrites to `Li`.
-// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD(0:5)=14, RT(6:10), RA(11:15), SI(16:31).
+/// [PPC-Book1 p:51 s:3.3.8] addi: RT <- (RA|0) + EXTS(SI); RA=0 yields the
+/// `li RT,simm` extended mnemonic that the quickening pass rewrites to `Li`.
+/// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD(0:5)=14, RT(6:10), RA(11:15), SI(16:31).
 fn enc_li(rt: u32, simm: i16) -> u32 {
     (14 << 26) | ((rt & 0x1F) << 21) | ((simm as u16) as u32)
 }
 
-// [PPC-Book1 p:42 s:3.3.3] stw: MEM(EA,4) <- (RS)32:63; EA = (RA|0)+EXTS(D).
-// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD=36.
+/// [PPC-Book1 p:42 s:3.3.3] stw: MEM(EA,4) <- (RS)32:63; EA = (RA|0)+EXTS(D).
+/// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD=36.
 fn enc_stw(rs: u32, ra: u32, off: i16) -> u32 {
     (36 << 26) | ((rs & 0x1F) << 21) | ((ra & 0x1F) << 16) | (off as u16 as u32)
 }
 
-// [PPC-Book1 p:37 s:3.3.2] lwz: RT <- 32 zeros || MEM(EA,4); EA = (RA|0)+EXTS(D).
-// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD=32.
+/// [PPC-Book1 p:37 s:3.3.2] lwz: RT <- 32 zeros || MEM(EA,4); EA = (RA|0)+EXTS(D).
+/// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD=32.
 fn enc_lwz(rt: u32, ra: u32, off: i16) -> u32 {
     (32 << 26) | ((rt & 0x1F) << 21) | ((ra & 0x1F) << 16) | (off as u16 as u32)
 }
 
-// [PPC-Book1 p:82 s:3.3.13] mflr = mfspr RT,LR (SPR=8). The 10-bit
-// encoded SPR field is split with halves swapped relative to the SPR
-// number: instruction bits 11:15 hold the LOW 5 bits of the SPR
-// number, instruction bits 16:20 hold the HIGH 5 bits, so decode
-// reassembles SPR# = (inst[16:20] << 5) | inst[11:15].
-// SPR=8 = 0b00000_01000 -- low half 0b01000 = 8 at PPC bits 11:15,
-// high half 0 at PPC bits 16:20. `(8 << 16)` writes that bits-11:15
-// field (same instruction-bit position as RA in X-form).
-// [PPC-Book1 p:9 s:1.7.8 XFX-Form] OPCD=31, XO(21:30)=339.
+/// [PPC-Book1 p:82 s:3.3.13] mflr = mfspr RT,LR (SPR=8). The 10-bit
+/// encoded SPR field is split with halves swapped relative to the SPR
+/// number: instruction bits 11:15 hold the LOW 5 bits of the SPR
+/// number, instruction bits 16:20 hold the HIGH 5 bits, so decode
+/// reassembles SPR# = (`inst[16:20]` << 5) | `inst[11:15]`.
+/// SPR=8 = 0b00000_01000 -- low half 0b01000 = 8 at PPC bits 11:15,
+/// high half 0 at PPC bits 16:20. `(8 << 16)` writes that bits-11:15
+/// field (same instruction-bit position as RA in X-form).
+/// [PPC-Book1 p:9 s:1.7.8 XFX-Form] OPCD=31, XO(21:30)=339.
 fn enc_mflr(rt: u32) -> u32 {
     (31 << 26) | ((rt & 0x1F) << 21) | (8 << 16) | (339 << 1)
 }
 
-// [PPC-Book1 p:81 s:3.3.13] mtlr = mtspr LR,RS (SPR=8); same XFX-form
-// SPR-field half-swap as mflr above. XO(21:30)=467.
+/// [PPC-Book1 p:81 s:3.3.13] mtlr = mtspr LR,RS (SPR=8); same XFX-form
+/// SPR-field half-swap as mflr above. XO(21:30)=467.
 fn enc_mtlr(rs: u32) -> u32 {
     (31 << 26) | ((rs & 0x1F) << 21) | (8 << 16) | (467 << 1)
 }
 
-// [PPC-Book1 p:39 s:3.3.2] ld: RT <- MEM(EA,8); EA = (RA|0)+EXTS(DS||0b00).
-// [PPC-Book1 p:8 s:1.7.5 DS-Form] OPCD=58, DS(16:29) || 0b00, XO(30:31)=00.
-// `& 0xFFFC` clears the low 2 bits of the encoded offset (keeping DS aligned
-// to 4 bytes) and the XO field (selecting plain ld, not ldu/lwa).
+/// [PPC-Book1 p:39 s:3.3.2] ld: RT <- MEM(EA,8); EA = (RA|0)+EXTS(DS||0b00).
+/// [PPC-Book1 p:8 s:1.7.5 DS-Form] OPCD=58, DS(16:29) || 0b00, XO(30:31)=00.
+/// `& 0xFFFC` clears the low 2 bits of the encoded offset (keeping DS aligned
+/// to 4 bytes) and the XO field (selecting plain ld, not ldu/lwa).
 fn enc_ld(rt: u32, ra: u32, off: i16) -> u32 {
     (58 << 26) | ((rt & 0x1F) << 21) | ((ra & 0x1F) << 16) | ((off as u16 as u32) & 0xFFFC)
 }
 
-// [PPC-Book1 p:43 s:3.3.3] std: MEM(EA,8) <- (RS); EA = (RA|0)+EXTS(DS||0b00).
-// [PPC-Book1 p:8 s:1.7.5 DS-Form] OPCD=62, XO(30:31)=00 selects std (not stdu).
+/// [PPC-Book1 p:43 s:3.3.3] std: MEM(EA,8) <- (RS); EA = (RA|0)+EXTS(DS||0b00).
+/// [PPC-Book1 p:8 s:1.7.5 DS-Form] OPCD=62, XO(30:31)=00 selects std (not stdu).
 fn enc_std(rs: u32, ra: u32, off: i16) -> u32 {
     (62 << 26) | ((rs & 0x1F) << 21) | ((ra & 0x1F) << 16) | ((off as u16 as u32) & 0xFFFC)
 }
 
-// [PPC-Book1 p:60 s:3.3.9] cmpi (cmpwi when L=0): signed compare of (RA)32:63
-// against EXTS(SI); CR[BF] <- c || XER[SO]. The L bit at PPC bit 10 stays
-// zero by virtue of no operand occupying that position.
-// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD=11, BF(6:8), L(10), RA(11:15), SI(16:31).
+/// [PPC-Book1 p:60 s:3.3.9] cmpi (cmpwi when L=0): signed compare of (RA)32:63
+/// against EXTS(SI); `CR[BF]` <- c || `XER[SO]`. The L bit at PPC bit 10 stays
+/// zero by virtue of no operand occupying that position.
+/// [PPC-Book1 p:8 s:1.7.4 D-Form] OPCD=11, BF(6:8), L(10), RA(11:15), SI(16:31).
 fn enc_cmpwi(bf: u32, ra: u32, imm: i16) -> u32 {
     (11 << 26) | ((bf & 0x7) << 23) | ((ra & 0x1F) << 16) | (imm as u16 as u32)
 }
 
-// [PPC-Book1 p:60 s:3.3.9] cmp (cmpw when L=0): signed compare of (RA)32:63
-// against (RB)32:63 into CR[BF].
-// [PPC-Book1 p:9 s:1.7.6 X-Form] OPCD=31, XO(21:30)=0.
+/// [PPC-Book1 p:60 s:3.3.9] cmp (cmpw when L=0): signed compare of (RA)32:63
+/// against (RB)32:63 into `CR[BF]`.
+/// [PPC-Book1 p:9 s:1.7.6 X-Form] OPCD=31, XO(21:30)=0.
 fn enc_cmpw(bf: u32, ra: u32, rb: u32) -> u32 {
     (31 << 26) | ((bf & 0x7) << 23) | ((ra & 0x1F) << 16) | ((rb & 0x1F) << 11)
 }
 
-// [PPC-Book1 p:24 s:2.4] bc BO,BI,target: branch B-form, non-linking with
-// AA=LK=0. `& 0xFFFC` clears AA(30) and LK(31) regardless of caller bits and
-// forces BD to 4-byte alignment; without it a non-aligned offset would
-// silently flip AA/LK and produce a different branch class.
-// [PPC-Book1 p:8 s:1.7.2 B-Form] OPCD=16, BO(6:10), BI(11:15), BD(16:29).
+/// [PPC-Book1 p:24 s:2.4] bc BO,BI,target: branch B-form, non-linking with
+/// AA=LK=0. `& 0xFFFC` clears AA(30) and LK(31) regardless of caller bits and
+/// forces BD to 4-byte alignment; without it a non-aligned offset would
+/// silently flip AA/LK and produce a different branch class.
+/// [PPC-Book1 p:8 s:1.7.2 B-Form] OPCD=16, BO(6:10), BI(11:15), BD(16:29).
 fn enc_bc(bo: u32, bi: u32, offset: i16) -> u32 {
     (16 << 26) | ((bo & 0x1F) << 21) | ((bi & 0x1F) << 16) | ((offset as u16 as u32) & 0xFFFC)
 }
 
-// 18-instruction tile hitting each of the nine super-pair fused
-// variants exactly once: LiStw, MflrStw, LwzMtlr, MflrStd, LdMtlr,
-// StdStd, LwzCmpwi, CmpwBc, CmpwiBc. Pair membership requirements
-// per `shadow::superpair::make_super_pair`.
-//
-// Both bc forms use BO=12 BI=2 and comparisons set EQ=false, so every
-// conditional branch falls through.
-// [PPC-Book1 p:20 s:2.4.1 Figure 21] BO=12 (0b01100) is "branch if
-// CR[BI]==1" with the BO_4 software hint clear.
-// [PPC-Book1 p:18 s:2.3.1] CR0 bit assignments are LT(0), GT(1), EQ(2),
-// SO(3); BI=2 indexes the EQ bit of CR0.
-//
-// r1 stays at 0 (PpuState::new zeros GPRs), so every load/store
-// aliases the instruction bytes in mem and forwards through the
-// store buffer.
+/// 18-instruction tile hitting each of the nine super-pair fused
+/// variants exactly once: LiStw, MflrStw, LwzMtlr, MflrStd, LdMtlr,
+/// StdStd, LwzCmpwi, CmpwBc, CmpwiBc. Pair membership requirements
+/// per `shadow::superpair::make_super_pair`.
+///
+/// Both bc forms use BO=12 BI=2 and comparisons set EQ=false, so every
+/// conditional branch falls through.
+/// [PPC-Book1 p:20 s:2.4.1 Figure 21] BO=12 (0b01100) is "branch if
+/// `CR[BI]`==1" with the BO_4 software hint clear.
+/// [PPC-Book1 p:18 s:2.3.1] CR0 bit assignments are LT(0), GT(1), EQ(2),
+/// SO(3); BI=2 indexes the EQ bit of CR0.
+///
+/// r1 stays at 0 (PpuState::new zeros GPRs), so every load/store
+/// aliases the instruction bytes in mem and forwards through the
+/// store buffer.
 fn mixed100_tile() -> [u32; 18] {
     [
         enc_li(3, 10),       // 0x00: addi r3, 0, 10 -- quickens to Li

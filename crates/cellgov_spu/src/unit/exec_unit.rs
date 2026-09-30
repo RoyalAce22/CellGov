@@ -302,7 +302,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         })
     }
 
-    // [CBEA p:95 s:8.5.3] a restart resumes at SPU_NPC; [CBEA p:94 s:8.5.2] it clears the C, I, S, H and P bits.
+    /// [CBEA p:95 s:8.5.3] a restart resumes at SPU_NPC; [CBEA p:94 s:8.5.2] it clears the C, I, S, H and P bits.
     fn restart(&mut self) -> Result<(), RestartError> {
         let stop = self.state.stop.take().ok_or(RestartError::NotStopped)?;
         self.state.pc = stop.npc;
@@ -310,9 +310,9 @@ impl ExecutionUnit for SpuExecutionUnit {
         Ok(())
     }
 
-    // [CBEA p:94 s:8.5.2] R is set while the SPU runs and clear once it stops.
-    // A unit CellGov refused issues no instructions, so it reports R clear
-    // with no stop cause.
+    /// [CBEA p:94 s:8.5.2] R is set while the SPU runs and clear once it stops.
+    /// A unit CellGov refused issues no instructions, so it reports R clear
+    /// with no stop cause.
     fn spu_status(&self) -> Option<u32> {
         if self.status == UnitStatus::Faulted {
             return Some(0);
@@ -324,9 +324,9 @@ impl ExecutionUnit for SpuExecutionUnit {
         )
     }
 
-    // [CBEA p:92 s:8.5.1] a stop request stops instruction issue; [CBEA p:95 s:8.5.3] SPU_NPC then names the next instruction.
-    // A unit CellGov refused keeps its refusal, and a stopped unit its
-    // stop.
+    /// [CBEA p:92 s:8.5.1] a stop request stops instruction issue; [CBEA p:95 s:8.5.3] SPU_NPC then names the next instruction.
+    /// A unit CellGov refused keeps its refusal, and a stopped unit its
+    /// stop.
     fn request_stop(&mut self, waiting: bool) -> Result<(), ProblemStateError> {
         if self.state.stop.is_none() && self.status != UnitStatus::Faulted {
             self.state
@@ -336,9 +336,9 @@ impl ExecutionUnit for SpuExecutionUnit {
         Ok(())
     }
 
-    // [CBEA p:95 s:8.5.3] a write updates SPU_NPC only while the SPU is stopped; its least significant bit is the interrupt-enable state, which the model does not carry.
-    // A new SPU_NPC abandons a parked rdch; the runtime returns any
-    // message it already took.
+    /// [CBEA p:95 s:8.5.3] a write updates SPU_NPC only while the SPU is stopped; its least significant bit is the interrupt-enable state, which the model does not carry.
+    /// A new SPU_NPC abandons a parked rdch; the runtime returns any
+    /// message it already took.
     fn write_npc(&mut self, npc: u32) -> Result<(), ProblemStateError> {
         if self.status == UnitStatus::Faulted {
             return Err(ProblemStateError::Refused);
@@ -361,7 +361,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         Ok(())
     }
 
-    // [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox takes the oldest message out of the queue.
+    /// [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox takes the oldest message out of the queue.
     fn read_out_mbox(&mut self) -> Result<Option<u32>, ProblemStateError> {
         Ok(self.state.channels.out_mbox.take())
     }

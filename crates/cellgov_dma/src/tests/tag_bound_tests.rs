@@ -69,7 +69,8 @@ fn every_accepted_tag_id_has_its_own_status_bit() {
 /// Tag group `n` publishes the bit of weight two to the `n`, which the
 /// distinctness check above leaves open: any permutation of the 32 bits
 /// passes it.
-// [CBEA p:126 s:9.3.4 MFC Read Tag-Group Query Mask Channel] the tag-group bit table runs g1F down to g0, so group 0 sits in the least significant bit and group 31 in the most significant.
+///
+/// [CBEA p:126 s:9.3.4 MFC Read Tag-Group Query Mask Channel] the tag-group bit table runs g1F down to g0, so group 0 sits in the least significant bit and group 31 in the most significant.
 #[test]
 fn tag_group_n_publishes_the_bit_of_weight_two_to_the_n() {
     for (raw, bit) in [

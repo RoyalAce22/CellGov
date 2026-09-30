@@ -67,7 +67,8 @@ impl<C> OperandField<C> {
     }
 
     /// Returns values at important signed and unsigned boundaries.
-    // [Jiang2022 p:5 s:3.1.1] The maximum and the minimum are the two boundary values an immediate must cover.
+    ///
+    /// [Jiang2022 p:5 s:3.1.1] The maximum and the minimum are the two boundary values an immediate must cover.
     pub fn boundary_values(&self) -> Vec<u32> {
         let maximum = self.maximum();
         let sign = 1u32

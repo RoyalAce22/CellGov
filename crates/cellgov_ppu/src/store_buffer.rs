@@ -29,7 +29,8 @@ const CAPACITY: usize = 64;
 /// (no PPC store instruction has zero width); the upper bound is the
 /// `value: u128` payload's capacity (`stvx`/`dcbz`-by-granule peak at
 /// 16 bytes per entry).
-// [PPC-Book2 p:10 s:1.7.3.1 Reservations] a later lwarx/ldarx clears the earlier reservation and establishes a new one; a stwcx./stdcx. clears only the reservation that precedes it.
+///
+/// [PPC-Book2 p:10 s:1.7.3.1 Reservations] a later lwarx/ldarx clears the earlier reservation and establishes a new one; a stwcx./stdcx. clears only the reservation that precedes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct StoreEntry {
     addr: u64,
@@ -182,6 +183,8 @@ impl StoreBuffer {
     /// in the block and emitted by [`Self::flush`] as a
     /// `ConditionalStore` at effect slot `emit_at` (see `StoreEntry`).
     ///
+    /// [PPC-Book2 p:9 s:1.7.3 Atomic Update] stwcx./stdcx. commit through the ConditionalStore effect path; the entry keeps their bytes in program order with the block's plain stores.
+    ///
     /// # Errors
     ///
     /// Returns the same refusals as [`Self::insert`].
@@ -189,7 +192,6 @@ impl StoreBuffer {
     /// # Panics
     ///
     /// Panics as [`Self::insert`] does.
-    // [PPC-Book2 p:9 s:1.7.3 Atomic Update] stwcx./stdcx. commit through the ConditionalStore effect path; the entry keeps their bytes in program order with the block's plain stores.
     #[inline]
     pub fn insert_conditional(
         &mut self,
@@ -269,13 +271,14 @@ impl StoreBuffer {
     /// for plain entries, `ConditionalStore` for successful
     /// `stwcx`/`stdcx` -- and clear the buffer.
     ///
+    /// [PPC-Book2 p:28 s:3.3 eieio] block-boundary flush models the memory-barrier ordering of Load/Store accesses with respect to other processors.
+    ///
     /// # Panics
     ///
     /// If `effects` was truncated below a recorded `emit_at` since
     /// the conditional store executed. The caller keeps the vector
     /// append-only between execute and flush; a fault clears both
     /// the vector and this buffer together.
-    // [PPC-Book2 p:28 s:3.3 eieio] block-boundary flush models the memory-barrier ordering of Load/Store accesses with respect to other processors.
     pub fn flush(&mut self, effects: &mut Vec<Effect>, source: UnitId) {
         let mut next = 0usize;
         let mut inserted = 0usize;

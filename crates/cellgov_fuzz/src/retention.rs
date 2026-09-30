@@ -649,13 +649,14 @@ pub struct EvaluationDistribution {
 impl EvaluationDistribution {
     /// Builds distributions from repeated equal-budget trials.
     ///
+    /// [Klees2018 p:2127 s:4 Statistically Sound Comparisons] A single run is
+    /// not evidence; a claim needs many trials and a comparison of their
+    /// distributions.
+    ///
     /// # Errors
     ///
     /// Returns [`EvaluationError`] for fewer than two trials, repeated seeds,
     /// or unequal attempted-case budgets.
-    // [Klees2018 p:2127 s:4 Statistically Sound Comparisons] A single run is
-    // not evidence; a claim needs many trials and a comparison of their
-    // distributions.
     pub fn from_trials(
         trials: impl IntoIterator<Item = TrialMetrics>,
     ) -> Result<Self, EvaluationError> {

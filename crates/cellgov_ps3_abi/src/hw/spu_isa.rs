@@ -3,8 +3,9 @@
 
 /// An SPU instruction format: where the opcode ends and which operand
 /// fields follow it.
-// [SPU-ISA p:28 s:2.3] the RR, RRR and RI7 formats.
-// [SPU-ISA p:29 s:2.3] the RI10, RI16 and RI18 formats.
+///
+/// [SPU-ISA p:28 s:2.3] the RR, RRR and RI7 formats.
+/// [SPU-ISA p:29 s:2.3] the RI10, RI16 and RI18 formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpuForm {
     /// 11-bit opcode, then RB, RA and RT.
@@ -14,7 +15,8 @@ pub enum SpuForm {
     /// 11-bit opcode, then a 7-bit immediate, RA and RT.
     Ri7,
     /// 10-bit opcode, then an 8-bit immediate, RA and RT.
-    // [SPU-ISA p:220 s:9] the conversions carry an 8-bit scale after a 10-bit opcode.
+    ///
+    /// [SPU-ISA p:220 s:9] the conversions carry an 8-bit scale after a 10-bit opcode.
     Ri8,
     /// 8-bit opcode, then a 10-bit immediate, RA and RT.
     Ri10,
@@ -24,7 +26,8 @@ pub enum SpuForm {
     Ri18,
     /// 7-bit opcode, then the branch instruction's offset split across two
     /// fields around a 16-bit branch-target immediate.
-    // [SPU-ISA p:193 s:8] hbra and hbrr split ROH and ROL around I16.
+    ///
+    /// [SPU-ISA p:193 s:8] hbra and hbrr split ROH and ROL around I16.
     Hint,
 }
 
@@ -80,21 +83,24 @@ const fn row(
 
 /// The I8 that gives `csflt` and `cuflt` scale 0: their scale is this
 /// value less I8.
-// [SPU-ISA p:220 s:9] csflt's scale is 155 minus I8; [SPU-ISA p:222 s:9] cuflt's is the same.
+///
+/// [SPU-ISA p:220 s:9] csflt's scale is 155 minus I8; [SPU-ISA p:222 s:9] cuflt's is the same.
 pub const TO_FLOAT_SCALE_BIAS: u8 = 155;
 
 /// The I8 that gives `cflts` and `cfltu` scale 0: their scale is this
 /// value less I8.
-// [SPU-ISA p:221 s:9] cflts's scale is 173 minus I8; [SPU-ISA p:223 s:9] cfltu's is the same.
+///
+/// [SPU-ISA p:221 s:9] cflts's scale is 173 minus I8; [SPU-ISA p:223 s:9] cfltu's is the same.
 pub const TO_INTEGER_SCALE_BIAS: u8 = 173;
 
 /// Every SPU ISA 1.2 instruction, ordered by opcode. No row's opcode is
 /// a prefix of another's, so a word matches at most one row.
-// [SPU-ISA p:259 s:A] Table A-1 lists every SPU instruction and the page that shows its encoding; each row carries that page, except where the table misprints it.
-// [SPU-ISA p:211 s:9] the dfnms encoding is on this page, though Table A-1 gives 213.
-// [SPU-ISA p:235 s:9] the fscrwr encoding is on this page, though Table A-1 gives 236.
-// [SPU-ISA p:236 s:9] the fscrrd encoding is on this page, though Table A-1 gives 235.
-// [CBE-Handbook p:766 s:B.1 Table B-1] the CBE's SPU instruction table lists dfma and dfnms but none of the ISA 1.2 double-precision compares (dfceq, dfcmeq, dfcgt, dfcmgt, dftsv), which the ISA marks optional.
+///
+/// [SPU-ISA p:259 s:A] Table A-1 lists every SPU instruction and the page that shows its encoding; each row carries that page, except where the table misprints it.
+/// [SPU-ISA p:211 s:9] the dfnms encoding is on this page, though Table A-1 gives 213.
+/// [SPU-ISA p:235 s:9] the fscrwr encoding is on this page, though Table A-1 gives 236.
+/// [SPU-ISA p:236 s:9] the fscrrd encoding is on this page, though Table A-1 gives 235.
+/// [CBE-Handbook p:766 s:B.1 Table B-1] the CBE's SPU instruction table lists dfma and dfnms but none of the ISA 1.2 double-precision compares (dfceq, dfcmeq, dfcgt, dfcmgt, dftsv), which the ISA marks optional.
 pub const SPU_OPCODE_MAP: &[SpuOpcodeRow] = &[
     row("stop", 11, 0b00000000000, SpuForm::Rr, 238, true),
     row("lnop", 11, 0b00000000001, SpuForm::Rr, 240, true),

@@ -4,12 +4,12 @@
 use super::*;
 use crate::state::SpuState;
 
-// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
-// [SPU-ISA p:29 s:2.3] RI10: 8-bit opcode, I10, RA, RT.
+/// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
 fn rr(op: u32, rt: u32, ra: u32, rb: u32) -> u32 {
     op << 21 | rb << 14 | ra << 7 | rt
 }
 
+/// [SPU-ISA p:29 s:2.3] RI10: 8-bit opcode, I10, RA, RT.
 fn ri10(op: u32, rt: u32, ra: u32, i10: u32) -> u32 {
     op << 24 | (i10 & 0x3FF) << 14 | ra << 7 | rt
 }

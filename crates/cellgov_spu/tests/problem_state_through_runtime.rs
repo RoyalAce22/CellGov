@@ -67,7 +67,7 @@ fn r5(rt: &Runtime, unit: UnitId) -> u32 {
     spu(rt, unit).state().reg_word(5)
 }
 
-// [CBEA p:99 s:8.6.2] an MMIO write to SPU_In_Mbox is available to the SPU's rdch of SPU_RdInMbox.
+/// [CBEA p:99 s:8.6.2] an MMIO write to SPU_In_Mbox is available to the SPU's rdch of SPU_RdInMbox.
 #[test]
 fn an_inbound_mailbox_write_wakes_the_spu_parked_on_it() {
     let (mut rt, unit) = runtime_with_spu();
@@ -80,8 +80,8 @@ fn an_inbound_mailbox_write_wakes_the_spu_parked_on_it() {
     assert_eq!(rt.unit_spu_status(unit), Some(SPU_STATUS_P));
 }
 
-// [CBEA p:92 s:8.5.1] a stop request stops instruction issue until a run request.
-// [CBEA p:94 s:8.5.2] an SPU stopped while waiting on a blocked channel reports W.
+/// [CBEA p:92 s:8.5.1] a stop request stops instruction issue until a run request.
+/// [CBEA p:94 s:8.5.2] an SPU stopped while waiting on a blocked channel reports W.
 #[test]
 fn a_stop_request_holds_a_parked_spu_stopped_until_it_restarts() {
     let (mut rt, unit) = runtime_with_spu();

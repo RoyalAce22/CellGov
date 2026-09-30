@@ -38,8 +38,8 @@ fn run(word: u32, a: u32, b: u32) -> SpuStepOutcome {
     out
 }
 
-// [CBEA p:94 s:8.5.2] H (bit 29) marks a stop by a halt instruction.
-// [CBEA p:93 s:8.5.2] the StopCode field is not valid without P.
+/// [CBEA p:94 s:8.5.2] H (bit 29) marks a stop by a halt instruction.
+/// [CBEA p:93 s:8.5.2] the StopCode field is not valid without P.
 #[test]
 fn a_met_halt_stops_the_unit_with_the_halt_bit_and_the_next_word() {
     use cellgov_exec::{ExecutionContext, ExecutionUnit, StopRegisters, YieldReason};
@@ -66,14 +66,14 @@ fn a_met_halt_stops_the_unit_with_the_halt_bit_and_the_next_word() {
     );
 }
 
-// [SPU-ISA p:150 s:7] heq halts when RA's preferred word equals RB's.
+/// [SPU-ISA p:150 s:7] heq halts when RA's preferred word equals RB's.
 #[test]
 fn heq_halts_only_on_equal_words() {
     assert_eq!(run(rr(0x3D8), 5, 5), HALT);
     assert_eq!(run(rr(0x3D8), 5, 6), SpuStepOutcome::Continue);
 }
 
-// [SPU-ISA p:150 s:7] heq compares the preferred slots only, RA0:3 and RB0:3.
+/// [SPU-ISA p:150 s:7] heq compares the preferred slots only, RA0:3 and RB0:3.
 #[test]
 fn a_halt_reads_only_the_preferred_slot() {
     let heq = decode(rr(0x3D8)).expect("heq decodes");
@@ -89,14 +89,14 @@ fn a_halt_reads_only_the_preferred_slot() {
     }
 }
 
-// [SPU-ISA p:151 s:7] heqi compares against I10 sign-extended to 32 bits.
+/// [SPU-ISA p:151 s:7] heqi compares against I10 sign-extended to 32 bits.
 #[test]
 fn heqi_compares_against_the_sign_extended_immediate() {
     assert_eq!(run(ri10(0x7F, -1), 0xFFFF_FFFF, 0), HALT);
     assert_eq!(run(ri10(0x7F, -1), 0x3FF, 0), SpuStepOutcome::Continue);
 }
 
-// [SPU-ISA p:152 s:7] hgt is an algebraic compare.
+/// [SPU-ISA p:152 s:7] hgt is an algebraic compare.
 #[test]
 fn hgt_compares_signed() {
     assert_eq!(run(rr(0x258), 1, 0x8000_0000), HALT);
@@ -104,7 +104,7 @@ fn hgt_compares_signed() {
     assert_eq!(run(rr(0x258), 7, 7), SpuStepOutcome::Continue);
 }
 
-// [SPU-ISA p:153 s:7] hgti compares algebraically against the sign-extended I10.
+/// [SPU-ISA p:153 s:7] hgti compares algebraically against the sign-extended I10.
 #[test]
 fn hgti_compares_signed_against_the_immediate() {
     assert_eq!(run(ri10(0x4F, -1), 0, 0), HALT);
@@ -114,7 +114,7 @@ fn hgti_compares_signed_against_the_immediate() {
     );
 }
 
-// [SPU-ISA p:154 s:7] hlgt is a logical (unsigned) compare.
+/// [SPU-ISA p:154 s:7] hlgt is a logical (unsigned) compare.
 #[test]
 fn hlgt_compares_unsigned() {
     assert_eq!(run(rr(0x2D8), 0x8000_0000, 1), HALT);
@@ -122,7 +122,7 @@ fn hlgt_compares_unsigned() {
     assert_eq!(run(rr(0x2D8), 7, 7), SpuStepOutcome::Continue);
 }
 
-// [SPU-ISA p:155 s:7] hlgti extends I10 to 32 bits, then compares unsigned.
+/// [SPU-ISA p:155 s:7] hlgti extends I10 to 32 bits, then compares unsigned.
 #[test]
 fn hlgti_compares_unsigned_against_the_sign_extended_immediate() {
     assert_eq!(run(ri10(0x5F, -512), 0xFFFF_FFFF, 0), HALT);

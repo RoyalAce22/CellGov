@@ -49,9 +49,10 @@ pub enum SpuThreadError {
 
 impl SpuThreadStop {
     /// The meaning of a stop whose `SPU_Status` word is `status`.
-    // [CBEA p:93 s:8.5.2] StopCode (bits 0:15) is valid only with P; C and I name an SPU error.
-    // [CBEA p:94 s:8.5.2] H names a halt and P a stop-and-signal.
-    // [CBEA p:263 s:21.4] an invalid instruction or channel instruction raises an SPU error, not a program stop.
+    ///
+    /// [CBEA p:93 s:8.5.2] StopCode (bits 0:15) is valid only with P; C and I name an SPU error.
+    /// [CBEA p:94 s:8.5.2] H names a halt and P a stop-and-signal.
+    /// [CBEA p:263 s:21.4] an invalid instruction or channel instruction raises an SPU error, not a program stop.
     pub fn from_status(status: u32) -> Self {
         if status & SPU_STATUS_P != 0 {
             let code = ((status >> SPU_STATUS_STOP_CODE_SHIFT) & SPU_STOP_CODE_MASK) as u16;

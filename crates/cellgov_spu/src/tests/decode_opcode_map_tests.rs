@@ -37,7 +37,7 @@ fn every_row_decodes_as_its_own_mnemonic_or_is_refused_by_it() {
     }
 }
 
-// [SPU-ISA p:259 s:A] no instruction has an RRR opcode of 1001 or 1010.
+/// [SPU-ISA p:259 s:A] no instruction has an RRR opcode of 1001 or 1010.
 #[test]
 fn a_word_no_row_owns_is_unassigned() {
     for word in [0x9000_0000, 0xA123_4567] {

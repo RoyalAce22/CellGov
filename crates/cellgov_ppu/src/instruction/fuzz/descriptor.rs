@@ -121,7 +121,8 @@ impl PpuGenerationDescriptor {
     }
 
     /// Produces valid exact-kind words by clearing one encoded operand bit.
-    // [Regehr2012 p:4 s:5.2] A reducer that emits only variants it knows are valid never chases a difference an invalid variant caused.
+    ///
+    /// [Regehr2012 p:4 s:5.2] A reducer that emits only variants it knows are valid never chases a difference an invalid variant caused.
     pub fn shrink(&self, raw: u32) -> Vec<u32> {
         operand::operand_bit_clears(raw, &self.operands)
             .into_iter()

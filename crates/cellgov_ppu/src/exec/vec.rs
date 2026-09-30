@@ -270,7 +270,8 @@ pub(crate) fn execute_va(
 
 /// Execute `vsldoi`. `shb` is the 4-bit byte-shift immediate carved out
 /// of the VA-form vc slot by the decoder.
-// [AltiVec-PEM p:6-136 s:6.2] Vector Shift Left Double by Octet Immediate
+///
+/// [AltiVec-PEM p:6-136 s:6.2] Vector Shift Left Double by Octet Immediate
 pub(crate) fn execute_vsldoi(
     state: &mut PpuState,
     vt: u8,

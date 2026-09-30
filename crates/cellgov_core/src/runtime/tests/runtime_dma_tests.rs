@@ -105,7 +105,8 @@ fn an_untagged_completion_wakes_its_issuer_with_no_tag_bit() {
 }
 
 /// Uses tag 5 because at tag 0 the shift `1 << 0` equals the constant 1.
-// [CBEA p:126 s:9.3.4 MFC Read Tag-Group Query Mask Channel] the mask's bit positions run g1F..g0, so tag group n is the bit of weight 2^n.
+///
+/// [CBEA p:126 s:9.3.4 MFC Read Tag-Group Query Mask Channel] the mask's bit positions run g1F..g0, so tag group n is the bit of weight 2^n.
 #[test]
 fn a_queued_tagged_transfer_holds_that_tag_groups_bit_until_it_completes() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
@@ -147,7 +148,7 @@ fn a_queued_tagged_transfer_holds_that_tag_groups_bit_until_it_completes() {
     );
 }
 
-// [CBEA p:128 s:9.3.6] a tag group reads complete when it has no outstanding operations.
+/// [CBEA p:128 s:9.3.6] a tag group reads complete when it has no outstanding operations.
 #[test]
 fn outstanding_tag_groups_count_only_the_units_own_transfers_and_a_reused_tag_stays_outstanding() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};

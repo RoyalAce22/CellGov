@@ -112,7 +112,8 @@ impl Runtime {
     }
 
     /// Returns one bit for each tag group with a `unit` transfer in the queue.
-    // [CBEA p:128 s:9.3.6] a tag group reads complete when it has no outstanding operations.
+    ///
+    /// [CBEA p:128 s:9.3.6] a tag group reads complete when it has no outstanding operations.
     pub(super) fn outstanding_dma_tags(&self, unit: cellgov_event::UnitId) -> u32 {
         self.dma_queue
             .pending()

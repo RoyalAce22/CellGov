@@ -47,7 +47,7 @@ fn run(unit: &mut SpuExecutionUnit) -> cellgov_exec::ExecutionStepResult {
     unit.run_until_yield(Budget::new(20), &ExecutionContext::new(&mem), &mut effects)
 }
 
-// [CBEA p:94 s:8.5.2] R is 1 while the SPU runs; a stop-and-signal clears it and sets P.
+/// [CBEA p:94 s:8.5.2] R is 1 while the SPU runs; a stop-and-signal clears it and sets P.
 #[test]
 fn the_status_word_reports_a_running_spu_and_a_stopped_one() {
     let mut unit = unit_with(&[0x0000_0005]);
@@ -56,7 +56,7 @@ fn the_status_word_reports_a_running_spu_and_a_stopped_one() {
     assert_eq!(unit.spu_status(), Some((5 << 16) | SPU_STATUS_P));
 }
 
-// [CBEA p:92 s:8.5.1] a stop request stops instruction issue; [CBEA p:95 s:8.5.3] SPU_NPC names the next instruction.
+/// [CBEA p:92 s:8.5.1] a stop request stops instruction issue; [CBEA p:95 s:8.5.3] SPU_NPC names the next instruction.
 #[test]
 fn a_stop_request_stops_a_running_spu_at_its_next_instruction() {
     let mut unit = unit_with(&[]);
@@ -77,7 +77,7 @@ fn a_stop_request_stops_a_running_spu_at_its_next_instruction() {
     );
 }
 
-// [CBEA p:94 s:8.5.2] W is set with the stopped status when the SPU was waiting on a blocked channel.
+/// [CBEA p:94 s:8.5.2] W is set with the stopped status when the SPU was waiting on a blocked channel.
 #[test]
 fn a_stop_request_on_a_waiting_spu_sets_w() {
     let mut unit = unit_with(&[]);
@@ -102,7 +102,7 @@ fn a_stop_request_leaves_a_stopped_spu_and_a_refused_one_as_they_are() {
     assert_eq!(refused.state().stop, None);
 }
 
-// [CBEA p:95 s:8.5.3] a write updates SPU_NPC only while the SPU is stopped.
+/// [CBEA p:95 s:8.5.3] a write updates SPU_NPC only while the SPU is stopped.
 #[test]
 fn spu_npc_takes_a_write_only_while_the_spu_is_stopped() {
     let mut unit = unit_with(&[]);
@@ -115,7 +115,7 @@ fn spu_npc_takes_a_write_only_while_the_spu_is_stopped() {
     assert_eq!(unit.state().pc, 0x100);
 }
 
-// [CBEA p:101 s:8.7] overwrite mode sets the channel to the data, logical OR mode ORs it in; both set the count to 1.
+/// [CBEA p:101 s:8.7] overwrite mode sets the channel to the data, logical OR mode ORs it in; both set the count to 1.
 #[test]
 fn a_signal_write_follows_the_register_mode_and_sets_its_count() {
     let mut unit = unit_with(&[
@@ -140,8 +140,8 @@ fn a_signal_write_follows_the_register_mode_and_sets_its_count() {
     assert_eq!((unit.state().reg_word(3), unit.state().reg_word(4)), (1, 1));
 }
 
-// [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox returns the message the SPU wrote and frees its entry.
-// [CBEA p:133 s:9.5.1] SPU_WrOutMbox counts its free entries.
+/// [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox returns the message the SPU wrote and frees its entry.
+/// [CBEA p:133 s:9.5.1] SPU_WrOutMbox counts its free entries.
 #[test]
 fn the_outbound_mailbox_holds_the_spus_message_until_it_is_read() {
     let mut unit = unit_with(&[
@@ -156,7 +156,7 @@ fn the_outbound_mailbox_holds_the_spus_message_until_it_is_read() {
     assert_eq!(unit.read_out_mbox(), Ok(None));
 }
 
-// [CBEA p:98 s:8.6.1] a write to a full outbound mailbox stalls the SPU; the model refuses it by name.
+/// [CBEA p:98 s:8.6.1] a write to a full outbound mailbox stalls the SPU; the model refuses it by name.
 #[test]
 fn a_write_to_a_full_outbound_mailbox_is_refused_as_a_stall() {
     let mut unit = unit_with(&[wrch(SPU_WR_OUT_MBOX, 4)]);

@@ -190,7 +190,7 @@ fn structured_generated_word_for_descriptor(
     })
 }
 
-// [Padhye2019 p:332 s:3.1] Each random draw becomes one typed operand value, so every draw sequence encodes a structured word.
+/// [Padhye2019 p:332 s:3.1] Each random draw becomes one typed operand value, so every draw sequence encodes a structured word.
 fn generated_ppu_parameters(
     descriptor: &PpuGenerationDescriptor,
     rng: &mut Rng,
@@ -235,7 +235,7 @@ fn generated_ppu_parameters(
     })
 }
 
-// [Martignoni2009 p:128 s:3.1] A test case is code plus data, and the data are the register values and the remaining memory bytes; the registers are drawn here and the memory bytes in the engine.
+/// [Martignoni2009 p:128 s:3.1] A test case is code plus data, and the data are the register values and the remaining memory bytes; the registers are drawn here and the memory bytes in the engine.
 pub(super) fn random_state(rng: &mut Rng) -> Result<PpuState, GeneratorError> {
     let mut state = PpuState::new();
     let mut gpr = [0u64; 32];

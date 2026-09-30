@@ -745,7 +745,7 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
     );
 }
 
-// [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9]: a conversion's scale outside 0..=127 is undefined.
+/// [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9]: a conversion's scale outside 0..=127 is undefined.
 #[test]
 fn a_conversion_is_generated_only_with_a_defined_scale() {
     use cellgov_ps3_abi::hw::spu_isa::{TO_FLOAT_SCALE_BIAS, TO_INTEGER_SCALE_BIAS};
@@ -779,7 +779,7 @@ fn a_conversion_is_generated_only_with_a_defined_scale() {
     }
 }
 
-// [CBE-Handbook p:765 s:B.1] through [CBE-Handbook p:767 s:B.1]: the CBE's SPU instruction table has no double-precision compares.
+/// [CBE-Handbook p:765 s:B.1] through [CBE-Handbook p:767 s:B.1]: the CBE's SPU instruction table has no double-precision compares.
 #[test]
 fn the_registry_classifies_the_absent_double_compares_as_invalid_words() {
     use crate::instruction::SpuDecodeError;

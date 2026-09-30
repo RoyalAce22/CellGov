@@ -20,8 +20,8 @@ fn lmw(rt: u8, ra: u8) -> (ExecuteVerdict, PpuState, Vec<Effect>) {
     (v, s, effects)
 }
 
-// [PPC-Book1 p:46 s:3.3.5] lmw is invalid when RA is 0 or in the load range.
-// [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction interrupt for it.
+/// [PPC-Book1 p:46 s:3.3.5] lmw is invalid when RA is 0 or in the load range.
+/// [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction interrupt for it.
 #[test]
 fn lmw_with_ra_in_the_load_range_or_zero_faults_without_loading() {
     for (rt, ra) in [(20, 26), (20, 20), (20, 31), (3, 0), (31, 31)] {

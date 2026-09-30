@@ -26,7 +26,8 @@ fn branch_indirect_if(state: &mut SpuState, ra: u8, taken: bool) -> SpuStepOutco
 ///
 /// The ISA lets the SPU run zero or more instructions past a met halt;
 /// CellGov runs none, so the resume address is the word after the halt.
-// [SPU-ISA p:149 s:7] a halt stops imprecisely, at or after the halt instruction.
+///
+/// [SPU-ISA p:149 s:7] a halt stops imprecisely, at or after the halt instruction.
 fn halt_if(condition: bool) -> SpuStepOutcome {
     if condition {
         SpuStepOutcome::Stop {
@@ -38,7 +39,7 @@ fn halt_if(condition: bool) -> SpuStepOutcome {
     }
 }
 
-// [SPU-ISA p:116 s:5 Table 5-1] 10xxxxxx gives 0x00, 110xxxxx gives 0xFF, 111xxxxx gives 0x80.
+/// [SPU-ISA p:116 s:5 Table 5-1] 10xxxxxx gives 0x00, 110xxxxx gives 0xFF, 111xxxxx gives 0x80.
 fn shufb_byte(a: &[u8; 16], b: &[u8; 16], control: u8) -> u8 {
     match control {
         0x80..=0xBF => 0x00,

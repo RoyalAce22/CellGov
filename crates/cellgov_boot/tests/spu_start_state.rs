@@ -5,8 +5,8 @@ use cellgov_lv2::{LsSegment, SpuInitState, SpuLoadImage};
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState};
 use cellgov_spu::SpuExecutionUnit;
 
-// [CBEA p:238 s:16.3.3] privileged software initializes the channel counts before a new context starts.
-// [CBEA p:239 s:16.4] both signal-notification registers start in overwrite mode, the power-on reset value.
+/// [CBEA p:238 s:16.3.3] privileged software initializes the channel counts before a new context starts.
+/// [CBEA p:239 s:16.4] both signal-notification registers start in overwrite mode, the power-on reset value.
 #[test]
 fn a_thread_group_spu_starts_with_the_architected_channels_and_signal_registers() {
     let init = SpuInitState {

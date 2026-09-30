@@ -8,7 +8,7 @@ use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu_fpscr::fpscr_field;
 use cellgov_ps3_abi::hw::spu_isa::{TO_FLOAT_SCALE_BIAS, TO_INTEGER_SCALE_BIAS};
 
-// [SPU-ISA p:220 s:9] RI8: 10-bit opcode, I8, RA, RT.
+/// [SPU-ISA p:220 s:9] RI8: 10-bit opcode, I8, RA, RT.
 fn ri8(op: u32, rt: u32, ra: u32, imm: u32) -> u32 {
     op << 22 | imm << 14 | ra << 7 | rt
 }
@@ -153,7 +153,7 @@ fn every_defined_scale_matches_the_oracle() {
     }
 }
 
-// [SPU-ISA p:221 s:9] cflts saturates above 2^31 - 1 and below -2^31; [SPU-ISA p:223 s:9] cfltu saturates above 2^32 - 1 and every negative product to zero.
+/// [SPU-ISA p:221 s:9] cflts saturates above 2^31 - 1 and below -2^31; [SPU-ISA p:223 s:9] cfltu saturates above 2^32 - 1 and every negative product to zero.
 #[test]
 fn the_integer_conversions_saturate_at_their_documented_borders() {
     let (_, s) = run(
@@ -184,7 +184,7 @@ fn the_integer_conversions_saturate_at_their_documented_borders() {
     assert_eq!(s.fpscr, 0, "the integer conversions set no flag");
 }
 
-// [SPU-ISA p:196 s:9.1] truncation is the only single-precision rounding.
+/// [SPU-ISA p:196 s:9.1] truncation is the only single-precision rounding.
 #[test]
 fn the_float_conversions_truncate_and_flush() {
     // 2^32 - 1 truncates to 2^32 - 256, not up to 2^32; -2^31 is exact.
@@ -207,7 +207,7 @@ fn the_float_conversions_truncate_and_flush() {
     );
 }
 
-// [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9]: a scale outside 0..=127 has an undefined result.
+/// [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9]: a scale outside 0..=127 has an undefined result.
 #[test]
 fn an_undefined_scale_is_a_named_refusal() {
     for (op, imms) in [

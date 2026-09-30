@@ -158,7 +158,8 @@ fn clear_covering_drops_all_entries_on_same_line() {
 
 /// Without writer-exclusion, `lwarx; stw; stwcx.` on the same
 /// line would always fail the conditional store.
-// [PPC-Book2 p:10 s:1.7.3.1] "some other processor".
+///
+/// [PPC-Book2 p:10 s:1.7.3.1] "some other processor".
 #[test]
 fn clear_covering_preserves_excepted_unit() {
     let mut t = ReservationTable::new();

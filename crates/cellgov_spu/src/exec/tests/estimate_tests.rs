@@ -6,7 +6,7 @@ use super::*;
 use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu_fpscr::fpscr_field;
 
-// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT; RRR: 4-bit opcode, RT, RB, RA, RC.
+/// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT; RRR: 4-bit opcode, RT, RB, RA, RC.
 fn rr(op: u32, rt: u32, ra: u32, rb: u32) -> u32 {
     op << 21 | rb << 14 | ra << 7 | rt
 }
@@ -94,7 +94,8 @@ fn fi_matches_its_formula() {
 }
 
 /// Runs the reciprocal sequence on four operands and returns y2.
-// [SPU-ISA p:215 s:9] FREST y0,x; FI y1,x,y0; FNMS t1,x,y1,ONE; FMA y2,t1,y1,y1.
+///
+/// [SPU-ISA p:215 s:9] FREST y0,x; FI y1,x,y0; FNMS t1,x,y1,ONE; FMA y2,t1,y1,y1.
 fn reciprocal(x: [u32; 4]) -> ([u32; 4], u128) {
     let mut s = SpuState::new();
     s.regs[1] = from_words(x);
@@ -107,7 +108,8 @@ fn reciprocal(x: [u32; 4]) -> ([u32; 4], u128) {
 }
 
 /// Runs the reciprocal-square-root sequence on four operands and returns y2.
-// [SPU-ISA p:217 s:9] FRSQEST y0,x; AND ax,x,mask; FI y1,ax,y0; FM t1,ax,y1; FM t2,y1,HALF; FNMS t1,t1,y1,ONE; FMA y2,t1,t2,y1.
+///
+/// [SPU-ISA p:217 s:9] FRSQEST y0,x; AND ax,x,mask; FI y1,ax,y0; FM t1,ax,y1; FM t2,y1,HALF; FNMS t1,t1,y1,ONE; FMA y2,t1,t2,y1.
 fn reciprocal_sqrt(x: [u32; 4]) -> [u32; 4] {
     let mut s = SpuState::new();
     s.regs[1] = from_words(x);
@@ -239,7 +241,7 @@ fn both_sequences_meet_their_bounds_for_every_fraction() {
     check_reciprocal_sqrt(128, 0..1 << 23);
 }
 
-// [SPU-ISA p:215 s:9] 1/0 gives 0x7FFFFFFF; [SPU-ISA p:216 s:9] |x| >= 2^126 gives 0, 0x7E800000 included.
+/// [SPU-ISA p:215 s:9] 1/0 gives 0x7FFFFFFF; [SPU-ISA p:216 s:9] |x| >= 2^126 gives 0, 0x7E800000 included.
 #[test]
 fn zero_and_big_operands_meet_their_documented_results() {
     let (y2, fpscr) = reciprocal([0, 0x7E80_0000, 0x7F7F_FFFF, 0x7E7F_FFFF]);
@@ -257,7 +259,7 @@ fn zero_and_big_operands_meet_their_documented_results() {
     }
 }
 
-// [SPU-ISA p:217 s:9] with a zero exponent, fraction <= 0x000ff53c gives y2 = 0x7fffffff, and above it y2 >= 0x7fc00000.
+/// [SPU-ISA p:217 s:9] with a zero exponent, fraction <= 0x000ff53c gives y2 = 0x7fffffff, and above it y2 >= 0x7fc00000.
 fn check_zero_threshold(fractions: impl Iterator<Item = u32>) {
     let fractions: Vec<u32> = fractions.collect();
     for chunk in fractions.chunks(4) {
@@ -290,7 +292,7 @@ fn the_frsqest_zero_threshold_holds_for_every_fraction() {
     check_zero_threshold(0..1 << 23);
 }
 
-// [SPU-ISA p:215 s:9] and [SPU-ISA p:217 s:9]: a zero exponent flags divide by zero, in its own slot.
+/// [SPU-ISA p:215 s:9] and [SPU-ISA p:217 s:9]: a zero exponent flags divide by zero, in its own slot.
 #[test]
 fn a_zero_exponent_flags_divide_by_zero_in_its_own_slot() {
     for op in [FREST, FRSQEST] {
@@ -305,7 +307,7 @@ fn a_zero_exponent_flags_divide_by_zero_in_its_own_slot() {
     }
 }
 
-// [SPU-ISA p:215 s:9] S is the operand's sign; [SPU-ISA p:217 s:9] frsqest's sign is always 0.
+/// [SPU-ISA p:215 s:9] S is the operand's sign; [SPU-ISA p:217 s:9] frsqest's sign is always 0.
 #[test]
 fn the_estimate_carries_the_documented_sign_and_layout() {
     let mut s = SpuState::new();

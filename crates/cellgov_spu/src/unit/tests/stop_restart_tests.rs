@@ -33,7 +33,7 @@ fn run(unit: &mut SpuExecutionUnit) -> YieldReason {
         .yield_reason
 }
 
-// [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR; [CBEA p:95 s:8.5.3] SPU_NPC holds the address the SPU resumes at.
+/// [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR; [CBEA p:95 s:8.5.3] SPU_NPC holds the address the SPU resumes at.
 #[test]
 fn a_stop_records_its_code_and_the_next_word() {
     let mut unit = unit_with(&[STOP_0X102, IL_R3_7, STOP_0X102]);
@@ -56,7 +56,7 @@ fn a_stop_records_its_code_and_the_next_word() {
     );
 }
 
-// [CBEA p:95 s:8.5.3] a restart resumes at SPU_NPC; [CBEA p:94 s:8.5.2] it clears the stop status.
+/// [CBEA p:95 s:8.5.3] a restart resumes at SPU_NPC; [CBEA p:94 s:8.5.2] it clears the stop status.
 #[test]
 fn a_restart_resumes_at_the_next_word() {
     let mut unit = unit_with(&[STOP_0X102, IL_R3_7, STOP_0X102]);
@@ -78,7 +78,7 @@ fn a_unit_that_did_not_stop_refuses_a_restart() {
     assert_eq!(unit.status(), UnitStatus::Runnable);
 }
 
-// [CBEA p:93 s:8.5.2] a stopd always sets StopCode to x'3FFF'.
+/// [CBEA p:93 s:8.5.2] a stopd always sets StopCode to x'3FFF'.
 #[test]
 fn a_stopd_reports_the_breakpoint_code() {
     let mut unit = unit_with(&[STOPD]);

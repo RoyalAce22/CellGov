@@ -56,27 +56,34 @@ impl<T, const N: usize> std::ops::Index<usize> for RegBank<T, N> {
 /// stay directly assignable.
 pub struct PpuState {
     /// General-purpose registers r0..r31.
-    // [PPC-Book1 p:41 s:3.2.1] 64-bit GPRs.
+    ///
+    /// [PPC-Book1 p:41 s:3.2.1] 64-bit GPRs.
     pub gpr: RegBank<u64, GPR_COUNT>,
     /// Floating-point registers f0..f31 as raw f64 bit patterns.
-    // [PPC-Book1 p:97 s:4.2] FPRs hold floating-point values in double format.
+    ///
+    /// [PPC-Book1 p:97 s:4.2] FPRs hold floating-point values in double format.
     pub fpr: RegBank<u64, FPR_COUNT>,
     /// Vector registers v0..v31; big-endian (byte 0 is MSB).
-    // [AltiVec-PEM p:2-4 s:2.3.1] 128-bit vector registers.
+    ///
+    /// [AltiVec-PEM p:2-4 s:2.3.1] 128-bit vector registers.
     pub vr: RegBank<u128, VR_COUNT>,
     /// Program counter.
     pub pc: u64,
     /// Condition register: 8 x 4-bit fields packed into the low 32 bits.
-    // [PPC-Book1 p:28 s:2.3.1] CR is 32-bit, eight 4-bit fields CR0..CR7.
+    ///
+    /// [PPC-Book1 p:28 s:2.3.1] CR is 32-bit, eight 4-bit fields CR0..CR7.
     cr: u32,
     /// Link register.
-    // [PPC-Book1 p:28 s:2.3] Link Register (LR), branch processor register.
+    ///
+    /// [PPC-Book1 p:28 s:2.3] Link Register (LR), branch processor register.
     lr: u64,
     /// Count register.
-    // [PPC-Book1 p:28 s:2.3] Count Register (CTR), branch processor register.
+    ///
+    /// [PPC-Book1 p:28 s:2.3] Count Register (CTR), branch processor register.
     ctr: u64,
     /// Fixed-point exception register.
-    // [PPC-Book1 p:42 s:3.2.2] XER is a 64-bit register.
+    ///
+    /// [PPC-Book1 p:42 s:3.2.2] XER is a 64-bit register.
     xer: u64,
     /// AltiVec VR-usage mask (SPR 256). Excluded from
     /// [`Self::state_hash`]; divergences surface via the GPR holding
@@ -84,7 +91,8 @@ pub struct PpuState {
     /// write-only-then-read-back -- enforced by the `Mfvrsave` arm's
     /// `debug_assert!` with [`Self::mfvrsave_executed`] as liveness
     /// witness.
-    // [AltiVec-PEM p:2-6 s:2.3.3] VRSAVE is SPR 256, 32 bits.
+    ///
+    /// [AltiVec-PEM p:2-6 s:2.3.3] VRSAVE is SPR 256, 32 bits.
     pub vrsave: u32,
     /// Instrument flag (hash-excluded): set by `mtvrsave`. Guards the
     /// read-before-write tripwire in `Mfvrsave`.
@@ -120,11 +128,13 @@ pub struct PpuState {
     /// for the RSX-MMIO-window `debug_assert!`.
     pub dcbz_executed: u64,
     /// Time base register.
-    // [PPC-Book2 p:37 s:4] Time Base (TB) is a 64-bit register, increments periodically.
+    ///
+    /// [PPC-Book2 p:37 s:4] Time Base (TB) is a 64-bit register, increments periodically.
     pub tb: u64,
     /// Per-unit half of the reservation; `stwcx`/`stdcx` succeeds only
     /// when this and [`cellgov_sync::ReservationTable`] agree.
-    // [PPC-Book2 p:10 s:1.7.3.1] Reservation state: lwarx/ldarx sets, stwcx./stdcx. tests + clears.
+    ///
+    /// [PPC-Book2 p:10 s:1.7.3.1] Reservation state: lwarx/ldarx sets, stwcx./stdcx. tests + clears.
     reservation: Option<ReservedLine>,
     /// The Multilinear-128 accumulator of the hashed lanes. Each setter
     /// of a hashed lane adds that lane's change, so [`Self::state_hash`]
@@ -380,7 +390,8 @@ impl PpuState {
     }
 
     /// Read CR field `field` (0..=7) as a 4-bit LT/GT/EQ/SO nibble.
-    // [PPC-Book1 p:29 s:2.3.1] CR0 bits: 0=LT, 1=GT, 2=EQ, 3=SO.
+    ///
+    /// [PPC-Book1 p:29 s:2.3.1] CR0 bits: 0=LT, 1=GT, 2=EQ, 3=SO.
     pub fn cr_field(&self, field: u8) -> u8 {
         debug_assert!(field <= 7, "CR field index out of range: {field}");
         let shift = (7 - field) * 4;
@@ -411,13 +422,15 @@ impl PpuState {
     }
 
     /// XER carry bit (PPC bit 34 from MSB = Rust bit 29 from LSB).
-    // [PPC-Book1 p:32 s:3.2.2] XER bit 34 is Carry (CA).
+    ///
+    /// [PPC-Book1 p:32 s:3.2.2] XER bit 34 is Carry (CA).
     pub fn xer_ca(&self) -> bool {
         (self.xer >> 29) & 1 != 0
     }
 
     /// XER sticky-overflow bit (PPC bit 32 = Rust bit 31).
-    // [PPC-Book1 p:32 s:3.2.2] XER bit 32 is Summary Overflow (SO), sticky.
+    ///
+    /// [PPC-Book1 p:32 s:3.2.2] XER bit 32 is Summary Overflow (SO), sticky.
     pub fn xer_so(&self) -> bool {
         (self.xer >> 31) & 1 != 0
     }
@@ -432,7 +445,8 @@ impl PpuState {
     }
 
     /// Write OV (Rust bit 30) and OR into sticky SO (Rust bit 31).
-    // [PPC-Book1 p:32 s:3.2.2] XER bit 33 is Overflow (OV); SO is sticky and OR'd from OV.
+    ///
+    /// [PPC-Book1 p:32 s:3.2.2] XER bit 33 is Overflow (OV); SO is sticky and OR'd from OV.
     pub fn set_xer_ov(&mut self, overflow: bool) {
         if overflow {
             self.set_xer(self.xer | (1u64 << 31) | (1u64 << 30));
@@ -442,13 +456,15 @@ impl PpuState {
     }
 
     /// XER transfer byte count (PPC bits 57..63), used by `lswx` / `stswx`.
-    // [PPC-Book1 p:32 s:3.2.2] XER bits 57..63 hold the byte count for load-/store-string indexed.
+    ///
+    /// [PPC-Book1 p:32 s:3.2.2] XER bits 57..63 hold the byte count for load-/store-string indexed.
     pub fn xer_tbc(&self) -> u8 {
         (self.xer & 0x7F) as u8
     }
 
     /// Set CR0 LT/GT/EQ from `result as i64` plus XER's SO; 64-bit mode.
-    // [PPC-Book1 p:18 s:2.3.1] CR0 = c || XER[SO] for fixed-point Rc=1 instructions.
+    ///
+    /// [PPC-Book1 p:18 s:2.3.1] CR0 = c || `XER[SO]` for fixed-point Rc=1 instructions.
     pub fn set_cr0_from_result(&mut self, result: u64) {
         let signed = result as i64;
         let mut nib = if signed < 0 {

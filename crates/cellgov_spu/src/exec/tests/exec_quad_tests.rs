@@ -13,7 +13,7 @@ fn uid() -> UnitId {
     UnitId::new(1)
 }
 
-// [SPU-ISA p:32 s:3. Memory-Load/Store Instructions] lqd: I10 gains four zero bits before the add, and the sum drops its low four bits.
+/// [SPU-ISA p:32 s:3. Memory-Load/Store Instructions] lqd: I10 gains four zero bits before the add, and the sum drops its low four bits.
 #[test]
 fn lqd_scales_a_negative_immediate_by_sixteen_and_masks_the_low_bits() {
     let mut s = SpuState::new();
@@ -33,7 +33,7 @@ fn lqd_scales_a_negative_immediate_by_sixteen_and_masks_the_low_bits() {
     assert_eq!(s.regs[3], PATTERN);
 }
 
-// [SPU-ISA p:36 s:3. Memory-Load/Store Instructions] stqd: the same scaled and masked address as lqd, written from RT.
+/// [SPU-ISA p:36 s:3. Memory-Load/Store Instructions] stqd: the same scaled and masked address as lqd, written from RT.
 #[test]
 fn stqd_writes_the_register_at_the_scaled_offset() {
     let mut s = SpuState::new();
@@ -54,7 +54,7 @@ fn stqd_writes_the_register_at_the_scaled_offset() {
     assert!(s.ls[0x2040..0x2050].iter().all(|&b| b == 0));
 }
 
-// [SPU-ISA p:33 s:3. Memory-Load/Store Instructions] lqx: the preferred slots of RA and RB add, and the sum drops its low four bits.
+/// [SPU-ISA p:33 s:3. Memory-Load/Store Instructions] lqx: the preferred slots of RA and RB add, and the sum drops its low four bits.
 #[test]
 fn lqx_and_stqx_sum_the_preferred_slots_of_ra_and_rb() {
     let mut s = SpuState::new();
@@ -85,7 +85,7 @@ fn lqx_and_stqx_sum_the_preferred_slots_of_ra_and_rb() {
     assert_eq!(s.regs[6], PATTERN);
 }
 
-// [SPU-ISA p:34 s:3. Memory-Load/Store Instructions] lqa: I16 with two zero bits appended is the whole address.
+/// [SPU-ISA p:34 s:3. Memory-Load/Store Instructions] lqa: I16 with two zero bits appended is the whole address.
 #[test]
 fn lqa_and_stqa_ignore_every_register_for_the_address() {
     let mut s = SpuState::new();
@@ -99,7 +99,7 @@ fn lqa_and_stqa_ignore_every_register_for_the_address() {
     assert_eq!(s.regs[8], PATTERN);
 }
 
-// [SPU-ISA p:35 s:3. Memory-Load/Store Instructions] lqr: I16 with two zero bits appended adds to the PC.
+/// [SPU-ISA p:35 s:3. Memory-Load/Store Instructions] lqr: I16 with two zero bits appended adds to the PC.
 #[test]
 fn lqr_and_stqr_use_the_pc_not_ra() {
     let mut s = SpuState::new();

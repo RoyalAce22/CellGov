@@ -32,12 +32,12 @@ const ALL_COMPONENTS: [SpuReferenceComponent; 9] = [
 
 const SEQUENTIAL: &str = "000102030405060708090a0b0c0d0e0f";
 const ROTATED_12: &str = "0c0d0e0f000102030405060708090a0b";
-// [SPU-ISA p:238 s:10. Control Instructions] stop: opcode 0x000 with a zero stop-and-signal type.
+/// [SPU-ISA p:238 s:10. Control Instructions] stop: opcode 0x000 with a zero stop-and-signal type.
 const STOP_WORD: u32 = 0;
-// [SPU-ISA p:52 s:4. Constant-Formation Instructions] il RI16-form: opcode 0x081, I16 = 1, RT = 3.
+/// [SPU-ISA p:52 s:4. Constant-Formation Instructions] il RI16-form: opcode 0x081, I16 = 1, RT = 3.
 const IL_R3_1: u32 = 0x4080_0083;
-// [SPU-ISA p:249 s:11. Channel Instructions] rchcnt RR-form: opcode 0x00F, CA = 1, RT = 3.
-// Channel 1, SPU_WrEventMask, is implemented but the model does not answer its count, so it faults.
+/// [SPU-ISA p:249 s:11. Channel Instructions] rchcnt RR-form: opcode 0x00F, CA = 1, RT = 3.
+/// Channel 1, SPU_WrEventMask, is implemented but the model does not answer its count, so it faults.
 const RCHCNT_R3_CH1: u32 = 0x01e0_0083;
 
 type Mutation = fn(&mut SpuReferenceExpected, &mut SpuObservableSnapshot, &mut SpuStepOutcome);

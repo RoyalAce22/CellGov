@@ -18,7 +18,7 @@ fn no_opcode_is_a_prefix_of_another() {
     }
 }
 
-// [SPU-ISA p:259 s:A] Table A-1 lists 199 SPU instructions.
+/// [SPU-ISA p:259 s:A] Table A-1 lists 199 SPU instructions.
 #[test]
 fn every_row_finds_itself_by_its_canonical_word() {
     assert_eq!(SPU_OPCODE_MAP.len(), 199);
@@ -27,7 +27,7 @@ fn every_row_finds_itself_by_its_canonical_word() {
     }
 }
 
-// [SPU-ISA p:259 s:A] no instruction has an RRR opcode of 1001 or 1010.
+/// [SPU-ISA p:259 s:A] no instruction has an RRR opcode of 1001 or 1010.
 #[test]
 fn a_word_no_row_owns_finds_none() {
     assert_eq!(row_for(0x9000_0000), None);

@@ -73,7 +73,8 @@ fn immediate(operand: &str) -> u32 {
 }
 
 /// Encodes one instruction in SPU assembler syntax.
-// [SPU-ISA p:28 s:2.3] RR, RRR; [SPU-ISA p:29 s:2.3] RI16; [SPU-ISA p:220 s:9] RI8, whose assembler operand is the scale.
+///
+/// [SPU-ISA p:28 s:2.3] RR, RRR; [SPU-ISA p:29 s:2.3] RI16; [SPU-ISA p:220 s:9] RI8, whose assembler operand is the scale.
 fn assemble(line: &str) -> u32 {
     let (mnemonic, operands) = line.split_once(' ').unwrap_or((line, ""));
     let ops: Vec<&str> = operands
@@ -326,7 +327,8 @@ fn rpcs3_results(decoder: &str) -> Vec<(u128, u128)> {
 /// RPCS3 is a differential peer, not the reference: every case where it
 /// disagrees with the expected result has a row in peer.tsv with its
 /// class, and every row still disagrees.
-// [McKeeman1998 p:101 s:Differential Testing] two implementations can differ and both stay within the documents, so a disagreement is classified, not failed on.
+///
+/// [McKeeman1998 p:101 s:Differential Testing] two implementations can differ and both stay within the documents, so a disagreement is classified, not failed on.
 #[test]
 fn every_rpcs3_disagreement_is_classified() {
     let cases = read_cases(&std::fs::read_to_string(CASES).expect("cases.tsv"));

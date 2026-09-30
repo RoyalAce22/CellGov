@@ -65,7 +65,8 @@ fn vxor_typed_and_vx_stub_paths_produce_identical_state() {
 /// (1284 executed as OR), exactly the transcription-scramble class
 /// the encoding-law tests exist to catch; this test pins the
 /// corrected mapping with semantic probes.
-// [AltiVec-PEM p:6-111 s:6.2] vor XO=1156; [p:6-110] vnor XO=1284.
+///
+/// [AltiVec-PEM p:6-111 s:6.2] vor XO=1156; [p:6-110] vnor XO=1284.
 #[test]
 fn vx_xo_table_matches_altivec_pem_canonical() {
     let pairs: &[(u16, u128, u128, u128, &str)] = &[

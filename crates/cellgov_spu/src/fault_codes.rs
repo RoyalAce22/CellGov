@@ -19,14 +19,16 @@ use cellgov_effects::FaultKind;
 /// counter as `pc`, the other two as `faulting_ea`.
 ///
 /// [`LocalDiagnostics`]: cellgov_exec::LocalDiagnostics
-// [CBE-Handbook p:64 s:3.1.1 Local Store] Local store holds 256 KB, so an address inside it needs 18 bits.
+///
+/// [CBE-Handbook p:64 s:3.1.1 Local Store] Local store holds 256 KB, so an address inside it needs 18 bits.
 pub(crate) const FAULT_LS_OUT_OF_RANGE: u32 = 0x0002_0000;
 pub(crate) const FAULT_UNSUPPORTED_CHANNEL: u32 = 0x0003_0000;
 /// An MFC command the model has no arm for.
 ///
 /// The detail is the command word the guest wrote; its opcode sits in
 /// the low byte, so the masked detail still names the command.
-// [CBE-Handbook p:457 s:17.9.6 MFC Class ID and MFC Command Opcode Channel] The word written to this channel carries the transfer and replacement class ids in its high half and the MFC command opcode in its low byte.
+///
+/// [CBE-Handbook p:457 s:17.9.6 MFC Class ID and MFC Command Opcode Channel] The word written to this channel carries the transfer and replacement class ids in its high half and the MFC command opcode in its low byte.
 pub(crate) const FAULT_UNSUPPORTED_MFC_CMD: u32 = 0x0004_0000;
 /// An SPU instruction CellGov does not implement. The detail is the
 /// instruction's row in [`cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP`], which

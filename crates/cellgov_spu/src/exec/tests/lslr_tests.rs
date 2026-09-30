@@ -6,7 +6,7 @@
 use super::*;
 use crate::state::{SpuObservableSnapshot, SpuState, SPU_LSLR_FULL};
 
-// [SPU-ISA p:31 s:3 Table 3-1] 0x00007FFF selects a 32 KB local store.
+/// [SPU-ISA p:31 s:3 Table 3-1] 0x00007FFF selects a 32 KB local store.
 const LSLR_32K: u32 = 0x7FFF;
 
 fn uid() -> UnitId {

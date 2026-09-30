@@ -16,8 +16,8 @@ fn under_prefix(prefix: u32) -> Vec<(u32, Result<SpuInstruction, SpuDecodeError>
         .collect()
 }
 
-// [SPU-ISA p:33 s:3] lqx is 00111000100.
-// [SPU-ISA p:259 s:A] Table A-1 starts the list of every SPU instruction; checked entry by entry, only lqx starts 00111000.
+/// [SPU-ISA p:33 s:3] lqx is 00111000100.
+/// [SPU-ISA p:259 s:A] Table A-1 starts the list of every SPU instruction; checked entry by entry, only lqx starts 00111000.
 #[test]
 fn only_lqx_decodes_under_its_prefix() {
     for (op11, decoded) in under_prefix(0x38) {
@@ -39,8 +39,8 @@ fn only_lqx_decodes_under_its_prefix() {
     }
 }
 
-// [SPU-ISA p:37 s:3] stqx is 00101000100; [SPU-ISA p:239 s:10] stopd is 00101000000.
-// [SPU-ISA p:259 s:A] Table A-1 starts the list of every SPU instruction; checked entry by entry, only stqx and stopd start 00101000.
+/// [SPU-ISA p:37 s:3] stqx is 00101000100; [SPU-ISA p:239 s:10] stopd is 00101000000.
+/// [SPU-ISA p:259 s:A] Table A-1 starts the list of every SPU instruction; checked entry by entry, only stqx and stopd start 00101000.
 #[test]
 fn only_stqx_and_stopd_decode_under_their_prefix() {
     for (op11, decoded) in under_prefix(0x28) {

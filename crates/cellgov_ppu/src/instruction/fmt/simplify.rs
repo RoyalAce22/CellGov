@@ -68,9 +68,10 @@ impl Simplified {
 }
 
 /// What a Branch Conditional's BO field tests, hint bits masked out.
-// [PPC-Book1 p:20 s:2.4.1] Figure 21 BO field encodings: 0000z bdnzf,
-// 0001z bdzf, 001at cond-false, 0100z bdnzt, 0101z bdzt, 011at
-// cond-true, 1a00t bdnz, 1a01t bdz, 1z1zz branch-always.
+///
+/// [PPC-Book1 p:20 s:2.4.1] Figure 21 BO field encodings: 0000z bdnzf,
+/// 0001z bdzf, 001at cond-false, 0100z bdnzt, 0101z bdzt, 011at
+/// cond-true, 1a00t bdnz, 1a01t bdz, 1z1zz branch-always.
 enum BranchKind {
     /// Branch always.
     Always,
@@ -123,8 +124,9 @@ fn branch_kind(bo: u8, bi: u8) -> Option<BranchKind> {
 
 /// Condition code for a tested CR bit: `blt`-style when the branch
 /// fires on the bit being 1, `bge`-style on 0.
-// [PPC-Book1 p:153 s:B.2.3] standard condition codes lt/gt/eq/so and
-// their negations ge/le/ne/ns.
+///
+/// [PPC-Book1 p:153 s:B.2.3] standard condition codes lt/gt/eq/so and
+/// their negations ge/le/ne/ns.
 fn cond_code(bi: u8, wanted: bool) -> &'static str {
     if wanted {
         ["lt", "gt", "eq", "so"][(bi & 3) as usize]
@@ -135,7 +137,8 @@ fn cond_code(bi: u8, wanted: bool) -> &'static str {
 
 /// CTR-decrement stem: `bdnz` / `bdz`, optionally with the `t`/`f`
 /// CR-bit test suffix.
-// [PPC-Book1 p:152 s:B.2.2] Table 3 simple branch mnemonics.
+///
+/// [PPC-Book1 p:152 s:B.2.2] Table 3 simple branch mnemonics.
 fn ctr_stem(nz: bool, cond: Option<bool>) -> Mn {
     let mut m = Mn::new(if nz { "bdnz" } else { "bdz" });
     match cond {
