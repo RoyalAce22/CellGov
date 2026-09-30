@@ -343,9 +343,13 @@ fn run_instructions_inner(
 fn spu_relation_check(relation: SpuMetamorphicRelation) -> CheckIdentity {
     match relation {
         SpuMetamorphicRelation::Deterministic => CheckIdentity::DeterministicReplay,
-        SpuMetamorphicRelation::NopFalseTarget => CheckIdentity::SpuNopFalseTarget,
-        SpuMetamorphicRelation::RotateByteCountHighBit => CheckIdentity::SpuRotateByteCountHighBit,
+        SpuMetamorphicRelation::IgnoredField => CheckIdentity::SpuIgnoredField,
+        SpuMetamorphicRelation::CountMasking => CheckIdentity::SpuCountMasking,
         SpuMetamorphicRelation::ShufbControlClass => CheckIdentity::SpuShufbControlClass,
+        SpuMetamorphicRelation::ImmediateRegister => CheckIdentity::SpuImmediateRegister,
+        SpuMetamorphicRelation::Commutative => CheckIdentity::SpuCommutative,
+        SpuMetamorphicRelation::SlotPermutation => CheckIdentity::SpuSlotPermutation,
+        SpuMetamorphicRelation::CompareBranch => CheckIdentity::SpuCompareBranch,
     }
 }
 
@@ -410,7 +414,7 @@ fn run_metamorphic_checks(
             decoded.map(|instruction| run_once(&instruction, &case.partner_initial(initial)))
         }) {
             Ok(Ok(mut partner)) => {
-                case.settle_partner(initial, &mut partner.state.regs);
+                case.settle_partner(&first.state.regs, &mut partner.state.regs);
                 seeded::spu_partner(&mut partner.state);
                 partner
             }

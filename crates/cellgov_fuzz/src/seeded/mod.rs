@@ -29,6 +29,12 @@
 //! | replay run only               | `Nondeterministic`                   | deterministic replay        |
 //! | metamorphic partner only      | `MetamorphicMismatch`                | declared relation           |
 //! | every PPU observation         | `CommonMode`                         | none: the reference tier    |
+//! | SPU decoder, ignored bits     | `IgnoredFieldRead`                   | ignored-field relation      |
+//! | SPU result, one input class   | `UnmaskedCount`                      | count-masking relation      |
+//! |                               | `ImmediateFormOnly`                  | immediate-register relation |
+//! |                               | `OperandOrder`                       | commutativity relation      |
+//! |                               | `FirstSlot`                          | slot-permutation relation   |
+//! |                               | `BranchFallThrough`                  | compare-branch relation     |
 
 #[cfg(test)]
 mod defect;
@@ -47,3 +53,7 @@ pub(crate) use enabled::*;
 #[cfg(test)]
 #[path = "../tests/seeded_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/seeded_relation_tests.rs"]
+mod relation_tests;

@@ -26,9 +26,9 @@ fn a_common_mode_spu_defect_crosses_internal_checks_but_not_a_documented_vector(
     assert!(descriptor.outcomes.contains(&SpuOutcomeClass::Continue));
     assert!(descriptor
         .relations
-        .contains(&SpuMetamorphicRelation::RotateByteCountHighBit));
+        .contains(&SpuMetamorphicRelation::CountMasking));
     let partner_word = instruction
-        .metamorphic_case(word, SpuMetamorphicRelation::RotateByteCountHighBit)
+        .metamorphic_case(word, SpuMetamorphicRelation::CountMasking)
         .expect("documented upper immediate bits permit a partner")
         .partner_word;
     let partner = decode(partner_word).expect("partner must decode");

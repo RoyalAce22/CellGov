@@ -94,7 +94,15 @@ pub(crate) fn spu_decode(
         active() != Some(SeededDefect::DecoderPanic),
         "seeded decoder panic"
     );
-    cellgov_spu::decode::decode(raw)
+    let decoded = cellgov_spu::decode::decode(raw)?;
+    Ok(match decoded {
+        SpuInstruction::Stop { signal }
+            if active() == Some(SeededDefect::IgnoredFieldRead) && raw & 0x001F_C000 != 0 =>
+        {
+            SpuInstruction::Stop { signal: signal ^ 1 }
+        }
+        other => other,
+    })
 }
 
 /// Marks entry to an executor boundary.
@@ -146,7 +154,8 @@ pub(crate) fn ppu_observed(observation: &mut PpuObservation) {
 ///
 /// The common-mode defect touches a register the footprint allows and
 /// only when the outcome publishes register values; the footprint
-/// defect touches one it forbids.
+/// defect touches one it forbids. The common-mode corruption is the same
+/// in every byte, so no metamorphic relation's partner sees it differently.
 pub(crate) fn spu_observed(
     instruction: &SpuInstruction,
     outcome: SpuOutcomeClass,
@@ -166,9 +175,49 @@ pub(crate) fn spu_observed(
     };
     if let Some(register) = register {
         let register = usize::from(register);
-        let mut value = state.regs[register];
-        value[15] ^= CORRUPTION;
-        state.set_reg(register, value);
+        state.set_reg(register, state.regs[register].map(|byte| byte ^ CORRUPTION));
+    }
+    spu_relation_defect(instruction, outcome, state);
+}
+
+/// Applies a relation defect: a wrong result that only the partner of one
+/// metamorphic relation computes differently.
+///
+/// Each defect writes only a register the instruction writes, and the same
+/// way on every run of the same input, so the footprint, outcome and replay
+/// checks stay clean. The whole-register corruptions leave every byte slot
+/// the same, so a slot permutation carries them through unchanged.
+fn spu_relation_defect(
+    instruction: &SpuInstruction,
+    outcome: SpuOutcomeClass,
+    state: &mut SpuState,
+) {
+    let whole = |state: &mut SpuState, rt: u8| {
+        let register = usize::from(rt);
+        state.set_reg(register, state.regs[register].map(|byte| byte ^ CORRUPTION));
+    };
+    match (active(), *instruction) {
+        (Some(SeededDefect::UnmaskedCount), SpuInstruction::Rotqbyi { rt, imm, .. })
+            if imm & 0x70 != 0 =>
+        {
+            whole(state, rt);
+        }
+        (Some(SeededDefect::ImmediateFormOnly), SpuInstruction::Ai { rt, .. }) => whole(state, rt),
+        (Some(SeededDefect::OperandOrder), SpuInstruction::And { rt, ra, rb }) if ra > rb => {
+            whole(state, rt);
+        }
+        (Some(SeededDefect::FirstSlot), SpuInstruction::Sf { rt, .. }) => {
+            let register = usize::from(rt);
+            let mut value = state.regs[register];
+            value[0] ^= CORRUPTION;
+            state.set_reg(register, value);
+        }
+        (Some(SeededDefect::BranchFallThrough), SpuInstruction::Brz { .. })
+            if outcome == SpuOutcomeClass::Continue =>
+        {
+            state.pc = state.pc.wrapping_add(4);
+        }
+        _ => {}
     }
 }
 

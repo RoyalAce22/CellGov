@@ -69,18 +69,31 @@ impl SpuOutcomeClass {
 }
 
 /// Interpreter self-relation suitable for fuzz checking.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SpuMetamorphicRelation {
     /// Identical inputs give identical outputs.
     ///
     /// [Le2014 p:219 s:3.1] The comparison assumes deterministic semantics, where repeated executions on the same input yield the same result, and this relation checks that assumption.
     Deterministic,
-    /// NOP's false target field leaves the complete observation unchanged.
-    NopFalseTarget,
-    /// The high immediate bits do not affect a quadword byte rotation.
-    RotateByteCountHighBit,
+    /// Word bits the ISA marks ignored, or a false target, leave the complete
+    /// observation unchanged.
+    IgnoredField,
+    /// Count bits a shift or rotate masks off leave the result unchanged.
+    CountMasking,
     /// A shufb control byte changed within its class gives the same result byte.
     ShufbControlClass,
+    /// An immediate form equals its register form with the extended
+    /// immediate in every element of RB.
+    ImmediateRegister,
+    /// A swap of RA and RB of a symmetric operation leaves the observation
+    /// unchanged.
+    Commutative,
+    /// A swap of the doublewords of every input of an element-wise operation
+    /// swaps the doublewords of its result.
+    SlotPermutation,
+    /// A conditional branch goes where the opposite-sense branch goes on the
+    /// mask a compare of the tested value against zero gives.
+    CompareBranch,
 }
 
 /// A partner whose complete observation must match the original.
@@ -90,9 +103,13 @@ pub struct SpuMetamorphicCase {
     pub relation: SpuMetamorphicRelation,
     /// Encodes the instruction to run from the partner's initial state.
     pub partner_word: u32,
-    /// The input register the relation rewrites in the partner's initial
-    /// state; `None` when the partner runs from the original initial state.
-    pub varied_input: Option<SpuVariedInput>,
+    /// The input registers the relation rewrites in the partner's initial
+    /// state, each named once; all `None` when the partner runs from the
+    /// original initial state.
+    pub varied_inputs: [Option<SpuVariedInput>; 3],
+    /// The result register whose doublewords
+    /// [`SpuMetamorphicCase::settle_partner`] swaps back.
+    pub permuted_output: Option<u8>,
 }
 
 /// One input register a state relation rewrites before the partner runs.
@@ -100,11 +117,32 @@ pub struct SpuMetamorphicCase {
 pub struct SpuVariedInput {
     /// The rewritten register.
     pub register: u8,
+    /// How the partner's value derives from the original's.
+    pub rewrite: SpuInputRewrite,
     /// True when the instruction does not write the register.
     ///
-    /// [`SpuMetamorphicCase::settle_partner`] then restores the register in
-    /// the partner's final state to its original value.
+    /// [`SpuMetamorphicCase::settle_partner`] then copies the register in
+    /// the partner's final state from the original's.
     pub restore: bool,
+}
+
+/// How a state relation rewrites one input register.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpuInputRewrite {
+    /// Each shufb control byte moves to another byte of its class.
+    ShufbControlClass,
+    /// The register takes this value.
+    Replace([u8; 16]),
+    /// The set bits of this mask flip.
+    Flip([u8; 16]),
+    /// The tested field becomes all ones when it was zero and zero
+    /// otherwise: the preferred word, or bytes 2:3 when `halfword`.
+    ZeroCompare {
+        /// Tests bytes 2:3 instead of the preferred word.
+        halfword: bool,
+    },
+    /// The two doublewords trade places.
+    SwapDoublewords,
 }
 
 /// Reason a relation has no partner to compare.

@@ -61,12 +61,20 @@ pub enum CheckIdentity {
     PpuRecordCr6,
     /// PPU overflow-enable XER relation.
     PpuOverflowEnable,
-    /// Checks that changing NOP's RT field leaves the complete observation unchanged.
-    SpuNopFalseTarget,
-    /// Checks that upper I7 bits leave the quadword byte rotation unchanged.
-    SpuRotateByteCountHighBit,
+    /// Checks that ignored word bits and false targets leave the complete observation unchanged.
+    SpuIgnoredField,
+    /// Checks that count bits a shift or rotate masks off leave the result unchanged.
+    SpuCountMasking,
     /// Checks that rewriting shufb control bytes within their class leaves the result unchanged.
     SpuShufbControlClass,
+    /// Checks that an immediate form equals its register form with the immediate splatted.
+    SpuImmediateRegister,
+    /// Checks that swapping RA and RB of a symmetric operation leaves the observation unchanged.
+    SpuCommutative,
+    /// Checks that an element-wise operation commutes with a swap of doublewords.
+    SpuSlotPermutation,
+    /// Checks that a conditional branch goes where the opposite branch goes on the zero-compare mask.
+    SpuCompareBranch,
     /// Interpreter-owned legal-outcome contract.
     LegalOutcome,
     /// Interpreter-owned legal-effect contract.

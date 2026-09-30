@@ -19,11 +19,11 @@ fn declared_spu_relations_have_executed_witnesses_and_detect_seeded_state_leaks(
     for (kind, relation) in [
         (
             SpuInstructionKind::Nop,
-            SpuMetamorphicRelation::NopFalseTarget,
+            SpuMetamorphicRelation::IgnoredField,
         ),
         (
             SpuInstructionKind::Rotqbyi,
-            SpuMetamorphicRelation::RotateByteCountHighBit,
+            SpuMetamorphicRelation::CountMasking,
         ),
     ] {
         let descriptor = generation_descriptors()

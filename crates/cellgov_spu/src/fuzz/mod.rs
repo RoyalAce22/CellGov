@@ -6,6 +6,7 @@ mod descriptor;
 mod fields;
 mod metamorphic;
 mod registry;
+mod relations;
 mod sequence;
 mod support;
 mod types;
@@ -23,6 +24,10 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/shufb_relation_tests.rs"]
 mod shufb_relation_tests;
+
+#[cfg(test)]
+#[path = "tests/relation_catalog_tests.rs"]
+mod relation_catalog_tests;
 
 #[cfg(test)]
 #[path = "tests/form_agreement_tests.rs"]

@@ -51,11 +51,16 @@ fn every_rc_byte_moves_within_its_class_and_the_result_holds() {
         .expect("distinct RC has a partner");
     assert_eq!(case.partner_word, raw);
     assert_eq!(
-        case.varied_input,
-        Some(SpuVariedInput {
-            register: 3,
-            restore: true,
-        })
+        case.varied_inputs,
+        [
+            Some(SpuVariedInput {
+                register: 3,
+                rewrite: SpuInputRewrite::ShufbControlClass,
+                restore: true,
+            }),
+            None,
+            None,
+        ]
     );
 
     let original = initial();
@@ -74,7 +79,7 @@ fn every_rc_byte_moves_within_its_class_and_the_result_holds() {
     let (_, partner_final) = observe(&instruction, partner_initial);
     assert_ne!(baseline.state.regs[3], partner_final.regs[3]);
     let mut partner_regs = *partner_final.regs.as_array();
-    case.settle_partner(&original, &mut partner_regs);
+    case.settle_partner(&baseline.state.regs, &mut partner_regs);
     assert_eq!(baseline.state.regs, partner_regs);
 }
 
@@ -86,17 +91,22 @@ fn an_rc_that_writes_rt_keeps_the_partner_result() {
         .metamorphic_case(raw, SpuMetamorphicRelation::ShufbControlClass)
         .expect("RC = RT still has a partner");
     assert_eq!(
-        case.varied_input,
-        Some(SpuVariedInput {
-            register: 3,
-            restore: false,
-        })
+        case.varied_inputs,
+        [
+            Some(SpuVariedInput {
+                register: 3,
+                rewrite: SpuInputRewrite::ShufbControlClass,
+                restore: false,
+            }),
+            None,
+            None,
+        ]
     );
     let original = initial();
     let (baseline, _) = observe(&instruction, original.clone());
     let (_, partner_final) = observe(&instruction, case.partner_initial(&original));
     let mut partner_regs = *partner_final.regs.as_array();
-    case.settle_partner(&original, &mut partner_regs);
+    case.settle_partner(&baseline.state.regs, &mut partner_regs);
     assert_eq!(baseline.state.regs, partner_regs);
 }
 
@@ -117,9 +127,9 @@ fn an_rc_that_is_also_a_data_input_has_no_partner() {
 fn a_word_relation_runs_from_the_original_state() {
     let nop = crate::decode::decode(0x4020_0000).expect("nop decodes");
     let case = nop
-        .metamorphic_case(0x4020_0000, SpuMetamorphicRelation::NopFalseTarget)
+        .metamorphic_case(0x4020_0000, SpuMetamorphicRelation::IgnoredField)
         .expect("nop has a partner");
-    assert_eq!(case.varied_input, None);
+    assert_eq!(case.varied_inputs, [None; 3]);
     let original = initial();
     assert_eq!(case.partner_initial(&original).regs, original.regs);
 }

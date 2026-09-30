@@ -47,9 +47,13 @@ fn structured_spu_campaign_executes_every_typed_relation() {
         run.report.findings
     );
     for check in [
-        CheckIdentity::SpuNopFalseTarget,
-        CheckIdentity::SpuRotateByteCountHighBit,
+        CheckIdentity::SpuIgnoredField,
+        CheckIdentity::SpuCountMasking,
         CheckIdentity::SpuShufbControlClass,
+        CheckIdentity::SpuImmediateRegister,
+        CheckIdentity::SpuCommutative,
+        CheckIdentity::SpuSlotPermutation,
+        CheckIdentity::SpuCompareBranch,
     ] {
         assert!(
             run.report

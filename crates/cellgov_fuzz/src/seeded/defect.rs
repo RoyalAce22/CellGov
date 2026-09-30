@@ -23,4 +23,16 @@ pub(crate) enum SeededDefect {
     MetamorphicMismatch,
     /// Every run stores the wrong value in a register it may write.
     CommonMode,
+    /// The SPU decoder folds a stop's ignored bits into its signal type.
+    IgnoredFieldRead,
+    /// A shift or rotate immediate form reads count bits the ISA masks off.
+    UnmaskedCount,
+    /// An SPU immediate form computes a result its register form does not.
+    ImmediateFormOnly,
+    /// A symmetric SPU operation's result depends on its operand order.
+    OperandOrder,
+    /// An element-wise SPU operation computes its first byte slot wrongly.
+    FirstSlot,
+    /// A not-taken branch on a zero preferred word advances past the next word.
+    BranchFallThrough,
 }

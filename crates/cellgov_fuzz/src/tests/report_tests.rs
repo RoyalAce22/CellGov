@@ -486,17 +486,17 @@ fn metamorphic_counters_refuse_saturation() {
     let mut report = report(0);
     report
         .metamorphic_executions
-        .insert(CheckIdentity::SpuNopFalseTarget, u64::MAX);
+        .insert(CheckIdentity::SpuIgnoredField, u64::MAX);
     report
         .metamorphic_inapplicable
-        .insert(CheckIdentity::SpuNopFalseTarget, u64::MAX);
+        .insert(CheckIdentity::SpuIgnoredField, u64::MAX);
 
     assert_eq!(
-        report.metamorphic_executed(CheckIdentity::SpuNopFalseTarget),
+        report.metamorphic_executed(CheckIdentity::SpuIgnoredField),
         overflow("metamorphic executions")
     );
     assert_eq!(
-        report.metamorphic_skipped(CheckIdentity::SpuNopFalseTarget),
+        report.metamorphic_skipped(CheckIdentity::SpuIgnoredField),
         overflow("inapplicable metamorphic relations")
     );
 }
