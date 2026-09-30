@@ -194,6 +194,9 @@ fn each_error_has_its_own_code() {
         MfcCommandError::LocalStoreUnaligned { lsa: 0, size: 0 },
         MfcCommandError::AddressLowBitsDiffer { lsa: 0, ea: 0 },
         MfcCommandError::ListAddressUnaligned(0),
+        MfcCommandError::IllegalOpcode(0),
+        MfcCommandError::ReservedOpcode(0),
+        MfcCommandError::ProxyOnlyCommand(0),
     ];
     let codes: std::collections::BTreeSet<u8> = errors.iter().map(|e| e.code()).collect();
     assert_eq!(codes.len(), errors.len());

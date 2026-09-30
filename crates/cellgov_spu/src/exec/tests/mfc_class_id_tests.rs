@@ -113,13 +113,13 @@ fn the_program_builds_the_command_word_it_was_given() {
 /// catches a swap of the two. The two constants differ so that a swap
 /// shows here.
 #[test]
-fn each_field_reads_its_own_byte_of_the_word() {
+fn each_field_reads_its_own_bits_of_the_word() {
     let raw = TCLASS << 24 | RCLASS << 16 | MFC_PUT;
     let word = MfcCmd::new(raw);
 
     assert_eq!(word.tclass_id(), TCLASS as u8, "TclassID is bits 0:7");
     assert_eq!(word.rclass_id(), RCLASS as u8, "RclassID is bits 8:15");
-    assert_eq!(word.opcode(), MFC_PUT, "the opcode is bits 24:31");
+    assert_eq!(word.opcode(), MFC_PUT, "the opcode is bits 16:31");
     assert!(
         !word.names_a_reserved_opcode(),
         "and bit 16 is clear in a word that sets neither reserved bit",
@@ -154,36 +154,6 @@ fn a_put_carrying_no_class_id_is_unchanged() {
     let (result, _) = run_once(&mut unit);
 
     assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
-}
-
-/// Bit 16 marks the opcode reserved, so such a word is a different
-/// command from the one its low byte spells.
-#[test]
-fn a_reserved_opcode_is_refused_though_its_low_byte_names_a_put() {
-    let word = 1 << 15 | MFC_PUT;
-    assert!(
-        MfcCmd::new(word).names_a_reserved_opcode(),
-        "the premise: the word marks its own opcode reserved",
-    );
-    assert_eq!(
-        MfcCmd::new(word).opcode(),
-        MFC_PUT,
-        "and its low byte really does name a command the model runs",
-    );
-
-    let mut unit = unit_issuing(word);
-    let (result, effects) = run_once(&mut unit);
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    // The detail half is 16 bits, so it carries the reserved byte and
-    // the opcode. A word's class ids sit above that half, so the fault
-    // omits them.
-    assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(FAULT_UNSUPPORTED_MFC_CMD | word)),
-        "refused by name, carrying the half of the word that refused it",
-    );
-    assert!(effects.is_empty(), "and nothing was enqueued: {effects:?}");
 }
 
 /// The case asserts the whole fault code. Every other way this program

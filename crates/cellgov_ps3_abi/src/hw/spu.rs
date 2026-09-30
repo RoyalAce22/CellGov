@@ -291,11 +291,10 @@ pub const MFC_PUTLLC: u32 = 0xB4;
 /// | --- | --- |
 /// | 0:7 | TclassID |
 /// | 8:15 | RclassID |
-/// | 16:23 | reserved, bit 16 marking the opcode reserved |
-/// | 24:31 | opcode |
+/// | 16:31 | opcode, bit 16 set for a reserved one |
 ///
 /// Bit numbering is the document's, most significant first, so the
-/// opcode is the word's low byte and bit 16 is `1 << 15`.
+/// opcode is the word's low halfword and bit 16 is `1 << 15`.
 ///
 /// [CBE-Handbook p:457 s:17.9.6 MFC Class ID and MFC Command Opcode Channel] the write sets the class ids and the opcode and enqueues the command formed by the earlier parameter writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -314,11 +313,19 @@ impl MfcCmd {
         self.0
     }
 
-    /// The operation this command names, against [`MFC_PUT`] and its
-    /// siblings.
+    /// The 16-bit opcode, to compare against [`MFC_PUT`] and its siblings.
+    ///
+    /// [CBEA p:113 s:9.1.1 MFC Command Opcode Channel] the command parameter is the word's low 16 bits, whose upper 8 bits are reserved.
+    /// [CBEA p:57 s:7.1.3] those reserved bits belong to the opcode: the reserved commands are x'8000' to x'FFFF'.
     #[inline]
     pub const fn opcode(self) -> u32 {
-        self.0 & 0xFF
+        self.0 & 0xFFFF
+    }
+
+    /// The class of [`Self::opcode`].
+    #[inline]
+    pub const fn class(self) -> super::spu_mfc::MfcOpcodeClass {
+        super::spu_mfc::mfc_opcode_class(self.opcode() as u16)
     }
 
     /// Transfer class id, which steers bus bandwidth.
@@ -337,13 +344,12 @@ impl MfcCmd {
         (self.0 >> 16) as u8
     }
 
-    /// True where the word marks its own opcode reserved, whatever the
-    /// opcode byte holds.
+    /// True where the word's opcode is in the reserved range.
     ///
     /// [CBEA p:113 s:9.1.1 MFC Command Opcode Channel] the command parameter is the word's low halfword, whose own leading bit marks the opcode reserved.
     #[inline]
     pub const fn names_a_reserved_opcode(self) -> bool {
-        self.0 & (1 << 15) != 0
+        matches!(self.class(), super::spu_mfc::MfcOpcodeClass::Reserved)
     }
 }
 

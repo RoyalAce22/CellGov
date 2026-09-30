@@ -77,7 +77,7 @@ impl MfcExceptionClass {
     }
 }
 
-/// A command's parameter that fails one row of Table 7-6.
+/// A command opcode or parameter that fails one row of Table 7-6.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum MfcCommandError {
     /// `MFC_TagID` sets a reserved bit, bits 0:26.
@@ -116,15 +116,28 @@ pub enum MfcCommandError {
     /// A list address not doubleword aligned.
     #[error("list address 0x{0:08x} is not doubleword aligned")]
     ListAddressUnaligned(u32),
+    /// An opcode the architecture neither defines nor reserves.
+    #[error("opcode 0x{0:04x} is illegal")]
+    IllegalOpcode(u32),
+    /// An opcode in the reserved range.
+    #[error("opcode 0x{0:04x} is reserved")]
+    ReservedOpcode(u32),
+    /// A defined command the SPU command queue does not accept: one with
+    /// an `s` modifier.
+    #[error("opcode 0x{0:04x} is a proxy-queue command")]
+    ProxyOnlyCommand(u32),
 }
 
 impl MfcCommandError {
     /// The class 0 interrupt the error raises.
     ///
-    /// [CBEA p:57 s:7.2 Table 7-6] an invalid tag is a DMA command error; the size and address rows are DMA alignment errors.
+    /// [CBEA p:57 s:7.2 Table 7-6] an invalid tag, an invalid opcode and a command the queue does not accept are DMA command errors; the size and address rows are DMA alignment errors.
     pub const fn class(self) -> MfcExceptionClass {
         match self {
-            Self::ReservedTagBits(_) => MfcExceptionClass::InvalidCommand,
+            Self::ReservedTagBits(_)
+            | Self::IllegalOpcode(_)
+            | Self::ReservedOpcode(_)
+            | Self::ProxyOnlyCommand(_) => MfcExceptionClass::InvalidCommand,
             Self::ReservedSizeBits(_)
             | Self::SizeTooLarge(_)
             | Self::SizeUnaligned(_)
@@ -147,6 +160,9 @@ impl MfcCommandError {
             Self::LocalStoreUnaligned { .. } => 6,
             Self::AddressLowBitsDiffer { .. } => 7,
             Self::ListAddressUnaligned(_) => 8,
+            Self::IllegalOpcode(_) => 9,
+            Self::ReservedOpcode(_) => 10,
+            Self::ProxyOnlyCommand(_) => 11,
         }
     }
 }

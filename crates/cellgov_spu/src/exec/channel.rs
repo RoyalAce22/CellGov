@@ -11,6 +11,7 @@ use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::hw::spu;
 use cellgov_ps3_abi::hw::spu::{ChannelDirection, MfcCmd, MfcTagId, MFC_ATOMIC_STAT_S};
+use cellgov_ps3_abi::hw::spu_mfc::{MfcOpcodeClass, MfcQueues};
 use cellgov_sync::RESERVATION_LINE_BYTES;
 use cellgov_time::GuestTicks;
 
@@ -257,14 +258,7 @@ fn checked_transfer(
     state: &mut SpuState,
     unit_id: UnitId,
 ) -> Result<MfcTagId, SpuStepOutcome> {
-    let c = &state.channels;
-    let params = MfcParameters {
-        lsa: c.mfc_lsa,
-        eah: c.mfc_eah,
-        eal: c.mfc_eal,
-        size: c.mfc_size,
-        tag: c.mfc_tag_id,
-    };
+    let params = latched_parameters(state);
     let error = match cellgov_dma::validate(MfcCommandClass::Transfer, params) {
         Ok(()) => match u8::try_from(params.tag).ok().and_then(MfcTagId::new) {
             Some(tag) => return Ok(tag),
@@ -273,8 +267,32 @@ fn checked_transfer(
         },
         Err(error) => error,
     };
+    Err(queue_invalid(cmd, error, state, unit_id))
+}
+
+/// The parameters the channels latched for the next command.
+fn latched_parameters(state: &SpuState) -> MfcParameters {
+    let c = &state.channels;
+    MfcParameters {
+        lsa: c.mfc_lsa,
+        eah: c.mfc_eah,
+        eal: c.mfc_eal,
+        size: c.mfc_size,
+        tag: c.mfc_tag_id,
+    }
+}
+
+/// Queue `cmd` as a command the MFC refuses with `error`. It takes a
+/// slot like any queued command.
+fn queue_invalid(
+    cmd: u32,
+    error: MfcCommandError,
+    state: &mut SpuState,
+    unit_id: UnitId,
+) -> SpuStepOutcome {
+    let params = latched_parameters(state);
     state.channels.cmd_queue_free -= 1;
-    Err(SpuStepOutcome::Yield {
+    SpuStepOutcome::Yield {
         effects: vec![Effect::MfcInvalidCommand {
             issuer: unit_id,
             command: InvalidMfcCommand {
@@ -284,7 +302,22 @@ fn checked_transfer(
             },
         }],
         reason: YieldReason::DmaSubmitted,
-    })
+    }
+}
+
+/// The command error an opcode alone raises on the SPU queue, if any.
+///
+/// [CBEA p:57 s:7.2 Table 7-6] an invalid opcode, a reserved bit in the opcode, and an `s` command on the SPU queue are DMA command errors.
+/// [CBE-Handbook p:287 s:9.8.3.2] the CBE checks the reserved bits: nonzero upper 8 opcode bits are a DMA command error.
+fn opcode_error(word: MfcCmd) -> Option<MfcCommandError> {
+    match word.class() {
+        MfcOpcodeClass::Reserved => Some(MfcCommandError::ReservedOpcode(word.opcode())),
+        MfcOpcodeClass::Illegal => Some(MfcCommandError::IllegalOpcode(word.opcode())),
+        MfcOpcodeClass::Defined(def) if def.queues == MfcQueues::ProxyOnly => {
+            Some(MfcCommandError::ProxyOnlyCommand(word.opcode()))
+        }
+        MfcOpcodeClass::Defined(_) => None,
+    }
 }
 
 fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
@@ -295,11 +328,10 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
     }
     let word = MfcCmd::new(cmd);
     // [CBEA p:113 s:9.1.1 MFC Command Opcode Channel] an invalid command suspends queue processing and raises an invalid-command interrupt, and the leading bit of the command halfword marks the opcode reserved.
-    // The reserved bit outranks the low byte, so this check runs ahead
-    // of the opcode match. A word that sets the bit names some other
-    // command than its low byte spells.
-    if word.names_a_reserved_opcode() {
-        return SpuStepOutcome::Fault(SpuFault::UnsupportedMfcCommand(cmd));
+    // A command error outranks the parameter checks, so this check runs
+    // first.
+    if let Some(error) = opcode_error(word) {
+        return queue_invalid(cmd, error, state, unit_id);
     }
     // The two class ids ride in the same word and steer bus bandwidth
     // and cache replacement. They change how fast a command runs, never
@@ -383,6 +415,10 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
         // containing line. The caller writes the reservation register
         // and the status channel after the line arrives; see
         // `SpuStepOutcome::MemoryRead`.
+        // [CBEA p:57 s:7.2 Table 7-6] a getllar, putllc or putlluc issued while another is pending is a command error.
+        // No atomic command is ever pending here. The unit copies a
+        // getllar's line in the step that issues it. A putllc yields its
+        // store to the step's commit before the next instruction runs.
         spu::MFC_GETLLAR => {
             let line = cellgov_sync::ReservedLine::containing(ea);
             SpuStepOutcome::MemoryRead {
@@ -424,6 +460,8 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 SpuStepOutcome::Continue
             }
         }
+        // A defined command the SPU queue accepts and this model does not
+        // run. The fault marks a gap in the model.
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedMfcCommand(cmd)),
     }
 }
@@ -431,3 +469,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
 #[cfg(test)]
 #[path = "tests/mfc_class_id_tests.rs"]
 mod mfc_class_id_tests;
+
+#[cfg(test)]
+#[path = "tests/mfc_opcode_class_tests.rs"]
+mod mfc_opcode_class_tests;

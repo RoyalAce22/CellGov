@@ -66,8 +66,8 @@ nine-step deterministic loop:
    and commands complete in (completion time, enqueue order), the
    latency model having seen the commands queued ahead. A completing
    get reads its source then and lands the bytes in its issuer's local
-   store. A command whose parameters the MFC refuses holds its slot
-   too; when the queue reaches it, its issuer's queue suspends and the
+   store. A command whose opcode or parameters the MFC refuses holds
+   its slot too; when the queue reaches it, its issuer's queue suspends and the
    runtime records the MFC exception for the host to take. A DMA completion leaves the queue at fire time, and an
    SPU's tag group reads complete at its next step once none of its
    transfers with that tag is queued. A unit yielding `DmaWait` or
