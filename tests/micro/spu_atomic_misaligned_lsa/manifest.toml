@@ -1,0 +1,41 @@
+[test]
+name = "spu_atomic_misaligned_lsa"
+
+[rpcs3]
+binary = "build/spu_atomic_misaligned_lsa.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# a status and the three atomic statuses, the local-store buffer after the getllar,
+# and each main-storage line after the store that wrote it
+memory_regions = [
+  { name = "status", addr = 0, size = 16 },
+  { name = "buffer", addr = 16, size = 256 },
+  { name = "line1", addr = 272, size = 128 },
+  { name = "line2", addr = 400, size = 128 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Build + run:
+#   docker run --rm #     -v "$(pwd)/tests/micro/spu_atomic_misaligned_lsa:/src" #     -v "$(pwd)/tests/micro/common:/common" #     -e COMMON=/common ps3dev bash /src/build.sh
+#
+#   cargo run --release -p cellgov_cli -- boot run #     --title-manifest tests/micro/spu_atomic_misaligned_lsa/manifest.toml #     --max-steps 1000000
+
+[cellgov.title]
+short_name = "spuatomlsa"
+display_name = "CellGov SPU atomic misaligned local-store microtest"
+eboot_candidates = ["spu_atomic_misaligned_lsa.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"

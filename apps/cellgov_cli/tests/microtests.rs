@@ -255,7 +255,69 @@ const CASES: &[Case] = &[
             ("publisher_pad2", Exact(0)),
         ],
     },
+    Case {
+        name: "spu_atomic_misaligned_lsa",
+        max_steps: 1_000_000,
+        fields: &MISALIGNED_LSA_FIELDS,
+    },
 ];
+
+/// spu_atomic_misaligned_lsa's payload: a status and the three atomic
+/// statuses, the SPU's 256-byte buffer after its getllar, then the two
+/// 128-byte lines after the putllc and the putlluc.
+const MISALIGNED_LSA_FIELDS: [(&str, Expect); 132] = misaligned_lsa_fields();
+
+/// The payload byte at `offset` within the three data regions.
+///
+/// The buffer starts as `i ^ 0x55`; the getllar replaces its first line
+/// with the main-storage line `0x80 + i`. The SPU then adds one to every
+/// byte, and the putllc and putlluc each store one buffer line.
+const fn misaligned_lsa_byte(offset: usize) -> u8 {
+    /// The buffer byte at `i` after the getllar.
+    const fn after_getllar(i: usize) -> u8 {
+        if i < 128 {
+            (0x80 + i) as u8
+        } else {
+            (i ^ 0x55) as u8
+        }
+    }
+    if offset < 256 {
+        after_getllar(offset)
+    } else if offset < 384 {
+        after_getllar(offset - 256).wrapping_add(1)
+    } else {
+        after_getllar(offset - 384 + 128).wrapping_add(1)
+    }
+}
+
+const fn misaligned_lsa_fields() -> [(&'static str, Expect); 132] {
+    let mut fields = [("", Any); 132];
+    fields[0] = ("status", Exact(0));
+    fields[1] = ("getllar_status", Exact(MFC_ATOMIC_STAT_G));
+    // A putllc that holds its reservation reports success, 0.
+    fields[2] = ("putllc_status", Exact(0));
+    fields[3] = ("putlluc_status", Exact(MFC_ATOMIC_STAT_U));
+    let mut word = 0;
+    while word < 128 {
+        let at = word * 4;
+        let value = u32::from_be_bytes([
+            misaligned_lsa_byte(at),
+            misaligned_lsa_byte(at + 1),
+            misaligned_lsa_byte(at + 2),
+            misaligned_lsa_byte(at + 3),
+        ]);
+        let name = if word < 64 {
+            "buffer"
+        } else if word < 96 {
+            "line1"
+        } else {
+            "line2"
+        };
+        fields[4 + word] = (name, Exact(value));
+        word += 1;
+    }
+    fields
+}
 
 /// Walk up from `CARGO_MANIFEST_DIR` to the `[workspace]` Cargo.toml.
 fn workspace_root() -> PathBuf {

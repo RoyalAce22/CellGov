@@ -876,10 +876,12 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
     let ea = ((state.channels.mfc_eah as u64) << 32) | state.channels.mfc_eal as u64;
     let lsa = state.channels.mfc_lsa;
     // [CBEA p:66 s:7.8.1] the getllar data transfer is one cache line.
-    // Which local-store line an unaligned MFC_LSA names is unestablished.
-    // This model takes the line that contains it, as it does for the
-    // effective address. A line therefore never straddles the end of
-    // local store.
+    // No official page says which local-store line an unaligned MFC_LSA
+    // names. This model takes the line that contains it, as it does for
+    // the effective address, and the spu_atomic_misaligned_lsa
+    // microtest's reference baselines do the same for getllar, putllc
+    // and putlluc. A line therefore never straddles the end of local
+    // store.
     let line_lsa = lsa & !(RESERVATION_LINE_BYTES as u32 - 1);
 
     match word.opcode() {

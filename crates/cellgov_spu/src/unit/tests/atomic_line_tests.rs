@@ -10,7 +10,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize};
-use cellgov_ps3_abi::hw::spu::{MFC_CMD, MFC_GETLLAR, MFC_PUTLLC};
+use cellgov_ps3_abi::hw::spu::{MFC_CMD, MFC_GETLLAR, MFC_PUTLLC, MFC_PUTLLUC};
 use cellgov_sync::{ReservationTable, ReservedLine, RESERVATION_LINE_BYTES};
 use cellgov_time::Budget;
 
@@ -246,4 +246,53 @@ fn a_misaligned_putllc_stores_over_the_reserved_line() {
         "the store covers the line the reservation was held on",
     );
     assert_eq!(unit.state().channels.atomic_status, 0, "and succeeded");
+}
+
+/// The bytes a store of `cmd` writes when `MFC_LSA` sits 0x30 into a
+/// local-store line of [`counted_line`], with a line of 0xEE after it.
+fn stored_bytes_from_a_misaligned_lsa(cmd: u32) -> Vec<u8> {
+    let mem = memory_with_counted_line();
+    let mut table = ReservationTable::new();
+    table.insert_or_replace(UnitId::new(UNIT), ReservedLine::containing(LINE_EA));
+    let ctx = ExecutionContext::new(&mem).with_reservations(&table);
+    let mut unit = unit_issuing(cmd, LINE_EA);
+    let s = unit.state_mut();
+    s.reservation = Some(ReservedLine::containing(LINE_EA));
+    let lsa = LSA as usize;
+    s.ls[lsa..lsa + LINE].copy_from_slice(&counted_line());
+    s.ls[lsa + LINE..lsa + 2 * LINE].fill(0xEE);
+    s.channels.mfc_lsa = LSA + 0x30;
+    let mut effects = Vec::new();
+    let result = run_once(&mut unit, &ctx, &mut effects);
+
+    assert_ne!(
+        result.yield_reason,
+        YieldReason::Fault,
+        "{:?}",
+        result.fault
+    );
+    let stores: Vec<Vec<u8>> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::ConditionalStore { bytes, .. } | Effect::SharedWriteIntent { bytes, .. } => {
+                Some(bytes.bytes().to_vec())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stores.len(), 1, "{effects:?}");
+    stores.into_iter().next().unwrap_or_default()
+}
+
+/// [CBEA p:57 s:7.2] alignment is not checked for the atomic commands, so a misaligned MFC_LSA refuses nothing.
+/// A putllc or putlluc stores the local-store line that contains MFC_LSA, from its first byte.
+#[test]
+fn a_misaligned_lsa_putllc_and_putlluc_store_the_containing_local_store_line() {
+    for cmd in [MFC_PUTLLC, MFC_PUTLLUC] {
+        assert_eq!(
+            stored_bytes_from_a_misaligned_lsa(cmd),
+            counted_line(),
+            "command 0x{cmd:02x}: the line from its first byte, not from MFC_LSA",
+        );
+    }
 }

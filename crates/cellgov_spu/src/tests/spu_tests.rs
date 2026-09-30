@@ -1220,6 +1220,88 @@ fn spu_lluc_publish_matches_rpcs3_baseline() {
     );
 }
 
+/// [CBEA p:57 s:7.2] alignment is not checked for the atomic commands.
+/// [CBEA p:66 s:7.8.1] the getllar transfer is one cache line placed in local storage.
+/// getllar, putllc and putlluc each take the local-store line that contains a misaligned MFC_LSA.
+#[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
+fn spu_atomic_misaligned_lsa_matches_rpcs3_baseline() {
+    let elf_path =
+        std::path::Path::new("../../tests/micro/spu_atomic_misaligned_lsa/build/spu_main.elf");
+    let baseline_dir =
+        std::path::Path::new("../../tests/scenario_observations/spu_atomic_misaligned_lsa");
+    let elf_data = microtest_elf(elf_path);
+    let result_ea: u64 = 0x1_0000;
+    let lines_ea: u32 = 0x1_8000;
+
+    let factory = || {
+        let elf = elf_data.clone();
+        cellgov_testkit::fixtures::ScenarioFixture::builder()
+            .memory_size(0x2_0000)
+            .budget(Budget::new(100_000))
+            .max_steps(1_000)
+            .seed_memory(move |mem| {
+                let first: Vec<u8> = (0..128u8).map(|i| 0x80 + i).collect();
+                let range = cellgov_mem::ByteRange::new(
+                    cellgov_mem::GuestAddr::new(u64::from(lines_ea)),
+                    128,
+                )
+                .unwrap();
+                mem.apply_commit(range, &first).unwrap();
+            })
+            .register(move |rt| {
+                let data = elf.clone();
+                rt.register_unit_with(|id| {
+                    let mut unit = SpuExecutionUnit::new(id);
+                    loader::load_spu_elf(&data, unit.state_mut()).unwrap();
+                    unit.state_mut().pc = 0x80;
+                    unit.state_mut().set_reg_word_splat(1, 0x3FFF0);
+                    unit.state_mut().set_reg_word_splat(4, result_ea as u32);
+                    unit.state_mut().set_reg_word_splat(5, lines_ea);
+                    unit
+                });
+            })
+            .build()
+    };
+
+    let region = |name: &str, offset: u64, size: u64| cellgov_compare::RegionDescriptor {
+        name: name.into(),
+        space: cellgov_compare::AddressSpaceId::BOOT,
+        addr: result_ea + offset,
+        size,
+    };
+    let regions = vec![
+        region("status", 0, 16),
+        region("buffer", 16, 256),
+        region("line1", 272, 128),
+        region("line2", 400, 128),
+    ];
+    let cellgov_obs = cellgov_compare::observe_with_determinism_check(factory, &regions).unwrap();
+    assert_eq!(
+        cellgov_obs.outcome,
+        cellgov_compare::ObservedOutcome::Completed
+    );
+
+    let baselines = vec![
+        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_interpreter.json")).unwrap(),
+        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_llvm.json")).unwrap(),
+    ];
+    let result = cellgov_compare::compare_multi(
+        &baselines,
+        &cellgov_obs,
+        cellgov_compare::CompareMode::Memory,
+    );
+    assert_eq!(
+        result.classification,
+        cellgov_compare::Classification::Match,
+        "spu_atomic_misaligned_lsa diverges from its recorded baseline: {:?}",
+        result.cellgov_result
+    );
+}
+
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
