@@ -101,7 +101,14 @@ fn ori_from_binary() {
 fn bi_from_binary() {
     // bi $0 -> 0x35000000
     let insn = decode(0x3500_0000).unwrap();
-    assert_eq!(insn, SpuInstruction::Bi { ra: 0 });
+    assert_eq!(
+        insn,
+        SpuInstruction::Bi {
+            ra: 0,
+            d: false,
+            e: false
+        }
+    );
 }
 
 #[test]
@@ -115,7 +122,7 @@ fn brsl_from_binary() {
 fn nop_from_binary() {
     // nop $127 -> 0x4020007f
     let insn = decode(0x4020_007f).unwrap();
-    assert_eq!(insn, SpuInstruction::Nop);
+    assert_eq!(insn, SpuInstruction::Nop { rt: 127 });
 }
 
 #[test]

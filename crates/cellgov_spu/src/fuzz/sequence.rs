@@ -56,7 +56,10 @@ impl SpuSequenceInteraction {
             2
         };
         if words.len() <= essential
-            || crate::decode::decode(*words.last()?).ok() != Some(SpuInstruction::Nop)
+            || !matches!(
+                crate::decode::decode(*words.last()?),
+                Ok(SpuInstruction::Nop { .. })
+            )
         {
             return None;
         }

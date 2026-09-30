@@ -89,7 +89,15 @@ fn shufb_identity_pattern() {
 fn bi_branches_to_register() {
     let mut s = SpuState::new();
     s.set_reg_word_splat(0, 0x3A0);
-    let outcome = execute(&SpuInstruction::Bi { ra: 0 }, &mut s, uid());
+    let outcome = execute(
+        &SpuInstruction::Bi {
+            ra: 0,
+            d: false,
+            e: false,
+        },
+        &mut s,
+        uid(),
+    );
     assert!(matches!(outcome, SpuStepOutcome::Branch));
     assert_eq!(s.pc, 0x3A0);
 }
@@ -174,7 +182,7 @@ fn stop_reports_a_stop_with_its_signal() {
 fn nop_continues() {
     let mut s = SpuState::new();
     assert!(matches!(
-        execute(&SpuInstruction::Nop, &mut s, uid()),
+        execute(&SpuInstruction::Nop { rt: 0 }, &mut s, uid()),
         SpuStepOutcome::Continue
     ));
     assert!(matches!(

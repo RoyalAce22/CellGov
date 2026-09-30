@@ -985,12 +985,12 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
         }
         // [SPU-ISA p:178 s:7. Compare, Branch, and Halt Instructions] Branch Indirect: PC <- RA preferred slot masked to LS range.
-        SpuInstruction::Bi { ra } => {
+        SpuInstruction::Bi { ra, .. } => {
             state.pc = state.insn_addr(state.reg_word(ra));
             SpuStepOutcome::Branch
         }
         // [SPU-ISA p:181 s:7. Compare, Branch, and Halt Instructions] Branch Indirect and Set Link: the target is read from RA before RT is written; the link is (PC+4) masked by LSLR in RT's preferred slot with the other slots zeroed, then PC <- RA masked to LS range.
-        SpuInstruction::Bisl { rt, ra } => {
+        SpuInstruction::Bisl { rt, ra, .. } => {
             let target = state.insn_addr(state.reg_word(ra));
             let link = state.ls_wrap(state.pc.wrapping_add(4));
             state.regs[rt as usize] = [0u8; 16];
@@ -1017,15 +1017,19 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
         }
         // [SPU-ISA p:186 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Zero: PC <- RA preferred slot masked to LS range when RT's preferred word is zero.
-        SpuInstruction::Biz { rt, ra } => branch_indirect_if(state, ra, state.reg_word(rt) == 0),
+        SpuInstruction::Biz { rt, ra, .. } => {
+            branch_indirect_if(state, ra, state.reg_word(rt) == 0)
+        }
         // [SPU-ISA p:187 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Not Zero: taken when RT's preferred word is non-zero.
-        SpuInstruction::Binz { rt, ra } => branch_indirect_if(state, ra, state.reg_word(rt) != 0),
+        SpuInstruction::Binz { rt, ra, .. } => {
+            branch_indirect_if(state, ra, state.reg_word(rt) != 0)
+        }
         // [SPU-ISA p:188 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Zero Halfword: taken when the low halfword of RT's preferred slot is zero.
-        SpuInstruction::Bihz { rt, ra } => {
+        SpuInstruction::Bihz { rt, ra, .. } => {
             branch_indirect_if(state, ra, state.reg_word(rt) & 0xFFFF == 0)
         }
         // [SPU-ISA p:189 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Not Zero Halfword: taken when the low halfword of RT's preferred slot is non-zero.
-        SpuInstruction::Bihnz { rt, ra } => {
+        SpuInstruction::Bihnz { rt, ra, .. } => {
             branch_indirect_if(state, ra, state.reg_word(rt) & 0xFFFF != 0)
         }
 
@@ -1041,11 +1045,11 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:192 s:8. Hint-for-Branch Instructions] Hint for Branch (r-form) is a hint with no architectural effect.
         // [SPU-ISA p:194 s:8. Hint-for-Branch Instructions] Hint for Branch Relative is a hint with no architectural effect.
         // [SPU-ISA p:193 s:8. Hint-for-Branch Instructions] Hint for Branch (a-form) is a hint with no architectural effect.
-        SpuInstruction::Nop
+        SpuInstruction::Nop { .. }
         | SpuInstruction::Lnop
-        | SpuInstruction::Hbr
-        | SpuInstruction::Hbra
-        | SpuInstruction::Hbrr => SpuStepOutcome::Continue,
+        | SpuInstruction::Hbr { .. }
+        | SpuInstruction::Hbra { .. }
+        | SpuInstruction::Hbrr { .. } => SpuStepOutcome::Continue,
 
         // Every load, store and fetch here reads and writes local store in
         // program order, so each store is already visible to the next load

@@ -244,19 +244,43 @@ fn biz_and_binz_test_the_preferred_word() {
     s.set_reg_word_splat(0, 0x3ffc3);
     s.set_reg_word_splat(78, 0);
     assert!(matches!(
-        run(SpuInstruction::Biz { rt: 78, ra: 0 }, &mut s),
+        run(
+            SpuInstruction::Biz {
+                rt: 78,
+                ra: 0,
+                d: false,
+                e: false
+            },
+            &mut s
+        ),
         SpuStepOutcome::Branch
     ));
     assert_eq!(s.pc, 0x3ffc0);
     s.pc = 0x100;
     assert!(matches!(
-        run(SpuInstruction::Binz { rt: 78, ra: 0 }, &mut s),
+        run(
+            SpuInstruction::Binz {
+                rt: 78,
+                ra: 0,
+                d: false,
+                e: false
+            },
+            &mut s
+        ),
         SpuStepOutcome::Continue
     ));
     assert_eq!(s.pc, 0x100);
     s.set_reg_word_splat(78, 1);
     assert!(matches!(
-        run(SpuInstruction::Binz { rt: 78, ra: 0 }, &mut s),
+        run(
+            SpuInstruction::Binz {
+                rt: 78,
+                ra: 0,
+                d: false,
+                e: false
+            },
+            &mut s
+        ),
         SpuStepOutcome::Branch
     ));
     assert_eq!(s.pc, 0x3ffc0);
@@ -270,18 +294,42 @@ fn bihz_and_bihnz_test_only_the_low_halfword() {
     s.set_reg_word_splat(0, 0x200);
     s.set_reg_word_splat(3, 0x0001_0000);
     assert!(matches!(
-        run(SpuInstruction::Bihz { rt: 3, ra: 0 }, &mut s),
+        run(
+            SpuInstruction::Bihz {
+                rt: 3,
+                ra: 0,
+                d: false,
+                e: false
+            },
+            &mut s
+        ),
         SpuStepOutcome::Branch
     ));
     assert_eq!(s.pc, 0x200);
     s.pc = 0x100;
     assert!(matches!(
-        run(SpuInstruction::Bihnz { rt: 3, ra: 0 }, &mut s),
+        run(
+            SpuInstruction::Bihnz {
+                rt: 3,
+                ra: 0,
+                d: false,
+                e: false
+            },
+            &mut s
+        ),
         SpuStepOutcome::Continue
     ));
     s.set_reg_word_splat(3, 0x0000_0001);
     assert!(matches!(
-        run(SpuInstruction::Bihnz { rt: 3, ra: 0 }, &mut s),
+        run(
+            SpuInstruction::Bihnz {
+                rt: 3,
+                ra: 0,
+                d: false,
+                e: false
+            },
+            &mut s
+        ),
         SpuStepOutcome::Branch
     ));
     assert_eq!(s.pc, 0x200);
@@ -407,7 +455,7 @@ fn hbra_and_dsync_change_no_state() {
     s.regs[2] = PATTERN;
     let before = s.clone();
     assert!(matches!(
-        run(SpuInstruction::Hbra, &mut s),
+        run(SpuInstruction::Hbra { ro: 0, target: 0 }, &mut s),
         SpuStepOutcome::Continue
     ));
     assert!(matches!(

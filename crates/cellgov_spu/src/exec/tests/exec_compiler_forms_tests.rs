@@ -347,7 +347,16 @@ fn bisl_links_in_the_preferred_slot_only_and_branches() {
     s.pc = 0x100;
     s.set_reg_word_splat(4, 0x3A3);
     s.regs[0] = [0xEE; 16];
-    let outcome = execute(&SpuInstruction::Bisl { rt: 0, ra: 4 }, &mut s, uid());
+    let outcome = execute(
+        &SpuInstruction::Bisl {
+            rt: 0,
+            ra: 4,
+            d: false,
+            e: false,
+        },
+        &mut s,
+        uid(),
+    );
     assert!(matches!(outcome, SpuStepOutcome::Branch));
     assert_eq!(s.pc, 0x3A0);
     assert_eq!(s.reg_word_slot(0, 0), 0x104);
@@ -363,7 +372,16 @@ fn bisl_link_at_the_top_of_ls_wraps_through_the_ls_mask() {
     // 0x40000, which LSLR folds to 0.
     s.pc = 0x3FFFC;
     s.set_reg_word_splat(4, 0x200);
-    let outcome = execute(&SpuInstruction::Bisl { rt: 0, ra: 4 }, &mut s, uid());
+    let outcome = execute(
+        &SpuInstruction::Bisl {
+            rt: 0,
+            ra: 4,
+            d: false,
+            e: false,
+        },
+        &mut s,
+        uid(),
+    );
     assert!(matches!(outcome, SpuStepOutcome::Branch));
     assert_eq!(s.pc, 0x200);
     assert_eq!(s.reg_word_slot(0, 0), 0);
@@ -376,7 +394,16 @@ fn bisl_target_above_ls_wraps_through_the_ls_mask() {
     // Bit 18 of the target falls to LSLR and the low two bits to the
     // instruction-alignment mask.
     s.set_reg_word_splat(4, 0x4_03A3);
-    let outcome = execute(&SpuInstruction::Bisl { rt: 0, ra: 4 }, &mut s, uid());
+    let outcome = execute(
+        &SpuInstruction::Bisl {
+            rt: 0,
+            ra: 4,
+            d: false,
+            e: false,
+        },
+        &mut s,
+        uid(),
+    );
     assert!(matches!(outcome, SpuStepOutcome::Branch));
     assert_eq!(s.pc, 0x3A0);
     assert_eq!(s.reg_word_slot(0, 0), 0x104);
@@ -387,7 +414,16 @@ fn bisl_reads_the_target_before_writing_the_link_when_rt_is_ra() {
     let mut s = SpuState::new();
     s.pc = 0x100;
     s.set_reg_word_splat(4, 0x3A0);
-    let outcome = execute(&SpuInstruction::Bisl { rt: 4, ra: 4 }, &mut s, uid());
+    let outcome = execute(
+        &SpuInstruction::Bisl {
+            rt: 4,
+            ra: 4,
+            d: false,
+            e: false,
+        },
+        &mut s,
+        uid(),
+    );
     assert!(matches!(outcome, SpuStepOutcome::Branch));
     assert_eq!(s.pc, 0x3A0);
     assert_eq!(s.reg_word_slot(4, 0), 0x104);

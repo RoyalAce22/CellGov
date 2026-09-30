@@ -6,7 +6,13 @@ use super::*;
 
 #[test]
 fn hbra_from_binary() {
-    assert_eq!(decode(0x1008_3c19).unwrap(), SpuInstruction::Hbra);
+    assert_eq!(
+        decode(0x1008_3c19).unwrap(),
+        SpuInstruction::Hbra {
+            ro: 25,
+            target: 0x1078
+        }
+    );
 }
 
 #[test]
@@ -127,19 +133,39 @@ fn brhz_from_binary() {
 fn biz_family_from_binary() {
     assert_eq!(
         decode(0x2500_004e).unwrap(),
-        SpuInstruction::Biz { rt: 78, ra: 0 }
+        SpuInstruction::Biz {
+            rt: 78,
+            ra: 0,
+            d: false,
+            e: false
+        }
     );
     assert_eq!(
         decode(0x2520_004e).unwrap(),
-        SpuInstruction::Binz { rt: 78, ra: 0 }
+        SpuInstruction::Binz {
+            rt: 78,
+            ra: 0,
+            d: false,
+            e: false
+        }
     );
     assert_eq!(
         decode(0x2540_004e).unwrap(),
-        SpuInstruction::Bihz { rt: 78, ra: 0 }
+        SpuInstruction::Bihz {
+            rt: 78,
+            ra: 0,
+            d: false,
+            e: false
+        }
     );
     assert_eq!(
         decode(0x2560_004e).unwrap(),
-        SpuInstruction::Bihnz { rt: 78, ra: 0 }
+        SpuInstruction::Bihnz {
+            rt: 78,
+            ra: 0,
+            d: false,
+            e: false
+        }
     );
 }
 

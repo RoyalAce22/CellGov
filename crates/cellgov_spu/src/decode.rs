@@ -40,6 +40,11 @@ struct Fields {
     i16_raw: u16,
     i16_signed: i16,
     i16_offset: i32,
+    d: bool,
+    e: bool,
+    p: bool,
+    hbr_ro: i16,
+    hint_ro: i16,
 }
 
 impl Fields {
@@ -57,6 +62,14 @@ impl Fields {
             i16_raw,
             i16_signed: i16_raw as i16,
             i16_offset: i32::from(i16_raw as i16),
+            // [SPU-ISA p:178 s:7] D is bit 12 and E bit 13 of the branch-indirect forms.
+            d: raw & 0x0008_0000 != 0,
+            e: raw & 0x0004_0000 != 0,
+            // [SPU-ISA p:192 s:8] hbr's P bit is bit 11; ROH sits at bits 16 and 17, ROL in the RT field.
+            p: raw & 0x0010_0000 != 0,
+            hbr_ro: word_offset_9((raw >> 14) & 0x3, raw & 0x7F),
+            // [SPU-ISA p:193 s:8] hbra and hbrr put ROH at bits 7 and 8 and ROL in the RT field.
+            hint_ro: word_offset_9((raw >> 23) & 0x3, raw & 0x7F),
         }
     }
 }
@@ -119,8 +132,12 @@ const DECODERS: &[(&str, Builder)] = &[
         ra: f.ra,
         rb: f.rb,
     }),
-    ("bi", |f| SpuInstruction::Bi { ra: f.ra }),
-    ("nop", |_| SpuInstruction::Nop),
+    ("bi", |f| SpuInstruction::Bi {
+        ra: f.ra,
+        d: f.d,
+        e: f.e,
+    }),
+    ("nop", |f| SpuInstruction::Nop { rt: f.rt }),
     ("lnop", |_| SpuInstruction::Lnop),
     // [SPU-ISA p:242 s:10 Sync] RR opcode 0x002; bit 11 is the C feature bit.
     ("sync", |f| SpuInstruction::Sync {
@@ -133,7 +150,11 @@ const DECODERS: &[(&str, Builder)] = &[
     // [SPU-ISA p:154 s:7 Hlgt] RR opcode 0x2D8.
     ("hlgt", |f| SpuInstruction::Hlgt { ra: f.ra, rb: f.rb }),
     // [SPU-ISA p:192 s:8 Hbr] RR opcode 0x1AC; the P bit selects hbrp on the same opcode.
-    ("hbr", |_| SpuInstruction::Hbr),
+    ("hbr", |f| SpuInstruction::Hbr {
+        p: f.p,
+        ra: f.ra,
+        ro: f.hbr_ro,
+    }),
     // [SPU-ISA p:83 s:5 Clz] RR opcode 0x2A5; RB field unused.
     ("clz", |f| SpuInstruction::Clz { rt: f.rt, ra: f.ra }),
     // [SPU-ISA p:84 s:5 Cntb] RR opcode 0x2B4; RB field unused.
@@ -157,11 +178,31 @@ const DECODERS: &[(&str, Builder)] = &[
         rt: f.rt,
         channel: f.ra,
     }),
-    // [SPU-ISA p:186 s:7 Biz] RR opcodes 0x128..0x12B; the D/E interrupt bits at [12:13] are not modeled.
-    ("biz", |f| SpuInstruction::Biz { rt: f.rt, ra: f.ra }),
-    ("binz", |f| SpuInstruction::Binz { rt: f.rt, ra: f.ra }),
-    ("bihz", |f| SpuInstruction::Bihz { rt: f.rt, ra: f.ra }),
-    ("bihnz", |f| SpuInstruction::Bihnz { rt: f.rt, ra: f.ra }),
+    // [SPU-ISA p:186 s:7 Biz] RR opcodes 0x128..0x12B; the variant carries the D/E interrupt bits at [12:13], and execution ignores them.
+    ("biz", |f| SpuInstruction::Biz {
+        rt: f.rt,
+        ra: f.ra,
+        d: f.d,
+        e: f.e,
+    }),
+    ("binz", |f| SpuInstruction::Binz {
+        rt: f.rt,
+        ra: f.ra,
+        d: f.d,
+        e: f.e,
+    }),
+    ("bihz", |f| SpuInstruction::Bihz {
+        rt: f.rt,
+        ra: f.ra,
+        d: f.d,
+        e: f.e,
+    }),
+    ("bihnz", |f| SpuInstruction::Bihnz {
+        rt: f.rt,
+        ra: f.ra,
+        d: f.d,
+        e: f.e,
+    }),
     // [SPU-ISA p:41 s:3 Cbx] RR opcodes 0x1D4..0x1D7: cbx, chx, cwx, cdx.
     ("cbx", |f| SpuInstruction::Cbx {
         rt: f.rt,
@@ -526,8 +567,13 @@ const DECODERS: &[(&str, Builder)] = &[
         ra: f.ra,
         rb: f.rb,
     }),
-    // [SPU-ISA p:181 s:7 Bisl] RR opcode 0x1A9; the D/E interrupt bits at [12:13] are not modeled.
-    ("bisl", |f| SpuInstruction::Bisl { rt: f.rt, ra: f.ra }),
+    // [SPU-ISA p:181 s:7 Bisl] RR opcode 0x1A9; the variant carries the D/E interrupt bits at [12:13], and execution ignores them.
+    ("bisl", |f| SpuInstruction::Bisl {
+        rt: f.rt,
+        ra: f.ra,
+        d: f.d,
+        e: f.e,
+    }),
     ("shlqbyi", |f| SpuInstruction::Shlqbyi {
         rt: f.rt,
         ra: f.ra,
@@ -866,9 +912,15 @@ const DECODERS: &[(&str, Builder)] = &[
         imm: (f.raw >> 7) & 0x3FFFF,
     }),
     // [SPU-ISA p:193 s:8 Hbra] prefix 0001000 in bits [0:6], ROH in [7:8], I16 in [9:24].
-    ("hbra", |_| SpuInstruction::Hbra),
+    ("hbra", |f| SpuInstruction::Hbra {
+        ro: f.hint_ro,
+        target: f.i16_offset,
+    }),
     // [SPU-ISA p:194 s:8 Hbrr] prefix 0001001 in bits [0:6], ROH in [7:8].
-    ("hbrr", |_| SpuInstruction::Hbrr),
+    ("hbrr", |f| SpuInstruction::Hbrr {
+        ro: f.hint_ro,
+        offset: f.i16_offset,
+    }),
 ];
 
 /// `DECODERS` indexed by opcode-map row, built at compile time; a mnemonic
@@ -888,6 +940,11 @@ const BUILDERS: [Option<Builder>; spu_isa::SPU_OPCODE_MAP.len()] = {
     }
     builders
 };
+
+/// The signed 9-bit word offset ROH || ROL.
+fn word_offset_9(roh: u32, rol: u32) -> i16 {
+    (((roh << 7 | rol) as i16) << 7) >> 7
+}
 
 // [SPU-ISA p:32 s:3 Lqd] RI10 imm10 is sign-extended before address compute.
 fn sign_extend_10(val: u16) -> i16 {
@@ -917,3 +974,7 @@ mod quad_x_form_tests;
 #[cfg(test)]
 #[path = "tests/decode_opcode_map_tests.rs"]
 mod opcode_map_tests;
+
+#[cfg(test)]
+#[path = "tests/decode_field_tests.rs"]
+mod field_tests;

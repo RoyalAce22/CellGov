@@ -105,7 +105,11 @@ impl SpuInstruction {
         {
             return Err(SpuRelationRefusal::Ineligible { relation });
         }
-        let same_decoding = crate::decode::decode(partner_word).ok() == Some(*self);
+        // [SPU-ISA p:241 s:10 Control Instructions] the partner names another false target, so it is the same
+        // instruction kind with only RT changed.
+        let same_decoding = crate::decode::decode(partner_word).is_ok_and(|partner| {
+            SpuInstructionKind::from(partner) == SpuInstructionKind::from(*self)
+        });
         let same_rotation = matches!((relation, *self, crate::decode::decode(partner_word)),
             (SpuMetamorphicRelation::RotateByteCountHighBit,
              SpuInstruction::Rotqbyi { rt, ra, imm },

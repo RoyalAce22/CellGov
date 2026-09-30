@@ -35,20 +35,44 @@ fn brhnz_from_binary() {
 fn bisl_from_binary() {
     // bisl $0, $4 -> 0x35200200
     let insn = decode(0x3520_0200).unwrap();
-    assert_eq!(insn, SpuInstruction::Bisl { rt: 0, ra: 4 });
+    assert_eq!(
+        insn,
+        SpuInstruction::Bisl {
+            rt: 0,
+            ra: 4,
+            d: false,
+            e: false
+        }
+    );
 }
 
 #[test]
-fn bisl_interrupt_bits_do_not_change_the_decode() {
+fn bisl_carries_its_interrupt_bits() {
     // [SPU-ISA p:181 s:7 Bisl] D is bit 12 and E is bit 13 (big-endian);
     // bit 11 is reserved. The test sets each bit on its own because the
-    // D = E = 1 combination is undefined.
+    // D = E = 1 combination is reserved.
     let d_bit = 1 << (31 - 12);
     let e_bit = 1 << (31 - 13);
     let with_d = decode(0x3520_0200 | d_bit).unwrap();
-    assert_eq!(with_d, SpuInstruction::Bisl { rt: 0, ra: 4 });
+    assert_eq!(
+        with_d,
+        SpuInstruction::Bisl {
+            rt: 0,
+            ra: 4,
+            d: true,
+            e: false
+        }
+    );
     let with_e = decode(0x3520_0200 | e_bit).unwrap();
-    assert_eq!(with_e, SpuInstruction::Bisl { rt: 0, ra: 4 });
+    assert_eq!(
+        with_e,
+        SpuInstruction::Bisl {
+            rt: 0,
+            ra: 4,
+            d: false,
+            e: true
+        }
+    );
 }
 
 #[test]

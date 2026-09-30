@@ -401,11 +401,11 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Binz { .. }
             | SpuInstruction::Bihz { .. }
             | SpuInstruction::Bihnz { .. }
-            | SpuInstruction::Nop
+            | SpuInstruction::Nop { .. }
             | SpuInstruction::Lnop
-            | SpuInstruction::Hbr
-            | SpuInstruction::Hbra
-            | SpuInstruction::Hbrr
+            | SpuInstruction::Hbr { .. }
+            | SpuInstruction::Hbra { .. }
+            | SpuInstruction::Hbrr { .. }
             | SpuInstruction::Sync { .. }
             | SpuInstruction::Dsync
             | SpuInstruction::Heq { .. }

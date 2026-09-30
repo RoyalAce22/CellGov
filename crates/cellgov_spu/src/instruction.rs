@@ -1222,6 +1222,10 @@ pub enum SpuInstruction {
     Bi {
         /// Register containing target address.
         ra: u8,
+        /// The D feature bit: disable interrupts at the target.
+        d: bool,
+        /// The E feature bit: enable interrupts at the target.
+        e: bool,
     },
     // [SPU-ISA p:181 s:7 Branch Indirect and Set Link (Bisl) p.181, Branch If Not Zero Halfword (Brhnz) p.184]
     /// Branch indirect and set link: rt = (PC + 4, 0, 0, 0), PC = ra.
@@ -1230,6 +1234,10 @@ pub enum SpuInstruction {
         rt: u8,
         /// Register containing target address.
         ra: u8,
+        /// The D feature bit: disable interrupts at the target.
+        d: bool,
+        /// The E feature bit: enable interrupts at the target.
+        e: bool,
     },
     /// Branch relative if the low halfword of rt's preferred slot is not zero.
     Brhnz {
@@ -1252,6 +1260,10 @@ pub enum SpuInstruction {
         rt: u8,
         /// Register containing target address.
         ra: u8,
+        /// The D feature bit: disable interrupts at the target.
+        d: bool,
+        /// The E feature bit: enable interrupts at the target.
+        e: bool,
     },
     /// Branch indirect if the preferred word of rt is not zero: PC = ra.
     Binz {
@@ -1259,6 +1271,10 @@ pub enum SpuInstruction {
         rt: u8,
         /// Register containing target address.
         ra: u8,
+        /// The D feature bit: disable interrupts at the target.
+        d: bool,
+        /// The E feature bit: enable interrupts at the target.
+        e: bool,
     },
     /// Branch indirect if the low halfword of rt's preferred slot is zero: PC = ra.
     Bihz {
@@ -1266,6 +1282,10 @@ pub enum SpuInstruction {
         rt: u8,
         /// Register containing target address.
         ra: u8,
+        /// The D feature bit: disable interrupts at the target.
+        d: bool,
+        /// The E feature bit: enable interrupts at the target.
+        e: bool,
     },
     /// Branch indirect if the low halfword of rt's preferred slot is not zero: PC = ra.
     Bihnz {
@@ -1273,6 +1293,10 @@ pub enum SpuInstruction {
         rt: u8,
         /// Register containing target address.
         ra: u8,
+        /// The D feature bit: disable interrupts at the target.
+        d: bool,
+        /// The E feature bit: enable interrupts at the target.
+        e: bool,
     },
 
     // [SPU-ISA p:248 s:11 Channel Instructions: Rdch p.248, Wrch p.250]
@@ -1302,15 +1326,36 @@ pub enum SpuInstruction {
     // [SPU-ISA p:240 s:10 Control: Nop p.241, Lnop p.240, Sync p.242, Dsync p.243, Stop p.238, Heq p.150]
     // [SPU-ISA p:192 s:8 Hint-for-Branch: Hbr p.192, Hbra p.193, Hbrr p.194]
     /// No operation (even pipeline).
-    Nop,
+    Nop {
+        /// The false target: named by the encoding, never written.
+        rt: u8,
+    },
     /// No operation (odd pipeline).
     Lnop,
     /// Branch hint; ignored by the interpreter.
-    Hbr,
+    Hbr {
+        /// The P feature bit: an inline-prefetch hint, which ignores `ra`
+        /// and requires `ro` to be zero.
+        p: bool,
+        /// Register holding the branch target.
+        ra: u8,
+        /// Signed word offset from the hint to the branch, ROH || ROL.
+        ro: i16,
+    },
     /// Branch-absolute hint; ignored by the interpreter.
-    Hbra,
+    Hbra {
+        /// Signed word offset from the hint to the branch, ROH || ROL.
+        ro: i16,
+        /// Signed word address of the branch target.
+        target: i32,
+    },
     /// Branch-relative hint; ignored by the interpreter.
-    Hbrr,
+    Hbrr {
+        /// Signed word offset from the hint to the branch, ROH || ROL.
+        ro: i16,
+        /// Signed word offset from the hint to the branch target.
+        offset: i32,
+    },
     /// Synchronize: complete pending stores before the next fetch.
     Sync {
         /// The C bit: `sync.c`, which also synchronizes channel state.

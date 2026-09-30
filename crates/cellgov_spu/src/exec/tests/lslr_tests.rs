@@ -85,7 +85,15 @@ fn a_link_past_the_limit_is_the_wrapped_address() {
 fn an_indirect_branch_past_the_limit_lands_on_the_wrapped_target() {
     let mut s = state_32k();
     s.set_reg_word_splat(1, 0x800B);
-    execute(&SpuInstruction::Bi { ra: 1 }, &mut s, uid());
+    execute(
+        &SpuInstruction::Bi {
+            ra: 1,
+            d: false,
+            e: false,
+        },
+        &mut s,
+        uid(),
+    );
     assert_eq!(s.pc, 0x8);
 }
 
@@ -113,10 +121,30 @@ fn every_taken_conditional_relative_branch_lands_on_the_wrapped_target() {
 #[test]
 fn every_taken_conditional_indirect_branch_lands_on_the_wrapped_target() {
     let cases = [
-        SpuInstruction::Biz { rt: 1, ra: 3 },
-        SpuInstruction::Binz { rt: 2, ra: 3 },
-        SpuInstruction::Bihz { rt: 1, ra: 3 },
-        SpuInstruction::Bihnz { rt: 2, ra: 3 },
+        SpuInstruction::Biz {
+            rt: 1,
+            ra: 3,
+            d: false,
+            e: false,
+        },
+        SpuInstruction::Binz {
+            rt: 2,
+            ra: 3,
+            d: false,
+            e: false,
+        },
+        SpuInstruction::Bihz {
+            rt: 1,
+            ra: 3,
+            d: false,
+            e: false,
+        },
+        SpuInstruction::Bihnz {
+            rt: 2,
+            ra: 3,
+            d: false,
+            e: false,
+        },
     ];
     for insn in cases {
         let mut s = state_32k();
@@ -136,7 +164,16 @@ fn bisl_wraps_both_its_target_and_its_link() {
     let mut s = state_32k();
     s.pc = 0x7FFC;
     s.set_reg_word_splat(1, 0x800B);
-    execute(&SpuInstruction::Bisl { rt: 3, ra: 1 }, &mut s, uid());
+    execute(
+        &SpuInstruction::Bisl {
+            rt: 3,
+            ra: 1,
+            d: false,
+            e: false,
+        },
+        &mut s,
+        uid(),
+    );
     assert_eq!(s.pc, 0x8);
     assert_eq!(s.reg_word(3), 0);
 }
