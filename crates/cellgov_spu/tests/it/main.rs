@@ -11,6 +11,7 @@ mod mfc_lock_line_through_runtime;
 mod mfc_mssync_through_runtime;
 mod mfc_queue_through_runtime;
 mod mfc_storage_control_through_runtime;
+mod observation_without_copies;
 mod problem_state_edges_through_runtime;
 mod problem_state_through_runtime;
 mod signal_read_through_runtime;

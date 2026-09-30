@@ -175,19 +175,68 @@ impl SpuObservation {
         }
         SpuObservationComparison { differences }
     }
+
+    /// The comparison [`Self::compare`] gives for the observations
+    /// [`Self::from_parts`] builds from these parts, without copying
+    /// either snapshot.
+    pub fn compare_parts(
+        a_state: &SpuObservableSnapshot,
+        a_outcome: &SpuStepOutcome,
+        b_state: &SpuObservableSnapshot,
+        b_outcome: &SpuStepOutcome,
+    ) -> SpuObservationComparison {
+        let mut differences = state_differences(a_state, b_state);
+        if a_outcome != b_outcome {
+            differences.insert(SpuObservationComponent::Outcome);
+        }
+        if outcome_effects(a_outcome) != outcome_effects(b_outcome) {
+            differences.insert(SpuObservationComponent::Effects);
+        }
+        if is_fault(a_outcome) != is_fault(b_outcome) {
+            differences.insert(SpuObservationComponent::FaultDiscard);
+        }
+        SpuObservationComparison { differences }
+    }
+}
+
+/// The effects [`SpuObservation::from_parts`] records for `outcome`.
+fn outcome_effects(outcome: &SpuStepOutcome) -> &[Effect] {
+    match outcome {
+        SpuStepOutcome::Yield { effects, .. } => effects,
+        SpuStepOutcome::Continue
+        | SpuStepOutcome::Branch
+        | SpuStepOutcome::MemoryRead { .. }
+        | SpuStepOutcome::Fault(_)
+        | SpuStepOutcome::Stop { .. } => &[],
+    }
+}
+
+fn is_fault(outcome: &SpuStepOutcome) -> bool {
+    matches!(outcome, SpuStepOutcome::Fault(_))
 }
 
 /// The architectural components on which two snapshots differ.
-///
-/// Every field is named, so a new one fails to compile here until it is
-/// compared or marked as not a component.
 fn state_differences(
     a: &SpuObservableSnapshot,
     b: &SpuObservableSnapshot,
 ) -> BTreeSet<SpuObservationComponent> {
+    state_differences_with(a, b, a.ls != b.ls)
+}
+
+/// [`state_differences`], with the local-store comparison made by the
+/// caller, which may hold the two local stores somewhere other than the
+/// snapshots.
+///
+/// Every field is named, so a new one fails to compile here until it is
+/// compared or marked as not a component.
+fn state_differences_with(
+    a: &SpuObservableSnapshot,
+    b: &SpuObservableSnapshot,
+    local_store_differs: bool,
+) -> BTreeSet<SpuObservationComponent> {
     let SpuObservableSnapshot {
         regs,
-        ls,
+        ls: _,
         pc,
         // Not components of an instruction observation.
         lslr: _,
@@ -201,7 +250,7 @@ fn state_differences(
     } = a;
     [
         (*regs != b.regs, SpuObservationComponent::Registers),
-        (*ls != b.ls, SpuObservationComponent::LocalStore),
+        (local_store_differs, SpuObservationComponent::LocalStore),
         (*pc != b.pc, SpuObservationComponent::ProgramCounter),
         (*channels != b.channels, SpuObservationComponent::Channels),
         (
@@ -584,20 +633,75 @@ impl SpuAllowedFootprint {
         initial: &SpuState,
         observed: &SpuObservation,
     ) -> BTreeSet<SpuObservationComponent> {
-        let before = SpuObservableSnapshot::capture(initial);
+        self.violations_between(
+            initial,
+            &observed.state,
+            &observed.outcome,
+            &observed.effects,
+            observed.fault_discarded,
+            initial.ls != observed.state.ls,
+        )
+    }
+
+    /// [`Self::violations`] of the observation [`SpuObservation::from_parts`]
+    /// builds from `state` and `outcome`, without copying `state`.
+    pub fn violations_of(
+        &self,
+        initial: &SpuState,
+        state: &SpuObservableSnapshot,
+        outcome: &SpuStepOutcome,
+    ) -> BTreeSet<SpuObservationComponent> {
+        self.violations_between(
+            initial,
+            state,
+            outcome,
+            outcome_effects(outcome),
+            is_fault(outcome),
+            initial.ls != state.ls,
+        )
+    }
+
+    /// [`Self::violations`] of [`SpuObservation::capture`] of `after` and
+    /// `outcome`, without copying either local store.
+    pub fn violations_after(
+        &self,
+        initial: &SpuState,
+        after: &SpuState,
+        outcome: &SpuStepOutcome,
+    ) -> BTreeSet<SpuObservationComponent> {
+        self.violations_between(
+            initial,
+            &SpuObservableSnapshot::capture_without_local_store(after),
+            outcome,
+            outcome_effects(outcome),
+            is_fault(outcome),
+            initial.ls != after.ls,
+        )
+    }
+
+    /// The body of the three entry points. `local_store_differs` stands in
+    /// for the local store of `observed`, which may be left empty.
+    fn violations_between(
+        &self,
+        initial: &SpuState,
+        observed: &SpuObservableSnapshot,
+        outcome: &SpuStepOutcome,
+        effects: &[Effect],
+        fault_discarded: bool,
+        local_store_differs: bool,
+    ) -> BTreeSet<SpuObservationComponent> {
+        let before = SpuObservableSnapshot::capture_without_local_store(initial);
         let mut violations = BTreeSet::new();
         // [Martignoni2009 p:127 s:2.2] After an exception the program counter, the registers and the memory stay as they were, so a discarded step may change none of them.
-        if observed.fault_discarded {
-            violations = state_differences(&before, &observed.state);
+        if fault_discarded {
+            violations = state_differences_with(&before, observed, local_store_differs);
         } else {
-            for (index, (previous, current)) in
-                before.regs.iter().zip(&observed.state.regs).enumerate()
-            {
+            for (index, (previous, current)) in before.regs.iter().zip(&observed.regs).enumerate() {
                 // A stalled access did not retire, so it writes no register.
                 // [CBE-Handbook p:542 s:19.6.6.3 SPU Side] An empty inbound mailbox stalls the read.
                 if previous != current
                     && (matches!(
-                        &observed.outcome,
+                        outcome,
                         SpuStepOutcome::Yield {
                             reason: cellgov_exec::YieldReason::ChannelStall,
                             ..
@@ -607,37 +711,35 @@ impl SpuAllowedFootprint {
                     violations.insert(SpuObservationComponent::Registers);
                 }
             }
-            if before.ls != observed.state.ls && !self.local_store {
+            if local_store_differs && !self.local_store {
                 violations.insert(SpuObservationComponent::LocalStore);
             }
-            if before.pc != observed.state.pc && !self.control_transfer {
+            if before.pc != observed.pc && !self.control_transfer {
                 violations.insert(SpuObservationComponent::ProgramCounter);
             }
-            if !channel_differences(&before.channels, &observed.state.channels)
-                .is_subset(&self.channels)
+            if !channel_differences(&before.channels, &observed.channels).is_subset(&self.channels)
             {
                 violations.insert(SpuObservationComponent::Channels);
             }
-            if before.reservation != observed.state.reservation && !self.reservation {
+            if before.reservation != observed.reservation && !self.reservation {
                 violations.insert(SpuObservationComponent::Reservation);
             }
-            if before.fpscr != observed.state.fpscr && !self.fpscr {
+            if before.fpscr != observed.fpscr && !self.fpscr {
                 violations.insert(SpuObservationComponent::Fpscr);
             }
-            if before.signals != observed.state.signals && !self.signals {
+            if before.signals != observed.signals && !self.signals {
                 violations.insert(SpuObservationComponent::Signals);
             }
             if (before.interrupts_enabled, before.srr0)
-                != (observed.state.interrupts_enabled, observed.state.srr0)
+                != (observed.interrupts_enabled, observed.srr0)
                 && !self.interrupts
             {
                 violations.insert(SpuObservationComponent::Interrupts);
             }
         }
         // A fault discards effects even when their kind is otherwise allowed.
-        if (observed.fault_discarded && !observed.effects.is_empty())
-            || observed
-                .effects
+        if (fault_discarded && !effects.is_empty())
+            || effects
                 .iter()
                 .any(|effect| !self.effects.contains(&effect.kind()))
         {

@@ -76,7 +76,7 @@ pub(super) fn run_once(
     );
     ObservedStep {
         outcome,
-        state: SpuObservableSnapshot::capture(&state),
+        state: SpuObservableSnapshot::capture_owned(state),
     }
 }
 
@@ -85,7 +85,7 @@ pub(super) fn spu_observation(
     assessment: &CaseAssessment,
     terminal: SpuTerminalObservation<'_>,
     state: &SpuObservableSnapshot,
-    initial_state: SpuObservableSnapshot,
+    initial_state: &SpuState,
     depth: u64,
     asymmetry: CrossReferenceAsymmetry,
 ) -> SemanticObservation {
@@ -96,7 +96,7 @@ pub(super) fn spu_observation(
         .into_iter()
         .flat_map(outcome_effects)
         .collect::<Vec<_>>();
-    let state_changed = *state != initial_state;
+    let state_changed = !state.matches(initial_state);
     let state_transition = match outcome_class {
         Some(SpuOutcomeClass::Fault) if !state_changed => StateTransitionClass::FaultDiscarded,
         _ if !effects.is_empty() => StateTransitionClass::Effect,
@@ -126,10 +126,9 @@ pub(super) fn spu_step_replay_asymmetry(
     first: &ObservedStep,
     second: &ObservedStep,
 ) -> CrossReferenceAsymmetry {
-    let first_observation = SpuObservation::from_parts(first.state.clone(), first.outcome.clone());
-    let second_observation =
-        SpuObservation::from_parts(second.state.clone(), second.outcome.clone());
-    let differences = first_observation.compare(&second_observation).differences;
+    let differences =
+        SpuObservation::compare_parts(&first.state, &first.outcome, &second.state, &second.outcome)
+            .differences;
     replay_asymmetry(
         differences.iter().any(|component| {
             matches!(
@@ -262,6 +261,8 @@ fn run_sequence_with_limit(
     let mut has_undefined_operands = false;
     let mut has_unmodeled_execution = false;
     let mut footprint_violations = BTreeSet::new();
+    // Each step's pre-state, copied into one buffer the run reuses.
+    let mut before = initial.clone();
     for _ in 0..budget {
         let Some(slot) = usize::try_from(state.pc / 4).ok() else {
             break;
@@ -287,7 +288,7 @@ fn run_sequence_with_limit(
         let identity = InstructionIdentity::Spu(descriptor.kind);
         kinds.push(identity);
         executing.set(Some(identity));
-        let before = state.clone();
+        before.clone_from(&state);
         let outcome = execute(&instruction, &mut state, UNIT);
         seeded::spu_observed(
             &instruction,
@@ -296,7 +297,7 @@ fn run_sequence_with_limit(
         );
         footprint_violations.extend(
             SpuAllowedFootprint::for_instruction(&instruction)
-                .violations(&before, &SpuObservation::capture(&state, &outcome)),
+                .violations_after(&before, &state, &outcome),
         );
         terminal_outcome = Some(outcome.clone());
         match outcome {
@@ -310,7 +311,7 @@ fn run_sequence_with_limit(
             }
             SpuStepOutcome::Fault(_) => {
                 // The runtime fault-discard rule hides state from a faulting batch.
-                state = initial.clone();
+                state.clone_from(initial);
                 break;
             }
         }
@@ -318,7 +319,7 @@ fn run_sequence_with_limit(
     seeded::spu_program_counter(&mut state.pc);
     (
         ObservedSequence {
-            state: SpuObservableSnapshot::capture(&state),
+            state: SpuObservableSnapshot::capture_owned(state),
             // Sequence replay retains the terminal outcome because the descriptor observes its effects.
             terminal_outcome,
             decode_refusal,

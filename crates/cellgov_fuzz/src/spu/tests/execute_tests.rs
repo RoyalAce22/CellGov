@@ -168,14 +168,15 @@ fn spu_observation_preserves_the_first_executed_kind() {
         EligibilityReason::InterpreterContract,
         BTreeSet::new(),
     );
-    let state = SpuObservableSnapshot::capture(&SpuState::new());
+    let initial = SpuState::new();
+    let state = SpuObservableSnapshot::capture(&initial);
 
     let observation = spu_observation(
         [lnop, nop],
         &assessment,
         SpuTerminalObservation::Execution(Some(&SpuStepOutcome::Continue)),
         &state,
-        state.clone(),
+        &initial,
         2,
         CrossReferenceAsymmetry::None,
     );
@@ -187,7 +188,7 @@ fn spu_observation_preserves_the_first_executed_kind() {
         &assessment,
         SpuTerminalObservation::DecodeRefusal(Some(&SpuStepOutcome::Continue)),
         &state,
-        state.clone(),
+        &initial,
         2,
         CrossReferenceAsymmetry::None,
     );

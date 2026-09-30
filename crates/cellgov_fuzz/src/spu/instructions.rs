@@ -9,7 +9,7 @@ use cellgov_spu::fuzz::{
     SpuMetamorphicRelation, SpuOutcomeClass, SpuRelationRefusal,
 };
 use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation, SpuObservationComponent};
-use cellgov_spu::state::{SpuObservableSnapshot, SpuState};
+use cellgov_spu::state::SpuState;
 
 use super::assess::assess_instruction_case;
 use super::execute::{
@@ -178,7 +178,7 @@ fn run_instructions_inner(
                     &assessment,
                     SpuTerminalObservation::Execution(Some(&first.outcome)),
                     &first.state,
-                    SpuObservableSnapshot::capture(&initial),
+                    &initial,
                     1,
                     CrossReferenceAsymmetry::None,
                 ),
@@ -208,7 +208,7 @@ fn run_instructions_inner(
                             &assessment,
                             SpuTerminalObservation::Execution(Some(&first.outcome)),
                             &first.state,
-                            SpuObservableSnapshot::capture(&initial),
+                            &initial,
                             1,
                             CrossReferenceAsymmetry::TargetPanic,
                         ),
@@ -278,10 +278,11 @@ fn run_instructions_inner(
                 iteration,
             )?;
         }
-        let complete = SpuObservation::from_parts(first.state.clone(), first.outcome.clone());
-        for component in
-            SpuAllowedFootprint::for_instruction(&instruction).violations(&initial, &complete)
-        {
+        for component in SpuAllowedFootprint::for_instruction(&instruction).violations_of(
+            &initial,
+            &first.state,
+            &first.outcome,
+        ) {
             let divergence = match component {
                 SpuObservationComponent::ProgramCounter => DivergenceClass::ControlFlow,
                 SpuObservationComponent::Effects => DivergenceClass::Effect,
@@ -330,7 +331,7 @@ fn run_instructions_inner(
                 &assessment,
                 SpuTerminalObservation::Execution(Some(&first.outcome)),
                 &first.state,
-                SpuObservableSnapshot::capture(&initial),
+                &initial,
                 1,
                 asymmetry,
             ),
@@ -449,9 +450,13 @@ fn run_metamorphic_checks(
             }
         };
         report.metamorphic_executed(check)?;
-        let differences = SpuObservation::from_parts(first.state.clone(), first.outcome.clone())
-            .compare(&SpuObservation::from_parts(partner.state, partner.outcome))
-            .differences;
+        let differences = SpuObservation::compare_parts(
+            &first.state,
+            &first.outcome,
+            &partner.state,
+            &partner.outcome,
+        )
+        .differences;
         if differences.is_empty() {
             continue;
         }

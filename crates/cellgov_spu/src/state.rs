@@ -183,9 +183,60 @@ pub struct SpuChannelSnapshot {
 impl SpuObservableSnapshot {
     /// Creates an instruction-comparison snapshot.
     pub fn capture(state: &SpuState) -> Self {
+        Self::with_local_store(state, state.ls.clone())
+    }
+
+    /// Creates the snapshot of a state no caller reads again, and keeps
+    /// its local store without a copy.
+    pub fn capture_owned(mut state: SpuState) -> Self {
+        let ls = std::mem::take(&mut state.ls);
+        Self::with_local_store(&state, ls)
+    }
+
+    /// The snapshot of every component except the local store, which is
+    /// left empty. Comparisons read the local store in place instead.
+    pub(crate) fn capture_without_local_store(state: &SpuState) -> Self {
+        Self::with_local_store(state, Vec::new())
+    }
+
+    /// Whether this snapshot equals [`Self::capture`] of `state`, without
+    /// the copy of the local store that capture makes.
+    pub fn matches(&self, state: &SpuState) -> bool {
+        self.ls == state.ls && self.eq_except_local_store(&Self::capture_without_local_store(state))
+    }
+
+    /// Whether every component except the local store is equal.
+    fn eq_except_local_store(&self, other: &Self) -> bool {
+        let Self {
+            regs,
+            ls: _,
+            pc,
+            lslr,
+            signals,
+            channels,
+            reservation,
+            stop,
+            fpscr,
+            interrupts_enabled,
+            srr0,
+        } = self;
+        *regs == other.regs
+            && *pc == other.pc
+            && *lslr == other.lslr
+            && *signals == other.signals
+            && *channels == other.channels
+            && *reservation == other.reservation
+            && *stop == other.stop
+            && *fpscr == other.fpscr
+            && *interrupts_enabled == other.interrupts_enabled
+            && *srr0 == other.srr0
+    }
+
+    fn with_local_store(state: &SpuState, ls: Vec<u8>) -> Self {
         let SpuState {
             regs,
-            ls,
+            // The caller supplies the local store.
+            ls: _,
             pc,
             lslr,
             signals,
@@ -228,7 +279,7 @@ impl SpuObservableSnapshot {
         } = channels;
         Self {
             regs: *regs.as_array(),
-            ls: ls.clone(),
+            ls,
             pc: *pc,
             lslr: *lslr,
             signals: *signals,
@@ -697,6 +748,37 @@ impl Clone for SpuState {
             acc: self.acc,
         }
     }
+
+    /// Copies `source` into `self` and keeps `self`'s local-store buffer,
+    /// so a clone into an existing state allocates nothing for it.
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            regs,
+            ls,
+            pc,
+            lslr,
+            signals,
+            channels,
+            reservation,
+            stop,
+            fpscr,
+            interrupts_enabled,
+            srr0,
+            acc,
+        } = source;
+        self.regs = RegBank(regs.0);
+        self.ls.clone_from(ls);
+        self.pc = *pc;
+        self.lslr = *lslr;
+        self.signals = *signals;
+        self.channels.clone_from(channels);
+        self.reservation = *reservation;
+        self.stop = *stop;
+        self.fpscr = *fpscr;
+        self.interrupts_enabled = *interrupts_enabled;
+        self.srr0 = *srr0;
+        self.acc = *acc;
+    }
 }
 
 /// MFC and channel state read/written by rdch/wrch/rchcnt.
@@ -985,3 +1067,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/accumulator_tests.rs"]
 mod accumulator_tests;
+
+#[cfg(test)]
+#[path = "tests/buffer_reuse_tests.rs"]
+mod buffer_reuse_tests;

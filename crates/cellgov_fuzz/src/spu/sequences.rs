@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use cellgov_effects::Effect;
 use cellgov_spu::fuzz::SpuOutcomeClass;
 use cellgov_spu::observation::SpuObservationComponent;
-use cellgov_spu::state::{SpuObservableSnapshot, SPU_LS_SIZE};
+use cellgov_spu::state::SPU_LS_SIZE;
 
 use super::assess::assess_sequence_case;
 use super::execute::{
@@ -224,7 +224,7 @@ fn run_sequences_inner(
                     &assessment,
                     SpuTerminalObservation::from_sequence(&first.0),
                     &first.0.state,
-                    SpuObservableSnapshot::capture(&initial),
+                    &initial,
                     first.1,
                     CrossReferenceAsymmetry::None,
                 ),
@@ -263,7 +263,7 @@ fn run_sequences_inner(
                             &assessment,
                             SpuTerminalObservation::from_sequence(&first.0),
                             &first.0.state,
-                            SpuObservableSnapshot::capture(&initial),
+                            &initial,
                             first.1,
                             CrossReferenceAsymmetry::TargetPanic,
                         ),
@@ -350,7 +350,7 @@ fn run_sequences_inner(
                 &assessment,
                 SpuTerminalObservation::from_sequence(&first.0),
                 &first.0.state,
-                SpuObservableSnapshot::capture(&initial),
+                &initial,
                 first.1,
                 asymmetry,
             ),
