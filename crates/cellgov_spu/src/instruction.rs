@@ -148,6 +148,52 @@ pub enum SpuInstruction {
         /// Source register B (minuend).
         rb: u8,
     },
+    // [SPU-ISA p:58 s:5 Halfword add and subtract: Ah p.58, Ahi p.59, Sfh p.62, Sfhi p.63; Sfi p.65]
+    /// Add halfword: all 8 halfword slots, `rt[i] = ra[i] + rb[i]`.
+    Ah {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Add halfword immediate: all 8 halfword slots, `rt[i] = ra[i] + imm`.
+    Ahi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
+    /// Subtract from halfword: all 8 halfword slots, `rt[i] = rb[i] - ra[i]`.
+    Sfh {
+        /// Destination register.
+        rt: u8,
+        /// Source register A (subtrahend).
+        ra: u8,
+        /// Source register B (minuend).
+        rb: u8,
+    },
+    /// Subtract from halfword immediate: all 8 halfword slots, `rt[i] = imm - ra[i]`.
+    Sfhi {
+        /// Destination register.
+        rt: u8,
+        /// Source register (subtrahend).
+        ra: u8,
+        /// 10-bit signed immediate (minuend).
+        imm: i16,
+    },
+    /// Subtract from word immediate: all 4 word slots, `rt[i] = imm - ra[i]`.
+    Sfi {
+        /// Destination register.
+        rt: u8,
+        /// Source register (subtrahend).
+        ra: u8,
+        /// 10-bit signed immediate (minuend).
+        imm: i16,
+    },
 
     // [SPU-ISA p:101 s:5 Logical: Ori (Or Word Immediate) p.106, Nor p.113, Andi p.101]
     // [SPU-ISA p:97 s:5 Logical: And p.97, Or p.102, Selb p.115, Xsbh p.94]

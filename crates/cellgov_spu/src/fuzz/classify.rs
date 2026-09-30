@@ -155,6 +155,9 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
         K::Lqd
         | K::Stqd
         | K::Ai
+        | K::Ahi
+        | K::Sfhi
+        | K::Sfi
         | K::Ori
         | K::Andi
         | K::Ceqi
@@ -224,6 +227,11 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::A
         | SpuInstructionKind::Ai
         | SpuInstructionKind::Sf
+        | SpuInstructionKind::Ah
+        | SpuInstructionKind::Ahi
+        | SpuInstructionKind::Sfh
+        | SpuInstructionKind::Sfhi
+        | SpuInstructionKind::Sfi
         | SpuInstructionKind::And
         | SpuInstructionKind::Or
         | SpuInstructionKind::Selb

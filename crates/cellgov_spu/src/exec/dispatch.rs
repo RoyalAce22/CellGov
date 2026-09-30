@@ -6,6 +6,7 @@ use crate::stop::SpuStopKind;
 use cellgov_event::UnitId;
 
 use super::channel::{execute_rchcnt, execute_rdch, execute_wrch};
+use super::lanes::{from_halfwords, from_words, halfwords, words};
 use super::ls::{insertion_controls, load_quad, rotate_mask_count, store_quad, Lsa};
 use super::outcome::SpuStepOutcome;
 
@@ -154,6 +155,44 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                 let b = state.reg_word_slot(rb, slot);
                 state.set_reg_word_slot(rt, slot, b.wrapping_sub(a));
             }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:58 s:5. Integer and Logical Instructions] Add Halfword: per-halfword 16-bit modulo addition.
+        SpuInstruction::Ah { rt, ra, rb } => {
+            let (a, b) = (
+                halfwords(state.regs[ra as usize]),
+                halfwords(state.regs[rb as usize]),
+            );
+            state.regs[rt as usize] =
+                from_halfwords(std::array::from_fn(|i| a[i].wrapping_add(b[i])));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:59 s:5. Integer and Logical Instructions] Add Halfword Immediate: I10 sign-extended to 16 bits, added to each halfword.
+        SpuInstruction::Ahi { rt, ra, imm } => {
+            let a = halfwords(state.regs[ra as usize]);
+            state.regs[rt as usize] = from_halfwords(a.map(|h| h.wrapping_add(imm as u16)));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:62 s:5. Integer and Logical Instructions] Subtract from Halfword: per-halfword RB + not RA + 1.
+        SpuInstruction::Sfh { rt, ra, rb } => {
+            let (a, b) = (
+                halfwords(state.regs[ra as usize]),
+                halfwords(state.regs[rb as usize]),
+            );
+            state.regs[rt as usize] =
+                from_halfwords(std::array::from_fn(|i| b[i].wrapping_sub(a[i])));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:63 s:5. Integer and Logical Instructions] Subtract from Halfword Immediate: I10 sign-extended to 16 bits, minus each halfword.
+        SpuInstruction::Sfhi { rt, ra, imm } => {
+            let a = halfwords(state.regs[ra as usize]);
+            state.regs[rt as usize] = from_halfwords(a.map(|h| (imm as u16).wrapping_sub(h)));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:65 s:5. Integer and Logical Instructions] Subtract from Word Immediate: I10 sign-extended to 32 bits, minus each word.
+        SpuInstruction::Sfi { rt, ra, imm } => {
+            let a = words(state.regs[ra as usize]);
+            state.regs[rt as usize] = from_words(a.map(|w| (imm as i32 as u32).wrapping_sub(w)));
             SpuStepOutcome::Continue
         }
 
@@ -616,3 +655,7 @@ mod tag_status_mask_tests;
 #[cfg(test)]
 #[path = "tests/tag_update_mode_tests.rs"]
 mod tag_update_mode_tests;
+
+#[cfg(test)]
+#[path = "tests/halfword_arith_tests.rs"]
+mod halfword_arith_tests;
