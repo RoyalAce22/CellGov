@@ -573,6 +573,62 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 rb: rb7,
             })
         }
+        // [SPU-ISA p:156 s:7 Ceqb] RR opcode 0x3D0.
+        0x3D0 => {
+            return Ok(SpuInstruction::Ceqb {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:158 s:7 Ceqh] RR opcode 0x3C8.
+        0x3C8 => {
+            return Ok(SpuInstruction::Ceqh {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:162 s:7 Cgtb] RR opcode 0x250.
+        0x250 => {
+            return Ok(SpuInstruction::Cgtb {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:164 s:7 Cgth] RR opcode 0x248.
+        0x248 => {
+            return Ok(SpuInstruction::Cgth {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:166 s:7 Cgt] RR opcode 0x240.
+        0x240 => {
+            return Ok(SpuInstruction::Cgt {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:168 s:7 Clgtb] RR opcode 0x2D0.
+        0x2D0 => {
+            return Ok(SpuInstruction::Clgtb {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:170 s:7 Clgth] RR opcode 0x2C8.
+        0x2C8 => {
+            return Ok(SpuInstruction::Clgth {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
         // [SPU-ISA p:172 s:7 Clgt] RR opcode 0x2C0.
         0x2C0 => {
             return Ok(SpuInstruction::Clgt {
@@ -885,6 +941,54 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         // [SPU-ISA p:155 s:7 Hlgti] RI10 opcode 0x5F.
         0x5F => {
             return Ok(SpuInstruction::Hlgti {
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:159 s:7 Ceqhi] RI10 opcode 0x7D.
+        0x7D => {
+            return Ok(SpuInstruction::Ceqhi {
+                rt: rt7,
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:163 s:7 Cgtbi] RI10 opcode 0x4E.
+        0x4E => {
+            return Ok(SpuInstruction::Cgtbi {
+                rt: rt7,
+                ra: ra7,
+                imm: (i10 & 0xFF) as u8,
+            })
+        }
+        // [SPU-ISA p:165 s:7 Cgthi] RI10 opcode 0x4D.
+        0x4D => {
+            return Ok(SpuInstruction::Cgthi {
+                rt: rt7,
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:169 s:7 Clgtbi] RI10 opcode 0x5E.
+        0x5E => {
+            return Ok(SpuInstruction::Clgtbi {
+                rt: rt7,
+                ra: ra7,
+                imm: (i10 & 0xFF) as u8,
+            })
+        }
+        // [SPU-ISA p:171 s:7 Clgthi] RI10 opcode 0x5D.
+        0x5D => {
+            return Ok(SpuInstruction::Clgthi {
+                rt: rt7,
+                ra: ra7,
+                imm: sign_extend_10(i10),
+            })
+        }
+        // [SPU-ISA p:173 s:7 Clgti] RI10 opcode 0x5C.
+        0x5C => {
+            return Ok(SpuInstruction::Clgti {
+                rt: rt7,
                 ra: ra7,
                 imm: sign_extend_10(i10),
             })

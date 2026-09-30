@@ -137,6 +137,20 @@ fn quad(state: &mut SpuState, rt: u8, ra: u8, f: impl Fn(u128) -> u128) -> SpuSt
     SpuStepOutcome::Continue
 }
 
+/// Applies `f` to each byte of `ra` and `rb` and writes the sixteen
+/// results to `rt`, reading both sources before the write.
+fn bytes2(
+    state: &mut SpuState,
+    rt: u8,
+    ra: u8,
+    rb: u8,
+    f: impl Fn(u8, u8) -> u8,
+) -> SpuStepOutcome {
+    let [a, b] = [ra, rb].map(|r| state.regs[r as usize]);
+    state.regs[rt as usize] = std::array::from_fn(|i| f(a[i], b[i]));
+    SpuStepOutcome::Continue
+}
+
 /// Execute a single decoded SPU instruction.
 pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match *insn {
@@ -833,6 +847,98 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
             SpuStepOutcome::Continue
         }
+        // [SPU-ISA p:156 s:7. Compare, Branch, and Halt Instructions] Compare Equal Byte: per byte, all ones when RA equals RB.
+        SpuInstruction::Ceqb { rt, ra, rb } => {
+            bytes2(state, rt, ra, rb, |a, b| if a == b { 0xFF } else { 0 })
+        }
+        // [SPU-ISA p:158 s:7. Compare, Branch, and Halt Instructions] Compare Equal Halfword: per halfword, all ones when RA equals RB.
+        SpuInstruction::Ceqh { rt, ra, rb } => {
+            halfwords2(state, rt, ra, rb, |a, b| if a == b { 0xFFFF } else { 0 })
+        }
+        // [SPU-ISA p:159 s:7. Compare, Branch, and Halt Instructions] Compare Equal Halfword Immediate: per halfword against I10 sign-extended to 16 bits.
+        SpuInstruction::Ceqhi { rt, ra, imm } => {
+            halfwords2(
+                state,
+                rt,
+                ra,
+                ra,
+                |a, _| if a == imm as u16 { 0xFFFF } else { 0 },
+            )
+        }
+        // [SPU-ISA p:162 s:7. Compare, Branch, and Halt Instructions] Compare Greater Than Byte: signed per byte.
+        SpuInstruction::Cgtb { rt, ra, rb } => {
+            bytes2(
+                state,
+                rt,
+                ra,
+                rb,
+                |a, b| if a as i8 > b as i8 { 0xFF } else { 0 },
+            )
+        }
+        // [SPU-ISA p:163 s:7. Compare, Branch, and Halt Instructions] Compare Greater Than Byte Immediate: signed per byte against the rightmost 8 bits of I10.
+        SpuInstruction::Cgtbi { rt, ra, imm } => bytes2(state, rt, ra, ra, |a, _| {
+            if a as i8 > imm as i8 {
+                0xFF
+            } else {
+                0
+            }
+        }),
+        // [SPU-ISA p:164 s:7. Compare, Branch, and Halt Instructions] Compare Greater Than Halfword: signed per halfword.
+        SpuInstruction::Cgth { rt, ra, rb } => halfwords2(state, rt, ra, rb, |a, b| {
+            if a as i16 > b as i16 {
+                0xFFFF
+            } else {
+                0
+            }
+        }),
+        // [SPU-ISA p:165 s:7. Compare, Branch, and Halt Instructions] Compare Greater Than Halfword Immediate: signed per halfword against I10 sign-extended to 16 bits.
+        SpuInstruction::Cgthi { rt, ra, imm } => {
+            halfwords2(
+                state,
+                rt,
+                ra,
+                ra,
+                |a, _| if a as i16 > imm { 0xFFFF } else { 0 },
+            )
+        }
+        // [SPU-ISA p:166 s:7. Compare, Branch, and Halt Instructions] Compare Greater Than Word: signed per word.
+        SpuInstruction::Cgt { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| {
+            if a as i32 > b as i32 {
+                u32::MAX
+            } else {
+                0
+            }
+        }),
+        // [SPU-ISA p:168 s:7. Compare, Branch, and Halt Instructions] Compare Logical Greater Than Byte: unsigned per byte.
+        SpuInstruction::Clgtb { rt, ra, rb } => {
+            bytes2(state, rt, ra, rb, |a, b| if a > b { 0xFF } else { 0 })
+        }
+        // [SPU-ISA p:169 s:7. Compare, Branch, and Halt Instructions] Compare Logical Greater Than Byte Immediate: unsigned per byte against the rightmost 8 bits of I10.
+        SpuInstruction::Clgtbi { rt, ra, imm } => {
+            bytes2(state, rt, ra, ra, |a, _| if a > imm { 0xFF } else { 0 })
+        }
+        // [SPU-ISA p:170 s:7. Compare, Branch, and Halt Instructions] Compare Logical Greater Than Halfword: unsigned per halfword.
+        SpuInstruction::Clgth { rt, ra, rb } => {
+            halfwords2(state, rt, ra, rb, |a, b| if a > b { 0xFFFF } else { 0 })
+        }
+        // [SPU-ISA p:171 s:7. Compare, Branch, and Halt Instructions] Compare Logical Greater Than Halfword Immediate: unsigned per halfword against I10 sign-extended to 16 bits.
+        SpuInstruction::Clgthi { rt, ra, imm } => {
+            halfwords2(
+                state,
+                rt,
+                ra,
+                ra,
+                |a, _| if a > imm as u16 { 0xFFFF } else { 0 },
+            )
+        }
+        // [SPU-ISA p:173 s:7. Compare, Branch, and Halt Instructions] Compare Logical Greater Than Word Immediate: unsigned per word against I10 sign-extended to 32 bits.
+        SpuInstruction::Clgti { rt, ra, imm } => words2(state, rt, ra, ra, |a, _| {
+            if a > imm as i32 as u32 {
+                u32::MAX
+            } else {
+                0
+            }
+        }),
 
         // [SPU-ISA p:174 s:7. Compare, Branch, and Halt Instructions] Branch Relative: PC <- PC + sign-extended I16<<2, masked to LS range.
         SpuInstruction::Br { offset } => {
@@ -1080,3 +1186,7 @@ mod quad_bit_shift_tests;
 #[cfg(test)]
 #[path = "tests/quad_byte_shift_tests.rs"]
 mod quad_byte_shift_tests;
+
+#[cfg(test)]
+#[path = "tests/compare_tests.rs"]
+mod compare_tests;

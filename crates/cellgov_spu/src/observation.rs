@@ -325,6 +325,19 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Cwx { rt, .. }
             | SpuInstruction::Cdd { rt, .. }
             | SpuInstruction::Cdx { rt, .. }
+            | SpuInstruction::Ceqb { rt, .. }
+            | SpuInstruction::Ceqh { rt, .. }
+            | SpuInstruction::Ceqhi { rt, .. }
+            | SpuInstruction::Cgtb { rt, .. }
+            | SpuInstruction::Cgtbi { rt, .. }
+            | SpuInstruction::Cgth { rt, .. }
+            | SpuInstruction::Cgthi { rt, .. }
+            | SpuInstruction::Cgt { rt, .. }
+            | SpuInstruction::Clgtb { rt, .. }
+            | SpuInstruction::Clgtbi { rt, .. }
+            | SpuInstruction::Clgth { rt, .. }
+            | SpuInstruction::Clgthi { rt, .. }
+            | SpuInstruction::Clgti { rt, .. }
             | SpuInstruction::Ceq { rt, .. }
             | SpuInstruction::Ceqi { rt, .. }
             | SpuInstruction::Ceqbi { rt, .. }

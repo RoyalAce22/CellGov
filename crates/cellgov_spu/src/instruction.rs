@@ -1040,6 +1040,124 @@ pub enum SpuInstruction {
         /// The rightmost 8 bits of the I10 field.
         imm: u8,
     },
+    // [SPU-ISA p:156 s:7 Byte, halfword and word compares: Ceqb p.156, Ceqh p.158, Ceqhi p.159, Cgtb p.162, Cgtbi p.163, Cgth p.164, Cgthi p.165, Cgt p.166, Clgtb p.168, Clgtbi p.169, Clgth p.170, Clgthi p.171, Clgti p.173]
+    /// Compare equal byte: each byte all ones where `ra` equals `rb`.
+    Ceqb {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Compare equal halfword: each halfword all ones where `ra` equals `rb`.
+    Ceqh {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Compare equal halfword immediate: against I10 sign-extended to 16 bits.
+    Ceqhi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
+    /// Compare greater than byte: signed, each byte all ones where `ra > rb`.
+    Cgtb {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Compare greater than byte immediate: signed, against the rightmost 8 bits of I10.
+    Cgtbi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// The rightmost 8 bits of the I10 field.
+        imm: u8,
+    },
+    /// Compare greater than halfword: signed, each halfword all ones where `ra > rb`.
+    Cgth {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Compare greater than halfword immediate: signed, against I10 sign-extended to 16 bits.
+    Cgthi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
+    /// Compare greater than word: signed, each word all ones where `ra > rb`.
+    Cgt {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Compare logical greater than byte: unsigned, each byte all ones where `ra > rb`.
+    Clgtb {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Compare logical greater than byte immediate: unsigned, against the rightmost 8 bits of I10.
+    Clgtbi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// The rightmost 8 bits of the I10 field.
+        imm: u8,
+    },
+    /// Compare logical greater than halfword: unsigned, each halfword all ones where `ra > rb`.
+    Clgth {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Compare logical greater than halfword immediate: unsigned, against I10 sign-extended to 16 bits.
+    Clgthi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
+    /// Compare logical greater than word immediate: unsigned, against I10 sign-extended to 32 bits.
+    Clgti {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
     // [SPU-ISA p:167 s:7 Compare Greater Than Word Immediate (Cgti) p.167, Compare Logical Greater Than Word (Clgt) p.172]
     /// Compare greater than word immediate, signed: `rt[i] = (ra[i] > sign_extend(imm)) ? 0xFFFFFFFF : 0`.
     Cgti {
