@@ -679,10 +679,11 @@ fn the_pick_precondition_rejects_a_zero_pair_lane_the_host_maximum_breaks() {
 
 #[test]
 fn a_word_that_does_not_decode_errors_in_the_program_and_ends_a_run_elsewhere() {
-    let garbage = (0..=u32::MAX)
-        .rev()
-        .find(|&word| cellgov_spu::decode::decode(word).is_err())
-        .expect("some word does not decode");
+    let garbage: u32 = 0xafff_ffff;
+    assert!(
+        cellgov_spu::decode::decode(garbage).is_err(),
+        "the test needs a word that does not decode"
+    );
     const OUTSIDE: u32 = 0x1_0000;
     let bra = 0x060 << 23 | (OUTSIDE >> 2) << 7;
     assert_eq!(
