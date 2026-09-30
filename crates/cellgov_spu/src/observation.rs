@@ -234,7 +234,13 @@ impl SpuAllowedFootprint {
             channels: BTreeSet::new(),
             reservation: false,
             control_transfer: false,
-            fpscr: matches!(instruction, SpuInstruction::Fscrwr { .. }),
+            fpscr: matches!(
+                instruction,
+                SpuInstruction::Fscrwr { .. }
+                    | SpuInstruction::Fa { .. }
+                    | SpuInstruction::Fs { .. }
+                    | SpuInstruction::Fm { .. }
+            ),
             effects: instruction
                 .fuzz_descriptor()
                 .effects
@@ -444,7 +450,10 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Stopd
             | SpuInstruction::Mtspr { .. }
             | SpuInstruction::Fscrwr { .. } => None,
-            SpuInstruction::Fscrrd { rt } => Some(rt),
+            SpuInstruction::Fscrrd { rt }
+            | SpuInstruction::Fa { rt, .. }
+            | SpuInstruction::Fs { rt, .. }
+            | SpuInstruction::Fm { rt, .. } => Some(rt),
         };
         if let Some(register) = register {
             footprint.registers.insert(register);

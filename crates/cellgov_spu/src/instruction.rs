@@ -1428,6 +1428,34 @@ pub enum SpuInstruction {
         /// Source register.
         rt: u8,
     },
+    // [SPU-ISA p:202 s:9 Single-precision arithmetic: Fa p.202, Fs p.204, Fm p.206]
+    /// Floating add: per slot, `ra + rb` in extended-range single precision, truncated.
+    Fa {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Floating subtract: per slot, `ra - rb` in extended-range single precision, truncated.
+    Fs {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Floating multiply: per slot, `ra * rb` in extended-range single precision, truncated.
+    Fm {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
     // [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
     /// Write RA's defined bits into the FPSCR; RT is a false target.
     Fscrwr {

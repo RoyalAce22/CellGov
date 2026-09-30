@@ -1075,6 +1075,19 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:245 s:10. Control Instructions] Move to SPR: writing an undefined SPR performs no operation.
         // [CBE-Handbook p:67 s:3.1.2] the SPU has no special-purpose registers, so every write is dropped.
         SpuInstruction::Mtspr { sa: _, rt: _ } => SpuStepOutcome::Continue,
+        // [SPU-ISA p:202 s:9. Floating-Point Instructions] Floating Add: RA + RB per slot, extended-range single precision.
+        SpuInstruction::Fa { rt, ra, rb } => {
+            super::float::single(state, rt, ra, rb, super::float::sum)
+        }
+        // [SPU-ISA p:204 s:9. Floating-Point Instructions] Floating Subtract: RA - RB per slot.
+        SpuInstruction::Fs { rt, ra, rb } => {
+            super::float::single(state, rt, ra, rb, |a, b| super::float::sum(a, b.negated()))
+        }
+        // [SPU-ISA p:206 s:9. Floating-Point Instructions] Floating Multiply: RA x RB per slot.
+        // [SPU-ISA p:196 s:9.1] OVF and UNF test the result before rounding, so the 24 x 24-bit product stays exact until truncation.
+        SpuInstruction::Fm { rt, ra, rb } => {
+            super::float::single(state, rt, ra, rb, super::float::product)
+        }
         // [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
         SpuInstruction::Fscrwr { ra } => {
             state.fpscr = u128::from_be_bytes(state.regs[ra as usize])
@@ -1223,3 +1236,7 @@ mod compare_tests;
 #[cfg(test)]
 #[path = "tests/absolute_branch_tests.rs"]
 mod absolute_branch_tests;
+
+#[cfg(test)]
+#[path = "tests/single_float_tests.rs"]
+mod single_float_tests;

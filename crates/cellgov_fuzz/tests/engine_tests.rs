@@ -412,13 +412,14 @@ fn structured_state_bias_reaches_effect_classes_with_named_preconditions() {
     // - a wrch kind
     // - the MFC_Cmd channel
     // - a put command
-    // About one case in 64 per kind meets them, so 384 per kind expects six.
+    // About one case in 128 per kind meets them and enqueues, so 768 per
+    // kind expects six.
     let spu_kinds = cellgov_spu::fuzz::generation_descriptors().len() as u64;
     let structured = FuzzConfig {
         schedule: CampaignSchedule {
             cases: CaseRange {
                 first: 0,
-                count: spu_kinds * 384,
+                count: spu_kinds * 768,
             },
             ..CampaignSchedule::default()
         },

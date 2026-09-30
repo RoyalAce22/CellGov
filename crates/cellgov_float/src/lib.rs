@@ -35,7 +35,7 @@ mod round;
 
 pub use arith::{add, mul};
 pub use format::{Binary32, Binary64, Format};
-pub use operand::{default_nan, unpack, Operand};
+pub use operand::{default_nan, unpack, unpack_extended, Operand};
 pub use round::{round_pack, Exact, Flags, Packed, Policy, Rounding};
 
 #[cfg(test)]

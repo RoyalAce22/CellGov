@@ -37,6 +37,14 @@ impl Exact {
             .then(|| Exact::from_parts(negative, significand, exponent, false))
     }
 
+    /// The same value with the opposite sign.
+    pub fn negated(self) -> Exact {
+        Exact {
+            negative: !self.negative,
+            ..self
+        }
+    }
+
     /// The value's sign.
     pub fn negative(&self) -> bool {
         self.negative

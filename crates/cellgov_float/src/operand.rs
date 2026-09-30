@@ -85,6 +85,23 @@ pub fn unpack<F: Format>(policy: Policy, bits: u64) -> (Operand, Flags) {
     }
 }
 
+/// Decodes `bits` in format `F` under [`Policy::SpuExtended`], which reads
+/// every pattern as a zero or a finite value, with the flags reading it
+/// raises.
+// [SPU-ISA p:195 s:9.1] single precision has no infinity or NaN: exponent 255 is a normal binade.
+pub fn unpack_extended<F: Format>(bits: u64) -> (Exact, Flags) {
+    let (operand, flags) = unpack::<F>(Policy::SpuExtended, bits);
+    let exact = match operand {
+        Operand::Finite(exact) => exact,
+        // `unpack` returns no infinity or NaN under this policy.
+        Operand::Zero { negative } | Operand::Infinity { negative } => {
+            Exact::from_parts(negative, 0, 0, false)
+        }
+        Operand::NaN { .. } => Exact::from_parts(false, 0, 0, false),
+    };
+    (exact, flags)
+}
+
 /// The default quiet NaN every NaN result takes: a positive sign, an
 /// all-ones exponent and only the fraction's leading bit set.
 // [SPU-ISA p:197 s:9.2] the default QNaN has a zero sign, an all-ones exponent and only the fraction's leading bit set (0x7FF8000000000000 for double precision); an implementation may return it for any NaN result.

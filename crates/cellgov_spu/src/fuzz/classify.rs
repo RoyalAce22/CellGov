@@ -402,6 +402,9 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Mfspr
         | SpuInstructionKind::Mtspr
         | SpuInstructionKind::Fscrwr
-        | SpuInstructionKind::Fscrrd => {}
+        | SpuInstructionKind::Fscrrd
+        | SpuInstructionKind::Fa
+        | SpuInstructionKind::Fs
+        | SpuInstructionKind::Fm => {}
     }
 }

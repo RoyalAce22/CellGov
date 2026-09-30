@@ -120,6 +120,24 @@ const DECODERS: &[(&str, Builder)] = &[
     ("mfspr", |f| SpuInstruction::Mfspr { rt: f.rt, sa: f.ra }),
     // [SPU-ISA p:245 s:10 Mtspr] RR opcode 0x10C; SA sits in the RA field.
     ("mtspr", |f| SpuInstruction::Mtspr { sa: f.ra, rt: f.rt }),
+    // [SPU-ISA p:202 s:9 Fa] RR opcode 0x2C4.
+    ("fa", |f| SpuInstruction::Fa {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
+    // [SPU-ISA p:204 s:9 Fs] RR opcode 0x2C5.
+    ("fs", |f| SpuInstruction::Fs {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
+    // [SPU-ISA p:206 s:9 Fm] RR opcode 0x2C6.
+    ("fm", |f| SpuInstruction::Fm {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
     // [SPU-ISA p:235 s:9 Fscrwr] RR opcode 0x3BA; RT is a false target.
     ("fscrwr", |f| SpuInstruction::Fscrwr { ra: f.ra }),
     // [SPU-ISA p:236 s:9 Fscrrd] RR opcode 0x398; RA and RB are unused.
