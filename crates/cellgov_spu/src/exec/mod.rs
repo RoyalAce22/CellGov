@@ -10,6 +10,7 @@ mod lanes;
 mod ls;
 mod outcome;
 
+pub(crate) use channel::invalid_command;
 pub use dispatch::execute;
 pub(crate) use float::scale;
 pub use outcome::{SpuFault, SpuStepOutcome};

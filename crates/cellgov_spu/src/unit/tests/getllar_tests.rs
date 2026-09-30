@@ -6,9 +6,8 @@
 //! `putllc` would otherwise succeed against a comparison the guest made
 //! on stale local store.
 
-use crate::fault_codes::FAULT_MFC_READ_UNRESOLVED;
 use crate::SpuExecutionUnit;
-use cellgov_effects::{Effect, FaultKind};
+use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize};
@@ -153,25 +152,36 @@ fn getllar_from_an_auxiliary_region_reads_its_line_and_acquires() {
     );
 }
 
-/// A line that resolves to nothing takes no reservation.
+/// The error of the one invalid command `effects` queues, if any.
+fn queued_error(effects: &[Effect]) -> Option<cellgov_dma::MfcCommandError> {
+    effects.iter().find_map(|e| match e {
+        Effect::MfcInvalidCommand { command, .. } => Some(command.error),
+        _ => None,
+    })
+}
+
+/// A line that does not translate raises the MFC data-storage exception
+/// and takes no reservation.
+///
+/// [CBEA p:118 s:9.1.6] a mapping fault suspends the queue and raises the MFC data-storage interrupt.
 #[test]
-fn getllar_from_an_unmapped_address_acquires_nothing_and_refuses() {
+fn getllar_from_an_unmapped_address_queues_a_data_storage_exception() {
     let mem = memory_with_marked_aux();
     let mut unit = unit_getllar(UNMAPPED_EA);
+    let free = unit.state().channels.cmd_queue_free;
     let mut effects = Vec::new();
     let result = run_once(&mut unit, &mem, &mut effects);
 
+    assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
     assert_eq!(
-        result.yield_reason,
-        YieldReason::Fault,
-        "a line that never arrived is a refusal, not a held lock",
+        queued_error(&effects),
+        Some(cellgov_dma::MfcCommandError::DataStorage { ea: UNMAPPED_EA }),
+        "{effects:?}"
     );
     assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(
-            FAULT_MFC_READ_UNRESOLVED | (UNMAPPED_EA as u32 & 0xFFFF)
-        )),
-        "the refusal names itself and where it failed",
+        unit.state().channels.cmd_queue_free,
+        free - 1,
+        "the refused command holds a slot"
     );
     assert!(
         acquired_lines(&effects).is_empty(),
@@ -182,7 +192,7 @@ fn getllar_from_an_unmapped_address_acquires_nothing_and_refuses() {
         "and the unit's own register holds none either, so a later \
          putllc has nothing to match",
     );
-    assert_eq!(unit.status(), UnitStatus::Faulted, "the unit stops");
+    assert_ne!(unit.status(), UnitStatus::Faulted, "the SPU runs on");
 }
 
 /// The destination boundary: the last [`LINE_BYTES`] of local store
@@ -232,59 +242,35 @@ fn a_getllar_takes_the_local_store_line_containing_its_address() {
     );
 }
 
-/// A refusal drops the reservation an earlier `getllar` in the same
-/// batch took, in both halves of the state a `putllc` reads.
+/// A refused getllar leaves the reservation an earlier getllar in the
+/// same step took, so the register a putllc reads and the table that
+/// step's acquire commits to name the same line.
 #[test]
-fn a_refused_getllar_drops_a_reservation_the_same_batch_acquired() {
+fn a_refused_getllar_keeps_the_reservation_the_same_step_acquired() {
     let mem = memory_with_marked_aux();
     let mut unit = unit_getllar_twice(UNMAPPED_NEAR_EA);
     let mut effects = Vec::new();
-    let result = run_once(&mut unit, &mem, &mut effects);
+    run_once(&mut unit, &mem, &mut effects);
 
     let lsa = LSA as usize;
     assert_eq!(
         &unit.state().ls[lsa..lsa + LINE_BYTES as usize],
         &[MARK; LINE_BYTES as usize],
-        "the first getllar read its line, so there was a reservation to \
-         drop",
+        "the first getllar read its line, so there is a reservation to \
+         keep",
     );
     assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(
-            FAULT_MFC_READ_UNRESOLVED | (UNMAPPED_NEAR_EA & 0xFFFF)
-        )),
-        "and the second one names the address that refused it",
+        queued_error(&effects),
+        Some(cellgov_dma::MfcCommandError::DataStorage {
+            ea: u64::from(UNMAPPED_NEAR_EA)
+        }),
+        "and the second one names the address that does not translate",
     );
-    assert!(
-        effects.is_empty(),
-        "the refused batch carries nothing, the first line's acquire \
-         included: {effects:?}",
-    );
-    assert!(
-        unit.state().reservation.is_none(),
-        "and the register a putllc reads holds neither line",
-    );
-}
-
-/// The detail bits cannot reach the class field.
-///
-/// The address is the guest's, so an unmasked detail would decode as
-/// another fault class.
-#[test]
-fn a_refused_getllar_cannot_smear_into_the_fault_class() {
-    let mem = memory_with_marked_aux();
-    // Low half all ones, and no region backs it.
-    let mut unit = unit_getllar(0x7_FFFF);
-    let mut effects = Vec::new();
-    let result = run_once(&mut unit, &mem, &mut effects);
-
-    let Some(FaultKind::Guest(code)) = result.fault else {
-        panic!("expected a guest fault, got {:?}", result.fault);
-    };
+    let acquired = acquired_lines(&effects);
+    assert_eq!(acquired.len(), 1, "the first line's acquire: {effects:?}");
     assert_eq!(
-        code & 0xFFFF_0000,
-        FAULT_MFC_READ_UNRESOLVED,
-        "the class the reader decodes is the class that was raised: \
-         0x{code:08x}",
+        unit.state().reservation.map(|l| l.addr()),
+        Some(acquired[0]),
+        "and the register holds that same line",
     );
 }

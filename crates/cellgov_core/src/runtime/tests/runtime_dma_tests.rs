@@ -389,13 +389,14 @@ fn dma_completion_does_not_fire_before_its_time() {
     assert_eq!(rt.dma_queue().len(), 1);
 }
 
+/// The raised put writes nothing, so another unit's reservation over the
+/// line survives.
 #[test]
-fn dma_enqueue_rejects_reserved_destination_preserves_reservation() {
-    use crate::commit::CommitError;
+fn a_put_to_a_reserved_destination_raises_and_preserves_reservation() {
     use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
     use cellgov_mem::{ByteRange, GuestAddr, PageSize, Region, RegionAccess};
 
-    fn run() -> (bool, bool, Vec<u8>) {
+    fn run() -> (Option<cellgov_dma::MfcCommandError>, bool, Vec<u8>) {
         let mem = GuestMemory::from_regions(vec![
             Region::new(0, 0x10000, "rw", PageSize::Page64K),
             Region::with_access(
@@ -425,35 +426,30 @@ fn dma_enqueue_rejects_reserved_destination_preserves_reservation() {
         ];
         rt.registry_mut()
             .register_with(|id| FakeIsaUnit::new(id, ops));
-        let step = rt.step().unwrap();
-        let err = rt.commit_step(&step.result, &step.effects).unwrap_err();
-        let rejected = matches!(
-            err,
-            CommitError::DmaDestinationReserved {
-                effect_index: _,
-                addr: 0x10000,
-                region: "reserved",
-            }
-        );
+        for _ in 0..8 {
+            let Ok(step) = rt.step() else { break };
+            rt.commit_step(&step.result, &step.effects)
+                .expect("the enqueue is accepted");
+        }
+        rt.drain_pending_dma();
+        let raised = rt.take_mfc_exception().map(|e| e.command.error);
         let cross_unit_held = rt.reservations().is_held_by(UnitId::new(1));
-        (rejected, cross_unit_held, rt.trace().bytes().to_vec())
+        (raised, cross_unit_held, rt.trace().bytes().to_vec())
     }
 
-    let (rejected_a, held_a, trace_a) = run();
-    let (rejected_b, held_b, trace_b) = run();
+    let (raised_a, held_a, trace_a) = run();
+    let (raised_b, held_b, trace_b) = run();
 
-    assert!(
-        rejected_a,
-        "enqueue must reject the DmaEnqueue with DmaDestinationReserved"
+    assert_eq!(
+        raised_a,
+        Some(cellgov_dma::MfcCommandError::DataStorage { ea: 0x10000 }),
+        "the queue raises the put when it reaches it"
     );
     assert!(
         held_a,
-        "cross-unit reservation must survive the rejected batch"
+        "cross-unit reservation must survive a put that wrote nothing"
     );
-    assert_eq!(
-        rejected_a, rejected_b,
-        "rejection observable must be stable"
-    );
+    assert_eq!(raised_a, raised_b, "the raise is stable");
     assert_eq!(held_a, held_b, "reservation observable must be stable");
     assert_eq!(trace_a, trace_b, "trace bytes must be byte-identical");
 }
@@ -641,14 +637,22 @@ fn dma_wait_same_commit_completion_overrides_blocked_to_runnable() {
     assert_eq!(trace_a, trace_b, "trace bytes byte-identical across runs");
 }
 
+/// A put the queue raises keeps its tag outstanding, so nothing wakes the
+/// issuer that waits on the tag.
 #[test]
-fn dma_enqueue_rejection_faults_issuer_instead_of_stalling() {
-    use crate::commit::CommitError;
+fn a_raised_put_holds_its_tag_and_its_waiting_issuer_stays_parked() {
     use crate::runtime::StepError;
     use cellgov_exec::UnitStatus;
     use cellgov_mem::{ByteRange, GuestAddr, PageSize, Region, RegionAccess};
 
-    fn run() -> (CommitErrShape, Option<UnitStatus>, StepError, Vec<u8>) {
+    type Outcome = (
+        Option<cellgov_dma::MfcCommandError>,
+        Option<UnitStatus>,
+        StepError,
+        Vec<u8>,
+    );
+
+    fn run() -> Outcome {
         let mem = GuestMemory::from_regions(vec![
             Region::new(0, 0x10000, "rw", PageSize::Page64K),
             Region::with_access(
@@ -670,58 +674,37 @@ fn dma_enqueue_rejection_faults_issuer_instead_of_stalling() {
             seen_tag_bits: Cell::new(0),
             dst_addr: 0x10000,
         });
-
-        let step_a = rt.step().expect("first step runs");
-        let err = rt
-            .commit_step(&step_a.result, &step_a.effects)
-            .expect_err("rejected batch");
-        let err_shape = match err {
-            CommitError::DmaDestinationReserved { addr, region, .. } => {
-                CommitErrShape::Reserved { addr, region }
+        let terminal = loop {
+            match rt.step() {
+                Ok(step) => {
+                    rt.commit_step(&step.result, &step.effects)
+                        .expect("the enqueue is accepted");
+                }
+                Err(err) => break err,
             }
-            other => CommitErrShape::Other(format!("{other:?}")),
         };
-
-        let status_after_reject = rt.registry().effective_status(unit_id);
-
-        let terminal = rt.step().expect_err("no further progress possible");
-
         (
-            err_shape,
-            status_after_reject,
+            rt.take_mfc_exception().map(|e| e.command.error),
+            rt.registry().effective_status(unit_id),
             terminal,
             rt.trace().bytes().to_vec(),
         )
     }
 
-    let (err_a, status_a, terminal_a, trace_a) = run();
-    let (err_b, status_b, terminal_b, trace_b) = run();
+    let (raised_a, status_a, terminal_a, trace_a) = run();
+    let (raised_b, status_b, terminal_b, trace_b) = run();
 
-    assert!(
-        matches!(
-            err_a,
-            CommitErrShape::Reserved {
-                addr: 0x10000,
-                region: "reserved"
-            }
-        ),
-        "commit_step must still return the typed DmaDestinationReserved \
-         (the host-visible signal is preserved): got {err_a:?}"
+    assert_eq!(
+        raised_a,
+        Some(cellgov_dma::MfcCommandError::DataStorage { ea: 0x10000 })
     );
     assert_eq!(
         status_a,
-        Some(UnitStatus::Faulted),
-        "the SPU issuer must be Faulted after pre-validate rejection -- \
-         without the mark the unit runs again and reads its never-queued \
-         transfer's tag group complete"
+        Some(UnitStatus::Blocked),
+        "the tag never reads complete, so the issuer never wakes"
     );
-    assert_eq!(
-        terminal_a,
-        StepError::NoRunnableUnit,
-        "with the issuer Faulted, the runtime terminates at NoRunnableUnit \
-         on the next step, with no unit left to run"
-    );
-    assert_eq!(err_a, err_b, "rejection shape deterministic");
+    assert_eq!(terminal_a, StepError::AllBlocked);
+    assert_eq!(raised_a, raised_b, "the raise is deterministic");
     assert_eq!(status_a, status_b, "issuer status deterministic");
     assert_eq!(terminal_a, terminal_b, "terminal deterministic");
     assert_eq!(trace_a, trace_b, "trace bytes byte-identical across runs");

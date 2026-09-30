@@ -3,22 +3,69 @@
 //! [`Runtime::drain_pending_dma`] runs at scenario termination and
 //! lands every outstanding transfer that no suspended queue holds.
 
-use cellgov_dma::DmaCompletion;
+use cellgov_dma::{DmaCompletion, MfcCommandError};
 use cellgov_exec::UnitStatus;
+use cellgov_mem::{ByteRange, GuestMemory};
+use cellgov_ps3_abi::hw::ppu::CELL_EA_LIMIT;
 use cellgov_time::GuestTicks;
 use cellgov_trace::HostWriter;
 
 use super::spaces::AddressSpaceId;
 use super::Runtime;
 
+/// The fault a transfer raises when the queue reaches it, or `None`.
+///
+/// A main-storage range faults when:
+///
+/// - it runs past the effective-address space (a data-segment fault);
+/// - space 0 has no region for it, or a region the access may not use
+///   (a data-storage fault).
+///
+/// CellGov models no segment table. It treats an address past the Cell's
+/// real-address bound as one that no segment names, because no region
+/// can back it. The architecture does not fix that bound; CellGov does.
+/// [CBEA p:120 s:9.1.7] a segment fault raises the MFC data-segment interrupt; a mapping fault or a protection violation raises the MFC data-storage interrupt.
+fn translation_fault(
+    memory: &GuestMemory,
+    c: &DmaCompletion,
+    payloaded: bool,
+) -> Option<MfcCommandError> {
+    let check = |range: ByteRange, write: bool| {
+        if range.length() == 0 {
+            return None;
+        }
+        let ea = range.start().raw();
+        // `ByteRange` holds only ranges that fit the 64-bit space.
+        let last = ea + (range.length() - 1);
+        if last > CELL_EA_LIMIT {
+            return Some(MfcCommandError::DataSegment { ea });
+        }
+        let translates = if write {
+            memory
+                .validate_write(range, range.length() as usize)
+                .is_ok()
+        } else {
+            memory.with_reads_unlogged(|mem: &GuestMemory| mem.read_checked(range).is_ok())
+        };
+        (!translates).then_some(MfcCommandError::DataStorage { ea })
+    };
+    let request = c.request();
+    request
+        .main_storage_read(payloaded)
+        .and_then(|range| check(range, false))
+        .or_else(|| {
+            request
+                .main_storage_write()
+                .and_then(|range| check(range, true))
+        })
+}
+
 impl Runtime {
     /// Commit one DMA completion's payload to its destination.
     ///
-    /// Infallible by construction: `pre_validate`'s DmaEnqueue arm
-    /// proved the destination is mapped and `ReadWrite` at enqueue,
-    /// regions are add-only with immutable access, and snapshots
-    /// co-capture queue and memory -- so the destination remains
-    /// writable at completion.
+    /// Infallible by construction: the queue hands over only a transfer
+    /// whose ranges [`translation_fault`] passed at this instant, and the
+    /// runtime applies it before anything else touches memory.
     ///
     /// The write sweeps overlapping reservations. DMA commits
     /// independently of `SharedWriteIntent`. Without the sweep, a
@@ -32,6 +79,12 @@ impl Runtime {
     /// own MFC transfer is a local SPE action rather than that outside
     /// entity.
     fn apply_dma_transfer(&mut self, c: &DmaCompletion, payload: Option<&[u8]>) {
+        // A transfer of no bytes touches no address, so its ends need not
+        // name a writable region and nothing lands.
+        // [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
+        if c.length() == 0 {
+            return;
+        }
         if c.direction() == cellgov_dma::DmaDirection::Get {
             self.land_get(c);
             return;
@@ -43,7 +96,7 @@ impl Runtime {
             owned = self
                 .memory
                 .read(c.source())
-                .expect("DMA source range mapped and readable at enqueue")
+                .expect("the queue translated the DMA source when it reached the transfer")
                 .to_vec();
             &owned
         };
@@ -57,7 +110,7 @@ impl Runtime {
             bytes,
             Some(c.issuer()),
         )
-        .expect("DMA destination validated as ReadWrite at enqueue");
+        .expect("the queue translated the DMA destination when it reached the transfer");
         // A landing inside a shared view reaches the sibling views the
         // same way a committed store does. The bytes are the same bytes
         // whichever view names them, so a landing that replicated
@@ -93,7 +146,7 @@ impl Runtime {
         } else {
             self.memory
                 .read(c.source())
-                .expect("DMA get source mapped and readable at enqueue")
+                .expect("the queue translated the get source when it reached the transfer")
                 .to_vec()
         };
         // The destination is a local-store offset, below 2^32.
@@ -117,7 +170,12 @@ impl Runtime {
     /// Apply the DMA completions due now and record each refused command
     /// the queue reaches; returns the fired completions for the trace.
     pub(super) fn fire_dma_completions(&mut self) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
-        let processed = self.dma_queue.process_due(self.time);
+        let memory = &self.memory;
+        let processed = self
+            .dma_queue
+            .process_due_translating(self.time, |c, payloaded| {
+                translation_fault(memory, c, payloaded)
+            });
         for raised in processed.raised {
             self.record_mfc_exception(raised);
         }
@@ -182,7 +240,12 @@ impl Runtime {
     /// suspends its issuer's queue, and the issuer's later transfers never
     /// land.
     pub fn drain_pending_dma(&mut self) {
-        let processed = self.dma_queue.process_due(GuestTicks::new(u64::MAX));
+        let memory = &self.memory;
+        let processed = self
+            .dma_queue
+            .process_due_translating(GuestTicks::new(u64::MAX), |c, payloaded| {
+                translation_fault(memory, c, payloaded)
+            });
         for raised in processed.raised {
             self.record_mfc_exception(raised);
         }
@@ -204,3 +267,7 @@ mod dma_shared_view_tests;
 #[cfg(test)]
 #[path = "tests/dma_invalidation_tests.rs"]
 mod dma_invalidation_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_translation_tests.rs"]
+mod dma_translation_tests;

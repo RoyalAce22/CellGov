@@ -776,12 +776,6 @@ impl ExecutionUnit for TagPollUnit {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum CommitErrShape {
-    Reserved { addr: u64, region: &'static str },
-    Other(String),
-}
-
 #[derive(Clone)]
 
 struct RsxFlipSpinnerUnit {

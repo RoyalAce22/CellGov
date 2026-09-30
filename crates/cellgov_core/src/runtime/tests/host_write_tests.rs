@@ -65,7 +65,6 @@ fn unit_write_error(rt: &mut Runtime, target: ByteRange) -> CommitError {
     let mut ctx = CommitContext {
         space: 0,
         memory: &mut rt.memory,
-        dma_memory: None,
         units: &mut rt.registry,
         mailboxes: &mut rt.mailbox_registry,
         signals: &mut rt.signal_registry,

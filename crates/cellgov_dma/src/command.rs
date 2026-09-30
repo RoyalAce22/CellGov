@@ -58,26 +58,38 @@ pub enum MfcCommandClass {
     Synchronization,
 }
 
-/// Which class 0 interrupt a failed check raises.
+/// Which MFC interrupt a refused command raises.
+///
+/// [CBEA p:263 s:21.4 Table 21-3] the DMA alignment and invalid DMA command interrupts are class 0; the MFC data-segment and data-storage interrupts are class 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MfcExceptionClass {
     /// A DMA alignment error.
     Alignment,
     /// An invalid DMA command.
     InvalidCommand,
+    /// An effective address outside every segment.
+    DataSegment,
+    /// An effective address with no mapping, or one the access may not use.
+    DataStorage,
 }
 
 impl MfcExceptionClass {
     /// The class's bit in the class 0 interrupt status register.
-    pub const fn class0_status_bit(self) -> u64 {
+    ///
+    /// `None` for a class 1 exception, which has no bit in that register.
+    pub const fn class0_status_bit(self) -> Option<u64> {
         match self {
-            Self::Alignment => MFC_CLASS0_ALIGNMENT,
-            Self::InvalidCommand => MFC_CLASS0_INVALID_COMMAND,
+            Self::Alignment => Some(MFC_CLASS0_ALIGNMENT),
+            Self::InvalidCommand => Some(MFC_CLASS0_INVALID_COMMAND),
+            Self::DataSegment | Self::DataStorage => None,
         }
     }
 }
 
-/// A command opcode or parameter that fails one row of Table 7-6.
+/// Why the MFC refuses a command.
+///
+/// - An opcode or parameter fails one row of Table 7-6.
+/// - An effective address does not translate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum MfcCommandError {
     /// `MFC_TagID` sets a reserved bit, bits 0:26.
@@ -126,11 +138,24 @@ pub enum MfcCommandError {
     /// an `s` modifier.
     #[error("opcode 0x{0:04x} is a proxy-queue command")]
     ProxyOnlyCommand(u32),
+    /// An effective address outside every segment.
+    #[error("effective address 0x{ea:016x} is outside every segment")]
+    DataSegment {
+        /// The transfer's effective address.
+        ea: u64,
+    },
+    /// An effective address with no mapping, or one the access may not use.
+    #[error("effective address 0x{ea:016x} does not translate for the access")]
+    DataStorage {
+        /// The transfer's effective address.
+        ea: u64,
+    },
 }
 
 impl MfcCommandError {
-    /// The class 0 interrupt the error raises.
+    /// The interrupt the error raises.
     ///
+    /// [CBEA p:118 s:9.1.6] a segment fault raises the MFC data-segment interrupt; a mapping fault or a protection violation raises the MFC data-storage interrupt.
     /// [CBEA p:57 s:7.2 Table 7-6] an invalid tag, an invalid opcode and a command the queue does not accept are DMA command errors; the size and address rows are DMA alignment errors.
     pub const fn class(self) -> MfcExceptionClass {
         match self {
@@ -145,6 +170,8 @@ impl MfcCommandError {
             | Self::LocalStoreUnaligned { .. }
             | Self::AddressLowBitsDiffer { .. }
             | Self::ListAddressUnaligned(_) => MfcExceptionClass::Alignment,
+            Self::DataSegment { .. } => MfcExceptionClass::DataSegment,
+            Self::DataStorage { .. } => MfcExceptionClass::DataStorage,
         }
     }
 
@@ -163,6 +190,8 @@ impl MfcCommandError {
             Self::IllegalOpcode(_) => 9,
             Self::ReservedOpcode(_) => 10,
             Self::ProxyOnlyCommand(_) => 11,
+            Self::DataSegment { .. } => 12,
+            Self::DataStorage { .. } => 13,
         }
     }
 }

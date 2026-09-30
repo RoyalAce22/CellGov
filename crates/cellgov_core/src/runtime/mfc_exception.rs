@@ -1,11 +1,17 @@
 //! An MFC exception the host has not taken: a queued command the MFC
 //! refused, which suspended its SPU's command queue.
 //!
-//! The MFC reports the refusal to the PPE as a class 0 interrupt, which
-//! LV2 turns into the SPU thread-group exception event. CellGov keeps the
-//! first such exception for the host, which ends the run on it.
+//! The MFC reports the refusal to the PPE as an interrupt, which LV2
+//! turns into the SPU thread-group exception event. The interrupt class
+//! depends on the refusal:
 //!
-//! [CBEA p:263 s:21.4 Table 21-3] the DMA alignment and invalid DMA command interrupts are class 0.
+//! - class 0 for a refused command or parameter;
+//! - class 1 for an address that does not translate.
+//!
+//! CellGov keeps the first such exception for the host, which ends the
+//! run on it.
+//!
+//! [CBEA p:263 s:21.4 Table 21-3] the DMA alignment and invalid DMA command interrupts are class 0; the MFC data-segment and data-storage interrupts are class 1.
 
 use cellgov_dma::{InvalidMfcCommand, RaisedMfcCommand};
 use cellgov_event::UnitId;
@@ -28,6 +34,8 @@ impl core::fmt::Display for MfcException {
         let class = match self.command.error.class() {
             cellgov_dma::MfcExceptionClass::Alignment => "DMA alignment",
             cellgov_dma::MfcExceptionClass::InvalidCommand => "invalid DMA command",
+            cellgov_dma::MfcExceptionClass::DataSegment => "MFC data segment",
+            cellgov_dma::MfcExceptionClass::DataStorage => "MFC data storage",
         };
         let p = self.command.params;
         write!(f, "SPU unit {}", self.unit.raw())?;

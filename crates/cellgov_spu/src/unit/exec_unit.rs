@@ -5,8 +5,7 @@ use super::spu_unit::{SpuExecutionUnit, SpuSnapshot};
 use super::transfer::{copy_into_local_store, shared_read};
 use crate::exec::{SpuFault, SpuStepOutcome};
 use crate::fault_codes::{
-    guest_fault, guest_fault_for, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_READ_UNRESOLVED,
-    FAULT_UNIMPLEMENTED_INSN,
+    guest_fault, guest_fault_for, FAULT_LS_OUT_OF_RANGE, FAULT_UNIMPLEMENTED_INSN,
 };
 use crate::instruction::SpuDecodeError;
 use crate::stop::SpuStopKind;
@@ -157,17 +156,26 @@ impl ExecutionUnit for SpuExecutionUnit {
                     // [CBEA p:111 s:9 SPU Channel Map] MFC_EAL is a write channel carrying the low-order SPU effective-address command parameter.
                     let read = copy_into_local_store(&mut self.state, ctx.memory(), ea, lsa, size);
                     if read.is_err() {
-                        // A reservation over bytes that never arrived
-                        // would let a later putllc succeed against stale
-                        // local store, so a refused copy takes none.
-                        self.state.reservation = None;
-                        effects.clear();
-                        self.status = UnitStatus::Faulted;
+                        // The line does not translate: the MFC raises the
+                        // data-storage exception for the getllar, which
+                        // moves no line and never reports its status.
+                        // [CBEA p:118 s:9.1.6] a mapping fault suspends the queue and raises the MFC data-storage interrupt.
+                        // The command acquires no reservation over a
+                        // line it never read. One an earlier getllar took
+                        // stands, in the register as in the committed
+                        // table that getllar's acquire reaches.
+                        effects.push(crate::exec::invalid_command(
+                            spu::MFC_GETLLAR,
+                            cellgov_dma::MfcCommandError::DataStorage { ea },
+                            &mut self.state,
+                            self.id,
+                        ));
+                        self.state.advance_pc();
                         return ExecutionStepResult {
-                            yield_reason: YieldReason::Fault,
+                            yield_reason: YieldReason::DmaSubmitted,
                             consumed_cost: InstructionCost::new(budget.raw() - remaining),
-                            local_diagnostics: LocalDiagnostics::with_pc_ea(step_pc, ea),
-                            fault: Some(guest_fault(FAULT_MFC_READ_UNRESOLVED, ea as u32)),
+                            local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                            fault: None,
                             syscall_args: None,
                         };
                     }
@@ -190,13 +198,6 @@ impl ExecutionUnit for SpuExecutionUnit {
                     let local_diagnostics = match f {
                         SpuFault::LsOutOfRange(addr) => {
                             LocalDiagnostics::with_pc_ea(step_pc, u64::from(addr))
-                        }
-                        // The detail half carries the tag, so the address
-                        // rides here.
-                        SpuFault::MfcAddressWraps(_) => {
-                            let c = &self.state.channels;
-                            let ea = (u64::from(c.mfc_eah) << 32) | u64::from(c.mfc_eal);
-                            LocalDiagnostics::with_pc_ea(step_pc, ea)
                         }
                         _ => LocalDiagnostics::with_pc(step_pc),
                     };

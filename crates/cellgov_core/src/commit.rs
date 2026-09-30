@@ -86,24 +86,6 @@ pub enum CommitError {
         /// Source unit id that was not found in the registry.
         source_unit: UnitId,
     },
-    /// A `DmaEnqueue` destination range escapes any registered region.
-    #[error("effect[{effect_index}]: DMA destination escapes regions")]
-    DmaDestinationOutOfRange {
-        /// Index of the offending effect within the batch.
-        effect_index: usize,
-    },
-    /// A `DmaEnqueue` carrying no inline payload names a source range
-    /// that escapes any registered region.
-    ///
-    /// The completion reads the source out of committed space 0, so a
-    /// range that does not resolve there has no bytes to move. An
-    /// enqueue that carries its bytes inline is not held to this: the
-    /// completion never reads a range for it.
-    #[error("effect[{effect_index}]: DMA source escapes regions")]
-    DmaSourceOutOfRange {
-        /// Index of the offending effect within the batch.
-        effect_index: usize,
-    },
     /// A `DmaEnqueue` inline payload is not as long as the destination
     /// it lands in.
     ///
@@ -125,19 +107,6 @@ pub enum CommitError {
     DmaGetWithPayload {
         /// Index of the offending effect within the batch.
         effect_index: usize,
-    },
-    /// A `DmaEnqueue` destination range lies in a non-`ReadWrite` region.
-    #[error(
-        "effect[{effect_index}]: DMA destination at 0x{addr:016x} lies in \
-         reserved region {region}"
-    )]
-    DmaDestinationReserved {
-        /// Index of the offending effect within the batch.
-        effect_index: usize,
-        /// Faulting guest address (start of destination range).
-        addr: u64,
-        /// Reserved region's label.
-        region: &'static str,
     },
     /// The memory layer rejected the drain (permissions, or a
     /// pre-validation/drain disagreement on containment).
@@ -227,14 +196,6 @@ pub struct CommitContext<'a> {
     pub space: u32,
     /// Guest memory the staged writes drain into.
     pub memory: &'a mut GuestMemory,
-    /// Space 0's memory, `Some` only where [`Self::memory`] is a child
-    /// space and `None` where the two are the same memory.
-    ///
-    /// Every DMA transfer reads and writes space 0, whatever space its
-    /// issuer runs in. A caller that validates a DMA range resolves it
-    /// against this field. Against [`Self::memory`] the check reads
-    /// bytes the transfer never touches.
-    pub dma_memory: Option<&'a GuestMemory>,
     /// Unit registry queried for source/target validation and status overrides.
     pub units: &'a mut UnitRegistry,
     /// Mailbox registry for send and receive-attempt effects.
@@ -443,62 +404,11 @@ impl CommitPipeline {
                                     effect_index: idx,
                                 });
                             }
-                        } else if !(get && request.length() == 0) {
-                            // A get of no bytes reads nothing, so its source
-                            // need not resolve.
-                            // [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
-                            let src = request.source();
-                            // Unlogged: the transfer's own read at
-                            // completion is the one the runtime reports,
-                            // and this batch may still be refused below.
-                            let dma_mem: &GuestMemory = ctx.dma_memory.unwrap_or(&*ctx.memory);
-                            let resolves: Result<(), MemError> =
-                                dma_mem.with_reads_unlogged(|mem: &GuestMemory| {
-                                    mem.read_checked(src).map(|_| ())
-                                });
-                            if let Err(err) = resolves {
-                                ctx.units
-                                    .set_status_override(request.issuer(), UnitStatus::Faulted);
-                                return Err(match err {
-                                    MemError::Unmapped(_) => {
-                                        CommitError::DmaSourceOutOfRange { effect_index: idx }
-                                    }
-                                    other => CommitError::Memory(other),
-                                });
-                            }
                         }
-                        let dst = request.destination();
-                        // Space 0, whatever space the issuer runs in;
-                        // see the doc on `CommitContext::dma_memory`. A
-                        // get's destination is local store, not memory.
-                        let dst_mem: &GuestMemory = ctx.dma_memory.unwrap_or(&*ctx.memory);
-                        let written = if get {
-                            Ok(())
-                        } else {
-                            dst_mem.validate_write(dst, dst.length() as usize)
-                        };
-                        if let Err(err) = written {
-                            // Without the mark the issuer runs again and
-                            // `MFC_RD_TAG_STAT` reads its tag group
-                            // complete: the refused transfer never entered
-                            // the DMA queue, so a transfer that never ran
-                            // would read as done.
-                            ctx.units
-                                .set_status_override(request.issuer(), UnitStatus::Faulted);
-                            return Err(match err {
-                                MemError::Unmapped(_) | MemError::LengthMismatch => {
-                                    CommitError::DmaDestinationOutOfRange { effect_index: idx }
-                                }
-                                MemError::ReservedWrite { addr, region } => {
-                                    CommitError::DmaDestinationReserved {
-                                        effect_index: idx,
-                                        addr,
-                                        region,
-                                    }
-                                }
-                                other => CommitError::Memory(other),
-                            });
-                        }
+                        // The pipeline checks no main-storage address. The
+                        // queue raises one that does not translate when it
+                        // reaches the transfer.
+                        // [CBEA p:118 s:9.1.6] the address's validity is checked asynchronous to the instruction stream, and an invalid one suspends the queue.
                         dma_count += 1;
                     }
                     Effect::MfcInvalidCommand { issuer, .. } => {

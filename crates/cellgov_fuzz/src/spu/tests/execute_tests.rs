@@ -308,12 +308,18 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
                 );
             }
-            SpuSequenceInteraction::MfcAddressFault => {
+            SpuSequenceInteraction::UnmodelledMfcCommand => {
                 assert_eq!(first.2.len(), 2);
-                assert!(matches!(
-                    first.0.terminal_outcome,
-                    Some(SpuStepOutcome::Fault(_))
-                ));
+                assert!(
+                    matches!(
+                        first.0.terminal_outcome,
+                        Some(SpuStepOutcome::Fault(
+                            cellgov_spu::exec::SpuFault::UnsupportedMfcCommand(word)
+                        )) if word & 0xFFFF == cellgov_ps3_abi::hw::spu::MFC_PUTB
+                    ),
+                    "{:?}",
+                    first.0.terminal_outcome
+                );
                 assert_eq!(first.0.state, SpuObservableSnapshot::capture(&initial));
                 assert!(first.0.footprint_violations.is_empty());
             }
@@ -383,7 +389,7 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
             SpuSequenceInteraction::LocalStore => {
                 defective.0.state.ls[STRUCTURED_LS_DATA_BASE as usize] ^= 1
             }
-            SpuSequenceInteraction::MfcAddressFault => defective.0.state.pc ^= 4,
+            SpuSequenceInteraction::UnmodelledMfcCommand => defective.0.state.pc ^= 4,
             SpuSequenceInteraction::Branch => defective.0.state.pc ^= 4,
             SpuSequenceInteraction::Stop => {
                 defective.0.terminal_outcome = Some(SpuStepOutcome::Continue)

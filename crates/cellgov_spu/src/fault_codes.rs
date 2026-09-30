@@ -36,19 +36,9 @@ pub(crate) const FAULT_UNIMPLEMENTED_INSN: u32 = 0x0005_0000;
 /// A refused `rchcnt`, distinct from a refused `rdch` / `wrch` on the
 /// same channel.
 pub(crate) const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
-/// An MFC put or get whose effective-address range runs past the end
-/// of the address space. Its low bits carry the transfer's tag id. A
-/// range no region backs is the commit's refusal of the enqueue.
-pub(crate) const FAULT_MFC_ADDRESS_WRAPS: u32 = 0x0007_0000;
-// No class uses 0x0008_0000, so an old code with that class decodes as
-// no current fault.
-/// A synchronous MFC read -- `getllar` -- whose effective address
-/// resolves to no region. The detail is the low 16 bits of the
-/// effective address; [`LocalDiagnostics::faulting_ea`] carries it
-/// whole.
-///
-/// [`LocalDiagnostics::faulting_ea`]: cellgov_exec::LocalDiagnostics::faulting_ea
-pub(crate) const FAULT_MFC_READ_UNRESOLVED: u32 = 0x0009_0000;
+// No class uses 0x0007_0000 to 0x0009_0000, so an old code with one of
+// those classes decodes as no current fault. An MFC address that does not
+// translate raises an MFC exception, which no fault class names.
 /// A channel access whose stall no event can end. The detail is the
 /// channel number.
 pub(crate) const FAULT_CHANNEL_STALL: u32 = 0x000A_0000;
@@ -67,14 +57,12 @@ pub(crate) const FAULT_DETAIL_MASK: u32 = 0xFFFF;
 
 /// Every class this crate raises, so the layout checks and the layout
 /// tests cover one set.
-const EVERY_FAULT_CLASS: [u32; 10] = [
+const EVERY_FAULT_CLASS: [u32; 8] = [
     FAULT_LS_OUT_OF_RANGE,
     FAULT_UNSUPPORTED_CHANNEL,
     FAULT_UNSUPPORTED_MFC_CMD,
     FAULT_UNIMPLEMENTED_INSN,
     FAULT_UNSUPPORTED_CHANNEL_COUNT,
-    FAULT_MFC_ADDRESS_WRAPS,
-    FAULT_MFC_READ_UNRESOLVED,
     FAULT_CHANNEL_STALL,
     FAULT_RESERVED_TAG_UPDATE,
     FAULT_UNDEFINED_CONVERSION_SCALE,
@@ -116,7 +104,6 @@ pub(crate) fn guest_fault_for(fault: SpuFault) -> FaultKind {
         SpuFault::UnsupportedChannelCount(channel) => {
             guest_fault(FAULT_UNSUPPORTED_CHANNEL_COUNT, channel as u32)
         }
-        SpuFault::MfcAddressWraps(tag) => guest_fault(FAULT_MFC_ADDRESS_WRAPS, u32::from(tag)),
         SpuFault::ChannelStall(channel) => guest_fault(FAULT_CHANNEL_STALL, u32::from(channel)),
         SpuFault::ReservedTagUpdate(value) => guest_fault(FAULT_RESERVED_TAG_UPDATE, value),
         SpuFault::UndefinedConversionScale(imm) => {
@@ -141,8 +128,6 @@ pub fn describe_guest_fault(code: u32) -> Option<String> {
         FAULT_UNSUPPORTED_CHANNEL => "SPU_UNSUPPORTED_CHANNEL",
         FAULT_UNSUPPORTED_MFC_CMD => "SPU_UNSUPPORTED_MFC_CMD",
         FAULT_UNSUPPORTED_CHANNEL_COUNT => "SPU_UNSUPPORTED_CHANNEL_COUNT",
-        FAULT_MFC_ADDRESS_WRAPS => "SPU_MFC_ADDRESS_WRAPS",
-        FAULT_MFC_READ_UNRESOLVED => "SPU_MFC_READ_UNRESOLVED",
         FAULT_CHANNEL_STALL => "SPU_CHANNEL_STALL",
         FAULT_RESERVED_TAG_UPDATE => "SPU_RESERVED_TAG_UPDATE",
         FAULT_UNDEFINED_CONVERSION_SCALE => "SPU_UNDEFINED_CONVERSION_SCALE",

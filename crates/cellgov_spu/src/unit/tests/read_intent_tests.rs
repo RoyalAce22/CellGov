@@ -80,7 +80,7 @@ fn a_transfer_ending_at_the_last_byte_of_memory_records_the_read() {
 }
 
 #[test]
-fn a_transfer_reaching_past_the_address_space_records_no_read() {
+fn a_getllar_whose_line_does_not_translate_records_no_read() {
     let mut unit = unit_issuing(MFC_GETLLAR);
     unit.state_mut().channels.mfc_eal = LAST_LINE_EA as u32;
     // One byte short of the space the transfer needs, so the copy
@@ -92,9 +92,15 @@ fn a_transfer_reaching_past_the_address_space_records_no_read() {
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
     assert!(read_ranges(&effects).is_empty(), "{effects:?}");
-    // The refusal, not an empty vector, is why no read is recorded. An
+    // The queued invalid command is why the step records no read. An
     // empty batch alone would also satisfy the assertion above.
-    assert_eq!(result.yield_reason, YieldReason::Fault);
+    assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::MfcInvalidCommand { .. })),
+        "{effects:?}"
+    );
 }
 
 /// An `MFC_LSA` in the last half-line takes the line that contains it,

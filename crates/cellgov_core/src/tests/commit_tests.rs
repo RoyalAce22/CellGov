@@ -64,7 +64,6 @@ impl CommitTestBed {
         let mut ctx = CommitContext {
             space: 0,
             memory: &mut self.mem,
-            dma_memory: None,
             units: &mut self.units,
             mailboxes: &mut self.mailboxes,
             signals: &mut self.signals,
@@ -1273,25 +1272,21 @@ fn conditional_store_with_prior_reservation_leaves_counter_at_zero() {
 }
 
 #[test]
-fn dma_enqueue_destination_out_of_range_rejects_batch() {
+fn dma_enqueue_to_an_unmapped_destination_reaches_the_queue() {
     let mut bed = CommitTestBed::new(4096);
     let issuer = bed.units.register_with(DummyUnit::runnable);
     // Source is in-range (0..4), destination is past end of memory.
     let bad_dst = ByteRange::new(GuestAddr::new(0x10_0000), 4).unwrap();
     let ok_src = range(0, 4);
     let req = DmaRequest::new(DmaDirection::Put, ok_src, bad_dst, issuer).unwrap();
-    let bad = Effect::DmaEnqueue {
+    let put = Effect::DmaEnqueue {
         request: req,
         payload: None,
     };
-    let (r, e) = step_with(YieldReason::BudgetExhausted, vec![bad]);
-    let err = bed.process(&r, &e);
-    assert!(matches!(
-        err,
-        Err(CommitError::DmaDestinationOutOfRange { effect_index: 0 })
-    ));
-    // Queue stays empty when the batch is rejected atomically.
-    assert!(bed.dma_queue.is_empty());
+    let (r, e) = step_with(YieldReason::BudgetExhausted, vec![put]);
+    let outcome = bed.process(&r, &e).expect("the queue checks the address");
+    assert_eq!(outcome.dma_enqueued, 1);
+    assert_eq!(bed.dma_queue.len(), 1);
 }
 
 /// A guest that never reached GCM init has no label base, so the

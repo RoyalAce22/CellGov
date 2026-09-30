@@ -4,7 +4,7 @@
 
 use cellgov_core::{Runtime, RuntimeMode};
 use cellgov_event::UnitId;
-use cellgov_exec::{ExecutionUnit, StallWake, UnitStatus, YieldReason};
+use cellgov_exec::{ExecutionUnit, StallWake, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize};
 use cellgov_ps3_abi::hw::spu::{
     MFC_CMD, MFC_GET, MFC_PUT, MFC_RD_TAG_STAT, MFC_SPU_QUEUE_DEPTH, MFC_TAG_UPDATE_ALL,
@@ -166,24 +166,25 @@ fn a_zero_byte_get_completes_where_no_region_backs_its_address() {
     assert_eq!(spu(&rt, unit).state().reg_word(5), 1 << TAG);
 }
 
-/// The commit refuses a get whose source no region backs, and
-/// its issuer stops rather than wait on a tag that will never complete.
+/// The queue raises a get whose source no region backs when it reaches
+/// the get. Its bytes never land, and its tag never reads complete.
+///
+/// [CBEA p:118 s:9.1.6] a mapping fault suspends the queue and raises the MFC data-storage interrupt.
 #[test]
-fn a_get_from_an_unmapped_address_is_refused_and_faults_the_issuer() {
+fn a_get_from_an_unmapped_address_raises_a_data_storage_exception() {
     let (mut rt, unit) = runtime_with(&get_and_wait(), MFC_GET, UNMAPPED_EA, LSA, TRANSFER_BYTES);
-    let step = rt.step().expect("the SPU runs");
-    let refused = rt.commit_step(&step.result, &step.effects);
-    assert!(
-        matches!(
-            refused,
-            Err(cellgov_core::CommitError::DmaSourceOutOfRange { .. })
-        ),
-        "{refused:?}"
-    );
     assert_eq!(
-        rt.registry().effective_status(unit),
-        Some(UnitStatus::Faulted)
+        run(&mut rt).last(),
+        Some(&YieldReason::ChannelStall),
+        "the SPU parks on a tag the get never completes"
     );
+    let exception = rt.take_mfc_exception().expect("the queue reached the get");
+    assert_eq!(exception.unit, unit);
+    assert_eq!(
+        exception.command.error,
+        cellgov_dma::MfcCommandError::DataStorage { ea: UNMAPPED_EA }
+    );
+    assert_eq!(spu(&rt, unit).state().reg_word(5), 0, "the wait never ends");
 }
 
 /// A get that ends at the last byte of local store lands there, and one

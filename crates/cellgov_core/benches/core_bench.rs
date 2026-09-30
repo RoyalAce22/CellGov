@@ -58,7 +58,6 @@ fn bench_commit_0_effects(c: &mut Criterion) {
             let mut ctx = CommitContext {
                 space: 0,
                 memory: &mut mem,
-                dma_memory: None,
                 units: &mut units,
                 mailboxes: &mut mailboxes,
                 signals: &mut signals,
@@ -97,7 +96,6 @@ fn bench_commit_1_effect(c: &mut Criterion) {
             let mut ctx = CommitContext {
                 space: 0,
                 memory: &mut mem,
-                dma_memory: None,
                 units: &mut units,
                 mailboxes: &mut mailboxes,
                 signals: &mut signals,
@@ -138,7 +136,6 @@ fn bench_commit_10_effects(c: &mut Criterion) {
             let mut ctx = CommitContext {
                 space: 0,
                 memory: &mut mem,
-                dma_memory: None,
                 units: &mut units,
                 mailboxes: &mut mailboxes,
                 signals: &mut signals,
@@ -185,7 +182,6 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
             let mut ctx = CommitContext {
                 space: 0,
                 memory: &mut mem,
-                dma_memory: None,
                 units: &mut units,
                 mailboxes: &mut mailboxes,
                 signals: &mut signals,

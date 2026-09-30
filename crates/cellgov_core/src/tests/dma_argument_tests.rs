@@ -1,10 +1,13 @@
-//! DMA arguments the enqueue refuses by name rather than panicking at
-//! completion.
+//! DMA arguments the enqueue refuses by name, and the ones it leaves to
+//! the queue.
 //!
-//! The completion reads the source out of committed space 0 and writes
-//! the destination there, so both ends have to resolve at enqueue. An
-//! end that does not is a refusal the caller can read, in the shape
-//! every other bad DMA argument already takes.
+//! The pipeline refuses an enqueue whose shape is wrong:
+//!
+//! - a payload of the wrong length;
+//! - a get that carries bytes.
+//!
+//! It checks no main-storage address. The queue raises an address that
+//! does not translate when it reaches the transfer.
 
 use super::*;
 use crate::commit::tests::{range, step_with, CommitTestBed, DummyUnit};
@@ -46,12 +49,6 @@ fn refused(effects: Vec<Effect>) -> (CommitError, Option<UnitStatus>) {
     (err, bed.units.effective_status(issuer))
 }
 
-#[test]
-fn an_unmapped_dma_source_is_refused_at_enqueue() {
-    let err = refusal_of(vec![enqueue(range(UNMAPPED, 4), range(0, 4), None)]);
-    assert_eq!(err, CommitError::DmaSourceOutOfRange { effect_index: 0 });
-}
-
 /// The completion writes the payload over the whole destination, so any
 /// other length reaches the memory layer as a mismatch it has no
 /// refusal for.
@@ -68,41 +65,18 @@ fn a_payload_that_is_not_the_destination_length_is_refused() {
     }
 }
 
-/// An inline payload carries the bytes, so no source range is read and
-/// none has to resolve.
-#[test]
-fn an_unmapped_source_with_an_inline_payload_is_accepted() {
-    let mut bed = CommitTestBed::new(8);
-    bed.units.register_with(DummyUnit::runnable);
-    let (result, e) = step_with(
-        YieldReason::BudgetExhausted,
-        vec![enqueue(
-            range(UNMAPPED, 4),
-            range(0, 4),
-            Some(vec![1, 2, 3, 4]),
-        )],
-    );
-    let outcome = bed
-        .process(&result, &e)
-        .expect("the payload is the bytes, so the source is never read");
-    assert_eq!(outcome.dma_enqueued, 1);
-}
-
 /// Every refusal marks the issuer, so it cannot poll a tag bit that
 /// will never arrive.
 #[test]
 fn each_refused_enqueue_faults_the_issuer() {
     let shapes = [
-        enqueue(range(UNMAPPED, 4), range(0, 4), None),
         enqueue(range(0, 4), range(4, 4), Some(vec![1, 2, 3])),
-        enqueue(range(0, 4), range(UNMAPPED, 4), None),
         request(
             DmaDirection::Get,
             range(0, 4),
             range(4, 4),
             Some(vec![1, 2, 3, 4]),
         ),
-        request(DmaDirection::Get, range(UNMAPPED, 4), range(4, 4), None),
     ];
     for shape in shapes {
         let (err, status) = refused(vec![shape]);
@@ -123,54 +97,13 @@ fn a_get_with_an_inline_payload_is_refused_by_name() {
     assert_eq!(err, CommitError::DmaGetWithPayload { effect_index: 0 });
 }
 
-/// A get's destination is its issuer's local store, not memory, so only
-/// its source has to resolve; a get of no bytes reads none.
-/// [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
-#[test]
-fn a_get_resolves_only_its_source() {
-    let err = refusal_of(vec![request(
-        DmaDirection::Get,
-        range(UNMAPPED, 4),
-        range(0, 4),
-        None,
-    )]);
-    assert_eq!(err, CommitError::DmaSourceOutOfRange { effect_index: 0 });
-    for (source, destination) in [
-        (range(0, 4), range(UNMAPPED, 4)),
-        (range(UNMAPPED, 0), range(0, 0)),
-    ] {
-        let mut bed = CommitTestBed::new(8);
-        bed.units.register_with(DummyUnit::runnable);
-        let (result, e) = step_with(
-            YieldReason::BudgetExhausted,
-            vec![request(DmaDirection::Get, source, destination, None)],
-        );
-        let outcome = bed.process(&result, &e).expect("the get reaches the queue");
-        assert_eq!(outcome.dma_enqueued, 1);
-    }
-}
-
-/// The premise for the refusals above: the same enqueue with both ends
-/// mapped reaches the queue.
-#[test]
-fn a_put_between_two_mapped_ends_is_accepted() {
-    let mut bed = CommitTestBed::new(8);
-    bed.units.register_with(DummyUnit::runnable);
-    let (result, e) = step_with(
-        YieldReason::BudgetExhausted,
-        vec![enqueue(range(0, 4), range(4, 4), None)],
-    );
-    let outcome = bed.process(&result, &e).expect("both ends resolve");
-    assert_eq!(outcome.dma_enqueued, 1);
-}
-
-/// Base of the zero-readable region [`bed_with_reserved_sources`] adds.
+/// Base of the zero-readable region [`bed_with_reserved_regions`] adds.
 const ZERO_READABLE: u64 = 0x2000;
 
-/// Base of the strict region [`bed_with_reserved_sources`] adds.
+/// Base of the strict region [`bed_with_reserved_regions`] adds.
 const STRICT: u64 = 0x3000;
 
-fn bed_with_reserved_sources() -> CommitTestBed {
+fn bed_with_reserved_regions() -> CommitTestBed {
     let mem = GuestMemory::from_regions(vec![
         Region::new(0, 8, "main", PageSize::Page64K),
         Region::with_access(
@@ -194,40 +127,47 @@ fn bed_with_reserved_sources() -> CommitTestBed {
     bed
 }
 
-/// Validating the source reports no read of its own. The count exists
-/// for the reads a run makes, and the transfer's own read happens at
-/// completion -- after a batch this one may still refuse.
+/// The shapes cover each way an address does not translate:
+///
+/// - no region;
+/// - a region the read may not use;
+/// - a region the write may not use.
+///
+/// [CBEA p:118 s:9.1.6] the address's validity is checked asynchronous to the instruction stream, during the transfer.
 #[test]
-fn validating_a_zero_readable_source_reports_no_provisional_read() {
-    let mut bed = bed_with_reserved_sources();
+fn an_address_that_does_not_translate_reaches_the_queue() {
+    let shapes = [
+        enqueue(range(UNMAPPED, 4), range(0, 4), None),
+        enqueue(range(0, 4), range(UNMAPPED, 4), None),
+        enqueue(range(STRICT, 4), range(0, 4), None),
+        enqueue(range(0, 4), range(ZERO_READABLE, 4), None),
+        request(DmaDirection::Get, range(UNMAPPED, 4), range(0, 4), None),
+    ];
+    for shape in shapes {
+        let mut bed = bed_with_reserved_regions();
+        let (result, e) = step_with(YieldReason::BudgetExhausted, vec![shape.clone()]);
+        let outcome = bed
+            .process(&result, &e)
+            .unwrap_or_else(|err| panic!("{shape:?} refused: {err}"));
+        assert_eq!(outcome.dma_enqueued, 1, "{shape:?}");
+        assert_ne!(
+            bed.units.effective_status(UnitId::new(0)),
+            Some(UnitStatus::Faulted),
+            "{shape:?}"
+        );
+    }
+}
+
+/// The enqueue reads nothing: the transfer's own read happens when the
+/// queue reaches it.
+#[test]
+fn an_enqueue_reports_no_provisional_read() {
+    let mut bed = bed_with_reserved_regions();
     let (result, e) = step_with(
         YieldReason::BudgetExhausted,
         vec![enqueue(range(ZERO_READABLE, 4), range(0, 4), None)],
     );
-    let outcome = bed
-        .process(&result, &e)
-        .expect("a zero-readable source resolves");
+    let outcome = bed.process(&result, &e).expect("the enqueue is accepted");
     assert_eq!(outcome.dma_enqueued, 1);
     assert_eq!(bed.memory().provisional_read_count(), 0);
-}
-
-/// A strict source resolves to a region, so it is not a range that
-/// escapes them: the refusal carries the memory layer's own error.
-#[test]
-fn a_strict_reserved_source_is_refused_as_a_memory_error() {
-    let mut bed = bed_with_reserved_sources();
-    let (result, e) = step_with(
-        YieldReason::BudgetExhausted,
-        vec![enqueue(range(STRICT, 4), range(0, 4), None)],
-    );
-    let err = bed
-        .process(&result, &e)
-        .expect_err("reading a strict region faults");
-    assert_eq!(
-        err,
-        CommitError::Memory(MemError::ReservedStrictRead {
-            addr: STRICT,
-            region: "strict",
-        }),
-    );
 }

@@ -75,11 +75,10 @@ impl Runtime {
             return Ok(CommitOutcome::default());
         }
 
-        // Commit into the emitting unit's address space; the batch's
-        // writes were validated against the same space the unit
-        // executed in. A DMA transfer's ends are the exception: the
-        // pipeline resolves them in space 0, through
-        // `CommitContext::dma_memory`.
+        // Commit into the emitting unit's address space; the pipeline
+        // validates the batch's writes against the same space the unit
+        // executed in. A DMA transfer's ends are the exception: the queue
+        // resolves them in space 0 when it reaches the transfer.
         let source_space = match self.last_scheduled_unit {
             Some(unit) => self.spaces.space_of(unit),
             None => crate::runtime::spaces::AddressSpaceId::BOOT,
@@ -124,17 +123,15 @@ impl Runtime {
         // `rsx_label_writes_committed` is threaded through CommitContext
         // so `process()` increments it adjacent to the guard it witnesses.
         let rsx_label_base = self.resolved_rsx_label_base();
-        let (space_memory, space_reservations, dma_memory) =
-            crate::runtime::spaces::resolve_commit_targets(
-                &mut self.memory,
-                &mut self.reservations,
-                &mut self.spaces,
-                source_space,
-            );
+        let (space_memory, space_reservations) = crate::runtime::spaces::resolve_commit_targets(
+            &mut self.memory,
+            &mut self.reservations,
+            &mut self.spaces,
+            source_space,
+        );
         let mut ctx = CommitContext {
             space: source_space.raw(),
             memory: space_memory,
-            dma_memory,
             units: &mut self.registry,
             mailboxes: &mut self.mailbox_registry,
             signals: &mut self.signal_registry,
@@ -248,8 +245,8 @@ impl Runtime {
         // read that waits on it. A refusal discards the transfer the
         // unit parks on, so no completion fires to wake the park.
         // A refused enqueue marks its issuer Faulted, which covers that
-        // shape. This guard covers the other one: the enqueue resolved,
-        // and a later effect's refusal discarded it.
+        // shape. This guard covers the other one: the enqueue passed its
+        // checks, and a later effect's refusal discarded it.
         if result.yield_reason == YieldReason::DmaWait && batch_applied {
             self.registry
                 .set_status_override(source, UnitStatus::Blocked);

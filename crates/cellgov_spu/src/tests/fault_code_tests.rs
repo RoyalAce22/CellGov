@@ -2,7 +2,7 @@
 //!
 //! A code is a class in the high half and a detail in the low. Each
 //! detail these paths carry is a value the guest picked or influenced --
-//! a program counter, a channel number, an MFC command word, a tag id --
+//! a program counter, a channel number, an MFC command word --
 //! so a detail wide enough to set a class bit would make the code decode
 //! as some other fault.
 //!
@@ -15,8 +15,8 @@
 
 use super::{
     guest_fault_for, EVERY_FAULT_CLASS, FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE,
-    FAULT_MFC_ADDRESS_WRAPS, FAULT_UNDEFINED_CONVERSION_SCALE, FAULT_UNSUPPORTED_CHANNEL,
-    FAULT_UNSUPPORTED_CHANNEL_COUNT, FAULT_UNSUPPORTED_MFC_CMD,
+    FAULT_UNDEFINED_CONVERSION_SCALE, FAULT_UNSUPPORTED_CHANNEL, FAULT_UNSUPPORTED_CHANNEL_COUNT,
+    FAULT_UNSUPPORTED_MFC_CMD,
 };
 use crate::exec::SpuFault;
 use crate::SpuExecutionUnit;
@@ -67,7 +67,6 @@ fn every_variant_at_its_widest_detail() -> Vec<(SpuFault, u32)> {
             SpuFault::UnsupportedChannelCount(u8::MAX),
             FAULT_UNSUPPORTED_CHANNEL_COUNT,
         ),
-        (SpuFault::MfcAddressWraps(u8::MAX), FAULT_MFC_ADDRESS_WRAPS),
         (
             SpuFault::UndefinedConversionScale(u8::MAX),
             FAULT_UNDEFINED_CONVERSION_SCALE,

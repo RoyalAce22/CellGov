@@ -9,6 +9,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_ps3_abi::hw::ppu::CELL_EA_LIMIT;
 use cellgov_ps3_abi::hw::spu;
 use cellgov_ps3_abi::hw::spu::{ChannelDirection, MfcCmd, MfcTagId, MFC_ATOMIC_STAT_S};
 use cellgov_ps3_abi::hw::spu_mfc::{MfcOpcodeClass, MfcQueues};
@@ -282,27 +283,49 @@ fn latched_parameters(state: &SpuState) -> MfcParameters {
     }
 }
 
-/// Queue `cmd` as a command the MFC refuses with `error`. It takes a
-/// slot like any queued command.
+/// The effect that queues `cmd` as a command the MFC refuses with
+/// `error`. It takes a slot like any queued command.
+pub(crate) fn invalid_command(
+    cmd: u32,
+    error: MfcCommandError,
+    state: &mut SpuState,
+    unit_id: UnitId,
+) -> Effect {
+    let params = latched_parameters(state);
+    state.channels.cmd_queue_free -= 1;
+    Effect::MfcInvalidCommand {
+        issuer: unit_id,
+        command: InvalidMfcCommand {
+            word: cmd,
+            params,
+            error,
+        },
+    }
+}
+
+/// Queue `cmd` as a command the MFC refuses with `error`.
 fn queue_invalid(
     cmd: u32,
     error: MfcCommandError,
     state: &mut SpuState,
     unit_id: UnitId,
 ) -> SpuStepOutcome {
-    let params = latched_parameters(state);
-    state.channels.cmd_queue_free -= 1;
     SpuStepOutcome::Yield {
-        effects: vec![Effect::MfcInvalidCommand {
-            issuer: unit_id,
-            command: InvalidMfcCommand {
-                word: cmd,
-                params,
-                error,
-            },
-        }],
+        effects: vec![invalid_command(cmd, error, state, unit_id)],
         reason: YieldReason::DmaSubmitted,
     }
+}
+
+/// The data-segment exception an atomic command raises for an effective
+/// address past the Cell's real-address bound, if it does.
+///
+/// CellGov models no segment table. It treats such an address as one no
+/// segment names, as the runtime's translation check does for a
+/// transfer. Naming its line would also break the reservation line's
+/// own bound.
+/// [CBEA p:120 s:9.1.7] a segment fault suspends the queue and raises the MFC data-segment interrupt.
+fn atomic_segment_fault(ea: u64) -> Option<MfcCommandError> {
+    (ea > CELL_EA_LIMIT).then_some(MfcCommandError::DataSegment { ea })
 }
 
 /// The command error an opcode alone raises on the SPU queue, if any.
@@ -362,7 +385,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             let src =
                 ByteRange::new(GuestAddr::new(lsa as u64), size as u64).expect("valid LS range");
             let Some(dst) = ByteRange::new(GuestAddr::new(ea), size as u64) else {
-                return SpuStepOutcome::Fault(SpuFault::MfcAddressWraps(tag.raw()));
+                return queue_invalid(cmd, MfcCommandError::DataSegment { ea }, state, unit_id);
             };
             let request = DmaRequest::new(DmaDirection::Put, src, dst, unit_id)
                 .expect("matching sizes")
@@ -391,8 +414,10 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 Ok(tag) => tag,
                 Err(queued) => return queued,
             };
+            // A range past 2^64 names no segment: the queue raises it like
+            // any address past the effective-address space.
             let Some(src) = ByteRange::new(GuestAddr::new(ea), size as u64) else {
-                return SpuStepOutcome::Fault(SpuFault::MfcAddressWraps(tag.raw()));
+                return queue_invalid(cmd, MfcCommandError::DataSegment { ea }, state, unit_id);
             };
             let dst =
                 ByteRange::new(GuestAddr::new(lsa as u64), size as u64).expect("valid LS range");
@@ -420,6 +445,9 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
         // getllar's line in the step that issues it. A putllc yields its
         // store to the step's commit before the next instruction runs.
         spu::MFC_GETLLAR => {
+            if let Some(error) = atomic_segment_fault(ea) {
+                return queue_invalid(cmd, error, state, unit_id);
+            }
             let line = cellgov_sync::ReservedLine::containing(ea);
             SpuStepOutcome::MemoryRead {
                 ea: line.addr(),
@@ -430,6 +458,9 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
         }
         // [CBEA p:66 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] putllc: conditional store that succeeds only if the local reservation is still held for this line.
         spu::MFC_PUTLLC => {
+            if let Some(error) = atomic_segment_fault(ea) {
+                return queue_invalid(cmd, error, state, unit_id);
+            }
             let line = cellgov_sync::ReservedLine::containing(ea);
             let success = match state.reservation {
                 Some(l) => l.addr() == line.addr(),

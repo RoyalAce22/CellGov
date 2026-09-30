@@ -1,9 +1,8 @@
 //! An address-bearing SPU fault carries its address whole in
-//! `faulting_ea`.
+//! `faulting_ea`. An MFC address that does not translate queues an
+//! invalid command, whose error carries the address whole.
 
-use crate::fault_codes::{
-    FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_ADDRESS_WRAPS, FAULT_MFC_READ_UNRESOLVED,
-};
+use crate::fault_codes::{FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE};
 use crate::SpuExecutionUnit;
 use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
@@ -15,8 +14,7 @@ use cellgov_time::Budget;
 const UNIT: u64 = 7;
 const MEM_BYTES: usize = 0x2000;
 
-/// An address no region backs, with its low half clear so the masked
-/// detail alone cannot name it.
+/// An address no region backs.
 const UNMAPPED_EA: u64 = 0x9_0000;
 
 /// `il $rt, imm`.
@@ -57,43 +55,46 @@ fn class_of(result: &ExecutionStepResult) -> u32 {
     }
 }
 
-fn detail_of(result: &ExecutionStepResult) -> u32 {
-    match result.fault {
-        Some(FaultKind::Guest(code)) => code & FAULT_DETAIL_MASK,
-        other => panic!("expected a guest fault, got {other:?}"),
-    }
+/// The error of the invalid command in `effects`, if any.
+fn queued_error(effects: &[Effect]) -> Option<cellgov_dma::MfcCommandError> {
+    effects.iter().find_map(|e| match e {
+        Effect::MfcInvalidCommand { command, .. } => Some(command.error),
+        _ => None,
+    })
 }
 
+fn run_collecting(unit: &mut SpuExecutionUnit, mem: &GuestMemory) -> Vec<Effect> {
+    let ctx = ExecutionContext::new(mem);
+    let mut effects: Vec<Effect> = Vec::new();
+    unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+    effects
+}
+
+/// The command error carries the whole line address, which the 16-bit
+/// detail half cannot hold.
 #[test]
 fn a_refused_getllar_carries_the_line_address_whole() {
     let mem = GuestMemory::new(MEM_BYTES);
     let mut unit = unit_issuing(MFC_GETLLAR, UNMAPPED_EA, 0x200, 128);
-    let result = run_once(&mut unit, &mem);
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(class_of(&result), FAULT_MFC_READ_UNRESOLVED);
     assert_eq!(
-        detail_of(&result),
-        0,
-        "the detail half lost the address, which sits above it",
+        queued_error(&run_collecting(&mut unit, &mem)),
+        Some(cellgov_dma::MfcCommandError::DataStorage { ea: UNMAPPED_EA })
     );
-    assert_eq!(result.local_diagnostics.faulting_ea, Some(UNMAPPED_EA));
-    assert_eq!(result.local_diagnostics.pc, Some(4), "the wrch");
 }
 
+/// A range past 2^64 names no segment.
+///
+/// [CBEA p:120 s:9.1.7] a segment fault suspends the queue and raises the MFC data-segment interrupt.
 #[test]
-fn a_get_whose_source_runs_past_the_address_space_is_refused_at_issue() {
+fn a_get_whose_source_runs_past_the_address_space_queues_a_data_segment_exception() {
     let mem = GuestMemory::new(MEM_BYTES);
     // ea + 64 carries out of the 64-bit space.
     let mut unit = unit_issuing(MFC_GET, u64::MAX - 0x3F, 0x200, 64);
-    let issued = run_once(&mut unit, &mem);
-    assert_eq!(issued.yield_reason, YieldReason::Fault);
-    assert_eq!(class_of(&issued), FAULT_MFC_ADDRESS_WRAPS);
-    assert_eq!(issued.local_diagnostics.pc, Some(4), "the wrch");
     assert_eq!(
-        issued.local_diagnostics.faulting_ea,
-        Some(u64::MAX - 0x3F),
-        "the detail half carries the tag id, so the address rides here",
+        queued_error(&run_collecting(&mut unit, &mem)),
+        Some(cellgov_dma::MfcCommandError::DataSegment {
+            ea: u64::MAX - 0x3F
+        })
     );
 }
 
@@ -128,8 +129,12 @@ fn a_fetch_past_local_store_carries_its_pc_and_no_access_address() {
 
 #[test]
 fn an_spu_fault_populates_no_register_dump() {
-    let mem = GuestMemory::new(MEM_BYTES);
-    let mut unit = unit_issuing(MFC_GETLLAR, UNMAPPED_EA, 0x200, 128);
+    // lqa rt=3, imm=0x7FFE: past a 64 KB store.
+    let raw = (0x061u32 << 23) | 3 | ((0x7FFEu32 & 0xFFFF) << 7);
+    let mut unit = SpuExecutionUnit::new(UnitId::new(UNIT));
+    unit.state_mut().ls.truncate(0x1_0000);
+    unit.state_mut().ls[0..4].copy_from_slice(&raw.to_be_bytes());
+    let mem = GuestMemory::new(16);
     let result = run_once(&mut unit, &mem);
 
     assert_eq!(result.yield_reason, YieldReason::Fault);

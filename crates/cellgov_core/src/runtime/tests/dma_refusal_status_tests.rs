@@ -23,23 +23,20 @@ use crate::runtime::StepError;
 const SRC: u64 = 0x20;
 const MAPPED_DST: u64 = 0x40;
 
-/// Past the end of that region, so the destination check refuses it.
-const UNMAPPED_DST: u64 = 0x2000;
-
 const LEN: u64 = 4;
 
 fn range(addr: u64) -> ByteRange {
     ByteRange::new(GuestAddr::new(addr), LEN).expect("a 4-byte range")
 }
 
-/// Enqueues one payload-less `DmaPut` and waits on its tag in the same
-/// step.
+/// Enqueues one `DmaPut` and waits on its tag in the same step.
 ///
 /// That is what puts the refusal and the park on one unit.
 #[derive(Clone)]
 struct WaitingEmitter {
     id: UnitId,
     destination: u64,
+    payload: Option<Vec<u8>>,
     steps: u64,
 }
 
@@ -71,7 +68,7 @@ impl ExecutionUnit for WaitingEmitter {
                 .expect("equal-length ends");
             effects.push(Effect::DmaEnqueue {
                 request,
-                payload: None,
+                payload: self.payload.clone(),
             });
             YieldReason::DmaWait
         } else {
@@ -89,11 +86,12 @@ impl ExecutionUnit for WaitingEmitter {
     fn snapshot(&self) {}
 }
 
-fn runtime_with_emitter(destination: u64) -> (Runtime, UnitId) {
+fn runtime_with_emitter(destination: u64, payload: Option<Vec<u8>>) -> (Runtime, UnitId) {
     let mut rt = Runtime::new(GuestMemory::new(0x100), Budget::new(4), 100);
     let unit = rt.registry_mut().register_with(|id| WaitingEmitter {
         id,
         destination,
+        payload,
         steps: 0,
     });
     (rt, unit)
@@ -101,14 +99,14 @@ fn runtime_with_emitter(destination: u64) -> (Runtime, UnitId) {
 
 #[test]
 fn a_refused_enqueue_leaves_its_waiting_issuer_faulted() {
-    let (mut rt, unit) = runtime_with_emitter(UNMAPPED_DST);
+    let (mut rt, unit) = runtime_with_emitter(MAPPED_DST, Some(vec![1, 2, 3]));
     let step = rt.step().expect("the emitter runs");
     let err = rt
         .commit_step(&step.result, &step.effects)
-        .expect_err("the destination is past the end of the only region");
+        .expect_err("the payload is shorter than the destination");
     assert!(
-        matches!(err, CommitError::DmaDestinationOutOfRange { .. }),
-        "the destination is the end that fails: {err:?}",
+        matches!(err, CommitError::DmaPayloadLengthMismatch { .. }),
+        "the payload is what fails: {err:?}",
     );
     assert_eq!(
         rt.registry().effective_status(unit),
@@ -123,15 +121,16 @@ fn a_refused_enqueue_leaves_its_waiting_issuer_faulted() {
     );
 }
 
-/// The enqueue itself resolves, so nothing marks the issuer `Faulted`.
+/// The enqueue itself passes its checks, so nothing marks the issuer
+/// `Faulted`.
 /// The refusal discards the whole batch, so the queue holds no
 /// completion to wake a park with.
 #[test]
 fn a_batch_refused_after_a_valid_enqueue_does_not_park_its_issuer() {
-    let (mut rt, unit) = runtime_with_emitter(MAPPED_DST);
+    let (mut rt, unit) = runtime_with_emitter(MAPPED_DST, None);
     let mut step = rt.step().expect("the emitter runs");
     // An unregistered wake target refuses the batch without touching the
-    // enqueue, which validated one effect earlier.
+    // enqueue, which passed its checks one effect earlier.
     step.effects.push(Effect::WakeUnit {
         target: UnitId::new(99),
         source: unit,
@@ -157,11 +156,11 @@ fn a_batch_refused_after_a_valid_enqueue_does_not_park_its_issuer() {
 
 #[test]
 fn an_accepted_enqueue_still_parks_its_waiting_issuer() {
-    let (mut rt, unit) = runtime_with_emitter(MAPPED_DST);
+    let (mut rt, unit) = runtime_with_emitter(MAPPED_DST, None);
     let step = rt.step().expect("the emitter runs");
     let outcome = rt
         .commit_step(&step.result, &step.effects)
-        .expect("both ends resolve");
+        .expect("the enqueue passes its checks");
     let blocked = outcome.blocked_units;
     assert!(
         blocked.contains(&(unit, BlockReason::DmaWait)),

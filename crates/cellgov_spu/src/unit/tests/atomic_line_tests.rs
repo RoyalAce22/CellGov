@@ -5,9 +5,8 @@
 //! address. Nothing refuses a misaligned address, so a guest that writes
 //! one gets the containing line.
 
-use crate::fault_codes::FAULT_MFC_READ_UNRESOLVED;
 use crate::SpuExecutionUnit;
-use cellgov_effects::{Effect, FaultKind};
+use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize};
@@ -171,13 +170,16 @@ fn a_refused_getllar_names_the_line_not_the_byte() {
     let ctx = ExecutionContext::new(&mem);
     let mut unit = unit_issuing(MFC_GETLLAR, UNMAPPED_EA + 0x2C);
     let mut effects = Vec::new();
-    let result = run_once(&mut unit, &ctx, &mut effects);
+    run_once(&mut unit, &ctx, &mut effects);
 
+    let error = effects.iter().find_map(|e| match e {
+        Effect::MfcInvalidCommand { command, .. } => Some(command.error),
+        _ => None,
+    });
     assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(
-            FAULT_MFC_READ_UNRESOLVED | (UNMAPPED_EA as u32 & 0xFFFF)
-        )),
+        error,
+        Some(cellgov_dma::MfcCommandError::DataStorage { ea: UNMAPPED_EA }),
+        "{effects:?}"
     );
 }
 
@@ -191,7 +193,7 @@ fn a_refused_getllar_leaves_the_atomic_status_alone() {
     let mut effects = Vec::new();
     let result = run_once(&mut unit, &ctx, &mut effects);
 
-    assert_eq!(result.yield_reason, YieldReason::Fault);
+    assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
     assert_eq!(
         unit.state().channels.atomic_status,
         1,

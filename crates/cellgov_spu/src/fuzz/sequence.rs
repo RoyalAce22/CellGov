@@ -28,9 +28,9 @@ pub enum SpuSequenceInteraction {
     Reservation,
     /// Store a quadword and then load that address.
     LocalStore,
-    /// Stage a put whose effective address runs past the top of the
-    /// address space, after a legal instruction.
-    MfcAddressFault,
+    /// Issue a defined MFC command the model does not run, after a legal
+    /// instruction.
+    UnmodelledMfcCommand,
     /// Branch across a decoy word to the next fetchable word.
     Branch,
     /// Reach a terminating STOP after a preceding instruction.
@@ -47,7 +47,7 @@ impl SpuSequenceInteraction {
         Self::MemoryRead,
         Self::Reservation,
         Self::LocalStore,
-        Self::MfcAddressFault,
+        Self::UnmodelledMfcCommand,
         Self::Branch,
         Self::Stop,
     ];
@@ -95,16 +95,10 @@ impl SpuSequenceInteraction {
                 state.set_reg_word_splat(2, data_base);
                 state.regs[1] = std::array::from_fn(|index| index as u8 + 1);
             }
-            Self::MfcAddressFault => {
-                // A valid put whose last byte lies past 2^64. The limit
-                // register wraps the local-store address, but the
-                // effective address has nothing to wrap to.
-                state.set_reg_word_splat(2, spu::MFC_PUT);
-                state.channels.mfc_lsa = data_base;
-                state.channels.mfc_eah = u32::MAX;
-                state.channels.mfc_eal = 0xFFFF_FFF0;
-                state.channels.mfc_size = 32;
-                state.channels.mfc_tag_id = 0;
+            Self::UnmodelledMfcCommand => {
+                // A put with a barrier: the SPU queue accepts it, and the
+                // model runs no barrier form, so it faults.
+                state.set_reg_word_splat(2, spu::MFC_PUTB);
             }
             Self::Mailbox => state.channels.in_mbox = vec![SEQUENCE_MAILBOX_MESSAGE],
             Self::Branch | Self::Stop => {}
@@ -173,7 +167,9 @@ impl SpuSequenceInteraction {
                 word(K::Stqd, &[(reg, 0, 1), (reg, 1, 2)])?,
                 word(K::Lqd, &[(reg, 0, 3), (reg, 1, 2)])?,
             ],
-            Self::MfcAddressFault => vec![word(K::Nop, &[])?, wrch(2, u32::from(spu::MFC_CMD))?],
+            Self::UnmodelledMfcCommand => {
+                vec![word(K::Nop, &[])?, wrch(2, u32::from(spu::MFC_CMD))?]
+            }
             Self::Branch => vec![
                 word(K::Br, &[(immediate, 0, 2)])?,
                 word(K::Il, &[(reg, 0, 5), (immediate, 0, 7)])?,

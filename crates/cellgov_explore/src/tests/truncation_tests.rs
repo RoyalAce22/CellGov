@@ -436,15 +436,8 @@ fn a_refusal_of_any_shape_truncates() {
             effect_index: 0,
             source_unit: UnitId::new(0),
         },
-        CommitError::DmaDestinationOutOfRange { effect_index: 0 },
-        CommitError::DmaSourceOutOfRange { effect_index: 0 },
         CommitError::DmaPayloadLengthMismatch { effect_index: 0 },
         CommitError::DmaGetWithPayload { effect_index: 0 },
-        CommitError::DmaDestinationReserved {
-            effect_index: 0,
-            addr: 0,
-            region: "reserved",
-        },
         CommitError::Memory(cellgov_mem::MemError::LengthMismatch),
     ];
     // The count stands in for exhaustiveness only over a list that

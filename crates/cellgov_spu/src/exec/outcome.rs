@@ -64,19 +64,15 @@ pub enum SpuFault {
         /// Whether it was a read or write.
         is_write: bool,
     },
-    /// An MFC command word this model will not enqueue.
+    /// A defined MFC command the SPU queue accepts and this model does
+    /// not run.
     ///
-    /// The variant carries the whole 32-bit word. A reader can then tell
-    /// a refusal the reserved bit raised from one the opcode raised.
+    /// The variant carries the whole 32-bit word, class ids included.
     #[error("SPU unsupported MFC command word 0x{0:08x}")]
     UnsupportedMfcCommand(u32),
     /// A channel whose capacity the model does not know.
     #[error("SPU unsupported channel rchcnt 0x{0:02x}")]
     UnsupportedChannelCount(u8),
-    /// An MFC put or get whose effective-address range runs past the end
-    /// of the address space; the field is the tag id.
-    #[error("SPU MFC transfer under tag {0} names an address past the address space")]
-    MfcAddressWraps(u8),
     /// A channel access whose stall no event can end: a tag-status
     /// read with no update request, which only an interrupt could end.
     #[error("SPU channel 0x{0:02x} access stalls")]

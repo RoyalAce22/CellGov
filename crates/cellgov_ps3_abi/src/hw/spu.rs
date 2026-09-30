@@ -276,6 +276,10 @@ pub const MFC_PUT: u32 = 0x20;
 ///
 /// [CBEA p:60 s:7.5 Get Commands] get opcode 0x40, main storage to LS.
 pub const MFC_GET: u32 = 0x40;
+/// DMA put with a tag-specific barrier.
+///
+/// [CBEA p:306 s:Appendix D Table D-2] putb opcode x'0021', supported on the proxy queue and the SPU queue.
+pub const MFC_PUTB: u32 = 0x21;
 /// Atomic: get with reservation (getllar).
 ///
 /// [CBEA p:65 s:7.8 MFC Atomic Update Commands] getllar opcode 0xD0.

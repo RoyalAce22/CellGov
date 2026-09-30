@@ -28,6 +28,10 @@ mod getllar_tests;
 mod atomic_line_tests;
 
 #[cfg(test)]
+#[path = "tests/atomic_segment_tests.rs"]
+mod atomic_segment_tests;
+
+#[cfg(test)]
 #[path = "tests/fault_diag_tests.rs"]
 mod fault_diag_tests;
 

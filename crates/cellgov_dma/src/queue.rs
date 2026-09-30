@@ -21,6 +21,9 @@
 //! - the entry keeps its slot and its tag
 //! - no later command of that issuer completes
 //!
+//! A transfer whose address does not translate becomes an invalid entry
+//! when the queue reaches it, and raises the same way.
+//!
 //! [CBEA p:113 s:9.1.1] an invalid command or parameter suspends SPU command queue processing and raises an invalid-command interrupt.
 //!
 //! [CBEA p:53 s:7.1.1] unless a form says otherwise, data-transfer commands execute in any order.
@@ -29,7 +32,7 @@
 // [CBE-Handbook p:504 s:18.10.4] 16-entry MFC SPU command queue depth.
 // [CBE-Handbook p:522 s:19.3.3.2] 8-entry MFC proxy command queue for PPE-issued commands.
 
-use crate::command::InvalidMfcCommand;
+use crate::command::{InvalidMfcCommand, MfcCommandError};
 use crate::completion::DmaCompletion;
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
@@ -119,6 +122,37 @@ impl LaneValue for InvalidEntry {
         lanes.lane(8, 0, params.ea());
         lanes.lane(9, 0, u64::from(params.size));
         lanes.lane(10, 0, u64::from(params.tag));
+    }
+}
+
+/// The refused command that a queued transfer stands for, with `error`.
+///
+/// The queue keeps a transfer as ranges, so this function rebuilds the
+/// opcode and the two addresses from them. A put with no inline payload
+/// names no local-store address, so its `lsa` is 0.
+fn refused_transfer(
+    c: &DmaCompletion,
+    payloaded: bool,
+    error: MfcCommandError,
+) -> InvalidMfcCommand {
+    use crate::request::DmaDirection;
+    use cellgov_ps3_abi::hw::spu::{MFC_GET, MFC_PUT};
+    let (word, ls, main) = match c.direction() {
+        DmaDirection::Put => (MFC_PUT, payloaded.then(|| c.source()), c.destination()),
+        DmaDirection::Get => (MFC_GET, Some(c.destination()), c.source()),
+    };
+    let ea = main.start().raw();
+    InvalidMfcCommand {
+        word,
+        params: crate::command::MfcParameters {
+            // A local-store range starts below 2^32.
+            lsa: ls.map_or(0, |r| r.start().raw() as u32),
+            eah: (ea >> 32) as u32,
+            eal: ea as u32,
+            size: c.length() as u32,
+            tag: c.request().tag_id().map_or(0, |t| u32::from(t.raw())),
+        },
+        error,
     }
 }
 
@@ -306,6 +340,11 @@ impl DmaQueue {
         self.process_due(now).completions
     }
 
+    /// [`Self::process_due_translating`] with every address translating.
+    pub fn process_due(&mut self, now: GuestTicks) -> DueCommands {
+        self.process_due_translating(now, |_, _| None)
+    }
+
     /// Process everything due by `now`, in `(time, sequence)` order.
     ///
     /// For each issuer whose queue is not suspended:
@@ -315,7 +354,19 @@ impl DmaQueue {
     ///   suspends from there on
     ///
     /// A raised command and every later command of its issuer stay queued.
-    pub fn process_due(&mut self, now: GuestTicks) -> DueCommands {
+    ///
+    /// The queue calls `translate` on each transfer it reaches, with a
+    /// flag that is `true` when an inline payload carries the bytes.
+    /// `translate` returns the fault of an address that does not
+    /// translate. The queue then raises that transfer as a refused
+    /// command and moves none of its bytes.
+    ///
+    /// [CBEA p:118 s:9.1.6] an invalid effective address suspends the queue; the address is checked during the transfer, so a partial transfer may come first.
+    pub fn process_due_translating(
+        &mut self,
+        now: GuestTicks,
+        mut translate: impl FnMut(&DmaCompletion, bool) -> Option<MfcCommandError>,
+    ) -> DueCommands {
         let mut due = DueCommands::default();
         loop {
             let transfer = self
@@ -332,17 +383,38 @@ impl DmaQueue {
                 .filter(|(time, _)| *time <= now);
             match (transfer, invalid) {
                 (None, None) => return due,
-                (Some(t), Some(i)) if t < i => self.complete(t, &mut due),
-                (Some(t), None) => self.complete(t, &mut due),
+                (Some(t), Some(i)) if t < i => self.complete(t, &mut translate, &mut due),
+                (Some(t), None) => self.complete(t, &mut translate, &mut due),
                 (_, Some(i)) => self.raise(i, &mut due),
             }
         }
     }
 
-    fn complete(&mut self, key: (GuestTicks, u64), due: &mut DueCommands) {
-        if let Some(e) = self.entries.remove(key) {
+    fn complete(
+        &mut self,
+        key: (GuestTicks, u64),
+        translate: &mut impl FnMut(&DmaCompletion, bool) -> Option<MfcCommandError>,
+        due: &mut DueCommands,
+    ) {
+        let Some(e) = self.entries.remove(key) else {
+            return;
+        };
+        let Some(error) = translate(&e.completion, e.payload.is_some()) else {
             due.completions.push((e.completion, e.payload));
-        }
+            return;
+        };
+        let command = refused_transfer(&e.completion, e.payload.is_some(), error);
+        let issuer = e.completion.issuer();
+        self.invalid.insert(
+            key,
+            InvalidEntry {
+                issuer,
+                command,
+                time: key.0,
+                raised: true,
+            },
+        );
+        due.raised.push(RaisedMfcCommand { issuer, command });
     }
 
     fn raise(&mut self, key: (GuestTicks, u64), due: &mut DueCommands) {

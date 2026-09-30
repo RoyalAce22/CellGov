@@ -131,12 +131,12 @@ A `DmaEnqueue` the pipeline refuses at step 4 also marks the issuing
 unit `Faulted` before returning the `CommitError`, so the SPU cannot
 roll forward into a tag-poll that never wakes: the unit terminates on
 the rejecting step and the host-visible `CommitError` says which
-argument it refused. Four arguments reach that mark -- a destination
-that is reserved or out of range, a source range that resolves to no
-region, an inline payload that is not the destination's length, and any
-direction but a put. The completion reads the source and writes the
-destination in committed space 0, so each of those is an end the
-transfer could not have honoured.
+argument it refused. Two arguments reach that mark: an inline payload
+that is not the destination's length, and a get that carries a payload.
+An address that does not translate is no refusal here. The queue checks
+a transfer's main-storage ends in committed space 0 when it reaches the
+transfer, and raises one that does not translate as an MFC data-segment
+or data-storage exception, moving none of its bytes.
 
 **Trivial-step fast path (FaultDriven only).** `Runtime::commit_step`
 skips steps 4-8 and only advances the epoch (plus the scheduler

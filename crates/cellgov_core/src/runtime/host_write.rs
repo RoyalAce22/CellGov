@@ -54,7 +54,7 @@ impl Runtime {
         bytes: &[u8],
         exempt: Option<UnitId>,
     ) -> Result<usize, MemError> {
-        let (mem, reservations, _dma_memory) = super::spaces::resolve_commit_targets(
+        let (mem, reservations) = super::spaces::resolve_commit_targets(
             &mut self.memory,
             &mut self.reservations,
             &mut self.spaces,

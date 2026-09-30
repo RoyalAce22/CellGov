@@ -79,8 +79,8 @@ fn a_runtime_step_cap_stops_the_observer_with_a_named_reason() {
 
 #[test]
 fn a_refused_commit_stops_the_observer_and_names_itself() {
-    // A DMA whose destination lands in a reserved region is refused at
-    // commit, so the step's effects never reach guest state.
+    // The commit refuses a store into a reserved region, so the step's
+    // effects never reach guest state.
     let mem = GuestMemory::from_regions(vec![
         Region::new(0, 0x10000, "rw", PageSize::Page64K),
         Region::with_access(
@@ -97,9 +97,8 @@ fn a_refused_commit_stops_the_observer_and_names_itself() {
         FakeIsaUnit::new(
             id,
             vec![
-                FakeOp::DmaPut {
-                    src: 0x40,
-                    dst: 0x10000,
+                FakeOp::SharedStore {
+                    addr: 0x10000,
                     len: 16,
                 },
                 FakeOp::End,
@@ -114,21 +113,17 @@ fn a_refused_commit_stops_the_observer_and_names_itself() {
     assert!(
         matches!(
             refusal,
-            CommitError::DmaDestinationReserved {
+            CommitError::Memory(cellgov_mem::MemError::ReservedWrite {
                 region: "reserved",
                 ..
-            }
+            })
         ),
-        "the reserved destination is the refusal this scenario forces: {refusal}"
+        "the reserved store is the refusal this scenario forces: {refusal}"
     );
     assert_eq!(stop.class(), crate::util::StopClass::Refusal);
     assert!(stop.is_truncated());
     assert!(
         log.points().is_empty(),
         "a step whose effects were refused must not enter the decision log",
-    );
-    assert!(
-        rt.registry().runnable_ids().next().is_none(),
-        "the refused issuer faults, so a leftover-runnable-units test          would read this truncated run as a completed one",
     );
 }
