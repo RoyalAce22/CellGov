@@ -183,11 +183,11 @@ ordinal	route	arm
 181	null_backend	none
 182	null_backend	none
 183	null_backend	none
-184	null_backend	none
+184	typed	SpuThreadWriteSnr
 185	null_backend	none
 186	null_backend	none
-187	null_backend	none
-188	null_backend	none
+187	typed	SpuThreadSetSpuCfg
+188	typed	SpuThreadGetSpuCfg
 189	null_backend	none
 190	typed	SpuThreadWriteMb
 191	null_backend	none

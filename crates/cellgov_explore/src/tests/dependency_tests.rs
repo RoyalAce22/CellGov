@@ -395,3 +395,35 @@ fn fault_is_ignored() {
     }]);
     assert!(fp.is_local_only());
 }
+
+fn signal_write(target: u64) -> StepFootprint {
+    StepFootprint::from_effects(&[Effect::SpuSignalWrite {
+        target: UnitId::new(target),
+        register: 0,
+        value: 1,
+        source: UnitId::new(9),
+    }])
+}
+
+/// A step of `unit` that touches nothing a footprint records, as an SPU
+/// step that reads its signal register is.
+fn quiet_step_of(unit: u64) -> StepFootprint {
+    StepFootprint {
+        local_store_owner: Some(UnitId::new(unit)),
+        ..StepFootprint::default()
+    }
+}
+
+#[test]
+fn a_signal_write_conflicts_with_every_step_of_its_target_and_no_other() {
+    assert!(signal_write(7).conflicts(&quiet_step_of(7)));
+    assert!(quiet_step_of(7).conflicts(&signal_write(7)));
+    assert!(!signal_write(7).conflicts(&quiet_step_of(8)));
+}
+
+/// A register that overwrites keeps the later of two writes.
+#[test]
+fn two_signal_writes_to_one_unit_conflict() {
+    assert!(signal_write(7).conflicts(&signal_write(7)));
+    assert!(!signal_write(7).conflicts(&signal_write(8)));
+}

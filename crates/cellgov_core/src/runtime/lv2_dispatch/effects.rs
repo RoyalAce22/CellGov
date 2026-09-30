@@ -168,6 +168,34 @@ impl Runtime {
                     self.last_lv2_effects.push(effect.clone());
                     continue;
                 }
+                Effect::SpuSignalWrite {
+                    target,
+                    register,
+                    value,
+                    ..
+                } => {
+                    let register = if *register == 0 {
+                        cellgov_exec::SignalNotifier::One
+                    } else {
+                        cellgov_exec::SignalNotifier::Two
+                    };
+                    if let Err(refusal) = self.write_unit_signal(*target, register, *value) {
+                        // The handler resolved `target` from a running
+                        // thread, so a refusal names a host-side
+                        // disagreement between the thread table and the
+                        // unit registry.
+                        self.lv2_host.log_invariant_break(
+                            "runtime.apply_lv2_effects_spu_signal_write_refused",
+                            format_args!(
+                                "LV2 dispatch wrote a signal of unit {} and the unit refused \
+                                 it ({refusal:?}); the value is discarded",
+                                target.raw(),
+                            ),
+                        );
+                    }
+                    self.last_lv2_effects.push(effect.clone());
+                    continue;
+                }
                 // Execution units and the FIFO advance pass emit these
                 // variants, and no LV2 handler does. A boot prints the
                 // detail line of its first break alone, so each variant

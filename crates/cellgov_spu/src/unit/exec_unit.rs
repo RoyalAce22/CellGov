@@ -370,6 +370,24 @@ impl ExecutionUnit for SpuExecutionUnit {
         Ok(())
     }
 
+    /// [CBEA p:239 s:16.4] SPU_Cfg sets each signal-notification register to overwrite or to OR.
+    fn set_signal_logical_or(
+        &mut self,
+        register: SignalNotifier,
+        logical_or: bool,
+    ) -> Result<(), ProblemStateError> {
+        let index = match register {
+            SignalNotifier::One => 0,
+            SignalNotifier::Two => 1,
+        };
+        self.state.signals[index].mode = if logical_or {
+            crate::state::SignalNotifyMode::LogicalOr
+        } else {
+            crate::state::SignalNotifyMode::Overwrite
+        };
+        Ok(())
+    }
+
     /// [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox takes the oldest message out of the queue.
     fn read_out_mbox(&mut self) -> Result<Option<u32>, ProblemStateError> {
         Ok(self.state.channels.out_mbox.take())

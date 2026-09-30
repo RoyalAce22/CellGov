@@ -904,3 +904,146 @@ fn group_start_unknown_group_returns_error() {
         other => panic!("expected Immediate error, got {other:?}"),
     }
 }
+
+/// Group 1 with thread 0 initialized, so thread id 256 names it; when
+/// `running`, the group runs and unit 7 is that thread's SPU.
+fn host_with_thread(running: bool) -> Lv2Host {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x4000);
+    host.dispatch(
+        Lv2Request::SpuThreadGroupCreate {
+            id_ptr: 0x100,
+            num_threads: 1,
+            priority: 0,
+            attr_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    host.thread_groups_mut()
+        .initialize_thread(1, 0, crate::image::SpuImageHandle::new(1).unwrap(), [0; 4])
+        .unwrap();
+    if running {
+        host.thread_groups_mut().get_mut(1).unwrap().state = GroupState::Running;
+        host.record_spu(UnitId::new(7), 1, 0).unwrap();
+    }
+    host
+}
+
+const THREAD: u32 = 256;
+
+fn immediate(dispatch: Lv2Dispatch) -> (u64, Vec<Effect>) {
+    match dispatch {
+        Lv2Dispatch::Immediate { code, effects } => (code, effects),
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+fn write_snr(host: &mut Lv2Host, thread_id: u32, number: u32, value: u32) -> (u64, Vec<Effect>) {
+    let rt = FakeRuntime::new(0x4000);
+    immediate(host.dispatch(
+        Lv2Request::SpuThreadWriteSnr {
+            thread_id,
+            number,
+            value,
+        },
+        UnitId::new(0),
+        &rt,
+    ))
+}
+
+/// The register number is 0-based and checked before the thread, as
+/// the spu_signal_notify microtest's reference baselines show.
+#[test]
+fn a_signal_write_refuses_a_register_number_past_1_before_the_thread() {
+    let mut host = Lv2Host::new();
+    assert_eq!(
+        write_snr(&mut host, 999, 2, 1),
+        (errno::CELL_EINVAL.into(), vec![])
+    );
+}
+
+#[test]
+fn a_signal_write_to_a_thread_with_no_running_spu_is_esrch() {
+    let mut host = host_with_thread(false);
+    assert_eq!(
+        write_snr(&mut host, THREAD, 0, 1),
+        (errno::CELL_ESRCH.into(), vec![])
+    );
+}
+
+#[test]
+fn a_signal_write_names_the_running_spu_and_the_register() {
+    let mut host = host_with_thread(true);
+    assert_eq!(
+        write_snr(&mut host, THREAD, 1, 5),
+        (
+            0,
+            vec![Effect::SpuSignalWrite {
+                target: UnitId::new(7),
+                register: 1,
+                value: 5,
+                source: UnitId::new(0),
+            }]
+        )
+    );
+}
+
+fn set_cfg(host: &mut Lv2Host, thread_id: u32, value: u64) -> u64 {
+    let rt = FakeRuntime::new(0x4000);
+    immediate(host.dispatch(
+        Lv2Request::SpuThreadSetSpuCfg { thread_id, value },
+        UnitId::new(0),
+        &rt,
+    ))
+    .0
+}
+
+/// A configuration above the two mode bits is EINVAL before the arm
+/// looks up the thread, and an initialized thread takes one before its
+/// group starts.
+#[test]
+fn the_signal_configuration_checks_its_bits_then_the_thread_and_holds_before_start() {
+    let mut host = host_with_thread(false);
+    assert_eq!(set_cfg(&mut host, 999, 4), errno::CELL_EINVAL.into());
+    assert_eq!(set_cfg(&mut host, 999, 2), errno::CELL_ESRCH.into());
+    assert_eq!(set_cfg(&mut host, THREAD, 2), 0);
+    assert_eq!(host.thread_groups().signal_config(THREAD), Some(2));
+}
+
+fn get_cfg(host: &mut Lv2Host, thread_id: u32, value_ptr: u32) -> (u64, Vec<Effect>) {
+    let rt = FakeRuntime::new(0x4000);
+    immediate(host.dispatch(
+        Lv2Request::SpuThreadGetSpuCfg {
+            thread_id,
+            value_ptr,
+        },
+        UnitId::new(0),
+        &rt,
+    ))
+}
+
+#[test]
+fn reading_the_signal_configuration_checks_the_thread_then_the_pointer() {
+    let mut host = host_with_thread(false);
+    assert_eq!(set_cfg(&mut host, THREAD, 3), 0);
+    assert_eq!(
+        get_cfg(&mut host, 999, 0),
+        (errno::CELL_ESRCH.into(), vec![])
+    );
+    assert_eq!(
+        get_cfg(&mut host, THREAD, 0),
+        (errno::CELL_EFAULT.into(), vec![])
+    );
+    let (code, effects) = get_cfg(&mut host, THREAD, 0x200);
+    assert_eq!(code, 0);
+    assert_eq!(
+        effects,
+        vec![Effect::shared_write(
+            ByteRange::contiguous_u32(0x200, 8),
+            WritePayload::from_slice(&3u64.to_be_bytes()),
+            UnitId::new(0),
+            GuestTicks::ZERO,
+        )]
+    );
+}

@@ -29,6 +29,12 @@ pub struct ThreadSlot {
     pub args: [u64; 4],
     /// `None` until `sys_spu_thread_group_start` resolves the image.
     pub init: Option<SpuInitState>,
+    /// The thread's `SPU_Cfg` signal configuration: bit 0 puts
+    /// signal-notification register 1 in OR mode, bit 1 register 2. 0,
+    /// both registers overwriting, until `sys_spu_thread_set_spu_cfg`.
+    ///
+    /// [CBEA p:239 s:16.4] each register either overwrites its contents or ORs the data written into them.
+    pub signal_config: u64,
 }
 
 /// Lifecycle state of a thread group.
@@ -88,6 +94,9 @@ impl LaneValue for ThreadGroup {
             lanes.lane(7, index, u64::from(slot.image_handle.raw()));
             for (i, arg) in slot.args.iter().enumerate() {
                 lanes.lane(8 + i as u8, index, *arg);
+            }
+            if slot.signal_config != 0 {
+                lanes.lane(26, index, slot.signal_config);
             }
             let Some(init) = &slot.init else {
                 continue;
@@ -313,6 +322,7 @@ impl ThreadGroupTable {
                 image_handle,
                 args,
                 init: None,
+                signal_config: 0,
             },
         );
         Ok(())
@@ -431,6 +441,58 @@ impl ThreadGroupTable {
         self.thread_id_to_unit
             .get(thread_id)
             .map(|&raw| UnitId::new(raw))
+    }
+
+    /// The slot an initialized thread occupies, as `(group_id, slot)`.
+    fn slot_of_thread(&self, thread_id: u32) -> Option<(u32, u32)> {
+        let (group_id, slot) = (
+            thread_id / MAX_SLOTS_PER_GROUP,
+            thread_id % MAX_SLOTS_PER_GROUP,
+        );
+        self.groups
+            .get(group_id)?
+            .slots
+            .contains_key(&slot)
+            .then_some((group_id, slot))
+    }
+
+    /// The signal configuration of an initialized thread.
+    pub fn signal_config(&self, thread_id: u32) -> Option<u64> {
+        let (group_id, slot) = self.slot_of_thread(thread_id)?;
+        self.groups
+            .get(group_id)?
+            .slots
+            .get(&slot)
+            .map(|s| s.signal_config)
+    }
+
+    /// Set the signal configuration of an initialized thread. `false`
+    /// when no initialized thread has the id.
+    pub fn set_signal_config(&mut self, thread_id: u32, value: u64) -> bool {
+        let Some((group_id, slot)) = self.slot_of_thread(thread_id) else {
+            return false;
+        };
+        let Some(mut group) = self.groups.get_mut(group_id) else {
+            return false;
+        };
+        match group.slots.get_mut(&slot) {
+            Some(s) => {
+                s.signal_config = value;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The signal configuration of the thread a registered SPU runs,
+    /// finished or not.
+    pub fn signal_config_of_unit(&self, unit_id: UnitId) -> Option<u64> {
+        let thread_id = self
+            .thread_id_to_unit
+            .iter()
+            .find(|(_, &raw)| raw == unit_id.raw())
+            .map(|(tid, _)| tid)?;
+        self.signal_config(thread_id)
     }
 
     /// The group of a registered SPU that has not finished.

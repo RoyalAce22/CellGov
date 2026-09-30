@@ -283,6 +283,22 @@ pub trait ExecutionUnit {
         Err(crate::ProblemStateError::NoProblemState)
     }
 
+    /// Set whether one signal-notification register ORs the data
+    /// written into it (`true`) or overwrites its contents (`false`).
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ProblemStateError::NoProblemState`] for a unit without
+    /// SPE problem-state registers.
+    fn set_signal_logical_or(
+        &mut self,
+        register: crate::SignalNotifier,
+        logical_or: bool,
+    ) -> Result<(), crate::ProblemStateError> {
+        let _ = (register, logical_or);
+        Err(crate::ProblemStateError::NoProblemState)
+    }
+
     /// Read `SPU_Out_Mbox`: the oldest message the unit wrote, which
     /// leaves the mailbox, or `None` when it is empty.
     ///

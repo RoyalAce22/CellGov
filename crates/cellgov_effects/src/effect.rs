@@ -221,6 +221,18 @@ pub enum Effect {
         /// The command and the check it fails.
         command: InvalidMfcCommand,
     },
+    /// Write one of an SPU's signal-notification registers, in the mode
+    /// its thread's configuration gives that register.
+    SpuSignalWrite {
+        /// The SPU unit whose register takes the write.
+        target: UnitId,
+        /// 0 for signal-notification register 1, 1 for register 2.
+        register: u8,
+        /// The value written.
+        value: u32,
+        /// Emitting unit.
+        source: UnitId,
+    },
 }
 
 /// Stable identity for an [`Effect`] variant used by validation tools.
@@ -260,6 +272,8 @@ pub enum EffectKind {
     MailboxPop,
     /// [`Effect::MfcInvalidCommand`].
     MfcInvalidCommand,
+    /// [`Effect::SpuSignalWrite`].
+    SpuSignalWrite,
 }
 
 impl Effect {
@@ -283,6 +297,7 @@ impl Effect {
             Self::ClockRead { .. } => EffectKind::ClockRead,
             Self::MailboxPop { .. } => EffectKind::MailboxPop,
             Self::MfcInvalidCommand { .. } => EffectKind::MfcInvalidCommand,
+            Self::SpuSignalWrite { .. } => EffectKind::SpuSignalWrite,
         }
     }
 

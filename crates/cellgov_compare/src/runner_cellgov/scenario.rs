@@ -101,6 +101,7 @@ fn extract_events(trace_bytes: &[u8]) -> Result<Vec<ObservedEvent>, TraceDecodeE
                 | TracedEffectKind::WaitOnEvent
                 | TracedEffectKind::WakeUnit
                 | TracedEffectKind::SignalUpdate
+                | TracedEffectKind::SpuSignalWrite
                 | TracedEffectKind::FaultRaised
                 | TracedEffectKind::TraceMarker
                 | TracedEffectKind::ReservationAcquire

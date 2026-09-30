@@ -143,6 +143,19 @@ pub trait RegisteredUnit: 'static {
         value: u32,
     ) -> Result<(), ProblemStateError>;
 
+    /// Set a signal-notification register's mode. See
+    /// [`ExecutionUnit::set_signal_logical_or`].
+    ///
+    /// # Errors
+    ///
+    /// [`ProblemStateError::NoProblemState`] for a unit without SPE
+    /// problem-state registers.
+    fn set_signal_logical_or(
+        &mut self,
+        register: SignalNotifier,
+        logical_or: bool,
+    ) -> Result<(), ProblemStateError>;
+
     /// Read `SPU_Out_Mbox`. See [`ExecutionUnit::read_out_mbox`].
     ///
     /// # Errors
@@ -279,6 +292,15 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
         value: u32,
     ) -> Result<(), ProblemStateError> {
         ExecutionUnit::write_signal(self, register, value)
+    }
+
+    #[inline]
+    fn set_signal_logical_or(
+        &mut self,
+        register: SignalNotifier,
+        logical_or: bool,
+    ) -> Result<(), ProblemStateError> {
+        ExecutionUnit::set_signal_logical_or(self, register, logical_or)
     }
 
     #[inline]

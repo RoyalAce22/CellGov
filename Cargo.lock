@@ -438,6 +438,7 @@ dependencies = [
  "cellgov_event",
  "cellgov_exec",
  "cellgov_float",
+ "cellgov_lv2",
  "cellgov_mem",
  "cellgov_ps3_abi",
  "cellgov_sync",

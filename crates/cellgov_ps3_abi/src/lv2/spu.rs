@@ -6,6 +6,14 @@
 /// Maximum bytes `sys_spu_image_open` scans for the path NUL terminator.
 pub const IMAGE_PATH_MAX: usize = 256;
 
+/// The bits of an SPU thread's signal configuration: bit 0 puts
+/// signal-notification register 1 in OR mode, bit 1 register 2.
+/// `sys_spu_thread_set_spu_cfg` refuses a value with any other bit set,
+/// as the spu_signal_notify microtest's reference baselines show.
+///
+/// [CBEA p:239 s:16.4] each signal-notification register either overwrites its contents or ORs the data written into them.
+pub const SPU_CFG_SIGNAL_MODE_BITS: u64 = 0b11;
+
 /// Local-store size in bytes at the width of the kernel's 32-bit image
 /// fields; it bounds segment placement.
 ///

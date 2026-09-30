@@ -149,6 +149,19 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             thread_id: p!(0),
             value: p!(1),
         },
+        syscall::SPU_THREAD_WRITE_SNR => Lv2Request::SpuThreadWriteSnr {
+            thread_id: p!(0),
+            number: p!(1),
+            value: p!(2),
+        },
+        syscall::SPU_THREAD_SET_SPU_CFG => Lv2Request::SpuThreadSetSpuCfg {
+            thread_id: p!(0),
+            value: args[1],
+        },
+        syscall::SPU_THREAD_GET_SPU_CFG => Lv2Request::SpuThreadGetSpuCfg {
+            thread_id: p!(0),
+            value_ptr: p!(1),
+        },
         syscall::TIME_GET_TIMEZONE => Lv2Request::TimeGetTimezone {
             timezone_ptr: p!(0),
             summer_time_ptr: p!(1),

@@ -103,13 +103,16 @@ SemaphoreWait	modeled	92
 SpuImageImport	modeled	158
 SpuImageOpen	modeled	156
 SpuInitialize	partial-state	169
+SpuThreadGetSpuCfg	modeled	188
 SpuThreadGroupCreate	modeled	170
 SpuThreadGroupDestroy	modeled	171
 SpuThreadGroupJoin	modeled	178
 SpuThreadGroupStart	modeled	173
 SpuThreadGroupTerminate	null-backend	177
 SpuThreadInitialize	modeled	172
+SpuThreadSetSpuCfg	modeled	187
 SpuThreadWriteMb	modeled	190
+SpuThreadWriteSnr	modeled	184
 SsAccessControlEngine	modeled	871
 SysRsxContextAllocate	partial-state	670
 SysRsxContextAttribute	partial-state	674

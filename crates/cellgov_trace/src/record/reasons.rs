@@ -145,6 +145,8 @@ pub enum TracedEffectKind {
     MailboxPop = 15,
     /// An MFC command queued with a parameter the MFC refuses.
     MfcInvalidCommand = 16,
+    /// A write of an SPU's signal-notification register.
+    SpuSignalWrite = 17,
 }
 
 /// Reason a host-side invariant break was recorded into the trace

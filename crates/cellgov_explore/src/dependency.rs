@@ -88,6 +88,12 @@ pub struct StepFootprint {
     /// source. A receive attempt belongs here too: an empty mailbox
     /// parks its source.
     pub wait_units: Vec<cellgov_event::UnitId>,
+    /// Units whose signal-notification register this step wrote.
+    ///
+    /// The unit reads its registers in steps that emit nothing, so a
+    /// write conflicts with every step of that unit, and with another
+    /// write to it: a register that overwrites keeps the later value.
+    pub signal_writes: Vec<cellgov_event::UnitId>,
     /// 128-byte-aligned line addresses touched by a `ReservationAcquire`.
     ///
     /// A cross-unit write overlapping the line clears the reservation
@@ -259,6 +265,7 @@ impl StepFootprint {
             wait_barriers,
             wake_targets,
             wait_units,
+            signal_writes,
             reservation_lines,
             inflight_dma_ranges,
             inflight_local_stores,
@@ -279,6 +286,7 @@ impl StepFootprint {
         self.wait_barriers.extend(wait_barriers);
         self.wake_targets.extend(wake_targets);
         self.wait_units.extend(wait_units);
+        self.signal_writes.extend(signal_writes);
         self.reservation_lines.extend(reservation_lines);
         self.inflight_dma_ranges.extend(inflight_dma_ranges);
         self.inflight_local_stores.extend(inflight_local_stores);
@@ -399,6 +407,9 @@ impl StepFootprint {
                 Effect::SignalUpdate { signal, .. } => {
                     fp.signal_updates.push(*signal);
                 }
+                Effect::SpuSignalWrite { target, .. } => {
+                    fp.signal_writes.push(*target);
+                }
                 Effect::ReservationAcquire { line_addr, .. } => {
                     fp.reservation_lines
                         .push(*line_addr & !(RESERVATION_LINE_BYTES - 1));
@@ -507,6 +518,19 @@ impl StepFootprint {
             return true;
         }
 
+        // A signal write reaches every step of its target, whose reads
+        // of the register emit nothing.
+        if ids_overlap(&self.signal_writes, &other.signal_writes)
+            || other
+                .local_store_owner
+                .is_some_and(|unit| self.signal_writes.contains(&unit))
+            || self
+                .local_store_owner
+                .is_some_and(|unit| other.signal_writes.contains(&unit))
+        {
+            return true;
+        }
+
         // A false dependency: no registry holds barrier state, so a
         // barrier wait's one consequence is its own unit's status.
         if ids_overlap(&self.wait_barriers, &other.wait_barriers) {
@@ -577,6 +601,7 @@ impl StepFootprint {
             && self.wait_barriers.is_empty()
             && self.wait_units.is_empty()
             && self.wake_targets.is_empty()
+            && self.signal_writes.is_empty()
             && self.reservation_lines.is_empty()
             && self.inflight_dma_ranges.is_empty()
             && self.dma_local_stores.is_empty()

@@ -1,5 +1,6 @@
 //! SPU-lifecycle LV2 dispatch: image open, thread-group
-//! create/start/initialize/join, and mailbox write.
+//! create/start/initialize/join, mailbox and signal writes, and the
+//! signal configuration.
 
 use cellgov_effects::{Effect, MailboxMessage, WritePayload};
 use cellgov_event::UnitId;
@@ -744,6 +745,99 @@ impl Lv2Host {
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![effect],
+        }
+    }
+
+    /// `sys_spu_thread_write_snr`
+    /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_WRITE_SNR`]): write
+    /// signal-notification register `number + 1` of the running SPU that
+    /// `thread_id` names, in the mode its thread's configuration gives
+    /// that register.
+    ///
+    /// The spu_signal_notify microtest's reference baselines fix the
+    /// numbering and the order of the checks.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` when `number` is neither 0 nor 1. This check
+    ///   comes first.
+    /// - `CELL_ESRCH` when no running SPU has `thread_id`. A thread whose
+    ///   group has not started has no SPU to hold the value, so the model
+    ///   refuses it too.
+    pub(super) fn dispatch_write_snr(
+        &self,
+        thread_id: u32,
+        number: u32,
+        value: u32,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        let Ok(register @ 0..=1) = u8::try_from(number) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        let Some(target) = self.state.groups.running_unit_for_thread(thread_id) else {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        };
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![Effect::SpuSignalWrite {
+                target,
+                register,
+                value,
+                source: requester,
+            }],
+        }
+    }
+
+    /// `sys_spu_thread_set_spu_cfg`
+    /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_SET_SPU_CFG`]): set
+    /// the signal configuration of an initialized thread. Bit 0 puts
+    /// signal-notification register 1 in OR mode, bit 1 register 2.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` when `value` sets a bit above the two register
+    ///   modes. This check comes first.
+    /// - `CELL_ESRCH` when no initialized thread has `thread_id`.
+    pub(super) fn dispatch_set_spu_cfg(&mut self, thread_id: u32, value: u64) -> Lv2Dispatch {
+        if value > spu::SPU_CFG_SIGNAL_MODE_BITS {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        if !self.state.groups.set_signal_config(thread_id, value) {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
+        Lv2Dispatch::immediate(0)
+    }
+
+    /// `sys_spu_thread_get_spu_cfg`
+    /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GET_SPU_CFG`]): store
+    /// the signal configuration of an initialized thread at `value_ptr`
+    /// as a u64.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when no initialized thread has `thread_id`.
+    /// - `CELL_EFAULT` when `value_ptr` is null.
+    pub(super) fn dispatch_get_spu_cfg(
+        &self,
+        thread_id: u32,
+        value_ptr: u32,
+        requester: UnitId,
+        tick: GuestTicks,
+    ) -> Lv2Dispatch {
+        let Some(config) = self.state.groups.signal_config(thread_id) else {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        };
+        if let Some(refusal) = self.efault_if_null(&[value_ptr]) {
+            return refusal;
+        }
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![Effect::shared_write(
+                ByteRange::contiguous_u32(value_ptr, 8),
+                WritePayload::from_slice(&config.to_be_bytes()),
+                requester,
+                tick,
+            )],
         }
     }
 }

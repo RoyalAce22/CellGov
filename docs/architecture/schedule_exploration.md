@@ -251,6 +251,14 @@ conflicts.
 
 No clause was added for either.
 
+A handler's signal write has a clause of its own. It conflicts with
+every step of its target, and with another signal write to the same
+target.
+
+*Why:* the target reads its signal-notification registers in steps
+that emit nothing, and a register that overwrites keeps the later of
+two writes.
+
 ### The all-blocked time warp
 
 The all-blocked time warp does reach a footprint. It fires the timer

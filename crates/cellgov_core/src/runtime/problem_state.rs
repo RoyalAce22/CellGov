@@ -76,6 +76,10 @@ impl Runtime {
     /// Write one signal-notification register of `unit`. A unit parked
     /// reading that register becomes runnable and runs its read again.
     ///
+    /// An SPU that runs an LV2 thread takes the register's mode from
+    /// that thread's signal configuration, which
+    /// `sys_spu_thread_set_spu_cfg` sets.
+    ///
     /// # Errors
     ///
     /// [`ProblemStateError::UnknownUnit`], [`ProblemStateError::Retired`]
@@ -88,10 +92,19 @@ impl Runtime {
         value: u32,
     ) -> Result<(), ProblemStateError> {
         self.refuse_retired(unit)?;
-        self.registry
+        let config = self.lv2_host.thread_groups().signal_config_of_unit(unit);
+        let target = self
+            .registry
             .get_mut(unit)
-            .ok_or(ProblemStateError::UnknownUnit)?
-            .write_signal(register, value)?;
+            .ok_or(ProblemStateError::UnknownUnit)?;
+        if let Some(config) = config {
+            let bit = match register {
+                SignalNotifier::One => 0,
+                SignalNotifier::Two => 1,
+            };
+            target.set_signal_logical_or(register, config >> bit & 1 == 1)?;
+        }
+        target.write_signal(register, value)?;
         if self.stall_ends(unit, StallWake::SignalWrite(register), false) {
             self.registry
                 .set_status_override(unit, UnitStatus::Runnable);

@@ -286,6 +286,12 @@ lv2_syscalls! {
     SPU_THREAD_GROUP_TERMINATE = 177 => "sys_spu_thread_group_terminate";
     /// `sys_spu_thread_group_join`.
     SPU_THREAD_GROUP_JOIN = 178 => "sys_spu_thread_group_join";
+    /// `sys_spu_thread_write_snr`.
+    SPU_THREAD_WRITE_SNR = 184 => "sys_spu_thread_write_snr";
+    /// `sys_spu_thread_set_spu_cfg`.
+    SPU_THREAD_SET_SPU_CFG = 187 => "sys_spu_thread_set_spu_cfg";
+    /// `sys_spu_thread_get_spu_cfg`.
+    SPU_THREAD_GET_SPU_CFG = 188 => "sys_spu_thread_get_spu_cfg";
     /// `sys_spu_thread_write_ls_mb` family entry point.
     SPU_THREAD_WRITE_MB = 190 => "sys_spu_thread_write_ls_mb";
 

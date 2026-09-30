@@ -29,6 +29,7 @@ use std::process::Command;
 
 use cellgov_compare::{Observation, ObservedOutcome};
 use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, MFC_ATOMIC_STAT_S, MFC_ATOMIC_STAT_U};
+use cellgov_ps3_abi::lv2::errno;
 
 /// What a payload word must be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -270,6 +271,27 @@ const CASES: &[Case] = &[
             ("message1", Exact(0x22)),
             ("message2", Exact(0x33)),
             ("message3", Exact(0x55)),
+        ],
+    },
+    Case {
+        name: "spu_signal_notify",
+        max_steps: 1_000_000,
+        fields: &[
+            ("status", Exact(0)),
+            // SPU_SIGNAL1_OVERWRITE | SPU_SIGNAL2_OR, read back.
+            ("config", Exact(0b10)),
+            ("register_number_2", Exact(errno::CELL_EINVAL.code)),
+            ("unknown_thread", Exact(errno::CELL_ESRCH.code)),
+            ("count1", Exact(1)),
+            ("count2", Exact(1)),
+            // Register 1 overwrites: 0x10 then 0x20 leaves 0x20.
+            ("register1", Exact(0x20)),
+            // Register 2 ORs: 0x01 then 0x02 leaves 0x03.
+            ("register2", Exact(0x03)),
+            ("count1_after", Exact(0)),
+            ("count2_after", Exact(0)),
+            ("config_of_4", Exact(errno::CELL_EINVAL.code)),
+            ("config_of_unknown_thread", Exact(errno::CELL_ESRCH.code)),
         ],
     },
     Case {

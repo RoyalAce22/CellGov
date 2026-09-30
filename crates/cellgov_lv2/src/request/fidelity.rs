@@ -224,7 +224,10 @@ impl Lv2RequestKind {
             | Lv2RequestKind::SpuThreadGroupStart
             | Lv2RequestKind::SpuThreadGroupDestroy
             | Lv2RequestKind::SpuThreadGroupJoin
-            | Lv2RequestKind::SpuThreadWriteMb => Modeled,
+            | Lv2RequestKind::SpuThreadWriteMb
+            | Lv2RequestKind::SpuThreadWriteSnr
+            | Lv2RequestKind::SpuThreadSetSpuCfg
+            | Lv2RequestKind::SpuThreadGetSpuCfg => Modeled,
             // SPU teardown is an honest ENOSYS refusal.
             Lv2RequestKind::SpuThreadGroupTerminate => NullBackend,
             // Announced limits are validated but not persisted.

@@ -476,6 +476,7 @@ fn apply_committed_effects(
             | Effect::WaitOnEvent { .. }
             | Effect::WakeUnit { .. }
             | Effect::SignalUpdate { .. }
+            | Effect::SpuSignalWrite { .. }
             | Effect::RsxLabelWrite { .. }
             | Effect::RsxFlipRequest { .. } => {
                 return Err(PpuObservationError::UnsupportedEffect {

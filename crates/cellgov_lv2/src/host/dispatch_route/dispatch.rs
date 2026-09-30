@@ -144,6 +144,18 @@ impl Lv2Host {
             Lv2Request::SpuThreadWriteMb { thread_id, value } => {
                 self.dispatch_write_mb(thread_id, value, requester)
             }
+            Lv2Request::SpuThreadWriteSnr {
+                thread_id,
+                number,
+                value,
+            } => self.dispatch_write_snr(thread_id, number, value, requester),
+            Lv2Request::SpuThreadSetSpuCfg { thread_id, value } => {
+                self.dispatch_set_spu_cfg(thread_id, value)
+            }
+            Lv2Request::SpuThreadGetSpuCfg {
+                thread_id,
+                value_ptr,
+            } => self.dispatch_get_spu_cfg(thread_id, value_ptr, requester, tick),
             Lv2Request::TtyWrite {
                 buf_ptr,
                 len,

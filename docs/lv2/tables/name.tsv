@@ -337,14 +337,17 @@ ordinal	packet	name	source	ref	fw_from	fw_to
 181	none	sys_spu_thread_write_ls	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_WRITE_LS	none	none
 182	none	sys_spu_thread_read_ls	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 182	none	sys_spu_thread_read_ls	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_READ_LS	none	none
+184	none	sys_spu_thread_write_snr	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_WRITE_SNR	none	none
 184	none	sys_spu_thread_write_snr	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 184	none	sys_spu_thread_write_snr	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_WRITE_SNR	none	none
 185	none	sys_spu_thread_group_connect_event	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 185	none	sys_spu_thread_group_connect_event	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_GROUP_CONNECT_EVENT	none	none
 186	none	sys_spu_thread_group_disconnect_event	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 186	none	sys_spu_thread_group_disconnect_event	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_GROUP_DISCONNECT_EVENT	none	none
+187	none	sys_spu_thread_set_spu_cfg	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_SET_SPU_CFG	none	none
 187	none	sys_spu_thread_set_spu_cfg	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 187	none	sys_spu_thread_set_spu_cfg	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_SET_SPU_CFG	none	none
+188	none	sys_spu_thread_get_spu_cfg	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GET_SPU_CFG	none	none
 188	none	sys_spu_thread_get_spu_cfg	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 188	none	sys_spu_thread_get_spu_cfg	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_GET_SPU_CFG	none	none
 190	none	sys_spu_thread_write_ls_mb	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_WRITE_MB	none	none

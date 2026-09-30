@@ -29,6 +29,7 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
         Effect::ClockRead { .. } => TracedEffectKind::ClockRead,
         Effect::MailboxPop { .. } => TracedEffectKind::MailboxPop,
         Effect::MfcInvalidCommand { .. } => TracedEffectKind::MfcInvalidCommand,
+        Effect::SpuSignalWrite { .. } => TracedEffectKind::SpuSignalWrite,
     }
 }
 

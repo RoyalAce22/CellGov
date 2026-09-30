@@ -35,5 +35,8 @@ spu-microtests = []
 [dev-dependencies]
 cellgov_compare = { path = "../cellgov_compare" }
 cellgov_core = { path = "../cellgov_core" }
+# The signal-write fixture initializes an SPU thread, which takes the
+# image handle type `sys_spu_thread_initialize` records.
+cellgov_lv2 = { path = "../cellgov_lv2" }
 cellgov_testkit = { path = "../cellgov_testkit" }
 cellgov_trace = { path = "../cellgov_trace" }

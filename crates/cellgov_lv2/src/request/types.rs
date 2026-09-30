@@ -127,6 +127,30 @@ pub enum Lv2Request {
         /// In: mailbox value.
         value: u32,
     },
+    /// `sys_spu_thread_write_snr`.
+    SpuThreadWriteSnr {
+        /// In: target SPU thread id.
+        thread_id: u32,
+        /// In: 0 for signal-notification register 1, 1 for register 2.
+        number: u32,
+        /// In: the value written.
+        value: u32,
+    },
+    /// `sys_spu_thread_set_spu_cfg`.
+    SpuThreadSetSpuCfg {
+        /// In: target SPU thread id.
+        thread_id: u32,
+        /// In: the configuration; bit 0 puts register 1 in OR mode and
+        /// bit 1 register 2.
+        value: u64,
+    },
+    /// `sys_spu_thread_get_spu_cfg`.
+    SpuThreadGetSpuCfg {
+        /// In: target SPU thread id.
+        thread_id: u32,
+        /// Out: the configuration, as a u64.
+        value_ptr: u32,
+    },
     /// `sys_mutex_create`.
     MutexCreate {
         /// Out: mutex id.

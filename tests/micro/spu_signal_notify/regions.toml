@@ -1,0 +1,14 @@
+[[regions]]
+name = "config"
+addr = "0x0"
+size = "0x10"
+
+[[regions]]
+name = "signals"
+addr = "0x10"
+size = "0x10"
+
+[[regions]]
+name = "after"
+addr = "0x20"
+size = "0x10"
