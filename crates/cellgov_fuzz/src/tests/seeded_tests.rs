@@ -162,17 +162,85 @@ fn find_case(
         .unwrap_or_else(|| panic!("{target:?} {strategy:?}: no case below {SEARCH_LIMIT} matches"))
 }
 
+/// The first canonical descriptor word whose single-case run executes a
+/// metamorphic partner. The walk follows registry order and does not sample,
+/// so a new instruction kind cannot move the selection off the metamorphic
+/// tier.
+fn metamorphic_words(target: FuzzTarget) -> Vec<u32> {
+    let words: Vec<u32> = match target {
+        FuzzTarget::PpuInstruction => cellgov_ppu::instruction::fuzz::generation_descriptors()
+            .iter()
+            .map(|descriptor| descriptor.canonical_word)
+            .collect(),
+        FuzzTarget::SpuInstruction => cellgov_spu::fuzz::generation_descriptors()
+            .iter()
+            .map(|descriptor| descriptor.canonical_word)
+            .collect(),
+        FuzzTarget::PpuSequence | FuzzTarget::SpuSequence => {
+            panic!("{target:?} is not an instruction target")
+        }
+    };
+    let config = config(GenerationStrategy::Structured);
+    words
+        .into_iter()
+        .map(|word| vec![word])
+        .find(|words| {
+            !evaluate_case(target, config, 0, words)
+                .report
+                .metamorphic_executions
+                .is_empty()
+        })
+        .unwrap_or_else(|| panic!("{target:?}: no descriptor word executes a metamorphic partner"))
+}
+
 /// `bi` with the reserved E and D options both set: an undefined operand
 /// combination the structured generator never emits.
 fn spu_undefined_word() -> u32 {
-    let word = cellgov_spu::fuzz::generation_descriptors()
+    let word = spu_bi_word() | 0x000c_0000;
+    assert!(cellgov_spu::fuzz::encoding_has_undefined_operands(word));
+    word
+}
+
+/// `bi` with one interrupt-control option set: a defined combination the
+/// executor does not model.
+fn spu_unsupported_word() -> u32 {
+    let word = spu_bi_word() | 0x0004_0000;
+    assert!(!cellgov_spu::fuzz::encoding_has_undefined_operands(word));
+    assert!(!cellgov_spu::fuzz::encoding_execution_is_supported(word));
+    word
+}
+
+fn spu_bi_word() -> u32 {
+    cellgov_spu::fuzz::generation_descriptors()
         .iter()
         .find(|descriptor| descriptor.kind == cellgov_spu::instruction::SpuInstructionKind::Bi)
         .expect("bi descriptor")
         .canonical_word
-        | 0x000c_0000;
-    assert!(cellgov_spu::fuzz::encoding_has_undefined_operands(word));
-    word
+}
+
+/// A case index and its words, a label, and the outcome a plain run reports.
+type InapplicableCase = ((u64, Vec<u32>), &'static str, RunOutcome);
+
+/// One undefined and one unsupported case for `target`. The structured SPU
+/// generator emits only defined operand combinations and draws an unmodeled
+/// channel less often with every modeled one, so its cases are substituted
+/// words.
+fn inapplicable_cases(target: FuzzTarget) -> [InapplicableCase; 2] {
+    let strategy = GenerationStrategy::Structured;
+    let (undefined, unsupported) = match target {
+        FuzzTarget::SpuInstruction => (
+            (0, vec![spu_undefined_word()]),
+            (0, vec![spu_unsupported_word()]),
+        ),
+        _ => (
+            find_case(target, strategy, |report| report.undefined_cases == 1),
+            find_case(target, strategy, |report| report.unsupported_cases == 1),
+        ),
+    };
+    [
+        (undefined, "undefined", RunOutcome::UndefinedCase),
+        (unsupported, "unsupported", RunOutcome::UnsupportedCase),
+    ]
 }
 
 fn retained_transition(run: &FuzzRun) -> StateTransitionClass {
@@ -214,12 +282,6 @@ fn every_engine_and_strategy_runs_an_exercised_clean_baseline() {
                     "{target:?} {strategy:?} averaged under two instructions per eligible case"
                 );
             }
-            if strategy == GenerationStrategy::Structured && INSTRUCTION_TARGETS.contains(&target) {
-                assert!(
-                    !report.metamorphic_executions.is_empty(),
-                    "{target:?} executed no metamorphic partner"
-                );
-            }
             assert!(
                 report.instruction_kinds.len() >= 4,
                 "{target:?} {strategy:?} reached {} kinds",
@@ -231,6 +293,19 @@ fn every_engine_and_strategy_runs_an_exercised_clean_baseline() {
         !effects.is_empty(),
         "no baseline campaign observed a guest-visible effect"
     );
+    for target in INSTRUCTION_TARGETS {
+        let words = metamorphic_words(target);
+        let run = evaluate_case(target, config(GenerationStrategy::Structured), 0, &words);
+        assert!(
+            run.report.is_clean(),
+            "{target:?}: {:?}",
+            run.report.finding_counts
+        );
+        assert!(
+            !run.report.metamorphic_executions.is_empty(),
+            "{target:?} executed no metamorphic partner"
+        );
+    }
 }
 
 #[test]
@@ -350,10 +425,21 @@ fn an_illegal_outcome_is_detected_on_every_eligible_instruction_case() {
             run.report.eligible_cases,
             "{target:?}: one illegal outcome per eligible case and none elsewhere"
         );
-        assert!(
-            run.report.unsupported_cases + run.report.undefined_cases > 0,
-            "{target:?}: the campaign met no inapplicable case, so the count proves nothing about them"
-        );
+        let _guard = seed(SeededDefect::IllegalOutcome);
+        for ((index, words), label, outcome) in inapplicable_cases(target) {
+            let inapplicable = evaluate_case(
+                target,
+                config(GenerationStrategy::Structured),
+                index,
+                &words,
+            );
+            assert_eq!(inapplicable.outcome, outcome, "{target:?} {label}");
+            assert!(
+                inapplicable.report.findings.is_empty(),
+                "{target:?} {label}: {:?}",
+                inapplicable.report.finding_counts
+            );
+        }
         for finding in &run.report.findings {
             assert_eq!(finding.kind, FindingKind::IllegalOutcome);
             assert_eq!(finding.fingerprint.check, CheckIdentity::LegalOutcome);
@@ -474,30 +560,45 @@ fn nondeterminism_is_detected_in_every_engine() {
 #[test]
 fn a_metamorphic_mismatch_is_detected_once_per_executed_relation() {
     for target in INSTRUCTION_TARGETS {
-        let run = seeded_run(
+        let words = metamorphic_words(target);
+        let campaign = seeded_run(
             target,
             GenerationStrategy::Structured,
             SeededDefect::MetamorphicMismatch,
         );
-        assert_eq!(run.outcome, RunOutcome::SemanticFinding, "{target:?}");
-        let executed: u64 = run.report.metamorphic_executions.values().sum();
-        assert!(executed > 0, "{target:?}");
-        assert_eq!(
-            count(&run.report, FindingKind::MetamorphicViolation),
-            executed,
+        let _guard = seed(SeededDefect::MetamorphicMismatch);
+        let selected = evaluate_case(target, config(GenerationStrategy::Structured), 0, &words);
+        assert_eq!(selected.outcome, RunOutcome::SemanticFinding, "{target:?}");
+        for run in [&campaign, &selected] {
+            let executed: u64 = run.report.metamorphic_executions.values().sum();
+            assert_eq!(
+                count(&run.report, FindingKind::MetamorphicViolation),
+                executed,
+                "{target:?}"
+            );
+            assert!(
+                run.report
+                    .finding_counts
+                    .keys()
+                    .all(|kind| *kind == FindingKind::MetamorphicViolation),
+                "{target:?}: {:?}",
+                run.report.finding_counts
+            );
+            for finding in &run.report.findings {
+                assert_eq!(
+                    finding.fingerprint.divergence,
+                    DivergenceClass::ArchitecturalState
+                );
+                assert!(run
+                    .report
+                    .metamorphic_executions
+                    .contains_key(&finding.fingerprint.check));
+            }
+        }
+        assert!(
+            selected.report.metamorphic_executions.values().sum::<u64>() > 0,
             "{target:?}"
         );
-        assert_eq!(run.report.finding_counts.len(), 1, "{target:?}");
-        for finding in &run.report.findings {
-            assert_eq!(
-                finding.fingerprint.divergence,
-                DivergenceClass::ArchitecturalState
-            );
-            assert!(run
-                .report
-                .metamorphic_executions
-                .contains_key(&finding.fingerprint.check));
-        }
     }
 }
 
@@ -512,17 +613,7 @@ fn an_inapplicable_case_is_refused_before_any_seeded_defect_can_fire() {
     ];
     for target in INSTRUCTION_TARGETS {
         let strategy = GenerationStrategy::Structured;
-        // The structured SPU generator emits only defined operand combinations,
-        // so its undefined case is a substituted word.
-        let undefined = match target {
-            FuzzTarget::SpuInstruction => (0, vec![spu_undefined_word()]),
-            _ => find_case(target, strategy, |report| report.undefined_cases == 1),
-        };
-        let unsupported = find_case(target, strategy, |report| report.unsupported_cases == 1);
-        for ((index, words), label, outcome) in [
-            (undefined, "undefined", RunOutcome::UndefinedCase),
-            (unsupported, "unsupported", RunOutcome::UnsupportedCase),
-        ] {
+        for ((index, words), label, outcome) in inapplicable_cases(target) {
             let plain = evaluate_case(target, config(strategy), index, &words);
             assert_eq!(plain.report.eligible_cases, 0, "{target:?} {label}");
             assert!(
@@ -564,8 +655,13 @@ fn a_common_mode_defect_is_invisible_to_every_self_differential_check() {
             run.report.finding_counts
         );
         assert_eq!(run.outcome, RunOutcome::CleanCompletion, "{target:?}");
+        let words = metamorphic_words(target);
+        let _guard = seed(SeededDefect::CommonMode);
+        let selected = evaluate_case(target, config(GenerationStrategy::Structured), 0, &words);
+        assert!(selected.report.is_clean(), "{target:?}");
+        assert_eq!(selected.outcome, RunOutcome::CleanCompletion, "{target:?}");
         assert!(
-            !run.report.metamorphic_executions.is_empty(),
+            !selected.report.metamorphic_executions.is_empty(),
             "{target:?}: the metamorphic tier did not run, so its silence is not evidence"
         );
     }
