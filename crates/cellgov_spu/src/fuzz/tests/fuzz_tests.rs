@@ -778,3 +778,35 @@ fn a_conversion_is_generated_only_with_a_defined_scale() {
         }
     }
 }
+
+// [CBE-Handbook p:765 s:B.1] through [CBE-Handbook p:767 s:B.1]: the CBE's SPU instruction table has no double-precision compares.
+#[test]
+fn the_registry_classifies_the_absent_double_compares_as_invalid_words() {
+    use crate::instruction::SpuDecodeError;
+    use cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP;
+    let kinds: Vec<&'static str> = generation_descriptors()
+        .iter()
+        .map(|descriptor| descriptor.kind.into())
+        .collect();
+    for mnemonic in ["dfceq", "dfcmeq", "dfcgt", "dfcmgt", "dftsv"] {
+        let row = SPU_OPCODE_MAP
+            .iter()
+            .find(|row| row.mnemonic == mnemonic)
+            .expect("a row");
+        assert!(
+            kinds
+                .iter()
+                .all(|kind| !kind.eq_ignore_ascii_case(mnemonic)),
+            "{mnemonic} is not a generation kind"
+        );
+        assert_eq!(exact_kind(row.canonical_word()), None, "{mnemonic}");
+        assert_eq!(
+            crate::decode::decode(row.canonical_word()),
+            Err(SpuDecodeError::AbsentOnCbe {
+                raw: row.canonical_word(),
+                mnemonic
+            }),
+            "{mnemonic} is an invalid instruction, not an unknown word"
+        );
+    }
+}

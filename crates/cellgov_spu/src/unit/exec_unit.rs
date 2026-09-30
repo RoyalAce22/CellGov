@@ -131,7 +131,8 @@ impl ExecutionUnit for SpuExecutionUnit {
                 Ok(i) => i,
                 // [CBEA p:33 s:2.1.2] an SPU that meets an invalid instruction halts and records the event in its status register.
                 // [CBEA p:93 s:8.5.2] I: invalid instruction detected, SPU stopped imprecisely.
-                Err(SpuDecodeError::Unassigned(_)) => {
+                // [CBEA p:34 s:2.2.3] an optional instruction the implementation lacks is an illegal instruction.
+                Err(SpuDecodeError::Unassigned(_) | SpuDecodeError::AbsentOnCbe { .. }) => {
                     self.state.record_stop(SpuStopKind::InvalidInstruction, 0);
                     self.status = UnitStatus::Finished;
                     return ExecutionStepResult {

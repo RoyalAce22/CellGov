@@ -18,8 +18,10 @@ use crate::instruction::{SpuDecodeError, SpuInstruction};
 /// # Errors
 ///
 /// Returns [`SpuDecodeError::Unassigned`] for a word that is not an SPU
-/// instruction and [`SpuDecodeError::Unimplemented`] for an instruction
-/// CellGov does not implement.
+/// instruction, [`SpuDecodeError::AbsentOnCbe`] for an optional
+/// instruction the CBE does not provide, and
+/// [`SpuDecodeError::Unimplemented`] for an instruction CellGov does not
+/// implement.
 pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
     let build = spu_isa::row_for(raw).and_then(|(row, _)| BUILDERS[row]);
     match build {

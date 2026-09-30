@@ -23,9 +23,15 @@ fn every_row_decodes_as_its_own_mnemonic_or_is_refused_by_it() {
                 assert!(row.on_cbe, "{}", row.mnemonic);
                 assert_eq!((mnemonic, raw), (row.mnemonic, word));
             }
+            Err(SpuDecodeError::AbsentOnCbe { mnemonic, raw }) => {
+                assert!(!row.on_cbe, "{} refused as absent on the CBE", row.mnemonic);
+                assert_eq!((mnemonic, raw), (row.mnemonic, word));
+            }
             Err(SpuDecodeError::Unassigned(raw)) => {
-                assert!(!row.on_cbe, "{} refused as unassigned", row.mnemonic);
-                assert_eq!(raw, word);
+                panic!(
+                    "{} (0x{raw:08x}) has a row but is refused as unassigned",
+                    row.mnemonic
+                )
             }
         }
     }

@@ -1688,10 +1688,20 @@ pub enum SpuInstruction {
 /// Decode failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SpuDecodeError {
-    /// No instruction the CBE provides has this word's opcode, so the
-    /// word is not an SPU instruction.
+    /// No instruction of the SPU instruction set has this word's opcode,
+    /// so the word is not an SPU instruction.
     #[error("0x{0:08x} is not an SPU instruction")]
     Unassigned(u32),
+    /// The word is the named optional instruction of the SPU instruction
+    /// set, which the CBE does not provide, so on the CBE it is an invalid
+    /// instruction.
+    #[error("SPU instruction {mnemonic} (0x{raw:08x}) is not on the CBE")]
+    AbsentOnCbe {
+        /// The refused word.
+        raw: u32,
+        /// The instruction's mnemonic.
+        mnemonic: &'static str,
+    },
     /// The word is the named instruction, which CellGov does not
     /// implement.
     #[error("SPU instruction {mnemonic} (0x{raw:08x}) is not implemented")]
@@ -1711,7 +1721,11 @@ impl SpuDecodeError {
                 raw,
                 mnemonic: row.mnemonic,
             },
-            _ => SpuDecodeError::Unassigned(raw),
+            Some((_, row)) => SpuDecodeError::AbsentOnCbe {
+                raw,
+                mnemonic: row.mnemonic,
+            },
+            None => SpuDecodeError::Unassigned(raw),
         }
     }
 }
