@@ -41,7 +41,7 @@ fn the_committed_directory_replays_clean() {
         cellgov_fuzz::spu_reference::run_reference_directory(&dir).expect("the directory reads");
     let text = render_spu_reference(&campaign);
     assert!(text.contains(
-        "fuzz spu-reference: dfa_directed_rounding_v1.json single unit=instruction:dfa match \
+        "fuzz spu-reference: dfa.json directed-rounding-per-slice unit=instruction:dfa match \
          differences=[] unchosen=[] excluded=2"
     ));
     assert!(text.contains(

@@ -7,7 +7,7 @@ use cellgov_fuzz::spu_reference::{
 
 const ROTATION: &str = include_str!("fixtures/spu_reference_single/rotqbyi_12_v1.json");
 const DIRECTED_ROUNDING: &str =
-    include_str!("fixtures/spu_reference/dfa_directed_rounding_v1.json");
+    include_str!("fixtures/spu_reference_single/dfa_directed_rounding_v1.json");
 
 /// [SPU-ISA p:197 s:9.2] slice 0 rounds by RN0 and slice 1 by RN1: 1 + 0.75 ulp toward zero is 1, and -(1 + 0.25 ulp) toward -inf is -(1 + 1 ulp), where round to nearest gives 1 + 1 ulp and -1.
 /// [SPU-ISA p:200 s:9.3] the slice-0 INV the vector starts with stays set, and each inexact slice adds its INX.
