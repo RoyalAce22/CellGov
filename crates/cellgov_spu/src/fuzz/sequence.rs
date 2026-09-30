@@ -8,6 +8,12 @@ use crate::instruction::{SpuInstruction, SpuInstructionKind};
 
 use super::types::{SpuGenerationDescriptor, SpuGenerationError, SpuOperandClass};
 
+/// The opcode the refused-command interaction issues: x'00D8', which no
+/// table of the architecture defines.
+///
+/// [CBEA p:308 s:Appendix D Table D-5] the atomic commands are getllar, putllc, putlluc and putqlluc; no get lock-line unconditional command exists.
+pub const REFUSED_MFC_OPCODE: u32 = 0xD8;
+
 /// The message the mailbox interaction finds waiting.
 pub const SEQUENCE_MAILBOX_MESSAGE: u32 = 0x5EED_0001;
 
@@ -28,9 +34,9 @@ pub enum SpuSequenceInteraction {
     Reservation,
     /// Store a quadword and then load that address.
     LocalStore,
-    /// Issue a defined MFC command the model does not run, after a legal
-    /// instruction.
-    UnmodelledMfcCommand,
+    /// Issue an MFC opcode the architecture does not define, after a
+    /// legal instruction. The SPU queue refuses it as an invalid command.
+    RefusedMfcCommand,
     /// Branch across a decoy word to the next fetchable word.
     Branch,
     /// Reach a terminating STOP after a preceding instruction.
@@ -47,7 +53,7 @@ impl SpuSequenceInteraction {
         Self::MemoryRead,
         Self::Reservation,
         Self::LocalStore,
-        Self::UnmodelledMfcCommand,
+        Self::RefusedMfcCommand,
         Self::Branch,
         Self::Stop,
     ];
@@ -95,10 +101,8 @@ impl SpuSequenceInteraction {
                 state.set_reg_word_splat(2, data_base);
                 state.regs[1] = std::array::from_fn(|index| index as u8 + 1);
             }
-            Self::UnmodelledMfcCommand => {
-                // An unconditional lock-line put: the SPU queue accepts it,
-                // and the model does not run it, so it faults.
-                state.set_reg_word_splat(2, spu::MFC_PUTLLUC);
+            Self::RefusedMfcCommand => {
+                state.set_reg_word_splat(2, REFUSED_MFC_OPCODE);
             }
             Self::Mailbox => state.channels.in_mbox = vec![SEQUENCE_MAILBOX_MESSAGE],
             Self::Branch | Self::Stop => {}
@@ -167,7 +171,7 @@ impl SpuSequenceInteraction {
                 word(K::Stqd, &[(reg, 0, 1), (reg, 1, 2)])?,
                 word(K::Lqd, &[(reg, 0, 3), (reg, 1, 2)])?,
             ],
-            Self::UnmodelledMfcCommand => {
+            Self::RefusedMfcCommand => {
                 vec![word(K::Nop, &[])?, wrch(2, u32::from(spu::MFC_CMD))?]
             }
             Self::Branch => vec![

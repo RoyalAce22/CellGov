@@ -13,6 +13,8 @@ const WRCH_EFFECTS: &[EffectKind] = &[
     EffectKind::DmaEnqueue,
     EffectKind::ConditionalStore,
     EffectKind::MfcInvalidCommand,
+    // putlluc's unconditional store.
+    EffectKind::SharedWriteIntent,
 ];
 // The fuzz engine rejects outcomes outside these executor-derived sets.
 const CONTINUE: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue];

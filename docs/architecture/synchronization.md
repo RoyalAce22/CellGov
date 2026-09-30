@@ -166,8 +166,9 @@ success bit.
 **Two pieces of state.** Every execution unit carries a local
 register -- `Option<ReservedLine>` on `PpuState` / `SpuState` --
 set by an atomic load and cleared by a conditional-store
-retirement or by another unit's write to the line; the holder's
-own plain stores leave it in place. The committed
+retirement, by an SPU's own put or unconditional lock-line put over
+the line, or by another unit's write to the line; the holder's other
+stores leave it in place. The committed
 cross-unit view is `cellgov_sync::ReservationTable`, a
 unit-ordered map from `UnitId` to `ReservedLine` owned by the
 commit pipeline, whose lanes enter `sync_state_hash` with

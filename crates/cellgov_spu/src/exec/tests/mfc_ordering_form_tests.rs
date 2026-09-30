@@ -9,7 +9,7 @@ use cellgov_exec::{BarrierKind, ExecutionContext, ExecutionUnit, RetiredBarrier,
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::hw::spu::{
     MFC_BARRIER, MFC_CMD, MFC_EIEIO, MFC_GET, MFC_GETB, MFC_GETF, MFC_GETLB, MFC_PUT, MFC_PUTB,
-    MFC_PUTF, MFC_PUTLF, MFC_SNDSIG, MFC_SNDSIGB, MFC_SNDSIGF, MFC_SYNC,
+    MFC_PUTF, MFC_PUTLF, MFC_PUTQLLUC, MFC_SNDSIG, MFC_SNDSIGB, MFC_SNDSIGF, MFC_SYNC,
 };
 use cellgov_time::Budget;
 
@@ -219,4 +219,33 @@ fn each_result_hint_form_queues_what_its_plain_form_queues() {
         assert_eq!(hint_effects, plain_effects, "0x{hint:02x}");
         assert_eq!(hint_barriers, plain_barriers, "0x{hint:02x}");
     }
+}
+
+/// [CBEA p:68 s:7.8.4] putqlluc is a queued put of one cache line with an implied tag-specific fence.
+#[test]
+fn putqlluc_queues_a_fenced_put_of_the_line_from_local_store() {
+    let (reason, effects, barriers) = issue_traced(MFC_PUTQLLUC, 0, TAG, true);
+    assert_eq!(reason, YieldReason::DmaSubmitted);
+    let [Effect::DmaEnqueue {
+        request,
+        payload: None,
+    }] = effects.as_slice()
+    else {
+        panic!("one queued put: {effects:?}");
+    };
+    assert_eq!(request.direction(), DmaDirection::Put);
+    assert!(request.local_store_source());
+    assert_eq!(request.ordering(), MfcOrdering::Fence);
+    assert_eq!(request.tag_id().map(|t| t.raw()), Some(TAG as u8));
+    assert_eq!(
+        (
+            request.source().start().raw(),
+            request.destination().start().raw(),
+            request.length()
+        ),
+        (0x1000, 0x2000, 128),
+        "the line, whatever MFC_Size holds"
+    );
+    assert_eq!(barriers.len(), 1);
+    assert_eq!(barriers[0].kind, BarrierKind::MfcFence);
 }

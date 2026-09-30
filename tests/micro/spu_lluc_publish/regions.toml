@@ -1,0 +1,14 @@
+[[regions]]
+name = "holder"
+addr = "0x0"
+size = "0x10"
+
+[[regions]]
+name = "line"
+addr = "0x10"
+size = "0x10"
+
+[[regions]]
+name = "publisher"
+addr = "0x20"
+size = "0x10"

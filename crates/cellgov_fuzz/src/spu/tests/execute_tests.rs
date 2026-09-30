@@ -308,19 +308,22 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
                 );
             }
-            SpuSequenceInteraction::UnmodelledMfcCommand => {
+            SpuSequenceInteraction::RefusedMfcCommand => {
                 assert_eq!(first.2.len(), 2);
                 assert!(
                     matches!(
-                        first.0.terminal_outcome,
-                        Some(SpuStepOutcome::Fault(
-                            cellgov_spu::exec::SpuFault::UnsupportedMfcCommand(word)
-                        )) if word & 0xFFFF == cellgov_ps3_abi::hw::spu::MFC_PUTLLUC
+                        &first.0.terminal_outcome,
+                        Some(SpuStepOutcome::Yield { effects, .. })
+                            if matches!(
+                                effects.as_slice(),
+                                [cellgov_effects::Effect::MfcInvalidCommand { command, .. }]
+                                    if command.word == cellgov_spu::fuzz::REFUSED_MFC_OPCODE
+                                        && command.error.to_string() == "opcode 0x00d8 is illegal"
+                            )
                     ),
                     "{:?}",
                     first.0.terminal_outcome
                 );
-                assert_eq!(first.0.state, SpuObservableSnapshot::capture(&initial));
                 assert!(first.0.footprint_violations.is_empty());
             }
             SpuSequenceInteraction::Branch => {
@@ -389,7 +392,7 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
             SpuSequenceInteraction::LocalStore => {
                 defective.0.state.ls[STRUCTURED_LS_DATA_BASE as usize] ^= 1
             }
-            SpuSequenceInteraction::UnmodelledMfcCommand => defective.0.state.pc ^= 4,
+            SpuSequenceInteraction::RefusedMfcCommand => defective.0.state.pc ^= 4,
             SpuSequenceInteraction::Branch => defective.0.state.pc ^= 4,
             SpuSequenceInteraction::Stop => {
                 defective.0.terminal_outcome = Some(SpuStepOutcome::Continue)

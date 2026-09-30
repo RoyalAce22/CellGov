@@ -155,10 +155,9 @@ fn fault_observation_rejects_a_seeded_post_fault_write() {
 }
 
 #[test]
-fn conditional_store_fault_keeps_its_reservation_until_commit() {
+fn an_unconditional_lock_line_put_stays_inside_the_command_footprint() {
     let mut initial = SpuState::new();
     initial.reservation = Some(cellgov_sync::ReservedLine::containing(0));
-    // An opcode the model does not execute faults the command.
     initial.set_reg_word_splat(3, cellgov_ps3_abi::hw::spu::MFC_PUTLLUC);
     let instruction = SpuInstruction::Wrch {
         channel: cellgov_ps3_abi::hw::spu::MFC_CMD,
@@ -166,25 +165,22 @@ fn conditional_store_fault_keeps_its_reservation_until_commit() {
     };
     let mut state = initial.clone();
     let outcome = execute(&instruction, &mut state, UnitId::new(0));
-    let mut observed = SpuObservation::capture(&state, &outcome);
+    let observed = SpuObservation::capture(&state, &outcome);
+    let footprint = SpuAllowedFootprint::for_instruction(&instruction);
 
-    assert!(observed.fault_discarded);
-    assert!(SpuAllowedFootprint::for_instruction(&instruction)
-        .violations(&initial, &observed)
-        .is_empty());
-    assert_eq!(observed.state.reservation, initial.reservation);
+    assert!(!observed.fault_discarded);
+    assert!(footprint.violations(&initial, &observed).is_empty());
+    assert_eq!(observed.state.reservation, None, "the store takes the line");
+    assert_eq!(
+        observed.state.channels.atomic_status,
+        cellgov_ps3_abi::hw::spu::MFC_ATOMIC_STAT_U
+    );
 
-    let mut successful = initial.clone();
-    successful.set_reg_word_splat(3, cellgov_ps3_abi::hw::spu::MFC_PUTLLC);
-    let SpuStepOutcome::Yield { effects, .. } =
-        execute(&instruction, &mut successful, UnitId::new(0))
-    else {
-        panic!("valid conditional store should yield an effect");
-    };
-    observed.effects = effects;
-    assert!(SpuAllowedFootprint::for_instruction(&instruction)
-        .violations(&initial, &observed)
-        .contains(&SpuObservationComponent::Effects));
+    let mut seeded = observed;
+    seeded.state.regs[3][0] ^= 1;
+    assert!(footprint
+        .violations(&initial, &seeded)
+        .contains(&SpuObservationComponent::Registers));
 }
 
 #[test]

@@ -65,7 +65,8 @@ pub enum SpuFault {
         is_write: bool,
     },
     /// A defined MFC command the SPU queue accepts and this model does
-    /// not run.
+    /// not run. The model runs every such command, so no defined opcode
+    /// reaches it.
     ///
     /// The variant carries the whole 32-bit word, class ids included.
     #[error("SPU unsupported MFC command word 0x{0:08x}")]

@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use cellgov_compare::{Observation, ObservedOutcome};
+use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, MFC_ATOMIC_STAT_S, MFC_ATOMIC_STAT_U};
 
 /// What a payload word must be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -233,6 +234,25 @@ const CASES: &[Case] = &[
             ("received1", Exact(0xA4A5_A6A7)),
             ("received2", Exact(0xA8A9_AAAB)),
             ("received3", Exact(0xACAD_AEAF)),
+        ],
+    },
+    Case {
+        name: "spu_lluc_publish",
+        max_steps: 1_000_000,
+        fields: &[
+            ("status", Exact(0)),
+            ("getllar_status", Exact(MFC_ATOMIC_STAT_G)),
+            ("putllc_status", Exact(MFC_ATOMIC_STAT_S)),
+            ("pad", Exact(0)),
+            // The publisher's line holds PUBLISHED (0x77) at every byte.
+            ("line0", Exact(0x7777_7777)),
+            ("line1", Exact(0x7777_7777)),
+            ("line2", Exact(0x7777_7777)),
+            ("line3", Exact(0x7777_7777)),
+            ("putlluc_status", Exact(MFC_ATOMIC_STAT_U)),
+            ("publisher_pad0", Exact(0)),
+            ("publisher_pad1", Exact(0)),
+            ("publisher_pad2", Exact(0)),
         ],
     },
 ];

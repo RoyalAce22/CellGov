@@ -87,8 +87,8 @@ pub(super) fn execute_wrch(
             let outcome = execute_mfc_cmd(val, state, unit_id);
             // A command that did not write MFC_EAH names the high word 0,
             // so the MFC takes EAH back to 0 once a command has used it.
-            // A write that stalls on a full queue used nothing, and so did
-            // a command the model does not run.
+            // A write that stalls on a full queue used nothing, and so would
+            // a command the model does not run; no defined opcode is one.
             // [CBEA p:52 s:7] when EAH is not specified on a command, hardware must set EAH to '0'.
             // [CBEA p:121 s:9.2] footnote 1: EAH is optional and is set to zero if not written.
             if !matches!(
@@ -325,7 +325,9 @@ fn issue_transfer(
     let local =
         ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size)).expect("valid LS range");
     let request = local_store_transfer(direction, local, main, unit_id);
-    // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
+    // [CBE-Handbook p:479 s:18.6.4] a reservation reset by a local SPE action raises no lost event; the page names putllc, putlluc and putqlluc as such actions.
+    // That this command's own store over the reserved line resets the
+    // reservation too is CellGov's choice.
     if direction == DmaDirection::Put {
         if let Some(line) = state.reservation {
             if line.overlaps_range(ea, u64::from(size)) {
@@ -407,6 +409,54 @@ fn issue_ordering_command(
     }
 }
 
+/// Queues a putqlluc: a put of the local-store line at `line_lsa` over
+/// the line that contains `ea`, behind a tag-specific fence.
+///
+/// It reads its line when it completes, as every queued put does, and it
+/// reports no atomic status: its tag group says when it is complete.
+///
+/// [CBEA p:68 s:7.8.4] putqlluc is putlluc placed in the command queue; it creates a tag-specific fence and completes through its tag group.
+/// [CBEA p:131 s:9.4] MFC_RdAtomicStat gives no status for the queued putqlluc.
+fn issue_queued_lock_line(
+    cmd: u32,
+    ea: u64,
+    line_lsa: u32,
+    state: &mut SpuState,
+    unit_id: UnitId,
+) -> SpuStepOutcome {
+    let raw = state.channels.mfc_tag_id;
+    let Some(tag) = u8::try_from(raw).ok().and_then(MfcTagId::new) else {
+        // [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] A set bit above the tag field suspends MFC command queue processing
+        return queue_invalid(cmd, MfcCommandError::ReservedTagBits(raw), state, unit_id);
+    };
+    if let Some(error) = atomic_segment_fault(ea) {
+        return queue_invalid(cmd, error, state, unit_id);
+    }
+    let line = cellgov_sync::ReservedLine::containing(ea);
+    let main = ByteRange::new(GuestAddr::new(line.addr()), RESERVATION_LINE_BYTES)
+        .expect("valid EA range");
+    let local = ByteRange::new(GuestAddr::new(u64::from(line_lsa)), RESERVATION_LINE_BYTES)
+        .expect("valid LS range");
+    // [CBE-Handbook p:479 s:18.6.4] a matching putllc, putlluc or putqlluc resets the SPE's reservation, and raises no lock-line reservation lost event.
+    if state
+        .reservation
+        .is_some_and(|held| held.addr() == line.addr())
+    {
+        state.reservation = None;
+    }
+    let request = local_store_transfer(DmaDirection::Put, local, main, unit_id)
+        .with_tag_id(tag)
+        .with_ordering(MfcOrdering::Fence);
+    state.channels.cmd_queue_free -= 1;
+    SpuStepOutcome::Yield {
+        effects: vec![Effect::DmaEnqueue {
+            request,
+            payload: None,
+        }],
+        reason: YieldReason::DmaSubmitted,
+    }
+}
+
 /// Queues an SL1 storage control command as a tag-specific barrier.
 ///
 /// With `zero`, the command writes zeros over every data block its
@@ -440,7 +490,9 @@ fn issue_storage_control(
     else {
         return queue_invalid(cmd, MfcCommandError::DataSegment { ea }, state, unit_id);
     };
-    // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
+    // [CBE-Handbook p:479 s:18.6.4] a reservation reset by a local SPE action raises no lost event; the page names putllc, putlluc and putqlluc as such actions.
+    // That this command's own store over the reserved line resets the
+    // reservation too is CellGov's choice.
     if let Some(line) = state.reservation {
         if blocks.length() > 0 && line.overlaps_range(start, blocks.length()) {
             state.reservation = None;
@@ -618,7 +670,9 @@ fn queue_list_segment(
         let local = ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size))
             .expect("valid LS range");
 
-        // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
+        // [CBE-Handbook p:479 s:18.6.4] a reservation reset by a local SPE action raises no lost event; the page names putllc, putlluc and putqlluc as such actions.
+        // That this command's own store over the reserved line resets the
+        // reservation too is CellGov's choice.
         if list.direction == DmaDirection::Put {
             if let Some(line) = state.reservation {
                 if line.overlaps_range(params.ea(), u64::from(size)) {
@@ -781,6 +835,8 @@ pub(crate) fn mfc_barrier_kind(cmd: u32) -> Option<BarrierKind> {
     Some(match MfcCmd::new(cmd).opcode() {
         spu::MFC_PUTF | spu::MFC_PUTRF | spu::MFC_GETF | spu::MFC_SNDSIGF => BarrierKind::MfcFence,
         spu::MFC_PUTLF | spu::MFC_PUTRLF | spu::MFC_GETLF => BarrierKind::MfcFence,
+        // [CBEA p:68 s:7.8.4] putqlluc creates a tag-specific fence though it has no f modifier.
+        spu::MFC_PUTQLLUC => BarrierKind::MfcFence,
         spu::MFC_PUTB | spu::MFC_PUTRB | spu::MFC_GETB | spu::MFC_SNDSIGB => {
             BarrierKind::MfcTagBarrier
         }
@@ -931,8 +987,40 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 SpuStepOutcome::Continue
             }
         }
-        // A defined command the SPU queue accepts and this model does not
-        // run. The fault marks a gap in the model.
+        // [CBEA p:67 s:7.8.3] putlluc stores a cache line from local store whether or not a reservation exists.
+        // [CBEA p:68 s:7.8.3] it is issued immediately, is not queued behind other commands, and has no tag.
+        // The store covers the line that contains the effective address,
+        // as getllar's read does, and the status channel reports U.
+        spu::MFC_PUTLLUC => {
+            if let Some(error) = atomic_segment_fault(ea) {
+                return queue_invalid(cmd, error, state, unit_id);
+            }
+            let line = cellgov_sync::ReservedLine::containing(ea);
+            let ls_bytes = state.read_ls_wrapped(line_lsa, RESERVATION_LINE_BYTES as u32);
+            // [CBE-Handbook p:479 s:18.6.4] a matching putllc, putlluc or putqlluc resets the SPE's reservation, and raises no lock-line reservation lost event.
+            if state
+                .reservation
+                .is_some_and(|held| held.addr() == line.addr())
+            {
+                state.reservation = None;
+            }
+            let range = ByteRange::new(GuestAddr::new(line.addr()), RESERVATION_LINE_BYTES)
+                .expect("valid EA range");
+            state.channels.atomic_status = spu::MFC_ATOMIC_STAT_U;
+            state.channels.atomic_status_ready = true;
+            SpuStepOutcome::Yield {
+                effects: vec![Effect::shared_write(
+                    range,
+                    WritePayload::new(ls_bytes),
+                    unit_id,
+                    GuestTicks::ZERO,
+                )],
+                reason: YieldReason::DmaSubmitted,
+            }
+        }
+        spu::MFC_PUTQLLUC => issue_queued_lock_line(cmd, ea, line_lsa, state, unit_id),
+        // Every command the SPU queue accepts has an arm above, so no
+        // opcode reaches this one. The fault would mark a gap in the model.
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedMfcCommand(cmd)),
     }
 }

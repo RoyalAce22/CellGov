@@ -114,6 +114,10 @@ pub const MFC_RD_ATOMIC_STAT: u8 = 27;
 ///
 /// [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] bit 29 of the 32-bit status word is G, set when the get lock-line and reserve command completed.
 pub const MFC_ATOMIC_STAT_G: u32 = 1 << (31 - 29);
+/// `MFC_RdAtomicStat` U bit: a `putlluc` completed.
+///
+/// [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] bit 30 of the status word is U, set when the put lock-line unconditional command completed.
+pub const MFC_ATOMIC_STAT_U: u32 = 1 << (31 - 30);
 /// `MFC_RdAtomicStat` S bit: a `putllc` lost its reservation. The bit
 /// is clear when the conditional store succeeded.
 ///
@@ -385,6 +389,10 @@ pub const MFC_PUTLLC: u32 = 0xB4;
 ///
 /// [CBEA p:308 s:Appendix D Table D-5] putlluc opcode x'00B0'.
 pub const MFC_PUTLLUC: u32 = 0xB0;
+/// Atomic: queued put unconditional (putqlluc).
+///
+/// [CBEA p:308 s:Appendix D Table D-5] putqlluc opcode x'00B8'.
+pub const MFC_PUTQLLUC: u32 = 0xB8;
 
 /// One word written to [`MFC_CMD`]: an opcode and two class ids.
 ///

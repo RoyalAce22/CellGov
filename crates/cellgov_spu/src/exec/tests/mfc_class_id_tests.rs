@@ -6,9 +6,8 @@
 //! that carries a class id, which is what the channel exists to let a
 //! guest set.
 
-use crate::fault_codes::FAULT_UNSUPPORTED_MFC_CMD;
 use crate::SpuExecutionUnit;
-use cellgov_effects::{Effect, FaultKind};
+use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
 use cellgov_mem::GuestMemory;
@@ -156,25 +155,23 @@ fn a_put_carrying_no_class_id_is_unchanged() {
     assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
 }
 
-/// The case asserts the whole fault code. Every other way this program
-/// can fail -- a mis-encoded `wrch`, a word that reached some other
-/// channel -- also ends in a fault. Only the code separates those from
-/// this refusal. The detail half carries the opcode; the class ids sit
-/// above it.
+/// The refusal names the opcode alone; the class ids sit above it.
 #[test]
-fn an_unmodelled_opcode_is_refused_whatever_its_class_ids() {
-    let unmodelled: u32 = 0xB0;
-    let word = TCLASS << 24 | RCLASS << 16 | unmodelled;
+fn an_illegal_opcode_is_refused_whatever_its_class_ids() {
+    let illegal: u32 = 0xD8;
+    let word = TCLASS << 24 | RCLASS << 16 | illegal;
     let mut unit = unit_issuing(word);
     let (result, effects) = run_once(&mut unit);
 
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(FAULT_UNSUPPORTED_MFC_CMD | unmodelled)),
-        "the MFC refusal, carrying the opcode and not the class ids",
+    assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::MfcInvalidCommand { command, .. }]
+                if command.error == cellgov_dma::MfcCommandError::IllegalOpcode(illegal)
+        ),
+        "{effects:?}"
     );
-    assert!(effects.is_empty(), "and nothing was enqueued: {effects:?}");
 }
 
 /// Marks the last 16 bytes of local store 0xAA, and returns the `len`

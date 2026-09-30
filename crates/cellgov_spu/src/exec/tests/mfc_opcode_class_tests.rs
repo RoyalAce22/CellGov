@@ -1,5 +1,5 @@
 //! An opcode the SPU queue does not accept queues an invalid command
-//! that names why, and a defined command the model does not run faults.
+//! that names why, and every command it accepts runs.
 
 use crate::fault_codes::FAULT_UNSUPPORTED_MFC_CMD;
 use crate::SpuExecutionUnit;
@@ -9,6 +9,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, YieldReason};
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::hw::spu::{MFC_CMD, MFC_SPU_QUEUE_DEPTH};
+use cellgov_ps3_abi::hw::spu_mfc::{MfcQueues, MFC_COMMANDS};
 use cellgov_time::Budget;
 
 const UNIT: u64 = 7;
@@ -103,14 +104,17 @@ fn class_ids_do_not_change_the_opcode_class() {
     );
 }
 
-/// Opcode 0xB0 is putlluc, which the SPU queue accepts.
 #[test]
-fn a_defined_command_the_model_does_not_run_faults() {
-    let (_, result, effects) = issue(0x00B0);
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(FAULT_UNSUPPORTED_MFC_CMD | 0xB0))
-    );
-    assert!(effects.is_empty(), "{effects:?}");
+fn every_command_the_spu_queue_accepts_runs() {
+    let gaps: Vec<_> = MFC_COMMANDS
+        .iter()
+        .filter(|def| def.queues != MfcQueues::ProxyOnly)
+        .filter(|def| {
+            let opcode = u32::from(def.opcode);
+            let (_, result, _) = issue(opcode);
+            result.fault == Some(FaultKind::Guest(FAULT_UNSUPPORTED_MFC_CMD | opcode))
+        })
+        .map(|def| def.mnemonic)
+        .collect();
+    assert!(gaps.is_empty(), "commands the model does not run: {gaps:?}");
 }

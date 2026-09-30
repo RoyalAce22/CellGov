@@ -641,7 +641,8 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
         &[
             EffectKind::DmaEnqueue,
             EffectKind::ConditionalStore,
-            EffectKind::MfcInvalidCommand
+            EffectKind::MfcInvalidCommand,
+            EffectKind::SharedWriteIntent
         ]
     );
     assert_eq!(
