@@ -9,8 +9,8 @@
 use cellgov_event::UnitId;
 use cellgov_spu::exec::{execute, SpuStepOutcome};
 use cellgov_spu::fuzz::{
-    sequence_relations, SpuSequencePartner, SpuSequenceRelation, SpuSequenceRelationId,
-    SpuSymbolicWord,
+    sequence_relations, SpuFusedFlow, SpuSequencePartner, SpuSequencePin, SpuSequenceRelation,
+    SpuSequenceRelationId, SpuSymbolicWord, SEQUENCE_PROGRAM_BASE, SEQUENCE_TAKEN_LANDING,
 };
 use cellgov_spu::instruction::SpuInstructionKind;
 use cellgov_spu::observation::{SpuObservation, SpuObservationComponent};
@@ -28,9 +28,16 @@ use crate::CAMPAIGN_VERSION;
 
 const UNIT: UnitId = UnitId::new(0);
 
-/// `stop 0x3FFE`: the terminator both sides of a relation stop at.
+/// `stop 0x3FFE`: the terminator both sides of a relation stop at when the
+/// sequence takes no branch.
 /// [SPU-ISA p:238 s:10 Stop] opcode 0x000 with the signal type in bits 18:31.
 const TERMINATOR: u32 = 0x0000_3FFE;
+
+/// `stop 0x3FFD`: the terminator at the taken landing.
+const TAKEN_TERMINATOR: u32 = 0x0000_3FFD;
+
+/// Draws one case makes of a row before it leaves the row unexercised.
+const PRECONDITION_DRAWS: u32 = 4;
 
 /// Lane values the instantiation draws beside random words: zero, one, the
 /// signed extremes, all ones and a halfword boundary.
@@ -103,6 +110,24 @@ pub(crate) fn instantiate(
         let value = start.regs[usize::from(assignment[1])];
         start.set_reg(usize::from(assignment[2]), value);
     }
+    // An all-zero register, so a test of a whole register can hold.
+    if rng.chance(1, 8)? {
+        let register = assignment[rng.below(count as u64)? as usize];
+        start.set_reg(usize::from(register), [0; 16]);
+    }
+    for &(symbolic, pin) in relation.pins {
+        let register = usize::from(assignment[usize::from(symbolic)]);
+        let mut value = start.regs[register];
+        match pin {
+            SpuSequencePin::TakenLanding => {
+                value[0..4].copy_from_slice(&SEQUENCE_TAKEN_LANDING.to_be_bytes());
+            }
+        }
+        start.set_reg(register, value);
+    }
+    if relation.local_store {
+        rng.fill(&mut start.ls);
+    }
     Ok(RelationInstance { assignment, start })
 }
 
@@ -113,8 +138,19 @@ pub(crate) fn compare_relation(
     instance: &RelationInstance,
     case_index: u64,
 ) -> Result<RelationVerdict, FuzzError> {
-    compare_under(relation, instance, case_index, relation.dead, &[])
+    compare_under(
+        relation,
+        instance,
+        case_index,
+        relation.dead,
+        &[],
+        &|_, _| {},
+    )
 }
+
+/// A change a test makes to the partner's observation before the
+/// comparison: a seeded partner defect.
+pub(crate) type PartnerHook<'a> = &'a dyn Fn(&mut SpuObservation, &RelationInstance);
 
 /// Runs both sides with `tail` after each and compares them, leaving out
 /// the registers the dead set `dead` excludes.
@@ -128,6 +164,7 @@ fn compare_under(
     case_index: u64,
     dead: &[u8],
     tail: &[u32],
+    hook: PartnerHook<'_>,
 ) -> Result<RelationVerdict, FuzzError> {
     if let Some(precondition) = relation.precondition {
         if !precondition(&instance.start, &instance.assignment) {
@@ -136,19 +173,20 @@ fn compare_under(
     }
     let mut words = encode(relation.id, relation.sequence, &instance.assignment)?;
     words.extend_from_slice(tail);
-    let original = run_side(relation.id, &words, &instance.start)?;
+    let original = run_side(relation.id, &words, &instance.start, false)?;
     let mut partner = match relation.partner {
         SpuSequencePartner::Guest(partner) => {
             let mut partner = encode(relation.id, partner, &instance.assignment)?;
             partner.extend_from_slice(tail);
-            run_side(relation.id, &partner, &instance.start)?
+            run_side(relation.id, &partner, &instance.start, false)?
         }
         SpuSequencePartner::Fused(fused) => {
             let mut state = instance.start.clone();
-            (fused.apply)(&mut state, &instance.assignment);
-            run_side(relation.id, tail, &state)?
+            let flow = (fused.apply)(&mut state, &instance.assignment);
+            run_side(relation.id, tail, &state, flow == SpuFusedFlow::Taken)?
         }
     };
+    hook(&mut partner, instance);
     // [Mullen2016 p:449 s:1] A dead register may hold another value; the
     // Registers comparison leaves it out, and LS, channels, PC and effects
     // stay compared.
@@ -194,7 +232,7 @@ pub(crate) fn unneeded_dead_registers(
         for index in 0..draws {
             let mut rng = Rng::for_case(CAMPAIGN_VERSION, seed, index);
             let instance = instantiate(relation, &mut rng)?;
-            let verdict = compare_under(relation, &instance, index, &reduced, &[])?;
+            let verdict = compare_under(relation, &instance, index, &reduced, &[], &|_, _| {})?;
             if matches!(verdict, RelationVerdict::Diverged(_)) {
                 needed = true;
                 break;
@@ -235,12 +273,13 @@ pub(crate) fn reader_tail_reads(
             rt: target,
             ra: source,
             rb: 0,
+            rc: 0,
             imm: 0,
         };
         tail.extend(encode(relation.id, &[read], &assignment)?);
         reads.push((dead, scratch));
     }
-    let verdict = compare_under(relation, instance, 0, relation.dead, &tail)?;
+    let verdict = compare_under(relation, instance, 0, relation.dead, &tail, &|_, _| {})?;
     let RelationVerdict::Diverged(divergence) = verdict else {
         return Ok(Vec::new());
     };
@@ -335,10 +374,22 @@ pub(super) fn run_relation_check(
     if relations.is_empty() {
         return Ok(CrossReferenceAsymmetry::None);
     }
-    let relation = &relations[rng.below(relations.len() as u64)? as usize];
+    // Every row takes its turn, so a bounded campaign reaches each of them.
+    let relation = &relations[(case_index % relations.len() as u64) as usize];
     let check = CheckIdentity::SpuSequenceRelation(relation.id);
-    let instance = instantiate(relation, rng)?;
-    match compare_relation(relation, &instance, case_index)? {
+    // A draw outside the precondition counts as inapplicable and draws
+    // again, a bounded number of times.
+    let mut attempt = 0;
+    let (instance, verdict) = loop {
+        let instance = instantiate(relation, rng)?;
+        let verdict = compare_relation(relation, &instance, case_index)?;
+        attempt += 1;
+        if verdict != RelationVerdict::Inapplicable || attempt == PRECONDITION_DRAWS {
+            break (instance, verdict);
+        }
+        report.metamorphic_skipped(check)?;
+    };
+    match verdict {
         RelationVerdict::Inapplicable => {
             report.metamorphic_skipped(check)?;
             Ok(CrossReferenceAsymmetry::None)
@@ -401,25 +452,36 @@ pub(crate) fn encode(
         .ok_or_else(|| InvariantError::UnencodableSequenceRelation { relation }.into())
 }
 
-/// Runs `words` and the terminator from LS address 0 of `start`.
+/// Runs `words` and the terminator from [`SEQUENCE_PROGRAM_BASE`] of
+/// `start`, or from the taken landing when `taken`.
 ///
-/// The run then restores the program's LS words and takes PC relative to
-/// the terminator, so two programs of different lengths that stop at it
-/// compare equal there.
+/// The run then restores the program's LS words and the landing's, and
+/// takes PC relative to the fall-through terminator, so two programs of
+/// different lengths that stop at it compare equal there; a stop at the
+/// taken landing keeps its absolute PC.
 fn run_side(
     relation: SpuSequenceRelationId,
     words: &[u32],
     start: &SpuState,
+    taken: bool,
 ) -> Result<SpuObservation, FuzzError> {
     let mut state = start.clone();
     let program: Vec<u32> = words.iter().copied().chain([TERMINATOR]).collect();
-    let end = program.len() * 4;
+    let base = SEQUENCE_PROGRAM_BASE as usize;
+    let landing = SEQUENCE_TAKEN_LANDING as usize;
+    let end = base + program.len() * 4;
     for (slot, word) in program.iter().enumerate() {
-        state.ls[slot * 4..slot * 4 + 4].copy_from_slice(&word.to_be_bytes());
+        let at = base + slot * 4;
+        state.ls[at..at + 4].copy_from_slice(&word.to_be_bytes());
     }
-    state.pc = 0;
+    state.ls[landing..landing + 4].copy_from_slice(&TAKEN_TERMINATOR.to_be_bytes());
+    state.pc = if taken {
+        SEQUENCE_TAKEN_LANDING
+    } else {
+        SEQUENCE_PROGRAM_BASE
+    };
     let mut outcome = SpuStepOutcome::Continue;
-    for _ in 0..program.len() {
+    for _ in 0..=program.len() {
         let Some(raw) = state.fetch() else {
             break;
         };
@@ -441,8 +503,13 @@ fn run_side(
             }
         }
     }
-    state.ls[..end].copy_from_slice(&start.ls[..end]);
-    state.pc = state.pc.wrapping_sub((words.len() * 4) as u32);
+    state.ls[base..end].copy_from_slice(&start.ls[base..end]);
+    state.ls[landing..landing + 4].copy_from_slice(&start.ls[landing..landing + 4]);
+    if state.pc != SEQUENCE_TAKEN_LANDING + 4 {
+        state.pc = state
+            .pc
+            .wrapping_sub(SEQUENCE_PROGRAM_BASE + (words.len() * 4) as u32);
+    }
     Ok(SpuObservation::capture(&state, &outcome))
 }
 

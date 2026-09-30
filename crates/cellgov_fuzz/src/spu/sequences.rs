@@ -209,6 +209,9 @@ fn run_sequences_inner(
                 .flat_map(outcome_effects)
                 .map(Effect::kind),
         )?;
+        // The relation check is independent of the generated program, so
+        // every case runs it and every row gets its turn.
+        let relation_asymmetry = run_relation_check(report, &mut rng, iteration)?;
         if assessment.eligibility != CaseEligibility::Eligible {
             report.observe_case(
                 iteration,
@@ -335,7 +338,7 @@ fn run_sequences_inner(
                 iteration,
             )?;
         }
-        asymmetry = asymmetry.max(run_relation_check(report, &mut rng, iteration)?);
+        asymmetry = asymmetry.max(relation_asymmetry);
         report.observe_case(
             iteration,
             spu_observation(
