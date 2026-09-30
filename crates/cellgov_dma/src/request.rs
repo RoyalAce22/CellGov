@@ -60,8 +60,8 @@ impl DmaRequest {
         })
     }
 
-    /// Attach the MFC tag-id the SPU issued under. Completion publishes
-    /// [`MfcTagId::status_bit`] to the issuer's tag-status channel.
+    /// Attach the MFC tag-id the SPU issued under. The request holds that
+    /// tag group outstanding until it completes.
     #[inline]
     pub const fn with_tag_id(mut self, tag_id: MfcTagId) -> Self {
         self.tag_id = Some(tag_id);

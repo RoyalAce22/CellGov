@@ -1,8 +1,8 @@
-//! A request cannot carry a tag id the completion cannot publish.
+//! A request cannot carry a tag id that names no tag group.
 //!
-//! The tag-status word is 32 bits, one per tag group, so a completion
-//! publishes `1 << tag_id`. A tagged request carries the bound with it,
-//! so the completion path shifts without a guard of its own.
+//! The tag-status word is 32 bits, one per tag group. A tagged request
+//! carries the bound with it, so a reader of its group needs no guard of
+//! its own.
 
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
@@ -42,12 +42,11 @@ fn a_tag_id_past_the_architected_range_is_refused() {
     assert_eq!(MfcTagId::new(u8::MAX), None, "nor does any wider value");
 }
 
-/// Every accepted tag id publishes a distinct bit, and no shift
-/// overflows.
+/// Every accepted tag id has a distinct bit, and no shift overflows.
 ///
-/// This is the property the type exists for: the completion path shifts
-/// by `raw()` without a guard of its own, so the whole accepted range
-/// has to be shiftable.
+/// This is the property the type exists for: the readers that build a
+/// unit's outstanding-tag set shift by the id without a guard of their
+/// own, so the whole accepted range has to be shiftable.
 #[test]
 fn every_accepted_tag_id_has_its_own_status_bit() {
     let mut seen = 0u32;

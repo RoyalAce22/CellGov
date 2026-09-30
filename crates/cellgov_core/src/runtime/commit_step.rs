@@ -237,15 +237,16 @@ impl Runtime {
         // Park before firing completions: fire_dma_completions sets the
         // wake override (Runnable) for every issuer whose completion
         // just landed and that is neither Finished nor Faulted, which
-        // overwrites this Blocked override. A tag bit rides along only
-        // where the request carries a tag, and is no part of the wake.
+        // overwrites this Blocked override. The wake does not depend on
+        // the tag: the unit reads its tag groups from the queue at its
+        // next step.
         // Reverse order would leave the SPU Blocked even when its wake
         // just fired.
         //
         // Only a batch that applied leaves a completion to wake the
         // park. One batch can hold both a DmaEnqueue and the tag-status
         // read that waits on it. A refusal discards the transfer the
-        // unit parks on, so nothing publishes the tag bit it waits for.
+        // unit parks on, so no completion fires to wake the park.
         // A refused enqueue marks its issuer Faulted, which covers that
         // shape. This guard covers the other one: the enqueue resolved,
         // and a later effect's refusal discarded it.

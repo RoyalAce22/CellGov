@@ -564,14 +564,14 @@ fn dma_wait_parks_spu_blocked_and_completion_wakes_it() {
     assert_eq!(
         blocked_a,
         UnitStatus::Blocked,
-        "SPU must be Blocked while DmaWait yields and the tag bit is unset"
+        "SPU must be Blocked while DmaWait yields and its tag group is outstanding"
     );
     assert_eq!(
         final_a,
         UnitStatus::Finished,
         "the wake must let the SPU resume past the tag poll and reach Finished -- \
-         if this fails with the SPU still Blocked, the completion path published \
-         the tag bit but did NOT transition Blocked -> Runnable"
+         if this fails with the SPU still Blocked, the completion path landed \
+         the transfer but did not move Blocked to Runnable"
     );
     assert_eq!(blocked_a, blocked_b, "Blocked observation deterministic");
     assert_eq!(final_a, final_b, "final status deterministic");
@@ -711,15 +711,14 @@ fn dma_enqueue_rejection_faults_issuer_instead_of_stalling() {
         status_a,
         Some(UnitStatus::Faulted),
         "the SPU issuer must be Faulted after pre-validate rejection -- \
-         without this status mutation, the SPU rolls into a tag-poll \
-         DmaWait that can never wake, and the runtime hangs at AllBlocked"
+         without the mark the unit runs again and reads its never-queued \
+         transfer's tag group complete"
     );
     assert_eq!(
         terminal_a,
         StepError::NoRunnableUnit,
         "with the issuer Faulted, the runtime terminates at NoRunnableUnit \
-         on the next step -- NOT AllBlocked. AllBlocked would mean the \
-         status mutation did not fire and the SPU stalled."
+         on the next step, with no unit left to run"
     );
     assert_eq!(err_a, err_b, "rejection shape deterministic");
     assert_eq!(status_a, status_b, "issuer status deterministic");

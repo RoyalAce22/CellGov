@@ -76,8 +76,8 @@ pub enum SpuFault {
     /// An MFC command whose staged tag id is outside the architected
     /// range.
     ///
-    /// The completion path publishes `1 << tag_id` into a 32-bit
-    /// tag-status word, so a value past the range has no bit to set.
+    /// The tag-status word holds one bit per tag group, so a value past
+    /// the range names no group.
     #[error("SPU MFC command tag id {0} is outside 0..31")]
     TagIdOutOfRange(u32),
     /// A channel access that stalls the SPU, on a channel whose stall

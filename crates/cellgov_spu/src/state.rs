@@ -5,6 +5,7 @@ use cellgov_sync::ReservedLine;
 
 use crate::stop::SpuStop;
 
+use cellgov_ps3_abi::hw::spu::MfcTagId;
 pub use cellgov_ps3_abi::hw::spu::{SPU_LSLR_FULL, SPU_LS_SIZE, SPU_REG_COUNT};
 
 /// Full SPU architectural state.
@@ -81,14 +82,15 @@ pub struct SpuChannelSnapshot {
     pub mfc_tag_id: u32,
     /// Mask for tag-status queries.
     pub tag_mask: u32,
-    /// Completed DMA tags.
+    /// Tag-status word as the last step entry built it: a set bit means
+    /// that group had no outstanding transfer then. A new context holds 0.
     pub tag_status: u32,
     /// Status of the last atomic command.
     pub atomic_status: u32,
     /// Destination register for a pending mailbox read.
     pub pending_mbox_rt: Option<u8>,
     /// Pending MFC GET request.
-    pub pending_get: Option<(u64, u32, u32, u8)>,
+    pub pending_get: Option<(u64, u32, u32, MfcTagId)>,
     /// A tag-status update request is outstanding.
     pub tag_update_pending: bool,
     /// An atomic command's status is waiting to be read.
@@ -362,7 +364,9 @@ pub struct ChannelState {
     /// Tag mask written by mfc_write_tag_mask.
     // [CBEA p:111 s:9] MFC_WrTagMask channel x'16': tag-group query mask.
     pub tag_mask: u32,
-    /// Tag completion status bits, set on DMA completion.
+    /// Tag groups with no outstanding transfer, one bit per group,
+    /// rebuilt at the start of each `run_until_yield`. A new context
+    /// holds 0 until its first step.
     // [CBEA p:111 s:9] MFC_RdTagStat channel x'18': tag-group status bits.
     pub tag_status: u32,
     /// Atomic operation status set after getllar/putllc.
@@ -372,10 +376,10 @@ pub struct ChannelState {
     /// by `run_until_yield` on message delivery.
     // [CBEA p:111 s:9] SPU_RdInMbox channel x'1D': PPE-to-SPU mailbox read.
     pub pending_mbox_rt: Option<u8>,
-    /// Pending DMA Get (ea, lsa, size, tag_id); serviced at the start of
-    /// the next `run_until_yield` from the committed memory snapshot, with
-    /// the tag bit published to `tag_status` after the copy lands.
-    pub pending_get: Option<(u64, u32, u32, u8)>,
+    /// Pending DMA Get (ea, lsa, size, tag); the next `run_until_yield`
+    /// copies it at its start from the committed memory snapshot. Its
+    /// tag group reads outstanding in `tag_status` until the copy lands.
+    pub pending_get: Option<(u64, u32, u32, MfcTagId)>,
     /// A tag-status update request is outstanding, so `MFC_RdTagStat`
     /// counts 1 once the request's condition holds. A read clears it.
     // [CBEA p:128 s:9.3.6] the MFC_RdTagStat count starts at 0 and turns 1 when the requested tag status is available.

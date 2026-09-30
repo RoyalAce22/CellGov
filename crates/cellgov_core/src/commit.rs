@@ -204,8 +204,8 @@ pub enum BlockReason {
     /// `WaitOnEvent` effect.
     WaitOnEvent,
     /// SPU `MFC_RD_TAG_STAT` yielded with the masked tags not yet
-    /// complete; runtime parks the unit until a DMA completion
-    /// publishes the missing tag bit and wakes the issuer.
+    /// complete; runtime parks the unit until a DMA completion takes
+    /// the missing transfer off the queue and wakes the issuer.
     DmaWait,
 }
 
@@ -406,10 +406,11 @@ impl CommitPipeline {
                         // see the doc on `CommitContext::dma_memory`.
                         let dst_mem: &GuestMemory = ctx.dma_memory.unwrap_or(&*ctx.memory);
                         if let Err(err) = dst_mem.validate_write(dst, dst.length() as usize) {
-                            // A Faulted issuer cannot poll
-                            // `MFC_RD_TAG_STAT` for a tag bit that never
-                            // arrives and warp to an empty queue
-                            // (`StepError::AllBlocked`).
+                            // Without the mark the issuer runs again and
+                            // `MFC_RD_TAG_STAT` reads its tag group
+                            // complete: the refused transfer never entered
+                            // the DMA queue, so a transfer that never ran
+                            // would read as done.
                             ctx.units
                                 .set_status_override(request.issuer(), UnitStatus::Faulted);
                             return Err(match err {

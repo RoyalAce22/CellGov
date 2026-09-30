@@ -96,7 +96,7 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             tag_status: *tag_status,
             atomic_status: *atomic_status,
             pending_mbox_rt: *pending_mbox_rt,
-            pending_get: *pending_get,
+            pending_get: pending_get.map(|(ea, lsa, size, tag)| (ea, lsa, size, tag.raw())),
             tag_update_pending: *tag_update_pending,
             atomic_status_ready: *atomic_status_ready,
             in_mbox_count: *in_mbox_count,

@@ -728,7 +728,12 @@ fn channel_snapshots_convert_field_by_field() {
     state.channels.tag_status = 7;
     state.channels.atomic_status = 8;
     state.channels.pending_mbox_rt = Some(9);
-    state.channels.pending_get = Some((10, 11, 12, 13));
+    state.channels.pending_get = Some((
+        10,
+        11,
+        12,
+        cellgov_ps3_abi::hw::spu::MfcTagId::new(13).expect("13 is a tag group"),
+    ));
     state.channels.tag_update_pending = true;
     state.channels.atomic_status_ready = true;
     state.channels.in_mbox_count = 14;
@@ -1110,7 +1115,15 @@ fn replay_places_words_at_a_nonzero_pc_and_applies_initial_overrides() {
         Some(ReservedLine::containing(0x80))
     );
     assert_eq!(replay.state.channels.mfc_lsa, 1);
-    assert_eq!(replay.state.channels.pending_get, Some((10, 11, 12, 13)));
+    assert_eq!(
+        replay.state.channels.pending_get,
+        Some((
+            10,
+            11,
+            12,
+            cellgov_ps3_abi::hw::spu::MfcTagId::new(13).expect("13 is a tag group")
+        ))
+    );
 }
 
 #[test]

@@ -17,7 +17,7 @@ use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, ProblemStateError,
     RestartError, SignalNotifier, StopRegisters, UnitStatus, YieldReason,
 };
-use cellgov_ps3_abi::hw::spu::{MfcTagId, MFC_ATOMIC_STAT_G, SPU_STATUS_R};
+use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, SPU_STATUS_R};
 use cellgov_ps3_abi::hw::spu_isa;
 use cellgov_time::{Budget, InstructionCost};
 
@@ -58,8 +58,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             .state
             .channels
             .pending_get
-            .and_then(|(_, _, _, tag_id)| MfcTagId::new(tag_id))
-            .map_or(0, MfcTagId::status_bit);
+            .map_or(0, |(_, _, _, tag)| tag.status_bit());
         self.state.channels.tag_status = !(ctx.outstanding_dma_tags() | parked_get_group);
         if let Some((ea, lsa, size, tag_id)) = self.state.channels.pending_get.take() {
             // `ea` comes from MFC_EAH and MFC_EAL, so the guest can name
@@ -78,9 +77,10 @@ impl ExecutionUnit for SpuExecutionUnit {
                 // transfer finished, so a refused copy faults instead of
                 // publishing it.
                 let (fault, address) = match refusal {
-                    CopyRefusal::Unresolved => {
-                        (guest_fault(FAULT_MFC_GET_UNRESOLVED, u32::from(tag_id)), ea)
-                    }
+                    CopyRefusal::Unresolved => (
+                        guest_fault(FAULT_MFC_GET_UNRESOLVED, u32::from(tag_id.raw())),
+                        ea,
+                    ),
                     CopyRefusal::LocalStoreEscapes => {
                         (guest_fault(FAULT_LS_OUT_OF_RANGE, lsa), u64::from(lsa))
                     }

@@ -392,11 +392,8 @@ fn run_spu_fixed_value_binary() {
             YieldReason::DmaSubmitted => continue,
             YieldReason::BudgetExhausted => continue,
             YieldReason::DmaWait => {
-                // Direct-loop test has no Runtime / DMA queue; simulate
-                // the completion publish by ORing the issued tag bit.
-                // The yield must be observed first.
-                let tag_id = unit.state().channels.mfc_tag_id as u8;
-                unit.state_mut().channels.tag_status |= 1u32 << tag_id;
+                // Direct-loop test has no DMA queue, so at the next step
+                // entry every tag group reads complete.
                 continue;
             }
             YieldReason::Fault => {
@@ -883,11 +880,8 @@ fn dma_completion_payloads_are_correct() {
             YieldReason::Finished => break,
             YieldReason::DmaSubmitted | YieldReason::BudgetExhausted => continue,
             YieldReason::DmaWait => {
-                // Direct-loop test has no Runtime / DMA queue; simulate
-                // the completion publish by ORing the issued tag bit.
-                // The yield must be observed first.
-                let tag_id = unit.state().channels.mfc_tag_id as u8;
-                unit.state_mut().channels.tag_status |= 1u32 << tag_id;
+                // Direct-loop test has no DMA queue, so at the next step
+                // entry every tag group reads complete.
                 continue;
             }
             other => panic!("unexpected: {:?}", other),

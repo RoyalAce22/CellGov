@@ -3,8 +3,8 @@
 //! One batch can carry both a `DmaEnqueue` and the tag-status read
 //! that waits on it. The unit a refused enqueue marks `Faulted` is then
 //! the same unit the `DmaWait` park reaches. The mark has to win: a
-//! refused enqueue queues no completion, so nothing publishes the tag
-//! bit a parked issuer waits for.
+//! refused enqueue queues no completion, so nothing wakes a parked
+//! issuer.
 
 use cellgov_dma::{DmaDirection, DmaRequest};
 use cellgov_effects::Effect;
@@ -114,7 +114,7 @@ fn a_refused_enqueue_leaves_its_waiting_issuer_faulted() {
         rt.registry().effective_status(unit),
         Some(UnitStatus::Faulted),
         "the refusal's mark has to outlive the park, or the issuer waits \
-         on a tag bit no completion will publish",
+         on a completion the refusal never queued",
     );
     assert_eq!(
         rt.step().expect_err("nothing can run"),

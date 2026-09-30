@@ -8,9 +8,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::hw::spu;
-use cellgov_ps3_abi::hw::spu::{
-    ChannelDirection, MfcCmd, MfcTagId, MFC_ATOMIC_STAT_S, MFC_MAX_TAG_ID,
-};
+use cellgov_ps3_abi::hw::spu::{ChannelDirection, MfcCmd, MfcTagId, MFC_ATOMIC_STAT_S};
 use cellgov_sync::RESERVATION_LINE_BYTES;
 use cellgov_time::GuestTicks;
 
@@ -220,13 +218,15 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
 
 fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     // [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] A set bit above the tag field suspends MFC command queue processing, so no command naming that tag is processed.
-    // The model has no suspended queue to hold the command in, and
-    // carrying it would reach `1 << tag_id` on the completion path,
-    // where a value past 31 has no bit to set. The command is refused
-    // by name instead.
-    if state.channels.mfc_tag_id > MFC_MAX_TAG_ID {
+    // The model has no suspended queue to hold the command in, and a
+    // value past 31 names no group in the tag-status word. The command
+    // is refused by name instead.
+    let Some(tag) = u8::try_from(state.channels.mfc_tag_id)
+        .ok()
+        .and_then(MfcTagId::new)
+    else {
         return SpuStepOutcome::Fault(SpuFault::TagIdOutOfRange(state.channels.mfc_tag_id));
-    }
+    };
     let word = MfcCmd::new(cmd);
     // [CBEA p:113 s:9.1.1 MFC Command Opcode Channel] an invalid command suspends queue processing and raises an invalid-command interrupt, and the leading bit of the command halfword marks the opcode reserved.
     // The reserved bit outranks the low byte, so this check runs ahead
@@ -267,13 +267,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             let dst = ByteRange::new(GuestAddr::new(ea), size as u64).expect("valid EA range");
             let request = DmaRequest::new(DmaDirection::Put, src, dst, unit_id)
                 .expect("matching sizes")
-                // The gate at the top of this function refused anything
-                // above the architected range, so the staged value is
-                // inside it.
-                .with_tag_id(
-                    MfcTagId::new(state.channels.mfc_tag_id as u8)
-                        .expect("invariant: the tag gate bounds the staged tag id"),
-                );
+                .with_tag_id(tag);
             // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
             if let Some(line) = state.reservation {
                 if line.overlaps_range(ea, size as u64) {
@@ -290,7 +284,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
         }
         // [CBEA p:60 s:7. MFC Commands sub:7.5 Get Commands (Main Storage to Local Storage)] get: copy main-storage bytes into LS.
         spu::MFC_GET => {
-            state.channels.pending_get = Some((ea, lsa, size, state.channels.mfc_tag_id as u8));
+            state.channels.pending_get = Some((ea, lsa, size, tag));
             SpuStepOutcome::Yield {
                 effects: vec![],
                 reason: YieldReason::DmaSubmitted,

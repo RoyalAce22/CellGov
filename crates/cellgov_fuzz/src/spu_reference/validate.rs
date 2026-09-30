@@ -1,5 +1,6 @@
 //! Parsing and validation of an SPU reference artifact, and its initial state.
 
+use cellgov_ps3_abi::hw::spu::MfcTagId;
 use cellgov_spu::state::{SpuState, SPU_LS_SIZE, SPU_REG_COUNT};
 
 use crate::reference::is_lower_hex;
@@ -63,7 +64,17 @@ impl SpuReferenceInput {
             state.channels.tag_status = channels.tag_status;
             state.channels.atomic_status = channels.atomic_status;
             state.channels.pending_mbox_rt = channels.pending_mbox_rt;
-            state.channels.pending_get = channels.pending_get;
+            state.channels.pending_get = match channels.pending_get {
+                None => None,
+                Some((ea, lsa, size, tag)) => Some((
+                    ea,
+                    lsa,
+                    size,
+                    MfcTagId::new(tag).ok_or(SpuReferenceError::Invalid {
+                        field: "initial_state.channels.pending_get",
+                    })?,
+                )),
+            };
             state.channels.tag_update_pending = channels.tag_update_pending;
             state.channels.atomic_status_ready = channels.atomic_status_ready;
             state.channels.in_mbox_count = channels.in_mbox_count;
@@ -157,6 +168,25 @@ impl SpuReferenceArtifact {
                 .is_some_and(|register| register as usize >= SPU_REG_COUNT)
         }) {
             return Err(invalid("expected.channels.pending_mbox_rt"));
+        }
+        let wide_tag = |pending_get: Option<(u64, u32, u32, u8)>| {
+            pending_get.is_some_and(|(_, _, _, tag)| MfcTagId::new(tag).is_none())
+        };
+        if self
+            .initial_state
+            .channels
+            .as_ref()
+            .is_some_and(|channels| wide_tag(channels.pending_get))
+        {
+            return Err(invalid("initial_state.channels.pending_get"));
+        }
+        if self
+            .expected
+            .channels
+            .as_value()
+            .is_some_and(|channels| wide_tag(channels.pending_get))
+        {
+            return Err(invalid("expected.channels.pending_get"));
         }
         if self
             .expected

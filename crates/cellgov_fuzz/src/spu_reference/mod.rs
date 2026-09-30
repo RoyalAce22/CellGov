@@ -11,3 +11,7 @@ pub use validate::*;
 #[cfg(test)]
 #[path = "../tests/spu_reference_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/spu_reference_tag_tests.rs"]
+mod tag_tests;

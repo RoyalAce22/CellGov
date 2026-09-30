@@ -133,7 +133,7 @@ fn the_highest_architected_tag_id_issues_its_command() {
         unit.state()
             .channels
             .pending_get
-            .map(|(_, _, _, tag)| u32::from(tag)),
+            .map(|(_, _, _, tag)| u32::from(tag.raw())),
         Some(LAST_VALID_TAG),
         "and the transfer carries the tag the guest named",
     );
@@ -159,7 +159,7 @@ fn a_tag_id_past_the_architected_range_refuses_its_command() {
     );
     assert!(
         unit.state().channels.pending_get.is_none(),
-        "no transfer was parked, so nothing will shift by the tag",
+        "no transfer was parked with a tag outside the 32 groups",
     );
     assert_eq!(
         unit.state().channels.tag_status,
@@ -170,6 +170,29 @@ fn a_tag_id_past_the_architected_range_refuses_its_command() {
         unit.status(),
         UnitStatus::Faulted,
         "the unit stops rather than carrying a command it cannot report",
+    );
+}
+
+/// A staged value whose low byte is a valid tag id is still refused.
+///
+/// The channel holds 32 bits and a tag id fits in 8. A narrowing that
+/// dropped the high bits would read 0x100 as tag 0 and issue the command.
+#[test]
+fn a_wide_tag_id_whose_low_byte_is_in_range_refuses_its_command() {
+    const LOW_BYTE_ZERO: u32 = 0x100;
+    let mut unit = unit_getting_with_tag(LOW_BYTE_ZERO);
+    let result = run_once(&mut unit);
+
+    assert_eq!(
+        result.fault,
+        Some(FaultKind::Guest(
+            FAULT_MFC_TAG_ID_OUT_OF_RANGE | LOW_BYTE_ZERO
+        )),
+        "the whole staged value is checked, not its low byte",
+    );
+    assert!(
+        unit.state().channels.pending_get.is_none(),
+        "no transfer was parked under tag 0",
     );
 }
 

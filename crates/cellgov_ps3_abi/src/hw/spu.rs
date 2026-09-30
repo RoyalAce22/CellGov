@@ -32,10 +32,9 @@ pub const MFC_CMD: u8 = 21;
 
 /// A tag id inside the architected range.
 ///
-/// The completion path publishes `1 << tag_id` into a 32-bit tag-status
-/// word, so a value this type refuses has no bit to set. Holding the
-/// bound here means [`MfcTagId::status_bit`] cannot overflow, whoever
-/// built the command.
+/// The tag-status word holds one bit per tag group, so a value this type
+/// refuses names no group. Holding the bound here means
+/// [`MfcTagId::status_bit`] cannot overflow, whoever built the command.
 // [CBEA p:128 s:9.3.6 MFC Read Tag-Group Status Channel] the status word reports one bit per tag group, and a group left out of the query mask reads zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MfcTagId(u8);
@@ -53,7 +52,13 @@ impl MfcTagId {
         Some(Self(raw))
     }
 
-    /// The tag-status bit this id publishes.
+    /// The tag id, 0 to 31.
+    #[inline]
+    pub const fn raw(self) -> u8 {
+        self.0
+    }
+
+    /// The bit of this id's group in the tag-status word.
     #[inline]
     pub const fn status_bit(self) -> u32 {
         1u32 << self.0
