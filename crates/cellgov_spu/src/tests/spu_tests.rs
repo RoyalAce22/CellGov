@@ -1449,3 +1449,134 @@ fn spu_fixed_value_matches_rpcs3_baseline() {
         result.cellgov_result
     );
 }
+
+/// The PPU of the spu_lr_event microtest: polls the ready flag, then
+/// stores 0x5A5A5A5A into lock line A once.
+#[derive(Clone)]
+struct LineStorer {
+    id: UnitId,
+    ready: cellgov_mem::ByteRange,
+    line: cellgov_mem::ByteRange,
+    done: bool,
+}
+
+impl ExecutionUnit for LineStorer {
+    type Snapshot = bool;
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+    fn status(&self) -> UnitStatus {
+        if self.done {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<cellgov_effects::Effect>,
+    ) -> cellgov_exec::ExecutionStepResult {
+        let ready = ctx.memory().read_checked(self.ready).unwrap();
+        effects.push(cellgov_effects::Effect::SharedReadIntent {
+            range: self.ready,
+            source: self.id,
+        });
+        if ready.iter().any(|&byte| byte != 0) {
+            effects.push(cellgov_effects::Effect::shared_write(
+                self.line,
+                cellgov_effects::WritePayload::new(vec![0x5A; 4]),
+                self.id,
+                cellgov_time::GuestTicks::ZERO,
+            ));
+            self.done = true;
+        }
+        cellgov_exec::ExecutionStepResult {
+            yield_reason: if self.done {
+                YieldReason::Finished
+            } else {
+                YieldReason::BudgetExhausted
+            },
+            consumed_cost: InstructionCost::new(budget.raw()),
+            local_diagnostics: cellgov_exec::LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+    fn snapshot(&self) -> bool {
+        self.done
+    }
+}
+
+/// [CBEA p:148 s:9.11.1] Lr is set when a snoop external to the MFC resets the reservation, and not for a reservation reset by a local action.
+/// [CBEA p:165 s:9.12.10] with Lr enabled, the event sets the SPU_RdEventStat count to 1.
+#[test]
+#[cfg_attr(
+    not(feature = "spu-microtests"),
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+)]
+fn spu_lr_event_matches_rpcs3_baseline() {
+    let elf_path = std::path::Path::new("../../tests/micro/spu_lr_event/build/spu_main.elf");
+    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/spu_lr_event");
+    let elf_data = microtest_elf(elf_path);
+    // The PPU's block: result, lock line A, lock line B, ready flag.
+    let block: u64 = 0x1_0000;
+    let range = move |offset: u64| {
+        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(block + offset), 4).unwrap()
+    };
+
+    let factory = || {
+        let elf = elf_data.clone();
+        cellgov_testkit::fixtures::ScenarioFixture::builder()
+            .memory_size(0x2_0000)
+            .budget(Budget::new(10_000))
+            .max_steps(10_000)
+            .register(move |rt| {
+                rt.register_unit_with(|id| {
+                    let mut unit = SpuExecutionUnit::new(id);
+                    loader::load_spu_elf(&elf, unit.state_mut()).unwrap();
+                    unit.state_mut().pc = 0x80;
+                    unit.state_mut().set_reg_word_splat(1, 0x3FFF0);
+                    unit.state_mut().set_reg_word_splat(4, block as u32);
+                    unit
+                });
+                rt.register_unit_with(|id| LineStorer {
+                    id,
+                    ready: range(384),
+                    line: range(128),
+                    done: false,
+                });
+            })
+            .build()
+    };
+
+    let region = |name: &str, offset: u64| cellgov_compare::RegionDescriptor {
+        name: name.into(),
+        space: cellgov_compare::AddressSpaceId::BOOT,
+        addr: block + offset,
+        size: 16,
+    };
+    let regions = vec![region("local", 0), region("remote", 16)];
+    let cellgov_obs = cellgov_compare::observe_with_determinism_check(factory, &regions).unwrap();
+    assert_eq!(
+        cellgov_obs.outcome,
+        cellgov_compare::ObservedOutcome::Completed
+    );
+
+    let baselines = vec![
+        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_interpreter.json")).unwrap(),
+        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_llvm.json")).unwrap(),
+    ];
+    let result = cellgov_compare::compare_multi(
+        &baselines,
+        &cellgov_obs,
+        cellgov_compare::CompareMode::Memory,
+    );
+    assert_eq!(
+        result.classification,
+        cellgov_compare::Classification::Match,
+        "spu_lr_event diverges from its recorded baseline: {:?}",
+        result.cellgov_result
+    );
+}

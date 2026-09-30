@@ -1,0 +1,56 @@
+{
+  "outcome": "Completed",
+  "memory_regions": [
+    {
+      "name": "local",
+      "addr": 0,
+      "data": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "remote",
+      "addr": 16,
+      "data": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        90,
+        90,
+        90,
+        90
+      ]
+    }
+  ],
+  "events": [],
+  "state_hashes": null,
+  "metadata": {
+    "runner": "rpcs3-llvm",
+    "steps": null
+  },
+  "tty_log": []
+}

@@ -218,7 +218,8 @@ one of:
 - for an atomic-status read with no status, an immediate atomic
   command of its own, which cannot come while it stalls;
 - for an event-status read with no enabled event, any of the events'
-  producers: a mailbox delivery, a signal write, or a DMA completion.
+  producers: a mailbox delivery, a signal write, a DMA completion, or
+  a store that clears its reservation.
   A unit whose event is still masked parks again.
 
 ### Batch atomicity

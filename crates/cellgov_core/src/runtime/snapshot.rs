@@ -131,6 +131,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         last_host_writes: _,              // cleared on restore, rewritten by the next step
         last_lv2_effects: _,              // cleared on restore, rewritten by the next step
         last_mailbox_read: _,             // cleared on restore, rewritten by the next step
+        last_entry_reservation: _,        // cleared on restore, rewritten by the next step
         spu_thread_failure: _,            // cleared on restore, taken by the host after a commit
         mfc_exception: _,                 // cleared on restore, taken by the host after a commit
         spu_factory: _,                   // set once at construction
@@ -257,6 +258,7 @@ impl Runtime {
         self.last_host_writes.clear();
         self.last_lv2_effects.clear();
         self.last_mailbox_read = None;
+        self.last_entry_reservation = None;
         self.spu_thread_failure = None;
         self.mfc_exception = None;
         self.trace.clear();

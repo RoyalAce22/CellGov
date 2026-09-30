@@ -98,6 +98,10 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::channel_stall`].
     fn channel_stall(&self) -> Option<cellgov_exec::ChannelStall>;
 
+    /// The line of the unit's local reservation. See
+    /// [`ExecutionUnit::local_reservation`].
+    fn local_reservation(&self) -> Option<u64>;
+
     /// Land an MFC get's bytes in the unit's local store. See
     /// [`ExecutionUnit::land_local_store`].
     ///
@@ -263,6 +267,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn channel_stall(&self) -> Option<cellgov_exec::ChannelStall> {
         ExecutionUnit::channel_stall(self)
+    }
+
+    #[inline]
+    fn local_reservation(&self) -> Option<u64> {
+        ExecutionUnit::local_reservation(self)
     }
 
     #[inline]

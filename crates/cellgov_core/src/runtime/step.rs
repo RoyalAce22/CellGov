@@ -108,6 +108,7 @@ impl Runtime {
                     }
                     let due = self.fire_dma_completions();
                     let timer_due = self.fire_timer_wakes();
+                    self.wake_reservation_lost_waiters();
                     self.emit_time_warp_trace(&due, &timer_due);
                     if let Some(id) = self.scheduler.select_next(&self.registry) {
                         break id;
@@ -133,6 +134,10 @@ impl Runtime {
 
         // Memory borrow scoped to `run_until_yield` to enforce the
         // freeze-during-step rule.
+        self.last_entry_reservation = self
+            .registry
+            .get(unit_id)
+            .and_then(|unit| unit.local_reservation());
         let received = self.registry.drain_receives(unit_id);
         let syscall_ret = self.registry.drain_syscall_return(unit_id);
         let reg_writes = self.registry.drain_register_writes(unit_id);

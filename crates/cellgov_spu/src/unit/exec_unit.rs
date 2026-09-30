@@ -90,8 +90,13 @@ impl ExecutionUnit for SpuExecutionUnit {
 
         // Mirror cross-unit reservation invalidation. The context view is
         // frozen for the step, so a single entry-time check suffices.
+        // Only another unit's store drops the committed entry while the
+        // local register holds a line: the unit's own actions clear the
+        // register as they run.
+        // [CBEA p:148 s:9.11.1] Lr is set when a snoop external to the MFC resets the reservation, and never for a local action.
         if self.state.reservation.is_some() && !ctx.reservation_held(self.id) {
             self.state.reservation = None;
+            self.state.raise_events(spu::event::LR);
         }
 
         let mut remaining = budget.raw();
@@ -407,6 +412,10 @@ impl ExecutionUnit for SpuExecutionUnit {
 
     fn channel_stall(&self) -> Option<ChannelStall> {
         self.stall
+    }
+
+    fn local_reservation(&self) -> Option<u64> {
+        self.state.reservation.map(|line| line.addr())
     }
 
     fn drain_barriers(&mut self) -> Vec<cellgov_exec::RetiredBarrier> {

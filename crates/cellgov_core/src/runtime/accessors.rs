@@ -328,6 +328,20 @@ impl Runtime {
         self.last_mailbox_read
     }
 
+    /// The line the last step's unit held in its local reservation
+    /// register as the step began, or `None`.
+    ///
+    /// The step checks the committed table for that line before its
+    /// first instruction and raises the reservation lost event when the
+    /// entry is gone. So the order of this step and another unit's store
+    /// to the line decides what the step did, though the step emits no
+    /// effect naming the line.
+    ///
+    /// [CBEA p:148 s:9.11.1] Lr is set when a snoop external to the MFC resets the reservation.
+    pub fn last_entry_reservation(&self) -> Option<u64> {
+        self.last_entry_reservation
+    }
+
     // -- scheduler --
 
     /// Replace the runtime scheduler.

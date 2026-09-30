@@ -72,6 +72,7 @@ impl Runtime {
             last_host_writes: Vec::new(),
             last_lv2_effects: Vec::new(),
             last_mailbox_read: None,
+            last_entry_reservation: None,
             spu_thread_failure: None,
             mfc_exception: None,
             lv2_host: Lv2Host::new(),

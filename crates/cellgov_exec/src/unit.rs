@@ -216,6 +216,14 @@ pub trait ExecutionUnit {
         None
     }
 
+    /// The line address the unit's local reservation register holds, or
+    /// `None` when it holds none. The runtime compares it with the
+    /// committed reservation table to find a reservation another
+    /// unit's store cleared.
+    fn local_reservation(&self) -> Option<u64> {
+        None
+    }
+
     /// Write `bytes` into the unit's local store at `lsa`: the landing of
     /// an MFC get the unit queued, which completes between its steps.
     ///

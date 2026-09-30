@@ -203,6 +203,37 @@ impl Runtime {
                 })
     }
 
+    /// Make runnable each unit that waits on an event and whose local
+    /// reservation register names a line the committed table no longer
+    /// holds for it. Another unit's store cleared the reservation, and
+    /// the unit raises the reservation lost event when it next runs.
+    ///
+    /// [CBEA p:165 s:9.12.10] the event occurs when the reservation is lost.
+    pub(super) fn wake_reservation_lost_waiters(&mut self) {
+        let lost: Vec<UnitId> = self
+            .registry
+            .ids()
+            .filter(|&unit| {
+                self.stall_ends(unit, StallWake::Event, false)
+                    && self
+                        .registry
+                        .get(unit)
+                        .and_then(|unit| unit.local_reservation())
+                        .is_some()
+                    && !super::spaces::resolve_unit_reservations(
+                        &self.reservations,
+                        &self.spaces,
+                        unit,
+                    )
+                    .is_held_by(unit)
+            })
+            .collect();
+        for unit in lost {
+            self.registry
+                .set_status_override(unit, UnitStatus::Runnable);
+        }
+    }
+
     fn refuse_retired(&self, unit: UnitId) -> Result<(), ProblemStateError> {
         if self.registry.status_override(unit) == Some(UnitStatus::Finished) {
             return Err(ProblemStateError::Retired);

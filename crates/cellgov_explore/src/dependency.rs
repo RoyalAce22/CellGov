@@ -100,6 +100,14 @@ pub struct StepFootprint {
     /// and flips the next conditional-store verdict, so the pair
     /// conflicts.
     pub reservation_lines: Vec<u64>,
+    /// The line the unit held a reservation on as the step began.
+    ///
+    /// The step reads the committed entry for it before its first
+    /// instruction, and an SPU raises the reservation lost event when a
+    /// store removed it. So a cross-unit write covering the line
+    /// conflicts with the step, which emits nothing naming the line.
+    /// [`StepFootprint::note_commit`] sets it.
+    pub held_reservation_lines: Vec<u64>,
     /// What every transfer in flight during this step touches at its
     /// landing: a put's destination, and the source of one no inline
     /// payload carries.
@@ -161,6 +169,8 @@ impl StepFootprint {
         self.mailbox_counts.extend(rt.last_mailbox_read());
         self.note_inflight(rt);
         self.local_store_owner = Some(unit);
+        self.held_reservation_lines
+            .extend(rt.last_entry_reservation());
         self.note_lv2_effects(rt);
         self.expand_aliases(rt, unit);
         self.note_host_writes(rt);
@@ -267,6 +277,7 @@ impl StepFootprint {
             wait_units,
             signal_writes,
             reservation_lines,
+            held_reservation_lines,
             inflight_dma_ranges,
             inflight_local_stores,
             local_store_owner,
@@ -288,6 +299,7 @@ impl StepFootprint {
         self.wait_units.extend(wait_units);
         self.signal_writes.extend(signal_writes);
         self.reservation_lines.extend(reservation_lines);
+        self.held_reservation_lines.extend(held_reservation_lines);
         self.inflight_dma_ranges.extend(inflight_dma_ranges);
         self.inflight_local_stores.extend(inflight_local_stores);
         self.local_store_owner = self.local_store_owner.or(local_store_owner);
@@ -562,6 +574,17 @@ impl StepFootprint {
             return true;
         }
 
+        // A write before the step clears the entry the step checks as
+        // it begins, and a write after it clears the entry in a later
+        // step. Two holders of one line do not conflict for holding it.
+        let clears_held = |writer: &StepFootprint, holder: &StepFootprint| {
+            write_covers_any_line(&writer.shared_writes, &holder.held_reservation_lines)
+                || write_covers_any_line(&writer.dma_writes, &holder.held_reservation_lines)
+        };
+        if clears_held(self, other) || clears_held(other, self) {
+            return true;
+        }
+
         // One step's cost decides where an in-flight transfer lands,
         // and the other step reads or writes the bytes it lands on.
         if touches_inflight(self, other) || touches_inflight(other, self) {
@@ -603,6 +626,7 @@ impl StepFootprint {
             && self.wake_targets.is_empty()
             && self.signal_writes.is_empty()
             && self.reservation_lines.is_empty()
+            && self.held_reservation_lines.is_empty()
             && self.inflight_dma_ranges.is_empty()
             && self.dma_local_stores.is_empty()
             && self.inflight_local_stores.is_empty()
@@ -622,6 +646,7 @@ impl StepFootprint {
         ranges_overlap(&self.inflight_dma_ranges, &self.shared_writes)
             || ranges_overlap(&self.inflight_dma_ranges, &self.shared_reads)
             || write_covers_any_line(&self.inflight_dma_ranges, &self.reservation_lines)
+            || write_covers_any_line(&self.inflight_dma_ranges, &self.held_reservation_lines)
             || owns_inflight_local_store(self, self)
     }
 }
@@ -639,6 +664,10 @@ fn touches_inflight(during: &StepFootprint, accessor: &StepFootprint) -> bool {
         || ranges_overlap(&during.inflight_dma_ranges, &accessor.dma_writes)
         || ranges_overlap(&during.inflight_dma_ranges, &accessor.dma_reads)
         || write_covers_any_line(&during.inflight_dma_ranges, &accessor.reservation_lines)
+        || write_covers_any_line(
+            &during.inflight_dma_ranges,
+            &accessor.held_reservation_lines,
+        )
         || local_stores_overlap(&during.inflight_local_stores, &accessor.dma_local_stores)
         || owns_inflight_local_store(during, accessor)
 }

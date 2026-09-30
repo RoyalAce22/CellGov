@@ -28,7 +28,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use cellgov_compare::{Observation, ObservedOutcome};
-use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, MFC_ATOMIC_STAT_S, MFC_ATOMIC_STAT_U};
+use cellgov_ps3_abi::hw::spu::{event, MFC_ATOMIC_STAT_G, MFC_ATOMIC_STAT_S, MFC_ATOMIC_STAT_U};
 use cellgov_ps3_abi::lv2::errno;
 
 /// What a payload word must be.
@@ -271,6 +271,23 @@ const CASES: &[Case] = &[
             ("message1", Exact(0x22)),
             ("message2", Exact(0x33)),
             ("message3", Exact(0x55)),
+        ],
+    },
+    Case {
+        name: "spu_lr_event",
+        max_steps: 1_000_000,
+        fields: &[
+            ("status", Exact(0)),
+            // A putllc, a getllar to another line and a putlluc reset
+            // the reservation by a local action.
+            ("count_after_putllc", Exact(0)),
+            ("count_after_getllar", Exact(0)),
+            ("count_after_putlluc", Exact(0)),
+            ("putllc_status", Exact(0)),
+            // The PPU's store into the reserved line.
+            ("event_status", Exact(event::LR)),
+            ("count_after_ack", Exact(0)),
+            ("line_word", Exact(0x5A5A_5A5A)),
         ],
     },
     Case {

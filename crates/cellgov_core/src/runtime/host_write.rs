@@ -117,6 +117,7 @@ impl Runtime {
         bytes: &[u8],
     ) -> Result<usize, MemError> {
         let cleared = self.host_write(HostWriter::Placement, space, range, bytes, None)?;
+        self.wake_reservation_lost_waiters();
         // A placement skips the commit pipeline's shared-view fanout,
         // so bytes that land inside a shared view leave the sibling
         // views incoherent. `commit_bytes_at` and the LV2

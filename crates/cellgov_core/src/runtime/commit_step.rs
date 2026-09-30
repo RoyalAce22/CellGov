@@ -399,6 +399,10 @@ impl Runtime {
             }
         }
 
+        // Every guest write of this commit has landed, and any of them
+        // can have cleared the reservation of a unit waiting on an event.
+        self.wake_reservation_lost_waiters();
+
         // Breaks logged after the dispatch-time drain (apply_lv2_effects
         // inside the dispatch folds, the RSX mirror failures above) must
         // trace inside this commit's window: fire_timer_wakes drains only

@@ -427,3 +427,34 @@ fn two_signal_writes_to_one_unit_conflict() {
     assert!(signal_write(7).conflicts(&signal_write(7)));
     assert!(!signal_write(7).conflicts(&signal_write(8)));
 }
+
+/// [CBEA p:148 s:9.11.1] Lr: an outside store resets the reservation. The holder's step emits nothing naming the line, and the store before or after it decides whether the step raises the event.
+#[test]
+fn a_write_to_a_line_a_step_began_holding_conflicts_and_a_second_holder_does_not() {
+    let holder = StepFootprint {
+        held_reservation_lines: vec![0x100],
+        ..StepFootprint::default()
+    };
+    let store = StepFootprint::from_effects(&[Effect::shared_write(
+        range(0x17C, 4),
+        WritePayload::new(vec![0; 4]),
+        UnitId::new(1),
+        GuestTicks::new(0),
+    )]);
+    assert!(holder.conflicts(&store));
+    assert!(store.conflicts(&holder));
+
+    let elsewhere = StepFootprint::from_effects(&[Effect::shared_write(
+        range(0x180, 4),
+        WritePayload::new(vec![0; 4]),
+        UnitId::new(1),
+        GuestTicks::new(0),
+    )]);
+    assert!(!holder.conflicts(&elsewhere), "the store misses the line");
+
+    let second_holder = StepFootprint {
+        held_reservation_lines: vec![0x100],
+        ..StepFootprint::default()
+    };
+    assert!(!holder.conflicts(&second_holder));
+}

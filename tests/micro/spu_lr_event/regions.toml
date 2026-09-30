@@ -1,0 +1,9 @@
+[[regions]]
+name = "local"
+addr = "0x0"
+size = "0x10"
+
+[[regions]]
+name = "remote"
+addr = "0x10"
+size = "0x10"
