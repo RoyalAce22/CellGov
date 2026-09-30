@@ -90,6 +90,7 @@ fn a_local_store_write_and_mailbox_yield_have_typed_footprints() {
 fn a_stalled_tag_status_read_cannot_publish_its_destination_register() {
     let mut initial = SpuState::new();
     initial.channels.tag_mask = 1;
+    initial.channels.tag_update = Some(cellgov_spu::state::TagUpdateCondition::All);
     let instruction = SpuInstruction::Rdch {
         rt: 3,
         channel: cellgov_ps3_abi::hw::spu::MFC_RD_TAG_STAT,

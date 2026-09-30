@@ -68,9 +68,15 @@ pub(super) fn execute_wrch(
             state.channels.tag_mask = val;
             SpuStepOutcome::Continue
         }
-        // [CBE-Handbook p:459 s:17. SPE Channel and Related MMIO Interface sub:17.10 MFC Tag-Group Management Channels] MFC_WrTagUpdate triggers when MFC_RdTagStat refreshes; immediate completion in this model.
+        // [CBEA p:127 s:9.3.5] MFC_WrTagUpdate sets when the tag status updates: immediately, when any enabled group completes, or when all do.
+        // [CBE-Handbook p:459 s:17.10] bits 0:29 are reserved, and TS 11 is a reserved update condition.
+        // The model gives a reserved request no meaning and refuses it by
+        // name.
         spu::MFC_WR_TAG_UPDATE => {
-            state.channels.tag_update_pending = true;
+            if val > spu::MFC_TAG_UPDATE_ALL {
+                return SpuStepOutcome::Fault(SpuFault::ReservedTagUpdate(val));
+            }
+            state.channels.request_tag_update(val);
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:463 s:17. SPE Channel and Related MMIO Interface sub:17.12 SPU Mailbox Channels] SPU Write Outbound Mailbox sends a 32-bit message to the PPE.
@@ -104,20 +110,25 @@ pub(super) fn execute_rdch(
         return invalid_channel();
     }
     match channel {
-        // [CBE-Handbook p:460 s:17. SPE Channel and Related MMIO Interface sub:17.10 MFC Tag-Group Management Channels] Read Tag-Group Status Channel: returns tag-status word; blocks until masked tags complete.
-        spu::MFC_RD_TAG_STAT => {
-            let masked = state.channels.tag_status & state.channels.tag_mask;
-            if masked == state.channels.tag_mask {
-                // [CBEA p:128 s:9.3.6] a group the query mask leaves out reads zero.
-                state.set_reg_channel_word(rt, masked);
-                state.channels.tag_update_pending = false;
+        // [CBE-Handbook p:460 s:17.10.4] MFC_RdTagStat reports the status from the last tag-group status update request.
+        // [CBEA p:127 s:9.3.5] a read with no update request is a software-induced deadlock.
+        // The model does not park the SPU on that deadlock and refuses the
+        // read by name.
+        spu::MFC_RD_TAG_STAT => match state.channels.tag_status_read.take() {
+            Some(status) => {
+                state.set_reg_channel_word(rt, status);
                 SpuStepOutcome::Continue
-            } else {
-                SpuStepOutcome::Yield {
-                    effects: vec![],
-                    reason: YieldReason::DmaWait,
-                }
             }
+            None if state.channels.tag_update.is_some() => SpuStepOutcome::Yield {
+                effects: vec![],
+                reason: YieldReason::DmaWait,
+            },
+            None => SpuStepOutcome::Fault(SpuFault::ChannelStall(channel)),
+        },
+        // [CBEA p:126 s:9.3.4] MFC_RdTagMask returns the current tag-group query mask.
+        spu::MFC_RD_TAG_MASK => {
+            state.set_reg_channel_word(rt, state.channels.tag_mask);
+            SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:543 s:19. DMA Transfers and Interprocessor Communication sub:19.6 Mailboxes] SPU Read Inbound Mailbox is read-blocking when the mailbox is empty.
         spu::SPU_RD_IN_MBOX => {
@@ -187,11 +198,9 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         // The model takes each request as it is written.
         spu::MFC_WR_TAG_UPDATE => 1,
         // [CBEA p:128 s:9.3.6] MFC_RdTagStat counts 1 once the requested tag status is available.
-        // The model makes it available when every masked tag has completed, as its read does.
-        spu::MFC_RD_TAG_STAT => u32::from(
-            channels.tag_update_pending
-                && channels.tag_status & channels.tag_mask == channels.tag_mask,
-        ),
+        spu::MFC_RD_TAG_STAT => u32::from(channels.tag_status_read.is_some()),
+        // [CBEA p:126 s:9.3.4] MFC_RdTagMask is nonblocking and counts 1.
+        spu::MFC_RD_TAG_MASK => 1,
         // [CBEA p:131 s:9.4] MFC_RdAtomicStat counts 1 once an immediate atomic command completes.
         spu::MFC_RD_ATOMIC_STAT => u32::from(channels.atomic_status_ready),
         // [CBEA p:133 s:9.5.1] SPU_WrOutMbox counts its free entries.

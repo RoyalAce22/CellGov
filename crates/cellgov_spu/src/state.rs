@@ -5,7 +5,9 @@ use cellgov_sync::ReservedLine;
 
 use crate::stop::SpuStop;
 
-use cellgov_ps3_abi::hw::spu::MfcTagId;
+use cellgov_ps3_abi::hw::spu::{
+    MfcTagId, MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY, MFC_TAG_UPDATE_IMMEDIATE,
+};
 pub use cellgov_ps3_abi::hw::spu::{SPU_LSLR_FULL, SPU_LS_SIZE, SPU_REG_COUNT};
 
 /// Full SPU architectural state.
@@ -91,8 +93,10 @@ pub struct SpuChannelSnapshot {
     pub pending_mbox_rt: Option<u8>,
     /// Pending MFC GET request.
     pub pending_get: Option<(u64, u32, u32, MfcTagId)>,
-    /// A tag-status update request is outstanding.
-    pub tag_update_pending: bool,
+    /// A waiting conditional tag-status update request.
+    pub tag_update: Option<TagUpdateCondition>,
+    /// The `MFC_RdTagStat` data of a met update request, not yet read.
+    pub tag_status_read: Option<u32>,
     /// An atomic command's status is waiting to be read.
     pub atomic_status_ready: bool,
     /// Messages in the inbound mailbox at the start of the step.
@@ -125,7 +129,8 @@ impl SpuObservableSnapshot {
             atomic_status,
             pending_mbox_rt,
             pending_get,
-            tag_update_pending,
+            tag_update,
+            tag_status_read,
             atomic_status_ready,
             in_mbox_count,
             out_mbox,
@@ -147,7 +152,8 @@ impl SpuObservableSnapshot {
                 atomic_status: *atomic_status,
                 pending_mbox_rt: *pending_mbox_rt,
                 pending_get: *pending_get,
-                tag_update_pending: *tag_update_pending,
+                tag_update: *tag_update,
+                tag_status_read: *tag_status_read,
                 atomic_status_ready: *atomic_status_ready,
                 in_mbox_count: *in_mbox_count,
                 out_mbox: *out_mbox,
@@ -380,10 +386,14 @@ pub struct ChannelState {
     /// copies it at its start from the committed memory snapshot. Its
     /// tag group reads outstanding in `tag_status` until the copy lands.
     pub pending_get: Option<(u64, u32, u32, MfcTagId)>,
-    /// A tag-status update request is outstanding, so `MFC_RdTagStat`
-    /// counts 1 once the request's condition holds. A read clears it.
-    // [CBEA p:128 s:9.3.6] the MFC_RdTagStat count starts at 0 and turns 1 when the requested tag status is available.
-    pub tag_update_pending: bool,
+    /// A waiting conditional tag-status update request.
+    // [CBEA p:127 s:9.3.5] an update request updates the status immediately, when any enabled group completes, or when all enabled groups complete.
+    pub tag_update: Option<TagUpdateCondition>,
+    /// The `MFC_RdTagStat` data a met update request latched.
+    ///
+    /// `Some` is a channel count of 1. A read takes the data.
+    // [CBEA p:128 s:9.3.6] the channel holds the status of the groups enabled at the time of the last update; its count turns 1 when that status is available.
+    pub tag_status_read: Option<u32>,
     /// An atomic command completed and `MFC_RdAtomicStat` has not been
     /// read since, so the channel counts 1.
     // [CBEA p:131 s:9.4] the MFC_RdAtomicStat count starts at 0 and is 1 once an immediate atomic command completes.
@@ -420,8 +430,9 @@ impl ChannelState {
             atomic_status: 0,
             pending_mbox_rt: None,
             pending_get: None,
+            tag_update: None,
             // x'18' count 0.
-            tag_update_pending: false,
+            tag_status_read: None,
             // x'1B' count 0.
             atomic_status_ready: false,
             // x'1D' count 0.
@@ -430,6 +441,64 @@ impl ChannelState {
             out_mbox: None,
         }
     }
+}
+
+impl ChannelState {
+    /// Applies a write to `MFC_WrTagUpdate`.
+    ///
+    /// - An immediate request latches the masked status now.
+    /// - A conditional request latches it once its condition holds.
+    ///
+    /// A new request replaces an earlier one and its unread result.
+    /// The caller refuses a reserved value first. A reserved value that
+    /// reaches this function makes no request.
+    // [CBE-Handbook p:459 s:17.10] TS 00 updates immediately, 01 when any enabled group completes, 10 when all do; 11 is reserved.
+    pub fn request_tag_update(&mut self, value: u32) {
+        let condition = match value & 3 {
+            MFC_TAG_UPDATE_IMMEDIATE => None,
+            MFC_TAG_UPDATE_ANY => Some(TagUpdateCondition::Any),
+            MFC_TAG_UPDATE_ALL => Some(TagUpdateCondition::All),
+            _ => return,
+        };
+        self.tag_status_read = None;
+        match condition {
+            None => {
+                self.tag_update = None;
+                self.tag_status_read = Some(self.tag_status & self.tag_mask);
+            }
+            Some(condition) => {
+                self.tag_update = Some(condition);
+                self.settle_tag_update();
+            }
+        }
+    }
+
+    /// Latches the masked status if the waiting request's condition holds.
+    ///
+    /// With an empty mask, "all enabled groups" holds at once and "any
+    /// enabled group" never does.
+    // [CBEA p:128 s:9.3.6] a set bit means the group has no outstanding operations and the query mask enables it.
+    pub fn settle_tag_update(&mut self) {
+        let masked = self.tag_status & self.tag_mask;
+        let met = match self.tag_update {
+            None => return,
+            Some(TagUpdateCondition::Any) => masked != 0,
+            Some(TagUpdateCondition::All) => masked == self.tag_mask,
+        };
+        if met {
+            self.tag_update = None;
+            self.tag_status_read = Some(masked);
+        }
+    }
+}
+
+/// The condition a tag-status update request waits on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TagUpdateCondition {
+    /// Any group the query mask enables has no outstanding operations.
+    Any,
+    /// Every group the query mask enables has no outstanding operations.
+    All,
 }
 
 impl Default for ChannelState {

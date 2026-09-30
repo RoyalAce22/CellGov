@@ -10,6 +10,7 @@ fn read_tag_status(mask: u32, status: u32) -> (SpuStepOutcome, u32) {
     let mut s = SpuState::new();
     s.channels.tag_mask = mask;
     s.channels.tag_status = status;
+    s.channels.request_tag_update(spu::MFC_TAG_UPDATE_IMMEDIATE);
     let out = execute(
         &SpuInstruction::Rdch {
             rt: 4,

@@ -101,6 +101,7 @@ pub(super) fn execution_supported(instruction: SpuInstruction) -> bool {
 
 const RDCH_CHANNELS: &[u32] = &[
     spu::MFC_RD_TAG_STAT as u32,
+    spu::MFC_RD_TAG_MASK as u32,
     spu::MFC_RD_ATOMIC_STAT as u32,
     spu::SPU_RD_IN_MBOX as u32,
     spu::SPU_RD_MACH_STAT as u32,
@@ -119,6 +120,7 @@ const WRCH_CHANNELS: &[u32] = &[
 ];
 pub(super) const RCHCNT_CHANNELS: &[u32] = &[
     spu::SPU_RD_MACH_STAT as u32,
+    spu::MFC_RD_TAG_MASK as u32,
     spu::MFC_LSA as u32,
     spu::MFC_EAH as u32,
     spu::MFC_EAL as u32,

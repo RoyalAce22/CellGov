@@ -2,8 +2,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use cellgov_ps3_abi::hw::spu::{MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY};
 use cellgov_spu::exec::SpuStepOutcome;
-use cellgov_spu::state::SpuObservableSnapshot;
+use cellgov_spu::state::{SpuObservableSnapshot, TagUpdateCondition};
 use serde::{Deserialize, Serialize};
 
 use crate::reference::{ReferenceField, ReferenceOmission, ReferenceProvenance};
@@ -54,9 +55,14 @@ pub struct SpuReferenceChannels {
     pub pending_mbox_rt: Option<u8>,
     /// Pending DMA GET as `(effective address, local address, size, tag)`.
     pub pending_get: Option<(u64, u32, u32, u8)>,
-    /// A tag-status update request is outstanding.
+    /// The TS code of a waiting tag-status update request.
+    ///
+    /// The code is 1 for any enabled group and 2 for all of them.
     #[serde(default)]
-    pub tag_update_pending: bool,
+    pub tag_update: Option<u32>,
+    /// The tag status a met update request latched and no read took.
+    #[serde(default)]
+    pub tag_status_read: Option<u32>,
     /// An atomic command's status is waiting to be read.
     #[serde(default)]
     pub atomic_status_ready: bool,
@@ -81,7 +87,8 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             atomic_status,
             pending_mbox_rt,
             pending_get,
-            tag_update_pending,
+            tag_update,
+            tag_status_read,
             atomic_status_ready,
             in_mbox_count,
             out_mbox,
@@ -97,7 +104,11 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             atomic_status: *atomic_status,
             pending_mbox_rt: *pending_mbox_rt,
             pending_get: pending_get.map(|(ea, lsa, size, tag)| (ea, lsa, size, tag.raw())),
-            tag_update_pending: *tag_update_pending,
+            tag_update: tag_update.map(|condition| match condition {
+                TagUpdateCondition::Any => MFC_TAG_UPDATE_ANY,
+                TagUpdateCondition::All => MFC_TAG_UPDATE_ALL,
+            }),
+            tag_status_read: *tag_status_read,
             atomic_status_ready: *atomic_status_ready,
             in_mbox_count: *in_mbox_count,
             out_mbox: *out_mbox,

@@ -98,6 +98,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             parked_get_read = shared_read(ea, size, self.id);
             self.state.channels.tag_status = !ctx.outstanding_dma_tags();
         }
+        self.state.channels.settle_tag_update();
         self.state.channels.in_mbox_count = ctx.mailbox_occupancy();
 
         // Mirror cross-unit reservation invalidation. The context view is

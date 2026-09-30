@@ -612,3 +612,7 @@ mod channel_direction_tests;
 #[cfg(test)]
 #[path = "tests/tag_status_mask_tests.rs"]
 mod tag_status_mask_tests;
+
+#[cfg(test)]
+#[path = "tests/tag_update_mode_tests.rs"]
+mod tag_update_mode_tests;

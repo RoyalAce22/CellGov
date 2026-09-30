@@ -116,7 +116,7 @@ fn all_channels() -> serde_json::Value {
         "mfc_lsa": 1, "mfc_eah": 2, "mfc_eal": 3, "mfc_size": 4, "mfc_tag_id": 5,
         "tag_mask": 6, "tag_status": 7, "atomic_status": 8,
         "pending_mbox_rt": 127, "pending_get": [9, 10, 11, 12],
-        "tag_update_pending": true, "atomic_status_ready": true, "in_mbox_count": 3,
+        "tag_update": 2, "tag_status_read": 6, "atomic_status_ready": true, "in_mbox_count": 3,
         "out_mbox": 5
     })
 }
@@ -516,7 +516,8 @@ fn artifact_types_round_trip_through_json() {
             atomic_status: 8,
             pending_mbox_rt: Some(127),
             pending_get: Some((9, 10, 11, 12)),
-            tag_update_pending: true,
+            tag_update: Some(2),
+            tag_status_read: Some(6),
             atomic_status_ready: true,
             in_mbox_count: 3,
             out_mbox: Some(5),
@@ -683,7 +684,7 @@ fn each_component_is_named_when_it_differs() {
 
 #[test]
 fn every_channel_field_participates_in_the_channel_comparison() {
-    let mutations: [fn(&mut SpuReferenceChannels); 14] = [
+    let mutations: [fn(&mut SpuReferenceChannels); 15] = [
         |channels| channels.mfc_lsa ^= 1,
         |channels| channels.mfc_eah ^= 1,
         |channels| channels.mfc_eal ^= 1,
@@ -694,7 +695,8 @@ fn every_channel_field_participates_in_the_channel_comparison() {
         |channels| channels.atomic_status ^= 1,
         |channels| channels.pending_mbox_rt = Some(3),
         |channels| channels.pending_get = Some((1, 2, 3, 4)),
-        |channels| channels.tag_update_pending ^= true,
+        |channels| channels.tag_update = Some(1),
+        |channels| channels.tag_status_read = Some(1),
         |channels| channels.atomic_status_ready ^= true,
         |channels| channels.in_mbox_count ^= 1,
         |channels| channels.out_mbox = Some(0xAB),
@@ -734,7 +736,8 @@ fn channel_snapshots_convert_field_by_field() {
         12,
         cellgov_ps3_abi::hw::spu::MfcTagId::new(13).expect("13 is a tag group"),
     ));
-    state.channels.tag_update_pending = true;
+    state.channels.tag_update = Some(cellgov_spu::state::TagUpdateCondition::All);
+    state.channels.tag_status_read = Some(6);
     state.channels.atomic_status_ready = true;
     state.channels.in_mbox_count = 14;
     state.channels.out_mbox = Some(15);
@@ -752,7 +755,8 @@ fn channel_snapshots_convert_field_by_field() {
             atomic_status: 8,
             pending_mbox_rt: Some(9),
             pending_get: Some((10, 11, 12, 13)),
-            tag_update_pending: true,
+            tag_update: Some(2),
+            tag_status_read: Some(6),
             atomic_status_ready: true,
             in_mbox_count: 14,
             out_mbox: Some(15),
@@ -1092,7 +1096,8 @@ fn replay_places_words_at_a_nonzero_pc_and_applies_initial_overrides() {
         atomic_status: 8,
         pending_mbox_rt: Some(9),
         pending_get: Some((10, 11, 12, 13)),
-        tag_update_pending: true,
+        tag_update: Some(2),
+        tag_status_read: Some(6),
         atomic_status_ready: true,
         in_mbox_count: 3,
         out_mbox: Some(5),

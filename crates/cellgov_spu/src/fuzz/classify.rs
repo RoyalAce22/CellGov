@@ -16,8 +16,16 @@ const FAULT: &[SpuOutcomeClass] = &[SpuOutcomeClass::Fault];
 const YIELD: &[SpuOutcomeClass] = &[SpuOutcomeClass::Yield];
 const STOP: &[SpuOutcomeClass] = &[SpuOutcomeClass::Stop];
 const CONTINUE_OR_STOP: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Stop];
-const CONTINUE_OR_YIELD: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Yield];
 const LOAD_STORE: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Fault];
+// A tag-status read has three outcomes:
+// - a latched status reads at once;
+// - a waiting request parks the SPU;
+// - a read with no request faults.
+const TAG_STATUS_READ: &[SpuOutcomeClass] = &[
+    SpuOutcomeClass::Continue,
+    SpuOutcomeClass::Yield,
+    SpuOutcomeClass::Fault,
+];
 const CONDITIONAL_BRANCH: &[SpuOutcomeClass] =
     &[SpuOutcomeClass::Continue, SpuOutcomeClass::Branch];
 const UNCONDITIONAL_BRANCH: &[SpuOutcomeClass] = &[SpuOutcomeClass::Branch];
@@ -61,13 +69,13 @@ pub(super) fn effect_and_outcome(
         SpuInstruction::Rdch {
             channel: spu::MFC_RD_TAG_STAT,
             ..
-        } => (NO_EFFECTS, CONTINUE_OR_YIELD),
+        } => (NO_EFFECTS, TAG_STATUS_READ),
         SpuInstruction::Rdch {
             channel: spu::SPU_RD_IN_MBOX,
             ..
         } => (RDCH_EFFECTS, YIELD),
         SpuInstruction::Rdch {
-            channel: spu::MFC_RD_ATOMIC_STAT | spu::SPU_RD_MACH_STAT,
+            channel: spu::MFC_RD_ATOMIC_STAT | spu::SPU_RD_MACH_STAT | spu::MFC_RD_TAG_MASK,
             ..
         } => (NO_EFFECTS, CONTINUE),
         SpuInstruction::Rdch { channel, .. }
@@ -91,10 +99,14 @@ pub(super) fn effect_and_outcome(
                 | spu::MFC_SIZE
                 | spu::MFC_TAG_ID
                 | spu::MFC_WR_TAG_MASK
-                | spu::MFC_WR_TAG_UPDATE
                 | spu::SPU_WR_OUT_MBOX,
             ..
         } => (NO_EFFECTS, CONTINUE),
+        // The channel refuses a reserved update request.
+        SpuInstruction::Wrch {
+            channel: spu::MFC_WR_TAG_UPDATE,
+            ..
+        } => (NO_EFFECTS, LOAD_STORE),
         SpuInstruction::Wrch { channel, .. }
             if spu::channel_direction(channel) == Some(spu::ChannelDirection::Read) =>
         {

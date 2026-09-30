@@ -212,6 +212,7 @@ fn channel_operands_prefer_interpreter_owned_architected_selectors() {
         channels(SpuInstructionKind::Rdch),
         &[
             spu::MFC_RD_TAG_STAT as u32,
+            spu::MFC_RD_TAG_MASK as u32,
             spu::MFC_RD_ATOMIC_STAT as u32,
             spu::SPU_RD_IN_MBOX as u32,
             spu::SPU_RD_MACH_STAT as u32,
@@ -234,6 +235,7 @@ fn channel_operands_prefer_interpreter_owned_architected_selectors() {
         channels(SpuInstructionKind::Rchcnt),
         &[
             spu::SPU_RD_MACH_STAT as u32,
+            spu::MFC_RD_TAG_MASK as u32,
             spu::MFC_LSA as u32,
             spu::MFC_EAH as u32,
             spu::MFC_EAL as u32,
@@ -579,6 +581,47 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
     .fuzz_descriptor();
     assert_eq!(rdch.effects, &[EffectKind::MailboxReceiveAttempt]);
     assert_eq!(rdch.outcomes, &[SpuOutcomeClass::Yield]);
+
+    // Each tag-channel read state reaches its own executor arm, and the declared set holds all three.
+    let mut latched = crate::state::SpuState::new();
+    latched.channels.tag_status_read = Some(1);
+    let mut waiting = crate::state::SpuState::new();
+    waiting.channels.tag_update = Some(crate::state::TagUpdateCondition::All);
+    for (channel, mut state, expected) in [
+        (spu::MFC_RD_TAG_STAT, latched, SpuOutcomeClass::Continue),
+        (spu::MFC_RD_TAG_STAT, waiting, SpuOutcomeClass::Yield),
+        (
+            spu::MFC_RD_TAG_STAT,
+            crate::state::SpuState::new(),
+            SpuOutcomeClass::Fault,
+        ),
+        (
+            spu::MFC_RD_TAG_MASK,
+            crate::state::SpuState::new(),
+            SpuOutcomeClass::Continue,
+        ),
+    ] {
+        let read = SpuInstruction::Rdch { rt: 3, channel };
+        let outcome = SpuOutcomeClass::from_outcome(&crate::exec::execute(
+            &read,
+            &mut state,
+            cellgov_event::UnitId::new(0),
+        ));
+        assert_eq!(outcome, expected, "channel {channel}");
+        assert!(
+            read.fuzz_descriptor().outcomes.contains(&outcome),
+            "channel {channel}: {outcome:?}"
+        );
+    }
+    assert_eq!(
+        SpuInstruction::Rdch {
+            rt: 0,
+            channel: spu::MFC_RD_TAG_MASK,
+        }
+        .fuzz_descriptor()
+        .outcomes,
+        &[SpuOutcomeClass::Continue]
+    );
 
     let wrch = SpuInstruction::Wrch {
         channel: spu::MFC_CMD,

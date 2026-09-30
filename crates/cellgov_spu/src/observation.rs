@@ -31,6 +31,10 @@ pub enum SpuChannelField {
     PendingMailbox,
     /// Pending DMA GET command.
     PendingGet,
+    /// Waiting tag-status update request.
+    TagUpdate,
+    /// Latched tag status not yet read.
+    TagStatusRead,
 }
 
 fn channel_differences(
@@ -63,6 +67,14 @@ fn channel_differences(
         (
             before.pending_get != after.pending_get,
             SpuChannelField::PendingGet,
+        ),
+        (
+            before.tag_update != after.tag_update,
+            SpuChannelField::TagUpdate,
+        ),
+        (
+            before.tag_status_read != after.tag_status_read,
+            SpuChannelField::TagStatusRead,
         ),
     ] {
         if changed {
@@ -289,6 +301,10 @@ impl SpuAllowedFootprint {
                     footprint.channels.insert(SpuChannelField::AtomicStatus);
                     footprint.reservation = true;
                 }
+                if channel == spu::MFC_WR_TAG_UPDATE {
+                    footprint.channels.insert(SpuChannelField::TagUpdate);
+                    footprint.channels.insert(SpuChannelField::TagStatusRead);
+                }
                 None
             }
             SpuInstruction::Br { .. }
@@ -344,6 +360,15 @@ impl SpuAllowedFootprint {
             }
         ) {
             footprint.channels.insert(SpuChannelField::PendingMailbox);
+        }
+        if matches!(
+            instruction,
+            SpuInstruction::Rdch {
+                channel: cellgov_ps3_abi::hw::spu::MFC_RD_TAG_STAT,
+                ..
+            }
+        ) {
+            footprint.channels.insert(SpuChannelField::TagStatusRead);
         }
         footprint
     }

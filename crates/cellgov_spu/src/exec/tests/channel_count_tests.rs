@@ -34,6 +34,7 @@ fn a_channel_the_model_does_not_implement_refuses_its_count() {
 fn the_tag_status_count_follows_a_request_and_its_read() {
     let mut s = SpuState::new();
     s.channels.tag_mask = 0b10;
+    s.set_reg_word_splat(4, spu::MFC_TAG_UPDATE_ALL);
     let wrch = |channel| SpuInstruction::Wrch { channel, rt: 4 };
     execute(&wrch(spu::MFC_WR_TAG_UPDATE), &mut s, uid());
     assert_eq!(
@@ -41,7 +42,9 @@ fn the_tag_status_count_follows_a_request_and_its_read() {
         0,
         "tag 1 is still in flight"
     );
+    // The unit rebuilds the status and settles the request at step entry.
     s.channels.tag_status = 0b10;
+    s.channels.settle_tag_update();
     assert_eq!(count(&mut s, spu::MFC_RD_TAG_STAT), 1);
     execute(
         &SpuInstruction::Rdch {

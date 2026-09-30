@@ -37,6 +37,7 @@ fn rdch_tag_status_zeros_slots_one_to_three() {
     let mut s = SpuState::new();
     s.channels.tag_mask = 0x8000_0006;
     s.channels.tag_status = 0x8000_0006;
+    s.channels.request_tag_update(spu::MFC_TAG_UPDATE_IMMEDIATE);
     assert!(matches!(
         read(spu::MFC_RD_TAG_STAT, &mut s),
         SpuStepOutcome::Continue

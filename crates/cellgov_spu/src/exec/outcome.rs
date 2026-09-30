@@ -84,4 +84,9 @@ pub enum SpuFault {
     /// the model does not park.
     #[error("SPU channel 0x{0:02x} access stalls")]
     ChannelStall(u8),
+    /// A tag-status update request with a reserved value.
+    ///
+    /// The word is the value the guest wrote.
+    #[error("SPU reserved tag-status update request 0x{0:08x}")]
+    ReservedTagUpdate(u32),
 }

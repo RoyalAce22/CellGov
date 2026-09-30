@@ -1,7 +1,7 @@
 //! Parsing and validation of an SPU reference artifact, and its initial state.
 
-use cellgov_ps3_abi::hw::spu::MfcTagId;
-use cellgov_spu::state::{SpuState, SPU_LS_SIZE, SPU_REG_COUNT};
+use cellgov_ps3_abi::hw::spu::{MfcTagId, MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY};
+use cellgov_spu::state::{SpuState, TagUpdateCondition, SPU_LS_SIZE, SPU_REG_COUNT};
 
 use crate::reference::is_lower_hex;
 
@@ -75,7 +75,17 @@ impl SpuReferenceInput {
                     })?,
                 )),
             };
-            state.channels.tag_update_pending = channels.tag_update_pending;
+            state.channels.tag_update = match channels.tag_update {
+                None => None,
+                Some(MFC_TAG_UPDATE_ANY) => Some(TagUpdateCondition::Any),
+                Some(MFC_TAG_UPDATE_ALL) => Some(TagUpdateCondition::All),
+                Some(_) => {
+                    return Err(SpuReferenceError::Invalid {
+                        field: "initial_state.channels.tag_update",
+                    })
+                }
+            };
+            state.channels.tag_status_read = channels.tag_status_read;
             state.channels.atomic_status_ready = channels.atomic_status_ready;
             state.channels.in_mbox_count = channels.in_mbox_count;
             state.channels.out_mbox = channels.out_mbox;
@@ -168,6 +178,25 @@ impl SpuReferenceArtifact {
                 .is_some_and(|register| register as usize >= SPU_REG_COUNT)
         }) {
             return Err(invalid("expected.channels.pending_mbox_rt"));
+        }
+        let bad_update = |update: Option<u32>| {
+            update.is_some_and(|ts| ts != MFC_TAG_UPDATE_ANY && ts != MFC_TAG_UPDATE_ALL)
+        };
+        if self
+            .initial_state
+            .channels
+            .as_ref()
+            .is_some_and(|channels| bad_update(channels.tag_update))
+        {
+            return Err(invalid("initial_state.channels.tag_update"));
+        }
+        if self
+            .expected
+            .channels
+            .as_value()
+            .is_some_and(|channels| bad_update(channels.tag_update))
+        {
+            return Err(invalid("expected.channels.tag_update"));
         }
         let wide_tag = |pending_get: Option<(u64, u32, u32, u8)>| {
             pending_get.is_some_and(|(_, _, _, tag)| MfcTagId::new(tag).is_none())

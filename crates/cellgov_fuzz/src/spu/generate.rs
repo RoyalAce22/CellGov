@@ -296,6 +296,10 @@ pub(super) fn state_aware_state(
     state.channels.mfc_tag_id = 0;
     state.channels.tag_mask = 1;
     state.channels.tag_status = 1;
+    // A tag-status read needs an update request; an immediate one latches the status now.
+    state
+        .channels
+        .request_tag_update(cellgov_ps3_abi::hw::spu::MFC_TAG_UPDATE_IMMEDIATE);
     state.channels.atomic_status = 0;
     state.channels.pending_mbox_rt = None;
     state.channels.pending_get = None;

@@ -1,4 +1,5 @@
-//! A reference artifact's parked get names a tag group, 0 to 31.
+//! A reference artifact's parked get names a tag group, 0 to 31, and a
+//! waiting tag-status update request is any or all.
 
 use super::*;
 
@@ -15,7 +16,7 @@ fn with_parked_get_tag(side: &str, tag: u8) -> serde_json::Value {
         "mfc_lsa": 0, "mfc_eah": 0, "mfc_eal": 0, "mfc_size": 0, "mfc_tag_id": 0,
         "tag_mask": 0, "tag_status": 0, "atomic_status": 0,
         "pending_mbox_rt": null, "pending_get": [0, 0, 0, tag],
-        "tag_update_pending": false, "atomic_status_ready": false, "in_mbox_count": 0,
+        "tag_update": null, "tag_status_read": null, "atomic_status_ready": false, "in_mbox_count": 0,
         "out_mbox": null
     });
     if side == "initial_state" {
@@ -51,4 +52,32 @@ fn a_parked_get_tag_of_31_parses_and_loads_as_that_group() {
         .pending_get
         .expect("the parked get loads");
     assert_eq!(tag.status_bit(), 1 << 31);
+}
+
+// [CBE-Handbook p:459 s:17.10] TS 00 updates at once and 11 is reserved, so only 01 and 10 leave a request waiting.
+#[test]
+fn a_waiting_tag_update_other_than_any_or_all_is_refused_on_either_side() {
+    for (side, field) in [
+        ("initial_state", "initial_state.channels.tag_update"),
+        ("expected", "expected.channels.tag_update"),
+    ] {
+        for (ts, accepted) in [(0u32, false), (1, true), (2, true), (3, false)] {
+            let mut json = with_parked_get_tag(side, 0);
+            let channels = if side == "initial_state" {
+                &mut json["initial_state"]["channels"]
+            } else {
+                &mut json["expected"]["channels"]["value"]
+            };
+            channels["tag_update"] = ts.into();
+            let parsed = parse_reference_json(&json.to_string());
+            if accepted {
+                assert!(parsed.is_ok(), "{side} TS {ts}: {parsed:?}");
+            } else {
+                assert!(
+                    matches!(parsed, Err(SpuReferenceError::Invalid { field: f }) if f == field),
+                    "{side} TS {ts}: {parsed:?}"
+                );
+            }
+        }
+    }
 }
