@@ -562,9 +562,13 @@ pub enum SpuInstruction {
     Hbra,
     /// Branch-relative hint; ignored by the interpreter.
     Hbrr,
-    /// Ordering barrier; no-op in the interpreter.
-    Sync,
-    /// Data barrier; no-op in the interpreter.
+    /// Synchronize: complete pending stores before the next fetch.
+    Sync {
+        /// The C bit: `sync.c`, which also synchronizes channel state.
+        c: bool,
+    },
+    /// Synchronize data: complete earlier loads, stores and channel
+    /// accesses before later ones start.
     Dsync,
     /// Halt if RA's preferred word equals RB's.
     Heq {

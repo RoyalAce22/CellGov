@@ -503,15 +503,26 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:192 s:8. Hint-for-Branch Instructions] Hint for Branch (r-form) is a hint with no architectural effect.
         // [SPU-ISA p:194 s:8. Hint-for-Branch Instructions] Hint for Branch Relative is a hint with no architectural effect.
         // [SPU-ISA p:193 s:8. Hint-for-Branch Instructions] Hint for Branch (a-form) is a hint with no architectural effect.
-        // [SPU-ISA p:242 s:10. Control Instructions] Synchronize is a barrier; modeled as a no-op given in-order semantics.
-        // [SPU-ISA p:243 s:10. Control Instructions] Synchronize Data orders local-store accesses; a no-op given in-order semantics.
         SpuInstruction::Nop
         | SpuInstruction::Lnop
         | SpuInstruction::Hbr
         | SpuInstruction::Hbra
-        | SpuInstruction::Hbrr
-        | SpuInstruction::Sync
-        | SpuInstruction::Dsync => SpuStepOutcome::Continue,
+        | SpuInstruction::Hbrr => SpuStepOutcome::Continue,
+
+        // Every load, store and fetch here reads and writes local store in
+        // program order, so each store is already visible to the next load
+        // and the next fetch. Each channel write that `execute_wrch` accepts
+        // takes effect before the next instruction, and the channels that
+        // set execution state fall to its unsupported-channel fault. The
+        // three barriers therefore order nothing further. This is one of
+        // the outcomes the architecture allows.
+        // [SPU-ISA p:242 s:10. Control Instructions] Synchronize waits for pending stores before the next fetch; the C bit first synchronizes channel state.
+        // [SPU-ISA p:243 s:10. Control Instructions] Synchronize Data completes earlier loads, stores and channel accesses before later ones start.
+        // [SPU-ISA p:254 s:13.1] local-store access is weakly consistent with respect to the instruction fetch.
+        // [SPU-ISA p:255 s:13.3] without sync, the SPU might or might not execute a newly stored instruction.
+        // [SPU-ISA p:256 s:13.5] an instruction the SPU fetched before the store is not seen, so self-modifying code runs a sync first.
+        // [SPU-ISA p:258 s:13.9] only sync.c guarantees that a channel write to execution state affects the next instruction.
+        SpuInstruction::Sync { c: _ } | SpuInstruction::Dsync => SpuStepOutcome::Continue,
 
         // [SPU-ISA p:244 s:10. Control Instructions] Move from SPR: an undefined SPR supplies zeros.
         // [CBE-Handbook p:67 s:3.1.2] the SPU has no special-purpose registers, so every SA reads zero.
@@ -574,3 +585,7 @@ mod halt_tests;
 #[cfg(test)]
 #[path = "tests/spr_tests.rs"]
 mod spr_tests;
+
+#[cfg(test)]
+#[path = "tests/sync_tests.rs"]
+mod sync_tests;

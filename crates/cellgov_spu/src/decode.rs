@@ -97,7 +97,12 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         0x1A8 => return Ok(SpuInstruction::Bi { ra: ra7 }),
         0x201 => return Ok(SpuInstruction::Nop),
         0x001 => return Ok(SpuInstruction::Lnop),
-        0x002 => return Ok(SpuInstruction::Sync),
+        // [SPU-ISA p:242 s:10 Sync] RR opcode 0x002; bit 11 is the C feature bit.
+        0x002 => {
+            return Ok(SpuInstruction::Sync {
+                c: raw & 0x0010_0000 != 0,
+            })
+        }
         // [SPU-ISA p:150 s:7 Heq] RR opcode 0x3D8; RT is a false target.
         0x3D8 => return Ok(SpuInstruction::Heq { ra: ra7, rb: rb7 }),
         // [SPU-ISA p:152 s:7 Hgt] RR opcode 0x258.
