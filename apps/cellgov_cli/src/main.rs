@@ -34,6 +34,8 @@ mod lv2_tables;
 mod oracle_gap;
 mod paths;
 mod progress;
+mod spu_census;
+mod spu_disasm;
 
 use std::path::Path;
 
@@ -180,6 +182,8 @@ fn dispatch_dev(
 ) -> Result<CommandExitCode, CommandError> {
     match dev {
         DevCommand::Disasm(args) => disasm::run(args, vfs_flag),
+        DevCommand::SpuDisasm(args) => spu_disasm::run(args, vfs_flag),
+        DevCommand::SpuCensus(args) => spu_census::run(args, vfs_flag, globals.format),
         DevCommand::PrxImports(args) => {
             dump_prx_imports::run(args, vfs_flag)?;
             Ok(CommandExitCode::SUCCESS)

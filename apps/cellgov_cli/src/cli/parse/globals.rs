@@ -159,6 +159,8 @@ pub(super) fn reads_vfs_root(command: &Command) -> bool {
         | Command::Boot(_) => true,
         Command::Dev(dev) => match dev {
             DevCommand::Disasm(_)
+            | DevCommand::SpuDisasm(_)
+            | DevCommand::SpuCensus(_)
             | DevCommand::PrxImports(_)
             | DevCommand::Funcs(_)
             | DevCommand::Lv2Discover(_)
@@ -197,7 +199,7 @@ pub(super) fn reads_format(command: &Command) -> bool {
             TitleCommand::List | TitleCommand::Show { .. } | TitleCommand::Verify { .. }
         ),
         Command::Dev(dev) => match dev {
-            DevCommand::Lv2Discover(_) => true,
+            DevCommand::Lv2Discover(_) | DevCommand::SpuCensus(_) => true,
             #[cfg(feature = "decrypt")]
             DevCommand::Lv2Extract(_) => true,
             _ => false,

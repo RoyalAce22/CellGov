@@ -22,10 +22,36 @@ pub const ELF32_PHDR_SIZE: usize = 32;
 /// `e_entry` field offset in the ELF32 header.
 pub const ELF32_E_ENTRY: usize = 24;
 
+/// `e_phoff` field offset in the ELF32 header.
+pub const ELF32_E_PHOFF: usize = 28;
+
+/// `e_shoff` field offset in the ELF32 header.
+pub const ELF32_E_SHOFF: usize = 32;
+
+/// `e_phentsize` field offset in the ELF32 header.
+pub const ELF32_E_PHENTSIZE: usize = 42;
+
+/// `e_phnum` field offset in the ELF32 header.
+pub const ELF32_E_PHNUM: usize = 44;
+
+/// `e_shentsize` field offset in the ELF32 header.
+pub const ELF32_E_SHENTSIZE: usize = 46;
+
+/// `e_shnum` field offset in the ELF32 header.
+pub const ELF32_E_SHNUM: usize = 48;
+
+/// `p_flags` field offset in an ELF32 program header.
+pub const ELF32_P_FLAGS: usize = 24;
+
 // Same container coupling as the `ELF64_*` block below: a reader that
-// bounds-checks `ELF32_HEADER_SIZE` reads this field without a second
+// bounds-checks `ELF32_HEADER_SIZE` reads these fields without a second
 // check.
 const _: () = assert!(ELF32_E_ENTRY + 4 <= ELF32_HEADER_SIZE);
+const _: () = assert!(ELF32_E_SHNUM + 2 <= ELF32_HEADER_SIZE);
+const _: () = assert!(ELF32_P_FLAGS + 4 <= ELF32_PHDR_SIZE);
+
+/// `e_ident[EI_CLASS]` value for 32-bit ELF.
+pub const ELFCLASS32: u8 = 1;
 
 /// `e_ident[EI_CLASS]` value for 64-bit ELF.
 pub const ELFCLASS64: u8 = 2;
@@ -58,6 +84,11 @@ pub const ET_EXEC: u16 = 2;
 
 /// `e_machine` value for 64-bit PowerPC.
 pub const EM_PPC64: u16 = 21;
+
+/// `e_machine` value for code an SPE runs.
+///
+/// [CBE-Handbook p:393 s:14.2.2.1 Table 14-1] e_machine EM_SPU is 23: the code runs on an SPE.
+pub const EM_SPU: u16 = 23;
 
 /// `e_type` value for PS3 PRX modules (Sony-specific extension to ELF
 /// `e_type`).

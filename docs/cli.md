@@ -1300,6 +1300,82 @@ Exit codes particular to this command:
   141  stdout was closed by a downstream reader
 ```
 
+#### `cellgov dev spu-disasm`
+
+Disassemble an SPU image: an SPU ELF, one embedded in another file, or a raw local-store image.
+
+```console
+$ cellgov dev spu-disasm dumps/EBOOT.BIN
+$ cellgov dev spu-disasm dumps/EBOOT.BIN --image 3 --count 64
+$ cellgov dev spu-disasm dumps/job.bin --raw --skip 30 --base 4000
+```
+
+```
+Usage: cellgov dev spu-disasm [OPTIONS] <PATH>
+```
+
+| Argument | Description |
+| --- | --- |
+| `PATH` | SPU ELF, a file holding SPU ELFs, a SELF, or a raw image. Required. |
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--image` | `N` | Disassemble the Nth SPU ELF found in the file, from 0. |
+| `--raw` | -- | Read the file as a raw local-store image. |
+| `--base` | `HEX` | Local-store address a raw image loads at. Default `0`. |
+| `--skip` | `HEX` | Bytes at the start of a raw file that are not the image. Default `0`. |
+| `--lsa` | `HEX` | Local-store address to start at; defaults to the ELF entry, or --base for a raw image. |
+| `--count` | `N` | Instruction count. Default `16`. |
+
+```
+Input:
+  An SPU ELF is disassembled from its entry point, or from --lsa. A file
+  that holds SPU ELFs inside it (a PPU executable or PRX) lists them;
+  --image N picks one. --raw reads the file, past --skip bytes, as a
+  local-store image placed at --base.
+
+SCE-wrapped input:
+  this build has no decrypt support: plaintext ELF / PRX only. An
+  SCE-wrapped input is refused by name, and --vfs-root names no path
+  this build reads; rebuild with --features decrypt to read one.
+
+Exit codes particular to this command:
+  20   at least one word is no instruction the CBE runs
+  141  stdout was closed by a downstream reader
+```
+
+#### `cellgov dev spu-census`
+
+Count the SPU instruction words of installed titles by mnemonic and decoder class.
+
+```console
+$ cellgov dev spu-census --all
+$ cellgov dev spu-census --title flow --format json
+```
+
+```
+Usage: cellgov dev spu-census [OPTIONS] <--all|--title <NAME>>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--all` | -- | Every title in the registry. |
+| `--title` | `NAME` | One title, by short name. |
+
+```
+Scope:
+  Every installed version of each title: the base tree and each update
+  tree. Each ELF, SELF or SPRX file in them is read; a SELF this build
+  cannot decrypt is listed as skipped. Each SPU ELF found in them is
+  counted once, however many files hold it: the words of its executable
+  PT_LOAD segments. A title that ships inside the firmware is skipped.
+
+SCE-wrapped input:
+  this build has no decrypt support: plaintext ELF / PRX only. An
+  SCE-wrapped input is refused by name, and --vfs-root names no path
+  this build reads; rebuild with --features decrypt to read one.
+```
+
 #### `cellgov dev prx-imports`
 
 Print a PRX or executable's import table.

@@ -22,6 +22,12 @@ pub(crate) const MAX_DISASM_COUNT: usize = 1 << 16;
 pub(crate) enum DevCommand {
     /// Disassemble a guest ELF at a virtual address.
     Disasm(DisasmArgs),
+    /// Disassemble an SPU image: an SPU ELF, one embedded in another
+    /// file, or a raw local-store image.
+    SpuDisasm(SpuDisasmArgs),
+    /// Count the SPU instruction words of installed titles by mnemonic
+    /// and decoder class.
+    SpuCensus(SpuCensusArgs),
     /// Print a PRX or executable's import table.
     PrxImports(PrxImportsArgs),
     /// Print the OPD-derived function map for an ELF or PRX.
@@ -127,6 +133,80 @@ pub(crate) struct DisasmArgs {
     /// Build the OPD function map and annotate branch targets.
     #[arg(long)]
     pub symbolize: bool,
+}
+
+/// The outcomes `dev spu-disasm` has beyond the shared 0-5 contract.
+const SPU_DISASM_EXIT_CODES: &str = "Exit codes particular to this command:
+  20   at least one word is no instruction the CBE runs
+  141  stdout was closed by a downstream reader";
+
+/// How `dev spu-disasm` picks its image.
+const SPU_DISASM_INPUT_NOTE: &str = "Input:
+  An SPU ELF is disassembled from its entry point, or from --lsa. A file
+  that holds SPU ELFs inside it (a PPU executable or PRX) lists them;
+  --image N picks one. --raw reads the file, past --skip bytes, as a
+  local-store image placed at --base.";
+
+/// `cellgov dev spu-disasm`
+#[derive(Debug, clap::Args)]
+#[command(after_help = format!("{SPU_DISASM_INPUT_NOTE}
+
+{SCE_INPUT_USAGE_NOTE}
+
+{SPU_DISASM_EXIT_CODES}"))]
+pub(crate) struct SpuDisasmArgs {
+    /// SPU ELF, a file holding SPU ELFs, a SELF, or a raw image.
+    #[arg(value_name = "PATH")]
+    pub path: String,
+    /// Disassemble the Nth SPU ELF found in the file, from 0.
+    #[arg(long, value_name = "N", conflicts_with = "raw")]
+    pub image: Option<usize>,
+    /// Read the file as a raw local-store image.
+    #[arg(long)]
+    pub raw: bool,
+    /// Local-store address a raw image loads at.
+    #[arg(long, value_name = "HEX", value_parser = value::hex_u32, default_value = "0", requires = "raw")]
+    pub base: u32,
+    /// Bytes at the start of a raw file that are not the image.
+    #[arg(long, value_name = "HEX", value_parser = value::hex_u32, default_value = "0", requires = "raw")]
+    pub skip: u32,
+    /// Local-store address to start at; defaults to the ELF entry, or
+    /// --base for a raw image.
+    #[arg(long, value_name = "HEX", value_parser = value::hex_u32)]
+    pub lsa: Option<u32>,
+    /// Instruction count.
+    #[arg(long, value_name = "N", default_value_t = 16, value_parser = disasm_count)]
+    pub count: usize,
+}
+
+/// Which titles `cellgov dev spu-census` reads.
+#[derive(Debug, clap::Args)]
+#[group(required = true, multiple = false)]
+pub(crate) struct SpuCensusScope {
+    /// Every title in the registry.
+    #[arg(long)]
+    pub all: bool,
+    /// One title, by short name.
+    #[arg(long, value_name = "NAME")]
+    pub title: Option<String>,
+}
+
+/// What `dev spu-census` reads and counts.
+const SPU_CENSUS_NOTE: &str = "Scope:
+  Every installed version of each title: the base tree and each update
+  tree. Each ELF, SELF or SPRX file in them is read; a SELF this build
+  cannot decrypt is listed as skipped. Each SPU ELF found in them is
+  counted once, however many files hold it: the words of its executable
+  PT_LOAD segments. A title that ships inside the firmware is skipped.";
+
+/// `cellgov dev spu-census`
+#[derive(Debug, clap::Args)]
+#[command(after_help = format!("{SPU_CENSUS_NOTE}
+
+{SCE_INPUT_USAGE_NOTE}"))]
+pub(crate) struct SpuCensusArgs {
+    #[command(flatten)]
+    pub scope: SpuCensusScope,
 }
 
 /// A `--count` inside the disassembler's window.

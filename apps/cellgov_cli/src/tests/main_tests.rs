@@ -66,6 +66,8 @@ const DISPATCHED: &[&str] = &[
     "scenario run",
     "scenario dump",
     "dev disasm",
+    "dev spu-disasm",
+    "dev spu-census",
     "dev prx-imports",
     "dev funcs",
     "dev lv2-discover",

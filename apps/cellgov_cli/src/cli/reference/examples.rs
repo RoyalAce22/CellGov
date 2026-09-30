@@ -208,6 +208,21 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         ],
     },
     Examples {
+        path: "dev spu-disasm",
+        lines: &[
+            "cellgov dev spu-disasm dumps/EBOOT.BIN",
+            "cellgov dev spu-disasm dumps/EBOOT.BIN --image 3 --count 64",
+            "cellgov dev spu-disasm dumps/job.bin --raw --skip 30 --base 4000",
+        ],
+    },
+    Examples {
+        path: "dev spu-census",
+        lines: &[
+            "cellgov dev spu-census --all",
+            "cellgov dev spu-census --title flow --format json",
+        ],
+    },
+    Examples {
         path: "dev prx-imports",
         lines: &[
             "cellgov dev prx-imports vfs/dev_flash/sys/external/libsysmodule.sprx",

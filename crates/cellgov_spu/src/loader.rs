@@ -4,7 +4,9 @@
 use crate::state::SpuState;
 use cellgov_mem::be::{read_u16, read_u32};
 use cellgov_ps3_abi::format::elf::{
-    ELF32_E_ENTRY, ELF32_HEADER_SIZE, ELF32_PHDR_SIZE, ELF_MAGIC, PT_LOAD,
+    ELF32_E_ENTRY, ELF32_E_PHENTSIZE, ELF32_E_PHNUM, ELF32_E_PHOFF, ELF32_E_SHENTSIZE,
+    ELF32_E_SHNUM, ELF32_E_SHOFF, ELF32_HEADER_SIZE, ELF32_PHDR_SIZE, ELF32_P_FLAGS,
+    ELF_E_MACHINE_OFFSET, ELF_MAGIC, PT_LOAD,
 };
 
 /// Load failure.
@@ -59,14 +61,52 @@ pub enum LoadError {
     },
 }
 
-/// Load an SPU ELF binary into `state`, copying PT_LOAD segments into
-/// LS, zeroing `.bss` (memsz > filesz), and setting `state.pc` to the
-/// ELF entry point.
+/// One PT_LOAD segment of an SPU ELF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpuLoadSegment {
+    /// Local-store address the segment loads at.
+    pub vaddr: u32,
+    /// File offset of the segment's bytes.
+    pub offset: usize,
+    /// Bytes the file holds.
+    pub filesz: usize,
+    /// Bytes the segment takes in local store.
+    pub memsz: usize,
+    /// The segment's `p_flags`.
+    pub flags: u32,
+}
+
+impl SpuLoadSegment {
+    /// The segment's file bytes within `data`, the ELF it came from.
+    pub fn bytes<'a>(&self, data: &'a [u8]) -> &'a [u8] {
+        &data[self.offset..self.offset + self.filesz]
+    }
+}
+
+/// An SPU ELF's header and PT_LOAD segments, validated against a local
+/// store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpuElf {
+    /// `e_machine`.
+    pub machine: u16,
+    /// `e_entry`.
+    pub entry: u32,
+    /// The PT_LOAD segments, in header order.
+    pub segments: Vec<SpuLoadSegment>,
+    /// Bytes from the header to the end of the last structure the file
+    /// holds: the header, the program-header table, the segments' file
+    /// bytes, and the section-header table when there is one. ELF names
+    /// no total size, so this is where an embedded image ends.
+    pub extent: usize,
+}
+
+/// Read an SPU ELF's header and PT_LOAD segments, checking each
+/// against a local store of `ls_len` bytes.
 ///
 /// # Errors
 ///
 /// Returns [`LoadError`] on any header or segment validation failure.
-pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> {
+pub fn parse_spu_elf(data: &[u8], ls_len: usize) -> Result<SpuElf, LoadError> {
     if data.len() < ELF32_HEADER_SIZE {
         return Err(LoadError::TooSmall);
     }
@@ -85,10 +125,11 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
         return Err(LoadError::NotBigEndian);
     }
 
+    let machine = read_u16(data, ELF_E_MACHINE_OFFSET);
     let entry = read_u32(data, ELF32_E_ENTRY);
-    let phoff = read_u32(data, 28) as usize;
-    let phnum = read_u16(data, 44) as usize;
-    let phentsize = read_u16(data, 42) as usize;
+    let phoff = read_u32(data, ELF32_E_PHOFF) as usize;
+    let phnum = read_u16(data, ELF32_E_PHNUM) as usize;
+    let phentsize = read_u16(data, ELF32_E_PHENTSIZE) as usize;
 
     // [CBE-Handbook p:393 s:14.2.2.1 Table 14-1] an SPE-ELF object is
     // ELFCLASS32, so its program-header slot has exactly one architected
@@ -100,6 +141,11 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
         return Err(LoadError::BadPhentsize { phentsize });
     }
 
+    let mut segments = Vec::new();
+    let mut extent = ELF32_HEADER_SIZE;
+    if phnum != 0 {
+        extent = extent.max(phoff.saturating_add(phnum * ELF32_PHDR_SIZE));
+    }
     for i in 0..phnum {
         let base = phoff + i * phentsize;
         if base + ELF32_PHDR_SIZE > data.len() {
@@ -115,6 +161,7 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
         let p_vaddr = read_u32(data, base + 8);
         let p_filesz = read_u32(data, base + 16) as usize;
         let p_memsz = read_u32(data, base + 20) as usize;
+        let p_flags = read_u32(data, base + ELF32_P_FLAGS);
 
         // The local-store bound below is memsz-derived while the copy
         // is filesz bytes, so a header claiming extra file bytes would
@@ -128,7 +175,7 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
 
         // [CBE-Handbook p:64 s:3.1.1] Local Store is 256 KB; segments must fit.
         let end = p_vaddr as usize + p_memsz;
-        if end > state.ls.len() {
+        if end > ls_len {
             return Err(LoadError::SegmentOutOfRange {
                 vaddr: p_vaddr,
                 memsz: p_memsz as u32,
@@ -139,15 +186,14 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
             return Err(LoadError::SegmentTruncated);
         }
 
-        let dst_start = p_vaddr as usize;
-        state.ls[dst_start..dst_start + p_filesz]
-            .copy_from_slice(&data[p_offset..p_offset + p_filesz]);
-
-        if p_memsz > p_filesz {
-            let bss_start = dst_start + p_filesz;
-            let bss_end = dst_start + p_memsz;
-            state.ls[bss_start..bss_end].fill(0);
-        }
+        extent = extent.max(p_offset + p_filesz);
+        segments.push(SpuLoadSegment {
+            vaddr: p_vaddr,
+            offset: p_offset,
+            filesz: p_filesz,
+            memsz: p_memsz,
+            flags: p_flags,
+        });
     }
 
     // [CBE-Handbook p:395 s:14.3 Table 14-4] an SPE-ELF image names the
@@ -155,12 +201,44 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
     // a loadable image lies wholly inside that local store. The loader
     // rejects an entry point with no whole word left, rather than
     // deferring to the first failed fetch.
-    if entry as usize + 4 > state.ls.len() {
+    if entry as usize + 4 > ls_len {
         return Err(LoadError::EntryOutOfRange { entry });
     }
 
+    // An embedded image is usually stripped of its section headers, so
+    // only a table that lies inside the data extends the image.
+    let shoff = read_u32(data, ELF32_E_SHOFF) as usize;
+    let shnum = read_u16(data, ELF32_E_SHNUM) as usize;
+    let shentsize = read_u16(data, ELF32_E_SHENTSIZE) as usize;
+    let sh_end = shoff.saturating_add(shnum.saturating_mul(shentsize));
+    if shoff != 0 && shnum != 0 && sh_end <= data.len() {
+        extent = extent.max(sh_end);
+    }
+
+    Ok(SpuElf {
+        machine,
+        entry,
+        segments,
+        extent,
+    })
+}
+
+/// Load an SPU ELF binary into `state`, copying PT_LOAD segments into
+/// LS, zeroing `.bss` (memsz > filesz), and setting `state.pc` to the
+/// ELF entry point.
+///
+/// # Errors
+///
+/// Returns [`LoadError`] on any header or segment validation failure.
+pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> {
+    let elf = parse_spu_elf(data, state.ls.len())?;
+    for segment in &elf.segments {
+        let dst_start = segment.vaddr as usize;
+        state.ls[dst_start..dst_start + segment.filesz].copy_from_slice(segment.bytes(data));
+        state.ls[dst_start + segment.filesz..dst_start + segment.memsz].fill(0);
+    }
     // [CBE-Handbook p:421 s:14.6.3.3] SPE loader transfers control to entry parameter (e_entry).
-    state.pc = entry;
+    state.pc = elf.entry;
     Ok(())
 }
 
