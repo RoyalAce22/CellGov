@@ -114,12 +114,21 @@ smoke_artifacts() {
         --artifacts-dir target/fuzz-smoke/release --regressions crates/cellgov_fuzz/regressions
 }
 
+# The MSRV promise is that the workspace builds on it; the workflow's
+# msrv job runs this group on the MSRV toolchain, and the pre-push hook
+# runs it the same way. Tests run on the pinned and stable toolchains.
+check() {
+    timed check cargo check --workspace --all-targets --locked
+    timed check-external-data cargo check --workspace --all-targets --locked --features "$external_data_features"
+}
+
 deny() {
     timed deny cargo deny check advisories bans licenses sources
 }
 
 case "${1:-full}" in
     lint) run_group lint lint ;;
+    check) run_group check check ;;
     test) run_group test test_suite ;;
     test-linux) run_group test-linux test_linux ;;
     local) run_group local test_local ;;
@@ -134,7 +143,7 @@ case "${1:-full}" in
         run_group local test_local
         ;;
     *)
-        echo "usage: $0 {lint|test|test-linux|local|smoke-artifacts|deny|full}" >&2
+        echo "usage: $0 {lint|check|test|test-linux|local|smoke-artifacts|deny|full}" >&2
         exit 2
         ;;
 esac

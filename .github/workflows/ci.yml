@@ -13,18 +13,23 @@ on:
 permissions:
   contents: read
 
-# A second push to one branch makes the earlier run's verdict stale
-# before it finishes; cancel it instead of paying for both.
+# A second push to a branch other than main makes the earlier run's
+# verdict stale before it finishes; cancel it instead of paying for both.
+# On main every push keeps its run, so every commit that reaches main
+# gets a verdict of its own.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# The budget: every blocking lint and test leg finishes in 30 minutes.
-# Each such leg's `timeout-minutes` is 40, a margin above the budget, so a
-# leg that overruns it goes red as `infrastructure` in the `CI` summary
-# instead of running on. `.github/ci.sh` prints the time of every command
-# group; those lines show which group took the time. Raise the budget
-# here, in this one comment and the two timeouts, not per leg.
+# The budget: every lint, check and test job finishes in 30 minutes.
+# Each such job's `timeout-minutes` is 40, a margin above the budget, so
+# a blocking job that overruns it goes red as `infrastructure` in the
+# `CI` summary instead of running on. `.github/ci.sh` prints the time of
+# every command group; those lines show which group took the time. Raise
+# the budget here, in this one comment and those timeouts, not per job.
+#
+# Every job name ends in `blocking` or `informational`. A blocking job
+# is in the `CI` job's `needs`; an informational one is not.
 
 defaults:
   run:
@@ -40,7 +45,7 @@ env:
     cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/installed-title-tests,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/npdrm-oracle-vectors,cellgov_install/installed-title-tests,cellgov_install/title-dumps,cellgov_install/installed-firmware-tests,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
 
 jobs:
-  # `strategy.matrix` cannot read `env`, so the MSRV reaches the matrix
+  # `strategy.matrix` cannot read `env`, so the MSRV reaches the msrv job
   # as a job output rather than a second copy of the number. Only the
   # output is consumed downstream; nothing assumes which runner read it.
   config:
@@ -67,26 +72,17 @@ jobs:
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           bash -n .github/ci.sh .github/ci_verdict.sh .github/external-data.sh .github/fuzz.sh .github/loader_fuzz.sh
 
-  # The only job that denies warnings. The pinned entry is blocking, on
-  # a version that moves only when this file does; the stable entry is
-  # informational, so lints added upstream show up before the pin is
-  # bumped. Linux only: fmt and clippy output does not vary by platform.
-  #
-  # The pinned version is written once, in the matrix; the job name is
-  # derived from it so the number is not copied.
+  # The only job that denies warnings, on a version that moves only when
+  # this file does. Linux only: fmt and clippy output does not vary by
+  # platform. The pinned version is written once, in the matrix; the job
+  # name is derived from it so the number is not copied.
   lint:
-    name: lint (${{ matrix.informational && 'stable, informational' || format('pinned {0}', matrix.toolchain) }})
+    name: lint (pinned ${{ matrix.toolchain }}, blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    continue-on-error: ${{ matrix.informational }}
     strategy:
-      fail-fast: false
       matrix:
-        include:
-          - toolchain: "1.95.0"
-            informational: false
-          - toolchain: stable
-            informational: true
+        toolchain: ["1.95.0"]
     env:
       RUSTFLAGS: -D warnings
     steps:
@@ -104,7 +100,30 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' && !matrix.informational }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: repository lint
+        run: bash .github/ci.sh lint
+
+  # Informational: lints added upstream show up here before the pin is
+  # bumped. Not in the `CI` job's `needs`, so neither a failure nor a
+  # timeout here turns the run red.
+  lint-stable:
+    name: lint (stable, informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
 
       - name: repository lint
         run: bash .github/ci.sh lint
@@ -118,7 +137,7 @@ jobs:
   # in one run. A new advisory fails this job with no change to the
   # tree; deny.toml says how to answer it.
   deny:
-    name: deny
+    name: deny (blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -131,44 +150,53 @@ jobs:
         with:
           command: check advisories bans licenses sources
 
-  # No `-D warnings`: a warning is not a test failure. `beta` is
-  # informational. The release run is required -- debug_assert! compiles
-  # out, so a #[should_panic] on a debug-only assertion only fails there.
-  #
-  # Every toolchain runs on both runners: the project is developed on
-  # Windows and ships for Windows and Linux, and a path, line-ending,
-  # console or file-locking assumption only fails on the other one.
-  test:
-    name: test (${{ matrix.name }}, ${{ matrix.os }})
+  # Blocking. The MSRV promise is that the workspace builds on it: an API
+  # or language feature newer than the MSRV fails to compile, and the
+  # check finds that on one platform. Whether a test passes does not
+  # depend on the toolchain, so the tests run on stable.
+  msrv:
+    name: check (msrv ${{ needs.config.outputs.msrv }}, ubuntu-latest, blocking)
     needs: config
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install ${{ needs.config.outputs.msrv }} toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: ${{ needs.config.outputs.msrv }}
+
+      - name: repository check
+        run: bash .github/ci.sh check
+
+  # Blocking. No `-D warnings`: a warning is not a test failure. The
+  # release run is required -- debug_assert! compiles out, so a
+  # #[should_panic] on a debug-only assertion only fails there.
+  #
+  # Both runners: the project is developed on Windows and ships for
+  # Windows and Linux, and a path, line-ending, console or file-locking
+  # assumption only fails on the other one.
+  test:
+    name: test (stable, ${{ matrix.os }}, blocking)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
-    continue-on-error: ${{ matrix.informational }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        name: [msrv, stable, beta]
-        include:
-          - name: msrv
-            toolchain: ${{ needs.config.outputs.msrv }}
-            informational: false
-          - name: stable
-            toolchain: stable
-            informational: false
-          - name: beta
-            toolchain: beta
-            informational: true
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
 
       # Exports RUSTUP_TOOLCHAIN, which outranks rust-toolchain.toml.
-      - name: Install ${{ matrix.toolchain }} toolchain
+      - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
-          toolchain: ${{ matrix.toolchain }}
+          toolchain: stable
 
       # Third-party dependency artifacts only. A checkout resets source
       # mtimes, so every workspace crate rebuilds whatever a cache holds;
@@ -177,15 +205,14 @@ jobs:
       # repository and evicts the least recently used entry, so only a
       # run on main saves, and only from the pinned lint leg and the two
       # stable test legs: three entries. The key names the OS, the
-      # toolchain, Cargo.lock and the CARGO*/RUST* environment, so the
-      # other toolchains' legs find no entry and build uncached.
+      # toolchain, Cargo.lock and the CARGO*/RUST* environment.
       # `shared-key` drops the job name, so `fuzz.yml` restores the
       # stable entry by the same key and saves nothing.
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: test
-          save-if: ${{ github.ref == 'refs/heads/main' && matrix.name == 'stable' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: repository tests
         id: tests
@@ -194,7 +221,7 @@ jobs:
       # Builds whose result does not depend on the platform or the
       # toolchain run once, on one leg.
       - name: repository tests (Linux-only builds)
-        if: matrix.os == 'ubuntu-latest' && matrix.name == 'stable'
+        if: matrix.os == 'ubuntu-latest'
         run: bash .github/ci.sh test-linux
 
       # A red test step may be the fuzz smoke set. Its finding artifacts
@@ -210,14 +237,37 @@ jobs:
         if: failure() && steps.tests.outcome == 'failure'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: fuzz-smoke-${{ matrix.name }}-${{ matrix.os }}
+          name: fuzz-smoke-stable-${{ matrix.os }}
           path: target/fuzz-smoke/
           if-no-files-found: ignore
 
+  # Informational: a toolchain regression shows up here before it reaches
+  # stable. Linux only. Not in the `CI` job's `needs`, so neither a failure
+  # nor a timeout here turns the run red.
+  test-beta:
+    name: test (beta, ubuntu-latest, informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install beta toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: beta
+
+      - name: repository tests
+        run: bash .github/ci.sh test
+
+  # The verdict. `needs` lists the blocking jobs and nothing else, so
+  # each informational job's result, including a timeout, stays out of
+  # it.
   success:
     name: CI
     if: always()
-    needs: [config, lint, deny, test]
+    needs: [config, lint, deny, msrv, test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -228,15 +278,18 @@ jobs:
         with:
           persist-credentials: false
 
-      # One row per leg: its result and, when it is not green, whether
+      # One row per job: its result and, when it is not green, whether
       # the cause is infrastructure, a test, compile/lint, or a newer push.
-      # The table explains the verdict; it never changes it.
+      # The table explains the verdict; it never changes it. A newer push
+      # cancels a run only off main (see `concurrency`), so only there is
+      # a cancel read as superseded.
       - name: Class every leg
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          CANCELS: ${{ github.ref != 'refs/heads/main' }}
         run: |
-          bash .github/ci_verdict.sh "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" CI \
+          bash .github/ci_verdict.sh "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" CI "$CANCELS" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Require all blocking checks
