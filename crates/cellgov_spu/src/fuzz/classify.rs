@@ -92,12 +92,13 @@ pub(super) fn effect_and_outcome(
             ..
         } => (RDCH_EFFECTS, YIELD),
         SpuInstruction::Rdch {
-            channel: spu::MFC_RD_ATOMIC_STAT | spu::SPU_RD_MACH_STAT | spu::MFC_RD_TAG_MASK,
+            channel: spu::SPU_RD_MACH_STAT | spu::MFC_RD_TAG_MASK,
             ..
         } => (NO_EFFECTS, CONTINUE),
-        // A signal read with nothing written stalls.
+        // A signal read with nothing written stalls, and so does an
+        // atomic-status read with no status.
         SpuInstruction::Rdch {
-            channel: spu::SPU_RD_SIG_NOTIFY_1 | spu::SPU_RD_SIG_NOTIFY_2,
+            channel: spu::SPU_RD_SIG_NOTIFY_1 | spu::SPU_RD_SIG_NOTIFY_2 | spu::MFC_RD_ATOMIC_STAT,
             ..
         } => (NO_EFFECTS, CONTINUE_OR_YIELD),
         SpuInstruction::Rdch { channel, .. }

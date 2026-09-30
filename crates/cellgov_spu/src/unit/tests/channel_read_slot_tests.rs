@@ -45,6 +45,7 @@ fn rdch_tag_status_zeros_slots_one_to_three() {
 fn rdch_atomic_status_zeros_slots_one_to_three() {
     let mut s = SpuState::new();
     s.channels.atomic_status = spu::MFC_ATOMIC_STAT_S;
+    s.channels.atomic_status_ready = true;
     assert!(matches!(
         read(spu::MFC_RD_ATOMIC_STAT, &mut s),
         SpuStepOutcome::Continue

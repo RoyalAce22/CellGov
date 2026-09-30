@@ -271,6 +271,9 @@ impl Runtime {
                         BlockReason::OutboundMailboxFull
                     }
                     cellgov_exec::StallWake::SignalWrite(_) => BlockReason::SignalEmpty,
+                    cellgov_exec::StallWake::AtomicCommandCompletion => {
+                        BlockReason::AtomicStatusEmpty
+                    }
                 },
                 None => {
                     self.lv2_host.log_invariant_break(

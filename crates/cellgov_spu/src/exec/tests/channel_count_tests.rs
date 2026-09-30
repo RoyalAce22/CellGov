@@ -82,6 +82,42 @@ fn the_atomic_status_count_follows_a_putllc_and_its_read() {
     assert_eq!(count(&mut s, spu::MFC_RD_ATOMIC_STAT), 0);
 }
 
+/// [CBEA p:131 s:9.4] the channel is read-blocking with a maximum count of 1, and a read clears its contents.
+#[test]
+fn a_second_atomic_status_read_stalls_and_leaves_its_register() {
+    let mut s = SpuState::new();
+    // A putllc with no reservation fails, and reports S.
+    s.set_reg_word_splat(4, spu::MFC_PUTLLC);
+    execute(
+        &SpuInstruction::Wrch {
+            channel: spu::MFC_CMD,
+            rt: 4,
+        },
+        &mut s,
+        uid(),
+    );
+    let rdch = SpuInstruction::Rdch {
+        rt: 5,
+        channel: spu::MFC_RD_ATOMIC_STAT,
+    };
+    assert_eq!(execute(&rdch, &mut s, uid()), SpuStepOutcome::Continue);
+    assert_eq!(s.reg_word(5), spu::MFC_ATOMIC_STAT_S);
+    assert_eq!(s.channels.atomic_status, 0, "the read cleared the status");
+
+    s.set_reg_word_splat(5, 0xDEAD_BEEF);
+    assert!(
+        matches!(
+            execute(&rdch, &mut s, uid()),
+            SpuStepOutcome::Yield {
+                reason: cellgov_exec::YieldReason::ChannelStall,
+                ..
+            }
+        ),
+        "no command completed since the read"
+    );
+    assert_eq!(s.reg_word(5), 0xDEAD_BEEF);
+}
+
 /// [CBEA p:131 s:9.4] a successful putllc and a getllar are immediate atomic commands too, so each makes the count 1.
 #[test]
 fn a_successful_putllc_and_a_getllar_each_make_the_atomic_status_count_1() {

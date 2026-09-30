@@ -182,3 +182,52 @@ fn putqlluc_publishes_through_its_tag_group() {
     );
     assert_eq!(line, [0x77; 128]);
 }
+
+/// [CBEA p:131 s:9.4] the channel is read-blocking with a maximum count of 1, and a read clears its contents.
+#[test]
+fn a_second_atomic_status_read_parks_the_unit_for_good() {
+    let mut rt = Runtime::new(GuestMemory::new(0x1000), Budget::new(1), 200);
+    let unit = rt.register_unit_with(|id| {
+        spu(
+            id,
+            &[
+                wrch(MFC_LSA, 10),
+                wrch(MFC_EAL, 11),
+                wrch(MFC_CMD, 12),
+                rdch(MFC_RD_ATOMIC_STAT, 20),
+                rdch(MFC_RD_ATOMIC_STAT, 21),
+                0,
+            ],
+            &[
+                (10, 0x800),
+                (11, LINE),
+                (12, MFC_PUTLLUC),
+                (21, 0xDEAD_BEEF),
+            ],
+        )
+    });
+    for _ in 0..50 {
+        let Ok(step) = rt.step() else { break };
+        assert_ne!(step.result.yield_reason, YieldReason::Finished);
+        rt.commit_step(&step.result, &step.effects)
+            .expect("the step commits");
+    }
+    let parked = state(&rt, unit);
+    assert_eq!(parked.reg_word(20), MFC_ATOMIC_STAT_U, "the first read");
+    assert_eq!(
+        parked.reg_word(21),
+        0xDEAD_BEEF,
+        "the second read never retired"
+    );
+    assert_eq!(
+        rt.registry().effective_status(unit),
+        Some(cellgov_exec::UnitStatus::Blocked)
+    );
+    assert_eq!(
+        rt.registry()
+            .get(unit)
+            .and_then(|unit| unit.channel_stall())
+            .map(|stall| stall.wake),
+        Some(cellgov_exec::StallWake::AtomicCommandCompletion)
+    );
+}

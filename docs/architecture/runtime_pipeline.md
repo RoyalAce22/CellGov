@@ -88,8 +88,10 @@ nine-step deterministic loop:
    same batch. A `ChannelStall` leaves the unit's program counter on
    the blocking channel access, and the unit names the event that
    ends the park: a mailbox delivery, a DMA completion (for a tag-status
-   wait or a full command queue), a read of its outbound mailbox, or a
-   write to the signal-notification register it reads.
+   wait or a full command queue), a read of its outbound mailbox, a
+   write to the signal-notification register it reads, or, for an
+   atomic-status read with no status, an immediate atomic command of
+   its own, which cannot come while it stalls.
    Only that event wakes it, and the access runs again. A refused batch parks nobody: it queued no completion,
    so the park would wait on a transfer that will never land.
 8. Emit the batch's commit trace records and notify the scheduler

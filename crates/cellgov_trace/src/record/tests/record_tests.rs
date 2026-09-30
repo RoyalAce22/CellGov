@@ -357,6 +357,7 @@ fn unit_blocked_reason_discriminants_locked() {
     assert_eq!(TracedBlockReason::DmaWait as u8, 2);
     assert_eq!(TracedBlockReason::OutboundMailboxFull as u8, 3);
     assert_eq!(TracedBlockReason::SignalEmpty as u8, 4);
+    assert_eq!(TracedBlockReason::AtomicStatusEmpty as u8, 5);
 }
 
 #[test]

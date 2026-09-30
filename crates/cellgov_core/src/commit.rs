@@ -191,6 +191,9 @@ pub enum BlockReason {
     /// SPU `SPU_RD_SIG_NOTIFY_1` or `_2` found no signal; runtime parks
     /// the unit until another processor writes the register.
     SignalEmpty,
+    /// SPU `MFC_RD_ATOMIC_STAT` found no status; only an immediate atomic
+    /// command of the unit itself gives it one, so the park does not end.
+    AtomicStatusEmpty,
 }
 
 /// Mutable references to every subsystem the commit pipeline touches.

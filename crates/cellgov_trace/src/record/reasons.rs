@@ -78,6 +78,9 @@ pub enum TracedBlockReason {
     /// SPU blocked on a signal-notification channel until another
     /// processor writes the register.
     SignalEmpty = 4,
+    /// SPU blocked on `MFC_RD_ATOMIC_STAT` with no immediate atomic
+    /// command completed.
+    AtomicStatusEmpty = 5,
 }
 
 /// Why a unit was woken, as the trace records it.

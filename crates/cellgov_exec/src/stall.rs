@@ -24,6 +24,14 @@ pub enum StallWake {
     /// Another processor writes the signal-notification register the
     /// unit reads.
     SignalWrite(crate::SignalNotifier),
+    /// An immediate atomic command of the unit completes.
+    ///
+    /// The unit issues those commands itself, so while it stalls none
+    /// completes: only an interrupt, which the model does not raise, ends
+    /// the stall.
+    ///
+    /// [CBEA p:131 s:9.4] a read of MFC_RdAtomicStat before the unit issues an immediate atomic command is a software-induced deadlock.
+    AtomicCommandCompletion,
 }
 
 impl StallWake {

@@ -215,8 +215,13 @@ pub(super) fn execute_rdch(
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:462 s:17. SPE Channel and Related MMIO Interface sub:17.11 MFC Read Atomic Command Status Channel] Reports success/failure status for the most recent atomic command (e.g. putllc).
+        // [CBEA p:131 s:9.4] the channel is read-blocking with a maximum count of 1, and a read clears its contents.
         spu::MFC_RD_ATOMIC_STAT => {
+            if !state.channels.atomic_status_ready {
+                return stall();
+            }
             state.set_reg_channel_word(rt, state.channels.atomic_status);
+            state.channels.atomic_status = 0;
             state.channels.atomic_status_ready = false;
             SpuStepOutcome::Continue
         }
