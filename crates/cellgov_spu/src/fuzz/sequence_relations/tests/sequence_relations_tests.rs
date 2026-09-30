@@ -56,7 +56,7 @@ fn every_row_is_in_identity_order_and_every_word_decodes_to_its_kind() {
     sorted.sort_unstable();
     sorted.dedup();
     assert_eq!(ids, sorted);
-    assert_eq!(ids.len(), 56);
+    assert_eq!(ids.len(), 69);
     for row in sequence_relations() {
         let assignment: Vec<u8> = (10..10 + row.register_count() as u8).collect();
         let partner: &[SpuSymbolicWord] = match row.partner {
@@ -170,4 +170,77 @@ fn the_result_only_partner_writes_rt_and_leaves_c_as_it_was() {
     assert_eq!(state.regs[9], [0x77; 16], "c kept");
     assert_eq!(state.regs[70], [0; 16], "equal words give zero");
     assert_eq!(fused.writes, [RT]);
+}
+
+/// Normal single-precision words from a fixed generator, exponents 64..=190.
+fn normal_words(count: usize) -> Vec<u32> {
+    let mut state = 0x1449u64;
+    (0..count)
+        .map(|_| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let bits = (state >> 32) as u32;
+            bits & 0x807F_FFFF | (64 + (bits >> 8) % 127) << 23
+        })
+        .collect()
+}
+
+#[test]
+fn the_integer_division_and_square_root_round_as_the_host_does() {
+    let words = normal_words(20_000);
+    for pair in words.chunks_exact(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let host = (f32::from_bits(a) / f32::from_bits(b)).to_bits();
+        // The model covers normal quotients, the division row's domain.
+        if (1..=254).contains(&((host >> 23) & 0xFF)) {
+            assert_eq!(
+                super::lanes::ieee_divide(a, b),
+                Some(host),
+                "{a:#010x} / {b:#010x}"
+            );
+        }
+        let magnitude = a & 0x7FFF_FFFF;
+        let root = f32::from_bits(magnitude).sqrt().to_bits();
+        assert_eq!(
+            super::lanes::ieee_sqrt(magnitude),
+            Some(root),
+            "sqrt {a:#010x}"
+        );
+    }
+}
+
+#[test]
+fn the_truncated_estimates_meet_their_defining_inequalities() {
+    for x in normal_words(20_000) {
+        let value = f64::from(f32::from_bits(x & 0x7FFF_FFFF));
+        let reciprocal = super::lanes::truncated_reciprocal(x).expect("in range");
+        let y = f64::from(f32::from_bits(reciprocal & 0x7FFF_FFFF));
+        let next = f64::from(f32::from_bits((reciprocal & 0x7FFF_FFFF) + 1));
+        // A 24-bit by 24-bit product is exact in f64.
+        assert!(value * y < 1.0 && value * next >= 1.0, "1/{x:#010x}");
+        assert_eq!(reciprocal >> 31, x >> 31, "the reciprocal keeps the sign");
+        let rsqrt = super::lanes::truncated_rsqrt(x).expect("in range");
+        let (y, next) = (
+            f64::from(f32::from_bits(rsqrt)),
+            f64::from(f32::from_bits(rsqrt + 1)),
+        );
+        // Exact to 72 bits through u128 on the significands.
+        let exact = |y: f64| -> bool {
+            let (m, e) = (
+                value.to_bits() & ((1 << 52) - 1) | 1 << 52,
+                value.to_bits() >> 52,
+            );
+            let (n, f) = (y.to_bits() & ((1 << 52) - 1) | 1 << 52, y.to_bits() >> 52);
+            let (m, n) = (u128::from(m >> 29), u128::from(n >> 29));
+            let scale = (e as i32 - 1023 - 23) + 2 * (f as i32 - 1023 - 23);
+            let product = m * n * n;
+            match -scale {
+                shift if shift <= 0 => false,
+                shift if shift >= 127 => true,
+                shift => product < 1u128 << shift,
+            }
+        };
+        assert!(exact(y) && !exact(next), "1/sqrt {x:#010x}");
+    }
 }

@@ -72,6 +72,7 @@ pub(super) const CEQ_NOT_EQUAL_FUSED: SpuSequenceRelation = SpuSequenceRelation 
     dead: &[],
     pins: &[],
     local_store: false,
+    approximate: &[],
 };
 
 pub(super) const CEQ_NOT_EQUAL_NOR: SpuSequenceRelation = SpuSequenceRelation {
@@ -258,6 +259,7 @@ macro_rules! select_rows {
                 dead: &[],
                 pins: &[],
                 local_store: false,
+        approximate: &[],
             },
         )*];
     };
@@ -345,6 +347,7 @@ const fn splat_row(
         dead: &[],
         pins: &[],
         local_store: false,
+        approximate: &[],
     }
 }
 

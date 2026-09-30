@@ -132,6 +132,35 @@ pub enum SpuSequenceRelationId {
     MoveOriAndi,
     /// `ori m,x,0; a rt,m,y` against `shlqbyi m,x,0; a rt,m,y`.
     MoveOriShlqbyi,
+    /// `frest t,x; fi rt,x,t` against the truncated reciprocal, measured.
+    EstimateReciprocal,
+    /// `frsqest t,x; fi rt,x,t` against the truncated reciprocal square root.
+    EstimateRsqrt,
+    /// The documented Newton reciprocal against the truncated reciprocal,
+    /// within 1 ulp.
+    NewtonReciprocal,
+    /// [`Self::NewtonReciprocal`] with `one` one ulp above 1.0, measured.
+    NewtonReciprocalOnePlus,
+    /// The documented reciprocal square root Newton step, within 1 ulp.
+    RsqrtNewton,
+    /// The reciprocal square root chain that yields `sqrt(x)`, against the
+    /// host's square root, measured.
+    SquareRoot,
+    /// The reciprocal and correction chain that yields `a / b`, against the
+    /// host's division, measured.
+    Division,
+    /// `fcgt c,a,b; selb rt,b,a,c` against the host's maximum.
+    FloatMax,
+    /// `fcgt c,a,b; selb rt,a,b,c` against the host's minimum.
+    FloatMin,
+    /// `fcmgt c,a,b; selb rt,b,a,c` against the host's larger magnitude.
+    MagnitudeMax,
+    /// `fcmgt c,a,b; selb rt,a,b,c` against the host's smaller magnitude.
+    MagnitudeMin,
+    /// `fceq c,a,b; selb rt,b,a,c` against the host's equal pick.
+    EqualPick,
+    /// `fcgt c,a,b; selb rt,b,a,c` against the SPU lane select.
+    FloatMaxSelect,
 }
 
 /// How exactly a relation's partner matches its sequence.
@@ -141,8 +170,16 @@ pub enum SpuFloatClass {
     BitExact,
     /// Bit-exact on every start state the precondition admits.
     BitExactUnderPrecondition,
-    /// Inexact: the partner may differ in low-order bits.
-    Inexact,
+    /// Inexact: the registers the row names approximate may differ in
+    /// low-order bits.
+    ///
+    /// [Schkufza2014 p:56 s:3] The error in a register is its distance in
+    /// ULPs from the target's value; a bound on it is the claim.
+    Inexact {
+        /// The largest ULP distance the claim admits in each lane; `None`
+        /// when the row only measures it.
+        ulp: Option<u32>,
+    },
 }
 
 /// One instruction of a relation row, with symbolic registers.
@@ -238,6 +275,8 @@ pub enum SpuSequencePin {
     /// The preferred word holds [`SEQUENCE_TAKEN_LANDING`], an indirect
     /// branch's target.
     TakenLanding,
+    /// Every word holds this value: a constant a row reads, such as 1.0.
+    Word(u32),
 }
 
 /// One row of the sequence-relation catalog.
@@ -265,6 +304,9 @@ pub struct SpuSequenceRelation {
     /// True when the row reads or writes local store, so the start state
     /// needs local-store contents.
     pub local_store: bool,
+    /// The symbolic registers an inexact row compares lane by lane within
+    /// its ULP bound instead of bit for bit.
+    pub approximate: &'static [u8],
 }
 
 impl SpuSequenceRelation {

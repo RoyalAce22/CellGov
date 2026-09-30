@@ -5,6 +5,10 @@ use super::rows_compare::{
     CEQH_NOT_EQUAL_FUSED, CEQ_NOT_EQUAL_FUSED, CEQ_NOT_EQUAL_NOR, CEQ_NOT_EQUAL_RESULT_ONLY,
     SELECT_ROWS, SPLAT_ROWS,
 };
+use super::rows_float::{
+    DIVISION_ROW, ESTIMATE_RECIPROCAL_ROW, ESTIMATE_RSQRT_ROW, NEWTON_RECIPROCAL_ONE_PLUS_ROW,
+    NEWTON_RECIPROCAL_ROW, PICK_ROWS, RSQRT_NEWTON_ROW, SQUARE_ROOT_ROW,
+};
 use super::rows_integer::{FUNNEL_ROW, MPY32_ROW, MPY32_SWAPPED_ROW, NEGATED_ROWS, POPCOUNT_ROW};
 use super::rows_memory::{
     MOVE_ORI_AI_ROW, MOVE_ORI_ANDI_ROW, MOVE_ORI_SHLQBYI_ROW, SPLIT_LOAD_ROW, SPLIT_STORE_ROW,
@@ -13,7 +17,7 @@ use super::rows_shuffle::INSERT_ROWS;
 use super::types::SpuSequenceRelation;
 
 /// The row groups, in identity order.
-const GROUPS: [&[SpuSequenceRelation]; 11] = [
+const GROUPS: [&[SpuSequenceRelation]; 13] = [
     &[
         CEQ_NOT_EQUAL_FUSED,
         CEQ_NOT_EQUAL_NOR,
@@ -30,6 +34,16 @@ const GROUPS: [&[SpuSequenceRelation]; 11] = [
     &[POPCOUNT_ROW],
     &[SPLIT_LOAD_ROW, SPLIT_STORE_ROW],
     &[MOVE_ORI_AI_ROW, MOVE_ORI_ANDI_ROW, MOVE_ORI_SHLQBYI_ROW],
+    &[
+        ESTIMATE_RECIPROCAL_ROW,
+        ESTIMATE_RSQRT_ROW,
+        NEWTON_RECIPROCAL_ROW,
+        NEWTON_RECIPROCAL_ONE_PLUS_ROW,
+        RSQRT_NEWTON_ROW,
+        SQUARE_ROOT_ROW,
+        DIVISION_ROW,
+    ],
+    &PICK_ROWS,
 ];
 
 const fn row_count() -> usize {

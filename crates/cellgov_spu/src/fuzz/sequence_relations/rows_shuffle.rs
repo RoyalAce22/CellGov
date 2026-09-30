@@ -136,6 +136,7 @@ const fn insert_row(
         dead: &[],
         pins: &[],
         local_store: false,
+        approximate: &[],
     }
 }
 

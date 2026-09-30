@@ -53,6 +53,7 @@ pub(super) const SPLIT_LOAD_ROW: SpuSequenceRelation = SpuSequenceRelation {
     dead: &[],
     pins: &[],
     local_store: true,
+    approximate: &[],
 };
 
 pub(super) const SPLIT_STORE_ROW: SpuSequenceRelation = SpuSequenceRelation {
@@ -87,6 +88,7 @@ pub(super) const MOVE_ORI_AI_ROW: SpuSequenceRelation = SpuSequenceRelation {
     dead: &[],
     pins: &[],
     local_store: false,
+    approximate: &[],
 };
 
 pub(super) const MOVE_ORI_ANDI_ROW: SpuSequenceRelation = SpuSequenceRelation {

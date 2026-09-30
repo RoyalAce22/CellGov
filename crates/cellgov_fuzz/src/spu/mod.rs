@@ -16,7 +16,9 @@ mod sequences;
 mod shrink;
 
 pub use instructions::run_instructions;
-pub use sequence_relations::{check_dead_sets, DeadSetFinding};
+pub use sequence_relations::{
+    check_dead_sets, check_preconditions, measured_ulp, DeadSetFinding, PreconditionFinding,
+};
 pub use sequences::run_sequences;
 
 pub(crate) use instructions::{instruction_case_words, run_instructions_with};

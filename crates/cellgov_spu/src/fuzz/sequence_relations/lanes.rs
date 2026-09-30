@@ -169,3 +169,132 @@ fn holds32(compare: Compare, x: u32, y: u32) -> bool {
 pub(super) fn rotate_left_128(value: [u8; 16], bits: u32) -> [u8; 16] {
     u128::from_be_bytes(value).rotate_left(bits).to_be_bytes()
 }
+
+/// The distance in ULPs between two single-precision words: the number of
+/// values between them in the SPU order, where every zero-exponent word is
+/// zero.
+///
+/// [Schkufza2014 p:58 s:5.2] The distance counts the floating-point numbers
+/// between two values.
+pub fn ulp_distance(left: u32, right: u32) -> u32 {
+    float_key(left).abs_diff(float_key(right)) as u32
+}
+
+/// The exponent field of a single-precision word.
+pub(super) fn exponent(bits: u32) -> u32 {
+    (bits >> 23) & 0xFF
+}
+
+/// A nonzero single-precision magnitude as `significand * 2^scale`, the
+/// significand with its hidden bit; `None` for a zero exponent.
+///
+/// [SPU-ISA p:196 s:9] The extended range reads exponent 255 as an ordinary
+/// exponent, and a zero exponent as zero.
+fn parts(bits: u32) -> Option<(u64, i32)> {
+    let biased = exponent(bits);
+    (biased != 0).then(|| {
+        (
+            u64::from(bits & 0x7F_FFFF | 0x80_0000),
+            biased as i32 - 127 - 23,
+        )
+    })
+}
+
+/// The magnitude word with `significand` (24 bits, hidden bit set) and
+/// `scale`; `None` outside the exponent range 1..=255.
+fn word(significand: u64, scale: i32) -> Option<u32> {
+    let biased = scale + 127 + 23;
+    ((1..=255).contains(&biased))
+        .then_some((biased as u32) << 23 | (significand as u32 & 0x7F_FFFF))
+}
+
+/// The truncated reciprocal of `x`: the magnitude `Y` with `x * Y < 1` and
+/// `x * INC(Y) >= 1`, signed as `x`; `None` for a zero exponent or a `Y`
+/// outside the exponent range.
+///
+/// [SPU-ISA p:216 s:9 Frest] `1/x = Y where x * Y < 1.0 and x * INC(Y) >= 1.0`.
+/// With `x = m * 2^s`, the largest significand `n` with `m * n < 2^47` is
+/// `(2^47 - 1) / m`, which lies in `[2^23, 2^24)` for every 24-bit `m`.
+pub(super) fn truncated_reciprocal(x: u32) -> Option<u32> {
+    let (m, s) = parts(x)?;
+    let n = ((1u64 << 47) - 1) / m;
+    Some(word(n, -s - 47)? | x & 0x8000_0000)
+}
+
+/// The truncated reciprocal square root of `|x|`: the magnitude `Y` with
+/// `x * Y^2 < 1` and `x * INC(Y)^2 >= 1`.
+///
+/// [SPU-ISA p:218 s:9 Frsqest] `1/sqrt(x) = Y where x * Y^2 < 1.0 and
+/// x * INC(Y)^2 >= 1.0`. With `x = m * 2^s` and `Y = n * 2^e`, the
+/// largest `n` with `m * n^2 < 2^t` is the integer square root of
+/// `(2^t - 1) / m`, for the `t` of the parity of `s` that puts `n` in
+/// `[2^23, 2^24)`.
+pub(super) fn truncated_rsqrt(x: u32) -> Option<u32> {
+    let (m, s) = parts(x)?;
+    let t: i32 = if s.rem_euclid(2) == 0 { 70 } else { 71 };
+    let n = (((1u128 << t) - 1) / u128::from(m)).isqrt() as u64;
+    let (n, t) = if n >= 1 << 24 {
+        (
+            (((1u128 << (t - 2)) - 1) / u128::from(m)).isqrt() as u64,
+            t - 2,
+        )
+    } else {
+        (n, t)
+    };
+    word(n, (-s - t) / 2)
+}
+
+/// The order a host gives single-precision words: sign and magnitude, a
+/// denormal a nonzero value below every normal.
+pub(super) fn ieee_order(bits: u32) -> i64 {
+    let magnitude = i64::from(bits & 0x7FFF_FFFF);
+    if bits & 0x8000_0000 != 0 {
+        -magnitude
+    } else {
+        magnitude
+    }
+}
+
+/// `significand * 2^scale`, rounded to 24 bits to nearest with ties to
+/// even. `significand` carries `guard` extra low bits and `sticky` is true
+/// when any bit below them was nonzero.
+fn round_nearest(significand: u64, guard: u32, sticky: bool, scale: i32) -> Option<u32> {
+    let kept = significand >> guard;
+    let dropped = significand & ((1 << guard) - 1);
+    let half = 1 << (guard - 1);
+    let up = dropped > half || (dropped == half && (sticky || kept & 1 == 1));
+    let (kept, scale) = match kept + u64::from(up) {
+        overflow if overflow == 1 << 24 => (1 << 23, scale + guard as i32 + 1),
+        rounded => (rounded, scale + guard as i32),
+    };
+    word(kept, scale)
+}
+
+/// The host's IEEE `a / b` for normal operands and a normal quotient,
+/// rounded to nearest.
+pub(super) fn ieee_divide(a: u32, b: u32) -> Option<u32> {
+    let ((ma, sa), (mb, sb)) = (parts(a)?, parts(b)?);
+    let numerator = ma << 26;
+    let quotient = numerator / mb;
+    let sticky = numerator % mb != 0;
+    // The quotient has 26 or 27 bits; keep 24 and round the rest.
+    let guard = 64 - quotient.leading_zeros() - 24;
+    let magnitude = round_nearest(quotient, guard, sticky, sa - sb - 26)?;
+    Some(magnitude | (a ^ b) & 0x8000_0000)
+}
+
+/// The host's IEEE `sqrt(|x|)` for a normal `x`, rounded to nearest.
+pub(super) fn ieee_sqrt(x: u32) -> Option<u32> {
+    let (m, s) = parts(x)?;
+    // An even scale halves exactly.
+    let (m, s) = if s.rem_euclid(2) == 0 {
+        (m, s)
+    } else {
+        (m << 1, s - 1)
+    };
+    let radicand = u128::from(m) << 26;
+    let root = radicand.isqrt() as u64;
+    let sticky = u128::from(root) * u128::from(root) != radicand;
+    let guard = 64 - root.leading_zeros() - 24;
+    round_nearest(root, guard, sticky, s / 2 - 13)
+}

@@ -64,13 +64,22 @@ fn every_row_holds_over_aliased_and_equal_lane_instantiations() {
             aliased += u32::from(distinct.len() < instance.assignment.len());
             equal += u32::from(compares_for_equality(relation) && preferred_words_equal(&instance));
         }
+        // A float row's precondition excludes whole lane classes, so fewer
+        // of its draws compare.
+        let floor = if relation.precondition.is_some() {
+            DRAWS as u32 / 16
+        } else {
+            DRAWS as u32 / 2
+        };
         assert!(
-            matched > DRAWS as u32 / 2,
+            matched > floor,
             "{:?}: only {matched} of {DRAWS} draws compared",
             relation.id
         );
+        // An inexact row pins constants and needs every register its own.
+        let needs_distinct = matches!(relation.float_class, SpuFloatClass::Inexact { .. });
         assert!(
-            aliased > 0,
+            aliased > 0 || needs_distinct,
             "{:?}: no aliased assignment drawn",
             relation.id
         );
@@ -318,9 +327,21 @@ fn a_reader_tail_makes_every_dead_set_row_diverge_on_the_register_it_read() {
         .collect();
     assert!(!with_dead.is_empty());
     for relation in with_dead {
-        let mut named = 0;
+        let (mut named, mut compared) = (0, 0);
         for index in 0..DRAWS {
             let instance = draw(relation, index);
+            let verdict = compare_relation(relation, &instance, index).expect("the row encodes");
+            if verdict == RelationVerdict::Inapplicable {
+                continue;
+            }
+            compared += 1;
+            // Without the tail the same draw matches: the read is what exposes it.
+            assert_eq!(
+                verdict,
+                RelationVerdict::Match,
+                "{:?} draw {index}",
+                relation.id
+            );
             let excluded = relation.excluded_registers(&instance.assignment, relation.dead);
             let reads = reader_tail_reads(relation, &instance).expect("the tail encodes");
             assert!(
@@ -329,15 +350,10 @@ fn a_reader_tail_makes_every_dead_set_row_diverge_on_the_register_it_read() {
                 relation.id
             );
             named += u32::from(!reads.is_empty());
-            // Without the tail the same draw matches: the read is what exposes it.
-            assert_eq!(
-                compare_relation(relation, &instance, index).expect("the row encodes"),
-                RelationVerdict::Match
-            );
         }
         assert!(
-            named > DRAWS as u32 / 2,
-            "{:?}: the tail named a register on only {named} of {DRAWS} draws",
+            named > compared / 2,
+            "{:?}: the tail named a register on only {named} of {compared} compared draws",
             relation.id
         );
     }
@@ -411,6 +427,11 @@ fn defect(relation: &SpuSequenceRelation) -> Defect {
         usize::from(instance.assignment[usize::from(symbolic)])
     };
     match (relation.id, relation.partner) {
+        // A measured row compares its value only by distance, so its fused
+        // partner raises an FPSCR flag the sequence does not.
+        _ if relation.float_class == SpuFloatClass::Inexact { ulp: None } => {
+            Box::new(|partner, _| partner.state.fpscr |= 1)
+        }
         // A fused partner that forgets to write its first intermediate.
         (_, SpuSequencePartner::Fused(fused)) => {
             let first = fused.writes[0];
@@ -573,4 +594,157 @@ fn a_turn_redraws_past_the_precondition_and_counts_each_draw_outside_it() {
         "only {executed} of {TURNS} turns compared; {outside} draws outside"
     );
     assert!(report.findings.is_empty(), "{:?}", report.findings);
+}
+
+#[test]
+fn every_precondition_is_drawn_on_both_sides_and_needed() {
+    assert_eq!(check_preconditions(1449, DRAWS * 4).expect("draws run"), []);
+}
+
+/// The word `lane` of symbolic register `symbolic` at the start.
+fn start_word(instance: &RelationInstance, symbolic: usize, lane: usize) -> u32 {
+    lanes(&instance.start.regs[usize::from(instance.assignment[symbolic])])[lane]
+}
+
+#[test]
+fn the_host_maximum_diverges_only_on_an_exponent_255_or_zero_pair_lane() {
+    let relation = row(SpuSequenceRelationId::FloatMax);
+    let (mut maximal, mut zero_pair) = (0, 0);
+    for index in 0..DRAWS * 4 {
+        let instance = draw(&relation, index);
+        // Distinct registers, so a divergence comes from the lanes.
+        let registers = &instance.assignment[0..3];
+        if registers[0] == registers[1]
+            || registers[0] == registers[2]
+            || registers[1] == registers[2]
+        {
+            continue;
+        }
+        let verdict = compare_sides(&relation, &instance, index, relation.dead, &[], &|_, _| {})
+            .expect("the row encodes");
+        let RelationVerdict::Diverged(divergence) = verdict else {
+            continue;
+        };
+        let rt = instance.assignment[3];
+        for &(register, lane) in &divergence.differing_words {
+            if register != rt {
+                continue;
+            }
+            let lane = usize::from(lane);
+            let (a, b) = (
+                start_word(&instance, 1, lane),
+                start_word(&instance, 2, lane),
+            );
+            let exponent = |word: u32| (word >> 23) & 0xFF;
+            let is_maximal = exponent(a) == 255 || exponent(b) == 255;
+            let is_zero_pair = exponent(a) == 0 && exponent(b) == 0;
+            assert!(
+                is_maximal || is_zero_pair,
+                "draw {index} lane {lane}: a={a:#010x} b={b:#010x}"
+            );
+            maximal += u32::from(is_maximal);
+            zero_pair += u32::from(is_zero_pair);
+        }
+    }
+    assert!(
+        maximal > 0 && zero_pair > 0,
+        "{maximal} exponent-255 lanes, {zero_pair} zero pairs"
+    );
+}
+
+#[test]
+fn the_pick_precondition_rejects_a_zero_pair_lane_the_host_maximum_breaks() {
+    let relation = row(SpuSequenceRelationId::FloatMax);
+    let precondition = relation.precondition.expect("the pick rows have one");
+    let mut instance = (0..DRAWS)
+        .map(|index| draw(&relation, index))
+        .find(|instance| precondition(&instance.start, &instance.assignment))
+        .expect("a draw lies inside the precondition");
+    // A positive denorm against negative zero: the host orders the denorm
+    // above, the SPU compares the two equal.
+    for (symbolic, word) in [(1, 0x0000_0001u32), (2, 0x8000_0000)] {
+        let register = usize::from(instance.assignment[symbolic]);
+        let mut value = instance.start.regs[register];
+        value[0..4].copy_from_slice(&word.to_be_bytes());
+        instance.start.set_reg(register, value);
+    }
+    assert!(!precondition(&instance.start, &instance.assignment));
+    let verdict = compare_sides(&relation, &instance, 0, relation.dead, &[], &|_, _| {})
+        .expect("the row encodes");
+    assert!(
+        matches!(verdict, RelationVerdict::Diverged(_)),
+        "{verdict:?}"
+    );
+}
+
+#[test]
+fn a_word_that_does_not_decode_errors_in_the_program_and_ends_a_run_elsewhere() {
+    let garbage = (0..=u32::MAX)
+        .rev()
+        .find(|&word| cellgov_spu::decode::decode(word).is_err())
+        .expect("some word does not decode");
+    const OUTSIDE: u32 = 0x1_0000;
+    let bra = 0x060 << 23 | (OUTSIDE >> 2) << 7;
+    assert_eq!(
+        cellgov_spu::decode::decode(bra),
+        Ok(cellgov_spu::instruction::SpuInstruction::Bra {
+            address: (OUTSIDE >> 2) as i32
+        })
+    );
+    let mut start = SpuState::new();
+    start.ls[OUTSIDE as usize..OUTSIDE as usize + 4].copy_from_slice(&garbage.to_be_bytes());
+    let relation = SpuSequenceRelationId::FloatMax;
+    let observation =
+        run_side(relation, &[bra], &start, false).expect("a word outside the program ends the run");
+    assert_eq!(
+        observation.state.pc,
+        OUTSIDE.wrapping_sub(SEQUENCE_PROGRAM_BASE + 4)
+    );
+    assert!(matches!(
+        run_side(relation, &[garbage], &start, false),
+        Err(FuzzError::Invariant(
+            InvariantError::UnencodableSequenceRelation { .. }
+        ))
+    ));
+}
+
+#[test]
+fn every_inexact_row_reports_a_ulp_bound_within_its_claim() {
+    for relation in sequence_relations() {
+        let SpuFloatClass::Inexact { ulp } = relation.float_class else {
+            continue;
+        };
+        let measured = measured_ulp(relation, 1449, DRAWS)
+            .expect("draws run")
+            .unwrap_or_else(|| panic!("{:?}: no draw compared", relation.id));
+        if let Some(bound) = ulp {
+            assert!(measured <= bound, "{:?}: {measured} ulp", relation.id);
+        }
+    }
+}
+
+#[test]
+fn the_square_root_chain_leaves_a_host_square_root_exactly_on_a_negative_lane() {
+    let relation = row(SpuSequenceRelationId::SquareRoot);
+    let mut diverged = 0;
+    for index in 0..DRAWS * 4 {
+        let instance = draw(&relation, index);
+        let mut registers = instance.assignment.clone();
+        registers.sort_unstable();
+        registers.dedup();
+        let in_range = (0..4).all(|lane| {
+            let exponent = (start_word(&instance, 1, lane) >> 23) & 0xFF;
+            (1..=254).contains(&exponent)
+        });
+        if registers.len() < instance.assignment.len() || !in_range {
+            continue;
+        }
+        let negative = (0..4).any(|lane| start_word(&instance, 1, lane) >> 31 == 1);
+        let verdict = compare_sides(&relation, &instance, index, relation.dead, &[], &|_, _| {})
+            .expect("the row encodes");
+        let is_diverged = matches!(verdict, RelationVerdict::Diverged(_));
+        assert_eq!(is_diverged, negative, "draw {index}");
+        diverged += u32::from(is_diverged);
+    }
+    assert!(diverged > 0);
 }

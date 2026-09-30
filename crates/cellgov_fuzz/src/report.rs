@@ -308,6 +308,8 @@ pub struct SequenceRelationDivergence {
     pub assignment: Vec<u8>,
     /// Each differing register, with its number of differing bits.
     pub bit_distance: Vec<(u8, u32)>,
+    /// Each differing word, as `(register, word)`.
+    pub differing_words: Vec<(u8, u8)>,
 }
 
 impl FuzzReport {

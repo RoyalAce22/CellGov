@@ -9,8 +9,9 @@
 use cellgov_event::UnitId;
 use cellgov_spu::exec::{execute, SpuStepOutcome};
 use cellgov_spu::fuzz::{
-    sequence_relations, SpuFusedFlow, SpuSequencePartner, SpuSequencePin, SpuSequenceRelation,
-    SpuSequenceRelationId, SpuSymbolicWord, SEQUENCE_PROGRAM_BASE, SEQUENCE_TAKEN_LANDING,
+    sequence_relations, ulp_distance, SpuFloatClass, SpuFusedFlow, SpuSequencePartner,
+    SpuSequencePin, SpuSequenceRelation, SpuSequenceRelationId, SpuSymbolicWord,
+    SEQUENCE_PROGRAM_BASE, SEQUENCE_TAKEN_LANDING,
 };
 use cellgov_spu::instruction::SpuInstructionKind;
 use cellgov_spu::observation::{SpuObservation, SpuObservationComponent};
@@ -37,11 +38,53 @@ const TERMINATOR: u32 = 0x0000_3FFE;
 const TAKEN_TERMINATOR: u32 = 0x0000_3FFD;
 
 /// Draws one case makes of a row before it leaves the row unexercised.
-const PRECONDITION_DRAWS: u32 = 4;
+const PRECONDITION_DRAWS: u32 = 16;
 
 /// Lane values the instantiation draws beside random words: zero, one, the
-/// signed extremes, all ones and a halfword boundary.
-const BOUNDARY_WORDS: [u32; 6] = [0, 1, 0x7FFF_FFFF, 0x8000_0000, 0xFFFF_FFFF, 0x0000_FFFF];
+/// signed extremes, all ones and a halfword boundary, which are also the
+/// single-precision classes +0, a denormal, the largest exponent-255 value,
+/// -0 and its negative; then the smallest normal, the largest IEEE normal,
+/// exponent 255 with a zero fraction, and +1.0 and -1.0.
+///
+/// [Aharoni2003 p:17 s:1] A float test draws its operands from the boundary
+/// classes of the format.
+const BOUNDARY_WORDS: [u32; 11] = [
+    0,
+    1,
+    0x7FFF_FFFF,
+    0x8000_0000,
+    0xFFFF_FFFF,
+    0x0000_FFFF,
+    0x0080_0000,
+    0x7F7F_FFFF,
+    0x7F80_0000,
+    0x3F80_0000,
+    0xBF80_0000,
+];
+
+/// The exponents a float row's normal operands draw from.
+const FLOAT_EXPONENTS: std::ops::RangeInclusive<u32> = 60..=190;
+
+/// True for a single-precision float instruction.
+fn is_float(kind: SpuInstructionKind) -> bool {
+    use SpuInstructionKind as K;
+    matches!(
+        kind,
+        K::Fa
+            | K::Fs
+            | K::Fm
+            | K::Fma
+            | K::Fms
+            | K::Fnms
+            | K::Frest
+            | K::Frsqest
+            | K::Fi
+            | K::Fceq
+            | K::Fcmeq
+            | K::Fcgt
+            | K::Fcmgt
+    )
+}
 
 /// A relation row on real registers and a start state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,10 +136,27 @@ pub(crate) fn instantiate(
         rng.fill(&mut value);
         start.set_reg(register, value);
     }
+    let float_row = relation.sequence.iter().any(|word| is_float(word.kind));
     for &register in &assignment {
         let mut value = [0u8; 16];
         for lane in value.chunks_exact_mut(4) {
-            let word = if rng.chance(1, 2)? {
+            let word = if float_row {
+                // Mostly normal operands, so a float row's precondition
+                // holds; the boundary classes still come often enough to
+                // fall outside it.
+                if rng.chance(1, 8)? {
+                    BOUNDARY_WORDS[rng.below(BOUNDARY_WORDS.len() as u64)? as usize]
+                } else {
+                    let exponent = FLOAT_EXPONENTS.start()
+                        + rng.below(u64::from(
+                            FLOAT_EXPONENTS.end() - FLOAT_EXPONENTS.start() + 1,
+                        ))? as u32;
+                    // Three in four positive, so a row that needs a
+                    // positive operand in every lane still compares.
+                    let sign = u32::from(rng.chance(1, 4)?) << 31;
+                    rng.next_u32() & 0x007F_FFFF | exponent << 23 | sign
+                }
+            } else if rng.chance(1, 2)? {
                 BOUNDARY_WORDS[rng.below(BOUNDARY_WORDS.len() as u64)? as usize]
             } else {
                 rng.next_u32()
@@ -121,6 +181,11 @@ pub(crate) fn instantiate(
         match pin {
             SpuSequencePin::TakenLanding => {
                 value[0..4].copy_from_slice(&SEQUENCE_TAKEN_LANDING.to_be_bytes());
+            }
+            SpuSequencePin::Word(word) => {
+                for lane in value.chunks_exact_mut(4) {
+                    lane.copy_from_slice(&word.to_be_bytes());
+                }
             }
         }
         start.set_reg(register, value);
@@ -171,10 +236,19 @@ fn compare_under(
             return Ok(RelationVerdict::Inapplicable);
         }
     }
+    compare_sides(relation, instance, case_index, dead, tail, hook)
+}
+
+/// Runs both sides of `relation` from `instance`, with `tail` after each.
+fn run_sides(
+    relation: &SpuSequenceRelation,
+    instance: &RelationInstance,
+    tail: &[u32],
+) -> Result<(SpuObservation, SpuObservation), FuzzError> {
     let mut words = encode(relation.id, relation.sequence, &instance.assignment)?;
     words.extend_from_slice(tail);
     let original = run_side(relation.id, &words, &instance.start, false)?;
-    let mut partner = match relation.partner {
+    let partner = match relation.partner {
         SpuSequencePartner::Guest(partner) => {
             let mut partner = encode(relation.id, partner, &instance.assignment)?;
             partner.extend_from_slice(tail);
@@ -186,6 +260,43 @@ fn compare_under(
             run_side(relation.id, tail, &state, flow == SpuFusedFlow::Taken)?
         }
     };
+    Ok((original, partner))
+}
+
+/// The real registers `relation` compares within its ULP bound.
+fn approximate_registers(
+    relation: &SpuSequenceRelation,
+    instance: &RelationInstance,
+) -> Vec<usize> {
+    relation
+        .approximate
+        .iter()
+        .map(|&symbolic| usize::from(instance.assignment[usize::from(symbolic)]))
+        .collect()
+}
+
+/// The words of `value`.
+fn lanes(value: &[u8; 16]) -> [u32; 4] {
+    std::array::from_fn(|i| {
+        u32::from_be_bytes([
+            value[4 * i],
+            value[4 * i + 1],
+            value[4 * i + 2],
+            value[4 * i + 3],
+        ])
+    })
+}
+
+/// Compares both sides without asking the precondition.
+fn compare_sides(
+    relation: &SpuSequenceRelation,
+    instance: &RelationInstance,
+    case_index: u64,
+    dead: &[u8],
+    tail: &[u32],
+    hook: PartnerHook<'_>,
+) -> Result<RelationVerdict, FuzzError> {
+    let (original, mut partner) = run_sides(relation, instance, tail)?;
     hook(&mut partner, instance);
     // [Mullen2016 p:449 s:1] A dead register may hold another value; the
     // Registers comparison leaves it out, and LS, channels, PC and effects
@@ -193,6 +304,26 @@ fn compare_under(
     for register in relation.excluded_registers(&instance.assignment, dead) {
         let register = usize::from(register);
         partner.state.regs[register] = original.state.regs[register];
+    }
+    // [Schkufza2014 p:56 s:4] An inexact row matches when no lane is more
+    // ULPs from the target than its bound; a row with no bound only
+    // measures the distance.
+    let bound = match relation.float_class {
+        SpuFloatClass::Inexact { ulp } => ulp,
+        _ => Some(0),
+    };
+    for register in approximate_registers(relation, instance) {
+        let (left, right) = (
+            lanes(&original.state.regs[register]),
+            lanes(&partner.state.regs[register]),
+        );
+        for lane in 0..4 {
+            if bound.is_none_or(|bound| ulp_distance(left[lane], right[lane]) <= bound) {
+                let at = 4 * lane;
+                let value = original.state.regs[register][at..at + 4].to_vec();
+                partner.state.regs[register][at..at + 4].copy_from_slice(&value);
+            }
+        }
     }
     // [Martignoni2009 p:127 s:2.2] The comparison covers the complete state
     // after execution.
@@ -208,8 +339,114 @@ fn compare_under(
             start_registers: Box::new(*instance.start.regs.as_array()),
             assignment: instance.assignment.clone(),
             bit_distance: bit_distance(&original, &partner),
+            differing_words: differing_words(&original, &partner),
         },
     )))
+}
+
+/// The largest ULP distance in any lane of the registers `relation`
+/// compares within its bound, over the draws of `draws` the precondition
+/// admits; `None` when it admits none.
+///
+/// [Schkufza2014 p:58 s:5.3] The largest observed sample bounds the ULP
+/// error between the target and the rewrite.
+///
+/// # Errors
+///
+/// [`FuzzError`] when a draw fails or the row does not encode.
+pub fn measured_ulp(
+    relation: &SpuSequenceRelation,
+    seed: u64,
+    draws: u64,
+) -> Result<Option<u32>, FuzzError> {
+    let mut largest = None;
+    for index in 0..draws {
+        let mut rng = Rng::for_case(CAMPAIGN_VERSION, seed, index);
+        let instance = instantiate(relation, &mut rng)?;
+        if relation
+            .precondition
+            .is_some_and(|precondition| !precondition(&instance.start, &instance.assignment))
+        {
+            continue;
+        }
+        let (original, partner) = run_sides(relation, &instance, &[])?;
+        for register in approximate_registers(relation, &instance) {
+            let (left, right) = (
+                lanes(&original.state.regs[register]),
+                lanes(&partner.state.regs[register]),
+            );
+            for lane in 0..4 {
+                let distance = ulp_distance(left[lane], right[lane]);
+                largest = Some(largest.map_or(distance, |so_far: u32| so_far.max(distance)));
+            }
+        }
+    }
+    Ok(largest)
+}
+
+/// What the precondition check found wrong with one catalog row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreconditionFinding {
+    /// No draw satisfied the precondition, so the check compared nothing.
+    NeverInside {
+        /// The row.
+        relation: SpuSequenceRelationId,
+    },
+    /// No draw fell outside the precondition, so its need is untested.
+    NeverOutside {
+        /// The row.
+        relation: SpuSequenceRelationId,
+    },
+    /// No draw outside the precondition diverges: the row holds there too,
+    /// so the precondition is stronger than the rewrite needs.
+    Unneeded {
+        /// The row.
+        relation: SpuSequenceRelationId,
+    },
+}
+
+/// Checks every catalog row with a precondition over `draws` draws from
+/// `seed`: the draws fall on both sides of it, and some draw outside it
+/// diverges, which shows the row needs it.
+///
+/// [Mukherjee2024 p:120:10 s:4.3] A valid precondition is false on the
+/// negative examples and true on the positive one.
+/// [Mukherjee2024 p:120:14 s:5.4] It is as weak as it can be while it still
+/// justifies the rewrite.
+///
+/// # Errors
+///
+/// [`FuzzError`] when a draw fails or a row does not encode.
+pub fn check_preconditions(seed: u64, draws: u64) -> Result<Vec<PreconditionFinding>, FuzzError> {
+    let mut findings = Vec::new();
+    for relation in sequence_relations() {
+        let Some(precondition) = relation.precondition else {
+            continue;
+        };
+        let (mut inside, mut outside, mut diverged) = (0u64, 0u64, 0u64);
+        for index in 0..draws {
+            let mut rng = Rng::for_case(CAMPAIGN_VERSION, seed, index);
+            let instance = instantiate(relation, &mut rng)?;
+            if precondition(&instance.start, &instance.assignment) {
+                inside += 1;
+                continue;
+            }
+            outside += 1;
+            let verdict =
+                compare_sides(relation, &instance, index, relation.dead, &[], &|_, _| {})?;
+            diverged += u64::from(matches!(verdict, RelationVerdict::Diverged(_)));
+        }
+        let relation = relation.id;
+        if inside == 0 {
+            findings.push(PreconditionFinding::NeverInside { relation });
+        }
+        if outside == 0 {
+            findings.push(PreconditionFinding::NeverOutside { relation });
+        } else if diverged == 0 {
+            findings.push(PreconditionFinding::Unneeded { relation });
+        }
+    }
+    Ok(findings)
 }
 
 /// The dead registers of `relation` no draw needs: with one removed from
@@ -485,8 +722,15 @@ fn run_side(
         let Some(raw) = state.fetch() else {
             break;
         };
-        let instruction = cellgov_spu::decode::decode(raw)
-            .map_err(|_| InvariantError::UnencodableSequenceRelation { relation })?;
+        let Ok(instruction) = cellgov_spu::decode::decode(raw) else {
+            // A row word that does not decode is a catalog defect; a word
+            // fetched elsewhere, after a draw outside the precondition sent
+            // control there, ends the run.
+            if (SEQUENCE_PROGRAM_BASE..end as u32).contains(&state.pc) {
+                return Err(InvariantError::UnencodableSequenceRelation { relation }.into());
+            }
+            break;
+        };
         outcome = execute(&instruction, &mut state, UNIT);
         match &outcome {
             SpuStepOutcome::Continue => state.advance_pc(),
@@ -511,6 +755,26 @@ fn run_side(
             .wrapping_sub(SEQUENCE_PROGRAM_BASE + (words.len() * 4) as u32);
     }
     Ok(SpuObservation::capture(&state, &outcome))
+}
+
+/// Each word that differs, as `(register, word)`: the lanes a finding
+/// names.
+fn differing_words(original: &SpuObservation, partner: &SpuObservation) -> Vec<(u8, u8)> {
+    original
+        .state
+        .regs
+        .iter()
+        .zip(&partner.state.regs)
+        .enumerate()
+        .flat_map(|(register, (left, right))| {
+            (0..4u8)
+                .filter(move |&word| {
+                    let at = usize::from(word) * 4;
+                    left[at..at + 4] != right[at..at + 4]
+                })
+                .map(move |word| (register as u8, word))
+        })
+        .collect()
 }
 
 /// The registers that differ, each with the number of differing bits.

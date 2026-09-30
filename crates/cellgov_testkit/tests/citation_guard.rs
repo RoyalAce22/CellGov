@@ -93,6 +93,9 @@ const DOCUMENTS: &[(&str, PageGrammar)] = &[
     ("Schkufza2013", PageGrammar::Integer),
     ("Mullen2016", PageGrammar::Integer),
     ("Liu2024", PageGrammar::ArticlePage),
+    ("Menendez2016", PageGrammar::Integer),
+    ("Mukherjee2024", PageGrammar::ArticlePage),
+    ("Schkufza2014", PageGrammar::Integer),
 ];
 
 /// Floor on the population the guard validates. The tree carries

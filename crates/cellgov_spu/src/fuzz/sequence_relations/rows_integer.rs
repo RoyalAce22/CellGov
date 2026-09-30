@@ -83,6 +83,7 @@ pub(super) const MPY32_ROW: SpuSequenceRelation = SpuSequenceRelation {
     dead: &[],
     pins: &[],
     local_store: false,
+    approximate: &[],
 };
 
 pub(super) const MPY32_SWAPPED_ROW: SpuSequenceRelation = SpuSequenceRelation {
@@ -193,6 +194,7 @@ const fn negated_row(
         dead: &[],
         pins: &[],
         local_store: false,
+        approximate: &[],
     }
 }
 
@@ -248,6 +250,7 @@ pub(super) const FUNNEL_ROW: SpuSequenceRelation = SpuSequenceRelation {
     dead: &[],
     pins: &[],
     local_store: false,
+    approximate: &[],
 };
 
 // Symbolic registers of the popcount row: `cntb c,a; sumb rt,c,c`.
@@ -282,4 +285,5 @@ pub(super) const POPCOUNT_ROW: SpuSequenceRelation = SpuSequenceRelation {
     dead: &[],
     pins: &[],
     local_store: false,
+    approximate: &[],
 };

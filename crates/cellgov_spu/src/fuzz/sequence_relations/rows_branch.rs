@@ -77,6 +77,7 @@ const fn branch_row(
             &[]
         },
         local_store: false,
+        approximate: &[],
     }
 }
 

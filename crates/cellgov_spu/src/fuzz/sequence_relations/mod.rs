@@ -8,18 +8,21 @@
 //! every register assignment. The rows come from the fusions a recompiler
 //! applies to SPU code: compare and select, the 32-bit multiply, element
 //! insertion, negated shift counts, branch tests, split local-store
-//! addresses and pass-through moves.
+//! addresses, pass-through moves, and the float estimate, Newton, square
+//! root, division and minimum or maximum fusions.
 
 mod catalog;
 mod lanes;
 mod rows_branch;
 mod rows_compare;
+mod rows_float;
 mod rows_integer;
 mod rows_memory;
 mod rows_shuffle;
 mod types;
 
 pub use catalog::sequence_relations;
+pub use lanes::ulp_distance;
 pub use types::*;
 
 #[cfg(test)]
