@@ -262,6 +262,10 @@ const DECODERS: &[(&str, Builder)] = &[
         ra: f.ra,
         rb: f.rb,
     }),
+    // [SPU-ISA p:224 s:9 Frds] RR opcode 0x3B9; RB is unused.
+    ("frds", |f| SpuInstruction::Frds { rt: f.rt, ra: f.ra }),
+    // [SPU-ISA p:225 s:9 Fesd] RR opcode 0x3B8; RB is unused.
+    ("fesd", |f| SpuInstruction::Fesd { rt: f.rt, ra: f.ra }),
     // [SPU-ISA p:235 s:9 Fscrwr] RR opcode 0x3BA; RT is a false target.
     ("fscrwr", |f| SpuInstruction::Fscrwr { ra: f.ra }),
     // [SPU-ISA p:236 s:9 Fscrrd] RR opcode 0x398; RA and RB are unused.

@@ -3,7 +3,8 @@
 //! FPSCR slice names, and the six flags ORed into that slice.
 
 use cellgov_float::{
-    add, default_nan, mul, round_pack, unpack, Binary64, Exact, Flags, Operand, Policy, Rounding,
+    add, default_nan, mul, round_pack, unpack, Binary32, Binary64, Exact, Flags, Format, Operand,
+    Policy, Rounding,
 };
 
 use super::lanes::{doublewords, from_doublewords};
@@ -18,6 +19,23 @@ const DENORMAL_OPERAND_RAISES_INVALID: bool = false;
 /// negative, rather than the default QNaN's positive sign.
 // [SPU-ISA p:197 s:9.2] a NaN result may be the default QNaN, sign 0, even with NaN inputs; [Mueller2005 p:61 s:3.2] the CBE computes the generic NaN for every NaN result; hardware vectors decide whether an all-negative NaN input changes the sign.
 const NAN_RESULT_TAKES_INPUT_SIGN: bool = false;
+
+/// Whether `frds` reads a denormal double as a zero of its sign with DENORM.
+// [SPU-ISA p:198 s:9.2.1] an implementation may force a denormal conversion input to zero and set DENORM; [Mueller2005 p:61 s:3.2] the CBE's double unit treats denormal operands as zero, and the conversions follow it until hardware vectors decide.
+const FRDS_FLUSHES_DENORMAL_INPUT: bool = true;
+
+/// Whether `fesd` reads a denormal single as a zero of its sign with DENORM.
+// [SPU-ISA p:198 s:9.2.1] the same freedom for the single-precision input.
+const FESD_FLUSHES_DENORMAL_INPUT: bool = true;
+
+/// Whether a conversion's NaN result is the target format's default QNaN,
+/// rather than the input NaN quieted with its payload carried.
+// [SPU-ISA p:197 s:9.2] the default QNaN is one allowed NaN result; hardware vectors decide what the conversions return.
+const CONVERSION_NAN_IS_DEFAULT: bool = true;
+
+/// Whether an SNaN conversion input raises INV.
+// [SPU-ISA p:199 s:9.2.2] an SNaN operand is an invalid operation.
+const CONVERSION_SNAN_RAISES_INVALID: bool = true;
 
 /// The double-precision operation an arm applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,4 +271,99 @@ fn result(op: DoubleOp, x: Operand, y: Operand, rounding: Rounding, raw: [u64; 2
             (packed.bits, packed.flags)
         }
     }
+}
+
+/// `frds`: each doubleword rounded to single precision in the slot's mode,
+/// in the left word, with the right word zero.
+// [SPU-ISA p:224 s:9] the result goes in the left word slot and zeros in the right; the slot's FPSCR mode rounds it and the double-precision flags accumulate.
+pub(super) fn round_to_single(state: &mut SpuState, rt: u8, ra: u8) -> SpuStepOutcome {
+    let rounding = state.fpscr_rounding();
+    let a = doublewords(state.regs[ra as usize]);
+    let mut flags = [Flags::default(); 2];
+    let results = std::array::from_fn(|slot| {
+        let (bits, slot_flags) =
+            convert::<Binary64, Binary32>(a[slot], rounding[slot], FRDS_FLUSHES_DENORMAL_INPUT);
+        flags[slot] = slot_flags;
+        bits << 32
+    });
+    state.regs[rt as usize] = from_doublewords(results);
+    state.fpscr_accumulate_double(flags);
+    SpuStepOutcome::Continue
+}
+
+/// `fesd`: the left word of each doubleword extended to double precision;
+/// the arm ignores the right word.
+// [SPU-ISA p:225 s:9] the left word slot converts and the right word slot is ignored.
+pub(super) fn extend_to_double(state: &mut SpuState, rt: u8, ra: u8) -> SpuStepOutcome {
+    let rounding = state.fpscr_rounding();
+    let a = doublewords(state.regs[ra as usize]);
+    let mut flags = [Flags::default(); 2];
+    let results = std::array::from_fn(|slot| {
+        let (bits, slot_flags) = convert::<Binary32, Binary64>(
+            a[slot] >> 32,
+            rounding[slot],
+            FESD_FLUSHES_DENORMAL_INPUT,
+        );
+        flags[slot] = slot_flags;
+        bits
+    });
+    state.regs[rt as usize] = from_doublewords(results);
+    state.fpscr_accumulate_double(flags);
+    SpuStepOutcome::Continue
+}
+
+/// `bits` in format `From` converted to format `To` under IEEE 754, rounded
+/// once in `rounding`, with the flags the conversion raises.
+// [SPU-ISA p:198 s:9.2.1] both conversions follow IEEE 754 except for denormal inputs, so infinities, NaNs and denormal results exist in both formats.
+fn convert<From: Format, To: Format>(bits: u64, rounding: Rounding, flush: bool) -> (u64, Flags) {
+    let negative = bits >> From::SIGN_SHIFT & 1 == 1;
+    let exponent = (bits >> From::FRAC_BITS) as u32 & From::EXP_MAX;
+    let fraction = bits & From::FRAC_MASK;
+    let sign = u64::from(negative) << To::SIGN_SHIFT;
+    let exponent_max = u64::from(To::EXP_MAX) << To::FRAC_BITS;
+    if exponent == From::EXP_MAX && fraction == 0 {
+        return (sign | exponent_max, Flags::default());
+    }
+    if exponent == From::EXP_MAX {
+        let quiet = fraction >> (From::FRAC_BITS - 1) & 1 == 1;
+        // [SPU-ISA p:197 s:9.2] the NaN flag marks a QNaN produced in place of the proper input NaN, so the quieted-payload path leaves it clear.
+        let flags = Flags {
+            nan: CONVERSION_NAN_IS_DEFAULT,
+            invalid: CONVERSION_SNAN_RAISES_INVALID && !quiet,
+            ..Flags::default()
+        };
+        if CONVERSION_NAN_IS_DEFAULT {
+            return (default_nan::<To>(), flags);
+        }
+        // The payload's leading bits, quieted.
+        let payload = if To::FRAC_BITS >= From::FRAC_BITS {
+            fraction << (To::FRAC_BITS - From::FRAC_BITS)
+        } else {
+            fraction >> (From::FRAC_BITS - To::FRAC_BITS)
+        };
+        let quiet_bit = 1 << (To::FRAC_BITS - 1);
+        return (sign | exponent_max | payload | quiet_bit, flags);
+    }
+    let (significand, biased) = match (exponent, fraction) {
+        (0, 0) => return (sign, Flags::default()),
+        (0, _) if flush => {
+            return (
+                sign,
+                Flags {
+                    denormal: true,
+                    ..Flags::default()
+                },
+            )
+        }
+        (0, _) => (fraction, 1),
+        _ => (fraction | 1 << From::FRAC_BITS, exponent),
+    };
+    let exact = Exact::new(
+        negative,
+        u128::from(significand),
+        biased as i32 - From::BIAS - From::FRAC_BITS as i32,
+    )
+    .expect("invariant: a format's significand is at most 53 bits wide");
+    let packed = round_pack::<To>(Policy::Ieee754Cbe, rounding, exact);
+    (packed.bits, packed.flags)
 }

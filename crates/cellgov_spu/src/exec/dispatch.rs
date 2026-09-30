@@ -1199,6 +1199,10 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                 negate: true,
             },
         ),
+        // [SPU-ISA p:224 s:9. Floating-Point Instructions] Floating Round Double to Single: RA's doublewords rounded into their left words.
+        SpuInstruction::Frds { rt, ra } => super::double::round_to_single(state, rt, ra),
+        // [SPU-ISA p:225 s:9. Floating-Point Instructions] Floating Extend Single to Double: RA's left words extended.
+        SpuInstruction::Fesd { rt, ra } => super::double::extend_to_double(state, rt, ra),
         // [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
         SpuInstruction::Fscrwr { ra } => {
             state.fpscr = u128::from_be_bytes(state.regs[ra as usize])
@@ -1375,3 +1379,7 @@ mod double_float_tests;
 #[cfg(test)]
 #[path = "tests/fused_double_tests.rs"]
 mod fused_double_tests;
+
+#[cfg(test)]
+#[path = "tests/precision_conversion_tests.rs"]
+mod precision_conversion_tests;

@@ -1655,6 +1655,23 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
+    // [SPU-ISA p:224 s:9 Precision conversions: Frds p.224, Fesd p.225]
+    /// Floating round double to single: per doubleword slot, `ra` rounded
+    /// to single precision in the left word, the right word zero.
+    Frds {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// Floating extend single to double: per doubleword slot, the left word
+    /// of `ra` extended to double precision.
+    Fesd {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
     // [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
     /// Write RA's defined bits into the FPSCR; RT is a false target.
     Fscrwr {

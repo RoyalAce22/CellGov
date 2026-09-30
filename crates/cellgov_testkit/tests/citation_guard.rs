@@ -87,6 +87,7 @@ const DOCUMENTS: &[(&str, PageGrammar)] = &[
     ("Boldo2015", PageGrammar::Integer),
     ("Aharoni2003", PageGrammar::Integer),
     ("Verdonk2001Basic", PageGrammar::Integer),
+    ("Verdonk2001Conversions", PageGrammar::Integer),
     ("Liew2017", PageGrammar::Integer),
 ];
 
