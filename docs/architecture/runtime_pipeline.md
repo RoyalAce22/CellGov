@@ -63,12 +63,16 @@ nine-step deterministic loop:
    step, so neither a child-space batch nor a faulting one carries
    them. A DMA completion leaves the queue at fire time, and an
    SPU's tag group reads complete at its next step once none of its
-   transfers with that tag is queued. An SPU yielding `DmaWait` out
-   of a batch that applied is parked `Blocked` before completions
-   fire, so a same-commit completion's `Runnable` override
-   overwrites the fresh `Blocked` and the wake fires in the same
-   batch. A refused batch parks nobody: it queued no completion, so
-   the park would wait on a transfer that will never land.
+   transfers with that tag is queued. A unit yielding `DmaWait` or
+   `ChannelStall` out of a batch that applied is parked `Blocked`
+   before completions fire, so a same-commit completion's `Runnable`
+   override overwrites the fresh `Blocked` and the wake fires in the
+   same batch. A `ChannelStall` leaves the unit's program counter on
+   the blocking channel access, and the unit names the event that
+   ends the park: a mailbox delivery, a DMA completion, or a read of
+   its outbound mailbox. Only that event wakes it, and the access
+   runs again. A refused batch parks nobody: it queued no completion,
+   so the park would wait on a transfer that will never land.
 8. Emit the batch's commit trace records and notify the scheduler
    of the yield with whether other units woke and whether the
    source still holds an lwmutex.
@@ -155,9 +159,11 @@ The full vocabulary of guest-visible operations:
   `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`,
   `FaultRaised`, `TraceMarker`, `ReservationAcquire`,
   `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`,
-  `SharedReadIntent`, `ClockRead`. The last two declare what a step
-  read so dependency analysis can pair it; the commit pipeline stages
-  nothing for either.
+  `SharedReadIntent`, `ClockRead`, `MailboxPop`. `SharedReadIntent`
+  and `ClockRead` declare what a step read so dependency analysis can
+  pair it; the commit pipeline stages nothing for either. `MailboxPop`
+  removes a message the unit already read, and the commit refuses the
+  batch when the message is not the one at that place in the mailbox.
 - **Trace record variants** in `cellgov_trace::TraceRecord`:
   - one header, `RunIdentity`, written first and never repeated:
     the format version plus a fingerprint of each half of the

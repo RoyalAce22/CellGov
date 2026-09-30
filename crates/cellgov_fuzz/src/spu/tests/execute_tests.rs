@@ -18,6 +18,7 @@ fn an_spu_sequence_retains_terminal_effects() {
     let mut initial = SpuState::new();
     let rd_in_mbox = (0x00d_u32 << 21) | (29 << 7) | 2;
     initial.ls[..4].copy_from_slice(&rd_in_mbox.to_be_bytes());
+    initial.channels.in_mbox = vec![0x0000_0042];
 
     let (observed, decoded, _) = run_sequence(&initial, 1);
 
@@ -261,7 +262,11 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
             }
             SpuSequenceInteraction::Mailbox => {
                 assert_eq!(first.2.len(), 2);
-                assert_eq!(first.0.state.channels.pending_mbox_rt, Some(3));
+                assert_eq!(
+                    first.0.state.regs[3][..4],
+                    cellgov_spu::fuzz::SEQUENCE_MAILBOX_MESSAGE.to_be_bytes()
+                );
+                assert!(first.0.state.channels.in_mbox.is_empty());
                 assert!(matches!(
                     first.0.terminal_outcome,
                     Some(SpuStepOutcome::Yield { .. })
@@ -347,7 +352,7 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
         let mut defective = replay;
         match interaction {
             SpuSequenceInteraction::Channel => defective.0.state.channels.mfc_lsa ^= 16,
-            SpuSequenceInteraction::Mailbox => defective.0.state.channels.pending_mbox_rt = None,
+            SpuSequenceInteraction::Mailbox => defective.0.state.regs[3] = initial.regs[3],
             SpuSequenceInteraction::Dma => {
                 if let Some(SpuStepOutcome::Yield { effects, .. }) =
                     &mut defective.0.terminal_outcome

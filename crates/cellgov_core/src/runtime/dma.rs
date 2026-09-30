@@ -4,7 +4,7 @@
 //! forces every outstanding transfer into the final memory snapshot.
 
 use cellgov_dma::DmaCompletion;
-use cellgov_exec::UnitStatus;
+use cellgov_exec::{StallWake, UnitStatus};
 use cellgov_time::GuestTicks;
 use cellgov_trace::HostWriter;
 
@@ -103,6 +103,16 @@ impl Runtime {
                 self.registry.effective_status(c.issuer()),
                 Some(UnitStatus::Finished | UnitStatus::Faulted)
             ) {
+                continue;
+            }
+            // A unit stalled on another channel stays parked: only that
+            // channel's producer gives it a count.
+            if self
+                .registry
+                .get(c.issuer())
+                .and_then(|unit| unit.channel_stall())
+                .is_some_and(|stall| stall.wake != StallWake::DmaCompletion)
+            {
                 continue;
             }
             self.registry

@@ -55,8 +55,8 @@ pub(crate) const FAULT_MFC_TAG_ID_OUT_OF_RANGE: u32 = 0x0008_0000;
 ///
 /// [`LocalDiagnostics::faulting_ea`]: cellgov_exec::LocalDiagnostics::faulting_ea
 pub(crate) const FAULT_MFC_READ_UNRESOLVED: u32 = 0x0009_0000;
-/// A channel access that stalls the SPU on a channel whose stall the
-/// model does not park. The detail is the channel number.
+/// A channel access whose stall no event can end. The detail is the
+/// channel number.
 pub(crate) const FAULT_CHANNEL_STALL: u32 = 0x000A_0000;
 /// A tag-status update request with a reserved value. The detail is the
 /// low 16 bits of the value the guest wrote.

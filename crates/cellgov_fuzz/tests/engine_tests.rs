@@ -456,7 +456,7 @@ fn structured_state_bias_reaches_effect_classes_with_named_preconditions() {
         );
     }
     for effect in [
-        EffectKind::MailboxReceiveAttempt,
+        EffectKind::MailboxPop,
         EffectKind::DmaEnqueue,
         EffectKind::ConditionalStore,
     ] {

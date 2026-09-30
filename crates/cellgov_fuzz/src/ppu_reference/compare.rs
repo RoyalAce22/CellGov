@@ -320,6 +320,7 @@ pub(super) fn reference_yield(reason: YieldReason) -> PpuReferenceYieldReason {
         YieldReason::InterruptBoundary => PpuReferenceYieldReason::InterruptBoundary,
         YieldReason::Fault => PpuReferenceYieldReason::Fault,
         YieldReason::Finished => PpuReferenceYieldReason::Finished,
+        YieldReason::ChannelStall => PpuReferenceYieldReason::ChannelStall,
     }
 }
 

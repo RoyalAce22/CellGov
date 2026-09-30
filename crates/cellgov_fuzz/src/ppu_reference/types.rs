@@ -139,6 +139,8 @@ pub enum PpuReferenceYieldReason {
     InterruptBoundary,
     /// Execution finished.
     Finished,
+    /// Execution parked on a blocking channel with a zero count.
+    ChannelStall,
 }
 
 /// Stable serialized fault attribution.

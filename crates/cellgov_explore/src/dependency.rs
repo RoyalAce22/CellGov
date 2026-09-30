@@ -107,8 +107,9 @@ pub struct StepFootprint {
 impl StepFootprint {
     /// Extract a footprint from one whole step.
     ///
-    /// Adds the park a [`YieldReason::DmaWait`] result carries, which
-    /// no effect names and [`StepFootprint::from_effects`] misses.
+    /// Adds the park a [`YieldReason::DmaWait`] or
+    /// [`YieldReason::ChannelStall`] result carries, which no effect
+    /// names and [`StepFootprint::from_effects`] misses.
     pub fn from_step(
         unit: cellgov_event::UnitId,
         yielded: YieldReason,
@@ -198,7 +199,8 @@ impl StepFootprint {
         for effect in rt.last_lv2_effects() {
             if let Effect::MailboxSend { mailbox, .. } = effect {
                 // The target the release names: the unit whose raw id
-                // is the mailbox's, whatever its block reason was.
+                // is the mailbox's. Recording the wake whatever parked
+                // the target only adds conflicts.
                 self.wake_targets
                     .push(cellgov_event::UnitId::new(mailbox.raw()));
             }
@@ -322,6 +324,11 @@ impl StepFootprint {
                     // The footprint is built before the pop decides, so
                     // every attempt records the park it may take.
                     fp.wait_units.push(*source);
+                }
+                Effect::MailboxPop { mailbox, .. } => {
+                    // A pop takes a message the unit already read and
+                    // never parks: an empty mailbox stalls instead.
+                    fp.mailbox_receives.push(*mailbox);
                 }
                 Effect::DmaEnqueue { request, payload } => {
                     fp.dma_writes.push(request.destination());

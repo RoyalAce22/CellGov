@@ -14,6 +14,19 @@ use cellgov_time::GuestTicks;
 
 use super::outcome::{SpuFault, SpuStepOutcome};
 
+/// The yield of a blocking channel access whose count is zero. The
+/// access does not retire; the unit parks on it and runs it again when
+/// woken.
+///
+/// [CBEA p:109 s:9] a blocking channel access completes only when the channel count is non-zero; otherwise the SPU stalls.
+/// [SPU-ISA p:257 s:13.7] channel accesses are never reordered or speculated, so the stalled access is the next one to run.
+fn stall() -> SpuStepOutcome {
+    SpuStepOutcome::Yield {
+        effects: vec![],
+        reason: YieldReason::ChannelStall,
+    }
+}
+
 /// The stop a channel instruction in the wrong direction takes.
 fn invalid_channel() -> SpuStepOutcome {
     SpuStepOutcome::Stop {
@@ -81,11 +94,9 @@ pub(super) fn execute_wrch(
         }
         // [CBE-Handbook p:463 s:17. SPE Channel and Related MMIO Interface sub:17.12 SPU Mailbox Channels] SPU Write Outbound Mailbox sends a 32-bit message to the PPE.
         // [CBEA p:98 s:8.6.1] a write to a full outbound mailbox stalls the SPU until another processor reads it.
-        // The model does not park the SPU on it, so the write is refused
-        // by name.
         spu::SPU_WR_OUT_MBOX => {
             if state.channels.out_mbox.is_some() {
-                return SpuStepOutcome::Fault(SpuFault::ChannelStall(channel));
+                return stall();
             }
             state.channels.out_mbox = Some(val);
             SpuStepOutcome::Continue
@@ -119,10 +130,7 @@ pub(super) fn execute_rdch(
                 state.set_reg_channel_word(rt, status);
                 SpuStepOutcome::Continue
             }
-            None if state.channels.tag_update.is_some() => SpuStepOutcome::Yield {
-                effects: vec![],
-                reason: YieldReason::DmaWait,
-            },
+            None if state.channels.tag_update.is_some() => stall(),
             None => SpuStepOutcome::Fault(SpuFault::ChannelStall(channel)),
         },
         // [CBEA p:126 s:9.3.4] MFC_RdTagMask returns the current tag-group query mask.
@@ -131,11 +139,19 @@ pub(super) fn execute_rdch(
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:543 s:19. DMA Transfers and Interprocessor Communication sub:19.6 Mailboxes] SPU Read Inbound Mailbox is read-blocking when the mailbox is empty.
+        // The read takes the oldest message and the commit removes it
+        // from the mailbox; the step then yields so the next step sees
+        // the mailbox without it.
         spu::SPU_RD_IN_MBOX => {
-            state.channels.pending_mbox_rt = Some(rt);
+            if state.channels.in_mbox.is_empty() {
+                return stall();
+            }
+            let message = state.channels.in_mbox.remove(0);
+            state.set_reg_channel_word(rt, message);
             SpuStepOutcome::Yield {
-                effects: vec![Effect::MailboxReceiveAttempt {
+                effects: vec![Effect::MailboxPop {
                     mailbox: cellgov_sync::MailboxId::new(unit_id.raw()),
+                    message: cellgov_effects::MailboxMessage::new(message),
                     source: unit_id,
                 }],
                 reason: YieldReason::MailboxAccess,
@@ -207,7 +223,9 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         // [CBEA p:133 s:9.5.1] SPU_WrOutMbox counts its free entries.
         spu::SPU_WR_OUT_MBOX => spu::SPU_OUT_MBOX_DEPTH - u32::from(channels.out_mbox.is_some()),
         // [CBEA p:135 s:9.5.3] SPU_RdInMbox counts the messages in the inbound mailbox.
-        spu::SPU_RD_IN_MBOX => channels.in_mbox_count.min(spu::SPU_IN_MBOX_DEPTH),
+        spu::SPU_RD_IN_MBOX => u32::try_from(channels.in_mbox.len())
+            .unwrap_or(u32::MAX)
+            .min(spu::SPU_IN_MBOX_DEPTH),
         // [CBEA p:147 s:9.11.1] SPU_RdEventStat counts 1 once an enabled event is pending.
         // The model raises no SPU event.
         spu::SPU_RD_EVENT_STAT => 0,

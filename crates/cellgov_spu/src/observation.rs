@@ -27,8 +27,8 @@ pub enum SpuChannelField {
     TagStatus,
     /// Atomic-command result.
     AtomicStatus,
-    /// Pending mailbox destination register.
-    PendingMailbox,
+    /// Inbound mailbox messages the step has not read.
+    InboundMailbox,
     /// Pending DMA GET command.
     PendingGet,
     /// Waiting tag-status update request.
@@ -61,8 +61,8 @@ fn channel_differences(
             SpuChannelField::AtomicStatus,
         ),
         (
-            before.pending_mbox_rt != after.pending_mbox_rt,
-            SpuChannelField::PendingMailbox,
+            before.in_mbox != after.in_mbox,
+            SpuChannelField::InboundMailbox,
         ),
         (
             before.pending_get != after.pending_get,
@@ -400,12 +400,6 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Bisl { rt, .. }
             | SpuInstruction::Rchcnt { rt, .. }
             | SpuInstruction::Mfspr { rt, .. } => Some(rt),
-            // [CBE-Handbook p:542 s:19.6.6.3 SPU Side] An empty inbound mailbox stalls the read.
-            // The executor writes RT only when a message arrives on re-entry.
-            SpuInstruction::Rdch {
-                channel: cellgov_ps3_abi::hw::spu::SPU_RD_IN_MBOX,
-                ..
-            } => None,
             SpuInstruction::Rdch { rt, .. } => Some(rt),
             SpuInstruction::Stqd { .. }
             | SpuInstruction::Stqx { .. }
@@ -525,7 +519,7 @@ impl SpuAllowedFootprint {
                 ..
             }
         ) {
-            footprint.channels.insert(SpuChannelField::PendingMailbox);
+            footprint.channels.insert(SpuChannelField::InboundMailbox);
         }
         if matches!(
             instruction,
@@ -554,10 +548,16 @@ impl SpuAllowedFootprint {
             for (index, (previous, current)) in
                 before.regs.iter().zip(&observed.state.regs).enumerate()
             {
-                // The executor's yielding arms do not publish register values.
+                // A stalled access did not retire, so it writes no register.
+                // [CBE-Handbook p:542 s:19.6.6.3 SPU Side] An empty inbound mailbox stalls the read.
                 if previous != current
-                    && (matches!(&observed.outcome, SpuStepOutcome::Yield { .. })
-                        || !self.registers.contains(&(index as u8)))
+                    && (matches!(
+                        &observed.outcome,
+                        SpuStepOutcome::Yield {
+                            reason: cellgov_exec::YieldReason::ChannelStall,
+                            ..
+                        }
+                    ) || !self.registers.contains(&(index as u8)))
                 {
                     violations.insert(SpuObservationComponent::Registers);
                 }

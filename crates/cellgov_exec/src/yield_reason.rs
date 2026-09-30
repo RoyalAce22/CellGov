@@ -44,6 +44,17 @@ pub enum YieldReason {
     /// Terminal: the runtime should remove the unit from the
     /// runnable set after observing this.
     Finished = 8,
+    /// A blocking channel access found its channel count at zero. The
+    /// instruction did not retire: the unit parks with its program
+    /// counter on it and runs it again when the channel's producer
+    /// wakes the unit. The unit names the channel and its waker through
+    /// `ExecutionUnit::channel_stall`.
+    ///
+    /// Discriminant 9 is the trace-only hypercall reason, so raw values
+    /// stay equal to the trace's.
+    ///
+    /// [SPU-ISA p:247 s:11] an access to a channel without capacity stops instruction processing until capacity is available.
+    ChannelStall = 10,
 }
 
 impl YieldReason {
@@ -55,6 +66,7 @@ impl YieldReason {
         match self {
             YieldReason::WaitingSync
             | YieldReason::DmaWait
+            | YieldReason::ChannelStall
             | YieldReason::Finished
             | YieldReason::Fault => true,
             YieldReason::BudgetExhausted
@@ -73,10 +85,10 @@ impl YieldReason {
     /// - a `WaitOnEvent` effect
     /// - a `MailboxReceiveAttempt` effect whose mailbox comes back
     ///   empty
-    /// - this yield reason, which no effect names
+    /// - these yield reasons, which no effect names
     ///
     /// A reader that builds a per-step record from the effect list
-    /// alone sees the first two and asks here for the third.
+    /// alone sees the first two and asks here for the rest.
     ///
     /// `Syscall` answers `false` although LV2 dispatch parks its
     /// source too, at the blocking and timer-sleep arms that the
@@ -86,7 +98,7 @@ impl YieldReason {
     /// nameless to an effect-list reader.
     pub fn parks_without_an_effect(&self) -> bool {
         match self {
-            YieldReason::DmaWait => true,
+            YieldReason::DmaWait | YieldReason::ChannelStall => true,
             YieldReason::WaitingSync
             | YieldReason::MailboxAccess
             | YieldReason::BudgetExhausted
@@ -102,10 +114,12 @@ impl YieldReason {
     /// eligible for this yield. The fast path skips per-step LV2
     /// drain / syscall-response arbitration; a yield reason that
     /// implies runtime arbitration (`Syscall`, `Finished`) must not
-    /// take the fast path.
+    /// take the fast path. Nor may `ChannelStall`: the fast path skips
+    /// the park, and the unit would run the stalled access again at
+    /// once.
     pub fn allows_trivial_fast_path(&self) -> bool {
         match self {
-            YieldReason::Syscall | YieldReason::Finished => false,
+            YieldReason::Syscall | YieldReason::Finished | YieldReason::ChannelStall => false,
             YieldReason::BudgetExhausted
             | YieldReason::MailboxAccess
             | YieldReason::DmaSubmitted

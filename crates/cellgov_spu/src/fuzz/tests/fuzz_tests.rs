@@ -585,7 +585,7 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
         channel: spu::SPU_RD_IN_MBOX,
     }
     .fuzz_descriptor();
-    assert_eq!(rdch.effects, &[EffectKind::MailboxReceiveAttempt]);
+    assert_eq!(rdch.effects, &[EffectKind::MailboxPop]);
     assert_eq!(rdch.outcomes, &[SpuOutcomeClass::Yield]);
 
     // Each tag-channel read state reaches its own executor arm, and the declared set holds all three.

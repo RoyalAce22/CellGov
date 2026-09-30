@@ -54,6 +54,7 @@ impl Runtime {
                     BlockReason::MailboxEmpty => TracedBlockReason::MailboxEmpty,
                     BlockReason::WaitOnEvent => TracedBlockReason::WaitOnEvent,
                     BlockReason::DmaWait => TracedBlockReason::DmaWait,
+                    BlockReason::OutboundMailboxFull => TracedBlockReason::OutboundMailboxFull,
                 };
                 self.trace.record(&TraceRecord::UnitBlocked {
                     unit,

@@ -25,6 +25,7 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
         Effect::RsxFlipRequest { .. } => TracedEffectKind::RsxFlipRequest,
         Effect::SharedReadIntent { .. } => TracedEffectKind::SharedReadIntent,
         Effect::ClockRead { .. } => TracedEffectKind::ClockRead,
+        Effect::MailboxPop { .. } => TracedEffectKind::MailboxPop,
     }
 }
 
@@ -55,6 +56,7 @@ pub(super) fn traced_yield_reason(y: YieldReason, syscall_lev: Option<u8>) -> Tr
         YieldReason::InterruptBoundary => TracedYieldReason::InterruptBoundary,
         YieldReason::Fault => TracedYieldReason::Fault,
         YieldReason::Finished => TracedYieldReason::Finished,
+        YieldReason::ChannelStall => TracedYieldReason::ChannelStall,
     }
 }
 

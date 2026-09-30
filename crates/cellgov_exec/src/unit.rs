@@ -198,6 +198,14 @@ pub trait ExecutionUnit {
         None
     }
 
+    /// The channel access the unit's last step stalled on, or `None`.
+    /// The runtime reads it when the step yields
+    /// [`crate::YieldReason::ChannelStall`], and a waker checks it so
+    /// that only the channel's own producer wakes the unit.
+    fn channel_stall(&self) -> Option<crate::ChannelStall> {
+        None
+    }
+
     /// An `SPU_RunCntl` stop request. `waiting` says the unit waits on a
     /// blocked channel. A stopped unit stays as it is.
     ///

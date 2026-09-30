@@ -8,13 +8,15 @@ use crate::instruction::{SpuInstruction, SpuInstructionKind};
 use super::types::{SpuEncodingForm, SpuOutcomeClass, SpuSequenceFlow};
 
 const NO_EFFECTS: &[EffectKind] = &[];
-const RDCH_EFFECTS: &[EffectKind] = &[EffectKind::MailboxReceiveAttempt];
+const RDCH_EFFECTS: &[EffectKind] = &[EffectKind::MailboxPop];
 const WRCH_EFFECTS: &[EffectKind] = &[EffectKind::DmaEnqueue, EffectKind::ConditionalStore];
 // The fuzz engine rejects outcomes outside these executor-derived sets.
 const CONTINUE: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue];
 const FAULT: &[SpuOutcomeClass] = &[SpuOutcomeClass::Fault];
 const YIELD: &[SpuOutcomeClass] = &[SpuOutcomeClass::Yield];
 const STOP: &[SpuOutcomeClass] = &[SpuOutcomeClass::Stop];
+// A write to a full outbound mailbox stalls.
+const CONTINUE_OR_YIELD: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Yield];
 const CONTINUE_OR_STOP: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Stop];
 const LOAD_STORE: &[SpuOutcomeClass] = &[SpuOutcomeClass::Continue, SpuOutcomeClass::Fault];
 // A tag-status read has three outcomes:
@@ -107,10 +109,13 @@ pub(super) fn effect_and_outcome(
                 | spu::MFC_EAL
                 | spu::MFC_SIZE
                 | spu::MFC_TAG_ID
-                | spu::MFC_WR_TAG_MASK
-                | spu::SPU_WR_OUT_MBOX,
+                | spu::MFC_WR_TAG_MASK,
             ..
         } => (NO_EFFECTS, CONTINUE),
+        SpuInstruction::Wrch {
+            channel: spu::SPU_WR_OUT_MBOX,
+            ..
+        } => (NO_EFFECTS, CONTINUE_OR_YIELD),
         // The channel refuses a reserved update request.
         SpuInstruction::Wrch {
             channel: spu::MFC_WR_TAG_UPDATE,

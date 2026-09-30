@@ -6,12 +6,8 @@
 use crate::exec::{execute, SpuStepOutcome};
 use crate::instruction::SpuInstruction;
 use crate::state::SpuState;
-use crate::unit::SpuExecutionUnit;
 use cellgov_event::UnitId;
-use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
-use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::hw::spu;
-use cellgov_time::Budget;
 
 const RT: u8 = 9;
 const PATTERN: [u8; 16] = [0xA5; 16];
@@ -83,15 +79,18 @@ fn rchcnt_zeros_slots_one_to_three() {
 }
 
 #[test]
-fn a_resumed_inbound_mailbox_read_zeros_slots_one_to_three() {
-    let mut unit = SpuExecutionUnit::new(UnitId::new(0));
-    unit.state_mut().regs[RT as usize] = PATTERN;
-    unit.state_mut().channels.pending_mbox_rt = Some(RT);
-    // The parked rdch sits at PC 0; the word after it is zero, a stop.
-    let mem = GuestMemory::new(16);
-    let received = [0x1234_5678];
-    let ctx = ExecutionContext::with_received(&mem, &received);
-    let result = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
-    assert_eq!(result.yield_reason, YieldReason::Finished);
-    assert_preferred_only(unit.state(), 0x1234_5678);
+fn an_inbound_mailbox_read_zeros_slots_one_to_three() {
+    let mut s = SpuState::new();
+    s.regs[RT as usize] = PATTERN;
+    s.channels.in_mbox = vec![0x1234_5678];
+    let outcome = execute(
+        &SpuInstruction::Rdch {
+            rt: RT,
+            channel: spu::SPU_RD_IN_MBOX,
+        },
+        &mut s,
+        UnitId::new(0),
+    );
+    assert!(matches!(outcome, SpuStepOutcome::Yield { .. }));
+    assert_preferred_only(&s, 0x1234_5678);
 }

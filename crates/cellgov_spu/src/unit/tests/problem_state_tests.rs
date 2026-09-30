@@ -3,7 +3,6 @@
 
 use crate::stop::SpuStopKind;
 use crate::SpuExecutionUnit;
-use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionUnit, ProblemStateError, SignalNotifier, StopRegisters, UnitStatus,
@@ -156,18 +155,21 @@ fn the_outbound_mailbox_holds_the_spus_message_until_it_is_read() {
     assert_eq!(unit.read_out_mbox(), Ok(None));
 }
 
-/// [CBEA p:98 s:8.6.1] a write to a full outbound mailbox stalls the SPU; the model refuses it by name.
+/// [CBEA p:98 s:8.6.1] a write to a full outbound mailbox stalls the SPU until another processor reads it.
 #[test]
-fn a_write_to_a_full_outbound_mailbox_is_refused_as_a_stall() {
+fn a_write_to_a_full_outbound_mailbox_stalls_on_the_write() {
     let mut unit = unit_with(&[wrch(SPU_WR_OUT_MBOX, 4)]);
     unit.state_mut().channels.out_mbox = Some(1);
     let result = run(&mut unit);
-    let Some(FaultKind::Guest(code)) = result.fault else {
-        panic!("expected a guest fault, got {:?}", result.fault);
-    };
-    assert_eq!(
-        crate::describe_guest_fault(code).as_deref(),
-        Some("SPU_CHANNEL_STALL (detail=0x001c)")
-    );
+    assert_eq!(result.yield_reason, YieldReason::ChannelStall);
+    assert_eq!(result.fault, None);
+    assert_eq!(unit.state().pc, 0, "the write did not retire");
     assert_eq!(unit.state().channels.out_mbox, Some(1));
+    assert_eq!(
+        unit.channel_stall(),
+        Some(cellgov_exec::ChannelStall {
+            channel: SPU_WR_OUT_MBOX,
+            wake: cellgov_exec::StallWake::OutboundMailboxRead,
+        })
+    );
 }

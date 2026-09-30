@@ -66,14 +66,23 @@ fn park_against_a_wake() -> Runtime {
 /// variant pick a side. A wrong side prunes the step that parked a
 /// unit, and nothing else reports it.
 #[test]
-fn a_dma_wait_is_the_only_yield_that_parks_with_no_effect() {
+fn a_dma_wait_and_a_channel_stall_are_the_yields_that_park_with_no_effect() {
     use strum::VariantArray;
     let parking: Vec<YieldReason> = YieldReason::VARIANTS
         .iter()
         .copied()
         .filter(|reason| reason.parks_without_an_effect())
         .collect();
-    assert_eq!(parking, vec![YieldReason::DmaWait]);
+    assert_eq!(
+        parking,
+        vec![YieldReason::DmaWait, YieldReason::ChannelStall]
+    );
+}
+
+#[test]
+fn a_channel_stall_records_the_unit_it_parks() {
+    let parked = StepFootprint::from_step(PARKER, YieldReason::ChannelStall, &[]);
+    assert_eq!(parked.wait_units, vec![PARKER]);
 }
 
 #[test]

@@ -37,6 +37,9 @@ pub enum TracedYieldReason {
     /// distinguished from `Syscall` so a rejection cannot byte-collide with an
     /// unrelated LV2 handler returning `CELL_EINVAL`.
     Hypercall = 9,
+    /// Unit parked on a blocking channel whose count was zero; the
+    /// stalled instruction runs again when the unit wakes.
+    ChannelStall = 10,
 }
 
 /// Which piece of state a [`TraceRecord::StateHashCheckpoint`](super::TraceRecord::StateHashCheckpoint) hashes.
@@ -69,6 +72,9 @@ pub enum TracedBlockReason {
     MailboxEmpty = 1,
     /// SPU blocked on `MFC_RD_TAG_STAT` until a pending DMA completes.
     DmaWait = 2,
+    /// SPU blocked on `SPU_WR_OUT_MBOX` until another unit reads the
+    /// message waiting in its outbound mailbox.
+    OutboundMailboxFull = 3,
 }
 
 /// Why a unit was woken, as the trace records it.
@@ -129,6 +135,8 @@ pub enum TracedEffectKind {
     SharedReadIntent = 13,
     /// Guest-clock read.
     ClockRead = 14,
+    /// Removal of a mailbox message the unit already read.
+    MailboxPop = 15,
 }
 
 /// Reason a host-side invariant break was recorded into the trace

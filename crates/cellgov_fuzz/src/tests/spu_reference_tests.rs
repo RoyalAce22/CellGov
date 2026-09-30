@@ -117,8 +117,9 @@ fn all_channels() -> serde_json::Value {
     serde_json::json!({
         "mfc_lsa": 1, "mfc_eah": 2, "mfc_eal": 3, "mfc_size": 4, "mfc_tag_id": 5,
         "tag_mask": 6, "tag_status": 7, "atomic_status": 8,
-        "pending_mbox_rt": 127, "pending_get": [9, 10, 11, 12],
-        "tag_update": 2, "tag_status_read": 6, "atomic_status_ready": true, "in_mbox_count": 3,
+        "pending_get": [9, 10, 11, 12],
+        "tag_update": 2, "tag_status_read": 6, "atomic_status_ready": true,
+        "in_mbox": [21, 22, 23],
         "out_mbox": 5
     })
 }
@@ -324,19 +325,29 @@ fn parse_refuses_unaligned_reservations_on_both_sides() {
     parse(&json).expect("aligned reservations parse");
 }
 
+/// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_RdInMbox has 4 maximum entries.
 #[test]
-fn parse_refuses_an_initial_mailbox_register_outside_the_bank() {
+fn parse_refuses_an_inbound_mailbox_past_its_depth_on_both_sides() {
     let mut json = fixture();
     json["initial_state"]["channels"] = all_channels();
-    json["initial_state"]["channels"]["pending_mbox_rt"] = 128.into();
+    json["initial_state"]["channels"]["in_mbox"] = serde_json::json!([1, 2, 3, 4, 5]);
     assert!(matches!(
         parse(&json),
         Err(SpuReferenceError::Invalid {
-            field: "initial_state.channels.pending_mbox_rt"
+            field: "initial_state.channels.in_mbox"
         })
     ));
-    json["initial_state"]["channels"]["pending_mbox_rt"] = 127.into();
-    parse(&json).expect("register 127 is inside the bank");
+    json["initial_state"]["channels"]["in_mbox"] = serde_json::json!([1, 2, 3, 4]);
+    parse(&json).expect("four messages fill the mailbox");
+    let mut overfull = all_channels();
+    overfull["in_mbox"] = serde_json::json!([1, 2, 3, 4, 5]);
+    json["expected"]["channels"] = serde_json::json!({"status": "value", "value": overfull});
+    assert!(matches!(
+        parse(&json),
+        Err(SpuReferenceError::Invalid {
+            field: "expected.channels.in_mbox"
+        })
+    ));
 }
 
 #[test]
@@ -526,12 +537,11 @@ fn artifact_types_round_trip_through_json() {
             tag_mask: 6,
             tag_status: 7,
             atomic_status: 8,
-            pending_mbox_rt: Some(127),
             pending_get: Some((9, 10, 11, 12)),
             tag_update: Some(2),
             tag_status_read: Some(6),
             atomic_status_ready: true,
-            in_mbox_count: 3,
+            in_mbox: vec![21, 22, 23],
             out_mbox: Some(5),
         })
     );
@@ -703,7 +713,7 @@ fn each_component_is_named_when_it_differs() {
 
 #[test]
 fn every_channel_field_participates_in_the_channel_comparison() {
-    let mutations: [fn(&mut SpuReferenceChannels); 15] = [
+    let mutations: [fn(&mut SpuReferenceChannels); 14] = [
         |channels| channels.mfc_lsa ^= 1,
         |channels| channels.mfc_eah ^= 1,
         |channels| channels.mfc_eal ^= 1,
@@ -712,12 +722,11 @@ fn every_channel_field_participates_in_the_channel_comparison() {
         |channels| channels.tag_mask ^= 1,
         |channels| channels.tag_status ^= 1,
         |channels| channels.atomic_status ^= 1,
-        |channels| channels.pending_mbox_rt = Some(3),
         |channels| channels.pending_get = Some((1, 2, 3, 4)),
         |channels| channels.tag_update = Some(1),
         |channels| channels.tag_status_read = Some(1),
         |channels| channels.atomic_status_ready ^= true,
-        |channels| channels.in_mbox_count ^= 1,
+        |channels| channels.in_mbox.push(1),
         |channels| channels.out_mbox = Some(0xAB),
     ];
     let loaded = snapshot();
@@ -748,7 +757,6 @@ fn channel_snapshots_convert_field_by_field() {
     state.channels.tag_mask = 6;
     state.channels.tag_status = 7;
     state.channels.atomic_status = 8;
-    state.channels.pending_mbox_rt = Some(9);
     state.channels.pending_get = Some((
         10,
         11,
@@ -758,7 +766,7 @@ fn channel_snapshots_convert_field_by_field() {
     state.channels.tag_update = Some(cellgov_spu::state::TagUpdateCondition::All);
     state.channels.tag_status_read = Some(6);
     state.channels.atomic_status_ready = true;
-    state.channels.in_mbox_count = 14;
+    state.channels.in_mbox = vec![14, 16];
     state.channels.out_mbox = Some(15);
     let converted = SpuReferenceChannels::from(&SpuObservableSnapshot::capture(&state).channels);
     assert_eq!(
@@ -772,12 +780,11 @@ fn channel_snapshots_convert_field_by_field() {
             tag_mask: 6,
             tag_status: 7,
             atomic_status: 8,
-            pending_mbox_rt: Some(9),
             pending_get: Some((10, 11, 12, 13)),
             tag_update: Some(2),
             tag_status_read: Some(6),
             atomic_status_ready: true,
-            in_mbox_count: 14,
+            in_mbox: vec![14, 16],
             out_mbox: Some(15),
         }
     );
@@ -1087,12 +1094,12 @@ fn replay_names_the_mismatch_of_an_altered_fixture() {
 #[test]
 fn replay_validates_the_artifact_before_executing() {
     let mut altered = artifact();
-    altered.schema_version = 4;
+    altered.schema_version = 5;
     assert!(matches!(
         replay_reference(&altered),
         Err(SpuReferenceError::Version {
-            found: 4,
-            supported: 3
+            found: 5,
+            supported: 4
         })
     ));
     let mut altered = artifact();
@@ -1121,12 +1128,11 @@ fn replay_places_words_at_a_nonzero_pc_and_applies_initial_overrides() {
         tag_mask: 6,
         tag_status: 7,
         atomic_status: 8,
-        pending_mbox_rt: Some(9),
         pending_get: Some((10, 11, 12, 13)),
         tag_update: Some(2),
         tag_status_read: Some(6),
         atomic_status_ready: true,
-        in_mbox_count: 3,
+        in_mbox: vec![21, 22, 23],
         out_mbox: Some(5),
     });
     altered.expected.pc = value(0x104);

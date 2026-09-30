@@ -93,7 +93,7 @@ fn extract_events(trace_bytes: &[u8]) -> Result<Vec<ObservedEvent>, TraceDecodeE
         let maybe = match record {
             TraceRecord::EffectEmitted { unit, kind, .. } => match kind {
                 TracedEffectKind::MailboxSend => Some((ObservedEventKind::MailboxSend, unit.raw())),
-                TracedEffectKind::MailboxReceiveAttempt => {
+                TracedEffectKind::MailboxReceiveAttempt | TracedEffectKind::MailboxPop => {
                     Some((ObservedEventKind::MailboxReceive, unit.raw()))
                 }
                 TracedEffectKind::DmaEnqueue => Some((ObservedEventKind::DmaComplete, unit.raw())),

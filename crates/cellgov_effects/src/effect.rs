@@ -194,6 +194,22 @@ pub enum Effect {
         /// Reading unit.
         source: UnitId,
     },
+    /// Take the head message of a mailbox the unit has already read.
+    ///
+    /// The unit read `message` from its step's view of the mailbox and
+    /// wrote it to its register; the commit removes that message. The
+    /// commit refuses the batch when the message after the batch's
+    /// earlier pops from the mailbox is not `message`, and it never
+    /// delivers or parks, unlike
+    /// [`Effect::MailboxReceiveAttempt`].
+    MailboxPop {
+        /// Mailbox the message leaves.
+        mailbox: MailboxId,
+        /// The message the unit read.
+        message: MailboxMessage,
+        /// Reading unit.
+        source: UnitId,
+    },
 }
 
 /// Stable identity for an [`Effect`] variant used by validation tools.
@@ -229,6 +245,8 @@ pub enum EffectKind {
     SharedReadIntent,
     /// [`Effect::ClockRead`].
     ClockRead,
+    /// [`Effect::MailboxPop`].
+    MailboxPop,
 }
 
 impl Effect {
@@ -250,6 +268,7 @@ impl Effect {
             Self::RsxFlipRequest { .. } => EffectKind::RsxFlipRequest,
             Self::SharedReadIntent { .. } => EffectKind::SharedReadIntent,
             Self::ClockRead { .. } => EffectKind::ClockRead,
+            Self::MailboxPop { .. } => EffectKind::MailboxPop,
         }
     }
 

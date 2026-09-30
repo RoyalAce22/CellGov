@@ -52,6 +52,15 @@ pub enum CommitError {
         /// Mailbox id that was not found in the registry.
         mailbox: MailboxId,
     },
+    /// A `MailboxPop` names a message that is not the one at its place
+    /// in the mailbox: the unit read a view the batch does not match.
+    #[error("effect[{effect_index}]: mailbox {mailbox} pop does not match its message")]
+    MailboxPopMismatch {
+        /// Index of the offending effect within the batch.
+        effect_index: usize,
+        /// Mailbox the pop named.
+        mailbox: MailboxId,
+    },
     /// A `SignalUpdate` targeted an unregistered signal.
     #[error("effect[{effect_index}]: unknown signal {signal}")]
     UnknownSignal {
@@ -147,7 +156,8 @@ pub struct CommitOutcome {
     pub mailbox_sends_committed: usize,
     /// Number of `SignalUpdate` effects committed.
     pub signal_updates_committed: usize,
-    /// Number of `MailboxReceiveAttempt` effects that delivered a message.
+    /// Number of `MailboxReceiveAttempt` effects that delivered a message
+    /// and `MailboxPop` effects that took one.
     pub mailbox_receives_committed: usize,
     /// Number of `MailboxReceiveAttempt` effects that blocked on an empty mailbox.
     pub mailbox_receives_blocked: usize,
@@ -207,6 +217,9 @@ pub enum BlockReason {
     /// complete; runtime parks the unit until a DMA completion takes
     /// the missing transfer off the queue and wakes the issuer.
     DmaWait,
+    /// SPU `SPU_WR_OUT_MBOX` found its outbound mailbox full; runtime
+    /// parks the unit until another unit reads the waiting message.
+    OutboundMailboxFull,
 }
 
 /// Mutable references to every subsystem the commit pipeline touches.
@@ -310,6 +323,9 @@ impl CommitPipeline {
         let mut blocked_units = Vec::new();
         let mut woken_units = Vec::new();
         let mut deferred = 0usize;
+        // Pops this batch takes from each mailbox so far; the next pop
+        // from the same mailbox names the message after them.
+        let mut pops: Vec<(MailboxId, usize)> = Vec::new();
 
         // The IIFE routes every validation failure through
         // `staging.clear()`; `StagingMemory`'s Drop debug-asserts an
@@ -356,6 +372,44 @@ impl CommitPipeline {
                                 source_unit: *source,
                             });
                         }
+                        // An attempt takes the next message when there is
+                        // one, so a later pop names the message after it.
+                        match pops.iter_mut().find(|(id, _)| id == mailbox) {
+                            Some((_, taken)) => *taken += 1,
+                            None => pops.push((*mailbox, 1)),
+                        }
+                    }
+                    Effect::MailboxPop {
+                        mailbox,
+                        message,
+                        source,
+                    } => {
+                        let Some(queue) = ctx.mailboxes.get(*mailbox) else {
+                            return Err(CommitError::UnknownMailbox {
+                                effect_index: idx,
+                                mailbox: *mailbox,
+                            });
+                        };
+                        if ctx.units.get(*source).is_none() {
+                            return Err(CommitError::UnknownSourceUnit {
+                                effect_index: idx,
+                                source_unit: *source,
+                            });
+                        }
+                        let taken = match pops.iter_mut().find(|(id, _)| id == mailbox) {
+                            Some((_, taken)) => taken,
+                            None => {
+                                pops.push((*mailbox, 0));
+                                &mut pops.last_mut().expect("just pushed").1
+                            }
+                        };
+                        if queue.iter().nth(*taken) != Some(&message.raw()) {
+                            return Err(CommitError::MailboxPopMismatch {
+                                effect_index: idx,
+                                mailbox: *mailbox,
+                            });
+                        }
+                        *taken += 1;
                     }
                     Effect::SignalUpdate { signal, .. } => {
                         if ctx.signals.get(*signal).is_none() {
@@ -598,6 +652,24 @@ impl CommitPipeline {
                             receives_blocked += 1;
                         }
                     }
+                }
+                Effect::MailboxPop {
+                    mailbox, message, ..
+                } => {
+                    let taken = ctx
+                        .mailboxes
+                        .get_mut(*mailbox)
+                        .expect("pre-validated mailbox id")
+                        .try_receive();
+                    // Validation read the mailbox before this batch's
+                    // sends; a send into a full mailbox in the same batch
+                    // would drop the message the pop names.
+                    debug_assert_eq!(
+                        taken,
+                        Some(message.raw()),
+                        "MailboxPop took a message other than the one it names"
+                    );
+                    receives += 1;
                 }
                 Effect::WakeUnit { target, .. } => {
                     ctx.units.set_status_override(*target, UnitStatus::Runnable);

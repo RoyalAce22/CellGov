@@ -141,9 +141,10 @@ touched nothing. The runtime publishes what the host did during a step
 -- the tagged guest writes, and the effects the dispatch applied -- and
 each one is folded into the category it would have had from a unit. A
 handler's write becomes that step's write; its mailbox send becomes
-that step's send and the wake it performs, since the dispatch releases
-the target by status alone rather than by what parked it. No clause
-was added for either.
+that step's send and a wake of the target, whatever parked it: the
+dispatch releases a target parked on the mailbox or on nothing it
+names, and recording the wake for every target only adds conflicts. No
+clause was added for either.
 
 One thing still reaches committed state without reaching a footprint.
 The RSX FIFO advance pass commits guest memory and sweeps reservations

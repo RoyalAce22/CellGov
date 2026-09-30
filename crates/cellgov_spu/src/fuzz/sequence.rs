@@ -8,12 +8,15 @@ use crate::instruction::{SpuInstruction, SpuInstructionKind};
 
 use super::types::{SpuGenerationDescriptor, SpuGenerationError, SpuOperandClass};
 
+/// The message the mailbox interaction finds waiting.
+pub const SEQUENCE_MAILBOX_MESSAGE: u32 = 0x5EED_0001;
+
 /// A bounded interaction that requires a specific SPU instruction order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SpuSequenceInteraction {
     /// Stage a channel value before reading channel status.
     Channel,
-    /// Produce a pending inbound-mailbox read.
+    /// Read the message waiting in the inbound mailbox.
     Mailbox,
     /// Stage an address and then enqueue DMA.
     Dma,
@@ -97,7 +100,8 @@ impl SpuSequenceInteraction {
                 state.channels.mfc_eal = data_base;
                 state.reservation = Some(ReservedLine::containing(u64::from(data_base)));
             }
-            Self::Mailbox | Self::Branch | Self::Stop => {}
+            Self::Mailbox => state.channels.in_mbox = vec![SEQUENCE_MAILBOX_MESSAGE],
+            Self::Branch | Self::Stop => {}
         }
     }
 

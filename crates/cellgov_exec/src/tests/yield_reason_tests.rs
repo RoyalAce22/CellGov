@@ -13,6 +13,7 @@ fn discriminants_are_locked() {
     assert_eq!(YieldReason::InterruptBoundary as u8, 6);
     assert_eq!(YieldReason::Fault as u8, 7);
     assert_eq!(YieldReason::Finished as u8, 8);
+    assert_eq!(YieldReason::ChannelStall as u8, 10);
 }
 
 #[test]

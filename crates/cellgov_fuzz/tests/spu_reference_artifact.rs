@@ -145,16 +145,17 @@ fn a_shared_spu_executor_defect_escapes_replay_but_not_the_independent_vector() 
 #[test]
 fn unknown_schema_fields_and_versions_are_refused() {
     let mut json: serde_json::Value = serde_json::from_str(ROTATION).expect("valid JSON");
-    for found in [1, 2, 4] {
-        // Version 1 predates the FPSCR axis, version 2 the initial FPSCR;
-        // version 4 is not written yet.
+    for found in [1, 2, 3, 5] {
+        // Version 1 predates the FPSCR axis, version 2 the initial FPSCR,
+        // version 3 the inbound mailbox contents; version 5 is not
+        // written yet.
         json["schema_version"] = found.into();
         assert!(matches!(
             parse_reference_json(&json.to_string()),
-            Err(SpuReferenceError::Version { found: f, supported: 3 }) if f == found
+            Err(SpuReferenceError::Version { found: f, supported: 4 }) if f == found
         ));
     }
-    json["schema_version"] = 3.into();
+    json["schema_version"] = 4.into();
     json["expected"]["untracked_axis"] = true.into();
     assert!(matches!(
         parse_reference_json(&json.to_string()),
@@ -285,18 +286,18 @@ fn the_documented_vector_needs_an_official_source_key() {
 }
 
 #[test]
-fn expected_channels_cannot_name_a_nonexistent_mailbox_register() {
+fn a_stashed_mailbox_register_is_no_longer_a_channel_field() {
+    // A mailbox read writes its register when it runs, so no channel
+    // state holds a destination register between steps.
     let mut json: serde_json::Value = serde_json::from_str(ROTATION).expect("valid JSON");
     json["expected"]["channels"] = serde_json::json!({"status": "value", "value": {
         "mfc_lsa": 0, "mfc_eah": 0, "mfc_eal": 0, "mfc_size": 0,
         "mfc_tag_id": 0, "tag_mask": 0, "tag_status": 0, "atomic_status": 0,
-        "pending_mbox_rt": 128, "pending_get": null
+        "pending_mbox_rt": 3, "pending_get": null
     }});
     assert!(matches!(
         parse_reference_json(&json.to_string()),
-        Err(SpuReferenceError::Invalid {
-            field: "expected.channels.pending_mbox_rt"
-        })
+        Err(SpuReferenceError::Json(_))
     ));
 }
 

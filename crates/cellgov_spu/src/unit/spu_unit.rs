@@ -2,7 +2,7 @@
 
 use crate::state;
 use cellgov_event::UnitId;
-use cellgov_exec::UnitStatus;
+use cellgov_exec::{ChannelStall, UnitStatus};
 
 /// SPU execution unit snapshot for replay.
 #[derive(Debug, Clone)]
@@ -30,6 +30,9 @@ pub struct SpuExecutionUnit {
     pub(super) id: UnitId,
     pub(super) state: state::SpuState,
     pub(super) status: UnitStatus,
+    /// The channel access the last step stalled on; cleared at each
+    /// step entry, since the woken step runs the access again.
+    pub(super) stall: Option<ChannelStall>,
 }
 
 impl SpuExecutionUnit {
@@ -39,6 +42,7 @@ impl SpuExecutionUnit {
             id,
             state: state::SpuState::new(),
             status: UnitStatus::Runnable,
+            stall: None,
         }
     }
 

@@ -139,7 +139,8 @@ fn the_inbound_mailbox_count_is_the_runtime_occupancy_up_to_the_depth() {
             unit.state_mut().ls[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
         }
         let mem = GuestMemory::new(0x1000);
-        let ctx = ExecutionContext::new(&mem).with_mailbox_occupancy(occupancy);
+        let messages: Vec<u32> = (0..occupancy).collect();
+        let ctx = ExecutionContext::new(&mem).with_inbound_mailbox(&messages);
         let mut effects = Vec::new();
         unit.run_until_yield(Budget::new(10), &ctx, &mut effects);
         assert_eq!(unit.state().reg_word(3), want, "occupancy {occupancy}");

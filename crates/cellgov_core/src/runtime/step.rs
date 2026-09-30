@@ -159,17 +159,18 @@ impl Runtime {
                 &self.spaces,
                 unit_id,
             );
-            // A unit's own inbound mailbox shares its id.
-            let mailbox_occupancy = self
+            // A unit's own inbound mailbox shares its id. An empty
+            // mailbox collects into a Vec that does not allocate.
+            let inbound_mailbox: Vec<u32> = self
                 .mailbox_registry
                 .get(own_mailbox)
-                .map_or(0, |mailbox| mailbox.len() as u32);
+                .map_or_else(Vec::new, |mailbox| mailbox.iter().copied().collect());
             let ctx = ctx
                 .with_reservations(unit_reservations)
                 .with_current_tick(self.time)
                 .with_trace_per_step(self.mode != RuntimeMode::FaultDriven)
                 .with_outstanding_dma_tags(outstanding_tags)
-                .with_mailbox_occupancy(mailbox_occupancy)
+                .with_inbound_mailbox(&inbound_mailbox)
                 .with_mailbox_read_flag(&mailbox_read);
             let unit = self
                 .registry

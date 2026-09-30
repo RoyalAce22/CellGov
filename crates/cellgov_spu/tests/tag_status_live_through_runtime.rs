@@ -65,7 +65,7 @@ fn a_reused_tag_waits_for_its_second_transfer() {
     assert_eq!(submits.len(), 2, "two puts: {reasons:?}");
     assert_eq!(reasons.last(), Some(&YieldReason::Finished), "{reasons:?}");
     assert!(
-        reasons[submits[1]..].contains(&YieldReason::DmaWait),
+        reasons[submits[1]..].contains(&YieldReason::ChannelStall),
         "the wait after the second put must park until that put lands: {reasons:?}"
     );
     // The park check above also passes for a status that never reads
@@ -80,4 +80,7 @@ fn a_reused_tag_waits_for_its_second_transfer() {
         1 << TAG,
         "the reused group reads complete after its second transfer lands",
     );
+    // Each woken read ran again and took the status it waited for.
+    assert_eq!(spu.state().reg_word(5), 1 << TAG, "the first wait's read");
+    assert_eq!(spu.state().reg_word(6), 1 << TAG, "the second wait's read");
 }

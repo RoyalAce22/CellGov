@@ -14,9 +14,11 @@ use crate::{decode, exec};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, ProblemStateError,
-    RestartError, SignalNotifier, StopRegisters, UnitStatus, YieldReason,
+    ChannelStall, ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics,
+    ProblemStateError, RestartError, SignalNotifier, StallWake, StopRegisters, UnitStatus,
+    YieldReason,
 };
+use cellgov_ps3_abi::hw::spu;
 use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, SPU_STATUS_R};
 use cellgov_ps3_abi::hw::spu_isa;
 use cellgov_time::{Budget, InstructionCost};
@@ -38,13 +40,9 @@ impl ExecutionUnit for SpuExecutionUnit {
         ctx: &ExecutionContext<'_>,
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
-        // Re-entry after a mailbox park: a yielded rdch leaves PC on the
-        // instruction; resume by writing the message and stepping past it.
-        if let Some(&msg) = ctx.received_messages().first() {
-            let rt = self.state.channels.pending_mbox_rt.take().unwrap_or(2);
-            self.state.set_reg_channel_word(rt, msg);
-            self.state.advance_pc();
-        }
+        // A woken stall runs its channel access again from the PC it
+        // left, so nothing of the old park carries over.
+        self.stall = None;
 
         // This step clears the effect vector below, so the parked
         // transfer's read enters it after the clear.
@@ -99,7 +97,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             self.state.channels.tag_status = !ctx.outstanding_dma_tags();
         }
         self.state.channels.settle_tag_update();
-        self.state.channels.in_mbox_count = ctx.mailbox_occupancy();
+        self.state.channels.in_mbox = ctx.inbound_mailbox().to_vec();
 
         // Mirror cross-unit reservation invalidation. The context view is
         // frozen for the step, so a single entry-time check suffices.
@@ -177,9 +175,11 @@ impl ExecutionUnit for SpuExecutionUnit {
                     reason,
                 } => {
                     effects.extend(step_effects);
-                    if reason != YieldReason::MailboxAccess {
-                        // PC stays on the rdch; the re-entry block at the
-                        // top of `run_until_yield` advances it.
+                    if reason == YieldReason::ChannelStall {
+                        // The access did not retire: PC stays on it, and
+                        // the unit names the channel for its waker.
+                        self.stall = channel_stall(&insn);
+                    } else {
                         self.state.advance_pc();
                     }
                     return ExecutionStepResult {
@@ -332,13 +332,14 @@ impl ExecutionUnit for SpuExecutionUnit {
             self.state
                 .record_stop(SpuStopKind::Requested { waiting }, 0);
             self.status = UnitStatus::Finished;
+            self.stall = None;
         }
         Ok(())
     }
 
     /// [CBEA p:95 s:8.5.3] a write updates SPU_NPC only while the SPU is stopped; its least significant bit is the interrupt-enable state, which the model does not carry.
-    /// A new SPU_NPC abandons a parked rdch; the runtime returns any
-    /// message it already took.
+    /// A new SPU_NPC abandons a parked channel access, which took
+    /// nothing.
     fn write_npc(&mut self, npc: u32) -> Result<(), ProblemStateError> {
         if self.status == UnitStatus::Faulted {
             return Err(ProblemStateError::Refused);
@@ -366,9 +367,30 @@ impl ExecutionUnit for SpuExecutionUnit {
         Ok(self.state.channels.out_mbox.take())
     }
 
+    fn channel_stall(&self) -> Option<ChannelStall> {
+        self.stall
+    }
+
     fn local_memory_hash(&self) -> Option<u64> {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&self.state.ls);
         Some(hasher.finish())
     }
+}
+
+/// The channel a stalled instruction names and the event that ends the
+/// stall, or `None` for an instruction with no blocking channel.
+fn channel_stall(insn: &crate::instruction::SpuInstruction) -> Option<ChannelStall> {
+    use crate::instruction::SpuInstruction;
+    let channel = match insn {
+        SpuInstruction::Rdch { channel, .. } | SpuInstruction::Wrch { channel, .. } => *channel,
+        _ => return None,
+    };
+    let wake = match channel {
+        spu::SPU_RD_IN_MBOX => StallWake::MailboxDelivery,
+        spu::MFC_RD_TAG_STAT => StallWake::DmaCompletion,
+        spu::SPU_WR_OUT_MBOX => StallWake::OutboundMailboxRead,
+        _ => return None,
+    };
+    Some(ChannelStall { channel, wake })
 }

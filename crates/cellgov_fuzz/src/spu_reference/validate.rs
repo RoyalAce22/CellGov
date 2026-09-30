@@ -1,6 +1,8 @@
 //! Parsing and validation of an SPU reference artifact, and its initial state.
 
-use cellgov_ps3_abi::hw::spu::{MfcTagId, MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY};
+use cellgov_ps3_abi::hw::spu::{
+    MfcTagId, MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY, SPU_IN_MBOX_DEPTH,
+};
 use cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED;
 use cellgov_spu::state::{SpuState, TagUpdateCondition, SPU_LS_SIZE, SPU_REG_COUNT};
 
@@ -80,7 +82,6 @@ impl SpuReferenceInput {
             state.channels.tag_mask = channels.tag_mask;
             state.channels.tag_status = channels.tag_status;
             state.channels.atomic_status = channels.atomic_status;
-            state.channels.pending_mbox_rt = channels.pending_mbox_rt;
             state.channels.pending_get = match channels.pending_get {
                 None => None,
                 Some((ea, lsa, size, tag)) => Some((
@@ -104,7 +105,7 @@ impl SpuReferenceInput {
             };
             state.channels.tag_status_read = channels.tag_status_read;
             state.channels.atomic_status_ready = channels.atomic_status_ready;
-            state.channels.in_mbox_count = channels.in_mbox_count;
+            state.channels.in_mbox.clone_from(&channels.in_mbox);
             state.channels.out_mbox = channels.out_mbox;
         }
         state.reservation = self.reservation.map(cellgov_sync::ReservedLine::containing);
@@ -193,24 +194,15 @@ impl SpuReferenceArtifact {
         {
             return Err(invalid("expected.reservation"));
         }
-        if self
-            .initial_state
-            .channels
-            .as_ref()
-            .is_some_and(|channels| {
-                channels
-                    .pending_mbox_rt
-                    .is_some_and(|register| register as usize >= SPU_REG_COUNT)
-            })
-        {
-            return Err(invalid("initial_state.channels.pending_mbox_rt"));
+        // [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_RdInMbox has 4 maximum entries.
+        let overfull = |channels: &super::types::SpuReferenceChannels| {
+            channels.in_mbox.len() > SPU_IN_MBOX_DEPTH as usize
+        };
+        if self.initial_state.channels.as_ref().is_some_and(overfull) {
+            return Err(invalid("initial_state.channels.in_mbox"));
         }
-        if self.expected.channels.as_value().is_some_and(|channels| {
-            channels
-                .pending_mbox_rt
-                .is_some_and(|register| register as usize >= SPU_REG_COUNT)
-        }) {
-            return Err(invalid("expected.channels.pending_mbox_rt"));
+        if self.expected.channels.as_value().is_some_and(overfull) {
+            return Err(invalid("expected.channels.in_mbox"));
         }
         let bad_update = |update: Option<u32>| {
             update.is_some_and(|ts| ts != MFC_TAG_UPDATE_ANY && ts != MFC_TAG_UPDATE_ALL)

@@ -563,6 +563,102 @@ fn receive_from_unknown_mailbox_aborts_batch() {
     );
 }
 
+fn mailbox_pop(mailbox: MailboxId, message: u32, source: UnitId) -> Effect {
+    Effect::MailboxPop {
+        mailbox,
+        message: cellgov_effects::MailboxMessage::new(message),
+        source,
+    }
+}
+
+#[test]
+fn pops_take_the_messages_they_name_in_order_and_deliver_nothing() {
+    let mut bed = CommitTestBed::new(8);
+    let reader = bed.units.register_with(DummyUnit::runnable);
+    let mb = bed.mailboxes.register(4);
+    for message in [0xa, 0xb, 0xc] {
+        bed.mailboxes.get_mut(mb).unwrap().force_send(message);
+    }
+    let (r, e) = step_with(
+        YieldReason::MailboxAccess,
+        vec![mailbox_pop(mb, 0xa, reader), mailbox_pop(mb, 0xb, reader)],
+    );
+    let outcome = bed.process(&r, &e).unwrap();
+    assert_eq!(outcome.mailbox_receives_committed, 2);
+    assert_eq!(outcome.mailbox_receives_blocked, 0);
+    assert_eq!(bed.mailboxes.get(mb).unwrap().peek(), Some(0xc));
+    assert!(bed.units.drain_receives(reader).is_empty());
+    assert_eq!(
+        bed.units.effective_status(reader),
+        Some(UnitStatus::Runnable)
+    );
+}
+
+#[test]
+fn a_pop_that_names_the_wrong_message_refuses_the_whole_batch() {
+    let mut bed = CommitTestBed::new(8);
+    let reader = bed.units.register_with(DummyUnit::runnable);
+    let mb = bed.mailboxes.register(4);
+    for message in [0xa, 0xb] {
+        bed.mailboxes.get_mut(mb).unwrap().force_send(message);
+    }
+    // The second pop names 0xa again, but the message after 0xa is 0xb.
+    let (r, e) = step_with(
+        YieldReason::MailboxAccess,
+        vec![mailbox_pop(mb, 0xa, reader), mailbox_pop(mb, 0xa, reader)],
+    );
+    let err = bed.process(&r, &e).unwrap_err();
+    assert_eq!(
+        err,
+        CommitError::MailboxPopMismatch {
+            effect_index: 1,
+            mailbox: mb
+        }
+    );
+    assert_eq!(bed.mailboxes.get(mb).unwrap().len(), 2, "no pop applied");
+    // A pop from an empty mailbox names a message that is not there.
+    let empty = bed.mailboxes.register(4);
+    let (r, e) = step_with(
+        YieldReason::MailboxAccess,
+        vec![mailbox_pop(empty, 0xa, reader)],
+    );
+    assert_eq!(
+        bed.process(&r, &e).unwrap_err(),
+        CommitError::MailboxPopMismatch {
+            effect_index: 0,
+            mailbox: empty
+        }
+    );
+}
+
+#[test]
+fn a_pop_after_a_receive_attempt_names_the_message_after_the_attempts() {
+    let mut bed = CommitTestBed::new(8);
+    let reader = bed.units.register_with(DummyUnit::runnable);
+    let mb = bed.mailboxes.register(4);
+    for message in [0xa, 0xb] {
+        bed.mailboxes.get_mut(mb).unwrap().force_send(message);
+    }
+    let (r, e) = step_with(
+        YieldReason::MailboxAccess,
+        vec![mailbox_receive(mb, reader), mailbox_pop(mb, 0xa, reader)],
+    );
+    assert_eq!(
+        bed.process(&r, &e).unwrap_err(),
+        CommitError::MailboxPopMismatch {
+            effect_index: 1,
+            mailbox: mb
+        },
+        "the attempt takes 0xa first"
+    );
+    let (r, e) = step_with(
+        YieldReason::MailboxAccess,
+        vec![mailbox_receive(mb, reader), mailbox_pop(mb, 0xb, reader)],
+    );
+    bed.process(&r, &e).unwrap();
+    assert!(bed.mailboxes.get(mb).unwrap().is_empty());
+}
+
 fn wait_effect(source: UnitId) -> Effect {
     use cellgov_effects::WaitTarget;
     use cellgov_sync::MailboxId;

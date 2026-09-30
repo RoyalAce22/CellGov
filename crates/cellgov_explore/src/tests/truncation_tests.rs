@@ -420,6 +420,10 @@ fn a_refusal_of_any_shape_truncates() {
             effect_index: 0,
             mailbox: cellgov_sync::MailboxId::new(0),
         },
+        CommitError::MailboxPopMismatch {
+            effect_index: 0,
+            mailbox: cellgov_sync::MailboxId::new(0),
+        },
         CommitError::UnknownSignal {
             effect_index: 0,
             signal: cellgov_sync::SignalId::new(0),

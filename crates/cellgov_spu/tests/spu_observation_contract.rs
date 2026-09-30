@@ -44,7 +44,7 @@ fn register_and_local_store_writes_have_distinct_allowed_footprints() {
     let mut seeded = observed.clone();
     seeded.state.regs[4][0] ^= 1;
     seeded.state.ls[16] ^= 1;
-    seeded.state.channels.pending_mbox_rt = Some(5);
+    seeded.state.channels.in_mbox.push(5);
     seeded.state.reservation = Some(cellgov_sync::ReservedLine::containing(0));
     let differences = footprint.violations(&initial, &seeded);
     assert!(differences.contains(&SpuObservationComponent::Registers));
@@ -66,24 +66,49 @@ fn a_local_store_write_and_mailbox_yield_have_typed_footprints() {
         rt: 3,
         channel: cellgov_ps3_abi::hw::spu::SPU_RD_IN_MBOX,
     };
-    let mut state = initial.clone();
-    let outcome = execute(&mailbox, &mut state, UnitId::new(0));
-    let observed = SpuObservation::capture(&state, &outcome);
     let footprint = SpuAllowedFootprint::for_instruction(&mailbox);
-    assert!(matches!(outcome, SpuStepOutcome::Yield { .. }));
     assert!(footprint
         .channels
-        .contains(&cellgov_spu::observation::SpuChannelField::PendingMailbox));
-    assert!(footprint.registers.is_empty());
+        .contains(&cellgov_spu::observation::SpuChannelField::InboundMailbox));
+    assert!(footprint.registers.contains(&3));
     assert!(!footprint.local_store);
-    assert!(footprint.violations(&initial, &observed).is_empty());
-    assert_eq!(observed.effects.len(), 1);
 
-    let mut premature_write = observed;
+    // An empty mailbox stalls the read: no effect, and no register.
+    let mut state = initial.clone();
+    let outcome = execute(&mailbox, &mut state, UnitId::new(0));
+    let stalled = SpuObservation::capture(&state, &outcome);
+    assert!(matches!(
+        outcome,
+        SpuStepOutcome::Yield {
+            reason: cellgov_exec::YieldReason::ChannelStall,
+            ..
+        }
+    ));
+    assert!(stalled.effects.is_empty());
+    assert!(footprint.violations(&initial, &stalled).is_empty());
+    let mut premature_write = stalled;
     premature_write.state.regs[3][0] ^= 1;
     assert!(footprint
         .violations(&initial, &premature_write)
         .contains(&SpuObservationComponent::Registers));
+
+    // A waiting message is read into RT and popped by one effect.
+    let mut waiting = initial.clone();
+    waiting.channels.in_mbox = vec![0x0000_0007];
+    let mut state = waiting.clone();
+    let outcome = execute(&mailbox, &mut state, UnitId::new(0));
+    let read = SpuObservation::capture(&state, &outcome);
+    assert!(matches!(
+        outcome,
+        SpuStepOutcome::Yield {
+            reason: cellgov_exec::YieldReason::MailboxAccess,
+            ..
+        }
+    ));
+    assert_eq!(state.reg_word(3), 7);
+    assert!(state.channels.in_mbox.is_empty());
+    assert_eq!(read.effects.len(), 1);
+    assert!(footprint.violations(&waiting, &read).is_empty());
 }
 
 #[test]

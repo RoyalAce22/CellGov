@@ -88,11 +88,10 @@ fn a_fresh_unit_starts_with_zero_data_and_overwrite_signal_modes() {
             c.tag_mask,
             c.tag_status,
             c.atomic_status,
-            c.in_mbox_count,
         ],
-        [0; 9]
+        [0; 8]
     );
-    assert_eq!(c.pending_mbox_rt, None);
+    assert!(c.in_mbox.is_empty());
     assert_eq!(c.out_mbox, None);
     assert_eq!(c.pending_get, None);
     assert_eq!(c.tag_update, None);

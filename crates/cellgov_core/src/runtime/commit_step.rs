@@ -257,6 +257,39 @@ impl Runtime {
                 o.blocked_units.push((source, BlockReason::DmaWait));
             }
         }
+        // A channel stall parks the same way. The unit names the event
+        // that ends the park, and the trace keeps the block reasons the
+        // mailbox and tag-status parks have always had.
+        if result.yield_reason == YieldReason::ChannelStall && batch_applied {
+            let reason = match self
+                .registry
+                .get(source)
+                .and_then(|unit| unit.channel_stall())
+            {
+                Some(stall) => match stall.wake {
+                    cellgov_exec::StallWake::MailboxDelivery => BlockReason::MailboxEmpty,
+                    cellgov_exec::StallWake::DmaCompletion => BlockReason::DmaWait,
+                    cellgov_exec::StallWake::OutboundMailboxRead => {
+                        BlockReason::OutboundMailboxFull
+                    }
+                },
+                None => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.channel_stall_unnamed",
+                        format_args!(
+                            "{source:?} yielded ChannelStall without naming the channel; \
+                             it parks until any waker reaches it"
+                        ),
+                    );
+                    BlockReason::MailboxEmpty
+                }
+            };
+            self.registry
+                .set_status_override(source, UnitStatus::Blocked);
+            if let Ok(ref mut o) = outcome {
+                o.blocked_units.push((source, reason));
+            }
+        }
         self.epoch.advance();
         let due = self.fire_dma_completions();
         if let Ok(ref mut o) = outcome {

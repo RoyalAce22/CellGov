@@ -15,8 +15,8 @@ fn with_parked_get_tag(side: &str, tag: u8) -> serde_json::Value {
     let channels = serde_json::json!({
         "mfc_lsa": 0, "mfc_eah": 0, "mfc_eal": 0, "mfc_size": 0, "mfc_tag_id": 0,
         "tag_mask": 0, "tag_status": 0, "atomic_status": 0,
-        "pending_mbox_rt": null, "pending_get": [0, 0, 0, tag],
-        "tag_update": null, "tag_status_read": null, "atomic_status_ready": false, "in_mbox_count": 0,
+        "pending_get": [0, 0, 0, tag],
+        "tag_update": null, "tag_status_read": null, "atomic_status_ready": false, "in_mbox": [],
         "out_mbox": null
     });
     if side == "initial_state" {

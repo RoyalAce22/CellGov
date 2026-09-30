@@ -14,8 +14,8 @@ use cellgov_time::GuestTicks;
 ///
 /// Units publish changes only by emitting `Effect` packets in their
 /// step result. The one write through the context is the flag
-/// [`Self::mailbox_occupancy`] sets, which records a read and carries
-/// no guest state.
+/// [`Self::inbound_mailbox`] and [`Self::mailbox_occupancy`] set, which
+/// records a read and carries no guest state.
 #[derive(Debug, Clone, Copy)]
 pub struct ExecutionContext<'a> {
     memory: &'a GuestMemory,
@@ -30,8 +30,8 @@ pub struct ExecutionContext<'a> {
     /// `drain_retired_state_hashes`.
     trace_per_step: bool,
     outstanding_dma_tags: u32,
-    mailbox_occupancy: u32,
-    /// Set when the unit reads [`Self::mailbox_occupancy`], so the
+    inbound_mailbox: &'a [u32],
+    /// Set when the unit reads [`Self::inbound_mailbox`], so the
     /// runtime knows the step read its mailbox. It records what the
     /// unit observed and carries no guest state.
     mailbox_read: Option<&'a core::cell::Cell<bool>>,
@@ -50,7 +50,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
-            mailbox_occupancy: 0,
+            inbound_mailbox: &[],
             mailbox_read: None,
         }
     }
@@ -68,7 +68,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
-            mailbox_occupancy: 0,
+            inbound_mailbox: &[],
             mailbox_read: None,
         }
     }
@@ -88,7 +88,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
-            mailbox_occupancy: 0,
+            inbound_mailbox: &[],
             mailbox_read: None,
         }
     }
@@ -112,7 +112,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
-            mailbox_occupancy: 0,
+            inbound_mailbox: &[],
             mailbox_read: None,
         }
     }
@@ -158,17 +158,17 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
-    /// Number of messages waiting in the unit's own inbound mailbox at
-    /// the start of the step.
+    /// The messages waiting in the unit's own inbound mailbox at the
+    /// start of the step, oldest first.
     #[inline]
-    pub const fn with_mailbox_occupancy(self, count: u32) -> Self {
+    pub const fn with_inbound_mailbox(self, messages: &'a [u32]) -> Self {
         Self {
-            mailbox_occupancy: count,
+            inbound_mailbox: messages,
             ..self
         }
     }
 
-    /// Attach the flag [`Self::mailbox_occupancy`] sets when the unit
+    /// Attach the flag [`Self::inbound_mailbox`] sets when the unit
     /// reads it.
     #[inline]
     pub const fn with_mailbox_read_flag(self, flag: &'a core::cell::Cell<bool>) -> Self {
@@ -178,14 +178,21 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
-    /// Messages waiting in the unit's own inbound mailbox at the start
-    /// of the step.
+    /// The messages waiting in the unit's own inbound mailbox at the
+    /// start of the step, oldest first.
     #[inline]
-    pub fn mailbox_occupancy(&self) -> u32 {
+    pub fn inbound_mailbox(&self) -> &'a [u32] {
         if let Some(flag) = self.mailbox_read {
             flag.set(true);
         }
-        self.mailbox_occupancy
+        self.inbound_mailbox
+    }
+
+    /// Number of messages waiting in the unit's own inbound mailbox at
+    /// the start of the step.
+    #[inline]
+    pub fn mailbox_occupancy(&self) -> u32 {
+        u32::try_from(self.inbound_mailbox().len()).unwrap_or(u32::MAX)
     }
 
     /// Tag groups with a transfer of this unit's still outstanding.

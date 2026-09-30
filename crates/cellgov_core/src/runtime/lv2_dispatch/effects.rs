@@ -197,6 +197,7 @@ impl Runtime {
                     "runtime.apply_lv2_effects_unsupported_shared_read_intent"
                 }
                 Effect::ClockRead { .. } => "runtime.apply_lv2_effects_unsupported_clock_read",
+                Effect::MailboxPop { .. } => "runtime.apply_lv2_effects_unsupported_mailbox_pop",
             };
             self.lv2_host.log_invariant_break(
                 site,

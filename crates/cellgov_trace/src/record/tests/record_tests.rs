@@ -101,9 +101,10 @@ fn effect_emitted_discriminants_locked() {
     assert_eq!(TracedEffectKind::RsxFlipRequest as u8, 12);
     assert_eq!(TracedEffectKind::SharedReadIntent as u8, 13);
     assert_eq!(TracedEffectKind::ClockRead as u8, 14);
-    // Without this, a variant appended below ClockRead keeps every
+    assert_eq!(TracedEffectKind::MailboxPop as u8, 15);
+    // Without this, a variant appended below MailboxPop keeps every
     // assertion above green and ships with an unpinned discriminant.
-    assert_eq!(TracedEffectKind::VARIANTS.len(), 15);
+    assert_eq!(TracedEffectKind::VARIANTS.len(), 16);
 }
 
 #[test]
@@ -315,6 +316,7 @@ fn unit_blocked_reason_discriminants_locked() {
     assert_eq!(TracedBlockReason::WaitOnEvent as u8, 0);
     assert_eq!(TracedBlockReason::MailboxEmpty as u8, 1);
     assert_eq!(TracedBlockReason::DmaWait as u8, 2);
+    assert_eq!(TracedBlockReason::OutboundMailboxFull as u8, 3);
 }
 
 #[test]

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::reference::{ReferenceField, ReferenceOmission, ReferenceProvenance};
 
 /// Current offline SPU reference schema.
-pub const SPU_REFERENCE_SCHEMA_VERSION: u32 = 3;
+pub const SPU_REFERENCE_SCHEMA_VERSION: u32 = 4;
 
 /// Independent source of an SPU observation.
 pub type SpuReferenceProvenance = ReferenceProvenance;
@@ -57,8 +57,6 @@ pub struct SpuReferenceChannels {
     pub tag_status: u32,
     /// Atomic-command status.
     pub atomic_status: u32,
-    /// Destination of an unresolved inbound-mailbox read.
-    pub pending_mbox_rt: Option<u8>,
     /// Pending DMA GET as `(effective address, local address, size, tag)`.
     pub pending_get: Option<(u64, u32, u32, u8)>,
     /// The TS code of a waiting tag-status update request.
@@ -72,9 +70,10 @@ pub struct SpuReferenceChannels {
     /// An atomic command's status is waiting to be read.
     #[serde(default)]
     pub atomic_status_ready: bool,
-    /// Messages in the inbound mailbox.
+    /// Messages in the inbound mailbox, oldest first; at most the
+    /// mailbox depth.
     #[serde(default)]
-    pub in_mbox_count: u32,
+    pub in_mbox: Vec<u32>,
     /// The message in the outbound mailbox.
     #[serde(default)]
     pub out_mbox: Option<u32>,
@@ -91,12 +90,11 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             tag_mask,
             tag_status,
             atomic_status,
-            pending_mbox_rt,
             pending_get,
             tag_update,
             tag_status_read,
             atomic_status_ready,
-            in_mbox_count,
+            in_mbox,
             out_mbox,
         } = value;
         Self {
@@ -108,7 +106,6 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             tag_mask: *tag_mask,
             tag_status: *tag_status,
             atomic_status: *atomic_status,
-            pending_mbox_rt: *pending_mbox_rt,
             pending_get: pending_get.map(|(ea, lsa, size, tag)| (ea, lsa, size, tag.raw())),
             tag_update: tag_update.map(|condition| match condition {
                 TagUpdateCondition::Any => MFC_TAG_UPDATE_ANY,
@@ -116,7 +113,7 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             }),
             tag_status_read: *tag_status_read,
             atomic_status_ready: *atomic_status_ready,
-            in_mbox_count: *in_mbox_count,
+            in_mbox: in_mbox.clone(),
             out_mbox: *out_mbox,
         }
     }

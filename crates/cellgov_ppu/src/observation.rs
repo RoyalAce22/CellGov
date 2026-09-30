@@ -470,6 +470,7 @@ fn apply_committed_effects(
             Effect::FaultRaised { .. } => return Err(PpuObservationError::FaultEffectWithoutFault),
             Effect::MailboxSend { .. }
             | Effect::MailboxReceiveAttempt { .. }
+            | Effect::MailboxPop { .. }
             | Effect::DmaEnqueue { .. }
             | Effect::WaitOnEvent { .. }
             | Effect::WakeUnit { .. }

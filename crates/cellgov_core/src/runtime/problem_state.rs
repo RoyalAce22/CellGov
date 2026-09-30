@@ -3,7 +3,7 @@
 //! the signal-notification registers.
 
 use cellgov_event::UnitId;
-use cellgov_exec::{ProblemStateError, SignalNotifier, UnitStatus};
+use cellgov_exec::{ProblemStateError, SignalNotifier, StallWake, UnitStatus};
 use cellgov_sync::MailboxId;
 
 use super::Runtime;
@@ -51,9 +51,9 @@ impl Runtime {
         Ok(())
     }
 
-    /// Write `SPU_NPC` of a stopped `unit`. A message the unit's parked
-    /// read already took goes back to the front of its mailbox, since a
-    /// restart at the new address does not run that read.
+    /// Write `SPU_NPC` of a stopped `unit`. A parked channel access
+    /// took nothing, so the restart at the new address abandons it with
+    /// no channel state to return.
     ///
     /// # Errors
     ///
@@ -70,29 +70,7 @@ impl Runtime {
         self.registry
             .get_mut(unit)
             .ok_or(ProblemStateError::UnknownUnit)?
-            .write_npc(npc)?;
-        let taken = self.registry.drain_receives(unit);
-        if taken.is_empty() {
-            return Ok(());
-        }
-        let returned = self
-            .mailbox_registry
-            .get_mut(MailboxId::new(unit.raw()))
-            .is_some_and(|mut mailbox| {
-                taken
-                    .iter()
-                    .rev()
-                    .all(|&message| mailbox.return_front(message))
-            });
-        if !returned {
-            self.lv2_host.log_invariant_break(
-                "runtime.write_unit_npc_message_not_returned",
-                format_args!(
-                    "{unit:?}: a message its abandoned mailbox read took did not fit back                      in the mailbox and is lost"
-                ),
-            );
-        }
-        Ok(())
+            .write_npc(npc)
     }
 
     /// Write one signal-notification register of `unit`.
@@ -116,7 +94,10 @@ impl Runtime {
     }
 
     /// Read `SPU_Out_Mbox` of `unit`: the message it wrote, or `None`
-    /// when the mailbox is empty.
+    /// when the mailbox is empty. A unit parked writing the mailbox
+    /// becomes runnable and runs its write again.
+    ///
+    /// [CBEA p:98 s:8.6.1] a write to a full outbound mailbox stalls the SPU until another processor reads it.
     ///
     /// # Errors
     ///
@@ -125,10 +106,16 @@ impl Runtime {
     /// [`Runtime::request_unit_stop`].
     pub fn read_unit_out_mbox(&mut self, unit: UnitId) -> Result<Option<u32>, ProblemStateError> {
         self.refuse_retired(unit)?;
-        self.registry
+        let message = self
+            .registry
             .get_mut(unit)
             .ok_or(ProblemStateError::UnknownUnit)?
-            .read_out_mbox()
+            .read_out_mbox()?;
+        if message.is_some() && self.stall_ends(unit, StallWake::OutboundMailboxRead, false) {
+            self.registry
+                .set_status_override(unit, UnitStatus::Runnable);
+        }
+        Ok(message)
     }
 
     /// Write `SPU_In_Mbox` of `unit`. A write to a full mailbox
@@ -164,18 +151,33 @@ impl Runtime {
 
     /// Put `message` in `mailbox` and make a unit parked on it runnable.
     /// An SPU's inbound mailbox shares its unit id. `false` when no
-    /// mailbox has the id.
+    /// mailbox has the id. A parked unit that names no channel stall
+    /// wakes too, as before channel stalls had names.
     pub(super) fn deliver_mailbox_message(&mut self, mailbox: MailboxId, message: u32) -> bool {
-        let Some(mut queue) = self.mailbox_registry.get_mut(mailbox) else {
-            return false;
-        };
-        queue.force_send(message);
+        {
+            let Some(mut queue) = self.mailbox_registry.get_mut(mailbox) else {
+                return false;
+            };
+            queue.force_send(message);
+        }
         let target = UnitId::new(mailbox.raw());
-        if self.registry.effective_status(target) == Some(UnitStatus::Blocked) {
+        if self.stall_ends(target, StallWake::MailboxDelivery, true) {
             self.registry
                 .set_status_override(target, UnitStatus::Runnable);
         }
         true
+    }
+
+    /// Whether `wake` ends the park of `unit`: the unit is blocked and
+    /// its channel stall names `wake`. `unstalled` answers for a blocked
+    /// unit that names no channel stall.
+    pub(super) fn stall_ends(&self, unit: UnitId, wake: StallWake, unstalled: bool) -> bool {
+        self.registry.effective_status(unit) == Some(UnitStatus::Blocked)
+            && self
+                .registry
+                .get(unit)
+                .and_then(|unit| unit.channel_stall())
+                .map_or(unstalled, |stall| stall.wake == wake)
     }
 
     fn refuse_retired(&self, unit: UnitId) -> Result<(), ProblemStateError> {

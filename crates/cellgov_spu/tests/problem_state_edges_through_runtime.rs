@@ -1,12 +1,12 @@
-//! Two edges of the problem-state operations: an NPC write after a
-//! mailbox read took a message returns the message, and a unit CellGov
-//! refused reports itself stopped and refuses an NPC write.
+//! Edges of the problem-state operations: a mailbox read that parks,
+//! completes, meets a stop, or loses to an NPC write, and a unit CellGov
+//! refused, which reports itself stopped and refuses an NPC write.
 
 use cellgov_core::Runtime;
 use cellgov_event::UnitId;
 use cellgov_exec::{ProblemStateError, UnitStatus};
 use cellgov_mem::GuestMemory;
-use cellgov_ps3_abi::hw::spu::{SPU_IN_MBOX_DEPTH, SPU_RD_IN_MBOX, SPU_STATUS_R};
+use cellgov_ps3_abi::hw::spu::{SPU_IN_MBOX_DEPTH, SPU_RD_IN_MBOX, SPU_STATUS_R, SPU_STATUS_W};
 use cellgov_spu::SpuExecutionUnit;
 use cellgov_sync::MailboxId;
 use cellgov_time::Budget;
@@ -57,31 +57,58 @@ fn occupancy(rt: &mut Runtime, unit: UnitId) -> usize {
         .len()
 }
 
-/// [CBEA p:95 s:8.5.3] a restart resumes at SPU_NPC, which a write while the SPU is stopped replaces.
+/// A read of a waiting message writes its register and keeps it taken.
 #[test]
-fn an_npc_write_returns_the_message_an_abandoned_read_took() {
+fn a_completed_mailbox_read_writes_rt_and_keeps_the_message() {
     let (mut rt, unit) = runtime_with_spu();
     step(&mut rt); // the rdch parks on the empty mailbox
     rt.write_unit_in_mbox(unit, 9)
         .expect("the SPU has a mailbox");
-    step(&mut rt); // the rdch runs again and its commit takes the message
-    assert_eq!(occupancy(&mut rt, unit), 0, "the commit took the message");
-    rt.write_unit_in_mbox(unit, 10).expect("a second message");
+    step(&mut rt); // the rdch runs again and reads the message
+    assert_eq!(occupancy(&mut rt, unit), 0, "the read took the message");
+    let state = spu(&rt, unit).state();
+    assert_eq!(state.reg_word(5), 9);
+    assert_eq!(state.pc, 4, "the read retired");
+}
 
+/// [CBEA p:95 s:8.5.3] SPU_NPC names the next instruction to execute; [CBEA p:94 s:8.5.2] an SPU stopped while it waits on a blocked channel sets W.
+#[test]
+fn a_stop_during_a_parked_read_reports_the_read_and_a_restart_runs_it() {
+    let (mut rt, unit) = runtime_with_spu();
+    step(&mut rt); // the rdch parks on the empty mailbox
     rt.request_unit_stop(unit).expect("problem state");
-    rt.write_unit_npc(unit, 8).expect("the SPU is stopped");
-    let queued: Vec<u32> = rt
-        .mailbox_registry_mut()
-        .get_mut(MailboxId::new(unit.raw()))
-        .expect("the SPU's mailbox")
-        .iter()
-        .copied()
-        .collect();
+    let stop = rt.unit_stop_registers(unit).expect("the SPU stopped");
     assert_eq!(
-        queued,
-        [9, 10],
-        "the message is back, ahead of the one sent after it"
+        stop.npc, 0,
+        "NPC is the stalled rdch, not the word after it"
     );
+    assert_ne!(
+        stop.status & SPU_STATUS_W,
+        0,
+        "the SPU was waiting on a channel"
+    );
+
+    rt.write_unit_in_mbox(unit, 11)
+        .expect("the SPU has a mailbox");
+    rt.restart_unit(unit).expect("restart");
+    step(&mut rt);
+    assert_eq!(
+        spu(&rt, unit).state().reg_word(5),
+        11,
+        "the rerun read took it"
+    );
+    assert_eq!(occupancy(&mut rt, unit), 0);
+}
+
+/// [CBEA p:95 s:8.5.3] a restart resumes at SPU_NPC, which a write while the SPU is stopped replaces.
+#[test]
+fn an_npc_write_after_a_parked_read_leaves_the_mailbox_alone() {
+    let (mut rt, unit) = runtime_with_spu();
+    step(&mut rt); // the rdch parks on the empty mailbox
+    rt.request_unit_stop(unit).expect("problem state");
+    rt.write_unit_in_mbox(unit, 10).expect("a message");
+    rt.write_unit_npc(unit, 8).expect("the SPU is stopped");
+    assert_eq!(occupancy(&mut rt, unit), 1, "the parked read took nothing");
 
     rt.restart_unit(unit).expect("restart");
     step(&mut rt);
@@ -89,6 +116,7 @@ fn an_npc_write_returns_the_message_an_abandoned_read_took() {
     assert_eq!(state.reg_word(6), 1, "the SPU ran the word at the new NPC");
     assert_eq!(state.reg_word(5), 0, "the abandoned read wrote nothing");
     assert_eq!(state.stop.map(|stop| stop.npc), Some(0x10));
+    assert_eq!(occupancy(&mut rt, unit), 1, "the message still waits");
 }
 
 /// [CBEA p:94 s:8.5.2] R is 1 only while the SPU runs.

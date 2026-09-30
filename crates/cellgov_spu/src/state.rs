@@ -101,8 +101,6 @@ pub struct SpuChannelSnapshot {
     pub tag_status: u32,
     /// Status of the last atomic command.
     pub atomic_status: u32,
-    /// Destination register for a pending mailbox read.
-    pub pending_mbox_rt: Option<u8>,
     /// Pending MFC GET request.
     pub pending_get: Option<(u64, u32, u32, MfcTagId)>,
     /// A waiting conditional tag-status update request.
@@ -111,8 +109,9 @@ pub struct SpuChannelSnapshot {
     pub tag_status_read: Option<u32>,
     /// An atomic command's status is waiting to be read.
     pub atomic_status_ready: bool,
-    /// Messages in the inbound mailbox at the start of the step.
-    pub in_mbox_count: u32,
+    /// Messages in the inbound mailbox, oldest first, less the ones the
+    /// step has read.
+    pub in_mbox: Vec<u32>,
     /// The message in the outbound mailbox.
     pub out_mbox: Option<u32>,
 }
@@ -140,12 +139,11 @@ impl SpuObservableSnapshot {
             tag_mask,
             tag_status,
             atomic_status,
-            pending_mbox_rt,
             pending_get,
             tag_update,
             tag_status_read,
             atomic_status_ready,
-            in_mbox_count,
+            in_mbox,
             out_mbox,
         } = channels;
         Self {
@@ -163,12 +161,11 @@ impl SpuObservableSnapshot {
                 tag_mask: *tag_mask,
                 tag_status: *tag_status,
                 atomic_status: *atomic_status,
-                pending_mbox_rt: *pending_mbox_rt,
                 pending_get: *pending_get,
                 tag_update: *tag_update,
                 tag_status_read: *tag_status_read,
                 atomic_status_ready: *atomic_status_ready,
-                in_mbox_count: *in_mbox_count,
+                in_mbox: in_mbox.clone(),
                 out_mbox: *out_mbox,
             },
             reservation: *reservation,
@@ -416,11 +413,6 @@ pub struct ChannelState {
     ///
     /// [CBEA p:111 s:9] MFC_RdAtomicStat channel x'1B': atomic-command completion status.
     pub atomic_status: u32,
-    /// Target register for a pending rdch SPU_RdInMbox yield; consumed
-    /// by `run_until_yield` on message delivery.
-    ///
-    /// [CBEA p:111 s:9] SPU_RdInMbox channel x'1D': PPE-to-SPU mailbox read.
-    pub pending_mbox_rt: Option<u8>,
     /// Pending DMA Get (ea, lsa, size, tag); the next `run_until_yield`
     /// copies it at its start from the committed memory snapshot. Its
     /// tag group reads outstanding in `tag_status` until the copy lands.
@@ -440,11 +432,13 @@ pub struct ChannelState {
     ///
     /// [CBEA p:131 s:9.4] the MFC_RdAtomicStat count starts at 0 and is 1 once an immediate atomic command completes.
     pub atomic_status_ready: bool,
-    /// Messages in the unit's inbound mailbox at the start of the step,
-    /// which the runtime reports: the `SPU_RdInMbox` count.
+    /// The messages in the unit's inbound mailbox, oldest first, as the
+    /// runtime reported them at the start of the step, less the ones
+    /// the step has read. Its length is the `SPU_RdInMbox` count.
     ///
+    /// [CBEA p:111 s:9] SPU_RdInMbox channel x'1D': PPE-to-SPU mailbox read.
     /// [CBEA p:135 s:9.5.3] the SPU_RdInMbox count is the number of messages in the inbound mailbox and starts at 0.
-    pub in_mbox_count: u32,
+    pub in_mbox: Vec<u32>,
     /// The message the SPU wrote to `SPU_WrOutMbox` and no processor
     /// has read. The mailbox holds one.
     ///
@@ -473,7 +467,6 @@ impl ChannelState {
             tag_status: 0,
             // x'1B' data.
             atomic_status: 0,
-            pending_mbox_rt: None,
             pending_get: None,
             tag_update: None,
             // x'18' count 0.
@@ -481,7 +474,7 @@ impl ChannelState {
             // x'1B' count 0.
             atomic_status_ready: false,
             // x'1D' count 0.
-            in_mbox_count: 0,
+            in_mbox: Vec::new(),
             // x'1C' count 1.
             out_mbox: None,
         }

@@ -90,6 +90,10 @@ pub trait RegisteredUnit: 'static {
     /// The `SPU_Status` word. See [`ExecutionUnit::spu_status`].
     fn spu_status(&self) -> Option<u32>;
 
+    /// The channel access the unit stalled on. See
+    /// [`ExecutionUnit::channel_stall`].
+    fn channel_stall(&self) -> Option<cellgov_exec::ChannelStall>;
+
     /// An `SPU_RunCntl` stop request. See [`ExecutionUnit::request_stop`].
     ///
     /// # Errors
@@ -216,6 +220,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn spu_status(&self) -> Option<u32> {
         ExecutionUnit::spu_status(self)
+    }
+
+    #[inline]
+    fn channel_stall(&self) -> Option<cellgov_exec::ChannelStall> {
+        ExecutionUnit::channel_stall(self)
     }
 
     #[inline]
