@@ -148,6 +148,61 @@ pub enum SpuInstruction {
         /// Source register B (minuend).
         rb: u8,
     },
+    // [SPU-ISA p:66 s:5 Carry and borrow: Addx p.66, Cg p.67, Cgx p.68, Sfx p.69, Bg p.70, Bgx p.71]
+    /// Add extended: all 4 word slots, `rt[i] = ra[i] + rb[i] + (rt[i] & 1)`.
+    Addx {
+        /// Destination register, and the carry or borrow input in each word's low bit.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Carry generate: all 4 word slots, `rt[i]` = the carry out of `ra[i] + rb[i]`.
+    Cg {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Carry generate extended: the carry out of `ra[i] + rb[i] + (rt[i] & 1)`.
+    Cgx {
+        /// Destination register, and the carry or borrow input in each word's low bit.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Subtract from extended: `rt[i] = rb[i] + !ra[i] + (rt[i] & 1)`.
+    Sfx {
+        /// Destination register, and the carry or borrow input in each word's low bit.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Borrow generate: `rt[i]` = 1 when `rb[i] >= ra[i]` unsigned, else 0.
+    Bg {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Borrow generate extended: `rt[i]` = 1 when `rb[i] - ra[i] - !(rt[i] & 1)` is not negative, else 0.
+    Bgx {
+        /// Destination register, and the carry or borrow input in each word's low bit.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
     // [SPU-ISA p:58 s:5 Halfword add and subtract: Ah p.58, Ahi p.59, Sfh p.62, Sfhi p.63; Sfi p.65]
     /// Add halfword: all 8 halfword slots, `rt[i] = ra[i] + rb[i]`.
     Ah {

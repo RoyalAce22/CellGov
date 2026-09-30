@@ -157,6 +157,57 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
             SpuStepOutcome::Continue
         }
+        // [SPU-ISA p:66 s:5. Integer and Logical Instructions] Add Extended: RA + RB + the low bit of each RT word.
+        // [SPU-ISA p:66 s:5] bits 0 to 30 of the RT input are reserved; the RTL reads bit 31 alone.
+        SpuInstruction::Addx { rt, ra, rb } => {
+            let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
+            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
+                a[i].wrapping_add(b[i]).wrapping_add(t[i] & 1)
+            }));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:67 s:5. Integer and Logical Instructions] Carry Generate: the carry out of RA + RB in bit 31, other bits zero.
+        SpuInstruction::Cg { rt, ra, rb } => {
+            let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
+            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
+                ((u64::from(a[i]) + u64::from(b[i])) >> 32) as u32
+            }));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:68 s:5. Integer and Logical Instructions] Carry Generate Extended: the carry out of RA + RB + RT bit 31.
+        SpuInstruction::Cgx { rt, ra, rb } => {
+            let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
+            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
+                ((u64::from(a[i]) + u64::from(b[i]) + u64::from(t[i] & 1)) >> 32) as u32
+            }));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:69 s:5. Integer and Logical Instructions] Subtract from Extended: RB + not RA + RT bit 31.
+        SpuInstruction::Sfx { rt, ra, rb } => {
+            let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
+            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
+                b[i].wrapping_add(!a[i]).wrapping_add(t[i] & 1)
+            }));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:70 s:5. Integer and Logical Instructions] Borrow Generate: 1 when RB >= RA unsigned, else 0.
+        SpuInstruction::Bg { rt, ra, rb } => {
+            let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
+            state.regs[rt as usize] = from_words(std::array::from_fn(|i| u32::from(b[i] >= a[i])));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:71 s:5. Integer and Logical Instructions] Borrow Generate Extended: RB >= RA when RT bit 31 is set, RB > RA when it is clear.
+        SpuInstruction::Bgx { rt, ra, rb } => {
+            let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
+            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
+                u32::from(if t[i] & 1 != 0 {
+                    b[i] >= a[i]
+                } else {
+                    b[i] > a[i]
+                })
+            }));
+            SpuStepOutcome::Continue
+        }
         // [SPU-ISA p:58 s:5. Integer and Logical Instructions] Add Halfword: per-halfword 16-bit modulo addition.
         SpuInstruction::Ah { rt, ra, rb } => {
             let (a, b) = (
@@ -659,3 +710,7 @@ mod tag_update_mode_tests;
 #[cfg(test)]
 #[path = "tests/halfword_arith_tests.rs"]
 mod halfword_arith_tests;
+
+#[cfg(test)]
+#[path = "tests/carry_borrow_tests.rs"]
+mod carry_borrow_tests;

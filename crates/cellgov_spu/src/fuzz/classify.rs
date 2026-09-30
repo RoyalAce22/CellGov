@@ -227,6 +227,12 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::A
         | SpuInstructionKind::Ai
         | SpuInstructionKind::Sf
+        | SpuInstructionKind::Addx
+        | SpuInstructionKind::Cg
+        | SpuInstructionKind::Cgx
+        | SpuInstructionKind::Sfx
+        | SpuInstructionKind::Bg
+        | SpuInstructionKind::Bgx
         | SpuInstructionKind::Ah
         | SpuInstructionKind::Ahi
         | SpuInstructionKind::Sfh
