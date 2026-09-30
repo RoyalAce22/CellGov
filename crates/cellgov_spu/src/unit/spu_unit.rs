@@ -56,6 +56,19 @@ pub struct SpuExecutionUnit {
     /// The unit records a barrier only while the context asks for
     /// per-step trace data.
     pub(super) barriers: Vec<cellgov_exec::RetiredBarrier>,
+    /// Instructions the unit has retired: the step each state record
+    /// carries.
+    pub(super) retirement_counter: u64,
+    /// `[lo, hi]` of the retirement steps whose full state the unit
+    /// records, or `None` for none.
+    pub(super) full_state_window: Option<(u64, u64)>,
+    /// `(step, pc, state_hash)` per instruction retired since the last
+    /// drain, recorded only while the context asks for per-step trace
+    /// data.
+    pub(super) per_step_hashes: Vec<(u64, u64, u64)>,
+    /// `(step, pc, fingerprint)` per instruction retired inside the
+    /// window since the last drain.
+    pub(super) per_step_full_states: Vec<(u64, u64, cellgov_exec::SpuFingerprint)>,
 }
 
 impl SpuExecutionUnit {
@@ -67,7 +80,41 @@ impl SpuExecutionUnit {
             status: UnitStatus::Runnable,
             stall: None,
             barriers: Vec::new(),
+            retirement_counter: 0,
+            full_state_window: None,
+            per_step_hashes: Vec::new(),
+            per_step_full_states: Vec::new(),
         }
+    }
+
+    /// Record the full state of each instruction whose retirement step
+    /// falls in `[lo, hi]`, or of none for `None`.
+    pub fn set_full_state_window(&mut self, window: Option<(u64, u64)>) {
+        self.full_state_window = window;
+    }
+
+    /// The window [`Self::set_full_state_window`] set.
+    pub fn full_state_window(&self) -> Option<(u64, u64)> {
+        self.full_state_window
+    }
+
+    /// Record the instruction at `pc` as retired: its state hash while
+    /// the context asks for per-step trace data, its full state inside
+    /// the window, and one more on the retirement counter.
+    pub(super) fn retire(&mut self, pc: u64, trace_per_step: bool) {
+        let step = self.retirement_counter;
+        if trace_per_step {
+            self.per_step_hashes
+                .push((step, pc, self.state.state_hash()));
+        }
+        if self
+            .full_state_window
+            .is_some_and(|(lo, hi)| (lo..=hi).contains(&step))
+        {
+            self.per_step_full_states
+                .push((step, pc, self.state.fingerprint()));
+        }
+        self.retirement_counter += 1;
     }
 
     /// Mutable access to architectural state.
@@ -81,8 +128,9 @@ impl SpuExecutionUnit {
     }
 
     /// Put the unit back in the context `snapshot` holds. The unit keeps
-    /// its id and drops the barriers it has not drained, which are trace
-    /// output, not state.
+    /// its id, its retirement counter and its full-state window, and
+    /// drops the barriers and state records it has not drained, which
+    /// are trace output, not state.
     ///
     /// [CBEA p:241 s:17] a context restore returns the SPE to the saved state.
     pub fn restore(&mut self, snapshot: SpuSnapshot) {
@@ -95,5 +143,7 @@ impl SpuExecutionUnit {
         self.status = status;
         self.stall = stall;
         self.barriers.clear();
+        self.per_step_hashes.clear();
+        self.per_step_full_states.clear();
     }
 }

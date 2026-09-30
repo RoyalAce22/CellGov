@@ -1,4 +1,4 @@
-//! The format-3 header's layout, and the refusal by name of a header
+//! The format-4 header's layout, and the refusal by name of a header
 //! written under another trace format.
 
 use super::codec::*;
@@ -16,7 +16,7 @@ fn the_header_is_tag_version_then_the_firmware_game_and_override_fingerprints() 
         overrides: 0x0102_0304_0506_0708,
     }
     .encode(&mut buf);
-    let mut want = vec![0x0d, 3, 0, 0, 0];
+    let mut want = vec![0x0d, 4, 0, 0, 0];
     want.extend_from_slice(&1u64.to_le_bytes());
     want.extend_from_slice(&2u64.to_le_bytes());
     want.extend_from_slice(&0x0102_0304_0506_0708u64.to_le_bytes());

@@ -12,6 +12,11 @@ use crate::stop::SpuStop;
 use cellgov_ps3_abi::hw::spu::{MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY, MFC_TAG_UPDATE_IMMEDIATE};
 pub use cellgov_ps3_abi::hw::spu::{SPU_LSLR_FULL, SPU_LS_SIZE, SPU_REG_COUNT};
 
+/// The id of the scheme [`SpuState::state_hash`] computes.
+///
+/// Traces record it beside the PPU scheme.
+pub const STATE_HASH_SCHEME: u64 = crate::multilinear::SCHEME_ID;
+
 /// Register-bank storage with read-only indexing.
 ///
 /// There is no `IndexMut` and no `Clone`: every write lands in an

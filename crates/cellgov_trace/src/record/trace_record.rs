@@ -8,8 +8,9 @@ use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 use super::codec::{
     TAG_BARRIER, TAG_COMMIT_APPLIED, TAG_EFFECT_EMITTED, TAG_HOST_INVARIANT_BREAK, TAG_HOST_WRITE,
     TAG_PPU_STATE_FULL, TAG_PPU_STATE_HASH, TAG_RESERVED_REGION_READ, TAG_RUN_IDENTITY,
-    TAG_STATE_HASH_CHECKPOINT, TAG_STATE_HASH_SCHEME, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED,
-    TAG_SYSCALL_RETURNED, TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_STOPPED, TAG_UNIT_WOKEN,
+    TAG_SPU_REGISTERS, TAG_SPU_STATE_FULL, TAG_SPU_STATE_HASH, TAG_STATE_HASH_CHECKPOINT,
+    TAG_STATE_HASH_SCHEME, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED, TAG_SYSCALL_RETURNED,
+    TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_STOPPED, TAG_UNIT_WOKEN,
 };
 use super::reasons::{
     HashCheckpointKind, HostWriter, TracedBarrierKind, TracedBlockReason, TracedEffectKind,
@@ -21,7 +22,7 @@ use super::reasons::{
 ///
 /// A stream whose first record is not `RunIdentity` is version 1 and
 /// carries no run identity.
-pub const TRACE_FORMAT_VERSION: u32 = 3;
+pub const TRACE_FORMAT_VERSION: u32 = 4;
 
 /// A single structured trace record.
 #[allow(clippy::large_enum_variant)]
@@ -239,6 +240,9 @@ pub enum TraceRecord {
         /// [`StateHashCheckpoint`](Self::StateHashCheckpoint) in the
         /// stream.
         checkpoint: u64,
+        /// Scheme id of every [`SpuStateHash`](Self::SpuStateHash) in the
+        /// stream.
+        spu: u64,
     },
     /// A unit's own instruction stopped it with a restartable state.
     /// Emitted once per stop, after `CommitApplied`.
@@ -260,6 +264,64 @@ pub enum TraceRecord {
         pc: u64,
         /// Which barrier it is.
         kind: TracedBarrierKind,
+    },
+    /// Per-step SPU state fingerprint at instruction retire.
+    ///
+    /// `hash` covers the registers, FPSCR, LSLR, IE, SRR0 and the
+    /// reservation, under the scheme the stream's
+    /// [`StateHashScheme`](Self::StateHashScheme) record names. The
+    /// stream carries one per retired instruction while per-step tracing
+    /// is active. A run holds several SPUs, so each record names its unit
+    /// and counts steps per unit.
+    SpuStateHash {
+        /// Unit that retired the instruction.
+        unit: UnitId,
+        /// The unit's retired-instruction counter.
+        step: u64,
+        /// PC of the instruction that just retired.
+        pc: u64,
+        /// Hash of the SPU architectural state.
+        hash: StateHash,
+    },
+    /// The non-register half of an SPU full-state snapshot at
+    /// instruction retire.
+    ///
+    /// Opt-in `[lo, hi]` window only, never on the hot path. Eight
+    /// [`SpuRegisters`](Self::SpuRegisters) records with the same `unit`
+    /// and `step` follow it. Together they carry the full fingerprint
+    /// input set of [`SpuStateHash`](Self::SpuStateHash), so a hash
+    /// divergence always names the disagreeing field.
+    SpuStateFull {
+        /// Unit that retired the instruction.
+        unit: UnitId,
+        /// The unit's retired-instruction counter.
+        step: u64,
+        /// PC of the instruction that just retired.
+        pc: u64,
+        /// Floating-point status and control register.
+        fpscr: u128,
+        /// Local storage limit register.
+        lslr: u32,
+        /// Interrupt-enable state.
+        interrupts_enabled: bool,
+        /// State save and restore register 0.
+        srr0: u32,
+        /// Line address of the local reservation, if held.
+        reservation_line: Option<u64>,
+    },
+    /// Sixteen registers of an SPU full-state snapshot, from register
+    /// `first`.
+    SpuRegisters {
+        /// Unit the registers belong to.
+        unit: UnitId,
+        /// The step of the [`SpuStateFull`](Self::SpuStateFull) record
+        /// they complete.
+        step: u64,
+        /// Number of the first register: 0, 16, ..., 112.
+        first: u8,
+        /// Registers `first..first + 16`, byte 0 of each the most
+        /// significant.
+        regs: [u128; 16],
     },
 }
 
@@ -285,6 +347,9 @@ impl TraceRecord {
             TraceRecord::StateHashScheme { .. } => TAG_STATE_HASH_SCHEME,
             TraceRecord::UnitStopped { .. } => TAG_UNIT_STOPPED,
             TraceRecord::Barrier { .. } => TAG_BARRIER,
+            TraceRecord::SpuStateHash { .. } => TAG_SPU_STATE_HASH,
+            TraceRecord::SpuStateFull { .. } => TAG_SPU_STATE_FULL,
+            TraceRecord::SpuRegisters { .. } => TAG_SPU_REGISTERS,
         }
     }
 
@@ -307,9 +372,12 @@ impl TraceRecord {
             TAG_SYSCALL_RETURNED => 1 + 8 * 3,
             TAG_RUN_IDENTITY => 1 + 4 + 8 * 3,
             TAG_HOST_WRITE => 1 + 1 + 4 + 8 + 4 + 4,
-            TAG_STATE_HASH_SCHEME => 1 + 8 + 8,
+            TAG_STATE_HASH_SCHEME => 1 + 8 * 3,
             TAG_UNIT_STOPPED => 1 + 8 + 4 + 4,
             TAG_BARRIER => 1 + 8 + 8 + 1,
+            TAG_SPU_STATE_HASH => 1 + 8 * 4,
+            TAG_SPU_STATE_FULL => 1 + 8 * 3 + 16 + 4 + 1 + 4 + 1 + 8,
+            TAG_SPU_REGISTERS => 1 + 8 + 8 + 1 + 16 * 16,
             _ => return None,
         })
     }
@@ -326,7 +394,10 @@ impl TraceRecord {
             TraceRecord::CommitApplied { .. } => TraceLevel::Commits,
             TraceRecord::StateHashCheckpoint { .. }
             | TraceRecord::PpuStateHash { .. }
-            | TraceRecord::PpuStateFull { .. } => TraceLevel::Hashes,
+            | TraceRecord::PpuStateFull { .. }
+            | TraceRecord::SpuStateHash { .. }
+            | TraceRecord::SpuStateFull { .. }
+            | TraceRecord::SpuRegisters { .. } => TraceLevel::Hashes,
             TraceRecord::EffectEmitted { .. } | TraceRecord::Barrier { .. } => TraceLevel::Effects,
             TraceRecord::HostInvariantBreak { .. } => TraceLevel::Scheduling,
             TraceRecord::SyscallEntered { .. } => TraceLevel::Scheduling,

@@ -145,7 +145,7 @@ impl Runtime {
         effects_buf.clear();
         let mailbox_read = core::cell::Cell::new(false);
         let own_mailbox = cellgov_sync::MailboxId::new(unit_id.raw());
-        let (result, retired_hashes, retired_full, barriers) = {
+        let (result, retired_hashes, retired_full, spu_hashes, spu_full, barriers) = {
             let unit_mem =
                 crate::runtime::spaces::resolve_unit_memory(&self.memory, &self.spaces, unit_id);
             let ctx = if let Some(code) = syscall_ret {
@@ -190,17 +190,26 @@ impl Runtime {
                 .get_mut(unit_id)
                 .expect("scheduler returned an id that is not in the registry");
             let res = unit.run_until_yield(self.budget_per_step, &ctx, &mut effects_buf);
-            let (retired_hashes, retired_full, barriers) = if self.mode == RuntimeMode::FaultDriven
-            {
-                (Vec::new(), Vec::new(), Vec::new())
-            } else {
-                (
-                    unit.drain_retired_state_hashes(),
-                    unit.drain_retired_state_full(),
-                    unit.drain_barriers(),
-                )
-            };
-            (res, retired_hashes, retired_full, barriers)
+            let (retired_hashes, retired_full, spu_hashes, spu_full, barriers) =
+                if self.mode == RuntimeMode::FaultDriven {
+                    (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
+                } else {
+                    (
+                        unit.drain_retired_state_hashes(),
+                        unit.drain_retired_state_full(),
+                        unit.drain_retired_spu_state_hashes(),
+                        unit.drain_retired_spu_state_full(),
+                        unit.drain_barriers(),
+                    )
+                };
+            (
+                res,
+                retired_hashes,
+                retired_full,
+                spu_hashes,
+                spu_full,
+                barriers,
+            )
         };
         if mailbox_read.get() && self.mailbox_registry.get(own_mailbox).is_some() {
             self.last_mailbox_read = Some(own_mailbox);
@@ -240,6 +249,46 @@ impl Runtime {
                 cr,
                 reservation_line,
             });
+        }
+        // An SPU record names its unit and counts steps per unit, so a
+        // hash and its full state pair by (unit, step).
+        for (step, pc, hash) in spu_hashes {
+            self.trace.record(&TraceRecord::SpuStateHash {
+                unit: unit_id,
+                step,
+                pc,
+                hash: cellgov_trace::StateHash::new(hash),
+            });
+        }
+        for (step, pc, fingerprint) in spu_full {
+            let cellgov_exec::SpuFingerprint {
+                regs,
+                fpscr,
+                lslr,
+                interrupts_enabled,
+                srr0,
+                reservation_line,
+            } = fingerprint;
+            self.zoom_trace.record(&TraceRecord::SpuStateFull {
+                unit: unit_id,
+                step,
+                pc,
+                fpscr,
+                lslr,
+                interrupts_enabled,
+                srr0,
+                reservation_line,
+            });
+            for (block, chunk) in regs.chunks_exact(16).enumerate() {
+                let mut block_regs = [0u128; 16];
+                block_regs.copy_from_slice(chunk);
+                self.zoom_trace.record(&TraceRecord::SpuRegisters {
+                    unit: unit_id,
+                    step,
+                    first: (block * 16) as u8,
+                    regs: block_regs,
+                });
+            }
         }
         for barrier in barriers {
             self.trace.record(&TraceRecord::Barrier {

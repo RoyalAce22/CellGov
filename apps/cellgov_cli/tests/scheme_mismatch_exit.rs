@@ -41,6 +41,7 @@ fn state_trace(scheme: Option<u64>) -> Vec<u8> {
         writer.record(&TraceRecord::StateHashScheme {
             ppu,
             checkpoint: CHECKPOINT_HASH_SCHEME,
+            spu: 0,
         });
     }
     writer.record(&TraceRecord::PpuStateHash {

@@ -9,7 +9,8 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump, PpuFingerprint,
-    ProblemStateError, RestartError, RetiredBarrier, SignalNotifier, StopRegisters, UnitStatus,
+    ProblemStateError, RestartError, RetiredBarrier, SignalNotifier, SpuFingerprint, StopRegisters,
+    UnitStatus,
 };
 use cellgov_time::Budget;
 
@@ -46,6 +47,14 @@ pub trait RegisteredUnit: 'static {
     /// Drain full-register snapshots collected inside the zoom-in window.
     /// See [`ExecutionUnit::drain_retired_state_full`].
     fn drain_retired_state_full(&mut self) -> Vec<(u64, u64, PpuFingerprint)>;
+
+    /// Drain SPU per-instruction state hashes. See
+    /// [`ExecutionUnit::drain_retired_spu_state_hashes`].
+    fn drain_retired_spu_state_hashes(&mut self) -> Vec<(u64, u64, u64)>;
+
+    /// Drain SPU full-state snapshots collected inside the zoom-in
+    /// window. See [`ExecutionUnit::drain_retired_spu_state_full`].
+    fn drain_retired_spu_state_full(&mut self) -> Vec<(u64, u64, SpuFingerprint)>;
 
     /// Drain the barrier instructions retired during the most recent
     /// `run_until_yield`. See [`ExecutionUnit::drain_barriers`].
@@ -207,6 +216,16 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn drain_retired_state_full(&mut self) -> Vec<(u64, u64, PpuFingerprint)> {
         ExecutionUnit::drain_retired_state_full(self)
+    }
+
+    #[inline]
+    fn drain_retired_spu_state_hashes(&mut self) -> Vec<(u64, u64, u64)> {
+        ExecutionUnit::drain_retired_spu_state_hashes(self)
+    }
+
+    #[inline]
+    fn drain_retired_spu_state_full(&mut self) -> Vec<(u64, u64, SpuFingerprint)> {
+        ExecutionUnit::drain_retired_spu_state_full(self)
     }
 
     #[inline]

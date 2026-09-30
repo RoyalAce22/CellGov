@@ -91,6 +91,8 @@ pub struct TraceSchemes {
     pub ppu: u64,
     /// Scheme id of the stream's `StateHashCheckpoint` records.
     pub checkpoint: u64,
+    /// Scheme id of the stream's `SpuStateHash` records.
+    pub spu: u64,
 }
 
 impl TraceSchemes {
@@ -98,6 +100,9 @@ impl TraceSchemes {
     pub const UNSTAMPED: Self = Self {
         ppu: cellgov_ppu::state::FNV1A_SCHEME_ID,
         checkpoint: crate::observation::LEGACY_CHECKPOINT_HASH_SCHEME,
+        // A stream without the record predates SPU state hashes and
+        // holds none, so no id names their scheme.
+        spu: 0,
     };
 }
 
@@ -121,9 +126,15 @@ fn leading_scheme(bytes: &[u8]) -> Option<TraceSchemes> {
     }
     match first {
         Some(Err(_)) => None,
-        Some(Ok(TraceRecord::StateHashScheme { ppu, checkpoint })) => {
-            Some(TraceSchemes { ppu, checkpoint })
-        }
+        Some(Ok(TraceRecord::StateHashScheme {
+            ppu,
+            checkpoint,
+            spu,
+        })) => Some(TraceSchemes {
+            ppu,
+            checkpoint,
+            spu,
+        }),
         _ => Some(TraceSchemes::UNSTAMPED),
     }
 }

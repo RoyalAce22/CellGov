@@ -26,6 +26,7 @@ fn trace(checkpoint: u64) -> Vec<u8> {
     w.record(&TraceRecord::StateHashScheme {
         ppu: SCHEME_ID,
         checkpoint,
+        spu: 0,
     });
     for step in 0..2 {
         w.record(&TraceRecord::PpuStateHash {
@@ -48,6 +49,7 @@ fn a_stream_names_its_checkpoint_scheme() {
         TraceSchemes {
             ppu: SCHEME_ID,
             checkpoint: CHECKPOINT_HASH_SCHEME,
+            spu: 0,
         }
     );
 }
@@ -63,6 +65,7 @@ fn an_unstamped_stream_reads_as_the_legacy_checkpoint_scheme() {
     let unstamped = TraceSchemes {
         ppu: FNV1A_SCHEME_ID,
         checkpoint: LEGACY_CHECKPOINT_HASH_SCHEME,
+        spu: 0,
     };
     assert_eq!(trace_scheme(&w.take_bytes()), unstamped);
     assert_eq!(trace_scheme(&[]), unstamped);

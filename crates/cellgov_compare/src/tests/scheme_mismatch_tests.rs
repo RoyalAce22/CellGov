@@ -31,6 +31,7 @@ fn trace(scheme: Option<u64>) -> Vec<u8> {
         w.record(&TraceRecord::StateHashScheme {
             ppu,
             checkpoint: crate::CHECKPOINT_HASH_SCHEME,
+            spu: 0,
         });
     }
     for step in 0..3 {
@@ -61,12 +62,14 @@ fn a_headerless_stream_may_lead_with_its_scheme() {
     w.record(&TraceRecord::StateHashScheme {
         ppu: 5,
         checkpoint: 6,
+        spu: 7,
     });
     assert_eq!(
         trace_scheme(&w.take_bytes()),
         crate::TraceSchemes {
             ppu: 5,
-            checkpoint: 6
+            checkpoint: 6,
+            spu: 7,
         }
     );
 }

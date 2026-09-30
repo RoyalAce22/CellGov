@@ -328,16 +328,18 @@ The full vocabulary of guest-visible operations:
     header a reader would not find is worse than none, because
     absence is treated as a run that made no claim;
   - `StateHashScheme`, written directly after the header: the scheme
-    ids of the stream's `PpuStateHash` records and of its
-    `StateHashCheckpoint` records. So two captures of two schemes
+    ids of the stream's `PpuStateHash` records, of its
+    `StateHashCheckpoint` records and of its `SpuStateHash` records.
+    So two captures of two schemes
     compare as a scheme mismatch. A stream without it is treated as
     the FNV-1a PPU scheme and the first checkpoint scheme;
   - decision-level: `UnitScheduled`, `StepCompleted`,
     `CommitApplied`, `StateHashCheckpoint`, `EffectEmitted`,
     `UnitBlocked`, `UnitWoken`, `UnitStopped` (the status and
     resume address of a unit its own instruction stopped);
-  - two per-step variants for the divergence trace:
-    `PpuStateHash`, `PpuStateFull`;
+  - per-step variants for the divergence trace: `PpuStateHash`,
+    `PpuStateFull`, and for an SPU `SpuStateHash`, `SpuStateFull`,
+    `SpuRegisters`;
   - `Barrier` (unit, address, kind), one per barrier instruction a
     unit retired, in retirement order;
   - one diagnostic side-channel for host-side invariant breaks:
@@ -360,8 +362,8 @@ The full vocabulary of guest-visible operations:
 ### Trace gating
 
 `RuntimeMode` gates trace emission. The per-call
-`ExecutionContext::trace_per_step` flag gates the two per-step
-variants and the `Barrier` records.
+`ExecutionContext::trace_per_step` flag gates the per-step hash
+records and the `Barrier` records.
 
 | `RuntimeMode` | Overhead paid | Sets `trace_per_step` |
 | --- | --- | --- |
@@ -390,6 +392,19 @@ stream. Their per-instruction step indices are monotonic and
 independent of `steps_taken`. PC attribution holds at any `Budget`
 size: a yield retiring N instructions emits N records, one per PC.
 
+An SPU emits one `SpuStateHash` per retired instruction: 33 bytes,
+unit + step + pc + 64-bit Multilinear-128 hash of the registers,
+FPSCR, LSLR, IE, SRR0 and reservation (`cellgov_spu::multilinear`),
+over the field list `cellgov_exec::SpuFingerprint`. A run holds
+several SPUs, so the record names its unit and `step` is that unit's
+own retirement counter. The runtime drains them through
+`ExecutionUnit::drain_retired_spu_state_hashes`.
+
+Neither hash enters `sync_state_hash`, which covers committed sync
+state only. A register divergence shows in the per-step records. The
+commit checkpoints see it once a store or an effect carries it out of
+the unit.
+
 ### Zoom window
 
 `set_full_state_window(Some((lo, hi)))` enables a bounded-window
@@ -397,6 +412,13 @@ second stream of `PpuStateFull` records. Each is 310 bytes, the
 same fingerprint input set uncompressed. They go to a separate
 `zoom_trace` sink so the main per-step stream stays homogeneous.
 The off branch costs one predicted-away test in the hot loop.
+
+`SpuExecutionUnit::set_full_state_window` does the same for an SPU.
+Its snapshot is too wide for one record, so it is an `SpuStateFull`
+(59 bytes: the fields outside the registers) and eight
+`SpuRegisters` (274 bytes each, sixteen registers), all keyed by
+unit and step. Together they carry every lane the `SpuStateHash`
+reads.
 
 ### Per-step coverage caveat
 

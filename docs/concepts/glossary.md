@@ -177,7 +177,10 @@ module in the install. Derived by `select_import_closure`.
 **Fingerprint.** The field list (`cellgov_exec::PpuFingerprint`:
 GPR, LR, CTR, XER, CR, reservation) that `PpuStateHash` digests and
 `PpuStateFull` snapshots. FPR, VMX, FPSCR, TB, and VRSAVE are outside
-it, so per-step localization is scalar-visible only.
+it, so per-step localization is scalar-visible only. The SPU's list,
+`cellgov_exec::SpuFingerprint` (registers, FPSCR, LSLR, IE, SRR0,
+reservation), is what `SpuStateHash` digests and `SpuStateFull` with
+`SpuRegisters` snapshots.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#effects-and-trace-records)
 
 **Guest ticks.** Guest time, advanced by each unit's consumed budget.

@@ -29,6 +29,9 @@ pub(super) const TAG_HOST_WRITE: u8 = 0x0e;
 pub(super) const TAG_STATE_HASH_SCHEME: u8 = 0x0f;
 pub(super) const TAG_UNIT_STOPPED: u8 = 0x10;
 pub(super) const TAG_BARRIER: u8 = 0x11;
+pub(super) const TAG_SPU_STATE_HASH: u8 = 0x12;
+pub(super) const TAG_SPU_STATE_FULL: u8 = 0x13;
+pub(super) const TAG_SPU_REGISTERS: u8 = 0x14;
 
 impl TraceRecord {
     /// Append the binary encoding to `buf`.
@@ -185,9 +188,14 @@ impl TraceRecord {
                 write_u32(buf, *len);
                 write_u32(buf, *reservations_cleared);
             }
-            TraceRecord::StateHashScheme { ppu, checkpoint } => {
+            TraceRecord::StateHashScheme {
+                ppu,
+                checkpoint,
+                spu,
+            } => {
                 write_u64(buf, *ppu);
                 write_u64(buf, *checkpoint);
+                write_u64(buf, *spu);
             }
             TraceRecord::UnitStopped { unit, status, npc } => {
                 write_u64(buf, unit.raw());
@@ -198,6 +206,50 @@ impl TraceRecord {
                 write_u64(buf, unit.raw());
                 write_u64(buf, *pc);
                 buf.push(u8::from(*kind));
+            }
+            TraceRecord::SpuStateHash {
+                unit,
+                step,
+                pc,
+                hash,
+            } => {
+                write_u64(buf, unit.raw());
+                write_u64(buf, *step);
+                write_u64(buf, *pc);
+                write_u64(buf, hash.raw());
+            }
+            TraceRecord::SpuStateFull {
+                unit,
+                step,
+                pc,
+                fpscr,
+                lslr,
+                interrupts_enabled,
+                srr0,
+                reservation_line,
+            } => {
+                write_u64(buf, unit.raw());
+                write_u64(buf, *step);
+                write_u64(buf, *pc);
+                write_u128(buf, *fpscr);
+                write_u32(buf, *lslr);
+                buf.push(u8::from(*interrupts_enabled));
+                write_u32(buf, *srr0);
+                buf.push(u8::from(reservation_line.is_some()));
+                write_u64(buf, reservation_line.unwrap_or(0));
+            }
+            TraceRecord::SpuRegisters {
+                unit,
+                step,
+                first,
+                regs,
+            } => {
+                write_u64(buf, unit.raw());
+                write_u64(buf, *step);
+                buf.push(*first);
+                for r in regs.iter() {
+                    write_u128(buf, *r);
+                }
             }
         }
         debug_assert_eq!(
@@ -418,7 +470,12 @@ impl TraceRecord {
             TAG_STATE_HASH_SCHEME => {
                 let ppu = read_u64(bytes, &mut pos)?;
                 let checkpoint = read_u64(bytes, &mut pos)?;
-                TraceRecord::StateHashScheme { ppu, checkpoint }
+                let spu = read_u64(bytes, &mut pos)?;
+                TraceRecord::StateHashScheme {
+                    ppu,
+                    checkpoint,
+                    spu,
+                }
             }
             TAG_UNIT_STOPPED => {
                 let unit = UnitId::new(read_u64(bytes, &mut pos)?);
@@ -431,6 +488,54 @@ impl TraceRecord {
                 let pc = read_u64(bytes, &mut pos)?;
                 let kind = TracedBarrierKind::try_from(read_u8(bytes, &mut pos)?)?;
                 TraceRecord::Barrier { unit, pc, kind }
+            }
+            TAG_SPU_STATE_HASH => {
+                let unit = UnitId::new(read_u64(bytes, &mut pos)?);
+                let step = read_u64(bytes, &mut pos)?;
+                let pc = read_u64(bytes, &mut pos)?;
+                let hash = StateHash::new(read_u64(bytes, &mut pos)?);
+                TraceRecord::SpuStateHash {
+                    unit,
+                    step,
+                    pc,
+                    hash,
+                }
+            }
+            TAG_SPU_STATE_FULL => {
+                let unit = UnitId::new(read_u64(bytes, &mut pos)?);
+                let step = read_u64(bytes, &mut pos)?;
+                let pc = read_u64(bytes, &mut pos)?;
+                let fpscr = read_u128(bytes, &mut pos)?;
+                let lslr = read_u32(bytes, &mut pos)?;
+                let interrupts_enabled = read_bool(bytes, &mut pos)?;
+                let srr0 = read_u32(bytes, &mut pos)?;
+                let resv_held = read_bool(bytes, &mut pos)?;
+                let resv_addr = read_u64(bytes, &mut pos)?;
+                TraceRecord::SpuStateFull {
+                    unit,
+                    step,
+                    pc,
+                    fpscr,
+                    lslr,
+                    interrupts_enabled,
+                    srr0,
+                    reservation_line: resv_held.then_some(resv_addr),
+                }
+            }
+            TAG_SPU_REGISTERS => {
+                let unit = UnitId::new(read_u64(bytes, &mut pos)?);
+                let step = read_u64(bytes, &mut pos)?;
+                let first = read_u8(bytes, &mut pos)?;
+                let mut regs = [0u128; 16];
+                for r in regs.iter_mut() {
+                    *r = read_u128(bytes, &mut pos)?;
+                }
+                TraceRecord::SpuRegisters {
+                    unit,
+                    step,
+                    first,
+                    regs,
+                }
             }
             other => return Err(DecodeError::UnknownTag(other)),
         };
@@ -446,10 +551,22 @@ pub(super) fn write_u64(buf: &mut Vec<u8>, v: u64) {
     buf.extend_from_slice(&v.to_le_bytes());
 }
 
+fn write_u128(buf: &mut Vec<u8>, v: u128) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
+
 fn read_u8(bytes: &[u8], pos: &mut usize) -> Result<u8, DecodeError> {
     let v = *bytes.get(*pos).ok_or(DecodeError::Truncated)?;
     *pos += 1;
     Ok(v)
+}
+
+fn read_bool(bytes: &[u8], pos: &mut usize) -> Result<bool, DecodeError> {
+    match read_u8(bytes, pos)? {
+        0 => Ok(false),
+        1 => Ok(true),
+        other => Err(DecodeError::InvalidBool(other)),
+    }
 }
 
 fn read_u32(bytes: &[u8], pos: &mut usize) -> Result<u32, DecodeError> {
@@ -470,4 +587,14 @@ fn read_u64(bytes: &[u8], pos: &mut usize) -> Result<u64, DecodeError> {
         .map_err(|_| DecodeError::Truncated)?;
     *pos += 8;
     Ok(u64::from_le_bytes(slice))
+}
+
+fn read_u128(bytes: &[u8], pos: &mut usize) -> Result<u128, DecodeError> {
+    let slice: [u8; 16] = bytes
+        .get(*pos..*pos + 16)
+        .ok_or(DecodeError::Truncated)?
+        .try_into()
+        .map_err(|_| DecodeError::Truncated)?;
+    *pos += 16;
+    Ok(u128::from_le_bytes(slice))
 }

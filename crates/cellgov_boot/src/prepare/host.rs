@@ -114,7 +114,8 @@ pub(super) fn report_boot_banner(
 }
 
 /// The writer a run's trace starts in: the identity header, then the
-/// scheme ids of the PPU state hash and of the commit checkpoints.
+/// scheme ids of the PPU state hash, the commit checkpoints and the SPU
+/// state hash.
 ///
 /// The header leads the stream, so the writer takes it before the
 /// runtime that appends to it exists.
@@ -126,6 +127,7 @@ pub(super) fn run_trace_writer(
     trace.record(&cellgov_trace::TraceRecord::StateHashScheme {
         ppu: cellgov_ppu::state::STATE_HASH_SCHEME,
         checkpoint: cellgov_compare::CHECKPOINT_HASH_SCHEME,
+        spu: cellgov_spu::state::STATE_HASH_SCHEME,
     });
     trace
 }

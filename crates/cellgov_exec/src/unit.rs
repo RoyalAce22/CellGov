@@ -139,6 +139,25 @@ pub trait ExecutionUnit {
         Vec::new()
     }
 
+    /// Drain `(step, pc, state_hash)` triples for the SPU instructions
+    /// retired during the most recent `run_until_yield`, in retirement
+    /// order. `step` is the unit's own retirement counter. The default
+    /// returns an empty vec and allocates nothing.
+    ///
+    /// A unit collects them only when
+    /// [`ExecutionContext::trace_per_step`] is true.
+    fn drain_retired_spu_state_hashes(&mut self) -> Vec<(u64, u64, u64)> {
+        Vec::new()
+    }
+
+    /// Drain the SPU full-state snapshots collected during the most
+    /// recent `run_until_yield` inside the unit's zoom-in window, as
+    /// `(step, pc, fingerprint)` in retirement order. `step` matches the
+    /// step of the same instruction's hash.
+    fn drain_retired_spu_state_full(&mut self) -> Vec<(u64, u64, SpuFingerprint)> {
+        Vec::new()
+    }
+
     /// Drain the barrier instructions retired during the most recent
     /// `run_until_yield`, in retirement order. The default returns an
     /// empty vec and allocates nothing.

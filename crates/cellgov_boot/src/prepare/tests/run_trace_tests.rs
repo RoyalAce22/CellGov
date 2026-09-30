@@ -1,5 +1,5 @@
 //! A run's trace leads with its identity header, then the schemes of its
-//! PPU state hash and its commit checkpoints.
+//! PPU state hash, its commit checkpoints and its SPU state hash.
 
 use super::*;
 use cellgov_trace::{TraceReader, TraceRecord};
@@ -16,6 +16,7 @@ fn the_scheme_record_follows_the_header() {
             TraceRecord::StateHashScheme {
                 ppu: cellgov_ppu::state::STATE_HASH_SCHEME,
                 checkpoint: cellgov_compare::CHECKPOINT_HASH_SCHEME,
+                spu: cellgov_spu::state::STATE_HASH_SCHEME,
             },
         ]
     );
@@ -24,6 +25,7 @@ fn the_scheme_record_follows_the_header() {
         cellgov_compare::TraceSchemes {
             ppu: cellgov_ppu::state::STATE_HASH_SCHEME,
             checkpoint: cellgov_compare::CHECKPOINT_HASH_SCHEME,
+            spu: cellgov_spu::state::STATE_HASH_SCHEME,
         }
     );
 }

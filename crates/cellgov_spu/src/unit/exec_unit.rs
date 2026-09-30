@@ -174,6 +174,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                 SpuStepOutcome::Branch => {}
                 SpuStepOutcome::Stop { kind, signal } => {
                     self.state.record_stop(kind, signal);
+                    self.retire(step_pc, ctx.trace_per_step());
                     self.status = UnitStatus::Finished;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Finished,
@@ -210,6 +211,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         });
                     } else {
                         self.state.advance_pc();
+                        self.retire(step_pc, ctx.trace_per_step());
                     }
                     return ExecutionStepResult {
                         yield_reason: reason,
@@ -254,6 +256,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                             self.id,
                         ));
                         self.state.advance_pc();
+                        self.retire(step_pc, ctx.trace_per_step());
                         return ExecutionStepResult {
                             yield_reason: YieldReason::DmaSubmitted,
                             consumed_cost: InstructionCost::new(budget.raw() - remaining),
@@ -297,6 +300,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                 }
             }
 
+            self.retire(step_pc, ctx.trace_per_step());
             debug_assert!(
                 self.state.hash_is_current(),
                 "state-hash accumulator out of date after retirement at 0x{step_pc:x}"
@@ -325,6 +329,12 @@ impl ExecutionUnit for SpuExecutionUnit {
             stall,
             // Trace output the runtime drains, not state.
             barriers: _,
+            per_step_hashes: _,
+            per_step_full_states: _,
+            // Trace instruments: the step the records carry and the
+            // window of full records.
+            retirement_counter: _,
+            full_state_window: _,
         } = self;
         SpuSnapshot {
             state: state.clone(),
@@ -438,6 +448,14 @@ impl ExecutionUnit for SpuExecutionUnit {
 
     fn drain_barriers(&mut self) -> Vec<cellgov_exec::RetiredBarrier> {
         std::mem::take(&mut self.barriers)
+    }
+
+    fn drain_retired_spu_state_hashes(&mut self) -> Vec<(u64, u64, u64)> {
+        std::mem::take(&mut self.per_step_hashes)
+    }
+
+    fn drain_retired_spu_state_full(&mut self) -> Vec<(u64, u64, cellgov_exec::SpuFingerprint)> {
+        std::mem::take(&mut self.per_step_full_states)
     }
 
     /// [CBEA p:60 s:7.5] a get moves main-storage bytes into local storage.

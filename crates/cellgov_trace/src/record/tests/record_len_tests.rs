@@ -102,6 +102,7 @@ fn one_of_each() -> Vec<TraceRecord> {
         TraceRecord::StateHashScheme {
             ppu: 37,
             checkpoint: 38,
+            spu: 41,
         },
         TraceRecord::UnitStopped {
             unit: UnitId::new(1),
@@ -112,6 +113,28 @@ fn one_of_each() -> Vec<TraceRecord> {
             unit: UnitId::new(2),
             pc: 40,
             kind: TracedBarrierKind::Lwsync,
+        },
+        TraceRecord::SpuStateHash {
+            unit: UnitId::new(3),
+            step: 42,
+            pc: 43,
+            hash: StateHash::new(44),
+        },
+        TraceRecord::SpuStateFull {
+            unit: UnitId::new(3),
+            step: 45,
+            pc: 46,
+            fpscr: 47,
+            lslr: 48,
+            interrupts_enabled: true,
+            srr0: 49,
+            reservation_line: Some(50),
+        },
+        TraceRecord::SpuRegisters {
+            unit: UnitId::new(3),
+            step: 45,
+            first: 112,
+            regs: [51; 16],
         },
     ]
 }
@@ -139,10 +162,10 @@ fn every_known_tag_has_a_sample_and_the_next_tag_is_free() {
     assert_eq!(sampled, declared, "a variant is missing from one_of_each");
     assert_eq!(
         declared.iter().copied().collect::<Vec<_>>(),
-        (0..=TAG_BARRIER).collect::<Vec<_>>(),
+        (0..=TAG_SPU_REGISTERS).collect::<Vec<_>>(),
         "tags are dense and append-only"
     );
-    assert_eq!(TraceRecord::encoded_len(TAG_BARRIER + 1), None);
+    assert_eq!(TraceRecord::encoded_len(TAG_SPU_REGISTERS + 1), None);
 }
 
 #[test]

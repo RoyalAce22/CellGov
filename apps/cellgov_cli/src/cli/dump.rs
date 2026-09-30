@@ -210,9 +210,14 @@ fn dump_trace(result: &ScenarioResult) -> Result<(), CommandError> {
                      addr=0x{addr:x} len={len} cleared={reservations_cleared}"
                 );
             }
-            TraceRecord::StateHashScheme { ppu, checkpoint } => {
+            TraceRecord::StateHashScheme {
+                ppu,
+                checkpoint,
+                spu,
+            } => {
                 println!(
-                    "{i:4}  StateHashScheme    ppu=0x{ppu:016x} checkpoint=0x{checkpoint:016x}"
+                    "{i:4}  StateHashScheme    ppu=0x{ppu:016x} checkpoint=0x{checkpoint:016x} \
+                     spu=0x{spu:016x}"
                 );
             }
             TraceRecord::UnitStopped { unit, status, npc } => {
@@ -224,6 +229,32 @@ fn dump_trace(result: &ScenarioResult) -> Result<(), CommandError> {
             TraceRecord::Barrier { unit, pc, kind } => {
                 println!(
                     "{i:4}  Barrier            unit={} pc=0x{pc:016x} kind={kind:?}",
+                    unit.raw()
+                );
+            }
+            TraceRecord::SpuStateHash {
+                unit,
+                step,
+                pc,
+                hash,
+            } => {
+                println!(
+                    "{i:4}  SpuStateHash       unit={} step={step} pc=0x{pc:x} hash=0x{:x}",
+                    unit.raw(),
+                    hash.raw()
+                );
+            }
+            TraceRecord::SpuStateFull { unit, step, pc, .. } => {
+                println!(
+                    "{i:4}  SpuStateFull       unit={} step={step} pc=0x{pc:x} (window capture)",
+                    unit.raw()
+                );
+            }
+            TraceRecord::SpuRegisters {
+                unit, step, first, ..
+            } => {
+                println!(
+                    "{i:4}  SpuRegisters       unit={} step={step} first=r{first} (window capture)",
                     unit.raw()
                 );
             }
