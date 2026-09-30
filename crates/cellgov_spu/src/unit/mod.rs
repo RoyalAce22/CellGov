@@ -58,3 +58,7 @@ mod channel_read_slot_tests;
 #[cfg(test)]
 #[path = "tests/interrupt_tests.rs"]
 mod interrupt_tests;
+
+#[cfg(test)]
+#[path = "tests/snapshot_tests.rs"]
+mod snapshot_tests;

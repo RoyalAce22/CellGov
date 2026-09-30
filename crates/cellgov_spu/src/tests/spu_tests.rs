@@ -105,13 +105,13 @@ fn snapshot_captures_state() {
     unit.state_mut().set_reg_word_splat(7, 0xBEEF);
     unit.state_mut().pc = 0x100;
     let snap = unit.snapshot();
-    assert_eq!(snap.pc, 0x100);
+    assert_eq!(snap.state.pc, 0x100);
     assert_eq!(
         u32::from_be_bytes([
-            snap.regs[7][0],
-            snap.regs[7][1],
-            snap.regs[7][2],
-            snap.regs[7][3]
+            snap.state.regs[7][0],
+            snap.state.regs[7][1],
+            snap.state.regs[7][2],
+            snap.state.regs[7][3]
         ]),
         0xBEEF
     );

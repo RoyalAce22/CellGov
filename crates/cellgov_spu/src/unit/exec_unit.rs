@@ -311,30 +311,19 @@ impl ExecutionUnit for SpuExecutionUnit {
     fn snapshot(&self) -> SpuSnapshot {
         // Every field is named, so a new one fails to compile here until
         // the snapshot takes it or says why not.
-        let crate::state::SpuState {
-            regs,
-            ls,
-            pc,
-            lslr,
-            // The replay snapshot does not carry these.
-            signals: _,
-            channels: _,
-            reservation,
-            stop,
-            fpscr,
-            interrupts_enabled,
-            srr0,
-        } = &self.state;
+        let SpuExecutionUnit {
+            // The unit's identity, not its context.
+            id: _,
+            state,
+            status,
+            stall,
+            // Trace output the runtime drains, not state.
+            barriers: _,
+        } = self;
         SpuSnapshot {
-            regs: *regs,
-            pc: *pc,
-            lslr: *lslr,
-            ls: ls.clone(),
-            reservation_line: reservation.map(|l| l.addr()),
-            stop: *stop,
-            fpscr: *fpscr,
-            interrupts_enabled: *interrupts_enabled,
-            srr0: *srr0,
+            state: state.clone(),
+            status: *status,
+            stall: *stall,
         }
     }
 
@@ -459,9 +448,7 @@ impl ExecutionUnit for SpuExecutionUnit {
     }
 
     fn local_memory_hash(&self) -> Option<u64> {
-        let mut hasher = cellgov_mem::Fnv1aHasher::new();
-        hasher.write(&self.state.ls);
-        Some(hasher.finish())
+        Some(super::spu_unit::local_store_hash(&self.state.ls))
     }
 }
 

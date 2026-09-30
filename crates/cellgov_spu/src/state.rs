@@ -9,7 +9,7 @@ use cellgov_ps3_abi::hw::spu::{MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY, MFC_TAG_U
 pub use cellgov_ps3_abi::hw::spu::{SPU_LSLR_FULL, SPU_LS_SIZE, SPU_REG_COUNT};
 
 /// Full SPU architectural state.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpuState {
     /// 128 x 128-bit GPRs; each register is 16 bytes, byte 0 is MSB.
     ///
@@ -498,7 +498,7 @@ impl Default for SpuState {
 /// invalid and leaves what the channel holds unstated.
 /// [CBEA p:121 s:9.2] after a command is queued the parameter values become invalid, and omitting a required parameter can make the queue operate improperly.
 /// [CBEA p:52 s:7] when EAH is not specified on a command, hardware must set EAH to '0'.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelState {
     /// MFC_LSA: local store address for next DMA command.
     ///

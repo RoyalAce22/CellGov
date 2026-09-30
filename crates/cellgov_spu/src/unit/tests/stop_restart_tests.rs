@@ -47,7 +47,7 @@ fn a_stop_records_its_code_and_the_next_word() {
     };
     assert_eq!(unit.state().stop, Some(expected));
     assert_eq!(unit.state().pc, 4);
-    assert_eq!(unit.snapshot().stop, Some(expected));
+    assert_eq!(unit.snapshot().state.stop, Some(expected));
     assert_eq!(
         unit.stop_registers(),
         Some(StopRegisters {
