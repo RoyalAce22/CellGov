@@ -196,6 +196,30 @@ const DECODERS: &[(&str, Builder)] = &[
         ra: f.ra,
         imm: ((f.raw >> 14) & 0xFF) as u8,
     }),
+    // [SPU-ISA p:231 s:9 Fceq] RR opcode 0x3C2.
+    ("fceq", |f| SpuInstruction::Fceq {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
+    // [SPU-ISA p:232 s:9 Fcmeq] RR opcode 0x3CA.
+    ("fcmeq", |f| SpuInstruction::Fcmeq {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
+    // [SPU-ISA p:233 s:9 Fcgt] RR opcode 0x2C2.
+    ("fcgt", |f| SpuInstruction::Fcgt {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
+    // [SPU-ISA p:234 s:9 Fcmgt] RR opcode 0x2CA.
+    ("fcmgt", |f| SpuInstruction::Fcmgt {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
     // [SPU-ISA p:235 s:9 Fscrwr] RR opcode 0x3BA; RT is a false target.
     ("fscrwr", |f| SpuInstruction::Fscrwr { ra: f.ra }),
     // [SPU-ISA p:236 s:9 Fscrrd] RR opcode 0x398; RA and RB are unused.

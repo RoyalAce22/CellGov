@@ -4,6 +4,7 @@ use crate::instruction::SpuInstruction;
 use crate::state::SpuState;
 use crate::stop::SpuStopKind;
 use cellgov_event::UnitId;
+use cellgov_float::{extended_magnitude_key, extended_order_key};
 
 use super::channel::{execute_rchcnt, execute_rdch, execute_wrch};
 use super::lanes::{from_halfwords, from_words, halfwords, words};
@@ -1126,6 +1127,22 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         SpuInstruction::Cfltu { rt, ra, imm } => {
             super::float::to_integer(state, rt, ra, imm, false)
         }
+        // [SPU-ISA p:231 s:9. Floating-Point Instructions] Floating Compare Equal: RA = RB per slot, every zero equal.
+        SpuInstruction::Fceq { rt, ra, rb } => super::float::compare(state, rt, ra, rb, |a, b| {
+            extended_order_key(a) == extended_order_key(b)
+        }),
+        // [SPU-ISA p:232 s:9. Floating-Point Instructions] Floating Compare Magnitude Equal: |RA| = |RB| per slot.
+        SpuInstruction::Fcmeq { rt, ra, rb } => super::float::compare(state, rt, ra, rb, |a, b| {
+            extended_magnitude_key(a) == extended_magnitude_key(b)
+        }),
+        // [SPU-ISA p:233 s:9. Floating-Point Instructions] Floating Compare Greater Than: RA > RB per slot.
+        SpuInstruction::Fcgt { rt, ra, rb } => super::float::compare(state, rt, ra, rb, |a, b| {
+            extended_order_key(a) > extended_order_key(b)
+        }),
+        // [SPU-ISA p:234 s:9. Floating-Point Instructions] Floating Compare Magnitude Greater Than: |RA| > |RB| per slot.
+        SpuInstruction::Fcmgt { rt, ra, rb } => super::float::compare(state, rt, ra, rb, |a, b| {
+            extended_magnitude_key(a) > extended_magnitude_key(b)
+        }),
         // [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
         SpuInstruction::Fscrwr { ra } => {
             state.fpscr = u128::from_be_bytes(state.regs[ra as usize])
@@ -1290,3 +1307,7 @@ mod estimate_tests;
 #[cfg(test)]
 #[path = "tests/conversion_tests.rs"]
 mod conversion_tests;
+
+#[cfg(test)]
+#[path = "tests/float_compare_tests.rs"]
+mod float_compare_tests;

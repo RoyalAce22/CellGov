@@ -1553,6 +1553,43 @@ pub enum SpuInstruction {
         /// The I8 field; the scale is 173 less it.
         imm: u8,
     },
+    // [SPU-ISA p:231 s:9 Compares: Fceq p.231, Fcmeq p.232, Fcgt p.233, Fcmgt p.234]
+    /// Floating compare equal: per slot, all ones when `ra == rb`.
+    Fceq {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Floating compare magnitude equal: per slot, all ones when `|ra| == |rb|`.
+    Fcmeq {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Floating compare greater than: per slot, all ones when `ra > rb`.
+    Fcgt {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Floating compare magnitude greater than: per slot, all ones when `|ra| > |rb|`.
+    Fcmgt {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
     // [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
     /// Write RA's defined bits into the FPSCR; RT is a false target.
     Fscrwr {

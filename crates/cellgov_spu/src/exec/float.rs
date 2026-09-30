@@ -160,6 +160,27 @@ pub(super) fn to_integer(
     SpuStepOutcome::Continue
 }
 
+/// Writes all ones to each word slot of `rt` where `holds` is true of the
+/// slot's `ra` and `rb` words, and zero elsewhere.
+// [SPU-ISA p:196 s:9.1] the compares set no flag.
+pub(super) fn compare(
+    state: &mut SpuState,
+    rt: u8,
+    ra: u8,
+    rb: u8,
+    holds: impl Fn(u32, u32) -> bool,
+) -> SpuStepOutcome {
+    let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
+    state.regs[rt as usize] = from_words(std::array::from_fn(|slot| {
+        if holds(a[slot], b[slot]) {
+            u32::MAX
+        } else {
+            0
+        }
+    }));
+    SpuStepOutcome::Continue
+}
+
 /// `a + b` for two exact operands: decoded single-precision values or
 /// one of their products.
 pub(super) fn sum(a: Exact, b: Exact) -> Exact {

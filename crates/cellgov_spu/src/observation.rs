@@ -471,7 +471,11 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Csflt { rt, .. }
             | SpuInstruction::Cflts { rt, .. }
             | SpuInstruction::Cuflt { rt, .. }
-            | SpuInstruction::Cfltu { rt, .. } => Some(rt),
+            | SpuInstruction::Cfltu { rt, .. }
+            | SpuInstruction::Fceq { rt, .. }
+            | SpuInstruction::Fcmeq { rt, .. }
+            | SpuInstruction::Fcgt { rt, .. }
+            | SpuInstruction::Fcmgt { rt, .. } => Some(rt),
         };
         if let Some(register) = register {
             footprint.registers.insert(register);

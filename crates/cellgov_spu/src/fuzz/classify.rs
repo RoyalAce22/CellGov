@@ -434,6 +434,10 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Csflt
         | SpuInstructionKind::Cflts
         | SpuInstructionKind::Cuflt
-        | SpuInstructionKind::Cfltu => {}
+        | SpuInstructionKind::Cfltu
+        | SpuInstructionKind::Fceq
+        | SpuInstructionKind::Fcmeq
+        | SpuInstructionKind::Fcgt
+        | SpuInstructionKind::Fcmgt => {}
     }
 }
