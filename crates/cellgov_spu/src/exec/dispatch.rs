@@ -36,6 +36,23 @@ fn halt_if(condition: bool) -> SpuStepOutcome {
     }
 }
 
+// [SPU-ISA p:116 s:5 Table 5-1] 10xxxxxx gives 0x00, 110xxxxx gives 0xFF, 111xxxxx gives 0x80.
+fn shufb_byte(a: &[u8; 16], b: &[u8; 16], control: u8) -> u8 {
+    match control {
+        0x80..=0xBF => 0x00,
+        0xC0..=0xDF => 0xFF,
+        0xE0..=0xFF => 0x80,
+        _ => {
+            let index = usize::from(control & 0x1F);
+            if index < 16 {
+                a[index]
+            } else {
+                b[index - 16]
+            }
+        }
+    }
+}
+
 /// Execute a single decoded SPU instruction.
 pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match *insn {
@@ -213,30 +230,12 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             SpuStepOutcome::Continue
         }
 
-        // [SPU-ISA p:116 s:5. Integer and Logical Instructions] Shuffle Bytes: RC byte selectors choose from RA||RB or generate 0x00/0xFF/0x80 constants.
+        // [SPU-ISA p:116 s:5. Integer and Logical Instructions] Shuffle Bytes: each RC byte selects a byte of RA||RB or a constant.
         SpuInstruction::Shufb { rt, ra, rb, rc } => {
             let a = state.regs[ra as usize];
             let b = state.regs[rb as usize];
             let c = state.regs[rc as usize];
-            let mut result = [0u8; 16];
-            for i in 0..16 {
-                let sel = c[i];
-                result[i] = if sel & 0xC0 == 0xC0 {
-                    // Constant-generation patterns in the high bits of sel.
-                    if sel & 0xE0 == 0xC0 {
-                        0x00
-                    } else if sel & 0xE0 == 0xE0 {
-                        0xFF
-                    } else {
-                        0x80
-                    }
-                } else if sel & 0x10 == 0 {
-                    a[(sel & 0xF) as usize]
-                } else {
-                    b[(sel & 0xF) as usize]
-                };
-            }
-            state.regs[rt as usize] = result;
+            state.regs[rt as usize] = std::array::from_fn(|i| shufb_byte(&a, &b, c[i]));
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:125 s:6. Shift and Rotate Instructions] Shift Left Quadword by Bytes Immediate: shift register left by I7 bytes, fill zero.
@@ -597,3 +596,7 @@ mod channel_count_tests;
 #[cfg(test)]
 #[path = "tests/start_state_tests.rs"]
 mod start_state_tests;
+
+#[cfg(test)]
+#[path = "tests/shufb_tests.rs"]
+mod shufb_tests;

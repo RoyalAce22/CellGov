@@ -76,18 +76,35 @@ pub enum SpuMetamorphicRelation {
     NopFalseTarget,
     /// The high immediate bits do not affect a quadword byte rotation.
     RotateByteCountHighBit,
+    /// A shufb control byte changed within its class gives the same result byte.
+    ShufbControlClass,
 }
 
-/// A partner word whose complete observation must match the original.
+/// A partner whose complete observation must match the original.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpuMetamorphicCase {
-    /// Selects the rule used to derive the partner word.
+    /// Selects the rule used to derive the partner.
     pub relation: SpuMetamorphicRelation,
-    /// Encodes the instruction to run from the original initial state.
+    /// Encodes the instruction to run from the partner's initial state.
     pub partner_word: u32,
+    /// The input register the relation rewrites in the partner's initial
+    /// state; `None` when the partner runs from the original initial state.
+    pub varied_input: Option<SpuVariedInput>,
 }
 
-/// Reason a partner word cannot be compared.
+/// One input register a state relation rewrites before the partner runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpuVariedInput {
+    /// The rewritten register.
+    pub register: u8,
+    /// True when the instruction does not write the register.
+    ///
+    /// [`SpuMetamorphicCase::settle_partner`] then restores the register in
+    /// the partner's final state to its original value.
+    pub restore: bool,
+}
+
+/// Reason a relation has no partner to compare.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SpuRelationRefusal {
     /// The instruction does not declare the requested relation.
@@ -96,10 +113,10 @@ pub enum SpuRelationRefusal {
         /// Relation absent from the instruction descriptor.
         relation: SpuMetamorphicRelation,
     },
-    /// No valid partner word exists for this encoding.
-    #[error("SPU relation {relation:?} has no alternate encoding")]
+    /// No valid partner exists for this encoding.
+    #[error("SPU relation {relation:?} has no partner for this encoding")]
     NoPartner {
-        /// Relation without a valid partner word.
+        /// Relation without a valid partner.
         relation: SpuMetamorphicRelation,
     },
     /// The original or partner word has undefined or unsupported behavior.

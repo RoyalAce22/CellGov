@@ -1,6 +1,7 @@
 //! The fuzz contract on each decoded instruction and the metamorphic relations it admits.
 
 use crate::instruction::{SpuInstruction, SpuInstructionKind};
+use crate::state::{SpuState, SPU_REG_COUNT};
 
 use super::classify::{classify_kind, effect_and_outcome, form_for_kind};
 use super::support::{
@@ -9,7 +10,7 @@ use super::support::{
 };
 use super::types::{
     SpuFuzzDescriptor, SpuMetamorphicCase, SpuMetamorphicRelation, SpuObservableState,
-    SpuRelationRefusal,
+    SpuRelationRefusal, SpuVariedInput,
 };
 
 const NOP_RELATIONS: &[SpuMetamorphicRelation] = &[
@@ -20,7 +21,23 @@ const ROTATE_RELATIONS: &[SpuMetamorphicRelation] = &[
     SpuMetamorphicRelation::Deterministic,
     SpuMetamorphicRelation::RotateByteCountHighBit,
 ];
+const SHUFB_RELATIONS: &[SpuMetamorphicRelation] = &[
+    SpuMetamorphicRelation::Deterministic,
+    SpuMetamorphicRelation::ShufbControlClass,
+];
 const RELATIONS: &[SpuMetamorphicRelation] = &[SpuMetamorphicRelation::Deterministic];
+
+/// Returns another shufb control byte in the same class as `control`.
+///
+/// A constant pattern keeps its high three bits. A selector keeps its low five.
+// [SPU-ISA p:116 s:5 Table 5-1] 10xxxxxx, 110xxxxx and 111xxxxx each give one constant; any other byte selects by its rightmost 5 bits.
+fn shufb_class_partner(control: u8) -> u8 {
+    if control & 0x80 != 0 {
+        control ^ 0x1F
+    } else {
+        control ^ 0x60
+    }
+}
 
 impl SpuInstruction {
     /// Return the interpreter-owned fuzz contract for this instruction.
@@ -34,19 +51,18 @@ impl SpuInstruction {
             observable_state: SpuObservableState::Complete,
             effects,
             outcomes,
-            relations: if kind == SpuInstructionKind::Rotqbyi {
-                ROTATE_RELATIONS
-            } else if kind == SpuInstructionKind::Nop {
-                NOP_RELATIONS
-            } else {
-                RELATIONS
+            relations: match kind {
+                SpuInstructionKind::Rotqbyi => ROTATE_RELATIONS,
+                SpuInstructionKind::Nop => NOP_RELATIONS,
+                SpuInstructionKind::Shufb => SHUFB_RELATIONS,
+                _ => RELATIONS,
             },
             decoded_execution_supported: execution_supported(*self),
             state_input: state_input(*self),
         }
     }
 
-    /// Derives a same-observation partner word from an eligible instruction.
+    /// Derives a same-observation partner from an eligible instruction.
     ///
     /// # Errors
     ///
@@ -77,6 +93,9 @@ impl SpuInstruction {
                 // [SPU-ISA p:132 s:6. Shift and Rotate Instructions] ROTQBYI uses only I7's low four bits for its byte count.
                 raw ^ 0x0004_0000
             }
+            SpuMetamorphicRelation::ShufbControlClass => {
+                return self.shufb_control_case(raw, relation);
+            }
             SpuMetamorphicRelation::Deterministic => {
                 return Err(SpuRelationRefusal::Undeclared { relation })
             }
@@ -98,6 +117,63 @@ impl SpuInstruction {
         Ok(SpuMetamorphicCase {
             relation,
             partner_word,
+            varied_input: None,
         })
+    }
+
+    /// The shufb control-class case: the same word, with RC rewritten.
+    ///
+    /// An RC that aliases RA or RB is also a data input, and a rewrite of it
+    /// can change a selected byte. Such an encoding has no partner.
+    fn shufb_control_case(
+        &self,
+        raw: u32,
+        relation: SpuMetamorphicRelation,
+    ) -> Result<SpuMetamorphicCase, SpuRelationRefusal> {
+        let SpuInstruction::Shufb { rt, ra, rb, rc } = *self else {
+            return Err(SpuRelationRefusal::Undeclared { relation });
+        };
+        if rc == ra || rc == rb {
+            return Err(SpuRelationRefusal::NoPartner { relation });
+        }
+        Ok(SpuMetamorphicCase {
+            relation,
+            partner_word: raw,
+            varied_input: Some(SpuVariedInput {
+                register: rc,
+                restore: rc != rt,
+            }),
+        })
+    }
+}
+
+impl SpuMetamorphicCase {
+    /// The initial state the partner runs from: `initial`, with the varied
+    /// input rewritten when the relation has one.
+    pub fn partner_initial(&self, initial: &SpuState) -> SpuState {
+        let mut partner = initial.clone();
+        if let (SpuMetamorphicRelation::ShufbControlClass, Some(input)) =
+            (self.relation, self.varied_input)
+        {
+            let register = &mut partner.regs[usize::from(input.register)];
+            *register = register.map(shufb_class_partner);
+        }
+        partner
+    }
+
+    /// Restores the varied input in `partner_regs` to its value in `initial`.
+    ///
+    /// The restore applies only when the instruction does not write that
+    /// register. The caller runs this before it compares the partner with
+    /// the original, so the comparison covers only the relation's claim.
+    pub fn settle_partner(&self, initial: &SpuState, partner_regs: &mut [[u8; 16]; SPU_REG_COUNT]) {
+        if let Some(SpuVariedInput {
+            register,
+            restore: true,
+        }) = self.varied_input
+        {
+            let register = usize::from(register);
+            partner_regs[register] = initial.regs[register];
+        }
     }
 }

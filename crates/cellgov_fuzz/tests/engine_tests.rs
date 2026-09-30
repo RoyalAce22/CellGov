@@ -24,7 +24,7 @@ fn small_config() -> FuzzConfig {
 }
 
 #[test]
-fn structured_spu_campaign_executes_both_typed_relations() {
+fn structured_spu_campaign_executes_every_typed_relation() {
     let config = FuzzConfig {
         schedule: CampaignSchedule {
             cases: CaseRange {
@@ -49,6 +49,7 @@ fn structured_spu_campaign_executes_both_typed_relations() {
     for check in [
         CheckIdentity::SpuNopFalseTarget,
         CheckIdentity::SpuRotateByteCountHighBit,
+        CheckIdentity::SpuShufbControlClass,
     ] {
         assert!(
             run.report

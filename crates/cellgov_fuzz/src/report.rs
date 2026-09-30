@@ -65,6 +65,8 @@ pub enum CheckIdentity {
     SpuNopFalseTarget,
     /// Checks that upper I7 bits leave the quadword byte rotation unchanged.
     SpuRotateByteCountHighBit,
+    /// Checks that rewriting shufb control bytes within their class leaves the result unchanged.
+    SpuShufbControlClass,
     /// Interpreter-owned legal-outcome contract.
     LegalOutcome,
     /// Interpreter-owned legal-effect contract.

@@ -19,3 +19,7 @@ pub use types::*;
 #[cfg(test)]
 #[path = "tests/fuzz_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/shufb_relation_tests.rs"]
+mod shufb_relation_tests;

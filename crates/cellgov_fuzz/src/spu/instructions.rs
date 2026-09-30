@@ -342,10 +342,14 @@ fn spu_relation_check(relation: SpuMetamorphicRelation) -> CheckIdentity {
         SpuMetamorphicRelation::Deterministic => CheckIdentity::DeterministicReplay,
         SpuMetamorphicRelation::NopFalseTarget => CheckIdentity::SpuNopFalseTarget,
         SpuMetamorphicRelation::RotateByteCountHighBit => CheckIdentity::SpuRotateByteCountHighBit,
+        SpuMetamorphicRelation::ShufbControlClass => CheckIdentity::SpuShufbControlClass,
     }
 }
 
 // [Le2014 p:219 s:3.1.2] Each equivalent variant runs on the same input as the original, and any disagreement is a finding.
+// A relation with a varied input is the other form: the partner runs
+// the same word from a rewritten register, which the relation claims
+// gives the same result.
 #[allow(clippy::too_many_arguments)]
 fn run_metamorphic_checks(
     report: &mut FuzzReport,
@@ -400,9 +404,10 @@ fn run_metamorphic_checks(
         };
         let partner = match call_target(|| {
             let decoded = seeded::spu_decode(case.partner_word);
-            decoded.map(|instruction| run_once(&instruction, initial))
+            decoded.map(|instruction| run_once(&instruction, &case.partner_initial(initial)))
         }) {
             Ok(Ok(mut partner)) => {
+                case.settle_partner(initial, &mut partner.state.regs);
                 seeded::spu_partner(&mut partner.state);
                 partner
             }
