@@ -13,9 +13,9 @@ use crate::{decode, exec};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    ChannelStall, ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics,
-    ProblemStateError, RestartError, SignalNotifier, StallWake, StopRegisters, UnitStatus,
-    YieldReason,
+    BarrierKind, ChannelStall, ExecutionContext, ExecutionStepResult, ExecutionUnit,
+    LocalDiagnostics, ProblemStateError, RestartError, SignalNotifier, StallWake, StopRegisters,
+    UnitStatus, YieldReason,
 };
 use cellgov_ps3_abi::hw::spu;
 use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, SPU_STATUS_R};
@@ -111,6 +111,12 @@ impl ExecutionUnit for SpuExecutionUnit {
 
             match exec::execute(&insn, &mut self.state, self.id) {
                 SpuStepOutcome::Continue => {
+                    if ctx.trace_per_step() {
+                        if let Some(kind) = barrier_kind(&insn) {
+                            self.barriers
+                                .push(cellgov_exec::RetiredBarrier { pc: step_pc, kind });
+                        }
+                    }
                     self.state.advance_pc();
                 }
                 SpuStepOutcome::Branch => {}
@@ -336,6 +342,10 @@ impl ExecutionUnit for SpuExecutionUnit {
         self.stall
     }
 
+    fn drain_barriers(&mut self) -> Vec<cellgov_exec::RetiredBarrier> {
+        std::mem::take(&mut self.barriers)
+    }
+
     /// [CBEA p:60 s:7.5] a get moves main-storage bytes into local storage.
     ///
     /// Each byte's address wraps by the limit register, so a landing never
@@ -349,6 +359,17 @@ impl ExecutionUnit for SpuExecutionUnit {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&self.state.ls);
         Some(hasher.finish())
+    }
+}
+
+/// The barrier `insn` is, if it is one.
+fn barrier_kind(insn: &crate::instruction::SpuInstruction) -> Option<BarrierKind> {
+    use crate::instruction::SpuInstruction;
+    match insn {
+        SpuInstruction::Sync { c: false } => Some(BarrierKind::SpuSync),
+        SpuInstruction::Sync { c: true } => Some(BarrierKind::SpuSyncC),
+        SpuInstruction::Dsync => Some(BarrierKind::SpuDsync),
+        _ => None,
     }
 }
 

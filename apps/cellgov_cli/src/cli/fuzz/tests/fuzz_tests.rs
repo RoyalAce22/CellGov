@@ -97,6 +97,8 @@ fn quiet_progress_campaign_parses_and_dispatches() {
             "fuzz",
             "ppu-instruction",
             "--progress",
+            "--first",
+            "1",
             "--count",
             "1",
             "--workers",
@@ -475,7 +477,7 @@ fn selected_independent_references_are_replayed_and_checked() {
         Some(std::path::PathBuf::from("vector.json"))
     );
     let mut ppu_run =
-        parse(&["ppu-instruction", "--replay-case", "0", "--workers", "1"]).expect("PPU campaign");
+        parse(&["ppu-instruction", "--replay-case", "1", "--workers", "1"]).expect("PPU campaign");
     let FuzzCommand::PpuInstruction(ref mut args) = ppu_run.command else {
         panic!("PPU mode")
     };

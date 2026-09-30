@@ -611,12 +611,8 @@ fn decode_xl(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         16 => Ok(PpuInstruction::Bclr { bo, bi, link }),
         33 => Ok(PpuInstruction::Crnor { bt, ba, bb }),
         129 => Ok(PpuInstruction::Crandc { bt, ba, bb }),
-        // isync decodes as `ori 0,0,0` (a nop under the deterministic model).
-        150 => Ok(PpuInstruction::Ori {
-            ra: 0,
-            rs: 0,
-            imm: 0,
-        }),
+        // [PPC-Book2 p:22 s:3.3.1] isync XL-form XO 150; every operand field is reserved.
+        150 => Ok(PpuInstruction::Isync),
         193 => Ok(PpuInstruction::Crxor { bt, ba, bb }),
         225 => Ok(PpuInstruction::Crnand { bt, ba, bb }),
         257 => Ok(PpuInstruction::Crand { bt, ba, bb }),
@@ -923,20 +919,26 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         // visible effects and needs a real variant.
         1014 => return Ok(PpuInstruction::Dcbz { ra, rb }),
 
-        // Cache and memory-barrier hints. Under the deterministic
-        // single-unit model these all collapse to a nop:
+        // [PPC-Book2 p:26 s:3.3.3] sync / lwsync / ptesync (598): the L field at bits 9:10 selects the flavor, and L=3 is reserved.
+        // The decoder keeps a reserved L value and refuses no sync word.
+        598 => {
+            return Ok(PpuInstruction::Sync {
+                l: ((raw >> 21) & 3) as u8,
+            })
+        }
+        // [PPC-Book2 p:28 s:3.3.3] eieio (854).
+        854 => return Ok(PpuInstruction::Eieio),
+
+        // Cache hints. With no cache model these collapse to a nop:
         //   [PPC-Book2 p:21 s:3.2.2] dcbst (54), dcbf (86).
         //   [PPC-Book2 p:19 s:3.2.2] dcbt (278), dcbtst (246).
         //   [PPC-Book2 p:18 s:3.2.1] icbi (982).
-        //   [PPC-Book2 p:26 s:3.3.3] sync / lwsync / ptesync (598)
-        //                            (L-field selects the flavor).
-        //   [PPC-Book2 p:28 s:3.3.3] eieio (854).
         //   [AltiVec-PEM p:6-10 s:6.2] dst (342),
         //   [AltiVec-PEM p:6-12 s:6.2] dstst (374),
         //   [AltiVec-PEM p:6-9 s:6.2] dss (822): AltiVec data-stream
         //                           touch hints; no cache model means
         //                           no architectural side-effect.
-        54 | 86 | 246 | 278 | 342 | 374 | 598 | 822 | 854 | 982 => {
+        54 | 86 | 246 | 278 | 342 | 374 | 822 | 982 => {
             return Ok(PpuInstruction::Ori {
                 ra: 0,
                 rs: 0,

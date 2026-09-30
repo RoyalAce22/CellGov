@@ -64,17 +64,25 @@ pub const PPC_BCLR_XO: u32 = 16;
 /// [PPC-Book2 p:22 s:3.3.1] isync XL-form XO 150.
 pub const PPC_ISYNC_XO: u32 = 150;
 
-/// Extended opcodes under primary 31 of the storage-control hints and
-/// barriers: dcbst, dcbf, dcbtst, dcbt, dst, dstst, sync, dss, eieio
-/// and icbi, in ascending order.
+/// Extended opcode (XO) of `sync`, `lwsync` and `ptesync` under primary 31.
+///
+/// [PPC-Book2 p:26 s:3.3.3] sync 598.
+pub const PPC_SYNC_XO: u32 = 598;
+
+/// Extended opcode (XO) of `eieio` under primary 31.
+///
+/// [PPC-Book2 p:28 s:3.3.3] eieio 854.
+pub const PPC_EIEIO_XO: u32 = 854;
+
+/// Extended opcodes under primary 31 of the storage-control hints:
+/// dcbst, dcbf, dcbtst, dcbt, dst, dstst, dss and icbi, in ascending
+/// order.
 ///
 /// [PPC-Book2 p:21 s:3.2.2] dcbst 54 and dcbf 86.
 /// [PPC-Book2 p:19 s:3.2.2] dcbt 278 and dcbtst 246.
 /// [PPC-Book2 p:18 s:3.2.1] icbi 982.
-/// [PPC-Book2 p:26 s:3.3.3] sync 598.
-/// [PPC-Book2 p:28 s:3.3.3] eieio 854.
 /// [AltiVec-PEM p:6-10 s:6.2] dst 342; [AltiVec-PEM p:6-12 s:6.2] dstst 374; [AltiVec-PEM p:6-9 s:6.2] dss 822.
-pub const PPC_STORAGE_HINT_XOS: [u32; 10] = [54, 86, 246, 278, 342, 374, 598, 822, 854, 982];
+pub const PPC_STORAGE_HINT_XOS: [u32; 8] = [54, 86, 246, 278, 342, 374, 822, 982];
 
 /// High-order fraction bit that distinguishes a QNaN from an SNaN in
 /// double format; setting it quiets a propagated SNaN.

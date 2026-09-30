@@ -218,6 +218,12 @@ fn dump_trace(result: &ScenarioResult) -> Result<(), CommandError> {
                     unit.raw()
                 );
             }
+            TraceRecord::Barrier { unit, pc, kind } => {
+                println!(
+                    "{i:4}  Barrier            unit={} pc=0x{pc:016x} kind={kind:?}",
+                    unit.raw()
+                );
+            }
         }
     }
     println!("--- {count} records total ---");

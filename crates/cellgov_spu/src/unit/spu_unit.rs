@@ -33,6 +33,11 @@ pub struct SpuExecutionUnit {
     /// The channel access the last step stalled on; cleared at each
     /// step entry, since the woken step runs the access again.
     pub(super) stall: Option<ChannelStall>,
+    /// Barrier instructions retired since the last drain.
+    ///
+    /// The unit records a barrier only while the context asks for
+    /// per-step trace data.
+    pub(super) barriers: Vec<cellgov_exec::RetiredBarrier>,
 }
 
 impl SpuExecutionUnit {
@@ -43,6 +48,7 @@ impl SpuExecutionUnit {
             state: state::SpuState::new(),
             status: UnitStatus::Runnable,
             stall: None,
+            barriers: Vec::new(),
         }
     }
 

@@ -28,3 +28,7 @@ mod tap_tests;
 #[cfg(test)]
 #[path = "tests/clock_read_tests.rs"]
 mod clock_read_tests;
+
+#[cfg(test)]
+#[path = "tests/barrier_tests.rs"]
+mod barrier_tests;

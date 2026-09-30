@@ -125,8 +125,8 @@ architecture allows: the one a program that places its barriers
 correctly sees. `sync`, `sync.c` and `dsync` decode as their own
 instructions and order nothing further. A recompiled program that
 depends on a store being fetched without a `sync` is therefore not
-caught by an SPU run here; the barrier locations stay in the
-instruction stream.
+caught by an SPU run here; a traced run records each barrier's
+location as a `Barrier` trace record.
 
 ## Predecoded instruction shadow
 

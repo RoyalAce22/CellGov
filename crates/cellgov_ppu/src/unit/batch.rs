@@ -20,6 +20,7 @@ pub(super) struct BatchEntry {
     pub(super) snapshot: Option<state::PpuState>,
     pub(super) hashes: usize,
     pub(super) fulls: usize,
+    pub(super) barriers: usize,
     pub(super) retired: u64,
 }
 
@@ -87,6 +88,7 @@ impl PpuExecutionUnit {
             snapshot: (max_budget > 1).then(|| self.state.clone()),
             hashes: self.per_step_hashes.len(),
             fulls: self.per_step_full_states.len(),
+            barriers: self.barriers.len(),
             retired: self.retirement_counter,
         };
 
@@ -318,6 +320,10 @@ impl PpuExecutionUnit {
             if ctx.trace_per_step() {
                 self.per_step_hashes
                     .push((step_pc, self.state.state_hash()));
+                if let Some(kind) = insn.barrier_kind() {
+                    self.barriers
+                        .push(cellgov_exec::RetiredBarrier { pc: step_pc, kind });
+                }
             }
 
             if let Some((lo, hi)) = self.full_state_window {

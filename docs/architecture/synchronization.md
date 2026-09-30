@@ -236,9 +236,14 @@ the invariant per path. The sweep fires from three paths:
 
 **Scope and bounds.** The reservation table and local registers
 are the full contention model. Memory-barrier instructions
-(`sync`, `lwsync`, `eieio`, `isync`) are not modelled; the
-commit pipeline's ordering at epoch boundaries substitutes for
-them. [Schedule exploration](schedule_exploration.md) over
+(`sync`, `lwsync`, `ptesync`, `eieio`, `isync`, and the SPU's
+`sync`, `sync.c` and `dsync`) decode as their own instructions and
+change no result: each unit runs its accesses in program order and
+each step commits as one batch, which orders more than any barrier
+does. A traced run records each retired barrier as a `Barrier`
+record (unit, address, kind), so a consumer that runs the program
+on reordering hardware has the location of every barrier
+instruction the run retired. [Schedule exploration](schedule_exploration.md) over
 contention workloads is conservative:
 `StepFootprint::reservation_lines` marks a step dependent on any
 other step whose writes cover the reserved line.

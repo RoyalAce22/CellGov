@@ -109,6 +109,39 @@ fn effect_emitted_discriminants_locked() {
 }
 
 #[test]
+fn barrier_kind_discriminants_locked() {
+    use strum::VariantArray;
+    assert_eq!(TracedBarrierKind::Sync as u8, 0);
+    assert_eq!(TracedBarrierKind::Lwsync as u8, 1);
+    assert_eq!(TracedBarrierKind::Ptesync as u8, 2);
+    assert_eq!(TracedBarrierKind::SyncL3 as u8, 3);
+    assert_eq!(TracedBarrierKind::Eieio as u8, 4);
+    assert_eq!(TracedBarrierKind::Isync as u8, 5);
+    assert_eq!(TracedBarrierKind::SpuSync as u8, 6);
+    assert_eq!(TracedBarrierKind::SpuSyncC as u8, 7);
+    assert_eq!(TracedBarrierKind::SpuDsync as u8, 8);
+    assert_eq!(TracedBarrierKind::VARIANTS.len(), 9);
+}
+
+#[test]
+fn a_barrier_record_round_trips_and_an_unknown_kind_is_refused() {
+    let record = TraceRecord::Barrier {
+        unit: UnitId::new(7),
+        pc: 0x0001_0204,
+        kind: TracedBarrierKind::Eieio,
+    };
+    let mut buf = Vec::new();
+    record.encode(&mut buf);
+    assert_eq!(TraceRecord::decode(&buf), Ok((record, buf.len())));
+    let last = buf.len() - 1;
+    buf[last] = 99;
+    assert_eq!(
+        TraceRecord::decode(&buf),
+        Err(DecodeError::UnknownBarrierKind(99))
+    );
+}
+
+#[test]
 fn unknown_effect_kind_returns_error() {
     let mut buf = vec![TAG_EFFECT_EMITTED];
     write_u64(&mut buf, 0);

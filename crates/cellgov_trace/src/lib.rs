@@ -25,8 +25,8 @@ pub use hash::StateHash;
 pub use level::TraceLevel;
 pub use reader::TraceReader;
 pub use record::{
-    DecodeError, HashCheckpointKind, HostWriter, TraceRecord, TracedBlockReason, TracedEffectKind,
-    TracedInvariantBreakReason, TracedSyscallDisposition, TracedWakeReason, TracedYieldReason,
-    TRACE_FORMAT_VERSION,
+    DecodeError, HashCheckpointKind, HostWriter, TraceRecord, TracedBarrierKind, TracedBlockReason,
+    TracedEffectKind, TracedInvariantBreakReason, TracedSyscallDisposition, TracedWakeReason,
+    TracedYieldReason, TRACE_FORMAT_VERSION,
 };
 pub use writer::TraceWriter;

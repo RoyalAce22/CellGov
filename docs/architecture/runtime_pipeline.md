@@ -194,6 +194,8 @@ The full vocabulary of guest-visible operations:
     resume address of a unit its own instruction stopped);
   - two per-step variants for the divergence trace:
     `PpuStateHash`, `PpuStateFull`;
+  - `Barrier` (unit, address, kind), one per barrier instruction a
+    unit retired, in retirement order;
   - one diagnostic side-channel for host-side invariant breaks:
     `HostInvariantBreak`;
   - `SyscallEntered`, emitted before `Lv2Host::dispatch` runs, and
@@ -216,8 +218,10 @@ trace overhead, `DeterminismCheck` pays state-hash overhead at
 commit boundaries, and `FullTrace` pays both.
 
 The per-call `ExecutionContext::trace_per_step` flag gates the two
-per-step variants; `RuntimeMode::FullTrace` and
-`RuntimeMode::DeterminismCheck` set it, `FaultDriven` does not.
+per-step variants and the `Barrier` records; `RuntimeMode::FullTrace`
+and `RuntimeMode::DeterminismCheck` set it, `FaultDriven` does not.
+The runtime drains a step's barriers through
+`ExecutionUnit::drain_barriers`.
 When set, the unit emits one `PpuStateHash` (25 bytes: step + pc +
 64-bit Multilinear-128 hash of GPR + LR + CTR + XER + CR +
 reservation, `cellgov_ppu::multilinear`) per retired instruction. The fingerprint input set is

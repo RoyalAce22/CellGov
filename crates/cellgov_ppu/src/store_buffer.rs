@@ -271,7 +271,10 @@ impl StoreBuffer {
     /// for plain entries, `ConditionalStore` for successful
     /// `stwcx`/`stdcx` -- and clear the buffer.
     ///
-    /// [PPC-Book2 p:28 s:3.3 eieio] block-boundary flush models the memory-barrier ordering of Load/Store accesses with respect to other processors.
+    /// [PPC-Book2 p:28 s:3.3.3] a memory barrier orders one processor's stores as other processors see them.
+    /// The flush runs at the block boundary. The step's commit then applies
+    /// the stores as one batch in program order. Thus no barrier inside the
+    /// block changes what another unit sees.
     ///
     /// # Panics
     ///

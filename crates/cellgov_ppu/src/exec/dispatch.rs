@@ -282,5 +282,15 @@ pub fn execute(
 
         // [PPC-Book1 p:26 s:2.4.2] sc surfaces LEV to the system; service dispatch is runtime-defined.
         PpuInstruction::Sc { lev } => ExecuteVerdict::Syscall { lev },
+
+        // One unit's accesses run in program order and each step's
+        // stores commit as one batch, so no barrier changes a result.
+        // The unit records where each barrier retires.
+        // [PPC-Book2 p:26 s:3.3.3] a memory barrier orders storage accesses.
+        // [PPC-Book2 p:27 s:3.3.3] sync alters no special register; [PPC-Book2 p:28 s:3.3.3] nor does eieio.
+        // [PPC-Book2 p:22 s:3.3.1] isync alters no special register.
+        PpuInstruction::Sync { .. } | PpuInstruction::Eieio | PpuInstruction::Isync => {
+            ExecuteVerdict::Continue
+        }
     }
 }

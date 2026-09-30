@@ -6,7 +6,7 @@ use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 
 use super::error::DecodeError;
 use super::reasons::{
-    HashCheckpointKind, HostWriter, TracedBlockReason, TracedEffectKind,
+    HashCheckpointKind, HostWriter, TracedBarrierKind, TracedBlockReason, TracedEffectKind,
     TracedInvariantBreakReason, TracedSyscallDisposition, TracedWakeReason, TracedYieldReason,
 };
 use super::trace_record::{TraceRecord, TRACE_FORMAT_VERSION};
@@ -28,6 +28,7 @@ pub(super) const TAG_RUN_IDENTITY: u8 = 0x0d;
 pub(super) const TAG_HOST_WRITE: u8 = 0x0e;
 pub(super) const TAG_STATE_HASH_SCHEME: u8 = 0x0f;
 pub(super) const TAG_UNIT_STOPPED: u8 = 0x10;
+pub(super) const TAG_BARRIER: u8 = 0x11;
 
 impl TraceRecord {
     /// Append the binary encoding to `buf`.
@@ -192,6 +193,11 @@ impl TraceRecord {
                 write_u64(buf, unit.raw());
                 write_u32(buf, *status);
                 write_u32(buf, *npc);
+            }
+            TraceRecord::Barrier { unit, pc, kind } => {
+                write_u64(buf, unit.raw());
+                write_u64(buf, *pc);
+                buf.push(u8::from(*kind));
             }
         }
         debug_assert_eq!(
@@ -419,6 +425,12 @@ impl TraceRecord {
                 let status = read_u32(bytes, &mut pos)?;
                 let npc = read_u32(bytes, &mut pos)?;
                 TraceRecord::UnitStopped { unit, status, npc }
+            }
+            TAG_BARRIER => {
+                let unit = UnitId::new(read_u64(bytes, &mut pos)?);
+                let pc = read_u64(bytes, &mut pos)?;
+                let kind = TracedBarrierKind::try_from(read_u8(bytes, &mut pos)?)?;
+                TraceRecord::Barrier { unit, pc, kind }
             }
             other => return Err(DecodeError::UnknownTag(other)),
         };

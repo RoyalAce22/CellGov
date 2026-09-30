@@ -14,7 +14,7 @@ mod trace_record;
 
 pub use error::DecodeError;
 pub use reasons::{
-    HashCheckpointKind, HostWriter, TracedBlockReason, TracedEffectKind,
+    HashCheckpointKind, HostWriter, TracedBarrierKind, TracedBlockReason, TracedEffectKind,
     TracedInvariantBreakReason, TracedSyscallDisposition, TracedWakeReason, TracedYieldReason,
 };
 pub use trace_record::{TraceRecord, TRACE_FORMAT_VERSION};

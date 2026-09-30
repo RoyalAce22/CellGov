@@ -57,6 +57,10 @@ impl ExecutionUnit for PpuExecutionUnit {
         std::mem::take(&mut self.per_step_full_states)
     }
 
+    fn drain_barriers(&mut self) -> Vec<cellgov_exec::RetiredBarrier> {
+        std::mem::take(&mut self.barriers)
+    }
+
     fn drain_profile_insns(&mut self) -> Vec<(&'static str, u64)> {
         let map = std::mem::take(&mut self.profile_insns);
         let mut v: Vec<_> = map.into_iter().collect();

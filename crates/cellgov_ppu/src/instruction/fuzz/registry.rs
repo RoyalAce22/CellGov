@@ -159,8 +159,8 @@ fn retain_generation_word(raw: u32, words: &mut BTreeMap<PpuFuzzKind, u32>) {
     let descriptor = instruction.fuzz_descriptor(raw);
     if descriptor.form != PpuEncodingForm::Synthetic && generation_operands_are_valid(instruction) {
         let canonical = words.entry(descriptor.kind).or_insert(raw);
-        // [PPC-Book1 p:66 s:3.3.11] ori is primary-24 D-form. Decoder
-        // aliases such as isync and cache hints must not hide its operands.
+        // [PPC-Book1 p:66 s:3.3.11] ori is primary-24 D-form. The cache
+        // hints decode as ori and must not hide its operands.
         if descriptor.kind == PpuFuzzKind::Ordinary(PpuInstructionKind::Ori) && raw >> 26 == 24 {
             *canonical = raw;
         }

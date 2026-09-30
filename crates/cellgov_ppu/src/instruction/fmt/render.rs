@@ -746,5 +746,16 @@ pub(super) fn render(
                 op(f, "sc", format_args!("{lev}"))
             }
         }
+
+        // -- Storage ordering --
+        // [PPC-Book2 p:27 s:3.3.3] the extended mnemonics sync, lwsync and ptesync name L = 0, 1 and 2.
+        I::Sync { l } => match l {
+            0 => op0(f, "sync"),
+            1 => op0(f, "lwsync"),
+            2 => op0(f, "ptesync"),
+            _ => op(f, "sync", format_args!("{l}")),
+        },
+        I::Eieio => op0(f, "eieio"),
+        I::Isync => op0(f, "isync"),
     }
 }

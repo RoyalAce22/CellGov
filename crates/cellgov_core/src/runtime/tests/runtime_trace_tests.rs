@@ -1009,3 +1009,88 @@ fn fault_driven_mode_delivers_syscall_returns_without_tracing_them() {
         "the value still reaches the caller"
     );
 }
+
+/// A unit that retires one barrier per step and reports it.
+#[derive(Clone)]
+struct BarrierUnit {
+    id: UnitId,
+    done: bool,
+    pending: Vec<cellgov_exec::RetiredBarrier>,
+}
+
+impl ExecutionUnit for BarrierUnit {
+    type Snapshot = ();
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+    fn status(&self) -> UnitStatus {
+        if self.done {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        _effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        self.done = true;
+        self.pending.push(cellgov_exec::RetiredBarrier {
+            pc: 0x40,
+            kind: cellgov_exec::BarrierKind::Lwsync,
+        });
+        ExecutionStepResult {
+            yield_reason: YieldReason::Finished,
+            consumed_cost: InstructionCost::new(budget.raw()),
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+    fn drain_barriers(&mut self) -> Vec<cellgov_exec::RetiredBarrier> {
+        std::mem::take(&mut self.pending)
+    }
+    fn snapshot(&self) {}
+}
+
+/// The barrier records one step of a [`BarrierUnit`] leaves under `mode`.
+fn barrier_records(mode: crate::runtime::types::RuntimeMode) -> Vec<cellgov_trace::TraceRecord> {
+    use cellgov_trace::{TraceReader, TraceRecord};
+    let mut rt = build(16, 1, 100);
+    rt.set_mode(mode);
+    rt.registry_mut().register_with(|id| BarrierUnit {
+        id,
+        done: false,
+        pending: Vec::new(),
+    });
+    rt.step().unwrap();
+    let bytes = rt.trace().bytes().to_vec();
+    TraceReader::new(&bytes)
+        .map(|r| r.expect("decode"))
+        .filter(|r| matches!(r, TraceRecord::Barrier { .. }))
+        .collect()
+}
+
+#[test]
+fn a_traced_step_records_each_barrier_its_unit_retired() {
+    use crate::runtime::types::RuntimeMode;
+    use cellgov_trace::{TraceRecord, TracedBarrierKind};
+    let expected = vec![TraceRecord::Barrier {
+        unit: UnitId::new(0),
+        pc: 0x40,
+        kind: TracedBarrierKind::Lwsync,
+    }];
+    assert_eq!(barrier_records(RuntimeMode::FullTrace), expected);
+    assert_eq!(barrier_records(RuntimeMode::DeterminismCheck), expected);
+    assert_eq!(barrier_records(RuntimeMode::FaultDriven), Vec::new());
+}
+
+#[test]
+fn the_barrier_bridge_keeps_every_kind_value() {
+    use crate::runtime::trace_bridge::traced_barrier_kind;
+    for kind in cellgov_exec::BarrierKind::VARIANTS {
+        assert_eq!(u8::from(traced_barrier_kind(kind)), kind as u8, "{kind:?}");
+    }
+}

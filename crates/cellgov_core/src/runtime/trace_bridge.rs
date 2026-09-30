@@ -1,11 +1,13 @@
 //! Bridges runtime effect/yield enums onto their `cellgov_trace` twins
 //! and exposes a read-only `MemoryView` to `Lv2Host::dispatch`.
 
-use cellgov_exec::YieldReason;
+use cellgov_exec::{BarrierKind, YieldReason};
 use cellgov_lv2::{InvariantBreakReason, Lv2Runtime};
 use cellgov_mem::GuestMemory;
 use cellgov_time::GuestTicks;
-use cellgov_trace::{TracedEffectKind, TracedInvariantBreakReason, TracedYieldReason};
+use cellgov_trace::{
+    TracedBarrierKind, TracedEffectKind, TracedInvariantBreakReason, TracedYieldReason,
+};
 
 pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKind {
     use cellgov_effects::Effect;
@@ -27,6 +29,20 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
         Effect::ClockRead { .. } => TracedEffectKind::ClockRead,
         Effect::MailboxPop { .. } => TracedEffectKind::MailboxPop,
         Effect::MfcInvalidCommand { .. } => TracedEffectKind::MfcInvalidCommand,
+    }
+}
+
+pub(super) fn traced_barrier_kind(kind: BarrierKind) -> TracedBarrierKind {
+    match kind {
+        BarrierKind::Sync => TracedBarrierKind::Sync,
+        BarrierKind::Lwsync => TracedBarrierKind::Lwsync,
+        BarrierKind::Ptesync => TracedBarrierKind::Ptesync,
+        BarrierKind::SyncL3 => TracedBarrierKind::SyncL3,
+        BarrierKind::Eieio => TracedBarrierKind::Eieio,
+        BarrierKind::Isync => TracedBarrierKind::Isync,
+        BarrierKind::SpuSync => TracedBarrierKind::SpuSync,
+        BarrierKind::SpuSyncC => TracedBarrierKind::SpuSyncC,
+        BarrierKind::SpuDsync => TracedBarrierKind::SpuDsync,
     }
 }
 

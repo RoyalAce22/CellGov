@@ -601,6 +601,9 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
         | I::CmpwBc { .. }
         | I::Consumed
         | I::Dcbz { .. }
-        | I::Sc { .. } => None,
+        | I::Sc { .. }
+        | I::Sync { .. }
+        | I::Eieio
+        | I::Isync => None,
     }
 }

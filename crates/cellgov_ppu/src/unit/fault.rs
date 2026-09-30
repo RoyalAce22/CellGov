@@ -44,8 +44,9 @@ impl PpuExecutionUnit {
     /// the batch entry, and mark the unit faulted.
     ///
     /// Retirements discarded by the rollback never reach the trace
-    /// stream: their `PpuStateHash` / `PpuStateFull` entries are
-    /// truncated and `retirement_counter` is restored.
+    /// stream: the rollback truncates their `PpuStateHash` /
+    /// `PpuStateFull` entries and barrier records, and restores
+    /// `retirement_counter`.
     fn discard_batch(&mut self, entry: &BatchEntry, effects: &mut Vec<Effect>) {
         if let Some(snap) = entry.snapshot.as_ref() {
             self.state = snap.clone();
@@ -55,6 +56,7 @@ impl PpuExecutionUnit {
         effects.clear();
         self.per_step_hashes.truncate(entry.hashes);
         self.per_step_full_states.truncate(entry.fulls);
+        self.barriers.truncate(entry.barriers);
         self.retirement_counter = entry.retired;
         self.status = UnitStatus::Faulted;
     }

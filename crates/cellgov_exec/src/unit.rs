@@ -119,6 +119,16 @@ pub trait ExecutionUnit {
         Vec::new()
     }
 
+    /// Drain the barrier instructions retired during the most recent
+    /// `run_until_yield`, in retirement order. The default returns an
+    /// empty vec and allocates nothing.
+    ///
+    /// A unit collects them only when
+    /// [`ExecutionContext::trace_per_step`] is true.
+    fn drain_barriers(&mut self) -> Vec<crate::RetiredBarrier> {
+        Vec::new()
+    }
+
     /// Drain instruction-variant frequency data from profiling mode.
     fn drain_profile_insns(&mut self) -> Vec<(&'static str, u64)> {
         Vec::new()

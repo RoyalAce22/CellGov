@@ -193,6 +193,37 @@ pub enum HostWriter {
     Placement = 7,
 }
 
+/// Mirror of `cellgov_exec::BarrierKind` for the trace stream.
+///
+/// The discriminants are the wire encoding and equal the source enum's,
+/// so a new kind goes at the end of the list.
+/// `cellgov_core::runtime::trace_bridge` pairs the two enums by name.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
+)]
+#[repr(u8)]
+#[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_barrier_kind))]
+pub enum TracedBarrierKind {
+    /// PPU `sync` (L=0).
+    Sync = 0,
+    /// PPU `lwsync`.
+    Lwsync = 1,
+    /// PPU `ptesync`.
+    Ptesync = 2,
+    /// PPU `sync` with the reserved L value 3.
+    SyncL3 = 3,
+    /// PPU `eieio`.
+    Eieio = 4,
+    /// PPU `isync`.
+    Isync = 5,
+    /// SPU `sync`.
+    SpuSync = 6,
+    /// SPU `sync.c`.
+    SpuSyncC = 7,
+    /// SPU `dsync`.
+    SpuDsync = 8,
+}
+
 /// Which dispatch arm a [`TraceRecord::SyscallEntered`](super::TraceRecord::SyscallEntered) record was
 /// classified into. Pure function of `(lev, num, args)`; derived by
 /// the runtime before `Lv2Host::dispatch` runs.

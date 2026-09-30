@@ -21,6 +21,7 @@
     )
 )]
 
+pub mod barrier;
 pub mod context;
 pub mod fake_isa;
 pub mod operand;
@@ -31,6 +32,7 @@ pub mod stop;
 pub mod unit;
 pub mod yield_reason;
 
+pub use barrier::{BarrierKind, RetiredBarrier};
 pub use context::ExecutionContext;
 pub use fake_isa::{FakeIsaUnit, FakeOp};
 pub use problem_state::{ProblemStateError, SignalNotifier};

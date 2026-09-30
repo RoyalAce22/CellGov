@@ -51,6 +51,12 @@ pub struct PpuExecutionUnit {
     /// Increments on successful retirement only.
     pub(super) retirement_counter: u64,
     pub(super) per_step_full_states: Vec<(u64, u64, cellgov_exec::PpuFingerprint)>,
+    /// Barrier instructions retired since the last drain.
+    ///
+    /// The unit records a barrier only while the context asks for
+    /// per-step trace data. A faulted batch truncates this list to its
+    /// length at batch entry.
+    pub(super) barriers: Vec<cellgov_exec::RetiredBarrier>,
     pub(super) instruction_shadow: Option<shadow::PredecodedShadow>,
     pub(super) shadow_hits: u64,
     pub(super) shadow_misses: u64,
@@ -101,6 +107,7 @@ impl PpuExecutionUnit {
             full_state_window: None,
             retirement_counter: 0,
             per_step_full_states: Vec::new(),
+            barriers: Vec::new(),
             instruction_shadow: None,
             shadow_hits: 0,
             shadow_misses: 0,

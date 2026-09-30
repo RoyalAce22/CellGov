@@ -39,6 +39,9 @@ pub enum DecodeError {
     /// Host-writer byte is not a known variant.
     #[error("unknown host writer 0x{0:02x}")]
     UnknownHostWriter(u8),
+    /// Barrier-kind byte is not a known variant.
+    #[error("unknown barrier kind 0x{0:02x}")]
+    UnknownBarrierKind(u8),
     /// The header names a trace format other than [`TRACE_FORMAT_VERSION`].
     ///
     /// Each format fixes its own header width, so the decoder cannot
@@ -78,5 +81,9 @@ impl DecodeError {
 
     pub(super) fn unknown_host_writer(v: u8) -> Self {
         Self::UnknownHostWriter(v)
+    }
+
+    pub(super) fn unknown_barrier_kind(v: u8) -> Self {
+        Self::UnknownBarrierKind(v)
     }
 }

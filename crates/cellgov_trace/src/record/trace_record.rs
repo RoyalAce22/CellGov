@@ -6,13 +6,13 @@ use cellgov_event::UnitId;
 use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 
 use super::codec::{
-    TAG_COMMIT_APPLIED, TAG_EFFECT_EMITTED, TAG_HOST_INVARIANT_BREAK, TAG_HOST_WRITE,
+    TAG_BARRIER, TAG_COMMIT_APPLIED, TAG_EFFECT_EMITTED, TAG_HOST_INVARIANT_BREAK, TAG_HOST_WRITE,
     TAG_PPU_STATE_FULL, TAG_PPU_STATE_HASH, TAG_RESERVED_REGION_READ, TAG_RUN_IDENTITY,
     TAG_STATE_HASH_CHECKPOINT, TAG_STATE_HASH_SCHEME, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED,
     TAG_SYSCALL_RETURNED, TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_STOPPED, TAG_UNIT_WOKEN,
 };
 use super::reasons::{
-    HashCheckpointKind, HostWriter, TracedBlockReason, TracedEffectKind,
+    HashCheckpointKind, HostWriter, TracedBarrierKind, TracedBlockReason, TracedEffectKind,
     TracedInvariantBreakReason, TracedSyscallDisposition, TracedWakeReason, TracedYieldReason,
 };
 
@@ -250,6 +250,17 @@ pub enum TraceRecord {
         /// The `SPU_NPC` word: the address the unit resumes at.
         npc: u32,
     },
+    /// A barrier instruction a unit retired, in retirement order among
+    /// that unit's barriers. The record names where the program orders
+    /// its storage accesses; the model gives the barrier no effect.
+    Barrier {
+        /// Unit that retired the barrier.
+        unit: UnitId,
+        /// Guest address of the barrier instruction.
+        pc: u64,
+        /// Which barrier it is.
+        kind: TracedBarrierKind,
+    },
 }
 
 impl TraceRecord {
@@ -273,6 +284,7 @@ impl TraceRecord {
             TraceRecord::HostWrite { .. } => TAG_HOST_WRITE,
             TraceRecord::StateHashScheme { .. } => TAG_STATE_HASH_SCHEME,
             TraceRecord::UnitStopped { .. } => TAG_UNIT_STOPPED,
+            TraceRecord::Barrier { .. } => TAG_BARRIER,
         }
     }
 
@@ -297,6 +309,7 @@ impl TraceRecord {
             TAG_HOST_WRITE => 1 + 1 + 4 + 8 + 4 + 4,
             TAG_STATE_HASH_SCHEME => 1 + 8 + 8,
             TAG_UNIT_STOPPED => 1 + 8 + 4 + 4,
+            TAG_BARRIER => 1 + 8 + 8 + 1,
             _ => return None,
         })
     }
@@ -314,7 +327,7 @@ impl TraceRecord {
             TraceRecord::StateHashCheckpoint { .. }
             | TraceRecord::PpuStateHash { .. }
             | TraceRecord::PpuStateFull { .. } => TraceLevel::Hashes,
-            TraceRecord::EffectEmitted { .. } => TraceLevel::Effects,
+            TraceRecord::EffectEmitted { .. } | TraceRecord::Barrier { .. } => TraceLevel::Effects,
             TraceRecord::HostInvariantBreak { .. } => TraceLevel::Scheduling,
             TraceRecord::SyscallEntered { .. } => TraceLevel::Scheduling,
             TraceRecord::ReservedRegionRead { .. } => TraceLevel::Hashes,

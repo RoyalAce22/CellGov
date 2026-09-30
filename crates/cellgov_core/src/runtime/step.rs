@@ -7,6 +7,7 @@ use cellgov_time::GuestTicks;
 use cellgov_trace::TraceRecord;
 
 use crate::runtime::state::Runtime;
+use crate::runtime::trace_bridge::traced_barrier_kind;
 use crate::runtime::trace_bridge::traced_effect_kind;
 use crate::runtime::trace_bridge::traced_yield_reason;
 use crate::runtime::types::{RuntimeMode, RuntimeStep, StepError};
@@ -139,7 +140,7 @@ impl Runtime {
         effects_buf.clear();
         let mailbox_read = core::cell::Cell::new(false);
         let own_mailbox = cellgov_sync::MailboxId::new(unit_id.raw());
-        let (result, retired_hashes, retired_full) = {
+        let (result, retired_hashes, retired_full, barriers) = {
             let unit_mem =
                 crate::runtime::spaces::resolve_unit_memory(&self.memory, &self.spaces, unit_id);
             let ctx = if let Some(code) = syscall_ret {
@@ -181,15 +182,17 @@ impl Runtime {
                 .get_mut(unit_id)
                 .expect("scheduler returned an id that is not in the registry");
             let res = unit.run_until_yield(self.budget_per_step, &ctx, &mut effects_buf);
-            let (retired_hashes, retired_full) = if self.mode == RuntimeMode::FaultDriven {
-                (Vec::new(), Vec::new())
+            let (retired_hashes, retired_full, barriers) = if self.mode == RuntimeMode::FaultDriven
+            {
+                (Vec::new(), Vec::new(), Vec::new())
             } else {
                 (
                     unit.drain_retired_state_hashes(),
                     unit.drain_retired_state_full(),
+                    unit.drain_barriers(),
                 )
             };
-            (res, retired_hashes, retired_full)
+            (res, retired_hashes, retired_full, barriers)
         };
         if mailbox_read.get() && self.mailbox_registry.get(own_mailbox).is_some() {
             self.last_mailbox_read = Some(own_mailbox);
@@ -228,6 +231,13 @@ impl Runtime {
                 xer,
                 cr,
                 reservation_line,
+            });
+        }
+        for barrier in barriers {
+            self.trace.record(&TraceRecord::Barrier {
+                unit: unit_id,
+                pc: barrier.pc,
+                kind: traced_barrier_kind(barrier.kind),
             });
         }
 

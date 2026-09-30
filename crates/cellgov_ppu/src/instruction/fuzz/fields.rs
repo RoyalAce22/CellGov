@@ -119,6 +119,8 @@ fn field_candidates(descriptor: PpuFuzzDescriptor) -> Vec<(u32, PpuOperandClass)
             K::Ordinary(I::Mfocrf | I::Mtcrf | I::Mtocrf) => {
                 vec![(0x000f_f000, C::Selector), (BITS_21_25, C::Register)]
             }
+            // [PPC-Book2 p:26 s:3.3.3] sync's L field selects the barrier.
+            K::Ordinary(I::Sync) => vec![(0x0060_0000, C::Selector)],
             _ => vec![
                 (BIT_0, C::Flag),
                 (0x0000_0400, C::Flag),

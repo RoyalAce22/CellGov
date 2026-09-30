@@ -1,5 +1,5 @@
-//! The three SPU barriers decode apart, and the interpreter shows a
-//! store to the next fetch without a `sync`.
+//! The three SPU barriers decode apart, a traced step records each one,
+//! and the interpreter shows a store to the next fetch without a `sync`.
 
 use super::*;
 use crate::decode::decode;
@@ -57,4 +57,37 @@ fn run_stored_instruction(after_store: u32) {
         "0x{after_store:08x}"
     );
     assert_eq!(unit.state().reg_word(3), 9, "0x{after_store:08x}");
+}
+
+#[test]
+fn a_traced_step_records_each_barrier_by_kind() {
+    use cellgov_exec::{BarrierKind, ExecutionContext, ExecutionUnit, RetiredBarrier};
+    use cellgov_mem::GuestMemory;
+    use cellgov_time::Budget;
+
+    const SYNC: u32 = 0x002 << 21;
+    const SYNC_C: u32 = (0x002 << 21) | 0x0010_0000;
+    const DSYNC: u32 = 0x003 << 21;
+    const NOP: u32 = 0x201 << 21;
+    let program = [SYNC, NOP, SYNC_C, DSYNC];
+    let run = |per_step: bool| {
+        let mut unit = crate::SpuExecutionUnit::new(UnitId::new(1));
+        for (i, word) in program.iter().enumerate() {
+            unit.state_mut().ls[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+        }
+        let mem = GuestMemory::new(0x1000);
+        let ctx = ExecutionContext::new(&mem).with_trace_per_step(per_step);
+        unit.run_until_yield(Budget::new(4), &ctx, &mut Vec::new());
+        unit.drain_barriers()
+    };
+    let barrier = |pc, kind| RetiredBarrier { pc, kind };
+    assert_eq!(
+        run(true),
+        [
+            barrier(0, BarrierKind::SpuSync),
+            barrier(8, BarrierKind::SpuSyncC),
+            barrier(12, BarrierKind::SpuDsync),
+        ]
+    );
+    assert!(run(false).is_empty());
 }

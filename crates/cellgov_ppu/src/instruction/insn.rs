@@ -1561,6 +1561,30 @@ pub enum PpuInstruction {
     Sc {
         lev: u8,
     },
+
+    // -- Storage ordering --
+    // The model executes these as `nop` and records where each one
+    // retires; see `barrier_kind`.
+    /// Synchronize.
+    ///
+    /// The L field selects the barrier:
+    /// - 0: heavyweight `sync`.
+    /// - 1: `lwsync`.
+    /// - 2: `ptesync`.
+    /// - 3: reserved. The decoder keeps this value.
+    ///
+    /// [PPC-Book2 p:26 s:3.3.3] sync X-form, with the L field at bits 9:10.
+    Sync {
+        l: u8,
+    },
+    /// Enforce in-order execution of I/O.
+    ///
+    /// [PPC-Book2 p:28 s:3.3.3] eieio X-form.
+    Eieio,
+    /// Instruction synchronize.
+    ///
+    /// [PPC-Book2 p:22 s:3.3.1] isync XL-form.
+    Isync,
 }
 
 impl PpuInstruction {
@@ -1797,7 +1821,21 @@ impl PpuInstruction {
             | PpuInstruction::Srdi { .. }
             | PpuInstruction::Consumed
             | PpuInstruction::Dcbz { .. }
-            | PpuInstruction::Sc { .. } => false,
+            | PpuInstruction::Sc { .. }
+            | PpuInstruction::Sync { .. }
+            | PpuInstruction::Eieio
+            | PpuInstruction::Isync => false,
+        }
+    }
+
+    /// The barrier this instruction is, if it is one.
+    pub const fn barrier_kind(&self) -> Option<cellgov_exec::BarrierKind> {
+        use cellgov_exec::BarrierKind;
+        match self {
+            PpuInstruction::Sync { l } => Some(BarrierKind::ppu_sync(*l)),
+            PpuInstruction::Eieio => Some(BarrierKind::Eieio),
+            PpuInstruction::Isync => Some(BarrierKind::Isync),
+            _ => None,
         }
     }
 

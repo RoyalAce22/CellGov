@@ -475,6 +475,9 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::CmpwBc
         | PpuInstructionKind::Consumed
         | PpuInstructionKind::Dcbz
-        | PpuInstructionKind::Sc => {}
+        | PpuInstructionKind::Sc
+        | PpuInstructionKind::Sync
+        | PpuInstructionKind::Eieio
+        | PpuInstructionKind::Isync => {}
     }
 }

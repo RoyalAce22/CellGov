@@ -7,7 +7,7 @@
 //! variant with no arm here fails to compile.
 // [PPC-Book1 p:7 s:1.7 Instruction formats] OPCD at bits 0:5; XO is form-dependent.
 
-use cellgov_ps3_abi::hw::ppc_isa::{PPC_ISYNC_XO, PPC_STORAGE_HINT_XOS};
+use cellgov_ps3_abi::hw::ppc_isa::{PPC_EIEIO_XO, PPC_ISYNC_XO, PPC_STORAGE_HINT_XOS, PPC_SYNC_XO};
 
 use super::ops::{VaOp, VxOp};
 use super::{PpuInstruction, PpuInstructionKind};
@@ -26,7 +26,7 @@ pub enum EncodeError {
 /// The second spelling of a decoded instruction that a raw word can carry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Alias {
-    /// A barrier or cache hint the deterministic model decodes as `nop`.
+    /// A cache hint the deterministic model decodes as `nop`.
     NopHint {
         /// Primary opcode of the hint.
         primary: u8,
@@ -736,6 +736,13 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         // [PPC-Book1 p:8 s:1.7.3 SC-Form] LEV(20:26) 1(30).
         I::Sc { lev } => p(17) | (((lev as u32) & 0x7F) << 5) | 2,
 
+        // [PPC-Book2 p:26 s:3.3.3] sync X-form: L at bits 9:10, XO 598.
+        I::Sync { l } => p(31) | (((l as u32) & 3) << 21) | xo_10(PPC_SYNC_XO, false),
+        // [PPC-Book2 p:28 s:3.3.3] eieio X-form, XO 854.
+        I::Eieio => p(31) | xo_10(PPC_EIEIO_XO, false),
+        // [PPC-Book2 p:22 s:3.3.1] isync XL-form, XO 150.
+        I::Isync => p(19) | xo_10(PPC_ISYNC_XO, false),
+
         // Quickened single instructions: the base form their extended mnemonic names.
         // [PPC-Book1 p:162 s:B.9 Load Immediate] li Rx,value == addi Rx,0,value.
         I::Li { rt: t, imm } => d(14, t, 0, imm as u16),
@@ -793,6 +800,10 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         I::Cmpw { .. } | I::Cmpd { .. } | I::Cmplw { .. } | I::Cmpld { .. } => CMP_BIT_9 | RC,
         // [PPC-Book1 p:8 s:1.7.3 SC-Form] every field but LEV and the marker bit is reserved.
         I::Sc { .. } => 0x03FF_F01C,
+        // [PPC-Book2 p:26 s:3.3.3] sync reads L alone; bits 6:8, 11:20 and 31 are reserved.
+        I::Sync { .. } => 0x039F_F801,
+        // [PPC-Book2 p:28 s:3.3.3], [PPC-Book2 p:22 s:3.3.1] eieio and isync read no operand field.
+        I::Eieio | I::Isync => 0x03FF_F801,
         // [PPC-Book1 p:30 s:2.4.4] mcrf reads BF and BFA only.
         I::Mcrf { .. } => 0x0063_F801,
         // [PPC-Book1 p:25 s:2.4.1] the BH hint and its reserved neighbours are not modelled.
@@ -1005,14 +1016,13 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
 
 /// Names the second spelling `raw` uses when it is not the canonical word.
 ///
-/// The deterministic model decodes `isync` and the storage-control
-/// hints as `nop`. Returns `None` for a word whose only difference
-/// from its canonical encoding is in [`reserved_bits`].
+/// The deterministic model decodes the cache hints as `nop`. Returns
+/// `None` for a word whose only difference from its canonical encoding
+/// is in [`reserved_bits`].
 pub fn alias(raw: u32) -> Option<Alias> {
     let primary = (raw >> 26) as u8;
     let xo = ((raw >> 1) & 0x3FF) as u16;
     match primary {
-        19 if u32::from(xo) == PPC_ISYNC_XO => Some(Alias::NopHint { primary, xo }),
         31 if PPC_STORAGE_HINT_XOS.contains(&u32::from(xo)) => Some(Alias::NopHint { primary, xo }),
         31 if xo == 339 => {
             let spr = (((raw >> 11) & 0x1F) << 5 | ((raw >> 16) & 0x1F)) as u16;

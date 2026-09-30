@@ -108,21 +108,42 @@ fn every_nop_hint_decodes_to_the_preferred_nop_whatever_its_operand_bits() {
             assert_eq!(encode(&NOP), Ok(0x6000_0000));
             checked += 1;
         }
-        let isync = (19 << 26) | pattern | (PPC_ISYNC_XO << 1);
-        assert_eq!(decode(isync), Ok(NOP), "isync {isync:#010x}");
-        assert_eq!(
-            alias(isync),
-            Some(Alias::NopHint {
-                primary: 19,
-                xo: PPC_ISYNC_XO as u16
-            })
-        );
-        checked += 1;
     }
-    assert_eq!(
-        checked,
-        operand_patterns.len() * (PPC_STORAGE_HINT_XOS.len() + 1)
-    );
+    assert_eq!(checked, operand_patterns.len() * PPC_STORAGE_HINT_XOS.len());
+}
+
+/// [PPC-Book2 p:26 s:3.3.3] sync, L at bits 9:10; [PPC-Book2 p:28 s:3.3.3] eieio; [PPC-Book2 p:22 s:3.3.1] isync.
+#[test]
+fn each_barrier_decodes_to_its_own_instruction_whatever_its_reserved_bits() {
+    let reserved_patterns = [0u32, (5 << 21) | (6 << 16) | (7 << 11) | 1];
+    for pattern in reserved_patterns {
+        for l in 0..4u32 {
+            let sync = (31 << 26) | (pattern & !0x0060_0000) | (l << 21) | (PPC_SYNC_XO << 1);
+            assert_eq!(
+                decode(sync),
+                Ok(I::Sync { l: l as u8 }),
+                "sync {sync:#010x}"
+            );
+            assert_eq!(alias(sync), None, "sync {sync:#010x}");
+        }
+        let eieio = (31 << 26) | pattern | (PPC_EIEIO_XO << 1);
+        assert_eq!(decode(eieio), Ok(I::Eieio), "eieio {eieio:#010x}");
+        assert_eq!(alias(eieio), None);
+        let isync = (19 << 26) | pattern | (PPC_ISYNC_XO << 1);
+        assert_eq!(decode(isync), Ok(I::Isync), "isync {isync:#010x}");
+        assert_eq!(alias(isync), None);
+    }
+}
+
+/// [PPC-Book2 p:27 s:3.3.3] lwsync is sync 1.
+#[test]
+fn the_barriers_encode_to_their_canonical_words() {
+    assert_eq!(encode(&I::Sync { l: 0 }), Ok(0x7c00_04ac));
+    assert_eq!(encode(&I::Sync { l: 1 }), Ok(0x7c20_04ac));
+    assert_eq!(encode(&I::Sync { l: 2 }), Ok(0x7c40_04ac));
+    assert_eq!(encode(&I::Sync { l: 3 }), Ok(0x7c60_04ac));
+    assert_eq!(encode(&I::Eieio), Ok(0x7c00_06ac));
+    assert_eq!(encode(&I::Isync), Ok(0x4c00_012c));
 }
 
 #[test]

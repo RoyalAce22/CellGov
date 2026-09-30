@@ -654,3 +654,19 @@ fn no_trailing_whitespace() {
         assert_eq!(text, text.trim_end(), "trailing space in {text:?}");
     }
 }
+
+/// [PPC-Book2 p:27 s:3.3.3] sync, lwsync and ptesync are the extended mnemonics for L = 0, 1 and 2.
+#[test]
+fn barriers_render_by_mnemonic() {
+    assert_eq!(fmt_insn(PpuInstruction::Sync { l: 0 }), "sync");
+    assert_eq!(fmt_insn(PpuInstruction::Sync { l: 1 }), "lwsync");
+    assert_eq!(fmt_insn(PpuInstruction::Sync { l: 2 }), "ptesync");
+    assert_eq!(
+        fmt_insn(PpuInstruction::Sync { l: 3 })
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["sync", "3"]
+    );
+    assert_eq!(fmt_insn(PpuInstruction::Eieio), "eieio");
+    assert_eq!(fmt_insn(PpuInstruction::Isync), "isync");
+}
