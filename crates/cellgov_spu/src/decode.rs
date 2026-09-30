@@ -726,6 +726,13 @@ const DECODERS: &[(&str, Builder)] = &[
         d: f.d,
         e: f.e,
     }),
+    // [SPU-ISA p:180 s:7 Bisled] RR opcode 0x1AB; the variant carries the D/E interrupt bits at [12:13], and execution ignores them.
+    ("bisled", |f| SpuInstruction::Bisled {
+        rt: f.rt,
+        ra: f.ra,
+        d: f.d,
+        e: f.e,
+    }),
     ("shlqbyi", |f| SpuInstruction::Shlqbyi {
         rt: f.rt,
         ra: f.ra,

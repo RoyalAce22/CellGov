@@ -461,3 +461,46 @@ fn brhnz_tests_only_the_low_halfword() {
     assert!(matches!(outcome, SpuStepOutcome::Branch));
     assert_eq!(s.pc, 0x150);
 }
+
+/// [SPU-ISA p:180 s:7] bisled writes the link into RT whether or not it branches.
+/// [CBEA p:147 s:9.11.1] bisled branches only when the SPU_RdEventStat count is not zero.
+#[test]
+fn bisled_branches_on_an_enabled_event_and_links_either_way() {
+    use cellgov_ps3_abi::hw::spu::event::{S1, S2};
+    let bisled = SpuInstruction::Bisled {
+        rt: 4,
+        ra: 4,
+        d: false,
+        e: false,
+    };
+
+    // S2 is pending but masked, so the count stays 0.
+    let mut s = SpuState::new();
+    s.pc = 0x100;
+    s.set_reg_word_splat(4, 0x3A0);
+    s.channels.set_event_state(0, S1);
+    s.raise_events(S2);
+    let outcome = execute(&bisled, &mut s, uid());
+    assert!(matches!(outcome, SpuStepOutcome::Continue));
+    assert_eq!(s.pc, 0x100, "the unit advances past a Continue");
+    assert_eq!(s.reg_word_slot(4, 0), 0x104);
+    assert_eq!(s.reg_word_slot(4, 1), 0);
+
+    // An enabled event sets the count, and the target is read before
+    // the link overwrites RA.
+    let mut s = SpuState::new();
+    s.pc = 0x100;
+    s.set_reg_word_splat(4, 0x3A0);
+    s.regs[4][4..].copy_from_slice(&[0xEE; 12]);
+    s.channels.set_event_state(0, S1);
+    s.raise_events(S1);
+    let outcome = execute(&bisled, &mut s, uid());
+    assert!(matches!(outcome, SpuStepOutcome::Branch));
+    assert_eq!(s.pc, 0x3A0);
+    assert_eq!(s.reg_word_slot(4, 0), 0x104);
+    assert_eq!(s.reg_word_slot(4, 1), 0);
+    assert!(
+        s.channels.event_count,
+        "bisled reads the count and leaves it"
+    );
+}

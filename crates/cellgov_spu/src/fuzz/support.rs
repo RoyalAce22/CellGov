@@ -26,6 +26,7 @@ pub fn encoding_execution_is_supported(raw: u32) -> bool {
         kind,
         SpuInstructionKind::Bi
             | SpuInstructionKind::Bisl
+            | SpuInstructionKind::Bisled
             | SpuInstructionKind::Biz
             | SpuInstructionKind::Binz
             | SpuInstructionKind::Bihz
@@ -34,6 +35,8 @@ pub fn encoding_execution_is_supported(raw: u32) -> bool {
     // [SPU-ISA p:178 s:7 Compare, Branch, and Halt Instructions] BI's E and D
     // options replace interrupt-enable state, which the executor does not model.
     // [SPU-ISA p:181 s:7 Compare, Branch, and Halt Instructions] BISL has the
+    // same interrupt-control options.
+    // [SPU-ISA p:180 s:7 Compare, Branch, and Halt Instructions] BISLED has the
     // same interrupt-control options.
     // [SPU-ISA p:186 s:7 Compare, Branch, and Halt Instructions] BIZ has the
     // same interrupt-control options.

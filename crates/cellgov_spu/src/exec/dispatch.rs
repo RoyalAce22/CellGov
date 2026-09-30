@@ -1000,6 +1000,20 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             state.pc = target;
             SpuStepOutcome::Branch
         }
+        // [SPU-ISA p:180 s:7. Compare, Branch, and Halt Instructions] Branch Indirect and Set Link if External Data: RT gets the link whether or not the branch is taken, and PC <- RA only when the external condition is true.
+        // [CBEA p:147 s:9.11.1] the condition is a non-zero SPU_RdEventStat count.
+        SpuInstruction::Bisled { rt, ra, .. } => {
+            let target = state.insn_addr(state.reg_word(ra));
+            let link = state.ls_wrap(state.pc.wrapping_add(4));
+            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg_word_slot(rt, 0, link);
+            if state.channels.event_count {
+                state.pc = target;
+                SpuStepOutcome::Branch
+            } else {
+                SpuStepOutcome::Continue
+            }
+        }
         // [SPU-ISA p:184 s:7. Compare, Branch, and Halt Instructions] Branch If Not Zero Halfword: branch when the low halfword of RT's preferred slot is non-zero.
         SpuInstruction::Brhnz { rt, offset } => {
             if state.reg_word(rt) & 0xFFFF != 0 {

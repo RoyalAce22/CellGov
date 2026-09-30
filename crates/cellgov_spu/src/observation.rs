@@ -411,6 +411,7 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Brsl { rt, .. }
             | SpuInstruction::Brasl { rt, .. }
             | SpuInstruction::Bisl { rt, .. }
+            | SpuInstruction::Bisled { rt, .. }
             | SpuInstruction::Rchcnt { rt, .. }
             | SpuInstruction::Mfspr { rt, .. } => Some(rt),
             SpuInstruction::Rdch { rt, .. } => Some(rt),
@@ -520,6 +521,7 @@ impl SpuAllowedFootprint {
                 | SpuInstruction::Brnz { .. }
                 | SpuInstruction::Bi { .. }
                 | SpuInstruction::Bisl { .. }
+                | SpuInstruction::Bisled { .. }
                 | SpuInstruction::Brhnz { .. }
                 | SpuInstruction::Brhz { .. }
                 | SpuInstruction::Biz { .. }

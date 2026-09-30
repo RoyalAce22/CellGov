@@ -5,6 +5,7 @@ use super::*;
 
 const BI: u32 = 0x1A8 << 21;
 const BISL: u32 = 0x1A9 << 21;
+const BISLED: u32 = 0x1AB << 21;
 const BIZ: u32 = 0x128 << 21;
 const BINZ: u32 = 0x129 << 21;
 const BIHZ: u32 = 0x12A << 21;
@@ -23,6 +24,7 @@ fn interrupt_bits(raw: u32) -> (bool, bool) {
     match decode(raw).expect("decodes") {
         SpuInstruction::Bi { d, e, .. }
         | SpuInstruction::Bisl { d, e, .. }
+        | SpuInstruction::Bisled { d, e, .. }
         | SpuInstruction::Biz { d, e, .. }
         | SpuInstruction::Binz { d, e, .. }
         | SpuInstruction::Bihz { d, e, .. }
@@ -33,7 +35,7 @@ fn interrupt_bits(raw: u32) -> (bool, bool) {
 
 #[test]
 fn every_branch_indirect_form_carries_d_and_e() {
-    for opcode in [BI, BISL, BIZ, BINZ, BIHZ, BIHNZ] {
+    for opcode in [BI, BISL, BISLED, BIZ, BINZ, BIHZ, BIHNZ] {
         assert_eq!(interrupt_bits(opcode), (false, false), "{opcode:#010x}");
         assert_eq!(interrupt_bits(opcode | D), (true, false), "{opcode:#010x}");
         assert_eq!(interrupt_bits(opcode | E), (false, true), "{opcode:#010x}");

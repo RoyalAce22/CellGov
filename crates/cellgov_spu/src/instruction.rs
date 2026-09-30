@@ -1266,6 +1266,20 @@ pub enum SpuInstruction {
         /// The E feature bit: enable interrupts at the target.
         e: bool,
     },
+    /// Branch indirect and set link if external data: rt = (PC + 4, 0,
+    /// 0, 0), and PC = ra when the SPU_RdEventStat count is not zero.
+    ///
+    /// [SPU-ISA p:180 s:7 Branch Indirect and Set Link if External Data]
+    Bisled {
+        /// Link register destination.
+        rt: u8,
+        /// Register containing target address.
+        ra: u8,
+        /// The D feature bit: disable interrupts at the target.
+        d: bool,
+        /// The E feature bit: enable interrupts at the target.
+        e: bool,
+    },
     /// Branch relative if the low halfword of rt's preferred slot is not zero.
     Brhnz {
         /// Register to test.

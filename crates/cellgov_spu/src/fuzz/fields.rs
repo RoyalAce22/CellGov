@@ -103,8 +103,9 @@ fn field_candidates(
                 (0x0004_0000, C::Flag),
                 (0x0008_0000, C::Flag),
             ],
-            K::Bisl | K::Biz | K::Binz | K::Bihz | K::Bihnz => {
+            K::Bisl | K::Bisled | K::Biz | K::Binz | K::Bihz | K::Bihnz => {
                 // [SPU-ISA p:181 s:7 Compare, Branch, and Halt Instructions] BISL encodes E and D options.
+                // [SPU-ISA p:180 s:7 Compare, Branch, and Halt Instructions] BISLED encodes E and D options.
                 // [SPU-ISA p:186 s:7 Compare, Branch, and Halt Instructions] BIZ encodes E and D options.
                 // [SPU-ISA p:187 s:7 Compare, Branch, and Halt Instructions] BINZ encodes E and D options.
                 // [SPU-ISA p:188 s:7 Compare, Branch, and Halt Instructions] BIHZ encodes E and D options.
@@ -149,11 +150,14 @@ pub(super) fn operand_combination_is_valid(kind: SpuInstructionKind, word: u32) 
         // [SPU-ISA p:178 s:7 Compare, Branch, and Halt Instructions] BI reserves E and D set together.
         K::Bi => word & 0x000c_0000 != 0x000c_0000,
         // [SPU-ISA p:181 s:7 Compare, Branch, and Halt Instructions] BISL reserves E and D set together.
+        // [SPU-ISA p:180 s:7 Compare, Branch, and Halt Instructions] BISLED reserves E and D set together.
         // [SPU-ISA p:186 s:7 Compare, Branch, and Halt Instructions] BIZ reserves E and D set together.
         // [SPU-ISA p:187 s:7 Compare, Branch, and Halt Instructions] BINZ reserves E and D set together.
         // [SPU-ISA p:188 s:7 Compare, Branch, and Halt Instructions] BIHZ reserves E and D set together.
         // [SPU-ISA p:189 s:7 Compare, Branch, and Halt Instructions] BIHNZ reserves E and D set together.
-        K::Bisl | K::Biz | K::Binz | K::Bihz | K::Bihnz => word & 0x000c_0000 != 0x000c_0000,
+        K::Bisl | K::Bisled | K::Biz | K::Binz | K::Bihz | K::Bihnz => {
+            word & 0x000c_0000 != 0x000c_0000
+        }
         // [SPU-ISA p:192 s:8 Hint-for-Branch Instructions] P requires the split RO field to be zero.
         K::Hbr => word & 0x0010_0000 == 0 || word & 0x0000_c07f == 0,
         // [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9]: an I8 whose scale falls outside 0..=127 has an undefined result.

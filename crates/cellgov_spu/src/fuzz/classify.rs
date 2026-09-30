@@ -162,6 +162,7 @@ pub(super) fn effect_and_outcome(
         | SpuInstruction::Brhz { .. }
         | SpuInstruction::Biz { .. }
         | SpuInstruction::Binz { .. }
+        | SpuInstruction::Bisled { .. }
         | SpuInstruction::Bihz { .. }
         | SpuInstruction::Bihnz { .. } => (NO_EFFECTS, CONDITIONAL_BRANCH),
         SpuInstruction::Stop { .. } | SpuInstruction::Stopd => (NO_EFFECTS, STOP),
@@ -254,6 +255,7 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
         | K::Brhz
         | K::Biz
         | K::Binz
+        | K::Bisled
         | K::Bihz
         | K::Bihnz => SpuEncodingForm::Branch,
         K::Rdch | K::Wrch | K::Rchcnt => SpuEncodingForm::Channel,
@@ -412,6 +414,7 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Brnz
         | SpuInstructionKind::Bi
         | SpuInstructionKind::Bisl
+        | SpuInstructionKind::Bisled
         | SpuInstructionKind::Brhnz
         | SpuInstructionKind::Brhz
         | SpuInstructionKind::Biz
