@@ -393,6 +393,20 @@ fn issue_list(
         Ok(tag) => tag,
         Err(queued) => return queued,
     };
+    // [CBEA p:60 s:7.5.3] the LSA must be 16-byte aligned when the first element is 16 bytes or less.
+    let c = &state.channels;
+    if c.mfc_size > 0 {
+        let head = state.read_ls_wrapped(c.mfc_eal, 4);
+        let first =
+            u32::from_be_bytes([head[0], head[1], head[2], head[3]]) & !spu::MFC_LIST_STALL_NOTIFY;
+        if first <= 16 && c.mfc_lsa & 0xF != 0 {
+            let error = MfcCommandError::LocalStoreUnaligned {
+                lsa: c.mfc_lsa,
+                size: first,
+            };
+            return queue_invalid(cmd, error, state, unit_id);
+        }
+    }
     let c = &state.channels;
     let mut list = ListCursor {
         word: cmd,
@@ -473,10 +487,25 @@ fn queue_list_segment(
             size,
             tag: u32::from(list.tag.raw()),
         };
-        let checked = cellgov_dma::validate(MfcCommandClass::Transfer, params).and_then(|()| {
-            ByteRange::new(GuestAddr::new(params.ea()), u64::from(size))
-                .ok_or(MfcCommandError::DataSegment { ea: params.ea() })
-        });
+        // [CBE-Handbook p:531 s:19.4.4.2] a list element transfer cannot cross the 4 GB area the list's EAH names; the DMA halts at the boundary and an MFC exception is signalled.
+        // The model moves none of the element's bytes, as for an address
+        // that does not translate.
+        let crosses = u64::from(eal) + u64::from(size) > 1 << 32;
+        let checked = cellgov_dma::validate(MfcCommandClass::Transfer, params)
+            .and_then(|()| {
+                if crosses {
+                    Err(MfcCommandError::ListElementCrosses4Gb {
+                        ea: params.ea(),
+                        size,
+                    })
+                } else {
+                    Ok(())
+                }
+            })
+            .and_then(|()| {
+                ByteRange::new(GuestAddr::new(params.ea()), u64::from(size))
+                    .ok_or(MfcCommandError::DataSegment { ea: params.ea() })
+            });
         let main = match checked {
             Ok(main) => main,
             // The documents name no exception for a bad element. The model
@@ -489,7 +518,12 @@ fn queue_list_segment(
                 break;
             }
         };
-        list.data = lsa.wrapping_add(size).wrapping_add(15) & !15;
+        // A zero-size element skips a transfer, and leaves the next one
+        // where it would have been.
+        // [CBEA p:129 s:9.3.7] software skips a list element by setting its transfer size to zero.
+        if size > 0 {
+            list.data = lsa.wrapping_add(size).wrapping_add(15) & !15;
+        }
         let local = ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size))
             .expect("valid LS range");
         let (src, dst, payload) = match list.direction {

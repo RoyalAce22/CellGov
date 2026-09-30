@@ -278,3 +278,85 @@ fn a_stall_read_with_no_list_is_refused_and_an_acknowledgment_restarts_nothing()
     let mut read = unit(MFC_GETL, &[], &[rdch(MFC_RD_LIST_STALL_STAT, 5)]);
     assert_eq!(step(&mut read, 0).0, YieldReason::Fault);
 }
+
+/// [CBEA p:60 s:7.5.3] the LSA must be 16-byte aligned when the first element is 16 bytes or less.
+#[test]
+fn a_short_first_element_needs_a_quadword_aligned_local_store_address() {
+    let mut unaligned = unit(MFC_GETL, &[(8, 0x1008)], &[wrch(MFC_CMD, 2)]);
+    unaligned.state_mut().channels.mfc_lsa = 0x408;
+    assert_eq!(
+        refusal(&step(&mut unaligned, 0).1),
+        MfcCommandError::LocalStoreUnaligned {
+            lsa: 0x408,
+            size: 8
+        }
+    );
+    let mut aligned = unit(MFC_GETL, &[(8, 0x1008)], &[wrch(MFC_CMD, 2)]);
+    let queued = requests(&step(&mut aligned, 0).1);
+    assert_eq!(get_shape(&queued[0]), (0x408, 0x1008, 8));
+}
+
+/// [CBE-Handbook p:531 s:19.4.4.2] a list element transfer cannot cross the 4 GB area of the list's EAH.
+#[test]
+fn an_element_that_crosses_its_4_gb_area_is_refused_after_the_elements_before_it() {
+    let mut unit = unit(
+        MFC_GETL,
+        &[(0x10, 0x1000), (0x20, 0xFFFF_FFF0)],
+        &[wrch(MFC_CMD, 2)],
+    );
+    let (_, effects) = step(&mut unit, 0);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [
+                Effect::DmaEnqueue { .. },
+                Effect::MfcInvalidCommand { command, .. },
+            ] if command.error == MfcCommandError::ListElementCrosses4Gb {
+                ea: 0xFFFF_FFF0,
+                size: 0x20,
+            }
+        ),
+        "{effects:?}"
+    );
+}
+
+/// [CBEA p:129 s:9.3.7] software skips a list element by setting its transfer size to zero.
+#[test]
+fn a_zero_size_element_moves_nothing_and_leaves_the_next_transfer_in_place() {
+    let mut unit = unit(
+        MFC_GETL,
+        &[(0x10, 0x1000), (0, 0x2004), (0x10, 0x3000)],
+        &[wrch(MFC_CMD, 2)],
+    );
+    let queued = requests(&step(&mut unit, 0).1);
+    assert_eq!(
+        queued.iter().map(get_shape).collect::<Vec<_>>(),
+        [
+            (0x400, 0x1000, 0x10),
+            (0x414, 0x2004, 0),
+            (0x410, 0x3000, 0x10)
+        ]
+    );
+}
+
+/// [CBEA p:61 s:7.5.3] a list whose transfer overwrites list elements not yet started gives unpredictable results.
+/// The model reads a segment's elements when the segment starts, so a
+/// get over them changes only elements after a stall.
+#[test]
+fn a_list_that_gets_over_its_own_elements_queues_the_elements_it_read_first() {
+    let mut unit = unit(
+        MFC_GETL,
+        &[(0x20, 0x1000), (0x10, 0x2000), (0x10, 0x3000)],
+        &[wrch(MFC_CMD, 2)],
+    );
+    unit.state_mut().channels.mfc_lsa = LIST;
+    let queued = requests(&step(&mut unit, 0).1);
+    assert_eq!(
+        queued.iter().map(get_shape).collect::<Vec<_>>(),
+        [
+            (0x200, 0x1000, 0x20),
+            (0x220, 0x2000, 0x10),
+            (0x230, 0x3000, 0x10)
+        ]
+    );
+}

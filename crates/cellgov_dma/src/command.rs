@@ -131,6 +131,15 @@ pub enum MfcCommandError {
     /// A list size that is not a multiple of 8.
     #[error("list size 0x{0:08x} is not a multiple of 8")]
     ListSizeUnaligned(u32),
+    /// A list element whose transfer crosses the 4 GB area its list's
+    /// EAH names.
+    #[error("list element at 0x{ea:016x} of {size} bytes crosses its 4 GB area")]
+    ListElementCrosses4Gb {
+        /// The element's effective address.
+        ea: u64,
+        /// The element's transfer size.
+        size: u32,
+    },
     /// An opcode the architecture neither defines nor reserves.
     #[error("opcode 0x{0:04x} is illegal")]
     IllegalOpcode(u32),
@@ -174,7 +183,11 @@ impl MfcCommandError {
             | Self::AddressLowBitsDiffer { .. }
             | Self::ListAddressUnaligned(_)
             | Self::ListSizeUnaligned(_) => MfcExceptionClass::Alignment,
-            Self::DataSegment { .. } => MfcExceptionClass::DataSegment,
+            // The Handbook names no class for the crossing. The model raises
+            // the class of an address outside the area it may use.
+            Self::DataSegment { .. } | Self::ListElementCrosses4Gb { .. } => {
+                MfcExceptionClass::DataSegment
+            }
             Self::DataStorage { .. } => MfcExceptionClass::DataStorage,
         }
     }
@@ -197,6 +210,7 @@ impl MfcCommandError {
             Self::DataSegment { .. } => 12,
             Self::DataStorage { .. } => 13,
             Self::ListSizeUnaligned(_) => 14,
+            Self::ListElementCrosses4Gb { .. } => 15,
         }
     }
 }

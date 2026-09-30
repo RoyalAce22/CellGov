@@ -210,6 +210,7 @@ fn each_error_has_its_own_code() {
         MfcCommandError::DataSegment { ea: 0 },
         MfcCommandError::DataStorage { ea: 0 },
         MfcCommandError::ListSizeUnaligned(0),
+        MfcCommandError::ListElementCrosses4Gb { ea: 0, size: 0 },
     ];
     let codes: std::collections::BTreeSet<u8> = errors.iter().map(|e| e.code()).collect();
     assert_eq!(codes.len(), errors.len());
