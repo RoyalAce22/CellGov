@@ -186,6 +186,9 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
         | K::Rotmi
         | K::Rotmai
         | K::Roti
+        | K::Shlqbii
+        | K::Rotqbii
+        | K::Rotqmbii
         | K::Shlhi
         | K::Rothi
         | K::Rothmi
@@ -301,6 +304,12 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Rotqby
         | SpuInstructionKind::Rotqbyi
         | SpuInstructionKind::Rotqmbyi
+        | SpuInstructionKind::Shlqbi
+        | SpuInstructionKind::Shlqbii
+        | SpuInstructionKind::Rotqbi
+        | SpuInstructionKind::Rotqbii
+        | SpuInstructionKind::Rotqmbi
+        | SpuInstructionKind::Rotqmbii
         | SpuInstructionKind::Shl
         | SpuInstructionKind::Shli
         | SpuInstructionKind::Rotmi

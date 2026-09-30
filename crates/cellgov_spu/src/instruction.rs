@@ -686,6 +686,62 @@ pub enum SpuInstruction {
         imm: u8,
     },
 
+    // [SPU-ISA p:122 s:6 Quadword bit shifts: Shlqbi p.122, Shlqbii p.123, Rotqbi p.134, Rotqbii p.135, Rotqmbi p.143, Rotqmbii p.144]
+    /// Shift left quadword by bits: `ra` shifted left by bits 29 to 31 of `rb`'s preferred slot.
+    Shlqbi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Count register; bits 29 to 31 of its preferred slot.
+        rb: u8,
+    },
+    /// Shift left quadword by bits immediate: `ra` shifted left by `imm & 0x07`.
+    Shlqbii {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate.
+        imm: u8,
+    },
+    /// Rotate quadword by bits: `ra` rotated left by bits 29 to 31 of `rb`'s preferred slot.
+    Rotqbi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Count register; bits 29 to 31 of its preferred slot.
+        rb: u8,
+    },
+    /// Rotate quadword by bits immediate: `ra` rotated left by `imm & 0x07`.
+    Rotqbii {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate.
+        imm: u8,
+    },
+    /// Rotate and mask quadword by bits: `ra` shifted right by `(0 - rb) & 0x07`, `rb` read from its preferred slot.
+    Rotqmbi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Count register; bits 29 to 31 of its preferred slot.
+        rb: u8,
+    },
+    /// Rotate and mask quadword by bits immediate: `ra` shifted right by `(0 - imm) & 0x07`.
+    Rotqmbii {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate.
+        imm: u8,
+    },
+
     // [SPU-ISA p:120 s:6 Shift/Rotate Word: Shl p.120, Shli p.121, Rotmi p.139, Rotmai p.148]
     /// Shift left word: per slot, `rt[i] = ra[i] << (rb[i] & 0x3F)`, zero when the count exceeds 31.
     Shl {
