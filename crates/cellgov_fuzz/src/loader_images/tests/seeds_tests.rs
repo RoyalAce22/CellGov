@@ -1,5 +1,8 @@
 use super::super::seeds::*;
-use cellgov_ps3_abi::format::elf::ELF_MAGIC;
+use super::super::spu::JOB_IMAGE_CODE_OFFSET;
+use cellgov_ps3_abi::format::elf::{ELF_MAGIC, EM_SPU};
+use cellgov_ps3_abi::hw::spu::SPU_LS_SIZE;
+use cellgov_spu::loader::{parse_spu_elf, LoadError};
 
 use cellgov_ppu::funcmap;
 use cellgov_ppu::loader::pt_load_segments;
@@ -15,13 +18,13 @@ fn seed(name: &str) -> Vec<u8> {
 }
 
 #[test]
-fn every_seed_has_a_distinct_name_and_enumerates_as_elf64() {
+fn every_seed_has_a_distinct_name_and_every_ppu_seed_enumerates_as_elf64() {
     let all = seeds();
     let mut names: Vec<&str> = all.iter().map(|seed| seed.name).collect();
     names.sort_unstable();
     names.dedup();
     assert_eq!(names.len(), all.len(), "seed names repeat");
-    for seed in &all {
+    for seed in &ppu_seeds() {
         assert_eq!(&seed.bytes[0..4], &ELF_MAGIC, "{}", seed.name);
         let segments = pt_load_segments(&seed.bytes)
             .unwrap_or_else(|e| panic!("{} does not enumerate: {e}", seed.name));
@@ -135,6 +138,31 @@ fn the_entry_opd_seed_yields_a_function_anchor_and_the_text_only_seed_none() {
     );
     let bare = funcmap::build(&seed("exec_text_only")).unwrap();
     assert!(bare.functions.is_empty());
+}
+
+#[test]
+fn the_spu_elf_seeds_parse_with_their_segments_and_entry() {
+    let minimal = parse_spu_elf(&seed("spu_elf_minimal"), SPU_LS_SIZE).unwrap();
+    let shape = |elf: &cellgov_spu::loader::SpuElf| -> Vec<(u32, usize, usize)> {
+        elf.segments
+            .iter()
+            .map(|seg| (seg.vaddr, seg.filesz, seg.memsz))
+            .collect()
+    };
+    assert_eq!((minimal.machine, minimal.entry), (EM_SPU, 0));
+    assert_eq!(shape(&minimal), [(0, 8, 8)]);
+    let bss = parse_spu_elf(&seed("spu_elf_bss_tail"), SPU_LS_SIZE).unwrap();
+    assert_eq!(bss.entry, 0x80);
+    assert_eq!(shape(&bss), [(0x80, 8, 8), (0x1000, 0x40, 0x400)]);
+}
+
+#[test]
+fn the_job_image_seed_has_no_elf_header_and_its_code_at_the_code_offset() {
+    let job = seed("spu_job_image");
+    assert_ne!(&job[0..4], &ELF_MAGIC);
+    assert_eq!(parse_spu_elf(&job, SPU_LS_SIZE), Err(LoadError::BadMagic));
+    let code = &job[JOB_IMAGE_CODE_OFFSET as usize..];
+    assert_eq!(code, [0x40, 0x20, 0, 0, 0, 0, 0, 0]);
 }
 
 #[test]

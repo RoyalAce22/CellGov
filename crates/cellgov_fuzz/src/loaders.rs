@@ -15,9 +15,10 @@ use cellgov_ppu::loader::LoadError;
 use cellgov_ppu::prx::ImportParseError;
 use cellgov_ppu::sprx::PrxParseError;
 use cellgov_ppu::state::PpuState;
+use cellgov_spu::state::SpuState;
 
 use crate::boundary::call_target;
-use crate::loader_images::structured_image;
+use crate::loader_images::{other_ls_form, spu_elf_image, structured_image, LsSegments};
 use crate::rng::Rng;
 use crate::{GeneratorError, TargetPanicPayload, CAMPAIGN_VERSION};
 
@@ -45,16 +46,23 @@ pub enum LoaderTarget {
     ParseImports,
     /// `cellgov_ppu::funcmap::build`.
     FuncmapBuild,
+    /// `cellgov_spu::loader::load_spu_elf` into a fresh local store.
+    LoadSpuElf,
+    /// `cellgov_spu::loader::load_ls_segments` into a fresh local store,
+    /// with the arguments [`LsSegments::from_bytes`] reads.
+    LoadLsSegments,
 }
 
 impl LoaderTarget {
     /// Every target, in the order `fuzz/Cargo.toml` and the workflow list them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::PtLoadSegments,
         Self::LoadPpuElf,
         Self::ParsePrx,
         Self::ParseImports,
         Self::FuncmapBuild,
+        Self::LoadSpuElf,
+        Self::LoadLsSegments,
     ];
 
     /// The name the `fuzz/fuzz_targets/<name>.rs` file and the workflow
@@ -66,6 +74,19 @@ impl LoaderTarget {
             Self::ParsePrx => "parse_prx",
             Self::ParseImports => "parse_imports",
             Self::FuncmapBuild => "funcmap_build",
+            Self::LoadSpuElf => "load_spu_elf",
+            Self::LoadLsSegments => "load_ls_segments",
+        }
+    }
+
+    /// The image the fuzz bytes describe for this target: a PPU ELF or
+    /// PRX for the PPU parsers, an SPU ELF for `load_spu_elf`, and the
+    /// same bytes read as the other argument form for `load_ls_segments`.
+    pub fn structured_input(self, data: &[u8]) -> Vec<u8> {
+        match self {
+            Self::LoadSpuElf => spu_elf_image(data),
+            Self::LoadLsSegments => other_ls_form(data),
+            _ => structured_image(data),
         }
     }
 
@@ -96,6 +117,9 @@ pub enum LoaderRefusal {
     /// The function-map builder's refusal.
     #[error(transparent)]
     FuncMap(#[from] FuncMapError),
+    /// The SPU loader's refusal.
+    #[error(transparent)]
+    Spu(#[from] cellgov_spu::loader::LoadError),
 }
 
 /// What one parser call returned.
@@ -129,6 +153,18 @@ pub fn run(target: LoaderTarget, data: &[u8]) -> LoaderOutcome {
         LoaderTarget::FuncmapBuild => cellgov_ppu::funcmap::build(data)
             .map(drop)
             .map_err(LoaderRefusal::FuncMap),
+        LoaderTarget::LoadSpuElf => cellgov_spu::loader::load_spu_elf(data, &mut SpuState::new())
+            .map_err(LoaderRefusal::Spu),
+        LoaderTarget::LoadLsSegments => {
+            let call = LsSegments::from_bytes(data);
+            let segments: Vec<(u32, &[u8])> = call
+                .segments
+                .iter()
+                .map(|(at, bytes)| (*at, bytes.as_slice()))
+                .collect();
+            cellgov_spu::loader::load_ls_segments(&segments, call.entry, &mut SpuState::new())
+                .map_err(LoaderRefusal::Spu)
+        }
     };
     match refusal {
         Ok(()) => LoaderOutcome::Accepted,
@@ -142,7 +178,7 @@ pub enum InputPath {
     /// The fuzz bytes themselves.
     Raw,
     /// The image the fuzz bytes describe, see
-    /// [`structured_image`].
+    /// [`LoaderTarget::structured_input`].
     Structured,
 }
 
@@ -159,7 +195,7 @@ pub struct CaseOutcome {
 /// is the body of every `cargo fuzz` target; a panic propagates.
 pub fn exercise(target: LoaderTarget, data: &[u8]) -> CaseOutcome {
     let raw = run(target, data);
-    let structured = run(target, &structured_image(data));
+    let structured = run(target, &target.structured_input(data));
     CaseOutcome { raw, structured }
 }
 
@@ -231,7 +267,7 @@ pub fn sweep(
         let input = mutate(&mut rng, base)?;
         // The image renders outside the target boundary, so a renderer
         // panic fails the sweep itself.
-        let image = structured_image(&input);
+        let image = target.structured_input(&input);
         for path in [InputPath::Raw, InputPath::Structured] {
             let outcome = match path {
                 InputPath::Raw => call_target(|| run(target, &input)),

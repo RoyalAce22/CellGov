@@ -9,14 +9,21 @@
 | `parse_prx`        | `cellgov_ppu::sprx::parse_prx`           |
 | `parse_imports`    | `cellgov_ppu::prx::parse_imports`        |
 | `funcmap_build`    | `cellgov_ppu::funcmap::build`            |
+| `load_spu_elf`     | `cellgov_spu::loader::load_spu_elf`      |
+| `load_ls_segments` | `cellgov_spu::loader::load_ls_segments`  |
 
 Every target asserts one property: the parser returns, with a value or
 its own typed error, on any bytes. A panic is the finding. Each input
 drives two calls, one on the raw bytes and one on the image the bytes
-describe when read as fields of an ELF or PRX
-(`cellgov_fuzz::loader_images::structured_image`), so the fuzzer
-reaches the table walks and relocation arithmetic instead of stopping
-at the magic check.
+describe (`cellgov_fuzz::loaders::LoaderTarget::structured_input`), so
+the fuzzer reaches the table walks and relocation arithmetic instead of
+stopping at the magic check. The PPU targets read the bytes as fields
+of an ELF or PRX, and `load_spu_elf` as fields of an SPU ELF.
+`load_ls_segments` takes a segment list and an entry point, not a
+file: an input with an even first byte is a job image with no ELF
+header, loaded whole at local-store address 0x4000 and entered 0x30
+bytes in; an odd first byte makes the rest a described segment list.
+Its second call flips that bit, so every input drives both forms.
 
 This package is not a workspace member. libFuzzer needs a nightly
 toolchain, and the workspace builds on the pinned stable; the
@@ -55,7 +62,8 @@ each target's input set between runs.
 `fuzz/seeds/*.bin` are the committed starting images, rendered from
 `cellgov_fuzz::loader_images::seeds`: minimal executables, a module
 with exports and system OPDs, modules with import tables located both
-ways, zero-sized placeholder segments. `loaders::tests` fails when the
+ways, zero-sized placeholder segments, two SPU executables and an SPU
+job image. `loaders::tests` fails when the
 files drift from the generator; after changing a seed image, run
 
 ```bash
@@ -78,6 +86,6 @@ cargo +nightly fuzz run --fuzz-dir fuzz <target> fuzz/artifacts/<target>/crash-<
 ```
 
 then pin the minimised input as a named unit test beside the parser in
-`cellgov_ppu` and fix the parser to return its typed error. A file that
+`cellgov_ppu` or `cellgov_spu` and fix the parser to return its typed error. A file that
 merely fails to parse is not a finding; the targets accept every
 refusal.

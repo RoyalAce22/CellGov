@@ -36,6 +36,7 @@ dependencies = [
  "cellgov_mem",
  "cellgov_ps3_abi",
  "cellgov_time",
+ "thiserror",
 ]
 
 [[package]]
@@ -68,12 +69,18 @@ dependencies = [
  "cellgov_sync",
  "cellgov_time",
  "strum",
+ "thiserror",
 ]
+
+[[package]]
+name = "cellgov_float"
+version = "0.0.0"
 
 [[package]]
 name = "cellgov_fuzz"
 version = "0.0.0"
 dependencies = [
+ "cellgov_dma",
  "cellgov_effects",
  "cellgov_event",
  "cellgov_exec",
@@ -126,6 +133,7 @@ dependencies = [
  "cellgov_effects",
  "cellgov_event",
  "cellgov_exec",
+ "cellgov_float",
  "cellgov_mem",
  "cellgov_ps3_abi",
  "cellgov_sync",

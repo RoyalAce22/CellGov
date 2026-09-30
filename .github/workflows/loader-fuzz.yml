@@ -1,8 +1,8 @@
 name: loader-fuzz
 
 # The coverage-guided jobs over the parsers that take attacker-shaped
-# input: the ELF loader, the PRX parser, the import walk and the
-# function-map builder. Each target asserts one property, that the
+# input: the ELF loader, the PRX parser, the import walk, the
+# function-map builder and the two SPU image loaders. Each target asserts one property, that the
 # parser returns with a value or its typed error on any bytes, and a
 # panic is the finding. libFuzzer needs a nightly toolchain, so the
 # jobs run here on a schedule rather than in the continuous build; the
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [pt_load_segments, load_ppu_elf, parse_prx, parse_imports, funcmap_build]
+        target: [pt_load_segments, load_ppu_elf, parse_prx, parse_imports, funcmap_build, load_spu_elf, load_ls_segments]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:

@@ -1,14 +1,15 @@
-# The cargo-fuzz targets for the ELF and PRX parsers. Not a workspace
-# member: libFuzzer needs a nightly toolchain, and the workspace builds
-# on the pinned stable. Run them with `bash .github/loader_fuzz.sh run
-# <target>`; see README.md beside this file.
+# The cargo-fuzz targets for the ELF, PRX and SPU image parsers. Not a
+# workspace member: libFuzzer needs a nightly toolchain, and the
+# workspace builds on the pinned stable. Run them with
+# `bash .github/loader_fuzz.sh run <target>`; see README.md beside this
+# file.
 [package]
 name = "cellgov-loader-fuzz"
 version = "0.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
-description = "cargo-fuzz targets for the CellGov ELF and PRX parsers"
+description = "cargo-fuzz targets for the CellGov ELF, PRX and SPU image parsers"
 
 [package.metadata]
 cargo-fuzz = true
@@ -50,6 +51,20 @@ bench = false
 [[bin]]
 name = "funcmap_build"
 path = "fuzz_targets/funcmap_build.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "load_spu_elf"
+path = "fuzz_targets/load_spu_elf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "load_ls_segments"
+path = "fuzz_targets/load_ls_segments.rs"
 test = false
 doc = false
 bench = false

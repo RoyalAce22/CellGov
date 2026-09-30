@@ -3,6 +3,8 @@ use super::*;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use cellgov_spu::loader::LoadError as SpuLoadError;
+
 use crate::loader_images::seeds;
 
 /// Cases each target runs in the bounded sweep; small, so the
@@ -62,6 +64,8 @@ fn every_target_accepts_the_seed_built_for_it_and_refuses_the_wrong_shape() {
         (LoaderTarget::ParsePrx, "prx_baseline"),
         (LoaderTarget::ParseImports, "prx_imports"),
         (LoaderTarget::FuncmapBuild, "exec_entry_opd"),
+        (LoaderTarget::LoadSpuElf, "spu_elf_bss_tail"),
+        (LoaderTarget::LoadLsSegments, "spu_job_image"),
     ];
     for (target, name) in accepted {
         assert_eq!(
@@ -78,6 +82,19 @@ fn every_target_accepts_the_seed_built_for_it_and_refuses_the_wrong_shape() {
         run(LoaderTarget::PtLoadSegments, b"not an elf"),
         LoaderOutcome::Refused(LoaderRefusal::Elf(LoadError::TooSmall))
     );
+    assert_eq!(
+        run(LoaderTarget::LoadSpuElf, &seed("exec_text_only")),
+        LoaderOutcome::Refused(LoaderRefusal::Spu(SpuLoadError::Not32Bit))
+    );
+    // An odd first byte, then no segments and an entry word read in full:
+    // one byte past the last whole instruction in local store.
+    let past_entry = [1, 0, 0, 0, 0, 3, 0, 0, 0, 0xFD, 0xFF, 0x03, 0x00];
+    assert_eq!(
+        run(LoaderTarget::LoadLsSegments, &past_entry),
+        LoaderOutcome::Refused(LoaderRefusal::Spu(SpuLoadError::EntryOutOfRange {
+            entry: 0x3_FFFD
+        }))
+    );
 }
 
 #[test]
@@ -90,6 +107,27 @@ fn exercise_runs_the_raw_bytes_and_the_image_they_describe() {
             // An empty stream describes an image with no program
             // headers, which the reader refuses by name.
             structured: LoaderOutcome::Refused(LoaderRefusal::Elf(LoadError::NoProgramHeaders)),
+        }
+    );
+    // The SPU image an empty stream describes has no segments and enters
+    // at zero, which the SPU loader takes.
+    assert_eq!(
+        exercise(LoaderTarget::LoadSpuElf, &[]),
+        CaseOutcome {
+            raw: LoaderOutcome::Refused(LoaderRefusal::Spu(SpuLoadError::TooSmall)),
+            structured: LoaderOutcome::Accepted,
+        }
+    );
+    // A described list whose entry is out of range; its other form is a
+    // thirteen-byte job image, which loads.
+    let past_entry = [1, 0, 0, 0, 0, 3, 0, 0, 0, 0xFD, 0xFF, 0x03, 0x00];
+    assert_eq!(
+        exercise(LoaderTarget::LoadLsSegments, &past_entry),
+        CaseOutcome {
+            raw: LoaderOutcome::Refused(LoaderRefusal::Spu(SpuLoadError::EntryOutOfRange {
+                entry: 0x3_FFFD
+            })),
+            structured: LoaderOutcome::Accepted,
         }
     );
 }

@@ -65,8 +65,8 @@ CI runs those on both platforms and additionally `cargo test
 --release`, the `cellgov_install` tests with `--features decrypt`,
 `cellgov_compare` with `--no-default-features`, and the bounded fuzz
 smoke set (`cellgov dev fuzz smoke`) in both build profiles. A weekly
-workflow runs the `cargo fuzz` targets over the ELF and PRX parsers
-from [fuzz/](fuzz/README.md) on a nightly toolchain.
+workflow runs the `cargo fuzz` targets over the ELF, PRX and SPU image
+parsers from [fuzz/](fuzz/README.md) on a nightly toolchain.
 
 The workspace has no
 runtime dependency on RPCS3. `cellgov_compare` gates its RPCS3
@@ -86,6 +86,11 @@ content needs it:
 ```bash
 cargo build --release -p cellgov_cli --features decrypt
 ```
+
+Running retail firmware or titles, the project's main purpose,
+always needs the `decrypt` feature. The default build serves
+library consumers, plaintext guests such as homebrew and
+microtests, and CI; it does not run retail content.
 
 The other features (`installed-*-tests`, `*-dumps`, `*-microtests`,
 `ps3autotests`) select test suites that read local dumps

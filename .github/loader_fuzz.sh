@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The cargo-fuzz jobs for the ELF and PRX parsers: nightly-only, so they
-# run on the scheduled loader-fuzz workflow and by hand, never in the
-# continuous build. The bounded sample of the same property runs on
+# The cargo-fuzz jobs for the ELF, PRX and SPU image parsers:
+# nightly-only, so they run on the scheduled loader-fuzz workflow and by
+# hand, never in the continuous build. The bounded sample of the same property runs on
 # stable inside `cargo test -p cellgov_fuzz`.
 
 set -euo pipefail

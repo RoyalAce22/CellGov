@@ -1,4 +1,4 @@
-//! Structure-aware ELF and PRX images for the loader fuzz targets: the
+//! Structure-aware ELF, PRX and SPU images for the loader fuzz targets: the
 //! seed images a fuzz run starts from, and the decoder that turns a
 //! fuzz byte stream into a near-valid image.
 //!
@@ -13,10 +13,12 @@ mod elf;
 mod mutate;
 mod prx;
 mod seeds;
+mod spu;
 mod stream;
 
 pub use elf::*;
 pub use mutate::*;
 pub use prx::*;
 pub use seeds::*;
+pub use spu::*;
 pub use stream::*;

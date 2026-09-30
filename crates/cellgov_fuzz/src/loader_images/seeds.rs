@@ -1,12 +1,13 @@
 //! The named seed images a fuzz run starts from.
 
 use cellgov_ps3_abi::format::elf::{
-    ELF_PHENTSIZE, ET_EXEC, ET_PRX, PRX_IMPORT_ENTRY_FIRMWARE_SIZE, PRX_IMPORT_ENTRY_MIN_SIZE,
-    PRX_LIB_INFO_SIZE, PT_LOAD, R_PPC64_ADDR32,
+    ELF32_PHDR_SIZE, ELF_PHENTSIZE, ET_EXEC, ET_PRX, PRX_IMPORT_ENTRY_FIRMWARE_SIZE,
+    PRX_IMPORT_ENTRY_MIN_SIZE, PRX_LIB_INFO_SIZE, PT_LOAD, R_PPC64_ADDR32,
 };
 
 use super::elf::{align_up, nops, put_u32, ExecImage, ImageSegment};
 use super::prx::{PrxExportLibrary, PrxImage, PrxImportModule, PrxRelocation, ENTRY_SIZE};
+use super::spu::{SpuElfImage, SpuImageSegment, JOB_IMAGE_CODE_OFFSET};
 
 /// A named seed image.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,8 +98,15 @@ fn import_modules() -> Vec<PrxImportModule> {
     ]
 }
 
-/// Every seed image, in a fixed order.
+/// Every seed image, PPU then SPU, in a fixed order.
 pub fn seeds() -> Vec<Seed> {
+    let mut all = ppu_seeds();
+    all.extend(spu_seeds());
+    all
+}
+
+/// The PPU seed images: ELF64 executables and PRX modules.
+pub fn ppu_seeds() -> Vec<Seed> {
     let mut opd = vec![0u8; 0x40];
     put_u32(&mut opd, 0, SEED_TEXT_VADDR as u32);
     put_u32(&mut opd, 4, SEED_TOC);
@@ -194,6 +202,61 @@ pub fn seeds() -> Vec<Seed> {
         Seed {
             name: "prx_no_system_entry",
             bytes: prx_no_system.render(),
+        },
+    ]
+}
+
+/// SPU `nop` then `stop 0`, the code the SPU seeds carry.
+fn spu_code() -> Vec<u8> {
+    let mut code = Vec::new();
+    // [SPU-ISA p:241 s:10] nop is 01000000001 with a false target.
+    code.extend_from_slice(&0x4020_0000u32.to_be_bytes());
+    // [SPU-ISA p:238 s:10] stop with code 0 is the all-zero word.
+    code.extend_from_slice(&[0; 4]);
+    code
+}
+
+/// The SPU seed images: ELF32 executables for `load_spu_elf`, and a job
+/// image with no ELF header for `load_ls_segments`.
+pub fn spu_seeds() -> Vec<Seed> {
+    let segment = |vaddr, bytes: Vec<u8>, memsz| SpuImageSegment {
+        p_type: PT_LOAD,
+        vaddr,
+        bytes,
+        memsz,
+        flags: 5,
+    };
+    let minimal = SpuElfImage {
+        entry: 0,
+        phentsize: ELF32_PHDR_SIZE as u16,
+        segments: vec![segment(0, spu_code(), 8)],
+        trailer: Vec::new(),
+    };
+    let bss = SpuElfImage {
+        entry: 0x80,
+        phentsize: ELF32_PHDR_SIZE as u16,
+        segments: vec![
+            segment(0x80, spu_code(), 8),
+            segment(0x1000, vec![0x5A; 0x40], 0x400),
+        ],
+        trailer: Vec::new(),
+    };
+    // A job image: its tag word, a header up to the code offset, then code.
+    let mut job = 0xC0DE_C0DEu32.to_be_bytes().to_vec();
+    job.resize(JOB_IMAGE_CODE_OFFSET as usize, 0);
+    job.extend(spu_code());
+    vec![
+        Seed {
+            name: "spu_elf_minimal",
+            bytes: minimal.render(),
+        },
+        Seed {
+            name: "spu_elf_bss_tail",
+            bytes: bss.render(),
+        },
+        Seed {
+            name: "spu_job_image",
+            bytes: job,
         },
     ]
 }
