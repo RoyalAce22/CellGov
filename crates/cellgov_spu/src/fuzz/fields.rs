@@ -12,20 +12,16 @@ pub(super) fn operand_fields(
     field_candidates(descriptor.kind, descriptor.form)
         .into_iter()
         .filter_map(|(mask, class)| {
+            // [SPU-ISA p:150 s:7 Compare, Branch, and Halt Instructions] a halt's RT is a false
+            // target the decoder does not carry, so its bits stay a generated field.
+            // [SPU-ISA p:151 s:7 Compare, Branch, and Halt Instructions] HEQI's RT is a false target.
+            // [SPU-ISA p:152 s:7 Compare, Branch, and Halt Instructions] HGT's RT is a false target.
+            // [SPU-ISA p:153 s:7 Compare, Branch, and Halt Instructions] HGTI's RT is a false target.
+            // [SPU-ISA p:154 s:7 Compare, Branch, and Halt Instructions] HLGT's RT is a false target.
+            // [SPU-ISA p:155 s:7 Compare, Branch, and Halt Instructions] HLGTI's RT is a false target.
             let decoded_field_is_ignored = matches!(
                 descriptor.kind,
-                SpuInstructionKind::Nop
-                    | SpuInstructionKind::Bi
-                    | SpuInstructionKind::Bisl
-                    | SpuInstructionKind::Biz
-                    | SpuInstructionKind::Binz
-                    | SpuInstructionKind::Bihz
-                    | SpuInstructionKind::Bihnz
-                    | SpuInstructionKind::Hbr
-                    | SpuInstructionKind::Hbra
-                    | SpuInstructionKind::Hbrr
-                    | SpuInstructionKind::Sync
-                    | SpuInstructionKind::Heq
+                SpuInstructionKind::Heq
                     | SpuInstructionKind::Heqi
                     | SpuInstructionKind::Hgt
                     | SpuInstructionKind::Hgti

@@ -23,3 +23,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/shufb_relation_tests.rs"]
 mod shufb_relation_tests;
+
+#[cfg(test)]
+#[path = "tests/form_agreement_tests.rs"]
+mod form_agreement_tests;

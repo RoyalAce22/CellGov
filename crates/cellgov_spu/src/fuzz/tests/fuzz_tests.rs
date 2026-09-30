@@ -276,23 +276,18 @@ fn generated_witnesses_and_structural_operations_preserve_kind() {
             .iter()
             .fold(0, |mask, field| mask | field.mask);
         let decoded_but_ignored_fields = match descriptor.kind {
-            SpuInstructionKind::Nop => 0x0000_007f,
-            SpuInstructionKind::Bi
-            | SpuInstructionKind::Bisl
-            | SpuInstructionKind::Biz
-            | SpuInstructionKind::Binz
-            | SpuInstructionKind::Bihz
-            | SpuInstructionKind::Bihnz => 0x000c_0000,
             // [SPU-ISA p:150 s:7] RT is a false target the halts never write.
+            // [SPU-ISA p:151 s:7] HEQI's RT is a false target.
+            // [SPU-ISA p:152 s:7] HGT's RT is a false target.
+            // [SPU-ISA p:153 s:7] HGTI's RT is a false target.
+            // [SPU-ISA p:154 s:7] HLGT's RT is a false target.
+            // [SPU-ISA p:155 s:7] HLGTI's RT is a false target.
             SpuInstructionKind::Heq
             | SpuInstructionKind::Heqi
             | SpuInstructionKind::Hgt
             | SpuInstructionKind::Hgti
             | SpuInstructionKind::Hlgt
             | SpuInstructionKind::Hlgti => 0x0000_007f,
-            SpuInstructionKind::Hbr => 0x0010_ffff,
-            SpuInstructionKind::Hbra | SpuInstructionKind::Hbrr => 0x01ff_ffff,
-            SpuInstructionKind::Sync => 0x0010_0000,
             _ => 0,
         };
         assert_eq!(
