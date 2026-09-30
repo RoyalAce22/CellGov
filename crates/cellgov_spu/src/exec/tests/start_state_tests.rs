@@ -93,7 +93,11 @@ fn a_fresh_unit_starts_with_zero_data_and_overwrite_signal_modes() {
     );
     assert!(c.in_mbox.is_empty());
     assert_eq!(c.out_mbox, None);
-    assert_eq!(c.pending_get, None);
+    // [CBEA p:238 s:16.3.3] the MFC_Cmd count starts at the queue depth.
+    assert_eq!(
+        c.cmd_queue_free,
+        cellgov_ps3_abi::hw::spu::MFC_SPU_QUEUE_DEPTH
+    );
     assert_eq!(c.tag_update, None);
     assert_eq!(c.tag_status_read, None);
     assert!(!c.atomic_status_ready);

@@ -6,12 +6,14 @@
 //! refusal sits on the command. The tag-status word has one bit for
 //! each of the 32 tag groups, and a value past 31 names none of them.
 //! The refusal keeps such a value away from the put path, which expects
-//! a valid `MfcTagId`. It also keeps a parked get's tag inside the 32
+//! a valid `MfcTagId`. It also keeps a queued get's tag inside the 32
 //! groups.
+
+// [CBEA p:115 s:9.1.3 MFC Command Tag Identification Channel] the identification tag is any value between x'0' and x'1F'.
 
 use crate::fault_codes::FAULT_MFC_TAG_ID_OUT_OF_RANGE;
 use crate::SpuExecutionUnit;
-use cellgov_effects::FaultKind;
+use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::GuestMemory;
@@ -72,11 +74,20 @@ fn unit_getting_with_tag(tag: u32) -> SpuExecutionUnit {
     unit
 }
 
-fn run_once(unit: &mut SpuExecutionUnit) -> cellgov_exec::ExecutionStepResult {
+fn run_once(unit: &mut SpuExecutionUnit) -> (cellgov_exec::ExecutionStepResult, Vec<Effect>) {
     let mem = GuestMemory::new(MEM_BYTES);
     let ctx = ExecutionContext::new(&mem);
     let mut effects = Vec::new();
-    unit.run_until_yield(Budget::new(100), &ctx, &mut effects)
+    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+    (result, effects)
+}
+
+/// The tag of the get the step enqueued, or `None` when it enqueued none.
+fn enqueued_tag(effects: &[Effect]) -> Option<u32> {
+    effects.iter().find_map(|effect| match effect {
+        Effect::DmaEnqueue { request, .. } => request.tag_id().map(|tag| u32::from(tag.raw())),
+        _ => None,
+    })
 }
 
 /// The premise: the encoding puts the value on the channel, so the
@@ -101,7 +112,7 @@ fn the_program_writes_the_tag_id_it_was_built_with() {
 #[test]
 fn the_channel_write_is_not_where_a_wide_tag_id_is_checked() {
     let mut unit = unit_writing_tag(FIRST_INVALID_TAG);
-    let result = run_once(&mut unit);
+    let (result, _) = run_once(&mut unit);
 
     assert_ne!(
         result.yield_reason,
@@ -122,7 +133,7 @@ fn the_channel_write_is_not_where_a_wide_tag_id_is_checked() {
 #[test]
 fn the_highest_architected_tag_id_issues_its_command() {
     let mut unit = unit_getting_with_tag(LAST_VALID_TAG);
-    let result = run_once(&mut unit);
+    let (result, effects) = run_once(&mut unit);
 
     assert_eq!(
         result.yield_reason,
@@ -130,10 +141,7 @@ fn the_highest_architected_tag_id_issues_its_command() {
         "31 is inside the range, so the command is enqueued",
     );
     assert_eq!(
-        unit.state()
-            .channels
-            .pending_get
-            .map(|(_, _, _, tag)| u32::from(tag.raw())),
+        enqueued_tag(&effects),
         Some(LAST_VALID_TAG),
         "and the transfer carries the tag the guest named",
     );
@@ -143,7 +151,7 @@ fn the_highest_architected_tag_id_issues_its_command() {
 #[test]
 fn a_tag_id_past_the_architected_range_refuses_its_command() {
     let mut unit = unit_getting_with_tag(FIRST_INVALID_TAG);
-    let result = run_once(&mut unit);
+    let (result, effects) = run_once(&mut unit);
 
     assert_eq!(
         result.yield_reason,
@@ -157,9 +165,10 @@ fn a_tag_id_past_the_architected_range_refuses_its_command() {
         )),
         "the refusal names itself and the value the guest wrote",
     );
-    assert!(
-        unit.state().channels.pending_get.is_none(),
-        "no transfer was parked with a tag outside the 32 groups",
+    assert_eq!(
+        enqueued_tag(&effects),
+        None,
+        "no transfer was queued with a tag outside the 32 groups",
     );
     assert_eq!(
         unit.state().channels.tag_status,
@@ -181,7 +190,7 @@ fn a_tag_id_past_the_architected_range_refuses_its_command() {
 fn a_wide_tag_id_whose_low_byte_is_in_range_refuses_its_command() {
     const LOW_BYTE_ZERO: u32 = 0x100;
     let mut unit = unit_getting_with_tag(LOW_BYTE_ZERO);
-    let result = run_once(&mut unit);
+    let (result, effects) = run_once(&mut unit);
 
     assert_eq!(
         result.fault,
@@ -190,9 +199,10 @@ fn a_wide_tag_id_whose_low_byte_is_in_range_refuses_its_command() {
         )),
         "the whole staged value is checked, not its low byte",
     );
-    assert!(
-        unit.state().channels.pending_get.is_none(),
-        "no transfer was parked under tag 0",
+    assert_eq!(
+        enqueued_tag(&effects),
+        None,
+        "no transfer was queued under tag 0"
     );
 }
 
@@ -204,7 +214,7 @@ fn a_wide_tag_id_whose_low_byte_is_in_range_refuses_its_command() {
 #[test]
 fn a_refused_tag_id_cannot_smear_into_the_fault_class() {
     let mut unit = unit_getting_with_tag(u32::MAX);
-    let result = run_once(&mut unit);
+    let (result, _) = run_once(&mut unit);
 
     assert_eq!(
         unit.state().channels.mfc_tag_id,

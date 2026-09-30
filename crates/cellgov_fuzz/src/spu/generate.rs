@@ -267,7 +267,7 @@ pub(super) fn random_state(rng: &mut Rng) -> Result<SpuState, FuzzError> {
     state.channels.tag_status = rng.next_u32();
     state.channels.atomic_status = rng.next_u32();
     state.channels.in_mbox.clear();
-    state.channels.pending_get = None;
+    state.channels.cmd_queue_free = cellgov_ps3_abi::hw::spu::MFC_SPU_QUEUE_DEPTH;
     state.reservation = if rng.chance(1, 2)? {
         Some(ReservedLine::containing(
             rng.next_u64() & ((1u64 << 42) - 1),
@@ -307,7 +307,7 @@ pub(super) fn state_aware_state(
     // One waiting message, so a mailbox read completes and pops it; an
     // empty mailbox would only ever stall the read.
     state.channels.in_mbox = vec![cellgov_spu::fuzz::SEQUENCE_MAILBOX_MESSAGE];
-    state.channels.pending_get = None;
+    state.channels.cmd_queue_free = cellgov_ps3_abi::hw::spu::MFC_SPU_QUEUE_DEPTH;
     state.reservation = Some(ReservedLine::containing(u64::from(STRUCTURED_LS_DATA_BASE)));
     // [Wang2024 p:340:10 s:3.2] The generator filters candidate inputs to values that satisfy the instruction's precondition before it uses one.
     if let Some(input) = input {

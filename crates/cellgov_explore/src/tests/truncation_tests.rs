@@ -439,7 +439,7 @@ fn a_refusal_of_any_shape_truncates() {
         CommitError::DmaDestinationOutOfRange { effect_index: 0 },
         CommitError::DmaSourceOutOfRange { effect_index: 0 },
         CommitError::DmaPayloadLengthMismatch { effect_index: 0 },
-        CommitError::DmaDirectionUnsupported { effect_index: 0 },
+        CommitError::DmaGetWithPayload { effect_index: 0 },
         CommitError::DmaDestinationReserved {
             effect_index: 0,
             addr: 0,

@@ -5,8 +5,8 @@ use super::spu_unit::{SpuExecutionUnit, SpuSnapshot};
 use super::transfer::{copy_into_local_store, shared_read, CopyRefusal};
 use crate::exec::{SpuFault, SpuStepOutcome};
 use crate::fault_codes::{
-    guest_fault, guest_fault_for, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_GET_UNRESOLVED,
-    FAULT_MFC_READ_UNRESOLVED, FAULT_UNIMPLEMENTED_INSN,
+    guest_fault, guest_fault_for, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_READ_UNRESOLVED,
+    FAULT_UNIMPLEMENTED_INSN,
 };
 use crate::instruction::SpuDecodeError;
 use crate::stop::SpuStopKind;
@@ -44,58 +44,15 @@ impl ExecutionUnit for SpuExecutionUnit {
         // left, so nothing of the old park carries over.
         self.stall = None;
 
-        // This step clears the effect vector below, so the parked
-        // transfer's read enters it after the clear.
-        let mut parked_get_read = None;
         // A group reads complete when this unit has no outstanding
-        // transfer with its tag. A reused tag therefore reads incomplete
-        // until its new transfer lands. A parked get stays outstanding
-        // until its copy below lands. A refused copy leaves it outstanding.
+        // transfer with its tag, so a reused tag reads incomplete until its
+        // new transfer lands.
         // [CBEA p:128 s:9.3.6] a set bit means the group has no outstanding operations.
-        let parked_get_group = self
-            .state
-            .channels
-            .pending_get
-            .map_or(0, |(_, _, _, tag)| tag.status_bit());
-        self.state.channels.tag_status = !(ctx.outstanding_dma_tags() | parked_get_group);
-        if let Some((ea, lsa, size, tag_id)) = self.state.channels.pending_get.take() {
-            // `ea` comes from MFC_EAH and MFC_EAL, so the guest can name
-            // an address no region backs.
-            // [CBEA p:111 s:9 SPU Channel Map] MFC_EAL is a write channel carrying the low-order SPU effective-address command parameter.
-            // A transfer of no bytes touches neither end, so neither
-            // address has to resolve for it.
-            // [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
-            let moved = if size == 0 {
-                Ok(())
-            } else {
-                copy_into_local_store(&mut self.state.ls, ctx.memory(), ea, lsa, size)
-            };
-            if let Err(refusal) = moved {
-                // The tag bit is the guest's only signal that the
-                // transfer finished, so a refused copy faults instead of
-                // publishing it.
-                let (fault, address) = match refusal {
-                    CopyRefusal::Unresolved => (
-                        guest_fault(FAULT_MFC_GET_UNRESOLVED, u32::from(tag_id.raw())),
-                        ea,
-                    ),
-                    CopyRefusal::LocalStoreEscapes => {
-                        (guest_fault(FAULT_LS_OUT_OF_RANGE, lsa), u64::from(lsa))
-                    }
-                };
-                effects.clear();
-                self.status = UnitStatus::Faulted;
-                return ExecutionStepResult {
-                    yield_reason: YieldReason::Fault,
-                    consumed_cost: InstructionCost::new(0),
-                    local_diagnostics: LocalDiagnostics::with_pc_ea(self.state.pc as u64, address),
-                    fault: Some(fault),
-                    syscall_args: None,
-                };
-            }
-            parked_get_read = shared_read(ea, size, self.id);
-            self.state.channels.tag_status = !ctx.outstanding_dma_tags();
-        }
+        self.state.channels.tag_status = !ctx.outstanding_dma_tags();
+        // Each queued command holds a slot until it completes. A count
+        // that rises from 0 here is the Qv event's edge.
+        self.state.channels.cmd_queue_free =
+            spu::MFC_SPU_QUEUE_DEPTH.saturating_sub(ctx.dma_queue_occupancy());
         self.state.channels.settle_tag_update();
         self.state.channels.in_mbox = ctx.inbound_mailbox().to_vec();
 
@@ -107,7 +64,6 @@ impl ExecutionUnit for SpuExecutionUnit {
 
         let mut remaining = budget.raw();
         effects.clear();
-        effects.extend(parked_get_read);
 
         loop {
             let step_pc = self.state.pc as u64;
@@ -196,8 +152,9 @@ impl ExecutionUnit for SpuExecutionUnit {
                     size,
                     acquire_line,
                 } => {
-                    // `ea` can name an address no region backs; see the
-                    // parked-get arm above.
+                    // `ea` comes from MFC_EAH and MFC_EAL, so the guest can
+                    // name an address no region backs.
+                    // [CBEA p:111 s:9 SPU Channel Map] MFC_EAL is a write channel carrying the low-order SPU effective-address command parameter.
                     let read =
                         copy_into_local_store(&mut self.state.ls, ctx.memory(), ea, lsa, size);
                     if let Err(refusal) = read {
@@ -242,6 +199,13 @@ impl ExecutionUnit for SpuExecutionUnit {
                     let local_diagnostics = match f {
                         SpuFault::LsOutOfRange(addr) => {
                             LocalDiagnostics::with_pc_ea(step_pc, u64::from(addr))
+                        }
+                        // The detail half carries the tag, so the address
+                        // rides here.
+                        SpuFault::MfcGetAddressWraps(_) => {
+                            let c = &self.state.channels;
+                            let ea = (u64::from(c.mfc_eah) << 32) | u64::from(c.mfc_eal);
+                            LocalDiagnostics::with_pc_ea(step_pc, ea)
                         }
                         _ => LocalDiagnostics::with_pc(step_pc),
                     };
@@ -371,6 +335,17 @@ impl ExecutionUnit for SpuExecutionUnit {
         self.stall
     }
 
+    /// [CBEA p:60 s:7.5] a get moves main-storage bytes into local storage.
+    fn land_local_store(&mut self, lsa: u32, bytes: &[u8]) -> Result<(), ProblemStateError> {
+        let start = lsa as usize;
+        let target = start
+            .checked_add(bytes.len())
+            .and_then(|end| self.state.ls.get_mut(start..end))
+            .ok_or(ProblemStateError::Refused)?;
+        target.copy_from_slice(bytes);
+        Ok(())
+    }
+
     fn local_memory_hash(&self) -> Option<u64> {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&self.state.ls);
@@ -390,6 +365,7 @@ fn channel_stall(insn: &crate::instruction::SpuInstruction) -> Option<ChannelSta
         spu::SPU_RD_IN_MBOX => StallWake::MailboxDelivery,
         spu::MFC_RD_TAG_STAT => StallWake::DmaCompletion,
         spu::SPU_WR_OUT_MBOX => StallWake::OutboundMailboxRead,
+        spu::MFC_CMD => StallWake::CommandQueueSlot,
         _ => return None,
     };
     Some(ChannelStall { channel, wake })

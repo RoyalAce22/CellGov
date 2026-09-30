@@ -4,6 +4,16 @@
 //! giving a total order that preserves enqueue order among equal times.
 //! `Effect::DmaEnqueue` flows through the commit pipeline into this
 //! queue; completions emit wake events as they drain.
+//!
+//! The queue is every SPU's MFC command queue at once: an issuer's
+//! entries are its commands enqueued and not yet complete, so its free
+//! slots are the queue depth less that count. Commands complete in
+//! `(completion_time, sequence)` order, which with a fixed latency is
+//! issue order for each issuer. Commands without a fence or barrier may
+//! complete in any order, so that one is permitted. The model has no
+//! fenced or barrier form: the SPU refuses one as an unsupported command.
+//!
+//! [CBEA p:53 s:7.1.1] unless a form says otherwise, data-transfer commands execute in any order.
 //
 // [CBE-Handbook p:509 s:19] MFC command queues; out-of-order execution; tag-group ordering via fence/barrier.
 // [CBE-Handbook p:504 s:18.10.4] 16-entry MFC SPU command queue depth.
@@ -106,6 +116,22 @@ impl DmaQueue {
             },
         );
         seq
+    }
+
+    /// For one issuer: how many of its commands are queued, and the
+    /// status bit of every tag group one of them holds outstanding.
+    pub fn issuer_view(&self, issuer: cellgov_event::UnitId) -> (u32, u32) {
+        self.entries
+            .values()
+            .filter(|e| e.completion.issuer() == issuer)
+            .fold((0, 0), |(count, tags), e| {
+                let tag = e
+                    .completion
+                    .request()
+                    .tag_id()
+                    .map_or(0, |tag| tag.status_bit());
+                (count + 1, tags | tag)
+            })
     }
 
     /// Borrow the earliest pending completion without removing it.

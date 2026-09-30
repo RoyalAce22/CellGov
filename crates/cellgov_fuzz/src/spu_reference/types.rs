@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::reference::{ReferenceField, ReferenceOmission, ReferenceProvenance};
 
 /// Current offline SPU reference schema.
-pub const SPU_REFERENCE_SCHEMA_VERSION: u32 = 4;
+pub const SPU_REFERENCE_SCHEMA_VERSION: u32 = 5;
 
 /// Independent source of an SPU observation.
 pub type SpuReferenceProvenance = ReferenceProvenance;
@@ -57,8 +57,10 @@ pub struct SpuReferenceChannels {
     pub tag_status: u32,
     /// Atomic-command status.
     pub atomic_status: u32,
-    /// Pending DMA GET as `(effective address, local address, size, tag)`.
-    pub pending_get: Option<(u64, u32, u32, u8)>,
+    /// Free MFC command-queue slots, the `MFC_Cmd` count; absent means a
+    /// queue with every slot free.
+    #[serde(default = "full_command_queue")]
+    pub mfc_cmd_count: u32,
     /// The TS code of a waiting tag-status update request.
     ///
     /// The code is 1 for any enabled group and 2 for all of them.
@@ -79,6 +81,10 @@ pub struct SpuReferenceChannels {
     pub out_mbox: Option<u32>,
 }
 
+fn full_command_queue() -> u32 {
+    cellgov_ps3_abi::hw::spu::MFC_SPU_QUEUE_DEPTH
+}
+
 impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
     fn from(value: &cellgov_spu::state::SpuChannelSnapshot) -> Self {
         let cellgov_spu::state::SpuChannelSnapshot {
@@ -90,7 +96,7 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             tag_mask,
             tag_status,
             atomic_status,
-            pending_get,
+            cmd_queue_free,
             tag_update,
             tag_status_read,
             atomic_status_ready,
@@ -106,7 +112,7 @@ impl From<&cellgov_spu::state::SpuChannelSnapshot> for SpuReferenceChannels {
             tag_mask: *tag_mask,
             tag_status: *tag_status,
             atomic_status: *atomic_status,
-            pending_get: pending_get.map(|(ea, lsa, size, tag)| (ea, lsa, size, tag.raw())),
+            mfc_cmd_count: *cmd_queue_free,
             tag_update: tag_update.map(|condition| match condition {
                 TagUpdateCondition::Any => MFC_TAG_UPDATE_ANY,
                 TagUpdateCondition::All => MFC_TAG_UPDATE_ALL,

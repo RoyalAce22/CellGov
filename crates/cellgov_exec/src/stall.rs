@@ -16,6 +16,19 @@ pub enum StallWake {
     DmaCompletion,
     /// Another unit reads the message waiting in the outbound mailbox.
     OutboundMailboxRead,
+    /// One of the unit's queued MFC commands completes, freeing a slot
+    /// in its command queue.
+    ///
+    /// [CBEA p:113 s:9.1.1] a write to MFC_Cmd with the command queue full stalls until a slot frees.
+    CommandQueueSlot,
+}
+
+impl StallWake {
+    /// Whether a completion of one of the unit's DMA transfers ends the
+    /// stall.
+    pub const fn ends_on_dma_completion(self) -> bool {
+        matches!(self, Self::DmaCompletion | Self::CommandQueueSlot)
+    }
 }
 
 /// The blocking channel a unit stalled on and the event that wakes it.

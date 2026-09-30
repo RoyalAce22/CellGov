@@ -21,8 +21,9 @@
 //!   `RsxLabelWrite` effects it queues. Its MMIO mirrors do reach
 //!   [`StepFootprint::note_host_writes`].
 //! - A DMA completion's wake of its issuer, which the commit applies
-//!   as a status override and no `WakeUnit` effect carries. The park
-//!   it ends does reach [`StepFootprint::wait_units`].
+//!   as a status override and no `WakeUnit` effect carries, and a get's
+//!   landing in its issuer's local store, which no range names. The
+//!   park the wake ends does reach [`StepFootprint::wait_units`].
 //! - An LV2 handler's park of its caller and the wake that ends it.
 //!   The one park a workload here reaches is the spawn's staged pass
 //!   (`tests/child_init_window.rs`), which every driver refuses with
@@ -53,10 +54,10 @@ pub struct StepFootprint {
     /// message: the unit's own inbound mailbox, when the step asked for
     /// its count. An SPU asks at the start of every step.
     pub mailbox_counts: Vec<MailboxId>,
-    /// Ranges a transfer writes at completion: its destination.
+    /// Ranges a transfer writes at completion: a put's destination.
     ///
-    /// The commit pipeline admits puts alone, so the destination is the
-    /// end that lands in committed memory for every queued transfer.
+    /// A get lands in its issuer's local store, which is not committed
+    /// memory, so a get adds nothing here.
     pub dma_writes: Vec<ByteRange>,
     /// Ranges a transfer reads at completion: the source of a
     /// transfer no inline payload carries.
@@ -88,7 +89,7 @@ pub struct StepFootprint {
     /// conflicts.
     pub reservation_lines: Vec<u64>,
     /// What every transfer in flight during this step touches at its
-    /// landing: each one's destination, and the source of one no inline
+    /// landing: a put's destination, and the source of one no inline
     /// payload carries.
     ///
     /// A transfer lands at the first commit whose clock passed its
@@ -174,11 +175,14 @@ impl StepFootprint {
             .iter()
             .map(|(completion, payloaded)| (completion, *payloaded));
         for (completion, payloaded) in queued.chain(fired) {
-            self.inflight_dma_ranges.push(completion.destination());
-            // See the doc on `dma_reads`.
-            if !payloaded {
-                self.inflight_dma_ranges.push(completion.source());
-            }
+            // A get lands in its issuer's local store, not in memory, so
+            // only the main-storage ends are ranges here. See the doc on
+            // `dma_reads` for the payloaded put.
+            let request = completion.request();
+            self.inflight_dma_ranges
+                .extend(request.main_storage_write());
+            self.inflight_dma_ranges
+                .extend(request.main_storage_read(payloaded));
         }
     }
 
@@ -331,10 +335,9 @@ impl StepFootprint {
                     fp.mailbox_receives.push(*mailbox);
                 }
                 Effect::DmaEnqueue { request, payload } => {
-                    fp.dma_writes.push(request.destination());
-                    if payload.is_none() {
-                        fp.dma_reads.push(request.source());
-                    }
+                    fp.dma_writes.extend(request.main_storage_write());
+                    fp.dma_reads
+                        .extend(request.main_storage_read(payload.is_some()));
                 }
                 Effect::WaitOnEvent { target, source } => {
                     fp.wait_units.push(*source);

@@ -128,11 +128,12 @@ fn a_step_with_no_transfer_records_no_read() {
     assert!(read_ranges(&effects).is_empty(), "{effects:?}");
 }
 
+/// A get's source is read when the transfer completes, not when the
+/// unit issues it, so the issuing step records the queued transfer and
+/// no read.
 #[test]
-fn a_parked_get_records_its_read_after_the_effect_vector_is_cleared() {
+fn a_queued_get_records_its_transfer_and_no_read_at_issue() {
     let mut unit = unit_issuing(MFC_GET);
-    // A size the GETLLAR path cannot produce, so the recorded length
-    // can only come from this transfer.
     unit.state_mut().channels.mfc_size = 64;
     let mem = GuestMemory::new(MEM_BYTES);
     let ctx = ExecutionContext::new(&mem);
@@ -141,18 +142,13 @@ fn a_parked_get_records_its_read_after_the_effect_vector_is_cleared() {
     let issuing = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
     assert_eq!(issuing.yield_reason, YieldReason::DmaSubmitted);
     assert!(read_ranges(&effects).is_empty(), "{effects:?}");
-
-    // The step's clear drops this, so the assert below sees only the
-    // parked read.
-    effects.push(Effect::RsxFlipRequest { buffer_index: 0 });
-    let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
-
-    assert_eq!(
-        effects,
-        [Effect::SharedReadIntent {
-            range: ByteRange::new(GuestAddr::new(SOURCE_EA), 64).unwrap(),
-            source: UnitId::new(UNIT),
-        }]
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::DmaEnqueue { request, payload: None }]
+                if request.source() == ByteRange::new(GuestAddr::new(SOURCE_EA), 64).unwrap()
+        ),
+        "{effects:?}"
     );
 }
 

@@ -30,6 +30,7 @@ pub struct ExecutionContext<'a> {
     /// `drain_retired_state_hashes`.
     trace_per_step: bool,
     outstanding_dma_tags: u32,
+    dma_queue_occupancy: u32,
     inbound_mailbox: &'a [u32],
     /// Set when the unit reads [`Self::inbound_mailbox`], so the
     /// runtime knows the step read its mailbox. It records what the
@@ -50,6 +51,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
+            dma_queue_occupancy: 0,
             inbound_mailbox: &[],
             mailbox_read: None,
         }
@@ -68,6 +70,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
+            dma_queue_occupancy: 0,
             inbound_mailbox: &[],
             mailbox_read: None,
         }
@@ -88,6 +91,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
+            dma_queue_occupancy: 0,
             inbound_mailbox: &[],
             mailbox_read: None,
         }
@@ -112,6 +116,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
+            dma_queue_occupancy: 0,
             inbound_mailbox: &[],
             mailbox_read: None,
         }
@@ -158,6 +163,16 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
+    /// Number of the unit's MFC commands queued and not yet complete at
+    /// the start of the step.
+    #[inline]
+    pub const fn with_dma_queue_occupancy(self, count: u32) -> Self {
+        Self {
+            dma_queue_occupancy: count,
+            ..self
+        }
+    }
+
     /// The messages waiting in the unit's own inbound mailbox at the
     /// start of the step, oldest first.
     #[inline]
@@ -199,6 +214,12 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn outstanding_dma_tags(&self) -> u32 {
         self.outstanding_dma_tags
+    }
+
+    /// Number of this unit's MFC commands queued and not yet complete.
+    #[inline]
+    pub const fn dma_queue_occupancy(&self) -> u32 {
+        self.dma_queue_occupancy
     }
 
     /// Committed memory view, borrowed for the step's lifetime.

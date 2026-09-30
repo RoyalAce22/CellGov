@@ -4,7 +4,7 @@
 //! forces every outstanding transfer into the final memory snapshot.
 
 use cellgov_dma::DmaCompletion;
-use cellgov_exec::{StallWake, UnitStatus};
+use cellgov_exec::UnitStatus;
 use cellgov_time::GuestTicks;
 use cellgov_trace::HostWriter;
 
@@ -32,6 +32,10 @@ impl Runtime {
     /// own MFC transfer is a local SPE action rather than that outside
     /// entity.
     fn apply_dma_transfer(&mut self, c: &DmaCompletion, payload: Option<&[u8]>) {
+        if c.direction() == cellgov_dma::DmaDirection::Get {
+            self.land_get(c);
+            return;
+        }
         let owned;
         let bytes = if let Some(data) = payload {
             data
@@ -78,6 +82,38 @@ impl Runtime {
         }
     }
 
+    /// Land a completed get: read its source now and write the bytes
+    /// into the issuer's local store.
+    ///
+    /// The source is read at completion, so a store another unit
+    /// committed while the get was in flight is what lands.
+    fn land_get(&mut self, c: &DmaCompletion) {
+        let bytes = if c.length() == 0 {
+            Vec::new()
+        } else {
+            self.memory
+                .read(c.source())
+                .expect("DMA get source mapped and readable at enqueue")
+                .to_vec()
+        };
+        // The destination is a local-store offset, below 2^32.
+        let lsa = c.destination().start().raw() as u32;
+        let landed = match self.registry.get_mut(c.issuer()) {
+            Some(unit) => unit.land_local_store(lsa, &bytes),
+            None => Err(cellgov_exec::ProblemStateError::UnknownUnit),
+        };
+        if let Err(err) = landed {
+            self.lv2_host.log_invariant_break(
+                "runtime.dma_get_unlanded",
+                format_args!(
+                    "{:?}: a completed MFC get of {} bytes to local store 0x{lsa:08x} did not \n                     land ({err:?}); the issuer checked the range at issue",
+                    c.issuer(),
+                    c.length(),
+                ),
+            );
+        }
+    }
+
     /// Pop and apply DMA completions whose modeled time has arrived;
     /// returns the fired list for trace recording.
     pub(super) fn fire_dma_completions(&mut self) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
@@ -111,7 +147,7 @@ impl Runtime {
                 .registry
                 .get(c.issuer())
                 .and_then(|unit| unit.channel_stall())
-                .is_some_and(|stall| stall.wake != StallWake::DmaCompletion)
+                .is_some_and(|stall| !stall.wake.ends_on_dma_completion())
             {
                 continue;
             }
@@ -121,15 +157,18 @@ impl Runtime {
         due
     }
 
-    /// Returns one bit for each tag group with a `unit` transfer in the queue.
+    /// For `unit`: how many of its MFC commands are queued, and one bit
+    /// for each tag group with one of its transfers in the queue.
     ///
     /// [CBEA p:128 s:9.3.6] a tag group reads complete when it has no outstanding operations.
+    pub(super) fn unit_dma_view(&self, unit: cellgov_event::UnitId) -> (u32, u32) {
+        self.dma_queue.issuer_view(unit)
+    }
+
+    /// One bit for each tag group with a `unit` transfer in the queue.
+    #[cfg(test)]
     pub(super) fn outstanding_dma_tags(&self, unit: cellgov_event::UnitId) -> u32 {
-        self.dma_queue
-            .pending()
-            .filter(|(c, _)| c.issuer() == unit)
-            .filter_map(|(c, _)| c.request().tag_id())
-            .fold(0, |bits, tag| bits | tag.status_bit())
+        self.unit_dma_view(unit).1
     }
 
     /// Drain all pending DMA completions regardless of scheduled time;

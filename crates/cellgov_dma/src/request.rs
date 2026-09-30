@@ -99,6 +99,27 @@ impl DmaRequest {
         self.issuer
     }
 
+    /// The main-storage range the transfer writes: a put's destination.
+    /// A get writes the issuer's local store, which is not main storage.
+    #[inline]
+    pub const fn main_storage_write(self) -> Option<ByteRange> {
+        match self.direction {
+            DmaDirection::Put => Some(self.destination),
+            DmaDirection::Get => None,
+        }
+    }
+
+    /// The main-storage range the transfer reads: a get's source, or a
+    /// put's source when no inline payload already carries its bytes.
+    #[inline]
+    pub const fn main_storage_read(self, payloaded: bool) -> Option<ByteRange> {
+        match self.direction {
+            DmaDirection::Get => Some(self.source),
+            DmaDirection::Put if payloaded => None,
+            DmaDirection::Put => Some(self.source),
+        }
+    }
+
     /// Length of the transfer in bytes.
     #[inline]
     pub const fn length(self) -> u64 {

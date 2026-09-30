@@ -206,6 +206,22 @@ pub trait ExecutionUnit {
         None
     }
 
+    /// Write `bytes` into the unit's local store at `lsa`: the landing of
+    /// an MFC get the unit queued, which completes between its steps.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ProblemStateError::NoProblemState`] for a unit without a
+    /// local store; [`crate::ProblemStateError::Refused`] when the range
+    /// leaves the local store.
+    fn land_local_store(
+        &mut self,
+        _lsa: u32,
+        _bytes: &[u8],
+    ) -> Result<(), crate::ProblemStateError> {
+        Err(crate::ProblemStateError::NoProblemState)
+    }
+
     /// An `SPU_RunCntl` stop request. `waiting` says the unit waits on a
     /// blocked channel. A stopped unit stays as it is.
     ///

@@ -29,8 +29,8 @@ pub enum SpuChannelField {
     AtomicStatus,
     /// Inbound mailbox messages the step has not read.
     InboundMailbox,
-    /// Pending DMA GET command.
-    PendingGet,
+    /// Free MFC command-queue slots.
+    CommandQueue,
     /// Waiting tag-status update request.
     TagUpdate,
     /// Latched tag status not yet read.
@@ -65,8 +65,8 @@ fn channel_differences(
             SpuChannelField::InboundMailbox,
         ),
         (
-            before.pending_get != after.pending_get,
-            SpuChannelField::PendingGet,
+            before.cmd_queue_free != after.cmd_queue_free,
+            SpuChannelField::CommandQueue,
         ),
         (
             before.tag_update != after.tag_update,
@@ -417,7 +417,7 @@ impl SpuAllowedFootprint {
                     spu::MFC_SIZE => Some(SpuChannelField::MfcSize),
                     spu::MFC_TAG_ID => Some(SpuChannelField::MfcTagId),
                     spu::MFC_WR_TAG_MASK => Some(SpuChannelField::TagMask),
-                    spu::MFC_CMD => Some(SpuChannelField::PendingGet),
+                    spu::MFC_CMD => Some(SpuChannelField::CommandQueue),
                     spu::MFC_WR_TAG_UPDATE | spu::SPU_WR_OUT_MBOX | spu::SPU_WR_OUT_INTR_MBOX => {
                         None
                     }

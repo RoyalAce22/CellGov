@@ -268,7 +268,8 @@ impl Runtime {
             {
                 Some(stall) => match stall.wake {
                     cellgov_exec::StallWake::MailboxDelivery => BlockReason::MailboxEmpty,
-                    cellgov_exec::StallWake::DmaCompletion => BlockReason::DmaWait,
+                    cellgov_exec::StallWake::DmaCompletion
+                    | cellgov_exec::StallWake::CommandQueueSlot => BlockReason::DmaWait,
                     cellgov_exec::StallWake::OutboundMailboxRead => {
                         BlockReason::OutboundMailboxFull
                     }

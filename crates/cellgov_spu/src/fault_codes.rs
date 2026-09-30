@@ -38,12 +38,11 @@ pub(crate) const FAULT_UNIMPLEMENTED_INSN: u32 = 0x0005_0000;
 /// A refused `rchcnt`, distinct from a refused `rdch` / `wrch` on the
 /// same channel.
 pub(crate) const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
-/// A parked MFC GET whose effective address resolves to no region. Its
-/// low bits carry the transfer's tag id; [`LocalDiagnostics::faulting_ea`]
-/// carries the effective address whole. A destination that escapes
-/// local store is [`FAULT_LS_OUT_OF_RANGE`], as it is for a put.
-///
-/// [`LocalDiagnostics::faulting_ea`]: cellgov_exec::LocalDiagnostics::faulting_ea
+/// An MFC GET whose effective-address range runs past the end of the
+/// address space. Its low bits carry the transfer's tag id. A source no
+/// region backs is the commit's refusal of the enqueue, and a
+/// destination that escapes local store is [`FAULT_LS_OUT_OF_RANGE`], as
+/// it is for a put.
 pub(crate) const FAULT_MFC_GET_UNRESOLVED: u32 = 0x0007_0000;
 /// An MFC command whose staged tag id is outside 0..31. The low bits
 /// carry the value the guest wrote, masked to 16 bits.
@@ -124,6 +123,7 @@ pub(crate) fn guest_fault_for(fault: SpuFault) -> FaultKind {
             guest_fault(FAULT_UNSUPPORTED_CHANNEL_COUNT, channel as u32)
         }
         SpuFault::TagIdOutOfRange(tag) => guest_fault(FAULT_MFC_TAG_ID_OUT_OF_RANGE, tag),
+        SpuFault::MfcGetAddressWraps(tag) => guest_fault(FAULT_MFC_GET_UNRESOLVED, u32::from(tag)),
         SpuFault::ChannelStall(channel) => guest_fault(FAULT_CHANNEL_STALL, u32::from(channel)),
         SpuFault::ReservedTagUpdate(value) => guest_fault(FAULT_RESERVED_TAG_UPDATE, value),
         SpuFault::UndefinedConversionScale(imm) => {

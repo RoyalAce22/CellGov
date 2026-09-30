@@ -284,7 +284,14 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                 if interaction == SpuSequenceInteraction::Reservation {
                     assert!(first.0.state.reservation.is_none());
                 } else if interaction == SpuSequenceInteraction::DmaGet {
-                    assert!(first.0.state.channels.pending_get.is_some());
+                    assert!(matches!(
+                        &first.0.terminal_outcome,
+                        Some(SpuStepOutcome::Yield { effects, .. }) if matches!(
+                            effects.first(),
+                            Some(cellgov_effects::Effect::DmaEnqueue { request, payload: None })
+                                if request.main_storage_write().is_none()
+                        )
+                    ));
                 }
             }
             SpuSequenceInteraction::MemoryRead => {
@@ -360,7 +367,13 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                     effects.clear();
                 }
             }
-            SpuSequenceInteraction::DmaGet => defective.0.state.channels.pending_get = None,
+            SpuSequenceInteraction::DmaGet => {
+                if let Some(SpuStepOutcome::Yield { effects, .. }) =
+                    &mut defective.0.terminal_outcome
+                {
+                    effects.clear();
+                }
+            }
             SpuSequenceInteraction::MemoryRead => {
                 defective.0.terminal_outcome = Some(SpuStepOutcome::Continue)
             }

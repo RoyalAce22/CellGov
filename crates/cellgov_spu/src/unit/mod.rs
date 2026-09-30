@@ -12,10 +12,6 @@ pub use spu_unit::{SpuExecutionUnit, SpuSnapshot};
 mod read_intent_tests;
 
 #[cfg(test)]
-#[path = "tests/parked_get_tests.rs"]
-mod parked_get_tests;
-
-#[cfg(test)]
 #[path = "tests/fall_through_wrap_tests.rs"]
 mod fall_through_wrap_tests;
 

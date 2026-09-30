@@ -87,24 +87,18 @@ fn a_refused_getllar_carries_the_line_address_whole() {
 }
 
 #[test]
-fn a_refused_parked_get_carries_the_effective_address_whole() {
+fn a_get_whose_source_runs_past_the_address_space_is_refused_at_issue() {
     let mem = GuestMemory::new(MEM_BYTES);
-    let mut unit = unit_issuing(MFC_GET, UNMAPPED_EA, 0x200, 64);
+    // ea + 64 carries out of the 64-bit space.
+    let mut unit = unit_issuing(MFC_GET, u64::MAX - 0x3F, 0x200, 64);
     let issued = run_once(&mut unit, &mem);
+    assert_eq!(issued.yield_reason, YieldReason::Fault);
+    assert_eq!(class_of(&issued), FAULT_MFC_GET_UNRESOLVED);
+    assert_eq!(issued.local_diagnostics.pc, Some(4), "the wrch");
     assert_eq!(
-        issued.yield_reason,
-        YieldReason::DmaSubmitted,
-        "the premise: the get parks"
-    );
-
-    let performed = run_once(&mut unit, &mem);
-    assert_eq!(performed.yield_reason, YieldReason::Fault);
-    assert_eq!(class_of(&performed), FAULT_MFC_GET_UNRESOLVED);
-    assert_eq!(
-        performed.local_diagnostics.faulting_ea,
-        Some(UNMAPPED_EA),
-        "the detail half carries the tag id, so the address has nowhere \
-         else to go",
+        issued.local_diagnostics.faulting_ea,
+        Some(u64::MAX - 0x3F),
+        "the detail half carries the tag id, so the address rides here",
     );
 }
 

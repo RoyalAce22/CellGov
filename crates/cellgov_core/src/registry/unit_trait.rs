@@ -94,6 +94,14 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::channel_stall`].
     fn channel_stall(&self) -> Option<cellgov_exec::ChannelStall>;
 
+    /// Land an MFC get's bytes in the unit's local store. See
+    /// [`ExecutionUnit::land_local_store`].
+    ///
+    /// # Errors
+    ///
+    /// As for [`ExecutionUnit::land_local_store`].
+    fn land_local_store(&mut self, lsa: u32, bytes: &[u8]) -> Result<(), ProblemStateError>;
+
     /// An `SPU_RunCntl` stop request. See [`ExecutionUnit::request_stop`].
     ///
     /// # Errors
@@ -225,6 +233,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn channel_stall(&self) -> Option<cellgov_exec::ChannelStall> {
         ExecutionUnit::channel_stall(self)
+    }
+
+    #[inline]
+    fn land_local_store(&mut self, lsa: u32, bytes: &[u8]) -> Result<(), ProblemStateError> {
+        ExecutionUnit::land_local_store(self, lsa, bytes)
     }
 
     #[inline]

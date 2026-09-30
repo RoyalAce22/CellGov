@@ -5,9 +5,7 @@ use cellgov_sync::ReservedLine;
 
 use crate::stop::SpuStop;
 
-use cellgov_ps3_abi::hw::spu::{
-    MfcTagId, MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY, MFC_TAG_UPDATE_IMMEDIATE,
-};
+use cellgov_ps3_abi::hw::spu::{MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY, MFC_TAG_UPDATE_IMMEDIATE};
 pub use cellgov_ps3_abi::hw::spu::{SPU_LSLR_FULL, SPU_LS_SIZE, SPU_REG_COUNT};
 
 /// Full SPU architectural state.
@@ -101,8 +99,8 @@ pub struct SpuChannelSnapshot {
     pub tag_status: u32,
     /// Status of the last atomic command.
     pub atomic_status: u32,
-    /// Pending MFC GET request.
-    pub pending_get: Option<(u64, u32, u32, MfcTagId)>,
+    /// Free slots in the MFC command queue.
+    pub cmd_queue_free: u32,
     /// A waiting conditional tag-status update request.
     pub tag_update: Option<TagUpdateCondition>,
     /// The `MFC_RdTagStat` data of a met update request, not yet read.
@@ -139,7 +137,7 @@ impl SpuObservableSnapshot {
             tag_mask,
             tag_status,
             atomic_status,
-            pending_get,
+            cmd_queue_free,
             tag_update,
             tag_status_read,
             atomic_status_ready,
@@ -161,7 +159,7 @@ impl SpuObservableSnapshot {
                 tag_mask: *tag_mask,
                 tag_status: *tag_status,
                 atomic_status: *atomic_status,
-                pending_get: *pending_get,
+                cmd_queue_free: *cmd_queue_free,
                 tag_update: *tag_update,
                 tag_status_read: *tag_status_read,
                 atomic_status_ready: *atomic_status_ready,
@@ -413,10 +411,17 @@ pub struct ChannelState {
     ///
     /// [CBEA p:111 s:9] MFC_RdAtomicStat channel x'1B': atomic-command completion status.
     pub atomic_status: u32,
-    /// Pending DMA Get (ea, lsa, size, tag); the next `run_until_yield`
-    /// copies it at its start from the committed memory snapshot. Its
-    /// tag group reads outstanding in `tag_status` until the copy lands.
-    pub pending_get: Option<(u64, u32, u32, MfcTagId)>,
+    /// Free slots in the MFC command queue: the queue depth less the
+    /// unit's commands queued and not yet complete, which the runtime
+    /// reports at the start of each step. It is the `MFC_Cmd` count, and
+    /// a put or get the step enqueues takes one.
+    ///
+    /// A count that rises from 0 at a step's start is where the Qv event
+    /// comes from: a slot freed while the queue was full.
+    ///
+    /// [CBEA p:113 s:9.1.1] the MFC_Cmd count is the number of free command-queue slots.
+    /// [CBEA p:159 s:9.12.3] a slot freeing when the queue was full raises the Qv event.
+    pub cmd_queue_free: u32,
     /// A waiting conditional tag-status update request.
     ///
     /// [CBEA p:127 s:9.3.5] an update request updates the status immediately, when any enabled group completes, or when all enabled groups complete.
@@ -467,7 +472,8 @@ impl ChannelState {
             tag_status: 0,
             // x'1B' data.
             atomic_status: 0,
-            pending_get: None,
+            // MFC_Cmd count: the queue depth.
+            cmd_queue_free: cellgov_ps3_abi::hw::spu::MFC_SPU_QUEUE_DEPTH,
             tag_update: None,
             // x'18' count 0.
             tag_status_read: None,

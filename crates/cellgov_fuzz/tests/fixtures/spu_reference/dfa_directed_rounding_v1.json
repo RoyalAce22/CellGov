@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "case_id": "spu-isa-dfa-directed-rounding",
   "provenance": {
     "kind": "documented_vector",

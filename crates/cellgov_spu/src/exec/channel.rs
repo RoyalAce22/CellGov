@@ -206,9 +206,8 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         spu::SPU_RD_MACH_STAT => 1,
         // [CBEA p:112 s:9.1] the MFC command parameter channels are nonblocking and count 1.
         spu::MFC_LSA | spu::MFC_EAH | spu::MFC_EAL | spu::MFC_SIZE | spu::MFC_TAG_ID => 1,
-        // [CBEA p:113 s:9.1.1] MFC_Cmd counts the free command-queue slots. The model keeps no
-        // bounded queue and its wrch never stalls on a full one, so every slot counts as free.
-        spu::MFC_CMD => spu::MFC_SPU_QUEUE_DEPTH,
+        // [CBEA p:113 s:9.1.1] MFC_Cmd counts the free command-queue slots.
+        spu::MFC_CMD => channels.cmd_queue_free,
         // [CBEA p:125 s:9.3.3] MFC_WrTagMask is nonblocking and has no count.
         spu::MFC_WR_TAG_MASK => 1,
         // [CBEA p:127 s:9.3.5] MFC_WrTagUpdate counts 0 until the MFC takes the request, then 1.
@@ -245,6 +244,11 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
 }
 
 fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
+    // [CBEA p:113 s:9.1.1] a write to MFC_Cmd with the command queue full stalls until a slot frees.
+    // [CBEA p:65 s:7.8] the immediate atomic commands also need a free slot, though they are not queued behind other commands.
+    if state.channels.cmd_queue_free == 0 {
+        return stall();
+    }
     // [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] A set bit above the tag field suspends MFC command queue processing, so no command naming that tag is processed.
     // The model has no suspended queue to hold the command in, and a
     // value past 31 names no group in the tag-status word. The command
@@ -302,6 +306,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                     state.reservation = None;
                 }
             }
+            state.channels.cmd_queue_free -= 1;
             SpuStepOutcome::Yield {
                 effects: vec![Effect::DmaEnqueue {
                     request,
@@ -311,10 +316,30 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             }
         }
         // [CBEA p:60 s:7. MFC Commands sub:7.5 Get Commands (Main Storage to Local Storage)] get: copy main-storage bytes into LS.
+        // The get joins the command queue. The runtime reads its source
+        // when it completes and lands the bytes in local store, so the
+        // local-store end is checked here, where the unit can refuse it.
         spu::MFC_GET => {
-            state.channels.pending_get = Some((ea, lsa, size, tag));
+            let fits = (lsa as usize)
+                .checked_add(size as usize)
+                .is_some_and(|end| end <= state.ls.len());
+            if !fits {
+                return SpuStepOutcome::Fault(SpuFault::LsOutOfRange(lsa));
+            }
+            let Some(src) = ByteRange::new(GuestAddr::new(ea), size as u64) else {
+                return SpuStepOutcome::Fault(SpuFault::MfcGetAddressWraps(tag.raw()));
+            };
+            let dst =
+                ByteRange::new(GuestAddr::new(lsa as u64), size as u64).expect("valid LS range");
+            let request = DmaRequest::new(DmaDirection::Get, src, dst, unit_id)
+                .expect("matching sizes")
+                .with_tag_id(tag);
+            state.channels.cmd_queue_free -= 1;
             SpuStepOutcome::Yield {
-                effects: vec![],
+                effects: vec![Effect::DmaEnqueue {
+                    request,
+                    payload: None,
+                }],
                 reason: YieldReason::DmaSubmitted,
             }
         }

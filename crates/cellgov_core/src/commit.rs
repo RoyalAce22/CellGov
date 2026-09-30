@@ -116,15 +116,13 @@ pub enum CommitError {
         /// Index of the offending effect within the batch.
         effect_index: usize,
     },
-    /// A `DmaEnqueue` names a direction the completion does not model.
+    /// A `Get` `DmaEnqueue` carries an inline payload.
     ///
-    /// The completion writes the request's destination into committed
-    /// space 0 whatever the direction says, which is the `Put` reading.
-    /// A `Get` names the local-store end as its destination, so
-    /// applying it there would land the transfer in main memory at a
-    /// local-store address.
-    #[error("effect[{effect_index}]: DMA direction is not modelled")]
-    DmaDirectionUnsupported {
+    /// A get reads its source when it completes, so bytes captured at
+    /// enqueue would land in local store instead of the source's bytes
+    /// at completion.
+    #[error("effect[{effect_index}]: DMA get carries an inline payload")]
+    DmaGetWithPayload {
         /// Index of the offending effect within the batch.
         effect_index: usize,
     },
@@ -421,10 +419,20 @@ impl CommitPipeline {
                         signal_updates += 1;
                     }
                     Effect::DmaEnqueue { request, payload } => {
-                        if request.direction() != DmaDirection::Put {
+                        // A get writes its issuer's local store, which only
+                        // the issuer can land, so the issuer must exist and
+                        // the bytes come from the source at completion.
+                        let get = request.direction() == DmaDirection::Get;
+                        if get && ctx.units.get(request.issuer()).is_none() {
+                            return Err(CommitError::UnknownSourceUnit {
+                                effect_index: idx,
+                                source_unit: request.issuer(),
+                            });
+                        }
+                        if get && payload.is_some() {
                             ctx.units
                                 .set_status_override(request.issuer(), UnitStatus::Faulted);
-                            return Err(CommitError::DmaDirectionUnsupported { effect_index: idx });
+                            return Err(CommitError::DmaGetWithPayload { effect_index: idx });
                         }
                         if let Some(bytes) = payload {
                             if bytes.len() as u64 != request.destination().length() {
@@ -434,7 +442,10 @@ impl CommitPipeline {
                                     effect_index: idx,
                                 });
                             }
-                        } else {
+                        } else if !(get && request.length() == 0) {
+                            // A get of no bytes reads nothing, so its source
+                            // need not resolve.
+                            // [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
                             let src = request.source();
                             // Unlogged: the transfer's own read at
                             // completion is the one the runtime reports,
@@ -457,9 +468,15 @@ impl CommitPipeline {
                         }
                         let dst = request.destination();
                         // Space 0, whatever space the issuer runs in;
-                        // see the doc on `CommitContext::dma_memory`.
+                        // see the doc on `CommitContext::dma_memory`. A
+                        // get's destination is local store, not memory.
                         let dst_mem: &GuestMemory = ctx.dma_memory.unwrap_or(&*ctx.memory);
-                        if let Err(err) = dst_mem.validate_write(dst, dst.length() as usize) {
+                        let written = if get {
+                            Ok(())
+                        } else {
+                            dst_mem.validate_write(dst, dst.length() as usize)
+                        };
+                        if let Err(err) = written {
                             // Without the mark the issuer runs again and
                             // `MFC_RD_TAG_STAT` reads its tag group
                             // complete: the refused transfer never entered
@@ -629,7 +646,9 @@ impl CommitPipeline {
                         .or_in(*value);
                 }
                 Effect::DmaEnqueue { request, payload } => {
-                    let completion_time = ctx.dma_latency.completion_time(request, ctx.now);
+                    let completion_time =
+                        ctx.dma_latency
+                            .completion_time(request, ctx.now, &*ctx.dma_queue);
                     let completion = DmaCompletion::new(*request, completion_time);
                     ctx.dma_queue.enqueue(completion, payload.clone());
                 }

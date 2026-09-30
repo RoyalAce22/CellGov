@@ -96,7 +96,13 @@ fn each_refused_enqueue_faults_the_issuer() {
         enqueue(range(UNMAPPED, 4), range(0, 4), None),
         enqueue(range(0, 4), range(4, 4), Some(vec![1, 2, 3])),
         enqueue(range(0, 4), range(UNMAPPED, 4), None),
-        request(DmaDirection::Get, range(0, 4), range(4, 4), None),
+        request(
+            DmaDirection::Get,
+            range(0, 4),
+            range(4, 4),
+            Some(vec![1, 2, 3, 4]),
+        ),
+        request(DmaDirection::Get, range(UNMAPPED, 4), range(4, 4), None),
     ];
     for shape in shapes {
         let (err, status) = refused(vec![shape]);
@@ -104,20 +110,44 @@ fn each_refused_enqueue_faults_the_issuer() {
     }
 }
 
-/// A `Get` names the local-store end as its destination, which the
-/// completion would write into main memory.
+/// A get reads its source when it completes, so an inline payload is
+/// refused by name.
 #[test]
-fn a_get_is_refused_by_name() {
+fn a_get_with_an_inline_payload_is_refused_by_name() {
     let err = refusal_of(vec![request(
         DmaDirection::Get,
         range(0, 4),
         range(4, 4),
+        Some(vec![1, 2, 3, 4]),
+    )]);
+    assert_eq!(err, CommitError::DmaGetWithPayload { effect_index: 0 });
+}
+
+/// A get's destination is its issuer's local store, not memory, so only
+/// its source has to resolve; a get of no bytes reads none.
+/// [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
+#[test]
+fn a_get_resolves_only_its_source() {
+    let err = refusal_of(vec![request(
+        DmaDirection::Get,
+        range(UNMAPPED, 4),
+        range(0, 4),
         None,
     )]);
-    assert_eq!(
-        err,
-        CommitError::DmaDirectionUnsupported { effect_index: 0 }
-    );
+    assert_eq!(err, CommitError::DmaSourceOutOfRange { effect_index: 0 });
+    for (source, destination) in [
+        (range(0, 4), range(UNMAPPED, 4)),
+        (range(UNMAPPED, 0), range(0, 0)),
+    ] {
+        let mut bed = CommitTestBed::new(8);
+        bed.units.register_with(DummyUnit::runnable);
+        let (result, e) = step_with(
+            YieldReason::BudgetExhausted,
+            vec![request(DmaDirection::Get, source, destination, None)],
+        );
+        let outcome = bed.process(&result, &e).expect("the get reaches the queue");
+        assert_eq!(outcome.dma_enqueued, 1);
+    }
 }
 
 /// The premise for the refusals above: the same enqueue with both ends

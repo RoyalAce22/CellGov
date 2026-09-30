@@ -1,7 +1,7 @@
 //! Parsing and validation of an SPU reference artifact, and its initial state.
 
 use cellgov_ps3_abi::hw::spu::{
-    MfcTagId, MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY, SPU_IN_MBOX_DEPTH,
+    MFC_SPU_QUEUE_DEPTH, MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY, SPU_IN_MBOX_DEPTH,
 };
 use cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED;
 use cellgov_spu::state::{SpuState, TagUpdateCondition, SPU_LS_SIZE, SPU_REG_COUNT};
@@ -82,17 +82,7 @@ impl SpuReferenceInput {
             state.channels.tag_mask = channels.tag_mask;
             state.channels.tag_status = channels.tag_status;
             state.channels.atomic_status = channels.atomic_status;
-            state.channels.pending_get = match channels.pending_get {
-                None => None,
-                Some((ea, lsa, size, tag)) => Some((
-                    ea,
-                    lsa,
-                    size,
-                    MfcTagId::new(tag).ok_or(SpuReferenceError::Invalid {
-                        field: "initial_state.channels.pending_get",
-                    })?,
-                )),
-            };
+            state.channels.cmd_queue_free = channels.mfc_cmd_count;
             state.channels.tag_update = match channels.tag_update {
                 None => None,
                 Some(MFC_TAG_UPDATE_ANY) => Some(TagUpdateCondition::Any),
@@ -204,6 +194,26 @@ impl SpuReferenceArtifact {
         if self.expected.channels.as_value().is_some_and(overfull) {
             return Err(invalid("expected.channels.in_mbox"));
         }
+        // [CBE-Handbook p:528 s:19.4.3.2] the MFC SPU command queue has 16 entries.
+        let too_many_slots = |channels: &super::types::SpuReferenceChannels| {
+            channels.mfc_cmd_count > MFC_SPU_QUEUE_DEPTH
+        };
+        if self
+            .initial_state
+            .channels
+            .as_ref()
+            .is_some_and(too_many_slots)
+        {
+            return Err(invalid("initial_state.channels.mfc_cmd_count"));
+        }
+        if self
+            .expected
+            .channels
+            .as_value()
+            .is_some_and(too_many_slots)
+        {
+            return Err(invalid("expected.channels.mfc_cmd_count"));
+        }
         let bad_update = |update: Option<u32>| {
             update.is_some_and(|ts| ts != MFC_TAG_UPDATE_ANY && ts != MFC_TAG_UPDATE_ALL)
         };
@@ -222,25 +232,6 @@ impl SpuReferenceArtifact {
             .is_some_and(|channels| bad_update(channels.tag_update))
         {
             return Err(invalid("expected.channels.tag_update"));
-        }
-        let wide_tag = |pending_get: Option<(u64, u32, u32, u8)>| {
-            pending_get.is_some_and(|(_, _, _, tag)| MfcTagId::new(tag).is_none())
-        };
-        if self
-            .initial_state
-            .channels
-            .as_ref()
-            .is_some_and(|channels| wide_tag(channels.pending_get))
-        {
-            return Err(invalid("initial_state.channels.pending_get"));
-        }
-        if self
-            .expected
-            .channels
-            .as_value()
-            .is_some_and(|channels| wide_tag(channels.pending_get))
-        {
-            return Err(invalid("expected.channels.pending_get"));
         }
         if self
             .expected

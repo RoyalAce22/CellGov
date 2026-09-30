@@ -80,6 +80,10 @@ pub enum SpuFault {
     /// the range names no group.
     #[error("SPU MFC command tag id {0} is outside 0..31")]
     TagIdOutOfRange(u32),
+    /// An MFC get whose effective-address range runs past the end of
+    /// the address space; the field is the tag id.
+    #[error("SPU MFC get under tag {0} names a source past the address space")]
+    MfcGetAddressWraps(u8),
     /// A channel access whose stall no event can end: a tag-status
     /// read with no update request, which only an interrupt could end.
     #[error("SPU channel 0x{0:02x} access stalls")]

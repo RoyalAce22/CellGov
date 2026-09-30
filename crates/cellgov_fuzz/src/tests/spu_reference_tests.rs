@@ -117,7 +117,7 @@ fn all_channels() -> serde_json::Value {
     serde_json::json!({
         "mfc_lsa": 1, "mfc_eah": 2, "mfc_eal": 3, "mfc_size": 4, "mfc_tag_id": 5,
         "tag_mask": 6, "tag_status": 7, "atomic_status": 8,
-        "pending_get": [9, 10, 11, 12],
+        "mfc_cmd_count": 12,
         "tag_update": 2, "tag_status_read": 6, "atomic_status_ready": true,
         "in_mbox": [21, 22, 23],
         "out_mbox": 5
@@ -537,7 +537,7 @@ fn artifact_types_round_trip_through_json() {
             tag_mask: 6,
             tag_status: 7,
             atomic_status: 8,
-            pending_get: Some((9, 10, 11, 12)),
+            mfc_cmd_count: 12,
             tag_update: Some(2),
             tag_status_read: Some(6),
             atomic_status_ready: true,
@@ -722,7 +722,7 @@ fn every_channel_field_participates_in_the_channel_comparison() {
         |channels| channels.tag_mask ^= 1,
         |channels| channels.tag_status ^= 1,
         |channels| channels.atomic_status ^= 1,
-        |channels| channels.pending_get = Some((1, 2, 3, 4)),
+        |channels| channels.mfc_cmd_count ^= 1,
         |channels| channels.tag_update = Some(1),
         |channels| channels.tag_status_read = Some(1),
         |channels| channels.atomic_status_ready ^= true,
@@ -757,12 +757,7 @@ fn channel_snapshots_convert_field_by_field() {
     state.channels.tag_mask = 6;
     state.channels.tag_status = 7;
     state.channels.atomic_status = 8;
-    state.channels.pending_get = Some((
-        10,
-        11,
-        12,
-        cellgov_ps3_abi::hw::spu::MfcTagId::new(13).expect("13 is a tag group"),
-    ));
+    state.channels.cmd_queue_free = 13;
     state.channels.tag_update = Some(cellgov_spu::state::TagUpdateCondition::All);
     state.channels.tag_status_read = Some(6);
     state.channels.atomic_status_ready = true;
@@ -780,7 +775,7 @@ fn channel_snapshots_convert_field_by_field() {
             tag_mask: 6,
             tag_status: 7,
             atomic_status: 8,
-            pending_get: Some((10, 11, 12, 13)),
+            mfc_cmd_count: 13,
             tag_update: Some(2),
             tag_status_read: Some(6),
             atomic_status_ready: true,
@@ -1094,12 +1089,12 @@ fn replay_names_the_mismatch_of_an_altered_fixture() {
 #[test]
 fn replay_validates_the_artifact_before_executing() {
     let mut altered = artifact();
-    altered.schema_version = 5;
+    altered.schema_version = 6;
     assert!(matches!(
         replay_reference(&altered),
         Err(SpuReferenceError::Version {
-            found: 5,
-            supported: 4
+            found: 6,
+            supported: 5
         })
     ));
     let mut altered = artifact();
@@ -1128,7 +1123,7 @@ fn replay_places_words_at_a_nonzero_pc_and_applies_initial_overrides() {
         tag_mask: 6,
         tag_status: 7,
         atomic_status: 8,
-        pending_get: Some((10, 11, 12, 13)),
+        mfc_cmd_count: 13,
         tag_update: Some(2),
         tag_status_read: Some(6),
         atomic_status_ready: true,
@@ -1154,15 +1149,7 @@ fn replay_places_words_at_a_nonzero_pc_and_applies_initial_overrides() {
         Some(ReservedLine::containing(0x80))
     );
     assert_eq!(replay.state.channels.mfc_lsa, 1);
-    assert_eq!(
-        replay.state.channels.pending_get,
-        Some((
-            10,
-            11,
-            12,
-            cellgov_ps3_abi::hw::spu::MfcTagId::new(13).expect("13 is a tag group")
-        ))
-    );
+    assert_eq!(replay.state.channels.cmd_queue_free, 13);
 }
 
 #[test]
