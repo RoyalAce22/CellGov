@@ -56,13 +56,32 @@ smoke() {
     cellgov dev fuzz smoke --artifacts-dir "$out/smoke" --regressions "$regressions"
 }
 
+# Names a job's outcome from its exit status: clean, a timeout, killed
+# (out of memory), or a finding with the files the uploaded artifact
+# holds for it.
+outcome() {
+    local job=$1 status=$2 artifact=$3 files
+    case "$status" in
+        "") echo "fuzz $job: did not finish (no exit status recorded)" ;;
+        0) echo "fuzz $job: clean" ;;
+        124) echo "fuzz $job: timeout (the step's time budget ran out)" ;;
+        127) echo "fuzz $job: did not start (exit 127, a command was not found)" ;;
+        137) echo "fuzz $job: killed, most likely out of memory (exit 137)" ;;
+        *)
+            files=$(find "$out" -type f -name '*.json' 2>/dev/null | wc -l | tr -d '[:space:]')
+            echo "fuzz $job: finding or refusal (exit $status); $files result file(s) in artifact $artifact"
+            ;;
+    esac
+}
+
 case "${1:-}" in
+    outcome) outcome "${2:?job}" "${3:-}" "${4:?artifact name}" ;;
     campaigns) campaigns ;;
     raw) raw ;;
     evaluate) evaluate ;;
     smoke) smoke ;;
     *)
-        echo "usage: $0 {campaigns|raw|evaluate|smoke}" >&2
+        echo "usage: $0 {campaigns|raw|evaluate|smoke|outcome <job> <status> <artifact>}" >&2
         exit 2
         ;;
 esac

@@ -7,15 +7,19 @@ name: loader-fuzz
 # panic is the finding. libFuzzer needs a nightly toolchain, so the
 # jobs run here on a schedule rather than in the continuous build; the
 # bounded stable sample of the same property runs in
-# `cargo test -p cellgov_fuzz`. The input set a run grows is cached
-# for the next one, seeded from the committed images under fuzz/seeds.
+# `cargo test -p cellgov_fuzz`. The input set a run grows is kept as
+# an artifact for the next one, seeded from the committed images under
+# fuzz/seeds.
 on:
   schedule:
     - cron: '17 5 * * 0'
   workflow_dispatch:
 
+# Read-only. `actions: read` lets a run find and download the inputs
+# artifact an earlier run uploaded.
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: loader-fuzz-${{ github.ref }}
@@ -46,15 +50,17 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --version 0.13.2 --locked
 
+      # The inputs travel as an artifact, not a cache entry: an artifact
+      # keeps 90 days and nothing evicts it, while a cache entry shares
+      # GitHub's 10 GB pool with the push gate and did not survive a week
+      # of pushes. The log prints the count restored.
       - name: Restore the inputs the last run grew
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: fuzz/inputs/${{ matrix.target }}
-          key: loader-fuzz-${{ matrix.target }}-${{ github.run_id }}
-          restore-keys: |
-            loader-fuzz-${{ matrix.target }}-
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/loader_fuzz.sh restore '${{ matrix.target }}'
 
       - name: Fuzz the target
+        id: fuzz
         env:
           FUZZ_TOOLCHAIN: nightly-2026-08-22
         run: bash .github/loader_fuzz.sh run '${{ matrix.target }}'
@@ -63,10 +69,22 @@ jobs:
       # set the next run should start from.
       - name: Save the inputs for the next run
         if: always()
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          path: fuzz/inputs/${{ matrix.target }}
-          key: loader-fuzz-${{ matrix.target }}-${{ github.run_id }}
+          name: loader-fuzz-inputs-${{ matrix.target }}
+          path: fuzz/inputs/${{ matrix.target }}/
+          if-no-files-found: warn
+          retention-days: 90
+
+      # Crash, timeout/out-of-memory, or clean, from libFuzzer's own
+      # artifact names; a red job no longer reads the same for all three.
+      - name: Name the outcome
+        if: always()
+        env:
+          RESULT: ${{ steps.fuzz.outcome }}
+        run: |
+          bash .github/loader_fuzz.sh outcome '${{ matrix.target }}' "$RESULT" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       # A crash artifact replays with
       # `cargo +nightly fuzz run --fuzz-dir fuzz <target> <artifact>`.

@@ -54,8 +54,9 @@ PATH="/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/<ver
 ```
 
 Everything a run writes lives under `fuzz/inputs/<target>/` and
-`fuzz/artifacts/<target>/`, both ignored by git. The workflow caches
-each target's input set between runs.
+`fuzz/artifacts/<target>/`, both ignored by git. The workflow keeps
+each target's input set between runs as a 90-day artifact,
+`loader-fuzz-inputs-<target>`.
 
 ## Seeds
 

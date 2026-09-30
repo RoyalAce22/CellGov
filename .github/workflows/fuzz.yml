@@ -47,10 +47,39 @@ env:
   FUZZ_RAW_WORDS: ${{ inputs.raw_words || '16777216' }}
 
 jobs:
+  # Every job below uses a fixed seed, so a scheduled run on the commit
+  # the last successful scheduled run tested repeats it exactly. That run
+  # is skipped; a run started by hand always runs.
+  changed:
+    name: main moved since the last scheduled run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/fuzz.yml/runs?event=schedule&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""')
+          if [ "$EVENT" = schedule ] && [ "$last" = "$SHA" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "main is still $SHA, which the last successful scheduled run tested; skipping" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   # Every job runs on both runners: a finding that depends on the platform
   # is a finding about the platform.
   scheduled:
     name: ${{ matrix.job }} (${{ matrix.os }})
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     strategy:
@@ -77,8 +106,24 @@ jobs:
           shared-key: test
           save-if: false
 
+      # The step stops itself 10 minutes inside the job's bound, so a
+      # run that outlasts its budget is named a timeout below instead of
+      # being cut off with no summary.
       - name: ${{ matrix.job }}
-        run: bash .github/fuzz.sh ${{ matrix.job }}
+        id: run
+        run: |
+          status=0
+          timeout 170m bash .github/fuzz.sh '${{ matrix.job }}' || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Name the outcome
+        if: always()
+        env:
+          STATUS: ${{ steps.run.outputs.status }}
+        run: |
+          bash .github/fuzz.sh outcome '${{ matrix.job }}' "$STATUS" 'fuzz-${{ matrix.job }}-${{ matrix.os }}' \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Findings, raw results and evaluations are the run's output whether
       # or not a job went red; a finding's artifact names its exact replay.
