@@ -608,3 +608,7 @@ mod reserved_channel_tests;
 #[cfg(test)]
 #[path = "tests/channel_direction_tests.rs"]
 mod channel_direction_tests;
+
+#[cfg(test)]
+#[path = "tests/tag_status_mask_tests.rs"]
+mod tag_status_mask_tests;

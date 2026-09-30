@@ -110,7 +110,8 @@ pub(super) fn execute_rdch(
         spu::MFC_RD_TAG_STAT => {
             let masked = state.channels.tag_status & state.channels.tag_mask;
             if masked == state.channels.tag_mask {
-                state.set_reg_channel_word(rt, state.channels.tag_status);
+                // [CBEA p:128 s:9.3.6] a group the query mask leaves out reads zero.
+                state.set_reg_channel_word(rt, masked);
                 state.channels.tag_update_pending = false;
                 SpuStepOutcome::Continue
             } else {
