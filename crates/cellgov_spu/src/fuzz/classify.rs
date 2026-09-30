@@ -229,6 +229,9 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::A
         | SpuInstructionKind::Ai
         | SpuInstructionKind::Sf
+        | SpuInstructionKind::Avgb
+        | SpuInstructionKind::Absdb
+        | SpuInstructionKind::Sumb
         | SpuInstructionKind::Mpy
         | SpuInstructionKind::Mpyu
         | SpuInstructionKind::Mpyi

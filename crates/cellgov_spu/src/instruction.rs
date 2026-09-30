@@ -148,6 +148,34 @@ pub enum SpuInstruction {
         /// Source register B (minuend).
         rb: u8,
     },
+    // [SPU-ISA p:91 s:5 Byte arithmetic: Avgb p.91, Absdb p.92, Sumb p.93]
+    /// Average bytes: `(ra + rb + 1) >> 1` per unsigned byte, without loss of precision.
+    Avgb {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Absolute differences of bytes: `|rb - ra|` per unsigned byte.
+    Absdb {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Sum bytes into halfwords: per word, the sum of `rb`'s four bytes in the high halfword and of `ra`'s in the low.
+    Sumb {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
     // [SPU-ISA p:72 s:5 16-bit multiplies: Mpy p.72 .. Mpyhhau p.82]
     /// Multiply: the signed low halfwords of each word, a 32-bit product.
     Mpy {

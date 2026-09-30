@@ -188,6 +188,32 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
             SpuStepOutcome::Continue
         }
+        // [SPU-ISA p:91 s:5. Integer and Logical Instructions] Average Bytes: (RA + RB + 1) >> 1 per unsigned byte, computed in nine bits.
+        SpuInstruction::Avgb { rt, ra, rb } => {
+            let [a, b] = [ra, rb].map(|r| state.regs[r as usize]);
+            state.regs[rt as usize] =
+                std::array::from_fn(|j| ((u16::from(a[j]) + u16::from(b[j]) + 1) >> 1) as u8);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:92 s:5. Integer and Logical Instructions] Absolute Differences of Bytes: |RB - RA| per unsigned byte.
+        SpuInstruction::Absdb { rt, ra, rb } => {
+            let [a, b] = [ra, rb].map(|r| state.regs[r as usize]);
+            state.regs[rt as usize] = std::array::from_fn(|j| a[j].abs_diff(b[j]));
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:93 s:5. Integer and Logical Instructions] Sum Bytes into Halfwords: per word, RB's four-byte sum in the high halfword and RA's in the low.
+        SpuInstruction::Sumb { rt, ra, rb } => {
+            let [a, b] = [ra, rb].map(|r| state.regs[r as usize]);
+            let sum = |reg: [u8; 16], i: usize| -> u32 {
+                reg[i * 4..i * 4 + 4]
+                    .iter()
+                    .map(|&byte| u32::from(byte))
+                    .sum()
+            };
+            state.regs[rt as usize] =
+                from_words(std::array::from_fn(|i| sum(b, i) << 16 | sum(a, i)));
+            SpuStepOutcome::Continue
+        }
         // [SPU-ISA p:72 s:5. Integer and Logical Instructions] Multiply: signed low halfwords, 32-bit product.
         SpuInstruction::Mpy { rt, ra, rb } => words2(state, rt, ra, rb, |a, b| {
             (low_signed(a) * low_signed(b)) as u32
@@ -844,3 +870,7 @@ mod multiply_tests;
 #[cfg(test)]
 #[path = "tests/bit_mask_tests.rs"]
 mod bit_mask_tests;
+
+#[cfg(test)]
+#[path = "tests/byte_arith_tests.rs"]
+mod byte_arith_tests;
