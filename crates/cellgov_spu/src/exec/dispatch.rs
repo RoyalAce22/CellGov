@@ -953,6 +953,19 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             state.pc = state.insn_addr(state.pc.wrapping_add((offset << 2) as u32));
             SpuStepOutcome::Branch
         }
+        // [SPU-ISA p:175 s:7. Compare, Branch, and Halt Instructions] Branch Absolute: PC <- sign-extended I16<<2, masked to LS range.
+        SpuInstruction::Bra { address } => {
+            state.pc = state.insn_addr((address << 2) as u32);
+            SpuStepOutcome::Branch
+        }
+        // [SPU-ISA p:177 s:7. Compare, Branch, and Halt Instructions] Branch Absolute and Set Link: the link is (PC+4) masked by LSLR in RT's preferred slot with the other slots zeroed, then the absolute branch is taken.
+        SpuInstruction::Brasl { rt, address } => {
+            let link = state.ls_wrap(state.pc.wrapping_add(4));
+            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg_word_slot(rt, 0, link);
+            state.pc = state.insn_addr((address << 2) as u32);
+            SpuStepOutcome::Branch
+        }
         // [SPU-ISA p:183 s:7. Compare, Branch, and Halt Instructions] Branch If Zero Word: branch when RT preferred slot is zero.
         SpuInstruction::Brz { rt, offset } => {
             if state.reg_word(rt) == 0 {
@@ -1190,3 +1203,7 @@ mod quad_byte_shift_tests;
 #[cfg(test)]
 #[path = "tests/compare_tests.rs"]
 mod compare_tests;
+
+#[cfg(test)]
+#[path = "tests/absolute_branch_tests.rs"]
+mod absolute_branch_tests;

@@ -1191,6 +1191,19 @@ pub enum SpuInstruction {
         /// Signed word offset.
         offset: i32,
     },
+    // [SPU-ISA p:175 s:7 Absolute branches: Bra p.175, Brasl p.177]
+    /// Branch absolute: PC = address * 4, masked by the limit register.
+    Bra {
+        /// Signed word address.
+        address: i32,
+    },
+    /// Branch absolute and set link: rt = (PC + 4, 0, 0, 0), PC = address * 4.
+    Brasl {
+        /// Link register destination.
+        rt: u8,
+        /// Signed word address.
+        address: i32,
+    },
     /// Branch relative if preferred word of rt is zero.
     Brz {
         /// Register to test.

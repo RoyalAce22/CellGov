@@ -90,8 +90,8 @@ fn field_candidates(
         F::Ri18 => vec![(0x0000_007f, C::Register), (0x01ff_ff80, C::Immediate)],
         F::Channel => vec![(0x0000_007f, C::Register), (0x0000_3f80, C::Channel)],
         F::Branch => match kind {
-            K::Br => vec![(0x007f_ff80, C::Immediate)],
-            K::Brsl | K::Brz | K::Brnz | K::Brhnz | K::Brhz => {
+            K::Br | K::Bra => vec![(0x007f_ff80, C::Immediate)],
+            K::Brsl | K::Brasl | K::Brz | K::Brnz | K::Brhnz | K::Brhz => {
                 vec![(0x0000_007f, C::Register), (0x007f_ff80, C::Immediate)]
             }
             // [SPU-ISA p:178 s:7 Compare, Branch, and Halt Instructions] BI encodes E and D options.

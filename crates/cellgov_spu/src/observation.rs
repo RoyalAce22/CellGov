@@ -344,6 +344,7 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Cgti { rt, .. }
             | SpuInstruction::Clgt { rt, .. }
             | SpuInstruction::Brsl { rt, .. }
+            | SpuInstruction::Brasl { rt, .. }
             | SpuInstruction::Bisl { rt, .. }
             | SpuInstruction::Rchcnt { rt, .. }
             | SpuInstruction::Mfspr { rt, .. } => Some(rt),
@@ -390,6 +391,7 @@ impl SpuAllowedFootprint {
                 None
             }
             SpuInstruction::Br { .. }
+            | SpuInstruction::Bra { .. }
             | SpuInstruction::Brz { .. }
             | SpuInstruction::Brnz { .. }
             | SpuInstruction::Bi { .. }
@@ -423,6 +425,8 @@ impl SpuAllowedFootprint {
             instruction,
             SpuInstruction::Br { .. }
                 | SpuInstruction::Brsl { .. }
+                | SpuInstruction::Bra { .. }
+                | SpuInstruction::Brasl { .. }
                 | SpuInstruction::Brz { .. }
                 | SpuInstruction::Brnz { .. }
                 | SpuInstruction::Bi { .. }

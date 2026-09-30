@@ -125,6 +125,8 @@ pub(super) fn effect_and_outcome(
         SpuInstruction::Rchcnt { .. } => (NO_EFFECTS, FAULT),
         SpuInstruction::Br { .. }
         | SpuInstruction::Brsl { .. }
+        | SpuInstruction::Bra { .. }
+        | SpuInstruction::Brasl { .. }
         | SpuInstruction::Bi { .. }
         | SpuInstruction::Bisl { .. } => (NO_EFFECTS, UNCONDITIONAL_BRANCH),
         SpuInstruction::Brz { .. }
@@ -205,6 +207,8 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
         K::Ila => SpuEncodingForm::Ri18,
         K::Br
         | K::Brsl
+        | K::Bra
+        | K::Brasl
         | K::Brz
         | K::Brnz
         | K::Bi
@@ -365,6 +369,8 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Clgt
         | SpuInstructionKind::Br
         | SpuInstructionKind::Brsl
+        | SpuInstructionKind::Bra
+        | SpuInstructionKind::Brasl
         | SpuInstructionKind::Brz
         | SpuInstructionKind::Brnz
         | SpuInstructionKind::Bi

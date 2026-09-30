@@ -1040,6 +1040,19 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 offset: i16_offset,
             })
         }
+        // [SPU-ISA p:175 s:7 Bra] RI16 opcode 0x060; RT field unused.
+        0x060 => {
+            return Ok(SpuInstruction::Bra {
+                address: i16_offset,
+            })
+        }
+        // [SPU-ISA p:177 s:7 Brasl] RI16 opcode 0x062.
+        0x062 => {
+            return Ok(SpuInstruction::Brasl {
+                rt: rt7,
+                address: i16_offset,
+            })
+        }
         0x040 => {
             return Ok(SpuInstruction::Brz {
                 rt: rt7,
