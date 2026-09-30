@@ -220,7 +220,10 @@ one of:
 - for an event-status read with no enabled event, any of the events'
   producers: a mailbox delivery, a signal write, a DMA completion, or
   a store that clears its reservation.
-  A unit whose event is still masked parks again.
+  A unit whose event is still masked parks again;
+- for any access by a unit with interrupts enabled and an event
+  enabled, the same producers as an event-status read: the interrupt
+  ends the stall.
 
 ### Batch atomicity
 

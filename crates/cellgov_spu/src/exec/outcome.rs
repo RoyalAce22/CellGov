@@ -89,4 +89,10 @@ pub enum SpuFault {
     /// The byte is the I8 field.
     #[error("SPU conversion I8 {0} gives an undefined scale")]
     UndefinedConversionScale(u8),
+    /// A taken indirect branch with both the D and E feature bits set,
+    /// whose effect on the interrupt-enable state is undefined.
+    ///
+    /// The word is the branch's address.
+    #[error("SPU indirect branch at 0x{0:05x} sets both D and E")]
+    UndefinedInterruptControl(u32),
 }

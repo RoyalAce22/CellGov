@@ -43,9 +43,10 @@ recipe.
 
 ## Observations
 
-**Each test has interpreter and LLVM scenario observations** under
-`tests/scenario_observations/`. The observations are settled when
-both decoders agree.
+**Each test the reference runner can run has interpreter and LLVM
+scenario observations** under `tests/scenario_observations/`. The
+observations are settled when both decoders agree. A test the runner
+cannot run is checked against the values its documented layout fixes.
 
 CellGov checks each test in two steps:
 

@@ -102,6 +102,7 @@ fn a_stop_request_leaves_a_stopped_spu_and_a_refused_one_as_they_are() {
 }
 
 /// [CBEA p:95 s:8.5.3] a write updates SPU_NPC only while the SPU is stopped.
+/// [CBEA p:96 s:8.5.3] bit 30 is reserved and bit 31 is the interrupt-enable state at start.
 #[test]
 fn spu_npc_takes_a_write_only_while_the_spu_is_stopped() {
     let mut unit = unit_with(&[]);
@@ -109,9 +110,10 @@ fn spu_npc_takes_a_write_only_while_the_spu_is_stopped() {
     unit.request_stop(false).expect("problem state");
     unit.write_npc(0x103)
         .expect("a stopped SPU takes the write");
-    assert_eq!(unit.stop_registers().map(|regs| regs.npc), Some(0x100));
+    assert_eq!(unit.stop_registers().map(|regs| regs.npc), Some(0x101));
     unit.restart().expect("restart");
     assert_eq!(unit.state().pc, 0x100);
+    assert!(unit.state().interrupts_enabled);
 }
 
 /// [CBEA p:101 s:8.7] overwrite mode sets the channel to the data, logical OR mode ORs it in; both set the count to 1.

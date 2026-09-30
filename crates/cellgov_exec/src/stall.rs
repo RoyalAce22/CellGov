@@ -3,9 +3,9 @@
 /// The event that gives a stalled channel a non-zero count.
 ///
 /// The runtime wakes a stalled unit only on its channel's own event, and
-/// the unit then runs the stalled access again. Later producers join as
-/// the model gains them: an SPU event and an interrupt, which ends any
-/// stall.
+/// the unit then runs the stalled access again. A unit that can take an
+/// interrupt parks on [`StallWake::Event`] instead, since an interrupt
+/// ends any stall.
 ///
 /// [CBE-Handbook p:447 s:17.1.6] a blocked access stalls until the channel changes or the SPU is interrupted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,8 +27,7 @@ pub enum StallWake {
     /// An immediate atomic command of the unit completes.
     ///
     /// The unit issues those commands itself, so while it stalls none
-    /// completes: only an interrupt, which the model does not raise, ends
-    /// the stall.
+    /// completes: only an interrupt ends the stall.
     ///
     /// [CBEA p:131 s:9.4] a read of MFC_RdAtomicStat before the unit issues an immediate atomic command is a software-induced deadlock.
     AtomicCommandCompletion,
@@ -40,7 +39,8 @@ pub enum StallWake {
     MultisourceSync,
     /// An event the unit's mask enables occurs. Every event source's
     /// producer ends this park, and a unit whose event is still masked
-    /// parks again.
+    /// parks again. A unit that can take an interrupt parks on this wake
+    /// whatever channel it stalled on.
     ///
     /// [CBEA p:147 s:9.11.1] a read of SPU_RdEventStat with count 0 stalls, a wait on event.
     Event,

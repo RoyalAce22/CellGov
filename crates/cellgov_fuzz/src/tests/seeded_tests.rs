@@ -201,10 +201,9 @@ fn spu_undefined_word() -> u32 {
     word
 }
 
-/// `bi` with one interrupt-control option set: a defined combination the
-/// executor does not model.
+/// `rdch` of `SPU_RdDec`: a defined channel the executor does not model.
 fn spu_unsupported_word() -> u32 {
-    let word = spu_bi_word() | 0x0004_0000;
+    let word = (0x00D << 21) | (u32::from(cellgov_ps3_abi::hw::spu::SPU_RD_DEC) << 7) | 3;
     assert!(!cellgov_spu::fuzz::encoding_has_undefined_operands(word));
     assert!(!cellgov_spu::fuzz::encoding_execution_is_supported(word));
     word

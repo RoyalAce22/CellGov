@@ -1253,6 +1253,18 @@ pub enum SpuInstruction {
         /// The E feature bit: enable interrupts at the target.
         e: bool,
     },
+    /// Interrupt return: PC = SRR0. RA is a source whose value the
+    /// instruction ignores.
+    ///
+    /// [SPU-ISA p:179 s:7 Interrupt Return]
+    Iret {
+        /// Ignored source register.
+        ra: u8,
+        /// The D feature bit: disable interrupts at the target.
+        d: bool,
+        /// The E feature bit: enable interrupts at the target.
+        e: bool,
+    },
     /// Branch indirect and set link: rt = (PC + 4, 0, 0, 0), PC = ra.
     ///
     /// [SPU-ISA p:181 s:7 Branch Indirect and Set Link (Bisl) p.181, Branch If Not Zero Halfword (Brhnz) p.184]

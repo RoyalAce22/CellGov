@@ -69,31 +69,6 @@ fn budget_exhaustion_yields() {
     assert_eq!(unit.state().pc, 20);
 }
 
-#[test]
-fn decode_failure_faults() {
-    let mut unit = SpuExecutionUnit::new(UnitId::new(4));
-    // The first CBE instruction without a decode arm stands in.
-    let bad = cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP
-        .iter()
-        .map(|row| row.canonical_word())
-        .find(|&word| {
-            matches!(
-                crate::decode::decode(word),
-                Err(crate::instruction::SpuDecodeError::Unimplemented { .. })
-            )
-        })
-        .expect("a CBE instruction without a decode arm")
-        .to_be_bytes();
-    unit.state_mut().ls[0..4].copy_from_slice(&bad);
-
-    let mem = GuestMemory::new(16);
-    let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert!(result.fault.is_some());
-}
-
 /// The mask confines every address to a full-size local store, so a
 /// short `ls` is the only shape that reaches the bound in `ls_addr`.
 #[test]

@@ -222,8 +222,12 @@ fn raw_spu_unmodeled_channels_are_unsupported_not_named_faults() {
     }
 }
 
+/// The seed draws an indirect branch with one interrupt-control option
+/// set, which the executor applies to the interrupt-enable state.
+///
+/// [SPU-ISA p:251 s:12] a taken indirect branch with D or E set disables or enables interrupts at the target.
 #[test]
-fn raw_spu_interrupt_options_without_modeled_execution_are_unsupported() {
+fn raw_spu_interrupt_options_execute_as_modeled() {
     let config = FuzzConfig {
         seed: 0xA212_C9E1_694B_D553,
         strategy: GenerationStrategy::RawWords,
@@ -236,21 +240,12 @@ fn raw_spu_interrupt_options_without_modeled_execution_are_unsupported() {
     };
 
     for run in [spu::run_instructions(config), spu::run_sequences(config)] {
-        assert_eq!(run.outcome, RunOutcome::UnsupportedCase);
+        assert_eq!(run.outcome, RunOutcome::CleanCompletion);
         assert_eq!(run.report.cases, 1);
         assert_eq!(run.report.decoded, 1);
-        assert_eq!(run.report.executed_steps, 1);
-        assert_eq!(run.report.eligible_cases, 0);
-        assert_eq!(run.report.unsupported_cases, 1);
+        assert_eq!(run.report.eligible_cases, 1);
+        assert_eq!(run.report.unsupported_cases, 0);
         assert_eq!(run.report.undefined_cases, 0);
-        assert_eq!(
-            run.report
-                .eligibility_reasons
-                .get(&EligibilityReason::UnmodeledExecution),
-            Some(&1)
-        );
-        assert!(run.report.case_features.is_empty());
-        assert!(run.report.finding_counts.is_empty());
         assert!(run.report.findings.is_empty());
     }
 }

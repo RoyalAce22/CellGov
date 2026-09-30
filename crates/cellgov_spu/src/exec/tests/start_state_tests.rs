@@ -14,7 +14,8 @@ use crate::state::{SignalNotifyMode, SpuObservableSnapshot, SpuState};
 /// [CBE-Handbook p:445 s:17.1 Table 17-2] MFC_Cmd holds 16 entries.
 /// [CBEA p:143 s:9.10] software initializes the MFC_WrMSSyncReq count to 1.
 /// [CBEA p:151 s:9.11.2], [CBEA p:153 s:9.11.3], [CBEA p:155 s:9.11.4] the event mask and acknowledgment channels always count 1.
-const START_COUNTS: [(u8, u32); 24] = [
+/// [CBEA p:142 s:9.9.1], [CBEA p:142 s:9.9.2] the SRR0 channels always count 1.
+const START_COUNTS: [(u8, u32); 26] = [
     (0x00, 0),
     (0x01, 1),
     (0x02, 1),
@@ -24,6 +25,8 @@ const START_COUNTS: [(u8, u32); 24] = [
     (0x0B, 1),
     (0x0C, 1),
     (0x0D, 1),
+    (0x0E, 1),
+    (0x0F, 1),
     (0x10, 1),
     (0x11, 1),
     (0x12, 1),

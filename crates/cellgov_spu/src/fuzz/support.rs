@@ -18,25 +18,15 @@ pub fn encoding_execution_is_supported(raw: u32) -> bool {
     let Ok(instruction) = crate::decode::decode(raw) else {
         return false;
     };
-    if !execution_supported(instruction) {
-        return false;
-    }
-    let kind = SpuInstructionKind::from(instruction);
-    let controls_interrupts = matches!(
-        kind,
-        SpuInstructionKind::Bi
-            | SpuInstructionKind::Bisl
-            | SpuInstructionKind::Bisled
-            | SpuInstructionKind::Biz
-            | SpuInstructionKind::Binz
-            | SpuInstructionKind::Bihz
-            | SpuInstructionKind::Bihnz
-    ) && raw & 0x000c_0000 != 0;
+    // The executor applies every D and E setting of the indirect branches;
+    // `operand_combination_is_valid` refuses the reserved D = E = 1.
     // [SPU-ISA p:178 s:7 Compare, Branch, and Halt Instructions] BI's E and D
-    // options replace interrupt-enable state, which the executor does not model.
+    // options change the interrupt-enable state at the target.
     // [SPU-ISA p:181 s:7 Compare, Branch, and Halt Instructions] BISL has the
     // same interrupt-control options.
     // [SPU-ISA p:180 s:7 Compare, Branch, and Halt Instructions] BISLED has the
+    // same interrupt-control options.
+    // [SPU-ISA p:179 s:7 Compare, Branch, and Halt Instructions] IRET has the
     // same interrupt-control options.
     // [SPU-ISA p:186 s:7 Compare, Branch, and Halt Instructions] BIZ has the
     // same interrupt-control options.
@@ -46,7 +36,7 @@ pub fn encoding_execution_is_supported(raw: u32) -> bool {
     // same interrupt-control options.
     // [SPU-ISA p:189 s:7 Compare, Branch, and Halt Instructions] BIHNZ has the
     // same interrupt-control options.
-    !controls_interrupts
+    execution_supported(instruction)
 }
 
 const MFC_COMMAND_INPUTS: &[u32] = &[

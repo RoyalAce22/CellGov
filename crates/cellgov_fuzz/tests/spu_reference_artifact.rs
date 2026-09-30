@@ -304,12 +304,9 @@ fn a_stashed_mailbox_register_is_no_longer_a_channel_field() {
 #[test]
 fn decode_refusals_keep_the_raw_word_and_program_counter() {
     let mut json: serde_json::Value = serde_json::from_str(ROTATION).expect("valid JSON");
-    // The first CBE instruction without a decode arm stands in.
-    let (word, mnemonic) = cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP
-        .iter()
-        .find(|row| row.on_cbe && cellgov_spu::decode::decode(row.canonical_word()).is_err())
-        .map(|row| (row.canonical_word(), row.mnemonic))
-        .expect("a CBE instruction without a decode arm");
+    // Every CBE instruction decodes, so the first SPU instruction the
+    // CBE does not provide stands in.
+    let (word, mnemonic) = first_absent_on_cbe_row();
     json["words"] = serde_json::json!([word]);
     let artifact =
         parse_reference_json(&json.to_string()).expect("decoder robustness word must parse");
@@ -318,10 +315,20 @@ fn decode_refusals_keep_the_raw_word_and_program_counter() {
         error,
         SpuReferenceError::Decode {
             pc: 0,
-            source: cellgov_spu::instruction::SpuDecodeError::Unimplemented {
+            source: cellgov_spu::instruction::SpuDecodeError::AbsentOnCbe {
                 raw,
                 mnemonic: refused,
             }
         } if raw == word && refused == mnemonic
     ));
+}
+
+/// The canonical word and mnemonic of the first SPU instruction the CBE
+/// does not provide.
+fn first_absent_on_cbe_row() -> (u32, &'static str) {
+    cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP
+        .iter()
+        .find(|row| !row.on_cbe)
+        .map(|row| (row.canonical_word(), row.mnemonic))
+        .expect("an SPU instruction absent on the CBE")
 }

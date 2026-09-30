@@ -54,6 +54,14 @@ pub struct SpuState {
     ///
     /// [SPU-ISA p:200 s:9.3] the FPSCR holds the double-precision rounding modes and the sticky exception flags.
     pub fpscr: u128,
+    /// The interrupt-enable state.
+    ///
+    /// [SPU-ISA p:251 s:12.1] with interrupts enabled, a present condition sends the SPU to address 0 and disables interrupts.
+    pub interrupts_enabled: bool,
+    /// State save and restore register 0: the address `iret` returns to.
+    ///
+    /// [SPU-ISA p:251 s:12.1] an interrupt saves the address of the next instruction in SRR0.
+    pub srr0: u32,
 }
 
 /// Architectural state for instruction comparison.
@@ -77,6 +85,10 @@ pub struct SpuObservableSnapshot {
     pub stop: Option<SpuStop>,
     /// Floating-point status and control register.
     pub fpscr: u128,
+    /// Interrupt-enable state.
+    pub interrupts_enabled: bool,
+    /// State save and restore register 0.
+    pub srr0: u32,
 }
 
 /// Channel state for instruction comparison.
@@ -127,6 +139,8 @@ impl SpuObservableSnapshot {
             reservation,
             stop,
             fpscr,
+            interrupts_enabled,
+            srr0,
         } = state;
         let ChannelState {
             mfc_lsa,
@@ -182,6 +196,8 @@ impl SpuObservableSnapshot {
             reservation: *reservation,
             stop: *stop,
             fpscr: *fpscr,
+            interrupts_enabled: *interrupts_enabled,
+            srr0: *srr0,
         }
     }
 }
@@ -261,6 +277,9 @@ impl SpuState {
             // [CBE-Handbook p:421 s:14.6.3.4] the loader clears the SPE's registers before the program is copied in.
             // [SPU-ISA p:200 s:9.3] RN 00 is round to nearest even; a status bit stays clear until an operation sets it.
             fpscr: 0,
+            // [CBEA p:96 s:8.5.3] SPU_NPC[IE] sets the enable state at start; a new context starts with it clear.
+            interrupts_enabled: false,
+            srr0: 0,
         }
     }
 
@@ -392,7 +411,8 @@ impl SpuState {
     ///
     /// [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR.
     pub fn record_stop(&mut self, kind: crate::stop::SpuStopKind, signal: u16) {
-        let stop = SpuStop::new(kind, signal, self.pc, self.lslr);
+        let mut stop = SpuStop::new(kind, signal, self.pc, self.lslr);
+        stop.interrupts_enabled = self.interrupts_enabled;
         self.pc = stop.npc;
         self.stop = Some(stop);
     }
@@ -427,6 +447,32 @@ impl SpuState {
         let rising = levels & !self.channels.event_levels;
         self.channels.event_levels = levels;
         self.raise_events(rising);
+    }
+
+    /// Whether an interrupt can end a wait: interrupts are enabled and
+    /// at least one event is enabled.
+    ///
+    /// [SPU-ISA p:251 s:12.1] with interrupts enabled, a present condition sends the SPU to its handler.
+    pub fn interruptible(&self) -> bool {
+        self.interrupts_enabled && self.channels.event_mask != 0
+    }
+
+    /// Whether the SPU takes an interrupt before its next instruction:
+    /// interrupts are enabled and the SPU_RdEventStat count is not zero.
+    ///
+    /// [CBEA p:147 s:9.11.1] a non-zero event-status count with interrupts enabled interrupts the SPU.
+    pub fn interrupt_pending(&self) -> bool {
+        self.interrupts_enabled && self.channels.event_count
+    }
+
+    /// Take the interrupt: save the address of the next instruction in
+    /// SRR0, disable interrupts, and branch to address 0.
+    ///
+    /// [SPU-ISA p:251 s:12.1] the SPU branches to address 0, disables the interrupt facility and saves the next instruction's address in SRR0.
+    pub fn take_interrupt(&mut self) {
+        self.srr0 = self.pc;
+        self.interrupts_enabled = false;
+        self.pc = 0;
     }
 
     /// Set `events` in the pending-event register.

@@ -161,6 +161,15 @@ pub(super) fn execute_wrch(
             }
             SpuStepOutcome::Continue
         }
+        // [CBEA p:142 s:9.9.1] a write to SPU_WrSRR0 updates SRR0.
+        // The architecture asks for a sync.c before an instruction that
+        // depends on the new value, and calls SRR0 indeterminate after a
+        // write with interrupts enabled. The model takes the write at
+        // once in both cases, which is CellGov's choice.
+        spu::SPU_WR_SRR0 => {
+            state.srr0 = val;
+            SpuStepOutcome::Continue
+        }
         // [CBE-Handbook p:443 s:17.1.4] a write to a reserved channel has no effect and raises no interrupt.
         _ if spu::is_reserved_channel(channel) => SpuStepOutcome::Continue,
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
@@ -184,24 +193,26 @@ pub(super) fn execute_rdch(
         // [CBE-Handbook p:460 s:17.10.4] MFC_RdTagStat reports the status from the last tag-group status update request.
         // [CBEA p:127 s:9.3.5] a read with no update request is a software-induced deadlock.
         // The model does not park the SPU on that deadlock and refuses the
-        // read by name.
+        // read by name, unless an interrupt can end the wait.
         spu::MFC_RD_TAG_STAT => match state.channels.tag_status_read.take() {
             Some(status) => {
                 state.set_reg_channel_word(rt, status);
                 SpuStepOutcome::Continue
             }
-            None if state.channels.tag_update.is_some() => stall(),
+            None if state.channels.tag_update.is_some() || state.interruptible() => stall(),
             None => SpuStepOutcome::Fault(SpuFault::ChannelStall(channel)),
         },
         // [CBEA p:129 s:9.3.7] MFC_RdListStallStat returns the tag groups whose list stalled since the last read, clears them, and blocks while there are none.
         // A read never completes when the status is 0 and no list has a
-        // stall still to come. The model refuses that read by name.
+        // stall still to come. The model refuses that read by name, unless
+        // an interrupt can end the wait.
         spu::MFC_RD_LIST_STALL_STAT => {
             let status = core::mem::take(&mut state.channels.list_stall_status);
             if status != 0 {
                 state.set_reg_channel_word(rt, status);
                 SpuStepOutcome::Continue
-            } else if state.channels.lists.iter().any(|list| !list.stalled) {
+            } else if state.channels.lists.iter().any(|list| !list.stalled) || state.interruptible()
+            {
                 stall()
             } else {
                 SpuStepOutcome::Fault(SpuFault::ChannelStall(channel))
@@ -273,10 +284,15 @@ pub(super) fn execute_rdch(
             state.channels.atomic_status_ready = false;
             SpuStepOutcome::Continue
         }
-        // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] Two status bits: IS (bit 30) isolation and IE (bit 31) interrupt enable; the model runs nonisolated with interrupts never enabled, so both read as zero.
+        // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] Two status bits: IS (bit 30) isolation and IE (bit 31) interrupt enable; the model runs nonisolated, so IS reads as zero.
         // The isolation facility is out of scope; docs/architecture/execution_units.md records why.
         spu::SPU_RD_MACH_STAT => {
-            state.set_reg_channel_word(rt, 0);
+            state.set_reg_channel_word(rt, u32::from(state.interrupts_enabled));
+            SpuStepOutcome::Continue
+        }
+        // [CBEA p:142 s:9.9.2] a read of SPU_RdSRR0 returns the contents of SRR0.
+        spu::SPU_RD_SRR0 => {
+            state.set_reg_channel_word(rt, state.srr0);
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:443 s:17.1.4] a read of a reserved channel returns zeros and raises no interrupt.
@@ -314,6 +330,8 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
     Some(match channel {
         // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] The channel has no count; rchcnt on it always returns 1.
         spu::SPU_RD_MACH_STAT => 1,
+        // [CBEA p:142 s:9.9.1], [CBEA p:142 s:9.9.2] the SRR0 channels have no count; rchcnt on either returns 1.
+        spu::SPU_WR_SRR0 | spu::SPU_RD_SRR0 => 1,
         // [CBEA p:112 s:9.1] the MFC command parameter channels are nonblocking and count 1.
         spu::MFC_LSA | spu::MFC_EAH | spu::MFC_EAL | spu::MFC_SIZE | spu::MFC_TAG_ID => 1,
         // [CBEA p:113 s:9.1.1] MFC_Cmd counts the free command-queue slots.

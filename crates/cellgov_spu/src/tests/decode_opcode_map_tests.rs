@@ -46,15 +46,25 @@ fn a_word_no_row_owns_is_unassigned() {
 }
 
 #[test]
+fn every_cbe_instruction_decodes() {
+    let missing: Vec<&str> = SPU_OPCODE_MAP
+        .iter()
+        .filter(|row| row.on_cbe && decode(row.canonical_word()).is_err())
+        .map(|row| row.mnemonic)
+        .collect();
+    assert_eq!(missing, Vec::<&str>::new());
+}
+
+#[test]
 fn a_refused_word_keeps_its_operand_bits() {
     let (row, word) = SPU_OPCODE_MAP
         .iter()
         .map(|row| (row, row.canonical_word() | (u32::MAX >> row.width)))
-        .find(|(row, word)| row.on_cbe && decode(*word).is_err())
-        .expect("a CBE instruction without a decode arm");
+        .find(|(row, _)| !row.on_cbe)
+        .expect("an SPU instruction absent on the CBE");
     assert_eq!(
         decode(word),
-        Err(SpuDecodeError::Unimplemented {
+        Err(SpuDecodeError::AbsentOnCbe {
             raw: word,
             mnemonic: row.mnemonic
         })

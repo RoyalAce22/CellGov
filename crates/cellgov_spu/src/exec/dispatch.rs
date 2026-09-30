@@ -9,13 +9,38 @@ use cellgov_float::{extended_magnitude_key, extended_order_key};
 use super::channel::{execute_rchcnt, execute_rdch, execute_wrch};
 use super::lanes::{from_halfwords, from_words, halfwords, words};
 use super::ls::{insertion_controls, load_quad, negated_count, rotate_mask_count, store_quad, Lsa};
-use super::outcome::SpuStepOutcome;
+use super::outcome::{SpuFault, SpuStepOutcome};
+
+/// The taken path of every indirect branch: PC <- `target`, with the
+/// D and E feature bits applied to the interrupt-enable state.
+///
+/// [SPU-ISA p:251 s:12] a taken branch changes the interrupt-enable status before the target instruction runs, and D = E = 1 causes undefined behavior.
+/// CellGov refuses D = E = 1, as it refuses the other operand encodings
+/// whose result is undefined.
+fn take_indirect(state: &mut SpuState, target: u32, d: bool, e: bool) -> SpuStepOutcome {
+    match (d, e) {
+        (true, true) => {
+            return SpuStepOutcome::Fault(SpuFault::UndefinedInterruptControl(state.pc))
+        }
+        (true, false) => state.interrupts_enabled = false,
+        (false, true) => state.interrupts_enabled = true,
+        (false, false) => {}
+    }
+    state.pc = target;
+    SpuStepOutcome::Branch
+}
 
 /// The shared body of the indirect conditional branches.
-fn branch_indirect_if(state: &mut SpuState, ra: u8, taken: bool) -> SpuStepOutcome {
+fn branch_indirect_if(
+    state: &mut SpuState,
+    ra: u8,
+    d: bool,
+    e: bool,
+    taken: bool,
+) -> SpuStepOutcome {
     if taken {
-        state.pc = state.insn_addr(state.reg_word(ra));
-        SpuStepOutcome::Branch
+        let target = state.insn_addr(state.reg_word(ra));
+        take_indirect(state, target, d, e)
     } else {
         SpuStepOutcome::Continue
     }
@@ -987,29 +1012,32 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
         }
         // [SPU-ISA p:178 s:7. Compare, Branch, and Halt Instructions] Branch Indirect: PC <- RA preferred slot masked to LS range.
-        SpuInstruction::Bi { ra, .. } => {
-            state.pc = state.insn_addr(state.reg_word(ra));
-            SpuStepOutcome::Branch
+        SpuInstruction::Bi { ra, d, e } => {
+            let target = state.insn_addr(state.reg_word(ra));
+            take_indirect(state, target, d, e)
+        }
+        // [SPU-ISA p:179 s:7. Compare, Branch, and Halt Instructions] Interrupt Return: PC <- SRR0, with the D and E feature bits; RA is ignored.
+        SpuInstruction::Iret { d, e, .. } => {
+            let target = state.insn_addr(state.srr0);
+            take_indirect(state, target, d, e)
         }
         // [SPU-ISA p:181 s:7. Compare, Branch, and Halt Instructions] Branch Indirect and Set Link: the target is read from RA before RT is written; the link is (PC+4) masked by LSLR in RT's preferred slot with the other slots zeroed, then PC <- RA masked to LS range.
-        SpuInstruction::Bisl { rt, ra, .. } => {
+        SpuInstruction::Bisl { rt, ra, d, e } => {
             let target = state.insn_addr(state.reg_word(ra));
             let link = state.ls_wrap(state.pc.wrapping_add(4));
             state.regs[rt as usize] = [0u8; 16];
             state.set_reg_word_slot(rt, 0, link);
-            state.pc = target;
-            SpuStepOutcome::Branch
+            take_indirect(state, target, d, e)
         }
         // [SPU-ISA p:180 s:7. Compare, Branch, and Halt Instructions] Branch Indirect and Set Link if External Data: RT gets the link whether or not the branch is taken, and PC <- RA only when the external condition is true.
         // [CBEA p:147 s:9.11.1] the condition is a non-zero SPU_RdEventStat count.
-        SpuInstruction::Bisled { rt, ra, .. } => {
+        SpuInstruction::Bisled { rt, ra, d, e } => {
             let target = state.insn_addr(state.reg_word(ra));
             let link = state.ls_wrap(state.pc.wrapping_add(4));
             state.regs[rt as usize] = [0u8; 16];
             state.set_reg_word_slot(rt, 0, link);
             if state.channels.event_count {
-                state.pc = target;
-                SpuStepOutcome::Branch
+                take_indirect(state, target, d, e)
             } else {
                 SpuStepOutcome::Continue
             }
@@ -1033,20 +1061,20 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
         }
         // [SPU-ISA p:186 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Zero: PC <- RA preferred slot masked to LS range when RT's preferred word is zero.
-        SpuInstruction::Biz { rt, ra, .. } => {
-            branch_indirect_if(state, ra, state.reg_word(rt) == 0)
+        SpuInstruction::Biz { rt, ra, d, e } => {
+            branch_indirect_if(state, ra, d, e, state.reg_word(rt) == 0)
         }
         // [SPU-ISA p:187 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Not Zero: taken when RT's preferred word is non-zero.
-        SpuInstruction::Binz { rt, ra, .. } => {
-            branch_indirect_if(state, ra, state.reg_word(rt) != 0)
+        SpuInstruction::Binz { rt, ra, d, e } => {
+            branch_indirect_if(state, ra, d, e, state.reg_word(rt) != 0)
         }
         // [SPU-ISA p:188 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Zero Halfword: taken when the low halfword of RT's preferred slot is zero.
-        SpuInstruction::Bihz { rt, ra, .. } => {
-            branch_indirect_if(state, ra, state.reg_word(rt) & 0xFFFF == 0)
+        SpuInstruction::Bihz { rt, ra, d, e } => {
+            branch_indirect_if(state, ra, d, e, state.reg_word(rt) & 0xFFFF == 0)
         }
         // [SPU-ISA p:189 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Not Zero Halfword: taken when the low halfword of RT's preferred slot is non-zero.
-        SpuInstruction::Bihnz { rt, ra, .. } => {
-            branch_indirect_if(state, ra, state.reg_word(rt) & 0xFFFF != 0)
+        SpuInstruction::Bihnz { rt, ra, d, e } => {
+            branch_indirect_if(state, ra, d, e, state.reg_word(rt) & 0xFFFF != 0)
         }
 
         // [SPU-ISA p:250 s:11. Channel Instructions] Write Channel: send RT to the addressed channel.

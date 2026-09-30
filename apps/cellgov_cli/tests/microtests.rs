@@ -274,6 +274,22 @@ const CASES: &[Case] = &[
         ],
     },
     Case {
+        name: "spu_interrupt_mbox",
+        max_steps: 1_000_000,
+        fields: &[
+            ("status", Exact(0)),
+            // The handler took the PPU's message.
+            ("message", Exact(0xC0DE)),
+            ("handler_event_status", Exact(event::MB)),
+            // An interrupt turns interrupts off; irete turns them on.
+            ("handler_mach_stat", Exact(0)),
+            ("mach_stat_after", Exact(1)),
+            ("in_mbox_count_after", Exact(0)),
+            ("srr0_set", Exact(1)),
+            ("pad", Exact(0)),
+        ],
+    },
+    Case {
         name: "spu_lr_event",
         max_steps: 1_000_000,
         fields: &[

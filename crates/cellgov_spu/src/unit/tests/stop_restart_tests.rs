@@ -43,6 +43,7 @@ fn a_stop_records_its_code_and_the_next_word() {
         kind: SpuStopKind::Stop,
         code: 0x102,
         npc: 4,
+        interrupts_enabled: false,
     };
     assert_eq!(unit.state().stop, Some(expected));
     assert_eq!(unit.state().pc, 4);

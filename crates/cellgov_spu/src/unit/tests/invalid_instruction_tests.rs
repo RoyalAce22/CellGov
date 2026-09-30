@@ -4,7 +4,6 @@
 
 use crate::stop::{SpuStop, SpuStopKind};
 use crate::SpuExecutionUnit;
-use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, StopRegisters, UnitStatus, YieldReason,
@@ -37,6 +36,7 @@ fn an_unassigned_word_stops_the_unit_as_an_invalid_instruction_at_that_word() {
             kind: SpuStopKind::InvalidInstruction,
             code: 0,
             npc: 0x20,
+            interrupts_enabled: false,
         })
     );
     assert_eq!(
@@ -78,6 +78,7 @@ fn each_optional_double_compare_is_an_invalid_instruction_on_the_cbe() {
                 kind: SpuStopKind::InvalidInstruction,
                 code: 0,
                 npc: 0x20,
+                interrupts_enabled: false,
             }),
             "{mnemonic}"
         );
@@ -96,27 +97,4 @@ fn each_optional_double_compare_is_an_invalid_instruction_on_the_cbe() {
             "{mnemonic} wrote no register"
         );
     }
-}
-
-/// Needs a row the decoder has no arm for; the first such row stands in.
-#[test]
-fn an_unimplemented_instruction_is_a_refusal_that_names_it() {
-    let (index, row) = SPU_OPCODE_MAP
-        .iter()
-        .enumerate()
-        .find(|(_, row)| row.on_cbe && crate::decode::decode(row.canonical_word()).is_err())
-        .expect("a CBE instruction without a decode arm");
-    let (unit, result) = run_word_at_0x20(row.canonical_word());
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert_eq!(unit.state().stop, None);
-    let Some(FaultKind::Guest(code)) = result.fault else {
-        panic!("expected a guest fault, got {:?}", result.fault);
-    };
-    assert_eq!(code & 0xFFFF, index as u32);
-    let described = crate::describe_guest_fault(code).expect("an SPU class");
-    assert!(
-        described.contains(&format!("({})", row.mnemonic)),
-        "{described}"
-    );
 }

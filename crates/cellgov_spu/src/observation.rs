@@ -107,6 +107,8 @@ pub enum SpuObservationComponent {
     Fpscr,
     /// Signal-notification registers.
     Signals,
+    /// Interrupt-enable state and SRR0.
+    Interrupts,
 }
 
 /// Complete SPU state, outcome, and effect observation.
@@ -194,6 +196,8 @@ fn state_differences(
         channels,
         reservation,
         fpscr,
+        interrupts_enabled,
+        srr0,
     } = a;
     [
         (*regs != b.regs, SpuObservationComponent::Registers),
@@ -206,6 +210,10 @@ fn state_differences(
         ),
         (*fpscr != b.fpscr, SpuObservationComponent::Fpscr),
         (*signals != b.signals, SpuObservationComponent::Signals),
+        (
+            (*interrupts_enabled, *srr0) != (b.interrupts_enabled, b.srr0),
+            SpuObservationComponent::Interrupts,
+        ),
     ]
     .into_iter()
     .filter_map(|(differs, component)| differs.then_some(component))
@@ -229,6 +237,9 @@ pub struct SpuAllowedFootprint {
     pub fpscr: bool,
     /// Whether the instruction may clear a signal-notification register.
     pub signals: bool,
+    /// Whether the instruction may change the interrupt-enable state or
+    /// SRR0.
+    pub interrupts: bool,
     /// Effect classes declared by the instruction descriptor.
     pub effects: BTreeSet<EffectKind>,
 }
@@ -242,6 +253,21 @@ impl SpuAllowedFootprint {
             channels: BTreeSet::new(),
             reservation: false,
             control_transfer: false,
+            interrupts: matches!(
+                instruction,
+                SpuInstruction::Bi { .. }
+                    | SpuInstruction::Bisl { .. }
+                    | SpuInstruction::Bisled { .. }
+                    | SpuInstruction::Biz { .. }
+                    | SpuInstruction::Binz { .. }
+                    | SpuInstruction::Bihz { .. }
+                    | SpuInstruction::Bihnz { .. }
+                    | SpuInstruction::Iret { .. }
+                    | SpuInstruction::Wrch {
+                        channel: cellgov_ps3_abi::hw::spu::SPU_WR_SRR0,
+                        ..
+                    }
+            ),
             signals: matches!(
                 instruction,
                 SpuInstruction::Rdch {
@@ -463,6 +489,7 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Binz { .. }
             | SpuInstruction::Bihz { .. }
             | SpuInstruction::Bihnz { .. }
+            | SpuInstruction::Iret { .. }
             | SpuInstruction::Nop { .. }
             | SpuInstruction::Lnop
             | SpuInstruction::Hbr { .. }
@@ -528,6 +555,7 @@ impl SpuAllowedFootprint {
                 | SpuInstruction::Binz { .. }
                 | SpuInstruction::Bihz { .. }
                 | SpuInstruction::Bihnz { .. }
+                | SpuInstruction::Iret { .. }
         );
         if matches!(
             instruction,
@@ -598,6 +626,12 @@ impl SpuAllowedFootprint {
             }
             if before.signals != observed.state.signals && !self.signals {
                 violations.insert(SpuObservationComponent::Signals);
+            }
+            if (before.interrupts_enabled, before.srr0)
+                != (observed.state.interrupts_enabled, observed.state.srr0)
+                && !self.interrupts
+            {
+                violations.insert(SpuObservationComponent::Interrupts);
             }
         }
         // A fault discards effects even when their kind is otherwise allowed.

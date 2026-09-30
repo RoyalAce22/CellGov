@@ -98,7 +98,8 @@ fn field_candidates(
                 vec![(0x0000_007f, C::Register), (0x007f_ff80, C::Immediate)]
             }
             // [SPU-ISA p:178 s:7 Compare, Branch, and Halt Instructions] BI encodes E and D options.
-            K::Bi => vec![
+            // [SPU-ISA p:179 s:7 Compare, Branch, and Halt Instructions] IRET encodes the same fields.
+            K::Bi | K::Iret => vec![
                 (0x0000_3f80, C::Register),
                 (0x0004_0000, C::Flag),
                 (0x0008_0000, C::Flag),
@@ -148,7 +149,8 @@ pub(super) fn operand_combination_is_valid(kind: SpuInstructionKind, word: u32) 
     use SpuInstructionKind as K;
     match kind {
         // [SPU-ISA p:178 s:7 Compare, Branch, and Halt Instructions] BI reserves E and D set together.
-        K::Bi => word & 0x000c_0000 != 0x000c_0000,
+        // [SPU-ISA p:179 s:7 Compare, Branch, and Halt Instructions] IRET reserves E and D set together.
+        K::Bi | K::Iret => word & 0x000c_0000 != 0x000c_0000,
         // [SPU-ISA p:181 s:7 Compare, Branch, and Halt Instructions] BISL reserves E and D set together.
         // [SPU-ISA p:180 s:7 Compare, Branch, and Halt Instructions] BISLED reserves E and D set together.
         // [SPU-ISA p:186 s:7 Compare, Branch, and Halt Instructions] BIZ reserves E and D set together.

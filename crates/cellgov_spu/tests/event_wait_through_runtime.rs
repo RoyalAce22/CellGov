@@ -13,7 +13,8 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::hw::spu::{
     event, MFC_CMD, MFC_EAL, MFC_GET, MFC_GETLLAR, MFC_LSA, MFC_PUT, MFC_PUTLLC, MFC_PUTLLUC,
     MFC_RD_ATOMIC_STAT, MFC_SIZE, MFC_TAG_ID, MFC_TAG_UPDATE_ALL, MFC_WR_MSSYNC_REQ,
-    MFC_WR_TAG_MASK, MFC_WR_TAG_UPDATE, SPU_IN_MBOX_DEPTH, SPU_RD_EVENT_STAT, SPU_WR_EVENT_MASK,
+    MFC_WR_TAG_MASK, MFC_WR_TAG_UPDATE, SPU_IN_MBOX_DEPTH, SPU_RD_EVENT_STAT, SPU_RD_IN_MBOX,
+    SPU_RD_SRR0, SPU_WR_EVENT_MASK,
 };
 use cellgov_spu::SpuExecutionUnit;
 use cellgov_time::Budget;
@@ -334,4 +335,46 @@ fn a_put_landing_in_the_line_while_every_unit_waits_ends_a_wait_on_lr() {
         "the put is still in flight, and the other SPU stopped"
     );
     assert_eq!(finish(&mut rt, waiter), event::LR);
+}
+
+/// [CBE-Handbook p:447 s:17.1.6] a blocked channel access stalls until the channel changes or the SPU is interrupted.
+/// [SPU-ISA p:251 s:12.1] the interrupt saves the address of the next instruction, the stalled read, in SRR0.
+#[test]
+fn an_interrupt_ends_a_stalled_mailbox_read() {
+    let mut rt = Runtime::new(GuestMemory::new(0x1000), Budget::new(100), 200);
+    let mailbox = rt
+        .mailbox_registry_mut()
+        .register(SPU_IN_MBOX_DEPTH as usize);
+    let unit = rt.register_unit_with(|id| {
+        assert_eq!(id.raw(), mailbox.raw());
+        let mut spu = SpuExecutionUnit::new(id);
+        let state = spu.state_mut();
+        let handler = [rdch(SPU_RD_SRR0, 20), 0];
+        let main = [rdch(SPU_RD_IN_MBOX, 5), 0];
+        for (base, words) in [(0usize, &handler), (0x100, &main)] {
+            for (i, word) in words.iter().enumerate() {
+                state.ls[base + i * 4..base + i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+            }
+        }
+        state.pc = 0x100;
+        state.channels.set_event_state(0, event::S1);
+        state.interrupts_enabled = true;
+        spu
+    });
+    step(&mut rt);
+    assert!(
+        parked_on_an_event(&rt, unit),
+        "the mailbox read parks on any event"
+    );
+    rt.write_unit_signal(unit, SignalNotifier::One, 9)
+        .expect("problem state");
+    finish(&mut rt, unit);
+    let state = rt
+        .registry()
+        .get(unit)
+        .and_then(|unit| unit.as_any().downcast_ref::<SpuExecutionUnit>())
+        .expect("the SPU unit")
+        .state();
+    assert_eq!(state.reg_word(20), 0x100, "SRR0 names the stalled read");
+    assert!(state.channels.in_mbox.is_empty());
 }

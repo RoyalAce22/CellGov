@@ -129,6 +129,7 @@ fn a_unit_that_meets_a_wrong_direction_rdch_stops_with_c_on_that_word() {
             kind: SpuStopKind::InvalidChannel,
             code: 0,
             npc: 8,
+            interrupts_enabled: false,
         })
     );
     assert_eq!(

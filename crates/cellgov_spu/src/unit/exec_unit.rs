@@ -103,6 +103,10 @@ impl ExecutionUnit for SpuExecutionUnit {
         effects.clear();
 
         loop {
+            // [SPU-ISA p:251 s:12.1] an interrupt lands between instructions.
+            if self.state.interrupt_pending() {
+                self.state.take_interrupt();
+            }
             let step_pc = self.state.pc as u64;
             let raw = match self.state.fetch() {
                 Some(w) => w,
@@ -192,8 +196,18 @@ impl ExecutionUnit for SpuExecutionUnit {
                     effects.extend(step_effects);
                     if reason == YieldReason::ChannelStall {
                         // The access did not retire: PC stays on it, and
-                        // the unit names the channel for its waker.
-                        self.stall = channel_stall(&insn);
+                        // the unit names the channel for its waker. Any
+                        // enabled event can interrupt the wait, so every
+                        // producer ends it.
+                        // [CBE-Handbook p:447 s:17.1.6] a blocked access stalls until the channel changes or the SPU is interrupted.
+                        self.stall = channel_stall(&insn).map(|stall| ChannelStall {
+                            wake: if self.state.interruptible() {
+                                StallWake::Event
+                            } else {
+                                stall.wake
+                            },
+                            ..stall
+                        });
                     } else {
                         self.state.advance_pc();
                     }
@@ -308,6 +322,8 @@ impl ExecutionUnit for SpuExecutionUnit {
             reservation,
             stop,
             fpscr,
+            interrupts_enabled,
+            srr0,
         } = &self.state;
         SpuSnapshot {
             regs: *regs,
@@ -317,20 +333,24 @@ impl ExecutionUnit for SpuExecutionUnit {
             reservation_line: reservation.map(|l| l.addr()),
             stop: *stop,
             fpscr: *fpscr,
+            interrupts_enabled: *interrupts_enabled,
+            srr0: *srr0,
         }
     }
 
     fn stop_registers(&self) -> Option<StopRegisters> {
         self.state.stop.map(|stop| StopRegisters {
             status: stop.status_word(),
-            npc: stop.npc,
+            npc: stop.npc | u32::from(stop.interrupts_enabled),
         })
     }
 
     /// [CBEA p:95 s:8.5.3] a restart resumes at SPU_NPC; [CBEA p:94 s:8.5.2] it clears the C, I, S, H and P bits.
+    /// [CBEA p:96 s:8.5.3] `SPU_NPC[IE]` is the interrupt-enable state at start.
     fn restart(&mut self) -> Result<(), RestartError> {
         let stop = self.state.stop.take().ok_or(RestartError::NotStopped)?;
         self.state.pc = stop.npc;
+        self.state.interrupts_enabled = stop.interrupts_enabled;
         self.status = UnitStatus::Runnable;
         Ok(())
     }
@@ -362,7 +382,8 @@ impl ExecutionUnit for SpuExecutionUnit {
         Ok(())
     }
 
-    /// [CBEA p:95 s:8.5.3] a write updates SPU_NPC only while the SPU is stopped; its least significant bit is the interrupt-enable state, which the model does not carry.
+    /// [CBEA p:95 s:8.5.3] a write updates SPU_NPC only while the SPU is stopped.
+    /// [CBEA p:96 s:8.5.3] its least significant bit is the interrupt-enable state at start.
     /// A new SPU_NPC abandons a parked channel access, which took
     /// nothing.
     fn write_npc(&mut self, npc: u32) -> Result<(), ProblemStateError> {
@@ -371,6 +392,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         }
         let stop = self.state.stop.as_mut().ok_or(ProblemStateError::Running)?;
         stop.npc = npc & self.state.lslr & !3;
+        stop.interrupts_enabled = npc & 1 != 0;
         Ok(())
     }
 

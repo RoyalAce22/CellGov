@@ -1,0 +1,40 @@
+[test]
+name = "spu_interrupt_mbox"
+
+[rpcs3]
+binary = "build/spu_interrupt_mbox.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# the status, the message and the event and machine status inside the
+# handler; the machine status and mailbox count after the return and
+# whether SRR0 was set
+memory_regions = [
+  { name = "handler", addr = 0, size = 16 },
+  { name = "after", addr = 16, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Build + run:
+#   docker run --rm #     -v "$(pwd)/tests/micro/spu_interrupt_mbox:/src" #     -v "$(pwd)/tests/micro/common:/common" #     -e COMMON=/common ps3dev bash /src/build.sh
+#
+#   cargo run --release -p cellgov_cli -- boot run #     --title-manifest tests/micro/spu_interrupt_mbox/manifest.toml #     --max-steps 1000000
+
+[cellgov.title]
+short_name = "spuintrmbox"
+display_name = "CellGov SPU mailbox interrupt microtest"
+eboot_candidates = ["spu_interrupt_mbox.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"

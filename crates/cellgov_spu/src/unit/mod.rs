@@ -54,3 +54,7 @@ mod problem_state_tests;
 #[cfg(test)]
 #[path = "tests/channel_read_slot_tests.rs"]
 mod channel_read_slot_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_tests.rs"]
+mod interrupt_tests;

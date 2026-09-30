@@ -330,7 +330,7 @@ const DECODERS: &[(&str, Builder)] = &[
         rt: f.rt,
         channel: f.ra,
     }),
-    // [SPU-ISA p:186 s:7 Biz] RR opcodes 0x128..0x12B; the variant carries the D/E interrupt bits at [12:13], and execution ignores them.
+    // [SPU-ISA p:186 s:7 Biz] RR opcodes 0x128..0x12B; the variant carries the D/E interrupt bits at [12:13].
     ("biz", |f| SpuInstruction::Biz {
         rt: f.rt,
         ra: f.ra,
@@ -719,16 +719,22 @@ const DECODERS: &[(&str, Builder)] = &[
         ra: f.ra,
         rb: f.rb,
     }),
-    // [SPU-ISA p:181 s:7 Bisl] RR opcode 0x1A9; the variant carries the D/E interrupt bits at [12:13], and execution ignores them.
+    // [SPU-ISA p:181 s:7 Bisl] RR opcode 0x1A9; the variant carries the D/E interrupt bits at [12:13].
     ("bisl", |f| SpuInstruction::Bisl {
         rt: f.rt,
         ra: f.ra,
         d: f.d,
         e: f.e,
     }),
-    // [SPU-ISA p:180 s:7 Bisled] RR opcode 0x1AB; the variant carries the D/E interrupt bits at [12:13], and execution ignores them.
+    // [SPU-ISA p:180 s:7 Bisled] RR opcode 0x1AB; the variant carries the D/E interrupt bits at [12:13].
     ("bisled", |f| SpuInstruction::Bisled {
         rt: f.rt,
+        ra: f.ra,
+        d: f.d,
+        e: f.e,
+    }),
+    // [SPU-ISA p:179 s:7 Iret] RR opcode 0x1AA; the D/E interrupt bits sit at [12:13].
+    ("iret", |f| SpuInstruction::Iret {
         ra: f.ra,
         d: f.d,
         e: f.e,

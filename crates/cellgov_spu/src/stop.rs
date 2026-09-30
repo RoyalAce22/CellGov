@@ -38,6 +38,10 @@ pub struct SpuStop {
     pub code: u16,
     /// The local-store address the SPU resumes at.
     pub npc: u32,
+    /// The interrupt-enable state the SPU resumes with: `SPU_NPC[IE]`.
+    ///
+    /// [CBEA p:96 s:8.5.3] bit 31 of SPU_NPC is the interrupt-enable state at start.
+    pub interrupts_enabled: bool,
 }
 
 impl SpuStop {
@@ -73,6 +77,7 @@ impl SpuStop {
             kind,
             code,
             npc: resume & lslr & !3,
+            interrupts_enabled: false,
         }
     }
 

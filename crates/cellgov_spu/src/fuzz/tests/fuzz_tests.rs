@@ -498,13 +498,13 @@ fn indirect_branch_generation_rejects_the_reserved_interrupt_pair() {
         let enable_only = descriptor
             .encode(&parameters)
             .expect("the enable-only option must encode");
-        assert!(!encoding_execution_is_supported(enable_only));
+        assert!(encoding_execution_is_supported(enable_only));
         parameters[enable] = 0;
         parameters[disable] = 1;
         let disable_only = descriptor
             .encode(&parameters)
             .expect("the disable-only option must encode");
-        assert!(!encoding_execution_is_supported(disable_only));
+        assert!(encoding_execution_is_supported(disable_only));
         parameters[enable] = 1;
         let undefined = descriptor
             .encode(&parameters)
