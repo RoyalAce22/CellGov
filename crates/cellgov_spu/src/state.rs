@@ -3,19 +3,53 @@
 
 use cellgov_sync::ReservedLine;
 
+use crate::multilinear::{
+    lane_delta, reservation_lanes, wide_lane_delta, LANE_FPSCR, LANE_INTERRUPTS_ENABLED, LANE_LSLR,
+    LANE_RESERVATION_LINE, LANE_RESERVATION_TAG, LANE_SRR0,
+};
 use crate::stop::SpuStop;
 
 use cellgov_ps3_abi::hw::spu::{MFC_TAG_UPDATE_ALL, MFC_TAG_UPDATE_ANY, MFC_TAG_UPDATE_IMMEDIATE};
 pub use cellgov_ps3_abi::hw::spu::{SPU_LSLR_FULL, SPU_LS_SIZE, SPU_REG_COUNT};
 
+/// Register-bank storage with read-only indexing.
+///
+/// There is no `IndexMut` and no `Clone`: every write lands in an
+/// owning [`SpuState`] setter.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RegBank<T, const N: usize>([T; N]);
+
+impl<T, const N: usize> RegBank<T, N> {
+    /// Borrow the whole bank, e.g. for snapshotting or hashing.
+    #[inline]
+    pub fn as_array(&self) -> &[T; N] {
+        &self.0
+    }
+}
+
+impl<T, const N: usize> core::ops::Index<usize> for RegBank<T, N> {
+    type Output = T;
+    #[inline]
+    #[track_caller]
+    fn index(&self, i: usize) -> &T {
+        &self.0[i]
+    }
+}
+
 /// Full SPU architectural state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Hash-covered fields (the registers, LSLR, FPSCR, IE, SRR0 and the
+/// reservation) accept writes only through their setters; hash-excluded
+/// fields (local store, PC, signal registers, channels, stopped state)
+/// stay directly assignable.
+#[derive(Debug, PartialEq, Eq)]
 pub struct SpuState {
     /// 128 x 128-bit GPRs; each register is 16 bytes, byte 0 is MSB.
     ///
     /// [SPU-ISA p:28 s:2.2] All GPRs are 128 bits wide; leftmost word (bytes 0-3) is preferred slot.
-    pub regs: [[u8; 16]; SPU_REG_COUNT],
-    /// 256 KB local store.
+    pub regs: RegBank<[u8; 16], SPU_REG_COUNT>,
+    /// 256 KB local store. Excluded from [`Self::state_hash`]: the
+    /// local store has a hash of its own.
     pub ls: Vec<u8>,
     /// Program counter.
     pub pc: u32,
@@ -30,12 +64,19 @@ pub struct SpuState {
     /// [SPU-ISA p:31 s:3] every effective address is ANDed with the LSLR before use, and the LSLR must not change while the SPU runs.
     /// [CBEA p:235 s:16.2] privileged software sets SPU_LSLR; an access past it occurs at the wrapped address.
     /// [CBE-Handbook p:395 s:14.3 Table 14-4] the spu_env note's ls_size is the SPU_LSLR setting an image needs, and zero asks for the whole local store.
-    pub lslr: u32,
+    lslr: u32,
     /// Signal-notification registers 1 and 2, in that order.
+    ///
+    /// Excluded from [`Self::state_hash`]: the program reads a signal
+    /// only through a channel read, which lands in a register.
     ///
     /// [CBEA p:101 s:8.7] each SPU has two signal-notification facilities, each one register and one channel.
     pub signals: [SignalNotifyRegister; 2],
     /// MFC/channel state for DMA, mailbox, and tag operations.
+    ///
+    /// Excluded from [`Self::state_hash`]: the program sees channel
+    /// state only through a channel read, which lands in a register, or
+    /// through an interrupt, which changes the next instruction to run.
     pub channels: ChannelState,
     /// Local half of the atomic reservation. MFC_PUTLLC succeeds only
     /// when this is `Some(line)` *and* the committed
@@ -43,9 +84,13 @@ pub struct SpuState {
     /// `ExecutionContext::reservation_held`) still holds the line.
     ///
     /// [CBEA p:91 s:8.4.3] Reservation granule is the 128-byte lock line.
-    pub reservation: Option<ReservedLine>,
+    reservation: Option<ReservedLine>,
     /// Why the SPU stopped, or `None` while it can run. A restart clears
     /// it.
+    ///
+    /// Excluded from [`Self::state_hash`]: a stopped SPU retires no
+    /// instruction, and the stop reaches the runtime through the stop
+    /// registers.
     ///
     /// [CBEA p:94 s:8.5.2] the C, I, S, H and P status bits clear when the SPU restarts.
     pub stop: Option<SpuStop>,
@@ -53,15 +98,19 @@ pub struct SpuState {
     /// significant; only the defined bits are ever set.
     ///
     /// [SPU-ISA p:200 s:9.3] the FPSCR holds the double-precision rounding modes and the sticky exception flags.
-    pub fpscr: u128,
+    fpscr: u128,
     /// The interrupt-enable state.
     ///
     /// [SPU-ISA p:251 s:12.1] with interrupts enabled, a present condition sends the SPU to address 0 and disables interrupts.
-    pub interrupts_enabled: bool,
+    interrupts_enabled: bool,
     /// State save and restore register 0: the address `iret` returns to.
     ///
     /// [SPU-ISA p:251 s:12.1] an interrupt saves the address of the next instruction in SRR0.
-    pub srr0: u32,
+    srr0: u32,
+    /// The Multilinear-128 accumulator of the hashed lanes. Each setter
+    /// of a hashed lane adds that lane's change, so [`Self::state_hash`]
+    /// reads it without a rehash.
+    acc: u128,
 }
 
 /// Architectural state for instruction comparison.
@@ -141,6 +190,7 @@ impl SpuObservableSnapshot {
             fpscr,
             interrupts_enabled,
             srr0,
+            acc: _,
         } = state;
         let ChannelState {
             mfc_lsa,
@@ -172,7 +222,7 @@ impl SpuObservableSnapshot {
             event_levels: _,
         } = channels;
         Self {
-            regs: *regs,
+            regs: *regs.as_array(),
             ls: ls.clone(),
             pc: *pc,
             lslr: *lslr,
@@ -261,12 +311,14 @@ impl Default for SignalNotifyRegister {
 impl SpuState {
     /// The state an SPU starts a new context in.
     pub fn new() -> Self {
-        Self {
+        let mut state = Self {
             // [CBE-Handbook p:421 s:14.6.3.4] the loader clears the SPE's registers and local store before the program is copied in.
-            regs: [[0u8; 16]; SPU_REG_COUNT],
+            regs: RegBank([[0u8; 16]; SPU_REG_COUNT]),
             ls: vec![0u8; SPU_LS_SIZE],
             pc: 0,
-            lslr: SPU_LSLR_FULL,
+            // The setter below writes the full limit, so the accumulator
+            // takes its lane.
+            lslr: 0,
             signals: [SignalNotifyRegister::new(); 2],
             channels: ChannelState::new(),
             reservation: None,
@@ -280,7 +332,149 @@ impl SpuState {
             // [CBEA p:96 s:8.5.3] SPU_NPC[IE] sets the enable state at start; a new context starts with it clear.
             interrupts_enabled: false,
             srr0: 0,
+            acc: crate::multilinear::KEYS[0],
+        };
+        state.set_lslr(SPU_LSLR_FULL);
+        state
+    }
+
+    /// Write register `k`.
+    #[inline]
+    #[track_caller]
+    pub fn set_reg(&mut self, k: usize, v: [u8; 16]) {
+        let old = u128::from_be_bytes(self.regs.0[k]);
+        self.acc = self
+            .acc
+            .wrapping_add(wide_lane_delta(2 * k, old, u128::from_be_bytes(v)));
+        self.regs.0[k] = v;
+    }
+
+    /// Replace the whole register file (loader and snapshot restore).
+    #[inline]
+    pub fn set_reg_all(&mut self, regs: [[u8; 16]; SPU_REG_COUNT]) {
+        for (k, &v) in regs.iter().enumerate() {
+            self.set_reg(k, v);
         }
+    }
+
+    /// Local storage limit register.
+    #[inline]
+    pub fn lslr(&self) -> u32 {
+        self.lslr
+    }
+
+    /// Write the local storage limit register.
+    #[inline]
+    pub fn set_lslr(&mut self, v: u32) {
+        self.acc = self
+            .acc
+            .wrapping_add(lane_delta(LANE_LSLR, u64::from(self.lslr), u64::from(v)));
+        self.lslr = v;
+    }
+
+    /// Floating-point status and control register.
+    #[inline]
+    pub fn fpscr(&self) -> u128 {
+        self.fpscr
+    }
+
+    /// Write the floating-point status and control register.
+    #[inline]
+    pub fn set_fpscr(&mut self, v: u128) {
+        self.acc = self
+            .acc
+            .wrapping_add(wide_lane_delta(LANE_FPSCR, self.fpscr, v));
+        self.fpscr = v;
+    }
+
+    /// The interrupt-enable state.
+    #[inline]
+    pub fn interrupts_enabled(&self) -> bool {
+        self.interrupts_enabled
+    }
+
+    /// Write the interrupt-enable state.
+    #[inline]
+    pub fn set_interrupts_enabled(&mut self, v: bool) {
+        self.acc = self.acc.wrapping_add(lane_delta(
+            LANE_INTERRUPTS_ENABLED,
+            u64::from(self.interrupts_enabled),
+            u64::from(v),
+        ));
+        self.interrupts_enabled = v;
+    }
+
+    /// State save and restore register 0.
+    #[inline]
+    pub fn srr0(&self) -> u32 {
+        self.srr0
+    }
+
+    /// Write state save and restore register 0.
+    #[inline]
+    pub fn set_srr0(&mut self, v: u32) {
+        self.acc = self
+            .acc
+            .wrapping_add(lane_delta(LANE_SRR0, u64::from(self.srr0), u64::from(v)));
+        self.srr0 = v;
+    }
+
+    /// The local reservation, if held.
+    #[inline]
+    pub fn reservation(&self) -> Option<ReservedLine> {
+        self.reservation
+    }
+
+    /// Set or clear the local reservation.
+    #[inline]
+    pub fn set_reservation(&mut self, r: Option<ReservedLine>) {
+        let (old_tag, old_line) = reservation_lanes(self.reservation.map(|l| l.addr()));
+        let (tag, line) = reservation_lanes(r.map(|l| l.addr()));
+        self.acc = self
+            .acc
+            .wrapping_add(lane_delta(LANE_RESERVATION_TAG, old_tag, tag))
+            .wrapping_add(lane_delta(LANE_RESERVATION_LINE, old_line, line));
+        self.reservation = r;
+    }
+
+    /// The canonical fingerprint input set for this state.
+    ///
+    /// [`Self::state_hash`] hashes exactly these fields.
+    pub fn fingerprint(&self) -> cellgov_exec::SpuFingerprint {
+        cellgov_exec::SpuFingerprint {
+            regs: self.regs.0.map(u128::from_be_bytes),
+            fpscr: self.fpscr,
+            lslr: self.lslr,
+            interrupts_enabled: self.interrupts_enabled,
+            srr0: self.srr0,
+            reservation_line: self.reservation.map(|l| l.addr()),
+        }
+    }
+
+    /// The Multilinear-128 hash of the [`Self::fingerprint`] field set.
+    ///
+    /// [`crate::multilinear`] defines the lanes, the keys and the
+    /// collision bound. The hash is the high half of an accumulator the
+    /// setters keep current, so reading it costs a shift.
+    #[inline]
+    pub fn state_hash(&self) -> u64 {
+        crate::multilinear::finish(self.acc)
+    }
+
+    /// [`Self::state_hash`] computed from every lane, without the
+    /// accumulator the setters keep.
+    pub fn state_hash_from_scratch(&self) -> u64 {
+        crate::multilinear::finish(self.accumulate_from_scratch())
+    }
+
+    /// Whether the accumulator equals the one every lane gives now.
+    pub fn hash_is_current(&self) -> bool {
+        self.acc == self.accumulate_from_scratch()
+    }
+
+    /// The Multilinear-128 accumulator of every lane, read from `self`.
+    fn accumulate_from_scratch(&self) -> u128 {
+        crate::multilinear::accumulate(&crate::multilinear::lanes(&self.fingerprint()))
     }
 
     /// `addr` masked by the local storage limit register.
@@ -349,14 +543,7 @@ impl SpuState {
     /// Splat a 32-bit value across all four word slots of a register.
     pub fn set_reg_word_splat(&mut self, r: u8, val: u32) {
         let bytes = val.to_be_bytes();
-        let reg = &mut self.regs[r as usize];
-        for slot in 0..4 {
-            let base = slot * 4;
-            reg[base] = bytes[0];
-            reg[base + 1] = bytes[1];
-            reg[base + 2] = bytes[2];
-            reg[base + 3] = bytes[3];
-        }
+        self.set_reg(r as usize, std::array::from_fn(|i| bytes[i % 4]));
     }
 
     /// Write a 32-bit channel read result: `val` in the preferred slot,
@@ -364,8 +551,9 @@ impl SpuState {
     ///
     /// [SPU-ISA p:248 s:11] a 32-bit channel value occupies the preferred slot and the other slots return zeros.
     pub fn set_reg_channel_word(&mut self, r: u8, val: u32) {
-        self.regs[r as usize] = [0u8; 16];
-        self.set_reg_word_slot(r, 0, val);
+        let mut reg = [0u8; 16];
+        reg[..4].copy_from_slice(&val.to_be_bytes());
+        self.set_reg(r as usize, reg);
     }
 
     /// Read word slot `slot` (0-3) of a register as big-endian u32.
@@ -378,12 +566,9 @@ impl SpuState {
     /// Write word slot `slot` (0-3) of a register.
     pub fn set_reg_word_slot(&mut self, r: u8, slot: usize, val: u32) {
         let base = slot * 4;
-        let bytes = val.to_be_bytes();
-        let reg = &mut self.regs[r as usize];
-        reg[base] = bytes[0];
-        reg[base + 1] = bytes[1];
-        reg[base + 2] = bytes[2];
-        reg[base + 3] = bytes[3];
+        let mut reg = self.regs[r as usize];
+        reg[base..base + 4].copy_from_slice(&val.to_be_bytes());
+        self.set_reg(r as usize, reg);
     }
 
     /// Fetch the 32-bit word at `self.pc` through the limit register, or
@@ -470,8 +655,8 @@ impl SpuState {
     ///
     /// [SPU-ISA p:251 s:12.1] the SPU branches to address 0, disables the interrupt facility and saves the next instruction's address in SRR0.
     pub fn take_interrupt(&mut self) {
-        self.srr0 = self.pc;
-        self.interrupts_enabled = false;
+        self.set_srr0(self.pc);
+        self.set_interrupts_enabled(false);
         self.pc = 0;
     }
 
@@ -486,6 +671,26 @@ impl SpuState {
 impl Default for SpuState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// Manual because `RegBank` is not `Clone` (see its doc).
+impl Clone for SpuState {
+    fn clone(&self) -> Self {
+        Self {
+            regs: RegBank(self.regs.0),
+            ls: self.ls.clone(),
+            pc: self.pc,
+            lslr: self.lslr,
+            signals: self.signals,
+            channels: self.channels.clone(),
+            reservation: self.reservation,
+            stop: self.stop,
+            fpscr: self.fpscr,
+            interrupts_enabled: self.interrupts_enabled,
+            srr0: self.srr0,
+            acc: self.acc,
+        }
     }
 }
 
@@ -771,3 +976,7 @@ impl Default for ChannelState {
 #[cfg(test)]
 #[path = "tests/state_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/accumulator_tests.rs"]
+mod accumulator_tests;

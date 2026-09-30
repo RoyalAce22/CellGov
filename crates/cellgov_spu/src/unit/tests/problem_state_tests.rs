@@ -113,7 +113,7 @@ fn spu_npc_takes_a_write_only_while_the_spu_is_stopped() {
     assert_eq!(unit.stop_registers().map(|regs| regs.npc), Some(0x101));
     unit.restart().expect("restart");
     assert_eq!(unit.state().pc, 0x100);
-    assert!(unit.state().interrupts_enabled);
+    assert!(unit.state().interrupts_enabled());
 }
 
 /// [CBEA p:101 s:8.7] overwrite mode sets the channel to the data, logical OR mode ORs it in; both set the count to 1.

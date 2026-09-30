@@ -22,8 +22,8 @@ fn take_indirect(state: &mut SpuState, target: u32, d: bool, e: bool) -> SpuStep
         (true, true) => {
             return SpuStepOutcome::Fault(SpuFault::UndefinedInterruptControl(state.pc))
         }
-        (true, false) => state.interrupts_enabled = false,
-        (false, true) => state.interrupts_enabled = true,
+        (true, false) => state.set_interrupts_enabled(false),
+        (false, true) => state.set_interrupts_enabled(true),
         (false, false) => {}
     }
     state.pc = target;
@@ -93,7 +93,10 @@ fn words2(
     f: impl Fn(u32, u32) -> u32,
 ) -> SpuStepOutcome {
     let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
-    state.regs[rt as usize] = from_words(std::array::from_fn(|i| f(a[i], b[i])));
+    state.set_reg(
+        rt as usize,
+        from_words(std::array::from_fn(|i| f(a[i], b[i]))),
+    );
     SpuStepOutcome::Continue
 }
 
@@ -132,7 +135,10 @@ fn halfwords2(
     f: impl Fn(u16, u16) -> u16,
 ) -> SpuStepOutcome {
     let [a, b] = [ra, rb].map(|r| halfwords(state.regs[r as usize]));
-    state.regs[rt as usize] = from_halfwords(std::array::from_fn(|i| f(a[i], b[i])));
+    state.set_reg(
+        rt as usize,
+        from_halfwords(std::array::from_fn(|i| f(a[i], b[i]))),
+    );
     SpuStepOutcome::Continue
 }
 
@@ -160,7 +166,7 @@ fn shift_right_algebraic_word(word: u32, count: u32) -> u32 {
 /// result to `rt`.
 fn quad(state: &mut SpuState, rt: u8, ra: u8, f: impl Fn(u128) -> u128) -> SpuStepOutcome {
     let q = u128::from_be_bytes(state.regs[ra as usize]);
-    state.regs[rt as usize] = f(q).to_be_bytes();
+    state.set_reg(rt as usize, f(q).to_be_bytes());
     SpuStepOutcome::Continue
 }
 
@@ -174,7 +180,7 @@ fn bytes2(
     f: impl Fn(u8, u8) -> u8,
 ) -> SpuStepOutcome {
     let [a, b] = [ra, rb].map(|r| state.regs[r as usize]);
-    state.regs[rt as usize] = std::array::from_fn(|i| f(a[i], b[i]));
+    state.set_reg(rt as usize, std::array::from_fn(|i| f(a[i], b[i])));
     SpuStepOutcome::Continue
 }
 
@@ -211,11 +217,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:50 s:4. Constant-Formation Instructions] Immediate Load Halfword: replicate I16 into each of the eight halfword slots.
         SpuInstruction::Ilh { rt, imm } => {
             let hw = imm.to_be_bytes();
-            let reg = &mut state.regs[rt as usize];
-            for slot in 0..8 {
-                reg[slot * 2] = hw[0];
-                reg[slot * 2 + 1] = hw[1];
-            }
+            state.set_reg(rt as usize, std::array::from_fn(|i| hw[i % 2]));
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:51 s:4. Constant-Formation Instructions] Immediate Load Halfword Upper: I16 placed in upper halfword of each word slot.
@@ -241,7 +243,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                     0x00
                 };
             }
-            state.regs[rt as usize] = result;
+            state.set_reg(rt as usize, result);
             SpuStepOutcome::Continue
         }
 
@@ -284,14 +286,16 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:91 s:5. Integer and Logical Instructions] Average Bytes: (RA + RB + 1) >> 1 per unsigned byte, computed in nine bits.
         SpuInstruction::Avgb { rt, ra, rb } => {
             let [a, b] = [ra, rb].map(|r| state.regs[r as usize]);
-            state.regs[rt as usize] =
-                std::array::from_fn(|j| ((u16::from(a[j]) + u16::from(b[j]) + 1) >> 1) as u8);
+            state.set_reg(
+                rt as usize,
+                std::array::from_fn(|j| ((u16::from(a[j]) + u16::from(b[j]) + 1) >> 1) as u8),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:92 s:5. Integer and Logical Instructions] Absolute Differences of Bytes: |RB - RA| per unsigned byte.
         SpuInstruction::Absdb { rt, ra, rb } => {
             let [a, b] = [ra, rb].map(|r| state.regs[r as usize]);
-            state.regs[rt as usize] = std::array::from_fn(|j| a[j].abs_diff(b[j]));
+            state.set_reg(rt as usize, std::array::from_fn(|j| a[j].abs_diff(b[j])));
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:93 s:5. Integer and Logical Instructions] Sum Bytes into Halfwords: per word, RB's four-byte sum in the high halfword and RA's in the low.
@@ -303,8 +307,10 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                     .map(|&byte| u32::from(byte))
                     .sum()
             };
-            state.regs[rt as usize] =
-                from_words(std::array::from_fn(|i| sum(b, i) << 16 | sum(a, i)));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|i| sum(b, i) << 16 | sum(a, i))),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:72 s:5. Integer and Logical Instructions] Multiply: signed low halfwords, 32-bit product.
@@ -326,9 +332,12 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:76 s:5. Integer and Logical Instructions] Multiply and Add: the signed low-halfword product plus RC.
         SpuInstruction::Mpya { rt, ra, rb, rc } => {
             let [a, b, c] = [ra, rb, rc].map(|r| words(state.regs[r as usize]));
-            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
-                ((low_signed(a[i]) * low_signed(b[i])) as u32).wrapping_add(c[i])
-            }));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|i| {
+                    ((low_signed(a[i]) * low_signed(b[i])) as u32).wrapping_add(c[i])
+                })),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:77 s:5. Integer and Logical Instructions] Multiply High: the high halfword of RA times the low halfword of RB; the product's low 16 bits move to the high half.
@@ -346,9 +355,12 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:80 s:5. Integer and Logical Instructions] Multiply High High and Add: the signed high-halfword product plus RT.
         SpuInstruction::Mpyhha { rt, ra, rb } => {
             let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
-            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
-                ((high_signed(a[i]) * high_signed(b[i])) as u32).wrapping_add(t[i])
-            }));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|i| {
+                    ((high_signed(a[i]) * high_signed(b[i])) as u32).wrapping_add(t[i])
+                })),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:81 s:5. Integer and Logical Instructions] Multiply High High Unsigned: unsigned high halfwords.
@@ -358,60 +370,81 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:82 s:5. Integer and Logical Instructions] Multiply High High Unsigned and Add: the unsigned high-halfword product plus RT.
         SpuInstruction::Mpyhhau { rt, ra, rb } => {
             let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
-            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
-                ((a[i] >> 16) * (b[i] >> 16)).wrapping_add(t[i])
-            }));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|i| {
+                    ((a[i] >> 16) * (b[i] >> 16)).wrapping_add(t[i])
+                })),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:66 s:5. Integer and Logical Instructions] Add Extended: RA + RB + the low bit of each RT word.
         // [SPU-ISA p:66 s:5] bits 0 to 30 of the RT input are reserved; the RTL reads bit 31 alone.
         SpuInstruction::Addx { rt, ra, rb } => {
             let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
-            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
-                a[i].wrapping_add(b[i]).wrapping_add(t[i] & 1)
-            }));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|i| {
+                    a[i].wrapping_add(b[i]).wrapping_add(t[i] & 1)
+                })),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:67 s:5. Integer and Logical Instructions] Carry Generate: the carry out of RA + RB in bit 31, other bits zero.
         SpuInstruction::Cg { rt, ra, rb } => {
             let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
-            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
-                ((u64::from(a[i]) + u64::from(b[i])) >> 32) as u32
-            }));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|i| {
+                    ((u64::from(a[i]) + u64::from(b[i])) >> 32) as u32
+                })),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:68 s:5. Integer and Logical Instructions] Carry Generate Extended: the carry out of RA + RB + RT bit 31.
         SpuInstruction::Cgx { rt, ra, rb } => {
             let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
-            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
-                ((u64::from(a[i]) + u64::from(b[i]) + u64::from(t[i] & 1)) >> 32) as u32
-            }));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|i| {
+                    ((u64::from(a[i]) + u64::from(b[i]) + u64::from(t[i] & 1)) >> 32) as u32
+                })),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:69 s:5. Integer and Logical Instructions] Subtract from Extended: RB + not RA + RT bit 31.
         SpuInstruction::Sfx { rt, ra, rb } => {
             let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
-            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
-                b[i].wrapping_add(!a[i]).wrapping_add(t[i] & 1)
-            }));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|i| {
+                    b[i].wrapping_add(!a[i]).wrapping_add(t[i] & 1)
+                })),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:70 s:5. Integer and Logical Instructions] Borrow Generate: 1 when RB >= RA unsigned, else 0.
         SpuInstruction::Bg { rt, ra, rb } => {
             let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
-            state.regs[rt as usize] = from_words(std::array::from_fn(|i| u32::from(b[i] >= a[i])));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|i| u32::from(b[i] >= a[i]))),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:71 s:5. Integer and Logical Instructions] Borrow Generate Extended: RB >= RA when RT bit 31 is set, RB > RA when it is clear.
         SpuInstruction::Bgx { rt, ra, rb } => {
             let [a, b, t] = [ra, rb, rt].map(|r| words(state.regs[r as usize]));
-            state.regs[rt as usize] = from_words(std::array::from_fn(|i| {
-                u32::from(if t[i] & 1 != 0 {
-                    b[i] >= a[i]
-                } else {
-                    b[i] > a[i]
-                })
-            }));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|i| {
+                    u32::from(if t[i] & 1 != 0 {
+                        b[i] >= a[i]
+                    } else {
+                        b[i] > a[i]
+                    })
+                })),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:58 s:5. Integer and Logical Instructions] Add Halfword: per-halfword 16-bit modulo addition.
@@ -420,14 +453,19 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                 halfwords(state.regs[ra as usize]),
                 halfwords(state.regs[rb as usize]),
             );
-            state.regs[rt as usize] =
-                from_halfwords(std::array::from_fn(|i| a[i].wrapping_add(b[i])));
+            state.set_reg(
+                rt as usize,
+                from_halfwords(std::array::from_fn(|i| a[i].wrapping_add(b[i]))),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:59 s:5. Integer and Logical Instructions] Add Halfword Immediate: I10 sign-extended to 16 bits, added to each halfword.
         SpuInstruction::Ahi { rt, ra, imm } => {
             let a = halfwords(state.regs[ra as usize]);
-            state.regs[rt as usize] = from_halfwords(a.map(|h| h.wrapping_add(imm as u16)));
+            state.set_reg(
+                rt as usize,
+                from_halfwords(a.map(|h| h.wrapping_add(imm as u16))),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:62 s:5. Integer and Logical Instructions] Subtract from Halfword: per-halfword RB + not RA + 1.
@@ -436,20 +474,28 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                 halfwords(state.regs[ra as usize]),
                 halfwords(state.regs[rb as usize]),
             );
-            state.regs[rt as usize] =
-                from_halfwords(std::array::from_fn(|i| b[i].wrapping_sub(a[i])));
+            state.set_reg(
+                rt as usize,
+                from_halfwords(std::array::from_fn(|i| b[i].wrapping_sub(a[i]))),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:63 s:5. Integer and Logical Instructions] Subtract from Halfword Immediate: I10 sign-extended to 16 bits, minus each halfword.
         SpuInstruction::Sfhi { rt, ra, imm } => {
             let a = halfwords(state.regs[ra as usize]);
-            state.regs[rt as usize] = from_halfwords(a.map(|h| (imm as u16).wrapping_sub(h)));
+            state.set_reg(
+                rt as usize,
+                from_halfwords(a.map(|h| (imm as u16).wrapping_sub(h))),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:65 s:5. Integer and Logical Instructions] Subtract from Word Immediate: I10 sign-extended to 32 bits, minus each word.
         SpuInstruction::Sfi { rt, ra, imm } => {
             let a = words(state.regs[ra as usize]);
-            state.regs[rt as usize] = from_words(a.map(|w| (imm as i32 as u32).wrapping_sub(w)));
+            state.set_reg(
+                rt as usize,
+                from_words(a.map(|w| (imm as i32 as u32).wrapping_sub(w))),
+            );
             SpuStepOutcome::Continue
         }
 
@@ -475,7 +521,10 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:107 s:5. Integer and Logical Instructions] Or Across: the OR of RA's four words in the preferred slot; the other slots are zero.
         SpuInstruction::Orx { rt, ra } => {
             let w = words(state.regs[ra as usize]);
-            state.regs[rt as usize] = from_words([w[0] | w[1] | w[2] | w[3], 0, 0, 0]);
+            state.set_reg(
+                rt as usize,
+                from_words([w[0] | w[1] | w[2] | w[3], 0, 0, 0]),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:99 s:5. Integer and Logical Instructions] And Byte Immediate: the rightmost 8 bits of I10, replicated into every byte.
@@ -515,45 +564,38 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         }
         // [SPU-ISA p:113 s:5. Integer and Logical Instructions] Nor: bitwise NOR across the full 128-bit register.
         SpuInstruction::Nor { rt, ra, rb } => {
-            for i in 0..16 {
-                state.regs[rt as usize][i] =
-                    !(state.regs[ra as usize][i] | state.regs[rb as usize][i]);
-            }
+            let [a, b] = [ra, rb].map(|r| state.regs[r as usize]);
+            state.set_reg(rt as usize, std::array::from_fn(|i| !(a[i] | b[i])));
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:97 s:5. Integer and Logical Instructions] And: bitwise AND across the full 128-bit register.
         SpuInstruction::And { rt, ra, rb } => {
-            for i in 0..16 {
-                state.regs[rt as usize][i] =
-                    state.regs[ra as usize][i] & state.regs[rb as usize][i];
-            }
+            let [a, b] = [ra, rb].map(|r| state.regs[r as usize]);
+            state.set_reg(rt as usize, std::array::from_fn(|i| a[i] & b[i]));
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:102 s:5. Integer and Logical Instructions] Or: bitwise OR across the full 128-bit register.
         SpuInstruction::Or { rt, ra, rb } => {
-            for i in 0..16 {
-                state.regs[rt as usize][i] =
-                    state.regs[ra as usize][i] | state.regs[rb as usize][i];
-            }
+            let [a, b] = [ra, rb].map(|r| state.regs[r as usize]);
+            state.set_reg(rt as usize, std::array::from_fn(|i| a[i] | b[i]));
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:115 s:5. Integer and Logical Instructions] Select Bits: RC bits pick RB where set and RA where clear.
         SpuInstruction::Selb { rt, ra, rb, rc } => {
-            for i in 0..16 {
-                let c = state.regs[rc as usize][i];
-                state.regs[rt as usize][i] =
-                    (c & state.regs[rb as usize][i]) | (!c & state.regs[ra as usize][i]);
-            }
+            let [a, b, c] = [ra, rb, rc].map(|r| state.regs[r as usize]);
+            state.set_reg(
+                rt as usize,
+                std::array::from_fn(|i| (c[i] & b[i]) | (!c[i] & a[i])),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:94 s:5. Integer and Logical Instructions] Extend Sign Byte to Halfword: each halfword takes the sign-extended value of its right byte.
         SpuInstruction::Xsbh { rt, ra } => {
-            for slot in 0..8 {
-                let low = state.regs[ra as usize][slot * 2 + 1];
-                let hw = (low as i8 as i16).to_be_bytes();
-                state.regs[rt as usize][slot * 2] = hw[0];
-                state.regs[rt as usize][slot * 2 + 1] = hw[1];
-            }
+            let a = state.regs[ra as usize];
+            state.set_reg(
+                rt as usize,
+                std::array::from_fn(|i| (a[i | 1] as i8 as i16).to_be_bytes()[i % 2]),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:95 s:5. Integer and Logical Instructions] Extend Sign Halfword to Word: each word takes the sign-extended value of its right halfword.
@@ -562,33 +604,47 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         SpuInstruction::Xswd { rt, ra } => {
             let w = words(state.regs[ra as usize]);
             let sign = |word: u32| ((word as i32) >> 31) as u32;
-            state.regs[rt as usize] = from_words([sign(w[1]), w[1], sign(w[3]), w[3]]);
+            state.set_reg(
+                rt as usize,
+                from_words([sign(w[1]), w[1], sign(w[3]), w[3]]),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:83 s:5. Integer and Logical Instructions] Count Leading Zeros: per word, 32 for a zero word.
         SpuInstruction::Clz { rt, ra } => words2(state, rt, ra, ra, |a, _| a.leading_zeros()),
         // [SPU-ISA p:84 s:5. Integer and Logical Instructions] Count Ones in Bytes: the population count of each byte.
         SpuInstruction::Cntb { rt, ra } => {
-            state.regs[rt as usize] = state.regs[ra as usize].map(|b| b.count_ones() as u8);
+            state.set_reg(
+                rt as usize,
+                state.regs[ra as usize].map(|b| b.count_ones() as u8),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:85 s:5. Integer and Logical Instructions] Form Select Mask for Bytes: the preferred slot's rightmost 16 bits, leftmost bit to byte 0, each replicated eight times.
         SpuInstruction::Fsmb { rt, ra } => {
             let s = state.reg_word_slot(ra, 0);
-            state.regs[rt as usize] = std::array::from_fn(|j| mask_bit(s, 15 - j) as u8);
+            state.set_reg(
+                rt as usize,
+                std::array::from_fn(|j| mask_bit(s, 15 - j) as u8),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:86 s:5. Integer and Logical Instructions] Form Select Mask for Halfwords: the preferred slot's rightmost 8 bits, leftmost bit to halfword 0, each replicated 16 times.
         SpuInstruction::Fsmh { rt, ra } => {
             let s = state.reg_word_slot(ra, 0);
-            state.regs[rt as usize] =
-                from_halfwords(std::array::from_fn(|j| mask_bit(s, 7 - j) as u16));
+            state.set_reg(
+                rt as usize,
+                from_halfwords(std::array::from_fn(|j| mask_bit(s, 7 - j) as u16)),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:87 s:5. Integer and Logical Instructions] Form Select Mask for Words: the preferred slot's rightmost 4 bits, leftmost bit to word 0, each replicated 32 times.
         SpuInstruction::Fsm { rt, ra } => {
             let s = state.reg_word_slot(ra, 0);
-            state.regs[rt as usize] = from_words(std::array::from_fn(|j| mask_bit(s, 3 - j)));
+            state.set_reg(
+                rt as usize,
+                from_words(std::array::from_fn(|j| mask_bit(s, 3 - j))),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:88 s:5. Integer and Logical Instructions] Gather Bits from Bytes: the rightmost bit of each byte, byte 0 leftmost, forms the right half of the preferred slot; every other bit of RT is zero.
@@ -596,7 +652,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             let bits = state.regs[ra as usize]
                 .iter()
                 .fold(0u32, |bits, b| (bits << 1) | u32::from(b & 1));
-            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg(rt as usize, [0u8; 16]);
             state.set_reg_word_slot(rt, 0, bits);
             SpuStepOutcome::Continue
         }
@@ -606,7 +662,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             for slot in 0..4 {
                 bits = (bits << 1) | (state.reg_word_slot(ra, slot) & 1);
             }
-            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg(rt as usize, [0u8; 16]);
             state.set_reg_word_slot(rt, 0, bits);
             SpuStepOutcome::Continue
         }
@@ -616,7 +672,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             for slot in 0..8 {
                 bits = (bits << 1) | (state.regs[ra as usize][slot * 2 + 1] & 1) as u32;
             }
-            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg(rt as usize, [0u8; 16]);
             state.set_reg_word_slot(rt, 0, bits);
             SpuStepOutcome::Continue
         }
@@ -626,7 +682,10 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             let a = state.regs[ra as usize];
             let b = state.regs[rb as usize];
             let c = state.regs[rc as usize];
-            state.regs[rt as usize] = std::array::from_fn(|i| shufb_byte(&a, &b, c[i]));
+            state.set_reg(
+                rt as usize,
+                std::array::from_fn(|i| shufb_byte(&a, &b, c[i])),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:125 s:6. Shift and Rotate Instructions] Shift Left Quadword by Bytes Immediate: shift register left by I7 bytes, fill zero.
@@ -783,50 +842,66 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
 
         // [SPU-ISA p:40 s:3. Memory-Load/Store Instructions] Generate Controls for Byte Insertion (d-form): build shufb mask whose target byte position holds 0x03.
         SpuInstruction::Cbd { rt, ra, imm } => {
-            state.regs[rt as usize] =
-                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 1);
+            state.set_reg(
+                rt as usize,
+                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 1),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:41 s:3. Memory-Load/Store Instructions] Generate Controls for Byte Insertion (x-form): the byte position is RA + RB.
         SpuInstruction::Cbx { rt, ra, rb } => {
-            state.regs[rt as usize] =
-                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 1);
+            state.set_reg(
+                rt as usize,
+                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 1),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:42 s:3. Memory-Load/Store Instructions] Generate Controls for Halfword Insertion (d-form): the aligned halfword slot holds 0x02 0x03.
         SpuInstruction::Chd { rt, ra, imm } => {
-            state.regs[rt as usize] =
-                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 2);
+            state.set_reg(
+                rt as usize,
+                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 2),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:43 s:3. Memory-Load/Store Instructions] Generate Controls for Halfword Insertion (x-form): the halfword position is RA + RB.
         SpuInstruction::Chx { rt, ra, rb } => {
-            state.regs[rt as usize] =
-                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 2);
+            state.set_reg(
+                rt as usize,
+                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 2),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:44 s:3. Memory-Load/Store Instructions] Generate Controls for Word Insertion (d-form): build shufb mask placing 0x00..0x03 at the aligned word slot.
         SpuInstruction::Cwd { rt, ra, imm } => {
-            state.regs[rt as usize] =
-                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 4);
+            state.set_reg(
+                rt as usize,
+                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 4),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:45 s:3. Memory-Load/Store Instructions] Generate Controls for Word Insertion (x-form): the word position is RA + RB.
         SpuInstruction::Cwx { rt, ra, rb } => {
-            state.regs[rt as usize] =
-                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 4);
+            state.set_reg(
+                rt as usize,
+                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 4),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:46 s:3. Memory-Load/Store Instructions] Generate Controls for Doubleword Insertion (d-form): the aligned doubleword slot holds 0x00..0x07.
         SpuInstruction::Cdd { rt, ra, imm } => {
-            state.regs[rt as usize] =
-                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 8);
+            state.set_reg(
+                rt as usize,
+                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 8),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:47 s:3. Memory-Load/Store Instructions] Generate Controls for Doubleword Insertion (x-form): the doubleword position is RA + RB.
         SpuInstruction::Cdx { rt, ra, rb } => {
-            state.regs[rt as usize] =
-                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 8);
+            state.set_reg(
+                rt as usize,
+                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 8),
+            );
             SpuStepOutcome::Continue
         }
 
@@ -850,10 +925,11 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         }
         // [SPU-ISA p:157 s:7. Compare, Branch, and Halt Instructions] Compare Equal Byte Immediate: each byte of RA against the rightmost 8 bits of I10, all ones on a match.
         SpuInstruction::Ceqbi { rt, ra, imm } => {
-            for i in 0..16 {
-                let a = state.regs[ra as usize][i];
-                state.regs[rt as usize][i] = if a == imm { 0xFF } else { 0x00 };
-            }
+            let a = state.regs[ra as usize];
+            state.set_reg(
+                rt as usize,
+                a.map(|byte| if byte == imm { 0xFF } else { 0x00 }),
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:167 s:7. Compare, Branch, and Halt Instructions] Compare Greater Than Word Immediate: signed compare of each RA slot against sign-extended I10.
@@ -975,7 +1051,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:176 s:7. Compare, Branch, and Halt Instructions] Branch Relative and Set Link: the link is (PC+4) masked by LSLR in RT's preferred slot with the other slots zeroed, then the relative branch is taken.
         SpuInstruction::Brsl { rt, offset } => {
             let link = state.ls_wrap(state.pc.wrapping_add(4));
-            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg(rt as usize, [0u8; 16]);
             state.set_reg_word_slot(rt, 0, link);
             state.pc = state.insn_addr(state.pc.wrapping_add((offset << 2) as u32));
             SpuStepOutcome::Branch
@@ -988,7 +1064,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:177 s:7. Compare, Branch, and Halt Instructions] Branch Absolute and Set Link: the link is (PC+4) masked by LSLR in RT's preferred slot with the other slots zeroed, then the absolute branch is taken.
         SpuInstruction::Brasl { rt, address } => {
             let link = state.ls_wrap(state.pc.wrapping_add(4));
-            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg(rt as usize, [0u8; 16]);
             state.set_reg_word_slot(rt, 0, link);
             state.pc = state.insn_addr((address << 2) as u32);
             SpuStepOutcome::Branch
@@ -1018,14 +1094,14 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         }
         // [SPU-ISA p:179 s:7. Compare, Branch, and Halt Instructions] Interrupt Return: PC <- SRR0, with the D and E feature bits; RA is ignored.
         SpuInstruction::Iret { d, e, .. } => {
-            let target = state.insn_addr(state.srr0);
+            let target = state.insn_addr(state.srr0());
             take_indirect(state, target, d, e)
         }
         // [SPU-ISA p:181 s:7. Compare, Branch, and Halt Instructions] Branch Indirect and Set Link: the target is read from RA before RT is written; the link is (PC+4) masked by LSLR in RT's preferred slot with the other slots zeroed, then PC <- RA masked to LS range.
         SpuInstruction::Bisl { rt, ra, d, e } => {
             let target = state.insn_addr(state.reg_word(ra));
             let link = state.ls_wrap(state.pc.wrapping_add(4));
-            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg(rt as usize, [0u8; 16]);
             state.set_reg_word_slot(rt, 0, link);
             take_indirect(state, target, d, e)
         }
@@ -1034,7 +1110,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         SpuInstruction::Bisled { rt, ra, d, e } => {
             let target = state.insn_addr(state.reg_word(ra));
             let link = state.ls_wrap(state.pc.wrapping_add(4));
-            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg(rt as usize, [0u8; 16]);
             state.set_reg_word_slot(rt, 0, link);
             if state.channels.event_count {
                 take_indirect(state, target, d, e)
@@ -1113,7 +1189,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:244 s:10. Control Instructions] Move from SPR: an undefined SPR supplies zeros.
         // [CBE-Handbook p:67 s:3.1.2] the SPU has no special-purpose registers, so every SA reads zero.
         SpuInstruction::Mfspr { rt, sa: _ } => {
-            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg(rt as usize, [0u8; 16]);
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:245 s:10. Control Instructions] Move to SPR: writing an undefined SPR performs no operation.
@@ -1248,14 +1324,18 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         SpuInstruction::Fesd { rt, ra } => super::double::extend_to_double(state, rt, ra),
         // [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
         SpuInstruction::Fscrwr { ra } => {
-            state.fpscr = u128::from_be_bytes(state.regs[ra as usize])
-                & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED;
+            state.set_fpscr(
+                u128::from_be_bytes(state.regs[ra as usize])
+                    & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED,
+            );
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:236 s:9. Floating-Point Instructions] FPSCR Read: the FPSCR with its unused bits forced to zero.
         SpuInstruction::Fscrrd { rt } => {
-            state.regs[rt as usize] =
-                (state.fpscr & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED).to_be_bytes();
+            state.set_reg(
+                rt as usize,
+                (state.fpscr() & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED).to_be_bytes(),
+            );
             SpuStepOutcome::Continue
         }
 

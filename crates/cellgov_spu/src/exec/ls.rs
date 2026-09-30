@@ -52,7 +52,9 @@ impl Lsa {
 pub(super) fn load_quad(state: &mut SpuState, rt: u8, lsa: Lsa) -> SpuStepOutcome {
     match ls_addr(state, lsa.resolve(state)) {
         Ok(a) => {
-            state.regs[rt as usize].copy_from_slice(&state.ls[a..a + 16]);
+            let mut quad = [0u8; 16];
+            quad.copy_from_slice(&state.ls[a..a + 16]);
+            state.set_reg(rt as usize, quad);
             SpuStepOutcome::Continue
         }
         Err(f) => SpuStepOutcome::Fault(f),

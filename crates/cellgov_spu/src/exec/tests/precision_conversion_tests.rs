@@ -200,15 +200,15 @@ fn rounding_fields(modes: [Mode; 2]) -> u128 {
 
 fn run(op: u32, a: [u64; 2], modes: [Mode; 2]) -> ([u64; 2], u128) {
     let mut s = SpuState::new();
-    s.fpscr = rounding_fields(modes);
-    s.regs[1] = from_doublewords(a);
-    s.regs[3] = [0xAA; 16];
+    s.set_fpscr(rounding_fields(modes));
+    s.set_reg(1, from_doublewords(a));
+    s.set_reg(3, [0xAA; 16]);
     let insn = crate::decode::decode(rr(op, 3, 1)).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),
         SpuStepOutcome::Continue
     );
-    (doublewords(s.regs[3]), s.fpscr & !rounding_fields(modes))
+    (doublewords(s.regs[3]), s.fpscr() & !rounding_fields(modes))
 }
 
 fn check_frds(a: [u64; 2], modes: [Mode; 2]) {
@@ -423,8 +423,11 @@ fn fesd_matches_the_oracle_for_every_single() {
     let mut s = SpuState::new();
     for w in (0..=u32::MAX).step_by(2) {
         let pair = [w, w + 1];
-        s.regs[1] = from_doublewords(pair.map(|w| u64::from(w) << 32 | u64::from(!w)));
-        s.fpscr = 0;
+        s.set_reg(
+            1,
+            from_doublewords(pair.map(|w| u64::from(w) << 32 | u64::from(!w))),
+        );
+        s.set_fpscr(0);
         execute(&insn, &mut s, UnitId::new(0));
         let expected = pair.map(fesd_oracle);
         assert_eq!(
@@ -432,6 +435,6 @@ fn fesd_matches_the_oracle_for_every_single() {
             expected.map(|(bits, _)| bits),
             "{w:08x}"
         );
-        assert_eq!(s.fpscr, fpscr_of(expected.map(|(_, f)| f)), "{w:08x}");
+        assert_eq!(s.fpscr(), fpscr_of(expected.map(|(_, f)| f)), "{w:08x}");
     }
 }

@@ -22,9 +22,9 @@ const ROTMAHI: u32 = 0x07E;
 /// halfwords.
 fn run(raw: u32, a: u16, b: [u16; 8]) -> [u16; 8] {
     let mut s = SpuState::new();
-    s.regs[1] = from_halfwords([a; 8]);
-    s.regs[2] = from_halfwords(b);
-    s.regs[3] = [0xAA; 16];
+    s.set_reg(1, from_halfwords([a; 8]));
+    s.set_reg(2, from_halfwords(b));
+    s.set_reg(3, [0xAA; 16]);
     let insn = crate::decode::decode(raw).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),

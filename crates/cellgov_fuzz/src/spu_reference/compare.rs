@@ -39,7 +39,7 @@ pub fn replay_reference(
         crate::seeded::spu_observed(
             &instruction,
             cellgov_spu::fuzz::SpuOutcomeClass::from_outcome(&outcome),
-            &mut state.regs,
+            &mut state,
         );
         match outcome {
             SpuStepOutcome::Continue => state.advance_pc(),

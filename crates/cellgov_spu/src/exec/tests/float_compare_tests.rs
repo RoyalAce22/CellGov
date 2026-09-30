@@ -39,15 +39,15 @@ fn holds(op: u32, a: u32, b: u32) -> bool {
 
 fn run(op: u32, a: [u32; 4], b: [u32; 4]) -> ([u32; 4], u128) {
     let mut s = SpuState::new();
-    s.regs[1] = from_words(a);
-    s.regs[2] = from_words(b);
-    s.regs[3] = [0xAA; 16];
+    s.set_reg(1, from_words(a));
+    s.set_reg(2, from_words(b));
+    s.set_reg(3, [0xAA; 16]);
     let insn = crate::decode::decode(rr(op, 3, 1, 2)).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),
         SpuStepOutcome::Continue
     );
-    (words(s.regs[3]), s.fpscr)
+    (words(s.regs[3]), s.fpscr())
 }
 
 fn check(op: u32, a: [u32; 4], b: [u32; 4]) {
@@ -149,9 +149,9 @@ fn every_first_operand_orders_as_its_value() {
     for op in [FCEQ, FCMEQ, FCGT, FCMGT] {
         let insn = crate::decode::decode(rr(op, 3, 1, 2)).expect("decodes");
         let mut s = SpuState::new();
-        s.regs[2] = from_words(seconds);
+        s.set_reg(2, from_words(seconds));
         for a in 0..=u32::MAX {
-            s.regs[1] = from_words([a; 4]);
+            s.set_reg(1, from_words([a; 4]));
             execute(&insn, &mut s, UnitId::new(0));
             let want: [u32; 4] = std::array::from_fn(|i| {
                 if holds(op, a, seconds[i]) {
@@ -162,6 +162,6 @@ fn every_first_operand_orders_as_its_value() {
             });
             assert_eq!(words(s.regs[3]), want, "op {op:#x} {a:#010x}");
         }
-        assert_eq!(s.fpscr, 0);
+        assert_eq!(s.fpscr(), 0);
     }
 }

@@ -26,6 +26,7 @@ mod fpscr;
 pub mod fuzz;
 pub mod instruction;
 pub mod loader;
+pub mod multilinear;
 pub mod observation;
 pub mod state;
 pub mod stop;

@@ -1,7 +1,9 @@
 //! The unit snapshot holds the whole SPU context, and restore is its
 //! exact inverse.
 
-use crate::state::{SignalNotifyMode, SpuObservableSnapshot, TagUpdateCondition, SPU_LS_SIZE};
+use crate::state::{
+    SignalNotifyMode, SpuObservableSnapshot, TagUpdateCondition, SPU_LS_SIZE, SPU_REG_COUNT,
+};
 use crate::stop::{SpuStop, SpuStopKind};
 use crate::SpuExecutionUnit;
 use cellgov_event::UnitId;
@@ -38,10 +40,8 @@ fn random_unit(seed: u64) -> SpuExecutionUnit {
     let mut r = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
     let mut unit = SpuExecutionUnit::new(UnitId::new(3));
     let s = unit.state_mut();
-    for reg in s.regs.iter_mut() {
-        for byte in reg.iter_mut() {
-            *byte = r.next() as u8;
-        }
+    for k in 0..SPU_REG_COUNT {
+        s.set_reg(k, std::array::from_fn(|_| r.next() as u8));
     }
     for _ in 0..64 {
         let at = (r.next() % SPU_LS_SIZE as u64) as usize;
@@ -83,15 +83,16 @@ fn random_unit(seed: u64) -> SpuExecutionUnit {
     c.event_mask = r.word();
     c.event_count = r.flag();
     c.event_levels = r.word();
-    s.reservation = r
-        .flag()
-        .then(|| ReservedLine::containing(r.next() & 0xFFFF_FF80));
+    s.set_reservation(
+        r.flag()
+            .then(|| ReservedLine::containing(r.next() & 0xFFFF_FF80)),
+    );
     s.stop = r
         .flag()
-        .then(|| SpuStop::new(SpuStopKind::Stop, r.next() as u16, s.pc, s.lslr));
-    s.fpscr = (u128::from(r.next()) << 64 | u128::from(r.next())) & FPSCR_DEFINED;
-    s.interrupts_enabled = r.flag();
-    s.srr0 = r.word();
+        .then(|| SpuStop::new(SpuStopKind::Stop, r.next() as u16, s.pc, s.lslr()));
+    s.set_fpscr((u128::from(r.next()) << 64 | u128::from(r.next())) & FPSCR_DEFINED);
+    s.set_interrupts_enabled(r.flag());
+    s.set_srr0(r.word());
     unit.status = [
         UnitStatus::Runnable,
         UnitStatus::Blocked,
@@ -117,6 +118,12 @@ fn restoring_a_snapshot_into_a_fresh_unit_reproduces_the_snapshot() {
         assert_eq!(fresh.state(), unit.state(), "seed {seed}");
         assert_eq!(fresh.status(), unit.status(), "seed {seed}");
         assert_eq!(fresh.channel_stall(), unit.channel_stall(), "seed {seed}");
+        assert!(fresh.state().hash_is_current(), "seed {seed}");
+        assert_eq!(
+            fresh.state().state_hash(),
+            unit.state().state_hash(),
+            "seed {seed}"
+        );
     }
 }
 

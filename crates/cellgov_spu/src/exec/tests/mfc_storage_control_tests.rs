@@ -128,14 +128,19 @@ fn sdcrz_of_no_bytes_zeroes_nothing() {
 fn sdcrz_clears_a_reservation_on_a_block_it_zeroes() {
     for (line, kept) in [(0x2080, false), (0x2100, true)] {
         let mut unit = unit_issuing(MFC_SDCRZ, 0x2010, 0x80, TAG);
-        unit.state_mut().reservation = Some(ReservedLine::containing(line));
+        unit.state_mut()
+            .set_reservation(Some(ReservedLine::containing(line)));
         let mut table = ReservationTable::new();
         table.insert_or_replace(UnitId::new(9), ReservedLine::containing(line));
         let mem = GuestMemory::new(0x4000);
         let ctx = ExecutionContext::new(&mem).with_reservations(&table);
         let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
         assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
-        assert_eq!(unit.state().reservation.is_some(), kept, "line 0x{line:x}");
+        assert_eq!(
+            unit.state().reservation().is_some(),
+            kept,
+            "line 0x{line:x}"
+        );
     }
 }
 

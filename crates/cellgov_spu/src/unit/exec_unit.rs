@@ -94,8 +94,8 @@ impl ExecutionUnit for SpuExecutionUnit {
         // local register holds a line: the unit's own actions clear the
         // register as they run.
         // [CBEA p:148 s:9.11.1] Lr is set when a snoop external to the MFC resets the reservation, and never for a local action.
-        if self.state.reservation.is_some() && !ctx.reservation_held(self.id) {
-            self.state.reservation = None;
+        if self.state.reservation().is_some() && !ctx.reservation_held(self.id) {
+            self.state.set_reservation(None);
             self.state.raise_events(spu::event::LR);
         }
 
@@ -267,8 +267,10 @@ impl ExecutionUnit for SpuExecutionUnit {
                         // [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] the channel holds the status of the last completed immediate atomic command.
                         self.state.channels.atomic_status = MFC_ATOMIC_STAT_G;
                         self.state.channels.atomic_status_ready = true;
-                        self.state.reservation =
-                            Some(cellgov_sync::ReservedLine::containing(line_addr));
+                        self.state
+                            .set_reservation(Some(cellgov_sync::ReservedLine::containing(
+                                line_addr,
+                            )));
                         effects.push(Effect::ReservationAcquire {
                             line_addr,
                             source: self.id,
@@ -295,6 +297,10 @@ impl ExecutionUnit for SpuExecutionUnit {
                 }
             }
 
+            debug_assert!(
+                self.state.hash_is_current(),
+                "state-hash accumulator out of date after retirement at 0x{step_pc:x}"
+            );
             remaining = remaining.saturating_sub(1);
             if remaining == 0 {
                 return ExecutionStepResult {
@@ -339,7 +345,7 @@ impl ExecutionUnit for SpuExecutionUnit {
     fn restart(&mut self) -> Result<(), RestartError> {
         let stop = self.state.stop.take().ok_or(RestartError::NotStopped)?;
         self.state.pc = stop.npc;
-        self.state.interrupts_enabled = stop.interrupts_enabled;
+        self.state.set_interrupts_enabled(stop.interrupts_enabled);
         self.status = UnitStatus::Runnable;
         Ok(())
     }
@@ -379,8 +385,9 @@ impl ExecutionUnit for SpuExecutionUnit {
         if self.status == UnitStatus::Faulted {
             return Err(ProblemStateError::Refused);
         }
+        let lslr = self.state.lslr();
         let stop = self.state.stop.as_mut().ok_or(ProblemStateError::Running)?;
-        stop.npc = npc & self.state.lslr & !3;
+        stop.npc = npc & lslr & !3;
         stop.interrupts_enabled = npc & 1 != 0;
         Ok(())
     }
@@ -426,7 +433,7 @@ impl ExecutionUnit for SpuExecutionUnit {
     }
 
     fn local_reservation(&self) -> Option<u64> {
-        self.state.reservation.map(|line| line.addr())
+        self.state.reservation().map(|line| line.addr())
     }
 
     fn drain_barriers(&mut self) -> Vec<cellgov_exec::RetiredBarrier> {

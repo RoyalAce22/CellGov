@@ -31,9 +31,9 @@ const XORI: u32 = 0x44;
 /// Runs `raw` with `a` in r1, `b` in r2 and junk in r3, and returns r3's words.
 fn run(raw: u32, a: [u32; 4], b: [u32; 4]) -> [u32; 4] {
     let mut s = SpuState::new();
-    s.regs[1] = from_words(a);
-    s.regs[2] = from_words(b);
-    s.regs[3] = [0xAA; 16];
+    s.set_reg(1, from_words(a));
+    s.set_reg(2, from_words(b));
+    s.set_reg(3, [0xAA; 16]);
     let insn = crate::decode::decode(raw).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),

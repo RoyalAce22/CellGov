@@ -162,7 +162,7 @@ fn rotqmbyi_shifts_right_by_the_negated_count_and_zero_fills() {
         0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
         0xAF,
     ];
-    s.regs[4] = src;
+    s.set_reg(4, src);
     // (0 - 0x72) mod 32 = 14 bytes right.
     run(
         SpuInstruction::Rotqmbyi {
@@ -200,9 +200,12 @@ fn rotqmbyi_shifts_right_by_the_negated_count_and_zero_fills() {
 #[test]
 fn ceqbi_marks_each_matching_byte() {
     let mut s = SpuState::new();
-    s.regs[2] = [
-        0x22, 0x00, 0x22, 0xFF, 0x22, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0x22,
-    ];
+    s.set_reg(
+        2,
+        [
+            0x22, 0x00, 0x22, 0xFF, 0x22, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0x22,
+        ],
+    );
     run(
         SpuInstruction::Ceqbi {
             rt: 3,
@@ -339,7 +342,7 @@ fn bihz_and_bihnz_test_only_the_low_halfword() {
 #[test]
 fn gb_gathers_word_low_bits_word_zero_leftmost() {
     let mut s = SpuState::new();
-    s.regs[3] = [0xAA; 16];
+    s.set_reg(3, [0xAA; 16]);
     for (slot, v) in [1u32, 0, 1, 1].into_iter().enumerate() {
         s.set_reg_word_slot(5, slot, 0xFFFF_FFFE | v);
     }
@@ -353,13 +356,15 @@ fn gb_gathers_word_low_bits_word_zero_leftmost() {
 #[test]
 fn gbh_gathers_halfword_low_bits_halfword_zero_leftmost() {
     let mut s = SpuState::new();
-    s.regs[3] = [0xAA; 16];
-    s.regs[5] = [0xFF; 16];
+    s.set_reg(3, [0xAA; 16]);
+    s.set_reg(5, [0xFF; 16]);
     // Halfword low bits 1,0,0,0,0,0,1,1: not a palindrome, so a
     // reversed gather order reads 0b1100_0001 and fails.
+    let mut low_bits = s.regs[5];
     for hw in 1..6 {
-        s.regs[5][hw * 2 + 1] = 0xFE;
+        low_bits[hw * 2 + 1] = 0xFE;
     }
+    s.set_reg(5, low_bits);
     run(SpuInstruction::Gbh { rt: 3, ra: 5 }, &mut s);
     let mut want = [0u8; 16];
     want[3] = 0b1000_0011;
@@ -370,7 +375,7 @@ fn gbh_gathers_halfword_low_bits_halfword_zero_leftmost() {
 #[test]
 fn rchcnt_answers_one_for_machine_status() {
     let mut s = SpuState::new();
-    s.regs[2] = [0xAA; 16];
+    s.set_reg(2, [0xAA; 16]);
     assert!(matches!(
         run(
             SpuInstruction::Rchcnt {
@@ -389,7 +394,7 @@ fn rchcnt_answers_one_for_machine_status() {
 #[test]
 fn rchcnt_on_an_unmodeled_channel_faults_by_name() {
     let mut s = SpuState::new();
-    s.regs[2] = PATTERN;
+    s.set_reg(2, PATTERN);
     assert!(matches!(
         run(
             SpuInstruction::Rchcnt {
@@ -435,7 +440,7 @@ fn a_refused_rchcnt_faults_in_its_own_class_not_the_rdch_one() {
 #[test]
 fn rdch_machine_status_reads_zero() {
     let mut s = SpuState::new();
-    s.regs[78] = PATTERN;
+    s.set_reg(78, PATTERN);
     assert!(matches!(
         run(
             SpuInstruction::Rdch {
@@ -452,7 +457,7 @@ fn rdch_machine_status_reads_zero() {
 #[test]
 fn hbra_and_dsync_change_no_state() {
     let mut s = SpuState::new();
-    s.regs[2] = PATTERN;
+    s.set_reg(2, PATTERN);
     let before = s.clone();
     assert!(matches!(
         run(SpuInstruction::Hbra { ro: 0, target: 0 }, &mut s),

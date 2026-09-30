@@ -58,6 +58,26 @@ pub struct PpuFingerprint {
     pub reservation_line: Option<u64>,
 }
 
+/// Canonical SPU fingerprint input set.
+///
+/// The SPU counterpart of [`PpuFingerprint`]: `SpuState::state_hash`
+/// folds exactly these fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpuFingerprint {
+    /// Registers r0..r127, byte 0 of each the most significant.
+    pub regs: [u128; 128],
+    /// Floating-point status and control register.
+    pub fpscr: u128,
+    /// Local storage limit register.
+    pub lslr: u32,
+    /// Interrupt-enable state.
+    pub interrupts_enabled: bool,
+    /// State save and restore register 0.
+    pub srr0: u32,
+    /// Line address of the local reservation, if held.
+    pub reservation_line: Option<u64>,
+}
+
 /// A resumable execution unit: something that can take a budget, run
 /// for some guest time, and return a step result.
 ///

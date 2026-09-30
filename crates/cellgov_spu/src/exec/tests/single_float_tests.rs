@@ -150,15 +150,15 @@ fn oracle(op: u32, a: u32, b: u32) -> (u32, SpFlags) {
 /// Runs `op` over the four slot pairs and returns RT's words and the FPSCR.
 fn run(op: u32, a: [u32; 4], b: [u32; 4]) -> ([u32; 4], u128) {
     let mut s = SpuState::new();
-    s.regs[1] = from_words(a);
-    s.regs[2] = from_words(b);
-    s.regs[3] = [0xAA; 16];
+    s.set_reg(1, from_words(a));
+    s.set_reg(2, from_words(b));
+    s.set_reg(3, [0xAA; 16]);
     let insn = crate::decode::decode(rr(op, 3, 1, 2)).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),
         SpuStepOutcome::Continue
     );
-    (words(s.regs[3]), s.fpscr)
+    (words(s.regs[3]), s.fpscr())
 }
 
 /// The FPSCR bits the oracle's per-slot flags set.
@@ -302,10 +302,10 @@ fn fm_over_every_first_operand_matches_the_exact_host_product() {
     };
     let insn = crate::decode::decode(rr(FM, 3, 1, 2)).expect("decodes");
     let mut s = SpuState::new();
-    s.regs[2] = from_words(seconds);
+    s.set_reg(2, from_words(seconds));
     for a in 0..=u32::MAX {
-        s.regs[1] = from_words([a; 4]);
-        s.fpscr = 0;
+        s.set_reg(1, from_words([a; 4]));
+        s.set_fpscr(0);
         execute(&insn, &mut s, UnitId::new(0));
         let expected: [(u32, SpFlags); 4] = std::array::from_fn(|slot| {
             let b = seconds[slot];
@@ -335,7 +335,7 @@ fn fm_over_every_first_operand_matches_the_exact_host_product() {
             "{a:#010x}"
         );
         assert_eq!(
-            s.fpscr,
+            s.fpscr(),
             fpscr_of(expected.map(|(_, flags)| flags)),
             "{a:#010x}"
         );

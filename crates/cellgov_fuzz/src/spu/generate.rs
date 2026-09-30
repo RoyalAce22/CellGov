@@ -7,7 +7,7 @@ use cellgov_spu::fuzz::{
     generation_descriptors, SpuGenerationDescriptor, SpuGenerationError, SpuOperandClass,
     SpuSequenceFlow, SpuSequenceInteraction, SpuStateInput,
 };
-use cellgov_spu::state::{SpuState, SPU_LS_SIZE};
+use cellgov_spu::state::{SpuState, SPU_LS_SIZE, SPU_REG_COUNT};
 use cellgov_sync::{ReservedLine, RESERVATION_LINE_BYTES};
 
 use crate::boundary::call_target;
@@ -251,8 +251,10 @@ fn generated_spu_parameters(
 /// [Martignoni2009 p:128 s:3.1] A test case is code plus data, and the data are the register values and the remaining memory bytes, so both are drawn at random here.
 pub(super) fn random_state(rng: &mut Rng) -> Result<SpuState, FuzzError> {
     let mut state = SpuState::new();
-    for register in &mut state.regs {
-        rng.fill(register);
+    for k in 0..SPU_REG_COUNT {
+        let mut register = [0u8; 16];
+        rng.fill(&mut register);
+        state.set_reg(k, register);
     }
     rng.fill(&mut state.ls);
     state.pc = pc_for_slot(rng.below((SPU_LS_SIZE / 4) as u64)?)?;
@@ -266,16 +268,16 @@ pub(super) fn random_state(rng: &mut Rng) -> Result<SpuState, FuzzError> {
     state.channels.atomic_status = rng.next_u32();
     state.channels.in_mbox.clear();
     state.channels.cmd_queue_free = cellgov_ps3_abi::hw::spu::MFC_SPU_QUEUE_DEPTH;
-    state.reservation = if rng.chance(1, 2)? {
+    state.set_reservation(if rng.chance(1, 2)? {
         Some(ReservedLine::containing(
             rng.next_u64() & ((1u64 << 42) - 1),
         ))
     } else {
         None
-    };
+    });
     // The rounding fields and sticky flags vary like the registers do.
     let fpscr = u128::from(rng.next_u64()) << 64 | u128::from(rng.next_u64());
-    state.fpscr = fpscr & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED;
+    state.set_fpscr(fpscr & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED);
     Ok(state)
 }
 
@@ -306,7 +308,9 @@ pub(super) fn state_aware_state(
     // empty mailbox would only ever stall the read.
     state.channels.in_mbox = vec![cellgov_spu::fuzz::SEQUENCE_MAILBOX_MESSAGE];
     state.channels.cmd_queue_free = cellgov_ps3_abi::hw::spu::MFC_SPU_QUEUE_DEPTH;
-    state.reservation = Some(ReservedLine::containing(u64::from(STRUCTURED_LS_DATA_BASE)));
+    state.set_reservation(Some(ReservedLine::containing(u64::from(
+        STRUCTURED_LS_DATA_BASE,
+    ))));
     // [Wang2024 p:340:10 s:3.2] The generator filters candidate inputs to values that satisfy the instruction's precondition before it uses one.
     if let Some(input) = input {
         // [Wang2024 p:340:9 s:3.1] Choices carry hand-set weights that favour the operations judged more likely to reach a defect, so the preferred value wins half the draws.

@@ -8,17 +8,17 @@ fn new_state_is_zeroed() {
     assert_eq!(s.pc, 0);
     assert_eq!(s.ls.len(), SPU_LS_SIZE);
     assert!(s.ls.iter().all(|&b| b == 0));
-    assert!(s.regs.iter().all(|r| r.iter().all(|&b| b == 0)));
-    assert!(s.reservation.is_none());
+    assert!(s.regs.as_array().iter().all(|r| r.iter().all(|&b| b == 0)));
+    assert!(s.reservation().is_none());
 }
 
 #[test]
 fn reservation_field_is_settable_and_clearable() {
     let mut s = SpuState::new();
-    s.reservation = Some(ReservedLine::containing(0x4000));
-    assert_eq!(s.reservation.map(|l| l.addr()), Some(0x4000));
-    s.reservation = None;
-    assert!(s.reservation.is_none());
+    s.set_reservation(Some(ReservedLine::containing(0x4000)));
+    assert_eq!(s.reservation().map(|l| l.addr()), Some(0x4000));
+    s.set_reservation(None);
+    assert!(s.reservation().is_none());
 }
 
 #[test]

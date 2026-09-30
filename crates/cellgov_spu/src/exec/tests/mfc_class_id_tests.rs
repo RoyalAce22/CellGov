@@ -232,7 +232,7 @@ fn a_putllc_stores_the_local_store_line_containing_its_address() {
         let s = unit.state_mut();
         s.ls[SPU_LS_SIZE - 128..].copy_from_slice(&want);
         s.channels.mfc_lsa = lsa;
-        s.reservation = Some(line);
+        s.set_reservation(Some(line));
     }
     let (_, effects) = run_once_holding(&mut unit, line);
 

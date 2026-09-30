@@ -81,7 +81,7 @@ fn random_states_draw_every_rounding_mode_in_both_slices() {
         let mut rng = Rng::for_case(crate::CAMPAIGN_VERSION, 11, case);
         let state = random_state(&mut rng).unwrap();
         assert_eq!(
-            state.fpscr & !FPSCR_DEFINED,
+            state.fpscr() & !FPSCR_DEFINED,
             0,
             "only defined bits are drawn"
         );

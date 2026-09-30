@@ -10,9 +10,9 @@ use crate::state::SpuState;
 /// RB = 0x10..0x1F, and returns RT.
 fn shufb_all(control: u8) -> [u8; 16] {
     let mut s = SpuState::new();
-    s.regs[1] = std::array::from_fn(|i| i as u8);
-    s.regs[2] = std::array::from_fn(|i| 0x10 + i as u8);
-    s.regs[3] = [control; 16];
+    s.set_reg(1, std::array::from_fn(|i| i as u8));
+    s.set_reg(2, std::array::from_fn(|i| 0x10 + i as u8));
+    s.set_reg(3, [control; 16]);
     execute(
         &SpuInstruction::Shufb {
             rt: 4,
@@ -60,12 +60,15 @@ fn shufb_selector_uses_only_the_low_five_bits() {
 #[test]
 fn shufb_mixes_constants_and_selectors_per_byte() {
     let mut s = SpuState::new();
-    s.regs[1] = std::array::from_fn(|i| 0xA0 + i as u8);
-    s.regs[2] = std::array::from_fn(|i| 0xB0 + i as u8);
-    s.regs[3] = [
-        0x80, 0xC0, 0xE0, 0x00, 0x1F, 0x10, 0xBF, 0xDF, 0xFF, 0x7F, 0x3F, 0x0F, 0x9A, 0xC5, 0xE9,
-        0x05,
-    ];
+    s.set_reg(1, std::array::from_fn(|i| 0xA0 + i as u8));
+    s.set_reg(2, std::array::from_fn(|i| 0xB0 + i as u8));
+    s.set_reg(
+        3,
+        [
+            0x80, 0xC0, 0xE0, 0x00, 0x1F, 0x10, 0xBF, 0xDF, 0xFF, 0x7F, 0x3F, 0x0F, 0x9A, 0xC5,
+            0xE9, 0x05,
+        ],
+    );
     execute(
         &SpuInstruction::Shufb {
             rt: 4,

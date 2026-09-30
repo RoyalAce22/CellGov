@@ -37,7 +37,7 @@ pub(super) fn single<const N: usize>(
         flags[slot] = operand_flags.or(packed.flags);
         packed.bits as u32
     });
-    state.regs[rt as usize] = from_words(results);
+    state.set_reg(rt as usize, from_words(results));
     state.fpscr_accumulate_single(flags);
     SpuStepOutcome::Continue
 }
@@ -48,7 +48,7 @@ pub(super) fn single<const N: usize>(
 /// [SPU-ISA p:215 s:9] and [SPU-ISA p:217 s:9]: a zero exponent flags divide by zero; [SPU-ISA p:196 s:9.1] frest and frsqest set DBZ only.
 pub(super) fn estimate(state: &mut SpuState, rt: u8, ra: u8, op: fn(u32) -> u32) -> SpuStepOutcome {
     let a = words(state.regs[ra as usize]);
-    state.regs[rt as usize] = from_words(a.map(op));
+    state.set_reg(rt as usize, from_words(a.map(op)));
     state.fpscr_accumulate_dbz(a.map(|x| x >> 23 & 0xFF == 0));
     SpuStepOutcome::Continue
 }
@@ -78,7 +78,7 @@ pub(super) fn interpolate(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuSt
         });
         packed.bits as u32
     });
-    state.regs[rt as usize] = from_words(results);
+    state.set_reg(rt as usize, from_words(results));
     state.fpscr_accumulate_single(flags);
     SpuStepOutcome::Continue
 }
@@ -121,7 +121,7 @@ pub(super) fn to_float(
         flags[slot] = packed.flags;
         packed.bits as u32
     });
-    state.regs[rt as usize] = from_words(results);
+    state.set_reg(rt as usize, from_words(results));
     state.fpscr_accumulate_single(flags);
     SpuStepOutcome::Continue
 }
@@ -141,28 +141,32 @@ pub(super) fn to_integer(
         return SpuStepOutcome::Fault(SpuFault::UndefinedConversionScale(imm));
     };
     let a = words(state.regs[ra as usize]);
-    state.regs[rt as usize] = from_words(a.map(|word| {
-        let (x, _) = unpack_extended::<Binary32>(u64::from(word));
-        // The magnitude truncated toward zero, or `None` at 2^33 and above.
-        let shift = x.exponent() + scale as i32;
-        let significand = x.significand();
-        let magnitude = if significand == 0 {
-            Some(0)
-        } else if shift >= 0 {
-            (128 - significand.leading_zeros() as i32 + shift <= 33).then(|| significand << shift)
-        } else {
-            Some(significand.checked_shr(shift.unsigned_abs()).unwrap_or(0))
-        };
-        match (signed, x.negative(), magnitude) {
-            (true, false, Some(m)) if m <= i32::MAX as u128 => m as u32,
-            (true, false, _) => i32::MAX as u32,
-            (true, true, Some(m)) if m <= 1 << 31 => (m as u32).wrapping_neg(),
-            (true, true, _) => i32::MIN as u32,
-            (false, false, Some(m)) if m <= u128::from(u32::MAX) => m as u32,
-            (false, false, _) => u32::MAX,
-            (false, true, _) => 0,
-        }
-    }));
+    state.set_reg(
+        rt as usize,
+        from_words(a.map(|word| {
+            let (x, _) = unpack_extended::<Binary32>(u64::from(word));
+            // The magnitude truncated toward zero, or `None` at 2^33 and above.
+            let shift = x.exponent() + scale as i32;
+            let significand = x.significand();
+            let magnitude = if significand == 0 {
+                Some(0)
+            } else if shift >= 0 {
+                (128 - significand.leading_zeros() as i32 + shift <= 33)
+                    .then(|| significand << shift)
+            } else {
+                Some(significand.checked_shr(shift.unsigned_abs()).unwrap_or(0))
+            };
+            match (signed, x.negative(), magnitude) {
+                (true, false, Some(m)) if m <= i32::MAX as u128 => m as u32,
+                (true, false, _) => i32::MAX as u32,
+                (true, true, Some(m)) if m <= 1 << 31 => (m as u32).wrapping_neg(),
+                (true, true, _) => i32::MIN as u32,
+                (false, false, Some(m)) if m <= u128::from(u32::MAX) => m as u32,
+                (false, false, _) => u32::MAX,
+                (false, true, _) => 0,
+            }
+        })),
+    );
     SpuStepOutcome::Continue
 }
 
@@ -178,13 +182,16 @@ pub(super) fn compare(
     holds: impl Fn(u32, u32) -> bool,
 ) -> SpuStepOutcome {
     let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
-    state.regs[rt as usize] = from_words(std::array::from_fn(|slot| {
-        if holds(a[slot], b[slot]) {
-            u32::MAX
-        } else {
-            0
-        }
-    }));
+    state.set_reg(
+        rt as usize,
+        from_words(std::array::from_fn(|slot| {
+            if holds(a[slot], b[slot]) {
+                u32::MAX
+            } else {
+                0
+            }
+        })),
+    );
     SpuStepOutcome::Continue
 }
 

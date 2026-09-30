@@ -79,7 +79,7 @@ pub(super) fn double(state: &mut SpuState, rt: u8, ra: u8, rb: u8, op: DoubleOp)
         });
         bits
     });
-    state.regs[rt as usize] = from_doublewords(results);
+    state.set_reg(rt as usize, from_doublewords(results));
     state.fpscr_accumulate_double(flags);
     SpuStepOutcome::Continue
 }
@@ -205,7 +205,7 @@ pub(super) fn fused(state: &mut SpuState, rt: u8, ra: u8, rb: u8, form: Fused) -
             bits
         }
     });
-    state.regs[rt as usize] = from_doublewords(results);
+    state.set_reg(rt as usize, from_doublewords(results));
     state.fpscr_accumulate_double(flags);
     SpuStepOutcome::Continue
 }
@@ -298,7 +298,7 @@ pub(super) fn round_to_single(state: &mut SpuState, rt: u8, ra: u8) -> SpuStepOu
         flags[slot] = slot_flags;
         bits << 32
     });
-    state.regs[rt as usize] = from_doublewords(results);
+    state.set_reg(rt as usize, from_doublewords(results));
     state.fpscr_accumulate_double(flags);
     SpuStepOutcome::Continue
 }
@@ -320,7 +320,7 @@ pub(super) fn extend_to_double(state: &mut SpuState, rt: u8, ra: u8) -> SpuStepO
         flags[slot] = slot_flags;
         bits
     });
-    state.regs[rt as usize] = from_doublewords(results);
+    state.set_reg(rt as usize, from_doublewords(results));
     state.fpscr_accumulate_double(flags);
     SpuStepOutcome::Continue
 }

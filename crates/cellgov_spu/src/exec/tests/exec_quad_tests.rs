@@ -38,7 +38,7 @@ fn lqd_scales_a_negative_immediate_by_sixteen_and_masks_the_low_bits() {
 fn stqd_writes_the_register_at_the_scaled_offset() {
     let mut s = SpuState::new();
     s.set_reg_word_splat(1, 0x2000);
-    s.regs[4] = PATTERN;
+    s.set_reg(4, PATTERN);
     let outcome = execute(
         &SpuInstruction::Stqd {
             rt: 4,
@@ -60,7 +60,7 @@ fn lqx_and_stqx_sum_the_preferred_slots_of_ra_and_rb() {
     let mut s = SpuState::new();
     s.set_reg_word_splat(1, 0x3004);
     s.set_reg_word_splat(2, 0x0018);
-    s.regs[5] = PATTERN;
+    s.set_reg(5, PATTERN);
     // 0x3004 + 0x0018 = 0x301C; the quadword mask folds it to 0x3010.
     execute(
         &SpuInstruction::Stqx {
@@ -90,7 +90,7 @@ fn lqx_and_stqx_sum_the_preferred_slots_of_ra_and_rb() {
 fn lqa_and_stqa_ignore_every_register_for_the_address() {
     let mut s = SpuState::new();
     s.set_reg_word_splat(1, 0xDEAD_0000);
-    s.regs[7] = PATTERN;
+    s.set_reg(7, PATTERN);
     let imm: i16 = (0x0400u16 >> 2) as i16;
     execute(&SpuInstruction::Stqa { rt: 7, imm }, &mut s, uid());
     assert_eq!(&s.ls[0x0400..0x0410], &PATTERN);
@@ -105,7 +105,7 @@ fn lqr_and_stqr_use_the_pc_not_ra() {
     let mut s = SpuState::new();
     s.pc = 0x0500;
     s.set_reg_word_splat(1, 0xDEAD_0000);
-    s.regs[9] = PATTERN;
+    s.set_reg(9, PATTERN);
     execute(&SpuInstruction::Stqr { rt: 9, imm: 4 }, &mut s, uid());
     assert_eq!(&s.ls[0x0510..0x0520], &PATTERN);
     let outcome = execute(&SpuInstruction::Lqr { rt: 10, imm: 4 }, &mut s, uid());
@@ -117,7 +117,7 @@ fn lqr_and_stqr_use_the_pc_not_ra() {
 fn load_past_a_short_local_store_faults_and_leaves_rt_unchanged() {
     let mut s = SpuState::new();
     s.ls.truncate(0x1000);
-    s.regs[3] = PATTERN;
+    s.set_reg(3, PATTERN);
     s.set_reg_word_splat(1, 0x1000);
     let outcome = execute(
         &SpuInstruction::Lqd {
@@ -139,7 +139,7 @@ fn load_past_a_short_local_store_faults_and_leaves_rt_unchanged() {
 fn store_past_a_short_local_store_faults_and_leaves_ls_unchanged() {
     let mut s = SpuState::new();
     s.ls.truncate(0x1000);
-    s.regs[3] = PATTERN;
+    s.set_reg(3, PATTERN);
     let before = s.ls.clone();
     // I16 = 0x400 -> LSA 0x1000, the first quadword past the end.
     let outcome = execute(&SpuInstruction::Stqa { rt: 3, imm: 0x400 }, &mut s, uid());

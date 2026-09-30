@@ -122,7 +122,7 @@ fn a_second_atomic_status_read_stalls_and_leaves_its_register() {
 #[test]
 fn a_successful_putllc_and_a_getllar_each_make_the_atomic_status_count_1() {
     let mut s = SpuState::new();
-    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x80));
+    s.set_reservation(Some(cellgov_sync::ReservedLine::containing(0x80)));
     s.channels.mfc_eal = 0x80;
     s.set_reg_word_splat(4, spu::MFC_PUTLLC);
     let wrch_cmd = SpuInstruction::Wrch {
@@ -156,7 +156,10 @@ fn a_successful_putllc_and_a_getllar_each_make_the_atomic_status_count_1() {
     let mem = GuestMemory::new(0x1000);
     let mut effects = Vec::new();
     unit.run_until_yield(Budget::new(10), &ExecutionContext::new(&mem), &mut effects);
-    assert!(unit.state().reservation.is_some(), "the getllar completed");
+    assert!(
+        unit.state().reservation().is_some(),
+        "the getllar completed"
+    );
     assert_eq!(unit.state().reg_word(3), 1);
 }
 

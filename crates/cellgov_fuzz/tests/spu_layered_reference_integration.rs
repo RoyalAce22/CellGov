@@ -34,7 +34,7 @@ fn a_common_mode_spu_defect_crosses_internal_checks_but_not_a_documented_vector(
     let partner = decode(partner_word).expect("partner must decode");
 
     let mut initial = SpuState::new();
-    initial.regs = reference.initial.regs;
+    initial.set_reg_all(reference.initial.regs);
     initial.ls = reference.initial.ls.clone();
     initial.pc = reference.initial.pc;
     let mut original_state = initial.clone();

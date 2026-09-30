@@ -70,7 +70,7 @@ fn interrupt_pending(unit: &mut SpuExecutionUnit) {
     let state = unit.state_mut();
     state.channels.set_event_state(0, S1);
     state.raise_events(S1);
-    state.interrupts_enabled = true;
+    state.set_interrupts_enabled(true);
 }
 
 /// [SPU-ISA p:251 s:12.1] with an enabled condition present and interrupts enabled, the SPU branches to address 0, disables interrupts and saves the next instruction's address in SRR0.
@@ -100,14 +100,14 @@ fn an_enabled_event_with_interrupts_on_enters_the_handler_before_the_next_instru
 fn no_interrupt_without_an_enabled_event_or_with_interrupts_off() {
     let mut unit = unit_with(&[(0, &HANDLER), (0x100, &[il(3, 7), STOP])]);
     unit.state_mut().pc = 0x100;
-    unit.state_mut().interrupts_enabled = true;
+    unit.state_mut().set_interrupts_enabled(true);
     run(&mut unit);
     assert_eq!(unit.state().reg_word(3), 7, "no event is pending");
 
     let mut unit = unit_with(&[(0, &HANDLER), (0x100, &[il(3, 7), STOP])]);
     unit.state_mut().pc = 0x100;
     interrupt_pending(&mut unit);
-    unit.state_mut().interrupts_enabled = false;
+    unit.state_mut().set_interrupts_enabled(false);
     run(&mut unit);
     assert_eq!(unit.state().reg_word(3), 7, "interrupts are off");
 }
@@ -119,7 +119,7 @@ fn iret_with_e_returns_to_srr0_with_interrupts_enabled() {
         (0, &[IRET | E]),
         (0x100, &[rdch(SPU_RD_MACH_STAT, 21), STOP]),
     ]);
-    unit.state_mut().srr0 = 0x100;
+    unit.state_mut().set_srr0(0x100);
     run(&mut unit);
     assert_eq!(unit.state().reg_word(21), 1);
     assert_eq!(unit.state().stop.map(|stop| stop.npc), Some(0x108));
@@ -137,7 +137,7 @@ fn the_d_and_e_bits_act_only_on_a_taken_branch() {
     state.set_reg_word_splat(12, 0x100);
     run(&mut unit);
     // bie to 0x10, biz not taken, bid to 0x100, stop.
-    assert!(!unit.state().interrupts_enabled);
+    assert!(!unit.state().interrupts_enabled());
     assert_eq!(unit.state().stop.map(|stop| stop.npc), Some(0x104));
 
     let mut unit = unit_with(&[(0, &[bi(10) | E, 0, 0, 0, biz(11, 12) | D, STOP])]);
@@ -146,7 +146,7 @@ fn the_d_and_e_bits_act_only_on_a_taken_branch() {
     state.set_reg_word_splat(11, 1);
     run(&mut unit);
     assert!(
-        unit.state().interrupts_enabled,
+        unit.state().interrupts_enabled(),
         "the untaken biz left E's enable"
     );
 }
@@ -179,7 +179,7 @@ fn srr0_round_trips_through_its_channels_and_both_count_one() {
     unit.state_mut().set_reg_word_splat(10, 0x1234);
     run(&mut unit);
     let state = unit.state();
-    assert_eq!(state.srr0, 0x1234);
+    assert_eq!(state.srr0(), 0x1234);
     assert_eq!(state.reg_word(20), 0x1234);
     assert_eq!((state.reg_word(21), state.reg_word(22)), (1, 1));
 }
@@ -188,14 +188,14 @@ fn srr0_round_trips_through_its_channels_and_both_count_one() {
 #[test]
 fn spu_npc_carries_the_interrupt_enable_state_through_a_stop_and_restart() {
     let mut unit = unit_with(&[(0, &[STOP, rdch(SPU_RD_MACH_STAT, 21), STOP])]);
-    unit.state_mut().interrupts_enabled = true;
+    unit.state_mut().set_interrupts_enabled(true);
     run(&mut unit);
     assert_eq!(unit.stop_registers().map(|stop| stop.npc), Some(4 | 1));
 
     unit.write_npc(4).expect("stopped");
     unit.restart().expect("stopped");
     assert!(
-        !unit.state().interrupts_enabled,
+        !unit.state().interrupts_enabled(),
         "SPU_NPC[IE] was written 0"
     );
     run(&mut unit);
@@ -215,7 +215,7 @@ fn a_tag_status_read_with_no_request_parks_when_an_interrupt_can_end_it() {
     let mut unit = unit_with(&[(0, &[rdch(MFC_RD_TAG_STAT, 5)])]);
     let state = unit.state_mut();
     state.channels.set_event_state(0, S1);
-    state.interrupts_enabled = true;
+    state.set_interrupts_enabled(true);
     assert_eq!(run(&mut unit), YieldReason::ChannelStall);
     assert_eq!(
         unit.channel_stall().map(|stall| stall.wake),

@@ -68,8 +68,8 @@ fn bias(op: u32) -> u32 {
 
 fn run(op: u32, imm: u32, a: [u32; 4]) -> (SpuStepOutcome, SpuState) {
     let mut s = SpuState::new();
-    s.regs[1] = from_words(a);
-    s.regs[3] = [0xAA; 16];
+    s.set_reg(1, from_words(a));
+    s.set_reg(3, [0xAA; 16]);
     let insn = crate::decode::decode(ri8(op, 3, 1, imm)).expect("decodes");
     (execute(&insn, &mut s, UnitId::new(0)), s)
 }
@@ -85,7 +85,7 @@ fn check(op: u32, scale: i32, a: [u32; 4]) {
         expected.map(|(bits, _)| bits),
         "{context}"
     );
-    assert_eq!(s.fpscr, fpscr_of(expected.map(|(_, f)| f)), "{context}");
+    assert_eq!(s.fpscr(), fpscr_of(expected.map(|(_, f)| f)), "{context}");
 }
 
 /// Integers at the edges of both ranges, and small values.
@@ -181,7 +181,7 @@ fn the_integer_conversions_saturate_at_their_documented_borders() {
     // Truncation, not rounding: 1.99... and -1.99... give 1 and -1.
     let (_, s) = run(CFLTS, TO_INTEGER_BIAS, [0x3FFF_FFFF, 0xBFFF_FFFF, 0, 0]);
     assert_eq!(words(s.regs[3]), [1, 0xFFFF_FFFF, 0, 0]);
-    assert_eq!(s.fpscr, 0, "the integer conversions set no flag");
+    assert_eq!(s.fpscr(), 0, "the integer conversions set no flag");
 }
 
 /// [SPU-ISA p:196 s:9.1] truncation is the only single-precision rounding.
@@ -201,7 +201,7 @@ fn the_float_conversions_truncate_and_flush() {
     let (_, s) = run(CSFLT, TO_FLOAT_BIAS - 127, [0, 1, 2, 0xFFFF_FFFF]);
     assert_eq!(words(s.regs[3]), [0, 0, 0x0080_0000, 0]);
     assert_eq!(
-        s.fpscr,
+        s.fpscr(),
         fpscr_field(62, 2) | fpscr_field(126, 2),
         "UNF and DIFF in slots 1 and 3"
     );
@@ -224,7 +224,7 @@ fn an_undefined_scale_is_a_named_refusal() {
                 "op {op:#x} I8 {imm}"
             );
             assert_eq!(s.regs[3], [0xAA; 16], "RT keeps its value");
-            assert_eq!(s.fpscr, 0);
+            assert_eq!(s.fpscr(), 0);
         }
         // The edges of the defined range run.
         let lowest = bias(op) - 127;
@@ -248,8 +248,8 @@ fn exhaustive(op: u32) {
     let mut s = SpuState::new();
     for base in (0..=u32::MAX).step_by(4) {
         let a = [base, base + 1, base + 2, base + 3];
-        s.regs[1] = from_words(a);
-        s.fpscr = 0;
+        s.set_reg(1, from_words(a));
+        s.set_fpscr(0);
         execute(&insn, &mut s, UnitId::new(0));
         let expected: [(u32, SpFlags); 4] = std::array::from_fn(|i| oracle(op, a[i], 0));
         assert_eq!(
@@ -257,7 +257,11 @@ fn exhaustive(op: u32) {
             expected.map(|(bits, _)| bits),
             "{base:#010x}"
         );
-        assert_eq!(s.fpscr, fpscr_of(expected.map(|(_, f)| f)), "{base:#010x}");
+        assert_eq!(
+            s.fpscr(),
+            fpscr_of(expected.map(|(_, f)| f)),
+            "{base:#010x}"
+        );
     }
 }
 

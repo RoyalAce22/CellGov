@@ -21,7 +21,7 @@ fn mfspr_writes_128_zero_bits_for_every_sa() {
             }
         );
         let mut s = SpuState::new();
-        s.regs[5] = [0xA5; 16];
+        s.set_reg(5, [0xA5; 16]);
         let out = execute(&insn, &mut s, UnitId::new(0));
         assert_eq!(out, SpuStepOutcome::Continue);
         assert_eq!(s.regs[5], [0; 16], "sa {sa}");
@@ -41,7 +41,7 @@ fn mtspr_changes_no_state_for_any_sa() {
             }
         );
         let mut s = SpuState::new();
-        s.regs[5] = [0xA5; 16];
+        s.set_reg(5, [0xA5; 16]);
         let before = SpuObservableSnapshot::capture(&s);
         let out = execute(&insn, &mut s, UnitId::new(0));
         assert_eq!(out, SpuStepOutcome::Continue);

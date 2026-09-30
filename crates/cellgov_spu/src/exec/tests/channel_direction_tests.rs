@@ -46,7 +46,7 @@ fn the_direction_table_matches_the_channel_map() {
 fn wrch_to_a_read_channel_is_an_invalid_channel_stop() {
     for channel in READ {
         let mut s = SpuState::new();
-        s.regs[7] = [0xA5; 16];
+        s.set_reg(7, [0xA5; 16]);
         let before = SpuObservableSnapshot::capture(&s);
         let out = execute(
             &SpuInstruction::Wrch { channel, rt: 7 },
@@ -66,7 +66,7 @@ fn wrch_to_a_read_channel_is_an_invalid_channel_stop() {
 fn rdch_of_a_write_channel_is_an_invalid_channel_stop() {
     for channel in WRITE {
         let mut s = SpuState::new();
-        s.regs[7] = [0xA5; 16];
+        s.set_reg(7, [0xA5; 16]);
         let before = SpuObservableSnapshot::capture(&s);
         let out = execute(
             &SpuInstruction::Rdch { rt: 7, channel },

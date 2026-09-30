@@ -52,8 +52,8 @@ fn fi_oracle(ra: u32, rb: u32) -> (u32, SpFlags) {
 
 fn check_fi(ra: [u32; 4], rb: [u32; 4]) {
     let mut s = SpuState::new();
-    s.regs[1] = from_words(ra);
-    s.regs[2] = from_words(rb);
+    s.set_reg(1, from_words(ra));
+    s.set_reg(2, from_words(rb));
     step(&mut s, rr(FI, 3, 1, 2));
     let expected: [(u32, SpFlags); 4] = std::array::from_fn(|i| fi_oracle(ra[i], rb[i]));
     let context = format!("{ra:08x?} {rb:08x?}");
@@ -62,7 +62,7 @@ fn check_fi(ra: [u32; 4], rb: [u32; 4]) {
         expected.map(|(bits, _)| bits),
         "{context}"
     );
-    assert_eq!(s.fpscr, fpscr_of(expected.map(|(_, f)| f)), "{context}");
+    assert_eq!(s.fpscr(), fpscr_of(expected.map(|(_, f)| f)), "{context}");
 }
 
 #[test]
@@ -98,13 +98,13 @@ fn fi_matches_its_formula() {
 /// [SPU-ISA p:215 s:9] FREST y0,x; FI y1,x,y0; FNMS t1,x,y1,ONE; FMA y2,t1,y1,y1.
 fn reciprocal(x: [u32; 4]) -> ([u32; 4], u128) {
     let mut s = SpuState::new();
-    s.regs[1] = from_words(x);
-    s.regs[6] = from_words([ONE; 4]);
+    s.set_reg(1, from_words(x));
+    s.set_reg(6, from_words([ONE; 4]));
     step(&mut s, rr(FREST, 2, 1, 0));
     step(&mut s, rr(FI, 3, 1, 2));
     step(&mut s, rrr(FNMS, 4, 3, 1, 6));
     step(&mut s, rrr(FMA, 5, 3, 4, 3));
-    (words(s.regs[5]), s.fpscr)
+    (words(s.regs[5]), s.fpscr())
 }
 
 /// Runs the reciprocal-square-root sequence on four operands and returns y2.
@@ -112,10 +112,10 @@ fn reciprocal(x: [u32; 4]) -> ([u32; 4], u128) {
 /// [SPU-ISA p:217 s:9] FRSQEST y0,x; AND ax,x,mask; FI y1,ax,y0; FM t1,ax,y1; FM t2,y1,HALF; FNMS t1,t1,y1,ONE; FMA y2,t1,t2,y1.
 fn reciprocal_sqrt(x: [u32; 4]) -> [u32; 4] {
     let mut s = SpuState::new();
-    s.regs[1] = from_words(x);
-    s.regs[6] = from_words([ONE; 4]);
-    s.regs[7] = from_words([HALF; 4]);
-    s.regs[8] = from_words([0x7FFF_FFFF; 4]);
+    s.set_reg(1, from_words(x));
+    s.set_reg(6, from_words([ONE; 4]));
+    s.set_reg(7, from_words([HALF; 4]));
+    s.set_reg(8, from_words([0x7FFF_FFFF; 4]));
     step(&mut s, rr(FRSQEST, 2, 1, 0));
     step(&mut s, rr(AND, 9, 1, 8));
     step(&mut s, rr(FI, 3, 9, 2));
@@ -297,10 +297,10 @@ fn the_frsqest_zero_threshold_holds_for_every_fraction() {
 fn a_zero_exponent_flags_divide_by_zero_in_its_own_slot() {
     for op in [FREST, FRSQEST] {
         let mut s = SpuState::new();
-        s.regs[1] = from_words([0x0000_0000, ONE, 0x8000_0001, 0x7F80_0000]);
+        s.set_reg(1, from_words([0x0000_0000, ONE, 0x8000_0001, 0x7F80_0000]));
         step(&mut s, rr(op, 2, 1, 0));
         assert_eq!(
-            s.fpscr,
+            s.fpscr(),
             fpscr_field(116, 1) | fpscr_field(118, 1),
             "op {op:#x}"
         );
@@ -311,7 +311,10 @@ fn a_zero_exponent_flags_divide_by_zero_in_its_own_slot() {
 #[test]
 fn the_estimate_carries_the_documented_sign_and_layout() {
     let mut s = SpuState::new();
-    s.regs[1] = from_words([ONE, ONE | 0x8000_0000, 0x4000_0000, 0xC000_0000]);
+    s.set_reg(
+        1,
+        from_words([ONE, ONE | 0x8000_0000, 0x4000_0000, 0xC000_0000]),
+    );
     step(&mut s, rr(FREST, 2, 1, 0));
     step(&mut s, rr(FRSQEST, 3, 1, 0));
     let frest = words(s.regs[2]);

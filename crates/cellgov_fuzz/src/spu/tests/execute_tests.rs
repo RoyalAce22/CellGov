@@ -52,10 +52,13 @@ fn a_faulting_spu_sequence_discards_prior_state() {
 fn self_modified_decode_refusal_is_a_terminal_observation() {
     let mut initial = SpuState::new();
     // RR opcode 0x004 names no instruction, so the stored word never decodes.
-    initial.regs[0] = [0x00, 0x80, 0x00, 0x00]
-        .repeat(4)
-        .try_into()
-        .expect("16 bytes");
+    initial.set_reg(
+        0,
+        [0x00, 0x80, 0x00, 0x00]
+            .repeat(4)
+            .try_into()
+            .expect("16 bytes"),
+    );
     let stqd_r0_at_16 = 0x2400_4080u32;
     let nop = 0x4020_007fu32;
     for (index, word) in [stqd_r0_at_16, nop, nop, nop, nop].iter().enumerate() {
@@ -203,7 +206,9 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
         initial.channels.mfc_eal = STRUCTURED_LS_DATA_BASE;
         initial.channels.tag_mask = 1;
         initial.channels.tag_status = 1;
-        initial.reservation = Some(ReservedLine::containing(u64::from(STRUCTURED_LS_DATA_BASE)));
+        initial.set_reservation(Some(ReservedLine::containing(u64::from(
+            STRUCTURED_LS_DATA_BASE,
+        ))));
         interaction.prepare_state(&mut initial, STRUCTURED_LS_DATA_BASE);
         if matches!(
             interaction,
@@ -387,7 +392,7 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                 defective.0.terminal_outcome = Some(SpuStepOutcome::Continue)
             }
             SpuSequenceInteraction::Reservation => {
-                defective.0.state.reservation = initial.reservation
+                defective.0.state.reservation = initial.reservation()
             }
             SpuSequenceInteraction::LocalStore => {
                 defective.0.state.ls[STRUCTURED_LS_DATA_BASE as usize] ^= 1

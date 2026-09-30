@@ -304,16 +304,16 @@ fn rounding_fields(modes: [Mode; 2]) -> u128 {
 /// flag bits the operation set.
 fn run(op: u32, a: [u64; 2], b: [u64; 2], modes: [Mode; 2]) -> ([u64; 2], u128) {
     let mut s = SpuState::new();
-    s.fpscr = rounding_fields(modes);
-    s.regs[1] = from_doublewords(a);
-    s.regs[2] = from_doublewords(b);
-    s.regs[3] = [0xAA; 16];
+    s.set_fpscr(rounding_fields(modes));
+    s.set_reg(1, from_doublewords(a));
+    s.set_reg(2, from_doublewords(b));
+    s.set_reg(3, [0xAA; 16]);
     let insn = crate::decode::decode(rr(op, 3, 1, 2)).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),
         SpuStepOutcome::Continue
     );
-    (doublewords(s.regs[3]), s.fpscr & !rounding_fields(modes))
+    (doublewords(s.regs[3]), s.fpscr() & !rounding_fields(modes))
 }
 
 fn check(op: u32, a: [u64; 2], b: [u64; 2], modes: [Mode; 2]) {

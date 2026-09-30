@@ -14,13 +14,16 @@ fn shufb_word(rt: u32, ra: u32, rb: u32, rc: u32) -> u32 {
 
 fn initial() -> SpuState {
     let mut state = SpuState::new();
-    state.regs[1] = std::array::from_fn(|i| 0xA0 + i as u8);
-    state.regs[2] = std::array::from_fn(|i| 0xB0 + i as u8);
+    state.set_reg(1, std::array::from_fn(|i| 0xA0 + i as u8));
+    state.set_reg(2, std::array::from_fn(|i| 0xB0 + i as u8));
     // Every class: 10xxxxxx, 110xxxxx, 111xxxxx, RA selectors, RB selectors.
-    state.regs[3] = [
-        0x80, 0xBF, 0xC0, 0xDF, 0xE0, 0xFF, 0x00, 0x0F, 0x10, 0x1F, 0x3F, 0x7F, 0x45, 0x9A, 0xD3,
-        0xEC,
-    ];
+    state.set_reg(
+        3,
+        [
+            0x80, 0xBF, 0xC0, 0xDF, 0xE0, 0xFF, 0x00, 0x0F, 0x10, 0x1F, 0x3F, 0x7F, 0x45, 0x9A,
+            0xD3, 0xEC,
+        ],
+    );
     state
 }
 
@@ -68,10 +71,11 @@ fn every_rc_byte_moves_within_its_class_and_the_result_holds() {
     }
 
     let (baseline, _) = observe(&instruction, original.clone());
-    let (_, mut partner_final) = observe(&instruction, partner_initial);
+    let (_, partner_final) = observe(&instruction, partner_initial);
     assert_ne!(baseline.state.regs[3], partner_final.regs[3]);
-    case.settle_partner(&original, &mut partner_final.regs);
-    assert_eq!(baseline.state.regs, partner_final.regs);
+    let mut partner_regs = *partner_final.regs.as_array();
+    case.settle_partner(&original, &mut partner_regs);
+    assert_eq!(baseline.state.regs, partner_regs);
 }
 
 #[test]
@@ -90,9 +94,10 @@ fn an_rc_that_writes_rt_keeps_the_partner_result() {
     );
     let original = initial();
     let (baseline, _) = observe(&instruction, original.clone());
-    let (_, mut partner_final) = observe(&instruction, case.partner_initial(&original));
-    case.settle_partner(&original, &mut partner_final.regs);
-    assert_eq!(baseline.state.regs, partner_final.regs);
+    let (_, partner_final) = observe(&instruction, case.partner_initial(&original));
+    let mut partner_regs = *partner_final.regs.as_array();
+    case.settle_partner(&original, &mut partner_regs);
+    assert_eq!(baseline.state.regs, partner_regs);
 }
 
 #[test]

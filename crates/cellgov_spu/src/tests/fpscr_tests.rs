@@ -20,7 +20,7 @@ fn step(s: &mut SpuState, raw: u32) {
 
 #[test]
 fn a_new_context_starts_with_a_zero_fpscr() {
-    assert_eq!(SpuState::new().fpscr, 0);
+    assert_eq!(SpuState::new().fpscr(), 0);
 }
 
 /// [SPU-ISA p:235 s:9] the unused bits fscrwr writes are undefined.
@@ -28,11 +28,11 @@ fn a_new_context_starts_with_a_zero_fpscr() {
 #[test]
 fn writing_all_ones_reads_back_exactly_the_defined_bits() {
     let mut s = SpuState::new();
-    s.regs[5] = [0xFF; 16];
-    s.regs[9] = [0xAA; 16];
+    s.set_reg(5, [0xFF; 16]);
+    s.set_reg(9, [0xAA; 16]);
     step(&mut s, FSCRWR | 5 << 7 | 9);
     assert_eq!(s.regs[9], [0xAA; 16], "RT is a false target");
-    assert_eq!(s.fpscr, FPSCR_DEFINED, "only the defined bits are stored");
+    assert_eq!(s.fpscr(), FPSCR_DEFINED, "only the defined bits are stored");
     step(&mut s, FSCRRD | 3);
     assert_eq!(u128::from_be_bytes(s.regs[3]), FPSCR_DEFINED);
 }
@@ -49,7 +49,7 @@ fn the_rounding_fields_decode_all_four_modes_for_both_slices() {
     for (slice, first) in FPSCR_RN_FIRST.into_iter().enumerate() {
         for (code, mode) in modes.into_iter().enumerate() {
             let mut s = SpuState::new();
-            s.fpscr = (code as u128) << (128 - first - 2);
+            s.set_fpscr((code as u128) << (128 - first - 2));
             let mut want = [Rounding::NearestEven; 2];
             want[slice] = mode;
             assert_eq!(s.fpscr_rounding(), want, "slice {slice} code {code}");
@@ -79,12 +79,12 @@ fn accumulating_one_slice_leaves_every_other_bit_unchanged() {
     for (slice, first) in [29, 61, 93, 125].into_iter().enumerate() {
         let mut s = SpuState::new();
         s.fpscr_accumulate_single(only(slice, all));
-        assert_eq!(s.fpscr, fpscr_field(first, 3), "single slice {slice}");
+        assert_eq!(s.fpscr(), fpscr_field(first, 3), "single slice {slice}");
     }
     for (slice, first) in [50, 82].into_iter().enumerate() {
         let mut s = SpuState::new();
         s.fpscr_accumulate_double(only(slice, all));
-        assert_eq!(s.fpscr, fpscr_field(first, 6), "double slice {slice}");
+        assert_eq!(s.fpscr(), fpscr_field(first, 6), "double slice {slice}");
     }
     for slice in 0..4 {
         let mut s = SpuState::new();
@@ -92,7 +92,7 @@ fn accumulating_one_slice_leaves_every_other_bit_unchanged() {
         divided[slice] = true;
         s.fpscr_accumulate_dbz(divided);
         assert_eq!(
-            s.fpscr,
+            s.fpscr(),
             fpscr_field(116 + slice as u32, 1),
             "dbz slice {slice}"
         );
@@ -106,7 +106,7 @@ fn accumulating_one_slice_leaves_every_other_bit_unchanged() {
             ..Flags::default()
         },
     ));
-    assert_eq!(s.fpscr, fpscr_field(62, 1));
+    assert_eq!(s.fpscr(), fpscr_field(62, 1));
     let mut s = SpuState::new();
     s.fpscr_accumulate_double(only(
         0,
@@ -115,7 +115,7 @@ fn accumulating_one_slice_leaves_every_other_bit_unchanged() {
             ..Flags::default()
         },
     ));
-    assert_eq!(s.fpscr, fpscr_field(55, 1));
+    assert_eq!(s.fpscr(), fpscr_field(55, 1));
 }
 
 /// [SPU-ISA p:200 s:9.3] every status bit stays set until fscrwr clears it.
@@ -129,14 +129,14 @@ fn flags_stay_set_across_an_operation_that_raises_none() {
             ..Flags::default()
         },
     ));
-    let before = s.fpscr;
+    let before = s.fpscr();
     s.fpscr_accumulate_single([Flags::default(); 4]);
     s.fpscr_accumulate_double([Flags::default(); 2]);
     s.fpscr_accumulate_dbz([false; 4]);
-    assert_eq!(s.fpscr, before);
-    s.regs[1] = [0; 16];
+    assert_eq!(s.fpscr(), before);
+    s.set_reg(1, [0; 16]);
     step(&mut s, FSCRWR | 1 << 7);
-    assert_eq!(s.fpscr, 0, "fscrwr clears the sticky bits");
+    assert_eq!(s.fpscr(), 0, "fscrwr clears the sticky bits");
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn the_fpscr_is_compared_and_only_fscrwr_may_change_it() {
 
     let before = SpuState::new();
     let mut after = before.clone();
-    after.fpscr = FPSCR_DEFINED;
+    after.set_fpscr(FPSCR_DEFINED);
     let observe = |state: &SpuState| {
         SpuObservation::from_parts(
             SpuObservableSnapshot::capture(state),

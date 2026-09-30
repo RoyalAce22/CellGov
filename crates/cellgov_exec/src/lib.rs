@@ -39,5 +39,5 @@ pub use problem_state::{ProblemStateError, SignalNotifier};
 pub use stall::{ChannelStall, StallWake};
 pub use step_result::{ExecutionStepResult, FaultRegisterDump, LocalDiagnostics};
 pub use stop::{RestartError, StopRegisters};
-pub use unit::{ExecutionUnit, PpuFingerprint, UnitStatus};
+pub use unit::{ExecutionUnit, PpuFingerprint, SpuFingerprint, UnitStatus};
 pub use yield_reason::YieldReason;

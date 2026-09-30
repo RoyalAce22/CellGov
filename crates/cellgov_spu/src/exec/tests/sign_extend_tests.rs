@@ -15,8 +15,8 @@ const XSWD: u32 = 0x2A6;
 /// Runs `op` with `a` in r1 and junk in r3, and returns r3's words.
 fn run(op: u32, a: [u32; 4]) -> [u32; 4] {
     let mut s = SpuState::new();
-    s.regs[1] = from_words(a);
-    s.regs[3] = [0xAA; 16];
+    s.set_reg(1, from_words(a));
+    s.set_reg(3, [0xAA; 16]);
     let insn = crate::decode::decode(rr(op, 3, 1)).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),

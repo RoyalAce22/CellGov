@@ -403,16 +403,16 @@ fn rounding_fields(modes: [Mode; 2]) -> u128 {
 /// Runs `op` with RA = `a`, RB = `b`, RT = `c`; returns RT and the flag bits.
 fn run(op: u32, a: [u64; 2], b: [u64; 2], c: [u64; 2], modes: [Mode; 2]) -> ([u64; 2], u128) {
     let mut s = SpuState::new();
-    s.fpscr = rounding_fields(modes);
-    s.regs[1] = from_doublewords(a);
-    s.regs[2] = from_doublewords(b);
-    s.regs[3] = from_doublewords(c);
+    s.set_fpscr(rounding_fields(modes));
+    s.set_reg(1, from_doublewords(a));
+    s.set_reg(2, from_doublewords(b));
+    s.set_reg(3, from_doublewords(c));
     let insn = crate::decode::decode(rr(op, 3, 1, 2)).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),
         SpuStepOutcome::Continue
     );
-    (doublewords(s.regs[3]), s.fpscr & !rounding_fields(modes))
+    (doublewords(s.regs[3]), s.fpscr() & !rounding_fields(modes))
 }
 
 fn check(op: u32, a: [u64; 2], b: [u64; 2], c: [u64; 2], modes: [Mode; 2]) {
@@ -562,8 +562,8 @@ fn a_nan_result_keeps_sign_0_through_the_negated_forms() {
 fn rt_is_read_before_it_is_written() {
     // RT is also RA: 2 x 3 + 2 = 8.
     let mut s = SpuState::new();
-    s.regs[5] = from_doublewords([0x4000_0000_0000_0000; 2]);
-    s.regs[6] = from_doublewords([0x4008_0000_0000_0000; 2]);
+    s.set_reg(5, from_doublewords([0x4000_0000_0000_0000; 2]));
+    s.set_reg(6, from_doublewords([0x4008_0000_0000_0000; 2]));
     let insn = crate::decode::decode(rr(DFMA, 5, 5, 6)).expect("decodes");
     execute(&insn, &mut s, UnitId::new(0));
     assert_eq!(doublewords(s.regs[5]), [0x4020_0000_0000_0000; 2]);

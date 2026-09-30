@@ -95,11 +95,11 @@ impl SpuSequenceInteraction {
                 );
                 state.channels.mfc_lsa = data_base + cellgov_sync::RESERVATION_LINE_BYTES as u32;
                 state.channels.mfc_eal = data_base;
-                state.reservation = Some(ReservedLine::containing(u64::from(data_base)));
+                state.set_reservation(Some(ReservedLine::containing(u64::from(data_base))));
             }
             Self::LocalStore => {
                 state.set_reg_word_splat(2, data_base);
-                state.regs[1] = std::array::from_fn(|index| index as u8 + 1);
+                state.set_reg(1, std::array::from_fn(|index| index as u8 + 1));
             }
             Self::RefusedMfcCommand => {
                 state.set_reg_word_splat(2, REFUSED_MFC_OPCODE);

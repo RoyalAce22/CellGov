@@ -6,7 +6,7 @@ use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::observation::PpuObservation;
 use cellgov_spu::fuzz::SpuOutcomeClass;
 use cellgov_spu::instruction::SpuInstruction;
-use cellgov_spu::state::{SpuObservableSnapshot, SPU_REG_COUNT};
+use cellgov_spu::state::{SpuObservableSnapshot, SpuState};
 
 /// Decodes a PPU word at the decoder boundary.
 #[inline(always)]
@@ -69,7 +69,7 @@ pub(crate) fn ppu_observed(_observation: &mut PpuObservation) {}
 pub(crate) fn spu_observed(
     _instruction: &SpuInstruction,
     _outcome: SpuOutcomeClass,
-    _regs: &mut [[u8; 16]; SPU_REG_COUNT],
+    _state: &mut SpuState,
 ) {
 }
 

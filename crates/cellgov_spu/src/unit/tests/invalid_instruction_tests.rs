@@ -92,7 +92,7 @@ fn each_optional_double_compare_is_an_invalid_instruction_on_the_cbe() {
             "{mnemonic} sets I"
         );
         assert_eq!(
-            unit.state().regs,
+            *unit.state().regs.as_array(),
             [[0; 16]; 128],
             "{mnemonic} wrote no register"
         );

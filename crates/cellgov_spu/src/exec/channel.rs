@@ -167,7 +167,7 @@ pub(super) fn execute_wrch(
         // write with interrupts enabled. The model takes the write at
         // once in both cases, which is CellGov's choice.
         spu::SPU_WR_SRR0 => {
-            state.srr0 = val;
+            state.set_srr0(val);
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:443 s:17.1.4] a write to a reserved channel has no effect and raises no interrupt.
@@ -287,12 +287,12 @@ pub(super) fn execute_rdch(
         // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] Two status bits: IS (bit 30) isolation and IE (bit 31) interrupt enable; the model runs nonisolated, so IS reads as zero.
         // The isolation facility is out of scope; docs/architecture/execution_units.md records why.
         spu::SPU_RD_MACH_STAT => {
-            state.set_reg_channel_word(rt, u32::from(state.interrupts_enabled));
+            state.set_reg_channel_word(rt, u32::from(state.interrupts_enabled()));
             SpuStepOutcome::Continue
         }
         // [CBEA p:142 s:9.9.2] a read of SPU_RdSRR0 returns the contents of SRR0.
         spu::SPU_RD_SRR0 => {
-            state.set_reg_channel_word(rt, state.srr0);
+            state.set_reg_channel_word(rt, state.srr0());
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:443 s:17.1.4] a read of a reserved channel returns zeros and raises no interrupt.
@@ -403,9 +403,9 @@ fn issue_transfer(
     // That this command's own store over the reserved line resets the
     // reservation too is CellGov's choice.
     if direction == DmaDirection::Put {
-        if let Some(line) = state.reservation {
+        if let Some(line) = state.reservation() {
             if line.overlaps_range(ea, u64::from(size)) {
-                state.reservation = None;
+                state.set_reservation(None);
             }
         }
     }
@@ -513,10 +513,10 @@ fn issue_queued_lock_line(
         .expect("valid LS range");
     // [CBE-Handbook p:479 s:18.6.4] a matching putllc, putlluc or putqlluc resets the SPE's reservation, and raises no lock-line reservation lost event.
     if state
-        .reservation
+        .reservation()
         .is_some_and(|held| held.addr() == line.addr())
     {
-        state.reservation = None;
+        state.set_reservation(None);
     }
     let request = local_store_transfer(DmaDirection::Put, local, main, unit_id)
         .with_tag_id(tag)
@@ -567,9 +567,9 @@ fn issue_storage_control(
     // [CBE-Handbook p:479 s:18.6.4] a reservation reset by a local SPE action raises no lost event; the page names putllc, putlluc and putqlluc as such actions.
     // That this command's own store over the reserved line resets the
     // reservation too is CellGov's choice.
-    if let Some(line) = state.reservation {
+    if let Some(line) = state.reservation() {
         if blocks.length() > 0 && line.overlaps_range(start, blocks.length()) {
-            state.reservation = None;
+            state.set_reservation(None);
         }
     }
     // The zeros ride as the put's payload, so no local store is read. The
@@ -748,9 +748,9 @@ fn queue_list_segment(
         // That this command's own store over the reserved line resets the
         // reservation too is CellGov's choice.
         if list.direction == DmaDirection::Put {
-            if let Some(line) = state.reservation {
+            if let Some(line) = state.reservation() {
                 if line.overlaps_range(params.ea(), u64::from(size)) {
-                    state.reservation = None;
+                    state.set_reservation(None);
                 }
             }
         }
@@ -1034,13 +1034,13 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 return queue_invalid(cmd, error, state, unit_id);
             }
             let line = cellgov_sync::ReservedLine::containing(ea);
-            let success = match state.reservation {
+            let success = match state.reservation() {
                 Some(l) => l.addr() == line.addr(),
                 None => false,
             };
             if success {
                 let ls_bytes = state.read_ls_wrapped(line_lsa, RESERVATION_LINE_BYTES as u32);
-                state.reservation = None;
+                state.set_reservation(None);
                 // The store covers the line the reservation named, as
                 // the getllar arm's read did.
                 let range = ByteRange::new(GuestAddr::new(line.addr()), RESERVATION_LINE_BYTES)
@@ -1057,7 +1057,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                     reason: YieldReason::DmaSubmitted,
                 }
             } else {
-                state.reservation = None;
+                state.set_reservation(None);
                 state.channels.atomic_status = MFC_ATOMIC_STAT_S;
                 state.channels.atomic_status_ready = true;
                 SpuStepOutcome::Continue
@@ -1075,10 +1075,10 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             let ls_bytes = state.read_ls_wrapped(line_lsa, RESERVATION_LINE_BYTES as u32);
             // [CBE-Handbook p:479 s:18.6.4] a matching putllc, putlluc or putqlluc resets the SPE's reservation, and raises no lock-line reservation lost event.
             if state
-                .reservation
+                .reservation()
                 .is_some_and(|held| held.addr() == line.addr())
             {
-                state.reservation = None;
+                state.set_reservation(None);
             }
             let range = ByteRange::new(GuestAddr::new(line.addr()), RESERVATION_LINE_BYTES)
                 .expect("valid EA range");

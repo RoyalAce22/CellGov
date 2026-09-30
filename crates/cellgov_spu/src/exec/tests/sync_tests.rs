@@ -46,7 +46,9 @@ fn run_stored_instruction(after_store: u32) {
         unit.state_mut().ls[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
     }
     // r4 holds `il r3, 9` then three zero words, which are `stop 0`.
-    unit.state_mut().regs[4][..4].copy_from_slice(&IL_R3_9.to_be_bytes());
+    let mut r4 = [0u8; 16];
+    r4[..4].copy_from_slice(&IL_R3_9.to_be_bytes());
+    unit.state_mut().set_reg(4, r4);
 
     let mem = GuestMemory::new(0x1000);
     let mut effects = Vec::new();

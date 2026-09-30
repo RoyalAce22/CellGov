@@ -58,7 +58,7 @@ fn an_atomic_command_past_the_address_space_queues_a_data_segment_exception() {
                 "0x{cmd:02x} at 0x{ea:x}: {effects:?}"
             );
             assert_ne!(unit.status(), UnitStatus::Faulted);
-            assert!(unit.state().reservation.is_none());
+            assert!(unit.state().reservation().is_none());
         }
     }
 }

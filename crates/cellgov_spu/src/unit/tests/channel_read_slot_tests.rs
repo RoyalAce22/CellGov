@@ -20,7 +20,7 @@ fn assert_preferred_only(state: &SpuState, value: u32) {
 }
 
 fn read(channel: u8, state: &mut SpuState) -> SpuStepOutcome {
-    state.regs[RT as usize] = PATTERN;
+    state.set_reg(RT as usize, PATTERN);
     execute(
         &SpuInstruction::Rdch { rt: RT, channel },
         state,
@@ -66,7 +66,7 @@ fn rdch_machine_status_zeros_the_whole_register() {
 #[test]
 fn rchcnt_zeros_slots_one_to_three() {
     let mut s = SpuState::new();
-    s.regs[RT as usize] = PATTERN;
+    s.set_reg(RT as usize, PATTERN);
     let outcome = execute(
         &SpuInstruction::Rchcnt {
             rt: RT,
@@ -82,7 +82,7 @@ fn rchcnt_zeros_slots_one_to_three() {
 #[test]
 fn an_inbound_mailbox_read_zeros_slots_one_to_three() {
     let mut s = SpuState::new();
-    s.regs[RT as usize] = PATTERN;
+    s.set_reg(RT as usize, PATTERN);
     s.channels.in_mbox = vec![0x1234_5678];
     let outcome = execute(
         &SpuInstruction::Rdch {

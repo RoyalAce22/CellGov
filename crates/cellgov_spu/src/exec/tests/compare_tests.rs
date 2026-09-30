@@ -31,9 +31,9 @@ const CLGTI: u32 = 0x5C;
 /// Runs `raw` with `a` in r1, `b` in r2 and junk in r3, and returns r3.
 fn run(raw: u32, a: [u8; 16], b: [u8; 16]) -> [u8; 16] {
     let mut s = SpuState::new();
-    s.regs[1] = a;
-    s.regs[2] = b;
-    s.regs[3] = [0xAA; 16];
+    s.set_reg(1, a);
+    s.set_reg(2, b);
+    s.set_reg(3, [0xAA; 16]);
     let insn = crate::decode::decode(raw).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),

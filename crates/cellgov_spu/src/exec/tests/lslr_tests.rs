@@ -15,14 +15,14 @@ fn uid() -> UnitId {
 
 fn state_32k() -> SpuState {
     let mut s = SpuState::new();
-    s.lslr = LSLR_32K;
+    s.set_lslr(LSLR_32K);
     s
 }
 
 #[test]
 fn a_new_state_holds_the_full_limit_and_the_snapshot_carries_it() {
     let s = SpuState::new();
-    assert_eq!(s.lslr, SPU_LSLR_FULL);
+    assert_eq!(s.lslr(), SPU_LSLR_FULL);
     assert_eq!(SPU_LSLR_FULL, 0x0003_FFFF);
     assert_eq!(SpuObservableSnapshot::capture(&state_32k()).lslr, LSLR_32K);
 }
@@ -48,7 +48,7 @@ fn a_load_past_the_limit_reads_the_wrapped_quadword() {
 #[test]
 fn a_store_past_the_limit_writes_the_wrapped_quadword() {
     let mut s = state_32k();
-    s.regs[2] = [0x5A; 16];
+    s.set_reg(2, [0x5A; 16]);
     s.set_reg_word_splat(1, 0x8020);
     let out = execute(
         &SpuInstruction::Stqd {

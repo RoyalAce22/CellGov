@@ -9,7 +9,7 @@ use cellgov_ppu::observation::PpuObservation;
 use cellgov_spu::fuzz::SpuOutcomeClass;
 use cellgov_spu::instruction::SpuInstruction;
 use cellgov_spu::observation::SpuAllowedFootprint;
-use cellgov_spu::state::{SpuObservableSnapshot, SPU_REG_COUNT};
+use cellgov_spu::state::{SpuObservableSnapshot, SpuState, SPU_REG_COUNT};
 
 use super::SeededDefect;
 
@@ -150,7 +150,7 @@ pub(crate) fn ppu_observed(observation: &mut PpuObservation) {
 pub(crate) fn spu_observed(
     instruction: &SpuInstruction,
     outcome: SpuOutcomeClass,
-    regs: &mut [[u8; 16]; SPU_REG_COUNT],
+    state: &mut SpuState,
 ) {
     let footprint = SpuAllowedFootprint::for_instruction(instruction);
     let register = match active() {
@@ -165,7 +165,10 @@ pub(crate) fn spu_observed(
         _ => None,
     };
     if let Some(register) = register {
-        regs[usize::from(register)][15] ^= CORRUPTION;
+        let register = usize::from(register);
+        let mut value = state.regs[register];
+        value[15] ^= CORRUPTION;
+        state.set_reg(register, value);
     }
 }
 

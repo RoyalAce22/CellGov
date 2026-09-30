@@ -71,9 +71,10 @@ fn a_stalled_list_resumes_with_the_element_software_rewrote() {
         state.set_reg_word_splat(7, MFC_TAG_UPDATE_ALL);
         state.set_reg_word_splat(9, TAG);
         // The replacement for element 3: 16 bytes from 0x1300.
-        state.regs[8][..4].copy_from_slice(&0x10u32.to_be_bytes());
-        state.regs[8][4..8].copy_from_slice(&0x1300u32.to_be_bytes());
-        state.regs[8][8..].fill(0);
+        let mut element = [0u8; 16];
+        element[..4].copy_from_slice(&0x10u32.to_be_bytes());
+        element[4..8].copy_from_slice(&0x1300u32.to_be_bytes());
+        state.set_reg(8, element);
         let c = &mut state.channels;
         c.mfc_lsa = DATA;
         c.mfc_eal = LIST as u32;

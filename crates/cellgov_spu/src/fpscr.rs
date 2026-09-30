@@ -27,7 +27,7 @@ impl SpuState {
     /// The rounding modes of the two double-precision slices.
     pub fn fpscr_rounding(&self) -> [Rounding; 2] {
         FPSCR_RN_FIRST.map(|first| {
-            match (self.fpscr & fpscr_field(first, 2)) >> (128 - first - 2) {
+            match (self.fpscr() & fpscr_field(first, 2)) >> (128 - first - 2) {
                 0 => Rounding::NearestEven,
                 1 => Rounding::TowardZero,
                 2 => Rounding::TowardPositive,
@@ -39,7 +39,9 @@ impl SpuState {
     /// ORs each single-precision slice's OVF, UNF and DIFF in.
     pub fn fpscr_accumulate_single(&mut self, flags: [Flags; 4]) {
         for (first, flags) in FPSCR_SINGLE_FIRST.into_iter().zip(flags) {
-            self.fpscr |= field_bits(first, &[flags.overflow, flags.underflow, flags.diff]);
+            self.set_fpscr(
+                self.fpscr() | field_bits(first, &[flags.overflow, flags.underflow, flags.diff]),
+            );
         }
     }
 
@@ -47,7 +49,7 @@ impl SpuState {
     /// DENORM in.
     pub fn fpscr_accumulate_double(&mut self, flags: [Flags; 2]) {
         for (first, flags) in FPSCR_DOUBLE_FIRST.into_iter().zip(flags) {
-            self.fpscr |= field_bits(
+            let set = field_bits(
                 first,
                 &[
                     flags.overflow,
@@ -58,13 +60,14 @@ impl SpuState {
                     flags.denormal,
                 ],
             );
+            self.set_fpscr(self.fpscr() | set);
         }
     }
 
     /// Sets the divide-by-zero flag of each single-precision slice that
     /// divided by zero.
     pub fn fpscr_accumulate_dbz(&mut self, divided_by_zero: [bool; 4]) {
-        self.fpscr |= field_bits(FPSCR_DBZ_FIRST, &divided_by_zero);
+        self.set_fpscr(self.fpscr() | field_bits(FPSCR_DBZ_FIRST, &divided_by_zero));
     }
 }
 

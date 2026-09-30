@@ -55,17 +55,20 @@ impl SpuReferenceInput {
         let mut state = SpuState::new();
         state.pc = self.pc;
         if let Some(hex) = &self.fpscr {
-            state.fpscr = parse_fpscr(hex).ok_or(SpuReferenceError::Invalid {
+            state.set_fpscr(parse_fpscr(hex).ok_or(SpuReferenceError::Invalid {
                 field: "initial_state.fpscr",
-            })?;
+            })?);
         }
         for (index, hex) in &self.regs_hex {
             let index = parse_index(index, SPU_REG_COUNT).ok_or(SpuReferenceError::Invalid {
                 field: "initial_state.regs_hex",
             })?;
-            state.regs[index] = parse_register(hex).ok_or(SpuReferenceError::Invalid {
-                field: "initial_state.regs_hex",
-            })?;
+            state.set_reg(
+                index,
+                parse_register(hex).ok_or(SpuReferenceError::Invalid {
+                    field: "initial_state.regs_hex",
+                })?,
+            );
         }
         for (offset, &byte) in &self.local_store {
             let offset = parse_index(offset, SPU_LS_SIZE).ok_or(SpuReferenceError::Invalid {
@@ -98,7 +101,7 @@ impl SpuReferenceInput {
             state.channels.in_mbox.clone_from(&channels.in_mbox);
             state.channels.out_mbox = channels.out_mbox;
         }
-        state.reservation = self.reservation.map(cellgov_sync::ReservedLine::containing);
+        state.set_reservation(self.reservation.map(cellgov_sync::ReservedLine::containing));
         Ok(state)
     }
 }

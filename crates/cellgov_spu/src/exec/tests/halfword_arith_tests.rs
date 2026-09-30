@@ -16,8 +16,8 @@ fn ri10(op: u32, rt: u32, ra: u32, i10: u32) -> u32 {
 
 fn run(raw: u32, a: [u16; 8], b: [u16; 8]) -> [u16; 8] {
     let mut s = SpuState::new();
-    s.regs[1] = std::array::from_fn(|i| a[i / 2].to_be_bytes()[i % 2]);
-    s.regs[2] = std::array::from_fn(|i| b[i / 2].to_be_bytes()[i % 2]);
+    s.set_reg(1, std::array::from_fn(|i| a[i / 2].to_be_bytes()[i % 2]));
+    s.set_reg(2, std::array::from_fn(|i| b[i / 2].to_be_bytes()[i % 2]));
     let insn = crate::decode::decode(raw).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),

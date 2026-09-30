@@ -67,11 +67,14 @@ fn ori_with_zero_is_move() {
 #[test]
 fn shufb_identity_pattern() {
     let mut s = SpuState::new();
-    s.regs[1] = [
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
-        0x1F,
-    ];
-    s.regs[3] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    s.set_reg(
+        1,
+        [
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
+            0x1E, 0x1F,
+        ],
+    );
+    s.set_reg(3, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     execute(
         &SpuInstruction::Shufb {
             rt: 4,

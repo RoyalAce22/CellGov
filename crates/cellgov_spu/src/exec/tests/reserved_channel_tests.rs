@@ -32,7 +32,7 @@ fn the_reserved_set_has_every_number_the_map_reserves() {
 fn rdch_of_a_reserved_channel_reads_zero() {
     for channel in reserved() {
         let mut s = SpuState::new();
-        s.regs[7] = [0xA5; 16];
+        s.set_reg(7, [0xA5; 16]);
         let out = execute(
             &SpuInstruction::Rdch { rt: 7, channel },
             &mut s,
@@ -50,7 +50,7 @@ fn rdch_of_a_reserved_channel_reads_zero() {
 fn wrch_to_a_reserved_channel_changes_nothing() {
     for channel in reserved() {
         let mut s = SpuState::new();
-        s.regs[7] = [0xA5; 16];
+        s.set_reg(7, [0xA5; 16]);
         let before = SpuObservableSnapshot::capture(&s);
         let out = execute(
             &SpuInstruction::Wrch { channel, rt: 7 },
@@ -73,7 +73,7 @@ fn wrch_to_a_reserved_channel_changes_nothing() {
 fn rchcnt_of_a_reserved_channel_counts_zero() {
     for channel in reserved() {
         let mut s = SpuState::new();
-        s.regs[7] = [0xA5; 16];
+        s.set_reg(7, [0xA5; 16]);
         let out = execute(
             &SpuInstruction::Rchcnt { rt: 7, channel },
             &mut s,

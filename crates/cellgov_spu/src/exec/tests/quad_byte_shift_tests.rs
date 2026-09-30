@@ -25,9 +25,9 @@ const A: [u8; 16] = [
 /// slots, and junk in r3, and returns r3.
 fn run(op: u32, count: u32) -> [u8; 16] {
     let mut s = SpuState::new();
-    s.regs[1] = A;
-    s.regs[2] = from_words([count, u32::MAX, u32::MAX, u32::MAX]);
-    s.regs[3] = [0xAA; 16];
+    s.set_reg(1, A);
+    s.set_reg(2, from_words([count, u32::MAX, u32::MAX, u32::MAX]));
+    s.set_reg(3, [0xAA; 16]);
     let insn = crate::decode::decode(rr(op, 3, 1, 2)).expect("decodes");
     assert_eq!(
         execute(&insn, &mut s, UnitId::new(0)),

@@ -51,8 +51,8 @@ fn declared_spu_relations_have_executed_witnesses_and_detect_seeded_state_leaks(
         assert_ne!(case.partner_word, raw);
         let partner = crate::decode::decode(case.partner_word).expect("partner must decode");
         let mut left = SpuState::new();
-        left.regs[0] = std::array::from_fn(|index| index as u8 + 1);
-        left.regs[1] = [0xa5; 16];
+        left.set_reg(0, std::array::from_fn(|index| index as u8 + 1));
+        left.set_reg(1, [0xa5; 16]);
         let mut right = left.clone();
         let baseline = crate::exec::execute(&instruction, &mut left, UnitId::new(0));
         let alternate = crate::exec::execute(&partner, &mut right, UnitId::new(0));
@@ -70,7 +70,7 @@ fn declared_spu_relations_have_executed_witnesses_and_detect_seeded_state_leaks(
             let wrong =
                 crate::decode::decode(raw ^ 0x0000_4000).expect("adjacent count must decode");
             let mut wrong_state = SpuState::new();
-            wrong_state.regs[0] = std::array::from_fn(|index| index as u8 + 1);
+            wrong_state.set_reg(0, std::array::from_fn(|index| index as u8 + 1));
             let wrong_outcome = crate::exec::execute(&wrong, &mut wrong_state, UnitId::new(0));
             assert!(baseline
                 .compare(&SpuObservation::capture(&wrong_state, &wrong_outcome))

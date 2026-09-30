@@ -127,7 +127,7 @@ fn a_misaligned_getllar_delivers_and_reserves_the_containing_line() {
          address the guest wrote",
     );
     assert_eq!(
-        unit.state().reservation.map(|l| l.addr()),
+        unit.state().reservation().map(|l| l.addr()),
         Some(LINE_EA),
         "the reservation covers the same line",
     );
@@ -161,7 +161,10 @@ fn a_misaligned_getllar_near_the_region_end_reads_its_line_whole() {
         "the line the address falls inside resolves: {:?}",
         result.fault,
     );
-    assert_eq!(unit.state().reservation.map(|l| l.addr()), Some(last_line));
+    assert_eq!(
+        unit.state().reservation().map(|l| l.addr()),
+        Some(last_line)
+    );
 }
 
 #[test]
@@ -199,7 +202,7 @@ fn a_refused_getllar_leaves_the_atomic_status_alone() {
         1,
         "a command that did not complete reported no status",
     );
-    assert!(unit.state().reservation.is_none());
+    assert!(unit.state().reservation().is_none());
 }
 
 /// G is bit 29 of the status word, so the channel reads `0x4`.
@@ -223,7 +226,8 @@ fn a_misaligned_putllc_stores_over_the_reserved_line() {
     table.insert_or_replace(UnitId::new(UNIT), ReservedLine::containing(LINE_EA));
     let ctx = ExecutionContext::new(&mem).with_reservations(&table);
     let mut unit = unit_issuing(MFC_PUTLLC, INSIDE_EA);
-    unit.state_mut().reservation = Some(ReservedLine::containing(LINE_EA));
+    unit.state_mut()
+        .set_reservation(Some(ReservedLine::containing(LINE_EA)));
     let mut effects = Vec::new();
     let result = run_once(&mut unit, &ctx, &mut effects);
 
@@ -257,7 +261,7 @@ fn stored_bytes_from_a_misaligned_lsa(cmd: u32) -> Vec<u8> {
     let ctx = ExecutionContext::new(&mem).with_reservations(&table);
     let mut unit = unit_issuing(cmd, LINE_EA);
     let s = unit.state_mut();
-    s.reservation = Some(ReservedLine::containing(LINE_EA));
+    s.set_reservation(Some(ReservedLine::containing(LINE_EA)));
     let lsa = LSA as usize;
     s.ls[lsa..lsa + LINE].copy_from_slice(&counted_line());
     s.ls[lsa + LINE..lsa + 2 * LINE].fill(0xEE);

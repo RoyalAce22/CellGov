@@ -145,7 +145,7 @@ fn mfc_getllar_sets_local_reservation_and_emits_acquire() {
     let mut effects = Vec::new();
     let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
-    assert_eq!(unit.state().reservation.map(|l| l.addr()), Some(0x1000));
+    assert_eq!(unit.state().reservation().map(|l| l.addr()), Some(0x1000));
     assert_eq!(
         unit.state().channels.atomic_status,
         0x4,
@@ -173,7 +173,7 @@ fn mfc_getllar_sets_local_reservation_and_emits_acquire() {
 fn mfc_putllc_with_matching_reservation_emits_conditional_store() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(8));
     let s = unit.state_mut();
-    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
+    s.set_reservation(Some(cellgov_sync::ReservedLine::containing(0x1000)));
     s.channels.mfc_lsa = 0x200;
     s.channels.mfc_eal = 0x1000;
     s.channels.mfc_size = 128;
@@ -198,7 +198,7 @@ fn mfc_putllc_with_matching_reservation_emits_conditional_store() {
     let mut effects = Vec::new();
     let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
-    assert!(unit.state().reservation.is_none());
+    assert!(unit.state().reservation().is_none());
     assert_eq!(unit.state().channels.atomic_status, 0);
     let conds: Vec<_> = effects
         .iter()
@@ -254,7 +254,7 @@ fn mfc_putllc_without_reservation_fails_silently() {
 fn mfc_putllc_with_reservation_on_different_line_fails() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(10));
     let s = unit.state_mut();
-    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
+    s.set_reservation(Some(cellgov_sync::ReservedLine::containing(0x1000)));
     s.channels.mfc_lsa = 0x200;
     s.channels.mfc_eal = 0x1100;
     s.channels.mfc_size = 128;
@@ -279,14 +279,14 @@ fn mfc_putllc_with_reservation_on_different_line_fails() {
     assert!(!effects
         .iter()
         .any(|e| matches!(e, cellgov_effects::Effect::ConditionalStore { .. })));
-    assert!(unit.state().reservation.is_none());
+    assert!(unit.state().reservation().is_none());
 }
 
 #[test]
 fn mfc_put_overlapping_reserved_line_clears_local_reservation() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(11));
     let s = unit.state_mut();
-    s.reservation = Some(cellgov_sync::ReservedLine::containing(0x1000));
+    s.set_reservation(Some(cellgov_sync::ReservedLine::containing(0x1000)));
     s.channels.mfc_lsa = 0x200;
     s.channels.mfc_eal = 0x1040;
     s.channels.mfc_size = 16;
@@ -309,7 +309,7 @@ fn mfc_put_overlapping_reserved_line_clears_local_reservation() {
     let mut effects = Vec::new();
     let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
-    assert!(unit.state().reservation.is_none());
+    assert!(unit.state().reservation().is_none());
 }
 
 #[test]

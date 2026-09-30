@@ -72,7 +72,7 @@ pub(super) fn run_once(
     seeded::spu_observed(
         instruction,
         SpuOutcomeClass::from_outcome(&outcome),
-        &mut state.regs,
+        &mut state,
     );
     ObservedStep {
         outcome,
@@ -292,7 +292,7 @@ fn run_sequence_with_limit(
         seeded::spu_observed(
             &instruction,
             SpuOutcomeClass::from_outcome(&outcome),
-            &mut state.regs,
+            &mut state,
         );
         footprint_violations.extend(
             SpuAllowedFootprint::for_instruction(&instruction)

@@ -19,9 +19,9 @@ const SFI: u32 = 0x0C;
 /// Runs `raw` with `a` in r1, `b` in r2 and junk in r3, and returns r3's words.
 fn run(raw: u32, a: u32, b: [u32; 4]) -> [u32; 4] {
     let mut s = SpuState::new();
-    s.regs[1] = from_words([a; 4]);
-    s.regs[2] = from_words(b);
-    s.regs[3] = [0xAA; 16];
+    s.set_reg(1, from_words([a; 4]));
+    s.set_reg(2, from_words(b));
+    s.set_reg(3, [0xAA; 16]);
     step(&mut s, raw);
     words(s.regs[3])
 }
@@ -67,8 +67,8 @@ fn rotm_and_rotma_shift_right_by_the_negated_count_modulo_64() {
 #[test]
 fn sfi_then_rotm_is_a_logical_right_shift_by_a_register_count() {
     let mut s = SpuState::new();
-    s.regs[1] = from_words([0, 5, 31, 32]);
-    s.regs[2] = from_words([0x8000_0000; 4]);
+    s.set_reg(1, from_words([0, 5, 31, 32]));
+    s.set_reg(2, from_words([0x8000_0000; 4]));
     step(&mut s, SFI << 24 | 1 << 7 | 3);
     step(&mut s, rr(ROTM, 4, 2, 3));
     assert_eq!(words(s.regs[4]), [0x8000_0000, 0x0400_0000, 1, 0]);

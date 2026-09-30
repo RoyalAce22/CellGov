@@ -358,7 +358,7 @@ fn an_interrupt_ends_a_stalled_mailbox_read() {
         }
         state.pc = 0x100;
         state.channels.set_event_state(0, event::S1);
-        state.interrupts_enabled = true;
+        state.set_interrupts_enabled(true);
         spu
     });
     step(&mut rt);

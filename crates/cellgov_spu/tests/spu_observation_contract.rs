@@ -157,7 +157,7 @@ fn fault_observation_rejects_a_seeded_post_fault_write() {
 #[test]
 fn an_unconditional_lock_line_put_stays_inside_the_command_footprint() {
     let mut initial = SpuState::new();
-    initial.reservation = Some(cellgov_sync::ReservedLine::containing(0));
+    initial.set_reservation(Some(cellgov_sync::ReservedLine::containing(0)));
     initial.set_reg_word_splat(3, cellgov_ps3_abi::hw::spu::MFC_PUTLLUC);
     let instruction = SpuInstruction::Wrch {
         channel: cellgov_ps3_abi::hw::spu::MFC_CMD,

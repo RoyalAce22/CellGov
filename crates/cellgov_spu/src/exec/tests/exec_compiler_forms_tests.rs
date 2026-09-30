@@ -35,7 +35,7 @@ fn lqr_negative_offset_reaches_below_pc() {
 fn stqr_stores_relative_to_pc_with_low_bits_masked() {
     let mut s = SpuState::new();
     s.pc = 0x104;
-    s.regs[6] = PATTERN;
+    s.set_reg(6, PATTERN);
     // 0x104 + 8*4 = 0x124; the quadword mask folds it to 0x120.
     let outcome = execute(&SpuInstruction::Stqr { rt: 6, imm: 8 }, &mut s, uid());
     assert!(matches!(outcome, SpuStepOutcome::Continue));
@@ -48,7 +48,7 @@ fn stqr_stores_relative_to_pc_with_low_bits_masked() {
 fn stqr_past_ls_end_wraps_through_the_ls_mask() {
     let mut s = SpuState::new();
     s.pc = 0x3FFF0;
-    s.regs[6] = PATTERN;
+    s.set_reg(6, PATTERN);
     // 0x3FFF0 + 4*4 = 0x40000, which the local-store mask folds to 0.
     let outcome = execute(&SpuInstruction::Stqr { rt: 6, imm: 4 }, &mut s, uid());
     assert!(matches!(outcome, SpuStepOutcome::Continue));
@@ -58,8 +58,8 @@ fn stqr_past_ls_end_wraps_through_the_ls_mask() {
 #[test]
 fn and_or_operate_on_all_sixteen_bytes() {
     let mut s = SpuState::new();
-    s.regs[1] = [0xF0; 16];
-    s.regs[2] = [0x3C; 16];
+    s.set_reg(1, [0xF0; 16]);
+    s.set_reg(2, [0x3C; 16]);
     execute(
         &SpuInstruction::And {
             rt: 3,
@@ -85,9 +85,9 @@ fn and_or_operate_on_all_sixteen_bytes() {
 #[test]
 fn selb_takes_rb_where_rc_is_set() {
     let mut s = SpuState::new();
-    s.regs[1] = [0xAA; 16];
-    s.regs[2] = [0x55; 16];
-    s.regs[3] = [0x0F; 16];
+    s.set_reg(1, [0xAA; 16]);
+    s.set_reg(2, [0x55; 16]);
+    s.set_reg(3, [0x0F; 16]);
     execute(
         &SpuInstruction::Selb {
             rt: 4,
@@ -104,10 +104,13 @@ fn selb_takes_rb_where_rc_is_set() {
 #[test]
 fn xsbh_sign_extends_the_right_byte_of_each_halfword() {
     let mut s = SpuState::new();
-    s.regs[1] = [
-        0x12, 0x80, 0x34, 0x7F, 0x56, 0xFF, 0x78, 0x00, 0x9A, 0x01, 0xBC, 0xFE, 0xDE, 0x40, 0xF0,
-        0xC0,
-    ];
+    s.set_reg(
+        1,
+        [
+            0x12, 0x80, 0x34, 0x7F, 0x56, 0xFF, 0x78, 0x00, 0x9A, 0x01, 0xBC, 0xFE, 0xDE, 0x40,
+            0xF0, 0xC0,
+        ],
+    );
     execute(&SpuInstruction::Xsbh { rt: 2, ra: 1 }, &mut s, uid());
     assert_eq!(
         s.regs[2],
@@ -253,7 +256,7 @@ fn rotmai_replicates_the_sign_bit() {
 #[test]
 fn rotqbyi_rotates_left_by_the_low_nibble() {
     let mut s = SpuState::new();
-    s.regs[1] = PATTERN;
+    s.set_reg(1, PATTERN);
     execute(
         &SpuInstruction::Rotqbyi {
             rt: 2,
@@ -346,7 +349,7 @@ fn bisl_links_in_the_preferred_slot_only_and_branches() {
     let mut s = SpuState::new();
     s.pc = 0x100;
     s.set_reg_word_splat(4, 0x3A3);
-    s.regs[0] = [0xEE; 16];
+    s.set_reg(0, [0xEE; 16]);
     let outcome = execute(
         &SpuInstruction::Bisl {
             rt: 0,
@@ -434,7 +437,7 @@ fn bisl_reads_the_target_before_writing_the_link_when_rt_is_ra() {
 fn brsl_links_in_the_preferred_slot_only_and_masks_at_the_top_of_ls() {
     let mut s = SpuState::new();
     s.pc = 0x100;
-    s.regs[0] = [0xEE; 16];
+    s.set_reg(0, [0xEE; 16]);
     execute(&SpuInstruction::Brsl { rt: 0, offset: 16 }, &mut s, uid());
     assert_eq!(s.reg_word_slot(0, 0), 0x104);
     assert_eq!(s.reg_word_slot(0, 1), 0);
@@ -491,7 +494,9 @@ fn bisled_branches_on_an_enabled_event_and_links_either_way() {
     let mut s = SpuState::new();
     s.pc = 0x100;
     s.set_reg_word_splat(4, 0x3A0);
-    s.regs[4][4..].copy_from_slice(&[0xEE; 12]);
+    let mut target = s.regs[4];
+    target[4..].copy_from_slice(&[0xEE; 12]);
+    s.set_reg(4, target);
     s.channels.set_event_state(0, S1);
     s.raise_events(S1);
     let outcome = execute(&bisled, &mut s, uid());

@@ -43,7 +43,7 @@ fn a_negative_i16_wraps_through_the_limit_register() {
 fn brasl_links_the_next_address_in_the_preferred_slot_only() {
     let mut s = SpuState::new();
     s.pc = 0x3_FFFC;
-    s.regs[5] = [0xAA; 16];
+    s.set_reg(5, [0xAA; 16]);
     assert_eq!(step(&mut s, ri16(BRASL, 5, 0x0040)), SpuStepOutcome::Branch);
     assert_eq!(s.pc, 0x100);
     // PC + 4 wraps through the limit register to zero.

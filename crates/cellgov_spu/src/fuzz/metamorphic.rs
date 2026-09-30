@@ -160,8 +160,8 @@ impl SpuMetamorphicCase {
         if let (SpuMetamorphicRelation::ShufbControlClass, Some(input)) =
             (self.relation, self.varied_input)
         {
-            let register = &mut partner.regs[usize::from(input.register)];
-            *register = register.map(shufb_class_partner);
+            let register = usize::from(input.register);
+            partner.set_reg(register, partner.regs[register].map(shufb_class_partner));
         }
         partner
     }

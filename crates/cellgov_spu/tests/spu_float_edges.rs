@@ -130,9 +130,9 @@ fn step(state: &mut SpuState, line: &str) {
 fn run(case: &Case) -> (u128, u128) {
     let mut state = SpuState::new();
     for (register, value) in (3..).zip(case.inputs) {
-        state.regs[register] = value.to_be_bytes();
+        state.set_reg(register, value.to_be_bytes());
     }
-    state.regs[FPSCR_IN as usize] = case.fpscr.to_be_bytes();
+    state.set_reg(FPSCR_IN as usize, case.fpscr.to_be_bytes());
     step(&mut state, &format!("fscrwr ${FPSCR_IN}"));
     for line in &case.asm {
         step(&mut state, line);

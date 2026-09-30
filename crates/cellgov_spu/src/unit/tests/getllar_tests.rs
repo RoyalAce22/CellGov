@@ -188,7 +188,7 @@ fn getllar_from_an_unmapped_address_queues_a_data_storage_exception() {
         "no reservation over a line the unit never read: {effects:?}",
     );
     assert!(
-        unit.state().reservation.is_none(),
+        unit.state().reservation().is_none(),
         "and the unit's own register holds none either, so a later \
          putllc has nothing to match",
     );
@@ -269,7 +269,7 @@ fn a_refused_getllar_keeps_the_reservation_the_same_step_acquired() {
     let acquired = acquired_lines(&effects);
     assert_eq!(acquired.len(), 1, "the first line's acquire: {effects:?}");
     assert_eq!(
-        unit.state().reservation.map(|l| l.addr()),
+        unit.state().reservation().map(|l| l.addr()),
         Some(acquired[0]),
         "and the register holds that same line",
     );
