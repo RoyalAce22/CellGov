@@ -399,6 +399,10 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         }
         // [SPU-ISA p:94 s:5 Xsbh] RR opcode 0x2B6; RB field unused.
         0x2B6 => return Ok(SpuInstruction::Xsbh { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:95 s:5 Xshw] RR opcode 0x2AE; RB field unused.
+        0x2AE => return Ok(SpuInstruction::Xshw { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:96 s:5 Xswd] RR opcode 0x2A6; RB field unused.
+        0x2A6 => return Ok(SpuInstruction::Xswd { rt: rt7, ra: ra7 }),
         // [SPU-ISA p:120 s:6 Shl] RR opcode 0x05B.
         0x05B => {
             return Ok(SpuInstruction::Shl {

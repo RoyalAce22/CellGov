@@ -412,6 +412,15 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
             SpuStepOutcome::Continue
         }
+        // [SPU-ISA p:95 s:5. Integer and Logical Instructions] Extend Sign Halfword to Word: each word takes the sign-extended value of its right halfword.
+        SpuInstruction::Xshw { rt, ra } => words2(state, rt, ra, ra, |a, _| low_signed(a) as u32),
+        // [SPU-ISA p:96 s:5. Integer and Logical Instructions] Extend Sign Word to Doubleword: each doubleword takes the sign-extended value of its right word.
+        SpuInstruction::Xswd { rt, ra } => {
+            let w = words(state.regs[ra as usize]);
+            let sign = |word: u32| ((word as i32) >> 31) as u32;
+            state.regs[rt as usize] = from_words([sign(w[1]), w[1], sign(w[3]), w[3]]);
+            SpuStepOutcome::Continue
+        }
         // [SPU-ISA p:83 s:5. Integer and Logical Instructions] Count Leading Zeros: per word, 32 for a zero word.
         SpuInstruction::Clz { rt, ra } => words2(state, rt, ra, ra, |a, _| a.leading_zeros()),
         // [SPU-ISA p:84 s:5. Integer and Logical Instructions] Count Ones in Bytes: the population count of each byte.
@@ -874,3 +883,7 @@ mod bit_mask_tests;
 #[cfg(test)]
 #[path = "tests/byte_arith_tests.rs"]
 mod byte_arith_tests;
+
+#[cfg(test)]
+#[path = "tests/sign_extend_tests.rs"]
+mod sign_extend_tests;

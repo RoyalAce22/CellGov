@@ -418,6 +418,21 @@ pub enum SpuInstruction {
         /// Source register.
         ra: u8,
     },
+    // [SPU-ISA p:95 s:5 Xshw p.95, Xswd p.96]
+    /// Extend sign halfword to word: each word slot = sign_extend(its low halfword).
+    Xshw {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// Extend sign word to doubleword: each doubleword slot = sign_extend(its low word).
+    Xswd {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
     // [SPU-ISA p:83 s:5 Bit counts, select masks and byte gather: Clz p.83 .. Gbb p.88]
     /// Count leading zeros: per word, 32 for a zero word.
     Clz {

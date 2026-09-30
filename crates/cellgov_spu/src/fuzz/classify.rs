@@ -258,6 +258,8 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Or
         | SpuInstructionKind::Selb
         | SpuInstructionKind::Xsbh
+        | SpuInstructionKind::Xshw
+        | SpuInstructionKind::Xswd
         | SpuInstructionKind::Clz
         | SpuInstructionKind::Cntb
         | SpuInstructionKind::Fsmb
