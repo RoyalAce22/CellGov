@@ -13,6 +13,7 @@ description = "Deterministic fuzz-engine library for the PPU and SPU interpreter
 workspace = true
 
 [dependencies]
+cellgov_dma = { path = "../cellgov_dma" }
 cellgov_effects = { path = "../cellgov_effects" }
 cellgov_event = { path = "../cellgov_event" }
 cellgov_exec = { path = "../cellgov_exec" }

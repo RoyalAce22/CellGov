@@ -276,6 +276,21 @@ pub enum SpuReferenceError {
         /// Invalid field path.
         field: &'static str,
     },
+    /// One vector of a set failed validation or replay.
+    #[error("SPU reference vector {index}: {source}")]
+    InVector {
+        /// The vector's index in its set.
+        index: usize,
+        /// Why it failed.
+        #[source]
+        source: Box<SpuReferenceError>,
+    },
+    /// The scripted world could not service a step.
+    #[error("SPU reference world could not service {what}")]
+    World {
+        /// What it could not service.
+        what: &'static str,
+    },
     /// Instruction fetch failed at the selected program counter.
     #[error("SPU reference instruction fetch failed at PC 0x{pc:08x}")]
     Fetch {

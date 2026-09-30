@@ -315,6 +315,7 @@ version = "0.0.0"
 name = "cellgov_fuzz"
 version = "0.0.0"
 dependencies = [
+ "cellgov_dma",
  "cellgov_effects",
  "cellgov_event",
  "cellgov_exec",
