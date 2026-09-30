@@ -11,6 +11,8 @@ pub struct SpuSnapshot {
     pub regs: [[u8; 16]; 128],
     /// Program counter.
     pub pc: u32,
+    /// Local storage limit register.
+    pub lslr: u32,
     /// Local store contents.
     pub ls: Vec<u8>,
     /// Canonical line address of the atomic reservation; `None` when

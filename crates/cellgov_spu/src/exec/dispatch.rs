@@ -9,11 +9,10 @@ use super::channel::{execute_rchcnt, execute_rdch, execute_wrch};
 use super::ls::{insertion_controls, load_quad, rotate_mask_count, store_quad, Lsa};
 use super::outcome::SpuStepOutcome;
 
-/// The indirect conditional branches: PC <- RA's preferred slot masked
-/// to the LS range when `taken`, else fall through.
+/// The shared body of the indirect conditional branches.
 fn branch_indirect_if(state: &mut SpuState, ra: u8, taken: bool) -> SpuStepOutcome {
     if taken {
-        state.pc = state.reg_word(ra) & 0x3FFFC;
+        state.pc = state.insn_addr(state.reg_word(ra));
         SpuStepOutcome::Branch
     } else {
         SpuStepOutcome::Continue
@@ -401,21 +400,21 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
 
         // [SPU-ISA p:174 s:7. Compare, Branch, and Halt Instructions] Branch Relative: PC <- PC + sign-extended I16<<2, masked to LS range.
         SpuInstruction::Br { offset } => {
-            state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
+            state.pc = state.insn_addr(state.pc.wrapping_add((offset << 2) as u32));
             SpuStepOutcome::Branch
         }
         // [SPU-ISA p:176 s:7. Compare, Branch, and Halt Instructions] Branch Relative and Set Link: the link is (PC+4) masked by LSLR in RT's preferred slot with the other slots zeroed, then the relative branch is taken.
         SpuInstruction::Brsl { rt, offset } => {
-            let link = state.pc.wrapping_add(4) & 0x3FFFF;
+            let link = state.ls_wrap(state.pc.wrapping_add(4));
             state.regs[rt as usize] = [0u8; 16];
             state.set_reg_word_slot(rt, 0, link);
-            state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
+            state.pc = state.insn_addr(state.pc.wrapping_add((offset << 2) as u32));
             SpuStepOutcome::Branch
         }
         // [SPU-ISA p:183 s:7. Compare, Branch, and Halt Instructions] Branch If Zero Word: branch when RT preferred slot is zero.
         SpuInstruction::Brz { rt, offset } => {
             if state.reg_word(rt) == 0 {
-                state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
+                state.pc = state.insn_addr(state.pc.wrapping_add((offset << 2) as u32));
                 SpuStepOutcome::Branch
             } else {
                 SpuStepOutcome::Continue
@@ -424,7 +423,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:182 s:7. Compare, Branch, and Halt Instructions] Branch If Not Zero Word: branch when RT preferred slot is non-zero.
         SpuInstruction::Brnz { rt, offset } => {
             if state.reg_word(rt) != 0 {
-                state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
+                state.pc = state.insn_addr(state.pc.wrapping_add((offset << 2) as u32));
                 SpuStepOutcome::Branch
             } else {
                 SpuStepOutcome::Continue
@@ -432,13 +431,13 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         }
         // [SPU-ISA p:178 s:7. Compare, Branch, and Halt Instructions] Branch Indirect: PC <- RA preferred slot masked to LS range.
         SpuInstruction::Bi { ra } => {
-            state.pc = state.reg_word(ra) & 0x3FFFC;
+            state.pc = state.insn_addr(state.reg_word(ra));
             SpuStepOutcome::Branch
         }
         // [SPU-ISA p:181 s:7. Compare, Branch, and Halt Instructions] Branch Indirect and Set Link: the target is read from RA before RT is written; the link is (PC+4) masked by LSLR in RT's preferred slot with the other slots zeroed, then PC <- RA masked to LS range.
         SpuInstruction::Bisl { rt, ra } => {
-            let target = state.reg_word(ra) & 0x3FFFC;
-            let link = state.pc.wrapping_add(4) & 0x3FFFF;
+            let target = state.insn_addr(state.reg_word(ra));
+            let link = state.ls_wrap(state.pc.wrapping_add(4));
             state.regs[rt as usize] = [0u8; 16];
             state.set_reg_word_slot(rt, 0, link);
             state.pc = target;
@@ -447,7 +446,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:184 s:7. Compare, Branch, and Halt Instructions] Branch If Not Zero Halfword: branch when the low halfword of RT's preferred slot is non-zero.
         SpuInstruction::Brhnz { rt, offset } => {
             if state.reg_word(rt) & 0xFFFF != 0 {
-                state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
+                state.pc = state.insn_addr(state.pc.wrapping_add((offset << 2) as u32));
                 SpuStepOutcome::Branch
             } else {
                 SpuStepOutcome::Continue
@@ -456,7 +455,7 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:185 s:7. Compare, Branch, and Halt Instructions] Branch If Zero Halfword: branch when the low halfword of RT's preferred slot is zero.
         SpuInstruction::Brhz { rt, offset } => {
             if state.reg_word(rt) & 0xFFFF == 0 {
-                state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
+                state.pc = state.insn_addr(state.pc.wrapping_add((offset << 2) as u32));
                 SpuStepOutcome::Branch
             } else {
                 SpuStepOutcome::Continue
@@ -518,3 +517,7 @@ mod compiler_forms_tests;
 #[cfg(test)]
 #[path = "tests/exec_job_forms_tests.rs"]
 mod job_forms_tests;
+
+#[cfg(test)]
+#[path = "tests/lslr_tests.rs"]
+mod lslr_tests;

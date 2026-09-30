@@ -1,8 +1,8 @@
-//! SPU architectural state (registers, LS, PC, channels, reservation).
+//! SPU architectural state (registers, LS, PC, limit register, channels, reservation).
 
 use cellgov_sync::ReservedLine;
 
-pub use cellgov_ps3_abi::hw::spu::{SPU_LS_SIZE, SPU_REG_COUNT};
+pub use cellgov_ps3_abi::hw::spu::{SPU_LSLR_FULL, SPU_LS_SIZE, SPU_REG_COUNT};
 
 /// Full SPU architectural state.
 #[derive(Clone)]
@@ -14,6 +14,17 @@ pub struct SpuState {
     pub ls: Vec<u8>,
     /// Program counter.
     pub pc: u32,
+    /// Local storage limit register: the mask on every local-store
+    /// address that an SPU instruction uses.
+    ///
+    /// No PS3 path sets a value other than [`SPU_LSLR_FULL`]. An SPE-ELF
+    /// image can ask for a smaller value in its environment note. The
+    /// loader reads only the `PT_LOAD` segments, and no LV2 SPU
+    /// interface carries a size.
+    // [SPU-ISA p:31 s:3] every effective address is ANDed with the LSLR before use, and the LSLR must not change while the SPU runs.
+    // [CBEA p:235 s:16.2] privileged software sets SPU_LSLR; an access past it occurs at the wrapped address.
+    // [CBE-Handbook p:395 s:14.3 Table 14-4] the spu_env note's ls_size is the SPU_LSLR setting an image needs, and zero asks for the whole local store.
+    pub lslr: u32,
     /// MFC/channel state for DMA, mailbox, and tag operations.
     pub channels: ChannelState,
     /// Local half of the atomic reservation. MFC_PUTLLC succeeds only
@@ -33,6 +44,8 @@ pub struct SpuObservableSnapshot {
     pub ls: Vec<u8>,
     /// Address of the next instruction.
     pub pc: u32,
+    /// Local storage limit register.
+    pub lslr: u32,
     /// Architectural channel state.
     pub channels: SpuChannelSnapshot,
     /// Atomic reservation state.
@@ -71,6 +84,7 @@ impl SpuObservableSnapshot {
             regs,
             ls,
             pc,
+            lslr,
             channels,
             reservation,
         } = state;
@@ -90,6 +104,7 @@ impl SpuObservableSnapshot {
             regs: *regs,
             ls: ls.clone(),
             pc: *pc,
+            lslr: *lslr,
             channels: SpuChannelSnapshot {
                 mfc_lsa: *mfc_lsa,
                 mfc_eah: *mfc_eah,
@@ -114,9 +129,40 @@ impl SpuState {
             regs: [[0u8; 16]; SPU_REG_COUNT],
             ls: vec![0u8; SPU_LS_SIZE],
             pc: 0,
+            lslr: SPU_LSLR_FULL,
             channels: ChannelState::new(),
             reservation: None,
         }
+    }
+
+    /// `addr` masked by the local storage limit register.
+    ///
+    /// These addresses pass through here:
+    /// - every load and store address
+    /// - every instruction fetch
+    /// - every branch target and link value
+    ///
+    /// The MFC local-store address does not.
+    // [SPU-ISA p:31 s:3] every effective address is ANDed with the LSLR, so a reference past the effective size wraps.
+    #[inline]
+    pub fn ls_wrap(&self, addr: u32) -> u32 {
+        addr & self.lslr
+    }
+
+    /// The instruction address `addr` names: wrapped, with the
+    /// rightmost two bits dropped.
+    // [SPU-ISA p:178 s:7] the branch target is RA & LSLR & 0xFFFFFFFC.
+    #[inline]
+    pub fn insn_addr(&self, addr: u32) -> u32 {
+        self.ls_wrap(addr) & !3
+    }
+
+    /// The quadword address `addr` names: wrapped, with the rightmost
+    /// four bits dropped.
+    // [SPU-ISA p:32 s:3] the load address is the sum & LSLR & 0xFFFFFFF0.
+    #[inline]
+    pub fn quad_addr(&self, addr: u32) -> u32 {
+        self.ls_wrap(addr) & !0xF
     }
 
     /// Read the preferred slot (word 0) of a register as big-endian u32.
@@ -156,9 +202,13 @@ impl SpuState {
         reg[base + 3] = bytes[3];
     }
 
-    /// Fetch the 32-bit word at `self.pc`, or `None` if PC is out of LS range.
+    /// Fetch the 32-bit word at `self.pc` through the limit register, or
+    /// `None` when the wrapped address is past the end of `ls`.
+    ///
+    /// Only a `ls` shorter than the limit, which a test builds, returns
+    /// `None`.
     pub fn fetch(&self) -> Option<u32> {
-        let addr = self.pc as usize;
+        let addr = self.insn_addr(self.pc) as usize;
         if addr + 4 > self.ls.len() {
             return None;
         }
@@ -173,7 +223,7 @@ impl SpuState {
     /// Step PC to the next sequential instruction.
     // [SPU-ISA p:31 s:3] Every local-storage address is ANDed with the LSLR, so the word after the last one is word 0.
     pub fn advance_pc(&mut self) {
-        self.pc = self.pc.wrapping_add(4) & (SPU_LS_SIZE as u32 - 4);
+        self.pc = self.insn_addr(self.pc.wrapping_add(4));
     }
 }
 

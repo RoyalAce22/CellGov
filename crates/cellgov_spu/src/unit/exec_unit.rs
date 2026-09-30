@@ -231,6 +231,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         SpuSnapshot {
             regs: self.state.regs,
             pc: self.state.pc,
+            lslr: self.state.lslr,
             ls: self.state.ls.clone(),
             reservation_line: self.state.reservation.map(|l| l.addr()),
         }

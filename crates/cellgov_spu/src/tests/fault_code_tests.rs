@@ -46,9 +46,9 @@ fn code_for(fault: SpuFault) -> u32 {
 /// instruction field, so `u8::MAX` is past anything a program produces
 /// and stands here for the field's own bound. `LsOutOfRange` carries the
 /// raw address operand, which a guest picks freely, but `exec::ls_addr`
-/// masks that operand to 0x3FFF0 before its bounds test, so a whole
-/// local store never raises the variant; the fetch path raises that
-/// class instead, which the last test walks to.
+/// masks that operand with the limit register before its bounds test, so
+/// a whole local store never raises the variant; the fetch path raises
+/// that class instead, which the last test walks to.
 fn every_variant_at_its_widest_detail() -> Vec<(SpuFault, u32)> {
     vec![
         (SpuFault::LsOutOfRange(u32::MAX), FAULT_LS_OUT_OF_RANGE),
@@ -99,17 +99,19 @@ fn every_raised_class_is_in_the_checked_list() {
     }
 }
 
-/// A fetch at a PC past local store reports the out-of-range class, not
-/// another one.
+/// The fetch path's detail is the raw `pc`.
 ///
-/// The fetch path's detail is the raw `pc`. Branches and fall-through
-/// mask `pc` into local store, so only a host-placed PC reaches this
-/// path; `SPU_LS_SIZE` is the smallest such value. Unmasked it ORs into
-/// the class field and the code reads as `FAULT_UNSUPPORTED_CHANNEL_COUNT`.
+/// The fetch masks `pc` with the limit register, so only a `ls` shorter
+/// than the limit reaches this path. `LS_END` is the smallest PC whose
+/// value reaches the class field. Without `FAULT_DETAIL_MASK`, that value
+/// ORs into the class field, and the code reads as
+/// `FAULT_UNSUPPORTED_CHANNEL`.
 #[test]
 fn a_fetch_past_local_store_keeps_its_own_class() {
+    const LS_END: usize = SPU_LS_SIZE / 4;
     let mut unit = SpuExecutionUnit::new(UnitId::new(UNIT));
-    unit.state_mut().pc = SPU_LS_SIZE as u32;
+    unit.state_mut().ls.truncate(LS_END);
+    unit.state_mut().pc = LS_END as u32;
 
     let mem = GuestMemory::new(MEM_BYTES);
     let ctx = ExecutionContext::new(&mem);
@@ -125,7 +127,7 @@ fn a_fetch_past_local_store_keeps_its_own_class() {
         panic!("expected a guest fault, got {:?}", result.fault);
     };
     assert_ne!(
-        SPU_LS_SIZE as u32 & !FAULT_DETAIL_MASK,
+        LS_END as u32 & !FAULT_DETAIL_MASK,
         0,
         "the premise: the detail this path carries reaches the class field",
     );
@@ -141,7 +143,7 @@ fn a_fetch_past_local_store_keeps_its_own_class() {
     );
     assert_eq!(
         result.local_diagnostics.pc,
-        Some(SPU_LS_SIZE as u64),
+        Some(LS_END as u64),
         "the address the detail cannot hold travels beside the code",
     );
 }

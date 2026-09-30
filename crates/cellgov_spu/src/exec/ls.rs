@@ -6,16 +6,14 @@ use super::outcome::{SpuFault, SpuStepOutcome};
 
 /// The aligned local-store offset a quadword load or store resolves to.
 ///
-/// The mask is the architecture's own, for a local store of
-/// [`crate::state::SPU_LS_SIZE`]. It confines every address to local
-/// store, so a guest cannot reach past the end however it computes the
-/// address. The bound below therefore covers a `ls` shorter than the
-/// architected size, which only a test builds. The fetch path faults on
-/// a guest address; this path cannot.
+/// [`SpuState::quad_addr`] confines every address to the range the
+/// limit register selects. A guest cannot reach past that range,
+/// however it computes the address. The bound below covers a `ls`
+/// shorter than the limit, which only a test builds.
 // [SPU-ISA p:31 s:3. Memory-Load/Store Instructions] Every load/store address is first ANDed with the limit register, whose 256 KB value is 0x0003FFFF, and its low four bits are then dropped because only aligned quadwords move.
-fn ls_addr(raw: u32, ls_len: usize) -> Result<usize, SpuFault> {
-    let a = (raw & 0x3FFF0) as usize;
-    if a + 16 > ls_len {
+fn ls_addr(state: &SpuState, raw: u32) -> Result<usize, SpuFault> {
+    let a = state.quad_addr(raw) as usize;
+    if a + 16 > state.ls.len() {
         Err(SpuFault::LsOutOfRange(raw))
     } else {
         Ok(a)
@@ -51,7 +49,7 @@ impl Lsa {
 /// unchanged.
 #[inline]
 pub(super) fn load_quad(state: &mut SpuState, rt: u8, lsa: Lsa) -> SpuStepOutcome {
-    match ls_addr(lsa.resolve(state), state.ls.len()) {
+    match ls_addr(state, lsa.resolve(state)) {
         Ok(a) => {
             state.regs[rt as usize].copy_from_slice(&state.ls[a..a + 16]);
             SpuStepOutcome::Continue
@@ -64,7 +62,7 @@ pub(super) fn load_quad(state: &mut SpuState, rt: u8, lsa: Lsa) -> SpuStepOutcom
 /// store unchanged.
 #[inline]
 pub(super) fn store_quad(state: &mut SpuState, rt: u8, lsa: Lsa) -> SpuStepOutcome {
-    match ls_addr(lsa.resolve(state), state.ls.len()) {
+    match ls_addr(state, lsa.resolve(state)) {
         Ok(a) => {
             state.ls[a..a + 16].copy_from_slice(&state.regs[rt as usize]);
             SpuStepOutcome::Continue

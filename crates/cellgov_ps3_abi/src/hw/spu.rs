@@ -189,6 +189,11 @@ impl MfcCmd {
 // [CBE-Handbook p:64 s:3.1.1] Local Store is a 256 KB single-ported memory.
 pub const SPU_LS_SIZE: usize = 256 * 1024;
 
+/// The local storage limit register value that selects all of
+/// [`SPU_LS_SIZE`].
+// [SPU-ISA p:31 s:3 Table 3-1] the LSLR is 2^n - 1 for an effective size of 2^n bytes, and 0x0003FFFF selects 256 KB.
+pub const SPU_LSLR_FULL: u32 = SPU_LS_SIZE as u32 - 1;
+
 /// Number of SPU general-purpose 128-bit registers (r0..r127).
 // [SPU-ISA p:25 s:2] The SPU architecture defines 128 general-purpose
 // registers, each holding 128 data bits.

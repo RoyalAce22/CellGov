@@ -53,9 +53,17 @@ fn fetch_from_ls() {
 }
 
 #[test]
-fn fetch_out_of_range() {
-    let s = SpuState::new();
-    let mut s2 = s;
-    s2.pc = SPU_LS_SIZE as u32;
-    assert_eq!(s2.fetch(), None);
+fn fetch_past_the_limit_wraps_to_word_0() {
+    let mut s = SpuState::new();
+    s.ls[..4].copy_from_slice(&0x1234_5678u32.to_be_bytes());
+    s.pc = SPU_LS_SIZE as u32;
+    assert_eq!(s.fetch(), Some(0x1234_5678));
+}
+
+#[test]
+fn fetch_past_a_short_local_store_is_none() {
+    let mut s = SpuState::new();
+    s.ls.truncate(0x100);
+    s.pc = 0x100;
+    assert_eq!(s.fetch(), None);
 }
