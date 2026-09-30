@@ -8,8 +8,8 @@ use cellgov_event::UnitId;
 use cellgov_exec::{BarrierKind, ExecutionContext, ExecutionUnit, RetiredBarrier, YieldReason};
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::hw::spu::{
-    MFC_BARRIER, MFC_CMD, MFC_EIEIO, MFC_GET, MFC_GETB, MFC_GETF, MFC_PUT, MFC_PUTB, MFC_PUTF,
-    MFC_SNDSIG, MFC_SNDSIGB, MFC_SNDSIGF, MFC_SYNC,
+    MFC_BARRIER, MFC_CMD, MFC_EIEIO, MFC_GET, MFC_GETB, MFC_GETF, MFC_GETLB, MFC_PUT, MFC_PUTB,
+    MFC_PUTF, MFC_PUTLF, MFC_SNDSIG, MFC_SNDSIGB, MFC_SNDSIGF, MFC_SYNC,
 };
 use cellgov_time::Budget;
 
@@ -174,6 +174,8 @@ fn a_traced_step_records_the_barrier_each_ordered_command_queues() {
         (MFC_SYNC, 16, MfcSync),
         (MFC_EIEIO, 16, MfcEieio),
         (MFC_BARRIER, 16, MfcBarrier),
+        (MFC_PUTLF, 16, MfcFence),
+        (MFC_GETLB, 16, MfcTagBarrier),
     ] {
         let (_, _, barriers) = issue_traced(cmd, size, TAG, true);
         assert_eq!(barriers, [RetiredBarrier { pc: 4, kind }], "0x{cmd:02x}");

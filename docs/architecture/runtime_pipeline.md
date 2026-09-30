@@ -67,13 +67,17 @@ nine-step deterministic loop:
    latency model having seen the commands queued ahead, and a fence or
    barrier holding a command behind the queued commands it orders
    after. The ordering commands (barrier, mfcsync, mfceieio) move no
-   bytes and hold a slot and their tag until they complete. A completing
+   bytes and hold a slot and their tag until they complete. A list
+   command queues one transfer per element under one slot and its tag,
+   and stops after a stall-and-notify element until the SPU
+   acknowledges the stall. A completing
    get reads its source then and lands the bytes in its issuer's local
    store. A command whose opcode or parameters the MFC refuses holds
    its slot too; when the queue reaches it, its issuer's queue suspends and the
    runtime records the MFC exception for the host to take. A DMA completion leaves the queue at fire time, and an
    SPU's tag group reads complete at its next step once none of its
-   transfers with that tag is queued. A unit yielding `DmaWait` or
+   transfers with that tag is queued and none of its lists with that
+   tag has elements still to queue. A unit yielding `DmaWait` or
    `ChannelStall` out of a batch that applied is parked `Blocked`
    before completions fire, so a same-commit completion's `Runnable`
    override overwrites the fresh `Blocked` and the wake fires in the

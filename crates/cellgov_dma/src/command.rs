@@ -17,8 +17,8 @@
 
 use cellgov_ps3_abi::hw::spu::{
     MFC_ADDRESS_LOW_BITS, MFC_CLASS0_ALIGNMENT, MFC_CLASS0_INVALID_COMMAND,
-    MFC_LIST_ADDRESS_LOW_BITS, MFC_SIZE_RESERVED_MASK, MFC_SNDSIG_SIZE, MFC_TAG_ID_RESERVED_MASK,
-    MFC_TRANSFER_SIZE_MAX,
+    MFC_LIST_ADDRESS_LOW_BITS, MFC_LIST_ELEMENT_BYTES, MFC_SIZE_RESERVED_MASK, MFC_SNDSIG_SIZE,
+    MFC_TAG_ID_RESERVED_MASK, MFC_TRANSFER_SIZE_MAX,
 };
 
 /// The parameter channels an MFC command latches.
@@ -128,6 +128,9 @@ pub enum MfcCommandError {
     /// A list address not doubleword aligned.
     #[error("list address 0x{0:08x} is not doubleword aligned")]
     ListAddressUnaligned(u32),
+    /// A list size that is not a multiple of 8.
+    #[error("list size 0x{0:08x} is not a multiple of 8")]
+    ListSizeUnaligned(u32),
     /// An opcode the architecture neither defines nor reserves.
     #[error("opcode 0x{0:04x} is illegal")]
     IllegalOpcode(u32),
@@ -169,7 +172,8 @@ impl MfcCommandError {
             | Self::SendSignalSize(_)
             | Self::LocalStoreUnaligned { .. }
             | Self::AddressLowBitsDiffer { .. }
-            | Self::ListAddressUnaligned(_) => MfcExceptionClass::Alignment,
+            | Self::ListAddressUnaligned(_)
+            | Self::ListSizeUnaligned(_) => MfcExceptionClass::Alignment,
             Self::DataSegment { .. } => MfcExceptionClass::DataSegment,
             Self::DataStorage { .. } => MfcExceptionClass::DataStorage,
         }
@@ -192,6 +196,7 @@ impl MfcCommandError {
             Self::ProxyOnlyCommand(_) => 11,
             Self::DataSegment { .. } => 12,
             Self::DataStorage { .. } => 13,
+            Self::ListSizeUnaligned(_) => 14,
         }
     }
 }
@@ -247,6 +252,10 @@ pub fn validate(class: MfcCommandClass, params: MfcParameters) -> Result<(), Mfc
             }
             if params.eal & MFC_LIST_ADDRESS_LOW_BITS != 0 {
                 return Err(MfcCommandError::ListAddressUnaligned(params.eal));
+            }
+            // [CBEA p:116 s:9.1.4] a list size is a multiple of 8 bytes up to 16 KB; an invalid size raises the DMA alignment interrupt.
+            if !params.size.is_multiple_of(MFC_LIST_ELEMENT_BYTES) {
+                return Err(MfcCommandError::ListSizeUnaligned(params.size));
             }
             Ok(())
         }

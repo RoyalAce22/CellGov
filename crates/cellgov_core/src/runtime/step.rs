@@ -174,6 +174,7 @@ impl Runtime {
                 .with_current_tick(self.time)
                 .with_trace_per_step(self.mode != RuntimeMode::FaultDriven)
                 .with_outstanding_dma_tags(outstanding_tags)
+                .with_list_stall_tags(self.dma_queue.stall_notify_tags(unit_id))
                 .with_dma_queue_occupancy(queued_commands)
                 .with_inbound_mailbox(&inbound_mailbox)
                 .with_mailbox_read_flag(&mailbox_read);

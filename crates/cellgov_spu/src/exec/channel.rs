@@ -1,6 +1,6 @@
 //! The channel reads and writes and the MFC command path.
 
-use crate::state::SpuState;
+use crate::state::{ListCursor, SpuState};
 use crate::stop::SpuStopKind;
 use cellgov_dma::DmaDirection::{Get, Put};
 use cellgov_dma::MfcCommandClass::{SendSignal, Transfer};
@@ -118,6 +118,8 @@ pub(super) fn execute_wrch(
             state.channels.request_tag_update(val);
             SpuStepOutcome::Continue
         }
+        // [CBEA p:130 s:9.3.8] MFC_WrListStallAck names a tag group in bits 27:31 and restarts that group's stalled list commands.
+        spu::MFC_WR_LIST_STALL_ACK => acknowledge_list_stall(val, state, unit_id),
         // [CBE-Handbook p:463 s:17. SPE Channel and Related MMIO Interface sub:17.12 SPU Mailbox Channels] SPU Write Outbound Mailbox sends a 32-bit message to the PPE.
         // [CBEA p:98 s:8.6.1] a write to a full outbound mailbox stalls the SPU until another processor reads it.
         spu::SPU_WR_OUT_MBOX => {
@@ -159,6 +161,20 @@ pub(super) fn execute_rdch(
             None if state.channels.tag_update.is_some() => stall(),
             None => SpuStepOutcome::Fault(SpuFault::ChannelStall(channel)),
         },
+        // [CBEA p:129 s:9.3.7] MFC_RdListStallStat returns the tag groups whose list stalled since the last read, clears them, and blocks while there are none.
+        // A read never completes when the status is 0 and no list has a
+        // stall still to come. The model refuses that read by name.
+        spu::MFC_RD_LIST_STALL_STAT => {
+            let status = core::mem::take(&mut state.channels.list_stall_status);
+            if status != 0 {
+                state.set_reg_channel_word(rt, status);
+                SpuStepOutcome::Continue
+            } else if state.channels.lists.iter().any(|list| !list.stalled) {
+                stall()
+            } else {
+                SpuStepOutcome::Fault(SpuFault::ChannelStall(channel))
+            }
+        }
         // [CBEA p:126 s:9.3.4] MFC_RdTagMask returns the current tag-group query mask.
         spu::MFC_RD_TAG_MASK => {
             state.set_reg_channel_word(rt, state.channels.tag_mask);
@@ -258,8 +274,9 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         spu::SPU_RD_SIG_NOTIFY_1 => u32::from(state.signals[0].pending),
         spu::SPU_RD_SIG_NOTIFY_2 => u32::from(state.signals[1].pending),
         // [CBEA p:129 s:9.3.7] MFC_RdListStallStat counts 1 once a list element with the stall-and-notify flag completes.
-        // The model runs no list command.
-        spu::MFC_RD_LIST_STALL_STAT => 0,
+        spu::MFC_RD_LIST_STALL_STAT => u32::from(channels.list_stall_status != 0),
+        // [CBEA p:130 s:9.3.8] MFC_WrListStallAck is nonblocking and counts 1.
+        spu::MFC_WR_LIST_STALL_ACK => 1,
         // [CBEA p:134 s:9.5.2] SPU_WrOutIntrMbox counts its free entries.
         // The model writes nothing to it, so the one entry is free.
         spu::SPU_WR_OUT_INTR_MBOX => spu::SPU_OUT_INTR_MBOX_DEPTH,
@@ -352,6 +369,181 @@ fn issue_ordering_command(
             request,
             payload: Some(Vec::new()),
         }],
+        reason: YieldReason::DmaSubmitted,
+    }
+}
+
+/// Validate a list command's latched parameters, then queue its elements
+/// up to the first stall-and-notify element.
+///
+/// The list takes one command-queue slot. A list that stops at a stall
+/// keeps its slot and its tag group in [`ListCursor`] until it queues
+/// its last element.
+///
+/// [CBEA p:60 s:7.5.3] the list address is in MFC_EAL and the list size in MFC_Size; each element names the transfer size and low effective address, and every element uses MFC_EAH.
+/// [CBEA p:116 s:9.1.4] a list size may be 0; such a list names no transfer.
+fn issue_list(
+    cmd: u32,
+    direction: DmaDirection,
+    ordering: MfcOrdering,
+    state: &mut SpuState,
+    unit_id: UnitId,
+) -> SpuStepOutcome {
+    let tag = match checked_transfer(cmd, MfcCommandClass::List, state, unit_id) {
+        Ok(tag) => tag,
+        Err(queued) => return queued,
+    };
+    let c = &state.channels;
+    let mut list = ListCursor {
+        word: cmd,
+        tag,
+        direction,
+        ordering,
+        eah: c.mfc_eah,
+        element: c.mfc_eal,
+        remaining: c.mfc_size / spu::MFC_LIST_ELEMENT_BYTES,
+        data: c.mfc_lsa,
+        stalled: false,
+    };
+    state.channels.cmd_queue_free -= 1;
+    let effects = if list.remaining == 0 {
+        vec![ordered_empty_command(tag, ordering, unit_id)]
+    } else {
+        queue_list_segment(cmd, &mut list, state, unit_id)
+    };
+    if list.remaining > 0 {
+        state.channels.lists.push(list);
+    }
+    SpuStepOutcome::Yield {
+        effects,
+        reason: YieldReason::DmaSubmitted,
+    }
+}
+
+/// A queued command of no length under `tag`: it holds a slot and its
+/// tag group until the queue completes it.
+fn ordered_empty_command(tag: MfcTagId, ordering: MfcOrdering, unit_id: UnitId) -> Effect {
+    let none = ByteRange::new(GuestAddr::new(0), 0).expect("an empty range");
+    let request = DmaRequest::new(DmaDirection::Put, none, none, unit_id)
+        .expect("matching sizes")
+        .with_tag_id(tag)
+        .with_ordering(ordering);
+    Effect::DmaEnqueue {
+        request,
+        payload: Some(Vec::new()),
+    }
+}
+
+/// Queue the list's elements from its cursor up to and including the
+/// next stall-and-notify element, or to its end.
+///
+/// The model reads each element from local store when it queues the
+/// segment. An element that software rewrote while the list stalled is
+/// the one the segment queues. The segment's last element holds the
+/// list's slot when it ends the list; otherwise the list's
+/// [`ListCursor`] holds it. An element the MFC refuses ends the list as
+/// an invalid command, which takes over the slot.
+///
+/// [CBEA p:59 s:7.4] the elements are processed in order; each transfer starts at the next quadword boundary of local store after the last, and one below 16 bytes takes the low four bits of its effective address; a stall-and-notify flag on the last element is ignored.
+/// [CBEA p:129 s:9.3.7] the MFC reads no element past one with the stall-and-notify flag until the stall is acknowledged.
+fn queue_list_segment(
+    cmd: u32,
+    list: &mut ListCursor,
+    state: &mut SpuState,
+    unit_id: UnitId,
+) -> Vec<Effect> {
+    let mut effects = Vec::new();
+    while list.remaining > 0 {
+        let raw = state.read_ls_wrapped(list.element, spu::MFC_LIST_ELEMENT_BYTES);
+        let word = |i: usize| u32::from_be_bytes([raw[i], raw[i + 1], raw[i + 2], raw[i + 3]]);
+        let (head, eal) = (word(0), word(4));
+        list.element = list.element.wrapping_add(spu::MFC_LIST_ELEMENT_BYTES);
+        list.remaining -= 1;
+        let stall = head & spu::MFC_LIST_STALL_NOTIFY != 0 && list.remaining > 0;
+        let size = head & !spu::MFC_LIST_STALL_NOTIFY;
+        let lsa = if size < 16 {
+            (list.data & !0xF) | (eal & 0xF)
+        } else {
+            list.data
+        };
+        let params = MfcParameters {
+            lsa,
+            eah: list.eah,
+            eal,
+            size,
+            tag: u32::from(list.tag.raw()),
+        };
+        let checked = cellgov_dma::validate(MfcCommandClass::Transfer, params).and_then(|()| {
+            ByteRange::new(GuestAddr::new(params.ea()), u64::from(size))
+                .ok_or(MfcCommandError::DataSegment { ea: params.ea() })
+        });
+        let main = match checked {
+            Ok(main) => main,
+            // The documents name no exception for a bad element. The model
+            // raises the one a single transfer with the same parameters
+            // raises.
+            Err(error) => {
+                state.channels.cmd_queue_free += 1;
+                effects.push(invalid_command(cmd, params, error, state, unit_id));
+                list.remaining = 0;
+                break;
+            }
+        };
+        list.data = lsa.wrapping_add(size).wrapping_add(15) & !15;
+        let local = ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size))
+            .expect("valid LS range");
+        let (src, dst, payload) = match list.direction {
+            DmaDirection::Put => (local, main, Some(state.read_ls_wrapped(lsa, size))),
+            DmaDirection::Get => (main, local, None),
+        };
+        // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
+        if list.direction == DmaDirection::Put {
+            if let Some(line) = state.reservation {
+                if line.overlaps_range(params.ea(), u64::from(size)) {
+                    state.reservation = None;
+                }
+            }
+        }
+        let mut request = DmaRequest::new(list.direction, src, dst, unit_id)
+            .expect("matching sizes")
+            .with_tag_id(list.tag)
+            .with_ordering(list.ordering);
+        if stall {
+            request = request.with_stall_notify().without_slot();
+        } else if list.remaining > 0 {
+            request = request.without_slot();
+        }
+        effects.push(Effect::DmaEnqueue { request, payload });
+        if stall {
+            break;
+        }
+    }
+    effects
+}
+
+/// Restart the stalled lists of the tag group `value` names.
+///
+/// For a group with no stalled list, the model restarts nothing.
+///
+/// [CBEA p:130 s:9.3.8] an acknowledgment for a tag group with no stalled list has undefined results.
+fn acknowledge_list_stall(value: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
+    let group = value & 0x1F;
+    let mut effects = Vec::new();
+    let mut lists = core::mem::take(&mut state.channels.lists);
+    lists.retain_mut(|list| {
+        if !list.stalled || u32::from(list.tag.raw()) != group {
+            return true;
+        }
+        list.stalled = false;
+        effects.extend(queue_list_segment(list.word, list, state, unit_id));
+        list.remaining > 0
+    });
+    state.channels.lists = lists;
+    if effects.is_empty() {
+        return SpuStepOutcome::Continue;
+    }
+    SpuStepOutcome::Yield {
+        effects,
         reason: YieldReason::DmaSubmitted,
     }
 }
@@ -464,7 +656,9 @@ fn opcode_error(word: MfcCmd) -> Option<MfcCommandError> {
 pub(crate) fn mfc_barrier_kind(cmd: u32) -> Option<BarrierKind> {
     Some(match MfcCmd::new(cmd).opcode() {
         spu::MFC_PUTF | spu::MFC_GETF | spu::MFC_SNDSIGF => BarrierKind::MfcFence,
+        spu::MFC_PUTLF | spu::MFC_PUTRLF | spu::MFC_GETLF => BarrierKind::MfcFence,
         spu::MFC_PUTB | spu::MFC_GETB | spu::MFC_SNDSIGB => BarrierKind::MfcTagBarrier,
+        spu::MFC_PUTLB | spu::MFC_PUTRLB | spu::MFC_GETLB => BarrierKind::MfcTagBarrier,
         spu::MFC_SYNC => BarrierKind::MfcSync,
         spu::MFC_EIEIO => BarrierKind::MfcEieio,
         spu::MFC_BARRIER => BarrierKind::MfcBarrier,
@@ -523,6 +717,14 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             issue_ordering_command(cmd, Order::TagBarrier, state, unit_id)
         }
         spu::MFC_BARRIER => issue_ordering_command(cmd, Order::QueueBarrier, state, unit_id),
+        // [CBEA p:58 s:7.4] a list command runs a sequence of transfers, one per list element, under one tag group.
+        // [CBEA p:62 s:7.6.5] on the CBE the putrl forms behave as the putl forms.
+        spu::MFC_PUTL | spu::MFC_PUTRL => issue_list(cmd, Put, Order::None, state, unit_id),
+        spu::MFC_PUTLF | spu::MFC_PUTRLF => issue_list(cmd, Put, Order::Fence, state, unit_id),
+        spu::MFC_PUTLB | spu::MFC_PUTRLB => issue_list(cmd, Put, Order::TagBarrier, state, unit_id),
+        spu::MFC_GETL => issue_list(cmd, Get, Order::None, state, unit_id),
+        spu::MFC_GETLF => issue_list(cmd, Get, Order::Fence, state, unit_id),
+        spu::MFC_GETLB => issue_list(cmd, Get, Order::TagBarrier, state, unit_id),
         // [CBEA p:66 s:7.8.1 Get Lock Line and Reserve Command] getllar: the transfer is one cache line, placed in local storage, with a reservation over it.
         // The effective address names the line by any byte inside it.
         // [CBEA p:57 s:7.2 Command Exceptions] alignment is not checked for the atomic commands, so a misaligned address refuses nothing.
@@ -602,3 +804,7 @@ mod mfc_parameter_latch_tests;
 #[cfg(test)]
 #[path = "tests/mfc_ordering_form_tests.rs"]
 mod mfc_ordering_form_tests;
+
+#[cfg(test)]
+#[path = "tests/mfc_list_tests.rs"]
+mod mfc_list_tests;

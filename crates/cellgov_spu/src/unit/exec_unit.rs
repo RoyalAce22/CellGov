@@ -47,11 +47,29 @@ impl ExecutionUnit for SpuExecutionUnit {
         // transfer with its tag, so a reused tag reads incomplete until its
         // new transfer lands.
         // [CBEA p:128 s:9.3.6] a set bit means the group has no outstanding operations.
-        self.state.channels.tag_status = !ctx.outstanding_dma_tags();
-        // Each queued command holds a slot until it completes. A count
+        // A list with elements still to queue holds its tag group too.
+        let channels = &mut self.state.channels;
+        let list_tags = channels
+            .lists
+            .iter()
+            .fold(0, |tags, list| tags | list.tag.status_bit());
+        channels.tag_status = !(ctx.outstanding_dma_tags() | list_tags);
+        // Each queued command holds a slot until it completes, and a list
+        // holds its one slot until it queues its last element. A count
         // that rises from 0 here is the Qv event's edge.
-        self.state.channels.cmd_queue_free =
-            spu::MFC_SPU_QUEUE_DEPTH.saturating_sub(ctx.dma_queue_occupancy());
+        let held = u32::try_from(channels.lists.len()).unwrap_or(u32::MAX);
+        channels.cmd_queue_free = spu::MFC_SPU_QUEUE_DEPTH
+            .saturating_sub(ctx.dma_queue_occupancy())
+            .saturating_sub(held);
+        // A list stalls once its stall-and-notify element leaves the queue.
+        // [CBEA p:129 s:9.3.7] the stall occurs after the flagged element's transfer completes, and sets the group's bit in MFC_RdListStallStat.
+        for list in channels.lists.iter_mut().filter(|list| !list.stalled) {
+            let bit = list.tag.status_bit();
+            if ctx.list_stall_tags() & bit == 0 {
+                list.stalled = true;
+                channels.list_stall_status |= bit;
+            }
+        }
         self.state.channels.settle_tag_update();
         self.state.channels.in_mbox = ctx.inbound_mailbox().to_vec();
 
@@ -380,8 +398,8 @@ fn barrier_kind(insn: &crate::instruction::SpuInstruction) -> Option<BarrierKind
 }
 
 /// The barrier an `MFC_Cmd` write queued, if its command orders the
-/// queue. A refused command queues an invalid command, not a transfer,
-/// and orders nothing.
+/// queue. A write whose first effect is an invalid command orders
+/// nothing.
 fn queued_mfc_barrier(
     insn: &crate::instruction::SpuInstruction,
     state: &crate::state::SpuState,
@@ -394,7 +412,7 @@ fn queued_mfc_barrier(
     else {
         return None;
     };
-    if !matches!(effects, [Effect::DmaEnqueue { .. }]) {
+    if !matches!(effects.first(), Some(Effect::DmaEnqueue { .. })) {
         return None;
     }
     exec::mfc_barrier_kind(state.reg_word(rt))
@@ -410,7 +428,7 @@ fn channel_stall(insn: &crate::instruction::SpuInstruction) -> Option<ChannelSta
     };
     let wake = match channel {
         spu::SPU_RD_IN_MBOX => StallWake::MailboxDelivery,
-        spu::MFC_RD_TAG_STAT => StallWake::DmaCompletion,
+        spu::MFC_RD_TAG_STAT | spu::MFC_RD_LIST_STALL_STAT => StallWake::DmaCompletion,
         spu::SPU_WR_OUT_MBOX => StallWake::OutboundMailboxRead,
         spu::MFC_CMD => StallWake::CommandQueueSlot,
         _ => return None,

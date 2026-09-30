@@ -52,6 +52,8 @@ pub struct DmaRequest {
     issuer: UnitId,
     tag_id: Option<MfcTagId>,
     ordering: MfcOrdering,
+    stall_notify: bool,
+    holds_slot: bool,
 }
 
 impl DmaRequest {
@@ -78,6 +80,8 @@ impl DmaRequest {
             issuer,
             tag_id: None,
             ordering: MfcOrdering::None,
+            stall_notify: false,
+            holds_slot: true,
         })
     }
 
@@ -100,6 +104,36 @@ impl DmaRequest {
     #[inline]
     pub const fn ordering(self) -> MfcOrdering {
         self.ordering
+    }
+
+    /// Mark the transfer as a list element with the stall-and-notify flag.
+    ///
+    /// [CBEA p:129 s:9.3.7] a list element with the stall-and-notify flag stalls its list after the element's transfer completes.
+    #[inline]
+    pub const fn with_stall_notify(mut self) -> Self {
+        self.stall_notify = true;
+        self
+    }
+
+    /// Whether the transfer is a list element whose list stalls once it
+    /// completes.
+    #[inline]
+    pub const fn stall_notify(self) -> bool {
+        self.stall_notify
+    }
+
+    /// Mark the transfer as a list element that holds no command-queue
+    /// slot: one list command holds one slot, whatever its element count.
+    #[inline]
+    pub const fn without_slot(mut self) -> Self {
+        self.holds_slot = false;
+        self
+    }
+
+    /// Whether the transfer holds a slot in its issuer's command queue.
+    #[inline]
+    pub const fn holds_slot(self) -> bool {
+        self.holds_slot
     }
 
     /// MFC tag-id the SPU issued under; `None` for PPU/host-initiated DMA.

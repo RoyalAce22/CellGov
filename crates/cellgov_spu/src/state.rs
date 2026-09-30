@@ -143,6 +143,9 @@ impl SpuObservableSnapshot {
             atomic_status_ready,
             in_mbox,
             out_mbox,
+            // Instruction comparison runs no list command.
+            lists: _,
+            list_stall_status: _,
         } = channels;
         Self {
             regs: *regs,
@@ -482,6 +485,41 @@ pub struct ChannelState {
     /// [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox returns the messages in the order the SPU wrote them.
     /// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_WrOutMbox has 1 maximum entry.
     pub out_mbox: Option<u32>,
+    /// The list commands stopped at a stall-and-notify element, oldest first.
+    ///
+    /// Each holds its command-queue slot and its tag group until it queues
+    /// its last element.
+    pub lists: Vec<ListCursor>,
+    /// Tag groups whose list stalled since the last read of
+    /// `MFC_RdListStallStat`, one bit per group. A nonzero value is a
+    /// channel count of 1.
+    ///
+    /// [CBEA p:129 s:9.3.7] the channel reports the tag groups with a stalled list; a read clears it and sets the count to 0.
+    pub list_stall_status: u32,
+}
+
+/// Where a list command resumes after its stall.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListCursor {
+    /// The command word that queued the list.
+    pub word: u32,
+    /// The list's tag group.
+    pub tag: cellgov_ps3_abi::hw::spu::MfcTagId,
+    /// Put or get.
+    pub direction: cellgov_dma::DmaDirection,
+    /// The fence or barrier the command's form sets.
+    pub ordering: cellgov_dma::MfcOrdering,
+    /// The high effective-address word every element shares.
+    pub eah: u32,
+    /// Local-store address of the next list element.
+    pub element: u32,
+    /// Elements not yet queued.
+    pub remaining: u32,
+    /// Local-store address the next element's transfer uses.
+    pub data: u32,
+    /// The stall-and-notify element completed, so the list is stalled
+    /// and an acknowledgment resumes it.
+    pub stalled: bool,
 }
 
 impl ChannelState {
@@ -515,6 +553,9 @@ impl ChannelState {
             in_mbox: Vec::new(),
             // x'1C' count 1.
             out_mbox: None,
+            lists: Vec::new(),
+            // x'19' count 0.
+            list_stall_status: 0,
         }
     }
 }

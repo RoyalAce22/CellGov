@@ -10,8 +10,9 @@ use crate::state::{SignalNotifyMode, SpuObservableSnapshot, SpuState};
 ///
 /// [CBEA p:238 s:16.3.3] the counts of x'0', x'3', x'4', x'18', x'19', x'1B' and x'1D' start at 0; x'17', x'1C' and x'1E' at 1; MFC_Cmd at the queue depth.
 /// [CBEA p:109 s:9] a nonblocking channel counts 1.
+/// [CBEA p:130 s:9.3.8] MFC_WrListStallAck counts 1.
 /// [CBE-Handbook p:445 s:17.1 Table 17-2] MFC_Cmd holds 16 entries.
-const START_COUNTS: [(u8, u32); 19] = [
+const START_COUNTS: [(u8, u32); 20] = [
     (0x00, 0),
     (0x03, 0),
     (0x04, 0),
@@ -27,6 +28,7 @@ const START_COUNTS: [(u8, u32); 19] = [
     (0x17, 1),
     (0x18, 0),
     (0x19, 0),
+    (0x1A, 1),
     (0x1B, 0),
     (0x1C, 1),
     (0x1D, 0),

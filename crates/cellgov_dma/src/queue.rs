@@ -7,7 +7,8 @@
 //!
 //! The queue is every SPU's MFC command queue at once: an issuer's
 //! entries are its commands enqueued and not yet complete, so its free
-//! slots are the queue depth less that count. Commands complete in
+//! slots are the queue depth less the slots those entries hold
+//! ([`DmaQueue::issuer_view`]). Commands complete in
 //! `(completion_time, sequence)` order, which with a fixed latency is
 //! issue order for each issuer. Commands without a fence or barrier may
 //! complete in any order, so the architecture allows this order. A
@@ -61,6 +62,8 @@ struct QueueEntry {
 /// 8. 1 when an inline payload is present
 /// 9. the payload bytes
 /// 10. the ordering, when the command sets one
+/// 11. 1 for a list element with the stall-and-notify flag
+/// 12. 1 for a list element that holds no command-queue slot
 impl LaneValue for QueueEntry {
     fn lanes(&self, lanes: &mut ObjectLanes) {
         let c = self.completion;
@@ -80,6 +83,12 @@ impl LaneValue for QueueEntry {
         if ordering != MfcOrdering::None {
             lanes.lane(10, 0, ordering as u64);
         }
+        if c.request().stall_notify() {
+            lanes.lane(11, 0, 1);
+        }
+        if !c.request().holds_slot() {
+            lanes.lane(12, 0, 1);
+        }
     }
 }
 
@@ -92,6 +101,11 @@ struct InvalidEntry {
     time: GuestTicks,
     /// The queue reached the command, and the issuer's queue suspended.
     raised: bool,
+    /// The refused transfer's [`DmaRequest::holds_slot`].
+    holds_slot: bool,
+    /// The refused transfer's [`DmaRequest::stall_notify`]; see
+    /// [`DmaQueue::stall_notify_tags`].
+    stall_notify: bool,
 }
 
 impl InvalidEntry {
@@ -117,6 +131,8 @@ impl InvalidEntry {
 /// 8. the effective address
 /// 9. the size
 /// 10. the tag channel value
+/// 11. 1 for a refused list element with the stall-and-notify flag
+/// 12. 1 for a refused list element that holds no command-queue slot
 impl LaneValue for InvalidEntry {
     fn lanes(&self, lanes: &mut ObjectLanes) {
         let params = self.command.params;
@@ -130,6 +146,12 @@ impl LaneValue for InvalidEntry {
         lanes.lane(8, 0, params.ea());
         lanes.lane(9, 0, u64::from(params.size));
         lanes.lane(10, 0, u64::from(params.tag));
+        if self.stall_notify {
+            lanes.lane(11, 0, 1);
+        }
+        if !self.holds_slot {
+            lanes.lane(12, 0, 1);
+        }
     }
 }
 
@@ -240,6 +262,8 @@ impl DmaQueue {
                 command,
                 time,
                 raised: false,
+                holds_slot: true,
+                stall_notify: false,
             },
         );
         seq
@@ -343,29 +367,54 @@ impl DmaQueue {
             .fold(own, GuestTicks::max)
     }
 
-    /// For one issuer: how many of its commands are queued, and the
-    /// status bit of every tag group one of them holds outstanding.
+    /// For one issuer: how many command-queue slots its queued commands
+    /// hold, and the status bit of every tag group one of them holds
+    /// outstanding.
     ///
     /// An invalid command holds a slot and its tag like a transfer does.
+    /// A list's elements hold its tag, and one slot between them.
     pub fn issuer_view(&self, issuer: UnitId) -> (u32, u32) {
         let transfers = self
             .entries
             .values()
             .filter(|e| e.completion.issuer() == issuer)
             .map(|e| {
-                e.completion
-                    .request()
-                    .tag_id()
-                    .map_or(0, |tag| tag.status_bit())
+                let request = e.completion.request();
+                let tag = request.tag_id().map_or(0, |tag| tag.status_bit());
+                (u32::from(request.holds_slot()), tag)
             });
         let invalid = self
             .invalid
             .values()
             .filter(|e| e.issuer == issuer)
-            .map(InvalidEntry::tag_bit);
+            .map(|e| (u32::from(e.holds_slot), e.tag_bit()));
         transfers
             .chain(invalid)
-            .fold((0, 0), |(count, tags), tag| (count + 1, tags | tag))
+            .fold((0, 0), |(count, tags), (slot, tag)| {
+                (count + slot, tags | tag)
+            })
+    }
+
+    /// For one issuer: the status bit of every tag group with a queued
+    /// list element that carries the stall-and-notify flag.
+    ///
+    /// A flagged element the queue refused stays in the view: the queue
+    /// suspends on it, so its list never stalls.
+    pub fn stall_notify_tags(&self, issuer: UnitId) -> u32 {
+        let queued = self
+            .entries
+            .values()
+            .map(|e| e.completion.request())
+            .filter(|r| r.issuer() == issuer && r.stall_notify())
+            .fold(0, |tags, r| {
+                tags | r.tag_id().map_or(0, |tag| tag.status_bit())
+            });
+        let refused = self
+            .invalid
+            .values()
+            .filter(|e| e.issuer == issuer && e.stall_notify)
+            .fold(0, |tags, e| tags | e.tag_bit());
+        queued | refused
     }
 
     /// Borrow the earliest pending completion without removing it.
@@ -464,6 +513,7 @@ impl DmaQueue {
         };
         let command = refused_transfer(&e.completion, e.payload.is_some(), error);
         let issuer = e.completion.issuer();
+        let request = e.completion.request();
         self.invalid.insert(
             key,
             InvalidEntry {
@@ -471,6 +521,8 @@ impl DmaQueue {
                 command,
                 time: key.0,
                 raised: true,
+                holds_slot: request.holds_slot(),
+                stall_notify: request.stall_notify(),
             },
         );
         due.raised.push(RaisedMfcCommand { issuer, command });
@@ -511,6 +563,10 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/queue_lanes_tests.rs"]
 mod lanes_tests;
+
+#[cfg(test)]
+#[path = "tests/queue_list_tests.rs"]
+mod list_tests;
 
 #[cfg(test)]
 #[path = "tests/queue_invalid_tests.rs"]

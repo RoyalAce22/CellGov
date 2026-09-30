@@ -168,6 +168,16 @@ fn a_list_checks_its_size_and_both_doubleword_alignments() {
     assert_eq!(check(MfcCommandClass::List, |p| p.eal = 0x2008), Ok(()));
 }
 
+/// [CBEA p:116 s:9.1.4] a list size is a multiple of 8 bytes, from 0 to 16 KB; an invalid size raises the DMA alignment interrupt.
+#[test]
+fn a_list_size_is_a_multiple_of_8_and_may_be_0() {
+    let error = check(MfcCommandClass::List, |p| p.size = 12).unwrap_err();
+    assert_eq!(error, MfcCommandError::ListSizeUnaligned(12));
+    assert_eq!(error.class(), MfcExceptionClass::Alignment);
+    assert_eq!(check(MfcCommandClass::List, |p| p.size = 0), Ok(()));
+    assert_eq!(check(MfcCommandClass::List, |p| p.size = 8), Ok(()));
+}
+
 /// [CBEA p:57 s:7.2 Table 7-6] footnote 1: none of the alignment checks apply to mfcsync, mfceieio, barrier and the atomic commands.
 #[test]
 fn atomic_and_synchronization_commands_are_not_checked() {
@@ -197,6 +207,9 @@ fn each_error_has_its_own_code() {
         MfcCommandError::IllegalOpcode(0),
         MfcCommandError::ReservedOpcode(0),
         MfcCommandError::ProxyOnlyCommand(0),
+        MfcCommandError::DataSegment { ea: 0 },
+        MfcCommandError::DataStorage { ea: 0 },
+        MfcCommandError::ListSizeUnaligned(0),
     ];
     let codes: std::collections::BTreeSet<u8> = errors.iter().map(|e| e.code()).collect();
     assert_eq!(codes.len(), errors.len());

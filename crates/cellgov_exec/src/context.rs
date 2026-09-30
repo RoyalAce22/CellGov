@@ -30,6 +30,7 @@ pub struct ExecutionContext<'a> {
     /// `drain_retired_state_hashes`.
     trace_per_step: bool,
     outstanding_dma_tags: u32,
+    list_stall_tags: u32,
     dma_queue_occupancy: u32,
     inbound_mailbox: &'a [u32],
     /// Set when the unit reads [`Self::inbound_mailbox`], so the
@@ -51,6 +52,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
+            list_stall_tags: 0,
             dma_queue_occupancy: 0,
             inbound_mailbox: &[],
             mailbox_read: None,
@@ -70,6 +72,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
+            list_stall_tags: 0,
             dma_queue_occupancy: 0,
             inbound_mailbox: &[],
             mailbox_read: None,
@@ -91,6 +94,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
+            list_stall_tags: 0,
             dma_queue_occupancy: 0,
             inbound_mailbox: &[],
             mailbox_read: None,
@@ -116,6 +120,7 @@ impl<'a> ExecutionContext<'a> {
             current_tick: GuestTicks::ZERO,
             trace_per_step: false,
             outstanding_dma_tags: 0,
+            list_stall_tags: 0,
             dma_queue_occupancy: 0,
             inbound_mailbox: &[],
             mailbox_read: None,
@@ -159,6 +164,18 @@ impl<'a> ExecutionContext<'a> {
     pub const fn with_outstanding_dma_tags(self, bits: u32) -> Self {
         Self {
             outstanding_dma_tags: bits,
+            ..self
+        }
+    }
+
+    /// Tag groups with a queued stall-and-notify list element of this
+    /// unit's, one bit per group.
+    ///
+    /// The element's list stalls once the element leaves the queue.
+    #[inline]
+    pub const fn with_list_stall_tags(self, bits: u32) -> Self {
+        Self {
+            list_stall_tags: bits,
             ..self
         }
     }
@@ -214,6 +231,13 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn outstanding_dma_tags(&self) -> u32 {
         self.outstanding_dma_tags
+    }
+
+    /// Tag groups with a queued stall-and-notify list element of this
+    /// unit's.
+    #[inline]
+    pub const fn list_stall_tags(&self) -> u32 {
+        self.list_stall_tags
     }
 
     /// Number of this unit's MFC commands queued and not yet complete.

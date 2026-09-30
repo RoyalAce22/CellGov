@@ -292,6 +292,40 @@ pub const MFC_GETB: u32 = 0x41;
 ///
 /// [CBEA p:307 s:Appendix D Table D-2] getf opcode x'0042'.
 pub const MFC_GETF: u32 = 0x42;
+/// DMA list put: each list element names one transfer from local store
+/// to main storage.
+///
+/// [CBEA p:306 s:Appendix D Table D-2] putl x'0024', putlb x'0025', putlf x'0026'; putrl x'0034', putrlb x'0035', putrlf x'0036'.
+pub const MFC_PUTL: u32 = 0x24;
+/// DMA list put with a tag-specific barrier.
+pub const MFC_PUTLB: u32 = 0x25;
+/// DMA list put with a tag-specific fence.
+pub const MFC_PUTLF: u32 = 0x26;
+/// DMA list put with the replace-cache hint.
+///
+/// [CBEA p:62 s:7.6.5] on the CBE, putrl, putrlf and putrlb behave as putl, putlf and putlb.
+pub const MFC_PUTRL: u32 = 0x34;
+/// DMA list put with the replace-cache hint and a tag-specific barrier.
+pub const MFC_PUTRLB: u32 = 0x35;
+/// DMA list put with the replace-cache hint and a tag-specific fence.
+pub const MFC_PUTRLF: u32 = 0x36;
+/// DMA list get: each list element names one transfer from main
+/// storage to local store.
+///
+/// [CBEA p:307 s:Appendix D Table D-2] getl x'0044', getlb x'0045', getlf x'0046'.
+pub const MFC_GETL: u32 = 0x44;
+/// DMA list get with a tag-specific barrier.
+pub const MFC_GETLB: u32 = 0x45;
+/// DMA list get with a tag-specific fence.
+pub const MFC_GETLF: u32 = 0x46;
+/// Bytes in one DMA list element.
+///
+/// [CBEA p:59 s:7.4] a list element is a doubleword: the stall-and-notify flag and transfer size, then the low effective-address word.
+pub const MFC_LIST_ELEMENT_BYTES: u32 = 8;
+/// The stall-and-notify flag in a list element's first word, bit 0.
+///
+/// [CBEA p:59 s:7.4] bit 0 of a list element is the stall-and-notify flag, bits 1:16 are reserved, and bits 17:31 are the transfer size.
+pub const MFC_LIST_STALL_NOTIFY: u32 = 0x8000_0000;
 /// Send signal: a 4-byte put.
 ///
 /// [CBEA p:308 s:Appendix D Table D-4] sndsig x'00A0', sndsigb x'00A1', sndsigf x'00A2'.
