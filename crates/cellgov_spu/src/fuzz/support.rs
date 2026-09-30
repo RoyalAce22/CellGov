@@ -92,7 +92,9 @@ pub(super) fn execution_supported(instruction: SpuInstruction) -> bool {
         // [SPU-ISA p:238 s:10 Control Instructions] STOP signals its 14-bit
         // value to the external environment, while the executor only records
         // that the unit finished.
-        SpuInstruction::Stop { .. } => false,
+        // [SPU-ISA p:239 s:10 Control Instructions] STOPD stops the SPU as a
+        // breakpoint, which the executor records only as a finish.
+        SpuInstruction::Stop { .. } | SpuInstruction::Stopd => false,
         _ => true,
     }
 }

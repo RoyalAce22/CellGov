@@ -307,7 +307,8 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Sync
             | SpuInstruction::Dsync
             | SpuInstruction::Heq
-            | SpuInstruction::Stop { .. } => None,
+            | SpuInstruction::Stop { .. }
+            | SpuInstruction::Stopd => None,
         };
         if let Some(register) = register {
             footprint.registers.insert(register);

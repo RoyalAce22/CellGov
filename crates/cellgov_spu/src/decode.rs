@@ -72,6 +72,24 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 signal: (raw & 0x3FFF) as u16,
             });
         }
+        // [SPU-ISA p:239 s:10 Stopd] RR opcode 0x140; its RB, RA and RC fields only carry dependencies.
+        0x140 => return Ok(SpuInstruction::Stopd),
+        // [SPU-ISA p:33 s:3 Lqx] RR opcode 0x1C4.
+        0x1C4 => {
+            return Ok(SpuInstruction::Lqx {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:37 s:3 Stqx] RR opcode 0x144.
+        0x144 => {
+            return Ok(SpuInstruction::Stqx {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
         0x1A8 => return Ok(SpuInstruction::Bi { ra: ra7 }),
         0x201 => return Ok(SpuInstruction::Nop),
         0x001 => return Ok(SpuInstruction::Lnop),
@@ -328,20 +346,6 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 imm: sign_extend_10(i10),
             })
         }
-        0x38 => {
-            return Ok(SpuInstruction::Lqx {
-                rt: rt7,
-                ra: ra7,
-                rb: rb7,
-            })
-        }
-        0x28 => {
-            return Ok(SpuInstruction::Stqx {
-                rt: rt7,
-                ra: ra7,
-                rb: rb7,
-            })
-        }
         // [SPU-ISA p:167 s:7 Cgti] RI10 opcode 0x4C.
         0x4C => {
             return Ok(SpuInstruction::Cgti {
@@ -497,3 +501,7 @@ mod compiler_forms_tests;
 #[cfg(test)]
 #[path = "tests/decode_job_forms_tests.rs"]
 mod job_forms_tests;
+
+#[cfg(test)]
+#[path = "tests/decode_quad_x_form_tests.rs"]
+mod quad_x_form_tests;

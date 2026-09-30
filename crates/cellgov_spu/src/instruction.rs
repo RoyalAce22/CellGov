@@ -573,6 +573,8 @@ pub enum SpuInstruction {
         /// Signal type field.
         signal: u16,
     },
+    /// Stop and signal with dependencies: a debugger breakpoint.
+    Stopd,
 }
 
 /// Decode failure.

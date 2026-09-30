@@ -111,7 +111,7 @@ pub(super) fn effect_and_outcome(
         | SpuInstruction::Binz { .. }
         | SpuInstruction::Bihz { .. }
         | SpuInstruction::Bihnz { .. } => (NO_EFFECTS, CONDITIONAL_BRANCH),
-        SpuInstruction::Stop { .. } => (NO_EFFECTS, YIELD),
+        SpuInstruction::Stop { .. } | SpuInstruction::Stopd => (NO_EFFECTS, YIELD),
         _ => (NO_EFFECTS, CONTINUE),
     }
 }
@@ -151,9 +151,16 @@ pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
         | K::Bihz
         | K::Bihnz => SpuEncodingForm::Branch,
         K::Rdch | K::Wrch | K::Rchcnt => SpuEncodingForm::Channel,
-        K::Nop | K::Lnop | K::Hbr | K::Hbra | K::Hbrr | K::Sync | K::Dsync | K::Heq | K::Stop => {
-            SpuEncodingForm::Control
-        }
+        K::Nop
+        | K::Lnop
+        | K::Hbr
+        | K::Hbra
+        | K::Hbrr
+        | K::Sync
+        | K::Dsync
+        | K::Heq
+        | K::Stop
+        | K::Stopd => SpuEncodingForm::Control,
         _ => SpuEncodingForm::Rrr,
     }
 }
@@ -231,6 +238,7 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Sync
         | SpuInstructionKind::Dsync
         | SpuInstructionKind::Heq
-        | SpuInstructionKind::Stop => {}
+        | SpuInstructionKind::Stop
+        | SpuInstructionKind::Stopd => {}
     }
 }

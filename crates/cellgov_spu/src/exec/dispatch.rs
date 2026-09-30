@@ -499,7 +499,8 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         | SpuInstruction::Heq => SpuStepOutcome::Continue,
 
         // [SPU-ISA p:238 s:10. Control Instructions] Stop and Signal halts the SPU and raises the stop signal to the PPE.
-        SpuInstruction::Stop { signal: _ } => SpuStepOutcome::Yield {
+        // [SPU-ISA p:239 s:10. Control Instructions] Stop and Signal with Dependencies stops the SPU as stop does.
+        SpuInstruction::Stop { signal: _ } | SpuInstruction::Stopd => SpuStepOutcome::Yield {
             effects: vec![],
             reason: YieldReason::Finished,
         },
