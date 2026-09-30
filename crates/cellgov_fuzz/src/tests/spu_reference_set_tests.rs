@@ -9,7 +9,7 @@ use cellgov_ps3_abi::lv2::spu::thread_window;
 
 const EXISTING: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/spu_reference/rotqbyi_12_v1.json"
+    "/tests/fixtures/spu_reference_single/rotqbyi_12_v1.json"
 ));
 
 /// [SPU-ISA p:238 s:10. Control Instructions] stop: opcode 0x000 with a zero stop-and-signal type.

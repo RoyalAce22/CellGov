@@ -15,7 +15,7 @@ use crate::reference::ReferenceField;
 
 const FIXTURE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/spu_reference/rotqbyi_12_v1.json"
+    "/tests/fixtures/spu_reference_single/rotqbyi_12_v1.json"
 ));
 
 const ALL_COMPONENTS: [SpuReferenceComponent; 9] = [

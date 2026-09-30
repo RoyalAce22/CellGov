@@ -11,7 +11,7 @@ use cellgov_fuzz::spu_reference::{
 };
 
 const PPU_REFERENCE: &str = include_str!("fixtures/ppu_reference/li_r3_7_v1.json");
-const SPU_REFERENCE: &str = include_str!("fixtures/spu_reference/rotqbyi_12_v1.json");
+const SPU_REFERENCE: &str = include_str!("fixtures/spu_reference_single/rotqbyi_12_v1.json");
 const BASELINE: &str = include_str!("fixtures/decoder_campaign_v2.json");
 
 #[test]

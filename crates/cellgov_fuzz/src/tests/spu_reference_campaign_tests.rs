@@ -5,7 +5,7 @@ use super::*;
 
 const ROTATION: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/spu_reference/rotqbyi_12_v1.json"
+    "/tests/fixtures/spu_reference_single/rotqbyi_12_v1.json"
 ));
 
 /// A one-vector set for `unit` that stops at once and expects nothing.

@@ -41,8 +41,12 @@ fn the_committed_directory_replays_clean() {
         cellgov_fuzz::spu_reference::run_reference_directory(&dir).expect("the directory reads");
     let text = render_spu_reference(&campaign);
     assert!(text.contains(
-        "fuzz spu-reference: rotqbyi_12_v1.json single unit=instruction:rotqbyi match \
-         differences=[] unchosen=[] excluded=3"
+        "fuzz spu-reference: dfa_directed_rounding_v1.json single unit=instruction:dfa match \
+         differences=[] unchosen=[] excluded=2"
+    ));
+    assert!(text.contains(
+        "fuzz spu-reference: rotqbyi.json sequential-bytes-by-12 unit=instruction:rotqbyi \
+         match differences=[] unchosen=[] excluded=2"
     ));
     assert!(text.contains("missing=0 duplicated=0 unowned=0 stale_pending=0 unknown_pending=0"));
 }
@@ -51,7 +55,9 @@ fn the_committed_directory_replays_clean() {
 fn a_differing_file_or_a_gap_fails_and_is_named() {
     let scratch = cellgov_testkit::scratch::scratch_labeled("cli_spu_reference");
     let dir: &Path = &scratch;
-    let fixture = std::fs::read_to_string(fixtures().join("rotqbyi_12_v1.json")).expect("reads");
+    let fixture =
+        std::fs::read_to_string(fixtures().join("../spu_reference_single/rotqbyi_12_v1.json"))
+            .expect("reads");
     let mut wrong: serde_json::Value = serde_json::from_str(&fixture).expect("JSON");
     wrong["expected"]["pc"]["value"] = 8.into();
     std::fs::write(dir.join("rotqbyi.json"), wrong.to_string()).expect("writes");

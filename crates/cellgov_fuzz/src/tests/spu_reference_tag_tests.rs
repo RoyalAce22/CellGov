@@ -7,7 +7,7 @@ use super::*;
 
 const FIXTURE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/spu_reference/rotqbyi_12_v1.json"
+    "/tests/fixtures/spu_reference_single/rotqbyi_12_v1.json"
 ));
 
 fn with_command_count(side: &str, count: u32) -> serde_json::Value {

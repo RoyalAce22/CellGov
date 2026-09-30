@@ -5,7 +5,7 @@ use cellgov_fuzz::spu_reference::{
     SpuReferenceError, SpuReferenceOmission,
 };
 
-const ROTATION: &str = include_str!("fixtures/spu_reference/rotqbyi_12_v1.json");
+const ROTATION: &str = include_str!("fixtures/spu_reference_single/rotqbyi_12_v1.json");
 const DIRECTED_ROUNDING: &str =
     include_str!("fixtures/spu_reference/dfa_directed_rounding_v1.json");
 
