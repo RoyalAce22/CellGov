@@ -313,7 +313,8 @@ fn a_run_that_reaches_no_check_is_not_a_clean_completion() {
     let config = config(GenerationStrategy::RawWords);
     for (target, refused) in [
         (FuzzTarget::PpuInstruction, 0u32),
-        (FuzzTarget::SpuInstruction, u32::MAX),
+        // RR opcode 0x004 names no SPU instruction.
+        (FuzzTarget::SpuInstruction, 0x0080_0000),
     ] {
         let run = evaluate_case(target, config, 0, &[refused]);
         assert_eq!(run.report.decoded, 0, "{target:?}");

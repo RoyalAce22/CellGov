@@ -9,25 +9,29 @@ use super::lanes::{from_words, words};
 use super::outcome::SpuStepOutcome;
 use crate::state::SpuState;
 
-/// Applies `op` to each word slot of `ra` and `rb` as single-precision
-/// values, writes the packed results to `rt`, and ORs each slot's flags
-/// into the FPSCR.
-// [SPU-ISA p:196 s:9.1] fa, fs and fm set OVF, UNF and DIFF in the slice of each slot.
-pub(super) fn single(
+/// Applies `op` to each word slot of the `sources` registers as
+/// single-precision values, writes the packed results to `rt`, and ORs
+/// each slot's flags into the FPSCR.
+// [SPU-ISA p:196 s:9.1] fa, fs, fm, fma, fms and fnms set OVF, UNF and DIFF in the slice of each slot.
+pub(super) fn single<const N: usize>(
     state: &mut SpuState,
     rt: u8,
-    ra: u8,
-    rb: u8,
-    op: impl Fn(Exact, Exact) -> Exact,
+    sources: [u8; N],
+    op: impl Fn([Exact; N]) -> Exact,
 ) -> SpuStepOutcome {
-    let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
+    let words_of = sources.map(|r| words(state.regs[r as usize]));
     let mut flags = [Flags::default(); 4];
     let results = std::array::from_fn(|slot| {
-        let (x, x_flags) = unpack_extended::<Binary32>(u64::from(a[slot]));
-        let (y, y_flags) = unpack_extended::<Binary32>(u64::from(b[slot]));
+        let mut operand_flags = Flags::default();
+        let operands = words_of.map(|w| {
+            let (x, x_flags) = unpack_extended::<Binary32>(u64::from(w[slot]));
+            operand_flags = operand_flags.or(x_flags);
+            x
+        });
         // The extended policy truncates whatever mode is named.
-        let packed = round_pack::<Binary32>(Policy::SpuExtended, Rounding::TowardZero, op(x, y));
-        flags[slot] = x_flags.or(y_flags).or(packed.flags);
+        let packed =
+            round_pack::<Binary32>(Policy::SpuExtended, Rounding::TowardZero, op(operands));
+        flags[slot] = operand_flags.or(packed.flags);
         packed.bits as u32
     });
     state.regs[rt as usize] = from_words(results);
@@ -35,10 +39,11 @@ pub(super) fn single(
     SpuStepOutcome::Continue
 }
 
-/// `a + b` for two decoded single-precision operands.
+/// `a + b` for two exact operands: decoded single-precision values or
+/// one of their products.
 pub(super) fn sum(a: Exact, b: Exact) -> Exact {
     cellgov_float::add(a, b)
-        .expect("invariant: decoded single-precision operands are exact and 24 bits wide")
+        .expect("invariant: single-precision operands and their products are exact and at most 48 bits wide")
 }
 
 /// `a * b` for two decoded single-precision operands.

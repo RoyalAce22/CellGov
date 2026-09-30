@@ -50,7 +50,11 @@ fn a_faulting_spu_sequence_discards_prior_state() {
 #[test]
 fn self_modified_decode_refusal_is_a_terminal_observation() {
     let mut initial = SpuState::new();
-    initial.regs[0] = [0xff; 16];
+    // RR opcode 0x004 names no instruction, so the stored word never decodes.
+    initial.regs[0] = [0x00, 0x80, 0x00, 0x00]
+        .repeat(4)
+        .try_into()
+        .expect("16 bytes");
     let stqd_r0_at_16 = 0x2400_4080u32;
     let nop = 0x4020_007fu32;
     for (index, word) in [stqd_r0_at_16, nop, nop, nop, nop].iter().enumerate() {
@@ -61,7 +65,7 @@ fn self_modified_decode_refusal_is_a_terminal_observation() {
     let (observed, decoded, _) = run_sequence(&initial, 5);
 
     assert_eq!(decoded, 4);
-    assert_eq!(observed.decode_refusal, Some((16, u32::MAX)));
+    assert_eq!(observed.decode_refusal, Some((16, 0x0080_0000)));
 }
 
 #[test]

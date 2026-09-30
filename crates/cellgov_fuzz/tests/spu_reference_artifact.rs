@@ -226,7 +226,13 @@ fn expected_channels_cannot_name_a_nonexistent_mailbox_register() {
 #[test]
 fn decode_refusals_keep_the_raw_word_and_program_counter() {
     let mut json: serde_json::Value = serde_json::from_str(ROTATION).expect("valid JSON");
-    json["words"] = serde_json::json!([u32::MAX]);
+    // The first CBE instruction without a decode arm stands in.
+    let (word, mnemonic) = cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP
+        .iter()
+        .find(|row| row.on_cbe && cellgov_spu::decode::decode(row.canonical_word()).is_err())
+        .map(|row| (row.canonical_word(), row.mnemonic))
+        .expect("a CBE instruction without a decode arm");
+    json["words"] = serde_json::json!([word]);
     let artifact =
         parse_reference_json(&json.to_string()).expect("decoder robustness word must parse");
     let error = replay_reference(&artifact).expect_err("unsupported word must refuse");
@@ -235,9 +241,9 @@ fn decode_refusals_keep_the_raw_word_and_program_counter() {
         SpuReferenceError::Decode {
             pc: 0,
             source: cellgov_spu::instruction::SpuDecodeError::Unimplemented {
-                raw: u32::MAX,
-                mnemonic: "fms"
+                raw,
+                mnemonic: refused,
             }
-        }
+        } if raw == word && refused == mnemonic
     ));
 }

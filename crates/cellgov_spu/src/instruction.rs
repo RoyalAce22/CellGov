@@ -1456,6 +1456,40 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
+    // [SPU-ISA p:208 s:9 Fused multiply-add: Fma p.208, Fnms p.210, Fms p.212]
+    /// Floating multiply and add: per slot, `ra * rb + rc` with one truncation.
+    Fma {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+        /// Source register C, the addend.
+        rc: u8,
+    },
+    /// Floating multiply and subtract: per slot, `ra * rb - rc` with one truncation.
+    Fms {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+        /// Source register C, subtracted from the product.
+        rc: u8,
+    },
+    /// Floating negative multiply and subtract: per slot, `rc - ra * rb` with one truncation.
+    Fnms {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+        /// Source register C, the minuend.
+        rc: u8,
+    },
     // [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
     /// Write RA's defined bits into the FPSCR; RT is a false target.
     Fscrwr {

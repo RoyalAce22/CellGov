@@ -16,16 +16,16 @@ const FM: u32 = 0x2C6;
 
 /// The oracle's flags for one slot: OVF, UNF, DIFF.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct SpFlags {
-    overflow: bool,
-    underflow: bool,
-    diff: bool,
+pub(super) struct SpFlags {
+    pub(super) overflow: bool,
+    pub(super) underflow: bool,
+    pub(super) diff: bool,
 }
 
 /// A decoded operand: sign, 24-bit significand (0 for zero), exponent of
 /// its lowest bit, and whether reading it raised DIFF.
 // [SPU-ISA p:196 s:9.1] a zero exponent reads as zero and raises DIFF with a nonzero fraction; exponent 255 is a number and raises DIFF.
-fn decode_operand(bits: u32) -> (bool, i128, i32, bool) {
+pub(super) fn decode_operand(bits: u32) -> (bool, i128, i32, bool) {
     let negative = bits >> 31 == 1;
     let exponent = (bits >> 23 & 0xFF) as i32;
     let fraction = i128::from(bits & 0x7F_FFFF);
@@ -44,7 +44,12 @@ fn decode_operand(bits: u32) -> (bool, i128, i32, bool) {
 /// Truncates `(-1)^negative * magnitude * 2^exponent`, where `sticky`
 /// marks nonzero bits below `magnitude`, to extended-range single precision.
 // [SPU-ISA p:196 s:9.1] truncation only; below Smin the result is +0 with UNF and DIFF; above Smax it is Smax with OVF; exponent 255 raises DIFF.
-fn truncate(negative: bool, magnitude: u128, exponent: i32, sticky: bool) -> (u32, SpFlags) {
+pub(super) fn truncate(
+    negative: bool,
+    magnitude: u128,
+    exponent: i32,
+    sticky: bool,
+) -> (u32, SpFlags) {
     if magnitude == 0 {
         return (0, SpFlags::default());
     }
@@ -155,7 +160,7 @@ fn run(op: u32, a: [u32; 4], b: [u32; 4]) -> ([u32; 4], u128) {
 }
 
 /// The FPSCR bits the oracle's per-slot flags set.
-fn fpscr_of(flags: [SpFlags; 4]) -> u128 {
+pub(super) fn fpscr_of(flags: [SpFlags; 4]) -> u128 {
     [29, 61, 93, 125]
         .into_iter()
         .zip(flags)
@@ -188,7 +193,7 @@ fn check(op: u32, a: [u32; 4], b: [u32; 4]) {
 
 /// The operand classes: zeros, denormals, Smin and its neighbour, ordinary
 /// values, exponent 254, exponent 255 and Smax, with both signs.
-const CLASSES: [u32; 12] = [
+pub(super) const CLASSES: [u32; 12] = [
     0x0000_0000,
     0x0000_0001,
     0x007F_FFFF,

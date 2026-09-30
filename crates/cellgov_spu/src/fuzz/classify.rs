@@ -152,7 +152,7 @@ pub(super) fn effect_and_outcome(
 pub(super) fn form_for_kind(kind: SpuInstructionKind) -> SpuEncodingForm {
     use SpuInstructionKind as K;
     match kind {
-        K::Selb | K::Shufb | K::Mpya => SpuEncodingForm::Rrrr,
+        K::Selb | K::Shufb | K::Mpya | K::Fma | K::Fms | K::Fnms => SpuEncodingForm::Rrrr,
         // [SPU-ISA p:29 s:2.3 Instruction Formats] RI10 carries I10 between its opcode and RA fields.
         K::Lqd
         | K::Stqd
@@ -405,6 +405,9 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Fscrrd
         | SpuInstructionKind::Fa
         | SpuInstructionKind::Fs
-        | SpuInstructionKind::Fm => {}
+        | SpuInstructionKind::Fm
+        | SpuInstructionKind::Fma
+        | SpuInstructionKind::Fms
+        | SpuInstructionKind::Fnms => {}
     }
 }

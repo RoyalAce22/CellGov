@@ -1222,16 +1222,14 @@ fn replay_restores_the_loaded_state_after_a_fault() {
 #[test]
 fn replay_names_the_program_counter_of_a_later_undecodable_word() {
     let mut altered = artifact();
-    altered.words = vec![IL_R3_1, u32::MAX];
+    // RR opcode 0x004 names no instruction.
+    altered.words = vec![IL_R3_1, 0x0080_0000];
     let error = replay_reference(&altered).expect_err("second word cannot decode");
     assert!(matches!(
         error,
         SpuReferenceError::Decode {
             pc: 4,
-            source: SpuDecodeError::Unimplemented {
-                raw: u32::MAX,
-                mnemonic: "fms"
-            }
+            source: SpuDecodeError::Unassigned(0x0080_0000)
         }
     ));
 }

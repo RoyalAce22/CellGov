@@ -38,3 +38,19 @@ fn a_word_no_row_owns_is_unassigned() {
         assert_eq!(decode(word), Err(SpuDecodeError::Unassigned(word)));
     }
 }
+
+#[test]
+fn a_refused_word_keeps_its_operand_bits() {
+    let (row, word) = SPU_OPCODE_MAP
+        .iter()
+        .map(|row| (row, row.canonical_word() | (u32::MAX >> row.width)))
+        .find(|(row, word)| row.on_cbe && decode(*word).is_err())
+        .expect("a CBE instruction without a decode arm");
+    assert_eq!(
+        decode(word),
+        Err(SpuDecodeError::Unimplemented {
+            raw: word,
+            mnemonic: row.mnemonic
+        })
+    );
+}

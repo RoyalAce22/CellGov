@@ -2,18 +2,6 @@
 
 use super::*;
 
-// [SPU-ISA p:212 s:9] fms is RRR opcode 1111, so 0xFFFFFFFF is an fms CellGov does not implement.
-#[test]
-fn an_unimplemented_instruction_is_refused_by_its_mnemonic() {
-    assert_eq!(
-        decode(0xFFFF_FFFF),
-        Err(SpuDecodeError::Unimplemented {
-            raw: 0xFFFF_FFFF,
-            mnemonic: "fms",
-        })
-    );
-}
-
 #[test]
 fn stop_zero_decodes() {
     let insn = decode(0x0000_0000).unwrap();

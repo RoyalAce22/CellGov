@@ -72,10 +72,11 @@ fn a_removed_or_duplicated_recipe_is_a_named_coverage_defect() {
 fn rejected_and_ambiguous_words_have_distinct_diagnostic_classes() {
     let mut spu = spu_descriptors();
     let displaced = spu[0].kind;
-    spu[0].canonical_word = u32::MAX;
+    // RR opcode 0x004 names no SPU instruction.
+    spu[0].canonical_word = 0x0080_0000;
     let rejected = sweep_spu(&spu);
     assert!(rejected.findings.iter().any(|finding| matches!(finding,
-        SemanticSweepFinding::UnexpectedRejection { kind: cellgov_fuzz::InstructionIdentity::Spu(kind), raw: u32::MAX, .. }
+        SemanticSweepFinding::UnexpectedRejection { kind: cellgov_fuzz::InstructionIdentity::Spu(kind), raw: 0x0080_0000, .. }
         if *kind == displaced)));
     assert!(!rejected.is_clean());
 

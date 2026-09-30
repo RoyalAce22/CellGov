@@ -1077,16 +1077,34 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         SpuInstruction::Mtspr { sa: _, rt: _ } => SpuStepOutcome::Continue,
         // [SPU-ISA p:202 s:9. Floating-Point Instructions] Floating Add: RA + RB per slot, extended-range single precision.
         SpuInstruction::Fa { rt, ra, rb } => {
-            super::float::single(state, rt, ra, rb, super::float::sum)
+            super::float::single(state, rt, [ra, rb], |[a, b]| super::float::sum(a, b))
         }
         // [SPU-ISA p:204 s:9. Floating-Point Instructions] Floating Subtract: RA - RB per slot.
-        SpuInstruction::Fs { rt, ra, rb } => {
-            super::float::single(state, rt, ra, rb, |a, b| super::float::sum(a, b.negated()))
-        }
+        SpuInstruction::Fs { rt, ra, rb } => super::float::single(state, rt, [ra, rb], |[a, b]| {
+            super::float::sum(a, b.negated())
+        }),
         // [SPU-ISA p:206 s:9. Floating-Point Instructions] Floating Multiply: RA x RB per slot.
         // [SPU-ISA p:196 s:9.1] OVF and UNF test the result before rounding, so the 24 x 24-bit product stays exact until truncation.
         SpuInstruction::Fm { rt, ra, rb } => {
-            super::float::single(state, rt, ra, rb, super::float::product)
+            super::float::single(state, rt, [ra, rb], |[a, b]| super::float::product(a, b))
+        }
+        // [SPU-ISA p:208 s:9. Floating-Point Instructions] Floating Multiply and Add: RA x RB + RC per slot; the multiplication is exact and not subject to limits on its range.
+        SpuInstruction::Fma { rt, ra, rb, rc } => {
+            super::float::single(state, rt, [ra, rb, rc], |[a, b, c]| {
+                super::float::sum(super::float::product(a, b), c)
+            })
+        }
+        // [SPU-ISA p:212 s:9. Floating-Point Instructions] Floating Multiply and Subtract: RA x RB - RC per slot.
+        SpuInstruction::Fms { rt, ra, rb, rc } => {
+            super::float::single(state, rt, [ra, rb, rc], |[a, b, c]| {
+                super::float::sum(super::float::product(a, b), c.negated())
+            })
+        }
+        // [SPU-ISA p:210 s:9. Floating-Point Instructions] Floating Negative Multiply and Subtract: RC - RA x RB per slot, one exact expression truncated once, not a negated fma.
+        SpuInstruction::Fnms { rt, ra, rb, rc } => {
+            super::float::single(state, rt, [ra, rb, rc], |[a, b, c]| {
+                super::float::sum(c, super::float::product(a, b).negated())
+            })
         }
         // [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
         SpuInstruction::Fscrwr { ra } => {
@@ -1240,3 +1258,7 @@ mod absolute_branch_tests;
 #[cfg(test)]
 #[path = "tests/single_float_tests.rs"]
 mod single_float_tests;
+
+#[cfg(test)]
+#[path = "tests/fused_float_tests.rs"]
+mod fused_float_tests;

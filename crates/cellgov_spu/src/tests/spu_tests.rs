@@ -72,7 +72,18 @@ fn budget_exhaustion_yields() {
 #[test]
 fn decode_failure_faults() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(4));
-    let bad = 0xFFFF_FFFFu32.to_be_bytes();
+    // The first CBE instruction without a decode arm stands in.
+    let bad = cellgov_ps3_abi::hw::spu_isa::SPU_OPCODE_MAP
+        .iter()
+        .map(|row| row.canonical_word())
+        .find(|&word| {
+            matches!(
+                crate::decode::decode(word),
+                Err(crate::instruction::SpuDecodeError::Unimplemented { .. })
+            )
+        })
+        .expect("a CBE instruction without a decode arm")
+        .to_be_bytes();
     unit.state_mut().ls[0..4].copy_from_slice(&bad);
 
     let mem = GuestMemory::new(16);
