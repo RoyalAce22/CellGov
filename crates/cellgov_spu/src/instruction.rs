@@ -1618,6 +1618,43 @@ pub enum SpuInstruction {
         /// Source register B.
         rb: u8,
     },
+    // [SPU-ISA p:209 s:9 Double-precision fused forms: Dfma p.209, Dfnms p.211, Dfms p.213, Dfnma p.214]
+    /// Double floating multiply and add: per doubleword slot, `ra * rb + rt`, rounded once.
+    Dfma {
+        /// Destination register, and the addend.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Double floating multiply and subtract: per doubleword slot, `ra * rb - rt`, rounded once.
+    Dfms {
+        /// Destination register, and the subtrahend.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Double floating negative multiply and subtract: the negated rounded `dfms` result.
+    Dfnms {
+        /// Destination register, and the subtrahend.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Double floating negative multiply and add: the negated rounded `dfma` result.
+    Dfnma {
+        /// Destination register, and the addend.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
     // [SPU-ISA p:235 s:9 Fscrwr p.235, Fscrrd p.236]
     /// Write RA's defined bits into the FPSCR; RT is a false target.
     Fscrwr {

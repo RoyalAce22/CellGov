@@ -1155,6 +1155,50 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         SpuInstruction::Dfm { rt, ra, rb } => {
             super::double::double(state, rt, ra, rb, super::double::DoubleOp::Multiply)
         }
+        // [SPU-ISA p:209 s:9. Floating-Point Instructions] Double Floating Multiply and Add: RA x RB + RT per doubleword slot, rounded once.
+        SpuInstruction::Dfma { rt, ra, rb } => super::double::fused(
+            state,
+            rt,
+            ra,
+            rb,
+            super::double::Fused {
+                subtract: false,
+                negate: false,
+            },
+        ),
+        // [SPU-ISA p:213 s:9. Floating-Point Instructions] Double Floating Multiply and Subtract: RA x RB - RT per doubleword slot, rounded once.
+        SpuInstruction::Dfms { rt, ra, rb } => super::double::fused(
+            state,
+            rt,
+            ra,
+            rb,
+            super::double::Fused {
+                subtract: true,
+                negate: false,
+            },
+        ),
+        // [SPU-ISA p:211 s:9. Floating-Point Instructions] Double Floating Negative Multiply and Subtract: the negated rounded dfms result.
+        SpuInstruction::Dfnms { rt, ra, rb } => super::double::fused(
+            state,
+            rt,
+            ra,
+            rb,
+            super::double::Fused {
+                subtract: true,
+                negate: true,
+            },
+        ),
+        // [SPU-ISA p:214 s:9. Floating-Point Instructions] Double Floating Negative Multiply and Add: the negated rounded dfma result.
+        SpuInstruction::Dfnma { rt, ra, rb } => super::double::fused(
+            state,
+            rt,
+            ra,
+            rb,
+            super::double::Fused {
+                subtract: false,
+                negate: true,
+            },
+        ),
         // [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
         SpuInstruction::Fscrwr { ra } => {
             state.fpscr = u128::from_be_bytes(state.regs[ra as usize])
@@ -1327,3 +1371,7 @@ mod float_compare_tests;
 #[cfg(test)]
 #[path = "tests/double_float_tests.rs"]
 mod double_float_tests;
+
+#[cfg(test)]
+#[path = "tests/fused_double_tests.rs"]
+mod fused_double_tests;

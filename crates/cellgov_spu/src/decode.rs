@@ -238,6 +238,30 @@ const DECODERS: &[(&str, Builder)] = &[
         ra: f.ra,
         rb: f.rb,
     }),
+    // [SPU-ISA p:209 s:9 Dfma] RR opcode 0x35C; RT is the addend.
+    ("dfma", |f| SpuInstruction::Dfma {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
+    // [SPU-ISA p:213 s:9 Dfms] RR opcode 0x35D; RT is the subtrahend.
+    ("dfms", |f| SpuInstruction::Dfms {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
+    // [SPU-ISA p:211 s:9 Dfnms] RR opcode 0x35E.
+    ("dfnms", |f| SpuInstruction::Dfnms {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
+    // [SPU-ISA p:214 s:9 Dfnma] RR opcode 0x35F.
+    ("dfnma", |f| SpuInstruction::Dfnma {
+        rt: f.rt,
+        ra: f.ra,
+        rb: f.rb,
+    }),
     // [SPU-ISA p:235 s:9 Fscrwr] RR opcode 0x3BA; RT is a false target.
     ("fscrwr", |f| SpuInstruction::Fscrwr { ra: f.ra }),
     // [SPU-ISA p:236 s:9 Fscrrd] RR opcode 0x398; RA and RB are unused.

@@ -441,6 +441,10 @@ pub(super) fn classify_kind(kind: SpuInstructionKind) {
         | SpuInstructionKind::Fcmgt
         | SpuInstructionKind::Dfa
         | SpuInstructionKind::Dfs
-        | SpuInstructionKind::Dfm => {}
+        | SpuInstructionKind::Dfm
+        | SpuInstructionKind::Dfma
+        | SpuInstructionKind::Dfms
+        | SpuInstructionKind::Dfnms
+        | SpuInstructionKind::Dfnma => {}
     }
 }
