@@ -34,6 +34,28 @@ fn each_error_maps_to_the_class_its_message_names() {
             ExitCode::Refused,
         ),
         (
+            RunnerPs3Error::from(LeaseError::Held {
+                path: PathBuf::from("cellgov_runner_ps3_10.77.0.2.lease"),
+                host: "10.77.0.2".to_string(),
+                holder: "pid=1 holder=x".to_string(),
+            }),
+            ExitCode::Refused,
+        ),
+        (
+            RunnerPs3Error::from(LeaseError::Io {
+                path: PathBuf::from("cellgov_runner_ps3_10.77.0.2.lease"),
+                source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            }),
+            ExitCode::Usage,
+        ),
+        (
+            RunnerPs3Error::from(crate::console::ConsoleError::MissingField {
+                field: "model",
+                remedy: "pass --model",
+            }),
+            ExitCode::Refused,
+        ),
+        (
             RunnerPs3Error::from(ConsoleProfileError::Mismatch {
                 profile: "cech20-cex-493".to_string(),
                 mismatches: Vec::new(),

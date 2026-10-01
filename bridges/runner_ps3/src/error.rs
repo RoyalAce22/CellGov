@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use cellgov_compare::console_profile::ConsoleProfileError;
 
+use crate::lease::LeaseError;
+
 /// Process exit codes, one per failure class.
 ///
 /// A script that drives the runner reads the class from the code alone;
@@ -59,6 +61,13 @@ pub enum RunnerPs3Error {
         /// The command that removes it.
         clear_with: String,
     },
+    /// Another run holds the console, or the lease file failed.
+    #[error("lease: {0}")]
+    Lease(#[from] crate::lease::LeaseError),
+    /// The console's identity is not established; the message names the
+    /// field and what states it.
+    #[error("console: {0}")]
+    Console(#[from] crate::console::ConsoleError),
     /// The profiles file did not load, or the console failed the claimed
     /// profile; the message names the profile to claim instead or the
     /// file to add one to.
@@ -91,7 +100,10 @@ impl RunnerPs3Error {
     pub fn exit_code(&self) -> ExitCode {
         match self {
             Self::Usage(_) | Self::LocalIo { .. } => ExitCode::Usage,
-            Self::Refused { .. } => ExitCode::Refused,
+            Self::Refused { .. } | Self::Console(_) | Self::Lease(LeaseError::Held { .. }) => {
+                ExitCode::Refused
+            }
+            Self::Lease(LeaseError::Io { .. }) => ExitCode::Usage,
             Self::Profile(
                 ConsoleProfileError::Mismatch { .. } | ConsoleProfileError::UnknownProfile { .. },
             ) => ExitCode::Refused,

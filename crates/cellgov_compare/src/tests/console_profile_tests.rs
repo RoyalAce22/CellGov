@@ -26,7 +26,7 @@ fn console() -> ConsoleFacts {
         firmware: "4.93".to_string(),
         cfw: "EvilNAT 4.93 PEX".to_string(),
         cobra: "8.5".to_string(),
-        webman: "1.47.48t".to_string(),
+        webman: Some("1.47.48t".to_string()),
         debugger_attached: false,
     }
 }
@@ -85,7 +85,7 @@ fn a_wrong_hard_field_refuses_naming_the_profile_the_field_and_both_values() {
 #[test]
 fn soft_fields_never_refuse() {
     let mut other = console();
-    other.webman = "1.47.50".to_string();
+    other.webman = Some("1.47.50".to_string());
     other.model = "CECH-2004B".to_string();
     other.cfw = "EvilNAT 4.93.2 PEX".to_string();
     profiles(PROFILES)
@@ -134,7 +134,7 @@ fn every_hard_field_is_checked_in_file_order() {
         firmware: "4.92".to_string(),
         cfw: "EvilNATX 4.93".to_string(),
         cobra: "8.4".to_string(),
-        webman: "1.47.48t".to_string(),
+        webman: None,
         debugger_attached: true,
     };
     let fields: Vec<&str> = profiles(PROFILES).profile["cech20-cex-493"]

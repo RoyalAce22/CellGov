@@ -9,6 +9,7 @@ use super::*;
 struct MemoryWire {
     input: Cursor<Vec<u8>>,
     output: Vec<u8>,
+    write_closed: bool,
 }
 
 impl MemoryWire {
@@ -16,6 +17,7 @@ impl MemoryWire {
         Self {
             input: Cursor::new(script.as_bytes().to_vec()),
             output: Vec::new(),
+            write_closed: false,
         }
     }
 
@@ -36,6 +38,37 @@ impl Write for MemoryWire {
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl DataConnection for MemoryWire {
+    fn close_write(&mut self) -> std::io::Result<()> {
+        self.write_closed = true;
+        Ok(())
+    }
+}
+
+/// A data connection whose every write fails.
+struct BrokenData;
+
+impl Read for BrokenData {
+    fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+        Err(std::io::ErrorKind::ConnectionReset.into())
+    }
+}
+
+impl Write for BrokenData {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::ErrorKind::ConnectionReset.into())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl DataConnection for BrokenData {
+    fn close_write(&mut self) -> std::io::Result<()> {
         Ok(())
     }
 }
@@ -169,6 +202,7 @@ fn a_session_logs_in_stores_a_file_and_quits_with_every_exchange_transcribed() {
     session.quit(&mut transcript).expect("quit");
 
     assert_eq!(data.output, b"CGOV");
+    assert!(data.write_closed, "a borrowed data stream still closes");
     assert_eq!(
         control.sent(),
         "USER anonymous\r\nPASS anonymous@\r\nTYPE I\r\nPASV\r\nSTOR /dev_hdd0/tmp/x.bin\r\nQUIT\r\n"
@@ -230,6 +264,74 @@ fn a_reply_the_command_does_not_accept_names_the_command_and_the_code() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn a_data_failure_leaves_the_session_refusing_every_later_command() {
+    let mut control = MemoryWire::answering(concat!(
+        "220 ready\r\n",
+        "150 opening\r\n",
+        "426 transfer aborted\r\n",
+        "250 deleted\r\n",
+    ));
+    let mut transcript = Transcript::new();
+    {
+        let mut session = FtpSession::open(&mut control, &mut transcript).expect("greeting");
+        let stored = session.stor("/dev_hdd0/tmp/x.bin", BrokenData, b"CGOV", &mut transcript);
+        assert!(
+            matches!(
+                stored,
+                Err(TransportError::Io {
+                    operation: "FTP data write",
+                    ..
+                })
+            ),
+            "{stored:?}"
+        );
+        match session.dele("/dev_hdd0/tmp/x.bin", &mut transcript) {
+            Err(TransportError::Desynced(command)) => {
+                assert_eq!(command, "DELE /dev_hdd0/tmp/x.bin");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(
+        control.sent(),
+        "STOR /dev_hdd0/tmp/x.bin\r\n",
+        "nothing after the failure"
+    );
+}
+
+#[test]
+fn a_reply_the_command_refuses_still_ends_its_exchange() {
+    let mut control = MemoryWire::answering("220 ready\r\n550 No such file\r\n250 removed\r\n");
+    let mut transcript = Transcript::new();
+    let mut session = FtpSession::open(&mut control, &mut transcript).expect("greeting");
+    session
+        .dele("/dev_hdd0/tmp/cgov_x.bin", &mut transcript)
+        .expect_err("550");
+    session
+        .rmd("/dev_hdd0/game/CGOV00001", &mut transcript)
+        .expect("the session is still in step");
+}
+
+#[test]
+fn a_preliminary_reply_the_command_refuses_leaves_its_closing_reply_owed() {
+    let mut control = MemoryWire::answering("220 ready\r\n150 opening\r\n226 done\r\n");
+    let mut transcript = Transcript::new();
+    {
+        let mut session = FtpSession::open(&mut control, &mut transcript).expect("greeting");
+        session
+            .dele("/dev_hdd0/tmp/cgov_x.bin", &mut transcript)
+            .expect_err("150 is not 250");
+        match session.rmd("/dev_hdd0/game/CGOV00001", &mut transcript) {
+            Err(TransportError::Desynced(command)) => {
+                assert_eq!(command, "RMD /dev_hdd0/game/CGOV00001");
+            }
+            other => panic!("the 226 must not answer the RMD: {other:?}"),
+        }
+    }
+    assert_eq!(control.sent(), "DELE /dev_hdd0/tmp/cgov_x.bin\r\n");
 }
 
 #[test]

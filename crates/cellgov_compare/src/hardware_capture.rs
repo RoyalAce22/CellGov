@@ -89,8 +89,9 @@ pub struct ConsoleFacts {
     pub cfw: String,
     /// Cobra payload version.
     pub cobra: String,
-    /// webMAN version.
-    pub webman: String,
+    /// webMAN version, or `None` when the status page states none.
+    #[serde(default)]
+    pub webman: Option<String>,
     /// Whether a debugger held the console during the run.
     pub debugger_attached: bool,
 }

@@ -23,7 +23,7 @@ fn provenance() -> CaptureProvenance {
             firmware: "4.93".to_string(),
             cfw: "EvilNAT 4.93 PEX".to_string(),
             cobra: "8.5".to_string(),
-            webman: "1.47.48".to_string(),
+            webman: Some("1.47.48".to_string()),
             debugger_attached: false,
         },
         transport: TransportFacts {

@@ -15,6 +15,30 @@ pub trait Wire: Read + Write {}
 
 impl<T: Read + Write> Wire for T {}
 
+/// An FTP data connection: a [`Wire`] whose sending half can close while
+/// the stream stays borrowed, so the server sees the end of a stored
+/// file even when the caller keeps the stream.
+pub trait DataConnection: Wire {
+    /// Close the sending half.
+    ///
+    /// # Errors
+    ///
+    /// The stream's own refusal.
+    fn close_write(&mut self) -> std::io::Result<()>;
+}
+
+impl DataConnection for std::net::TcpStream {
+    fn close_write(&mut self) -> std::io::Result<()> {
+        self.shutdown(std::net::Shutdown::Write)
+    }
+}
+
+impl<T: DataConnection + ?Sized> DataConnection for &mut T {
+    fn close_write(&mut self) -> std::io::Result<()> {
+        (**self).close_write()
+    }
+}
+
 /// Where the console listens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
@@ -103,6 +127,18 @@ pub enum TransportError {
     /// A PASV reply with no address six-tuple.
     #[error("FTP PASV reply {0:?} holds no address six-tuple")]
     BadPasv(String),
+    /// An earlier exchange on the FTP session failed with its reply still
+    /// unread, so the next reply would answer the wrong command.
+    #[error("FTP session refuses {0}: an earlier exchange failed with its reply unread")]
+    Desynced(String),
+    /// An HTTP status the request does not accept.
+    #[error("HTTP GET {path} answered {status}")]
+    UnexpectedStatus {
+        /// The request path.
+        path: String,
+        /// The status code.
+        status: u16,
+    },
 }
 
 /// The refusal for a value that could split a request line.
