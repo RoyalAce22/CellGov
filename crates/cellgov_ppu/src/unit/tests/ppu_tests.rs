@@ -754,7 +754,7 @@ fn spu_fixed_value_image_open_writes_handle_to_guest_memory() {
     );
 }
 
-/// Compare an LV2-driven microtest against its scenario observations and
+/// Compare an LV2-driven microtest against its reference and
 /// assert expected marker patterns appear within their named
 /// regions. `region_defs` are (name, offset_from_symbol, size);
 /// `markers` are (region_name, expected_bytes).
@@ -772,10 +772,6 @@ fn run_lv2_driven_baseline_check(
         "../../tests/micro/{}/build/spu_main.elf",
         microtest
     ));
-    let baseline_dir =
-        std::path::PathBuf::from(format!("../../tests/scenario_observations/{}", microtest));
-    let interp_path = baseline_dir.join("rpcs3_interpreter.json");
-    let llvm_path = baseline_dir.join("rpcs3_llvm.json");
     let ppu_elf = microtest_bytes(&ppu_path);
     let spu_elf = microtest_bytes(&spu_path);
 
@@ -801,22 +797,7 @@ fn run_lv2_driven_baseline_check(
         microtest
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&interp_path).unwrap(),
-        cellgov_compare::baseline::load(&llvm_path).unwrap(),
-    ];
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "{} LV2-driven diverges from RPCS3: {:?}",
-        microtest,
-        result.cellgov_result
-    );
+    crate::unit::reference_support::assert_matches_reference(microtest, &cellgov_obs);
 
     for (region_name, expected_bytes) in markers {
         let region = regions
@@ -847,7 +828,7 @@ fn run_lv2_driven_baseline_check(
     not(feature = "ppu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
-fn spu_fixed_value_lv2_baseline() {
+fn spu_fixed_value_lv2_matches_its_reference() {
     run_lv2_driven_baseline_check(
         "spu_fixed_value",
         "result",
@@ -861,7 +842,7 @@ fn spu_fixed_value_lv2_baseline() {
     not(feature = "ppu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
-fn dma_completion_lv2_baseline() {
+fn dma_completion_lv2_matches_its_reference() {
     run_lv2_driven_baseline_check(
         "dma_completion",
         "result_buf",
@@ -875,7 +856,7 @@ fn dma_completion_lv2_baseline() {
     not(feature = "ppu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
-fn ls_to_shared_lv2_baseline() {
+fn ls_to_shared_lv2_matches_its_reference() {
     run_lv2_driven_baseline_check(
         "ls_to_shared",
         "result_buf",
@@ -889,7 +870,7 @@ fn ls_to_shared_lv2_baseline() {
     not(feature = "ppu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
-fn atomic_reservation_lv2_baseline() {
+fn atomic_reservation_lv2_matches_its_reference() {
     run_lv2_driven_baseline_check(
         "atomic_reservation",
         "buf",
@@ -903,7 +884,7 @@ fn atomic_reservation_lv2_baseline() {
     not(feature = "ppu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
-fn mailbox_roundtrip_lv2_baseline() {
+fn mailbox_roundtrip_lv2_matches_its_reference() {
     run_lv2_driven_baseline_check(
         "mailbox_roundtrip",
         "result",
@@ -917,7 +898,7 @@ fn mailbox_roundtrip_lv2_baseline() {
     not(feature = "ppu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
-fn barrier_wakeup_lv2_baseline() {
+fn barrier_wakeup_lv2_matches_its_reference() {
     run_lv2_driven_baseline_check(
         "barrier_wakeup",
         "buf",

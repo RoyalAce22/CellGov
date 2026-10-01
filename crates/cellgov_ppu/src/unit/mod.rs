@@ -14,6 +14,10 @@ pub use ppu_unit::{PpuExecutionUnit, PpuSnapshot};
 mod tests;
 
 #[cfg(test)]
+#[path = "tests/reference_support.rs"]
+mod reference_support;
+
+#[cfg(test)]
 #[path = "tests/break_pc_tests.rs"]
 mod break_pc_tests;
 

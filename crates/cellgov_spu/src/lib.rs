@@ -42,3 +42,7 @@ pub use unit::{SpuExecutionUnit, SpuSnapshot};
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/reference_support.rs"]
+mod reference_support;

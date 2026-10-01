@@ -434,12 +434,8 @@ fn run_spu_fixed_value_binary() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn mailbox_roundtrip_matches_rpcs3_baseline() {
+fn mailbox_roundtrip_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/mailbox_roundtrip/build/spu_main.elf");
-
-    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/mailbox_roundtrip");
-    let interp_path = baseline_dir.join("rpcs3_interpreter.json");
-    let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
     let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
@@ -491,22 +487,7 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&interp_path).unwrap(),
-        cellgov_compare::baseline::load(&llvm_path).unwrap(),
-    ];
-
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "mailbox_roundtrip diverges from RPCS3: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("mailbox_roundtrip", &cellgov_obs);
 }
 
 #[test]
@@ -600,12 +581,8 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn atomic_reservation_matches_rpcs3_baseline() {
+fn atomic_reservation_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/atomic_reservation/build/spu_main.elf");
-
-    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/atomic_reservation");
-    let interp_path = baseline_dir.join("rpcs3_interpreter.json");
-    let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
     let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
@@ -651,22 +628,7 @@ fn atomic_reservation_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&interp_path).unwrap(),
-        cellgov_compare::baseline::load(&llvm_path).unwrap(),
-    ];
-
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "atomic_reservation diverges from RPCS3: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("atomic_reservation", &cellgov_obs);
 }
 
 #[test]
@@ -674,12 +636,8 @@ fn atomic_reservation_matches_rpcs3_baseline() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn barrier_wakeup_matches_rpcs3_baseline() {
+fn barrier_wakeup_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/barrier_wakeup/build/spu_main.elf");
-
-    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/barrier_wakeup");
-    let interp_path = baseline_dir.join("rpcs3_interpreter.json");
-    let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
     let elf_data = microtest_elf(elf_path);
     // 256-byte aligned; low byte of argp encodes thread index.
@@ -736,22 +694,7 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&interp_path).unwrap(),
-        cellgov_compare::baseline::load(&llvm_path).unwrap(),
-    ];
-
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "barrier_wakeup diverges from RPCS3: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("barrier_wakeup", &cellgov_obs);
 }
 
 #[test]
@@ -759,12 +702,8 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn ls_to_shared_matches_rpcs3_baseline() {
+fn ls_to_shared_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/ls_to_shared/build/spu_main.elf");
-
-    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/ls_to_shared");
-    let interp_path = baseline_dir.join("rpcs3_interpreter.json");
-    let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
     let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
@@ -810,22 +749,7 @@ fn ls_to_shared_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&interp_path).unwrap(),
-        cellgov_compare::baseline::load(&llvm_path).unwrap(),
-    ];
-
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "ls_to_shared diverges from RPCS3: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("ls_to_shared", &cellgov_obs);
 }
 
 /// The bytes a put from local store writes when it completes. A direct
@@ -913,12 +837,8 @@ fn dma_completion_payloads_are_correct() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn dma_completion_matches_rpcs3_baseline() {
+fn dma_completion_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/dma_completion/build/spu_main.elf");
-
-    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/dma_completion");
-    let interp_path = baseline_dir.join("rpcs3_interpreter.json");
-    let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
     let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
@@ -964,22 +884,7 @@ fn dma_completion_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&interp_path).unwrap(),
-        cellgov_compare::baseline::load(&llvm_path).unwrap(),
-    ];
-
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "dma_completion diverges from RPCS3: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("dma_completion", &cellgov_obs);
 }
 
 /// [CBEA p:129 s:9.3.7] a list stalls after its stall-and-notify element completes, and software may rewrite later elements before it acknowledges the stall.
@@ -988,9 +893,8 @@ fn dma_completion_matches_rpcs3_baseline() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn spu_dma_list_matches_rpcs3_baseline() {
+fn spu_dma_list_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_dma_list/build/spu_main.elf");
-    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/spu_dma_list");
     let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
 
@@ -1027,21 +931,7 @@ fn spu_dma_list_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_interpreter.json")).unwrap(),
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_llvm.json")).unwrap(),
-    ];
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "spu_dma_list diverges from its recorded baseline: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("spu_dma_list", &cellgov_obs);
 }
 
 /// [CBEA p:38 s:3.2.1] an MFC effective address can name another SPU's aliased local store.
@@ -1051,9 +941,8 @@ fn spu_dma_list_matches_rpcs3_baseline() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn spu_ls_alias_matches_rpcs3_baseline() {
+fn spu_ls_alias_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_ls_alias/build/spu_main.elf");
-    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/spu_ls_alias");
     let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
 
@@ -1100,21 +989,7 @@ fn spu_ls_alias_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_interpreter.json")).unwrap(),
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_llvm.json")).unwrap(),
-    ];
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "spu_ls_alias diverges from its recorded baseline: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("spu_ls_alias", &cellgov_obs);
 }
 
 /// [CBEA p:67 s:7.8.3] putlluc stores whether or not a reservation exists.
@@ -1125,9 +1000,8 @@ fn spu_ls_alias_matches_rpcs3_baseline() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn spu_lluc_publish_matches_rpcs3_baseline() {
+fn spu_lluc_publish_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_lluc_publish/build/spu_main.elf");
-    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/spu_lluc_publish");
     let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
     let line_ea: u32 = 0x1_8000;
@@ -1178,21 +1052,7 @@ fn spu_lluc_publish_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_interpreter.json")).unwrap(),
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_llvm.json")).unwrap(),
-    ];
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "spu_lluc_publish diverges from its recorded baseline: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("spu_lluc_publish", &cellgov_obs);
 }
 
 /// [CBE-Handbook p:535 s:19.6.2] a write to a full inbound mailbox overwrites the last value written to it.
@@ -1202,10 +1062,8 @@ fn spu_lluc_publish_matches_rpcs3_baseline() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn spu_in_mbox_overrun_matches_rpcs3_baseline() {
+fn spu_in_mbox_overrun_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_in_mbox_overrun/build/spu_main.elf");
-    let baseline_dir =
-        std::path::Path::new("../../tests/scenario_observations/spu_in_mbox_overrun");
     let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
     let flag_ea: u32 = 0x1_8000;
@@ -1260,21 +1118,7 @@ fn spu_in_mbox_overrun_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_interpreter.json")).unwrap(),
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_llvm.json")).unwrap(),
-    ];
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "spu_in_mbox_overrun diverges from its recorded baseline: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("spu_in_mbox_overrun", &cellgov_obs);
 }
 
 /// [CBEA p:57 s:7.2] alignment is not checked for the atomic commands.
@@ -1285,11 +1129,9 @@ fn spu_in_mbox_overrun_matches_rpcs3_baseline() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn spu_atomic_misaligned_lsa_matches_rpcs3_baseline() {
+fn spu_atomic_misaligned_lsa_matches_its_reference() {
     let elf_path =
         std::path::Path::new("../../tests/micro/spu_atomic_misaligned_lsa/build/spu_main.elf");
-    let baseline_dir =
-        std::path::Path::new("../../tests/scenario_observations/spu_atomic_misaligned_lsa");
     let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
     let lines_ea: u32 = 0x1_8000;
@@ -1342,21 +1184,7 @@ fn spu_atomic_misaligned_lsa_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_interpreter.json")).unwrap(),
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_llvm.json")).unwrap(),
-    ];
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "spu_atomic_misaligned_lsa diverges from its recorded baseline: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("spu_atomic_misaligned_lsa", &cellgov_obs);
 }
 
 #[test]
@@ -1364,12 +1192,8 @@ fn spu_atomic_misaligned_lsa_matches_rpcs3_baseline() {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn spu_fixed_value_matches_rpcs3_baseline() {
+fn spu_fixed_value_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
-
-    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/spu_fixed_value");
-    let interp_path = baseline_dir.join("rpcs3_interpreter.json");
-    let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
     let elf_data = microtest_elf(elf_path);
     let result_ea: u64 = 0x1_0000;
@@ -1407,22 +1231,7 @@ fn spu_fixed_value_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&interp_path).unwrap(),
-        cellgov_compare::baseline::load(&llvm_path).unwrap(),
-    ];
-
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "spu_fixed_value diverges from RPCS3: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("spu_fixed_value", &cellgov_obs);
 }
 
 /// The PPU of the spu_lr_event microtest: polls the ready flag, then
@@ -1491,9 +1300,8 @@ impl ExecutionUnit for LineStorer {
     not(feature = "spu-microtests"),
     ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
-fn spu_lr_event_matches_rpcs3_baseline() {
+fn spu_lr_event_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_lr_event/build/spu_main.elf");
-    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/spu_lr_event");
     let elf_data = microtest_elf(elf_path);
     // The PPU's block: result, lock line A, lock line B, ready flag.
     let block: u64 = 0x1_0000;
@@ -1539,19 +1347,5 @@ fn spu_lr_event_matches_rpcs3_baseline() {
         cellgov_compare::ObservedOutcome::Completed
     );
 
-    let baselines = vec![
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_interpreter.json")).unwrap(),
-        cellgov_compare::baseline::load(&baseline_dir.join("rpcs3_llvm.json")).unwrap(),
-    ];
-    let result = cellgov_compare::compare_multi(
-        &baselines,
-        &cellgov_obs,
-        cellgov_compare::CompareMode::Memory,
-    );
-    assert_eq!(
-        result.classification,
-        cellgov_compare::Classification::Match,
-        "spu_lr_event diverges from its recorded baseline: {:?}",
-        result.cellgov_result
-    );
+    crate::reference_support::assert_matches_reference("spu_lr_event", &cellgov_obs);
 }
