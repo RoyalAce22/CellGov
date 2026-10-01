@@ -182,21 +182,34 @@ impl<C: ConsoleOps + ?Sized> ConsoleOps for &mut C {
     }
 }
 
+/// What `--reclaim` would remove: an occupied game directory, and every
+/// path in it and in its `USRDIR`, as the console lists them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reclaim {
+    /// The game directory.
+    pub game_dir: String,
+    /// Every path in it, `USRDIR`'s contents included.
+    pub contents: Vec<String>,
+}
+
 /// Refuse to run over a stale result or an occupied game directory.
 ///
 /// The runner deletes a result file that answers `200` once and checks
-/// it again; a second `200` is a refusal. An existing game directory is a refusal
-/// unless `reclaim` is set, in which case [`cleanup`] empties it first.
-/// Each refusal names `clear_with`, the command that clears it.
+/// it again; a second `200` is a refusal. An existing game directory is
+/// a refusal unless `reclaim` is set and `may_reclaim`, shown the
+/// directory and what it holds, answers yes; then [`cleanup`] empties
+/// it. A declined reclaim is a refusal that leaves the console as it
+/// was. Each refusal names `clear_with`, the command that clears it.
 ///
 /// # Errors
 ///
-/// [`RunnerPs3Error::Refused`], [`RunnerPs3Error::Transport`], or a
-/// [`cleanup`] error from a reclaim.
+/// [`RunnerPs3Error::Refused`], [`RunnerPs3Error::Transport`], an error
+/// `may_reclaim` returns, or a [`cleanup`] error from a reclaim.
 pub fn preflight<C: ConsoleOps>(
     console: &mut C,
     target: &Target,
     reclaim: bool,
+    may_reclaim: &mut dyn FnMut(&Reclaim) -> Result<bool, RunnerPs3Error>,
     clear_with: &str,
     transcript: &mut Transcript,
 ) -> Result<(), RunnerPs3Error> {
@@ -205,10 +218,31 @@ pub fn preflight<C: ConsoleOps>(
         .iter()
         .any(|name| name == target.appid())
     {
+        let occupied = || format!("{} already exists on the console", target.game_dir);
         if !reclaim {
             return Err(RunnerPs3Error::Refused {
-                reason: format!("{} already exists on the console", target.game_dir),
+                reason: occupied(),
                 clear_with: format!("{clear_with}, or rerun with --reclaim"),
+            });
+        }
+        let mut contents = Vec::new();
+        for name in entries(console, &target.game_dir, transcript)? {
+            if name == "USRDIR" {
+                for inner in entries(console, &target.usrdir, transcript)? {
+                    contents.push(format!("{}/{inner}", target.usrdir));
+                }
+            }
+            contents.push(format!("{}/{name}", target.game_dir));
+        }
+        let question = Reclaim {
+            game_dir: target.game_dir.clone(),
+            contents,
+        };
+        if !may_reclaim(&question)? {
+            transcript.decision(format!("reclaim of {} declined", target.game_dir));
+            return Err(RunnerPs3Error::Refused {
+                reason: format!("{}, and the reclaim was declined", occupied()),
+                clear_with: clear_with.to_string(),
             });
         }
         transcript.decision(format!("reclaiming {}", target.game_dir));

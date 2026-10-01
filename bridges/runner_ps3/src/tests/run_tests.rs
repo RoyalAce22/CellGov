@@ -12,6 +12,11 @@ fn target() -> Target {
 
 const CLEAR: &str = "runner_ps3 cleanup --host 10.77.0.2";
 
+/// A reclaim question answered yes.
+fn yes(_: &Reclaim) -> Result<bool, RunnerPs3Error> {
+    Ok(true)
+}
+
 #[test]
 fn the_target_paths_follow_the_appid_and_the_result_file() {
     assert_eq!(
@@ -29,7 +34,15 @@ fn the_target_paths_follow_the_appid_and_the_result_file() {
 fn a_clean_console_passes_preflight_without_a_change() {
     let mut console = MemoryConsole::empty();
     let mut transcript = Transcript::new();
-    preflight(&mut console, &target(), false, CLEAR, &mut transcript).expect("clean");
+    preflight(
+        &mut console,
+        &target(),
+        false,
+        &mut yes,
+        CLEAR,
+        &mut transcript,
+    )
+    .expect("clean");
     assert!(!console
         .calls
         .iter()
@@ -41,7 +54,15 @@ fn a_stale_result_is_deleted_once_and_the_run_proceeds() {
     let mut console = MemoryConsole::empty();
     console.put(&target().result_path);
     let mut transcript = Transcript::new();
-    preflight(&mut console, &target(), false, CLEAR, &mut transcript).expect("cleared");
+    preflight(
+        &mut console,
+        &target(),
+        false,
+        &mut yes,
+        CLEAR,
+        &mut transcript,
+    )
+    .expect("cleared");
     assert!(console.files.is_empty());
     assert_eq!(
         console
@@ -59,8 +80,15 @@ fn a_result_that_survives_its_delete_is_refused_with_the_clearing_command() {
     console.put(&target().result_path);
     console.respawn = true;
     let mut transcript = Transcript::new();
-    let err =
-        preflight(&mut console, &target(), false, CLEAR, &mut transcript).expect_err("refused");
+    let err = preflight(
+        &mut console,
+        &target(),
+        false,
+        &mut yes,
+        CLEAR,
+        &mut transcript,
+    )
+    .expect_err("refused");
     match err {
         RunnerPs3Error::Refused { reason, clear_with } => {
             assert_eq!(
@@ -86,8 +114,15 @@ fn a_result_that_survives_its_delete_is_refused_with_the_clearing_command() {
 fn an_occupied_game_directory_is_refused_unless_reclaimed() {
     let mut console = MemoryConsole::with_package(&target());
     let mut transcript = Transcript::new();
-    let err =
-        preflight(&mut console, &target(), false, CLEAR, &mut transcript).expect_err("occupied");
+    let err = preflight(
+        &mut console,
+        &target(),
+        false,
+        &mut yes,
+        CLEAR,
+        &mut transcript,
+    )
+    .expect_err("occupied");
     match &err {
         RunnerPs3Error::Refused { reason, clear_with } => {
             assert_eq!(
@@ -103,9 +138,81 @@ fn an_occupied_game_directory_is_refused_unless_reclaimed() {
         "a refusal changes nothing"
     );
 
-    preflight(&mut console, &target(), true, CLEAR, &mut transcript).expect("reclaimed");
+    let mut asked = Vec::new();
+    preflight(
+        &mut console,
+        &target(),
+        true,
+        &mut |question| {
+            asked.push(question.clone());
+            Ok(true)
+        },
+        CLEAR,
+        &mut transcript,
+    )
+    .expect("reclaimed");
+    assert_eq!(
+        asked,
+        [Reclaim {
+            game_dir: "/dev_hdd0/game/CGOV00001".to_string(),
+            contents: vec![
+                "/dev_hdd0/game/CGOV00001/PARAM.SFO".to_string(),
+                "/dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN".to_string(),
+                "/dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf".to_string(),
+                "/dev_hdd0/game/CGOV00001/USRDIR".to_string(),
+            ],
+        }],
+        "the question names the directory and everything in it"
+    );
     assert!(!console.dirs.contains(&target().game_dir));
     assert!(console.files.is_empty());
+}
+
+#[test]
+fn a_declined_or_unaskable_reclaim_leaves_the_console_as_it_was() {
+    for (answer, refused) in [
+        (Ok(false), true),
+        (
+            Err(RunnerPs3Error::Usage("this run may not prompt".to_string())),
+            false,
+        ),
+    ] {
+        let mut console = MemoryConsole::with_package(&target());
+        let before = (console.files.clone(), console.dirs.clone());
+        let mut answer = Some(answer);
+        let err = preflight(
+            &mut console,
+            &target(),
+            true,
+            &mut |_| answer.take().expect("asked once"),
+            CLEAR,
+            &mut Transcript::new(),
+        )
+        .expect_err("not reclaimed");
+        match err {
+            RunnerPs3Error::Refused { reason, clear_with } if refused => {
+                assert_eq!(
+                    reason,
+                    "/dev_hdd0/game/CGOV00001 already exists on the console, and the reclaim \
+                     was declined"
+                );
+                assert_eq!(clear_with, CLEAR);
+            }
+            RunnerPs3Error::Usage(message) if !refused => {
+                assert_eq!(message, "this run may not prompt");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!((console.files, console.dirs), before, "nothing removed");
+        assert!(
+            !console
+                .calls
+                .iter()
+                .any(|c| c.starts_with("DELE") || c.starts_with("RMD") || c.contains("unmount")),
+            "{:?}",
+            console.calls
+        );
+    }
 }
 
 #[test]
@@ -362,8 +469,15 @@ fn a_result_path_that_answers_neither_200_nor_404_is_a_transport_error() {
             Err(refused(path))
         }
     }
-    let err =
-        preflight(&mut Teapot, &target(), false, CLEAR, &mut Transcript::new()).expect_err("418");
+    let err = preflight(
+        &mut Teapot,
+        &target(),
+        false,
+        &mut yes,
+        CLEAR,
+        &mut Transcript::new(),
+    )
+    .expect_err("418");
     assert!(
         matches!(
             err,

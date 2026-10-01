@@ -7,13 +7,17 @@ const ASK: Answers = Answers {
     no_input: false,
 };
 
+const INSTEAD: &str = "--dry-run to see the plan";
+
 fn on_a_terminal(input: &str) -> bool {
     ask(
         "remove it?",
         ASK,
+        INSTEAD,
         &mut Cursor::new(input.to_string()),
         || true,
     )
+    .expect("a terminal can be asked")
 }
 
 #[test]
@@ -23,12 +27,16 @@ fn yes_answers_without_reading_input() {
         no_input: false,
     };
     // An empty reader would answer no if it were consulted.
-    assert!(ask(
-        "remove it?",
-        answers,
-        &mut Cursor::new(String::new()),
-        || { panic!("--yes must not consult the terminal") }
-    ));
+    assert_eq!(
+        ask(
+            "remove it?",
+            answers,
+            INSTEAD,
+            &mut Cursor::new(String::new()),
+            || { panic!("--yes must not consult the terminal") }
+        ),
+        Ok(true)
+    );
 }
 
 #[test]
@@ -71,5 +79,46 @@ impl BufRead for Broken {
 
 #[test]
 fn an_answer_that_cannot_be_read_declines() {
-    assert!(!ask("remove it?", ASK, &mut Broken, || true));
+    assert_eq!(
+        ask("remove it?", ASK, INSTEAD, &mut Broken, || true),
+        Ok(false)
+    );
+}
+
+#[test]
+fn a_run_that_cannot_ask_is_a_usage_message_naming_both_ways_out() {
+    let no_input = Answers {
+        yes: false,
+        no_input: true,
+    };
+    for (answers, terminal, said) in [
+        (no_input, true, "this run may not prompt (--no-input)"),
+        (ASK, false, "stdin is not a terminal"),
+    ] {
+        let usage = ask(
+            "remove it?",
+            answers,
+            "run without --reclaim",
+            &mut Cursor::new(
+                "y
+"
+                .to_string(),
+            ),
+            || terminal,
+        )
+        .expect_err("cannot ask")
+        .to_string();
+        assert!(
+            usage.starts_with(
+                "remove it?
+"
+            ),
+            "{usage}"
+        );
+        assert!(usage.contains(said), "{usage}");
+        assert!(
+            usage.ends_with("pass --yes to answer it, or run without --reclaim"),
+            "{usage}"
+        );
+    }
 }

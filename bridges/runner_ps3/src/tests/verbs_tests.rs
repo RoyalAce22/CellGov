@@ -130,6 +130,7 @@ impl Bench {
             },
             &mut |_| {},
             &mut || Ok("2026-09-30T12:00:00Z".to_string()),
+            &mut |_| Ok(true),
         );
         if let Some(host) = opened {
             assert_eq!(host, HOST);

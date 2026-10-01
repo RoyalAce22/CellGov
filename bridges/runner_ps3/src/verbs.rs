@@ -21,7 +21,7 @@ use crate::console::{self, StatusReport, STATUS_PATH};
 use crate::deploy::{self, Package};
 use crate::error::RunnerPs3Error;
 use crate::lease::{self, Lease, LeaseError};
-use crate::run::{self, ConsoleOps, Target};
+use crate::run::{self, ConsoleOps, Reclaim, Target};
 use crate::transcript::Transcript;
 use crate::transport::TransportError;
 
@@ -168,7 +168,8 @@ impl From<RunnerPs3Error> for Box<Failure> {
 
 /// Run `command`'s verb. `connect` opens the console a host names, and
 /// runs at most once; `sleep` waits between polls; `now` stamps a
-/// capture.
+/// capture; `may_reclaim` answers whether `--reclaim` may empty an
+/// occupied game directory, shown the directory and what it holds.
 ///
 /// # Errors
 ///
@@ -180,6 +181,7 @@ pub fn execute<C: ConsoleOps>(
     connect: impl FnOnce(&str) -> C,
     sleep: &mut dyn FnMut(Duration),
     now: &mut dyn FnMut() -> Result<String, RunnerPs3Error>,
+    may_reclaim: &mut dyn FnMut(&Reclaim) -> Result<bool, RunnerPs3Error>,
 ) -> Result<Report, Box<Failure>> {
     match command.verb()? {
         Verb::Unlock => {
@@ -188,7 +190,7 @@ pub fn execute<C: ConsoleOps>(
             Ok(Report::Unlock { host, removed })
         }
         Verb::Convert => Ok(convert(command, context)?),
-        verb => on_console(verb, command, context, connect, sleep, now),
+        verb => on_console(verb, command, context, connect, sleep, now, may_reclaim),
     }
 }
 
@@ -337,6 +339,7 @@ fn on_console<C: ConsoleOps>(
     connect: impl FnOnce(&str) -> C,
     sleep: &mut dyn FnMut(Duration),
     now: &mut dyn FnMut() -> Result<String, RunnerPs3Error>,
+    may_reclaim: &mut dyn FnMut(&Reclaim) -> Result<bool, RunnerPs3Error>,
 ) -> Result<Report, Box<Failure>> {
     let host = command.host(context.host_env.as_deref())?;
     let claimed = claimed_profile(command, context)?;
@@ -400,6 +403,7 @@ fn on_console<C: ConsoleOps>(
             &mut webman,
             &target,
             command.reclaim,
+            may_reclaim,
             &clear_with,
             &mut transcript,
         )
@@ -453,15 +457,22 @@ fn on_console<C: ConsoleOps>(
                 recapture_reason: command.reason.clone(),
                 clear_with,
             };
-            capture::capture(&mut webman, &plan, &facts, sleep, now, &mut transcript).map(
-                |record| {
-                    Some(CaptureReport {
-                        capture_id: record.capture_id,
-                        out: plan.out.clone(),
-                        replaced: plan.recapture_reason.clone(),
-                    })
-                },
+            capture::capture(
+                &mut webman,
+                &plan,
+                &facts,
+                sleep,
+                now,
+                may_reclaim,
+                &mut transcript,
             )
+            .map(|record| {
+                Some(CaptureReport {
+                    capture_id: record.capture_id,
+                    out: plan.out.clone(),
+                    replaced: plan.recapture_reason.clone(),
+                })
+            })
         }
     };
     let (capture, failed) = match result {

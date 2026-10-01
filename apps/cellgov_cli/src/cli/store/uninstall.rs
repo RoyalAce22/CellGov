@@ -11,8 +11,11 @@ use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::{FirmwareUninstallArgs, UninstallArgs};
 use cellgov_boot::manifest::{ManifestError, TitleRegistry};
 
-use super::confirm::{confirm, Answers};
 use super::registry_dir;
+use crate::cli::confirm::{confirm, Answers};
+
+/// The way out of a prompt this run cannot ask, other than `--yes`.
+const DRY_RUN: &str = "--dry-run to see the plan";
 
 /// `cellgov title uninstall <TITLE_ID> [--ver V | --updates | --all]`
 pub(crate) fn title(
@@ -67,6 +70,7 @@ pub(crate) fn title(
             plan.recorded_files()
         ),
         answers,
+        DRY_RUN,
     ) {
         println!("cellgov: nothing was removed");
         return Ok(CommandExitCode::SUCCESS);
@@ -173,6 +177,7 @@ pub(crate) fn firmware(
             plan.version, plan.pup_sha256
         ),
         answers,
+        DRY_RUN,
     ) {
         println!("cellgov: nothing was removed");
         return Ok(CommandExitCode::SUCCESS);

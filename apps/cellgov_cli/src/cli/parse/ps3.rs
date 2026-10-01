@@ -92,7 +92,8 @@ pub(crate) struct Ps3ManifestArgs {
 pub(crate) struct Ps3DeployArgs {
     #[command(flatten)]
     pub target: Ps3ManifestArgs,
-    /// Empty an occupied game directory before the deploy.
+    /// Empty an occupied game directory before the deploy; asks first, and
+    /// --yes answers.
     #[arg(long)]
     pub reclaim: bool,
 }
@@ -133,7 +134,8 @@ pub(crate) struct Ps3CaptureArgs {
     /// (default: 500).
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
     pub poll_ms: Option<u64>,
-    /// Empty an occupied game directory before the deploy.
+    /// Empty an occupied game directory before the deploy; asks first, and
+    /// --yes answers.
     #[arg(long)]
     pub reclaim: bool,
     /// Leave the package on the console after the capture.

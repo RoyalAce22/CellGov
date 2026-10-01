@@ -370,3 +370,54 @@ fn format_json_is_the_runners_json_flag_on_every_verb_but_convert() {
     let refusal = crate::cli::parse::global_refusal(&convert).expect("convert prints JSON already");
     assert!(refusal.contains("ps3 status"), "{refusal}");
 }
+
+fn occupied() -> Reclaim {
+    Reclaim {
+        game_dir: "/dev_hdd0/game/CGOV00001".to_string(),
+        contents: vec![
+            "/dev_hdd0/game/CGOV00001/PARAM.SFO".to_string(),
+            "/dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN".to_string(),
+        ],
+    }
+}
+
+#[test]
+fn the_reclaim_question_names_the_directory_and_everything_in_it() {
+    assert_eq!(
+        reclaim_question(&occupied()),
+        [
+            "--reclaim empties /dev_hdd0/game/CGOV00001 on the console, removing:",
+            "  /dev_hdd0/game/CGOV00001/PARAM.SFO",
+            "  /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN",
+            "empty it?",
+        ]
+        .join("\n")
+    );
+}
+
+#[test]
+fn yes_reclaims_and_no_input_is_a_usage_error_naming_both_ways_out() {
+    let yes = Answers {
+        yes: true,
+        no_input: false,
+    };
+    assert!(may_reclaim(yes)(&occupied()).expect("--yes answers"));
+    let no_input = Answers {
+        yes: false,
+        no_input: true,
+    };
+    let error = may_reclaim(no_input)(&occupied()).expect_err("cannot ask");
+    assert_eq!(exit_code(&error), exit_codes::USAGE);
+    let message = error.to_string();
+    assert!(
+        message.contains("/dev_hdd0/game/CGOV00001/PARAM.SFO"),
+        "{message}"
+    );
+    assert!(message.contains("--no-input"), "{message}");
+    assert!(
+        message.ends_with(
+            "pass --yes to answer it, or rerun without --reclaim to leave the directory"
+        ),
+        "{message}"
+    );
+}

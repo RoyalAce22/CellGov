@@ -90,6 +90,7 @@ fn run_capture(
         &facts(),
         &mut |_| {},
         &mut || Ok("2026-09-30T12:00:00Z".to_string()),
+        &mut |_| Ok(true),
         &mut Transcript::new(),
     )
 }

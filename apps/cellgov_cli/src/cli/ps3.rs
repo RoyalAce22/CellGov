@@ -9,11 +9,12 @@ use cellgov_compare::console_profile::ConsoleProfileError;
 use runner_ps3::cli::{Command as RunnerCommand, Verb};
 use runner_ps3::console::ConsoleError;
 use runner_ps3::lease::LeaseError;
-use runner_ps3::run::WebmanConsole;
+use runner_ps3::run::{Reclaim, WebmanConsole};
 use runner_ps3::transport::Endpoint;
 use runner_ps3::verbs::{self, Context};
 use runner_ps3::RunnerPs3Error;
 
+use super::confirm::{self, Answers};
 use super::exit::{CommandError, CommandExitCode};
 use super::exit_codes;
 use super::parse::{OutputFormat, Ps3Command, Ps3Debugger, Ps3Identity, Ps3ManifestArgs};
@@ -33,7 +34,9 @@ pub(crate) const EXIT_FRAME: i32 = exit_codes::command_specific(53);
 pub(crate) const EXIT_CLEANUP: i32 = exit_codes::command_specific(54);
 
 /// Run `command` against the console its flags or the environment name,
-/// and print its report: as JSON under `--format json`.
+/// and print its report: as JSON under `--format json`. `--reclaim`
+/// asks before it empties an occupied game directory, and `answers`
+/// (`--yes`, `--no-input`) answers for a run that cannot ask.
 ///
 /// # Errors
 ///
@@ -41,6 +44,7 @@ pub(crate) const EXIT_CLEANUP: i32 = exit_codes::command_specific(54);
 pub(crate) fn run(
     command: &Ps3Command,
     format: OutputFormat,
+    answers: Answers,
 ) -> Result<CommandExitCode, CommandError> {
     let json = format == OutputFormat::Json;
     let context = Context {
@@ -57,6 +61,7 @@ pub(crate) fn run(
         |host| WebmanConsole::new(Endpoint::new(host)),
         &mut sleep,
         &mut runner_ps3::provenance::now_rfc3339,
+        &mut may_reclaim(answers),
     );
     match outcome {
         Ok(report) => {
@@ -78,6 +83,40 @@ pub(crate) fn run(
                 format!("{INVOCATION}: {}", failure.error),
             ))
         }
+    }
+}
+
+/// The way out of the reclaim prompt other than `--yes`.
+const WITHOUT_RECLAIM: &str = "rerun without --reclaim to leave the directory";
+
+/// The reclaim question, naming the directory and every path in it.
+pub(crate) fn reclaim_question(reclaim: &Reclaim) -> String {
+    let mut question = format!(
+        "--reclaim empties {} on the console, removing:",
+        reclaim.game_dir
+    );
+    for path in &reclaim.contents {
+        question.push_str(
+            "
+  ",
+        );
+        question.push_str(path);
+    }
+    question.push_str(
+        "
+empty it?",
+    );
+    question
+}
+
+/// The answer to a reclaim question: a prompt, `--yes`, or, for a run
+/// that cannot ask, a usage error.
+pub(crate) fn may_reclaim(
+    answers: Answers,
+) -> impl FnMut(&Reclaim) -> Result<bool, RunnerPs3Error> {
+    move |reclaim| {
+        confirm::decide(&reclaim_question(reclaim), answers, WITHOUT_RECLAIM)
+            .map_err(|cannot| RunnerPs3Error::Usage(cannot.to_string()))
     }
 }
 

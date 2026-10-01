@@ -1,7 +1,6 @@
 //! Handlers for the commands that read and write the content store:
 //! `status`, `firmware`, `title`, `keys`, and `self decrypt`.
 
-pub(crate) mod confirm;
 #[cfg(feature = "decrypt")]
 mod container;
 mod error;

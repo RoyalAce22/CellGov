@@ -39,13 +39,13 @@ mod spu_disasm;
 
 use std::path::Path;
 
+use cli::confirm::Answers;
 use cli::exit::{CommandError, CommandExitCode};
 use cli::parse::{
     self, BootCommand, Cli, Command, DevCommand, DiffCommand, FirmwareCommand, Globals,
     KeysCommand, ScenarioCommand, SelfCommand, TitleCommand,
 };
 use cli::scenarios::{report, run_scenario, SCENARIOS};
-use cli::store::confirm::Answers;
 use cli::store::read;
 
 fn main() {
@@ -171,7 +171,7 @@ fn dispatch(command: &Command, globals: &Globals) -> Result<CommandExitCode, Com
             cli::dump::run(name, SCENARIOS)?;
             Ok(CommandExitCode::SUCCESS)
         }
-        Command::Ps3(ps3) => cli::ps3::run(ps3, globals.format),
+        Command::Ps3(ps3) => cli::ps3::run(ps3, globals.format, answers),
         Command::Dev(dev) => dispatch_dev(dev, vfs_flag, globals),
     }
 }

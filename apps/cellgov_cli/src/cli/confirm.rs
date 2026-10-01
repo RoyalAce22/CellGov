@@ -3,7 +3,8 @@
 //!
 //! Prompting is for destruction only, and every prompt has a flag that
 //! answers it. A run that cannot ask -- `--no-input`, or a stdin that
-//! is not a terminal -- exits with a usage error naming that flag.
+//! is not a terminal -- is a usage error naming that flag and the
+//! caller's other way out.
 
 use std::io::{BufRead, IsTerminal, Write};
 
@@ -18,37 +19,60 @@ pub(crate) struct Answers {
     pub no_input: bool,
 }
 
-/// Whether to go ahead with the step `question` describes.
+/// A confirmation the run cannot ask: the question, why it cannot ask,
+/// and the flags that answer it.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub(crate) struct CannotAsk(String);
+
+/// Whether to go ahead with the step `question` describes, exiting
+/// with the usage status when the run cannot ask. `instead` names the
+/// way out other than `--yes`.
 ///
 /// Both the prompt and the answer go to stderr.
-pub(crate) fn confirm(question: &str, answers: Answers) -> bool {
-    ask(question, answers, &mut std::io::stdin().lock(), || {
-        std::io::stdin().is_terminal()
-    })
+pub(crate) fn confirm(question: &str, answers: Answers, instead: &str) -> bool {
+    decide(question, answers, instead).unwrap_or_else(|usage| die_usage(&usage.to_string()))
 }
 
-/// [`confirm`] against an explicit input, so a test can drive an answer
+/// [`confirm`], returning the usage message for a run that cannot ask
+/// instead of exiting with it.
+///
+/// # Errors
+///
+/// [`CannotAsk`] under `--no-input` or a stdin that is not a terminal.
+pub(crate) fn decide(question: &str, answers: Answers, instead: &str) -> Result<bool, CannotAsk> {
+    ask(
+        question,
+        answers,
+        instead,
+        &mut std::io::stdin().lock(),
+        || std::io::stdin().is_terminal(),
+    )
+}
+
+/// [`decide`] against an explicit input, so a test can drive an answer
 /// without a terminal.
 fn ask(
     question: &str,
     answers: Answers,
+    instead: &str,
     input: &mut dyn BufRead,
     stdin_is_terminal: impl Fn() -> bool,
-) -> bool {
+) -> Result<bool, CannotAsk> {
     if answers.yes {
-        return true;
+        return Ok(true);
     }
     if answers.no_input {
-        die_usage(&format!(
+        return Err(CannotAsk(format!(
             "{question}\nthis run may not prompt (--no-input); pass --yes to answer it, or \
-             --dry-run to see the plan"
-        ));
+             {instead}"
+        )));
     }
     if !stdin_is_terminal() {
-        die_usage(&format!(
+        return Err(CannotAsk(format!(
             "{question}\nstdin is not a terminal, so this run cannot prompt; pass --yes to \
-             answer it, or --dry-run to see the plan"
-        ));
+             answer it, or {instead}"
+        )));
     }
     eprint!("{question} [y/N] ");
     // stderr is unbuffered, so the prompt is already on screen and a
@@ -59,10 +83,10 @@ fn ask(
         // Declining an unreadable answer is safe, but a silent decline
         // reads as an operator who said no.
         eprintln!("cellgov: reading the answer failed ({e}); taking it as no");
-        return false;
+        return Ok(false);
     }
     let answer = line.trim().to_ascii_lowercase();
-    answer == "y" || answer == "yes"
+    Ok(answer == "y" || answer == "yes")
 }
 
 #[cfg(test)]

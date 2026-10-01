@@ -49,6 +49,9 @@ fn main() -> ProcessExit {
                 |host| WebmanConsole::new(Endpoint::new(host)),
                 &mut sleep,
                 &mut provenance::now_rfc3339,
+                // The standalone runner serves scripts: --reclaim is the
+                // operator's answer, and nothing prompts.
+                &mut |_| Ok(true),
             )
         });
     match outcome {

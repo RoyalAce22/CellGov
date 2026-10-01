@@ -1322,7 +1322,7 @@ Usage: cellgov ps3 deploy [OPTIONS] --manifest <FILE>
 | `--cfw` | `CFW` | The CFW name and build, which the status page does not state. |
 | `--debugger` | `DEBUGGER` | Whether a debugger holds the console. One of `none`, `attached`. |
 | `--manifest` | `FILE` | The microtest's manifest.toml. Required. |
-| `--reclaim` | -- | Empty an occupied game directory before the deploy. |
+| `--reclaim` | -- | Empty an occupied game directory before the deploy; asks first, and --yes answers. |
 
 ```
 Exit codes particular to this command:
@@ -1456,7 +1456,7 @@ Usage: cellgov ps3 capture [OPTIONS] --manifest <FILE> --harness-revision <SHA>
 | `--harness-revision` | `SHA` | The harness revision the capture records; the runner reads no git. Required. |
 | `--out` | `DIR` | The capture directory (default: ps3/PROFILE/ beside the manifest). |
 | `--poll-ms` | `N` | The wait between polls for the result, in milliseconds (default: 500). |
-| `--reclaim` | -- | Empty an occupied game directory before the deploy. |
+| `--reclaim` | -- | Empty an occupied game directory before the deploy; asks first, and --yes answers. |
 | `--keep-deployed` | -- | Leave the package on the console after the capture. |
 | `--recapture` | -- | Replace a committed capture; needs --reason. |
 | `--reason` | `TEXT` | Why this capture replaces the committed one; the provenance records it. |

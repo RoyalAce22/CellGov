@@ -340,13 +340,15 @@ fn common_files(test_dir: &Path) -> Result<Vec<(String, PathBuf)>, RunnerPs3Erro
 /// # Errors
 ///
 /// [`RunnerPs3Error::Refused`] for an existing `out` without a recapture
-/// reason, and any error of the steps above.
+/// reason, and any error of the steps above. `may_reclaim` answers the
+/// preflight's question under `plan.reclaim`.
 pub fn capture<C: ConsoleOps>(
     console: &mut C,
     plan: &CapturePlan,
     facts: &ConsoleFacts,
     sleep: &mut dyn FnMut(Duration),
     now: &mut dyn FnMut() -> Result<String, RunnerPs3Error>,
+    may_reclaim: &mut dyn FnMut(&run::Reclaim) -> Result<bool, RunnerPs3Error>,
     transcript: &mut Transcript,
 ) -> Result<CaptureProvenance, RunnerPs3Error> {
     if plan.out.exists() && plan.recapture_reason.is_none() {
@@ -375,7 +377,14 @@ pub fn capture<C: ConsoleOps>(
         harness_revision: plan.harness_revision.clone(),
         recapture_reason: plan.recapture_reason.clone(),
     };
-    run::preflight(console, &target, plan.reclaim, &plan.clear_with, transcript)?;
+    run::preflight(
+        console,
+        &target,
+        plan.reclaim,
+        may_reclaim,
+        &plan.clear_with,
+        transcript,
+    )?;
     let timeout_ms = plan.manifest.ps3.timeout_ms;
     let fetched = deploy::deploy(console, &target, &package, transcript)
         .and_then(|()| run::start(console, &target, transcript))
