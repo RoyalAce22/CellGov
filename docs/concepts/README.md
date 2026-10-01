@@ -155,6 +155,17 @@ memory bytes, or event sequence produces a `DIVERGE` line naming
 the first divergent field. If every field matches exactly, the
 tool prints `MATCH`.
 
+A real console is a third runner, and where it has answered, the one
+the other two are held to. A **hardware capture** is a console's answer to one microtest,
+committed under `tests/micro/<name>/ps3/<profile>/` with its
+provenance. Its `<profile>` is a **console profile**: a named hardware
+class (board family, kernel, system software, custom firmware), never
+one machine. The **reference profile** is the one the committed
+assertions are held to. Hardware evidence covers exactly the tracked
+profiles and nothing broader; the
+[README](../../README.md#hardware-evidence) states the claim and the
+current profile once.
+
 `MATCH` is strong evidence that CellGov's model is correct for the
 code path the title exercised up to that checkpoint. `DIVERGE` is
 the starting point for investigation -- not a conclusion.

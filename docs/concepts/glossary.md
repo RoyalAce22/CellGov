@@ -87,6 +87,14 @@ remaining effects in emission order, dispatch the syscall, advance
 the epoch, fire due wakes, emit trace records.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#per-step-pipeline)
 
+**Console profile.** A named hardware class the PS3 runner checks a
+console against, kept in `tests/micro/console_profiles.toml`. It
+holds only hard fields, the facts that can change what a microtest
+observes (board family, kernel, system software, custom firmware,
+Cobra version); a console that fails one is refused. It never names a
+unit, and has no field for a console identifier.
+[README.md](../../README.md#hardware-evidence)
+
 **Contaminating divergence.** A result the runtime did not compute
 (a fabricated success) that the guest consumes as truth, after which
 downstream behaviour is wrong undetectably. The null backend exists
@@ -186,6 +194,13 @@ reservation), is what `SpuStateHash` digests and `SpuStateFull` with
 **Guest ticks.** Guest time, advanced by each unit's consumed budget.
 Never wall-clock time; CellGov has no host-time dependency.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#per-step-pipeline)
+
+**Hardware capture.** A committed answer from a console under a named
+console profile: the result frame, its observation, a redacted
+transcript, and a provenance block (profile, observed console facts,
+capture date, source and binary hashes, harness revision), under
+`tests/micro/<name>/ps3/<profile>/`.
+[README.md](../../README.md#hardware-evidence)
 
 **Honest divergence.** A gap where CellGov reported not-implemented
 through the null backend rather than fabricating a result. Whether
@@ -302,6 +317,14 @@ Derived, never chosen; a `[[bench.matrix]]` row may attach an override
 or a `pending` reason to it but cannot move it. A title shipped inside
 the firmware has none.
 [title_harness.md](../architecture/title_harness.md#which-firmware-a-title-is-measured-against)
+
+**Reference profile.** The console profile the committed assertions
+are held to, named by the `reference` key of
+`tests/micro/console_profiles.toml`. Where a hardware capture exists
+under it, that capture is the reference; an emulator answer that
+differs from it is a peer and is never copied into CellGov. Captures
+under other profiles are peers too.
+[README.md](../../README.md#hardware-evidence)
 
 **Region.** One contiguous range of a guest address space with a
 label, page-size class, and access mode (`ReadWrite`,

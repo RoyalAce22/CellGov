@@ -23,6 +23,41 @@ audio, networking, input, JIT, host-speed execution, or per-title
 compatibility hack. RPCS3 plays a game; CellGov answers, byte for
 byte, what a PS3 game would produce under any legal schedule.
 
+## Hardware evidence
+
+Some of CellGov's behaviour is checked against a real console, and
+the claim that rests on that check is narrow.
+
+- **Profiles, not machines.** CellGov's hardware evidence comes from
+  the console profiles in
+  [tests/micro/console_profiles.toml](tests/micro/console_profiles.toml).
+  A profile names a hardware class: board family, kernel, system
+  software, custom firmware and Cobra version. The PS3 runner never
+  reads a unit identifier, so it cannot pin one machine and does not
+  try.
+- **One profile today.** The reference profile is a PlayStation 3
+  slim of the CECH-20xx / DYN-001 board family (NOR flash), CEX
+  kernel, system software **4.93**, **EvilNAT 4.93 PEX** with Cobra
+  8.5. The console behind it is a CECH-2001A converted from official
+  firmware 4.93 and managed through webMAN MOD. Each capture records
+  the webMAN version; it is not part of the profile.
+- **Every hardware result names its profile.** A capture lives under
+  `tests/micro/<name>/ps3/<profile>/` with its provenance. Captures
+  under different profiles are not assumed comparable.
+- **Nothing broader.** CellGov does not claim, and will not claim, to
+  have tested or to test every game on every system-software version
+  on every PS3 generation (fat, slim, super-slim), NAND consoles, DEX
+  kernels, or other custom firmwares. A new profile widens the
+  evidence by exactly its class and no further.
+- **Off-profile results carry no hardware evidence.** CellGov composes
+  any installed firmware with any title. A result on a firmware no
+  profile runs, or on a title nobody ran on a profiled console, has
+  no hardware evidence behind it.
+- **No console identifiers.** A console's identifying values (IDPS,
+  PSID, MAC address, CID, board ids, root keys, flash and EEPROM
+  dumps) are private. They appear nowhere in the repository, and a
+  profile has no field for them.
+
 ## Documentation
 
 - [docs/concepts/](docs/concepts/README.md) -- observations,
