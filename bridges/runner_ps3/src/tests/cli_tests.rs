@@ -88,12 +88,15 @@ fn every_verb_has_its_word() {
 fn the_defaults_fill_what_the_line_leaves_out() {
     let command = parsed(&["status"]);
     assert_eq!(
-        command.profiles_path(Path::new(DEFAULT_PROFILES)),
-        PathBuf::from(DEFAULT_PROFILES)
+        command.profiles_path(Path::new("root")),
+        Path::new("root")
+            .join("tests/micro")
+            .join("console_profiles.toml")
     );
     assert_eq!(
-        parsed(&["status", "--profiles", "mine.toml"]).profiles_path(Path::new(DEFAULT_PROFILES)),
-        PathBuf::from("mine.toml")
+        parsed(&["status", "--profiles", "mine.toml"]).profiles_path(Path::new("root")),
+        PathBuf::from("mine.toml"),
+        "--profiles resolves as typed"
     );
     assert_eq!(command.poll_ms(), DEFAULT_POLL_MS);
     assert_eq!(command.operator().debugger_attached, None);

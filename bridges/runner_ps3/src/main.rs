@@ -13,7 +13,7 @@
 )]
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::Path;
 use std::process::ExitCode as ProcessExit;
 
 use runner_ps3::cli;
@@ -37,7 +37,7 @@ fn main() -> ProcessExit {
                 host_env: var(env::HOST),
                 profile_env: var(env::PROFILE),
                 lease_dir: std::env::temp_dir(),
-                default_profiles: PathBuf::from(cli::DEFAULT_PROFILES),
+                workspace_root: Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."),
                 invocation: INVOCATION.to_string(),
             };
             verbs::execute(

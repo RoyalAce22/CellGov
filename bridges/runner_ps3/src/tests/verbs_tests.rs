@@ -4,6 +4,7 @@
 
 use std::ffi::OsString;
 
+use cellgov_observation::console_profile::console_profiles_path;
 use cellgov_testkit::scratch::ScratchDir;
 
 use super::*;
@@ -62,8 +63,9 @@ impl Bench {
     fn new() -> Self {
         let scratch = cellgov_testkit::scratch::scratch();
         let manifest = package_on_disk(&scratch);
-        let default_profiles = scratch.join("console_profiles.toml");
-        std::fs::write(&default_profiles, PROFILES).expect("profiles");
+        let profiles = console_profiles_path(&scratch);
+        std::fs::create_dir_all(profiles.parent().expect("micro dir")).expect("micro dir");
+        std::fs::write(&profiles, PROFILES).expect("profiles");
         let lease_dir = scratch.join("leases");
         std::fs::create_dir_all(&lease_dir).expect("lease dir");
         let mut console = MemoryConsole::empty();
@@ -74,7 +76,7 @@ impl Bench {
             host_env: Some(HOST.to_string()),
             profile_env: Some(PROFILE.to_string()),
             lease_dir,
-            default_profiles,
+            workspace_root: scratch.to_path_buf(),
             invocation: INVOCATION.to_string(),
         };
         Self {

@@ -1,6 +1,7 @@
 //! Named console profiles: the hardware class a console capture assumes.
 //!
-//! `tests/micro/console_profiles.toml` holds every profile. A profile
+//! One file holds every profile, at [`console_profiles_path`] under the
+//! workspace root. A profile
 //! names a class of console, never a unit: it carries only the hard
 //! fields, the ones that can change what a microtest observes (the
 //! board family, the kernel, the system software version, the CFW and
@@ -22,8 +23,17 @@ use serde::Deserialize;
 
 use crate::hardware_capture::ConsoleFacts;
 
-/// The profiles file, under `tests/micro/`.
+/// The microtest directory, relative to the workspace root.
+pub const MICRO_DIR: &str = "tests/micro";
+
+/// The profiles file's name, under [`MICRO_DIR`].
 pub const CONSOLE_PROFILES_FILE: &str = "console_profiles.toml";
+
+/// The profiles file under the workspace `root`: the one default every
+/// front end resolves, whatever its working directory.
+pub fn console_profiles_path(root: &Path) -> PathBuf {
+    root.join(MICRO_DIR).join(CONSOLE_PROFILES_FILE)
+}
 
 /// Every tracked profile and the one the committed assertions are held
 /// to.
@@ -131,7 +141,7 @@ fn join(mismatches: &[FieldMismatch]) -> String {
 
 fn satisfied_hint(satisfied: &[String]) -> String {
     if satisfied.is_empty() {
-        format!("no tracked profile matches it; add one to tests/micro/{CONSOLE_PROFILES_FILE}")
+        format!("no tracked profile matches it; add one to {MICRO_DIR}/{CONSOLE_PROFILES_FILE}")
     } else {
         let flags: Vec<String> = satisfied.iter().map(|n| format!("--profile {n}")).collect();
         format!("it satisfies {}", flags.join(" or "))

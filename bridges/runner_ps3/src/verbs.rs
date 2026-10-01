@@ -33,8 +33,9 @@ pub struct Context {
     pub profile_env: Option<String>,
     /// The directory every runner on this machine keeps its leases in.
     pub lease_dir: PathBuf,
-    /// The profiles file when `--profiles` is absent.
-    pub default_profiles: PathBuf,
+    /// The workspace root; the tracked profiles file under it is the
+    /// default when `--profiles` is absent.
+    pub workspace_root: PathBuf,
     /// The words that run this front end, such as `runner_ps3`. Every
     /// remedy the runner names starts with them.
     pub invocation: String,
@@ -163,7 +164,7 @@ fn claimed_profile(command: &Command, context: &Context) -> Result<String, Runne
 
 fn load_profiles(command: &Command, context: &Context) -> Result<ConsoleProfiles, RunnerPs3Error> {
     Ok(ConsoleProfiles::load(
-        &command.profiles_path(&context.default_profiles),
+        &command.profiles_path(&context.workspace_root),
     )?)
 }
 

@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use cellgov_observation::console_profile::{ConsoleProfileError, CONSOLE_PROFILES_FILE};
+use cellgov_observation::console_profile::{console_profiles_path, ConsoleProfileError};
 
 use super::*;
 
@@ -15,9 +15,7 @@ const PAGE: &str = include_str!("fixtures/cpursx.html");
 const PROFILE: &str = "cech20-cex-493";
 
 fn tracked() -> ConsoleProfiles {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/micro")
-        .join(CONSOLE_PROFILES_FILE);
+    let path = console_profiles_path(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
     ConsoleProfiles::load(&path).expect("the tracked profiles load")
 }
 

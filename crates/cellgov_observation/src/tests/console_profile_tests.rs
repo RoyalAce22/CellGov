@@ -37,9 +37,7 @@ fn profiles(text: &str) -> ConsoleProfiles {
 
 #[test]
 fn the_tracked_file_loads_and_the_reference_console_satisfies_it() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/micro")
-        .join(CONSOLE_PROFILES_FILE);
+    let path = console_profiles_path(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
     let tracked = ConsoleProfiles::load(&path).expect("the tracked profiles load");
     assert_eq!(
         tracked,

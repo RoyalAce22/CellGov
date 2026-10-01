@@ -7,13 +7,11 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use cellgov_observation::console_profile::console_profiles_path;
+
 use crate::console::OperatorFacts;
 use crate::env;
 use crate::error::RunnerPs3Error;
-
-/// The profiles file when `--profiles` is absent, relative to the
-/// workspace root.
-pub const DEFAULT_PROFILES: &str = "tests/micro/console_profiles.toml";
 
 /// The wait between polls for the result when `--poll-ms` is absent.
 pub const DEFAULT_POLL_MS: u64 = 500;
@@ -353,11 +351,12 @@ impl Command {
         Self::required(self.frame.as_deref(), "--frame")
     }
 
-    /// `--profiles`, or `default`, the file the front end names.
-    pub fn profiles_path(&self, default: &Path) -> PathBuf {
+    /// `--profiles` as the operator typed it, or the tracked profiles
+    /// file under `workspace_root`.
+    pub fn profiles_path(&self, workspace_root: &Path) -> PathBuf {
         self.profiles
             .clone()
-            .unwrap_or_else(|| default.to_path_buf())
+            .unwrap_or_else(|| console_profiles_path(workspace_root))
     }
 
     /// `--poll-ms`, or [`DEFAULT_POLL_MS`].
