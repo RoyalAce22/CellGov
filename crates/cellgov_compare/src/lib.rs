@@ -21,6 +21,7 @@ pub mod classify;
 pub mod compare;
 pub mod diverge;
 pub mod format;
+pub mod hardware_capture;
 pub mod identity;
 pub mod manifest;
 pub mod observation;

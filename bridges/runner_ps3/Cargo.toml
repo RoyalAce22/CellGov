@@ -1,0 +1,38 @@
+[package]
+name = "runner_ps3"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "runner_ps3"
+path = "src/main.rs"
+
+[features]
+# The one test target that opens a socket to a console. Off by default;
+# an operator with a console on the network turns it on.
+ps3-hardware = []
+
+[dependencies]
+cellgov_compare = { path = "../../crates/cellgov_compare" }
+cellgov_ps3_abi = { path = "../../crates/cellgov_ps3_abi" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+strum = { version = "0.26", default-features = false, features = ["derive"] }
+thiserror = "2"
+toml = "1"
+
+[[test]]
+name = "live_console"
+required-features = ["ps3-hardware"]

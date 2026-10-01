@@ -173,7 +173,10 @@ const LAYERS: &[(&str, &[&str])] = &[
             "terminal", "testkit", "compare", "explore", "fuzz", "install", "boot",
         ],
     ),
-    ("Binaries", &["cli", "mkelf", "rpcs3_to_observation"]),
+    (
+        "Binaries",
+        &["cli", "mkelf", "rpcs3_to_observation", "runner_ps3"],
+    ),
 ];
 
 /// How the diagram names a crate.

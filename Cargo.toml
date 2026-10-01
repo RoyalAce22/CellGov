@@ -26,6 +26,7 @@ members = [
     "apps/cellgov_mkelf",
     "apps/cellgov_install",
     "bridges/rpcs3_to_observation",
+    "bridges/runner_ps3",
 ]
 # The cargo-fuzz targets need nightly and libFuzzer, so they stay out
 # of every workspace build; the scheduled loader-fuzz workflow builds

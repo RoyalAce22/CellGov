@@ -40,6 +40,7 @@ pub(crate) const STORE_WATCH_PATH: &str = "CELLGOV_STORE_WATCH_PATH";
 pub(crate) const VALUE_SAMPLE: &str = "CELLGOV_VALUE_SAMPLE";
 pub(crate) const VALUE_SAMPLE_PATH: &str = "CELLGOV_VALUE_SAMPLE_PATH";
 pub(crate) const VALUE_SAMPLE_STRIDE: &str = "CELLGOV_VALUE_SAMPLE_STRIDE";
+pub(crate) const PS3_HOST: &str = "CELLGOV_PS3_HOST";
 
 const ENV_VARS: &[EnvVar] = &[
     EnvVar {
@@ -66,6 +67,11 @@ const ENV_VARS: &[EnvVar] = &[
         name: "CELLGOV_FORCE_ANSI",
         scope: Scope::Operator,
         purpose: "Force ANSI terminal output.",
+    },
+    EnvVar {
+        name: PS3_HOST,
+        scope: Scope::Operator,
+        purpose: "Name the console the PS3 runner talks to.",
     },
     EnvVar {
         name: "CELLGOV_FW_DEBUG",

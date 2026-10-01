@@ -51,6 +51,7 @@ const HOST: &[&str] = &[
     "apps/cellgov_mkelf",
     "apps/cellgov_install",
     "bridges/rpcs3_to_observation",
+    "bridges/runner_ps3",
 ];
 
 /// The arguments of the crate-root `cfg_attr`, whitespace removed.

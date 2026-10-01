@@ -1240,6 +1240,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "runner_ps3"
+version = "0.0.0"
+dependencies = [
+ "cellgov_compare",
+ "cellgov_ps3_abi",
+ "serde",
+ "serde_json",
+ "sha2",
+ "strum",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
