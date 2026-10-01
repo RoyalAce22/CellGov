@@ -8,8 +8,11 @@
 #
 #   <name>.elf   the PPU program relinked with -DCGOV_OUT_FILE, so the
 #                CGOV frame also lands in /dev_hdd0/tmp/cgov_<name>.bin
-#                (tests/micro/common/cgov_out.h), TOC-patched like the
-#                reference ELF, plus PSL1GHT's lv2-sprx.o so the ELF
+#                (tests/micro/common/cgov_out.h), and with
+#                -DCGOV_PS3_USRDIR, so an SPU image loads from the
+#                deployed USRDIR by import from memory
+#                (tests/micro/common/cgov_spu_load.h); TOC-patched like
+#                the reference ELF, plus PSL1GHT's lv2-sprx.o so the ELF
 #                carries the PRX parameter record the console's loader
 #                and sprxlinker both need;
 #   EBOOT.BIN    that ELF as an NPDRM SELF under one fixed content id;
@@ -17,11 +20,18 @@
 #                TITLE_ID this microtest deploys under;
 #   link.txt     which start file the ELF was linked with;
 #   siblings     each extra argument copied in, so a program the PPU
-#                opens under /app_home/ (spu_main.elf, child.self) sits
-#                beside the EBOOT.
+#                loads (spu_main.elf, child.self) sits beside the EBOOT
+#                in USRDIR.
 #
 # The reference build/<name>.elf is not touched: the emulator baselines
 # were recorded from it and stay valid.
+#
+# Measured on a retail console (CECH-2001A, 4.93 CEX, webMAN 1.47.48t):
+#   - the common-crt0 link boots when /play.ps3 starts it, so
+#     CGOV_PS3_PSL1GHT_CRT stays a fallback, not the default;
+#   - /play.ps3 does not map /app_home to the EBOOT's USRDIR: a file
+#     opened as /app_home/<name> answers CELL_ENOENT. The console
+#     variant names the deployed USRDIR by its absolute path instead.
 #
 # Environment:
 #   CGOV_PS3_APPID           TITLE_ID for PARAM.SFO (default CGOV00001)
@@ -71,6 +81,7 @@ ${PPU_PREFIX}-gcc \
     -L${PSL1GHT}/ppu/lib \
     -O2 -Wall \
     -DCGOV_OUT_FILE="\"$RESULT_FILE\"" \
+    -DCGOV_PS3_USRDIR="\"/dev_hdd0/game/$APPID/USRDIR\"" \
     -o "$PS3OUT/$NAME.elf" \
     "${START_FILES[@]}" \
     "$PPU_SOURCE" \

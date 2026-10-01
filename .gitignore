@@ -18,7 +18,7 @@ tools/
 
 # test artifacts (compiled ELFs, objects, build output)
 tests/micro/**/*.bin
-!tests/micro/*/ps3/cgov_frame.bin
+!tests/micro/*/ps3/*/cgov_frame.bin
 tests/micro/**/*.elf
 tests/micro/**/*.self
 tests/micro/**/*.o

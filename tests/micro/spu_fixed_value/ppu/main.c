@@ -22,6 +22,7 @@
 #include <sys/tty.h>
 
 #include "cgov_out.h"
+#include "cgov_spu_load.h"
 
 /* No printf/exit -- the custom CRT0 does not initialize the full
  * newlib runtime. Error paths write status to TTY and return
@@ -98,7 +99,7 @@ int main(void)
     result.value  = 0xFFFFFFFF;
 
     /* Step 1: load SPU ELF from the filesystem. */
-    ret = sysSpuImageOpen(&image, SPU_ELF_PATH);
+    ret = CGOV_SPU_IMAGE_OPEN(&image, SPU_ELF_PATH);
     if (ret != 0)
         return fail(1);
 
