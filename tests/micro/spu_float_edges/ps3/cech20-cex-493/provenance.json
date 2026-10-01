@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "capture_id": "micro:spu_float_edges#76fa160c37d7",
+  "captured_at": "2026-10-01T01:44:11Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "627d6d302153fe47df861f47019e9fbcd605d210",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/627d6d302153fe47df861f47019e9fbcd605d210"
+  },
+  "microtest": {
+    "name": "spu_float_edges",
+    "manifest_sha256": "855cd7eee33d00bc235ed1cab0534556ccbfddd54bd3dcd110a704cf2401d99a",
+    "sources": {
+      "build.sh": "150f1cfc8bcc154cec5537e27b4ffb2bf434253a106b74e3845368239b1dddef",
+      "cases.h": "6fd3c23d6ee491958c3575fedc36c2985e4819f3ae8b749fb73183c794ec4cb0",
+      "cases.tsv": "af94316e3fbe6debd865b616b322a597d45259d0c820a80a001db98fe46b89f4",
+      "peer.tsv": "3efd4b003602e4f0931f780a38d06f5027738f9625ba4e176e479d7153c41837",
+      "ppu/main.c": "1c957f8fae358e0fa16416e1ecefc296a646f996c21d1d7479f6c05d28a79b50",
+      "regions.toml": "e587b531bfb38a9280c22fa6538ded72fc30a5fc8b0c303202dbfece0fda04a7",
+      "spu/cases.S": "6ea1c119000cef1e49269b4fbdcb029c396b49bc28a5aa8253ae8fac55b9b80a",
+      "spu/main.c": "e812e1fcef6b9395a8c28600c05a8fc0e12c90cfc74d5a384b5dab531c8ac80c"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "0e64731043452e2a3c753ea1a087b1b83915f2dc574ea9eb1e072e806ddd8520",
+    "ps3_elf_sha256": "aec259847a503c1e19a654b672992d68a249c713abfe1009f940ef1e9bc163ac",
+    "reference_elf_sha256": "6befe1071a7a2a2d6af10ca46caeb02c7d4f2ee33405b63bf1bef9ebb1da06d2",
+    "siblings": {
+      "spu_main.elf": "02510ed763b1ae3dfbe75c6077dc01621b06e04abe1d5ae450393e6f31a5283a"
+    },
+    "param_sfo_sha256": "325763105744bb1de9e6c435a87da3fbf739a62feda2eacd91a878a969f3f2aa"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "76fa160c37d74ab85ddd20433ecff56160daba37310cdefacdffcd810cc2596d",
+    "bytes": 808,
+    "result_path": "/dev_hdd0/tmp/cgov_spu_float_edges.bin"
+  },
+  "digest": "76fa160c37d74ab85ddd20433ecff56160daba37310cdefacdffcd810cc2596d  micro:spu_float_edges  808",
+  "recapture_reason": null
+}

@@ -1,0 +1,21 @@
+[test]
+name = "spu_raw_status"
+
+# A hardware probe: one raw SPU runs to `stop 0x1234`, and the PPU reads
+# SPU_Status, SPU_NextPC and the class 0, 1 and 2 interrupt status back
+# through the problem-state window. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# failed step + rc, SPU_Status, SPU_NextPC, the image's entry, polls,
+# three interrupt-status return codes, a zero word, and three u64
+# interrupt status words: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+files = ["spu_main.elf"]

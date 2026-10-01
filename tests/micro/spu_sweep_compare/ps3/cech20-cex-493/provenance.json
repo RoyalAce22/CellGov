@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "capture_id": "micro:spu_sweep_compare#86b6403e68d8",
+  "captured_at": "2026-10-01T01:51:52Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "5e64c8fd9e5adf6cdad7cc497663bce6f06d28df",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/5e64c8fd9e5adf6cdad7cc497663bce6f06d28df"
+  },
+  "microtest": {
+    "name": "spu_sweep_compare",
+    "manifest_sha256": "90a9d8459d764006d4a30ebd90485fd73317ffa99f220819d9f4a2664d61ffc9",
+    "sources": {
+      "build.sh": "3b0ec933ff611bcd9067f01e6a0433f8e04ba928be4cce578d19fe509a7d5a37",
+      "ppu/main.c": "38a5c30695eba1fd8dd6fc3166f8fa0af5e294b83de5a58558a87e3b7db7f432",
+      "spu/main.c": "66e38ac9bf583e56b14a01517a296425cd8cf5b70687862f9f6fbee05ae6e9c0"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "eef2f1abe13a293920120f22ca3021e11309905beb2c6b18585d652a15152feb",
+    "ps3_elf_sha256": "9f29f8b828d5ba1c8a5cb33b57b7b38bbd6792f6b580ce74c97c77d79dbfab85",
+    "reference_elf_sha256": "699982d3b02fba43ffc57fb4660c95243ddbea11dcae07a20fb8d3d171eabd81",
+    "siblings": {
+      "spu_main.elf": "218c7c6e0291c25ed9a0a2d48384a077ba4f6623d3d830a5f2b5a6e1d631e5de"
+    },
+    "param_sfo_sha256": "e2fc79829aed68ff63ce4c23e1d2ef28dd36846aaf81484589850239f4850768"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "86b6403e68d82b73d21474aa0b5cdb56c202b4f673a1f0e110e0cadc33ea147f",
+    "bytes": 40,
+    "result_path": "/dev_hdd0/tmp/cgov_spu_sweep_compare.bin"
+  },
+  "digest": "86b6403e68d82b73d21474aa0b5cdb56c202b4f673a1f0e110e0cadc33ea147f  micro:spu_sweep_compare  40",
+  "recapture_reason": null
+}

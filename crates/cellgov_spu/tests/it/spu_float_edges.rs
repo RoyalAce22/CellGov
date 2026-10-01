@@ -309,6 +309,76 @@ fn the_built_program_stores_every_expected_result() {
     }
 }
 
+/// The console capture of the built program: a retail PS3's own answer
+/// for every case.
+const CONSOLE: &str = "../../tests/micro/spu_float_edges/ps3/cech20-cex-493/observation.json";
+
+/// Per case, `$3` and the FPSCR, from a 32-bytes-per-case payload.
+fn case_results(payload: &[u8]) -> Vec<(u128, u128)> {
+    payload
+        .chunks(32)
+        .map(|case| {
+            let quad =
+                |at: usize| u128::from_be_bytes(case[at..at + 16].try_into().expect("16 bytes"));
+            (quad(0), quad(16))
+        })
+        .collect()
+}
+
+/// The console's disagreements with `cases.tsv`, each a CellGov defect
+/// with the issue that owns it.
+const CONSOLE_DISAGREEMENTS: &str = "../../tests/micro/spu_float_edges/console.tsv";
+
+/// The console is the reference: every case the hardware ran answers
+/// what `cases.tsv` expects, `$3` and the FPSCR both, except the cases
+/// `console.tsv` lists, and each of those still disagrees.
+#[test]
+fn the_console_capture_agrees_with_every_expected_result() {
+    let cases = read_cases(&std::fs::read_to_string(CASES).expect("cases.tsv"));
+    let observation = cellgov_compare::baseline::load(std::path::Path::new(CONSOLE))
+        .unwrap_or_else(|e| panic!("{CONSOLE}: {e}"));
+    let console = case_results(&observation.memory_regions[0].data);
+    assert_eq!(console.len(), cases.len(), "the capture holds every case");
+    let mut found = std::collections::BTreeSet::new();
+    for (case, (r3, fpscr)) in cases.iter().zip(console) {
+        let (want_r3, want_fpscr) = case.expect.expect("expected results");
+        for (field, got, want) in [("r3", r3, want_r3), ("fpscr", fpscr, want_fpscr)] {
+            if got != want {
+                found.insert(format!("{}\t{field}\t{}", case.name, format_value(got)));
+            }
+        }
+    }
+    let text = std::fs::read_to_string(CONSOLE_DISAGREEMENTS).expect("console.tsv");
+    let mut listed = std::collections::BTreeSet::new();
+    for line in text
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.starts_with("case\t") && !l.is_empty())
+    {
+        let fields: Vec<&str> = line.split('\t').collect();
+        assert_eq!(fields.len(), 6, "{line}");
+        assert_eq!(fields[3], "cellgov-defect", "{line}");
+        assert!(fields[4].starts_with('#'), "{line} names no issue");
+        listed.insert(fields[..3].join("\t"));
+    }
+    let unlisted: Vec<&String> = found.difference(&listed).collect();
+    let stale: Vec<&String> = listed.difference(&found).collect();
+    assert!(
+        unlisted.is_empty() && stale.is_empty(),
+        "console disagreements with no row in console.tsv:\n{}\n\
+         rows that no longer disagree:\n{}",
+        unlisted
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        stale
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
 const PEER: &str = "../../tests/micro/spu_float_edges/peer.tsv";
 
 /// RPCS3's results for one decoder: per case, `$3` and the FPSCR.

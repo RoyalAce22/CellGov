@@ -1,0 +1,24 @@
+[test]
+name = "spu_sweep_compare"
+
+# A hardware probe of the on-SPU compare mode: the SPU checks two models
+# of `or` with a fixed operand against the instruction over all 2^32
+# inputs and returns only the mismatch counts and the first mismatch.
+# The identity model must report zero; the model broken at one input
+# must report exactly one, at that input. The console capture is the
+# answer; no emulator runs 2^32 iterations.
+
+[observe]
+# status, identity mismatches, broken mismatches, first broken input,
+# the hardware's and the model's result there, inputs swept (u64).
+memory_regions = [
+  { name = "result", addr = 0, size = 32 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The sweep takes seconds on the SPU; the budget leaves room.
+timeout_ms = 60000
+files = ["spu_main.elf"]

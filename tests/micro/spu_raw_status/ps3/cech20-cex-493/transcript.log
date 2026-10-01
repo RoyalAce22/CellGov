@@ -1,0 +1,233 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5728 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0006 < 404 (508 bytes)
+#0007 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0008 > USER anonymous
+#0009 < 331 OK
+#0010 > PASS anonymous@
+#0011 < 230 OK
+#0012 > TYPE I
+#0013 < 200 TYPE OK
+#0014 > PASV
+#0015 < 227 Entering Passive Mode (10,77,0,2,156,232)
+#0016 > NLST /dev_hdd0/game
+#0017 < 150 OK
+#0018 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 63C]
+#0019 > QUIT
+#0020 < 221 BYE
+#0021 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0022 > USER anonymous
+#0023 < 331 OK
+#0024 > PASS anonymous@
+#0025 < 230 OK
+#0026 > TYPE I
+#0027 < 200 TYPE OK
+#0028 > MKD /dev_hdd0/game/CGOV00001
+#0029 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0030 > QUIT
+#0031 < 221 BYE
+#0032 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0033 > USER anonymous
+#0034 < 331 OK
+#0035 > PASS anonymous@
+#0036 < 230 OK
+#0037 > TYPE I
+#0038 < 200 TYPE OK
+#0039 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0040 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0041 > QUIT
+#0042 < 221 BYE
+#0043 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0044 > USER anonymous
+#0045 < 331 OK
+#0046 > PASS anonymous@
+#0047 < 230 OK
+#0048 > TYPE I
+#0049 < 200 TYPE OK
+#0050 > PASV
+#0051 < 227 Entering Passive Mode (10,77,0,2,164,127)
+#0052 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0053 < 150 OK
+#0054 < 226 OK
+#0055 > QUIT
+#0056 < 221 BYE
+#0057 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0058 > USER anonymous
+#0059 < 331 OK
+#0060 > PASS anonymous@
+#0061 < 230 OK
+#0062 > TYPE I
+#0063 < 200 TYPE OK
+#0064 > PASV
+#0065 < 227 Entering Passive Mode (10,77,0,2,168,179)
+#0066 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (7040 bytes)
+#0067 < 150 OK
+#0068 < 226 OK
+#0069 > QUIT
+#0070 < 221 BYE
+#0071 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0072 > USER anonymous
+#0073 < 331 OK
+#0074 > PASS anonymous@
+#0075 < 230 OK
+#0076 > TYPE I
+#0077 < 200 TYPE OK
+#0078 > PASV
+#0079 < 227 Entering Passive Mode (10,77,0,2,170,152)
+#0080 > STOR /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf (620 bytes)
+#0081 < 150 OK
+#0082 < 226 OK
+#0083 > QUIT
+#0084 < 221 BYE
+#0085 = deployed 3 file(s) under /dev_hdd0/game/CGOV00001
+#0086 > GET /play.ps3/dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0087 < 200 (5013 bytes)
+#0088 > GET /play.ps3
+#0089 < 200 (5728 bytes)
+#0090 = started
+#0091 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0092 < 404 (508 bytes)
+#0093 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0094 < 404 (508 bytes)
+#0095 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0096 < 404 (508 bytes)
+#0097 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0098 < 404 (508 bytes)
+#0099 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0100 < 404 (508 bytes)
+#0101 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0102 < 404 (508 bytes)
+#0103 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0104 < 404 (508 bytes)
+#0105 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0106 < 404 (508 bytes)
+#0107 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0108 < 404 (508 bytes)
+#0109 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0110 < 404 (508 bytes)
+#0111 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0112 < 404 (508 bytes)
+#0113 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0114 < 404 (508 bytes)
+#0115 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0116 < 200 (72 bytes)
+#0117 = result present after 13 poll(s)
+#0118 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0119 < 200 (72 bytes)
+#0120 = captured micro:spu_raw_status#4c9ffa3b5b78
+#0121 > GET /mount.ps3/unmount
+#0122 < 200 (4767 bytes)
+#0123 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0124 > USER anonymous
+#0125 < 331 OK
+#0126 > PASS anonymous@
+#0127 < 230 OK
+#0128 > TYPE I
+#0129 < 200 TYPE OK
+#0130 > PASV
+#0131 < 227 Entering Passive Mode (10,77,0,2,202,165)
+#0132 > NLST /dev_hdd0/game
+#0133 < 150 OK
+#0134 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 61C]
+#0135 > QUIT
+#0136 < 221 BYE
+#0137 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0138 > USER anonymous
+#0139 < 331 OK
+#0140 > PASS anonymous@
+#0141 < 230 OK
+#0142 > TYPE I
+#0143 < 200 TYPE OK
+#0144 > PASV
+#0145 < 227 Entering Passive Mode (10,77,0,2,204,218)
+#0146 > NLST /dev_hdd0/game/CGOV00001
+#0147 < 150 OK
+#0148 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 61C]
+#0149 > QUIT
+#0150 < 221 BYE
+#0151 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0152 > USER anonymous
+#0153 < 331 OK
+#0154 > PASS anonymous@
+#0155 < 230 OK
+#0156 > TYPE I
+#0157 < 200 TYPE OK
+#0158 > PASV
+#0159 < 227 Entering Passive Mode (10,77,0,2,208,100)
+#0160 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0161 < 150 OK
+#0162 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 61C]
+#0163 > QUIT
+#0164 < 221 BYE
+#0165 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0166 > USER anonymous
+#0167 < 331 OK
+#0168 > PASS anonymous@
+#0169 < 230 OK
+#0170 > TYPE I
+#0171 < 200 TYPE OK
+#0172 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0173 < 250 OK
+#0174 > QUIT
+#0175 < 221 BYE
+#0176 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0177 > USER anonymous
+#0178 < 331 OK
+#0179 > PASS anonymous@
+#0180 < 230 OK
+#0181 > TYPE I
+#0182 < 200 TYPE OK
+#0183 > DELE /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf
+#0184 < 250 OK
+#0185 > QUIT
+#0186 < 221 BYE
+#0187 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0188 > USER anonymous
+#0189 < 331 OK
+#0190 > PASS anonymous@
+#0191 < 230 OK
+#0192 > TYPE I
+#0193 < 200 TYPE OK
+#0194 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0195 < 250 OK
+#0196 > QUIT
+#0197 < 221 BYE
+#0198 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0199 > USER anonymous
+#0200 < 331 OK
+#0201 > PASS anonymous@
+#0202 < 230 OK
+#0203 > TYPE I
+#0204 < 200 TYPE OK
+#0205 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0206 < 250 OK
+#0207 > QUIT
+#0208 < 221 BYE
+#0209 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0210 > USER anonymous
+#0211 < 331 OK
+#0212 > PASS anonymous@
+#0213 < 230 OK
+#0214 > TYPE I
+#0215 < 200 TYPE OK
+#0216 > RMD /dev_hdd0/game/CGOV00001
+#0217 < 250 OK
+#0218 > QUIT
+#0219 < 221 BYE
+#0220 > GET /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0221 < 200 (72 bytes)
+#0222 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0223 > USER anonymous
+#0224 < 331 OK
+#0225 > PASS anonymous@
+#0226 < 230 OK
+#0227 > TYPE I
+#0228 < 200 TYPE OK
+#0229 > DELE /dev_hdd0/tmp/cgov_spu_raw_status.bin
+#0230 < 250 OK
+#0231 > QUIT
+#0232 < 221 BYE
+#0233 = console restored

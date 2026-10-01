@@ -1,0 +1,8 @@
+# Every case where the console capture (ps3/cech20-cex-493/) disagrees
+# with cases.tsv. The console is the reference, so each row is a CellGov
+# defect named by the issue that owns it; the gate test
+# the_console_capture_agrees_with_every_expected_result fails on a
+# disagreement with no row and on a row that no longer disagrees.
+case	field	console	class	issue	note
+reciprocal_sequence	fpscr	00000000_00000000_00000005_00000201	cellgov-defect	#1500	slot 3 flags: CellGov's frest model sets one more flag than the console
+reciprocal_sqrt_sequence	r3	7fffffff_7ffffffd_3effffff_3f3504f3	cellgov-defect	#1500	slot 3 is one ulp above CellGov's: frsqest's table is CellGov's own, not the hardware's
