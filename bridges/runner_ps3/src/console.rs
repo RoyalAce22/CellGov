@@ -12,7 +12,7 @@
 //! states. The webMAN version is soft: recorded, absent when the page
 //! omits it, never a refusal.
 
-use cellgov_compare::console_profile::ConsoleProfiles;
+use cellgov_compare::console_profile::{ConsoleProfileError, ConsoleProfiles};
 use cellgov_compare::hardware_capture::ConsoleFacts;
 
 use crate::error::RunnerPs3Error;
@@ -26,20 +26,17 @@ pub const PROFILE_ENV: &str = "CELLGOV_PS3_PROFILE";
 pub const STATUS_PATH: &str = "/cpursx.ps3";
 
 /// The profile a run claims: `--profile` when given, else
-/// [`PROFILE_ENV`]. An empty value counts as absent.
+/// [`PROFILE_ENV`]. A blank value counts as absent.
 ///
 /// # Errors
 ///
 /// [`RunnerPs3Error::Usage`] naming both sources when neither is set.
 pub fn claimed_profile(flag: Option<&str>, env: Option<&str>) -> Result<String, RunnerPs3Error> {
-    flag.filter(|v| !v.is_empty())
-        .or(env.filter(|v| !v.is_empty()))
-        .map(str::to_string)
-        .ok_or_else(|| {
-            RunnerPs3Error::Usage(format!(
-                "no console profile claimed; pass --profile <name> or set {PROFILE_ENV}"
-            ))
-        })
+    stated(flag).or_else(|| stated(env)).ok_or_else(|| {
+        RunnerPs3Error::Usage(format!(
+            "no console profile claimed; pass --profile <name> or set {PROFILE_ENV}"
+        ))
+    })
 }
 
 /// What the status page states; each field is absent when the page
@@ -65,20 +62,30 @@ pub struct OperatorFacts {
     pub model: Option<String>,
     /// `--cfw`, the CFW name and any build string after it.
     pub cfw: Option<String>,
-    /// Whether a debugger holds the console; the page does not say.
-    pub debugger_attached: bool,
+    /// `--debugger`: whether a debugger holds the console. The page does
+    /// not say, and a hard field is never assumed.
+    pub debugger_attached: Option<bool>,
 }
 
 /// Why the console's identity is not established.
 #[derive(Debug, thiserror::Error)]
 pub enum ConsoleError {
-    /// No source states a hard field.
-    #[error("the console's {field} is not stated: {remedy}")]
-    MissingField {
+    /// The operator left out a hard field only the operator states.
+    #[error("the console's {field} is not stated: the status page does not state it; pass {flag}")]
+    OperatorMissing {
         /// The field.
         field: &'static str,
-        /// What states it.
-        remedy: &'static str,
+        /// The flag that states it.
+        flag: &'static str,
+    },
+    /// The status page does not state a hard field webMAN states.
+    #[error(
+        "the console's {field} is not stated: check that webMAN answers {STATUS_PATH} with its \
+         firmware line"
+    )]
+    PageMissing {
+        /// The field.
+        field: &'static str,
     },
     /// The operator states a value the page contradicts.
     #[error("--{field} {operator:?} contradicts the status page, which states {page:?}")]
@@ -91,9 +98,6 @@ pub enum ConsoleError {
         operator: String,
     },
 }
-
-/// The remedy for a hard field the page should state.
-const PAGE_REMEDY: &str = "check that webMAN answers /cpursx.ps3 with its firmware line";
 
 /// The page's facts, from its text with markup removed.
 ///
@@ -165,19 +169,17 @@ fn stated(value: Option<&str>) -> Option<String> {
 ///
 /// # Errors
 ///
-/// [`ConsoleError::MissingField`] for a hard field no source states,
-/// and [`ConsoleError::Contradiction`] for an operator value the page
-/// contradicts.
+/// [`ConsoleError::PageMissing`] for a hard field the page should state
+/// and does not, [`ConsoleError::OperatorMissing`] for one only the
+/// operator states and did not, and [`ConsoleError::Contradiction`] for
+/// an operator value the page contradicts.
 pub fn identify(
     page: &StatusPage,
     operator: &OperatorFacts,
     profile: &str,
 ) -> Result<ConsoleFacts, ConsoleError> {
     let from_page = |value: &Option<String>, field| {
-        stated(value.as_deref()).ok_or(ConsoleError::MissingField {
-            field,
-            remedy: PAGE_REMEDY,
-        })
+        stated(value.as_deref()).ok_or(ConsoleError::PageMissing { field })
     };
     let firmware = from_page(&page.firmware, "firmware")?;
     let kernel = from_page(&page.kernel, "kernel")?;
@@ -194,16 +196,22 @@ pub fn identify(
         }
         (Some(model), _) | (None, Some(model)) => model,
         (None, None) => {
-            return Err(ConsoleError::MissingField {
+            return Err(ConsoleError::OperatorMissing {
                 field: "model",
-                remedy: "the status page does not state it; pass --model",
+                flag: "--model",
             });
         }
     };
-    let cfw = stated(operator.cfw.as_deref()).ok_or(ConsoleError::MissingField {
+    let cfw = stated(operator.cfw.as_deref()).ok_or(ConsoleError::OperatorMissing {
         field: "cfw",
-        remedy: "the status page does not state it; pass --cfw",
+        flag: "--cfw",
     })?;
+    let debugger_attached = operator
+        .debugger_attached
+        .ok_or(ConsoleError::OperatorMissing {
+            field: "debugger_attached",
+            flag: "--debugger <none|attached>",
+        })?;
     Ok(ConsoleFacts {
         profile: profile.to_string(),
         model,
@@ -212,7 +220,7 @@ pub fn identify(
         cfw,
         cobra,
         webman: stated(page.webman.as_deref()),
-        debugger_attached: operator.debugger_attached,
+        debugger_attached,
     })
 }
 
@@ -248,6 +256,69 @@ pub fn establish(
     profiles.check(claimed, &facts)?;
     transcript.decision(format!("console satisfies profile {claimed}"));
     Ok(facts)
+}
+
+/// The `status` report for `facts` under the `claimed` profile: the
+/// claim, one verdict line per hard field, the soft fields, and every
+/// other tracked profile the console satisfies. The second value is
+/// the claim's own verdict.
+///
+/// # Errors
+///
+/// [`ConsoleProfileError::UnknownProfile`] when the file does not track
+/// the claim.
+pub fn status_report(
+    facts: &ConsoleFacts,
+    profiles: &ConsoleProfiles,
+    claimed: &str,
+) -> Result<(Vec<String>, Result<(), ConsoleProfileError>), ConsoleProfileError> {
+    let verdict = profiles.check(claimed, facts);
+    if let Err(unknown @ ConsoleProfileError::UnknownProfile { .. }) = verdict {
+        return Err(unknown);
+    }
+    let failed = match &verdict {
+        Err(ConsoleProfileError::Mismatch { mismatches, .. }) => mismatches.clone(),
+        _ => Vec::new(),
+    };
+    let debugger = if facts.debugger_attached {
+        "attached"
+    } else {
+        "none"
+    };
+    let mut lines = vec![format!("profile {claimed}")];
+    for (field, observed) in [
+        ("models", facts.model.as_str()),
+        ("kernel", facts.kernel.as_str()),
+        ("firmware", facts.firmware.as_str()),
+        ("cfw", facts.cfw.as_str()),
+        ("cobra", facts.cobra.as_str()),
+        ("debugger_attached", debugger),
+    ] {
+        lines.push(match failed.iter().find(|m| m.field == field) {
+            Some(m) => format!(
+                "  {field}: {observed} FAILS, the profile requires {}",
+                m.expected
+            ),
+            None => format!("  {field}: {observed} ok"),
+        });
+    }
+    lines.push(format!(
+        "soft: model {}, cfw {}, webman {}",
+        facts.model,
+        facts.cfw,
+        facts.webman.as_deref().unwrap_or("not stated")
+    ));
+    let others: Vec<String> = profiles
+        .satisfied_by(facts)
+        .into_iter()
+        .filter(|name| name != claimed)
+        .collect();
+    lines.push(if others.is_empty() {
+        "also satisfies: none".to_string()
+    } else {
+        format!("also satisfies: {}", others.join(", "))
+    });
+    Ok((lines, verdict))
 }
 
 #[cfg(test)]

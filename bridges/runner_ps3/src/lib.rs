@@ -12,6 +12,7 @@
 //! The verbs live in the binary; this library holds what they share.
 
 pub mod capture;
+pub mod cli;
 pub mod console;
 pub mod deploy;
 pub mod error;
@@ -22,3 +23,7 @@ pub mod transcript;
 pub mod transport;
 
 pub use error::{ExitCode, RunnerPs3Error};
+
+#[cfg(test)]
+#[path = "tests/memory_console.rs"]
+mod memory_console;

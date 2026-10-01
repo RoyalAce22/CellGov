@@ -25,7 +25,7 @@ fn operator() -> OperatorFacts {
     OperatorFacts {
         model: Some("CECH-2001A".to_string()),
         cfw: Some("EvilNAT 4.93 PEX".to_string()),
-        debugger_attached: false,
+        debugger_attached: Some(false),
     }
 }
 
@@ -34,14 +34,14 @@ fn the_flag_wins_over_the_variable() {
     assert_eq!(claimed_profile(Some("a"), Some("b")).expect("flag"), "a");
     assert_eq!(claimed_profile(None, Some("b")).expect("variable"), "b");
     assert_eq!(
-        claimed_profile(Some(""), Some("b")).expect("empty flag"),
+        claimed_profile(Some(" "), Some(" b ")).expect("blank flag"),
         "b"
     );
 }
 
 #[test]
 fn neither_source_is_a_usage_error_naming_both() {
-    for (flag, env) in [(None, None), (Some(""), Some(""))] {
+    for (flag, env) in [(None, None), (Some(""), Some("")), (Some("  "), Some("\t"))] {
         let err = claimed_profile(flag, env).expect_err("unclaimed");
         assert_eq!(err.exit_code(), crate::ExitCode::Usage);
         assert_eq!(
@@ -112,7 +112,7 @@ fn a_changed_soft_field_is_recorded_and_never_refuses() {
 }
 
 #[test]
-fn a_hard_field_the_page_does_not_state_is_a_refusal_naming_it() {
+fn a_hard_field_the_page_does_not_state_is_a_transport_error_naming_it() {
     for (from, to, field) in [
         ("Firmware: 4.93 CEX Cobra 8.5", "Cobra 8.5", "firmware"),
         ("4.93 CEX Cobra", "4.93 XYZ Cobra", "kernel"),
@@ -120,8 +120,12 @@ fn a_hard_field_the_page_does_not_state_is_a_refusal_naming_it() {
     ] {
         let page = PAGE.replace(from, to);
         match identify(&parse_status_page(&page), &operator(), PROFILE) {
-            Err(ConsoleError::MissingField { field: named, .. }) => {
+            Err(err @ ConsoleError::PageMissing { field: named }) => {
                 assert_eq!(named, field, "{from:?} -> {to:?}");
+                assert_eq!(
+                    RunnerPs3Error::from(err).exit_code(),
+                    crate::ExitCode::Transport
+                );
             }
             other => panic!("{field}: {other:?}"),
         }
@@ -129,8 +133,15 @@ fn a_hard_field_the_page_does_not_state_is_a_refusal_naming_it() {
 }
 
 #[test]
-fn a_hard_field_only_the_operator_states_is_a_refusal_when_absent_or_blank() {
+fn a_hard_field_only_the_operator_states_is_a_usage_error_when_absent_or_blank() {
     for (blank, field) in [
+        (
+            OperatorFacts {
+                debugger_attached: None,
+                ..operator()
+            },
+            "debugger_attached",
+        ),
         (
             OperatorFacts {
                 model: Some("  ".to_string()),
@@ -148,12 +159,12 @@ fn a_hard_field_only_the_operator_states_is_a_refusal_when_absent_or_blank() {
     ] {
         let err = identify(&parse_status_page(PAGE), &blank, PROFILE).expect_err(field);
         assert!(
-            matches!(err, ConsoleError::MissingField { field: named, .. } if named == field),
+            matches!(err, ConsoleError::OperatorMissing { field: named, .. } if named == field),
             "{err}"
         );
         assert_eq!(
             RunnerPs3Error::from(err).exit_code(),
-            crate::ExitCode::Refused
+            crate::ExitCode::Usage
         );
     }
 }
@@ -201,4 +212,54 @@ fn a_wrong_hard_field_fails_the_claimed_profile_naming_the_field() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+fn facts_from_page(page: &str) -> ConsoleFacts {
+    identify(&parse_status_page(page), &operator(), PROFILE).expect("identified")
+}
+
+#[test]
+fn the_status_report_gives_each_hard_field_a_verdict_and_the_soft_fields() {
+    let (lines, verdict) =
+        status_report(&facts_from_page(PAGE), &tracked(), PROFILE).expect("tracked claim");
+    verdict.expect("the console satisfies its claim");
+    assert_eq!(
+        lines,
+        [
+            "profile cech20-cex-493",
+            "  models: CECH-2001A ok",
+            "  kernel: cex ok",
+            "  firmware: 4.93 ok",
+            "  cfw: EvilNAT 4.93 PEX ok",
+            "  cobra: 8.5 ok",
+            "  debugger_attached: none ok",
+            "soft: model CECH-2001A, cfw EvilNAT 4.93 PEX, webman 1.47.48t",
+            "also satisfies: none",
+        ]
+    );
+}
+
+#[test]
+fn the_status_report_marks_a_failing_field_and_names_a_profile_the_console_satisfies() {
+    let two = ConsoleProfiles::parse(concat!(
+        "reference = \"cech20-cex-493\"\n",
+        "[profile.cech20-cex-493]\nmodels = [\"CECH-20\"]\nkernel = \"cex\"\n",
+        "firmware = \"4.93\"\ncfw = \"EvilNAT\"\ncobra = \"8.5\"\ndebugger_attached = false\n",
+        "[profile.cech20-cex-493-cobra84]\nmodels = [\"CECH-20\"]\nkernel = \"cex\"\n",
+        "firmware = \"4.93\"\ncfw = \"EvilNAT\"\ncobra = \"8.4\"\ndebugger_attached = false\n",
+    ))
+    .expect("profiles");
+    let facts = facts_from_page(&PAGE.replace("Cobra 8.5", "Cobra 8.4"));
+    let (lines, verdict) = status_report(&facts, &two, PROFILE).expect("tracked claim");
+    assert!(matches!(verdict, Err(ConsoleProfileError::Mismatch { .. })));
+    assert_eq!(lines[5], "  cobra: 8.4 FAILS, the profile requires \"8.5\"");
+    assert_eq!(lines[8], "also satisfies: cech20-cex-493-cobra84");
+}
+
+#[test]
+fn the_status_report_of_an_untracked_claim_is_an_error() {
+    assert!(matches!(
+        status_report(&facts_from_page(PAGE), &tracked(), "cech25"),
+        Err(ConsoleProfileError::UnknownProfile { .. })
+    ));
 }

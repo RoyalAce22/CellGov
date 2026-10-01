@@ -3,7 +3,10 @@
 use std::path::PathBuf;
 
 use cellgov_compare::console_profile::ConsoleProfileError;
+use cellgov_compare::hardware_capture::HardwareCaptureError;
+use cellgov_compare::manifest::ManifestError;
 
+use crate::console::ConsoleError;
 use crate::lease::LeaseError;
 
 /// Process exit codes, one per failure class.
@@ -15,9 +18,10 @@ use crate::lease::LeaseError;
 pub enum ExitCode {
     /// Every verb ran to completion.
     Ok = 0,
-    /// The command line did not parse or named a missing input.
+    /// The command line did not parse, or named an input that is missing
+    /// or unreadable.
     Usage = 1,
-    /// The runner refused before touching the console: a lease, a stale
+    /// The runner refused before changing the console: a lease, a stale
     /// result, a profile mismatch, an existing output directory.
     Refused = 2,
     /// The console did not answer as the protocol requires.
@@ -28,6 +32,9 @@ pub enum ExitCode {
     Frame = 5,
     /// The capture succeeded but the runner could not restore the console.
     Cleanup = 6,
+    /// The runner could not write its own output on this machine, or the
+    /// host clock is unusable.
+    Local = 7,
 }
 
 impl ExitCode {
@@ -43,17 +50,39 @@ pub enum RunnerPs3Error {
     /// The command line did not parse.
     #[error("usage: {0}")]
     Usage(String),
-    /// A local file the verb needs cannot be read or written.
-    #[error("{path}: {source}")]
-    LocalIo {
+    /// An input file the verb names cannot be read.
+    #[error("read {path}: {source}")]
+    LocalRead {
         /// The file.
         path: PathBuf,
         /// The I/O error.
         #[source]
         source: std::io::Error,
     },
-    /// The runner refused before touching the console; the message
-    /// names the command that clears it.
+    /// The verb could not write one of its output files.
+    #[error("write {path}: {source}")]
+    LocalWrite {
+        /// The file or directory.
+        path: PathBuf,
+        /// The I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The host clock reads before 1970, so the capture has no honest
+    /// timestamp.
+    #[error("the host clock reads before 1970; set it before capturing")]
+    HostClock,
+    /// The manifest a verb names does not load.
+    #[error("manifest: {0}")]
+    Manifest(#[from] ManifestError),
+    /// A committed capture does not load.
+    #[error("committed capture: {0}")]
+    Capture(#[from] HardwareCaptureError),
+    /// A record the runner writes did not serialize.
+    #[error("serialize: {0}")]
+    Serialize(#[from] serde_json::Error),
+    /// The runner refused before changing the console; the message names
+    /// the command that clears it.
     #[error("refused: {reason}; clear it with `{clear_with}`")]
     Refused {
         /// What stands in the way.
@@ -63,11 +92,11 @@ pub enum RunnerPs3Error {
     },
     /// Another run holds the console, or the lease file failed.
     #[error("lease: {0}")]
-    Lease(#[from] crate::lease::LeaseError),
+    Lease(#[from] LeaseError),
     /// The console's identity is not established; the message names the
     /// field and what states it.
     #[error("console: {0}")]
-    Console(#[from] crate::console::ConsoleError),
+    Console(#[from] ConsoleError),
     /// The profiles file did not load, or the console failed the claimed
     /// profile; the message names the profile to claim instead or the
     /// file to add one to.
@@ -99,11 +128,19 @@ impl RunnerPs3Error {
     /// The exit code for this error's class.
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            Self::Usage(_) | Self::LocalIo { .. } => ExitCode::Usage,
-            Self::Refused { .. } | Self::Console(_) | Self::Lease(LeaseError::Held { .. }) => {
-                ExitCode::Refused
-            }
-            Self::Lease(LeaseError::Io { .. }) => ExitCode::Usage,
+            Self::Usage(_)
+            | Self::LocalRead { .. }
+            | Self::Manifest(_)
+            | Self::Capture(_)
+            | Self::Console(ConsoleError::OperatorMissing { .. }) => ExitCode::Usage,
+            Self::LocalWrite { .. }
+            | Self::HostClock
+            | Self::Serialize(_)
+            | Self::Lease(LeaseError::Io { .. }) => ExitCode::Local,
+            Self::Refused { .. }
+            | Self::Lease(LeaseError::Held { .. })
+            | Self::Console(ConsoleError::Contradiction { .. }) => ExitCode::Refused,
+            Self::Console(ConsoleError::PageMissing { .. }) => ExitCode::Transport,
             Self::Profile(
                 ConsoleProfileError::Mismatch { .. } | ConsoleProfileError::UnknownProfile { .. },
             ) => ExitCode::Refused,

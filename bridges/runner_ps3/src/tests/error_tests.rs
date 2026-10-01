@@ -8,7 +8,7 @@ use super::*;
 #[test]
 fn every_class_has_its_own_code_and_ok_is_zero() {
     let codes: Vec<i32> = ExitCode::VARIANTS.iter().map(|c| c.code()).collect();
-    assert_eq!(codes, [0, 1, 2, 3, 4, 5, 6]);
+    assert_eq!(codes, [0, 1, 2, 3, 4, 5, 6, 7]);
     assert_eq!(ExitCode::Ok.code(), 0);
 }
 
@@ -20,10 +20,24 @@ fn each_error_maps_to_the_class_its_message_names() {
             ExitCode::Usage,
         ),
         (
-            RunnerPs3Error::LocalIo {
+            RunnerPs3Error::LocalRead {
                 path: PathBuf::from("manifest.toml"),
                 source: std::io::Error::from(std::io::ErrorKind::NotFound),
             },
+            ExitCode::Usage,
+        ),
+        (
+            RunnerPs3Error::LocalWrite {
+                path: PathBuf::from("tests/micro/x/ps3/cech20-cex-493"),
+                source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            },
+            ExitCode::Local,
+        ),
+        (RunnerPs3Error::HostClock, ExitCode::Local),
+        (
+            RunnerPs3Error::from(
+                cellgov_compare::manifest::parse_console("[test]").expect_err("no observe"),
+            ),
             ExitCode::Usage,
         ),
         (
@@ -46,12 +60,24 @@ fn each_error_maps_to_the_class_its_message_names() {
                 path: PathBuf::from("cellgov_runner_ps3_10.77.0.2.lease"),
                 source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
             }),
+            ExitCode::Local,
+        ),
+        (
+            RunnerPs3Error::from(ConsoleError::OperatorMissing {
+                field: "model",
+                flag: "--model",
+            }),
             ExitCode::Usage,
         ),
         (
-            RunnerPs3Error::from(crate::console::ConsoleError::MissingField {
+            RunnerPs3Error::from(ConsoleError::PageMissing { field: "firmware" }),
+            ExitCode::Transport,
+        ),
+        (
+            RunnerPs3Error::from(ConsoleError::Contradiction {
                 field: "model",
-                remedy: "pass --model",
+                page: "CECH-2501A".to_string(),
+                operator: "CECH-2001A".to_string(),
             }),
             ExitCode::Refused,
         ),

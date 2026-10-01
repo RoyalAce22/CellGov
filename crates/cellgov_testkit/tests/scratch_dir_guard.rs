@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 /// Files that may call `std::env::temp_dir()`, workspace-relative with
 /// `/` separators, each with the reason it is not the helper's job.
-const ALLOWED: [(&str, &str); 2] = [
+const ALLOWED: [(&str, &str); 3] = [
     (
         "crates/cellgov_testkit/src/tests/scratch_tests.rs",
         "asserts where the helper puts a directory",
@@ -27,6 +27,11 @@ const ALLOWED: [(&str, &str); 2] = [
         "apps/cellgov_cli/src/game/bench/divergence.rs",
         "a shipped diagnostic writes two state traces and removes them; \
          the helper is a dev-dependency and never reaches a release build",
+    ),
+    (
+        "bridges/runner_ps3/src/main.rs",
+        "the per-console lease is not scratch: it lives in the machine's temp \
+         directory with no process id so every runner on the machine sees it",
     ),
 ];
 

@@ -7,10 +7,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cellgov_compare::hardware_capture::{
-    ArtifactHashes, CaptureProvenance, ConsoleFacts, FrameFacts, HarnessFacts, MicrotestFacts,
-    TransportFacts, CAPTURE_PROVENANCE_SCHEMA, FRAME_FILE,
+    sha256_hex, ArtifactHashes, CaptureProvenance, ConsoleFacts, FrameFacts, HarnessFacts,
+    MicrotestFacts, TransportFacts, CAPTURE_PROVENANCE_SCHEMA, FRAME_FILE,
 };
-use sha2::{Digest, Sha256};
 
 use crate::error::RunnerPs3Error;
 
@@ -32,8 +31,8 @@ pub struct CaptureInputs {
     pub ps3_elf: PathBuf,
     /// `build/<name>.elf`, the reference the emulators run.
     pub reference_elf: PathBuf,
-    /// `build/ps3/spu_main.elf`, when the test has one.
-    pub spu_elf: Option<PathBuf>,
+    /// Each file deployed beside the EBOOT, by name.
+    pub siblings: Vec<(String, PathBuf)>,
     /// `build/ps3/PARAM.SFO`.
     pub param_sfo: PathBuf,
     /// Where the console wrote the frame.
@@ -46,29 +45,28 @@ pub struct CaptureInputs {
     pub recapture_reason: Option<String>,
 }
 
-/// The lowercase hex SHA-256 of `bytes`.
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
 fn hash_file(path: &Path) -> Result<String, RunnerPs3Error> {
     std::fs::read(path)
         .map(|bytes| sha256_hex(&bytes))
-        .map_err(|source| RunnerPs3Error::LocalIo {
+        .map_err(|source| RunnerPs3Error::LocalRead {
             path: path.to_path_buf(),
             source,
         })
+}
+
+fn hash_all(files: &[(String, PathBuf)]) -> Result<BTreeMap<String, String>, RunnerPs3Error> {
+    files
+        .iter()
+        .map(|(name, path)| Ok((name.clone(), hash_file(path)?)))
+        .collect()
 }
 
 /// The record for `frame`, taken at `captured_at`.
 ///
 /// # Errors
 ///
-/// [`RunnerPs3Error::LocalIo`] naming the first input file that cannot
-/// be read.
+/// [`RunnerPs3Error::LocalRead`] naming the first input file the runner
+/// cannot read.
 pub fn build(
     inputs: &CaptureInputs,
     frame: &[u8],
@@ -76,14 +74,8 @@ pub fn build(
 ) -> Result<CaptureProvenance, RunnerPs3Error> {
     let frame_sha256 = sha256_hex(frame);
     let bytes = frame.len() as u64;
-    let mut sources = BTreeMap::new();
-    for (relative, path) in &inputs.sources {
-        sources.insert(relative.clone(), hash_file(path)?);
-    }
-    let spu_elf_sha256 = match &inputs.spu_elf {
-        Some(path) => Some(hash_file(path)?),
-        None => None,
-    };
+    let sources = hash_all(&inputs.sources)?;
+    let siblings = hash_all(&inputs.siblings)?;
     Ok(CaptureProvenance {
         schema: CAPTURE_PROVENANCE_SCHEMA,
         capture_id: CaptureProvenance::capture_id(&inputs.name, &frame_sha256),
@@ -110,7 +102,7 @@ pub fn build(
             eboot_sha256: hash_file(&inputs.eboot)?,
             ps3_elf_sha256: hash_file(&inputs.ps3_elf)?,
             reference_elf_sha256: hash_file(&inputs.reference_elf)?,
-            spu_elf_sha256,
+            siblings,
             param_sfo_sha256: hash_file(&inputs.param_sfo)?,
         },
         frame: FrameFacts {
@@ -126,11 +118,19 @@ pub fn build(
 
 /// The wall clock now, as RFC 3339 UTC to the second. The runner's only
 /// clock read; nothing orders or waits on it.
-pub fn now_rfc3339() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs());
-    rfc3339(seconds)
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::HostClock`] when the host clock reads before 1970,
+/// rather than a fabricated epoch timestamp.
+pub fn now_rfc3339() -> Result<String, RunnerPs3Error> {
+    since_epoch(SystemTime::now())
+}
+
+fn since_epoch(now: SystemTime) -> Result<String, RunnerPs3Error> {
+    now.duration_since(UNIX_EPOCH)
+        .map(|elapsed| rfc3339(elapsed.as_secs()))
+        .map_err(|_| RunnerPs3Error::HostClock)
 }
 
 /// `seconds` after the Unix epoch as `YYYY-MM-DDTHH:MM:SSZ`.

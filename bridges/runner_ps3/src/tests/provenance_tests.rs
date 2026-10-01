@@ -33,7 +33,11 @@ fn inputs(dir: &Path, spu: bool) -> CaptureInputs {
         eboot: file("EBOOT.BIN"),
         ps3_elf: file("ps3.elf"),
         reference_elf: file("reference.elf"),
-        spu_elf: spu.then(|| file("spu_main.elf")),
+        siblings: if spu {
+            vec![("spu_main.elf".to_string(), file("spu_main.elf"))]
+        } else {
+            Vec::new()
+        },
         param_sfo: file("PARAM.SFO"),
         result_path: "/dev_hdd0/tmp/cgov_spu_fixed_value.bin".to_string(),
         console: console(),
@@ -79,8 +83,8 @@ fn a_built_record_passes_the_loaders_check_and_hashes_every_input() {
         sha256_hex(b"reference.elf")
     );
     assert_eq!(
-        record.artifacts.spu_elf_sha256.as_deref(),
-        Some(sha256_hex(b"spu_main.elf").as_str())
+        record.artifacts.siblings,
+        BTreeMap::from([("spu_main.elf".to_string(), sha256_hex(b"spu_main.elf"))])
     );
     assert_eq!(record.artifacts.param_sfo_sha256, sha256_hex(b"PARAM.SFO"));
     assert_eq!(record.harness.runner, "runner_ps3");
@@ -93,10 +97,10 @@ fn a_built_record_passes_the_loaders_check_and_hashes_every_input() {
 }
 
 #[test]
-fn a_test_with_no_spu_image_records_none() {
+fn a_test_with_no_sibling_records_none() {
     let dir = cellgov_testkit::scratch::scratch();
     let record = build(&inputs(&dir, false), b"abc", String::new()).expect("builds");
-    assert_eq!(record.artifacts.spu_elf_sha256, None);
+    assert!(record.artifacts.siblings.is_empty());
 }
 
 #[test]
@@ -105,7 +109,7 @@ fn a_missing_input_is_named() {
     let mut missing = inputs(&dir, false);
     missing.eboot = dir.join("absent.bin");
     match build(&missing, b"abc", String::new()) {
-        Err(RunnerPs3Error::LocalIo { path, .. }) => assert_eq!(path, dir.join("absent.bin")),
+        Err(RunnerPs3Error::LocalRead { path, .. }) => assert_eq!(path, dir.join("absent.bin")),
         other => panic!("{other:?}"),
     }
 }
@@ -117,7 +121,20 @@ fn the_clock_text_is_rfc_3339_utc() {
     assert_eq!(rfc3339(1_700_000_000), "2023-11-14T22:13:20Z");
     assert_eq!(rfc3339(4_107_542_399), "2100-02-28T23:59:59Z");
     assert_eq!(rfc3339(4_107_542_400), "2100-03-01T00:00:00Z");
-    let now = now_rfc3339();
+    let now = now_rfc3339().expect("the host clock is past 1970");
     assert_eq!(now.len(), "1970-01-01T00:00:00Z".len(), "{now}");
     assert!(now.ends_with('Z'), "{now}");
+}
+
+#[test]
+fn a_clock_before_1970_is_an_error_not_the_epoch() {
+    let before = UNIX_EPOCH - std::time::Duration::from_secs(1);
+    assert!(matches!(
+        since_epoch(before),
+        Err(RunnerPs3Error::HostClock)
+    ));
+    assert_eq!(
+        since_epoch(UNIX_EPOCH).expect("the epoch itself"),
+        "1970-01-01T00:00:00Z"
+    );
 }

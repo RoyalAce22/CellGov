@@ -1,18 +1,24 @@
 //! A microtest capture taken on a PS3 and committed beside the test.
 //!
-//! `tests/micro/<name>/ps3/` holds four files the console runner wrote:
+//! `tests/micro/<name>/ps3/<profile>/` holds four files the console
+//! runner wrote under the console profile the run claimed:
 //! `observation.json` (an [`Observation`] whose runner is
 //! [`RUNNER_PS3_CEX`]), `cgov_frame.bin` (the bytes fetched from the
 //! console), `provenance.json` (a [`CaptureProvenance`]) and
-//! `transcript.log`. Where the directory exists the capture is the
-//! reference for that test; where it does not, the emulator
-//! observations stand alone.
+//! `transcript.log`. The capture under the reference profile is the
+//! reference for that test; where there is none, the emulator
+//! observations stand alone. A capture under another profile is never
+//! the reference.
 
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
+use crate::console_profile::{ConsoleProfileError, ConsoleProfiles};
 use crate::observation::Observation;
 
 /// The runner string a console capture carries in its observation.
@@ -25,8 +31,11 @@ pub const RUNNER_PS3_CEX: &str = "ps3-cex";
 /// The one `provenance.json` layout this crate reads.
 pub const CAPTURE_PROVENANCE_SCHEMA: u32 = 1;
 
-/// The directory a capture lives in, under the microtest's own.
+/// The directory the captures live in, under the microtest's own; each
+/// sits in a subdirectory named for its console profile.
 pub const CAPTURE_DIR: &str = "ps3";
+/// The kernel a [`RUNNER_PS3_CEX`] capture runs on.
+pub const CAPTURE_KERNEL: &str = "cex";
 /// The observation the runner converted from the frame.
 pub const OBSERVATION_FILE: &str = "observation.json";
 /// The bytes fetched from the console, untouched.
@@ -138,9 +147,9 @@ pub struct ArtifactHashes {
     pub ps3_elf_sha256: String,
     /// The reference ELF the emulators run.
     pub reference_elf_sha256: String,
-    /// The SPU image deployed beside the EBOOT, when the test has one.
-    #[serde(default)]
-    pub spu_elf_sha256: Option<String>,
+    /// Each file deployed beside the EBOOT (the manifest's `[ps3]
+    /// files`), by name.
+    pub siblings: BTreeMap<String, String>,
     /// The `PARAM.SFO`.
     pub param_sfo_sha256: String,
 }
@@ -167,14 +176,20 @@ impl CaptureProvenance {
     }
 
     /// The record's own consistency: the schema this crate reads, a
-    /// capture id derived from the test name and the frame hash, and a
-    /// frame file named [`FRAME_FILE`].
+    /// frame hash of 64 lowercase hex digits, a capture id derived from
+    /// the test name and that hash, and a frame file named
+    /// [`FRAME_FILE`].
     pub fn check(&self) -> Result<(), HardwareCaptureError> {
         if self.schema != CAPTURE_PROVENANCE_SCHEMA {
             return Err(HardwareCaptureError::Schema {
                 found: self.schema,
                 expected: CAPTURE_PROVENANCE_SCHEMA,
             });
+        }
+        if !is_sha256_hex(&self.frame.sha256) {
+            return Err(HardwareCaptureError::FrameHashShape(
+                self.frame.sha256.clone(),
+            ));
         }
         let expected = Self::capture_id(&self.microtest.name, &self.frame.sha256);
         if self.capture_id != expected {
@@ -271,6 +286,74 @@ pub enum HardwareCaptureError {
         /// The runner as written.
         found: String,
     },
+    /// The recorded frame hash is not 64 lowercase hex digits.
+    #[error("capture frame hash {0:?} is not 64 lowercase hex digits")]
+    FrameHashShape(String),
+    /// The frame on disk does not hash to the recorded value.
+    #[error("capture frame hashes to {found}, the provenance records {recorded}")]
+    FrameHash {
+        /// The hash of the bytes on disk.
+        found: String,
+        /// The hash the provenance records.
+        recorded: String,
+    },
+    /// A path the capture layout needs as a directory is something else.
+    #[error("capture path {0} is not a directory")]
+    NotADirectory(PathBuf),
+    /// The capture names a test other than the directory it sits under.
+    #[error("capture names test {found:?} but sits under test {expected:?}")]
+    TestName {
+        /// The name the provenance records.
+        found: String,
+        /// The test directory's name.
+        expected: String,
+    },
+    /// The capture sits under a profile directory other than its own.
+    #[error("capture records profile {profile:?} but sits in directory {directory:?}")]
+    ProfileDirectory {
+        /// The directory's name.
+        directory: String,
+        /// The profile the provenance records.
+        profile: String,
+    },
+    /// The recorded console fails its own profile, or the profile is not
+    /// tracked.
+    #[error("capture console: {0}")]
+    Profile(#[from] ConsoleProfileError),
+    /// The recorded kernel is not the one the runner string names.
+    #[error(
+        "capture console kernel {found:?}, a {RUNNER_PS3_CEX:?} capture runs on {CAPTURE_KERNEL:?}"
+    )]
+    Kernel {
+        /// The kernel as recorded.
+        found: String,
+    },
+    /// The observation's firmware is not the console's.
+    #[error("capture observation firmware {observation:?}, the console ran {console:?}")]
+    ObservationFirmware {
+        /// The observation's `runner_firmware`.
+        observation: Option<String>,
+        /// The provenance's console firmware.
+        console: String,
+    },
+    /// The observation carries a field a console capture never sets.
+    #[error("capture observation carries {0}, which a console capture never sets")]
+    ObservationField(&'static str),
+}
+
+fn is_sha256_hex(text: &str) -> bool {
+    text.len() == 64
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The lowercase hex SHA-256 of `bytes`.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn read(path: &Path) -> Result<Vec<u8>, HardwareCaptureError> {
@@ -288,11 +371,32 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, HardwareCap
     })
 }
 
-/// Load the capture in `dir` (a `ps3/` directory) and check it against
-/// itself: provenance schema and id, frame length, observation runner.
-pub fn load(dir: &Path) -> Result<HardwareCapture, HardwareCaptureError> {
+/// Load the capture in `dir` (a `ps3/<profile>/` directory) and check
+/// it: the provenance record's own consistency; its profile against the
+/// directory name and against the tracked profile's hard fields; the
+/// kernel the runner string implies; the frame's length and hash; the
+/// observation's runner, firmware and console-only shape; and the
+/// transcript's presence.
+pub fn load(
+    dir: &Path,
+    profiles: &ConsoleProfiles,
+) -> Result<HardwareCapture, HardwareCaptureError> {
     let provenance: CaptureProvenance = read_json(&dir.join(PROVENANCE_FILE))?;
     provenance.check()?;
+    let console = &provenance.console;
+    let directory = dir.file_name().and_then(OsStr::to_str).unwrap_or_default();
+    if directory != console.profile {
+        return Err(HardwareCaptureError::ProfileDirectory {
+            directory: directory.to_string(),
+            profile: console.profile.clone(),
+        });
+    }
+    profiles.check(&console.profile, console)?;
+    if console.kernel != CAPTURE_KERNEL {
+        return Err(HardwareCaptureError::Kernel {
+            found: console.kernel.clone(),
+        });
+    }
     let frame = read(&dir.join(FRAME_FILE))?;
     let found = frame.len() as u64;
     if found != provenance.frame.bytes {
@@ -301,12 +405,16 @@ pub fn load(dir: &Path) -> Result<HardwareCapture, HardwareCaptureError> {
             expected: provenance.frame.bytes,
         });
     }
-    let observation: Observation = read_json(&dir.join(OBSERVATION_FILE))?;
-    if observation.metadata.runner != RUNNER_PS3_CEX {
-        return Err(HardwareCaptureError::Runner {
-            found: observation.metadata.runner.clone(),
+    let hash = sha256_hex(&frame);
+    if hash != provenance.frame.sha256 {
+        return Err(HardwareCaptureError::FrameHash {
+            found: hash,
+            recorded: provenance.frame.sha256.clone(),
         });
     }
+    let observation: Observation = read_json(&dir.join(OBSERVATION_FILE))?;
+    check_observation(&observation, console)?;
+    read(&dir.join(TRANSCRIPT_FILE))?;
     Ok(HardwareCapture {
         dir: dir.to_path_buf(),
         observation,
@@ -315,16 +423,79 @@ pub fn load(dir: &Path) -> Result<HardwareCapture, HardwareCaptureError> {
     })
 }
 
-/// The reference for the microtest in `test_dir`: its `ps3/` capture
-/// when the directory exists, the emulator observations otherwise. A
-/// capture directory that exists but does not load is an error, never
+/// The observation a console capture converts to: the console's runner
+/// string and firmware, no state hashes and no run identity.
+fn check_observation(
+    observation: &Observation,
+    console: &ConsoleFacts,
+) -> Result<(), HardwareCaptureError> {
+    if observation.metadata.runner != RUNNER_PS3_CEX {
+        return Err(HardwareCaptureError::Runner {
+            found: observation.metadata.runner.clone(),
+        });
+    }
+    if observation.runner_firmware.as_deref() != Some(console.firmware.as_str()) {
+        return Err(HardwareCaptureError::ObservationFirmware {
+            observation: observation.runner_firmware.clone(),
+            console: console.firmware.clone(),
+        });
+    }
+    if observation.state_hashes.is_some() {
+        return Err(HardwareCaptureError::ObservationField("state hashes"));
+    }
+    if !observation.identity.is_empty() {
+        return Err(HardwareCaptureError::ObservationField("a run identity"));
+    }
+    Ok(())
+}
+
+/// Whether `path` is a directory: `Ok(false)` only when nothing is
+/// there. A link whose target is gone is something there, not absence.
+fn directory_present(path: &Path) -> Result<bool, HardwareCaptureError> {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_dir() => Ok(true),
+        Ok(_) => Err(HardwareCaptureError::NotADirectory(path.to_path_buf())),
+        Err(source)
+            if source.kind() == ErrorKind::NotFound && std::fs::symlink_metadata(path).is_err() =>
+        {
+            Ok(false)
+        }
+        Err(source) => Err(HardwareCaptureError::Io {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+/// The reference for the microtest in `test_dir`: its capture under the
+/// reference profile when that directory exists, the emulator
+/// observations when nothing is there. A directory that exists but does
+/// not load, or names another test, is an error, never
 /// [`MicrotestReference::EmulatorOnly`].
-pub fn microtest_reference(test_dir: &Path) -> Result<MicrotestReference, HardwareCaptureError> {
-    let dir = test_dir.join(CAPTURE_DIR);
-    if !dir.is_dir() {
+pub fn microtest_reference(
+    test_dir: &Path,
+    profiles: &ConsoleProfiles,
+) -> Result<MicrotestReference, HardwareCaptureError> {
+    let root = test_dir.join(CAPTURE_DIR);
+    if !directory_present(&root)? {
         return Ok(MicrotestReference::EmulatorOnly);
     }
-    load(&dir).map(|capture| MicrotestReference::Hardware(Box::new(capture)))
+    let dir = root.join(&profiles.reference);
+    if !directory_present(&dir)? {
+        return Ok(MicrotestReference::EmulatorOnly);
+    }
+    let capture = load(&dir, profiles)?;
+    let expected = test_dir
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or_default();
+    if capture.provenance.microtest.name != expected {
+        return Err(HardwareCaptureError::TestName {
+            found: capture.provenance.microtest.name.clone(),
+            expected: expected.to_string(),
+        });
+    }
+    Ok(MicrotestReference::Hardware(Box::new(capture)))
 }
 
 #[cfg(test)]

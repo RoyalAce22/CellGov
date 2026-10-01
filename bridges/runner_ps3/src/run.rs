@@ -1,9 +1,10 @@
-//! The console before a run and after it: the preflight that refuses a
-//! stale result or an occupied game directory, and the cleanup that
+//! The console before, during and after a run: the preflight that
+//! refuses a stale result or an occupied game directory, the start and
+//! the polled wait for the result, the fetch, and the cleanup that
 //! unmounts the test and removes everything the runner put on the
 //! console.
 //!
-//! Both steps run against [`ConsoleOps`], which [`WebmanConsole`]
+//! Every step runs against [`ConsoleOps`], which [`WebmanConsole`]
 //! implements over the network and a test implements in memory.
 
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -20,6 +21,9 @@ pub const GAME_ROOT: &str = "/dev_hdd0/game";
 pub const RESULT_ROOT: &str = "/dev_hdd0/tmp";
 /// The webMAN request that unmounts the running game.
 pub const UNMOUNT_PATH: &str = "/mount.ps3/unmount";
+/// The webMAN request that mounts the game at the path after it, or,
+/// bare, starts the mounted one.
+pub const PLAY_PATH: &str = "/play.ps3";
 
 /// The console-side paths of one microtest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +55,7 @@ impl Target {
     }
 }
 
-/// The console operations preflight and cleanup need.
+/// The console operations the verbs need.
 pub trait ConsoleOps {
     /// The HTTP status of `GET path`.
     ///
@@ -63,6 +67,37 @@ pub trait ConsoleOps {
         path: &str,
         transcript: &mut Transcript,
     ) -> Result<u16, TransportError>;
+
+    /// The body of `GET path`, or `None` when it answers `404`.
+    ///
+    /// # Errors
+    ///
+    /// Any transport failure, and [`TransportError::UnexpectedStatus`]
+    /// for a status other than `200` or `404`.
+    fn fetch(
+        &mut self,
+        path: &str,
+        transcript: &mut Transcript,
+    ) -> Result<Option<Vec<u8>>, TransportError>;
+
+    /// Create the directory `path`.
+    ///
+    /// # Errors
+    ///
+    /// Any transport failure.
+    fn make_dir(&mut self, path: &str, transcript: &mut Transcript) -> Result<(), TransportError>;
+
+    /// Store `bytes` as the file `path`.
+    ///
+    /// # Errors
+    ///
+    /// Any transport failure.
+    fn store(
+        &mut self,
+        path: &str,
+        bytes: &[u8],
+        transcript: &mut Transcript,
+    ) -> Result<(), TransportError>;
 
     /// The entries the server lists for directory `dir`, as it lists
     /// them. webMAN answers a directory that does not exist with an empty
@@ -112,6 +147,37 @@ pub fn preflight<C: ConsoleOps>(
     clear_with: &str,
     transcript: &mut Transcript,
 ) -> Result<(), RunnerPs3Error> {
+    clear_stale_result(console, target, clear_with, transcript)?;
+    if entries(console, GAME_ROOT, transcript)?
+        .iter()
+        .any(|name| name == target.appid())
+    {
+        if !reclaim {
+            return Err(RunnerPs3Error::Refused {
+                reason: format!("{} already exists on the console", target.game_dir),
+                clear_with: format!("{clear_with}, or rerun with --reclaim"),
+            });
+        }
+        transcript.decision(format!("reclaiming {}", target.game_dir));
+        cleanup(console, target, transcript)?;
+    }
+    Ok(())
+}
+
+/// Delete a result file that answers `200` once, and refuse when a
+/// second check still finds it. Without this step, the wait accepts the
+/// result of an earlier run as the result of this run.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Refused`] naming `clear_with`, and
+/// [`RunnerPs3Error::Transport`].
+pub fn clear_stale_result<C: ConsoleOps>(
+    console: &mut C,
+    target: &Target,
+    clear_with: &str,
+    transcript: &mut Transcript,
+) -> Result<(), RunnerPs3Error> {
     if result_present(console, &target.result_path, transcript)? {
         transcript.decision(format!(
             "stale result at {}; deleting it once",
@@ -127,19 +193,6 @@ pub fn preflight<C: ConsoleOps>(
                 clear_with: clear_with.to_string(),
             });
         }
-    }
-    if entries(console, GAME_ROOT, transcript)?
-        .iter()
-        .any(|name| name == target.appid())
-    {
-        if !reclaim {
-            return Err(RunnerPs3Error::Refused {
-                reason: format!("{} already exists on the console", target.game_dir),
-                clear_with: format!("{clear_with}, or rerun with --reclaim"),
-            });
-        }
-        transcript.decision(format!("reclaiming {}", target.game_dir));
-        cleanup(console, target, transcript)?;
     }
     Ok(())
 }
@@ -187,6 +240,89 @@ pub fn cleanup<C: ConsoleOps>(
             remaining: remaining.join(", "),
         })
     }
+}
+
+/// Mount the deployed EBOOT as `/app_home` and start it: two webMAN
+/// requests, each of which must answer `200`.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Transport`] for a failed request or another status.
+pub fn start<C: ConsoleOps>(
+    console: &mut C,
+    target: &Target,
+    transcript: &mut Transcript,
+) -> Result<(), RunnerPs3Error> {
+    for path in [
+        format!("{PLAY_PATH}{}/EBOOT.BIN", target.usrdir),
+        PLAY_PATH.to_string(),
+    ] {
+        let status = console.http_status(&path, transcript)?;
+        if status != 200 {
+            return Err(TransportError::UnexpectedStatus { path, status }.into());
+        }
+    }
+    transcript.decision("started");
+    Ok(())
+}
+
+/// Poll the result path until it answers `200`: at most
+/// `timeout_ms / poll_ms` polls, rounded up, each after `sleep(poll_ms)`.
+/// The sleep comes before the poll, so the last poll comes at or after
+/// the budget and a budget no longer than one interval still waits one
+/// interval. The runner reads no clock to wait; the budget is the poll
+/// count.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Usage`] for a zero `poll_ms`,
+/// [`RunnerPs3Error::Timeout`] when no poll finds the result, and
+/// [`RunnerPs3Error::Transport`] for a failed poll.
+pub fn wait_for_result<C: ConsoleOps>(
+    console: &mut C,
+    target: &Target,
+    timeout_ms: u64,
+    poll_ms: u64,
+    sleep: &mut dyn FnMut(Duration),
+    transcript: &mut Transcript,
+) -> Result<(), RunnerPs3Error> {
+    if poll_ms == 0 {
+        return Err(RunnerPs3Error::Usage(
+            "--poll-ms must be greater than zero".to_string(),
+        ));
+    }
+    let polls = timeout_ms.div_ceil(poll_ms).max(1);
+    for poll in 1..=polls {
+        sleep(Duration::from_millis(poll_ms));
+        if result_present(console, &target.result_path, transcript)? {
+            transcript.decision(format!("result present after {poll} poll(s)"));
+            return Ok(());
+        }
+    }
+    Err(RunnerPs3Error::Timeout {
+        result_path: target.result_path.clone(),
+        timeout_ms,
+    })
+}
+
+/// The result file's bytes.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Transport`] for a failed request, and
+/// [`RunnerPs3Error::Timeout`] when the file is gone.
+pub fn fetch_result<C: ConsoleOps>(
+    console: &mut C,
+    target: &Target,
+    timeout_ms: u64,
+    transcript: &mut Transcript,
+) -> Result<Vec<u8>, RunnerPs3Error> {
+    console
+        .fetch(&target.result_path, transcript)?
+        .ok_or_else(|| RunnerPs3Error::Timeout {
+            result_path: target.result_path.clone(),
+            timeout_ms,
+        })
 }
 
 /// Empty and remove the game directory, which its parent lists: its
@@ -355,6 +491,41 @@ impl ConsoleOps for WebmanConsole {
     ) -> Result<u16, TransportError> {
         let mut stream = self.connect_port(self.endpoint.http_port)?;
         http::get(&mut stream, &self.endpoint.host, path, transcript).map(|r| r.status)
+    }
+
+    fn fetch(
+        &mut self,
+        path: &str,
+        transcript: &mut Transcript,
+    ) -> Result<Option<Vec<u8>>, TransportError> {
+        let mut stream = self.connect_port(self.endpoint.http_port)?;
+        let response = http::get(&mut stream, &self.endpoint.host, path, transcript)?;
+        match response.status {
+            200 => Ok(Some(response.body)),
+            404 => Ok(None),
+            status => Err(TransportError::UnexpectedStatus {
+                path: path.to_string(),
+                status,
+            }),
+        }
+    }
+
+    fn make_dir(&mut self, path: &str, transcript: &mut Transcript) -> Result<(), TransportError> {
+        let mut session = self.ftp(transcript)?;
+        session.mkd(path, transcript)?;
+        session.quit(transcript).map(drop)
+    }
+
+    fn store(
+        &mut self,
+        path: &str,
+        bytes: &[u8],
+        transcript: &mut Transcript,
+    ) -> Result<(), TransportError> {
+        let mut session = self.ftp(transcript)?;
+        let data = self.connect(SocketAddr::V4(session.pasv(transcript)?))?;
+        session.stor(path, data, bytes, transcript)?;
+        session.quit(transcript).map(drop)
     }
 
     fn list(
