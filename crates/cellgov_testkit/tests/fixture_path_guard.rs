@@ -13,17 +13,27 @@
 //! External-data fixtures are the exception. Those are operator-owned or
 //! locally built, gitignored, and their suites sit behind a
 //! cargo feature that hard-asserts when the file is absent. They are
-//! listed in [`EXTERNAL_DATA_PREFIXES`].
+//! listed in [`EXTERNAL_DATA_PREFIXES`], plus a microtest's `build/`
+//! directory ([`MICRO_BUILD_DIR`]).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Path prefixes whose contents are gitignored and feature-gated.
 ///
+/// Under [`MICRO_PREFIX`] only the build output is external: see
+/// [`MICRO_BUILD_DIR`].
+const EXTERNAL_DATA_PREFIXES: &[&str] = &["tests/ps3autotests/"];
+
+/// The microtest tree. Its sources, manifests and committed console
+/// captures are ordinary committed fixtures; only a `build/` directory
+/// in it is external data.
+const MICRO_PREFIX: &str = "tests/micro/";
+
 /// `tests/micro/<name>/build/` holds ELFs produced by that test's
 /// `build.sh` in a ps3dev toolchain container. The suites reading them
 /// are behind `spu-microtests` / `ppu-microtests` / `microtests`.
-const EXTERNAL_DATA_PREFIXES: &[&str] = &["tests/micro/", "tests/ps3autotests/"];
+const MICRO_BUILD_DIR: &str = "build";
 
 /// The subset of [`EXTERNAL_DATA_PREFIXES`] whose whole tree `.gitignore`
 /// drops, so only an operator who cloned it has the directory at all.
@@ -162,9 +172,13 @@ fn guard_source_path(root: &Path) -> PathBuf {
 }
 
 fn is_external_data(repo_path: &str) -> bool {
-    EXTERNAL_DATA_PREFIXES
-        .iter()
-        .any(|p| repo_path.starts_with(p))
+    let micro_build = repo_path
+        .strip_prefix(MICRO_PREFIX)
+        .is_some_and(|rest| rest.split('/').any(|segment| segment == MICRO_BUILD_DIR));
+    micro_build
+        || EXTERNAL_DATA_PREFIXES
+            .iter()
+            .any(|p| repo_path.starts_with(p))
 }
 
 /// Whether `repo_path` names a capture intermediate by extension.
@@ -216,6 +230,26 @@ fn the_data_allowlist_exempts_built_output_and_nothing_else() {
         "tests/fixtures/NPUA80145/cellgov/anchors/fw-4.93/base/boot_summary.json"
     ));
     assert!(!is_external_data("tests/title_manifests/flow.toml"));
+}
+
+/// Positive control for the microtest rule: a committed capture, a
+/// manifest and a source under `tests/micro/` are existence-checked; a
+/// path through a `build/` directory is not.
+#[test]
+fn only_the_build_output_of_a_microtest_is_exempt() {
+    assert!(is_external_data("tests/micro/x/build/x.elf"));
+    assert!(is_external_data("tests/micro/x/build/ps3/EBOOT.BIN"));
+    assert!(is_external_data("tests/micro/x/build"));
+    for committed in [
+        "tests/micro/x/ps3/observation.json",
+        "tests/micro/x/ps3/cech20-cex-493/cgov_frame.bin",
+        "tests/micro/x/manifest.toml",
+        "tests/micro/x/ppu/main.c",
+        "tests/micro/x/builder/notes.txt",
+        "tests/micro/",
+    ] {
+        assert!(!is_external_data(committed), "{committed} was exempted");
+    }
 }
 
 /// Floors on the population each gate polices. The workspace has

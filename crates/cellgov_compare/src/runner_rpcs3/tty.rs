@@ -31,21 +31,34 @@ fn find_magic(data: &[u8], from: usize) -> Option<usize> {
         .map(|p| p + from)
 }
 
-/// Scan a TTY log for the `CGOV` frame and slice each declared region
-/// out of its payload at that region's offset.
+/// Read the TTY log at `tty_path` and parse it with [`parse_tty_frame`].
 ///
 /// # Errors
 ///
-/// Returns `Err` when the log carries no frame, carries a second frame
-/// past the first one's payload, is truncated inside the header or
-/// payload, or declares a region the payload cannot satisfy.
+/// [`Rpcs3Error::TtyRead`] when the file cannot be read, and every
+/// [`parse_tty_frame`] refusal.
 pub fn parse_tty_log(
     tty_path: &Path,
     regions: &[TtyRegion],
 ) -> Result<Vec<NamedMemoryRegion>, Rpcs3Error> {
     let data = std::fs::read(tty_path).map_err(Rpcs3Error::TtyRead)?;
+    parse_tty_frame(&data, regions)
+}
 
-    let magic_pos = find_magic(&data, 0).ok_or(Rpcs3Error::TtyMagicNotFound)?;
+/// Scan `data`, a TTY log or a bare frame already in memory, for the
+/// `CGOV` frame and slice each declared region out of its payload at
+/// that region's offset.
+///
+/// # Errors
+///
+/// Returns `Err` when the bytes carry no frame, carry a second frame
+/// past the first one's payload, are truncated inside the header or
+/// payload, or declare a region the payload cannot satisfy.
+pub fn parse_tty_frame(
+    data: &[u8],
+    regions: &[TtyRegion],
+) -> Result<Vec<NamedMemoryRegion>, Rpcs3Error> {
+    let magic_pos = find_magic(data, 0).ok_or(Rpcs3Error::TtyMagicNotFound)?;
 
     // `magic_pos < data.len()` by find-position contract, so the
     // header_end add is bounded by `data.len() + TTY_HEADER_SIZE`,
@@ -75,7 +88,7 @@ pub fn parse_tty_log(
     // Magic bytes inside the payload are region data. One that starts
     // past the payload is a second frame, and nothing here can tell
     // which of the two the caller meant.
-    if let Some(second) = find_magic(&data, payload_end) {
+    if let Some(second) = find_magic(data, payload_end) {
         return Err(Rpcs3Error::TtyFrameAmbiguous {
             first: magic_pos,
             second,
@@ -114,3 +127,7 @@ pub fn parse_tty_log(
 #[cfg(test)]
 #[path = "tests/tty_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/tty_frame_tests.rs"]
+mod tty_frame_tests;

@@ -4,12 +4,14 @@
 
 mod event;
 mod hashes;
+mod mask;
 mod memory;
 mod model;
 mod outcome;
 
 pub use event::{ObservedEvent, ObservedEventKind};
 pub use hashes::{ObservedHashes, CHECKPOINT_HASH_SCHEME, LEGACY_CHECKPOINT_HASH_SCHEME};
+pub use mask::blank_volatile;
 pub use memory::{NamedMemoryRegion, CODE_REGION_NAME};
 pub use model::{Observation, ObservationMetadata};
 pub use outcome::ObservedOutcome;

@@ -15,4 +15,4 @@ pub use config::{
 pub use dump::parse_dump;
 pub use error::Rpcs3Error;
 pub use observe::{observe, observe_from_tty};
-pub use tty::{parse_tty_log, TTY_MAGIC};
+pub use tty::{parse_tty_frame, parse_tty_log, TTY_MAGIC};
