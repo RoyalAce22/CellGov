@@ -62,3 +62,9 @@ kind = "process-exit"
 # The parent spawns /app_home/child.self, so it deploys beside
 # the EBOOT.
 files = ["child.self"]
+# On the reference console (4.93 CEX, Cobra) the run stopped every
+# answer from the console, ping included, seconds after it started,
+# before any result file landed; it took a power cycle. The same reason
+# is the test's row in tests/micro/ps3_gaps.tsv.
+portable = false
+not_portable_reason = "hangs a retail 4.93 CEX console seconds after the start, before any result is written"

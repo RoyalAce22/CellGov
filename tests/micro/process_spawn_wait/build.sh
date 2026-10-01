@@ -66,4 +66,28 @@ make_self "$OUT/child.elf" "$OUT/child.self"
 echo "=== Build complete ==="
 ls -la "$OUT"/parent.elf "$OUT"/child.elf "$OUT"/child.self
 
-bash "$COMMON/package_ps3.sh" process_spawn_wait /src/ppu/parent.c "$OUT/child.self"
+# The console package carries its own child: the same program built
+# with CGOV_PS3_USRDIR, the macro package_ps3.sh gives the parent's
+# console relink, so it skips the store to the fixed address 0x100 that
+# a console process cannot write. The reference child.self above is
+# untouched.
+echo "=== Building the console child ==="
+mkdir -p "$OUT/ps3_child"
+${PPU_PREFIX}-gcc \
+    -nostartfiles \
+    -I${PSL1GHT}/ppu/include \
+    -I"$COMMON" \
+    -L${PSL1GHT}/ppu/lib \
+    -O2 -Wall \
+    -DCGOV_PS3_USRDIR="\"/dev_hdd0/game/${CGOV_PS3_APPID:-CGOV00001}/USRDIR\"" \
+    -o "$OUT/ps3_child/child.elf" \
+    "$OUT/crt0.o" \
+    /src/ppu/child.c \
+    -llv2 -lsysmodule -lrt
+python3 "$COMMON/patch_toc.py" \
+    "$OUT/ps3_child/child.elf" \
+    "${PPU_PREFIX}-readelf" \
+    "${PPU_PREFIX}-nm"
+make_self "$OUT/ps3_child/child.elf" "$OUT/ps3_child/child.self"
+
+bash "$COMMON/package_ps3.sh" process_spawn_wait /src/ppu/parent.c "$OUT/ps3_child/child.self"

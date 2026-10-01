@@ -401,6 +401,30 @@ fn on_console<C: ConsoleOps>(
         manifest,
     } = job;
     let manifest_path = manifest_path.as_path();
+    // A test its manifest calls not portable cannot run on the console as
+    // written, and one of them hangs it outright.
+    if matches!(
+        action,
+        Action::Deploy | Action::Run | Action::Capture { .. }
+    ) && !manifest.ps3.portable
+    {
+        return Err(RunnerPs3Error::Refused {
+            reason: format!(
+                "{} is not portable: {}",
+                manifest.test.name,
+                manifest
+                    .ps3
+                    .not_portable_reason
+                    .as_deref()
+                    .unwrap_or("its manifest gives no reason")
+            ),
+            clear_with: format!(
+                "make the test portable and set [ps3] portable = true in {}",
+                manifest_path.display()
+            ),
+        }
+        .into());
+    }
     if !matches!(action, Action::Cleanup) {
         let interlock = Interlock {
             limits: profiles.load,

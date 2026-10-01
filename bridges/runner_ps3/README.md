@@ -79,7 +79,8 @@ console's lease, refuses a result file left by an earlier run that a
 delete does not clear, and refuses an occupied game directory unless
 `--reclaim` is given. `run` and `capture` also refuse a console whose
 status page does not show it at the XMB: a title an earlier test left
-running would take the start. `cellgov ps3` asks before a reclaim empties the
+running would take the start. `deploy`, `run` and `capture` refuse a
+test whose manifest sets `[ps3] portable = false`, naming its reason. `cellgov ps3` asks before a reclaim empties the
 directory, naming what it holds; `--yes` answers. Every refusal names
 the command that clears it.
 

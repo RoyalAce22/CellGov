@@ -30,8 +30,16 @@ SYS_PROCESS_PARAM(1001, 0x10000)
 #define SYS_PROCESS_SPAWN      21
 
 #define RESULT_ADDR 0x100
-#define CHILD_PATH  "/app_home/child.self"
 #define MAX_POLLS   2000000u
+
+/* The console build (package_ps3.sh) defines CGOV_PS3_USRDIR: webMAN
+ * does not map /app_home to the EBOOT's directory there, so the child
+ * is named by the directory the package deploys into. */
+#ifdef CGOV_PS3_USRDIR
+#define CHILD_PATH  CGOV_PS3_USRDIR "/child.self"
+#else
+#define CHILD_PATH  "/app_home/child.self"
+#endif
 
 struct TestResult {
     unsigned int status;
@@ -65,14 +73,20 @@ static void write_tty_result(const struct TestResult *r)
     CGOV_OUT_FILE_WRITE(r, len);
 }
 
+/* The copy at RESULT_ADDR is for CellGov's observation of the parent's
+ * space. The console build (CGOV_OUT_FILE defined) skips it: 0x100 is
+ * not mapped in a console process, and the frame file carries the
+ * result there. */
 static void publish(const struct TestResult *r)
 {
+#ifndef CGOV_OUT_FILE
     volatile struct TestResult *fixed =
         (volatile struct TestResult *)RESULT_ADDR;
     fixed->status = r->status;
     fixed->pid = r->pid;
     fixed->spawn_rc = r->spawn_rc;
     fixed->polls = r->polls;
+#endif
     write_tty_result(r);
 }
 
@@ -88,6 +102,15 @@ int main(void)
     spawn_block[3] = 0;    /* argv terminator */
     spawn_block[4] = 0;    /* envp terminator */
 
+#ifdef CGOV_OUT_FILE
+    /* The console build leaves a stage in the result file before the
+     * spawn and after it returns, so a run that never finishes still
+     * says how far it got: status 0x80 = the spawn was entered, 0x40 =
+     * it returned and the poll began. The last write is the final
+     * result. */
+    result.status = 0x80;
+    CGOV_OUT_FILE_WRITE(&result, sizeof(result));
+#endif
     rc = syscall6_s32(
         SYS_PROCESS_SPAWN,
         (unsigned long)&pid_out,
@@ -96,6 +119,9 @@ int main(void)
         (unsigned long)spawn_block,
         sizeof(spawn_block) + sizeof(child_path),
         0);
+#ifdef CGOV_OUT_FILE
+    result.status = 0;
+#endif
     result.spawn_rc = (unsigned int)rc;
     if (rc != 0) {
         result.status |= 0x1;
@@ -103,6 +129,11 @@ int main(void)
         return (int)result.status;
     }
     result.pid = pid_out;
+#ifdef CGOV_OUT_FILE
+    result.status = 0x40;
+    CGOV_OUT_FILE_WRITE(&result, sizeof(result));
+    result.status = 0;
+#endif
 
     /* CELL_OK while the child lives; CELL_ESRCH once it has
      * exited. Any nonzero return ends the poll. */

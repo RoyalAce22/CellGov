@@ -86,7 +86,13 @@ int main(void)
     unsigned long long thread_exit = 0;
     s32 ret;
 
+    /* The console child (build.sh defines CGOV_PS3_USRDIR for it) skips
+     * the store: 0x100 is not mapped in a console process. */
+#ifndef CGOV_PS3_USRDIR
     *magic = MAGIC;
+#else
+    (void)magic;
+#endif
 
     ret = cgov_ppu_thread_create(
         &tid,

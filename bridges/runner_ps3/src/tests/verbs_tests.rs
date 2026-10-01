@@ -505,6 +505,50 @@ fn run_and_capture_refuse_a_console_away_from_the_xmb_and_deploy_does_not() {
 }
 
 #[test]
+fn deploy_run_and_capture_refuse_a_test_its_manifest_calls_not_portable() {
+    let mut bench = Bench::new();
+    let text = std::fs::read_to_string(&bench.manifest).expect("manifest");
+    std::fs::write(
+        &bench.manifest,
+        text.replace(
+            "[ps3]",
+            "[ps3]\nportable = false\nnot_portable_reason = \"hangs the console\"",
+        ),
+    )
+    .expect("manifest");
+    for (verb, extra) in [
+        ("deploy", vec![]),
+        ("run", vec![]),
+        ("capture", vec!["--harness-revision", "0123456789abcdef"]),
+    ] {
+        let failure = bench.on_console(verb, &extra).expect_err("not portable");
+        assert_eq!(failure.error.exit_code(), ExitCode::Refused, "{verb}");
+        assert!(
+            failure
+                .error
+                .to_string()
+                .contains("is not portable: hangs the console"),
+            "{verb}: {}",
+            failure.error
+        );
+    }
+    assert!(
+        bench
+            .console
+            .calls
+            .iter()
+            .all(|call| call == "FETCH /cpursx.ps3"),
+        "a refused verb changes nothing: {:?}",
+        bench.console.calls
+    );
+    transcript_of(
+        bench
+            .on_console("cleanup", &[])
+            .expect("cleanup stays open"),
+    );
+}
+
+#[test]
 fn a_capture_records_the_reading_it_started_from() {
     let mut bench = Bench::new();
     bench
