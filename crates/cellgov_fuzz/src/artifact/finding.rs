@@ -19,7 +19,7 @@ use super::schema::{
 };
 
 /// Schema version a finding artifact carries.
-pub const FINDING_ARTIFACT_VERSION: u32 = 2;
+pub const FINDING_ARTIFACT_VERSION: u32 = 3;
 
 /// Portable, versioned record for one retained finding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

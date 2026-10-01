@@ -49,8 +49,9 @@ pub use error::{
 };
 pub use parameters::ParameterStream;
 pub use report::{
-    CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
-    InstructionIdentity, OutcomeIdentity, ReductionOutcome, RunOutcome, SemanticFingerprint,
+    CheckIdentity, ComponentIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun,
+    FuzzTarget, InstructionIdentity, OutcomeIdentity, ReductionOutcome, RunOutcome,
+    SemanticFingerprint,
 };
 pub use retention::{
     BoundaryClass, CampaignDistribution, CrossReferenceAsymmetry, EvaluationDistribution,

@@ -49,6 +49,7 @@ pub(super) fn record_target_panic(
             divergence: DivergenceClass::TargetPanic,
             outcome: None,
             effect: None,
+            component: None,
         },
         kind: FindingKind::TargetPanic,
         replay: ReplayCoordinates::new(

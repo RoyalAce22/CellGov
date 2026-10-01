@@ -14,3 +14,7 @@ pub use store::*;
 #[cfg(test)]
 #[path = "../tests/artifact_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/artifact_parse_version_tests.rs"]
+mod parse_version_tests;

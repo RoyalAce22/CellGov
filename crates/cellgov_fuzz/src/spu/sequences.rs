@@ -6,7 +6,6 @@ use std::collections::BTreeSet;
 
 use cellgov_effects::Effect;
 use cellgov_spu::fuzz::SpuOutcomeClass;
-use cellgov_spu::observation::SpuObservationComponent;
 use cellgov_spu::state::SPU_LS_SIZE;
 
 use super::assess::assess_sequence_case;
@@ -17,7 +16,7 @@ use super::execute::{
 use super::generate::{
     case_descriptors, random_state, state_aware_state, structured_sequence, GeneratedSequence,
 };
-use super::record::{guarded_run, record, record_target_panic};
+use super::record::{footprint_fingerprint, guarded_run, record, record_target_panic};
 use super::sequence_relations::{replay_stored, run_relation_check};
 use crate::boundary::call_target;
 use crate::case::CaseEligibility;
@@ -284,6 +283,7 @@ fn run_sequences_inner(
                         divergence: DivergenceClass::ArchitecturalState,
                         outcome: None,
                         effect: None,
+                        component: None,
                     },
                     words.clone(),
                     iteration,
@@ -302,42 +302,27 @@ fn run_sequences_inner(
                     divergence: DivergenceClass::ControlFlow,
                     outcome: None,
                     effect: None,
+                    component: None,
                 },
                 words.clone(),
                 iteration,
             )?;
         }
         for component in &first.0.footprint_violations {
-            let divergence = match component {
-                SpuObservationComponent::ProgramCounter => DivergenceClass::ControlFlow,
-                SpuObservationComponent::Effects => DivergenceClass::Effect,
-                SpuObservationComponent::Outcome | SpuObservationComponent::FaultDiscard => {
-                    DivergenceClass::Outcome
-                }
-                SpuObservationComponent::Registers
-                | SpuObservationComponent::LocalStore
-                | SpuObservationComponent::Channels
-                | SpuObservationComponent::Reservation
-                | SpuObservationComponent::Fpscr
-                | SpuObservationComponent::Signals
-                | SpuObservationComponent::Interrupts => DivergenceClass::ArchitecturalState,
-            };
             asymmetry = asymmetry.max(CrossReferenceAsymmetry::State);
             record(
                 report,
                 FindingKind::IllegalFootprint,
-                SemanticFingerprint {
-                    target: FuzzTarget::SpuSequence,
-                    instruction_kind: None,
-                    check: CheckIdentity::AllowedFootprint,
-                    divergence,
-                    outcome: first
+                footprint_fingerprint(
+                    FuzzTarget::SpuSequence,
+                    None,
+                    *component,
+                    first
                         .0
                         .terminal_outcome
                         .as_ref()
                         .map(|outcome| outcome_identity(SpuOutcomeClass::from_outcome(outcome))),
-                    effect: None,
-                },
+                ),
                 words.clone(),
                 iteration,
             )?;

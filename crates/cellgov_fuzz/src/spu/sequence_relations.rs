@@ -23,8 +23,8 @@ use super::counterexample::{reduce_instance, stored_counterexamples, RelationCou
 use super::record::record;
 use crate::error::{FuzzError, InvariantError};
 use crate::report::{
-    CheckIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzTarget, SemanticFingerprint,
-    SequenceRelationDivergence, StoredReplay,
+    CheckIdentity, ComponentIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzTarget,
+    SemanticFingerprint, SequenceRelationDivergence, StoredReplay,
 };
 use crate::retention::CrossReferenceAsymmetry;
 use crate::rng::Rng;
@@ -703,6 +703,7 @@ pub(super) fn run_relation_check(
                     divergence: divergence_class(divergence.first_component),
                     outcome: None,
                     effect: None,
+                    component: Some(ComponentIdentity::Spu(divergence.first_component)),
                 },
                 words,
                 case_index,

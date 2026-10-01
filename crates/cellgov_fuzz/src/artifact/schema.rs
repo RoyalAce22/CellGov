@@ -24,6 +24,8 @@ pub struct ArtifactFingerprint {
     pub outcome: Option<String>,
     /// Guest-visible effect class, when relevant.
     pub effect: Option<String>,
+    /// Observation component the finding diverged in, when the check names one.
+    pub component: Option<String>,
 }
 
 impl From<&SemanticFingerprint> for ArtifactFingerprint {
@@ -35,6 +37,7 @@ impl From<&SemanticFingerprint> for ArtifactFingerprint {
             divergence: format!("{:?}", source.divergence),
             outcome: source.outcome.map(|outcome| format!("{outcome:?}")),
             effect: source.effect.map(|effect| format!("{effect:?}")),
+            component: source.component.map(|component| format!("{component:?}")),
         }
     }
 }

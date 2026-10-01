@@ -25,6 +25,10 @@ mod tests;
 mod outcome_tests;
 
 #[cfg(test)]
+#[path = "tests/component_clause_tests.rs"]
+mod component_clause_tests;
+
+#[cfg(test)]
 #[path = "tests/guard_tests.rs"]
 mod guard_tests;
 

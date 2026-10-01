@@ -29,6 +29,7 @@ fn finding(kind: FindingKind, case_index: u64) -> Finding {
             divergence: DivergenceClass::Outcome,
             outcome: None,
             effect: None,
+            component: None,
         },
         kind,
         replay: ReplayCoordinates::new(
@@ -834,6 +835,7 @@ fn fingerprints_order_by_target_before_check() {
         divergence: DivergenceClass::Undefined,
         outcome: None,
         effect: None,
+        component: None,
     };
     let later_target = SemanticFingerprint {
         target: FuzzTarget::SpuInstruction,
@@ -842,6 +844,7 @@ fn fingerprints_order_by_target_before_check() {
         divergence: DivergenceClass::TargetPanic,
         outcome: None,
         effect: None,
+        component: None,
     };
 
     assert!(earlier_target < later_target);

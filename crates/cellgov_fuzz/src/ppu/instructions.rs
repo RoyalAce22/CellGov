@@ -25,8 +25,8 @@ use crate::case::CaseEligibility;
 use crate::error::{FuzzError, InvariantError};
 use crate::registry::ppu_descriptors;
 use crate::report::{
-    CheckIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
-    InstructionIdentity, OutcomeIdentity, SemanticFingerprint,
+    CheckIdentity, ComponentIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzRun,
+    FuzzTarget, InstructionIdentity, OutcomeIdentity, SemanticFingerprint,
 };
 use crate::retention::CrossReferenceAsymmetry;
 use crate::rng::Rng;
@@ -208,6 +208,7 @@ fn run_instructions_inner(
                     divergence: DivergenceClass::Outcome,
                     outcome: Some(outcome_identity(outcome)),
                     effect: None,
+                    component: None,
                 },
                 vec![raw],
                 iteration,
@@ -232,6 +233,7 @@ fn run_instructions_inner(
                     divergence: DivergenceClass::Effect,
                     outcome: None,
                     effect: Some(effect),
+                    component: None,
                 },
                 vec![raw],
                 iteration,
@@ -281,6 +283,7 @@ fn run_instructions_inner(
                         divergence: DivergenceClass::ArchitecturalState,
                         outcome: None,
                         effect: None,
+                        component: None,
                     },
                     vec![raw],
                     iteration,
@@ -451,10 +454,11 @@ fn run_metamorphic_checks(
         let comparison = baseline
             .observation
             .compare_metamorphic(&partner.observation, case.permitted_delta);
-        if comparison.disallowed_differences.is_empty() {
+        let Some((component, divergence, asymmetry)) =
+            metamorphic_divergence(&comparison.disallowed_differences)
+        else {
             continue;
-        }
-        let (divergence, asymmetry) = metamorphic_divergence(&comparison.disallowed_differences);
+        };
         strongest = strongest.max(asymmetry);
         record(
             report,
@@ -466,6 +470,7 @@ fn run_metamorphic_checks(
                 divergence,
                 outcome: None,
                 effect: None,
+                component: Some(ComponentIdentity::Ppu(component)),
             },
             vec![raw, case.partner_word],
             iteration,
@@ -484,23 +489,50 @@ fn relation_check(relation: PpuMetamorphicRelation) -> CheckIdentity {
     }
 }
 
+/// The component that decides a metamorphic finding's class, with that
+/// class and its asymmetry; `None` when nothing differs.
+///
+/// The first present component decides:
+///
+/// 1. a discarded fault;
+/// 2. an effect difference, staged before committed;
+/// 3. an outcome difference;
+/// 4. the lowest state component in observation order.
 fn metamorphic_divergence(
     differences: &BTreeSet<PpuObservationComponent>,
-) -> (DivergenceClass, CrossReferenceAsymmetry) {
-    if differences.contains(&PpuObservationComponent::FaultDiscard) {
-        (DivergenceClass::Outcome, CrossReferenceAsymmetry::Fault)
-    } else if differences.contains(&PpuObservationComponent::StagedEffects)
-        || differences.contains(&PpuObservationComponent::CommittedEffects)
-    {
-        (DivergenceClass::Effect, CrossReferenceAsymmetry::Effect)
-    } else if differences.contains(&PpuObservationComponent::Outcome) {
-        (DivergenceClass::Outcome, CrossReferenceAsymmetry::Outcome)
-    } else {
-        (
+) -> Option<(
+    PpuObservationComponent,
+    DivergenceClass,
+    CrossReferenceAsymmetry,
+)> {
+    let component = [
+        PpuObservationComponent::FaultDiscard,
+        PpuObservationComponent::StagedEffects,
+        PpuObservationComponent::CommittedEffects,
+        PpuObservationComponent::Outcome,
+    ]
+    .into_iter()
+    .find(|component| differences.contains(component))
+    .or_else(|| differences.iter().next().copied())?;
+    let (divergence, asymmetry) = match component {
+        PpuObservationComponent::FaultDiscard => {
+            (DivergenceClass::Outcome, CrossReferenceAsymmetry::Fault)
+        }
+        PpuObservationComponent::StagedEffects | PpuObservationComponent::CommittedEffects => {
+            (DivergenceClass::Effect, CrossReferenceAsymmetry::Effect)
+        }
+        PpuObservationComponent::Outcome => {
+            (DivergenceClass::Outcome, CrossReferenceAsymmetry::Outcome)
+        }
+        PpuObservationComponent::State
+        | PpuObservationComponent::Memory
+        | PpuObservationComponent::Reservations
+        | PpuObservationComponent::StoreBuffer => (
             DivergenceClass::ArchitecturalState,
             CrossReferenceAsymmetry::State,
-        )
-    }
+        ),
+    };
+    Some((component, divergence, asymmetry))
 }
 
 fn record_invalid_metamorphic_partner(
@@ -522,6 +554,7 @@ fn record_invalid_metamorphic_partner(
             divergence,
             outcome,
             effect: None,
+            component: None,
         },
         original_words,
         iteration,
@@ -543,6 +576,10 @@ mod record_cr6_tests;
 #[cfg(test)]
 #[path = "tests/invalid_form_tests.rs"]
 mod invalid_form_tests;
+
+#[cfg(test)]
+#[path = "tests/metamorphic_component_tests.rs"]
+mod metamorphic_component_tests;
 
 #[cfg(test)]
 #[path = "tests/reservation_ea_tests.rs"]

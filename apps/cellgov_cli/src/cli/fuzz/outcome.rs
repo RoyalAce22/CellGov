@@ -58,13 +58,14 @@ impl ArtifactRecordText for ArtifactRecord {
 
     fn render(&self, prefix: &str) -> String {
         format!(
-            "{prefix}version={} seed={} case={} kind={:?} check={} divergence={} reduction={} artifact={} {}\n",
+            "{prefix}version={} seed={} case={} kind={:?} check={} divergence={}{} reduction={} artifact={} {}\n",
             self.campaign_version,
             self.seed,
             self.case_index,
             self.finding_kind,
             self.fingerprint.check,
             self.fingerprint.divergence,
+            component_clause(self.fingerprint.component.as_deref()),
             describe_reduction(&self.reduction),
             if self.stored { "stored" } else { "not stored" },
             self.replay_command(),
@@ -207,13 +208,14 @@ pub(crate) fn render_smoke_outcome(campaigns: usize, outcome: SmokeOutcome) -> S
 #[must_use]
 pub(crate) fn render_promotion(regression: &Regression) -> String {
     format!(
-        "fuzz promote: {} status={:?} profile={:?} kind={} check={} divergence={} artifact={}\n",
+        "fuzz promote: {} status={:?} profile={:?} kind={} check={} divergence={}{} artifact={}\n",
         regression.entry.name,
         regression.entry.status,
         regression.entry.profile,
         regression.artifact.finding_kind,
         regression.artifact.fingerprint.check,
         regression.artifact.fingerprint.divergence,
+        component_clause(regression.artifact.fingerprint.component.as_deref()),
         regression.path.display(),
     )
 }
@@ -422,14 +424,21 @@ pub(crate) fn render_comparison(comparison: &Comparison) -> String {
     text
 }
 
-/// The retained artifacts that share one finding kind, check and
-/// divergence class: one summary line, however many cases hit it.
+/// The retained artifacts that share one finding kind, check, divergence
+/// class and named component: one summary line, however many cases hit it.
 struct FindingGroup<'a> {
     kind: FindingKind,
     check: &'a str,
     divergence: &'a str,
+    component: Option<&'a str>,
     /// In storage order.
     records: Vec<&'a ArtifactRecord>,
+}
+
+/// The ` component=<name>` clause of a finding line, empty when the
+/// fingerprint names no component.
+fn component_clause(component: Option<&str>) -> String {
+    component.map_or_else(String::new, |component| format!(" component={component}"))
 }
 
 /// Instruction kinds a group line names before it counts the rest.
@@ -458,11 +467,12 @@ impl FindingGroup<'_> {
             listed
         };
         let mut line = format!(
-            "fuzz: findings={} kind={:?} check={} divergence={} instructions={instructions}",
+            "fuzz: findings={} kind={:?} check={} divergence={}{} instructions={instructions}",
             self.records.len(),
             self.kind,
             self.check,
             self.divergence,
+            component_clause(self.component),
         );
         let (mut reduced, mut irreducible, mut failed) = (0usize, 0usize, 0usize);
         for record in &self.records {
@@ -499,10 +509,12 @@ fn finding_groups(records: &[ArtifactRecord]) -> Vec<FindingGroup<'_>> {
     for record in records {
         let check = record.fingerprint.check.as_str();
         let divergence = record.fingerprint.divergence.as_str();
+        let component = record.fingerprint.component.as_deref();
         let same = |group: &&mut FindingGroup<'_>| {
             group.kind == record.finding_kind
                 && group.check == check
                 && group.divergence == divergence
+                && group.component == component
         };
         match groups.iter_mut().find(same) {
             Some(group) => group.records.push(record),
@@ -510,6 +522,7 @@ fn finding_groups(records: &[ArtifactRecord]) -> Vec<FindingGroup<'_>> {
                 kind: record.finding_kind,
                 check,
                 divergence,
+                component,
                 records: vec![record],
             }),
         }
@@ -521,6 +534,7 @@ fn finding_groups(records: &[ArtifactRecord]) -> Vec<FindingGroup<'_>> {
             .then_with(|| a.kind.cmp(&b.kind))
             .then_with(|| a.check.cmp(b.check))
             .then_with(|| a.divergence.cmp(b.divergence))
+            .then_with(|| a.component.cmp(&b.component))
     });
     groups
 }
@@ -578,12 +592,13 @@ pub(crate) fn render_campaign_summary(
 #[must_use]
 pub(crate) fn render_replay_outcome(outcome: &ReplayOutcome) -> String {
     format!(
-        "fuzz replay: reproduced case={} reduced={} kind={} check={} divergence={} words={:?}\n",
+        "fuzz replay: reproduced case={} reduced={} kind={} check={} divergence={}{} words={:?}\n",
         outcome.case_index,
         outcome.reduced,
         outcome.finding_kind,
         outcome.fingerprint.check,
         outcome.fingerprint.divergence,
+        component_clause(outcome.fingerprint.component.as_deref()),
         outcome.words
     )
 }

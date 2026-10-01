@@ -24,10 +24,11 @@ fn fingerprint() -> ArtifactFingerprint {
         divergence: "Outcome".into(),
         outcome: None,
         effect: None,
+        component: None,
     }
 }
 
-fn record(stored: bool, reduction: ArtifactReduction) -> ArtifactRecord {
+pub(super) fn record(stored: bool, reduction: ArtifactReduction) -> ArtifactRecord {
     ArtifactRecord {
         path: PathBuf::from("out").join("finding.json"),
         campaign_version: 3,
@@ -40,7 +41,7 @@ fn record(stored: bool, reduction: ArtifactReduction) -> ArtifactRecord {
     }
 }
 
-fn summary_with_findings(findings: u64) -> CampaignSummary {
+pub(super) fn summary_with_findings(findings: u64) -> CampaignSummary {
     CampaignSummary {
         cases: 4,
         decoded: 4,
@@ -72,6 +73,7 @@ fn a_relation_finding_and_its_counterexamples_print_the_row_name_as_the_check() 
         divergence: DivergenceClass::ArchitecturalState,
         outcome: None,
         effect: None,
+        component: None,
     });
     assert_eq!(fingerprint.check, "Mpy32");
     let mut summary = summary_with_findings(1);

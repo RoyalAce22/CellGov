@@ -105,13 +105,21 @@ fn seeded_effect_and_outcome_leaks_receive_typed_divergence_classes() {
         .collect();
     assert_eq!(
         metamorphic_divergence(&effect),
-        (DivergenceClass::Effect, CrossReferenceAsymmetry::Effect)
+        Some((
+            PpuObservationComponent::CommittedEffects,
+            DivergenceClass::Effect,
+            CrossReferenceAsymmetry::Effect
+        ))
     );
 
     let outcome = [PpuObservationComponent::Outcome].into_iter().collect();
     assert_eq!(
         metamorphic_divergence(&outcome),
-        (DivergenceClass::Outcome, CrossReferenceAsymmetry::Outcome)
+        Some((
+            PpuObservationComponent::Outcome,
+            DivergenceClass::Outcome,
+            CrossReferenceAsymmetry::Outcome
+        ))
     );
 
     let mixed = [
@@ -122,7 +130,11 @@ fn seeded_effect_and_outcome_leaks_receive_typed_divergence_classes() {
     .collect();
     assert_eq!(
         metamorphic_divergence(&mixed),
-        (DivergenceClass::Effect, CrossReferenceAsymmetry::Effect)
+        Some((
+            PpuObservationComponent::CommittedEffects,
+            DivergenceClass::Effect,
+            CrossReferenceAsymmetry::Effect
+        ))
     );
 
     let fault = [PpuObservationComponent::FaultDiscard]
@@ -130,8 +142,28 @@ fn seeded_effect_and_outcome_leaks_receive_typed_divergence_classes() {
         .collect();
     assert_eq!(
         metamorphic_divergence(&fault),
-        (DivergenceClass::Outcome, CrossReferenceAsymmetry::Fault)
+        Some((
+            PpuObservationComponent::FaultDiscard,
+            DivergenceClass::Outcome,
+            CrossReferenceAsymmetry::Fault
+        ))
     );
+
+    let state = [
+        PpuObservationComponent::Memory,
+        PpuObservationComponent::State,
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        metamorphic_divergence(&state),
+        Some((
+            PpuObservationComponent::State,
+            DivergenceClass::ArchitecturalState,
+            CrossReferenceAsymmetry::State
+        ))
+    );
+    assert_eq!(metamorphic_divergence(&BTreeSet::new()), None);
 }
 
 #[test]
@@ -269,6 +301,8 @@ fn undeclared_descriptor_relation_is_a_visible_finding() {
         DivergenceClass::ReferenceDisagreement
     );
     assert_eq!(report.findings[0].fingerprint.outcome, None);
+    // Nothing was compared, so no component is named.
+    assert_eq!(report.findings[0].fingerprint.component, None);
 }
 
 #[test]

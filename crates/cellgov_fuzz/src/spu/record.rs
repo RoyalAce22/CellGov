@@ -1,13 +1,35 @@
 //! The findings an engine records when a contract check fails or the target
 //! panics, and the guarded run that wraps every SPU engine.
 
+use cellgov_spu::observation::SpuObservationComponent;
+
+use super::sequence_relations::divergence_class;
 use crate::boundary::call_harness;
 use crate::error::{FuzzError, InvariantError};
 use crate::report::{
-    CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
-    InstructionIdentity, ReductionOutcome, SemanticFingerprint,
+    CheckIdentity, ComponentIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun,
+    FuzzTarget, InstructionIdentity, OutcomeIdentity, ReductionOutcome, SemanticFingerprint,
 };
 use crate::{FuzzConfig, ReplayCoordinates, TargetPanicPayload};
+
+/// The identity of a write outside the allowed footprint, in `component`;
+/// see [`ComponentIdentity`] for why the component is part of it.
+pub(super) fn footprint_fingerprint(
+    target: FuzzTarget,
+    instruction_kind: Option<InstructionIdentity>,
+    component: SpuObservationComponent,
+    outcome: Option<OutcomeIdentity>,
+) -> SemanticFingerprint {
+    SemanticFingerprint {
+        target,
+        instruction_kind,
+        check: CheckIdentity::AllowedFootprint,
+        divergence: divergence_class(component),
+        outcome,
+        effect: None,
+        component: Some(ComponentIdentity::Spu(component)),
+    }
+}
 
 pub(super) fn record(
     report: &mut FuzzReport,
@@ -49,6 +71,7 @@ pub(super) fn record_target_panic(
             divergence: DivergenceClass::TargetPanic,
             outcome: None,
             effect: None,
+            component: None,
         },
         kind: FindingKind::TargetPanic,
         replay: ReplayCoordinates::new(
@@ -96,3 +119,7 @@ pub(super) fn guarded_run(
 #[cfg(test)]
 #[path = "tests/record_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/footprint_fingerprint_tests.rs"]
+mod footprint_fingerprint_tests;

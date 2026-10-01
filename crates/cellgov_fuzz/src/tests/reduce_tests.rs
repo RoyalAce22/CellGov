@@ -426,6 +426,7 @@ fn synthetic_finding(target: FuzzTarget, words: Vec<u32>) -> Finding {
             divergence: DivergenceClass::Outcome,
             outcome: None,
             effect: None,
+            component: None,
         },
         kind: FindingKind::IllegalOutcome,
         replay: ReplayCoordinates {

@@ -241,6 +241,7 @@ fn run_sequences_inner(
                         divergence: DivergenceClass::ArchitecturalState,
                         outcome: None,
                         effect: None,
+                        component: None,
                     },
                     words.clone(),
                     iteration,

@@ -19,14 +19,15 @@ use super::execute::{
 use super::generate::{
     case_descriptors, random_state, state_aware_state, structured_generated_word, GeneratedWord,
 };
-use super::record::{guarded_run, record, record_target_panic};
+use super::record::{footprint_fingerprint, guarded_run, record, record_target_panic};
+use super::sequence_relations::divergence_class;
 use crate::boundary::call_target;
 use crate::case::CaseEligibility;
 use crate::error::{FuzzError, InvariantError};
 use crate::registry::spu_descriptors;
 use crate::report::{
-    CheckIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
-    InstructionIdentity, SemanticFingerprint,
+    CheckIdentity, ComponentIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzRun,
+    FuzzTarget, InstructionIdentity, SemanticFingerprint,
 };
 use crate::retention::CrossReferenceAsymmetry;
 use crate::rng::Rng;
@@ -229,6 +230,7 @@ fn run_instructions_inner(
                         divergence: DivergenceClass::ArchitecturalState,
                         outcome: None,
                         effect: None,
+                        component: None,
                     },
                     vec![raw],
                     iteration,
@@ -251,6 +253,7 @@ fn run_instructions_inner(
                     divergence: DivergenceClass::Outcome,
                     outcome: Some(outcome_identity(outcome)),
                     effect: None,
+                    component: None,
                 },
                 vec![raw],
                 iteration,
@@ -273,6 +276,7 @@ fn run_instructions_inner(
                     divergence: DivergenceClass::Effect,
                     outcome: None,
                     effect: Some(effect),
+                    component: None,
                 },
                 vec![raw],
                 iteration,
@@ -283,33 +287,18 @@ fn run_instructions_inner(
             &first.state,
             &first.outcome,
         ) {
-            let divergence = match component {
-                SpuObservationComponent::ProgramCounter => DivergenceClass::ControlFlow,
-                SpuObservationComponent::Effects => DivergenceClass::Effect,
-                SpuObservationComponent::Registers
-                | SpuObservationComponent::LocalStore
-                | SpuObservationComponent::Channels
-                | SpuObservationComponent::Reservation
-                | SpuObservationComponent::Outcome
-                | SpuObservationComponent::FaultDiscard
-                | SpuObservationComponent::Fpscr
-                | SpuObservationComponent::Signals
-                | SpuObservationComponent::Interrupts => DivergenceClass::ArchitecturalState,
-            };
             asymmetry = asymmetry.max(CrossReferenceAsymmetry::State);
             record(
                 report,
                 FindingKind::IllegalFootprint,
-                SemanticFingerprint {
-                    target: FuzzTarget::SpuInstruction,
-                    instruction_kind: Some(identity),
-                    check: CheckIdentity::AllowedFootprint,
-                    divergence,
-                    outcome: Some(outcome_identity(SpuOutcomeClass::from_outcome(
+                footprint_fingerprint(
+                    FuzzTarget::SpuInstruction,
+                    Some(identity),
+                    component,
+                    Some(outcome_identity(SpuOutcomeClass::from_outcome(
                         &first.outcome,
                     ))),
-                    effect: None,
-                },
+                ),
                 vec![raw],
                 iteration,
             )?;
@@ -397,6 +386,7 @@ fn run_metamorphic_checks(
                         divergence: DivergenceClass::ReferenceDisagreement,
                         outcome: None,
                         effect: None,
+                        component: None,
                     },
                     vec![raw],
                     iteration,
@@ -430,6 +420,7 @@ fn run_metamorphic_checks(
                         divergence: DivergenceClass::Outcome,
                         outcome: None,
                         effect: None,
+                        component: None,
                     },
                     vec![raw, case.partner_word],
                     iteration,
@@ -457,24 +448,9 @@ fn run_metamorphic_checks(
             &partner.outcome,
         )
         .differences;
-        if differences.is_empty() {
+        let Some((component, asymmetry)) = metamorphic_divergence(&differences) else {
             continue;
-        }
-        let (divergence, asymmetry) =
-            if differences.contains(&SpuObservationComponent::FaultDiscard) {
-                (DivergenceClass::Outcome, CrossReferenceAsymmetry::Fault)
-            } else if differences.contains(&SpuObservationComponent::Effects) {
-                (DivergenceClass::Effect, CrossReferenceAsymmetry::Effect)
-            } else if differences.contains(&SpuObservationComponent::Outcome) {
-                (DivergenceClass::Outcome, CrossReferenceAsymmetry::Outcome)
-            } else if differences.contains(&SpuObservationComponent::ProgramCounter) {
-                (DivergenceClass::ControlFlow, CrossReferenceAsymmetry::State)
-            } else {
-                (
-                    DivergenceClass::ArchitecturalState,
-                    CrossReferenceAsymmetry::State,
-                )
-            };
+        };
         strongest = strongest.max(asymmetry);
         record(
             report,
@@ -483,9 +459,10 @@ fn run_metamorphic_checks(
                 target: FuzzTarget::SpuInstruction,
                 instruction_kind: Some(identity),
                 check,
-                divergence,
+                divergence: divergence_class(component),
                 outcome: None,
                 effect: None,
+                component: Some(ComponentIdentity::Spu(component)),
             },
             vec![raw, case.partner_word],
             iteration,
@@ -494,6 +471,48 @@ fn run_metamorphic_checks(
     Ok(strongest)
 }
 
+/// The component that decides a metamorphic finding's class, with its
+/// asymmetry; `None` when nothing differs.
+///
+/// The first present component decides:
+///
+/// 1. a discarded fault;
+/// 2. an effect difference;
+/// 3. an outcome difference;
+/// 4. a program-counter difference;
+/// 5. the lowest state component in observation order.
+fn metamorphic_divergence(
+    differences: &BTreeSet<SpuObservationComponent>,
+) -> Option<(SpuObservationComponent, CrossReferenceAsymmetry)> {
+    let component = [
+        SpuObservationComponent::FaultDiscard,
+        SpuObservationComponent::Effects,
+        SpuObservationComponent::Outcome,
+        SpuObservationComponent::ProgramCounter,
+    ]
+    .into_iter()
+    .find(|component| differences.contains(component))
+    .or_else(|| differences.iter().next().copied())?;
+    let asymmetry = match component {
+        SpuObservationComponent::FaultDiscard => CrossReferenceAsymmetry::Fault,
+        SpuObservationComponent::Effects => CrossReferenceAsymmetry::Effect,
+        SpuObservationComponent::Outcome => CrossReferenceAsymmetry::Outcome,
+        SpuObservationComponent::ProgramCounter
+        | SpuObservationComponent::Registers
+        | SpuObservationComponent::LocalStore
+        | SpuObservationComponent::Channels
+        | SpuObservationComponent::Reservation
+        | SpuObservationComponent::Fpscr
+        | SpuObservationComponent::Signals
+        | SpuObservationComponent::Interrupts => CrossReferenceAsymmetry::State,
+    };
+    Some((component, asymmetry))
+}
+
 #[cfg(test)]
 #[path = "tests/instructions_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/metamorphic_component_tests.rs"]
+mod metamorphic_component_tests;

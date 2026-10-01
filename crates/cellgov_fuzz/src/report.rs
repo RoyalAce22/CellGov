@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_effects::EffectKind;
 use cellgov_ppu::instruction::fuzz::PpuFuzzKind;
+use cellgov_ppu::observation::PpuObservationComponent;
 use cellgov_spu::instruction::SpuInstructionKind;
+use cellgov_spu::observation::SpuObservationComponent;
 
 use crate::case::{CaseAssessment, CaseEligibility, CaseFeature, EligibilityReason};
 use crate::error::{FuzzError, InvariantError};
@@ -156,6 +158,20 @@ pub enum OutcomeIdentity {
     SpuStop,
 }
 
+/// The observation component a state-comparing check found different.
+///
+/// Several components share one divergence class. A footprint or
+/// relation finding names the component as well, so two stray writes to
+/// different components are two finding identities. One identity in two
+/// bounded finding slots would hide a third finding class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ComponentIdentity {
+    /// A component of a PPU observation.
+    Ppu(PpuObservationComponent),
+    /// A component of an SPU observation.
+    Spu(SpuObservationComponent),
+}
+
 /// Stable identity used to bucket and rank semantically equal findings.
 ///
 /// Fingerprints let callers group redundant failures before they rank diverse
@@ -178,6 +194,8 @@ pub struct SemanticFingerprint {
     pub outcome: Option<OutcomeIdentity>,
     /// Relevant effect class, when one exists.
     pub effect: Option<EffectKind>,
+    /// Observation component the check found different, when it names one.
+    pub component: Option<ComponentIdentity>,
 }
 
 /// A validation rule that failed.

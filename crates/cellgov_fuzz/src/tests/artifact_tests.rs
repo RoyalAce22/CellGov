@@ -48,6 +48,7 @@ fn sample() -> (FuzzFindingArtifact, FuzzRun) {
                 divergence: DivergenceClass::Outcome,
                 outcome: None,
                 effect: None,
+                component: None,
             },
             kind: FindingKind::IllegalOutcome,
             replay: ReplayCoordinates {
@@ -349,7 +350,7 @@ fn artifact_key_order_is_pinned() {
     assert_eq!(
         serde_json::to_string(&artifact).expect("serializes"),
         concat!(
-            r#"{"schema_version":2,"#,
+            r#"{"schema_version":3,"#,
             r#""campaign":{"campaign_version":4,"seed":7,"strategy":"structured","#,
             r#""schedule":{"cases":{"first":12,"count":1},"shard":{"index":0,"count":1},"cancellation":null},"#,
             r#""retention":{"capacity":256,"per_kind_capacity":8,"novelty_weight":8,"rarity_weight":4,"asymmetry_weight":16,"policy":"balanced"},"#,
@@ -358,7 +359,7 @@ fn artifact_key_order_is_pinned() {
             r#""original":{"replay":{"campaign_version":4,"target":"PpuInstruction","strategy":"structured","seed":7,"case_index":12,"sequence_words":32},"#,
             r#""words":[945815559],"state_source":"versioned_generator"},"#,
             r#""finding_kind":"IllegalOutcome","#,
-            r#""fingerprint":{"target":"PpuInstruction","instruction_kind":null,"check":"LegalOutcome","divergence":"Outcome","outcome":null,"effect":null},"#,
+            r#""fingerprint":{"target":"PpuInstruction","instruction_kind":null,"check":"LegalOutcome","divergence":"Outcome","outcome":null,"effect":null,"component":null},"#,
             r#""reference":{"kind":"local"},"#,
             r#""observation":{"first_instruction_kind":null,"instruction_kinds":[],"operands":"Ordinary","eligibility":"Eligible","outcome":null,"state_transition":"ArchitecturalState","effects":[],"boundaries":[],"sequence_depth":1,"asymmetry":"Outcome"},"#,
             r#""coverage":{"cases":1,"decoded":1,"eligible":0,"unsupported":0,"undefined":0,"finding_counts":{"IllegalOutcome":1}},"#,
