@@ -164,6 +164,21 @@ fn the_cfw_name_matches_alone_or_before_a_build_string() {
 }
 
 #[test]
+fn any_separator_that_is_not_a_letter_or_digit_starts_the_build_string() {
+    for observed in [
+        "EvilNAT-4.93",
+        "EvilNAT\t4.93",
+        "EvilNAT_4.93",
+        "EvilNAT (4.93)",
+    ] {
+        assert!(cfw_matches(observed, "EvilNAT"), "{observed:?}");
+    }
+    for observed in ["EvilNAT4.93", "EvilNAT\u{e9}"] {
+        assert!(!cfw_matches(observed, "EvilNAT"), "{observed:?}");
+    }
+}
+
+#[test]
 fn an_unknown_field_is_refused_at_load() {
     for text in [
         PROFILES.replace("cobra = \"8.5\"", "cobra = \"8.5\"\nwebman = \"1.47.48t\""),

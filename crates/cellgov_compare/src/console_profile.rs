@@ -194,11 +194,13 @@ impl ConsoleProfile {
 }
 
 /// The CFW name matches when the observed string is the name, or the
-/// name followed by a space and a build string.
+/// name followed by a separator and a build string. A separator is any
+/// character that is not a letter or a digit, so `EvilNAT 4.93`,
+/// `EvilNAT-4.93` and `EvilNAT\t4.93` match and `EvilNATX` does not.
 fn cfw_matches(observed: &str, name: &str) -> bool {
     observed
         .strip_prefix(name)
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
+        .is_some_and(|rest| rest.chars().next().is_none_or(|c| !c.is_alphanumeric()))
 }
 
 impl ConsoleProfiles {
