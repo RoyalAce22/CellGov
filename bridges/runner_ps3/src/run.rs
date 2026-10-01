@@ -537,26 +537,33 @@ impl WebmanConsole {
             operation: "connect",
             source,
         };
-        let stream = TcpStream::connect_timeout(&address, timeout).map_err(io)?;
+        let stream = TcpStream::connect_timeout(&address, timeout).map_err(|source| {
+            TransportError::Unreachable {
+                operation: "connect to",
+                address: format!("{}:{}", self.endpoint.host, address.port()),
+                source,
+            }
+        })?;
         stream.set_read_timeout(Some(timeout)).map_err(io)?;
         stream.set_write_timeout(Some(timeout)).map_err(io)?;
         Ok(stream)
     }
 
     fn connect_port(&self, port: u16) -> Result<TcpStream, TransportError> {
+        let unresolved = |source| TransportError::Unreachable {
+            operation: "resolve",
+            address: format!("{}:{port}", self.endpoint.host),
+            source,
+        };
         let address = (self.endpoint.host.as_str(), port)
             .to_socket_addrs()
-            .map_err(|source| TransportError::Io {
-                operation: "resolve",
-                source,
-            })?
+            .map_err(unresolved)?
             .next()
-            .ok_or_else(|| TransportError::Io {
-                operation: "resolve",
-                source: std::io::Error::new(
+            .ok_or_else(|| {
+                unresolved(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    format!("{} has no address", self.endpoint.host),
-                ),
+                    "the host has no address",
+                ))
             })?;
         self.connect(address)
     }

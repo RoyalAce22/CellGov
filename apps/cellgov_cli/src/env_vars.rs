@@ -143,6 +143,21 @@ const ENV_VARS: &[EnvVar] = &[
         purpose: "Discard observation output in a synthetic run.",
     },
     EnvVar {
+        name: "CELLGOV_PS3_MODEL",
+        scope: Scope::TestOnly,
+        purpose: "Name the console's model for the live PS3 runner suite.",
+    },
+    EnvVar {
+        name: "CELLGOV_PS3_CFW",
+        scope: Scope::TestOnly,
+        purpose: "Name the console's CFW for the live PS3 runner suite.",
+    },
+    EnvVar {
+        name: "CELLGOV_PS3_DEBUGGER",
+        scope: Scope::TestOnly,
+        purpose: "State none or attached for the live PS3 runner suite.",
+    },
+    EnvVar {
         name: "CELLGOV_RETAIN_SCRATCH",
         scope: Scope::TestOnly,
         purpose: "Retain a scratch directory after a test.",

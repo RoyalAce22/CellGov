@@ -489,3 +489,30 @@ fn a_result_path_that_answers_neither_200_nor_404_is_a_transport_error() {
         "{err:?}"
     );
 }
+
+#[test]
+fn a_console_that_does_not_answer_is_named_by_its_address() {
+    // A port that held a listener a moment ago and holds none now.
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .and_then(|listener| listener.local_addr())
+        .expect("a free port")
+        .port();
+    let mut console = WebmanConsole::new(Endpoint {
+        http_port: port,
+        io_timeout_ms: 2_000,
+        ..Endpoint::new("127.0.0.1")
+    });
+    let error = console
+        .fetch("/cpursx.ps3", &mut Transcript::new())
+        .expect_err("nothing listens");
+    assert!(
+        matches!(&error, TransportError::Unreachable { address, .. } if *address == format!("127.0.0.1:{port}")),
+        "{error:?}"
+    );
+    assert!(
+        error
+            .to_string()
+            .starts_with(&format!("connect to 127.0.0.1:{port}: ")),
+        "{error}"
+    );
+}

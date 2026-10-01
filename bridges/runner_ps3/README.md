@@ -171,6 +171,22 @@ existing capture is a refusal. The emulator baselines follow the same
 rule, in
 [`tests/scenario_observations/README.md`](../../tests/scenario_observations/README.md).
 
+## The live suite
+
+`cargo test -p runner_ps3 --features ps3-hardware --test live_console`
+runs the runner against the console. It needs `CELLGOV_PS3_HOST` and
+`CELLGOV_PS3_PROFILE`, and the three facts the status page does not
+state: `CELLGOV_PS3_MODEL`, `CELLGOV_PS3_CFW` and `CELLGOV_PS3_DEBUGGER`
+(`none` or `attached`). It also needs the PS3 build of
+`tests/micro/spu_fixed_value`. It checks that the console satisfies the
+claimed profile, that a capture of `spu_fixed_value` reproduces the
+committed frame byte for byte, and that a console left dirty is refused
+with the command that clears it, then cleans it up.
+
+With the feature on, a missing variable, a missing build or a console
+that does not answer is a failure naming it, never a skip. CI
+type-checks the suite and never runs it.
+
 ## Safety
 
 The runner sends only what the loop needs: the status page, the mount

@@ -67,6 +67,18 @@ impl Endpoint {
 /// Why an exchange with the console failed.
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
+    /// The console's address did not resolve, or did not accept a
+    /// connection: the console is off, or not where the host names it.
+    #[error("{operation} {address}: {source}")]
+    Unreachable {
+        /// `resolve` or `connect to`.
+        operation: &'static str,
+        /// The host and port.
+        address: String,
+        /// The I/O error.
+        #[source]
+        source: std::io::Error,
+    },
     /// The stream refused a read or a write.
     #[error("{operation}: {source}")]
     Io {

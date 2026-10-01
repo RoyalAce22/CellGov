@@ -106,6 +106,9 @@ reserved for commands that are quiet until they report.
 | `CELLGOV_VALUE_SAMPLE_STRIDE` | debug | Set the value-sample stride. |
 | `CELLGOV_NO_FIRMWARE_DIR` | test-only | Suppress the synthetic firmware-directory default. |
 | `CELLGOV_OBS_NULL_SINK` | test-only | Discard observation output in a synthetic run. |
+| `CELLGOV_PS3_MODEL` | test-only | Name the console's model for the live PS3 runner suite. |
+| `CELLGOV_PS3_CFW` | test-only | Name the console's CFW for the live PS3 runner suite. |
+| `CELLGOV_PS3_DEBUGGER` | test-only | State none or attached for the live PS3 runner suite. |
 | `CELLGOV_RETAIN_SCRATCH` | test-only | Retain a scratch directory after a test. |
 
 
