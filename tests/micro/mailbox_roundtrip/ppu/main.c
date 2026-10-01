@@ -15,6 +15,7 @@
 #include <sys/tty.h>
 
 #include "cgov_out.h"
+#include "cgov_spu_load.h"
 
 SYS_PROCESS_PARAM(1001, 0x10000)
 
@@ -70,7 +71,7 @@ int main(void)
     result.status = 0xFFFFFFFF;
     result.value  = 0xFFFFFFFF;
 
-    ret = sysSpuImageOpen(&image, SPU_ELF_PATH);
+    ret = CGOV_SPU_IMAGE_OPEN(&image, SPU_ELF_PATH);
     if (ret != 0)
         return fail(1);
 

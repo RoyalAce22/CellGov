@@ -1,0 +1,351 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5725 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 62 C, fan 37%, /dev_hdd0 99737 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > QUIT
+#0016 < 221 BYE
+#0017 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0018 > USER anonymous
+#0019 < 331 OK
+#0020 > PASS anonymous@
+#0021 < 230 OK
+#0022 > TYPE I
+#0023 < 200 TYPE OK
+#0024 > PASV
+#0025 < 227 Entering Passive Mode (10,77,0,2,128,40)
+#0026 > STOR /dev_hdd0/tmp/cellgov_lease/holder (71 bytes)
+#0027 < 150 OK
+#0028 < 226 OK
+#0029 > QUIT
+#0030 < 221 BYE
+#0031 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0032 < 404 (508 bytes)
+#0033 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0034 > USER anonymous
+#0035 < 331 OK
+#0036 > PASS anonymous@
+#0037 < 230 OK
+#0038 > TYPE I
+#0039 < 200 TYPE OK
+#0040 > PASV
+#0041 < 227 Entering Passive Mode (10,77,0,2,130,103)
+#0042 > NLST /dev_hdd0/game
+#0043 < 150 OK
+#0044 < 226 [/dev_hdd0/game/] [ 97.4 GB free CPU: 67C | RSX: 62C]
+#0045 > QUIT
+#0046 < 221 BYE
+#0047 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0048 > USER anonymous
+#0049 < 331 OK
+#0050 > PASS anonymous@
+#0051 < 230 OK
+#0052 > TYPE I
+#0053 < 200 TYPE OK
+#0054 > MKD /dev_hdd0/game/CGOV00001
+#0055 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0056 > QUIT
+#0057 < 221 BYE
+#0058 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0059 > USER anonymous
+#0060 < 331 OK
+#0061 > PASS anonymous@
+#0062 < 230 OK
+#0063 > TYPE I
+#0064 < 200 TYPE OK
+#0065 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0066 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0067 > QUIT
+#0068 < 221 BYE
+#0069 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0070 > USER anonymous
+#0071 < 331 OK
+#0072 > PASS anonymous@
+#0073 < 230 OK
+#0074 > TYPE I
+#0075 < 200 TYPE OK
+#0076 > PASV
+#0077 < 227 Entering Passive Mode (10,77,0,2,138,227)
+#0078 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0079 < 150 OK
+#0080 < 226 OK
+#0081 > QUIT
+#0082 < 221 BYE
+#0083 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0084 > USER anonymous
+#0085 < 331 OK
+#0086 > PASS anonymous@
+#0087 < 230 OK
+#0088 > TYPE I
+#0089 < 200 TYPE OK
+#0090 > PASV
+#0091 < 227 Entering Passive Mode (10,77,0,2,142,161)
+#0092 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (7872 bytes)
+#0093 < 150 OK
+#0094 < 226 OK
+#0095 > QUIT
+#0096 < 221 BYE
+#0097 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0098 > USER anonymous
+#0099 < 331 OK
+#0100 > PASS anonymous@
+#0101 < 230 OK
+#0102 > TYPE I
+#0103 < 200 TYPE OK
+#0104 > PASV
+#0105 < 227 Entering Passive Mode (10,77,0,2,146,247)
+#0106 > STOR /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf (6344 bytes)
+#0107 < 150 OK
+#0108 < 226 OK
+#0109 > QUIT
+#0110 < 221 BYE
+#0111 = deployed 3 file(s) under /dev_hdd0/game/CGOV00001
+#0112 > GET /play.ps3?CGOV00001
+#0113 < 200 (5725 bytes)
+#0114 = started
+#0115 > GET /cpursx.ps3
+#0116 < 200 (5725 bytes)
+#0117 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0118 < 404 (508 bytes)
+#0119 > GET /cpursx.ps3
+#0120 < 200 (5725 bytes)
+#0121 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0122 < 404 (508 bytes)
+#0123 > GET /cpursx.ps3
+#0124 < 200 (5725 bytes)
+#0125 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0126 < 404 (508 bytes)
+#0127 > GET /cpursx.ps3
+#0128 < 200 (5725 bytes)
+#0129 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0130 < 404 (508 bytes)
+#0131 > GET /cpursx.ps3
+#0132 < 200 (5725 bytes)
+#0133 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0134 < 404 (508 bytes)
+#0135 > GET /cpursx.ps3
+#0136 < 200 (5725 bytes)
+#0137 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0138 < 404 (508 bytes)
+#0139 > GET /cpursx.ps3
+#0140 < 200 (5725 bytes)
+#0141 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0142 < 404 (508 bytes)
+#0143 > GET /cpursx.ps3
+#0144 < 200 (5725 bytes)
+#0145 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0146 < 404 (508 bytes)
+#0147 > GET /cpursx.ps3
+#0148 < 200 (5725 bytes)
+#0149 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0150 < 404 (508 bytes)
+#0151 > GET /cpursx.ps3
+#0152 < 200 (5725 bytes)
+#0153 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0154 < 404 (508 bytes)
+#0155 > GET /cpursx.ps3
+#0156 < 200 (5725 bytes)
+#0157 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0158 < 404 (508 bytes)
+#0159 > GET /cpursx.ps3
+#0160 < 200 (5725 bytes)
+#0161 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0162 < 404 (508 bytes)
+#0163 > GET /cpursx.ps3
+#0164 < 200 (5725 bytes)
+#0165 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0166 < 404 (508 bytes)
+#0167 > GET /cpursx.ps3
+#0168 < 200 (5725 bytes)
+#0169 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0170 < 404 (508 bytes)
+#0171 > GET /cpursx.ps3
+#0172 < 200 (5725 bytes)
+#0173 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0174 < 404 (508 bytes)
+#0175 > GET /cpursx.ps3
+#0176 < 200 (5725 bytes)
+#0177 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0178 < 404 (508 bytes)
+#0179 > GET /cpursx.ps3
+#0180 < 200 (5725 bytes)
+#0181 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0182 < 404 (508 bytes)
+#0183 > GET /cpursx.ps3
+#0184 < 200 (5725 bytes)
+#0185 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0186 < 404 (508 bytes)
+#0187 > GET /cpursx.ps3
+#0188 < 200 (5725 bytes)
+#0189 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0190 < 404 (508 bytes)
+#0191 = still at the XMB after 20 poll(s); sending the start once more
+#0192 > GET /play.ps3?CGOV00001
+#0193 < 200 (5725 bytes)
+#0194 = started
+#0195 > GET /cpursx.ps3
+#0196 < 200 (5725 bytes)
+#0197 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0198 < 404 (508 bytes)
+#0199 > GET /cpursx.ps3
+#0200 < 200 (5725 bytes)
+#0201 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0202 < 404 (508 bytes)
+#0203 > GET /cpursx.ps3
+#0204 < 200 (5725 bytes)
+#0205 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0206 < 404 (508 bytes)
+#0207 > GET /cpursx.ps3
+#0208 < 200 (5725 bytes)
+#0209 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0210 < 404 (508 bytes)
+#0211 > GET /cpursx.ps3
+#0212 < 200 (5725 bytes)
+#0213 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0214 < 404 (508 bytes)
+#0215 > GET /cpursx.ps3
+#0216 < 200 (5725 bytes)
+#0217 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0218 < 404 (508 bytes)
+#0219 > GET /cpursx.ps3
+#0220 < 200 (6428 bytes)
+#0221 = left the XMB after 26 poll(s)
+#0222 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0223 < 200 (40 bytes)
+#0224 = result present after 1 poll(s)
+#0225 > GET /cpursx.ps3
+#0226 < 200 (6428 bytes)
+#0227 > GET /cpursx.ps3
+#0228 < 200 (6428 bytes)
+#0229 > GET /cpursx.ps3
+#0230 < 200 (5933 bytes)
+#0231 > GET /cpursx.ps3
+#0232 < 200 (5933 bytes)
+#0233 > GET /cpursx.ps3
+#0234 < 200 (5725 bytes)
+#0235 = back at the XMB after 5 poll(s)
+#0236 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0237 < 200 (40 bytes)
+#0238 = captured micro:barrier_wakeup#ba2db503fb88
+#0239 > GET /mount.ps3/unmount
+#0240 < 200 (4441 bytes)
+#0241 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0242 > USER anonymous
+#0243 < 331 OK
+#0244 > PASS anonymous@
+#0245 < 230 OK
+#0246 > TYPE I
+#0247 < 200 TYPE OK
+#0248 > PASV
+#0249 < 227 Entering Passive Mode (10,77,0,2,134,95)
+#0250 > NLST /dev_hdd0/game
+#0251 < 150 OK
+#0252 < 226 [/dev_hdd0/game/] [ 97.4 GB free CPU: 66C | RSX: 61C]
+#0253 > QUIT
+#0254 < 221 BYE
+#0255 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0256 > USER anonymous
+#0257 < 331 OK
+#0258 > PASS anonymous@
+#0259 < 230 OK
+#0260 > TYPE I
+#0261 < 200 TYPE OK
+#0262 > PASV
+#0263 < 227 Entering Passive Mode (10,77,0,2,138,75)
+#0264 > NLST /dev_hdd0/game/CGOV00001
+#0265 < 150 OK
+#0266 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.4 GB free CPU: 66C | RSX: 61C]
+#0267 > QUIT
+#0268 < 221 BYE
+#0269 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0270 > USER anonymous
+#0271 < 331 OK
+#0272 > PASS anonymous@
+#0273 < 230 OK
+#0274 > TYPE I
+#0275 < 200 TYPE OK
+#0276 > PASV
+#0277 < 227 Entering Passive Mode (10,77,0,2,140,212)
+#0278 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0279 < 150 OK
+#0280 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 61C]
+#0281 > QUIT
+#0282 < 221 BYE
+#0283 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0284 > USER anonymous
+#0285 < 331 OK
+#0286 > PASS anonymous@
+#0287 < 230 OK
+#0288 > TYPE I
+#0289 < 200 TYPE OK
+#0290 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0291 < 250 OK
+#0292 > QUIT
+#0293 < 221 BYE
+#0294 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0295 > USER anonymous
+#0296 < 331 OK
+#0297 > PASS anonymous@
+#0298 < 230 OK
+#0299 > TYPE I
+#0300 < 200 TYPE OK
+#0301 > DELE /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf
+#0302 < 250 OK
+#0303 > QUIT
+#0304 < 221 BYE
+#0305 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0306 > USER anonymous
+#0307 < 331 OK
+#0308 > PASS anonymous@
+#0309 < 230 OK
+#0310 > TYPE I
+#0311 < 200 TYPE OK
+#0312 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0313 < 250 OK
+#0314 > QUIT
+#0315 < 221 BYE
+#0316 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0317 > USER anonymous
+#0318 < 331 OK
+#0319 > PASS anonymous@
+#0320 < 230 OK
+#0321 > TYPE I
+#0322 < 200 TYPE OK
+#0323 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0324 < 250 OK
+#0325 > QUIT
+#0326 < 221 BYE
+#0327 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0328 > USER anonymous
+#0329 < 331 OK
+#0330 > PASS anonymous@
+#0331 < 230 OK
+#0332 > TYPE I
+#0333 < 200 TYPE OK
+#0334 > RMD /dev_hdd0/game/CGOV00001
+#0335 < 250 OK
+#0336 > QUIT
+#0337 < 221 BYE
+#0338 > GET /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0339 < 200 (40 bytes)
+#0340 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0341 > USER anonymous
+#0342 < 331 OK
+#0343 > PASS anonymous@
+#0344 < 230 OK
+#0345 > TYPE I
+#0346 < 200 TYPE OK
+#0347 > DELE /dev_hdd0/tmp/cgov_barrier_wakeup.bin
+#0348 < 250 OK
+#0349 > QUIT
+#0350 < 221 BYE
+#0351 = console restored

@@ -22,6 +22,7 @@
 #include <sys/tty.h>
 
 #include "cgov_out.h"
+#include "cgov_spu_load.h"
 
 SYS_PROCESS_PARAM(1001, 0x10000)
 
@@ -75,7 +76,7 @@ int main(void)
         lines[i] = (unsigned char)(0x80 + i);
     memset(lines + 128, 0, 128);
 
-    ret = sysSpuImageOpen(&g_image, SPU_ELF_PATH);
+    ret = CGOV_SPU_IMAGE_OPEN(&g_image, SPU_ELF_PATH);
     if (ret != 0) return fail(1);
 
     memset(&g_grpattr, 0, sizeof(g_grpattr));

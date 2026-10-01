@@ -1,0 +1,359 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5725 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 62 C, fan 33%, /dev_hdd0 99737 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > QUIT
+#0016 < 221 BYE
+#0017 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0018 > USER anonymous
+#0019 < 331 OK
+#0020 > PASS anonymous@
+#0021 < 230 OK
+#0022 > TYPE I
+#0023 < 200 TYPE OK
+#0024 > PASV
+#0025 < 227 Entering Passive Mode (10,77,0,2,238,52)
+#0026 > STOR /dev_hdd0/tmp/cellgov_lease/holder (82 bytes)
+#0027 < 150 OK
+#0028 < 226 OK
+#0029 > QUIT
+#0030 < 221 BYE
+#0031 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0032 < 404 (519 bytes)
+#0033 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0034 > USER anonymous
+#0035 < 331 OK
+#0036 > PASS anonymous@
+#0037 < 230 OK
+#0038 > TYPE I
+#0039 < 200 TYPE OK
+#0040 > PASV
+#0041 < 227 Entering Passive Mode (10,77,0,2,242,25)
+#0042 > NLST /dev_hdd0/game
+#0043 < 150 OK
+#0044 < 226 [/dev_hdd0/game/] [ 97.4 GB free CPU: 67C | RSX: 62C]
+#0045 > QUIT
+#0046 < 221 BYE
+#0047 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0048 > USER anonymous
+#0049 < 331 OK
+#0050 > PASS anonymous@
+#0051 < 230 OK
+#0052 > TYPE I
+#0053 < 200 TYPE OK
+#0054 > MKD /dev_hdd0/game/CGOV00001
+#0055 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0056 > QUIT
+#0057 < 221 BYE
+#0058 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0059 > USER anonymous
+#0060 < 331 OK
+#0061 > PASS anonymous@
+#0062 < 230 OK
+#0063 > TYPE I
+#0064 < 200 TYPE OK
+#0065 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0066 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0067 > QUIT
+#0068 < 221 BYE
+#0069 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0070 > USER anonymous
+#0071 < 331 OK
+#0072 > PASS anonymous@
+#0073 < 230 OK
+#0074 > TYPE I
+#0075 < 200 TYPE OK
+#0076 > PASV
+#0077 < 227 Entering Passive Mode (10,77,0,2,252,15)
+#0078 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0079 < 150 OK
+#0080 < 226 OK
+#0081 > QUIT
+#0082 < 221 BYE
+#0083 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0084 > USER anonymous
+#0085 < 331 OK
+#0086 > PASS anonymous@
+#0087 < 230 OK
+#0088 > TYPE I
+#0089 < 200 TYPE OK
+#0090 > PASV
+#0091 < 227 Entering Passive Mode (10,77,0,2,254,126)
+#0092 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (7904 bytes)
+#0093 < 150 OK
+#0094 < 226 OK
+#0095 > QUIT
+#0096 < 221 BYE
+#0097 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0098 > USER anonymous
+#0099 < 331 OK
+#0100 > PASS anonymous@
+#0101 < 230 OK
+#0102 > TYPE I
+#0103 < 200 TYPE OK
+#0104 > PASV
+#0105 < 227 Entering Passive Mode (10,77,0,2,130,200)
+#0106 > STOR /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf (6281 bytes)
+#0107 < 150 OK
+#0108 < 226 OK
+#0109 > QUIT
+#0110 < 221 BYE
+#0111 = deployed 3 file(s) under /dev_hdd0/game/CGOV00001
+#0112 > GET /play.ps3?CGOV00001
+#0113 < 200 (5725 bytes)
+#0114 = started
+#0115 > GET /cpursx.ps3
+#0116 < 200 (5725 bytes)
+#0117 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0118 < 404 (519 bytes)
+#0119 > GET /cpursx.ps3
+#0120 < 200 (5725 bytes)
+#0121 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0122 < 404 (519 bytes)
+#0123 > GET /cpursx.ps3
+#0124 < 200 (5725 bytes)
+#0125 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0126 < 404 (519 bytes)
+#0127 > GET /cpursx.ps3
+#0128 < 200 (5725 bytes)
+#0129 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0130 < 404 (519 bytes)
+#0131 > GET /cpursx.ps3
+#0132 < 200 (5725 bytes)
+#0133 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0134 < 404 (519 bytes)
+#0135 > GET /cpursx.ps3
+#0136 < 200 (5725 bytes)
+#0137 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0138 < 404 (519 bytes)
+#0139 > GET /cpursx.ps3
+#0140 < 200 (5725 bytes)
+#0141 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0142 < 404 (519 bytes)
+#0143 > GET /cpursx.ps3
+#0144 < 200 (5725 bytes)
+#0145 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0146 < 404 (519 bytes)
+#0147 > GET /cpursx.ps3
+#0148 < 200 (5725 bytes)
+#0149 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0150 < 404 (519 bytes)
+#0151 > GET /cpursx.ps3
+#0152 < 200 (5725 bytes)
+#0153 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0154 < 404 (519 bytes)
+#0155 > GET /cpursx.ps3
+#0156 < 200 (5725 bytes)
+#0157 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0158 < 404 (519 bytes)
+#0159 > GET /cpursx.ps3
+#0160 < 200 (5725 bytes)
+#0161 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0162 < 404 (519 bytes)
+#0163 > GET /cpursx.ps3
+#0164 < 200 (5725 bytes)
+#0165 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0166 < 404 (519 bytes)
+#0167 > GET /cpursx.ps3
+#0168 < 200 (5725 bytes)
+#0169 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0170 < 404 (519 bytes)
+#0171 > GET /cpursx.ps3
+#0172 < 200 (5725 bytes)
+#0173 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0174 < 404 (519 bytes)
+#0175 > GET /cpursx.ps3
+#0176 < 200 (5725 bytes)
+#0177 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0178 < 404 (519 bytes)
+#0179 > GET /cpursx.ps3
+#0180 < 200 (5725 bytes)
+#0181 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0182 < 404 (519 bytes)
+#0183 > GET /cpursx.ps3
+#0184 < 200 (5725 bytes)
+#0185 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0186 < 404 (519 bytes)
+#0187 > GET /cpursx.ps3
+#0188 < 200 (5725 bytes)
+#0189 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0190 < 404 (519 bytes)
+#0191 = still at the XMB after 20 poll(s); sending the start once more
+#0192 > GET /play.ps3?CGOV00001
+#0193 < 200 (5725 bytes)
+#0194 = started
+#0195 > GET /cpursx.ps3
+#0196 < 200 (5725 bytes)
+#0197 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0198 < 404 (519 bytes)
+#0199 > GET /cpursx.ps3
+#0200 < 200 (5725 bytes)
+#0201 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0202 < 404 (519 bytes)
+#0203 > GET /cpursx.ps3
+#0204 < 200 (5725 bytes)
+#0205 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0206 < 404 (519 bytes)
+#0207 > GET /cpursx.ps3
+#0208 < 200 (5725 bytes)
+#0209 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0210 < 404 (519 bytes)
+#0211 > GET /cpursx.ps3
+#0212 < 200 (5725 bytes)
+#0213 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0214 < 404 (519 bytes)
+#0215 > GET /cpursx.ps3
+#0216 < 200 (5725 bytes)
+#0217 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0218 < 404 (519 bytes)
+#0219 > GET /cpursx.ps3
+#0220 < 200 (5933 bytes)
+#0221 = left the XMB after 26 poll(s)
+#0222 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0223 < 404 (519 bytes)
+#0224 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0225 < 404 (519 bytes)
+#0226 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0227 < 404 (519 bytes)
+#0228 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0229 < 404 (519 bytes)
+#0230 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0231 < 200 (536 bytes)
+#0232 = result present after 5 poll(s)
+#0233 > GET /cpursx.ps3
+#0234 < 200 (6450 bytes)
+#0235 > GET /cpursx.ps3
+#0236 < 200 (6450 bytes)
+#0237 > GET /cpursx.ps3
+#0238 < 200 (5933 bytes)
+#0239 > GET /cpursx.ps3
+#0240 < 200 (5933 bytes)
+#0241 > GET /cpursx.ps3
+#0242 < 200 (5725 bytes)
+#0243 = back at the XMB after 5 poll(s)
+#0244 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0245 < 200 (536 bytes)
+#0246 = captured micro:spu_atomic_misaligned_lsa#b210c2eb1394
+#0247 > GET /mount.ps3/unmount
+#0248 < 200 (4441 bytes)
+#0249 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0250 > USER anonymous
+#0251 < 331 OK
+#0252 > PASS anonymous@
+#0253 < 230 OK
+#0254 > TYPE I
+#0255 < 200 TYPE OK
+#0256 > PASV
+#0257 < 227 Entering Passive Mode (10,77,0,2,158,241)
+#0258 > NLST /dev_hdd0/game
+#0259 < 150 OK
+#0260 < 226 [/dev_hdd0/game/] [ 97.4 GB free CPU: 67C | RSX: 61C]
+#0261 > QUIT
+#0262 < 221 BYE
+#0263 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0264 > USER anonymous
+#0265 < 331 OK
+#0266 > PASS anonymous@
+#0267 < 230 OK
+#0268 > TYPE I
+#0269 < 200 TYPE OK
+#0270 > PASV
+#0271 < 227 Entering Passive Mode (10,77,0,2,160,224)
+#0272 > NLST /dev_hdd0/game/CGOV00001
+#0273 < 150 OK
+#0274 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.4 GB free CPU: 67C | RSX: 61C]
+#0275 > QUIT
+#0276 < 221 BYE
+#0277 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0278 > USER anonymous
+#0279 < 331 OK
+#0280 > PASS anonymous@
+#0281 < 230 OK
+#0282 > TYPE I
+#0283 < 200 TYPE OK
+#0284 > PASV
+#0285 < 227 Entering Passive Mode (10,77,0,2,164,24)
+#0286 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0287 < 150 OK
+#0288 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 61C]
+#0289 > QUIT
+#0290 < 221 BYE
+#0291 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0292 > USER anonymous
+#0293 < 331 OK
+#0294 > PASS anonymous@
+#0295 < 230 OK
+#0296 > TYPE I
+#0297 < 200 TYPE OK
+#0298 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0299 < 250 OK
+#0300 > QUIT
+#0301 < 221 BYE
+#0302 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0303 > USER anonymous
+#0304 < 331 OK
+#0305 > PASS anonymous@
+#0306 < 230 OK
+#0307 > TYPE I
+#0308 < 200 TYPE OK
+#0309 > DELE /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf
+#0310 < 250 OK
+#0311 > QUIT
+#0312 < 221 BYE
+#0313 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0314 > USER anonymous
+#0315 < 331 OK
+#0316 > PASS anonymous@
+#0317 < 230 OK
+#0318 > TYPE I
+#0319 < 200 TYPE OK
+#0320 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0321 < 250 OK
+#0322 > QUIT
+#0323 < 221 BYE
+#0324 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0325 > USER anonymous
+#0326 < 331 OK
+#0327 > PASS anonymous@
+#0328 < 230 OK
+#0329 > TYPE I
+#0330 < 200 TYPE OK
+#0331 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0332 < 250 OK
+#0333 > QUIT
+#0334 < 221 BYE
+#0335 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0336 > USER anonymous
+#0337 < 331 OK
+#0338 > PASS anonymous@
+#0339 < 230 OK
+#0340 > TYPE I
+#0341 < 200 TYPE OK
+#0342 > RMD /dev_hdd0/game/CGOV00001
+#0343 < 250 OK
+#0344 > QUIT
+#0345 < 221 BYE
+#0346 > GET /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0347 < 200 (536 bytes)
+#0348 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0349 > USER anonymous
+#0350 < 331 OK
+#0351 > PASS anonymous@
+#0352 < 230 OK
+#0353 > TYPE I
+#0354 < 200 TYPE OK
+#0355 > DELE /dev_hdd0/tmp/cgov_spu_atomic_misaligned_lsa.bin
+#0356 < 250 OK
+#0357 > QUIT
+#0358 < 221 BYE
+#0359 = console restored
