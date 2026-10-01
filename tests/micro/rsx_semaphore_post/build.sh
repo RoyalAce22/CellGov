@@ -39,6 +39,7 @@ echo "=== Linking PPU program ==="
 ${PPU_PREFIX}-gcc \
     -nostartfiles \
     -I${PSL1GHT}/ppu/include \
+    -I"$COMMON" \
     -L${PSL1GHT}/ppu/lib \
     -O2 -Wall \
     -o "$OUT/rsx_semaphore_post.elf" \

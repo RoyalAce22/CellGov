@@ -16,6 +16,8 @@
 #include <lv2/spu.h>
 #include <sys/tty.h>
 
+#include "cgov_out.h"
+
 SYS_PROCESS_PARAM(1001, 0x10000)
 
 static const char CGOV_MAGIC[4] = { 'C', 'G', 'O', 'V' };
@@ -31,6 +33,7 @@ static void write_tty_tagged(const void *data, unsigned int len)
     sysTtyWrite(0, CGOV_MAGIC, 4, &written);
     sysTtyWrite(0, len_be, 4, &written);
     sysTtyWrite(0, data, len, &written);
+    CGOV_OUT_FILE_WRITE(data, len);
 }
 
 static int __attribute__((noinline)) fail(unsigned int status)

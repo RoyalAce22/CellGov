@@ -37,6 +37,8 @@
 #include <sys/process.h>
 #include <sys/tty.h>
 
+#include "cgov_out.h"
+
 SYS_PROCESS_PARAM(1001, 0x10000)
 
 static inline s32 syscall0_s32(u64 num)
@@ -284,6 +286,7 @@ static void write_tty_result(const struct TestResult *r)
     sysTtyWrite(0, CGOV_MAGIC, 4, &written);
     sysTtyWrite(0, len_be, 4, &written);
     sysTtyWrite(0, r, len, &written);
+    CGOV_OUT_FILE_WRITE(r, len);
 }
 
 static int __attribute__((noinline)) fail(unsigned int status)

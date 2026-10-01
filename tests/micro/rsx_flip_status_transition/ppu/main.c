@@ -35,6 +35,8 @@
 #include <sys/process.h>
 #include <sys/tty.h>
 
+#include "cgov_out.h"
+
 SYS_PROCESS_PARAM(1001, 0x10000)
 
 static inline s32 syscall4_s32(u64 num, u64 a, u64 b, u64 c, u64 d)
@@ -146,6 +148,7 @@ static void write_tty_result(const struct TestResult *r)
                  (unsigned long)&written);
     syscall4_s32(SYS_TTY_WRITE, 0, (unsigned long)r, len,
                  (unsigned long)&written);
+    CGOV_OUT_FILE_WRITE(r, len);
 }
 
 /* Endian: [PPC-Book1 p:128 s:5.3.3.1] a PowerPC system comes up in
