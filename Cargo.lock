@@ -192,6 +192,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "filebuffer",
+ "runner_ps3",
  "serde",
  "serde_json",
  "strum",

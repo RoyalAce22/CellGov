@@ -70,6 +70,7 @@ fn names_its_own_store_root(command: &Command) -> bool {
         | Command::Diff(_)
         | Command::Explore(_)
         | Command::Scenario(_)
+        | Command::Ps3(_)
         | Command::Dev(_) => false,
     }
 }
@@ -139,7 +140,8 @@ pub(super) fn renders_progress(command: &Command) -> bool {
         | Command::SelfCmd(_)
         | Command::Diff(_)
         | Command::Explore(_)
-        | Command::Scenario(_) => false,
+        | Command::Scenario(_)
+        | Command::Ps3(_) => false,
     }
 }
 
@@ -174,7 +176,8 @@ pub(super) fn reads_vfs_root(command: &Command) -> bool {
         // `explore title` composes a cell out of the store, exactly as
         // the boot family does; the other two explore fixtures.
         Command::Explore(args) => matches!(args.command, Some(ExploreCommand::Title(_))),
-        Command::Diff(_) | Command::Scenario(_) => false,
+        // The runner reads its own profiles file and no store.
+        Command::Diff(_) | Command::Scenario(_) | Command::Ps3(_) => false,
     }
 }
 
@@ -204,6 +207,11 @@ pub(super) fn reads_format(command: &Command) -> bool {
             DevCommand::Lv2Extract(_) => true,
             _ => false,
         },
-        Command::Keys(_) | Command::SelfCmd(_) | Command::Boot(_) | Command::Scenario(_) => false,
+        // `ps3 convert` always prints JSON; the other verbs print lines.
+        Command::Keys(_)
+        | Command::SelfCmd(_)
+        | Command::Boot(_)
+        | Command::Scenario(_)
+        | Command::Ps3(_) => false,
     }
 }

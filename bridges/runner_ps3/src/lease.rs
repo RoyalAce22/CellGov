@@ -43,6 +43,13 @@ pub enum LeaseError {
     },
 }
 
+/// The directory every runner on this machine keeps its leases in,
+/// whichever front end runs it: the machine's temp directory, with no
+/// process id in the name.
+pub fn default_dir() -> PathBuf {
+    std::env::temp_dir()
+}
+
 /// The lease file for `host` under `dir`. Every character of the host
 /// outside ASCII alphanumerics and `.` folds to `_`.
 pub fn lease_path(dir: &Path, host: &str) -> PathBuf {

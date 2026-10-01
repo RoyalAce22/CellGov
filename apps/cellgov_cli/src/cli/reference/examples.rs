@@ -201,6 +201,52 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         lines: &["cellgov scenario dump dma"],
     },
     Examples {
+        path: "ps3 status",
+        lines: &[
+            "cellgov ps3 status --host 10.77.0.2 --profile cech20-cex-493 --model CECH-2001A --cfw EvilNAT --debugger none",
+        ],
+    },
+    Examples {
+        path: "ps3 deploy",
+        lines: &[
+            "cellgov ps3 deploy --model CECH-2001A --cfw EvilNAT --debugger none --manifest tests/micro/spu_fixed_value/manifest.toml",
+        ],
+    },
+    Examples {
+        path: "ps3 run",
+        lines: &[
+            "cellgov ps3 run --model CECH-2001A --cfw EvilNAT --debugger none --manifest tests/micro/spu_fixed_value/manifest.toml",
+        ],
+    },
+    Examples {
+        path: "ps3 fetch",
+        lines: &[
+            "cellgov ps3 fetch --model CECH-2001A --cfw EvilNAT --debugger none --manifest tests/micro/spu_fixed_value/manifest.toml --out frame.bin",
+        ],
+    },
+    Examples {
+        path: "ps3 cleanup",
+        lines: &[
+            "cellgov ps3 cleanup --model CECH-2001A --cfw EvilNAT --debugger none --manifest tests/micro/spu_fixed_value/manifest.toml",
+        ],
+    },
+    Examples {
+        path: "ps3 capture",
+        lines: &[
+            "cellgov ps3 capture --model CECH-2001A --cfw EvilNAT --debugger none --manifest tests/micro/spu_fixed_value/manifest.toml --harness-revision 0123abcd",
+        ],
+    },
+    Examples {
+        path: "ps3 convert",
+        lines: &[
+            "cellgov ps3 convert --frame frame.bin --manifest tests/micro/spu_fixed_value/manifest.toml --profile cech20-cex-493",
+        ],
+    },
+    Examples {
+        path: "ps3 unlock",
+        lines: &["cellgov ps3 unlock --host 10.77.0.2"],
+    },
+    Examples {
         path: "dev disasm",
         lines: &[
             "cellgov dev disasm vfs/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN --vaddr 0x10381ce8",

@@ -171,6 +171,7 @@ fn dispatch(command: &Command, globals: &Globals) -> Result<CommandExitCode, Com
             cli::dump::run(name, SCENARIOS)?;
             Ok(CommandExitCode::SUCCESS)
         }
+        Command::Ps3(ps3) => cli::ps3::run(ps3),
         Command::Dev(dev) => dispatch_dev(dev, vfs_flag, globals),
     }
 }

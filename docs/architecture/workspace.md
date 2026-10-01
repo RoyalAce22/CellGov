@@ -29,10 +29,10 @@ graph BT
     lv2_archive
   end
   subgraph Host tooling
-    terminal; testkit; observation; compare; explore; fuzz; install; boot
+    terminal; testkit; observation; compare; explore; fuzz; install; runner_ps3; boot
   end
   subgraph Binaries
-    cli; mkelf; rpcs3_to_observation; runner_ps3
+    cli; mkelf; rpcs3_to_observation
   end
 
   ps3_abi --> time
@@ -64,6 +64,7 @@ graph BT
   spu --> fuzz
   ps3_abi --> install
   terminal --> install
+  observation --> runner_ps3
   compare --> boot
   install --> boot
   spu --> boot
@@ -71,9 +72,9 @@ graph BT
   explore --> cli
   fuzz --> cli
   lv2_archive --> cli
+  runner_ps3 --> cli
   ps3_abi --> mkelf
   compare --> rpcs3_to_observation
-  observation --> runner_ps3
 ```
 
 <!-- workspace-gen:dag:end -->
@@ -243,9 +244,9 @@ dependencies are intentionally absent. The workspace compiles under
 | `cellgov_explore`      | serde, serde_json, strum, thiserror                                        |
 | `cellgov_fuzz`         | serde, serde_json, thiserror                                               |
 | `cellgov_cli`          | clap, clap_complete, filebuffer, serde, serde_json, strum, thiserror, toml |
+| `runner_ps3`           | serde, serde_json, strum, thiserror, toml                                  |
 | `cellgov_mkelf`        | none                                                                       |
 | `rpcs3_to_observation` | serde, serde_json, thiserror, toml                                         |
-| `runner_ps3`           | serde, serde_json, strum, thiserror, toml                                  |
 
 <!-- workspace-gen:external:end -->
 
@@ -278,5 +279,5 @@ dependencies are intentionally absent. The workspace compiles under
 | `cellgov_cli`                  | The workspace's one binary, `cellgov`: `firmware`, `title`, `keys`, `self`, `boot`, `diff`, `explore`, `scenario`, and the `dev` tools.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `cellgov_mkelf`                | Standalone generator of PPU ELF fixtures for the microtest suite. Depends on `cellgov_ps3_abi` only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `cellgov_install`              | PS3 firmware and SELF decrypter library. Its firmware installer peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction) and writes per-module SELFs into a store entry keyed on the version the extracted tree's own `vsh/etc/version.txt` names, holding the `dev_flash` mount with `dev_flash2` / `dev_flash3` as siblings beside it, and `core_os/` with the LV2 kernel the PUP's CoreOS package contains, kept SCE-wrapped and hashed as stored in the install record. The extraction stages under one hidden sibling of the firmware root and commits with a rename, since the version that names the entry is unreadable until the tree is out. A SELF decrypts one at a time behind `cellgov self decrypt`. `cellgov_cli`'s boot path calls the library's `sce::decrypt_self_to_elf` to peel encrypted SELFs at load time. Every decrypt path takes a `keys::KeyVault` the operator supplies (`CELLGOV_KEYS`, or the vault `keys import` normalized into `vfs/.cellgov/keys/keys.toml`); no build carries a key value, and a SELF whose key revision the vault lacks is refused by name. Firmware modules from the user's PUP decrypt bit-identically to committed per-module reference digests, held by a parity gate over the stems the reference set covers; the user supplies the PUP, since CellGov ships no firmware. Nothing in the decrypt path depends on another runner. |
-| `bridges/runner_ps3`           | The PS3 runner: deploys a packaged microtest to a retail console over webMAN's HTTP and FTP, starts it, fetches the CGOV frame it leaves, and converts the frame into the `Observation` a committed capture under `tests/micro/<name>/ps3/<profile>/` holds, named for the console profile in `tests/micro/console_profiles.toml` the run claimed. Host tooling over `std::net`; excluded from `default-members` as `rpcs3_to_observation` is; build with `cargo build -p runner_ps3`. The `ps3-hardware` feature gates the one test target that opens a socket. |
+| `bridges/runner_ps3`           | The PS3 runner: deploys a packaged microtest to a retail console over webMAN's HTTP and FTP, starts it, fetches the CGOV frame it leaves, and converts the frame into the `Observation` a committed capture under `tests/micro/<name>/ps3/<profile>/` holds, named for the console profile in `tests/micro/console_profiles.toml` the run claimed. Host tooling over `std::net`. The verbs live in the library, which `cellgov ps3` drives; the standalone `runner_ps3` binary is a second front end over the same verbs. The `ps3-hardware` feature gates the one test target that opens a socket. |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/`, excluded from the workspace's `default-members`, so a plain `cargo build` pulls in no RPCS3-aware code; build with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |

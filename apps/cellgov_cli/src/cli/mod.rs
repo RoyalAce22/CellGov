@@ -16,6 +16,7 @@ pub(crate) mod fuzz;
 pub(crate) mod gen_manifest;
 pub(crate) mod keys;
 pub(crate) mod parse;
+pub(crate) mod ps3;
 pub(crate) mod record_anchors;
 pub(crate) mod reference;
 pub(crate) mod relations;

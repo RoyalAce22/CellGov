@@ -18,6 +18,7 @@ use std::process::ExitCode as ProcessExit;
 
 use runner_ps3::cli;
 use runner_ps3::env;
+use runner_ps3::lease;
 use runner_ps3::provenance;
 use runner_ps3::run::WebmanConsole;
 use runner_ps3::transport::Endpoint;
@@ -36,7 +37,7 @@ fn main() -> ProcessExit {
             let context = Context {
                 host_env: var(env::HOST),
                 profile_env: var(env::PROFILE),
-                lease_dir: std::env::temp_dir(),
+                lease_dir: lease::default_dir(),
                 workspace_root: Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."),
                 invocation: INVOCATION.to_string(),
             };

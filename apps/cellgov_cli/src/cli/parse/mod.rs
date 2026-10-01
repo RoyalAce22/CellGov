@@ -9,6 +9,7 @@ mod diff;
 mod entry;
 mod fuzz;
 mod globals;
+mod ps3;
 mod store;
 mod tree;
 mod value;
@@ -47,6 +48,9 @@ pub(crate) use fuzz::{
 };
 #[cfg(test)]
 pub(crate) use globals::global_refusal;
+#[cfg(test)]
+pub(crate) use ps3::PS3_EXIT_CODES;
+pub(crate) use ps3::{Ps3Command, Ps3Debugger, Ps3Identity, Ps3ManifestArgs};
 pub(crate) use store::{
     FirmwareCommand, FirmwareInstallArgs, FirmwareUninstallArgs, InstallContainerArgs, KeysCommand,
     KeysPathArgs, SelfCommand, SelfDecryptArgs, TitleCommand, TitleInstallArgs, UninstallArgs,

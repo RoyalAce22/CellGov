@@ -37,6 +37,9 @@ cellgov_terminal = { path = "../../crates/cellgov_terminal" }
 cellgov_testkit = { path = "../../crates/cellgov_testkit" }
 cellgov_time = { path = "../../crates/cellgov_time" }
 cellgov_trace = { path = "../../crates/cellgov_trace" }
+# The PS3 runner's verbs, which `cellgov ps3` drives; it links no crate
+# this one does not already link.
+runner_ps3 = { path = "../../bridges/runner_ps3" }
 # The command tree, its help, and its typo suggestions are declarative
 # here; the hand-rolled equivalent for a two-level tree with global
 # flags is a subsystem this crate would own outright.

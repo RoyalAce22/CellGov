@@ -1262,6 +1262,271 @@ Usage: cellgov scenario dump [OPTIONS] <NAME>
 | --- | --- |
 | `NAME` | Scenario name. Required. |
 
+### `cellgov ps3`
+
+Run a microtest on a retail PS3 and capture what it observes.
+
+```
+Usage: cellgov ps3 [OPTIONS] <COMMAND>
+```
+
+#### `cellgov ps3 status`
+
+Read the console's identity and check it against the claimed profile.
+
+```console
+$ cellgov ps3 status --host 10.77.0.2 --profile cech20-cex-493 --model CECH-2001A --cfw EvilNAT --debugger none
+```
+
+```
+Usage: cellgov ps3 status [OPTIONS]
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--host` | `HOST` | The console (default: CELLGOV_PS3_HOST). |
+| `--profile` | `NAME` | The console profile this run claims (default: CELLGOV_PS3_PROFILE). |
+| `--profiles` | `FILE` | The profiles file (default: tests/micro/console_profiles.toml under the workspace root). |
+| `--model` | `MODEL` | The console's model, which the status page does not state. |
+| `--cfw` | `CFW` | The CFW name and build, which the status page does not state. |
+| `--debugger` | `DEBUGGER` | Whether a debugger holds the console. One of `none`, `attached`. |
+
+```
+Exit codes particular to this command:
+  50  refused before changing the console: a lease, a stale result, a profile
+      the console fails, an occupied game directory, an existing capture
+  51  the console did not answer as the protocol requires
+  52  the test left no result within the manifest's budget
+  53  the fetched bytes are not one whole CGOV frame
+  54  the capture succeeded, but cleanup left something on the console
+```
+
+#### `cellgov ps3 deploy`
+
+Copy a packaged microtest to the console.
+
+```console
+$ cellgov ps3 deploy --model CECH-2001A --cfw EvilNAT --debugger none --manifest tests/micro/spu_fixed_value/manifest.toml
+```
+
+```
+Usage: cellgov ps3 deploy [OPTIONS] --manifest <FILE>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--host` | `HOST` | The console (default: CELLGOV_PS3_HOST). |
+| `--profile` | `NAME` | The console profile this run claims (default: CELLGOV_PS3_PROFILE). |
+| `--profiles` | `FILE` | The profiles file (default: tests/micro/console_profiles.toml under the workspace root). |
+| `--model` | `MODEL` | The console's model, which the status page does not state. |
+| `--cfw` | `CFW` | The CFW name and build, which the status page does not state. |
+| `--debugger` | `DEBUGGER` | Whether a debugger holds the console. One of `none`, `attached`. |
+| `--manifest` | `FILE` | The microtest's manifest.toml. Required. |
+| `--reclaim` | -- | Empty an occupied game directory before the deploy. |
+
+```
+Exit codes particular to this command:
+  50  refused before changing the console: a lease, a stale result, a profile
+      the console fails, an occupied game directory, an existing capture
+  51  the console did not answer as the protocol requires
+  52  the test left no result within the manifest's budget
+  53  the fetched bytes are not one whole CGOV frame
+  54  the capture succeeded, but cleanup left something on the console
+```
+
+#### `cellgov ps3 run`
+
+Start the deployed test and wait for its result.
+
+```console
+$ cellgov ps3 run --model CECH-2001A --cfw EvilNAT --debugger none --manifest tests/micro/spu_fixed_value/manifest.toml
+```
+
+```
+Usage: cellgov ps3 run [OPTIONS] --manifest <FILE>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--host` | `HOST` | The console (default: CELLGOV_PS3_HOST). |
+| `--profile` | `NAME` | The console profile this run claims (default: CELLGOV_PS3_PROFILE). |
+| `--profiles` | `FILE` | The profiles file (default: tests/micro/console_profiles.toml under the workspace root). |
+| `--model` | `MODEL` | The console's model, which the status page does not state. |
+| `--cfw` | `CFW` | The CFW name and build, which the status page does not state. |
+| `--debugger` | `DEBUGGER` | Whether a debugger holds the console. One of `none`, `attached`. |
+| `--manifest` | `FILE` | The microtest's manifest.toml. Required. |
+| `--poll-ms` | `N` | The wait between polls for the result, in milliseconds (default: 500). |
+
+```
+Exit codes particular to this command:
+  50  refused before changing the console: a lease, a stale result, a profile
+      the console fails, an occupied game directory, an existing capture
+  51  the console did not answer as the protocol requires
+  52  the test left no result within the manifest's budget
+  53  the fetched bytes are not one whole CGOV frame
+  54  the capture succeeded, but cleanup left something on the console
+```
+
+#### `cellgov ps3 fetch`
+
+Copy the result file to this machine.
+
+```console
+$ cellgov ps3 fetch --model CECH-2001A --cfw EvilNAT --debugger none --manifest tests/micro/spu_fixed_value/manifest.toml --out frame.bin
+```
+
+```
+Usage: cellgov ps3 fetch [OPTIONS] --manifest <FILE> --out <FILE>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--host` | `HOST` | The console (default: CELLGOV_PS3_HOST). |
+| `--profile` | `NAME` | The console profile this run claims (default: CELLGOV_PS3_PROFILE). |
+| `--profiles` | `FILE` | The profiles file (default: tests/micro/console_profiles.toml under the workspace root). |
+| `--model` | `MODEL` | The console's model, which the status page does not state. |
+| `--cfw` | `CFW` | The CFW name and build, which the status page does not state. |
+| `--debugger` | `DEBUGGER` | Whether a debugger holds the console. One of `none`, `attached`. |
+| `--manifest` | `FILE` | The microtest's manifest.toml. Required. |
+| `--out` | `FILE` | Where to write the result file. Required. |
+
+```
+Exit codes particular to this command:
+  50  refused before changing the console: a lease, a stale result, a profile
+      the console fails, an occupied game directory, an existing capture
+  51  the console did not answer as the protocol requires
+  52  the test left no result within the manifest's budget
+  53  the fetched bytes are not one whole CGOV frame
+  54  the capture succeeded, but cleanup left something on the console
+```
+
+#### `cellgov ps3 cleanup`
+
+Remove the package and the result from the console.
+
+```console
+$ cellgov ps3 cleanup --model CECH-2001A --cfw EvilNAT --debugger none --manifest tests/micro/spu_fixed_value/manifest.toml
+```
+
+```
+Usage: cellgov ps3 cleanup [OPTIONS] --manifest <FILE>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--host` | `HOST` | The console (default: CELLGOV_PS3_HOST). |
+| `--profile` | `NAME` | The console profile this run claims (default: CELLGOV_PS3_PROFILE). |
+| `--profiles` | `FILE` | The profiles file (default: tests/micro/console_profiles.toml under the workspace root). |
+| `--model` | `MODEL` | The console's model, which the status page does not state. |
+| `--cfw` | `CFW` | The CFW name and build, which the status page does not state. |
+| `--debugger` | `DEBUGGER` | Whether a debugger holds the console. One of `none`, `attached`. |
+| `--manifest` | `FILE` | The microtest's manifest.toml. Required. |
+
+```
+Exit codes particular to this command:
+  50  refused before changing the console: a lease, a stale result, a profile
+      the console fails, an occupied game directory, an existing capture
+  51  the console did not answer as the protocol requires
+  52  the test left no result within the manifest's budget
+  53  the fetched bytes are not one whole CGOV frame
+  54  the capture succeeded, but cleanup left something on the console
+```
+
+#### `cellgov ps3 capture`
+
+Deploy, run, fetch and clean up, writing a committed capture.
+
+```console
+$ cellgov ps3 capture --model CECH-2001A --cfw EvilNAT --debugger none --manifest tests/micro/spu_fixed_value/manifest.toml --harness-revision 0123abcd
+```
+
+```
+Usage: cellgov ps3 capture [OPTIONS] --manifest <FILE> --harness-revision <SHA>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--host` | `HOST` | The console (default: CELLGOV_PS3_HOST). |
+| `--profile` | `NAME` | The console profile this run claims (default: CELLGOV_PS3_PROFILE). |
+| `--profiles` | `FILE` | The profiles file (default: tests/micro/console_profiles.toml under the workspace root). |
+| `--model` | `MODEL` | The console's model, which the status page does not state. |
+| `--cfw` | `CFW` | The CFW name and build, which the status page does not state. |
+| `--debugger` | `DEBUGGER` | Whether a debugger holds the console. One of `none`, `attached`. |
+| `--manifest` | `FILE` | The microtest's manifest.toml. Required. |
+| `--harness-revision` | `SHA` | The harness revision the capture records; the runner reads no git. Required. |
+| `--out` | `DIR` | The capture directory (default: ps3/PROFILE/ beside the manifest). |
+| `--poll-ms` | `N` | The wait between polls for the result, in milliseconds (default: 500). |
+| `--reclaim` | -- | Empty an occupied game directory before the deploy. |
+| `--keep-deployed` | -- | Leave the package on the console after the capture. |
+| `--recapture` | -- | Replace a committed capture; needs --reason. |
+| `--reason` | `TEXT` | Why this capture replaces the committed one; the provenance records it. |
+
+```
+Exit codes particular to this command:
+  50  refused before changing the console: a lease, a stale result, a profile
+      the console fails, an occupied game directory, an existing capture
+  51  the console did not answer as the protocol requires
+  52  the test left no result within the manifest's budget
+  53  the fetched bytes are not one whole CGOV frame
+  54  the capture succeeded, but cleanup left something on the console
+```
+
+#### `cellgov ps3 convert`
+
+Convert a fetched frame into an observation, offline.
+
+```console
+$ cellgov ps3 convert --frame frame.bin --manifest tests/micro/spu_fixed_value/manifest.toml --profile cech20-cex-493
+```
+
+```
+Usage: cellgov ps3 convert [OPTIONS] --frame <FILE> --manifest <FILE>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--frame` | `FILE` | The fetched CGOV frame. Required. |
+| `--manifest` | `FILE` | The microtest's manifest.toml. Required. |
+| `--profile` | `NAME` | The console profile the capture ran under (default: CELLGOV_PS3_PROFILE). |
+| `--profiles` | `FILE` | The profiles file (default: tests/micro/console_profiles.toml under the workspace root). |
+| `--out` | `FILE` | Where to write the observation (default: stdout). |
+
+```
+Exit codes particular to this command:
+  50  refused before changing the console: a lease, a stale result, a profile
+      the console fails, an occupied game directory, an existing capture
+  51  the console did not answer as the protocol requires
+  52  the test left no result within the manifest's budget
+  53  the fetched bytes are not one whole CGOV frame
+  54  the capture succeeded, but cleanup left something on the console
+```
+
+#### `cellgov ps3 unlock`
+
+Remove a stale lease on a console.
+
+```console
+$ cellgov ps3 unlock --host 10.77.0.2
+```
+
+```
+Usage: cellgov ps3 unlock [OPTIONS]
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--host` | `HOST` | The console (default: CELLGOV_PS3_HOST). |
+
+```
+Exit codes particular to this command:
+  50  refused before changing the console: a lease, a stale result, a profile
+      the console fails, an occupied game directory, an existing capture
+  51  the console did not answer as the protocol requires
+  52  the test left no result within the manifest's budget
+  53  the fetched bytes are not one whole CGOV frame
+  54  the capture succeeded, but cleanup left something on the console
+```
+
 ### `cellgov dev`
 
 Maintainer tooling.

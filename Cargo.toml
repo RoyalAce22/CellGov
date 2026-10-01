@@ -63,6 +63,7 @@ default-members = [
     "apps/cellgov_cli",
     "apps/cellgov_mkelf",
     "apps/cellgov_install",
+    "bridges/runner_ps3",
 ]
 
 [workspace.package]

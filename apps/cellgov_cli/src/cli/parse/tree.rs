@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use super::boot::{BenchArgs, BenchGateArgs, BootRunArgs};
 use super::dev::DevCommand;
 use super::diff::{DiffCommand, ExploreArgs, OutputFormat, ScenarioCommand};
+use super::ps3::Ps3Command;
 use super::store::{FirmwareCommand, KeysCommand, SelfCommand, TitleCommand};
 
 /// The deterministic oracle's one command-line entry point.
@@ -110,6 +111,9 @@ pub(crate) enum Command {
     /// Run a synthetic SPU/PPU scenario.
     #[command(subcommand)]
     Scenario(ScenarioCommand),
+    /// Run a microtest on a retail PS3 and capture what it observes.
+    #[command(subcommand)]
+    Ps3(Ps3Command),
     /// Maintainer tooling.
     #[command(subcommand)]
     Dev(DevCommand),
