@@ -11,7 +11,10 @@
 #           $3 and the FPSCR read with fscrrd after the case
 #   source  where the expected value comes from. "documented" means the
 #           cited rule and the engine's exact computation, not yet measured
-#           on hardware; a hardware vector replaces it with "measured".
+#           on hardware. "measured ps3/<profile>" means the expected
+#           columns are that console capture's answer; the ignored
+#           adopt_hardware_measurements test writes them, and
+#           hardware_capture_agrees_with_every_measured_row holds them.
 case	asm	fpscr	r3	r4	r5	r6	expect_r3	expect_fpscr	source
 fa_overflow_saturates	fa $3,$4,$5	0	0	7fffffff_ffffffff_3f800000_00800000	7fffffff_ffffffff_3f800000_80800000	0	7fffffff_ffffffff_40000000_00000000	00000005_00000005_00000000_00000000	documented [SPU-ISA p:196 s:9.1] overflow to +/-Smax with OVF and DIFF; x - x is +0
 fm_underflow_flushes	fm $3,$4,$5	0	0	00800000_80800000_1f800000_3f800000	00800000_00800000_1f800000_3f800000	0	00000000_00000000_00000000_3f800000	00000003_00000003_00000003_00000000	documented [SPU-ISA p:196 s:9.1] a result below Smin is +0 with UNF and DIFF

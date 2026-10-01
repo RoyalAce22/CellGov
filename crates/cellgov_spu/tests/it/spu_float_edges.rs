@@ -5,6 +5,8 @@
 //! each case, runs `fscrwr`, the case and `fscrrd` on a fresh SPU state,
 //! and compares. The ignored `regenerate` test fills the expected columns
 //! and writes the SPU program the hardware and RPCS3 runs build from.
+//! The ignored `adopt_hardware_measurements` test replaces those columns
+//! with the console capture's answers and marks each row `measured`.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::hw::spu_isa::{
@@ -313,6 +315,10 @@ fn the_built_program_stores_every_expected_result() {
 /// for every case.
 const CONSOLE: &str = "../../tests/micro/spu_float_edges/ps3/cech20-cex-493/observation.json";
 
+/// The `source` prefix of a row whose expected columns came from
+/// [`CONSOLE`], naming the capture directory under the microtest.
+const MEASURED: &str = "measured ps3/cech20-cex-493";
+
 /// Per case, `$3` and the FPSCR, from a 32-bytes-per-case payload.
 fn case_results(payload: &[u8]) -> Vec<(u128, u128)> {
     payload
@@ -325,6 +331,81 @@ fn case_results(payload: &[u8]) -> Vec<(u128, u128)> {
         .collect()
 }
 
+/// Per case, the console's `$3` and FPSCR, one entry per row of `cases`.
+fn console_results(cases: &[Case]) -> Vec<(u128, u128)> {
+    let observation = cellgov_compare::baseline::load(std::path::Path::new(CONSOLE))
+        .unwrap_or_else(|e| panic!("{CONSOLE}: {e}"));
+    let console = case_results(&observation.memory_regions[0].data);
+    assert_eq!(console.len(), cases.len(), "the capture holds every case");
+    console
+}
+
+/// A row whose source says `measured` holds the console's own answer,
+/// `$3` and the FPSCR both, and cites the capture it came from; every
+/// other row is still `documented`.
+#[test]
+fn hardware_capture_agrees_with_every_measured_row() {
+    let cases = read_cases(&std::fs::read_to_string(CASES).expect("cases.tsv"));
+    for (case, (r3, fpscr)) in cases.iter().zip(console_results(&cases)) {
+        if !case.source.starts_with("measured") {
+            assert!(
+                case.source.starts_with("documented"),
+                "{}: source is neither documented nor measured: {}",
+                case.name,
+                case.source
+            );
+            continue;
+        }
+        assert!(
+            case.source.starts_with(MEASURED),
+            "{}: a measured row names the capture it was measured on ({MEASURED}): {}",
+            case.name,
+            case.source
+        );
+        let (want_r3, want_fpscr) = case.expect.expect("expected results");
+        assert_eq!(
+            (format_value(r3), format_value(fpscr)),
+            (format_value(want_r3), format_value(want_fpscr)),
+            "{}: the row says measured, but the capture answers otherwise",
+            case.name
+        );
+    }
+}
+
+/// Rewrites every row's expected columns from the console capture and
+/// its source from `documented` to [`MEASURED`], keeping the citation
+/// after it. `regenerate` fills these columns from CellGov's own run,
+/// which is the guess the table exists to check; copying the console's
+/// answer is the measurement, so this is the intended way a row leaves
+/// `documented`. A row whose value changes is then either a
+/// CellGov defect or an implementation-defined choice the console made.
+#[test]
+#[ignore = "rewrites cases.tsv's expected columns and sources from the console capture"]
+fn adopt_hardware_measurements() {
+    let text = std::fs::read_to_string(CASES).expect("cases.tsv");
+    let cases = read_cases(&text);
+    let mut console = console_results(&cases).into_iter();
+    let mut out = String::new();
+    for line in text.lines() {
+        if line.starts_with('#') || line.starts_with("case\t") || line.is_empty() {
+            out.push_str(line);
+        } else {
+            let (r3, fpscr) = console.next().expect("a console result per row");
+            let mut fields: Vec<String> = line.split('\t').map(str::to_string).collect();
+            fields[7] = format_value(r3);
+            fields[8] = format_value(fpscr);
+            let cited = fields[9]
+                .strip_prefix("documented")
+                .or_else(|| fields[9].strip_prefix(MEASURED))
+                .unwrap_or_else(|| panic!("{}: unknown source {}", fields[0], fields[9]));
+            fields[9] = format!("{MEASURED}{cited}");
+            out.push_str(&fields.join("\t"));
+        }
+        out.push('\n');
+    }
+    std::fs::write(CASES, out).expect("write cases.tsv");
+}
+
 /// The console's disagreements with `cases.tsv`, each a CellGov defect
 /// with the issue that owns it.
 const CONSOLE_DISAGREEMENTS: &str = "../../tests/micro/spu_float_edges/console.tsv";
@@ -335,10 +416,7 @@ const CONSOLE_DISAGREEMENTS: &str = "../../tests/micro/spu_float_edges/console.t
 #[test]
 fn the_console_capture_agrees_with_every_expected_result() {
     let cases = read_cases(&std::fs::read_to_string(CASES).expect("cases.tsv"));
-    let observation = cellgov_compare::baseline::load(std::path::Path::new(CONSOLE))
-        .unwrap_or_else(|e| panic!("{CONSOLE}: {e}"));
-    let console = case_results(&observation.memory_regions[0].data);
-    assert_eq!(console.len(), cases.len(), "the capture holds every case");
+    let console = console_results(&cases);
     let mut found = std::collections::BTreeSet::new();
     for (case, (r3, fpscr)) in cases.iter().zip(console) {
         let (want_r3, want_fpscr) = case.expect.expect("expected results");
