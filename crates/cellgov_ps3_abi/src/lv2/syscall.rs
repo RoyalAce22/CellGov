@@ -288,12 +288,28 @@ lv2_syscalls! {
     SPU_THREAD_GROUP_JOIN = 178 => "sys_spu_thread_group_join";
     /// `sys_spu_thread_write_snr`.
     SPU_THREAD_WRITE_SNR = 184 => "sys_spu_thread_write_snr";
+    /// `sys_spu_thread_group_connect_event`.
+    SPU_THREAD_GROUP_CONNECT_EVENT = 185 => "sys_spu_thread_group_connect_event";
+    /// `sys_spu_thread_group_disconnect_event`.
+    SPU_THREAD_GROUP_DISCONNECT_EVENT = 186 => "sys_spu_thread_group_disconnect_event";
     /// `sys_spu_thread_set_spu_cfg`.
     SPU_THREAD_SET_SPU_CFG = 187 => "sys_spu_thread_set_spu_cfg";
     /// `sys_spu_thread_get_spu_cfg`.
     SPU_THREAD_GET_SPU_CFG = 188 => "sys_spu_thread_get_spu_cfg";
     /// `sys_spu_thread_write_ls_mb` family entry point.
     SPU_THREAD_WRITE_MB = 190 => "sys_spu_thread_write_ls_mb";
+    /// `sys_spu_thread_connect_event`.
+    SPU_THREAD_CONNECT_EVENT = 191 => "sys_spu_thread_connect_event";
+    /// `sys_spu_thread_disconnect_event`.
+    SPU_THREAD_DISCONNECT_EVENT = 192 => "sys_spu_thread_disconnect_event";
+    /// `sys_spu_thread_bind_queue`.
+    SPU_THREAD_BIND_QUEUE = 193 => "sys_spu_thread_bind_queue";
+    /// `sys_spu_thread_unbind_queue`.
+    SPU_THREAD_UNBIND_QUEUE = 194 => "sys_spu_thread_unbind_queue";
+    /// `sys_spu_thread_group_connect_event_all_threads`.
+    SPU_THREAD_GROUP_CONNECT_EVENT_ALL_THREADS = 251 => "sys_spu_thread_group_connect_event_all_threads";
+    /// `sys_spu_thread_group_disconnect_event_all_threads`.
+    SPU_THREAD_GROUP_DISCONNECT_EVENT_ALL_THREADS = 252 => "sys_spu_thread_group_disconnect_event_all_threads";
 
     /// `sys_memory_container_create`.
     MEMORY_CONTAINER_CREATE = 341 => "sys_memory_container_create";

@@ -151,6 +151,76 @@ pub enum Lv2Request {
         /// Out: the configuration, as a u64.
         value_ptr: u32,
     },
+    /// `sys_spu_thread_group_connect_event`.
+    SpuThreadGroupConnectEvent {
+        /// In: group id.
+        group_id: u32,
+        /// In: event queue id.
+        queue_id: u32,
+        /// In: group event type.
+        event_type: u32,
+    },
+    /// `sys_spu_thread_group_disconnect_event`.
+    SpuThreadGroupDisconnectEvent {
+        /// In: group id.
+        group_id: u32,
+        /// In: group event type.
+        event_type: u32,
+    },
+    /// `sys_spu_thread_connect_event`.
+    SpuThreadConnectEvent {
+        /// In: target SPU thread id.
+        thread_id: u32,
+        /// In: event queue id.
+        queue_id: u32,
+        /// In: thread event type.
+        event_type: u32,
+        /// In: SPU event port number.
+        port: u32,
+    },
+    /// `sys_spu_thread_disconnect_event`.
+    SpuThreadDisconnectEvent {
+        /// In: target SPU thread id.
+        thread_id: u32,
+        /// In: thread event type.
+        event_type: u32,
+        /// In: SPU event port number.
+        port: u32,
+    },
+    /// `sys_spu_thread_bind_queue`.
+    SpuThreadBindQueue {
+        /// In: target SPU thread id.
+        thread_id: u32,
+        /// In: event queue id.
+        queue_id: u32,
+        /// In: the number the SPU names the queue by.
+        queue_number: u32,
+    },
+    /// `sys_spu_thread_unbind_queue`.
+    SpuThreadUnbindQueue {
+        /// In: target SPU thread id.
+        thread_id: u32,
+        /// In: the number the SPU names the queue by.
+        queue_number: u32,
+    },
+    /// `sys_spu_thread_group_connect_event_all_threads`.
+    SpuThreadGroupConnectEventAllThreads {
+        /// In: group id.
+        group_id: u32,
+        /// In: event queue id.
+        queue_id: u32,
+        /// In: bit `n` set requests port `n`; the lowest free one wins.
+        request_mask: u64,
+        /// Out: the port taken, one byte.
+        port_ptr: u32,
+    },
+    /// `sys_spu_thread_group_disconnect_event_all_threads`.
+    SpuThreadGroupDisconnectEventAllThreads {
+        /// In: group id.
+        group_id: u32,
+        /// In: SPU event port number.
+        port: u32,
+    },
     /// `sys_mutex_create`.
     MutexCreate {
         /// Out: mutex id.

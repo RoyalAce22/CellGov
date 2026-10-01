@@ -227,7 +227,20 @@ impl Lv2RequestKind {
             | Lv2RequestKind::SpuThreadWriteMb
             | Lv2RequestKind::SpuThreadWriteSnr
             | Lv2RequestKind::SpuThreadSetSpuCfg
-            | Lv2RequestKind::SpuThreadGetSpuCfg => Modeled,
+            | Lv2RequestKind::SpuThreadGetSpuCfg
+            | Lv2RequestKind::SpuThreadGroupDisconnectEvent
+            | Lv2RequestKind::SpuThreadConnectEvent
+            | Lv2RequestKind::SpuThreadDisconnectEvent
+            | Lv2RequestKind::SpuThreadUnbindQueue
+            | Lv2RequestKind::SpuThreadGroupConnectEventAllThreads
+            | Lv2RequestKind::SpuThreadGroupDisconnectEventAllThreads => Modeled,
+            // The group type and the queue type are not modeled. The
+            // connect arm refuses a system-module connect for every
+            // group. The bind arm binds a PPU-type queue like an SPU
+            // queue.
+            Lv2RequestKind::SpuThreadGroupConnectEvent | Lv2RequestKind::SpuThreadBindQueue => {
+                PartialState
+            }
             // SPU teardown is an honest ENOSYS refusal.
             Lv2RequestKind::SpuThreadGroupTerminate => NullBackend,
             // Announced limits are validated but not persisted.

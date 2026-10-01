@@ -105,6 +105,34 @@ pub mod segment {
     pub const LOAD_ALIGN: u32 = 0x10;
 }
 
+/// The numbers the SPU event-binding syscalls take: a thread group's
+/// event types, a thread's event ports and its queue bindings.
+///
+/// No public document names these values; they are unestablished. The
+/// open PS3 toolchain's `sys/spu.h` names the run and exception group
+/// types, the user thread type, and a port number range of 0..63. The
+/// system-module group type and the queue-binding count are not in that
+/// header, and nothing here derives them. The binding count fixes the
+/// `CELL_EAGAIN` ceiling of `sys_spu_thread_bind_queue`.
+pub mod event {
+    /// `SYS_SPU_THREAD_GROUP_EVENT_RUN`: the group's threads started or
+    /// stopped.
+    pub const GROUP_RUN: u32 = 1;
+    /// `SYS_SPU_THREAD_GROUP_EVENT_EXCEPTION`: a thread of the group took
+    /// an exception.
+    pub const GROUP_EXCEPTION: u32 = 2;
+    /// `SYS_SPU_THREAD_GROUP_EVENT_SYSTEM_MODULE`: a system-module event
+    /// for a group created to cooperate with the system.
+    pub const GROUP_SYSTEM_MODULE: u32 = 4;
+    /// `SYS_SPU_THREAD_EVENT_USER`: the one event type a per-thread port
+    /// connect accepts.
+    pub const THREAD_USER: u32 = 0x1;
+    /// Event ports per SPU thread; a port number `spup` is below it.
+    pub const PORT_COUNT: u32 = 64;
+    /// Queue bindings per SPU thread.
+    pub const QUEUE_BINDING_COUNT: usize = 32;
+}
+
 /// `cause` enum returned by `sys_spu_thread_group_join`.
 pub mod group_join_cause {
     /// `SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT`: a thread of the group

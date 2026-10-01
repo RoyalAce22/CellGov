@@ -209,6 +209,7 @@ impl Lv2Host {
         }
         self.state.event_queues.destroy(id);
         self.state.event_ports.unbind_queue(id);
+        self.state.groups.unbind_event_queue(id);
         if let Some(ipc_key) = self.derived.event_queue_ipc_keys.remove(&id) {
             if self.derived.event_queue_ipc.get(&ipc_key) == Some(&id) {
                 self.derived.event_queue_ipc.remove(&ipc_key);

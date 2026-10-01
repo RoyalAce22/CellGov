@@ -2,8 +2,8 @@
   "checkpoint": {
     "kind": "first_rsx_write"
   },
-  "outcome": "RsxWriteCheckpoint",
-  "steps": 37131,
+  "outcome": "Fault",
+  "steps": 36883,
   "budget": 256,
   "host_invariant_breaks": 3,
   "witnesses": {
@@ -32,11 +32,11 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 9816,
+      "value": 9805,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 9815,
+      "value": 9804,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -108,11 +108,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 9816,
+      "value": 9805,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 9814,
+      "value": 9803,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,22 +164,16 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 1,
+      "value": 0,
       "class": "at-least"
     },
     "unsupported_syscalls_distinct": {
-      "value": 1,
+      "value": 0,
       "class": "exact"
     },
     "vrsave_written": {
       "value": 0,
       "class": "exact"
-    }
-  },
-  "unsupported_syscalls": {
-    "251": {
-      "hits": 1,
-      "first_hit": 9193840
     }
   },
   "firmware": {

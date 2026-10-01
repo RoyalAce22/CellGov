@@ -7,7 +7,7 @@ use crate::dispatch::{SpuInitState, SpuLoadImage};
 use crate::image::SpuImageHandle;
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{self, source, LaneEntryMut, LaneMap, LaneValue, ObjectLanes};
-use cellgov_ps3_abi::lv2::spu::group_join_cause;
+use cellgov_ps3_abi::lv2::spu::{event, group_join_cause};
 use std::collections::BTreeMap;
 
 /// Cap on slots per group; the `group_id * 256 + slot` thread-id
@@ -35,6 +35,12 @@ pub struct ThreadSlot {
     ///
     /// [CBEA p:239 s:16.4] each register either overwrites its contents or ORs the data written into them.
     pub signal_config: u64,
+    /// The event queue each connected SPU event port delivers to, by
+    /// port number below [`event::PORT_COUNT`].
+    pub event_ports: BTreeMap<u32, u32>,
+    /// The event queues the SPU names by number in its own receives,
+    /// at most [`event::QUEUE_BINDING_COUNT`] of them.
+    pub queue_bindings: BTreeMap<u32, u32>,
 }
 
 /// Lifecycle state of a thread group.
@@ -69,6 +75,22 @@ pub struct ThreadGroup {
     /// The status each thread gave `sys_spu_thread_exit`, by raw unit
     /// id.
     pub thread_exit_status: BTreeMap<u64, u32>,
+    /// The event queue each connected group event type delivers to.
+    pub event_queues: BTreeMap<u32, u32>,
+}
+
+impl ThreadGroup {
+    /// Whether every declared slot is initialized.
+    pub fn is_initialized(&self) -> bool {
+        self.slots.len() as u32 >= self.num_threads
+    }
+
+    /// Whether no initialized thread has event port `port` connected.
+    pub fn port_is_free(&self, port: u32) -> bool {
+        self.slots
+            .values()
+            .all(|slot| !slot.event_ports.contains_key(&port))
+    }
 }
 
 impl LaneValue for ThreadGroup {
@@ -88,6 +110,9 @@ impl LaneValue for ThreadGroup {
         for (&unit, &status) in &self.thread_exit_status {
             lanes.lane(25, unit, u64::from(status));
         }
+        for (&event_type, &queue) in &self.event_queues {
+            lanes.lane(27, u64::from(event_type), u64::from(queue));
+        }
         for (&index, slot) in &self.slots {
             let index = u64::from(index);
             lanes.lane(6, index, 1);
@@ -97,6 +122,12 @@ impl LaneValue for ThreadGroup {
             }
             if slot.signal_config != 0 {
                 lanes.lane(26, index, slot.signal_config);
+            }
+            for (&port, &queue) in &slot.event_ports {
+                lanes.lane(28, (index << 32) | u64::from(port), u64::from(queue));
+            }
+            for (&number, &queue) in &slot.queue_bindings {
+                lanes.lane(29, (index << 32) | u64::from(number), u64::from(queue));
             }
             let Some(init) = &slot.init else {
                 continue;
@@ -127,6 +158,32 @@ impl LaneValue for ThreadGroup {
             }
         }
     }
+}
+
+/// Failure modes of [`ThreadGroupTable::bind_thread_queue`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum BindQueueError {
+    /// -> `CELL_ESRCH`: no initialized thread has the id.
+    #[error("no initialized SPU thread with that id")]
+    UnknownThread,
+    /// -> `CELL_EBUSY`: the number or the queue is already bound.
+    #[error("the queue number or the queue is already bound on the thread")]
+    Busy,
+    /// -> `CELL_EAGAIN`: the thread holds
+    /// [`event::QUEUE_BINDING_COUNT`] bindings.
+    #[error("the thread holds its full count of queue bindings")]
+    Full,
+}
+
+/// Failure modes of [`ThreadGroupTable::unbind_thread_queue`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum UnbindQueueError {
+    /// -> `CELL_ESRCH`: no initialized thread has the id.
+    #[error("no initialized SPU thread with that id")]
+    UnknownThread,
+    /// -> `CELL_ESRCH`: the thread binds no queue under that number.
+    #[error("no queue is bound under that number")]
+    NotBound,
 }
 
 /// Failure modes of [`ThreadGroupTable::initialize_thread`].
@@ -277,6 +334,7 @@ impl ThreadGroupTable {
             join_cause: group_join_cause::ALL_THREADS_EXIT,
             exit_status: 0,
             thread_exit_status: BTreeMap::new(),
+            event_queues: BTreeMap::new(),
         };
         self.groups.insert(id, group);
         Some(id)
@@ -323,6 +381,8 @@ impl ThreadGroupTable {
                 args,
                 init: None,
                 signal_config: 0,
+                event_ports: BTreeMap::new(),
+                queue_bindings: BTreeMap::new(),
             },
         );
         Ok(())
@@ -482,6 +542,174 @@ impl ThreadGroupTable {
             }
             None => false,
         }
+    }
+
+    /// The `(group_id, slot)` of an initialized thread, or `None` when
+    /// no initialized thread has the id.
+    pub fn thread_slot(&self, thread_id: u32) -> Option<(u32, u32)> {
+        self.slot_of_thread(thread_id)
+    }
+
+    /// The queue connected to group event type `event_type`.
+    pub fn group_event_queue(&self, group_id: u32, event_type: u32) -> Option<u32> {
+        self.groups
+            .get(group_id)?
+            .event_queues
+            .get(&event_type)
+            .copied()
+    }
+
+    /// Connect group event type `event_type` to `queue`, or disconnect it
+    /// with `None`. Returns `false` when no group has the id.
+    pub fn set_group_event_queue(
+        &mut self,
+        group_id: u32,
+        event_type: u32,
+        queue: Option<u32>,
+    ) -> bool {
+        let Some(mut group) = self.groups.get_mut(group_id) else {
+            return false;
+        };
+        match queue {
+            Some(queue) => group.event_queues.insert(event_type, queue),
+            None => group.event_queues.remove(&event_type),
+        };
+        true
+    }
+
+    /// The queue connected to event port `port` of an initialized thread.
+    pub fn thread_port_queue(&self, thread_id: u32, port: u32) -> Option<u32> {
+        let (group_id, slot) = self.slot_of_thread(thread_id)?;
+        self.groups
+            .get(group_id)?
+            .slots
+            .get(&slot)?
+            .event_ports
+            .get(&port)
+            .copied()
+    }
+
+    /// Connect event port `port` of an initialized thread to `queue`, or
+    /// disconnect it with `None`. Returns `false` when no initialized
+    /// thread has the id.
+    pub fn set_thread_port_queue(&mut self, thread_id: u32, port: u32, queue: Option<u32>) -> bool {
+        let Some((group_id, slot)) = self.slot_of_thread(thread_id) else {
+            return false;
+        };
+        let Some(mut group) = self.groups.get_mut(group_id) else {
+            return false;
+        };
+        let Some(slot) = group.slots.get_mut(&slot) else {
+            return false;
+        };
+        match queue {
+            Some(queue) => slot.event_ports.insert(port, queue),
+            None => slot.event_ports.remove(&port),
+        };
+        true
+    }
+
+    /// Connect event port `port` of every initialized thread of the group
+    /// to `queue`, or disconnect it with `None`. Returns `false` when no
+    /// group has the id.
+    pub fn set_group_port_queue(&mut self, group_id: u32, port: u32, queue: Option<u32>) -> bool {
+        let Some(mut group) = self.groups.get_mut(group_id) else {
+            return false;
+        };
+        for slot in group.slots.values_mut() {
+            match queue {
+                Some(queue) => slot.event_ports.insert(port, queue),
+                None => slot.event_ports.remove(&port),
+            };
+        }
+        true
+    }
+
+    /// The queues an initialized thread names by number, by that number.
+    pub fn thread_queue_bindings(&self, thread_id: u32) -> Option<&BTreeMap<u32, u32>> {
+        let (group_id, slot) = self.slot_of_thread(thread_id)?;
+        Some(&self.groups.get(group_id)?.slots.get(&slot)?.queue_bindings)
+    }
+
+    /// Bind `queue` to `number` on an initialized thread.
+    ///
+    /// # Errors
+    ///
+    /// See [`BindQueueError`]; an error binds nothing.
+    pub fn bind_thread_queue(
+        &mut self,
+        thread_id: u32,
+        number: u32,
+        queue: u32,
+    ) -> Result<(), BindQueueError> {
+        let (group_id, slot) = self
+            .slot_of_thread(thread_id)
+            .ok_or(BindQueueError::UnknownThread)?;
+        let mut group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or(BindQueueError::UnknownThread)?;
+        let slot = group
+            .slots
+            .get_mut(&slot)
+            .ok_or(BindQueueError::UnknownThread)?;
+        if slot.queue_bindings.contains_key(&number)
+            || slot.queue_bindings.values().any(|&bound| bound == queue)
+        {
+            return Err(BindQueueError::Busy);
+        }
+        if slot.queue_bindings.len() >= event::QUEUE_BINDING_COUNT {
+            return Err(BindQueueError::Full);
+        }
+        slot.queue_bindings.insert(number, queue);
+        Ok(())
+    }
+
+    /// Drop the binding an initialized thread holds under `number`.
+    ///
+    /// # Errors
+    ///
+    /// See [`UnbindQueueError`].
+    pub fn unbind_thread_queue(
+        &mut self,
+        thread_id: u32,
+        number: u32,
+    ) -> Result<(), UnbindQueueError> {
+        let (group_id, slot) = self
+            .slot_of_thread(thread_id)
+            .ok_or(UnbindQueueError::UnknownThread)?;
+        let mut group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or(UnbindQueueError::UnknownThread)?;
+        let slot = group
+            .slots
+            .get_mut(&slot)
+            .ok_or(UnbindQueueError::UnknownThread)?;
+        slot.queue_bindings
+            .remove(&number)
+            .map(|_| ())
+            .ok_or(UnbindQueueError::NotBound)
+    }
+
+    /// Drop every group event connection, thread port connection and
+    /// queue binding that targets `queue_id`.
+    ///
+    /// # Cross-module contract
+    ///
+    /// The queue-destroy arm must call this, or a surviving connection
+    /// names a queue the queue table no longer knows.
+    ///
+    /// O(n) over every slot of every group.
+    pub fn unbind_event_queue(&mut self, queue_id: u32) {
+        self.groups.for_each_mut(|_, group| {
+            group.event_queues.retain(|_, &mut queue| queue != queue_id);
+            for slot in group.slots.values_mut() {
+                slot.event_ports.retain(|_, &mut queue| queue != queue_id);
+                slot.queue_bindings
+                    .retain(|_, &mut queue| queue != queue_id);
+            }
+        });
     }
 
     /// The signal configuration of the thread a registered SPU runs,
@@ -678,3 +906,7 @@ impl ThreadGroupTable {
 #[cfg(test)]
 #[path = "tests/thread_group_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/thread_group_event_tests.rs"]
+mod event_tests;

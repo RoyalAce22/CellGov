@@ -113,6 +113,87 @@ fn classify_thread_group_terminate_is_separate_from_join() {
 }
 
 #[test]
+fn classify_spu_event_binding_arms_take_their_slots_in_order() {
+    // Distinct values per slot: permuted field pins would still pass
+    // the narrowing tables, which only name the slots that narrow.
+    let args = [0x11, 0x22, 0x33, 0x44, 0, 0, 0, 0];
+    assert_eq!(
+        classify(syscall::SPU_THREAD_GROUP_CONNECT_EVENT, &args),
+        Lv2Request::SpuThreadGroupConnectEvent {
+            group_id: 0x11,
+            queue_id: 0x22,
+            event_type: 0x33,
+        }
+    );
+    assert_eq!(
+        classify(syscall::SPU_THREAD_GROUP_DISCONNECT_EVENT, &args),
+        Lv2Request::SpuThreadGroupDisconnectEvent {
+            group_id: 0x11,
+            event_type: 0x22,
+        }
+    );
+    assert_eq!(
+        classify(syscall::SPU_THREAD_CONNECT_EVENT, &args),
+        Lv2Request::SpuThreadConnectEvent {
+            thread_id: 0x11,
+            queue_id: 0x22,
+            event_type: 0x33,
+            port: 0x44,
+        }
+    );
+    assert_eq!(
+        classify(syscall::SPU_THREAD_DISCONNECT_EVENT, &args),
+        Lv2Request::SpuThreadDisconnectEvent {
+            thread_id: 0x11,
+            event_type: 0x22,
+            port: 0x33,
+        }
+    );
+    assert_eq!(
+        classify(syscall::SPU_THREAD_BIND_QUEUE, &args),
+        Lv2Request::SpuThreadBindQueue {
+            thread_id: 0x11,
+            queue_id: 0x22,
+            queue_number: 0x33,
+        }
+    );
+    assert_eq!(
+        classify(syscall::SPU_THREAD_UNBIND_QUEUE, &args),
+        Lv2Request::SpuThreadUnbindQueue {
+            thread_id: 0x11,
+            queue_number: 0x22,
+        }
+    );
+    assert_eq!(
+        classify(
+            syscall::SPU_THREAD_GROUP_DISCONNECT_EVENT_ALL_THREADS,
+            &args
+        ),
+        Lv2Request::SpuThreadGroupDisconnectEventAllThreads {
+            group_id: 0x11,
+            port: 0x22,
+        }
+    );
+}
+
+#[test]
+fn classify_connect_event_all_threads_keeps_the_whole_request_mask() {
+    // The mask is the one 64-bit argument of the family: bit 63 names
+    // port 63 and must survive classification unnarrowed.
+    let mask = (1u64 << 63) | 1;
+    let args = [0x11, 0x22, mask, 0x44, 0, 0, 0, 0];
+    assert_eq!(
+        classify(syscall::SPU_THREAD_GROUP_CONNECT_EVENT_ALL_THREADS, &args),
+        Lv2Request::SpuThreadGroupConnectEventAllThreads {
+            group_id: 0x11,
+            queue_id: 0x22,
+            request_mask: mask,
+            port_ptr: 0x44,
+        }
+    );
+}
+
+#[test]
 fn classify_tty_write() {
     let args = [0, 0x8000, 64, 0x9000, 0, 0, 0, 0];
     let req = classify(syscall::TTY_WRITE, &args);
@@ -313,7 +394,7 @@ fn unsupported_preserves_args_for_diagnosis() {
 #[test]
 fn spu_thread_group_range_stubs_classify_as_unsupported() {
     let args = [0; 8];
-    for n in [174, 175, 176, 179, 180, 192] {
+    for n in [174, 175, 176, 179, 180] {
         let req = classify(n, &args);
         assert!(
             matches!(req, Lv2Request::Unsupported { number, .. } if number == n),
@@ -851,6 +932,20 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::SPU_THREAD_WRITE_SNR, &[0, 1, 2]),
     (syscall::SPU_THREAD_SET_SPU_CFG, &[0]),
     (syscall::SPU_THREAD_GET_SPU_CFG, &[0, 1]),
+    (syscall::SPU_THREAD_GROUP_CONNECT_EVENT, &[0, 1, 2]),
+    (syscall::SPU_THREAD_GROUP_DISCONNECT_EVENT, &[0, 1]),
+    (syscall::SPU_THREAD_CONNECT_EVENT, &[0, 1, 2, 3]),
+    (syscall::SPU_THREAD_DISCONNECT_EVENT, &[0, 1, 2]),
+    (syscall::SPU_THREAD_BIND_QUEUE, &[0, 1, 2]),
+    (syscall::SPU_THREAD_UNBIND_QUEUE, &[0, 1]),
+    (
+        syscall::SPU_THREAD_GROUP_CONNECT_EVENT_ALL_THREADS,
+        &[0, 1, 3],
+    ),
+    (
+        syscall::SPU_THREAD_GROUP_DISCONNECT_EVENT_ALL_THREADS,
+        &[0, 1],
+    ),
     (syscall::MEMORY_CONTAINER_CREATE, &[0]),
     (syscall::MEMORY_ALLOCATE, &[2]),
     (syscall::MEMORY_ALLOCATE_FROM_CONTAINER, &[1, 3]),

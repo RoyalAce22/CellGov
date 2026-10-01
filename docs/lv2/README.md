@@ -306,9 +306,9 @@ per dispatch arm with the slots that reach it. Of the 1024 slots:
 
 | Route | Slots | Meaning |
 | --- | ---: | --- |
-| `typed` | 121 | Classifies to a typed request arm. |
+| `typed` | 129 | Classifies to a typed request arm. |
 | `routed` | 25 | Reaches a dedicated arm inside `Unsupported`. |
-| `null_backend` | 876 | The honest traced `CELL_ENOSYS` refusal through the generic arm. |
+| `null_backend` | 868 | The honest traced `CELL_ENOSYS` refusal through the generic arm. |
 | `runtime_fast_path` | 2 | Answered by the runtime's timer path; never classified or dispatched. |
 
 The routing-layer guarantee -- an unhandled syscall returns
@@ -367,7 +367,7 @@ stays and none is preferred; the disagreement is the information.
 | --- | ---: | --- |
 | `psdevwiki` | 618 | The name cell of psdevwiki's LV2 Functions and Syscalls table, taken only where it is one plain identifier and not a stub ending in `_`; `ref` is the page. |
 | `psl1ght` | 240 | `sys_` and the lowercased rest of a `SYSCALL_` token in PSL1GHT's `lv2/syscalls.h`; `ref` is the header and the token. |
-| `cellgov` | 147 | The name field of the `lv2_syscalls!` macro; `ref` is the constant. CellGov's own vocabulary, rendered, never hand-copied. |
+| `cellgov` | 155 | The name field of the `lv2_syscalls!` macro; `ref` is the constant. CellGov's own vocabulary, rendered, never hand-copied. |
 | `non_public` | 0 | A name known only from material that cannot be cited; `ref` is `none`. |
 
 `packet` is `none` for a name that applies to the whole ordinal.

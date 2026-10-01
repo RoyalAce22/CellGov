@@ -162,6 +162,49 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             thread_id: p!(0),
             value_ptr: p!(1),
         },
+        syscall::SPU_THREAD_GROUP_CONNECT_EVENT => Lv2Request::SpuThreadGroupConnectEvent {
+            group_id: p!(0),
+            queue_id: p!(1),
+            event_type: p!(2),
+        },
+        syscall::SPU_THREAD_GROUP_DISCONNECT_EVENT => Lv2Request::SpuThreadGroupDisconnectEvent {
+            group_id: p!(0),
+            event_type: p!(1),
+        },
+        syscall::SPU_THREAD_CONNECT_EVENT => Lv2Request::SpuThreadConnectEvent {
+            thread_id: p!(0),
+            queue_id: p!(1),
+            event_type: p!(2),
+            port: p!(3),
+        },
+        syscall::SPU_THREAD_DISCONNECT_EVENT => Lv2Request::SpuThreadDisconnectEvent {
+            thread_id: p!(0),
+            event_type: p!(1),
+            port: p!(2),
+        },
+        syscall::SPU_THREAD_BIND_QUEUE => Lv2Request::SpuThreadBindQueue {
+            thread_id: p!(0),
+            queue_id: p!(1),
+            queue_number: p!(2),
+        },
+        syscall::SPU_THREAD_UNBIND_QUEUE => Lv2Request::SpuThreadUnbindQueue {
+            thread_id: p!(0),
+            queue_number: p!(1),
+        },
+        syscall::SPU_THREAD_GROUP_CONNECT_EVENT_ALL_THREADS => {
+            Lv2Request::SpuThreadGroupConnectEventAllThreads {
+                group_id: p!(0),
+                queue_id: p!(1),
+                request_mask: args[2],
+                port_ptr: p!(3),
+            }
+        }
+        syscall::SPU_THREAD_GROUP_DISCONNECT_EVENT_ALL_THREADS => {
+            Lv2Request::SpuThreadGroupDisconnectEventAllThreads {
+                group_id: p!(0),
+                port: p!(1),
+            }
+        }
         syscall::TIME_GET_TIMEZONE => Lv2Request::TimeGetTimezone {
             timezone_ptr: p!(0),
             summer_time_ptr: p!(1),

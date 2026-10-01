@@ -30,6 +30,7 @@ pub mod rsx;
 mod runtime;
 mod semaphore;
 mod spu;
+mod spu_event;
 mod state;
 mod state_hash;
 mod system_ipc_witness;

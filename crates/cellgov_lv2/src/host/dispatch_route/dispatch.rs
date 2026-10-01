@@ -156,6 +156,51 @@ impl Lv2Host {
                 thread_id,
                 value_ptr,
             } => self.dispatch_get_spu_cfg(thread_id, value_ptr, requester, tick),
+            Lv2Request::SpuThreadGroupConnectEvent {
+                group_id,
+                queue_id,
+                event_type,
+            } => self.dispatch_group_connect_event(group_id, queue_id, event_type),
+            Lv2Request::SpuThreadGroupDisconnectEvent {
+                group_id,
+                event_type,
+            } => self.dispatch_group_disconnect_event(group_id, event_type),
+            Lv2Request::SpuThreadConnectEvent {
+                thread_id,
+                queue_id,
+                event_type,
+                port,
+            } => self.dispatch_thread_connect_event(thread_id, queue_id, event_type, port),
+            Lv2Request::SpuThreadDisconnectEvent {
+                thread_id,
+                event_type,
+                port,
+            } => self.dispatch_thread_disconnect_event(thread_id, event_type, port),
+            Lv2Request::SpuThreadBindQueue {
+                thread_id,
+                queue_id,
+                queue_number,
+            } => self.dispatch_thread_bind_queue(thread_id, queue_id, queue_number),
+            Lv2Request::SpuThreadUnbindQueue {
+                thread_id,
+                queue_number,
+            } => self.dispatch_thread_unbind_queue(thread_id, queue_number),
+            Lv2Request::SpuThreadGroupConnectEventAllThreads {
+                group_id,
+                queue_id,
+                request_mask,
+                port_ptr,
+            } => self.dispatch_group_connect_event_all_threads(
+                group_id,
+                queue_id,
+                request_mask,
+                port_ptr,
+                requester,
+                tick,
+            ),
+            Lv2Request::SpuThreadGroupDisconnectEventAllThreads { group_id, port } => {
+                self.dispatch_group_disconnect_event_all_threads(group_id, port)
+            }
             Lv2Request::TtyWrite {
                 buf_ptr,
                 len,

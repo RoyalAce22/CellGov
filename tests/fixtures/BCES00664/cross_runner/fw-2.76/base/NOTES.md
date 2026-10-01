@@ -7,14 +7,20 @@ engine: Studio Liverpool proprietary
 distribution: Disc ISO
 cell: fw 2.76 x base
 checkpoint: FirstRsxWrite
-steps: 37131
+steps: 36883
 convergence: Yes
 byte_parity: 1020 non-semantic
 ---
 
-WipEout HD Fury converges with RPCS3 at `FirstRsxWrite` (step 37,131)
-and every divergent byte classifies. The step count reproduces across
-three `boot bench` runs and matches this cell's committed anchor.
+WipEout HD Fury converged with RPCS3 at `FirstRsxWrite` (step 37,131)
+and every divergent byte classifies; the cross-runner triple beside this
+file is that measurement. The committed anchor now stops earlier, at
+step 36,883, with an MFC fault on the first SPU of the title's SPURS
+thread group: the group's event connect answers instead of refusing, so
+SPURS starts its SPUs, and the kernel's first transfer names an address
+built from a thread argument whose high word repeats its low word. With
+the arguments laid out as one big-endian doubleword in the preferred
+slot the same run reaches the checkpoint at step 37,201.
 
 Both runners mount the same firmware tree: RPCS3's `/dev_flash/`
 mapping names the store entry CellGov composes, so the two sides share
@@ -34,7 +40,9 @@ version this title's own `PARAM.SFO` asks for
 
 ## Next step
 
-None outstanding for this cell. The one byte `fw 4.93 x base` left
+Lay each SPU thread argument out as a 64-bit value in the preferred
+slot when the SPU starts, then re-measure this cell and regenerate the
+triple at the checkpoint it reaches. The one byte `fw 4.93 x base` left
 unclassified, in a record written by a firmware-PRX helper, has since
 closed: CellGov reaches the helper there now, and both runners hold its
 constant. That was the CellGov side moving rather than 2.76's helper
