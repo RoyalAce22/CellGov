@@ -13,13 +13,13 @@ use crate::state::SpuState;
 
 /// Whether a denormal operand, read as zero with DENORM, also raises INV.
 ///
-/// [SPU-ISA p:199 s:9.2.2] an implementation may set INV as well as DENORM for a denormal operand; CellGov sets DENORM only until hardware vectors decide.
+/// [SPU-ISA p:199 s:9.2.2] an implementation may set INV as well as DENORM for a denormal operand. The console capture of the `spu_float_edges` microtest settles it: its `dfm_snan_and_denormal_operands` case sets DENORM alone for the denormal slot.
 const DENORMAL_OPERAND_RAISES_INVALID: bool = false;
 
 /// Whether a NaN result takes the sign of NaN operands that are all
 /// negative, rather than the default QNaN's positive sign.
 ///
-/// [SPU-ISA p:197 s:9.2] a NaN result may be the default QNaN, sign 0, even with NaN inputs; [Mueller2005 p:61 s:3.2] the CBE computes the generic NaN for every NaN result; hardware vectors decide whether an all-negative NaN input changes the sign.
+/// [SPU-ISA p:197 s:9.2] a NaN result may be the default QNaN, sign 0, even with NaN inputs; [Mueller2005 p:61 s:3.2] the CBE computes the generic NaN for every NaN result. The console capture of the `spu_float_edges` microtest settles the sign: its `dfnma_nan_result_keeps_sign_0` case returns the positive default QNaN for negative NaN inputs.
 const NAN_RESULT_TAKES_INPUT_SIGN: bool = false;
 
 /// Whether `frds` reads a denormal double as a zero of its sign with DENORM.
@@ -35,7 +35,7 @@ const FESD_FLUSHES_DENORMAL_INPUT: bool = true;
 /// Whether a conversion's NaN result is the target format's default QNaN,
 /// rather than the input NaN quieted with its payload carried.
 ///
-/// [SPU-ISA p:197 s:9.2] the default QNaN is one allowed NaN result; hardware vectors decide what the conversions return.
+/// [SPU-ISA p:197 s:9.2] the default QNaN is one allowed NaN result. The console capture of the `spu_float_edges` microtest settles it for `fesd`: its `fesd_of_an_infinity` case returns the default QNaN for an SNaN input, not the payload quieted.
 const CONVERSION_NAN_IS_DEFAULT: bool = true;
 
 /// Whether an SNaN conversion input raises INV.

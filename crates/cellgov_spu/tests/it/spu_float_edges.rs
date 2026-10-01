@@ -146,26 +146,73 @@ fn run(case: &Case) -> (u128, u128) {
     )
 }
 
+/// CellGov's differences from the measured results, each a CellGov
+/// defect with the issue that owns it.
+const DEFECTS: &str = "../../tests/micro/spu_float_edges/defects.tsv";
+
+/// `defects.tsv`'s rows: CellGov's own value, keyed by case and field.
+fn read_defects() -> std::collections::BTreeMap<(String, String), String> {
+    let text = std::fs::read_to_string(DEFECTS).expect("defects.tsv");
+    let mut rows = std::collections::BTreeMap::new();
+    for line in text
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.starts_with("case\t") && !l.is_empty())
+    {
+        let fields: Vec<&str> = line.split('\t').collect();
+        assert_eq!(fields.len(), 6, "{line}");
+        assert_eq!(fields[3], "cellgov-defect", "{line}");
+        assert!(fields[4].starts_with('#'), "{line} names no issue");
+        rows.insert(
+            (fields[0].to_string(), fields[1].to_string()),
+            fields[2].to_string(),
+        );
+    }
+    rows
+}
+
+/// CellGov answers what `cases.tsv` expects, `$3` and the FPSCR both,
+/// for every case but those `defects.tsv` lists, and each of those
+/// still differs with the value the row records.
 #[test]
-fn every_case_matches_its_expected_result() {
+fn every_case_matches_its_expected_result_or_names_its_defect() {
     let cases = read_cases(&std::fs::read_to_string(CASES).expect("cases.tsv"));
     assert!(cases.len() >= 20, "{} cases", cases.len());
+    let mut found = std::collections::BTreeSet::new();
     for case in &cases {
         let (want_r3, want_fpscr) = case.expect.unwrap_or_else(|| {
             panic!(
-                "{} has no expected result; run the regenerate test",
+                "{} has no expected result; run adopt_hardware_measurements",
                 case.name
             )
         });
         let (r3, fpscr) = run(case);
-        assert_eq!(
-            (format_value(r3), format_value(fpscr)),
-            (format_value(want_r3), format_value(want_fpscr)),
-            "{}: {}",
-            case.name,
-            case.source
-        );
+        for (field, got, want) in [("r3", r3, want_r3), ("fpscr", fpscr, want_fpscr)] {
+            if got != want {
+                found.insert(format!("{}\t{field}\t{}", case.name, format_value(got)));
+            }
+        }
     }
+    let listed: std::collections::BTreeSet<String> = read_defects()
+        .into_iter()
+        .map(|((case, field), cellgov)| format!("{case}\t{field}\t{cellgov}"))
+        .collect();
+    let unlisted: Vec<&String> = found.difference(&listed).collect();
+    let stale: Vec<&String> = listed.difference(&found).collect();
+    assert!(
+        unlisted.is_empty() && stale.is_empty(),
+        "CellGov differences with no row in defects.tsv:\n{}\n\
+         rows that no longer differ:\n{}",
+        unlisted
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        stale
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
 }
 
 /// The SPU program: per case, the inputs loaded, the FPSCR written, the
@@ -294,17 +341,26 @@ fn the_built_program_stores_every_expected_result() {
         }
     }
     let payload = payload.expect("the results DMA put");
+    // A field defects.tsv lists holds CellGov's recorded value, not the
+    // console's.
+    let defects = read_defects();
     for (index, case) in cases.iter().enumerate() {
         let (want_r3, want_fpscr) = case.expect.expect("expected results");
         let at = |offset: usize| {
             u128::from_be_bytes(payload[offset..offset + 16].try_into().expect("16 bytes"))
+        };
+        let want = |field: &str, measured: u128| {
+            defects
+                .get(&(case.name.to_string(), field.to_string()))
+                .cloned()
+                .unwrap_or_else(|| format_value(measured))
         };
         assert_eq!(
             (
                 format_value(at(index * 32)),
                 format_value(at(index * 32 + 16))
             ),
-            (format_value(want_r3), format_value(want_fpscr)),
+            (want("r3", want_r3), want("fpscr", want_fpscr)),
             "{}",
             case.name
         );
@@ -340,25 +396,16 @@ fn console_results(cases: &[Case]) -> Vec<(u128, u128)> {
     console
 }
 
-/// A row whose source says `measured` holds the console's own answer,
-/// `$3` and the FPSCR both, and cites the capture it came from; every
-/// other row is still `documented`.
+/// Every row is `measured`, now that a capture exists: it holds the
+/// console's own answer, `$3` and the FPSCR both, and cites the capture
+/// it came from.
 #[test]
 fn hardware_capture_agrees_with_every_measured_row() {
     let cases = read_cases(&std::fs::read_to_string(CASES).expect("cases.tsv"));
     for (case, (r3, fpscr)) in cases.iter().zip(console_results(&cases)) {
-        if !case.source.starts_with("measured") {
-            assert!(
-                case.source.starts_with("documented"),
-                "{}: source is neither documented nor measured: {}",
-                case.name,
-                case.source
-            );
-            continue;
-        }
         assert!(
             case.source.starts_with(MEASURED),
-            "{}: a measured row names the capture it was measured on ({MEASURED}): {}",
+            "{}: every row is measured on the capture ({MEASURED}): {}",
             case.name,
             case.source
         );
@@ -404,57 +451,6 @@ fn adopt_hardware_measurements() {
         out.push('\n');
     }
     std::fs::write(CASES, out).expect("write cases.tsv");
-}
-
-/// The console's disagreements with `cases.tsv`, each a CellGov defect
-/// with the issue that owns it.
-const CONSOLE_DISAGREEMENTS: &str = "../../tests/micro/spu_float_edges/console.tsv";
-
-/// The console is the reference: every case the hardware ran answers
-/// what `cases.tsv` expects, `$3` and the FPSCR both, except the cases
-/// `console.tsv` lists, and each of those still disagrees.
-#[test]
-fn the_console_capture_agrees_with_every_expected_result() {
-    let cases = read_cases(&std::fs::read_to_string(CASES).expect("cases.tsv"));
-    let console = console_results(&cases);
-    let mut found = std::collections::BTreeSet::new();
-    for (case, (r3, fpscr)) in cases.iter().zip(console) {
-        let (want_r3, want_fpscr) = case.expect.expect("expected results");
-        for (field, got, want) in [("r3", r3, want_r3), ("fpscr", fpscr, want_fpscr)] {
-            if got != want {
-                found.insert(format!("{}\t{field}\t{}", case.name, format_value(got)));
-            }
-        }
-    }
-    let text = std::fs::read_to_string(CONSOLE_DISAGREEMENTS).expect("console.tsv");
-    let mut listed = std::collections::BTreeSet::new();
-    for line in text
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.starts_with("case\t") && !l.is_empty())
-    {
-        let fields: Vec<&str> = line.split('\t').collect();
-        assert_eq!(fields.len(), 6, "{line}");
-        assert_eq!(fields[3], "cellgov-defect", "{line}");
-        assert!(fields[4].starts_with('#'), "{line} names no issue");
-        listed.insert(fields[..3].join("\t"));
-    }
-    let unlisted: Vec<&String> = found.difference(&listed).collect();
-    let stale: Vec<&String> = listed.difference(&found).collect();
-    assert!(
-        unlisted.is_empty() && stale.is_empty(),
-        "console disagreements with no row in console.tsv:\n{}\n\
-         rows that no longer disagree:\n{}",
-        unlisted
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join("\n"),
-        stale
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
 }
 
 const PEER: &str = "../../tests/micro/spu_float_edges/peer.tsv";

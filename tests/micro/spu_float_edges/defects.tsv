@@ -1,0 +1,9 @@
+# Every case where CellGov's result differs from the measured one. The
+# expected columns of cases.tsv are the console capture's answers
+# (ps3/cech20-cex-493/), so each row is a CellGov defect named by the
+# issue that owns it, with CellGov's own value; the gate test
+# every_case_matches_its_expected_result_or_names_its_defect fails on a
+# difference with no row and on a row that no longer differs.
+case	field	cellgov	class	issue	note
+reciprocal_sequence	fpscr	00000000_00000000_00000005_00000203	cellgov-defect	#1500	slot 3 flags: CellGov's frest model sets one more flag than the console
+reciprocal_sqrt_sequence	r3	7fffffff_7ffffffd_3effffff_3f3504f2	cellgov-defect	#1500	slot 3 is one ulp below the console's: frsqest's table is CellGov's own, not the hardware's
