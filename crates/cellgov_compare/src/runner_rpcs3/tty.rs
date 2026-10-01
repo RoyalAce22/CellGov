@@ -1,16 +1,13 @@
-//! TTY-log frame format and extractor.
+//! The RPCS3 TTY log as a CGOV frame source.
 //!
-//! # TTY frame format
-//!
-//! The test writes `CGOV` (4 bytes) + big-endian u32 payload length +
-//! raw payload bytes via `sys_tty_write`. The adapter locates the magic
-//! tag in the log and slices each region from the payload at its
-//! stated offset.
-//!
-//! One log carries exactly one frame. A second frame past the first
-//! one's payload is refused rather than resolved by position.
+//! The test writes its CGOV frame via `sys_tty_write`, so the frame
+//! sits in RPCS3's TTY log among other output. The frame format and its
+//! parser are [`cellgov_observation::frame`]'s; this module reads the
+//! log and states the parser's refusals as [`Rpcs3Error`]s.
 
 use std::path::Path;
+
+use cellgov_observation::frame::{parse_frame, FrameError};
 
 use crate::observation::NamedMemoryRegion;
 
@@ -18,17 +15,27 @@ use super::config::TtyRegion;
 use super::error::Rpcs3Error;
 
 /// Magic tag that precedes the big-endian u32 length and payload bytes.
-pub const TTY_MAGIC: &[u8; 4] = b"CGOV";
+pub use cellgov_observation::frame::FRAME_MAGIC as TTY_MAGIC;
 
-/// TTY frame header: 4-byte magic + 4-byte length.
-const TTY_HEADER_SIZE: usize = 8;
-
-/// Byte offset of the first `CGOV` at or after `from`.
-fn find_magic(data: &[u8], from: usize) -> Option<usize> {
-    data.get(from..)?
-        .windows(TTY_MAGIC.len())
-        .position(|w| w == TTY_MAGIC.as_slice())
-        .map(|p| p + from)
+impl From<FrameError> for Rpcs3Error {
+    fn from(error: FrameError) -> Self {
+        match error {
+            FrameError::MagicNotFound => Self::TtyMagicNotFound,
+            FrameError::Ambiguous { first, second } => Self::TtyFrameAmbiguous { first, second },
+            FrameError::PayloadTooSmall { expected, actual } => {
+                Self::TtyPayloadTooSmall { expected, actual }
+            }
+            FrameError::OffsetOverflow {
+                region_name,
+                offset,
+                size,
+            } => Self::TtyOffsetOverflow {
+                region_name,
+                offset,
+                size,
+            },
+        }
+    }
 }
 
 /// Read the TTY log at `tty_path` and parse it with [`parse_tty_frame`].
@@ -58,70 +65,7 @@ pub fn parse_tty_frame(
     data: &[u8],
     regions: &[TtyRegion],
 ) -> Result<Vec<NamedMemoryRegion>, Rpcs3Error> {
-    let magic_pos = find_magic(data, 0).ok_or(Rpcs3Error::TtyMagicNotFound)?;
-
-    // `magic_pos < data.len()` by find-position contract, so the
-    // header_end add is bounded by `data.len() + TTY_HEADER_SIZE`,
-    // well below `usize::MAX` for any real TTY log.
-    let header_end = magic_pos + TTY_HEADER_SIZE;
-    if header_end > data.len() {
-        return Err(Rpcs3Error::TtyPayloadTooSmall {
-            expected: TTY_HEADER_SIZE as u64,
-            actual: (data.len() - magic_pos) as u64,
-        });
-    }
-
-    let len_bytes: [u8; 4] = data[magic_pos + 4..header_end].try_into().expect("4 bytes");
-    let payload_len_u64 = u32::from_be_bytes(len_bytes) as u64;
-
-    let payload_start = header_end;
-    let payload_end_u64 = (payload_start as u64)
-        .checked_add(payload_len_u64)
-        .expect("payload_start + u32 length fits in u64");
-    if payload_end_u64 > data.len() as u64 {
-        return Err(Rpcs3Error::TtyPayloadTooSmall {
-            expected: payload_len_u64,
-            actual: (data.len() - payload_start) as u64,
-        });
-    }
-    let payload_end = payload_end_u64 as usize;
-    // Magic bytes inside the payload are region data. One that starts
-    // past the payload is a second frame, and nothing here can tell
-    // which of the two the caller meant.
-    if let Some(second) = find_magic(data, payload_end) {
-        return Err(Rpcs3Error::TtyFrameAmbiguous {
-            first: magic_pos,
-            second,
-        });
-    }
-    let payload = &data[payload_start..payload_end];
-
-    let mut result = Vec::with_capacity(regions.len());
-    for region in regions {
-        let region_end = region.offset.checked_add(region.size).ok_or_else(|| {
-            Rpcs3Error::TtyOffsetOverflow {
-                region_name: region.name.clone(),
-                offset: region.offset,
-                size: region.size,
-            }
-        })?;
-        if region_end > payload_len_u64 {
-            return Err(Rpcs3Error::TtyPayloadTooSmall {
-                expected: region_end,
-                actual: payload_len_u64,
-            });
-        }
-        // region_end <= payload_len_u64 <= u32::MAX, so both bounds stay
-        // within usize on all supported hosts.
-        let lo = region.offset as usize;
-        let hi = region_end as usize;
-        result.push(NamedMemoryRegion {
-            name: region.name.clone(),
-            addr: region.guest_addr,
-            data: payload[lo..hi].to_vec(),
-        });
-    }
-    Ok(result)
+    Ok(parse_frame(data, regions)?)
 }
 
 #[cfg(test)]

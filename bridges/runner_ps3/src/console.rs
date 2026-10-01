@@ -12,8 +12,8 @@
 //! states. The webMAN version is soft: recorded, absent when the page
 //! omits it, never a refusal.
 
-use cellgov_compare::console_profile::{ConsoleProfileError, ConsoleProfiles};
-use cellgov_compare::hardware_capture::ConsoleFacts;
+use cellgov_observation::console_profile::{ConsoleProfileError, ConsoleProfiles};
+use cellgov_observation::hardware_capture::ConsoleFacts;
 
 use crate::error::RunnerPs3Error;
 use crate::transcript::Transcript;

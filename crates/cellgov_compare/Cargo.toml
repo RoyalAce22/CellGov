@@ -27,6 +27,8 @@ cellgov_event = { path = "../cellgov_event" }
 # shape by the allocator's first id.
 cellgov_lv2 = { path = "../cellgov_lv2" }
 cellgov_mem = { path = "../cellgov_mem" }
+# The observation schema, its manifest and the console captures.
+cellgov_observation = { path = "../cellgov_observation" }
 cellgov_ppu = { path = "../cellgov_ppu" }
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 cellgov_testkit = { path = "../cellgov_testkit" }
@@ -34,9 +36,6 @@ cellgov_time = { path = "../cellgov_time" }
 cellgov_trace = { path = "../cellgov_trace" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# A committed console capture's frame is checked against its recorded
-# SHA-256.
-sha2 = "0.10"
 toml = "1"
 thiserror = "2"
 strum = { version = "0.26", default-features = false, features = ["derive"] }

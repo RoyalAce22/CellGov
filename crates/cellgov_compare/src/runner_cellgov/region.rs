@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cellgov_core::AddressSpaceId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, RegionAccess};
 
+use crate::manifest::ObserveSection;
 use crate::observation::NamedMemoryRegion;
 
 /// Every address space of a finished run, keyed by id; space 0 is the
@@ -23,6 +24,21 @@ pub struct RegionDescriptor {
     pub addr: u64,
     /// Size in bytes.
     pub size: u64,
+}
+
+/// A microtest manifest's `[observe]` regions as the extractor consumes
+/// them: each at its guest address, in its address space.
+pub fn region_descriptors(observe: &ObserveSection) -> Vec<RegionDescriptor> {
+    observe
+        .memory_regions
+        .iter()
+        .map(|r| RegionDescriptor {
+            name: r.name.clone(),
+            space: AddressSpaceId::new(r.space),
+            addr: r.addr,
+            size: r.size,
+        })
+        .collect()
 }
 
 /// Why the extractor refused a region descriptor.

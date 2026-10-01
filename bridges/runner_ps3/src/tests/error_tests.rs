@@ -36,7 +36,7 @@ fn each_error_maps_to_the_class_its_message_names() {
         (RunnerPs3Error::HostClock, ExitCode::Local),
         (
             RunnerPs3Error::from(
-                cellgov_compare::manifest::parse_console("[test]").expect_err("no observe"),
+                cellgov_observation::manifest::parse_console("[test]").expect_err("no observe"),
             ),
             ExitCode::Usage,
         ),

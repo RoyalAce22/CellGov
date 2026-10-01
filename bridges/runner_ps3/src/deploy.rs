@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_compare::manifest::ConsoleManifest;
+use cellgov_observation::manifest::ConsoleManifest;
 
 use crate::error::RunnerPs3Error;
 use crate::run::{ConsoleOps, Target};

@@ -9,7 +9,7 @@ mod region;
 mod scenario;
 
 pub use boot::{observe_from_boot, BootOutcome, BootOutcomeParseError};
-pub use region::{RegionDescriptor, RegionExtractError, SpaceSnapshots};
+pub use region::{region_descriptors, RegionDescriptor, RegionExtractError, SpaceSnapshots};
 pub use scenario::{
     observe, observe_checked, observe_with_determinism_check, CheckedRun, DeterminismError,
     ObserveDisagreement, ObserveError,

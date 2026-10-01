@@ -10,10 +10,6 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::observation::ObservedOutcome;
-use crate::runner_cellgov::RegionDescriptor;
-#[cfg(feature = "rpcs3-runner")]
-use crate::runner_rpcs3::Rpcs3Decoder;
-use crate::AddressSpaceId;
 
 /// A parsed microtest manifest.
 #[derive(Debug, Clone, Deserialize)]
@@ -189,21 +185,6 @@ pub struct ObserveSection {
     pub event_classes: Vec<String>,
 }
 
-impl ObserveSection {
-    /// The regions as the observation extractor consumes them.
-    pub fn region_descriptors(&self) -> Vec<RegionDescriptor> {
-        self.memory_regions
-            .iter()
-            .map(|r| RegionDescriptor {
-                name: r.name.clone(),
-                space: AddressSpaceId::new(r.space),
-                addr: r.addr,
-                size: r.size,
-            })
-            .collect()
-    }
-}
-
 /// Expected outcome for the test.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExpectSection {
@@ -307,16 +288,6 @@ pub enum DecoderField {
     Interpreter,
     /// PPU + SPU LLVM recompiler.
     Llvm,
-}
-
-#[cfg(feature = "rpcs3-runner")]
-impl From<DecoderField> for Rpcs3Decoder {
-    fn from(d: DecoderField) -> Self {
-        match d {
-            DecoderField::Interpreter => Rpcs3Decoder::Interpreter,
-            DecoderField::Llvm => Rpcs3Decoder::Llvm,
-        }
-    }
 }
 
 /// Expected-outcome field (lowercase string in TOML).

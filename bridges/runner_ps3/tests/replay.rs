@@ -12,8 +12,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use cellgov_compare::console_profile::{ConsoleProfiles, CONSOLE_PROFILES_FILE};
-use cellgov_compare::hardware_capture::profile_directories;
+use cellgov_observation::console_profile::{ConsoleProfiles, CONSOLE_PROFILES_FILE};
+use cellgov_observation::hardware_capture::profile_directories;
 use runner_ps3::capture::replay;
 
 fn micro_root() -> PathBuf {

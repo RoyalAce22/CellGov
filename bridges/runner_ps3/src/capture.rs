@@ -8,15 +8,15 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cellgov_compare::console_profile::{ConsoleProfileError, ConsoleProfiles};
-use cellgov_compare::hardware_capture::{
+use cellgov_observation::console_profile::{ConsoleProfileError, ConsoleProfiles};
+use cellgov_observation::frame::{parse_frame, FrameRegion, FRAME_MAGIC};
+use cellgov_observation::hardware_capture::{
     self, CaptureProvenance, ConsoleFacts, FRAME_FILE, OBSERVATION_FILE, PROVENANCE_FILE,
     RUNNER_PS3_CEX,
 };
-use cellgov_compare::manifest::{self, ConsoleManifest};
-use cellgov_compare::observation::{Observation, ObservationMetadata, ObservedOutcome};
-use cellgov_compare::runner_rpcs3::{parse_tty_log, TtyRegion, TTY_MAGIC};
-use cellgov_compare::RunIdentity;
+use cellgov_observation::identity::RunIdentity;
+use cellgov_observation::manifest::{self, ConsoleManifest};
+use cellgov_observation::observation::{Observation, ObservationMetadata, ObservedOutcome};
 
 use crate::deploy::{self, Package};
 use crate::error::RunnerPs3Error;
@@ -40,7 +40,7 @@ pub fn check_frame(bytes: &[u8]) -> Result<(), RunnerPs3Error> {
             bytes.len()
         )));
     };
-    if &header[..4] != TTY_MAGIC.as_slice() {
+    if &header[..4] != FRAME_MAGIC.as_slice() {
         return Err(RunnerPs3Error::Frame(
             "the bytes do not open with the CGOV magic".to_string(),
         ));
@@ -60,13 +60,13 @@ pub fn check_frame(bytes: &[u8]) -> Result<(), RunnerPs3Error> {
 /// observation reports it at its `addr`, the guest address CellGov's
 /// own run reads it from.
 ///
-/// [`MemoryRegionSpec::payload_offset`]: cellgov_compare::manifest::MemoryRegionSpec::payload_offset
+/// [`MemoryRegionSpec::payload_offset`]: cellgov_observation::manifest::MemoryRegionSpec::payload_offset
 ///
 /// # Errors
 ///
 /// [`RunnerPs3Error::Usage`] for a manifest with no region, a region
 /// outside space 0, an empty region, or two regions of one name.
-pub fn payload_regions(manifest: &ConsoleManifest) -> Result<Vec<TtyRegion>, RunnerPs3Error> {
+pub fn payload_regions(manifest: &ConsoleManifest) -> Result<Vec<FrameRegion>, RunnerPs3Error> {
     let regions = &manifest.observe.memory_regions;
     let bad = |what: String| RunnerPs3Error::Usage(format!("manifest [observe]: {what}"));
     if regions.is_empty() {
@@ -91,7 +91,7 @@ pub fn payload_regions(manifest: &ConsoleManifest) -> Result<Vec<TtyRegion>, Run
     }
     Ok(regions
         .iter()
-        .map(|region| TtyRegion {
+        .map(|region| FrameRegion {
             name: region.name.clone(),
             offset: region.payload_offset(),
             size: region.size,
@@ -120,7 +120,7 @@ pub fn frame_to_observation(
     check_frame(&bytes)?;
     let regions = payload_regions(manifest)?;
     let memory_regions =
-        parse_tty_log(frame_path, &regions).map_err(|e| RunnerPs3Error::Frame(e.to_string()))?;
+        parse_frame(&bytes, &regions).map_err(|e| RunnerPs3Error::Frame(e.to_string()))?;
     Ok(Observation {
         outcome: ObservedOutcome::Completed,
         memory_regions,

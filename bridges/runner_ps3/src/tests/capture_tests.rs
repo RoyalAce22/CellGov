@@ -3,8 +3,8 @@
 //! capture, including the two changes it must refuse: one byte of the
 //! frame, and a capture moved under another profile.
 
-use cellgov_compare::console_profile::ConsoleProfiles;
-use cellgov_compare::hardware_capture::{HardwareCaptureError, TRANSCRIPT_FILE};
+use cellgov_observation::console_profile::ConsoleProfiles;
+use cellgov_observation::hardware_capture::{HardwareCaptureError, TRANSCRIPT_FILE};
 use cellgov_testkit::scratch::ScratchDir;
 
 use super::*;

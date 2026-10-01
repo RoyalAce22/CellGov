@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use cellgov_compare::console_profile::{ConsoleProfileError, CONSOLE_PROFILES_FILE};
+use cellgov_observation::console_profile::{ConsoleProfileError, CONSOLE_PROFILES_FILE};
 
 use super::*;
 

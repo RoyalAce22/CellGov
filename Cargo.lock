@@ -208,6 +208,7 @@ dependencies = [
  "cellgov_event",
  "cellgov_lv2",
  "cellgov_mem",
+ "cellgov_observation",
  "cellgov_ppu",
  "cellgov_ps3_abi",
  "cellgov_testkit",
@@ -216,7 +217,6 @@ dependencies = [
  "criterion",
  "serde",
  "serde_json",
- "sha2",
  "strum",
  "thiserror",
  "toml",
@@ -398,6 +398,21 @@ name = "cellgov_mkelf"
 version = "0.0.0"
 dependencies = [
  "cellgov_ps3_abi",
+]
+
+[[package]]
+name = "cellgov_observation"
+version = "0.0.0"
+dependencies = [
+ "cellgov_mem",
+ "cellgov_testkit",
+ "cellgov_trace",
+ "serde",
+ "serde_json",
+ "sha2",
+ "strum",
+ "thiserror",
+ "toml",
 ]
 
 [[package]]
@@ -1245,6 +1260,7 @@ name = "runner_ps3"
 version = "0.0.0"
 dependencies = [
  "cellgov_compare",
+ "cellgov_observation",
  "cellgov_ps3_abi",
  "cellgov_testkit",
  "serde",

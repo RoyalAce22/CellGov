@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use cellgov_compare::hardware_capture::TRANSCRIPT_FILE;
+use cellgov_observation::hardware_capture::TRANSCRIPT_FILE;
 
 /// The words an identifier follows on the console's status page.
 const ID_KEYWORDS: [&str; 2] = ["IDPS", "PSID"];

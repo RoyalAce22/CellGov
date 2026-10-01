@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cellgov_compare::hardware_capture::{
+use cellgov_observation::hardware_capture::{
     sha256_hex, ArtifactHashes, CaptureProvenance, ConsoleFacts, FrameFacts, HarnessFacts,
     MicrotestFacts, TransportFacts, CAPTURE_PROVENANCE_SCHEMA, FRAME_FILE,
 };

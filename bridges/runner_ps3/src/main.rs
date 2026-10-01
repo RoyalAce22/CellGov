@@ -15,8 +15,8 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode as ProcessExit;
 
-use cellgov_compare::console_profile::ConsoleProfiles;
-use cellgov_compare::manifest::{self, ConsoleManifest};
+use cellgov_observation::console_profile::ConsoleProfiles;
+use cellgov_observation::manifest::{self, ConsoleManifest};
 use runner_ps3::capture::{self, CapturePlan};
 use runner_ps3::cli::{self, Command, Verb, HOST_ENV};
 use runner_ps3::console::{self, PROFILE_ENV, STATUS_PATH};
@@ -287,7 +287,7 @@ fn on_console(verb: Verb, command: &Command) -> Result<(), RunnerPs3Error> {
                 manifest_path
                     .parent()
                     .map_or_else(PathBuf::new, Path::to_path_buf)
-                    .join(cellgov_compare::hardware_capture::CAPTURE_DIR)
+                    .join(cellgov_observation::hardware_capture::CAPTURE_DIR)
                     .join(&claimed)
             });
             let plan = CapturePlan {

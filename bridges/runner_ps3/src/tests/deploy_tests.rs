@@ -2,7 +2,7 @@
 //! contents of what reaches the console, and a missing build output
 //! that changes nothing on it.
 
-use cellgov_compare::manifest;
+use cellgov_observation::manifest;
 use cellgov_testkit::scratch::ScratchDir;
 
 use super::*;

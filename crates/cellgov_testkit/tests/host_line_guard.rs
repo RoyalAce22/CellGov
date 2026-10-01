@@ -41,6 +41,7 @@ const RUNTIME: &[&str] = &[
 
 /// The members above it, which keep their host access.
 const HOST: &[&str] = &[
+    "crates/cellgov_observation",
     "crates/cellgov_compare",
     "crates/cellgov_boot",
     "crates/cellgov_testkit",

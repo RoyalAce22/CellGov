@@ -2,9 +2,9 @@
 
 use std::path::PathBuf;
 
-use cellgov_compare::console_profile::ConsoleProfileError;
-use cellgov_compare::hardware_capture::HardwareCaptureError;
-use cellgov_compare::manifest::ManifestError;
+use cellgov_observation::console_profile::ConsoleProfileError;
+use cellgov_observation::hardware_capture::HardwareCaptureError;
+use cellgov_observation::manifest::ManifestError;
 
 use crate::console::ConsoleError;
 use crate::lease::LeaseError;

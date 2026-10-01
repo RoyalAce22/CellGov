@@ -19,13 +19,8 @@ pub mod boot_summary;
 pub mod checkpoint_manifest;
 pub mod classify;
 pub mod compare;
-pub mod console_profile;
 pub mod diverge;
 pub mod format;
-pub mod hardware_capture;
-pub mod identity;
-pub mod manifest;
-pub mod observation;
 pub mod observation_compare;
 pub mod report;
 pub mod runner_cellgov;
@@ -36,6 +31,11 @@ pub mod sync_primitive_scan;
 pub mod trace_decode;
 pub mod witness_parse;
 pub mod witnesses;
+
+// The observation schema and its records live in `cellgov_observation`,
+// which the PS3 runner depends on without the runtime; every module is
+// re-exported here under its old path.
+pub use cellgov_observation::{console_profile, hardware_capture, identity, manifest, observation};
 
 #[cfg(test)]
 #[path = "tests/test_support.rs"]
@@ -48,6 +48,10 @@ mod scheme_mismatch_tests;
 #[cfg(test)]
 #[path = "tests/checkpoint_scheme_tests.rs"]
 mod checkpoint_scheme_tests;
+
+#[cfg(test)]
+#[path = "tests/override_carriage_tests.rs"]
+mod override_carriage_tests;
 
 pub use boot_summary::{BootSummary, BootSummaryError, CheckpointKind};
 pub use cellgov_core::AddressSpaceId;
@@ -79,9 +83,9 @@ pub use observation_compare::{
 };
 pub use report::{format_human, format_json, format_multi_human, format_multi_json};
 pub use runner_cellgov::{
-    observe, observe_checked, observe_from_boot, observe_with_determinism_check, BootOutcome,
-    BootOutcomeParseError, CheckedRun, DeterminismError, ObserveDisagreement, ObserveError,
-    RegionDescriptor, RegionExtractError, SpaceSnapshots,
+    observe, observe_checked, observe_from_boot, observe_with_determinism_check,
+    region_descriptors, BootOutcome, BootOutcomeParseError, CheckedRun, DeterminismError,
+    ObserveDisagreement, ObserveError, RegionDescriptor, RegionExtractError, SpaceSnapshots,
 };
 pub use summary::{
     summarize, ByteParity, ByteParityDivergeReason, Convergence, ConvergenceFailure,

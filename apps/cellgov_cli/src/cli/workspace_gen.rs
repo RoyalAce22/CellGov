@@ -170,7 +170,14 @@ const LAYERS: &[(&str, &[&str])] = &[
     (
         "Host tooling",
         &[
-            "terminal", "testkit", "compare", "explore", "fuzz", "install", "boot",
+            "terminal",
+            "testkit",
+            "observation",
+            "compare",
+            "explore",
+            "fuzz",
+            "install",
+            "boot",
         ],
     ),
     (

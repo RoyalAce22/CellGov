@@ -2,7 +2,7 @@
 
 use cellgov_compare::{
     compare, compare_multi, format_human, format_json, format_multi_human, format_multi_json,
-    CompareMode, Observation, RegionDescriptor,
+    region_descriptors, CompareMode, Observation, RegionDescriptor,
 };
 
 use crate::cli::exit::{CommandError, CommandExitCode};
@@ -66,7 +66,7 @@ pub(super) fn run_manifest_compare(
         None
     };
 
-    let regions: Vec<RegionDescriptor> = manifest.observe.region_descriptors();
+    let regions: Vec<RegionDescriptor> = region_descriptors(&manifest.observe);
 
     let cellgov_section = match &manifest.cellgov {
         Some(cg) => cg,

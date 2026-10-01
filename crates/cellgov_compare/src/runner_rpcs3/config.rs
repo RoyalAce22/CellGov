@@ -4,6 +4,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::manifest::DecoderField;
+
 /// RPCS3 installation and global settings.
 #[derive(Debug, Clone)]
 pub struct Rpcs3Config {
@@ -35,6 +37,15 @@ impl Rpcs3Decoder {
         match self {
             Self::Interpreter => "rpcs3-interpreter",
             Self::Llvm => "rpcs3-llvm",
+        }
+    }
+}
+
+impl From<DecoderField> for Rpcs3Decoder {
+    fn from(d: DecoderField) -> Self {
+        match d {
+            DecoderField::Interpreter => Rpcs3Decoder::Interpreter,
+            DecoderField::Llvm => Rpcs3Decoder::Llvm,
         }
     }
 }
@@ -87,20 +98,5 @@ pub struct DumpRegion {
     pub guest_addr: u64,
 }
 
-/// A region to extract from the TTY payload.
-#[derive(Debug, Clone)]
-pub struct TtyRegion {
-    /// Region name.
-    pub name: String,
-    /// Byte offset within the payload.
-    ///
-    /// Stated rather than accumulated: a guest emits one struct and
-    /// names positions inside it, so the regions can leave alignment
-    /// padding between them. Summing sizes would slide every region
-    /// after the first gap.
-    pub offset: u64,
-    /// Number of bytes for this region within the payload.
-    pub size: u64,
-    /// Guest address to report in the observation.
-    pub guest_addr: u64,
-}
+/// A region to extract from the TTY payload: the CGOV frame region.
+pub use cellgov_observation::frame::FrameRegion as TtyRegion;
