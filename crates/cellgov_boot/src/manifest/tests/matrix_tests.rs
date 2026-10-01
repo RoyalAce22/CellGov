@@ -1,13 +1,16 @@
-//! `[[bench.matrix]]` parsing -- the derived cell, row defaults, and the
-//! refusal shapes.
+//! `[[bench.matrix]]` parsing -- the reference cell, row defaults, and
+//! the refusal shapes.
 
 use std::path::Path;
 
 use super::super::checkpoint::CheckpointTrigger;
 use super::super::model::TitleManifest;
-use super::{derived_key, CellExpectation, CellKey, ManifestError, BASE_GAME_VER};
+use super::{
+    reference_key, CellExpectation, CellKey, ManifestError, BASE_GAME_VER, REFERENCE_FIRMWARE,
+};
 
-/// The floor every hdd fixture below states.
+/// The floor every hdd fixture below states: metadata, below the
+/// reference firmware.
 const FLOOR: &str = "4.91";
 
 /// A psn-hdd manifest at [`FLOOR`] whose `[[bench.matrix]]` rows are
@@ -82,35 +85,94 @@ fn refusal(text: &str) -> String {
     refusal_err(text).to_string()
 }
 
-fn floor_key() -> CellKey {
-    derived_key(FLOOR)
+/// The reference cell of a title with a version axis.
+fn reference() -> CellKey {
+    reference_key(false)
 }
 
-// -- the derived cell --
+// -- the reference cell --
 
 #[test]
-fn a_manifest_with_no_bench_table_declares_the_derived_cell_alone() {
+fn the_reference_firmware_is_a_system_software_version() {
+    assert!(cellgov_install::system_ver::SystemVersion::parse(REFERENCE_FIRMWARE).is_some());
+    assert_eq!(
+        reference().label(),
+        format!("fw {REFERENCE_FIRMWARE} x base")
+    );
+    assert_eq!(
+        reference_key(true).label(),
+        format!("fw {REFERENCE_FIRMWARE}")
+    );
+}
+
+#[test]
+fn the_reference_cell_is_the_reference_firmware_whatever_the_floor() {
+    for floor in ["1.50", "2.76", FLOOR, REFERENCE_FIRMWARE] {
+        let m = load(&hdd_at(Some(floor), ""));
+        assert_eq!(m.matrix.len(), 1, "{floor}");
+        assert_eq!(m.matrix[0].key, reference(), "{floor}");
+        assert_eq!(m.reference_key(), Some(reference()), "{floor}");
+        assert_eq!(
+            m.system_ver.as_deref(),
+            Some(floor),
+            "the floor stays as metadata"
+        );
+    }
+}
+
+#[test]
+fn a_system_ver_newer_than_the_reference_firmware_is_refused() {
+    for newer in ["4.94", "5.00", "10.01"] {
+        let err = refusal(&hdd_at(Some(newer), ""));
+        assert!(err.contains(&format!("{newer:?}")), "{err}");
+        assert!(err.contains("newer than the reference firmware"), "{err}");
+    }
+}
+
+#[test]
+fn a_system_ver_that_is_no_system_software_version_is_refused() {
+    for bad in ["base", "4.9x", "4.", "4.12345"] {
+        let err = refusal(&hdd_at(Some(bad), ""));
+        assert!(err.contains("system_ver"), "{err}");
+        assert!(err.contains(&format!("{bad:?}")), "{err}");
+    }
+    let err = refusal(&hdd_at(Some("base"), ""));
+    assert!(err.contains("no system-software version"), "{err}");
+}
+
+#[test]
+fn a_row_at_the_floor_is_a_drift_cell_beside_the_reference() {
+    let m = load(&hdd_with(&format!(
+        "\n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"base\"\n"
+    )));
+    assert_eq!(m.matrix.len(), 2);
+    assert_eq!(m.matrix[0].key, reference());
+    assert_eq!(m.matrix[1].key.fw, FLOOR);
+}
+
+#[test]
+fn a_manifest_with_no_bench_table_declares_the_reference_cell_alone() {
     let m = load(&hdd_with(""));
     assert_eq!(m.matrix.len(), 1);
     let cell = &m.matrix[0];
-    assert_eq!(cell.key, floor_key());
+    assert_eq!(cell.key, reference());
     assert_eq!(cell.key.game_ver.as_deref(), Some(BASE_GAME_VER));
     assert_eq!(cell.expect, CellExpectation::Frontier);
     assert_eq!(cell.bench_max_steps, None);
     assert_eq!(cell.checkpoint, None);
     assert_eq!(cell.pending, None);
-    assert_eq!(m.reference_key(), Some(floor_key()));
+    assert_eq!(m.reference_key(), Some(reference()));
 }
 
 #[test]
-fn an_empty_matrix_declares_the_derived_cell_alone() {
+fn an_empty_matrix_declares_the_reference_cell_alone() {
     let m = load(&hdd_with("\n[bench]\nmatrix = []\n"));
     assert_eq!(m.matrix.len(), 1);
-    assert_eq!(m.matrix[0].key, floor_key());
+    assert_eq!(m.matrix[0].key, reference());
 }
 
 #[test]
-fn a_bench_table_with_no_matrix_key_declares_the_derived_cell_alone() {
+fn a_bench_table_with_no_matrix_key_declares_the_reference_cell_alone() {
     assert_eq!(load(&hdd_with("\n[bench]\n")).matrix.len(), 1);
 }
 
@@ -151,7 +213,7 @@ fn a_system_ver_on_a_manifest_relative_title_is_refused() {
     assert!(err.contains("beside its manifest"), "{err}");
 }
 
-// -- rows beside the derived cell --
+// -- rows beside the reference cell --
 
 #[test]
 fn a_row_may_declare_the_probe_expectation() {
@@ -178,7 +240,7 @@ fn an_unknown_expectation_is_refused_and_names_the_accepted_ones() {
 }
 
 #[test]
-fn rows_keep_their_declaration_order_behind_the_derived_cell() {
+fn rows_keep_their_declaration_order_behind_the_reference_cell() {
     let m = load(&hdd_with(
         r#"
 [[bench.matrix]]
@@ -202,7 +264,7 @@ game_ver = "02.51"
     assert_eq!(
         order,
         [
-            (FLOOR, Some(BASE_GAME_VER)),
+            (REFERENCE_FIRMWARE, Some(BASE_GAME_VER)),
             ("3.55", Some(BASE_GAME_VER)),
             ("2.76", Some(BASE_GAME_VER)),
             ("3.55", Some("02.51")),
@@ -306,24 +368,24 @@ fn every_refusal_names_the_manifest_it_came_from() {
     assert!(err.contains("cell-fixture.toml"), "{err}");
 }
 
-// -- a row repeating the derived cell --
+// -- a row repeating the reference cell --
 
 #[test]
-fn a_row_repeating_the_derived_cell_with_nothing_to_add_is_refused() {
+fn a_bare_row_repeating_the_reference_is_refused_as_adding_nothing() {
     for tail in ["", "expect = \"frontier\"\n"] {
         let err = refusal(&hdd_with(&format!(
-            "\n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"base\"\n{tail}"
+            "\n[[bench.matrix]]\nfw = \"{REFERENCE_FIRMWARE}\"\ngame_ver = \"base\"\n{tail}"
         )));
-        assert!(err.contains("fw 4.91 x base"), "{err}");
-        assert!(err.contains("system_ver"), "{err}");
+        assert!(err.contains("fw 4.93 x base"), "{err}");
+        assert!(err.contains("reference cell"), "{err}");
         assert!(err.contains("adds nothing"), "{err}");
     }
 }
 
 #[test]
-fn a_row_repeating_the_derived_cell_attaches_its_override_to_it() {
+fn a_row_repeating_the_reference_cell_attaches_its_override_to_it() {
     let m = load(&hdd_with(&format!(
-        "\n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"base\"\n\
+        "\n[[bench.matrix]]\nfw = \"{REFERENCE_FIRMWARE}\"\ngame_ver = \"base\"\n\
          bench_max_steps = 250_000_000\n\
          checkpoint = {{ kind = \"pc\", pc = \"0x10381ce8\" }}\n"
     )));
@@ -332,16 +394,16 @@ fn a_row_repeating_the_derived_cell_attaches_its_override_to_it() {
         1,
         "the row attaches; it declares no second cell"
     );
-    let cell = m.cell(&floor_key()).expect("the derived cell");
+    let cell = m.cell(&reference()).expect("the reference cell");
     assert_eq!(cell.bench_max_steps, Some(250_000_000));
     assert_eq!(cell.checkpoint, Some(CheckpointTrigger::Pc(0x1038_1ce8)));
     assert_eq!(cell.expect, CellExpectation::Frontier);
 }
 
 #[test]
-fn a_row_repeating_the_derived_cell_attaches_its_pending_reason() {
+fn a_row_repeating_the_reference_cell_attaches_its_pending_reason() {
     let m = load(&hdd_with(&format!(
-        "\n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"base\"\n\
+        "\n[[bench.matrix]]\nfw = \"{REFERENCE_FIRMWARE}\"\ngame_ver = \"base\"\n\
          pending = \"the boot faults before the checkpoint\"\n"
     )));
     assert_eq!(m.matrix.len(), 1);
@@ -352,30 +414,30 @@ fn a_row_repeating_the_derived_cell_attaches_its_pending_reason() {
 }
 
 #[test]
-fn a_row_repeating_the_derived_cell_as_a_probe_is_refused() {
+fn a_row_repeating_the_reference_cell_as_a_probe_is_refused() {
     let err = refusal(&hdd_with(&format!(
-        "\n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"base\"\nexpect = \"probe\"\n\
+        "\n[[bench.matrix]]\nfw = \"{REFERENCE_FIRMWARE}\"\ngame_ver = \"base\"\nexpect = \"probe\"\n\
          bench_max_steps = 250_000_000\n"
     )));
-    assert!(err.contains("fw 4.91 x base"), "{err}");
+    assert!(err.contains("fw 4.93 x base"), "{err}");
     assert!(err.contains("probe"), "{err}");
     assert!(err.contains("another cell"), "{err}");
 }
 
 #[test]
-fn two_rows_repeating_the_derived_cell_are_refused_as_a_repeat() {
+fn two_rows_repeating_the_reference_cell_are_refused_as_a_repeat() {
     let err = refusal(&hdd_with(&format!(
-        "\n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"base\"\nbench_max_steps = 1\n\
-         \n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"base\"\nbench_max_steps = 2\n"
+        "\n[[bench.matrix]]\nfw = \"{REFERENCE_FIRMWARE}\"\ngame_ver = \"base\"\nbench_max_steps = 1\n\
+         \n[[bench.matrix]]\nfw = \"{REFERENCE_FIRMWARE}\"\ngame_ver = \"base\"\nbench_max_steps = 2\n"
     )));
-    assert!(err.contains("fw 4.91 x base"), "{err}");
+    assert!(err.contains("fw 4.93 x base"), "{err}");
     assert!(err.contains("twice"), "{err}");
 }
 
 #[test]
-fn a_row_at_the_floor_under_another_game_version_is_its_own_cell() {
+fn a_row_at_the_reference_firmware_under_another_game_version_is_its_own_cell() {
     let m = load(&hdd_with(&format!(
-        "\n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"02.51\"\n"
+        "\n[[bench.matrix]]\nfw = \"{REFERENCE_FIRMWARE}\"\ngame_ver = \"02.51\"\n"
     )));
     assert_eq!(m.matrix.len(), 2);
     assert_eq!(m.matrix[1].key.game_ver.as_deref(), Some("02.51"));
@@ -454,7 +516,7 @@ fn a_per_cell_checkpoint_is_refused_on_the_same_terms_as_the_title_level_one() {
 // -- a title shipped inside the firmware --
 
 #[test]
-fn a_firmware_exec_matrix_is_one_row_per_firmware_and_derives_nothing() {
+fn a_firmware_exec_matrix_is_one_row_per_firmware_and_adds_no_cell() {
     let m = TitleManifest::load_from_text(
         &firmware_exec_with(
             "",
@@ -475,7 +537,11 @@ expect = "probe"
     assert_eq!(m.matrix[0].key.fw, "4.91");
     assert_eq!(m.matrix[1].expect, CellExpectation::Probe);
     assert_eq!(m.system_ver, None);
-    assert_eq!(m.reference_key(), None);
+    assert_eq!(
+        m.reference_key(),
+        Some(reference_key(true)),
+        "its reference is a row it declares, or none"
+    );
 }
 
 #[test]
@@ -545,7 +611,8 @@ fn the_nested_cellgov_layout_carries_the_floor_and_the_matrix() {
     let m = load(&nested_cellgov_with(
         "\n[[cellgov.bench.matrix]]\nfw = \"3.55\"\ngame_ver = \"base\"\n",
     ));
-    assert_eq!(m.reference_key(), Some(floor_key()));
+    assert_eq!(m.reference_key(), Some(reference()));
+    assert_eq!(m.system_ver.as_deref(), Some(FLOOR));
     assert_eq!(m.matrix.len(), 2);
     assert_eq!(m.matrix[1].key.fw, "3.55");
 }
@@ -593,7 +660,7 @@ kind = "process-exit"
 
 /// Only a firmware-shipped source drops the game-version axis, so a
 /// manifest-relative title names a game version like any other title.
-/// It has no PARAM.SFO, so it derives no cell and needs no floor.
+/// It has no PARAM.SFO, so it has no reference cell and needs no floor.
 #[test]
 fn a_manifest_relative_title_declares_cells_on_the_game_version_axis() {
     let m = load(&manifest_relative_with(
@@ -648,14 +715,14 @@ mirror = true
 fn a_row_cannot_override_its_way_into_the_checkpoint_the_mirror_makes_unreachable() {
     let err = TitleManifest::load_from_text(
         &mirrored_with(&format!(
-            "\n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"base\"\n\
+            "\n[[bench.matrix]]\nfw = \"{REFERENCE_FIRMWARE}\"\ngame_ver = \"base\"\n\
              checkpoint = {{ kind = \"first-rsx-write\" }}\n"
         )),
         origin(),
     )
     .expect_err("the mirror leaves the put-pointer write unable to fault")
     .to_string();
-    assert!(err.contains("fw 4.91 x base"), "{err}");
+    assert!(err.contains("fw 4.93 x base"), "{err}");
     assert!(err.contains("first-rsx-write"), "{err}");
     assert!(err.contains("mirror"), "{err}");
 }
@@ -664,7 +731,7 @@ fn a_row_cannot_override_its_way_into_the_checkpoint_the_mirror_makes_unreachabl
 fn a_mirrored_title_accepts_a_row_overriding_to_a_reachable_checkpoint() {
     let m = TitleManifest::load_from_text(
         &mirrored_with(&format!(
-            "\n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"base\"\n\
+            "\n[[bench.matrix]]\nfw = \"{REFERENCE_FIRMWARE}\"\ngame_ver = \"base\"\n\
              checkpoint = {{ kind = \"pc\", pc = \"0x10381ce8\" }}\n"
         )),
         origin(),
@@ -707,8 +774,8 @@ kind = "first-rsx-write"
     }
 
     /// `01.5000` passes the store's path-component check, so without
-    /// its own refusal it would derive a cell at a firmware directory
-    /// nothing installs.
+    /// its own refusal it would record a floor no firmware directory
+    /// names.
     #[test]
     fn a_system_ver_spelled_the_way_param_sfo_spells_it_is_refused_naming_the_key() {
         for (raw, key) in [
@@ -725,11 +792,12 @@ kind = "first-rsx-write"
     }
 
     #[test]
-    fn a_disc_title_derives_its_cell_from_system_ver() {
+    fn a_disc_title_declares_the_reference_cell_and_keeps_its_floor() {
         let m = load(&disc_at(Some(FLOOR)));
         assert_eq!(m.matrix.len(), 1);
-        assert_eq!(m.matrix[0].key, floor_key());
-        assert_eq!(m.reference_key(), Some(floor_key()));
+        assert_eq!(m.matrix[0].key, reference());
+        assert_eq!(m.reference_key(), Some(reference()));
+        assert_eq!(m.system_ver.as_deref(), Some(FLOOR));
     }
 
     #[test]

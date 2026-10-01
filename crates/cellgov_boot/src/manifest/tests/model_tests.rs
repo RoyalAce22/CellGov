@@ -448,23 +448,41 @@ mod reference_cell_tests {
     }
 
     #[test]
-    fn the_reference_key_is_the_floor_times_the_base_install() {
+    fn the_reference_key_is_the_reference_firmware_times_the_base_install_whatever_the_floor() {
         let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
         m.system_ver = Some("3.55".to_string());
         m.matrix = vec![base_cell("4.91"), base_cell("3.55")];
         assert_eq!(
             m.reference_key(),
             Some(CellKey {
-                fw: "3.55".to_string(),
+                fw: crate::manifest::REFERENCE_FIRMWARE.to_string(),
                 game_ver: Some("base".to_string()),
             }),
-            "the floor answers, not the first declared cell"
+            "the reference firmware answers, not the floor nor the first declared cell"
         );
     }
 
     #[test]
-    fn a_title_with_no_floor_has_no_reference_key() {
-        let m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+    fn a_firmware_shipped_title_is_referenced_at_the_firmware_alone() {
+        let mut m = hdd_manifest("VSH", "vsh", &["vsh.self"]);
+        m.source = GameSource::FirmwareExec {
+            dir: PathBuf::from("dev_flash/vsh/module"),
+        };
+        assert_eq!(
+            m.reference_key(),
+            Some(CellKey {
+                fw: crate::manifest::REFERENCE_FIRMWARE.to_string(),
+                game_ver: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_title_built_beside_its_manifest_has_no_reference_key() {
+        let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+        m.source = GameSource::ManifestRelative {
+            dir: PathBuf::from("build"),
+        };
         assert_eq!(m.system_ver, None);
         assert_eq!(m.reference_key(), None);
     }

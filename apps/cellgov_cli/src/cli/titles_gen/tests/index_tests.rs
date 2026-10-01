@@ -46,15 +46,20 @@ fn the_config_column_names_the_reference_cell() {
 
 #[test]
 fn a_title_declaring_no_cells_names_no_configuration() {
+    // Only a title built beside its manifest can declare no cell: it has
+    // no reference and no floor.
     let mut t = title("NPAA00011", "NoCells", 2009, "Studio");
+    t.source = cellgov_boot::manifest::GameSource::ManifestRelative {
+        dir: std::path::PathBuf::from("build"),
+    };
     t.system_ver = None;
     t.matrix.clear();
     let tmp = Fixtures::new("config-none");
     let row = headline_row(&t, tmp.path());
     assert!(!row.contains("fw "), "{row}");
     assert!(
-        row.ends_with("| -- | -- | -- | -- | -- | -- |"),
-        "the Config cell must be `--` alongside the data cells: {row}"
+        row.ends_with("| -- | -- | -- | -- | -- | -- | -- |"),
+        "the Config and Floor cells must be `--` alongside the data cells: {row}"
     );
 }
 
@@ -241,7 +246,7 @@ fn cross_present_boot_absent_renders_dashes_then_yes() {
     tmp.write_cross("NPAA40002", &reference_key(), &converged(0));
     let row = headline_row(&t, tmp.path());
     assert!(
-        row.ends_with("| fw 4.93 x base | -- | -- | -- | Yes | equivalent |"),
+        row.ends_with("| fw 4.93 x base | 4.93 | -- | -- | -- | Yes | equivalent |"),
         "boot cells must be `--` beside a recorded convergence: {row}"
     );
 }
@@ -451,24 +456,24 @@ fn a_firmware_shipped_title_has_no_row_in_the_index_and_is_not_counted() {
 }
 
 #[test]
-fn the_config_column_names_the_floor_whatever_else_is_declared() {
+fn the_config_column_names_the_reference_and_the_floor_column_the_floor() {
     let mut t = title("NPAA00021", "Floored", 2007, "Studio");
     t.system_ver = Some("1.50".to_string());
     t.matrix = vec![
-        matrix_cell(cell_key("1.50", Some(BASE))),
         matrix_cell(reference_key()),
+        matrix_cell(cell_key("1.50", Some(BASE))),
     ];
     let tmp = Fixtures::new("config-floor");
     tmp.write_anchor(
         "NPAA00021",
-        &reference_key(),
+        &cell_key("1.50", Some(BASE)),
         &boot(BootOutcome::ProcessExit, 4_444_444),
     );
     let row = headline_row(&t, tmp.path());
-    assert!(row.contains("| fw 1.50 x base |"), "{row}");
+    assert!(row.contains("| fw 4.93 x base | 1.50 |"), "{row}");
     assert!(
         !row.contains("4,444,444"),
-        "the newer firmware's anchor is not the headline: {row}"
+        "the floor cell's anchor is not the headline: {row}"
     );
 }
 

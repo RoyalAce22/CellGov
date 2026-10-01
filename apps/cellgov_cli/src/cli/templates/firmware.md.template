@@ -8,13 +8,15 @@ reach the same architectural state as RPCS3 at the checkpoint
 non-semantic divergences (Byte parity) -- for one firmware version.
 
 The system software is not a title. A game states the firmware it
-shipped against in its own `PARAM.SFO`, and that floor is the one
-cell its headline row is measured at. The software here ships in
-every firmware image, so it has no floor of its own: its version axis
-*is* the firmware axis, and every firmware version its manifest
-declares is a row of equal standing. That is why it has a page of its
-own rather than a row on the title index, where a `Year` or a
-`Config` column would mean something different from every other row.
+shipped against in its own `PARAM.SFO`, its floor, and is measured at
+firmware 4.93 whatever that floor is. The software here ships in every
+firmware image, so it has no floor of its own: its version axis *is*
+the firmware axis, and every firmware version its manifest declares is
+a row. The 4.93 row is its reference, the one cell the bench sweep
+requires an anchor for; the others are drift studies. That is why it
+has a page of its own rather than a row on the title index, where a
+`Year` or a `Config` column would mean something different from every
+other row.
 
 Read the Convergence and Byte parity columns through
 [concepts/](concepts/README.md), the same way as on the title matrix.

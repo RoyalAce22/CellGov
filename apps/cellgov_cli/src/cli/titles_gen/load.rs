@@ -161,16 +161,20 @@ pub(crate) struct TitleDocs<'a> {
 
 impl TitleDocs<'_> {
     /// The loaded reference cell, which the headline row renders in
-    /// full. `None` for a title that derives no reference.
+    /// full. `None` for a title with no reference, and for a
+    /// firmware-shipped title that declares no row at the reference
+    /// firmware.
     pub(crate) fn reference(&self) -> Option<&LoadedCell> {
         let key = self.title.reference_key()?;
         let found = self.cells.iter().find(|c| c.key == key);
-        // The manifest loader puts the derived cell first in every
-        // matrix, so a miss is a manifest built outside it. The Config
-        // column would then name a cell the row quotes nothing for.
+        // The manifest loader puts the reference cell first in the
+        // matrix of every title with a floor, so a miss there is a
+        // manifest built outside it. A firmware-shipped title declares
+        // its rows itself, and the registry test holds them to the
+        // reference.
         debug_assert!(
-            found.is_some(),
-            "titles-gen: {} derives {} from system_ver, but its matrix does not declare it",
+            found.is_some() || self.title.ships_in_firmware(),
+            "titles-gen: {} is a game title, but its matrix does not declare the reference cell {}",
             self.title.content_id,
             key.label()
         );

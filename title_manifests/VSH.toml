@@ -22,8 +22,9 @@ consume = false
 # The system software ships inside every firmware image and states no
 # floor of its own, so every cell it is measured at is a row here; each
 # renders on docs/firmware.md. See docs/architecture/title_harness.md.
-# One row per firmware a registered title's floor names, plus the
-# newest.
+# The 4.93 row is the reference, the one cell the bench sweep needs an
+# anchor for, as it is for every title; the others, one per firmware a registered title's floor names, are
+# drift studies.
 [[bench.matrix]]
 fw = "1.50"
 pending = "the firmware-exec boot requires sys/internal/libfs_utility2 before the first step, and firmware 1.50 ships no such module"

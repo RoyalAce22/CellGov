@@ -3,7 +3,7 @@
 //!
 //! `dev record-anchors` measures and writes them; `boot bench --all`
 //! measures and compares them. Both read the cells from the registry
-//! alone: the one cell `[title] system_ver` derives and every
+//! alone: the reference cell a title with a floor declares and every
 //! `[[bench.matrix]]` row, in declaration order. A cell with no anchor
 //! is then visible; a walk over the anchor tree would omit it.
 
@@ -22,6 +22,9 @@ pub(crate) struct DeclaredCell {
     pub checkpoint: CheckpointTrigger,
     /// The registry's reason this cell has no measurement yet.
     pub pending: Option<String>,
+    /// Whether the cell is the title's reference, the one cell the
+    /// sweep requires an anchor for. Every other cell is a drift study.
+    pub gated: bool,
 }
 
 impl DeclaredCell {
@@ -33,6 +36,7 @@ impl DeclaredCell {
 
 /// Every cell `title` declares, in declaration order.
 pub(crate) fn declared_cells(title: &TitleManifest) -> Vec<DeclaredCell> {
+    let reference = title.reference_key();
     title
         .matrix
         .iter()
@@ -43,6 +47,7 @@ pub(crate) fn declared_cells(title: &TitleManifest) -> Vec<DeclaredCell> {
             max_steps: title.cell_max_steps(Some(cell)),
             checkpoint: title.cell_checkpoint(Some(cell)),
             pending: cell.pending.clone(),
+            gated: reference.as_ref() == Some(&cell.key),
         })
         .collect()
 }
@@ -99,9 +104,9 @@ pub(crate) fn select_titles<'a>(
 
 /// Refuse a selection that includes a title with no declared cell.
 ///
-/// A title with a PARAM.SFO always declares the cell its `system_ver`
-/// derives. Only a title shipped inside the firmware, or built beside
-/// its manifest, can reach here with nothing declared.
+/// A title with a PARAM.SFO always declares the reference cell. Only a
+/// title shipped inside the firmware, or built beside its manifest, can
+/// reach here with nothing declared.
 ///
 /// # Errors
 ///

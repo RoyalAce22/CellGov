@@ -8,8 +8,9 @@ developer = "Naughty Dog"
 engine = "Naughty Dog proprietary"
 distribution = "disc-iso"
 # PS3_SYSTEM_VER from the title's own PARAM.SFO (01.9400), held against
-# the installed content by the `installed-title-tests` suite. Derives the one cell
-# the headline row is measured at: fw 1.94 x base.
+# the installed content by the `installed-title-tests` suite. The floor is
+# metadata: every title's headline row is measured at the reference
+# firmware, fw 4.93 x base, the firmware consoles run today.
 system_ver = "1.94"
 
 [source]
@@ -18,14 +19,13 @@ kind = "disc"
 [checkpoint]
 kind = "first-rsx-write"
 
-# Drift study: the same title on the newest firmware. Recorded evidence
-# about how much of a divergence is the firmware's rather than the
-# title's.
+# Drift study: the title at its own floor; not gated.
 [[bench.matrix]]
 fw = "1.94"
 game_ver = "base"
 pending = "the resident title image or firmware set crosses the fixed TLS reservation, so boot refuses before TLS initialization"
 
+# The reference cell's reason it has no measurement yet.
 [[bench.matrix]]
 fw = "4.93"
 game_ver = "base"

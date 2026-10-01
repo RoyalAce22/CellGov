@@ -14,6 +14,7 @@ fn cell(short_name: &str, fw: &str, game_ver: Option<&str>) -> DeclaredCell {
         max_steps: 4_000,
         checkpoint: CheckpointTrigger::ProcessExit,
         pending: None,
+        gated: true,
     }
 }
 
@@ -76,30 +77,44 @@ fn the_worst_cell_decides_the_status() {
 #[test]
 fn a_passing_set_is_classified_by_its_anchor_verdict() {
     assert_eq!(
-        classify(outcome(BenchGate::Pass, AnchorVerdict::Match, Vec::new())).unwrap(),
+        classify(
+            outcome(BenchGate::Pass, AnchorVerdict::Match, Vec::new()),
+            true
+        )
+        .unwrap(),
         CellVerdict::Matches
     );
     assert_eq!(
-        classify(outcome(
-            BenchGate::Pass,
-            AnchorVerdict::NotRecorded("fw 4.93 x base".to_string()),
-            Vec::new()
-        ))
+        classify(
+            outcome(
+                BenchGate::Pass,
+                AnchorVerdict::NotRecorded("fw 4.93 x base".to_string()),
+                Vec::new()
+            ),
+            true
+        )
         .unwrap(),
         CellVerdict::NotRecorded,
         "an unrecorded cell passes the single gate and is a finding here"
     );
     assert_eq!(
-        classify(outcome(
-            BenchGate::Pass,
-            AnchorVerdict::NotComparable(vec!["retargeted".to_string()]),
-            Vec::new()
-        ))
+        classify(
+            outcome(
+                BenchGate::Pass,
+                AnchorVerdict::NotComparable(vec!["retargeted".to_string()]),
+                Vec::new()
+            ),
+            true
+        )
         .unwrap(),
         CellVerdict::NotCompared(vec!["retargeted".to_string()])
     );
     assert_eq!(
-        classify(outcome(BenchGate::Pass, AnchorVerdict::Skipped, Vec::new())).unwrap(),
+        classify(
+            outcome(BenchGate::Pass, AnchorVerdict::Skipped, Vec::new()),
+            true
+        )
+        .unwrap(),
         CellVerdict::NotChecked
     );
 }
@@ -108,29 +123,34 @@ fn a_passing_set_is_classified_by_its_anchor_verdict() {
 fn a_failing_set_is_classified_by_its_gate() {
     let failures = vec!["steps 10 != recorded 11".to_string()];
     assert_eq!(
-        classify(outcome(
-            BenchGate::AnchorDrift,
-            AnchorVerdict::Drift(failures.clone()),
-            Vec::new()
-        ))
+        classify(
+            outcome(
+                BenchGate::AnchorDrift,
+                AnchorVerdict::Drift(failures.clone()),
+                Vec::new()
+            ),
+            true
+        )
         .unwrap(),
         CellVerdict::Moved(failures)
     );
     assert_eq!(
-        classify(outcome(
-            BenchGate::DeterminismBreak,
-            AnchorVerdict::Match,
-            vec!["a".to_string(), "b".to_string()]
-        ))
+        classify(
+            outcome(
+                BenchGate::DeterminismBreak,
+                AnchorVerdict::Match,
+                vec!["a".to_string(), "b".to_string()]
+            ),
+            true
+        )
         .unwrap(),
         CellVerdict::DeterminismBreak(2)
     );
     assert_eq!(
-        classify(outcome(
-            BenchGate::SpreadExceeded,
-            AnchorVerdict::Match,
-            Vec::new()
-        ))
+        classify(
+            outcome(BenchGate::SpreadExceeded, AnchorVerdict::Match, Vec::new()),
+            true
+        )
         .unwrap(),
         CellVerdict::NoThroughputVerdict
     );
@@ -303,4 +323,39 @@ fn only_a_measured_cell_counts_as_run() {
     assert!(CellVerdict::BootFailed("x".to_string()).ran());
     assert!(!CellVerdict::NotInstalled("x".to_string()).ran());
     assert!(!CellVerdict::Pending("x".to_string()).ran());
+}
+
+#[test]
+fn an_unrecorded_drift_cell_is_reported_as_not_gated_and_fails_nothing() {
+    let unrecorded = || {
+        outcome(
+            BenchGate::Pass,
+            AnchorVerdict::NotRecorded("fw 2.76 x base".to_string()),
+            Vec::new(),
+        )
+    };
+    assert_eq!(classify(unrecorded(), false).unwrap(), CellVerdict::Ungated);
+    assert_eq!(
+        classify(unrecorded(), true).unwrap(),
+        CellVerdict::NotRecorded,
+        "the reference cell fails for want of an anchor"
+    );
+    assert_eq!(
+        sweep_exit_code(&[CellVerdict::Matches, CellVerdict::Ungated]),
+        0
+    );
+    assert!(CellVerdict::Ungated.ran());
+    let mut drift = cell("synthetic", "2.76", Some("base"));
+    drift.gated = false;
+    assert_eq!(
+        summary_lines(&drift, &CellVerdict::Ungated),
+        vec![
+            "synthetic fw 2.76 x base: not gated -- a drift cell, not the reference, with no \
+             anchor; record one with `dev record-anchors --title synthetic` to hold it to one"
+        ]
+    );
+    assert_eq!(
+        tally_line(&[CellVerdict::Matches, CellVerdict::Ungated]),
+        "boot bench --all: 2 declared cell(s): 1 matched, 1 not gated"
+    );
 }

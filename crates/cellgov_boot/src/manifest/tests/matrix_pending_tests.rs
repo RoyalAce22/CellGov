@@ -4,9 +4,9 @@
 use std::path::Path;
 
 use super::super::model::TitleManifest;
-use super::derived_key;
+use super::{reference_key, REFERENCE_FIRMWARE};
 
-/// The floor the fixture states.
+/// The floor the fixture states: metadata, far below the reference.
 const FLOOR: &str = "1.50";
 
 fn manifest_with(rows: &str) -> String {
@@ -30,9 +30,11 @@ kind = "first-rsx-write"
     )
 }
 
-/// A row that repeats the derived cell with `pending = "<reason>"`.
+/// A row that repeats the reference cell with `pending = "<reason>"`.
 fn pending_row(reason: &str) -> String {
-    format!("\n[[bench.matrix]]\nfw = \"{FLOOR}\"\ngame_ver = \"base\"\npending = \"{reason}\"\n")
+    format!(
+        "\n[[bench.matrix]]\nfw = \"{REFERENCE_FIRMWARE}\"\ngame_ver = \"base\"\npending = \"{reason}\"\n"
+    )
 }
 
 fn origin() -> &'static Path {
@@ -42,11 +44,11 @@ fn origin() -> &'static Path {
 const REASON: &str = "the firmware is not obtainable";
 
 #[test]
-fn a_row_carries_the_reason_the_derived_cell_cannot_be_measured() {
+fn a_row_carries_the_reason_the_reference_cell_cannot_be_measured() {
     let text = manifest_with(&pending_row(REASON));
     let m = TitleManifest::load_from_text(&text, origin()).expect("manifest loads");
     assert_eq!(m.matrix.len(), 1);
-    let cell = m.cell(&derived_key(FLOOR)).expect("the derived cell");
+    let cell = m.cell(&reference_key(false)).expect("the reference cell");
     assert_eq!(cell.pending.as_deref(), Some(REASON));
 }
 
@@ -57,7 +59,7 @@ fn a_cell_that_states_no_reason_is_not_pending() {
 }
 
 #[test]
-fn a_row_beside_the_derived_cell_carries_its_own_reason() {
+fn a_row_beside_the_reference_cell_carries_its_own_reason() {
     let text = manifest_with(&format!(
         "\n[[bench.matrix]]\nfw = \"3.55\"\ngame_ver = \"base\"\npending = \"{REASON}\"\n"
     ));

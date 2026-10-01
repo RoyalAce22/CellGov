@@ -13,7 +13,7 @@ Back to the [firmware page](../firmware.md).
 | 1.94 | . (the boot faults at step 327, before the checkpoint: liblv2's once-mutex slot names a mutex the host never created, and the debug build's LV2 handoff witness panics on it) |
 | 2.76 | anchor (MaxSteps) |
 | 3.70 | anchor (MaxSteps) |
-| 4.93 | anchor (MaxSteps) |
+| 4.93 | anchor (MaxSteps)* |
 
 Legend:
 
@@ -26,7 +26,7 @@ Legend:
 | `anchor (<outcome>)` | a boot anchor with no cross-runner verdict beside it |
 | `.` | cell declared, nothing recorded yet |
 | (blank) | cell not declared -- out of scope for this title |
-| `*` | suffix marking the reference cell -- the title's `PARAM.SFO` floor times its base install, the one the matrix renders |
+| `*` | suffix marking the reference cell -- firmware 4.93 times the base install, the one the matrix renders |
 
 A `.` and a blank say different things. A blank is a boundary somebody
 chose; a `.` is a hole in what was chosen, and a cell that names its

@@ -187,7 +187,7 @@ spine every per-version table of the archive indexes against.
 | `fw` | The store's version key spelling (`4.91`), so it joins to `--fw`, the anchors' `fw-<ver>` directories and the title manifests with no normalisation. |
 | `order` | An integer sort key rising down the file, since version keys compare as strings only; a reserved word in SQL, so a query spells it `"order"`. |
 | `release_date` | `YYYY-MM-DD` as psdevwiki's page for the version states it; where that page states none, as the Japanese-language encyclopedia article on the system software states it, which is Japan's calendar day and can run one day later; `none` where neither states one. |
-| `priority` | How soon the program needs the version: `1` for every firmware a declared title cell composes and the census reference, `2` for the versions that open a key era or a firmware line, `3` for the rest. |
+| `priority` | How soon the program needs the version: `1` for the reference firmware every title is measured at and the census reference, `2` for the versions that open a key era or a firmware line, `3` for the rest. |
 | `role` | What the version is to the program beyond being one more row, one of the labels below. |
 
 | Role | Meaning |
@@ -204,7 +204,9 @@ key, when `order` does not rise, when a date is malformed, when a
 priority is not 1, 2 or 3 or the census reference lacks priority 1,
 or when a single role sits on more or fewer than one row; a guard in
 `cellgov_boot` fails when a title manifest declares a firmware this
-table has no row for or gives less than priority 1.
+table has no row for, when the reference firmware lacks priority 1 or
+the role `final`, or when any other row but the census reference has
+priority 1.
 
 ## PUP provenance
 

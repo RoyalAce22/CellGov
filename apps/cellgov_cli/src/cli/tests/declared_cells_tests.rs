@@ -59,6 +59,29 @@ fn one_cell_per_declared_row_at_that_rows_cap() {
 }
 
 #[test]
+fn only_the_reference_cell_is_gated_whatever_the_floor() {
+    let mut title = manifest(vec![
+        cell("4.93", Some("base"), None),
+        cell("2.76", Some("base"), None),
+        cell("4.93", Some("01.02"), None),
+    ]);
+    title.system_ver = Some("2.76".to_string());
+    let gated: Vec<(String, bool)> = declared_cells(&title)
+        .iter()
+        .map(|c| (c.cell.label(), c.gated))
+        .collect();
+    assert_eq!(
+        gated,
+        vec![
+            ("fw 4.93 x base".to_string(), true),
+            ("fw 2.76 x base".to_string(), false),
+            ("fw 4.93 x 01.02".to_string(), false),
+        ],
+        "the floor cell and an update cell are drift studies"
+    );
+}
+
+#[test]
 fn a_title_declaring_no_cells_yields_none() {
     assert!(declared_cells(&manifest(Vec::new())).is_empty());
 }

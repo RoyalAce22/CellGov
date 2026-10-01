@@ -13,16 +13,15 @@ rap_filename = "UP9000-NPUA80068_00-STARDUSTFULL0001.rap"
 # at this exact value.
 bench_max_steps = 100_000_000
 # PS3_SYSTEM_VER from the title's own PARAM.SFO (03.7000), held against
-# the installed content by the `installed-title-tests` suite. Derives the one cell
-# the headline row is measured at: fw 3.70 x base.
+# the installed content by the `installed-title-tests` suite. The floor is
+# metadata: every title's headline row is measured at the reference
+# firmware, fw 4.93 x base, the firmware consoles run today.
 system_ver = "3.70"
 
 [checkpoint]
 kind = "first-rsx-write"
 
-# Drift study: the same title on the newest firmware. Recorded evidence
-# about how much of a divergence is the firmware's rather than the
-# title's.
+# Drift study: the title at its own floor; not gated.
 [[bench.matrix]]
-fw = "4.93"
+fw = "3.70"
 game_ver = "base"

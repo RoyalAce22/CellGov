@@ -3,9 +3,10 @@
 //! `cellgov_boot::manifest::TitleRegistry` loads and checks every
 //! manifest under `title_manifests/`, and `cellgov_boot::manifest`
 //! places each cell's anchor. This module only shapes that into the
-//! cells a suite boots: a game title at its reference cell, the floor
-//! its `system_ver` derives times the base install, and every declared
-//! cell of a title shipped inside the firmware.
+//! cells a suite boots: every title at its reference cell, the reference
+//! firmware times the base install for a game, and the reference
+//! firmware alone for a title shipped inside it. Every other declared
+//! cell is a drift study no suite gates.
 
 use std::path::{Path, PathBuf};
 
@@ -30,9 +31,7 @@ pub fn workspace_root() -> PathBuf {
 
 /// One title at the cell a suite boots and holds against its anchor.
 ///
-/// A game title yields one of these, at its reference cell. A title
-/// shipped inside the firmware yields one per declared row; the suites
-/// gate every such row alike.
+/// Every title yields one of these, at its reference cell.
 pub struct TitleUnderTest {
     pub short_name: String,
     #[allow(dead_code, reason = "not every suite reads every field")]
@@ -108,8 +107,8 @@ fn at_cell(m: &TitleManifest, key: CellKey, cell: Option<&MatrixCell>) -> TitleU
 
 /// Every registered game title at its reference cell, by short name.
 ///
-/// A title shipped inside the firmware has no reference cell and is not
-/// here; see [`firmware_exec_titles`].
+/// A title shipped inside the firmware is not here; see
+/// [`firmware_exec_titles`].
 #[allow(dead_code, reason = "not every registry suite boots game titles")]
 pub fn titles() -> Vec<TitleUnderTest> {
     manifests()
@@ -145,17 +144,32 @@ pub fn declared_cells() -> Vec<TitleUnderTest> {
         .collect()
 }
 
-/// Every declared cell of every registered title shipped inside the
-/// firmware, one entry per cell, by short name then declaration order.
+/// Every registered title shipped inside the firmware at its reference
+/// cell, by short name.
+///
+/// # Panics
+///
+/// Panics when such a title declares no row at the reference firmware:
+/// its rows are its whole declaration, so the reference is one of them.
 #[allow(dead_code, reason = "not every suite boots the system software")]
 pub fn firmware_exec_titles() -> Vec<TitleUnderTest> {
     manifests()
         .iter()
         .filter(|m| m.ships_in_firmware())
-        .flat_map(|m| {
-            m.matrix
-                .iter()
-                .map(move |cell| at_cell(m, cell.key.clone(), Some(cell)))
+        .map(|m| {
+            let key = m.reference_key().unwrap_or_else(|| {
+                panic!("{}: a firmware-shipped title has a reference", m.short_name)
+            });
+            let cell = m.cell(&key).unwrap_or_else(|| {
+                panic!(
+                    "{}: declares no [[bench.matrix]] row at {}, the reference cell; a title \
+                     shipped inside the firmware declares every cell it is measured at, the \
+                     reference among them",
+                    m.short_name,
+                    key.label()
+                )
+            });
+            at_cell(m, key.clone(), Some(cell))
         })
         .collect()
 }

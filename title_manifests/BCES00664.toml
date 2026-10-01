@@ -8,8 +8,9 @@ developer = "Sony Liverpool"
 engine = "Studio Liverpool proprietary"
 distribution = "disc-iso"
 # PS3_SYSTEM_VER from the title's own PARAM.SFO (02.7600), held against
-# the installed content by the `installed-title-tests` suite. Derives the one cell
-# the headline row is measured at: fw 2.76 x base.
+# the installed content by the `installed-title-tests` suite. The floor is
+# metadata: every title's headline row is measured at the reference
+# firmware, fw 4.93 x base, the firmware consoles run today.
 system_ver = "2.76"
 
 [source]
@@ -18,9 +19,7 @@ kind = "disc"
 [checkpoint]
 kind = "first-rsx-write"
 
-# Drift study: the same title on the newest firmware. Recorded evidence
-# about how much of a divergence is the firmware's rather than the
-# title's.
+# Drift study: the title at its own floor; not gated.
 [[bench.matrix]]
-fw = "4.93"
+fw = "2.76"
 game_ver = "base"

@@ -267,11 +267,12 @@ fn a_firmware_shipped_titles_cell_sits_one_level_up_and_is_accepted() {
         &boot(BootOutcome::MaxSteps, 389_859),
     );
     let docs = load_title(&t, fixtures.path()).unwrap();
-    assert!(
-        docs.reference().is_none(),
-        "a firmware-shipped title derives no reference"
-    );
     assert!(docs.cells[0].artifacts.boot.is_some());
+    assert_eq!(
+        docs.reference().map(|c| c.key.clone()),
+        Some(cell_key(REFERENCE_FW, None)),
+        "a firmware-shipped title's reference is its row at the reference firmware"
+    );
 }
 
 #[test]

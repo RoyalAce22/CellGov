@@ -23,7 +23,7 @@ pub use cell_paths::{
 };
 pub use checkpoint::{CheckpointParseError, CheckpointTrigger};
 pub use eboot_load::{EbootLoadError, TitleNotInstalled};
-pub use matrix::BASE_GAME_VER;
+pub use matrix::{reference_key, BASE_GAME_VER, REFERENCE_FIRMWARE};
 pub use model::{ContentManifest, MountEntry, TitleManifest, DEFAULT_BENCH_MAX_STEPS};
 pub use registry::TitleRegistry;
 

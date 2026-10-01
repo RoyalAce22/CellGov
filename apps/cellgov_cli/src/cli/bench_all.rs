@@ -44,9 +44,12 @@ pub(super) enum CellVerdict {
     /// The run disagreed with the committed anchor; each string names
     /// one disagreement.
     Moved(Vec<String>),
-    /// The registry declares the cell, and the anchor tree holds no
-    /// anchor for it.
+    /// The registry declares the reference cell, and the anchor tree
+    /// holds no anchor for it.
     NotRecorded,
+    /// A drift cell, one that is not the reference, with no anchor: the
+    /// sweep reports the run, and the run gates nothing.
+    Ungated,
     /// A retargeting flag made the run incomparable; each string names
     /// one.
     NotCompared(Vec<String>),
@@ -72,7 +75,8 @@ impl CellVerdict {
             | Self::NotCompared(_)
             | Self::NotChecked
             | Self::NotInstalled(_)
-            | Self::Pending(_) => 0,
+            | Self::Pending(_)
+            | Self::Ungated => 0,
             Self::NotRecorded => exit_codes::FAILED,
             Self::NoThroughputVerdict => EXIT_SPREAD_EXCEEDED,
             Self::BootFailed(_) => exit_codes::DIVERGED,
@@ -93,7 +97,8 @@ impl CellVerdict {
             | Self::NotCompared(_)
             | Self::NotChecked
             | Self::NotInstalled(_)
-            | Self::Pending(_) => 0,
+            | Self::Pending(_)
+            | Self::Ungated => 0,
             Self::NotRecorded => 1,
             Self::NoThroughputVerdict => 2,
             Self::BootFailed(_) => 3,
@@ -113,6 +118,7 @@ impl CellVerdict {
             Self::Matches => "matched",
             Self::Moved(_) => "moved",
             Self::NotRecorded => "not recorded",
+            Self::Ungated => "not gated",
             Self::NotCompared(_) => "not compared",
             Self::NotChecked => "not checked",
             Self::NotInstalled(_) => "not installed",
@@ -148,6 +154,11 @@ pub(super) fn summary_lines(cell: &DeclaredCell, verdict: &CellVerdict) -> Vec<S
         CellVerdict::NotRecorded => lines.push(format!(
             "{label}: not recorded -- the registry declares the cell and nothing gates it; \
              record it with `dev record-anchors --title {}`",
+            cell.short_name
+        )),
+        CellVerdict::Ungated => lines.push(format!(
+            "{label}: not gated -- a drift cell, not the reference, with no anchor; record one \
+             with `dev record-anchors --title {}` to hold it to one",
             cell.short_name
         )),
         CellVerdict::NotCompared(reasons) => {
@@ -273,8 +284,12 @@ pub(super) fn not_installed_reason(e: &ComposeError) -> Option<String> {
     }
 }
 
-/// The verdict a completed run set gives its cell.
-pub(super) fn classify(outcome: game::BenchRunsOutcome) -> Result<CellVerdict, CommandError> {
+/// The verdict a completed run set gives its cell; `gated` says whether
+/// the cell is the title's reference, which alone needs an anchor.
+pub(super) fn classify(
+    outcome: game::BenchRunsOutcome,
+    gated: bool,
+) -> Result<CellVerdict, CommandError> {
     let verdict = match outcome.gate {
         game::BenchGate::DeterminismBreak => {
             CellVerdict::DeterminismBreak(outcome.determinism_failures.len())
@@ -290,7 +305,8 @@ pub(super) fn classify(outcome: game::BenchRunsOutcome) -> Result<CellVerdict, C
         game::BenchGate::SpreadExceeded => CellVerdict::NoThroughputVerdict,
         game::BenchGate::Pass => match outcome.anchor {
             game::AnchorVerdict::Match => CellVerdict::Matches,
-            game::AnchorVerdict::NotRecorded(_) => CellVerdict::NotRecorded,
+            game::AnchorVerdict::NotRecorded(_) if gated => CellVerdict::NotRecorded,
+            game::AnchorVerdict::NotRecorded(_) => CellVerdict::Ungated,
             game::AnchorVerdict::NotComparable(reasons) => CellVerdict::NotCompared(reasons),
             game::AnchorVerdict::Skipped => CellVerdict::NotChecked,
             game::AnchorVerdict::Drift(_) => {
@@ -391,7 +407,7 @@ fn gate_cell(
     match outcome {
         Ok(o) => {
             bar.finish();
-            classify(o)
+            classify(o, cell.gated)
         }
         Err(game::SpawnError::Command(error)) => {
             bar.abort();

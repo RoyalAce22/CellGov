@@ -7,9 +7,10 @@ use super::super::test_fixtures::*;
 use super::*;
 use cellgov_boot::manifest::TitleManifest;
 
-/// The first entry's firmware is the title's floor, so that cell
-/// becomes the reference. Cells with no game version make the title
-/// one shipped inside the firmware, which derives no reference.
+/// The first entry's firmware is the title's floor, which is metadata:
+/// the reference is the reference firmware times the base install.
+/// Cells with no game version make the title one shipped inside the
+/// firmware, whose reference is its row at the reference firmware.
 fn title_with(content_id: &str, cells: &[(&str, Option<&str>)]) -> TitleManifest {
     let mut t = match cells.first() {
         Some((fw, Some(_))) => {
@@ -95,7 +96,7 @@ fn the_reference_cell_carries_the_star_and_no_other_cell_does() {
 }
 
 #[test]
-fn a_firmware_shipped_title_has_no_game_axis() {
+fn a_firmware_shipped_title_has_no_game_axis_and_marks_its_reference_row() {
     let t = title_with("VSHTEST", &[(REFERENCE_FW, None), ("4.91", None)]);
     let fixtures = Fixtures::new("grid-no-game-axis");
     fixtures.write_anchor(
@@ -105,27 +106,24 @@ fn a_firmware_shipped_title_has_no_game_axis() {
     );
     let grid = grid_of(&t, fixtures.path());
     assert!(grid.starts_with("| fw | result |"), "{grid}");
-    assert!(grid.contains("| 4.93 | anchor (MaxSteps) |"), "{grid}");
+    assert!(grid.contains("| 4.93 | anchor (MaxSteps)* |"), "{grid}");
     assert!(grid.contains("| 4.91 | . |"), "{grid}");
-    assert!(
-        !grid.contains('*'),
-        "a firmware-shipped title derives no reference, so no cell carries the mark: {grid}"
-    );
+    assert_eq!(grid.matches('*').count(), 1, "{grid}");
 }
 
 #[test]
-fn the_star_follows_the_floor_not_the_first_declared_row() {
+fn the_star_follows_the_reference_firmware_not_the_floor_nor_the_first_declared_row() {
     let mut t = title_with(
         "NPAA80008",
         &[("1.50", Some(BASE)), (REFERENCE_FW, Some(BASE))],
     );
-    // Declaration order puts the newer firmware first; the floor still
-    // carries the mark.
+    // The floor is 1.50, and declaration order puts it last; the
+    // reference firmware carries the mark either way.
     t.matrix.reverse();
     let fixtures = Fixtures::new("grid-star-floor");
     let grid = grid_of(&t, fixtures.path());
-    assert!(grid.contains("| 1.50 | .* |"), "{grid}");
-    assert!(grid.contains("| 4.93 | . |"), "{grid}");
+    assert!(grid.contains("| 4.93 | .* |"), "{grid}");
+    assert!(grid.contains("| 1.50 | . |"), "{grid}");
 }
 
 #[test]

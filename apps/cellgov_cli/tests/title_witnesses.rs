@@ -2,8 +2,9 @@
 //! cells' recorded baselines.
 //!
 //! Titles come from `title_manifests/`. Expectations come from the
-//! anchor of each gated cell: a game title's floor times its base
-//! install, or each declared firmware of a firmware-shipped title.
+//! anchor of each gated cell, every title's reference: the reference
+//! firmware times the base install, or the reference firmware alone for
+//! a firmware-shipped title.
 //! Adding a title needs no change here -- drop in a manifest, record
 //! it, commit the baseline.
 //!

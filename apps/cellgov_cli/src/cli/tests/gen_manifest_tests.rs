@@ -130,8 +130,8 @@ fn hdd_stub_fills_generated_fields_with_rap() {
     assert_eq!(manifest.system_ver.as_deref(), Some(SYSTEM_VER));
     assert_eq!(
         manifest.reference_key().map(|k| k.label()),
-        Some("fw 1.50 x base".to_string()),
-        "the stub declares the floor cell and nothing else"
+        Some("fw 4.93 x base".to_string()),
+        "the stub declares the reference cell and nothing else"
     );
     assert_eq!(manifest.matrix.len(), 1);
 }

@@ -1,11 +1,14 @@
 //! The bench matrix: which `(firmware, game version)` cells a title
 //! declares.
 //!
-//! A title with a PARAM.SFO declares one cell by carrying `system_ver`,
-//! its floor: the firmware it shipped against, times its base install.
-//! That cell is the reference, and `[[bench.matrix]]` rows add cells
-//! beside it or attach an override to it. A firmware-shipped title has
-//! no floor, so its rows are its whole declaration.
+//! CellGov measures every title at [`REFERENCE_FIRMWARE`].
+//! A title with a PARAM.SFO declares that cell, the reference firmware
+//! times its base install, by carrying `system_ver`, its floor: the
+//! firmware it shipped against, which the loader validates and keeps as
+//! metadata. `[[bench.matrix]]` rows add cells beside the reference, a
+//! floor cell among them, or attach an override to it. A
+//! firmware-shipped title has no floor, so its rows are its whole
+//! declaration, and its reference is its row at the reference firmware.
 //!
 //! The registry declares every cell. The gate and the generated
 //! documents read the declared set; nothing here enumerates the store.
@@ -15,7 +18,7 @@ use std::path::Path;
 
 use cellgov_install::store::VersionKey;
 pub use cellgov_install::store::BASE_GAME_VER;
-use cellgov_install::system_ver::firmware_version_key;
+use cellgov_install::system_ver::{firmware_version_key, SystemVersion};
 
 use super::checkpoint::CheckpointTrigger;
 use super::loader::{mirror_makes_checkpoint_unreachable, parse_checkpoint, ManifestError};
@@ -104,19 +107,26 @@ impl MatrixCell {
     }
 }
 
-/// The cell `[title] system_ver` derives: the title's floor times its
-/// base install.
-pub fn derived_key(system_ver: &str) -> CellKey {
+/// The firmware CellGov measures every title's reference cell at: CellGov
+/// policy, not a console fact: the firmware consoles run today, the one
+/// the hardware evidence was taken at, and one firmware for every title,
+/// so a bug two titles share presents as shared.
+pub const REFERENCE_FIRMWARE: &str = "4.93";
+
+/// The reference cell: [`REFERENCE_FIRMWARE`] times the base install,
+/// or the firmware alone for a title that ships inside it.
+pub fn reference_key(ships_in_firmware: bool) -> CellKey {
     CellKey {
-        fw: system_ver.to_string(),
-        game_ver: Some(BASE_GAME_VER.to_string()),
+        fw: REFERENCE_FIRMWARE.to_string(),
+        game_ver: (!ships_in_firmware).then(|| BASE_GAME_VER.to_string()),
     }
 }
 
 /// Translate the declaration into the declared cells, or refuse it.
 ///
-/// The derived cell leads the list so the grid and the coverage count
-/// keep declaration order; the rows follow in their own order.
+/// A title with a floor declares the reference cell first, so the grid
+/// and the coverage count keep declaration order; the rows follow in
+/// their own order.
 ///
 /// # Errors
 ///
@@ -127,7 +137,9 @@ pub fn derived_key(system_ver: &str) -> CellKey {
 ///   manifest-relative source),
 /// - uses the `MM.mmmm` spelling of PARAM.SFO for a store firmware
 ///   version key,
-/// - names an unusable version key.
+/// - names an unusable version key,
+/// - is no system-software version,
+/// - is newer than [`REFERENCE_FIRMWARE`].
 ///
 /// [`ManifestError::Parse`] for a row that:
 ///
@@ -138,7 +150,7 @@ pub fn derived_key(system_ver: &str) -> CellKey {
 /// - overrides the checkpoint to one the title-level `[rsx] mirror`
 ///   makes unreachable,
 /// - repeats a cell an earlier row already declared,
-/// - repeats the derived cell with `expect = "probe"`, or with no
+/// - repeats the reference cell with `expect = "probe"`, or with no
 ///   override and no `pending`,
 /// - states a `pending` reason that is empty, or that carries a `|` or
 ///   a line break.
@@ -157,18 +169,18 @@ pub(super) fn build(
     let firmware_exec = matches!(source, GameSource::FirmwareExec { .. });
     let mut cells: Vec<MatrixCell> = Vec::with_capacity(rows.len() + 1);
     let mut seen: BTreeSet<CellKey> = BTreeSet::new();
-    let derived = derived_cell(system_ver, source, origin)?;
-    let mut derived_repeated = false;
-    if let Some(cell) = derived {
+    let reference = reference_cell(system_ver, source, origin)?;
+    let mut reference_repeated = false;
+    if let Some(cell) = reference {
         seen.insert(cell.key.clone());
         cells.push(cell);
     }
     for row in rows {
         let cell = build_cell(row, firmware_exec, rsx_mirror, origin)?;
-        let repeats_derived = system_ver.is_some() && cells[0].key == cell.key;
-        if repeats_derived && !derived_repeated {
-            attach_to_derived(&mut cells[0], cell, origin)?;
-            derived_repeated = true;
+        let repeats_reference = system_ver.is_some() && cells[0].key == cell.key;
+        if repeats_reference && !reference_repeated {
+            attach_to_reference(&mut cells[0], cell, origin)?;
+            reference_repeated = true;
             continue;
         }
         if !seen.insert(cell.key.clone()) {
@@ -186,9 +198,9 @@ pub(super) fn build(
     Ok(cells)
 }
 
-/// The cell `[title] system_ver` derives, or a refusal when the key does
-/// not fit the source kind.
-fn derived_cell(
+/// The reference cell a title with a floor declares, or a refusal when
+/// `[title] system_ver` does not fit the source kind or is no floor.
+fn reference_cell(
     system_ver: Option<&str>,
     source: &GameSource,
     origin: &Path,
@@ -199,8 +211,7 @@ fn derived_cell(
             format!(
                 "[title] system_ver {v:?} does not apply to a title shipped inside the \
                  firmware: it has no PARAM.SFO to state a floor, and its version axis is the \
-                 firmware's, so every [[bench.matrix]] row declares one cell and none is \
-                 derived. Drop the key"
+                 firmware's, so every [[bench.matrix]] row declares one cell. Drop the key"
             ),
         )),
         (Some(v), GameSource::ManifestRelative { .. }) => Err(refusal(
@@ -215,8 +226,8 @@ fn derived_cell(
         (None, GameSource::Hdd | GameSource::Disc) => Err(refusal(
             origin,
             "[title] system_ver is required: the PS3_SYSTEM_VER the title's own PARAM.SFO \
-             states, as a firmware version key (01.5000 is \"1.50\"). It derives the cell \
-             the headline row renders, so nobody chooses that cell"
+             states, as a firmware version key (01.5000 is \"1.50\"). It is the title's \
+             floor, which the install records and a boot below it warns on"
                 .to_string(),
         )),
         (Some(v), GameSource::Hdd | GameSource::Disc) => {
@@ -236,8 +247,27 @@ fn derived_cell(
                 ));
             }
             VersionKey::new(v).map_err(|e| refusal(origin, format!("[title] system_ver: {e}")))?;
+            let Some(floor) = SystemVersion::parse(v) else {
+                return Err(refusal(
+                    origin,
+                    format!(
+                        "[title] system_ver {v:?} is no system-software version; a floor is \
+                         the firmware the title's PARAM.SFO asks for, such as \"2.76\""
+                    ),
+                ));
+            };
+            if SystemVersion::parse(REFERENCE_FIRMWARE).is_some_and(|reference| floor > reference) {
+                return Err(refusal(
+                    origin,
+                    format!(
+                        "[title] system_ver {v:?} is newer than the reference firmware \
+                         {REFERENCE_FIRMWARE:?}, which every title is measured at; no title \
+                         can ask for a firmware the reference predates"
+                    ),
+                ));
+            }
             Ok(Some(MatrixCell {
-                key: derived_key(v),
+                key: reference_key(false),
                 expect: CellExpectation::Frontier,
                 bench_max_steps: None,
                 checkpoint: None,
@@ -247,10 +277,10 @@ fn derived_cell(
     }
 }
 
-/// Move the override and reason of a row that repeats the derived cell
-/// onto that cell.
-fn attach_to_derived(
-    derived: &mut MatrixCell,
+/// Move the override and reason of a row that repeats the reference
+/// cell onto that cell.
+fn attach_to_reference(
+    reference: &mut MatrixCell,
     row: MatrixCell,
     origin: &Path,
 ) -> Result<(), ManifestError> {
@@ -258,7 +288,7 @@ fn attach_to_derived(
         return Err(refusal(
             origin,
             format!(
-                "[[bench.matrix]] repeats {}, the cell [title] system_ver derives, with expect = \
+                "[[bench.matrix]] repeats {}, the reference cell, with expect = \
                  {:?}; the headline row states whether this title converged, and a probe cell's \
                  datum is which error the guest received instead. Declare the probe at another \
                  cell",
@@ -271,16 +301,16 @@ fn attach_to_derived(
         return Err(refusal(
             origin,
             format!(
-                "[[bench.matrix]] repeats {}, the cell [title] system_ver already declares, and \
+                "[[bench.matrix]] repeats {}, the reference cell every title declares, and \
                  carries no bench_max_steps, checkpoint or pending; the row adds nothing. Drop \
                  it, or give it the override or reason it exists for",
                 row.label()
             ),
         ));
     }
-    derived.bench_max_steps = row.bench_max_steps;
-    derived.checkpoint = row.checkpoint;
-    derived.pending = row.pending;
+    reference.bench_max_steps = row.bench_max_steps;
+    reference.checkpoint = row.checkpoint;
+    reference.pending = row.pending;
     Ok(())
 }
 

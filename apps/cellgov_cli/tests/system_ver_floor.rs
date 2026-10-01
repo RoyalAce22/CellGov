@@ -1,10 +1,12 @@
 //! Every registered game title's `system_ver` is the floor its installed
 //! PARAM.SFO states.
 //!
-//! The manifest carries the floor as a scalar so the generated documents
-//! render the same on a checkout with no external data. This suite holds that
-//! scalar to the `PS3_SYSTEM_VER` in the installed base tree, found
-//! through the install record.
+//! The floor is metadata: it names no cell, since CellGov measures every
+//! title at the reference firmware. The manifest carries it as a scalar so the
+//! generated documents' Floor column renders the same on a checkout with
+//! no external data. This suite holds that scalar to the
+//! `PS3_SYSTEM_VER` in the installed base tree, found through the
+//! install record.
 //!
 //! A title with no install record skips by name. At least one title
 //! must have an install record, or the suite fails: green means

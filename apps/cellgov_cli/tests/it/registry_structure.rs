@@ -1,18 +1,15 @@
 //! Self-contained structural checks on the title registry and its
 //! committed fixtures.
 //!
-//! The gated set is:
-//!
-//! - every game title's reference cell, the floor its `system_ver`
-//!   derives, and
-//! - every declared cell of a title shipped inside the firmware, which
-//!   derives no reference.
-//!
-//! A game title's other rows carry no gate: a manifest declares a cell
-//! for free.
+//! The gated set is every title's reference cell: the reference
+//! firmware times the base install for a game, and the reference
+//! firmware alone for a title shipped inside it. Every other row, a
+//! floor cell among them, carries no gate: a manifest declares a drift
+//! cell for free.
 
 use crate::registry;
 
+use cellgov_boot::manifest::REFERENCE_FIRMWARE;
 use cellgov_compare::{BootSummary, GameIdentity};
 use registry::{boot_anchor_path, firmware_exec_titles, titles, TitleUnderTest, BASE_GAME_VER};
 
@@ -109,10 +106,15 @@ fn every_committed_anchor_names_the_cell_it_is_filed_under() {
 }
 
 #[test]
-fn every_game_titles_gated_cell_is_its_floor_times_its_base_install() {
+fn every_game_titles_gated_cell_is_the_reference_firmware_times_its_base_install() {
     let games = titles();
     assert!(!games.is_empty(), "the registry holds no game title");
     for t in &games {
+        assert_eq!(
+            t.reference.fw, REFERENCE_FIRMWARE,
+            "{}: the reference cell is at the reference firmware",
+            t.short_name
+        );
         assert_eq!(
             t.reference.game_ver.as_deref(),
             Some(BASE_GAME_VER),
@@ -131,13 +133,18 @@ fn every_game_titles_gated_cell_is_its_floor_times_its_base_install() {
 }
 
 #[test]
-fn the_system_software_is_declared_at_least_once_and_on_no_game_axis() {
+fn the_system_software_declares_its_reference_row_on_no_game_axis() {
     let cells = firmware_exec_titles();
     assert!(
         !cells.is_empty(),
-        "the registry declares no cell for a title shipped inside the firmware"
+        "the registry declares no title shipped inside the firmware"
     );
     for c in &cells {
+        assert_eq!(
+            c.reference.fw, REFERENCE_FIRMWARE,
+            "{}: the reference row is at the reference firmware",
+            c.short_name
+        );
         assert_eq!(
             c.reference.game_ver, None,
             "{}: a firmware-shipped cell has no game-version axis",

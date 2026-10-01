@@ -3,8 +3,8 @@
 //!
 //! The witness suite asserts against each cell's `boot_summary.json`;
 //! this is the only thing that writes one. It records the cells the
-//! registry declares -- the one `[title] system_ver` derives and every
-//! `[[bench.matrix]]` row -- and refuses a cell it does not.
+//! registry declares -- the reference cell a title with a floor declares
+//! and every `[[bench.matrix]]` row -- and refuses a cell it does not.
 
 use std::collections::BTreeMap;
 use std::path::Path;

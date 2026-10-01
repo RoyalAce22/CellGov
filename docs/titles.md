@@ -55,28 +55,20 @@ from [concepts/](concepts/README.md). In brief:
 ## Which firmware a title is measured against
 
 The Config column names the cell a row was measured at: the firmware
-library and the installed content version. That cell is not chosen.
-Every title states the firmware it shipped against in its own
-`PARAM.SFO` (`PS3_SYSTEM_VER`), the manifest carries that value as
-`system_ver`, and the headline row is measured at that firmware times
-the title's base install. Nothing in a manifest can point the row
-elsewhere.
+library and the installed content version. Every title is measured at
+firmware 4.93, the reference firmware, times its base install. 4.93 is
+what a console runs today, and it is the firmware the hardware evidence
+was taken at.
+One reference firmware also means a bug two titles share presents as
+shared.
 
-The floor is the frontier map's honest surface. At it, the title and
-the firmware were shipped and tested together, so a divergence there
-is CellGov's, and the syscall a `No` row names is one the title used
-on hardware. Measured years later on the newest firmware, an early
-title loads a sysmodule set and binds a system-software revision
-nobody who owned the disc ever ran, and a divergence there may name a
-syscall that is on the boot path only because of that.
-
-The cost is real and is stated here rather than hidden: each title is
-measured against the system-software revision and sysmodule set its
-own floor ships, so a bug shared by two titles at two floors will not
-present as shared. That is what the hardware did. A manifest may still
-declare further cells -- the newest firmware as a drift study, an
-update version -- and every declared cell, measured or not, is on that
-title's own page. Follow its serial.
+The Floor column is the firmware the title shipped against, as its own
+`PARAM.SFO` states it (`PS3_SYSTEM_VER`). The manifest carries it as
+`system_ver`, the install records it, and a boot below it warns; it
+names no cell here. A manifest may declare further cells -- the title
+at its own floor as a drift study, an update version -- and every
+declared cell, measured or not, is on that title's own page. Follow its
+serial.
 
 Both verdicts state agreement between two runs of one firmware
 library. A summary naming a different firmware on each side is
@@ -96,8 +88,8 @@ Column definitions:
 
 - **Serial**: content id, linking to that title's per-cell page.
 - **Config**: the cell the row was measured at -- `fw <version> x
-  <content version>`, the title's `PARAM.SFO` floor times its base
-  install.
+  <content version>`, the reference firmware times the base install.
+- **Floor**: the firmware the title's own `PARAM.SFO` asks for.
 - **Steps**: unit yields at the default per-step budget (256
   instructions). Use `--budget 1` for single-instruction stepping.
 - **Insns**: rough instruction count to checkpoint (`steps * budget`).
@@ -108,19 +100,20 @@ Column definitions:
 
 ## Matrix
 
-| Serial | Title | Year | Developer | Engine | Format | Config | Checkpoint | Steps | Insns | Convergence | Byte parity |
-| --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
-| [BCES00664](titles/BCES00664.md) | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | fw 2.76 x base | FirstRsxWrite -> RsxWriteCheckpoint | 37,201 | 9,523,456 | Yes | 1020 non-semantic |
-| [BCUS98103](titles/BCUS98103.md) | Uncharted: Drake's Fortune | 2007 | Naughty Dog | Naughty Dog proprietary | Disc ISO | fw 1.94 x base | -- | -- | -- | -- | -- |
-| [NPUA80001](titles/NPUA80001.md) | flOw | 2007 | thatgamecompany | PhyreEngine | PSN HDD | fw 1.50 x base | -- | -- | -- | -- | -- |
-| [NPUA80068](titles/NPUA80068.md) | Super Stardust HD | 2007 | Housemarque | Housemarque proprietary | PSN HDD | fw 3.70 x base | FirstRsxWrite -> MaxSteps | 390,435 | 99,951,360 | -- | -- |
+| Serial | Title | Year | Developer | Engine | Format | Config | Floor | Checkpoint | Steps | Insns | Convergence | Byte parity |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
+| [BCES00664](titles/BCES00664.md) | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | fw 4.93 x base | 2.76 | FirstRsxWrite -> RsxWriteCheckpoint | 37,130 | 9,505,280 | Yes | 975 non-semantic |
+| [BCUS98103](titles/BCUS98103.md) | Uncharted: Drake's Fortune | 2007 | Naughty Dog | Naughty Dog proprietary | Disc ISO | fw 4.93 x base | 1.94 | -- | -- | -- | -- | -- |
+| [NPUA80001](titles/NPUA80001.md) | flOw | 2007 | thatgamecompany | PhyreEngine | PSN HDD | fw 4.93 x base | 1.50 | -- | -- | -- | -- | -- |
+| [NPUA80068](titles/NPUA80068.md) | Super Stardust HD | 2007 | Housemarque | Housemarque proprietary | PSN HDD | fw 4.93 x base | 3.70 | FirstRsxWrite -> MaxSteps | 390,435 | 99,951,360 | No (outcome: Timeout vs Completed) | -- |
 
 Coverage: 4 game title(s), 5 firmware(s), 8 declared cell(s), 4 recorded.
 
 Counts only, over the game titles above, and the denominator is what
 the registry declares rather than the product of every version that
-exists. Every title declares its floor; a further cell is declared
-because somebody chose to measure this title against that library too.
+exists. Every title declares its reference cell; a further cell is
+declared because somebody chose to measure this title against that
+library too.
 The gap between declared and recorded is the honest one-glance answer
 to how much of that has been carried out.
 

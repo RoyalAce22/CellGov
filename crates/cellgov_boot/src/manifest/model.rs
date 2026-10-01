@@ -132,8 +132,8 @@ pub struct TitleManifest {
     /// The title's floor: the firmware its own PARAM.SFO requires, as a
     /// store version key. It is present on every title with a PARAM.SFO
     /// (an hdd or disc source) and absent on one without
-    /// (firmware-shipped or manifest-relative). It derives
-    /// [`Self::reference_key`].
+    /// (firmware-shipped or manifest-relative). It is metadata: the
+    /// reference cell is at the reference firmware whatever the floor.
     pub system_ver: Option<String>,
     /// Built-in boot checkpoint; CLI `--checkpoint` overrides.
     pub checkpoint: CheckpointTrigger,
@@ -150,10 +150,10 @@ pub struct TitleManifest {
     /// Mount-table registration order matches declaration order;
     /// the dispatch layer consults mounts in that order on a miss.
     pub mounts: Vec<MountEntry>,
-    /// The `(firmware, game version)` cells this title declares: the
-    /// cell [`Self::system_ver`] derives first, then every
+    /// The `(firmware, game version)` cells this title declares: for a
+    /// title with a floor, the reference cell first, then every
     /// `[[bench.matrix]]` row in declaration order. A row that repeats
-    /// the derived cell attaches its override to it and adds no entry.
+    /// the reference cell attaches its override to it and adds no entry.
     pub matrix: Vec<MatrixCell>,
 }
 
@@ -321,10 +321,15 @@ impl TitleManifest {
         self.checkpoint
     }
 
-    /// The cell the headline row renders: the title's floor times its
-    /// base install. It is `None` for a title with no PARAM.SFO.
+    /// The cell the headline row renders: the reference firmware times
+    /// the base install, or the reference firmware alone for a title
+    /// shipped inside it. It is `None` for a title built beside its
+    /// manifest, which has no reference.
     pub fn reference_key(&self) -> Option<CellKey> {
-        self.system_ver.as_deref().map(super::matrix::derived_key)
+        match self.source {
+            GameSource::ManifestRelative { .. } => None,
+            _ => Some(super::matrix::reference_key(self.ships_in_firmware())),
+        }
     }
 
     /// The declared cell `key` names, when the title declares one.

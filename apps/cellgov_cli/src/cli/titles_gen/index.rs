@@ -1,11 +1,12 @@
 //! `docs/titles.md`: one row per game title at its reference cell,
 //! plus a coverage count over every cell those titles declare. The
-//! reference cell is the title's floor times its base install.
+//! reference cell is the reference firmware times the base install.
 //!
 //! The Config column names that cell, so a reader can tell which
-//! firmware and game version produced a step count. A title shipped
-//! inside the firmware has no such cell and renders on the firmware
-//! page instead ([`super::firmware`]).
+//! firmware and game version produced a step count, and the Floor
+//! column the firmware the title's own `PARAM.SFO` asks for. A title
+//! shipped inside the firmware renders on the firmware page instead
+//! ([`super::firmware`]).
 
 use std::collections::BTreeSet;
 
@@ -69,15 +70,15 @@ pub(super) fn coverage_counts<'a>(
 fn render_row(docs: &TitleDocs<'_>) -> String {
     let title = docs.title;
     let empty = CellArtifacts::default();
-    let reference = docs.reference().map_or(&empty, |c| &c.artifacts);
+    let loaded = docs.reference();
+    let reference = loaded.map_or(&empty, |c| &c.artifacts);
     let (checkpoint_cell, steps_cell, insns_cell, convergence_cell, byte_parity_cell) =
         data_cells(reference);
-    let config_cell = title
-        .reference_key()
-        .map_or_else(|| NO_DATA.to_string(), |k| k.label());
+    let config_cell = loaded.map_or_else(|| NO_DATA.to_string(), |c| c.key.label());
+    let floor_cell = title.system_ver.as_deref().unwrap_or(NO_DATA);
 
     format!(
-        "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+        "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
         detail_page_link(&title.content_id),
         title.display_name,
         title.year,
@@ -85,6 +86,7 @@ fn render_row(docs: &TitleDocs<'_>) -> String {
         title.engine,
         title.distribution.format_label(),
         config_cell,
+        floor_cell,
         checkpoint_cell,
         steps_cell,
         insns_cell,
