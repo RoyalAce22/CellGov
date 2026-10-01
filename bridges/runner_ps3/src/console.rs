@@ -15,18 +15,15 @@
 use cellgov_observation::console_profile::{ConsoleProfileError, ConsoleProfiles};
 use cellgov_observation::hardware_capture::ConsoleFacts;
 
+use crate::env;
 use crate::error::RunnerPs3Error;
 use crate::transcript::Transcript;
-
-/// The variable that names the claimed profile when `--profile` is
-/// absent.
-pub const PROFILE_ENV: &str = "CELLGOV_PS3_PROFILE";
 
 /// The status page webMAN serves.
 pub const STATUS_PATH: &str = "/cpursx.ps3";
 
 /// The profile a run claims: `--profile` when given, else
-/// [`PROFILE_ENV`]. A blank value counts as absent.
+/// [`env::PROFILE`]. A blank value counts as absent.
 ///
 /// # Errors
 ///
@@ -34,7 +31,8 @@ pub const STATUS_PATH: &str = "/cpursx.ps3";
 pub fn claimed_profile(flag: Option<&str>, env: Option<&str>) -> Result<String, RunnerPs3Error> {
     stated(flag).or_else(|| stated(env)).ok_or_else(|| {
         RunnerPs3Error::Usage(format!(
-            "no console profile claimed; pass --profile <name> or set {PROFILE_ENV}"
+            "no console profile claimed; pass --profile <name> or set {}",
+            env::PROFILE
         ))
     })
 }

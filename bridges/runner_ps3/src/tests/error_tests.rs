@@ -52,6 +52,7 @@ fn each_error_maps_to_the_class_its_message_names() {
                 path: PathBuf::from("cellgov_runner_ps3_10.77.0.2.lease"),
                 host: "10.77.0.2".to_string(),
                 holder: "pid=1 holder=x".to_string(),
+                unlock_with: "runner_ps3 unlock --host 10.77.0.2".to_string(),
             }),
             ExitCode::Refused,
         ),

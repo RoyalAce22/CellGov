@@ -129,6 +129,59 @@ pub trait ConsoleOps {
         -> Result<(), TransportError>;
 }
 
+/// A borrowed console is a console, so a caller that keeps its console
+/// lends it to a verb.
+impl<C: ConsoleOps + ?Sized> ConsoleOps for &mut C {
+    fn http_status(
+        &mut self,
+        path: &str,
+        transcript: &mut Transcript,
+    ) -> Result<u16, TransportError> {
+        (**self).http_status(path, transcript)
+    }
+
+    fn fetch(
+        &mut self,
+        path: &str,
+        transcript: &mut Transcript,
+    ) -> Result<Option<Vec<u8>>, TransportError> {
+        (**self).fetch(path, transcript)
+    }
+
+    fn make_dir(&mut self, path: &str, transcript: &mut Transcript) -> Result<(), TransportError> {
+        (**self).make_dir(path, transcript)
+    }
+
+    fn store(
+        &mut self,
+        path: &str,
+        bytes: &[u8],
+        transcript: &mut Transcript,
+    ) -> Result<(), TransportError> {
+        (**self).store(path, bytes, transcript)
+    }
+
+    fn list(
+        &mut self,
+        dir: &str,
+        transcript: &mut Transcript,
+    ) -> Result<Vec<String>, TransportError> {
+        (**self).list(dir, transcript)
+    }
+
+    fn delete(&mut self, path: &str, transcript: &mut Transcript) -> Result<(), TransportError> {
+        (**self).delete(path, transcript)
+    }
+
+    fn remove_dir(
+        &mut self,
+        path: &str,
+        transcript: &mut Transcript,
+    ) -> Result<(), TransportError> {
+        (**self).remove_dir(path, transcript)
+    }
+}
+
 /// Refuse to run over a stale result or an occupied game directory.
 ///
 /// The runner deletes a result file that answers `200` once and checks

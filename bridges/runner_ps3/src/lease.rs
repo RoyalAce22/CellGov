@@ -20,9 +20,7 @@ pub struct Lease {
 #[derive(Debug, thiserror::Error)]
 pub enum LeaseError {
     /// Another runner, or a run that did not release, holds the console.
-    #[error(
-        "{path} holds the console for {holder}; clear it with `runner_ps3 unlock --host {host}`"
-    )]
+    #[error("{path} holds the console for {holder}; clear it with `{unlock_with}`")]
     Held {
         /// The lease file.
         path: PathBuf,
@@ -30,6 +28,9 @@ pub enum LeaseError {
         host: String,
         /// What the lease file names as its holder.
         holder: String,
+        /// The `unlock` command that clears it, through the front end
+        /// that asked for the lease.
+        unlock_with: String,
     },
     /// The runner cannot create, read or remove the lease file.
     #[error("lease file {path}: {source}")]
@@ -60,12 +61,19 @@ pub fn lease_path(dir: &Path, host: &str) -> PathBuf {
 
 impl Lease {
     /// Take the lease on `host` for `holder` (the microtest name).
+    /// `invocation` is the front end's command, such as `runner_ps3`,
+    /// which a refusal's `unlock` remedy starts with.
     ///
     /// # Errors
     ///
     /// [`LeaseError::Held`] when the file exists, naming its holder, and
     /// [`LeaseError::Io`] for any other failure.
-    pub fn acquire(dir: &Path, host: &str, holder: &str) -> Result<Self, LeaseError> {
+    pub fn acquire(
+        dir: &Path,
+        host: &str,
+        holder: &str,
+        invocation: &str,
+    ) -> Result<Self, LeaseError> {
         let path = lease_path(dir, host);
         let io = |source| LeaseError::Io {
             path: path.clone(),
@@ -86,6 +94,7 @@ impl Lease {
                     path: path.clone(),
                     host: host.to_string(),
                     holder: text.split_whitespace().collect::<Vec<_>>().join(" "),
+                    unlock_with: format!("{invocation} unlock --host {host}"),
                 })
             }
             Err(source) => Err(io(source)),

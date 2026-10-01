@@ -9,18 +9,23 @@
 //! from byte buffers. This crate is host tooling: it never runs guest
 //! code and never touches the runtime.
 //!
-//! The verbs live in the binary; this library holds what they share.
+//! The verbs live in [`verbs`], which takes a parsed command and returns
+//! a report without printing. The `runner_ps3` binary is one front end;
+//! any other command line can link this library and drive the same
+//! verbs.
 
 pub mod capture;
 pub mod cli;
 pub mod console;
 pub mod deploy;
+pub mod env;
 pub mod error;
 pub mod lease;
 pub mod provenance;
 pub mod run;
 pub mod transcript;
 pub mod transport;
+pub mod verbs;
 
 pub use error::{ExitCode, RunnerPs3Error};
 

@@ -8,10 +8,8 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use crate::console::OperatorFacts;
+use crate::env;
 use crate::error::RunnerPs3Error;
-
-/// The variable that names the console when `--host` is absent.
-pub const HOST_ENV: &str = "CELLGOV_PS3_HOST";
 
 /// The profiles file when `--profiles` is absent, relative to the
 /// workspace root.
@@ -55,16 +53,6 @@ pub enum Verb {
     Unlock,
 }
 
-/// The identity flags every verb that talks to the console takes.
-const CONSOLE: &[&str] = &[
-    "--host",
-    "--profile",
-    "--profiles",
-    "--model",
-    "--cfw",
-    "--debugger",
-];
-
 impl Verb {
     /// The verb's word on the command line.
     pub fn name(self) -> &'static str {
@@ -85,14 +73,65 @@ impl Verb {
         !matches!(self, Self::Convert | Self::Unlock)
     }
 
-    fn accepts(self, flag: &str) -> bool {
-        let extra: &[&str] = match self {
-            Self::Status => &[],
-            Self::Deploy => &["--manifest", "--reclaim"],
-            Self::Cleanup => &["--manifest"],
-            Self::Run => &["--manifest", "--poll-ms"],
-            Self::Fetch => &["--manifest", "--out"],
+    /// Every flag the verb takes; the parser refuses any other, and
+    /// [`USAGE`] names exactly these. A verb that talks to the console
+    /// takes the six identity flags first.
+    pub fn flags(self) -> &'static [&'static str] {
+        match self {
+            Self::Status => &[
+                "--host",
+                "--profile",
+                "--profiles",
+                "--model",
+                "--cfw",
+                "--debugger",
+            ],
+            Self::Deploy => &[
+                "--host",
+                "--profile",
+                "--profiles",
+                "--model",
+                "--cfw",
+                "--debugger",
+                "--manifest",
+                "--reclaim",
+            ],
+            Self::Run => &[
+                "--host",
+                "--profile",
+                "--profiles",
+                "--model",
+                "--cfw",
+                "--debugger",
+                "--manifest",
+                "--poll-ms",
+            ],
+            Self::Fetch => &[
+                "--host",
+                "--profile",
+                "--profiles",
+                "--model",
+                "--cfw",
+                "--debugger",
+                "--manifest",
+                "--out",
+            ],
+            Self::Cleanup => &[
+                "--host",
+                "--profile",
+                "--profiles",
+                "--model",
+                "--cfw",
+                "--debugger",
+                "--manifest",
+            ],
             Self::Capture => &[
+                "--host",
+                "--profile",
+                "--profiles",
+                "--model",
+                "--cfw",
+                "--debugger",
                 "--manifest",
                 "--harness-revision",
                 "--out",
@@ -102,13 +141,9 @@ impl Verb {
                 "--recapture",
                 "--reason",
             ],
-            Self::Convert => {
-                return ["--frame", "--manifest", "--profile", "--profiles", "--out"]
-                    .contains(&flag)
-            }
-            Self::Unlock => return flag == "--host",
-        };
-        CONSOLE.contains(&flag) || extra.contains(&flag)
+            Self::Convert => &["--frame", "--manifest", "--profile", "--profiles", "--out"],
+            Self::Unlock => &["--host"],
+        }
     }
 }
 
@@ -205,7 +240,7 @@ pub fn parse(args: &[OsString]) -> Result<Command, RunnerPs3Error> {
         if !flag.starts_with("--") {
             return Err(usage(format!("unexpected argument {flag:?}")));
         }
-        if !verb.accepts(flag) {
+        if !verb.flags().contains(&flag) {
             return Err(usage(format!("{} does not take {flag}", verb.name())));
         }
         match flag {
@@ -275,7 +310,7 @@ impl Command {
         self.verb.ok_or_else(|| usage("no verb given".to_string()))
     }
 
-    /// The console: `--host`, else `env` (the [`HOST_ENV`] variable).
+    /// The console: `--host`, else `env` (the [`env::HOST`] variable).
     ///
     /// # Errors
     ///
@@ -287,7 +322,12 @@ impl Command {
             .map(str::trim)
             .find(|v| !v.is_empty())
             .map(str::to_string)
-            .ok_or_else(|| usage(format!("no console named; pass --host or set {HOST_ENV}")))
+            .ok_or_else(|| {
+                usage(format!(
+                    "no console named; pass --host or set {}",
+                    env::HOST
+                ))
+            })
     }
 
     /// `path`, or a usage error naming `flag`.
@@ -313,11 +353,11 @@ impl Command {
         Self::required(self.frame.as_deref(), "--frame")
     }
 
-    /// `--profiles`, or [`DEFAULT_PROFILES`].
-    pub fn profiles_path(&self) -> PathBuf {
+    /// `--profiles`, or `default`, the file the front end names.
+    pub fn profiles_path(&self, default: &Path) -> PathBuf {
         self.profiles
             .clone()
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_PROFILES))
+            .unwrap_or_else(|| default.to_path_buf())
     }
 
     /// `--poll-ms`, or [`DEFAULT_POLL_MS`].

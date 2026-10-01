@@ -87,7 +87,14 @@ fn every_verb_has_its_word() {
 #[test]
 fn the_defaults_fill_what_the_line_leaves_out() {
     let command = parsed(&["status"]);
-    assert_eq!(command.profiles_path(), PathBuf::from(DEFAULT_PROFILES));
+    assert_eq!(
+        command.profiles_path(Path::new(DEFAULT_PROFILES)),
+        PathBuf::from(DEFAULT_PROFILES)
+    );
+    assert_eq!(
+        parsed(&["status", "--profiles", "mine.toml"]).profiles_path(Path::new(DEFAULT_PROFILES)),
+        PathBuf::from("mine.toml")
+    );
     assert_eq!(command.poll_ms(), DEFAULT_POLL_MS);
     assert_eq!(command.operator().debugger_attached, None);
     assert_eq!(command.host(Some(" 10.77.0.2 ")).expect("env"), "10.77.0.2");
@@ -164,6 +171,57 @@ fn a_malformed_line_is_a_usage_error_naming_the_problem() {
     ] {
         let message = refusal(words);
         assert!(message.starts_with(said), "{words:?}: {message}");
+    }
+}
+
+/// The flags [`USAGE`] names for `verb`: its line and the indented
+/// lines after it, with `(status flags)` standing for status's.
+fn usage_flags(verb: Verb) -> std::collections::BTreeSet<String> {
+    let mut lines = USAGE
+        .lines()
+        .skip_while(|line| !line.starts_with(&format!("  {} ", verb.name())));
+    let first = lines
+        .next()
+        .unwrap_or_else(|| panic!("USAGE has no line for {}", verb.name()));
+    let block: Vec<&str> = std::iter::once(first)
+        .chain(lines.take_while(|line| line.starts_with("   ")))
+        .collect();
+    let mut flags = std::collections::BTreeSet::new();
+    for word in block.join(" ").split_whitespace() {
+        if word == "(status" {
+            flags.extend(usage_flags(Verb::Status));
+        }
+        let word = word.trim_matches(|c| c == '[' || c == ']');
+        if word.starts_with("--") {
+            flags.insert(word.to_string());
+        }
+    }
+    flags
+}
+
+#[test]
+fn usage_names_exactly_the_flags_each_verb_takes() {
+    for verb in <Verb as strum::VariantArray>::VARIANTS {
+        let table: std::collections::BTreeSet<String> =
+            verb.flags().iter().map(|flag| flag.to_string()).collect();
+        assert_eq!(usage_flags(*verb), table, "{}", verb.name());
+    }
+}
+
+#[test]
+fn the_parser_refuses_every_flag_outside_the_verbs_table() {
+    let every: std::collections::BTreeSet<&str> = <Verb as strum::VariantArray>::VARIANTS
+        .iter()
+        .flat_map(|verb| verb.flags())
+        .copied()
+        .collect();
+    for verb in <Verb as strum::VariantArray>::VARIANTS {
+        for flag in every.iter().filter(|flag| !verb.flags().contains(flag)) {
+            assert_eq!(
+                refusal(&[verb.name(), flag]),
+                format!("{} does not take {flag}", verb.name())
+            );
+        }
     }
 }
 

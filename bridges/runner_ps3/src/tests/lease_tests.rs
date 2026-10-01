@@ -19,8 +19,8 @@ fn a_host_folds_to_a_file_name() {
 #[test]
 fn a_second_runner_is_refused_with_the_holder_and_the_command_that_clears_it() {
     let dir = cellgov_testkit::scratch::scratch();
-    let first = Lease::acquire(&dir, "10.77.0.2", "spu_fixed_value").expect("free");
-    let err = Lease::acquire(&dir, "10.77.0.2", "dma_completion").expect_err("held");
+    let first = Lease::acquire(&dir, "10.77.0.2", "spu_fixed_value", "cellgov ps3").expect("free");
+    let err = Lease::acquire(&dir, "10.77.0.2", "dma_completion", "cellgov ps3").expect_err("held");
     match &err {
         LeaseError::Held { host, holder, .. } => {
             assert_eq!(host, "10.77.0.2");
@@ -34,37 +34,37 @@ fn a_second_runner_is_refused_with_the_holder_and_the_command_that_clears_it() {
     }
     assert!(
         err.to_string()
-            .ends_with("clear it with `runner_ps3 unlock --host 10.77.0.2`"),
+            .ends_with("clear it with `cellgov ps3 unlock --host 10.77.0.2`"),
         "{err}"
     );
     first.release().expect("release");
-    Lease::acquire(&dir, "10.77.0.2", "dma_completion").expect("free again");
+    Lease::acquire(&dir, "10.77.0.2", "dma_completion", "runner_ps3").expect("free again");
 }
 
 #[test]
 fn another_console_has_its_own_lease() {
     let dir = cellgov_testkit::scratch::scratch();
-    let _one = Lease::acquire(&dir, "10.77.0.2", "a").expect("free");
-    let _two = Lease::acquire(&dir, "10.77.0.3", "b").expect("another host is free");
+    let _one = Lease::acquire(&dir, "10.77.0.2", "a", "runner_ps3").expect("free");
+    let _two = Lease::acquire(&dir, "10.77.0.3", "b", "runner_ps3").expect("another host is free");
 }
 
 #[test]
 fn a_dropped_lease_frees_the_console() {
     let dir = cellgov_testkit::scratch::scratch();
     let path = {
-        let lease = Lease::acquire(&dir, "10.77.0.2", "a").expect("free");
+        let lease = Lease::acquire(&dir, "10.77.0.2", "a", "runner_ps3").expect("free");
         lease.path().to_path_buf()
     };
     assert!(!path.exists());
-    Lease::acquire(&dir, "10.77.0.2", "b").expect("free after drop");
+    Lease::acquire(&dir, "10.77.0.2", "b", "runner_ps3").expect("free after drop");
 }
 
 #[test]
 fn unlock_clears_a_stale_lease_and_reports_whether_one_was_there() {
     let dir = cellgov_testkit::scratch::scratch();
-    let lease = Lease::acquire(&dir, "10.77.0.2", "a").expect("free");
+    let lease = Lease::acquire(&dir, "10.77.0.2", "a", "runner_ps3").expect("free");
     std::mem::forget(lease);
     assert!(unlock(&dir, "10.77.0.2").expect("unlock"));
     assert!(!unlock(&dir, "10.77.0.2").expect("nothing to unlock"));
-    Lease::acquire(&dir, "10.77.0.2", "b").expect("free after unlock");
+    Lease::acquire(&dir, "10.77.0.2", "b", "runner_ps3").expect("free after unlock");
 }
