@@ -8,6 +8,7 @@ use cellgov_observation::hardware_capture::{HardwareCaptureError, TRANSCRIPT_FIL
 use cellgov_testkit::scratch::ScratchDir;
 
 use super::*;
+use crate::console::STATUS_PATH;
 use crate::memory_console::{package_on_disk, MemoryConsole, PACKAGED_FRAME};
 
 const PROFILE: &str = "cech20-cex-493";
@@ -80,11 +81,24 @@ fn plan() -> (ScratchDir, CapturePlan) {
     (scratch, plan)
 }
 
-/// A clean console whose started test writes `frame`.
+/// The files the runner left on the console: all but the status page.
+fn left_on_console(console: &MemoryConsole) -> Vec<&String> {
+    console.files.keys().filter(|k| *k != STATUS_PATH).collect()
+}
+
+/// A status page whose `MEM:` line reads `mem`.
+fn status_page(mem: &str) -> Vec<u8> {
+    format!("<a class=\"s\" href=\"/browser.ps3$slaunch\">MEM: {mem}</a><br>").into_bytes()
+}
+
+/// A clean console at the XMB whose started test writes `frame`.
 fn console_writing(plan: &CapturePlan, frame: &[u8]) -> MemoryConsole {
     let mut console = MemoryConsole::empty();
     console.on_start = Some((plan.target().result_path, frame.to_vec()));
     console.polls_before_result = 1;
+    console
+        .files
+        .insert(STATUS_PATH.to_string(), status_page("1,748 KB (XMB)"));
     console
 }
 
@@ -208,7 +222,7 @@ fn a_capture_writes_four_files_that_replay_and_leaves_the_console_restored() {
         console.dirs.iter().collect::<Vec<_>>(),
         ["/dev_hdd0/game", "/dev_hdd0/tmp"]
     );
-    assert!(console.files.is_empty(), "{:?}", console.files);
+    assert!(left_on_console(&console).is_empty(), "{:?}", console.files);
     let transcript = std::fs::read_to_string(plan.out.join(TRANSCRIPT_FILE)).expect("transcript");
     assert!(transcript.contains("= console restored"), "{transcript}");
 }
@@ -249,13 +263,68 @@ fn a_run_that_never_writes_its_result_times_out_cleans_up_and_writes_nothing() {
 }
 
 #[test]
+fn a_title_that_never_returns_to_the_xmb_is_neither_fetched_nor_cleaned_up() {
+    let (_scratch, plan) = plan();
+    let mut console = console_writing(&plan, PACKAGED_FRAME);
+    console
+        .files
+        .insert(STATUS_PATH.to_string(), status_page("1,316 KB "));
+    let err = run_capture(&mut console, &plan).expect_err("never back at the XMB");
+    assert!(
+        matches!(err, RunnerPs3Error::StillRunning { .. }),
+        "{err:?}"
+    );
+    assert_eq!(err.exit_code(), crate::ExitCode::Timeout);
+    assert!(!plan.out.exists());
+    let result = format!("FETCH {}", plan.target().result_path);
+    assert!(
+        !console.calls.iter().any(|c| *c == result
+            || c.starts_with("DELE")
+            || c.starts_with("RMD")
+            || c.contains("unmount")),
+        "{:?}",
+        console.calls
+    );
+}
+
+#[test]
+fn a_capture_waits_for_the_xmb_between_the_result_and_the_fetch() {
+    let (_scratch, plan) = plan();
+    let mut console = console_writing(&plan, PACKAGED_FRAME);
+    console
+        .files
+        .insert(STATUS_PATH.to_string(), status_page("1,316 KB "));
+    console
+        .later_status
+        .push_back(status_page("1,748 KB (XMB)"));
+    run_capture(&mut console, &plan).expect("captured");
+    let transcript = std::fs::read_to_string(plan.out.join(TRANSCRIPT_FILE)).expect("transcript");
+    let at = |decision: &str| {
+        transcript.find(decision).unwrap_or_else(|| {
+            panic!(
+                "{decision:?} missing:
+{transcript}"
+            )
+        })
+    };
+    let order = [
+        at("= started"),
+        at("= left the XMB after 1 poll(s)"),
+        at("= result present after"),
+        at("= back at the XMB after 1 poll(s)"),
+        at("= captured"),
+    ];
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{transcript}");
+}
+
+#[test]
 fn a_result_that_is_not_one_frame_is_a_frame_error_and_the_console_is_cleaned() {
     let (_scratch, plan) = plan();
     let mut console = console_writing(&plan, b"CGOV\x00\x00\x00\x08short");
     let err = run_capture(&mut console, &plan).expect_err("short frame");
     assert_eq!(err.exit_code(), crate::ExitCode::Frame);
     assert!(!plan.out.exists());
-    assert!(console.files.is_empty(), "{:?}", console.files);
+    assert!(left_on_console(&console).is_empty(), "{:?}", console.files);
 }
 
 #[test]
@@ -272,7 +341,7 @@ fn a_recapture_whose_frame_does_not_convert_leaves_the_old_capture_whole() {
         !staging_dir(&plan.out).exists(),
         "no staging directory remains"
     );
-    assert!(console.files.is_empty(), "{:?}", console.files);
+    assert!(left_on_console(&console).is_empty(), "{:?}", console.files);
 }
 
 #[test]

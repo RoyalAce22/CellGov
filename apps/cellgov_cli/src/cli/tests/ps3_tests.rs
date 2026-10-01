@@ -332,6 +332,8 @@ fn each_runner_failure_maps_to_its_status() {
             },
             52,
         ),
+        (RunnerPs3Error::NotStarted { timeout_ms: 30_000 }, 52),
+        (RunnerPs3Error::StillRunning { timeout_ms: 30_000 }, 52),
         (RunnerPs3Error::Frame("magic absent".to_string()), 53),
         (
             RunnerPs3Error::Cleanup {

@@ -329,11 +329,13 @@ fn common_files(test_dir: &Path) -> Result<Vec<(String, PathBuf)>, RunnerPs3Erro
 }
 
 /// The capture loop on a console whose identity is `facts`: preflight,
-/// deploy, start, wait, fetch, then the frame, observation and
-/// provenance written to `plan.out`, cleanup, and the transcript.
+/// deploy, start, wait for the result and then for the XMB, fetch, then
+/// the frame, observation and provenance written to `plan.out`, cleanup,
+/// and the transcript.
 ///
 /// A failure before the frame is in hand still runs cleanup (unless the
-/// plan keeps the package) and returns the failure. A cleanup failure
+/// plan keeps the package, or the title never returned to the XMB) and
+/// returns the failure. A cleanup failure
 /// after the runner writes the files returns [`RunnerPs3Error::Cleanup`], and
 /// the capture stays written.
 ///
@@ -389,6 +391,16 @@ pub fn capture<C: ConsoleOps>(
     let fetched = deploy::deploy(console, &target, &package, transcript)
         .and_then(|()| run::start(console, &target, transcript))
         .and_then(|()| {
+            run::wait_for_launch(
+                console,
+                &target,
+                timeout_ms,
+                plan.poll_ms,
+                sleep,
+                transcript,
+            )
+        })
+        .and_then(|()| {
             run::wait_for_result(
                 console,
                 &target,
@@ -398,6 +410,7 @@ pub fn capture<C: ConsoleOps>(
                 transcript,
             )
         })
+        .and_then(|()| run::wait_for_xmb(console, timeout_ms, plan.poll_ms, sleep, transcript))
         .and_then(|()| run::fetch_result(console, &target, timeout_ms, transcript))
         .and_then(|frame| check_frame(&frame).map(|()| frame));
     // Everything that can still fail runs against a staging directory
@@ -425,7 +438,11 @@ pub fn capture<C: ConsoleOps>(
                     transcript.decision(format!("{} remains: {e}", staging.display()));
                 }
             }
-            if !plan.keep_deployed {
+            if matches!(error, RunnerPs3Error::StillRunning { .. }) {
+                // A running title holds the package and the result open;
+                // the operator exits it first.
+                transcript.decision("no cleanup while the title still runs");
+            } else if !plan.keep_deployed {
                 if let Err(cleanup) = run::cleanup(console, &target, transcript) {
                     transcript.decision(format!("after the failure, {cleanup}"));
                 }

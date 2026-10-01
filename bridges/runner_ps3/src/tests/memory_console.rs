@@ -34,6 +34,17 @@ pub(crate) struct MemoryConsole {
     /// The status pages the console serves after the current one, one
     /// per read of the status page.
     pub(crate) later_status: VecDeque<Vec<u8>>,
+    /// How many status-page reads the console refuses, as it does while
+    /// the XMB reloads after a title exits.
+    pub(crate) status_refusals: usize,
+    /// How many start requests the console answers without starting the
+    /// title, as it does soon after a previous title exits.
+    pub(crate) ignored_starts: usize,
+    /// How many result reads, once the file exists, find it still being
+    /// written: the body outgrows webMAN's stated length.
+    pub(crate) growing_reads: usize,
+    /// The path `growing_reads` applies to.
+    pub(crate) result_path: Option<String>,
     /// Every request, in order.
     pub(crate) calls: Vec<String>,
     started: bool,
@@ -147,22 +158,42 @@ impl ConsoleOps for MemoryConsole {
             self.started = false;
             return Ok(self.unmount_status.unwrap_or(200));
         }
-        if path == PLAY_PATH {
-            self.started = true;
+        if let Some(appid) = path
+            .strip_prefix(PLAY_PATH)
+            .and_then(|rest| rest.strip_prefix('?'))
+        {
+            // webMAN answers 200 and starts the title when its EBOOT is
+            // installed.
+            if self.ignored_starts > 0 {
+                self.ignored_starts -= 1;
+                return Ok(200);
+            }
+            self.started = self
+                .files
+                .contains_key(&format!("{GAME_ROOT}/{appid}/USRDIR/EBOOT.BIN"));
             return Ok(200);
         }
-        if let Some(eboot) = path.strip_prefix(PLAY_PATH) {
-            return Ok(if self.files.contains_key(eboot) {
-                200
-            } else {
-                404
+        let present = self.poll(path);
+        let result = self.result_path.as_deref() == Some(path);
+        if present && result && self.growing_reads > 0 {
+            self.growing_reads -= 1;
+            return Err(TransportError::BodyLength {
+                found: 16,
+                expected: 4,
             });
         }
-        Ok(if self.poll(path) { 200 } else { 404 })
+        Ok(if present { 200 } else { 404 })
     }
 
     fn fetch(&mut self, path: &str, _: &mut Transcript) -> Result<Option<Vec<u8>>, TransportError> {
         self.calls.push(format!("FETCH {path}"));
+        if path == STATUS_PATH && self.status_refusals > 0 {
+            self.status_refusals -= 1;
+            return Err(TransportError::Io {
+                operation: "connect",
+                source: std::io::Error::from(std::io::ErrorKind::ConnectionAborted),
+            });
+        }
         let page = self.files.get(path).cloned();
         if path == STATUS_PATH {
             if let Some(next) = self.later_status.pop_front() {

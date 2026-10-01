@@ -216,32 +216,231 @@ fn a_declined_or_unaskable_reclaim_leaves_the_console_as_it_was() {
 }
 
 #[test]
-fn start_mounts_the_eboot_then_starts_it() {
+fn start_sends_one_request_naming_the_appid() {
     let mut console = MemoryConsole::with_package(&target());
     let mut transcript = Transcript::new();
     start(&mut console, &target(), &mut transcript).expect("started");
-    assert_eq!(
-        console.calls,
-        [
-            "GET /play.ps3/dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN",
-            "GET /play.ps3",
-        ]
+    assert_eq!(console.calls, ["GET /play.ps3?CGOV00001"]);
+}
+
+/// A status page whose `MEM:` line reads `mem`, marked up as webMAN
+/// serves it.
+fn status_page(mem: &str) -> Vec<u8> {
+    format!(
+        "<b>CPU: 67&deg;C</b><br><a class=\"s\" href=\"/browser.ps3$slaunch\">MEM: {mem}</a>\
+         <br>HDD:  97.5 GB free<br>"
+    )
+    .into_bytes()
+}
+
+#[test]
+fn the_status_page_says_whether_the_console_is_at_the_xmb() {
+    let page = |mem: &str| String::from_utf8(status_page(mem)).expect("ascii");
+    assert_eq!(crate::console::at_xmb(&page("1,748 KB (XMB)")), Some(true));
+    assert_eq!(crate::console::at_xmb(&page("1,316 KB ")), Some(false));
+    assert_eq!(crate::console::at_xmb("<b>CPU: 67&deg;C</b>"), None);
+}
+
+#[test]
+fn a_launch_is_seen_when_the_console_leaves_the_xmb() {
+    let mut console = MemoryConsole::with_package(&target());
+    console.status_refusals = 1;
+    console
+        .files
+        .insert(STATUS_PATH.to_string(), status_page("1,748 KB (XMB)"));
+    console.later_status.push_back(status_page("1,316 KB "));
+    let mut transcript = Transcript::new();
+    wait_for_launch(
+        &mut console,
+        &target(),
+        30_000,
+        500,
+        &mut |_| {},
+        &mut transcript,
+    )
+    .expect("left on the third poll");
+    assert!(
+        transcript
+            .lines()
+            .iter()
+            .any(|l| l.ends_with("left the XMB after 3 poll(s)")),
+        "{:?}",
+        transcript.lines()
     );
 }
 
 #[test]
-fn a_start_over_a_missing_eboot_is_a_transport_error() {
-    let mut console = MemoryConsole::empty();
-    let err = start(&mut console, &target(), &mut Transcript::new()).expect_err("no eboot");
+fn a_test_that_ran_between_two_polls_counts_as_launched() {
+    let mut console = MemoryConsole::with_package(&target());
+    console
+        .files
+        .insert(STATUS_PATH.to_string(), status_page("1,748 KB (XMB)"));
+    console.put(&target().result_path);
+    let mut transcript = Transcript::new();
+    wait_for_launch(
+        &mut console,
+        &target(),
+        30_000,
+        500,
+        &mut |_| {},
+        &mut transcript,
+    )
+    .expect("the result shows it ran");
     assert!(
-        matches!(
-            &err,
-            RunnerPs3Error::Transport(TransportError::UnexpectedStatus { status: 404, path })
-                if path == "/play.ps3/dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN"
-        ),
+        transcript
+            .lines()
+            .iter()
+            .any(|l| l.ends_with("the result was already there at poll 1")),
+        "{:?}",
+        transcript.lines()
+    );
+}
+
+#[test]
+fn an_ignored_start_is_sent_once_more_after_ten_seconds() {
+    let mut console = MemoryConsole::with_package(&target());
+    console.ignored_starts = 1;
+    console.on_start = Some((target().result_path, b"frame".to_vec()));
+    console
+        .files
+        .insert(STATUS_PATH.to_string(), status_page("1,748 KB (XMB)"));
+    start(&mut console, &target(), &mut Transcript::new()).expect("answered");
+    let mut transcript = Transcript::new();
+    wait_for_launch(
+        &mut console,
+        &target(),
+        30_000,
+        500,
+        &mut |_| {},
+        &mut transcript,
+    )
+    .expect("the second start took");
+    let starts = console
+        .calls
+        .iter()
+        .filter(|c| *c == "GET /play.ps3?CGOV00001")
+        .count();
+    assert_eq!(starts, 2, "{:?}", console.calls);
+    assert!(
+        transcript
+            .lines()
+            .iter()
+            .any(|l| l.ends_with("still at the XMB after 20 poll(s); sending the start once more")),
+        "{:?}",
+        transcript.lines()
+    );
+}
+
+#[test]
+fn a_result_still_being_written_counts_as_not_yet() {
+    let mut console = started(0);
+    console.result_path = Some(target().result_path);
+    console.growing_reads = 2;
+    let mut transcript = Transcript::new();
+    wait_for_result(
+        &mut console,
+        &target(),
+        30_000,
+        500,
+        &mut |_| {},
+        &mut transcript,
+    )
+    .expect("whole on the third poll");
+    assert!(
+        transcript
+            .lines()
+            .iter()
+            .any(|l| l.ends_with("result present after 3 poll(s)")),
+        "{:?}",
+        transcript.lines()
+    );
+    assert_eq!(
+        transcript
+            .lines()
+            .iter()
+            .filter(|l| l.ends_with("grew from 4 to 16 bytes during the read; not yet"))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn a_start_that_never_leaves_the_xmb_is_not_started() {
+    let mut console = MemoryConsole::with_package(&target());
+    console
+        .files
+        .insert(STATUS_PATH.to_string(), status_page("1,748 KB (XMB)"));
+    let mut polls = 0;
+    let err = wait_for_launch(
+        &mut console,
+        &target(),
+        1_001,
+        500,
+        &mut |_| polls += 1,
+        &mut Transcript::new(),
+    )
+    .expect_err("never left");
+    assert!(
+        matches!(err, RunnerPs3Error::NotStarted { timeout_ms: 1_001 }),
         "{err:?}"
     );
-    assert_eq!(console.calls.len(), 1, "the bare start is never sent");
+    assert_eq!(err.exit_code(), crate::ExitCode::Timeout);
+    assert_eq!(polls, 3);
+}
+
+#[test]
+fn the_xmb_wait_counts_refused_and_in_game_polls_as_not_yet() {
+    let mut console = MemoryConsole::empty();
+    console.status_refusals = 2;
+    console
+        .files
+        .insert(STATUS_PATH.to_string(), status_page("1,316 KB "));
+    console.later_status.push_back(status_page("1,316 KB "));
+    console
+        .later_status
+        .push_back(status_page("1,748 KB (XMB)"));
+    let mut sleeps = Vec::new();
+    let mut transcript = Transcript::new();
+    wait_for_xmb(
+        &mut console,
+        30_000,
+        500,
+        &mut |d| sleeps.push(d),
+        &mut transcript,
+    )
+    .expect("the fifth poll finds the XMB");
+    assert_eq!(sleeps, [Duration::from_millis(500); 5]);
+    assert!(
+        transcript
+            .lines()
+            .iter()
+            .any(|l| l.ends_with("back at the XMB after 5 poll(s)")),
+        "{:?}",
+        transcript.lines()
+    );
+}
+
+#[test]
+fn a_title_that_never_returns_to_the_xmb_is_still_running_after_the_budget() {
+    for page in [status_page("1,316 KB "), b"<b>no memory line</b>".to_vec()] {
+        let mut console = MemoryConsole::empty();
+        console.files.insert(STATUS_PATH.to_string(), page);
+        let mut polls = 0;
+        let err = wait_for_xmb(
+            &mut console,
+            1_001,
+            500,
+            &mut |_| polls += 1,
+            &mut Transcript::new(),
+        )
+        .expect_err("never back");
+        assert!(
+            matches!(err, RunnerPs3Error::StillRunning { timeout_ms: 1_001 }),
+            "{err:?}"
+        );
+        assert_eq!(err.exit_code(), crate::ExitCode::Timeout);
+        assert_eq!(polls, 3, "ceil(1001 / 500) polls");
+    }
 }
 
 fn started(polls_before_result: usize) -> MemoryConsole {

@@ -422,6 +422,18 @@ fn on_console<C: ConsoleOps>(
             facts.load_at_start = Some(reading);
         }
     }
+    // A start lands on whatever runs: a title left running by an earlier
+    // test would take the start, and its exit would read as this test's.
+    if matches!(action, Action::Run | Action::Capture { .. })
+        && console::at_xmb(&html) != Some(true)
+    {
+        return Err(RunnerPs3Error::Refused {
+            reason: "the status page does not show the console at the XMB, so a title still runs"
+                .to_string(),
+            clear_with: "exit the title (webMAN /xmb.ps3$exit, or the controller)".to_string(),
+        }
+        .into());
+    }
     let lease = Lease::acquire(
         &mut webman,
         &host,
@@ -460,9 +472,28 @@ fn on_console<C: ConsoleOps>(
         Action::Run => run::clear_stale_result(&mut webman, &target, &clear_with, &mut transcript)
             .and_then(|()| run::start(&mut webman, &target, &mut transcript))
             .and_then(|()| {
+                run::wait_for_launch(
+                    &mut webman,
+                    &target,
+                    manifest.ps3.timeout_ms,
+                    command.poll_ms(),
+                    sleep,
+                    &mut transcript,
+                )
+            })
+            .and_then(|()| {
                 run::wait_for_result(
                     &mut webman,
                     &target,
+                    manifest.ps3.timeout_ms,
+                    command.poll_ms(),
+                    sleep,
+                    &mut transcript,
+                )
+            })
+            .and_then(|()| {
+                run::wait_for_xmb(
+                    &mut webman,
                     manifest.ps3.timeout_ms,
                     command.poll_ms(),
                     sleep,

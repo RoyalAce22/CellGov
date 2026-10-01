@@ -139,6 +139,17 @@ pub fn parse_status_page(html: &str) -> StatusPage {
     }
 }
 
+/// Whether the page says the console is at the XMB: `Some(true)` when its
+/// `MEM:` line ends `(XMB)`, `Some(false)` when that line names no XMB
+/// (a game or app is running), `None` when the page has no `MEM:` line.
+pub fn at_xmb(html: &str) -> Option<bool> {
+    strip_markup(html)
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("MEM:"))
+        .map(|line| line.ends_with("(XMB)"))
+}
+
 /// The page with every `<...>` tag replaced by a line break.
 pub(crate) fn strip_markup(html: &str) -> String {
     let mut out = String::with_capacity(html.len());

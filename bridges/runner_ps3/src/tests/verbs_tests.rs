@@ -464,6 +464,47 @@ fn a_reading_between_the_floor_and_the_ceiling_is_refused_only_after_a_hot_one()
 }
 
 #[test]
+fn run_and_capture_refuse_a_console_away_from_the_xmb_and_deploy_does_not() {
+    let in_game = PAGE.replace("MEM: 1,748 KB (XMB)", "MEM: 1,308 KB");
+    let unstated = PAGE.replace("MEM: 1,748 KB (XMB)", "");
+    for page in [in_game, unstated] {
+        let mut bench = Bench::new();
+        bench
+            .console
+            .files
+            .insert(STATUS_PATH.to_string(), page.into_bytes());
+        bench.arm();
+        for (verb, extra) in [
+            ("run", vec![]),
+            ("capture", vec!["--harness-revision", "0123456789abcdef"]),
+        ] {
+            let failure = bench.on_console(verb, &extra).expect_err("a title runs");
+            assert_eq!(failure.error.exit_code(), ExitCode::Refused, "{verb}");
+            assert!(
+                failure
+                    .error
+                    .to_string()
+                    .contains("not show the console at the XMB"),
+                "{verb}: {}",
+                failure.error
+            );
+        }
+        assert!(
+            bench
+                .console
+                .calls
+                .iter()
+                .all(|call| call == "FETCH /cpursx.ps3"),
+            "a refused start changes nothing: {:?}",
+            bench.console.calls
+        );
+        bench
+            .on_console("deploy", &[])
+            .expect("a deploy starts nothing");
+    }
+}
+
+#[test]
 fn a_capture_records_the_reading_it_started_from() {
     let mut bench = Bench::new();
     bench

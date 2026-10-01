@@ -244,7 +244,9 @@ pub(crate) fn exit_code(error: &RunnerPs3Error) -> i32 {
         | RunnerPs3Error::Lease(LeaseError::Transport(_))
         | RunnerPs3Error::Console(ConsoleError::PageMissing { .. })
         | RunnerPs3Error::Load(LoadError::Unstated(_)) => EXIT_TRANSPORT,
-        RunnerPs3Error::Timeout { .. } => EXIT_TIMEOUT,
+        RunnerPs3Error::Timeout { .. }
+        | RunnerPs3Error::StillRunning { .. }
+        | RunnerPs3Error::NotStarted { .. } => EXIT_TIMEOUT,
         RunnerPs3Error::Frame(_) => EXIT_FRAME,
         RunnerPs3Error::Cleanup { .. } => EXIT_CLEANUP,
     }

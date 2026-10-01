@@ -10,6 +10,7 @@
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
+use crate::console::{at_xmb, STATUS_PATH};
 use crate::error::RunnerPs3Error;
 use crate::transcript::Transcript;
 use crate::transport::ftp::FtpSession;
@@ -21,9 +22,12 @@ pub const GAME_ROOT: &str = "/dev_hdd0/game";
 pub const RESULT_ROOT: &str = "/dev_hdd0/tmp";
 /// The webMAN request that unmounts the running game.
 pub const UNMOUNT_PATH: &str = "/mount.ps3/unmount";
-/// The webMAN request that mounts the game at the path after it, or,
-/// bare, starts the mounted one.
+/// The webMAN request that, followed by `?<APPID>`, mounts the game
+/// installed under that directory of [`GAME_ROOT`] and starts it.
 pub const PLAY_PATH: &str = "/play.ps3";
+/// How long a start may go unanswered by a title before the runner sends
+/// it once more.
+pub const RESEND_START_AFTER_MS: u64 = 10_000;
 
 /// The console-side paths of one microtest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -329,8 +333,14 @@ pub fn cleanup<C: ConsoleOps>(
     }
 }
 
-/// Mount the deployed EBOOT as `/app_home` and start it: two webMAN
-/// requests, each of which must answer `200`.
+/// Start the deployed test with one webMAN request,
+/// `/play.ps3?<APPID>`, which must answer `200`.
+///
+/// webMAN documents this form as mounting the title under
+/// `/dev_hdd0/game/<APPID>` and starting it. The path form
+/// (`/play.ps3/<EBOOT path>`) only mounts, and a bare `/play.ps3` starts
+/// whatever the XMB then offers, which on the reference console was
+/// another installed app.
 ///
 /// # Errors
 ///
@@ -340,17 +350,109 @@ pub fn start<C: ConsoleOps>(
     target: &Target,
     transcript: &mut Transcript,
 ) -> Result<(), RunnerPs3Error> {
-    for path in [
-        format!("{PLAY_PATH}{}/EBOOT.BIN", target.usrdir),
-        PLAY_PATH.to_string(),
-    ] {
-        let status = console.http_status(&path, transcript)?;
-        if status != 200 {
-            return Err(TransportError::UnexpectedStatus { path, status }.into());
-        }
+    let path = format!("{PLAY_PATH}?{}", target.appid());
+    let status = console.http_status(&path, transcript)?;
+    if status != 200 {
+        return Err(TransportError::UnexpectedStatus { path, status }.into());
     }
     transcript.decision("started");
     Ok(())
+}
+
+/// Poll until the start has visibly taken: the status page says the
+/// console left the XMB, or the test's result is already there (a test
+/// that ran and exited between two polls). At most `timeout_ms / poll_ms`
+/// polls, rounded up, each after `sleep(poll_ms)`; a refused poll counts
+/// as not yet. A start not taken after [`RESEND_START_AFTER_MS`] is sent
+/// once more.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Usage`] for a zero `poll_ms`, and
+/// [`RunnerPs3Error::NotStarted`] when every poll still finds the XMB
+/// and no result.
+pub fn wait_for_launch<C: ConsoleOps>(
+    console: &mut C,
+    target: &Target,
+    timeout_ms: u64,
+    poll_ms: u64,
+    sleep: &mut dyn FnMut(Duration),
+    transcript: &mut Transcript,
+) -> Result<(), RunnerPs3Error> {
+    if poll_ms == 0 {
+        return Err(RunnerPs3Error::Usage(
+            "--poll-ms must be greater than zero".to_string(),
+        ));
+    }
+    let polls = timeout_ms.div_ceil(poll_ms).max(1);
+    let resend_at = RESEND_START_AFTER_MS.div_ceil(poll_ms).max(1);
+    for poll in 1..=polls {
+        sleep(Duration::from_millis(poll_ms));
+        if poll == resend_at {
+            // A start sent soon after a previous title exits can be ignored
+            // while the XMB settles; the console then stays at the XMB.
+            transcript.decision(format!(
+                "still at the XMB after {poll} poll(s); sending the start once more"
+            ));
+            start(console, target, transcript)?;
+        }
+        let left = match console.fetch(STATUS_PATH, transcript) {
+            Ok(Some(page)) => at_xmb(&String::from_utf8_lossy(&page)) == Some(false),
+            Ok(None) => false,
+            Err(error) => {
+                transcript.decision(format!("status page unanswered: {error}"));
+                false
+            }
+        };
+        if left {
+            transcript.decision(format!("left the XMB after {poll} poll(s)"));
+            return Ok(());
+        }
+        if result_written(console, &target.result_path, transcript)? {
+            transcript.decision(format!("the result was already there at poll {poll}"));
+            return Ok(());
+        }
+    }
+    Err(RunnerPs3Error::NotStarted { timeout_ms })
+}
+
+/// Poll the status page until it says the console is back at the XMB:
+/// the test exited, so its result file is whole and nothing holds
+/// the package open. At most `timeout_ms / poll_ms` polls, rounded up,
+/// each after `sleep(poll_ms)`.
+///
+/// A title's exit reloads the XMB, and webMAN with it, so for a while
+/// the console refuses connections; such a poll counts as not yet.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Usage`] for a zero `poll_ms`, and
+/// [`RunnerPs3Error::StillRunning`] when no poll finds the XMB.
+pub fn wait_for_xmb<C: ConsoleOps>(
+    console: &mut C,
+    timeout_ms: u64,
+    poll_ms: u64,
+    sleep: &mut dyn FnMut(Duration),
+    transcript: &mut Transcript,
+) -> Result<(), RunnerPs3Error> {
+    if poll_ms == 0 {
+        return Err(RunnerPs3Error::Usage(
+            "--poll-ms must be greater than zero".to_string(),
+        ));
+    }
+    let polls = timeout_ms.div_ceil(poll_ms).max(1);
+    for poll in 1..=polls {
+        sleep(Duration::from_millis(poll_ms));
+        match console.fetch(STATUS_PATH, transcript) {
+            Ok(Some(page)) if at_xmb(&String::from_utf8_lossy(&page)) == Some(true) => {
+                transcript.decision(format!("back at the XMB after {poll} poll(s)"));
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(error) => transcript.decision(format!("status page unanswered: {error}")),
+        }
+    }
+    Err(RunnerPs3Error::StillRunning { timeout_ms })
 }
 
 /// Poll the result path until it answers `200`: at most
@@ -381,7 +483,7 @@ pub fn wait_for_result<C: ConsoleOps>(
     let polls = timeout_ms.div_ceil(poll_ms).max(1);
     for poll in 1..=polls {
         sleep(Duration::from_millis(poll_ms));
-        if result_present(console, &target.result_path, transcript)? {
+        if result_written(console, &target.result_path, transcript)? {
             transcript.decision(format!("result present after {poll} poll(s)"));
             return Ok(());
         }
@@ -491,6 +593,25 @@ fn entries<C: ConsoleOps>(
         .filter(|name| !name.is_empty() && *name != "." && *name != "..")
         .map(str::to_string)
         .collect())
+}
+
+/// Whether the result file is there for the waits: a file the test is
+/// still writing grows between webMAN's header and its body, and counts
+/// as not yet.
+fn result_written<C: ConsoleOps>(
+    console: &mut C,
+    path: &str,
+    transcript: &mut Transcript,
+) -> Result<bool, TransportError> {
+    match result_present(console, path, transcript) {
+        Err(TransportError::BodyLength { found, expected }) => {
+            transcript.decision(format!(
+                "{path} grew from {expected} to {found} bytes during the read; not yet"
+            ));
+            Ok(false)
+        }
+        other => other,
+    }
 }
 
 fn result_present<C: ConsoleOps>(

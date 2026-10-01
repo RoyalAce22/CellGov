@@ -120,6 +120,27 @@ pub enum RunnerPs3Error {
         /// The manifest's budget.
         timeout_ms: u64,
     },
+    /// The test wrote its result but did not exit to the XMB within the
+    /// budget; the runner neither fetches nor cleans up under a running
+    /// title.
+    #[error(
+        "timeout: the console was not back at the XMB {timeout_ms} ms after the result appeared; \
+         exit the title (webMAN /xmb.ps3$exit, or the controller) and run cleanup"
+    )]
+    StillRunning {
+        /// The manifest's budget.
+        timeout_ms: u64,
+    },
+    /// The start request answered, but the console never left the XMB:
+    /// no title started.
+    #[error(
+        "timeout: the console was still at the XMB {timeout_ms} ms after the start request; \
+         no title started"
+    )]
+    NotStarted {
+        /// The manifest's budget.
+        timeout_ms: u64,
+    },
     /// The fetched bytes are not one whole CGOV frame.
     #[error("frame: {0}")]
     Frame(String),
@@ -161,7 +182,9 @@ impl RunnerPs3Error {
             Self::Transport(_)
             | Self::Lease(LeaseError::Transport(_))
             | Self::Load(LoadError::Unstated(_)) => ExitCode::Transport,
-            Self::Timeout { .. } => ExitCode::Timeout,
+            Self::Timeout { .. } | Self::StillRunning { .. } | Self::NotStarted { .. } => {
+                ExitCode::Timeout
+            }
             Self::Frame(_) => ExitCode::Frame,
             Self::Cleanup { .. } => ExitCode::Cleanup,
         }

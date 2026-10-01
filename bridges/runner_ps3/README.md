@@ -59,7 +59,7 @@ capture taken under its name assumed the old value.
 | --- | --- |
 | `status` | Reads the console's identity and checks it against the claimed profile, and prints its temperatures, fan and free space. |
 | `deploy` | Copies the package to the console. |
-| `run` | Starts the deployed test and waits for its result. |
+| `run` | Starts the deployed test, waits for its result, and waits for the console to return to the XMB. |
 | `fetch` | Copies the result file to this machine. |
 | `cleanup` | Unmounts the test and removes the package and the result. |
 | `capture` | The whole loop, writing a committed capture. |
@@ -77,7 +77,9 @@ under the workspace root, whatever the working directory. `--json`
 Before it changes anything, a verb that changes the console takes the
 console's lease, refuses a result file left by an earlier run that a
 delete does not clear, and refuses an occupied game directory unless
-`--reclaim` is given. `cellgov ps3` asks before a reclaim empties the
+`--reclaim` is given. `run` and `capture` also refuse a console whose
+status page does not show it at the XMB: a title an earlier test left
+running would take the start. `cellgov ps3` asks before a reclaim empties the
 directory, naming what it holds; `--yes` answers. Every refusal names
 the command that clears it.
 
@@ -189,8 +191,9 @@ type-checks the suite and never runs it.
 
 ## Safety
 
-The runner sends only what the loop needs: the status page, the mount
-and start requests, the result fetch, and the unmount over HTTP; and
+The runner sends only what the loop needs: the status page, the start
+request (`/play.ps3?<APPID>`, which mounts the test and starts it), the
+result fetch, and the unmount over HTTP; and
 over FTP, listings, and directory creation, upload and deletion
 confined to its own game directory, its result file and its lease
 directory. It never sends a webMAN request
