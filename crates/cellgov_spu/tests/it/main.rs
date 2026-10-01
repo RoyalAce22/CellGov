@@ -2,6 +2,7 @@
 //! one test binary so each profile links the crate's dependencies once.
 
 mod channel_stall_through_runtime;
+mod console_events;
 mod console_raw_stop;
 mod event_wait_through_runtime;
 mod mailbox_count_through_runtime;

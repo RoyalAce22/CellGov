@@ -74,6 +74,22 @@ pub enum SpuFault {
     /// A channel whose capacity the model does not know.
     #[error("SPU unsupported channel rchcnt 0x{0:02x}")]
     UnsupportedChannelCount(u8),
+    /// An access to a decrementer channel. The console's decrementer
+    /// counts down at the time-base frequency, so its value tracks
+    /// elapsed hardware time; CellGov's SPU time does not yet follow the
+    /// hardware's cycles, so no value it could return would be the
+    /// console's, and the model refuses the access by name.
+    #[error(
+        "SPU decrementer channel {} 0x{channel:02x}: the decrementer is not modeled, \
+         since CellGov's SPU time is not the console's cycle count",
+        if *is_count { "rchcnt" } else if *channel == cellgov_ps3_abi::hw::spu::SPU_WR_DEC { "wrch" } else { "rdch" }
+    )]
+    DecrementerUnmodeled {
+        /// `SPU_WrDec` or `SPU_RdDec`.
+        channel: u8,
+        /// Whether the access was `rchcnt`.
+        is_count: bool,
+    },
     /// A channel access whose stall no event can end: a tag-status
     /// read with no update request, which only an interrupt could end.
     #[error("SPU channel 0x{0:02x} access stalls")]

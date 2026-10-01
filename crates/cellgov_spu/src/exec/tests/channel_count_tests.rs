@@ -21,11 +21,59 @@ fn count(s: &mut SpuState, channel: u8) -> u32 {
 }
 
 #[test]
-fn a_channel_the_model_does_not_implement_refuses_its_count() {
+fn the_decrementer_channels_refuse_their_count_by_name() {
     let mut s = SpuState::new();
+    for channel in [spu::SPU_WR_DEC, spu::SPU_RD_DEC] {
+        assert_eq!(
+            execute(&SpuInstruction::Rchcnt { rt: 3, channel }, &mut s, uid()),
+            SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
+                channel,
+                is_count: true
+            })
+        );
+    }
+}
+
+#[test]
+fn the_decrementer_channels_refuse_a_read_and_a_write_by_name() {
+    let mut s = SpuState::new();
+    let write = execute(
+        &SpuInstruction::Wrch {
+            channel: spu::SPU_WR_DEC,
+            rt: 3,
+        },
+        &mut s,
+        uid(),
+    );
+    let read = execute(
+        &SpuInstruction::Rdch {
+            rt: 3,
+            channel: spu::SPU_RD_DEC,
+        },
+        &mut s,
+        uid(),
+    );
     assert_eq!(
-        execute(&SpuInstruction::Rchcnt { rt: 3, channel: 7 }, &mut s, uid()),
-        SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(7))
+        (write, read),
+        (
+            SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
+                channel: spu::SPU_WR_DEC,
+                is_count: false
+            }),
+            SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
+                channel: spu::SPU_RD_DEC,
+                is_count: false
+            })
+        )
+    );
+    assert_eq!(
+        SpuFault::DecrementerUnmodeled {
+            channel: spu::SPU_WR_DEC,
+            is_count: false
+        }
+        .to_string(),
+        "SPU decrementer channel wrch 0x07: the decrementer is not modeled, \
+         since CellGov's SPU time is not the console's cycle count"
     );
 }
 

@@ -404,35 +404,42 @@ fn rchcnt_on_an_unmodeled_channel_faults_by_name() {
             },
             &mut s
         ),
-        SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(7))
+        SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
+            channel: 7,
+            is_count: true
+        })
     ));
     assert_eq!(s.regs[2], PATTERN);
 }
 
 #[test]
-fn a_refused_rchcnt_faults_in_its_own_class_not_the_rdch_one() {
-    use crate::fault_codes::{FAULT_UNSUPPORTED_CHANNEL, FAULT_UNSUPPORTED_CHANNEL_COUNT};
+fn a_refused_decrementer_rchcnt_is_told_apart_from_the_rdch() {
+    use crate::fault_codes::FAULT_DECREMENTER_UNMODELED;
     use crate::SpuExecutionUnit;
     use cellgov_effects::FaultKind;
     use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
     use cellgov_mem::GuestMemory;
     use cellgov_time::Budget;
 
-    // rchcnt $2, $8: the decrementer count is not modeled.
-    let raw: u32 = (0x00Fu32 << 21) | (8u32 << 7) | 2;
-    let mut unit = SpuExecutionUnit::new(uid());
-    unit.state_mut().ls[0..4].copy_from_slice(&raw.to_be_bytes());
-    let mem = GuestMemory::new(16);
-    let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
-    assert_eq!(result.yield_reason, YieldReason::Fault);
+    let fault_of = |raw: u32| {
+        let mut unit = SpuExecutionUnit::new(uid());
+        unit.state_mut().ls[0..4].copy_from_slice(&raw.to_be_bytes());
+        let mem = GuestMemory::new(16);
+        let ctx = ExecutionContext::new(&mem);
+        let result = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
+        assert_eq!(result.yield_reason, YieldReason::Fault);
+        result.fault
+    };
+    // rchcnt $2, $8 and rdch $2, $8: the decrementer is not modeled.
+    let rchcnt: u32 = (0x00Fu32 << 21) | (8u32 << 7) | 2;
+    let rdch: u32 = (0x00Du32 << 21) | (8u32 << 7) | 2;
     assert_eq!(
-        result.fault,
-        Some(FaultKind::Guest(FAULT_UNSUPPORTED_CHANNEL_COUNT | 8))
+        fault_of(rchcnt),
+        Some(FaultKind::Guest(FAULT_DECREMENTER_UNMODELED | 0x108))
     );
-    assert_ne!(
-        result.fault,
-        Some(FaultKind::Guest(FAULT_UNSUPPORTED_CHANNEL | 8))
+    assert_eq!(
+        fault_of(rdch),
+        Some(FaultKind::Guest(FAULT_DECREMENTER_UNMODELED | 8))
     );
 }
 

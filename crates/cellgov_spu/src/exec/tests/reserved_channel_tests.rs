@@ -89,18 +89,19 @@ fn rchcnt_of_a_reserved_channel_counts_zero() {
 
 #[test]
 fn an_implemented_channel_without_an_arm_still_refuses_by_name() {
-    // SPU_RdDec is an architected read channel the model has not written.
+    // SPU_WrOutIntrMbox is an architected write channel the model has
+    // not written.
     let mut s = SpuState::new();
     let out = execute(
-        &SpuInstruction::Rdch { rt: 7, channel: 8 },
+        &SpuInstruction::Wrch { channel: 30, rt: 7 },
         &mut s,
         UnitId::new(0),
     );
     assert!(matches!(
         out,
         SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
-            channel: 8,
-            is_write: false
+            channel: 30,
+            is_write: true
         })
     ));
 }

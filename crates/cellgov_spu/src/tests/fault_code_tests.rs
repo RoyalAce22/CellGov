@@ -14,9 +14,9 @@
 //! the check reads names the classes the code actually raises.
 
 use super::{
-    guest_fault_for, EVERY_FAULT_CLASS, FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE,
-    FAULT_UNDEFINED_CONVERSION_SCALE, FAULT_UNSUPPORTED_CHANNEL, FAULT_UNSUPPORTED_CHANNEL_COUNT,
-    FAULT_UNSUPPORTED_MFC_CMD,
+    guest_fault_for, EVERY_FAULT_CLASS, FAULT_DECREMENTER_UNMODELED, FAULT_DETAIL_MASK,
+    FAULT_LS_OUT_OF_RANGE, FAULT_UNDEFINED_CONVERSION_SCALE, FAULT_UNSUPPORTED_CHANNEL,
+    FAULT_UNSUPPORTED_CHANNEL_COUNT, FAULT_UNSUPPORTED_MFC_CMD,
 };
 use crate::exec::SpuFault;
 use crate::SpuExecutionUnit;
@@ -41,8 +41,9 @@ fn code_for(fault: SpuFault) -> u32 {
 /// and the class that detail must leave alone.
 ///
 /// One reaches the class field from a guest: the MFC command word is a
-/// whole 32-bit channel write. `UnsupportedChannel` and
-/// `UnsupportedChannelCount` read a channel out of a 7-bit
+/// whole 32-bit channel write. `UnsupportedChannel`,
+/// `UnsupportedChannelCount` and `DecrementerUnmodeled` read a channel
+/// out of a 7-bit
 /// instruction field, so `u8::MAX` is past anything a program produces
 /// and stands here for the field's own bound. `LsOutOfRange` carries the
 /// raw address operand, which a guest picks freely, but `exec::ls_addr`
@@ -70,6 +71,13 @@ fn every_variant_at_its_widest_detail() -> Vec<(SpuFault, u32)> {
         (
             SpuFault::UndefinedConversionScale(u8::MAX),
             FAULT_UNDEFINED_CONVERSION_SCALE,
+        ),
+        (
+            SpuFault::DecrementerUnmodeled {
+                channel: u8::MAX,
+                is_count: true,
+            },
+            FAULT_DECREMENTER_UNMODELED,
         ),
     ]
 }

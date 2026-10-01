@@ -170,6 +170,15 @@ pub(super) fn execute_wrch(
             state.set_srr0(val);
             SpuStepOutcome::Continue
         }
+        // [CBEA p:139 s:9.7] SPU_WrDec loads the decrementer, which then counts down.
+        // A console counts it at the time-base frequency (79.8 MHz, the
+        // spu_events capture), so its value tracks elapsed hardware time.
+        // CellGov's SPU time is not that clock, and the model refuses the
+        // access by name rather than return a value no console produces.
+        spu::SPU_WR_DEC => SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
+            channel,
+            is_count: false,
+        }),
         // [CBE-Handbook p:443 s:17.1.4] a write to a reserved channel has no effect and raises no interrupt.
         _ if spu::is_reserved_channel(channel) => SpuStepOutcome::Continue,
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
@@ -295,6 +304,12 @@ pub(super) fn execute_rdch(
             state.set_reg_channel_word(rt, state.srr0());
             SpuStepOutcome::Continue
         }
+        // [CBEA p:139 s:9.7] SPU_RdDec reads the decrementer; refused by
+        // name for the reason the SPU_WrDec arm gives.
+        spu::SPU_RD_DEC => SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
+            channel,
+            is_count: false,
+        }),
         // [CBE-Handbook p:443 s:17.1.4] a read of a reserved channel returns zeros and raises no interrupt.
         _ if spu::is_reserved_channel(channel) => {
             state.set_reg_channel_word(rt, 0);
@@ -308,6 +323,14 @@ pub(super) fn execute_rdch(
 }
 
 pub(super) fn execute_rchcnt(rt: u8, channel: u8, state: &mut SpuState) -> SpuStepOutcome {
+    // [CBEA p:139 s:9.7] the decrementer channels; refused by name for
+    // the reason the SPU_WrDec arm of `execute_wrch` gives.
+    if channel == spu::SPU_WR_DEC || channel == spu::SPU_RD_DEC {
+        return SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
+            channel,
+            is_count: true,
+        });
+    }
     let Some(count) = channel_count(channel, state) else {
         return SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(channel));
     };

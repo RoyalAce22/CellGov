@@ -72,6 +72,10 @@ fn rchcnt_on_a_fresh_unit_reads_the_start_count_of_every_channel_number() {
                 Some(s.reg_word(3))
             }
             SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(c)) if c == channel => None,
+            SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
+                channel: c,
+                is_count: true,
+            }) if c == channel => None,
             other => panic!("channel 0x{channel:02x}: {other:?}"),
         };
         assert_eq!(got, expected[channel as usize], "channel 0x{channel:02x}");

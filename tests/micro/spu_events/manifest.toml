@@ -1,0 +1,23 @@
+[test]
+name = "spu_events"
+
+# A hardware probe: one SPU thread arms one event per phase and meets
+# its documented condition (MS, TG, QV, SN, TM on the SPU alone; MB, S1
+# and LR with the PPU acting on a flag), checks whether acknowledging
+# Tm with the mask clear stops the decrementer, and reads the
+# decrementer across a long spin the PPU brackets with the time base. The console capture is the answer; the CellGov gate
+# compares the events CellGov raises against it.
+
+[observe]
+# Twelve 16-byte phase records, then the PPU's time base at the two
+# rate flags, the time-base frequency, the first missed flag and the
+# failed step: 224 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 224 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+files = ["spu_main.elf"]

@@ -50,6 +50,9 @@ pub(crate) const FAULT_UNDEFINED_CONVERSION_SCALE: u32 = 0x000C_0000;
 /// A taken indirect branch with both D and E set. The detail is the
 /// branch's address modulo 64 KB, as on [`FAULT_LS_OUT_OF_RANGE`].
 pub(crate) const FAULT_UNDEFINED_INTERRUPT_CONTROL: u32 = 0x000D_0000;
+/// An access to a decrementer channel, which the model refuses by name.
+/// The detail is the channel number, with bit 8 set for `rchcnt`.
+pub(crate) const FAULT_DECREMENTER_UNMODELED: u32 = 0x000E_0000;
 
 /// The half of a fault code that carries the detail.
 ///
@@ -60,7 +63,7 @@ pub(crate) const FAULT_DETAIL_MASK: u32 = 0xFFFF;
 
 /// Every class this crate raises, so the layout checks and the layout
 /// tests cover one set.
-const EVERY_FAULT_CLASS: [u32; 9] = [
+const EVERY_FAULT_CLASS: [u32; 10] = [
     FAULT_LS_OUT_OF_RANGE,
     FAULT_UNSUPPORTED_CHANNEL,
     FAULT_UNSUPPORTED_MFC_CMD,
@@ -70,6 +73,7 @@ const EVERY_FAULT_CLASS: [u32; 9] = [
     FAULT_RESERVED_TAG_UPDATE,
     FAULT_UNDEFINED_CONVERSION_SCALE,
     FAULT_UNDEFINED_INTERRUPT_CONTROL,
+    FAULT_DECREMENTER_UNMODELED,
 ];
 
 // The debug assertion in `guest_fault` compiles out under `--release`,
@@ -116,6 +120,10 @@ pub(crate) fn guest_fault_for(fault: SpuFault) -> FaultKind {
         SpuFault::UndefinedInterruptControl(pc) => {
             guest_fault(FAULT_UNDEFINED_INTERRUPT_CONTROL, pc)
         }
+        SpuFault::DecrementerUnmodeled { channel, is_count } => guest_fault(
+            FAULT_DECREMENTER_UNMODELED,
+            u32::from(channel) | u32::from(is_count) << 8,
+        ),
     }
 }
 
@@ -139,6 +147,7 @@ pub fn describe_guest_fault(code: u32) -> Option<String> {
         FAULT_RESERVED_TAG_UPDATE => "SPU_RESERVED_TAG_UPDATE",
         FAULT_UNDEFINED_CONVERSION_SCALE => "SPU_UNDEFINED_CONVERSION_SCALE",
         FAULT_UNDEFINED_INTERRUPT_CONTROL => "SPU_UNDEFINED_INTERRUPT_CONTROL",
+        FAULT_DECREMENTER_UNMODELED => "SPU_DECREMENTER_UNMODELED",
         _ => return None,
     };
     Some(format!("{name} (detail=0x{detail:04x})"))
