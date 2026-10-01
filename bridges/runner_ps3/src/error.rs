@@ -59,7 +59,7 @@ pub enum RunnerPs3Error {
     },
     /// The console did not answer as the protocol requires.
     #[error("transport: {0}")]
-    Transport(String),
+    Transport(#[from] crate::transport::TransportError),
     /// The result did not appear within the budget.
     #[error("timeout: no result at {result_path} after {timeout_ms} ms")]
     Timeout {

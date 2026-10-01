@@ -34,7 +34,7 @@ fn each_error_maps_to_the_class_its_message_names() {
             ExitCode::Refused,
         ),
         (
-            RunnerPs3Error::Transport("FTP 530".to_string()),
+            RunnerPs3Error::from(crate::transport::TransportError::ReplyTruncated),
             ExitCode::Transport,
         ),
         (
