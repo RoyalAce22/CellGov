@@ -28,6 +28,115 @@ pub struct Manifest {
     pub observe: ObserveSection,
     /// Expected outcome.
     pub expect: ExpectSection,
+    /// What the console runner needs. Every field has a default, so a
+    /// manifest without the table is complete.
+    #[serde(default)]
+    pub ps3: Ps3Section,
+}
+
+impl Manifest {
+    /// The file name the PPU program writes its CGOV frame to on the
+    /// console: `[ps3] result_file`, or `cgov_<name>.bin` from the test
+    /// name.
+    pub fn result_file_name(&self) -> String {
+        result_file_name(&self.test, &self.ps3)
+    }
+}
+
+/// The tables the console runner reads from a microtest manifest.
+///
+/// The parse skips a `[cellgov]` table whatever its shape, so a
+/// manifest that also drives `boot run --title-manifest` parses here
+/// while [`Manifest`] refuses it for its missing `scenario`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConsoleManifest {
+    /// Test identity.
+    pub test: TestSection,
+    /// What to observe and compare.
+    pub observe: ObserveSection,
+    /// Expected outcome.
+    pub expect: ExpectSection,
+    /// What the console runner needs.
+    #[serde(default)]
+    pub ps3: Ps3Section,
+}
+
+impl ConsoleManifest {
+    /// The file name the PPU program writes its CGOV frame to on the
+    /// console: `[ps3] result_file`, or `cgov_<name>.bin` from the test
+    /// name.
+    pub fn result_file_name(&self) -> String {
+        result_file_name(&self.test, &self.ps3)
+    }
+}
+
+fn result_file_name(test: &TestSection, ps3: &Ps3Section) -> String {
+    ps3.result_file
+        .clone()
+        .unwrap_or_else(|| format!("cgov_{}.bin", test.name))
+}
+
+/// Whether `value` names one file or directory entry: not empty, not
+/// `.` or `..`, and free of path separators. The runner joins each
+/// name under a directory of its own, so anything else would reach
+/// outside it.
+fn is_bare_name(value: &str) -> bool {
+    !value.is_empty() && value != "." && value != ".." && !value.contains(['/', '\\'])
+}
+
+/// The `[ps3]` refusals: a zero budget, a name that is not a bare
+/// file name, a non-portable test with no reason, and a volatile
+/// range that names no declared region, covers no bytes, or runs past
+/// its region.
+fn check_ps3(observe: &ObserveSection, ps3: &Ps3Section) -> Result<(), ManifestError> {
+    if ps3.timeout_ms == 0 {
+        return Err(ManifestError::ZeroTimeout);
+    }
+    let names = std::iter::once(("appid", ps3.appid.as_str()))
+        .chain(ps3.result_file.iter().map(|f| ("result_file", f.as_str())))
+        .chain(ps3.files.iter().map(|f| ("files", f.as_str())));
+    for (field, value) in names {
+        if !is_bare_name(value) {
+            return Err(ManifestError::NotABareName {
+                field,
+                value: value.to_string(),
+            });
+        }
+    }
+    if !ps3.portable && ps3.not_portable_reason.is_none() {
+        return Err(ManifestError::NotPortableWithoutReason);
+    }
+    for (index, range) in ps3.volatile.iter().enumerate() {
+        let Some(region) = observe
+            .memory_regions
+            .iter()
+            .find(|r| r.name == range.region)
+        else {
+            return Err(ManifestError::VolatileRegionUnknown {
+                index,
+                region: range.region.clone(),
+            });
+        };
+        if range.size == 0 {
+            return Err(ManifestError::VolatileRangeEmpty {
+                index,
+                region: range.region.clone(),
+            });
+        }
+        match range.offset.checked_add(range.size) {
+            Some(end) if end <= region.size => {}
+            _ => {
+                return Err(ManifestError::VolatileRangeOutsideRegion {
+                    index,
+                    region: range.region.clone(),
+                    offset: range.offset,
+                    size: range.size,
+                    region_size: region.size,
+                })
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Top-level test identity.
@@ -100,6 +209,63 @@ impl ObserveSection {
 pub struct ExpectSection {
     /// Expected test outcome.
     pub outcome: OutcomeField,
+}
+
+/// What the console runner needs to run one microtest on a PS3.
+///
+/// [`parse`] refuses a table that names a field this struct does not
+/// have, gives no time, names a file by anything but a bare name,
+/// turns portability off without a reason, or declares a volatile
+/// range outside its region.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Ps3Section {
+    /// TITLE_ID the packaged EBOOT installs under.
+    pub appid: String,
+    /// Wall-clock budget for one run on the console, in milliseconds.
+    pub timeout_ms: u64,
+    /// File name the PPU program writes its CGOV frame to under the
+    /// console's result directory. `None` derives it from the test
+    /// name; see [`Manifest::result_file_name`].
+    pub result_file: Option<String>,
+    /// Whether the test should run on a retail console at all.
+    pub portable: bool,
+    /// Why it is not, when `portable` is false.
+    pub not_portable_reason: Option<String>,
+    /// Files deployed beside the EBOOT, by name under `build/ps3/`:
+    /// the programs the PPU opens under `/app_home/`.
+    pub files: Vec<String>,
+    /// Bytes a hardware run legitimately varies. A comparison blanks
+    /// them on both sides first.
+    pub volatile: Vec<VolatileRange>,
+}
+
+impl Default for Ps3Section {
+    fn default() -> Self {
+        Self {
+            appid: default_ps3_appid(),
+            timeout_ms: default_ps3_timeout_ms(),
+            result_file: None,
+            portable: true,
+            not_portable_reason: None,
+            files: Vec::new(),
+            volatile: Vec::new(),
+        }
+    }
+}
+
+/// A byte range inside an observed region that a hardware run may vary.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VolatileRange {
+    /// Name of the `[observe] memory_regions` entry the range lies in.
+    pub region: String,
+    /// Offset of the first byte from the region start.
+    pub offset: u64,
+    /// Number of bytes.
+    pub size: u64,
+    /// What varies there, for the reader of a comparison report.
+    pub reason: String,
 }
 
 /// A memory region to observe, as declared in the manifest.
@@ -183,6 +349,14 @@ fn default_timeout_ms() -> u64 {
     5000
 }
 
+fn default_ps3_appid() -> String {
+    "CGOV00001".to_string()
+}
+
+fn default_ps3_timeout_ms() -> u64 {
+    30_000
+}
+
 /// Why manifest loading failed.
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
@@ -192,6 +366,55 @@ pub enum ManifestError {
     /// TOML parse error.
     #[error("manifest parse: {0}")]
     Parse(#[from] toml::de::Error),
+    /// `[ps3] timeout_ms = 0`, which would time every run out at once.
+    #[error("manifest [ps3]: timeout_ms must be greater than zero")]
+    ZeroTimeout,
+    /// A `[ps3]` value that must be one file or directory name is empty,
+    /// `.`, `..`, or carries a path separator.
+    #[error("manifest [ps3]: {field} value {value:?} is not a bare file name")]
+    NotABareName {
+        /// The field: `appid`, `result_file` or `files`.
+        field: &'static str,
+        /// The value as written.
+        value: String,
+    },
+    /// `[ps3] portable = false` with no `not_portable_reason`.
+    #[error("manifest [ps3]: portable = false needs a not_portable_reason")]
+    NotPortableWithoutReason,
+    /// A volatile range names a region `[observe]` does not declare.
+    #[error(
+        "manifest [ps3]: volatile range {index} names region {region:?}, which [observe] does not declare"
+    )]
+    VolatileRegionUnknown {
+        /// Position of the range in `[ps3] volatile`.
+        index: usize,
+        /// The region name the range gave.
+        region: String,
+    },
+    /// A volatile range covers no bytes.
+    #[error("manifest [ps3]: volatile range {index} in region {region:?} is empty")]
+    VolatileRangeEmpty {
+        /// Position of the range in `[ps3] volatile`.
+        index: usize,
+        /// The region the range names.
+        region: String,
+    },
+    /// A volatile range runs past the end of its region.
+    #[error(
+        "manifest [ps3]: volatile range {index} at offset {offset} of {size} bytes runs past region {region:?} of {region_size} bytes"
+    )]
+    VolatileRangeOutsideRegion {
+        /// Position of the range in `[ps3] volatile`.
+        index: usize,
+        /// The region the range names.
+        region: String,
+        /// The range's first byte, from the region start.
+        offset: u64,
+        /// The range's byte count.
+        size: u64,
+        /// The region's byte count.
+        region_size: u64,
+    },
 }
 
 /// Load and parse a manifest from a TOML file.
@@ -203,9 +426,27 @@ pub fn load(path: &Path) -> Result<Manifest, ManifestError> {
 /// Parse a manifest from a TOML string.
 pub fn parse(text: &str) -> Result<Manifest, ManifestError> {
     let manifest: Manifest = toml::from_str(text)?;
+    check_ps3(&manifest.observe, &manifest.ps3)?;
+    Ok(manifest)
+}
+
+/// Load the console runner's view of a manifest from a TOML file.
+pub fn load_console(path: &Path) -> Result<ConsoleManifest, ManifestError> {
+    let text = std::fs::read_to_string(path)?;
+    parse_console(&text)
+}
+
+/// Parse the console runner's view of a manifest from a TOML string.
+pub fn parse_console(text: &str) -> Result<ConsoleManifest, ManifestError> {
+    let manifest: ConsoleManifest = toml::from_str(text)?;
+    check_ps3(&manifest.observe, &manifest.ps3)?;
     Ok(manifest)
 }
 
 #[cfg(test)]
 #[path = "tests/manifest_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ps3_section_tests.rs"]
+mod ps3_section_tests;

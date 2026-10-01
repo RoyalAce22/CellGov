@@ -55,3 +55,8 @@ path = "build"
 
 [cellgov.checkpoint]
 kind = "process-exit"
+
+[ps3]
+# The parent spawns /app_home/child.self, so it deploys beside
+# the EBOOT.
+files = ["child.self"]

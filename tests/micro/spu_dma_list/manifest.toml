@@ -15,3 +15,8 @@ memory_regions = [
 
 [expect]
 outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]
