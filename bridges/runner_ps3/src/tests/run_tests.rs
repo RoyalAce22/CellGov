@@ -361,7 +361,10 @@ fn cleanup_unmounts_and_removes_the_package_and_the_result() {
     cleanup(&mut console, &target(), &mut transcript).expect("restored");
     assert_eq!(console.unmounts, 1);
     assert!(console.files.is_empty(), "{:?}", console.files);
-    assert_eq!(console.dirs.iter().collect::<Vec<_>>(), [GAME_ROOT]);
+    assert_eq!(
+        console.dirs.iter().collect::<Vec<_>>(),
+        [GAME_ROOT, RESULT_ROOT]
+    );
     assert_eq!(
         transcript.lines().last().map(String::as_str),
         Some("#0001 = console restored")

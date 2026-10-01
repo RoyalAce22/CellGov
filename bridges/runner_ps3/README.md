@@ -64,7 +64,7 @@ capture taken under its name assumed the old value.
 | `cleanup` | Unmounts the test and removes the package and the result. |
 | `capture` | The whole loop, writing a committed capture. |
 | `convert` | Converts a fetched frame into an observation, offline. |
-| `unlock` | Removes a stale lease on a console. |
+| `unlock` | Removes a stale lease from a console, whoever holds it. |
 
 A command line `runner_ps3` cannot parse prints the usage with every
 verb's flags; `cellgov ps3 <verb> --help` prints the same flags. `--host`
@@ -74,12 +74,24 @@ under the workspace root, whatever the working directory. `--json`
 (`--format json` under `cellgov ps3`) prints the report as JSON;
 `convert` always prints the observation.
 
-Before it changes anything, a verb that changes the console takes a
-per-console lease, refuses a result file left by an earlier run that a
+Before it changes anything, a verb that changes the console takes the
+console's lease, refuses a result file left by an earlier run that a
 delete does not clear, and refuses an occupied game directory unless
 `--reclaim` is given. `cellgov ps3` asks before a reclaim empties the
 directory, naming what it holds; `--yes` answers. Every refusal names
 the command that clears it.
+
+The lease lives on the console, so every runner that reaches the
+console sees it, from any machine, account or spelling of the host. It
+is the directory `/dev_hdd0/tmp/cellgov_lease`: the runner takes it with
+FTP `MKD`, which webMAN refuses with `550` for a directory that exists,
+then stores a `holder` file naming the user, the machine, the process,
+the microtest and the front end. A refusal names that holder and the
+`unlock` command. `unlock` needs the console reachable, and removes the
+lease whoever holds it. A run that stops without releasing, such as one
+that panics, leaves the lease for `unlock` to clear. The runner ignores
+the lease files its earlier versions kept in the host's temp directory;
+delete them at will.
 
 ### The thermal and capacity interlock
 
@@ -89,7 +101,7 @@ comes from. `status`, `unlock` and `cleanup` stay open, so a hot console
 can still be read and cleared. The console is hot from the moment its
 hotter chip reads the ceiling, and cool again only once it reads below
 the floor; between the two it keeps the state it had, which a marker
-beside the lease carries from one run to the next. `deploy` and
+in this machine's temp directory carries from one run to the next. `deploy` and
 `capture` also refuse when `/dev_hdd0` holds less than its floor. A page
 that does not state a temperature, or the free space a deploy needs, is
 a refusal too: the interlock never assumes a cool console.
@@ -164,5 +176,6 @@ rule, in
 The runner sends only what the loop needs: the status page, the mount
 and start requests, the result fetch, and the unmount over HTTP; and
 over FTP, listings, and directory creation, upload and deletion
-confined to its own game directory and result file. It never sends a webMAN request
+confined to its own game directory, its result file and its lease
+directory. It never sends a webMAN request
 that changes the console's firmware, settings or power state.

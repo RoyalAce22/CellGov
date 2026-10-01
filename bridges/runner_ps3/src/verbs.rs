@@ -32,8 +32,12 @@ pub struct Context {
     pub host_env: Option<String>,
     /// The value of [`crate::env::PROFILE`], when set.
     pub profile_env: Option<String>,
-    /// The directory every runner on this machine keeps its leases in.
-    pub lease_dir: PathBuf,
+    /// The directory every runner on this machine keeps its hot markers
+    /// in.
+    pub marker_dir: PathBuf,
+    /// The user and machine running the front end, as `user@machine`; a
+    /// lease names them to every other runner.
+    pub who: String,
     /// The workspace root; the tracked profiles file under it is the
     /// default when `--profiles` is absent.
     pub workspace_root: PathBuf,
@@ -186,7 +190,9 @@ pub fn execute<C: ConsoleOps>(
     match command.verb()? {
         Verb::Unlock => {
             let host = command.host(context.host_env.as_deref())?;
-            let removed = lease::unlock(&context.lease_dir, &host).map_err(RunnerPs3Error::from)?;
+            let mut console = connect(&host);
+            let removed = lease::unlock(&mut console, &mut Transcript::new())
+                .map_err(RunnerPs3Error::from)?;
             Ok(Report::Unlock { host, removed })
         }
         Verb::Convert => Ok(convert(command, context)?),
@@ -365,7 +371,7 @@ fn on_console<C: ConsoleOps>(
             Ok(reading) => Some(load::assess(
                 reading,
                 &profiles.load,
-                &context.lease_dir,
+                &context.marker_dir,
                 &host,
             )?),
             Err(_) => None,
@@ -398,7 +404,7 @@ fn on_console<C: ConsoleOps>(
     if !matches!(action, Action::Cleanup) {
         let interlock = Interlock {
             limits: profiles.load,
-            marker_dir: &context.lease_dir,
+            marker_dir: &context.marker_dir,
             host: &host,
             wait_cool: command.wait_cool,
             needs_space: matches!(action, Action::Deploy | Action::Capture { .. }),
@@ -417,10 +423,11 @@ fn on_console<C: ConsoleOps>(
         }
     }
     let lease = Lease::acquire(
-        &context.lease_dir,
+        &mut webman,
         &host,
-        &manifest.test.name,
+        &lease::holder_text(&context.who, &manifest.test.name, &context.invocation),
         &context.invocation,
+        &mut transcript,
     )
     .map_err(RunnerPs3Error::from)?;
     let target = Target::new(&manifest.ps3.appid, &manifest.result_file_name());
@@ -513,11 +520,12 @@ fn on_console<C: ConsoleOps>(
         Ok(capture) => (capture, None),
         Err(error) => (None, Some(error)),
     };
+    let released = lease.release(&mut webman, &mut transcript);
     let report = Report::Console {
         capture,
         transcript: transcript.lines().to_vec(),
     };
-    let (error, lease) = match (failed, lease.release()) {
+    let (error, lease) = match (failed, released) {
         (None, Ok(())) => return Ok(report),
         (None, Err(lease_error)) => (lease_error.into(), None),
         (Some(error), Ok(())) => (error, None),

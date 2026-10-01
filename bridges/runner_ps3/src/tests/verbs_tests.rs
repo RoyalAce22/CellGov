@@ -10,6 +10,7 @@ use cellgov_testkit::scratch::ScratchDir;
 use super::*;
 use crate::cli::parse;
 use crate::console::STATUS_PATH;
+use crate::lease::LEASE_DIR;
 use crate::memory_console::{package_on_disk, MemoryConsole, PACKAGED_FRAME};
 use crate::ExitCode;
 
@@ -21,6 +22,9 @@ const PROFILE: &str = "cech20-cex-493";
 
 /// A front end other than the standalone binary.
 const INVOCATION: &str = "cellgov ps3";
+
+/// The user and machine the bench's runner names in its lease.
+const WHO: &str = "ana@bench-a";
 
 const PROFILES: &str = r#"
 reference = "cech20-cex-493"
@@ -75,8 +79,8 @@ impl Bench {
         let profiles = console_profiles_path(&scratch);
         std::fs::create_dir_all(profiles.parent().expect("micro dir")).expect("micro dir");
         std::fs::write(&profiles, PROFILES).expect("profiles");
-        let lease_dir = scratch.join("leases");
-        std::fs::create_dir_all(&lease_dir).expect("lease dir");
+        let marker_dir = scratch.join("markers");
+        std::fs::create_dir_all(&marker_dir).expect("marker dir");
         let mut console = MemoryConsole::empty();
         console
             .files
@@ -84,7 +88,8 @@ impl Bench {
         let context = Context {
             host_env: Some(HOST.to_string()),
             profile_env: Some(PROFILE.to_string()),
-            lease_dir,
+            marker_dir,
+            who: WHO.to_string(),
             workspace_root: scratch.to_path_buf(),
             invocation: INVOCATION.to_string(),
         };
@@ -103,6 +108,18 @@ impl Bench {
     fn target(&self) -> Target {
         let manifest = manifest::load_console(&self.manifest).expect("manifest");
         Target::new(&manifest.ps3.appid, &manifest.result_file_name())
+    }
+
+    /// A lease on the console for `who`, as another runner takes it.
+    fn lease(&mut self, who: &str) -> Lease {
+        Lease::acquire(
+            &mut self.console,
+            HOST,
+            &lease::holder_text(who, "another_test", "runner_ps3"),
+            "runner_ps3",
+            &mut Transcript::new(),
+        )
+        .expect("free")
     }
 
     /// The console's next start writes the packaged frame.
@@ -126,8 +143,7 @@ impl Bench {
     fn execute(&mut self, words: &[&str]) -> Result<Report, Box<Failure>> {
         let args: Vec<OsString> = words.iter().map(OsString::from).collect();
         let command = parse(&args).expect("parses");
-        let lease = lease::lease_path(&self.context.lease_dir, HOST);
-        let held = lease.exists();
+        let held = self.console.dirs.contains(LEASE_DIR);
         let console = &mut self.console;
         let mut opened = None;
         let result = execute(
@@ -145,7 +161,11 @@ impl Bench {
             assert_eq!(host, HOST);
         }
         if words[0] != "unlock" {
-            assert_eq!(lease.exists(), held, "{words:?} changed the lease");
+            assert_eq!(
+                self.console.dirs.contains(LEASE_DIR),
+                held,
+                "{words:?} changed the lease"
+            );
         }
         result
     }
@@ -267,9 +287,7 @@ fn every_verb_runs_through_the_library() {
 
     let report = bench.execute(&["unlock"]).expect("unlock");
     assert_eq!(report.lines(), ["no lease on 10.77.0.2"]);
-    std::mem::forget(
-        Lease::acquire(&bench.context.lease_dir, HOST, "stale", INVOCATION).expect("free"),
-    );
+    drop(bench.lease("stale@elsewhere"));
     let report = bench.execute(&["unlock"]).expect("unlock");
     assert_eq!(
         report,
@@ -279,6 +297,7 @@ fn every_verb_runs_through_the_library() {
         }
     );
     assert_eq!(report.lines(), ["removed the lease on 10.77.0.2"]);
+    assert!(!bench.console.dirs.contains(LEASE_DIR));
 }
 
 #[test]
@@ -327,7 +346,7 @@ fn every_remedy_names_the_front_end_that_ran_the_verb() {
         "a refused verb still reports its transcript: {failure:?}"
     );
 
-    let held = Lease::acquire(&bench.context.lease_dir, HOST, "another", INVOCATION).expect("free");
+    let held = bench.lease("another@elsewhere");
     let failure = bench.on_console("cleanup", &[]).expect_err("held");
     assert!(failure.report.is_none(), "{failure:?}");
     assert!(
@@ -338,7 +357,8 @@ fn every_remedy_names_the_front_end_that_ran_the_verb() {
         "{}",
         failure.error
     );
-    held.release().expect("release");
+    held.release(&mut bench.console, &mut Transcript::new())
+        .expect("release");
 }
 
 /// The fixture page with the Cell at `cpu_c`.
@@ -471,4 +491,44 @@ fn a_capture_records_the_reading_it_started_from() {
         record["console"]["load_at_start"],
         serde_json::json!({ "cpu_c": 70, "rsx_c": 64, "fan_percent": null })
     );
+}
+
+#[test]
+fn a_capture_takes_and_gives_back_the_console_lease_and_commits_no_holder() {
+    let mut bench = Bench::new();
+    bench.arm();
+    bench
+        .on_console("capture", &["--harness-revision", "0123456789abcdef"])
+        .expect("capture");
+    assert!(!bench.console.dirs.contains(LEASE_DIR), "released");
+    let lease_calls: Vec<&String> = bench
+        .console
+        .calls
+        .iter()
+        .filter(|call| call.contains(LEASE_DIR))
+        .collect();
+    assert_eq!(
+        lease_calls,
+        [
+            &format!("MKD {LEASE_DIR}"),
+            &format!(
+                "STOR {}/holder ({} bytes)",
+                LEASE_DIR,
+                lease::holder_text(WHO, "spu_fixed_value", INVOCATION).len()
+            ),
+            &format!("DELE {LEASE_DIR}/holder"),
+            &format!("RMD {LEASE_DIR}"),
+        ]
+    );
+    let committed = std::fs::read_to_string(
+        bench
+            .manifest
+            .parent()
+            .expect("test dir")
+            .join(CAPTURE_DIR)
+            .join(PROFILE)
+            .join("transcript.log"),
+    )
+    .expect("transcript");
+    assert!(!committed.contains(WHO), "{committed}");
 }

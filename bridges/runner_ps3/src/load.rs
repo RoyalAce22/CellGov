@@ -8,15 +8,15 @@
 //! mount behind because the console was hot is worse than a few FTP
 //! deletes. A console is hot from the moment its hotter chip reads the
 //! ceiling, and cool again only once it reads below the floor; the
-//! marker at [`lease::hot_path`], beside the lease, carries that state
-//! from one reading to the next, across runs and front ends. `deploy`
+//! marker at [`hot_path`] carries that state from one reading to the
+//! next, across runs and front ends on this machine. `deploy`
 //! and `capture` also refuse when `/dev_hdd0` holds less than the floor.
 //!
 //! The file-drop runner cannot see inside a run, so a run that heats the
 //! console is caught at the next verb, not during it.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cellgov_observation::console_profile::LoadLimits;
@@ -25,10 +25,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::console::{self, STATUS_PATH};
 use crate::error::RunnerPs3Error;
-use crate::lease;
 use crate::run::ConsoleOps;
 use crate::transcript::Transcript;
 use crate::transport::TransportError;
+
+/// The directory the hot markers live in, whichever front end runs
+/// the verb: the machine's temp directory, with no process id in the
+/// name.
+pub fn default_marker_dir() -> PathBuf {
+    std::env::temp_dir()
+}
+
+/// The marker under `dir` that says `host` was last read hot. Every
+/// character of the host outside ASCII alphanumerics and `.` folds to
+/// `_`.
+pub fn hot_path(dir: &Path, host: &str) -> PathBuf {
+    let safe: String = host
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    dir.join(format!("cellgov_runner_ps3_{safe}.hot"))
+}
 
 /// What the status page states about the console's load; each field is
 /// absent when the page does not state it.
@@ -245,7 +268,7 @@ pub fn assess(
     marker_dir: &Path,
     host: &str,
 ) -> Result<Thermal, RunnerPs3Error> {
-    let marker = lease::hot_path(marker_dir, host);
+    let marker = hot_path(marker_dir, host);
     let thermal = Thermal::of(reading.cpu_c.max(reading.rsx_c), limits, marker.exists());
     let written = match thermal {
         Thermal::Hot => std::fs::write(
@@ -270,7 +293,7 @@ pub fn assess(
 pub struct Interlock<'a> {
     /// The limits, from the profiles file.
     pub limits: LoadLimits,
-    /// The directory the marker lives in: the lease directory.
+    /// The directory the marker lives in.
     pub marker_dir: &'a Path,
     /// The console.
     pub host: &'a str,

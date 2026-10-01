@@ -1,12 +1,13 @@
 //! An in-memory console for the runner's tests, answering as webMAN
 //! does where the console's answers were measured: a directory that
-//! does not exist lists empty, and one that does lists `.` and `..`
-//! before its bare names.
+//! does not exist lists empty, one that does lists `.` and `..` before
+//! its bare names, and it answers `MKD` on a directory that exists with
+//! `550`.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::console::STATUS_PATH;
-use crate::run::{ConsoleOps, Target, GAME_ROOT, PLAY_PATH, UNMOUNT_PATH};
+use crate::run::{ConsoleOps, Target, GAME_ROOT, PLAY_PATH, RESULT_ROOT, UNMOUNT_PATH};
 use crate::transcript::Transcript;
 use crate::transport::TransportError;
 
@@ -93,6 +94,7 @@ impl MemoryConsole {
     pub(crate) fn empty() -> Self {
         let mut console = Self::default();
         console.dirs.insert(GAME_ROOT.to_string());
+        console.dirs.insert(RESULT_ROOT.to_string());
         console
     }
 
@@ -192,7 +194,12 @@ impl ConsoleOps for MemoryConsole {
     fn make_dir(&mut self, path: &str, _: &mut Transcript) -> Result<(), TransportError> {
         self.calls.push(format!("MKD {path}"));
         if !self.parent_exists(path) || !self.dirs.insert(path.to_string()) {
-            return Err(refused(path));
+            // The reply the reference console gave a second MKD.
+            return Err(TransportError::UnexpectedReply {
+                command: format!("MKD {path}"),
+                code: 550,
+                text: format!("File Error \"{path}/\""),
+            });
         }
         Ok(())
     }

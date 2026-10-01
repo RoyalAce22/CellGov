@@ -69,9 +69,10 @@ impl Verb {
         }
     }
 
-    /// Whether the verb talks to the console.
+    /// Whether the verb talks to the console: every verb but `convert`,
+    /// since the lease `unlock` clears lives on the console.
     pub fn touches_console(self) -> bool {
-        !matches!(self, Self::Convert | Self::Unlock)
+        !matches!(self, Self::Convert)
     }
 
     /// Every flag the verb takes; the parser refuses any other, and

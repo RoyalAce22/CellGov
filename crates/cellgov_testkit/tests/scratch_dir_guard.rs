@@ -29,10 +29,10 @@ const ALLOWED: [(&str, &str); 3] = [
          the helper is a dev-dependency and never reaches a release build",
     ),
     (
-        "bridges/runner_ps3/src/lease.rs",
-        "the per-console lease is not scratch: it lives in the machine's temp \
-         directory with no process id so every runner on the machine, under \
-         either front end, sees it",
+        "bridges/runner_ps3/src/load.rs",
+        "the per-console hot marker is not scratch: it lives in the machine's \
+         temp directory with no process id so every runner on the machine, \
+         under either front end, sees it",
     ),
 ];
 

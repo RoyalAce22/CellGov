@@ -51,7 +51,8 @@ pub(crate) fn run(
     let context = Context {
         host_env: var(runner_ps3::env::HOST),
         profile_env: var(runner_ps3::env::PROFILE),
-        lease_dir: runner_ps3::lease::default_dir(),
+        marker_dir: runner_ps3::load::default_marker_dir(),
+        who: runner_ps3::env::who(var),
         workspace_root: crate::paths::workspace_root(),
         invocation: INVOCATION.to_string(),
     };
@@ -229,8 +230,7 @@ pub(crate) fn exit_code(error: &RunnerPs3Error) -> i32 {
         )
         | RunnerPs3Error::LocalWrite { .. }
         | RunnerPs3Error::HostClock
-        | RunnerPs3Error::Serialize(_)
-        | RunnerPs3Error::Lease(LeaseError::Io { .. }) => exit_codes::FAILED,
+        | RunnerPs3Error::Serialize(_) => exit_codes::FAILED,
         RunnerPs3Error::Refused { .. }
         | RunnerPs3Error::Lease(LeaseError::Held { .. })
         | RunnerPs3Error::Console(ConsoleError::Contradiction { .. })
@@ -241,6 +241,7 @@ pub(crate) fn exit_code(error: &RunnerPs3Error) -> i32 {
             LoadError::Hot { .. } | LoadError::StillHot { .. } | LoadError::Full { .. },
         ) => EXIT_REFUSED,
         RunnerPs3Error::Transport(_)
+        | RunnerPs3Error::Lease(LeaseError::Transport(_))
         | RunnerPs3Error::Console(ConsoleError::PageMissing { .. })
         | RunnerPs3Error::Load(LoadError::Unstated(_)) => EXIT_TRANSPORT,
         RunnerPs3Error::Timeout { .. } => EXIT_TIMEOUT,

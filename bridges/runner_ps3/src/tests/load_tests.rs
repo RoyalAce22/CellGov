@@ -37,6 +37,19 @@ fn live_page(cpu_c: u32, rsx_c: u32, hdd: &str) -> String {
 }
 
 #[test]
+fn a_host_folds_to_a_marker_file_name() {
+    let dir = Path::new("markers");
+    assert_eq!(
+        hot_path(dir, "10.77.0.2"),
+        dir.join("cellgov_runner_ps3_10.77.0.2.hot")
+    );
+    assert_eq!(
+        hot_path(dir, "ps3:80/../x"),
+        dir.join("cellgov_runner_ps3_ps3_80_.._x.hot")
+    );
+}
+
+#[test]
 fn the_load_reads_from_the_fixture_page_and_the_live_shape() {
     assert_eq!(
         parse_load(PAGE),
@@ -99,7 +112,7 @@ fn reading(cpu_c: u32, rsx_c: u32) -> LoadReading {
 #[test]
 fn the_marker_carries_a_hot_reading_until_the_console_reads_below_the_floor() {
     let scratch = cellgov_testkit::scratch::scratch();
-    let marker = lease::hot_path(&scratch, HOST);
+    let marker = hot_path(&scratch, HOST);
     let assess_at = |cpu_c, rsx_c| assess(reading(cpu_c, rsx_c), &LIMITS, &scratch, HOST);
     assert_eq!(assess_at(75, 60).expect("assess"), Thermal::Cool);
     assert!(!marker.exists());
@@ -190,7 +203,7 @@ fn wait_cool_reads_again_until_the_console_is_below_the_floor() {
     });
     assert_eq!(slept, [Duration::from_secs(15); 2]);
     assert_eq!(console.calls, ["FETCH /cpursx.ps3", "FETCH /cpursx.ps3"]);
-    assert!(!lease::hot_path(&scratch, HOST).exists());
+    assert!(!hot_path(&scratch, HOST).exists());
 }
 
 #[test]

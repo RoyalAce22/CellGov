@@ -92,7 +92,8 @@ pub enum RunnerPs3Error {
         /// The command that removes it.
         clear_with: String,
     },
-    /// Another run holds the console, or the lease file failed.
+    /// Another run holds the console, or the console did not take or
+    /// remove the lease.
     #[error("lease: {0}")]
     Lease(#[from] LeaseError),
     /// The console's identity is not established; the message names the
@@ -139,10 +140,7 @@ impl RunnerPs3Error {
             | Self::Manifest(_)
             | Self::Capture(_)
             | Self::Console(ConsoleError::OperatorMissing { .. }) => ExitCode::Usage,
-            Self::LocalWrite { .. }
-            | Self::HostClock
-            | Self::Serialize(_)
-            | Self::Lease(LeaseError::Io { .. }) => ExitCode::Local,
+            Self::LocalWrite { .. } | Self::HostClock | Self::Serialize(_) => ExitCode::Local,
             Self::Refused { .. }
             | Self::Lease(LeaseError::Held { .. })
             | Self::Console(ConsoleError::Contradiction { .. }) => ExitCode::Refused,
@@ -160,7 +158,9 @@ impl RunnerPs3Error {
             Self::Load(
                 LoadError::Hot { .. } | LoadError::StillHot { .. } | LoadError::Full { .. },
             ) => ExitCode::Refused,
-            Self::Transport(_) | Self::Load(LoadError::Unstated(_)) => ExitCode::Transport,
+            Self::Transport(_)
+            | Self::Lease(LeaseError::Transport(_))
+            | Self::Load(LoadError::Unstated(_)) => ExitCode::Transport,
             Self::Timeout { .. } => ExitCode::Timeout,
             Self::Frame(_) => ExitCode::Frame,
             Self::Cleanup { .. } => ExitCode::Cleanup,

@@ -204,7 +204,10 @@ fn a_capture_writes_four_files_that_replay_and_leaves_the_console_restored() {
         PACKAGED_FRAME
     );
     replay(&plan.out, &plan.manifest_path, &profiles()).expect("the capture replays");
-    assert_eq!(console.dirs.iter().collect::<Vec<_>>(), ["/dev_hdd0/game"]);
+    assert_eq!(
+        console.dirs.iter().collect::<Vec<_>>(),
+        ["/dev_hdd0/game", "/dev_hdd0/tmp"]
+    );
     assert!(console.files.is_empty(), "{:?}", console.files);
     let transcript = std::fs::read_to_string(plan.out.join(TRANSCRIPT_FILE)).expect("transcript");
     assert!(transcript.contains("= console restored"), "{transcript}");
@@ -238,7 +241,10 @@ fn a_run_that_never_writes_its_result_times_out_cleans_up_and_writes_nothing() {
     let err = run_capture(&mut console, &plan).expect_err("no result");
     assert_eq!(err.exit_code(), crate::ExitCode::Timeout);
     assert!(!plan.out.exists());
-    assert_eq!(console.dirs.iter().collect::<Vec<_>>(), ["/dev_hdd0/game"]);
+    assert_eq!(
+        console.dirs.iter().collect::<Vec<_>>(),
+        ["/dev_hdd0/game", "/dev_hdd0/tmp"]
+    );
     assert!(console.files.is_empty());
 }
 

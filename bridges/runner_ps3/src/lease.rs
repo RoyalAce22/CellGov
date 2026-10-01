@@ -1,166 +1,159 @@
-//! One runner per console at a time: a lease file that names the
-//! holder, refused with the command that releases it, and released on
-//! drop.
+//! One runner per console at a time: a lease held on the console
+//! itself, so every runner that reaches the console sees it, whatever
+//! machine, account or host spelling it runs under.
 //!
-//! The caller names the directory the lease lives in, so every runner
-//! on one machine must pass the same one.
+//! The lease is the directory [`LEASE_DIR`]. Taking it is FTP `MKD`,
+//! which webMAN refuses with `550` for a directory that exists, so
+//! creation is the atomic step; the [`HOLDER_FILE`] stored into it then
+//! names who holds the console. A refusal reads that file and names the
+//! command that clears it. Releasing the lease removes the file and the
+//! directory; `unlock` does the same whoever holds it.
+//!
+//! The runner cannot reach the console from a destructor, so a run that
+//! panics leaves its lease behind, and `unlock` clears it. The runner
+//! ignores the lease files earlier runners kept in the host's temp
+//! directory.
 
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use crate::run::{ConsoleOps, RESULT_ROOT};
+use crate::transcript::Transcript;
+use crate::transport::TransportError;
+
+/// The lease directory's name under [`RESULT_ROOT`].
+pub const LEASE_NAME: &str = "cellgov_lease";
+
+/// The lease directory on the console.
+pub const LEASE_DIR: &str = "/dev_hdd0/tmp/cellgov_lease";
+
+/// The file in [`LEASE_DIR`] that names the holder.
+pub const HOLDER_FILE: &str = "/dev_hdd0/tmp/cellgov_lease/holder";
+
+/// The FTP reply webMAN gives `MKD` for a directory that exists.
+const EXISTS: u16 = 550;
 
 /// A held lease on one console.
 #[derive(Debug)]
+#[must_use = "a lease is released with `release`, or it holds the console until `unlock`"]
 pub struct Lease {
-    path: PathBuf,
-    released: bool,
+    _held: (),
 }
 
 /// Why a lease was not taken or not released.
 #[derive(Debug, thiserror::Error)]
 pub enum LeaseError {
     /// Another runner, or a run that did not release, holds the console.
-    #[error("{path} holds the console for {holder}; clear it with `{unlock_with}`")]
+    #[error("{LEASE_DIR} on {host} holds the console for {holder}; clear it with `{unlock_with}`")]
     Held {
-        /// The lease file.
-        path: PathBuf,
-        /// The host the lease covers.
+        /// The console.
         host: String,
-        /// What the lease file names as its holder.
+        /// What the holder file names, or why there is none.
         holder: String,
         /// The `unlock` command that clears it, through the front end
         /// that asked for the lease.
         unlock_with: String,
     },
-    /// The runner cannot create, read or remove the lease file.
-    #[error("lease file {path}: {source}")]
-    Io {
-        /// The lease file.
-        path: PathBuf,
-        /// The I/O error.
-        #[source]
-        source: std::io::Error,
-    },
+    /// The console did not take, show or remove the lease.
+    #[error("{LEASE_DIR}: {0}")]
+    Transport(#[from] TransportError),
 }
 
-/// The directory every runner on this machine keeps its leases in,
-/// whichever front end runs it: the machine's temp directory, with no
-/// process id in the name.
-pub fn default_dir() -> PathBuf {
-    std::env::temp_dir()
-}
-
-/// The lease file for `host` under `dir`. Every character of the host
-/// outside ASCII alphanumerics and `.` folds to `_`.
-pub fn lease_path(dir: &Path, host: &str) -> PathBuf {
-    host_file(dir, host, "lease")
-}
-
-/// The marker that says `host` was last read hot, beside its lease: the
-/// interlock's memory between runs.
-pub fn hot_path(dir: &Path, host: &str) -> PathBuf {
-    host_file(dir, host, "hot")
-}
-
-fn host_file(dir: &Path, host: &str, extension: &str) -> PathBuf {
-    let safe: String = host
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    dir.join(format!("cellgov_runner_ps3_{safe}.{extension}"))
+/// What a holder file says: who runs the runner, on which machine,
+/// under which process, for which microtest, through which front end.
+pub fn holder_text(who: &str, test: &str, invocation: &str) -> String {
+    format!(
+        "{who}, pid {}, test {test}, via {invocation}\n",
+        std::process::id()
+    )
 }
 
 impl Lease {
-    /// Take the lease on `host` for `holder` (the microtest name).
-    /// `invocation` is the front end's command, such as `runner_ps3`,
-    /// which a refusal's `unlock` remedy starts with.
+    /// Take the lease on `console` (at `host`) for `holder`, the text a
+    /// refusal shows another runner. `invocation` is the front end's
+    /// command, such as `runner_ps3`, which a refusal's `unlock` remedy
+    /// starts with.
     ///
     /// # Errors
     ///
-    /// [`LeaseError::Held`] when the file exists, naming its holder, and
-    /// [`LeaseError::Io`] for any other failure.
-    pub fn acquire(
-        dir: &Path,
+    /// [`LeaseError::Held`] when the directory exists, naming its holder,
+    /// and [`LeaseError::Transport`] for any other failure. When the
+    /// holder file does not store, the runner removes the directory again
+    /// before it reports the failure.
+    pub fn acquire<C: ConsoleOps>(
+        console: &mut C,
         host: &str,
         holder: &str,
         invocation: &str,
+        transcript: &mut Transcript,
     ) -> Result<Self, LeaseError> {
-        let path = lease_path(dir, host);
-        let io = |source| LeaseError::Io {
-            path: path.clone(),
-            source,
-        };
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
-                let lease = Self {
-                    path: path.clone(),
-                    released: false,
+        match console.make_dir(LEASE_DIR, transcript) {
+            Ok(()) => {}
+            Err(TransportError::UnexpectedReply { code: EXISTS, .. }) => {
+                let holder = match console.fetch(HOLDER_FILE, transcript)? {
+                    Some(bytes) => String::from_utf8_lossy(&bytes).trim().to_string(),
+                    None => format!(
+                        "an unnamed holder: {HOLDER_FILE} is absent, so a runner is taking \
+                         the lease or one stopped before it named itself"
+                    ),
                 };
-                writeln!(file, "pid={}\nholder={holder}", std::process::id()).map_err(io)?;
-                Ok(lease)
-            }
-            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-                let text = std::fs::read_to_string(&path).map_err(io)?;
-                Err(LeaseError::Held {
-                    path: path.clone(),
+                return Err(LeaseError::Held {
                     host: host.to_string(),
-                    holder: text.split_whitespace().collect::<Vec<_>>().join(" "),
+                    holder,
                     unlock_with: format!("{invocation} unlock --host {host}"),
-                })
+                });
             }
-            Err(source) => Err(io(source)),
+            Err(other) => return Err(other.into()),
         }
+        if let Err(stored) = console.store(HOLDER_FILE, holder.as_bytes(), transcript) {
+            if let Err(removed) = console.remove_dir(LEASE_DIR, transcript) {
+                transcript.decision(format!("after the failed store, {removed}"));
+            }
+            return Err(stored.into());
+        }
+        Ok(Self { _held: () })
     }
 
-    /// The lease file.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// Remove the lease file.
+    /// Remove the holder file and the lease directory.
     ///
     /// # Errors
     ///
-    /// [`LeaseError::Io`] when the runner cannot remove the file.
-    pub fn release(mut self) -> Result<(), LeaseError> {
-        self.released = true;
-        std::fs::remove_file(&self.path).map_err(|source| LeaseError::Io {
-            path: self.path.clone(),
-            source,
-        })
+    /// [`LeaseError::Transport`] when the console does not remove them;
+    /// `unlock` clears what remains.
+    pub fn release<C: ConsoleOps>(
+        self,
+        console: &mut C,
+        transcript: &mut Transcript,
+    ) -> Result<(), LeaseError> {
+        console.delete(HOLDER_FILE, transcript)?;
+        console.remove_dir(LEASE_DIR, transcript)?;
+        Ok(())
     }
 }
 
-impl Drop for Lease {
-    /// Remove the file on an early return or a panic. [`Lease::release`]
-    /// is the path that reports a failure; a drop cannot, and `unlock`
-    /// clears what one leaves behind.
-    fn drop(&mut self) {
-        if !self.released {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-}
-
-/// Remove the lease on `host` whoever holds it. Returns whether a lease
-/// was there.
+/// Remove the lease on `console` whoever holds it: every file in the
+/// lease directory, then the directory. Returns whether a lease was
+/// there.
 ///
 /// # Errors
 ///
-/// [`LeaseError::Io`] for a failure other than an absent file.
-pub fn unlock(dir: &Path, host: &str) -> Result<bool, LeaseError> {
-    let path = lease_path(dir, host);
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(true),
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(LeaseError::Io { path, source }),
+/// [`LeaseError::Transport`] when the console does not list or remove
+/// it.
+pub fn unlock<C: ConsoleOps>(
+    console: &mut C,
+    transcript: &mut Transcript,
+) -> Result<bool, LeaseError> {
+    let held = console
+        .list(RESULT_ROOT, transcript)?
+        .iter()
+        .any(|name| name == LEASE_NAME);
+    if !held {
+        return Ok(false);
     }
+    for name in console.list(LEASE_DIR, transcript)? {
+        if name != "." && name != ".." {
+            console.delete(&format!("{LEASE_DIR}/{name}"), transcript)?;
+        }
+    }
+    console.remove_dir(LEASE_DIR, transcript)?;
+    Ok(true)
 }
 
 #[cfg(test)]

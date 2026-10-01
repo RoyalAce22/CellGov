@@ -1,8 +1,8 @@
 //! `runner_ps3`: the standalone front end to the PS3 runner.
 //!
 //! The verbs live in the library's `verbs` module. This binary reads
-//! the command line and the two variables, names the lease directory,
-//! supplies the real console, sleep and clock, and prints the report. A
+//! the command line and the two variables, names the hot-marker
+//! directory and the lease holder, supplies the real console, sleep and clock, and prints the report. A
 //! failure prints what the verb produced, then its message, and exits
 //! with its class's code.
 
@@ -18,7 +18,7 @@ use std::process::ExitCode as ProcessExit;
 
 use runner_ps3::cli;
 use runner_ps3::env;
-use runner_ps3::lease;
+use runner_ps3::load;
 use runner_ps3::provenance;
 use runner_ps3::run::WebmanConsole;
 use runner_ps3::transport::Endpoint;
@@ -39,7 +39,8 @@ fn main() -> ProcessExit {
             let context = Context {
                 host_env: var(env::HOST),
                 profile_env: var(env::PROFILE),
-                lease_dir: lease::default_dir(),
+                marker_dir: load::default_marker_dir(),
+                who: env::who(var),
                 workspace_root: Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."),
                 invocation: INVOCATION.to_string(),
             };

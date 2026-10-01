@@ -263,13 +263,6 @@ fn each_runner_failure_maps_to_its_status() {
             1,
         ),
         (
-            RunnerPs3Error::from(LeaseError::Io {
-                path: PathBuf::from("lease"),
-                source: io(),
-            }),
-            1,
-        ),
-        (
             RunnerPs3Error::Refused {
                 reason: "a result file remains".to_string(),
                 clear_with: "cellgov ps3 cleanup".to_string(),
@@ -278,7 +271,6 @@ fn each_runner_failure_maps_to_its_status() {
         ),
         (
             RunnerPs3Error::from(LeaseError::Held {
-                path: PathBuf::from("lease"),
                 host: "10.77.0.2".to_string(),
                 holder: "pid=1 holder=x".to_string(),
                 unlock_with: "cellgov ps3 unlock --host 10.77.0.2".to_string(),
@@ -321,6 +313,12 @@ fn each_runner_failure_maps_to_its_status() {
         ),
         (
             RunnerPs3Error::from(LoadError::Unstated("CPU temperature")),
+            51,
+        ),
+        (
+            RunnerPs3Error::from(LeaseError::Transport(
+                runner_ps3::transport::TransportError::ReplyTruncated,
+            )),
             51,
         ),
         (

@@ -64,7 +64,6 @@ fn each_error_maps_to_the_class_its_message_names() {
         ),
         (
             RunnerPs3Error::from(LeaseError::Held {
-                path: PathBuf::from("cellgov_runner_ps3_10.77.0.2.lease"),
                 host: "10.77.0.2".to_string(),
                 holder: "pid=1 holder=x".to_string(),
                 unlock_with: "runner_ps3 unlock --host 10.77.0.2".to_string(),
@@ -72,11 +71,10 @@ fn each_error_maps_to_the_class_its_message_names() {
             ExitCode::Refused,
         ),
         (
-            RunnerPs3Error::from(LeaseError::Io {
-                path: PathBuf::from("cellgov_runner_ps3_10.77.0.2.lease"),
-                source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
-            }),
-            ExitCode::Local,
+            RunnerPs3Error::from(LeaseError::Transport(
+                crate::transport::TransportError::ReplyTruncated,
+            )),
+            ExitCode::Transport,
         ),
         (
             RunnerPs3Error::from(ConsoleError::OperatorMissing {
