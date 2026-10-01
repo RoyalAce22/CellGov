@@ -45,7 +45,14 @@ pub(super) fn install_unit_factories(rt: &mut Runtime, debug_opts: BootDebugOpti
 ///
 /// The image loads into local store, and the unit starts at the entry
 /// PC with its stack pointer in r1. Cell BE convention: args 0..3 map
-/// to r3..r6 (arg0 -> r3, etc.).
+/// to r3..r6 (arg0 -> r3, etc.), each as one 64-bit value in the
+/// preferred slot: word 0 holds its high half, word 1 its low half, and
+/// words 2 and 3 are zero. A SPURS kernel reads the whole doubleword when
+/// it adds an offset across both words of its instance address, so it
+/// needs the argument there and not its low word twice. No public
+/// document in the set states the layout; it is unestablished, and the
+/// open toolchain's SPU programs declare their arguments as 64-bit
+/// values.
 ///
 /// # Errors
 ///
@@ -79,10 +86,11 @@ pub fn spu_unit(
     }
     unit.state_mut().pc = init.entry_pc;
     unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
-    unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
-    unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
-    unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
-    unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
+    for (register, arg) in (3u8..).zip(init.args) {
+        let mut quad = [0u8; 16];
+        quad[..8].copy_from_slice(&arg.to_be_bytes());
+        unit.state_mut().set_reg(usize::from(register), quad);
+    }
     Ok(Box::new(unit))
 }
 
