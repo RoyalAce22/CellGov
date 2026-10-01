@@ -43,14 +43,28 @@ recipe.
 
 ## Observations
 
-**Each test the reference runner can run has interpreter and LLVM
-scenario observations** under `tests/scenario_observations/`. The
-observations are settled when both decoders agree. A test the runner
-cannot run is checked against the values its documented layout fixes.
+**Three runners answer a microtest: CellGov, RPCS3 and a retail
+console.** Where the console has answered, its capture is the
+reference; the emulator observations are peers.
+
+- **Hardware capture.** A console's answer, committed under
+  `tests/micro/<name>/ps3/<profile>/`. The reference is the capture
+  under the reference profile named in
+  `tests/micro/console_profiles.toml`; a capture under any other
+  profile is a peer.
+- **Scenario observations.** RPCS3's interpreter and LLVM answers,
+  under `tests/scenario_observations/`. They are settled when both
+  decoders agree, and an emulator answer that differs from the
+  console's is classified, never copied into CellGov.
+
+A test no runner can run is checked against the values its documented
+layout fixes.
 
 CellGov checks each test in two steps:
 
 1. Run it through `observe_with_determinism_check` (two runs must
    produce identical results).
-2. Compare the result against both observations via
-   `compare_multi --mode memory`.
+2. Compare the result with its reference in memory: the console
+   capture, with the manifest's `[ps3] volatile` bytes blanked on both
+   sides, or, for a test with no capture yet, both emulator
+   observations via `compare_multi`.

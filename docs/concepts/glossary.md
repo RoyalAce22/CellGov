@@ -343,6 +343,13 @@ per-unit local register plus the committed `ReservationTable`, on
 tool; CellGov has no build or runtime dependency on RPCS3.
 [comparison.md](../architecture/comparison.md#rpcs3-bridge)
 
+**Runner.** Anything that produces an `Observation`, named by the
+runner string in its metadata: `cellgov` and `cellgov-boot` for
+CellGov, `rpcs3-interpreter` and `rpcs3-llvm` for the RPCS3 bridge,
+`ps3-cex` for the PS3 runner. Observations from different runners are
+compared field by field.
+[comparison.md](../architecture/comparison.md)
+
 **RSX mirror / consume.** Two manifest flags. `[rsx] mirror = true`
 maps RSX local memory read-write so put-pointer writes land instead
 of tripping `FirstRsxWrite`; `[rsx] consume = true` additionally
@@ -360,7 +367,7 @@ repeated or malformed line is refused.
 **Scenario observation.** RPCS3's answer for one synthetic scenario
 under `tests/scenario_observations/<scenario>/`, recorded once per
 RPCS3 decoder so the two can be checked against each other.
-[README.md](README.md#two-committed-reference-trees)
+[README.md](README.md#three-committed-reference-trees)
 
 **Schedule exploration.** Replaying a run under alternate legal
 schedules within bounds and classifying the result as

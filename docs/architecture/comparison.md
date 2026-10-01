@@ -1,8 +1,8 @@
 # Comparison harness
 
-`cellgov_compare` reduces a run of any runner (CellGov, RPCS3, future
-recompiled output) to a normalized `Observation`, then diffs two
-observations field by field. An `Observation` contains:
+`cellgov_compare` reduces a run of any runner (CellGov, RPCS3, a retail
+console, future recompiled output) to a normalized `Observation`, then
+diffs two observations field by field. An `Observation` contains:
 
 - outcome
 - named memory regions
@@ -19,8 +19,11 @@ flowchart LR
   r3["patched RPCS3, oracle-mode config"] -->|"CELLGOV_DUMP_PATH / CELLGOV_DUMP_REGIONS"| dump["binary dump at _sys_process_exit"]
   dump --> br["rpcs3_to_observation --config-hash"]
   br --> orr["Observation JSON (RPCS3)"]
+  ps3["retail PS3, CFW + webMAN, build/ps3/EBOOT.BIN"] -->|"result file in /dev_hdd0/tmp"| rp["runner_ps3 capture"]
+  rp --> ops["Observation JSON (PS3, ps3/PROFILE/)"]
   oc --> cmp["diff observations (field by field) / compare --against-baseline (strict, memory, events, prefix)"]
   orr --> cmp
+  ops --> cmp
   cmp --> out["MATCH, or the first differing field"]
 ```
 
@@ -257,6 +260,29 @@ Cargo or runtime dependency on RPCS3, and the bridge is a
 verification-time tool. See a cell's `REPRODUCTION.md` under
 `tests/fixtures/<content-id>/cross_runner/fw-<ver>/<game-ver>/` for the
 build commands and the build-config workarounds.
+
+## PS3 runner
+
+`bridges/runner_ps3` is the third runner, and the one the other two
+are held to where it has answered. It deploys a microtest's
+`build/ps3/` package to a retail console over webMAN's FTP server,
+starts it through webMAN's HTTP server, fetches the `CGOV` frame the
+test writes to `/dev_hdd0/tmp`, and converts the frame into an
+`Observation` holding the regions the microtest's manifest names. The
+result is committed beside the microtest as a **hardware capture**,
+under `tests/micro/<name>/ps3/<profile>/`, with the untouched frame,
+its provenance and a redacted transcript; its runner string is
+`ps3-cex`.
+
+Every capture names a **console profile**: a hardware class, never one
+machine, checked against the console's status page before the runner
+changes anything. Captures under different profiles are not assumed
+comparable, and only the reference profile's capture is the reference.
+[README.md](../../README.md#hardware-evidence) states the claim and the
+profiles; the runner's
+[README](../../bridges/runner_ps3/README.md) covers the console setup,
+the verbs and the re-capture rules. Like the RPCS3 bridge, the runner
+is a verification-time tool: no runtime crate links it.
 
 ## Oracle-mode config contract
 

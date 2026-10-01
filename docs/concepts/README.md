@@ -173,10 +173,15 @@ the starting point for investigation -- not a conclusion.
 between comparable systems is a candidate for a bug-exposing test,
 not yet a verdict.
 
-### Two committed reference trees
+### Three committed reference trees
 
-Comparison needs something to compare against, and the two trees
+Comparison needs something to compare against, and the three trees
 that hold it answer different questions.
+
+A **hardware capture** is a retail console's answer for one
+microtest, under `tests/micro/<name>/ps3/<profile>/` beside the
+microtest itself. Where one exists under the reference profile, it is
+the reference the other two runners are held to.
 
 A **scenario observation** is RPCS3's answer for one synthetic
 scenario, under `tests/scenario_observations/<scenario>/`. Each

@@ -44,7 +44,7 @@ flowchart LR
 | [rsx.md](rsx.md)                                   | RSX CPU-side completion (FIFO cursor, method decoder, flip state) and the LV2 `sys_rsx` syscall surface.                                                |
 | [boot.md](boot.md)                                 | Firmware-loaded userspace surface, the firmware-set boot pipeline, and the common boot sequence.                                                     |
 | [schedule_exploration.md](schedule_exploration.md) | Bounded alternate-schedule enumeration in `cellgov_explore`.                                                                                            |
-| [comparison.md](comparison.md)                     | Observation schema, per-step divergence localization, the RPCS3 bridge, and the oracle-mode config contract.                                            |
+| [comparison.md](comparison.md)                     | Observation schema, per-step divergence localization, the RPCS3 bridge, the PS3 runner and its hardware captures, and the oracle-mode config contract. |
 | [title_harness.md](title_harness.md)               | Title manifests, anchors and witnesses, EBOOT resolution, the diagnostic CLI surface.                                                                   |
 | [microtests.md](microtests.md)                     | The PSL1GHT microtest suite.                                                                                                                           |
 

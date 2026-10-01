@@ -19,9 +19,14 @@ tests/scenario_observations/<scenario>/rpcs3_interpreter.json
 tests/scenario_observations/<scenario>/rpcs3_llvm.json
 ```
 
-Eight scenarios: `atomic_reservation`, `barrier_wakeup`,
-`dma_completion`, `ls_to_shared`, `mailbox_roundtrip`,
-`spu_dma_list`, `spu_fixed_value`, `spu_float_edges`.
+One directory per scenario RPCS3 has answered; the directory listing
+is the set.
+
+Hardware captures do not live here. A console's answer sits beside its
+microtest, under `tests/micro/<name>/ps3/<profile>/`, and where one
+exists under the reference profile it is the reference: these
+observations are then peers, and a difference between them and the
+capture is classified rather than copied.
 
 Each name matches a directory under `tests/micro/`. That directory's
 `manifest.toml` lists the `[observe] memory_regions` a dump contains.
