@@ -27,7 +27,7 @@ A representative selection:
 | ppu_event_flag_wakeall | sys_event_flag bitmask AND/OR wake fan-out.                    |
 | ppu_lwmutex_counter    | lwmutex contention on a shared counter.                        |
 | rsx_label_write_poll   | RSX label byte transition observed via PPU spin-poll.          |
-| rsx_semaphore_post     | NV4097 semaphore release polled by PPU.                        |
+| rsx_semaphore_post     | NV4097_GET_REPORT record polled by PPU through libgcm.         |
 | process_spawn_wait     | Parent spawns an SCE-wrapped child into its own address space and waits while the child runs a PPU thread on a stack there. |
 
 See `tests/micro/` for the full set.

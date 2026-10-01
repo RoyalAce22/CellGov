@@ -1,14 +1,11 @@
 [test]
 name = "rsx_label_write_poll"
 
-# Structural microtest. A PPU thread writes an
-# NV406E_SEMAPHORE_OFFSET + RELEASE pair to a FIFO buffer and
-# advances the RSX put pointer. CellGov's FIFO advance pass
-# parses the pair and emits an RsxLabelWrite effect; the commit
-# pipeline lands a 4-byte big-endian write at the label address;
-# the PPU's poll loop observes the written value and reports
-# success. Exercises the full label-write path end-to-end, with
-# rsx_mirror-mode writeback.
+# Structural microtest. The PPU brings up an RSX context through
+# libgcm (rsxInit over a 1 MiB-page host area), writes an
+# NV406E_SEMAPHORE_OFFSET + RELEASE pair for a user label into the
+# command buffer, flushes it, and polls the label for the released
+# value. Exercises the label-write path the way a game drives it.
 
 [rpcs3]
 binary = "build/rsx_label_write_poll.elf"
@@ -35,9 +32,10 @@ outcome = "completed"
 #          -v "$(pwd)/tests/micro/common:/common" \
 #          -e COMMON=/common ps3dev bash /src/build.sh
 #
-#   2. Run:
-#        cargo run --release -p cellgov_cli -- boot run \
-#          --title-manifest \
+#   2. Run (the program imports libgcm, so the boot needs the firmware
+#      and a build that decrypts its modules):
+#        cargo run --release --features decrypt -p cellgov_cli -- \
+#          boot run --fw 4.93 --title-manifest \
 # tests/micro/rsx_label_write_poll/manifest.toml --max-steps 1000000
 #
 # Expected TTY payload (CGOV magic + 16 bytes):
@@ -61,21 +59,12 @@ path = "build"
 kind = "process-exit"
 
 [cellgov.rsx]
-# Title needs the RSX region writable and the runtime's
-# writeback mirror enabled. See TitleManifest::rsx_mirror doc.
+# The RSX region writable, the runtime's writeback mirror on, and the
+# FIFO consumer draining what libgcm puts in the command buffer.
 mirror = true
 consume = true
-# The guest seeds cursor.get by storing to the MMIO GET slot, and
-# only the FIFO consumer reconciles cursor.get from MMIO
-# (mirror_rsx_control_register_writes mirrors PUT and REF, not GET).
-# Without this the drain walks from get = 0 and never reaches the
-# commands this test wrote.
 
 [ps3]
-# Not runnable on a retail console as written; the same reason is the
-# test's row in tests/micro/ps3_gaps.tsv.
-portable = false
-not_portable_reason = "writes CellGov's writeback-mirror addresses and passes a fabricated RSX context id"
 # Bytes the design table leaves free (Any): a hardware run may vary them.
 volatile = [
   { region = "result", offset = 12, size = 4, reason = "the poll count depends on when the label lands" },

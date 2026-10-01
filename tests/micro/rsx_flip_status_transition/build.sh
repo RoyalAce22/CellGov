@@ -36,6 +36,10 @@ echo "=== Assembling custom CRT0 ==="
 ${PPU_PREFIX}-gcc -c -o "$OUT/crt0.o" "$COMMON/crt0.S"
 
 echo "=== Linking PPU program ==="
+# The program imports libgcm from the firmware, so it also links
+# lv2-sprx.o, which carries the PRX parameter record that names the
+# import stubs, and the stubs are fixed up with sprxlinker, as
+# package_ps3.sh does for the console.
 ${PPU_PREFIX}-gcc \
     -nostartfiles \
     -I${PSL1GHT}/ppu/include \
@@ -44,16 +48,19 @@ ${PPU_PREFIX}-gcc \
     -O2 -Wall \
     -o "$OUT/rsx_flip_status_transition.elf" \
     "$OUT/crt0.o" \
+    "$(${PPU_PREFIX}-gcc -print-file-name=lv2-sprx.o)" \
     /src/ppu/main.c \
-    -llv2 -lsysmodule -lrt
+    -lrsx -lgcm_sys -llv2 -lsysmodule -lrt
 
 echo "=== Patching TOC and rldicr ==="
 python3 "$COMMON/patch_toc.py" \
     "$OUT/rsx_flip_status_transition.elf" \
     "${PPU_PREFIX}-readelf" \
     "${PPU_PREFIX}-nm"
+sprxlinker "$OUT/rsx_flip_status_transition.elf"
 
 echo "=== Build complete ==="
 ls -la "$OUT/rsx_flip_status_transition.elf"
 
+export CGOV_PS3_LIBS="-lrsx -lgcm_sys"
 bash "$COMMON/package_ps3.sh" rsx_flip_status_transition /src/ppu/main.c

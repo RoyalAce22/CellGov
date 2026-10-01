@@ -45,6 +45,45 @@ fn memory_allocate_returns_aligned_sequential_addresses() {
 }
 
 #[test]
+fn memory_allocate_aligns_to_the_page_size_its_flags_name() {
+    let mut host = Lv2Host::new();
+    host.set_mem_alloc_base(0x008A_0000);
+    let rt = FakeRuntime::new(0x10000);
+    let mut alloc = |flags: u64| match host.dispatch(
+        Lv2Request::MemoryAllocate {
+            size: 0x10000,
+            flags,
+            alloc_addr_ptr: 0x100,
+        },
+        UnitId::new(0),
+        &rt,
+    ) {
+        Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+    assert_eq!(
+        alloc(0x200),
+        0x008A_0000,
+        "64 KiB pages keep 64 KiB alignment"
+    );
+    assert_eq!(
+        alloc(0x400),
+        0x0090_0000,
+        "1 MiB pages land on a 1 MiB boundary"
+    );
+    assert_eq!(
+        alloc(0x200),
+        0x0091_0000,
+        "the cursor resumes after the 1 MiB block"
+    );
+    assert_eq!(
+        alloc(0),
+        0x00A0_0000,
+        "a word naming no page size takes 1 MiB"
+    );
+}
+
+#[test]
 fn set_mem_alloc_base_overrides_first_allocation_address() {
     let mut host = Lv2Host::new();
     host.set_mem_alloc_base(0x008A_0000);

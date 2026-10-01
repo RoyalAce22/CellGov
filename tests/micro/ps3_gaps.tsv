@@ -1,6 +1,3 @@
 name	class	reason	issue
 process_spawn_wait	not-portable	hangs a retail 4.93 CEX console seconds after the start, before any result is written	1538
-rsx_flip_status_transition	not-portable	writes CellGov's writeback-mirror addresses and passes a fabricated RSX context id	1540
-rsx_label_write_poll	not-portable	writes CellGov's writeback-mirror addresses and passes a fabricated RSX context id	1540
-rsx_semaphore_post	not-portable	writes CellGov's writeback-mirror addresses and passes a fabricated RSX context id	1540
 spu_mailbox_write	no-frame	a raw SPU image built by cellgov_mkelf; its result stays in local store and no PPU program emits a CGOV frame	-

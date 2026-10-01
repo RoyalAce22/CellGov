@@ -8,18 +8,22 @@ use crate::host::Lv2Host;
 use cellgov_time::GuestTicks;
 
 impl Lv2Host {
-    /// `sys_memory_allocate` (348): bump-allocates 64 KiB-aligned guest
-    /// memory from the user region above the loaded image and writes
-    /// the base to `*alloc_addr_ptr`.
+    /// `sys_memory_allocate` (348): bump-allocates guest memory from the
+    /// user region above the loaded image, aligned to the page size
+    /// `flags` names, and writes the base to `*alloc_addr_ptr`.
     ///
-    /// The bump allocator is CellGov's own. Its budget is
+    /// The page size is the granule of `flags`: 64 KiB for
+    /// `SYS_MEMORY_PAGE_SIZE_64K`, 1 MiB for `SYS_MEMORY_PAGE_SIZE_1M`
+    /// or a word naming none. The reference console returns a 1 MiB
+    /// allocation on a 1 MiB boundary, and libgcm's init refuses an IO
+    /// area that is not on one. The bump allocator itself is CellGov's
+    /// own: the base differs from the console's. Its budget is
     /// `USER_MEMORY_TOTAL`, the `total` that
     /// `sys_memory_get_user_memory_size` reports, so an allocation
     /// succeeds exactly when `available` had room for it.
     /// `sys_memory_free` reclaims nothing, so consumption is monotonic.
     /// The arm takes `size` as given: a zero size succeeds, and a size
-    /// that is no page multiple stays unrounded. The arm does not read
-    /// `flags`.
+    /// that is no page multiple stays unrounded.
     ///
     /// # Errors
     ///
@@ -31,19 +35,20 @@ impl Lv2Host {
     pub(super) fn dispatch_memory_allocate(
         &mut self,
         size: u64,
+        flags: u64,
         alloc_addr_ptr: u32,
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        const ALIGN: u32 = 0x1_0000;
+        let align = cellgov_ps3_abi::lv2::memory::page_size::granule_from_flags(flags);
         let Ok(size) = u32::try_from(size) else {
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         let Some(aligned_ptr) = self
             .state
             .mem_alloc_ptr
-            .checked_add(ALIGN - 1)
-            .map(|p| p & !(ALIGN - 1))
+            .checked_add(align - 1)
+            .map(|p| p & !(align - 1))
         else {
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };

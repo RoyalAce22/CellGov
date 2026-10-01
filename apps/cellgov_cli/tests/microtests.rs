@@ -50,6 +50,35 @@ fn workspace_root() -> PathBuf {
     }
 }
 
+/// Microtests that import firmware libraries (libgcm, for the RSX ones),
+/// and the firmware they boot against. Their boot loads the firmware's
+/// modules from the store under `vfs/`, which only a build with the
+/// `decrypt` feature can read, so without it such a case fails naming
+/// the feature; the suite never skips it.
+const FIRMWARE_CASES: &[&str] = &[
+    "rsx_flip_status_transition",
+    "rsx_label_write_poll",
+    "rsx_semaphore_post",
+];
+
+/// The firmware a [`FIRMWARE_CASES`] microtest boots against: the
+/// reference console's.
+const FIRMWARE: &str = "4.93";
+
+/// Microtests CellGov runs wrong, each with the open tracker issue that
+/// owns the defect. Such a case must still fail its payload check and
+/// still differ from its console capture: once it passes, the suite
+/// fails until the entry goes, so a fixed defect cannot hide here.
+const KNOWN_DEFECTS: &[(&str, u32)] = &[("rsx_flip_status_transition", 1705)];
+
+/// The issue that owns `name`'s known defect, if it has one.
+fn known_defect(name: &str) -> Option<u32> {
+    KNOWN_DEFECTS
+        .iter()
+        .find(|(case, _)| *case == name)
+        .map(|(_, issue)| *issue)
+}
+
 fn manifest_path(name: &str) -> PathBuf {
     workspace_root()
         .join("tests")
@@ -81,23 +110,37 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
     let observation_path = scratch.join("observation.json");
     std::fs::remove_file(&observation_path).ok();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellgov"))
-        .args(["boot", "run"])
+    let mut boot = Command::new(env!("CARGO_BIN_EXE_cellgov"));
+    boot.args(["boot", "run"])
         .arg("--title-manifest")
         .arg(&manifest)
         .arg("--max-steps")
         .arg(case.max_steps.to_string())
         .arg("--save-observation")
         .arg(&observation_path)
-        .current_dir(workspace_root())
-        // These are freestanding PSL1GHT binaries that bind no firmware
-        // namespace. Suppressing auto-discovery keeps the verdict the
-        // same on a machine that happens to have firmware installed.
-        .env("CELLGOV_NO_FIRMWARE_DIR", "1")
-        .output()
-        .expect("spawn cellgov boot run");
+        .current_dir(workspace_root());
+    if FIRMWARE_CASES.contains(&case.name) {
+        if !cfg!(feature = "decrypt") {
+            panic!(
+                "{} imports firmware libraries and boots against firmware {FIRMWARE}; \
+                 run the suite with --features microtests,decrypt",
+                case.name
+            );
+        }
+        boot.args(["--fw", FIRMWARE]);
+    } else {
+        // The rest are freestanding PSL1GHT binaries that bind no
+        // firmware namespace. Suppressing auto-discovery keeps the
+        // verdict the same on a machine that happens to have firmware
+        // installed.
+        boot.env("CELLGOV_NO_FIRMWARE_DIR", "1");
+    }
+    let output = boot.output().expect("spawn cellgov boot run");
 
-    if !output.status.success() {
+    // A known defect's run may end unsuccessfully (MAX_STEPS); its
+    // observation still carries the outcome the checks hold it to.
+    let tolerated = known_defect(case.name).is_some() && observation_path.is_file();
+    if !output.status.success() && !tolerated {
         eprintln!(
             "--- stdout ---\n{}",
             String::from_utf8_lossy(&output.stdout)

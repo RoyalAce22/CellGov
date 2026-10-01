@@ -37,7 +37,10 @@ ${PPU_PREFIX}-gcc -c -o "$OUT/crt0.o" "$COMMON/crt0.S"
 
 echo "=== Linking PPU program ==="
 # -nostartfiles: skip PSL1GHT's CRT0 (uses rldicr, mishandled by
-# RPCS3) and link our custom CRT0 from common/.
+# RPCS3) and link our custom CRT0 from common/. The program imports
+# libgcm from the firmware, so it also links lv2-sprx.o, which carries
+# the PRX parameter record that names the import stubs, and the stubs
+# are fixed up with sprxlinker, as package_ps3.sh does for the console.
 ${PPU_PREFIX}-gcc \
     -nostartfiles \
     -I${PSL1GHT}/ppu/include \
@@ -46,16 +49,19 @@ ${PPU_PREFIX}-gcc \
     -O2 -Wall \
     -o "$OUT/rsx_label_write_poll.elf" \
     "$OUT/crt0.o" \
+    "$(${PPU_PREFIX}-gcc -print-file-name=lv2-sprx.o)" \
     /src/ppu/main.c \
-    -llv2 -lsysmodule -lrt
+    -lrsx -lgcm_sys -llv2 -lsysmodule -lrt
 
 echo "=== Patching TOC and rldicr ==="
 python3 "$COMMON/patch_toc.py" \
     "$OUT/rsx_label_write_poll.elf" \
     "${PPU_PREFIX}-readelf" \
     "${PPU_PREFIX}-nm"
+sprxlinker "$OUT/rsx_label_write_poll.elf"
 
 echo "=== Build complete ==="
 ls -la "$OUT/rsx_label_write_poll.elf"
 
+export CGOV_PS3_LIBS="-lrsx -lgcm_sys"
 bash "$COMMON/package_ps3.sh" rsx_label_write_poll /src/ppu/main.c

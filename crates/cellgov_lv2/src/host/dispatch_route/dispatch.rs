@@ -466,9 +466,9 @@ impl Lv2Host {
             }
             Lv2Request::MemoryAllocate {
                 size,
+                flags,
                 alloc_addr_ptr,
-                ..
-            } => self.dispatch_memory_allocate(size, alloc_addr_ptr, requester, tick),
+            } => self.dispatch_memory_allocate(size, flags, alloc_addr_ptr, requester, tick),
             Lv2Request::MemoryFree { .. } => self.dispatch_memory_free_noop(),
             Lv2Request::MemoryContainerCreate { cid_ptr, size } => {
                 self.dispatch_memory_container_create(cid_ptr, size, requester, tick)

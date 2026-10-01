@@ -35,6 +35,9 @@
 #
 # Environment:
 #   CGOV_PS3_APPID           TITLE_ID for PARAM.SFO (default CGOV00001)
+#   CGOV_PS3_LIBS            extra libraries for the relink, ahead of the
+#                            default -llv2 -lsysmodule -lrt (an RSX test
+#                            passes "-lrsx -lgcm_sys")
 #   CGOV_PS3_PSL1GHT_CRT=1   link with PSL1GHT's own start files instead
 #                            of tests/micro/common/crt0.S, in case the
 #                            custom start file does not boot on the console
@@ -85,7 +88,7 @@ ${PPU_PREFIX}-gcc \
     -o "$PS3OUT/$NAME.elf" \
     "${START_FILES[@]}" \
     "$PPU_SOURCE" \
-    -llv2 -lsysmodule -lrt
+    ${CGOV_PS3_LIBS:-} -llv2 -lsysmodule -lrt
 if [ "$LINK_KIND" = "common-crt0" ]; then
     python3 "$COMMON/patch_toc.py" \
         "$PS3OUT/$NAME.elf" \

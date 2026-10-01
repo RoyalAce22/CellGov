@@ -1,0 +1,250 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5725 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 64 C, fan 38%, /dev_hdd0 99840 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > QUIT
+#0016 < 221 BYE
+#0017 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0018 > USER anonymous
+#0019 < 331 OK
+#0020 > PASS anonymous@
+#0021 < 230 OK
+#0022 > TYPE I
+#0023 < 200 TYPE OK
+#0024 > PASV
+#0025 < 227 Entering Passive Mode (10,77,0,2,188,124)
+#0026 > STOR /dev_hdd0/tmp/cellgov_lease/holder (75 bytes)
+#0027 < 150 OK
+#0028 < 226 OK
+#0029 > QUIT
+#0030 < 221 BYE
+#0031 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0032 < 404 (512 bytes)
+#0033 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0034 > USER anonymous
+#0035 < 331 OK
+#0036 > PASS anonymous@
+#0037 < 230 OK
+#0038 > TYPE I
+#0039 < 200 TYPE OK
+#0040 > PASV
+#0041 < 227 Entering Passive Mode (10,77,0,2,190,134)
+#0042 > NLST /dev_hdd0/game
+#0043 < 150 OK
+#0044 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 64C]
+#0045 > QUIT
+#0046 < 221 BYE
+#0047 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0048 > USER anonymous
+#0049 < 331 OK
+#0050 > PASS anonymous@
+#0051 < 230 OK
+#0052 > TYPE I
+#0053 < 200 TYPE OK
+#0054 > MKD /dev_hdd0/game/CGOV00001
+#0055 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0056 > QUIT
+#0057 < 221 BYE
+#0058 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0059 > USER anonymous
+#0060 < 331 OK
+#0061 > PASS anonymous@
+#0062 < 230 OK
+#0063 > TYPE I
+#0064 < 200 TYPE OK
+#0065 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0066 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0067 > QUIT
+#0068 < 221 BYE
+#0069 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0070 > USER anonymous
+#0071 < 331 OK
+#0072 > PASS anonymous@
+#0073 < 230 OK
+#0074 > TYPE I
+#0075 < 200 TYPE OK
+#0076 > PASV
+#0077 < 227 Entering Passive Mode (10,77,0,2,198,130)
+#0078 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0079 < 150 OK
+#0080 < 226 OK
+#0081 > QUIT
+#0082 < 221 BYE
+#0083 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0084 > USER anonymous
+#0085 < 331 OK
+#0086 > PASS anonymous@
+#0087 < 230 OK
+#0088 > TYPE I
+#0089 < 200 TYPE OK
+#0090 > PASV
+#0091 < 227 Entering Passive Mode (10,77,0,2,200,182)
+#0092 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (34672 bytes)
+#0093 < 150 OK
+#0094 < 226 OK
+#0095 > QUIT
+#0096 < 221 BYE
+#0097 = deployed 2 file(s) under /dev_hdd0/game/CGOV00001
+#0098 > GET /play.ps3?CGOV00001
+#0099 < 200 (5725 bytes)
+#0100 = started
+#0101 > GET /cpursx.ps3
+#0102 < 200 (5725 bytes)
+#0103 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0104 < 404 (512 bytes)
+#0105 > GET /cpursx.ps3
+#0106 < 200 (5725 bytes)
+#0107 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0108 < 404 (512 bytes)
+#0109 > GET /cpursx.ps3
+#0110 < 200 (5725 bytes)
+#0111 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0112 < 404 (512 bytes)
+#0113 > GET /cpursx.ps3
+#0114 < 200 (5725 bytes)
+#0115 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0116 < 404 (512 bytes)
+#0117 > GET /cpursx.ps3
+#0118 < 200 (5725 bytes)
+#0119 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0120 < 404 (512 bytes)
+#0121 > GET /cpursx.ps3
+#0122 < 200 (5933 bytes)
+#0123 = left the XMB after 6 poll(s)
+#0124 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0125 < 404 (512 bytes)
+#0126 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0127 < 404 (512 bytes)
+#0128 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0129 < 404 (512 bytes)
+#0130 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0131 < 404 (512 bytes)
+#0132 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0133 < 200 (24 bytes)
+#0134 = result present after 5 poll(s)
+#0135 > GET /cpursx.ps3
+#0136 < 200 (6436 bytes)
+#0137 > GET /cpursx.ps3
+#0138 < 200 (6436 bytes)
+#0139 > GET /cpursx.ps3
+#0140 < 200 (5933 bytes)
+#0141 > GET /cpursx.ps3
+#0142 < 200 (5933 bytes)
+#0143 > GET /cpursx.ps3
+#0144 < 200 (5725 bytes)
+#0145 = back at the XMB after 5 poll(s)
+#0146 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0147 < 200 (24 bytes)
+#0148 = captured micro:rsx_semaphore_post#8028b5136b1d
+#0149 > GET /mount.ps3/unmount
+#0150 < 200 (4441 bytes)
+#0151 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0152 > USER anonymous
+#0153 < 331 OK
+#0154 > PASS anonymous@
+#0155 < 230 OK
+#0156 > TYPE I
+#0157 < 200 TYPE OK
+#0158 > PASV
+#0159 < 227 Entering Passive Mode (10,77,0,2,168,51)
+#0160 > NLST /dev_hdd0/game
+#0161 < 150 OK
+#0162 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 61C]
+#0163 > QUIT
+#0164 < 221 BYE
+#0165 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0166 > USER anonymous
+#0167 < 331 OK
+#0168 > PASS anonymous@
+#0169 < 230 OK
+#0170 > TYPE I
+#0171 < 200 TYPE OK
+#0172 > PASV
+#0173 < 227 Entering Passive Mode (10,77,0,2,172,246)
+#0174 > NLST /dev_hdd0/game/CGOV00001
+#0175 < 150 OK
+#0176 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 61C]
+#0177 > QUIT
+#0178 < 221 BYE
+#0179 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0180 > USER anonymous
+#0181 < 331 OK
+#0182 > PASS anonymous@
+#0183 < 230 OK
+#0184 > TYPE I
+#0185 < 200 TYPE OK
+#0186 > PASV
+#0187 < 227 Entering Passive Mode (10,77,0,2,176,217)
+#0188 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0189 < 150 OK
+#0190 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 61C]
+#0191 > QUIT
+#0192 < 221 BYE
+#0193 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0194 > USER anonymous
+#0195 < 331 OK
+#0196 > PASS anonymous@
+#0197 < 230 OK
+#0198 > TYPE I
+#0199 < 200 TYPE OK
+#0200 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0201 < 250 OK
+#0202 > QUIT
+#0203 < 221 BYE
+#0204 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0205 > USER anonymous
+#0206 < 331 OK
+#0207 > PASS anonymous@
+#0208 < 230 OK
+#0209 > TYPE I
+#0210 < 200 TYPE OK
+#0211 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0212 < 250 OK
+#0213 > QUIT
+#0214 < 221 BYE
+#0215 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0216 > USER anonymous
+#0217 < 331 OK
+#0218 > PASS anonymous@
+#0219 < 230 OK
+#0220 > TYPE I
+#0221 < 200 TYPE OK
+#0222 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0223 < 250 OK
+#0224 > QUIT
+#0225 < 221 BYE
+#0226 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0227 > USER anonymous
+#0228 < 331 OK
+#0229 > PASS anonymous@
+#0230 < 230 OK
+#0231 > TYPE I
+#0232 < 200 TYPE OK
+#0233 > RMD /dev_hdd0/game/CGOV00001
+#0234 < 250 OK
+#0235 > QUIT
+#0236 < 221 BYE
+#0237 > GET /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0238 < 200 (24 bytes)
+#0239 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0240 > USER anonymous
+#0241 < 331 OK
+#0242 > PASS anonymous@
+#0243 < 230 OK
+#0244 > TYPE I
+#0245 < 200 TYPE OK
+#0246 > DELE /dev_hdd0/tmp/cgov_rsx_semaphore_post.bin
+#0247 < 250 OK
+#0248 > QUIT
+#0249 < 221 BYE
+#0250 = console restored

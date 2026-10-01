@@ -258,32 +258,48 @@ pub fn register_nv4097_flip_handler(
 /// convention.
 pub(crate) const NV4097_REPORT_OFFSET_MASK_U: u32 = NV4097_REPORT_OFFSET_MASK;
 
-/// `NV4097_GET_REPORT` (`0x1800`): write the low 32 bits of
-/// guest-ticks as a 4-byte report payload into the report block of
-/// the label area. The 16-byte envelope retail titles poll is wider;
-/// only the timestamp slot is written today.
+/// `NV4097_GET_REPORT` (`0x1800`): write a report record's timer from
+/// the low 32 bits of guest-ticks. The record's value word (the
+/// Z-pass count) is not modeled and stays as the guest left it.
 ///
-/// The argument's offset field is relative to the report block, not
-/// to the label area's base: report entries sit
-/// [`REPORTS_REPORT_OFFSET`] in, behind the semaphore and notify
-/// blocks. libgcm_sys.sprx resolves a report address the same way.
-/// Its report-address getter adds the report-block offset the kernel
-/// published in the driver-info block, then scales the guest's index;
-/// its label-address getter adds a separate semaphore-block offset.
+/// Under a label base the argument's low 24 bits are the record's
+/// byte offset in the report block and the top byte is the report
+/// type ([`NV4097_REPORT_RECORD_OFFSET_MASK`]). The report block sits
+/// [`REPORTS_REPORT_OFFSET`] into the label area, behind the semaphore
+/// and notify blocks. libgcm_sys.sprx resolves a report address the
+/// same way. Its report-address getter adds the report-block offset
+/// the kernel published in the driver-info block, then scales the
+/// guest's index; its label-address getter adds a separate
+/// semaphore-block offset. The timer is a big-endian `u64` at the
+/// record's start, so it lands as a zero high word and the ticks in
+/// the low word.
+///
 /// A zero `label_base` is the absolute-offset regime the commit
-/// pipeline documents, where no block base applies either.
+/// pipeline documents: the whole argument names the target, and the
+/// ticks land there as one word.
 ///
 /// [`REPORTS_REPORT_OFFSET`]: cellgov_ps3_abi::lv2::rsx::driver_info_init::REPORTS_REPORT_OFFSET
+/// [`NV4097_REPORT_RECORD_OFFSET_MASK`]: cellgov_ps3_abi::hw::rsx::NV4097_REPORT_RECORD_OFFSET_MASK
 pub fn nv4097_get_report(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&arg) = args.first() {
-        let field = arg & NV4097_REPORT_OFFSET_MASK_U;
-        let offset = if ctx.label_base == 0 {
-            field
+        let ticks = ctx.now.raw() as u32;
+        if ctx.label_base == 0 {
+            ctx.emitted.push(Effect::RsxLabelWrite {
+                offset: arg & NV4097_REPORT_OFFSET_MASK_U,
+                value: ticks,
+            });
         } else {
-            field.wrapping_add(REPORTS_REPORT_OFFSET)
-        };
-        let value = ctx.now.raw() as u32;
-        ctx.emitted.push(Effect::RsxLabelWrite { offset, value });
+            let record = (arg & cellgov_ps3_abi::hw::rsx::NV4097_REPORT_RECORD_OFFSET_MASK)
+                .wrapping_add(REPORTS_REPORT_OFFSET);
+            ctx.emitted.push(Effect::RsxLabelWrite {
+                offset: record,
+                value: 0,
+            });
+            ctx.emitted.push(Effect::RsxLabelWrite {
+                offset: record.wrapping_add(4),
+                value: ticks,
+            });
+        }
     }
 }
 

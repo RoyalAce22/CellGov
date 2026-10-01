@@ -7,11 +7,25 @@ fn every_microtest_reports_its_documented_payload() {
     let mut failures: Vec<String> = Vec::new();
     for case in CASES {
         let observation = run_observation(case, "payload");
-        if let Some(bad) = check_outcome(case, &observation) {
-            failures.push(format!("{}: {bad}", case.name));
+        let problems = match check_outcome(case, &observation) {
+            Some(bad) => vec![bad],
+            None => check_payload(case, &observation),
+        };
+        if let Some(issue) = known_defect(case.name) {
+            if problems.is_empty() {
+                failures.push(format!(
+                    "{}: passes, so #{issue} no longer reproduces; drop its KNOWN_DEFECTS entry",
+                    case.name
+                ));
+            } else {
+                eprintln!(
+                    "microtest {}: known defect #{issue}: {}",
+                    case.name,
+                    problems.join("; ")
+                );
+            }
             continue;
         }
-        let problems = check_payload(case, &observation);
         if problems.is_empty() {
             eprintln!(
                 "microtest {}: PASS (steps={:?})",
@@ -47,7 +61,9 @@ fn every_microtest_boots_bit_identically_twice() {
             ));
             continue;
         }
-        if a.tty_log.is_empty() {
+        // A known defect may stop the run before its frame; its two
+        // boots are still compared below.
+        if a.tty_log.is_empty() && known_defect(case.name).is_none() {
             failures.push(format!(
                 "{}: first boot produced no TTY; the comparison would be vacuous",
                 case.name

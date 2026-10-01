@@ -606,10 +606,43 @@ fn a_report_offset_lands_in_the_report_block_under_a_label_base() {
     nv4097_get_report(&mut ctx, &[0x30]);
     assert_eq!(
         emitted.as_slice(),
-        &[Effect::RsxLabelWrite {
-            offset: REPORTS_REPORT_OFFSET + 0x30,
-            value: 9,
-        }]
+        &[
+            Effect::RsxLabelWrite {
+                offset: REPORTS_REPORT_OFFSET + 0x30,
+                value: 0,
+            },
+            Effect::RsxLabelWrite {
+                offset: REPORTS_REPORT_OFFSET + 0x34,
+                value: 9,
+            },
+        ]
+    );
+}
+
+/// Under a label base the argument's top byte is the report type, as
+/// libgcm's SetReport packs it; the record lands at the low 24 bits.
+#[test]
+fn a_report_type_in_the_top_byte_does_not_move_the_record() {
+    use cellgov_ps3_abi::lv2::rsx::driver_info_init::REPORTS_REPORT_OFFSET;
+    let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
+    let mut ctx = ctx_with_time_and_label_base(
+        &mut cursor,
+        &mut sem_offset,
+        &mut emitted,
+        GuestTicks::new(5),
+        0x3020_0000,
+    );
+    nv4097_get_report(&mut ctx, &[0x0100_0010]);
+    let offsets: Vec<u32> = emitted
+        .iter()
+        .map(|e| match e {
+            Effect::RsxLabelWrite { offset, .. } => *offset,
+            other => panic!("expected RsxLabelWrite, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        offsets,
+        [REPORTS_REPORT_OFFSET + 0x10, REPORTS_REPORT_OFFSET + 0x14]
     );
 }
 

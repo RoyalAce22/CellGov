@@ -80,8 +80,16 @@ pub const NV4097_SET_SEMAPHORE_OFFSET: u16 = 0x1D6C;
 /// semaphore at the previously-set offset.
 pub const NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE: u16 = 0x1D70;
 
-/// `NV4097_GET_REPORT` offset-field mask.
+/// `NV4097_GET_REPORT` offset-field mask in the absolute-offset regime
+/// (no label base): the whole argument names the target.
 pub const NV4097_REPORT_OFFSET_MASK: u32 = 0xFFFF_FFFF;
+
+/// `NV4097_GET_REPORT` offset-field mask under a label base: the
+/// record's byte offset in the report block. The top byte carries the
+/// report type: the reference console's `rsx_semaphore_post` capture
+/// passes `ZPASS_PIXEL_CNT` (1) there over index 1 (offset 0x10) and
+/// gets its record at report index 1.
+pub const NV4097_REPORT_RECORD_OFFSET_MASK: u32 = 0x00FF_FFFF;
 
 /// `cellGcm` flip command code: writes a buffer-id arg to trigger a
 /// flip on the next commit boundary.

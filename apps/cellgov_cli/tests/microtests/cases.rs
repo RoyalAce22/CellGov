@@ -3,6 +3,9 @@
 //! test's documented output layout. Shared by the boot suite and the
 //! hardware-capture checks.
 
+use cellgov_ps3_abi::hw::rsx::{
+    CELL_GCM_DISPLAY_FLIP_STATUS_DONE, CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
+};
 use cellgov_ps3_abi::hw::spu::{event, MFC_ATOMIC_STAT_G, MFC_ATOMIC_STAT_S, MFC_ATOMIC_STAT_U};
 use cellgov_ps3_abi::lv2::errno;
 
@@ -52,8 +55,11 @@ const SPU_INCREMENTS: u32 = 32;
 /// `SIGNAL_WORD` the SPU thread window test's sender signals.
 const SPU_ALIAS_SIGNAL_WORD: u32 = 0xC0DE_0001;
 
-/// `FLIP_STATUS_DONE` -- the terminal value of the flip-status mirror.
-const FLIP_STATUS_DONE: u32 = 0;
+/// The flip status once a flip lands.
+const FLIP_STATUS_DONE: u32 = CELL_GCM_DISPLAY_FLIP_STATUS_DONE as u32;
+
+/// The flip status a reset leaves.
+const FLIP_STATUS_WAITING: u32 = CELL_GCM_DISPLAY_FLIP_STATUS_WAITING as u32;
 
 /// `sys_ppu_thread_exit` value both thread microtests hand to `join`.
 const THREAD_EXIT_RETVAL: u32 = 0xCAFE_F00D;
@@ -149,7 +155,8 @@ pub const CASES: &[Case] = &[
         max_steps: 1_000_000,
         fields: &[
             ("status", Exact(0)),
-            ("waiting_iters", Any),
+            // The reset leaves the status at WAITING until the flip lands.
+            ("after_reset", Exact(FLIP_STATUS_WAITING)),
             ("done_iters", Any),
             ("last_status", Exact(FLIP_STATUS_DONE)),
         ],
@@ -169,11 +176,12 @@ pub const CASES: &[Case] = &[
         max_steps: 1_000_000,
         fields: &[
             ("status", Exact(0)),
-            // The guest-ticks clock CellGov wrote; the value moves with
-            // step accounting, but a zero means no report ever landed.
-            ("report_value", NonZero),
+            // The report timer's low word moves with the clock. A timer
+            // that stayed zero sets status bit 1, which `status` pins.
+            ("timer_low", Any),
             ("spin_iters", Any),
-            ("padding", Exact(0)),
+            // The Z-pass pixel count, with nothing drawn.
+            ("value", Exact(0)),
         ],
     },
     Case {

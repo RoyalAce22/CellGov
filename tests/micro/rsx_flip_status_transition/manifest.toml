@@ -1,10 +1,11 @@
 [test]
 name = "rsx_flip_status_transition"
 
-# Structural microtest. A PPU thread writes a GCM_FLIP_COMMAND
-# method to the FIFO, advances put, and polls the flip-status
-# mirror through its WAITING -> DONE transition. Exercises the
-# RSX flip-status state machine end-to-end.
+# Structural microtest. The PPU brings up an RSX context through
+# libgcm, sets one 1080p display buffer in RSX local memory (the video
+# output keeps the mode the XMB left it in), resets the flip status,
+# queues a flip, and polls the flip status through its WAITING -> DONE
+# transition. Exercises the RSX flip-status state machine end-to-end.
 
 [rpcs3]
 binary = "build/rsx_flip_status_transition.elf"
@@ -36,20 +37,13 @@ path = "build"
 kind = "process-exit"
 
 [cellgov.rsx]
+# The RSX region writable, the runtime's writeback mirror on, and the
+# FIFO consumer draining what libgcm puts in the command buffer.
 mirror = true
 consume = true
-# The guest seeds cursor.get by storing to the MMIO GET slot, and
-# only the FIFO consumer reconciles cursor.get from MMIO
-# (mirror_rsx_control_register_writes mirrors PUT and REF, not GET).
-# Without this the drain walks from get = 0 and never reaches the
-# commands this test wrote.
 
 [ps3]
-# Not runnable on a retail console as written; the same reason is the
-# test's row in tests/micro/ps3_gaps.tsv.
-portable = false
-not_portable_reason = "writes CellGov's writeback-mirror addresses and passes a fabricated RSX context id"
 # Bytes the design table leaves free (Any): a hardware run may vary them.
 volatile = [
-  { region = "result", offset = 4, size = 8, reason = "poll counts depend on when the flip completes" },
+  { region = "result", offset = 8, size = 4, reason = "the poll count depends on when the flip lands" },
 ]

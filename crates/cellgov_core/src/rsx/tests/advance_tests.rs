@@ -1183,9 +1183,15 @@ fn a_drain_under_a_label_base_emits_a_report_into_the_report_block() {
     assert!(outcome.reached_put());
     assert_eq!(
         emitted.as_slice(),
-        &[Effect::RsxLabelWrite {
-            offset: REPORTS_REPORT_OFFSET + 0x50,
-            value: 0x77,
-        }]
+        &[
+            Effect::RsxLabelWrite {
+                offset: REPORTS_REPORT_OFFSET + 0x50,
+                value: 0,
+            },
+            Effect::RsxLabelWrite {
+                offset: REPORTS_REPORT_OFFSET + 0x54,
+                value: 0x77,
+            },
+        ]
     );
 }
