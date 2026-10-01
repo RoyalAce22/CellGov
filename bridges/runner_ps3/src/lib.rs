@@ -21,6 +21,7 @@ pub mod deploy;
 pub mod env;
 pub mod error;
 pub mod lease;
+pub mod load;
 pub mod provenance;
 pub mod run;
 pub mod transcript;

@@ -20,6 +20,13 @@ pub(super) const TEST: &str = "spu_fixed_value";
 const PROFILES: &str = r#"
 reference = "cech20-cex-493"
 
+[load]
+hot_c = 80
+cool_c = 72
+hdd_floor_mib = 1024
+wait_poll_s = 15
+wait_limit_s = 1800
+
 [profile.cech20-cex-493]
 models = ["CECH-20"]
 kernel = "cex"
@@ -63,6 +70,7 @@ pub(super) fn provenance() -> CaptureProvenance {
             cobra: "8.5".to_string(),
             webman: Some("1.47.48".to_string()),
             debugger_attached: false,
+            load_at_start: None,
         },
         transport: TransportFacts {
             kind: "webman-filedrop".to_string(),

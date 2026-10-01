@@ -53,6 +53,16 @@ pub fn default_dir() -> PathBuf {
 /// The lease file for `host` under `dir`. Every character of the host
 /// outside ASCII alphanumerics and `.` folds to `_`.
 pub fn lease_path(dir: &Path, host: &str) -> PathBuf {
+    host_file(dir, host, "lease")
+}
+
+/// The marker that says `host` was last read hot, beside its lease: the
+/// interlock's memory between runs.
+pub fn hot_path(dir: &Path, host: &str) -> PathBuf {
+    host_file(dir, host, "hot")
+}
+
+fn host_file(dir: &Path, host: &str, extension: &str) -> PathBuf {
     let safe: String = host
         .chars()
         .map(|c| {
@@ -63,7 +73,7 @@ pub fn lease_path(dir: &Path, host: &str) -> PathBuf {
             }
         })
         .collect();
-    dir.join(format!("cellgov_runner_ps3_{safe}.lease"))
+    dir.join(format!("cellgov_runner_ps3_{safe}.{extension}"))
 }
 
 impl Lease {

@@ -3,8 +3,9 @@
 //! does not exist lists empty, and one that does lists `.` and `..`
 //! before its bare names.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use crate::console::STATUS_PATH;
 use crate::run::{ConsoleOps, Target, GAME_ROOT, PLAY_PATH, UNMOUNT_PATH};
 use crate::transcript::Transcript;
 use crate::transport::TransportError;
@@ -29,6 +30,9 @@ pub(crate) struct MemoryConsole {
     /// How many result polls answer `404` after the start before the
     /// test's file appears.
     pub(crate) polls_before_result: usize,
+    /// The status pages the console serves after the current one, one
+    /// per read of the status page.
+    pub(crate) later_status: VecDeque<Vec<u8>>,
     /// Every request, in order.
     pub(crate) calls: Vec<String>,
     started: bool,
@@ -157,7 +161,13 @@ impl ConsoleOps for MemoryConsole {
 
     fn fetch(&mut self, path: &str, _: &mut Transcript) -> Result<Option<Vec<u8>>, TransportError> {
         self.calls.push(format!("FETCH {path}"));
-        Ok(self.files.get(path).cloned())
+        let page = self.files.get(path).cloned();
+        if path == STATUS_PATH {
+            if let Some(next) = self.later_status.pop_front() {
+                self.files.insert(path.to_string(), next);
+            }
+        }
+        Ok(page)
     }
 
     fn list(&mut self, dir: &str, _: &mut Transcript) -> Result<Vec<String>, TransportError> {

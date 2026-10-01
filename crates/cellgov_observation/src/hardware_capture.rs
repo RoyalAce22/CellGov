@@ -103,6 +103,24 @@ pub struct ConsoleFacts {
     pub webman: Option<String>,
     /// Whether a debugger held the console during the run.
     pub debugger_attached: bool,
+    /// The console's temperatures and fan when the capture started, so a
+    /// capture taken from a warm console shows it; absent from a record
+    /// that predates the reading, and from every report but a capture's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_at_start: Option<LoadReading>,
+}
+
+/// The console's load as its status page states it at one moment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadReading {
+    /// The Cell's temperature, in degrees Celsius.
+    pub cpu_c: u32,
+    /// The RSX's temperature, in degrees Celsius.
+    pub rsx_c: u32,
+    /// The fan speed, in percent; `None` when the page states none.
+    #[serde(default)]
+    pub fan_percent: Option<u32>,
 }
 
 /// How the runner moved files and started the test.

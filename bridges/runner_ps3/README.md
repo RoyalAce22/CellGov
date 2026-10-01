@@ -57,7 +57,7 @@ capture taken under its name assumed the old value.
 
 | Verb | What it does |
 | --- | --- |
-| `status` | Reads the console's identity and checks it against the claimed profile. |
+| `status` | Reads the console's identity and checks it against the claimed profile, and prints its temperatures, fan and free space. |
 | `deploy` | Copies the package to the console. |
 | `run` | Starts the deployed test and waits for its result. |
 | `fetch` | Copies the result file to this machine. |
@@ -81,6 +81,30 @@ delete does not clear, and refuses an occupied game directory unless
 directory, naming what it holds; `--yes` answers. Every refusal names
 the command that clears it.
 
+### The thermal and capacity interlock
+
+`deploy`, `run`, `fetch` and `capture` refuse while the console is hot,
+from the CPU and RSX temperatures on the same status page the identity
+comes from. `status`, `unlock` and `cleanup` stay open, so a hot console
+can still be read and cleared. The console is hot from the moment its
+hotter chip reads the ceiling, and cool again only once it reads below
+the floor; between the two it keeps the state it had, which a marker
+beside the lease carries from one run to the next. `deploy` and
+`capture` also refuse when `/dev_hdd0` holds less than its floor. A page
+that does not state a temperature, or the free space a deploy needs, is
+a refusal too: the interlock never assumes a cool console.
+
+The refusal names both temperatures, the ceiling, the floor and the
+`status` command to poll. With `--wait-cool`, the verb reads the status
+page again until the console is cool, and refuses if it is still hot
+when the wait runs out. The limits and the wait are the `[load]` table
+of the profiles file, which says where its values come from. A
+`capture` records the reading it started from as
+`console.load_at_start` in its provenance.
+
+The runner cannot see inside a run, so a run that heats the console is
+caught at the next verb, not during it.
+
 ### Exit codes
 
 | Class | `runner_ps3` | `cellgov ps3` |
@@ -103,7 +127,7 @@ the command that clears it.
 | --- | --- |
 | `cgov_frame.bin` | The bytes fetched from the console, untouched. |
 | `observation.json` | The observation converted from the frame, with the regions the manifest's `[observe]` table names. |
-| `provenance.json` | The console's facts under the claimed profile, the runner and its revision, the hashes of the microtest's sources and build artifacts, the frame's hash and size, and the recapture reason. |
+| `provenance.json` | The console's facts under the claimed profile and its temperatures and fan when the capture started, the runner and its revision, the hashes of the microtest's sources and build artifacts, the frame's hash and size, and the recapture reason. |
 | `transcript.log` | Every exchange with the console. |
 
 The conversion happens in a staging directory beside the capture, so a

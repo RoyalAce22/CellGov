@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::env;
 use crate::error::RunnerPs3Error;
+use crate::load::{ConsoleLoad, Thermal};
 use crate::transcript::Transcript;
 
 /// The status page webMAN serves.
@@ -139,7 +140,7 @@ pub fn parse_status_page(html: &str) -> StatusPage {
 }
 
 /// The page with every `<...>` tag replaced by a line break.
-fn strip_markup(html: &str) -> String {
+pub(crate) fn strip_markup(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
     let mut in_tag = false;
     for c in html.chars() {
@@ -220,6 +221,7 @@ pub fn identify(
         cobra,
         webman: stated(page.webman.as_deref()),
         debugger_attached,
+        load_at_start: None,
     })
 }
 
@@ -258,8 +260,8 @@ pub fn establish(
 }
 
 /// The `status` report: the console's facts under the claimed profile,
-/// the claim's verdict, and every other tracked profile the console
-/// satisfies.
+/// the claim's verdict, every other tracked profile the console
+/// satisfies, and its load.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StatusReport {
@@ -271,6 +273,11 @@ pub struct StatusReport {
     pub verdict: StatusVerdict,
     /// Every other tracked profile the console satisfies.
     pub also_satisfies: Vec<String>,
+    /// The temperatures, fan and free space the page states.
+    pub load: ConsoleLoad,
+    /// Where the console stands against the load limits; `None` when the
+    /// page states no temperature to hold to them.
+    pub thermal: Option<Thermal>,
 }
 
 /// The claim's verdict.
@@ -300,7 +307,7 @@ pub struct FailedField {
 
 impl StatusReport {
     /// The report as lines of text: the claim, one verdict line per hard
-    /// field, the soft fields, and the other profiles.
+    /// field, the soft fields, the other profiles, and the load.
     pub fn lines(&self) -> Vec<String> {
         let facts = &self.facts;
         let failed: &[FailedField] = match &self.verdict {
@@ -340,13 +347,23 @@ impl StatusReport {
         } else {
             format!("also satisfies: {}", self.also_satisfies.join(", "))
         });
+        lines.push(self.load.line());
+        lines.push(match self.thermal {
+            Some(Thermal::Cool) => "thermal: cool".to_string(),
+            Some(thermal) => {
+                format!(
+                    "thermal: {thermal}; deploy, run, fetch and capture refuse until it is cool"
+                )
+            }
+            None => "thermal: not known; the page states no temperature".to_string(),
+        });
         lines
     }
 }
 
-/// The `status` report for `facts` under the `claimed` profile. The
-/// second value is the claim's own verdict as an error, for the exit
-/// code.
+/// The `status` report for `facts` under the `claimed` profile, with
+/// the console's `load` and its `thermal` state. The second value is
+/// the claim's own verdict as an error, for the exit code.
 ///
 /// # Errors
 ///
@@ -356,6 +373,8 @@ pub fn status_report(
     facts: &ConsoleFacts,
     profiles: &ConsoleProfiles,
     claimed: &str,
+    load: ConsoleLoad,
+    thermal: Option<Thermal>,
 ) -> Result<(StatusReport, Result<(), ConsoleProfileError>), ConsoleProfileError> {
     let verdict = profiles.check(claimed, facts);
     if let Err(unknown @ ConsoleProfileError::UnknownProfile { .. }) = verdict {
@@ -382,6 +401,8 @@ pub fn status_report(
             .into_iter()
             .filter(|name| name != claimed)
             .collect(),
+        load,
+        thermal,
     };
     Ok((report, verdict))
 }

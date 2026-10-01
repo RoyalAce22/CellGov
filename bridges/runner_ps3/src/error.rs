@@ -8,6 +8,7 @@ use cellgov_observation::manifest::ManifestError;
 
 use crate::console::ConsoleError;
 use crate::lease::LeaseError;
+use crate::load::LoadError;
 
 /// Process exit codes, one per failure class.
 ///
@@ -22,7 +23,8 @@ pub enum ExitCode {
     /// or unreadable.
     Usage = 1,
     /// The runner refused before changing the console: a lease, a stale
-    /// result, a profile mismatch, an existing output directory.
+    /// result, a profile mismatch, an existing output directory, a hot
+    /// console or a full `/dev_hdd0`.
     Refused = 2,
     /// The console did not answer as the protocol requires.
     Transport = 3,
@@ -102,6 +104,10 @@ pub enum RunnerPs3Error {
     /// file to add one to.
     #[error("profile: {0}")]
     Profile(#[from] ConsoleProfileError),
+    /// The thermal and capacity interlock refused: the console is hot,
+    /// `/dev_hdd0` is full, or the page does not state a reading.
+    #[error("load: {0}")]
+    Load(#[from] LoadError),
     /// The console did not answer as the protocol requires.
     #[error("transport: {0}")]
     Transport(#[from] crate::transport::TransportError),
@@ -148,9 +154,13 @@ impl RunnerPs3Error {
                 ConsoleProfileError::Io { .. }
                 | ConsoleProfileError::Parse(_)
                 | ConsoleProfileError::UnknownReference(_)
-                | ConsoleProfileError::NoModels(_),
+                | ConsoleProfileError::NoModels(_)
+                | ConsoleProfileError::LoadLimits(_),
             ) => ExitCode::Usage,
-            Self::Transport(_) => ExitCode::Transport,
+            Self::Load(
+                LoadError::Hot { .. } | LoadError::StillHot { .. } | LoadError::Full { .. },
+            ) => ExitCode::Refused,
+            Self::Transport(_) | Self::Load(LoadError::Unstated(_)) => ExitCode::Transport,
             Self::Timeout { .. } => ExitCode::Timeout,
             Self::Frame(_) => ExitCode::Frame,
             Self::Cleanup { .. } => ExitCode::Cleanup,

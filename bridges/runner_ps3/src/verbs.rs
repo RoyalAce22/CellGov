@@ -17,13 +17,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::capture::{self, CapturePlan};
 use crate::cli::{Command, Verb};
-use crate::console::{self, StatusReport, STATUS_PATH};
+use crate::console::{self, StatusReport};
 use crate::deploy::{self, Package};
 use crate::error::RunnerPs3Error;
 use crate::lease::{self, Lease, LeaseError};
+use crate::load::{self, Interlock};
 use crate::run::{self, ConsoleOps, Reclaim, Target};
 use crate::transcript::Transcript;
-use crate::transport::TransportError;
 
 /// What a front end resolves before a verb runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,7 +77,7 @@ pub enum Report {
     },
     /// `status`: the facts, the claim and its verdict, and every other
     /// profile the console satisfies.
-    Status(StatusReport),
+    Status(Box<StatusReport>),
     /// A verb that changes the console.
     Console {
         /// The capture, for a `capture` that wrote one.
@@ -290,17 +290,19 @@ fn shell_word(word: &str) -> String {
     }
 }
 
-/// The `cleanup` line that clears a refusal, with every identity flag
-/// that verb requires, run through `invocation`.
-fn cleanup_line(
+/// The `verb` line a refusal names, with every identity flag the verb
+/// requires and the manifest when it takes one, run through
+/// `invocation`.
+fn verb_line(
     invocation: &str,
+    verb: Verb,
     host: &str,
     claimed: &str,
     command: &Command,
-    manifest_path: &Path,
+    manifest_path: Option<&Path>,
 ) -> String {
     let mut words = vec![
-        "cleanup".to_string(),
+        verb.name().to_string(),
         "--host".to_string(),
         host.to_string(),
         "--profile".to_string(),
@@ -322,8 +324,10 @@ fn cleanup_line(
         words.push("--debugger".to_string());
         words.push(if attached { "attached" } else { "none" }.to_string());
     }
-    words.push("--manifest".to_string());
-    words.push(manifest_path.display().to_string());
+    if let Some(manifest_path) = manifest_path {
+        words.push("--manifest".to_string());
+        words.push(manifest_path.display().to_string());
+    }
     std::iter::once(invocation.to_string())
         .chain(words.iter().map(|word| shell_word(word)))
         .collect::<Vec<_>>()
@@ -331,7 +335,8 @@ fn cleanup_line(
 }
 
 /// Every verb that talks to the console: identify it and check the
-/// claim first, then take the lease for any verb that changes it.
+/// claim first, hold any verb but `cleanup` to the load interlock, then
+/// take the lease for any verb that changes the console.
 fn on_console<C: ConsoleOps>(
     verb: Verb,
     command: &Command,
@@ -347,16 +352,7 @@ fn on_console<C: ConsoleOps>(
     let job = Job::of(verb, command)?;
     let mut webman = connect(&host);
     let mut transcript = Transcript::new();
-    let page = webman
-        .fetch(STATUS_PATH, &mut transcript)
-        .map_err(RunnerPs3Error::from)?
-        .ok_or_else(|| {
-            RunnerPs3Error::from(TransportError::UnexpectedStatus {
-                path: STATUS_PATH.to_string(),
-                status: 404,
-            })
-        })?;
-    let html = String::from_utf8_lossy(&page);
+    let html = load::status_page(&mut webman, &mut transcript)?;
     let Some(job) = job else {
         let facts = console::identify(
             &console::parse_status_page(&html),
@@ -364,9 +360,19 @@ fn on_console<C: ConsoleOps>(
             &claimed,
         )
         .map_err(RunnerPs3Error::from)?;
-        let (status, verdict) =
-            console::status_report(&facts, &profiles, &claimed).map_err(RunnerPs3Error::from)?;
-        let report = Report::Status(status);
+        let load = load::parse_load(&html);
+        let thermal = match load.reading() {
+            Ok(reading) => Some(load::assess(
+                reading,
+                &profiles.load,
+                &context.lease_dir,
+                &host,
+            )?),
+            Err(_) => None,
+        };
+        let (status, verdict) = console::status_report(&facts, &profiles, &claimed, load, thermal)
+            .map_err(RunnerPs3Error::from)?;
+        let report = Report::Status(Box::new(status));
         return match verdict {
             Ok(()) => Ok(report),
             Err(mismatch) => Err(Box::new(Failure {
@@ -376,7 +382,7 @@ fn on_console<C: ConsoleOps>(
             })),
         };
     };
-    let facts = console::establish(
+    let mut facts = console::establish(
         &html,
         &command.operator(),
         &profiles,
@@ -389,6 +395,27 @@ fn on_console<C: ConsoleOps>(
         manifest,
     } = job;
     let manifest_path = manifest_path.as_path();
+    if !matches!(action, Action::Cleanup) {
+        let interlock = Interlock {
+            limits: profiles.load,
+            marker_dir: &context.lease_dir,
+            host: &host,
+            wait_cool: command.wait_cool,
+            needs_space: matches!(action, Action::Deploy | Action::Capture { .. }),
+            poll_with: verb_line(
+                &context.invocation,
+                Verb::Status,
+                &host,
+                &claimed,
+                command,
+                None,
+            ),
+        };
+        let reading = load::admit(&mut webman, &html, &interlock, sleep, &mut transcript)?;
+        if matches!(action, Action::Capture { .. }) {
+            facts.load_at_start = Some(reading);
+        }
+    }
     let lease = Lease::acquire(
         &context.lease_dir,
         &host,
@@ -397,7 +424,14 @@ fn on_console<C: ConsoleOps>(
     )
     .map_err(RunnerPs3Error::from)?;
     let target = Target::new(&manifest.ps3.appid, &manifest.result_file_name());
-    let clear_with = cleanup_line(&context.invocation, &host, &claimed, command, manifest_path);
+    let clear_with = verb_line(
+        &context.invocation,
+        Verb::Cleanup,
+        &host,
+        &claimed,
+        command,
+        Some(manifest_path),
+    );
     let result = match action {
         Action::Deploy => run::preflight(
             &mut webman,

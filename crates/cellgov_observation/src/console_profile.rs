@@ -14,6 +14,9 @@
 //! The operator claims one profile per run; [`ConsoleProfiles::check`]
 //! refuses a console that does not satisfy every hard field of the
 //! claim, and names any other tracked profile it does satisfy.
+//!
+//! The same file holds the [`LoadLimits`] the runner's thermal and
+//! capacity interlock holds every console to.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -35,15 +38,39 @@ pub fn console_profiles_path(root: &Path) -> PathBuf {
     root.join(MICRO_DIR).join(CONSOLE_PROFILES_FILE)
 }
 
-/// Every tracked profile and the one the committed assertions are held
-/// to.
+/// Every tracked profile, the one the committed assertions are held to,
+/// and the load limits the runner holds every console to.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsoleProfiles {
     /// The profile the committed assertions are held to.
     pub reference: String,
+    /// The thermal and capacity limits.
+    pub load: LoadLimits,
     /// Each profile by name.
     pub profile: BTreeMap<String, ConsoleProfile>,
+}
+
+/// The thermal and capacity interlock's limits: operator policy, not a
+/// console fact, so no profile carries them.
+///
+/// A console is hot from the moment its hotter chip reads `hot_c` or
+/// more, and cool again only once it reads below `cool_c`; between the
+/// two it keeps the state it had, so a run does not flap on the
+/// boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadLimits {
+    /// The ceiling, in degrees Celsius.
+    pub hot_c: u32,
+    /// The floor, in degrees Celsius; below `hot_c`.
+    pub cool_c: u32,
+    /// The free space `/dev_hdd0` must hold for a deploy, in MiB.
+    pub hdd_floor_mib: u64,
+    /// The wait between status reads under `--wait-cool`, in seconds.
+    pub wait_poll_s: u64,
+    /// How long `--wait-cool` waits before it refuses, in seconds.
+    pub wait_limit_s: u64,
 }
 
 /// The hard fields of one class of console.
@@ -107,6 +134,13 @@ pub enum ConsoleProfileError {
     /// an empty one, which every console would satisfy.
     #[error("console profile {0:?} lists no model, or an empty model prefix")]
     NoModels(String),
+    /// The `[load]` limits cannot hold: a floor not below the ceiling
+    /// leaves no band to cool into, and a zero wait never reads again.
+    #[error(
+        "console profiles [load]: {0}; the floor cool_c must be below the ceiling hot_c, and \
+         wait_poll_s and wait_limit_s above zero"
+    )]
+    LoadLimits(String),
     /// The run claimed a profile the file does not hold.
     #[error("console profile {claimed:?} is not tracked; the tracked profiles are {known}")]
     UnknownProfile {
@@ -219,10 +253,24 @@ impl ConsoleProfiles {
     /// # Errors
     ///
     /// [`ConsoleProfileError::Parse`] for bad TOML or an unknown field,
-    /// [`ConsoleProfileError::UnknownReference`], and
-    /// [`ConsoleProfileError::NoModels`].
+    /// [`ConsoleProfileError::UnknownReference`],
+    /// [`ConsoleProfileError::NoModels`], and
+    /// [`ConsoleProfileError::LoadLimits`].
     pub fn parse(text: &str) -> Result<Self, ConsoleProfileError> {
         let profiles: Self = toml::from_str(text)?;
+        let load = profiles.load;
+        if load.cool_c >= load.hot_c {
+            return Err(ConsoleProfileError::LoadLimits(format!(
+                "cool_c {} is not below hot_c {}",
+                load.cool_c, load.hot_c
+            )));
+        }
+        if load.wait_poll_s == 0 || load.wait_limit_s == 0 {
+            return Err(ConsoleProfileError::LoadLimits(format!(
+                "wait_poll_s {} and wait_limit_s {}",
+                load.wait_poll_s, load.wait_limit_s
+            )));
+        }
         if !profiles.profile.contains_key(&profiles.reference) {
             return Err(ConsoleProfileError::UnknownReference(
                 profiles.reference.clone(),

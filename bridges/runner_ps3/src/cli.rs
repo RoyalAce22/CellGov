@@ -21,16 +21,17 @@ pub const USAGE: &str = "\
 usage: runner_ps3 <verb> [flags]
   status   --host H --profile P --model M --cfw C --debugger none|attached [--profiles F]
            [--json]
-  deploy   (status flags) --manifest F [--reclaim]
-  run      (status flags) --manifest F [--poll-ms N]
-  fetch    (status flags) --manifest F --out FILE
+  deploy   (status flags) --manifest F [--reclaim] [--wait-cool]
+  run      (status flags) --manifest F [--poll-ms N] [--wait-cool]
+  fetch    (status flags) --manifest F --out FILE [--wait-cool]
   cleanup  (status flags) --manifest F
   capture  (status flags) --manifest F --harness-revision SHA [--out DIR] [--poll-ms N]
-           [--reclaim] [--keep-deployed] [--recapture --reason TEXT]
+           [--reclaim] [--keep-deployed] [--recapture --reason TEXT] [--wait-cool]
   convert  --frame FILE --manifest F --profile P [--profiles F] [--out FILE]
   unlock   --host H [--json]
 --host defaults to CELLGOV_PS3_HOST and --profile to CELLGOV_PS3_PROFILE.
---json prints the report as JSON; convert always prints JSON.";
+--json prints the report as JSON; convert always prints JSON.
+deploy, run, fetch and capture refuse a hot console; --wait-cool waits for it to cool.";
 
 /// A runner verb.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
@@ -97,6 +98,7 @@ impl Verb {
                 "--json",
                 "--manifest",
                 "--reclaim",
+                "--wait-cool",
             ],
             Self::Run => &[
                 "--host",
@@ -108,6 +110,7 @@ impl Verb {
                 "--json",
                 "--manifest",
                 "--poll-ms",
+                "--wait-cool",
             ],
             Self::Fetch => &[
                 "--host",
@@ -119,6 +122,7 @@ impl Verb {
                 "--json",
                 "--manifest",
                 "--out",
+                "--wait-cool",
             ],
             Self::Cleanup => &[
                 "--host",
@@ -146,6 +150,7 @@ impl Verb {
                 "--keep-deployed",
                 "--recapture",
                 "--reason",
+                "--wait-cool",
             ],
             Self::Convert => &["--frame", "--manifest", "--profile", "--profiles", "--out"],
             Self::Unlock => &["--host", "--json"],
@@ -190,6 +195,8 @@ pub struct Command {
     pub reason: Option<String>,
     /// `--json`.
     pub json: bool,
+    /// `--wait-cool`.
+    pub wait_cool: bool,
 }
 
 fn usage(message: String) -> RunnerPs3Error {
@@ -256,6 +263,7 @@ pub fn parse(args: &[OsString]) -> Result<Command, RunnerPs3Error> {
             "--keep-deployed" => set_flag(&mut command.keep_deployed, flag)?,
             "--recapture" => set_flag(&mut command.recapture, flag)?,
             "--json" => set_flag(&mut command.json, flag)?,
+            "--wait-cool" => set_flag(&mut command.wait_cool, flag)?,
             _ => {
                 let value = words
                     .next()

@@ -7,6 +7,7 @@ use std::path::Path;
 use cellgov_observation::console_profile::{console_profiles_path, ConsoleProfileError};
 
 use super::*;
+use crate::load::parse_load;
 
 /// webMAN's status page as the console served it, with every
 /// identifier replaced by a synthetic value of the same shape.
@@ -80,6 +81,7 @@ fn the_real_page_and_the_operator_facts_satisfy_the_tracked_reference() {
             cobra: "8.5".to_string(),
             webman: Some("1.47.48t".to_string()),
             debugger_attached: false,
+            load_at_start: None,
         }
     );
     assert_eq!(
@@ -216,10 +218,25 @@ fn facts_from_page(page: &str) -> ConsoleFacts {
     identify(&parse_status_page(page), &operator(), PROFILE).expect("identified")
 }
 
+/// The report for `page` under `claimed`, its load read from the page
+/// and taken as cool.
+fn report_of(
+    page: &str,
+    profiles: &ConsoleProfiles,
+    claimed: &str,
+) -> Result<(StatusReport, Result<(), ConsoleProfileError>), ConsoleProfileError> {
+    status_report(
+        &facts_from_page(page),
+        profiles,
+        claimed,
+        parse_load(page),
+        Some(Thermal::Cool),
+    )
+}
+
 #[test]
 fn the_status_report_gives_each_hard_field_a_verdict_and_the_soft_fields() {
-    let (report, verdict) =
-        status_report(&facts_from_page(PAGE), &tracked(), PROFILE).expect("tracked claim");
+    let (report, verdict) = report_of(PAGE, &tracked(), PROFILE).expect("tracked claim");
     verdict.expect("the console satisfies its claim");
     assert_eq!(report.verdict, StatusVerdict::Pass);
     assert_eq!(
@@ -234,6 +251,8 @@ fn the_status_report_gives_each_hard_field_a_verdict_and_the_soft_fields() {
             "  debugger_attached: none ok",
             "soft: model CECH-2001A, cfw EvilNAT 4.93 PEX, webman 1.47.48t",
             "also satisfies: none",
+            "load: Cell 67 C, RSX 64 C, fan not stated, /dev_hdd0 99840 MiB free",
+            "thermal: cool",
         ]
     );
 }
@@ -242,14 +261,15 @@ fn the_status_report_gives_each_hard_field_a_verdict_and_the_soft_fields() {
 fn the_status_report_marks_a_failing_field_and_names_a_profile_the_console_satisfies() {
     let two = ConsoleProfiles::parse(concat!(
         "reference = \"cech20-cex-493\"\n",
+        "[load]\nhot_c = 80\ncool_c = 72\nhdd_floor_mib = 1024\nwait_poll_s = 15\nwait_limit_s = 1800\n",
         "[profile.cech20-cex-493]\nmodels = [\"CECH-20\"]\nkernel = \"cex\"\n",
         "firmware = \"4.93\"\ncfw = \"EvilNAT\"\ncobra = \"8.5\"\ndebugger_attached = false\n",
         "[profile.cech20-cex-493-cobra84]\nmodels = [\"CECH-20\"]\nkernel = \"cex\"\n",
         "firmware = \"4.93\"\ncfw = \"EvilNAT\"\ncobra = \"8.4\"\ndebugger_attached = false\n",
     ))
     .expect("profiles");
-    let facts = facts_from_page(&PAGE.replace("Cobra 8.5", "Cobra 8.4"));
-    let (report, verdict) = status_report(&facts, &two, PROFILE).expect("tracked claim");
+    let page = PAGE.replace("Cobra 8.5", "Cobra 8.4");
+    let (report, verdict) = report_of(&page, &two, PROFILE).expect("tracked claim");
     assert!(matches!(verdict, Err(ConsoleProfileError::Mismatch { .. })));
     assert_eq!(report.also_satisfies, ["cech20-cex-493-cobra84"]);
     let lines = report.lines();
@@ -260,7 +280,7 @@ fn the_status_report_marks_a_failing_field_and_names_a_profile_the_console_satis
 #[test]
 fn the_status_report_of_an_untracked_claim_is_an_error() {
     assert!(matches!(
-        status_report(&facts_from_page(PAGE), &tracked(), "cech25"),
+        report_of(PAGE, &tracked(), "cech25"),
         Err(ConsoleProfileError::UnknownProfile { .. })
     ));
 }

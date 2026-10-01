@@ -91,9 +91,24 @@ const LINES: &[&[&str]] = &[
         "--reclaim",
         "--debugger",
         "attached",
+        "--wait-cool",
     ],
-    &["run", "--manifest", "m.toml", "--poll-ms", "250"],
-    &["fetch", "--manifest", "m.toml", "--out", "frame.bin"],
+    &[
+        "run",
+        "--manifest",
+        "m.toml",
+        "--poll-ms",
+        "250",
+        "--wait-cool",
+    ],
+    &[
+        "fetch",
+        "--manifest",
+        "m.toml",
+        "--out",
+        "frame.bin",
+        "--wait-cool",
+    ],
     &["cleanup", "--manifest", "m.toml", "--host", "ps3"],
     &[
         "capture",
@@ -110,6 +125,7 @@ const LINES: &[&[&str]] = &[
         "--recapture",
         "--reason",
         "the SPU image changed",
+        "--wait-cool",
     ],
     &[
         "convert",
@@ -231,6 +247,10 @@ fn each_runner_failure_maps_to_its_status() {
             1,
         ),
         (
+            RunnerPs3Error::from(ConsoleProfileError::LoadLimits("x".to_string())),
+            1,
+        ),
+        (
             RunnerPs3Error::LocalWrite {
                 path: PathBuf::from("out"),
                 source: io(),
@@ -289,7 +309,18 @@ fn each_runner_failure_maps_to_its_status() {
             50,
         ),
         (
+            RunnerPs3Error::from(LoadError::Full {
+                free_bytes: 1,
+                required_bytes: 2,
+            }),
+            50,
+        ),
+        (
             RunnerPs3Error::from(runner_ps3::transport::TransportError::ReplyTruncated),
+            51,
+        ),
+        (
+            RunnerPs3Error::from(LoadError::Unstated("CPU temperature")),
             51,
         ),
         (

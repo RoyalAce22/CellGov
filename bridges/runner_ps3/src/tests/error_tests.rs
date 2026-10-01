@@ -1,9 +1,12 @@
 //! The exit-code contract: one code per failure class, no two classes
 //! sharing one, and every error variant mapped.
 
+use cellgov_observation::console_profile::LoadLimits;
+use cellgov_observation::hardware_capture::LoadReading;
 use strum::VariantArray;
 
 use super::*;
+use crate::load::Thermal;
 
 #[test]
 fn every_class_has_its_own_code_and_ok_is_zero() {
@@ -14,6 +17,18 @@ fn every_class_has_its_own_code_and_ok_is_zero() {
 
 #[test]
 fn each_error_maps_to_the_class_its_message_names() {
+    let hot = LoadReading {
+        cpu_c: 85,
+        rsx_c: 70,
+        fan_percent: Some(60),
+    };
+    let limits = LoadLimits {
+        hot_c: 80,
+        cool_c: 72,
+        hdd_floor_mib: 1024,
+        wait_poll_s: 15,
+        wait_limit_s: 1800,
+    };
     let cases: Vec<(RunnerPs3Error, ExitCode)> = vec![
         (
             RunnerPs3Error::Usage("no --host".to_string()),
@@ -117,6 +132,39 @@ fn each_error_maps_to_the_class_its_message_names() {
                 toml::from_str::<toml::Table>("=").expect_err("bad toml"),
             )),
             ExitCode::Usage,
+        ),
+        (
+            RunnerPs3Error::from(ConsoleProfileError::LoadLimits("cool_c 80".to_string())),
+            ExitCode::Usage,
+        ),
+        (
+            RunnerPs3Error::from(LoadError::Hot {
+                thermal: Thermal::Hot,
+                reading: hot,
+                limits,
+                poll_with: "runner_ps3 status --host 10.77.0.2".to_string(),
+            }),
+            ExitCode::Refused,
+        ),
+        (
+            RunnerPs3Error::from(LoadError::StillHot {
+                thermal: Thermal::Cooling,
+                reading: hot,
+                limits,
+                waited_s: 1800,
+            }),
+            ExitCode::Refused,
+        ),
+        (
+            RunnerPs3Error::from(LoadError::Full {
+                free_bytes: 1,
+                required_bytes: 2,
+            }),
+            ExitCode::Refused,
+        ),
+        (
+            RunnerPs3Error::from(LoadError::Unstated("CPU temperature")),
+            ExitCode::Transport,
         ),
         (
             RunnerPs3Error::from(crate::transport::TransportError::ReplyTruncated),

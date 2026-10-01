@@ -9,7 +9,8 @@ use std::path::PathBuf;
 /// contract.
 pub(crate) const PS3_EXIT_CODES: &str = "Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
-      the console fails, an occupied game directory, an existing capture
+      the console fails, an occupied game directory, an existing capture, a
+      hot console, a full /dev_hdd0
   51  the console did not answer as the protocol requires
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
@@ -96,6 +97,10 @@ pub(crate) struct Ps3DeployArgs {
     /// --yes answers.
     #[arg(long)]
     pub reclaim: bool,
+    /// Wait for a hot console to cool below the profiles file's floor
+    /// instead of refusing.
+    #[arg(long)]
+    pub wait_cool: bool,
 }
 
 /// `cellgov ps3 run`
@@ -107,6 +112,10 @@ pub(crate) struct Ps3RunArgs {
     /// (default: 500).
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
     pub poll_ms: Option<u64>,
+    /// Wait for a hot console to cool below the profiles file's floor
+    /// instead of refusing.
+    #[arg(long)]
+    pub wait_cool: bool,
 }
 
 /// `cellgov ps3 fetch`
@@ -117,6 +126,10 @@ pub(crate) struct Ps3FetchArgs {
     /// Where to write the result file.
     #[arg(long, value_name = "FILE")]
     pub out: PathBuf,
+    /// Wait for a hot console to cool below the profiles file's floor
+    /// instead of refusing.
+    #[arg(long)]
+    pub wait_cool: bool,
 }
 
 /// `cellgov ps3 capture`
@@ -147,6 +160,10 @@ pub(crate) struct Ps3CaptureArgs {
     /// Why this capture replaces the committed one; the provenance records it.
     #[arg(long, value_name = "TEXT", requires = "recapture")]
     pub reason: Option<String>,
+    /// Wait for a hot console to cool below the profiles file's floor
+    /// instead of refusing.
+    #[arg(long)]
+    pub wait_cool: bool,
 }
 
 /// `cellgov ps3 convert`

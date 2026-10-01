@@ -9,6 +9,13 @@ use super::*;
 const PROFILES: &str = r#"
 reference = "cech20-cex-493"
 
+[load]
+hot_c = 80
+cool_c = 72
+hdd_floor_mib = 1024
+wait_poll_s = 15
+wait_limit_s = 1800
+
 [profile.cech20-cex-493]
 models = ["CECH-20"]
 kernel = "cex"
@@ -28,6 +35,7 @@ fn console() -> ConsoleFacts {
         cobra: "8.5".to_string(),
         webman: Some("1.47.48t".to_string()),
         debugger_attached: false,
+        load_at_start: None,
     }
 }
 
@@ -134,6 +142,7 @@ fn every_hard_field_is_checked_in_file_order() {
         cobra: "8.4".to_string(),
         webman: None,
         debugger_attached: true,
+        load_at_start: None,
     };
     let fields: Vec<&str> = profiles(PROFILES).profile["cech20-cex-493"]
         .mismatches(&foreign)
@@ -209,6 +218,39 @@ fn a_missing_reference_and_an_empty_or_blank_model_list_are_refused_at_load() {
         ConsoleProfiles::parse(&PROFILES.replace("[\"CECH-20\"]", "[\"CECH-20\", \"\"]")),
         Err(ConsoleProfileError::NoModels(name)) if name == "cech20-cex-493"
     ));
+}
+
+#[test]
+fn load_limits_with_no_band_to_cool_into_or_no_wait_are_refused_at_load() {
+    for (from, to) in [
+        ("cool_c = 72", "cool_c = 80"),
+        ("cool_c = 72", "cool_c = 81"),
+        ("wait_poll_s = 15", "wait_poll_s = 0"),
+        ("wait_limit_s = 1800", "wait_limit_s = 0"),
+    ] {
+        assert!(
+            matches!(
+                ConsoleProfiles::parse(&PROFILES.replace(from, to)),
+                Err(ConsoleProfileError::LoadLimits(_))
+            ),
+            "{to}"
+        );
+    }
+    assert!(matches!(
+        ConsoleProfiles::parse(&PROFILES.replace("cool_c = 72", "cool_c = 79")),
+        Ok(ConsoleProfiles {
+            load: LoadLimits { cool_c: 79, .. },
+            ..
+        })
+    ));
+    let without_load = PROFILES.replace("[load]", "[unread]");
+    assert!(
+        matches!(
+            ConsoleProfiles::parse(&without_load),
+            Err(ConsoleProfileError::Parse(_))
+        ),
+        "the limits are never assumed"
+    );
 }
 
 #[test]

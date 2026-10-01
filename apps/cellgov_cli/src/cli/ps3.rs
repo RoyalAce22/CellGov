@@ -9,6 +9,7 @@ use cellgov_compare::console_profile::ConsoleProfileError;
 use runner_ps3::cli::{Command as RunnerCommand, Verb};
 use runner_ps3::console::ConsoleError;
 use runner_ps3::lease::LeaseError;
+use runner_ps3::load::LoadError;
 use runner_ps3::run::{Reclaim, WebmanConsole};
 use runner_ps3::transport::Endpoint;
 use runner_ps3::verbs::{self, Context};
@@ -146,16 +147,19 @@ pub(crate) fn runner_command(command: &Ps3Command, json: bool) -> RunnerCommand 
             out.verb = Some(Verb::Deploy);
             set_target(&mut out, &args.target);
             out.reclaim = args.reclaim;
+            out.wait_cool = args.wait_cool;
         }
         Ps3Command::Run(args) => {
             out.verb = Some(Verb::Run);
             set_target(&mut out, &args.target);
             out.poll_ms = args.poll_ms;
+            out.wait_cool = args.wait_cool;
         }
         Ps3Command::Fetch(args) => {
             out.verb = Some(Verb::Fetch);
             set_target(&mut out, &args.target);
             out.out = Some(args.out.clone());
+            out.wait_cool = args.wait_cool;
         }
         Ps3Command::Cleanup(args) => {
             out.verb = Some(Verb::Cleanup);
@@ -171,6 +175,7 @@ pub(crate) fn runner_command(command: &Ps3Command, json: bool) -> RunnerCommand 
             out.keep_deployed = args.keep_deployed;
             out.recapture = args.recapture;
             out.reason = args.reason.clone();
+            out.wait_cool = args.wait_cool;
         }
         Ps3Command::Convert(args) => {
             out.verb = Some(Verb::Convert);
@@ -219,7 +224,8 @@ pub(crate) fn exit_code(error: &RunnerPs3Error) -> i32 {
             ConsoleProfileError::Io { .. }
             | ConsoleProfileError::Parse(_)
             | ConsoleProfileError::UnknownReference(_)
-            | ConsoleProfileError::NoModels(_),
+            | ConsoleProfileError::NoModels(_)
+            | ConsoleProfileError::LoadLimits(_),
         )
         | RunnerPs3Error::LocalWrite { .. }
         | RunnerPs3Error::HostClock
@@ -230,9 +236,13 @@ pub(crate) fn exit_code(error: &RunnerPs3Error) -> i32 {
         | RunnerPs3Error::Console(ConsoleError::Contradiction { .. })
         | RunnerPs3Error::Profile(
             ConsoleProfileError::Mismatch { .. } | ConsoleProfileError::UnknownProfile { .. },
+        )
+        | RunnerPs3Error::Load(
+            LoadError::Hot { .. } | LoadError::StillHot { .. } | LoadError::Full { .. },
         ) => EXIT_REFUSED,
         RunnerPs3Error::Transport(_)
-        | RunnerPs3Error::Console(ConsoleError::PageMissing { .. }) => EXIT_TRANSPORT,
+        | RunnerPs3Error::Console(ConsoleError::PageMissing { .. })
+        | RunnerPs3Error::Load(LoadError::Unstated(_)) => EXIT_TRANSPORT,
         RunnerPs3Error::Timeout { .. } => EXIT_TIMEOUT,
         RunnerPs3Error::Frame(_) => EXIT_FRAME,
         RunnerPs3Error::Cleanup { .. } => EXIT_CLEANUP,

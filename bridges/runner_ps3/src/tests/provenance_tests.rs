@@ -16,6 +16,7 @@ fn console() -> ConsoleFacts {
         cobra: "8.5".to_string(),
         webman: Some("1.47.48t".to_string()),
         debugger_attached: false,
+        load_at_start: None,
     }
 }
 

@@ -7,6 +7,7 @@ use cellgov_observation::hardware_capture::ConsoleFacts;
 
 use super::*;
 use crate::console::{FailedField, StatusVerdict};
+use crate::load::{ConsoleLoad, Thermal};
 use crate::transcript::{MASKED_ID, MASKED_MAC};
 
 fn facts() -> ConsoleFacts {
@@ -19,16 +20,24 @@ fn facts() -> ConsoleFacts {
         cobra: "8.5".to_string(),
         webman: Some("1.47.48t".to_string()),
         debugger_attached: false,
+        load_at_start: None,
     }
 }
 
 fn status(verdict: StatusVerdict) -> Report {
-    Report::Status(StatusReport {
+    Report::Status(Box::new(StatusReport {
         claimed: "cech20-cex-493".to_string(),
         facts: facts(),
         verdict,
         also_satisfies: vec!["cech20-cex-493-cobra84".to_string()],
-    })
+        load: ConsoleLoad {
+            cpu_c: Some(67),
+            rsx_c: Some(64),
+            fan_percent: Some(40),
+            hdd_free_bytes: None,
+        },
+        thermal: Some(Thermal::Cooling),
+    }))
 }
 
 fn transcript() -> Vec<String> {
@@ -85,7 +94,7 @@ fn a_console_verb_without_a_capture_reports_only_its_transcript() {
 }
 
 #[test]
-fn the_status_json_names_the_claim_the_verdict_and_the_facts() {
+fn the_status_json_names_the_claim_the_verdict_the_facts_and_the_load() {
     let value: serde_json::Value =
         serde_json::from_str(&status(StatusVerdict::Pass).json().expect("serializes"))
             .expect("json");
@@ -93,6 +102,20 @@ fn the_status_json_names_the_claim_the_verdict_and_the_facts() {
     assert_eq!(value["verdict"], serde_json::json!({ "result": "pass" }));
     assert_eq!(value["facts"]["firmware"], "4.93");
     assert_eq!(value["also_satisfies"][0], "cech20-cex-493-cobra84");
+    assert_eq!(
+        value["load"],
+        serde_json::json!({
+            "cpu_c": 67,
+            "rsx_c": 64,
+            "fan_percent": 40,
+            "hdd_free_bytes": null,
+        })
+    );
+    assert_eq!(value["thermal"], "cooling");
+    assert!(
+        value["facts"].get("load_at_start").is_none(),
+        "status facts carry no capture reading: {value}"
+    );
 }
 
 #[test]

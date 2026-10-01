@@ -16,6 +16,26 @@
 # The profile the committed assertions are held to.
 reference = "cech20-cex-493"
 
+# The thermal and capacity interlock: operator policy, held to every
+# console. deploy, run, fetch and capture refuse while the console is hot;
+# status, unlock and cleanup stay open. A console is hot from the moment
+# its hotter chip (Cell or RSX) reads hot_c or more, and cool again only
+# once both read below cool_c; between the two it keeps its state.
+#
+# hot_c is the top of the target-temperature range webMAN's own dynamic
+# fan control accepts (its setup page offers 40 to 80 C). cool_c sits
+# above that control's 68 C default target and the reference console's
+# measured idle (Cell 67 C, RSX 64 C at 40% fan), so a console the fan
+# control holds at its target does cool below it. These are a margin
+# below what the fan control is built to hold, not a measured failure
+# point.
+[load]
+hot_c = 80
+cool_c = 72
+hdd_floor_mib = 1024      # free space /dev_hdd0 must hold for a deploy
+wait_poll_s = 15          # --wait-cool: the wait between status reads
+wait_limit_s = 1800       # --wait-cool: how long it waits before refusing
+
 [profile.cech20-cex-493]
 models = ["CECH-20"]        # a model matches when it starts with one of these
 kernel = "cex"
