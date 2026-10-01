@@ -27,7 +27,9 @@ mapping names the store entry CellGov composes, so the two sides share
 one library rather than two installs of one version. `2.76` is the
 version this title's own `PARAM.SFO` asks for
 (`PS3_SYSTEM_VER = 02.7600`), and the same version its disc carries in
-`PS3_UPDATE/PS3UPDAT.PUP`.
+`PS3_UPDATE/PS3UPDAT.PUP`. Every title is measured at firmware 4.93,
+so this cell is a drift study: the title at its own floor, beside the
+`fw 4.93 x base` reference.
 
 ## Classifier coverage (per-class)
 

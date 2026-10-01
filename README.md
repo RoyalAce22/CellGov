@@ -190,7 +190,10 @@ under `vfs/dev_bdvd/<title-id>/`, a PSN package under
 **A disc image needs no separate firmware.** The install registers the
 disc's own `PS3_UPDATE/PS3UPDAT.PUP` as a `vfs/firmware/<version>/`
 entry and records the version on the title; `boot run` boots the disc
-on it by default. `--no-firmware` skips this.
+on it by default, so the disc runs on the system software it was
+certified against. `--no-firmware` skips this. Every committed result
+is taken at firmware 4.93 whatever the title shipped with, so the
+bench needs 4.93 installed beside it.
 
 **A PSN package needs firmware installed by hand.** Its `PARAM.SFO`
 declares the lowest system software it runs on; `title show` prints
@@ -201,7 +204,9 @@ target/release/cellgov title show <title-id>
 ```
 
 Install that version or the latest `PS3UPDAT.PUP` from
-[playstation.com](https://www.playstation.com/en-us/support/hardware/ps3/system-software/):
+[playstation.com](https://www.playstation.com/en-us/support/hardware/ps3/system-software/).
+The floor is what the title needs to boot; every committed result is
+taken at 4.93, the latest:
 
 ```bash
 cargo run --release -p cellgov_cli --features decrypt -- firmware install /path/to/PS3UPDAT.PUP

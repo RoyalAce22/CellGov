@@ -62,13 +62,16 @@ install step. It exercises the privileged paths under
 A result is keyed by the cell: the title at one firmware version and
 one game version.
 
-**The reference cell.** A title with a PARAM.SFO declares one cell by
-having `system_ver` (the firmware that table asks for) times its base
-install. That cell is the reference: the headline row is measured at
-it, and nothing in the manifest can move it.
+**The reference cell.** Every title is measured at one firmware, the
+reference firmware, 4.93. A title with a PARAM.SFO declares the
+reference firmware times its base install with no row. That cell is
+the reference: the headline row is measured at it, it is the one cell
+the bench sweep requires an anchor for, and nothing in the manifest can
+move it.
 
 **`[[bench.matrix]]` rows.** A row declares a further cell beside the
-reference, or repeats the reference to attach any of:
+reference, a drift study such as the title at its own floor, or
+repeats the reference to attach any of:
 
 - a per-cell cap
 - a checkpoint
@@ -88,47 +91,66 @@ A repeat of the reference is refused if it:
 **Firmware-shipped titles.** A firmware-shipped title has no
 PARAM.SFO and so no `system_ver`. Its version axis is the firmware's,
 its rows are its whole declaration, and each row names a firmware and
-no game version.
+no game version. Its reference is its row at the reference firmware,
+which it must declare.
 
 ## Which firmware a title is measured against
 
-The reference cell is derived from the title. Every title states the
-firmware it shipped against in its own `PARAM.SFO`, under
-`PS3_SYSTEM_VER`, disc and network alike; `02.7600` names firmware
-2.76. That value is then used in four places:
+Every title is measured at 4.93, the reference firmware
+(`cellgov_boot::manifest::REFERENCE_FIRMWARE`), a constant. No manifest
+key points the headline row elsewhere.
+
+Every title also states the firmware it shipped against in its own
+`PARAM.SFO`, under `PS3_SYSTEM_VER`, disc and network alike; `02.7600`
+names firmware 2.76. That value is the title's floor. It is read,
+checked, recorded and warned on, but it names no cell:
 
 - The manifest repeats it as `[title] system_ver`, in the store's key
-  spelling.
+  spelling. The loader refuses a value that is no system-software
+  version, or one newer than the reference firmware.
 - An `installed-title-tests` suite checks the repetition against the
   installed table.
-- The loader builds the reference cell from it: `(system_ver, base)`.
 - The installer records the same table entry, verbatim, as
   `[title] system_ver` in the install record of every base and update
   it writes. A boot composed under a firmware older than the one
   that entry names warns.
+- The title index shows it in its Floor column.
 
-No manifest key points the headline row elsewhere. The cell a title is
-measured at is a fact the title contains, not a choice the registry
-records.
+### Rationale now
 
-### Rationale
+- **End users run the newest firmware.** A console that plays a disc
+  or a network title today runs 4.93. Going below a console's current
+  firmware is a service-mode procedure, not a setting, and below 3.55
+  it risks a brick, so the combination a floor names is one almost
+  nobody can still run.
+- **Hardware evidence exists at 4.93 alone.** The PS3 runner's console
+  profiles are 4.93 profiles, so a reference cell at 4.93 can be checked
+  against a console and one at a floor cannot.
+- **One firmware makes titles comparable.** Measured against one
+  system-software revision and one sysmodule set, a bug two titles
+  share presents as shared.
 
-The floor is the frontier map's honest surface. At the floor, the
-title and the firmware were shipped and tested together. A divergence
-there is CellGov's, and the syscall a `No` row names as the next
-implementation target is one the title used on hardware.
+### Rationale then (superseded)
 
-Measured on the newest firmware instead, an early title loads a
-sysmodule set and binds a system-software revision nobody who owned
-the disc ever ran. A divergence there may name a syscall that is on
-the boot path only because the title was booted years out of its era.
+The previous rule made the floor the reference cell. It read:
 
-The cost is real and is stated rather than hidden. Each title is
-measured against the system-software revision and sysmodule set its
-own floor ships, so a bug shared by two titles at two floors will not
-present as shared. That is what the hardware did. A manifest may still
-declare the newest firmware as a further cell -- a drift study -- and
-every declared cell renders on the title's own page.
+> The floor is the frontier map's honest surface. At the floor, the
+> title and the firmware were shipped and tested together. A divergence
+> there is CellGov's, and the syscall a `No` row names as the next
+> implementation target is one the title used on hardware.
+>
+> Measured on the newest firmware instead, an early title loads a
+> sysmodule set and binds a system-software revision nobody who owned
+> the disc ever ran. A divergence there may name a syscall that is on
+> the boot path only because the title was booted years out of its era.
+>
+> The cost is real and is stated rather than hidden. Each title is
+> measured against the system-software revision and sysmodule set its
+> own floor ships, so a bug shared by two titles at two floors will not
+> present as shared.
+
+That argument still holds for the floor cell, which a manifest may
+declare as a drift study; it no longer names the headline.
 
 ### Shipped firmware on a disc
 
@@ -157,7 +179,8 @@ title at its reference cell. The status is:
 - boot checkpoint reached
 - cross-runner observation match
 
-A Config column names the reference cell. Every declared cell of one
+A Config column names the reference cell, and a Floor column the
+title's floor. Every declared cell of one
 title, measured or not, is on that title's own page under
 `docs/titles/<content-id>.md`: a grid with firmware down the side and
 game version across.
@@ -165,8 +188,8 @@ game version across.
 The system software has its own page,
 [firmware.md](../firmware.md). The page has one row per firmware
 version the system software's manifest declares, with the same
-verdict columns. Every one of those cells is gated on an anchor, since
-none is the reference.
+verdict columns. Its 4.93 row is the reference, as it is for every
+title; the other rows are drift studies.
 
 *Why:* the system software ships inside every firmware image, states
 no floor of its own, and its version axis is the firmware axis. A
@@ -244,10 +267,11 @@ refused.
 
 ### Gated cells
 
-A gated cell normally has a committed anchor. The gated cells are:
+A gated cell normally has a committed anchor. The gated cells are the
+reference cells, one per title:
 
-- a game title's reference cell
-- any declared cell of the system software
+- a game title's reference firmware times its base install
+- the system software's reference firmware row
 
 When something outside the registry stops a gated cell being
 measured, a `[[bench.matrix]]` row for that cell states the reason.
@@ -261,7 +285,10 @@ that states a reason and has an anchor anyway is refused too.
 
 *Why:* the reason cannot outlive what it described.
 
-A game title's other cells are not gated: declaring one stays free.
+A title's other cells are drift studies and are not gated: declaring
+one stays free. `boot bench --all` reports one with no anchor as not
+gated and fails on it never; one with an anchor is still compared
+against it.
 
 ### Witnesses
 
@@ -306,13 +333,13 @@ A test checks the emitters against that split.
 `dev record-anchors` is the only writer. It records the cells the
 registry declares:
 
-- the reference cell `system_ver` derives
+- the reference cell every title with a floor declares
 - every `[[bench.matrix]]` row
 
 It refuses a cell the registry does not declare.
 
-*Why:* the store may hold ten firmwares, and a declared cell is one
-the title's own floor names or somebody reviewed into a row.
+*Why:* the store may hold ten firmwares, and a declared cell is the
+reference or one somebody reviewed into a row.
 
 `--fw` and `--game-ver` narrow the recording to the declared cells
 they name.

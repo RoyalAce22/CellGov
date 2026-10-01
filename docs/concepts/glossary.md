@@ -128,7 +128,7 @@ this or the identity triple, and the two share nothing.
 [titles.md](../titles.md)
 
 **Declared cell.** A cell a title's manifest names: the reference
-cell its `system_ver` derives, plus every `[[bench.matrix]]` row. The
+cell a title with a floor declares, plus every `[[bench.matrix]]` row. The
 registry declares every cell; the gate and the generated documents
 read the declared set rather than enumerating the store, and
 `dev record-anchors` refuses a cell no manifest declares.
@@ -190,6 +190,13 @@ it, so per-step localization is scalar-visible only. The SPU's list,
 reservation), is what `SpuStateHash` digests and `SpuStateFull` with
 `SpuRegisters` snapshots.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#effects-and-trace-records)
+
+**Floor.** The firmware a title's own `PARAM.SFO` asks for
+(`PS3_SYSTEM_VER`), carried in the manifest as `[title] system_ver`.
+Metadata: the install records it, a boot below it warns, and the title
+index shows it, but it names no cell. A manifest may declare the title
+at its floor as a drift study.
+[title_harness.md](../architecture/title_harness.md#which-firmware-a-title-is-measured-against)
 
 **Guest ticks.** Guest time, advanced by each unit's consumed budget.
 Never wall-clock time; CellGov has no host-time dependency.
@@ -310,12 +317,18 @@ SELF is an SCE-wrapped executable; the PUP is the firmware update
 package `cellgov firmware install` unpacks into the VFS.
 [workspace.md](../architecture/workspace.md#per-crate-responsibilities)
 
-**Reference cell.** The cell a title's headline row is measured at:
-the firmware its own `PARAM.SFO` asks for (`PS3_SYSTEM_VER`, carried
-in the manifest as `[title] system_ver`) times its base install.
-Derived, never chosen; a `[[bench.matrix]]` row may attach an override
-or a `pending` reason to it but cannot move it. A title shipped inside
-the firmware has none.
+**Reference cell.** The cell a title's headline row is measured at,
+and the one cell the bench sweep requires an anchor for: the reference
+firmware times the base install, or the reference firmware alone for a
+title shipped inside it. Never chosen per title; a `[[bench.matrix]]`
+row may attach an override or a `pending` reason to it but cannot move
+it. A title built beside its manifest has none.
+[title_harness.md](../architecture/title_harness.md#which-firmware-a-title-is-measured-against)
+
+**Reference firmware.** Firmware 4.93, the one firmware every title is
+measured at (`cellgov_boot::manifest::REFERENCE_FIRMWARE`): the
+firmware consoles run today and the one the hardware evidence was taken
+at. A constant, whatever a title's floor.
 [title_harness.md](../architecture/title_harness.md#which-firmware-a-title-is-measured-against)
 
 **Reference profile.** The console profile the committed assertions
