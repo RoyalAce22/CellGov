@@ -8,6 +8,7 @@
 use super::dev::DevCommand;
 use super::diff::{DiffCommand, ExploreCommand, OutputFormat};
 use super::fuzz::FuzzCommand;
+use super::ps3::Ps3Command;
 use super::store::{FirmwareCommand, KeysCommand, TitleCommand};
 use super::tree::{Cli, Command};
 
@@ -89,10 +90,12 @@ const VFS_ROOT_READERS: &str = if cfg!(feature = "decrypt") {
 /// The commands [`reads_format`] answers for, as help text.
 const FORMAT_READERS: &str = if cfg!(feature = "decrypt") {
     "status, firmware list / show / verify / verify-pups / kernels, title list / show / verify, \
-     diff compare, diff observations, explore, and dev lv2-discover / lv2-extract"
+     diff compare, diff observations, explore, ps3 status / deploy / run / fetch / cleanup / \
+     capture / unlock, and dev lv2-discover / lv2-extract"
 } else {
     "status, firmware list / show / verify / verify-pups / kernels, title list / show / verify, \
-     diff compare, diff observations, explore, and dev lv2-discover"
+     diff compare, diff observations, explore, ps3 status / deploy / run / fetch / cleanup / \
+     capture / unlock, and dev lv2-discover"
 };
 
 /// The commands [`reads_quiet`] answers for, as help text.
@@ -207,11 +210,8 @@ pub(super) fn reads_format(command: &Command) -> bool {
             DevCommand::Lv2Extract(_) => true,
             _ => false,
         },
-        // `ps3 convert` always prints JSON; the other verbs print lines.
-        Command::Keys(_)
-        | Command::SelfCmd(_)
-        | Command::Boot(_)
-        | Command::Scenario(_)
-        | Command::Ps3(_) => false,
+        // `ps3 convert` always prints the observation as JSON.
+        Command::Ps3(ps3) => !matches!(ps3, Ps3Command::Convert(_)),
+        Command::Keys(_) | Command::SelfCmd(_) | Command::Boot(_) | Command::Scenario(_) => false,
     }
 }

@@ -22,7 +22,7 @@ use runner_ps3::lease;
 use runner_ps3::provenance;
 use runner_ps3::run::WebmanConsole;
 use runner_ps3::transport::Endpoint;
-use runner_ps3::verbs::{self, Context, Failure, Report};
+use runner_ps3::verbs::{self, Context, Failure};
 use runner_ps3::ExitCode;
 
 /// The command every remedy this front end prints starts with.
@@ -31,9 +31,11 @@ const INVOCATION: &str = "runner_ps3";
 fn main() -> ProcessExit {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     let mut sleep = std::thread::sleep;
+    let mut json = false;
     let outcome = cli::parse(&args)
         .map_err(Box::<Failure>::from)
         .and_then(|command| {
+            json = command.json;
             let context = Context {
                 host_env: var(env::HOST),
                 profile_env: var(env::PROFILE),
@@ -50,13 +52,19 @@ fn main() -> ProcessExit {
             )
         });
     match outcome {
-        Ok(report) => {
-            print(&report);
-            ProcessExit::from(ExitCode::Ok.code() as u8)
-        }
+        Ok(report) => match report.render(json) {
+            Ok(lines) => {
+                print(&lines);
+                ProcessExit::from(ExitCode::Ok.code() as u8)
+            }
+            Err(error) => {
+                eprintln!("{INVOCATION}: {error}");
+                ProcessExit::from(error.exit_code().code() as u8)
+            }
+        },
         Err(failure) => {
-            if let Some(report) = &failure.report {
-                print(report);
+            if let Some(Ok(lines)) = failure.report.as_ref().map(|r| r.render(json)) {
+                print(&lines);
             }
             if let Some(lease) = &failure.lease {
                 eprintln!("{INVOCATION}: lease: {lease}");
@@ -74,8 +82,8 @@ fn var(name: &str) -> Option<String> {
     std::env::var_os(name).and_then(|value| value.into_string().ok())
 }
 
-fn print(report: &Report) {
-    for line in report.lines() {
+fn print(lines: &[String]) {
+    for line in lines {
         println!("{line}");
     }
 }

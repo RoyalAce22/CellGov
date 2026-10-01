@@ -38,10 +38,17 @@ fn clap_flags(verb: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// The runner's `--json` is `cellgov`'s global `--format json`, so it
+/// is not a verb flag here.
 #[test]
 fn every_verb_takes_exactly_the_flags_the_runner_takes() {
     for verb in Verb::VARIANTS {
-        let table: BTreeSet<String> = verb.flags().iter().map(|f| f.to_string()).collect();
+        let table: BTreeSet<String> = verb
+            .flags()
+            .iter()
+            .filter(|flag| **flag != "--json")
+            .map(|f| f.to_string())
+            .collect();
         assert_eq!(clap_flags(verb.name()), table, "ps3 {}", verb.name());
     }
 }
@@ -123,7 +130,10 @@ const LINES: &[&[&str]] = &[
 #[test]
 fn each_line_maps_to_the_command_the_runner_parses_from_it() {
     for words in LINES {
-        let ours = runner_command(&parsed(words).unwrap_or_else(|e| panic!("{words:?}: {e}")));
+        let ours = runner_command(
+            &parsed(words).unwrap_or_else(|e| panic!("{words:?}: {e}")),
+            false,
+        );
         let args: Vec<OsString> = words.iter().map(OsString::from).collect();
         let theirs = runner_ps3::cli::parse(&args).expect("the runner parses it");
         assert_eq!(ours, theirs, "{words:?}");
@@ -320,4 +330,43 @@ fn the_help_names_every_status_in_the_band() {
             "{code} is missing from:\n{PS3_EXIT_CODES}"
         );
     }
+}
+
+#[test]
+fn format_json_is_the_runners_json_flag_on_every_verb_but_convert() {
+    for words in LINES.iter().filter(|words| words[0] != "convert") {
+        let mut argv = vec!["cellgov", "--format", "json", "ps3"];
+        argv.extend_from_slice(words);
+        let cli = Cli::try_parse_from(&argv).unwrap_or_else(|e| panic!("{argv:?}: {e}"));
+        assert_eq!(
+            crate::cli::parse::global_refusal(&cli),
+            None,
+            "{argv:?} reads --format"
+        );
+        let Command::Ps3(command) = &cli.command else {
+            panic!("{argv:?}");
+        };
+        let mut runner_words: Vec<&str> = words.to_vec();
+        runner_words.push("--json");
+        let args: Vec<OsString> = runner_words.iter().map(OsString::from).collect();
+        assert_eq!(
+            runner_command(command, true),
+            runner_ps3::cli::parse(&args).expect("the runner parses it"),
+            "{argv:?}"
+        );
+    }
+    let convert = Cli::try_parse_from([
+        "cellgov",
+        "--format",
+        "json",
+        "ps3",
+        "convert",
+        "--frame",
+        "f",
+        "--manifest",
+        "m",
+    ])
+    .expect("clap parses it");
+    let refusal = crate::cli::parse::global_refusal(&convert).expect("convert prints JSON already");
+    assert!(refusal.contains("ps3 status"), "{refusal}");
 }

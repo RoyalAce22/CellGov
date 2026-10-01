@@ -20,6 +20,7 @@ pub const DEFAULT_POLL_MS: u64 = 500;
 pub const USAGE: &str = "\
 usage: runner_ps3 <verb> [flags]
   status   --host H --profile P --model M --cfw C --debugger none|attached [--profiles F]
+           [--json]
   deploy   (status flags) --manifest F [--reclaim]
   run      (status flags) --manifest F [--poll-ms N]
   fetch    (status flags) --manifest F --out FILE
@@ -27,8 +28,9 @@ usage: runner_ps3 <verb> [flags]
   capture  (status flags) --manifest F --harness-revision SHA [--out DIR] [--poll-ms N]
            [--reclaim] [--keep-deployed] [--recapture --reason TEXT]
   convert  --frame FILE --manifest F --profile P [--profiles F] [--out FILE]
-  unlock   --host H
---host defaults to CELLGOV_PS3_HOST and --profile to CELLGOV_PS3_PROFILE.";
+  unlock   --host H [--json]
+--host defaults to CELLGOV_PS3_HOST and --profile to CELLGOV_PS3_PROFILE.
+--json prints the report as JSON; convert always prints JSON.";
 
 /// A runner verb.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray)]
@@ -83,6 +85,7 @@ impl Verb {
                 "--model",
                 "--cfw",
                 "--debugger",
+                "--json",
             ],
             Self::Deploy => &[
                 "--host",
@@ -91,6 +94,7 @@ impl Verb {
                 "--model",
                 "--cfw",
                 "--debugger",
+                "--json",
                 "--manifest",
                 "--reclaim",
             ],
@@ -101,6 +105,7 @@ impl Verb {
                 "--model",
                 "--cfw",
                 "--debugger",
+                "--json",
                 "--manifest",
                 "--poll-ms",
             ],
@@ -111,6 +116,7 @@ impl Verb {
                 "--model",
                 "--cfw",
                 "--debugger",
+                "--json",
                 "--manifest",
                 "--out",
             ],
@@ -121,6 +127,7 @@ impl Verb {
                 "--model",
                 "--cfw",
                 "--debugger",
+                "--json",
                 "--manifest",
             ],
             Self::Capture => &[
@@ -130,6 +137,7 @@ impl Verb {
                 "--model",
                 "--cfw",
                 "--debugger",
+                "--json",
                 "--manifest",
                 "--harness-revision",
                 "--out",
@@ -140,7 +148,7 @@ impl Verb {
                 "--reason",
             ],
             Self::Convert => &["--frame", "--manifest", "--profile", "--profiles", "--out"],
-            Self::Unlock => &["--host"],
+            Self::Unlock => &["--host", "--json"],
         }
     }
 }
@@ -180,6 +188,8 @@ pub struct Command {
     pub recapture: bool,
     /// `--reason`.
     pub reason: Option<String>,
+    /// `--json`.
+    pub json: bool,
 }
 
 fn usage(message: String) -> RunnerPs3Error {
@@ -245,6 +255,7 @@ pub fn parse(args: &[OsString]) -> Result<Command, RunnerPs3Error> {
             "--reclaim" => set_flag(&mut command.reclaim, flag)?,
             "--keep-deployed" => set_flag(&mut command.keep_deployed, flag)?,
             "--recapture" => set_flag(&mut command.recapture, flag)?,
+            "--json" => set_flag(&mut command.json, flag)?,
             _ => {
                 let value = words
                     .next()

@@ -11,12 +11,12 @@ use runner_ps3::console::ConsoleError;
 use runner_ps3::lease::LeaseError;
 use runner_ps3::run::WebmanConsole;
 use runner_ps3::transport::Endpoint;
-use runner_ps3::verbs::{self, Context, Report};
+use runner_ps3::verbs::{self, Context};
 use runner_ps3::RunnerPs3Error;
 
 use super::exit::{CommandError, CommandExitCode};
 use super::exit_codes;
-use super::parse::{Ps3Command, Ps3Debugger, Ps3Identity, Ps3ManifestArgs};
+use super::parse::{OutputFormat, Ps3Command, Ps3Debugger, Ps3Identity, Ps3ManifestArgs};
 
 /// The command every remedy the runner prints starts with.
 pub(crate) const INVOCATION: &str = "cellgov ps3";
@@ -32,12 +32,17 @@ pub(crate) const EXIT_FRAME: i32 = exit_codes::command_specific(53);
 /// Cleanup after a capture left something on the console.
 pub(crate) const EXIT_CLEANUP: i32 = exit_codes::command_specific(54);
 
-/// Run `command` against the console its flags or the environment name.
+/// Run `command` against the console its flags or the environment name,
+/// and print its report: as JSON under `--format json`.
 ///
 /// # Errors
 ///
 /// The runner's failure, with its status from [`exit_code`].
-pub(crate) fn run(command: &Ps3Command) -> Result<CommandExitCode, CommandError> {
+pub(crate) fn run(
+    command: &Ps3Command,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    let json = format == OutputFormat::Json;
     let context = Context {
         host_env: var(runner_ps3::env::HOST),
         profile_env: var(runner_ps3::env::PROFILE),
@@ -47,7 +52,7 @@ pub(crate) fn run(command: &Ps3Command) -> Result<CommandExitCode, CommandError>
     };
     let mut sleep = std::thread::sleep;
     let outcome = verbs::execute(
-        &runner_command(command),
+        &runner_command(command, json),
         &context,
         |host| WebmanConsole::new(Endpoint::new(host)),
         &mut sleep,
@@ -55,12 +60,15 @@ pub(crate) fn run(command: &Ps3Command) -> Result<CommandExitCode, CommandError>
     );
     match outcome {
         Ok(report) => {
-            print(&report);
+            let lines = report
+                .render(json)
+                .map_err(|error| CommandError::status(exit_code(&error), error.to_string()))?;
+            print(&lines);
             Ok(CommandExitCode::SUCCESS)
         }
         Err(failure) => {
-            if let Some(report) = &failure.report {
-                print(report);
+            if let Some(Ok(lines)) = failure.report.as_ref().map(|r| r.render(json)) {
+                print(&lines);
             }
             if let Some(lease) = &failure.lease {
                 eprintln!("{INVOCATION}: lease: {lease}");
@@ -77,15 +85,19 @@ fn var(name: &str) -> Option<String> {
     std::env::var_os(name).and_then(|value| value.into_string().ok())
 }
 
-fn print(report: &Report) {
-    for line in report.lines() {
+fn print(lines: &[String]) {
+    for line in lines {
         println!("{line}");
     }
 }
 
-/// The runner's command for `command`.
-pub(crate) fn runner_command(command: &Ps3Command) -> RunnerCommand {
-    let mut out = RunnerCommand::default();
+/// The runner's command for `command`; `json` is the global `--format
+/// json`, the runner's `--json`.
+pub(crate) fn runner_command(command: &Ps3Command, json: bool) -> RunnerCommand {
+    let mut out = RunnerCommand {
+        json,
+        ..RunnerCommand::default()
+    };
     match command {
         Ps3Command::Status(identity) => {
             out.verb = Some(Verb::Status);

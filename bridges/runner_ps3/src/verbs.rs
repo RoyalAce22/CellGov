@@ -13,10 +13,11 @@ use std::time::Duration;
 use cellgov_observation::console_profile::ConsoleProfiles;
 use cellgov_observation::hardware_capture::CAPTURE_DIR;
 use cellgov_observation::manifest::{self, ConsoleManifest};
+use serde::{Deserialize, Serialize};
 
 use crate::capture::{self, CapturePlan};
 use crate::cli::{Command, Verb};
-use crate::console::{self, STATUS_PATH};
+use crate::console::{self, StatusReport, STATUS_PATH};
 use crate::deploy::{self, Package};
 use crate::error::RunnerPs3Error;
 use crate::lease::{self, Lease, LeaseError};
@@ -42,16 +43,23 @@ pub struct Context {
 }
 
 /// A capture the runner wrote.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CaptureReport {
     /// The capture's identifier.
     pub capture_id: String,
     /// The directory it went to.
     pub out: PathBuf,
+    /// Why it replaced a committed capture; `None` for a first capture.
+    pub replaced: Option<String>,
 }
 
-/// What a verb produced.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What a verb produced. Its JSON form ([`Report::json`]) carries each
+/// variant's fields with no tag: `status` its facts, claim and verdict,
+/// `capture` its capture and transcript, `unlock` its host and whether a
+/// it removed a lease, and the other console verbs their transcript.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum Report {
     /// `unlock`: whether a lease on `host` was there to remove.
     Unlock {
@@ -67,15 +75,13 @@ pub enum Report {
         /// `--out`; `None` when the JSON is the report.
         out: Option<PathBuf>,
     },
-    /// `status`: the claim, one verdict line per hard field, the soft
-    /// fields, and every other profile the console satisfies.
-    Status {
-        /// The report lines.
-        lines: Vec<String>,
-    },
+    /// `status`: the facts, the claim and its verdict, and every other
+    /// profile the console satisfies.
+    Status(StatusReport),
     /// A verb that changes the console.
     Console {
         /// The capture, for a `capture` that wrote one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         capture: Option<CaptureReport>,
         /// Every request, reply and decision, redacted.
         transcript: Vec<String>,
@@ -96,7 +102,7 @@ impl Report {
             } => vec![format!("no lease on {host}")],
             Self::Convert { json, out: None } => vec![json.clone()],
             Self::Convert { out: Some(_), .. } => Vec::new(),
-            Self::Status { lines } => lines.clone(),
+            Self::Status(report) => report.lines(),
             Self::Console {
                 capture,
                 transcript,
@@ -105,6 +111,34 @@ impl Report {
                 .map(|c| format!("{} -> {}", c.capture_id, c.out.display()))
                 .chain(transcript.iter().cloned())
                 .collect(),
+        }
+    }
+
+    /// The report as a front end prints it: its lines, or under `json`
+    /// its JSON as one block.
+    ///
+    /// # Errors
+    ///
+    /// [`RunnerPs3Error::Serialize`] when the JSON form does not
+    /// serialize.
+    pub fn render(&self, json: bool) -> Result<Vec<String>, RunnerPs3Error> {
+        if json {
+            Ok(vec![self.json()?])
+        } else {
+            Ok(self.lines())
+        }
+    }
+
+    /// The report as JSON: `convert`'s observation as it stands, and
+    /// every other report as its fields.
+    ///
+    /// # Errors
+    ///
+    /// [`RunnerPs3Error::Serialize`] when the report does not serialize.
+    pub fn json(&self) -> Result<String, RunnerPs3Error> {
+        match self {
+            Self::Convert { json, .. } => Ok(json.clone()),
+            report => Ok(serde_json::to_string_pretty(report)?),
         }
     }
 }
@@ -327,9 +361,9 @@ fn on_console<C: ConsoleOps>(
             &claimed,
         )
         .map_err(RunnerPs3Error::from)?;
-        let (lines, verdict) =
+        let (status, verdict) =
             console::status_report(&facts, &profiles, &claimed).map_err(RunnerPs3Error::from)?;
-        let report = Report::Status { lines };
+        let report = Report::Status(status);
         return match verdict {
             Ok(()) => Ok(report),
             Err(mismatch) => Err(Box::new(Failure {
@@ -424,6 +458,7 @@ fn on_console<C: ConsoleOps>(
                     Some(CaptureReport {
                         capture_id: record.capture_id,
                         out: plan.out.clone(),
+                        replaced: plan.recapture_reason.clone(),
                     })
                 },
             )
@@ -455,3 +490,7 @@ fn on_console<C: ConsoleOps>(
 #[cfg(test)]
 #[path = "tests/verbs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/report_json_tests.rs"]
+mod report_json_tests;

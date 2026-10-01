@@ -218,11 +218,12 @@ fn facts_from_page(page: &str) -> ConsoleFacts {
 
 #[test]
 fn the_status_report_gives_each_hard_field_a_verdict_and_the_soft_fields() {
-    let (lines, verdict) =
+    let (report, verdict) =
         status_report(&facts_from_page(PAGE), &tracked(), PROFILE).expect("tracked claim");
     verdict.expect("the console satisfies its claim");
+    assert_eq!(report.verdict, StatusVerdict::Pass);
     assert_eq!(
-        lines,
+        report.lines(),
         [
             "profile cech20-cex-493",
             "  models: CECH-2001A ok",
@@ -248,8 +249,10 @@ fn the_status_report_marks_a_failing_field_and_names_a_profile_the_console_satis
     ))
     .expect("profiles");
     let facts = facts_from_page(&PAGE.replace("Cobra 8.5", "Cobra 8.4"));
-    let (lines, verdict) = status_report(&facts, &two, PROFILE).expect("tracked claim");
+    let (report, verdict) = status_report(&facts, &two, PROFILE).expect("tracked claim");
     assert!(matches!(verdict, Err(ConsoleProfileError::Mismatch { .. })));
+    assert_eq!(report.also_satisfies, ["cech20-cex-493-cobra84"]);
+    let lines = report.lines();
     assert_eq!(lines[5], "  cobra: 8.4 FAILS, the profile requires \"8.5\"");
     assert_eq!(lines[8], "also satisfies: cech20-cex-493-cobra84");
 }

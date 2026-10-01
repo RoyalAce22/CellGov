@@ -159,7 +159,8 @@ fn every_verb_runs_through_the_library() {
     let mut status = vec!["status"];
     status.extend(OPERATOR);
     match bench.execute(&status).expect("status") {
-        Report::Status { lines } => {
+        Report::Status(status) => {
+            let lines = status.lines();
             assert_eq!(lines[0], "profile cech20-cex-493");
             assert!(
                 lines.contains(&"  firmware: 4.93 ok".to_string()),
@@ -281,10 +282,14 @@ fn a_failed_claim_still_reports_status_lines() {
         "{failure:?}"
     );
     match failure.report {
-        Some(Report::Status { lines }) => assert!(
-            lines.contains(&"  firmware: 4.93 FAILS, the profile requires \"4.92\"".to_string()),
-            "{lines:?}"
-        ),
+        Some(Report::Status(status)) => {
+            let lines = status.lines();
+            assert!(
+                lines
+                    .contains(&"  firmware: 4.93 FAILS, the profile requires \"4.92\"".to_string()),
+                "{lines:?}"
+            );
+        }
         other => panic!("{other:?}"),
     }
 }

@@ -14,6 +14,7 @@
 
 use cellgov_observation::console_profile::{ConsoleProfileError, ConsoleProfiles};
 use cellgov_observation::hardware_capture::ConsoleFacts;
+use serde::{Deserialize, Serialize};
 
 use crate::env;
 use crate::error::RunnerPs3Error;
@@ -256,10 +257,96 @@ pub fn establish(
     Ok(facts)
 }
 
-/// The `status` report for `facts` under the `claimed` profile: the
-/// claim, one verdict line per hard field, the soft fields, and every
-/// other tracked profile the console satisfies. The second value is
-/// the claim's own verdict.
+/// The `status` report: the console's facts under the claimed profile,
+/// the claim's verdict, and every other tracked profile the console
+/// satisfies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StatusReport {
+    /// The profile the run claims.
+    pub claimed: String,
+    /// The console's facts: no unit identifier, only the class.
+    pub facts: ConsoleFacts,
+    /// Whether the console satisfies the claim.
+    pub verdict: StatusVerdict,
+    /// Every other tracked profile the console satisfies.
+    pub also_satisfies: Vec<String>,
+}
+
+/// The claim's verdict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
+pub enum StatusVerdict {
+    /// The console satisfies every hard field of the claim.
+    Pass,
+    /// The console fails the named hard fields.
+    Mismatch {
+        /// Each failing field, in file order.
+        failed: Vec<FailedField>,
+    },
+}
+
+/// One hard field the console fails.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FailedField {
+    /// The field, as the profiles file spells it.
+    pub field: String,
+    /// What the profile requires.
+    pub expected: String,
+    /// What the console states.
+    pub observed: String,
+}
+
+impl StatusReport {
+    /// The report as lines of text: the claim, one verdict line per hard
+    /// field, the soft fields, and the other profiles.
+    pub fn lines(&self) -> Vec<String> {
+        let facts = &self.facts;
+        let failed: &[FailedField] = match &self.verdict {
+            StatusVerdict::Pass => &[],
+            StatusVerdict::Mismatch { failed } => failed,
+        };
+        let debugger = if facts.debugger_attached {
+            "attached"
+        } else {
+            "none"
+        };
+        let mut lines = vec![format!("profile {}", self.claimed)];
+        for (field, observed) in [
+            ("models", facts.model.as_str()),
+            ("kernel", facts.kernel.as_str()),
+            ("firmware", facts.firmware.as_str()),
+            ("cfw", facts.cfw.as_str()),
+            ("cobra", facts.cobra.as_str()),
+            ("debugger_attached", debugger),
+        ] {
+            lines.push(match failed.iter().find(|m| m.field == field) {
+                Some(m) => format!(
+                    "  {field}: {observed} FAILS, the profile requires {}",
+                    m.expected
+                ),
+                None => format!("  {field}: {observed} ok"),
+            });
+        }
+        lines.push(format!(
+            "soft: model {}, cfw {}, webman {}",
+            facts.model,
+            facts.cfw,
+            facts.webman.as_deref().unwrap_or("not stated")
+        ));
+        lines.push(if self.also_satisfies.is_empty() {
+            "also satisfies: none".to_string()
+        } else {
+            format!("also satisfies: {}", self.also_satisfies.join(", "))
+        });
+        lines
+    }
+}
+
+/// The `status` report for `facts` under the `claimed` profile. The
+/// second value is the claim's own verdict as an error, for the exit
+/// code.
 ///
 /// # Errors
 ///
@@ -269,54 +356,34 @@ pub fn status_report(
     facts: &ConsoleFacts,
     profiles: &ConsoleProfiles,
     claimed: &str,
-) -> Result<(Vec<String>, Result<(), ConsoleProfileError>), ConsoleProfileError> {
+) -> Result<(StatusReport, Result<(), ConsoleProfileError>), ConsoleProfileError> {
     let verdict = profiles.check(claimed, facts);
     if let Err(unknown @ ConsoleProfileError::UnknownProfile { .. }) = verdict {
         return Err(unknown);
     }
-    let failed = match &verdict {
-        Err(ConsoleProfileError::Mismatch { mismatches, .. }) => mismatches.clone(),
-        _ => Vec::new(),
+    let report = StatusReport {
+        claimed: claimed.to_string(),
+        facts: facts.clone(),
+        verdict: match &verdict {
+            Err(ConsoleProfileError::Mismatch { mismatches, .. }) => StatusVerdict::Mismatch {
+                failed: mismatches
+                    .iter()
+                    .map(|m| FailedField {
+                        field: m.field.to_string(),
+                        expected: m.expected.clone(),
+                        observed: m.observed.clone(),
+                    })
+                    .collect(),
+            },
+            _ => StatusVerdict::Pass,
+        },
+        also_satisfies: profiles
+            .satisfied_by(facts)
+            .into_iter()
+            .filter(|name| name != claimed)
+            .collect(),
     };
-    let debugger = if facts.debugger_attached {
-        "attached"
-    } else {
-        "none"
-    };
-    let mut lines = vec![format!("profile {claimed}")];
-    for (field, observed) in [
-        ("models", facts.model.as_str()),
-        ("kernel", facts.kernel.as_str()),
-        ("firmware", facts.firmware.as_str()),
-        ("cfw", facts.cfw.as_str()),
-        ("cobra", facts.cobra.as_str()),
-        ("debugger_attached", debugger),
-    ] {
-        lines.push(match failed.iter().find(|m| m.field == field) {
-            Some(m) => format!(
-                "  {field}: {observed} FAILS, the profile requires {}",
-                m.expected
-            ),
-            None => format!("  {field}: {observed} ok"),
-        });
-    }
-    lines.push(format!(
-        "soft: model {}, cfw {}, webman {}",
-        facts.model,
-        facts.cfw,
-        facts.webman.as_deref().unwrap_or("not stated")
-    ));
-    let others: Vec<String> = profiles
-        .satisfied_by(facts)
-        .into_iter()
-        .filter(|name| name != claimed)
-        .collect();
-    lines.push(if others.is_empty() {
-        "also satisfies: none".to_string()
-    } else {
-        format!("also satisfies: {}", others.join(", "))
-    });
-    Ok((lines, verdict))
+    Ok((report, verdict))
 }
 
 #[cfg(test)]
