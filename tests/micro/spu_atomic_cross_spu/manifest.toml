@@ -53,3 +53,8 @@ kind = "process-exit"
 # The PPU opens the SPU image under /app_home/, so it deploys
 # beside the EBOOT.
 files = ["spu_main.elf"]
+# Bytes the design table leaves free (Any): a hardware run may vary them.
+volatile = [
+  { region = "result", offset = 4, size = 8, reason = "SPU 0's counter reading and putllc retries depend on how the two SPUs interleave" },
+  { region = "result", offset = 20, size = 8, reason = "SPU 1's counter reading and putllc retries depend on how the two SPUs interleave" },
+]

@@ -49,3 +49,7 @@ consume = true
 # test's row in tests/micro/ps3_gaps.tsv.
 portable = false
 not_portable_reason = "writes CellGov's writeback-mirror addresses and passes a fabricated RSX context id"
+# Bytes the design table leaves free (Any): a hardware run may vary them.
+volatile = [
+  { region = "result", offset = 8, size = 4, reason = "the poll count depends on when the report lands" },
+]

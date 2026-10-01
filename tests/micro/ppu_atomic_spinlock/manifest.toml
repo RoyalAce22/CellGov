@@ -64,3 +64,9 @@ path = "build"
 
 [cellgov.checkpoint]
 kind = "process-exit"
+
+[ps3]
+# Bytes the design table leaves free (Any): a hardware run may vary them.
+volatile = [
+  { region = "result", offset = 8, size = 8, reason = "stwcx retry counts depend on how the two threads interleave" },
+]
