@@ -58,3 +58,5 @@ python3 "$COMMON/patch_toc.py" \
 
 echo "=== Build complete ==="
 ls -la "$OUT/ppu_two_threads_disjoint_writes.elf"
+
+bash "$COMMON/package_ps3.sh" ppu_two_threads_disjoint_writes /src/ppu/main.c

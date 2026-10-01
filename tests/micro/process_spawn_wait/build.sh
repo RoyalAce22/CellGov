@@ -65,3 +65,5 @@ make_self "$OUT/child.elf" "$OUT/child.self"
 
 echo "=== Build complete ==="
 ls -la "$OUT"/parent.elf "$OUT"/child.elf "$OUT"/child.self
+
+bash "$COMMON/package_ps3.sh" process_spawn_wait /src/ppu/parent.c "$OUT/child.self"

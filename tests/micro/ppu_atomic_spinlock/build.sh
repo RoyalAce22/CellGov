@@ -57,3 +57,5 @@ python3 "$COMMON/patch_toc.py" \
 
 echo "=== Build complete ==="
 ls -la "$OUT/ppu_atomic_spinlock.elf"
+
+bash "$COMMON/package_ps3.sh" ppu_atomic_spinlock /src/ppu/main.c

@@ -65,3 +65,5 @@ python3 "$COMMON/patch_toc.py" \
 
 echo "=== Build complete ==="
 ls -la "$OUT/atomic_reservation.elf" "$OUT/spu_main.elf"
+
+bash "$COMMON/package_ps3.sh" atomic_reservation /src/ppu/main.c "$OUT/spu_main.elf"

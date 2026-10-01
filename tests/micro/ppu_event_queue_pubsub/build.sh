@@ -43,3 +43,5 @@ python3 "$COMMON/patch_toc.py" \
     "$OUT/ppu_event_queue_pubsub.elf" \
     "${PPU_PREFIX}-readelf" "${PPU_PREFIX}-nm"
 ls -la "$OUT/ppu_event_queue_pubsub.elf"
+
+bash "$COMMON/package_ps3.sh" ppu_event_queue_pubsub /src/ppu/main.c

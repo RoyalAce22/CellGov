@@ -55,3 +55,5 @@ python3 "$COMMON/patch_toc.py" \
 
 echo "=== Build complete ==="
 ls -la "$OUT/rsx_semaphore_post.elf"
+
+bash "$COMMON/package_ps3.sh" rsx_semaphore_post /src/ppu/main.c

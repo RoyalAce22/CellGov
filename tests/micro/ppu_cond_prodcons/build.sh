@@ -55,3 +55,5 @@ python3 "$COMMON/patch_toc.py" \
 
 echo "=== Build complete ==="
 ls -la "$OUT/ppu_cond_prodcons.elf"
+
+bash "$COMMON/package_ps3.sh" ppu_cond_prodcons /src/ppu/main.c

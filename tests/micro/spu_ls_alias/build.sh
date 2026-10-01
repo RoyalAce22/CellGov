@@ -66,3 +66,5 @@ python3 "$COMMON/patch_toc.py" \
 
 echo "=== Build complete ==="
 ls -la "$OUT/spu_ls_alias.elf" "$OUT/spu_main.elf"
+
+bash "$COMMON/package_ps3.sh" spu_ls_alias /src/ppu/main.c "$OUT/spu_main.elf"

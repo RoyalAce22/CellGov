@@ -55,3 +55,5 @@ python3 "$COMMON/patch_toc.py" \
 
 echo "=== Build complete ==="
 ls -la "$OUT/rsx_flip_status_transition.elf"
+
+bash "$COMMON/package_ps3.sh" rsx_flip_status_transition /src/ppu/main.c

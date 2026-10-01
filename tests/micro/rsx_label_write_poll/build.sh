@@ -57,3 +57,5 @@ python3 "$COMMON/patch_toc.py" \
 
 echo "=== Build complete ==="
 ls -la "$OUT/rsx_label_write_poll.elf"
+
+bash "$COMMON/package_ps3.sh" rsx_label_write_poll /src/ppu/main.c

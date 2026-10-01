@@ -66,3 +66,5 @@ python3 "$COMMON/patch_toc.py" \
 
 echo "=== Build complete ==="
 ls -la "$OUT/spu_atomic_misaligned_lsa.elf" "$OUT/spu_main.elf"
+
+bash "$COMMON/package_ps3.sh" spu_atomic_misaligned_lsa /src/ppu/main.c "$OUT/spu_main.elf"

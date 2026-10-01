@@ -43,3 +43,5 @@ python3 "$COMMON/patch_toc.py" \
     "$OUT/ppu_event_flag_wakeall.elf" \
     "${PPU_PREFIX}-readelf" "${PPU_PREFIX}-nm"
 ls -la "$OUT/ppu_event_flag_wakeall.elf"
+
+bash "$COMMON/package_ps3.sh" ppu_event_flag_wakeall /src/ppu/main.c

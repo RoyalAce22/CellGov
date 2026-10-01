@@ -65,3 +65,5 @@ python3 "$COMMON/patch_toc.py" \
 
 echo "=== Build complete ==="
 ls -la "$OUT/ls_to_shared.elf" "$OUT/spu_main.elf"
+
+bash "$COMMON/package_ps3.sh" ls_to_shared /src/ppu/main.c "$OUT/spu_main.elf"
