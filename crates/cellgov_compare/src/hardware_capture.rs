@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::console_profile::{ConsoleProfileError, ConsoleProfiles};
-use crate::observation::Observation;
+use crate::observation::{Observation, ObservedOutcome};
 
 /// The runner string a console capture carries in its observation.
 ///
@@ -133,7 +133,8 @@ pub struct MicrotestFacts {
     pub name: String,
     /// SHA-256 of the manifest.
     pub manifest_sha256: String,
-    /// SHA-256 of each source file, by path relative to the test.
+    /// SHA-256 of each source file, by path relative to the test; the
+    /// shared build inputs sit under `../common/`.
     pub sources: BTreeMap<String, String>,
 }
 
@@ -339,6 +340,10 @@ pub enum HardwareCaptureError {
     /// The observation carries a field a console capture never sets.
     #[error("capture observation carries {0}, which a console capture never sets")]
     ObservationField(&'static str),
+    /// A file sits directly in the capture directory, where only
+    /// profile directories belong: an old-layout capture, or a stray.
+    #[error("capture path {0} is a file; a capture lives in a ps3/<profile>/ directory")]
+    LooseFile(PathBuf),
 }
 
 fn is_sha256_hex(text: &str) -> bool {
@@ -424,7 +429,8 @@ pub fn load(
 }
 
 /// The observation a console capture converts to: the console's runner
-/// string and firmware, no state hashes and no run identity.
+/// string and firmware, a completed outcome, and no events, TTY log,
+/// step count, state hashes or run identity.
 fn check_observation(
     observation: &Observation,
     console: &ConsoleFacts,
@@ -445,6 +451,20 @@ fn check_observation(
     }
     if !observation.identity.is_empty() {
         return Err(HardwareCaptureError::ObservationField("a run identity"));
+    }
+    if observation.outcome != ObservedOutcome::Completed {
+        return Err(HardwareCaptureError::ObservationField(
+            "an outcome other than completed",
+        ));
+    }
+    if !observation.events.is_empty() {
+        return Err(HardwareCaptureError::ObservationField("events"));
+    }
+    if !observation.tty_log.is_empty() {
+        return Err(HardwareCaptureError::ObservationField("a TTY log"));
+    }
+    if observation.metadata.steps.is_some() {
+        return Err(HardwareCaptureError::ObservationField("a step count"));
     }
     Ok(())
 }
@@ -467,21 +487,49 @@ fn directory_present(path: &Path) -> Result<bool, HardwareCaptureError> {
     }
 }
 
+/// Every `ps3/<profile>/` directory under the microtest in `test_dir`,
+/// sorted; none when `ps3/` is absent.
+///
+/// # Errors
+///
+/// [`HardwareCaptureError::LooseFile`] for a file directly in `ps3/`,
+/// [`HardwareCaptureError::NotADirectory`] when `ps3/` is a file, and
+/// [`HardwareCaptureError::Io`] when it cannot be read.
+pub fn profile_directories(test_dir: &Path) -> Result<Vec<PathBuf>, HardwareCaptureError> {
+    let root = test_dir.join(CAPTURE_DIR);
+    if !directory_present(&root)? {
+        return Ok(Vec::new());
+    }
+    let io = |source| HardwareCaptureError::Io {
+        path: root.clone(),
+        source,
+    };
+    let mut dirs = Vec::new();
+    for entry in std::fs::read_dir(&root).map_err(io)? {
+        let path = entry.map_err(io)?.path();
+        match directory_present(&path) {
+            Ok(true) => dirs.push(path),
+            Ok(false) | Err(HardwareCaptureError::NotADirectory(_)) => {
+                return Err(HardwareCaptureError::LooseFile(path))
+            }
+            Err(other) => return Err(other),
+        }
+    }
+    dirs.sort();
+    Ok(dirs)
+}
+
 /// The reference for the microtest in `test_dir`: its capture under the
 /// reference profile when that directory exists, the emulator
 /// observations when nothing is there. A directory that exists but does
-/// not load, or names another test, is an error, never
-/// [`MicrotestReference::EmulatorOnly`].
+/// not load, or names another test, and a file directly in `ps3/`, are
+/// errors, never [`MicrotestReference::EmulatorOnly`].
 pub fn microtest_reference(
     test_dir: &Path,
     profiles: &ConsoleProfiles,
 ) -> Result<MicrotestReference, HardwareCaptureError> {
-    let root = test_dir.join(CAPTURE_DIR);
-    if !directory_present(&root)? {
-        return Ok(MicrotestReference::EmulatorOnly);
-    }
-    let dir = root.join(&profiles.reference);
-    if !directory_present(&dir)? {
+    let dir = test_dir.join(CAPTURE_DIR).join(&profiles.reference);
+    if !profile_directories(test_dir)?.contains(&dir) {
         return Ok(MicrotestReference::EmulatorOnly);
     }
     let capture = load(&dir, profiles)?;
@@ -501,3 +549,7 @@ pub fn microtest_reference(
 #[cfg(test)]
 #[path = "tests/hardware_capture_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/capture_shape_tests.rs"]
+mod capture_shape_tests;

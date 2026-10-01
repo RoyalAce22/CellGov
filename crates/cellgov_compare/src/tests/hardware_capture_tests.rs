@@ -14,8 +14,8 @@ use crate::test_support::sample_observation;
 const FRAME: &[u8] = b"CGOV\x00\x00\x00\x08\x00\x00\x00\x00\x00\x00\x00\x01";
 /// SHA-256 of `FRAME`, computed outside the crate.
 const FRAME_SHA256: &str = "a6a02b1911a2fd8c0fa63ac7afff4213a9c76e97501775919ae9a777cf917894";
-const PROFILE: &str = "cech20-cex-493";
-const TEST: &str = "spu_fixed_value";
+pub(super) const PROFILE: &str = "cech20-cex-493";
+pub(super) const TEST: &str = "spu_fixed_value";
 
 const PROFILES: &str = r#"
 reference = "cech20-cex-493"
@@ -45,11 +45,11 @@ cobra = "8.5"
 debugger_attached = false
 "#;
 
-fn profiles() -> ConsoleProfiles {
+pub(super) fn profiles() -> ConsoleProfiles {
     ConsoleProfiles::parse(PROFILES).expect("profiles")
 }
 
-fn provenance() -> CaptureProvenance {
+pub(super) fn provenance() -> CaptureProvenance {
     CaptureProvenance {
         schema: CAPTURE_PROVENANCE_SCHEMA,
         capture_id: CaptureProvenance::capture_id(TEST, FRAME_SHA256),
@@ -95,18 +95,21 @@ fn provenance() -> CaptureProvenance {
     }
 }
 
-fn console_observation() -> Observation {
+pub(super) fn console_observation() -> Observation {
     let mut observation = sample_observation();
     observation.metadata.runner = RUNNER_PS3_CEX.to_string();
     observation.state_hashes = None;
     observation.identity = Default::default();
     observation.runner_firmware = Some("4.93".to_string());
+    observation.events.clear();
+    observation.tty_log.clear();
+    observation.metadata.steps = None;
     observation
 }
 
 /// A test directory inside a scratch directory that lives as long as
 /// this value does.
-struct TestDir {
+pub(super) struct TestDir {
     _scratch: ScratchDir,
     path: PathBuf,
 }
@@ -120,7 +123,7 @@ impl std::ops::Deref for TestDir {
 }
 
 /// A scratch test directory named `name`.
-fn test_dir_named(name: &str) -> TestDir {
+pub(super) fn test_dir_named(name: &str) -> TestDir {
     let scratch = cellgov_testkit::scratch::scratch();
     let path = scratch.join(name);
     std::fs::create_dir_all(&path).expect("test dir");
@@ -131,13 +134,13 @@ fn test_dir_named(name: &str) -> TestDir {
 }
 
 /// A scratch test directory named for the test.
-fn test_dir() -> TestDir {
+pub(super) fn test_dir() -> TestDir {
     test_dir_named(TEST)
 }
 
 /// A whole capture under `profile` in a fresh test directory: the
 /// directory's guard and the capture directory.
-fn capture_in(
+pub(super) fn capture_in(
     profile: &str,
     provenance: &CaptureProvenance,
     observation: &Observation,
@@ -173,7 +176,7 @@ fn write_capture(
     dir
 }
 
-fn whole_capture() -> (TestDir, PathBuf) {
+pub(super) fn whole_capture() -> (TestDir, PathBuf) {
     capture_in(PROFILE, &provenance(), &console_observation())
 }
 

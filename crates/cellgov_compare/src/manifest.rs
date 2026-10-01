@@ -282,6 +282,20 @@ pub struct MemoryRegionSpec {
     pub addr: u64,
     /// Size in bytes.
     pub size: u64,
+    /// Where the region's bytes sit in the CGOV frame payload, for the
+    /// console runner, which reads the frame instead of guest memory.
+    /// `None` takes [`Self::addr`], the shape of a test that emits its
+    /// result struct from guest address 0.
+    #[serde(default)]
+    pub payload_offset: Option<u64>,
+}
+
+impl MemoryRegionSpec {
+    /// The region's offset in the CGOV frame payload: `payload_offset`,
+    /// or `addr` when the manifest gives none.
+    pub fn payload_offset(&self) -> u64 {
+        self.payload_offset.unwrap_or(self.addr)
+    }
 }
 
 /// RPCS3 decoder selection.

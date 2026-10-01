@@ -55,9 +55,12 @@ pub fn check_frame(bytes: &[u8]) -> Result<(), RunnerPs3Error> {
     Ok(())
 }
 
-/// The manifest's regions as positions in the frame payload: a region's
-/// `addr` is its offset inside the struct the test emits, and the
-/// observation reports the same number, as the emulator bridge does.
+/// The manifest's regions as positions in the frame payload: each
+/// region sits at its [`MemoryRegionSpec::payload_offset`], and the
+/// observation reports it at its `addr`, the guest address CellGov's
+/// own run reads it from.
+///
+/// [`MemoryRegionSpec::payload_offset`]: cellgov_compare::manifest::MemoryRegionSpec::payload_offset
 ///
 /// # Errors
 ///
@@ -90,7 +93,7 @@ pub fn payload_regions(manifest: &ConsoleManifest) -> Result<Vec<TtyRegion>, Run
         .iter()
         .map(|region| TtyRegion {
             name: region.name.clone(),
-            offset: region.addr,
+            offset: region.payload_offset(),
             size: region.size,
             guest_addr: region.addr,
         })
@@ -311,6 +314,20 @@ fn source_files(dir: &Path) -> Result<Vec<(String, PathBuf)>, RunnerPs3Error> {
     Ok(out)
 }
 
+/// The shared build inputs every microtest build reads, `../common/`
+/// beside the test directory, keyed by that relative path; none when
+/// the directory is absent.
+fn common_files(test_dir: &Path) -> Result<Vec<(String, PathBuf)>, RunnerPs3Error> {
+    let common = test_dir.join("..").join("common");
+    if !common.is_dir() {
+        return Ok(Vec::new());
+    }
+    Ok(source_files(&common)?
+        .into_iter()
+        .map(|(relative, path)| (format!("../common/{relative}"), path))
+        .collect())
+}
+
 /// The capture loop on a console whose identity is `facts`: preflight,
 /// deploy, start, wait, fetch, then the frame, observation and
 /// provenance written to `plan.out`, cleanup, and the transcript.
@@ -343,7 +360,11 @@ pub fn capture<C: ConsoleOps>(
     let inputs = CaptureInputs {
         name: plan.manifest.test.name.clone(),
         manifest: plan.manifest_path.clone(),
-        sources: source_files(&package.test_dir)?,
+        sources: [
+            source_files(&package.test_dir)?,
+            common_files(&package.test_dir)?,
+        ]
+        .concat(),
         eboot: package.eboot.clone(),
         ps3_elf: package.ps3_elf.clone(),
         reference_elf: package.reference_elf.clone(),
@@ -433,3 +454,7 @@ pub fn capture<C: ConsoleOps>(
 #[cfg(test)]
 #[path = "tests/capture_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/capture_layout_tests.rs"]
+mod capture_layout_tests;

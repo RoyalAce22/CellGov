@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use cellgov_compare::console_profile::{ConsoleProfiles, CONSOLE_PROFILES_FILE};
-use cellgov_compare::hardware_capture::CAPTURE_DIR;
+use cellgov_compare::hardware_capture::profile_directories;
 use runner_ps3::capture::replay;
 
 fn micro_root() -> PathBuf {
@@ -31,14 +31,14 @@ fn subdirectories(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Every `ps3/<profile>/` directory under a microtest, with its manifest.
+/// A file directly in a `ps3/` directory fails the target here: it is a
+/// capture no lookup would ever read.
 fn committed_captures() -> Vec<(PathBuf, PathBuf)> {
     let mut captures = Vec::new();
     for test in subdirectories(&micro_root()) {
-        let root = test.join(CAPTURE_DIR);
-        if root.is_dir() {
-            for capture in subdirectories(&root) {
-                captures.push((capture, test.join("manifest.toml")));
-            }
+        let dirs = profile_directories(&test).unwrap_or_else(|e| panic!("{e}"));
+        for capture in dirs {
+            captures.push((capture, test.join("manifest.toml")));
         }
     }
     captures

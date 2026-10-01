@@ -23,7 +23,8 @@ pub struct CaptureInputs {
     pub name: String,
     /// The manifest file.
     pub manifest: PathBuf,
-    /// Each source file, by its path relative to the microtest.
+    /// Each source file, by its path relative to the microtest, the
+    /// shared `../common/` build inputs included.
     pub sources: Vec<(String, PathBuf)>,
     /// `build/ps3/EBOOT.BIN`.
     pub eboot: PathBuf,

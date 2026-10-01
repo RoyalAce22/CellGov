@@ -20,8 +20,10 @@ name = "process_spawn_wait"
 [observe]
 # Parent TestResult at 0x100 (parent space):
 #   status + pid + spawn_rc + polls
+# The parent emits the same 16 bytes as its whole CGOV payload, so a
+# runner that reads the frame finds them at payload offset 0.
 memory_regions = [
-  { name = "result", addr = 256, size = 16 },
+  { name = "result", addr = 256, size = 16, payload_offset = 0 },
 ]
 
 [expect]
