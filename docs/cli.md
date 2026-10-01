@@ -92,6 +92,7 @@ reserved for commands that are quiet until they report.
 | `CELLGOV_NO_COLOR` | operator | Disable color for this program. |
 | `CELLGOV_FORCE_ANSI` | operator | Force ANSI terminal output. |
 | `CELLGOV_PS3_HOST` | operator | Name the console the PS3 runner talks to. |
+| `CELLGOV_PS3_PROFILE` | operator | Name the console profile a PS3 runner run claims. |
 | `CELLGOV_FW_DEBUG` | debug | Trace firmware package decryption. |
 | `CELLGOV_BOOT_TRACE_MEM` | debug | Record boot memory tracing. |
 | `CELLGOV_RUNGAME_PROFILE` | debug | Print host-time boot spans. |

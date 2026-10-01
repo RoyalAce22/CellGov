@@ -71,9 +71,14 @@ pub struct CaptureProvenance {
 }
 
 /// The public facts about the console; no identifier of the unit.
+///
+/// Every observed value is kept, hard and soft; which fields are hard is
+/// the [`crate::console_profile`] module's to say.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsoleFacts {
+    /// The console profile the run claimed.
+    pub profile: String,
     /// Model name, such as `CECH-2001A`.
     pub model: String,
     /// `cex` or `dex`.

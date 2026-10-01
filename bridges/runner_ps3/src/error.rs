@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use cellgov_compare::console_profile::ConsoleProfileError;
+
 /// Process exit codes, one per failure class.
 ///
 /// A script that drives the runner reads the class from the code alone;
@@ -57,6 +59,11 @@ pub enum RunnerPs3Error {
         /// The command that removes it.
         clear_with: String,
     },
+    /// The profiles file did not load, or the console failed the claimed
+    /// profile; the message names the profile to claim instead or the
+    /// file to add one to.
+    #[error("profile: {0}")]
+    Profile(#[from] ConsoleProfileError),
     /// The console did not answer as the protocol requires.
     #[error("transport: {0}")]
     Transport(#[from] crate::transport::TransportError),
@@ -85,6 +92,15 @@ impl RunnerPs3Error {
         match self {
             Self::Usage(_) | Self::LocalIo { .. } => ExitCode::Usage,
             Self::Refused { .. } => ExitCode::Refused,
+            Self::Profile(
+                ConsoleProfileError::Mismatch { .. } | ConsoleProfileError::UnknownProfile { .. },
+            ) => ExitCode::Refused,
+            Self::Profile(
+                ConsoleProfileError::Io { .. }
+                | ConsoleProfileError::Parse(_)
+                | ConsoleProfileError::UnknownReference(_)
+                | ConsoleProfileError::NoModels(_),
+            ) => ExitCode::Usage,
             Self::Transport(_) => ExitCode::Transport,
             Self::Timeout { .. } => ExitCode::Timeout,
             Self::Frame(_) => ExitCode::Frame,

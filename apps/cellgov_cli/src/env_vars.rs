@@ -41,6 +41,7 @@ pub(crate) const VALUE_SAMPLE: &str = "CELLGOV_VALUE_SAMPLE";
 pub(crate) const VALUE_SAMPLE_PATH: &str = "CELLGOV_VALUE_SAMPLE_PATH";
 pub(crate) const VALUE_SAMPLE_STRIDE: &str = "CELLGOV_VALUE_SAMPLE_STRIDE";
 pub(crate) const PS3_HOST: &str = "CELLGOV_PS3_HOST";
+pub(crate) const PS3_PROFILE: &str = "CELLGOV_PS3_PROFILE";
 
 const ENV_VARS: &[EnvVar] = &[
     EnvVar {
@@ -72,6 +73,11 @@ const ENV_VARS: &[EnvVar] = &[
         name: PS3_HOST,
         scope: Scope::Operator,
         purpose: "Name the console the PS3 runner talks to.",
+    },
+    EnvVar {
+        name: PS3_PROFILE,
+        scope: Scope::Operator,
+        purpose: "Name the console profile a PS3 runner run claims.",
     },
     EnvVar {
         name: "CELLGOV_FW_DEBUG",

@@ -1,0 +1,25 @@
+# Console profiles for the PS3 runner's captures.
+#
+# A profile names a class of console, never a unit, and holds only the
+# hard fields: those that can change what a microtest observes. The
+# runner refuses a console that fails a hard field of the profile the
+# run claims (--profile, or CELLGOV_PS3_PROFILE). Every other console
+# fact (the exact model string, the webMAN version, the CFW build
+# string) is recorded in the transcript and the provenance and never
+# refuses.
+#
+# Never edit a hard field of an existing profile: every capture taken
+# under its name assumed the old value. Add a new profile with a new
+# name instead. A profile name never carries an owner's name or any
+# unit identifier.
+
+# The profile the committed assertions are held to.
+reference = "cech20-cex-493"
+
+[profile.cech20-cex-493]
+models = ["CECH-20"]        # a model matches when it starts with one of these
+kernel = "cex"
+firmware = "4.93"
+cfw = "EvilNAT"
+cobra = "8.5"
+debugger_attached = false

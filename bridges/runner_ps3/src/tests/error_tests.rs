@@ -34,6 +34,42 @@ fn each_error_maps_to_the_class_its_message_names() {
             ExitCode::Refused,
         ),
         (
+            RunnerPs3Error::from(ConsoleProfileError::Mismatch {
+                profile: "cech20-cex-493".to_string(),
+                mismatches: Vec::new(),
+                satisfied: Vec::new(),
+            }),
+            ExitCode::Refused,
+        ),
+        (
+            RunnerPs3Error::from(ConsoleProfileError::UnknownProfile {
+                claimed: "cech25".to_string(),
+                known: "cech20-cex-493".to_string(),
+            }),
+            ExitCode::Refused,
+        ),
+        (
+            RunnerPs3Error::from(ConsoleProfileError::UnknownReference("cech25".to_string())),
+            ExitCode::Usage,
+        ),
+        (
+            RunnerPs3Error::from(ConsoleProfileError::NoModels("cech25".to_string())),
+            ExitCode::Usage,
+        ),
+        (
+            RunnerPs3Error::from(ConsoleProfileError::Io {
+                path: PathBuf::from("console_profiles.toml"),
+                source: std::io::Error::from(std::io::ErrorKind::NotFound),
+            }),
+            ExitCode::Usage,
+        ),
+        (
+            RunnerPs3Error::from(ConsoleProfileError::from(
+                toml::from_str::<toml::Table>("=").expect_err("bad toml"),
+            )),
+            ExitCode::Usage,
+        ),
+        (
             RunnerPs3Error::from(crate::transport::TransportError::ReplyTruncated),
             ExitCode::Transport,
         ),

@@ -17,6 +17,7 @@ fn provenance() -> CaptureProvenance {
         capture_id: CaptureProvenance::capture_id("spu_fixed_value", FRAME_SHA256),
         captured_at: "2026-09-30T12:00:00Z".to_string(),
         console: ConsoleFacts {
+            profile: "cech20-cex-493".to_string(),
             model: "CECH-2001A".to_string(),
             kernel: "cex".to_string(),
             firmware: "4.93".to_string(),

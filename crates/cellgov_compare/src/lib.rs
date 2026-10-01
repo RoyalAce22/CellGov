@@ -19,6 +19,7 @@ pub mod boot_summary;
 pub mod checkpoint_manifest;
 pub mod classify;
 pub mod compare;
+pub mod console_profile;
 pub mod diverge;
 pub mod format;
 pub mod hardware_capture;
