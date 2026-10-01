@@ -168,11 +168,11 @@ struct RunOutcome {
 }
 
 /// Invariant-break sites this microtest is known to trip, with their
-/// per-run counts. `process.spawn_unconsumed_args` is the guest
-/// passing sc-21 trailing register args the host does not model.
-/// Entries must be in site-string order -- the run collects them from
-/// a `BTreeMap`.
-const EXPECTED_INVARIANT_BREAKS: &[(&str, u64)] = &[("process.spawn_unconsumed_args", 1)];
+/// per-run counts: none. The microtests' syscall helpers pass zero in
+/// every register a call does not name, so sc 21 carries no trailing
+/// args for `process.spawn_unconsumed_args` to report. Entries must be
+/// in site-string order -- the run collects them from a `BTreeMap`.
+const EXPECTED_INVARIANT_BREAKS: &[(&str, u64)] = &[];
 
 fn run_once(parent_elf: &[u8], child_elf: &[u8]) -> RunOutcome {
     let mut rt = build_runtime(parent_elf, child_elf);

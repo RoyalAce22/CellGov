@@ -1,0 +1,330 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5725 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 62 C, fan 35%, /dev_hdd0 99737 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > QUIT
+#0016 < 221 BYE
+#0017 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0018 > USER anonymous
+#0019 < 331 OK
+#0020 > PASS anonymous@
+#0021 < 230 OK
+#0022 > TYPE I
+#0023 < 200 TYPE OK
+#0024 > PASV
+#0025 < 227 Entering Passive Mode (10,77,0,2,254,79)
+#0026 > STOR /dev_hdd0/tmp/cellgov_lease/holder (79 bytes)
+#0027 < 150 OK
+#0028 < 226 OK
+#0029 > QUIT
+#0030 < 221 BYE
+#0031 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0032 < 404 (516 bytes)
+#0033 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0034 > USER anonymous
+#0035 < 331 OK
+#0036 > PASS anonymous@
+#0037 < 230 OK
+#0038 > TYPE I
+#0039 < 200 TYPE OK
+#0040 > PASV
+#0041 < 227 Entering Passive Mode (10,77,0,2,128,88)
+#0042 > NLST /dev_hdd0/game
+#0043 < 150 OK
+#0044 < 226 [/dev_hdd0/game/] [ 97.4 GB free CPU: 67C | RSX: 63C]
+#0045 > QUIT
+#0046 < 221 BYE
+#0047 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0048 > USER anonymous
+#0049 < 331 OK
+#0050 > PASS anonymous@
+#0051 < 230 OK
+#0052 > TYPE I
+#0053 < 200 TYPE OK
+#0054 > MKD /dev_hdd0/game/CGOV00001
+#0055 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0056 > QUIT
+#0057 < 221 BYE
+#0058 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0059 > USER anonymous
+#0060 < 331 OK
+#0061 > PASS anonymous@
+#0062 < 230 OK
+#0063 > TYPE I
+#0064 < 200 TYPE OK
+#0065 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0066 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0067 > QUIT
+#0068 < 221 BYE
+#0069 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0070 > USER anonymous
+#0071 < 331 OK
+#0072 > PASS anonymous@
+#0073 < 230 OK
+#0074 > TYPE I
+#0075 < 200 TYPE OK
+#0076 > PASV
+#0077 < 227 Entering Passive Mode (10,77,0,2,138,16)
+#0078 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0079 < 150 OK
+#0080 < 226 OK
+#0081 > QUIT
+#0082 < 221 BYE
+#0083 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0084 > USER anonymous
+#0085 < 331 OK
+#0086 > PASS anonymous@
+#0087 < 230 OK
+#0088 > TYPE I
+#0089 < 200 TYPE OK
+#0090 > PASV
+#0091 < 227 Entering Passive Mode (10,77,0,2,140,107)
+#0092 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (5008 bytes)
+#0093 < 150 OK
+#0094 < 226 OK
+#0095 > QUIT
+#0096 < 221 BYE
+#0097 = deployed 2 file(s) under /dev_hdd0/game/CGOV00001
+#0098 > GET /play.ps3?CGOV00001
+#0099 < 200 (5725 bytes)
+#0100 = started
+#0101 > GET /cpursx.ps3
+#0102 < 200 (5725 bytes)
+#0103 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0104 < 404 (516 bytes)
+#0105 > GET /cpursx.ps3
+#0106 < 200 (5725 bytes)
+#0107 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0108 < 404 (516 bytes)
+#0109 > GET /cpursx.ps3
+#0110 < 200 (5725 bytes)
+#0111 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0112 < 404 (516 bytes)
+#0113 > GET /cpursx.ps3
+#0114 < 200 (5725 bytes)
+#0115 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0116 < 404 (516 bytes)
+#0117 > GET /cpursx.ps3
+#0118 < 200 (5725 bytes)
+#0119 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0120 < 404 (516 bytes)
+#0121 > GET /cpursx.ps3
+#0122 < 200 (5725 bytes)
+#0123 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0124 < 404 (516 bytes)
+#0125 > GET /cpursx.ps3
+#0126 < 200 (5725 bytes)
+#0127 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0128 < 404 (516 bytes)
+#0129 > GET /cpursx.ps3
+#0130 < 200 (5725 bytes)
+#0131 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0132 < 404 (516 bytes)
+#0133 > GET /cpursx.ps3
+#0134 < 200 (5725 bytes)
+#0135 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0136 < 404 (516 bytes)
+#0137 > GET /cpursx.ps3
+#0138 < 200 (5725 bytes)
+#0139 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0140 < 404 (516 bytes)
+#0141 > GET /cpursx.ps3
+#0142 < 200 (5725 bytes)
+#0143 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0144 < 404 (516 bytes)
+#0145 > GET /cpursx.ps3
+#0146 < 200 (5725 bytes)
+#0147 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0148 < 404 (516 bytes)
+#0149 > GET /cpursx.ps3
+#0150 < 200 (5725 bytes)
+#0151 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0152 < 404 (516 bytes)
+#0153 > GET /cpursx.ps3
+#0154 < 200 (5725 bytes)
+#0155 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0156 < 404 (516 bytes)
+#0157 > GET /cpursx.ps3
+#0158 < 200 (5725 bytes)
+#0159 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0160 < 404 (516 bytes)
+#0161 > GET /cpursx.ps3
+#0162 < 200 (5725 bytes)
+#0163 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0164 < 404 (516 bytes)
+#0165 > GET /cpursx.ps3
+#0166 < 200 (5725 bytes)
+#0167 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0168 < 404 (516 bytes)
+#0169 > GET /cpursx.ps3
+#0170 < 200 (5725 bytes)
+#0171 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0172 < 404 (516 bytes)
+#0173 > GET /cpursx.ps3
+#0174 < 200 (5725 bytes)
+#0175 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0176 < 404 (516 bytes)
+#0177 = still at the XMB after 20 poll(s); sending the start once more
+#0178 > GET /play.ps3?CGOV00001
+#0179 < 200 (5725 bytes)
+#0180 = started
+#0181 > GET /cpursx.ps3
+#0182 < 200 (5725 bytes)
+#0183 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0184 < 404 (516 bytes)
+#0185 > GET /cpursx.ps3
+#0186 < 200 (5725 bytes)
+#0187 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0188 < 404 (516 bytes)
+#0189 > GET /cpursx.ps3
+#0190 < 200 (5725 bytes)
+#0191 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0192 < 404 (516 bytes)
+#0193 > GET /cpursx.ps3
+#0194 < 200 (5725 bytes)
+#0195 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0196 < 404 (516 bytes)
+#0197 > GET /cpursx.ps3
+#0198 < 200 (5725 bytes)
+#0199 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0200 < 404 (516 bytes)
+#0201 > GET /cpursx.ps3
+#0202 < 200 (5725 bytes)
+#0203 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0204 < 404 (516 bytes)
+#0205 > GET /cpursx.ps3
+#0206 < 200 (5933 bytes)
+#0207 = left the XMB after 26 poll(s)
+#0208 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0209 < 404 (516 bytes)
+#0210 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0211 < 404 (516 bytes)
+#0212 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0213 < 200 (24 bytes)
+#0214 = result present after 3 poll(s)
+#0215 > GET /cpursx.ps3
+#0216 < 200 (6444 bytes)
+#0217 > GET /cpursx.ps3
+#0218 < 200 (6444 bytes)
+#0219 > GET /cpursx.ps3
+#0220 < 200 (5933 bytes)
+#0221 > GET /cpursx.ps3
+#0222 < 200 (5933 bytes)
+#0223 > GET /cpursx.ps3
+#0224 < 200 (5725 bytes)
+#0225 = back at the XMB after 5 poll(s)
+#0226 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0227 < 200 (24 bytes)
+#0228 = captured micro:ppu_event_queue_pubsub#54175d0829a3
+#0229 > GET /mount.ps3/unmount
+#0230 < 200 (4441 bytes)
+#0231 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0232 > USER anonymous
+#0233 < 331 OK
+#0234 > PASS anonymous@
+#0235 < 230 OK
+#0236 > TYPE I
+#0237 < 200 TYPE OK
+#0238 > PASV
+#0239 < 227 Entering Passive Mode (10,77,0,2,152,253)
+#0240 > NLST /dev_hdd0/game
+#0241 < 150 OK
+#0242 < 226 [/dev_hdd0/game/] [ 97.4 GB free CPU: 67C | RSX: 62C]
+#0243 > QUIT
+#0244 < 221 BYE
+#0245 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0246 > USER anonymous
+#0247 < 331 OK
+#0248 > PASS anonymous@
+#0249 < 230 OK
+#0250 > TYPE I
+#0251 < 200 TYPE OK
+#0252 > PASV
+#0253 < 227 Entering Passive Mode (10,77,0,2,156,154)
+#0254 > NLST /dev_hdd0/game/CGOV00001
+#0255 < 150 OK
+#0256 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.4 GB free CPU: 67C | RSX: 61C]
+#0257 > QUIT
+#0258 < 221 BYE
+#0259 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0260 > USER anonymous
+#0261 < 331 OK
+#0262 > PASS anonymous@
+#0263 < 230 OK
+#0264 > TYPE I
+#0265 < 200 TYPE OK
+#0266 > PASV
+#0267 < 227 Entering Passive Mode (10,77,0,2,160,94)
+#0268 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0269 < 150 OK
+#0270 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 62C]
+#0271 > QUIT
+#0272 < 221 BYE
+#0273 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0274 > USER anonymous
+#0275 < 331 OK
+#0276 > PASS anonymous@
+#0277 < 230 OK
+#0278 > TYPE I
+#0279 < 200 TYPE OK
+#0280 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0281 < 250 OK
+#0282 > QUIT
+#0283 < 221 BYE
+#0284 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0285 > USER anonymous
+#0286 < 331 OK
+#0287 > PASS anonymous@
+#0288 < 230 OK
+#0289 > TYPE I
+#0290 < 200 TYPE OK
+#0291 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0292 < 250 OK
+#0293 > QUIT
+#0294 < 221 BYE
+#0295 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0296 > USER anonymous
+#0297 < 331 OK
+#0298 > PASS anonymous@
+#0299 < 230 OK
+#0300 > TYPE I
+#0301 < 200 TYPE OK
+#0302 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0303 < 250 OK
+#0304 > QUIT
+#0305 < 221 BYE
+#0306 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0307 > USER anonymous
+#0308 < 331 OK
+#0309 > PASS anonymous@
+#0310 < 230 OK
+#0311 > TYPE I
+#0312 < 200 TYPE OK
+#0313 > RMD /dev_hdd0/game/CGOV00001
+#0314 < 250 OK
+#0315 > QUIT
+#0316 < 221 BYE
+#0317 > GET /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0318 < 200 (24 bytes)
+#0319 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0320 > USER anonymous
+#0321 < 331 OK
+#0322 > PASS anonymous@
+#0323 < 230 OK
+#0324 > TYPE I
+#0325 < 200 TYPE OK
+#0326 > DELE /dev_hdd0/tmp/cgov_ppu_event_queue_pubsub.bin
+#0327 < 250 OK
+#0328 > QUIT
+#0329 < 221 BYE
+#0330 = console restored

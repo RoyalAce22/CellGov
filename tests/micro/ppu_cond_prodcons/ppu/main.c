@@ -35,103 +35,16 @@
 #include <string.h>
 
 #include <sys/process.h>
+#include <sys/thread.h>
 #include <sys/tty.h>
 
+#include "cgov_lv2.h"
 #include "cgov_out.h"
 
 SYS_PROCESS_PARAM(1001, 0x10000)
 
-static inline s32 syscall0_s32(u64 num)
-{
-    register u64 r3 __asm__("3") = 0;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r11)
-        : "memory"
-    );
-    return (s32)r3;
-}
-
-static inline s32 syscall1_s32(u64 num, u64 a)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r11)
-        : "memory"
-    );
-    return (s32)r3;
-}
-
-static inline s32 syscall2_s32(u64 num, u64 a, u64 b)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r11)
-        : "memory"
-    );
-    return (s32)r3;
-}
-
-static inline s32 syscall3_s32(u64 num, u64 a, u64 b, u64 c)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r5 __asm__("5") = c;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r11)
-        : "memory"
-    );
-    return (s32)r3;
-}
-
-static inline s32 syscall8_s32(u64 num, u64 a, u64 b, u64 c, u64 d,
-                               u64 e, u64 f, u64 g, u64 h)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r5 __asm__("5") = c;
-    register u64 r6 __asm__("6") = d;
-    register u64 r7 __asm__("7") = e;
-    register u64 r8 __asm__("8") = f;
-    register u64 r9 __asm__("9") = g;
-    register u64 r10 __asm__("10") = h;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r9), "r"(r10), "r"(r11)
-        : "r0", "r12", "cr0", "ctr", "memory"
-    );
-    return (s32)r3;
-}
-
-static inline void syscall1_noreturn(u64 num, u64 a)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        :
-        : "r"(r3), "r"(r11)
-        : "memory"
-    );
-}
-
 #define SYS_PPU_THREAD_EXIT   41
 #define SYS_PPU_THREAD_JOIN   44
-#define SYS_PPU_THREAD_CREATE 52
 #define SYS_MUTEX_CREATE     100
 #define SYS_MUTEX_LOCK       102
 #define SYS_MUTEX_UNLOCK     104
@@ -340,16 +253,15 @@ int main(void)
     if (cond_not_full == 0)
         return fail(0x20);
 
-    /* Spawn consumer. */
-    ret = syscall8_s32(
-        SYS_PPU_THREAD_CREATE,
-        (unsigned long)&tid,
+    /* Spawn consumer and start it. */
+    ret = cgov_ppu_thread_create(
+        &tid,
         make_thread_param(&consumer_param, (const void *)&consumer_entry),
         0,          /* arg */
         0,          /* unk (reserved; liblv2's wrapper passes 0) */
         1000,       /* prio */
         0x4000,     /* stacksize */
-        0,          /* flags */
+        THREAD_JOINABLE, /* flags: the parent joins it */
         0);         /* threadname (none) */
     if (ret != 0)
         return fail(0x40);

@@ -27,93 +27,16 @@
 #include <string.h>
 
 #include <sys/process.h>
+#include <sys/thread.h>
 #include <sys/tty.h>
 
+#include "cgov_lv2.h"
 #include "cgov_out.h"
 
 SYS_PROCESS_PARAM(1001, 0x10000)
 
-static inline s32 syscall2_s32(u64 num, u64 a, u64 b)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r11)
-        : "memory"
-    );
-    return (s32)r3;
-}
-
-static inline s32 syscall3_s32(u64 num, u64 a, u64 b, u64 c)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r5 __asm__("5") = c;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r11)
-        : "memory"
-    );
-    return (s32)r3;
-}
-
-static inline s32 syscall4_s32(u64 num, u64 a, u64 b, u64 c, u64 d)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r5 __asm__("5") = c;
-    register u64 r6 __asm__("6") = d;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r6), "r"(r11)
-        : "memory"
-    );
-    return (s32)r3;
-}
-
-static inline s32 syscall8_s32(u64 num, u64 a, u64 b, u64 c, u64 d,
-                               u64 e, u64 f, u64 g, u64 h)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r5 __asm__("5") = c;
-    register u64 r6 __asm__("6") = d;
-    register u64 r7 __asm__("7") = e;
-    register u64 r8 __asm__("8") = f;
-    register u64 r9 __asm__("9") = g;
-    register u64 r10 __asm__("10") = h;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r9), "r"(r10), "r"(r11)
-        : "r0", "r12", "cr0", "ctr", "memory"
-    );
-    return (s32)r3;
-}
-
-static inline void syscall1_noreturn(u64 num, u64 a)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        :
-        : "r"(r3), "r"(r11)
-        : "memory"
-    );
-}
-
 #define SYS_PPU_THREAD_EXIT    41
 #define SYS_PPU_THREAD_JOIN    44
-#define SYS_PPU_THREAD_CREATE  52
 #define SYS_EVENT_QUEUE_CREATE       128
 #define SYS_EVENT_QUEUE_RECV         130
 #define SYS_EVENT_PORT_CREATE        134
@@ -197,9 +120,8 @@ struct SysEvent {
  * std::tie(gpr[4], gpr[5], gpr[6], gpr[7]) = queue.events.front().
  * Storing those registers into the caller's struct is the stub's
  * job, which is why this call cannot go through syscall3_s32: that
- * wrapper declares r4 and r5 as inputs only, so a compiler free to
- * hoist their setup out of a loop would feed the second receive the
- * first event's data1 as its timeout. */
+ * helper returns r3 alone. The asm keeps cgov_lv2.h's register
+ * contract, so the kernel may change any register it lists. */
 static inline s32 event_queue_receive(unsigned int equeue_id,
                                       struct SysEvent *out,
                                       unsigned long long timeout)
@@ -209,12 +131,17 @@ static inline s32 event_queue_receive(unsigned int equeue_id,
     register u64 r5 __asm__("5") = timeout;
     register u64 r6 __asm__("6") = 0;
     register u64 r7 __asm__("7") = 0;
+    register u64 r8 __asm__("8") = 0;
+    register u64 r9 __asm__("9") = 0;
+    register u64 r10 __asm__("10") = 0;
     register u64 r11 __asm__("11") = SYS_EVENT_QUEUE_RECV;
     __asm__ volatile (
         "sc\n"
-        : "+r"(r3), "+r"(r4), "+r"(r5), "+r"(r6), "+r"(r7)
-        : "r"(r11)
-        : "memory"
+        : "+r"(r3), "+r"(r4), "+r"(r5), "+r"(r6), "+r"(r7), "+r"(r8),
+          "+r"(r9), "+r"(r10), "+r"(r11)
+        :
+        : "r0", "r12", "lr", "ctr", "xer", "cr0", "cr1", "cr5", "cr6",
+          "cr7", "memory"
     );
     /* Only a CELL_OK return carries an event. An error return leaves
      * r4 holding the pointer this call passed in, and storing that as
@@ -300,11 +227,10 @@ int main(void)
     ret = syscall2_s32(SYS_EVENT_PORT_CONNECT_LOCAL, port_id, queue_id);
     if (ret != 0) { result.status = 0x40; write_tty_result(&result); return 1; }
 
-    /* Spawn receiver. */
-    ret = syscall8_s32(SYS_PPU_THREAD_CREATE,
-        (unsigned long)&tid,
+    /* Spawn receiver and start it. */
+    ret = cgov_ppu_thread_create(&tid,
         make_thread_param(&receiver_param, (const void *)&receiver_entry),
-        0, 0, 1000, 0x4000, 0, 0);
+        0, 0, 1000, 0x4000, THREAD_JOINABLE, 0);
     if (ret != 0) { result.status = 0x02; write_tty_result(&result); return 1; }
 
     /* Send N payloads through the connected port. data1 = i. */

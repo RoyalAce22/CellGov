@@ -28,69 +28,16 @@
 #include <string.h>
 
 #include <sys/process.h>
+#include <sys/thread.h>
 #include <sys/tty.h>
 
+#include "cgov_lv2.h"
 #include "cgov_out.h"
 
 SYS_PROCESS_PARAM(1001, 0x10000)
 
-/* Direct-syscall helpers. PSL1GHT provides LV2_SYSCALL inline
- * wrappers for many syscalls, but sys_ppu_thread_create (52) and
- * sys_ppu_thread_exit (41) are routed through HLE imports in the
- * library. We issue the syscalls directly so this microtest has
- * no HLE dependency. The calling convention is: r11 = syscall
- * number, r3-r10 = args, `sc` instruction, r3 = return value. */
-
-static inline s32 syscall8_s32(u64 num, u64 a, u64 b, u64 c, u64 d,
-                               u64 e, u64 f, u64 g, u64 h)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r5 __asm__("5") = c;
-    register u64 r6 __asm__("6") = d;
-    register u64 r7 __asm__("7") = e;
-    register u64 r8 __asm__("8") = f;
-    register u64 r9 __asm__("9") = g;
-    register u64 r10 __asm__("10") = h;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r9), "r"(r10), "r"(r11)
-        : "r0", "r12", "cr0", "ctr", "memory"
-    );
-    return (s32)r3;
-}
-
-static inline void syscall1_noreturn(u64 num, u64 a)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        :
-        : "r"(r3), "r"(r11)
-        : "memory"
-    );
-}
-
-static inline s32 syscall2_s32(u64 num, u64 a, u64 b)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r11)
-        : "memory"
-    );
-    return (s32)r3;
-}
-
 #define SYS_PPU_THREAD_EXIT   41
 #define SYS_PPU_THREAD_JOIN   44
-#define SYS_PPU_THREAD_CREATE 52
 
 /* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
  * stacksize, flags, threadname*); the user-space wrapper passes
@@ -187,15 +134,14 @@ int main(void)
     child_word = 0xDEADBEEF;
     parent_word = 0xDEADBEEF;
 
-    ret = syscall8_s32(
-        SYS_PPU_THREAD_CREATE,
-        (unsigned long)&tid,
+    ret = cgov_ppu_thread_create(
+        &tid,
         make_thread_param(&child_param, (const void *)&child_entry),
         0,          /* arg */
         0,          /* unk (reserved; liblv2's wrapper passes 0) */
         1000,       /* prio */
         0x4000,     /* stacksize */
-        0,          /* flags */
+        THREAD_JOINABLE, /* flags: the parent joins it */
         0);         /* threadname (none) */
     if (ret != 0)
         return fail(1);

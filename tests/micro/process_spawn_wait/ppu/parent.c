@@ -21,6 +21,7 @@
 #include <sys/process.h>
 #include <sys/tty.h>
 
+#include "cgov_lv2.h"
 #include "cgov_out.h"
 
 SYS_PROCESS_PARAM(1001, 0x10000)
@@ -31,38 +32,6 @@ SYS_PROCESS_PARAM(1001, 0x10000)
 #define RESULT_ADDR 0x100
 #define CHILD_PATH  "/app_home/child.self"
 #define MAX_POLLS   2000000u
-
-static inline s32 syscall2_s32(u64 num, u64 a, u64 b)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r11)
-        : "memory"
-    );
-    return (s32)r3;
-}
-
-static inline s32 syscall6_s32(u64 num, u64 a, u64 b, u64 c, u64 d, u64 e, u64 f)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r5 __asm__("5") = c;
-    register u64 r6 __asm__("6") = d;
-    register u64 r7 __asm__("7") = e;
-    register u64 r8 __asm__("8") = f;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r11)
-        : "r0", "r9", "r10", "r12", "cr0", "ctr", "memory"
-    );
-    return (s32)r3;
-}
 
 struct TestResult {
     unsigned int status;

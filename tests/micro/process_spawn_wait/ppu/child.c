@@ -10,6 +10,8 @@
 
 #include <sys/process.h>
 
+#include "cgov_lv2.h"
+
 SYS_PROCESS_PARAM(1001, 0x10000)
 
 #define MAGIC_ADDR 0x100
@@ -17,43 +19,6 @@ SYS_PROCESS_PARAM(1001, 0x10000)
 
 #define SYS_PPU_THREAD_EXIT   41
 #define SYS_PPU_THREAD_JOIN   44
-#define SYS_PPU_THREAD_CREATE 52
-
-/* Direct-syscall helpers, same shape as the sync-primitive
- * microtests: r11 = syscall number, r3-r10 = args, `sc`, r3 =
- * return value. */
-static inline s32 syscall8_s32(u64 num, u64 a, u64 b, u64 c, u64 d,
-                               u64 e, u64 f, u64 g, u64 h)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r4 __asm__("4") = b;
-    register u64 r5 __asm__("5") = c;
-    register u64 r6 __asm__("6") = d;
-    register u64 r7 __asm__("7") = e;
-    register u64 r8 __asm__("8") = f;
-    register u64 r9 __asm__("9") = g;
-    register u64 r10 __asm__("10") = h;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r9), "r"(r10), "r"(r11)
-        : "r0", "r12", "cr0", "ctr", "memory"
-    );
-    return (s32)r3;
-}
-
-static inline void syscall1_noreturn(u64 num, u64 a)
-{
-    register u64 r3 __asm__("3") = a;
-    register u64 r11 __asm__("11") = num;
-    __asm__ volatile (
-        "sc\n"
-        :
-        : "r"(r3), "r"(r11)
-        : "memory"
-    );
-}
 
 /* Syscall 52's param* is a ppu_thread_param_t { u32 entry_opd_ptr;
  * u32 tls }, and the OPD it names is the kernel's 8-byte
@@ -123,9 +88,8 @@ int main(void)
 
     *magic = MAGIC;
 
-    ret = syscall8_s32(
-        SYS_PPU_THREAD_CREATE,
-        (unsigned long)&tid,
+    ret = cgov_ppu_thread_create(
+        &tid,
         make_thread_param(&thread_param, (const void *)&stack_toucher),
         0,          /* arg */
         0,          /* unk (reserved; liblv2's wrapper passes 0) */

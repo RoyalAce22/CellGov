@@ -1,0 +1,332 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5725 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 62 C, fan 31%, /dev_hdd0 99737 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > QUIT
+#0016 < 221 BYE
+#0017 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0018 > USER anonymous
+#0019 < 331 OK
+#0020 > PASS anonymous@
+#0021 < 230 OK
+#0022 > TYPE I
+#0023 < 200 TYPE OK
+#0024 > PASV
+#0025 < 227 Entering Passive Mode (10,77,0,2,226,215)
+#0026 > STOR /dev_hdd0/tmp/cellgov_lease/holder (74 bytes)
+#0027 < 150 OK
+#0028 < 226 OK
+#0029 > QUIT
+#0030 < 221 BYE
+#0031 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0032 < 404 (511 bytes)
+#0033 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0034 > USER anonymous
+#0035 < 331 OK
+#0036 > PASS anonymous@
+#0037 < 230 OK
+#0038 > TYPE I
+#0039 < 200 TYPE OK
+#0040 > PASV
+#0041 < 227 Entering Passive Mode (10,77,0,2,228,234)
+#0042 > NLST /dev_hdd0/game
+#0043 < 150 OK
+#0044 < 226 [/dev_hdd0/game/] [ 97.4 GB free CPU: 67C | RSX: 63C]
+#0045 > QUIT
+#0046 < 221 BYE
+#0047 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0048 > USER anonymous
+#0049 < 331 OK
+#0050 > PASS anonymous@
+#0051 < 230 OK
+#0052 > TYPE I
+#0053 < 200 TYPE OK
+#0054 > MKD /dev_hdd0/game/CGOV00001
+#0055 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0056 > QUIT
+#0057 < 221 BYE
+#0058 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0059 > USER anonymous
+#0060 < 331 OK
+#0061 > PASS anonymous@
+#0062 < 230 OK
+#0063 > TYPE I
+#0064 < 200 TYPE OK
+#0065 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0066 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0067 > QUIT
+#0068 < 221 BYE
+#0069 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0070 > USER anonymous
+#0071 < 331 OK
+#0072 > PASS anonymous@
+#0073 < 230 OK
+#0074 > TYPE I
+#0075 < 200 TYPE OK
+#0076 > PASV
+#0077 < 227 Entering Passive Mode (10,77,0,2,240,36)
+#0078 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0079 < 150 OK
+#0080 < 226 OK
+#0081 > QUIT
+#0082 < 221 BYE
+#0083 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0084 > USER anonymous
+#0085 < 331 OK
+#0086 > PASS anonymous@
+#0087 < 230 OK
+#0088 > TYPE I
+#0089 < 200 TYPE OK
+#0090 > PASV
+#0091 < 227 Entering Passive Mode (10,77,0,2,244,219)
+#0092 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (5312 bytes)
+#0093 < 150 OK
+#0094 < 226 OK
+#0095 > QUIT
+#0096 < 221 BYE
+#0097 = deployed 2 file(s) under /dev_hdd0/game/CGOV00001
+#0098 > GET /play.ps3?CGOV00001
+#0099 < 200 (5725 bytes)
+#0100 = started
+#0101 > GET /cpursx.ps3
+#0102 < 200 (5725 bytes)
+#0103 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0104 < 404 (511 bytes)
+#0105 > GET /cpursx.ps3
+#0106 < 200 (5725 bytes)
+#0107 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0108 < 404 (511 bytes)
+#0109 > GET /cpursx.ps3
+#0110 < 200 (5725 bytes)
+#0111 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0112 < 404 (511 bytes)
+#0113 > GET /cpursx.ps3
+#0114 < 200 (5725 bytes)
+#0115 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0116 < 404 (511 bytes)
+#0117 > GET /cpursx.ps3
+#0118 < 200 (5725 bytes)
+#0119 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0120 < 404 (511 bytes)
+#0121 > GET /cpursx.ps3
+#0122 < 200 (5725 bytes)
+#0123 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0124 < 404 (511 bytes)
+#0125 > GET /cpursx.ps3
+#0126 < 200 (5725 bytes)
+#0127 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0128 < 404 (511 bytes)
+#0129 > GET /cpursx.ps3
+#0130 < 200 (5725 bytes)
+#0131 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0132 < 404 (511 bytes)
+#0133 > GET /cpursx.ps3
+#0134 < 200 (5725 bytes)
+#0135 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0136 < 404 (511 bytes)
+#0137 > GET /cpursx.ps3
+#0138 < 200 (5725 bytes)
+#0139 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0140 < 404 (511 bytes)
+#0141 > GET /cpursx.ps3
+#0142 < 200 (5725 bytes)
+#0143 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0144 < 404 (511 bytes)
+#0145 > GET /cpursx.ps3
+#0146 < 200 (5725 bytes)
+#0147 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0148 < 404 (511 bytes)
+#0149 > GET /cpursx.ps3
+#0150 < 200 (5725 bytes)
+#0151 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0152 < 404 (511 bytes)
+#0153 > GET /cpursx.ps3
+#0154 < 200 (5725 bytes)
+#0155 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0156 < 404 (511 bytes)
+#0157 > GET /cpursx.ps3
+#0158 < 200 (5725 bytes)
+#0159 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0160 < 404 (511 bytes)
+#0161 > GET /cpursx.ps3
+#0162 < 200 (5725 bytes)
+#0163 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0164 < 404 (511 bytes)
+#0165 > GET /cpursx.ps3
+#0166 < 200 (5725 bytes)
+#0167 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0168 < 404 (511 bytes)
+#0169 > GET /cpursx.ps3
+#0170 < 200 (5725 bytes)
+#0171 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0172 < 404 (511 bytes)
+#0173 > GET /cpursx.ps3
+#0174 < 200 (5725 bytes)
+#0175 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0176 < 404 (511 bytes)
+#0177 = still at the XMB after 20 poll(s); sending the start once more
+#0178 > GET /play.ps3?CGOV00001
+#0179 < 200 (5725 bytes)
+#0180 = started
+#0181 > GET /cpursx.ps3
+#0182 < 200 (5725 bytes)
+#0183 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0184 < 404 (511 bytes)
+#0185 > GET /cpursx.ps3
+#0186 < 200 (5725 bytes)
+#0187 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0188 < 404 (511 bytes)
+#0189 > GET /cpursx.ps3
+#0190 < 200 (5725 bytes)
+#0191 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0192 < 404 (511 bytes)
+#0193 > GET /cpursx.ps3
+#0194 < 200 (5725 bytes)
+#0195 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0196 < 404 (511 bytes)
+#0197 > GET /cpursx.ps3
+#0198 < 200 (5725 bytes)
+#0199 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0200 < 404 (511 bytes)
+#0201 > GET /cpursx.ps3
+#0202 < 200 (5725 bytes)
+#0203 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0204 < 404 (511 bytes)
+#0205 > GET /cpursx.ps3
+#0206 < 200 (5933 bytes)
+#0207 = left the XMB after 26 poll(s)
+#0208 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0209 < 404 (511 bytes)
+#0210 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0211 < 404 (511 bytes)
+#0212 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0213 < 200 (24 bytes)
+#0214 = result present after 3 poll(s)
+#0215 > GET /cpursx.ps3
+#0216 < 200 (6434 bytes)
+#0217 > GET /cpursx.ps3
+#0218 < 200 (6434 bytes)
+#0219 > GET /cpursx.ps3
+#0220 < 200 (6434 bytes)
+#0221 > GET /cpursx.ps3
+#0222 < 200 (5933 bytes)
+#0223 > GET /cpursx.ps3
+#0224 < 200 (5933 bytes)
+#0225 > GET /cpursx.ps3
+#0226 < 200 (5725 bytes)
+#0227 = back at the XMB after 6 poll(s)
+#0228 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0229 < 200 (24 bytes)
+#0230 = captured micro:ppu_cond_prodcons#c75f88c8a3a1
+#0231 > GET /mount.ps3/unmount
+#0232 < 200 (4441 bytes)
+#0233 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0234 > USER anonymous
+#0235 < 331 OK
+#0236 > PASS anonymous@
+#0237 < 230 OK
+#0238 > TYPE I
+#0239 < 200 TYPE OK
+#0240 > PASV
+#0241 < 227 Entering Passive Mode (10,77,0,2,128,109)
+#0242 > NLST /dev_hdd0/game
+#0243 < 150 OK
+#0244 < 226 [/dev_hdd0/game/] [ 97.4 GB free CPU: 67C | RSX: 62C]
+#0245 > QUIT
+#0246 < 221 BYE
+#0247 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0248 > USER anonymous
+#0249 < 331 OK
+#0250 > PASS anonymous@
+#0251 < 230 OK
+#0252 > TYPE I
+#0253 < 200 TYPE OK
+#0254 > PASV
+#0255 < 227 Entering Passive Mode (10,77,0,2,132,225)
+#0256 > NLST /dev_hdd0/game/CGOV00001
+#0257 < 150 OK
+#0258 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.4 GB free CPU: 67C | RSX: 62C]
+#0259 > QUIT
+#0260 < 221 BYE
+#0261 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0262 > USER anonymous
+#0263 < 331 OK
+#0264 > PASS anonymous@
+#0265 < 230 OK
+#0266 > TYPE I
+#0267 < 200 TYPE OK
+#0268 > PASV
+#0269 < 227 Entering Passive Mode (10,77,0,2,136,147)
+#0270 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0271 < 150 OK
+#0272 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 62C]
+#0273 > QUIT
+#0274 < 221 BYE
+#0275 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0276 > USER anonymous
+#0277 < 331 OK
+#0278 > PASS anonymous@
+#0279 < 230 OK
+#0280 > TYPE I
+#0281 < 200 TYPE OK
+#0282 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0283 < 250 OK
+#0284 > QUIT
+#0285 < 221 BYE
+#0286 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0287 > USER anonymous
+#0288 < 331 OK
+#0289 > PASS anonymous@
+#0290 < 230 OK
+#0291 > TYPE I
+#0292 < 200 TYPE OK
+#0293 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0294 < 250 OK
+#0295 > QUIT
+#0296 < 221 BYE
+#0297 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0298 > USER anonymous
+#0299 < 331 OK
+#0300 > PASS anonymous@
+#0301 < 230 OK
+#0302 > TYPE I
+#0303 < 200 TYPE OK
+#0304 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0305 < 250 OK
+#0306 > QUIT
+#0307 < 221 BYE
+#0308 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0309 > USER anonymous
+#0310 < 331 OK
+#0311 > PASS anonymous@
+#0312 < 230 OK
+#0313 > TYPE I
+#0314 < 200 TYPE OK
+#0315 > RMD /dev_hdd0/game/CGOV00001
+#0316 < 250 OK
+#0317 > QUIT
+#0318 < 221 BYE
+#0319 > GET /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0320 < 200 (24 bytes)
+#0321 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0322 > USER anonymous
+#0323 < 331 OK
+#0324 > PASS anonymous@
+#0325 < 230 OK
+#0326 > TYPE I
+#0327 < 200 TYPE OK
+#0328 > DELE /dev_hdd0/tmp/cgov_ppu_cond_prodcons.bin
+#0329 < 250 OK
+#0330 > QUIT
+#0331 < 221 BYE
+#0332 = console restored
