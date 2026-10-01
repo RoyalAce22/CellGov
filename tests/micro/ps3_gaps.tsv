@@ -1,0 +1,27 @@
+name	class	reason	issue
+atomic_reservation	pending	portable, not yet captured	1536
+barrier_wakeup	pending	portable, not yet captured	1536
+dma_completion	pending	portable, not yet captured	1536
+ls_to_shared	pending	portable, not yet captured	1536
+mailbox_roundtrip	pending	portable, not yet captured	1536
+ppu_atomic_spinlock	pending	portable, not yet captured	1535
+ppu_cond_prodcons	pending	portable, not yet captured	1535
+ppu_event_flag_wakeall	pending	portable, not yet captured	1535
+ppu_event_queue_pubsub	pending	portable, not yet captured	1535
+ppu_lwmutex_counter	pending	portable, not yet captured	1535
+ppu_semaphore_prodcons	pending	portable, not yet captured	1535
+ppu_two_threads_disjoint_writes	pending	portable, not yet captured	1535
+process_spawn_wait	pending	portable, not yet captured	1538
+rsx_flip_status_transition	not-portable	writes CellGov's writeback-mirror addresses and passes a fabricated RSX context id	1540
+rsx_label_write_poll	not-portable	writes CellGov's writeback-mirror addresses and passes a fabricated RSX context id	1540
+rsx_semaphore_post	not-portable	writes CellGov's writeback-mirror addresses and passes a fabricated RSX context id	1540
+spu_atomic_cross_spu	pending	portable, not yet captured	1535
+spu_atomic_misaligned_lsa	pending	portable, not yet captured	1536
+spu_dma_list	pending	portable, not yet captured	1536
+spu_in_mbox_overrun	pending	portable, not yet captured	1536
+spu_interrupt_mbox	pending	portable, not yet captured	1535
+spu_lluc_publish	pending	portable, not yet captured	1536
+spu_lr_event	pending	portable, not yet captured	1535
+spu_ls_alias	pending	portable, not yet captured	1536
+spu_mailbox_write	no-frame	a raw SPU image built by cellgov_mkelf; its result stays in local store and no PPU program emits a CGOV frame	-
+spu_signal_notify	pending	portable, not yet captured	1536

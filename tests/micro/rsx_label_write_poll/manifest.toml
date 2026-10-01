@@ -70,3 +70,9 @@ consume = true
 # (mirror_rsx_control_register_writes mirrors PUT and REF, not GET).
 # Without this the drain walks from get = 0 and never reaches the
 # commands this test wrote.
+
+[ps3]
+# Not runnable on a retail console as written; the same reason is the
+# test's row in tests/micro/ps3_gaps.tsv.
+portable = false
+not_portable_reason = "writes CellGov's writeback-mirror addresses and passes a fabricated RSX context id"
