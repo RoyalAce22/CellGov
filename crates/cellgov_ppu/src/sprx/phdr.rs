@@ -74,9 +74,16 @@ pub(super) struct VaddrRange {
 
 pub(super) fn v2f(seg_map: &[SegEntry], vaddr: usize) -> Option<usize> {
     for seg in seg_map {
-        if vaddr >= seg.vaddr && vaddr < seg.vaddr + seg.size {
-            return Some(vaddr - seg.vaddr + seg.file_offset);
+        let Some(delta) = vaddr.checked_sub(seg.vaddr) else {
+            continue;
+        };
+        if delta < seg.size {
+            return seg.file_offset.checked_add(delta);
         }
     }
     None
 }
+
+#[cfg(test)]
+#[path = "tests/phdr_tests.rs"]
+mod tests;

@@ -207,15 +207,20 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
         return Err(PrxParseError::MissingSegments(content.len()));
     };
 
+    // `segment_file_end` checks every file-backed PT_LOAD, zero-memsz
+    // ones included, so each map entry lies inside the image.
     let seg_map: Vec<SegEntry> = loads
         .iter()
         .filter(|l| l.p_filesz > 0)
-        .map(|l| SegEntry {
-            vaddr: l.p_vaddr as usize,
-            file_offset: l.p_offset,
-            size: l.p_filesz as usize,
+        .map(|l| {
+            segment_file_end(data, l)?;
+            Ok(SegEntry {
+                vaddr: l.p_vaddr as usize,
+                file_offset: l.p_offset,
+                size: l.p_filesz as usize,
+            })
         })
-        .collect();
+        .collect::<Result<_, PrxParseError>>()?;
 
     let text = extract_segment(data, &loads[text_idx], text_idx)?;
     let data_seg = extract_segment(data, &loads[data_idx], data_idx)?;
@@ -257,6 +262,18 @@ pub(super) fn extract_segment(
     phdr: &RawPhdr,
     index: usize,
 ) -> Result<PrxSegment, PrxParseError> {
+    let end = segment_file_end(data, phdr)?;
+    Ok(PrxSegment {
+        index,
+        vaddr: phdr.p_vaddr,
+        filesz: phdr.p_filesz,
+        memsz: phdr.p_memsz,
+        data: data[phdr.p_offset..end].to_vec(),
+    })
+}
+
+/// Returns the end of a PT_LOAD's file bytes, or `OutOfBounds` if they leave `data`.
+fn segment_file_end(data: &[u8], phdr: &RawPhdr) -> Result<usize, PrxParseError> {
     // ELF requires p_memsz >= p_filesz. The loader sizes its region
     // check against memsz, so filesz > memsz would write past the
     // validated range.
@@ -270,13 +287,7 @@ pub(super) fn extract_segment(
     if end > data.len() {
         return Err(PrxParseError::OutOfBounds);
     }
-    Ok(PrxSegment {
-        index,
-        vaddr: phdr.p_vaddr,
-        filesz: phdr.p_filesz,
-        memsz: phdr.p_memsz,
-        data: data[phdr.p_offset..end].to_vec(),
-    })
+    Ok(end)
 }
 
 /// Parse RELA entries from the 0x700000A4 relocation segment.
@@ -349,3 +360,7 @@ mod module_identity_tests;
 #[cfg(test)]
 #[path = "tests/placeholder_segment_tests.rs"]
 mod placeholder_segment_tests;
+
+#[cfg(test)]
+#[path = "tests/mapping_segment_tests.rs"]
+mod mapping_segment_tests;

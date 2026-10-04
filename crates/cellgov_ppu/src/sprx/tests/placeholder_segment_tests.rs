@@ -4,13 +4,16 @@
 use cellgov_ps3_abi::format::elf::{ELF64_RELA_SIZE, ELF_PHENTSIZE};
 
 use crate::sprx::test_fixtures::make_test_prx;
-use crate::sprx::{load_prx, parse_prx, PrxLoadError};
+use crate::sprx::{load_prx, parse_prx, PrxLoadError, PrxParseError};
 
 /// Fixture geometry from [`make_test_prx`].
 const PHDR_BASE: usize = 64;
 const RELOC_FILE_OFF: usize = 0x3F0;
 const DATA_VADDR: u64 = 0x100;
 const DATA_END_VADDR: u64 = 0x300;
+
+/// Where [`with_placeholder_segments`] moves the program-header table.
+const PADDED_PHDR_BASE: usize = 0x440;
 
 /// The PT_LOAD index of each content segment in the padded table.
 const TEXT_INDEX: usize = 0;
@@ -47,7 +50,7 @@ fn with_placeholder_segments(mut buf: Vec<u8>) -> Vec<u8> {
         empty,
         reloc.clone(),
     ];
-    let new_phoff = 0x440usize;
+    let new_phoff = PADDED_PHDR_BASE;
     let need = new_phoff + table.len() * ELF_PHENTSIZE;
     if buf.len() < need {
         buf.resize(need, 0);
@@ -144,6 +147,27 @@ fn a_relocation_resolves_against_the_pt_load_its_index_names() {
     let (relocs_applied, _, _, word) = padded;
     assert_eq!(relocs_applied, 3);
     assert_eq!(u64::from(word), base + 0x10);
+}
+
+#[test]
+fn a_placeholder_that_claims_file_bytes_it_cannot_hold_is_refused() {
+    let padded = with_placeholder_segments(make_test_prx());
+    parse_prx(&padded).expect("padded parse");
+    let len = padded.len() as u64;
+
+    // Each pair is `(p_offset, p_filesz)` for the placeholder in slot 1.
+    // Its p_memsz stays 0, so it is not a content segment and only the
+    // segment map reads it.
+    for (offset, filesz) in [(len, 0x10u64), (u64::MAX - 0xF, 0x20), (0, 0x10)] {
+        let mut bytes = padded.clone();
+        let at = PADDED_PHDR_BASE + ELF_PHENTSIZE;
+        bytes[at + 8..at + 16].copy_from_slice(&offset.to_be_bytes());
+        bytes[at + 32..at + 40].copy_from_slice(&filesz.to_be_bytes());
+        assert!(
+            matches!(parse_prx(&bytes), Err(PrxParseError::OutOfBounds)),
+            "offset {offset:#x} filesz {filesz:#x}"
+        );
+    }
 }
 
 /// Point RELA entry `entry`'s target PT_LOAD index at `index`.
