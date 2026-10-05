@@ -113,6 +113,9 @@ test_suite() {
 test_linux() {
     timed test-compare-no-default cargo test -p cellgov_compare --locked --no-default-features
     timed bench-build cargo bench --workspace --no-run --benches --locked
+    # The microtest post-link patcher, on ELF images built in memory.
+    # -B writes no __pycache__ into the tree.
+    timed patch-toc python3 -B -m unittest discover -s tests/micro/common -p 'test_*.py'
 }
 
 test_local() {
