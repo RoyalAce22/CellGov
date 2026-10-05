@@ -1,0 +1,16 @@
+[test]
+name = "lv2_syscall_bound"
+
+# A hardware probe: what sc answers for an r11 at and past the end of
+# the syscall dispatch table, every argument zero. The console capture
+# is the answer; no emulator runs it.
+
+[observe]
+# nine u64 r3 values, one per r11 in the order ppu/main.c lists: 72
+# bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 72 },
+]
+
+[expect]
+outcome = "completed"

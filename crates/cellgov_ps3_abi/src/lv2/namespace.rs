@@ -11,6 +11,11 @@
 //!   number itself currently sits at the namespace start
 //!   ([`crate::lv2::syscall::UNRESOLVED_IMPORT`]).
 //!
+//! Only the first boundary is the kernel's. The console answers
+//! `CELL_ENOSYS` for every r11 at or past the table, the
+//! `UnresolvedImport` range included; that range is a CellGov
+//! partition for the numbers its own import trampolines issue.
+//!
 //! This module holds the namespace layout and the pure encode /
 //! decode over it. The LEV-aware dispatch-hint classifier lives in
 //! `cellgov_lv2::syscall_classification`.

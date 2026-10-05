@@ -32,6 +32,8 @@ mod prx;
 mod prx_module_list_fill;
 #[path = "route_stub_tests.rs"]
 mod stub;
+#[path = "syscall_bound_console_tests.rs"]
+mod syscall_bound_console;
 #[path = "route_thread_start_tests.rs"]
 mod thread_start;
 #[path = "unsupported_arg_width_tests.rs"]

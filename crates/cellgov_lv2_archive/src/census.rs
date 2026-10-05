@@ -586,3 +586,7 @@ fn parse_hex32(value: &str) -> u32 {
 #[cfg(test)]
 #[path = "tests/census_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/census_console_tests.rs"]
+mod console_tests;

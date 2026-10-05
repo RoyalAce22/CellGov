@@ -1,0 +1,14 @@
+[test]
+name = "lv2_syscall_table_live"
+
+# A hardware probe: the running kernel's syscall dispatch table, read through the CFW's lv2 peek.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# the word before the table and the out-of-image count, then per slot the entry and its descriptor's code word: 16400 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 16400 },
+]
+
+[expect]
+outcome = "completed"

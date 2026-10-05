@@ -12,6 +12,12 @@
 //! name field is CellGov's own vocabulary. The LV2 archive's `name.tsv`
 //! records it under the `cellgov` source beside what the other
 //! committed sources say.
+//!
+//! The reference console runs the 4.93 table the census extracts. The
+//! console capture of tests/micro/lv2_syscall_table_live reads all
+//! 1024 slots. Every slot holds the census row's handler except eight
+//! not-implemented stubs: 6 to 11, 15 and 35. The console's CFW points
+//! these eight at handlers of its own.
 
 /// One entry of an `lv2_syscalls!` list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -434,11 +440,20 @@ lv2_syscalls! {
     /// call site in the installed firmware image loads 1, 2 or 3, so
     /// the kernel's answer to any other `pkg_id` is unestablished. The
     /// name is inherited vocabulary; no first-party list carries it.
+    // The console capture of tests/micro/lv2_syscall_table_live shows
+    // a handler of its own at this slot on 4.93, the census row's.
     SS_ACCESS_CONTROL_ENGINE = 871 => "sys_ss_access_control_engine";
 }
 
 /// Slots in the LV2 syscall dispatch table. `sc` selects one by the
-/// value in r11. A number at or past this count selects none.
+/// value in r11. The kernel compares all 64 bits of r11 with this count
+/// and runs slot 0, the not-implemented stub, for a number at or past
+/// it, so the call answers `CELL_ENOSYS`.
+// The count and the slot-0 fallback are the compare-and-clear the
+// census reads in the kernel's sc vector. The console capture of
+// tests/micro/lv2_syscall_bound shows CELL_ENOSYS, sign-extended into
+// r3, for r11 = 1024, 1025, 0xFFFF, 0x10000, 0x7FFFF, 0x80000 and
+// 0x1_0000_0001, as for slots 0 and 1023.
 pub const SYSCALL_TABLE_SLOTS: u64 = 1024;
 
 /// CellGov-private pseudo-syscall: fired by the unresolved-import
@@ -484,6 +499,8 @@ lv2_syscalls! {
     /// just above the module-id-by-address query at 461. What it does
     /// is unestablished. No committed source names it, so the constant
     /// carries no LV2 name.
+    // The console capture of tests/micro/lv2_syscall_table_live shows
+    // the shared not-implemented stub at this slot on 4.93.
     UNS_FUNC_462 = 462;
     /// `_sys_prx_register_module`.
     SYS_PRX_REGISTER_MODULE = 484 => "_sys_prx_register_module";
@@ -504,10 +521,14 @@ lv2_syscalls! {
     /// Gamepad YCON interface. The number sits just below the sys_io
     /// buffer block that starts at 624; the name is inherited
     /// vocabulary, not a Sony one.
+    // The console capture of tests/micro/lv2_syscall_table_live shows
+    // a handler of its own at this slot on 4.93, the census row's.
     GAMEPAD_YCON_IF = 621 => "sys_gamepad_ycon_if";
     /// HID is-root query. The number's owner is unestablished, and the
     /// name is uncorroborated: inherited vocabulary the archive reports
     /// under the `cellgov` source alone.
+    // The console capture of tests/micro/lv2_syscall_table_live shows
+    // a handler of its own at this slot on 4.93, the census row's.
     HID_IS_ROOT = 512 => "sys_hid_manager_is_process_permission_root";
     /// `sys_rsx_attribute`, the last entry of the sys_rsx block. The
     /// per-context setter is `sys_rsx_context_attribute` at 674.
