@@ -1,0 +1,39 @@
+[test]
+name = "spu_image_segments"
+
+[rpcs3]
+binary = "build/spu_image_segments.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# The failed step and the four initialize answers, the sixteen open
+# answers, then the local store at the COPY segment, the two FILL
+# segments and a range in no segment.
+memory_regions = [
+  { name = "answers", addr = 0, size = 32 },
+  { name = "open", addr = 32, size = 64 },
+  { name = "copied", addr = 96, size = 16 },
+  { name = "filled", addr = 112, size = 16 },
+  { name = "filled_everywhere", addr = 128, size = 16 },
+  { name = "untouched", addr = 144, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+short_name = "spuimgsegs"
+display_name = "CellGov SPU image segment records microtest"
+eboot_candidates = ["spu_image_segments.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"

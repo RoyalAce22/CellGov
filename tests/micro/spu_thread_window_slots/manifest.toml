@@ -1,0 +1,42 @@
+[test]
+name = "spu_thread_window_slots"
+
+[rpcs3]
+binary = "build/spu_thread_window_slots.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# The failed step, the join cause and status of each of the three
+# groups, what slot 0 got through each slot's local-store alias, each
+# slot's signal record, and the yield marker.
+memory_regions = [
+  { name = "header", addr = 0, size = 32 },
+  { name = "window", addr = 32, size = 64 },
+  { name = "slots", addr = 96, size = 64 },
+  { name = "yield", addr = 160, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+short_name = "spuwinslots"
+display_name = "CellGov SPU thread window slots microtest"
+eboot_candidates = ["spu_thread_window_slots.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

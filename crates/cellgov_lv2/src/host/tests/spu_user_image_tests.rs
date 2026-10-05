@@ -171,9 +171,10 @@ fn a_user_image_is_snapshotted_at_initialize_and_loaded_at_group_start() {
                 ls_start: 0x100,
                 bytes: (0x10..0x30u8).collect(),
             },
+            // A FILL range reads zero whatever its `value` word holds.
             LsSegment {
                 ls_start: 0x200,
-                bytes: [0xde, 0xad, 0xbe, 0xef].repeat(4),
+                bytes: vec![0; 0x10],
             },
         ])
     );

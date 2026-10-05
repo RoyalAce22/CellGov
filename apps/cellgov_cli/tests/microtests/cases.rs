@@ -8,6 +8,7 @@ use cellgov_ps3_abi::hw::rsx::{
 };
 use cellgov_ps3_abi::hw::spu::{event, MFC_ATOMIC_STAT_G, MFC_ATOMIC_STAT_S, MFC_ATOMIC_STAT_U};
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::spu::{group_join_cause, IMAGE_PATH_MAX, IMAGE_PATH_NAME_MAX};
 
 /// What a payload word must be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +55,115 @@ const SPU_INCREMENTS: u32 = 32;
 
 /// `SIGNAL_WORD` the SPU thread window test's sender signals.
 const SPU_ALIAS_SIGNAL_WORD: u32 = 0xC0DE_0001;
+
+/// spu_thread_window_slots's payload, in order:
+/// - the failed step and its code;
+/// - the join cause and status of its three groups;
+/// - what slot 0 got through each slot's local-store alias;
+/// - each slot's signal record;
+/// - the yield marker.
+const WINDOW_SLOTS_FIELDS: [(&str, Expect); 44] = window_slots_fields();
+
+const fn window_slots_fields() -> [(&'static str, Expect); 44] {
+    let mut fields = [("pad", Exact(0)); 44];
+    fields[0] = ("step", Exact(0));
+    fields[1] = ("rc", Exact(0));
+    fields[2] = ("window_cause", Exact(group_join_cause::ALL_THREADS_EXIT));
+    fields[3] = ("window_status", Exact(0));
+    fields[4] = ("group_exit_cause", Exact(group_join_cause::GROUP_EXIT));
+    // spu/main.c's GROUP_EXIT_STATUS.
+    fields[5] = ("group_exit_status", Exact(0x1234));
+    fields[6] = ("yield_cause", Exact(group_join_cause::ALL_THREADS_EXIT));
+    fields[7] = ("yield_status", Exact(0));
+    let mut slot = 0;
+    while slot < 4 {
+        let mut word = 0;
+        while word < 4 {
+            let pattern = 0x5A00_0000 | (slot as u32) << 16 | word as u32;
+            fields[8 + slot * 4 + word] = ("window", Exact(pattern));
+            word += 1;
+        }
+        // Slot 0 collects one bit from each other slot; slot n gets
+        // the release word 0xB0 + n.
+        let signal = if slot == 0 { 0xE } else { 0xB0 + slot as u32 };
+        fields[24 + slot * 4] = ("slot", Exact(slot as u32));
+        fields[25 + slot * 4] = ("signal", Exact(signal));
+        slot += 1;
+    }
+    fields[40] = ("yield_marker", Exact(0x5949_4C44));
+    fields
+}
+
+/// spu_image_segments's payload, in order:
+/// - the failed step and its code;
+/// - the four initialize answers;
+/// - the sixteen open answers;
+/// - the local store at the COPY range, at the two FILL ranges, and at
+///   a range in no segment.
+const IMAGE_SEGMENTS_FIELDS: [(&str, Expect); 40] = image_segments_fields();
+
+/// The probe's open cases: short names or one long name, and the path
+/// length without its NUL.
+const IMAGE_OPEN_CASES: [(bool, usize); 16] = [
+    (false, 255),
+    (false, 256),
+    (false, 269),
+    (false, 270),
+    (false, 271),
+    (false, 1022),
+    (false, 1023),
+    (false, 1024),
+    (false, 1025),
+    (false, 2048),
+    (true, 1022),
+    (true, 1023),
+    (true, 1024),
+    (true, 1025),
+    (true, 2048),
+    (false, 0),
+];
+
+/// What `sys_spu_image_open` answers for a path of `length` bytes under
+/// `/dev_hdd0/tmp/` that names no file.
+const fn image_open_answer(short_names: bool, length: usize) -> u32 {
+    const PREFIX: usize = "/dev_hdd0/tmp/".len();
+    let longest = if short_names || length <= PREFIX {
+        1
+    } else {
+        length - PREFIX
+    };
+    if length < IMAGE_PATH_MAX && longest > IMAGE_PATH_NAME_MAX {
+        errno::CELL_ENAMETOOLONG.code
+    } else {
+        errno::CELL_ENOENT.code
+    }
+}
+
+const fn image_segments_fields() -> [(&'static str, Expect); 40] {
+    let mut fields = [("pad", Exact(0)); 40];
+    fields[3] = ("type_3", Exact(errno::CELL_EINVAL.code));
+    fields[4] = ("entry_3fffc", Exact(0));
+    fields[5] = ("entry_40000", Exact(errno::CELL_EINVAL.code));
+    let mut i = 0;
+    while i < 16 {
+        let (short_names, length) = IMAGE_OPEN_CASES[i];
+        fields[8 + i] = ("open", Exact(image_open_answer(short_names, length)));
+        i += 1;
+    }
+    // ppu/main.c's COPY_SOURCE; both FILL ranges read zero.
+    let mut word = 0;
+    while word < 4 {
+        fields[24 + word] = ("copied", Exact(0xC0C0_C0C0 + 0x0101_0101 * word as u32));
+        fields[28 + word] = ("filled", Exact(0));
+        fields[32 + word] = ("filled_everywhere", Exact(0));
+        fields[36 + word] = ("untouched", Exact(0));
+        word += 1;
+    }
+    fields[0] = ("step", Exact(0));
+    fields[1] = ("rc", Exact(0));
+    fields[2] = ("initialize", Exact(0));
+    fields
+}
 
 /// The flip status once a flip lands.
 const FLIP_STATUS_DONE: u32 = CELL_GCM_DISPLAY_FLIP_STATUS_DONE as u32;
@@ -219,6 +329,16 @@ pub const CASES: &[Case] = &[
             ("received2", Exact(0xA8A9_AAAB)),
             ("received3", Exact(0xACAD_AEAF)),
         ],
+    },
+    Case {
+        name: "spu_thread_window_slots",
+        max_steps: 1_000_000,
+        fields: &WINDOW_SLOTS_FIELDS,
+    },
+    Case {
+        name: "spu_image_segments",
+        max_steps: 1_000_000,
+        fields: &IMAGE_SEGMENTS_FIELDS,
     },
     Case {
         name: "spu_lluc_publish",

@@ -3,8 +3,21 @@
 //! Behaviour (image open, thread-group create / start / join, mailbox
 //! write) lives in `cellgov_lv2::host::spu`; this module is data only.
 
-/// Maximum bytes `sys_spu_image_open` scans for the path NUL terminator.
-pub const IMAGE_PATH_MAX: usize = 256;
+/// The bytes `sys_spu_image_open` scans for the path's NUL. A path with
+/// no NUL in them is a path the kernel does not find: `CELL_ENOENT`.
+// The console capture of tests/micro/spu_image_segments shows the
+// bound: a path with its NUL at index 1023 reaches the name check, and
+// paths of 1024, 1025 and 2048 bytes answer CELL_ENOENT whatever their
+// names. The console runs Cobra, which hooks the kernel's path lookup;
+// CellGov takes these answers as the kernel's.
+pub const IMAGE_PATH_MAX: usize = 1024;
+
+/// The longest name in a path that `sys_spu_image_open` accepts; a
+/// longer one answers `CELL_ENAMETOOLONG`.
+// The console capture of tests/micro/spu_image_segments shows that a
+// 255-byte name answers CELL_ENOENT and a 256-byte name answers
+// CELL_ENAMETOOLONG.
+pub const IMAGE_PATH_NAME_MAX: usize = 255;
 
 /// The bits of an SPU thread's signal configuration: bit 0 puts
 /// signal-notification register 1 in OR mode, bit 1 register 2.
@@ -23,10 +36,12 @@ pub const LS_SIZE: u32 = crate::hw::spu::SPU_LS_SIZE as u32;
 /// The effective-address window in which LV2 maps each thread of an SPU
 /// thread group: slot `n` takes `STRIDE` bytes from `BASE + n * STRIDE`,
 /// its local store first and its problem-state area at `PROBLEM_STATE`.
-///
-/// No public document gives this layout. The values are the ones the
-/// oracle's MFC transfer path decodes (SPUThread.cpp
-/// `spu_thread::do_dma_transfer`).
+// No public document gives this layout; the open PS3 toolchain's
+// sys/spu.h names the same three values. The console capture of
+// tests/micro/spu_thread_window_slots shows them. Slot 0 of a
+// four-thread group gets each slot's local store, its own included,
+// through BASE + n * STRIDE. Its signals reach the SPU_Sig_Notify_1 of
+// each other slot through that slot's PROBLEM_STATE area.
 pub mod thread_window {
     /// The window's first effective address.
     pub const BASE: u64 = 0xF000_0000;
@@ -40,6 +55,11 @@ pub mod thread_window {
 /// The 16-byte `sys_spu_image` record `sys_spu_thread_initialize`
 /// reads: `type`, `entry_point`, `segs`, `nsegs`, each a big-endian
 /// 32-bit word.
+// The console capture of tests/micro/spu_image_segments shows the user
+// record: a record built word by word at these offsets runs. The
+// kernel accepts an entry of ENTRY_MAX and answers CELL_EINVAL for
+// ENTRY_MAX + 4. No capture shows a kernel record: the retail kernel
+// refuses to open an unsigned SPU ELF, so no probe holds one.
 pub mod image {
     /// Byte length of the record.
     pub const LEN: u32 = 16;
@@ -71,10 +91,14 @@ pub mod image {
 
 /// The 24-byte `sys_spu_segment` record: `type`, `ls`, `size` as
 /// big-endian 32-bit words, then a 64-bit-aligned source union whose
-/// first word is `addr` (copy source) or `value` (fill pattern), the
+/// first word is `addr` (copy source) or `value` (fill value), the
 /// layout the firmware's liblv2 `sys_spu_image_import` writes. The
 /// union is 64-bit wide, so the record is 0x18 bytes even though the
 /// three leading words and the copy source total 0x14.
+// The console capture of tests/micro/spu_image_segments shows the
+// layout. In a table of 0x18-byte records, a COPY record with decoy
+// sources at +0x0C and +0x14 loads from the source at ADDR_OFFSET. A
+// segment type of 3 answers CELL_EINVAL.
 pub mod segment {
     /// Byte length of the record.
     pub const LEN: u32 = 0x18;
@@ -84,13 +108,19 @@ pub mod segment {
     pub const LS_OFFSET: u32 = 4;
     /// Offset of the byte size.
     pub const SIZE_OFFSET: u32 = 8;
-    /// Offset of the copy source address or the fill value.
+    /// Offset of the copy source address, and of the fill value the
+    /// console does not apply.
     pub const ADDR_OFFSET: u32 = 0x10;
 
     /// `SYS_SPU_SEGMENT_TYPE_COPY`: `size` bytes copied from `addr`.
     pub const TYPE_COPY: u32 = 1;
-    /// `SYS_SPU_SEGMENT_TYPE_FILL`: `size` bytes filled with the
-    /// 32-bit `value` pattern.
+    /// `SYS_SPU_SEGMENT_TYPE_FILL`: `size` bytes that read zero when
+    /// the thread runs, whatever the `value` word holds.
+    // The console capture of tests/micro/spu_image_segments shows that
+    // two FILL ranges read zero: one with 0x11223344 at ADDR_OFFSET, one
+    // with 0x77777777 in all three source words. A local store the
+    // kernel clears before it loads reads the same, so the console
+    // capture cannot tell a zero fill from no write.
     pub const TYPE_FILL: u32 = 2;
     /// `SYS_SPU_SEGMENT_TYPE_INFO`: metadata, never loaded.
     pub const TYPE_INFO: u32 = 4;
@@ -134,6 +164,10 @@ pub mod event {
 }
 
 /// `cause` enum returned by `sys_spu_thread_group_join`.
+// The console captures of tests/micro/spu_thread_window_slots and
+// tests/micro/spu_stop_service_codes show all three, each with the
+// join status it carries: GROUP_EXIT with the exit status,
+// ALL_THREADS_EXIT with 0, and TERMINATED with the terminate value.
 pub mod group_join_cause {
     /// `SYS_SPU_THREAD_GROUP_JOIN_GROUP_EXIT`: a thread of the group
     /// called `sys_spu_thread_group_exit`, which ended every thread.
@@ -150,13 +184,19 @@ pub mod group_join_cause {
 /// service. The SPU puts the service's argument in `SPU_WrOutMbox`
 /// first.
 ///
-/// No public document names these values; they are unestablished. The
-/// open PS3 toolchain's `spu_thread_exit` writes its status to
-/// `SPU_WrOutMbox` and stops with [`THREAD_EXIT`](stop_code::THREAD_EXIT),
-/// as every SPU program under `tests/micro` shows once its `build.sh`
-/// has run. Nothing in the tree witnesses the other values.
+/// No public document names these values. The open PS3 toolchain's
+/// SPU thread library issues each one, and the reference console
+/// serves each one as the service named here.
 ///
 /// [CBEA p:94 s:8.5.2] a stop-and-signal copies its 14-bit code into bits 2 through 15 of SPU_Status.
+// The console captures show each service:
+// - tests/micro/spu_thread_window_slots: YIELD resumes the thread,
+//   GROUP_EXIT ends the group with its status, and THREAD_EXIT ends
+//   the thread.
+// - tests/micro/spu_stop_service_codes: RECEIVE_EVENT takes an event
+//   from a bound queue. TRY_RECEIVE_EVENT answers CELL_EBUSY on an
+//   empty queue and CELL_EINVAL on an unbound queue number.
+// Each probe's SPU program issues these codes after its build.sh runs.
 pub mod stop_code {
     /// `spu_thread_group_yield`: the thread group gives up its SPUs and
     /// resumes.

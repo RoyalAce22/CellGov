@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "capture_id": "micro:spu_stop_service_codes#81ddc61b547b",
+  "captured_at": "2026-10-05T01:18:38Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 65,
+      "fan_percent": 36
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "ec684116a8b03d74ed08ef18214b972f4b0e5b69",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/ec684116a8b03d74ed08ef18214b972f4b0e5b69"
+  },
+  "microtest": {
+    "name": "spu_stop_service_codes",
+    "manifest_sha256": "0a70739fcd45638de7e840aed64e6da1df4e52fda429b78214a0da2450c4e20c",
+    "sources": {
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "ba14ec3c62738bce8007004b391ad88a7fd3f06d20eccd6fe216ea7b7afff94d",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_toc.py": "a636189ce940704db8773310685bcea005530d2a54dbc35e73debdd56f218435",
+      "build.sh": "fc1a7018e88782b0f2f581a81410275f46081d0af63742adfb9a35053c4169ab",
+      "ppu/main.c": "e7ee4e175f6776b8b597c7f0952a92c2db9fce58d1d245576ad43e446eba813d",
+      "spu/main.c": "1a2ebf0ee8c3a6948adf396ee21a763297176b6d274ee69647cd0cc7159c5ad1"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "d337ca4cf194f265e7ad1d437489b5e1e69a5d534b0c04433405b7df0d0894ad",
+    "ps3_elf_sha256": "5af4ec224ad5a439bf4073426326d55ee0f5e4f447136ba3740d864c264c0362",
+    "reference_elf_sha256": "535531dfc245265d1920935a68a11e0ae218bd05e595e7ae11df6bb793ae5ae9",
+    "siblings": {
+      "spu_main.elf": "ead5013a0d2c3edf8ec0cacfcb2f0fc6e3d57fb4b1f5c4aebe530c473ae34032"
+    },
+    "param_sfo_sha256": "1ff9d493606f3acd5aa5e5dd69726bc80c96899bc8a2efc74547f6b0e8a7c8af"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "81ddc61b547b6b35f647c6784440c6bb47b26f10e7e389febcb432534af853f4",
+    "bytes": 72,
+    "result_path": "/dev_hdd0/tmp/cgov_spu_stop_service_codes.bin"
+  },
+  "digest": "81ddc61b547b6b35f647c6784440c6bb47b26f10e7e389febcb432534af853f4  micro:spu_stop_service_codes  72",
+  "recapture_reason": null
+}

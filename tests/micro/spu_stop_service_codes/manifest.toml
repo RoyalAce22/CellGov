@@ -1,0 +1,22 @@
+[test]
+name = "spu_stop_service_codes"
+
+# A hardware probe: the join of a terminated SPU thread group, and the
+# event-queue receive and tryreceive services an SPU thread asks for
+# with stop-and-signal. The console capture is the answer; no emulator
+# runs it.
+
+[observe]
+# failed step + rc, the terminate answer, the two joins, then the SPU's
+# receive and tryreceive answers: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

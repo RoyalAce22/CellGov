@@ -28,6 +28,28 @@ fn kernel_image_struct(handle: crate::image::SpuImageHandle) -> [u8; 16] {
     img_struct
 }
 
+/// The path `sys_spu_image_open` names at `path_ptr`, without its NUL,
+/// or the code the kernel answers instead.
+fn image_path(rt: &dyn Lv2Runtime, path_ptr: u32) -> Result<&[u8], errno::Lv2ErrCode> {
+    let addr = u64::from(path_ptr);
+    let Some(path) = rt.read_committed_until(addr, spu::IMAGE_PATH_MAX, 0) else {
+        // No NUL sits within the window. If the whole window reads, the
+        // kernel does not find the path; if it does not, the read faults.
+        return Err(if rt.read_committed(addr, spu::IMAGE_PATH_MAX).is_some() {
+            errno::CELL_ENOENT
+        } else {
+            errno::CELL_EFAULT
+        });
+    };
+    if path
+        .split(|&b| b == b'/')
+        .any(|name| name.len() > spu::IMAGE_PATH_NAME_MAX)
+    {
+        return Err(errno::CELL_ENAMETOOLONG);
+    }
+    Ok(path)
+}
+
 /// Why a user-type `sys_spu_image` was refused at thread initialize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UserImageRefusal {
@@ -125,17 +147,14 @@ impl Lv2Host {
                 ));
             }
             placed.push((ls, size));
+            // A FILL range reads zero on the console whatever its
+            // `value` word holds.
             let bytes = if seg_type == segment::TYPE_COPY {
                 rt.read_committed(u64::from(addr), size as usize)
                     .ok_or(UserImageRefusal::Unreadable)?
                     .to_vec()
             } else {
-                addr.to_be_bytes()
-                    .iter()
-                    .copied()
-                    .cycle()
-                    .take(size as usize)
-                    .collect()
+                vec![0; size as usize]
             };
             segments.push(LsSegment {
                 ls_start: ls,
@@ -214,7 +233,9 @@ impl Lv2Host {
     /// # Errors
     ///
     /// - `CELL_EFAULT` when the path bytes are unreadable.
-    /// - `CELL_EINVAL` when no NUL sits within `IMAGE_PATH_MAX`.
+    /// - `CELL_ENAMETOOLONG` when a name in the path is longer than
+    ///   `IMAGE_PATH_NAME_MAX`.
+    /// - `CELL_ENOENT` when no NUL sits within `IMAGE_PATH_MAX`.
     /// - `CELL_ENOENT` when the store holds no image at the path.
     pub(super) fn dispatch_image_open(
         &mut self,
@@ -224,20 +245,10 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let path_bytes = match rt.read_committed(path_ptr as u64, spu::IMAGE_PATH_MAX) {
-            Some(bytes) => bytes,
-            None => {
-                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
-            }
+        let path = match image_path(rt, path_ptr) {
+            Ok(path) => path,
+            Err(code) => return Lv2Dispatch::immediate(code.into()),
         };
-        // Missing NUL is malformed (EINVAL), distinct from not-found (ENOENT).
-        let path_len = match path_bytes.iter().position(|&b| b == 0) {
-            Some(n) => n,
-            None => {
-                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
-            }
-        };
-        let path = &path_bytes[..path_len];
 
         let record = match self.state.content.lookup_by_path(path) {
             Some(r) => r,
@@ -849,6 +860,10 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/spu_user_image_tests.rs"]
 mod user_image_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_console_tests.rs"]
+mod console_tests;
 
 #[cfg(test)]
 #[path = "tests/encoding_cap_tests.rs"]
