@@ -350,11 +350,10 @@ fn event_flag_error_and_busy_exits_zero_a_nonnull_result_ptr() {
     );
     let id = extract_created_id(&created);
 
-    // Bad mode: EINVAL stores 0 (and takes precedence over ESRCH --
-    // the id here is unknown too).
+    // Bad mode on a live id: EINVAL stores 0.
     let bad_mode = host.dispatch(
         Lv2Request::EventFlagWait {
-            id: id + 1,
+            id,
             bits: 0b1,
             mode: 0x03,
             result_ptr: 0x300,

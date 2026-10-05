@@ -7,10 +7,11 @@
 //!
 //! The hardware trace in `tests/ps3autotests/tests/lv2/sys_event_flag`
 //! pins a refusal code on every arm here, the set / clear arithmetic,
-//! and the count cancel reports. It never presents two faults at once,
-//! so the mode-before-id order is CellGov's own. It never destroys a
-//! flag with a parked waiter, so destroy's `CELL_EBUSY` has no trace
-//! behind it.
+//! and the count cancel reports. It never presents two faults at once.
+//! The console capture of `tests/micro/lv2_event_flag_check_order`
+//! does: wait and trywait check the id before the mode. The trace never
+//! destroys a flag with a parked waiter, so destroy's `CELL_EBUSY` has
+//! no trace behind it.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
@@ -133,11 +134,16 @@ impl Lv2Host {
         };
         // Every non-park exit stores through a non-null result
         // pointer: an error exit stores 0, and only a satisfied wait
-        // stores the observed pattern. The order of mode validation
-        // against the id lookup is unestablished. The hardware trace
-        // in tests/ps3autotests/tests/lv2/sys_event_flag pins EINVAL
-        // for a bad mode and ESRCH for a bad id, but never combines
-        // the two. CellGov validates the mode first.
+        // stores the observed pattern. The arm checks the id before the
+        // mode, so an unknown id answers ESRCH whatever the mode; the
+        // console capture of tests/micro/lv2_event_flag_check_order
+        // shows this order.
+        if self.state.event_flags.lookup(id).is_none() {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_ESRCH.into(),
+                effects: event_flag_result_write(result_ptr, 0, requester, tick),
+            };
+        }
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EINVAL.into(),
@@ -205,9 +211,14 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         // Every exit stores through a non-null result pointer:
         // EINVAL, ESRCH, and the no-match EBUSY all store 0; only a
-        // match stores the observed pattern. As in the wait arm,
-        // CellGov validates the mode before the id lookup and no
-        // trace orders the two.
+        // match stores the observed pattern. As in the wait arm, this
+        // arm checks the id before the mode.
+        if self.state.event_flags.lookup(id).is_none() {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_ESRCH.into(),
+                effects: event_flag_result_write(result_ptr, 0, requester, tick),
+            };
+        }
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EINVAL.into(),
@@ -418,3 +429,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/event_flag_clear_all_tests.rs"]
 mod clear_all_tests;
+
+#[cfg(test)]
+#[path = "tests/event_flag_console_tests.rs"]
+mod console_tests;

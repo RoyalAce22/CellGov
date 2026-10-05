@@ -1,0 +1,17 @@
+[test]
+name = "lv2_event_flag_check_order"
+
+# A hardware probe: sys_event_flag_wait (85) and sys_event_flag_trywait
+# (86) with a bad id, a bad mode, and both at once, against one live
+# flag. The console capture is the answer; no emulator runs it.
+
+[observe]
+# failed step + rc, then twelve 16-byte case records (u32 rc, u32 zero,
+# u64 result word), six for 85 and six for 86, in the order
+# ppu/main.c lists: 200 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 200 },
+]
+
+[expect]
+outcome = "completed"
