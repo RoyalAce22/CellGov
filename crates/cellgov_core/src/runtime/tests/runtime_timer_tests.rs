@@ -367,7 +367,7 @@ fn semaphore_timed_wait_expires_with_etimedout() {
     let recorder = unit.as_any().downcast_ref::<RecordingUnit>().unwrap();
     assert_eq!(
         recorder.observed_r3.get(),
-        Some(0x8001_000Bu64),
+        Some(0xFFFF_FFFF_8001_000Bu64),
         "expired semaphore wait must deliver CELL_ETIMEDOUT"
     );
     assert!(
@@ -523,7 +523,7 @@ fn all_blocked_time_warp_expires_semaphore_wait_with_etimedout() {
     let recorder = unit.as_any().downcast_ref::<RecordingUnit>().unwrap();
     assert_eq!(
         recorder.observed_r3.get(),
-        Some(0x8001_000Bu64),
+        Some(0xFFFF_FFFF_8001_000Bu64),
         "warp-expired semaphore wait must deliver CELL_ETIMEDOUT"
     );
     assert_eq!(rt.timer_wakes_pending(), 0);
@@ -712,7 +712,7 @@ fn contended_cond_expiry_reparks_without_phantom_timer_wake_record() {
     let recorder = unit.as_any().downcast_ref::<RecordingUnit>().unwrap();
     assert_eq!(
         recorder.observed_r3.get(),
-        Some(0x8001_000Bu64),
+        Some(0xFFFF_FFFF_8001_000Bu64),
         "cond timeout with contended mutex must still deliver CELL_ETIMEDOUT"
     );
     assert_eq!(rt.lv2_host().observability().invariant_break_count, 0);
@@ -922,7 +922,7 @@ fn a_no_wake_expiry_warps_again_instead_of_reporting_all_blocked() {
     let recorder = unit.as_any().downcast_ref::<RecordingUnit>().unwrap();
     assert_eq!(
         recorder.observed_r3.get(),
-        Some(0x8001_000Bu64),
+        Some(0xFFFF_FFFF_8001_000Bu64),
         "the second warp's semaphore expiry must deliver CELL_ETIMEDOUT"
     );
     assert_eq!(rt.timer_wakes_pending(), 0);

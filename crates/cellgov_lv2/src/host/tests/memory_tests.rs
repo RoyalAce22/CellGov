@@ -49,9 +49,10 @@ fn memory_allocate_aligns_to_the_page_size_its_flags_name() {
     let mut host = Lv2Host::new();
     host.set_mem_alloc_base(0x008A_0000);
     let rt = FakeRuntime::new(0x10000);
+    // One page of the size the flags name.
     let mut alloc = |flags: u64| match host.dispatch(
         Lv2Request::MemoryAllocate {
-            size: 0x10000,
+            size: if flags == 0x200 { 0x1_0000 } else { 0x10_0000 },
             flags,
             alloc_addr_ptr: 0x100,
         },
@@ -73,12 +74,12 @@ fn memory_allocate_aligns_to_the_page_size_its_flags_name() {
     );
     assert_eq!(
         alloc(0x200),
-        0x0091_0000,
+        0x00A0_0000,
         "the cursor resumes after the 1 MiB block"
     );
     assert_eq!(
         alloc(0),
-        0x00A0_0000,
+        0x00B0_0000,
         "a word naming no page size takes 1 MiB"
     );
 }
@@ -133,11 +134,11 @@ fn user_memory_size_available_falls_with_allocation() {
             other => panic!("expected Immediate(0), got {other:?}"),
         }
     };
-    let alloc = |host: &mut Lv2Host, size: u64| {
+    let alloc = |host: &mut Lv2Host, size: u64, flags: u64| {
         let d = host.dispatch(
             Lv2Request::MemoryAllocate {
                 size,
-                flags: 0x200,
+                flags,
                 alloc_addr_ptr: 0x100,
             },
             source,
@@ -152,19 +153,19 @@ fn user_memory_size_available_falls_with_allocation() {
         "nothing consumed before first alloc"
     );
 
-    alloc(&mut host, 0x100);
+    alloc(&mut host, 0x1_0000, 0x200);
     assert_eq!(
         query(&mut host),
-        total - 0x100,
+        total - 0x1_0000,
         "available falls by the allocated size"
     );
 
-    // The next allocation first re-aligns the cursor to the 64 KiB
-    // granule, so the fall includes the alignment padding.
-    alloc(&mut host, 0x100);
+    // A 1 MiB page first re-aligns the cursor from 0x8B_0000 to the
+    // 1 MiB granule, so the fall includes the alignment padding.
+    alloc(&mut host, 0x10_0000, 0x400);
     assert_eq!(
         query(&mut host),
-        total - 0x1_0000 - 0x100,
+        total - 0x1_0000 - 0x5_0000 - 0x10_0000,
         "available falls by padding-to-granule plus size"
     );
 }

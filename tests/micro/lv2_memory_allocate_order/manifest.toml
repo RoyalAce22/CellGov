@@ -1,0 +1,14 @@
+[test]
+name = "lv2_memory_allocate_order"
+
+# A hardware probe: which refusal sys_memory_allocate gives a size that is both unaligned and too large.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 3 big-endian u64 words, in the order ppu/main.c lists: 24 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 24 },
+]
+
+[expect]
+outcome = "completed"

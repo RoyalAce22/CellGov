@@ -35,16 +35,17 @@ const CASES: [(IdKind, u32); 6] = [
 ];
 
 /// The console's `(return code, result word)` for case `index` of the
-/// payload's twelve records.
-fn console_case(payload: &[u8], index: usize) -> (u64, u64) {
+/// payload's twelve records. The probe keeps the return code as an
+/// `s32`, the low word of r3.
+fn console_case(payload: &[u8], index: usize) -> (u32, u64) {
     let at = 8 + 16 * index;
     let rc = payload_u32(payload, at);
     let word = u64::from_be_bytes(payload[at + 8..at + 16].try_into().expect("8 bytes"));
-    (u64::from(rc), word)
+    (rc, word)
 }
 
-/// CellGov's `(return code, result word)` for one call.
-fn cellgov_case(dispatch: &Lv2Dispatch) -> (u64, u64) {
+/// CellGov's `(return code low word, result word)` for one call.
+fn cellgov_case(dispatch: &Lv2Dispatch) -> (u32, u64) {
     let Lv2Dispatch::Immediate { code, effects } = dispatch else {
         panic!("expected Immediate, got {dispatch:?}");
     };
@@ -56,11 +57,11 @@ fn cellgov_case(dispatch: &Lv2Dispatch) -> (u64, u64) {
         }
         other => panic!("expected one result write, got {other:?}"),
     };
-    (*code, word)
+    (*code as u32, word)
 }
 
 /// Run every case of one syscall against a fresh host holding one flag.
-fn run_cases(trywait: bool) -> Vec<(u64, u64)> {
+fn run_cases(trywait: bool) -> Vec<(u32, u64)> {
     let mut host = Lv2Host::new();
     let rt = fake_runtime_with_valid_sync_attr(0x10000);
     let src = UnitId::new(0);

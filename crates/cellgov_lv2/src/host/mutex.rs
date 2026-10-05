@@ -152,6 +152,14 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_mutex_trylock` (103).
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` for an unknown id.
+    /// - `CELL_EDEADLK` when the caller already holds a non-recursive
+    ///   mutex, as the `lv2_error_codes_sync` capture shows.
+    /// - `CELL_EBUSY` while another thread holds it.
     pub(super) fn dispatch_mutex_trylock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             self.log_invariant_break(
@@ -160,6 +168,14 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
+        if self
+            .state
+            .mutexes
+            .lookup(id)
+            .is_some_and(|m| m.owner() == Some(caller) && !m.attrs().recursive)
+        {
+            return Lv2Dispatch::immediate(errno::CELL_EDEADLK.into());
+        }
         match self.state.mutexes.try_acquire(id, caller) {
             None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
             Some(crate::sync_primitives::MutexAcquire::Acquired) => Lv2Dispatch::immediate(0),

@@ -30,8 +30,6 @@ fn sc_past_the_table_answers_enosys_as_the_console_does() {
             errno::CELL_ENOSYS.code,
             "r11 {r11:#x} on the console"
         );
-        // The console sign-extends the code into r3; CellGov compares
-        // the low word here.
         assert_eq!(console >> 32, 0xFFFF_FFFF, "r11 {r11:#x}: r3 sign-extended");
         let request = classify(r11, &[0; 8]);
         if r11 == UNRESOLVED_IMPORT {
@@ -48,6 +46,6 @@ fn sc_past_the_table_answers_enosys_as_the_console_does() {
         else {
             panic!("r11 {r11:#x}: expected an immediate answer");
         };
-        assert_eq!(code as u32, console as u32, "r11 {r11:#x}");
+        assert_eq!(code, console, "r11 {r11:#x}");
     }
 }

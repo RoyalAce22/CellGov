@@ -22,14 +22,19 @@ impl Lv2Host {
     /// `sys_memory_get_user_memory_size` reports, so an allocation
     /// succeeds exactly when `available` had room for it.
     /// `sys_memory_free` reclaims nothing, so consumption is monotonic.
-    /// The arm takes `size` as given: a zero size succeeds, and a size
-    /// that is no page multiple stays unrounded.
+    /// A zero size succeeds.
     ///
     /// # Errors
+    ///
+    /// The list is in firing order. The `lv2_memory_allocate_order`
+    /// capture shows that a size that is too large and no page multiple
+    /// answers `CELL_ENOMEM`.
     ///
     /// - `CELL_ENOMEM` when `size` does not fit in `u32`, the aligned
     ///   cursor would wrap, or the budget is exhausted. The cursor does
     ///   not move.
+    /// - `CELL_EALIGN` when `size` is no multiple of the page size, as
+    ///   the `lv2_error_codes_sync` capture shows.
     /// - `CELL_EFAULT` for a null `alloc_addr_ptr`. The cursor advances
     ///   before this check.
     pub(super) fn dispatch_memory_allocate(
@@ -64,6 +69,9 @@ impl Lv2Host {
             .saturating_add(cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL);
         if next > region_end {
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+        }
+        if !size.is_multiple_of(align) {
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         self.state.mem_alloc_ptr = next;
         self.immediate_write_u32(aligned_ptr, alloc_addr_ptr, requester, tick)

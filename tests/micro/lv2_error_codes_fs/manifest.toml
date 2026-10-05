@@ -1,0 +1,14 @@
+[test]
+name = "lv2_error_codes_fs"
+
+# A hardware probe: the CellError codes the file-system calls give under /dev_hdd0/tmp, one call apiece.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 13 big-endian u64 words, in the order ppu/main.c lists: 104 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 104 },
+]
+
+[expect]
+outcome = "completed"
