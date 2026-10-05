@@ -220,3 +220,7 @@ mod adaptive_tests;
 #[cfg(test)]
 #[path = "tests/mutex_console_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/mutex_cond_rwlock_console_tests.rs"]
+mod cond_rwlock_console_tests;

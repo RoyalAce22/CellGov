@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::dispatch::Lv2BlockReason;
+use crate::host::test_support::COND_ATTR_PTR;
 use crate::host::test_support::{
     console_payload, extract_write_u32, fake_runtime_with_valid_sync_attr, payload_u32,
     seed_primary_ppu, FakeRuntime, VALID_MUTEX_ATTR_PTR, VALID_SYNC_ATTR_PTR,
@@ -131,7 +132,7 @@ fn cellgov_case(case: Case) -> [u32; 4] {
                 w.created(Lv2Request::CondCreate {
                     id_ptr: 0x104,
                     mutex_id: mutex,
-                    attr_ptr: 0,
+                    attr_ptr: COND_ATTR_PTR,
                 })
             }
         }

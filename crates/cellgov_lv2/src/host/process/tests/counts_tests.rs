@@ -23,6 +23,18 @@ fn count_for_class_covers_every_documented_class_id() {
     assert_eq!(counts.count_for_class(0xFF, &host), 0);
 }
 
+#[test]
+fn two_live_rwlock_sets_of_one_size_hash_apart() {
+    let mut a = ProcessCounts::new();
+    let mut b = ProcessCounts::new();
+    a.rwlock_insert(1);
+    b.rwlock_insert(2);
+    assert_ne!(a.sync_term(), b.sync_term());
+    assert!(b.rwlock_remove(2));
+    b.rwlock_insert(1);
+    assert_eq!(a.sync_term(), b.sync_term());
+}
+
 /// Catches the strongest realistic regression: someone adds a
 /// constant to [`ALL_PROCESS_OBJECT_CLASS_IDS`] (so the coverage
 /// test passes vacuously) but forgets to add a `count_for_class`
@@ -41,7 +53,7 @@ fn each_counter_bump_moves_a_documented_class() {
         ),
         (
             "rwlock",
-            &ProcessCounts::rwlock_inc as &dyn Fn(&mut ProcessCounts),
+            &(|c: &mut ProcessCounts| c.rwlock_insert(1)) as &dyn Fn(&mut ProcessCounts),
             SYS_RWLOCK_OBJECT,
         ),
         (
@@ -77,7 +89,7 @@ fn counter_classes_observe_inc_dec() {
     let mut counts = ProcessCounts::new();
     counts.timer_inc();
     counts.timer_inc();
-    counts.rwlock_inc();
+    counts.rwlock_insert(1);
     counts.event_port_inc();
     counts.lwcond_inc();
     counts.fs_fd_inc();
@@ -88,7 +100,7 @@ fn counter_classes_observe_inc_dec() {
     assert_eq!(counts.count_for_class(SYS_FS_FD_OBJECT, &host), 1);
 
     counts.timer_dec();
-    counts.rwlock_dec();
+    assert!(counts.rwlock_remove(1));
     counts.lwcond_dec();
     assert_eq!(counts.count_for_class(SYS_TIMER_OBJECT, &host), 1);
     assert_eq!(counts.count_for_class(SYS_RWLOCK_OBJECT, &host), 0);
@@ -99,7 +111,7 @@ fn counter_classes_observe_inc_dec() {
 fn dec_saturates_at_zero() {
     let mut counts = ProcessCounts::new();
     counts.timer_dec();
-    counts.rwlock_dec();
+    assert!(!counts.rwlock_remove(1));
     counts.event_port_dec();
     counts.lwcond_dec();
     let host = Lv2Host::new();

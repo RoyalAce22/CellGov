@@ -22,7 +22,9 @@ use crate::host::Lv2Host;
 #[derive(Debug, Clone, Default)]
 pub(in crate::host) struct ProcessCounts {
     timer: u32,
-    rwlock: u32,
+    /// Live `sys_rwlock_create` ids. `sys_rwlock_destroy` answers
+    /// ESRCH for any other id.
+    rwlocks: std::collections::BTreeSet<u32>,
     /// Mirrors the hashed `event_ports` table's live count: the
     /// dispatch arms pair inc with create and dec with a successful
     /// destroy.
@@ -33,19 +35,24 @@ pub(in crate::host) struct ProcessCounts {
     fs_fd: u32,
 }
 
-/// One lane per counter; the exhaustive destructure makes a new counter
-/// without a lane a compile error.
+/// One lane per counter, and field 6 slot `i` holds the `i`-th live
+/// rwlock id in ascending order; the exhaustive destructure makes a new
+/// counter without a lane a compile error.
 impl cellgov_mem::lanes::LaneValue for ProcessCounts {
     fn lanes(&self, lanes: &mut cellgov_mem::lanes::ObjectLanes) {
         let Self {
             timer,
-            rwlock,
+            rwlocks,
             event_port,
             lwcond,
             fs_fd,
         } = self;
-        for (field, counter) in (1..).zip([timer, rwlock, event_port, lwcond, fs_fd]) {
+        let rwlock = rwlocks.len() as u32;
+        for (field, counter) in (1..).zip([timer, &rwlock, event_port, lwcond, fs_fd]) {
             lanes.lane(field, 0, u64::from(*counter));
+        }
+        for (slot, id) in rwlocks.iter().enumerate() {
+            lanes.lane(6, slot as u64, u64::from(*id));
         }
     }
 }
@@ -68,12 +75,13 @@ impl ProcessCounts {
         self.timer = self.timer.saturating_sub(1);
     }
 
-    pub(in crate::host) fn rwlock_inc(&mut self) {
-        self.rwlock = self.rwlock.saturating_add(1);
+    pub(in crate::host) fn rwlock_insert(&mut self, id: u32) {
+        self.rwlocks.insert(id);
     }
 
-    pub(in crate::host) fn rwlock_dec(&mut self) {
-        self.rwlock = self.rwlock.saturating_sub(1);
+    /// Remove `id`, and tell whether it was live.
+    pub(in crate::host) fn rwlock_remove(&mut self, id: u32) -> bool {
+        self.rwlocks.remove(&id)
     }
 
     pub(in crate::host) fn event_port_inc(&mut self) {
@@ -113,7 +121,7 @@ impl ProcessCounts {
         match class_id {
             SYS_MUTEX_OBJECT => host.state.mutexes.len() as u32,
             SYS_COND_OBJECT => host.state.conds.len() as u32,
-            SYS_RWLOCK_OBJECT => self.rwlock,
+            SYS_RWLOCK_OBJECT => self.rwlocks.len() as u32,
             SYS_EVENT_PORT_OBJECT => self.event_port,
             SYS_TIMER_OBJECT => self.timer,
             SYS_EVENT_QUEUE_OBJECT => host.state.event_queues.len() as u32,

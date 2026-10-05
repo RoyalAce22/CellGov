@@ -1,0 +1,14 @@
+[test]
+name = "lv2_mutex_cond_rwlock_rows"
+
+# A hardware probe: the lwmutex, mutex, cond and rwlock answers the behavior table marks unestablished: lwmutex ids, rwlock destroy, a contended trylock, cond signal while the mutex is held, signal_all and signal_to.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 40 big-endian u32 words, in the order ppu/main.c lists: 160 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 160 },
+]
+
+[expect]
+outcome = "completed"

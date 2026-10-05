@@ -311,7 +311,7 @@ fn fingerprint_differs_between_two_distinct_process_count_classes() {
     let mut a = Lv2Host::new();
     let mut b = Lv2Host::new();
     a.state.process_counts.timer_inc();
-    b.state.process_counts.rwlock_inc();
+    b.state.process_counts.rwlock_insert(1);
     assert_ne!(a.fingerprint(), b.fingerprint());
 }
 

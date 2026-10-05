@@ -31,23 +31,28 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        if self.state.mutexes.lookup(mutex_id).is_none() {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
-        }
-        // The kernel reads the whole attribute block: the console
-        // capture of tests/micro/lv2_semaphore_gates answers EFAULT
-        // when only the name bytes are unmapped. No capture presents
-        // a null attribute pointer, so a null pointer still creates a
-        // cond.
+        // The kernel reads the whole attribute block before it looks at
+        // the mutex id. The console captures of
+        // tests/micro/lv2_semaphore_gates (name bytes unmapped) and
+        // tests/micro/lv2_cond_create_gates (null block, null id pointer,
+        // stale mutex) show each answer and that order. A null id pointer
+        // is EFAULT, but no capture orders it against a stale mutex, so
+        // its place last is unestablished.
         use cellgov_ps3_abi::lv2::sync::cond_attribute as attr_layout;
-        if attr_ptr != 0
-            && crate::host::guest_struct::GuestStruct::read(
+        if attr_ptr == 0
+            || crate::host::guest_struct::GuestStruct::read(
                 rt,
                 u64::from(attr_ptr),
                 attr_layout::SIZE as usize,
             )
             .is_none()
         {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        }
+        if self.state.mutexes.lookup(mutex_id).is_none() {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
+        if id_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let id = self.alloc_id();
@@ -62,8 +67,6 @@ impl Lv2Host {
         // The attribute's key field carries meaning only when
         // attr_pshared selects a process-shared cond. A
         // process-private cond has no key, so its effective key is 0.
-        // A null attr skips the gate above, and its key is read at
-        // guest address 0 like any other block.
         if let Some(ipc_key) = cond_attr_ipc_key(attr_ptr, rt) {
             if ipc_key != 0 {
                 self.derived.cond_ipc_keys.insert(id, ipc_key);
@@ -338,6 +341,13 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
         }
         let target = PpuThreadId::new(target_thread as u64);
+        // A thread id that names no thread is ESRCH, as the console
+        // capture of tests/micro/lv2_mutex_cond_rwlock_rows answers for
+        // a live cond. A live thread that is not waiting on this cond
+        // stays EPERM; no capture settles that row.
+        if self.state.ppu_threads.get(target).is_none() {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
         match self.state.conds.signal_to(id, target) {
             Ok(()) => {}
             Err(crate::sync_primitives::CondSignalToError::UnknownId) => {

@@ -327,22 +327,26 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// `sys_rwlock_create` stub: mirrors [`Self::dispatch_timer_create`]
-    /// against the rwlock counter.
+    /// `sys_rwlock_create` stub: records the new id as live, with no
+    /// lock state behind it.
     pub(super) fn dispatch_rwlock_create(
         &mut self,
         id_ptr: u32,
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        self.state.process_counts.rwlock_inc();
         let id = self.alloc_id();
+        self.state.process_counts.rwlock_insert(id);
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
-    /// `sys_rwlock_destroy` stub: mirrors [`Self::dispatch_timer_destroy`].
-    pub(super) fn dispatch_rwlock_destroy(&mut self) -> Lv2Dispatch {
-        self.state.process_counts.rwlock_dec();
+    /// `sys_rwlock_destroy`: ESRCH for an id no create returned or
+    /// that a destroy already freed, as the console capture of
+    /// `tests/micro/lv2_mutex_cond_rwlock_rows` answers.
+    pub(super) fn dispatch_rwlock_destroy(&mut self, id: u32) -> Lv2Dispatch {
+        if !self.state.process_counts.rwlock_remove(id) {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
         Lv2Dispatch::immediate(0)
     }
 

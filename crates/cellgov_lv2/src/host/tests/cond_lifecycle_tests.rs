@@ -1,4 +1,5 @@
 use super::*;
+use crate::host::test_support::COND_ATTR_PTR;
 
 #[test]
 fn cond_create_writes_id_and_binds_mutex() {
@@ -8,7 +9,7 @@ fn cond_create_writes_id_and_binds_mutex() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         src,
         &rt,
@@ -33,7 +34,7 @@ fn cond_create_unknown_mutex_returns_esrch() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id: 0xDEAD,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         src,
         &rt,
@@ -53,7 +54,7 @@ fn cond_destroy_empty_succeeds() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         src,
         &rt,
@@ -99,7 +100,7 @@ fn cond_destroy_with_waiter_returns_ebusy() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         src,
         &rt,

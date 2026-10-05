@@ -1,4 +1,5 @@
 use super::*;
+use crate::host::test_support::COND_ATTR_PTR;
 
 #[test]
 fn cond_signal_no_waiter_is_observably_lost() {
@@ -8,7 +9,7 @@ fn cond_signal_no_waiter_is_observably_lost() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         src,
         &rt,
@@ -58,7 +59,7 @@ fn cond_signal_wakes_waiter_cleanly_when_mutex_free() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         waiter_unit,
         &rt,
@@ -127,7 +128,7 @@ fn cond_signal_reparks_waiter_on_mutex_when_held() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         waiter_unit,
         &rt,
@@ -219,7 +220,7 @@ fn cond_signal_wakes_fifo_head_when_multiple_waiters() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         w1_unit,
         &rt,
@@ -292,7 +293,7 @@ fn cond_signal_to_targets_specific_waiter_and_preserves_order() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         w1,
         &rt,
@@ -379,7 +380,7 @@ fn cond_signal_to_target_not_waiting_returns_eperm() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         w1,
         &rt,
@@ -466,7 +467,7 @@ fn cond_signal_to_reparks_target_on_mutex_when_held() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         w1,
         &rt,

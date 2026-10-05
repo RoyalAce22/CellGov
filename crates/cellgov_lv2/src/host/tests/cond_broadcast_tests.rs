@@ -1,4 +1,5 @@
 use super::*;
+use crate::host::test_support::COND_ATTR_PTR;
 
 #[test]
 fn cond_signal_all_wakes_first_reparks_rest_when_mutex_free() {
@@ -22,7 +23,7 @@ fn cond_signal_all_wakes_first_reparks_rest_when_mutex_free() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         w1,
         &rt,
@@ -107,7 +108,7 @@ fn cond_signal_all_reparks_all_when_mutex_held() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         w1,
         &rt,
@@ -178,7 +179,7 @@ fn cond_signal_all_no_waiters_is_lost() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         src,
         &rt,
@@ -228,7 +229,7 @@ fn cond_signal_all_flags_invariant_break_on_double_parked_waker() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         signaler_unit,
         &rt,
@@ -291,7 +292,7 @@ fn cond_signal_before_wait_does_not_wake_subsequent_waiter() {
             Lv2Request::CondCreate {
                 id_ptr: 0x200,
                 mutex_id,
-                attr_ptr: 0,
+                attr_ptr: COND_ATTR_PTR,
             },
             waiter_unit,
             &rt,
@@ -408,7 +409,7 @@ fn cond_many_lost_signals_do_not_accumulate() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         waiter_unit,
         &rt,
@@ -455,7 +456,7 @@ fn cond_signal_dispatches_witness_counts_invocations() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         src,
         &rt,

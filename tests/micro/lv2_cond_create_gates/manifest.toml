@@ -1,0 +1,14 @@
+[test]
+name = "lv2_cond_create_gates"
+
+# A hardware probe: sys_cond_create with a null attribute pointer, a null id pointer and a stale mutex id.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 8 big-endian u32 words, in the order ppu/main.c lists: 32 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 32 },
+]
+
+[expect]
+outcome = "completed"

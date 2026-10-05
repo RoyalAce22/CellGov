@@ -215,6 +215,11 @@ pub(super) fn payload_u32(payload: &[u8], at: usize) -> u32 {
     u32::from_be_bytes(payload[at..at + 4].try_into().expect("4 bytes"))
 }
 
+/// A readable `sys_cond_attribute_t` address for `sys_cond_create`.
+/// Zeroed memory there reads as a process-private cond, and the block
+/// ends below `ID_PTR`-style addresses at 0x100.
+pub(super) const COND_ATTR_PTR: u32 = 0x70;
+
 /// Address where [`FakeRuntime::with_valid_mutex_attr`] seeds a
 /// `sys_mutex_attribute_t` that `sys_mutex_create` accepts.
 pub(super) const VALID_MUTEX_ATTR_PTR: u32 = 0x40;

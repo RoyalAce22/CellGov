@@ -1,4 +1,5 @@
 use super::*;
+use crate::host::test_support::COND_ATTR_PTR;
 
 #[test]
 fn cond_wait_releases_mutex_and_parks_caller() {
@@ -16,7 +17,7 @@ fn cond_wait_releases_mutex_and_parks_caller() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         src,
         &rt,
@@ -105,7 +106,7 @@ fn cond_wait_transfers_mutex_to_waiter_via_block_and_wake() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         owner_unit,
         &rt,
@@ -173,7 +174,7 @@ fn cond_wait_by_non_owner_returns_eperm() {
         Lv2Request::CondCreate {
             id_ptr: 0x200,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         owner_unit,
         &rt,

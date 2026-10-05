@@ -794,7 +794,7 @@ impl Lv2Host {
             Lv2Request::RwlockCreate { id_ptr, .. } => {
                 self.dispatch_rwlock_create(id_ptr, requester, tick)
             }
-            Lv2Request::RwlockDestroy { .. } => self.dispatch_rwlock_destroy(),
+            Lv2Request::RwlockDestroy { id } => self.dispatch_rwlock_destroy(id),
             Lv2Request::EventPortCreate {
                 id_ptr,
                 port_type,

@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::dispatch::Lv2Dispatch;
+use crate::host::test_support::COND_ATTR_PTR;
 use crate::host::test_support::{
     create_mutex_host, extract_write_u32, fake_runtime_with_valid_sync_attr, seed_primary_ppu,
     FakeRuntime, VALID_SYNC_ATTR_PTR,
@@ -568,7 +569,7 @@ fn cond_setup(host: &mut Lv2Host, rt: &FakeRuntime, owner: UnitId) -> (u32, u32)
         Lv2Request::CondCreate {
             id_ptr: 0x110,
             mutex_id,
-            attr_ptr: 0,
+            attr_ptr: COND_ATTR_PTR,
         },
         owner,
         rt,
