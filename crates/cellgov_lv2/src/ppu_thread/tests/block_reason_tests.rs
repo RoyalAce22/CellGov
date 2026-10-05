@@ -22,12 +22,14 @@ fn event_flag_wait_mode_stable_tag_is_injective() {
         EventFlagWaitMode::AndClear.stable_tag(),
         EventFlagWaitMode::OrNoClear.stable_tag(),
         EventFlagWaitMode::OrClear.stable_tag(),
+        EventFlagWaitMode::AndClearAll.stable_tag(),
+        EventFlagWaitMode::OrClearAll.stable_tag(),
     ];
     let mut seen = std::collections::BTreeSet::new();
     for t in tags {
         assert!(seen.insert(t), "duplicate stable_tag value: {t}");
     }
-    assert_eq!(seen.len(), 4);
+    assert_eq!(seen.len(), 6);
 }
 
 #[test]

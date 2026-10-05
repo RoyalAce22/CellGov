@@ -84,6 +84,10 @@ pub enum EventFlagWaitMode {
     OrNoClear,
     /// Any bit in `mask` must be set; clear the matched bits.
     OrClear,
+    /// All bits in `mask` must be set; clear every bit of the flag.
+    AndClearAll,
+    /// Any bit in `mask` must be set; clear every bit of the flag.
+    OrClearAll,
 }
 
 impl EventFlagWaitMode {
@@ -94,6 +98,8 @@ impl EventFlagWaitMode {
             EventFlagWaitMode::AndClear => 1,
             EventFlagWaitMode::OrNoClear => 2,
             EventFlagWaitMode::OrClear => 3,
+            EventFlagWaitMode::AndClearAll => 4,
+            EventFlagWaitMode::OrClearAll => 5,
         }
     }
 }

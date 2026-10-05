@@ -1,0 +1,14 @@
+[test]
+name = "lv2_event_flag_clear_all"
+
+# A hardware probe: the event flag CLEAR_ALL wait mode, the mode with both clear bits, and the event flag object count around a create and a destroy.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 36 big-endian u32 words, in the order ppu/main.c lists: 144 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 144 },
+]
+
+[expect]
+outcome = "completed"

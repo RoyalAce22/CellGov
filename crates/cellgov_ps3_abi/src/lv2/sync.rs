@@ -84,9 +84,9 @@ pub const SYS_SYNC_WAITER_MULTIPLE: u32 = 0x20000;
 ///
 /// Either clear gives the waiter the flag value from before the clear.
 // The split between the two clear bits comes from a non-public
-// description of the wait mode, so it carries no citation. No capture
-// caller issues CLEAR_ALL, so nothing in dev_flash witnesses it
-// either.
+// description of the wait mode, so it carries no citation. The console
+// capture of tests/micro/lv2_event_flag_clear_all shows it: CLEAR_ALL
+// leaves the flag 0, and the two clear bits together are EINVAL.
 pub mod event_flag_wait_mode {
     /// Match when every requested bit is set.
     pub const AND: u32 = 0x01;

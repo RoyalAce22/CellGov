@@ -1,8 +1,8 @@
 //! Event flag table.
 //!
-//! CLEAR-wakes mutate `bits` mid-walk of the waiter list, so two
-//! waiters woken by one `set_and_wake` call can observe different
-//! patterns.
+//! A CLEAR or CLEAR_ALL wake changes `bits` during the walk of the
+//! waiter list, so two waiters woken by one `set_and_wake` call can
+//! observe different patterns, and a later waiter may not wake.
 
 use crate::ppu_thread::{EventFlagWaitMode, PpuThreadId};
 use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
@@ -14,7 +14,7 @@ pub struct EventFlagWaiter {
     pub thread: PpuThreadId,
     /// Bit mask the waiter expects.
     pub mask: u64,
-    /// AND/OR match policy and CLEAR/NO-CLEAR wake policy.
+    /// AND/OR match policy and the clear policy of the wake.
     pub mode: EventFlagWaitMode,
     /// Guest address to write the observed pattern on wake.
     pub result_ptr: u32,
@@ -102,16 +102,22 @@ impl EventFlagEntry {
 
 fn mask_matches(bits: u64, mask: u64, mode: EventFlagWaitMode) -> bool {
     match mode {
-        EventFlagWaitMode::AndClear | EventFlagWaitMode::AndNoClear => (bits & mask) == mask,
-        EventFlagWaitMode::OrClear | EventFlagWaitMode::OrNoClear => (bits & mask) != 0,
+        EventFlagWaitMode::AndClear
+        | EventFlagWaitMode::AndNoClear
+        | EventFlagWaitMode::AndClearAll => (bits & mask) == mask,
+        EventFlagWaitMode::OrClear
+        | EventFlagWaitMode::OrNoClear
+        | EventFlagWaitMode::OrClearAll => (bits & mask) != 0,
     }
 }
 
-fn should_clear(mode: EventFlagWaitMode) -> bool {
-    matches!(
-        mode,
-        EventFlagWaitMode::AndClear | EventFlagWaitMode::OrClear
-    )
+/// The bits a satisfied wait under `mode` clears from the flag.
+fn cleared_bits(mask: u64, mode: EventFlagWaitMode) -> u64 {
+    match mode {
+        EventFlagWaitMode::AndNoClear | EventFlagWaitMode::OrNoClear => 0,
+        EventFlagWaitMode::AndClear | EventFlagWaitMode::OrClear => mask,
+        EventFlagWaitMode::AndClearAll | EventFlagWaitMode::OrClearAll => u64::MAX,
+    }
 }
 
 /// Table of event flags.
@@ -199,7 +205,7 @@ impl EventFlagTable {
         self.entries.is_empty()
     }
 
-    /// Try to wait without parking. Applies CLEAR on match.
+    /// Try to wait without parking. A match applies the mode's clear.
     pub fn try_wait(
         &mut self,
         id: u32,
@@ -209,9 +215,7 @@ impl EventFlagTable {
         let mut entry = self.entries.get_mut(id)?;
         if mask_matches(entry.bits, mask, mode) {
             let observed = entry.bits;
-            if should_clear(mode) {
-                entry.bits &= !mask;
-            }
+            entry.bits &= !cleared_bits(mask, mode);
             Some(EventFlagWait::Matched { observed })
         } else {
             Some(EventFlagWait::NoMatch)
@@ -274,9 +278,7 @@ impl EventFlagTable {
             let w = entry.waiters[i];
             if mask_matches(entry.bits, w.mask, w.mode) {
                 let observed = entry.bits;
-                if should_clear(w.mode) {
-                    entry.bits &= !w.mask;
-                }
+                entry.bits &= !cleared_bits(w.mask, w.mode);
                 entry.waiters.remove(i);
                 woken.push(EventFlagWake {
                     thread: w.thread,

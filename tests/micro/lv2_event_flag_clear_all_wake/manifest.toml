@@ -1,0 +1,14 @@
+[test]
+name = "lv2_event_flag_clear_all_wake"
+
+# A hardware probe: an event flag set that wakes a waiter parked with CLEAR_ALL, and what a second waiter parked behind it sees.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 14 big-endian u32 words, in the order ppu/main.c lists: 56 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 56 },
+]
+
+[expect]
+outcome = "completed"

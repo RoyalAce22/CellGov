@@ -25,54 +25,32 @@ use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// Decode a `sys_event_flag_wait` mode word; `None` when either
-    /// nibble is out of range.
+    /// nibble is out of range, both clear bits included.
     ///
-    /// [`CLEAR_ALL`] asks for every bit of the flag value. The wait
-    /// modes `EventFlagTable` takes clear only the waiter's own bit
-    /// pattern, so `CLEAR_ALL` decodes onto the same arm as [`CLEAR`].
-    /// Both dispatch entries witness that collapse through
-    /// `note_clear_all_collapse`.
+    /// [`CLEAR_ALL`] clears every bit of the flag on a match, where
+    /// [`CLEAR`] clears only the waited bits. The console capture of
+    /// `tests/micro/lv2_event_flag_clear_all` shows the `CLEAR_ALL`
+    /// arms, and EINVAL for the two clear bits together.
     ///
     /// [`CLEAR`]: cellgov_ps3_abi::lv2::sync::event_flag_wait_mode::CLEAR
     /// [`CLEAR_ALL`]: cellgov_ps3_abi::lv2::sync::event_flag_wait_mode::CLEAR_ALL
     fn decode_event_flag_mode(raw: u32) -> Option<crate::ppu_thread::EventFlagWaitMode> {
+        use crate::ppu_thread::EventFlagWaitMode as Mode;
         use cellgov_ps3_abi::lv2::sync::event_flag_wait_mode as wait_mode;
         let or_match = match raw & wait_mode::MATCH_MASK {
             wait_mode::AND => false,
             wait_mode::OR => true,
             _ => return None,
         };
-        let clear = match raw & wait_mode::CLEAR_MASK {
-            0 => false,
-            wait_mode::CLEAR | wait_mode::CLEAR_ALL => true,
+        Some(match (or_match, raw & wait_mode::CLEAR_MASK) {
+            (false, 0) => Mode::AndNoClear,
+            (false, wait_mode::CLEAR) => Mode::AndClear,
+            (false, wait_mode::CLEAR_ALL) => Mode::AndClearAll,
+            (true, 0) => Mode::OrNoClear,
+            (true, wait_mode::CLEAR) => Mode::OrClear,
+            (true, wait_mode::CLEAR_ALL) => Mode::OrClearAll,
             _ => return None,
-        };
-        Some(match (or_match, clear) {
-            (false, false) => crate::ppu_thread::EventFlagWaitMode::AndNoClear,
-            (false, true) => crate::ppu_thread::EventFlagWaitMode::AndClear,
-            (true, false) => crate::ppu_thread::EventFlagWaitMode::OrNoClear,
-            (true, true) => crate::ppu_thread::EventFlagWaitMode::OrClear,
         })
-    }
-
-    /// Name the `CLEAR_ALL` wait the flag table cannot express.
-    ///
-    /// `decode_event_flag_mode` states the collapse. The mode is legal
-    /// input, so the call still answers and this witness counts the
-    /// divergence.
-    fn note_clear_all_collapse(&mut self, site: &'static str, mode_raw: u32) {
-        use cellgov_ps3_abi::lv2::sync::event_flag_wait_mode as wait_mode;
-        if mode_raw & wait_mode::CLEAR_MASK != wait_mode::CLEAR_ALL {
-            return;
-        }
-        self.log_invariant_break(
-            site,
-            format_args!(
-                "sys_event_flag wait mode {mode_raw:#x} selects CLEAR_ALL; the model \
-                 clears only the waiter's own bit pattern, so bits outside it survive \
-                 the match"
-            ),
-        );
     }
 
     pub(super) fn dispatch_event_flag_create(
@@ -150,7 +128,6 @@ impl Lv2Host {
                 effects: event_flag_result_write(result_ptr, 0, requester, tick),
             };
         };
-        self.note_clear_all_collapse("event_flag.wait_clear_all_not_modeled", mode_raw);
         match self.state.event_flags.try_wait(id, bits, mode) {
             None => Lv2Dispatch::Immediate {
                 code: errno::CELL_ESRCH.into(),
@@ -225,7 +202,6 @@ impl Lv2Host {
                 effects: event_flag_result_write(result_ptr, 0, requester, tick),
             };
         };
-        self.note_clear_all_collapse("event_flag.trywait_clear_all_not_modeled", mode_raw);
         match self.state.event_flags.try_wait(id, bits, mode) {
             None => Lv2Dispatch::Immediate {
                 code: errno::CELL_ESRCH.into(),
