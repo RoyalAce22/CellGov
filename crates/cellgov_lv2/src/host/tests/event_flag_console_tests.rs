@@ -3,19 +3,14 @@
 //! reference console does: the same return code and result word for
 //! each, read from its committed capture.
 
-use std::path::Path;
-
 use super::*;
 use crate::host::test_support::{
-    extract_write_u32, fake_runtime_with_valid_sync_attr, seed_primary_ppu, VALID_SYNC_ATTR_PTR,
+    console_payload, extract_write_u32, fake_runtime_with_valid_sync_attr, payload_u32,
+    seed_primary_ppu, VALID_SYNC_ATTR_PTR,
 };
 use crate::request::Lv2Request;
 
-/// The frame the console wrote, under the reference profile. The
-/// `ps3_captures` guard in `cellgov_compare` holds it to its
-/// observation and provenance.
-const FRAME: &str =
-    "../../tests/micro/lv2_event_flag_check_order/ps3/cech20-cex-493/cgov_frame.bin";
+const PROBE: &str = "lv2_event_flag_check_order";
 
 /// The word the probe stores in the result before each call.
 const RESULT_FILL: u64 = 0xDEAD_BEEF_CAFE_F00D;
@@ -39,22 +34,11 @@ const CASES: [(IdKind, u32); 6] = [
     (IdKind::Live, 0x3),
 ];
 
-/// The frame's payload: the bytes after the `CGOV` magic and the
-/// big-endian length.
-fn console_payload() -> Vec<u8> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(FRAME);
-    let frame = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    assert_eq!(&frame[0..4], b"CGOV", "frame magic");
-    let len = u32::from_be_bytes(frame[4..8].try_into().expect("4 bytes")) as usize;
-    assert_eq!(frame.len(), 8 + len, "one whole frame");
-    frame[8..].to_vec()
-}
-
 /// The console's `(return code, result word)` for case `index` of the
 /// payload's twelve records.
 fn console_case(payload: &[u8], index: usize) -> (u64, u64) {
     let at = 8 + 16 * index;
-    let rc = u32::from_be_bytes(payload[at..at + 4].try_into().expect("4 bytes"));
+    let rc = payload_u32(payload, at);
     let word = u64::from_be_bytes(payload[at + 8..at + 16].try_into().expect("8 bytes"));
     (u64::from(rc), word)
 }
@@ -124,7 +108,7 @@ fn run_cases(trywait: bool) -> Vec<(u64, u64)> {
 }
 
 fn assert_matches_console(trywait: bool, first_record: usize) {
-    let payload = console_payload();
+    let payload = console_payload(PROBE);
     assert_eq!(&payload[0..8], &[0; 8], "the probe ran every step");
     let cellgov = run_cases(trywait);
     for (i, got) in cellgov.iter().enumerate() {

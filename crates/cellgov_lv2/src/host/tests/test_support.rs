@@ -9,6 +9,7 @@ use crate::host::{Lv2Host, Lv2Runtime};
 use crate::ppu_thread::PpuThreadAttrs;
 use crate::request::Lv2Request;
 
+#[derive(Clone)]
 pub(crate) struct FakeRuntime {
     memory: GuestMemory,
     tick: GuestTicks,
@@ -37,6 +38,22 @@ impl FakeRuntime {
             writable_override: None,
             writable_at: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// This runtime with [`valid_mutex_attr_bytes`] committed at
+    /// [`VALID_MUTEX_ATTR_PTR`].
+    pub(super) fn with_valid_mutex_attr(mut self) -> Self {
+        self.memory
+            .apply_commit(
+                ByteRange::new(
+                    GuestAddr::new(VALID_MUTEX_ATTR_PTR as u64),
+                    MUTEX_ATTR_SIZE as u64,
+                )
+                .unwrap(),
+                &valid_mutex_attr_bytes(),
+            )
+            .unwrap();
+        self
     }
 
     pub(super) fn with_tick(mut self, tick: GuestTicks) -> Self {
@@ -176,6 +193,55 @@ pub(super) fn valid_sync_attr_bytes() -> [u8; SYNC_ATTR_SIZE] {
     attr
 }
 
+/// The payload of the frame the reference console wrote for the probe
+/// `tests/micro/<probe>`: the bytes after the `CGOV` magic and the
+/// big-endian length.
+///
+/// The `ps3_captures` guard in `cellgov_compare` holds each committed
+/// frame to its observation and provenance.
+pub(super) fn console_payload(probe: &str) -> Vec<u8> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/micro")
+        .join(probe)
+        .join("ps3/cech20-cex-493/cgov_frame.bin");
+    let frame = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(&frame[0..4], b"CGOV", "frame magic");
+    let len = u32::from_be_bytes(frame[4..8].try_into().expect("4 bytes")) as usize;
+    assert_eq!(frame.len(), 8 + len, "one whole frame");
+    frame[8..].to_vec()
+}
+
+pub(super) fn payload_u32(payload: &[u8], at: usize) -> u32 {
+    u32::from_be_bytes(payload[at..at + 4].try_into().expect("4 bytes"))
+}
+
+/// Address where [`FakeRuntime::with_valid_mutex_attr`] seeds a
+/// `sys_mutex_attribute_t` that `sys_mutex_create` accepts.
+pub(super) const VALID_MUTEX_ATTR_PTR: u32 = 0x40;
+
+/// Bytes of a `sys_mutex_attribute_t`.
+pub(super) const MUTEX_ATTR_SIZE: usize =
+    cellgov_ps3_abi::lv2::sync::mutex_attribute::SIZE as usize;
+
+/// A `sys_mutex_attribute_t` of FIFO, not recursive, not
+/// process-shared and not adaptive, with a zero key, flags and name.
+pub(super) fn valid_mutex_attr_bytes() -> [u8; MUTEX_ATTR_SIZE] {
+    use cellgov_ps3_abi::lv2::sync::{
+        mutex_attribute as layout, SYS_SYNC_FIFO, SYS_SYNC_NOT_ADAPTIVE,
+        SYS_SYNC_NOT_PROCESS_SHARED, SYS_SYNC_NOT_RECURSIVE,
+    };
+    let mut attr = [0u8; MUTEX_ATTR_SIZE];
+    for (off, word) in [
+        (layout::PROTOCOL_OFFSET, SYS_SYNC_FIFO),
+        (layout::RECURSIVE_OFFSET, SYS_SYNC_NOT_RECURSIVE),
+        (layout::PSHARED_OFFSET, SYS_SYNC_NOT_PROCESS_SHARED),
+        (layout::ADAPTIVE_OFFSET, SYS_SYNC_NOT_ADAPTIVE),
+    ] {
+        attr[off..off + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    attr
+}
+
 /// Build a `FakeRuntime` whose guest memory carries
 /// [`valid_sync_attr_bytes`] at [`VALID_SYNC_ATTR_PTR`].
 pub(super) fn fake_runtime_with_valid_sync_attr(size: usize) -> FakeRuntime {
@@ -289,13 +355,14 @@ pub(super) fn connected_port(
 }
 
 pub(super) fn create_mutex_host(host: &mut Lv2Host, src: UnitId, rt: &FakeRuntime) -> u32 {
+    let rt = rt.clone().with_valid_mutex_attr();
     let created = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         src,
-        rt,
+        &rt,
     );
     match &created {
         crate::dispatch::Lv2Dispatch::Immediate {

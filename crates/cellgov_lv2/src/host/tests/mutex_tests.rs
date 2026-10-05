@@ -1,20 +1,22 @@
 //! LV2 mutex dispatch tests: attribute decoding, contended block-and-wake, recursive relock counting, trylock EBUSY, EPERM non-owner unlock, and transient-unit aliasing.
 
 use super::*;
-use crate::host::test_support::{extract_write_u32, seed_primary_ppu, FakeRuntime};
+use crate::host::test_support::{
+    extract_write_u32, seed_primary_ppu, FakeRuntime, VALID_MUTEX_ATTR_PTR,
+};
 use crate::ppu_thread::{PpuThreadAttrs, PpuThreadId};
 use crate::request::Lv2Request;
 
 #[test]
 fn mutex_create_allocates_monotonic_ids() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000);
+    let rt = FakeRuntime::new(0x10000).with_valid_mutex_attr();
     let source = UnitId::new(0);
 
     let r1 = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         source,
         &rt,
@@ -22,7 +24,7 @@ fn mutex_create_allocates_monotonic_ids() {
     let r2 = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x104,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         source,
         &rt,
@@ -68,13 +70,13 @@ fn mutex_lock_on_unknown_id_returns_esrch() {
 #[test]
 fn mutex_lock_unowned_acquires_and_unlock_frees() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(256);
+    let rt = FakeRuntime::new(256).with_valid_mutex_attr();
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
     let created = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         src,
         &rt,
@@ -119,7 +121,7 @@ fn mutex_lock_unowned_acquires_and_unlock_frees() {
 #[test]
 fn mutex_lock_contended_blocks_and_unlock_wakes() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(256);
+    let rt = FakeRuntime::new(256).with_valid_mutex_attr();
     let owner_unit = UnitId::new(0);
     let waiter_unit = UnitId::new(1);
     seed_primary_ppu(&mut host, owner_unit);
@@ -140,7 +142,7 @@ fn mutex_lock_contended_blocks_and_unlock_wakes() {
     let created = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         owner_unit,
         &rt,
@@ -191,12 +193,15 @@ fn mutex_lock_contended_blocks_and_unlock_wakes() {
 }
 
 #[test]
-fn mutex_create_default_attrs_when_attr_ptr_zero() {
+fn a_null_mutex_attr_ptr_is_efault_before_any_state_change() {
+    // Address 0 is mapped in this runtime, so only the explicit null
+    // check refuses the create.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
-    let created = host.dispatch(
+    let pre = host.sync_partial();
+    let r = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,
             attr_ptr: 0,
@@ -204,17 +209,8 @@ fn mutex_create_default_attrs_when_attr_ptr_zero() {
         src,
         &rt,
     );
-    let id = match &created {
-        Lv2Dispatch::Immediate {
-            code: 0,
-            effects: e,
-        } => extract_write_u32(&e[0]),
-        other => panic!("expected Immediate(0), got {other:?}"),
-    };
-    assert_eq!(
-        host.mutexes().lookup(id).unwrap().attrs(),
-        crate::sync_primitives::MutexAttrs::default()
-    );
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
+    assert_eq!(pre, host.sync_partial());
 }
 
 #[test]
@@ -335,8 +331,6 @@ fn mutex_attr_runtime(
     put(layout::PROTOCOL_OFFSET, protocol);
     put(layout::RECURSIVE_OFFSET, recursive);
     put(layout::PSHARED_OFFSET, pshared);
-    // A zero adaptive word is out of range, so a create that reaches
-    // this word reports an invariant break the test is not about.
     put(
         layout::ADAPTIVE_OFFSET,
         cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_ADAPTIVE,
@@ -590,13 +584,13 @@ fn a_saturated_recursive_lock_count_returns_ekresource() {
 #[test]
 fn mutex_trylock_unowned_acquires() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(256);
+    let rt = FakeRuntime::new(256).with_valid_mutex_attr();
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
     let created = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         src,
         &rt,
@@ -625,7 +619,7 @@ fn mutex_trylock_unowned_acquires() {
 #[test]
 fn mutex_trylock_contended_returns_ebusy_and_does_not_park() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(256);
+    let rt = FakeRuntime::new(256).with_valid_mutex_attr();
     let owner_unit = UnitId::new(0);
     let other_unit = UnitId::new(1);
     seed_primary_ppu(&mut host, owner_unit);
@@ -645,7 +639,7 @@ fn mutex_trylock_contended_returns_ebusy_and_does_not_park() {
     let created = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         owner_unit,
         &rt,
@@ -693,7 +687,7 @@ fn mutex_trylock_unknown_returns_esrch() {
 #[test]
 fn mutex_unlock_non_owner_returns_eperm() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(256);
+    let rt = FakeRuntime::new(256).with_valid_mutex_attr();
     let owner_unit = UnitId::new(0);
     let other_unit = UnitId::new(1);
     seed_primary_ppu(&mut host, owner_unit);
@@ -713,7 +707,7 @@ fn mutex_unlock_non_owner_returns_eperm() {
     let created = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         owner_unit,
         &rt,
@@ -743,13 +737,13 @@ fn mutex_unlock_non_owner_returns_eperm() {
 #[test]
 fn mutex_lock_from_transient_unit_without_alias_returns_esrch() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(256);
+    let rt = FakeRuntime::new(256).with_valid_mutex_attr();
     let primary = UnitId::new(0);
     seed_primary_ppu(&mut host, primary);
     let created = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         primary,
         &rt,
@@ -780,13 +774,13 @@ fn mutex_lock_from_transient_unit_without_alias_returns_esrch() {
 #[test]
 fn mutex_lock_from_aliased_transient_unit_acquires_as_primary() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(256);
+    let rt = FakeRuntime::new(256).with_valid_mutex_attr();
     let primary = UnitId::new(0);
     seed_primary_ppu(&mut host, primary);
     let created = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         primary,
         &rt,

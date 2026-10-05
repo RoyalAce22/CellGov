@@ -44,11 +44,10 @@ pub const SYS_SYNC_NOT_RECURSIVE: u32 = 0x20;
 
 /// `adaptive = SYS_SYNC_ADAPTIVE`: the create asks that a contending
 /// thread spin before it parks.
-// Neither adaptive enumerant is witnessed: no public document states
-// the pair, and no capture isolates the field. The built microtests
-// passes SYS_SYNC_NOT_ADAPTIVE, and no capture passes the
-// other member. The kernel answer for a third value is unestablished,
-// so `sys_mutex_create` names it instead of refusing it.
+// No public document states the pair. The console capture of
+// tests/micro/lv2_mutex_create_attr shows that `sys_mutex_create`
+// accepts either member, zero, 0x3000 and 0xFFFF, so the kernel does
+// not range-check the word; no capture tries a value above 0xFFFF.
 //
 // Both members state an intent the kernel drops: the non-public
 // description of the field calls it unimplemented and without effect,
@@ -57,8 +56,7 @@ pub const SYS_SYNC_NOT_RECURSIVE: u32 = 0x20;
 pub const SYS_SYNC_ADAPTIVE: u32 = 0x1000;
 
 /// `adaptive = SYS_SYNC_NOT_ADAPTIVE`: the create asks that a
-/// contending thread park at once. These two are the whole `adaptive`
-/// vocabulary.
+/// contending thread park at once.
 pub const SYS_SYNC_NOT_ADAPTIVE: u32 = 0x2000;
 
 /// `type = SYS_SYNC_WAITER_SINGLE`: at most one thread may park on

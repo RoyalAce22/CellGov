@@ -1,0 +1,17 @@
+[test]
+name = "lv2_mutex_create_attr"
+
+# A hardware probe: sys_mutex_create (100) with a null attribute block
+# and with each attribute word out of range, alone and together. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# fourteen 16-byte case records (u32 create rc, u32 id written, u32
+# destroy rc or 0xFFFFFFFF, u32 zero), in the order ppu/main.c lists:
+# 224 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 224 },
+]
+
+[expect]
+outcome = "completed"

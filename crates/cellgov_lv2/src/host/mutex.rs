@@ -30,26 +30,24 @@ impl Lv2Host {
         if id_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        // Known divergence: the kernel faults on a null attr, but here
-        // a null attr_ptr serves default attributes because the testkit
-        // relies on the null-attr default create.
+        // The kernel reads the attribute block unconditionally, so a
+        // null attr_ptr is EFAULT like any other unreadable pointer.
+        if attr_ptr == 0 {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        }
         use cellgov_ps3_abi::lv2::sync::mutex_attribute as attr_layout;
-        let attrs = if attr_ptr == 0 {
-            MutexAttrs::default()
-        } else if let Some(attr) =
+        let attrs = if let Some(attr) =
             GuestStruct::read(rt, attr_ptr as u64, attr_layout::SIZE as usize)
         {
             let protocol = attr.u32_at(attr_layout::PROTOCOL_OFFSET);
             let recursive_raw = attr.u32_at(attr_layout::RECURSIVE_OFFSET);
             let pshared = attr.u32_at(attr_layout::PSHARED_OFFSET);
-            let adaptive = attr.u32_at(attr_layout::ADAPTIVE_OFFSET);
-            // Each attribute word is an enumeration, so every unknown
-            // enumerant is EINVAL -- except adaptive, whose refusal
-            // code is unestablished. Validation ladder: protocol,
-            // recursive, pshared / ipc_key / flags, then adaptive.
-            // The ladder's order is a CellGov choice -- which EINVAL
-            // fires first when two words are both bad is
-            // unestablished.
+            // Protocol, recursive and pshared are enumerations, and an
+            // unknown enumerant in any of them is EINVAL. Every refusal
+            // here is EINVAL, so the order of the three checks is not
+            // visible to a guest. Dispatch does not check the adaptive
+            // word: the console creates the mutex for every adaptive
+            // value tried.
             match protocol {
                 cellgov_ps3_abi::lv2::sync::SYS_SYNC_FIFO
                 | cellgov_ps3_abi::lv2::sync::SYS_SYNC_PRIORITY => {}
@@ -67,12 +65,10 @@ impl Lv2Host {
             match pshared {
                 cellgov_ps3_abi::lv2::sync::SYS_SYNC_PROCESS_SHARED => {
                     // Process-shared creates carry an ipc_key and an
-                    // attach policy. A valid key starts at 1, so a
-                    // zero key is out of range; the attach flag must
-                    // be NEWLY_CREATED / NOT_CREATE / NOT_CARE
-                    // (1 / 2 / 3). EINVAL for the zero key is a
-                    // CellGov choice -- the key range is established,
-                    // the code for breaking it is not.
+                    // attach policy. A zero key, or an attach flag
+                    // other than NEWLY_CREATED / NOT_CREATE / NOT_CARE
+                    // (1 / 2 / 3), is EINVAL. A create that is not
+                    // process-shared ignores both fields.
                     let ipc_key = attr.u64_at(attr_layout::IPC_KEY_OFFSET);
                     let flags = attr.u32_at(attr_layout::FLAGS_OFFSET);
                     if ipc_key == 0 || !(1..=3).contains(&flags) {
@@ -94,31 +90,12 @@ impl Lv2Host {
                 cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_PROCESS_SHARED => {}
                 _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             }
-            // The adaptive word is the last member of the ladder, and
-            // the only one CellGov does not refuse. Neither member
-            // reaches the entry, for the reason recorded on
-            // SYS_SYNC_ADAPTIVE.
-            match adaptive {
-                cellgov_ps3_abi::lv2::sync::SYS_SYNC_ADAPTIVE
-                | cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_ADAPTIVE => {}
-                _ => self.log_invariant_break(
-                    "mutex.adaptive_out_of_range",
-                    format_args!(
-                        "sys_mutex_create with adaptive {adaptive:#x}: neither \
-                         SYS_SYNC_ADAPTIVE nor SYS_SYNC_NOT_ADAPTIVE; the refusal \
-                         code is unestablished, so the mutex is created"
-                    ),
-                ),
-            }
             MutexAttrs {
                 priority_policy: protocol,
                 recursive: recursive_raw == cellgov_ps3_abi::lv2::sync::SYS_SYNC_RECURSIVE,
                 protocol,
             }
         } else {
-            // The kernel reads the attribute struct unconditionally;
-            // an unreadable attr pointer is a guest fault, not the
-            // default-attribute arm.
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         let id = self.alloc_id();
@@ -239,3 +216,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/mutex_adaptive_tests.rs"]
 mod adaptive_tests;
+
+#[cfg(test)]
+#[path = "tests/mutex_console_tests.rs"]
+mod console_tests;

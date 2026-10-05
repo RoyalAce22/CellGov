@@ -42,7 +42,7 @@ fn a_mutex_call_from_a_unit_without_a_thread_record_is_esrch_and_logged() {
 #[test]
 fn lwmutex_and_mutex_id_spaces_are_independent() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000);
+    let rt = FakeRuntime::new(0x10000).with_valid_mutex_attr();
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
     let lw = host.dispatch(
@@ -63,7 +63,7 @@ fn lwmutex_and_mutex_id_spaces_are_independent() {
     let hv = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x104,
-            attr_ptr: 0,
+            attr_ptr: VALID_MUTEX_ATTR_PTR,
         },
         src,
         &rt,
@@ -106,7 +106,7 @@ fn lwmutex_and_mutex_id_spaces_are_independent() {
 #[test]
 fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000);
+    let rt = FakeRuntime::new(0x10000).with_valid_mutex_attr();
     let owner_unit = UnitId::new(0);
     let waiter_unit = UnitId::new(1);
     seed_primary_ppu(&mut host, owner_unit);
@@ -142,7 +142,7 @@ fn lwmutex_and_mutex_waiter_lists_do_not_cross_contaminate() {
         let r = host.dispatch(
             Lv2Request::MutexCreate {
                 id_ptr: 0x104,
-                attr_ptr: 0,
+                attr_ptr: VALID_MUTEX_ATTR_PTR,
             },
             owner_unit,
             &rt,

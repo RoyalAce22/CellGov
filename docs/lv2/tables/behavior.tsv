@@ -35,7 +35,7 @@ ordinal	packet	same_as	selector_slot	provenance_kind	provenance_ref	witness	exce
 97	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/lwmutex_tests.rs:lwmutex_lock_contended_parks_caller_on_waiter_list	none	crates/cellgov_lv2/src/host/lwmutex.rs
 98	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/lwmutex_tests.rs:lwmutex_unlock_with_three_waiters_wakes_head_in_fifo_order	none	crates/cellgov_lv2/src/host/lwmutex.rs
 99	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/lwmutex_tests.rs:lwmutex_trylock_contended_returns_ebusy_and_does_not_park	none	crates/cellgov_lv2/src/host/lwmutex.rs
-100	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/mutex_tests.rs:mutex_create_decodes_attr_ptr	none	crates/cellgov_lv2/src/host/mutex.rs
+100	none	none	none	console_capture	micro:lv2_mutex_create_attr	crates/cellgov_lv2/src/host/tests/mutex_console_tests.rs:mutex_create_answers_each_attribute_block_as_the_console_does	none	crates/cellgov_lv2/src/host/mutex.rs
 101	none	none	none	unestablished	none	none	none	crates/cellgov_lv2/src/host/mutex.rs
 102	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/mutex_tests.rs:a_recursive_relock_returns_ok_and_needs_matching_unlocks_before_the_waiter_wakes	none	crates/cellgov_lv2/src/host/mutex.rs
 103	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/mutex_tests.rs:mutex_trylock_contended_returns_ebusy_and_does_not_park	none	crates/cellgov_lv2/src/host/mutex.rs
