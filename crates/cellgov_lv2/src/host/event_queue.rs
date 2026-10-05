@@ -70,10 +70,9 @@ impl Lv2Host {
     /// # Errors
     ///
     /// `CELL_EINVAL` for a `port_type` outside
-    /// {`SYS_EVENT_PORT_LOCAL`, `SYS_EVENT_PORT_IPC`}: the type word
-    /// is an enumeration, so an unlisted value is an invalid
-    /// argument. Only the local form is described outside the
-    /// kernel; the IPC enumerant is unestablished.
+    /// {`SYS_EVENT_PORT_LOCAL`, `SYS_EVENT_PORT_IPC`}. The console
+    /// capture of `tests/micro/lv2_event_port_answers` creates types 1
+    /// and 3 and refuses types 0 and 2.
     pub(super) fn dispatch_event_port_create(
         &mut self,
         id_ptr: u32,
@@ -83,12 +82,6 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if port_type != SYS_EVENT_PORT_LOCAL && port_type != SYS_EVENT_PORT_IPC {
-            // A guest that trips this passes a type LV2 does not
-            // define, so the refusal is worth a named break.
-            self.log_invariant_break(
-                "dispatch.event_port_create_bad_type",
-                format_args!("sys_event_port_create: port_type {port_type} is neither LOCAL(1) nor IPC(3); returning CELL_EINVAL"),
-            );
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         self.state.process_counts.event_port_inc();
@@ -120,9 +113,9 @@ impl Lv2Host {
     ///
     /// A port binds to at most one queue, and its type must match the
     /// connect form. The two forms differ only in how the queue is
-    /// named, so they share one body. The local form's contract is
-    /// described outside the kernel; the IPC form's is
-    /// unestablished.
+    /// named, so they share one body. The console capture of
+    /// `tests/micro/lv2_event_port_answers` shows each refusal below
+    /// for the IPC form.
     ///
     /// # Errors
     ///
@@ -479,6 +472,10 @@ mod exclusion_tests;
 #[cfg(test)]
 #[path = "tests/destroy_parked_console_tests.rs"]
 mod destroy_parked_console_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_console_tests.rs"]
+mod event_port_console_tests;
 
 #[cfg(test)]
 #[path = "tests/event_queue_destroy_mode_tests.rs"]

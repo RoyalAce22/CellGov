@@ -1,0 +1,14 @@
+[test]
+name = "lv2_event_port_answers"
+
+# A hardware probe: event port create types, IPC connect, send to an unconnected port and to a full queue, destroy of a connected port, and a tryreceive batch larger than the queue holds.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 40 big-endian u32 words, in the order ppu/main.c lists: 160 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 160 },
+]
+
+[expect]
+outcome = "completed"
