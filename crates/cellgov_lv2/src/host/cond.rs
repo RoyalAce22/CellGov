@@ -34,6 +34,22 @@ impl Lv2Host {
         if self.state.mutexes.lookup(mutex_id).is_none() {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
+        // The kernel reads the whole attribute block: the console
+        // capture of tests/micro/lv2_semaphore_gates answers EFAULT
+        // when only the name bytes are unmapped. No capture presents
+        // a null attribute pointer, so a null pointer still creates a
+        // cond.
+        use cellgov_ps3_abi::lv2::sync::cond_attribute as attr_layout;
+        if attr_ptr != 0
+            && crate::host::guest_struct::GuestStruct::read(
+                rt,
+                u64::from(attr_ptr),
+                attr_layout::SIZE as usize,
+            )
+            .is_none()
+        {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        }
         let id = self.alloc_id();
         if self
             .state
@@ -46,8 +62,8 @@ impl Lv2Host {
         // The attribute's key field carries meaning only when
         // attr_pshared selects a process-shared cond. A
         // process-private cond has no key, so its effective key is 0.
-        // An unreadable attr stays keyless; attr validation is
-        // otherwise unchanged.
+        // A null attr skips the gate above, and its key is read at
+        // guest address 0 like any other block.
         if let Some(ipc_key) = cond_attr_ipc_key(attr_ptr, rt) {
             if ipc_key != 0 {
                 self.derived.cond_ipc_keys.insert(id, ipc_key);

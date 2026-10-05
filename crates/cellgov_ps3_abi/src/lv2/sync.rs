@@ -111,10 +111,10 @@ pub mod event_flag_wait_mode {
 /// declared [`SIZE`](semaphore_attribute::SIZE) of 32 bytes.
 // The field order and the eight-byte name come from a non-public
 // description of the struct, so they carry no citation. The kernel
-// answer for a block whose name bytes are unmapped is unestablished.
-// No capture presents an attribute block that straddles the end
-// of a mapped region. CellGov gates the create on the whole declared
-// size, which a copy-in of the struct reaches.
+// reads the whole declared size: the console capture of
+// tests/micro/lv2_semaphore_gates answers EFAULT from the semaphore,
+// mutex, event flag and cond creates when only a block's name bytes
+// are unmapped.
 pub mod semaphore_attribute {
     /// `sizeof(sys_semaphore_attribute_t)`.
     pub const SIZE: u32 = 0x20;

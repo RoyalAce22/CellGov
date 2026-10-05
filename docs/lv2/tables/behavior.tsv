@@ -25,7 +25,7 @@ ordinal	packet	same_as	selector_slot	provenance_kind	provenance_ref	witness	exce
 85	none	none	none	console_capture	micro:lv2_event_flag_check_order	crates/cellgov_lv2/src/host/tests/event_flag_console_tests.rs:event_flag_wait_checks_the_id_before_the_mode_as_the_console_does	none	crates/cellgov_lv2/src/host/event_flag.rs
 86	none	none	none	console_capture	micro:lv2_event_flag_check_order	crates/cellgov_lv2/src/host/tests/event_flag_console_tests.rs:event_flag_trywait_checks_the_id_before_the_mode_as_the_console_does	none	crates/cellgov_lv2/src/host/event_flag.rs
 87	none	none	none	console_capture	ps3autotests:sys_event_flag	crates/cellgov_lv2/src/host/tests/event_flag_tests.rs:event_flag_set_wakes_matching_waiters_in_fifo_order	none	crates/cellgov_lv2/src/host/event_flag.rs
-90	none	none	none	console_capture	ps3autotests:sys_semaphore	crates/cellgov_lv2/src/host/tests/hardware_trace_tests.rs:semaphore_create_rejects_the_four_bound_violations_the_console_rejects	none	crates/cellgov_lv2/src/host/semaphore.rs
+90	none	none	none	console_capture	micro:lv2_semaphore_gates	crates/cellgov_lv2/src/host/tests/semaphore_console_tests.rs:the_semaphore_gates_answer_as_the_console_does	none	crates/cellgov_lv2/src/host/semaphore.rs
 91	none	none	none	console_capture	ps3autotests:sys_semaphore	crates/cellgov_lv2/src/host/tests/hardware_trace_tests.rs:semaphore_destroy_of_an_already_destroyed_id_answers_esrch	none	crates/cellgov_lv2/src/host/semaphore.rs
 92	none	none	none	console_capture	ps3autotests:sys_semaphore	crates/cellgov_lv2/src/host/tests/semaphore_tests.rs:semaphore_wait_with_zero_count_parks_caller	none	crates/cellgov_lv2/src/host/semaphore.rs
 93	none	none	none	console_capture	ps3autotests:sys_semaphore	crates/cellgov_lv2/src/host/tests/semaphore_tests.rs:semaphore_trywait_with_zero_count_returns_ebusy	none	crates/cellgov_lv2/src/host/semaphore.rs
@@ -46,7 +46,7 @@ ordinal	packet	same_as	selector_slot	provenance_kind	provenance_ref	witness	exce
 108	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/cond_signal_tests.rs:cond_signal_reparks_waiter_on_mutex_when_held	none	crates/cellgov_lv2/src/host/cond.rs
 109	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/cond_broadcast_tests.rs:cond_signal_all_wakes_first_reparks_rest_when_mutex_free	none	crates/cellgov_lv2/src/host/cond.rs
 110	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/cond_signal_tests.rs:cond_signal_to_targets_specific_waiter_and_preserves_order	none	crates/cellgov_lv2/src/host/cond.rs
-114	none	none	none	console_capture	ps3autotests:sys_semaphore	crates/cellgov_lv2/src/host/tests/semaphore_tests.rs:semaphore_get_value_writes_current_count	none	crates/cellgov_lv2/src/host/semaphore.rs
+114	none	none	none	console_capture	micro:lv2_semaphore_gates	crates/cellgov_lv2/src/host/tests/semaphore_console_tests.rs:the_semaphore_gates_answer_as_the_console_does	none	crates/cellgov_lv2/src/host/semaphore.rs
 118	none	none	none	console_capture	ps3autotests:sys_event_flag	crates/cellgov_lv2/src/host/tests/hardware_trace_tests.rs:event_flag_clear_keeps_the_bits_its_argument_names	none	crates/cellgov_lv2/src/host/event_flag.rs
 120	none	none	none	unestablished	none	none	none	crates/cellgov_lv2/src/host/dispatch_route/inline_arms.rs
 121	none	none	none	unestablished	none	none	none	crates/cellgov_lv2/src/host/dispatch_route/inline_arms.rs

@@ -294,11 +294,25 @@ fn semaphore_get_value_writes_current_count() {
 }
 
 #[test]
-fn semaphore_get_value_null_out_ptr_returns_efault() {
+fn semaphore_get_value_null_out_ptr_on_a_live_id_returns_efault() {
     let mut host = Lv2Host::new();
     let rt = fake_runtime_with_valid_sync_attr(0x10000);
+    let created = host.dispatch(
+        Lv2Request::SemaphoreCreate {
+            id_ptr: 0x100,
+            attr_ptr: VALID_SYNC_ATTR_PTR,
+            initial: 0,
+            max: 1,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let id = match &created {
+        Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
     let r = host.dispatch(
-        Lv2Request::SemaphoreGetValue { id: 1, out_ptr: 0 },
+        Lv2Request::SemaphoreGetValue { id, out_ptr: 0 },
         UnitId::new(0),
         &rt,
     );

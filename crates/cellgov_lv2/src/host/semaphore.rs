@@ -5,9 +5,11 @@
 //!
 //! The hardware trace in `tests/ps3autotests/tests/lv2/sys_semaphore`
 //! pins a refusal code on every arm here and the wake count on post.
-//! It never presents two faults at once, so every gate order below is
-//! CellGov's own. The zero-post refusal and destroy's `CELL_EBUSY`
-//! have no trace behind them.
+//! The console capture of `tests/micro/lv2_semaphore_gates` settles the
+//! create order of a null attribute block, the bounds and a null id
+//! pointer, the get_value order of the id and the out-pointer, and the
+//! zero-count post refusal. Every other gate order below is CellGov's
+//! own, and destroy's `CELL_EBUSY` has no capture behind it.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
@@ -32,12 +34,11 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        // The order of the pointer gates against the bounds gates is
-        // unestablished. The hardware trace in
-        // tests/ps3autotests/tests/lv2/sys_semaphore presents a null
-        // pointer and an out-of-range bound only one at a time, so
-        // this order is CellGov's.
-        if id_ptr == 0 || attr_ptr == 0 {
+        // The console capture of tests/micro/lv2_semaphore_gates fixes
+        // the order: a null attribute block is EFAULT before the
+        // bounds are checked, and out-of-range bounds are EINVAL
+        // before a null id pointer is EFAULT.
+        if attr_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         use cellgov_ps3_abi::lv2::sync::semaphore_attribute as attr_layout;
@@ -56,6 +57,9 @@ impl Lv2Host {
         // that nothing can ever acquire.
         if max <= 0 || initial < 0 || initial > max {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        if id_ptr == 0 {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let id = self.alloc_id();
         match self.state.semaphores.create_with_id(id, initial, max) {
@@ -133,17 +137,15 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        // This order is CellGov's: the trace never presents both
-        // faults at once. It answers EFAULT for a null out-pointer on
-        // a live id, and ESRCH for a stale id with a good pointer.
-        // The post arm's order is the reverse, and there the trace
-        // does settle it.
-        if out_ptr == 0 {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
-        }
+        // The id is checked before the out-pointer: the console
+        // capture of tests/micro/lv2_semaphore_gates answers ESRCH
+        // for a stale id with a null out-pointer.
         let Some(entry) = self.state.semaphores.lookup(id) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
+        if out_ptr == 0 {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        }
         let count = entry.count() as u32;
         self.immediate_write_u32(count, out_ptr, requester, tick)
     }
@@ -152,12 +154,9 @@ impl Lv2Host {
         // Error order: id lookup, then val<=0, then overflow-vs-max.
         // The hardware trace in
         // tests/ps3autotests/tests/lv2/sys_semaphore posts val 0 to a
-        // stale id and gets ESRCH, so this arm must answer ESRCH
-        // there too. That constrains CellGov without settling the
-        // kernel's own gate order. The documented refusal is a
-        // negative count, so a zero count may be legal, with no gate
-        // at all. The trace never presents two faults at once.
-        // Refusing zero is CellGov's choice.
+        // stale id and gets ESRCH. The console capture of
+        // tests/micro/lv2_semaphore_gates posts 0 and -1 to a live id
+        // and gets EINVAL for both, with the count unchanged.
         //
         // The overflow check folds in waiters: post(N) wakes up to N
         // waiters and only the leftover counts toward `max`. The
@@ -208,3 +207,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/semaphore_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/semaphore_console_tests.rs"]
+mod console_tests;

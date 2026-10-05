@@ -1,0 +1,17 @@
+[test]
+name = "lv2_semaphore_gates"
+
+# A hardware probe: the null-pointer and stale-id gates of
+# sys_semaphore_create, get_value and post, a zero and a negative post,
+# and the four sync creates given an attribute block whose name bytes
+# lie on an unmapped page. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# 26 big-endian u32 words, in the order ppu/main.c lists: 104 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 104 },
+]
+
+[expect]
+outcome = "completed"
