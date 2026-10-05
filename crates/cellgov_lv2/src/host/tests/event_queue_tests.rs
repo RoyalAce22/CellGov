@@ -102,7 +102,14 @@ fn event_queue_destroy_with_waiters_returns_ebusy() {
     host.event_queues_mut()
         .enqueue_waiter(id, PpuThreadId::PRIMARY, 0x2000)
         .unwrap();
-    let d = host.dispatch(Lv2Request::EventQueueDestroy { queue_id: id }, src, &rt);
+    let d = host.dispatch(
+        Lv2Request::EventQueueDestroy {
+            queue_id: id,
+            mode: 0,
+        },
+        src,
+        &rt,
+    );
     let Lv2Dispatch::Immediate { code, .. } = d else {
         panic!("expected Immediate, got {d:?}");
     };

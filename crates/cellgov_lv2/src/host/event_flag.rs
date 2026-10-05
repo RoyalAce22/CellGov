@@ -9,9 +9,9 @@
 //! pins a refusal code on every arm here, the set / clear arithmetic,
 //! and the count cancel reports. It never presents two faults at once.
 //! The console capture of `tests/micro/lv2_event_flag_check_order`
-//! does: wait and trywait check the id before the mode. The trace never
-//! destroys a flag with a parked waiter, so destroy's `CELL_EBUSY` has
-//! no trace behind it.
+//! does: wait and trywait check the id before the mode. The console
+//! capture of `tests/micro/lv2_destroy_parked` settles destroy's
+//! `CELL_EBUSY` with a parked waiter, who stays parked.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;

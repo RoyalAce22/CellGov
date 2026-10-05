@@ -285,8 +285,8 @@ impl Lv2Host {
             Lv2Request::EventQueueCreate {
                 id_ptr, key, size, ..
             } => self.dispatch_event_queue_create(id_ptr, key, size, requester, tick),
-            Lv2Request::EventQueueDestroy { queue_id } => {
-                self.dispatch_event_queue_destroy(queue_id)
+            Lv2Request::EventQueueDestroy { queue_id, mode } => {
+                self.dispatch_event_queue_destroy(queue_id, mode)
             }
             Lv2Request::EventQueueReceive {
                 queue_id, out_ptr, ..

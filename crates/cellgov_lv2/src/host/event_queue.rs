@@ -200,14 +200,40 @@ impl Lv2Host {
         }
     }
 
-    pub(super) fn dispatch_event_queue_destroy(&mut self, id: u32) -> Lv2Dispatch {
+    /// `sys_event_queue_destroy` (129).
+    ///
+    /// A queue with parked receivers is EBUSY unless `mode` is
+    /// [`SYS_EVENT_QUEUE_DESTROY_FORCE`], which destroys it and wakes
+    /// each receiver with `CELL_ECANCELED`.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` for a `mode` other than 0 or
+    ///   [`SYS_EVENT_QUEUE_DESTROY_FORCE`], checked before the id.
+    /// - `CELL_ESRCH` for an unknown queue.
+    /// - `CELL_EBUSY` for mode 0 while a receiver waits on the queue.
+    ///
+    /// The console captures of `tests/micro/lv2_destroy_parked` and
+    /// `tests/micro/lv2_event_queue_destroy_mode` show each answer and
+    /// the mode-before-id order.
+    ///
+    /// [`SYS_EVENT_QUEUE_DESTROY_FORCE`]: cellgov_ps3_abi::lv2::sync::SYS_EVENT_QUEUE_DESTROY_FORCE
+    pub(super) fn dispatch_event_queue_destroy(&mut self, id: u32, mode: u32) -> Lv2Dispatch {
+        use cellgov_ps3_abi::lv2::sync::SYS_EVENT_QUEUE_DESTROY_FORCE;
+        if mode != 0 && mode != SYS_EVENT_QUEUE_DESTROY_FORCE {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
         let Some(entry) = self.state.event_queues.lookup(id) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
-        if !entry.waiters().is_empty() {
+        if !entry.waiters().is_empty() && mode != SYS_EVENT_QUEUE_DESTROY_FORCE {
             return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
-        self.state.event_queues.destroy(id);
+        let waiters = self
+            .state
+            .event_queues
+            .destroy_with_waiters(id)
+            .unwrap_or_default();
         self.state.event_ports.unbind_queue(id);
         self.state.groups.unbind_event_queue(id);
         if let Some(ipc_key) = self.derived.event_queue_ipc_keys.remove(&id) {
@@ -215,7 +241,25 @@ impl Lv2Host {
                 self.derived.event_queue_ipc.remove(&ipc_key);
             }
         }
-        Lv2Dispatch::immediate(0)
+        let canceled = u64::from(errno::CELL_ECANCELED);
+        let mut woken_unit_ids = Vec::new();
+        let mut response_updates = Vec::new();
+        for waiter in waiters {
+            if let Some(unit) = self.resolve_wake_thread(waiter.thread, "event_queue_destroy.force")
+            {
+                woken_unit_ids.push(unit);
+                response_updates.push((unit, PendingResponse::ReturnCode { code: canceled }));
+            }
+        }
+        if woken_unit_ids.is_empty() {
+            return Lv2Dispatch::immediate(0);
+        }
+        Lv2Dispatch::WakeAndReturn {
+            code: 0,
+            woken_unit_ids,
+            response_updates,
+            effects: vec![],
+        }
     }
 
     /// Log an invariant break if queue `id` holds payloads and parked waiters at once.
@@ -431,3 +475,11 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/event_queue_exclusion_tests.rs"]
 mod exclusion_tests;
+
+#[cfg(test)]
+#[path = "tests/destroy_parked_console_tests.rs"]
+mod destroy_parked_console_tests;
+
+#[cfg(test)]
+#[path = "tests/event_queue_destroy_mode_tests.rs"]
+mod destroy_mode_tests;

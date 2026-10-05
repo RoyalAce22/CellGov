@@ -502,7 +502,13 @@ fn destroying_a_queue_drops_every_spu_connection_to_it() {
     );
     assert_eq!(bind(&mut host, thread(0), q, 7), 0);
     assert_eq!(
-        call(&mut host, Lv2Request::EventQueueDestroy { queue_id: q }),
+        call(
+            &mut host,
+            Lv2Request::EventQueueDestroy {
+                queue_id: q,
+                mode: 0
+            }
+        ),
         0
     );
     assert_eq!(

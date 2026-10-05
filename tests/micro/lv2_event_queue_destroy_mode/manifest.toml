@@ -1,0 +1,15 @@
+[test]
+name = "lv2_event_queue_destroy_mode"
+
+# A hardware probe: sys_event_queue_destroy with mode words other than 0
+# and FORCE, and with a stale id and an unlisted mode together. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 6 big-endian u32 words, in the order ppu/main.c lists: 24 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 24 },
+]
+
+[expect]
+outcome = "completed"

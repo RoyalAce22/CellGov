@@ -222,6 +222,14 @@ pub mod cond_attribute {
     const _: () = assert!(IPC_KEY_OFFSET + core::mem::size_of::<u64>() <= SIZE as usize);
 }
 
+/// `mode = SYS_EVENT_QUEUE_DESTROY_FORCE` for `sys_event_queue_destroy`
+/// (129): destroy the queue even with receivers parked on it, and wake
+/// each of them with `CELL_ECANCELED`.
+// No public document states the value. The console capture of
+// tests/micro/lv2_destroy_parked passes 1 and observes the forced
+// destroy succeed and the parked receiver return ECANCELED.
+pub const SYS_EVENT_QUEUE_DESTROY_FORCE: u32 = 1;
+
 /// `port_type = SYS_EVENT_PORT_LOCAL`: connectable only by queue id,
 /// through `sys_event_port_connect_local` (136).
 pub const SYS_EVENT_PORT_LOCAL: u64 = 1;

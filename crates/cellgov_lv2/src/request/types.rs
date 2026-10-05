@@ -309,6 +309,9 @@ pub enum Lv2Request {
     EventQueueDestroy {
         /// In: queue id.
         queue_id: u32,
+        /// In: destroy mode; `SYS_EVENT_QUEUE_DESTROY_FORCE` destroys a
+        /// queue with parked receivers.
+        mode: u32,
     },
     /// The event returns in r4..=r7 (source / data1 / data2 / data3);
     /// `out_ptr` is the dummy pointer the kernel never writes. Timeout

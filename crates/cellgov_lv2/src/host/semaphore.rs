@@ -9,7 +9,8 @@
 //! create order of a null attribute block, the bounds and a null id
 //! pointer, the get_value order of the id and the out-pointer, and the
 //! zero-count post refusal. Every other gate order below is CellGov's
-//! own, and destroy's `CELL_EBUSY` has no capture behind it.
+//! own. The console capture of `tests/micro/lv2_destroy_parked` settles
+//! destroy's `CELL_EBUSY` with a parked waiter, who stays parked.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;

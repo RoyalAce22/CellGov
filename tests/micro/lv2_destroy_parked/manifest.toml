@@ -1,0 +1,18 @@
+[test]
+name = "lv2_destroy_parked"
+
+# A hardware probe: destroying a semaphore, event flag, mutex, cond and
+# event queue (mode 0 and FORCE) while another thread is parked on it,
+# and what the parked thread gets back. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# failed step + rc, then six 16-byte records (destroy while parked,
+# returned within 20 ms, the waiter's return code, destroy after), in
+# the order ppu/main.c lists: 104 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 104 },
+]
+
+[expect]
+outcome = "completed"

@@ -450,7 +450,10 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             key: args[2],
             size: p!(3),
         },
-        syscall::EVENT_QUEUE_DESTROY => Lv2Request::EventQueueDestroy { queue_id: p!(0) },
+        syscall::EVENT_QUEUE_DESTROY => Lv2Request::EventQueueDestroy {
+            queue_id: p!(0),
+            mode: p!(1),
+        },
         syscall::EVENT_QUEUE_RECEIVE => Lv2Request::EventQueueReceive {
             queue_id: p!(0),
             out_ptr: p!(1),

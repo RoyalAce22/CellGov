@@ -591,7 +591,10 @@ fn classify_event_queue_create_destroy() {
     let args2 = [99, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
         classify(syscall::EVENT_QUEUE_DESTROY, &args2),
-        Lv2Request::EventQueueDestroy { queue_id: 99 }
+        Lv2Request::EventQueueDestroy {
+            queue_id: 99,
+            mode: 0
+        }
     );
 }
 
@@ -889,7 +892,7 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::SEMAPHORE_GET_VALUE, &[0, 1]),
     (syscall::EVENT_FLAG_CLEAR, &[0]),
     (syscall::EVENT_QUEUE_CREATE, &[0, 1, 3]),
-    (syscall::EVENT_QUEUE_DESTROY, &[0]),
+    (syscall::EVENT_QUEUE_DESTROY, &[0, 1]),
     (syscall::EVENT_QUEUE_RECEIVE, &[0, 1]),
     (syscall::UART_INITIALIZE, &[]),
     (syscall::UART_RECEIVE, &[0, 2]),

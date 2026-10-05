@@ -36,12 +36,12 @@ ordinal	packet	same_as	selector_slot	provenance_kind	provenance_ref	witness	exce
 98	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/lwmutex_tests.rs:lwmutex_unlock_with_three_waiters_wakes_head_in_fifo_order	none	crates/cellgov_lv2/src/host/lwmutex.rs
 99	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/lwmutex_tests.rs:lwmutex_trylock_contended_returns_ebusy_and_does_not_park	none	crates/cellgov_lv2/src/host/lwmutex.rs
 100	none	none	none	console_capture	micro:lv2_mutex_create_attr	crates/cellgov_lv2/src/host/tests/mutex_console_tests.rs:mutex_create_answers_each_attribute_block_as_the_console_does	none	crates/cellgov_lv2/src/host/mutex.rs
-101	none	none	none	unestablished	none	none	none	crates/cellgov_lv2/src/host/mutex.rs
+101	none	none	none	console_capture	micro:lv2_destroy_parked	crates/cellgov_lv2/src/host/tests/destroy_parked_console_tests.rs:destroying_an_object_with_a_parked_waiter_answers_as_the_console_does	none	crates/cellgov_lv2/src/host/mutex.rs
 102	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/mutex_tests.rs:a_recursive_relock_returns_ok_and_needs_matching_unlocks_before_the_waiter_wakes	none	crates/cellgov_lv2/src/host/mutex.rs
 103	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/mutex_tests.rs:mutex_trylock_contended_returns_ebusy_and_does_not_park	none	crates/cellgov_lv2/src/host/mutex.rs
 104	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/mutex_tests.rs:mutex_lock_contended_blocks_and_unlock_wakes	none	crates/cellgov_lv2/src/host/mutex.rs
 105	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/cond_lifecycle_tests.rs:cond_create_writes_id_and_binds_mutex	none	crates/cellgov_lv2/src/host/cond.rs
-106	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/cond_lifecycle_tests.rs:cond_destroy_with_waiter_returns_ebusy	none	crates/cellgov_lv2/src/host/cond.rs
+106	none	none	none	console_capture	micro:lv2_destroy_parked	crates/cellgov_lv2/src/host/tests/destroy_parked_console_tests.rs:destroying_an_object_with_a_parked_waiter_answers_as_the_console_does	none	crates/cellgov_lv2/src/host/cond.rs
 107	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/cond_wait_tests.rs:cond_wait_transfers_mutex_to_waiter_via_block_and_wake	none	crates/cellgov_lv2/src/host/cond.rs
 108	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/cond_signal_tests.rs:cond_signal_reparks_waiter_on_mutex_when_held	none	crates/cellgov_lv2/src/host/cond.rs
 109	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/cond_broadcast_tests.rs:cond_signal_all_wakes_first_reparks_rest_when_mutex_free	none	crates/cellgov_lv2/src/host/cond.rs
@@ -51,7 +51,7 @@ ordinal	packet	same_as	selector_slot	provenance_kind	provenance_ref	witness	exce
 120	none	none	none	unestablished	none	none	none	crates/cellgov_lv2/src/host/dispatch_route/inline_arms.rs
 121	none	none	none	unestablished	none	none	none	crates/cellgov_lv2/src/host/dispatch_route/inline_arms.rs
 128	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/system_ipc_witness_tests.rs:a_second_keyed_create_on_the_same_key_is_eexist	none	crates/cellgov_lv2/src/host/event_queue.rs
-129	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/event_queue_tests.rs:event_queue_destroy_with_waiters_returns_ebusy	none	crates/cellgov_lv2/src/host/event_queue.rs
+129	none	none	none	console_capture	micro:lv2_destroy_parked	crates/cellgov_lv2/src/host/tests/destroy_parked_console_tests.rs:destroying_an_object_with_a_parked_waiter_answers_as_the_console_does	none	crates/cellgov_lv2/src/host/event_queue.rs
 130	none	none	none	firmware_reading	libaudio.prx	crates/cellgov_lv2/src/host/tests/event_queue_tests.rs:event_queue_receive_with_buffered_payload_delivers_immediately	none	crates/cellgov_lv2/src/host/event_queue.rs
 131	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/event_queue_tests.rs:event_queue_tryreceive_batch_drains_payloads	none	crates/cellgov_lv2/src/host/event_queue.rs
 132	none	none	none	console_capture	ps3autotests:sys_event_flag	crates/cellgov_lv2/src/host/tests/expire_tests.rs:event_flag_cancel_reports_the_pattern_through_each_result_ptr	none	crates/cellgov_lv2/src/host/event_flag.rs

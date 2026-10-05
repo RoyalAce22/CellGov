@@ -193,6 +193,14 @@ impl EventQueueTable {
         Some(entry)
     }
 
+    /// Remove the entry and hand back its parked receivers in FIFO
+    /// order, so the caller can wake each one; `None` if the id was
+    /// unknown.
+    pub fn destroy_with_waiters(&mut self, id: u32) -> Option<Vec<EventQueueWaiter>> {
+        let entry = self.entries.remove(id)?;
+        Some(entry.waiters.into_iter().collect())
+    }
+
     /// Read-only lookup.
     pub fn lookup(&self, id: u32) -> Option<&EventQueueEntry> {
         self.entries.get(id)
