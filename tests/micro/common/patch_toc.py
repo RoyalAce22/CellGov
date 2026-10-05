@@ -1,12 +1,19 @@
-"""Post-link patches for PSL1GHT ELFs running on RPCS3.
+"""Post-link patches for PSL1GHT ELFs.
 
-Usage: patch_toc.py <elf_path> <readelf_path> <nm_path>
+Usage: patch_toc.py <elf_path> <readelf_path> <nm_path> [--toc-only]
 
 Two patches:
 1. TOC base: computes .got + 0x8000, writes it into __cg_tocval.
 2. rldicr removal: replaces every `rldicr rN, rN, 16, 47` with
-   `slwi rN, rN, 16` (a 32-bit equivalent). RPCS3 v0.0.40
-   mishandles rldicr, causing branches to garbage addresses.
+   `slwi rN, rN, 16`. RPCS3 v0.0.40 mishandles rldicr, causing
+   branches to garbage addresses. The two are equal only when the
+   value fits in 32 bits: `slwi` clears the high word that `sldi`
+   keeps, so a 64-bit constant built with `lis; sldi 16; ori` loses
+   its high word.
+
+`--toc-only` applies patch 1 and leaves every rldicr in place. The
+console build (common/package_ps3.sh) passes it: the console runs
+rldicr correctly, and the rewrite would change what the probe sends.
 
 The rldicr scan is bounded to .text's file range -- ELF headers,
 .rodata, .data, and the symbol/string tables must never be
@@ -41,9 +48,16 @@ def section_fields(readelf, elf, name):
 
 
 def main():
+    if len(sys.argv) not in (4, 5) or (len(sys.argv) == 5 and sys.argv[4] != "--toc-only"):
+        print(
+            "usage: patch_toc.py <elf_path> <readelf_path> <nm_path> [--toc-only]",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     elf = sys.argv[1]
     readelf = sys.argv[2]
     nm = sys.argv[3]
+    toc_only = len(sys.argv) == 5
     # readelf and objdump ship side by side in the toolchain bin dir;
     # build.sh passes only the former, so derive the latter.
     objdump = readelf.replace("readelf", "objdump")
@@ -76,6 +90,10 @@ def main():
         f.write(struct.pack(">I", toc))
 
     print("TOC patched")
+
+    if toc_only:
+        print(f"rldicr left in place: {count_rldicr_in_disassembly(objdump, elf)} site(s)")
+        return
 
     # Patch 2: replace rldicr with 32-bit equivalents.
     # rldicr rN, rN, 16, 47 = rotate left doubleword then clear right.

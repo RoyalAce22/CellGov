@@ -12,7 +12,8 @@
 #                -DCGOV_PS3_USRDIR, so an SPU image loads from the
 #                deployed USRDIR by import from memory
 #                (tests/micro/common/cgov_spu_load.h); TOC-patched like
-#                the reference ELF, plus PSL1GHT's lv2-sprx.o so the ELF
+#                the reference ELF but with its rldicr instructions left
+#                in place, plus PSL1GHT's lv2-sprx.o so the ELF
 #                carries the PRX parameter record the console's loader
 #                and sprxlinker both need;
 #   EBOOT.BIN    that ELF as an NPDRM SELF under one fixed content id;
@@ -90,10 +91,14 @@ ${PPU_PREFIX}-gcc \
     "$PPU_SOURCE" \
     ${CGOV_PS3_LIBS:-} -llv2 -lsysmodule -lrt
 if [ "$LINK_KIND" = "common-crt0" ]; then
+    # --toc-only: the console runs rldicr correctly, and the rewrite
+    # the reference ELF takes would drop the high word of a 64-bit
+    # constant (common/patch_toc.py).
     python3 "$COMMON/patch_toc.py" \
         "$PS3OUT/$NAME.elf" \
         "${PPU_PREFIX}-readelf" \
-        "${PPU_PREFIX}-nm"
+        "${PPU_PREFIX}-nm" \
+        --toc-only
 fi
 echo "$LINK_KIND" > "$PS3OUT/link.txt"
 
