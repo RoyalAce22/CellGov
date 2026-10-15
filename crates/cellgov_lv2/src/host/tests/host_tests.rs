@@ -372,6 +372,9 @@ fn multi_primitive_determinism_canary() {
                 Lv2Dispatch::PpuThreadExit { .. } => "PpuExit".into(),
                 Lv2Dispatch::ProcessSpawn { pid, .. } => format!("Spawn({pid:#x})"),
                 Lv2Dispatch::ProcessExitChild { pid, .. } => format!("ExitChild({pid:#x})"),
+                Lv2Dispatch::SpuGroupTerminate { group_id, .. } => {
+                    format!("Terminate({group_id:#x})")
+                }
             };
             trace.push((format!("{label}:{tag}"), host.sync_partial()));
         }

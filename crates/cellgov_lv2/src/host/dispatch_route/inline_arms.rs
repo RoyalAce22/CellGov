@@ -13,25 +13,6 @@ use crate::host::{Lv2Host, Lv2Runtime};
 use cellgov_time::GuestTicks;
 
 impl Lv2Host {
-    /// `sys_spu_thread_group_terminate`: SPU teardown is not
-    /// modeled; returns CELL_ENOSYS and logs an invariant break per
-    /// call. What the kernel does to the group's running SPUs on
-    /// terminate is unestablished; a console witness would fix it.
-    pub(super) fn dispatch_spu_thread_group_terminate_stub(
-        &mut self,
-        group_id: u32,
-        value: i32,
-    ) -> Lv2Dispatch {
-        self.log_invariant_break(
-            "dispatch.spu_thread_group_terminate_stub",
-            format_args!(
-                "sys_spu_thread_group_terminate(group_id={group_id}, value={value}) \
-                 not implemented; returning CELL_ENOSYS"
-            ),
-        );
-        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
-    }
-
     /// `sys_memory_free`: the bump allocator tracks no per-allocation
     /// state, so a valid free, a bad pointer, and an unknown id are
     /// indistinguishable; all answer CELL_OK.

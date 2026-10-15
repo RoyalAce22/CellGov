@@ -13,3 +13,7 @@ pub(crate) use checks::check_response_updates;
 #[cfg(test)]
 #[path = "tests/lv2_dispatch_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/spu_group_terminate_tests.rs"]
+mod spu_group_terminate_tests;

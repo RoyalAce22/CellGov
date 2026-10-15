@@ -280,6 +280,31 @@ pub enum DestroyGroupError {
     Busy,
 }
 
+/// Failure modes of [`ThreadGroupTable::terminate`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum TerminateGroupError {
+    /// -> `CELL_ESRCH`: no group has the id.
+    #[error("unknown thread group")]
+    Unknown,
+    /// -> `CELL_ESTAT`: the group is not running.
+    #[error("thread group not running (state {state:?})")]
+    NotRunning {
+        /// Current group state.
+        state: GroupState,
+    },
+}
+
+/// Failure modes of [`ThreadGroupTable::thread_exit_status`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ExitStatusError {
+    /// -> `CELL_ESRCH`: no initialized thread has the id.
+    #[error("no initialized SPU thread with that id")]
+    UnknownThread,
+    /// -> `CELL_ESTAT`: the thread did not call `sys_spu_thread_exit`.
+    #[error("the SPU thread has no exit status")]
+    NoStatus,
+}
+
 /// Table of managed SPU thread groups.
 ///
 /// `unit_to_group` and `finished_units` partition the SPU
@@ -867,6 +892,81 @@ impl ThreadGroupTable {
             .filter(|&unit| unit != unit_id)
             .collect();
         Ok((group_id, others))
+    }
+
+    /// End the running group `group_id`, as `sys_spu_thread_group_terminate` does.
+    ///
+    /// Every thread of the group finishes, and a join reads
+    /// [`group_join_cause::TERMINATED`] with `status`. A terminated
+    /// thread records no exit status. Returns the units of the group
+    /// that were still running.
+    ///
+    /// # Errors
+    /// See [`TerminateGroupError`]; an error changes nothing.
+    pub fn terminate(
+        &mut self,
+        group_id: u32,
+        status: u32,
+    ) -> Result<Vec<UnitId>, TerminateGroupError> {
+        let mut group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or(TerminateGroupError::Unknown)?;
+        if group.state != GroupState::Running {
+            return Err(TerminateGroupError::NotRunning { state: group.state });
+        }
+        group.state = GroupState::Finished;
+        group.remaining_unfinished = 0;
+        group.join_cause = group_join_cause::TERMINATED;
+        group.exit_status = status;
+        let members: Vec<UnitId> = self
+            .unit_to_group
+            .iter()
+            .filter(|(_, &gid)| gid == group_id)
+            .map(|(unit, _)| unit)
+            .collect();
+        for &unit in &members {
+            self.unit_to_group.remove(unit);
+            self.finished_units.insert(unit, group_id);
+        }
+        Ok(members)
+    }
+
+    /// The status an initialized thread gave `sys_spu_thread_exit`.
+    ///
+    /// # Errors
+    /// See [`ExitStatusError`].
+    pub fn thread_exit_status(&self, thread_id: u32) -> Result<u32, ExitStatusError> {
+        let (group_id, _) = self
+            .slot_of_thread(thread_id)
+            .ok_or(ExitStatusError::UnknownThread)?;
+        let unit = self
+            .unit_for_thread(thread_id)
+            .ok_or(ExitStatusError::NoStatus)?;
+        self.groups
+            .get(group_id)
+            .and_then(|group| group.thread_exit_status.get(&unit.raw()))
+            .copied()
+            .ok_or(ExitStatusError::NoStatus)
+    }
+
+    /// Replace the argument block of an initialized thread. The group's
+    /// next start passes it; a running SPU keeps the block it started
+    /// with. Returns `false` when no initialized thread has the id.
+    pub fn set_thread_args(&mut self, thread_id: u32, args: [u64; 4]) -> bool {
+        let Some((group_id, slot)) = self.slot_of_thread(thread_id) else {
+            return false;
+        };
+        let Some(mut group) = self.groups.get_mut(group_id) else {
+            return false;
+        };
+        match group.slots.get_mut(&slot) {
+            Some(s) => {
+                s.args = args;
+                true
+            }
+            None => false,
+        }
     }
 
     /// The `cause` and `status` a join of the finished group

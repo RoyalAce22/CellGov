@@ -318,6 +318,13 @@ impl Runtime {
             Lv2Dispatch::ProcessSpawn { .. } => {
                 self.handle_process_spawn(source, dispatch);
             }
+            Lv2Dispatch::SpuGroupTerminate {
+                group_id,
+                finished_units,
+            } => {
+                self.step_woke_others = true;
+                self.handle_spu_group_terminate(source, group_id, finished_units);
+            }
             Lv2Dispatch::ProcessExitChild { pid, code, effects } => {
                 self.handle_process_exit_child(source, pid, code, effects);
             }

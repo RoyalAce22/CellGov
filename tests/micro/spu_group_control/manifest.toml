@@ -1,0 +1,23 @@
+[test]
+name = "spu_group_control"
+
+# A hardware probe: what sys_spu_thread_group_terminate,
+# sys_spu_thread_get_exit_status and sys_spu_thread_set_argument answer
+# in each group state. The console capture is the answer; no emulator
+# runs it.
+
+[observe]
+# failed step + rc, then one word per call in ppu/main.c's order, the
+# two joins, the exit status read back, and the two arguments the SPU
+# started with: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

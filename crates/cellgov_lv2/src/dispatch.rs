@@ -5,8 +5,13 @@
 //! The *source* is the caller's `UnitId`. Variants that block or mutate
 //! the caller ([`Lv2Dispatch::Block`], [`Lv2Dispatch::BlockAndWake`],
 //! [`Lv2Dispatch::PpuThreadCreate`], [`Lv2Dispatch::PpuThreadExit`])
-//! do so implicitly; other units are touched only through an explicit
-//! `woken_unit_ids` entry.
+//! do so implicitly. The runtime touches another unit only through one
+//! of these:
+//!
+//! - an explicit `woken_unit_ids` entry
+//! - an explicit `finished_units` entry
+//! - for [`Lv2Dispatch::SpuGroupTerminate`], a joiner parked on the
+//!   named group
 
 use std::collections::BTreeMap;
 
@@ -174,6 +179,20 @@ pub enum Lv2Dispatch {
         priority: u32,
         /// Effects committed at create time.
         effects: Vec<Effect>,
+    },
+    /// `sys_spu_thread_group_terminate`: the host already finished
+    /// group `group_id`.
+    ///
+    /// The runtime then does these steps:
+    ///
+    /// 1. It finishes each of `finished_units`.
+    /// 2. It wakes the group's joiners.
+    /// 3. It writes 0 to the source's r3.
+    SpuGroupTerminate {
+        /// The terminated group.
+        group_id: u32,
+        /// The group's SPU units that were not finished at the terminate.
+        finished_units: Vec<UnitId>,
     },
     /// [`Self::Immediate`] whose result also lands in GPRs beyond
     /// r3: `registers` are `(gpr, value)` pairs the caller sees

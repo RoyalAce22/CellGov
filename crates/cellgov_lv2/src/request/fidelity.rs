@@ -207,7 +207,7 @@ impl Lv2RequestKind {
     ///
     /// Use [`unsupported_arm_fidelity`] for an `Unsupported` request.
     pub fn fidelity(self) -> Option<ArmFidelity> {
-        use ArmFidelity::{AbiOnly, Modeled, NullBackend, PartialState};
+        use ArmFidelity::{AbiOnly, Modeled, PartialState};
         Some(match self {
             // Routing layer: not arms.
             Lv2RequestKind::NoSuchSyscall
@@ -224,6 +224,8 @@ impl Lv2RequestKind {
             | Lv2RequestKind::SpuThreadGroupStart
             | Lv2RequestKind::SpuThreadGroupDestroy
             | Lv2RequestKind::SpuThreadGroupJoin
+            | Lv2RequestKind::SpuThreadGetExitStatus
+            | Lv2RequestKind::SpuThreadSetArgument
             | Lv2RequestKind::SpuThreadWriteMb
             | Lv2RequestKind::SpuThreadWriteSnr
             | Lv2RequestKind::SpuThreadSetSpuCfg
@@ -241,8 +243,13 @@ impl Lv2RequestKind {
             Lv2RequestKind::SpuThreadGroupConnectEvent | Lv2RequestKind::SpuThreadBindQueue => {
                 PartialState
             }
-            // SPU teardown is an honest ENOSYS refusal.
-            Lv2RequestKind::SpuThreadGroupTerminate => NullBackend,
+            // Two gaps from the console:
+            // - The group has no waiting state. A group whose threads
+            //   all wait in the kernel terminates; the console answers
+            //   ESTAT.
+            // - A terminated group finishes; on the console it returns
+            //   to the initialized state.
+            Lv2RequestKind::SpuThreadGroupTerminate => PartialState,
             // Announced limits are validated but not persisted.
             Lv2RequestKind::SpuInitialize => PartialState,
 

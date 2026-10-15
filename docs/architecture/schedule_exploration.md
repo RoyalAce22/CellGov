@@ -220,7 +220,7 @@ event the relation already holds against the other writers.
 
 ## Commits the footprint does not take from a unit's effects
 
-Four things reach committed state other than through the effects a
+Five things reach committed state other than through the effects a
 unit's step emits. The table shows which of them reach a footprint:
 
 | Source | Reaches a footprint |
@@ -229,6 +229,7 @@ unit's step emits. The table shows which of them reach a footprint:
 | the all-blocked time warp | yes, belongs to the step the warp then picked |
 | a park the commit pipeline takes from the step result | yes, through the yield reason |
 | the RSX FIFO advance pass | no; only its MMIO mirrors are recorded |
+| a thread-group end that finishes the group's other units | no; each finish is a status override |
 
 ### LV2 handler effects
 
@@ -279,10 +280,11 @@ with the step that parked it rather than pruning against it.
 
 ### The RSX FIFO advance pass
 
-One thing still reaches committed state without reaching a footprint.
+Two things still reach committed state without reaching a footprint.
 The RSX FIFO advance pass commits guest memory and sweeps reservations
 from a batch no unit's step emitted; only its MMIO mirrors are
-recorded.
+recorded. A thread-group terminate or group exit finishes the group's
+other units through status overrides that no effect carries.
 
 ## Happens-before and races
 

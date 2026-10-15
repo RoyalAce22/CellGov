@@ -273,6 +273,10 @@ lv2_syscalls! {
     SPU_IMAGE_OPEN = 156 => "sys_spu_image_open";
     /// `sys_spu_image_import`.
     SPU_IMAGE_IMPORT = 158 => "sys_spu_image_import";
+    /// `sys_spu_thread_get_exit_status`.
+    SPU_THREAD_GET_EXIT_STATUS = 165 => "sys_spu_thread_get_exit_status";
+    /// `sys_spu_thread_set_argument`.
+    SPU_THREAD_SET_ARGUMENT = 166 => "sys_spu_thread_set_argument";
     /// `sys_spu_initialize` -- announce per-process SPU resource
     /// limits: how many physical SPUs the process may use, and how
     /// many of those may be handed out as Raw SPUs.

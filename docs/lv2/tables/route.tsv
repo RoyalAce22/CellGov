@@ -164,8 +164,8 @@ ordinal	route	arm
 162	null_backend	none
 163	null_backend	none
 164	null_backend	none
-165	null_backend	none
-166	null_backend	none
+165	typed	SpuThreadGetExitStatus
+166	typed	SpuThreadSetArgument
 167	null_backend	none
 168	null_backend	none
 169	typed	SpuInitialize

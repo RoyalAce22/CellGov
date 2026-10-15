@@ -161,6 +161,24 @@ impl Runtime {
         self.deliver_syscall_return(source, code);
     }
 
+    /// Finishes the SPUs of a terminated group and wakes the group's joiners.
+    pub(super) fn handle_spu_group_terminate(
+        &mut self,
+        source: UnitId,
+        group_id: u32,
+        finished_units: Vec<UnitId>,
+    ) {
+        for unit in finished_units {
+            self.registry
+                .set_status_override(unit, UnitStatus::Finished);
+            // A deadline left behind would wake a finished unit.
+            self.timer_wakes.cancel(unit);
+            let _ = self.syscall_responses.try_take(unit);
+        }
+        self.wake_group_joiners(group_id);
+        self.deliver_syscall_return(source, 0);
+    }
+
     pub(super) fn handle_block(
         &mut self,
         source: UnitId,

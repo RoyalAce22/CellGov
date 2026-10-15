@@ -10,7 +10,7 @@
 //! not fault records its read instead
 //! (`tests/fault_decided_by_a_write.rs`).
 //!
-//! Four kinds of shared state reach no footprint, so two steps that
+//! Five kinds of shared state reach no footprint, so two steps that
 //! interact only through one of them prune when they should not:
 //!
 //! - The deadline a timer wake carries (`tests/timer_deadline.rs`,
@@ -28,6 +28,11 @@
 //!   (`tests/child_init_window.rs`), which every driver refuses with
 //!   [`crate::util::StopReason::ChildInitUnserved`]; the parks the
 //!   sync and timer handlers take reach no footprint and no refusal.
+//! - A thread-group end that finishes other units. The commit applies
+//!   each finish as a status override that no effect carries. Two
+//!   calls end a group this way:
+//!   - a group terminate from a PPU
+//!   - a group exit from one of the group's SPUs
 
 use cellgov_effects::Effect;
 use cellgov_exec::YieldReason;

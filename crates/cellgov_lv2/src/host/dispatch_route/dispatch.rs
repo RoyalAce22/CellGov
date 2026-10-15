@@ -139,7 +139,14 @@ impl Lv2Host {
                 status_ptr,
             } => self.dispatch_group_join(group_id, cause_ptr, status_ptr, requester, tick),
             Lv2Request::SpuThreadGroupTerminate { group_id, value } => {
-                self.dispatch_spu_thread_group_terminate_stub(group_id, value)
+                self.dispatch_group_terminate(group_id, value)
+            }
+            Lv2Request::SpuThreadGetExitStatus {
+                thread_id,
+                status_ptr,
+            } => self.dispatch_get_exit_status(thread_id, status_ptr, requester, tick),
+            Lv2Request::SpuThreadSetArgument { thread_id, arg_ptr } => {
+                self.dispatch_set_argument(thread_id, arg_ptr, rt)
             }
             Lv2Request::SpuThreadWriteMb { thread_id, value } => {
                 self.dispatch_write_mb(thread_id, value, requester)

@@ -92,6 +92,20 @@ pub enum Lv2Request {
         /// In: termination value.
         value: i32,
     },
+    /// `sys_spu_thread_get_exit_status`.
+    SpuThreadGetExitStatus {
+        /// In: SPU thread id.
+        thread_id: u32,
+        /// Out: the status the thread gave `sys_spu_thread_exit`.
+        status_ptr: u32,
+    },
+    /// `sys_spu_thread_set_argument`.
+    SpuThreadSetArgument {
+        /// In: SPU thread id.
+        thread_id: u32,
+        /// In: the 32-byte `sys_spu_thread_argument` block.
+        arg_ptr: u32,
+    },
     /// `nsec` lies in `0..=999_999_999`.
     TimeGetCurrentTime {
         /// Out: seconds.

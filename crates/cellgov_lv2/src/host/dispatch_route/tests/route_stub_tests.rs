@@ -269,23 +269,6 @@ fn hypercall_records_invariant_break_and_returns_einval() {
 }
 
 #[test]
-fn spu_thread_group_terminate_logs_invariant_break_and_returns_enosys() {
-    let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000);
-    let before = host.observability().invariant_break_count;
-    let result = host.dispatch(
-        Lv2Request::SpuThreadGroupTerminate {
-            group_id: 1,
-            value: 0,
-        },
-        UnitId::new(0),
-        &rt,
-    );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
-    assert!(host.observability().invariant_break_count > before);
-}
-
-#[test]
 fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
