@@ -2,7 +2,7 @@
 
 use super::block_reason::block_reason_payload;
 use super::id::{PpuThreadId, PpuThreadIdAllocator};
-use super::thread::{AddJoinWaiter, PpuThread, PpuThreadAttrs, PpuThreadState};
+use super::thread::{AddJoinWaiter, PpuThread, PpuThreadAttrs, PpuThreadState, StartThread};
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{self, source, LaneEntryMut, LaneMap, LaneValue, ObjectLanes};
 
@@ -37,6 +37,9 @@ impl LaneValue for PpuThread {
         lanes.lane(13, 0, self.join_waiters.len() as u64);
         for (slot, waiter) in self.join_waiters.iter().enumerate() {
             lanes.lane(14, slot as u64, waiter.raw());
+        }
+        if !self.started {
+            lanes.lane(15, 0, 1);
         }
     }
 }
@@ -100,17 +103,41 @@ impl PpuThreadTable {
             attrs,
             exit_value: None,
             join_waiters: Vec::new(),
+            started: true,
         };
         self.threads.insert(PpuThreadId::PRIMARY, thread);
         self.unit_to_thread.insert(unit_id, PpuThreadId::PRIMARY);
     }
 
-    /// Create a child thread and record its attributes; `None`
-    /// if the id space is exhausted.
+    /// Create a started child thread, a spawned process's primary,
+    /// and record its attributes; `None` if the id space is exhausted.
     ///
     /// # Panics
     /// Debug-only if `unit_id` already maps to another thread.
     pub fn create(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) -> Option<PpuThreadId> {
+        self.insert_child(unit_id, attrs, true)
+    }
+
+    /// Create a thread that does not run until [`Self::start`] names
+    /// it, as `sys_ppu_thread_create` makes one; `None` if the id
+    /// space is exhausted.
+    ///
+    /// # Panics
+    /// Debug-only if `unit_id` already maps to another thread.
+    pub fn create_unstarted(
+        &mut self,
+        unit_id: UnitId,
+        attrs: PpuThreadAttrs,
+    ) -> Option<PpuThreadId> {
+        self.insert_child(unit_id, attrs, false)
+    }
+
+    fn insert_child(
+        &mut self,
+        unit_id: UnitId,
+        attrs: PpuThreadAttrs,
+        started: bool,
+    ) -> Option<PpuThreadId> {
         debug_assert!(
             !self.unit_to_thread.contains_key(unit_id),
             "create: UnitId {unit_id:?} already mapped to another thread",
@@ -123,10 +150,26 @@ impl PpuThreadTable {
             attrs,
             exit_value: None,
             join_waiters: Vec::new(),
+            started,
         };
         self.threads.insert(id, thread);
         self.unit_to_thread.insert(unit_id, id);
         Some(id)
+    }
+
+    /// Start a thread [`Self::create_unstarted`] made. A thread starts
+    /// once: the `lv2_ppu_thread_answers` capture shows a second
+    /// `sys_ppu_thread_start` answering CELL_EBUSY, on a running
+    /// thread and on one that exited.
+    pub fn start(&mut self, id: PpuThreadId) -> StartThread {
+        let Some(mut thread) = self.threads.get_mut(id) else {
+            return StartThread::UnknownTarget;
+        };
+        if thread.started {
+            return StartThread::AlreadyStarted;
+        }
+        thread.started = true;
+        StartThread::Started(thread.unit_id)
     }
 
     /// Insert an explicit `unit_id -> existing_thread_id` alias.

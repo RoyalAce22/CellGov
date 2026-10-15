@@ -313,8 +313,13 @@ impl Runtime {
                 );
             }
             Lv2Dispatch::PpuThreadCreate { .. } => {
-                self.step_woke_others = true;
+                // The new thread waits for its start, so a create wakes
+                // no unit.
                 self.handle_ppu_thread_create(source, dispatch);
+            }
+            Lv2Dispatch::PpuThreadStart { unit } => {
+                self.step_woke_others = true;
+                self.handle_ppu_thread_start(source, unit);
             }
             Lv2Dispatch::ProcessSpawn { .. } => {
                 self.handle_process_spawn(source, dispatch);

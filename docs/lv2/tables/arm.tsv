@@ -77,7 +77,7 @@ PpuThreadExit	modeled	41
 PpuThreadGetPriority	modeled	48
 PpuThreadJoin	modeled	44
 PpuThreadSetPriority	partial-state	47
-PpuThreadStart	partial-state	53
+PpuThreadStart	modeled	53
 PpuThreadYield	modeled	43
 ProcessExit	modeled	22
 ProcessExit2	partial-state	26

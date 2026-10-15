@@ -45,6 +45,8 @@ mod wakes;
 
 #[path = "ppu_join_console_tests.rs"]
 mod ppu_join_console;
+#[path = "ppu_start_console_tests.rs"]
+mod ppu_start_console;
 
 #[derive(Clone)]
 

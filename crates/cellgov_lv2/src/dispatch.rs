@@ -11,8 +11,8 @@
 //! - an explicit `woken_unit_ids` entry
 //! - an explicit `finished_units` entry
 //! - an explicit `units` entry of [`Lv2Dispatch::SpuGroupSuspension`]
-//! - the `unit` of [`Lv2Dispatch::RawSpuDestroy`] or
-//!   [`Lv2Dispatch::RawSpuReadPuintMb`]
+//! - the `unit` of [`Lv2Dispatch::RawSpuDestroy`],
+//!   [`Lv2Dispatch::RawSpuReadPuintMb`] or [`Lv2Dispatch::PpuThreadStart`]
 //! - for [`Lv2Dispatch::SpuGroupTerminate`], a joiner parked on the
 //!   named group
 
@@ -182,6 +182,13 @@ pub enum Lv2Dispatch {
         priority: u32,
         /// Effects committed at create time.
         effects: Vec<Effect>,
+    },
+    /// `sys_ppu_thread_start`: the host marked the thread started. The
+    /// runtime releases `unit`, which `PpuThreadCreate` registered
+    /// held, then writes 0 to the source's r3.
+    PpuThreadStart {
+        /// The started thread's unit.
+        unit: UnitId,
     },
     /// `sys_spu_thread_group_terminate`: the host already finished
     /// group `group_id`.

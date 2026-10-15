@@ -218,7 +218,7 @@ fn ppu_thread_yield_is_no_op_returning_ok() {
 }
 
 #[test]
-fn ppu_thread_start_returns_ok_because_auto_started_at_create() {
+fn ppu_thread_start_of_the_running_primary_is_ebusy() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     crate::host::test_support::seed_primary_ppu(&mut host, UnitId::new(0));
@@ -229,7 +229,7 @@ fn ppu_thread_start_returns_ok_because_auto_started_at_create() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(0));
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EBUSY.into()));
 }
 
 #[test]

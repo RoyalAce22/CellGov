@@ -1,4 +1,5 @@
-//! `sys_ppu_thread_create`: child PPU thread registration.
+//! `sys_ppu_thread_create`: child PPU thread registration, and
+//! `sys_ppu_thread_start`: its release.
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
@@ -53,7 +54,11 @@ impl Runtime {
             priority,
             tls_base: init.tls_base as u32,
         };
-        let Some(thread_id) = self.lv2_host.ppu_threads_mut().create(child_unit_id, attrs) else {
+        let Some(thread_id) = self
+            .lv2_host
+            .ppu_threads_mut()
+            .create_unstarted(child_unit_id, attrs)
+        else {
             // The registered unit cannot be removed, so it must not
             // stay schedulable behind the ENOMEM the guest sees. It
             // stays Finished (inert) in the boot space; its space tag
@@ -128,6 +133,8 @@ impl Runtime {
         if caller_pid != cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID {
             self.lv2_host.bind_unit_process(child_unit_id, caller_pid);
         }
+        // The thread runs once `sys_ppu_thread_start` names it.
+        self.registry.set_suspended(child_unit_id, true);
 
         // The tid writeback lands in the CREATOR's space, like every
         // other syscall out-parameter.
@@ -137,6 +144,12 @@ impl Runtime {
             u64::from(id_ptr),
             &thread_id.raw().to_be_bytes(),
         );
+        self.deliver_syscall_return(source, 0);
+    }
+
+    /// Release the unit of a thread the host just marked started.
+    pub(super) fn handle_ppu_thread_start(&mut self, source: UnitId, unit: UnitId) {
+        self.registry.set_suspended(unit, false);
         self.deliver_syscall_return(source, 0);
     }
 }

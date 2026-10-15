@@ -166,6 +166,8 @@ entry contains:
   base)
 - the exit value (set on `sys_ppu_thread_exit`)
 - a join-waiters list
+- whether it has started: a child `sys_ppu_thread_create` made stays
+  out of the scheduler until `sys_ppu_thread_start` names it
 
 The state machine has three paths:
 

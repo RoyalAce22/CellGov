@@ -19,27 +19,23 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// `sys_ppu_thread_start`: CELL_OK with no state change for a
-    /// thread the table holds.
-    ///
-    /// Known gap: real LV2 creates threads SUSPENDED and transitions
-    /// them here; CellGov collapses both into create, so the start
-    /// itself has nothing to do.
+    /// `sys_ppu_thread_start`: lets a thread `sys_ppu_thread_create`
+    /// made run. The `lv2_ppu_thread_answers` capture shows a created
+    /// thread that does not run until this call names it.
     ///
     /// # Errors
     ///
     /// - `CELL_ESRCH` when `target` names no thread, as the join and
     ///   priority arms answer it.
-    pub(super) fn dispatch_ppu_thread_start(&self, target: u64) -> Lv2Dispatch {
-        if self
-            .state
-            .ppu_threads
-            .get(crate::ppu_thread::PpuThreadId::new(target))
-            .is_none()
-        {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+    /// - `CELL_EBUSY` when a start already named the thread, whether it
+    ///   still runs or exited, as the same capture reads.
+    pub(super) fn dispatch_ppu_thread_start(&mut self, target: u64) -> Lv2Dispatch {
+        use crate::ppu_thread::{PpuThreadId, StartThread};
+        match self.state.ppu_threads.start(PpuThreadId::new(target)) {
+            StartThread::Started(unit) => Lv2Dispatch::PpuThreadStart { unit },
+            StartThread::UnknownTarget => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+            StartThread::AlreadyStarted => Lv2Dispatch::immediate(errno::CELL_EBUSY.into()),
         }
-        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_time_get_timebase_frequency`: the fixed

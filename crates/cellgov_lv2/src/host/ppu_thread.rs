@@ -292,3 +292,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/ppu_thread_console_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_thread_start_console_tests.rs"]
+mod start_console_tests;

@@ -36,8 +36,8 @@ impl UnitRegistry {
     }
 
     /// Hold `id` out of the runnable set while its SPU thread group is
-    /// suspended (`true`), or release it (`false`). No-op for unknown
-    /// ids.
+    /// suspended or its PPU thread waits for its start (`true`), or
+    /// release it (`false`). No-op for unknown ids.
     pub(crate) fn set_suspended(&mut self, id: UnitId, suspended: bool) {
         if !self.units.contains_key(&id) {
             return;

@@ -449,11 +449,10 @@ impl Lv2RequestKind {
             // PPU threads.
             Lv2RequestKind::PpuThreadYield
             | Lv2RequestKind::PpuThreadExit
-            | Lv2RequestKind::PpuThreadJoin => Modeled,
+            | Lv2RequestKind::PpuThreadJoin
+            | Lv2RequestKind::PpuThreadStart => Modeled,
             // JOINABLE / INTERRUPT flags are logged, not modeled.
             Lv2RequestKind::PpuThreadCreate => PartialState,
-            // Create-runs-immediately collapses the SUSPENDED state.
-            Lv2RequestKind::PpuThreadStart => PartialState,
 
             // Read-only VFS.
             Lv2RequestKind::FsOpen

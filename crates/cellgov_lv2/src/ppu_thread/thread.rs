@@ -95,4 +95,19 @@ pub struct PpuThread {
     pub exit_value: Option<u64>,
     /// Appended by `add_join_waiter`; drained by `mark_finished`.
     pub join_waiters: Vec<PpuThreadId>,
+    /// Whether the thread may run. `sys_ppu_thread_create` makes a
+    /// thread that does not run until `sys_ppu_thread_start` names
+    /// it; a process's primary thread starts with the process.
+    pub started: bool,
+}
+
+/// Outcome of [`super::PpuThreadTable::start`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartThread {
+    /// The thread was waiting for its start; its unit may now run.
+    Started(UnitId),
+    /// No thread has the id.
+    UnknownTarget,
+    /// The thread was already started.
+    AlreadyStarted,
 }

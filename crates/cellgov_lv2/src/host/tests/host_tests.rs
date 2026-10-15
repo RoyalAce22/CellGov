@@ -369,6 +369,7 @@ fn multi_primitive_determinism_canary() {
                 } => format!("Wake({code:#x},n={})", woken_unit_ids.len()),
                 Lv2Dispatch::RegisterSpu { .. } => "RegSpu".into(),
                 Lv2Dispatch::PpuThreadCreate { .. } => "PpuCreate".into(),
+                Lv2Dispatch::PpuThreadStart { .. } => "PpuStart".into(),
                 Lv2Dispatch::PpuThreadExit { .. } => "PpuExit".into(),
                 Lv2Dispatch::ProcessSpawn { pid, .. } => format!("Spawn({pid:#x})"),
                 Lv2Dispatch::ProcessExitChild { pid, .. } => format!("ExitChild({pid:#x})"),

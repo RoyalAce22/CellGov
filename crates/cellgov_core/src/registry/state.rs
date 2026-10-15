@@ -24,9 +24,10 @@ pub struct UnitRegistry {
     /// cleared when the unit next runs. Takes precedence over the
     /// unit's self-reported `status()` for scheduling and hashing.
     pub(super) status_overrides: BTreeMap<UnitId, UnitStatus>,
-    /// Units whose SPU thread group is suspended. Unlike an override,
-    /// the hold survives a step and a wake: the status underneath keeps
-    /// changing, and shows again when the group resumes.
+    /// Units whose SPU thread group is suspended, or whose PPU thread
+    /// waits for its start. Unlike an override, the hold survives a
+    /// step and a wake: the status underneath keeps changing, and shows
+    /// again when the hold ends.
     pub(super) suspended: BTreeSet<UnitId>,
     /// Per-unit pending `MailboxReceiveAttempt` pops, drained into
     /// `ExecutionContext::received_messages` at next step.

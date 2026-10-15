@@ -15,4 +15,4 @@ pub use block_reason::{EventFlagWaitMode, GuestBlockReason};
 pub use id::{PpuThreadId, PpuThreadIdAllocator};
 pub use stack::{ThreadStack, ThreadStackAllocator, ABI_MIN_STACK_FRAME};
 pub use table::PpuThreadTable;
-pub use thread::{AddJoinWaiter, PpuThread, PpuThreadAttrs, PpuThreadState};
+pub use thread::{AddJoinWaiter, PpuThread, PpuThreadAttrs, PpuThreadState, StartThread};
