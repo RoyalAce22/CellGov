@@ -924,6 +924,8 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::SPU_THREAD_GROUP_YIELD, &[0]),
     (syscall::SPU_THREAD_GROUP_SET_PRIORITY, &[0]),
     (syscall::SPU_THREAD_GROUP_GET_PRIORITY, &[0, 1]),
+    (syscall::SPU_THREAD_WRITE_LS, &[0]),
+    (syscall::SPU_THREAD_READ_LS, &[0, 2]),
     (syscall::SPU_THREAD_GET_EXIT_STATUS, &[0, 1]),
     (syscall::SPU_THREAD_SET_ARGUMENT, &[0, 1]),
     (syscall::SPU_THREAD_WRITE_MB, &[0, 1]),

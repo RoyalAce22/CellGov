@@ -1,0 +1,22 @@
+[test]
+name = "spu_thread_ls"
+
+# A hardware probe: what sys_spu_thread_write_ls and
+# sys_spu_thread_read_ls answer in each group state, for every size and
+# for the refused address, alignment and size forms, and what the
+# writes leave in local store. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# 80 big-endian u32 words, in the order ppu/main.c lists: 320 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 320 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

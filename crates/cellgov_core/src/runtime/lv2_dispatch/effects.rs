@@ -196,6 +196,38 @@ impl Runtime {
                     self.last_lv2_effects.push(effect.clone());
                     continue;
                 }
+                Effect::SpuLocalStoreWrite {
+                    target, lsa, bytes, ..
+                } => {
+                    let landed = self
+                        .registry
+                        .get_mut(*target)
+                        .ok_or(cellgov_exec::ProblemStateError::UnknownUnit)
+                        .and_then(|unit| unit.land_local_store(*lsa, bytes));
+                    if let Err(refusal) = landed {
+                        // The handler resolved `target` from a running
+                        // thread, so a refusal names a host-side
+                        // disagreement between the thread table and the
+                        // unit registry.
+                        self.lv2_host.log_invariant_break(
+                            "runtime.apply_lv2_effects_spu_local_store_write_refused",
+                            format_args!(
+                                "LV2 dispatch wrote {} bytes of the local store of unit {} and \
+                                 the unit refused them ({refusal:?}); the bytes are discarded",
+                                bytes.len(),
+                                target.raw(),
+                            ),
+                        );
+                    }
+                    self.last_lv2_effects.push(effect.clone());
+                    continue;
+                }
+                // The handler read the local store at dispatch; the
+                // effect records the read for the dependency footprint.
+                Effect::SpuLocalStoreRead { .. } => {
+                    self.last_lv2_effects.push(effect.clone());
+                    continue;
+                }
                 // Execution units and the FIFO advance pass emit these
                 // variants, and no LV2 handler does. A boot prints the
                 // detail line of its first break alone, so each variant

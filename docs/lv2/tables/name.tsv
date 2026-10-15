@@ -340,8 +340,10 @@ ordinal	packet	name	source	ref	fw_from	fw_to
 180	none	sys_spu_thread_group_get_priority	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_GET_PRIORITY	none	none
 180	none	sys_spu_thread_group_get_priority	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 180	none	sys_spu_thread_group_get_priority	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_GROUP_GET_PRIORITY	none	none
+181	none	sys_spu_thread_write_ls	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_WRITE_LS	none	none
 181	none	sys_spu_thread_write_ls	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 181	none	sys_spu_thread_write_ls	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_WRITE_LS	none	none
+182	none	sys_spu_thread_read_ls	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_READ_LS	none	none
 182	none	sys_spu_thread_read_ls	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 182	none	sys_spu_thread_read_ls	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_READ_LS	none	none
 184	none	sys_spu_thread_write_snr	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_WRITE_SNR	none	none

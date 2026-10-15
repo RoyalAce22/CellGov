@@ -306,6 +306,10 @@ lv2_syscalls! {
     SPU_THREAD_GROUP_SET_PRIORITY = 179 => "sys_spu_thread_group_set_priority";
     /// `sys_spu_thread_group_get_priority`.
     SPU_THREAD_GROUP_GET_PRIORITY = 180 => "sys_spu_thread_group_get_priority";
+    /// `sys_spu_thread_write_ls`.
+    SPU_THREAD_WRITE_LS = 181 => "sys_spu_thread_write_ls";
+    /// `sys_spu_thread_read_ls`.
+    SPU_THREAD_READ_LS = 182 => "sys_spu_thread_read_ls";
     /// `sys_spu_thread_write_snr`.
     SPU_THREAD_WRITE_SNR = 184 => "sys_spu_thread_write_snr";
     /// `sys_spu_thread_group_connect_event`.

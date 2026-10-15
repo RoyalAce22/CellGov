@@ -5,6 +5,7 @@ mod channel_stall_through_runtime;
 mod console_events;
 mod console_raw_stop;
 mod event_wait_through_runtime;
+mod local_store_through_lv2;
 mod mailbox_count_through_runtime;
 mod mfc_alias_through_runtime;
 mod mfc_completion_time_through_runtime;

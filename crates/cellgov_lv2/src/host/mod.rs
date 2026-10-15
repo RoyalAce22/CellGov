@@ -32,6 +32,7 @@ mod semaphore;
 mod spu;
 mod spu_event;
 mod spu_group_control;
+mod spu_local_store;
 mod state;
 mod state_hash;
 mod system_ipc_witness;

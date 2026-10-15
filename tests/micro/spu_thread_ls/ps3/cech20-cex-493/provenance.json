@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "capture_id": "micro:spu_thread_ls#704c4961d08d",
+  "captured_at": "2026-10-05T14:57:45Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 64,
+      "fan_percent": 38
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "ecce71a1f010a3545da85d6013db9b3f0bc07b8b",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/ecce71a1f010a3545da85d6013db9b3f0bc07b8b"
+  },
+  "microtest": {
+    "name": "spu_thread_ls",
+    "manifest_sha256": "f774db29b9866dbe7577ddf63b334e8c6daed96d28592b6b0b06e4df8ca37e5b",
+    "sources": {
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "ba14ec3c62738bce8007004b391ad88a7fd3f06d20eccd6fe216ea7b7afff94d",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "0884642297ee8d61492cc0bfef76e14bc706a30e125b0b37e2576ddab98f5238",
+      "ppu/main.c": "37e5d5b183c116bc17a3f3dc125ca5f90588160503a52717b35184f415cd2972",
+      "spu/main.c": "3d2b34f074d090139e2162e5ae9307e4f966e188f285708426f82e814b914036"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "98c1b9b8ee5ac02cc04adfd77bc840c8db0c1a217b44d180cf09752e517daf8c",
+    "ps3_elf_sha256": "d7a71025becc8c28ef2fc1ae77c46219280e02c130d5843b024bb19c0a127399",
+    "reference_elf_sha256": "c7d0cc81500920481a18bf2142cd8576992cb3df5c1d82b7695bf374b9c98b06",
+    "siblings": {
+      "spu_main.elf": "396d0c63775973a02db153d3b90632a77255201e282274274341a2c62ef62efc"
+    },
+    "param_sfo_sha256": "aa40bc23d8cc8d7af9301e09c1b85ed5e6de62c078857d16fa8c65c47b19cd0d"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "704c4961d08d9812a6ce27d1edfca96f464c146ef3fda30b6fa699b73b656e00",
+    "bytes": 328,
+    "result_path": "/dev_hdd0/tmp/cgov_spu_thread_ls.bin"
+  },
+  "digest": "704c4961d08d9812a6ce27d1edfca96f464c146ef3fda30b6fa699b73b656e00  micro:spu_thread_ls  328",
+  "recapture_reason": "the probe adds words 64-79: an exited thread of a running group, high argument bits, out-pointer forms"
+}

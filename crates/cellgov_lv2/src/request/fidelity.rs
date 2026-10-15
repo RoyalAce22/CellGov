@@ -226,6 +226,8 @@ impl Lv2RequestKind {
             | Lv2RequestKind::SpuThreadGroupJoin
             | Lv2RequestKind::SpuThreadGetExitStatus
             | Lv2RequestKind::SpuThreadSetArgument
+            | Lv2RequestKind::SpuThreadWriteLs
+            | Lv2RequestKind::SpuThreadReadLs
             | Lv2RequestKind::SpuThreadWriteMb
             | Lv2RequestKind::SpuThreadWriteSnr
             | Lv2RequestKind::SpuThreadSetSpuCfg

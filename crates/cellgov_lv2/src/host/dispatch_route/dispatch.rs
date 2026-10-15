@@ -169,6 +169,18 @@ impl Lv2Host {
             Lv2Request::SpuThreadSetArgument { thread_id, arg_ptr } => {
                 self.dispatch_set_argument(thread_id, arg_ptr, rt)
             }
+            Lv2Request::SpuThreadWriteLs {
+                thread_id,
+                lsa,
+                value,
+                size,
+            } => self.dispatch_write_ls(thread_id, lsa, value, size, requester),
+            Lv2Request::SpuThreadReadLs {
+                thread_id,
+                lsa,
+                value_ptr,
+                size,
+            } => self.dispatch_read_ls(thread_id, lsa, value_ptr, size, requester, rt),
             Lv2Request::SpuThreadWriteMb { thread_id, value } => {
                 self.dispatch_write_mb(thread_id, value, requester)
             }

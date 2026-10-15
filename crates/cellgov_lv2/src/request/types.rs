@@ -121,6 +121,30 @@ pub enum Lv2Request {
         /// Out: the group's priority word.
         priority_ptr: u32,
     },
+    /// `sys_spu_thread_write_ls`.
+    SpuThreadWriteLs {
+        /// In: target SPU thread id.
+        thread_id: u32,
+        /// In: local-store address: the low 32 bits of the argument,
+        /// which are all the kernel reads.
+        lsa: u32,
+        /// In: the value; the write takes its low `size` bytes.
+        value: u64,
+        /// In: the write's size in bytes.
+        size: u64,
+    },
+    /// `sys_spu_thread_read_ls`.
+    SpuThreadReadLs {
+        /// In: target SPU thread id.
+        thread_id: u32,
+        /// In: local-store address: the low 32 bits of the argument,
+        /// which are all the kernel reads.
+        lsa: u32,
+        /// Out: the 64-bit value word.
+        value_ptr: u32,
+        /// In: the read's size in bytes.
+        size: u64,
+    },
     /// `sys_spu_thread_get_exit_status`.
     SpuThreadGetExitStatus {
         /// In: SPU thread id.

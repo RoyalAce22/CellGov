@@ -156,6 +156,20 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             group_id: p!(0),
             priority_ptr: p!(1),
         },
+        syscall::SPU_THREAD_WRITE_LS => Lv2Request::SpuThreadWriteLs {
+            thread_id: p!(0),
+            // The kernel reads the low 32 bits (the spu_thread_ls capture).
+            lsa: args[1] as u32,
+            value: args[2],
+            size: args[3],
+        },
+        syscall::SPU_THREAD_READ_LS => Lv2Request::SpuThreadReadLs {
+            thread_id: p!(0),
+            // The kernel reads the low 32 bits (the spu_thread_ls capture).
+            lsa: args[1] as u32,
+            value_ptr: p!(2),
+            size: args[3],
+        },
         syscall::SPU_THREAD_GET_EXIT_STATUS => Lv2Request::SpuThreadGetExitStatus {
             thread_id: p!(0),
             status_ptr: p!(1),

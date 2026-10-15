@@ -36,7 +36,7 @@
 
 use cellgov_effects::Effect;
 use cellgov_exec::YieldReason;
-use cellgov_mem::ByteRange;
+use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::{BarrierId, MailboxId, SignalId, RESERVATION_LINE_BYTES};
 
 /// Shared resources one execution step accessed.
@@ -99,6 +99,13 @@ pub struct StepFootprint {
     /// write conflicts with every step of that unit, and with another
     /// write to it: a register that overwrites keeps the later value.
     pub signal_writes: Vec<cellgov_event::UnitId>,
+    /// Local-store ranges this step's effects read or wrote in another
+    /// processor's name, each with the unit that owns the local store.
+    ///
+    /// The owner's own loads and stores emit nothing, so an access
+    /// conflicts with every step of the owner, and with any other access
+    /// or transfer end on the same bytes.
+    pub local_store_accesses: Vec<(cellgov_event::UnitId, ByteRange)>,
     /// 128-byte-aligned line addresses touched by a `ReservationAcquire`.
     ///
     /// A cross-unit write overlapping the line clears the reservation
@@ -281,6 +288,7 @@ impl StepFootprint {
             wake_targets,
             wait_units,
             signal_writes,
+            local_store_accesses,
             reservation_lines,
             held_reservation_lines,
             inflight_dma_ranges,
@@ -303,6 +311,7 @@ impl StepFootprint {
         self.wake_targets.extend(wake_targets);
         self.wait_units.extend(wait_units);
         self.signal_writes.extend(signal_writes);
+        self.local_store_accesses.extend(local_store_accesses);
         self.reservation_lines.extend(reservation_lines);
         self.held_reservation_lines.extend(held_reservation_lines);
         self.inflight_dma_ranges.extend(inflight_dma_ranges);
@@ -427,6 +436,22 @@ impl StepFootprint {
                 Effect::SpuSignalWrite { target, .. } => {
                     fp.signal_writes.push(*target);
                 }
+                Effect::SpuLocalStoreWrite {
+                    target, lsa, bytes, ..
+                } => {
+                    fp.local_store_accesses.extend(
+                        ByteRange::new(GuestAddr::new(u64::from(*lsa)), bytes.len() as u64)
+                            .map(|range| (*target, range)),
+                    );
+                }
+                Effect::SpuLocalStoreRead {
+                    target, lsa, len, ..
+                } => {
+                    fp.local_store_accesses.extend(
+                        ByteRange::new(GuestAddr::new(u64::from(*lsa)), u64::from(*len))
+                            .map(|range| (*target, range)),
+                    );
+                }
                 Effect::ReservationAcquire { line_addr, .. } => {
                     fp.reservation_lines
                         .push(*line_addr & !(RESERVATION_LINE_BYTES - 1));
@@ -548,6 +573,26 @@ impl StepFootprint {
             return true;
         }
 
+        // Another processor's access to a local store reaches every step
+        // of its owner, whose loads and stores emit nothing, and any
+        // other access to the same bytes. A transfer's end in that local
+        // store is the issuer's own, so the owner clause covers a
+        // transfer queued there, and the in-flight clauses one landing.
+        let reaches_owner = |access: &StepFootprint, stepper: &StepFootprint| {
+            stepper.local_store_owner.is_some_and(|unit| {
+                access
+                    .local_store_accesses
+                    .iter()
+                    .any(|(owner, _)| *owner == unit)
+            })
+        };
+        if reaches_owner(self, other)
+            || reaches_owner(other, self)
+            || local_stores_overlap(&self.local_store_accesses, &other.local_store_accesses)
+        {
+            return true;
+        }
+
         // A false dependency: no registry holds barrier state, so a
         // barrier wait's one consequence is its own unit's status.
         if ids_overlap(&self.wait_barriers, &other.wait_barriers) {
@@ -630,6 +675,7 @@ impl StepFootprint {
             && self.wait_units.is_empty()
             && self.wake_targets.is_empty()
             && self.signal_writes.is_empty()
+            && self.local_store_accesses.is_empty()
             && self.reservation_lines.is_empty()
             && self.held_reservation_lines.is_empty()
             && self.inflight_dma_ranges.is_empty()
@@ -652,6 +698,7 @@ impl StepFootprint {
             || ranges_overlap(&self.inflight_dma_ranges, &self.shared_reads)
             || write_covers_any_line(&self.inflight_dma_ranges, &self.reservation_lines)
             || write_covers_any_line(&self.inflight_dma_ranges, &self.held_reservation_lines)
+            || local_stores_overlap(&self.inflight_local_stores, &self.local_store_accesses)
             || owns_inflight_local_store(self, self)
     }
 }
@@ -674,6 +721,10 @@ fn touches_inflight(during: &StepFootprint, accessor: &StepFootprint) -> bool {
             &accessor.held_reservation_lines,
         )
         || local_stores_overlap(&during.inflight_local_stores, &accessor.dma_local_stores)
+        || local_stores_overlap(
+            &during.inflight_local_stores,
+            &accessor.local_store_accesses,
+        )
         || owns_inflight_local_store(during, accessor)
 }
 

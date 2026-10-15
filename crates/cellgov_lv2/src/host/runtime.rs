@@ -3,6 +3,7 @@
 //! `Lv2Runtime` is the host's input view; [`crate::dispatch::Lv2Dispatch`]
 //! is its output.
 
+use cellgov_event::UnitId;
 use cellgov_time::GuestTicks;
 
 /// Readonly view of runtime state exposed to the host during dispatch.
@@ -54,4 +55,16 @@ pub trait Lv2Runtime {
     /// overlap" and names the violation in a debug assertion rather
     /// than spinning.
     fn committed_overlap_end(&self, addr: u64, size: u64) -> Option<u64>;
+
+    /// The `len` bytes of `unit`'s local store from `lsa`, or `None` for
+    /// a unit without a local store. An implementor with no SPU units
+    /// keeps the default.
+    ///
+    /// # Contract
+    /// The caller keeps `lsa + len` inside the local store; `Some(bytes)`
+    /// carries exactly `len` bytes.
+    fn read_local_store(&self, unit: UnitId, lsa: u32, len: u32) -> Option<Vec<u8>> {
+        let _ = (unit, lsa, len);
+        None
+    }
 }

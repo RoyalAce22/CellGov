@@ -30,6 +30,8 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
         Effect::MailboxPop { .. } => TracedEffectKind::MailboxPop,
         Effect::MfcInvalidCommand { .. } => TracedEffectKind::MfcInvalidCommand,
         Effect::SpuSignalWrite { .. } => TracedEffectKind::SpuSignalWrite,
+        Effect::SpuLocalStoreWrite { .. } => TracedEffectKind::SpuLocalStoreWrite,
+        Effect::SpuLocalStoreRead { .. } => TracedEffectKind::SpuLocalStoreRead,
     }
 }
 
@@ -83,10 +85,11 @@ pub(super) fn traced_yield_reason(y: YieldReason, syscall_lev: Option<u8>) -> Tr
     }
 }
 
-/// Read-only view of committed memory plus tick snapshot, constructed
-/// fresh per `Lv2Host::dispatch` call.
+/// Read-only view of committed memory, the units' local stores and the
+/// tick, constructed fresh per `Lv2Host::dispatch` call.
 pub(super) struct MemoryView<'a> {
     pub(super) memory: &'a GuestMemory,
+    pub(super) registry: &'a crate::registry::UnitRegistry,
     pub(super) current_tick: GuestTicks,
 }
 
@@ -102,6 +105,10 @@ impl Lv2Runtime for MemoryView<'_> {
 
     fn current_tick(&self) -> GuestTicks {
         self.current_tick
+    }
+
+    fn read_local_store(&self, unit: cellgov_event::UnitId, lsa: u32, len: u32) -> Option<Vec<u8>> {
+        self.registry.get(unit)?.read_local_store(lsa, len).ok()
     }
 
     fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]> {

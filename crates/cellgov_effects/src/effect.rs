@@ -233,6 +233,31 @@ pub enum Effect {
         /// Emitting unit.
         source: UnitId,
     },
+    /// Write bytes into an SPU's local store, as
+    /// `sys_spu_thread_write_ls` does.
+    SpuLocalStoreWrite {
+        /// The SPU unit whose local store takes the write.
+        target: UnitId,
+        /// The local-store address of the first byte.
+        lsa: u32,
+        /// The bytes written, big-endian.
+        bytes: Vec<u8>,
+        /// Emitting unit.
+        source: UnitId,
+    },
+    /// Record that the emitting step read an SPU's local store, as
+    /// `sys_spu_thread_read_ls` does. The read already happened; the
+    /// commit applies nothing.
+    SpuLocalStoreRead {
+        /// The SPU unit whose local store was read.
+        target: UnitId,
+        /// The local-store address of the first byte.
+        lsa: u32,
+        /// The number of bytes read.
+        len: u32,
+        /// Emitting unit.
+        source: UnitId,
+    },
 }
 
 /// Stable identity for an [`Effect`] variant used by validation tools.
@@ -274,6 +299,10 @@ pub enum EffectKind {
     MfcInvalidCommand,
     /// [`Effect::SpuSignalWrite`].
     SpuSignalWrite,
+    /// [`Effect::SpuLocalStoreWrite`].
+    SpuLocalStoreWrite,
+    /// [`Effect::SpuLocalStoreRead`].
+    SpuLocalStoreRead,
 }
 
 impl Effect {
@@ -298,6 +327,8 @@ impl Effect {
             Self::MailboxPop { .. } => EffectKind::MailboxPop,
             Self::MfcInvalidCommand { .. } => EffectKind::MfcInvalidCommand,
             Self::SpuSignalWrite { .. } => EffectKind::SpuSignalWrite,
+            Self::SpuLocalStoreWrite { .. } => EffectKind::SpuLocalStoreWrite,
+            Self::SpuLocalStoreRead { .. } => EffectKind::SpuLocalStoreRead,
         }
     }
 

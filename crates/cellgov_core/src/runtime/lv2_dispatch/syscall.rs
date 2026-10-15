@@ -199,6 +199,7 @@ impl Runtime {
         let wait_timeout_usec = request.wait_timeout_usec();
         let memory = MemoryView {
             memory: crate::runtime::spaces::resolve_unit_memory(&self.memory, &self.spaces, source),
+            registry: &self.registry,
             current_tick: self.time,
         };
         let dispatch = match ordinal {

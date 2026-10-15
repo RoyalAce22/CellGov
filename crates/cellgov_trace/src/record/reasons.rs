@@ -149,6 +149,10 @@ pub enum TracedEffectKind {
     MfcInvalidCommand = 16,
     /// A write of an SPU's signal-notification register.
     SpuSignalWrite = 17,
+    /// A write into an SPU's local store by another processor.
+    SpuLocalStoreWrite = 18,
+    /// A read of an SPU's local store by another processor.
+    SpuLocalStoreRead = 19,
 }
 
 /// Reason a host-side invariant break was recorded into the trace

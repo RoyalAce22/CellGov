@@ -19,6 +19,8 @@ pub(crate) struct FakeRuntime {
     /// Per-address `writable()` override; takes precedence over
     /// `writable_override`.
     writable_at: std::collections::BTreeMap<u64, bool>,
+    /// Each SPU unit's local store, for `read_local_store`.
+    local_stores: std::collections::BTreeMap<UnitId, Vec<u8>>,
 }
 
 impl FakeRuntime {
@@ -28,6 +30,7 @@ impl FakeRuntime {
             tick: GuestTicks::ZERO,
             writable_override: None,
             writable_at: std::collections::BTreeMap::new(),
+            local_stores: std::collections::BTreeMap::new(),
         }
     }
 
@@ -37,6 +40,7 @@ impl FakeRuntime {
             tick: GuestTicks::ZERO,
             writable_override: None,
             writable_at: std::collections::BTreeMap::new(),
+            local_stores: std::collections::BTreeMap::new(),
         }
     }
 
@@ -70,6 +74,13 @@ impl FakeRuntime {
         self.writable_at.insert(addr, value);
         self
     }
+
+    /// The local store of `unit`, created zeroed on first use.
+    pub(super) fn local_store_mut(&mut self, unit: UnitId) -> &mut Vec<u8> {
+        self.local_stores
+            .entry(unit)
+            .or_insert_with(|| vec![0; cellgov_ps3_abi::hw::spu::SPU_LS_SIZE])
+    }
 }
 
 impl Lv2Runtime for FakeRuntime {
@@ -86,6 +97,14 @@ impl Lv2Runtime for FakeRuntime {
 
     fn current_tick(&self) -> GuestTicks {
         self.tick
+    }
+
+    fn read_local_store(&self, unit: UnitId, lsa: u32, len: u32) -> Option<Vec<u8>> {
+        let start = lsa as usize;
+        self.local_stores
+            .get(&unit)?
+            .get(start..start + len as usize)
+            .map(<[u8]>::to_vec)
     }
 
     fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]> {

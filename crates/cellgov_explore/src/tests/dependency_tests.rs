@@ -428,6 +428,72 @@ fn two_signal_writes_to_one_unit_conflict() {
     assert!(!signal_write(7).conflicts(&signal_write(8)));
 }
 
+fn local_store_write(target: u64, lsa: u32) -> StepFootprint {
+    StepFootprint::from_effects(&[Effect::SpuLocalStoreWrite {
+        target: UnitId::new(target),
+        lsa,
+        bytes: vec![1, 2, 3, 4],
+        source: UnitId::new(9),
+    }])
+}
+
+fn local_store_read(target: u64, lsa: u32) -> StepFootprint {
+    StepFootprint::from_effects(&[Effect::SpuLocalStoreRead {
+        target: UnitId::new(target),
+        lsa,
+        len: 4,
+        source: UnitId::new(9),
+    }])
+}
+
+#[test]
+fn a_local_store_access_conflicts_with_every_step_of_its_owner_and_no_other() {
+    for access in [local_store_write(7, 0x100), local_store_read(7, 0x100)] {
+        assert!(!access.is_local_only());
+        assert!(access.conflicts(&quiet_step_of(7)));
+        assert!(quiet_step_of(7).conflicts(&access));
+        assert!(!access.conflicts(&quiet_step_of(8)));
+    }
+}
+
+/// A step during which a transfer into unit 7's local store at
+/// 0x100..0x104 was in flight.
+fn during_landing_in(unit: u64) -> StepFootprint {
+    StepFootprint {
+        inflight_local_stores: vec![(
+            UnitId::new(unit),
+            ByteRange::new(GuestAddr::new(0x100), 4).unwrap(),
+        )],
+        ..StepFootprint::default()
+    }
+}
+
+#[test]
+fn a_local_store_access_conflicts_with_a_landing_on_its_bytes() {
+    let access = local_store_write(7, 0x100);
+    assert!(during_landing_in(7).conflicts(&access));
+    assert!(access.conflicts(&during_landing_in(7)));
+    assert!(!during_landing_in(8).conflicts(&access));
+    assert!(!during_landing_in(7).conflicts(&local_store_read(7, 0x104)));
+}
+
+#[test]
+fn a_local_store_access_during_a_landing_on_its_bytes_rides_it() {
+    let mut rider = local_store_read(7, 0x100);
+    rider.inflight_local_stores = during_landing_in(7).inflight_local_stores;
+    assert!(rider.conflicts(&StepFootprint::default()));
+    let mut apart = local_store_read(7, 0x200);
+    apart.inflight_local_stores = during_landing_in(7).inflight_local_stores;
+    assert!(!apart.conflicts(&StepFootprint::default()));
+}
+
+#[test]
+fn local_store_accesses_conflict_on_shared_bytes_of_one_owner() {
+    assert!(local_store_write(7, 0x100).conflicts(&local_store_read(7, 0x102)));
+    assert!(!local_store_write(7, 0x100).conflicts(&local_store_read(7, 0x104)));
+    assert!(!local_store_write(7, 0x100).conflicts(&local_store_read(8, 0x100)));
+}
+
 /// [CBEA p:148 s:9.11.1] Lr: an outside store resets the reservation. The holder's step emits nothing naming the line, and the store before or after it decides whether the step raises the event.
 #[test]
 fn a_write_to_a_line_a_step_began_holding_conflicts_and_a_second_holder_does_not() {

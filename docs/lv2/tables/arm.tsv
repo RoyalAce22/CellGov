@@ -123,9 +123,11 @@ SpuThreadGroupSuspend	modeled	174
 SpuThreadGroupTerminate	partial-state	177
 SpuThreadGroupYield	modeled	176
 SpuThreadInitialize	modeled	172
+SpuThreadReadLs	modeled	182
 SpuThreadSetArgument	modeled	166
 SpuThreadSetSpuCfg	modeled	187
 SpuThreadUnbindQueue	modeled	194
+SpuThreadWriteLs	modeled	181
 SpuThreadWriteMb	modeled	190
 SpuThreadWriteSnr	modeled	184
 SsAccessControlEngine	modeled	871

@@ -104,9 +104,11 @@ fn effect_emitted_discriminants_locked() {
     assert_eq!(TracedEffectKind::MailboxPop as u8, 15);
     assert_eq!(TracedEffectKind::MfcInvalidCommand as u8, 16);
     assert_eq!(TracedEffectKind::SpuSignalWrite as u8, 17);
-    // Without this, a variant appended below SpuSignalWrite keeps every
+    assert_eq!(TracedEffectKind::SpuLocalStoreWrite as u8, 18);
+    assert_eq!(TracedEffectKind::SpuLocalStoreRead as u8, 19);
+    // Without this, a variant appended below SpuLocalStoreRead keeps every
     // assertion above green and ships with an unpinned discriminant.
-    assert_eq!(TracedEffectKind::VARIANTS.len(), 18);
+    assert_eq!(TracedEffectKind::VARIANTS.len(), 20);
 }
 
 #[test]

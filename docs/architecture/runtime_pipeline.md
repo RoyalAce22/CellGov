@@ -309,7 +309,8 @@ The full vocabulary of guest-visible operations:
   `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`,
   `FaultRaised`, `TraceMarker`, `ReservationAcquire`,
   `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`,
-  `SharedReadIntent`, `ClockRead`, `MailboxPop`, `MfcInvalidCommand`.
+  `SharedReadIntent`, `ClockRead`, `MailboxPop`, `MfcInvalidCommand`,
+  `SpuSignalWrite`, `SpuLocalStoreWrite`, `SpuLocalStoreRead`.
   - `SharedReadIntent` and `ClockRead` declare what a step read so
     dependency analysis can pair it. The commit pipeline stages
     nothing for either.
@@ -317,6 +318,10 @@ The full vocabulary of guest-visible operations:
     commit refuses the batch when the message is not the one at
     that place in the mailbox.
   - `MfcInvalidCommand` queues a command the MFC refuses.
+  - `SpuSignalWrite`, `SpuLocalStoreWrite` and `SpuLocalStoreRead`
+    carry another processor's write of an SPU's signal register and
+    its write or read of an SPU's local store. The read was already
+    made at dispatch; the commit applies nothing for it.
 - **Trace record variants** in `cellgov_trace::TraceRecord`:
   - one header, `RunIdentity`, written first and never repeated.
     It contains the format version plus a fingerprint of each half
