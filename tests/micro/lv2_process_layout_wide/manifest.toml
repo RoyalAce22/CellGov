@@ -1,0 +1,14 @@
+[test]
+name = "lv2_process_layout_wide"
+
+# A hardware probe: where the system places TLS, firmware PRX segments and the first user-memory blocks, for an image whose 6 MiB of zero-filled data ends past 0x10400000.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 852 big-endian u32 words, in the order ppu/main.c lists: 3408 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 3408 },
+]
+
+[expect]
+outcome = "completed"
