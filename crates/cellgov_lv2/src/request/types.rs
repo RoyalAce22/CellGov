@@ -778,9 +778,8 @@ pub enum Lv2Request {
         arg4: u64,
     },
     /// `sys_process_get_status`: the status comes back as the
-    /// syscall's return value, so the request carries only `pid`.
-    /// CellGov's liveness codes do not match the ones firmware waits
-    /// on; see `Lv2Host::dispatch_process_get_status`.
+    /// syscall's return value, so the request carries only `pid`; see
+    /// `Lv2Host::dispatch_process_get_status`.
     ProcessGetStatus {
         /// In: target pid.
         pid: u32,
@@ -788,7 +787,7 @@ pub enum Lv2Request {
     /// `sys_process_getpid`.
     ProcessGetPid,
     /// `class_id` names one `SYS_*_OBJECT` kernel-object class;
-    /// `count_out_ptr` receives a size_t written as 64-bit BE.
+    /// `count_out_ptr` receives a 32-bit BE count.
     ProcessGetNumberOfObject {
         /// In: object class id.
         class_id: u32,

@@ -10,7 +10,6 @@ use cellgov_ps3_abi::lv2::process::SYS_PROCESS_PARAM_PRIO_LIMIT;
 use cellgov_time::Budget;
 
 use super::types::ExecutionOptions;
-use crate::error::narrow_u32;
 use crate::BootError;
 
 /// Why the boot could not resolve its process parameters.
@@ -114,25 +113,17 @@ pub(super) fn resolve_boot_params(
     }
 
     let primary_prio: u32 = resolve_primary_prio(proc_param.map(|p| p.primary_prio), sink);
-    // An absent param segment leaves the kernel's own starting value
-    // of 1 MiB, which is also the ceiling on a `sys_proc_param` stack
-    // declaration. `decode_primary_stacksize` clamps a present
-    // declaration to that same ceiling, so the guard below cannot
-    // fire while the reservation is 1 MiB.
-    let primary_stack_size: u32 = match proc_param {
-        Some(p) => {
-            let want = decode_primary_stacksize(p.primary_stacksize);
-            if (want as usize) > PS3_PRIMARY_STACK_SIZE {
-                return Err(ParamsError::StackExceedsReservation {
-                    declared: want,
-                    reserved: PS3_PRIMARY_STACK_SIZE,
-                }
-                .into());
-            }
-            want
+    // An adopted declaration is at most the 1 MiB reservation, so the
+    // guard below cannot fire while the reservation is 1 MiB.
+    let primary_stack_size =
+        resolve_primary_stacksize(proc_param.map(|p| p.primary_stacksize), sink);
+    if (primary_stack_size as usize) > PS3_PRIMARY_STACK_SIZE {
+        return Err(ParamsError::StackExceedsReservation {
+            declared: primary_stack_size,
+            reserved: PS3_PRIMARY_STACK_SIZE,
         }
-        None => narrow_u32("PS3_PRIMARY_STACK_SIZE", PS3_PRIMARY_STACK_SIZE as u64)?,
-    };
+        .into());
+    }
     let primary_stack_base = primary_stack_base_for(primary_stack_size);
 
     Ok(BootParams {
@@ -174,37 +165,43 @@ fn resolve_primary_prio(declared: Option<i32>, sink: &dyn crate::BootSink) -> u3
 
 /// Decode a `sys_proc_param.primary_stacksize` declaration to bytes.
 ///
-/// The field carries either a kernel sentinel or a raw byte count.
-///
-/// - A sentinel decodes to the byte count it names, down to 32 KiB,
-///   with no clamp.
-/// - This clamps a raw count between
-///   [`PS3_PRIMARY_STACK_SIZE_MIN`](cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_SIZE_MIN)
-///   and
-///   [`PS3_PRIMARY_STACK_SIZE_MAX`](cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_SIZE_MAX)
-///   -- 4 KiB through 1 MiB, the range the field itself admits -- then
-///   rounds it up to a page.
-///
-/// Whether the kernel widens a small declaration is unestablished, so
-/// this keeps a raw count as declared.
-fn decode_primary_stacksize(declared: u32) -> u32 {
+/// A byte count from
+/// [`PS3_PRIMARY_STACK_SIZE_MIN`](cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_SIZE_MIN)
+/// through
+/// [`PS3_PRIMARY_STACK_SIZE_MAX`](cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_SIZE_MAX)
+/// rounds up to a page. `None` for any other count: the kernel does
+/// not adopt it.
+fn decode_primary_stacksize(declared: u32) -> Option<u32> {
     use cellgov_ps3_abi::hw::address_space::{
         PS3_PRIMARY_STACK_SIZE_MAX, PS3_PRIMARY_STACK_SIZE_MIN, PS3_STACK_SIZE_GRANULARITY,
     };
-    match declared {
-        0x10 => 32 * 1024,
-        0x20 => 64 * 1024,
-        0x30 => 96 * 1024,
-        0x40 => 128 * 1024,
-        0x50 => 256 * 1024,
-        0x60 => 512 * 1024,
-        0x70 => 1024 * 1024,
-        // Both clamp bounds are page multiples, so the round-up
-        // cannot push the result past the maximum.
-        raw => raw
-            .clamp(PS3_PRIMARY_STACK_SIZE_MIN, PS3_PRIMARY_STACK_SIZE_MAX)
-            .next_multiple_of(PS3_STACK_SIZE_GRANULARITY),
-    }
+    // Both bounds are page multiples, so the round-up cannot push an
+    // adopted count past the maximum.
+    (PS3_PRIMARY_STACK_SIZE_MIN..=PS3_PRIMARY_STACK_SIZE_MAX)
+        .contains(&declared)
+        .then(|| declared.next_multiple_of(PS3_STACK_SIZE_GRANULARITY))
+}
+
+/// The primary stack size for a title's `primary_stacksize`
+/// declaration, or for none.
+///
+/// A declaration the kernel does not adopt leaves the default, as a
+/// priority outside the range does in [`resolve_primary_prio`].
+fn resolve_primary_stacksize(declared: Option<u32>, sink: &dyn crate::BootSink) -> u32 {
+    use cellgov_ps3_abi::hw::address_space::{
+        PS3_PRIMARY_STACK_SIZE_DEFAULT, PS3_PRIMARY_STACK_SIZE_MAX, PS3_PRIMARY_STACK_SIZE_MIN,
+    };
+    let Some(declared) = declared else {
+        return PS3_PRIMARY_STACK_SIZE_DEFAULT;
+    };
+    decode_primary_stacksize(declared).unwrap_or_else(|| {
+        sink.warn(&format!(
+            "boot: sys_proc_param primary_stacksize=0x{declared:x} is outside \
+             0x{PS3_PRIMARY_STACK_SIZE_MIN:x}..=0x{PS3_PRIMARY_STACK_SIZE_MAX:x}; the kernel \
+             does not adopt it -- using the default 0x{PS3_PRIMARY_STACK_SIZE_DEFAULT:x}"
+        ));
+        PS3_PRIMARY_STACK_SIZE_DEFAULT
+    })
 }
 
 /// Primary thread r1 for a boot with no guest args.
@@ -269,3 +266,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/params_execution_tests.rs"]
 mod execution_tests;
+
+#[cfg(test)]
+#[path = "tests/primary_stack_console_tests.rs"]
+mod primary_stack_console_tests;

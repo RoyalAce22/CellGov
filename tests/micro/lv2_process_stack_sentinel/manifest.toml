@@ -1,0 +1,14 @@
+[test]
+name = "lv2_process_stack_sentinel"
+
+# A hardware probe: the same queries from a process whose SYS_PROCESS_PARAM declares the 32 KiB sentinel (0x10) as its primary stack, for the stack the kernel gives it.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 1208 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1208 },
+]
+
+[expect]
+outcome = "completed"

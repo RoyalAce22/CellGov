@@ -66,7 +66,7 @@ impl Lv2Runtime for ZeroProbeRuntime {
 
 /// Ordinals whose row carries no witness yet. The set only shrinks: a
 /// new row starts with a witness.
-const UNWITNESSED_BASELINE: &[u64] = &[31, 70, 71];
+const UNWITNESSED_BASELINE: &[u64] = &[70, 71];
 
 #[test]
 fn a_witness_is_a_path_and_a_function_in_a_data_free_crate() {

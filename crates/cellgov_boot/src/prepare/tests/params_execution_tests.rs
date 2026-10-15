@@ -135,3 +135,27 @@ fn capture_state_trace_selects_the_determinism_check_mode() {
     assert_eq!(params.mode, RuntimeMode::DeterminismCheck);
     assert_eq!(params.step_budget, default);
 }
+
+#[test]
+fn a_stack_size_the_kernel_does_not_adopt_is_witnessed() {
+    let log = WarnLog::default();
+    let size = super::resolve_primary_stacksize(Some(0x800), &log);
+    assert_eq!(
+        size,
+        cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_SIZE_DEFAULT
+    );
+    let warnings = log.0.borrow();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("primary_stacksize=0x800"),
+        "{}",
+        warnings[0]
+    );
+}
+
+#[test]
+fn an_adopted_stack_size_passes_without_a_warning() {
+    let log = WarnLog::default();
+    assert_eq!(super::resolve_primary_stacksize(Some(0x9000), &log), 0x9000);
+    assert!(log.0.borrow().is_empty());
+}

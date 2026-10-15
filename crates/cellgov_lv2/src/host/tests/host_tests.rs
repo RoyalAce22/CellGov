@@ -855,8 +855,8 @@ mod ss_access_control_engine {
             match r {
                 Lv2Dispatch::Immediate { code, effects } => {
                     assert_eq!(
-                        code, 0x8001_051Du64,
-                        "pkg_id={pkg_id} should return 0x8001051D"
+                        code, 0xFFFF_FFFF_8001_051Du64,
+                        "pkg_id={pkg_id} should return 0x8001051D sign-extended"
                     );
                     assert!(
                         effects.is_empty(),

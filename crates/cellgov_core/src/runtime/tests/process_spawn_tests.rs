@@ -172,7 +172,7 @@ fn child_exit_finishes_only_the_child_process() {
     );
     assert_eq!(rt.lv2_host().process_exit_status(EXPECTED_PID), Some(42));
 
-    // Liveness poll flips CELL_OK -> CELL_ESRCH across the exit.
+    // Liveness poll flips live -> CELL_ESRCH across the exit.
     let status = classify(
         cellgov_ps3_abi::lv2::syscall::PROCESS_GET_STATUS,
         &[u64::from(EXPECTED_PID), 0, 0, 0, 0, 0, 0, 0],
@@ -185,7 +185,7 @@ fn child_exit_finishes_only_the_child_process() {
 }
 
 #[test]
-fn get_status_reports_live_child_as_ok() {
+fn get_status_reports_a_live_child_as_live() {
     let mut rt = build_spawn_ready();
     rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
     let status = classify(
@@ -195,7 +195,7 @@ fn get_status_reports_live_child_as_ok() {
     rt.dispatch_lv2_request(status, UnitId::new(0));
     assert_eq!(
         rt.registry_mut().drain_syscall_return(UnitId::new(0)),
-        Some(0)
+        Some(cellgov_ps3_abi::lv2::process::SYS_PROCESS_STATUS_LIVE)
     );
 }
 

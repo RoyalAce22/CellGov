@@ -94,76 +94,47 @@ mod primary_entry_sp_tests {
 }
 
 mod primary_stacksize_tests {
-    use super::super::{decode_primary_stacksize, primary_entry_sp, primary_stack_base_for};
+    use super::super::{
+        decode_primary_stacksize, primary_entry_sp, primary_stack_base_for,
+        resolve_primary_stacksize,
+    };
+    use crate::NullSink;
     use cellgov_ps3_abi::hw::address_space::{
         PS3_ABI_MIN_STACK_FRAME as ENTRY_FRAME_RESERVE, PS3_PRIMARY_STACK_BASE,
-        PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_SIZE_MIN,
+        PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_SIZE_DEFAULT,
     };
 
     #[test]
-    fn a_sentinel_stacksize_declaration_decodes_to_its_byte_count() {
-        for (sentinel, bytes) in [
-            (0x10, 32 * 1024),
-            (0x20, 64 * 1024),
-            (0x30, 96 * 1024),
-            (0x40, 128 * 1024),
-            (0x50, 256 * 1024),
-            (0x60, 512 * 1024),
-            (0x70, 1024 * 1024),
-        ] {
-            assert_eq!(decode_primary_stacksize(sentinel), bytes);
+    fn a_count_inside_the_window_is_adopted_and_rounded_up_to_a_page() {
+        assert_eq!(decode_primary_stacksize(0x1000), Some(0x1000));
+        assert_eq!(decode_primary_stacksize(0x1001), Some(0x2000));
+        assert_eq!(decode_primary_stacksize(0xF_FFFF), Some(0x10_0000));
+        assert_eq!(decode_primary_stacksize(0x10_0000), Some(0x10_0000));
+    }
+
+    #[test]
+    fn a_count_outside_the_window_is_not_adopted() {
+        for declared in [0, 0x10, 0x70, 0xFFF, 0x10_0001, u32::MAX] {
+            assert_eq!(decode_primary_stacksize(declared), None, "0x{declared:x}");
         }
     }
 
     #[test]
-    fn a_raw_byte_count_inside_the_window_passes_through_unchanged() {
-        assert_eq!(decode_primary_stacksize(0x10000), 0x10000);
-        assert_eq!(decode_primary_stacksize(0x40000), 0x40000);
-        assert_eq!(decode_primary_stacksize(0x100000), 0x100000);
-    }
-
-    #[test]
-    fn a_raw_byte_count_is_honoured_as_declared_not_widened() {
-        // The system software's own param segment declares 0x9000, and
-        // the field's own definition permits a raw count down to 4 KiB.
-        assert_eq!(decode_primary_stacksize(0x9000), 0x9000);
-        assert_eq!(decode_primary_stacksize(0x1000), 0x1000);
-    }
-
-    #[test]
-    fn a_raw_byte_count_below_the_declared_minimum_is_raised_to_it() {
-        assert_eq!(decode_primary_stacksize(0), 0x1000);
-        assert_eq!(decode_primary_stacksize(1), 0x1000);
-        assert_eq!(decode_primary_stacksize(0xFFF), 0x1000);
-    }
-
-    #[test]
-    fn a_sentinel_is_decoded_before_the_raw_clamp_can_see_it() {
-        // Both numbers sit below the raw floor: 0x10 is the sentinel
-        // for 32 KiB, and 0x11 is no sentinel.
-        assert_eq!(decode_primary_stacksize(0x10), 0x8000);
-        assert_eq!(decode_primary_stacksize(0x11), PS3_PRIMARY_STACK_SIZE_MIN);
-    }
-
-    #[test]
-    fn a_raw_byte_count_above_the_kernel_ceiling_is_clamped_not_refused() {
-        assert_eq!(decode_primary_stacksize(0x10_0001), 0x10_0000);
-        assert_eq!(decode_primary_stacksize(u32::MAX), 0x10_0000);
-    }
-
-    #[test]
-    fn a_raw_byte_count_is_rounded_up_to_a_page() {
-        assert_eq!(decode_primary_stacksize(0x10001), 0x11000);
-        assert_eq!(decode_primary_stacksize(0x40001), 0x41000);
-        // The round-up cannot escape the ceiling, which is itself a
-        // page multiple.
-        assert_eq!(decode_primary_stacksize(0xF_FFFF), 0x10_0000);
+    fn a_count_the_kernel_does_not_adopt_leaves_the_default() {
+        assert_eq!(
+            resolve_primary_stacksize(Some(0x10_0001), &NullSink),
+            PS3_PRIMARY_STACK_SIZE_DEFAULT
+        );
+        assert_eq!(
+            resolve_primary_stacksize(None, &NullSink),
+            PS3_PRIMARY_STACK_SIZE_DEFAULT
+        );
     }
 
     #[test]
     fn the_recorded_stack_range_always_contains_the_whole_entry_frame() {
         for declared in [0u32, 0x9000, 0x10, 0x40, 0x70, 0x40000, 0x100000, u32::MAX] {
-            let size = decode_primary_stacksize(declared);
+            let size = resolve_primary_stacksize(Some(declared), &NullSink);
             let base = primary_stack_base_for(size);
             let end = base + u64::from(size);
             let sp = primary_entry_sp();

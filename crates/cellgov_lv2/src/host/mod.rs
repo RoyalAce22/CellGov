@@ -62,6 +62,10 @@ mod sync_attribute_tests;
 #[path = "tests/error_code_console_tests.rs"]
 mod error_code_console_tests;
 
+#[cfg(test)]
+#[path = "tests/process_queries_console_tests.rs"]
+mod process_queries_console_tests;
+
 pub use diagnostics::InvariantBreakReason;
 pub use lv2_host::{FirmwareIdentity, Lv2Host};
 pub use mmapper::SystemStateSeed;

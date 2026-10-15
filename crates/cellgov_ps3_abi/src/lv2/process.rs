@@ -1,7 +1,7 @@
 //! `sys_process_*` ABI constants.
 //!
 //! `SYS_*_OBJECT` class ids for `sys_process_get_number_of_object`
-//! (syscall 24): a single integer that selects which kernel-object
+//! (syscall 12): a single integer that selects which kernel-object
 //! class to count. Real LV2 carries one count per class in
 //! `sys_object`; CellGov maps each id to a table length or a
 //! side-counter (see `cellgov_lv2::host::process`).
@@ -9,15 +9,24 @@
 /// Numeric class id passed to `sys_process_get_number_of_object`.
 pub type ProcessObjectClassId = u32;
 
-/// Pid LV2 assigns the first non-kernel process.
+/// Pid CellGov gives the boot process.
 // Firmware observation: sys_process_getpid returns this to the
-// first user process on real hardware; PSL1GHT keys on the value.
+// first user process on real hardware; PSL1GHT keys on the value. A
+// process launched from the
+// XMB gets a pid that depends on launch history: the
+// lv2_process_queries and lv2_process_stack_small captures read
+// 0x011D0200 and 0x011F0200.
 pub const BOOT_PROCESS_PID: u32 = 0x0100_0500;
 
-/// Ppid the boot process reports; `sys_process_get_ppu_guid`
-/// returns the same value and PSL1GHT keys on the equality.
-// Firmware observation, same provenance as BOOT_PROCESS_PID.
+/// Ppid the boot process reports.
+// The lv2_process_queries capture reads this ppid from a process the
+// XMB launched.
 pub const BOOT_PROCESS_PPID: u32 = 0x0100_0300;
+
+/// `sys_process_get_status` return value for a live process.
+// The lv2_process_queries capture reads 2 for the calling process and
+// for its parent.
+pub const SYS_PROCESS_STATUS_LIVE: u64 = 2;
 
 /// One past the highest `sys_process_param.primary_prio` the kernel
 /// adopts; a declaration at or above it leaves the kernel default

@@ -1,0 +1,14 @@
+[test]
+name = "lv2_process_queries"
+
+# A hardware probe: process queries, object counts, stack information, the ids five creates return, and the read-only ss access control subcommands.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 1208 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1208 },
+]
+
+[expect]
+outcome = "completed"

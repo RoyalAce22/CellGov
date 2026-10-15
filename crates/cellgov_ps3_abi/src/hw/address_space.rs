@@ -3,9 +3,8 @@
 /// Base guest virtual address of the primary thread's stack region.
 pub const PS3_PRIMARY_STACK_BASE: u64 = 0xD000_0000;
 
-/// Size in bytes of the primary thread's stack region. 1 MiB
-/// matches what real PS3 titles declare in their `sys_proc_param`
-/// (PROC_PARAM.primary_stacksize).
+/// Size in bytes of the primary thread's stack region: the largest
+/// stack a `sys_proc_param` (PROC_PARAM.primary_stacksize) can get.
 pub const PS3_PRIMARY_STACK_SIZE: usize = 0x0010_0000;
 
 /// Sits immediately above the primary stack so child-stack allocator
@@ -48,34 +47,46 @@ const _: () = assert!(
 // r1 that is not a multiple of 16.
 const _: () = assert!(PS3_PRIMARY_STACK_TOP.is_multiple_of(0x10));
 
-/// Floor a decoder raises a raw `primary_stacksize` byte count to: the
-/// smallest count the field's own definition admits.
+/// Smallest `primary_stacksize` the kernel adopts.
 ///
-/// Whether the kernel then widens a small declaration is unestablished.
-///
-/// A decoder leaves the sentinel form alone: a sentinel names its own
-/// byte count, and the smallest names 32 KiB.
+/// The reference console gives a declared 0x800 or 0xC00 the
+/// [`PS3_PRIMARY_STACK_SIZE_DEFAULT`] and a declared 0x1800 0x2000
+/// (`tests/micro/lv2_process_stack_*`). The 0x10..0x70 values some
+/// tables read as size codes are declarations below this, and get the
+/// default too.
 pub const PS3_PRIMARY_STACK_SIZE_MIN: u32 = 0x1000;
 
-/// Largest primary stack the kernel hands out, and the ceiling on a
-/// declared `primary_stacksize`. The loader clamps a larger
-/// declaration rather than refusing it -- a loader choice, not a
-/// stated rule.
+/// Largest `primary_stacksize` the kernel adopts.
+///
+/// The reference console gives a declared 0x100000 a 1 MiB stack and
+/// a declared 0x101000 the [`PS3_PRIMARY_STACK_SIZE_DEFAULT`].
 pub const PS3_PRIMARY_STACK_SIZE_MAX: u32 = 0x10_0000;
 
-/// Granularity a clamped primary-stack size is rounded up to.
+/// Primary stack size when the title declares none, or declares one
+/// outside [`PS3_PRIMARY_STACK_SIZE_MIN`]..=[`PS3_PRIMARY_STACK_SIZE_MAX`].
+///
+/// The reference console gives a title with no `sys_proc_param` a
+/// 64 KiB stack (`tests/micro/lv2_process_stack_undeclared`).
+pub const PS3_PRIMARY_STACK_SIZE_DEFAULT: u32 = 0x1_0000;
+
+/// Granularity the kernel rounds an adopted primary-stack size up to.
+///
+/// The reference console gives a declared 0x11800 a 0x12000 stack.
 pub const PS3_STACK_SIZE_GRANULARITY: u32 = 0x1000;
 
-// Decoders clamp a raw `primary_stacksize` byte count into
-// [MIN, MAX] and then round up to the granularity. That round-up can
-// only stay inside the window while both bounds are themselves
-// granularity multiples, and the resulting stack only fits the backed
-// region while the region is at least MAX bytes -- otherwise a
-// max-declaring title's stack silently runs into the child-stack
-// region below it.
+// Decoders round an adopted `primary_stacksize` byte count in
+// [MIN, MAX] up to the granularity. That round-up can only stay
+// inside the window while both bounds are themselves granularity
+// multiples, and the resulting stack only fits the backed region while
+// the region is at least MAX bytes -- otherwise a max-declaring
+// title's stack silently runs into the child-stack region below it.
 const _: () = assert!(PS3_PRIMARY_STACK_SIZE_MIN <= PS3_PRIMARY_STACK_SIZE_MAX);
 const _: () = assert!(PS3_PRIMARY_STACK_SIZE_MIN.is_multiple_of(PS3_STACK_SIZE_GRANULARITY));
 const _: () = assert!(PS3_PRIMARY_STACK_SIZE_MAX.is_multiple_of(PS3_STACK_SIZE_GRANULARITY));
+const _: () = assert!(
+    PS3_PRIMARY_STACK_SIZE_MIN <= PS3_PRIMARY_STACK_SIZE_DEFAULT
+        && PS3_PRIMARY_STACK_SIZE_DEFAULT <= PS3_PRIMARY_STACK_SIZE_MAX
+);
 const _: () = assert!(PS3_PRIMARY_STACK_SIZE as u64 >= PS3_PRIMARY_STACK_SIZE_MAX as u64);
 
 /// Base of the iomap region `sys_rsx_context_iomap` (672) maps into;

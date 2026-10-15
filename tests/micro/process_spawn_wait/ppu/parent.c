@@ -1,5 +1,5 @@
 /* PPU program: spawn a child SELF via _sys_process_spawn (LV2 #21)
- * and observe its exit by polling sys_process_get_status (LV2 #4).
+ * and observe its exit by polling sys_process_get_status (sc 4).
  *
  * The spawn argument block follows the marshalled layout vsh's
  * client library builds (0x608950): { u64 table_off = 16; u64;
@@ -135,10 +135,11 @@ int main(void)
     result.status = 0;
 #endif
 
-    /* CELL_OK while the child lives; CELL_ESRCH once it has
-     * exited. Any nonzero return ends the poll. */
+    /* The status reads 1 or 2 while the child lives (2 for a running
+     * process in lv2_process_queries); any other return ends the poll. */
     while (polls < MAX_POLLS) {
-        if (syscall2_s32(SYS_PROCESS_GET_STATUS, pid_out, 0) != 0)
+        s32 st = syscall2_s32(SYS_PROCESS_GET_STATUS, pid_out, 0);
+        if (st != 1 && st != 2)
             break;
         polls++;
     }

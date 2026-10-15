@@ -206,7 +206,7 @@ fn ss_access_control_engine_default_pkg_id_returns_ss_status() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(0x8001_051D));
+    assert_eq!(result, Lv2Dispatch::immediate(0xFFFF_FFFF_8001_051D));
 }
 
 #[test]

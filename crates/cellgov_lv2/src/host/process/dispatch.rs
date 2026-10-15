@@ -265,19 +265,26 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_process_get_status`: minimal liveness poll.
+    /// `sys_process_get_status`: the status is the return value.
     ///
-    /// CELL_OK while `pid` names a live process, CELL_ESRCH after it
-    /// exits or when it never existed.
+    /// - [`SYS_PROCESS_STATUS_LIVE`] while `pid` names a live process
+    ///   or the boot process's parent, as the `lv2_process_queries`
+    ///   capture reads for a process and its parent.
+    /// - CELL_ESRCH for a pid that never existed, as the same capture
+    ///   reads.
+    /// - CELL_ESRCH after a child exits. What the console returns for
+    ///   an exited child is unestablished.
     ///
-    /// Known divergence: the status comes back as the syscall's return
-    /// value, and firmware re-polls while it reads 1 or 2. Neither
-    /// CELL_OK nor CELL_ESRCH means "not finished", so a guest wait
-    /// loop on this call leaves on the first poll.
+    /// [`SYS_PROCESS_STATUS_LIVE`]: cellgov_ps3_abi::lv2::process::SYS_PROCESS_STATUS_LIVE
     pub(in crate::host) fn dispatch_process_get_status(&self, pid: u32) -> Lv2Dispatch {
-        let code = match self.state.processes.get(pid) {
-            Some(entry) if entry.exit_status.is_none() => 0u64,
-            _ => errno::CELL_ESRCH.into(),
+        let live = match self.state.processes.get(pid) {
+            Some(entry) => entry.exit_status.is_none(),
+            None => pid == self.state.processes.boot().ppid,
+        };
+        let code = if live {
+            cellgov_ps3_abi::lv2::process::SYS_PROCESS_STATUS_LIVE
+        } else {
+            errno::CELL_ESRCH.into()
         };
         Lv2Dispatch::immediate(code)
     }
@@ -312,10 +319,13 @@ impl Lv2Host {
         Lv2Dispatch::immediate(ppid.into())
     }
 
-    /// `sys_process_get_ppu_guid`: equals the boot ppid (PSL1GHT
-    /// keys on the equality).
+    /// `sys_process_get_ppu_guid`: 0, the answer for an image that
+    /// embeds no PPU GUID, as the `lv2_process_queries` capture reads.
+    ///
+    /// CellGov does not look for an embedded GUID, so an image that
+    /// carries one also reads 0.
     pub(in crate::host) fn dispatch_process_get_ppu_guid(&self) -> Lv2Dispatch {
-        Lv2Dispatch::immediate(self.state.processes.boot().ppid.into())
+        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_process_is_stack`: 1 when `addr` is in any tracked PPU

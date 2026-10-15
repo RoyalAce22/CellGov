@@ -325,7 +325,7 @@ fn get_status_reports_the_boot_process_as_live() {
     let host = Lv2Host::new();
     assert_eq!(
         host.dispatch_process_get_status(BOOT_PROCESS_PID),
-        Lv2Dispatch::immediate(0)
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::process::SYS_PROCESS_STATUS_LIVE)
     );
 }
 
@@ -339,7 +339,7 @@ fn get_status_reports_an_unknown_pid_as_esrch() {
 }
 
 #[test]
-fn get_status_flips_from_ok_to_esrch_when_the_child_exits() {
+fn get_status_flips_from_live_to_esrch_when_the_child_exits() {
     let mut host = Lv2Host::new();
     assert!(host
         .state
@@ -347,7 +347,7 @@ fn get_status_flips_from_ok_to_esrch_when_the_child_exits() {
         .insert_child(FIRST_CHILD_PID, child_entry()));
     assert_eq!(
         host.dispatch_process_get_status(FIRST_CHILD_PID),
-        Lv2Dispatch::immediate(0)
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::process::SYS_PROCESS_STATUS_LIVE)
     );
     host.mark_process_exited(FIRST_CHILD_PID, -3);
     assert_eq!(

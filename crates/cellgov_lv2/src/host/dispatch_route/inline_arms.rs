@@ -235,11 +235,11 @@ impl Lv2Host {
     ///   spawned children serve the retail-application fallback.
     ///   CELL_EFAULT when `a2` is zero or exceeds `u32`.
     /// - Any other `pkg_id` answers the SS-domain status
-    ///   [`cellgov_ps3_abi::lv2::ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID`].
-    ///   All fourteen syscall-871 sites in the installed firmware --
-    ///   eight modules, each site an immediate load -- put 1, 2 or 3
-    ///   in `r3`. Nothing in that set reaches this arm, and the status
-    ///   itself is unanchored.
+    ///   [`cellgov_ps3_abi::lv2::ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID`],
+    ///   sign-extended, and writes nothing, as the
+    ///   `lv2_process_queries` capture reads for 0 and 4. All fourteen
+    ///   syscall-871 sites in the installed firmware -- eight modules,
+    ///   each site an immediate load -- put 1, 2 or 3 in `r3`.
     pub(super) fn dispatch_ss_access_control_engine(
         &mut self,
         pkg_id: u64,
@@ -283,9 +283,9 @@ impl Lv2Host {
                     }
                 }
             },
-            _ => Lv2Dispatch::immediate(u64::from(
-                cellgov_ps3_abi::lv2::ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID,
-            )),
+            _ => Lv2Dispatch::immediate(
+                cellgov_ps3_abi::lv2::ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID as i32 as i64 as u64,
+            ),
         }
     }
 
