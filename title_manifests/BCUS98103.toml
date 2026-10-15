@@ -23,10 +23,3 @@ kind = "first-rsx-write"
 [[bench.matrix]]
 fw = "1.94"
 game_ver = "base"
-pending = "the resident title image or firmware set crosses the fixed TLS reservation, so boot refuses before TLS initialization"
-
-# The reference cell's reason it has no measurement yet.
-[[bench.matrix]]
-fw = "4.93"
-game_ver = "base"
-pending = "the resident title image or firmware set crosses the fixed TLS reservation, so boot refuses before TLS initialization"

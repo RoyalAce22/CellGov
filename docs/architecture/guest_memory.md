@@ -28,11 +28,11 @@ PS3 LV2 virtual-address layout:
 The region map does not track `main`'s internal sub-layout; the
 region stays flat. Within it:
 
-- `sys_memory_allocate` starts above the loaded ELF footprint (the
-  ELF's highest user-region PT_LOAD end plus 64 KB alignment,
-  computed at startup);
-- TLS sits at `0x10400000`;
-- firmware PRX images load above that.
+- firmware PRX images load from the first page past the ELF's
+  PT_LOAD segments;
+- the main thread's 64 KB TLS area takes the first 64 KB page past the
+  ELF, the HLE trampolines and the firmware PRX images;
+- `sys_memory_allocate` starts where the TLS area ends.
 
 *Why:* the allocator base sits above the ELF because real PS3 LV2
 shares `0x00010000-0x0FFFFFFF` between the loaded binary and the

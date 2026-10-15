@@ -1,4 +1,5 @@
-//! Guest-heap placement: the three floors `alloc_base` must clear.
+//! TLS and guest-heap placement: the three floors the TLS area must
+//! clear, and the heap that follows it.
 
 use super::place_guest_heap;
 use crate::prx::PrxLoadInfo;
@@ -60,7 +61,8 @@ fn the_title_image_wins_when_it_reaches_highest() {
         p.alloc_floor, 0x2_0000,
         "the image end is the highest floor"
     );
-    assert_eq!(p.alloc_base, 0x2_0000);
+    assert_eq!(p.tls.base(), 0x2_0000);
+    assert_eq!(p.alloc_base, 0x3_0000);
 }
 
 #[test]
@@ -70,7 +72,8 @@ fn the_code_floor_wins_when_it_reaches_highest() {
     let elf = elf64_be_with_load(0x1_0000, 0x1_0000);
     let p = placement_of(&elf, &[prx_ending_at(0x1_5000)], 0x10_0000);
     assert_eq!(p.alloc_floor, 0x10_0000, "the code floor is the highest");
-    assert_eq!(p.alloc_base, 0x10_0000);
+    assert_eq!(p.tls.base(), 0x10_0000);
+    assert_eq!(p.alloc_base, 0x11_0000);
 }
 
 #[test]
@@ -81,7 +84,8 @@ fn the_firmware_set_wins_when_it_reaches_highest() {
     let p = placement_of(&elf, &[prx_ending_at(0x80_0000)], 0x1_2000);
     assert_eq!(p.prx_region_end, 0x80_0000);
     assert_eq!(p.alloc_floor, 0x80_0000, "the firmware set is the highest");
-    assert_eq!(p.alloc_base, 0x80_0000);
+    assert_eq!(p.tls.base(), 0x80_0000);
+    assert_eq!(p.alloc_base, 0x81_0000);
 }
 
 #[test]
@@ -103,16 +107,18 @@ fn a_floor_inside_a_page_rounds_the_base_up_to_the_next() {
     let elf = elf64_be_with_load(0x1_0000, 0x1_0001);
     let p = placement_of(&elf, &[], 0);
     assert_eq!(p.alloc_floor, 0x2_0001);
-    assert_eq!(p.alloc_base, 0x3_0000);
+    assert_eq!(p.tls.base(), 0x3_0000);
+    assert_eq!(p.alloc_base, 0x4_0000);
 }
 
 #[test]
 fn a_boot_with_nothing_resident_still_starts_above_the_null_page() {
-    // No parseable image, no firmware, no trampolines: the base must
-    // not be 0, or the first allocation would hand out the null page.
+    // No parseable image, no firmware, no trampolines: neither the TLS
+    // area nor the heap may start at 0, the null page.
     let p = placement_of(&[], &[], 0);
     assert_eq!(p.user_region_end, 0);
     assert_eq!(p.prx_region_end, 0);
     assert_eq!(p.alloc_floor, 0);
-    assert_eq!(p.alloc_base, 0x1_0000);
+    assert_eq!(p.tls.base(), 0x1_0000);
+    assert_eq!(p.alloc_base, 0x2_0000);
 }

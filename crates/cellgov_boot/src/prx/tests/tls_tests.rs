@@ -30,10 +30,17 @@ fn elf_with_pt_tls(vaddr: u64, filesz: u64, memsz: u64) -> Vec<u8> {
     buf
 }
 
+/// An area on the first page past the 0x1000-byte memory the refusal
+/// cases run in, so a template that passes every other check reaches
+/// the memory bound.
+fn area_past_memory() -> TlsArea {
+    TlsArea::above(0x1_0000).expect("in range")
+}
+
 fn tls_refusal(vaddr: u64, filesz: u64, memsz: u64) -> TlsError {
     let elf = elf_with_pt_tls(vaddr, filesz, memsz);
     let mut mem = GuestMemory::new(0x1000);
-    pre_init_tls(&elf, &mut mem, &NullSink).expect_err("refusal expected")
+    pre_init_tls(&elf, &mut mem, area_past_memory(), &NullSink).expect_err("refusal expected")
 }
 
 fn place(mem: &mut GuestMemory, addr: u64, bytes: &[u8]) {
@@ -126,20 +133,21 @@ fn a_pt_tls_with_file_bytes_but_no_memory_image_is_refused_not_skipped() {
 fn a_zero_memsz_pt_tls_initializes_nothing() {
     let elf = elf_with_pt_tls(0, 0, 0);
     let mut mem = GuestMemory::new(0x1000);
-    assert!(pre_init_tls(&elf, &mut mem, &NullSink).is_ok());
+    assert!(pre_init_tls(&elf, &mut mem, area_past_memory(), &NullSink).is_ok());
 }
 
 #[test]
 fn pre_init_zeroes_the_header_gap_and_the_bss_tail_with_the_template() {
     const VADDR: u64 = 0x1000;
     let elf = elf_with_pt_tls(VADDR, 8, 0x10);
-    let mut mem = GuestMemory::new(TLS_BASE as usize + 0x40);
+    let area = TlsArea::above(0x2_0000).expect("in range");
+    let mut mem = GuestMemory::new(area.base() as usize + 0x40);
     place(&mut mem, VADDR, &[0x11u8; 8]);
-    place(&mut mem, TLS_BASE, &[0xAAu8; 0x30]);
+    place(&mut mem, area.base(), &[0xAAu8; 0x30]);
 
-    pre_init_tls(&elf, &mut mem, &NullSink).expect("a well-formed PT_TLS initializes");
+    pre_init_tls(&elf, &mut mem, area, &NullSink).expect("a well-formed PT_TLS initializes");
 
-    let base = TLS_BASE as usize;
+    let base = area.base() as usize;
     let bytes = mem.as_bytes();
     assert!(
         bytes[base..base + 0x30].iter().all(|b| *b == 0),

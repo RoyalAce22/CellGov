@@ -1,5 +1,5 @@
-//! The firmware PRX set the title's import tables name, and the
-//! heap floor its extent forces.
+//! The firmware PRX set the title's import tables name, and the TLS
+//! area and heap floor its extent forces.
 
 use std::time::{Duration, Instant};
 
@@ -7,7 +7,7 @@ use super::types::{BootServices, DiagnosticOptions, TitleOptions};
 use crate::error::narrow_u32;
 use crate::prx::{
     install_unresolved_trampolines_only, load_firmware_set_bound, FirmwareLoadError, HostLinkMaps,
-    PrxLoadInfo, VerifiedFirmware, TLS_BASE,
+    PrxLoadInfo, TlsArea, VerifiedFirmware,
 };
 use crate::BootError;
 
@@ -20,25 +20,6 @@ pub(super) struct FirmwareSet {
     pub host_link: HostLinkMaps,
     pub t_hle_bind: Duration,
     pub t_prx_load: Duration,
-}
-
-pub(super) fn check_tls_reservation(
-    title_image_end: usize,
-    prx_modules: &[PrxLoadInfo],
-) -> Result<(), FirmwareLoadError> {
-    let image_end = prx_modules
-        .iter()
-        .map(|module| module.data_end)
-        .max()
-        .unwrap_or(0)
-        .max(title_image_end as u64);
-    if image_end > TLS_BASE {
-        return Err(FirmwareLoadError::RegionSize {
-            image_end,
-            tls_base: TLS_BASE,
-        });
-    }
-    Ok(())
 }
 
 /// Parse the title's import tables and load the firmware modules they
@@ -108,28 +89,41 @@ pub(super) fn load_firmware_set(
     })
 }
 
-/// Where the guest heap starts, and the three floors it had to clear.
+/// Where the TLS area and the guest heap start, and the three floors
+/// they had to clear.
 pub(super) struct MemoryPlacement {
     /// Highest of the three floors, before page rounding. Nothing
     /// below it is heap, and nothing at or above it is code.
     pub alloc_floor: usize,
-    /// `sys_memory_allocate`'s first address.
+    /// The main thread's TLS area, on the first 64 KB page at or above
+    /// `alloc_floor`.
+    pub tls: TlsArea,
+    /// `sys_memory_allocate`'s first address, the end of `tls`.
     pub alloc_base: u32,
     pub user_region_end: usize,
     pub prx_region_end: usize,
 }
 
-/// Place the guest heap above everything already resident.
+/// Place the TLS area and then the guest heap above everything already
+/// resident.
 ///
-/// The base must clear the title's PT_LOAD ranges, the HLE trampoline
-/// and OPD-body span, and the firmware set's load region -- an
-/// allocation inside any of the three would hand the title an address
-/// that already holds code.
+/// Both clear three floors, because TLS or an allocation inside any of
+/// them would overwrite code:
+///
+/// - the title's PT_LOAD ranges,
+/// - the HLE trampoline and OPD-body span,
+/// - the firmware set's load region.
+///
+/// The TLS area takes the first 64 KB page at or above the highest
+/// floor, and the heap starts where the area ends. This order matches
+/// the console: there, the first 64 KB allocation follows the
+/// user-memory block that holds the main thread's TLS. The addresses
+/// differ from the console's; see [`TlsArea`].
 ///
 /// # Errors
 ///
-/// Rounding the floor up to a 64 KB page overflows, or the rounded base
-/// does not fit a `u32`.
+/// - The TLS area does not fit above the floor.
+/// - The heap base does not fit a `u32`.
 pub(super) fn place_guest_heap(
     elf_data: &[u8],
     prx_modules: &[PrxLoadInfo],
@@ -143,15 +137,14 @@ pub(super) fn place_guest_heap(
         .max()
         .unwrap_or(0);
     let alloc_floor = user_region_end.max(code_floor as usize).max(prx_region_end);
-    let alloc_base = {
-        let rounded = alloc_floor
-            .checked_add(0xFFFF)
-            .ok_or(FirmwareLoadError::AllocFloorOverflow { alloc_floor })?
-            & !0xFFFF;
-        narrow_u32("alloc_base", rounded.max(0x0001_0000) as u64)?
-    };
+    // The floor of one page keeps the area off address 0, which the
+    // boot path reads as null.
+    let tls = TlsArea::above((alloc_floor as u64).max(TlsArea::SIZE))
+        .ok_or(FirmwareLoadError::AllocFloorOverflow { alloc_floor })?;
+    let alloc_base = narrow_u32("alloc_base", tls.end())?;
     Ok(MemoryPlacement {
         alloc_floor,
+        tls,
         alloc_base,
         user_region_end,
         prx_region_end,
@@ -163,5 +156,5 @@ pub(super) fn place_guest_heap(
 mod tests;
 
 #[cfg(test)]
-#[path = "tests/tls_reservation_tests.rs"]
-mod tls_reservation_tests;
+#[path = "tests/tls_placement_tests.rs"]
+mod tls_placement_tests;

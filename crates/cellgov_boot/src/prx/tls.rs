@@ -3,29 +3,71 @@
 
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 
-use crate::prepare::HLE_HEAP_BASE;
 use crate::BootSink;
 
-/// Must match the firmware sysPrxForUser `sys_initialize_tls`
-/// allocation seen by liblv2 at module_start time.
-pub const TLS_BASE: u64 = 0x10400000;
-
-/// Guest address of the synthetic kernel-context OPD installed by
-/// [`install_kernel_context_opd`]. Sits in the last 16 bytes of the
-/// 64 KB TLS reservation, immediately below `HLE_HEAP_BASE`.
-const KERNEL_CTX_OPD_ADDR: u64 = 0x1040_FFF0;
-
-const _: () = assert!(KERNEL_CTX_OPD_ADDR > TLS_BASE);
-const _: () = assert!(KERNEL_CTX_OPD_ADDR + 16 == HLE_HEAP_BASE as u64);
-
-/// Offset (from `TLS_BASE`) at which the PT_TLS template starts; PS3
+/// Offset (from the area base) at which the PT_TLS template starts; PS3
 /// kernel convention leaves `0x30` bytes of scratch for the per-thread
 /// TLS header.
 ///
-/// [`pre_init_tls`] zeroes those bytes with the template, so the
-/// reservation holds one known image. `seed_tls_thread_id` then writes
-/// the thread-id word at `TLS_BASE`; the rest stays zero.
+/// [`pre_init_tls`] zeroes those bytes with the template, so the area
+/// holds one known image. `seed_tls_thread_id` then writes the
+/// thread-id word at the area base; the rest stays zero.
 const TLS_TEMPLATE_OFFSET: u64 = 0x30;
+
+/// The main thread's TLS area in one process: 64 KB on a 64 KB page,
+/// with the synthetic kernel-context OPD in its last 16 bytes.
+///
+/// CellGov puts the area on the first 64 KB page at or above the end of
+/// everything resident, so it never overlaps the image or the firmware
+/// set. The console uses a
+/// different address. Its captures `micro:lv2_process_layout` and
+/// `micro:lv2_process_layout_wide` read the same r13 (`0x30007060`) at
+/// main for both image extents. There the TLS sits in the user-memory
+/// block at `0x30000000`, which does not move with the image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TlsArea {
+    base: u64,
+}
+
+impl TlsArea {
+    /// Size of the area in bytes; every area base is a multiple of it.
+    pub const SIZE: u64 = 0x1_0000;
+
+    /// Offset of the kernel-context OPD slot: the last 16 bytes.
+    const OPD_OFFSET: u64 = Self::SIZE - 16;
+
+    /// The area on the first 64 KB page at or above `resident_end`.
+    ///
+    /// `resident_end` is the exclusive end of everything already
+    /// resident. Returns `None` when the area would pass the end of the
+    /// 64-bit address range.
+    pub fn above(resident_end: u64) -> Option<Self> {
+        let base = resident_end.checked_next_multiple_of(Self::SIZE)?;
+        base.checked_add(Self::SIZE)?;
+        Some(Self { base })
+    }
+
+    /// First address of the area: the per-thread TLS header.
+    pub fn base(self) -> u64 {
+        self.base
+    }
+
+    /// First address past the area.
+    pub fn end(self) -> u64 {
+        self.base + Self::SIZE
+    }
+
+    /// Guest address of the kernel-context OPD slot.
+    pub fn kernel_context_opd(self) -> u64 {
+        self.base + Self::OPD_OFFSET
+    }
+
+    /// The r13 a thread starts with: the template start plus `0x7000`,
+    /// the PPC64 TLS bias.
+    pub fn thread_pointer(self) -> u64 {
+        self.base + TLS_TEMPLATE_OFFSET + 0x7000
+    }
+}
 
 /// Why TLS or the kernel-context OPD could not be initialized.
 #[derive(Debug, thiserror::Error)]
@@ -38,7 +80,7 @@ pub enum TlsError {
     TemplateOverlapsOpd {
         /// The PT_TLS memory size.
         memsz: usize,
-        /// Offset of the OPD slot inside the reservation.
+        /// Offset of the OPD slot inside the area.
         opd_offset: usize,
     },
     /// The PT_TLS header claims more file bytes than memory bytes, which
@@ -92,16 +134,25 @@ pub enum TlsError {
     /// The destination is not an addressable range.
     #[error("tls: invalid byte range at 0x{dst:016x}")]
     DestBadRange {
-        /// Base of the reservation the image would be committed to.
+        /// Base of the area that receives the image.
         dst: usize,
     },
     /// The pre-init commit was refused, so TLS holds its pre-load bytes.
     #[error("tls: pre-init commit at 0x{dst:016x} FAILED ({source}); TLS not initialized")]
     Commit {
-        /// Base of the reservation the image would be committed to.
+        /// Base of the area that receives the image.
         dst: usize,
         /// The commit pipeline's own account of the refusal.
         source: cellgov_mem::MemError,
+    },
+    /// The kernel-context OPD slot is past the 32-bit address range an
+    /// OPD code word can name.
+    #[error(
+        "module_start: kernel-context OPD slot 0x{addr:016x} is past the 32-bit address range"
+    )]
+    KernelContextOpdRange {
+        /// Guest address of the OPD slot.
+        addr: u64,
     },
     /// The kernel-context OPD commit was refused.
     #[error(
@@ -132,13 +183,15 @@ pub enum TlsError {
 /// # Errors
 ///
 /// The PT_TLS header is malformed, the template does not fit the
-/// reservation or guest memory, or the one commit was refused; see
+/// area or guest memory, or the one commit was refused; see
 /// [`TlsError`].
 pub fn pre_init_tls(
     elf_data: &[u8],
     mem: &mut GuestMemory,
+    area: TlsArea,
     sink: &dyn BootSink,
 ) -> Result<(), TlsError> {
+    let tls_base = area.base();
     let tls = match cellgov_ppu::loader::find_tls_segment(elf_data) {
         Some(t) => t,
         None => return Ok(()),
@@ -163,14 +216,14 @@ pub fn pre_init_tls(
     }
 
     // Reject a PT_TLS that would extend into the kernel-context OPD
-    // slot at the top of the reservation: the OPD commit happens later
+    // slot at the top of the area: the OPD commit happens later
     // and would clobber the template tail otherwise.
-    let opd_offset = (KERNEL_CTX_OPD_ADDR - TLS_BASE) as usize;
+    let opd_offset = TlsArea::OPD_OFFSET as usize;
     let template_end_offset =
         (TLS_TEMPLATE_OFFSET as usize)
             .checked_add(p_memsz)
             .ok_or(TlsError::DestOverflow {
-                dst: TLS_BASE as usize + TLS_TEMPLATE_OFFSET as usize,
+                dst: tls_base as usize + TLS_TEMPLATE_OFFSET as usize,
                 memsz: p_memsz,
             })?;
     if template_end_offset > opd_offset {
@@ -181,7 +234,7 @@ pub fn pre_init_tls(
     }
 
     let m_len = mem.as_bytes().len();
-    let tls_data_start = TLS_BASE as usize + TLS_TEMPLATE_OFFSET as usize;
+    let tls_data_start = tls_base as usize + TLS_TEMPLATE_OFFSET as usize;
 
     let src_end = p_vaddr
         .checked_add(p_filesz)
@@ -211,15 +264,15 @@ pub fn pre_init_tls(
     }
 
     // One image over the header gap and the template, so the header
-    // reads zero rather than whatever the reservation held.
+    // reads zero rather than whatever the area held.
     let header_len = TLS_TEMPLATE_OFFSET as usize;
     let mut image = vec![0u8; template_end_offset];
     if p_filesz > 0 {
         let m = mem.as_bytes();
         image[header_len..header_len + p_filesz].copy_from_slice(&m[p_vaddr..src_end]);
     }
-    let reservation = TLS_BASE as usize;
-    let range = ByteRange::new(GuestAddr::new(TLS_BASE), image.len() as u64)
+    let reservation = tls_base as usize;
+    let range = ByteRange::new(GuestAddr::new(tls_base), image.len() as u64)
         .ok_or(TlsError::DestBadRange { dst: reservation })?;
     mem.apply_commit(range, &image)
         .map_err(|source| TlsError::Commit {
@@ -230,27 +283,32 @@ pub fn pre_init_tls(
     sink.note(&format!(
         "tls: pre-initialized from PT_TLS at 0x{:x} (filesz=0x{:x}, memsz=0x{:x}) -> 0x{:x}, \
          header 0x{:x}..0x{:x} zeroed",
-        p_vaddr, p_filesz, p_memsz, tls_data_start, TLS_BASE, tls_data_start
+        p_vaddr, p_filesz, p_memsz, tls_data_start, tls_base, tls_data_start
     ));
     Ok(())
 }
 
-/// Write a `{code, toc}` OPD whose body is a single `blr` and return
-/// its address. liblv2's entry expects kernel-side function OPDs in
-/// r11 / r12; the synthetic OPD lets those calls return cleanly.
+/// Write a `{code, toc}` OPD whose body is a single `blr` into the
+/// last 16 bytes of `area` and return its address. liblv2's entry
+/// expects kernel-side function OPDs in r11 / r12; the synthetic OPD
+/// lets those calls return cleanly.
 ///
 /// # Errors
 ///
-/// [`TlsError::KernelContextOpd`] when the commit is refused.
-pub fn install_kernel_context_opd(mem: &mut GuestMemory) -> Result<u64, TlsError> {
-    let opd_addr = KERNEL_CTX_OPD_ADDR;
-    let blr_addr = (opd_addr as u32) + 8;
+/// - [`TlsError::KernelContextOpdRange`]: the slot is past the 32-bit
+///   address range that an OPD word can name.
+/// - [`TlsError::KernelContextOpd`]: the commit pipeline refuses the
+///   write.
+pub fn install_kernel_context_opd(mem: &mut GuestMemory, area: TlsArea) -> Result<u64, TlsError> {
+    let opd_addr = area.kernel_context_opd();
+    let blr_addr = u32::try_from(opd_addr + 8)
+        .map_err(|_| TlsError::KernelContextOpdRange { addr: opd_addr })?;
     let mut bytes = [0u8; 16];
     bytes[0..4].copy_from_slice(&blr_addr.to_be_bytes());
     bytes[4..8].copy_from_slice(&0u32.to_be_bytes());
     bytes[8..12].copy_from_slice(&0x4e80_0020u32.to_be_bytes());
     let range = ByteRange::new(GuestAddr::new(opd_addr), 16)
-        .expect("invariant: the OPD slot is a fixed 16-byte in-range address");
+        .ok_or(TlsError::KernelContextOpdRange { addr: opd_addr })?;
     mem.apply_commit(range, &bytes)
         .map_err(|source| TlsError::KernelContextOpd {
             addr: opd_addr,

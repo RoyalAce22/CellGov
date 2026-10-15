@@ -11,14 +11,24 @@ use super::types::{BootDebugOptions, DiagnosticOptions, ExecutionOptions};
 use crate::env::EnvBoolError;
 use crate::error::narrow_u32;
 use crate::guest_args::GuestArgsError;
-use crate::prx::TLS_BASE;
+use crate::prx::TlsArea;
 use crate::BootError;
+
+/// Where the title's primary thread starts: its entry OPD and its TLS
+/// area.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ProcessStart {
+    /// Guest address of the title's OPD entry descriptor.
+    pub entry: u64,
+    /// The main thread's TLS area.
+    pub tls: TlsArea,
+}
 
 fn seed_process_start_registers(
     state: &mut cellgov_ppu::state::PpuState,
     tls_info: Option<cellgov_ppu::loader::TlsInfo>,
     malloc_pagesize: u32,
-    entry: u64,
+    start: ProcessStart,
 ) {
     state.set_lr(0);
     state.set_gpr(6, 0);
@@ -28,11 +38,11 @@ fn seed_process_start_registers(
     state.set_gpr(8, tls_info.map(|t| t.vaddr).unwrap_or(0));
     state.set_gpr(9, tls_info.map(|t| t.filesz).unwrap_or(0));
     state.set_gpr(10, tls_info.map(|t| t.memsz).unwrap_or(0));
-    state.set_gpr(11, entry);
+    state.set_gpr(11, start.entry);
     state.set_gpr(12, malloc_pagesize as u64);
     // r13 is the PS3 PPC64 ABI TLS pointer; LV2 seeds it at process
     // creation and sys_initialize_tls does not touch it.
-    state.set_gpr(13, TLS_BASE + 0x7030);
+    state.set_gpr(13, start.tls.thread_pointer());
 }
 
 /// Why the primary thread's entry state could not be seeded.
@@ -82,7 +92,7 @@ pub(super) fn seed_primary_entry_state(
     diagnostics: &DiagnosticOptions<'_>,
     sink: &dyn crate::BootSink,
     params: &BootParams,
-    entry: u64,
+    start: ProcessStart,
 ) -> Result<(), EntryError> {
     let args_block = if execution.guest_args.is_empty() {
         None
@@ -127,7 +137,7 @@ pub(super) fn seed_primary_entry_state(
             state.set_gpr(5, 0);
         }
     }
-    seed_process_start_registers(state, params.tls_info, params.malloc_pagesize, entry);
+    seed_process_start_registers(state, params.tls_info, params.malloc_pagesize, start);
     Ok(())
 }
 

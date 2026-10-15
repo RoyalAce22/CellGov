@@ -13,6 +13,7 @@ use super::{
     run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PrxLoadInfo,
     HLE_STUBBED_MODULE_STARTS,
 };
+use crate::prx::TlsArea;
 
 const OWNER: UnitId = UnitId::new(0);
 
@@ -21,7 +22,7 @@ fn env(run_hle_stubbed: bool) -> ModuleStartEnv {
         space: AddressSpaceId::BOOT,
         thread_owner: OWNER,
         pid: None,
-        kctx_opd: 0,
+        tls: TlsArea::above(0).expect("a page at 0 is in range"),
         stack_pointer: 0x8000,
         break_pc: None,
         dump_mem_fault_ranges: Vec::new(),

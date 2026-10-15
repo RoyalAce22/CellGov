@@ -115,8 +115,8 @@ mod spawned_child_region_size_tests {
     fn a_child_below_the_floor_gets_the_boot_sized_region() {
         // The committed process_spawn_wait child (PT_LOADs end at
         // 0x1001_0010), an empty image, and a game-sized image all
-        // take the 1 GiB floor, so TLS_BASE and the fixed layout above
-        // it are inside the region.
+        // take the 1 GiB floor, so the firmware set and TLS area placed
+        // past the image are inside the region.
         assert_eq!(spawned_child_region_size(0x1001_0010), Ok(0x4000_0000));
         assert_eq!(spawned_child_region_size(0), Ok(0x4000_0000));
         assert_eq!(spawned_child_region_size(0x2000_0000), Ok(0x4000_0000));

@@ -16,7 +16,7 @@ use crate::step_loop::tty::{classify_tty_capture, TtyCaptureDecision};
 use crate::step_loop::{PcRing, SyscallRing};
 use crate::BootSink;
 
-use super::tls::TLS_BASE;
+use super::tls::TlsArea;
 use super::types::PrxLoadInfo;
 
 /// Per-module step cap inside the module_start loop.
@@ -179,8 +179,9 @@ pub struct ModuleStartEnv {
     /// Pid the transient unit is bound to; `None` for the boot
     /// process, whose units stay unbound.
     pub pid: Option<u32>,
-    /// Synthetic kernel-context OPD in `space` (r11 / r12).
-    pub kctx_opd: u64,
+    /// The process's TLS area in `space`. Its base holds the thread-id
+    /// word, and its last 16 bytes hold the kernel-context OPD (r11 / r12).
+    pub tls: TlsArea,
     /// Initial r1, inside a stack region of `space`.
     pub stack_pointer: u64,
     /// `--dump-at-pc` / `--dump-skip`: the transient unit faults with
@@ -196,10 +197,6 @@ pub struct ModuleStartEnv {
     /// The observer the transient unit reports its dispatches to.
     pub ppu_tap: Option<Rc<dyn cellgov_ppu::PpuTap>>,
 }
-
-/// Guest address of the thread-id word liblv2 reads back through
-/// `r13 - 0x7030` for the module_start units of every process.
-pub(crate) const MODULE_START_TLS_THREAD_ID_ADDR: u64 = TLS_BASE;
 
 /// Write the id of the thread the transient unit dispatches as into
 /// its TLS header, as LV2 does for every thread it starts.
@@ -217,11 +214,15 @@ fn seed_tls_thread_id(rt: &mut Runtime, env: &ModuleStartEnv) -> Result<(), Modu
             owner: env.thread_owner,
         })?
         .raw();
-    let range = ByteRange::new(GuestAddr::new(MODULE_START_TLS_THREAD_ID_ADDR), 8)
-        .expect("invariant: the TLS header word is a fixed in-range address");
+    // liblv2 reads the word back through `r13 - 0x7030`.
+    let addr = env.tls.base();
+    let range = ByteRange::new(GuestAddr::new(addr), 8).ok_or(ModuleStartError::TlsSeed {
+        addr,
+        detail: "the thread-id word is not an addressable range".to_string(),
+    })?;
     rt.place_bytes(env.space, range, &tid.to_be_bytes())
         .map_err(|e| ModuleStartError::TlsSeed {
-            addr: MODULE_START_TLS_THREAD_ID_ADDR,
+            addr,
             detail: format!("{e:?}"),
         })?;
     Ok(())
@@ -289,10 +290,9 @@ pub fn run_module_start(
     ms_state.pc = ms.code;
     ms_state.set_gpr(2, ms.toc);
     ms_state.set_gpr(1, env.stack_pointer);
-    ms_state.set_gpr(11, env.kctx_opd);
-    ms_state.set_gpr(12, env.kctx_opd);
-    // PPC64 convention: r13 = TLS_area + 0x7030.
-    ms_state.set_gpr(13, TLS_BASE + 0x30 + 0x7000);
+    ms_state.set_gpr(11, env.tls.kernel_context_opd());
+    ms_state.set_gpr(12, env.tls.kernel_context_opd());
+    ms_state.set_gpr(13, env.tls.thread_pointer());
     // LR=0 sentinel: blr from module_start jumps to PC=0, where the
     // all-zero word fails to decode and the fault signals a return.
     ms_state.set_lr(0);

@@ -15,10 +15,6 @@ use crate::env::EnvBoolError;
 use crate::error::narrow_u32;
 use crate::BootError;
 
-/// Bump-arena base for HLE-side allocations, above the TLS scratch
-/// at `0x10400000`.
-pub const HLE_HEAP_BASE: u32 = 0x10410000;
-
 /// Why the guest address space or the title image in it could not be
 /// built.
 #[derive(Debug, thiserror::Error)]
@@ -81,8 +77,6 @@ pub(super) struct LoadedImage {
     /// Guest address of the title's OPD entry descriptor.
     pub entry: u64,
     pub mem_size: usize,
-    /// Highest address exclusive of the title ELF's PT_LOAD ranges.
-    pub image_end: usize,
     /// First page past the title image: the floor the HLE trampolines
     /// and the firmware set are placed from.
     pub code_floor: u32,
@@ -209,7 +203,6 @@ pub(super) fn load_image(
         state,
         entry: load_result.entry,
         mem_size,
-        image_end: required_size,
         code_floor,
         t_mem_alloc,
         t_elf_load,

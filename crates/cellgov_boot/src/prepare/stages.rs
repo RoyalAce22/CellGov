@@ -52,15 +52,15 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         image.code_floor,
         t_start,
     )?;
-    firmware::check_tls_reservation(image.image_end, &prx_modules)?;
-    pre_init_tls(&elf_data, &mut image.mem, sink)?;
 
-    // 3. The guest heap floor, above everything now resident.
+    // 3. The TLS area and the guest heap floor, above everything now
+    // resident.
     let placement = firmware::place_guest_heap(&elf_data, &prx_modules, image.code_floor, sink)?;
-    // The kernel-context OPD lives in the TLS reservation and is
-    // consumed by every PRX's module_start entry (r11/r12). Install
-    // once before the module_start loop.
-    let kctx_opd = install_kernel_context_opd(&mut image.mem)?;
+    pre_init_tls(&elf_data, &mut image.mem, placement.tls, sink)?;
+    // The kernel-context OPD lives in the TLS area. Every PRX's
+    // module_start entry reads it through r11/r12, so it goes in once
+    // before the module_start loop.
+    install_kernel_context_opd(&mut image.mem, placement.tls)?;
 
     // 4. Process parameters: step budget, priority, stack, TLS.
     let params = params::resolve_boot_params(&execution, sink, &elf_data)?;
@@ -111,7 +111,10 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         &diagnostics,
         sink,
         &params,
-        image.entry,
+        entry::ProcessStart {
+            entry: image.entry,
+            tls: placement.tls,
+        },
     )?;
 
     // 11. Predecode shadow over the entry state's executable code.
@@ -129,7 +132,7 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         &diagnostics,
         &services,
         primary_unit_id,
-        kctx_opd,
+        placement.tls,
     )?;
 
     // 14. Debug patches and dumps.

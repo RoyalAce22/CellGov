@@ -7,7 +7,7 @@ use cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_BASE;
 use super::params::primary_entry_sp;
 use super::types::{BootServices, DiagnosticOptions};
 use crate::prx::{
-    run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PrxLoadInfo,
+    run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PrxLoadInfo, TlsArea,
 };
 use crate::BootError;
 
@@ -53,7 +53,7 @@ pub(super) fn run_module_starts(
     diagnostics: &DiagnosticOptions<'_>,
     services: &BootServices,
     primary_unit_id: cellgov_event::UnitId,
-    kctx_opd: u64,
+    tls: TlsArea,
 ) -> Result<ModuleStartCounts, BootError> {
     let sink = services.sink();
     let total = prx_modules
@@ -65,7 +65,7 @@ pub(super) fn run_module_starts(
         space: cellgov_core::AddressSpaceId::BOOT,
         thread_owner: primary_unit_id,
         pid: None,
-        kctx_opd,
+        tls,
         stack_pointer: MODULE_START_STACK_POINTER,
         break_pc: diagnostics.dump_at_pc.map(|pc| (pc, diagnostics.dump_skip)),
         dump_mem_fault_ranges: diagnostics.dump_mem_fault_ranges.to_vec(),

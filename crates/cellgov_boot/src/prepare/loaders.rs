@@ -12,7 +12,7 @@ use super::types::{BootDebugOptions, BootServices, TitleOptions};
 use crate::child_init::{ChildInitPlan, ChildInitPlans};
 use crate::prx::{
     install_kernel_context_opd, install_unresolved_trampolines_only, load_firmware_set_from,
-    pre_init_tls, FirmwareCandidates, TLS_BASE,
+    pre_init_tls, FirmwareCandidates, TlsArea,
 };
 
 /// Install the factories the runtime materializes execution units from.
@@ -108,7 +108,8 @@ pub fn spu_unit(
 ///
 /// - a key vault that will not load,
 /// - a firmware set that will not close,
-/// - a child image past the TLS reservation.
+/// - a child image and firmware set that leave no TLS area in the
+///   child's region.
 ///
 /// The runtime rolls the spawn back, fails the syscall and logs the
 /// cause (`cellgov_core` `process_spawn.rs`
@@ -230,32 +231,31 @@ pub(super) fn install_spawn_loader(
                 prx_modules.push(info);
             }
         }
-        // TLS, the kernel-context OPD and the HLE heap sit at fixed
-        // addresses above `TLS_BASE` in every process; an image or
-        // firmware set reaching them cannot be initialised there.
-        // The exit stub counts as image: the 0x30 bytes at `TLS_BASE`
-        // are the per-thread TLS header `sys_initialize_tls` writes.
-        let image_end = prx_modules
+        // The child's TLS area takes the first 64 KB page at or above
+        // the end of everything resident, as the boot's does. The exit
+        // stub counts as resident: `sys_initialize_tls` writes the
+        // per-thread TLS header over the first 0x30 bytes of the area.
+        let resident_end = prx_modules
             .iter()
             .map(|p| p.data_end)
             .max()
             .unwrap_or(0)
             .max(required as u64)
             .max(exit_stub_addr + 8);
-        if image_end > TLS_BASE {
-            return Err(cellgov_core::ProcessSpawnLoadError::RegionSize {
+        let tls = TlsArea::above(resident_end)
+            .filter(|area| area.end() <= child_mem_size as u64)
+            .ok_or_else(|| cellgov_core::ProcessSpawnLoadError::RegionSize {
                 detail: format!(
-                    "child image and firmware set end at 0x{image_end:x}, past the TLS \
-                     reservation at 0x{TLS_BASE:x}",
+                    "child image and firmware set end at 0x{resident_end:x}, leaving no TLS \
+                     area inside the 0x{child_mem_size:x}-byte region",
                 ),
-            });
-        }
-        pre_init_tls(elf_bytes, mem, sink.as_ref()).map_err(|e| {
+            })?;
+        pre_init_tls(elf_bytes, mem, tls, sink.as_ref()).map_err(|e| {
             cellgov_core::ProcessSpawnLoadError::ImageLoad {
                 detail: format!("child TLS: {e}"),
             }
         })?;
-        let kctx_opd = install_kernel_context_opd(mem).map_err(|e| {
+        install_kernel_context_opd(mem, tls).map_err(|e| {
             cellgov_core::ProcessSpawnLoadError::ImageLoad {
                 detail: format!("child kernel-context OPD: {e}"),
             }
@@ -271,7 +271,7 @@ pub(super) fn install_spawn_loader(
         let stack_top = (child_mem_size as u64) - 0x1000;
         let init_token = loader_plans.stage(ChildInitPlan {
             prx_modules,
-            kctx_opd,
+            tls,
             // A full primary-stack reservation below the child's SP:
             // the child's own stack grows down from `stack_top`, the
             // transient module_start stacks from here.
@@ -332,9 +332,8 @@ fn spawned_child_code_floor(required: usize) -> u64 {
 /// Sizes a spawned child's address-space region from its ELF's
 /// required memory by the rule the boot's own main region uses.
 ///
-/// The floor is what lets the child share the boot's fixed layout:
-/// TLS at `TLS_BASE`, the kernel-context OPD and HLE heap above it,
-/// and a firmware set placed past the image all sit far below 1 GiB.
+/// The floor leaves room past the image for the child's firmware set,
+/// its TLS area and its stack.
 /// The child's initial SP is one page below the region end.
 fn spawned_child_region_size(
     required: usize,

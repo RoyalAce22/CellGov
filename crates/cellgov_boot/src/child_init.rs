@@ -16,7 +16,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 
 use crate::prx::{
-    run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PrxLoadInfo,
+    run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PrxLoadInfo, TlsArea,
 };
 use crate::BootSink;
 
@@ -51,8 +51,8 @@ pub(crate) struct ChildInitPlan {
     /// The child's firmware set in topological order, plus any
     /// trampoline pseudo-module.
     pub prx_modules: Vec<PrxLoadInfo>,
-    /// Kernel-context OPD installed in the child's space.
-    pub kctx_opd: u64,
+    /// The child's TLS area, its kernel-context OPD already installed.
+    pub tls: TlsArea,
     /// r1 for each module_start, inside the child's region below its
     /// primary stack.
     pub stack_pointer: u64,
@@ -135,7 +135,7 @@ pub(crate) fn run_pending_child_inits(
             space: pending.space,
             thread_owner: pending.primary_unit,
             pid: Some(pending.pid),
-            kctx_opd: plan.kctx_opd,
+            tls: plan.tls,
             stack_pointer: plan.stack_pointer,
             break_pc: None,
             dump_mem_fault_ranges: Vec::new(),

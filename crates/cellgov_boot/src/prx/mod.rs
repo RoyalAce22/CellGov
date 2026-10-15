@@ -13,7 +13,7 @@ pub use load::{
 pub use module_start::{
     run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PER_MODULE_STEP_BUDGET,
 };
-pub use tls::{install_kernel_context_opd, pre_init_tls, TlsError, TLS_BASE};
+pub use tls::{install_kernel_context_opd, pre_init_tls, TlsArea, TlsError};
 pub use types::{
     HostLinkMaps, PrxLoadInfo, PrxLoadStageError, UnresolvedRequesters, VerifiedFirmware,
 };
