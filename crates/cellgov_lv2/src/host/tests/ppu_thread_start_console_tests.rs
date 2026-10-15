@@ -58,7 +58,7 @@ impl Probe {
     fn created_thread(&mut self) -> u64 {
         self.host
             .ppu_threads_mut()
-            .create_unstarted(CHILD, primary_attrs())
+            .create_unstarted(CHILD, primary_attrs(), true)
             .expect("child create")
             .raw()
     }

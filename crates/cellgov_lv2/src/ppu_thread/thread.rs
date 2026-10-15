@@ -13,8 +13,6 @@ pub enum PpuThreadState {
     Blocked(GuestBlockReason),
     /// Called `sys_ppu_thread_exit`; `exit_value` is populated.
     Finished,
-    /// Detached; resources release on exit without a join.
-    Detached,
 }
 
 impl PpuThreadState {
@@ -26,22 +24,18 @@ impl PpuThreadState {
     pub fn is_alive(&self) -> bool {
         match self {
             PpuThreadState::Runnable | PpuThreadState::Blocked(_) => true,
-            PpuThreadState::Finished | PpuThreadState::Detached => false,
+            PpuThreadState::Finished => false,
         }
     }
 
     /// Whether this thread is in the `Finished` state specifically (and
     /// therefore has a populated `exit_value` joinable via
-    /// `sys_ppu_thread_join`). Distinct from `Detached` (terminal but
-    /// not joinable) and from any future terminal variant. Exhaustive:
-    /// a new variant must decide whether its semantics include a
-    /// populated `exit_value`.
+    /// `sys_ppu_thread_join`). Exhaustive: a new variant must decide
+    /// whether its semantics include a populated `exit_value`.
     pub fn is_finished(&self) -> bool {
         match self {
             PpuThreadState::Finished => true,
-            PpuThreadState::Runnable | PpuThreadState::Blocked(_) | PpuThreadState::Detached => {
-                false
-            }
+            PpuThreadState::Runnable | PpuThreadState::Blocked(_) => false,
         }
     }
 }
@@ -76,8 +70,8 @@ pub enum AddJoinWaiter {
     SelfJoin,
     /// Target is already `Finished`.
     TargetAlreadyFinished,
-    /// Target is `Detached`; no joiner will ever wake.
-    TargetDetached,
+    /// Target is not joinable.
+    TargetNotJoinable,
 }
 
 /// A single PPU thread tracked by the host.
@@ -99,6 +93,9 @@ pub struct PpuThread {
     /// thread that does not run until `sys_ppu_thread_start` names
     /// it; a process's primary thread starts with the process.
     pub started: bool,
+    /// Whether a join may collect the thread. The exit of a thread
+    /// created without the JOINABLE flag, or detached, collects it.
+    pub joinable: bool,
 }
 
 /// Outcome of [`super::PpuThreadTable::start`].

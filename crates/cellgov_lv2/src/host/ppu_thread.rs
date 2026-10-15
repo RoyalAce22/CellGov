@@ -23,7 +23,9 @@ impl Lv2Host {
     /// - `CELL_EFAULT` when the target is finished and
     ///   `status_out_ptr` is null; the arm drops the exit value.
     /// - `CELL_EDEADLK` on a self-join.
-    /// - `CELL_EINVAL` when the target is detached.
+    /// - `CELL_EINVAL`, at once, when the target is not joinable, as the
+    ///   `lv2_ppu_thread_joinable` capture reads for a running thread and
+    ///   for one waiting for its start.
     pub(super) fn dispatch_ppu_thread_join(
         &mut self,
         target: u64,
@@ -74,10 +76,7 @@ impl Lv2Host {
                 effects: vec![],
             },
             AddJoinWaiter::SelfJoin => Lv2Dispatch::immediate(errno::CELL_EDEADLK.into()),
-            // A join against a target that is not joinable is EINVAL.
-            // ESRCH is reserved for ids that name no thread or an
-            // already-reaped one.
-            AddJoinWaiter::TargetDetached => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            AddJoinWaiter::TargetNotJoinable => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             AddJoinWaiter::UnknownTarget | AddJoinWaiter::TargetAlreadyFinished => {
                 self.record_invariant_break(
                     "ppu_thread_join.add_join_waiter_unreachable",
@@ -117,6 +116,9 @@ impl Lv2Host {
     ///   0x7FFFFFFF and -1000 as created.
     /// - `CELL_EFAULT` when the entry descriptor is unreadable.
     /// - `CELL_ENOMEM` when the arena is exhausted.
+    ///
+    /// `joinable` is the create's JOINABLE flag: a join refuses a thread
+    /// created without it, and the thread's exit collects it.
     #[allow(
         clippy::too_many_arguments,
         reason = "the Lv2Request fields the arm reads, plus the caller"
@@ -128,6 +130,7 @@ impl Lv2Host {
         arg: u64,
         priority: u32,
         stacksize: u64,
+        joinable: bool,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
@@ -195,6 +198,7 @@ impl Lv2Host {
             stack_base: stack.base,
             stack_size: stack.size,
             priority,
+            joinable,
             effects: vec![],
         }
     }
@@ -296,3 +300,7 @@ mod console_tests;
 #[cfg(test)]
 #[path = "tests/ppu_thread_start_console_tests.rs"]
 mod start_console_tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_thread_joinable_console_tests.rs"]
+mod joinable_console_tests;

@@ -180,6 +180,8 @@ pub enum Lv2Dispatch {
         stack_size: u64,
         /// Child scheduling priority.
         priority: u32,
+        /// Whether a join may collect the child (the JOINABLE flag).
+        joinable: bool,
         /// Effects committed at create time.
         effects: Vec<Effect>,
     },

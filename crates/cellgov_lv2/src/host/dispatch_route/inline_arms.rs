@@ -6,6 +6,9 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::ppu_thread::{
+    SYS_PPU_THREAD_CREATE_INTERRUPT, SYS_PPU_THREAD_CREATE_JOINABLE,
+};
 
 use crate::dispatch::Lv2Dispatch;
 
@@ -157,10 +160,9 @@ impl Lv2Host {
     }
 
     /// Wraps `dispatch_ppu_thread_create`: EPERM on JOINABLE+INTERRUPT
-    /// together, a log on any other nonzero `flags` (single
-    /// `SYS_PPU_THREAD_CREATE_{JOINABLE,INTERRUPT}` bits are not
-    /// modeled). `threadname_ptr` is unconsumed: thread names have no
-    /// modeled guest-visible surface.
+    /// together, the JOINABLE bit passed on, and a log on any other
+    /// nonzero bit (INTERRUPT alone is not modeled). `threadname_ptr` is
+    /// unconsumed: thread names have no modeled guest-visible surface.
     #[allow(clippy::too_many_arguments, reason = "mirrors the Lv2Request variant")]
     pub(super) fn dispatch_ppu_thread_create_with_flag_log(
         &mut self,
@@ -191,10 +193,13 @@ impl Lv2Host {
         // refused with CELL_EPERM before any other check, as the
         // lv2_ppu_thread_answers capture shows against a bad priority
         // and a null id pointer.
-        if flags & 3 == 3 {
+        if flags & SYS_PPU_THREAD_CREATE_JOINABLE != 0
+            && flags & SYS_PPU_THREAD_CREATE_INTERRUPT != 0
+        {
             return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
         }
-        if flags != 0 {
+        let joinable = flags & SYS_PPU_THREAD_CREATE_JOINABLE != 0;
+        if flags & !SYS_PPU_THREAD_CREATE_JOINABLE != 0 {
             self.log_invariant_break(
                 "dispatch.ppu_thread_create_unmodeled_flags",
                 format_args!(
@@ -204,7 +209,9 @@ impl Lv2Host {
             );
         }
         let priority = priority as u32;
-        self.dispatch_ppu_thread_create(id_ptr, param_ptr, arg, priority, stacksize, requester, rt)
+        self.dispatch_ppu_thread_create(
+            id_ptr, param_ptr, arg, priority, stacksize, joinable, requester, rt,
+        )
     }
 
     /// `sys_ss_access_control_engine`.

@@ -451,7 +451,7 @@ impl Lv2RequestKind {
             | Lv2RequestKind::PpuThreadExit
             | Lv2RequestKind::PpuThreadJoin
             | Lv2RequestKind::PpuThreadStart => Modeled,
-            // JOINABLE / INTERRUPT flags are logged, not modeled.
+            // The INTERRUPT flag is logged, not modeled.
             Lv2RequestKind::PpuThreadCreate => PartialState,
 
             // Read-only VFS.

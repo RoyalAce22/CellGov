@@ -13,17 +13,18 @@ use super::Runtime;
 impl Runtime {
     pub(super) fn handle_ppu_thread_create(&mut self, source: UnitId, dispatch: Lv2Dispatch) {
         let caller_space = self.spaces.space_of(source);
-        let (id_ptr, init, stack_base, stack_size, priority) = match dispatch {
+        let (id_ptr, init, stack_base, stack_size, priority, joinable) = match dispatch {
             Lv2Dispatch::PpuThreadCreate {
                 id_ptr,
                 init,
                 stack_base,
                 stack_size,
                 priority,
+                joinable,
                 effects,
             } => {
                 self.apply_lv2_effects(&effects, caller_space);
-                (id_ptr, init, stack_base, stack_size, priority)
+                (id_ptr, init, stack_base, stack_size, priority, joinable)
             }
             other => unreachable!("handle_ppu_thread_create called with {other:?}"),
         };
@@ -54,10 +55,10 @@ impl Runtime {
             priority,
             tls_base: init.tls_base as u32,
         };
-        let Some(thread_id) = self
-            .lv2_host
-            .ppu_threads_mut()
-            .create_unstarted(child_unit_id, attrs)
+        let Some(thread_id) =
+            self.lv2_host
+                .ppu_threads_mut()
+                .create_unstarted(child_unit_id, attrs, joinable)
         else {
             // The registered unit cannot be removed, so it must not
             // stay schedulable behind the ENOMEM the guest sees. It

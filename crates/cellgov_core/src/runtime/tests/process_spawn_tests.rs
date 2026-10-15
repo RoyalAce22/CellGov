@@ -453,9 +453,11 @@ fn a_join_inside_a_child_process_writes_status_into_its_own_space() {
     // boot-space zero check below cannot pass or fail off pre-staged
     // bytes.
     const STATUS_OUT: u64 = 0x600;
+    // A join collects only a thread created joinable.
+    const JOINABLE: u64 = cellgov_ps3_abi::lv2::ppu_thread::SYS_PPU_THREAD_CREATE_JOINABLE;
     let create = classify(
         cellgov_ps3_abi::lv2::syscall::PPU_THREAD_CREATE,
-        &[TID_OUT, 0x200, 0, 0, 1000, 0x4000, 0, 0],
+        &[TID_OUT, 0x200, 0, 0, 1000, 0x4000, JOINABLE, 0],
     );
     rt.dispatch_lv2_request(create, child);
     assert_eq!(rt.registry_mut().drain_syscall_return(child), Some(0));

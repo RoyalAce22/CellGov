@@ -255,8 +255,10 @@ fn ppu_thread_create_returns_dispatch_with_allocated_stack() {
             stack_base,
             stack_size,
             priority,
+            joinable,
             effects,
         } => {
+            assert!(!joinable, "flags 0 makes a thread that is not joinable");
             assert_eq!(id_ptr, 0x1000);
             assert_eq!(init.entry_code, 0x10_0000);
             assert_eq!(init.entry_toc, 0x10_0100);

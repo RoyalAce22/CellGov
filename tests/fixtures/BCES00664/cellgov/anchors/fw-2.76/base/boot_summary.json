@@ -5,7 +5,7 @@
   "outcome": "RsxWriteCheckpoint",
   "steps": 37241,
   "budget": 256,
-  "host_invariant_breaks": 7,
+  "host_invariant_breaks": 0,
   "witnesses": {
     "cond_reacquires": {
       "value": 0,
@@ -28,7 +28,7 @@
       "class": "absent"
     },
     "host_invariant_breaks": {
-      "value": 7,
+      "value": 0,
       "class": "exact"
     },
     "ldarx": {

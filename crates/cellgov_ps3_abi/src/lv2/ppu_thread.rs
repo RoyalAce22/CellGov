@@ -25,6 +25,17 @@ pub const PPU_THREAD_PRIORITY_MAX: i32 = 3071;
 // non-root ceiling stays the documented 3071.
 pub const PPU_THREAD_PRIORITY_MAX_ROOT: i32 = 3199;
 
+/// `_sys_ppu_thread_create` `flags` bit: a join may collect the thread.
+// The console capture of tests/micro/lv2_ppu_thread_joinable shows a
+// thread created with this bit found and joined after it exits, and one
+// created with flags 0 refused by a join with CELL_EINVAL.
+pub const SYS_PPU_THREAD_CREATE_JOINABLE: u64 = 0x1;
+
+/// `_sys_ppu_thread_create` `flags` bit: an interrupt thread. Set
+/// together with [`SYS_PPU_THREAD_CREATE_JOINABLE`], the create answers
+/// CELL_EPERM (tests/micro/lv2_ppu_thread_answers).
+pub const SYS_PPU_THREAD_CREATE_INTERRUPT: u64 = 0x2;
+
 /// `ppu_thread_param_t`, the block `_sys_ppu_thread_create` (52)
 /// reads.
 ///

@@ -168,12 +168,13 @@ entry contains:
 - a join-waiters list
 - whether it has started: a child `sys_ppu_thread_create` made stays
   out of the scheduler until `sys_ppu_thread_start` names it
+- whether it is joinable: a join refuses a thread that is not, and its
+  exit removes it from the table
 
-The state machine has three paths:
+The state machine has two paths:
 
 - `Runnable -> Blocked(GuestBlockReason) -> Runnable` (on wake)
 - `Runnable -> Finished` (on exit)
-- `Runnable | Blocked -> Detached` (via `PpuThreadTable::detach`)
 
 ```mermaid
 stateDiagram-v2
@@ -182,9 +183,7 @@ stateDiagram-v2
   Runnable --> Blocked : wait syscall parks the caller
   Blocked --> Runnable : wake, timeout, or cancel
   Runnable --> Finished : sys_ppu_thread_exit or process exit
-  Runnable --> Detached : PpuThreadTable detach
-  Blocked --> Detached : PpuThreadTable detach
-  Finished --> [*]
+  Finished --> [*] : a join, or the exit of a thread that is not joinable
 ```
 
 **The scheduler sees only the opaque `UnitStatus::Blocked`.** The

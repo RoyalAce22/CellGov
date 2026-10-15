@@ -13,7 +13,6 @@ impl LaneValue for PpuThread {
             PpuThreadState::Runnable => (1, None),
             PpuThreadState::Blocked(reason) => (2, Some(reason)),
             PpuThreadState::Finished => (3, None),
-            PpuThreadState::Detached => (4, None),
         };
         lanes.lane(2, 0, state);
         if let Some(reason) = reason {
@@ -40,6 +39,9 @@ impl LaneValue for PpuThread {
         }
         if !self.started {
             lanes.lane(15, 0, 1);
+        }
+        if !self.joinable {
+            lanes.lane(16, 0, 1);
         }
     }
 }
@@ -104,6 +106,7 @@ impl PpuThreadTable {
             exit_value: None,
             join_waiters: Vec::new(),
             started: true,
+            joinable: true,
         };
         self.threads.insert(PpuThreadId::PRIMARY, thread);
         self.unit_to_thread.insert(unit_id, PpuThreadId::PRIMARY);
@@ -115,12 +118,12 @@ impl PpuThreadTable {
     /// # Panics
     /// Debug-only if `unit_id` already maps to another thread.
     pub fn create(&mut self, unit_id: UnitId, attrs: PpuThreadAttrs) -> Option<PpuThreadId> {
-        self.insert_child(unit_id, attrs, true)
+        self.insert_child(unit_id, attrs, true, true)
     }
 
     /// Create a thread that does not run until [`Self::start`] names
-    /// it, as `sys_ppu_thread_create` makes one; `None` if the id
-    /// space is exhausted.
+    /// it, as `sys_ppu_thread_create` makes one, joinable or not;
+    /// `None` if the id space is exhausted.
     ///
     /// # Panics
     /// Debug-only if `unit_id` already maps to another thread.
@@ -128,8 +131,9 @@ impl PpuThreadTable {
         &mut self,
         unit_id: UnitId,
         attrs: PpuThreadAttrs,
+        joinable: bool,
     ) -> Option<PpuThreadId> {
-        self.insert_child(unit_id, attrs, false)
+        self.insert_child(unit_id, attrs, false, joinable)
     }
 
     fn insert_child(
@@ -137,6 +141,7 @@ impl PpuThreadTable {
         unit_id: UnitId,
         attrs: PpuThreadAttrs,
         started: bool,
+        joinable: bool,
     ) -> Option<PpuThreadId> {
         debug_assert!(
             !self.unit_to_thread.contains_key(unit_id),
@@ -151,6 +156,7 @@ impl PpuThreadTable {
             exit_value: None,
             join_waiters: Vec::new(),
             started,
+            joinable,
         };
         self.threads.insert(id, thread);
         self.unit_to_thread.insert(unit_id, id);
@@ -281,9 +287,13 @@ impl PpuThreadTable {
     /// Empty result if the thread does not exist or is already
     /// terminal.
     ///
+    /// A thread that is not joinable leaves the table here, so a later
+    /// call that names it answers as for an unknown id: the
+    /// `lv2_ppu_thread_joinable` capture reads CELL_ESRCH from a join,
+    /// a priority read and a start after such a thread exits.
+    ///
     /// # Panics
-    /// Debug-only if called on a thread already `Finished` or
-    /// `Detached`.
+    /// Debug-only if called on a thread already `Finished`.
     pub fn mark_finished(&mut self, id: PpuThreadId, exit_value: u64) -> Vec<PpuThreadId> {
         let Some(mut thread) = self.threads.get_mut(id) else {
             return Vec::new();
@@ -294,14 +304,19 @@ impl PpuThreadTable {
             thread.state,
         );
         // Release guard: a second call must not overwrite
-        // exit_value or drop Detached. Joiners drained on the
-        // first call.
+        // exit_value. Joiners drained on the first call.
         if !thread.state.is_alive() {
             return Vec::new();
         }
         thread.state = PpuThreadState::Finished;
         thread.exit_value = Some(exit_value);
-        std::mem::take(&mut thread.join_waiters)
+        let waiters = std::mem::take(&mut thread.join_waiters);
+        let collected = !thread.joinable;
+        drop(thread);
+        if collected {
+            self.threads.remove(id);
+        }
+        waiters
     }
 
     /// Drop a finished thread that a join collected, so a later call
@@ -338,7 +353,9 @@ impl PpuThreadTable {
         };
         match t.state {
             PpuThreadState::Finished => AddJoinWaiter::TargetAlreadyFinished,
-            PpuThreadState::Detached => AddJoinWaiter::TargetDetached,
+            PpuThreadState::Runnable | PpuThreadState::Blocked(_) if !t.joinable => {
+                AddJoinWaiter::TargetNotJoinable
+            }
             PpuThreadState::Runnable | PpuThreadState::Blocked(_) => {
                 t.join_waiters.push(waiter);
                 AddJoinWaiter::Parked
@@ -346,19 +363,19 @@ impl PpuThreadTable {
         }
     }
 
-    /// Mark a thread `Detached` so it garbage-collects on
-    /// finish without a join; `true` if the target exists.
+    /// Make a thread not joinable, so its exit collects it; `true` if
+    /// the target exists.
     pub fn detach(&mut self, id: PpuThreadId) -> bool {
         match self.threads.get_mut(id) {
             Some(mut t) => {
-                t.state = PpuThreadState::Detached;
+                t.joinable = false;
                 true
             }
             None => false,
         }
     }
 
-    /// Number of threads, including unpurged Finished / Detached.
+    /// Number of threads, including finished threads no join collected.
     pub fn len(&self) -> usize {
         self.threads.len()
     }

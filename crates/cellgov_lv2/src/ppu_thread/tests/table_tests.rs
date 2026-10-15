@@ -123,13 +123,12 @@ fn mark_finished_twice_panics_in_debug() {
 }
 
 #[test]
-#[cfg(debug_assertions)]
-#[should_panic(expected = "already Detached")]
-fn mark_finished_after_detach_panics_in_debug() {
+fn the_exit_of_a_detached_thread_collects_it() {
     let mut t = PpuThreadTable::new();
     let id = t.create(UnitId::new(2), dummy_attrs()).unwrap();
     t.detach(id);
-    t.mark_finished(id, 0);
+    assert!(t.mark_finished(id, 0).is_empty());
+    assert!(t.get(id).is_none(), "the exit collected the thread");
 }
 
 #[test]
@@ -179,14 +178,14 @@ fn add_join_waiter_on_finished_target_is_rejected() {
 }
 
 #[test]
-fn add_join_waiter_on_detached_target_is_rejected() {
+fn add_join_waiter_on_a_target_that_is_not_joinable_is_rejected() {
     let mut t = PpuThreadTable::new();
     let target = t.create(UnitId::new(2), dummy_attrs()).unwrap();
     let waiter = t.create(UnitId::new(3), dummy_attrs()).unwrap();
     t.detach(target);
     assert_eq!(
         t.add_join_waiter(target, waiter),
-        AddJoinWaiter::TargetDetached,
+        AddJoinWaiter::TargetNotJoinable,
     );
     assert!(t.get(target).unwrap().join_waiters.is_empty());
 }
@@ -304,11 +303,13 @@ fn a_purged_waiter_that_is_itself_a_join_target_keeps_its_own_waiters() {
 }
 
 #[test]
-fn detach_sets_state() {
+fn detach_makes_the_thread_not_joinable() {
     let mut t = PpuThreadTable::new();
     let id = t.create(UnitId::new(2), dummy_attrs()).unwrap();
     assert!(t.detach(id));
-    assert_eq!(t.get(id).unwrap().state, PpuThreadState::Detached);
+    let thread = t.get(id).unwrap();
+    assert!(!thread.joinable);
+    assert_eq!(thread.state, PpuThreadState::Runnable);
 }
 
 #[test]

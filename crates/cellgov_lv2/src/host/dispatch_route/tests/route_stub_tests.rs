@@ -269,7 +269,7 @@ fn hypercall_records_invariant_break_and_returns_einval() {
 }
 
 #[test]
-fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
+fn ppu_thread_create_logs_invariant_break_on_the_interrupt_flag() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let before = host.observability().invariant_break_count;
@@ -281,7 +281,7 @@ fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
             unk: 0,
             priority: 1000,
             stacksize: 0x4000,
-            flags: 0x1, // JOINABLE -- unmodeled
+            flags: 0x2, // INTERRUPT -- unmodeled
             threadname_ptr: 0,
         },
         UnitId::new(0),
@@ -289,7 +289,7 @@ fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
     );
     assert!(
         host.observability().invariant_break_count > before,
-        "expected log_invariant_break to fire on nonzero flags"
+        "expected log_invariant_break to fire on the INTERRUPT flag"
     );
 }
 
