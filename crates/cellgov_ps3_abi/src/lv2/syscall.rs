@@ -588,6 +588,8 @@ lv2_syscalls! {
     /// `sys_memory_container_create` alternate entry (341 is the main
     /// entry; 324 is an older / authority-gated form).
     MEMORY_CONTAINER_CREATE_324 = 324 => "sys_memory_container_create";
+    /// `sys_memory_container_destroy`.
+    MEMORY_CONTAINER_DESTROY = 342 => "sys_memory_container_destroy";
     /// `sys_mmapper_allocate_address`.
     MMAPPER_ALLOCATE_ADDRESS = 330 => "sys_mmapper_allocate_address";
     /// `sys_mmapper_map_shared_memory`.

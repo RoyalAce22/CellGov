@@ -54,9 +54,10 @@ LwMutexTryLock	modeled	99
 LwMutexUnlock	modeled	98
 MemoryAllocate	partial-state	348
 MemoryAllocateFromContainer	partial-state	350
-MemoryContainerCreate	abi-only	341
-MemoryContainerCreate324	abi-only	324
-MemoryFree	abi-only	349
+MemoryContainerCreate	partial-state	341
+MemoryContainerCreate324	partial-state	324
+MemoryContainerDestroy	modeled	342
+MemoryFree	modeled	349
 MemoryGetUserMemorySize	partial-state	352
 MmapperAllocateAddress	partial-state	330
 MmapperAllocateSharedMemory	partial-state	332

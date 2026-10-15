@@ -89,4 +89,14 @@ pub mod page_size {
             GRANULE_1M
         }
     }
+
+    /// The granule `flags` selects, `None` when its granularity field
+    /// holds anything other than zero, [`FLAG_64K`] or [`FLAG_1M`].
+    #[must_use]
+    pub const fn accepted_granule(flags: u64) -> Option<u32> {
+        match flags & GRANULARITY_FIELD {
+            0 | FLAG_64K | FLAG_1M => Some(granule_from_flags(flags)),
+            _ => None,
+        }
+    }
 }

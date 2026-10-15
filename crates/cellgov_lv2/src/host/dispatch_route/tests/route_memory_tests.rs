@@ -1095,11 +1095,11 @@ fn memory_get_user_memory_size_efault_on_null_ptr() {
 }
 
 #[test]
-fn memory_free_is_no_op_returning_ok() {
+fn memory_free_of_an_unallocated_address_is_einval() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(Lv2Request::MemoryFree { addr: 0x1000 }, UnitId::new(0), &rt);
-    assert_eq!(result, Lv2Dispatch::immediate(0));
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]

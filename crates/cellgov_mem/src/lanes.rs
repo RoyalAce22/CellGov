@@ -192,6 +192,8 @@ pub mod source {
     pub const RAW_SPU_TAGS: u8 = 64;
     /// Lightweight condition variables, one object per id.
     pub const LWCOND: u8 = 65;
+    /// Live user-memory blocks, one object per base address.
+    pub const MEMORY_BLOCK: u8 = 66;
 }
 
 const OBJECT_BITS: u32 = 32;

@@ -527,9 +527,9 @@ impl Lv2Host {
                 flags,
                 alloc_addr_ptr,
             } => self.dispatch_memory_allocate(size, flags, alloc_addr_ptr, requester, tick),
-            Lv2Request::MemoryFree { .. } => self.dispatch_memory_free_noop(),
+            Lv2Request::MemoryFree { addr } => self.dispatch_memory_free(addr),
             Lv2Request::MemoryContainerCreate { cid_ptr, size } => {
-                self.dispatch_memory_container_create(cid_ptr, size, requester, tick)
+                self.dispatch_memory_container_create(cid_ptr, size, false, requester, tick)
             }
             Lv2Request::MemoryAllocateFromContainer {
                 size,
@@ -744,14 +744,23 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::MEMORY_CONTAINER_CREATE_324,
                 args,
-            } => match self
-                .narrow_u32_args(syscall::MEMORY_CONTAINER_CREATE_324, [("cid", args[0])])
-            {
-                Some([cid_ptr]) => {
-                    self.dispatch_memory_container_create(cid_ptr, args[1], requester, tick)
+            } => {
+                match self.narrow_u32_args(syscall::MEMORY_CONTAINER_CREATE_324, [("cid", args[0])])
+                {
+                    Some([cid_ptr]) => self
+                        .dispatch_memory_container_create(cid_ptr, args[1], true, requester, tick),
+                    None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
                 }
-                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-            },
+            }
+            Lv2Request::Unsupported {
+                number: syscall::MEMORY_CONTAINER_DESTROY,
+                args,
+            } => {
+                match self.narrow_u32_args(syscall::MEMORY_CONTAINER_DESTROY, [("cid", args[0])]) {
+                    Some([cid]) => self.dispatch_memory_container_destroy(cid),
+                    None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+                }
+            }
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_ALLOCATE_ADDRESS,
                 args,

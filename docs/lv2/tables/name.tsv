@@ -488,6 +488,7 @@ ordinal	packet	name	source	ref	fw_from	fw_to
 339	none	sys_mmapper_allocate_shared_memory_ext	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 341	none	sys_memory_container_create	cellgov	cellgov_ps3_abi::lv2::syscall::MEMORY_CONTAINER_CREATE	none	none
 341	none	_sys_memory_container_create	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
+342	none	sys_memory_container_destroy	cellgov	cellgov_ps3_abi::lv2::syscall::MEMORY_CONTAINER_DESTROY	none	none
 342	none	sys_memory_container_destroy	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 343	none	sys_memory_container_get_size	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 343	none	sys_memory_container_get_size	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_MEMORY_CONTAINER_GET_SIZE	none	none

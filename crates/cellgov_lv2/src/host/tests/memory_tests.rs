@@ -160,18 +160,18 @@ fn user_memory_size_available_falls_with_allocation() {
         "available falls by the allocated size"
     );
 
-    // A 1 MiB page first re-aligns the cursor from 0x8B_0000 to the
-    // 1 MiB granule, so the fall includes the alignment padding.
+    // A 1 MiB page re-aligns the cursor to the 1 MiB granule; the
+    // padding is address space, not memory, so only the size counts.
     alloc(&mut host, 0x10_0000, 0x400);
     assert_eq!(
         query(&mut host),
-        total - 0x1_0000 - 0x5_0000 - 0x10_0000,
-        "available falls by padding-to-granule plus size"
+        total - 0x1_0000 - 0x10_0000,
+        "available falls by the allocated sizes alone"
     );
 }
 
 #[test]
-fn memory_free_is_noop_stub() {
+fn a_free_of_an_address_no_allocation_returned_is_einval() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(256);
     let result = host.dispatch(
@@ -179,7 +179,7 @@ fn memory_free_is_noop_stub() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(0));
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]

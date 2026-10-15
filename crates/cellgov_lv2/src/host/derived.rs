@@ -16,10 +16,10 @@ use super::mmapper::{PendingRegionInstall, SystemStateSeed};
 /// with the reason a divergence in it is caught elsewhere.
 #[derive(Debug, Clone)]
 pub(in crate::host) struct Lv2Derived {
-    /// Where `mem_alloc_ptr` started this boot; `ptr - base` is the
-    /// consumed-bytes figure `sys_memory_get_user_memory_size`
-    /// subtracts from the reported total. Boot config;
-    /// `mem_alloc_ptr` already carries the allocator into the hash.
+    /// The low end of the user region `sys_memory_allocate` places
+    /// blocks in, where `mem_alloc_ptr` started this boot. Boot config;
+    /// `mem_alloc_ptr` and the live blocks already carry the allocator
+    /// into the hash.
     pub(in crate::host) mem_alloc_base: u32,
     /// Boot-registered seeds keyed by `shm_ipc_key`; immutable after
     /// boot. Applied at most once, on the first 334 / 337 map of the

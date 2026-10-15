@@ -152,7 +152,7 @@ fn a_container_type_takes_a_container_that_exists() {
     );
     host.state.memory_containers.insert(
         0,
-        crate::host::memory::MemoryContainer::with_size(0x10_0000),
+        crate::host::memory::MemoryContainer::with_size(0x10_0000, false),
     );
     assert_eq!(create(&mut host, &rt, 1, ATTR_PTR), 0);
 }

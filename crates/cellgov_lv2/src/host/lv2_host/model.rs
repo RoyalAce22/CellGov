@@ -125,6 +125,10 @@ impl Lv2Host {
                     cellgov_mem::lanes::source::MEMORY_CONTAINER,
                     u64::from,
                 ),
+                memory_blocks: cellgov_mem::lanes::LaneMap::new(
+                    cellgov_mem::lanes::source::MEMORY_BLOCK,
+                    u64::from,
+                ),
                 lwmutexes: LwMutexTable::new(),
                 mutexes: MutexTable::new(),
                 semaphores: SemaphoreTable::new(),

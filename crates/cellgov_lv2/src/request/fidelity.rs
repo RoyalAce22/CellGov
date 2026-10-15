@@ -106,9 +106,14 @@ pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
             ArmFidelity::Modeled,
         ),
         (
+            syscall::MEMORY_CONTAINER_DESTROY,
+            "MemoryContainerDestroy",
+            ArmFidelity::Modeled,
+        ),
+        (
             syscall::MEMORY_CONTAINER_CREATE_324,
             "MemoryContainerCreate324",
-            ArmFidelity::AbiOnly,
+            ArmFidelity::PartialState,
         ),
         (
             syscall::MMAPPER_ALLOCATE_ADDRESS,
@@ -377,15 +382,18 @@ impl Lv2RequestKind {
             | Lv2RequestKind::ConfigAddServiceListener
             | Lv2RequestKind::ConfigRegisterService => PartialState,
 
-            // Memory: bump allocator with no reclamation.
-            Lv2RequestKind::MemoryAllocate => PartialState,
-            Lv2RequestKind::MemoryFree => AbiOnly,
-            // Available derives from the allocator cursor; total is
-            // the game-mode cap constant.
+            // Memory: the placement is CellGov's own, and a freed base is
+            // reused only once the region past the cursor is full.
+            Lv2RequestKind::MemoryAllocate | Lv2RequestKind::MemoryAllocateFromContainer => {
+                PartialState
+            }
+            Lv2RequestKind::MemoryFree => Modeled,
+            // Available counts live blocks and containers but not the
+            // loaded image; total is the game-mode cap constant.
             Lv2RequestKind::MemoryGetUserMemorySize => PartialState,
-            Lv2RequestKind::MemoryContainerCreate => AbiOnly,
-            // Container ids are checked; container budgets are not.
-            Lv2RequestKind::MemoryAllocateFromContainer => PartialState,
+            // Container ids come from the shared kernel-id allocator,
+            // not the console's ranges.
+            Lv2RequestKind::MemoryContainerCreate => PartialState,
 
             // Process.
             Lv2RequestKind::ProcessExit

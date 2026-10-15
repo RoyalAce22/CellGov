@@ -111,7 +111,7 @@ fn an_allocation_takes_the_container_memory_it_names() {
 }
 
 #[test]
-fn an_unknown_container_id_is_esrch_after_the_argument_gates() {
+fn an_unknown_container_id_is_esrch_ahead_of_the_argument_gates() {
     let rt = FakeRuntime::with_memory(GuestMemory::new(0x10000));
     let mut host = Lv2Host::new();
     let bogus = 0x7fff_ffff;
@@ -127,13 +127,13 @@ fn an_unknown_container_id_is_esrch_after_the_argument_gates() {
     );
     assert_eq!(
         code_of(&allocate(&mut host, &rt, 0, bogus, page_size::FLAG_64K)),
-        u64::from(errno::CELL_EALIGN),
-        "a zero size is refused before the id is looked up"
+        u64::from(errno::CELL_ESRCH),
+        "the id is looked up before a zero size is refused"
     );
     assert_eq!(
-        code_of(&allocate(&mut host, &rt, 0x1_0000, bogus, 0x100)),
-        u64::from(errno::CELL_EINVAL),
-        "an unknown page-size flag is refused before the id is looked up"
+        code_of(&allocate(&mut host, &rt, 0x1_0000, bogus, 0x900)),
+        u64::from(errno::CELL_ESRCH),
+        "the id is looked up before an unknown page-size flag is refused"
     );
     assert_eq!(
         code_of(&allocate(
@@ -143,8 +143,8 @@ fn an_unknown_container_id_is_esrch_after_the_argument_gates() {
             bogus,
             page_size::FLAG_1M
         )),
-        u64::from(errno::CELL_EALIGN),
-        "64 KiB is not a multiple of the 1 MiB page"
+        u64::from(errno::CELL_ESRCH),
+        "the id is looked up before the page multiple is checked"
     );
 }
 
@@ -223,7 +223,7 @@ fn the_container_set_moves_the_host_partial() {
     );
     host.state.memory_containers.insert(
         cid,
-        crate::host::memory::MemoryContainer::with_size(0x30_0000),
+        crate::host::memory::MemoryContainer::with_size(0x30_0000, false),
     );
     assert_eq!(host.sync_partial(), with);
 }

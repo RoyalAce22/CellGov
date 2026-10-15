@@ -78,6 +78,11 @@ pub(in crate::host) struct Lv2State {
     /// memory SPU thread groups and allocations take from each.
     pub(in crate::host) memory_containers:
         cellgov_mem::lanes::LaneMap<u32, super::memory::MemoryContainer>,
+    /// The live blocks `sys_memory_allocate` and
+    /// `sys_memory_allocate_from_container` handed out, by base address:
+    /// what `sys_memory_free` returns and what the available user
+    /// memory leaves out.
+    pub(in crate::host) memory_blocks: cellgov_mem::lanes::LaneMap<u32, super::memory::MemoryBlock>,
     pub(in crate::host) lwmutexes: LwMutexTable,
     pub(in crate::host) mutexes: MutexTable,
     pub(in crate::host) semaphores: SemaphoreTable,

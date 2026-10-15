@@ -13,20 +13,6 @@ use crate::host::{Lv2Host, Lv2Runtime};
 use cellgov_time::GuestTicks;
 
 impl Lv2Host {
-    /// `sys_memory_free`: the bump allocator tracks no per-allocation
-    /// state, so a valid free, a bad pointer, and an unknown id are
-    /// indistinguishable; all answer CELL_OK.
-    pub(super) fn dispatch_memory_free_noop(&mut self) -> Lv2Dispatch {
-        self.log_invariant_break(
-            "dispatch.memory_free_noop",
-            format_args!(
-                "sys_memory_free: bump allocator does not reclaim; \
-                 returning CELL_OK without state change"
-            ),
-        );
-        Lv2Dispatch::immediate(0u64)
-    }
-
     /// `sys_ppu_thread_yield`: round-robin advance happens on the
     /// syscall itself, so the host returns CELL_OK with no effects.
     pub(super) fn dispatch_ppu_thread_yield(&self) -> Lv2Dispatch {
@@ -109,15 +95,14 @@ impl Lv2Host {
 
     /// Writes `(total, available)` to `*mem_info_ptr`; EFAULT on null.
     ///
-    /// `total` is the PS3 game-mode user-memory cap; `available`
-    /// subtracts what the bump allocator has handed out this boot
-    /// (`sys_memory_free` is a no-op, so consumption is monotonic).
+    /// `total` is the PS3 game-mode user-memory cap; `available` is
+    /// [`Lv2Host::user_memory_available`].
     ///
     /// `available` over-reports. Real LV2 charges the loaded image and
     /// every thread stack to the same container, so its first read is
-    /// already below `total`. CellGov's counter starts at the
-    /// post-image allocator base and holds thread stacks in a separate
-    /// region, so the gap is the image size plus the stack usage.
+    /// already below `total`. CellGov's counter leaves out the image and
+    /// holds thread stacks in a separate region, so the gap is the image
+    /// size plus the stack usage.
     pub(super) fn dispatch_memory_get_user_memory_size(
         &self,
         mem_info_ptr: u32,
@@ -128,10 +113,7 @@ impl Lv2Host {
             return d;
         }
         let total = cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL;
-        // ptr starts at base and only grows; set_mem_alloc_base resets both.
-        debug_assert!(self.state.mem_alloc_ptr >= self.derived.mem_alloc_base);
-        let consumed = self.state.mem_alloc_ptr - self.derived.mem_alloc_base;
-        let available = total.saturating_sub(consumed);
+        let available = self.user_memory_available();
         let mut bytes = [0u8; 8];
         bytes[0..4].copy_from_slice(&total.to_be_bytes());
         bytes[4..8].copy_from_slice(&available.to_be_bytes());

@@ -341,7 +341,7 @@ ordinal	route	arm
 339	routed	MmapperAllocateSharedMemoryExt
 340	null_backend	none
 341	typed	MemoryContainerCreate
-342	null_backend	none
+342	routed	MemoryContainerDestroy
 343	null_backend	none
 344	null_backend	none
 345	null_backend	none

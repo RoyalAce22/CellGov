@@ -21,25 +21,27 @@ impl Lv2Host {
     ///
     /// Serves syscalls 324 and 341. Firmware publishes a wrapper for
     /// each: libsysmodule.sprx carries both in its syscall thunk
-    /// table. CellGov routes them to one arm; whether the kernel binds
-    /// them to one entry point is not witnessed here. The container
-    /// records `size` rounded down to the 1 MiB granule; the process's
-    /// own budget is not tracked, so the create takes nothing from it.
+    /// table. The `lv2_memory_free_container` capture shows the two
+    /// answering alike here, minting ids from different ranges, and
+    /// `sys_memory_container_destroy` finding only a 341 container;
+    /// `from_324` marks the other. The container records `size`
+    /// rounded down to the 1 MiB granule, and takes that much from the
+    /// available user memory, as the same capture shows.
     ///
     /// # Errors
     ///
     /// Listed in the order they fire.
     ///
-    /// - `CELL_ENOMEM` when `size` rounds down to zero. A sub-granule
-    ///   request has nothing left after truncation to the 1 MiB
-    ///   granule. Where that refusal sits against the `cid` gate is
-    ///   unestablished.
-    /// - `CELL_EFAULT` when `cid` is null. The gate is CellGov's own;
-    ///   no interface or firmware record establishes it.
+    /// - `CELL_ENOMEM` when `size` rounds down to zero, ahead of a null
+    ///   `cid`, as the `lv2_memory_free_container` capture shows. A
+    ///   sub-granule request has nothing left after truncation to the
+    ///   1 MiB granule.
+    /// - `CELL_EFAULT` when `cid` is null.
     pub(in crate::host::dispatch_route) fn dispatch_memory_container_create(
         &mut self,
         cid_ptr: u32,
         size: u64,
+        from_324: bool,
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
@@ -51,9 +53,10 @@ impl Lv2Host {
         }
         let cid = self.alloc_id();
         let size = size & !(CONTAINER_GRANULE - 1);
-        self.state
-            .memory_containers
-            .insert(cid, crate::host::memory::MemoryContainer::with_size(size));
+        self.state.memory_containers.insert(
+            cid,
+            crate::host::memory::MemoryContainer::with_size(size, from_324),
+        );
         let write = Effect::shared_write(
             ByteRange::contiguous_u32(cid_ptr, 4),
             WritePayload::from_slice(&cid.to_be_bytes()),
@@ -407,7 +410,7 @@ fn shared_memory_handle(size: u64, flags: u64) -> Result<MmapperHandle, Lv2ErrCo
     if size == 0 {
         return Err(errno::CELL_EALIGN);
     }
-    let Some(align) = accepted_granule(flags) else {
+    let Some(align) = page_size::accepted_granule(flags) else {
         return Err(errno::CELL_EINVAL);
     };
     let Ok(size) = u32::try_from(size) else {
@@ -447,20 +450,4 @@ fn mem_id_written(
 /// zero key reads as an unset field, which is CellGov's own reading.
 fn names_shared_segment(ipc_key: u64) -> bool {
     ipc_key != 0 && ipc_key != SYS_MMAPPER_NO_SHM_KEY
-}
-
-/// The page granule a `sys_mmapper` `flags` word selects, `None` when
-/// its granularity field holds an encoding the kernel refuses.
-///
-/// The granularity field is `flags` bits 8 to 11. 64 KiB and 1 MiB are
-/// the only encodings it defines, and an unset field takes the
-/// default. liblv2.sprx's own 256 MiB reservation carries the 64 KiB
-/// encoding in exactly those bits. Anything else is refused rather
-/// than rounded to a granule; nothing public establishes the refusal
-/// itself.
-fn accepted_granule(flags: u64) -> Option<u32> {
-    match flags & page_size::GRANULARITY_FIELD {
-        0 | page_size::FLAG_64K | page_size::FLAG_1M => Some(page_size::granule_from_flags(flags)),
-        _ => None,
-    }
 }

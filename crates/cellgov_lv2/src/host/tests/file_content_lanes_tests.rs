@@ -143,7 +143,7 @@ fn every_file_content_prx_and_shared_memory_change_moves_the_partial() {
         "memory container",
         host.state.memory_containers.insert(
             7,
-            crate::host::memory::MemoryContainer::with_size(0x10_0000)
+            crate::host::memory::MemoryContainer::with_size(0x10_0000, false)
         )
     );
 }
