@@ -8,7 +8,9 @@ use crate::ppu_thread::PpuThreadId;
 use crate::request::Lv2Request;
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
-use cellgov_ps3_abi::lv2::ppu_thread::{PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MIN_ROOT};
+use cellgov_ps3_abi::lv2::ppu_thread::{
+    PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MAX_ROOT, PPU_THREAD_PRIORITY_MIN_ROOT,
+};
 use cellgov_ps3_abi::lv2::{errno, syscall};
 
 const PRIO_PTR: u32 = 0x2000;
@@ -108,10 +110,10 @@ fn the_range_bounds_are_inclusive() {
 }
 
 #[test]
-fn a_debug_or_root_process_may_go_down_to_the_root_floor() {
-    // The priority floor is -512 under debug_or_root and 0 otherwise;
-    // the 3071 ceiling does not move. The privileged widening below
-    // zero has no public anchor.
+fn a_debug_or_root_process_has_the_root_window() {
+    // Under debug_or_root the window is -512 through 3199, as the
+    // lv2_ppu_thread_priority_bounds and lv2_ppu_thread_priority_ceiling
+    // captures show.
     let rt = rt();
     let mut host = Lv2Host::new();
     host.set_control_flags1(cellgov_ps3_abi::format::sce::CTRL_FLAGS1_ROOT_MASK);
@@ -137,7 +139,16 @@ fn a_debug_or_root_process_may_go_down_to_the_root_floor() {
         u64::from(errno::CELL_EINVAL)
     );
     assert_eq!(
-        set_priority(&mut host, &rt, id, i64::from(PPU_THREAD_PRIORITY_MAX) + 1),
+        set_priority(&mut host, &rt, id, i64::from(PPU_THREAD_PRIORITY_MAX_ROOT)),
+        0
+    );
+    assert_eq!(
+        set_priority(
+            &mut host,
+            &rt,
+            id,
+            i64::from(PPU_THREAD_PRIORITY_MAX_ROOT) + 1
+        ),
         u64::from(errno::CELL_EINVAL)
     );
 }

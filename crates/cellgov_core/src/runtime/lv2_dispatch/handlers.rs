@@ -377,6 +377,12 @@ impl Runtime {
             self.timer_wakes.cancel(waiter);
             let pending = self.syscall_responses.try_take(waiter);
             if let Some(PendingResponse::PpuThreadJoin { status_out_ptr, .. }) = pending {
+                // The join collects the thread, so a later call that
+                // names it answers CELL_ESRCH
+                // (tests/micro/lv2_ppu_thread_answers).
+                if let Some(tid) = self.lv2_host.ppu_threads().thread_id_for_unit(source) {
+                    self.lv2_host.ppu_threads_mut().reap(tid);
+                }
                 // The out-pointer was decoded from the JOINER's
                 // syscall, so it addresses the joiner's space.
                 if status_out_ptr != 0 {
@@ -391,9 +397,8 @@ impl Runtime {
                     // A NULL out-pointer is never written -- the join
                     // itself still completes (the target is reaped),
                     // but the joiner's r3 reports CELL_EFAULT, not
-                    // success. Reap-then-fault ordering has no public
-                    // attestation; a console probe of a NULL-vptr join
-                    // would settle whether the target is still reaped.
+                    // success, as the lv2_ppu_thread_answers capture
+                    // shows.
                     self.deliver_syscall_return(
                         waiter,
                         cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into(),

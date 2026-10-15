@@ -209,8 +209,8 @@ fn ppu_thread_join_detached_target_returns_einval() {
 #[test]
 fn ppu_thread_join_finished_target_with_null_status_ptr_is_efault_without_write() {
     // The status pointer is checked after the join concludes: a null
-    // pointer is EFAULT instead of a store. That the join runs first
-    // is a CellGov choice, unestablished against the console.
+    // pointer is EFAULT instead of a store, as the
+    // lv2_ppu_thread_answers capture shows.
     let mut host = Lv2Host::new();
     host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
     let child = host
@@ -460,17 +460,6 @@ fn ppu_thread_create_priority_ceiling_is_inclusive() {
         create(&mut host, PPU_THREAD_PRIORITY_MAX + 1),
         Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     );
-
-    let mut root = Lv2Host::new();
-    root.set_control_flags1(cellgov_ps3_abi::format::sce::CTRL_FLAGS1_ROOT_MASK);
-    assert!(matches!(
-        create(&mut root, PPU_THREAD_PRIORITY_MAX),
-        Lv2Dispatch::PpuThreadCreate { .. }
-    ));
-    assert_eq!(
-        create(&mut root, PPU_THREAD_PRIORITY_MAX + 1),
-        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
-    );
 }
 
 #[test]
@@ -497,9 +486,9 @@ fn ppu_thread_create_negative_priority_is_einval_for_user_perm() {
 }
 
 #[test]
-fn ppu_thread_create_negative_priority_floor_drops_to_minus_512_with_debug_or_root() {
-    // Debug-or-root callers may go down to -512; -513 stays EINVAL.
-    // The privileged widening below zero has no public anchor.
+fn a_debug_or_root_process_creates_at_any_priority() {
+    // The lv2_ppu_thread_priority_bounds capture reads back each of
+    // these priorities from a thread a root process created.
     let mut host = Lv2Host::new();
     host.set_control_flags1(0x4000_0000); // root -> debug_or_root
     let rt = opd_runtime(0x200, 0x10_0000, 0x10_0100);
@@ -519,14 +508,14 @@ fn ppu_thread_create_negative_priority_floor_drops_to_minus_512_with_debug_or_ro
             &rt,
         )
     };
-    assert!(matches!(
-        create(&mut host, -512),
-        Lv2Dispatch::PpuThreadCreate { .. }
-    ));
-    assert_eq!(
-        create(&mut host, -513),
-        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
-    );
+    for priority in [-1000, -513, 3072, 9999, 0x7FFF_FFFF] {
+        match create(&mut host, priority) {
+            Lv2Dispatch::PpuThreadCreate { priority: got, .. } => {
+                assert_eq!(got, priority as u32, "priority {priority}");
+            }
+            other => panic!("priority {priority}: expected PpuThreadCreate, got {other:?}"),
+        }
+    }
 }
 
 #[test]

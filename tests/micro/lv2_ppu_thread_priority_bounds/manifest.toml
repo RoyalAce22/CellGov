@@ -1,0 +1,14 @@
+[test]
+name = "lv2_ppu_thread_priority_bounds"
+
+# A hardware probe: the priority bounds of PPU thread set-priority and create.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words at the offsets ppu/main.c lists: 192 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"

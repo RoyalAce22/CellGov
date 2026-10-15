@@ -261,6 +261,19 @@ impl PpuThreadTable {
         std::mem::take(&mut thread.join_waiters)
     }
 
+    /// Drop a finished thread that a join collected, so a later call
+    /// that names it answers as for an unknown id. `true` when the
+    /// table dropped a finished thread.
+    ///
+    /// The `lv2_ppu_thread_answers` capture shows a second join of a
+    /// joined thread answering CELL_ESRCH.
+    pub fn reap(&mut self, id: PpuThreadId) -> bool {
+        if !self.threads.get(id).is_some_and(|t| t.state.is_finished()) {
+            return false;
+        }
+        self.threads.remove(id).is_some()
+    }
+
     /// Destructively take the joiner list without changing
     /// thread state.
     pub fn take_join_waiters(&mut self, id: PpuThreadId) -> Vec<PpuThreadId> {

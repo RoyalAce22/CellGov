@@ -192,11 +192,9 @@ impl Lv2Host {
         }
         // The interface defines `flags` as an OR over the JOINABLE and
         // INTERRUPT bits taken singly. A caller that sets both is
-        // outside the defined set, and CellGov refuses it with
-        // CELL_EPERM. Where that refusal sits against the entry
-        // EFAULT and priority EINVAL gates is unestablished. Those
-        // gates run inside dispatch_ppu_thread_create, so this one
-        // fires first when more than one would apply.
+        // refused with CELL_EPERM before any other check, as the
+        // lv2_ppu_thread_answers capture shows against a bad priority
+        // and a null id pointer.
         if flags & 3 == 3 {
             return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
         }

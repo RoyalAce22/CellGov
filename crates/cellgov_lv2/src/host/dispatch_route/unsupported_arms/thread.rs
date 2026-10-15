@@ -5,7 +5,8 @@ use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::ppu_thread::{
-    PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MIN, PPU_THREAD_PRIORITY_MIN_ROOT,
+    PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MAX_ROOT, PPU_THREAD_PRIORITY_MIN,
+    PPU_THREAD_PRIORITY_MIN_ROOT,
 };
 use cellgov_time::GuestTicks;
 
@@ -17,9 +18,8 @@ impl Lv2Host {
     /// priority to `*priop`.
     ///
     /// The id lookup precedes the `priop` gate, so an unknown id
-    /// answers ESRCH even when `priop` is bad. Both codes are defined
-    /// for this call; which one wins when both apply is a CellGov
-    /// choice, unestablished against the console.
+    /// answers ESRCH even when `priop` is null, as the
+    /// `lv2_ppu_thread_answers` capture shows.
     ///
     /// # Errors
     ///
@@ -61,13 +61,14 @@ impl Lv2Host {
     ///
     /// A PPU thread priority runs 0 (highest) through 3071, and a
     /// value outside that window is EINVAL. A debug-or-root process
-    /// may go below zero, down to the -512 floor
-    /// `_sys_ppu_thread_create` applies; that privileged widening
-    /// has no public anchor.
+    /// has the wider window -512 through 3199 that the
+    /// `lv2_ppu_thread_priority_bounds` and
+    /// `lv2_ppu_thread_priority_ceiling` captures show.
     ///
     /// # Errors
     ///
-    /// Listed in the order they fire.
+    /// Listed in the order they fire, as the `lv2_ppu_thread_answers`
+    /// capture shows.
     ///
     /// - `CELL_EINVAL` when `prio` is outside the window.
     /// - `CELL_ESRCH` when `thread_id` is absent from the thread table.
@@ -80,12 +81,12 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         let [prio] = Self::low_i32_args([args[1]]);
-        let floor = if self.privilege_of(requester).debug_or_root() {
-            PPU_THREAD_PRIORITY_MIN_ROOT
+        let window = if self.privilege_of(requester).debug_or_root() {
+            PPU_THREAD_PRIORITY_MIN_ROOT..=PPU_THREAD_PRIORITY_MAX_ROOT
         } else {
-            PPU_THREAD_PRIORITY_MIN
+            PPU_THREAD_PRIORITY_MIN..=PPU_THREAD_PRIORITY_MAX
         };
-        if !(floor..=PPU_THREAD_PRIORITY_MAX).contains(&prio) {
+        if !window.contains(&prio) {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let id = crate::ppu_thread::PpuThreadId::new(args[0]);

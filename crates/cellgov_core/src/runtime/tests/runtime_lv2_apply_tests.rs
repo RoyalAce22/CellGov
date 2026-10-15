@@ -638,8 +638,8 @@ fn a_wake_payload_into_a_shared_view_is_trapped_in_debug() {
 #[test]
 fn a_join_completing_with_a_null_status_pointer_returns_efault() {
     // A NULL vptr still joins -- the target is reaped -- but the
-    // joiner's r3 reports CELL_EFAULT after the wait resolves.
-    // Reap-then-fault ordering is unestablished.
+    // joiner's r3 reports CELL_EFAULT after the wait resolves, as
+    // the lv2_ppu_thread_answers capture shows.
     let mut rt = build(0x1000, 1, 100);
     let joiner = rt
         .registry_mut()

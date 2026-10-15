@@ -39,9 +39,10 @@ impl Lv2Host {
             let exit_value = target_thread.exit_value.unwrap_or(0);
             // The join completes, then the status pointer is checked:
             // a null pointer is EFAULT and the exit status is
-            // dropped, not written. Both codes are defined for this
-            // call; that the join runs first is a CellGov choice,
-            // unestablished against the console.
+            // dropped, not written. The `lv2_ppu_thread_answers`
+            // capture shows the join waiting for the thread and
+            // reaping it before the EFAULT.
+            self.state.ppu_threads.reap(target_id);
             if status_out_ptr == 0 {
                 return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
@@ -103,12 +104,17 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// Listed in the order they fire.
+    /// Listed in the order they fire. The `lv2_ppu_thread_answers`
+    /// capture shows each refusal, and that the arm reads the param
+    /// block before it checks the priority.
     ///
-    /// - `CELL_EFAULT` when the param block is unreadable or its entry
-    ///   descriptor pointer is null.
-    /// - `CELL_EINVAL` when `priority` is outside the window
-    ///   `sys_ppu_thread_set_priority` enforces.
+    /// - `CELL_EFAULT` when `id_ptr` is null, the param block is
+    ///   unreadable or its entry descriptor pointer is null.
+    /// - `CELL_EINVAL` when a non-root process names a `priority`
+    ///   outside the window `sys_ppu_thread_set_priority` enforces. A
+    ///   debug-or-root process creates at any priority: the
+    ///   `lv2_ppu_thread_priority_bounds` capture reads back 9999,
+    ///   0x7FFFFFFF and -1000 as created.
     /// - `CELL_EFAULT` when the entry descriptor is unreadable.
     /// - `CELL_ENOMEM` when the arena is exhausted.
     #[allow(
@@ -127,6 +133,9 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         use cellgov_ps3_abi::format::elf::function_descriptor;
         use cellgov_ps3_abi::lv2::ppu_thread::thread_param;
+        if let Some(refusal) = self.efault_if_null(&[id_ptr]) {
+            return refusal;
+        }
         let Some(param) = GuestStruct::read(rt, param_ptr as u64, thread_param::SIZE as usize)
         else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
@@ -134,24 +143,17 @@ impl Lv2Host {
         let entry_opd_ptr = param.u32_at(thread_param::ENTRY_OFFSET);
         let param_tls = param.u32_at(thread_param::TLS_OFFSET);
 
-        // A null entry descriptor is EFAULT. The check runs before
-        // the priority range test; that order is a CellGov choice,
-        // unestablished against the console.
+        // A null entry descriptor is EFAULT, before the priority test.
         if entry_opd_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         // `sys_ppu_thread_set_priority` (47) enforces the same window.
-        use cellgov_ps3_abi::lv2::ppu_thread::{
-            PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MIN, PPU_THREAD_PRIORITY_MIN_ROOT,
-        };
+        use cellgov_ps3_abi::lv2::ppu_thread::{PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MIN};
         let prio = priority as i32;
-        let prio_floor = if self.privilege_of(requester).debug_or_root() {
-            PPU_THREAD_PRIORITY_MIN_ROOT
-        } else {
-            PPU_THREAD_PRIORITY_MIN
-        };
-        if !(prio_floor..=PPU_THREAD_PRIORITY_MAX).contains(&prio) {
+        if !self.privilege_of(requester).debug_or_root()
+            && !(PPU_THREAD_PRIORITY_MIN..=PPU_THREAD_PRIORITY_MAX).contains(&prio)
+        {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
 
@@ -286,3 +288,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/ppu_thread_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_thread_console_tests.rs"]
+mod console_tests;

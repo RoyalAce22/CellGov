@@ -43,6 +43,9 @@ mod trace_records;
 #[path = "runtime_wake_tests.rs"]
 mod wakes;
 
+#[path = "ppu_join_console_tests.rs"]
+mod ppu_join_console;
+
 #[derive(Clone)]
 
 struct CountingUnit {
