@@ -1,0 +1,14 @@
+[test]
+name = "spu_image_nsegs_negative"
+
+# A hardware probe: the initialize answer for a user image with nsegs -1.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words at the offsets ppu/main.c lists: 16 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"

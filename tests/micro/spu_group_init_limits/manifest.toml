@@ -1,0 +1,14 @@
+[test]
+name = "spu_group_init_limits"
+
+# A hardware probe: SPU thread group and initialize limits a game process gets.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words at the offsets ppu/main.c lists: 96 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"

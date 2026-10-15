@@ -144,8 +144,9 @@ pub mod image {
     /// word-aligned address inside the local store.
     pub const ENTRY_MAX: u32 = 0x3fffc;
     /// Largest `nsegs` a user image may declare; zero and negative
-    /// counts are refused as well. The ceiling is unestablished:
-    /// nothing here derives 0x20 from anything else.
+    /// counts are refused as well. The `spu_group_init_limits` capture
+    /// accepts 0x20 segments and refuses 0 and 0x21 with `CELL_EINVAL`;
+    /// `spu_image_nsegs_negative` refuses -1 the same way.
     pub const NSEGS_MAX: i32 = 0x20;
 }
 
@@ -185,9 +186,9 @@ pub mod segment {
     /// `SYS_SPU_SEGMENT_TYPE_INFO`: metadata, never loaded.
     pub const TYPE_INFO: u32 = 4;
 
-    /// Largest `size` an INFO segment may declare. Unestablished:
-    /// INFO carries metadata that is never loaded, and nothing here
-    /// says what fixes its ceiling at 256.
+    /// Largest `size` an INFO segment may declare. The
+    /// `spu_group_init_limits` capture accepts 256 bytes and refuses
+    /// 257 with `CELL_EINVAL`.
     pub const INFO_SIZE_MAX: u32 = 256;
     /// Alignment `ls` and `size` of a loadable segment must satisfy.
     /// The kernel applies this flat check; a caller that builds an

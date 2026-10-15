@@ -296,8 +296,9 @@ ordinal	packet	name	source	ref	fw_from	fw_to
 156	none	sys_spu_image_open	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_IMAGE_OPEN	none	none
 156	none	sys_spu_image_open	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 156	none	sys_spu_image_open	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_IMAGE_OPEN	none	none
+157	none	sys_spu_image_import	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_IMAGE_IMPORT	none	none
 157	none	sys_spu_image_import	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
-158	none	sys_spu_image_import	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_IMAGE_IMPORT	none	none
+158	none	sys_spu_image_close	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_IMAGE_CLOSE	none	none
 158	none	sys_spu_image_close	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 159	none	sys_spu_image_get_segments	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 160	none	sys_raw_spu_create	cellgov	cellgov_ps3_abi::lv2::syscall::RAW_SPU_CREATE	none	none

@@ -62,6 +62,10 @@ pub(in crate::host) struct Lv2State {
     /// association steers a future 332's answer and is recorded
     /// nowhere else.
     pub(in crate::host) mmapper_ipc: cellgov_mem::lanes::LaneMap<u64, u32>,
+    /// The kernel SPU image ids 156 and 157 handed out, each to the
+    /// content-store handle of its image, or to 0 once 158 closed it.
+    /// A kernel record naming a closed id answers CELL_ESRCH.
+    pub(in crate::host) spu_image_ids: cellgov_mem::lanes::LaneMap<u32, u32>,
     /// The address areas 330 reserved and no 331 freed, by base: what
     /// 334 and 337 place a segment inside.
     pub(in crate::host) mmapper_areas:

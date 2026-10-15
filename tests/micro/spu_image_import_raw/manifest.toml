@@ -1,0 +1,14 @@
+[test]
+name = "spu_image_import_raw"
+
+# A hardware probe: the raw SPU image import and close answers a game process gets.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words at the offsets ppu/main.c lists: 80 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 80 },
+]
+
+[expect]
+outcome = "completed"

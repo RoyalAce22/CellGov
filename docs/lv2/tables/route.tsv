@@ -156,8 +156,8 @@ ordinal	route	arm
 154	typed	RawSpuGetIntStat
 155	null_backend	none
 156	typed	SpuImageOpen
-157	null_backend	none
-158	typed	SpuImageImport
+157	typed	SpuImageImport
+158	routed	SpuImageClose
 159	null_backend	none
 160	typed	RawSpuCreate
 161	typed	RawSpuDestroy

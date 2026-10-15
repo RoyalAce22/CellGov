@@ -775,6 +775,13 @@ impl Lv2Host {
                 args,
             } => self.dispatch_mmapper_allocate_address(args, requester, tick),
             Lv2Request::Unsupported {
+                number: syscall::SPU_IMAGE_CLOSE,
+                args,
+            } => match self.narrow_u32_args(syscall::SPU_IMAGE_CLOSE, [("img", args[0])]) {
+                Some([img]) => self.dispatch_spu_image_close(img, rt),
+                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            },
+            Lv2Request::Unsupported {
                 number: syscall::MMAPPER_FREE_ADDRESS,
                 args,
             } => match self.narrow_u32_args(syscall::MMAPPER_FREE_ADDRESS, [("addr", args[0])]) {

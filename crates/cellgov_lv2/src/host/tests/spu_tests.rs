@@ -8,10 +8,23 @@ use cellgov_mem::{GuestAddr, GuestMemory};
 use cellgov_ps3_abi::format::elf::{ELF32_E_ENTRY, ELF32_HEADER_SIZE};
 use cellgov_time::GuestTicks;
 
+/// A runtime of `size` bytes with the ELF magic at each of `at`.
+fn runtime_with_elf_magic(size: usize, at: &[u64]) -> FakeRuntime {
+    let mut mem = GuestMemory::new(size);
+    for &addr in at {
+        mem.apply_commit(
+            cellgov_mem::ByteRange::new(GuestAddr::new(addr), 4).unwrap(),
+            &cellgov_ps3_abi::format::elf::ELF_MAGIC,
+        )
+        .unwrap();
+    }
+    FakeRuntime::with_memory(mem)
+}
+
 #[test]
 fn image_import_registers_distinct_entries_per_type_id_img_ptr() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x1_0000);
+    let rt = runtime_with_elf_magic(0x1_0000, &[0x200, 0x400]);
     let req1 = Lv2Request::SpuImageImport {
         handle_out: 0x100,
         img_ptr: 0x200,
@@ -57,7 +70,45 @@ fn image_import_registers_distinct_entries_per_type_id_img_ptr() {
 }
 
 #[test]
-fn image_import_out_of_range_img_ptr_returns_einval() {
+fn a_second_import_of_other_bytes_from_one_address_gets_its_own_image() {
+    let mut host = Lv2Host::new();
+    let first = runtime_with_elf_magic(0x1000, &[0x200]);
+    let mut mem = GuestMemory::new(0x1000);
+    let mut other = cellgov_ps3_abi::format::elf::ELF_MAGIC.to_vec();
+    other.extend_from_slice(&[0xEE; 28]);
+    mem.apply_commit(
+        cellgov_mem::ByteRange::new(GuestAddr::new(0x200), 32).unwrap(),
+        &other,
+    )
+    .unwrap();
+    let second = FakeRuntime::with_memory(mem);
+    let import = |host: &mut Lv2Host, rt: &FakeRuntime| match host.dispatch(
+        Lv2Request::SpuImageImport {
+            handle_out: 0x100,
+            img_ptr: 0x200,
+            size: 32,
+            type_id: 0,
+        },
+        UnitId::new(0),
+        rt,
+    ) {
+        Lv2Dispatch::Immediate { code: 0, effects } => match &effects[0] {
+            Effect::SharedWriteIntent { bytes, .. } => {
+                u32::from_be_bytes(bytes.bytes()[4..8].try_into().unwrap())
+            }
+            other => panic!("expected the record write, got {other:?}"),
+        },
+        other => panic!("expected the import to succeed, got {other:?}"),
+    };
+    let a = import(&mut host, &first);
+    let b = import(&mut host, &second);
+    let again = import(&mut host, &first);
+    assert_ne!(a, b, "other bytes are another image");
+    assert_ne!(again, a, "a live id is never handed out twice");
+}
+
+#[test]
+fn image_import_out_of_range_img_ptr_returns_efault() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x1000);
     let req = Lv2Request::SpuImageImport {
@@ -69,7 +120,7 @@ fn image_import_out_of_range_img_ptr_returns_einval() {
     let result = host.dispatch(req, UnitId::new(0), &rt);
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, errno::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EFAULT.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -79,7 +130,7 @@ fn image_import_out_of_range_img_ptr_returns_einval() {
 #[test]
 fn image_import_unwritable_handle_out_returns_efault() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x1000);
+    let rt = runtime_with_elf_magic(0x1000, &[0x100]);
     let req = Lv2Request::SpuImageImport {
         handle_out: 0xFF8, // 0xFF8 + 16 = 0x1008 > 0x1000
         img_ptr: 0x100,

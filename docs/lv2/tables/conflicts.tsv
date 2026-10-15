@@ -28,8 +28,6 @@ ordinal	packet	name	source	disagreement
 154	none	sys_raw_spu_get_int_stat	cellgov	name
 154	none	sys_raw_spu_get_int_stat	psdevwiki	name
 154	none	sys_spu_get_int_stat	psl1ght	name
-158	none	sys_spu_image_import	cellgov	name
-158	none	sys_spu_image_close	psdevwiki	name
 160	none	sys_raw_spu_create	cellgov	name
 160	none	sys_raw_spu_create	psdevwiki	name
 160	none	sys_spu_create	psl1ght	name

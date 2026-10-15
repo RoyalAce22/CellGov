@@ -197,6 +197,9 @@ pub mod source {
     /// Address areas `sys_mmapper_allocate_address` reserved, one
     /// object per base address.
     pub const MMAPPER_AREA: u8 = 67;
+    /// The kernel SPU image ids 156 and 157 handed out, one object
+    /// per id.
+    pub const SPU_IMAGE_IDS: u8 = 68;
 }
 
 const OBJECT_BITS: u32 = 32;

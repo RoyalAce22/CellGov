@@ -120,7 +120,8 @@ SemaphoreGetValue	modeled	114
 SemaphorePost	modeled	94
 SemaphoreTryWait	modeled	93
 SemaphoreWait	modeled	92
-SpuImageImport	modeled	158
+SpuImageClose	modeled	158
+SpuImageImport	modeled	157
 SpuImageOpen	modeled	156
 SpuInitialize	modeled	169
 SpuThreadBindQueue	partial-state	193

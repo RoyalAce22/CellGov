@@ -36,12 +36,16 @@ pub(super) struct GroupCreateArgs {
 
 /// The `sys_spu_image` record the kernel hands back: `type` KERNEL,
 /// with the kernel image id occupying the `entry_point` word.
-fn kernel_image_struct(handle: crate::image::SpuImageHandle) -> [u8; 16] {
+fn kernel_image_struct(id: u32) -> [u8; 16] {
     let mut img_struct = [0u8; 16];
     img_struct[0..4].copy_from_slice(&spu::image::TYPE_KERNEL.to_be_bytes());
-    img_struct[4..8].copy_from_slice(&handle.raw().to_be_bytes());
+    img_struct[4..8].copy_from_slice(&id.to_be_bytes());
     img_struct
 }
+
+/// The first kernel image id minted for an image that already has a
+/// live id. Content-store handles count up from 1 and stay below it.
+const EXTRA_IMAGE_ID_BASE: u32 = 0x8000_0000;
 
 /// The path `sys_spu_image_open` names at `path_ptr`, without its NUL,
 /// or the code the kernel answers instead.
@@ -184,13 +188,19 @@ impl Lv2Host {
         Ok((entry, segments))
     }
 
-    /// `sys_spu_image_import`: register `size` bytes at `img_ptr` in
-    /// [`crate::image::ContentStore`] under a synthetic path and write the
-    /// handle into the SPU image struct at `handle_out`.
+    /// `sys_spu_image_import` (157): register `size` bytes at `img_ptr`
+    /// in [`crate::image::ContentStore`] under a synthetic path, mint a
+    /// kernel image id for it, and write the kernel record naming that
+    /// id into the SPU image struct at `handle_out`.
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` when `img_ptr` / `size` are out of guest bounds.
+    /// Each code is the one the `spu_image_import_raw` capture shows for
+    /// that refusal alone; the order among them is CellGov's.
+    ///
+    /// - `CELL_EINVAL` when `size` is zero or does not fit in `usize`.
+    /// - `CELL_EFAULT` when `size` bytes at `img_ptr` are unreadable.
+    /// - `CELL_ENOEXEC` when the bytes do not start with the ELF magic.
     /// - `CELL_EFAULT` when `handle_out` is not writable for 16 bytes.
     #[allow(
         clippy::too_many_arguments,
@@ -211,23 +221,44 @@ impl Lv2Host {
         let Ok(size) = usize::try_from(size) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
+        if size == 0 {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
         let img_bytes = match rt.read_committed(u64::from(img_ptr), size) {
             Some(b) => b,
             None => {
-                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
+        if !img_bytes.starts_with(&cellgov_ps3_abi::format::elf::ELF_MAGIC) {
+            return Lv2Dispatch::immediate(errno::CELL_ENOEXEC.into());
+        }
         if !rt.writable(u64::from(handle_out), 16) {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         // Synthetic path keys every (type_id, img_ptr) pair to a distinct
-        // entry; ELF parsing is deferred to sys_spu_thread_initialize.
-        let path = format!("/:import:{type_id:#x}:{img_ptr:#x}");
+        // entry; ELF parsing is deferred to sys_spu_thread_initialize. A
+        // guest can import other bytes from an address it imported from
+        // before, so a path that holds other bytes takes the next numeric
+        // suffix: the store refuses to re-register a path with new bytes.
+        let base = format!("/:import:{type_id:#x}:{img_ptr:#x}");
+        let mut path = base.clone();
+        let mut suffix = 0u32;
+        while self
+            .state
+            .content
+            .lookup_by_path(path.as_bytes())
+            .is_some_and(|r| r.elf_bytes != img_bytes)
+        {
+            suffix += 1;
+            path = format!("{base}:{suffix}");
+        }
         let handle = self
             .content_store_mut()
             .register(path.as_bytes(), img_bytes.to_vec());
+        let id = self.mint_image_id(handle);
 
-        let img_struct = kernel_image_struct(handle);
+        let img_struct = kernel_image_struct(id);
         let range = ByteRange::contiguous_u32(handle_out, 16);
         let effect = Effect::shared_write(
             range,
@@ -241,9 +272,79 @@ impl Lv2Host {
         }
     }
 
+    /// Mint a kernel image id for one open or import of `handle`.
+    /// The first live id of an image is its content-store handle;
+    /// an image that already has a live id gets the next id from
+    /// [`EXTRA_IMAGE_ID_BASE`]. The `spu_image_close_edges` capture
+    /// shows two imports of one ELF getting two ids, one closable
+    /// without the other.
+    fn mint_image_id(&mut self, handle: crate::image::SpuImageHandle) -> u32 {
+        let first = handle.raw();
+        let id = if self
+            .state
+            .spu_image_ids
+            .get(first)
+            .is_some_and(|&live| live != 0)
+        {
+            let extra = self
+                .state
+                .spu_image_ids
+                .iter()
+                .filter(|&(id, _)| id >= EXTRA_IMAGE_ID_BASE)
+                .count();
+            EXTRA_IMAGE_ID_BASE.saturating_add(u32::try_from(extra).unwrap_or(u32::MAX))
+        } else {
+            first
+        };
+        self.state.spu_image_ids.insert(id, first);
+        id
+    }
+
+    /// `sys_spu_image_close` (158): close the kernel image id the
+    /// record at `img_ptr` names.
+    ///
+    /// The id stays in the table, closed, and the image's bytes stay in
+    /// the content store: a later open of the same path finds them
+    /// again, and a kernel record naming the closed id initializes no
+    /// thread.
+    ///
+    /// # Errors
+    ///
+    /// As the `spu_image_import_raw` and `spu_image_close_edges`
+    /// captures show:
+    ///
+    /// - `CELL_EFAULT` when the record is unreadable.
+    /// - `CELL_EINVAL` when the record is not a kernel record.
+    /// - `CELL_ESRCH` when the record names a closed or unknown id; a
+    ///   second close of one record is this case.
+    pub(in crate::host) fn dispatch_spu_image_close(
+        &mut self,
+        img_ptr: u32,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        let word = |offset: u32| read_be_u32(rt, u64::from(img_ptr) + u64::from(offset));
+        let (Some(image_type), Some(handle)) = (
+            word(spu::image::TYPE_OFFSET),
+            word(spu::image::ENTRY_OFFSET),
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        };
+        if image_type != spu::image::TYPE_KERNEL {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        match self.state.spu_image_ids.get(handle).copied() {
+            Some(live) if live != 0 => {
+                self.state.spu_image_ids.insert(handle, 0);
+                Lv2Dispatch::immediate(0)
+            }
+            _ => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+        }
+    }
+
     /// `sys_spu_image_open`: resolve the NUL-terminated path at
-    /// `path_ptr` in the content store and write the kernel-shaped
-    /// `sys_spu_image` record for that image to `img_ptr`.
+    /// `path_ptr` in the content store, mint a kernel image id for the
+    /// image, and write the kernel-shaped `sys_spu_image` record naming
+    /// that id to `img_ptr`.
     ///
     /// # Errors
     ///
@@ -272,7 +373,9 @@ impl Lv2Host {
             }
         };
 
-        let img_struct = kernel_image_struct(record.handle);
+        let handle = record.handle;
+        let id = self.mint_image_id(handle);
+        let img_struct = kernel_image_struct(id);
 
         let range = ByteRange::contiguous_u32(img_ptr, 16);
         let effect = Effect::shared_write(
@@ -612,8 +715,8 @@ impl Lv2Host {
 
         // This screen runs ahead of every pointer read, so an
         // out-of-range slot with an unreadable image pointer answers
-        // CELL_EINVAL rather than CELL_EFAULT. Which of the two the
-        // kernel answers when both apply is unestablished.
+        // CELL_EINVAL rather than CELL_EFAULT, as the
+        // spu_group_init_limits capture shows.
         if thread_num >= MAX_SLOTS_PER_GROUP {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
@@ -681,6 +784,14 @@ impl Lv2Host {
                 (handle, Some(handle))
             }
             None => {
+                // A minted id resolves to its image's handle, and a closed
+                // one is CELL_ESRCH. An id no open minted is read as a
+                // content-store handle.
+                let kernel_handle = match self.state.spu_image_ids.get(kernel_handle).copied() {
+                    Some(0) => return Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+                    Some(handle) => handle,
+                    None => kernel_handle,
+                };
                 // ContentStore never allocates handle 0; guest-supplied 0 -> ESRCH.
                 let Some(handle) = crate::image::SpuImageHandle::new(kernel_handle) else {
                     return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
@@ -962,6 +1073,10 @@ mod user_image_tests;
 #[cfg(test)]
 #[path = "tests/spu_console_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_init_limits_console_tests.rs"]
+mod init_limits_console_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_pool_tests.rs"]

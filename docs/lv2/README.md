@@ -309,8 +309,8 @@ per dispatch arm with the slots that reach it. Of the 1024 slots:
 | Route | Slots | Meaning |
 | --- | ---: | --- |
 | `typed` | 154 | Classifies to a typed request arm. |
-| `routed` | 29 | Reaches a dedicated arm inside `Unsupported`. |
-| `null_backend` | 839 | The honest traced `CELL_ENOSYS` refusal through the generic arm. |
+| `routed` | 30 | Reaches a dedicated arm inside `Unsupported`. |
+| `null_backend` | 838 | The honest traced `CELL_ENOSYS` refusal through the generic arm. |
 | `runtime_fast_path` | 2 | Answered by the runtime's timer path; never classified or dispatched. |
 
 The routing-layer guarantee -- an unhandled syscall returns
@@ -369,7 +369,7 @@ stays and none is preferred; the disagreement is the information.
 | --- | ---: | --- |
 | `psdevwiki` | 618 | The name cell of psdevwiki's LV2 Functions and Syscalls table, taken only where it is one plain identifier and not a stub ending in `_`; `ref` is the page. |
 | `psl1ght` | 240 | `sys_` and the lowercased rest of a `SYSCALL_` token in PSL1GHT's `lv2/syscalls.h`; `ref` is the header and the token. |
-| `cellgov` | 184 | The name field of the `lv2_syscalls!` macro; `ref` is the constant. CellGov's own vocabulary, rendered, never hand-copied. |
+| `cellgov` | 185 | The name field of the `lv2_syscalls!` macro; `ref` is the constant. CellGov's own vocabulary, rendered, never hand-copied. |
 | `non_public` | 0 | A name known only from material that cannot be cited; `ref` is `none`. |
 
 `packet` is `none` for a name that applies to the whole ordinal.
@@ -394,7 +394,7 @@ for it either; the reach tables report exports beside names.
 `tables/conflicts.tsv` holds the rows of `tables/name.tsv` whose slot carries more
 than one distinct name: `spelling` when the names are one identifier
 under different leading underscores, `name` otherwise.
-32 slots:
+31 slots:
 
 | Slot | Disagreement | Names (sources) |
 | --- | --- | --- |
@@ -410,7 +410,6 @@ under different leading underscores, `name` otherwise.
 | 152 | name | `sys_raw_spu_get_int_mask` (cellgov, psdevwiki), `sys_spu_get_int_mask` (psl1ght) |
 | 153 | name | `sys_raw_spu_set_int_stat` (cellgov, psdevwiki), `sys_spu_set_int_stat` (psl1ght) |
 | 154 | name | `sys_raw_spu_get_int_stat` (cellgov, psdevwiki), `sys_spu_get_int_stat` (psl1ght) |
-| 158 | name | `sys_spu_image_close` (psdevwiki), `sys_spu_image_import` (cellgov) |
 | 160 | name | `sys_raw_spu_create` (cellgov, psdevwiki), `sys_spu_create` (psl1ght) |
 | 161 | name | `sys_raw_spu_destroy` (cellgov, psdevwiki), `sys_spu_destroy` (psl1ght) |
 | 163 | name | `sys_raw_spu_read_puint_mb` (cellgov, psdevwiki), `sys_spu_read_puint_mb` (psl1ght) |

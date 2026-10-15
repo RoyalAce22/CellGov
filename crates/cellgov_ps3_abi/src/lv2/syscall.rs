@@ -291,8 +291,9 @@ lv2_syscalls! {
     RAW_SPU_GET_INT_STAT = 154 => "sys_raw_spu_get_int_stat";
     /// `sys_spu_image_open`.
     SPU_IMAGE_OPEN = 156 => "sys_spu_image_open";
-    /// `sys_spu_image_import`.
-    SPU_IMAGE_IMPORT = 158 => "sys_spu_image_import";
+    /// `sys_spu_image_import`. Firmware liblv2's import wrapper issues
+    /// this number, and the `spu_image_import_raw` capture answers it.
+    SPU_IMAGE_IMPORT = 157 => "sys_spu_image_import";
     /// `sys_raw_spu_create`.
     RAW_SPU_CREATE = 160 => "sys_raw_spu_create";
     /// `sys_raw_spu_destroy`.
@@ -596,6 +597,9 @@ lv2_syscalls! {
     MMAPPER_ALLOCATE_ADDRESS = 330 => "sys_mmapper_allocate_address";
     /// `sys_mmapper_free_address`.
     MMAPPER_FREE_ADDRESS = 331 => "sys_mmapper_free_address";
+    /// `sys_spu_image_close`. Firmware liblv2's close wrapper issues this
+    /// number for a kernel image record.
+    SPU_IMAGE_CLOSE = 158 => "sys_spu_image_close";
     /// `sys_mmapper_map_shared_memory`.
     MMAPPER_MAP_SHARED_MEMORY = 334 => "sys_mmapper_map_shared_memory";
     /// `sys_mmapper_search_and_map`.

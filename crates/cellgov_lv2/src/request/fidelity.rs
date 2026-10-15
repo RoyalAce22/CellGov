@@ -126,6 +126,11 @@ pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
             ArmFidelity::PartialState,
         ),
         (
+            syscall::SPU_IMAGE_CLOSE,
+            "SpuImageClose",
+            ArmFidelity::Modeled,
+        ),
+        (
             syscall::MMAPPER_FREE_ADDRESS,
             "MmapperFreeAddress",
             ArmFidelity::PartialState,

@@ -76,7 +76,8 @@ ordinal	packet	same_as	selector_slot	provenance_kind	provenance_ref	witness	exce
 153	none	none	none	console_capture	micro:spu_raw_lifecycle	crates/cellgov_lv2/src/host/tests/raw_spu_console_tests.rs:raw_spu_calls_answer_as_the_console_does	none	crates/cellgov_lv2/src/host/raw_spu.rs
 154	none	none	none	console_capture	micro:spu_raw_lifecycle	crates/cellgov_lv2/src/host/tests/raw_spu_console_tests.rs:raw_spu_calls_answer_as_the_console_does	none	crates/cellgov_lv2/src/host/raw_spu.rs
 156	none	none	none	console_capture	micro:spu_image_segments	crates/cellgov_lv2/src/host/tests/spu_console_tests.rs:image_open_bounds_the_path_as_the_console_does	none	crates/cellgov_lv2/src/host/spu.rs
-158	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/spu_tests.rs:image_import_registers_distinct_entries_per_type_id_img_ptr	none	crates/cellgov_lv2/src/host/spu.rs
+157	none	none	none	console_capture	micro:spu_image_import_raw	crates/cellgov_lv2/src/host/tests/spu_init_limits_console_tests.rs:raw_image_import_and_close_answer_as_on_the_console	none	crates/cellgov_lv2/src/host/spu.rs
+158	none	none	none	console_capture	micro:spu_image_close_edges	crates/cellgov_lv2/src/host/tests/spu_init_limits_console_tests.rs:image_close_edges_answer_as_on_the_console	none	crates/cellgov_lv2/src/host/spu.rs
 160	none	none	none	console_capture	micro:spu_raw_lifecycle	crates/cellgov_lv2/src/host/tests/raw_spu_console_tests.rs:raw_spu_calls_answer_as_the_console_does	none	crates/cellgov_lv2/src/host/raw_spu.rs
 161	none	none	none	console_capture	micro:spu_raw_lifecycle	crates/cellgov_lv2/src/host/tests/raw_spu_console_tests.rs:raw_spu_calls_answer_as_the_console_does	none	crates/cellgov_lv2/src/host/raw_spu.rs
 163	none	none	none	console_capture	micro:spu_raw_lifecycle	crates/cellgov_lv2/src/host/tests/raw_spu_console_tests.rs:raw_spu_calls_answer_as_the_console_does	none	crates/cellgov_lv2/src/host/raw_spu.rs

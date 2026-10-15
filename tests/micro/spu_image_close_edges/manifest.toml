@@ -1,0 +1,14 @@
+[test]
+name = "spu_image_close_edges"
+
+# A hardware probe: SPU image close answers for two imports of one ELF and for a user record.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words at the offsets ppu/main.c lists: 48 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 48 },
+]
+
+[expect]
+outcome = "completed"

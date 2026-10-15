@@ -19,7 +19,8 @@ use std::collections::BTreeMap;
 /// `sys_spu_thread_group_create` holds a group to the SPU pool, at most
 /// [`pool::USABLE_SPUS`] threads, so no group a create admits reaches
 /// this cap; it bounds the slot indices `sys_spu_thread_initialize`
-/// names.
+/// names. The `spu_group_init_limits` capture shows the console's slot
+/// ceiling at the same 256.
 pub const MAX_SLOTS_PER_GROUP: u32 = 256;
 
 const _: () = assert!(pool::USABLE_SPUS <= MAX_SLOTS_PER_GROUP);
@@ -811,10 +812,11 @@ impl ThreadGroupTable {
             return Err(InitializeThreadError::SlotAlreadyInitialized);
         }
         // The slot index is the SPU number, unique within the group;
-        // its ceiling is MAX_SLOTS_PER_GROUP, which is CellGov's own.
-        // Only the populated count is capped against the group's
-        // declared thread count, so any index below that ceiling is
-        // accepted.
+        // its ceiling is MAX_SLOTS_PER_GROUP. Only the populated count
+        // is capped against the group's declared thread count, so any
+        // index below that ceiling is accepted: the
+        // spu_group_init_limits capture initializes slot 1 of a
+        // one-thread group and slot 255, and refuses slot 256.
         if group.slots.len() as u32 >= group.num_threads {
             return Err(InitializeThreadError::GroupFull {
                 num_threads: group.num_threads,

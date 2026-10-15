@@ -117,6 +117,10 @@ impl Lv2Host {
                     cellgov_mem::lanes::source::MMAPPER_IPC,
                     |key| key,
                 ),
+                spu_image_ids: cellgov_mem::lanes::LaneMap::new(
+                    cellgov_mem::lanes::source::SPU_IMAGE_IDS,
+                    u64::from,
+                ),
                 mmapper_areas: cellgov_mem::lanes::LaneMap::new(
                     cellgov_mem::lanes::source::MMAPPER_AREA,
                     u64::from,
