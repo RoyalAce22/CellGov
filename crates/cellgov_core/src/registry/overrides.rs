@@ -11,8 +11,21 @@ use super::UnitRegistry;
 
 impl UnitRegistry {
     /// Effective status of a unit: runtime override if set, else the
-    /// unit's self-reported `status()`.
+    /// unit's self-reported `status()`; and [`UnitStatus::Suspended`]
+    /// over a Runnable or Blocked status while the unit is suspended.
     pub fn effective_status(&self, id: UnitId) -> Option<UnitStatus> {
+        let status = self.status_beneath_hold(id)?;
+        let held = !self.suspended.is_empty()
+            && matches!(status, UnitStatus::Runnable | UnitStatus::Blocked)
+            && self.suspended.contains(&id);
+        Some(if held { UnitStatus::Suspended } else { status })
+    }
+
+    /// The status of a unit beneath a suspension hold: the runtime
+    /// override if set, else the unit's self-reported `status()`. A wake
+    /// reads this, so a message or signal that lands while the unit's
+    /// group is suspended still ends its park.
+    pub(crate) fn status_beneath_hold(&self, id: UnitId) -> Option<UnitStatus> {
         let unit = self.units.get(&id)?;
         Some(
             self.status_overrides
@@ -20,6 +33,23 @@ impl UnitRegistry {
                 .copied()
                 .unwrap_or_else(|| unit.status()),
         )
+    }
+
+    /// Hold `id` out of the runnable set while its SPU thread group is
+    /// suspended (`true`), or release it (`false`). No-op for unknown
+    /// ids.
+    pub(crate) fn set_suspended(&mut self, id: UnitId, suspended: bool) {
+        if !self.units.contains_key(&id) {
+            return;
+        }
+        let changed = if suspended {
+            self.suspended.insert(id)
+        } else {
+            self.suspended.remove(&id)
+        };
+        if changed {
+            self.status_lanes.get_mut().mark(id);
+        }
     }
 
     /// The runtime-side override on `id`, if one is set.

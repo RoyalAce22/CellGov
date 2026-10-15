@@ -99,6 +99,7 @@ fn status_byte(status: UnitStatus) -> u8 {
         UnitStatus::Blocked => 1,
         UnitStatus::Faulted => 2,
         UnitStatus::Finished => 3,
+        UnitStatus::Suspended => 4,
     }
 }
 

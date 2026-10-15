@@ -325,6 +325,11 @@ impl Runtime {
                 self.step_woke_others = true;
                 self.handle_spu_group_terminate(source, group_id, finished_units);
             }
+            Lv2Dispatch::SpuGroupSuspension { units, suspended } => {
+                // A resume makes units runnable again.
+                self.step_woke_others = !suspended;
+                self.handle_spu_group_suspension(source, units, suspended);
+            }
             Lv2Dispatch::ProcessExitChild { pid, code, effects } => {
                 self.handle_process_exit_child(source, pid, code, effects);
             }

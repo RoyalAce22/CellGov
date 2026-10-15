@@ -234,6 +234,12 @@ pub mod group_type {
 
     /// A root type with any of these bits set holds exactly one thread.
     pub const SINGLE_THREAD_MASK: u32 = 0x700;
+
+    /// A type with any of these bits set takes no suspend or resume, and
+    /// a yield of it does nothing.
+    // Unprobed: only root types carry these bits, and the probes created
+    // none of them for suspend; the mask follows the oracle's model.
+    pub const NO_RUN_CONTROL_MASK: u32 = 0xF00;
 }
 
 /// The priorities of an SPU thread group with a scheduler context. A

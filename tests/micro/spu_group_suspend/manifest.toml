@@ -1,0 +1,21 @@
+[test]
+name = "spu_group_suspend"
+
+# A hardware probe: what sys_spu_thread_group_suspend, resume and yield
+# answer in each group state and for each group type, a terminate of a
+# suspended group, and a start of a group that has already run. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 56 big-endian u32 words, in the order ppu/main.c lists: 224 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 224 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

@@ -62,7 +62,7 @@ consumed budget; `commit_step` only advances the epoch.
 
 The default `RoundRobinScheduler` walks the registry in id order
 from after the last selection. It skips units whose effective
-status is `Blocked` / `Faulted` / `Finished`.
+status is `Blocked` / `Suspended` / `Faulted` / `Finished`.
 
 **Stickiness.** Round-robin rotation has two stickiness exceptions.
 The previous unit is reselected if either holds:

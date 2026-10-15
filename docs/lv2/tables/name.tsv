@@ -319,10 +319,13 @@ ordinal	packet	name	source	ref	fw_from	fw_to
 173	none	sys_spu_thread_group_start	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_START	none	none
 173	none	sys_spu_thread_group_start	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 173	none	sys_spu_thread_group_start	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_GROUP_START	none	none
+174	none	sys_spu_thread_group_suspend	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_SUSPEND	none	none
 174	none	sys_spu_thread_group_suspend	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 174	none	sys_spu_thread_group_suspend	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_GROUP_SUSPEND	none	none
+175	none	sys_spu_thread_group_resume	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_RESUME	none	none
 175	none	sys_spu_thread_group_resume	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 175	none	sys_spu_thread_group_resume	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_GROUP_RESUME	none	none
+176	none	sys_spu_thread_group_yield	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_YIELD	none	none
 176	none	sys_spu_thread_group_yield	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 176	none	sys_spu_thread_group_yield	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SPU_THREAD_GROUP_YIELD	none	none
 177	none	sys_spu_thread_group_terminate	cellgov	cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_TERMINATE	none	none

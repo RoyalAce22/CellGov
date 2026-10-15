@@ -392,18 +392,6 @@ fn unsupported_preserves_args_for_diagnosis() {
 }
 
 #[test]
-fn spu_thread_group_range_stubs_classify_as_unsupported() {
-    let args = [0; 8];
-    for n in [174, 175, 176] {
-        let req = classify(n, &args);
-        assert!(
-            matches!(req, Lv2Request::Unsupported { number, .. } if number == n),
-            "syscall {n} should be Unsupported",
-        );
-    }
-}
-
-#[test]
 fn classify_mutex_create() {
     let args = [0x5000, 0x6000, 0, 0, 0, 0, 0, 0];
     let req = classify(syscall::MUTEX_CREATE, &args);
@@ -931,6 +919,9 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::SPU_THREAD_GROUP_DESTROY, &[0]),
     (syscall::SPU_THREAD_GROUP_TERMINATE, &[0]),
     (syscall::SPU_THREAD_GROUP_JOIN, &[0, 1, 2]),
+    (syscall::SPU_THREAD_GROUP_SUSPEND, &[0]),
+    (syscall::SPU_THREAD_GROUP_RESUME, &[0]),
+    (syscall::SPU_THREAD_GROUP_YIELD, &[0]),
     (syscall::SPU_THREAD_GROUP_SET_PRIORITY, &[0]),
     (syscall::SPU_THREAD_GROUP_GET_PRIORITY, &[0, 1]),
     (syscall::SPU_THREAD_GET_EXIT_STATUS, &[0, 1]),

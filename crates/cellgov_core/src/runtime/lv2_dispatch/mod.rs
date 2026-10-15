@@ -17,3 +17,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/spu_group_terminate_tests.rs"]
 mod spu_group_terminate_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_group_suspend_tests.rs"]
+mod spu_group_suspend_tests;

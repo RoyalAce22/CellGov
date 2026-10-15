@@ -440,7 +440,8 @@ impl Lv2Host {
 
     /// `sys_spu_thread_group_start`: register every initialized slot's
     /// SPU and move the group to [`GroupState::Running`]. Unknown id ->
-    /// CELL_ESRCH; a group that has already been started -> CELL_ESTAT.
+    /// CELL_ESRCH; a running group -> CELL_ESTAT; a finished group
+    /// starts again.
     /// The runtime creates the SPUs from the returned init states.
     /// Each slot enters at the entry [`Self::load_image_for`] reports.
     pub(super) fn dispatch_group_start(&mut self, group_id: u32) -> Lv2Dispatch {
@@ -451,22 +452,27 @@ impl Lv2Host {
             }
         };
 
-        // Group start leaves the initialized state exactly once and
-        // answers CELL_ESTAT from every other state, so a restart of a
-        // running or finished group is refused instead of silently
-        // re-registering its SPUs against a second RegisterSpu
-        // dispatch.
-        if group.state != GroupState::Created {
+        // Group start leaves the initialized state and answers
+        // CELL_ESTAT while the group runs. A finished group is
+        // initialized again, whether or not a join has read it: its
+        // previous run's units are dropped and it starts afresh
+        // (tests/micro/spu_group_suspend).
+        let restart = group.state == GroupState::Finished;
+        if group.state != GroupState::Created && !restart {
             return Lv2Dispatch::immediate(errno::CELL_ESTAT.into());
         }
 
         // Two-pass: validate every handle, then build `inits`. The second
-        // pass's `expect` requires the lookups to be pure reads.
+        // pass's `expect` requires the lookups to be pure reads. A
+        // refusal comes before the restart reset, so it changes nothing.
         let slot_entries: Vec<_> = group.slots.iter().map(|(&k, v)| (k, v.clone())).collect();
         for (_slot_idx, slot) in &slot_entries {
             if self.load_image_for(slot.image_handle).is_none() {
                 return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
+        }
+        if restart {
+            self.state.groups.reset_for_restart(group_id);
         }
 
         let mut inits = std::collections::BTreeMap::new();

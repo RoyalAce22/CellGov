@@ -173,9 +173,9 @@ ordinal	route	arm
 171	typed	SpuThreadGroupDestroy
 172	typed	SpuThreadInitialize
 173	typed	SpuThreadGroupStart
-174	null_backend	none
-175	null_backend	none
-176	null_backend	none
+174	typed	SpuThreadGroupSuspend
+175	typed	SpuThreadGroupResume
+176	typed	SpuThreadGroupYield
 177	typed	SpuThreadGroupTerminate
 178	typed	SpuThreadGroupJoin
 179	typed	SpuThreadGroupSetPriority

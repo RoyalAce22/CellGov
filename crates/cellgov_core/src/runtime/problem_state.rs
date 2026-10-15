@@ -38,7 +38,7 @@ impl Runtime {
     ///   problem-state registers.
     pub fn request_unit_stop(&mut self, unit: UnitId) -> Result<(), ProblemStateError> {
         self.refuse_retired(unit)?;
-        let status = self.registry.effective_status(unit);
+        let status = self.registry.status_beneath_hold(unit);
         if status == Some(UnitStatus::Faulted) {
             return Ok(());
         }
@@ -193,7 +193,7 @@ impl Runtime {
     /// producer can raise. `unstalled` answers for a blocked unit that
     /// names no channel stall.
     pub(super) fn stall_ends(&self, unit: UnitId, wake: StallWake, unstalled: bool) -> bool {
-        self.registry.effective_status(unit) == Some(UnitStatus::Blocked)
+        self.registry.status_beneath_hold(unit) == Some(UnitStatus::Blocked)
             && self
                 .registry
                 .get(unit)

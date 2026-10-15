@@ -85,6 +85,12 @@ pub struct ThreadGroup {
     /// `sys_spu_thread_group_set_priority`. Served back, never a
     /// scheduling input.
     pub priority: i32,
+    /// Whether `sys_spu_thread_group_suspend` holds the running group.
+    pub suspended: bool,
+    /// The status each thread gave `sys_spu_thread_exit` in an earlier
+    /// run of the group, by slot. A thread that has not exited in the
+    /// current run reports it.
+    pub previous_exit_status: BTreeMap<u32, u32>,
 }
 
 /// What `sys_spu_thread_group_create` asks for.
@@ -190,6 +196,13 @@ impl ThreadGroup {
         GroupKind::of_type(self.group_type)
     }
 
+    /// Whether the group takes `sys_spu_thread_group_suspend` and
+    /// `sys_spu_thread_group_resume`: a scheduler-context group whose
+    /// type carries no [`group_type::NO_RUN_CONTROL_MASK`] bit.
+    fn takes_run_control(&self) -> bool {
+        self.kind() == GroupKind::Context && self.group_type & group_type::NO_RUN_CONTROL_MASK == 0
+    }
+
     /// Whether every declared slot is initialized.
     pub fn is_initialized(&self) -> bool {
         self.slots.len() as u32 >= self.num_threads
@@ -228,6 +241,12 @@ impl LaneValue for ThreadGroup {
         }
         if self.priority != 0 {
             lanes.lane(31, 0, u64::from(self.priority as u32));
+        }
+        if self.suspended {
+            lanes.lane(32, 0, 1);
+        }
+        for (&slot, &status) in &self.previous_exit_status {
+            lanes.lane(33, u64::from(slot), u64::from(status));
         }
         for (&index, slot) in &self.slots {
             let index = u64::from(index);
@@ -414,6 +433,22 @@ pub enum CreateGroupError {
     /// -> `CELL_EAGAIN`: the u32 id space is exhausted.
     #[error("the thread-group id space is exhausted")]
     Exhausted,
+}
+
+/// Failure modes of [`ThreadGroupTable::suspend`],
+/// [`ThreadGroupTable::resume`] and [`ThreadGroupTable::check_yield`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum RunControlError {
+    /// -> `CELL_ESRCH`: no group has the id.
+    #[error("unknown thread group")]
+    Unknown,
+    /// -> `CELL_EINVAL`: the group has no scheduler context, shares an
+    /// SPU with the system, or its type takes no run control.
+    #[error("the thread group takes no suspend or resume")]
+    NoRunControl,
+    /// -> `CELL_ESTAT`: the group is not in a state the call acts on.
+    #[error("the thread group is not in a state the call acts on")]
+    NotRunning,
 }
 
 /// Failure modes of [`ThreadGroupTable::set_priority`].
@@ -674,6 +709,8 @@ impl ThreadGroupTable {
             event_queues: BTreeMap::new(),
             group_type,
             priority,
+            suspended: false,
+            previous_exit_status: BTreeMap::new(),
         };
         self.groups.insert(id, group);
         Some(id)
@@ -1230,6 +1267,7 @@ impl ThreadGroupTable {
             return Err(TerminateGroupError::NotRunning { state: group.state });
         }
         group.state = GroupState::Finished;
+        group.suspended = false;
         group.remaining_unfinished = 0;
         group.join_cause = group_join_cause::TERMINATED;
         group.exit_status = status;
@@ -1246,20 +1284,135 @@ impl ThreadGroupTable {
         Ok(members)
     }
 
+    /// The units of group `group_id` that have not finished.
+    fn live_units(&self, group_id: u32) -> Vec<UnitId> {
+        self.unit_to_group
+            .iter()
+            .filter(|(_, &gid)| gid == group_id)
+            .map(|(unit, _)| unit)
+            .collect()
+    }
+
+    /// Suspend the running group `group_id`, as
+    /// `sys_spu_thread_group_suspend` does. A suspended group stays
+    /// suspended. Returns the group's units that have not finished, for
+    /// the runtime to hold.
+    ///
+    /// # Errors
+    /// See [`RunControlError`]; an error changes nothing.
+    pub fn suspend(&mut self, group_id: u32) -> Result<Vec<UnitId>, RunControlError> {
+        {
+            let mut group = self
+                .groups
+                .get_mut(group_id)
+                .ok_or(RunControlError::Unknown)?;
+            if !group.takes_run_control() {
+                return Err(RunControlError::NoRunControl);
+            }
+            if group.state != GroupState::Running {
+                return Err(RunControlError::NotRunning);
+            }
+            group.suspended = true;
+        }
+        Ok(self.live_units(group_id))
+    }
+
+    /// Resume the suspended group `group_id`, as
+    /// `sys_spu_thread_group_resume` does. Returns the group's units that
+    /// have not finished, for the runtime to release.
+    ///
+    /// # Errors
+    /// See [`RunControlError`]; [`RunControlError::NotRunning`] also
+    /// covers a running group that is not suspended. An error changes
+    /// nothing.
+    pub fn resume(&mut self, group_id: u32) -> Result<Vec<UnitId>, RunControlError> {
+        {
+            let mut group = self
+                .groups
+                .get_mut(group_id)
+                .ok_or(RunControlError::Unknown)?;
+            if !group.takes_run_control() {
+                return Err(RunControlError::NoRunControl);
+            }
+            if group.state != GroupState::Running || !group.suspended {
+                return Err(RunControlError::NotRunning);
+            }
+            group.suspended = false;
+        }
+        Ok(self.live_units(group_id))
+    }
+
+    /// Check a `sys_spu_thread_group_yield` of group `group_id`. A yield
+    /// changes nothing: every SPU thread runs as its own unit, so no other
+    /// group waits for the SPUs it would give up.
+    ///
+    /// # Errors
+    /// [`RunControlError::Unknown`], and [`RunControlError::NotRunning`]
+    /// when the group is not running or is suspended. A group that takes
+    /// no run control answers `Ok`.
+    pub fn check_yield(&self, group_id: u32) -> Result<(), RunControlError> {
+        let group = self.groups.get(group_id).ok_or(RunControlError::Unknown)?;
+        if !group.takes_run_control() {
+            return Ok(());
+        }
+        if group.state != GroupState::Running || group.suspended {
+            return Err(RunControlError::NotRunning);
+        }
+        Ok(())
+    }
+
+    /// Return the finished group `group_id` to [`GroupState::Created`]
+    /// for another start, whether or not a join has read it: its slots
+    /// and their arguments stay, each thread's exit status moves to
+    /// [`ThreadGroup::previous_exit_status`], and the previous run's
+    /// units and join record go. Returns `false`, changing nothing,
+    /// unless the group finished.
+    pub(crate) fn reset_for_restart(&mut self, group_id: u32) -> bool {
+        let units: Vec<(u32, u64)> = self
+            .thread_id_to_unit
+            .iter()
+            .filter(|(tid, _)| tid / MAX_SLOTS_PER_GROUP == group_id)
+            .map(|(tid, &raw)| (tid % MAX_SLOTS_PER_GROUP, raw))
+            .collect();
+        {
+            let Some(mut group) = self.groups.get_mut(group_id) else {
+                return false;
+            };
+            if group.state != GroupState::Finished {
+                return false;
+            }
+            for (slot, raw) in units {
+                if let Some(&status) = group.thread_exit_status.get(&raw) {
+                    group.previous_exit_status.insert(slot, status);
+                }
+            }
+            group.state = GroupState::Created;
+            group.remaining_unfinished = 0;
+            group.join_cause = group_join_cause::ALL_THREADS_EXIT;
+            group.exit_status = 0;
+            group.thread_exit_status.clear();
+        }
+        self.finished_units.retain(|_, gid| *gid != group_id);
+        self.thread_id_to_unit
+            .retain(|tid, _| tid / MAX_SLOTS_PER_GROUP != group_id);
+        true
+    }
+
     /// The status an initialized thread gave `sys_spu_thread_exit`.
     ///
     /// # Errors
     /// See [`ExitStatusError`].
     pub fn thread_exit_status(&self, thread_id: u32) -> Result<u32, ExitStatusError> {
-        let (group_id, _) = self
+        let (group_id, slot) = self
             .slot_of_thread(thread_id)
             .ok_or(ExitStatusError::UnknownThread)?;
-        let unit = self
-            .unit_for_thread(thread_id)
-            .ok_or(ExitStatusError::NoStatus)?;
-        self.groups
+        let group = self
+            .groups
             .get(group_id)
-            .and_then(|group| group.thread_exit_status.get(&unit.raw()))
+            .ok_or(ExitStatusError::UnknownThread)?;
+        self.unit_for_thread(thread_id)
+            .and_then(|unit| group.thread_exit_status.get(&unit.raw()))
+            .or_else(|| group.previous_exit_status.get(&slot))
             .copied()
             .ok_or(ExitStatusError::NoStatus)
     }
@@ -1330,3 +1483,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/thread_group_event_tests.rs"]
 mod event_tests;
+
+#[cfg(test)]
+#[path = "tests/thread_group_restart_tests.rs"]
+mod restart_tests;

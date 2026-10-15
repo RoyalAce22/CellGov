@@ -375,6 +375,9 @@ fn multi_primitive_determinism_canary() {
                 Lv2Dispatch::SpuGroupTerminate { group_id, .. } => {
                     format!("Terminate({group_id:#x})")
                 }
+                Lv2Dispatch::SpuGroupSuspension { suspended, .. } => {
+                    format!("Suspension({suspended})")
+                }
             };
             trace.push((format!("{label}:{tag}"), host.sync_partial()));
         }

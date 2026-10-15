@@ -92,6 +92,21 @@ pub enum Lv2Request {
         /// In: termination value.
         value: i32,
     },
+    /// `sys_spu_thread_group_suspend`.
+    SpuThreadGroupSuspend {
+        /// In: group id.
+        group_id: u32,
+    },
+    /// `sys_spu_thread_group_resume`.
+    SpuThreadGroupResume {
+        /// In: group id.
+        group_id: u32,
+    },
+    /// `sys_spu_thread_group_yield`.
+    SpuThreadGroupYield {
+        /// In: group id.
+        group_id: u32,
+    },
     /// `sys_spu_thread_group_set_priority`.
     SpuThreadGroupSetPriority {
         /// In: group id.

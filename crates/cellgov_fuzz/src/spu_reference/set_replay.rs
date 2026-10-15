@@ -122,12 +122,14 @@ fn replay_vector(vector: &SpuReferenceVector) -> Result<SpuVectorReplay, SpuRefe
                     Some(FaultKind::Validation) | None => None,
                 },
             },
-            UnitStatus::Runnable | UnitStatus::Blocked => match world.unit.channel_stall() {
-                Some(stall) => SpuReferenceEnd::Stalled {
-                    channel: stall.channel,
-                },
-                None => SpuReferenceEnd::StepLimit,
-            },
+            UnitStatus::Runnable | UnitStatus::Blocked | UnitStatus::Suspended => {
+                match world.unit.channel_stall() {
+                    Some(stall) => SpuReferenceEnd::Stalled {
+                        channel: stall.channel,
+                    },
+                    None => SpuReferenceEnd::StepLimit,
+                }
+            }
         }
     };
     let snapshot = world.unit.snapshot();

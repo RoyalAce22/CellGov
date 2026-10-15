@@ -10,6 +10,7 @@
 //!
 //! - an explicit `woken_unit_ids` entry
 //! - an explicit `finished_units` entry
+//! - an explicit `units` entry of [`Lv2Dispatch::SpuGroupSuspension`]
 //! - for [`Lv2Dispatch::SpuGroupTerminate`], a joiner parked on the
 //!   named group
 
@@ -193,6 +194,16 @@ pub enum Lv2Dispatch {
         group_id: u32,
         /// The group's SPU units that were not finished at the terminate.
         finished_units: Vec<UnitId>,
+    },
+    /// `sys_spu_thread_group_suspend` or `sys_spu_thread_group_resume`:
+    /// the host already marked the group. The runtime holds each of
+    /// `units` out of the runnable set (`suspended`) or releases them,
+    /// then writes 0 to the source's r3.
+    SpuGroupSuspension {
+        /// The group's SPU units that have not finished.
+        units: Vec<UnitId>,
+        /// `true` to hold the units, `false` to release them.
+        suspended: bool,
     },
     /// [`Self::Immediate`] whose result also lands in GPRs beyond
     /// r3: `registers` are `(gpr, value)` pairs the caller sees

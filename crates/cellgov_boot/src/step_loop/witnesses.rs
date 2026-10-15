@@ -459,6 +459,7 @@ fn unit_status_label(status: Option<cellgov_exec::UnitStatus>) -> &'static str {
         Some(cellgov_exec::UnitStatus::Blocked) => "blocked",
         Some(cellgov_exec::UnitStatus::Faulted) => "faulted",
         Some(cellgov_exec::UnitStatus::Finished) => "finished",
+        Some(cellgov_exec::UnitStatus::Suspended) => "suspended",
         None => "none",
     }
 }

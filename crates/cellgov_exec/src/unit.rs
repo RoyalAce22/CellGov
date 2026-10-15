@@ -35,6 +35,10 @@ pub enum UnitStatus {
     /// [`ExecutionUnit::stop_registers`], which [`ExecutionUnit::restart`]
     /// resumes from.
     Finished = 3,
+    /// Held out of the runnable set because its SPU thread group is
+    /// suspended. A unit never reports this itself: the runtime reports
+    /// it over a Runnable or Blocked status until the group resumes.
+    Suspended = 4,
 }
 
 /// Canonical PPU fingerprint input set.

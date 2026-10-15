@@ -1,6 +1,7 @@
 //! LV2 dispatch for SPU thread-group control:
 //!
 //! - terminate a running group;
+//! - suspend, resume and yield a group;
 //! - set and read a group's priority;
 //! - read the exit status of a thread;
 //! - replace the argument block of a thread.
@@ -14,7 +15,19 @@ use cellgov_time::GuestTicks;
 use crate::dispatch::Lv2Dispatch;
 use crate::host::guest_struct::GuestStruct;
 use crate::host::{Lv2Host, Lv2Runtime};
-use crate::thread_group::{ExitStatusError, SetPriorityError, TerminateGroupError};
+use crate::thread_group::{
+    ExitStatusError, RunControlError, SetPriorityError, TerminateGroupError,
+};
+
+/// The errno a refused suspend, resume or yield answers.
+fn run_control_refusal(error: RunControlError) -> Lv2Dispatch {
+    let code = match error {
+        RunControlError::Unknown => errno::CELL_ESRCH,
+        RunControlError::NoRunControl => errno::CELL_EINVAL,
+        RunControlError::NotRunning => errno::CELL_ESTAT,
+    };
+    Lv2Dispatch::immediate(code.into())
+}
 
 impl Lv2Host {
     /// `sys_spu_thread_group_terminate`
@@ -37,6 +50,63 @@ impl Lv2Host {
             Err(TerminateGroupError::NotRunning { .. }) => {
                 Lv2Dispatch::immediate(errno::CELL_ESTAT.into())
             }
+        }
+    }
+
+    /// `sys_spu_thread_group_suspend`
+    /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_SUSPEND`]):
+    /// hold every unfinished thread of a running group until a resume.
+    /// A suspended group answers OK and stays suspended.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when no group has `group_id`.
+    /// - `CELL_EINVAL` when the group takes no run control: no scheduler
+    ///   context, cooperating with the system, or a reserved type bit.
+    /// - `CELL_ESTAT` when the group is not running.
+    pub(super) fn dispatch_group_suspend(&mut self, group_id: u32) -> Lv2Dispatch {
+        match self.state.groups.suspend(group_id) {
+            Ok(units) => Lv2Dispatch::SpuGroupSuspension {
+                units,
+                suspended: true,
+            },
+            Err(e) => run_control_refusal(e),
+        }
+    }
+
+    /// `sys_spu_thread_group_resume`
+    /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_RESUME`]):
+    /// release a suspended group's threads.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when no group has `group_id`.
+    /// - `CELL_EINVAL` when the group takes no run control.
+    /// - `CELL_ESTAT` when the group is not suspended.
+    pub(super) fn dispatch_group_resume(&mut self, group_id: u32) -> Lv2Dispatch {
+        match self.state.groups.resume(group_id) {
+            Ok(units) => Lv2Dispatch::SpuGroupSuspension {
+                units,
+                suspended: false,
+            },
+            Err(e) => run_control_refusal(e),
+        }
+    }
+
+    /// `sys_spu_thread_group_yield`
+    /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_YIELD`]): change
+    /// nothing. Every SPU thread runs as its own unit, so no group waits
+    /// for the SPUs a yield would give up. A group that takes no run
+    /// control answers OK.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when no group has `group_id`.
+    /// - `CELL_ESTAT` when the group is not running, or is suspended.
+    pub(super) fn dispatch_group_yield(&self, group_id: u32) -> Lv2Dispatch {
+        match self.state.groups.check_yield(group_id) {
+            Ok(()) => Lv2Dispatch::immediate(0),
+            Err(e) => run_control_refusal(e),
         }
     }
 
@@ -190,3 +260,7 @@ mod priority_tests;
 #[cfg(test)]
 #[path = "tests/spu_group_priority_console_tests.rs"]
 mod priority_console_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_group_suspend_console_tests.rs"]
+mod suspend_console_tests;

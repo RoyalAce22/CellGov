@@ -244,6 +244,13 @@ impl Lv2RequestKind {
             // that contest never arises.
             Lv2RequestKind::SpuThreadGroupSetPriority
             | Lv2RequestKind::SpuThreadGroupGetPriority => Modeled,
+            // A suspend holds the group's units out of the runnable set
+            // until the resume. A yield changes nothing: every SPU thread
+            // runs as its own unit, so no group waits for the SPUs it
+            // would give up.
+            Lv2RequestKind::SpuThreadGroupSuspend
+            | Lv2RequestKind::SpuThreadGroupResume
+            | Lv2RequestKind::SpuThreadGroupYield => Modeled,
             // The connect arm does not read the group type: it refuses a
             // system-module connect for every group. The queue type is
             // not modeled: the bind arm binds a PPU-type queue like an
@@ -251,12 +258,9 @@ impl Lv2RequestKind {
             Lv2RequestKind::SpuThreadGroupConnectEvent | Lv2RequestKind::SpuThreadBindQueue => {
                 PartialState
             }
-            // Two gaps from the console:
-            // - The group has no waiting state. A group whose threads
-            //   all wait in the kernel terminates; the console answers
-            //   ESTAT.
-            // - A terminated group finishes; on the console it returns
-            //   to the initialized state.
+            // The group has no waiting state: a group whose threads all
+            // wait in the kernel terminates, where the console answers
+            // ESTAT.
             Lv2RequestKind::SpuThreadGroupTerminate => PartialState,
 
             // Deterministic guest time is the model.

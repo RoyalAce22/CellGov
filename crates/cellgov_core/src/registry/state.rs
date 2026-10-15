@@ -4,7 +4,7 @@
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::registry::status_lanes::StatusLanes;
 use crate::registry::RegisteredUnit;
@@ -24,6 +24,10 @@ pub struct UnitRegistry {
     /// cleared when the unit next runs. Takes precedence over the
     /// unit's self-reported `status()` for scheduling and hashing.
     pub(super) status_overrides: BTreeMap<UnitId, UnitStatus>,
+    /// Units whose SPU thread group is suspended. Unlike an override,
+    /// the hold survives a step and a wake: the status underneath keeps
+    /// changing, and shows again when the group resumes.
+    pub(super) suspended: BTreeSet<UnitId>,
     /// Per-unit pending `MailboxReceiveAttempt` pops, drained into
     /// `ExecutionContext::received_messages` at next step.
     pub(super) pending_receives: BTreeMap<UnitId, Vec<u32>>,
@@ -50,6 +54,7 @@ impl Clone for UnitRegistry {
             next_id: self.next_id,
             units,
             status_overrides: self.status_overrides.clone(),
+            suspended: self.suspended.clone(),
             pending_receives: self.pending_receives.clone(),
             pending_syscall_returns: self.pending_syscall_returns.clone(),
             pending_register_writes: self.pending_register_writes.clone(),

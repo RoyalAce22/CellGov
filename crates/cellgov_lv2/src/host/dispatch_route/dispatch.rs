@@ -152,6 +152,9 @@ impl Lv2Host {
             Lv2Request::SpuThreadGroupTerminate { group_id, value } => {
                 self.dispatch_group_terminate(group_id, value)
             }
+            Lv2Request::SpuThreadGroupSuspend { group_id } => self.dispatch_group_suspend(group_id),
+            Lv2Request::SpuThreadGroupResume { group_id } => self.dispatch_group_resume(group_id),
+            Lv2Request::SpuThreadGroupYield { group_id } => self.dispatch_group_yield(group_id),
             Lv2Request::SpuThreadGroupSetPriority { group_id, priority } => {
                 self.dispatch_group_set_priority(group_id, priority)
             }

@@ -96,7 +96,8 @@ fn a_depth_holds_one_runnable_unit_with_the_rest_parked() {
             match registry.effective_status(id) {
                 Some(UnitStatus::Runnable) => runnable += 1,
                 Some(UnitStatus::Blocked) => parked += 1,
-                Some(UnitStatus::Faulted | UnitStatus::Finished) | None => {}
+                Some(UnitStatus::Faulted | UnitStatus::Finished | UnitStatus::Suspended) | None => {
+                }
             }
         }
         let alone = runnable == 1 && parked == 2;

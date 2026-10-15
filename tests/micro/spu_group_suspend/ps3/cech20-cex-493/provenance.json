@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "capture_id": "micro:spu_group_suspend#3a28cdce8995",
+  "captured_at": "2026-10-05T13:53:09Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 68,
+      "rsx_c": 65,
+      "fan_percent": 40
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "256e92af6cfca89e5e2aa2fafb216d7979614572",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/256e92af6cfca89e5e2aa2fafb216d7979614572"
+  },
+  "microtest": {
+    "name": "spu_group_suspend",
+    "manifest_sha256": "9139bc42ccbe00fab1baa2115acd16cc9e4f8742ae77271d575f0026b22c1829",
+    "sources": {
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "ba14ec3c62738bce8007004b391ad88a7fd3f06d20eccd6fe216ea7b7afff94d",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "235f08e1357a4e3afaf471f2e43ac363df1bd18914718c0f7bd52193c1cafe7e",
+      "ppu/main.c": "4a5c0da4c4f1f0727979d0162fd6adf8e264ed8e892d74085339bdd4615fd3f9",
+      "spu/main.c": "197075c56d175b1252097ed645bcd7bf44cc719f4f9ceb081a373e89adbcab6b"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "4c41fc7f0f226605522dc3ff60c88d62dde82be6b267887ae7820eb508974978",
+    "ps3_elf_sha256": "b1f11ea4a953c7e9c96355a1c5f4944a8a660b82b69efdb0cb0f84befc8548f7",
+    "reference_elf_sha256": "59600a6a824fb88453c4144a8164592322a3d46e5aad877a973ccc5f9be7ffcc",
+    "siblings": {
+      "spu_main.elf": "bf5571b2cf40554851ed2bb62525eb48885696853bb341370ab0d50255f1f3b5"
+    },
+    "param_sfo_sha256": "952cf42d295bef9a2638846720d49a65090a4b7af332a2d59708b938eec024e9"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "3a28cdce899500bb4d94bb704810487d7ce53c1015971669df4d8a15d9ba19e4",
+    "bytes": 232,
+    "result_path": "/dev_hdd0/tmp/cgov_spu_group_suspend.bin"
+  },
+  "digest": "3a28cdce899500bb4d94bb704810487d7ce53c1015971669df4d8a15d9ba19e4  micro:spu_group_suspend  232",
+  "recapture_reason": "the probe adds words 40-55: exit statuses across a restart and a start before the join"
+}

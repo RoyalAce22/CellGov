@@ -171,11 +171,28 @@ impl Runtime {
         for unit in finished_units {
             self.registry
                 .set_status_override(unit, UnitStatus::Finished);
+            // A terminate ends a suspended group too; the hold goes with it.
+            self.registry.set_suspended(unit, false);
             // A deadline left behind would wake a finished unit.
             self.timer_wakes.cancel(unit);
             let _ = self.syscall_responses.try_take(unit);
         }
         self.wake_group_joiners(group_id);
+        self.deliver_syscall_return(source, 0);
+    }
+
+    /// Holds a suspended group's units out of the runnable set, or
+    /// releases a resumed group's. A unit keeps the status it had, and a
+    /// wake that lands while it is held shows once it is released.
+    pub(super) fn handle_spu_group_suspension(
+        &mut self,
+        source: UnitId,
+        units: Vec<UnitId>,
+        suspended: bool,
+    ) {
+        for unit in units {
+            self.registry.set_suspended(unit, suspended);
+        }
         self.deliver_syscall_return(source, 0);
     }
 

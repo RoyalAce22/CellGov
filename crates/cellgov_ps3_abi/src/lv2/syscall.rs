@@ -292,6 +292,12 @@ lv2_syscalls! {
     SPU_THREAD_INITIALIZE = 172 => "sys_spu_thread_initialize";
     /// `sys_spu_thread_group_start`.
     SPU_THREAD_GROUP_START = 173 => "sys_spu_thread_group_start";
+    /// `sys_spu_thread_group_suspend`.
+    SPU_THREAD_GROUP_SUSPEND = 174 => "sys_spu_thread_group_suspend";
+    /// `sys_spu_thread_group_resume`.
+    SPU_THREAD_GROUP_RESUME = 175 => "sys_spu_thread_group_resume";
+    /// `sys_spu_thread_group_yield`.
+    SPU_THREAD_GROUP_YIELD = 176 => "sys_spu_thread_group_yield";
     /// `sys_spu_thread_group_terminate`.
     SPU_THREAD_GROUP_TERMINATE = 177 => "sys_spu_thread_group_terminate";
     /// `sys_spu_thread_group_join`.

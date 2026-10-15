@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::host::test_support::FakeRuntime;
+use crate::image::SpuImageHandle;
+use crate::thread_group::MAX_SLOTS_PER_GROUP;
 use cellgov_mem::{GuestAddr, GuestMemory};
 use cellgov_ps3_abi::format::elf::{ELF32_E_ENTRY, ELF32_HEADER_SIZE};
 use cellgov_time::GuestTicks;
@@ -765,7 +767,7 @@ fn a_second_start_of_a_running_group_is_rejected_as_estat() {
 }
 
 #[test]
-fn a_start_of_a_finished_group_is_rejected_as_estat() {
+fn a_start_of_a_finished_group_no_join_has_read_starts_it_again() {
     let mut host = host_with_finished_group();
     let rt = FakeRuntime::new(0x4000);
     let result = host.dispatch(
@@ -773,12 +775,46 @@ fn a_start_of_a_finished_group_is_rejected_as_estat() {
         UnitId::new(0),
         &rt,
     );
-    match result {
-        Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, errno::CELL_ESTAT.into());
-        }
-        other => panic!("expected Immediate ESTAT, got {other:?}"),
-    }
+    assert!(
+        matches!(result, Lv2Dispatch::RegisterSpu { code: 0, .. }),
+        "{result:?}"
+    );
+    assert_eq!(
+        host.thread_groups().get(1).unwrap().state,
+        GroupState::Running
+    );
+}
+
+#[test]
+fn a_restart_refused_for_an_image_that_no_longer_resolves_changes_nothing() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x4000);
+    let groups = host.thread_groups_mut();
+    let gid = groups.create(1).unwrap();
+    groups
+        .initialize_thread(gid, 0, SpuImageHandle::new(99).unwrap(), [0; 4])
+        .unwrap();
+    groups.get_mut(gid).unwrap().state = GroupState::Running;
+    groups.record_spu(UnitId::new(7), gid, 0).unwrap();
+    assert_eq!(groups.thread_exit(UnitId::new(7), 5), Ok(Some(gid)));
+    let before = host.thread_groups().sync_partial();
+
+    let result = host.dispatch(
+        Lv2Request::SpuThreadGroupStart { group_id: gid },
+        UnitId::new(0),
+        &rt,
+    );
+    assert!(
+        matches!(result, Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_ESRCH)),
+        "{result:?}"
+    );
+    let groups = host.thread_groups();
+    assert_eq!(groups.get(gid).unwrap().state, GroupState::Finished);
+    assert_eq!(
+        groups.unit_for_thread(gid * MAX_SLOTS_PER_GROUP),
+        Some(UnitId::new(7))
+    );
+    assert_eq!(groups.sync_partial(), before, "the refusal changes nothing");
 }
 
 #[test]
