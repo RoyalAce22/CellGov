@@ -638,11 +638,18 @@ impl Lv2Host {
             );
         }
 
-        self.state
+        let mut group = self
+            .state
             .groups
             .get_mut(group_id)
-            .expect("group existed above")
-            .state = GroupState::Running;
+            .expect("group existed above");
+        group.state = GroupState::Running;
+        // Each run starts from the configuration the kernel keeps
+        // (tests/micro/spu_signal_mbox_edges).
+        for slot in group.slots.values_mut() {
+            slot.live_signal_config = None;
+        }
+        drop(group);
 
         Lv2Dispatch::RegisterSpu {
             inits,
@@ -971,22 +978,21 @@ impl Lv2Host {
 
     /// `sys_spu_thread_write_snr`
     /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_WRITE_SNR`]): write
-    /// signal-notification register `number + 1` of the running SPU that
-    /// `thread_id` names, in the mode its thread's configuration gives
-    /// that register.
-    ///
-    /// The spu_signal_notify microtest's reference baselines fix the
-    /// numbering and the order of the checks.
+    /// signal-notification register `number + 1` of the thread
+    /// `thread_id` names. A running SPU takes the value in the mode its
+    /// live configuration gives that register. A thread with no running
+    /// SPU, before its group starts or after it ends, has the value kept
+    /// in the mode its kept configuration gives, and its next start loads
+    /// it; the `spu_snr_outside_run` capture shows both runs reading the
+    /// kept values.
     ///
     /// # Errors
     ///
     /// - `CELL_EINVAL` when `number` is neither 0 nor 1. This check
-    ///   comes first.
-    /// - `CELL_ESRCH` when no running SPU has `thread_id`. A thread whose
-    ///   group has not started has no SPU to hold the value, so the model
-    ///   refuses it too.
+    ///   comes first, as the `spu_signal_mbox_edges` capture shows.
+    /// - `CELL_ESRCH` when no initialized thread has `thread_id`.
     pub(super) fn dispatch_write_snr(
-        &self,
+        &mut self,
         thread_id: u32,
         number: u32,
         value: u32,
@@ -996,6 +1002,9 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
         let Some(target) = self.state.groups.running_unit_for_thread(thread_id) else {
+            if self.state.groups.save_signal(thread_id, register, value) {
+                return Lv2Dispatch::immediate(0);
+            }
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         Lv2Dispatch::Immediate {
@@ -1013,11 +1022,15 @@ impl Lv2Host {
     /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_SET_SPU_CFG`]): set
     /// the signal configuration of an initialized thread. Bit 0 puts
     /// signal-notification register 1 in OR mode, bit 1 register 2.
+    /// While the thread's group runs, the value holds for that run only:
+    /// the `spu_signal_mbox_edges` capture reads it back during the run
+    /// and the configuration set before the start after it.
     ///
     /// # Errors
     ///
     /// - `CELL_EINVAL` when `value` sets a bit above the two register
-    ///   modes. This check comes first.
+    ///   modes. This check comes first, as the `spu_signal_mbox_edges`
+    ///   capture shows.
     /// - `CELL_ESRCH` when no initialized thread has `thread_id`.
     pub(super) fn dispatch_set_spu_cfg(&mut self, thread_id: u32, value: u64) -> Lv2Dispatch {
         if value > spu::SPU_CFG_SIGNAL_MODE_BITS {
@@ -1032,11 +1045,15 @@ impl Lv2Host {
     /// `sys_spu_thread_get_spu_cfg`
     /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GET_SPU_CFG`]): store
     /// the signal configuration of an initialized thread at `value_ptr`
-    /// as a u64.
+    /// as a u64: the running SPU's while its group runs, the kept one
+    /// otherwise.
     ///
     /// # Errors
     ///
-    /// - `CELL_ESRCH` when no initialized thread has `thread_id`.
+    /// As the `spu_signal_mbox_edges` capture shows:
+    ///
+    /// - `CELL_ESRCH` when no initialized thread has `thread_id`. This
+    ///   check comes first.
     /// - `CELL_EFAULT` when `value_ptr` is null.
     pub(super) fn dispatch_get_spu_cfg(
         &self,
@@ -1066,6 +1083,10 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/spu_signal_console_tests.rs"]
+mod signal_console_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_user_image_tests.rs"]

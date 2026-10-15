@@ -128,9 +128,33 @@ impl Runtime {
                  corruption in the RegisterSpu path",
             );
             self.register_spu_inbound_mailbox(uid);
+            self.load_saved_signals(uid);
         }
         self.step_woke_others = true;
         self.deliver_syscall_return(source, code);
+    }
+
+    /// Write the signal-notification values the kernel keeps for the
+    /// thread the new SPU `uid` runs into its registers. A register with
+    /// no kept value stays empty (tests/micro/spu_snr_run_save).
+    fn load_saved_signals(&mut self, uid: UnitId) {
+        let saved = self.lv2_host.thread_groups().saved_signals_of_unit(uid);
+        for (register, value) in [
+            (cellgov_exec::SignalNotifier::One, saved[0]),
+            (cellgov_exec::SignalNotifier::Two, saved[1]),
+        ] {
+            let Some(value) = value else {
+                continue;
+            };
+            if let Err(refusal) = self.write_unit_signal(uid, register, value) {
+                // The unit was registered a moment ago, so a refusal
+                // names a host-side disagreement with the registry.
+                self.lv2_host.log_invariant_break(
+                    "runtime.load_saved_signals_refused",
+                    format_args!("SPU {uid:?} refused its kept signal {register:?}: {refusal}"),
+                );
+            }
+        }
     }
 
     /// Give the new SPU `uid` its inbound mailbox, which shares its id.

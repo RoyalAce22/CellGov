@@ -1,0 +1,23 @@
+[test]
+name = "spu_snr_run_save"
+
+# A hardware probe: what an SPU thread's start loads into a
+# signal-notification register no write reached, and whether a write
+# made while the thread runs reaches the value a later start loads. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# failed step + rc, then for each of two runs the SPU's two reports of
+# both registers and the PPU's writes during the run, then the destroy:
+# 96 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

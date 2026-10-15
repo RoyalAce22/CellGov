@@ -40,7 +40,24 @@ pub struct ThreadSlot {
     /// both registers overwriting, until `sys_spu_thread_set_spu_cfg`.
     ///
     /// [CBEA p:239 s:16.4] each register either overwrites its contents or ORs the data written into them.
+    ///
+    /// This is the configuration the kernel keeps for the thread. A
+    /// `sys_spu_thread_set_spu_cfg` while the group runs changes
+    /// [`Self::live_signal_config`] instead: the
+    /// `spu_signal_mbox_edges` capture reads a configuration set during
+    /// a run back during that run, and the earlier one after it.
     pub signal_config: u64,
+    /// The configuration the running SPU uses when a
+    /// `sys_spu_thread_set_spu_cfg` during the run replaced
+    /// [`Self::signal_config`]; `None` until then. Each start clears it.
+    pub live_signal_config: Option<u64>,
+    /// The value the kernel keeps for each signal-notification register,
+    /// `None` until a `sys_spu_thread_write_snr` reaches the thread while
+    /// its group does not run. Each start loads the values present into
+    /// the new SPU. The SPU reading a register and a write during a run
+    /// leave them as they are, as the `spu_snr_outside_run` and
+    /// `spu_snr_run_save` captures show.
+    pub saved_signals: [Option<u32>; 2],
     /// The event queue each connected SPU event port delivers to, by
     /// port number below [`event::PORT_COUNT`].
     pub event_ports: BTreeMap<u32, u32>,
@@ -289,6 +306,14 @@ impl LaneValue for ThreadGroup {
             }
             if slot.signal_config != 0 {
                 lanes.lane(26, index, slot.signal_config);
+            }
+            if let Some(live) = slot.live_signal_config {
+                lanes.lane(36, index, live);
+            }
+            for (register, value) in slot.saved_signals.iter().enumerate() {
+                if let Some(value) = value {
+                    lanes.lane(37, (index << 1) | register as u64, u64::from(*value));
+                }
             }
             for (&port, &queue) in &slot.event_ports {
                 lanes.lane(28, (index << 32) | u64::from(port), u64::from(queue));
@@ -829,6 +854,8 @@ impl ThreadGroupTable {
                 args,
                 init: None,
                 signal_config: 0,
+                live_signal_config: None,
+                saved_signals: [None; 2],
                 event_ports: BTreeMap::new(),
                 queue_bindings: BTreeMap::new(),
             },
@@ -964,18 +991,21 @@ impl ThreadGroupTable {
             .then_some((group_id, slot))
     }
 
-    /// The signal configuration of an initialized thread.
+    /// The signal configuration of an initialized thread: the running
+    /// SPU's while its group runs, the kept one otherwise.
     pub fn signal_config(&self, thread_id: u32) -> Option<u64> {
         let (group_id, slot) = self.slot_of_thread(thread_id)?;
-        self.groups
-            .get(group_id)?
-            .slots
-            .get(&slot)
-            .map(|s| s.signal_config)
+        let group = self.groups.get(group_id)?;
+        let s = group.slots.get(&slot)?;
+        Some(match group.state {
+            GroupState::Running => s.live_signal_config.unwrap_or(s.signal_config),
+            _ => s.signal_config,
+        })
     }
 
-    /// Set the signal configuration of an initialized thread. `false`
-    /// when no initialized thread has the id.
+    /// Set the signal configuration of an initialized thread: the
+    /// running SPU's while its group runs, the kept one otherwise.
+    /// `false` when no initialized thread has the id.
     pub fn set_signal_config(&mut self, thread_id: u32, value: u64) -> bool {
         let Some((group_id, slot)) = self.slot_of_thread(thread_id) else {
             return false;
@@ -983,13 +1013,44 @@ impl ThreadGroupTable {
         let Some(mut group) = self.groups.get_mut(group_id) else {
             return false;
         };
+        let running = group.state == GroupState::Running;
         match group.slots.get_mut(&slot) {
+            Some(s) if running => {
+                s.live_signal_config = Some(value);
+                true
+            }
             Some(s) => {
                 s.signal_config = value;
                 true
             }
             None => false,
         }
+    }
+
+    /// Keep `value` for signal-notification register `register`, 0 or 1,
+    /// of an initialized thread whose group does not run, in the mode its
+    /// kept configuration gives that register. `false` when no initialized
+    /// thread has the id or `register` names no register.
+    pub fn save_signal(&mut self, thread_id: u32, register: u8, value: u32) -> bool {
+        let Some((group_id, slot)) = self.slot_of_thread(thread_id) else {
+            return false;
+        };
+        let Some(mut group) = self.groups.get_mut(group_id) else {
+            return false;
+        };
+        let Some(s) = group.slots.get_mut(&slot) else {
+            return false;
+        };
+        let index = usize::from(register);
+        let Some(kept) = s.saved_signals.get_mut(index) else {
+            return false;
+        };
+        let or_mode = s.signal_config >> index & 1 == 1;
+        *kept = Some(match *kept {
+            Some(old) if or_mode => old | value,
+            _ => value,
+        });
+        true
     }
 
     /// The `(group_id, slot)` of an initialized thread, or `None` when
@@ -1169,6 +1230,29 @@ impl ThreadGroupTable {
             .find(|(_, &raw)| raw == unit_id.raw())
             .map(|(tid, _)| tid)?;
         self.signal_config(thread_id)
+    }
+
+    /// The signal-notification values the kernel keeps for the thread a
+    /// registered SPU runs, register 1 first; a start loads the ones
+    /// present into the SPU.
+    pub fn saved_signals_of_unit(&self, unit_id: UnitId) -> [Option<u32>; 2] {
+        let Some(thread_id) = self
+            .thread_id_to_unit
+            .iter()
+            .find(|(_, &raw)| raw == unit_id.raw())
+            .map(|(tid, _)| tid)
+        else {
+            return [None; 2];
+        };
+        self.slot_of_thread(thread_id)
+            .and_then(|(group_id, slot)| {
+                self.groups
+                    .get(group_id)?
+                    .slots
+                    .get(&slot)
+                    .map(|s| s.saved_signals)
+            })
+            .unwrap_or([None; 2])
     }
 
     /// The group of a registered SPU that has not finished.

@@ -22,7 +22,7 @@ pub const IMAGE_PATH_NAME_MAX: usize = 255;
 /// The bits of an SPU thread's signal configuration: bit 0 puts
 /// signal-notification register 1 in OR mode, bit 1 register 2.
 /// `sys_spu_thread_set_spu_cfg` refuses a value with any other bit set,
-/// as the spu_signal_notify microtest's reference baselines show.
+/// as the `spu_signal_mbox_edges` capture shows for 4.
 ///
 /// [CBEA p:239 s:16.4] each signal-notification register either overwrites its contents or ORs the data written into them.
 pub const SPU_CFG_SIGNAL_MODE_BITS: u64 = 0b11;

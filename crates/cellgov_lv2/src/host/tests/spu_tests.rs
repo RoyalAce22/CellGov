@@ -1040,7 +1040,7 @@ fn write_snr(host: &mut Lv2Host, thread_id: u32, number: u32, value: u32) -> (u6
 }
 
 /// The register number is 0-based and checked before the thread, as
-/// the spu_signal_notify microtest's reference baselines show.
+/// the spu_signal_mbox_edges capture shows.
 #[test]
 fn a_signal_write_refuses_a_register_number_past_1_before_the_thread() {
     let mut host = Lv2Host::new();
@@ -1051,11 +1051,23 @@ fn a_signal_write_refuses_a_register_number_past_1_before_the_thread() {
 }
 
 #[test]
-fn a_signal_write_to_a_thread_with_no_running_spu_is_esrch() {
+fn a_signal_write_to_a_thread_with_no_running_spu_is_kept_in_its_mode() {
     let mut host = host_with_thread(false);
+    assert_eq!(set_cfg(&mut host, THREAD, 1), 0);
+    for (number, value) in [(0, 0x10), (0, 0x01), (1, 0x20), (1, 0x40)] {
+        assert_eq!(write_snr(&mut host, THREAD, number, value), (0, vec![]));
+    }
+    assert_eq!(write_snr(&mut host, 999, 0, 1).0, errno::CELL_ESRCH.into());
     assert_eq!(
-        write_snr(&mut host, THREAD, 0, 1),
-        (errno::CELL_ESRCH.into(), vec![])
+        host.thread_groups().saved_signals_of_unit(UnitId::new(7)),
+        [None; 2],
+        "no SPU runs the thread yet"
+    );
+    let group = host.thread_groups().get(1).expect("the group");
+    assert_eq!(
+        group.slots[&0].saved_signals,
+        [Some(0x11), Some(0x40)],
+        "register 1 ORs, register 2 overwrites"
     );
 }
 

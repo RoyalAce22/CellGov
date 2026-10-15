@@ -1,0 +1,22 @@
+[test]
+name = "spu_snr_outside_run"
+
+# A hardware probe: where a signal-notification write to an SPU thread
+# with no running SPU goes, before the first start and between two
+# runs. The console capture is the answer; no emulator runs it.
+
+[observe]
+# failed step + rc, the four writes before the first start, what the
+# first run read from each register, the write between the runs, what
+# the second run read, and the destroy: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

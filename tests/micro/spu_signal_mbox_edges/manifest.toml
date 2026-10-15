@@ -1,0 +1,24 @@
+[test]
+name = "spu_signal_mbox_edges"
+
+# A hardware probe: the check order of the SPU thread signal and
+# configuration calls when two arguments are bad, what they and the
+# inbound mailbox write answer before a group starts, while it runs and
+# after it ends, and the mailbox write that wakes a waiting thread. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# failed step + rc, then one word per call or value read in ppu/main.c's
+# order, the join cause and status, the exit status read back, and the
+# destroy: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]
