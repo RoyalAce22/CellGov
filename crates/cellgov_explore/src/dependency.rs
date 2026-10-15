@@ -10,7 +10,7 @@
 //! not fault records its read instead
 //! (`tests/fault_decided_by_a_write.rs`).
 //!
-//! Five kinds of shared state reach no footprint, so two steps that
+//! Six kinds of shared state reach no footprint, so two steps that
 //! interact only through one of them prune when they should not:
 //!
 //! - The deadline a timer wake carries (`tests/timer_deadline.rs`,
@@ -33,6 +33,12 @@
 //!   calls end a group this way:
 //!   - a group terminate from a PPU
 //!   - a group exit from one of the group's SPUs
+//! - A Raw SPU's interrupt status and `SPU_Cfg` in the LV2 table. Two
+//!   calls change this state and reach no footprint:
+//!   - `sys_raw_spu_set_int_stat`, which clears the status bits a Raw
+//!     SPU's step latches
+//!   - `sys_raw_spu_set_spu_cfg`, which sets the mode of a signal store
+//!     through the window
 
 use cellgov_effects::Effect;
 use cellgov_exec::YieldReason;
@@ -184,6 +190,10 @@ impl StepFootprint {
         self.held_reservation_lines
             .extend(rt.last_entry_reservation());
         self.note_lv2_effects(rt);
+        // A Raw SPU's state reached through its window or its PU
+        // interrupt mailbox is local state its own steps read.
+        self.local_store_accesses
+            .extend(rt.last_problem_state_accesses());
         self.expand_aliases(rt, unit);
         self.note_host_writes(rt);
     }
@@ -352,8 +362,11 @@ impl StepFootprint {
                 // belongs to no unit's step, but its writes land inside
                 // one commit, whose step's position decides when a
                 // poller sees them.
+                // A problem-state projection carries the Raw SPU's own
+                // registers and local store, which no tick reaches.
                 cellgov_trace::HostWriter::SharedViewSeed
-                | cellgov_trace::HostWriter::RsxMirror => {
+                | cellgov_trace::HostWriter::RsxMirror
+                | cellgov_trace::HostWriter::SpuProblemState => {
                     record(self, range);
                 }
                 // A landing is already the in-flight set's, which holds

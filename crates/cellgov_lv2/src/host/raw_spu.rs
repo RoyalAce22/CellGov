@@ -16,6 +16,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno::{self, Lv2ErrCode};
+use cellgov_ps3_abi::lv2::spu::raw_spu;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
@@ -114,7 +115,10 @@ impl Lv2Host {
     /// finish.
     pub(in crate::host) fn dispatch_raw_spu_destroy(&mut self, id: u32) -> Lv2Dispatch {
         match self.state.raw_spus.remove(id) {
-            Ok(spu) => Lv2Dispatch::RawSpuDestroy { unit: spu.unit() },
+            Ok(spu) => Lv2Dispatch::RawSpuDestroy {
+                id,
+                unit: spu.unit(),
+            },
             Err(err) => refuse(err),
         }
     }
@@ -228,26 +232,69 @@ impl Lv2Host {
     }
 
     /// `sys_raw_spu_read_puint_mb`
-    /// ([`cellgov_ps3_abi::lv2::syscall::RAW_SPU_READ_PUINT_MB`]): write
-    /// the PU interrupt mailbox word as a 32-bit word. The call answers
-    /// `CELL_OK` whether or not the mailbox holds a message.
+    /// ([`cellgov_ps3_abi::lv2::syscall::RAW_SPU_READ_PUINT_MB`]): check
+    /// the id and the out pointer, then hand the runtime
+    /// [`Lv2Dispatch::RawSpuReadPuintMb`]. The call answers `CELL_OK`
+    /// whether or not the mailbox holds a message.
     pub(in crate::host) fn dispatch_raw_spu_read_puint_mb(
         &self,
         id: u32,
         value_ptr: u32,
-        requester: UnitId,
         rt: &dyn Lv2Runtime,
-        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let out = Out {
-            rt,
-            requester,
-            tick,
+        let unit = match self.state.raw_spus.get(id) {
+            Ok(spu) => spu.unit(),
+            Err(err) => return refuse(err),
         };
-        match self.state.raw_spus.puint_mb(id) {
-            Ok(word) => out.write(value_ptr, &word.to_be_bytes()),
-            Err(err) => refuse(err),
+        if !out_writable(rt, value_ptr, 4) {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
+        Lv2Dispatch::RawSpuReadPuintMb {
+            id,
+            unit,
+            value_ptr,
+        }
+    }
+
+    /// The signal-notification modes of the SPU `unit` runs: its thread's
+    /// signal configuration, or a Raw SPU's `SPU_Cfg` word. Bit 0 is the
+    /// mode of signal 1, and bit 1 is the mode of signal 2. A set bit
+    /// selects logical OR.
+    ///
+    /// [CBEA p:239 s:16.4] SPU_Cfg bit 63 sets signal notification 1's mode and bit 62 signal notification 2's; 1 is logical OR.
+    pub fn signal_config_of_spu(&self, unit: UnitId) -> Option<u64> {
+        self.thread_groups()
+            .signal_config_of_unit(unit)
+            .or_else(|| {
+                let (id, _) = self.raw_spu_units().find(|&(_, u)| u == unit)?;
+                self.state.raw_spus.cfg(id).ok().map(u64::from)
+            })
+    }
+
+    /// Every Raw SPU's id and unit, in id order.
+    pub fn raw_spu_units(&self) -> impl Iterator<Item = (u32, UnitId)> + '_ {
+        self.state.raw_spus.units()
+    }
+
+    /// Latch the class 2 interrupt status bits `stat` of the Raw SPU
+    /// `id`. Returns `false` when no Raw SPU has the id.
+    pub fn raise_raw_spu_int_stat(&mut self, id: u32, stat: u64) -> bool {
+        self.state
+            .raw_spus
+            .raise_int_stat(id, raw_spu::CLASS_APPLICATION, stat)
+            .is_ok()
+    }
+
+    /// Load `word` into the PU interrupt mailbox register of Raw SPU `id`.
+    ///
+    /// `word` is the message a read took from the interrupt mailbox. A
+    /// `None` word leaves the register unchanged. Returns the register's
+    /// word, or `None` when no Raw SPU has the id.
+    pub fn load_raw_spu_puint_mb(&mut self, id: u32, word: Option<u32>) -> Option<u32> {
+        if let Some(word) = word {
+            self.state.raw_spus.set_puint_mb(id, word).ok()?;
+        }
+        self.state.raw_spus.puint_mb(id).ok()
     }
 
     /// `sys_raw_spu_set_spu_cfg`

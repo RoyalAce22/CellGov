@@ -1,5 +1,6 @@
-//! The local store is the private memory an SPU reports to the
-//! explorer's observable.
+//! The local store, the signal-notification registers and the outbound
+//! mailboxes are the private memory an SPU reports to the explorer's
+//! observable.
 
 use crate::SpuExecutionUnit;
 use cellgov_event::UnitId;
@@ -17,6 +18,27 @@ fn one_local_store_byte_apart_is_a_different_hash() {
     let mut b = SpuExecutionUnit::new(UnitId::new(3));
     b.state_mut().ls[0x1234] = 1;
     assert_ne!(a.local_memory_hash(), b.local_memory_hash());
+}
+
+#[test]
+fn a_signal_or_an_outbound_message_is_a_different_hash() {
+    let base = SpuExecutionUnit::new(UnitId::new(3));
+    let changes: [fn(&mut crate::state::SpuState); 5] = [
+        |s| s.signals[0].word = 1,
+        |s| s.signals[1].pending = true,
+        |s| s.channels.out_mbox = Some(0),
+        |s| s.channels.out_intr_mbox = Some(0),
+        |s| s.channels.out_mbox = Some(7),
+    ];
+    for (i, change) in changes.iter().enumerate() {
+        let mut other = SpuExecutionUnit::new(UnitId::new(3));
+        change(other.state_mut());
+        assert_ne!(
+            base.local_memory_hash(),
+            other.local_memory_hash(),
+            "change {i}"
+        );
+    }
 }
 
 #[test]

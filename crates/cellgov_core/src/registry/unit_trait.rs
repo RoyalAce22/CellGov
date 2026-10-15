@@ -177,6 +177,32 @@ pub trait RegisteredUnit: 'static {
     /// problem-state registers.
     fn read_out_mbox(&mut self) -> Result<Option<u32>, ProblemStateError>;
 
+    /// Connect `SPU_WrOutIntrMbox` to a reader. See
+    /// [`ExecutionUnit::connect_out_intr_mbox`].
+    ///
+    /// # Errors
+    ///
+    /// [`ProblemStateError::NoProblemState`] for a unit without SPE
+    /// problem-state registers.
+    fn connect_out_intr_mbox(&mut self) -> Result<(), ProblemStateError>;
+
+    /// Read `SPU_Out_Intr_Mbox`. See
+    /// [`ExecutionUnit::read_out_intr_mbox`].
+    ///
+    /// # Errors
+    ///
+    /// [`ProblemStateError::NoProblemState`] for a unit without SPE
+    /// problem-state registers.
+    fn read_out_intr_mbox(&mut self) -> Result<Option<u32>, ProblemStateError>;
+
+    /// Take the interrupt a write to `SPU_WrOutIntrMbox` sent. See
+    /// [`ExecutionUnit::take_out_intr_mbox_interrupt`].
+    fn take_out_intr_mbox_interrupt(&mut self) -> bool;
+
+    /// The unread outbound mailbox messages. See
+    /// [`ExecutionUnit::out_mailboxes`].
+    fn out_mailboxes(&self) -> Option<cellgov_exec::OutMailboxes>;
+
     /// Upcast for callers that need to downcast to a concrete unit
     /// type to inspect state the trait does not expose.
     fn as_any(&self) -> &dyn Any;
@@ -334,6 +360,26 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn read_out_mbox(&mut self) -> Result<Option<u32>, ProblemStateError> {
         ExecutionUnit::read_out_mbox(self)
+    }
+
+    #[inline]
+    fn connect_out_intr_mbox(&mut self) -> Result<(), ProblemStateError> {
+        ExecutionUnit::connect_out_intr_mbox(self)
+    }
+
+    #[inline]
+    fn read_out_intr_mbox(&mut self) -> Result<Option<u32>, ProblemStateError> {
+        ExecutionUnit::read_out_intr_mbox(self)
+    }
+
+    #[inline]
+    fn take_out_intr_mbox_interrupt(&mut self) -> bool {
+        ExecutionUnit::take_out_intr_mbox_interrupt(self)
+    }
+
+    #[inline]
+    fn out_mailboxes(&self) -> Option<cellgov_exec::OutMailboxes> {
+        ExecutionUnit::out_mailboxes(self)
     }
 
     #[inline]

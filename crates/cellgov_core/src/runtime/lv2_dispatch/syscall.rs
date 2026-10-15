@@ -334,8 +334,15 @@ impl Runtime {
             Lv2Dispatch::RawSpuCreate { id, effects } => {
                 self.handle_raw_spu_create(source, id, effects);
             }
-            Lv2Dispatch::RawSpuDestroy { unit } => {
-                self.handle_raw_spu_destroy(source, unit);
+            Lv2Dispatch::RawSpuDestroy { id, unit } => {
+                self.handle_raw_spu_destroy(source, id, unit);
+            }
+            Lv2Dispatch::RawSpuReadPuintMb {
+                id,
+                unit,
+                value_ptr,
+            } => {
+                self.handle_raw_spu_read_puint_mb(source, id, unit, value_ptr);
             }
             Lv2Dispatch::ProcessExitChild { pid, code, effects } => {
                 self.handle_process_exit_child(source, pid, code, effects);

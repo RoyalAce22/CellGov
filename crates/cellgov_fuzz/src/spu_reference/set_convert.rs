@@ -81,6 +81,11 @@ impl From<&ChannelState> for SpuReferenceChannelState {
             atomic_status_ready,
             in_mbox,
             out_mbox,
+            // A reference set runs thread SPUs, whose interrupt mailbox no
+            // reader empties.
+            out_intr_mbox_connected: _,
+            out_intr_mbox: _,
+            out_intr_mbox_interrupt: _,
             lists,
             list_stall_status,
             mssync_tracking,

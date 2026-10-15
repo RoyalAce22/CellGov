@@ -1,0 +1,40 @@
+[test]
+name = "spu_raw_window_modes"
+
+# A Raw SPU's signal-notification modes under SPU_Cfg, the start
+# address an SPU_NPC store sets, and the single-entry outbound
+# interrupt mailbox that holds a second write until the PPU takes the
+# first, all driven through the problem-state window.
+
+[observe]
+# 32 big-endian u32 words, in the order ppu/main.c lists: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+short_name = "spurawmodes"
+display_name = "CellGov Raw SPU window modes microtest"
+eboot_candidates = ["spu_raw_window_modes.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[ps3]
+# Bytes the design table leaves free (Any): a hardware run may vary them.
+volatile = [
+  { region = "result", offset = 16, size = 4, reason = "w4: a Raw SPU id is the lowest the whole system leaves free" },
+  { region = "result", offset = 36, size = 4, reason = "w9: the poll count depends on when the first message arrives" },
+  { region = "result", offset = 56, size = 4, reason = "w14: the poll count depends on when the Raw SPU stops" },
+]

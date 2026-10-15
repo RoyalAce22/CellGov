@@ -48,7 +48,10 @@ fn step(rt: &mut Runtime) -> Result<(), StepError> {
 /// writes the register on the next.
 fn run_to_stop(rt: &mut Runtime, unit: UnitId) {
     for _ in 0..4 {
-        if rt.unit_spu_status(unit) != Some(SPU_STATUS_R) {
+        if rt
+            .unit_spu_status(unit)
+            .is_none_or(|status| status & SPU_STATUS_R == 0)
+        {
             return;
         }
         step(rt).expect("the SPU runs");
@@ -68,11 +71,12 @@ fn r5(rt: &Runtime, unit: UnitId) -> u32 {
 }
 
 /// [CBEA p:99 s:8.6.2] an MMIO write to SPU_In_Mbox is available to the SPU's rdch of SPU_RdInMbox.
+/// [CBEA p:94 s:8.5.2] W is set while the SPU waits on a blocked channel.
 #[test]
 fn an_inbound_mailbox_write_wakes_the_spu_parked_on_it() {
     let (mut rt, unit) = runtime_with_spu();
     step(&mut rt).expect("the rdch parks");
-    assert_eq!(rt.unit_spu_status(unit), Some(SPU_STATUS_R));
+    assert_eq!(rt.unit_spu_status(unit), Some(SPU_STATUS_R | SPU_STATUS_W));
     rt.write_unit_in_mbox(unit, 7)
         .expect("the SPU has a mailbox");
     run_to_stop(&mut rt, unit);
@@ -91,7 +95,10 @@ fn a_write_to_a_full_inbound_mailbox_overwrites_its_newest_message() {
             .expect("the write does not stall");
     }
     for _ in 0..16 {
-        if rt.unit_spu_status(unit) != Some(SPU_STATUS_R) {
+        if rt
+            .unit_spu_status(unit)
+            .is_none_or(|status| status & SPU_STATUS_R == 0)
+        {
             break;
         }
         step(&mut rt).expect("the SPU runs");

@@ -12,6 +12,17 @@ pub enum SignalNotifier {
     Two,
 }
 
+/// The unread messages in an SPU's outbound mailboxes.
+///
+/// [CBEA p:100 s:8.6.3] SPU_Mbox_Stat counts the valid entries in each outbound mailbox queue, and reading it changes no queue.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OutMailboxes {
+    /// The `SPU_Out_Mbox` message.
+    pub out_mbox: Option<u32>,
+    /// The `SPU_Out_Intr_Mbox` message.
+    pub out_intr_mbox: Option<u32>,
+}
+
 /// Why a unit refused a problem-state operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ProblemStateError {

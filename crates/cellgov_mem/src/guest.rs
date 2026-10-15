@@ -202,6 +202,10 @@ pub struct Region {
     page_size: PageSize,
     access: RegionAccess,
     dirty_pages: DirtyPages,
+    /// The label and access of the reserved region that
+    /// [`GuestMemory::map_window`] carved this region from, or `None`
+    /// when this region is no window.
+    window: Option<(&'static str, RegionAccess)>,
 }
 
 impl Region {
@@ -228,6 +232,7 @@ impl Region {
             page_size,
             access,
             dirty_pages: DirtyPages::new(num_pages),
+            window: None,
         }
     }
 
@@ -608,6 +613,15 @@ impl GuestMemory {
         })
     }
 
+    /// The smallest range `[start, end)` that holds every window that
+    /// [`Self::map_window`] carved, or `None` when the memory holds no window.
+    pub fn window_span(&self) -> Option<(u64, u64)> {
+        let mut windows = self.regions.iter().filter(|r| r.window.is_some());
+        let first = windows.next()?;
+        let last = windows.next_back().unwrap_or(first);
+        Some((first.base, last.end()))
+    }
+
     /// Number of 4 KiB pages currently marked dirty across every region.
     /// O(bitmap words), not O(pages).
     pub fn dirty_page_count(&self) -> u64 {
@@ -880,6 +894,9 @@ impl GuestMemory {
         }
     }
 }
+
+#[path = "guest_window.rs"]
+mod window;
 
 #[cfg(test)]
 #[path = "tests/guest_tests.rs"]

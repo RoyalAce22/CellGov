@@ -94,9 +94,10 @@ impl PpuExecutionUnit {
 
         let mem = ctx.memory().as_bytes();
         // Stack-allocated region table avoids per-call heap alloc on the
-        // Budget=1 hot path. Boot installs six regions and each
-        // shared-memory mapping adds one; a larger layout spills to the
-        // heap. Nothing guest-visible turns on the cutoff.
+        // Budget=1 hot path. Boot installs six regions, each
+        // shared-memory mapping adds one and each window adds up to two;
+        // a larger layout spills to the heap. Nothing guest-visible turns
+        // on the cutoff.
         const MAX_REGIONS: usize = 8;
         let mut region_views_storage: [cellgov_mem::RegionView<'_>; MAX_REGIONS] =
             [cellgov_mem::RegionView::plain(0, &[]); MAX_REGIONS];
@@ -118,6 +119,10 @@ impl PpuExecutionUnit {
         } else {
             &region_views_spill
         };
+        // A window's bytes are another unit's state, which the runtime
+        // updates only between batches. The batch ends at the instruction
+        // that reaches a window, so the next instruction sees the update.
+        let window_span = ctx.memory().window_span();
 
         loop {
             let step_pc = self.state.pc;
@@ -203,6 +208,7 @@ impl PpuExecutionUnit {
             }
 
             tap.dispatch(self.id, &insn, &self.state);
+            let (effects_before, stores_before) = (effects.len(), self.store_buf.len());
             match exec::execute(
                 &insn,
                 &mut self.state,
@@ -342,11 +348,18 @@ impl PpuExecutionUnit {
             self.retirement_counter += 1;
 
             remaining = remaining.saturating_sub(1);
-            if remaining == 0 {
+            let reached_window = window_span.is_some_and(|span| {
+                touches_window(
+                    span,
+                    effects.get(effects_before..).unwrap_or_default(),
+                    self.store_buf.stores_from(stores_before),
+                )
+            });
+            if remaining == 0 || reached_window {
                 self.close_block(effects);
                 return ExecutionStepResult {
                     yield_reason: YieldReason::BudgetExhausted,
-                    consumed_cost: InstructionCost::new(budget.raw()),
+                    consumed_cost: InstructionCost::new(budget.raw() - remaining),
                     local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                     fault: None,
                     syscall_args: None,
@@ -354,4 +367,18 @@ impl PpuExecutionUnit {
             }
         }
     }
+}
+
+/// Whether one instruction's new read intents or staged stores reach
+/// `[start, end)`.
+fn touches_window(
+    (start, end): (u64, u64),
+    new_effects: &[Effect],
+    mut new_stores: impl Iterator<Item = (u64, u8)>,
+) -> bool {
+    let overlaps = |addr: u64, len: u64| addr < end && addr.saturating_add(len) > start;
+    new_effects.iter().any(|e| match e {
+        Effect::SharedReadIntent { range, .. } => overlaps(range.start().raw(), range.length()),
+        _ => false,
+    }) || new_stores.any(|(addr, len)| overlaps(addr, u64::from(len)))
 }

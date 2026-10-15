@@ -140,8 +140,10 @@ impl RawSpuTable {
     ///
     /// # Errors
     /// [`RawSpuError::Exhausted`] when `limit` Raw SPUs already exist.
-    // The console capture hands out 0 then 1, and after the Raw SPU
-    // with id 1 is destroyed, 1 again.
+    // The console hands out the lowest id the whole system leaves free:
+    // its captures run 0 then 1, or 1 then 2 with id 0 held, and a
+    // destroyed Raw SPU's id comes back. CellGov models one process, so
+    // its ids start at 0.
     pub fn free_id(&self, limit: u32) -> Result<u32, RawSpuError> {
         if self.len() >= limit {
             return Err(RawSpuError::Exhausted);
@@ -170,6 +172,11 @@ impl RawSpuTable {
     /// [`RawSpuError::Unknown`] when no Raw SPU has the id.
     pub fn get(&self, id: u32) -> Result<&RawSpu, RawSpuError> {
         self.spus.get(id).ok_or(RawSpuError::Unknown)
+    }
+
+    /// Every Raw SPU's id and unit, in id order.
+    pub fn units(&self) -> impl Iterator<Item = (u32, UnitId)> + '_ {
+        self.spus.iter().map(|(id, spu)| (id, spu.unit))
     }
 
     /// Whether the Raw SPU `id` exists and takes calls for `class`.
@@ -239,6 +246,20 @@ impl RawSpuTable {
         Ok(())
     }
 
+    /// Latch the interrupt status bits `stat` of `class` for the Raw SPU
+    /// `id`; they stay set until a clear.
+    ///
+    /// [CBEA p:273 s:21.7] when an interrupt event occurs its status bit is set, and only a software write of 1 resets it.
+    ///
+    /// # Errors
+    /// [`RawSpuError::InvalidClass`], then [`RawSpuError::Unknown`].
+    pub fn raise_int_stat(&mut self, id: u32, class: u32, stat: u64) -> Result<(), RawSpuError> {
+        let slot = class_slot(class)?;
+        let mut spu = self.spus.get_mut(id).ok_or(RawSpuError::Unknown)?;
+        spu.stats[slot] |= stat;
+        Ok(())
+    }
+
     /// The interrupt status of `class` for the Raw SPU `id`: the bits
     /// latched since the last clear, and in class 2 the mailbox
     /// threshold bit, which a clear does not keep clear.
@@ -285,11 +306,23 @@ impl RawSpuTable {
     ///
     /// # Errors
     /// [`RawSpuError::Unknown`].
-    // The console capture reads an untouched Raw SPU's register as
-    // 0x21000000, and the message 0x1EEF twice: once as the read that took
-    // it, once from the empty mailbox after.
+    // The console captures read an untouched Raw SPU's register as a word
+    // that changes between runs (0x21000000, then 0x10000000), and the
+    // message 0x1EEF twice: once as the read that took it, once from the
+    // empty mailbox after.
     pub fn puint_mb(&self, id: u32) -> Result<u32, RawSpuError> {
         Ok(self.get(id)?.puint_mb)
+    }
+
+    /// Load `word`, a message a read took from the interrupt mailbox,
+    /// into the PU interrupt mailbox register of the Raw SPU `id`.
+    ///
+    /// # Errors
+    /// [`RawSpuError::Unknown`].
+    pub fn set_puint_mb(&mut self, id: u32, word: u32) -> Result<(), RawSpuError> {
+        let mut spu = self.spus.get_mut(id).ok_or(RawSpuError::Unknown)?;
+        spu.puint_mb = word;
+        Ok(())
     }
 
     /// Recover the Raw SPU `id` from a page fault.

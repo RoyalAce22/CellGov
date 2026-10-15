@@ -5,7 +5,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::{ChannelStall, UnitStatus};
 
 /// The SPU's whole context: its architected state and the unit's run
-/// state around it. Replay, instruction comparison, the local-store
+/// state around it. Replay, instruction comparison, the local-memory
 /// hash and a saved context all read this one type, and
 /// [`SpuExecutionUnit::restore`] is its exact inverse.
 ///
@@ -28,17 +28,40 @@ impl SpuSnapshot {
         state::SpuObservableSnapshot::capture(&self.state)
     }
 
-    /// The hash of the local store that the runtime's observable hash
-    /// folds in.
-    pub fn local_store_hash(&self) -> u64 {
-        local_store_hash(&self.state.ls)
+    /// The hash of the private memory the runtime's observable hash folds
+    /// in: the local store, the signal-notification registers and the
+    /// outbound mailboxes.
+    pub fn local_memory_hash(&self) -> u64 {
+        local_memory_hash(&self.state)
     }
 }
 
-/// FNV-1a over the local-store bytes.
-pub(super) fn local_store_hash(ls: &[u8]) -> u64 {
+/// FNV-1a over the SPU state outside committed memory that another
+/// processor writes or reads:
+///
+/// - the local-store bytes
+/// - the two signal-notification registers
+/// - the two outbound mailboxes
+///
+/// The problem-state operations change a signal register or a mailbox
+/// outside any effect. Two schedules can thus leave the local store
+/// equal and a signal register or a mailbox different.
+pub(super) fn local_memory_hash(state: &state::SpuState) -> u64 {
     let mut hasher = cellgov_mem::Fnv1aHasher::new();
-    hasher.write(ls);
+    hasher.write(&state.ls);
+    for signal in &state.signals {
+        hasher.write(&signal.word.to_le_bytes());
+        hasher.write(&[u8::from(signal.pending)]);
+    }
+    for message in [state.channels.out_mbox, state.channels.out_intr_mbox] {
+        match message {
+            Some(word) => {
+                hasher.write(&[1]);
+                hasher.write(&word.to_le_bytes());
+            }
+            None => hasher.write(&[0]),
+        }
+    }
     hasher.finish()
 }
 

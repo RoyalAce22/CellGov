@@ -294,6 +294,7 @@ The host writes through `Runtime::host_write` are:
 - wake and out-parameter payloads;
 - DMA completion;
 - the RSX control-register and flip-status mirrors;
+- the Raw SPU problem-state window projection;
 - shared-view seeding and fanout;
 - the placements the driving program makes itself through
   `Runtime::place_bytes`.

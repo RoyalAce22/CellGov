@@ -19,6 +19,7 @@ mod mailbox_receivers;
 mod observable;
 mod private_memory;
 mod published_counts;
+mod raw_spu_window_footprint;
 mod refusal_tally;
 mod regression;
 mod result_equality;

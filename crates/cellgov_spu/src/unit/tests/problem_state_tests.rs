@@ -5,13 +5,13 @@ use crate::stop::SpuStopKind;
 use crate::SpuExecutionUnit;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    ExecutionContext, ExecutionUnit, ProblemStateError, SignalNotifier, StopRegisters, UnitStatus,
-    YieldReason,
+    ExecutionContext, ExecutionUnit, OutMailboxes, ProblemStateError, SignalNotifier,
+    StopRegisters, UnitStatus, YieldReason,
 };
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::hw::spu::{
     SPU_RD_SIG_NOTIFY_1, SPU_RD_SIG_NOTIFY_2, SPU_STATUS_P, SPU_STATUS_R, SPU_STATUS_W,
-    SPU_WR_OUT_MBOX,
+    SPU_WR_OUT_INTR_MBOX, SPU_WR_OUT_MBOX,
 };
 use cellgov_time::Budget;
 
@@ -174,6 +174,64 @@ fn a_write_to_a_full_outbound_mailbox_stalls_on_the_write() {
             wake: cellgov_exec::StallWake::OutboundMailboxRead,
         })
     );
+}
+
+/// [CBEA p:134 s:9.5.2] a connected interrupt mailbox holds the SPU's message until a read frees it, and counts its free entries.
+#[test]
+fn a_connected_interrupt_mailbox_holds_the_spus_message_until_it_is_read() {
+    let mut unit = unit_with(&[
+        il(4, 0x1EEF),
+        wrch(SPU_WR_OUT_INTR_MBOX, 4),
+        rchcnt(3, SPU_WR_OUT_INTR_MBOX),
+        il(5, 7),
+        wrch(SPU_WR_OUT_MBOX, 5),
+        0,
+    ]);
+    unit.connect_out_intr_mbox().expect("problem state");
+    run(&mut unit);
+    assert_eq!(unit.state().reg_word(3), 0, "the one entry is full");
+    assert_eq!(
+        unit.out_mailboxes(),
+        Some(OutMailboxes {
+            out_mbox: Some(7),
+            out_intr_mbox: Some(0x1EEF),
+        })
+    );
+    assert!(unit.take_out_intr_mbox_interrupt(), "the write sent one");
+    assert!(!unit.take_out_intr_mbox_interrupt(), "the take cleared it");
+    assert_eq!(unit.read_out_intr_mbox(), Ok(Some(0x1EEF)));
+    assert_eq!(unit.read_out_intr_mbox(), Ok(None));
+    assert_eq!(unit.read_out_mbox(), Ok(Some(7)), "the other mailbox stays");
+}
+
+#[test]
+fn a_write_to_a_full_interrupt_mailbox_stalls_on_the_write() {
+    let mut unit = unit_with(&[wrch(SPU_WR_OUT_INTR_MBOX, 4)]);
+    unit.connect_out_intr_mbox().expect("problem state");
+    unit.state_mut().channels.out_intr_mbox = Some(1);
+    let result = run(&mut unit);
+    assert_eq!(result.yield_reason, YieldReason::ChannelStall);
+    assert_eq!(unit.state().pc, 0, "the write did not retire");
+    assert_eq!(
+        unit.channel_stall(),
+        Some(cellgov_exec::ChannelStall {
+            channel: SPU_WR_OUT_INTR_MBOX,
+            wake: cellgov_exec::StallWake::OutboundMailboxRead,
+        })
+    );
+}
+
+#[test]
+fn an_unconnected_interrupt_mailbox_refuses_the_write_by_name() {
+    let mut unit = unit_with(&[
+        rchcnt(3, SPU_WR_OUT_INTR_MBOX),
+        wrch(SPU_WR_OUT_INTR_MBOX, 4),
+    ]);
+    let result = run(&mut unit);
+    assert_eq!(result.yield_reason, YieldReason::Fault);
+    assert_eq!(unit.state().reg_word(3), 1, "the count still reads free");
+    assert_eq!(unit.state().channels.out_intr_mbox, None);
+    assert!(!unit.take_out_intr_mbox_interrupt());
 }
 
 /// `rdch rt, channel`.

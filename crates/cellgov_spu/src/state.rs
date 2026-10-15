@@ -263,6 +263,11 @@ impl SpuObservableSnapshot {
             atomic_status_ready,
             in_mbox,
             out_mbox,
+            // Instruction comparison runs thread SPUs, whose interrupt
+            // mailbox no reader empties.
+            out_intr_mbox_connected: _,
+            out_intr_mbox: _,
+            out_intr_mbox_interrupt: _,
             // Instruction comparison runs no list command.
             lists: _,
             list_stall_status: _,
@@ -865,6 +870,19 @@ pub struct ChannelState {
     /// [CBEA p:98 s:8.6.1] an MMIO read of SPU_Out_Mbox returns the messages in the order the SPU wrote them.
     /// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_WrOutMbox has 1 maximum entry.
     pub out_mbox: Option<u32>,
+    /// Whether a reader outside the unit empties `SPU_WrOutIntrMbox`, as
+    /// for a Raw SPU. A unit without one refuses the channel by name.
+    pub out_intr_mbox_connected: bool,
+    /// The unread message the SPU wrote to `SPU_WrOutIntrMbox`. The
+    /// mailbox holds one message.
+    ///
+    /// [CBEA p:134 s:9.5.2] a write to a full outbound interrupt mailbox stalls the SPU until the SPU Outbound Interrupt Mailbox Register is read.
+    pub out_intr_mbox: Option<u32>,
+    /// A write to `SPU_WrOutIntrMbox` sent an interrupt, and the
+    /// interrupt controller did not take it yet.
+    ///
+    /// [CBEA p:134 s:9.5.2] a write to the channel also sends an interrupt to a processor or other device.
+    pub out_intr_mbox_interrupt: bool,
     /// The list commands stopped at a stall-and-notify element, oldest first.
     ///
     /// Each holds its command-queue slot and its tag group until it queues
@@ -964,6 +982,10 @@ impl ChannelState {
             in_mbox: Vec::new(),
             // x'1C' count 1.
             out_mbox: None,
+            out_intr_mbox_connected: false,
+            // x'1E' count 1 once connected.
+            out_intr_mbox: None,
+            out_intr_mbox_interrupt: false,
             lists: Vec::new(),
             // x'19' count 0.
             list_stall_status: 0,

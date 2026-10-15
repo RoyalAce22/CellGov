@@ -56,6 +56,10 @@ impl Runtime {
             && self.rsx_cursor.get() == self.rsx_cursor.put()
             && self.rsx_call_stack.is_empty()
             && !self.rsx_flip.pending()
+            // A Raw SPU's step changes the state its window projects.
+            && !self.last_scheduled_unit.is_some_and(|unit| {
+                self.lv2_host.raw_spu_units().any(|(_, raw)| raw == unit)
+            })
         {
             self.epoch.advance();
             // This path fires no completion, so the list this commit
@@ -221,6 +225,11 @@ impl Runtime {
         {
             self.mirror_rsx_control_register_writes(effects);
         }
+        // A Raw SPU's window lives in its creator's space, so the batch
+        // reaches it only from there.
+        if batch_applied {
+            self.route_raw_spu_window_accesses(source_space, effects);
+        }
 
         debug_assert!(
             self.last_scheduled_unit.is_some(),
@@ -315,6 +324,7 @@ impl Runtime {
         } else {
             None
         };
+        self.project_raw_spu_windows(source, stopped.is_some(), !due.is_empty());
 
         // RSX FIFO advance: after unit effects commit and DMA completions
         // fire, before state-hash checkpoints emit. Emitted effects land

@@ -202,8 +202,10 @@ pub trait ExecutionUnit {
     ///
     /// An SPU's local store is such memory: a program computes in it,
     /// and two schedules can leave the committed memory equal and the
-    /// local store different. The schedule explorer folds this hash
-    /// beside the committed-memory hash into the observable its verdict
+    /// local store different. Its signal-notification registers and
+    /// outbound mailboxes are such memory too, because another processor
+    /// writes or reads them. The schedule explorer folds this hash beside
+    /// the committed-memory hash into the observable its verdict
     /// compares. Registers stay outside this hash.
     fn local_memory_hash(&self) -> Option<u64> {
         None
@@ -359,6 +361,41 @@ pub trait ExecutionUnit {
     /// SPE problem-state registers.
     fn read_out_mbox(&mut self) -> Result<Option<u32>, crate::ProblemStateError> {
         Err(crate::ProblemStateError::NoProblemState)
+    }
+
+    /// Connect `SPU_WrOutIntrMbox` to a reader outside the unit, as for a
+    /// Raw SPU. A unit that is never connected refuses the channel.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ProblemStateError::NoProblemState`] for a unit without
+    /// SPE problem-state registers.
+    fn connect_out_intr_mbox(&mut self) -> Result<(), crate::ProblemStateError> {
+        Err(crate::ProblemStateError::NoProblemState)
+    }
+
+    /// Read `SPU_Out_Intr_Mbox`: the message the unit wrote, which
+    /// leaves the mailbox, or `None` when it is empty.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ProblemStateError::NoProblemState`] for a unit without
+    /// SPE problem-state registers.
+    fn read_out_intr_mbox(&mut self) -> Result<Option<u32>, crate::ProblemStateError> {
+        Err(crate::ProblemStateError::NoProblemState)
+    }
+
+    /// Whether a write to `SPU_WrOutIntrMbox` sent an interrupt since
+    /// the last call. The call clears the interrupt. A unit without SPE
+    /// problem-state registers sends none.
+    fn take_out_intr_mbox_interrupt(&mut self) -> bool {
+        false
+    }
+
+    /// The unread outbound mailbox messages, or `None` for a unit without
+    /// SPE problem-state registers. The messages stay in the mailboxes.
+    fn out_mailboxes(&self) -> Option<crate::OutMailboxes> {
+        None
     }
 }
 

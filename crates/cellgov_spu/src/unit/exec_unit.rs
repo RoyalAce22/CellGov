@@ -14,8 +14,8 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
     BarrierKind, ChannelStall, ExecutionContext, ExecutionStepResult, ExecutionUnit,
-    LocalDiagnostics, ProblemStateError, RestartError, SignalNotifier, StallWake, StopRegisters,
-    UnitStatus, YieldReason,
+    LocalDiagnostics, OutMailboxes, ProblemStateError, RestartError, SignalNotifier, StallWake,
+    StopRegisters, UnitStatus, YieldReason,
 };
 use cellgov_ps3_abi::hw::spu;
 use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, SPU_STATUS_R};
@@ -438,6 +438,28 @@ impl ExecutionUnit for SpuExecutionUnit {
         Ok(self.state.channels.out_mbox.take())
     }
 
+    fn connect_out_intr_mbox(&mut self) -> Result<(), ProblemStateError> {
+        self.state.channels.out_intr_mbox_connected = true;
+        Ok(())
+    }
+
+    /// [CBEA p:134 s:9.5.2] a read of the SPU Outbound Interrupt Mailbox Register frees the slot a write took.
+    fn read_out_intr_mbox(&mut self) -> Result<Option<u32>, ProblemStateError> {
+        Ok(self.state.channels.out_intr_mbox.take())
+    }
+
+    fn take_out_intr_mbox_interrupt(&mut self) -> bool {
+        std::mem::take(&mut self.state.channels.out_intr_mbox_interrupt)
+    }
+
+    fn out_mailboxes(&self) -> Option<OutMailboxes> {
+        let c = &self.state.channels;
+        Some(OutMailboxes {
+            out_mbox: c.out_mbox,
+            out_intr_mbox: c.out_intr_mbox,
+        })
+    }
+
     fn channel_stall(&self) -> Option<ChannelStall> {
         self.stall
     }
@@ -473,7 +495,7 @@ impl ExecutionUnit for SpuExecutionUnit {
     }
 
     fn local_memory_hash(&self) -> Option<u64> {
-        Some(super::spu_unit::local_store_hash(&self.state.ls))
+        Some(super::spu_unit::local_memory_hash(&self.state))
     }
 }
 
@@ -520,7 +542,7 @@ fn channel_stall(insn: &crate::instruction::SpuInstruction) -> Option<ChannelSta
     let wake = match channel {
         spu::SPU_RD_IN_MBOX => StallWake::MailboxDelivery,
         spu::MFC_RD_TAG_STAT | spu::MFC_RD_LIST_STALL_STAT => StallWake::DmaCompletion,
-        spu::SPU_WR_OUT_MBOX => StallWake::OutboundMailboxRead,
+        spu::SPU_WR_OUT_MBOX | spu::SPU_WR_OUT_INTR_MBOX => StallWake::OutboundMailboxRead,
         spu::MFC_CMD => StallWake::CommandQueueSlot,
         spu::SPU_RD_SIG_NOTIFY_1 => StallWake::SignalWrite(SignalNotifier::One),
         spu::SPU_RD_SIG_NOTIFY_2 => StallWake::SignalWrite(SignalNotifier::Two),

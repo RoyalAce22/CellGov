@@ -148,6 +148,17 @@ impl StoreBuffer {
             .collect()
     }
 
+    /// The `(addr, len)` of each pending store from position `from` on,
+    /// in program order.
+    #[inline]
+    pub(crate) fn stores_from(&self, from: usize) -> impl Iterator<Item = (u64, u8)> + '_ {
+        self.entries
+            .get(from..)
+            .unwrap_or_default()
+            .iter()
+            .map(|e| (e.addr, e.len))
+    }
+
     /// Whether `n` more entries fit. Multi-store instructions
     /// (`stvx`, `dcbz`) call this before staging any store so a
     /// `BufferFull` mid-instruction does not leave a partial commit

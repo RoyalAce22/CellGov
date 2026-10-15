@@ -71,6 +71,7 @@ impl Runtime {
             last_dma_completions: Vec::new(),
             last_host_writes: Vec::new(),
             last_lv2_effects: Vec::new(),
+            last_problem_state_accesses: Vec::new(),
             last_mailbox_read: None,
             last_entry_reservation: None,
             spu_thread_failure: None,

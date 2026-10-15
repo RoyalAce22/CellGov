@@ -76,6 +76,7 @@ fn host_writer_discriminants_locked() {
     assert_eq!(HostWriter::SharedViewSeed as u8, 5);
     assert_eq!(HostWriter::SyscallOutParam as u8, 6);
     assert_eq!(HostWriter::Placement as u8, 7);
+    assert_eq!(HostWriter::SpuProblemState as u8, 8);
 }
 
 #[test]
@@ -86,7 +87,7 @@ fn host_writer_values_are_dense_and_the_next_value_is_free() {
     }
     assert_eq!(
         HostWriter::VARIANTS.len(),
-        8,
+        9,
         "a writer was added or removed: pin its value in host_writer_discriminants_locked"
     );
     let past_end = HostWriter::VARIANTS.len() as u8;

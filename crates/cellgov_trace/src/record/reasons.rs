@@ -205,6 +205,9 @@ pub enum HostWriter {
     /// Bytes the program driving the runtime places itself, outside
     /// every modeled mechanism.
     Placement = 7,
+    /// A Raw SPU's state projected into its problem-state window: a
+    /// register word or a local-store page.
+    SpuProblemState = 8,
 }
 
 /// Mirror of `cellgov_exec::BarrierKind` for the trace stream.

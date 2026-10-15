@@ -220,7 +220,7 @@ event the relation already holds against the other writers.
 
 ## Commits the footprint does not take from a unit's effects
 
-Five things reach committed state other than through the effects a
+Six things reach committed state other than through the effects a
 unit's step emits. The table shows which of them reach a footprint:
 
 | Source | Reaches a footprint |
@@ -230,6 +230,7 @@ unit's step emits. The table shows which of them reach a footprint:
 | a park the commit pipeline takes from the step result | yes, through the yield reason |
 | the RSX FIFO advance pass | no; only its MMIO mirrors are recorded |
 | a thread-group end that finishes the group's other units | no; each finish is a status override |
+| a Raw SPU's problem-state window | yes; a window access conflicts with every step of its Raw SPU, and the projection is recorded as a host write |
 
 ### LV2 handler effects
 

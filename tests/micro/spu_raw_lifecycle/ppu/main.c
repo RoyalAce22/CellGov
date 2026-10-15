@@ -64,14 +64,17 @@
 
 #include "cgov_out.h"
 #include "cgov_lv2.h"
-#include "cgov_spu_load.h"
+
+/* spu/main.S as words; build.sh generates it. */
+#include "../build/spu_program.h"
 
 SYS_PROCESS_PARAM(1001, 0x10000)
 
 #define RESULT_BYTES 320
 
-/* An address no user mapping covers. */
-#define UNMAPPED_PTR 0x10ull
+/* An address no user mapping covers, on the console or in CellGov,
+ * which maps its own trampolines in the low page. */
+#define UNMAPPED_PTR 0xB0000000ull
 
 #define SYS_RAW_SPU_CREATE_INTERRUPT_TAG 150
 #define SYS_RAW_SPU_SET_INT_MASK         151
@@ -106,8 +109,6 @@ SYS_PROCESS_PARAM(1001, 0x10000)
 static const char CGOV_MAGIC[4] = { 'C', 'G', 'O', 'V' };
 
 static volatile unsigned int result_buf[RESULT_BYTES / 4] __attribute__((aligned(128)));
-
-static const char SPU_ELF_PATH[] = "/app_home/spu_main.elf";
 
 static volatile unsigned int g_id;
 static volatile unsigned int g_word;
@@ -158,9 +159,7 @@ static unsigned int dword_call(u64 nr, u64 id, u64 class_id, unsigned int *lo)
 
 int main(void)
 {
-    sysSpuImage image;
-    unsigned int a, lo, polls, status;
-    int ret;
+    unsigned int a, lo, polls, status, i;
 
     memset((void *)result_buf, 0xEE, sizeof(result_buf));
     result_buf[0] = 0;
@@ -265,10 +264,9 @@ int main(void)
     LS_WORD(a, 0x3000) = 0xCAFEF00D;
     result_buf[40] = LS_WORD(a, 0x3000);
 
-    ret = CGOV_SPU_IMAGE_OPEN(&image, SPU_ELF_PATH);
-    if (ret != 0) return fail(2, ret);
-    ret = sysSpuRawImageLoad(a, &image);
-    if (ret != 0) return fail(3, ret);
+    /* The program lands at local store 0 through the window. */
+    for (i = 0; i < sizeof(SPU_PROGRAM) / sizeof(SPU_PROGRAM[0]); i++)
+        LS_WORD(a, 4 * i) = SPU_PROGRAM[i];
 
     PS_WORD(a, IN_MBOX) = 0x41;
     result_buf[41] = PS_WORD(a, MBOX_STAT);

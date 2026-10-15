@@ -315,6 +315,22 @@ impl Runtime {
         &self.last_lv2_effects
     }
 
+    /// The Raw SPUs whose state another processor reached since the last
+    /// [`Runtime::step`] began, each with the offsets of its window the
+    /// access named.
+    ///
+    /// - A local-store access names its bytes.
+    /// - A register access names the whole problem-state area.
+    /// - A `sys_raw_spu_read_puint_mb` that takes the interrupt
+    ///   mailbox's message names the whole problem-state area.
+    ///
+    /// The Raw SPU's own steps read that state, and this list records
+    /// none of them.
+    #[inline]
+    pub fn last_problem_state_accesses(&self) -> &[(UnitId, cellgov_mem::ByteRange)] {
+        &self.last_problem_state_accesses
+    }
+
     /// The mailbox whose occupancy the last step's unit read: its own
     /// inbound mailbox, which shares its id, when the registry holds one
     /// and the unit asked for its count. An SPU asks at the start of

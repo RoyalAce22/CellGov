@@ -36,3 +36,7 @@ mod clock_read_tests;
 #[cfg(test)]
 #[path = "tests/barrier_tests.rs"]
 mod barrier_tests;
+
+#[cfg(test)]
+#[path = "tests/window_access_tests.rs"]
+mod window_access_tests;

@@ -244,16 +244,16 @@ impl Lv2RequestKind {
             | Lv2RequestKind::RawSpuCreateInterruptTag
             | Lv2RequestKind::RawSpuSetIntMask
             | Lv2RequestKind::RawSpuGetIntMask
-            | Lv2RequestKind::RawSpuRecoverPageFault => Modeled,
-            // The interrupt status, the PU interrupt mailbox and SPU_Cfg
-            // are stored and served, but the SPU neither sets nor reads
-            // them yet: a Raw SPU runs only through its problem-state
-            // window, which CellGov does not map.
-            Lv2RequestKind::RawSpuSetSpuCfg
+            | Lv2RequestKind::RawSpuRecoverPageFault
+            | Lv2RequestKind::RawSpuSetSpuCfg
             | Lv2RequestKind::RawSpuGetSpuCfg
-            | Lv2RequestKind::RawSpuSetIntStat
-            | Lv2RequestKind::RawSpuGetIntStat
-            | Lv2RequestKind::RawSpuReadPuintMb => PartialState,
+            // Declared divergence: an untouched PU interrupt mailbox
+            // register reads 0; the console reads the physical SPU's last word.
+            | Lv2RequestKind::RawSpuReadPuintMb => Modeled,
+            // A Raw SPU latches class 2 S at a stop-and-signal and M at
+            // an interrupt mailbox write. B always reads set. CellGov
+            // raises no halt, tag-group or class 0 error interrupt.
+            Lv2RequestKind::RawSpuSetIntStat | Lv2RequestKind::RawSpuGetIntStat => PartialState,
             // Declared divergence: the priority is validated, stored and
             // served, and decides nothing. On the console it picks which
             // scheduler-context groups get SPUs when they want more than

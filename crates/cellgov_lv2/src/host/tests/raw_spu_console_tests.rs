@@ -3,10 +3,12 @@
 //! through the dispatch, and registers each created Raw SPU's unit as
 //! the runtime does.
 //!
-//! Words 38-47 come from a run of the Raw SPU through its problem-state
-//! window, which CellGov does not map yet, and so do the words that
-//! words 48, 50, 53 and 59 read; the test compares the answers of those
-//! calls and not the words. Word 52 reads the window too.
+//! Words 38-47 and 52 come from a run of the Raw SPU through its
+//! problem-state window, and so do the words that words 48, 50, 53 and
+//! 59 read. The runtime maps the window and runs the SPU. This test
+//! drives the dispatch alone, so it compares the answers of those calls
+//! and not the words. The `raw_spu_window` tests in `cellgov_spu`
+//! compare those words.
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -27,8 +29,8 @@ const CALLER: UnitId = UnitId::new(0);
 const NO_SUCH_RAW: u64 = 63;
 /// Where the probe keeps the words the calls write.
 const OUT_PTR: u64 = 0x800;
-/// An out pointer the console leaves unmapped: the low page.
-const UNMAPPED_PTR: u64 = 0x10;
+/// An out pointer the console leaves unmapped.
+const UNMAPPED_PTR: u64 = 0xB000_0000;
 /// The SELF control flags every probe EBOOT carries: root permission.
 const PROBE_CONTROL_FLAGS1: u32 = 0x4000_0000;
 /// What the probe's out words hold before a call writes them.
@@ -67,6 +69,11 @@ impl Probe {
                 (0, effects)
             }
             Lv2Dispatch::RawSpuDestroy { .. } => (0, vec![]),
+            // No SPU runs here, so the interrupt mailbox holds no message.
+            Lv2Dispatch::RawSpuReadPuintMb { id, .. } => {
+                let word = self.host.load_raw_spu_puint_mb(id, None).unwrap();
+                return (0, u64::from(word), 4);
+            }
             other => panic!("unexpected dispatch {other:?}"),
         };
         let (word, width) = effects
@@ -122,10 +129,8 @@ fn raw_spu_calls_answer_as_the_console_does() {
     put(4, p.code(SPU_INITIALIZE, [6, 2, 0, 0]));
     let [code, a] = p.create();
     put(5, code);
-    put(6, a);
     let [code, b] = p.create();
     put(7, code);
-    put(8, b);
     put(9, p.create()[0]);
     put(61, p.code(RAW_SPU_CREATE, [0, 0, 0, 0]));
     put(10, p.code(SPU_INITIALIZE, [6, 1, 0, 0]));
@@ -133,10 +138,9 @@ fn raw_spu_calls_answer_as_the_console_does() {
     put(12, p.code(RAW_SPU_DESTROY, [u64::from(b), 0, 0, 0]));
     put(13, p.code(RAW_SPU_DESTROY, [NO_SUCH_RAW, 0, 0, 0]));
     put(14, p.code(RAW_SPU_CREATE, [0, 0, 0, 0]));
-    let [code, id] = p.create();
+    let [code, reused] = p.create();
     put(62, code);
-    put(63, id);
-    assert_eq!(p.code(RAW_SPU_DESTROY, [u64::from(id), 0, 0, 0]), 0);
+    assert_eq!(p.code(RAW_SPU_DESTROY, [u64::from(reused), 0, 0, 0]), 0);
 
     let a = u64::from(a);
     let [code, tag0] = p.out_call(RAW_SPU_CREATE_INTERRUPT_TAG, [a, 0, 0, OUT_PTR], 4);
@@ -182,9 +186,9 @@ fn raw_spu_calls_answer_as_the_console_does() {
 
     let [code, mb] = p.out_call(RAW_SPU_READ_PUINT_MB, [a, OUT_PTR, 0, 0], 4);
     put(57, code);
-    // The console reads 0x21000000 here: whatever the physical SPU's
-    // register last held. CellGov reads 0 from a Raw SPU whose mailbox
-    // never held a message.
+    // The console reads whatever the physical SPU's register last held
+    // here, a word that changes between captures. CellGov reads 0 from a
+    // Raw SPU whose mailbox never held a message.
     assert_eq!(mb, 0, "an untouched PU interrupt mailbox reads 0");
 
     let no_such = NO_SUCH_RAW;
@@ -196,10 +200,12 @@ fn raw_spu_calls_answer_as_the_console_does() {
     );
     put(67, p.code(RAW_SPU_GET_INT_MASK, [a, 0, 0, 0]));
     put(68, p.code(RAW_SPU_CREATE, [UNMAPPED_PTR, 0, 0, 0]));
-    let [code, id] = p.create();
+    let [code, after_refusal] = p.create();
     put(69, code);
-    put(70, id);
-    assert_eq!(p.code(RAW_SPU_DESTROY, [u64::from(id), 0, 0, 0]), 0);
+    assert_eq!(
+        p.code(RAW_SPU_DESTROY, [u64::from(after_refusal), 0, 0, 0]),
+        0
+    );
     put(71, p.code(RAW_SPU_READ_PUINT_MB, [a, UNMAPPED_PTR, 0, 0]));
     put(72, p.code(RAW_SPU_GET_SPU_CFG, [a, 0, 0, 0]));
     put(73, p.code(RAW_SPU_SET_INT_MASK, [a, 3, 0, 0]));
@@ -242,8 +248,18 @@ fn raw_spu_calls_answer_as_the_console_does() {
     }
     assert_eq!(tag2 - tag0, word(20) - word(16), "tags created in turn");
 
+    // The console hands out the lowest Raw SPU id that no other part of
+    // the system holds, so its first id varies. The distance of each id
+    // from A's depends only on the probe's calls.
+    let ids = |a: u32, rest: [u32; 3]| rest.map(|id| id.wrapping_sub(a));
+    assert_eq!(
+        ids(a as u32, [b, reused, after_refusal]),
+        ids(word(6), [word(8), word(63), word(70)]),
+        "w8, w63 and w70 against w6"
+    );
+
     let compared = got.iter().filter(|value| value.is_some()).count();
-    assert_eq!(compared, 58, "every call the test makes is compared");
+    assert_eq!(compared, 54, "every call the test makes is compared");
     for (w, value) in got.iter().enumerate() {
         if let Some(value) = *value {
             assert_eq!(

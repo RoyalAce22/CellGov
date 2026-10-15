@@ -841,7 +841,7 @@ impl Lv2Host {
                 stat_ptr,
             } => self.dispatch_raw_spu_get_int_stat(id, class, stat_ptr, requester, rt, tick),
             Lv2Request::RawSpuReadPuintMb { id, value_ptr } => {
-                self.dispatch_raw_spu_read_puint_mb(id, value_ptr, requester, rt, tick)
+                self.dispatch_raw_spu_read_puint_mb(id, value_ptr, rt)
             }
             Lv2Request::RawSpuSetSpuCfg { id, value } => {
                 self.dispatch_raw_spu_set_spu_cfg(id, value)

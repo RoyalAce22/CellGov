@@ -96,6 +96,16 @@ pub mod raw_spu {
     ///
     /// [CBEA p:276 s:21.7.3] bit 59, B, is the SPU mailbox threshold interrupt status.
     pub const INT_STAT_MAILBOX_THRESHOLD: u64 = 0x10;
+    /// The class 2 status bit S, set when the SPU stops at a
+    /// stop-and-signal instruction.
+    ///
+    /// [CBEA p:276 s:21.7.3] bit 62, S, is the SPU stop-and-signal instruction trap status.
+    pub const INT_STAT_STOP_AND_SIGNAL: u64 = 0x2;
+    /// The class 2 status bit M, set by a write to the SPU's outbound
+    /// interrupt mailbox.
+    ///
+    /// [CBEA p:276 s:21.7.3] bit 63, M, is the mailbox interrupt status.
+    pub const INT_STAT_MAILBOX: u64 = 0x1;
     /// The top byte of every interrupt tag the console hands back.
     pub const INTERRUPT_TAG_KIND: u32 = 0x0A00_0000;
     /// The distance between two interrupt tags created in turn.

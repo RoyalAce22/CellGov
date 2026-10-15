@@ -1,11 +1,10 @@
 [test]
 name = "spu_raw_lifecycle"
 
-# A hardware probe: Raw SPU create and destroy against the pool
-# sys_spu_initialize sets, the Raw SPU interrupt, configuration and
-# recovery calls, and one run through the problem-state window and the
-# PU interrupt mailbox. The console capture is the answer; no emulator
-# runs it.
+# Raw SPU create and destroy against the pool sys_spu_initialize sets,
+# the Raw SPU interrupt, configuration and recovery calls, and one run
+# through the problem-state window and the PU interrupt mailbox. The
+# console capture is the answer, and CellGov boots it freestanding.
 
 [observe]
 # 80 big-endian u32 words, in the order ppu/main.c lists: 320 bytes.
@@ -16,7 +15,31 @@ memory_regions = [
 [expect]
 outcome = "completed"
 
+[cellgov.title]
+short_name = "spurawlife"
+display_name = "CellGov Raw SPU lifecycle microtest"
+eboot_candidates = ["spu_raw_lifecycle.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
 [ps3]
-# The PPU opens the SPU image under /app_home/, so it deploys
-# beside the EBOOT.
-files = ["spu_main.elf"]
+# Bytes the design table leaves free (Any): a hardware run may vary them.
+volatile = [
+  { region = "result", offset = 24, size = 4, reason = "w6: a Raw SPU id is the lowest the whole system leaves free" },
+  { region = "result", offset = 32, size = 4, reason = "w8: a Raw SPU id is the lowest the whole system leaves free" },
+  { region = "result", offset = 252, size = 4, reason = "w63: a Raw SPU id is the lowest the whole system leaves free" },
+  { region = "result", offset = 280, size = 4, reason = "w70: a Raw SPU id is the lowest the whole system leaves free" },
+  { region = "result", offset = 64, size = 4, reason = "w16: an interrupt tag's low bits count kernel objects the whole system creates" },
+  { region = "result", offset = 80, size = 4, reason = "w20: an interrupt tag's low bits count kernel objects the whole system creates" },
+  { region = "result", offset = 168, size = 4, reason = "w42: the SPU_Status poll count depends on when the Raw SPU stops" },
+  { region = "result", offset = 232, size = 4, reason = "w58: an untouched Raw SPU's PU interrupt mailbox register holds what the physical SPU's last held" },
+]

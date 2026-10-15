@@ -6,9 +6,12 @@
 use cellgov_ps3_abi::hw::rsx::{
     CELL_GCM_DISPLAY_FLIP_STATUS_DONE, CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
 };
-use cellgov_ps3_abi::hw::spu::{event, MFC_ATOMIC_STAT_G, MFC_ATOMIC_STAT_S, MFC_ATOMIC_STAT_U};
+use cellgov_ps3_abi::hw::spu::{
+    event, MFC_ATOMIC_STAT_G, MFC_ATOMIC_STAT_S, MFC_ATOMIC_STAT_U, SPU_IN_MBOX_DEPTH,
+    SPU_STATUS_P, SPU_STATUS_R, SPU_STATUS_W,
+};
 use cellgov_ps3_abi::lv2::errno;
-use cellgov_ps3_abi::lv2::spu::{group_join_cause, IMAGE_PATH_MAX, IMAGE_PATH_NAME_MAX};
+use cellgov_ps3_abi::lv2::spu::{group_join_cause, raw_spu, IMAGE_PATH_MAX, IMAGE_PATH_NAME_MAX};
 
 /// What a payload word must be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +165,166 @@ const fn image_segments_fields() -> [(&'static str, Expect); 40] {
     fields[0] = ("step", Exact(0));
     fields[1] = ("rc", Exact(0));
     fields[2] = ("initialize", Exact(0));
+    fields
+}
+
+/// spu_raw_lifecycle's payload, in the order ppu/main.c lists. These
+/// words take any value:
+/// - a Raw SPU id: the console hands out the lowest id that no other
+///   part of the system holds;
+/// - an interrupt tag: its low bits count kernel objects;
+/// - the status poll count: it follows the SPU's progress;
+/// - an untouched PU interrupt mailbox register: it holds the physical
+///   SPU's last word.
+const RAW_LIFECYCLE_FIELDS: [(&str, Expect); 80] = raw_lifecycle_fields();
+
+const fn raw_lifecycle_fields() -> [(&'static str, Expect); 80] {
+    const EAGAIN: Expect = Exact(errno::CELL_EAGAIN.code);
+    const EINVAL: Expect = Exact(errno::CELL_EINVAL.code);
+    const ESRCH: Expect = Exact(errno::CELL_ESRCH.code);
+    const EFAULT: Expect = Exact(errno::CELL_EFAULT.code);
+    const EBUSY: Expect = Exact(errno::CELL_EBUSY.code);
+    const OK: Expect = Exact(0);
+    // spu/main.S reads 0x41 from the inbound mailbox, writes 0x42 to the
+    // outbound one and 0x1EEF to the interrupt one, then stops with
+    // 0x100 at local store 0x14.
+    const STOPPED: u32 = 0x100 << 16 | SPU_STATUS_P;
+    const STOP_NPC: u32 = 0x18;
+    // SPU_Mbox_Stat: outbound count, free inbound entries << 8,
+    // interrupt mailbox count << 16.
+    const IN_FREE: u32 = SPU_IN_MBOX_DEPTH << 8;
+    const INTR: u32 = 1 << 16;
+    // Class 2 status bits B, S and M.
+    const B: u32 = raw_spu::INT_STAT_MAILBOX_THRESHOLD as u32;
+    const SM: u32 = (raw_spu::INT_STAT_STOP_AND_SIGNAL | raw_spu::INT_STAT_MAILBOX) as u32;
+    [
+        ("step", OK),
+        ("rc", OK),
+        ("create_before_initialize", EAGAIN),
+        ("its_id", Exact(0xEEEE_EEEE)),
+        ("initialize", OK),
+        ("create_a", OK),
+        ("id_a", Any),
+        ("create_b", OK),
+        ("id_b", Any),
+        ("create_past_the_pool", EAGAIN),
+        ("initialize_below_the_live_count", EBUSY),
+        ("destroy_b", OK),
+        ("destroy_b_again", ESRCH),
+        ("destroy_no_such", ESRCH),
+        ("create_null_id", EFAULT),
+        ("tag_class_0", OK),
+        ("tag_0", Any),
+        ("tag_class_0_again", EAGAIN),
+        ("tag_class_1", EINVAL),
+        ("tag_class_2", OK),
+        ("tag_2", Any),
+        ("tag_no_such", ESRCH),
+        ("set_mask_0", OK),
+        ("get_mask_0", OK),
+        ("mask_0", Exact(0x7)),
+        ("set_mask_2", OK),
+        ("mask_2", Exact(0xF)),
+        ("set_mask_class_1", EINVAL),
+        ("set_mask_no_such", ESRCH),
+        ("get_stat_0", OK),
+        ("stat_0", OK),
+        ("set_cfg_3", OK),
+        ("get_cfg", OK),
+        ("cfg_3", Exact(3)),
+        ("set_cfg_4", OK),
+        ("cfg_4", Exact(4 & raw_spu::CFG_MASK)),
+        ("recover", EINVAL),
+        ("recover_no_such", ESRCH),
+        ("status_before", Exact(0)),
+        ("mbox_stat_before", Exact(IN_FREE)),
+        ("local_store_word", Exact(0xCAFE_F00D)),
+        ("mbox_stat_after_in", Exact(IN_FREE - (1 << 8))),
+        ("polls", Any),
+        ("status_stopped", Exact(STOPPED)),
+        ("npc", Exact(STOP_NPC)),
+        ("mbox_stat_stopped", Exact(INTR | IN_FREE | 1)),
+        ("out_mbox", Exact(0x42)),
+        ("mbox_stat_after_out", Exact(INTR | IN_FREE)),
+        ("get_stat_2", OK),
+        ("stat_2", Exact(B | SM)),
+        ("read_puint_mb", OK),
+        ("puint_mb", Exact(0x1EEF)),
+        ("mbox_stat_after_puint", Exact(IN_FREE)),
+        ("stat_2_after_puint", Exact(B | SM)),
+        ("clear_stat_2", OK),
+        ("stat_2_cleared", Exact(B)),
+        ("destroy_a", OK),
+        ("read_puint_mb_untouched", OK),
+        ("puint_mb_untouched", Any),
+        ("read_puint_mb_again", OK),
+        ("puint_mb_again", Exact(0x1EEF)),
+        ("create_null_id_pool_full", EAGAIN),
+        ("create_after_null_id", OK),
+        ("its_id", Any),
+        ("set_mask_no_such_class_1", EINVAL),
+        ("get_mask_no_such_class_1", EINVAL),
+        ("tag_no_such_class_1", EINVAL),
+        ("get_mask_null", EFAULT),
+        ("create_unmapped_id", EFAULT),
+        ("create_after_unmapped_id", OK),
+        ("its_id", Any),
+        ("read_puint_mb_unmapped", EFAULT),
+        ("get_cfg_null", EFAULT),
+        ("set_mask_class_3", EINVAL),
+        ("tag_null", EFAULT),
+        ("tag_after_null", OK),
+        ("get_stat_2_c", OK),
+        ("stat_2_c", Exact(B)),
+        ("pad", Exact(0)),
+        ("pad", Exact(0)),
+    ]
+}
+
+/// spu_raw_window_modes's payload, in the order ppu/main.c lists. These
+/// words take any value:
+/// - the Raw SPU id: the console hands out the lowest id that no other
+///   part of the system holds;
+/// - the two poll counts: they follow the SPU's progress.
+const RAW_WINDOW_MODES_FIELDS: [(&str, Expect); 32] = raw_window_modes_fields();
+
+const fn raw_window_modes_fields() -> [(&'static str, Expect); 32] {
+    const OK: Expect = Exact(0);
+    // spu/main.S starts at local store 0x80, writes 0x11 and 0x22 to the
+    // interrupt mailbox, and stops with 0x101 at 0xA4.
+    const STOPPED: u32 = 0x101 << 16 | SPU_STATUS_P;
+    const STOP_NPC: u32 = 0xA8;
+    const IN_FREE: u32 = SPU_IN_MBOX_DEPTH << 8;
+    const INTR: u32 = 1 << 16;
+    const B: u32 = raw_spu::INT_STAT_MAILBOX_THRESHOLD as u32;
+    const SM: u32 = (raw_spu::INT_STAT_STOP_AND_SIGNAL | raw_spu::INT_STAT_MAILBOX) as u32;
+    let mut fields = [("pad", OK); 32];
+    fields[0] = ("step", OK);
+    fields[1] = ("rc", OK);
+    fields[2] = ("initialize", OK);
+    fields[3] = ("create", OK);
+    fields[4] = ("id", Any);
+    fields[5] = ("set_cfg_1", OK);
+    fields[6] = ("get_cfg", OK);
+    fields[7] = ("cfg", Exact(1));
+    fields[8] = ("mbox_stat_first_message", Exact(INTR | IN_FREE));
+    fields[9] = ("polls_first_message", Any);
+    fields[10] = ("status_second_waits", Exact(SPU_STATUS_R | SPU_STATUS_W));
+    fields[11] = ("read_puint_mb", OK);
+    fields[12] = ("puint_mb", Exact(0x11));
+    fields[13] = ("status_stopped", Exact(STOPPED));
+    fields[14] = ("polls_stopped", Any);
+    fields[15] = ("npc", Exact(STOP_NPC));
+    fields[16] = ("mbox_stat_stopped", Exact(INTR | IN_FREE));
+    fields[17] = ("get_stat_2", OK);
+    fields[18] = ("stat_2", Exact(B | SM));
+    fields[19] = ("read_puint_mb_second", OK);
+    fields[20] = ("puint_mb_second", Exact(0x22));
+    // SPU_Cfg 1: register 1 ORs 0x1 and 0x2; register 2 keeps the last
+    // of 0x10 and 0x20.
+    fields[21] = ("signal_1_or", Exact(0x3));
+    fields[22] = ("signal_2_overwrite", Exact(0x20));
+    fields[23] = ("destroy", OK);
     fields
 }
 
@@ -334,6 +497,16 @@ pub const CASES: &[Case] = &[
         name: "spu_thread_window_slots",
         max_steps: 1_000_000,
         fields: &WINDOW_SLOTS_FIELDS,
+    },
+    Case {
+        name: "spu_raw_lifecycle",
+        max_steps: 1_000_000,
+        fields: &RAW_LIFECYCLE_FIELDS,
+    },
+    Case {
+        name: "spu_raw_window_modes",
+        max_steps: 1_000_000,
+        fields: &RAW_WINDOW_MODES_FIELDS,
     },
     Case {
         name: "spu_image_segments",

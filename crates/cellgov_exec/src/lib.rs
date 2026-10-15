@@ -35,7 +35,7 @@ pub mod yield_reason;
 pub use barrier::{BarrierKind, RetiredBarrier};
 pub use context::ExecutionContext;
 pub use fake_isa::{FakeIsaUnit, FakeOp};
-pub use problem_state::{ProblemStateError, SignalNotifier};
+pub use problem_state::{OutMailboxes, ProblemStateError, SignalNotifier};
 pub use stall::{ChannelStall, StallWake};
 pub use step_result::{ExecutionStepResult, FaultRegisterDump, LocalDiagnostics};
 pub use stop::{RestartError, StopRegisters};

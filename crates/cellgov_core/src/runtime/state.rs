@@ -59,6 +59,10 @@ pub struct Runtime {
     /// [`Runtime::step`] began, read through
     /// [`Runtime::last_lv2_effects`].
     pub(super) last_lv2_effects: Vec<Effect>,
+    /// The Raw SPU state another processor reached since the last
+    /// [`Runtime::step`] began, read through
+    /// [`Runtime::last_problem_state_accesses`].
+    pub(super) last_problem_state_accesses: Vec<(UnitId, cellgov_mem::ByteRange)>,
     /// The mailbox whose occupancy the last step's unit read; see
     /// [`Runtime::last_mailbox_read`].
     pub(super) last_mailbox_read: Option<cellgov_sync::MailboxId>,

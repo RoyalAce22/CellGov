@@ -23,7 +23,7 @@ PS3 LV2 virtual-address layout:
 | 0xC0000000-0xCFFFFFFF      | 256 MB     | `rsx`          | `ReservedZeroReadable` (default) | Video / RSX local memory -- placeholder, reads zero and are counted                                                                                                      |
 | 0xD0000000-0xD00FFFFF      | 1 MB       | `stack`        | `ReadWrite`                      | Primary-thread stack (page-4K); matches `PROC_PARAM.primary_stacksize` typical for retail titles                                                                         |
 | 0xD0100000-0xD0FFFFFF      | 15 MB      | `child_stacks` | `ReadWrite`                      | Stack pool for PPU threads spawned by `sys_ppu_thread_create`                                                                                                            |
-| 0xE0000000-0xFFFFFFFF      | 512 MB     | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX; an MFC transfer into its SPU thread window reaches the target thread, as the runtime pipeline describes           |
+| 0xE0000000-0xFFFFFFFF      | 512 MB     | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX; an MFC transfer into its SPU thread window reaches the target thread, as the runtime pipeline describes; a Raw SPU's create maps its 1 MB problem-state window `ReadWrite` inside it, and its destroy returns it |
 
 The region map does not track `main`'s internal sub-layout; the
 region stays flat. Within it:

@@ -129,6 +129,17 @@ pub(super) fn execute_wrch(
             state.channels.out_mbox = Some(val);
             SpuStepOutcome::Continue
         }
+        // [CBEA p:134 s:9.5.2] a write to a full outbound interrupt mailbox stalls the SPU until another processor reads it.
+        // A unit whose interrupt mailbox no reader empties refuses the
+        // channel by name below.
+        spu::SPU_WR_OUT_INTR_MBOX if state.channels.out_intr_mbox_connected => {
+            if state.channels.out_intr_mbox.is_some() {
+                return stall();
+            }
+            state.channels.out_intr_mbox = Some(val);
+            state.channels.out_intr_mbox_interrupt = true;
+            SpuStepOutcome::Continue
+        }
         // [CBEA p:151 s:9.11.2] the mask selects the pending events SPU_RdEventStat reports; enabling a pending event updates the channel.
         // [CBEA p:153 s:9.11.3] SPU_RdEventMask returns the last data written, so the model keeps it whole.
         spu::SPU_WR_EVENT_MASK => {
@@ -390,8 +401,10 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         // [CBEA p:130 s:9.3.8] MFC_WrListStallAck is nonblocking and counts 1.
         spu::MFC_WR_LIST_STALL_ACK => 1,
         // [CBEA p:134 s:9.5.2] SPU_WrOutIntrMbox counts its free entries.
-        // The model writes nothing to it, so the one entry is free.
-        spu::SPU_WR_OUT_INTR_MBOX => spu::SPU_OUT_INTR_MBOX_DEPTH,
+        // A unit that refuses the write keeps the one entry free.
+        spu::SPU_WR_OUT_INTR_MBOX => {
+            spu::SPU_OUT_INTR_MBOX_DEPTH - u32::from(channels.out_intr_mbox.is_some())
+        }
         // [CBE-Handbook p:443 s:17.1.3] rchcnt on a reserved channel returns 0.
         _ if spu::is_reserved_channel(channel) => 0,
         _ => return None,

@@ -70,6 +70,7 @@ impl Runtime {
         // lands their guest writes, so the clear runs ahead of it.
         self.last_host_writes.clear();
         self.last_lv2_effects.clear();
+        self.last_problem_state_accesses.clear();
         self.last_mailbox_read = None;
 
         let unit_id = match self.scheduler.select_next(&self.registry) {

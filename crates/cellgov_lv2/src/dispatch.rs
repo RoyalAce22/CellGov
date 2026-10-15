@@ -11,7 +11,8 @@
 //! - an explicit `woken_unit_ids` entry
 //! - an explicit `finished_units` entry
 //! - an explicit `units` entry of [`Lv2Dispatch::SpuGroupSuspension`]
-//! - the `unit` of [`Lv2Dispatch::RawSpuDestroy`]
+//! - the `unit` of [`Lv2Dispatch::RawSpuDestroy`] or
+//!   [`Lv2Dispatch::RawSpuReadPuintMb`]
 //! - for [`Lv2Dispatch::SpuGroupTerminate`], a joiner parked on the
 //!   named group
 
@@ -213,7 +214,9 @@ pub enum Lv2Dispatch {
     /// 1. It registers a stopped SPU unit with an empty local store.
     /// 2. It enters the unit as Raw SPU `id` with
     ///    `Lv2Host::record_raw_spu`.
-    /// 3. It commits `effects`, the id write, and writes 0 to the
+    /// 3. It maps the Raw SPU's problem-state window in the source's
+    ///    address space.
+    /// 4. It commits `effects`, the id write, and writes 0 to the
     ///    source's r3.
     RawSpuCreate {
         /// The new Raw SPU's id.
@@ -222,10 +225,31 @@ pub enum Lv2Dispatch {
         effects: Vec<Effect>,
     },
     /// `sys_raw_spu_destroy`: the host already removed the Raw SPU. The
-    /// runtime finishes `unit`, then writes 0 to the source's r3.
+    /// runtime unmaps its window, finishes `unit`, then writes 0 to the
+    /// source's r3.
     RawSpuDestroy {
+        /// The destroyed Raw SPU's id.
+        id: u32,
         /// The destroyed Raw SPU's unit.
         unit: UnitId,
+    },
+    /// `sys_raw_spu_read_puint_mb`: the host checked the id and that
+    /// `value_ptr` takes a 32-bit word.
+    ///
+    /// The runtime then does these steps:
+    ///
+    /// 1. It takes the message from `unit`'s outbound interrupt mailbox,
+    ///    if it holds one, into the Raw SPU's PU interrupt mailbox
+    ///    register with `Lv2Host::load_raw_spu_puint_mb`.
+    /// 2. It writes the register's word at `value_ptr` and 0 to the
+    ///    source's r3.
+    RawSpuReadPuintMb {
+        /// The Raw SPU's id.
+        id: u32,
+        /// The Raw SPU's unit.
+        unit: UnitId,
+        /// Where the word goes, in the source's address space.
+        value_ptr: u32,
     },
     /// [`Self::Immediate`] whose result also lands in GPRs beyond
     /// r3: `registers` are `(gpr, value)` pairs the caller sees

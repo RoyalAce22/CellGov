@@ -283,8 +283,9 @@ bytes.
 - the effects vec is empty,
 - `fault` is `None`,
 - `yield_reason` is neither `Syscall` nor `Finished`,
-- the DMA queue is empty, and
-- no RSX work is pending.
+- the DMA queue is empty,
+- no RSX work is pending, and
+- the stepping unit is no Raw SPU, whose window projects its state.
 
 The observable contract is identical.
 

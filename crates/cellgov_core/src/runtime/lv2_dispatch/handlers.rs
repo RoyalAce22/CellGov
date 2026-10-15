@@ -211,17 +211,65 @@ impl Runtime {
         self.register_spu_inbound_mailbox(uid);
         self.lv2_host.record_raw_spu(id, uid);
         let caller_space = self.spaces.space_of(source);
+        self.open_raw_spu_window(id, uid, caller_space);
         self.apply_lv2_effects(&effects, caller_space);
         self.deliver_syscall_return(source, 0);
     }
 
-    /// Finishes the SPU of a destroyed Raw SPU.
-    pub(super) fn handle_raw_spu_destroy(&mut self, source: UnitId, unit: UnitId) {
+    /// Finishes the SPU of a destroyed Raw SPU and unmaps its window.
+    pub(super) fn handle_raw_spu_destroy(&mut self, source: UnitId, id: u32, unit: UnitId) {
+        self.close_raw_spu_window(id, unit);
         self.registry
             .set_status_override(unit, UnitStatus::Finished);
         // A deadline left behind would wake a finished unit.
         self.timer_wakes.cancel(unit);
         let _ = self.syscall_responses.try_take(unit);
+        self.deliver_syscall_return(source, 0);
+    }
+
+    /// Takes the message in the Raw SPU's outbound interrupt mailbox, if
+    /// it holds one, into its PU interrupt mailbox register, and writes
+    /// the register's word at `value_ptr` in the caller's space.
+    pub(super) fn handle_raw_spu_read_puint_mb(
+        &mut self,
+        source: UnitId,
+        id: u32,
+        unit: UnitId,
+        value_ptr: u32,
+    ) {
+        self.note_problem_state_access(unit);
+        let parked = self.registry.effective_status(unit) != Some(UnitStatus::Runnable);
+        let message = match self.read_unit_out_intr_mbox(unit) {
+            Ok(message) => message,
+            Err(err) => {
+                self.lv2_host.log_invariant_break(
+                    "runtime.raw_spu_puint_mb_unreadable",
+                    format_args!(
+                        "Raw SPU {id} ({unit:?}) refused its interrupt mailbox read: {err}"
+                    ),
+                );
+                None
+            }
+        };
+        if parked && self.registry.effective_status(unit) == Some(UnitStatus::Runnable) {
+            self.step_woke_others = true;
+        }
+        let Some(word) = self.lv2_host.load_raw_spu_puint_mb(id, message) else {
+            self.lv2_host.log_invariant_break(
+                "runtime.raw_spu_puint_mb_unknown",
+                format_args!("Raw SPU {id} left the table during its puint_mb read"),
+            );
+            return self
+                .deliver_syscall_return(source, cellgov_ps3_abi::lv2::errno::CELL_ESRCH.into());
+        };
+        let write = Effect::shared_write(
+            cellgov_mem::ByteRange::contiguous_u32(value_ptr, 4),
+            cellgov_effects::WritePayload::from_slice(&word.to_be_bytes()),
+            source,
+            self.time,
+        );
+        let caller_space = self.spaces.space_of(source);
+        self.apply_lv2_effects(&[write], caller_space);
         self.deliver_syscall_return(source, 0);
     }
 

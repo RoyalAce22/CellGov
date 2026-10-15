@@ -34,6 +34,7 @@ mod mfc_exception;
 mod ppu_create;
 mod problem_state;
 mod process_spawn;
+mod raw_spu_window;
 mod snapshot;
 mod spaces;
 mod spu_thread_stop;

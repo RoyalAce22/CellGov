@@ -76,6 +76,9 @@ fn random_unit(seed: u64) -> SpuExecutionUnit {
     c.atomic_status_ready = r.flag();
     c.in_mbox = (0..r.next() % 5).map(|_| r.word()).collect();
     c.out_mbox = r.flag().then(|| r.word());
+    c.out_intr_mbox_connected = r.flag();
+    c.out_intr_mbox = r.flag().then(|| r.word());
+    c.out_intr_mbox_interrupt = r.flag();
     c.list_stall_status = r.word();
     c.mssync_tracking = r.flag().then(|| r.next());
     c.mssync_horizon = r.flag().then(|| r.next());
@@ -128,7 +131,7 @@ fn restoring_a_snapshot_into_a_fresh_unit_reproduces_the_snapshot() {
 }
 
 #[test]
-fn the_comparison_view_and_the_local_store_hash_derive_from_the_snapshot() {
+fn the_comparison_view_and_the_local_memory_hash_derive_from_the_snapshot() {
     for seed in 1..=16 {
         let unit = random_unit(seed);
         let snapshot = unit.snapshot();
@@ -136,7 +139,7 @@ fn the_comparison_view_and_the_local_store_hash_derive_from_the_snapshot() {
             snapshot.observable(),
             SpuObservableSnapshot::capture(unit.state())
         );
-        assert_eq!(unit.local_memory_hash(), Some(snapshot.local_store_hash()));
+        assert_eq!(unit.local_memory_hash(), Some(snapshot.local_memory_hash()));
     }
 }
 

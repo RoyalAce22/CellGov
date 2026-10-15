@@ -4,6 +4,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_exec::{ProblemStateError, SignalNotifier, StallWake, UnitStatus};
+use cellgov_ps3_abi::hw::spu::{SPU_STATUS_R, SPU_STATUS_W};
 use cellgov_sync::MailboxId;
 
 use super::Runtime;
@@ -13,12 +14,20 @@ impl Runtime {
     /// problem-state registers or no unit with the id.
     ///
     /// A unit CellGov refused reports R clear with no stop cause.
+    ///
+    /// [CBEA p:94 s:8.5.2] W is set while the SPU waits on a blocked channel.
     pub fn unit_spu_status(&self, unit: UnitId) -> Option<u32> {
-        let status = self.registry.get(unit)?.spu_status()?;
-        if self.registry.effective_status(unit) == Some(UnitStatus::Faulted) {
-            return Some(0);
+        let spu = self.registry.get(unit)?;
+        let status = spu.spu_status()?;
+        match self.registry.effective_status(unit) {
+            Some(UnitStatus::Faulted) => Some(0),
+            Some(UnitStatus::Blocked)
+                if status & SPU_STATUS_R != 0 && spu.channel_stall().is_some() =>
+            {
+                Some(status | SPU_STATUS_W)
+            }
+            _ => Some(status),
         }
-        Some(status)
     }
 
     /// An `SPU_RunCntl` stop request for `unit`. A unit parked on a
@@ -78,7 +87,8 @@ impl Runtime {
     ///
     /// An SPU that runs an LV2 thread takes the register's mode from
     /// that thread's signal configuration, which
-    /// `sys_spu_thread_set_spu_cfg` sets.
+    /// `sys_spu_thread_set_spu_cfg` sets; a Raw SPU takes it from the
+    /// `SPU_Cfg` word `sys_raw_spu_set_spu_cfg` sets.
     ///
     /// # Errors
     ///
@@ -92,7 +102,7 @@ impl Runtime {
         value: u32,
     ) -> Result<(), ProblemStateError> {
         self.refuse_retired(unit)?;
-        let config = self.lv2_host.thread_groups().signal_config_of_unit(unit);
+        let config = self.lv2_host.signal_config_of_spu(unit);
         let target = self
             .registry
             .get_mut(unit)
@@ -130,6 +140,34 @@ impl Runtime {
             .get_mut(unit)
             .ok_or(ProblemStateError::UnknownUnit)?
             .read_out_mbox()?;
+        if message.is_some() && self.stall_ends(unit, StallWake::OutboundMailboxRead, false) {
+            self.registry
+                .set_status_override(unit, UnitStatus::Runnable);
+        }
+        Ok(message)
+    }
+
+    /// Read `SPU_Out_Intr_Mbox` of `unit`: the message it wrote, or
+    /// `None` when the mailbox is empty. A unit parked writing the
+    /// mailbox becomes runnable and runs its write again.
+    ///
+    /// [CBEA p:134 s:9.5.2] a write to a full outbound interrupt mailbox stalls the SPU until the SPU Outbound Interrupt Mailbox Register is read.
+    ///
+    /// # Errors
+    ///
+    /// [`ProblemStateError::UnknownUnit`], [`ProblemStateError::Retired`]
+    /// and [`ProblemStateError::NoProblemState`] as for
+    /// [`Runtime::request_unit_stop`].
+    pub fn read_unit_out_intr_mbox(
+        &mut self,
+        unit: UnitId,
+    ) -> Result<Option<u32>, ProblemStateError> {
+        self.refuse_retired(unit)?;
+        let message = self
+            .registry
+            .get_mut(unit)
+            .ok_or(ProblemStateError::UnknownUnit)?
+            .read_out_intr_mbox()?;
         if message.is_some() && self.stall_ends(unit, StallWake::OutboundMailboxRead, false) {
             self.registry
                 .set_status_override(unit, UnitStatus::Runnable);
