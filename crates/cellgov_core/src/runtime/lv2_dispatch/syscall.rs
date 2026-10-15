@@ -73,10 +73,10 @@ impl Runtime {
         // Timer path: park the caller until guest time reaches the
         // requested interval, still bypassing `Lv2Host::dispatch`.
         // Other threads run meanwhile; when everything is parked, the
-        // all-blocked time-warp jumps the clock to the deadline.
-        // Nothing public attests that the caller parks and then
-        // returns CELL_OK; a console probe or an lv2 timer autotest
-        // would settle it.
+        // all-blocked time-warp jumps the clock to the deadline. The
+        // lv2_timer_time_tty capture reads CELL_OK after at least the
+        // interval for both calls, and a return within 80 timebase
+        // ticks for a zero interval.
         let usec = match num {
             TIMER_USLEEP => args8[0],
             // The seconds-granularity call takes an unsigned 32-bit

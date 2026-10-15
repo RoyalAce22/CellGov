@@ -310,7 +310,7 @@ fn fingerprint_differs_between_two_distinct_process_count_classes() {
     // different classes must still read differently.
     let mut a = Lv2Host::new();
     let mut b = Lv2Host::new();
-    a.state.process_counts.timer_inc();
+    a.state.process_counts.timer_insert(1);
     b.state.process_counts.rwlock_insert(1);
     assert_ne!(a.fingerprint(), b.fingerprint());
 }
@@ -319,8 +319,8 @@ fn fingerprint_differs_between_two_distinct_process_count_classes() {
 fn fingerprint_returns_to_baseline_after_process_count_inc_then_dec() {
     let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
-    host.state.process_counts.timer_inc();
-    host.state.process_counts.timer_dec();
+    host.state.process_counts.timer_insert(1);
+    assert!(host.state.process_counts.timer_remove(1));
     assert_eq!(pre, host.fingerprint());
 }
 

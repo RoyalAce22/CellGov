@@ -62,9 +62,16 @@ impl Lv2Host {
         Lv2Dispatch::immediate(cellgov_time::CELL_PPU_TIMEBASE_HZ)
     }
 
-    /// `sys_time_get_timezone`: writes zero through both out-pointers,
-    /// UTC with no daylight saving; EFAULT on any null pointer. The
-    /// arm reads no host clock.
+    /// `sys_time_get_timezone`: writes a 4-byte zero through each
+    /// out-pointer, UTC with no daylight saving. The arm reads no host
+    /// clock; a console writes its own timezone setting instead.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EFAULT`, with nothing written, for a null timezone
+    ///   pointer.
+    /// - `CELL_EFAULT` for a null summer-time pointer, after the
+    ///   timezone write, as the `lv2_timer_time_tty` capture reads.
     pub(super) fn dispatch_time_get_timezone(
         &self,
         timezone_ptr: u32,
@@ -72,7 +79,7 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        if let Some(d) = self.efault_if_null(&[timezone_ptr, summer_time_ptr]) {
+        if let Some(d) = self.efault_if_null(&[timezone_ptr]) {
             return d;
         }
         let zero = 0i32.to_be_bytes();
@@ -82,6 +89,12 @@ impl Lv2Host {
             requester,
             tick,
         );
+        if summer_time_ptr == 0 {
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EFAULT.into(),
+                effects: vec![tz_write],
+            };
+        }
         let dst_write = Effect::shared_write(
             ByteRange::contiguous_u32(summer_time_ptr, 4),
             WritePayload::from_slice(&zero),
@@ -289,24 +302,31 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_timer_create` stub: no timer state beyond the
-    /// `ProcessCounts` tally is modeled.
+    /// `sys_timer_create` stub: records the new id as live, with no
+    /// timer state behind it.
     pub(super) fn dispatch_timer_create(
         &mut self,
         id_ptr: u32,
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        self.state.process_counts.timer_inc();
         let id = self.alloc_id();
+        self.state.process_counts.timer_insert(id);
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
-    /// `sys_timer_destroy` stub: counterpart to
-    /// [`Self::dispatch_timer_create`].
-    pub(super) fn dispatch_timer_destroy(&mut self) -> Lv2Dispatch {
-        self.state.process_counts.timer_dec();
-        Lv2Dispatch::immediate(0)
+    /// `sys_timer_destroy` stub: forgets a live id.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` for an id no create returned, or one already
+    ///   destroyed, as the `lv2_timer_time_tty` capture reads.
+    pub(super) fn dispatch_timer_destroy(&mut self, id: u32) -> Lv2Dispatch {
+        if self.state.process_counts.timer_remove(id) {
+            Lv2Dispatch::immediate(0)
+        } else {
+            Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
+        }
     }
 
     /// `sys_rwlock_create` stub: records the new id as live, with no

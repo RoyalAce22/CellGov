@@ -48,7 +48,7 @@ fn each_counter_bump_moves_a_documented_class() {
     for (label, bump, expected_class) in [
         (
             "timer",
-            &ProcessCounts::timer_inc as &dyn Fn(&mut ProcessCounts),
+            &(|c: &mut ProcessCounts| c.timer_insert(1)) as &dyn Fn(&mut ProcessCounts),
             SYS_TIMER_OBJECT,
         ),
         (
@@ -87,8 +87,8 @@ fn each_counter_bump_moves_a_documented_class() {
 fn counter_classes_observe_inc_dec() {
     let host = Lv2Host::new();
     let mut counts = ProcessCounts::new();
-    counts.timer_inc();
-    counts.timer_inc();
+    counts.timer_insert(1);
+    counts.timer_insert(2);
     counts.rwlock_insert(1);
     counts.event_port_inc();
     counts.lwcond_inc();
@@ -99,7 +99,7 @@ fn counter_classes_observe_inc_dec() {
     assert_eq!(counts.count_for_class(SYS_LWCOND_OBJECT, &host), 1);
     assert_eq!(counts.count_for_class(SYS_FS_FD_OBJECT, &host), 1);
 
-    counts.timer_dec();
+    assert!(counts.timer_remove(1));
     assert!(counts.rwlock_remove(1));
     counts.lwcond_dec();
     assert_eq!(counts.count_for_class(SYS_TIMER_OBJECT, &host), 1);
@@ -110,7 +110,7 @@ fn counter_classes_observe_inc_dec() {
 #[test]
 fn dec_saturates_at_zero() {
     let mut counts = ProcessCounts::new();
-    counts.timer_dec();
+    assert!(!counts.timer_remove(1));
     assert!(!counts.rwlock_remove(1));
     counts.event_port_dec();
     counts.lwcond_dec();

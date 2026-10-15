@@ -890,7 +890,7 @@ impl Lv2Host {
             Lv2Request::TimerCreate { id_ptr } => {
                 self.dispatch_timer_create(id_ptr, requester, tick)
             }
-            Lv2Request::TimerDestroy { .. } => self.dispatch_timer_destroy(),
+            Lv2Request::TimerDestroy { id } => self.dispatch_timer_destroy(id),
             Lv2Request::RwlockCreate { id_ptr, .. } => {
                 self.dispatch_rwlock_create(id_ptr, requester, tick)
             }

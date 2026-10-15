@@ -169,7 +169,7 @@ fn every_thread_process_and_identity_change_moves_the_partial() {
         host,
         h,
         "timer count",
-        host.state.process_counts.timer_inc()
+        host.state.process_counts.timer_insert(0x1100_0100)
     );
     step!(
         host,
@@ -318,7 +318,7 @@ fn thread_group_partial_wire_format_golden() {
 fn counters_holds_and_firmware_wire_format_golden() {
     let mut host = Lv2Host::new();
     let fresh = host.sync_partial();
-    host.state.process_counts.timer_inc();
+    host.state.process_counts.timer_insert(0x1100_0100);
     host.lwmutex_holds_inc(PpuThreadId::PRIMARY);
     host.lwmutex_holds_inc(PpuThreadId::PRIMARY);
     let mut digest = [0u8; 32];
@@ -331,6 +331,6 @@ fn counters_holds_and_firmware_wire_format_golden() {
     });
     assert_eq!(
         host.sync_partial().wrapping_sub(fresh),
-        0x5928_87d1_8806_b5b4_dbd1_030b_f64f_9529
+        0x1ff6_7106_6110_af02_c613_afa0_7889_d729
     );
 }

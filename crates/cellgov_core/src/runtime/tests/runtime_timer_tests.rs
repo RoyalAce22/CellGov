@@ -928,3 +928,7 @@ fn a_no_wake_expiry_warps_again_instead_of_reporting_all_blocked() {
     assert_eq!(rt.timer_wakes_pending(), 0);
     assert_eq!(rt.lv2_host().observability().invariant_break_count, 0);
 }
+
+#[cfg(test)]
+#[path = "runtime_timer_console_tests.rs"]
+mod console;
