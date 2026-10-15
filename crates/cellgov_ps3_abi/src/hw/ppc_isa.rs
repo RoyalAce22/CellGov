@@ -35,6 +35,38 @@ pub const PPC_BL_OPCODE_LK: u32 = 0x4800_0001;
 /// the signed 26-bit displacement.
 pub const PPC_B_OPCODE_NO_LK: u32 = 0x4800_0000;
 
+/// Primary opcode of the B-form `b` / `bl`.
+///
+/// [PPC-Book1 p:24 s:Branch] B-form, opcode 18.
+pub const PPC_B_OPCD: u32 = 18;
+
+/// Primary opcode of the B-form `bc` / `bcl`.
+///
+/// [PPC-Book1 p:24 s:Branch] B-form, opcode 16.
+pub const PPC_BC_OPCD: u32 = 16;
+
+/// Primary opcode of the XL-form group that holds `bclr` and `bcctr`
+/// ([`PPC_BCLR_XO`], [`PPC_BCCTR_XO`]).
+///
+/// [PPC-Book1 p:25 s:Branch Conditional to Link Register] XL-form, opcode 19.
+pub const PPC_XL_OPCD: u32 = 19;
+
+/// The link bit (LK) of every branch form: set, the branch writes the
+/// return address to the link register.
+///
+/// [PPC-Book1 p:24 s:Branch] LK is bit 31.
+pub const PPC_BRANCH_LK: u32 = 1;
+
+/// Primary opcode of the X-form group that holds `or`.
+///
+/// [PPC-Book1 p:67 s:Fixed-Point Logical Instructions] OR is X-form, opcode 31.
+pub const PPC_X_OPCD: u32 = 31;
+
+/// Extended opcode (XO) of `or`; `mr rA, rS` is `or rA, rS, rS`.
+///
+/// [PPC-Book1 p:67 s:Fixed-Point Logical Instructions] OR, extended opcode 444.
+pub const PPC_OR_XO: u32 = 444;
+
 /// Encoding of `addi r3, r3, 1`. Specific instruction useful as a
 /// fixed instruction inside synthetic test bodies.
 pub const PPC_ADDI_R3_R3_1: u32 = 0x3863_0001;

@@ -1298,7 +1298,7 @@ Usage: cellgov ps3 status [OPTIONS]
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
   51  the console did not answer as the protocol requires
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
@@ -1333,7 +1333,7 @@ Usage: cellgov ps3 deploy [OPTIONS] --manifest <FILE>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
   51  the console did not answer as the protocol requires
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
@@ -1368,7 +1368,7 @@ Usage: cellgov ps3 run [OPTIONS] --manifest <FILE>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
   51  the console did not answer as the protocol requires
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
@@ -1403,7 +1403,7 @@ Usage: cellgov ps3 fetch [OPTIONS] --manifest <FILE> --out <FILE>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
   51  the console did not answer as the protocol requires
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
@@ -1436,7 +1436,7 @@ Usage: cellgov ps3 cleanup [OPTIONS] --manifest <FILE>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
   51  the console did not answer as the protocol requires
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
@@ -1477,7 +1477,7 @@ Usage: cellgov ps3 capture [OPTIONS] --manifest <FILE> --harness-revision <SHA>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
   51  the console did not answer as the protocol requires
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
@@ -1508,7 +1508,7 @@ Usage: cellgov ps3 convert [OPTIONS] --frame <FILE> --manifest <FILE>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
   51  the console did not answer as the protocol requires
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
@@ -1535,7 +1535,7 @@ Usage: cellgov ps3 unlock [OPTIONS]
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
   51  the console did not answer as the protocol requires
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame

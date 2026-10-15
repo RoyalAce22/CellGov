@@ -15,6 +15,14 @@
 //! dev_flash, so nothing here has a witness: the host stages every
 //! reply at dispatch, in one order, with no latency.
 //!
+//! No probe sends `sys_uart_initialize`, `sys_uart_receive` or
+//! `sys_uart_send`: they reach the system controller and the AV manager
+//! behind it, so the runner refuses a probe that names them. Only a
+//! passive capture of what vsh sends may settle their answers, the
+//! reply contents and the parked-reader order. `sys_uart_get_params`
+//! reads two sizes, and the `lv2_uart_get_params` capture settles its
+//! answer to a game process after vsh has claimed the UART.
+//!
 //! vsh.self is the only dev_flash module that speaks this UART. It
 //! retries `sys_uart_initialize` up to ten times, with a 100 ms sleep
 //! between attempts. It has one send wrapper (mode 2) and one receive

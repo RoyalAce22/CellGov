@@ -379,6 +379,7 @@ pub fn capture<C: ConsoleOps>(
         harness_revision: plan.harness_revision.clone(),
         recapture_reason: plan.recapture_reason.clone(),
     };
+    deploy::admit(&package)?;
     run::preflight(
         console,
         &target,

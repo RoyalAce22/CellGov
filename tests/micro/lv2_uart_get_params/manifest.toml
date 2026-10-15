@@ -1,0 +1,14 @@
+[test]
+name = "lv2_uart_get_params"
+
+# A hardware probe: sys_uart_get_params, the one read-only UART call, from a game process.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 32 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 32 },
+]
+
+[expect]
+outcome = "completed"

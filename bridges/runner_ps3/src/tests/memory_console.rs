@@ -69,8 +69,38 @@ files = ["spu_main.elf"]
 /// The frame the packaged test writes: status 0, value `0x1337BAAD`.
 pub(crate) const PACKAGED_FRAME: &[u8] = b"CGOV\x00\x00\x00\x08\x00\x00\x00\x00\x13\x37\xBA\xAD";
 
+/// `li r11, 22` then `sc`: the PPU code of a relink that sends only
+/// `sys_process_exit`.
+pub(crate) const EXIT_ONLY: [u32; 2] = [0x3960_0016, 0x4400_0002];
+
+/// A big-endian ELF64 with one loadable executable segment holding
+/// `words`, as the passive-only scan reads it.
+pub(crate) fn ppu_elf(words: &[u32]) -> Vec<u8> {
+    const EHDR: usize = 64;
+    const PHDR: usize = 56;
+    let code_off = (EHDR + PHDR) as u64;
+    let code_len = (4 * words.len()) as u64;
+    let mut elf = vec![0u8; EHDR];
+    elf[..8].copy_from_slice(b"\x7fELF\x02\x02\x01\x00");
+    elf[0x20..0x28].copy_from_slice(&(EHDR as u64).to_be_bytes());
+    elf[0x36..0x38].copy_from_slice(&(PHDR as u16).to_be_bytes());
+    elf[0x38..0x3A].copy_from_slice(&1u16.to_be_bytes());
+    let mut ph = vec![0u8; PHDR];
+    ph[0..4].copy_from_slice(&1u32.to_be_bytes());
+    ph[4..8].copy_from_slice(&5u32.to_be_bytes());
+    ph[8..16].copy_from_slice(&code_off.to_be_bytes());
+    ph[0x20..0x28].copy_from_slice(&code_len.to_be_bytes());
+    ph[0x28..0x30].copy_from_slice(&code_len.to_be_bytes());
+    elf.extend_from_slice(&ph);
+    for w in words {
+        elf.extend_from_slice(&w.to_be_bytes());
+    }
+    elf
+}
+
 /// A packaged `spu_fixed_value` under `root`, each build file holding
-/// its own name; returns the manifest path.
+/// its own name except the PPU relink, an [`EXIT_ONLY`] ELF; returns the
+/// manifest path.
 pub(crate) fn package_on_disk(root: &std::path::Path) -> std::path::PathBuf {
     let dir = root.join("spu_fixed_value");
     let ps3 = dir.join("build").join("ps3");
@@ -87,6 +117,7 @@ pub(crate) fn package_on_disk(root: &std::path::Path) -> std::path::PathBuf {
     ] {
         std::fs::write(ps3.join(name), name).expect("package file");
     }
+    std::fs::write(ps3.join("spu_fixed_value.elf"), ppu_elf(&EXIT_ONLY)).expect("ppu relink");
     std::fs::write(dir.join("build").join("spu_fixed_value.elf"), "reference").expect("reference");
     manifest
 }

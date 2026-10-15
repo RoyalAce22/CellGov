@@ -78,6 +78,10 @@ mod arg_high_bits_console_tests;
 #[path = "tests/usbd_config_hid_console_tests.rs"]
 mod usbd_config_hid_console_tests;
 
+#[cfg(test)]
+#[path = "tests/uart_get_params_console_tests.rs"]
+mod uart_get_params_console_tests;
+
 pub use diagnostics::InvariantBreakReason;
 pub use lv2_host::{FirmwareIdentity, Lv2Host};
 pub use mmapper::SystemStateSeed;

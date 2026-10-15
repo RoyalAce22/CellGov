@@ -249,6 +249,27 @@ fn an_existing_capture_is_refused_unless_recaptured_with_a_reason() {
 }
 
 #[test]
+fn a_probe_that_sends_a_passive_only_call_is_refused_before_a_stale_result_is_cleared() {
+    let (_scratch, plan) = plan();
+    let package = Package::of(&plan.manifest_path, &plan.manifest);
+    let send = 0x3960_0000 | cellgov_ps3_abi::lv2::syscall::UART_SEND as u32;
+    std::fs::write(
+        &package.ps3_elf,
+        crate::memory_console::ppu_elf(&[send, 0x4400_0002]),
+    )
+    .expect("relink");
+    let mut console = console_writing(&plan, PACKAGED_FRAME);
+    let stale = plan.target().result_path;
+    console.files.insert(stale.clone(), b"stale".to_vec());
+    assert!(matches!(
+        run_capture(&mut console, &plan),
+        Err(RunnerPs3Error::PassiveOnlySyscall { .. })
+    ));
+    assert!(console.calls.is_empty(), "{:?}", console.calls);
+    assert_eq!(console.files[&stale], b"stale");
+}
+
+#[test]
 fn a_run_that_never_writes_its_result_times_out_cleans_up_and_writes_nothing() {
     let (_scratch, plan) = plan();
     let mut console = MemoryConsole::empty();

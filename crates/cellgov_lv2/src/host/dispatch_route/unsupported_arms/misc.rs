@@ -41,6 +41,9 @@ impl Lv2Host {
     /// performs. Nothing establishes what the kernel answers instead.
     /// The break records each call. libgem.sprx, libio.sprx and
     /// vsh.self call it, so the fabricated success reaches firmware.
+    /// Its subcommands reach controller hardware, so no probe sends it
+    /// and the runner refuses one that names it; only a passive capture
+    /// of what firmware sends can settle the answer.
     pub(in crate::host::dispatch_route) fn dispatch_gamepad_ycon_if(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.gamepad_ycon_if_stub",

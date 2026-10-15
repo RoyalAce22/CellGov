@@ -35,11 +35,15 @@ impl Lv2Host {
 
     /// `sys_uart_get_params` (370): the two ring sizes, u64 BE each.
     ///
+    /// The `lv2_uart_get_params` capture shows a game process, which has
+    /// no root privilege, reading both sizes; so privilege does not gate
+    /// this call. On the console vsh had already claimed the UART, so the
+    /// answer before any `sys_uart_initialize` is unestablished. A title
+    /// here boots with no vsh to claim it, so no initialize gate applies.
+    ///
     /// # Errors
     ///
-    /// - `CELL_ENOSYS` without root privilege.
-    /// - `CELL_ESRCH` before `sys_uart_initialize`.
-    /// - `CELL_EFAULT` for an unwritable output block.
+    /// - `CELL_EFAULT` for a null or unwritable output block.
     pub(in crate::host) fn dispatch_uart_get_params(
         &mut self,
         params_ptr: u32,
@@ -47,12 +51,6 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        if !self.privilege_of(requester).root() {
-            return Lv2Dispatch::immediate(errno::CELL_ENOSYS.into());
-        }
-        if !self.state.uart.initialized {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
-        }
         if params_ptr == 0 || !rt.writable(u64::from(params_ptr), av::SYS_UART_PARAMS_LEN) {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }

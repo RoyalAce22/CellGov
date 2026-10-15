@@ -11,7 +11,7 @@ use super::*;
 use crate::cli::parse;
 use crate::console::STATUS_PATH;
 use crate::lease::LEASE_DIR;
-use crate::memory_console::{package_on_disk, MemoryConsole, PACKAGED_FRAME};
+use crate::memory_console::{package_on_disk, ppu_elf, MemoryConsole, EXIT_ONLY, PACKAGED_FRAME};
 use crate::ExitCode;
 
 const PAGE: &str = include_str!("fixtures/cpursx.html");
@@ -502,6 +502,32 @@ fn run_and_capture_refuse_a_console_away_from_the_xmb_and_deploy_does_not() {
             .on_console("deploy", &[])
             .expect("a deploy starts nothing");
     }
+}
+
+#[test]
+fn deploy_and_capture_refuse_a_passive_only_call_before_reading_the_console() {
+    let mut bench = Bench::new();
+    let manifest = manifest::load_console(&bench.manifest).expect("manifest");
+    let relink = Package::of(&bench.manifest, &manifest).ps3_elf;
+    // `li r11, sys_uart_send; sc`.
+    let li_r11 = 0x3960_0000 | cellgov_ps3_abi::lv2::syscall::UART_SEND as u32;
+    std::fs::write(&relink, ppu_elf(&[li_r11, EXIT_ONLY[1]])).expect("relink");
+    for (verb, extra) in [
+        ("deploy", vec![]),
+        ("capture", vec!["--harness-revision", "0123456789abcdef"]),
+    ] {
+        let failure = bench.on_console(verb, &extra).expect_err("passive only");
+        assert!(
+            matches!(failure.error, RunnerPs3Error::PassiveOnlySyscall { .. }),
+            "{verb}: {}",
+            failure.error
+        );
+    }
+    assert!(
+        bench.console.calls.is_empty(),
+        "a refused probe never reaches the console: {:?}",
+        bench.console.calls
+    );
 }
 
 #[test]

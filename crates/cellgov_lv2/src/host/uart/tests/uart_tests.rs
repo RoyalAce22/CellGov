@@ -133,7 +133,7 @@ fn initialize_needs_root_and_claims_the_uart_once() {
 }
 
 #[test]
-fn send_receive_and_get_params_before_initialize_are_esrch() {
+fn send_and_receive_before_initialize_are_esrch() {
     let p = pkt(av::PS3AV_CID_AV_NULL_CMD, &[0; 4]);
     let rt = runtime_with_packets(&p);
     let mut host = root_host();
@@ -145,14 +145,6 @@ fn send_receive_and_get_params_before_initialize_are_esrch() {
         code_of(&recv(&mut host, &rt, 16, 0)),
         u64::from(errno::CELL_ESRCH)
     );
-    let d = host.dispatch(
-        Lv2Request::UartGetParams {
-            params_ptr: PARAMS_PTR,
-        },
-        src(),
-        &rt,
-    );
-    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
 }
 
 #[test]

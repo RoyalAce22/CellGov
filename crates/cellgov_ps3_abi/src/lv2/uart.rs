@@ -5,10 +5,11 @@
 //! Behaviour lives in `cellgov_lv2::host::uart`; this module is data
 //! only.
 //!
-//! The PS3AV protocol is not a guest-facing API and nothing in the
-//! captured evidence states it. The ring sizes, the header version and the
-//! command ids below are all unestablished. The packets vsh sends over
-//! this UART during boot would witness them.
+//! The PS3AV protocol is not a guest-facing API. The
+//! `lv2_uart_get_params` capture states the two ring sizes. The header
+//! version and the command ids below are unestablished, and only a
+//! passive capture of the packets vsh sends over this UART can settle
+//! them: no probe sends a packet.
 
 /// Bytes the RX (reply) ring holds.
 pub const PS3AV_RX_BUF_SIZE: usize = 0x800;

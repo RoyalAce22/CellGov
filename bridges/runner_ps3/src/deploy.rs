@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use cellgov_observation::manifest::ConsoleManifest;
 
 use crate::error::RunnerPs3Error;
+use crate::passive;
 use crate::run::{ConsoleOps, Target};
 use crate::transcript::Transcript;
 
@@ -69,22 +70,48 @@ fn read(path: &Path) -> Result<Vec<u8>, RunnerPs3Error> {
     })
 }
 
+/// Refuse a package whose PPU relink holds a passive-only syscall
+/// number. The verbs that deploy call this before anything reaches the
+/// console, ahead of the stale-result and reclaim steps.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::LocalRead`] when the relink cannot be read, and
+/// [`RunnerPs3Error::PassiveOnlySyscall`] and
+/// [`RunnerPs3Error::UnscannableElf`] from the
+/// [`passive`] scan.
+pub fn admit(package: &Package) -> Result<(), RunnerPs3Error> {
+    let ppu_elf = read(&package.ps3_elf)?;
+    match passive::first_passive_only_load(&ppu_elf, &package.ps3_elf)? {
+        Some((number, offset)) => Err(RunnerPs3Error::PassiveOnlySyscall {
+            elf: package.ps3_elf.clone(),
+            number,
+            offset,
+        }),
+        None => Ok(()),
+    }
+}
+
 /// Create the game directory and `USRDIR`, then store the PARAM.SFO in
 /// the first and the EBOOT and every sibling in the second. Every local
-/// file is read before anything is sent, so a missing build output
-/// changes nothing on the console.
+/// file is read, and the PPU relink scanned for a passive-only syscall,
+/// before anything is sent, so a missing build output or a refused
+/// probe changes nothing on the console.
 ///
 /// # Errors
 ///
 /// [`RunnerPs3Error::LocalRead`] naming the first package file the
-/// runner cannot read, and [`RunnerPs3Error::Transport`] for a failed
-/// exchange.
+/// runner cannot read, [`RunnerPs3Error::PassiveOnlySyscall`] and
+/// [`RunnerPs3Error::UnscannableElf`] from the
+/// [`passive`] scan, and [`RunnerPs3Error::Transport`]
+/// for a failed exchange.
 pub fn deploy<C: ConsoleOps>(
     console: &mut C,
     target: &Target,
     package: &Package,
     transcript: &mut Transcript,
 ) -> Result<(), RunnerPs3Error> {
+    admit(package)?;
     let mut usrdir_files = vec![(EBOOT.to_string(), read(&package.eboot)?)];
     for (name, path) in &package.siblings {
         usrdir_files.push((name.clone(), read(path)?));

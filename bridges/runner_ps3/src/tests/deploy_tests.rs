@@ -55,6 +55,26 @@ fn deploy_creates_the_game_directory_and_stores_every_file_in_place() {
 }
 
 #[test]
+fn a_relink_that_sends_a_passive_only_call_is_refused_before_the_console_is_touched() {
+    let (_scratch, package, target) = packaged();
+    let send = 0x3960_0000 | cellgov_ps3_abi::lv2::syscall::UART_SEND as u32;
+    std::fs::write(
+        &package.ps3_elf,
+        crate::memory_console::ppu_elf(&[send, 0x4400_0002]),
+    )
+    .expect("relink");
+    let mut console = MemoryConsole::empty();
+    match deploy(&mut console, &target, &package, &mut Transcript::new()) {
+        Err(RunnerPs3Error::PassiveOnlySyscall { elf, number, .. }) => {
+            assert_eq!(elf, package.ps3_elf);
+            assert_eq!(number, cellgov_ps3_abi::lv2::syscall::UART_SEND);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(console.calls.is_empty(), "{:?}", console.calls);
+}
+
+#[test]
 fn a_missing_build_output_is_named_and_nothing_reaches_the_console() {
     let (_scratch, package, target) = packaged();
     std::fs::remove_file(&package.siblings[0].1).expect("remove");

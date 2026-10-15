@@ -356,6 +356,13 @@ fn on_console<C: ConsoleOps>(
     let claimed = claimed_profile(command, context)?;
     let profiles = load_profiles(command, context)?;
     let job = Job::of(verb, command)?;
+    // A probe that would send a passive-only call is refused before the
+    // runner reads the status page or takes the lease.
+    if let Some(job) = &job {
+        if matches!(job.action, Action::Deploy | Action::Capture { .. }) {
+            deploy::admit(&Package::of(&job.manifest_path, &job.manifest))?;
+        }
+    }
     let mut webman = connect(&host);
     let mut transcript = Transcript::new();
     let html = load::status_page(&mut webman, &mut transcript)?;
@@ -476,23 +483,19 @@ fn on_console<C: ConsoleOps>(
         Some(manifest_path),
     );
     let result = match action {
-        Action::Deploy => run::preflight(
-            &mut webman,
-            &target,
-            command.reclaim,
-            may_reclaim,
-            &clear_with,
-            &mut transcript,
-        )
-        .and_then(|()| {
-            deploy::deploy(
+        Action::Deploy => {
+            let package = Package::of(manifest_path, &manifest);
+            run::preflight(
                 &mut webman,
                 &target,
-                &Package::of(manifest_path, &manifest),
+                command.reclaim,
+                may_reclaim,
+                &clear_with,
                 &mut transcript,
             )
-        })
-        .map(|()| None),
+            .and_then(|()| deploy::deploy(&mut webman, &target, &package, &mut transcript))
+            .map(|()| None)
+        }
         Action::Run => run::clear_stale_result(&mut webman, &target, &clear_with, &mut transcript)
             .and_then(|()| run::start(&mut webman, &target, &mut transcript))
             .and_then(|()| {

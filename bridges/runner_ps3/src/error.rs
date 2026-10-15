@@ -24,7 +24,8 @@ pub enum ExitCode {
     Usage = 1,
     /// The runner refused before changing the console: a lease, a stale
     /// result, a profile mismatch, an existing output directory, a hot
-    /// console or a full `/dev_hdd0`.
+    /// console, a full `/dev_hdd0`, or a probe whose PPU relink holds a
+    /// UART or gamepad call number.
     Refused = 2,
     /// The console did not answer as the protocol requires.
     Transport = 3,
@@ -144,6 +145,30 @@ pub enum RunnerPs3Error {
     /// The fetched bytes are not one whole CGOV frame.
     #[error("frame: {0}")]
     Frame(String),
+    /// The probe's PPU relink holds a syscall number no probe sends.
+    #[error(
+        "refused: {elf} holds syscall number {number} at file offset 0x{offset:08x}; the UART \
+         initialize, receive and send calls and sys_gamepad_ycon_if are settled only by passive \
+         capture, never by a probe"
+    )]
+    PassiveOnlySyscall {
+        /// The PPU relink.
+        elf: PathBuf,
+        /// The syscall number.
+        number: u64,
+        /// The file offset of the `li` or data word that holds it.
+        offset: u64,
+    },
+    /// The probe's PPU relink is not an ELF the passive-only scan reads,
+    /// so the runner cannot scan it.
+    #[error(
+        "refused: {elf} is not a big-endian ELF64 whose program headers lie in the file; rebuild \
+         the probe"
+    )]
+    UnscannableElf {
+        /// The PPU relink.
+        elf: PathBuf,
+    },
     /// Cleanup after a capture left something on the console.
     #[error("cleanup: {remaining} remains on the console")]
     Cleanup {
@@ -163,6 +188,8 @@ impl RunnerPs3Error {
             | Self::Console(ConsoleError::OperatorMissing { .. }) => ExitCode::Usage,
             Self::LocalWrite { .. } | Self::HostClock | Self::Serialize(_) => ExitCode::Local,
             Self::Refused { .. }
+            | Self::PassiveOnlySyscall { .. }
+            | Self::UnscannableElf { .. }
             | Self::Lease(LeaseError::Held { .. })
             | Self::Console(ConsoleError::Contradiction { .. }) => ExitCode::Refused,
             Self::Console(ConsoleError::PageMissing { .. }) => ExitCode::Transport,
