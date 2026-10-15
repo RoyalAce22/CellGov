@@ -1419,7 +1419,7 @@
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); left to hardware capture, issue #1411"
+          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); the quiet-nan-operand-console vector holds the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -1435,7 +1435,7 @@
         },
         "fpscr": {
           "status": "undefined",
-          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); left to hardware capture, issue #1411"
+          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); the quiet-nan-operand-console vector holds the console's answer"
         },
         "stop": {
           "status": "value",
@@ -1523,7 +1523,7 @@
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); left to hardware capture, issue #1411"
+          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); the signalling-nan-operand-console vector holds the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -1539,7 +1539,7 @@
         },
         "fpscr": {
           "status": "undefined",
-          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); left to hardware capture, issue #1411"
+          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); the signalling-nan-operand-console vector holds the console's answer"
         },
         "stop": {
           "status": "value",
@@ -1627,7 +1627,7 @@
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); left to hardware capture, issue #1411"
+          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); the denormal-operand-console vector holds the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -1643,7 +1643,7 @@
         },
         "fpscr": {
           "status": "undefined",
-          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); left to hardware capture, issue #1411"
+          "reason": "a NaN or denormal operand leaves the result and the NaN and DENORM flags to the implementation (SPU-ISA p:197, p:198, for dfa); the denormal-operand-console vector holds the console's answer"
         },
         "stop": {
           "status": "value",
@@ -1750,6 +1750,330 @@
         "fpscr": {
           "status": "value",
           "value": "0000070000000c000000080000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "quiet-nan-operand-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_reference_float/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, SPU thread group",
+        "source_sha256": "d436f4a881cf1ef6ae3a7ffcedbc3ee808792553c74e67737cec5eeee6b00d7b"
+      },
+      "words": [
+        1501659779
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "5": "7ff80000000000013ff0000000000000",
+          "6": "3ff00000000000003ff0000000000000",
+          "3": "cccccccccccccccccccccccccccccccc"
+        },
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "7ff80000000000004000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 4
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000002000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "signalling-nan-operand-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_reference_float/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, SPU thread group",
+        "source_sha256": "d436f4a881cf1ef6ae3a7ffcedbc3ee808792553c74e67737cec5eeee6b00d7b"
+      },
+      "words": [
+        1501659779
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "5": "3ff00000000000003ff0000000000000",
+          "6": "fff00000000000013ff0000000000000",
+          "3": "cccccccccccccccccccccccccccccccc"
+        },
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "7ff80000000000004000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 4
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000006000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "denormal-operand-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_reference_float/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, SPU thread group",
+        "source_sha256": "d436f4a881cf1ef6ae3a7ffcedbc3ee808792553c74e67737cec5eeee6b00d7b"
+      },
+      "words": [
+        1501659779
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "5": "00000000000000013ff0000000000000",
+          "6": "3ff00000000000003ff0000000000000",
+          "3": "cccccccccccccccccccccccccccccccc"
+        },
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "3ff00000000000004000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 4
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000001000000000000000000"
         },
         "stop": {
           "status": "value",

@@ -314,10 +314,15 @@ fn fused(x: Val, y: Val, z: Val, mode: Mode) -> (u64, DFlags) {
         let signaling = [x, y, z]
             .iter()
             .any(|v| matches!(v, Val::NaN { quiet: false }));
+        // The `spu_reference_float` capture: infinity times zero raises INV beside a QNaN addend.
+        let infinity_times_zero = matches!(
+            (x, y),
+            (Val::Inf(_), Val::Zero(_)) | (Val::Zero(_), Val::Inf(_))
+        );
         return (
             DEFAULT_NAN,
             DFlags {
-                invalid: signaling,
+                invalid: signaling || infinity_times_zero,
                 ..none
             },
         );

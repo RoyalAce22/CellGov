@@ -214,6 +214,7 @@ pub(super) fn fused(state: &mut SpuState, rt: u8, ra: u8, rb: u8, form: Fused) -
 /// beyond its operands'.
 ///
 /// [SPU-ISA p:199 s:9.2.2] INV for an SNaN operand, for infinity times zero, and for infinities of opposite signs added.
+/// The `spu_reference_float` capture shows infinity times zero raising INV with a QNaN addend too.
 fn fused_result(
     x: Operand,
     y: Operand,
@@ -221,13 +222,20 @@ fn fused_result(
     rounding: Rounding,
     raw: [u64; 3],
 ) -> (u64, Flags) {
-    if let Some(nan) = nan_operands(&[x, y, z], &raw) {
-        return nan;
-    }
     let is_infinity = |o: Operand| matches!(o, Operand::Infinity { .. });
     let is_zero = |o: Operand| matches!(o, Operand::Zero { .. });
+    let infinity_times_zero = (is_infinity(x) && is_zero(y)) || (is_zero(x) && is_infinity(y));
+    if let Some((bits, flags)) = nan_operands(&[x, y, z], &raw) {
+        return (
+            bits,
+            Flags {
+                invalid: flags.invalid || infinity_times_zero,
+                ..flags
+            },
+        );
+    }
     let none = Flags::default();
-    if (is_infinity(x) && is_zero(y)) || (is_zero(x) && is_infinity(y)) {
+    if infinity_times_zero {
         return nan_result(true, false);
     }
     if is_infinity(x) || is_infinity(y) {

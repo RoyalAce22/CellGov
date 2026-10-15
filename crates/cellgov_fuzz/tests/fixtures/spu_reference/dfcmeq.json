@@ -43,7 +43,7 @@
         },
         "pc": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely, and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely, and the stop code is not valid without P (CBEA p:93); the stop and the program counter are the spu_double_compares capture shows the console stopping with I and resuming past the word, which CellGov does not model yet (issue #1791)"
         },
         "lslr": {
           "status": "value",
@@ -55,7 +55,7 @@
         },
         "stop": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely, and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely, and the stop code is not valid without P (CBEA p:93); the stop and the program counter are the spu_double_compares capture shows the console stopping with I and resuming past the word, which CellGov does not model yet (issue #1791)"
         },
         "interrupts_enabled": {
           "status": "value",

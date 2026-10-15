@@ -1,0 +1,20 @@
+[test]
+name = "spu_reference_float"
+
+# A hardware probe of the floating-point reference-fixture vectors whose
+# result the documents leave open, plus infinity times zero with a NaN
+# addend in the fused double forms. vectors.tsv lists them in order;
+# gen_vectors.py generates it and spu/vectors.S from the fixtures.
+
+[observe]
+# Per vector: RT after its words, then the FPSCR (32 bytes); padding.
+memory_regions = [
+  { name = "result", addr = 0, size = 2048 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]
