@@ -1,0 +1,21 @@
+[test]
+name = "spu_fi_zero_operand"
+
+# A hardware probe of fi with an RB whose exponent is 0 (both zeros, an
+# exponent-0 RB with a fraction, the smallest fraction, each of both
+# signs) and with an exponent-1 RB whose result underflows, of each
+# sign, against Y = all ones and Y = 0. Each case records fi's result
+# and the FPSCR, cleared before it.
+
+[observe]
+# 16 cases x 8 words: RA, RB, result, 0, FPSCR (4 words); zero padding.
+memory_regions = [
+  { name = "result", addr = 0, size = 512 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

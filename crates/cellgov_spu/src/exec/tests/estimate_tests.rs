@@ -32,9 +32,21 @@ fn step(s: &mut SpuState, raw: u32) {
 
 /// The fi oracle for one slot: the formula on RB's fields and RA's
 /// fraction, exact, then truncated.
+///
+/// [SPU-ISA p:196 s:9.1] a zero-exponent RB is a zero, with DIFF for a nonzero fraction.
 fn fi_oracle(ra: u32, rb: u32) -> (u32, SpFlags) {
     let y = i128::from(ra & 0x7_FFFF);
     let exponent = (rb >> 23 & 0xFF) as i32;
+    if exponent == 0 {
+        let diff = rb & 0x7F_FFFF != 0;
+        return (
+            0,
+            SpFlags {
+                diff,
+                ..SpFlags::default()
+            },
+        );
+    }
     let base = i128::from(rb >> 10 & 0x1FFF);
     let step = i128::from(rb & 0x3FF);
     // In units of 2^-32: 1.BaseFraction is (2^13 + base) x 2^19, and

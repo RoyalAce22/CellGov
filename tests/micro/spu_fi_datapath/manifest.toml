@@ -1,0 +1,24 @@
+[test]
+name = "spu_fi_datapath"
+
+# A hardware probe of fi: every frest and frsqest table entry and four
+# extremes against all 2^19 values of Y, 2^22 random operand pairs,
+# flag vectors at the exponent edges, and the documented reciprocal and
+# reciprocal-square-root sequences over all 2^23 fractions at both
+# exponent parities. The SPU program's header comment has the layout.
+
+[observe]
+# A: per-entry compares, B: random pairs, C: flag vectors, D: sequence
+# sweeps (digest, FPSCR, samples), zero padding.
+memory_regions = [
+  { name = "result", addr = 0, size = 11392 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# About 2^27 fi operations with a scalar model check, and four 2^23
+# sequence sweeps.
+timeout_ms = 900000
+files = ["spu_main.elf"]

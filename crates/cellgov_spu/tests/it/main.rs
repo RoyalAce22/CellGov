@@ -22,6 +22,7 @@ mod raw_spu_window;
 mod signal_read_through_runtime;
 mod signal_write_through_lv2;
 mod spu_estimate_readout;
+mod spu_fi_datapath;
 mod spu_float_edges;
 mod spu_observation_contract;
 mod spu_state_records_through_runtime;

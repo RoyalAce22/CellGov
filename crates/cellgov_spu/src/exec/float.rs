@@ -57,12 +57,19 @@ pub(super) fn estimate(state: &mut SpuState, rt: u8, ra: u8, op: fn(u32) -> u32)
 /// truncated to extended-range single precision.
 ///
 /// [SPU-ISA p:219 s:9] RT = (-1)^S x (1.BaseFraction - 0.000StepFraction x Y) x 2^(BiasedExponent - 127), Y = 0.`RA[13:31]`; [SPU-ISA p:196 s:9.1] fi sets OVF, UNF and DIFF.
+///
+/// [SPU-ISA p:196 s:9.1] a zero-exponent operand is a zero, and DIFF marks one with a nonzero fraction and one with exponent 255. RB is fi's one floating operand: the `spu_fi_zero_operand` capture gives +0 for an exponent-0 RB of either sign, DIFF only with a nonzero fraction, and no flag from RA's exponent.
 pub(super) fn interpolate(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
     let [a, b] = [ra, rb].map(|r| words(state.regs[r as usize]));
     let mut flags = [Flags::default(); 4];
     let results = std::array::from_fn(|slot| {
         let (y, packed_estimate) = (a[slot] & 0x7_FFFF, b[slot]);
+        let (_, operand_flags) = unpack_extended::<Binary32>(u64::from(packed_estimate));
         let exponent = (packed_estimate >> 23 & 0xFF) as i32;
+        if exponent == 0 {
+            flags[slot] = operand_flags;
+            return 0;
+        }
         let base = packed_estimate >> 10 & 0x1FFF;
         let step = packed_estimate & 0x3FF;
         // In units of 2^-32: 1.BaseFraction is (2^13 + base) x 2^19 and
@@ -71,11 +78,7 @@ pub(super) fn interpolate(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuSt
         let exact = Exact::new(packed_estimate >> 31 == 1, value, exponent - 127 - 32)
             .expect("invariant: the interpolated significand is at most 33 bits wide");
         let packed = round_pack::<Binary32>(Policy::SpuExtended, Rounding::TowardZero, exact);
-        // An RB exponent of 255 is an input with exponent 255.
-        flags[slot] = packed.flags.or(Flags {
-            diff: exponent == 255,
-            ..Flags::default()
-        });
+        flags[slot] = operand_flags.or(packed.flags);
         packed.bits as u32
     });
     state.set_reg(rt as usize, from_words(results));
