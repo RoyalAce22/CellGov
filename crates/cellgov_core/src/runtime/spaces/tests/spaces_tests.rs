@@ -205,6 +205,30 @@ fn build(memory_size: usize) -> Runtime {
     )
 }
 
+/// Reserve `[0x5000_0000, 0x8000_0000)` through 330 as three 256 MiB
+/// areas of 64 KiB pages, so a 334 there has an area to land in.
+fn reserve_mmapper_areas(rt: &mut Runtime, unit: UnitId, out_ptr: u64) {
+    for _ in 0..3 {
+        rt.dispatch_lv2_request(
+            cellgov_lv2::Lv2Request::Unsupported {
+                number: cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_ADDRESS,
+                args: [
+                    0x1000_0000,
+                    cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K,
+                    0x1000_0000,
+                    out_ptr,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+            },
+            unit,
+        );
+        assert_eq!(rt.registry_mut().drain_syscall_return(unit), Some(0));
+    }
+}
+
 fn read4(mem: &GuestMemory, addr: u64) -> Option<Vec<u8>> {
     mem.read(ByteRange::new(GuestAddr::new(addr), 4).unwrap())
         .map(|b| b.to_vec())
@@ -666,8 +690,8 @@ fn two_process_run_is_deterministic() {
 fn keyed_shm_views_cohere_across_address_spaces() {
     use cellgov_lv2::request::classify;
     const KEY: u64 = 0x8006_0100_0000_0010;
-    const BOOT_VIEW: u64 = 0x3000_0000;
-    const CHILD_VIEW: u64 = 0x3100_0000;
+    const BOOT_VIEW: u64 = 0x5000_0000;
+    const CHILD_VIEW: u64 = 0x5100_0000;
     const SIZE: u64 = 0x10000;
     const FLAGS_64K: u64 = cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K;
 
@@ -687,6 +711,7 @@ fn keyed_shm_views_cohere_across_address_spaces() {
     rt.assign_unit_space(UnitId::new(1), S1).unwrap();
 
     // Boot: keyed 332 + 334 at BOOT_VIEW.
+    reserve_mmapper_areas(&mut rt, UnitId::new(0), 0x30);
     rt.dispatch_lv2_request(
         classify(
             cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
@@ -788,6 +813,7 @@ fn single_space_keyed_maps_do_not_register_a_mapping() {
     let mut rt = build(0x1000);
     rt.registry_mut()
         .register_with(|id| AddrWriter::new(id, 0x40, 0));
+    reserve_mmapper_areas(&mut rt, UnitId::new(0), 0x30);
     rt.dispatch_lv2_request(
         classify(
             cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
@@ -810,7 +836,7 @@ fn single_space_keyed_maps_do_not_register_a_mapping() {
     rt.dispatch_lv2_request(
         classify(
             cellgov_ps3_abi::lv2::syscall::MMAPPER_MAP_SHARED_MEMORY,
-            &[0x3000_0000, mem_id, 0, 0, 0, 0, 0, 0],
+            &[0x5000_0000, mem_id, 0, 0, 0, 0, 0, 0],
         ),
         UnitId::new(0),
     );
@@ -821,7 +847,7 @@ fn single_space_keyed_maps_do_not_register_a_mapping() {
     assert!(
         rt.shared_alias_ranges(
             UnitId::new(0),
-            ByteRange::new(GuestAddr::new(0x3000_0010), 4).unwrap()
+            ByteRange::new(GuestAddr::new(0x5000_0010), 4).unwrap()
         )
         .is_empty(),
         "a single-space keyed map must not promote into the shared table",
@@ -851,6 +877,7 @@ fn map_occupancy_is_judged_in_the_callers_space() {
     rt.assign_unit_space(UnitId::new(1), S1).unwrap();
 
     // Keyless 332 from boot mints the handle both callers name.
+    reserve_mmapper_areas(&mut rt, UnitId::new(0), 0x30);
     rt.dispatch_lv2_request(
         classify(
             cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
@@ -920,9 +947,9 @@ fn map_occupancy_is_judged_in_the_callers_space() {
 fn a_repeat_map_in_one_space_is_seeded_when_the_segment_becomes_shared() {
     use cellgov_lv2::request::classify;
     const KEY: u64 = 0x8006_0100_0000_0030;
-    const VIEW_A: u64 = 0x3000_0000;
-    const VIEW_B: u64 = 0x3100_0000;
-    const CHILD_VIEW: u64 = 0x3200_0000;
+    const VIEW_A: u64 = 0x5000_0000;
+    const VIEW_B: u64 = 0x5100_0000;
+    const CHILD_VIEW: u64 = 0x5200_0000;
     const SIZE: u64 = 0x10000;
     const FLAGS_64K: u64 = cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K;
 
@@ -938,6 +965,7 @@ fn a_repeat_map_in_one_space_is_seeded_when_the_segment_becomes_shared() {
         .register_with(|id| AddrWriter::new(id, 0x40, 0));
     rt.assign_unit_space(UnitId::new(1), S1).unwrap();
 
+    reserve_mmapper_areas(&mut rt, UnitId::new(0), 0x30);
     rt.dispatch_lv2_request(
         classify(
             cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
@@ -1017,8 +1045,8 @@ fn a_repeat_map_in_one_space_is_seeded_when_the_segment_becomes_shared() {
 fn seeding_an_attaching_view_clears_that_spaces_reservations() {
     use cellgov_lv2::request::classify;
     const KEY: u64 = 0x8006_0100_0000_0040;
-    const BOOT_VIEW: u64 = 0x3000_0000;
-    const CHILD_VIEW: u64 = 0x3100_0000;
+    const BOOT_VIEW: u64 = 0x5000_0000;
+    const CHILD_VIEW: u64 = 0x5100_0000;
     const SIZE: u64 = 0x10000;
     const FLAGS_64K: u64 = cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K;
 
@@ -1034,6 +1062,7 @@ fn seeding_an_attaching_view_clears_that_spaces_reservations() {
         .register_with(|id| AddrWriter::new(id, 0x40, 0));
     rt.assign_unit_space(UnitId::new(1), S1).unwrap();
 
+    reserve_mmapper_areas(&mut rt, UnitId::new(0), 0x30);
     rt.dispatch_lv2_request(
         classify(
             cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
@@ -1122,6 +1151,7 @@ fn a_keyed_view_of_a_different_size_is_refused_against_a_live_mapping() {
     rt.registry_mut()
         .register_with(|id| AddrWriter::new(id, 0x40, 0));
 
+    reserve_mmapper_areas(&mut rt, UnitId::new(0), 0x30);
     rt.dispatch_lv2_request(
         classify(
             cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
@@ -1135,7 +1165,7 @@ fn a_keyed_view_of_a_different_size_is_refused_against_a_live_mapping() {
     rt.dispatch_lv2_request(
         classify(
             cellgov_ps3_abi::lv2::syscall::MMAPPER_MAP_SHARED_MEMORY,
-            &[0x4000_0000, mem_id, 0, 0, 0, 0, 0, 0],
+            &[0x6000_0000, mem_id, 0, 0, 0, 0, 0, 0],
         ),
         UnitId::new(0),
     );

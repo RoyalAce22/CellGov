@@ -8,7 +8,7 @@ type HostChange = (&'static str, fn(&mut Lv2Host));
 #[test]
 fn rsx_context_fields_display_buffer_slots_and_kernel_cursors_move_the_partial() {
     let base = Lv2Host::new();
-    let changes: [HostChange; 11] = [
+    let changes: [HostChange; 10] = [
         ("allocated", |h| h.state.rsx_context.allocated = true),
         ("mem_ctx", |h| h.state.rsx_context.mem_ctx = 1),
         ("fifo_put", |h| h.state.rsx_context.fifo_put = 1),
@@ -23,7 +23,6 @@ fn rsx_context_fields_display_buffer_slots_and_kernel_cursors_move_the_partial()
         }),
         ("next_kernel_id", |h| h.state.next_kernel_id += 1),
         ("mem_alloc_ptr", |h| h.state.mem_alloc_ptr += 1),
-        ("mmapper_addr_cursor", |h| h.state.mmapper_addr_cursor += 1),
         ("rsx_mem_alloc_ptr", |h| h.state.rsx_mem_alloc_ptr += 1),
         ("rsx_mem_handle_counter", |h| {
             h.state.rsx_mem_handle_counter += 1

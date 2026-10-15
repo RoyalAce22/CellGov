@@ -65,30 +65,48 @@ impl Lv2Host {
         id
     }
 
-    /// Bump the mmapper VM cursor by `size` rounded up to the
-    /// 256 MiB granule and return the pre-bump cursor.
+    /// Reserve the lowest free range of `size`, rounded up to the
+    /// 256 MiB granule, in `[MMAPPER_REGION_START, MMAPPER_REGION_END)`,
+    /// record it as an area of `page`-byte pages, and return its base.
     ///
-    /// Returns `None` for `size == 0`, when the bump would overflow
-    /// `u32`, or when the resulting range would cross
-    /// [`Self::MMAPPER_REGION_END`].
-    pub(in crate::host) fn mmapper_alloc(&mut self, size: u32) -> Option<u32> {
+    /// A base that 331 freed is free for the next 330: the
+    /// `lv2_mmapper_map_edges` capture shows a 330 after a 331 getting
+    /// the freed base back.
+    ///
+    /// Returns `None` for `size == 0`, when the rounding would overflow
+    /// `u32`, or when no free range below
+    /// [`Self::MMAPPER_REGION_END`] holds the request.
+    pub(in crate::host) fn mmapper_alloc(&mut self, size: u32, page: u32) -> Option<u32> {
         if size == 0 {
             return None;
         }
         let granule = u32::try_from(cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE).ok()?;
         let rounded = size.checked_add(granule - 1)? & !(granule - 1);
-        let base = self.state.mmapper_addr_cursor;
-        let next = base.checked_add(rounded)?;
-        if next > Self::MMAPPER_REGION_END {
+        let mut base = u64::from(Self::MMAPPER_REGION_START);
+        for (area_base, area) in self.state.mmapper_areas.iter() {
+            if u64::from(area_base) >= base + u64::from(rounded) {
+                break;
+            }
+            base = base.max(u64::from(area_base) + u64::from(area.size));
+        }
+        if base + u64::from(rounded) > u64::from(Self::MMAPPER_REGION_END) {
             return None;
         }
-        self.state.mmapper_addr_cursor = next;
+        let base = u32::try_from(base).ok()?;
+        self.state.mmapper_areas.insert(
+            base,
+            crate::host::mmapper::MmapperArea {
+                size: rounded,
+                page,
+            },
+        );
         Some(base)
     }
 
     /// Search for the first free, `align`-aligned range of `size`
     /// bytes inside `[MMAPPER_REGION_START, MMAPPER_REGION_END)` at
-    /// or after `hint`, skipping every range recorded in
+    /// or after `hint` and ending at or below `limit`, skipping every
+    /// range recorded in
     /// [`mmapper_install_ledger`](crate::host::derived::Lv2Derived::mmapper_install_ledger) and every window occupied in
     /// the caller's committed layout. Loader regions are invisible to
     /// the ledger, so an occupied window is skipped rather than
@@ -98,8 +116,9 @@ impl Lv2Host {
     /// `hint` is rounded UP to `align`; misaligned hints do not fail.
     /// The scan begins at that rounded hint, clamped up to
     /// `MMAPPER_REGION_START`. A caller's `start_addr` therefore
-    /// steers where the search starts; it does not only name a
-    /// region. The kernel's own placement rule is unestablished.
+    /// is the base of the area the search stays inside. The
+    /// `lv2_mmapper_map_64k` capture shows two searches from one base
+    /// landing at the base and one segment above it.
     ///
     /// Returns `None` on exhaustion, which the caller answers with
     /// `CELL_ENOMEM`.
@@ -108,6 +127,7 @@ impl Lv2Host {
         hint: u32,
         size: u32,
         align: u32,
+        limit: u32,
         rt: &dyn crate::host::Lv2Runtime,
     ) -> Option<u32> {
         debug_assert!(
@@ -123,7 +143,7 @@ impl Lv2Host {
         let mut candidate = hint_clamped.checked_add(align_mask)? & !align_mask;
         loop {
             let end = candidate.checked_add(size)?;
-            if end > Self::MMAPPER_REGION_END {
+            if end > Self::MMAPPER_REGION_END || end > limit {
                 return None;
             }
             // Every ledger entry starting below `end` is a possible
@@ -165,6 +185,21 @@ impl Lv2Host {
                 None => return Some(candidate),
             }
         }
+    }
+
+    /// The area 330 reserved that holds `addr`: its base and record.
+    pub(in crate::host) fn mmapper_area_of(
+        &self,
+        addr: u64,
+    ) -> Option<(u32, crate::host::mmapper::MmapperArea)> {
+        let addr = u32::try_from(addr).ok()?;
+        self.state
+            .mmapper_areas
+            .iter()
+            .rev()
+            .find(|&(base, _)| base <= addr)
+            .filter(|&(base, area)| u64::from(addr) < u64::from(base) + u64::from(area.size))
+            .map(|(base, &area)| (base, area))
     }
 
     /// Record an mmapper-window install in the host ledger. Paired

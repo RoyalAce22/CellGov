@@ -252,23 +252,40 @@ fn fs_mounts_unmatched_path_returns_none() {
 #[test]
 fn mmapper_alloc_first_grant_sits_at_mmapper_region_start() {
     let mut host = Lv2Host::new();
-    assert_eq!(host.mmapper_alloc(0x1), Some(Lv2Host::MMAPPER_REGION_START));
+    assert_eq!(
+        host.mmapper_alloc(0x1, 0x1_0000),
+        Some(Lv2Host::MMAPPER_REGION_START)
+    );
 }
 
 #[test]
 fn mmapper_alloc_rounds_up_to_256_mib_granule() {
     let mut host = Lv2Host::new();
-    let first = host.mmapper_alloc(0x1).expect("first grant");
-    let second = host.mmapper_alloc(0x1).expect("second grant");
+    let first = host.mmapper_alloc(0x1, 0x1_0000).expect("first grant");
+    let second = host.mmapper_alloc(0x1, 0x1_0000).expect("second grant");
     assert_eq!(second - first, 0x1000_0000);
 }
 
 #[test]
-fn mmapper_alloc_cursor_advances_across_calls() {
+fn mmapper_alloc_hands_out_a_freed_base_again() {
     let mut host = Lv2Host::new();
-    let a = host.mmapper_alloc(0x1).expect("first");
-    let b = host.mmapper_alloc(0x1).expect("second");
-    let c = host.mmapper_alloc(0x1).expect("third");
+    let a = host.mmapper_alloc(0x1, 0x1_0000).expect("first");
+    let b = host.mmapper_alloc(0x1, 0x1_0000).expect("second");
+    host.state.mmapper_areas.remove(a);
+    assert_eq!(host.mmapper_alloc(0x1, 0x1_0000), Some(a));
+    assert_eq!(
+        host.mmapper_alloc(0x1, 0x1_0000),
+        Some(b + 0x1000_0000),
+        "the next grant skips the live area"
+    );
+}
+
+#[test]
+fn mmapper_alloc_grants_ascend_across_calls() {
+    let mut host = Lv2Host::new();
+    let a = host.mmapper_alloc(0x1, 0x1_0000).expect("first");
+    let b = host.mmapper_alloc(0x1, 0x1_0000).expect("second");
+    let c = host.mmapper_alloc(0x1, 0x1_0000).expect("third");
     assert_eq!(a, Lv2Host::MMAPPER_REGION_START);
     assert_eq!(b, Lv2Host::MMAPPER_REGION_START + 0x1000_0000);
     assert_eq!(c, Lv2Host::MMAPPER_REGION_START + 0x2000_0000);
@@ -277,9 +294,12 @@ fn mmapper_alloc_cursor_advances_across_calls() {
 #[test]
 fn mmapper_alloc_rejects_zero_size() {
     let mut host = Lv2Host::new();
-    assert_eq!(host.mmapper_alloc(0), None);
-    // Cursor unchanged after rejection.
-    assert_eq!(host.mmapper_alloc(0x1), Some(Lv2Host::MMAPPER_REGION_START));
+    assert_eq!(host.mmapper_alloc(0, 0x1_0000), None);
+    // Nothing reserved after rejection.
+    assert_eq!(
+        host.mmapper_alloc(0x1, 0x1_0000),
+        Some(Lv2Host::MMAPPER_REGION_START)
+    );
 }
 
 #[test]
@@ -288,11 +308,11 @@ fn mmapper_alloc_caps_at_mmapper_region_end() {
     // (MMAPPER_REGION_END - MMAPPER_REGION_START) / granule
     //   = (0xC000_0000 - 0x5000_0000) / 0x1000_0000 = 7 grants.
     for _ in 0..7 {
-        host.mmapper_alloc(0x1).expect("within region");
+        host.mmapper_alloc(0x1, 0x1_0000).expect("within region");
     }
     // The 8th grant would walk into the RSX dma_control MMIO
     // region at 0xC000_0000.
-    assert_eq!(host.mmapper_alloc(0x1), None);
+    assert_eq!(host.mmapper_alloc(0x1, 0x1_0000), None);
 }
 
 #[test]
@@ -303,6 +323,7 @@ fn mmapper_search_free_range_returns_hint_when_window_is_empty() {
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
+            Lv2Host::MMAPPER_REGION_END,
             &FakeRuntime::new(0x10),
         )
         .expect("first search succeeds");
@@ -314,7 +335,13 @@ fn mmapper_search_free_range_rounds_misaligned_hint_up() {
     let host = Lv2Host::new();
     let hint = Lv2Host::MMAPPER_REGION_START + 0x12345;
     let addr = host
-        .mmapper_search_free_range(hint, 0x1000, 0x10000, &FakeRuntime::new(0x10))
+        .mmapper_search_free_range(
+            hint,
+            0x1000,
+            0x10000,
+            Lv2Host::MMAPPER_REGION_END,
+            &FakeRuntime::new(0x10),
+        )
         .expect("aligned candidate available");
     assert_eq!(
         addr,
@@ -332,6 +359,7 @@ fn mmapper_search_free_range_advances_past_existing_install() {
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
+            Lv2Host::MMAPPER_REGION_END,
             &FakeRuntime::new(0x10),
         )
         .expect("next aligned slot available");
@@ -348,6 +376,7 @@ fn mmapper_search_free_range_returns_none_on_window_exhaustion() {
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
+            Lv2Host::MMAPPER_REGION_END,
             &FakeRuntime::new(0x10)
         ),
         None,
@@ -362,6 +391,7 @@ fn mmapper_search_free_range_rejects_zero_size() {
             Lv2Host::MMAPPER_REGION_START,
             0,
             0x10000,
+            Lv2Host::MMAPPER_REGION_END,
             &FakeRuntime::new(0x10)
         ),
         None,
@@ -381,6 +411,7 @@ fn mmapper_search_free_range_walks_through_multiple_holes() {
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
+            Lv2Host::MMAPPER_REGION_END,
             &FakeRuntime::new(0x10),
         )
         .expect("middle hole is free");
@@ -391,7 +422,13 @@ fn mmapper_search_free_range_walks_through_multiple_holes() {
 fn mmapper_search_free_range_clamps_hint_below_region_start_up_to_start() {
     let host = Lv2Host::new();
     let addr = host
-        .mmapper_search_free_range(0, 0x10000, 0x10000, &FakeRuntime::new(0x10))
+        .mmapper_search_free_range(
+            0,
+            0x10000,
+            0x10000,
+            Lv2Host::MMAPPER_REGION_END,
+            &FakeRuntime::new(0x10),
+        )
         .expect("hint below region clamps to start");
     assert_eq!(addr, Lv2Host::MMAPPER_REGION_START);
 }
@@ -418,6 +455,7 @@ fn mmapper_search_free_range_skips_a_window_the_caller_already_committed() {
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
+            Lv2Host::MMAPPER_REGION_END,
             &runtime_occupying(Lv2Host::MMAPPER_REGION_START, 0x20000),
         )
         .expect("the window past the committed region is free");
@@ -434,6 +472,7 @@ fn mmapper_search_free_range_takes_the_furthest_of_the_ledger_and_committed_skip
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
+            Lv2Host::MMAPPER_REGION_END,
             &runtime_occupying(Lv2Host::MMAPPER_REGION_START, 0x30000),
         )
         .expect("the window past both obstacles is free");
@@ -447,6 +486,7 @@ fn mmapper_search_free_range_takes_the_furthest_of_the_ledger_and_committed_skip
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
+            Lv2Host::MMAPPER_REGION_END,
             &runtime_occupying(Lv2Host::MMAPPER_REGION_START, 0x10000),
         )
         .expect("the window past both obstacles is free");
@@ -467,6 +507,7 @@ fn mmapper_search_free_range_does_not_hand_out_a_hole_nested_in_a_longer_entry()
             Lv2Host::MMAPPER_REGION_START + 0x20000,
             0x10000,
             0x10000,
+            Lv2Host::MMAPPER_REGION_END,
             &FakeRuntime::new(0x10),
         )
         .expect("a slot past the longer entry is available");
@@ -485,6 +526,7 @@ fn mmapper_search_free_range_reports_exhaustion_for_a_ledger_entry_that_overflow
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
+            Lv2Host::MMAPPER_REGION_END,
             &FakeRuntime::new(0x10)
         ),
         None,
@@ -499,7 +541,7 @@ fn mmapper_alloc_never_returns_address_in_reserved_rsx_window() {
     // never alias it.
     let mut host = Lv2Host::new();
     for _ in 0..7 {
-        let addr = host.mmapper_alloc(0x1).expect("within region");
+        let addr = host.mmapper_alloc(0x1, 0x1_0000).expect("within region");
         assert!(addr >= Lv2Host::MMAPPER_REGION_START);
         assert!(addr >= 0x5000_0000);
     }

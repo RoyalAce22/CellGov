@@ -51,8 +51,6 @@ pub(in crate::host) struct Lv2State {
     /// event-flag / cond. `lwmutexes` has its own allocator from 1.
     pub(in crate::host) next_kernel_id: u32,
     pub(in crate::host) mem_alloc_ptr: u32,
-    /// Bump cursor for `sys_mmapper_allocate_address` (256 MiB+ chunks).
-    pub(in crate::host) mmapper_addr_cursor: u32,
     pub(in crate::host) rsx_mem_alloc_ptr: u32,
     pub(in crate::host) rsx_mem_handle_counter: u32,
     pub(in crate::host) rsx_context: SysRsxContext,
@@ -64,6 +62,10 @@ pub(in crate::host) struct Lv2State {
     /// association steers a future 332's answer and is recorded
     /// nowhere else.
     pub(in crate::host) mmapper_ipc: cellgov_mem::lanes::LaneMap<u64, u32>,
+    /// The address areas 330 reserved and no 331 freed, by base: what
+    /// 334 and 337 place a segment inside.
+    pub(in crate::host) mmapper_areas:
+        cellgov_mem::lanes::LaneMap<u32, super::mmapper::MmapperArea>,
     /// `sys_config` handles, services, listeners, and the events a
     /// listener may still read back (516-522).
     pub(in crate::host) config: ConfigTable,

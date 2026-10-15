@@ -324,6 +324,7 @@ fn syscall_330_accepts_a_zero_alignment_and_the_four_area_sizes() {
 fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let breaks_before = host.observability().invariant_break_count;
     let result = host.dispatch(
         Lv2Request::Unsupported {
@@ -344,6 +345,7 @@ fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
 fn syscall_332_then_334_records_pending_region_install() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let mut mem_id_buf = [0u8; 4];
     let result_332 = host.dispatch(
         Lv2Request::Unsupported {
@@ -389,6 +391,7 @@ fn syscall_332_then_334_records_pending_region_install() {
 fn syscall_334_misaligned_returns_ealign() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let result_332 = host.dispatch(
         Lv2Request::Unsupported {
             number: 332,
@@ -434,6 +437,7 @@ fn syscall_334_misaligned_returns_ealign() {
 fn syscall_334_addr_out_of_range_returns_einval() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let result = host.dispatch(
         Lv2Request::Unsupported {
             number: 334,
@@ -450,6 +454,7 @@ fn syscall_362_records_handle_keyed_on_mem_id() {
     let mut host = Lv2Host::new();
     with_containers_362(&mut host);
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let result = host.dispatch(
         Lv2Request::Unsupported {
             number: 362,
@@ -495,6 +500,7 @@ fn syscall_362_records_handle_keyed_on_mem_id() {
 fn syscall_332_then_337_searches_installs_and_writes_back_found_addr() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let mem_id = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
     let result_337 = host.dispatch(
         Lv2Request::Unsupported {
@@ -525,6 +531,7 @@ fn syscall_332_then_337_searches_installs_and_writes_back_found_addr() {
 fn syscall_337_search_walks_past_existing_install() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let first = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
     let second = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
     // First 337 fills [0x5000_0000, 0x5010_0000).
@@ -563,6 +570,7 @@ fn syscall_337_search_walks_past_existing_install() {
 fn syscall_337_unknown_mem_id_returns_esrch_and_logs_break() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let breaks_before = host.observability().invariant_break_count;
     let r = host.dispatch(
         Lv2Request::Unsupported {
@@ -583,6 +591,7 @@ fn syscall_337_unknown_mem_id_returns_esrch_and_logs_break() {
 fn syscall_337_rejects_out_of_range_start_addr() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let mem_id = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
     // Below MMAPPER_REGION_START.
     let below = host.dispatch(
@@ -610,6 +619,7 @@ fn syscall_337_rejects_out_of_range_start_addr() {
 fn syscall_337_null_alloc_addr_returns_efault() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let mem_id = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
     let r = host.dispatch(
         Lv2Request::Unsupported {
@@ -626,6 +636,7 @@ fn syscall_337_null_alloc_addr_returns_efault() {
 fn syscall_337_exhausted_window_returns_enomem() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     // Fill the entire mmapper window in the ledger the search consults.
     let window = Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START;
     host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, window);
@@ -851,6 +862,7 @@ fn syscall_332_distinct_ipc_keys_mint_distinct_mem_ids() {
 fn syscall_337_applies_registered_seed_on_first_map_of_keyed_shm() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     host.register_system_seed(crate::SystemStateSeed {
         shm_ipc_key: 0x8006_0100_0000_0010,
         writes: vec![(0, vec![0xAA; 4]), (0x8000, vec![0xBB])],
@@ -889,6 +901,7 @@ fn syscall_337_applies_registered_seed_on_first_map_of_keyed_shm() {
 fn syscall_337_second_map_does_not_reapply_seed() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     host.register_system_seed(crate::SystemStateSeed {
         shm_ipc_key: 0x8006_0100_0000_0010,
         writes: vec![(0, vec![0xAA; 4])],
@@ -922,6 +935,7 @@ fn syscall_337_second_map_does_not_reapply_seed() {
 fn syscall_334_applies_registered_seed_at_fixed_addr() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     host.register_system_seed(crate::SystemStateSeed {
         shm_ipc_key: 0x8006_0100_0000_0010,
         writes: vec![(0x40, vec![0xCC; 8])],
@@ -950,6 +964,7 @@ fn syscall_334_applies_registered_seed_at_fixed_addr() {
 fn syscall_337_keyless_shm_ignores_registered_seeds() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     host.register_system_seed(crate::SystemStateSeed {
         shm_ipc_key: 0x8006_0100_0000_0010,
         writes: vec![(0, vec![0xAA; 4])],
@@ -1137,6 +1152,7 @@ fn syscall_334_over_an_occupied_window_returns_ebusy_and_stages_nothing() {
     )
     .unwrap();
     let rt = FakeRuntime::with_memory(mem);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let mem_id = mint_mmapper_handle(&mut host, &rt, 0x10000, 0x200);
     let result = host.dispatch(
         Lv2Request::Unsupported {
@@ -1167,6 +1183,7 @@ fn syscall_334_partial_overlap_is_ebusy_too() {
     )
     .unwrap();
     let rt = FakeRuntime::with_memory(mem);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let mem_id = mint_mmapper_handle(&mut host, &rt, 0x10000, 0x200);
     let result = host.dispatch(
         Lv2Request::Unsupported {
@@ -1194,6 +1211,7 @@ fn syscall_337_search_skips_caller_occupied_windows() {
     )
     .unwrap();
     let rt = FakeRuntime::with_memory(mem);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let mem_id = mint_mmapper_handle(&mut host, &rt, 0x10000, 0x200);
     let result = host.dispatch(
         Lv2Request::Unsupported {
@@ -1232,6 +1250,7 @@ fn syscall_337_search_skips_caller_occupied_windows() {
 fn syscall_334_over_a_window_the_host_already_mapped_returns_ebusy() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let first = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
     let second = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
     let map = |host: &mut Lv2Host, mem_id: u32, addr: u64| {
@@ -1261,6 +1280,7 @@ fn syscall_334_over_a_window_the_host_already_mapped_returns_ebusy() {
 fn syscall_334_partially_overlapping_a_prior_337_map_returns_ebusy() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let searched = mint_mmapper_handle(&mut host, &rt, 0x20_0000, 0x400);
     let fixed = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
     // 337 claims [0x5000_0000, 0x5020_0000).
@@ -1291,6 +1311,7 @@ fn syscall_334_partially_overlapping_a_prior_337_map_returns_ebusy() {
 fn syscall_334_over_a_window_nested_in_a_longer_ledger_entry_returns_ebusy() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let handle = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
     // A long entry, then a shorter one starting later and ending
     // before the candidate -- the shorter is what `next_back` finds.
@@ -1315,6 +1336,7 @@ fn syscall_334_over_a_window_nested_in_a_longer_ledger_entry_returns_ebusy() {
 fn syscall_334_immediately_after_a_prior_map_is_not_busy() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     let first = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
     let second = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
     let map = |host: &mut Lv2Host, mem_id: u32, addr: u64| {

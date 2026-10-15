@@ -3,9 +3,6 @@
 //! probe's calls run through the classifier and dispatch in its order,
 //! and every return code, and every free's code, is compared with the
 //! captured word. Area bases and segment ids are CellGov's own.
-//!
-//! The probe frees an address area with 331, which CellGov does not
-//! route yet, so the area frees are not replayed.
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -120,7 +117,7 @@ fn mmapper_allocate_answers_as_on_the_console_for_a_game_process() {
     const FROM: u64 = syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER;
     const FREE: u64 = syscall::MMAPPER_FREE_SHARED_MEMORY;
 
-    // A. 330.
+    // A. 330, each area freed with 331.
     for (slot, size, alignment, out) in [
         (0, 0x1000, AREA, OUT),
         (3, AREA, AREA, 0),
@@ -128,7 +125,17 @@ fn mmapper_allocate_answers_as_on_the_console_for_a_game_process() {
         (9, AREA, 0x3000, OUT),
         (12, AREA, AREA, OUT),
     ] {
-        p.rc(slot, &rt, ALLOC_ADDR, [size, FLAG_1M, alignment, out, 0, 0]);
+        match p.rc(slot, &rt, ALLOC_ADDR, [size, FLAG_1M, alignment, out, 0, 0]) {
+            Some(base) => {
+                p.rc(
+                    slot + 2,
+                    &rt,
+                    syscall::MMAPPER_FREE_ADDRESS,
+                    [base, 0, 0, 0, 0, 0],
+                );
+            }
+            None => assert_eq!(p.words[slot + 2], SKIP, "slot {}", slot + 2),
+        }
     }
 
     // B. 332.

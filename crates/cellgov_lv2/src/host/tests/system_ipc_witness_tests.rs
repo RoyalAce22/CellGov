@@ -11,7 +11,7 @@ use cellgov_time::GuestTicks;
 use crate::dispatch::Lv2Dispatch;
 use crate::host::test_support::{
     connected_port, create_mutex_host, extract_write_u32, fake_runtime_with_valid_sync_attr,
-    seed_primary_ppu, FakeRuntime, VALID_SYNC_ATTR_PTR,
+    reserve_mmapper_areas, seed_primary_ppu, FakeRuntime, VALID_SYNC_ATTR_PTR,
 };
 use crate::host::{is_system_ipc_key, Lv2Host};
 use crate::request::Lv2Request;
@@ -52,6 +52,9 @@ fn alloc_shm(host: &mut Lv2Host, rt: &FakeRuntime, ipc_key: u64) -> u32 {
 }
 
 fn map_shm(host: &mut Lv2Host, rt: &FakeRuntime, mem_id: u32, addr: u64) {
+    if host.state.mmapper_areas.iter().next().is_none() {
+        reserve_mmapper_areas(host, rt);
+    }
     let d = host.dispatch(
         Lv2Request::Unsupported {
             number: 334,
@@ -71,7 +74,7 @@ fn a_keyed_shm_create_and_map_bump_the_channel_one_witnesses() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x1000);
     let mem_id = alloc_shm(&mut host, &rt, NS_KEY);
-    map_shm(&mut host, &rt, mem_id, 0x3000_0000);
+    map_shm(&mut host, &rt, mem_id, 0x5000_0000);
 
     let w = &host.observability().system_ipc_witness;
     assert_eq!((w.shm_creates, w.shm_attaches, w.shm_maps), (1, 0, 1));
@@ -108,7 +111,7 @@ fn a_shm_outside_the_namespace_leaves_every_witness_silent() {
         "{created:?}"
     );
     let mem_id = alloc_shm(&mut host, &rt, OTHER_KEY);
-    map_shm(&mut host, &rt, mem_id, 0x3000_0000);
+    map_shm(&mut host, &rt, mem_id, 0x5000_0000);
     assert!(host.observability().system_ipc_witness.is_silent());
 }
 
@@ -126,13 +129,13 @@ fn a_committed_write_inside_the_mapping_bumps_the_shm_write_witness() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x1000);
     let mem_id = alloc_shm(&mut host, &rt, NS_KEY);
-    map_shm(&mut host, &rt, mem_id, 0x3000_0000);
+    map_shm(&mut host, &rt, mem_id, 0x5000_0000);
 
     // Inside, straddling the low edge, and the last byte of the range.
     host.note_committed_effects(&[
-        write_effect(0x3000_0040, 4),
-        write_effect(0x2fff_fffc, 8),
-        write_effect(0x3000_ffff, 1),
+        write_effect(0x5000_0040, 4),
+        write_effect(0x4fff_fffc, 8),
+        write_effect(0x5000_ffff, 1),
     ]);
     assert_eq!(host.observability().system_ipc_witness.shm_writes, 3);
 }
@@ -142,10 +145,10 @@ fn a_committed_write_outside_the_mapping_does_not_bump_the_shm_write_witness() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x1000);
     let mem_id = alloc_shm(&mut host, &rt, NS_KEY);
-    map_shm(&mut host, &rt, mem_id, 0x3000_0000);
+    map_shm(&mut host, &rt, mem_id, 0x5000_0000);
 
     // One byte short of the base, and one byte past the end.
-    host.note_committed_effects(&[write_effect(0x2fff_fffc, 4), write_effect(0x3001_0000, 4)]);
+    host.note_committed_effects(&[write_effect(0x4fff_fffc, 4), write_effect(0x5001_0000, 4)]);
     assert_eq!(host.observability().system_ipc_witness.shm_writes, 0);
 }
 
@@ -157,9 +160,9 @@ fn the_shm_write_witness_is_blind_to_writes_through_an_unrecorded_alias() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x1000);
     let mem_id = alloc_shm(&mut host, &rt, NS_KEY);
-    map_shm(&mut host, &rt, mem_id, 0x3000_0000);
+    map_shm(&mut host, &rt, mem_id, 0x5000_0000);
 
-    let alias_base = 0x4000_0000u32;
+    let alias_base = 0x6000_0000u32;
     host.note_committed_effects(&[write_effect(alias_base, 4)]);
     assert_eq!(host.observability().system_ipc_witness.shm_writes, 0);
 

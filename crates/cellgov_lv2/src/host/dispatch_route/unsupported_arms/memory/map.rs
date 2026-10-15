@@ -75,8 +75,9 @@ impl Lv2Host {
     }
 
     /// `sys_mmapper_map_shared_memory` (334): validates `addr`
-    /// against the 332/362 handle and the caller's committed layout,
-    /// then pushes a pending region install.
+    /// against the area 330 reserved around it, the 332/362 handle and
+    /// the caller's committed layout, then pushes a pending region
+    /// install.
     ///
     /// The install carries the handle's ipc key, so the runtime keeps
     /// every view of one keyed segment coherent. The window also enters
@@ -88,11 +89,20 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` for `addr < 0x2000_0000 || addr >= 0xC000_0000`
-    ///   or for `addr + handle.size` past `0xC000_0000`.
+    /// Listed in the order they fire, as the `lv2_mmapper_map` (an area
+    /// of 1 MiB pages) and `lv2_mmapper_map_64k` captures show. `flags`
+    /// is not checked: both captures map under 0x999 and read-only.
+    ///
+    /// - `CELL_EINVAL` when no area 330 reserved holds `addr`.
     /// - `CELL_ESRCH` (plus a `dispatch.mmapper_map_unknown_mem_id`
     ///   invariant break) when `mem_id` is not in the handle table.
-    /// - `CELL_EALIGN` when `addr % handle.align != 0`.
+    /// - `CELL_EINVAL` when the segment's granule is finer than the
+    ///   area's page size.
+    /// - `CELL_EALIGN` when `addr` is not a multiple of the area's page
+    ///   size. A segment of 1 MiB granule maps on a 64 KiB boundary of
+    ///   an area of 64 KiB pages.
+    /// - `CELL_EINVAL` when the segment runs past the end of the area,
+    ///   as the `lv2_mmapper_map_edges` capture shows.
     /// - `CELL_EBUSY` when the window intersects a region already
     ///   committed in the caller's space, or a window this host
     ///   already handed out through 334 / 337 -- loader images and
@@ -101,7 +111,7 @@ impl Lv2Host {
     ///
     /// `CELL_EINVAL` also answers a `mem_id` register that carries high
     /// bits, per [`Lv2Host::narrow_u32_args`]. The arm reads `addr` at
-    /// its full width, so the window test above refuses a high `addr`.
+    /// its full width, so the area test above refuses a high `addr`.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_map_shared_memory(
         &mut self,
         args: [u64; 8],
@@ -117,9 +127,9 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
         let addr = args[0];
-        if !(0x2000_0000..0xC000_0000).contains(&addr) {
+        let Some((area_base, area)) = self.mmapper_area_of(addr) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
-        }
+        };
         let Some(handle) = self.state.mmapper_handles.get(mem_id) else {
             self.log_invariant_break(
                 "dispatch.mmapper_map_unknown_mem_id",
@@ -130,13 +140,14 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
-        if !addr.is_multiple_of(u64::from(handle.align)) {
+        if handle.align < area.page {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        if !addr.is_multiple_of(u64::from(area.page)) {
             return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
-        let Some(end) = addr.checked_add(u64::from(handle.size)) else {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
-        };
-        if end > 0xC000_0000 {
+        let end = addr + u64::from(handle.size);
+        if end > u64::from(area_base) + u64::from(area.size) {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         // A window this host already handed out through 334 / 337 is
@@ -170,8 +181,8 @@ impl Lv2Host {
                 ipc_key: self.ipc_key_of_mem_id(mem_id),
             });
         // Record in the host ledger so sc 337's search sees this
-        // range as occupied. `addr` is in `[0x2000_0000, 0xC000_0000)`
-        // per the range check above, so the u32 narrow is lossless.
+        // range as occupied. `addr` lies inside a 330 area per the
+        // area test above, so the u32 narrow is lossless.
         self.mmapper_ledger_insert(addr as u32, handle.size);
         // Coherence witness: same property as sc 337.
         debug_assert!(
@@ -192,10 +203,11 @@ impl Lv2Host {
         Lv2Dispatch::Immediate { code: 0, effects }
     }
 
-    /// `sys_mmapper_search_and_map` (337): search for the first free
-    /// aligned range of `handle.size` at or after `start_addr`
-    /// inside the mmapper window, push a `PendingRegionInstall`,
-    /// write the actual mapped address back to `*alloc_addr_ptr`.
+    /// `sys_mmapper_search_and_map` (337): search the area 330
+    /// reserved at `start_addr` for the first free range of
+    /// `handle.size` on the area's page size, push a
+    /// `PendingRegionInstall`, and write the mapped address back to
+    /// `*alloc_addr_ptr`.
     ///
     /// The interface carries `start_addr` in and `alloc_addr` out as
     /// separate arguments. The out-pointer receives the address the
@@ -209,13 +221,20 @@ impl Lv2Host {
     /// seed for a keyed segment, as sc 334 does.
     ///
     /// # Errors
-    /// - `CELL_EFAULT` when `alloc_addr_ptr` is null.
-    /// - `CELL_EINVAL` when `start_addr` is outside the mmapper
-    ///   window `[MMAPPER_REGION_START, MMAPPER_REGION_END)`.
+    ///
+    /// Listed in the order they fire, as the `lv2_mmapper_map` and
+    /// `lv2_mmapper_map_64k` captures show.
+    ///
+    /// - `CELL_EINVAL` when no area 330 reserved holds `start_addr`.
     /// - `CELL_ESRCH` when `mem_id` is not in the handle table
     ///   (parallel to sc 334's `mmapper_map_unknown_mem_id` shape;
     ///   logs `dispatch.mmapper_search_and_map_unknown_mem_id`).
-    /// - `CELL_ENOMEM` when the search exhausts the mmapper window.
+    /// - `CELL_EALIGN` when the segment's granule is finer than the
+    ///   area's page size.
+    /// - `CELL_EINVAL` when `start_addr` is inside an area but not its
+    ///   base.
+    /// - `CELL_EFAULT` when `alloc_addr_ptr` is null.
+    /// - `CELL_ENOMEM` when the area has no free range for the segment.
     /// - `CELL_EINVAL` when `start_addr`, `mem_id` or `alloc_addr`
     ///   carries high bits, per [`Lv2Host::narrow_u32_args`]. That gate
     ///   precedes the rest.
@@ -238,12 +257,9 @@ impl Lv2Host {
         ) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
-        if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
-            return d;
-        }
-        if !(Lv2Host::MMAPPER_REGION_START..Lv2Host::MMAPPER_REGION_END).contains(&start_addr) {
+        let Some((area_base, area)) = self.mmapper_area_of(u64::from(start_addr)) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
-        }
+        };
         let Some(handle) = self.state.mmapper_handles.get(mem_id) else {
             self.log_invariant_break(
                 "dispatch.mmapper_search_and_map_unknown_mem_id",
@@ -254,8 +270,22 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
+        if handle.align < area.page {
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
+        }
+        if start_addr != area_base {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
+            return d;
+        }
+        let limit = start_addr.saturating_add(area.size);
+        // The `lv2_mmapper_map_edges` capture places a 1 MiB segment
+        // 64 KiB above a 64 KiB map in an area of 64 KiB pages: the
+        // search steps on the area's page size, not the segment's
+        // granule.
         let Some(found_addr) =
-            self.mmapper_search_free_range(start_addr, handle.size, handle.align, rt)
+            self.mmapper_search_free_range(start_addr, handle.size, area.page, limit, rt)
         else {
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };

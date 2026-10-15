@@ -775,6 +775,13 @@ impl Lv2Host {
                 args,
             } => self.dispatch_mmapper_allocate_address(args, requester, tick),
             Lv2Request::Unsupported {
+                number: syscall::MMAPPER_FREE_ADDRESS,
+                args,
+            } => match self.narrow_u32_args(syscall::MMAPPER_FREE_ADDRESS, [("addr", args[0])]) {
+                Some([addr]) => self.dispatch_mmapper_free_address(addr),
+                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            },
+            Lv2Request::Unsupported {
                 number: syscall::MMAPPER_MAP_SHARED_MEMORY,
                 args,
             } => self.dispatch_mmapper_map_shared_memory(args, requester, rt, tick),

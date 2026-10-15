@@ -63,6 +63,7 @@ MmapperAllocateAddress	partial-state	330
 MmapperAllocateSharedMemory	partial-state	332
 MmapperAllocateSharedMemoryExt	partial-state	339
 MmapperAllocateSharedMemoryFromContainer	partial-state	362
+MmapperFreeAddress	partial-state	331
 MmapperFreeSharedMemory	partial-state	329
 MmapperMapSharedMemory	partial-state	334
 MmapperSearchAndMap	partial-state	337

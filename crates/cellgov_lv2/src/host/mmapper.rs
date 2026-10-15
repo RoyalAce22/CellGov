@@ -78,6 +78,25 @@ impl MmapperHandleTable {
     }
 }
 
+/// An address area `sys_mmapper_allocate_address` (330) reserved: its
+/// size and the page size its `flags` named.
+///
+/// The `lv2_mmapper_map` and `lv2_mmapper_map_64k` captures show the page
+/// size deciding a map: the base a 334 names must be a multiple of it,
+/// and a segment whose own granule is finer than it is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MmapperArea {
+    pub size: u32,
+    pub page: u32,
+}
+
+impl LaneValue for MmapperArea {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.size));
+        lanes.lane(2, 0, u64::from(self.page));
+    }
+}
+
 /// Pending region-install request emitted by 334 / 337 and drained by
 /// the runtime after `Lv2Host::dispatch` returns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,3 +128,7 @@ pub struct SystemStateSeed {
 #[cfg(test)]
 #[path = "tests/mmapper_allocate_console_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/mmapper_map_console_tests.rs"]
+mod map_console_tests;

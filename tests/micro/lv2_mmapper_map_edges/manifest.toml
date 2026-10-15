@@ -1,0 +1,14 @@
+[test]
+name = "lv2_mmapper_map_edges"
+
+# A hardware probe: mmapper edge answers a game process gets in an area of 64 KiB pages.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 192 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"

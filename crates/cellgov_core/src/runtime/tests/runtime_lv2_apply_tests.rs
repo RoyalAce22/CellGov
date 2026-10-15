@@ -336,6 +336,30 @@ fn write_intent(addr: u64, value: u32) -> Effect {
     )
 }
 
+/// Reserve `[0x5000_0000, 0x8000_0000)` through 330 as three 256 MiB
+/// areas of 64 KiB pages, so a 334 there has an area to land in.
+fn reserve_mmapper_areas(rt: &mut Runtime, unit: UnitId, out_ptr: u64) {
+    for _ in 0..3 {
+        rt.dispatch_lv2_request(
+            cellgov_lv2::Lv2Request::Unsupported {
+                number: cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_ADDRESS,
+                args: [
+                    0x1000_0000,
+                    cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K,
+                    0x1000_0000,
+                    out_ptr,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+            },
+            unit,
+        );
+        assert_eq!(rt.registry_mut().drain_syscall_return(unit), Some(0));
+    }
+}
+
 #[test]
 fn mmapper_map_installs_the_window_in_the_callers_space() {
     // A child-process caller's sys_mmapper_map_shared_memory window
@@ -359,6 +383,7 @@ fn mmapper_map_installs_the_window_in_the_callers_space() {
         .unwrap();
     rt.assign_unit_space(source, space).unwrap();
 
+    reserve_mmapper_areas(&mut rt, source, 0x4100);
     const MEM_ID_PTR: u64 = 0x4000;
     rt.dispatch_lv2_request(
         cellgov_lv2::Lv2Request::Unsupported {
@@ -388,7 +413,7 @@ fn mmapper_map_installs_the_window_in_the_callers_space() {
         mem_id_bytes[3],
     ]);
 
-    const MAP_ADDR: u64 = 0x3000_0000;
+    const MAP_ADDR: u64 = 0x5000_0000;
     let breaks_before = rt.lv2_host().observability().invariant_break_count;
     rt.dispatch_lv2_request(
         cellgov_lv2::Lv2Request::Unsupported {
@@ -424,9 +449,9 @@ fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
     // already occupies. The handler checks the caller's committed
     // layout and refuses with CELL_EBUSY before staging anything; the
     // runtime's install-overlap witness stays as defense in depth and
-    // must not fire on this path. Which code the kernel picks for an
-    // occupied window is unestablished. CELL_EBUSY is CellGov's
-    // choice, and a console probe of a colliding map would settle it.
+    // must not fire on this path. The `lv2_mmapper_map_64k` capture
+    // shows the console answering CELL_EBUSY for a map over a window
+    // already mapped.
     use cellgov_ps3_abi::lv2::syscall::{
         MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY,
     };
@@ -443,6 +468,7 @@ fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
         .unwrap();
     rt.assign_unit_space(source, space).unwrap();
 
+    reserve_mmapper_areas(&mut rt, source, 0x4100);
     const MEM_ID_PTR: u64 = 0x4000;
     rt.dispatch_lv2_request(
         cellgov_lv2::Lv2Request::Unsupported {
@@ -473,7 +499,7 @@ fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
     ]);
 
     // Occupy the window in the caller's own space before mapping.
-    const MAP_ADDR: u64 = 0x3000_0000;
+    const MAP_ADDR: u64 = 0x5000_0000;
     rt.space_memory_mut(space)
         .unwrap()
         .install_region(MAP_ADDR, 0x10000, "image", cellgov_mem::PageSize::Page64K)

@@ -194,6 +194,9 @@ pub mod source {
     pub const LWCOND: u8 = 65;
     /// Live user-memory blocks, one object per base address.
     pub const MEMORY_BLOCK: u8 = 66;
+    /// Address areas `sys_mmapper_allocate_address` reserved, one
+    /// object per base address.
+    pub const MMAPPER_AREA: u8 = 67;
 }
 
 const OBJECT_BITS: u32 = 32;

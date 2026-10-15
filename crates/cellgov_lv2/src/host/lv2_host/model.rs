@@ -109,7 +109,6 @@ impl Lv2Host {
                 stack_allocator: ThreadStackAllocator::new(),
                 next_kernel_id: crate::host::state::FIRST_KERNEL_ID,
                 mem_alloc_ptr: 0x0001_0000, // PS3 user-memory region start
-                mmapper_addr_cursor: Self::MMAPPER_REGION_START,
                 rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
                 rsx_mem_handle_counter: 1,
                 rsx_context: SysRsxContext::new(),
@@ -117,6 +116,10 @@ impl Lv2Host {
                 mmapper_ipc: cellgov_mem::lanes::LaneMap::new(
                     cellgov_mem::lanes::source::MMAPPER_IPC,
                     |key| key,
+                ),
+                mmapper_areas: cellgov_mem::lanes::LaneMap::new(
+                    cellgov_mem::lanes::source::MMAPPER_AREA,
+                    u64::from,
                 ),
                 config: crate::host::config::ConfigTable::new(),
                 uart: crate::host::uart::UartState::new(),

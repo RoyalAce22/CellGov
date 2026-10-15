@@ -166,6 +166,27 @@ pub(super) fn extract_write_u32(effect: &Effect) -> u32 {
     }
 }
 
+/// Reserve the whole mmapper window through 330 as 256 MiB areas of
+/// 64 KiB pages, so a 334 or 337 at any 64 KiB boundary of
+/// `[MMAPPER_REGION_START, MMAPPER_REGION_END)` has an area to land in.
+pub(super) fn reserve_mmapper_areas(host: &mut Lv2Host, rt: &FakeRuntime) {
+    let areas = (Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START) / 0x1000_0000;
+    for _ in 0..areas {
+        let d = host.dispatch(
+            crate::request::Lv2Request::Unsupported {
+                number: 330,
+                args: [0x1000_0000, 0x200, 0x1000_0000, 0x900, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            rt,
+        );
+        assert!(
+            matches!(d, crate::dispatch::Lv2Dispatch::Immediate { code: 0, .. }),
+            "330 failed: {d:?}"
+        );
+    }
+}
+
 pub(super) fn seed_primary_ppu(host: &mut Lv2Host, unit_id: UnitId) {
     host.seed_primary_ppu_thread(
         unit_id,

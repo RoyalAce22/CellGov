@@ -126,6 +126,11 @@ pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
             ArmFidelity::PartialState,
         ),
         (
+            syscall::MMAPPER_FREE_ADDRESS,
+            "MmapperFreeAddress",
+            ArmFidelity::PartialState,
+        ),
+        (
             syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
             "MmapperAllocateSharedMemory",
             ArmFidelity::PartialState,

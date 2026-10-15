@@ -17,8 +17,8 @@ fn fresh() -> Runtime {
 #[test]
 fn fresh_runtime_sync_state_hash_wire_format_golden() {
     let rt = fresh();
-    assert_eq!(rt.sync_state_hash(), 0x7699_0b37_018f_359d);
-    assert_eq!(rt.sync_state_hash_from_scratch(), 0x7699_0b37_018f_359d);
+    assert_eq!(rt.sync_state_hash(), 0x50b2_c096_c746_10bd);
+    assert_eq!(rt.sync_state_hash_from_scratch(), 0x50b2_c096_c746_10bd);
 }
 
 /// The list holds every nonzero lane of a fresh runtime.
@@ -67,8 +67,6 @@ fn fresh_runtime_sync_state_lane_vector_golden() {
         lane(source::KERNEL_CURSORS, 0, 1, 0, 0xD100_0001),
         present(source::KERNEL_CURSORS, 1),
         lane(source::KERNEL_CURSORS, 1, 1, 0, 0x0001_0000),
-        present(source::KERNEL_CURSORS, 2),
-        lane(source::KERNEL_CURSORS, 2, 1, 0, 0x5000_0000),
         present(source::KERNEL_CURSORS, 3),
         lane(source::KERNEL_CURSORS, 3, 1, 0, 0x3000_0000),
         present(source::KERNEL_CURSORS, 4),

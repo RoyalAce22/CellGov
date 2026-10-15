@@ -69,13 +69,14 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_mmapper_allocate_address` (330): bumps a 256 MiB-aligned
-    /// cursor and writes its base to `*alloc_addr`.
+    /// `sys_mmapper_allocate_address` (330): reserves the lowest free
+    /// 256 MiB-aligned range, records the area and the page size its
+    /// `flags` name, and writes its base to `*alloc_addr`.
     ///
     /// liblv2.sprx's own reservation asks for 256 MiB at an alignment
-    /// of 256 MiB, so this cursor steps in the granule firmware uses.
+    /// of 256 MiB, so areas step in the granule firmware uses.
     ///
-    /// The cursor runs over `[MMAPPER_REGION_START, MMAPPER_REGION_END)`.
+    /// Areas lie in `[MMAPPER_REGION_START, MMAPPER_REGION_END)`.
     /// The start sits 256 MiB above `SYS_RSX_MEM_END`, so the reserved
     /// rsx_context window below it cannot alias a handout. The end is
     /// the RSX dma_control MMIO base itself; the exclusive bound keeps
@@ -137,7 +138,7 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
             return d;
         }
-        match self.mmapper_alloc(size) {
+        match self.mmapper_alloc(size, page_size::granule_from_flags(args[1])) {
             Some(addr) => {
                 let write = Effect::shared_write(
                     ByteRange::contiguous_u32(alloc_addr_ptr, 4),
@@ -409,6 +410,28 @@ impl Lv2Host {
         mem_id_written(mem_id_ptr, mem_id, requester, tick)
     }
 
+    /// `sys_mmapper_free_address` (331): removes the area 330 reserved
+    /// at `addr`.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` when `addr` is not the base of an area 330
+    ///   reserved and no 331 freed.
+    ///
+    /// The `lv2_mmapper_map_64k` capture shows `CELL_EBUSY` for an area
+    /// that still holds a mapping; this arm does not model it, because
+    /// CellGov does not route `sys_mmapper_unmap_shared_memory`, so a
+    /// mapping never leaves.
+    pub(in crate::host::dispatch_route) fn dispatch_mmapper_free_address(
+        &mut self,
+        addr: u32,
+    ) -> Lv2Dispatch {
+        match self.state.mmapper_areas.remove(addr) {
+            Some(_) => Lv2Dispatch::immediate(0),
+            None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+        }
+    }
+
     /// `sys_mmapper_free_shared_memory` (329): removes the segment
     /// `mem_id` names, and the key a keyed create registered for it.
     ///
@@ -417,8 +440,10 @@ impl Lv2Host {
     /// - `CELL_ESRCH` for a `mem_id` no create minted or a free already
     ///   removed, as the `lv2_mmapper_allocate` capture shows.
     ///
-    /// The interface also names `CELL_EBUSY` for a segment still
-    /// mapped; this arm does not model it.
+    /// The `lv2_mmapper_map_64k` capture shows `CELL_EBUSY` for a
+    /// segment still mapped; this arm does not model it, because CellGov
+    /// does not route `sys_mmapper_unmap_shared_memory`, so a mapping
+    /// never leaves.
     ///
     /// `CELL_EINVAL` also answers a `mem_id` register that carries high
     /// bits, per [`Lv2Host::narrow_u32_args`]. That gate precedes the

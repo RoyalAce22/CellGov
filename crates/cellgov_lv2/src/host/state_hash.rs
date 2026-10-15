@@ -51,12 +51,12 @@ impl Lv2State {
             stack_allocator,
             next_kernel_id,
             mem_alloc_ptr,
-            mmapper_addr_cursor,
             rsx_mem_alloc_ptr,
             rsx_mem_handle_counter,
             rsx_context,
             mmapper_handles,
             mmapper_ipc,
+            mmapper_areas,
             config,
             uart,
             usbd,
@@ -77,15 +77,15 @@ impl Lv2State {
             processes,
             process_counts,
         } = self;
+        // Object 2 was the mmapper address cursor, which the area
+        // table replaced; the other cursors keep their objects.
         let cursors = [
-            next_kernel_id,
-            mem_alloc_ptr,
-            mmapper_addr_cursor,
-            rsx_mem_alloc_ptr,
-            rsx_mem_handle_counter,
+            (next_kernel_id, 0u64),
+            (mem_alloc_ptr, 1),
+            (rsx_mem_alloc_ptr, 3),
+            (rsx_mem_handle_counter, 4),
         ]
         .into_iter()
-        .zip(0u64..)
         .fold(0u128, |acc, (cursor, object)| {
             acc.wrapping_add(lanes::value_term(source::KERNEL_CURSORS, object, cursor))
         });
@@ -115,6 +115,7 @@ impl Lv2State {
             partial!(config),
             partial!(mmapper_handles),
             map_partial!(mmapper_ipc),
+            map_partial!(mmapper_areas),
             map_partial!(memory_containers),
             map_partial!(memory_blocks),
             lanes::value_term(source::RSX_CONTEXT, 0, rsx_context),

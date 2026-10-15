@@ -594,6 +594,8 @@ lv2_syscalls! {
     MMAPPER_FREE_SHARED_MEMORY = 329 => "sys_mmapper_free_shared_memory";
     /// `sys_mmapper_allocate_address`.
     MMAPPER_ALLOCATE_ADDRESS = 330 => "sys_mmapper_allocate_address";
+    /// `sys_mmapper_free_address`.
+    MMAPPER_FREE_ADDRESS = 331 => "sys_mmapper_free_address";
     /// `sys_mmapper_map_shared_memory`.
     MMAPPER_MAP_SHARED_MEMORY = 334 => "sys_mmapper_map_shared_memory";
     /// `sys_mmapper_search_and_map`.

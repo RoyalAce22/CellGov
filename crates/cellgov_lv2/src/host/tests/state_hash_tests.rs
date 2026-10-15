@@ -260,10 +260,10 @@ fn fingerprint_changes_after_mmapper_handle_insert() {
 }
 
 #[test]
-fn fingerprint_changes_after_mmapper_cursor_advance() {
+fn fingerprint_changes_after_an_mmapper_area_reservation() {
     let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
-    host.mmapper_alloc(0x1000).unwrap();
+    host.mmapper_alloc(0x1000, 0x1_0000).unwrap();
     assert_ne!(pre, host.fingerprint());
 }
 
