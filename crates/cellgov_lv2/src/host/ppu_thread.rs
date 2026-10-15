@@ -111,6 +111,10 @@ impl Lv2Host {
     ///   `sys_ppu_thread_set_priority` enforces.
     /// - `CELL_EFAULT` when the entry descriptor is unreadable.
     /// - `CELL_ENOMEM` when the arena is exhausted.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the Lv2Request fields the arm reads, plus the caller"
+    )]
     pub(super) fn dispatch_ppu_thread_create(
         &mut self,
         id_ptr: u32,
@@ -118,6 +122,7 @@ impl Lv2Host {
         arg: u64,
         priority: u32,
         stacksize: u64,
+        requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         use cellgov_ps3_abi::format::elf::function_descriptor;
@@ -141,7 +146,7 @@ impl Lv2Host {
             PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MIN, PPU_THREAD_PRIORITY_MIN_ROOT,
         };
         let prio = priority as i32;
-        let prio_floor = if self.debug_or_root() {
+        let prio_floor = if self.privilege_of(requester).debug_or_root() {
             PPU_THREAD_PRIORITY_MIN_ROOT
         } else {
             PPU_THREAD_PRIORITY_MIN

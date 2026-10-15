@@ -22,8 +22,8 @@ impl Lv2Host {
     ///
     /// - `CELL_ENOSYS` for a caller without root privilege.
     /// - `CELL_EPERM` once the UART is already claimed.
-    pub(in crate::host) fn dispatch_uart_initialize(&mut self) -> Lv2Dispatch {
-        if !self.has_root_perm() {
+    pub(in crate::host) fn dispatch_uart_initialize(&mut self, requester: UnitId) -> Lv2Dispatch {
+        if !self.privilege_of(requester).root() {
             return Lv2Dispatch::immediate(errno::CELL_ENOSYS.into());
         }
         if self.state.uart.initialized {
@@ -47,7 +47,7 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        if !self.has_root_perm() {
+        if !self.privilege_of(requester).root() {
             return Lv2Dispatch::immediate(errno::CELL_ENOSYS.into());
         }
         if !self.state.uart.initialized {
@@ -100,7 +100,7 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        if !self.has_root_perm() {
+        if !self.privilege_of(requester).root() {
             return Lv2Dispatch::immediate(errno::CELL_ENOSYS.into());
         }
         if size == 0 {
@@ -206,7 +206,7 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        if !self.has_root_perm() {
+        if !self.privilege_of(requester).root() {
             return Lv2Dispatch::immediate(errno::CELL_ENOSYS.into());
         }
         if size == 0 {

@@ -214,9 +214,9 @@ pub(super) fn build_runtime(
         sink.note(&format!(
             "ctrl_flags1: 0x{:08x} (root={} debug_or_root={} debug={} coreos={})",
             h.control_flags1(),
-            h.has_root_perm(),
-            h.debug_or_root(),
-            h.has_debug_perm(),
+            h.boot_privilege().root(),
+            h.boot_privilege().debug_or_root(),
+            h.boot_privilege().debug(),
             h.is_coreos(),
         ));
     }

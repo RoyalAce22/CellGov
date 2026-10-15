@@ -718,13 +718,17 @@ mod privilege_predicates {
         for &(flags, root, debug_or_root, debug) in CASES {
             let mut host = Lv2Host::new();
             host.set_control_flags1(flags);
-            assert_eq!(host.has_root_perm(), root, "root for 0x{flags:08x}");
+            assert_eq!(host.boot_privilege().root(), root, "root for 0x{flags:08x}");
             assert_eq!(
-                host.debug_or_root(),
+                host.boot_privilege().debug_or_root(),
                 debug_or_root,
                 "debug_or_root for 0x{flags:08x}"
             );
-            assert_eq!(host.has_debug_perm(), debug, "debug for 0x{flags:08x}");
+            assert_eq!(
+                host.boot_privilege().debug(),
+                debug,
+                "debug for 0x{flags:08x}"
+            );
         }
     }
 
@@ -734,7 +738,7 @@ mod privilege_predicates {
             let mut host = Lv2Host::new();
             host.set_control_flags1(flags);
             assert!(
-                !host.has_root_perm() || host.debug_or_root(),
+                !host.boot_privilege().root() || host.boot_privilege().debug_or_root(),
                 "0x{flags:08x}: root without debug_or_root"
             );
         }
@@ -744,9 +748,9 @@ mod privilege_predicates {
     fn a_fresh_host_is_unprivileged() {
         let host = Lv2Host::new();
         assert_eq!(host.control_flags1(), 0);
-        assert!(!host.has_root_perm());
-        assert!(!host.debug_or_root());
-        assert!(!host.has_debug_perm());
+        assert!(!host.boot_privilege().root());
+        assert!(!host.boot_privilege().debug_or_root());
+        assert!(!host.boot_privilege().debug());
     }
 
     #[test]
@@ -755,14 +759,14 @@ mod privilege_predicates {
         let mut lib = Lv2Host::new();
         lib.set_program_authority_id(0x1070_0000_4000_0001);
         assert!(lib.is_coreos());
-        assert!(!lib.has_root_perm());
+        assert!(!lib.boot_privilege().root());
 
         // vsh.self: CoreOS and root.
         let mut vsh = Lv2Host::new();
         vsh.set_program_authority_id(0x1070_0005_FF00_0001);
         vsh.set_control_flags1(0x4000_0000);
         assert!(vsh.is_coreos());
-        assert!(vsh.has_root_perm());
+        assert!(vsh.boot_privilege().root());
 
         // A retail application is neither.
         let mut game = Lv2Host::new();
@@ -770,12 +774,72 @@ mod privilege_predicates {
             cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
         );
         assert!(!game.is_coreos());
-        assert!(!game.has_root_perm());
+        assert!(!game.boot_privilege().root());
     }
 
     #[test]
     fn the_default_authority_id_is_not_coreos() {
         assert!(!Lv2Host::new().is_coreos());
+    }
+
+    use crate::dispatch::Lv2Dispatch;
+    use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
+
+    const VSH_FLAGS: u32 = 0x4000_0000;
+    const CHILD_PID: u32 = BOOT_PROCESS_PID + 0x100;
+    const CHILD_UNIT: UnitId = UnitId::new(10);
+
+    /// A root boot process with an unprivileged child bound to
+    /// [`CHILD_UNIT`].
+    fn root_host_with_child() -> Lv2Host {
+        let mut host = Lv2Host::new();
+        host.set_control_flags1(VSH_FLAGS);
+        assert!(host.state.processes.insert_child(
+            CHILD_PID,
+            crate::host::ProcessEntry {
+                ppid: BOOT_PROCESS_PID,
+                authority_id: cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+                control_flags1: 0,
+                exit_status: None,
+            },
+        ));
+        host.bind_unit_process(CHILD_UNIT, CHILD_PID);
+        host
+    }
+
+    #[test]
+    fn a_caller_has_its_own_process_privilege() {
+        let host = root_host_with_child();
+        assert!(host.privilege_of(UnitId::new(0)).root());
+        assert!(!host.privilege_of(CHILD_UNIT).root());
+        assert!(!host.privilege_of(CHILD_UNIT).debug_or_root());
+    }
+
+    #[test]
+    fn a_root_only_call_from_a_child_of_a_root_process_is_refused() {
+        let mut host = root_host_with_child();
+        let rt = crate::host::test_support::FakeRuntime::new(0x1000);
+        let code = |host: &mut Lv2Host, unit| match host.dispatch(
+            crate::request::Lv2Request::UartInitialize,
+            unit,
+            &rt,
+        ) {
+            Lv2Dispatch::Immediate { code, .. } => code,
+            other => panic!("expected Immediate, got {other:?}"),
+        };
+        assert_eq!(
+            code(&mut host, CHILD_UNIT),
+            u64::from(cellgov_ps3_abi::lv2::errno::CELL_ENOSYS)
+        );
+        assert_eq!(code(&mut host, UnitId::new(0)), 0);
+    }
+
+    #[test]
+    fn a_unit_bound_to_a_vanished_process_has_no_privilege() {
+        let mut host = Lv2Host::new();
+        host.set_control_flags1(VSH_FLAGS);
+        host.bind_unit_process(CHILD_UNIT, CHILD_PID);
+        assert!(!host.privilege_of(CHILD_UNIT).root());
     }
 }
 

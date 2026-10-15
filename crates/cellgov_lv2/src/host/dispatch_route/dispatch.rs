@@ -156,7 +156,7 @@ impl Lv2Host {
             Lv2Request::SpuThreadGroupResume { group_id } => self.dispatch_group_resume(group_id),
             Lv2Request::SpuThreadGroupYield { group_id } => self.dispatch_group_yield(group_id),
             Lv2Request::SpuThreadGroupSetPriority { group_id, priority } => {
-                self.dispatch_group_set_priority(group_id, priority)
+                self.dispatch_group_set_priority(group_id, priority, requester)
             }
             Lv2Request::SpuThreadGroupGetPriority {
                 group_id,
@@ -331,7 +331,7 @@ impl Lv2Host {
             Lv2Request::EventQueueReceive {
                 queue_id, out_ptr, ..
             } => self.dispatch_event_queue_receive(queue_id, out_ptr, requester, tick),
-            Lv2Request::UartInitialize => self.dispatch_uart_initialize(),
+            Lv2Request::UartInitialize => self.dispatch_uart_initialize(requester),
             Lv2Request::UartReceive {
                 buf_ptr,
                 size,
@@ -578,6 +578,7 @@ impl Lv2Host {
                 stacksize,
                 flags,
                 threadname_ptr,
+                requester,
                 rt,
             ),
             Lv2Request::PpuThreadJoin {
@@ -684,7 +685,7 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::PPU_THREAD_SET_PRIORITY,
                 args,
-            } => self.dispatch_ppu_thread_set_priority(args),
+            } => self.dispatch_ppu_thread_set_priority(args, requester),
             Lv2Request::Unsupported {
                 number: syscall::PPU_THREAD_GET_PRIORITY,
                 args,

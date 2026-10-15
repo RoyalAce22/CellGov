@@ -26,6 +26,7 @@ mod mmapper;
 mod mutex;
 mod observability;
 mod ppu_thread;
+mod privilege;
 mod process;
 mod raw_spu;
 pub mod rsx;
@@ -65,6 +66,7 @@ pub use diagnostics::InvariantBreakReason;
 pub use lv2_host::{FirmwareIdentity, Lv2Host};
 pub use mmapper::SystemStateSeed;
 pub use observability::{Lv2Observability, UnsupportedSyscallWitness};
+pub use privilege::Privilege;
 pub use process::{ProcessEntry, ProcessTable};
 pub use rsx::{
     SysRsxContext, PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,

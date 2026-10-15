@@ -85,6 +85,7 @@ impl Lv2Host {
     pub(in crate::host::dispatch_route) fn dispatch_ppu_thread_set_priority(
         &mut self,
         args: [u64; 8],
+        requester: UnitId,
     ) -> Lv2Dispatch {
         use cellgov_ps3_abi::lv2::syscall;
 
@@ -93,7 +94,7 @@ impl Lv2Host {
         else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
-        let floor = if self.debug_or_root() {
+        let floor = if self.privilege_of(requester).debug_or_root() {
             PPU_THREAD_PRIORITY_MIN_ROOT
         } else {
             PPU_THREAD_PRIORITY_MIN

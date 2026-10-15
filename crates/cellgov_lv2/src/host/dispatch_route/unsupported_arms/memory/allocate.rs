@@ -366,7 +366,7 @@ impl Lv2Host {
             let admitted = ext_entry::PLAIN_TYPES.contains(&entry_type)
                 || (entry_type == ext_entry::PRIVILEGED_TYPE
                     && flags == page_size::FLAG_64K
-                    && self.debug_or_root());
+                    && self.privilege_of(requester).debug_or_root());
             if !admitted {
                 return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
             }

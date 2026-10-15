@@ -126,8 +126,9 @@ impl Lv2Host {
         &mut self,
         group_id: u32,
         priority: i32,
+        requester: UnitId,
     ) -> Lv2Dispatch {
-        let root = self.has_root_perm();
+        let root = self.privilege_of(requester).root();
         match self.state.groups.set_priority(group_id, priority, root) {
             Ok(()) => Lv2Dispatch::immediate(0),
             Err(SetPriorityError::Unknown) => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),

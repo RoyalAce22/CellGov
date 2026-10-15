@@ -65,7 +65,7 @@ fn root_only_group_types_answer_as_the_console_does() {
 
     let mut host = Lv2Host::new();
     host.set_control_flags1(PROBE_CONTROL_FLAGS1);
-    assert!(host.has_root_perm());
+    assert!(host.boot_privilege().root());
 
     // A named divergence. On the console the first 0x20A group answers
     // EBUSY: the running system already holds the resource that type

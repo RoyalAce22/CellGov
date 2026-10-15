@@ -181,6 +181,7 @@ impl Lv2Host {
         stacksize: u64,
         flags: u64,
         threadname_ptr: u32,
+        requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         let _ = threadname_ptr;
@@ -214,7 +215,7 @@ impl Lv2Host {
             );
         }
         let priority = priority as u32;
-        self.dispatch_ppu_thread_create(id_ptr, param_ptr, arg, priority, stacksize, rt)
+        self.dispatch_ppu_thread_create(id_ptr, param_ptr, arg, priority, stacksize, requester, rt)
     }
 
     /// `sys_ss_access_control_engine`.

@@ -31,8 +31,9 @@ fn child_unit() -> UnitId {
     UnitId::new(10)
 }
 
-/// Root host with the boot thread and one child-process thread; the
-/// child's reader parks first so it sits at the queue front.
+/// Root host with the boot thread and one thread of a root child
+/// process; the child's reader parks first so it sits at the queue
+/// front.
 fn host_with_child_reader_in_front() -> (Lv2Host, FakeRuntime, PpuThreadId) {
     let p = hw_conf_packet();
     let mut mem = GuestMemory::new(0x10000);
@@ -50,7 +51,7 @@ fn host_with_child_reader_in_front() -> (Lv2Host, FakeRuntime, PpuThreadId) {
         ProcessEntry {
             ppid: BOOT_PROCESS_PID,
             authority_id: 0,
-            control_flags1: 0,
+            control_flags1: ROOT,
             exit_status: None,
         }
     ));

@@ -129,7 +129,7 @@ fn a_root_only_type_needs_root_permission_and_its_single_thread() {
     let mut root = Lv2Host::new();
     root.set_program_authority_id(0x1070_0005_FF00_0001);
     root.set_control_flags1(0x4000_0000);
-    assert!(root.has_root_perm());
+    assert!(root.boot_privilege().root());
     assert_eq!(
         create(&mut root, &rt, 2, ATTR_PTR),
         errno::CELL_EINVAL.into()

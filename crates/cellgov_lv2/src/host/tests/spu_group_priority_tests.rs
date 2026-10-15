@@ -38,7 +38,7 @@ fn set(host: &mut Lv2Host, group_id: u32, priority: i32) -> u64 {
 #[test]
 fn a_user_process_takes_priorities_from_sixteen() {
     let mut host = Lv2Host::new();
-    assert!(!host.has_root_perm());
+    assert!(!host.boot_privilege().root());
     let below = group_priority::MIN_USER - 1;
     assert_eq!(create(&mut host, below), errno::CELL_EINVAL.into());
     assert_eq!(create(&mut host, group_priority::MIN_USER), 0);

@@ -346,7 +346,7 @@ impl Lv2Host {
         if num_threads == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
-        let root = self.has_root_perm();
+        let root = self.privilege_of(requester).root();
         let pid = self.state.processes.process_of_unit(requester);
         let request = GroupRequest {
             num_threads,

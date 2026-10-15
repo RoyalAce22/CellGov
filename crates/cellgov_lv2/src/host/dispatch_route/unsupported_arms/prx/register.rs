@@ -116,7 +116,7 @@ impl Lv2Host {
         if module_type & opt_layout::TYPE_MANUAL_IMPORTS == 0 {
             return Lv2Dispatch::immediate(0);
         }
-        if !self.is_coreos() {
+        if !self.is_coreos_process_of(requester) {
             // Only a CoreOS process may hand the kernel its own tables.
             return Lv2Dispatch::immediate(CELL_PRX_ERROR_ELF_IS_REGISTERED.into());
         }

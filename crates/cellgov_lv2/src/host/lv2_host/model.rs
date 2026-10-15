@@ -236,33 +236,40 @@ impl Lv2Host {
         self.obs.pending_invariant_breaks = pending;
     }
 
-    /// Raw capability word backing the privilege predicates.
+    /// The boot process's capability word.
     #[inline]
     pub fn control_flags1(&self) -> u32 {
         self.state.processes.boot().control_flags1
     }
 
-    /// Whether the booting process holds root privilege.
+    /// The boot process's privilege.
+    #[inline]
+    pub fn boot_privilege(&self) -> crate::host::Privilege {
+        crate::host::Privilege::from_control_flags1(self.control_flags1())
+    }
+
+    /// Whether the process `requester` belongs to is a CoreOS SELF.
     ///
-    /// The three capability predicates share bits -- root implies
-    /// debug-or-root, and the debug mask overlaps both.
-    #[inline]
-    pub fn has_root_perm(&self) -> bool {
-        self.control_flags1() & cellgov_ps3_abi::format::sce::CTRL_FLAGS1_ROOT_MASK != 0
+    /// A unit bound to a process the table no longer holds is not.
+    pub fn is_coreos_process_of(&self, requester: cellgov_event::UnitId) -> bool {
+        let pid = self.state.processes.process_of_unit(requester);
+        self.state.processes.get(pid).is_some_and(|entry| {
+            entry.authority_id >> 36 == cellgov_ps3_abi::format::sce::COREOS_AUTHORITY_ID_PREFIX
+        })
     }
 
-    /// Whether the booting process holds debug or root privilege; the
-    /// widest of the three masks. See [`Self::has_root_perm`].
-    #[inline]
-    pub fn debug_or_root(&self) -> bool {
-        self.control_flags1() & cellgov_ps3_abi::format::sce::CTRL_FLAGS1_DEBUG_OR_ROOT_MASK != 0
-    }
-
-    /// Whether the booting process holds debug privilege. See
-    /// [`Self::has_root_perm`].
-    #[inline]
-    pub fn has_debug_perm(&self) -> bool {
-        self.control_flags1() & cellgov_ps3_abi::format::sce::CTRL_FLAGS1_DEBUG_MASK != 0
+    /// The privilege of the process `requester` belongs to.
+    ///
+    /// A unit bound to a process the table no longer holds has no
+    /// privilege.
+    pub fn privilege_of(&self, requester: cellgov_event::UnitId) -> crate::host::Privilege {
+        let pid = self.state.processes.process_of_unit(requester);
+        let flags = self
+            .state
+            .processes
+            .get(pid)
+            .map_or(0, |entry| entry.control_flags1);
+        crate::host::Privilege::from_control_flags1(flags)
     }
 
     /// Whether the booting process is a CoreOS SELF (vsh and the other

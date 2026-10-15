@@ -187,6 +187,36 @@ fn a_non_coreos_caller_keeps_elf_is_registered() {
 }
 
 #[test]
+fn a_retail_child_of_a_coreos_process_keeps_elf_is_registered() {
+    use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
+    let child_pid = BOOT_PROCESS_PID + 0x100;
+    let child_unit = UnitId::new(10);
+    let mut host = Lv2Host::new();
+    host.set_program_authority_id(COREOS_AUTHID);
+    host.set_firmware_exports(exports_under(LIB, &[(0xDEAD_BEEF, 0x0080_1234)]));
+    assert!(host.state.processes.insert_child(
+        child_pid,
+        crate::host::ProcessEntry {
+            ppid: BOOT_PROCESS_PID,
+            authority_id: cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+            control_flags1: 0,
+            exit_status: None,
+        },
+    ));
+    host.bind_unit_process(child_unit, child_pid);
+    let rt = FakeRuntime::with_memory(memory_with(1, 0x30, &[0xDEAD_BEEF]));
+    let request = Lv2Request::Unsupported {
+        number: 484,
+        args: [0, OPT.into(), 0, 0, 0, 0, 0, 0],
+    };
+    assert_eq!(
+        host.dispatch(request, child_unit, &rt),
+        Lv2Dispatch::immediate(ELF_IS_REGISTERED)
+    );
+    assert_eq!(host.observability().prx_register_module_witness().1, 0);
+}
+
+#[test]
 fn a_coreos_caller_binds_its_got_slot_to_the_exporter_opd() {
     let mut host = Lv2Host::new();
     host.set_program_authority_id(COREOS_AUTHID);
