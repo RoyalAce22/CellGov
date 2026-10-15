@@ -126,9 +126,19 @@ impl Lv2Host {
             Lv2Request::SpuThreadGroupCreate {
                 id_ptr,
                 num_threads,
+                priority,
                 attr_ptr,
-                ..
-            } => self.dispatch_group_create(id_ptr, num_threads, attr_ptr, requester, rt, tick),
+            } => self.dispatch_group_create(
+                crate::host::spu::GroupCreateArgs {
+                    id_ptr,
+                    num_threads,
+                    priority,
+                    attr_ptr,
+                },
+                requester,
+                rt,
+                tick,
+            ),
             req @ Lv2Request::SpuThreadInitialize { .. } => {
                 self.dispatch_thread_initialize(req, requester, rt, tick)
             }
@@ -142,6 +152,13 @@ impl Lv2Host {
             Lv2Request::SpuThreadGroupTerminate { group_id, value } => {
                 self.dispatch_group_terminate(group_id, value)
             }
+            Lv2Request::SpuThreadGroupSetPriority { group_id, priority } => {
+                self.dispatch_group_set_priority(group_id, priority)
+            }
+            Lv2Request::SpuThreadGroupGetPriority {
+                group_id,
+                priority_ptr,
+            } => self.dispatch_group_get_priority(group_id, priority_ptr, requester, tick),
             Lv2Request::SpuThreadGetExitStatus {
                 thread_id,
                 status_ptr,

@@ -1,6 +1,7 @@
 //! LV2 dispatch for SPU thread-group control:
 //!
 //! - terminate a running group;
+//! - set and read a group's priority;
 //! - read the exit status of a thread;
 //! - replace the argument block of a thread.
 
@@ -13,7 +14,7 @@ use cellgov_time::GuestTicks;
 use crate::dispatch::Lv2Dispatch;
 use crate::host::guest_struct::GuestStruct;
 use crate::host::{Lv2Host, Lv2Runtime};
-use crate::thread_group::{ExitStatusError, TerminateGroupError};
+use crate::thread_group::{ExitStatusError, SetPriorityError, TerminateGroupError};
 
 impl Lv2Host {
     /// `sys_spu_thread_group_terminate`
@@ -36,6 +37,65 @@ impl Lv2Host {
             Err(TerminateGroupError::NotRunning { .. }) => {
                 Lv2Dispatch::immediate(errno::CELL_ESTAT.into())
             }
+        }
+    }
+
+    /// `sys_spu_thread_group_set_priority`
+    /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_SET_PRIORITY`]):
+    /// store a group's priority. The priority is served back by
+    /// `sys_spu_thread_group_get_priority` and is not a scheduling input;
+    /// see [`crate::thread_group::ThreadGroupTable::set_priority`].
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when no group has `group_id`, checked first.
+    /// - `CELL_EINVAL` when the group has no scheduler context or shares
+    ///   an SPU with the system, or the priority is out of range for the
+    ///   process.
+    pub(super) fn dispatch_group_set_priority(
+        &mut self,
+        group_id: u32,
+        priority: i32,
+    ) -> Lv2Dispatch {
+        let root = self.has_root_perm();
+        match self.state.groups.set_priority(group_id, priority, root) {
+            Ok(()) => Lv2Dispatch::immediate(0),
+            Err(SetPriorityError::Unknown) => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+            Err(SetPriorityError::Invalid) => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+        }
+    }
+
+    /// `sys_spu_thread_group_get_priority`
+    /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_GROUP_GET_PRIORITY`]):
+    /// store a group's priority at `priority_ptr` as an s32: 0 for a
+    /// group without a scheduler context, 15 for one that shares an SPU
+    /// with the system, and the stored priority otherwise.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when no group has `group_id`.
+    /// - `CELL_EFAULT` when `priority_ptr` is null.
+    pub(super) fn dispatch_group_get_priority(
+        &self,
+        group_id: u32,
+        priority_ptr: u32,
+        requester: UnitId,
+        tick: GuestTicks,
+    ) -> Lv2Dispatch {
+        let Some(priority) = self.state.groups.priority(group_id) else {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        };
+        if let Some(refusal) = self.efault_if_null(&[priority_ptr]) {
+            return refusal;
+        }
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![Effect::shared_write(
+                ByteRange::contiguous_u32(priority_ptr, 4),
+                WritePayload::from_slice(&priority.to_be_bytes()),
+                requester,
+                tick,
+            )],
         }
     }
 
@@ -122,3 +182,11 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/spu_group_control_console_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_group_priority_tests.rs"]
+mod priority_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_group_priority_console_tests.rs"]
+mod priority_console_tests;

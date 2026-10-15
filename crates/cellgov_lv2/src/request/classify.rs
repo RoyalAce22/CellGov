@@ -145,6 +145,14 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             group_id: p!(0),
             value: s!(1),
         },
+        syscall::SPU_THREAD_GROUP_SET_PRIORITY => Lv2Request::SpuThreadGroupSetPriority {
+            group_id: p!(0),
+            priority: s!(1),
+        },
+        syscall::SPU_THREAD_GROUP_GET_PRIORITY => Lv2Request::SpuThreadGroupGetPriority {
+            group_id: p!(0),
+            priority_ptr: p!(1),
+        },
         syscall::SPU_THREAD_GET_EXIT_STATUS => Lv2Request::SpuThreadGetExitStatus {
             thread_id: p!(0),
             status_ptr: p!(1),

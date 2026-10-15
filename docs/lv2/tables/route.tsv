@@ -178,8 +178,8 @@ ordinal	route	arm
 176	null_backend	none
 177	typed	SpuThreadGroupTerminate
 178	typed	SpuThreadGroupJoin
-179	null_backend	none
-180	null_backend	none
+179	typed	SpuThreadGroupSetPriority
+180	typed	SpuThreadGroupGetPriority
 181	null_backend	none
 182	null_backend	none
 183	null_backend	none

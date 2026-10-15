@@ -394,7 +394,7 @@ fn unsupported_preserves_args_for_diagnosis() {
 #[test]
 fn spu_thread_group_range_stubs_classify_as_unsupported() {
     let args = [0; 8];
-    for n in [174, 175, 176, 179, 180] {
+    for n in [174, 175, 176] {
         let req = classify(n, &args);
         assert!(
             matches!(req, Lv2Request::Unsupported { number, .. } if number == n),
@@ -931,6 +931,8 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::SPU_THREAD_GROUP_DESTROY, &[0]),
     (syscall::SPU_THREAD_GROUP_TERMINATE, &[0]),
     (syscall::SPU_THREAD_GROUP_JOIN, &[0, 1, 2]),
+    (syscall::SPU_THREAD_GROUP_SET_PRIORITY, &[0]),
+    (syscall::SPU_THREAD_GROUP_GET_PRIORITY, &[0, 1]),
     (syscall::SPU_THREAD_GET_EXIT_STATUS, &[0, 1]),
     (syscall::SPU_THREAD_SET_ARGUMENT, &[0, 1]),
     (syscall::SPU_THREAD_WRITE_MB, &[0, 1]),
@@ -1297,6 +1299,7 @@ const S32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::SEMAPHORE_POST, &[1]),
     (syscall::SPU_THREAD_GROUP_CREATE, &[2]),
     (syscall::SPU_THREAD_GROUP_TERMINATE, &[1]),
+    (syscall::SPU_THREAD_GROUP_SET_PRIORITY, &[1]),
 ];
 
 /// Probe slot `slot` of `num`'s classification with two values

@@ -1,0 +1,17 @@
+[test]
+name = "spu_group_priority"
+
+# A hardware probe: the priority sys_spu_thread_group_create accepts,
+# and what sys_spu_thread_group_set_priority and
+# sys_spu_thread_group_get_priority answer for context, exclusive
+# non-context and cooperate-with-system groups. The console capture is
+# the answer; no emulator runs it.
+
+[observe]
+# 32 big-endian u32 words, in the order ppu/main.c lists: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"

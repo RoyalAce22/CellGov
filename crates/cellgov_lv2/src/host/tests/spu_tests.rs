@@ -150,7 +150,7 @@ fn group_create_allocates_monotonic_ids() {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x100,
             num_threads: 1,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),
@@ -160,7 +160,7 @@ fn group_create_allocates_monotonic_ids() {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x200,
             num_threads: 1,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),
@@ -203,7 +203,7 @@ fn group_create_rejects_oversized_num_threads() {
     let req = Lv2Request::SpuThreadGroupCreate {
         id_ptr: 0x100,
         num_threads: 300,
-        priority: 0,
+        priority: 100,
         attr_ptr: 0,
     };
     let result = host.dispatch(req, UnitId::new(0), &rt);
@@ -234,7 +234,7 @@ fn thread_initialize_records_slot() {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x100,
             num_threads: 2,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),
@@ -467,7 +467,7 @@ fn group_start_returns_register_spu_with_inits() {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x400,
             num_threads: 1,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),
@@ -541,7 +541,7 @@ fn kernel_image_entry_pc(elf: Vec<u8>) -> u32 {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x400,
             num_threads: 1,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),
@@ -596,7 +596,7 @@ fn host_with_finished_group() -> Lv2Host {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x100,
             num_threads: 1,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),
@@ -720,7 +720,7 @@ fn a_zero_thread_group_create_is_rejected_as_einval() {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x100,
             num_threads: 0,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),
@@ -744,7 +744,7 @@ fn a_second_start_of_a_running_group_is_rejected_as_estat() {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x100,
             num_threads: 1,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),
@@ -798,7 +798,7 @@ fn initializing_a_thread_in_a_started_group_is_rejected_as_ebusy() {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x400,
             num_threads: 2,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),
@@ -844,7 +844,7 @@ fn a_slot_index_past_the_declared_count_is_accepted_and_a_full_group_is_ebusy() 
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x400,
             num_threads: 1,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),
@@ -914,7 +914,7 @@ fn host_with_thread(running: bool) -> Lv2Host {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x100,
             num_threads: 1,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),

@@ -114,7 +114,9 @@ SpuThreadGroupCreate	modeled	170
 SpuThreadGroupDestroy	modeled	171
 SpuThreadGroupDisconnectEvent	modeled	186
 SpuThreadGroupDisconnectEventAllThreads	modeled	252
+SpuThreadGroupGetPriority	modeled	180
 SpuThreadGroupJoin	modeled	178
+SpuThreadGroupSetPriority	modeled	179
 SpuThreadGroupStart	modeled	173
 SpuThreadGroupTerminate	partial-state	177
 SpuThreadInitialize	modeled	172

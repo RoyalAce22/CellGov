@@ -237,6 +237,13 @@ impl Lv2RequestKind {
             | Lv2RequestKind::SpuThreadGroupConnectEventAllThreads
             | Lv2RequestKind::SpuThreadGroupDisconnectEventAllThreads
             | Lv2RequestKind::SpuInitialize => Modeled,
+            // Declared divergence: the priority is validated, stored and
+            // served, and decides nothing. On the console it picks which
+            // scheduler-context groups get SPUs when they want more than
+            // exist; CellGov runs every SPU thread as its own unit, so
+            // that contest never arises.
+            Lv2RequestKind::SpuThreadGroupSetPriority
+            | Lv2RequestKind::SpuThreadGroupGetPriority => Modeled,
             // The connect arm does not read the group type: it refuses a
             // system-module connect for every group. The queue type is
             // not modeled: the bind arm binds a PPU-type queue like an

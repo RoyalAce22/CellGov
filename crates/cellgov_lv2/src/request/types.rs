@@ -92,6 +92,20 @@ pub enum Lv2Request {
         /// In: termination value.
         value: i32,
     },
+    /// `sys_spu_thread_group_set_priority`.
+    SpuThreadGroupSetPriority {
+        /// In: group id.
+        group_id: u32,
+        /// In: the new priority; LV2 ABI is signed `int priority`.
+        priority: i32,
+    },
+    /// `sys_spu_thread_group_get_priority`.
+    SpuThreadGroupGetPriority {
+        /// In: group id.
+        group_id: u32,
+        /// Out: the group's priority word.
+        priority_ptr: u32,
+    },
     /// `sys_spu_thread_get_exit_status`.
     SpuThreadGetExitStatus {
         /// In: SPU thread id.

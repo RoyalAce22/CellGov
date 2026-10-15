@@ -61,7 +61,7 @@ fn host_with_group() -> (Lv2Host, FakeRuntime) {
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x400,
             num_threads: 1,
-            priority: 0,
+            priority: 100,
             attr_ptr: 0,
         },
         UnitId::new(0),

@@ -236,6 +236,25 @@ pub mod group_type {
     pub const SINGLE_THREAD_MASK: u32 = 0x700;
 }
 
+/// The priorities of an SPU thread group with a scheduler context. A
+/// group without one takes any priority at create and reads back 0.
+// The console capture of tests/micro/spu_group_priority shows the root
+// range: a root process creates and sets 15, and 256 and -1 answer
+// CELL_EINVAL. It shows a cooperating group reading back COOPERATING
+// whatever it was created with. Probes run with root permission, so the
+// capture cannot show the user floor.
+pub mod group_priority {
+    /// The lowest priority a process without root permission may give.
+    pub const MIN_USER: i32 = 16;
+    /// The lowest priority a process with root permission may give.
+    pub const MIN_ROOT: i32 = 0;
+    /// The highest priority.
+    pub const MAX: i32 = 255;
+    /// The priority a group that shares an SPU with the system reads
+    /// back.
+    pub const COOPERATING: i32 = 15;
+}
+
 /// The 16-byte `sys_spu_thread_group_attribute` record:
 /// `nsize`, `name`, `type`, then the `option` union, each a big-endian
 /// 32-bit word.

@@ -16,8 +16,23 @@ use crate::host::guest_struct::{read_be_u32, GuestStruct};
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::image::LsSegment;
 use crate::request::Lv2Request;
-use crate::thread_group::{CreateGroupError, DestroyGroupError, GroupState, MAX_SLOTS_PER_GROUP};
+use crate::thread_group::{
+    CreateGroupError, DestroyGroupError, GroupRequest, GroupState, MAX_SLOTS_PER_GROUP,
+};
 use cellgov_time::GuestTicks;
+
+/// The arguments of `sys_spu_thread_group_create`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct GroupCreateArgs {
+    /// Out: group id.
+    pub(super) id_ptr: u32,
+    /// Thread count.
+    pub(super) num_threads: u32,
+    /// Group priority.
+    pub(super) priority: i32,
+    /// The `sys_spu_thread_group_attribute` record.
+    pub(super) attr_ptr: u32,
+}
 
 /// The `sys_spu_image` record the kernel hands back: `type` KERNEL,
 /// with the kernel image id occupying the `entry_point` word.
@@ -281,25 +296,31 @@ impl Lv2Host {
     ///
     /// - `CELL_EFAULT` when the attribute is unreadable, its container
     ///   word included for a type that takes memory from a container.
-    /// - `CELL_EINVAL` when `num_threads` is zero, or the group can never
-    ///   fit the pool.
+    /// - `CELL_EINVAL` when `num_threads` is zero, a group with a
+    ///   scheduler context has a priority out of range, or the group can
+    ///   never fit the pool.
     /// - `CELL_ESRCH` when the attribute names no memory container that
     ///   exists.
     /// - `CELL_EBUSY` when the groups that exist leave no room for it.
     /// - `CELL_EAGAIN` when the group allocator is exhausted.
     ///
     /// The reference console answers each of these in this order
-    /// (`tests/micro/spu_group_limits`, `tests/micro/spu_pool_edges`).
-    /// The container's memory is not taken.
+    /// (`tests/micro/spu_group_limits`, `tests/micro/spu_pool_edges`,
+    /// `tests/micro/spu_group_priority`). The container's memory is not
+    /// taken.
     pub(super) fn dispatch_group_create(
         &mut self,
-        id_ptr: u32,
-        num_threads: u32,
-        attr_ptr: u32,
+        args: GroupCreateArgs,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        let GroupCreateArgs {
+            id_ptr,
+            num_threads,
+            priority,
+            attr_ptr,
+        } = args;
         let type_addr = u64::from(attr_ptr) + u64::from(spu::group_attr::TYPE_OFFSET);
         let Some(group_type) = read_be_u32(rt, type_addr) else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
@@ -321,12 +342,12 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let root = self.has_root_perm();
-        if self
-            .state
-            .groups
-            .check_valid(num_threads, group_type, root)
-            .is_err()
-        {
+        let request = GroupRequest {
+            num_threads,
+            group_type,
+            priority,
+        };
+        if self.state.groups.check_valid(request, root).is_err() {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if container.is_some_and(|ct| !self.state.memory_containers.contains_key(ct)) {
@@ -334,11 +355,7 @@ impl Lv2Host {
         }
         // The pool holds at most `pool::USABLE_SPUS` threads per group,
         // well under the `MAX_SLOTS_PER_GROUP` thread-id encoding.
-        let group_id = match self
-            .state
-            .groups
-            .create_typed(num_threads, group_type, root)
-        {
+        let group_id = match self.state.groups.create_typed(request, root) {
             Ok(id) => id,
             Err(CreateGroupError::Invalid) => {
                 return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());

@@ -1,0 +1,15 @@
+[test]
+name = "spu_group_root_types"
+
+# A hardware probe: the root-only SPU thread-group types
+# sys_spu_thread_group_create takes from a process with root permission.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, in the order ppu/main.c lists: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"

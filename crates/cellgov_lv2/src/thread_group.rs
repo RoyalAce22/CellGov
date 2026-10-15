@@ -7,7 +7,7 @@ use crate::dispatch::{SpuInitState, SpuLoadImage};
 use crate::image::SpuImageHandle;
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{self, source, LaneEntryMut, LaneMap, LaneValue, ObjectLanes};
-use cellgov_ps3_abi::lv2::spu::{event, group_join_cause, group_type, pool};
+use cellgov_ps3_abi::lv2::spu::{event, group_join_cause, group_priority, group_type, pool};
 use std::collections::BTreeMap;
 
 /// Cap on slots per group; the `group_id * 256 + slot` thread-id
@@ -81,6 +81,32 @@ pub struct ThreadGroup {
     pub event_queues: BTreeMap<u32, u32>,
     /// The `type` word of the group's attribute at create.
     pub group_type: u32,
+    /// The priority given at create or by
+    /// `sys_spu_thread_group_set_priority`. Served back, never a
+    /// scheduling input.
+    pub priority: i32,
+}
+
+/// What `sys_spu_thread_group_create` asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupRequest {
+    /// Thread count.
+    pub num_threads: u32,
+    /// The `type` word of the group's attribute.
+    pub group_type: u32,
+    /// Group priority.
+    pub priority: i32,
+}
+
+/// Whether `priority` is one a process, with root permission when
+/// `root`, may give a group with a scheduler context.
+fn priority_in_range(priority: i32, root: bool) -> bool {
+    let min = if root {
+        group_priority::MIN_ROOT
+    } else {
+        group_priority::MIN_USER
+    };
+    (min..=group_priority::MAX).contains(&priority)
 }
 
 /// How a thread group occupies the SPU pool, from its `type` word.
@@ -199,6 +225,9 @@ impl LaneValue for ThreadGroup {
         }
         if self.group_type != group_type::NORMAL {
             lanes.lane(30, 0, u64::from(self.group_type));
+        }
+        if self.priority != 0 {
+            lanes.lane(31, 0, u64::from(self.priority as u32));
         }
         for (&index, slot) in &self.slots {
             let index = u64::from(index);
@@ -387,6 +416,18 @@ pub enum CreateGroupError {
     Exhausted,
 }
 
+/// Failure modes of [`ThreadGroupTable::set_priority`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SetPriorityError {
+    /// -> `CELL_ESRCH`: no group has the id.
+    #[error("unknown thread group")]
+    Unknown,
+    /// -> `CELL_EINVAL`: the group has no scheduler context, shares an
+    /// SPU with the system, or the priority is out of range.
+    #[error("the group takes no priority, or the priority is out of range")]
+    Invalid,
+}
+
 /// Failure modes of [`ThreadGroupTable::set_raw_limit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SetLimitsError {
@@ -474,42 +515,44 @@ impl ThreadGroupTable {
     ///
     /// Returns `None` if the u32 id space is exhausted.
     pub fn create(&mut self, num_threads: u32) -> Option<u32> {
-        self.insert_group(num_threads, group_type::NORMAL)
+        self.insert_group(GroupRequest {
+            num_threads,
+            group_type: group_type::NORMAL,
+            priority: 0,
+        })
     }
 
-    /// Create a group with `num_threads` slots and attribute type
-    /// `group_type`, for a process with root permission when `root`, if
-    /// the SPU pool has room for it.
+    /// Create the group `request` describes, for a process with root
+    /// permission when `root`, if the SPU pool has room for it.
     ///
     /// # Errors
     /// See [`CreateGroupError`]; an error creates nothing.
     pub fn create_typed(
         &mut self,
-        num_threads: u32,
-        group_type: u32,
+        request: GroupRequest,
         root: bool,
     ) -> Result<u32, CreateGroupError> {
-        self.check_valid(num_threads, group_type, root)?;
-        let demand = PoolDemand::of(GroupKind::of_type(group_type), num_threads);
+        self.check_valid(request, root)?;
+        let demand = PoolDemand::of(GroupKind::of_type(request.group_type), request.num_threads);
         if !self.occupied().with(demand).fits(self.spu_limit()) {
             return Err(CreateGroupError::Busy);
         }
-        self.insert_group(num_threads, group_type)
+        self.insert_group(request)
             .ok_or(CreateGroupError::Exhausted)
     }
 
-    /// Whether a process, with root permission when `root`, may create a
-    /// group of `num_threads` threads and type `group_type`, and whether
-    /// the group can ever fit the pool, whatever groups exist.
+    /// Whether a process, with root permission when `root`, may create
+    /// the group `request` describes, and whether the group can ever fit
+    /// the pool, whatever groups exist.
     ///
     /// # Errors
     /// [`CreateGroupError::Invalid`] when it cannot.
-    pub fn check_valid(
-        &self,
-        num_threads: u32,
-        group_type: u32,
-        root: bool,
-    ) -> Result<(), CreateGroupError> {
+    pub fn check_valid(&self, request: GroupRequest, root: bool) -> Result<(), CreateGroupError> {
+        let GroupRequest {
+            num_threads,
+            group_type,
+            priority,
+        } = request;
         let root_type = group_type::ROOT_TYPES.contains(&group_type);
         if !(group_type::USER_TYPES.contains(&group_type) || (root && root_type)) {
             return Err(CreateGroupError::Invalid);
@@ -523,6 +566,7 @@ impl ThreadGroupTable {
         let demand = PoolDemand::of(kind, num_threads);
         let spu_limit = self.spu_limit();
         if num_threads > max_threads
+            || (kind == GroupKind::Context && !priority_in_range(priority, root))
             || demand.physical > spu_limit
             || demand.controllable > spu_limit
             || (kind == GroupKind::CooperateWithSystem && num_threads < 2)
@@ -530,6 +574,45 @@ impl ThreadGroupTable {
             return Err(CreateGroupError::Invalid);
         }
         Ok(())
+    }
+
+    /// Give the group `group_id` priority `priority`, as
+    /// `sys_spu_thread_group_set_priority` does for a process with root
+    /// permission when `root`. The priority is served back and is not a
+    /// scheduling input: CellGov runs every SPU thread as its own unit, so
+    /// the contest for SPUs it decides on the console never arises.
+    ///
+    /// # Errors
+    /// See [`SetPriorityError`]; an error keeps the old priority.
+    pub fn set_priority(
+        &mut self,
+        group_id: u32,
+        priority: i32,
+        root: bool,
+    ) -> Result<(), SetPriorityError> {
+        let mut group = self
+            .groups
+            .get_mut(group_id)
+            .ok_or(SetPriorityError::Unknown)?;
+        if group.kind() != GroupKind::Context || !priority_in_range(priority, root) {
+            return Err(SetPriorityError::Invalid);
+        }
+        group.priority = priority;
+        Ok(())
+    }
+
+    /// The priority `sys_spu_thread_group_get_priority` reads for the
+    /// group `group_id`: 0 for a group without a scheduler context,
+    /// [`group_priority::COOPERATING`] for one that shares an SPU with the
+    /// system, and the stored priority otherwise. `None` when no group
+    /// has the id.
+    pub fn priority(&self, group_id: u32) -> Option<i32> {
+        let group = self.groups.get(group_id)?;
+        Some(match group.kind() {
+            GroupKind::NonContext => 0,
+            GroupKind::CooperateWithSystem => group_priority::COOPERATING,
+            GroupKind::Context => group.priority,
+        })
     }
 
     /// The SPUs left for SPU threads once Raw SPUs take their share.
@@ -568,7 +651,12 @@ impl ThreadGroupTable {
             })
     }
 
-    fn insert_group(&mut self, num_threads: u32, group_type: u32) -> Option<u32> {
+    fn insert_group(&mut self, request: GroupRequest) -> Option<u32> {
+        let GroupRequest {
+            num_threads,
+            group_type,
+            priority,
+        } = request;
         let id = self.next_id;
         if id == 0 {
             return None;
@@ -585,6 +673,7 @@ impl ThreadGroupTable {
             thread_exit_status: BTreeMap::new(),
             event_queues: BTreeMap::new(),
             group_type,
+            priority,
         };
         self.groups.insert(id, group);
         Some(id)
