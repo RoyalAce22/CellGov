@@ -871,7 +871,8 @@ impl Lv2Host {
     /// - `CELL_EFAULT` when `status_ptr` alone is null; the arm still
     ///   writes the cause.
     ///
-    /// Both null screens run after the wait.
+    /// Both null screens run after the wait. The `spu_group_join_null`
+    /// capture shows the three null cases on a running group.
     pub(super) fn dispatch_group_join(
         &self,
         group_id: u32,

@@ -1,0 +1,24 @@
+[test]
+name = "spu_group_join_null"
+
+# A hardware probe: what sys_spu_thread_group_join answers and writes
+# when its cause or status pointer is NULL, and whether it waits for
+# the group first. The console capture is the answer; no emulator runs
+# it.
+
+[observe]
+# failed step + rc, then eight words per case in ppu/main.c's order
+# (probed join rc, cause, status, second start rc, follow-up join rc,
+# cause, status, destroy rc) for four cases, then six zero words:
+# 160 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 160 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

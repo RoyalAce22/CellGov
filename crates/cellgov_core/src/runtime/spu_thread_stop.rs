@@ -119,3 +119,7 @@ impl Runtime {
 #[cfg(test)]
 #[path = "tests/spu_thread_stop_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/spu_group_join_null_console_tests.rs"]
+mod join_null_console_tests;

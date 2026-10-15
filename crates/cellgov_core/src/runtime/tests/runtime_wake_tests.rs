@@ -301,7 +301,6 @@ fn a_group_join_wake_with_null_cause_writes_nothing_and_returns_efault() {
         Some(UnitStatus::Runnable),
         "the join itself completes; only the writeback and code change",
     );
-    // The hardware's answer for a NULL cause is unestablished.
     assert_eq!(read_guest_u32_be(&rt, 0x200), 0);
     assert_eq!(
         rt.registry_mut().drain_syscall_return(waiter),

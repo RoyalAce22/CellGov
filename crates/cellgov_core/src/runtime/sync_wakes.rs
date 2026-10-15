@@ -296,8 +296,8 @@ impl Runtime {
             // wait: a NULL cause writes nothing -- not even a non-NULL
             // status -- and returns CELL_EFAULT; a NULL status alone
             // still writes cause and returns CELL_EFAULT. The
-            // hardware's answer here is unestablished, so the
-            // asymmetry is a witnessed choice.
+            // `spu_group_join_null` capture shows each of these on
+            // the reference console.
             // Address 0 may be mapped, so NULL is never written
             // through.
             let code = if cause_ptr == 0 {
