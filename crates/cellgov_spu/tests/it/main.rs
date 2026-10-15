@@ -17,6 +17,7 @@ mod mfc_storage_control_through_runtime;
 mod observation_without_copies;
 mod problem_state_edges_through_runtime;
 mod problem_state_through_runtime;
+mod raw_spu_lifecycle;
 mod signal_read_through_runtime;
 mod signal_write_through_lv2;
 mod spu_float_edges;

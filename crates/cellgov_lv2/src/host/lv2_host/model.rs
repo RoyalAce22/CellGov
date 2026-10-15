@@ -104,6 +104,7 @@ impl Lv2Host {
             state: state::Lv2State {
                 content: ContentStore::new(),
                 groups: ThreadGroupTable::new(),
+                raw_spus: crate::raw_spu::RawSpuTable::new(),
                 ppu_threads: PpuThreadTable::new(),
                 stack_allocator: ThreadStackAllocator::new(),
                 next_kernel_id: crate::host::state::FIRST_KERNEL_ID,

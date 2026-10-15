@@ -378,14 +378,15 @@ impl Lv2Host {
     /// # Errors
     ///
     /// - `CELL_EINVAL` when `max_raw_spu` exceeds the Raw SPU maximum.
-    /// - `CELL_EBUSY` when the thread groups that exist do not fit the
-    ///   new split.
+    /// - `CELL_EBUSY` when the thread groups or the Raw SPUs that exist
+    ///   do not fit the new split.
     pub(in crate::host) fn dispatch_spu_initialize(
         &mut self,
         _max_usable_spu: u32,
         max_raw_spu: u32,
     ) -> Lv2Dispatch {
-        match self.state.groups.set_raw_limit(max_raw_spu) {
+        let live_raw = self.state.raw_spus.len();
+        match self.state.groups.set_raw_limit(max_raw_spu, live_raw) {
             Ok(()) => Lv2Dispatch::immediate(0),
             Err(SetLimitsError::Invalid { .. }) => {
                 Lv2Dispatch::immediate(errno::CELL_EINVAL.into())

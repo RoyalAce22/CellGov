@@ -46,6 +46,7 @@ impl Lv2State {
         let Self {
             content,
             groups,
+            raw_spus,
             ppu_threads,
             stack_allocator,
             next_kernel_id,
@@ -98,6 +99,7 @@ impl Lv2State {
             partial!(event_ports),
             partial!(event_flags),
             partial!(groups),
+            partial!(raw_spus),
             partial!(ppu_threads),
             partial!(processes),
             stack_allocator.sync_term(),

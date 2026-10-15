@@ -1,0 +1,22 @@
+[test]
+name = "spu_raw_lifecycle"
+
+# A hardware probe: Raw SPU create and destroy against the pool
+# sys_spu_initialize sets, the Raw SPU interrupt, configuration and
+# recovery calls, and one run through the problem-state window and the
+# PU interrupt mailbox. The console capture is the answer; no emulator
+# runs it.
+
+[observe]
+# 80 big-endian u32 words, in the order ppu/main.c lists: 320 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 320 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

@@ -19,6 +19,7 @@ pub mod host;
 pub mod image;
 pub mod ppu_thread;
 pub mod prx_registry;
+pub mod raw_spu;
 pub mod request;
 pub mod spu_stop;
 pub mod sync_primitives;

@@ -331,6 +331,12 @@ impl Runtime {
                 self.step_woke_others = !suspended;
                 self.handle_spu_group_suspension(source, units, suspended);
             }
+            Lv2Dispatch::RawSpuCreate { id, effects } => {
+                self.handle_raw_spu_create(source, id, effects);
+            }
+            Lv2Dispatch::RawSpuDestroy { unit } => {
+                self.handle_raw_spu_destroy(source, unit);
+            }
             Lv2Dispatch::ProcessExitChild { pid, code, effects } => {
                 self.handle_process_exit_child(source, pid, code, effects);
             }

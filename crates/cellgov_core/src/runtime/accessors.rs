@@ -151,7 +151,8 @@ impl Runtime {
         self.lv2_direct_committed_writes
     }
 
-    /// Invoked when `Lv2Dispatch::RegisterSpu` fires during `commit_step`.
+    /// Invoked when `Lv2Dispatch::RegisterSpu` or
+    /// `Lv2Dispatch::RawSpuCreate` fires during `commit_step`.
     pub fn set_spu_factory<F>(&mut self, factory: F)
     where
         F: Fn(

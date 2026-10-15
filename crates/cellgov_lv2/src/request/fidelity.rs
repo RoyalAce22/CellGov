@@ -239,6 +239,21 @@ impl Lv2RequestKind {
             | Lv2RequestKind::SpuThreadGroupConnectEventAllThreads
             | Lv2RequestKind::SpuThreadGroupDisconnectEventAllThreads
             | Lv2RequestKind::SpuInitialize => Modeled,
+            Lv2RequestKind::RawSpuCreate
+            | Lv2RequestKind::RawSpuDestroy
+            | Lv2RequestKind::RawSpuCreateInterruptTag
+            | Lv2RequestKind::RawSpuSetIntMask
+            | Lv2RequestKind::RawSpuGetIntMask
+            | Lv2RequestKind::RawSpuRecoverPageFault => Modeled,
+            // The interrupt status, the PU interrupt mailbox and SPU_Cfg
+            // are stored and served, but the SPU neither sets nor reads
+            // them yet: a Raw SPU runs only through its problem-state
+            // window, which CellGov does not map.
+            Lv2RequestKind::RawSpuSetSpuCfg
+            | Lv2RequestKind::RawSpuGetSpuCfg
+            | Lv2RequestKind::RawSpuSetIntStat
+            | Lv2RequestKind::RawSpuGetIntStat
+            | Lv2RequestKind::RawSpuReadPuintMb => PartialState,
             // Declared divergence: the priority is validated, stored and
             // served, and decides nothing. On the console it picks which
             // scheduler-context groups get SPUs when they want more than

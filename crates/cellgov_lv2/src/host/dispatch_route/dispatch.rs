@@ -815,6 +815,43 @@ impl Lv2Host {
                 max_usable_spu,
                 max_raw_spu,
             } => self.dispatch_spu_initialize(max_usable_spu, max_raw_spu),
+            Lv2Request::RawSpuCreate { id_ptr, .. } => {
+                self.dispatch_raw_spu_create(id_ptr, requester, rt, tick)
+            }
+            Lv2Request::RawSpuDestroy { id } => self.dispatch_raw_spu_destroy(id),
+            Lv2Request::RawSpuCreateInterruptTag {
+                id, class, tag_ptr, ..
+            } => {
+                self.dispatch_raw_spu_create_interrupt_tag(id, class, tag_ptr, requester, rt, tick)
+            }
+            Lv2Request::RawSpuSetIntMask { id, class, mask } => {
+                self.dispatch_raw_spu_set_int_mask(id, class, mask)
+            }
+            Lv2Request::RawSpuGetIntMask {
+                id,
+                class,
+                mask_ptr,
+            } => self.dispatch_raw_spu_get_int_mask(id, class, mask_ptr, requester, rt, tick),
+            Lv2Request::RawSpuSetIntStat { id, class, stat } => {
+                self.dispatch_raw_spu_set_int_stat(id, class, stat)
+            }
+            Lv2Request::RawSpuGetIntStat {
+                id,
+                class,
+                stat_ptr,
+            } => self.dispatch_raw_spu_get_int_stat(id, class, stat_ptr, requester, rt, tick),
+            Lv2Request::RawSpuReadPuintMb { id, value_ptr } => {
+                self.dispatch_raw_spu_read_puint_mb(id, value_ptr, requester, rt, tick)
+            }
+            Lv2Request::RawSpuSetSpuCfg { id, value } => {
+                self.dispatch_raw_spu_set_spu_cfg(id, value)
+            }
+            Lv2Request::RawSpuGetSpuCfg { id, value_ptr } => {
+                self.dispatch_raw_spu_get_spu_cfg(id, value_ptr, requester, rt, tick)
+            }
+            Lv2Request::RawSpuRecoverPageFault { id } => {
+                self.dispatch_raw_spu_recover_page_fault(id)
+            }
             Lv2Request::ProcessGetNumberOfObject {
                 class_id,
                 count_out_ptr,

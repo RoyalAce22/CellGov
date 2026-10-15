@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
-use cellgov_lv2::{PendingResponse, SpuInitState};
+use cellgov_lv2::{PendingResponse, SpuInitState, SpuLoadImage};
 use cellgov_trace::HostWriter;
 
 use crate::runtime::Runtime;
@@ -127,38 +127,102 @@ impl Runtime {
                 "record_spu rejected a freshly allocated unit: dispatch-layer \
                  corruption in the RegisterSpu path",
             );
-            /// SPU Read Inbound Mailbox depth is 4 per
-            /// [CBE-Handbook p:533 s:19.6 Table 19-15]; we use it
-            /// as the default capacity for dispatch-allocated
-            /// mailboxes until the SPU exec layer differentiates
-            /// outbound (depth 1) from inbound (depth 4).
-            const SPU_INBOUND_MBOX_DEPTH: usize = 4;
-            let inserted = self.mailbox_registry.register_at(
-                cellgov_sync::MailboxId::new(uid.raw()),
-                SPU_INBOUND_MBOX_DEPTH,
-            );
-            if !inserted {
-                // Collision means the dispatch layer reused a
-                // UnitId that already had a mailbox -- SPU
-                // mailbox state would silently cross-talk
-                // between units.
-                self.lv2_host.log_invariant_break(
-                    "runtime.register_spu_mailbox_id_collision",
-                    format_args!(
-                        "{uid:?} reused a live mailbox slot, so SPU mailbox state can cross \
-                             between two units; every anchor needs revalidation if this fires"
-                    ),
-                );
-                debug_assert!(
-                    inserted,
-                    "RegisterSpu for UnitId({:?}) found an existing mailbox; \
-                         the dispatch layer must allocate a fresh unit id per SPU",
-                    uid.raw()
-                );
-            }
+            self.register_spu_inbound_mailbox(uid);
         }
         self.step_woke_others = true;
         self.deliver_syscall_return(source, code);
+    }
+
+    /// Give the new SPU `uid` its inbound mailbox, which shares its id.
+    fn register_spu_inbound_mailbox(&mut self, uid: UnitId) {
+        /// SPU Read Inbound Mailbox depth is 4 per
+        /// [CBE-Handbook p:533 s:19.6 Table 19-15]; we use it
+        /// as the default capacity for dispatch-allocated
+        /// mailboxes until the SPU exec layer differentiates
+        /// outbound (depth 1) from inbound (depth 4).
+        const SPU_INBOUND_MBOX_DEPTH: usize = 4;
+        let inserted = self.mailbox_registry.register_at(
+            cellgov_sync::MailboxId::new(uid.raw()),
+            SPU_INBOUND_MBOX_DEPTH,
+        );
+        if !inserted {
+            // Collision means the dispatch layer reused a
+            // UnitId that already had a mailbox -- SPU
+            // mailbox state would silently cross-talk
+            // between units.
+            self.lv2_host.log_invariant_break(
+                "runtime.register_spu_mailbox_id_collision",
+                format_args!(
+                    "{uid:?} reused a live mailbox slot, so SPU mailbox state can cross \
+                         between two units; every anchor needs revalidation if this fires"
+                ),
+            );
+            debug_assert!(
+                inserted,
+                "SPU registration for UnitId({:?}) found an existing mailbox; \
+                     the dispatch layer must allocate a fresh unit id per SPU",
+                uid.raw()
+            );
+        }
+    }
+
+    /// Registers the SPU of the new Raw SPU `id`, stopped with an empty
+    /// local store, and enters it in the host's Raw SPU table.
+    ///
+    /// A Raw SPU runs only once its problem-state run control starts it.
+    pub(super) fn handle_raw_spu_create(&mut self, source: UnitId, id: u32, effects: Vec<Effect>) {
+        let Some(factory) = &self.spu_factory else {
+            self.lv2_host.log_invariant_break(
+                "runtime.spu_factory_missing",
+                format_args!("Raw SPU {id} created without a factory"),
+            );
+            return self
+                .deliver_syscall_return(source, cellgov_ps3_abi::lv2::errno::CELL_ENOSYS.into());
+        };
+        let init = SpuInitState {
+            image: SpuLoadImage::Segments(Vec::new()),
+            entry_pc: 0,
+            stack_ptr: 0,
+            args: [0; 4],
+            group_id: 0,
+        };
+        let uid = match self
+            .registry
+            .try_register_dynamic(&|uid| factory(uid, init.clone()))
+        {
+            Ok(uid) => uid,
+            Err(reason) => {
+                self.lv2_host.log_invariant_break(
+                    "runtime.raw_spu_unit_failed",
+                    format_args!("Raw SPU {id}: the factory refused an empty image: {reason}"),
+                );
+                return self.deliver_syscall_return(
+                    source,
+                    cellgov_ps3_abi::lv2::errno::CELL_ENOMEM.into(),
+                );
+            }
+        };
+        if let Err(err) = self.request_unit_stop(uid) {
+            self.lv2_host.log_invariant_break(
+                "runtime.raw_spu_stop_failed",
+                format_args!("Raw SPU {id} ({uid:?}) refused its stop at create: {err}"),
+            );
+        }
+        self.register_spu_inbound_mailbox(uid);
+        self.lv2_host.record_raw_spu(id, uid);
+        let caller_space = self.spaces.space_of(source);
+        self.apply_lv2_effects(&effects, caller_space);
+        self.deliver_syscall_return(source, 0);
+    }
+
+    /// Finishes the SPU of a destroyed Raw SPU.
+    pub(super) fn handle_raw_spu_destroy(&mut self, source: UnitId, unit: UnitId) {
+        self.registry
+            .set_status_override(unit, UnitStatus::Finished);
+        // A deadline left behind would wake a finished unit.
+        self.timer_wakes.cancel(unit);
+        let _ = self.syscall_responses.try_take(unit);
+        self.deliver_syscall_return(source, 0);
     }
 
     /// Finishes the SPUs of a terminated group and wakes the group's joiners.

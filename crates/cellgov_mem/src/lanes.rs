@@ -186,6 +186,10 @@ pub mod source {
     pub const MFC_INVALID_COMMAND: u8 = 61;
     /// The SPU pool limits `sys_spu_initialize` sets.
     pub const SPU_LIMITS: u8 = 62;
+    /// Raw SPUs, one object per Raw SPU id.
+    pub const RAW_SPU: u8 = 63;
+    /// The Raw SPU interrupt-tag counter.
+    pub const RAW_SPU_TAGS: u8 = 64;
 }
 
 const OBJECT_BITS: u32 = 32;

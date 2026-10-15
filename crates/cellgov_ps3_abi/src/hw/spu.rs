@@ -514,6 +514,26 @@ impl MfcCmd {
     }
 }
 
+/// `SPU_Out_Mbox`'s offset in an SPE's problem-state area.
+///
+/// [CBEA p:98 s:8.6.1] SPU_Out_Mbox is at offset x'04004' of the SPE's problem-state area.
+pub const SPU_OUT_MBOX_OFFSET: u32 = 0x04004;
+/// `SPU_Mbox_Stat`'s offset in an SPE's problem-state area.
+///
+/// [CBEA p:100 s:8.6.3] SPU_Mbox_Stat is at offset x'04014' of the SPE's problem-state area.
+pub const SPU_MBOX_STAT_OFFSET: u32 = 0x04014;
+/// `SPU_RunCntl`'s offset in an SPE's problem-state area.
+///
+/// [CBEA p:92 s:8.5.1] SPU_RunCntl is at offset x'0401C' of the SPE's problem-state area.
+pub const SPU_RUN_CNTL_OFFSET: u32 = 0x0401C;
+/// `SPU_Status`'s offset in an SPE's problem-state area.
+///
+/// [CBEA p:93 s:8.5.2] SPU_Status is at offset x'04024' of the SPE's problem-state area.
+pub const SPU_STATUS_OFFSET: u32 = 0x04024;
+/// `SPU_NPC`'s offset in an SPE's problem-state area.
+///
+/// [CBEA p:96 s:8.5.3] SPU_NPC is at offset x'04034' of the SPE's problem-state area.
+pub const SPU_NPC_OFFSET: u32 = 0x04034;
 /// `SPU_In_Mbox`'s offset in an SPE's problem-state area.
 ///
 /// [CBEA p:99 s:8.6.2] SPU_In_Mbox is at offset x'0400C' of the SPE's problem-state area.

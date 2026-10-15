@@ -472,8 +472,9 @@ pub enum SetLimitsError {
         /// The requested Raw SPU count.
         max_raw: u32,
     },
-    /// -> `CELL_EBUSY`: the groups that exist do not fit the new split.
-    #[error("the existing thread groups do not fit max_raw_spu {max_raw}")]
+    /// -> `CELL_EBUSY`: the groups or the Raw SPUs that exist do not fit
+    /// the new split.
+    #[error("the existing thread groups or Raw SPUs do not fit max_raw_spu {max_raw}")]
     Busy {
         /// The requested Raw SPU count.
         max_raw: u32,
@@ -661,15 +662,17 @@ impl ThreadGroupTable {
     }
 
     /// Set aside `max_raw` physical SPUs for Raw SPUs, as
-    /// `sys_spu_initialize` does.
+    /// `sys_spu_initialize` does, while `live_raw` Raw SPUs exist.
     ///
     /// # Errors
     /// See [`SetLimitsError`]; an error keeps the old split.
-    pub fn set_raw_limit(&mut self, max_raw: u32) -> Result<(), SetLimitsError> {
+    // The console capture of tests/micro/spu_raw_lifecycle answers
+    // CELL_EBUSY to a limit of 1 while two Raw SPUs exist.
+    pub fn set_raw_limit(&mut self, max_raw: u32, live_raw: u32) -> Result<(), SetLimitsError> {
         if max_raw > pool::RAW_SPU_MAX {
             return Err(SetLimitsError::Invalid { max_raw });
         }
-        if !self.occupied().fits(pool::USABLE_SPUS - max_raw) {
+        if live_raw > max_raw || !self.occupied().fits(pool::USABLE_SPUS - max_raw) {
             return Err(SetLimitsError::Busy { max_raw });
         }
         self.max_raw = max_raw;

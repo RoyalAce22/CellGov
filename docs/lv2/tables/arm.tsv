@@ -91,6 +91,17 @@ PrxRegisterModule	modeled	484
 PrxStartModule	partial-state	481
 PrxStopModule	partial-state	482
 PrxUnloadModule	partial-state	483
+RawSpuCreate	modeled	160
+RawSpuCreateInterruptTag	modeled	150
+RawSpuDestroy	modeled	161
+RawSpuGetIntMask	modeled	152
+RawSpuGetIntStat	partial-state	154
+RawSpuGetSpuCfg	partial-state	197
+RawSpuReadPuintMb	partial-state	163
+RawSpuRecoverPageFault	modeled	199
+RawSpuSetIntMask	modeled	151
+RawSpuSetIntStat	partial-state	153
+RawSpuSetSpuCfg	partial-state	196
 RsxAttribute	abi-only	677
 RwlockCreate	abi-only	120
 RwlockDestroy	abi-only	121

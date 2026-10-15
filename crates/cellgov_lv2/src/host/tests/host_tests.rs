@@ -375,6 +375,8 @@ fn multi_primitive_determinism_canary() {
                 Lv2Dispatch::SpuGroupTerminate { group_id, .. } => {
                     format!("Terminate({group_id:#x})")
                 }
+                Lv2Dispatch::RawSpuCreate { id, .. } => format!("RawCreate({id})"),
+                Lv2Dispatch::RawSpuDestroy { .. } => "RawDestroy".into(),
                 Lv2Dispatch::SpuGroupSuspension { suspended, .. } => {
                     format!("Suspension({suspended})")
                 }

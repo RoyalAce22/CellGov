@@ -309,6 +309,50 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             max_usable_spu: p!(0),
             max_raw_spu: p!(1),
         },
+        syscall::RAW_SPU_CREATE => Lv2Request::RawSpuCreate {
+            id_ptr: p!(0),
+            attr_ptr: p!(1),
+        },
+        syscall::RAW_SPU_DESTROY => Lv2Request::RawSpuDestroy { id: p!(0) },
+        syscall::RAW_SPU_CREATE_INTERRUPT_TAG => Lv2Request::RawSpuCreateInterruptTag {
+            id: p!(0),
+            class: p!(1),
+            hw_thread: args[2],
+            tag_ptr: p!(3),
+        },
+        syscall::RAW_SPU_SET_INT_MASK => Lv2Request::RawSpuSetIntMask {
+            id: p!(0),
+            class: p!(1),
+            mask: args[2],
+        },
+        syscall::RAW_SPU_GET_INT_MASK => Lv2Request::RawSpuGetIntMask {
+            id: p!(0),
+            class: p!(1),
+            mask_ptr: p!(2),
+        },
+        syscall::RAW_SPU_SET_INT_STAT => Lv2Request::RawSpuSetIntStat {
+            id: p!(0),
+            class: p!(1),
+            stat: args[2],
+        },
+        syscall::RAW_SPU_GET_INT_STAT => Lv2Request::RawSpuGetIntStat {
+            id: p!(0),
+            class: p!(1),
+            stat_ptr: p!(2),
+        },
+        syscall::RAW_SPU_READ_PUINT_MB => Lv2Request::RawSpuReadPuintMb {
+            id: p!(0),
+            value_ptr: p!(1),
+        },
+        syscall::RAW_SPU_SET_SPU_CFG => Lv2Request::RawSpuSetSpuCfg {
+            id: p!(0),
+            value: p!(1),
+        },
+        syscall::RAW_SPU_GET_SPU_CFG => Lv2Request::RawSpuGetSpuCfg {
+            id: p!(0),
+            value_ptr: p!(1),
+        },
+        syscall::RAW_SPU_RECOVER_PAGE_FAULT => Lv2Request::RawSpuRecoverPageFault { id: p!(0) },
         syscall::TIMER_CREATE => Lv2Request::TimerCreate { id_ptr: p!(0) },
         syscall::TIMER_DESTROY => Lv2Request::TimerDestroy { id: p!(0) },
         syscall::RWLOCK_CREATE => Lv2Request::RwlockCreate {

@@ -52,6 +52,56 @@ pub mod thread_window {
     pub const PROBLEM_STATE: u64 = 0x4_0000;
 }
 
+/// The effective-address window in which LV2 maps each Raw SPU: Raw SPU
+/// `id` takes `STRIDE` bytes from `BASE + id * STRIDE`, its local store
+/// first and its problem-state area at `PROBLEM_STATE`.
+// No public document gives this layout; the open PS3 toolchain's
+// sys/spu.h names the same three values, and its problem-storage
+// accessors reach the registers there. The console capture of
+// tests/micro/spu_raw_status runs a Raw SPU through them.
+pub mod raw_window {
+    /// The window's first effective address.
+    pub const BASE: u64 = 0xE000_0000;
+    /// The bytes each Raw SPU takes.
+    pub const STRIDE: u64 = 0x10_0000;
+    /// The offset of a Raw SPU's problem-state area; its local store is
+    /// at offset 0.
+    pub const PROBLEM_STATE: u64 = 0x4_0000;
+}
+
+/// The arguments the Raw SPU calls (150-154, 160, 161, 163, 196, 197,
+/// 199) take and the values they hand back.
+// The console capture of tests/micro/spu_raw_lifecycle shows each one.
+pub mod raw_spu {
+    /// An interrupt class whose tag, mask and status a process may
+    /// reach: class 0, the error interrupts.
+    ///
+    /// [CBEA p:274 s:21.7.1] class 0 holds the SPU error, DMA command and DMA alignment interrupts.
+    pub const CLASS_ERROR: u32 = 0;
+    /// The other class a process may reach: class 2, the application
+    /// interrupts. Class 1 belongs to the kernel, and a call naming it
+    /// answers `CELL_EINVAL`.
+    ///
+    /// [CBEA p:275 s:21.7.2] class 1 holds the MFC translation and address-compare interrupts.
+    /// [CBEA p:276 s:21.7.3] class 2 holds the mailbox, stop-and-signal and tag-group interrupts.
+    pub const CLASS_APPLICATION: u32 = 2;
+    /// The `SPU_Cfg` bits `sys_raw_spu_set_spu_cfg` keeps; the console
+    /// reads back 0 after a write of 4.
+    ///
+    /// [CBEA p:239 s:16.4] bits 62 and 63 of SPU_Cfg, its two lowest bits, set the two signal-notification modes.
+    pub const CFG_MASK: u32 = 0x3;
+    /// The class 2 status bit B, the SPU mailbox threshold interrupt.
+    /// The console reads it set on a Raw SPU that never ran, and set
+    /// again straight after a write that clears every bit.
+    ///
+    /// [CBEA p:276 s:21.7.3] bit 59, B, is the SPU mailbox threshold interrupt status.
+    pub const INT_STAT_MAILBOX_THRESHOLD: u64 = 0x10;
+    /// The top byte of every interrupt tag the console hands back.
+    pub const INTERRUPT_TAG_KIND: u32 = 0x0A00_0000;
+    /// The distance between two interrupt tags created in turn.
+    pub const INTERRUPT_TAG_STEP: u32 = 0x100;
+}
+
 /// The 16-byte `sys_spu_image` record `sys_spu_thread_initialize`
 /// reads: `type`, `entry_point`, `segs`, `nsegs`, each a big-endian
 /// 32-bit word.

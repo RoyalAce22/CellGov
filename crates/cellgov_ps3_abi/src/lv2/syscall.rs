@@ -269,10 +269,26 @@ lv2_syscalls! {
     /// `sys_time_get_timebase_frequency`.
     TIME_GET_TIMEBASE_FREQUENCY = 147 => "sys_time_get_timebase_frequency";
 
+    /// `sys_raw_spu_create_interrupt_tag`.
+    RAW_SPU_CREATE_INTERRUPT_TAG = 150 => "sys_raw_spu_create_interrupt_tag";
+    /// `sys_raw_spu_set_int_mask`.
+    RAW_SPU_SET_INT_MASK = 151 => "sys_raw_spu_set_int_mask";
+    /// `sys_raw_spu_get_int_mask`.
+    RAW_SPU_GET_INT_MASK = 152 => "sys_raw_spu_get_int_mask";
+    /// `sys_raw_spu_set_int_stat`.
+    RAW_SPU_SET_INT_STAT = 153 => "sys_raw_spu_set_int_stat";
+    /// `sys_raw_spu_get_int_stat`.
+    RAW_SPU_GET_INT_STAT = 154 => "sys_raw_spu_get_int_stat";
     /// `sys_spu_image_open`.
     SPU_IMAGE_OPEN = 156 => "sys_spu_image_open";
     /// `sys_spu_image_import`.
     SPU_IMAGE_IMPORT = 158 => "sys_spu_image_import";
+    /// `sys_raw_spu_create`.
+    RAW_SPU_CREATE = 160 => "sys_raw_spu_create";
+    /// `sys_raw_spu_destroy`.
+    RAW_SPU_DESTROY = 161 => "sys_raw_spu_destroy";
+    /// `sys_raw_spu_read_puint_mb`.
+    RAW_SPU_READ_PUINT_MB = 163 => "sys_raw_spu_read_puint_mb";
     /// `sys_spu_thread_get_exit_status`.
     SPU_THREAD_GET_EXIT_STATUS = 165 => "sys_spu_thread_get_exit_status";
     /// `sys_spu_thread_set_argument`.
@@ -330,6 +346,12 @@ lv2_syscalls! {
     SPU_THREAD_BIND_QUEUE = 193 => "sys_spu_thread_bind_queue";
     /// `sys_spu_thread_unbind_queue`.
     SPU_THREAD_UNBIND_QUEUE = 194 => "sys_spu_thread_unbind_queue";
+    /// `sys_raw_spu_set_spu_cfg`.
+    RAW_SPU_SET_SPU_CFG = 196 => "sys_raw_spu_set_spu_cfg";
+    /// `sys_raw_spu_get_spu_cfg`.
+    RAW_SPU_GET_SPU_CFG = 197 => "sys_raw_spu_get_spu_cfg";
+    /// `sys_raw_spu_recover_page_fault`.
+    RAW_SPU_RECOVER_PAGE_FAULT = 199 => "sys_raw_spu_recover_page_fault";
     /// `sys_spu_thread_group_connect_event_all_threads`.
     SPU_THREAD_GROUP_CONNECT_EVENT_ALL_THREADS = 251 => "sys_spu_thread_group_connect_event_all_threads";
     /// `sys_spu_thread_group_disconnect_event_all_threads`.

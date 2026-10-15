@@ -26,6 +26,7 @@ mod mutex;
 mod observability;
 mod ppu_thread;
 mod process;
+mod raw_spu;
 pub mod rsx;
 mod runtime;
 mod semaphore;

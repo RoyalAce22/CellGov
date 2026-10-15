@@ -872,6 +872,92 @@ pub enum Lv2Request {
         /// In: maximum number of raw SPUs.
         max_raw_spu: u32,
     },
+    /// `sys_raw_spu_create`.
+    RawSpuCreate {
+        /// Out: the new Raw SPU's id word.
+        id_ptr: u32,
+        /// In: the attribute pointer, which the kernel ignores.
+        attr_ptr: u32,
+    },
+    /// `sys_raw_spu_destroy`.
+    RawSpuDestroy {
+        /// In: Raw SPU id.
+        id: u32,
+    },
+    /// `sys_raw_spu_create_interrupt_tag`.
+    RawSpuCreateInterruptTag {
+        /// In: Raw SPU id.
+        id: u32,
+        /// In: interrupt class.
+        class: u32,
+        /// In: the hardware thread for the interrupt, which the kernel
+        /// ignores.
+        hw_thread: u64,
+        /// Out: the tag word.
+        tag_ptr: u32,
+    },
+    /// `sys_raw_spu_set_int_mask`.
+    RawSpuSetIntMask {
+        /// In: Raw SPU id.
+        id: u32,
+        /// In: interrupt class.
+        class: u32,
+        /// In: the new mask.
+        mask: u64,
+    },
+    /// `sys_raw_spu_get_int_mask`.
+    RawSpuGetIntMask {
+        /// In: Raw SPU id.
+        id: u32,
+        /// In: interrupt class.
+        class: u32,
+        /// Out: the 64-bit mask word.
+        mask_ptr: u32,
+    },
+    /// `sys_raw_spu_set_int_stat`.
+    RawSpuSetIntStat {
+        /// In: Raw SPU id.
+        id: u32,
+        /// In: interrupt class.
+        class: u32,
+        /// In: the status bits to clear.
+        stat: u64,
+    },
+    /// `sys_raw_spu_get_int_stat`.
+    RawSpuGetIntStat {
+        /// In: Raw SPU id.
+        id: u32,
+        /// In: interrupt class.
+        class: u32,
+        /// Out: the 64-bit status word.
+        stat_ptr: u32,
+    },
+    /// `sys_raw_spu_read_puint_mb`.
+    RawSpuReadPuintMb {
+        /// In: Raw SPU id.
+        id: u32,
+        /// Out: the mailbox word.
+        value_ptr: u32,
+    },
+    /// `sys_raw_spu_set_spu_cfg`.
+    RawSpuSetSpuCfg {
+        /// In: Raw SPU id.
+        id: u32,
+        /// In: the `SPU_Cfg` value.
+        value: u32,
+    },
+    /// `sys_raw_spu_get_spu_cfg`.
+    RawSpuGetSpuCfg {
+        /// In: Raw SPU id.
+        id: u32,
+        /// Out: the `SPU_Cfg` word.
+        value_ptr: u32,
+    },
+    /// `sys_raw_spu_recover_page_fault`.
+    RawSpuRecoverPageFault {
+        /// In: Raw SPU id.
+        id: u32,
+    },
     /// `sys_ppu_thread_yield`.
     PpuThreadYield,
     /// `sys_ppu_thread_start`.

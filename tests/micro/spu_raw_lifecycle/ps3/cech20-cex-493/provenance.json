@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "capture_id": "micro:spu_raw_lifecycle#6ca5b775f7dd",
+  "captured_at": "2026-10-05T16:29:25Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 65,
+      "fan_percent": 37
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "2e31ca4d1f4ea6bc0109850685e6aa162839401d",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/2e31ca4d1f4ea6bc0109850685e6aa162839401d"
+  },
+  "microtest": {
+    "name": "spu_raw_lifecycle",
+    "manifest_sha256": "c8234d4f6ae8e184e667ec9b3eb8e892fd33b2d0334d97cfda3a074f3967f274",
+    "sources": {
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "ba14ec3c62738bce8007004b391ad88a7fd3f06d20eccd6fe216ea7b7afff94d",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "e6ac0fa014e06f19ef68f1458937683caadd2b0a28c4c50f5fe8bc5af57f47f1",
+      "ppu/main.c": "b9e614edf6550a3c68f3c551156a10c225f69bb65a3bcc1e6b40c3d6f0861218",
+      "spu/main.S": "6023dcbad7c44d989e7a0c7904c21079a99fd34aa2c359eeb190930f155adaf5"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "2fd9beeefd125aad8abdc342cd2be09bac1b13815702dd9b92a3797a8eba7375",
+    "ps3_elf_sha256": "19dbed659eb36a53c41583a0ba6cc771a778640a4982c05c65eee8d740547846",
+    "reference_elf_sha256": "20af20b42288f39f34b1542a6f3c31ac9d07abb3271c4c15a247068d30d798b6",
+    "siblings": {
+      "spu_main.elf": "e116cf717ac49a10f00db888c9b84e9246ab6e78c61e962e15c92b8b69a1b0a5"
+    },
+    "param_sfo_sha256": "47e98546814210b5ee82264a2699e7d072fa3a1f0fb818e75073d7f68799c64e"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "6ca5b775f7dd3453d13b0273d2e221434f29f48c6b3fe322ce25c73d06bc8989",
+    "bytes": 328,
+    "result_path": "/dev_hdd0/tmp/cgov_spu_raw_lifecycle.bin"
+  },
+  "digest": "6ca5b775f7dd3453d13b0273d2e221434f29f48c6b3fe322ce25c73d06bc8989  micro:spu_raw_lifecycle  328",
+  "recapture_reason": "probe refuses a null tag pointer on an untagged Raw SPU and reads its class 2 status"
+}

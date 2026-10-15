@@ -8,6 +8,7 @@ use crate::fs_store::FsStore;
 use crate::image::ContentStore;
 use crate::ppu_thread::{PpuThreadId, PpuThreadTable, ThreadStackAllocator};
 use crate::prx_registry::LoadedPrxRegistry;
+use crate::raw_spu::RawSpuTable;
 use crate::sync_primitives::{
     CondTable, EventFlagTable, EventPortTable, EventQueueTable, LwMutexTable, MutexTable,
     SemaphoreTable,
@@ -41,6 +42,9 @@ const _: () = assert!((FIRST_KERNEL_ID as u64) < PS3_SPU_RESERVED_BASE);
 pub(in crate::host) struct Lv2State {
     pub(in crate::host) content: ContentStore,
     pub(in crate::host) groups: ThreadGroupTable,
+    /// Raw SPUs (150-154, 160, 161, 163, 196, 197, 199); `groups` keeps
+    /// the limit `sys_spu_initialize` sets for them.
+    pub(in crate::host) raw_spus: RawSpuTable,
     pub(in crate::host) ppu_threads: PpuThreadTable,
     pub(in crate::host) stack_allocator: ThreadStackAllocator,
     /// Shared id allocator for mutex / semaphore / event-queue /
