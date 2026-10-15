@@ -7,6 +7,7 @@ mod errors;
 pub mod event_flag;
 pub mod event_port;
 pub mod event_queue;
+pub mod lwcond;
 pub mod lwmutex;
 pub mod mutex;
 pub mod semaphore;
@@ -26,6 +27,7 @@ pub use event_queue::{
     EventPayload, EventQueueEnqueueError, EventQueueEntry, EventQueueReceive, EventQueueSend,
     EventQueueTable, EventQueueWaiter,
 };
+pub use lwcond::{LwCondEntry, LwCondTable};
 pub use lwmutex::{
     LwMutexAcquire, LwMutexAcquireOrEnqueue, LwMutexEnqueueError, LwMutexEntry, LwMutexIdAllocator,
     LwMutexRelease, LwMutexTable,

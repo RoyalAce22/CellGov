@@ -42,6 +42,11 @@ FsStat	modeled	808
 FsWrite	partial-state	803
 GamepadYconIf	abi-only	621
 HidIsRoot	modeled	512
+LwCondCreate	modeled	111
+LwCondDestroy	modeled	112
+LwCondQueueWait	modeled	113
+LwCondSignal	modeled	115
+LwCondSignalAll	modeled	116
 LwMutexCreate	modeled	95
 LwMutexDestroy	modeled	96
 LwMutexLock	modeled	97
@@ -83,6 +88,7 @@ ProcessGetStatus	partial-state	4
 ProcessIsSpuLockLineReservationAddress	partial-state	14
 ProcessIsStack	modeled	none
 ProcessSpawn	partial-state	21,27
+PrxGetModuleIdByName	modeled	496
 PrxGetModuleList	partial-state	494
 PrxLoadModule	partial-state	480
 PrxLoadModuleOnMemcontainer	partial-state	497

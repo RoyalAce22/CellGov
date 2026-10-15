@@ -185,13 +185,18 @@ ordinal	packet	name	source	ref	fw_from	fw_to
 110	none	sys_cond_signal_to	cellgov	cellgov_ps3_abi::lv2::syscall::COND_SIGNAL_TO	none	none
 110	none	sys_cond_signal_to	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 110	none	sys_cond_signal_to	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_COND_SIGNAL_TO	none	none
+111	none	_sys_lwcond_create	cellgov	cellgov_ps3_abi::lv2::syscall::LWCOND_CREATE	none	none
 111	none	_sys_lwcond_create	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
+112	none	_sys_lwcond_destroy	cellgov	cellgov_ps3_abi::lv2::syscall::LWCOND_DESTROY	none	none
 112	none	_sys_lwcond_destroy	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
+113	none	_sys_lwcond_queue_wait	cellgov	cellgov_ps3_abi::lv2::syscall::LWCOND_QUEUE_WAIT	none	none
 113	none	_sys_lwcond_queue_wait	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 114	none	sys_semaphore_get_value	cellgov	cellgov_ps3_abi::lv2::syscall::SEMAPHORE_GET_VALUE	none	none
 114	none	sys_semaphore_get_value	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 114	none	sys_semaphore_get_value	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_SEMAPHORE_GET_VALUE	none	none
+115	none	_sys_lwcond_signal	cellgov	cellgov_ps3_abi::lv2::syscall::LWCOND_SIGNAL	none	none
 115	none	_sys_lwcond_signal	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
+116	none	_sys_lwcond_signal_all	cellgov	cellgov_ps3_abi::lv2::syscall::LWCOND_SIGNAL_ALL	none	none
 116	none	_sys_lwcond_signal_all	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 117	none	_sys_lwmutex_unlock2	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 118	none	sys_event_flag_clear	cellgov	cellgov_ps3_abi::lv2::syscall::EVENT_FLAG_CLEAR	none	none
@@ -616,6 +621,7 @@ ordinal	packet	name	source	ref	fw_from	fw_to
 494	none	sys_prx_get_module_list	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_PRX_GET_MODULE_LIST	none	none
 495	none	sys_prx_get_module_info	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 495	none	sys_prx_get_module_info	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_PRX_GET_MODULE_INFO	none	none
+496	none	_sys_prx_get_module_id_by_name	cellgov	cellgov_ps3_abi::lv2::syscall::SYS_PRX_GET_MODULE_ID_BY_NAME	none	none
 496	none	sys_prx_get_module_id_by_name	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 496	none	sys_prx_get_module_id_by_name	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_PRX_GET_MODULE_ID_BY_NAME	none	none
 497	none	_sys_prx_load_module_on_memcontainer	cellgov	cellgov_ps3_abi::lv2::syscall::SYS_PRX_LOAD_MODULE_ON_MEMCONTAINER	none	none

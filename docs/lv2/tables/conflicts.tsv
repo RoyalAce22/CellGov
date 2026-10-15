@@ -76,6 +76,9 @@ ordinal	packet	name	source	disagreement
 494	none	_sys_prx_get_module_list	cellgov	spelling
 494	none	sys_prx_get_module_list	psdevwiki	spelling
 494	none	sys_prx_get_module_list	psl1ght	spelling
+496	none	_sys_prx_get_module_id_by_name	cellgov	spelling
+496	none	sys_prx_get_module_id_by_name	psdevwiki	spelling
+496	none	sys_prx_get_module_id_by_name	psl1ght	spelling
 497	none	_sys_prx_load_module_on_memcontainer	cellgov	spelling
 497	none	sys_prx_load_module_on_memcontainer	psdevwiki	spelling
 497	none	sys_prx_load_module_on_memcontainer	psl1ght	spelling

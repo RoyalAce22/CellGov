@@ -186,7 +186,7 @@ stateDiagram-v2
 
 **The scheduler sees only the opaque `UnitStatus::Blocked`.** The
 guest-facing `GuestBlockReason` lives next to the thread table. Its
-variants cover every LV2 primitive that parks a caller:
+variants cover these LV2 primitives:
 
 - `WaitingOnJoin`
 - `WaitingOnLwMutex`

@@ -118,6 +118,21 @@ impl Lv2Host {
                 mutex_id,
                 mutex_kind,
             } => self.expire_cond_wait(id, mutex_id, mutex_kind, requester, thread),
+            // The waiter is on one of two lists:
+            // - the lwcond's waiter list;
+            // - the lwmutex's sleep queue, after an owner's signal moved it.
+            // The timeout removes it and returns ETIMEDOUT without the
+            // lwmutex. liblv2.prx's wait wrapper then locks the lwmutex
+            // itself before it returns ETIMEDOUT.
+            Lv2BlockReason::LwCond { id, lwmutex_id } => {
+                if !self.state.lwconds.remove_waiter(id, thread)
+                    && !self.state.lwmutexes.remove_waiter(lwmutex_id, thread)
+                {
+                    return self.expire_missing_waiter("lwcond", id, requester);
+                }
+                self.note_expiry("lwcond");
+                timed_out_wake(requester)
+            }
             Lv2BlockReason::ThreadGroupJoin { .. }
             | Lv2BlockReason::PpuThreadJoin { .. }
             | Lv2BlockReason::Uart

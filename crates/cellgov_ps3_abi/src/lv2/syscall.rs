@@ -240,8 +240,18 @@ lv2_syscalls! {
     /// `sys_cond_signal_to`.
     COND_SIGNAL_TO = 110 => "sys_cond_signal_to";
 
+    /// `_sys_lwcond_create`.
+    LWCOND_CREATE = 111 => "_sys_lwcond_create";
+    /// `_sys_lwcond_destroy`.
+    LWCOND_DESTROY = 112 => "_sys_lwcond_destroy";
+    /// `_sys_lwcond_queue_wait`.
+    LWCOND_QUEUE_WAIT = 113 => "_sys_lwcond_queue_wait";
     /// `sys_semaphore_get_value`.
     SEMAPHORE_GET_VALUE = 114 => "sys_semaphore_get_value";
+    /// `_sys_lwcond_signal`.
+    LWCOND_SIGNAL = 115 => "_sys_lwcond_signal";
+    /// `_sys_lwcond_signal_all`.
+    LWCOND_SIGNAL_ALL = 116 => "_sys_lwcond_signal_all";
 
     /// `sys_event_flag_cancel`.
     EVENT_FLAG_CANCEL = 132 => "sys_event_flag_cancel";
@@ -552,6 +562,8 @@ lv2_syscalls! {
     PPU_THREAD_GET_PRIORITY = 48 => "sys_ppu_thread_get_priority";
     /// `_sys_prx_get_module_list`.
     SYS_PRX_GET_MODULE_LIST = 494 => "_sys_prx_get_module_list";
+    /// `_sys_prx_get_module_id_by_name`.
+    SYS_PRX_GET_MODULE_ID_BY_NAME = 496 => "_sys_prx_get_module_id_by_name";
     /// `sys_event_port_connect_local`.
     EVENT_PORT_CONNECT_LOCAL = 136 => "sys_event_port_connect_local";
     /// `sys_event_port_disconnect`.

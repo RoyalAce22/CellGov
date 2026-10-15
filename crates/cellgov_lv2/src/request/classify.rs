@@ -695,6 +695,29 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             id: p!(0),
             target_thread: p!(1),
         },
+        syscall::LWCOND_CREATE => Lv2Request::LwCondCreate {
+            id_ptr: p!(0),
+            lwmutex_id: p!(1),
+            control_ptr: p!(2),
+            name: args[3],
+        },
+        syscall::LWCOND_DESTROY => Lv2Request::LwCondDestroy { id: p!(0) },
+        syscall::LWCOND_QUEUE_WAIT => Lv2Request::LwCondQueueWait {
+            id: p!(0),
+            lwmutex_id: p!(1),
+            timeout: args[2],
+        },
+        syscall::LWCOND_SIGNAL => Lv2Request::LwCondSignal {
+            id: p!(0),
+            lwmutex_id: p!(1),
+            ppu_thread_id: p!(2),
+            mode: p!(3),
+        },
+        syscall::LWCOND_SIGNAL_ALL => Lv2Request::LwCondSignalAll {
+            id: p!(0),
+            lwmutex_id: p!(1),
+            mode: p!(2),
+        },
         syscall::MEMORY_ALLOCATE => Lv2Request::MemoryAllocate {
             size: args[0],
             flags: args[1],

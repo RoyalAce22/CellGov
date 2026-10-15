@@ -3,9 +3,9 @@
     "kind": "first_rsx_write"
   },
   "outcome": "RsxWriteCheckpoint",
-  "steps": 37201,
+  "steps": 37241,
   "budget": 256,
-  "host_invariant_breaks": 5,
+  "host_invariant_breaks": 8,
   "witnesses": {
     "cond_reacquires": {
       "value": 0,
@@ -28,15 +28,15 @@
       "class": "absent"
     },
     "host_invariant_breaks": {
-      "value": 5,
+      "value": 8,
       "class": "exact"
     },
     "ldarx": {
-      "value": 9818,
+      "value": 9821,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 9823,
+      "value": 9820,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -104,15 +104,15 @@
       "class": "absent"
     },
     "spu_thread_init": {
-      "value": 5,
+      "value": 6,
       "class": "at-least"
     },
     "stdcx": {
-      "value": 9818,
+      "value": 9821,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 9822,
+      "value": 9819,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -168,18 +168,12 @@
       "class": "at-least"
     },
     "unsupported_syscalls_distinct": {
-      "value": 1,
+      "value": 0,
       "class": "exact"
     },
     "vrsave_written": {
       "value": 0,
       "class": "exact"
-    }
-  },
-  "unsupported_syscalls": {
-    "496": {
-      "hits": 1,
-      "first_hit": 9195359
     }
   },
   "firmware": {

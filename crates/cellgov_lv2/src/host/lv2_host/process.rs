@@ -74,13 +74,17 @@ impl Lv2Host {
         if threads.is_empty() {
             return;
         }
-        let purges: [(&'static str, usize); 9] = [
+        let purges: [(&'static str, usize); 10] = [
             ("mutex", self.state.mutexes.purge_waiters_of(&threads).len()),
             (
                 "lwmutex",
                 self.state.lwmutexes.purge_waiters_of(&threads).len(),
             ),
             ("cond", self.state.conds.purge_waiters_of(&threads).len()),
+            (
+                "lwcond",
+                self.state.lwconds.purge_waiters_of(&threads).len(),
+            ),
             (
                 "semaphore",
                 self.state.semaphores.purge_waiters_of(&threads).len(),

@@ -1,4 +1,5 @@
-//! The `_sys_prx_get_module_list` arm and the big-endian write it stages.
+//! The `_sys_prx_get_module_list` and `_sys_prx_get_module_id_by_name`
+//! arms, and the big-endian write the first stages.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
@@ -197,5 +198,59 @@ impl Lv2Host {
             tick,
         ));
         Lv2Dispatch::Immediate { code: 0, effects }
+    }
+
+    /// `_sys_prx_get_module_id_by_name` (496): the id of the loaded
+    /// module whose module-info name is the string at `args[0]`.
+    ///
+    /// The call reads at most [`MODULE_NAME_MAX`] bytes and compares
+    /// them with each name up to a NUL. It reads only the low word of
+    /// the name pointer. The `lv2_prx_module_id_by_name` console capture
+    /// shows this: a pointer with bit 32 set finds the module its low
+    /// word names. The call ignores `flags` and the option pointer.
+    ///
+    /// libsre.sprx asks for a module that is not loaded, and takes only
+    /// `CELL_PRX_ERROR_UNKNOWN_MODULE` as "not loaded". Any other error
+    /// stops its SPURS initialize.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` when the name pointer is NULL or names no
+    ///   readable byte.
+    /// - `CELL_PRX_ERROR_UNKNOWN_MODULE`, sign-extended like every
+    ///   error code, when no loaded module has the name.
+    ///
+    /// [`MODULE_NAME_MAX`]: cellgov_ps3_abi::lv2::prx::MODULE_NAME_MAX
+    pub(in crate::host::dispatch_route) fn dispatch_prx_get_module_id_by_name(
+        &mut self,
+        args: [u64; 8],
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        use cellgov_ps3_abi::lv2::prx::{CELL_PRX_ERROR_UNKNOWN_MODULE, MODULE_NAME_MAX};
+
+        let addr = args[0] & u64::from(u32::MAX);
+        if addr == 0 {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        let name: Vec<u8> = match rt.read_committed_until(addr, MODULE_NAME_MAX, 0) {
+            Some(prefix) => prefix.to_vec(),
+            None => match rt.read_committed(addr, MODULE_NAME_MAX) {
+                Some(bytes) => bytes.to_vec(),
+                None => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            },
+        };
+        let found = self.state.prx_registry.ids().find(|&id| {
+            self.state
+                .prx_registry
+                .lookup_by_id(id)
+                .is_some_and(|entry| {
+                    let own = entry.name().as_bytes();
+                    own[..own.len().min(MODULE_NAME_MAX)] == name[..]
+                })
+        });
+        match found {
+            Some(id) => Lv2Dispatch::immediate(u64::from(id)),
+            None => Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE as i32 as i64 as u64),
+        }
     }
 }

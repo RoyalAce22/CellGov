@@ -19,6 +19,7 @@ mod expire;
 mod fs;
 pub(crate) mod guest_struct;
 mod lv2_host;
+mod lwcond;
 mod lwmutex;
 mod memory;
 mod mmapper;

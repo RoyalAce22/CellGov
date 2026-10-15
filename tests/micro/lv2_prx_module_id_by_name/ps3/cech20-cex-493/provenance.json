@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "capture_id": "micro:lv2_prx_module_id_by_name#7f4aae716b86",
+  "captured_at": "2026-10-05T22:10:07Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 64,
+      "fan_percent": 38
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "0b5316cfb6959bac0ecbc356a1e1e8c77727ba3f",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/0b5316cfb6959bac0ecbc356a1e1e8c77727ba3f"
+  },
+  "microtest": {
+    "name": "lv2_prx_module_id_by_name",
+    "manifest_sha256": "31009dd3a6e9e619a58b781b255d9bee73953cb5ffb8cc072c2daa8b5e5c1a2d",
+    "sources": {
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "ba14ec3c62738bce8007004b391ad88a7fd3f06d20eccd6fe216ea7b7afff94d",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "753e6facab4fac23e12d1be4e44ac66cc09ecd155963ec273a2cb64d599247e6",
+      "ppu/main.c": "8831095b063bb6f483e8560062e65705e96efc691cd2b46bf77b8d16b23acd3f"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "5b95cfd56c43ec4896b60c5b223ca2f28d9f615e87b936ac9daa9335646d4697",
+    "ps3_elf_sha256": "9ab6c527f9a180f49086b928ff549c32312a0a762dfd0c36e276d5c4b78ff4eb",
+    "reference_elf_sha256": "f01488ddd628153b41c5a1992f143c3585b5a04fd2f51860c79dd326b212aa9f",
+    "siblings": {},
+    "param_sfo_sha256": "ef98b9c56ce37c5c8fcb73fab79422b37661eff916a04139e035917a59fb0bf5"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "7f4aae716b862655536e153763fbd46353adbe8fb3735ab91d0a0b80de05e470",
+    "bytes": 64,
+    "result_path": "/dev_hdd0/tmp/cgov_lv2_prx_module_id_by_name.bin"
+  },
+  "digest": "7f4aae716b862655536e153763fbd46353adbe8fb3735ab91d0a0b80de05e470  micro:lv2_prx_module_id_by_name  64",
+  "recapture_reason": null
+}

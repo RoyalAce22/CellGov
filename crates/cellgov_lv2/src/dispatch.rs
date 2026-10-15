@@ -402,6 +402,19 @@ pub enum Lv2BlockReason {
         /// Which mutex table `mutex_id` names (distinct id spaces).
         mutex_kind: CondMutexKind,
     },
+    /// `_sys_lwcond_queue_wait`. The caller released `lwmutex_id` on
+    /// entry.
+    ///
+    /// A signal does one of these:
+    ///
+    /// - It moves the caller onto that lwmutex's sleep queue.
+    /// - It wakes the caller.
+    LwCond {
+        /// Target lwcond id.
+        id: u32,
+        /// The lwmutex released at park.
+        lwmutex_id: u32,
+    },
 }
 
 /// Outcome of a timed wait expiring, shaped like the wake half of

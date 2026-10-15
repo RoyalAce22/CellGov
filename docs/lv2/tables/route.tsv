@@ -110,12 +110,12 @@ ordinal	route	arm
 108	typed	CondSignal
 109	typed	CondSignalAll
 110	typed	CondSignalTo
-111	null_backend	none
-112	null_backend	none
-113	null_backend	none
+111	typed	LwCondCreate
+112	typed	LwCondDestroy
+113	typed	LwCondQueueWait
 114	typed	SemaphoreGetValue
-115	null_backend	none
-116	null_backend	none
+115	typed	LwCondSignal
+116	typed	LwCondSignalAll
 117	null_backend	none
 118	typed	EventFlagClear
 119	null_backend	none
@@ -495,7 +495,7 @@ ordinal	route	arm
 493	null_backend	none
 494	routed	PrxGetModuleList
 495	null_backend	none
-496	null_backend	none
+496	routed	PrxGetModuleIdByName
 497	routed	PrxLoadModuleOnMemcontainer
 498	null_backend	none
 499	null_backend	none

@@ -723,11 +723,6 @@ fn lv2_sys_event_flag() {
 }
 
 #[test]
-#[ignore = "Known divergence, one cell wide: the SYS_LWCOND_OBJECT column reads \
-            0 where the console reads 1. Syscall 111 has no dispatch handler, \
-            so nothing increments the lwcond counter. Every other byte of the \
-            capture matches. Tracked as the lwcond object-count gap; un-ignore \
-            when the count moves."]
 fn lv2_sys_process() {
     run_case(&LV2_SYS_PROCESS);
 }

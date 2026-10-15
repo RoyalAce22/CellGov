@@ -1,8 +1,8 @@
 //! `sys_prx` ABI: `CellPrxError` codes, the start/stop option struct
-//! layout, and the start-command vocabulary. The `CellPrxError` range
-//! is disjoint from [`crate::lv2::errno`] -- PRX errors are
-//! `0x8001_1xxx`, LV2 errnos are `0x8001_0xxx` -- so the two tables
-//! never collide.
+//! layout, the start-command vocabulary, and the module-name size. The
+//! `CellPrxError` range is disjoint from [`crate::lv2::errno`] -- PRX
+//! errors are `0x8001_1xxx`, LV2 errnos are `0x8001_0xxx` -- so the two
+//! tables never collide.
 //!
 //! Only the codes CellGov answers with appear here. Installed firmware
 //! materialises four of the eight in its own code or data; the other
@@ -18,6 +18,11 @@
 /// libfiber.sprx and libsre.sprx build this constant with `lis` / `ori`
 /// before returning it.
 pub const CELL_PRX_ERROR_UNKNOWN_MODULE: u32 = 0x8001_112E;
+
+/// The most bytes of a module name `_sys_prx_get_module_id_by_name`
+/// reads and compares: the size of the module-info name field.
+// The oracle's prx module reads and compares this many.
+pub const MODULE_NAME_MAX: usize = 28;
 /// The module is not started.
 pub const CELL_PRX_ERROR_NOT_STARTED: u32 = 0x8001_1134;
 /// The module cannot be unloaded from its current state.

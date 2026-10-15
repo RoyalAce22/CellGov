@@ -190,6 +190,8 @@ pub mod source {
     pub const RAW_SPU: u8 = 63;
     /// The Raw SPU interrupt-tag counter.
     pub const RAW_SPU_TAGS: u8 = 64;
+    /// Lightweight condition variables, one object per id.
+    pub const LWCOND: u8 = 65;
 }
 
 const OBJECT_BITS: u32 = 32;

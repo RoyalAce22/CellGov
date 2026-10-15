@@ -741,6 +741,51 @@ fn classify_cond_signal_variants() {
 }
 
 #[test]
+fn classify_lwcond_family() {
+    assert_eq!(
+        classify(
+            syscall::LWCOND_CREATE,
+            &[0x5000, 7, 0x6000, 0x6c77_636f_6e64, 0, 0, 0, 0]
+        ),
+        Lv2Request::LwCondCreate {
+            id_ptr: 0x5000,
+            lwmutex_id: 7,
+            control_ptr: 0x6000,
+            name: 0x6c77_636f_6e64,
+        }
+    );
+    assert_eq!(
+        classify(syscall::LWCOND_DESTROY, &[9, 0, 0, 0, 0, 0, 0, 0]),
+        Lv2Request::LwCondDestroy { id: 9 }
+    );
+    assert_eq!(
+        classify(syscall::LWCOND_QUEUE_WAIT, &[9, 7, 500, 0, 0, 0, 0, 0]),
+        Lv2Request::LwCondQueueWait {
+            id: 9,
+            lwmutex_id: 7,
+            timeout: 500,
+        }
+    );
+    assert_eq!(
+        classify(syscall::LWCOND_SIGNAL, &[9, 7, 0xFFFF_FFFF, 3, 0, 0, 0, 0]),
+        Lv2Request::LwCondSignal {
+            id: 9,
+            lwmutex_id: 7,
+            ppu_thread_id: 0xFFFF_FFFF,
+            mode: 3,
+        }
+    );
+    assert_eq!(
+        classify(syscall::LWCOND_SIGNAL_ALL, &[9, 7, 1, 0, 0, 0, 0, 0]),
+        Lv2Request::LwCondSignalAll {
+            id: 9,
+            lwmutex_id: 7,
+            mode: 1,
+        }
+    );
+}
+
+#[test]
 fn classify_memory_allocate_free() {
     let args = [0x10000, 0x200, 0x9000, 0, 0, 0, 0, 0];
     assert_eq!(
@@ -888,6 +933,11 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::COND_SIGNAL, &[0]),
     (syscall::COND_SIGNAL_ALL, &[0]),
     (syscall::COND_SIGNAL_TO, &[0, 1]),
+    (syscall::LWCOND_CREATE, &[0, 1, 2]),
+    (syscall::LWCOND_DESTROY, &[0]),
+    (syscall::LWCOND_QUEUE_WAIT, &[0, 1]),
+    (syscall::LWCOND_SIGNAL, &[0, 1, 2, 3]),
+    (syscall::LWCOND_SIGNAL_ALL, &[0, 1, 2]),
     (syscall::SEMAPHORE_GET_VALUE, &[0, 1]),
     (syscall::EVENT_FLAG_CLEAR, &[0]),
     (syscall::EVENT_QUEUE_CREATE, &[0, 1, 3]),

@@ -1,0 +1,50 @@
+[test]
+name = "ppu_lwcond_prodcons"
+
+# Structural microtest for the lightweight cond primitive: the
+# lwmutex-based sibling of ppu_cond_prodcons through the raw lwmutex
+# and lwcond syscalls, plus the single-thread answers of the lwcond
+# calls. N messages pass through a BUF_SIZE-slot buffer; the
+# consumer's sum must equal N*(N-1)/2 with zero syscall errors.
+
+[rpcs3]
+binary = "build/ppu_lwcond_prodcons.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# 16 big-endian u32 words, in the order ppu/main.c lists: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"
+
+# Usage:
+#   1. Build:
+#        docker run --rm \
+#          -v "$(pwd)/tests/micro/ppu_lwcond_prodcons:/src" \
+#          -v "$(pwd)/tests/micro/common:/common" \
+#          -e COMMON=/common ps3dev bash /src/build.sh
+#
+#   2. Run:
+#        cargo run --release -p cellgov_cli -- boot run \
+#          --title-manifest tests/micro/ppu_lwcond_prodcons/\
+# manifest.toml --max-steps 10000000
+
+[cellgov.title]
+short_name = "lwcond"
+display_name = "CellGov lwcond producer-consumer microtest"
+eboot_candidates = ["ppu_lwcond_prodcons.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"

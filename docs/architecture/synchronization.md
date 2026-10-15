@@ -17,6 +17,7 @@ guest-visible id:
 - `EventQueueTable`
 - `EventFlagTable`
 - `CondTable`
+- `LwCondTable`
 
 Every table composes the shared `WaiterList`, a strict FIFO queue
 of `PpuThreadId`. Every table keeps its objects in a lane map whose
@@ -32,7 +33,7 @@ caller. The predicate fails when:
 - the semaphore count is zero;
 - the event queue is empty;
 - the event flag mask is unsatisfied;
-- the call is a cond wait (unconditionally).
+- the call is a cond or lwcond wait (unconditionally).
 
 The handler then:
 

@@ -178,6 +178,11 @@ pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
             ArmFidelity::PartialState,
         ),
         (
+            syscall::SYS_PRX_GET_MODULE_ID_BY_NAME,
+            "PrxGetModuleIdByName",
+            ArmFidelity::Modeled,
+        ),
+        (
             syscall::SYS_PRX_LOAD_MODULE_ON_MEMCONTAINER,
             "PrxLoadModuleOnMemcontainer",
             ArmFidelity::PartialState,
@@ -322,6 +327,11 @@ impl Lv2RequestKind {
             | Lv2RequestKind::CondSignal
             | Lv2RequestKind::CondSignalAll
             | Lv2RequestKind::CondSignalTo
+            | Lv2RequestKind::LwCondCreate
+            | Lv2RequestKind::LwCondDestroy
+            | Lv2RequestKind::LwCondQueueWait
+            | Lv2RequestKind::LwCondSignal
+            | Lv2RequestKind::LwCondSignalAll
             | Lv2RequestKind::LwMutexCreate
             | Lv2RequestKind::LwMutexDestroy
             | Lv2RequestKind::LwMutexLock

@@ -31,6 +31,9 @@ impl Lv2BlockReason {
             ),
             Lv2BlockReason::Uart => (8, [0, 0, 0]),
             Lv2BlockReason::UsbdEvent { handle } => (9, [u64::from(handle), 0, 0]),
+            Lv2BlockReason::LwCond { id, lwmutex_id } => {
+                (10, [u64::from(id), u64::from(lwmutex_id), 0])
+            }
         };
         lanes.lane(field, 0, tag + 1);
         for (i, value) in payload.into_iter().enumerate() {

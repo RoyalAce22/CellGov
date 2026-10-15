@@ -795,6 +795,7 @@ mod process_exit_waiter_purge {
     const SEMA: u32 = 0x102;
     const EQUEUE: u32 = 0x103;
     const EFLAG: u32 = 0x104;
+    const LWCOND: u32 = 0x105;
 
     fn plain_attrs() -> MutexAttrs {
         MutexAttrs {
@@ -860,6 +861,8 @@ mod process_exit_waiter_purge {
             .enqueue_waiter(EFLAG, t1, 0x1, EventFlagWaitMode::OrNoClear, 0x2000)
             .unwrap();
         host.state.lwmutexes.enqueue_waiter(lwm, t2).unwrap();
+        host.state.lwconds.create_with_id(LWCOND, lwm);
+        assert!(host.state.lwconds.enqueue_waiter(LWCOND, t1));
         (host, t1, t2)
     }
 
@@ -875,6 +878,7 @@ mod process_exit_waiter_purge {
         assert!(host.state.event_queues.purge_waiters_of(&dead).is_empty());
         assert!(host.state.event_flags.purge_waiters_of(&dead).is_empty());
         assert!(host.state.lwmutexes.purge_waiters_of(&dead).is_empty());
+        assert!(host.state.lwconds.purge_waiters_of(&dead).is_empty());
 
         let purges = &host.observability().process_exit_waiter_purges;
         assert_eq!(purges.get("mutex"), Some(&1));
@@ -883,6 +887,7 @@ mod process_exit_waiter_purge {
         assert_eq!(purges.get("equeue"), Some(&1));
         assert_eq!(purges.get("eflag"), Some(&1));
         assert_eq!(purges.get("lwmutex"), Some(&1));
+        assert_eq!(purges.get("lwcond"), Some(&1));
     }
 
     #[test]

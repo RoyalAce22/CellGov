@@ -1,0 +1,17 @@
+[test]
+name = "lv2_prx_module_id_by_name"
+
+# A hardware probe: what _sys_prx_get_module_id_by_name answers for a
+# loaded module, for names no loaded module carries, and for pointers
+# that name no readable string. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# seven u64 r3 values, one per case in the order ppu/main.c lists: 56
+# bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 56 },
+]
+
+[expect]
+outcome = "completed"

@@ -361,6 +361,28 @@ pub const CASES: &[Case] = &[
         ],
     },
     Case {
+        name: "ppu_lwcond_prodcons",
+        max_steps: 1_000_000,
+        fields: &[
+            ("status", Exact(0)),
+            ("sum", Exact(PRODCONS_SUM)),
+            ("producer_errs", Exact(0)),
+            ("consumer_errs", Exact(0)),
+            ("create_unknown_lwmutex", Exact(errno::CELL_ESRCH.code)),
+            ("signal_owned_no_waiter", Exact(errno::CELL_EPERM.code)),
+            ("signal_not_owned_no_waiter", Exact(0)),
+            ("signal_forced_no_waiter", Exact(errno::CELL_ENOENT.code)),
+            ("destroy_unknown", Exact(errno::CELL_ESRCH.code)),
+            ("signal_unknown_thread", Exact(errno::CELL_ESRCH.code)),
+            ("signal_all_owned_no_waiter", Exact(0)),
+            ("signal_all_not_owned_no_waiter", Exact(0)),
+            ("timed_wait", Exact(errno::CELL_ETIMEDOUT.code)),
+            ("lock_after_timeout", Exact(0)),
+            ("destroy", Exact(0)),
+            ("destroy_again", Exact(errno::CELL_ESRCH.code)),
+        ],
+    },
+    Case {
         name: "ppu_event_flag_wakeall",
         max_steps: 1_000_000,
         fields: &[

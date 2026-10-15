@@ -308,9 +308,9 @@ per dispatch arm with the slots that reach it. Of the 1024 slots:
 
 | Route | Slots | Meaning |
 | --- | ---: | --- |
-| `typed` | 149 | Classifies to a typed request arm. |
-| `routed` | 25 | Reaches a dedicated arm inside `Unsupported`. |
-| `null_backend` | 848 | The honest traced `CELL_ENOSYS` refusal through the generic arm. |
+| `typed` | 154 | Classifies to a typed request arm. |
+| `routed` | 26 | Reaches a dedicated arm inside `Unsupported`. |
+| `null_backend` | 842 | The honest traced `CELL_ENOSYS` refusal through the generic arm. |
 | `runtime_fast_path` | 2 | Answered by the runtime's timer path; never classified or dispatched. |
 
 The routing-layer guarantee -- an unhandled syscall returns
@@ -369,7 +369,7 @@ stays and none is preferred; the disagreement is the information.
 | --- | ---: | --- |
 | `psdevwiki` | 618 | The name cell of psdevwiki's LV2 Functions and Syscalls table, taken only where it is one plain identifier and not a stub ending in `_`; `ref` is the page. |
 | `psl1ght` | 240 | `sys_` and the lowercased rest of a `SYSCALL_` token in PSL1GHT's `lv2/syscalls.h`; `ref` is the header and the token. |
-| `cellgov` | 175 | The name field of the `lv2_syscalls!` macro; `ref` is the constant. CellGov's own vocabulary, rendered, never hand-copied. |
+| `cellgov` | 181 | The name field of the `lv2_syscalls!` macro; `ref` is the constant. CellGov's own vocabulary, rendered, never hand-copied. |
 | `non_public` | 0 | A name known only from material that cannot be cited; `ref` is `none`. |
 
 `packet` is `none` for a name that applies to the whole ordinal.
@@ -394,7 +394,7 @@ for it either; the reach tables report exports beside names.
 `tables/conflicts.tsv` holds the rows of `tables/name.tsv` whose slot carries more
 than one distinct name: `spelling` when the names are one identifier
 under different leading underscores, `name` otherwise.
-31 slots:
+32 slots:
 
 | Slot | Disagreement | Names (sources) |
 | --- | --- | --- |
@@ -427,6 +427,7 @@ under different leading underscores, `name` otherwise.
 | 484 | spelling | `_sys_prx_register_module` (cellgov), `sys_prx_register_module` (psdevwiki, psl1ght) |
 | 486 | spelling | `_sys_prx_register_library` (cellgov), `sys_prx_register_library` (psdevwiki, psl1ght) |
 | 494 | spelling | `_sys_prx_get_module_list` (cellgov), `sys_prx_get_module_list` (psdevwiki, psl1ght) |
+| 496 | spelling | `_sys_prx_get_module_id_by_name` (cellgov), `sys_prx_get_module_id_by_name` (psdevwiki, psl1ght) |
 | 497 | spelling | `_sys_prx_load_module_on_memcontainer` (cellgov), `sys_prx_load_module_on_memcontainer` (psdevwiki, psl1ght) |
 | 617 | name | `sys_storage_check_region_acl` (psdevwiki), `sys_storage_get_region_acl` (psl1ght) |
 

@@ -132,6 +132,7 @@ impl Lv2Host {
                 event_ports: EventPortTable::new(),
                 event_flags: EventFlagTable::new(),
                 conds: CondTable::new(),
+                lwconds: crate::sync_primitives::LwCondTable::new(),
                 lwmutex_holds: cellgov_mem::lanes::LaneMap::new(
                     cellgov_mem::lanes::source::LWMUTEX_HOLDS,
                     crate::ppu_thread::PpuThreadId::raw,

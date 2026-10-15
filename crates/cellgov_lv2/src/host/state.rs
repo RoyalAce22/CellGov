@@ -85,6 +85,7 @@ pub(in crate::host) struct Lv2State {
     pub(in crate::host) event_ports: EventPortTable,
     pub(in crate::host) event_flags: EventFlagTable,
     pub(in crate::host) conds: CondTable,
+    pub(in crate::host) lwconds: crate::sync_primitives::LwCondTable,
     /// Per-thread count of distinct lwmutexes held. Recursive
     /// re-acquires of the same lwmutex do not bump the count; only
     /// first-acquire (FREE -> me) and kernel-side transfer

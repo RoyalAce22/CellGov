@@ -66,6 +66,29 @@ pub const SYS_SYNC_WAITER_SINGLE: u32 = 0x10000;
 /// `type = SYS_SYNC_WAITER_MULTIPLE`: any number of threads may park.
 pub const SYS_SYNC_WAITER_MULTIPLE: u32 = 0x20000;
 
+/// The `mode` word of `_sys_lwcond_signal` and `_sys_lwcond_signal_all`.
+///
+/// The word says what the signaller holds of the lwmutex the lwcond
+/// binds. liblv2.sprx's signal wrappers choose it from the lwmutex
+/// owner word. `_sys_lwcond_signal_all` takes only `OWNED` and
+/// `NOT_OWNED`.
+// The oracle's lwcond module names the three modes.
+pub mod lwcond_signal_mode {
+    /// The signaller owns the lwmutex: a woken waiter joins the
+    /// lwmutex sleep queue and runs once the signaller unlocks.
+    pub const OWNED: u32 = 1;
+    /// The signaller could not take the lwmutex: a woken waiter returns
+    /// `CELL_EBUSY` and locks the lwmutex itself.
+    pub const NOT_OWNED: u32 = 2;
+    /// The signaller took the lwmutex for the signal: the lwmutex passes
+    /// to its oldest sleeper, or to the woken waiter when none sleeps.
+    pub const FORCED: u32 = 3;
+}
+
+/// The `ppu_thread_id` of `_sys_lwcond_signal` that names no thread:
+/// the signal wakes the waiter the lwcond's queue order picks.
+pub const LWCOND_SIGNAL_ANY_THREAD: u32 = u32::MAX;
+
 /// `sys_event_flag_wait` mode word.
 ///
 /// Two independent nibbles:

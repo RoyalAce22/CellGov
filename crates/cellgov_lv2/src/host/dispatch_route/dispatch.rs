@@ -504,6 +504,24 @@ impl Lv2Host {
             Lv2Request::CondSignalTo { id, target_thread } => {
                 self.dispatch_cond_signal_to(id, target_thread)
             }
+            Lv2Request::LwCondCreate {
+                id_ptr, lwmutex_id, ..
+            } => self.dispatch_lwcond_create(id_ptr, lwmutex_id, requester, tick),
+            Lv2Request::LwCondDestroy { id } => self.dispatch_lwcond_destroy(id),
+            Lv2Request::LwCondQueueWait { id, lwmutex_id, .. } => {
+                self.dispatch_lwcond_queue_wait(id, lwmutex_id, requester)
+            }
+            Lv2Request::LwCondSignal {
+                id,
+                lwmutex_id,
+                ppu_thread_id,
+                mode,
+            } => self.dispatch_lwcond_signal(id, lwmutex_id, ppu_thread_id, mode),
+            Lv2Request::LwCondSignalAll {
+                id,
+                lwmutex_id,
+                mode,
+            } => self.dispatch_lwcond_signal_all(id, lwmutex_id, mode),
             Lv2Request::MemoryAllocate {
                 size,
                 flags,
@@ -675,6 +693,10 @@ impl Lv2Host {
                 number: syscall::SYS_PRX_GET_MODULE_LIST,
                 args,
             } => self.dispatch_prx_get_module_list(args, requester, rt, tick),
+            Lv2Request::Unsupported {
+                number: syscall::SYS_PRX_GET_MODULE_ID_BY_NAME,
+                args,
+            } => self.dispatch_prx_get_module_id_by_name(args, rt),
             Lv2Request::Unsupported {
                 number: syscall::EVENT_PORT_CONNECT_LOCAL,
                 args,

@@ -1147,6 +1147,54 @@ pub enum Lv2Request {
         /// In: target thread id.
         target_thread: u32,
     },
+    /// `_sys_lwcond_create`.
+    LwCondCreate {
+        /// Out: lwcond id.
+        id_ptr: u32,
+        /// In: kernel id of the lwmutex the lwcond binds.
+        lwmutex_id: u32,
+        /// In: the user-space `sys_lwcond_t`, which the kernel keeps but
+        /// never reads.
+        control_ptr: u32,
+        /// In: the eight name bytes as one word.
+        name: u64,
+    },
+    /// `_sys_lwcond_destroy`.
+    LwCondDestroy {
+        /// In: lwcond id.
+        id: u32,
+    },
+    /// `_sys_lwcond_queue_wait`; timeout semantics in
+    /// [`Lv2Request::wait_timeout_usec`].
+    LwCondQueueWait {
+        /// In: lwcond id.
+        id: u32,
+        /// In: kernel id of the lwmutex the caller holds.
+        lwmutex_id: u32,
+        /// In: timeout in microseconds.
+        timeout: u64,
+    },
+    /// `_sys_lwcond_signal`.
+    LwCondSignal {
+        /// In: lwcond id.
+        id: u32,
+        /// In: kernel id of the bound lwmutex.
+        lwmutex_id: u32,
+        /// In: the thread to wake, or
+        /// `cellgov_ps3_abi::lv2::sync::LWCOND_SIGNAL_ANY_THREAD`.
+        ppu_thread_id: u32,
+        /// In: a `cellgov_ps3_abi::lv2::sync::lwcond_signal_mode` value.
+        mode: u32,
+    },
+    /// `_sys_lwcond_signal_all`.
+    LwCondSignalAll {
+        /// In: lwcond id.
+        id: u32,
+        /// In: kernel id of the bound lwmutex.
+        lwmutex_id: u32,
+        /// In: a `cellgov_ps3_abi::lv2::sync::lwcond_signal_mode` value.
+        mode: u32,
+    },
     /// `_sys_ppu_thread_create` (syscall 52). `param_ptr` is the
     /// `ppu_thread_param_t` pointer: `{ u32 entry_opd_ptr; u32 tls; }`.
     /// The dispatcher reads `param_ptr` for the OPD pointer, then
@@ -1346,7 +1394,8 @@ impl Lv2Request {
             | Lv2Request::EventQueueReceive { timeout, .. }
             | Lv2Request::EventFlagWait { timeout, .. }
             | Lv2Request::LwMutexLock { timeout, .. }
-            | Lv2Request::CondWait { timeout, .. } => Some(*timeout),
+            | Lv2Request::CondWait { timeout, .. }
+            | Lv2Request::LwCondQueueWait { timeout, .. } => Some(*timeout),
             _ => None,
         }
     }

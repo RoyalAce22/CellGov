@@ -19,7 +19,7 @@ const ABOVE_CEILING: u64 = AT_CEILING + 1;
 
 /// Each `Unsupported` syscall and the argument slots it binds as u32.
 ///
-/// A slot is absent for one of two reasons:
+/// A slot is absent for one of three reasons:
 ///
 /// - The arm reads that argument at its full 64-bit width. Every
 ///   `ipc_key`, `size` and `alignment` word is one. So are the 64-bit
@@ -28,6 +28,8 @@ const ABOVE_CEILING: u64 = AT_CEILING + 1;
 ///   64-bit [`crate::ppu_thread::PpuThreadId`].
 /// - The arm binds that argument as an `int`, so it appears in
 ///   [`UNSUPPORTED_I32_SLOTS`] instead.
+/// - The console reads the low word and ignores the high word. The
+///   `_sys_prx_get_module_id_by_name` name pointer is one.
 ///
 /// Syscall 47 binds no u32 field, so it has no row.
 const UNSUPPORTED_U32_SLOTS: &[(u64, &[usize])] = &[
