@@ -99,9 +99,10 @@ fn every_arm_refuses_a_handle_no_initialize_minted() {
     seed_primary_ppu(&mut host, src());
     let bogus = 0x7fff_ffff;
     let einval = u64::from(errno::CELL_EINVAL);
+    let esrch = u64::from(errno::CELL_ESRCH);
     assert_eq!(
         code_of(&host.dispatch(Lv2Request::UsbdFinalize { handle: bogus }, src(), &rt)),
-        einval
+        esrch
     );
     assert_eq!(
         code_of(&host.dispatch(
@@ -125,7 +126,7 @@ fn every_arm_refuses_a_handle_no_initialize_minted() {
             src(),
             &rt
         )),
-        einval
+        esrch
     );
     assert_eq!(
         code_of(&receive(&mut host, &rt, src(), bogus, ARGS)),
@@ -177,7 +178,6 @@ fn an_empty_bus_lists_no_devices_and_acknowledges_ldd_registration() {
             product_ptr: PRODUCT_PTR,
             product_len: 8,
         },
-        Lv2Request::UsbdDetectEvent,
     ] {
         assert_eq!(code_of(&host.dispatch(req, src(), &rt)), 0);
     }
@@ -191,6 +191,15 @@ fn an_empty_bus_lists_no_devices_and_acknowledges_ldd_registration() {
         &rt,
     );
     assert_eq!(code_of(&d), u64::from(errno::CELL_EFAULT));
+}
+
+#[test]
+fn detect_event_is_enosys() {
+    let rt = rt();
+    let mut host = Lv2Host::new();
+    let d = host.dispatch(Lv2Request::UsbdDetectEvent, src(), &rt);
+    assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
+    assert!(host.observability().invariant_break_sites.is_empty());
 }
 
 #[test]
@@ -382,22 +391,32 @@ fn a_finalized_handle_is_refused_everywhere_and_counted_nowhere() {
         0
     );
     let einval = u64::from(errno::CELL_EINVAL);
-    for req in [
-        Lv2Request::UsbdFinalize { handle },
-        Lv2Request::UsbdGetDeviceList {
-            handle,
-            list_ptr: 0x6000,
-            max_devices: 4,
-        },
-        Lv2Request::UsbdRegisterLdd {
-            handle,
-            product_ptr: PRODUCT_PTR,
-            product_len: 4,
-        },
-        Lv2Request::UsbdOpenDefaultPipe { handle, device: 1 },
-        Lv2Request::UsbdClosePipe { handle, pipe: 7 },
+    let esrch = u64::from(errno::CELL_ESRCH);
+    for (req, code) in [
+        (Lv2Request::UsbdFinalize { handle }, esrch),
+        (
+            Lv2Request::UsbdGetDeviceList {
+                handle,
+                list_ptr: 0x6000,
+                max_devices: 4,
+            },
+            einval,
+        ),
+        (
+            Lv2Request::UsbdRegisterLdd {
+                handle,
+                product_ptr: PRODUCT_PTR,
+                product_len: 4,
+            },
+            esrch,
+        ),
+        (
+            Lv2Request::UsbdOpenDefaultPipe { handle, device: 1 },
+            einval,
+        ),
+        (Lv2Request::UsbdClosePipe { handle, pipe: 7 }, einval),
     ] {
-        assert_eq!(code_of(&host.dispatch(req, src(), &rt)), einval);
+        assert_eq!(code_of(&host.dispatch(req, src(), &rt)), code);
     }
     assert_eq!(
         code_of(&receive(&mut host, &rt, src(), handle, ARGS)),
@@ -413,7 +432,7 @@ fn a_finalized_handle_is_refused_everywhere_and_counted_nowhere() {
 }
 
 #[test]
-fn unregistering_a_product_no_register_recorded_is_esrch() {
+fn unregistering_a_product_no_register_recorded_answers_the_driver_code() {
     let rt = rt();
     let mut host = Lv2Host::new();
     let handle = init(&mut host, &rt);
@@ -428,7 +447,8 @@ fn unregistering_a_product_no_register_recorded_is_esrch() {
             rt,
         ))
     };
-    assert_eq!(unregister(&mut host, &rt), u64::from(errno::CELL_ESRCH));
+    let not_registered = u64::from(usb::SYS_USBD_ERROR_PRODUCT_NOT_REGISTERED);
+    assert_eq!(unregister(&mut host, &rt), not_registered);
     assert_eq!(
         code_of(&host.dispatch(
             Lv2Request::UsbdRegisterLdd {
@@ -444,7 +464,7 @@ fn unregistering_a_product_no_register_recorded_is_esrch() {
     assert_eq!(host.state.usbd.ldds().len(), 1);
     assert_eq!(unregister(&mut host, &rt), 0);
     assert!(host.state.usbd.ldds().is_empty());
-    assert_eq!(unregister(&mut host, &rt), u64::from(errno::CELL_ESRCH));
+    assert_eq!(unregister(&mut host, &rt), not_registered);
 }
 
 #[test]

@@ -735,8 +735,8 @@ impl Lv2Host {
             } => self.dispatch_gamepad_ycon_if(),
             Lv2Request::Unsupported {
                 number: syscall::HID_IS_ROOT,
-                ..
-            } => self.dispatch_hid_is_root(),
+                args,
+            } => self.dispatch_hid_is_root(args[0], requester),
             Lv2Request::Unsupported {
                 number: syscall::RSX_ATTRIBUTE,
                 ..

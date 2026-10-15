@@ -188,7 +188,7 @@ fn syscall_621_returns_ok() {
 }
 
 #[test]
-fn syscall_512_returns_zero_non_root() {
+fn syscall_512_answers_one_for_the_callers_own_pid() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
@@ -199,7 +199,7 @@ fn syscall_512_returns_zero_non_root() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(0));
+    assert_eq!(result, Lv2Dispatch::immediate(1));
 }
 
 #[test]

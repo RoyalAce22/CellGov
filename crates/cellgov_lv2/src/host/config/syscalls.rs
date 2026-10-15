@@ -91,13 +91,17 @@ impl Lv2Host {
     /// record's `registered` field and its length follow the service's
     /// state at read time, whatever the queued event announced.
     ///
+    /// A read consumes the event whether it writes the record or is
+    /// refused for its size or destination; a second read of the same
+    /// event answers `CELL_ESRCH`. The `lv2_config_event_read` and
+    /// `lv2_config_event_consume` captures show both.
+    ///
     /// # Errors
     ///
-    /// - `CELL_ESRCH` for an unknown handle, an unknown event, or an
-    ///   event sent through a different handle.
-    /// - `CELL_EAGAIN` when `size` is below the length the queued
-    ///   event's `data3` announced, which exceeds the bytes written
-    ///   (see [`SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN`](cellgov_ps3_abi::lv2::config::SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN)).
+    /// - `CELL_ESRCH` for an unknown handle, an unknown or already-read
+    ///   event, or an event sent through a different handle.
+    /// - `CELL_EINVAL` when `size` is below the length the queued
+    ///   event's `data3` announced.
     /// - `CELL_EFAULT` for a null destination.
     pub(in crate::host) fn dispatch_config_get_service_event(
         &mut self,
@@ -121,11 +125,13 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if size < service.announced_len() as u64 {
-            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+            self.state.config.consume_event(event_id);
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let Some(record) = self.state.config.record(event_id) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
+        self.state.config.consume_event(event_id);
         if dst_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
@@ -143,6 +149,11 @@ impl Lv2Host {
     /// `sys_config_add_service_listener` (519): registers the listener
     /// and replays every matching service already registered, oldest
     /// first, to the handle's queue.
+    ///
+    /// The console answers a game process `CELL_ENOMEM` for a
+    /// pad-manager listener with any of the data buffers the
+    /// `lv2_config_listener_shapes` capture sends; CellGov accepts
+    /// them. Which buffers the kernel accepts is not captured.
     ///
     /// # Errors
     ///

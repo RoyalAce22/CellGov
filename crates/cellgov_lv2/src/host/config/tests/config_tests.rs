@@ -12,9 +12,9 @@ use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_EVENT_SOURCE_SERVICE, SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR,
-    SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN, SYS_CONFIG_SERVICE_EVENT_HEAD_LEN,
-    SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN, SYS_CONFIG_SERVICE_LISTENER_ONCE,
-    SYS_CONFIG_SERVICE_PADMANAGER, SYS_CONFIG_SERVICE_PADMANAGER2,
+    SYS_CONFIG_SERVICE_EVENT_HEAD_LEN, SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN,
+    SYS_CONFIG_SERVICE_LISTENER_ONCE, SYS_CONFIG_SERVICE_PADMANAGER,
+    SYS_CONFIG_SERVICE_PADMANAGER2,
 };
 use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_SERVICE_LISTENER_REPEATING, SYS_CONFIG_SERVICE_USER_LIBPAD,
@@ -232,31 +232,28 @@ fn a_pad_manager_listener_leading_with_01_is_replayed_the_seeded_service() {
     assert_eq!(ev.data2 as u32, 0, "first event id");
     assert_eq!(
         ev.data3,
-        (SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN + SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR.len())
-            as u64,
-        "data3 is the oracle's sizeof-based size, not the bytes written"
+        (SYS_CONFIG_SERVICE_EVENT_HEAD_LEN + SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR.len()) as u64,
+        "data3 is the bytes a read writes"
     );
     assert_eq!(host.state.config.event(0).unwrap().listener, listener);
 }
 
 #[test]
-fn a_pad_manager_listener_without_the_leading_byte_hears_nothing() {
+fn a_pad_manager_listener_whose_buffer_leads_with_another_byte_hears_nothing() {
     let mut host = Lv2Host::new();
     let rt = runtime();
     let queue = create_queue(&mut host, &rt, 8);
     let handle = open(&mut host, &rt, queue);
-    for (ptr, size) in [(NO_FILTER_PTR, 4u64), (PAD_FILTER_PTR, 0)] {
-        let d = add_listener(
-            &mut host,
-            &rt,
-            handle,
-            SYS_CONFIG_SERVICE_PADMANAGER,
-            ptr,
-            size,
-            SYS_CONFIG_SERVICE_LISTENER_REPEATING,
-        );
-        assert_eq!(code_of(&d), 0);
-    }
+    let d = add_listener(
+        &mut host,
+        &rt,
+        handle,
+        SYS_CONFIG_SERVICE_PADMANAGER,
+        NO_FILTER_PTR,
+        4,
+        SYS_CONFIG_SERVICE_LISTENER_REPEATING,
+    );
+    assert_eq!(code_of(&d), 0);
     assert!(drain(&mut host, queue).is_empty());
     assert_eq!(host.state.config.event_count(), 0);
 }
@@ -331,8 +328,8 @@ fn get_service_event_writes_the_record() {
     );
     assert_eq!(
         ev.data3,
-        record.len() as u64 + 7,
-        "announced size carries the oracle struct's tail padding"
+        record.len() as u64,
+        "announced size is the bytes written"
     );
     assert_eq!(&record[0..4], &listener.to_be_bytes());
     assert_eq!(&record[4..8], &1u32.to_be_bytes(), "registered");
@@ -345,7 +342,7 @@ fn get_service_event_writes_the_record() {
 }
 
 #[test]
-fn get_service_event_with_a_short_buffer_is_eagain() {
+fn get_service_event_with_a_short_buffer_is_einval_and_consumes_the_event() {
     let mut host = Lv2Host::new();
     let rt = runtime();
     let queue = create_queue(&mut host, &rt, 8);
@@ -361,17 +358,63 @@ fn get_service_event_with_a_short_buffer_is_eagain() {
     );
     let ev = drain(&mut host, queue)[0];
     let d = get_record(&mut host, &rt, handle, ev.data2 as u32, ev.data3 - 1);
-    assert_eq!(code_of(&d), u64::from(errno::CELL_EAGAIN));
-    let written =
-        (SYS_CONFIG_SERVICE_EVENT_HEAD_LEN + SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR.len()) as u64;
-    let d = get_record(&mut host, &rt, handle, ev.data2 as u32, written);
-    assert_eq!(
-        code_of(&d),
-        u64::from(errno::CELL_EAGAIN),
-        "a buffer sized to the bytes written is still below the announced floor"
-    );
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EINVAL));
     let d = get_record(&mut host, &rt, handle, ev.data2 as u32, ev.data3);
-    assert_eq!(code_of(&d), 0, "exactly data3 bytes suffice");
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
+}
+
+#[test]
+fn a_read_of_exactly_data3_bytes_writes_the_record_and_consumes_the_event() {
+    let mut host = Lv2Host::new();
+    let rt = runtime();
+    let queue = create_queue(&mut host, &rt, 8);
+    let handle = open(&mut host, &rt, queue);
+    add_listener(
+        &mut host,
+        &rt,
+        handle,
+        SYS_CONFIG_SERVICE_PADMANAGER2,
+        0,
+        0,
+        SYS_CONFIG_SERVICE_LISTENER_REPEATING,
+    );
+    let ev = drain(&mut host, queue)[0];
+    let d = get_record(&mut host, &rt, handle, ev.data2 as u32, ev.data3);
+    assert_eq!(written_bytes(&d).len() as u64, ev.data3);
+    let d = get_record(&mut host, &rt, handle, ev.data2 as u32, ev.data3);
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
+    assert_eq!(host.state.config.event_count(), 0);
+}
+
+#[test]
+fn a_read_to_a_null_destination_is_efault_and_consumes_the_event() {
+    let mut host = Lv2Host::new();
+    let rt = runtime();
+    let queue = create_queue(&mut host, &rt, 8);
+    let handle = open(&mut host, &rt, queue);
+    add_listener(
+        &mut host,
+        &rt,
+        handle,
+        SYS_CONFIG_SERVICE_PADMANAGER2,
+        0,
+        0,
+        SYS_CONFIG_SERVICE_LISTENER_REPEATING,
+    );
+    let ev = drain(&mut host, queue)[0];
+    let d = host.dispatch(
+        Lv2Request::ConfigGetServiceEvent {
+            handle,
+            event_id: ev.data2 as u32,
+            dst_ptr: 0,
+            size: ev.data3,
+        },
+        src(),
+        &rt,
+    );
+    assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
+    let d = get_record(&mut host, &rt, handle, ev.data2 as u32, ev.data3);
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
 }
 
 #[test]
@@ -398,6 +441,14 @@ fn a_registration_record_read_after_unregister_reports_the_live_state() {
         &rt,
     );
     assert_eq!(drain(&mut host, queue).len(), 1, "the unregister event");
+    assert!(
+        host.state
+            .config
+            .event(registered.data2 as u32)
+            .unwrap()
+            .registered,
+        "what the queue announced is kept as announced"
+    );
     let record = written_bytes(&get_record(
         &mut host,
         &rt,
@@ -415,14 +466,6 @@ fn a_registration_record_read_after_unregister_reports_the_live_state() {
         &record[16..24],
         &7u64.to_be_bytes(),
         "user_id still readable"
-    );
-    assert!(
-        host.state
-            .config
-            .event(registered.data2 as u32)
-            .unwrap()
-            .registered,
-        "what the queue announced is kept as announced"
     );
 }
 

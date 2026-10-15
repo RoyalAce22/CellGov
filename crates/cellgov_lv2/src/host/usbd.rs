@@ -8,10 +8,9 @@
 //!
 //! `libusbd.sprx` is the firmware side of this surface: it issues 530
 //! through 540 from its own wrappers, and the audio server reaches the
-//! same set. Nothing in dev_flash issues 541. No firmware witness
-//! fixes what any of them answer on an empty bus. The refusals below
-//! are the model's own, and the kernel's real answers are
-//! unestablished.
+//! same set. Nothing in dev_flash issues 541. The `lv2_usbd_config_hid`
+//! capture settles 530, 531, 536 and 541 for a game process. The
+//! device- and pipe-scoped refusals are the model's own.
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -79,7 +78,8 @@ impl cellgov_mem::lanes::LaneValue for UsbdState {
 pub(crate) struct UsbdState {
     handles: BTreeSet<u32>,
     /// Product strings `sys_usbd_register_ldd` recorded; unregister
-    /// answers ESRCH for one that is absent.
+    /// answers `SYS_USBD_ERROR_PRODUCT_NOT_REGISTERED` for one that is
+    /// absent.
     ldds: BTreeSet<Vec<u8>>,
     /// Parked readers in park order; finalize wakes them in this
     /// order.
@@ -170,7 +170,8 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` for a handle no initialize minted.
+    /// - `CELL_ESRCH` for a handle no initialize minted or one already
+    ///   finalized.
     pub(super) fn dispatch_usbd_finalize(
         &mut self,
         handle: u32,
@@ -178,7 +179,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if !self.state.usbd.handles.remove(&handle) {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         let waiters: Vec<UsbdWaiter> = self.state.usbd.waiters.drain(..).collect();
         if waiters.is_empty() {
@@ -214,7 +215,8 @@ impl Lv2Host {
     }
 
     /// `sys_usbd_get_device_list` (532): the attached-device count,
-    /// which is always 0 here, so nothing is written.
+    /// which is always 0 on this empty bus, so the arm writes nothing. The
+    /// console answers the count of its own devices.
     ///
     /// # Errors
     ///
@@ -236,7 +238,7 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
     ) -> Result<Vec<u8>, errno::Lv2ErrCode> {
         if !self.state.usbd.handles.contains(&handle) {
-            return Err(errno::CELL_EINVAL);
+            return Err(errno::CELL_ESRCH);
         }
         // The kernel signature carries the length as a u16.
         let len = usize::from(product_len as u16);
@@ -256,7 +258,9 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` for a handle no initialize minted.
+    /// - `CELL_ESRCH` for a handle no initialize minted. The model
+    ///   reuses the unregister gate; the console's 535 answer is not
+    ///   captured.
     /// - `CELL_EFAULT` for an unreadable product string.
     pub(super) fn dispatch_usbd_register_ldd(
         &mut self,
@@ -278,9 +282,10 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` for a handle no initialize minted.
+    /// - `CELL_ESRCH` for a handle no initialize minted.
     /// - `CELL_EFAULT` for an unreadable product string.
-    /// - `CELL_ESRCH` for a product no register recorded.
+    /// - [`usb::SYS_USBD_ERROR_PRODUCT_NOT_REGISTERED`] for a product no
+    ///   register recorded.
     pub(super) fn dispatch_usbd_unregister_ldd(
         &mut self,
         handle: u32,
@@ -293,7 +298,7 @@ impl Lv2Host {
             Err(code) => return Lv2Dispatch::immediate(code.into()),
         };
         if !self.state.usbd.ldds.remove(&product) {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(usb::SYS_USBD_ERROR_PRODUCT_NOT_REGISTERED.into());
         }
         Lv2Dispatch::immediate(0)
     }
@@ -394,15 +399,10 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_usbd_detect_event` (541): answers `CELL_OK` and models
-    /// nothing, so each call records an invariant break. No dev_flash
-    /// module issues it.
-    pub(super) fn dispatch_usbd_detect_event(&mut self) -> Lv2Dispatch {
-        self.log_invariant_break(
-            "dispatch.usbd_detect_event_unmodeled",
-            format_args!("sys_usbd_detect_event acknowledged with CELL_OK; nothing is modeled"),
-        );
-        Lv2Dispatch::immediate(0)
+    /// `sys_usbd_detect_event` (541): `CELL_ENOSYS`, as the console
+    /// answers a game process. No dev_flash module issues it.
+    pub(super) fn dispatch_usbd_detect_event(&self) -> Lv2Dispatch {
+        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 }
 

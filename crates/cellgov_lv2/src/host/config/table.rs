@@ -3,9 +3,9 @@
 use cellgov_mem::lanes::{self, source, LaneMap, LaneValue, ObjectLanes};
 
 use cellgov_ps3_abi::lv2::config::{
-    SYS_CONFIG_EVENT_SOURCE_SERVICE, SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN,
-    SYS_CONFIG_SERVICE_EVENT_HEAD_LEN, SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN,
-    SYS_CONFIG_SERVICE_LISTENER_ONCE, SYS_CONFIG_SERVICE_PADMANAGER,
+    SYS_CONFIG_EVENT_SOURCE_SERVICE, SYS_CONFIG_SERVICE_EVENT_HEAD_LEN,
+    SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN, SYS_CONFIG_SERVICE_LISTENER_ONCE,
+    SYS_CONFIG_SERVICE_PADMANAGER,
 };
 
 use crate::sync_primitives::EventPayload;
@@ -31,18 +31,13 @@ pub(crate) struct ConfigService {
 }
 
 impl ConfigService {
-    /// Buffer a `sys_config_get_service_event` call must offer;
-    /// reported in the queued event's `data3` whether or not the
-    /// service is still registered. It overstates both record lengths:
-    /// see [`Self::record_len`] and
-    /// [`SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN`].
+    /// Buffer a `sys_config_get_service_event` call must offer, and the
+    /// bytes it writes for a registered service; reported in the
+    /// queued event's `data3`. An unregistered service's record is
+    /// shorter (see [`SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN`]); what
+    /// its event announces is not captured, and CellGov announces the
+    /// same length.
     pub(super) fn announced_len(&self) -> usize {
-        SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN + self.data.len()
-    }
-
-    /// Bytes `sys_config_get_service_event` writes for a registered
-    /// service; seven short of [`Self::announced_len`].
-    fn record_len(&self) -> usize {
         SYS_CONFIG_SERVICE_EVENT_HEAD_LEN + self.data.len()
     }
 }
@@ -62,9 +57,9 @@ pub(crate) struct ConfigListener {
 }
 
 impl ConfigListener {
-    /// A once listener fires a single time, the id and verbosity must
-    /// fit, and pad-manager events reach only listeners whose buffer
-    /// leads with `0x01`.
+    /// A once listener fires a single time, and the id and verbosity
+    /// must fit. A pad-manager listener with a data buffer matches only
+    /// when the buffer leads with `0x01`; one with no buffer matches.
     pub(super) fn matches(&self, service: &ConfigService) -> bool {
         if self.listener_type == SYS_CONFIG_SERVICE_LISTENER_ONCE && self.delivered > 0 {
             return false;
@@ -72,7 +67,9 @@ impl ConfigListener {
         if self.service_id != service.service_id || self.min_verbosity > service.verbosity {
             return false;
         }
-        if self.service_id == SYS_CONFIG_SERVICE_PADMANAGER && self.data.first() != Some(&0x01) {
+        if self.service_id == SYS_CONFIG_SERVICE_PADMANAGER
+            && self.data.first().is_some_and(|&lead| lead != 0x01)
+        {
             return false;
         }
         true
@@ -152,7 +149,7 @@ pub(in crate::host) struct ServiceSpec {
 /// sent and may still read back.
 ///
 /// A service stays while it is registered or any event still refers
-/// to it; an event stays until its listener is removed.
+/// to it; an event stays until a read consumes it or its listener goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigTable {
     pub(super) handles: LaneMap<u32, ConfigHandle>,
@@ -345,6 +342,14 @@ impl ConfigTable {
         self.handles.remove(id).is_some()
     }
 
+    /// Drop `event` once a `sys_config_get_service_event` call has read
+    /// it, whatever the read answered.
+    pub(super) fn consume_event(&mut self, event: u32) {
+        if let Some(ev) = self.events.remove(event) {
+            self.collect_service(ev.service);
+        }
+    }
+
     /// Removing a listener drops every event it was sent.
     pub(super) fn remove_listener(&mut self, id: u32) -> bool {
         if self.listeners.remove(id).is_none() {
@@ -384,7 +389,7 @@ impl ConfigTable {
     pub(super) fn record(&self, event: u32) -> Option<Vec<u8>> {
         let ev = self.events.get(event)?;
         let s = self.services.get(ev.service)?;
-        let mut out = Vec::with_capacity(s.record_len());
+        let mut out = Vec::with_capacity(s.announced_len());
         out.extend_from_slice(&ev.listener.to_be_bytes());
         out.extend_from_slice(&u32::from(s.registered).to_be_bytes());
         out.extend_from_slice(&s.service_id.to_be_bytes());
@@ -394,7 +399,7 @@ impl ConfigTable {
             out.extend_from_slice(&(s.data.len() as u32).to_be_bytes());
             out.extend_from_slice(&0u32.to_be_bytes());
             out.extend_from_slice(&s.data);
-            debug_assert_eq!(out.len(), s.record_len());
+            debug_assert_eq!(out.len(), s.announced_len());
         } else {
             debug_assert_eq!(out.len(), SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN);
         }

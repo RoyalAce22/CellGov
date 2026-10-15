@@ -1,5 +1,6 @@
 //! Unsupported arms whose whole behaviour is a single answer.
 
+use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
@@ -18,10 +19,20 @@ impl Lv2Host {
         Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
-    /// `sys_hid_manager_is_process_permission_root` (512): returns 0
-    /// (retail titles run unprivileged).
-    pub(in crate::host::dispatch_route) fn dispatch_hid_is_root(&self) -> Lv2Dispatch {
-        Lv2Dispatch::immediate(0)
+    /// `sys_hid_manager_is_process_permission_root` (512): 1 when
+    /// `pid` (the low word of the first argument) is the caller's own,
+    /// else 0.
+    ///
+    /// The `lv2_usbd_config_hid` capture shows 1 for a game process's
+    /// own pid and 0 for pid 1. The answer for another live process is
+    /// not captured.
+    pub(in crate::host::dispatch_route) fn dispatch_hid_is_root(
+        &self,
+        pid: u64,
+        requester: UnitId,
+    ) -> Lv2Dispatch {
+        let own = u64::from(self.state.processes.process_of_unit(requester));
+        Lv2Dispatch::immediate(u64::from(pid as u32 as u64 == own))
     }
 
     /// `sys_gamepad_ycon_if` (621): stub returning CELL_OK.
