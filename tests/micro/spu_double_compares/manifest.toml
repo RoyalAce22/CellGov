@@ -1,0 +1,22 @@
+[test]
+name = "spu_double_compares"
+
+# A hardware probe of the optional ISA 1.2 double-precision compares on
+# a raw SPU: dfceq, dfcmeq, dfcgt, dfcmgt and dftsv each run from their
+# own entry point, with an unassigned word as a control, and the PPU
+# masks the raw SPU's class 0 and 2 interrupts first, then reads back
+# SPU_Status, SPU_NextPC, the class 0 interrupt status and
+# whether the entry stored its result. The PPU program's header comment
+# has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 336 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

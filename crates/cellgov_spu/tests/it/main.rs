@@ -2,6 +2,7 @@
 //! one test binary so each profile links the crate's dependencies once.
 
 mod channel_stall_through_runtime;
+mod console_double_compares;
 mod console_events;
 mod console_raw_stop;
 mod event_wait_through_runtime;
@@ -22,6 +23,7 @@ mod raw_spu_window;
 mod signal_read_through_runtime;
 mod signal_write_through_lv2;
 mod spu_convert_scales;
+mod spu_double_policy;
 mod spu_estimate_readout;
 mod spu_fi_datapath;
 mod spu_float_edges;

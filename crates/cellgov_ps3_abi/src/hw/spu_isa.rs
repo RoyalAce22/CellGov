@@ -100,7 +100,7 @@ pub const TO_INTEGER_SCALE_BIAS: u8 = 173;
 /// [SPU-ISA p:211 s:9] the dfnms encoding is on this page, though Table A-1 gives 213.
 /// [SPU-ISA p:235 s:9] the fscrwr encoding is on this page, though Table A-1 gives 236.
 /// [SPU-ISA p:236 s:9] the fscrrd encoding is on this page, though Table A-1 gives 235.
-/// [CBE-Handbook p:766 s:B.1 Table B-1] the CBE's SPU instruction table lists dfma and dfnms but none of the ISA 1.2 double-precision compares (dfceq, dfcmeq, dfcgt, dfcmgt, dftsv), which the ISA marks optional.
+/// [CBE-Handbook p:766 s:B.1 Table B-1] the CBE's SPU instruction table lists dfma and dfnms but none of the ISA 1.2 double-precision compares (dfceq, dfcmeq, dfcgt, dfcmgt, dftsv), which the ISA marks optional. The `spu_double_compares` capture shows each one stopping a raw SPU as an invalid instruction.
 pub const SPU_OPCODE_MAP: &[SpuOpcodeRow] = &[
     row("stop", 11, 0b00000000000, SpuForm::Rr, 238, true),
     row("lnop", 11, 0b00000000001, SpuForm::Rr, 240, true),

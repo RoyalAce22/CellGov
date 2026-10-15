@@ -1,0 +1,21 @@
+[test]
+name = "spu_double_policy"
+
+# A hardware probe of double-precision policy: denormal operands in each
+# position of dfa, dfs, dfm and the fused forms, denormal results in the
+# four rounding modes, QNaN and SNaN operands with payloads and both
+# signs, and fesd and frds of NaNs, denormals and rounding boundaries.
+# The SPU program's header comment has the case order and layout.
+
+[observe]
+# 91 cases x 16 words (op, mode, A, B, C, result quadword, FPSCR), padding.
+memory_regions = [
+  { name = "result", addr = 0, size = 6144 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

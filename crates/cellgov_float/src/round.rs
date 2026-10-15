@@ -110,7 +110,7 @@ pub enum Policy {
     /// denormal results, overflow per the mode, and UNF only for a tiny
     /// result that is also inexact.
     ///
-    /// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with inexactness.
+    /// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with inexactness. [SPU-ISA p:198 s:9.2] an implementation may support denormals only as results; the `spu_double_policy` capture shows the CBE producing them from dfm and dfs in all four modes, with UNF and INX only when inexact.
     Ieee754Cbe,
 }
 

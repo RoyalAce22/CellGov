@@ -13,34 +13,34 @@ use crate::state::SpuState;
 
 /// Whether a denormal operand, read as zero with DENORM, also raises INV.
 ///
-/// [SPU-ISA p:199 s:9.2.2] an implementation may set INV as well as DENORM for a denormal operand. The console capture of the `spu_float_edges` microtest settles it: its `dfm_snan_and_denormal_operands` case sets DENORM alone for the denormal slot.
+/// [SPU-ISA p:199 s:9.2.2] an implementation may set INV as well as DENORM for a denormal operand. The console capture of the `spu_float_edges` microtest settles it: its `dfm_snan_and_denormal_operands` case sets DENORM alone for the denormal slot, and the `spu_double_policy` capture shows the same with a denormal in every operand position of dfa, dfs, dfm and the fused forms.
 const DENORMAL_OPERAND_RAISES_INVALID: bool = false;
 
 /// Whether a NaN result takes the sign of NaN operands that are all
 /// negative, rather than the default QNaN's positive sign.
 ///
-/// [SPU-ISA p:197 s:9.2] a NaN result may be the default QNaN, sign 0, even with NaN inputs; [Mueller2005 p:61 s:3.2] the CBE computes the generic NaN for every NaN result. The console capture of the `spu_float_edges` microtest settles the sign: its `dfnma_nan_result_keeps_sign_0` case returns the positive default QNaN for negative NaN inputs.
+/// [SPU-ISA p:197 s:9.2] a NaN result may be the default QNaN, sign 0, even with NaN inputs; [Mueller2005 p:61 s:3.2] the CBE computes the generic NaN for every NaN result. The console capture of the `spu_float_edges` microtest settles the sign: its `dfnma_nan_result_keeps_sign_0` case returns the positive default QNaN for negative NaN inputs, as do the all-negative NaN cases of dfa, dfm and dfma in the `spu_double_policy` capture.
 const NAN_RESULT_TAKES_INPUT_SIGN: bool = false;
 
 /// Whether `frds` reads a denormal double as a zero of its sign with DENORM.
 ///
-/// [SPU-ISA p:198 s:9.2.1] an implementation may force a denormal conversion input to zero and set DENORM; [Mueller2005 p:61 s:3.2] the CBE's double unit treats denormal operands as zero, and the conversions follow it until hardware vectors decide.
+/// [SPU-ISA p:198 s:9.2.1] an implementation may force a denormal conversion input to zero and set DENORM; [Mueller2005 p:61 s:3.2] the CBE's double unit treats denormal operands as zero. The `spu_double_policy` capture shows `frds` of 0x000FFFFFFFFFFFFF giving +0 with DENORM.
 const FRDS_FLUSHES_DENORMAL_INPUT: bool = true;
 
 /// Whether `fesd` reads a denormal single as a zero of its sign with DENORM.
 ///
-/// [SPU-ISA p:198 s:9.2.1] the same freedom for the single-precision input.
+/// [SPU-ISA p:198 s:9.2.1] the same freedom for the single-precision input. The `spu_double_policy` capture shows `fesd` of 0x00000001 and 0x807FFFFF giving a zero of the input's sign with DENORM.
 const FESD_FLUSHES_DENORMAL_INPUT: bool = true;
 
 /// Whether a conversion's NaN result is the target format's default QNaN,
 /// rather than the input NaN quieted with its payload carried.
 ///
-/// [SPU-ISA p:197 s:9.2] the default QNaN is one allowed NaN result. The console capture of the `spu_float_edges` microtest settles it for `fesd`: its `fesd_of_an_infinity` case returns the default QNaN for an SNaN input, not the payload quieted.
+/// [SPU-ISA p:197 s:9.2] the default QNaN is one allowed NaN result. The console capture of the `spu_float_edges` microtest settles it for `fesd`: its `fesd_of_an_infinity` case returns the default QNaN for an SNaN input, not the payload quieted. The `spu_double_policy` capture shows the same for `fesd` of a QNaN with a payload and for `frds` of an SNaN and of a QNaN with a payload.
 const CONVERSION_NAN_IS_DEFAULT: bool = true;
 
 /// Whether an SNaN conversion input raises INV.
 ///
-/// [SPU-ISA p:199 s:9.2.2] an SNaN operand is an invalid operation.
+/// [SPU-ISA p:199 s:9.2.2] an SNaN operand is an invalid operation. The `spu_double_policy` capture shows INV for `fesd` of 0xFF800001 and `frds` of 0xFFF0000000000001, and no INV for a QNaN input.
 const CONVERSION_SNAN_RAISES_INVALID: bool = true;
 
 /// The double-precision operation an arm applies.
