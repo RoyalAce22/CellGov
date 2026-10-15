@@ -1,0 +1,17 @@
+[test]
+name = "spu_group_container"
+
+# A hardware probe: the memory an SPU thread group of type
+# MEMORY_FROM_CONTAINER takes from the memory container its attribute
+# names, how a container's size rounds, and what group create answers
+# when the container is short, the SPU pool full, or both. The console
+# capture is the answer; no emulator runs it.
+
+[observe]
+# 32 big-endian u32 words, in the order ppu/main.c lists: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"

@@ -29,12 +29,14 @@ fn written_u32(d: &Lv2Dispatch) -> u32 {
     }
 }
 
+/// A 3 MiB container: room for every allocation the tests below make.
 fn create_container(host: &mut Lv2Host, rt: &FakeRuntime) -> u32 {
+    create_container_of(host, rt, 0x30_0000)
+}
+
+fn create_container_of(host: &mut Lv2Host, rt: &FakeRuntime, size: u64) -> u32 {
     let d = host.dispatch(
-        Lv2Request::MemoryContainerCreate {
-            cid_ptr: OUT,
-            size: 0x10_0000,
-        },
+        Lv2Request::MemoryContainerCreate { cid_ptr: OUT, size },
         src(),
         rt,
     );
@@ -89,6 +91,23 @@ fn a_container_id_the_process_minted_allocates_at_the_page_size_named() {
 
     let d = allocate(&mut host, &rt, 0x10_0000, cid, 0);
     assert_eq!(code_of(&d), 0, "flags 0 is the 1 MiB default");
+}
+
+/// The console capture of `tests/micro/spu_group_container_shared` shows
+/// a container allocation taking the container's memory.
+#[test]
+fn an_allocation_takes_the_container_memory_it_names() {
+    let rt = FakeRuntime::with_memory(GuestMemory::new(0x10000));
+    let mut host = Lv2Host::new();
+    let cid = create_container_of(&mut host, &rt, 0x10_0000);
+    let d = allocate(&mut host, &rt, 0x10_0000, cid, page_size::FLAG_1M);
+    assert_eq!(code_of(&d), 0);
+    let d = allocate(&mut host, &rt, 0x1_0000, cid, page_size::FLAG_64K);
+    assert_eq!(
+        code_of(&d),
+        u64::from(errno::CELL_ENOMEM),
+        "the first allocation took the whole container"
+    );
 }
 
 #[test]
@@ -202,6 +221,9 @@ fn the_container_set_moves_the_host_partial() {
         with,
         "removing the container moves it back"
     );
-    host.state.memory_containers.insert(cid, ());
+    host.state.memory_containers.insert(
+        cid,
+        crate::host::memory::MemoryContainer::with_size(0x30_0000),
+    );
     assert_eq!(host.sync_partial(), with);
 }

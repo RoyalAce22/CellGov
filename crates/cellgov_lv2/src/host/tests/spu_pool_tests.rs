@@ -132,7 +132,10 @@ fn a_container_type_takes_a_container_that_exists() {
         create(&mut host, &rt, 1, ATTR_PTR),
         errno::CELL_ESRCH.into()
     );
-    host.state.memory_containers.insert(0, ());
+    host.state.memory_containers.insert(
+        0,
+        crate::host::memory::MemoryContainer::with_size(0x10_0000),
+    );
     assert_eq!(create(&mut host, &rt, 1, ATTR_PTR), 0);
 }
 

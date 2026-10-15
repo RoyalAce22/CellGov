@@ -332,6 +332,15 @@ pub mod group_attr {
     pub const CONTAINER_OFFSET: u32 = 12;
 }
 
+/// The memory an SPU thread group with a scheduler context takes for
+/// each of its threads: the save area of one local store. A group that
+/// shares an SPU with the system takes one in all.
+// The console capture of tests/micro/spu_group_container shows a 1 MiB
+// container holding a group of four threads and refusing a fifth thread
+// with CELL_ENOMEM, and a destroy returning the memory;
+// tests/micro/spu_group_container_coop shows the cooperating group's one.
+pub const GROUP_MEMORY_PER_THREAD: u64 = 0x4_0000;
+
 /// `cause` enum returned by `sys_spu_thread_group_join`.
 // The console captures of tests/micro/spu_thread_window_slots and
 // tests/micro/spu_stop_service_codes show all three, each with the

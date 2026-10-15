@@ -22,8 +22,9 @@ impl Lv2Host {
     /// Serves syscalls 324 and 341. Firmware publishes a wrapper for
     /// each: libsysmodule.sprx carries both in its syscall thunk
     /// table. CellGov routes them to one arm; whether the kernel binds
-    /// them to one entry point is not witnessed here. Physical-memory
-    /// budgets are not tracked.
+    /// them to one entry point is not witnessed here. The container
+    /// records `size` rounded down to the 1 MiB granule; the process's
+    /// own budget is not tracked, so the create takes nothing from it.
     ///
     /// # Errors
     ///
@@ -49,7 +50,10 @@ impl Lv2Host {
             return d;
         }
         let cid = self.alloc_id();
-        self.state.memory_containers.insert(cid, ());
+        let size = size & !(CONTAINER_GRANULE - 1);
+        self.state
+            .memory_containers
+            .insert(cid, crate::host::memory::MemoryContainer::with_size(size));
         let write = Effect::shared_write(
             ByteRange::contiguous_u32(cid_ptr, 4),
             WritePayload::from_slice(&cid.to_be_bytes()),

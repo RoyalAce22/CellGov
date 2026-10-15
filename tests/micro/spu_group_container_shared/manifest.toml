@@ -1,0 +1,16 @@
+[test]
+name = "spu_group_container_shared"
+
+# A hardware probe: what a cooperating container-type SPU thread group
+# takes from its memory container, and whether an allocation from a
+# container leaves less of it for a group. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, in the order ppu/main.c lists: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"

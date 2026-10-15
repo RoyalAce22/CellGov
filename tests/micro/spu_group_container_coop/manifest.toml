@@ -1,0 +1,15 @@
+[test]
+name = "spu_group_container_coop"
+
+# A hardware probe: whether a cooperating container-type SPU thread
+# group takes one local store's memory from its container or none. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, in the order ppu/main.c lists: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"

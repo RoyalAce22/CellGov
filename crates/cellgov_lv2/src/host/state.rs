@@ -73,9 +73,11 @@ pub(in crate::host) struct Lv2State {
     /// The USB host driver: handles and parked event readers
     /// (530-541).
     pub(in crate::host) usbd: UsbdState,
-    /// Container ids minted by `sys_memory_container_create`; the
-    /// membership `sys_memory_allocate_from_container` checks.
-    pub(in crate::host) memory_containers: cellgov_mem::lanes::LaneMap<u32, ()>,
+    /// The containers `sys_memory_container_create` minted, by id: the
+    /// membership `sys_memory_allocate_from_container` checks, and the
+    /// memory SPU thread groups and allocations take from each.
+    pub(in crate::host) memory_containers:
+        cellgov_mem::lanes::LaneMap<u32, super::memory::MemoryContainer>,
     pub(in crate::host) lwmutexes: LwMutexTable,
     pub(in crate::host) mutexes: MutexTable,
     pub(in crate::host) semaphores: SemaphoreTable,

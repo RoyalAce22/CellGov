@@ -17,7 +17,7 @@ use crate::host::{Lv2Host, Lv2Runtime};
 use crate::image::LsSegment;
 use crate::request::Lv2Request;
 use crate::thread_group::{
-    CreateGroupError, DestroyGroupError, GroupRequest, GroupState, MAX_SLOTS_PER_GROUP,
+    CreateGroupError, DestroyGroupError, GroupKind, GroupRequest, GroupState, MAX_SLOTS_PER_GROUP,
 };
 use cellgov_time::GuestTicks;
 
@@ -301,13 +301,18 @@ impl Lv2Host {
     ///   never fit the pool.
     /// - `CELL_ESRCH` when the attribute names no memory container that
     ///   exists.
+    /// - `CELL_ENOMEM` when the container cannot hold the group's memory.
     /// - `CELL_EBUSY` when the groups that exist leave no room for it.
     /// - `CELL_EAGAIN` when the group allocator is exhausted.
     ///
     /// The reference console answers each of these in this order
     /// (`tests/micro/spu_group_limits`, `tests/micro/spu_pool_edges`,
-    /// `tests/micro/spu_group_priority`). The container's memory is not
-    /// taken.
+    /// `tests/micro/spu_group_priority`, `tests/micro/spu_group_container`),
+    /// except that no capture places `CELL_ENOMEM` against `CELL_EBUSY`.
+    /// A container-type group takes its memory from the container the
+    /// attribute names (see [`GroupKind::container_memory`]), and its
+    /// destroy returns it. A group of any other type takes nothing from
+    /// the process's own budget, which CellGov does not track.
     pub(super) fn dispatch_group_create(
         &mut self,
         args: GroupCreateArgs,
@@ -353,6 +358,20 @@ impl Lv2Host {
         if container.is_some_and(|ct| !self.state.memory_containers.contains_key(ct)) {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
+        let charge = container.map(|ct| {
+            let bytes = GroupKind::of_type(group_type).container_memory(num_threads);
+            (ct, bytes)
+        });
+        if let Some((ct, bytes)) = charge {
+            if !self
+                .state
+                .memory_containers
+                .get(ct)
+                .is_some_and(|c| c.has_room(bytes))
+            {
+                return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+            }
+        }
         // The pool holds at most `pool::USABLE_SPUS` threads per group,
         // well under the `MAX_SLOTS_PER_GROUP` thread-id encoding.
         let group_id = match self.state.groups.create_typed(request, root) {
@@ -367,6 +386,14 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
             }
         };
+        if let Some((ct, bytes)) = charge {
+            if let Some(mut c) = self.state.memory_containers.get_mut(ct) {
+                c.taken += bytes;
+            }
+            if let Some(mut group) = self.state.groups.get_mut(group_id) {
+                group.container = Some(ct);
+            }
+        }
 
         let range = ByteRange::contiguous_u32(id_ptr, 4);
         let effect = Effect::shared_write(
@@ -398,10 +425,25 @@ impl Lv2Host {
             .get(group_id)
             .map(|g| g.slots.values().map(|s| s.image_handle).collect())
             .unwrap_or_default();
+        let charge = self.state.groups.get(group_id).and_then(|g| {
+            g.container
+                .map(|ct| (ct, g.kind().container_memory(g.num_threads)))
+        });
         let code = match self.state.groups.destroy(group_id) {
             Ok(()) => {
                 for handle in slot_handles {
                     self.content_store_mut().withdraw_user_image(handle);
+                }
+                // The memory goes back to the container the group took
+                // it from.
+                if let Some((ct, bytes)) = charge {
+                    if let Some(mut c) = self.state.memory_containers.get_mut(ct) {
+                        debug_assert!(
+                            c.taken >= bytes,
+                            "container {ct:#x} gets back more than it gave"
+                        );
+                        c.taken = c.taken.saturating_sub(bytes);
+                    }
                 }
                 0
             }
@@ -931,6 +973,10 @@ mod pool_console_tests;
 #[cfg(test)]
 #[path = "tests/spu_pool_edges_console_tests.rs"]
 mod pool_edges_console_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_group_container_console_tests.rs"]
+mod group_container_console_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_group_root_types_console_tests.rs"]

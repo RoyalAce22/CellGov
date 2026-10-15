@@ -7,7 +7,9 @@ use crate::dispatch::{SpuInitState, SpuLoadImage};
 use crate::image::SpuImageHandle;
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{self, source, LaneEntryMut, LaneMap, LaneValue, ObjectLanes};
-use cellgov_ps3_abi::lv2::spu::{event, group_join_cause, group_priority, group_type, pool};
+use cellgov_ps3_abi::lv2::spu::{
+    event, group_join_cause, group_priority, group_type, pool, GROUP_MEMORY_PER_THREAD,
+};
 use std::collections::BTreeMap;
 
 /// Cap on slots per group; the `group_id * 256 + slot` thread-id
@@ -91,6 +93,9 @@ pub struct ThreadGroup {
     /// run of the group, by slot. A thread that has not exited in the
     /// current run reports it.
     pub previous_exit_status: BTreeMap<u32, u32>,
+    /// The memory container the group's memory came from, for a type
+    /// that takes it from one.
+    pub container: Option<u32>,
 }
 
 /// What `sys_spu_thread_group_create` asks for.
@@ -129,6 +134,21 @@ pub enum GroupKind {
 }
 
 impl GroupKind {
+    /// The memory a group of this kind with `num_threads` threads takes
+    /// from a memory container: a local-store save area per thread, and
+    /// one in all for a group that shares an SPU with the system. No
+    /// container type lacks a scheduler context, so a group without one
+    /// takes none.
+    // The console captures of tests/micro/spu_group_container and
+    // tests/micro/spu_group_container_coop fix the first two amounts.
+    pub fn container_memory(self, num_threads: u32) -> u64 {
+        match self {
+            Self::Context => u64::from(num_threads) * GROUP_MEMORY_PER_THREAD,
+            Self::CooperateWithSystem => GROUP_MEMORY_PER_THREAD,
+            Self::NonContext => 0,
+        }
+    }
+
     /// The kind a group attribute's `type` word selects.
     pub fn of_type(group_type: u32) -> Self {
         if group_type & group_type::COOPERATE_WITH_SYSTEM != 0 {
@@ -247,6 +267,9 @@ impl LaneValue for ThreadGroup {
         }
         for (&slot, &status) in &self.previous_exit_status {
             lanes.lane(33, u64::from(slot), u64::from(status));
+        }
+        if let Some(container) = self.container {
+            lanes.lane(34, 0, u64::from(container));
         }
         for (&index, slot) in &self.slots {
             let index = u64::from(index);
@@ -714,6 +737,7 @@ impl ThreadGroupTable {
             priority,
             suspended: false,
             previous_exit_status: BTreeMap::new(),
+            container: None,
         };
         self.groups.insert(id, group);
         Some(id)

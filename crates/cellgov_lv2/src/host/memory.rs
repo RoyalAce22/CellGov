@@ -1,11 +1,43 @@
-//! `sys_memory_allocate` bump-allocator dispatch.
+//! `sys_memory_allocate` bump-allocator dispatch, and the memory
+//! containers `sys_memory_container_create` mints.
 
 use cellgov_event::UnitId;
+use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
 use cellgov_time::GuestTicks;
+
+/// A memory container: its size and the part of it SPU thread groups and
+/// allocations hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::host) struct MemoryContainer {
+    /// The size the create asked for, rounded down to the 1 MiB granule.
+    pub(in crate::host) size: u64,
+    /// The memory the container's SPU thread groups and allocations
+    /// hold.
+    pub(in crate::host) taken: u64,
+}
+
+impl MemoryContainer {
+    /// An empty container of `size` bytes.
+    pub(in crate::host) fn with_size(size: u64) -> Self {
+        Self { size, taken: 0 }
+    }
+
+    /// Whether `bytes` more fit the container.
+    pub(in crate::host) fn has_room(&self, bytes: u64) -> bool {
+        self.size.saturating_sub(self.taken) >= bytes
+    }
+}
+
+impl LaneValue for MemoryContainer {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.size);
+        lanes.lane(2, 0, self.taken);
+    }
+}
 
 impl Lv2Host {
     /// `sys_memory_allocate` (348): bump-allocates guest memory from the
@@ -80,8 +112,11 @@ impl Lv2Host {
     /// `sys_memory_allocate_from_container`: the `sys_memory_allocate`
     /// bump allocator gated on a container id this process minted.
     ///
-    /// Container budgets are not tracked, so a live container never
-    /// runs out.
+    /// The allocation takes `size` from the container, which an SPU
+    /// thread group then cannot take. `sys_memory_free` gives nothing
+    /// back. The console capture of
+    /// `tests/micro/spu_group_container_shared` shows a container
+    /// allocation leaving no room for a group.
     ///
     /// # Errors
     ///
@@ -95,7 +130,8 @@ impl Lv2Host {
     ///   1 MiB (0x400).
     /// - `CELL_EALIGN` when `size` is not a multiple of the page size.
     /// - `CELL_ESRCH` for a container id no create minted.
-    /// - `CELL_ENOMEM` when the user-memory budget is exhausted.
+    /// - `CELL_ENOMEM` when the container or the user-memory budget is
+    ///   exhausted.
     /// - `CELL_EFAULT` for a null `alloc_addr_ptr`.
     pub(super) fn dispatch_memory_allocate_from_container(
         &mut self,
@@ -120,6 +156,14 @@ impl Lv2Host {
         }
         if !self.state.memory_containers.contains_key(cid) {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
+        if !self
+            .state
+            .memory_containers
+            .get(cid)
+            .is_some_and(|c| c.has_room(size))
+        {
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         let Ok(size) = u32::try_from(size) else {
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
@@ -146,6 +190,9 @@ impl Lv2Host {
             return d;
         }
         self.state.mem_alloc_ptr = next;
+        if let Some(mut c) = self.state.memory_containers.get_mut(cid) {
+            c.taken += u64::from(size);
+        }
         self.immediate_write_u32(aligned_ptr, alloc_addr_ptr, requester, tick)
     }
 }
