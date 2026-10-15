@@ -1,0 +1,23 @@
+[test]
+name = "spu_estimate_readout"
+
+# A hardware probe that reads the frest and frsqest tables off the SPU.
+# Each estimate writes its table entry (BaseFraction, StepFraction) into
+# the result, so a scan of every fraction at one exponent gives the
+# index bits and the table, and a sweep of the exponents gives the
+# exponent map. The FPSCR after each zero or denormal input gives the
+# DBZ rule. The SPU program's header comment has the result layout.
+
+[observe]
+# Plateau scans, exponent map, FPSCR cases, zero padding.
+memory_regions = [
+  { name = "result", addr = 0, size = 27008 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# Three 2^23 scans take well under a second on the SPU.
+timeout_ms = 60000
+files = ["spu_main.elf"]

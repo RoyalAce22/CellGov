@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "capture_id": "micro:spu_estimate_readout#2b2cf0583d78",
+  "captured_at": "2026-10-14T07:23:03Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 67,
+      "fan_percent": 32
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "52ed2574cef50d993116e7721b48feb4f3556742",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/52ed2574cef50d993116e7721b48feb4f3556742"
+  },
+  "microtest": {
+    "name": "spu_estimate_readout",
+    "manifest_sha256": "b3d28e4a8abcd86f8453b177f5c7fedea9fd3052f36cae7ffc942314e4c165aa",
+    "sources": {
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "ba14ec3c62738bce8007004b391ad88a7fd3f06d20eccd6fe216ea7b7afff94d",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "a5fac0dbbaa2ca5f82989dd43ce51e3434fd7cc1f561b3e36ae66cf8001a70c3",
+      "ppu/main.c": "3a18e6a818d187ee08e35e0459cba2620929be696019f4b037613ef73058d24f",
+      "spu/main.c": "0ac5d92bfe5176b1bfbff2e026ca953fd701b402a82f00a77f7dfa3d6bd70ba8"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "9dd8f32a500bc6ec289c8af371c574150e1342ed75b3d8bffa1733a62a2e816a",
+    "ps3_elf_sha256": "6cd51dfb68bc627468bdb27b0fa040bc316586bb3887b9a44a557cdb42261e6d",
+    "reference_elf_sha256": "5bdb27fc36d034a5e249161e21206074c09ed0b6902402082c747662f298488d",
+    "siblings": {
+      "spu_main.elf": "b741cd861cb9a5bf417d2b278c23cc706a70148aeb03e1f39ea9c2d79d7e17ae"
+    },
+    "param_sfo_sha256": "c4638d3e4971db9b81addc10b5899cf166c333e1346371e96ac701906b0befc3"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "2b2cf0583d786dd66bb4c6a76d6f96c1f94f74225899d9afcb2b4ac2d785e919",
+    "bytes": 27016,
+    "result_path": "/dev_hdd0/tmp/cgov_spu_estimate_readout.bin"
+  },
+  "digest": "2b2cf0583d786dd66bb4c6a76d6f96c1f94f74225899d9afcb2b4ac2d785e919  micro:spu_estimate_readout  27016",
+  "recapture_reason": "the first build ran frest and frsqest followed by fi; this build issues the bare estimates"
+}

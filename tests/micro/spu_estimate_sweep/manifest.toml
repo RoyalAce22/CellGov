@@ -1,0 +1,25 @@
+[test]
+name = "spu_estimate_sweep"
+
+# A hardware probe that compares the frest and frsqest model read by
+# spu_estimate_readout against the instructions over all 2^32 inputs,
+# on the SPU, and returns only the mismatch counts and the first
+# mismatch. A control sweep with one table entry changed must count
+# exactly the 2^18 inputs of that entry's segment at one exponent. The
+# console capture is the answer; no emulator runs 2^32 iterations.
+
+[observe]
+# Per sweep (frest, frsqest, control): mismatches (u64), first
+# mismatching input, the instruction's and the model's result there,
+# inputs swept (u64), 0. Then 8 zero words.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# Two full sweeps with a per-lane table lookup take minutes.
+timeout_ms = 900000
+files = ["spu_main.elf"]

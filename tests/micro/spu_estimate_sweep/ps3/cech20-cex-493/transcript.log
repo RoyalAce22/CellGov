@@ -1,0 +1,483 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5725 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 67 C, fan 33%, /dev_hdd0 99840 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > QUIT
+#0016 < 221 BYE
+#0017 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0018 > USER anonymous
+#0019 < 331 OK
+#0020 > PASS anonymous@
+#0021 < 230 OK
+#0022 > TYPE I
+#0023 < 200 TYPE OK
+#0024 > PASV
+#0025 < 227 Entering Passive Mode (10,77,0,2,200,26)
+#0026 > STOR /dev_hdd0/tmp/cellgov_lease/holder (74 bytes)
+#0027 < 150 OK
+#0028 < 226 OK
+#0029 > QUIT
+#0030 < 221 BYE
+#0031 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0032 < 404 (512 bytes)
+#0033 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0034 > USER anonymous
+#0035 < 331 OK
+#0036 > PASS anonymous@
+#0037 < 230 OK
+#0038 > TYPE I
+#0039 < 200 TYPE OK
+#0040 > PASV
+#0041 < 227 Entering Passive Mode (10,77,0,2,202,79)
+#0042 > NLST /dev_hdd0/game
+#0043 < 150 OK
+#0044 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 67C]
+#0045 > QUIT
+#0046 < 221 BYE
+#0047 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0048 > USER anonymous
+#0049 < 331 OK
+#0050 > PASS anonymous@
+#0051 < 230 OK
+#0052 > TYPE I
+#0053 < 200 TYPE OK
+#0054 > MKD /dev_hdd0/game/CGOV00001
+#0055 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0056 > QUIT
+#0057 < 221 BYE
+#0058 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0059 > USER anonymous
+#0060 < 331 OK
+#0061 > PASS anonymous@
+#0062 < 230 OK
+#0063 > TYPE I
+#0064 < 200 TYPE OK
+#0065 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0066 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0067 > QUIT
+#0068 < 221 BYE
+#0069 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0070 > USER anonymous
+#0071 < 331 OK
+#0072 > PASS anonymous@
+#0073 < 230 OK
+#0074 > TYPE I
+#0075 < 200 TYPE OK
+#0076 > PASV
+#0077 < 227 Entering Passive Mode (10,77,0,2,208,33)
+#0078 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0079 < 150 OK
+#0080 < 226 OK
+#0081 > QUIT
+#0082 < 221 BYE
+#0083 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0084 > USER anonymous
+#0085 < 331 OK
+#0086 > PASS anonymous@
+#0087 < 230 OK
+#0088 > TYPE I
+#0089 < 200 TYPE OK
+#0090 > PASV
+#0091 < 227 Entering Passive Mode (10,77,0,2,212,161)
+#0092 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (7776 bytes)
+#0093 < 150 OK
+#0094 < 226 OK
+#0095 > QUIT
+#0096 < 221 BYE
+#0097 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0098 > USER anonymous
+#0099 < 331 OK
+#0100 > PASS anonymous@
+#0101 < 230 OK
+#0102 > TYPE I
+#0103 < 200 TYPE OK
+#0104 > PASV
+#0105 < 227 Entering Passive Mode (10,77,0,2,214,49)
+#0106 > STOR /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf (7138 bytes)
+#0107 < 150 OK
+#0108 < 226 OK
+#0109 > QUIT
+#0110 < 221 BYE
+#0111 = deployed 3 file(s) under /dev_hdd0/game/CGOV00001
+#0112 > GET /play.ps3?CGOV00001
+#0113 < 200 (5725 bytes)
+#0114 = started
+#0115 > GET /cpursx.ps3
+#0116 < 200 (5725 bytes)
+#0117 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0118 < 404 (512 bytes)
+#0119 > GET /cpursx.ps3
+#0120 < 200 (5725 bytes)
+#0121 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0122 < 404 (512 bytes)
+#0123 > GET /cpursx.ps3
+#0124 < 200 (5725 bytes)
+#0125 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0126 < 404 (512 bytes)
+#0127 > GET /cpursx.ps3
+#0128 < 200 (5725 bytes)
+#0129 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0130 < 404 (512 bytes)
+#0131 > GET /cpursx.ps3
+#0132 < 200 (5933 bytes)
+#0133 = left the XMB after 5 poll(s)
+#0134 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0135 < 404 (512 bytes)
+#0136 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0137 < 404 (512 bytes)
+#0138 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0139 < 404 (512 bytes)
+#0140 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0141 < 404 (512 bytes)
+#0142 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0143 < 404 (512 bytes)
+#0144 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0145 < 404 (512 bytes)
+#0146 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0147 < 404 (512 bytes)
+#0148 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0149 < 404 (512 bytes)
+#0150 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0151 < 404 (512 bytes)
+#0152 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0153 < 404 (512 bytes)
+#0154 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0155 < 404 (512 bytes)
+#0156 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0157 < 404 (512 bytes)
+#0158 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0159 < 404 (512 bytes)
+#0160 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0161 < 404 (512 bytes)
+#0162 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0163 < 404 (512 bytes)
+#0164 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0165 < 404 (512 bytes)
+#0166 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0167 < 404 (512 bytes)
+#0168 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0169 < 404 (512 bytes)
+#0170 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0171 < 404 (512 bytes)
+#0172 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0173 < 404 (512 bytes)
+#0174 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0175 < 404 (512 bytes)
+#0176 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0177 < 404 (512 bytes)
+#0178 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0179 < 404 (512 bytes)
+#0180 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0181 < 404 (512 bytes)
+#0182 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0183 < 404 (512 bytes)
+#0184 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0185 < 404 (512 bytes)
+#0186 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0187 < 404 (512 bytes)
+#0188 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0189 < 404 (512 bytes)
+#0190 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0191 < 404 (512 bytes)
+#0192 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0193 < 404 (512 bytes)
+#0194 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0195 < 404 (512 bytes)
+#0196 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0197 < 404 (512 bytes)
+#0198 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0199 < 404 (512 bytes)
+#0200 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0201 < 404 (512 bytes)
+#0202 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0203 < 404 (512 bytes)
+#0204 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0205 < 404 (512 bytes)
+#0206 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0207 < 404 (512 bytes)
+#0208 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0209 < 404 (512 bytes)
+#0210 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0211 < 404 (512 bytes)
+#0212 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0213 < 404 (512 bytes)
+#0214 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0215 < 404 (512 bytes)
+#0216 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0217 < 404 (512 bytes)
+#0218 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0219 < 404 (512 bytes)
+#0220 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0221 < 404 (512 bytes)
+#0222 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0223 < 404 (512 bytes)
+#0224 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0225 < 404 (512 bytes)
+#0226 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0227 < 404 (512 bytes)
+#0228 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0229 < 404 (512 bytes)
+#0230 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0231 < 404 (512 bytes)
+#0232 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0233 < 404 (512 bytes)
+#0234 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0235 < 404 (512 bytes)
+#0236 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0237 < 404 (512 bytes)
+#0238 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0239 < 404 (512 bytes)
+#0240 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0241 < 404 (512 bytes)
+#0242 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0243 < 404 (512 bytes)
+#0244 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0245 < 404 (512 bytes)
+#0246 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0247 < 404 (512 bytes)
+#0248 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0249 < 404 (512 bytes)
+#0250 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0251 < 404 (512 bytes)
+#0252 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0253 < 404 (512 bytes)
+#0254 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0255 < 404 (512 bytes)
+#0256 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0257 < 404 (512 bytes)
+#0258 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0259 < 404 (512 bytes)
+#0260 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0261 < 404 (512 bytes)
+#0262 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0263 < 404 (512 bytes)
+#0264 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0265 < 404 (512 bytes)
+#0266 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0267 < 404 (512 bytes)
+#0268 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0269 < 404 (512 bytes)
+#0270 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0271 < 404 (512 bytes)
+#0272 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0273 < 404 (512 bytes)
+#0274 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0275 < 404 (512 bytes)
+#0276 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0277 < 404 (512 bytes)
+#0278 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0279 < 404 (512 bytes)
+#0280 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0281 < 404 (512 bytes)
+#0282 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0283 < 404 (512 bytes)
+#0284 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0285 < 404 (512 bytes)
+#0286 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0287 < 404 (512 bytes)
+#0288 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0289 < 404 (512 bytes)
+#0290 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0291 < 404 (512 bytes)
+#0292 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0293 < 404 (512 bytes)
+#0294 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0295 < 404 (512 bytes)
+#0296 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0297 < 404 (512 bytes)
+#0298 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0299 < 404 (512 bytes)
+#0300 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0301 < 404 (512 bytes)
+#0302 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0303 < 404 (512 bytes)
+#0304 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0305 < 404 (512 bytes)
+#0306 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0307 < 404 (512 bytes)
+#0308 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0309 < 404 (512 bytes)
+#0310 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0311 < 404 (512 bytes)
+#0312 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0313 < 404 (512 bytes)
+#0314 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0315 < 404 (512 bytes)
+#0316 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0317 < 404 (512 bytes)
+#0318 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0319 < 404 (512 bytes)
+#0320 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0321 < 404 (512 bytes)
+#0322 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0323 < 404 (512 bytes)
+#0324 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0325 < 404 (512 bytes)
+#0326 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0327 < 404 (512 bytes)
+#0328 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0329 < 404 (512 bytes)
+#0330 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0331 < 404 (512 bytes)
+#0332 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0333 < 404 (512 bytes)
+#0334 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0335 < 404 (512 bytes)
+#0336 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0337 < 404 (512 bytes)
+#0338 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0339 < 404 (512 bytes)
+#0340 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0341 < 404 (512 bytes)
+#0342 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0343 < 404 (512 bytes)
+#0344 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0345 < 404 (512 bytes)
+#0346 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0347 < 404 (512 bytes)
+#0348 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0349 < 404 (512 bytes)
+#0350 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0351 < 404 (512 bytes)
+#0352 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0353 < 404 (512 bytes)
+#0354 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0355 < 404 (512 bytes)
+#0356 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0357 < 200 (136 bytes)
+#0358 = result present after 112 poll(s)
+#0359 > GET /cpursx.ps3
+#0360 < 200 (6436 bytes)
+#0361 > GET /cpursx.ps3
+#0362 < 200 (5933 bytes)
+#0363 > GET /cpursx.ps3
+#0364 < 200 (5933 bytes)
+#0365 > GET /cpursx.ps3
+#0366 < 200 (5725 bytes)
+#0367 = back at the XMB after 4 poll(s)
+#0368 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0369 < 200 (136 bytes)
+#0370 = captured micro:spu_estimate_sweep#8fbff5c9dc9f
+#0371 > GET /mount.ps3/unmount
+#0372 < 200 (4441 bytes)
+#0373 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0374 > USER anonymous
+#0375 < 331 OK
+#0376 > PASS anonymous@
+#0377 < 230 OK
+#0378 > TYPE I
+#0379 < 200 TYPE OK
+#0380 > PASV
+#0381 < 227 Entering Passive Mode (10,77,0,2,208,152)
+#0382 > NLST /dev_hdd0/game
+#0383 < 150 OK
+#0384 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 62C]
+#0385 > QUIT
+#0386 < 221 BYE
+#0387 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0388 > USER anonymous
+#0389 < 331 OK
+#0390 > PASS anonymous@
+#0391 < 230 OK
+#0392 > TYPE I
+#0393 < 200 TYPE OK
+#0394 > PASV
+#0395 < 227 Entering Passive Mode (10,77,0,2,212,165)
+#0396 > NLST /dev_hdd0/game/CGOV00001
+#0397 < 150 OK
+#0398 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 62C]
+#0399 > QUIT
+#0400 < 221 BYE
+#0401 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0402 > USER anonymous
+#0403 < 331 OK
+#0404 > PASS anonymous@
+#0405 < 230 OK
+#0406 > TYPE I
+#0407 < 200 TYPE OK
+#0408 > PASV
+#0409 < 227 Entering Passive Mode (10,77,0,2,216,9)
+#0410 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0411 < 150 OK
+#0412 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 61C]
+#0413 > QUIT
+#0414 < 221 BYE
+#0415 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0416 > USER anonymous
+#0417 < 331 OK
+#0418 > PASS anonymous@
+#0419 < 230 OK
+#0420 > TYPE I
+#0421 < 200 TYPE OK
+#0422 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0423 < 250 OK
+#0424 > QUIT
+#0425 < 221 BYE
+#0426 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0427 > USER anonymous
+#0428 < 331 OK
+#0429 > PASS anonymous@
+#0430 < 230 OK
+#0431 > TYPE I
+#0432 < 200 TYPE OK
+#0433 > DELE /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf
+#0434 < 250 OK
+#0435 > QUIT
+#0436 < 221 BYE
+#0437 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0438 > USER anonymous
+#0439 < 331 OK
+#0440 > PASS anonymous@
+#0441 < 230 OK
+#0442 > TYPE I
+#0443 < 200 TYPE OK
+#0444 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0445 < 250 OK
+#0446 > QUIT
+#0447 < 221 BYE
+#0448 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0449 > USER anonymous
+#0450 < 331 OK
+#0451 > PASS anonymous@
+#0452 < 230 OK
+#0453 > TYPE I
+#0454 < 200 TYPE OK
+#0455 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0456 < 250 OK
+#0457 > QUIT
+#0458 < 221 BYE
+#0459 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0460 > USER anonymous
+#0461 < 331 OK
+#0462 > PASS anonymous@
+#0463 < 230 OK
+#0464 > TYPE I
+#0465 < 200 TYPE OK
+#0466 > RMD /dev_hdd0/game/CGOV00001
+#0467 < 250 OK
+#0468 > QUIT
+#0469 < 221 BYE
+#0470 > GET /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0471 < 200 (136 bytes)
+#0472 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0473 > USER anonymous
+#0474 < 331 OK
+#0475 > PASS anonymous@
+#0476 < 230 OK
+#0477 > TYPE I
+#0478 < 200 TYPE OK
+#0479 > DELE /dev_hdd0/tmp/cgov_spu_estimate_sweep.bin
+#0480 < 250 OK
+#0481 > QUIT
+#0482 < 221 BYE
+#0483 = console restored

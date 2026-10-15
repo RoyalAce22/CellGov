@@ -5,5 +5,4 @@
 # every_case_matches_its_expected_result_or_names_its_defect fails on a
 # difference with no row and on a row that no longer differs.
 case	field	cellgov	class	issue	note
-reciprocal_sequence	fpscr	00000000_00000000_00000005_00000203	cellgov-defect	#1500	slot 3 flags: CellGov's frest model sets one more flag than the console
-reciprocal_sqrt_sequence	r3	7fffffff_7ffffffd_3effffff_3f3504f2	cellgov-defect	#1500	slot 3 is one ulp below the console's: frsqest's table is CellGov's own, not the hardware's
+reciprocal_sequence	fpscr	00000000_00000000_00000005_00000203	cellgov-defect	#1501	slot 3 flags: CellGov's fi sets UNF as well as DIFF for frest's exponent-0 estimate of 2^126; the console sets DIFF alone

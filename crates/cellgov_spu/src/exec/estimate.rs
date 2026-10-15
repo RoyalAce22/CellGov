@@ -3,97 +3,125 @@
 //!
 //! The architecture lets each implementation give different results
 //! [SPU-ISA p:195 s:9], and no public document gives the CBE's table
-//! contents. These tables are CellGov's own: each entry is the minimax line of its segment,
-//! written as a base less a step times the interpolation fraction and
-//! rounded to the entry's field widths. They meet the documented
-//! Newton-Raphson bounds and the documented `frsqest` zero threshold, but
-//! they are not the hardware's table, and the index widths are the
-//! smallest that meet those bounds. Hardware vectors replace them.
+//! contents. Each estimate writes its entry into its result, so the
+//! `spu_estimate_readout` microtest read the tables, the index widths
+//! and the exponent maps here off a CECH-2001A. The `spu_estimate_sweep`
+//! microtest compared this model with both instructions on that console
+//! over all 2^32 inputs and found no difference.
 
-/// Fraction bits `frest` indexes its table by.
-const FREST_INDEX_BITS: u32 = 5;
-
-/// Fraction bits `frsqest` indexes each of its two tables by.
-const FRSQEST_INDEX_BITS: u32 = 4;
+/// The fraction bits that index each table.
+const INDEX_BITS: u32 = 5;
 
 /// `frest` entries, (BaseFraction, StepFraction), for 2/m over each
 /// segment of the significand m.
-const FREST_TABLE: [(u16, u16); 1 << FREST_INDEX_BITS] = [
-    (8190, 993),
-    (8161, 935),
-    (7227, 881),
+const FREST_TABLE: [(u16, u16); 1 << INDEX_BITS] = [
+    (8190, 992),
+    (8161, 934),
+    (7227, 882),
     (7202, 832),
-    (6370, 787),
+    (6370, 786),
     (6350, 746),
     (5604, 708),
     (5586, 672),
-    (4914, 639),
-    (4899, 609),
-    (4290, 581),
+    (4914, 638),
+    (4900, 610),
+    (4290, 580),
     (4277, 554),
     (3723, 530),
-    (3711, 507),
-    (3205, 485),
-    (3195, 465),
+    (3711, 506),
+    (3205, 484),
+    (3196, 466),
     (2730, 446),
     (2721, 428),
-    (2293, 411),
-    (2285, 395),
-    (1890, 380),
-    (1883, 366),
-    (1517, 353),
-    (1510, 340),
-    (1170, 329),
-    (1164, 317),
-    (847, 306),
-    (842, 296),
-    (546, 286),
-    (541, 277),
-    (264, 268),
-    (260, 260),
+    (2293, 410),
+    (2287, 398),
+    (1889, 374),
+    (1889, 374),
+    (1515, 346),
+    (1515, 346),
+    (1169, 323),
+    (1169, 323),
+    (846, 301),
+    (846, 301),
+    (545, 282),
+    (545, 282),
+    (263, 263),
+    (263, 263),
 ];
 
 /// `frsqest` entries for an odd biased exponent (an even power of two):
 /// 2/sqrt(m) over each segment of m.
-const FRSQEST_ODD_EXPONENT: [(u16, u16); 1 << FRSQEST_INDEX_BITS] = [
-    (8189, 489),
-    (7700, 448),
+const FRSQEST_ODD_EXPONENT: [(u16, u16); 1 << INDEX_BITS] = [
+    (8191, 500),
+    (8180, 478),
+    (7702, 456),
+    (7695, 442),
     (7253, 412),
-    (6841, 381),
+    (7253, 412),
+    (6841, 380),
+    (6841, 380),
+    (6461, 353),
     (6461, 353),
     (6108, 329),
+    (6108, 329),
     (5779, 307),
-    (5472, 288),
-    (5184, 270),
-    (4914, 255),
+    (5779, 307),
+    (5472, 287),
+    (5472, 287),
+    (5185, 271),
+    (5185, 271),
+    (4914, 254),
+    (4914, 254),
     (4660, 240),
-    (4420, 227),
+    (4660, 240),
+    (4420, 228),
+    (4420, 228),
     (4192, 215),
-    (3977, 205),
+    (4192, 215),
+    (3977, 204),
+    (3977, 204),
     (3773, 195),
-    (3578, 185),
+    (3773, 195),
+    (3578, 186),
+    (3578, 186),
 ];
 
 /// `frsqest` entries for an even biased exponent (an odd power of two):
 /// 2/sqrt(2m) over each segment of m.
 ///
-/// [SPU-ISA p:217 s:9] with an exponent-0 input, y2 is 0x7fffffff exactly up to fraction 0x000ff53c; entry 1 is the one line near its segment's minimax line that does so.
-const FRSQEST_EVEN_EXPONENT: [(u16, u16); 1 << FRSQEST_INDEX_BITS] = [
-    (3391, 346),
+/// [SPU-ISA p:217 s:9] with an exponent-0 input, y2 is 0x7fffffff exactly up to fraction 0x000ff53c.
+const FRSQEST_EVEN_EXPONENT: [(u16, u16); 1 << INDEX_BITS] = [
+    (3392, 352),
+    (3386, 340),
+    (3046, 317),
     (3046, 317),
     (2729, 291),
+    (2729, 291),
     (2438, 269),
-    (2169, 250),
-    (1919, 233),
+    (2438, 269),
+    (2169, 249),
+    (2169, 249),
+    (1920, 233),
+    (1920, 233),
+    (1687, 217),
     (1687, 217),
     (1470, 203),
-    (1267, 191),
-    (1076, 180),
+    (1470, 203),
+    (1267, 192),
+    (1267, 192),
+    (1075, 179),
+    (1075, 179),
+    (896, 170),
     (896, 170),
     (726, 161),
+    (726, 161),
+    (565, 152),
     (565, 152),
     (413, 145),
-    (268, 138),
+    (413, 145),
+    (268, 137),
+    (268, 137),
+    (131, 131),
     (131, 131),
 ];
 
@@ -126,7 +154,7 @@ pub(super) fn frest(x: u32) -> u32 {
     pack(
         x >> 31 == 1,
         result_exponent,
-        FREST_TABLE[index(x, FREST_INDEX_BITS)],
+        FREST_TABLE[index(x, INDEX_BITS)],
     )
 }
 
@@ -147,5 +175,5 @@ pub(super) fn frsqest(x: u32) -> u32 {
     } else {
         &FRSQEST_EVEN_EXPONENT
     };
-    pack(false, result_exponent, table[index(x, FRSQEST_INDEX_BITS)])
+    pack(false, result_exponent, table[index(x, INDEX_BITS)])
 }
