@@ -1,0 +1,242 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5725 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 64 C, fan 38%, /dev_hdd0 99840 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > QUIT
+#0016 < 221 BYE
+#0017 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0018 > USER anonymous
+#0019 < 331 OK
+#0020 > PASS anonymous@
+#0021 < 230 OK
+#0022 > TYPE I
+#0023 < 200 TYPE OK
+#0024 > PASV
+#0025 < 227 Entering Passive Mode (10,77,0,2,232,213)
+#0026 > STOR /dev_hdd0/tmp/cellgov_lease/holder (73 bytes)
+#0027 < 150 OK
+#0028 < 226 OK
+#0029 > QUIT
+#0030 < 221 BYE
+#0031 > GET /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0032 < 404 (510 bytes)
+#0033 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0034 > USER anonymous
+#0035 < 331 OK
+#0036 > PASS anonymous@
+#0037 < 230 OK
+#0038 > TYPE I
+#0039 < 200 TYPE OK
+#0040 > PASV
+#0041 < 227 Entering Passive Mode (10,77,0,2,234,222)
+#0042 > NLST /dev_hdd0/game
+#0043 < 150 OK
+#0044 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 64C]
+#0045 > QUIT
+#0046 < 221 BYE
+#0047 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0048 > USER anonymous
+#0049 < 331 OK
+#0050 > PASS anonymous@
+#0051 < 230 OK
+#0052 > TYPE I
+#0053 < 200 TYPE OK
+#0054 > MKD /dev_hdd0/game/CGOV00001
+#0055 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0056 > QUIT
+#0057 < 221 BYE
+#0058 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0059 > USER anonymous
+#0060 < 331 OK
+#0061 > PASS anonymous@
+#0062 < 230 OK
+#0063 > TYPE I
+#0064 < 200 TYPE OK
+#0065 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0066 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0067 > QUIT
+#0068 < 221 BYE
+#0069 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0070 > USER anonymous
+#0071 < 331 OK
+#0072 > PASS anonymous@
+#0073 < 230 OK
+#0074 > TYPE I
+#0075 < 200 TYPE OK
+#0076 > PASV
+#0077 < 227 Entering Passive Mode (10,77,0,2,242,6)
+#0078 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0079 < 150 OK
+#0080 < 226 OK
+#0081 > QUIT
+#0082 < 221 BYE
+#0083 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0084 > USER anonymous
+#0085 < 331 OK
+#0086 > PASS anonymous@
+#0087 < 230 OK
+#0088 > TYPE I
+#0089 < 200 TYPE OK
+#0090 > PASV
+#0091 < 227 Entering Passive Mode (10,77,0,2,246,94)
+#0092 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (7824 bytes)
+#0093 < 150 OK
+#0094 < 226 OK
+#0095 > QUIT
+#0096 < 221 BYE
+#0097 = deployed 2 file(s) under /dev_hdd0/game/CGOV00001
+#0098 > GET /play.ps3?CGOV00001
+#0099 < 200 (5725 bytes)
+#0100 = started
+#0101 > GET /cpursx.ps3
+#0102 < 200 (5725 bytes)
+#0103 > GET /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0104 < 404 (510 bytes)
+#0105 > GET /cpursx.ps3
+#0106 < 200 (5725 bytes)
+#0107 > GET /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0108 < 404 (510 bytes)
+#0109 > GET /cpursx.ps3
+#0110 < 200 (5725 bytes)
+#0111 > GET /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0112 < 404 (510 bytes)
+#0113 > GET /cpursx.ps3
+#0114 < 200 (5725 bytes)
+#0115 > GET /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0116 < 404 (510 bytes)
+#0117 > GET /cpursx.ps3
+#0118 < 200 (5933 bytes)
+#0119 = left the XMB after 5 poll(s)
+#0120 > GET /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0121 < 404 (510 bytes)
+#0122 > GET /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0123 < 404 (510 bytes)
+#0124 > GET /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0125 < 200 (136 bytes)
+#0126 = result present after 3 poll(s)
+#0127 > GET /cpursx.ps3
+#0128 < 200 (6432 bytes)
+#0129 > GET /cpursx.ps3
+#0130 < 200 (6432 bytes)
+#0131 > GET /cpursx.ps3
+#0132 < 200 (5933 bytes)
+#0133 > GET /cpursx.ps3
+#0134 < 200 (5933 bytes)
+#0135 > GET /cpursx.ps3
+#0136 < 200 (5725 bytes)
+#0137 = back at the XMB after 5 poll(s)
+#0138 > GET /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0139 < 200 (136 bytes)
+#0140 = captured micro:spurs_initialize#2e078195e621
+#0141 > GET /mount.ps3/unmount
+#0142 < 200 (4441 bytes)
+#0143 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0144 > USER anonymous
+#0145 < 331 OK
+#0146 > PASS anonymous@
+#0147 < 230 OK
+#0148 > TYPE I
+#0149 < 200 TYPE OK
+#0150 > PASV
+#0151 < 227 Entering Passive Mode (10,77,0,2,188,19)
+#0152 > NLST /dev_hdd0/game
+#0153 < 150 OK
+#0154 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 62C]
+#0155 > QUIT
+#0156 < 221 BYE
+#0157 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0158 > USER anonymous
+#0159 < 331 OK
+#0160 > PASS anonymous@
+#0161 < 230 OK
+#0162 > TYPE I
+#0163 < 200 TYPE OK
+#0164 > PASV
+#0165 < 227 Entering Passive Mode (10,77,0,2,192,42)
+#0166 > NLST /dev_hdd0/game/CGOV00001
+#0167 < 150 OK
+#0168 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 62C]
+#0169 > QUIT
+#0170 < 221 BYE
+#0171 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0172 > USER anonymous
+#0173 < 331 OK
+#0174 > PASS anonymous@
+#0175 < 230 OK
+#0176 > TYPE I
+#0177 < 200 TYPE OK
+#0178 > PASV
+#0179 < 227 Entering Passive Mode (10,77,0,2,194,11)
+#0180 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0181 < 150 OK
+#0182 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 62C]
+#0183 > QUIT
+#0184 < 221 BYE
+#0185 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0186 > USER anonymous
+#0187 < 331 OK
+#0188 > PASS anonymous@
+#0189 < 230 OK
+#0190 > TYPE I
+#0191 < 200 TYPE OK
+#0192 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0193 < 250 OK
+#0194 > QUIT
+#0195 < 221 BYE
+#0196 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0197 > USER anonymous
+#0198 < 331 OK
+#0199 > PASS anonymous@
+#0200 < 230 OK
+#0201 > TYPE I
+#0202 < 200 TYPE OK
+#0203 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0204 < 250 OK
+#0205 > QUIT
+#0206 < 221 BYE
+#0207 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0208 > USER anonymous
+#0209 < 331 OK
+#0210 > PASS anonymous@
+#0211 < 230 OK
+#0212 > TYPE I
+#0213 < 200 TYPE OK
+#0214 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0215 < 250 OK
+#0216 > QUIT
+#0217 < 221 BYE
+#0218 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0219 > USER anonymous
+#0220 < 331 OK
+#0221 > PASS anonymous@
+#0222 < 230 OK
+#0223 > TYPE I
+#0224 < 200 TYPE OK
+#0225 > RMD /dev_hdd0/game/CGOV00001
+#0226 < 250 OK
+#0227 > QUIT
+#0228 < 221 BYE
+#0229 > GET /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0230 < 200 (136 bytes)
+#0231 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0232 > USER anonymous
+#0233 < 331 OK
+#0234 > PASS anonymous@
+#0235 < 230 OK
+#0236 > TYPE I
+#0237 < 200 TYPE OK
+#0238 > DELE /dev_hdd0/tmp/cgov_spurs_initialize.bin
+#0239 < 250 OK
+#0240 > QUIT
+#0241 < 221 BYE
+#0242 = console restored

@@ -1,0 +1,16 @@
+[test]
+name = "spurs_initialize"
+
+# A hardware probe: a SPURS instance initialized through the firmware's
+# cellSpurs library, which starts the SPURS handler PPU threads and the
+# SPU thread group the SPURS kernel runs on, then finalized. The console
+# capture is the answer.
+
+[observe]
+# 32 big-endian u32 words, in the order ppu/main.c lists: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"

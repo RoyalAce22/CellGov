@@ -114,6 +114,10 @@ name = "microtests"
 required-features = ["microtests"]
 
 [[test]]
+name = "spurs_microtest"
+required-features = ["microtests", "installed-firmware-tests"]
+
+[[test]]
 name = "title_witnesses"
 required-features = ["installed-title-tests"]
 
