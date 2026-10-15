@@ -16,7 +16,7 @@ use crate::host::guest_struct::{read_be_u32, GuestStruct};
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::image::LsSegment;
 use crate::request::Lv2Request;
-use crate::thread_group::{DestroyGroupError, GroupState, MAX_SLOTS_PER_GROUP};
+use crate::thread_group::{CreateGroupError, DestroyGroupError, GroupState, MAX_SLOTS_PER_GROUP};
 use cellgov_time::GuestTicks;
 
 /// The `sys_spu_image` record the kernel hands back: `type` KERNEL,
@@ -274,20 +274,45 @@ impl Lv2Host {
     }
 
     /// `sys_spu_thread_group_create`: mint a monotonic group id and
-    /// write it to `id_ptr`.
+    /// write it to `id_ptr`, if the SPU pool has room for a group of
+    /// `num_threads` threads of the attribute's type.
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` when `num_threads` is zero or exceeds
-    ///   [`MAX_SLOTS_PER_GROUP`].
+    /// - `CELL_EFAULT` when the attribute is unreadable, its container
+    ///   word included for a type that takes memory from a container.
+    /// - `CELL_EINVAL` when `num_threads` is zero, or the group can never
+    ///   fit the pool.
+    /// - `CELL_ESRCH` when the attribute names no memory container that
+    ///   exists.
+    /// - `CELL_EBUSY` when the groups that exist leave no room for it.
     /// - `CELL_EAGAIN` when the group allocator is exhausted.
+    ///
+    /// The reference console answers each of these in this order
+    /// (`tests/micro/spu_group_limits`, `tests/micro/spu_pool_edges`).
+    /// The container's memory is not taken.
     pub(super) fn dispatch_group_create(
         &mut self,
         id_ptr: u32,
         num_threads: u32,
+        attr_ptr: u32,
         requester: UnitId,
+        rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        let type_addr = u64::from(attr_ptr) + u64::from(spu::group_attr::TYPE_OFFSET);
+        let Some(group_type) = read_be_u32(rt, type_addr) else {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        };
+        let container = if group_type & spu::group_type::MEMORY_FROM_CONTAINER != 0 {
+            let ct_addr = u64::from(attr_ptr) + u64::from(spu::group_attr::CONTAINER_OFFSET);
+            let Some(ct) = read_be_u32(rt, ct_addr) else {
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            };
+            Some(ct)
+        } else {
+            None
+        };
         // A zero-thread group is refused before anything is
         // allocated: a slotless group could never reach the
         // fully-initialized state `sys_spu_thread_group_start`
@@ -295,26 +320,33 @@ impl Lv2Host {
         if num_threads == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
-        // `MAX_SLOTS_PER_GROUP` bounds CellGov's thread-id encoding.
-        // The kernel's own limit on `num` is unestablished, so this
-        // errno is CellGov's own refusal.
-        if num_threads > MAX_SLOTS_PER_GROUP {
-            self.log_invariant_break(
-                "dispatch.sys_spu_thread_group_create_num_threads_over_encoding_cap",
-                format_args!(
-                    "sys_spu_thread_group_create num={num_threads} exceeds the \
-                     group_id * {cap} + slot thread-id encoding CellGov allocates \
-                     from; returning CELL_EINVAL. The kernel's own limit on num is \
-                     unestablished, so this is a CellGov refusal, not a modelled \
-                     kernel answer.",
-                    cap = MAX_SLOTS_PER_GROUP,
-                ),
-            );
+        let root = self.has_root_perm();
+        if self
+            .state
+            .groups
+            .check_valid(num_threads, group_type, root)
+            .is_err()
+        {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
-        let group_id = match self.state.groups.create(num_threads) {
-            Some(id) => id,
-            None => {
+        if container.is_some_and(|ct| !self.state.memory_containers.contains_key(ct)) {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
+        // The pool holds at most `pool::USABLE_SPUS` threads per group,
+        // well under the `MAX_SLOTS_PER_GROUP` thread-id encoding.
+        let group_id = match self
+            .state
+            .groups
+            .create_typed(num_threads, group_type, root)
+        {
+            Ok(id) => id,
+            Err(CreateGroupError::Invalid) => {
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            }
+            Err(CreateGroupError::Busy) => {
+                return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
+            }
+            Err(CreateGroupError::Exhausted) => {
                 return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
             }
         };
@@ -866,8 +898,20 @@ mod user_image_tests;
 mod console_tests;
 
 #[cfg(test)]
-#[path = "tests/encoding_cap_tests.rs"]
-mod encoding_cap_tests;
+#[path = "tests/spu_pool_tests.rs"]
+mod pool_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_pool_console_tests.rs"]
+mod pool_console_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_pool_edges_console_tests.rs"]
+mod pool_edges_console_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_group_root_types_console_tests.rs"]
+mod root_types_console_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_thread_argument_tests.rs"]

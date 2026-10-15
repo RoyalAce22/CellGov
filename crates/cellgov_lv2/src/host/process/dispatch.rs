@@ -8,6 +8,7 @@ use cellgov_ps3_abi::lv2::errno;
 use crate::dispatch::Lv2Dispatch;
 use crate::host::guest_struct::read_be_u64;
 use crate::host::{Lv2Host, Lv2Runtime};
+use crate::thread_group::SetLimitsError;
 use cellgov_time::GuestTicks;
 
 /// `sys_memory_access_right_raw_spu` flag bit.
@@ -369,27 +370,28 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_spu_initialize`: validates `max_raw_spu <= 5` (LV2 cap).
+    /// `sys_spu_initialize`: set aside `max_raw_spu` physical SPUs for
+    /// Raw SPUs, leaving the rest of the pool to SPU thread groups.
+    /// `max_usable_spu` is not checked: the reference console accepts
+    /// `(0, 0)` (`tests/micro/spu_group_limits`).
     ///
-    /// The arm persists no limit and partitions no SPU pool into
-    /// usable and raw slots. It logs an invariant break, so a caller
-    /// that reads the limits back shows in the trace.
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` when `max_raw_spu` exceeds the Raw SPU maximum.
+    /// - `CELL_EBUSY` when the thread groups that exist do not fit the
+    ///   new split.
     pub(in crate::host) fn dispatch_spu_initialize(
         &mut self,
         _max_usable_spu: u32,
         max_raw_spu: u32,
     ) -> Lv2Dispatch {
-        if max_raw_spu > 5 {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        match self.state.groups.set_raw_limit(max_raw_spu) {
+            Ok(()) => Lv2Dispatch::immediate(0),
+            Err(SetLimitsError::Invalid { .. }) => {
+                Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
+            }
+            Err(SetLimitsError::Busy { .. }) => Lv2Dispatch::immediate(errno::CELL_EBUSY.into()),
         }
-        self.log_invariant_break(
-            "dispatch.spu_initialize_limits_unpersisted",
-            format_args!(
-                "sys_spu_initialize: announced limits not persisted; \
-                 max_usable_spu={_max_usable_spu} max_raw_spu={max_raw_spu}"
-            ),
-        );
-        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_process_get_number_of_object`: writes the per-class active

@@ -7,17 +7,19 @@ use crate::dispatch::{SpuInitState, SpuLoadImage};
 use crate::image::SpuImageHandle;
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{self, source, LaneEntryMut, LaneMap, LaneValue, ObjectLanes};
-use cellgov_ps3_abi::lv2::spu::{event, group_join_cause};
+use cellgov_ps3_abi::lv2::spu::{event, group_join_cause, group_type, pool};
 use std::collections::BTreeMap;
 
 /// Cap on slots per group; the `group_id * 256 + slot` thread-id
 /// encoding aliases adjacent groups' ranges above this.
 ///
-/// The kernel's own limit on `sys_spu_thread_group_create`'s `num` is
-/// unestablished, so this cap is CellGov's. No firmware caller comes
-/// near it: every literal `num` in installed firmware is 1, and no
-/// module announces more than 3 SPUs through `sys_spu_initialize`.
+/// `sys_spu_thread_group_create` holds a group to the SPU pool, at most
+/// [`pool::USABLE_SPUS`] threads, so no group a create admits reaches
+/// this cap; it bounds the slot indices `sys_spu_thread_initialize`
+/// names.
 pub const MAX_SLOTS_PER_GROUP: u32 = 256;
+
+const _: () = assert!(pool::USABLE_SPUS <= MAX_SLOTS_PER_GROUP);
 
 /// A single slot within a thread group.
 #[derive(Debug, Clone)]
@@ -77,9 +79,91 @@ pub struct ThreadGroup {
     pub thread_exit_status: BTreeMap<u64, u32>,
     /// The event queue each connected group event type delivers to.
     pub event_queues: BTreeMap<u32, u32>,
+    /// The `type` word of the group's attribute at create.
+    pub group_type: u32,
+}
+
+/// How a thread group occupies the SPU pool, from its `type` word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupKind {
+    /// The scheduler context-switches the group, so all such groups
+    /// together need as many SPUs as the largest one.
+    Context,
+    /// The group holds one SPU per thread while it lives.
+    NonContext,
+    /// The group shares one SPU with the system and holds one SPU per
+    /// other thread.
+    CooperateWithSystem,
+}
+
+impl GroupKind {
+    /// The kind a group attribute's `type` word selects.
+    pub fn of_type(group_type: u32) -> Self {
+        if group_type & group_type::COOPERATE_WITH_SYSTEM != 0 {
+            Self::CooperateWithSystem
+        } else if group_type & group_type::NON_CONTEXT != 0 {
+            Self::NonContext
+        } else {
+            Self::Context
+        }
+    }
+}
+
+/// What a set of groups needs from the SPU pool.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PoolDemand {
+    /// SPUs held for the whole life of a group.
+    physical: u32,
+    /// SPUs the context-switched groups need at once.
+    controllable: u32,
+    /// Groups that share an SPU with the system.
+    cooperating: u32,
+}
+
+impl PoolDemand {
+    /// The demand of one group of `num` threads.
+    fn of(kind: GroupKind, num: u32) -> Self {
+        match kind {
+            GroupKind::Context => Self {
+                controllable: num,
+                ..Self::default()
+            },
+            GroupKind::NonContext => Self {
+                physical: num,
+                ..Self::default()
+            },
+            GroupKind::CooperateWithSystem => Self {
+                physical: num.saturating_sub(1),
+                controllable: 1,
+                cooperating: 1,
+            },
+        }
+    }
+
+    /// The demand of `self` and `other` together: physical SPUs add up,
+    /// and context-switched groups need the larger of the two.
+    fn with(self, other: Self) -> Self {
+        Self {
+            physical: self.physical.saturating_add(other.physical),
+            controllable: self.controllable.max(other.controllable),
+            cooperating: self.cooperating.saturating_add(other.cooperating),
+        }
+    }
+
+    /// Whether the pool holds this demand with `spu_limit` SPUs for SPU
+    /// threads. The physical bound is strict: a demand that takes every
+    /// SPU is refused.
+    fn fits(self, spu_limit: u32) -> bool {
+        self.physical < spu_limit && self.controllable <= spu_limit && self.cooperating <= 1
+    }
 }
 
 impl ThreadGroup {
+    /// How the group occupies the SPU pool.
+    pub fn kind(&self) -> GroupKind {
+        GroupKind::of_type(self.group_type)
+    }
+
     /// Whether every declared slot is initialized.
     pub fn is_initialized(&self) -> bool {
         self.slots.len() as u32 >= self.num_threads
@@ -112,6 +196,9 @@ impl LaneValue for ThreadGroup {
         }
         for (&event_type, &queue) in &self.event_queues {
             lanes.lane(27, u64::from(event_type), u64::from(queue));
+        }
+        if self.group_type != group_type::NORMAL {
+            lanes.lane(30, 0, u64::from(self.group_type));
         }
         for (&index, slot) in &self.slots {
             let index = u64::from(index);
@@ -280,6 +367,43 @@ pub enum DestroyGroupError {
     Busy,
 }
 
+/// Failure modes of [`ThreadGroupTable::create_typed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CreateGroupError {
+    /// -> `CELL_EINVAL`: a type outside [`group_type::USER_TYPES`], and
+    /// for a process with root permission outside
+    /// [`group_type::ROOT_TYPES`] too; or a group that can never fit the
+    /// pool: more threads than [`pool::USABLE_SPUS`] (one for a root type
+    /// with a [`group_type::SINGLE_THREAD_MASK`] bit), a demand above the
+    /// SPU-thread limit, or a group sharing with the system of fewer than
+    /// two threads.
+    #[error("the group type is refused or the group can never fit the SPU pool")]
+    Invalid,
+    /// -> `CELL_EBUSY`: the groups that exist leave no room for it.
+    #[error("the SPU pool has no room for the group")]
+    Busy,
+    /// -> `CELL_EAGAIN`: the u32 id space is exhausted.
+    #[error("the thread-group id space is exhausted")]
+    Exhausted,
+}
+
+/// Failure modes of [`ThreadGroupTable::set_raw_limit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SetLimitsError {
+    /// -> `CELL_EINVAL`: more than [`pool::RAW_SPU_MAX`] Raw SPUs.
+    #[error("max_raw_spu {max_raw} exceeds the Raw SPU maximum")]
+    Invalid {
+        /// The requested Raw SPU count.
+        max_raw: u32,
+    },
+    /// -> `CELL_EBUSY`: the groups that exist do not fit the new split.
+    #[error("the existing thread groups do not fit max_raw_spu {max_raw}")]
+    Busy {
+        /// The requested Raw SPU count.
+        max_raw: u32,
+    },
+}
+
 /// Failure modes of [`ThreadGroupTable::terminate`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum TerminateGroupError {
@@ -321,6 +445,9 @@ pub struct ThreadGroupTable {
     /// Synthetic `group_id * 256 + slot` -> raw runtime `UnitId`.
     thread_id_to_unit: LaneMap<u32, u64>,
     next_id: u32,
+    /// The physical SPUs `sys_spu_initialize` set aside for Raw SPUs;
+    /// the rest of [`pool::USABLE_SPUS`] runs SPU threads.
+    max_raw: u32,
 }
 
 impl Default for ThreadGroupTable {
@@ -338,13 +465,110 @@ impl ThreadGroupTable {
             finished_units: LaneMap::new(source::GROUP_FINISHED_UNIT, UnitId::raw),
             thread_id_to_unit: LaneMap::new(source::GROUP_THREAD_ID, u64::from),
             next_id: 1,
+            max_raw: 0,
         }
     }
 
-    /// Create a group with `num_threads` slots.
+    /// Create a normal group with `num_threads` slots, outside the SPU
+    /// pool accounting.
     ///
     /// Returns `None` if the u32 id space is exhausted.
     pub fn create(&mut self, num_threads: u32) -> Option<u32> {
+        self.insert_group(num_threads, group_type::NORMAL)
+    }
+
+    /// Create a group with `num_threads` slots and attribute type
+    /// `group_type`, for a process with root permission when `root`, if
+    /// the SPU pool has room for it.
+    ///
+    /// # Errors
+    /// See [`CreateGroupError`]; an error creates nothing.
+    pub fn create_typed(
+        &mut self,
+        num_threads: u32,
+        group_type: u32,
+        root: bool,
+    ) -> Result<u32, CreateGroupError> {
+        self.check_valid(num_threads, group_type, root)?;
+        let demand = PoolDemand::of(GroupKind::of_type(group_type), num_threads);
+        if !self.occupied().with(demand).fits(self.spu_limit()) {
+            return Err(CreateGroupError::Busy);
+        }
+        self.insert_group(num_threads, group_type)
+            .ok_or(CreateGroupError::Exhausted)
+    }
+
+    /// Whether a process, with root permission when `root`, may create a
+    /// group of `num_threads` threads and type `group_type`, and whether
+    /// the group can ever fit the pool, whatever groups exist.
+    ///
+    /// # Errors
+    /// [`CreateGroupError::Invalid`] when it cannot.
+    pub fn check_valid(
+        &self,
+        num_threads: u32,
+        group_type: u32,
+        root: bool,
+    ) -> Result<(), CreateGroupError> {
+        let root_type = group_type::ROOT_TYPES.contains(&group_type);
+        if !(group_type::USER_TYPES.contains(&group_type) || (root && root_type)) {
+            return Err(CreateGroupError::Invalid);
+        }
+        let max_threads = if root_type && group_type & group_type::SINGLE_THREAD_MASK != 0 {
+            1
+        } else {
+            pool::USABLE_SPUS
+        };
+        let kind = GroupKind::of_type(group_type);
+        let demand = PoolDemand::of(kind, num_threads);
+        let spu_limit = self.spu_limit();
+        if num_threads > max_threads
+            || demand.physical > spu_limit
+            || demand.controllable > spu_limit
+            || (kind == GroupKind::CooperateWithSystem && num_threads < 2)
+        {
+            return Err(CreateGroupError::Invalid);
+        }
+        Ok(())
+    }
+
+    /// The SPUs left for SPU threads once Raw SPUs take their share.
+    pub fn spu_limit(&self) -> u32 {
+        pool::USABLE_SPUS - self.max_raw
+    }
+
+    /// The physical SPUs set aside for Raw SPUs.
+    pub fn raw_limit(&self) -> u32 {
+        self.max_raw
+    }
+
+    /// Set aside `max_raw` physical SPUs for Raw SPUs, as
+    /// `sys_spu_initialize` does.
+    ///
+    /// # Errors
+    /// See [`SetLimitsError`]; an error keeps the old split.
+    pub fn set_raw_limit(&mut self, max_raw: u32) -> Result<(), SetLimitsError> {
+        if max_raw > pool::RAW_SPU_MAX {
+            return Err(SetLimitsError::Invalid { max_raw });
+        }
+        if !self.occupied().fits(pool::USABLE_SPUS - max_raw) {
+            return Err(SetLimitsError::Busy { max_raw });
+        }
+        self.max_raw = max_raw;
+        Ok(())
+    }
+
+    /// What every group that exists needs from the SPU pool. A group
+    /// keeps its share until it is destroyed.
+    fn occupied(&self) -> PoolDemand {
+        self.groups
+            .values()
+            .fold(PoolDemand::default(), |acc, group| {
+                acc.with(PoolDemand::of(group.kind(), group.num_threads))
+            })
+    }
+
+    fn insert_group(&mut self, num_threads: u32, group_type: u32) -> Option<u32> {
         let id = self.next_id;
         if id == 0 {
             return None;
@@ -360,6 +584,7 @@ impl ThreadGroupTable {
             exit_status: 0,
             thread_exit_status: BTreeMap::new(),
             event_queues: BTreeMap::new(),
+            group_type,
         };
         self.groups.insert(id, group);
         Some(id)
@@ -997,9 +1222,15 @@ impl ThreadGroupTable {
             .wrapping_add(self.ids_term())
     }
 
-    /// The id allocator's term.
+    /// The id allocator's term, and the SPU pool split's once Raw SPUs
+    /// take a share.
     fn ids_term(&self) -> u128 {
-        lanes::value_term(source::GROUP_IDS, 0, &self.next_id)
+        let ids = lanes::value_term(source::GROUP_IDS, 0, &self.next_id);
+        if self.max_raw == 0 {
+            ids
+        } else {
+            ids.wrapping_add(lanes::value_term(source::SPU_LIMITS, 0, &self.max_raw))
+        }
     }
 }
 

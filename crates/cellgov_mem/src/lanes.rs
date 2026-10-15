@@ -184,6 +184,8 @@ pub mod source {
     /// MFC commands queued with a parameter the MFC refuses, one object
     /// per queue sequence number.
     pub const MFC_INVALID_COMMAND: u8 = 61;
+    /// The SPU pool limits `sys_spu_initialize` sets.
+    pub const SPU_LIMITS: u8 = 62;
 }
 
 const OBJECT_BITS: u32 = 32;

@@ -163,6 +163,90 @@ pub mod event {
     pub const QUEUE_BINDING_COUNT: usize = 32;
 }
 
+/// The physical SPUs LV2 hands to a process, which `sys_spu_initialize`
+/// splits between SPU threads and Raw SPUs. The kernel ignores the
+/// caller's `max_usable_spu` and always uses this count; the reference
+/// console's `spu_group_limits` capture shows it.
+pub mod pool {
+    /// The physical SPUs a process may use.
+    pub const USABLE_SPUS: u32 = 6;
+    /// The most `max_raw_spu` may be: one SPU stays with SPU threads.
+    pub const RAW_SPU_MAX: u32 = 5;
+}
+
+/// The `type` word of a `sys_spu_thread_group_attribute`, which decides
+/// how a group occupies the SPU pool. The reference console's
+/// `spu_group_limits` capture shows each type's accounting.
+pub mod group_type {
+    /// A regular group, which the scheduler context-switches.
+    pub const NORMAL: u32 = 0x00;
+    /// The group's memory comes from a container the attribute names.
+    pub const MEMORY_FROM_CONTAINER: u32 = 0x04;
+    /// The group has no scheduler context.
+    pub const NON_CONTEXT: u32 = 0x08;
+    /// A group without a context that occupies its SPUs while it lives.
+    pub const EXCLUSIVE_NON_CONTEXT: u32 = 0x18;
+    /// A group that shares one SPU with the system.
+    pub const COOPERATE_WITH_SYSTEM: u32 = 0x20;
+
+    /// The types a process without root permission may create; the
+    /// kernel answers `CELL_EINVAL` for any other.
+    // The capture shows NORMAL, EXCLUSIVE_NON_CONTEXT and
+    // COOPERATE_WITH_SYSTEM accepted and 0x01 refused. The
+    // tests/micro/spu_pool_edges capture shows both MEMORY_FROM_CONTAINER
+    // forms reaching the container lookup. Every probe EBOOT runs with
+    // root permission, so no capture shows which types a process without
+    // it may create; that split is unestablished.
+    pub const USER_TYPES: [u32; 5] = [
+        NORMAL,
+        MEMORY_FROM_CONTAINER,
+        EXCLUSIVE_NON_CONTEXT,
+        COOPERATE_WITH_SYSTEM,
+        COOPERATE_WITH_SYSTEM | MEMORY_FROM_CONTAINER,
+    ];
+
+    /// The further types only a process with root permission may create.
+    /// vsh creates 0x20A.
+    // The console capture of tests/micro/spu_group_root_types, from a
+    // process with root permission, shows 0x002, 0x00A, 0x022 and 0x102
+    // accepted, 0x30A refused, and 0x20A held to one thread. The first
+    // 0x20A group answers CELL_EBUSY there: the running system already
+    // holds what that type takes. The other entries are unprobed.
+    pub const ROOT_TYPES: [u32; 17] = [
+        0x002,
+        0x006,
+        0x00A,
+        0x102,
+        0x106,
+        0x10A,
+        0x202,
+        0x206,
+        0x20A,
+        0x902,
+        0x906,
+        0xA02,
+        0xA06,
+        0xC02,
+        0xC06,
+        COOPERATE_WITH_SYSTEM | 0x2,
+        COOPERATE_WITH_SYSTEM | 0x6,
+    ];
+
+    /// A root type with any of these bits set holds exactly one thread.
+    pub const SINGLE_THREAD_MASK: u32 = 0x700;
+}
+
+/// The 16-byte `sys_spu_thread_group_attribute` record:
+/// `nsize`, `name`, `type`, then the `option` union, each a big-endian
+/// 32-bit word.
+pub mod group_attr {
+    /// Offset of the `type` word.
+    pub const TYPE_OFFSET: u32 = 8;
+    /// Offset of the `option` word, which names the memory container for
+    /// a type with `group_type::MEMORY_FROM_CONTAINER` set.
+    pub const CONTAINER_OFFSET: u32 = 12;
+}
+
 /// `cause` enum returned by `sys_spu_thread_group_join`.
 // The console captures of tests/micro/spu_thread_window_slots and
 // tests/micro/spu_stop_service_codes show all three, each with the

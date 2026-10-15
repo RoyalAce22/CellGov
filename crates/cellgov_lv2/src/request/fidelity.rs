@@ -235,11 +235,12 @@ impl Lv2RequestKind {
             | Lv2RequestKind::SpuThreadDisconnectEvent
             | Lv2RequestKind::SpuThreadUnbindQueue
             | Lv2RequestKind::SpuThreadGroupConnectEventAllThreads
-            | Lv2RequestKind::SpuThreadGroupDisconnectEventAllThreads => Modeled,
-            // The group type and the queue type are not modeled. The
-            // connect arm refuses a system-module connect for every
-            // group. The bind arm binds a PPU-type queue like an SPU
-            // queue.
+            | Lv2RequestKind::SpuThreadGroupDisconnectEventAllThreads
+            | Lv2RequestKind::SpuInitialize => Modeled,
+            // The connect arm does not read the group type: it refuses a
+            // system-module connect for every group. The queue type is
+            // not modeled: the bind arm binds a PPU-type queue like an
+            // SPU queue.
             Lv2RequestKind::SpuThreadGroupConnectEvent | Lv2RequestKind::SpuThreadBindQueue => {
                 PartialState
             }
@@ -250,8 +251,6 @@ impl Lv2RequestKind {
             // - A terminated group finishes; on the console it returns
             //   to the initialized state.
             Lv2RequestKind::SpuThreadGroupTerminate => PartialState,
-            // Announced limits are validated but not persisted.
-            Lv2RequestKind::SpuInitialize => PartialState,
 
             // Deterministic guest time is the model.
             Lv2RequestKind::TimeGetCurrentTime | Lv2RequestKind::TimeGetTimebaseFrequency => {

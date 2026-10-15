@@ -126,8 +126,9 @@ impl Lv2Host {
             Lv2Request::SpuThreadGroupCreate {
                 id_ptr,
                 num_threads,
+                attr_ptr,
                 ..
-            } => self.dispatch_group_create(id_ptr, num_threads, requester, tick),
+            } => self.dispatch_group_create(id_ptr, num_threads, attr_ptr, requester, rt, tick),
             req @ Lv2Request::SpuThreadInitialize { .. } => {
                 self.dispatch_thread_initialize(req, requester, rt, tick)
             }

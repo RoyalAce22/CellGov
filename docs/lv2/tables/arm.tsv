@@ -102,7 +102,7 @@ SemaphoreTryWait	modeled	93
 SemaphoreWait	modeled	92
 SpuImageImport	modeled	158
 SpuImageOpen	modeled	156
-SpuInitialize	partial-state	169
+SpuInitialize	modeled	169
 SpuThreadBindQueue	partial-state	193
 SpuThreadConnectEvent	modeled	191
 SpuThreadDisconnectEvent	modeled	192

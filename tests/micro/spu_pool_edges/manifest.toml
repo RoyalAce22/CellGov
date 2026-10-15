@@ -1,0 +1,21 @@
+[test]
+name = "spu_pool_edges"
+
+# A hardware probe: what sys_spu_thread_group_create answers for an
+# unreadable attribute and for the memory-container group types, and
+# whether a finished thread group still holds its SPUs. The console
+# capture is the answer; no emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, in the order ppu/main.c lists: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

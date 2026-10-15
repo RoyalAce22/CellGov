@@ -1,0 +1,17 @@
+[test]
+name = "spu_group_limits"
+
+# A hardware probe: the SPU pool limits sys_spu_initialize sets, and
+# what sys_spu_thread_group_create answers for context, exclusive
+# non-context and cooperate-with-system groups against them, and for a
+# type no group takes. The console capture is the answer; no emulator
+# runs it.
+
+[observe]
+# 32 big-endian u32 words, in the order ppu/main.c lists: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"
