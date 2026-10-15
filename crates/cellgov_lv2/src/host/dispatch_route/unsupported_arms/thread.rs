@@ -16,31 +16,23 @@ impl Lv2Host {
     /// `sys_ppu_thread_get_priority` (48): writes the target's
     /// priority to `*priop`.
     ///
-    /// The id lookup precedes the `priop` null gate, so an unknown
-    /// id answers ESRCH even when `priop` is null. Both codes are
-    /// defined for this call; which one wins when both apply is a
-    /// CellGov choice, unestablished against the console.
+    /// The id lookup precedes the `priop` gate, so an unknown id
+    /// answers ESRCH even when `priop` is bad. Both codes are defined
+    /// for this call; which one wins when both apply is a CellGov
+    /// choice, unestablished against the console.
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` when `priop` carries high bits, per
-    ///   [`Lv2Host::narrow_u32_args`]. That gate precedes the id
-    ///   lookup.
     /// - `CELL_ESRCH` when `thread_id` is absent from the thread table.
-    /// - `CELL_EFAULT` when `priop` is null.
+    /// - `CELL_EFAULT`, with no write, when `priop` is null or carries
+    ///   high bits. The `lv2_arg_high_bits` capture reads CELL_EFAULT
+    ///   for a valid pointer with bit 32 set.
     pub(in crate::host::dispatch_route) fn dispatch_ppu_thread_get_priority(
         &mut self,
         args: [u64; 8],
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        use cellgov_ps3_abi::lv2::syscall;
-
-        let Some([priop]) =
-            self.narrow_u32_args(syscall::PPU_THREAD_GET_PRIORITY, [("priop", args[1])])
-        else {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
-        };
         let Some(thread) = self
             .state
             .ppu_threads
@@ -48,9 +40,10 @@ impl Lv2Host {
         else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
-        if let Some(d) = self.efault_if_null(&[priop]) {
-            return d;
-        }
+        let priop = match u32::try_from(args[1]) {
+            Ok(0) | Err(_) => return Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
+            Ok(priop) => priop,
+        };
         let write = Effect::shared_write(
             ByteRange::contiguous_u32(priop, 4),
             WritePayload::from_slice(&thread.attrs.priority.to_be_bytes()),
@@ -79,21 +72,14 @@ impl Lv2Host {
     /// - `CELL_EINVAL` when `prio` is outside the window.
     /// - `CELL_ESRCH` when `thread_id` is absent from the thread table.
     ///
-    /// `CELL_EINVAL` also answers a `prio` register that is no sign
-    /// extension of its low word, per [`Lv2Host::narrow_i32_args`].
-    /// That gate precedes the list above.
+    /// `prio` is the low word of its register, per
+    /// [`Lv2Host::low_i32_args`].
     pub(in crate::host::dispatch_route) fn dispatch_ppu_thread_set_priority(
         &mut self,
         args: [u64; 8],
         requester: UnitId,
     ) -> Lv2Dispatch {
-        use cellgov_ps3_abi::lv2::syscall;
-
-        let Some([prio]) =
-            self.narrow_i32_args(syscall::PPU_THREAD_SET_PRIORITY, [("prio", args[1])])
-        else {
-            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
-        };
+        let [prio] = Self::low_i32_args([args[1]]);
         let floor = if self.privilege_of(requester).debug_or_root() {
             PPU_THREAD_PRIORITY_MIN_ROOT
         } else {

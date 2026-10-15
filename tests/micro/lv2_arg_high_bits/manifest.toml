@@ -1,0 +1,14 @@
+[test]
+name = "lv2_arg_high_bits"
+
+# A hardware probe: the thread priority calls with a high word in a u32 pointer and an int argument, for whether LV2 masks or refuses it.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"

@@ -21,10 +21,13 @@ impl Lv2Host {
     /// of it. Every such arm binds its u32 fields here, before its own
     /// argument tests. That is the position the classifier's gate holds.
     ///
-    /// Whether the kernel masks a field to 32 bits or refuses it is
-    /// unestablished: every observed caller passes a value that already
-    /// fits, so none separates the two answers. A reading of the
-    /// kernel's syscall prologue fixes it.
+    /// The kernel answers a u32 field with high bits per call, not by
+    /// one rule: `_sys_prx_get_module_id_by_name` reads the low word of
+    /// its name pointer (`lv2_prx_module_id_by_name`), and
+    /// `sys_ppu_thread_get_priority` answers CELL_EFAULT for an out
+    /// pointer with bit 32 set (`lv2_arg_high_bits`). Neither arm binds
+    /// through here. For every arm that does, the console's answer is
+    /// unestablished.
     ///
     /// # Cross-module contract
     ///
@@ -55,46 +58,17 @@ impl Lv2Host {
     }
 
     /// Bind `N` `int`-typed guest fields out of the 64-bit argument
-    /// registers that carry them, or `None` when a register is no sign
-    /// extension of its own low word.
+    /// registers that carry them: each field is its register's low word.
     ///
-    /// PPC64 hands a guest `int x = -1` over as
-    /// `0xFFFF_FFFF_FFFF_FFFF`, so the low word alone does not say what
-    /// the caller passed. A register that reproduces its low word under
-    /// sign extension carries an `int`. This method refuses any other
-    /// register, such as `0x1_0000_0001`.
-    ///
-    /// [`Self::narrow_u32_args`] is the unsigned sibling. It gives the
-    /// position both gates take ahead of an arm's own argument tests.
-    /// It also names the kernel behaviour both gates leave
-    /// unestablished.
-    ///
-    /// # Cross-module contract
-    ///
-    /// A caller answers `None` with `CELL_EINVAL`, the answer the
-    /// classifier gives a malformed request. This method records each
-    /// occurrence under `dispatch.arg_not_sign_extended`.
-    pub(in crate::host::dispatch_route) fn narrow_i32_args<const N: usize>(
-        &mut self,
-        number: u64,
-        fields: [(&'static str, u64); N],
-    ) -> Option<[i32; N]> {
-        let mut narrowed = [0i32; N];
-        for (slot, (name, value)) in narrowed.iter_mut().zip(fields) {
-            let Ok(v) = i32::try_from(value as i64) else {
-                self.log_invariant_break(
-                    "dispatch.arg_not_sign_extended",
-                    format_args!(
-                        "syscall {number} int field {name}={value:#018x} is no sign extension of \
-                         its low word; returning CELL_EINVAL instead of answering about {low}",
-                        low = value as i32
-                    ),
-                );
-                return None;
-            };
-            *slot = v;
-        }
-        Some(narrowed)
+    /// The `lv2_arg_high_bits` capture reads CELL_OK and priority 3000
+    /// back for `sys_ppu_thread_set_priority` with `0x1_0000_0BB8` and
+    /// with `0xFFFF_FFFF_0000_0BB8`. That call is the only `int` the
+    /// console has answered; for every other caller the low-word
+    /// reading is CellGov's, unestablished.
+    pub(in crate::host::dispatch_route) fn low_i32_args<const N: usize>(
+        fields: [u64; N],
+    ) -> [i32; N] {
+        fields.map(|value| value as i32)
     }
 
     /// Append the TTY buffer into the observability `tty_log` and

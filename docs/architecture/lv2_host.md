@@ -64,13 +64,14 @@ a narrowed field.
 violation returns CELL_EINVAL with a `dispatch.arg_high_bits` break,
 before the arm's own argument tests run.
 
-**An `int`-typed field takes the signed form of the same rule.** The
-register must reproduce its own low word under sign extension. One
-that does not returns CELL_EINVAL with a
-`dispatch.arg_not_sign_extended` break.
+**An `int`-typed field is the low word of its register.** The console
+reads the low word of `sys_ppu_thread_set_priority`'s `int`; for every
+other `int` field the reading is CellGov's.
 
-Whether the kernel masks such a field or refuses it is unestablished
--- every observed caller passes a value that already fits in 32 bits.
+The kernel answers a u32 field with high bits per call: one pointer
+reads its low word, another answers CELL_EFAULT. Arms whose call the
+console has answered follow it; for the rest the refusal above is
+CellGov's.
 
 ## Archive rows and requests with no ordinal
 

@@ -70,6 +70,10 @@ mod process_queries_console_tests;
 #[path = "tests/timer_time_tty_console_tests.rs"]
 mod timer_time_tty_console_tests;
 
+#[cfg(test)]
+#[path = "tests/arg_high_bits_console_tests.rs"]
+mod arg_high_bits_console_tests;
+
 pub use diagnostics::InvariantBreakReason;
 pub use lv2_host::{FirmwareIdentity, Lv2Host};
 pub use mmapper::SystemStateSeed;
