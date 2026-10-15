@@ -814,7 +814,7 @@ impl Lv2Host {
             Lv2Request::SpuInitialize {
                 max_usable_spu,
                 max_raw_spu,
-            } => self.dispatch_spu_initialize(max_usable_spu, max_raw_spu),
+            } => self.dispatch_spu_initialize(max_usable_spu, max_raw_spu, requester),
             Lv2Request::RawSpuCreate { id_ptr, .. } => {
                 self.dispatch_raw_spu_create(id_ptr, requester, rt, tick)
             }

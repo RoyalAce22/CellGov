@@ -92,7 +92,12 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let id = match self.state.raw_spus.free_id(self.state.groups.raw_limit()) {
+        let pid = self.state.processes.process_of_unit(requester);
+        let id = match self
+            .state
+            .raw_spus
+            .free_id(self.state.groups.raw_limit(pid))
+        {
             Ok(id) => id,
             Err(err) => return refuse(err),
         };

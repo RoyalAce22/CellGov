@@ -347,12 +347,13 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let root = self.has_root_perm();
+        let pid = self.state.processes.process_of_unit(requester);
         let request = GroupRequest {
             num_threads,
             group_type,
             priority,
         };
-        if self.state.groups.check_valid(request, root).is_err() {
+        if self.state.groups.check_valid(request, root, pid).is_err() {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if container.is_some_and(|ct| !self.state.memory_containers.contains_key(ct)) {
@@ -374,7 +375,7 @@ impl Lv2Host {
         }
         // The pool holds at most `pool::USABLE_SPUS` threads per group,
         // well under the `MAX_SLOTS_PER_GROUP` thread-id encoding.
-        let group_id = match self.state.groups.create_typed(request, root) {
+        let group_id = match self.state.groups.create_typed(request, root, pid) {
             Ok(id) => id,
             Err(CreateGroupError::Invalid) => {
                 return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());

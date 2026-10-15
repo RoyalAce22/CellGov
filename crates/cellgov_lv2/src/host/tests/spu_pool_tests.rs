@@ -6,6 +6,10 @@ use cellgov_mem::{GuestAddr, GuestMemory};
 const MEM: usize = 0x4000;
 const ATTR_PTR: u32 = 0x800;
 const EXCLUSIVE: u32 = spu::group_type::EXCLUSIVE_NON_CONTEXT;
+const BOOT: u32 = cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
+const BOOT_UNIT: UnitId = UnitId::new(0);
+const CHILD: u32 = BOOT + 0x100;
+const CHILD_UNIT: UnitId = UnitId::new(7);
 
 /// A runtime whose group attribute at [`ATTR_PTR`] carries `group_type`.
 fn rt_with_type(group_type: u32) -> FakeRuntime {
@@ -20,6 +24,16 @@ fn rt_with_type(group_type: u32) -> FakeRuntime {
 }
 
 fn create(host: &mut Lv2Host, rt: &FakeRuntime, num_threads: u32, attr_ptr: u32) -> u64 {
+    create_by(host, rt, BOOT_UNIT, num_threads, attr_ptr)
+}
+
+fn create_by(
+    host: &mut Lv2Host,
+    rt: &FakeRuntime,
+    unit: UnitId,
+    num_threads: u32,
+    attr_ptr: u32,
+) -> u64 {
     match host.dispatch(
         Lv2Request::SpuThreadGroupCreate {
             id_ptr: 0x100,
@@ -27,7 +41,7 @@ fn create(host: &mut Lv2Host, rt: &FakeRuntime, num_threads: u32, attr_ptr: u32)
             priority: 100,
             attr_ptr,
         },
-        UnitId::new(0),
+        unit,
         rt,
     ) {
         Lv2Dispatch::Immediate { code, .. } => code,
@@ -36,12 +50,16 @@ fn create(host: &mut Lv2Host, rt: &FakeRuntime, num_threads: u32, attr_ptr: u32)
 }
 
 fn initialize(host: &mut Lv2Host, rt: &FakeRuntime, max_raw_spu: u32) -> u64 {
+    initialize_by(host, rt, BOOT_UNIT, max_raw_spu)
+}
+
+fn initialize_by(host: &mut Lv2Host, rt: &FakeRuntime, unit: UnitId, max_raw_spu: u32) -> u64 {
     match host.dispatch(
         Lv2Request::SpuInitialize {
             max_usable_spu: 6,
             max_raw_spu,
         },
-        UnitId::new(0),
+        unit,
         rt,
     ) {
         Lv2Dispatch::Immediate { code, .. } => code,
@@ -144,7 +162,7 @@ fn initialize_persists_the_raw_split_for_later_creates() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(MEM);
     assert_eq!(initialize(&mut host, &rt, 1), 0);
-    assert_eq!(host.thread_groups().raw_limit(), 1);
+    assert_eq!(host.thread_groups().raw_limit(BOOT), 1);
     assert_eq!(create(&mut host, &rt, 6, 0), errno::CELL_EINVAL.into());
     assert_eq!(create(&mut host, &rt, 5, 0), 0);
 }
@@ -155,12 +173,12 @@ fn initialize_that_the_live_groups_do_not_fit_keeps_the_old_split() {
     let rt = FakeRuntime::new(MEM);
     assert_eq!(create(&mut host, &rt, 6, 0), 0);
     assert_eq!(initialize(&mut host, &rt, 1), errno::CELL_EBUSY.into());
-    assert_eq!(host.thread_groups().raw_limit(), 0);
+    assert_eq!(host.thread_groups().raw_limit(BOOT), 0);
     assert_eq!(
         initialize(&mut host, &rt, spu::pool::RAW_SPU_MAX + 1),
         errno::CELL_EINVAL.into()
     );
-    assert_eq!(host.thread_groups().raw_limit(), 0);
+    assert_eq!(host.thread_groups().raw_limit(BOOT), 0);
 }
 
 #[test]
@@ -181,4 +199,101 @@ fn the_raw_split_and_the_group_type_reach_the_sync_hash() {
         normal.thread_groups().sync_partial(),
         exclusive.thread_groups().sync_partial()
     );
+}
+
+/// A host whose unit [`CHILD_UNIT`] runs in the child process [`CHILD`].
+fn host_with_child() -> Lv2Host {
+    let mut host = Lv2Host::new();
+    host.state.processes.bind_unit(CHILD_UNIT, CHILD);
+    host
+}
+
+#[test]
+fn a_child_process_has_its_own_pool_split_and_groups() {
+    let mut host = host_with_child();
+    let rt = rt_with_type(EXCLUSIVE);
+    assert_eq!(create(&mut host, &rt, 3, ATTR_PTR), 0);
+    assert_eq!(create(&mut host, &rt, 2, ATTR_PTR), 0);
+    assert_eq!(
+        create(&mut host, &rt, 1, ATTR_PTR),
+        errno::CELL_EBUSY.into(),
+        "the boot process holds five SPUs"
+    );
+
+    assert_eq!(
+        initialize_by(&mut host, &rt, CHILD_UNIT, 1),
+        0,
+        "the boot process's groups do not count against the child's split"
+    );
+    assert_eq!(host.thread_groups().raw_limit(CHILD), 1);
+    assert_eq!(host.thread_groups().raw_limit(BOOT), 0);
+    assert_eq!(create_by(&mut host, &rt, CHILD_UNIT, 4, ATTR_PTR), 0);
+    assert_eq!(
+        create_by(&mut host, &rt, CHILD_UNIT, 1, ATTR_PTR),
+        errno::CELL_EBUSY.into(),
+        "the child's four SPUs fill its five-SPU pool"
+    );
+    assert_eq!(
+        host.thread_groups().get(3).map(|g| g.pid),
+        Some(CHILD),
+        "the child's group records its process"
+    );
+}
+
+#[test]
+fn the_process_that_owns_a_group_reaches_the_sync_hash() {
+    let rt = FakeRuntime::new(MEM);
+    let mut boot = host_with_child();
+    assert_eq!(create(&mut boot, &rt, 1, 0), 0);
+    let mut child = host_with_child();
+    assert_eq!(create_by(&mut child, &rt, CHILD_UNIT, 1, 0), 0);
+    assert_ne!(
+        boot.thread_groups().sync_partial(),
+        child.thread_groups().sync_partial()
+    );
+    assert_eq!(
+        child.thread_groups().sync_partial(),
+        child.thread_groups().sync_partial_from_scratch()
+    );
+}
+
+#[test]
+fn the_boot_process_split_hashes_as_one_value_under_object_zero() {
+    use cellgov_mem::lanes::{self, source};
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(MEM);
+    let before = host.thread_groups().sync_partial();
+    assert_eq!(initialize(&mut host, &rt, 1), 0);
+    assert_eq!(
+        host.thread_groups().sync_partial().wrapping_sub(before),
+        lanes::value_term(source::SPU_LIMITS, 0, &1u32)
+    );
+}
+
+#[test]
+fn a_raw_spu_create_reads_the_split_of_the_calling_process() {
+    let mut host = host_with_child();
+    let rt = FakeRuntime::new(MEM);
+    assert_eq!(initialize(&mut host, &rt, 1), 0);
+    let raw_create = |host: &mut Lv2Host, unit| {
+        host.dispatch(
+            Lv2Request::RawSpuCreate {
+                id_ptr: 0x100,
+                attr_ptr: 0,
+            },
+            unit,
+            &rt,
+        )
+    };
+    assert!(
+        !matches!(
+            raw_create(&mut host, CHILD_UNIT),
+            Lv2Dispatch::RawSpuCreate { .. }
+        ),
+        "the child set no SPU aside for Raw SPUs"
+    );
+    assert!(matches!(
+        raw_create(&mut host, BOOT_UNIT),
+        Lv2Dispatch::RawSpuCreate { id: 0, .. }
+    ));
 }

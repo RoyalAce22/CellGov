@@ -7,6 +7,7 @@ use crate::dispatch::{SpuInitState, SpuLoadImage};
 use crate::image::SpuImageHandle;
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{self, source, LaneEntryMut, LaneMap, LaneValue, ObjectLanes};
+use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
 use cellgov_ps3_abi::lv2::spu::{
     event, group_join_cause, group_priority, group_type, pool, GROUP_MEMORY_PER_THREAD,
 };
@@ -96,6 +97,9 @@ pub struct ThreadGroup {
     /// The memory container the group's memory came from, for a type
     /// that takes it from one.
     pub container: Option<u32>,
+    /// The process that created the group. The SPU pool split and the
+    /// pool accounting are that process's own.
+    pub pid: u32,
 }
 
 /// What `sys_spu_thread_group_create` asks for.
@@ -270,6 +274,10 @@ impl LaneValue for ThreadGroup {
         }
         if let Some(container) = self.container {
             lanes.lane(34, 0, u64::from(container));
+        }
+        // A group without the lane belongs to the boot process.
+        if self.pid != BOOT_PROCESS_PID {
+            lanes.lane(35, 0, u64::from(self.pid));
         }
         for (&index, slot) in &self.slots {
             let index = u64::from(index);
@@ -545,9 +553,22 @@ pub struct ThreadGroupTable {
     /// Synthetic `group_id * 256 + slot` -> raw runtime `UnitId`.
     thread_id_to_unit: LaneMap<u32, u64>,
     next_id: u32,
-    /// The physical SPUs `sys_spu_initialize` set aside for Raw SPUs;
-    /// the rest of [`pool::USABLE_SPUS`] runs SPU threads.
-    max_raw: u32,
+    /// The physical SPUs each process's `sys_spu_initialize` set aside
+    /// for Raw SPUs, by pid; the rest of [`pool::USABLE_SPUS`] runs that
+    /// process's SPU threads. A process with no entry sets none aside.
+    // The oracle keeps the split and the group count per process. A
+    // console probe runs as one process, so no capture shows it.
+    raw_limits: LaneMap<u32, u32>,
+}
+
+/// The hash object of a process's SPU pool split: 0 for the boot
+/// process, its pid for any other.
+fn split_object(pid: u32) -> u64 {
+    if pid == BOOT_PROCESS_PID {
+        0
+    } else {
+        u64::from(pid)
+    }
 }
 
 impl Default for ThreadGroupTable {
@@ -565,24 +586,28 @@ impl ThreadGroupTable {
             finished_units: LaneMap::new(source::GROUP_FINISHED_UNIT, UnitId::raw),
             thread_id_to_unit: LaneMap::new(source::GROUP_THREAD_ID, u64::from),
             next_id: 1,
-            max_raw: 0,
+            raw_limits: LaneMap::new(source::SPU_LIMITS, split_object),
         }
     }
 
-    /// Create a normal group with `num_threads` slots, outside the SPU
-    /// pool accounting.
+    /// Create a normal group of the boot process with `num_threads`
+    /// slots, outside the SPU pool accounting.
     ///
     /// Returns `None` if the u32 id space is exhausted.
     pub fn create(&mut self, num_threads: u32) -> Option<u32> {
-        self.insert_group(GroupRequest {
-            num_threads,
-            group_type: group_type::NORMAL,
-            priority: 0,
-        })
+        self.insert_group(
+            GroupRequest {
+                num_threads,
+                group_type: group_type::NORMAL,
+                priority: 0,
+            },
+            BOOT_PROCESS_PID,
+        )
     }
 
-    /// Create the group `request` describes, for a process with root
-    /// permission when `root`, if the SPU pool has room for it.
+    /// Create the group `request` describes for process `pid`, with root
+    /// permission when `root`, if that process's SPU pool has room for
+    /// it.
     ///
     /// # Errors
     /// See [`CreateGroupError`]; an error creates nothing.
@@ -590,23 +615,29 @@ impl ThreadGroupTable {
         &mut self,
         request: GroupRequest,
         root: bool,
+        pid: u32,
     ) -> Result<u32, CreateGroupError> {
-        self.check_valid(request, root)?;
+        self.check_valid(request, root, pid)?;
         let demand = PoolDemand::of(GroupKind::of_type(request.group_type), request.num_threads);
-        if !self.occupied().with(demand).fits(self.spu_limit()) {
+        if !self.occupied(pid).with(demand).fits(self.spu_limit(pid)) {
             return Err(CreateGroupError::Busy);
         }
-        self.insert_group(request)
+        self.insert_group(request, pid)
             .ok_or(CreateGroupError::Exhausted)
     }
 
-    /// Whether a process, with root permission when `root`, may create
-    /// the group `request` describes, and whether the group can ever fit
-    /// the pool, whatever groups exist.
+    /// Whether process `pid`, with root permission when `root`, may
+    /// create the group `request` describes, and whether the group can
+    /// ever fit that process's pool, whatever groups exist.
     ///
     /// # Errors
     /// [`CreateGroupError::Invalid`] when it cannot.
-    pub fn check_valid(&self, request: GroupRequest, root: bool) -> Result<(), CreateGroupError> {
+    pub fn check_valid(
+        &self,
+        request: GroupRequest,
+        root: bool,
+        pid: u32,
+    ) -> Result<(), CreateGroupError> {
         let GroupRequest {
             num_threads,
             group_type,
@@ -623,7 +654,7 @@ impl ThreadGroupTable {
         };
         let kind = GroupKind::of_type(group_type);
         let demand = PoolDemand::of(kind, num_threads);
-        let spu_limit = self.spu_limit();
+        let spu_limit = self.spu_limit(pid);
         if num_threads > max_threads
             || (kind == GroupKind::Context && !priority_in_range(priority, root))
             || demand.physical > spu_limit
@@ -674,45 +705,56 @@ impl ThreadGroupTable {
         })
     }
 
-    /// The SPUs left for SPU threads once Raw SPUs take their share.
-    pub fn spu_limit(&self) -> u32 {
-        pool::USABLE_SPUS - self.max_raw
+    /// The SPUs left for process `pid`'s SPU threads once its Raw SPUs
+    /// take their share.
+    pub fn spu_limit(&self, pid: u32) -> u32 {
+        pool::USABLE_SPUS - self.raw_limit(pid)
     }
 
-    /// The physical SPUs set aside for Raw SPUs.
-    pub fn raw_limit(&self) -> u32 {
-        self.max_raw
+    /// The physical SPUs process `pid` set aside for Raw SPUs.
+    pub fn raw_limit(&self, pid: u32) -> u32 {
+        self.raw_limits.get(pid).copied().unwrap_or(0)
     }
 
-    /// Set aside `max_raw` physical SPUs for Raw SPUs, as
+    /// Set aside `max_raw` physical SPUs for process `pid`'s Raw SPUs, as
     /// `sys_spu_initialize` does, while `live_raw` Raw SPUs exist.
     ///
     /// # Errors
     /// See [`SetLimitsError`]; an error keeps the old split.
     // The console capture of tests/micro/spu_raw_lifecycle answers
     // CELL_EBUSY to a limit of 1 while two Raw SPUs exist.
-    pub fn set_raw_limit(&mut self, max_raw: u32, live_raw: u32) -> Result<(), SetLimitsError> {
+    pub fn set_raw_limit(
+        &mut self,
+        pid: u32,
+        max_raw: u32,
+        live_raw: u32,
+    ) -> Result<(), SetLimitsError> {
         if max_raw > pool::RAW_SPU_MAX {
             return Err(SetLimitsError::Invalid { max_raw });
         }
-        if live_raw > max_raw || !self.occupied().fits(pool::USABLE_SPUS - max_raw) {
+        if live_raw > max_raw || !self.occupied(pid).fits(pool::USABLE_SPUS - max_raw) {
             return Err(SetLimitsError::Busy { max_raw });
         }
-        self.max_raw = max_raw;
+        if max_raw == 0 {
+            self.raw_limits.remove(pid);
+        } else {
+            self.raw_limits.insert(pid, max_raw);
+        }
         Ok(())
     }
 
-    /// What every group that exists needs from the SPU pool. A group
-    /// keeps its share until it is destroyed.
-    fn occupied(&self) -> PoolDemand {
+    /// What every group of process `pid` needs from its SPU pool. A
+    /// group keeps its share until its destroy.
+    fn occupied(&self, pid: u32) -> PoolDemand {
         self.groups
             .values()
+            .filter(|group| group.pid == pid)
             .fold(PoolDemand::default(), |acc, group| {
                 acc.with(PoolDemand::of(group.kind(), group.num_threads))
             })
     }
 
-    fn insert_group(&mut self, request: GroupRequest) -> Option<u32> {
+    fn insert_group(&mut self, request: GroupRequest, pid: u32) -> Option<u32> {
         let GroupRequest {
             num_threads,
             group_type,
@@ -738,6 +780,7 @@ impl ThreadGroupTable {
             suspended: false,
             previous_exit_status: BTreeMap::new(),
             container: None,
+            pid,
         };
         self.groups.insert(id, group);
         Some(id)
@@ -1478,6 +1521,7 @@ impl ThreadGroupTable {
             .wrapping_add(self.unit_to_group.partial())
             .wrapping_add(self.finished_units.partial())
             .wrapping_add(self.thread_id_to_unit.partial())
+            .wrapping_add(self.raw_limits.partial())
             .wrapping_add(self.ids_term())
     }
 
@@ -1488,18 +1532,13 @@ impl ThreadGroupTable {
             .wrapping_add(self.unit_to_group.partial_from_scratch())
             .wrapping_add(self.finished_units.partial_from_scratch())
             .wrapping_add(self.thread_id_to_unit.partial_from_scratch())
+            .wrapping_add(self.raw_limits.partial_from_scratch())
             .wrapping_add(self.ids_term())
     }
 
-    /// The id allocator's term, and the SPU pool split's once Raw SPUs
-    /// take a share.
+    /// The id allocator's term.
     fn ids_term(&self) -> u128 {
-        let ids = lanes::value_term(source::GROUP_IDS, 0, &self.next_id);
-        if self.max_raw == 0 {
-            ids
-        } else {
-            ids.wrapping_add(lanes::value_term(source::SPU_LIMITS, 0, &self.max_raw))
-        }
+        lanes::value_term(source::GROUP_IDS, 0, &self.next_id)
     }
 }
 

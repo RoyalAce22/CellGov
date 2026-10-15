@@ -371,22 +371,25 @@ impl Lv2Host {
     }
 
     /// `sys_spu_initialize`: set aside `max_raw_spu` physical SPUs for
-    /// Raw SPUs, leaving the rest of the pool to SPU thread groups.
+    /// the calling process's Raw SPUs, leaving the rest of its pool to
+    /// its SPU thread groups. Each process has its own split.
     /// `max_usable_spu` is not checked: the reference console accepts
     /// `(0, 0)` (`tests/micro/spu_group_limits`).
     ///
     /// # Errors
     ///
     /// - `CELL_EINVAL` when `max_raw_spu` exceeds the Raw SPU maximum.
-    /// - `CELL_EBUSY` when the thread groups or the Raw SPUs that exist
-    ///   do not fit the new split.
+    /// - `CELL_EBUSY` when the process's thread groups or the Raw SPUs
+    ///   that exist do not fit the new split.
     pub(in crate::host) fn dispatch_spu_initialize(
         &mut self,
         _max_usable_spu: u32,
         max_raw_spu: u32,
+        requester: UnitId,
     ) -> Lv2Dispatch {
+        let pid = self.state.processes.process_of_unit(requester);
         let live_raw = self.state.raw_spus.len();
-        match self.state.groups.set_raw_limit(max_raw_spu, live_raw) {
+        match self.state.groups.set_raw_limit(pid, max_raw_spu, live_raw) {
             Ok(()) => Lv2Dispatch::immediate(0),
             Err(SetLimitsError::Invalid { .. }) => {
                 Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
