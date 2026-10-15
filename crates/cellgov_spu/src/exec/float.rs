@@ -3,7 +3,9 @@
 //! truncates and packs the result; the slot's flags OR into its FPSCR
 //! bits. The arms hold no floating-point logic.
 
-use cellgov_float::{round_pack, unpack_extended, Binary32, Exact, Flags, Policy, Rounding};
+use cellgov_float::{
+    round_pack, unpack_extended, Binary32, Exact, Flags, Format, Policy, Rounding,
+};
 
 use super::lanes::{from_words, words};
 use cellgov_ps3_abi::hw::spu_isa::{TO_FLOAT_SCALE_BIAS, TO_INTEGER_SCALE_BIAS};
@@ -86,13 +88,24 @@ pub(super) fn interpolate(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuSt
     SpuStepOutcome::Continue
 }
 
-/// The scale `bias - imm`, or `None` outside 0..=127, where every
-/// conversion's result is undefined.
+/// The scale `bias - imm`, for any I8.
 ///
-/// [SPU-ISA p:220 s:9] a scale outside 0..=127 is undefined; [SPU-ISA p:221 s:9] the same for the integer conversions.
-pub(crate) fn scale(bias: u8, imm: u8) -> Option<u32> {
-    let scale = i32::from(bias) - i32::from(imm);
-    (0..=127).contains(&scale).then_some(scale as u32)
+/// [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9] leave a scale outside 0..=127 undefined. The `spu_convert_scales` and `spu_convert_sweep` captures give the console's answer: csflt and cuflt follow their formula at every scale, and so do cflts and cfltu apart from the exponent edges `to_integer` names.
+fn scale(bias: u8, imm: u8) -> i32 {
+    i32::from(bias) - i32::from(imm)
+}
+
+/// The biased exponent plus the scale at which cflts (`signed`) or
+/// cfltu saturates: the value reaches 2^31 or 2^32.
+fn saturation_point(signed: bool) -> i32 {
+    Binary32::BIAS + if signed { 31 } else { 32 }
+}
+
+/// Whether cflts (`signed`) or cfltu at this I8 refuses some input:
+/// whether the largest biased exponent reaches 256 past the saturation
+/// point.
+pub(crate) fn to_integer_can_refuse(imm: u8, signed: bool) -> bool {
+    255 + scale(TO_INTEGER_SCALE_BIAS, imm) - saturation_point(signed) >= 256
 }
 
 /// `csflt` / `cuflt`: each slot's integer divided by 2^scale, truncated
@@ -106,9 +119,7 @@ pub(super) fn to_float(
     imm: u8,
     signed: bool,
 ) -> SpuStepOutcome {
-    let Some(scale) = scale(TO_FLOAT_SCALE_BIAS, imm) else {
-        return SpuStepOutcome::Fault(SpuFault::UndefinedConversionScale(imm));
-    };
+    let scale = scale(TO_FLOAT_SCALE_BIAS, imm);
     let a = words(state.regs[ra as usize]);
     let mut flags = [Flags::default(); 4];
     let results = std::array::from_fn(|slot| {
@@ -118,7 +129,7 @@ pub(super) fn to_float(
         } else {
             (false, a[slot])
         };
-        let exact = Exact::new(negative, u128::from(magnitude), -(scale as i32))
+        let exact = Exact::new(negative, u128::from(magnitude), -scale)
             .expect("invariant: a 32-bit integer fits the exact significand");
         let packed = round_pack::<Binary32>(Policy::SpuExtended, Rounding::TowardZero, exact);
         flags[slot] = packed.flags;
@@ -133,6 +144,17 @@ pub(super) fn to_float(
 /// zero and saturated to the integer range.
 ///
 /// [SPU-ISA p:221 s:9] cflts saturates above 2^31 - 1 and below -2^31; [SPU-ISA p:223 s:9] cfltu saturates above 2^32 - 1 and every negative product to zero; [SPU-ISA p:196 s:9.1] truncation is the only single-precision rounding, and neither sets a flag.
+///
+/// Only an undefined scale reaches two edges, which the
+/// `spu_convert_sweep` capture shows:
+///
+/// - A slot whose biased exponent plus the scale reaches the saturation
+///   point saturates even when its exponent is 0, a zero for every
+///   other purpose.
+/// - At 256 or more past that point the console's result for a slot
+///   depends on more than the slot's input and the scale: the same
+///   instruction and input gave different results in two probes. Such
+///   a slot refuses the instruction.
 pub(super) fn to_integer(
     state: &mut SpuState,
     rt: u8,
@@ -140,36 +162,40 @@ pub(super) fn to_integer(
     imm: u8,
     signed: bool,
 ) -> SpuStepOutcome {
-    let Some(scale) = scale(TO_INTEGER_SCALE_BIAS, imm) else {
-        return SpuStepOutcome::Fault(SpuFault::UndefinedConversionScale(imm));
-    };
+    let scale = scale(TO_INTEGER_SCALE_BIAS, imm);
     let a = words(state.regs[ra as usize]);
-    state.set_reg(
-        rt as usize,
-        from_words(a.map(|word| {
-            let (x, _) = unpack_extended::<Binary32>(u64::from(word));
-            // The magnitude truncated toward zero, or `None` at 2^33 and above.
-            let shift = x.exponent() + scale as i32;
-            let significand = x.significand();
-            let magnitude = if significand == 0 {
-                Some(0)
-            } else if shift >= 0 {
-                (128 - significand.leading_zeros() as i32 + shift <= 33)
-                    .then(|| significand << shift)
-            } else {
-                Some(significand.checked_shr(shift.unsigned_abs()).unwrap_or(0))
-            };
-            match (signed, x.negative(), magnitude) {
-                (true, false, Some(m)) if m <= i32::MAX as u128 => m as u32,
-                (true, false, _) => i32::MAX as u32,
-                (true, true, Some(m)) if m <= 1 << 31 => (m as u32).wrapping_neg(),
-                (true, true, _) => i32::MIN as u32,
-                (false, false, Some(m)) if m <= u128::from(u32::MAX) => m as u32,
-                (false, false, _) => u32::MAX,
-                (false, true, _) => 0,
-            }
-        })),
-    );
+    let past_saturation = a.map(|word| {
+        (word >> Binary32::FRAC_BITS & Binary32::EXP_MAX) as i32 + scale - saturation_point(signed)
+    });
+    if past_saturation.iter().any(|&past| past >= 256) {
+        return SpuStepOutcome::Fault(SpuFault::UndefinedConversionScale(imm));
+    }
+    let results = std::array::from_fn(|slot| {
+        let word = a[slot];
+        let (x, _) = unpack_extended::<Binary32>(u64::from(word));
+        // The magnitude truncated toward zero, or `None` at 2^33 and above.
+        let shift = x.exponent() + scale;
+        let significand = x.significand();
+        let magnitude = if past_saturation[slot] >= 0 {
+            None
+        } else if significand == 0 {
+            Some(0)
+        } else if shift >= 0 {
+            (128 - significand.leading_zeros() as i32 + shift <= 33).then(|| significand << shift)
+        } else {
+            Some(significand.checked_shr(shift.unsigned_abs()).unwrap_or(0))
+        };
+        match (signed, word >> 31 == 1, magnitude) {
+            (true, false, Some(m)) if m <= i32::MAX as u128 => m as u32,
+            (true, false, _) => i32::MAX as u32,
+            (true, true, Some(m)) if m <= 1 << 31 => (m as u32).wrapping_neg(),
+            (true, true, _) => i32::MIN as u32,
+            (false, false, Some(m)) if m <= u128::from(u32::MAX) => m as u32,
+            (false, false, _) => u32::MAX,
+            (false, true, _) => 0,
+        }
+    });
+    state.set_reg(rt as usize, from_words(results));
     SpuStepOutcome::Continue
 }
 

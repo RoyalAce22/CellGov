@@ -231,20 +231,17 @@ fn round_spu_extended<F: Format>(exact: Exact) -> Packed {
     }
     // Truncation keeps the leading FRAC_BITS + 1 bits.
     let drop = significant_bits(exact.significand) as i32 - (F::FRAC_BITS as i32 + 1);
-    let (kept, dropped) = if drop >= 0 {
-        shift_right_sticky(exact.significand, drop as u32)
+    let kept = if drop >= 0 {
+        shift_right_sticky(exact.significand, drop as u32).0
     } else {
-        (exact.significand << (-drop) as u32, false)
+        exact.significand << (-drop) as u32
     };
     let bits = sign | (biased as u64) << F::FRAC_BITS | (kept as u64 & F::FRAC_MASK);
-    let top_binade = biased == F::EXP_MAX as i32;
+    // [SPU-ISA p:196 s:9.1] reads OVF as a magnitude above Smax before rounding; [Mueller2005 p:64 s:4.4] reads it as an exponent above the maximum. The `spu_float_truncation` capture settles the second: a sum between Smax and 2^129 truncates to Smax with DIFF alone, so a result in the top binade never overflows.
     Packed {
         bits,
         flags: Flags {
-            // The magnitude before truncation exceeds Smax when it lies in the
-            // top binade above the all-ones significand.
-            overflow: top_binade && bits == all_ones && (dropped || exact.sticky),
-            diff: top_binade,
+            diff: biased == F::EXP_MAX as i32,
             ..Flags::default()
         },
     }

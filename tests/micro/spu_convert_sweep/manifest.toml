@@ -1,0 +1,21 @@
+[test]
+name = "spu_convert_sweep"
+
+# A hardware probe of cflts, cfltu, csflt and cuflt at all 256 I8
+# values over 4096 inputs: one digest of the results (and, for csflt
+# and cuflt, the FPSCRs) per opcode and I8, plus every result of cflts
+# and cfltu at I8 0..15 on 1024 structured inputs. The SPU program's
+# header comment has the inputs, the digest and the layout.
+
+[observe]
+# 1024 digests, then 32768 raw results.
+memory_regions = [
+  { name = "result", addr = 0, size = 135168 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000
+files = ["spu_main.elf"]

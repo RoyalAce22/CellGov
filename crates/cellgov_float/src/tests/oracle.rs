@@ -120,7 +120,6 @@ pub(crate) fn enumerate<F: Format>(policy: Policy, rounding: Rounding, x: Exact)
     match policy {
         Policy::SpuExtended => {
             let smin = 1u64 << F::FRAC_BITS;
-            let smax = count - 1;
             if compare_exact(x, magnitude::<F>(smin)) == Ordering::Less {
                 return Packed {
                     bits: 0,
@@ -131,7 +130,13 @@ pub(crate) fn enumerate<F: Format>(policy: Policy, rounding: Rounding, x: Exact)
                     },
                 };
             }
-            let over = compare_exact(x, magnitude::<F>(smax)) == Ordering::Greater;
+            // Overflow is a magnitude at or above 2^(emax + 1), the binade
+            // past the largest; the top binade truncates to Smax.
+            let past_top = Value {
+                significand: 1,
+                exponent: F::EXP_MAX as i32 - F::BIAS + 1,
+            };
+            let over = compare_exact(x, past_top) != Ordering::Less;
             // Truncation: the largest normal at or below |x|.
             let normals: Vec<u64> = (smin..count).collect();
             let mut chosen = smin;
@@ -296,11 +301,10 @@ pub(crate) fn define<F: Format>(policy: Policy, rounding: Rounding, x: Exact) ->
         Policy::SpuExtended => {
             let top = F::EXP_MAX as i32;
             let bits = (biased as u64) << F::FRAC_BITS | (units as u64 & F::FRAC_MASK);
-            let smax = (1 << F::SIGN_SHIFT) - 1;
             return Packed {
                 bits: sign | bits,
                 flags: Flags {
-                    overflow: biased == top && bits == smax && !exact,
+                    overflow: false,
                     diff: biased == top,
                     ..Flags::default()
                 },

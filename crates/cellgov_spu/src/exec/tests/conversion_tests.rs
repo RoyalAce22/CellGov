@@ -1,5 +1,6 @@
 //! csflt, cflts, cuflt and cfltu against an integer oracle, at the range
-//! borders, over every defined scale, and refusing an undefined one.
+//! borders, over every defined scale, and at the undefined scales as the
+//! console answers them.
 
 use super::single_float_tests::{decode_operand, fpscr_of, truncate, SpFlags};
 use super::*;
@@ -207,38 +208,87 @@ fn the_float_conversions_truncate_and_flush() {
     );
 }
 
-/// [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9]: a scale outside 0..=127 has an undefined result.
+/// [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9] leave a scale outside 0..=127 undefined; the `spu_convert_sweep` capture shows each conversion following its formula there.
 #[test]
-fn an_undefined_scale_is_a_named_refusal() {
+fn an_undefined_scale_follows_the_formula() {
+    let inputs = [0x3F80_0000, 0xC040_0000, 0x0000_0007, 0x4B00_0001];
     for (op, imms) in [
-        (CSFLT, [27, 156, 0, 255]),
-        (CUFLT, [27, 156, 0, 255]),
-        (CFLTS, [45, 174, 0, 255]),
-        (CFLTU, [45, 174, 0, 255]),
+        (CSFLT, [156, 200, 255, 0]),
+        (CUFLT, [156, 200, 255, 0]),
+        (CFLTS, [174, 200, 255, 16]),
+        (CFLTU, [174, 200, 255, 16]),
     ] {
         for imm in imms {
-            let (outcome, s) = run(op, imm, [0x3F80_0000; 4]);
+            let scale = bias(op) as i32 - imm as i32;
+            let (outcome, s) = run(op, imm, inputs);
+            assert_eq!(outcome, SpuStepOutcome::Continue, "op {op:#x} I8 {imm}");
+            let expected: [(u32, SpFlags); 4] =
+                std::array::from_fn(|i| oracle(op, inputs[i], scale));
             assert_eq!(
-                outcome,
-                SpuStepOutcome::Fault(SpuFault::UndefinedConversionScale(imm as u8)),
+                words(s.regs[3]),
+                expected.map(|(bits, _)| bits),
                 "op {op:#x} I8 {imm}"
             );
-            assert_eq!(s.regs[3], [0xAA; 16], "RT keeps its value");
-            assert_eq!(s.fpscr(), 0);
-        }
-        // The edges of the defined range run.
-        let lowest = bias(op) - 127;
-        for imm in [lowest, bias(op)] {
-            assert_eq!(run(op, imm, [0; 4]).0, SpuStepOutcome::Continue);
+            assert_eq!(
+                s.fpscr(),
+                fpscr_of(expected.map(|(_, f)| f)),
+                "op {op:#x} I8 {imm}"
+            );
         }
     }
-    let code = crate::fault_codes::guest_fault_for(SpuFault::UndefinedConversionScale(174));
+}
+
+/// The `spu_convert_sweep` capture: at an undefined scale that brings the
+/// biased exponent plus the scale to the saturation point (2^31 for
+/// cflts, 2^32 for cfltu), a zero-exponent slot saturates by its sign.
+#[test]
+fn a_zero_exponent_saturates_once_its_exponent_reaches_the_saturation_point() {
+    let zeros = [0x0000_0000, 0x8000_0000, 0x0000_0001, 0x807F_FFFF];
+    // Scale 158 = TO_INTEGER_BIAS - 15.
+    let (_, s) = run(CFLTS, 15, zeros);
+    assert_eq!(
+        words(s.regs[3]),
+        [0x7FFF_FFFF, 0x8000_0000, 0x7FFF_FFFF, 0x8000_0000]
+    );
+    let (_, s) = run(CFLTU, 15, zeros);
+    assert_eq!(words(s.regs[3]), [0; 4], "cfltu saturates one scale later");
+    let (_, s) = run(CFLTU, 14, zeros);
+    assert_eq!(words(s.regs[3]), [0xFFFF_FFFF, 0, 0xFFFF_FFFF, 0]);
+    let (_, s) = run(CFLTS, 16, zeros);
+    assert_eq!(words(s.regs[3]), [0; 4], "one scale short of the point");
+}
+
+/// The `spu_convert_sweep` capture: 256 or more past the saturation
+/// point, the console's result depends on more than the slot's input,
+/// so CellGov refuses the instruction.
+#[test]
+fn a_slot_far_past_the_saturation_point_is_a_named_refusal() {
+    // Biased exponent 255 at scale 159 (cflts) or 160 (cfltu) is 256 past
+    // the point; at one scale less it saturates.
+    for (op, refusing, running) in [(CFLTS, 14, 15), (CFLTU, 13, 14)] {
+        let input = [0x3F80_0000, 0x7F80_0000, 0, 0];
+        let (outcome, s) = run(op, refusing, input);
+        assert_eq!(
+            outcome,
+            SpuStepOutcome::Fault(SpuFault::UndefinedConversionScale(refusing as u8)),
+            "op {op:#x}"
+        );
+        assert_eq!(s.regs[3], [0xAA; 16], "RT keeps its value");
+        assert_eq!(s.fpscr(), 0);
+        assert_eq!(run(op, running, input).0, SpuStepOutcome::Continue);
+        assert_eq!(
+            run(op, refusing, [0x7F00_0000; 4]).0,
+            SpuStepOutcome::Continue,
+            "exponent 254 is 255 past the point"
+        );
+    }
+    let code = crate::fault_codes::guest_fault_for(SpuFault::UndefinedConversionScale(14));
     let cellgov_effects::FaultKind::Guest(code) = code else {
         panic!("expected a guest fault, got {code:?}");
     };
     assert_eq!(
         crate::describe_guest_fault(code).as_deref(),
-        Some("SPU_UNDEFINED_CONVERSION_SCALE (detail=0x00ae)")
+        Some("SPU_UNDEFINED_CONVERSION_SCALE (detail=0x000e)")
     );
 }
 

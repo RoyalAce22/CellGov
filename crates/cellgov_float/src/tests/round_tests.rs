@@ -256,7 +256,7 @@ fn the_coverage_results_match_their_golden_hash() {
     assert_eq!(golden_hash(), GOLDEN);
 }
 
-const GOLDEN: u64 = 0xf18c_7871_88cd_df2f;
+const GOLDEN: u64 = 0xa840_6dca_92dd_ae99;
 
 /// [SPU-ISA p:195 s:9.1] a zero exponent reads as zero and exponent 255 is a normal binade.
 #[test]

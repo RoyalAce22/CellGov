@@ -63,8 +63,8 @@ fn build_generation_descriptors() -> Vec<SpuGenerationDescriptor> {
 
 /// The immediate bits a kind's canonical word carries beside its opcode.
 ///
-/// A conversion's zero I8 names an undefined scale, so its canonical word
-/// takes scale 0, where the result is defined.
+/// A conversion's zero I8 names an undefined scale, at which cflts and
+/// cfltu refuse some inputs, so its canonical word takes scale 0.
 fn canonical_immediate(kind: SpuInstructionKind) -> u32 {
     use SpuInstructionKind as K;
     let imm = match kind {

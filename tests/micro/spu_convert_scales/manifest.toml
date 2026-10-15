@@ -1,0 +1,20 @@
+[test]
+name = "spu_convert_scales"
+
+# A hardware probe of cflts, cfltu, csflt and cuflt at all 256 I8
+# values on 16 inputs, including the 128 scales the architecture leaves
+# undefined. The SPU program's header comment has the layout.
+
+[observe]
+# Results per (opcode, I8, input vector), then the FPSCR after each
+# csflt and cuflt.
+memory_regions = [
+  { name = "result", addr = 0, size = 98304 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

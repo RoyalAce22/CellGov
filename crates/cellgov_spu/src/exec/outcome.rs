@@ -99,11 +99,12 @@ pub enum SpuFault {
     /// The word is the value the guest wrote.
     #[error("SPU reserved tag-status update request 0x{0:08x}")]
     ReservedTagUpdate(u32),
-    /// A conversion whose I8 field gives a scale outside 0..=127, where
-    /// the result is undefined.
+    /// A cflts or cfltu whose undefined scale puts a slot 256 or more
+    /// past the saturation point, where the console's result depends on
+    /// more than the slot's input.
     ///
     /// The byte is the I8 field.
-    #[error("SPU conversion I8 {0} gives an undefined scale")]
+    #[error("SPU conversion I8 {0} puts a slot 256 or more past the saturation point")]
     UndefinedConversionScale(u8),
     /// A taken indirect branch with both the D and E feature bits set,
     /// whose effect on the interrupt-enable state is undefined.

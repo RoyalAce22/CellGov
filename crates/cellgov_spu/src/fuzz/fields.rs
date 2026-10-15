@@ -1,7 +1,5 @@
 //! Operand fields, their candidate values, and operand validity.
 
-use cellgov_ps3_abi::hw::spu_isa;
-
 use crate::instruction::{SpuInstruction, SpuInstructionKind};
 
 use super::types::{SpuEncodingForm, SpuFuzzDescriptor, SpuOperandClass, SpuOperandField};
@@ -163,12 +161,11 @@ pub(super) fn operand_combination_is_valid(kind: SpuInstructionKind, word: u32) 
         // [SPU-ISA p:192 s:8 Hint-for-Branch Instructions] P requires the split RO field to be zero.
         K::Hbr => word & 0x0010_0000 == 0 || word & 0x0000_c07f == 0,
         // [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9]: an I8 whose scale falls outside 0..=127 has an undefined result.
-        K::Csflt | K::Cuflt => {
-            crate::exec::scale(spu_isa::TO_FLOAT_SCALE_BIAS, (word >> 14) as u8).is_some()
-        }
-        K::Cflts | K::Cfltu => {
-            crate::exec::scale(spu_isa::TO_INTEGER_SCALE_BIAS, (word >> 14) as u8).is_some()
-        }
+        // The console answers every I8, but a cflts or cfltu that can refuse
+        // some input stays out of generation: a refusal inside a sequence
+        // discards the sequence.
+        K::Cflts => !crate::exec::to_integer_can_refuse((word >> 14) as u8, true),
+        K::Cfltu => !crate::exec::to_integer_can_refuse((word >> 14) as u8, false),
         _ => true,
     }
 }

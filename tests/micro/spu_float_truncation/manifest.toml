@@ -1,0 +1,21 @@
+[test]
+name = "spu_float_truncation"
+
+# A hardware probe of single-precision arithmetic: opposite-sign sums
+# whose smaller operand lies 1 to 60 binades down, the fused forms with
+# an addend far below and far above the product, results just above
+# Smax from fm and fa, and when fscrrd sees a flag. The SPU program's
+# header comment has the case order and layout.
+
+[observe]
+# 1272 cases x (A, B, C, result, FPSCR word 0), 28 FPSCR words, padding.
+memory_regions = [
+  { name = "result", addr = 0, size = 25600 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

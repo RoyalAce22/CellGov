@@ -755,35 +755,51 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
 }
 
 /// [SPU-ISA p:220 s:9] and [SPU-ISA p:221 s:9]: a conversion's scale outside 0..=127 is undefined.
+/// The `spu_convert_sweep` capture answers every conversion scale, so every
+/// I8 is a defined operand except where cflts and cfltu can refuse an
+/// input 256 past saturation; those stay out of generation and out of
+/// the metamorphic relations.
 #[test]
-fn a_conversion_is_generated_only_with_a_defined_scale() {
-    use cellgov_ps3_abi::hw::spu_isa::{TO_FLOAT_SCALE_BIAS, TO_INTEGER_SCALE_BIAS};
+fn a_conversion_is_generated_at_every_scale_it_cannot_refuse() {
+    use crate::fuzz::types::SpuOutcomeClass;
     for descriptor in generation_descriptors() {
-        let bias = match descriptor.kind {
-            SpuInstructionKind::Csflt | SpuInstructionKind::Cuflt => TO_FLOAT_SCALE_BIAS,
-            SpuInstructionKind::Cflts | SpuInstructionKind::Cfltu => TO_INTEGER_SCALE_BIAS,
+        let refusing_below = match descriptor.kind {
+            SpuInstructionKind::Csflt | SpuInstructionKind::Cuflt => 0,
+            SpuInstructionKind::Cflts => 15,
+            SpuInstructionKind::Cfltu => 14,
             _ => continue,
         };
         let with_imm = |imm: u8| descriptor.canonical_word & !0x003f_c000 | u32::from(imm) << 14;
-        assert!(descriptor.operands_are_defined(descriptor.canonical_word));
-        assert_eq!(
-            descriptor.sequence_flow,
-            crate::fuzz::types::SpuSequenceFlow::Linear,
-            "{:?}",
-            descriptor.kind
-        );
-        for (imm, defined) in [
-            (bias - 127, true),
-            (bias, true),
-            (bias - 128, false),
-            (bias + 1, false),
-        ] {
+        for imm in 0..=255u8 {
+            let word = with_imm(imm);
+            let instruction = crate::decode::decode(word).expect("decodes");
+            let outcomes = instruction.fuzz_descriptor().outcomes;
+            let can_refuse = outcomes.contains(&SpuOutcomeClass::Fault);
             assert_eq!(
-                descriptor.operands_are_defined(with_imm(imm)),
-                defined,
+                can_refuse,
+                imm < refusing_below,
                 "{:?} I8 {imm}",
                 descriptor.kind
             );
+            assert_eq!(
+                descriptor.operands_are_defined(word),
+                !can_refuse,
+                "{:?} I8 {imm}",
+                descriptor.kind
+            );
+            if matches!(
+                descriptor.kind,
+                SpuInstructionKind::Cflts | SpuInstructionKind::Cfltu
+            ) {
+                let case =
+                    instruction.metamorphic_case(word, SpuMetamorphicRelation::SlotPermutation);
+                assert_eq!(
+                    matches!(case, Err(SpuRelationRefusal::Ineligible { .. })),
+                    can_refuse,
+                    "{:?} I8 {imm}: {case:?}",
+                    descriptor.kind
+                );
+            }
         }
     }
 }

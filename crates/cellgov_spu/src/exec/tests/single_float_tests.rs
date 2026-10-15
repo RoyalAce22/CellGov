@@ -42,15 +42,17 @@ pub(super) fn decode_operand(bits: u32) -> (bool, i128, i32, bool) {
     }
 }
 
-/// Truncates `(-1)^negative * magnitude * 2^exponent`, where `sticky`
-/// marks nonzero bits below `magnitude`, to extended-range single precision.
+/// Truncates `(-1)^negative * magnitude * 2^exponent` to extended-range
+/// single precision. Truncation never reads the bits below `magnitude`.
 ///
-/// [SPU-ISA p:196 s:9.1] truncation only; below Smin the result is +0 with UNF and DIFF; above Smax it is Smax with OVF; exponent 255 raises DIFF.
+/// [SPU-ISA p:196 s:9.1] truncation only; below Smin the result is +0 with UNF and DIFF; exponent 255 raises DIFF.
+///
+/// [Mueller2005 p:64 s:4.4] OVF needs a result exponent above 255; the `spu_float_truncation` capture shows a value between Smax and 2^129 truncating to Smax with DIFF alone.
 pub(super) fn truncate(
     negative: bool,
     magnitude: u128,
     exponent: i32,
-    sticky: bool,
+    _sticky: bool,
 ) -> (u32, SpFlags) {
     if magnitude == 0 {
         return (0, SpFlags::default());
@@ -78,17 +80,15 @@ pub(super) fn truncate(
             },
         );
     }
-    let (kept, dropped) = if top >= 23 {
-        let shift = (top - 23) as u32;
-        (magnitude >> shift, magnitude & ((1 << shift) - 1) != 0)
+    let kept = if top >= 23 {
+        magnitude >> (top - 23) as u32
     } else {
-        (magnitude << (23 - top) as u32, false)
+        magnitude << (23 - top) as u32
     };
     let bits = sign | (biased as u32) << 23 | (kept as u32 & 0x7F_FFFF);
     (
         bits,
         SpFlags {
-            overflow: biased == 255 && kept == 0xFF_FFFF && (dropped || sticky),
             diff: biased == 255,
             ..SpFlags::default()
         },

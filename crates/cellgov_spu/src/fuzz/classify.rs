@@ -1,7 +1,7 @@
 //! The encoding-form, effect and outcome classifiers, and the sequence-flow helper.
 
 use cellgov_effects::EffectKind;
-use cellgov_ps3_abi::hw::{spu, spu_isa};
+use cellgov_ps3_abi::hw::spu;
 
 use crate::instruction::{SpuInstruction, SpuInstructionKind};
 
@@ -62,12 +62,13 @@ pub(super) fn sequence_flow(outcomes: &[SpuOutcomeClass]) -> SpuSequenceFlow {
     }
 }
 
-/// The outcome of a conversion whose scale is `scale`.
-fn scaled(scale: Option<u32>) -> &'static [SpuOutcomeClass] {
-    if scale.is_some() {
-        CONTINUE
+/// The outcomes a cflts (`signed`) or cfltu with I8 field `imm` can
+/// end in: a refusal is possible only where some input can refuse.
+fn refusing(imm: u8, signed: bool) -> &'static [SpuOutcomeClass] {
+    if crate::exec::to_integer_can_refuse(imm, signed) {
+        LOAD_STORE
     } else {
-        FAULT
+        CONTINUE
     }
 }
 
@@ -174,15 +175,10 @@ pub(super) fn effect_and_outcome(
         | SpuInstruction::Hgti { .. }
         | SpuInstruction::Hlgt { .. }
         | SpuInstruction::Hlgti { .. } => (NO_EFFECTS, CONTINUE_OR_STOP),
-        // An I8 outside the defined scale range is a refusal.
-        SpuInstruction::Csflt { imm, .. } | SpuInstruction::Cuflt { imm, .. } => (
-            NO_EFFECTS,
-            scaled(crate::exec::scale(spu_isa::TO_FLOAT_SCALE_BIAS, imm)),
-        ),
-        SpuInstruction::Cflts { imm, .. } | SpuInstruction::Cfltu { imm, .. } => (
-            NO_EFFECTS,
-            scaled(crate::exec::scale(spu_isa::TO_INTEGER_SCALE_BIAS, imm)),
-        ),
+        // cflts and cfltu at some undefined scales refuse an input far
+        // enough past saturation.
+        SpuInstruction::Cflts { imm, .. } => (NO_EFFECTS, refusing(imm, true)),
+        SpuInstruction::Cfltu { imm, .. } => (NO_EFFECTS, refusing(imm, false)),
         _ => (NO_EFFECTS, CONTINUE),
     }
 }

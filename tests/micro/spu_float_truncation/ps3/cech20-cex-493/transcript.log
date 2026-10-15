@@ -1,0 +1,267 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5725 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 67 C, fan 34%, /dev_hdd0 99840 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > QUIT
+#0016 < 221 BYE
+#0017 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0018 > USER anonymous
+#0019 < 331 OK
+#0020 > PASS anonymous@
+#0021 < 230 OK
+#0022 > TYPE I
+#0023 < 200 TYPE OK
+#0024 > PASV
+#0025 < 227 Entering Passive Mode (10,77,0,2,168,206)
+#0026 > STOR /dev_hdd0/tmp/cellgov_lease/holder (77 bytes)
+#0027 < 150 OK
+#0028 < 226 OK
+#0029 > QUIT
+#0030 < 221 BYE
+#0031 > GET /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0032 < 404 (514 bytes)
+#0033 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0034 > USER anonymous
+#0035 < 331 OK
+#0036 > PASS anonymous@
+#0037 < 230 OK
+#0038 > TYPE I
+#0039 < 200 TYPE OK
+#0040 > PASV
+#0041 < 227 Entering Passive Mode (10,77,0,2,170,216)
+#0042 > NLST /dev_hdd0/game
+#0043 < 150 OK
+#0044 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 67C]
+#0045 > QUIT
+#0046 < 221 BYE
+#0047 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0048 > USER anonymous
+#0049 < 331 OK
+#0050 > PASS anonymous@
+#0051 < 230 OK
+#0052 > TYPE I
+#0053 < 200 TYPE OK
+#0054 > MKD /dev_hdd0/game/CGOV00001
+#0055 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0056 > QUIT
+#0057 < 221 BYE
+#0058 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0059 > USER anonymous
+#0060 < 331 OK
+#0061 > PASS anonymous@
+#0062 < 230 OK
+#0063 > TYPE I
+#0064 < 200 TYPE OK
+#0065 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0066 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0067 > QUIT
+#0068 < 221 BYE
+#0069 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0070 > USER anonymous
+#0071 < 331 OK
+#0072 > PASS anonymous@
+#0073 < 230 OK
+#0074 > TYPE I
+#0075 < 200 TYPE OK
+#0076 > PASV
+#0077 < 227 Entering Passive Mode (10,77,0,2,178,40)
+#0078 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0079 < 150 OK
+#0080 < 226 OK
+#0081 > QUIT
+#0082 < 221 BYE
+#0083 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0084 > USER anonymous
+#0085 < 331 OK
+#0086 > PASS anonymous@
+#0087 < 230 OK
+#0088 > TYPE I
+#0089 < 200 TYPE OK
+#0090 > PASV
+#0091 < 227 Entering Passive Mode (10,77,0,2,180,128)
+#0092 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (7792 bytes)
+#0093 < 150 OK
+#0094 < 226 OK
+#0095 > QUIT
+#0096 < 221 BYE
+#0097 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0098 > USER anonymous
+#0099 < 331 OK
+#0100 > PASS anonymous@
+#0101 < 230 OK
+#0102 > TYPE I
+#0103 < 200 TYPE OK
+#0104 > PASV
+#0105 < 227 Entering Passive Mode (10,77,0,2,184,16)
+#0106 > STOR /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf (7715 bytes)
+#0107 < 150 OK
+#0108 < 226 OK
+#0109 > QUIT
+#0110 < 221 BYE
+#0111 = deployed 3 file(s) under /dev_hdd0/game/CGOV00001
+#0112 > GET /play.ps3?CGOV00001
+#0113 < 200 (5725 bytes)
+#0114 = started
+#0115 > GET /cpursx.ps3
+#0116 < 200 (5725 bytes)
+#0117 > GET /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0118 < 404 (514 bytes)
+#0119 > GET /cpursx.ps3
+#0120 < 200 (5725 bytes)
+#0121 > GET /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0122 < 404 (514 bytes)
+#0123 > GET /cpursx.ps3
+#0124 < 200 (5725 bytes)
+#0125 > GET /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0126 < 404 (514 bytes)
+#0127 > GET /cpursx.ps3
+#0128 < 200 (5725 bytes)
+#0129 > GET /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0130 < 404 (514 bytes)
+#0131 > GET /cpursx.ps3
+#0132 < 200 (5933 bytes)
+#0133 = left the XMB after 5 poll(s)
+#0134 > GET /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0135 < 404 (514 bytes)
+#0136 > GET /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0137 < 404 (514 bytes)
+#0138 > GET /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0139 < 200 (25608 bytes)
+#0140 = result present after 3 poll(s)
+#0141 > GET /cpursx.ps3
+#0142 < 200 (6440 bytes)
+#0143 > GET /cpursx.ps3
+#0144 < 200 (6440 bytes)
+#0145 > GET /cpursx.ps3
+#0146 < 200 (5933 bytes)
+#0147 > GET /cpursx.ps3
+#0148 < 200 (5933 bytes)
+#0149 > GET /cpursx.ps3
+#0150 < 200 (5725 bytes)
+#0151 = back at the XMB after 5 poll(s)
+#0152 > GET /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0153 < 200 (25608 bytes)
+#0154 = captured micro:spu_float_truncation#ffbf5d03e674
+#0155 > GET /mount.ps3/unmount
+#0156 < 200 (4441 bytes)
+#0157 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0158 > USER anonymous
+#0159 < 331 OK
+#0160 > PASS anonymous@
+#0161 < 230 OK
+#0162 > TYPE I
+#0163 < 200 TYPE OK
+#0164 > PASV
+#0165 < 227 Entering Passive Mode (10,77,0,2,130,3)
+#0166 > NLST /dev_hdd0/game
+#0167 < 150 OK
+#0168 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 64C]
+#0169 > QUIT
+#0170 < 221 BYE
+#0171 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0172 > USER anonymous
+#0173 < 331 OK
+#0174 > PASS anonymous@
+#0175 < 230 OK
+#0176 > TYPE I
+#0177 < 200 TYPE OK
+#0178 > PASV
+#0179 < 227 Entering Passive Mode (10,77,0,2,134,105)
+#0180 > NLST /dev_hdd0/game/CGOV00001
+#0181 < 150 OK
+#0182 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 64C]
+#0183 > QUIT
+#0184 < 221 BYE
+#0185 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0186 > USER anonymous
+#0187 < 331 OK
+#0188 > PASS anonymous@
+#0189 < 230 OK
+#0190 > TYPE I
+#0191 < 200 TYPE OK
+#0192 > PASV
+#0193 < 227 Entering Passive Mode (10,77,0,2,136,128)
+#0194 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0195 < 150 OK
+#0196 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 64C]
+#0197 > QUIT
+#0198 < 221 BYE
+#0199 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0200 > USER anonymous
+#0201 < 331 OK
+#0202 > PASS anonymous@
+#0203 < 230 OK
+#0204 > TYPE I
+#0205 < 200 TYPE OK
+#0206 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0207 < 250 OK
+#0208 > QUIT
+#0209 < 221 BYE
+#0210 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0211 > USER anonymous
+#0212 < 331 OK
+#0213 > PASS anonymous@
+#0214 < 230 OK
+#0215 > TYPE I
+#0216 < 200 TYPE OK
+#0217 > DELE /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf
+#0218 < 250 OK
+#0219 > QUIT
+#0220 < 221 BYE
+#0221 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0222 > USER anonymous
+#0223 < 331 OK
+#0224 > PASS anonymous@
+#0225 < 230 OK
+#0226 > TYPE I
+#0227 < 200 TYPE OK
+#0228 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0229 < 250 OK
+#0230 > QUIT
+#0231 < 221 BYE
+#0232 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0233 > USER anonymous
+#0234 < 331 OK
+#0235 > PASS anonymous@
+#0236 < 230 OK
+#0237 > TYPE I
+#0238 < 200 TYPE OK
+#0239 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0240 < 250 OK
+#0241 > QUIT
+#0242 < 221 BYE
+#0243 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0244 > USER anonymous
+#0245 < 331 OK
+#0246 > PASS anonymous@
+#0247 < 230 OK
+#0248 > TYPE I
+#0249 < 200 TYPE OK
+#0250 > RMD /dev_hdd0/game/CGOV00001
+#0251 < 250 OK
+#0252 > QUIT
+#0253 < 221 BYE
+#0254 > GET /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0255 < 200 (25608 bytes)
+#0256 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0257 > USER anonymous
+#0258 < 331 OK
+#0259 > PASS anonymous@
+#0260 < 230 OK
+#0261 > TYPE I
+#0262 < 200 TYPE OK
+#0263 > DELE /dev_hdd0/tmp/cgov_spu_float_truncation.bin
+#0264 < 250 OK
+#0265 > QUIT
+#0266 < 221 BYE
+#0267 = console restored
