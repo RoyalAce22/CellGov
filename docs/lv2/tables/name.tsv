@@ -466,6 +466,7 @@ ordinal	packet	name	source	ref	fw_from	fw_to
 327	none	sys_mmapper_enable_page_fault_notification	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 327	none	sys_mmapper_enable_page_fault_notification	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_MMAPPER_ENABLE_PAGE_FAULT_NOTIFICATION	none	none
 328	none	sys_mmapper_allocate_shared_memory_from_container_ext	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
+329	none	sys_mmapper_free_shared_memory	cellgov	cellgov_ps3_abi::lv2::syscall::MMAPPER_FREE_SHARED_MEMORY	none	none
 329	none	sys_mmapper_free_shared_memory	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 330	none	sys_mmapper_allocate_address	cellgov	cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_ADDRESS	none	none
 330	none	sys_mmapper_allocate_address	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none

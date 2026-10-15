@@ -762,6 +762,15 @@ impl Lv2Host {
                 }
             }
             Lv2Request::Unsupported {
+                number: syscall::MMAPPER_FREE_SHARED_MEMORY,
+                args,
+            } => match self
+                .narrow_u32_args(syscall::MMAPPER_FREE_SHARED_MEMORY, [("mem_id", args[0])])
+            {
+                Some([mem_id]) => self.dispatch_mmapper_free_shared_memory(mem_id),
+                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            },
+            Lv2Request::Unsupported {
                 number: syscall::MMAPPER_ALLOCATE_ADDRESS,
                 args,
             } => self.dispatch_mmapper_allocate_address(args, requester, tick),

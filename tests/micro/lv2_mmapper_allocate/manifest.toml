@@ -1,0 +1,14 @@
+[test]
+name = "lv2_mmapper_allocate"
+
+# A hardware probe: the mmapper allocate answers a game process gets.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 544 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 544 },
+]
+
+[expect]
+outcome = "completed"

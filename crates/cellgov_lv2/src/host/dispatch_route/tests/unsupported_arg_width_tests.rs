@@ -43,11 +43,15 @@ const UNSUPPORTED_U32_SLOTS: &[(u64, &[usize])] = &[
     (syscall::SYS_PRX_LOAD_MODULE_ON_MEMCONTAINER, &[0]),
     (syscall::MEMORY_CONTAINER_CREATE_324, &[0]),
     (syscall::MEMORY_CONTAINER_DESTROY, &[0]),
+    (syscall::MMAPPER_FREE_SHARED_MEMORY, &[0]),
     (syscall::MMAPPER_ALLOCATE_ADDRESS, &[3]),
     (syscall::MMAPPER_ALLOCATE_SHARED_MEMORY, &[3]),
     (syscall::MMAPPER_MAP_SHARED_MEMORY, &[1]),
     (syscall::MMAPPER_SEARCH_AND_MAP, &[0, 1, 3]),
-    (syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER, &[4]),
+    (
+        syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER,
+        &[2, 4],
+    ),
     (syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT, &[2, 3, 5]),
     (syscall::EVENT_PORT_CONNECT_LOCAL, &[0, 1]),
     (syscall::EVENT_PORT_CONNECT_IPC, &[0]),
@@ -56,7 +60,7 @@ const UNSUPPORTED_U32_SLOTS: &[(u64, &[usize])] = &[
 
 /// The slot count the table names, so a lost row fails the sweeps
 /// below. A sweep that covers fewer slots is otherwise silent.
-const GATED_SLOTS: usize = 26;
+const GATED_SLOTS: usize = 28;
 
 /// Calls `f` for every slot in `table`, then checks the count against
 /// `expected`.

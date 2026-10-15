@@ -590,6 +590,8 @@ lv2_syscalls! {
     MEMORY_CONTAINER_CREATE_324 = 324 => "sys_memory_container_create";
     /// `sys_memory_container_destroy`.
     MEMORY_CONTAINER_DESTROY = 342 => "sys_memory_container_destroy";
+    /// `sys_mmapper_free_shared_memory`.
+    MMAPPER_FREE_SHARED_MEMORY = 329 => "sys_mmapper_free_shared_memory";
     /// `sys_mmapper_allocate_address`.
     MMAPPER_ALLOCATE_ADDRESS = 330 => "sys_mmapper_allocate_address";
     /// `sys_mmapper_map_shared_memory`.

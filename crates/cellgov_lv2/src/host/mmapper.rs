@@ -50,6 +50,12 @@ impl MmapperHandleTable {
         );
     }
 
+    /// Removes the handle `mem_id` names; `None` when no create minted
+    /// it or a free already removed it.
+    pub(crate) fn remove(&mut self, mem_id: u32) -> Option<MmapperHandle> {
+        self.handles.remove(mem_id)
+    }
+
     /// `None` is the caller's CELL_ESRCH arm: a `mem_id` no create
     /// minted names nothing.
     pub(crate) fn get(&self, mem_id: u32) -> Option<MmapperHandle> {
@@ -99,3 +105,7 @@ pub struct SystemStateSeed {
     /// size.
     pub writes: Vec<(u32, Vec<u8>)>,
 }
+
+#[cfg(test)]
+#[path = "tests/mmapper_allocate_console_tests.rs"]
+mod console_tests;

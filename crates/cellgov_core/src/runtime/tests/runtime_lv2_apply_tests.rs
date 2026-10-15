@@ -364,7 +364,7 @@ fn mmapper_map_installs_the_window_in_the_callers_space() {
         cellgov_lv2::Lv2Request::Unsupported {
             number: MMAPPER_ALLOCATE_SHARED_MEMORY,
             args: [
-                0,
+                cellgov_ps3_abi::lv2::memory::SYS_MMAPPER_NO_SHM_KEY,
                 0x10000,
                 cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K,
                 MEM_ID_PTR,
@@ -448,7 +448,7 @@ fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
         cellgov_lv2::Lv2Request::Unsupported {
             number: MMAPPER_ALLOCATE_SHARED_MEMORY,
             args: [
-                0,
+                cellgov_ps3_abi::lv2::memory::SYS_MMAPPER_NO_SHM_KEY,
                 0x10000,
                 cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K,
                 MEM_ID_PTR,

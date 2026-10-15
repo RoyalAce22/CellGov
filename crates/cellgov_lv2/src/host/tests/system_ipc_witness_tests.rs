@@ -94,6 +94,19 @@ fn a_second_keyed_create_counts_as_an_attach_not_a_create() {
 fn a_shm_outside_the_namespace_leaves_every_witness_silent() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x1000);
+    // A key outside the namespace attaches only once 339 created it.
+    let created = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 339,
+            args: [OTHER_KEY, SHM_SIZE, 0x200, 0x800, 1, 0x900, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert!(
+        matches!(created, Lv2Dispatch::Immediate { code: 0, .. }),
+        "{created:?}"
+    );
     let mem_id = alloc_shm(&mut host, &rt, OTHER_KEY);
     map_shm(&mut host, &rt, mem_id, 0x3000_0000);
     assert!(host.observability().system_ipc_witness.is_silent());

@@ -157,10 +157,17 @@ impl Lv2Host {
     /// `sys_mmapper_allocate_shared_memory` (332): mints a monotonic
     /// shm id and writes it to `*mem_id_ptr`.
     ///
-    /// A non-sentinel, non-zero `ipc_key` (`args[0]`) routes through
-    /// [`Lv2Host::mmapper_ipc`]: a registered key returns the
-    /// existing `mem_id` with `size` / `flags` ignored, an
-    /// unregistered key mints and registers.
+    /// An `ipc_key` (`args[0]`) other than `SYS_MMAPPER_NO_SHM_KEY`
+    /// attaches: a registered key returns the existing `mem_id` with
+    /// `size` / `flags` ignored. The `lv2_mmapper_allocate` capture
+    /// shows a game process's 332 under key 0, which no one created,
+    /// answering `CELL_ESRCH`: for a game process 332 attaches and never
+    /// creates, and zero is a key. A key in the system-IPC namespace,
+    /// and any key a root or debug process names, still mints and
+    /// registers when nothing here registered it. That stands in for the
+    /// system processes that create those segments on a console, which
+    /// CellGov does not run: a vsh boot names keys outside the namespace
+    /// that nothing in the boot creates first.
     ///
     /// liblv2.sprx's `sys_mmapper_allocate_shared_memory` wrapper
     /// takes `(size, flags, mem_id)`, shifts them into args 1..=3, and
@@ -178,9 +185,10 @@ impl Lv2Host {
     /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
     /// - `CELL_EALIGN` when `size` is not a multiple of the granule
     ///   the `flags` field selects.
-    /// - `CELL_EFAULT` when `mem_id_ptr` is null. The gate is
-    ///   CellGov's own; no interface or firmware record establishes
-    ///   it.
+    /// - `CELL_EFAULT` when `mem_id_ptr` is null, as the
+    ///   `lv2_mmapper_allocate` capture shows.
+    /// - `CELL_ESRCH` when a game process names a key no one created,
+    ///   outside the system-IPC namespace.
     ///
     /// `CELL_EINVAL` also answers a `mem_id` register that carries high
     /// bits, per [`Lv2Host::narrow_u32_args`]. That gate precedes the
@@ -209,8 +217,15 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
             return d;
         }
-        let keyed = names_shared_segment(ipc_key);
+        let keyed = ipc_key != SYS_MMAPPER_NO_SHM_KEY;
         let in_namespace = keyed && crate::host::is_system_ipc_key(ipc_key);
+        if keyed
+            && !in_namespace
+            && !self.privilege_of(requester).debug_or_root()
+            && !self.state.mmapper_ipc.contains_key(ipc_key)
+        {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
         let mem_id = match self.state.mmapper_ipc.get(ipc_key) {
             Some(&existing) if keyed => {
                 if in_namespace {
@@ -239,14 +254,19 @@ impl Lv2Host {
     /// `mem_id` out-pointer at r7.
     ///
     /// There is no ipc-key path: every call mints a fresh `mem_id`, so
-    /// 332's process-shared attach does not apply. The arm does not
-    /// read the container id.
+    /// 332's process-shared attach does not apply. The container id is
+    /// checked; the segment takes nothing from the container.
     ///
     /// # Errors
     ///
-    /// Same set and same order as
-    /// `dispatch_mmapper_allocate_shared_memory`, including the
-    /// `mem_id` width gate that precedes them.
+    /// - `CELL_ESRCH` for a container id no create minted, as the
+    ///   `lv2_mmapper_allocate` capture shows. The gate leads, as the
+    ///   container gate of `sys_memory_allocate_from_container` does;
+    ///   its place against the gates below is not captured here.
+    /// - Then the argument and `mem_id` gates of
+    ///   `dispatch_mmapper_allocate_shared_memory`, in that order,
+    ///   including the width gates on `cid` and `mem_id`, which precede
+    ///   everything.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_allocate_shared_memory_from_container(
         &mut self,
         args: [u64; 8],
@@ -255,12 +275,15 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         use cellgov_ps3_abi::lv2::syscall;
 
-        let Some([mem_id_ptr]) = self.narrow_u32_args(
+        let Some([cid, mem_id_ptr]) = self.narrow_u32_args(
             syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER,
-            [("mem_id", args[4])],
+            [("cid", args[2]), ("mem_id", args[4])],
         ) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
+        if !self.state.memory_containers.contains_key(cid) {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
         let size = args[1];
         let flags = args[3];
         let handle = match shared_memory_handle(size, flags) {
@@ -386,6 +409,31 @@ impl Lv2Host {
         mem_id_written(mem_id_ptr, mem_id, requester, tick)
     }
 
+    /// `sys_mmapper_free_shared_memory` (329): removes the segment
+    /// `mem_id` names, and the key a keyed create registered for it.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` for a `mem_id` no create minted or a free already
+    ///   removed, as the `lv2_mmapper_allocate` capture shows.
+    ///
+    /// The interface also names `CELL_EBUSY` for a segment still
+    /// mapped; this arm does not model it.
+    ///
+    /// `CELL_EINVAL` also answers a `mem_id` register that carries high
+    /// bits, per [`Lv2Host::narrow_u32_args`]. That gate precedes the
+    /// list above.
+    pub(in crate::host::dispatch_route) fn dispatch_mmapper_free_shared_memory(
+        &mut self,
+        mem_id: u32,
+    ) -> Lv2Dispatch {
+        if self.state.mmapper_handles.remove(mem_id).is_none() {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
+        self.state.mmapper_ipc.retain(|_, id| *id != mem_id);
+        Lv2Dispatch::immediate(0)
+    }
+
     /// Mints a `mem_id` and records the handle it names.
     fn mint_shared_memory(&mut self, handle: MmapperHandle) -> u32 {
         let mem_id = self.alloc_id();
@@ -441,13 +489,13 @@ fn mem_id_written(
     }
 }
 
-/// Whether an `ipc_key` names a process-shared segment.
+/// Whether a 339 `ipc_key` names a process-shared segment.
 ///
-/// 332 and 339 read this argument the same way: a key that names no
-/// segment registers nothing, so it cannot collide with itself.
-/// Whether zero belongs on the keyless side is unestablished.
-/// `SYS_MMAPPER_NO_SHM_KEY` is the sentinel the interface names; a
-/// zero key reads as an unset field, which is CellGov's own reading.
+/// A key that names no segment registers nothing, so it cannot collide
+/// with itself. `SYS_MMAPPER_NO_SHM_KEY` is the sentinel the interface
+/// names. 339 reads a zero key as an unset field, which is CellGov's
+/// own reading; 332 treats zero as a key, as the `lv2_mmapper_allocate`
+/// capture shows.
 fn names_shared_segment(ipc_key: u64) -> bool {
     ipc_key != 0 && ipc_key != SYS_MMAPPER_NO_SHM_KEY
 }

@@ -855,7 +855,7 @@ fn map_occupancy_is_judged_in_the_callers_space() {
         classify(
             cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
             &[
-                0,
+                cellgov_ps3_abi::lv2::memory::SYS_MMAPPER_NO_SHM_KEY,
                 0x10000,
                 cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K,
                 0x20,

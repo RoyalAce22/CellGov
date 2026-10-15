@@ -21,6 +21,17 @@ fn mint_mmapper_handle(host: &mut Lv2Host, rt: &FakeRuntime, size: u64, flags: u
     u32::from_be_bytes(bytes.bytes().try_into().unwrap())
 }
 
+/// Containers under the ids the 362 tests pass: the arm refuses an id
+/// no create minted.
+fn with_containers_362(host: &mut Lv2Host) {
+    for cid in [0x4000_0008, 0x4000_0015, 0x200] {
+        host.state.memory_containers.insert(
+            cid,
+            crate::host::memory::MemoryContainer::with_size(0x100_0000, false),
+        );
+    }
+}
+
 #[test]
 fn cell_ps3_user_memory_total_is_213_mib() {
     assert_eq!(cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL, 0x0D50_0000);
@@ -30,6 +41,7 @@ fn cell_ps3_user_memory_total_is_213_mib() {
 #[test]
 fn syscall_362_writes_fresh_mem_id_to_args4_ptr() {
     let mut host = Lv2Host::new();
+    with_containers_362(&mut host);
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
         Lv2Request::Unsupported {
@@ -436,6 +448,7 @@ fn syscall_334_addr_out_of_range_returns_einval() {
 #[test]
 fn syscall_362_records_handle_keyed_on_mem_id() {
     let mut host = Lv2Host::new();
+    with_containers_362(&mut host);
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
         Lv2Request::Unsupported {
@@ -962,15 +975,23 @@ fn syscall_337_keyless_shm_ignores_registered_seeds() {
 }
 
 #[test]
-fn syscall_332_sentinel_and_zero_keys_bypass_registration() {
+fn syscall_332_sentinel_mints_and_an_unknown_zero_key_is_esrch() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let sentinel_a = dispatch_332_keyed(&mut host, &rt, 0xffff_0000_0000_0000, 0x10000);
     let sentinel_b = dispatch_332_keyed(&mut host, &rt, 0xffff_0000_0000_0000, 0x10000);
-    let zero_a = dispatch_332_keyed(&mut host, &rt, 0, 0x10000);
-    let zero_b = dispatch_332_keyed(&mut host, &rt, 0, 0x10000);
     assert_ne!(sentinel_a, sentinel_b);
-    assert_ne!(zero_a, zero_b);
+    for _ in 0..2 {
+        let result = host.dispatch(
+            Lv2Request::Unsupported {
+                number: 332,
+                args: [0, 0x10000, 0x200, 0x9000, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ESRCH.into()));
+    }
     assert!(host.mmapper_ipc().is_empty());
 }
 
@@ -1007,6 +1028,7 @@ fn syscall_332_size_not_multiple_of_1m_granule_returns_ealign() {
 #[test]
 fn syscall_362_size_not_multiple_of_granule_returns_ealign() {
     let mut host = Lv2Host::new();
+    with_containers_362(&mut host);
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
         Lv2Request::Unsupported {
@@ -1031,6 +1053,7 @@ fn syscall_362_size_not_multiple_of_granule_returns_ealign() {
 #[test]
 fn syscall_362_reads_flags_from_args3_not_args2() {
     let mut host = Lv2Host::new();
+    with_containers_362(&mut host);
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
         Lv2Request::Unsupported {
@@ -1341,6 +1364,7 @@ fn syscall_332_zero_size_returns_ealign_and_mints_no_handle() {
 #[test]
 fn syscall_362_zero_size_returns_ealign() {
     let mut host = Lv2Host::new();
+    with_containers_362(&mut host);
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
         Lv2Request::Unsupported {
@@ -1391,6 +1415,7 @@ fn syscall_332_unencodable_granularity_field_returns_einval() {
 #[test]
 fn syscall_362_unencodable_granularity_field_returns_einval() {
     let mut host = Lv2Host::new();
+    with_containers_362(&mut host);
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(
         Lv2Request::Unsupported {
@@ -1483,6 +1508,7 @@ fn syscall_332_argument_refusals_outrank_a_null_mem_id() {
 #[test]
 fn syscall_362_argument_refusals_outrank_a_null_mem_id() {
     let mut host = Lv2Host::new();
+    with_containers_362(&mut host);
     let rt = FakeRuntime::new(0x10000);
     let call = |host: &mut Lv2Host, size: u64, flags: u64| {
         host.dispatch(

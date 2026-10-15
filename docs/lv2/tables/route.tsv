@@ -328,7 +328,7 @@ ordinal	route	arm
 326	null_backend	none
 327	null_backend	none
 328	null_backend	none
-329	null_backend	none
+329	routed	MmapperFreeSharedMemory
 330	routed	MmapperAllocateAddress
 331	null_backend	none
 332	routed	MmapperAllocateSharedMemory
