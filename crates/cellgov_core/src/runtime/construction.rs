@@ -17,6 +17,12 @@ use super::{Runtime, RuntimeMode};
 /// Default DMA completion latency in guest ticks under the
 /// workspace [`FixedLatency`] model. Folds into per-tag completion
 /// timing and the cross-runner parity verdict.
+///
+/// The value is not a measurement. The `spu_dma_timing` console capture
+/// measures DMA time in time-base ticks, and on the console it grows with
+/// the transfer's size. An SPU's guest ticks count its instructions, not
+/// the time base, so that table has no unit here to convert into. The
+/// model takes it once SPU guest time runs at the time base.
 pub const DEFAULT_DMA_LATENCY_TICKS: GuestTicks = GuestTicks::new(10);
 
 impl Runtime {

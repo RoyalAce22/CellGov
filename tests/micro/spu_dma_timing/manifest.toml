@@ -1,0 +1,19 @@
+[test]
+name = "spu_dma_timing"
+
+# A hardware probe of SPU DMA timing read from the decrementer: get and
+# put from 16 B to 16 KB, aligned and 16 bytes past a line, three lists,
+# and the getllar / putllc / putlluc round trips, each summed over 32
+# runs. The PPU program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 240 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]
