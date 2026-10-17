@@ -1,0 +1,21 @@
+[test]
+name = "spu_mfc_command_edges"
+
+# A hardware probe of MFC command edges on a raw SPU: a second put that
+# writes only MFC_Cmd, a stall ack on a tag group with no stalled list,
+# and the reserved MFC_WrTagUpdate value 3. The PPU reads back
+# SPU_Status, SPU_NextPC, the class 0 and class 2 interrupt statuses,
+# the result slots and the buffer words the transfers reach. The PPU
+# program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 112 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

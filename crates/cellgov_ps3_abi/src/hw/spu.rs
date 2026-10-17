@@ -95,6 +95,10 @@ pub const MFC_TAG_UPDATE_ANY: u32 = 1;
 ///
 /// [CBE-Handbook p:459 s:17.10 MFC Tag-Group Management Channels] TS=10 waits for all enabled groups.
 pub const MFC_TAG_UPDATE_ALL: u32 = 2;
+/// The reserved tag status update condition.
+///
+/// [CBE-Handbook p:459 s:17.10 MFC Tag-Group Management Channels] TS=11 is reserved.
+pub const MFC_TAG_UPDATE_RESERVED: u32 = 3;
 /// Read tag status; blocks until masked tags complete.
 ///
 /// [CBEA p:122 s:9.3 MFC Tag-Group Status Channels] MFC_RdTagStat, channel 24, read-blocking.

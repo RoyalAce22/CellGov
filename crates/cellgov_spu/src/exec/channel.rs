@@ -100,10 +100,11 @@ pub(super) fn execute_wrch(
         }
         // [CBEA p:127 s:9.3.5] MFC_WrTagUpdate sets when the tag status updates: immediately, when any enabled group completes, or when all do.
         // [CBE-Handbook p:459 s:17.10] bits 0:29 are reserved, and TS 11 is a reserved update condition.
-        // The model gives a reserved request no meaning and refuses it by
-        // name.
+        // The `spu_mfc_command_edges` console capture: TS 11 requests no
+        // update and raises no error, so the MFC_RdTagStat count stays 0.
+        // The model refuses a write with a reserved bit set by name.
         spu::MFC_WR_TAG_UPDATE => {
-            if val > spu::MFC_TAG_UPDATE_ALL {
+            if val > spu::MFC_TAG_UPDATE_RESERVED {
                 return SpuStepOutcome::Fault(SpuFault::ReservedTagUpdate(val));
             }
             state.channels.request_tag_update(val);

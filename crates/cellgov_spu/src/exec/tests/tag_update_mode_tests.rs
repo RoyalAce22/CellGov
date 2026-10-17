@@ -138,9 +138,28 @@ fn a_read_with_no_request_is_refused_by_name() {
     );
 }
 
+/// The `spu_mfc_command_edges` console capture: TS 11 requests no update
+/// and raises no error.
 #[test]
-fn a_reserved_update_request_is_refused_by_name() {
-    for value in [3, 1 << 2, 0x8000_0001] {
+fn a_reserved_update_condition_requests_no_update() {
+    let mut s = state(0b010, 0b010);
+    s.set_reg_word_splat(7, spu::MFC_TAG_UPDATE_RESERVED);
+    let out = execute(
+        &SpuInstruction::Wrch {
+            channel: spu::MFC_WR_TAG_UPDATE,
+            rt: 7,
+        },
+        &mut s,
+        UnitId::new(0),
+    );
+    assert_eq!(out, SpuStepOutcome::Continue);
+    assert_eq!(s.channels.tag_update, None);
+    assert_eq!(s.channels.tag_status_read, None);
+}
+
+#[test]
+fn a_reserved_update_request_bit_is_refused_by_name() {
+    for value in [1 << 2, 0x8000_0001] {
         let mut s = state(0b010, 0b010);
         s.set_reg_word_splat(7, value);
         let out = execute(
