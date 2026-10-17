@@ -15,6 +15,7 @@ use crate::host::Lv2Host;
 use crate::request::Lv2Request;
 
 const PROBE: &str = "spu_group_root_types";
+const USER_PROBE: &str = "spu_group_root_types_user";
 const CALLER: UnitId = UnitId::new(0);
 /// The SELF control flags every probe EBOOT carries: root permission.
 const PROBE_CONTROL_FLAGS1: u32 = 0x4000_0000;
@@ -88,6 +89,40 @@ fn root_only_group_types_answer_as_the_console_does() {
     ];
     for (i, &code) in got.iter().enumerate() {
         let w = i + 3;
+        assert_eq!(
+            code,
+            word(w),
+            "w{w}: 0x{code:08x} vs console 0x{:08x}",
+            word(w)
+        );
+    }
+}
+
+/// The same creates from a process without root permission, as the
+/// `spu_group_root_types_user` probe makes them: its EBOOT is signed with
+/// control_flags1 0, as a retail title is, and every root-only type is
+/// refused.
+#[test]
+fn root_only_group_types_refuse_a_process_without_root_as_the_console_does() {
+    let payload = console_payload(USER_PROBE);
+    let word = |w: usize| payload_u32(&payload, 4 * w);
+    assert_eq!((word(0), word(1)), (0, 0), "the probe ran every step");
+
+    let mut host = Lv2Host::new();
+    host.set_control_flags1(0);
+    assert!(!host.boot_privilege().root());
+
+    let got = [
+        create(&mut host, VSH_TYPE, 1),
+        create(&mut host, VSH_TYPE, 2),
+        create(&mut host, 0x002, 1),
+        create(&mut host, 0x00A, 2),
+        create(&mut host, 0x022, 2),
+        create(&mut host, 0x102, 1),
+        create(&mut host, 0x30A, 1),
+    ];
+    for (i, &code) in got.iter().enumerate() {
+        let w = i + 2;
         assert_eq!(
             code,
             word(w),

@@ -1,0 +1,19 @@
+[test]
+name = "spu_group_priority_user"
+
+# A hardware probe: spu_group_priority's questions asked by a process
+# without root permission (control_flags1 0, as a retail title is
+# signed). The console capture is the answer; no emulator runs it.
+
+[observe]
+# 32 big-endian u32 words, in the order ppu/main.c lists: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# A process without root permission may not create files in /dev_hdd0/tmp.
+result_in_usrdir = true

@@ -18,6 +18,16 @@ const PACKAGE_CALL: &str = "bash \"$COMMON/package_ps3.sh\" ";
 /// The one line of `package_ps3.sh` that names the result file.
 const RESULT_FILE_RULE: &str = "RESULT_FILE=\"/dev_hdd0/tmp/cgov_${NAME}.bin\"";
 
+/// The line of `package_ps3.sh` that names the result file under the
+/// deployed USRDIR, where the runner fetches it for a manifest with
+/// `[ps3] result_in_usrdir`.
+const USRDIR_RESULT_FILE_RULE: &str =
+    "RESULT_FILE=\"/dev_hdd0/game/$APPID/USRDIR/cgov_${NAME}.bin\"";
+
+/// The build-script setting that moves the result file under the
+/// deployed USRDIR; the manifest's `[ps3] result_in_usrdir` must match it.
+const USRDIR_RESULT_SETTING: &str = "CGOV_PS3_RESULT_IN_USRDIR=1";
+
 /// Floor on the packaged population, so a matcher that finds nothing
 /// reads as broken rather than as a tidied tree.
 const MIN_PACKAGED_TESTS: usize = 20;
@@ -156,6 +166,22 @@ fn every_build_script_packages_the_test_its_manifest_declares() {
                 m.result_file_name()
             ));
         }
+        let writes_in_usrdir = script
+            .lines()
+            .any(|l| l.contains(USRDIR_RESULT_SETTING) && !l.trim_start().starts_with('#'));
+        if writes_in_usrdir != m.ps3.result_in_usrdir {
+            problems.push(format!(
+                "  {}: the build {} {USRDIR_RESULT_SETTING} but the manifest's \
+                 result_in_usrdir is {}",
+                script_path.display(),
+                if writes_in_usrdir {
+                    "sets"
+                } else {
+                    "does not set"
+                },
+                m.ps3.result_in_usrdir
+            ));
+        }
         if call.siblings != m.ps3.files {
             problems.push(format!(
                 "  {}: packages siblings {:?} but the manifest declares files {:?}",
@@ -185,6 +211,14 @@ fn the_package_script_names_the_result_file_the_parser_derives() {
         script.lines().any(|line| line == RESULT_FILE_RULE),
         "{} no longer carries `{RESULT_FILE_RULE}`; the parser's default in \
          Manifest::result_file_name derives cgov_<name>.bin from the same name",
+        path.display()
+    );
+    assert!(
+        script
+            .lines()
+            .any(|line| line.trim_start() == USRDIR_RESULT_FILE_RULE),
+        "{} no longer carries `{USRDIR_RESULT_FILE_RULE}`; the runner fetches \
+         <usrdir>/cgov_<name>.bin for a manifest with [ps3] result_in_usrdir",
         path.display()
     );
     let m = manifest::parse_console(

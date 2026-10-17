@@ -36,7 +36,8 @@ pub struct Target {
     pub game_dir: String,
     /// `/dev_hdd0/game/<APPID>/USRDIR`.
     pub usrdir: String,
-    /// `/dev_hdd0/tmp/<result file>`.
+    /// `/dev_hdd0/tmp/<result file>`, or `<usrdir>/<result file>` for a
+    /// package that writes its result under its own `USRDIR`.
     pub result_path: String,
 }
 
@@ -51,6 +52,18 @@ impl Target {
             game_dir,
             result_path: format!("{RESULT_ROOT}/{result_file}"),
         }
+    }
+
+    /// The paths the manifest names: [`Self::new`], with the result
+    /// under `USRDIR` when `[ps3] result_in_usrdir` asks for it. The
+    /// runner fetches the result before cleanup removes the game
+    /// directory.
+    pub fn of(manifest: &cellgov_observation::manifest::ConsoleManifest) -> Self {
+        let mut target = Self::new(&manifest.ps3.appid, &manifest.result_file_name());
+        if manifest.ps3.result_in_usrdir {
+            target.result_path = format!("{}/{}", target.usrdir, manifest.result_file_name());
+        }
+        target
     }
 
     /// The game directory's name under [`GAME_ROOT`].

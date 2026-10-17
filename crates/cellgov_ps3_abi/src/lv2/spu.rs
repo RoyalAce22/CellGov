@@ -279,9 +279,12 @@ pub mod group_type {
     // The capture shows NORMAL, EXCLUSIVE_NON_CONTEXT and
     // COOPERATE_WITH_SYSTEM accepted and 0x01 refused. The
     // tests/micro/spu_pool_edges capture shows both MEMORY_FROM_CONTAINER
-    // forms reaching the container lookup. Every probe EBOOT runs with
-    // root permission, so no capture shows which types a process without
-    // it may create; that split is unestablished.
+    // forms reaching the container lookup. Those probes run with root
+    // permission. The tests/micro/spu_group_priority_user capture, from a
+    // process without it (control_flags1 0, as a retail title is signed),
+    // shows NORMAL, EXCLUSIVE_NON_CONTEXT and COOPERATE_WITH_SYSTEM
+    // accepted; no capture asks such a process for the
+    // MEMORY_FROM_CONTAINER forms.
     pub const USER_TYPES: [u32; 5] = [
         NORMAL,
         MEMORY_FROM_CONTAINER,
@@ -296,7 +299,10 @@ pub mod group_type {
     // process with root permission, shows 0x002, 0x00A, 0x022 and 0x102
     // accepted, 0x30A refused, and 0x20A held to one thread. The first
     // 0x20A group answers CELL_EBUSY there: the running system already
-    // holds what that type takes. The other entries are unprobed.
+    // holds what that type takes. The tests/micro/spu_group_root_types_user
+    // capture, from a process without root permission, refuses 0x20A,
+    // 0x002, 0x00A, 0x022 and 0x102 with CELL_EINVAL. The other entries are
+    // unprobed.
     pub const ROOT_TYPES: [u32; 17] = [
         0x002,
         0x006,
@@ -332,8 +338,9 @@ pub mod group_type {
 // The console capture of tests/micro/spu_group_priority shows the root
 // range: a root process creates and sets 15, and 256 and -1 answer
 // CELL_EINVAL. It shows a cooperating group reading back COOPERATING
-// whatever it was created with. Probes run with root permission, so the
-// capture cannot show the user floor.
+// whatever it was created with. The tests/micro/spu_group_priority_user
+// capture, from a process without root permission, shows the user floor:
+// create and set with 15 answer CELL_EINVAL, and 16 is accepted.
 pub mod group_priority {
     /// The lowest priority a process without root permission may give.
     pub const MIN_USER: i32 = 16;

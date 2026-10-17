@@ -198,7 +198,7 @@ fn a_dirty_console_is_refused_with_a_recovery_command() {
     let target = {
         let parsed =
             cellgov_observation::manifest::load_console(&manifest).expect("the manifest loads");
-        Target::new(&parsed.ps3.appid, &parsed.result_file_name())
+        Target::of(&parsed)
     };
     ok(
         "deploy",

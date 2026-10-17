@@ -15,6 +15,7 @@ use crate::host::Lv2Host;
 use crate::request::Lv2Request;
 
 const PROBE: &str = "spu_group_priority";
+const USER_PROBE: &str = "spu_group_priority_user";
 const CALLER: UnitId = UnitId::new(0);
 const NO_SUCH_ID: u32 = 0xFFFF_FFFF;
 /// The SELF control flags every probe EBOOT carries: the probe's
@@ -50,7 +51,7 @@ fn code(d: &Lv2Dispatch) -> (u32, Option<u32>) {
 }
 
 impl Probe {
-    fn new() -> Self {
+    fn new(control_flags1: u32) -> Self {
         let mut mem = GuestMemory::new(0x4000);
         for (attr, ty) in [
             (CONTEXT, group_type::NORMAL),
@@ -65,7 +66,7 @@ impl Probe {
             .unwrap();
         }
         let mut host = Lv2Host::new();
-        host.set_control_flags1(PROBE_CONTROL_FLAGS1);
+        host.set_control_flags1(control_flags1);
         Self {
             host,
             rt: FakeRuntime::with_memory(mem),
@@ -104,11 +105,25 @@ impl Probe {
 
 #[test]
 fn group_priority_answers_as_the_console_does() {
-    let payload = console_payload(PROBE);
+    answers_as_the_console_does(PROBE, PROBE_CONTROL_FLAGS1);
+}
+
+/// The same calls from a process without root permission, as the
+/// `spu_group_priority_user` probe makes them: its EBOOT is signed with
+/// control_flags1 0, as a retail title is, so priority 15 is refused.
+#[test]
+fn group_priority_answers_a_process_without_root_as_the_console_does() {
+    answers_as_the_console_does(USER_PROBE, 0);
+}
+
+/// Make the probe's calls, in its order, from a process whose SELF
+/// carries `control_flags1`, and hold each answer to `probe`'s capture.
+fn answers_as_the_console_does(probe: &str, control_flags1: u32) {
+    let payload = console_payload(probe);
     let word = |w: usize| payload_u32(&payload, 4 * w);
     assert_eq!((word(0), word(1)), (0, 0), "the probe ran every step");
 
-    let mut p = Probe::new();
+    let mut p = Probe::new(control_flags1);
     let mut got = vec![0u32; 2];
     got.push(p.create(CONTEXT, 1, 15).0);
     let (rc, c) = p.create(CONTEXT, 1, 16);

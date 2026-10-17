@@ -209,6 +209,13 @@ pub struct Ps3Section {
     /// console's result directory. `None` derives it from the test
     /// name; see [`Manifest::result_file_name`].
     pub result_file: Option<String>,
+    /// Whether the PPU program writes its CGOV frame under its own
+    /// `USRDIR` instead of the console's result directory. A process
+    /// without root permission must: the `lv2_fs_user_write` capture
+    /// refuses its create under `/dev_hdd0/tmp` with `CELL_EACCES`.
+    /// The build sets the same choice (`package_ps3.sh`,
+    /// `CGOV_PS3_RESULT_IN_USRDIR`).
+    pub result_in_usrdir: bool,
     /// Whether the test should run on a retail console at all.
     pub portable: bool,
     /// Why it is not, when `portable` is false.
@@ -227,6 +234,7 @@ impl Default for Ps3Section {
             appid: default_ps3_appid(),
             timeout_ms: default_ps3_timeout_ms(),
             result_file: None,
+            result_in_usrdir: false,
             portable: true,
             not_portable_reason: None,
             files: Vec::new(),

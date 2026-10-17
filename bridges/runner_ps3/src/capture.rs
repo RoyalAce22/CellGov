@@ -262,7 +262,7 @@ pub struct CapturePlan {
 impl CapturePlan {
     /// The console paths this plan deploys to and reads from.
     pub fn target(&self) -> Target {
-        Target::new(&self.manifest.ps3.appid, &self.manifest.result_file_name())
+        Target::of(&self.manifest)
     }
 }
 

@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "capture_id": "micro:spu_group_root_types_user#2f06768c2877",
+  "captured_at": "2026-10-16T21:23:06Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 62,
+      "fan_percent": 41
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "3c2c15dac6046ed2ea7fbd9f39a0044a5716cb80",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/3c2c15dac6046ed2ea7fbd9f39a0044a5716cb80"
+  },
+  "microtest": {
+    "name": "spu_group_root_types_user",
+    "manifest_sha256": "3d598ce9655de3d5ff5f8c8ecac0e9a66a5380b9ce38d0c75a4769e9e2aec1d6",
+    "sources": {
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "78e6be20e91352ffd7afa3e89e06d7ce57bc9842181c3c59e0b86670ecbd8abf",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_ctrl_flags.py": "86a0ec46658144b0a50e9179ac3e2323b96532a89227612e6a640a469ea4bf4d",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "fdc903bae46a8f3b6aab9facd41b7175c69e45bcf0a801d801b820ffe5612283",
+      "ppu/main.c": "36895a72ec6d193bfaff572bfed6448ecb5fa2644e9c39d1005c519758f599cb"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "01fb2a40d36c6313c5e9a8d6c04979b8def7c2631bb8517a80ea3e3a5769dde6",
+    "ps3_elf_sha256": "a91ff2e7431122b1c0633c2697f2fb7f88020badfdf77c50bf0dd84cf86c4910",
+    "reference_elf_sha256": "088f1b01a443c08e17e6b8b147b3a6e8b7f457ae92b7417e69c6509baebd485b",
+    "siblings": {},
+    "param_sfo_sha256": "0f01f780f25b5423a1d13d0478067ca663f294b71063d5b7f1e6a52d0ea361db"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "2f06768c2877d18f1b903de5315bfb0ff87582f6391fbe3db2d753e791f8003e",
+    "bytes": 72,
+    "result_path": "/dev_hdd0/game/CGOV00001/USRDIR/cgov_spu_group_root_types_user.bin"
+  },
+  "digest": "2f06768c2877d18f1b903de5315bfb0ff87582f6391fbe3db2d753e791f8003e  micro:spu_group_root_types_user  72",
+  "recapture_reason": "build script now exports the non-root settings on their own line; same flags and result path"
+}

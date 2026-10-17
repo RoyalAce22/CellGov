@@ -31,6 +31,26 @@ fn the_target_paths_follow_the_appid_and_the_result_file() {
 }
 
 #[test]
+fn a_manifest_that_keeps_its_result_in_usrdir_is_fetched_from_there() {
+    const MANIFEST: &str = "[test]\nname = \"spu_group_priority_user\"\n\
+        [observe]\nmemory_regions = [ { name = \"r\", addr = 0, size = 8 } ]\n\
+        [expect]\noutcome = \"completed\"\n";
+    let tmp = cellgov_observation::manifest::parse_console(MANIFEST).expect("manifest");
+    assert_eq!(
+        Target::of(&tmp).result_path,
+        "/dev_hdd0/tmp/cgov_spu_group_priority_user.bin"
+    );
+    let usrdir = cellgov_observation::manifest::parse_console(&format!(
+        "{MANIFEST}[ps3]\nresult_in_usrdir = true\n"
+    ))
+    .expect("manifest");
+    assert_eq!(
+        Target::of(&usrdir).result_path,
+        "/dev_hdd0/game/CGOV00001/USRDIR/cgov_spu_group_priority_user.bin"
+    );
+}
+
+#[test]
 fn a_clean_console_passes_preflight_without_a_change() {
     let mut console = MemoryConsole::empty();
     let mut transcript = Transcript::new();

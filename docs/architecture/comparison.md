@@ -19,7 +19,7 @@ flowchart LR
   r3["patched RPCS3, oracle-mode config"] -->|"CELLGOV_DUMP_PATH / CELLGOV_DUMP_REGIONS"| dump["binary dump at _sys_process_exit"]
   dump --> br["rpcs3_to_observation --config-hash"]
   br --> orr["Observation JSON (RPCS3)"]
-  ps3["retail PS3, CFW + webMAN, build/ps3/EBOOT.BIN"] -->|"result file in /dev_hdd0/tmp"| rp["runner_ps3 capture"]
+  ps3["retail PS3, CFW + webMAN, build/ps3/EBOOT.BIN"] -->|"result file in /dev_hdd0/tmp or USRDIR"| rp["runner_ps3 capture"]
   rp --> ops["Observation JSON (PS3, ps3/PROFILE/)"]
   oc --> cmp["diff observations (field by field) / compare --against-baseline (strict, memory, events, prefix)"]
   orr --> cmp
@@ -267,7 +267,8 @@ build commands and the build-config workarounds.
 are held to where it has answered. It deploys a microtest's
 `build/ps3/` package to a retail console over webMAN's FTP server,
 starts it through webMAN's HTTP server, fetches the `CGOV` frame the
-test writes to `/dev_hdd0/tmp`, and converts the frame into an
+test writes to `/dev_hdd0/tmp`, or to its own `USRDIR` when its
+manifest sets `[ps3] result_in_usrdir`, and converts the frame into an
 `Observation` holding the regions the microtest's manifest names. The
 result is committed beside the microtest as a **hardware capture**,
 under `tests/micro/<name>/ps3/<profile>/`, with the untouched frame,

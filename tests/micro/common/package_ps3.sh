@@ -44,6 +44,15 @@
 #   CGOV_PS3_PSL1GHT_CRT=1   link with PSL1GHT's own start files instead
 #                            of tests/micro/common/crt0.S, in case the
 #                            custom start file does not boot on the console
+#   CGOV_PS3_CTRL_FLAGS1     control_flags1 for the EBOOT, written over the
+#                            0x40000000 (root) make_self_npdrm signs with
+#                            (common/patch_ctrl_flags.py); 0 is a retail
+#                            title's value
+#   CGOV_PS3_RESULT_IN_USRDIR=1  write the result file under the deployed
+#                            USRDIR instead of /dev_hdd0/tmp, which a
+#                            process without root permission may not
+#                            create in; the manifest sets
+#                            [ps3] result_in_usrdir = true to match
 set -e
 
 PS3DEV="${PS3DEV:-/usr/local/ps3dev}"
@@ -59,6 +68,9 @@ PS3OUT="$OUT/ps3"
 COMMON="${COMMON:-/src/../common}"
 APPID="${CGOV_PS3_APPID:-CGOV00001}"
 RESULT_FILE="/dev_hdd0/tmp/cgov_${NAME}.bin"
+if [ "${CGOV_PS3_RESULT_IN_USRDIR:-0}" = "1" ]; then
+    RESULT_FILE="/dev_hdd0/game/$APPID/USRDIR/cgov_${NAME}.bin"
+fi
 # One content id for every microtest: the console keys NPDRM on the
 # EBOOT's own name, so the id need not vary per test.
 CONTENT_ID="UP0001-CGOV00001_00-CELLGOVMICROTEST"
@@ -107,6 +119,9 @@ echo "$LINK_KIND" > "$PS3OUT/link.txt"
 echo "=== Wrapping EBOOT.BIN ==="
 sprxlinker "$PS3OUT/$NAME.elf"
 make_self_npdrm "$PS3OUT/$NAME.elf" "$PS3OUT/EBOOT.BIN" "$CONTENT_ID"
+if [ -n "${CGOV_PS3_CTRL_FLAGS1:-}" ]; then
+    python3 "$COMMON/patch_ctrl_flags.py" "$PS3OUT/EBOOT.BIN" "$CGOV_PS3_CTRL_FLAGS1"
+fi
 
 echo "=== Writing PARAM.SFO (TITLE_ID $APPID) ==="
 sfo --fromxml "$COMMON/param_sfo.xml" "$PS3OUT/PARAM.SFO" \

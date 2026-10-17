@@ -1,0 +1,20 @@
+[test]
+name = "spu_group_root_types_user"
+
+# A hardware probe: the root-only SPU thread-group types
+# sys_spu_thread_group_create takes, asked by a process without root
+# permission (control_flags1 0, as a retail title is signed).
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, in the order ppu/main.c lists: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# A process without root permission may not create files in /dev_hdd0/tmp.
+result_in_usrdir = true

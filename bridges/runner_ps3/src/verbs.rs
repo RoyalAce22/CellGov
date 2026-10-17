@@ -473,7 +473,7 @@ fn on_console<C: ConsoleOps>(
         &mut transcript,
     )
     .map_err(RunnerPs3Error::from)?;
-    let target = Target::new(&manifest.ps3.appid, &manifest.result_file_name());
+    let target = Target::of(&manifest);
     let clear_with = verb_line(
         &context.invocation,
         Verb::Cleanup,
