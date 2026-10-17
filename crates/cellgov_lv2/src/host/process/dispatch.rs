@@ -435,10 +435,10 @@ impl Lv2Host {
     /// (`cellgov_ppu::loader::find_sys_process_param`) and plumbed
     /// through via [`Lv2Host::set_sdk_version`]. Callers that never
     /// invoke the setter retain `0xFFFFFFFF`
-    /// (`SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN`), the value a process
-    /// param carries when it declares no SDK version. PSL1GHT-built
-    /// homebrew leaves that word behind, and a console answers it for
-    /// such a title in `tests/ps3autotests/tests/lv2/sys_process`.
+    /// (`SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN`). The reference console
+    /// answers that sentinel for a process linked without a record, and
+    /// the record's own word for one with a record: 0x00192001 for a
+    /// PSL1GHT record (`elf_no_process_param`, `elf_process_param`).
     pub(in crate::host) fn dispatch_process_get_sdk_version(
         &self,
         version_out_ptr: u32,
@@ -494,3 +494,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/dispatch_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/sdk_version_console_tests.rs"]
+mod sdk_version_console_tests;

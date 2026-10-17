@@ -24,3 +24,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/loader_pt_load_tests.rs"]
 mod pt_load_tests;
+
+#[cfg(test)]
+#[path = "tests/process_param_console_tests.rs"]
+mod process_param_console_tests;

@@ -1,0 +1,17 @@
+[test]
+name = "elf_process_param"
+
+# A hardware probe of the process-param record and the function
+# descriptors: the record as the loader mapped it, the SDK version
+# sys_process_get_sdk_version answers for the process, the descriptor at
+# e_entry, and main's descriptor against r2. elf_no_process_param is the
+# same program linked without the record. The PPU program's header
+# comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"

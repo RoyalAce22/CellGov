@@ -92,6 +92,11 @@ pub const EM_SPU: u16 = 23;
 
 /// `e_type` value for PS3 PRX modules (Sony-specific extension to ELF
 /// `e_type`).
+///
+/// Each of the 142 modules in the 4.93 firmware's
+/// `dev_flash/sys/external` carries it, `libfs.sprx` (SHA-256
+/// 5db0ad1219496d2bc14554159395812af5dc1c3c70cdea5c62916021689dcca1)
+/// among them.
 pub const ET_PRX: u16 = 0xFFA4;
 
 /// `p_flags` bit: execute permission on a PT_LOAD segment.
@@ -105,6 +110,12 @@ pub const PF_R: u32 = 4;
 
 /// `p_type` for PS3 process-param segments (`PT_PROC_PARAM`,
 /// 0x60000001 -- Sony PT_LOOS-range extension).
+///
+/// The 4.93 firmware's `dev_flash/vsh/module/vsh.self` (SHA-256
+/// 1a25157ad4cfd9e480f427e9bfa27b60bd784e1f2c08c387061fd9edc1b5dfa1)
+/// carries one of 0x28 bytes. The reference console
+/// maps a PSL1GHT executable's record where this segment names it
+/// (`elf_process_param`).
 pub const PT_PROC_PARAM: u32 = 0x6000_0001;
 
 /// Bytes covered by the eight `sys_process_param_t` fields the loader
@@ -114,6 +125,10 @@ pub const PT_PROC_PARAM: u32 = 0x6000_0001;
 /// declare more than these 32 bytes. The eight 32-bit fields are the
 /// whole record a toolchain emits. The loader warns about a record
 /// that declares less, then reads the fields it covers.
+///
+/// A PSL1GHT record declares exactly this size, and the reference
+/// console's loader maps all eight words of it (`elf_process_param`).
+/// The 4.93 `vsh.self` declares 0x24 bytes, one zero word past them.
 pub const PROC_PARAM_SIZE: u64 = 32;
 
 /// `p_type` for normal loadable segments.
@@ -124,15 +139,28 @@ pub const PT_TLS: u32 = 7;
 
 /// `p_type` for the PS3 PRX relocation table (carries the
 /// `Elf64_Rela`-shaped entries the binder applies at load time).
+///
+/// Each of the 142 4.93 `dev_flash/sys/external` modules carries one;
+/// `libfs.sprx`'s holds 1545 entries.
 pub const PT_PRX_RELOC: u32 = 0x7000_00A4;
 
 /// `p_type` for the PS3 `PrxParamHeader` segment (carries the
 /// exports / imports table pointers).
+///
+/// An executable carries it: the 4.93 `vsh.self` an empty one, a
+/// PSL1GHT executable one of 0x28 bytes, through which the reference
+/// console binds its library stubs (`elf_process_param`). The 4.93
+/// external modules carry none; segment 0's `p_paddr` names their
+/// library information instead.
 pub const PT_PRX_PARAM: u32 = 0x6000_0002;
 
 /// Magic value at offset +4 of the `PrxParamHeader` struct inside a
 /// PT_PRX_PARAM segment. Rejects unrelated PT_LOOS payloads before
 /// any table-pointer dereference.
+///
+/// The record the reference console bound the `elf_process_param`
+/// probe's stubs through carries it at +4, after a `header_size` of
+/// 0x28.
 pub const PRX_PARAM_MAGIC: u32 = 0x1b43_4cec;
 
 /// ELF64 RELA entry size in bytes (`sizeof Elf64_Rela`: `r_offset`
@@ -217,8 +245,16 @@ const _: () = assert!(ELF64_SH_SIZE + 8 <= ELF64_SHENT_SIZE);
 /// reaches the same pair through the `entry` word of a
 /// [`thread_param`] block.
 ///
+/// The 4.93 `vsh.self` (SHA-256
+/// 1a25157ad4cfd9e480f427e9bfa27b60bd784e1f2c08c387061fd9edc1b5dfa1)
+/// shows the packing: its `e_entry`, 0x6D5AC8, holds code 0x10230 and
+/// TOC 0x6F5558, and the next entry holds another code address under
+/// the same TOC. The reference console starts a process through such a
+/// pair (`elf_process_param`). The PSL1GHT toolchain instead emits
+/// [`ppc64_function_descriptor`]s whose last doubleword holds this
+/// packed pair.
+///
 /// [`thread_param`]: crate::lv2::ppu_thread::thread_param
-// No public document states the packing.
 pub mod function_descriptor {
     /// Gives the descriptor size in bytes.
     pub const SIZE: usize = 8;
@@ -260,9 +296,15 @@ mod tests;
 /// The three-doubleword PPC64 ELFv1 function descriptor that LV2 uses.
 ///
 /// The packed [`function_descriptor`] form instead stores two 32-bit words.
+///
+/// The 4.93 `lv2_kernel.self` (SHA-256
+/// e5253ec74b5fc2a05ee16c68e6b6f85dfa192482eef9fe6614eb86e92ea28a9e)
+/// uses this form: each of the 1024 syscall-table entries names a
+/// descriptor on a 24-byte stride, every one with the same TOC and a
+/// zero environment. A PSL1GHT executable's descriptors take the same
+/// three doublewords, with the packed pair in the place of the
+/// environment (`elf_process_param`).
 pub mod ppc64_function_descriptor {
-    // Retail LV2 inspection: every extracted kernel descriptor uses
-    // three big-endian u64 words in this order.
     /// Bytes one descriptor occupies.
     pub const SIZE: usize = 24;
     /// Gives the byte offset of the code address.
@@ -301,6 +343,12 @@ pub const R_PPC64_ADDR16_LO_DS: u32 = 57;
 /// Value-segment index in a PS3 PRX RELA entry that names no segment.
 ///
 /// The addend is then a whole address.
+///
+/// None of the 142 4.93 `dev_flash/sys/external` modules uses it: their
+/// 94385 relocations name value segments 0, 1 and 3 only, with types
+/// [`R_PPC64_ADDR32`], [`R_PPC64_ADDR16_LO`], [`R_PPC64_ADDR16_HI`],
+/// [`R_PPC64_ADDR16_HA`], [`R_PPC64_REL24`] and
+/// [`R_PPC64_ADDR16_LO_DS`]. None uses [`R_PPC64_ADDR64`].
 pub const PRX_RELOC_NO_VALUE_SEGMENT: u32 = 0xFF;
 
 /// PS3 module entrypoint NID (`module_start` noname-export).
@@ -312,8 +360,13 @@ pub const NID_MODULE_STOP: u32 = 0xab77_9874;
 /// Minimum size in bytes of a PRX `libent` export entry (28 bytes).
 pub const EXPORT_ENTRY_MIN_SIZE: u8 = 0x1C;
 
-/// `attr` bit for system-class exports (Sony's first-party libraries
-/// emit this; user-mode PRXs do not).
+/// `attr` bit of the nameless export entry that holds a module's
+/// `module_start` and `module_stop`.
+///
+/// Each of the 142 4.93 `dev_flash/sys/external` modules has exactly one
+/// export entry with this attribute; every named library entry they
+/// export carries 0x1 or 0x9 instead. `libfs.sprx`'s three entries are
+/// 0x8000, then 0x9 twice for `sys_fs`.
 pub const EXPORT_ATTR_SYSTEM: u16 = 0x8000;
 
 /// Magic word at the start of the `sys_process_param_t` struct that
@@ -322,11 +375,16 @@ pub const EXPORT_ATTR_SYSTEM: u16 = 0x8000;
 pub const SYS_PROCESS_PARAM_MAGIC: u32 = 0x13bc_c5f6;
 
 /// Sentinel `sys_process_get_sdk_version` returns when no
-/// `sys_process_param_t` segment is present (PSL1GHT homebrew with no
-/// recorded SDK build). The process-param vocabulary reserves this
-/// value as the unknown-SDK marker, so a title may also declare it.
-/// Retail titles always carry a real version here, and cellSysutil's
-/// SDK-keyed init dispatcher takes a different branch on the sentinel.
+/// `sys_process_param_t` record is present. The process-param
+/// vocabulary reserves this value as the unknown-SDK marker, so a title
+/// may also declare it. Retail titles always carry a real version here,
+/// and cellSysutil's SDK-keyed init dispatcher takes a different branch
+/// on the sentinel.
+///
+/// The reference console answers it, with return code 0, for a process
+/// linked without a record (`elf_no_process_param`). A PSL1GHT record
+/// declares 0x00192001, and the console answers that word instead
+/// (`elf_process_param`).
 pub const SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN: u32 = 0xFFFF_FFFF;
 
 /// `version` field of `sys_process_param_t` for SDK 3.30 and later.
@@ -337,6 +395,10 @@ pub const SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN: u32 = 0xFFFF_FFFF;
 /// 0x00009000 alongside `sdk_version` 0x00250001. Each member of the
 /// `SYS_PROCESS_PARAM_VERSION_*` space takes the name of the SDK
 /// release that first emitted it.
+///
+/// The 4.93 `vsh.self` carries this value alongside `sdk_version`
+/// 0x00493000. A PSL1GHT record carries 0x00009000 alongside 0x00192001
+/// (`elf_process_param`).
 pub const SYS_PROCESS_PARAM_VERSION_330_0: u32 = 0x0033_0000;
 
 /// `e_phoff` field offset in the ELF64 header.
@@ -457,6 +519,9 @@ pub const PRX_IMPORT_ENTRY_VAR_MIN_SIZE: u8 = 36;
 
 /// The entry size every installed firmware module declares, with the
 /// variable fields and eight bytes past them.
+///
+/// All 387 import entries of the 142 4.93 `dev_flash/sys/external`
+/// modules declare it.
 pub const PRX_IMPORT_ENTRY_FIRMWARE_SIZE: u8 = 0x2C;
 
 /// Smallest declared entry size a `PrxImportEntry` can carry and
@@ -485,6 +550,14 @@ pub const PRX_LIB_INFO_IMPORTS_END_OFFSET: usize = 48;
 
 /// Size in bytes of one `ppu_prx_library_info` struct;
 /// `sys_prx_module_info_t` shares the layout.
+///
+/// The 4.93 `libfs.sprx`'s segment 0 `p_paddr` names file offset 0xFA80,
+/// where the 52 bytes hold the name `sys_fs_Library` in the
+/// [`PRX_MODULE_INFO_NAME_LEN`] bytes at +4, the TOC at +32, the export
+/// table bounds at +36 and +40, and the import table bounds at
+/// [`PRX_LIB_INFO_IMPORTS_START_OFFSET`] and
+/// [`PRX_LIB_INFO_IMPORTS_END_OFFSET`], which enclose one 0x2C-byte
+/// entry.
 pub const PRX_LIB_INFO_SIZE: usize = 52;
 
 /// Bytes of the `name` field at +4 of `sys_prx_module_info_t`, NUL
