@@ -1,26 +1,23 @@
 //! Running every loaded PRX's `module_start`.
 
-use cellgov_compare::BootOverrides;
-use cellgov_core::Runtime;
-use cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_BASE;
-
-use super::params::primary_entry_sp;
 use super::types::{BootServices, DiagnosticOptions};
 use crate::prx::{
     run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PrxLoadInfo, TlsArea,
 };
 use crate::BootError;
+use cellgov_compare::BootOverrides;
+use cellgov_core::Runtime;
 
-/// Stack pointer the transient `module_start` units run on.
-///
-/// Sits inside the primary stack reservation but below the game's own
-/// entry SP, so a `module_start` frame and the title's frames cannot
-/// overlap.
-const MODULE_START_STACK_POINTER: u64 = PS3_PRIMARY_STACK_BASE + 0x8000;
-
-// `primary_entry_sp` owns the game side of the reservation, so the two
-// addresses can move independently.
-const _: () = assert!(MODULE_START_STACK_POINTER < primary_entry_sp());
+/// The primary thread a `module_start` runs in: a `module_start` runs
+/// in the primary thread, on its stack, before the title's entry does.
+pub(super) struct PrimaryThread {
+    /// The primary's unit; the transient units alias its `PpuThreadId`.
+    pub unit: cellgov_event::UnitId,
+    /// Its TLS area.
+    pub tls: TlsArea,
+    /// Its entry r1, where each transient unit's stack starts.
+    pub entry_r1: u64,
+}
 
 /// How the `module_start` loop accounted for the modules it was given.
 pub(super) struct ModuleStartCounts {
@@ -52,8 +49,7 @@ pub(super) fn run_module_starts(
     overrides: BootOverrides,
     diagnostics: &DiagnosticOptions<'_>,
     services: &BootServices,
-    primary_unit_id: cellgov_event::UnitId,
-    tls: TlsArea,
+    primary: PrimaryThread,
 ) -> Result<ModuleStartCounts, BootError> {
     let sink = services.sink();
     let total = prx_modules
@@ -63,10 +59,10 @@ pub(super) fn run_module_starts(
     let skipped = overrides.skip_module_start;
     let boot_env = ModuleStartEnv {
         space: cellgov_core::AddressSpaceId::BOOT,
-        thread_owner: primary_unit_id,
+        thread_owner: primary.unit,
         pid: None,
-        tls,
-        stack_pointer: MODULE_START_STACK_POINTER,
+        tls: primary.tls,
+        stack_pointer: primary.entry_r1,
         break_pc: diagnostics.dump_at_pc.map(|pc| (pc, diagnostics.dump_skip)),
         dump_mem_fault_ranges: diagnostics.dump_mem_fault_ranges.to_vec(),
         run_hle_stubbed: overrides.disable_module_start_hle_stubs,
@@ -120,7 +116,7 @@ pub(super) fn run_module_starts(
     // unit's own status is still Runnable, but effective_status must
     // read Blocked.
     debug_assert_eq!(
-        rt.registry().effective_status(primary_unit_id),
+        rt.registry().effective_status(primary.unit),
         Some(cellgov_exec::UnitStatus::Blocked),
         "primary unit effective_status changed during module_start loop",
     );

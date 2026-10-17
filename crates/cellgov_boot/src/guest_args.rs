@@ -49,16 +49,17 @@ pub enum GuestArgsError {
         /// Index into the argv the caller supplied.
         index: usize,
     },
-    /// The block plus both entry frame reserves does not fit the stack.
+    /// The block plus the entry frame reserve below it does not fit
+    /// between the stack's base and its entry top.
     #[error(
-        "args block of {total} bytes plus two 0x70-byte entry frame reserves \
-         does not fit the 0x{stack_size:08x}-byte primary stack"
+        "args block of {total} bytes plus a 0x70-byte entry frame reserve \
+         does not fit the 0x{room:08x} bytes below the primary stack's entry top"
     )]
     BlockTooLarge {
         /// Bytes the pointer table and string storage need.
         total: u64,
-        /// The primary stack reservation it did not fit.
-        stack_size: u64,
+        /// Bytes from the stack's base to its entry top.
+        room: u64,
     },
 }
 
@@ -82,17 +83,19 @@ pub(crate) struct GuestArgsBlock {
     pub envp_addr: u64,
 }
 
-/// Lay out `args` below `stack_top`. Caller skips the call when
-/// `args` is empty; an empty slice here still produces a valid
-/// argc=0 block, which is not the no-args boot shape (r3..r6 = 0).
+/// Lay out `args` below `stack_top`, the r1 a no-args entry would
+/// take, in a stack whose lowest address is `stack_base`. Caller skips
+/// the call when `args` is empty; an empty slice here still produces a
+/// valid argc=0 block, which is not the no-args boot shape (r3..r6 = 0).
 ///
 /// # Errors
 ///
 /// [`GuestArgsError::ArgContainsNul`] and
-/// [`GuestArgsError::BlockTooLarge`] (checked against `stack_size`).
+/// [`GuestArgsError::BlockTooLarge`] (checked against the room between
+/// `stack_base` and `stack_top`).
 pub(crate) fn build_args_block(
+    stack_base: u64,
     stack_top: u64,
-    stack_size: u64,
     args: &[String],
 ) -> Result<GuestArgsBlock, GuestArgsError> {
     for (index, arg) in args.iter().enumerate() {
@@ -110,12 +113,12 @@ pub(crate) fn build_args_block(
         .map(|a| (a.len() as u64 + 1).next_multiple_of(STRING_ALIGN))
         .sum();
     let total = table_size + data_size;
-    // The stack top already reserves one entry frame. The r1 below
-    // the argument block consumes a second frame.
+    // The r1 below the argument block consumes one entry frame.
     // Equality is valid: initial_r1 then lands exactly at the
-    // declared stack base, which is part of the stack range.
-    if total + 2 * ENTRY_FRAME_RESERVE > stack_size {
-        return Err(GuestArgsError::BlockTooLarge { total, stack_size });
+    // stack base, which is part of the stack range.
+    let room = stack_top.saturating_sub(stack_base);
+    if total + ENTRY_FRAME_RESERVE > room {
+        return Err(GuestArgsError::BlockTooLarge { total, room });
     }
     let base = stack_top - total;
 

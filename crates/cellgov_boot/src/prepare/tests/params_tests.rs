@@ -68,15 +68,17 @@ mod primary_entry_sp_tests {
     use super::super::primary_entry_sp;
     use cellgov_ps3_abi::hw::address_space::{
         PS3_ABI_MIN_STACK_FRAME as ENTRY_FRAME_RESERVE, PS3_CHILD_STACKS_BASE,
-        PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE,
+        PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_SIZE_MAX,
+        PS3_PRIMARY_STACK_SIZE_MIN,
     };
 
     #[test]
     fn the_entry_frame_stays_below_the_child_stack_arena() {
         // The first block `ThreadStackAllocator` hands out starts at
         // PS3_CHILD_STACKS_BASE, so a callee's LR/CR/parameter-save
-        // stores above the entry r1 must all land under it.
-        let sp = primary_entry_sp();
+        // stores above the entry r1 must all land under it, even for the
+        // largest stack.
+        let sp = primary_entry_sp(PS3_PRIMARY_STACK_SIZE_MAX);
         assert!(
             sp + ENTRY_FRAME_RESERVE <= PS3_CHILD_STACKS_BASE,
             "entry frame 0x{sp:x}+0x{ENTRY_FRAME_RESERVE:x} reaches the child-stack arena",
@@ -89,19 +91,22 @@ mod primary_entry_sp_tests {
 
     #[test]
     fn the_entry_sp_is_quadword_aligned() {
-        assert_eq!(primary_entry_sp() % 0x10, 0);
+        for size in [
+            PS3_PRIMARY_STACK_SIZE_MIN,
+            0x1_0000,
+            PS3_PRIMARY_STACK_SIZE_MAX,
+        ] {
+            assert_eq!(primary_entry_sp(size) % 0x10, 0, "size 0x{size:x}");
+        }
     }
 }
 
 mod primary_stacksize_tests {
-    use super::super::{
-        decode_primary_stacksize, primary_entry_sp, primary_stack_base_for,
-        resolve_primary_stacksize,
-    };
+    use super::super::{decode_primary_stacksize, primary_entry_sp, resolve_primary_stacksize};
     use crate::NullSink;
     use cellgov_ps3_abi::hw::address_space::{
         PS3_ABI_MIN_STACK_FRAME as ENTRY_FRAME_RESERVE, PS3_PRIMARY_STACK_BASE,
-        PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_SIZE_DEFAULT,
+        PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_SIZE_DEFAULT, PS3_PRIMARY_STACK_START,
     };
 
     #[test]
@@ -135,9 +140,9 @@ mod primary_stacksize_tests {
     fn the_recorded_stack_range_always_contains_the_whole_entry_frame() {
         for declared in [0u32, 0x9000, 0x10, 0x40, 0x70, 0x40000, 0x100000, u32::MAX] {
             let size = resolve_primary_stacksize(Some(declared), &NullSink);
-            let base = primary_stack_base_for(size);
+            let base = PS3_PRIMARY_STACK_START;
             let end = base + u64::from(size);
-            let sp = primary_entry_sp();
+            let sp = primary_entry_sp(size);
             assert!(
                 (base..end).contains(&sp),
                 "declared 0x{declared:x} -> stack 0x{base:x}..0x{end:x} excludes SP 0x{sp:x}",
@@ -151,10 +156,9 @@ mod primary_stacksize_tests {
                 base >= PS3_PRIMARY_STACK_BASE,
                 "declared 0x{declared:x} -> base 0x{base:x} escapes the reservation",
             );
-            assert_eq!(
-                end,
-                PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64,
-                "the stack always ends at the top of the reservation",
+            assert!(
+                end <= PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64,
+                "declared 0x{declared:x} -> end 0x{end:x} escapes the reservation",
             );
         }
     }

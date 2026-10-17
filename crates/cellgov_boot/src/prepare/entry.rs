@@ -3,7 +3,6 @@
 
 use cellgov_core::{AddressSpaceId, Runtime};
 use cellgov_ppu::PpuExecutionUnit;
-use cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_TOP;
 
 use super::firmware::MemoryPlacement;
 use super::params::{primary_entry_sp, BootParams};
@@ -98,8 +97,8 @@ pub(super) fn seed_primary_entry_state(
         None
     } else {
         let block = crate::guest_args::build_args_block(
-            PS3_PRIMARY_STACK_TOP,
-            params.primary_stack_size as u64,
+            params.primary_stack_base,
+            primary_entry_sp(params.primary_stack_size),
             execution.guest_args,
         )?;
         let range = cellgov_mem::ByteRange::new(
@@ -131,7 +130,7 @@ pub(super) fn seed_primary_entry_state(
             state.set_gpr(5, b.envp_addr);
         }
         None => {
-            state.set_gpr(1, primary_entry_sp());
+            state.set_gpr(1, primary_entry_sp(params.primary_stack_size));
             state.set_gpr(3, 0);
             state.set_gpr(4, 0);
             state.set_gpr(5, 0);

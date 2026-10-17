@@ -16,9 +16,9 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region, RegionAcc
 // dev-deps.
 //
 //   STACK_BASE         = PS3_PRIMARY_STACK_BASE  = 0xD000_0000
-//   STACK_SIZE         = PS3_PRIMARY_STACK_SIZE  = 0x0010_0000
-//   CHILD_STACKS_BASE  = PS3_CHILD_STACKS_BASE   = 0xD010_0000
-//   CHILD_STACKS_SIZE  = PS3_CHILD_STACKS_SIZE   = 0x00F0_0000
+//   STACK_SIZE         = PS3_PRIMARY_STACK_SIZE  = 0x0010_1000
+//   CHILD_STACKS_BASE  = PS3_CHILD_STACKS_BASE   = 0xD010_1000
+//   CHILD_STACKS_SIZE  = PS3_CHILD_STACKS_SIZE   = 0x00EF_F000
 //   RSX_BASE           = PS3_RSX_BASE            = 0xC000_0000
 //   RSX_SIZE           = PS3_RSX_SIZE            = 0x1000_0000
 //   SPU_RESERVED_BASE  = PS3_SPU_RESERVED_BASE   = 0xE000_0000
@@ -30,9 +30,9 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region, RegionAcc
 const MAIN_BASE: u64 = 0;
 const MAIN_SIZE: usize = 0x4000_0000; // 1 GiB, mirrors boot.rs min_for_kernel
 const STACK_BASE: u64 = 0xD000_0000;
-const STACK_SIZE: usize = 0x0010_0000; // 1 MiB
-const CHILD_STACKS_BASE: u64 = 0xD010_0000;
-const CHILD_STACKS_SIZE: usize = 0x00F0_0000; // 15 MiB
+const STACK_SIZE: usize = 0x0010_1000; // 1 MiB + 4 KiB
+const CHILD_STACKS_BASE: u64 = 0xD010_1000;
+const CHILD_STACKS_SIZE: usize = 0x00EF_F000; // 15 MiB - 4 KiB
 const RSX_BASE: u64 = 0xC000_0000;
 const RSX_SIZE: usize = 0x1000_0000; // 256 MiB
 const SPU_RESERVED_BASE: u64 = 0xE000_0000;

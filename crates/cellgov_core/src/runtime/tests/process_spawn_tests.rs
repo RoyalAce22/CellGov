@@ -1060,7 +1060,7 @@ fn a_refused_thread_create_returns_its_stack_block_to_the_arena() {
         .unwrap();
     assert_eq!(
         next.base(),
-        0xD010_0000,
+        cellgov_ps3_abi::hw::address_space::PS3_CHILD_STACKS_BASE,
         "the refused create must return its block to the arena",
     );
 }

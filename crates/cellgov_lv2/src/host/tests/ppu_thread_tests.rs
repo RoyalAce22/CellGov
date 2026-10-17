@@ -264,11 +264,11 @@ fn ppu_thread_create_returns_dispatch_with_allocated_stack() {
             assert_eq!(init.entry_toc, 0x10_0100);
             assert_eq!(init.arg, 0xDEAD_BEEF);
             assert_eq!(priority, 1500);
-            assert_eq!(stack_base, 0xD010_0000);
+            assert_eq!(stack_base, 0xD010_1000);
             assert_eq!(stack_size, 0x10_000);
             assert_eq!(
                 init.stack_top,
-                0xD011_0000 - crate::ppu_thread::ABI_MIN_STACK_FRAME,
+                0xD011_1000 - crate::ppu_thread::ABI_MIN_STACK_FRAME,
                 "a child thread starts with a whole minimum frame reserved",
             );
             assert!(effects.is_empty());

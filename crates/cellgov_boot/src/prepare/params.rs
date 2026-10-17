@@ -4,7 +4,8 @@
 
 use cellgov_core::{default_budget_for_mode, RuntimeMode};
 use cellgov_ps3_abi::hw::address_space::{
-    PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_TOP,
+    PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_ENTRY_RESERVE, PS3_PRIMARY_STACK_SIZE,
+    PS3_PRIMARY_STACK_START,
 };
 use cellgov_ps3_abi::lv2::process::SYS_PROCESS_PARAM_PRIO_LIMIT;
 use cellgov_time::Budget;
@@ -113,18 +114,20 @@ pub(super) fn resolve_boot_params(
     }
 
     let primary_prio: u32 = resolve_primary_prio(proc_param.map(|p| p.primary_prio), sink);
-    // An adopted declaration is at most the 1 MiB reservation, so the
-    // guard below cannot fire while the reservation is 1 MiB.
+    // An adopted declaration is at most 1 MiB, and the reservation holds
+    // 1 MiB above the stack start, so the guard below cannot fire.
     let primary_stack_size =
         resolve_primary_stacksize(proc_param.map(|p| p.primary_stacksize), sink);
-    if (primary_stack_size as usize) > PS3_PRIMARY_STACK_SIZE {
+    let reserved =
+        (PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 - PS3_PRIMARY_STACK_START) as usize;
+    if (primary_stack_size as usize) > reserved {
         return Err(ParamsError::StackExceedsReservation {
             declared: primary_stack_size,
-            reserved: PS3_PRIMARY_STACK_SIZE,
+            reserved,
         }
         .into());
     }
-    let primary_stack_base = primary_stack_base_for(primary_stack_size);
+    let primary_stack_base = PS3_PRIMARY_STACK_START;
 
     Ok(BootParams {
         tls_info,
@@ -204,42 +207,14 @@ fn resolve_primary_stacksize(declared: Option<u32>, sink: &dyn crate::BootSink) 
     })
 }
 
-/// Primary thread r1 for a boot with no guest args.
-///
-/// [`PS3_PRIMARY_STACK_TOP`] already sits
-/// [`PS3_ABI_MIN_STACK_FRAME`](cellgov_ps3_abi::hw::address_space::PS3_ABI_MIN_STACK_FRAME)
-/// below the end of the primary stack region, so the no-args entry
-/// takes it unchanged -- subtracting the reserve a second time here
-/// would drop r1 a whole frame below the initial frame.
+/// Primary thread r1 at entry for a stack of `size` bytes, with no
+/// guest args: [`PS3_PRIMARY_STACK_ENTRY_RESERVE`] below the top of the
+/// stack, as on the reference console.
 ///
 /// [CBE-Handbook p:396 s:14.3.1.2] at entry R1 addresses the word
 /// holding the initial frame's NULL back-chain pointer.
-pub(super) const fn primary_entry_sp() -> u64 {
-    PS3_PRIMARY_STACK_TOP
-}
-
-/// Base address recorded for the primary thread's stack of `size`
-/// bytes.
-///
-/// [CBE-Handbook p:396 s:14.3.1.3] the loader initializes the stack
-/// before entry and hands the program its address in R1, with the
-/// argument information block above it.
-///
-/// CellGov's SP is the fixed [`PS3_PRIMARY_STACK_TOP`], so the
-/// recorded base sits `size` below the top of the reservation rather
-/// than at its bottom. That keeps the running SP inside the range
-/// `sys_process_is_stack` answers for.
-///
-/// # Panics
-///
-/// `size` must not exceed [`PS3_PRIMARY_STACK_SIZE`]; the caller
-/// rejects a larger declaration before reaching here.
-fn primary_stack_base_for(size: u32) -> u64 {
-    debug_assert!(
-        size as usize <= PS3_PRIMARY_STACK_SIZE,
-        "caller rejects a stack larger than the reservation",
-    );
-    PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 - size as u64
+pub(super) const fn primary_entry_sp(size: u32) -> u64 {
+    PS3_PRIMARY_STACK_START + size as u64 - PS3_PRIMARY_STACK_ENTRY_RESERVE
 }
 
 /// Convert a retired-instruction cap into the `rt.step()` call cap
@@ -270,3 +245,7 @@ mod execution_tests;
 #[cfg(test)]
 #[path = "tests/primary_stack_console_tests.rs"]
 mod primary_stack_console_tests;
+
+#[cfg(test)]
+#[path = "tests/primary_stack_placement_console_tests.rs"]
+mod primary_stack_placement_console_tests;

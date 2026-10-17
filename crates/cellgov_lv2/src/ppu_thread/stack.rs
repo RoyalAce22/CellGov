@@ -76,10 +76,8 @@ pub struct ThreadStackAllocator {
 
 impl ThreadStackAllocator {
     /// Lowest address the allocator will hand out; sits directly
-    /// above the primary thread's 1 MiB stack at
-    /// `0xD0000000..0xD0100000`. Tracks
-    /// [`cellgov_ps3_abi::hw::address_space::PS3_CHILD_STACKS_BASE`].
-    pub const CHILD_STACK_BASE: u64 = 0xD010_0000;
+    /// above the primary thread's stack region.
+    pub const CHILD_STACK_BASE: u64 = cellgov_ps3_abi::hw::address_space::PS3_CHILD_STACKS_BASE;
 
     /// Construct a fresh allocator.
     pub fn new() -> Self {

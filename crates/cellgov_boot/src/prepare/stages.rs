@@ -119,6 +119,7 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
 
     // 11. Predecode shadow over the entry state's executable code.
     let shadow = entry::build_instruction_shadow(&rt, &placement, image.code_floor, sink)?;
+    let entry_r1 = state.gpr[1];
 
     // 12. The primary unit, held non-runnable until module_start ends.
     let primary_unit_id =
@@ -131,8 +132,11 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         title.identity.overrides,
         &diagnostics,
         &services,
-        primary_unit_id,
-        placement.tls,
+        module_start::PrimaryThread {
+            unit: primary_unit_id,
+            tls: placement.tls,
+            entry_r1,
+        },
     )?;
 
     // 14. Debug patches and dumps.

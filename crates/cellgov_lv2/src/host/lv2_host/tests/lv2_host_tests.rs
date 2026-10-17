@@ -96,7 +96,7 @@ fn allocate_child_stack_produces_non_overlapping_blocks() {
     let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
     let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
     let s3 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    assert_eq!(s1.base, 0xD010_0000);
+    assert_eq!(s1.base, 0xD010_1000);
     assert!(s2.base >= s1.end());
     assert!(s3.base >= s2.end());
 }

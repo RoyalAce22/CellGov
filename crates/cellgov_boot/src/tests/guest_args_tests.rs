@@ -2,11 +2,13 @@
 
 use super::{build_args_block, GuestArgsError};
 use cellgov_ps3_abi::hw::address_space::{
-    PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_TOP,
+    PS3_PRIMARY_STACK_ENTRY_RESERVE, PS3_PRIMARY_STACK_SIZE_MAX, PS3_PRIMARY_STACK_START,
 };
 
-const TOP: u64 = PS3_PRIMARY_STACK_TOP;
-const SIZE: u64 = PS3_PRIMARY_STACK_SIZE as u64;
+/// The largest primary stack and the no-args entry r1 it gets.
+const BASE: u64 = PS3_PRIMARY_STACK_START;
+const SIZE: u64 = PS3_PRIMARY_STACK_SIZE_MAX as u64;
+const TOP: u64 = BASE + SIZE - PS3_PRIMARY_STACK_ENTRY_RESERVE;
 
 fn be64(bytes: &[u8], off: usize) -> u64 {
     u64::from_be_bytes(bytes[off..off + 8].try_into().unwrap())
@@ -14,7 +16,7 @@ fn be64(bytes: &[u8], off: usize) -> u64 {
 
 #[test]
 fn a_single_arg_lays_out_both_pointer_arrays_and_its_string() {
-    let block = build_args_block(TOP, SIZE, &["abc".to_string()]).unwrap();
+    let block = build_args_block(BASE, TOP, &["abc".to_string()]).unwrap();
     // 1 argv ptr + argv NULL + envp NULL -> 3 slots, padded to 4;
     // "abc\0" pads to 16.
     assert_eq!(block.bytes.len(), 4 * 8 + 16);
@@ -37,7 +39,7 @@ fn a_single_arg_lays_out_both_pointer_arrays_and_its_string() {
 fn two_args_use_all_four_slots_and_stack_16_byte_string_chunks() {
     let args = ["/dev_flash/vsh/module/vsh.self", "--mode=gametool"];
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    let block = build_args_block(TOP, SIZE, &args).unwrap();
+    let block = build_args_block(BASE, TOP, &args).unwrap();
     // 2 argv ptrs + argv NULL + envp NULL -> 4 slots exactly;
     // 31 bytes -> 32, 16 bytes -> 16.
     assert_eq!(block.bytes.len(), 4 * 8 + 32 + 16);
@@ -57,7 +59,7 @@ fn two_args_use_all_four_slots_and_stack_16_byte_string_chunks() {
 fn a_zero_arg_block_points_both_arrays_at_a_null_pointer() {
     // [CBE-Handbook p:396 s:14.3.1.2] With no arguments R4 names a NULL
     // pointer, and with no environment R5 names one too.
-    let block = build_args_block(TOP, SIZE, &[]).unwrap();
+    let block = build_args_block(BASE, TOP, &[]).unwrap();
     assert_eq!(block.argc, 0);
     // argv NULL + envp NULL -> 2 slots, no string storage.
     assert_eq!(block.bytes.len(), 2 * 8);
@@ -75,7 +77,7 @@ fn an_empty_string_arg_still_gets_a_pointer_and_a_nul_terminated_chunk() {
     // argc counts the empty entry and argv[0] must point at a real
     // "\0", not alias NULL: a guest strlen(argv[0]) walk has to see
     // a terminator inside the block.
-    let block = build_args_block(TOP, SIZE, &[String::new()]).unwrap();
+    let block = build_args_block(BASE, TOP, &[String::new()]).unwrap();
     assert_eq!(block.argc, 1);
     assert_eq!(block.bytes.len(), 4 * 8 + 16);
     let s0 = be64(&block.bytes, 0);
@@ -87,7 +89,7 @@ fn an_empty_string_arg_still_gets_a_pointer_and_a_nul_terminated_chunk() {
 fn nul_byte_in_an_arg_is_rejected_with_its_index() {
     let args = vec!["ok".to_string(), "bad\0arg".to_string()];
     assert_eq!(
-        build_args_block(TOP, SIZE, &args),
+        build_args_block(BASE, TOP, &args),
         Err(GuestArgsError::ArgContainsNul { index: 1 })
     );
 }
@@ -96,7 +98,7 @@ fn nul_byte_in_an_arg_is_rejected_with_its_index() {
 fn block_exceeding_the_stack_is_rejected() {
     let args = vec!["x".repeat(SIZE as usize)];
     assert!(matches!(
-        build_args_block(TOP, SIZE, &args),
+        build_args_block(BASE, TOP, &args),
         Err(GuestArgsError::BlockTooLarge { .. })
     ));
 }
@@ -106,27 +108,27 @@ fn r1_sits_a_full_linkage_frame_below_the_pointer_table() {
     // 8(r1) and 16(r1) are the CR and LR save slots the entry's
     // prologue may store through; both must fall in the reserve, not
     // in the table.
-    let block = build_args_block(TOP, SIZE, &["a".to_string(), "b".to_string()]).unwrap();
+    let block = build_args_block(BASE, TOP, &["a".to_string(), "b".to_string()]).unwrap();
     assert!(block.initial_r1 + 16 < block.argv_addr);
     assert_eq!(block.argv_addr - block.initial_r1, 0x70);
 }
 
 #[test]
 fn the_fit_check_counts_the_entry_frame_reserve() {
-    // One arg: 4 table slots (0x20). A string chunk of 0xFFF00
-    // makes total + 0xE0 == SIZE exactly, so r1 lands at the
-    // inclusive stack base and fits. One 16-byte granule more does
-    // not fit.
-    let exact = vec!["x".repeat(0xFFEFF)];
-    let block = build_args_block(TOP, SIZE, &exact).unwrap();
-    assert_eq!(block.initial_r1, PS3_PRIMARY_STACK_BASE);
+    // One arg: 4 table slots (0x20). The room is TOP - BASE = 0xFFDD0.
+    // A string chunk of 0xFFD40 makes total + 0x70 == room exactly, so
+    // r1 lands at the inclusive stack base and fits. One 16-byte
+    // granule more does not fit.
+    let exact = vec!["x".repeat(0xFFD3F)];
+    let block = build_args_block(BASE, TOP, &exact).unwrap();
+    assert_eq!(block.initial_r1, BASE);
 
-    let rejected = vec!["x".repeat(0xFFF0F)];
+    let rejected = vec!["x".repeat(0xFFD4F)];
     assert!(matches!(
-        build_args_block(TOP, SIZE, &rejected),
+        build_args_block(BASE, TOP, &rejected),
         Err(GuestArgsError::BlockTooLarge {
-            total: 0xFFF30,
-            stack_size: SIZE,
+            total: 0xFFD70,
+            room: 0xFFDD0,
         })
     ));
 }

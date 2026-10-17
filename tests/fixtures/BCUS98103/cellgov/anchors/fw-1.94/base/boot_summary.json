@@ -3,7 +3,7 @@
     "kind": "first_rsx_write"
   },
   "outcome": "RsxWriteCheckpoint",
-  "steps": 7119,
+  "steps": 4174,
   "budget": 256,
   "host_invariant_breaks": 0,
   "witnesses": {
@@ -36,7 +36,7 @@
       "class": "at-least"
     },
     "lwarx": {
-      "value": 652,
+      "value": 144,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -112,7 +112,7 @@
       "class": "at-least"
     },
     "stwcx": {
-      "value": 651,
+      "value": 143,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {

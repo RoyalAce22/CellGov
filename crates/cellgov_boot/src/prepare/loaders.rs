@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use cellgov_core::Runtime;
 use cellgov_ppu::PpuExecutionUnit;
-use cellgov_ps3_abi::hw::address_space::{PS3_PRIMARY_STACK_SIZE, PS3_RSX_IOMAP_BASE};
+use cellgov_ps3_abi::hw::address_space::{PS3_PRIMARY_STACK_SIZE_MAX, PS3_RSX_IOMAP_BASE};
 
 use super::types::{BootDebugOptions, BootServices, TitleOptions};
 use crate::child_init::{ChildInitPlan, ChildInitPlans};
@@ -275,7 +275,7 @@ pub(super) fn install_spawn_loader(
             // A full primary-stack reservation below the child's SP:
             // the child's own stack grows down from `stack_top`, the
             // transient module_start stacks from here.
-            stack_pointer: stack_top - PS3_PRIMARY_STACK_SIZE as u64,
+            stack_pointer: stack_top - u64::from(PS3_PRIMARY_STACK_SIZE_MAX),
             run_hle_stubbed: overrides.disable_module_start_hle_stubs,
             ppu_tap: taps.ppu(),
         });
