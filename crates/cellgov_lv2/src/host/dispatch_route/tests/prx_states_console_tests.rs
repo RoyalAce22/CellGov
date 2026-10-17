@@ -266,33 +266,25 @@ fn the_state_answers_match_the_third_state_capture() {
     r.check(18, rc);
 }
 
-/// The console tracks a start in progress and refuses a start of any
-/// module that is not freshly loaded; a refused unload of a started or
-/// starting module still withdraws it. CellGov's sc 480 hands back the
-/// boot's own instance of a module the boot already loaded, so the
-/// console's rule would refuse a game's start of that module.
-/// CellGov keeps its answers until a load hands back a fresh instance.
+/// Only a module just loaded starts, and a refused unload of a started
+/// or starting module still withdraws it.
 #[test]
-fn the_console_refuses_a_start_cellgov_accepts() {
-    let esrch: u64 = errno::CELL_ESRCH.into();
-
+fn a_start_needs_a_fresh_module_and_a_refused_unload_withdraws_as_on_the_console() {
     // A start after a stop report to a never-started module.
     let mut r = Replay::new("lv2_prx_states", 71);
     let a = r.load();
     for cmd in [1, 4, 2] {
         r.rc(STOP, a, cmd, 0);
     }
-    let cellgov = r.handshake(START, a);
-    assert_ne!(r.word(4), cellgov, "console refuses the start");
-    assert_eq!(cellgov, 0, "CellGov starts the stopped module");
+    let rc = r.handshake(START, a);
+    r.check(4, rc);
 
     // A second start of a started module.
     let mut r = Replay::new("lv2_prx_states_more", 37);
     let a = r.load();
     r.handshake(START, a);
-    let cellgov = r.handshake(START, a);
-    assert_ne!(r.word(2), cellgov, "console refuses the second start");
-    assert_eq!(cellgov, 0, "CellGov starts it again");
+    let rc = r.handshake(START, a);
+    r.check(2, rc);
 
     // A started module after its refused unload, and an unload between
     // the two start phases.
@@ -300,17 +292,21 @@ fn the_console_refuses_a_start_cellgov_accepts() {
     let a = r.load();
     r.handshake(START, a);
     r.unload(a);
-    let cellgov = r.rc(STOP, a, 1, 0);
-    assert_eq!(r.word(3), esrch, "console withdrew the module");
-    assert_eq!(cellgov, 0, "CellGov keeps it");
+    let rc = r.rc(STOP, a, 1, 0);
+    r.check(3, rc);
     for _ in 0..2 {
         r.load();
     }
     let g = r.load();
     r.rc(START, g, 1, 0);
-    let cellgov = r.unload(g);
-    assert_ne!(r.word(19), cellgov, "console refuses the unload");
-    assert_eq!(cellgov, 0, "CellGov withdraws the unstarted module");
+    let rc = r.unload(g);
+    r.check(19, rc);
+    let rc = r.rc(STOP, g, 1, 0);
+    r.check(20, rc);
+    let rc = r.rc(START, g, 2, 0);
+    r.check(21, rc);
+    let rc = r.unload(g);
+    r.check(22, rc);
 }
 
 /// The console's start and stop phase 1 hand back the module's own

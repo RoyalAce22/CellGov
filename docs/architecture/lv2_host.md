@@ -141,15 +141,17 @@ The `_sys_prx_*` arms (480 to 497) form one module state machine:
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Initialized : 480 load, or a miss stub for a retail-firmware name
-  Initialized --> Started : 481 cmd 1 (sentinel entries), then cmd 2 with res 0
+  [*] --> Initialized : 480 load (a fresh instance per call), or a miss stub for a retail-firmware name
+  Initialized --> Starting : 481 cmd 1 (sentinel entries)
+  Starting --> Started : 481 cmd 2 with res 0
   Started --> Stopping : 482 cmd 1
   Stopping --> Stopped : 482 cmd 2 with res 0
   Stopping --> Stopping : 482 cmd 2 with res 1, CELL_PRX_ERROR_CAN_NOT_STOP
   Initialized --> [*] : 483 unload
   Stopped --> [*] : 483 unload
-  Started --> Started : 483 refused, NOT_REMOVABLE
-  Stopping --> Stopping : 483 refused, NOT_REMOVABLE
+  Starting --> [*] : 483 NOT_REMOVABLE, withdrawn
+  Started --> [*] : 483 NOT_REMOVABLE, withdrawn
+  Stopping --> [*] : 483 NOT_REMOVABLE, withdrawn
 ```
 
 ## PPU thread lifecycle

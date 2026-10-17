@@ -52,10 +52,12 @@ fn syscall_494_flags_with_bit2_writes_zero_count_at_offset_0x10() {
     }
 }
 
+/// Each load of a registered module answers a fresh instance: a new
+/// id, `Initialized`, sharing the image.
 #[test]
-fn syscall_480_returns_registered_kernel_id_for_known_stem() {
+fn syscall_480_loads_a_fresh_instance_of_a_registered_module() {
     let mut host = Lv2Host::new();
-    let expected_id = host.prx_registry_mut().register(
+    let boot_id = host.prx_registry_mut().register(
         "libaudio".into(),
         "cellAudio_Library".into(),
         0x0147_0000,
@@ -70,16 +72,35 @@ fn syscall_480_returns_registered_kernel_id_for_known_stem() {
         .unwrap();
     mem.apply_commit(range, path).unwrap();
     let rt = FakeRuntime::with_memory(mem);
+    host.prx_registry_mut().mark_started(boot_id);
 
-    let result = host.dispatch(
+    let mut load = || match host.dispatch(
         Lv2Request::Unsupported {
             number: 480,
             args: [0x4000, 0, 0, 0, 0, 0, 0, 0],
         },
         UnitId::new(0),
         &rt,
+    ) {
+        Lv2Dispatch::Immediate { code, effects } if effects.is_empty() => {
+            u32::try_from(code).expect("a module id")
+        }
+        other => panic!("expected an id, got {other:?}"),
+    };
+    let first = load();
+    let second = load();
+    assert_ne!(first, boot_id);
+    assert_ne!(second, first);
+    for id in [first, second] {
+        let entry = host.prx_registry().lookup_by_id(id).expect("registered");
+        assert_eq!(entry.state(), crate::prx_registry::PrxState::Initialized);
+        assert_eq!(entry.base(), 0x0147_0000, "the instance shares the image");
+    }
+    assert_eq!(
+        host.prx_registry().lookup_by_id(boot_id).unwrap().state(),
+        crate::prx_registry::PrxState::Started,
+        "the boot's instance keeps its state"
     );
-    assert_eq!(result, Lv2Dispatch::immediate(u64::from(expected_id)));
 }
 
 #[test]
@@ -159,8 +180,18 @@ fn syscall_480_firmware_miss_registers_stub_and_start_reaches_sentinel() {
     };
     assert_eq!(host.observability().prx_load_hle_stub_count, 1);
 
-    // Re-load resolves the stub by stem: same id, no second mint.
-    assert_eq!(load(&mut host, &rt), Lv2Dispatch::immediate(u64::from(id)));
+    // A re-load instances the stub: a new id, no second stub.
+    match load(&mut host, &rt) {
+        Lv2Dispatch::Immediate { code, .. } => {
+            assert_ne!(code, u64::from(id));
+            let fresh = u32::try_from(code).expect("an id, not an errno");
+            assert_eq!(
+                host.prx_registry().lookup_by_id(fresh).map(|e| e.state()),
+                Some(crate::prx_registry::PrxState::Initialized)
+            );
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
     assert_eq!(host.observability().prx_load_hle_stub_count, 1);
 
     // The stub id starts like any loaded module: NO_ENTRY sentinel.
@@ -204,7 +235,7 @@ fn syscall_480_unknown_firmware_name_returns_enoent_not_a_stub() {
 #[test]
 fn syscall_497_routes_through_same_resolver_as_480() {
     let mut host = Lv2Host::new();
-    let expected_id = host.prx_registry_mut().register(
+    let boot_id = host.prx_registry_mut().register(
         "libaudio".into(),
         "cellAudio_Library".into(),
         0x0147_0000,
@@ -231,7 +262,15 @@ fn syscall_497_routes_through_same_resolver_as_480() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(u64::from(expected_id)));
+    let Lv2Dispatch::Immediate { code, .. } = result else {
+        panic!("expected Immediate, got {result:?}");
+    };
+    let id = u32::try_from(code).expect("a module id");
+    assert_ne!(id, boot_id, "a fresh instance, as 480 loads");
+    assert_eq!(
+        host.prx_registry().lookup_by_id(id).map(|e| e.stem()),
+        Some("libaudio")
+    );
 }
 
 #[test]
@@ -677,20 +716,20 @@ fn unload_module(host: &mut Lv2Host, id: u32, rt: &FakeRuntime) -> Lv2Dispatch {
 }
 
 #[test]
-fn prx_unload_module_started_returns_not_removable_and_counts() {
+fn prx_unload_module_started_returns_not_removable_counts_and_withdraws() {
     use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_NOT_REMOVABLE;
     let (mut host, id) = host_with_one_prx();
     host.prx_registry_mut().mark_started(id);
     let rt = FakeRuntime::new(0x1000);
-    let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         unload_module(&mut host, id, &rt),
         Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_NOT_REMOVABLE))
     );
     assert_eq!(host.observability().prx_unload_rejections, 1);
+    assert!(host.prx_registry().lookup_by_id(id).is_none());
     assert_eq!(
-        host.observability().invariant_break_count - breaks_before,
-        1
+        unload_module(&mut host, id, &rt),
+        Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
     );
 }
 

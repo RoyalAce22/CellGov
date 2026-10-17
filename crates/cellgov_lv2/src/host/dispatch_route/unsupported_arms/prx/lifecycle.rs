@@ -15,9 +15,12 @@ impl Lv2Host {
     ///
     /// `pOpt->cmd & 0xF` selects the phase:
     ///
-    /// 1. Phase 1 hands the caller the entry to invoke. CellGov runs
-    ///    every firmware module's `module_start` itself at boot, so
-    ///    this phase reports `NO_ENTRY`.
+    /// 1. Phase 1 moves an `Initialized` module to `Starting` and hands
+    ///    the caller the entry to invoke. CellGov runs every firmware
+    ///    module's `module_start` itself at boot, so this phase reports
+    ///    `NO_ENTRY`. A module in any other state answers
+    ///    `CELL_PRX_ERROR_ERROR`. No capture repeats phase 1 on a
+    ///    `Starting` module; CellGov refuses it as it does a started one.
     /// 2. Phase 2 reports what that entry returned. A report of
     ///    `SYS_PRX_RESIDENT` marks the module started, and a later
     ///    unload then answers `NOT_REMOVABLE`. Any other report
@@ -39,7 +42,7 @@ impl Lv2Host {
     ///   such an id with a readable option, before the lookup.
     /// - `CELL_ESRCH` when `id` names no loaded module.
     /// - `CELL_PRX_ERROR_ERROR` for a command nibble that is neither
-    ///   1 nor 2.
+    ///   1 nor 2, or a phase 1 to a module not just loaded.
     /// - `CELL_EFAULT` when `pOpt` is unreadable or the struct would
     ///   not fit inside the 32-bit guest address space.
     /// - `CELL_EINVAL` when `id` or `pOpt` carries high bits, per
@@ -119,6 +122,14 @@ impl Lv2Host {
 
         match cmd & start_cmd::MASK {
             start_cmd::GET_ENTRY => {
+                // Only a module just loaded starts: the console refuses a
+                // second start of a started module and a start of a
+                // stopped one (`lv2_prx_states`, `lv2_prx_states_more`).
+                if self.state.prx_registry.begin_start(id)
+                    != Some(crate::prx_registry::PrxState::Initialized)
+                {
+                    return Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_ERROR));
+                }
                 let mut effects = vec![self.write_be_u64(
                     requester,
                     p_opt + opt::ENTRY_OFFSET,
@@ -310,8 +321,10 @@ impl Lv2Host {
             }
             effects
         };
+        // No capture stops a module between its two start phases;
+        // CellGov answers it as one that never started.
         let wrong_state = |state: PrxState| match state {
-            PrxState::Initialized => Some(CELL_PRX_ERROR_NOT_STARTED),
+            PrxState::Initialized | PrxState::Starting => Some(CELL_PRX_ERROR_NOT_STARTED),
             PrxState::Stopped => Some(CELL_PRX_ERROR_ALREADY_STOPPED),
             PrxState::Stopping => Some(CELL_PRX_ERROR_ALREADY_STOPPING),
             PrxState::Started => None,
@@ -462,20 +475,19 @@ impl Lv2Host {
     }
 
     /// `_sys_prx_unload_module` (483): withdraw an `Initialized` or
-    /// `Stopped` module, refuse a `Started` / `Stopping` one.
-    ///
-    /// Boot-loaded firmware modules are started, since their images
-    /// back the GOT slots the title calls through. They refuse until
-    /// the guest completes the sc 482 stop handshake. An sc 480 miss
-    /// stub the guest never started withdraws with `CELL_OK` and frees
-    /// its id.
+    /// `Stopped` module with `CELL_OK`. For a `Started`, `Starting` or
+    /// `Stopping` module the call answers `NOT_REMOVABLE` and still
+    /// withdraws it, as the `lv2_prx_states_last` capture shows for a
+    /// started module and for one between the two start phases. No
+    /// capture unloads a `Stopping` module; CellGov withdraws it as it
+    /// does a started one.
     ///
     /// # Errors
     ///
     /// - `CELL_ESRCH` when `id` names no loaded module, as the
     ///   `lv2_prx_states` capture answers an id already unloaded.
-    /// - `CELL_PRX_ERROR_NOT_REMOVABLE` for a started or stopping
-    ///   resident module.
+    /// - `CELL_PRX_ERROR_NOT_REMOVABLE` for a module in the `Started`,
+    ///   `Starting` or `Stopping` state, which the call withdraws.
     /// - `CELL_EINVAL` when `id` carries high bits, per
     ///   [`Lv2Host::narrow_u32_args`].
     pub(in crate::host::dispatch_route) fn dispatch_prx_unload_module(
@@ -498,16 +510,11 @@ impl Lv2Host {
                     debug_assert!(removed.is_some(), "lookup said present and removable");
                     Lv2Dispatch::immediate(0)
                 }
-                PrxState::Started | PrxState::Stopping => {
-                    let stem = entry.stem().to_string();
+                PrxState::Started | PrxState::Starting | PrxState::Stopping => {
+                    // The refusal still withdraws the module: every later
+                    // call on the id answers ESRCH (`lv2_prx_states_last`).
                     self.obs.prx_unload_rejections += 1;
-                    self.log_invariant_break(
-                        "dispatch.prx_unload_module_resident",
-                        format_args!(
-                            "_sys_prx_unload_module id={id:#010x} ({stem}) is a started \
-                             resident module; returning CELL_PRX_ERROR_NOT_REMOVABLE"
-                        ),
-                    );
+                    self.state.prx_registry.withdraw(id);
                     Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_NOT_REMOVABLE))
                 }
             },

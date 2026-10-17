@@ -14,10 +14,8 @@ pub const FIRST_KERNEL_ID: u32 = 0x4002_0000;
 
 /// LV2 module lifecycle states CellGov models.
 ///
-/// `STARTING` and `DESTROYED` are omitted: start phase 1 persists no
-/// transition in this model, and withdrawal removes the entry
-/// outright. The explicit discriminants are the module's state lane,
-/// less one.
+/// The model has no `DESTROYED` state: withdrawal removes the entry outright. The
+/// explicit discriminants are the module's state lane, less one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PrxState {
@@ -30,6 +28,8 @@ pub enum PrxState {
     Stopping = 2,
     /// Stop handshake completed; eligible for withdrawal.
     Stopped = 3,
+    /// Start handshake phase 1 accepted; awaiting the phase 2 report.
+    Starting = 4,
 }
 
 /// One entry per loaded PRX.
@@ -44,9 +44,9 @@ pub struct LoadedPrxEntry {
     start_opd: Option<u32>,
     stop_opd: Option<u32>,
     /// Boot-loaded firmware modules are marked started by the boot
-    /// path; miss stubs stay `Initialized` until the guest completes
-    /// the sc 481 handshake. Unload withdraws only `Initialized` /
-    /// `Stopped` entries.
+    /// path; every other entry starts `Initialized`. sc 483 withdraws an
+    /// entry in any state and answers CELL_OK only for `Initialized` /
+    /// `Stopped`.
     state: PrxState,
 }
 
@@ -116,6 +116,8 @@ impl LaneValue for LoadedPrxEntry {
 ///
 /// Invariant: every key in `stem_to_id` resolves to a present
 /// `entries` row. [`register`](Self::register),
+/// [`register_instance`](Self::register_instance),
+/// [`begin_start`](Self::begin_start),
 /// [`mark_started`](Self::mark_started),
 /// [`begin_stop`](Self::begin_stop),
 /// [`finish_stop`](Self::finish_stop),
@@ -223,6 +225,36 @@ impl LoadedPrxRegistry {
         kernel_id
     }
 
+    /// Register a fresh instance of `of`'s module under a new kernel id,
+    /// `Initialized`, sharing its image. Returns the new id, or `None`
+    /// when `of` is unknown or no kernel id is left to allocate.
+    ///
+    /// Path lookup keeps resolving to the instance it named before, so
+    /// a later load of the path instances the same image again.
+    pub fn register_instance(&mut self, of: u32) -> Option<u32> {
+        let mut entry = self.entries.get(of)?.clone();
+        let kernel_id = self.next_id;
+        self.next_id = self.next_id.checked_add(1)?;
+        entry.kernel_id = kernel_id;
+        entry.state = PrxState::Initialized;
+        self.entries.insert(kernel_id, entry);
+        Some(kernel_id)
+    }
+
+    /// Start-handshake phase 1: transition `Initialized -> Starting`.
+    ///
+    /// Returns the state before the call so the dispatcher can refuse a
+    /// module that was not just loaded; `None` for an unknown id. Only
+    /// the `Initialized` state transitions.
+    pub fn begin_start(&mut self, id: u32) -> Option<PrxState> {
+        let mut e = self.entries.get_mut(id)?;
+        let old = e.state;
+        if old == PrxState::Initialized {
+            e.state = PrxState::Starting;
+        }
+        Some(old)
+    }
+
     /// Mark `id`'s module started (`module_start` ran, or the guest
     /// completed the sc 481 handshake). No-op for an unknown id.
     pub fn mark_started(&mut self, id: u32) {
@@ -290,20 +322,37 @@ impl LoadedPrxRegistry {
 
     /// Withdraw `id`'s module in any state, freeing its id. Returns the
     /// removed entry, or `None` when `id` is unknown.
+    ///
+    /// When path lookup named `id`, it moves to the lowest-id instance
+    /// left of the same image, if any.
     pub fn withdraw(&mut self, id: u32) -> Option<LoadedPrxEntry> {
         let entry = self.entries.remove(id)?;
-        self.stem_to_id.remove(&entry.stem);
+        if self.stem_to_id.get(&entry.stem) == Some(&id) {
+            match self
+                .entries
+                .iter()
+                .find(|(_, other)| other.stem == entry.stem)
+                .map(|(other_id, _)| other_id)
+            {
+                Some(other_id) => {
+                    self.stem_to_id.insert(entry.stem.clone(), other_id);
+                }
+                None => {
+                    self.stem_to_id.remove(&entry.stem);
+                }
+            }
+        }
         Some(entry)
     }
 
     /// Withdraw an `Initialized` or `Stopped` module, freeing its id.
     /// Returns the removed entry, or `None` when `id` is unknown or
-    /// the module is `Started` / `Stopping` (LV2 withdraws only
-    /// `INITIALIZED` / `STOPPED` states).
+    /// the module is `Started`, `Starting` or `Stopping` (LV2 withdraws
+    /// only `INITIALIZED` / `STOPPED` states with CELL_OK).
     pub fn withdraw_removable(&mut self, id: u32) -> Option<LoadedPrxEntry> {
         match self.entries.get(id)?.state {
             PrxState::Initialized | PrxState::Stopped => {}
-            PrxState::Started | PrxState::Stopping => return None,
+            PrxState::Started | PrxState::Starting | PrxState::Stopping => return None,
         }
         self.withdraw(id)
     }
@@ -388,3 +437,7 @@ pub fn extract_stem(path: &str) -> String {
 #[cfg(test)]
 #[path = "tests/prx_registry_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/prx_registry_instance_tests.rs"]
+mod instance_tests;

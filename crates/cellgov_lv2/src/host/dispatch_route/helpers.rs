@@ -113,16 +113,23 @@ impl Lv2Host {
     /// for `_sys_prx_load_module` (480) and
     /// `_sys_prx_load_module_on_memcontainer` (497).
     ///
-    /// Both syscalls share this arm. A registered path answers its
-    /// kernel id as the syscall code. The arm does not read 497's
+    /// Both syscalls share this arm. The arm does not read 497's
     /// container argument.
+    ///
+    /// A registered path loads a fresh instance of the module, with a
+    /// new kernel id in the `Initialized` state, and answers that id as
+    /// the syscall code. The console loads a fresh instance on every
+    /// call: the `lv2_prx_load_cycle` and `lv2_prx_states*` captures get
+    /// a new id for each load of `libadec.sprx`. CellGov's instance
+    /// shares the image the boot loaded, since the boot already linked
+    /// every import against it.
     ///
     /// Miss handling: a `/dev_flash/sys/external/` path whose stem
     /// names a module retail firmware ships (see
     /// `firmware_modules::FIRMWARE_MODULE_STEMS`) but is absent from
     /// the loaded firmware registers a stub entry under a real kernel
-    /// id, and a repeat load resolves that stub by stem and returns
-    /// the same id. Any other miss is `CELL_ENOENT`.
+    /// id, and a repeat load instances that stub as above. Any other
+    /// miss is `CELL_ENOENT`.
     ///
     /// The stub models no kernel behaviour. A console's `dev_flash`
     /// always holds the module, so the case cannot arise there. The
@@ -133,6 +140,9 @@ impl Lv2Host {
     ///
     /// - `CELL_EFAULT` when the pointer is unreadable or no NUL
     ///   terminator appears within the 256-byte cap.
+    /// - `CELL_ENOMEM` when the registry has no kernel id left for a
+    ///   fresh instance. CellGov chose this answer; no capture spends
+    ///   the id space.
     /// - `CELL_ENOENT` for non-UTF-8 path bytes (CellGov-side
     ///   narrowing: such a path cannot name anything in the installed firmware).
     /// - `CELL_EINVAL` when `path_arg` carries high bits, per
@@ -159,8 +169,16 @@ impl Lv2Host {
             self.obs.prx_load_not_found_count += 1;
             return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
         };
-        if let Some(entry) = self.state.prx_registry.lookup_by_path(path) {
-            return Lv2Dispatch::immediate(u64::from(entry.kernel_id()));
+        if let Some(of) = self
+            .state
+            .prx_registry
+            .lookup_by_path(path)
+            .map(|entry| entry.kernel_id())
+        {
+            return match self.state.prx_registry.register_instance(of) {
+                Some(id) => Lv2Dispatch::immediate(u64::from(id)),
+                None => Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
+            };
         }
         let stem = crate::prx_registry::extract_stem(path);
         if path.starts_with(FIRMWARE_DIR) && super::firmware_modules::is_known_firmware_stem(&stem)
