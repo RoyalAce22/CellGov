@@ -347,3 +347,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/raw_spu_console_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/raw_spu_status_console_tests.rs"]
+mod status_console_tests;
