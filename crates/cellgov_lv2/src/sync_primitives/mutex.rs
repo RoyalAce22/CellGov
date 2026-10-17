@@ -99,6 +99,11 @@ pub struct MutexEntry {
     waiters: WaiterList,
     attrs: MutexAttrs,
     lock_count: u32,
+    /// Conds created on this mutex and not yet destroyed.
+    live_conds: u32,
+    /// Set once a cond binding outlives its cond; see
+    /// [`MutexTable::bind_cond`].
+    retains_cond_binding: bool,
 }
 
 impl MutexEntry {
@@ -108,7 +113,15 @@ impl MutexEntry {
             waiters: WaiterList::new(),
             attrs,
             lock_count: 0,
+            live_conds: 0,
+            retains_cond_binding: false,
         }
+    }
+
+    /// Whether a cond is still bound: one lives, or the mutex retains a
+    /// destroyed one's binding.
+    pub fn has_cond_binding(&self) -> bool {
+        self.live_conds > 0 || self.retains_cond_binding
     }
 
     /// Current owner, or `None` if free.
@@ -160,6 +173,8 @@ impl LaneValue for MutexEntry {
         lanes.lane(6, 0, u64::from(self.attrs.protocol));
         let next = self.waiters.push_lanes(lanes, 7);
         lanes.lane(next, 0, u64::from(self.attrs.process_shared));
+        lanes.lane(next + 1, 0, u64::from(self.live_conds));
+        lanes.lane(next + 2, 0, u64::from(self.retains_cond_binding));
     }
 }
 
@@ -236,6 +251,38 @@ impl MutexTable {
             entry.waiters.len(),
         );
         Some(entry)
+    }
+
+    /// Record a cond created on mutex `id`; `false` if the id is unknown.
+    ///
+    /// A cond that is not process-shared, bound to a process-shared
+    /// mutex, leaves its binding behind when the guest destroys it: on the
+    /// reference console that mutex then refuses every destroy, and still
+    /// locks and unlocks (`lv2_mutex_shared_cond_destroy`). A
+    /// process-shared cond on that mutex, and any cond on a mutex that
+    /// is not process-shared, releases its binding with the cond.
+    pub fn bind_cond(&mut self, id: u32, cond_process_shared: bool) -> bool {
+        let Some(mut entry) = self.entries.get_mut(id) else {
+            return false;
+        };
+        entry.live_conds = entry.live_conds.saturating_add(1);
+        if entry.attrs.process_shared && !cond_process_shared {
+            entry.retains_cond_binding = true;
+        }
+        true
+    }
+
+    /// Record the destroy of a cond created on mutex `id`; `false` if
+    /// the id is unknown or no cond is live on it.
+    pub fn unbind_cond(&mut self, id: u32) -> bool {
+        let Some(mut entry) = self.entries.get_mut(id) else {
+            return false;
+        };
+        let Some(live) = entry.live_conds.checked_sub(1) else {
+            return false;
+        };
+        entry.live_conds = live;
+        true
     }
 
     /// Read-only lookup.

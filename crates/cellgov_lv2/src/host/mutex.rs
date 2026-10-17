@@ -116,12 +116,20 @@ impl Lv2Host {
     ///
     /// - `CELL_ESRCH` for an unknown id.
     /// - `CELL_EBUSY` while the mutex has an owner or a waiter.
+    /// - `CELL_EPERM` while a cond is bound to it: a live cond, or one
+    ///   whose binding outlived its destroy (see
+    ///   [`MutexTable::bind_cond`](crate::sync_primitives::MutexTable::bind_cond)).
+    ///   The `lv2_mutex_shared_cond_destroy` capture answers it with no
+    ///   owner; no capture orders it against `CELL_EBUSY`.
     pub(super) fn dispatch_mutex_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.state.mutexes.lookup(id) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if entry.owner().is_some() || !entry.waiters().is_empty() {
             return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
+        }
+        if entry.has_cond_binding() {
+            return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
         }
         self.state.mutexes.destroy(id);
         self.release_id(id);
@@ -250,3 +258,7 @@ mod cond_rwlock_console_tests;
 #[cfg(test)]
 #[path = "tests/sync_attr_console_tests.rs"]
 mod sync_attr_console_tests;
+
+#[cfg(test)]
+#[path = "tests/mutex_shared_cond_destroy_console_tests.rs"]
+mod shared_cond_destroy_console_tests;

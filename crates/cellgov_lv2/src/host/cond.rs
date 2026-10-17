@@ -92,6 +92,8 @@ impl Lv2Host {
             self.release_id(id);
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
+        let bound = self.state.mutexes.bind_cond(mutex_id, shared);
+        debug_assert!(bound, "mutex 0x{mutex_id:08x} vanished after its lookup");
         // The attribute's key field carries meaning only when
         // attr_pshared selects a process-shared cond. A
         // process-private cond has no key, so its effective key is 0.
@@ -113,6 +115,15 @@ impl Lv2Host {
         };
         if !entry.waiters().is_empty() {
             return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
+        }
+        if entry.mutex_kind() == CondMutexKind::Mutex {
+            let mutex_id = entry.mutex_id();
+            if !self.state.mutexes.unbind_cond(mutex_id) {
+                self.log_invariant_break(
+                    "dispatch.cond_destroy_unbound_mutex",
+                    format_args!("cond 0x{id:08x}: mutex 0x{mutex_id:08x} holds no live cond"),
+                );
+            }
         }
         self.state.conds.destroy(id);
         self.release_id(id);

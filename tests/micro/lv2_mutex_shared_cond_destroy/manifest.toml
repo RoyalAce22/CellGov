@@ -1,0 +1,15 @@
+[test]
+name = "lv2_mutex_shared_cond_destroy"
+
+# A hardware probe: which cond binding makes sys_mutex_destroy refuse a
+# mutex after the cond is destroyed. The console capture is the answer;
+# the CellGov gate replays it.
+
+[observe]
+# Eight 32-byte case records, in the order ppu/main.c lists: 256 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 256 },
+]
+
+[expect]
+outcome = "completed"

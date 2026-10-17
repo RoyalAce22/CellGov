@@ -5,7 +5,6 @@
 //! the committed capture.
 
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
-use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::sync::{
     SYS_SYNC_FIFO, SYS_SYNC_NOT_ADAPTIVE, SYS_SYNC_NOT_PROCESS_SHARED, SYS_SYNC_NOT_RECURSIVE,
     SYS_SYNC_PROCESS_SHARED,
@@ -132,10 +131,6 @@ fn sys_cond_create_answers_each_process_shared_case_as_the_console_does() {
     let (m1_destroy, _) = call(&mut host, MUTEX_DESTROY, [m1, 0, 0, 0], &[]);
     assert_eq!(m1_destroy, payload_u32(&payload, 8), "the M1 destroy");
 
-    // The console refuses the process-shared mutex's destroy with EPERM
-    // after every cond bound to it is destroyed; CellGov keeps no binding
-    // past a cond's destroy and accepts it.
     let (m2_destroy, _) = call(&mut host, MUTEX_DESTROY, [m2, 0, 0, 0], &[]);
-    assert_eq!(payload_u32(&payload, 12), errno::CELL_EPERM.code);
-    assert_eq!(m2_destroy, 0, "CellGov's M2 destroy");
+    assert_eq!(m2_destroy, payload_u32(&payload, 12), "the M2 destroy");
 }
