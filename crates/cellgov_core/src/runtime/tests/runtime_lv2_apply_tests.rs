@@ -318,7 +318,7 @@ fn lv2_apply_rolls_back_count_when_idlist_target_is_unmapped() {
     );
 }
 
-fn range4(addr: u64) -> cellgov_mem::ByteRange {
+pub(super) fn range4(addr: u64) -> cellgov_mem::ByteRange {
     cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 4).unwrap()
 }
 
@@ -338,7 +338,7 @@ fn write_intent(addr: u64, value: u32) -> Effect {
 
 /// Reserve `[0x5000_0000, 0x8000_0000)` through 330 as three 256 MiB
 /// areas of 64 KiB pages, so a 334 there has an area to land in.
-fn reserve_mmapper_areas(rt: &mut Runtime, unit: UnitId, out_ptr: u64) {
+pub(super) fn reserve_mmapper_areas(rt: &mut Runtime, unit: UnitId, out_ptr: u64) {
     for _ in 0..3 {
         rt.dispatch_lv2_request(
             cellgov_lv2::Lv2Request::Unsupported {
@@ -443,7 +443,7 @@ fn mmapper_map_installs_the_window_in_the_callers_space() {
 
 #[test]
 fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
-    // The mmapper ledger is host-global and cannot see regions the
+    // The mmapper window table is host-global and cannot see regions the
     // spawn loader installed in the caller's space, so a guest can ask
     // sys_mmapper_map_shared_memory (334) for a window its own layout
     // already occupies. The handler checks the caller's committed

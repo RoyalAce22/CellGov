@@ -254,6 +254,7 @@ fn fingerprint_changes_after_mmapper_handle_insert() {
         MmapperHandle {
             size: 0x10_0000,
             align: 0x10_0000,
+            stuck_maps: 0,
         },
     );
     assert_ne!(pre, host.fingerprint());
@@ -336,6 +337,7 @@ fn fingerprint_differs_when_mmapper_size_and_align_are_transposed() {
         MmapperHandle {
             size: 0x10_0000,
             align: 0x1000,
+            stuck_maps: 0,
         },
     );
     b.state.mmapper_handles.insert(
@@ -343,6 +345,7 @@ fn fingerprint_differs_when_mmapper_size_and_align_are_transposed() {
         MmapperHandle {
             size: 0x1000,
             align: 0x10_0000,
+            stuck_maps: 0,
         },
     );
     assert_ne!(a.fingerprint(), b.fingerprint());

@@ -215,7 +215,7 @@ impl Runtime {
         // `CommitError::OutOfRange` at pre-validation. Collect into a
         // local so the borrow on `self.lv2_host` releases before
         // touching `self.memory`.
-        let region_installs: Vec<(u64, usize, Option<u64>)> =
+        let region_installs: Vec<(u64, usize, Option<u64>, u32)> =
             self.lv2_host.drain_pending_region_installs().collect();
         if !region_installs.is_empty() {
             // The mapping appears in the CALLER's address space. The
@@ -224,7 +224,7 @@ impl Runtime {
             // window against the caller's view, and the caller's own
             // loads/stores resolve through that space.
             let caller_space = self.spaces.space_of(source);
-            for (addr, size, ipc_key) in region_installs {
+            for (addr, size, ipc_key, mem_id) in region_installs {
                 let mem = crate::runtime::spaces::resolve_space_memory_for_write(
                     &mut self.memory,
                     &mut self.spaces,
@@ -235,7 +235,7 @@ impl Runtime {
                 {
                     // Guest-reachable, but no longer expected: sc 334
                     // now refuses an occupied window with CELL_EBUSY
-                    // up front, consulting both the host ledger and
+                    // up front, consulting both the host window table and
                     // the caller's committed layout, and sc 337's
                     // search skips both. Reaching this arm means a
                     // window passed those gates and still failed to
@@ -255,11 +255,68 @@ impl Runtime {
                     );
                     continue;
                 }
+                // The window shows what the segment held when its last
+                // window was unmapped.
+                if let Some(bytes) = self.lv2_host.take_segment_contents(mem_id) {
+                    let restored = cellgov_mem::ByteRange::new(
+                        cellgov_mem::GuestAddr::new(addr),
+                        bytes.len() as u64,
+                    )
+                    .ok_or(cellgov_mem::MemError::LengthMismatch)
+                    .and_then(|range| mem.apply_commit(range, &bytes));
+                    if let Err(err) = restored {
+                        self.lv2_host.log_invariant_break(
+                            "dispatch.mmapper_contents_restore",
+                            format_args!(
+                                "shm contents of mem_id {mem_id:#x} not restored at \
+                                 0x{addr:08x}+0x{size:x}: {err}",
+                            ),
+                        );
+                    }
+                }
                 // A keyed window is a view of a process-shared
                 // segment; record it so views stay coherent across
                 // address spaces once a second space attaches.
                 if let Some(key) = ipc_key {
                     self.attach_keyed_shm_view(key, size as u64, caller_space, addr);
+                }
+            }
+        }
+        // A 335 takes its window out of the caller's space, which is
+        // where its 334 / 337 put it.
+        let region_removals: Vec<(u64, usize, Option<u64>, u32)> =
+            self.lv2_host.drain_pending_region_removals().collect();
+        if !region_removals.is_empty() {
+            let caller_space = self.spaces.space_of(source);
+            for (addr, size, ipc_key, mem_id) in region_removals {
+                let mem = crate::runtime::spaces::resolve_space_memory_for_write(
+                    &mut self.memory,
+                    &mut self.spaces,
+                    caller_space,
+                );
+                // The segment keeps the window's bytes for its next map.
+                let held =
+                    cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), size as u64)
+                        .and_then(|range| mem.read(range))
+                        .map(<[u8]>::to_vec);
+                if let Err(err) = mem.remove_region(addr, size) {
+                    // The window's install was refused, the one path
+                    // that leaves a host window with no region; the
+                    // install arm logged that break already.
+                    self.lv2_host.log_invariant_break(
+                        "dispatch.mmapper_region_remove_missing",
+                        format_args!(
+                            "shm region removal at 0x{addr:08x}+0x{size:x} in space {}: \
+                             {err}; nothing removed",
+                            caller_space.raw(),
+                        ),
+                    );
+                }
+                if let Some(bytes) = held {
+                    self.lv2_host.park_segment_contents(mem_id, bytes);
+                }
+                if let Some(key) = ipc_key {
+                    self.detach_keyed_shm_view(key, caller_space, addr);
                 }
             }
         }

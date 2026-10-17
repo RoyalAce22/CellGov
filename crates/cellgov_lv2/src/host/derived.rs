@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::fs_store::FsMountTable;
 
-use super::mmapper::{PendingRegionInstall, SystemStateSeed};
+use super::mmapper::{PendingRegionInstall, PendingRegionRemoval, SystemStateSeed};
 
 /// Guest-visible state excluded from the host's sync partial, each field
 /// with the reason a divergence in it is caught elsewhere.
@@ -51,15 +51,10 @@ pub(in crate::host) struct Lv2Derived {
     /// by the runtime post-dispatch and applied to `GuestMemory`
     /// (hashed there) before the dispatch's effects commit.
     pub(in crate::host) pending_region_installs: Vec<PendingRegionInstall>,
-    /// Ledger of every mmapper-window range handed out via 334 / 337
-    /// and not yet released. The search in 337 consults this to find a
-    /// free aligned range at-or-after the caller's hint; keyed
-    /// `start_addr -> size` so the nearest-below lookup is `O(log n)`.
-    /// Every insert pairs in the same dispatch with a
-    /// `PendingRegionInstall` and the chosen-address write, both
-    /// settling in hashed `GuestMemory`, so a ledger divergence is
-    /// caught at the step it arises.
-    pub(in crate::host) mmapper_install_ledger: BTreeMap<u32, u32>,
+    /// The region-removal requests 335 emits. The runtime drains them
+    /// after dispatch and applies them to `GuestMemory` (hashed there),
+    /// as it does [`Self::pending_region_installs`].
+    pub(in crate::host) pending_region_removals: Vec<PendingRegionRemoval>,
     /// Consulted by the dispatch layer when a guest path is not
     /// pre-registered in the fs store. Boot populates from the
     /// title manifest; immutable thereafter.

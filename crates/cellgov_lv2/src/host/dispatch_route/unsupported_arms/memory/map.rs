@@ -7,7 +7,7 @@ use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
-use crate::host::mmapper::PendingRegionInstall;
+use crate::host::mmapper::{PendingRegionInstall, PendingRegionRemoval};
 use crate::host::Lv2Host;
 
 impl Lv2Host {
@@ -81,10 +81,10 @@ impl Lv2Host {
     ///
     /// The install carries the handle's ipc key, so the runtime keeps
     /// every view of one keyed segment coherent. The window also enters
-    /// the host ledger that sc 337's search consults. The first map of
+    /// the host window table that sc 337's search and sc 335 consult. The first map of
     /// a seeded key co-emits its `SystemStateSeed` writes in the same
     /// effect batch. The occupancy test reads the caller's committed
-    /// layout as well as that ledger, because the ledger alone cannot
+    /// layout as well as that table, because the table alone cannot
     /// see regions the boot pipeline or the spawn loader installed.
     ///
     /// # Errors
@@ -152,20 +152,17 @@ impl Lv2Host {
         }
         // A window this host already handed out through 334 / 337 is
         // claimed even before the runtime commits its region, and the
-        // ledger outlives an install the drain refused. Consulting it
-        // alongside the caller's layout is what keeps ledger entries
-        // non-overlapping, which `mmapper_ledger_insert`'s freshness
-        // assertion depends on. The test is the furthest end over every
-        // entry starting before this window: a shorter entry can start
-        // later than -- and sit wholly inside -- a longer one, so
-        // `next_back` alone would report a nested window as free.
+        // window outlives an install the drain refused. Consulting the
+        // window table alongside the caller's layout is what keeps
+        // windows non-overlapping, which `mmapper_window_insert`'s
+        // freshness assertion depends on. The test is the furthest end
+        // over every window starting before this one: a shorter window
+        // can start later than -- and sit wholly inside -- a longer one,
+        // so the nearest window alone would report a nested one as free.
         let ledger_busy = self
-            .derived
-            .mmapper_install_ledger
-            .range(..(end as u32))
-            .map(|(&start, &len)| u64::from(start) + u64::from(len))
+            .mmapper_window_ends_below(end as u32)
             .max()
-            .is_some_and(|entry_end| entry_end > addr);
+            .is_some_and(|window_end| u64::from(window_end) > addr);
         if ledger_busy
             || rt
                 .committed_overlap_end(addr, u64::from(handle.size))
@@ -178,12 +175,13 @@ impl Lv2Host {
             .push(PendingRegionInstall {
                 addr,
                 size: handle.size as usize,
+                mem_id,
                 ipc_key: self.ipc_key_of_mem_id(mem_id),
             });
-        // Record in the host ledger so sc 337's search sees this
-        // range as occupied. `addr` lies inside a 330 area per the
-        // area test above, so the u32 narrow is lossless.
-        self.mmapper_ledger_insert(addr as u32, handle.size);
+        // Record the window so sc 337's search sees this range as
+        // occupied and sc 335 finds it. `addr` lies inside a 330 area
+        // per the area test above, so the u32 narrow is lossless.
+        self.mmapper_window_insert(addr as u32, handle.size, mem_id);
         // Coherence witness: same property as sc 337.
         debug_assert!(
             self.derived
@@ -193,10 +191,8 @@ impl Lv2Host {
             "sc 334 coherence: pending_region_installs missing entry for {addr:#x}",
         );
         debug_assert!(
-            self.derived
-                .mmapper_install_ledger
-                .contains_key(&(addr as u32)),
-            "sc 334 coherence: mmapper_install_ledger missing entry for {addr:#x}",
+            self.state.mmapper_windows.contains_key(addr as u32),
+            "sc 334 coherence: mmapper_windows missing entry for {addr:#x}",
         );
         self.note_system_ipc_map(mem_id, addr as u32, handle.size);
         let effects = self.system_seed_effects(mem_id, addr as u32, requester, tick);
@@ -214,10 +210,10 @@ impl Lv2Host {
     /// search settled on, not the caller's hint.
     ///
     /// An occupied window advances the candidate; the call does not
-    /// fail on it. Occupied means present in the host install ledger
+    /// fail on it. Occupied means present in the host window table
     /// or in the caller's committed layout. The kernel's search over
     /// the caller's VM area behaves the same way. A successful map
-    /// records the window in the ledger and co-emits any registered
+    /// records the window in the window table and co-emits any registered
     /// seed for a keyed segment, as sc 334 does.
     ///
     /// # Errors
@@ -233,7 +229,9 @@ impl Lv2Host {
     ///   area's page size.
     /// - `CELL_EINVAL` when `start_addr` is inside an area but not its
     ///   base.
-    /// - `CELL_EFAULT` when `alloc_addr_ptr` is null.
+    /// - `CELL_EFAULT` when `alloc_addr_ptr` is null. The segment stays
+    ///   busy against its free for good, as the `lv2_mmapper_unmap`
+    ///   capture shows; the area does not.
     /// - `CELL_ENOMEM` when the area has no free range for the segment.
     /// - `CELL_EINVAL` when `start_addr`, `mem_id` or `alloc_addr`
     ///   carries high bits, per [`Lv2Host::narrow_u32_args`]. That gate
@@ -277,6 +275,12 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
+            // The `lv2_mmapper_map_64k` and `lv2_mmapper_unmap` captures
+            // show this refusal leaving no window, yet the segment answers
+            // CELL_EBUSY to every later free while its area frees: the
+            // segment's map is counted before the address write faults,
+            // and never uncounted.
+            self.state.mmapper_handles.note_stuck_map(mem_id);
             return d;
         }
         let limit = start_addr.saturating_add(area.size);
@@ -294,11 +298,12 @@ impl Lv2Host {
             .push(PendingRegionInstall {
                 addr: u64::from(found_addr),
                 size: handle.size as usize,
+                mem_id,
                 ipc_key: self.ipc_key_of_mem_id(mem_id),
             });
-        self.mmapper_ledger_insert(found_addr, handle.size);
+        self.mmapper_window_insert(found_addr, handle.size, mem_id);
         // Coherence witness: on success, the install must be pending
-        // AND the ledger must contain the address we are writing
+        // AND the window table must contain the address we are writing
         // back.
         debug_assert!(
             self.derived
@@ -308,10 +313,8 @@ impl Lv2Host {
             "sc 337 coherence: pending_region_installs missing entry for {found_addr:#x}",
         );
         debug_assert!(
-            self.derived
-                .mmapper_install_ledger
-                .contains_key(&found_addr),
-            "sc 337 coherence: mmapper_install_ledger missing entry for {found_addr:#x}",
+            self.state.mmapper_windows.contains_key(found_addr),
+            "sc 337 coherence: mmapper_windows missing entry for {found_addr:#x}",
         );
         self.note_system_ipc_map(mem_id, found_addr, handle.size);
         let mut effects = self.system_seed_effects(mem_id, found_addr, requester, tick);
@@ -322,5 +325,69 @@ impl Lv2Host {
             tick,
         ));
         Lv2Dispatch::Immediate { code: 0, effects }
+    }
+
+    /// `sys_mmapper_unmap_shared_memory` (335): removes the window 334
+    /// or 337 mapped at `addr`, pushes a pending region removal, and
+    /// writes the segment's id to `*mem_id_ptr`.
+    ///
+    /// The `lv2_mmapper_unmap` capture shows 329 refusing the free of a
+    /// segment mapped at two windows until 335 unmaps both.
+    ///
+    /// # Errors
+    ///
+    /// Listed in the order they fire, as the `lv2_mmapper_map_64k` and
+    /// `lv2_mmapper_unmap` captures show. A refusal writes nothing.
+    ///
+    /// - `CELL_EINVAL` when no window starts at `addr`: an address
+    ///   inside a window, an address outside every area, and a window
+    ///   already unmapped alike, with a null `mem_id_ptr` too.
+    /// - `CELL_EFAULT` when `mem_id_ptr` is null. The window stays
+    ///   mapped.
+    ///
+    /// `CELL_EINVAL` also answers an `addr` or `mem_id_ptr` register
+    /// that carries high bits, per [`Lv2Host::narrow_u32_args`]. That
+    /// gate precedes the list above.
+    pub(in crate::host::dispatch_route) fn dispatch_mmapper_unmap_shared_memory(
+        &mut self,
+        args: [u64; 8],
+        requester: UnitId,
+        tick: GuestTicks,
+    ) -> Lv2Dispatch {
+        use cellgov_ps3_abi::lv2::syscall;
+
+        let Some([addr, mem_id_ptr]) = self.narrow_u32_args(
+            syscall::MMAPPER_UNMAP_SHARED_MEMORY,
+            [("addr", args[0]), ("mem_id", args[1])],
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        let Some(&window) = self.state.mmapper_windows.get(addr) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
+            return d;
+        }
+        self.state.mmapper_windows.remove(addr);
+        // The shm-write witness counts writes into mapped ranges only.
+        self.obs.system_ipc_mappings.remove(&addr);
+        self.derived
+            .pending_region_removals
+            .push(PendingRegionRemoval {
+                addr: u64::from(addr),
+                size: window.size as usize,
+                mem_id: window.mem_id,
+                ipc_key: self.ipc_key_of_mem_id(window.mem_id),
+            });
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(mem_id_ptr, 4),
+            WritePayload::from_slice(&window.mem_id.to_be_bytes()),
+            requester,
+            tick,
+        );
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![write],
+        }
     }
 }

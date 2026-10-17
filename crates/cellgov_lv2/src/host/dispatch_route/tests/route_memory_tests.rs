@@ -378,7 +378,13 @@ fn syscall_332_then_334_records_pending_region_install() {
     );
     assert_eq!(result_334, Lv2Dispatch::immediate(errno::CELL_OK.into()));
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
-    assert_eq!(installs, vec![(0x5000_0000_u64, 0x0400_0000_usize, None)]);
+    assert_eq!(
+        installs
+            .iter()
+            .map(|&(a, s, k, _)| (a, s, k))
+            .collect::<Vec<_>>(),
+        vec![(0x5000_0000_u64, 0x0400_0000_usize, None)]
+    );
 }
 
 #[test]
@@ -487,7 +493,13 @@ fn syscall_362_records_handle_keyed_on_mem_id() {
     );
     assert_eq!(result_334, Lv2Dispatch::immediate(errno::CELL_OK.into()));
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
-    assert_eq!(installs, vec![(0x5400_0000_u64, 0x00a0_0000_usize, None)]);
+    assert_eq!(
+        installs
+            .iter()
+            .map(|&(a, s, k, _)| (a, s, k))
+            .collect::<Vec<_>>(),
+        vec![(0x5400_0000_u64, 0x00a0_0000_usize, None)]
+    );
 }
 
 #[test]
@@ -518,7 +530,13 @@ fn syscall_332_then_337_searches_installs_and_writes_back_found_addr() {
         "empty window -> search returns the hint as the found address",
     );
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
-    assert_eq!(installs, vec![(0x5000_0000_u64, 0x0010_0000_usize, None)]);
+    assert_eq!(
+        installs
+            .iter()
+            .map(|&(a, s, k, _)| (a, s, k))
+            .collect::<Vec<_>>(),
+        vec![(0x5000_0000_u64, 0x0010_0000_usize, None)]
+    );
 }
 
 #[test]
@@ -633,7 +651,7 @@ fn syscall_337_exhausted_window_returns_enomem() {
     crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     // Fill the entire mmapper window in the ledger the search consults.
     let window = Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START;
-    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, window);
+    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, window, 0);
     let mem_id = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
     let r = host.dispatch(
         Lv2Request::Unsupported {
@@ -648,7 +666,7 @@ fn syscall_337_exhausted_window_returns_enomem() {
 
 /// Non-vacuous coverage for the sc 337 / sc 334 coherence witness: the
 /// dispatch's `debug_assert!` body reconstructed against a state that
-/// violates it (a ledger entry with `pending_region_installs` empty),
+/// violates it (a window with `pending_region_installs` empty),
 /// with the same panic message the dispatch carries.
 #[test]
 #[cfg(debug_assertions)]
@@ -1237,7 +1255,7 @@ fn syscall_337_search_skips_caller_occupied_windows() {
     );
 }
 
-/// The host ledger records a map the runtime has not committed yet,
+/// The host window table records a map the runtime has not committed yet,
 /// and outlives an install the drain refused, so 334 must consult it
 /// as well as the caller's committed layout.
 #[test]
@@ -1309,8 +1327,8 @@ fn syscall_334_over_a_window_nested_in_a_longer_ledger_entry_returns_ebusy() {
     let handle = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
     // A long entry, then a shorter one starting later and ending
     // before the candidate -- the shorter is what `next_back` finds.
-    host.mmapper_ledger_insert(0x5000_0000, 0x40_0000);
-    host.mmapper_ledger_insert(0x5010_0000, 0x1_0000);
+    host.mmapper_window_insert(0x5000_0000, 0x40_0000, 0);
+    host.mmapper_window_insert(0x5010_0000, 0x1_0000, 0);
     let result = host.dispatch(
         Lv2Request::Unsupported {
             number: 334,

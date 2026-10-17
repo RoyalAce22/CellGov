@@ -527,7 +527,8 @@ fn run_plain(
                     | MemError::ReservedStrictRead { addr, .. } => Some(*addr),
                     MemError::LengthMismatch
                     | MemError::OverlappingRegions
-                    | MemError::RegionOverflow { .. } => None,
+                    | MemError::RegionOverflow { .. }
+                    | MemError::NoSuchRegion { .. } => None,
                 };
                 let diagnostics = fault_diagnostics(&state, step_pc, ea);
                 state = initial.clone();

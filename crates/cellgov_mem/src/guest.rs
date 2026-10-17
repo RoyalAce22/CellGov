@@ -431,6 +431,14 @@ pub enum MemError {
         /// Size in bytes of the rejected region.
         size: u64,
     },
+    /// No region has exactly the base and size a removal named.
+    #[error("no region at 0x{base:016x} of {size} bytes to remove")]
+    NoSuchRegion {
+        /// Base address the removal named.
+        base: u64,
+        /// Size in bytes the removal named.
+        size: u64,
+    },
     /// Range is not entirely contained within any single mapped region.
     #[error("{0}")]
     Unmapped(FaultContext),
@@ -542,6 +550,30 @@ impl GuestMemory {
         self.page_hashes
             .get_mut()
             .insert(insertion, PageHashes::new(size.div_ceil(RESET_PAGE_SIZE)));
+        self.cached_hash.set(None);
+        Ok(())
+    }
+
+    /// Remove the region that starts at `base` and spans `size` bytes,
+    /// with its contents.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemError::NoSuchRegion`] when no region has exactly that
+    /// base and size; the call then removes nothing.
+    pub fn remove_region(&mut self, base: u64, size: usize) -> Result<(), MemError> {
+        let Some(idx) = self
+            .regions
+            .iter()
+            .position(|r| r.base() == base && r.size() == size as u64)
+        else {
+            return Err(MemError::NoSuchRegion {
+                base,
+                size: size as u64,
+            });
+        };
+        self.regions.remove(idx);
+        self.page_hashes.get_mut().remove(idx);
         self.cached_hash.set(None);
         Ok(())
     }
@@ -905,3 +937,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/incremental_hash_tests.rs"]
 mod incremental_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/remove_region_tests.rs"]
+mod remove_region_tests;

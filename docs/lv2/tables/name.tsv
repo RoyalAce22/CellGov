@@ -480,6 +480,7 @@ ordinal	packet	name	source	ref	fw_from	fw_to
 333	none	sys_mmapper_set_shared_memory_flag	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 334	none	sys_mmapper_map_shared_memory	cellgov	cellgov_ps3_abi::lv2::syscall::MMAPPER_MAP_SHARED_MEMORY	none	none
 334	none	sys_mmapper_map_shared_memory	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
+335	none	sys_mmapper_unmap_shared_memory	cellgov	cellgov_ps3_abi::lv2::syscall::MMAPPER_UNMAP_SHARED_MEMORY	none	none
 335	none	sys_mmapper_unmap_shared_memory	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 336	none	sys_mmapper_change_address_access_right	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 336	none	sys_mmapper_change_address_access_right	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_MMAPPER_CHANGE_ADDRESS_ACCESS_RIGHT	none	none

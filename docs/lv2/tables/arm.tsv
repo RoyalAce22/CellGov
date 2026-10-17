@@ -67,6 +67,7 @@ MmapperFreeAddress	partial-state	331
 MmapperFreeSharedMemory	partial-state	329
 MmapperMapSharedMemory	partial-state	334
 MmapperSearchAndMap	partial-state	337
+MmapperUnmapSharedMemory	partial-state	335
 MutexCreate	modeled	100
 MutexDestroy	modeled	101
 MutexLock	modeled	102

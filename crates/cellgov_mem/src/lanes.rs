@@ -204,6 +204,12 @@ pub mod source {
     pub const KERNEL_IDS: u8 = 69;
     /// Kernel-id slots that have held an id, one object per slot.
     pub const KERNEL_ID_SLOTS: u8 = 70;
+    /// Shared-memory windows 334 or 337 mapped and no 335 unmapped,
+    /// one object per window base.
+    pub const MMAPPER_WINDOW: u8 = 71;
+    /// The contents of shared-memory segments no window maps, one
+    /// object per mem id.
+    pub const MMAPPER_PARKED: u8 = 72;
 }
 
 const OBJECT_BITS: u32 = 32;

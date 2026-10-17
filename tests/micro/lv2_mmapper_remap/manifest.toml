@@ -1,0 +1,14 @@
+[test]
+name = "lv2_mmapper_remap"
+
+# A hardware probe: whether a shared-memory segment keeps its contents across an unmap and a later map.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 136 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 136 },
+]
+
+[expect]
+outcome = "completed"

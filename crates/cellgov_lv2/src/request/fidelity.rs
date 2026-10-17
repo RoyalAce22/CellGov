@@ -146,6 +146,11 @@ pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
             ArmFidelity::PartialState,
         ),
         (
+            syscall::MMAPPER_UNMAP_SHARED_MEMORY,
+            "MmapperUnmapSharedMemory",
+            ArmFidelity::PartialState,
+        ),
+        (
             syscall::MMAPPER_SEARCH_AND_MAP,
             "MmapperSearchAndMap",
             ArmFidelity::PartialState,

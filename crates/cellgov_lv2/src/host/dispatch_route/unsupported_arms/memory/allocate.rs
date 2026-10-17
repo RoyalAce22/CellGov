@@ -426,21 +426,24 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
+    /// Listed in the order they fire.
+    ///
     /// - `CELL_EINVAL` when `addr` is not the base of an area 330
     ///   reserved and no 331 freed.
-    ///
-    /// The `lv2_mmapper_map_64k` capture shows `CELL_EBUSY` for an area
-    /// that still holds a mapping; this arm does not model it, because
-    /// CellGov does not route `sys_mmapper_unmap_shared_memory`, so a
-    /// mapping never leaves.
+    /// - `CELL_EBUSY` when a window lies in the area, as the
+    ///   `lv2_mmapper_map_64k` capture shows.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_free_address(
         &mut self,
         addr: u32,
     ) -> Lv2Dispatch {
-        match self.state.mmapper_areas.remove(addr) {
-            Some(_) => Lv2Dispatch::immediate(0),
-            None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+        let Some(&area) = self.state.mmapper_areas.get(addr) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        if self.mmapper_area_busy(addr, area) {
+            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
+        self.state.mmapper_areas.remove(addr);
+        Lv2Dispatch::immediate(0)
     }
 
     /// `sys_mmapper_free_shared_memory` (329): removes the segment
@@ -448,13 +451,13 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
+    /// Listed in the order they fire.
+    ///
     /// - `CELL_ESRCH` for a `mem_id` no create minted or a free already
     ///   removed, as the `lv2_mmapper_allocate` capture shows.
-    ///
-    /// The `lv2_mmapper_map_64k` capture shows `CELL_EBUSY` for a
-    /// segment still mapped; this arm does not model it, because CellGov
-    /// does not route `sys_mmapper_unmap_shared_memory`, so a mapping
-    /// never leaves.
+    /// - `CELL_EBUSY` while a window maps the segment, or after a 337 of
+    ///   it refused with `CELL_EFAULT`, as the `lv2_mmapper_map_64k` and
+    ///   `lv2_mmapper_unmap` captures show.
     ///
     /// `CELL_EINVAL` also answers a `mem_id` register that carries high
     /// bits, per [`Lv2Host::narrow_u32_args`]. That gate precedes the
@@ -463,9 +466,13 @@ impl Lv2Host {
         &mut self,
         mem_id: u32,
     ) -> Lv2Dispatch {
-        if self.state.mmapper_handles.remove(mem_id).is_none() {
+        let Some(handle) = self.state.mmapper_handles.get(mem_id) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        };
+        if self.mmapper_segment_busy(mem_id, handle) {
+            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
+        self.state.mmapper_handles.remove(mem_id);
         self.state.mmapper_ipc.retain(|_, id| *id != mem_id);
         self.release_id(mem_id);
         Lv2Dispatch::immediate(0)
@@ -505,7 +512,11 @@ fn shared_memory_handle(size: u64, flags: u64) -> Result<MmapperHandle, Lv2ErrCo
     if !size.is_multiple_of(align) {
         return Err(errno::CELL_EALIGN);
     }
-    Ok(MmapperHandle { size, align })
+    Ok(MmapperHandle {
+        size,
+        align,
+        stuck_maps: 0,
+    })
 }
 
 /// Success with `mem_id` written to `*mem_id_ptr`.

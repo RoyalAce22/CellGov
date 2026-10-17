@@ -55,6 +55,11 @@ pub(in crate::host) struct Lv2State {
     /// 334 and 337 place a segment inside.
     pub(in crate::host) mmapper_areas:
         cellgov_mem::lanes::LaneMap<u32, super::mmapper::MmapperArea>,
+    /// The windows 334 and 337 mapped and no 335 unmapped, by base:
+    /// what 335 finds, what holds a segment or an area busy against
+    /// its free, and the ranges 334 refuses and 337 searches past.
+    pub(in crate::host) mmapper_windows:
+        cellgov_mem::lanes::LaneMap<u32, super::mmapper::MmapperWindow>,
     /// `sys_config` handles, services, listeners, and the events a
     /// listener may still read back (516-522).
     pub(in crate::host) config: ConfigTable,

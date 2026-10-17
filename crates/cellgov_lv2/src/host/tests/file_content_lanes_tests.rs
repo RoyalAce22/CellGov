@@ -128,6 +128,7 @@ fn every_file_content_prx_and_shared_memory_change_moves_the_partial() {
             MmapperHandle {
                 size: 0x10000,
                 align: 0x10000,
+                stuck_maps: 0,
             },
         )
     );

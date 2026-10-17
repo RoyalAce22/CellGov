@@ -35,9 +35,8 @@ impl Runtime {
                 return Err(SpaceError::UnknownSpace(space.raw()));
             }
         }
-        // Every view is checked before any is installed: there is no
-        // region-removal API, and an orphaned region would shift
-        // `committed_memory_hash`.
+        // Every view is checked before any is installed, so a refusal
+        // leaves no orphaned region to shift `committed_memory_hash`.
         for (idx, &(space, base)) in views.iter().enumerate() {
             let end = u128::from(base) + u128::from(size);
             if end > u128::from(u64::MAX) {
@@ -181,6 +180,33 @@ impl Runtime {
         self.spaces
             .shared
             .insert(key, SharedMapping { size, views });
+    }
+
+    /// Drop the view at `(space, base)` of the keyed segment `key`, once
+    /// the 335 drain removed its window: commits stop replicating to it
+    /// and from it. The detach of the last view drops the mapping.
+    pub(in crate::runtime) fn detach_keyed_shm_view(
+        &mut self,
+        key: u64,
+        space: AddressSpaceId,
+        base: u64,
+    ) {
+        if let Some(entry) = self.spaces.keyed_installs.get_mut(&key) {
+            entry.1.retain(|&view| view != (space, base));
+            if entry.1.is_empty() {
+                self.spaces.keyed_installs.remove(&key);
+            }
+        }
+        let emptied = match self.spaces.shared.get_mut(key) {
+            Some(mut mapping) => {
+                mapping.views.retain(|&view| view != (space, base));
+                mapping.views.is_empty()
+            }
+            None => false,
+        };
+        if emptied {
+            self.spaces.shared.remove(key);
+        }
     }
 
     /// Append one view to a live keyed mapping, seeding it from the

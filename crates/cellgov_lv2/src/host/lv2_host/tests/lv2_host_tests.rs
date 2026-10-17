@@ -353,7 +353,7 @@ fn mmapper_search_free_range_rounds_misaligned_hint_up() {
 #[test]
 fn mmapper_search_free_range_advances_past_existing_install() {
     let mut host = Lv2Host::new();
-    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x10000);
+    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, 0x10000, 0);
     let addr = host
         .mmapper_search_free_range(
             Lv2Host::MMAPPER_REGION_START,
@@ -370,7 +370,7 @@ fn mmapper_search_free_range_advances_past_existing_install() {
 fn mmapper_search_free_range_returns_none_on_window_exhaustion() {
     let mut host = Lv2Host::new();
     let window = Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START;
-    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, window);
+    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, window, 0);
     assert_eq!(
         host.mmapper_search_free_range(
             Lv2Host::MMAPPER_REGION_START,
@@ -404,8 +404,8 @@ fn mmapper_search_free_range_walks_through_multiple_holes() {
     //         [start+0x20000..+0x30000)=installed. A hinted 0x10000 search
     //         must land on the middle free slot.
     let mut host = Lv2Host::new();
-    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x10000);
-    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START + 0x20000, 0x10000);
+    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, 0x10000, 0);
+    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START + 0x20000, 0x10000, 0);
     let addr = host
         .mmapper_search_free_range(
             Lv2Host::MMAPPER_REGION_START,
@@ -466,7 +466,7 @@ fn mmapper_search_free_range_skips_a_window_the_caller_already_committed() {
 fn mmapper_search_free_range_takes_the_furthest_of_the_ledger_and_committed_skips() {
     let mut host = Lv2Host::new();
     // Ledger stops at +0x10000, the committed layout at +0x30000.
-    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x10000);
+    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, 0x10000, 0);
     let addr = host
         .mmapper_search_free_range(
             Lv2Host::MMAPPER_REGION_START,
@@ -480,7 +480,7 @@ fn mmapper_search_free_range_takes_the_furthest_of_the_ledger_and_committed_skip
 
     // Reversed: the ledger is now the furthest obstacle.
     let mut host = Lv2Host::new();
-    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x30000);
+    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, 0x30000, 0);
     let addr = host
         .mmapper_search_free_range(
             Lv2Host::MMAPPER_REGION_START,
@@ -495,13 +495,13 @@ fn mmapper_search_free_range_takes_the_furthest_of_the_ledger_and_committed_skip
 
 #[test]
 fn mmapper_search_free_range_does_not_hand_out_a_hole_nested_in_a_longer_entry() {
-    // A map whose region install was refused leaves a ledger entry
+    // A map whose region install was refused leaves a window
     // with no committed region behind it, so a later, shorter entry
     // can be recorded inside the earlier one's span. The search must
     // still treat the whole span as occupied.
     let mut host = Lv2Host::new();
-    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x40000);
-    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START + 0x10000, 0x1000);
+    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, 0x40000, 0);
+    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START + 0x10000, 0x1000, 0);
     let addr = host
         .mmapper_search_free_range(
             Lv2Host::MMAPPER_REGION_START + 0x20000,
@@ -520,7 +520,7 @@ fn mmapper_search_free_range_reports_exhaustion_for_a_ledger_entry_that_overflow
     // Only reachable if a dispatch arm ever records an unbounded
     // length; the search must refuse rather than read the overflow as
     // free space.
-    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, u32::MAX);
+    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, u32::MAX, 0);
     assert_eq!(
         host.mmapper_search_free_range(
             Lv2Host::MMAPPER_REGION_START,

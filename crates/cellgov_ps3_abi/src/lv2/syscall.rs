@@ -602,6 +602,8 @@ lv2_syscalls! {
     SPU_IMAGE_CLOSE = 158 => "sys_spu_image_close";
     /// `sys_mmapper_map_shared_memory`.
     MMAPPER_MAP_SHARED_MEMORY = 334 => "sys_mmapper_map_shared_memory";
+    /// `sys_mmapper_unmap_shared_memory`.
+    MMAPPER_UNMAP_SHARED_MEMORY = 335 => "sys_mmapper_unmap_shared_memory";
     /// `sys_mmapper_search_and_map`.
     MMAPPER_SEARCH_AND_MAP = 337 => "sys_mmapper_search_and_map";
     /// `sys_mmapper_allocate_shared_memory_from_container`.

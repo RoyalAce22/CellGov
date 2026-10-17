@@ -137,11 +137,10 @@ impl Lv2Host {
     /// Search for the first free, `align`-aligned range of `size`
     /// bytes inside `[MMAPPER_REGION_START, MMAPPER_REGION_END)` at
     /// or after `hint` and ending at or below `limit`, skipping every
-    /// range recorded in
-    /// [`mmapper_install_ledger`](crate::host::derived::Lv2Derived::mmapper_install_ledger) and every window occupied in
-    /// the caller's committed layout. Loader regions are invisible to
-    /// the ledger, so an occupied window is skipped rather than
-    /// refused -- `sys_mmapper_search_and_map` searches, it does not
+    /// window in [`mmapper_windows`](crate::host::state::Lv2State::mmapper_windows)
+    /// and every range occupied in the caller's committed layout.
+    /// Loader regions are invisible to the window table, so an occupied
+    /// range is skipped rather than refused -- `sys_mmapper_search_and_map` searches, it does not
     /// place.
     ///
     /// `hint` is rounded UP to `align`; misaligned hints do not fail.
@@ -177,20 +176,8 @@ impl Lv2Host {
             if end > Self::MMAPPER_REGION_END || end > limit {
                 return None;
             }
-            // Every ledger entry starting below `end` is a possible
-            // overlap, not only the nearest one: a map whose runtime
-            // `install_region` was refused still left its ledger
-            // entry behind, so a later map can record a range nested
-            // inside a longer one. O(ledger) per step, and the ledger
-            // holds one entry per shm map the boot made.
             let ledger_skip_to = self
-                .derived
-                .mmapper_install_ledger
-                .range(..end)
-                // An entry whose end overflows u32 covers the rest of
-                // the address space; saturating keeps it an obstacle
-                // instead of letting the overflow read as free.
-                .map(|(&start, &len)| start.saturating_add(len))
+                .mmapper_window_ends_below(end)
                 .filter(|&prior_end| prior_end > candidate)
                 .max();
             let committed_skip_to = rt
@@ -233,14 +220,66 @@ impl Lv2Host {
             .map(|(base, &area)| (base, area))
     }
 
-    /// Record an mmapper-window install in the host ledger. Paired
-    /// with a `PendingRegionInstall` push by the same dispatch.
-    pub(in crate::host) fn mmapper_ledger_insert(&mut self, addr: u32, size: u32) {
-        let prior = self.derived.mmapper_install_ledger.insert(addr, size);
+    /// The end of every window that starts below `end`.
+    ///
+    /// Every such window is a possible overlap, not only the nearest
+    /// one: a map whose runtime `install_region` was refused still
+    /// left its window behind, so a later map can record a range nested
+    /// inside a longer one. O(windows), one per live shm map. A window
+    /// whose end overflows u32 covers the rest of the address space;
+    /// saturating keeps it an obstacle instead of letting the overflow
+    /// read as free.
+    pub(in crate::host) fn mmapper_window_ends_below(
+        &self,
+        end: u32,
+    ) -> impl Iterator<Item = u32> + '_ {
+        self.state
+            .mmapper_windows
+            .iter()
+            .take_while(move |&(start, _)| start < end)
+            .map(|(start, w)| start.saturating_add(w.size))
+    }
+
+    /// Record a window 334 or 337 mapped. Paired with a
+    /// `PendingRegionInstall` push by the same dispatch.
+    pub(in crate::host) fn mmapper_window_insert(&mut self, addr: u32, size: u32, mem_id: u32) {
+        let prior = self
+            .state
+            .mmapper_windows
+            .insert(addr, crate::host::mmapper::MmapperWindow { mem_id, size });
         debug_assert!(
             prior.is_none(),
-            "mmapper ledger: addr {addr:#x} already recorded (size {prior:?})",
+            "mmapper window: addr {addr:#x} already recorded ({prior:?})",
         );
+    }
+
+    /// Whether a window maps `mem_id`, or a refused 337 left a map of it
+    /// behind: what holds the segment against a free.
+    pub(in crate::host) fn mmapper_segment_busy(
+        &self,
+        mem_id: u32,
+        handle: crate::host::mmapper::MmapperHandle,
+    ) -> bool {
+        handle.stuck_maps != 0
+            || self
+                .state
+                .mmapper_windows
+                .values()
+                .any(|w| w.mem_id == mem_id)
+    }
+
+    /// Whether a window lies in the area at `base`: what holds the area
+    /// against a free.
+    pub(in crate::host) fn mmapper_area_busy(
+        &self,
+        base: u32,
+        area: crate::host::mmapper::MmapperArea,
+    ) -> bool {
+        let end = u64::from(base) + u64::from(area.size);
+        self.state
+            .mmapper_windows
+            .keys()
+            .any(|start| start >= base && u64::from(start) < end)
     }
 
     /// `ipc_key -> mem_id` registrations made by keyed 332 calls.

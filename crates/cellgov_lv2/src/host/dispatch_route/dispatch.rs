@@ -793,6 +793,10 @@ impl Lv2Host {
                 args,
             } => self.dispatch_mmapper_map_shared_memory(args, requester, rt, tick),
             Lv2Request::Unsupported {
+                number: syscall::MMAPPER_UNMAP_SHARED_MEMORY,
+                args,
+            } => self.dispatch_mmapper_unmap_shared_memory(args, requester, tick),
+            Lv2Request::Unsupported {
                 number: syscall::MMAPPER_SEARCH_AND_MAP,
                 args,
             } => self.dispatch_mmapper_search_and_map(args, requester, rt, tick),

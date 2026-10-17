@@ -36,19 +36,58 @@ impl Lv2Host {
     ///
     /// # Cross-module contract
     ///
-    /// Each `(addr, size, ipc_key)` must be applied via
+    /// Each `(addr, size, ipc_key, mem_id)` must be applied via
     /// `GuestMemory::install_region` before the dispatch's effects
     /// commit; otherwise subsequent guest writes through `addr` trip
-    /// `CommitError::OutOfRange`. A `Some(ipc_key)` names the keyed
-    /// segment this window views; the runtime keeps keyed views
-    /// coherent across address spaces.
+    /// `CommitError::OutOfRange`. The window then takes `mem_id`'s
+    /// contents from [`Self::take_segment_contents`]. A `Some(ipc_key)`
+    /// names the keyed segment this window views; the runtime keeps
+    /// keyed views coherent across address spaces.
     pub fn drain_pending_region_installs(
         &mut self,
-    ) -> impl Iterator<Item = (u64, usize, Option<u64>)> + '_ {
+    ) -> impl Iterator<Item = (u64, usize, Option<u64>, u32)> + '_ {
         self.derived
             .pending_region_installs
             .drain(..)
-            .map(|p| (p.addr, p.size, p.ipc_key))
+            .map(|p| (p.addr, p.size, p.ipc_key, p.mem_id))
+    }
+
+    /// Drain pending shared-memory region-removal requests emitted by
+    /// `sys_mmapper_unmap_shared_memory` (335).
+    ///
+    /// # Cross-module contract
+    ///
+    /// Each `(addr, size, ipc_key, mem_id)` names a window an earlier
+    /// [`Self::drain_pending_region_installs`] item installed. The
+    /// runtime gives its bytes to [`Self::park_segment_contents`] under
+    /// `mem_id` and removes the window from the caller's space via
+    /// `GuestMemory::remove_region`. A `Some(ipc_key)` names the keyed segment whose
+    /// view the window was; the runtime drops that view.
+    pub fn drain_pending_region_removals(
+        &mut self,
+    ) -> impl Iterator<Item = (u64, usize, Option<u64>, u32)> + '_ {
+        self.derived
+            .pending_region_removals
+            .drain(..)
+            .map(|p| (p.addr, p.size, p.ipc_key, p.mem_id))
+    }
+
+    /// Keep the bytes an unmapped window of `mem_id` held, for the
+    /// segment's next map. A `mem_id` no handle names is an invariant
+    /// break: 329 refuses a free while a window maps the segment.
+    pub fn park_segment_contents(&mut self, mem_id: u32, bytes: Vec<u8>) {
+        if !self.state.mmapper_handles.park(mem_id, bytes) {
+            self.log_invariant_break(
+                "dispatch.mmapper_park_unknown_mem_id",
+                format_args!("unmapped window of mem_id {mem_id:#x}, which no handle names"),
+            );
+        }
+    }
+
+    /// The contents an unmap parked for `mem_id`, taken back for a new
+    /// window; `None` for a segment never unmapped.
+    pub fn take_segment_contents(&mut self, mem_id: u32) -> Option<Vec<u8>> {
+        self.state.mmapper_handles.take_parked(mem_id)
     }
 
     /// Debug-panic + log-once for a host-invariant break.
