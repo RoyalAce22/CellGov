@@ -399,6 +399,8 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         spu::SPU_WR_OUT_INTR_MBOX => {
             spu::SPU_OUT_INTR_MBOX_DEPTH - u32::from(channels.out_intr_mbox.is_some())
         }
+        // The reference console counts three reserved channels as 1.
+        _ if spu::SPU_RESERVED_CHANNELS_COUNTING_ONE.contains(&channel) => 1,
         // [CBE-Handbook p:443 s:17.1.3] rchcnt on a reserved channel returns 0.
         _ if spu::is_reserved_channel(channel) => 0,
         _ => return None,

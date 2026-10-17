@@ -1,0 +1,21 @@
+[test]
+name = "spu_tables"
+
+# A hardware probe of the SPU's channel and MFC tables on a raw SPU: the
+# rchcnt of every channel 0..127 at idle, the in mailbox filled five
+# times through problem state, the out mailbox's counts, and sixteen MFC
+# commands that need no list and cannot fault (the put, get, ordering
+# and atomic forms), each checked by what it moved. The PPU program's
+# header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 1024 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

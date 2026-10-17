@@ -1,0 +1,21 @@
+[test]
+name = "spu_reserved_access"
+
+# A hardware probe of the reserved SPU channels and the storage control
+# MFC commands on a raw SPU: an rdch of each of eight reserved channels,
+# a wrch to each followed by its rchcnt, then sdcrt, sdcrtst, sdcrz,
+# sdcrst and sdcrf on one 128-byte line each. The PPU reads back how each
+# run stopped, what it stored, the class 0 and class 2 statuses and the
+# buffer lines. The PPU program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 448 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

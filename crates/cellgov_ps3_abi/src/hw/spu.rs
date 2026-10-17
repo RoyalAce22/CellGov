@@ -126,6 +126,10 @@ pub const MFC_ATOMIC_STAT_U: u32 = 1 << (31 - 30);
 /// is clear when the conditional store succeeded.
 ///
 /// [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] bit 31 of the status word is S, 1 when the put conditional was unsuccessful and 0 when it succeeded.
+///
+/// The reference console agrees on all three bits (`spu_tables`): a
+/// getllar reads back G alone, a putllc that kept its reservation reads
+/// 0, and a putlluc reads U alone.
 pub const MFC_ATOMIC_STAT_S: u32 = 1;
 
 // SPU mailbox channels
@@ -279,6 +283,11 @@ pub enum ChannelDirection {
 /// [CBEA p:299 s:Appendix B, Table B-1] the access type of channels x'0' to x'B'.
 /// [CBEA p:300 s:Appendix B, Table B-1] the access type of channels x'C' to x'1C'.
 /// [CBEA p:301 s:Appendix B, Table B-1] the access type of channels x'1D' and x'1E'.
+///
+/// The reference console agrees. A read of each write channel returns 0
+/// and a write to each read channel changes nothing, and neither stops
+/// the SPU (`spu_channel_direction_sweep`); the idle `rchcnt` of every
+/// channel 0 to 30 is the count its access type implies (`spu_tables`).
 pub const fn channel_direction(channel: u8) -> Option<ChannelDirection> {
     match channel {
         SPU_RD_EVENT_STAT
@@ -321,10 +330,24 @@ pub const fn channel_direction(channel: u8) -> Option<ChannelDirection> {
 /// [CBEA p:299 s:Appendix B, Table B-1] channels 5, 6 and 10 are reserved.
 /// [CBEA p:301 s:Appendix B, Table B-1] channels 31 to 63 are reserved.
 /// [CBE-Handbook p:446 s:17.1.4, Table 17-2] on the CBE, channels 31 to 127 are reserved.
+///
+/// The reference console agrees on the access: an `rdch` of channels 5,
+/// 6, 10, 31, 69, 70, 71 and 127 reads 0, a `wrch` to each has no
+/// effect, and neither stops the SPU or latches a class 0 status
+/// (`spu_reserved_access`). Every reserved channel counts 0 except the
+/// three in [`SPU_RESERVED_CHANNELS_COUNTING_ONE`] (`spu_tables`).
 pub const fn is_reserved_channel(channel: u8) -> bool {
     // [CBE-Handbook p:446 s:17.1.4, Table 17-2] the 7-bit channel field names 128 channels, so 128 and up name none.
     matches!(channel, 5 | 6 | 10 | 31..=127)
 }
+
+/// The reserved channels whose `rchcnt` the reference console answers
+/// with 1, where every other reserved channel counts 0 (`spu_tables`).
+///
+/// The CBE's channel map names none of the three. A read of one returns
+/// 0 and a write has no effect, as on any other reserved channel
+/// (`spu_reserved_access`).
+pub const SPU_RESERVED_CHANNELS_COUNTING_ONE: [u8; 3] = [69, 70, 71];
 
 // MFC DMA command opcodes (written to MFC_CMD)
 
@@ -541,14 +564,23 @@ pub const SPU_NPC_OFFSET: u32 = 0x04034;
 /// `SPU_In_Mbox`'s offset in an SPE's problem-state area.
 ///
 /// [CBEA p:99 s:8.6.2] SPU_In_Mbox is at offset x'0400C' of the SPE's problem-state area.
+///
+/// The reference console agrees: a raw SPU reads the words stored here
+/// from SPU_RdInMbox (`spu_tables`).
 pub const SPU_IN_MBOX_OFFSET: u32 = 0x0400C;
 /// `SPU_Sig_Notify_1`'s offset in an SPE's problem-state area.
 ///
 /// [CBEA p:102 s:8.7.1] SPU_Sig_Notify_1 is at offset x'1400C' of the SPE's problem-state area.
+///
+/// The reference console agrees: a raw SPU reads the words stored here
+/// from SPU_RdSigNotify1 (`spu_raw_window_modes`).
 pub const SPU_SIG_NOTIFY_1_OFFSET: u32 = 0x1400C;
 /// `SPU_Sig_Notify_2`'s offset in an SPE's problem-state area.
 ///
 /// [CBEA p:103 s:8.7.2] SPU_Sig_Notify_2 is at offset x'1C00C' of the SPE's problem-state area.
+///
+/// The reference console agrees: a raw SPU reads the words stored here
+/// from SPU_RdSigNotify2 (`spu_raw_window_modes`).
 pub const SPU_SIG_NOTIFY_2_OFFSET: u32 = 0x1C00C;
 /// SPU local store size in bytes (256 KiB).
 ///
@@ -565,6 +597,9 @@ pub const SPU_LSLR_FULL: u32 = SPU_LS_SIZE as u32 - 1;
 /// an empty queue.
 ///
 /// [CBE-Handbook p:445 s:17.1 Table 17-2] MFC_Cmd has 16 maximum entries; [CBE-Handbook p:528 s:19.4.3.2] each MFC has a 16-entry SPU command queue.
+///
+/// The reference console agrees: an idle raw SPU's `rchcnt` of MFC_Cmd
+/// reads 16 (`spu_tables`).
 pub const MFC_SPU_QUEUE_DEPTH: u32 = 16;
 
 /// The largest MFC transfer, and the largest list, in bytes.
@@ -612,11 +647,19 @@ pub const MFC_CLASS0_INVALID_COMMAND: u64 = 1 << 1;
 /// Entries in the SPU inbound mailbox.
 ///
 /// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_RdInMbox has 4 maximum entries.
+///
+/// The reference console agrees (`spu_tables`). The PPU stored five
+/// words. After each store, `SPU_Mbox_Stat` showed 3, 2, 1, 0 and 0
+/// free entries. The SPU then counted 4 and read the first, second,
+/// third and fifth words: the fifth store replaced the fourth.
 pub const SPU_IN_MBOX_DEPTH: u32 = 4;
 
 /// Entries in the SPU outbound mailbox.
 ///
 /// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_WrOutMbox has 1 maximum entry.
+///
+/// The reference console agrees (`spu_tables`): `rchcnt` of the channel
+/// reads 1 while the mailbox is empty and 0 after one write.
 pub const SPU_OUT_MBOX_DEPTH: u32 = 1;
 
 /// Entries in the SPU outbound interrupt mailbox.

@@ -1,5 +1,6 @@
 //! Reserved channels on the CBE: rdch reads zero, wrch has no effect, and
-//! rchcnt counts zero, all without a fault.
+//! rchcnt counts zero, all without a fault. The three the reference
+//! console counts as 1 are the exception to the count.
 
 // [CBE-Handbook p:443 s:17.1.4] reads of reserved channels return zeros, writes have no effect, and their counts read 0.
 
@@ -70,7 +71,8 @@ fn wrch_to_a_reserved_channel_changes_nothing() {
 }
 
 #[test]
-fn rchcnt_of_a_reserved_channel_counts_zero() {
+fn rchcnt_of_a_reserved_channel_counts_zero_but_three_count_one() {
+    let counting_one = cellgov_ps3_abi::hw::spu::SPU_RESERVED_CHANNELS_COUNTING_ONE;
     for channel in reserved() {
         let mut s = SpuState::new();
         s.set_reg(7, [0xA5; 16]);
@@ -83,7 +85,9 @@ fn rchcnt_of_a_reserved_channel_counts_zero() {
             matches!(out, SpuStepOutcome::Continue),
             "channel 0x{channel:02x}: {out:?}"
         );
-        assert_eq!(s.regs[7], [0; 16], "channel 0x{channel:02x}");
+        let mut want = [0; 16];
+        want[3] = u8::from(counting_one.contains(&channel));
+        assert_eq!(s.regs[7], want, "channel 0x{channel:02x}");
     }
 }
 

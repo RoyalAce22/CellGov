@@ -37,6 +37,24 @@ const fn def(mnemonic: &'static str, opcode: u16, queues: MfcQueues) -> MfcComma
 /// [CBEA p:307 s:Appendix D Table D-3] the SL1 storage control commands.
 /// [CBEA p:308 s:Appendix D Table D-4] the synchronization commands; [CBEA p:308 s:Appendix D Table D-5] the atomic commands.
 /// [CBEA p:51 s:7] an `s` command is proxy-queue only; a list or atomic command is SPU-queue only.
+///
+/// The reference console runs every SPU-queue form that needs no list as
+/// the table describes. From one raw SPU's queue:
+///
+/// - the nine put and get forms move their bytes (`spu_tables`);
+/// - barrier, mfceieio, mfcsync and putqlluc complete under their tag
+///   (`spu_tables`);
+/// - getllar, putllc and putlluc complete with their atomic status
+///   (`spu_tables`);
+/// - the five storage control forms complete under their tag, and only
+///   sdcrz changes bytes: it zeroes its 128-byte block
+///   (`spu_reserved_access`).
+///
+/// `spu_dma_list` holds the list forms and `spu_thread_window_slots`
+/// holds sndsig. The probes sent no proxy-only form and no reserved
+/// opcode. The MFC stops on an error when it refuses an SPU-queue
+/// command, and a raw SPU destroyed in that state took the console down
+/// (`tests/micro/console_crashes.md`).
 pub const MFC_COMMANDS: [MfcCommandDef; 39] = {
     use MfcQueues::{Both, ProxyOnly, SpuOnly};
     [

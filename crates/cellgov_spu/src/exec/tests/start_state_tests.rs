@@ -59,6 +59,9 @@ fn rchcnt_on_a_fresh_unit_reads_the_start_count_of_every_channel_number() {
     for channel in RESERVED.into_iter().chain(0x1F..=0x7F) {
         expected[channel as usize] = Some(0);
     }
+    for channel in cellgov_ps3_abi::hw::spu::SPU_RESERVED_CHANNELS_COUNTING_ONE {
+        expected[channel as usize] = Some(1);
+    }
     let mut s = SpuState::new();
     for channel in 0..128u8 {
         let out = execute(
