@@ -127,9 +127,11 @@ fn sdcrz_of_no_bytes_zeroes_nothing() {
 }
 
 /// [CBEA p:65 s:7.8] a store by the issuer to its reserved line clears its reservation.
+/// The `spu_own_put_timing` console capture: the store clears it when it
+/// lands, so issuing sdcrz over the reserved block keeps it.
 #[test]
-fn sdcrz_clears_a_reservation_on_a_block_it_zeroes() {
-    for (line, kept) in [(0x2080, false), (0x2100, true)] {
+fn sdcrz_keeps_a_reservation_on_a_block_it_zeroes_until_the_zeros_land() {
+    for line in [0x2080, 0x2100] {
         let mut unit = unit_issuing(MFC_SDCRZ, 0x2010, 0x80, TAG);
         unit.state_mut()
             .set_reservation(Some(ReservedLine::containing(line)));
@@ -140,8 +142,8 @@ fn sdcrz_clears_a_reservation_on_a_block_it_zeroes() {
         let result = unit.run_until_yield(Budget::new(100), &ctx, &mut Vec::new());
         assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
         assert_eq!(
-            unit.state().reservation().is_some(),
-            kept,
+            unit.state().reservation(),
+            Some(ReservedLine::containing(line)),
             "line 0x{line:x}"
         );
     }

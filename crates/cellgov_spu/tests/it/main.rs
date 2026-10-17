@@ -8,6 +8,7 @@ mod console_events;
 mod console_ie_branch_forms;
 mod console_invalid_channel;
 mod console_invalid_npc;
+mod console_own_put_reservation;
 mod console_raw_stop;
 mod console_run_control;
 mod event_wait_through_runtime;

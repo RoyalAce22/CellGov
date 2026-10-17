@@ -203,7 +203,7 @@ fn a_dma_landing_in_a_view_replicates_to_its_sibling() {
 /// not only its memory.
 ///
 /// `other` stands for a unit of that space holding the replicated
-/// bytes. The issuer's exemption is the case below, because a space-0
+/// bytes. The issuer's own reservation is the case below, because a space-0
 /// unit cannot hold a reservation in a child space's table and this
 /// fixture could only name that state by building it by hand.
 #[test]
@@ -224,12 +224,14 @@ fn a_replicated_write_sweeps_the_sibling_space_table() {
     );
 }
 
-/// The issuer's exemption, over a repeat map inside its own space.
+/// The issuer's own reservation, over a repeat map inside its own space.
 ///
 /// The issuer holds the reservation in the one table it can hold one
-/// in, over an alias of the bytes its transfer writes.
+/// in, over an alias of the bytes its transfer writes. The
+/// `spu_own_put_timing` console capture: the issuer's own put resets
+/// the issuer's reservation when it lands.
 #[test]
-fn a_landing_spares_the_issuer_over_a_same_space_alias_and_sweeps_other_holders() {
+fn a_landing_over_a_same_space_alias_sweeps_every_holder_the_issuer_included() {
     let mut rt = shared_segment_with_same_space_alias();
     let issuer = UnitId::new(0);
     let other = UnitId::new(9);
@@ -253,8 +255,8 @@ fn a_landing_spares_the_issuer_over_a_same_space_alias_and_sweeps_other_holders(
          unit's reservation over it goes",
     );
     assert!(
-        rt.reservations().get(issuer).is_some(),
-        "and the issuer's own survives, as it does over the view the \
+        rt.reservations().get(issuer).is_none(),
+        "and the issuer's own goes too, as it does over the view the \
          transfer was aimed at",
     );
 }

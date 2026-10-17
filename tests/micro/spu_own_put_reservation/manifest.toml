@@ -1,0 +1,23 @@
+[test]
+name = "spu_own_put_reservation"
+
+# A hardware probe of an SPU's own MFC commands over its reservation
+# line, on a raw SPU: after a getllar, a put over the line, a put to the
+# next line, sdcrz, sdcrf, sdcrst, a list put over the line or a get from
+# it, then a putllc of the line. Each case records the getllar and
+# putllc statuses and the lock-line reservation lost event count and
+# bits after each step. The PPU reads back SPU_Status, SPU_NextPC, the class 0
+# interrupt status and the seventy-two result slots. The PPU program's
+# header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 320 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

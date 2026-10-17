@@ -428,16 +428,6 @@ fn issue_transfer(
     let local =
         ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size)).expect("valid LS range");
     let request = local_store_transfer(direction, local, main, unit_id);
-    // [CBE-Handbook p:479 s:18.6.4] a reservation reset by a local SPE action raises no lost event; the page names putllc, putlluc and putqlluc as such actions.
-    // That this command's own store over the reserved line resets the
-    // reservation too is CellGov's choice.
-    if direction == DmaDirection::Put {
-        if let Some(line) = state.reservation() {
-            if line.overlaps_range(ea, u64::from(size)) {
-                state.set_reservation(None);
-            }
-        }
-    }
     let request = request
         .with_tag_id(tag)
         .with_ordering(ordering)
@@ -598,14 +588,6 @@ fn issue_storage_control(
     else {
         return queue_invalid(cmd, MfcCommandError::DataSegment { ea }, state, unit_id);
     };
-    // [CBE-Handbook p:479 s:18.6.4] a reservation reset by a local SPE action raises no lost event; the page names putllc, putlluc and putqlluc as such actions.
-    // That this command's own store over the reserved line resets the
-    // reservation too is CellGov's choice.
-    if let Some(line) = state.reservation() {
-        if blocks.length() > 0 && line.overlaps_range(start, blocks.length()) {
-            state.set_reservation(None);
-        }
-    }
     // The zeros ride as the put's payload, so no local store is read. The
     // source names local-store address 0, the address a record of the
     // command gives when it names none.
@@ -784,17 +766,6 @@ fn queue_list_segment(
         }
         let local = ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size))
             .expect("valid LS range");
-
-        // [CBE-Handbook p:479 s:18.6.4] a reservation reset by a local SPE action raises no lost event; the page names putllc, putlluc and putqlluc as such actions.
-        // That this command's own store over the reserved line resets the
-        // reservation too is CellGov's choice.
-        if list.direction == DmaDirection::Put {
-            if let Some(line) = state.reservation() {
-                if line.overlaps_range(params.ea(), u64::from(size)) {
-                    state.set_reservation(None);
-                }
-            }
-        }
         let mut request = local_store_transfer(list.direction, local, main, unit_id)
             .with_tag_id(list.tag)
             .with_ordering(list.ordering)
@@ -988,11 +959,10 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
     let lsa = state.channels.mfc_lsa;
     // [CBEA p:66 s:7.8.1] the getllar data transfer is one cache line.
     // No official page says which local-store line an unaligned MFC_LSA
-    // names. This model takes the line that contains it, as it does for
-    // the effective address, and the spu_atomic_misaligned_lsa
-    // microtest's reference baselines do the same for getllar, putllc
-    // and putlluc. A line therefore never straddles the end of local
-    // store.
+    // names. The `spu_atomic_misaligned_lsa` console capture shows the
+    // line that contains it, for getllar, putllc and putlluc, as for the
+    // effective address. A line therefore never straddles the end of
+    // local store.
     let line_lsa = lsa & !(RESERVATION_LINE_BYTES as u32 - 1);
 
     match word.opcode() {
@@ -1035,9 +1005,8 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
         }
         spu::MFC_SDCRZ => issue_storage_control(cmd, true, state, unit_id),
         // [CBEA p:64 s:7.7.4] sdcrst writes modified blocks to main storage; [CBEA p:64 s:7.7.5] sdcrf also invalidates them.
-        // Whether invalidating a line in the atomic cache loses a
-        // reservation on it is unestablished. The model keeps the
-        // reservation.
+        // The `spu_own_put_reservation` console capture: neither loses a
+        // reservation on the line, and neither raises the lost event.
         spu::MFC_SDCRST | spu::MFC_SDCRF => issue_storage_control(cmd, false, state, unit_id),
         // [CBEA p:58 s:7.4] a list command runs a sequence of transfers, one per list element, under one tag group.
         // [CBEA p:62 s:7.6.5] on the CBE the putrl forms behave as the putl forms.

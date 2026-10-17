@@ -70,17 +70,19 @@ impl Runtime {
     /// whose ranges [`translation_fault`] passed at this instant, and the
     /// runtime applies it before anything else touches memory.
     ///
-    /// The write sweeps overlapping reservations. DMA commits
-    /// independently of `SharedWriteIntent`. Without the sweep, a
-    /// cross-unit MFC_PUT leaves a stale reservation, and a later
+    /// The write sweeps overlapping reservations, the issuer's included.
+    /// DMA commits independently of `SharedWriteIntent`. Without the
+    /// sweep, an MFC_PUT leaves a stale reservation, and a later
     /// `stwcx` / `putllc` reads it as still held.
     /// [PPC-Book2 p:10 s:1.7.3.1] the issuer's own reservation is
     /// preserved; only other processors' reservations are invalidated.
-    /// [CBE-Handbook p:479 s:18.6.4] names the Cell half of that split:
-    /// the atomic unit loses a lock-line reservation when another
-    /// processor element or device modifies the line, and the issuer's
-    /// own MFC transfer is a local SPE action rather than that outside
-    /// entity.
+    /// That rule covers a PPU's own stores, not a DMA.
+    /// [CBE-Handbook p:479 s:18.6.4] the atomic unit's snoop hardware resets a lock-line reservation when an outside entity modifies the line, and a local SPE action raises no lost event.
+    /// The `spu_own_put_reservation` and `spu_own_put_timing` console
+    /// captures: the issuer's own MFC put acts as an outside entity. It
+    /// resets the issuer's reservation and raises the lost event when it
+    /// lands, and a getllar taken between its issue and its landing is
+    /// lost too.
     fn apply_dma_transfer(&mut self, c: &DmaCompletion, payload: Option<&[u8]>) {
         // A transfer of no bytes touches no address, so its ends need not
         // name a writable region and nothing lands.
@@ -111,18 +113,17 @@ impl Runtime {
             AddressSpaceId::BOOT,
             c.destination(),
             &bytes,
-            Some(c.issuer()),
+            None,
         )
         .expect("the queue translated the DMA destination when it reached the transfer");
         // A landing inside a shared view reaches the sibling views the
         // same way a committed store does. The bytes are the same bytes
         // whichever view names them, so a landing that replicated
         // nothing would leave the siblings holding what the transfer
-        // replaced. The issuer is exempt there for the reason it is
-        // exempt above: every view of the segment shares one
-        // reservation granule, so the split the write already applies
-        // in space 0 is the split the aliases carry.
-        self.fanout_committed_range(AddressSpaceId::BOOT, c.destination(), Some(c.issuer()));
+        // replaced. The issuer is not exempt there either: every view of
+        // the segment shares one reservation granule, so the sweep the
+        // write already applies in space 0 is the sweep the aliases carry.
+        self.fanout_committed_range(AddressSpaceId::BOOT, c.destination(), None);
         // A transfer can land over code a unit is executing: a title
         // loading an overlay by MFC transfer is that shape. Predecoded
         // code at the destination, and at every alias the fanout

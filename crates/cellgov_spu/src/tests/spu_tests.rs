@@ -282,8 +282,10 @@ fn mfc_putllc_with_reservation_on_different_line_fails() {
     assert!(unit.state().reservation().is_none());
 }
 
+/// The `spu_own_put_timing` console capture: the put resets the
+/// reservation when it lands, not when it issues.
 #[test]
-fn mfc_put_overlapping_reserved_line_clears_local_reservation() {
+fn mfc_put_overlapping_reserved_line_keeps_the_reservation_until_it_lands() {
     let mut unit = SpuExecutionUnit::new(UnitId::new(11));
     let s = unit.state_mut();
     s.set_reservation(Some(cellgov_sync::ReservedLine::containing(0x1000)));
@@ -309,7 +311,10 @@ fn mfc_put_overlapping_reserved_line_clears_local_reservation() {
     let mut effects = Vec::new();
     let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
-    assert!(unit.state().reservation().is_none());
+    assert_eq!(
+        unit.state().reservation(),
+        Some(cellgov_sync::ReservedLine::containing(0x1000))
+    );
 }
 
 #[test]

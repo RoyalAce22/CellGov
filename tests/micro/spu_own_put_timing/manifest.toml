@@ -1,0 +1,22 @@
+[test]
+name = "spu_own_put_timing"
+
+# A hardware probe of when an SPU's own store over its reservation line
+# takes the reservation, on a raw SPU: after a getllar, a sndsig to the
+# line, a put to the line with the lost event read before its tag
+# completes, and a put followed by a second getllar before the tag
+# completes, then a putllc of the line. The PPU reads back SPU_Status,
+# SPU_NextPC, the class 0 interrupt status and the sixty-four result
+# slots. The PPU program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 288 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

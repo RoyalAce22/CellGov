@@ -220,8 +220,9 @@ register -- `Option<ReservedLine>` on `PpuState` / `SpuState`. An
 atomic load sets it. It is cleared by:
 
 - a conditional-store retirement;
-- an SPU's own put or unconditional lock-line put over the line;
-- another unit's write to the line.
+- an SPU's own unconditional lock-line put over the line;
+- another unit's write to the line, or the landing of the SPU's own
+  put over it.
 
 The holder's other stores leave it in place.
 
@@ -307,8 +308,8 @@ Validation, the sweep and the trace record sit together in
 making its own call.
 
 A write the host makes on one unit's behalf exempts that unit, as
-(1) exempts its emitter. A mechanism with no unit behind it exempts
-nobody.
+(1) exempts its emitter. A DMA completion exempts nobody, its issuer
+included. A mechanism with no unit behind it exempts nobody.
 
 **Scope and bounds.** The reservation table and local registers
 are the full contention model.

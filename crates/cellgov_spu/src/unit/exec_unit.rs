@@ -90,9 +90,10 @@ impl ExecutionUnit for SpuExecutionUnit {
 
         // Mirror cross-unit reservation invalidation. The context view is
         // frozen for the step, so a single entry-time check suffices.
-        // Only another unit's store drops the committed entry while the
-        // local register holds a line: the unit's own actions clear the
-        // register as they run.
+        // A store from another unit, or the landing of this unit's own
+        // MFC put, drops the committed entry while the local register
+        // holds a line. putllc, putlluc and putqlluc clear the register
+        // as they issue.
         // [CBEA p:148 s:9.11.1] Lr is set when a snoop external to the MFC resets the reservation, and never for a local action.
         if self.state.reservation().is_some() && !ctx.reservation_held(self.id) {
             self.state.set_reservation(None);
