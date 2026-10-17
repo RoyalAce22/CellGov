@@ -4,9 +4,11 @@
 //! Behaviour lives in `cellgov_lv2::host::usbd`; this module is data
 //! only.
 //!
-//! The event codes and record sizes below are unestablished: nothing
-//! in the captured evidence states them. `libusbd.sprx` is the module that would
-//! witness them.
+//! The event codes and the transfer-slot count below are unestablished.
+//! No game-run probe can reach them: an attach or detach event needs a
+//! device plugged or pulled while the probe waits, and a transfer needs
+//! a pipe, which needs a registered logical device driver.
+//! `libusbd.sprx` is the module that would witness them.
 
 use super::errno::Lv2ErrCode;
 
@@ -33,7 +35,10 @@ pub const SYS_USBD_TRANSFER_COMPLETE: u64 = 3;
 /// callback thread that receives it exits its loop.
 pub const SYS_USBD_TERMINATE: u64 = 4;
 
-/// Bytes per device record in a `sys_usbd_get_device_list` buffer.
+/// Bytes per device record in a `sys_usbd_get_device_list` buffer. In
+/// the `lv2_usbd_config_hid` capture the reference console answers 3
+/// devices into an 8-byte buffer and fills it with two records of this
+/// size, each opening with the device's index.
 pub const SYS_USBD_DEVICE_RECORD_LEN: usize = 4;
 
 /// Transfer slots the driver keeps per handle.

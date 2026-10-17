@@ -5,7 +5,7 @@ use cellgov_mem::lanes::{self, source, LaneMap, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_EVENT_SOURCE_SERVICE, SYS_CONFIG_SERVICE_EVENT_HEAD_LEN,
     SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN, SYS_CONFIG_SERVICE_LISTENER_ONCE,
-    SYS_CONFIG_SERVICE_PADMANAGER,
+    SYS_CONFIG_SERVICE_LISTENER_REPEATING, SYS_CONFIG_SERVICE_PADMANAGER,
 };
 
 use crate::sync_primitives::EventPayload;
@@ -57,12 +57,15 @@ pub(crate) struct ConfigListener {
 }
 
 impl ConfigListener {
-    /// A once listener fires a single time, and the id and verbosity
-    /// must fit. A pad-manager listener with a data buffer matches only
-    /// when the buffer leads with `0x01`; one with no buffer matches.
+    /// A once listener fires a single time, a listener of a type other
+    /// than once or repeating never fires, and the id and verbosity must
+    /// fit. A pad-manager listener with a data buffer matches only when
+    /// the buffer leads with `0x01`; one with no buffer matches.
     pub(super) fn matches(&self, service: &ConfigService) -> bool {
-        if self.listener_type == SYS_CONFIG_SERVICE_LISTENER_ONCE && self.delivered > 0 {
-            return false;
+        match self.listener_type {
+            SYS_CONFIG_SERVICE_LISTENER_ONCE if self.delivered > 0 => return false,
+            SYS_CONFIG_SERVICE_LISTENER_ONCE | SYS_CONFIG_SERVICE_LISTENER_REPEATING => {}
+            _ => return false,
         }
         if self.service_id != service.service_id || self.min_verbosity > service.verbosity {
             return false;

@@ -240,6 +240,11 @@ impl Lv2Host {
     /// `sys_config_register_service` (521): registers a service and
     /// notifies every listener that matches it.
     ///
+    /// On the reference console a game's own listener on the service
+    /// hears neither this registration nor its unregistration
+    /// (`lv2_config_service_records`); which listeners the console
+    /// notifies is not captured.
+    ///
     /// # Errors
     ///
     /// - `CELL_ESRCH` for an unknown handle.

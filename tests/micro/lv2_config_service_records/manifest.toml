@@ -1,0 +1,23 @@
+[test]
+name = "lv2_config_service_records"
+
+# A hardware probe: the sys_config service records a game process
+# receives, in full -- the pad-manager record and its descriptor, and a
+# user service's registration and unregistration records -- and which
+# service ids and listener types a listener with no data may name.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 768 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 768 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The kernel numbers each queued service event afresh on every run.
+volatile = [
+  { region = "result", offset = 80, size = 8, reason = "service event id" },
+]
