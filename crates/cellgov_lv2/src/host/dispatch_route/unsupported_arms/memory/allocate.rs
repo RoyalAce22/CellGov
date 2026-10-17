@@ -71,8 +71,9 @@ impl Lv2Host {
     }
 
     /// `sys_mmapper_allocate_address` (330): reserves the lowest free
-    /// 256 MiB-aligned range, records the area and the page size its
-    /// `flags` name, and writes its base to `*alloc_addr`.
+    /// range whose base is a multiple of `alignment`, records the area
+    /// and the page size its `flags` name, and writes its base to
+    /// `*alloc_addr`.
     ///
     /// liblv2.sprx's own reservation asks for 256 MiB at an alignment
     /// of 256 MiB, so areas step in the granule firmware uses.
@@ -93,9 +94,8 @@ impl Lv2Host {
     /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
     /// - `CELL_EALIGN` when `alignment` is not one of the four area
     ///   sizes the kernel accepts.
-    /// - `CELL_EFAULT` when `alloc_addr` is null. The gate is
-    ///   CellGov's own; no interface or firmware record establishes
-    ///   it.
+    /// - `CELL_EFAULT` when `alloc_addr` is null, as the
+    ///   `lv2_mmapper_allocate` capture shows.
     /// - `CELL_ENOMEM` when `size` is zero or the VM window is
     ///   exhausted.
     ///
@@ -124,10 +124,10 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         // A zero alignment is outside the accepted set, but it is
-        // taken as the default area size. No firmware caller relies on
-        // that: liblv2.sprx always names 256 MiB explicitly. The only
-        // evidence for the allowance is PSL1GHT's sbrk, which depends
-        // on it on real hardware.
+        // taken as the default area size: the lv2_mmapper_allocate
+        // capture grants it. No firmware caller relies on that:
+        // liblv2.sprx always names 256 MiB explicitly; PSL1GHT's sbrk
+        // does.
         let alignment = if alignment == 0 {
             VM_AREA_GRANULE
         } else {
@@ -140,7 +140,12 @@ impl Lv2Host {
             return d;
         }
         let pid = self.state.processes.process_of_unit(requester);
-        match self.mmapper_alloc(pid, size, page_size::granule_from_flags(args[1])) {
+        match self.mmapper_alloc_aligned(
+            pid,
+            size,
+            page_size::granule_from_flags(args[1]),
+            alignment,
+        ) {
             Some(addr) => {
                 let write = Effect::shared_write(
                     ByteRange::contiguous_u32(alloc_addr_ptr, 4),

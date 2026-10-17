@@ -230,3 +230,7 @@ mod unmap_console_tests;
 #[cfg(test)]
 #[path = "tests/mmapper_process_tests.rs"]
 mod process_tests;
+
+#[cfg(test)]
+#[path = "tests/memory_constants_console_tests.rs"]
+mod memory_constants_console_tests;

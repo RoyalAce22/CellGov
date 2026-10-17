@@ -1,0 +1,15 @@
+[test]
+name = "lv2_memory_constants"
+
+# A hardware probe: the sizes, alignments, granules and flag words the
+# memory and mmapper calls accept from a game process. The console
+# capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words at the slots ppu/main.c lists: 904 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 904 },
+]
+
+[expect]
+outcome = "completed"

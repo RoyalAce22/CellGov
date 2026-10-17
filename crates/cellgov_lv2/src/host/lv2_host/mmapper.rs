@@ -113,16 +113,32 @@ impl Lv2Host {
         }
     }
 
+    /// [`Self::mmapper_alloc_aligned`] at the granule alignment.
+    #[cfg(test)]
+    pub(in crate::host) fn mmapper_alloc(&mut self, pid: u32, size: u32, page: u32) -> Option<u32> {
+        self.mmapper_alloc_aligned(
+            pid,
+            size,
+            page,
+            cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE,
+        )
+    }
+
     /// Reserve the lowest range of `size`, rounded up to the 256 MiB
-    /// granule, in `[MMAPPER_REGION_START, MMAPPER_REGION_END)` that
-    /// process `pid` holds no area in, record it as an area of
-    /// `page`-byte pages, and return its base.
+    /// granule, in `[MMAPPER_REGION_START, MMAPPER_REGION_END)` whose
+    /// base is a multiple of `alignment` and that process `pid` holds no
+    /// area in, record it as an area of `page`-byte pages, and return
+    /// its base. `alignment` is a power of two; one below the granule
+    /// counts as the granule.
     ///
     /// Each process has its own areas: both `lv2_mmapper_map` captures,
     /// one game process each, get the region start as their first base,
     /// whatever another process holds. A base that 331 freed is free for
     /// the next 330: the `lv2_mmapper_map_edges` capture shows a 330
-    /// after a 331 getting the freed base back.
+    /// after a 331 getting the freed base back. The
+    /// `lv2_memory_constants` capture shows a 256 MiB area asked for
+    /// with a 512 MiB alignment at 0x60000000 and with a 1 GiB alignment
+    /// at 0x80000000, where the granule alignment gives 0x50000000.
     ///
     /// A range never overlaps an open RSX context window or a 1 MiB-page
     /// area, as [`Self::free_area_base`] describes.
@@ -130,13 +146,19 @@ impl Lv2Host {
     /// Returns `None` for `size == 0`, when the rounding would overflow
     /// `u32`, or when no free range below
     /// [`Self::MMAPPER_REGION_END`] holds the request.
-    pub(in crate::host) fn mmapper_alloc(&mut self, pid: u32, size: u32, page: u32) -> Option<u32> {
+    pub(in crate::host) fn mmapper_alloc_aligned(
+        &mut self,
+        pid: u32,
+        size: u32,
+        page: u32,
+        alignment: u64,
+    ) -> Option<u32> {
         if size == 0 {
             return None;
         }
         let granule = u32::try_from(cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE).ok()?;
         let rounded = size.checked_add(granule - 1)? & !(granule - 1);
-        let base = self.free_area_base(pid, rounded)?;
+        let base = self.free_area_base_aligned(pid, rounded, alignment)?;
         self.state.mmapper_areas.insert(
             (pid, base),
             crate::host::mmapper::MmapperArea {
@@ -162,6 +184,11 @@ impl Lv2Host {
     /// process's such area, not only `pid`'s, so the block table, keyed by
     /// address alone, never holds two processes' blocks at one base.
     pub(in crate::host) fn free_area_base(&self, pid: u32, rounded: u32) -> Option<u32> {
+        self.free_area_base_aligned(pid, rounded, cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE)
+    }
+
+    /// [`Self::free_area_base`] with the base a multiple of `alignment`.
+    fn free_area_base_aligned(&self, pid: u32, rounded: u32, alignment: u64) -> Option<u32> {
         use cellgov_ps3_abi::lv2::rsx::region;
         let granule = cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE;
         let window = self.state.rsx_context.control_slot(0).map(|start| {
@@ -172,11 +199,16 @@ impl Lv2Host {
             |base: u64, start: u64, end: u64| base < end && base + u64::from(rounded) > start;
         let mut base = u64::from(Self::MMAPPER_REGION_START);
         loop {
+            base = base.next_multiple_of(alignment.max(granule));
+            let aligned = base;
             for (area_base, area) in self.mmapper_areas_of(pid) {
                 if u64::from(area_base) >= base + u64::from(rounded) {
                     break;
                 }
                 base = base.max(u64::from(area_base) + u64::from(area.size));
+            }
+            if base != aligned {
+                continue;
             }
             if let Some((_, &held)) = self
                 .state
