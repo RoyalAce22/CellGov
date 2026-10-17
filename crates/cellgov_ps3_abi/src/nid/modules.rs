@@ -1,8 +1,14 @@
 //! The curated `nid_module!` blocks: the NIDs the workspace names at a
 //! typed callsite, one module per PS3 library.
+//!
+//! The 4.93 firmware export tables carry every NID below in the
+//! library its module names (see [`crate::nid`] for the files read).
 
 /// `sysPrxForUser` NIDs: the user-mode PRX shim that wraps LV2
 /// syscalls (TLS init, heap, lwmutex create, time, thread, process).
+///
+/// `liblv2.sprx` exports all of them from its `sysPrxForUser`
+/// library, attribute 0x1.
 pub mod sys_prx_for_user {
     crate::nid_module! {
         INITIALIZE_TLS = 0x7446_80a2, "sys_initialize_tls";
@@ -36,6 +42,13 @@ pub mod sys_prx_for_user {
 /// to the corresponding firmware OPDs at boot, so guest calls land
 /// in real firmware code that then issues raw `sys_fs_*` syscalls
 /// handled by `Lv2Host::dispatch`.
+///
+/// `libfs.sprx` and `libfs_155.sprx` both export all of them from a
+/// `sys_fs` library, attribute 0x9. In 4.93, `cellFsOpen` resolves the
+/// path to a handler object and calls through that object's descriptor
+/// table. The raw
+/// `sys_fs_open` (`sc` with r11 = 801) sits in a separate `libfs`
+/// function.
 pub mod sys_fs {
     crate::nid_module! {
         OPEN = 0x718b_f5f8, "cellFsOpen";
@@ -51,6 +64,9 @@ pub mod sys_fs {
 }
 
 /// `cellSysutil` NIDs.
+///
+/// `libsysutil.sprx` exports them from its `cellSysutil` library,
+/// attribute 0x9.
 pub mod cell_sysutil {
     crate::nid_module! {
         VIDEO_OUT_GET_STATE = 0x8875_72d5, "cellVideoOutGetState";
@@ -62,6 +78,9 @@ pub mod cell_sysutil {
 /// (module `cellSysutil_Library`), which exports under the
 /// `cellSysutil` namespace. This module groups them by C source file
 /// to mirror PSL1GHT's header layout.
+///
+/// The 4.93 `libsysutil.sprx` (module `cellSysutil_Library`) exports
+/// all five from its `cellSysutil` library, attribute 0x9.
 pub mod cell_save_data {
     crate::nid_module! {
         AUTO_LOAD = 0xc22c_79b5, "cellSaveDataAutoLoad";
@@ -73,6 +92,9 @@ pub mod cell_save_data {
 }
 
 /// `cellGcmSys` NIDs.
+///
+/// `libgcm_sys.sprx` exports them from its `cellGcmSys` library,
+/// attribute 0x1.
 pub mod cell_gcm_sys {
     crate::nid_module! {
         GET_TILED_PITCH_SIZE = 0x055b_d74d, "cellGcmGetTiledPitchSize";
@@ -86,6 +108,9 @@ pub mod cell_gcm_sys {
 }
 
 /// `cellSpurs` NIDs (PPU-side surface).
+///
+/// `libsre.sprx` exports them from its `cellSpurs` library, attribute
+/// 0x9.
 pub mod cell_spurs {
     crate::nid_module! {
         ATTRIBUTE_INITIALIZE = 0x9518_0230, "_cellSpursAttributeInitialize";

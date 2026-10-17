@@ -14,8 +14,10 @@ const H3: u32 = 0x10325476;
 const H4: u32 = 0xC3D2E1F0;
 
 /// Suffix appended to a function name before SHA-1 for named-export
-/// NID derivation. Hex value `0x6759659904250490566427499489741A`
-/// matches the documented PS3 algorithm.
+/// NID derivation, `0x6759659904250490566427499489741A`.
+///
+/// The 4.93 firmware export tables hold it: names derived with this
+/// suffix give the NIDs those modules export (see [`crate::nid`]).
 const NAMED_EXPORT_SALT: [u8; 16] = [
     0x67, 0x59, 0x65, 0x99, 0x04, 0x25, 0x04, 0x90, 0x56, 0x64, 0x27, 0x49, 0x94, 0x89, 0x74, 0x1A,
 ];

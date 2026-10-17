@@ -11,6 +11,33 @@
 //! carry fixed NIDs the derivation does not produce. NIDs are
 //! game-independent.
 //!
+//! The export tables of the 4.93 firmware modules hold the derivation.
+//! They were read from the 142 decrypted modules of
+//! `dev_flash/sys/external`. The reference console's `liblv2`, `libfs`,
+//! `libsysutil`, `libgcm_sys` and `libsre` are byte-identical to those
+//! files. Ten names derived through the salt give the exact NID their
+//! library exports: `cellFsOpen`, `cellFsRead`, `sys_lwmutex_create`,
+//! `cellGcmGetConfiguration`, `cellSpursInitialize`,
+//! `cellVideoOutGetState`, `cellSaveDataAutoLoad`,
+//! `sys_ppu_thread_create`, `_sys_malloc` and
+//! `cellSysutilCheckCallback`.
+//!
+//! The entry-point NIDs appear only in a module's nameless export
+//! library, whose attribute is 0x8000. None appears in a named library.
+//! In those 142 modules:
+//!
+//! - `module_info` (0xD7F43016) is a variable in every module. It
+//!   points at the module's library-information record, the same
+//!   record segment 0's `p_paddr` names.
+//! - `module_start` (0xBC9A0086, 105 modules), `module_stop`
+//!   (0xAB779874, 106) and `module_exit` (0x3AB9A95E, 41) are
+//!   functions. Each points at an 8-byte (code, TOC) descriptor; in
+//!   `libfs`, `module_start` names code 0x0 and `module_stop` code 0x50.
+//! - `module_prologue` (0x0D10FD3F) and `module_epilogue` (0x330F7005)
+//!   are functions exported by `librudp` alone.
+//! - A seventh nameless-library NID, 0x6D0F6CAE, is a variable in 131
+//!   modules; its name is not known.
+//!
 //! The curated `nid_module!` blocks live in `modules`, listed by name
 //! in [`CURATED`]. The full table is `table.rs`; `table_gen_tests`
 //! renders it from the `table.tsv` data file beside it and fails on
