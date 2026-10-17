@@ -1,10 +1,10 @@
 //! A child process's exit takes its shared-memory windows out of its
-//! space, and each segment keeps the bytes its window held.
+//! space, and a keyed segment keeps the bytes its window held.
 
 use cellgov_event::UnitId;
 use cellgov_lv2::request::classify;
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_ps3_abi::lv2::memory::{page_size::FLAG_64K, SYS_MMAPPER_NO_SHM_KEY};
+use cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K;
 use cellgov_ps3_abi::lv2::syscall;
 
 use super::super::spaces::AddressSpaceId;
@@ -16,6 +16,8 @@ const PROT_RW: u64 = 0x40000;
 const OUT: u64 = 0x400;
 const ID_OUT: u64 = 0x404;
 const MARK: u32 = 0x1234_5678;
+/// A key in the system-IPC namespace, which a game process may create.
+const SHM_KEY: u64 = cellgov_ps3_abi::lv2::ipc::SYSTEM_IPC_KEY_NAMESPACE | 0x42;
 
 fn call(rt: &mut Runtime, unit: UnitId, number: u64, args: [u64; 4]) -> Option<u64> {
     let [a, b, c, d] = args;
@@ -45,7 +47,7 @@ fn a_childs_exit_removes_its_windows_and_its_segment_keeps_their_bytes() {
         Some(0)
     );
     let a = u64::from(word(&rt, child_space, OUT).expect("330 wrote the base"));
-    let shm = [SYS_MMAPPER_NO_SHM_KEY, 0x1_0000, FLAG_64K, ID_OUT];
+    let shm = [SHM_KEY, 0x1_0000, FLAG_64K, ID_OUT];
     assert_eq!(
         call(&mut rt, child, syscall::MMAPPER_ALLOCATE_SHARED_MEMORY, shm),
         Some(0)
@@ -79,6 +81,20 @@ fn a_childs_exit_removes_its_windows_and_its_segment_keeps_their_bytes() {
         Some(0)
     );
     let pa = u64::from(word(&rt, AddressSpaceId::BOOT, OUT).expect("330 wrote the base"));
+    assert_eq!(
+        call(
+            &mut rt,
+            parent,
+            syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            shm
+        ),
+        Some(0)
+    );
+    assert_eq!(
+        word(&rt, AddressSpaceId::BOOT, ID_OUT).map(u64::from),
+        Some(m),
+        "the key names the child's segment"
+    );
     assert_eq!(
         call(
             &mut rt,

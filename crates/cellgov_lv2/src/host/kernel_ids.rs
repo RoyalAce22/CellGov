@@ -7,6 +7,8 @@ use cellgov_ps3_abi::lv2::kernel_id::{
     SLOT_COUNT,
 };
 
+use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
+
 /// The bits of an id under its class byte: which slot, at which
 /// generation.
 const SLOT_GENERATION_MASK: u32 = (1 << CLASS_SHIFT) - 1;
@@ -39,12 +41,20 @@ impl LaneValue for Slot {
 /// generation from the slot's current one that no live id there
 /// holds. That rule is CellGov's choice: no capture holds this many
 /// objects in one process at once.
+///
+/// The console keeps one table per process. This table serves every
+/// process on the host, and records which process holds each id, so
+/// the [`MAX_LIVE_IDS`] limit counts one process's ids and an exit
+/// hands back the ids its process held.
 #[derive(Debug, Clone)]
 pub(in crate::host) struct KernelIdTable {
     /// Each live id's class, keyed by the id's slot and generation bits.
     live: LaneMap<u32, u32>,
     /// Each slot that has held an id, by slot number.
     slots: LaneMap<u32, Slot>,
+    /// The pid holding each live id a spawned process minted, keyed as
+    /// `live` is. An id with no entry is the boot process's.
+    owners: LaneMap<u32, u32>,
 }
 
 impl Default for KernelIdTable {
@@ -52,16 +62,17 @@ impl Default for KernelIdTable {
         Self {
             live: LaneMap::new(source::KERNEL_IDS, u64::from),
             slots: LaneMap::new(source::KERNEL_ID_SLOTS, u64::from),
+            owners: LaneMap::new(source::KERNEL_ID_OWNERS, u64::from),
         }
     }
 }
 
 impl KernelIdTable {
-    /// Mint an id of `class`; `None` once the process holds
-    /// [`MAX_LIVE_IDS`] ids, which the caller answers with
+    /// Mint an id of `class` for process `owner`; `None` once `owner`
+    /// holds [`MAX_LIVE_IDS`] ids, which the caller answers with
     /// `CELL_EAGAIN`.
-    pub(in crate::host) fn alloc(&mut self, class: u32) -> Option<u32> {
-        if self.live.len() >= MAX_LIVE_IDS as usize {
+    pub(in crate::host) fn alloc(&mut self, owner: u32, class: u32) -> Option<u32> {
+        if self.count_held_by(owner) >= MAX_LIVE_IDS as usize {
             return None;
         }
         let slot_state = |slot: u32| {
@@ -88,6 +99,9 @@ impl KernelIdTable {
         };
         let id = compose(class, generation, slot);
         self.live.insert(id & SLOT_GENERATION_MASK, class);
+        if owner != BOOT_PROCESS_PID {
+            self.owners.insert(id & SLOT_GENERATION_MASK, owner);
+        }
         let mut state = slot_state(slot);
         state.live += 1;
         if free.is_none() {
@@ -105,6 +119,7 @@ impl KernelIdTable {
             return false;
         }
         self.live.remove(key);
+        self.owners.remove(key);
         let slot = slot_of(id);
         let Some(mut state) = self.slots.get_mut(slot) else {
             // Every live id's slot has an entry: alloc writes both.
@@ -116,6 +131,28 @@ impl KernelIdTable {
         true
     }
 
+    /// The live ids process `owner` holds, in ascending order of their
+    /// generation and slot bits.
+    pub(in crate::host) fn held_by_owner(&self, owner: u32) -> Vec<u32> {
+        self.live
+            .iter()
+            .filter(|&(key, _)| match self.owners.get(key) {
+                Some(&pid) => pid == owner,
+                None => owner == BOOT_PROCESS_PID,
+            })
+            .map(|(key, &class)| (class << CLASS_SHIFT) | key)
+            .collect()
+    }
+
+    /// How many live ids process `owner` holds.
+    fn count_held_by(&self, owner: u32) -> usize {
+        if owner == BOOT_PROCESS_PID {
+            self.live.len().saturating_sub(self.owners.len())
+        } else {
+            self.owners.iter().filter(|&(_, &pid)| pid == owner).count()
+        }
+    }
+
     /// Whether `id` is live.
     pub(in crate::host) fn is_live(&self, id: u32) -> bool {
         self.live.get(id & SLOT_GENERATION_MASK).copied() == Some(class_of(id))
@@ -123,7 +160,10 @@ impl KernelIdTable {
 
     /// The table's partial of the sync-state sum.
     pub(in crate::host) fn sync_partial(&self) -> u128 {
-        self.live.partial().wrapping_add(self.slots.partial())
+        self.live
+            .partial()
+            .wrapping_add(self.slots.partial())
+            .wrapping_add(self.owners.partial())
     }
 
     /// [`Self::sync_partial`] computed from every entry.
@@ -131,9 +171,14 @@ impl KernelIdTable {
         self.live
             .partial_from_scratch()
             .wrapping_add(self.slots.partial_from_scratch())
+            .wrapping_add(self.owners.partial_from_scratch())
     }
 }
 
 #[cfg(test)]
 #[path = "tests/kernel_ids_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/kernel_id_owners_tests.rs"]
+mod owner_tests;

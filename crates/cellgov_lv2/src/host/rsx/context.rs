@@ -55,7 +55,7 @@ impl Lv2Host {
         }
         // port_id == queue_id: single kernel id for the 1:1 port/queue
         // binding driver_info.handler_queue exposes.
-        let Some(queue_id) = self.alloc_id(SYS_EVENT_QUEUE_OBJECT) else {
+        let Some(queue_id) = self.alloc_id(requester, SYS_EVENT_QUEUE_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         let base = if self.state.rsx_context.pending_mem_addr != 0 {

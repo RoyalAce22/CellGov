@@ -143,7 +143,8 @@ fn hid_is_root(pid: u64) -> Lv2Request {
 fn host_from(first_id: u64) -> Lv2Host {
     let mut host = Lv2Host::new();
     for _ in 0..kernel_id::slot_of(first_id as u32) {
-        host.alloc_id(0x23).expect("a free slot");
+        host.alloc_id(cellgov_event::UnitId::new(0), 0x23)
+            .expect("a free slot");
     }
     host
 }

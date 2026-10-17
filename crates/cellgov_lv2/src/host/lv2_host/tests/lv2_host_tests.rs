@@ -691,14 +691,20 @@ fn mmapper_alloc_never_returns_address_in_reserved_rsx_window() {
 #[test]
 fn alloc_id_mints_the_class_in_the_top_byte_from_slot_zero() {
     let mut host = Lv2Host::new();
-    assert_eq!(host.alloc_id(0x85), Some(0x8500_0000));
-    assert_eq!(host.alloc_id(0x96), Some(0x9600_0100));
+    assert_eq!(
+        host.alloc_id(cellgov_event::UnitId::new(0), 0x85),
+        Some(0x8500_0000)
+    );
+    assert_eq!(
+        host.alloc_id(cellgov_event::UnitId::new(0), 0x96),
+        Some(0x9600_0100)
+    );
 }
 
 #[test]
 fn releasing_an_id_the_table_does_not_hold_is_an_invariant_break() {
     let mut host = Lv2Host::new();
-    let id = host.alloc_id(0x85).unwrap();
+    let id = host.alloc_id(cellgov_event::UnitId::new(0), 0x85).unwrap();
     host.release_id(id);
     assert_eq!(
         host.invariant_break_site_count("kernel_ids.release_unknown"),

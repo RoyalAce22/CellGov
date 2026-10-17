@@ -239,7 +239,8 @@ impl Lv2Host {
                 existing
             }
             _ => {
-                let Some(mem_id) = self.mint_shared_memory(handle, SHARED_MEMORY_CLASS) else {
+                let Some(mem_id) = self.mint_shared_memory(requester, handle, SHARED_MEMORY_CLASS)
+                else {
                     return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
                 };
                 if keyed {
@@ -301,7 +302,7 @@ impl Lv2Host {
         }
         // No capture reads a 362 id; it takes 332's class, the call
         // it is the container variant of.
-        let Some(mem_id) = self.mint_shared_memory(handle, SHARED_MEMORY_CLASS) else {
+        let Some(mem_id) = self.mint_shared_memory(requester, handle, SHARED_MEMORY_CLASS) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         mem_id_written(mem_id_ptr, mem_id, requester, tick)
@@ -409,7 +410,8 @@ impl Lv2Host {
         if keyed && self.state.mmapper_ipc.contains_key(ipc_key) {
             return Lv2Dispatch::immediate(errno::CELL_EEXIST.into());
         }
-        let Some(mem_id) = self.mint_shared_memory(handle, SHARED_MEMORY_EXT_CLASS) else {
+        let Some(mem_id) = self.mint_shared_memory(requester, handle, SHARED_MEMORY_EXT_CLASS)
+        else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         if keyed {
@@ -481,10 +483,15 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// Mints a `mem_id` of `class` and records the handle it names;
-    /// `None` when the id table is full.
-    fn mint_shared_memory(&mut self, handle: MmapperHandle, class: u32) -> Option<u32> {
-        let mem_id = self.alloc_id(class)?;
+    /// Mints a `mem_id` of `class` for `requester`'s process and
+    /// records the handle it names; `None` when the id table is full.
+    fn mint_shared_memory(
+        &mut self,
+        requester: UnitId,
+        handle: MmapperHandle,
+        class: u32,
+    ) -> Option<u32> {
+        let mem_id = self.alloc_id(requester, class)?;
         self.state.mmapper_handles.insert(mem_id, handle);
         Some(mem_id)
     }

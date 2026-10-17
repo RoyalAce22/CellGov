@@ -49,7 +49,7 @@ impl Lv2Host {
         }
         // size == 0 defaults to EQUEUE_MAX_RECV_EVENT (127).
         let effective_size = if size == 0 { 127 } else { size };
-        let Some(id) = self.alloc_id(SYS_EVENT_QUEUE_OBJECT) else {
+        let Some(id) = self.alloc_id(requester, SYS_EVENT_QUEUE_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         if !self.state.event_queues.create_with_id(id, effective_size) {
@@ -91,7 +91,7 @@ impl Lv2Host {
         if port_type != SYS_EVENT_PORT_LOCAL && port_type != SYS_EVENT_PORT_IPC {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
-        let Some(id) = self.alloc_id(SYS_EVENT_PORT_OBJECT) else {
+        let Some(id) = self.alloc_id(requester, SYS_EVENT_PORT_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         self.state.process_counts.event_port_inc();

@@ -284,7 +284,7 @@ impl Runtime {
         }
         // A 335 takes its window out of the caller's space, which is
         // where its 334 / 337 put it.
-        let region_removals: Vec<(u64, usize, Option<u64>, u32)> =
+        let region_removals: Vec<(u64, usize, Option<u64>, Option<u32>)> =
             self.lv2_host.drain_pending_region_removals().collect();
         if !region_removals.is_empty() {
             let caller_space = self.spaces.space_of(source);
@@ -428,7 +428,7 @@ impl Runtime {
     pub(in crate::runtime) fn remove_shm_windows(
         &mut self,
         space: crate::runtime::spaces::AddressSpaceId,
-        windows: Vec<(u64, usize, Option<u64>, u32)>,
+        windows: Vec<(u64, usize, Option<u64>, Option<u32>)>,
     ) {
         for (addr, size, ipc_key, mem_id) in windows {
             let mem = crate::runtime::spaces::resolve_space_memory_for_write(
@@ -453,7 +453,7 @@ impl Runtime {
                     ),
                 );
             }
-            if let Some(bytes) = held {
+            if let (Some(bytes), Some(mem_id)) = (held, mem_id) {
                 self.lv2_host.park_segment_contents(mem_id, bytes);
             }
             if let Some(key) = ipc_key {

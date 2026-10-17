@@ -26,7 +26,9 @@ fn rsx_context_fields_display_buffer_slots_and_kernel_cursors_move_the_partial()
         }),
         ("mem_alloc_ptr", |h| h.state.mem_alloc_ptr += 1),
         ("kernel id", |h| {
-            h.state.kernel_ids.alloc(0x85);
+            h.state
+                .kernel_ids
+                .alloc(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID, 0x85);
         }),
         ("rsx_mem_alloc_ptr", |h| h.state.rsx_mem_alloc_ptr += 1),
         ("rsx_mem_handle_counter", |h| {

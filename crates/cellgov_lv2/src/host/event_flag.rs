@@ -81,7 +81,7 @@ impl Lv2Host {
         if kind != SYS_SYNC_WAITER_SINGLE && kind != SYS_SYNC_WAITER_MULTIPLE {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
-        let Some(id) = self.alloc_id(SYS_EVENT_FLAG_OBJECT) else {
+        let Some(id) = self.alloc_id(requester, SYS_EVENT_FLAG_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         if self.state.event_flags.create_with_id(id, init).is_err() {

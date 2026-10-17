@@ -200,7 +200,8 @@ fn the_four_sync_creates_mint_the_consoles_ids() {
     let (mut host, rt) = host_and_runtime();
     let console_id = |i: usize| word(&payload, OFF_CREATE + 16 + i * 16) as u32;
     for _ in 0..kernel_id::slot_of(console_id(0)) {
-        host.alloc_id(0x23).expect("a free slot");
+        host.alloc_id(cellgov_event::UnitId::new(0), 0x23)
+            .expect("a free slot");
     }
     for (i, (_, create)) in creates().into_iter().enumerate() {
         let (code, effects) = immediate(&mut host, &rt, create);

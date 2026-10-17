@@ -50,7 +50,7 @@ impl Lv2Host {
         if out_handle_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let Some(id) = self.alloc_id(CONFIG_HANDLE_CLASS) else {
+        let Some(id) = self.alloc_id(requester, CONFIG_HANDLE_CLASS) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         if !self.state.config.seeded {
@@ -196,7 +196,7 @@ impl Lv2Host {
             Ok(data) => data,
             Err(code) => return Lv2Dispatch::immediate(code.into()),
         };
-        let Some(id) = self.alloc_id(CONFIG_LISTENER_CLASS) else {
+        let Some(id) = self.alloc_id(requester, CONFIG_LISTENER_CLASS) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         self.state.config.insert_listener(
@@ -266,7 +266,7 @@ impl Lv2Host {
             Ok(data) => data,
             Err(code) => return Lv2Dispatch::immediate(code.into()),
         };
-        let Some(id) = self.alloc_id(CONFIG_SERVICE_CLASS) else {
+        let Some(id) = self.alloc_id(requester, CONFIG_SERVICE_CLASS) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         self.state.config.insert_service(id, spec, data);

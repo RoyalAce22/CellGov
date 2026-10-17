@@ -63,7 +63,7 @@ impl Lv2Host {
         if id_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let Some(id) = self.alloc_id(SYS_SEMAPHORE_OBJECT) else {
+        let Some(id) = self.alloc_id(requester, SYS_SEMAPHORE_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         match self.state.semaphores.create_with_id(id, initial, max) {

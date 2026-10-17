@@ -176,6 +176,10 @@ pub struct Lv2Observability {
     /// purge time. Ownership is retained, so each count here is a
     /// primitive a survivor can no longer acquire.
     pub process_exit_retained_mutex_owners: u64,
+    /// Witness: kernel ids an exited process held whose object another
+    /// process can still reach, so the id stays live. See
+    /// `Lv2Host::mark_process_exited`.
+    pub process_exit_retained_ids: u64,
     /// Witness: `sys_mutex_unlock` calls refused with `CELL_EPERM`
     /// because the caller does not own the mutex.
     pub mutex_unlock_not_owner_count: u64,

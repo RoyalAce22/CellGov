@@ -21,7 +21,7 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let Some(id) = self.alloc_id(SYS_LWMUTEX_OBJECT) else {
+        let Some(id) = self.alloc_id(requester, SYS_LWMUTEX_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         if !self.state.lwmutexes.create_with_id(id) {

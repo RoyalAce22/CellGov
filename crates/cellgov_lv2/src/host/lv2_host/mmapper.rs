@@ -55,11 +55,16 @@ impl Lv2Host {
         self.state.rsx_context.context_id = context_id;
     }
 
-    /// Mint a kernel id of `class` from the shared slot table; `None`
-    /// once the process holds the most ids it may, which the create
-    /// answers with `CELL_EAGAIN`.
-    pub(in crate::host) fn alloc_id(&mut self, class: u32) -> Option<u32> {
-        self.state.kernel_ids.alloc(class)
+    /// Mint a kernel id of `class` for the process `requester` runs in;
+    /// `None` once that process holds the most ids it may, which the
+    /// create answers with `CELL_EAGAIN`.
+    pub(in crate::host) fn alloc_id(
+        &mut self,
+        requester: cellgov_event::UnitId,
+        class: u32,
+    ) -> Option<u32> {
+        let pid = self.state.processes.process_of_unit(requester);
+        self.state.kernel_ids.alloc(pid, class)
     }
 
     /// Return `id` to the slot table once a destroy removes its object.

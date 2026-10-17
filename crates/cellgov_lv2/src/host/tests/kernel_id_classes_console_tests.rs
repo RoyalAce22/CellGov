@@ -45,7 +45,8 @@ fn every_create_mints_the_consoles_id_and_a_freed_slot_comes_back_one_generation
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, MAIN);
     for _ in 0..kernel_id::slot_of(word(1)) {
-        host.alloc_id(0x23).expect("a free slot");
+        host.alloc_id(cellgov_event::UnitId::new(0), 0x23)
+            .expect("a free slot");
     }
     let mut ours = [0u32; 18];
 

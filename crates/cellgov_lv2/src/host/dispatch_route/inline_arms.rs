@@ -293,7 +293,8 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let Some(id) = self.alloc_id(cellgov_ps3_abi::lv2::process::SYS_TIMER_OBJECT) else {
+        let Some(id) = self.alloc_id(requester, cellgov_ps3_abi::lv2::process::SYS_TIMER_OBJECT)
+        else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         self.state.process_counts.timer_insert(id);
@@ -323,7 +324,8 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let Some(id) = self.alloc_id(cellgov_ps3_abi::lv2::process::SYS_RWLOCK_OBJECT) else {
+        let Some(id) = self.alloc_id(requester, cellgov_ps3_abi::lv2::process::SYS_RWLOCK_OBJECT)
+        else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         self.state.process_counts.rwlock_insert(id);

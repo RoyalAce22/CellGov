@@ -56,7 +56,7 @@ impl Lv2Host {
         if id_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let Some(id) = self.alloc_id(SYS_COND_OBJECT) else {
+        let Some(id) = self.alloc_id(requester, SYS_COND_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         if self

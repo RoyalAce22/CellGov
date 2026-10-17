@@ -146,10 +146,15 @@ fn mmapper_allocate_answers_as_on_the_console_for_a_game_process() {
     // the probe sent before it minted an id. The test sets both up.
     let first = p.words[31] as u32;
     for _ in 0..kernel_id::slot_of(first) {
-        p.host.alloc_id(0x23).expect("a free slot");
+        p.host
+            .alloc_id(cellgov_event::UnitId::new(0), 0x23)
+            .expect("a free slot");
     }
     for _ in 0..kernel_id::generation_of(first) {
-        let id = p.host.alloc_id(0x23).expect("a free slot");
+        let id = p
+            .host
+            .alloc_id(cellgov_event::UnitId::new(0), 0x23)
+            .expect("a free slot");
         p.host.release_id(id);
     }
     p.segment(15, &rt, SHM, [KEYLESS, 0, FLAG_1M, OUT, 0, 0]);

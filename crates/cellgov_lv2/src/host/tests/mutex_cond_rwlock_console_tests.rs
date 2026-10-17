@@ -322,7 +322,9 @@ fn object_ids_match_the_consoles_and_a_freed_slot_comes_back_one_generation_up()
     let p = console_payload(PROBE);
     let mut w = World::new(0);
     for _ in 0..cellgov_ps3_abi::lv2::kernel_id::slot_of(word(&p, 3)) {
-        w.host.alloc_id(0x23).expect("a free slot");
+        w.host
+            .alloc_id(cellgov_event::UnitId::new(0), 0x23)
+            .expect("a free slot");
     }
     let mut ids = Vec::new();
     for i in 0..3usize {

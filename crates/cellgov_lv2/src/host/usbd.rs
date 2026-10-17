@@ -157,7 +157,10 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[handle_ptr]) {
             return d;
         }
-        let Some(handle) = self.alloc_id(cellgov_ps3_abi::lv2::kernel_id::USBD_HANDLE_CLASS) else {
+        let Some(handle) = self.alloc_id(
+            requester,
+            cellgov_ps3_abi::lv2::kernel_id::USBD_HANDLE_CLASS,
+        ) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         self.state.usbd.handles.insert(handle);

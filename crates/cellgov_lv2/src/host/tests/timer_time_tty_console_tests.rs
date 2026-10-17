@@ -154,7 +154,8 @@ fn timer_destroy_refuses_an_id_it_never_created_or_already_destroyed() {
     );
     // The console's process held the slots below its timer's.
     for _ in 0..cellgov_ps3_abi::lv2::kernel_id::slot_of(words[24] as u32) {
-        host.alloc_id(0x23).expect("a free slot");
+        host.alloc_id(cellgov_event::UnitId::new(0), 0x23)
+            .expect("a free slot");
     }
     let (code, effects) = dispatch(&mut host, &rt, Lv2Request::TimerCreate { id_ptr: SLOT_A });
     assert_eq!(code, words[23], "create");

@@ -210,6 +210,9 @@ pub mod source {
     /// The contents of shared-memory segments no window maps, one
     /// object per mem id.
     pub const MMAPPER_PARKED: u8 = 72;
+    /// The owning pid of each live kernel id a spawned process holds,
+    /// keyed as `KERNEL_IDS` is.
+    pub const KERNEL_ID_OWNERS: u8 = 73;
 }
 
 const OBJECT_BITS: u32 = 32;

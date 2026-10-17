@@ -59,18 +59,11 @@ impl Lv2Host {
     /// exit, so a grant handed to a parked thread of an exited process
     /// is a resource no thread will ever consume or release.
     ///
-    /// Mutex ownership held by a dead thread is retained and witnessed
-    /// in `process_exit_retained_mutex_owners`; reclaiming it needs
-    /// creator attribution the shared object namespace does not
-    /// record.
+    /// A dead thread keeps the mutexes it holds that its process did
+    /// not create, and `witness_retained_mutex_owners` counts them in
+    /// `process_exit_retained_mutex_owners`.
     fn purge_exited_process_waiters(&mut self, pid: u32) {
-        let threads: std::collections::BTreeSet<crate::ppu_thread::PpuThreadId> = self
-            .state
-            .processes
-            .units_of(pid)
-            .into_iter()
-            .filter_map(|unit| self.state.ppu_threads.thread_id_for_unit(unit))
-            .collect();
+        let threads = self.threads_of_process(pid);
         if threads.is_empty() {
             return;
         }
@@ -113,6 +106,31 @@ impl Lv2Host {
                     .or_insert(0) += count as u64;
             }
         }
+    }
+
+    /// The PPU threads of process `pid`.
+    pub(in crate::host) fn threads_of_process(
+        &self,
+        pid: u32,
+    ) -> std::collections::BTreeSet<crate::ppu_thread::PpuThreadId> {
+        self.state
+            .processes
+            .units_of(pid)
+            .into_iter()
+            .filter_map(|unit| self.state.ppu_threads.thread_id_for_unit(unit))
+            .collect()
+    }
+
+    /// Witness the mutexes a thread of `pid`, which exited, still holds.
+    /// The exit already dropped each mutex `pid` created that no other
+    /// process reaches, so each one left is a mutex the exit kept. To
+    /// reclaim it needs creator attribution the shared object namespace
+    /// does not record.
+    fn witness_retained_mutex_owners(&mut self, pid: u32) {
+        let threads = self.threads_of_process(pid);
+        if threads.is_empty() {
+            return;
+        }
         let orphaned = self.state.mutexes.ids_owned_by(&threads);
         if !orphaned.is_empty() {
             self.obs.process_exit_retained_mutex_owners += orphaned.len() as u64;
@@ -138,7 +156,9 @@ impl Lv2Host {
     /// and is logged as a runtime sequencing bug.
     ///
     /// A fresh exit also purges the pid's threads from every LV2
-    /// waiter list; see `purge_exited_process_waiters`.
+    /// waiter list (see `purge_exited_process_waiters`), and releases
+    /// the kernel ids the pid held with their objects (see
+    /// `release_process_ids`).
     pub fn mark_process_exited(&mut self, pid: u32, status: i32) {
         match self.state.processes.get(pid).map(|entry| entry.exit_status) {
             None => self.log_invariant_break(
@@ -163,6 +183,8 @@ impl Lv2Host {
                     .exit_status = Some(status);
                 self.purge_exited_process_waiters(pid);
                 self.release_process_mmapper(pid);
+                self.release_process_ids(pid);
+                self.witness_retained_mutex_owners(pid);
             }
         }
     }

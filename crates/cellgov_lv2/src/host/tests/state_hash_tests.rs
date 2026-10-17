@@ -305,7 +305,7 @@ fn fingerprint_stays_off_baseline_after_alloc_id_backed_port_create_then_destroy
     // baseline.
     let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
-    let id = host.alloc_id(0x0E).unwrap();
+    let id = host.alloc_id(cellgov_event::UnitId::new(0), 0x0E).unwrap();
     host.state.event_ports.create_with_id(id, 1, 0);
     host.state.event_ports.destroy(id).unwrap();
     host.release_id(id);

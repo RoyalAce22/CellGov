@@ -4,6 +4,7 @@
 mod accessors;
 mod children;
 mod counters;
+mod exit_ids;
 mod mmapper;
 mod model;
 mod process;

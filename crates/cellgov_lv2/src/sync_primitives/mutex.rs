@@ -218,6 +218,22 @@ impl MutexTable {
         Some(entry)
     }
 
+    /// Remove the entry of a mutex whose process exited, held or not;
+    /// `None` if the id was unknown.
+    ///
+    /// Caller contract: no thread waits on it, and no thread of a live
+    /// process holds it.
+    pub fn destroy_abandoned(&mut self, id: u32) -> Option<MutexEntry> {
+        let entry = self.entries.remove(id)?;
+        debug_assert!(
+            entry.waiters.is_empty(),
+            "abandoned mutex {:#x} destroyed with {} parked waiter(s)",
+            id,
+            entry.waiters.len(),
+        );
+        Some(entry)
+    }
+
     /// Read-only lookup.
     pub fn lookup(&self, id: u32) -> Option<&MutexEntry> {
         self.entries.get(id)

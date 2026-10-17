@@ -60,16 +60,16 @@ impl Lv2Host {
     /// Each `(addr, size, ipc_key, mem_id)` names a window an earlier
     /// [`Self::drain_pending_region_installs`] item installed. The
     /// runtime gives its bytes to [`Self::park_segment_contents`] under
-    /// `mem_id` and removes the window from the caller's space via
+    /// a `Some(mem_id)` and removes the window from the caller's space via
     /// `GuestMemory::remove_region`. A `Some(ipc_key)` names the keyed segment whose
     /// view the window was; the runtime drops that view.
     pub fn drain_pending_region_removals(
         &mut self,
-    ) -> impl Iterator<Item = (u64, usize, Option<u64>, u32)> + '_ {
+    ) -> impl Iterator<Item = (u64, usize, Option<u64>, Option<u32>)> + '_ {
         self.derived
             .pending_region_removals
             .drain(..)
-            .map(|p| (p.addr, p.size, p.ipc_key, p.mem_id))
+            .map(|p| (p.addr, p.size, p.ipc_key, Some(p.mem_id)))
     }
 
     /// Drain the windows of child processes that exited, in the form of
@@ -80,14 +80,17 @@ impl Lv2Host {
     /// Each window lies in the exited child's space, not the space of
     /// the unit whose dispatch the runtime is draining, so the runtime
     /// drains this from its child-exit path, right after
-    /// [`Self::mark_process_exited`].
+    /// [`Self::mark_process_exited`]. The mem id is `None` for a
+    /// segment the exit freed with the child's ids: no later map can
+    /// name it, so its bytes are not kept.
     pub fn drain_released_process_windows(
         &mut self,
-    ) -> impl Iterator<Item = (u64, usize, Option<u64>, u32)> + '_ {
-        self.derived
-            .released_process_windows
-            .drain(..)
-            .map(|p| (p.addr, p.size, p.ipc_key, p.mem_id))
+    ) -> impl Iterator<Item = (u64, usize, Option<u64>, Option<u32>)> + '_ {
+        let handles = &self.state.mmapper_handles;
+        self.derived.released_process_windows.drain(..).map(|p| {
+            let kept = handles.get(p.mem_id).is_some().then_some(p.mem_id);
+            (p.addr, p.size, p.ipc_key, kept)
+        })
     }
 
     /// Keep the bytes an unmapped window of `mem_id` held, for the

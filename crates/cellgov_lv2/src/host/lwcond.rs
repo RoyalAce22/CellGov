@@ -40,7 +40,7 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[id_ptr]) {
             return d;
         }
-        let Some(id) = self.alloc_id(SYS_LWCOND_OBJECT) else {
+        let Some(id) = self.alloc_id(requester, SYS_LWCOND_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
         self.state.lwconds.create_with_id(id, lwmutex_id);
