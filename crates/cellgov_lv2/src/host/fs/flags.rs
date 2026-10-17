@@ -2,8 +2,8 @@
 
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::fs::{
-    CELL_FS_O_ACCMODE, CELL_FS_O_APPEND, CELL_FS_O_CREAT, CELL_FS_O_RDWR, CELL_FS_O_TRUNC,
-    CELL_FS_O_WRONLY,
+    CELL_FS_O_ACCMODE, CELL_FS_O_APPEND, CELL_FS_O_CREAT, CELL_FS_O_EXCL, CELL_FS_O_RDWR,
+    CELL_FS_O_TRUNC, CELL_FS_O_WRONLY,
 };
 
 /// Paths whose `sys_fs_open` accepts write flags. No write path
@@ -18,15 +18,23 @@ use cellgov_ps3_abi::lv2::fs::{
 /// regression test in `super::tests` pins this.
 pub(super) const FS_TTY_SINK_PATHS: &[&str] = &["/app_home/output.txt"];
 
-/// Returns `Some(errno)` if the open-flag combination is unsupportable
-/// against a read-only blob store, `None` otherwise. Paths in
-/// [`FS_TTY_SINK_PATHS`] bypass the flag check.
+/// Returns `Some(errno)` if the open-flag combination is refused for a
+/// path that exists or is unsupportable against a read-only blob store,
+/// `None` otherwise. Paths in [`FS_TTY_SINK_PATHS`] bypass the flag
+/// check.
+///
+/// An exclusive create of a path that exists is `CELL_EEXIST` before
+/// the read-only refusal: the `lv2_fs_constants` capture answers EEXIST
+/// for `O_CREAT | O_EXCL` on an existing file.
 pub(super) fn validate_open_flags(
     flags: u32,
     path: &str,
 ) -> Option<cellgov_ps3_abi::lv2::errno::Lv2ErrCode> {
     if FS_TTY_SINK_PATHS.contains(&path) {
         return None;
+    }
+    if flags & (CELL_FS_O_CREAT | CELL_FS_O_EXCL) == CELL_FS_O_CREAT | CELL_FS_O_EXCL {
+        return Some(errno::CELL_EEXIST);
     }
     let access = flags & CELL_FS_O_ACCMODE;
     if access == CELL_FS_O_WRONLY || access == CELL_FS_O_RDWR {

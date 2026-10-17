@@ -32,5 +32,9 @@ mod common;
 mod fs_answers_console_tests;
 
 #[cfg(test)]
+#[path = "tests/fs_constants_console_tests.rs"]
+mod fs_constants_console_tests;
+
+#[cfg(test)]
 #[path = "tests/fs_blksize_console_tests.rs"]
 mod fs_blksize_console_tests;

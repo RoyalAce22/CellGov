@@ -1,0 +1,15 @@
+[test]
+name = "lv2_fs_path_limit_mount"
+
+# A hardware probe: where sys_fs_stat stops taking a long path, byte by
+# byte, under two mount points of different length. The console capture
+# is the answer; no emulator runs it.
+
+[observe]
+# 16 big-endian u64 words, as ppu/main.c lists: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"

@@ -26,9 +26,10 @@ impl Lv2Host {
     ///
     /// In precedence order:
     /// 1. `fd_out_ptr` NULL / misaligned / unwritable -> CELL_EFAULT.
-    /// 2. `path_ptr` unmapped / no NUL within `CELL_FS_MAX_PATH_LENGTH`
-    ///    -> CELL_EFAULT or CELL_EINVAL.
-    /// 3. Path exists AND flags request write semantics -> CELL_EROFS.
+    /// 2. `path_ptr` unmapped -> CELL_EFAULT; a path or a name in it
+    ///    over the limit -> CELL_ENAMETOOLONG.
+    /// 3. Path exists AND flags ask an exclusive create -> CELL_EEXIST;
+    ///    path exists AND flags request write semantics -> CELL_EROFS.
     /// 4. Path exists, flags OK -> CELL_OK with one fd-write effect,
     ///    or CELL_EMFILE when the fd allocator is exhausted.
     /// 5. Path missing or non-UTF-8 -> CELL_ENOENT. A `..` traversal

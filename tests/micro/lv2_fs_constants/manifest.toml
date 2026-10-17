@@ -1,0 +1,15 @@
+[test]
+name = "lv2_fs_constants"
+
+# A hardware probe: the open-flag bits, the path and name limits and the
+# record sizes of the file-system calls. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# 64 big-endian u64 words at the slots ppu/main.c lists: 512 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 512 },
+]
+
+[expect]
+outcome = "completed"

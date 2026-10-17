@@ -9,15 +9,43 @@ use cellgov_ps3_abi::lv2::fs::CELL_FS_MAX_PATH_LENGTH;
 use crate::host::fs::common::{assert_immediate, fs_open, run, PathRuntime};
 
 #[test]
-fn path_without_null_terminator_returns_einval() {
+fn path_without_null_terminator_is_too_long() {
     let mut host = Lv2Host::new();
-    let rt = PathRuntime::empty(0x40000).write(0x10000, &vec![b'A'; CELL_FS_MAX_PATH_LENGTH]);
+    let rt = PathRuntime::empty(0x40000).write(0x10000, &vec![b'/'; 0x2000]);
 
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        errno::CELL_EINVAL.code,
+        errno::CELL_ENAMETOOLONG.code,
         0,
     );
+}
+
+/// `/dev_hdd0` and then `below` bytes of short names, NUL-terminated.
+fn device_path(below: usize) -> Vec<u8> {
+    let mut path = b"/dev_hdd0".to_vec();
+    while path.len() < 9 + below {
+        path.push(b'/');
+        let run = (9 + below - path.len()).min(200);
+        path.extend(std::iter::repeat_n(b'a', run));
+    }
+    path.push(0);
+    path
+}
+
+#[test]
+fn the_path_below_its_device_may_run_to_the_limit_and_no_further() {
+    let mut host = Lv2Host::new();
+    for (below, code) in [
+        (CELL_FS_MAX_PATH_LENGTH, errno::CELL_ENOENT.code),
+        (CELL_FS_MAX_PATH_LENGTH + 1, errno::CELL_ENAMETOOLONG.code),
+    ] {
+        let rt = PathRuntime::empty(0x40000).write(0x10000, &device_path(below));
+        assert_immediate(
+            run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
+            code,
+            0,
+        );
+    }
 }
 
 #[test]
@@ -72,19 +100,6 @@ fn high_bit_bytes_in_path_succeed() {
 fn empty_path_returns_enoent() {
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"\0");
-    assert_immediate(
-        run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        errno::CELL_ENOENT.code,
-        0,
-    );
-}
-
-#[test]
-fn max_length_path_succeeds() {
-    let mut host = Lv2Host::new();
-    let mut payload = vec![b'A'; CELL_FS_MAX_PATH_LENGTH - 1];
-    payload.push(0);
-    let rt = PathRuntime::empty(0x40000).write(0x10000, &payload);
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
         errno::CELL_ENOENT.code,

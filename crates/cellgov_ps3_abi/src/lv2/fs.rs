@@ -19,6 +19,15 @@
 pub const LV2_FS_OBJECT_ID_BASE: u32 = 3;
 
 // -- sys_fs_open flag bits --
+//
+// The console capture of tests/micro/lv2_fs_constants, from a game
+// process on a file under /dev_hdd0, shows each bit's effect: a write on
+// an O_RDONLY fd and a read on an O_WRONLY fd answer EBADF; O_RDWR and
+// O_ACCMODE itself open; O_CREAT | O_EXCL on an existing file answers
+// EEXIST; O_APPEND leaves a 4-byte file 5 bytes long with the position
+// at 5 after a 1-byte write; O_TRUNC leaves it 0 bytes long; O_CREAT
+// makes a new file with the mode it names. With O_RDONLY, every other
+// bit from 0x4 to 0x20000 opens except 0x1000, O_MSELF.
 
 /// `CELL_FS_O_RDONLY`: open for reading.
 pub const CELL_FS_O_RDONLY: u32 = 0o0;
@@ -26,22 +35,30 @@ pub const CELL_FS_O_RDONLY: u32 = 0o0;
 pub const CELL_FS_O_WRONLY: u32 = 0o1;
 /// `CELL_FS_O_RDWR`: open for reading and writing.
 pub const CELL_FS_O_RDWR: u32 = 0o2;
-/// Mask for the access-mode subfield (`RDONLY | WRONLY | RDWR`).
+/// Mask for the access-mode subfield (`RDONLY | WRONLY | RDWR`). The
+/// value itself opens.
 pub const CELL_FS_O_ACCMODE: u32 = 0o3;
 /// `CELL_FS_O_CREAT`: create file if it does not exist.
 pub const CELL_FS_O_CREAT: u32 = 0o100;
-/// `CELL_FS_O_EXCL`: combined with O_CREAT, fail if file exists.
+/// `CELL_FS_O_EXCL`: combined with O_CREAT, fail with `CELL_EEXIST` if
+/// the file exists.
 pub const CELL_FS_O_EXCL: u32 = 0o200;
 /// `CELL_FS_O_TRUNC`: truncate file on open.
 pub const CELL_FS_O_TRUNC: u32 = 0o1000;
 /// `CELL_FS_O_APPEND`: append on every write.
 pub const CELL_FS_O_APPEND: u32 = 0o2000;
+/// `CELL_FS_O_MSELF`: open the file as an MSELF archive. A file that is
+/// not one is `CELL_ENOTMSELF`.
+pub const CELL_FS_O_MSELF: u32 = 0o10000;
 
 // -- Path length cap --
 
-/// `CELL_FS_MAX_PATH_LENGTH`. Counts the terminator: max content
-/// is `CELL_FS_MAX_PATH_LENGTH - 1` and the NUL must appear at
-/// index `<= 1023`.
+/// The longest a path may run below its first component, the device
+/// it names (`/dev_hdd0`, `/dev_flash`), not counting the NUL. One byte
+/// more is `CELL_ENAMETOOLONG`.
+// The console capture of tests/micro/lv2_fs_path_limit_mount takes a
+// path of 1033 bytes under /dev_hdd0 and 1034 under /dev_flash and
+// refuses one byte more under each.
 pub const CELL_FS_MAX_PATH_LENGTH: usize = 1024;
 
 // -- CellFsStat wire format --
@@ -51,7 +68,8 @@ pub const CELL_FS_MAX_PATH_LENGTH: usize = 1024;
 /// s64 mtime; s64 ctime; u64 size; u64 blksize }`, packed with no
 /// padding. The `lv2_fs_answers` capture reads the size at offset 36
 /// and the block size at offset 44, and the kernel leaves bytes 52 on
-/// untouched.
+/// untouched; in the `lv2_fs_constants` capture `sys_fs_stat` and
+/// `sys_fs_fstat` each write exactly 52 bytes over a filled buffer.
 pub const CELL_FS_STAT_SIZE: u64 = 52;
 
 /// Offset of `CellFsStat::size` in the packed record.
@@ -74,6 +92,12 @@ pub const CELL_FS_DISC_BLOCK_SIZE: u64 = 2048;
 pub const CELL_FS_DISC_ROOT: &str = "/dev_bdvd";
 
 // -- mode bits (subset that CellGov currently emits) --
+//
+// The console captures read 0x8180 for a file made with mode 0o600
+// (lv2_fs_answers, lv2_fs_constants), 0x41C0 for a directory made with
+// 0o700, and 0x81A4 for a file under /dev_flash: S_IFREG, S_IFDIR and
+// the owner, group and other read bits, and owner-execute. No capture
+// shows group- or other-execute.
 
 /// `S_IFREG`: regular-file mode bit.
 pub const CELL_FS_S_IFREG: u32 = 0x8000;
@@ -98,19 +122,25 @@ pub const CELL_FS_S_IXOTH: u32 = 0x001;
 /// Wire size of `CellFsDirent`. The struct is
 /// `{ u8 d_type; u8 d_namlen; char d_name[256] }` with the name
 /// stored as a fixed 256-byte buffer (NUL-padded).
+// The console capture of tests/micro/lv2_fs_constants: each readdir
+// writes 258 bytes over a filled buffer and reports nread 258, and the
+// call at the end of the directory writes 258 bytes too and reports 0.
 pub const CELL_FS_DIRENT_SIZE: u64 = 258;
 
-/// Maximum filename length the kernel will write into
-/// `CellFsDirent::d_name`, excluding the trailing NUL. Names
-/// longer than this are truncated; `d_namlen` clamps to this
-/// value so guests reading the prefix get a well-formed string.
+/// The longest name a path may carry, excluding the trailing NUL, and
+/// so the longest `CellFsDirent::d_name` holds. A path naming a longer
+/// one is `CELL_ENAMETOOLONG`.
+// The console capture of tests/micro/lv2_fs_constants: sys_fs_stat of
+// a 255-byte name answers ENOENT, of a 256-byte one ENAMETOOLONG.
 pub const CELL_FS_MAX_FS_FILE_NAME_LENGTH: u8 = 255;
 
-/// `d_type` for an unknown filesystem entry.
+/// `d_type` for an unknown filesystem entry. No capture reads it.
 pub const CELL_FS_TYPE_UNKNOWN: u8 = 0;
-/// `d_type` for a directory.
+/// `d_type` for a directory, as the `lv2_fs_answers` and
+/// `lv2_fs_constants` captures read it for `.` and `..`.
 pub const CELL_FS_TYPE_DIRECTORY: u8 = 1;
-/// `d_type` for a regular file.
+/// `d_type` for a regular file, as the same captures read it.
 pub const CELL_FS_TYPE_REGULAR: u8 = 2;
-/// `d_type` for a symlink.
+/// `d_type` for a symlink. No capture reads it: no probe has a symlink
+/// to list.
 pub const CELL_FS_TYPE_SYMLINK: u8 = 3;

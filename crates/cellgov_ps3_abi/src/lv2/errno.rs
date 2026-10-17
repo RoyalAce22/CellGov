@@ -106,7 +106,7 @@ errno_table! {
     CELL_ENOTCONN     = 0x8001_0016, "Port is not connected";
     // Not captured: only an image the SELF loader rejects gives it (see ENOEXEC).
     CELL_EAUTHFAIL    = 0x8001_0017, "Program authentication fail";
-    // Not captured: an MSELF open of a file that is not one gives it.
+    // Console capture: lv2_fs_constants.
     CELL_ENOTMSELF    = 0x8001_0018, "The file is not a MSELF";
     // No syscall or file-system call documents it; no probe can name a call that gives it.
     CELL_ESYSVER      = 0x8001_0019, "System version error";

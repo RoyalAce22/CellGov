@@ -72,8 +72,8 @@ impl Lv2Host {
     ///
     /// In precedence order:
     /// 1. `stat_out_ptr` misaligned / unwritable for 52 bytes -> CELL_EFAULT.
-    /// 2. `path_ptr` unmapped or no NUL within `CELL_FS_MAX_PATH_LENGTH`
-    ///    -> CELL_EFAULT or CELL_EINVAL.
+    /// 2. `path_ptr` unmapped -> CELL_EFAULT; a path or a name in it
+    ///    over the limit -> CELL_ENAMETOOLONG.
     /// 3. Non-UTF-8 path -> CELL_ENOENT, with no mount probe.
     /// 4. Path in neither the store nor the mount table -> CELL_ENOENT.
     ///    The store caches a mount hit; a root the host declines to

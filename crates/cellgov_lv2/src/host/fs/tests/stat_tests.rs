@@ -132,12 +132,12 @@ fn stat_bad_path_pointer_returns_efault() {
 }
 
 #[test]
-fn stat_path_without_null_terminator_returns_einval() {
+fn stat_path_whose_one_name_is_1024_bytes_is_too_long() {
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x100000).write(0x10000, &vec![b'A'; CELL_FS_MAX_PATH_LENGTH]);
     assert_immediate(
         run(&mut host, &rt, fs_stat(0x10000, 0x40000)),
-        errno::CELL_EINVAL.code,
+        errno::CELL_ENAMETOOLONG.code,
         0,
     );
 }

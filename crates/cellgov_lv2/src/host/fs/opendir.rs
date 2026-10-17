@@ -29,8 +29,8 @@ impl Lv2Host {
     ///
     /// In precedence order:
     /// 1. `fd_out_ptr` NULL / misaligned / unwritable -> CELL_EFAULT.
-    /// 2. `path_ptr` unmapped / no NUL within `CELL_FS_MAX_PATH_LENGTH`
-    ///    -> CELL_EFAULT or CELL_EINVAL.
+    /// 2. `path_ptr` unmapped -> CELL_EFAULT; a path or a name in it
+    ///    over the limit -> CELL_ENAMETOOLONG.
     /// 3. Non-UTF-8 path -> CELL_ENOENT.
     /// 4. No matching mount prefix -> CELL_ENOENT.
     /// 5. Host path not-a-directory -> CELL_ENOTDIR; missing ->
