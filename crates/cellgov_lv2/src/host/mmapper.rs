@@ -149,6 +149,13 @@ impl LaneValue for MmapperArea {
     }
 }
 
+/// The lane object of a `(pid, base)` key: the pid in the high word.
+/// Every pid is nonzero, so the object needs more than the 32 packed
+/// object bits and each entry's lanes take the mixer term.
+pub(crate) fn pid_base_object((pid, base): (u32, u32)) -> u64 {
+    u64::from(pid) << 32 | u64::from(base)
+}
+
 /// A window 334 or 337 mapped and no 335 unmapped: the segment it views
 /// and the window's length, the segment's size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,3 +226,7 @@ mod map_console_tests;
 #[cfg(test)]
 #[path = "tests/mmapper_unmap_console_tests.rs"]
 mod unmap_console_tests;
+
+#[cfg(test)]
+#[path = "tests/mmapper_process_tests.rs"]
+mod process_tests;

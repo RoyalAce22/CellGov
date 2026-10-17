@@ -170,12 +170,23 @@ fn the_area_lookup_stops_at_the_area_end() {
     let s = setup(&words, &rt, FLAG_64K);
     assert_eq!(
         s.host
-            .mmapper_area_of(s.a + AREA - 1)
+            .mmapper_area_of(
+                cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+                s.a + AREA - 1
+            )
             .map(|(b, _)| u64::from(b)),
         Some(s.a)
     );
-    assert_eq!(s.host.mmapper_area_of(s.a + AREA), None);
-    assert_eq!(s.host.mmapper_area_of(s.a - 1), None);
+    assert_eq!(
+        s.host
+            .mmapper_area_of(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID, s.a + AREA),
+        None
+    );
+    assert_eq!(
+        s.host
+            .mmapper_area_of(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID, s.a - 1),
+        None
+    );
 }
 
 /// CellGov's choice: neither probe fills an area. A search stays inside
@@ -187,6 +198,7 @@ fn a_search_stays_inside_its_area() {
     let mut s = setup(&words, &rt, FLAG_64K);
     let a = s.a;
     s.host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
         u32::try_from(a).expect("u32 area base"),
         u32::try_from(AREA).expect("u32 area size"),
         0,

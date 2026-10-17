@@ -194,7 +194,7 @@ pub mod source {
     /// Live user-memory blocks, one object per base address.
     pub const MEMORY_BLOCK: u8 = 66;
     /// Address areas `sys_mmapper_allocate_address` reserved, one
-    /// object per base address.
+    /// object per owning pid and base address.
     pub const MMAPPER_AREA: u8 = 67;
     /// The kernel SPU image ids 156 and 157 handed out, one object
     /// per id.
@@ -205,7 +205,7 @@ pub mod source {
     /// Kernel-id slots that have held an id, one object per slot.
     pub const KERNEL_ID_SLOTS: u8 = 70;
     /// Shared-memory windows 334 or 337 mapped and no 335 unmapped,
-    /// one object per window base.
+    /// one object per owning pid and window base.
     pub const MMAPPER_WINDOW: u8 = 71;
     /// The contents of shared-memory segments no window maps, one
     /// object per mem id.

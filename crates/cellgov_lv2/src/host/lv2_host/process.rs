@@ -162,6 +162,7 @@ impl Lv2Host {
                     .expect("entry present just above")
                     .exit_status = Some(status);
                 self.purge_exited_process_waiters(pid);
+                self.release_process_mmapper(pid);
             }
         }
     }

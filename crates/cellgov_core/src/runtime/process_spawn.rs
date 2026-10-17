@@ -268,6 +268,11 @@ impl Runtime {
             let _ = self.syscall_responses.try_take(uid);
         }
         self.lv2_host.mark_process_exited(pid, code);
+        let windows: Vec<(u64, usize, Option<u64>, u32)> =
+            self.lv2_host.drain_released_process_windows().collect();
+        if !windows.is_empty() {
+            self.remove_shm_windows(caller_space, windows);
+        }
     }
 }
 
@@ -278,3 +283,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/process_spawn_init_tests.rs"]
 mod init_tests;
+
+#[cfg(test)]
+#[path = "tests/process_exit_mmapper_tests.rs"]
+mod exit_mmapper_tests;

@@ -72,6 +72,24 @@ impl Lv2Host {
             .map(|p| (p.addr, p.size, p.ipc_key, p.mem_id))
     }
 
+    /// Drain the windows of child processes that exited, in the form of
+    /// [`Self::drain_pending_region_removals`].
+    ///
+    /// # Cross-module contract
+    ///
+    /// Each window lies in the exited child's space, not the space of
+    /// the unit whose dispatch the runtime is draining, so the runtime
+    /// drains this from its child-exit path, right after
+    /// [`Self::mark_process_exited`].
+    pub fn drain_released_process_windows(
+        &mut self,
+    ) -> impl Iterator<Item = (u64, usize, Option<u64>, u32)> + '_ {
+        self.derived
+            .released_process_windows
+            .drain(..)
+            .map(|p| (p.addr, p.size, p.ipc_key, p.mem_id))
+    }
+
     /// Keep the bytes an unmapped window of `mem_id` held, for the
     /// segment's next map. A `mem_id` no handle names is an invariant
     /// break: 329 refuses a free while a window maps the segment.

@@ -96,25 +96,28 @@ impl Lv2Host {
         }
     }
 
-    /// Reserve the lowest free range of `size`, rounded up to the
-    /// 256 MiB granule, in `[MMAPPER_REGION_START, MMAPPER_REGION_END)`,
-    /// record it as an area of `page`-byte pages, and return its base.
+    /// Reserve the lowest range of `size`, rounded up to the 256 MiB
+    /// granule, in `[MMAPPER_REGION_START, MMAPPER_REGION_END)` that
+    /// process `pid` holds no area in, record it as an area of
+    /// `page`-byte pages, and return its base.
     ///
-    /// A base that 331 freed is free for the next 330: the
-    /// `lv2_mmapper_map_edges` capture shows a 330 after a 331 getting
-    /// the freed base back.
+    /// Each process has its own areas: both `lv2_mmapper_map` captures,
+    /// one game process each, get the region start as their first base,
+    /// whatever another process holds. A base that 331 freed is free for
+    /// the next 330: the `lv2_mmapper_map_edges` capture shows a 330
+    /// after a 331 getting the freed base back.
     ///
     /// Returns `None` for `size == 0`, when the rounding would overflow
     /// `u32`, or when no free range below
     /// [`Self::MMAPPER_REGION_END`] holds the request.
-    pub(in crate::host) fn mmapper_alloc(&mut self, size: u32, page: u32) -> Option<u32> {
+    pub(in crate::host) fn mmapper_alloc(&mut self, pid: u32, size: u32, page: u32) -> Option<u32> {
         if size == 0 {
             return None;
         }
         let granule = u32::try_from(cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE).ok()?;
         let rounded = size.checked_add(granule - 1)? & !(granule - 1);
         let mut base = u64::from(Self::MMAPPER_REGION_START);
-        for (area_base, area) in self.state.mmapper_areas.iter() {
+        for (area_base, area) in self.mmapper_areas_of(pid) {
             if u64::from(area_base) >= base + u64::from(rounded) {
                 break;
             }
@@ -125,7 +128,7 @@ impl Lv2Host {
         }
         let base = u32::try_from(base).ok()?;
         self.state.mmapper_areas.insert(
-            base,
+            (pid, base),
             crate::host::mmapper::MmapperArea {
                 size: rounded,
                 page,
@@ -134,10 +137,55 @@ impl Lv2Host {
         Some(base)
     }
 
+    /// Process `pid`'s areas, by base.
+    pub(in crate::host) fn mmapper_areas_of(
+        &self,
+        pid: u32,
+    ) -> impl Iterator<Item = (u32, &crate::host::mmapper::MmapperArea)> + '_ {
+        self.state
+            .mmapper_areas
+            .iter()
+            .filter(move |&((p, _), _)| p == pid)
+            .map(|((_, base), area)| (base, area))
+    }
+
+    /// Process `pid`'s windows, by base.
+    pub(in crate::host) fn mmapper_windows_of(
+        &self,
+        pid: u32,
+    ) -> impl Iterator<Item = (u32, &crate::host::mmapper::MmapperWindow)> + '_ {
+        self.state
+            .mmapper_windows
+            .iter()
+            .filter(move |&((p, _), _)| p == pid)
+            .map(|((_, base), window)| (base, window))
+    }
+
+    /// Drop the areas and windows of process `pid`, which exited: the
+    /// kernel tears a process's address space down with it, so its
+    /// windows no longer hold a segment against a free. Each window
+    /// joins `released_process_windows` for the runtime to remove, its
+    /// segment keeping the bytes as after a 335.
+    pub(in crate::host) fn release_process_mmapper(&mut self, pid: u32) {
+        let released: Vec<crate::host::mmapper::PendingRegionRemoval> = self
+            .mmapper_windows_of(pid)
+            .map(|(base, w)| crate::host::mmapper::PendingRegionRemoval {
+                addr: u64::from(base),
+                size: w.size as usize,
+                mem_id: w.mem_id,
+                ipc_key: self.ipc_key_of_mem_id(w.mem_id),
+            })
+            .collect();
+        self.derived.released_process_windows.extend(released);
+        self.state.mmapper_areas.retain(|(p, _), _| p != pid);
+        self.state.mmapper_windows.retain(|(p, _), _| p != pid);
+    }
+
     /// Search for the first free, `align`-aligned range of `size`
     /// bytes inside `[MMAPPER_REGION_START, MMAPPER_REGION_END)` at
     /// or after `hint` and ending at or below `limit`, skipping every
-    /// window in [`mmapper_windows`](crate::host::state::Lv2State::mmapper_windows)
+    /// window of process `pid` in
+    /// [`mmapper_windows`](crate::host::state::Lv2State::mmapper_windows)
     /// and every range occupied in the caller's committed layout.
     /// Loader regions are invisible to the window table, so an occupied
     /// range is skipped rather than refused -- `sys_mmapper_search_and_map` searches, it does not
@@ -154,6 +202,7 @@ impl Lv2Host {
     /// `CELL_ENOMEM`.
     pub(in crate::host) fn mmapper_search_free_range(
         &self,
+        pid: u32,
         hint: u32,
         size: u32,
         align: u32,
@@ -177,7 +226,7 @@ impl Lv2Host {
                 return None;
             }
             let ledger_skip_to = self
-                .mmapper_window_ends_below(end)
+                .mmapper_window_ends_below(pid, end)
                 .filter(|&prior_end| prior_end > candidate)
                 .max();
             let committed_skip_to = rt
@@ -205,22 +254,23 @@ impl Lv2Host {
         }
     }
 
-    /// The area 330 reserved that holds `addr`: its base and record.
+    /// The area process `pid`'s 330 reserved that holds `addr`: its base
+    /// and record.
     pub(in crate::host) fn mmapper_area_of(
         &self,
+        pid: u32,
         addr: u64,
     ) -> Option<(u32, crate::host::mmapper::MmapperArea)> {
         let addr = u32::try_from(addr).ok()?;
-        self.state
-            .mmapper_areas
-            .iter()
-            .rev()
-            .find(|&(base, _)| base <= addr)
+        self.mmapper_areas_of(pid)
+            .filter(|&(base, _)| base <= addr)
+            .last()
             .filter(|&(base, area)| u64::from(addr) < u64::from(base) + u64::from(area.size))
             .map(|(base, &area)| (base, area))
     }
 
-    /// The end of every window that starts below `end`.
+    /// The end of every window of process `pid` that starts below
+    /// `end`.
     ///
     /// Every such window is a possible overlap, not only the nearest
     /// one: a map whose runtime `install_region` was refused still
@@ -231,30 +281,35 @@ impl Lv2Host {
     /// read as free.
     pub(in crate::host) fn mmapper_window_ends_below(
         &self,
+        pid: u32,
         end: u32,
     ) -> impl Iterator<Item = u32> + '_ {
-        self.state
-            .mmapper_windows
-            .iter()
+        self.mmapper_windows_of(pid)
             .take_while(move |&(start, _)| start < end)
             .map(|(start, w)| start.saturating_add(w.size))
     }
 
-    /// Record a window 334 or 337 mapped. Paired with a
+    /// Record a window process `pid`'s 334 or 337 mapped. Paired with a
     /// `PendingRegionInstall` push by the same dispatch.
-    pub(in crate::host) fn mmapper_window_insert(&mut self, addr: u32, size: u32, mem_id: u32) {
-        let prior = self
-            .state
-            .mmapper_windows
-            .insert(addr, crate::host::mmapper::MmapperWindow { mem_id, size });
+    pub(in crate::host) fn mmapper_window_insert(
+        &mut self,
+        pid: u32,
+        addr: u32,
+        size: u32,
+        mem_id: u32,
+    ) {
+        let prior = self.state.mmapper_windows.insert(
+            (pid, addr),
+            crate::host::mmapper::MmapperWindow { mem_id, size },
+        );
         debug_assert!(
             prior.is_none(),
-            "mmapper window: addr {addr:#x} already recorded ({prior:?})",
+            "mmapper window: pid {pid:#x} addr {addr:#x} already recorded ({prior:?})",
         );
     }
 
-    /// Whether a window maps `mem_id`, or a refused 337 left a map of it
-    /// behind: what holds the segment against a free.
+    /// Whether a window of any process maps `mem_id`, or a refused 337
+    /// left a map of it behind: what holds the segment against a free.
     pub(in crate::host) fn mmapper_segment_busy(
         &self,
         mem_id: u32,
@@ -268,18 +323,17 @@ impl Lv2Host {
                 .any(|w| w.mem_id == mem_id)
     }
 
-    /// Whether a window lies in the area at `base`: what holds the area
-    /// against a free.
+    /// Whether a window of process `pid` lies in its area at `base`:
+    /// what holds the area against a free.
     pub(in crate::host) fn mmapper_area_busy(
         &self,
+        pid: u32,
         base: u32,
         area: crate::host::mmapper::MmapperArea,
     ) -> bool {
         let end = u64::from(base) + u64::from(area.size);
-        self.state
-            .mmapper_windows
-            .keys()
-            .any(|start| start >= base && u64::from(start) < end)
+        self.mmapper_windows_of(pid)
+            .any(|(start, _)| start >= base && u64::from(start) < end)
     }
 
     /// `ipc_key -> mem_id` registrations made by keyed 332 calls.

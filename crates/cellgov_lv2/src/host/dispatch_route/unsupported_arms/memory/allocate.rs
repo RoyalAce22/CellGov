@@ -139,7 +139,8 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
             return d;
         }
-        match self.mmapper_alloc(size, page_size::granule_from_flags(args[1])) {
+        let pid = self.state.processes.process_of_unit(requester);
+        match self.mmapper_alloc(pid, size, page_size::granule_from_flags(args[1])) {
             Some(addr) => {
                 let write = Effect::shared_write(
                     ByteRange::contiguous_u32(alloc_addr_ptr, 4),
@@ -421,28 +422,30 @@ impl Lv2Host {
         mem_id_written(mem_id_ptr, mem_id, requester, tick)
     }
 
-    /// `sys_mmapper_free_address` (331): removes the area 330 reserved
-    /// at `addr`.
+    /// `sys_mmapper_free_address` (331): removes the area the caller's
+    /// 330 reserved at `addr`.
     ///
     /// # Errors
     ///
     /// Listed in the order they fire.
     ///
-    /// - `CELL_EINVAL` when `addr` is not the base of an area 330
-    ///   reserved and no 331 freed.
+    /// - `CELL_EINVAL` when `addr` is not the base of an area the
+    ///   caller's 330 reserved and no 331 freed.
     /// - `CELL_EBUSY` when a window lies in the area, as the
     ///   `lv2_mmapper_map_64k` capture shows.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_free_address(
         &mut self,
         addr: u32,
+        requester: UnitId,
     ) -> Lv2Dispatch {
-        let Some(&area) = self.state.mmapper_areas.get(addr) else {
+        let pid = self.state.processes.process_of_unit(requester);
+        let Some(&area) = self.state.mmapper_areas.get((pid, addr)) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
-        if self.mmapper_area_busy(addr, area) {
+        if self.mmapper_area_busy(pid, addr, area) {
             return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
-        self.state.mmapper_areas.remove(addr);
+        self.state.mmapper_areas.remove((pid, addr));
         Lv2Dispatch::immediate(0)
     }
 

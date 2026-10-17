@@ -83,7 +83,7 @@ fn write_marshal_block(rt: &mut Runtime) {
     write(rt, PATH_STR, &path);
 }
 
-fn build_spawn_ready() -> Runtime {
+pub(super) fn build_spawn_ready() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(0x1000), Budget::new(4), 100);
     rt.registry_mut().register_with(Idle::new);
     write_marshal_block(&mut rt);
@@ -112,7 +112,7 @@ fn build_spawn_ready() -> Runtime {
     rt
 }
 
-fn spawn_request() -> cellgov_lv2::Lv2Request {
+pub(super) fn spawn_request() -> cellgov_lv2::Lv2Request {
     classify(
         cellgov_ps3_abi::lv2::syscall::PROCESS_SPAWN,
         &[PID_OUT, 1000, 0, BLOCK, 0x60, 0, 0, 0],

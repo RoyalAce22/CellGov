@@ -288,37 +288,7 @@ impl Runtime {
             self.lv2_host.drain_pending_region_removals().collect();
         if !region_removals.is_empty() {
             let caller_space = self.spaces.space_of(source);
-            for (addr, size, ipc_key, mem_id) in region_removals {
-                let mem = crate::runtime::spaces::resolve_space_memory_for_write(
-                    &mut self.memory,
-                    &mut self.spaces,
-                    caller_space,
-                );
-                // The segment keeps the window's bytes for its next map.
-                let held =
-                    cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), size as u64)
-                        .and_then(|range| mem.read(range))
-                        .map(<[u8]>::to_vec);
-                if let Err(err) = mem.remove_region(addr, size) {
-                    // The window's install was refused, the one path
-                    // that leaves a host window with no region; the
-                    // install arm logged that break already.
-                    self.lv2_host.log_invariant_break(
-                        "dispatch.mmapper_region_remove_missing",
-                        format_args!(
-                            "shm region removal at 0x{addr:08x}+0x{size:x} in space {}: \
-                             {err}; nothing removed",
-                            caller_space.raw(),
-                        ),
-                    );
-                }
-                if let Some(bytes) = held {
-                    self.lv2_host.park_segment_contents(mem_id, bytes);
-                }
-                if let Some(key) = ipc_key {
-                    self.detach_keyed_shm_view(key, caller_space, addr);
-                }
-            }
+            self.remove_shm_windows(caller_space, region_removals);
         }
         match dispatch {
             Lv2Dispatch::Immediate { code, effects } => {
@@ -444,6 +414,50 @@ impl Runtime {
                     effects,
                 );
                 self.register_wait_deadline(source, reason, wait_timeout_usec);
+            }
+        }
+    }
+}
+
+impl Runtime {
+    /// Take each shared-memory window `(addr, size, ipc_key, mem_id)` out
+    /// of `space`: its bytes stay with the segment for its next map, its
+    /// region leaves the space, and a keyed window's view leaves the
+    /// shared-mapping bookkeeping. A 335 drains here, and so does the
+    /// exit of a child process that held windows.
+    pub(in crate::runtime) fn remove_shm_windows(
+        &mut self,
+        space: crate::runtime::spaces::AddressSpaceId,
+        windows: Vec<(u64, usize, Option<u64>, u32)>,
+    ) {
+        for (addr, size, ipc_key, mem_id) in windows {
+            let mem = crate::runtime::spaces::resolve_space_memory_for_write(
+                &mut self.memory,
+                &mut self.spaces,
+                space,
+            );
+            // The segment keeps the window's bytes for its next map.
+            let held = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), size as u64)
+                .and_then(|range| mem.read(range))
+                .map(<[u8]>::to_vec);
+            if let Err(err) = mem.remove_region(addr, size) {
+                // The window's install was refused, the one path
+                // that leaves a host window with no region; the
+                // install arm logged that break already.
+                self.lv2_host.log_invariant_break(
+                    "dispatch.mmapper_region_remove_missing",
+                    format_args!(
+                        "shm region removal at 0x{addr:08x}+0x{size:x} in space {}: \
+                             {err}; nothing removed",
+                        space.raw(),
+                    ),
+                );
+            }
+            if let Some(bytes) = held {
+                self.lv2_host.park_segment_contents(mem_id, bytes);
+            }
+            if let Some(key) = ipc_key {
+                self.detach_keyed_shm_view(key, space, addr);
             }
         }
     }

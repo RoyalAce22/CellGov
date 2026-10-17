@@ -785,7 +785,7 @@ impl Lv2Host {
                 number: syscall::MMAPPER_FREE_ADDRESS,
                 args,
             } => match self.narrow_u32_args(syscall::MMAPPER_FREE_ADDRESS, [("addr", args[0])]) {
-                Some([addr]) => self.dispatch_mmapper_free_address(addr),
+                Some([addr]) => self.dispatch_mmapper_free_address(addr, requester),
                 None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             },
             Lv2Request::Unsupported {

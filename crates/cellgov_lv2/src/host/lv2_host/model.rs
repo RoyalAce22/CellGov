@@ -124,11 +124,11 @@ impl Lv2Host {
                 ),
                 mmapper_areas: cellgov_mem::lanes::LaneMap::new(
                     cellgov_mem::lanes::source::MMAPPER_AREA,
-                    u64::from,
+                    crate::host::mmapper::pid_base_object,
                 ),
                 mmapper_windows: cellgov_mem::lanes::LaneMap::new(
                     cellgov_mem::lanes::source::MMAPPER_WINDOW,
-                    u64::from,
+                    crate::host::mmapper::pid_base_object,
                 ),
                 config: crate::host::config::ConfigTable::new(),
                 uart: crate::host::uart::UartState::new(),
@@ -169,6 +169,7 @@ impl Lv2Host {
                 event_queue_ipc: BTreeMap::new(),
                 pending_region_installs: Vec::new(),
                 pending_region_removals: Vec::new(),
+                released_process_windows: Vec::new(),
                 fs_mounts: FsMountTable::new(),
                 sdk_version: SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,
                 firmware_exports: BTreeMap::new(),

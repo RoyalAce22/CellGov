@@ -253,7 +253,11 @@ fn fs_mounts_unmatched_path_returns_none() {
 fn mmapper_alloc_first_grant_sits_at_mmapper_region_start() {
     let mut host = Lv2Host::new();
     assert_eq!(
-        host.mmapper_alloc(0x1, 0x1_0000),
+        host.mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000
+        ),
         Some(Lv2Host::MMAPPER_REGION_START)
     );
 }
@@ -261,20 +265,57 @@ fn mmapper_alloc_first_grant_sits_at_mmapper_region_start() {
 #[test]
 fn mmapper_alloc_rounds_up_to_256_mib_granule() {
     let mut host = Lv2Host::new();
-    let first = host.mmapper_alloc(0x1, 0x1_0000).expect("first grant");
-    let second = host.mmapper_alloc(0x1, 0x1_0000).expect("second grant");
+    let first = host
+        .mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000,
+        )
+        .expect("first grant");
+    let second = host
+        .mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000,
+        )
+        .expect("second grant");
     assert_eq!(second - first, 0x1000_0000);
 }
 
 #[test]
 fn mmapper_alloc_hands_out_a_freed_base_again() {
     let mut host = Lv2Host::new();
-    let a = host.mmapper_alloc(0x1, 0x1_0000).expect("first");
-    let b = host.mmapper_alloc(0x1, 0x1_0000).expect("second");
-    host.state.mmapper_areas.remove(a);
-    assert_eq!(host.mmapper_alloc(0x1, 0x1_0000), Some(a));
+    let a = host
+        .mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000,
+        )
+        .expect("first");
+    let b = host
+        .mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000,
+        )
+        .expect("second");
+    host.state
+        .mmapper_areas
+        .remove((cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID, a));
     assert_eq!(
-        host.mmapper_alloc(0x1, 0x1_0000),
+        host.mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000
+        ),
+        Some(a)
+    );
+    assert_eq!(
+        host.mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000
+        ),
         Some(b + 0x1000_0000),
         "the next grant skips the live area"
     );
@@ -283,9 +324,27 @@ fn mmapper_alloc_hands_out_a_freed_base_again() {
 #[test]
 fn mmapper_alloc_grants_ascend_across_calls() {
     let mut host = Lv2Host::new();
-    let a = host.mmapper_alloc(0x1, 0x1_0000).expect("first");
-    let b = host.mmapper_alloc(0x1, 0x1_0000).expect("second");
-    let c = host.mmapper_alloc(0x1, 0x1_0000).expect("third");
+    let a = host
+        .mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000,
+        )
+        .expect("first");
+    let b = host
+        .mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000,
+        )
+        .expect("second");
+    let c = host
+        .mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000,
+        )
+        .expect("third");
     assert_eq!(a, Lv2Host::MMAPPER_REGION_START);
     assert_eq!(b, Lv2Host::MMAPPER_REGION_START + 0x1000_0000);
     assert_eq!(c, Lv2Host::MMAPPER_REGION_START + 0x2000_0000);
@@ -294,10 +353,17 @@ fn mmapper_alloc_grants_ascend_across_calls() {
 #[test]
 fn mmapper_alloc_rejects_zero_size() {
     let mut host = Lv2Host::new();
-    assert_eq!(host.mmapper_alloc(0, 0x1_0000), None);
+    assert_eq!(
+        host.mmapper_alloc(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID, 0, 0x1_0000),
+        None
+    );
     // Nothing reserved after rejection.
     assert_eq!(
-        host.mmapper_alloc(0x1, 0x1_0000),
+        host.mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000
+        ),
         Some(Lv2Host::MMAPPER_REGION_START)
     );
 }
@@ -308,11 +374,23 @@ fn mmapper_alloc_caps_at_mmapper_region_end() {
     // (MMAPPER_REGION_END - MMAPPER_REGION_START) / granule
     //   = (0xC000_0000 - 0x5000_0000) / 0x1000_0000 = 7 grants.
     for _ in 0..7 {
-        host.mmapper_alloc(0x1, 0x1_0000).expect("within region");
+        host.mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000,
+        )
+        .expect("within region");
     }
     // The 8th grant would walk into the RSX dma_control MMIO
     // region at 0xC000_0000.
-    assert_eq!(host.mmapper_alloc(0x1, 0x1_0000), None);
+    assert_eq!(
+        host.mmapper_alloc(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+            0x1,
+            0x1_0000
+        ),
+        None
+    );
 }
 
 #[test]
@@ -320,6 +398,7 @@ fn mmapper_search_free_range_returns_hint_when_window_is_empty() {
     let host = Lv2Host::new();
     let addr = host
         .mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
@@ -336,6 +415,7 @@ fn mmapper_search_free_range_rounds_misaligned_hint_up() {
     let hint = Lv2Host::MMAPPER_REGION_START + 0x12345;
     let addr = host
         .mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             hint,
             0x1000,
             0x10000,
@@ -353,9 +433,15 @@ fn mmapper_search_free_range_rounds_misaligned_hint_up() {
 #[test]
 fn mmapper_search_free_range_advances_past_existing_install() {
     let mut host = Lv2Host::new();
-    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, 0x10000, 0);
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        Lv2Host::MMAPPER_REGION_START,
+        0x10000,
+        0,
+    );
     let addr = host
         .mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
@@ -370,9 +456,15 @@ fn mmapper_search_free_range_advances_past_existing_install() {
 fn mmapper_search_free_range_returns_none_on_window_exhaustion() {
     let mut host = Lv2Host::new();
     let window = Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START;
-    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, window, 0);
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        Lv2Host::MMAPPER_REGION_START,
+        window,
+        0,
+    );
     assert_eq!(
         host.mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
@@ -388,6 +480,7 @@ fn mmapper_search_free_range_rejects_zero_size() {
     let host = Lv2Host::new();
     assert_eq!(
         host.mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             Lv2Host::MMAPPER_REGION_START,
             0,
             0x10000,
@@ -404,10 +497,21 @@ fn mmapper_search_free_range_walks_through_multiple_holes() {
     //         [start+0x20000..+0x30000)=installed. A hinted 0x10000 search
     //         must land on the middle free slot.
     let mut host = Lv2Host::new();
-    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, 0x10000, 0);
-    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START + 0x20000, 0x10000, 0);
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        Lv2Host::MMAPPER_REGION_START,
+        0x10000,
+        0,
+    );
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        Lv2Host::MMAPPER_REGION_START + 0x20000,
+        0x10000,
+        0,
+    );
     let addr = host
         .mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
@@ -423,6 +527,7 @@ fn mmapper_search_free_range_clamps_hint_below_region_start_up_to_start() {
     let host = Lv2Host::new();
     let addr = host
         .mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             0,
             0x10000,
             0x10000,
@@ -452,6 +557,7 @@ fn mmapper_search_free_range_skips_a_window_the_caller_already_committed() {
     let host = Lv2Host::new();
     let addr = host
         .mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
@@ -466,9 +572,15 @@ fn mmapper_search_free_range_skips_a_window_the_caller_already_committed() {
 fn mmapper_search_free_range_takes_the_furthest_of_the_ledger_and_committed_skips() {
     let mut host = Lv2Host::new();
     // Ledger stops at +0x10000, the committed layout at +0x30000.
-    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, 0x10000, 0);
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        Lv2Host::MMAPPER_REGION_START,
+        0x10000,
+        0,
+    );
     let addr = host
         .mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
@@ -480,9 +592,15 @@ fn mmapper_search_free_range_takes_the_furthest_of_the_ledger_and_committed_skip
 
     // Reversed: the ledger is now the furthest obstacle.
     let mut host = Lv2Host::new();
-    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, 0x30000, 0);
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        Lv2Host::MMAPPER_REGION_START,
+        0x30000,
+        0,
+    );
     let addr = host
         .mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
@@ -500,10 +618,21 @@ fn mmapper_search_free_range_does_not_hand_out_a_hole_nested_in_a_longer_entry()
     // can be recorded inside the earlier one's span. The search must
     // still treat the whole span as occupied.
     let mut host = Lv2Host::new();
-    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, 0x40000, 0);
-    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START + 0x10000, 0x1000, 0);
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        Lv2Host::MMAPPER_REGION_START,
+        0x40000,
+        0,
+    );
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        Lv2Host::MMAPPER_REGION_START + 0x10000,
+        0x1000,
+        0,
+    );
     let addr = host
         .mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             Lv2Host::MMAPPER_REGION_START + 0x20000,
             0x10000,
             0x10000,
@@ -520,9 +649,15 @@ fn mmapper_search_free_range_reports_exhaustion_for_a_ledger_entry_that_overflow
     // Only reachable if a dispatch arm ever records an unbounded
     // length; the search must refuse rather than read the overflow as
     // free space.
-    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, u32::MAX, 0);
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        Lv2Host::MMAPPER_REGION_START,
+        u32::MAX,
+        0,
+    );
     assert_eq!(
         host.mmapper_search_free_range(
+            cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             Lv2Host::MMAPPER_REGION_START,
             0x10000,
             0x10000,
@@ -541,7 +676,13 @@ fn mmapper_alloc_never_returns_address_in_reserved_rsx_window() {
     // never alias it.
     let mut host = Lv2Host::new();
     for _ in 0..7 {
-        let addr = host.mmapper_alloc(0x1, 0x1_0000).expect("within region");
+        let addr = host
+            .mmapper_alloc(
+                cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+                0x1,
+                0x1_0000,
+            )
+            .expect("within region");
         assert!(addr >= Lv2Host::MMAPPER_REGION_START);
         assert!(addr >= 0x5000_0000);
     }

@@ -651,7 +651,12 @@ fn syscall_337_exhausted_window_returns_enomem() {
     crate::host::test_support::reserve_mmapper_areas(&mut host, &rt);
     // Fill the entire mmapper window in the ledger the search consults.
     let window = Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START;
-    host.mmapper_window_insert(Lv2Host::MMAPPER_REGION_START, window, 0);
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        Lv2Host::MMAPPER_REGION_START,
+        window,
+        0,
+    );
     let mem_id = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
     let r = host.dispatch(
         Lv2Request::Unsupported {
@@ -1327,8 +1332,18 @@ fn syscall_334_over_a_window_nested_in_a_longer_ledger_entry_returns_ebusy() {
     let handle = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
     // A long entry, then a shorter one starting later and ending
     // before the candidate -- the shorter is what `next_back` finds.
-    host.mmapper_window_insert(0x5000_0000, 0x40_0000, 0);
-    host.mmapper_window_insert(0x5010_0000, 0x1_0000, 0);
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        0x5000_0000,
+        0x40_0000,
+        0,
+    );
+    host.mmapper_window_insert(
+        cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
+        0x5010_0000,
+        0x1_0000,
+        0,
+    );
     let result = host.dispatch(
         Lv2Request::Unsupported {
             number: 334,

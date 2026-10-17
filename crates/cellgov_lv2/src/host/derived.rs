@@ -55,6 +55,9 @@ pub(in crate::host) struct Lv2Derived {
     /// after dispatch and applies them to `GuestMemory` (hashed there),
     /// as it does [`Self::pending_region_installs`].
     pub(in crate::host) pending_region_removals: Vec<PendingRegionRemoval>,
+    /// The windows an exited child held, which the runtime takes out of
+    /// that child's space as it does a 335's (hashed there).
+    pub(in crate::host) released_process_windows: Vec<PendingRegionRemoval>,
     /// Consulted by the dispatch layer when a guest path is not
     /// pre-registered in the fs store. Boot populates from the
     /// title manifest; immutable thereafter.
