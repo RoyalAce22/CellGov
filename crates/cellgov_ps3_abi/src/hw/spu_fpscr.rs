@@ -28,6 +28,13 @@ pub const FPSCR_DOUBLE_FIRST: [u32; 2] = [50, 82];
 pub const FPSCR_DBZ_FIRST: u32 = 116;
 
 /// Every defined FPSCR bit; `fscrrd` reads each other bit as zero.
+///
+/// The reference console agrees: after `fscrwr` of all ones, `fscrrd`
+/// reads back exactly this mask (`spu_float_truncation`). The flag fields
+/// sit where the ISA places them: an overflow sets each single-precision
+/// slice's flags (`spu_float_truncation`), the double-precision flags and
+/// rounding fields follow each double operation (`spu_double_policy`),
+/// and the estimates set the divide-by-zero flags (`spu_estimate_readout`).
 pub const FPSCR_DEFINED: u128 = fpscr_field(FPSCR_RN_FIRST[0], 4)
     | fpscr_field(FPSCR_SINGLE_FIRST[0], 3)
     | fpscr_field(FPSCR_SINGLE_FIRST[1], 3)

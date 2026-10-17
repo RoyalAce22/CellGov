@@ -15,6 +15,7 @@ mod console_invalid_channel;
 mod console_invalid_npc;
 mod console_list_bad_element;
 mod console_mfc_command_edges;
+mod console_opcode_sweep;
 mod console_own_put_reservation;
 mod console_queue_events;
 mod console_raw_status;

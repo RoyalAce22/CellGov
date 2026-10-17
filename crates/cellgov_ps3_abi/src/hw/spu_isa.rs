@@ -85,12 +85,19 @@ const fn row(
 /// value less I8.
 ///
 /// [SPU-ISA p:220 s:9] csflt's scale is 155 minus I8; [SPU-ISA p:222 s:9] cuflt's is the same.
+///
+/// The reference console agrees: csflt and cuflt follow this scale at
+/// every I8 (`spu_convert_scales`).
 pub const TO_FLOAT_SCALE_BIAS: u8 = 155;
 
 /// The I8 that gives `cflts` and `cfltu` scale 0: their scale is this
 /// value less I8.
 ///
 /// [SPU-ISA p:221 s:9] cflts's scale is 173 minus I8; [SPU-ISA p:223 s:9] cfltu's is the same.
+///
+/// The reference console agrees: cflts and cfltu follow this scale at
+/// every I8, apart from the exponent edges far past saturation
+/// (`spu_convert_scales`).
 pub const TO_INTEGER_SCALE_BIAS: u8 = 173;
 
 /// Every SPU ISA 1.2 instruction, ordered by opcode. No row's opcode is
@@ -101,6 +108,13 @@ pub const TO_INTEGER_SCALE_BIAS: u8 = 173;
 /// [SPU-ISA p:235 s:9] the fscrwr encoding is on this page, though Table A-1 gives 236.
 /// [SPU-ISA p:236 s:9] the fscrrd encoding is on this page, though Table A-1 gives 235.
 /// [CBE-Handbook p:766 s:B.1 Table B-1] the CBE's SPU instruction table lists dfma and dfnms but none of the ISA 1.2 double-precision compares (dfceq, dfcmeq, dfcgt, dfcmgt, dftsv), which the ISA marks optional. The `spu_double_compares` capture shows each one stopping a raw SPU as an invalid instruction.
+///
+/// The reference console decodes every row whose `on_cbe` is true: in
+/// the `spu_opcode_sweep` capture, each 11-bit prefix of such a row, with
+/// every other field zero, runs without the invalid-instruction stop, and
+/// each prefix of the five optional compares stops with it. Most prefixes
+/// that match no row stop with it too, but 65 do not; the
+/// `console_opcode_sweep` test of `cellgov_spu` names them.
 pub const SPU_OPCODE_MAP: &[SpuOpcodeRow] = &[
     row("stop", 11, 0b00000000000, SpuForm::Rr, 238, true),
     row("lnop", 11, 0b00000000001, SpuForm::Rr, 240, true),

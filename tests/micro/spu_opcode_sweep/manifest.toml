@@ -1,0 +1,21 @@
+[test]
+name = "spu_opcode_sweep"
+
+# A hardware probe of the SPU's instruction decode on a raw SPU: each of
+# the 2048 11-bit opcode prefixes, with every other field zero, run once
+# and followed by a stop. The PPU reads back SPU_Status, SPU_NextPC and
+# the class 0 status after each, so a prefix the SPU decodes runs on to
+# its block's stop and one it does not stops with the invalid-instruction
+# bit. The PPU program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 24592 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 600000
+files = ["spu_main.elf"]
