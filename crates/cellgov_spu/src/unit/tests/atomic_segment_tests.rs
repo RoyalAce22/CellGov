@@ -28,6 +28,11 @@ fn wrch(channel: u8, rt: u32) -> [u8; 4] {
 /// Issues `cmd` with its effective address at `ea`, and returns the unit,
 /// the step's yield and its effects.
 fn issue(cmd: u32, ea: u64) -> (SpuExecutionUnit, YieldReason, Vec<Effect>) {
+    issue_in(cmd, ea, &GuestMemory::new(0x1000))
+}
+
+/// As [`issue`], over `mem`.
+fn issue_in(cmd: u32, ea: u64, mem: &GuestMemory) -> (SpuExecutionUnit, YieldReason, Vec<Effect>) {
     let mut unit = SpuExecutionUnit::new(UnitId::new(3));
     let s = unit.state_mut();
     s.channels.mfc_eah = (ea >> 32) as u32;
@@ -35,8 +40,7 @@ fn issue(cmd: u32, ea: u64) -> (SpuExecutionUnit, YieldReason, Vec<Effect>) {
     s.channels.mfc_lsa = 0x200;
     s.ls[0..4].copy_from_slice(&il(10, cmd));
     s.ls[4..8].copy_from_slice(&wrch(MFC_CMD, 10));
-    let mem = GuestMemory::new(0x1000);
-    let ctx = ExecutionContext::new(&mem);
+    let ctx = ExecutionContext::new(mem);
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
     (unit, result.yield_reason, effects)
@@ -63,17 +67,27 @@ fn an_atomic_command_past_the_address_space_queues_a_data_segment_exception() {
     }
 }
 
-/// The last line below the real-address bound names a segment. No region
-/// backs it here, so the getllar queues a data-storage exception.
+/// The last line below the real-address bound names a segment: with a
+/// region there, the getllar reads it and queues no exception.
 #[test]
 fn the_last_line_of_the_space_is_no_segment_fault() {
-    let (_, _, effects) = issue(MFC_GETLLAR, CELL_EA_LIMIT);
+    let mut mem = GuestMemory::new(0x1000);
+    mem.install_region(
+        CELL_EA_LIMIT + 1 - 0x10000,
+        0x10000,
+        "top",
+        cellgov_mem::PageSize::Page64K,
+    )
+    .expect("clear of the base region");
+    let (unit, _, effects) = issue_in(MFC_GETLLAR, CELL_EA_LIMIT, &mem);
     assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::MfcInvalidCommand { command, .. }]
-                if command.error == MfcCommandError::DataStorage { ea: CELL_EA_LIMIT & !0x7F }
-        ),
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::MfcInvalidCommand { .. })),
         "{effects:?}"
+    );
+    assert_eq!(
+        unit.state().reservation().map(|line| line.addr()),
+        Some(CELL_EA_LIMIT & !0x7F)
     );
 }

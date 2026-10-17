@@ -262,7 +262,10 @@ fn window_target(
     }))
 }
 
-/// The fault a main-storage transfer raises, or `None`.
+/// The fault a main-storage transfer raises, or `None`: a data-segment
+/// fault for a range no region backs, as the `spu_ea_bound` console
+/// capture shows, and a data-storage fault for a backed range the access
+/// may not use.
 ///
 /// [CBEA p:120 s:9.1.7] a segment fault raises the MFC data-segment interrupt; a mapping fault or a protection violation raises the MFC data-storage interrupt.
 fn translation_fault(
@@ -275,17 +278,16 @@ fn translation_fault(
             return None;
         }
         let ea = range.start().raw();
-        if ea + (range.length() - 1) > CELL_EA_LIMIT {
+        let backed =
+            ea + (range.length() - 1) <= CELL_EA_LIMIT && memory.read_checked(range).is_ok();
+        if !backed {
             return Some(MfcCommandError::DataSegment { ea });
         }
-        let translates = if write {
-            memory
+        let permitted = !write
+            || memory
                 .validate_write(range, range.length() as usize)
-                .is_ok()
-        } else {
-            memory.read_checked(range).is_ok()
-        };
-        (!translates).then_some(MfcCommandError::DataStorage { ea })
+                .is_ok();
+        (!permitted).then_some(MfcCommandError::DataStorage { ea })
     };
     let request = c.request();
     request

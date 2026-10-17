@@ -212,8 +212,8 @@ pub mod segment {
 /// system-module group type and the queue-binding count are not in that
 /// header, and nothing here derives them. The binding count fixes the
 /// `CELL_EAGAIN` ceiling of `sys_spu_thread_bind_queue`. Console captures
-/// witness the exception type, its event's source and the DMA alignment
-/// cause.
+/// witness the exception type, its event's source, and the DMA alignment
+/// and MFC data-segment causes.
 pub mod event {
     /// `SYS_SPU_THREAD_GROUP_EVENT_RUN`: the group's threads started or
     /// stopped.
@@ -231,6 +231,11 @@ pub mod event {
     /// interrupt, in the low word of its second data word, as those
     /// captures read it. The high word is the thread's SPU_NPC.
     pub const EXCEPTION_DMA_ALIGNMENT: u32 = 0x1;
+    /// The cause an exception event reports for an MFC data-segment
+    /// interrupt, whose third data word holds MFC_DAR. The `spu_ea_bound`
+    /// console capture reads it for a get and a getllar at addresses the
+    /// process maps nothing at.
+    pub const EXCEPTION_MFC_SEGMENT: u32 = 0x10;
     /// `SYS_SPU_THREAD_GROUP_EVENT_SYSTEM_MODULE`: a system-module event
     /// for a group created to cooperate with the system.
     pub const GROUP_SYSTEM_MODULE: u32 = 4;

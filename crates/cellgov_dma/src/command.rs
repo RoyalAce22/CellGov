@@ -153,13 +153,14 @@ pub enum MfcCommandError {
     /// an `s` modifier.
     #[error("opcode 0x{0:04x} is a proxy-queue command")]
     ProxyOnlyCommand(u32),
-    /// An effective address outside every segment.
+    /// An effective address outside every segment: past the
+    /// effective-address space, or one no region backs.
     #[error("effective address 0x{ea:016x} is outside every segment")]
     DataSegment {
         /// The transfer's effective address.
         ea: u64,
     },
-    /// An effective address with no mapping, or one the access may not use.
+    /// An effective address in a backed region the access may not use.
     #[error("effective address 0x{ea:016x} does not translate for the access")]
     DataStorage {
         /// The transfer's effective address.

@@ -181,7 +181,7 @@ fn a_refused_getllar_names_the_line_not_the_byte() {
     });
     assert_eq!(
         error,
-        Some(cellgov_dma::MfcCommandError::DataStorage { ea: UNMAPPED_EA }),
+        Some(cellgov_dma::MfcCommandError::DataSegment { ea: UNMAPPED_EA }),
         "{effects:?}"
     );
 }

@@ -233,10 +233,12 @@ impl ExecutionUnit for SpuExecutionUnit {
                     // [CBEA p:111 s:9 SPU Channel Map] MFC_EAL is a write channel carrying the low-order SPU effective-address command parameter.
                     let read = copy_into_local_store(&mut self.state, ctx.memory(), ea, lsa, size);
                     if read.is_err() {
-                        // The line does not translate: the MFC raises the
-                        // data-storage exception for the getllar, which
-                        // moves no line and never reports its status.
-                        // [CBEA p:118 s:9.1.6] a mapping fault suspends the queue and raises the MFC data-storage interrupt.
+                        // No region backs the line: the MFC raises the
+                        // data-segment exception for the getllar, which
+                        // moves no line and never reports its status. The
+                        // spu_ea_bound console capture shows that class
+                        // for a getllar at an address nothing maps.
+                        // [CBEA p:120 s:9.1.7] a segment fault suspends the queue and raises the MFC data-segment interrupt.
                         // The command acquires no reservation over a
                         // line it never read. One an earlier getllar took
                         // stands, in the register as in the committed
@@ -252,7 +254,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         effects.push(crate::exec::invalid_command(
                             spu::MFC_GETLLAR,
                             params,
-                            cellgov_dma::MfcCommandError::DataStorage { ea },
+                            cellgov_dma::MfcCommandError::DataSegment { ea },
                             &mut self.state,
                             self.id,
                         ));

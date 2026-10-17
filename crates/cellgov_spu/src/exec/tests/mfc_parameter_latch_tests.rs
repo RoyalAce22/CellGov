@@ -121,7 +121,7 @@ fn a_refused_getllar_records_its_line() {
             );
             assert_eq!(
                 command.error,
-                cellgov_dma::MfcCommandError::DataStorage { ea: 0x1_0009_0000 }
+                cellgov_dma::MfcCommandError::DataSegment { ea: 0x1_0009_0000 }
             );
         }
         other => panic!("expected one invalid command, got {other:?}"),

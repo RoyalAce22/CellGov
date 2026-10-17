@@ -438,11 +438,11 @@ fn a_get_lands_mapped_main_storage_and_a_put_writes_local_store_back() {
 }
 
 #[test]
-fn a_transfer_to_an_unmapped_address_is_raised_as_data_storage() {
+fn a_transfer_to_an_unmapped_address_is_raised_as_data_segment() {
     let mut get = vector(&mfc_program(0x40, 0x1000, 0x4000, 16));
     get["expected"]["mfc_exceptions"] = value(json!([{
         "word": 0x40, "lsa": 0x1000, "eah": 0, "eal": 0x4000, "size": 16, "tag": 0,
-        "error": {"cause": "data_storage", "ea": 0x4000}
+        "error": {"cause": "data_segment", "ea": 0x4000}
     }]));
     get["expected"]["local_store"] = value(json!([]));
     let replay = replay_one(get);

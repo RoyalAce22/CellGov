@@ -1599,7 +1599,7 @@
               "size": 16,
               "tag": 5,
               "error": {
-                "cause": "data_storage",
+                "cause": "data_segment",
                 "ea": 524288
               }
             }

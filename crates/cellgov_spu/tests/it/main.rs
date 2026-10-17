@@ -7,6 +7,7 @@ mod console_dma_after_exit;
 mod console_dma_after_stop;
 mod console_dma_timing;
 mod console_double_compares;
+mod console_ea_bound;
 mod console_event_edges;
 mod console_events;
 mod console_ie_branch_forms;

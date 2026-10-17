@@ -1,0 +1,21 @@
+[test]
+name = "spu_ea_bound"
+
+# A hardware probe: an SPU thread runs a get or a getllar at effective
+# addresses with EAH 0x1, 0xFF, 0x3FF and 0x400, and a get at two
+# unmapped addresses below 4 GB, each in a fresh group whose exception
+# event goes to a PPU event queue. The capture holds the event the
+# kernel sends for each, and how the group ends.
+
+[observe]
+# The failed step, the case count and the queue destroy's answer, then
+# ten 48-byte case records: 496 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 496 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+files = ["spu_main.elf"]

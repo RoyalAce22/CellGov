@@ -22,13 +22,15 @@ use super::Runtime;
 ///
 /// A main-storage range faults when:
 ///
-/// - it runs past the effective-address space (a data-segment fault);
-/// - space 0 has no region for it, or a region the access may not use
-///   (a data-storage fault).
+/// - it runs past the effective-address space, or space 0 has no region
+///   for it (a data-segment fault);
+/// - space 0 has a region for it that the access may not use (a
+///   data-storage fault).
 ///
-/// CellGov models no segment table. It treats an address past the Cell's
-/// real-address bound as one that no segment names, because no region
-/// can back it. The architecture does not fix that bound; CellGov does.
+/// CellGov models no segment table. The `spu_ea_bound` console capture
+/// shows an SPU thread's access to an address its process maps nothing
+/// at raising the data-segment interrupt, below 4 GB as above it, so an
+/// unbacked range is one that no segment names.
 /// [CBEA p:120 s:9.1.7] a segment fault raises the MFC data-segment interrupt; a mapping fault or a protection violation raises the MFC data-storage interrupt.
 pub(super) fn translation_fault(
     memory: &GuestMemory,
@@ -42,17 +44,16 @@ pub(super) fn translation_fault(
         let ea = range.start().raw();
         // `ByteRange` holds only ranges that fit the 64-bit space.
         let last = ea + (range.length() - 1);
-        if last > CELL_EA_LIMIT {
+        let backed = last <= CELL_EA_LIMIT
+            && memory.with_reads_unlogged(|mem: &GuestMemory| mem.read_checked(range).is_ok());
+        if !backed {
             return Some(MfcCommandError::DataSegment { ea });
         }
-        let translates = if write {
-            memory
+        let permitted = !write
+            || memory
                 .validate_write(range, range.length() as usize)
-                .is_ok()
-        } else {
-            memory.with_reads_unlogged(|mem: &GuestMemory| mem.read_checked(range).is_ok())
-        };
-        (!translates).then_some(MfcCommandError::DataStorage { ea })
+                .is_ok();
+        (!permitted).then_some(MfcCommandError::DataStorage { ea })
     };
     let request = c.request();
     request

@@ -167,11 +167,12 @@ fn a_zero_byte_get_completes_where_no_region_backs_its_address() {
 }
 
 /// The queue raises a get whose source no region backs when it reaches
-/// the get. Its bytes never land, and its tag never reads complete.
+/// the get, with the data-segment class the `spu_ea_bound` console
+/// capture shows. Its bytes never land, and its tag never reads complete.
 ///
-/// [CBEA p:118 s:9.1.6] a mapping fault suspends the queue and raises the MFC data-storage interrupt.
+/// [CBEA p:120 s:9.1.7] a segment fault suspends the queue and raises the MFC data-segment interrupt.
 #[test]
-fn a_get_from_an_unmapped_address_raises_a_data_storage_exception() {
+fn a_get_from_an_unmapped_address_raises_a_data_segment_exception() {
     let (mut rt, unit) = runtime_with(&get_and_wait(), MFC_GET, UNMAPPED_EA, LSA, TRANSFER_BYTES);
     assert_eq!(
         run(&mut rt).last(),
@@ -182,7 +183,7 @@ fn a_get_from_an_unmapped_address_raises_a_data_storage_exception() {
     assert_eq!(exception.unit, unit);
     assert_eq!(
         exception.command.error,
-        cellgov_dma::MfcCommandError::DataStorage { ea: UNMAPPED_EA }
+        cellgov_dma::MfcCommandError::DataSegment { ea: UNMAPPED_EA }
     );
     assert_eq!(spu(&rt, unit).state().reg_word(5), 0, "the wait never ends");
 }

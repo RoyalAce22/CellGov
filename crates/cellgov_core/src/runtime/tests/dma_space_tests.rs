@@ -205,7 +205,7 @@ fn a_child_space_transfer_over_a_child_only_source_raises_in_space_zero() {
     let exception = rt.take_mfc_exception().expect("the queue raised it");
     assert_eq!(
         exception.command.error,
-        cellgov_dma::MfcCommandError::DataStorage { ea: CHILD_ONLY }
+        cellgov_dma::MfcCommandError::DataSegment { ea: CHILD_ONLY }
     );
     assert_eq!(
         rt.memory().read(range(SPACE0_DST)).map(<[u8]>::to_vec),
@@ -225,7 +225,7 @@ fn a_child_space_transfer_over_a_child_only_destination_raises_in_space_zero() {
     let exception = rt.take_mfc_exception().expect("the queue raised it");
     assert_eq!(
         exception.command.error,
-        cellgov_dma::MfcCommandError::DataStorage {
+        cellgov_dma::MfcCommandError::DataSegment {
             ea: CHILD_ONLY + 0x80
         }
     );

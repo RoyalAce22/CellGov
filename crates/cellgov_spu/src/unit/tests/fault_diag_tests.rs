@@ -78,7 +78,7 @@ fn a_refused_getllar_carries_the_line_address_whole() {
     let mut unit = unit_issuing(MFC_GETLLAR, UNMAPPED_EA, 0x200, 128);
     assert_eq!(
         queued_error(&run_collecting(&mut unit, &mem)),
-        Some(cellgov_dma::MfcCommandError::DataStorage { ea: UNMAPPED_EA })
+        Some(cellgov_dma::MfcCommandError::DataSegment { ea: UNMAPPED_EA })
     );
 }
 

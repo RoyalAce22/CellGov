@@ -160,12 +160,12 @@ fn queued_error(effects: &[Effect]) -> Option<cellgov_dma::MfcCommandError> {
     })
 }
 
-/// A line that does not translate raises the MFC data-storage exception
-/// and takes no reservation.
+/// A line no region backs raises the MFC data-segment exception, as the
+/// `spu_ea_bound` console capture shows, and takes no reservation.
 ///
-/// [CBEA p:118 s:9.1.6] a mapping fault suspends the queue and raises the MFC data-storage interrupt.
+/// [CBEA p:120 s:9.1.7] a segment fault suspends the queue and raises the MFC data-segment interrupt.
 #[test]
-fn getllar_from_an_unmapped_address_queues_a_data_storage_exception() {
+fn getllar_from_an_unmapped_address_queues_a_data_segment_exception() {
     let mem = memory_with_marked_aux();
     let mut unit = unit_getllar(UNMAPPED_EA);
     let free = unit.state().channels.cmd_queue_free;
@@ -175,7 +175,7 @@ fn getllar_from_an_unmapped_address_queues_a_data_storage_exception() {
     assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
     assert_eq!(
         queued_error(&effects),
-        Some(cellgov_dma::MfcCommandError::DataStorage { ea: UNMAPPED_EA }),
+        Some(cellgov_dma::MfcCommandError::DataSegment { ea: UNMAPPED_EA }),
         "{effects:?}"
     );
     assert_eq!(
@@ -261,7 +261,7 @@ fn a_refused_getllar_keeps_the_reservation_the_same_step_acquired() {
     );
     assert_eq!(
         queued_error(&effects),
-        Some(cellgov_dma::MfcCommandError::DataStorage {
+        Some(cellgov_dma::MfcCommandError::DataSegment {
             ea: u64::from(UNMAPPED_NEAR_EA)
         }),
         "and the second one names the address that does not translate",

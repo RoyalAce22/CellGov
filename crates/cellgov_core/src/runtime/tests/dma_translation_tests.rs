@@ -105,9 +105,14 @@ fn run_out(rt: &mut Runtime) {
     rt.drain_pending_dma();
 }
 
-/// [CBEA p:120 s:9.1.7] a segment fault raises the MFC data-segment interrupt; a mapping fault raises the MFC data-storage interrupt.
+/// A put past the space or to an address no region backs is a segment
+/// fault, as the `spu_ea_bound` console capture shows for an SPU thread;
+/// one to a region the put may not write is a storage fault.
+///
+/// [CBEA p:120 s:9.1.7] a segment fault raises the MFC data-segment interrupt; a mapping fault or a protection violation raises the MFC data-storage interrupt.
 #[test]
-fn a_put_past_the_space_is_a_segment_fault_and_one_inside_with_no_region_a_storage_fault() {
+fn a_put_with_no_backing_region_is_a_segment_fault_and_one_to_a_read_only_region_a_storage_fault() {
+    const READ_ONLY: u64 = 0x10000;
     for (dst, want) in [
         (
             CELL_EA_LIMIT - 1,
@@ -115,9 +120,19 @@ fn a_put_past_the_space_is_a_segment_fault_and_one_inside_with_no_region_a_stora
                 ea: CELL_EA_LIMIT - 1,
             },
         ),
-        (0x1000, MfcCommandError::DataStorage { ea: 0x1000 }),
+        (0x1000, MfcCommandError::DataSegment { ea: 0x1000 }),
+        (READ_ONLY, MfcCommandError::DataStorage { ea: READ_ONLY }),
     ] {
         let mut rt = runtime_putting(vec![dst]);
+        rt.memory_mut()
+            .install_region_with_access(
+                READ_ONLY,
+                0x10000,
+                "read-only",
+                PageSize::Page64K,
+                cellgov_mem::RegionAccess::ReservedZeroReadable,
+            )
+            .expect("clear of the base region");
         run_out(&mut rt);
         let exception = rt.take_mfc_exception().expect("the queue raised the put");
         assert_eq!(exception.command.error, want, "put to 0x{dst:x}");
