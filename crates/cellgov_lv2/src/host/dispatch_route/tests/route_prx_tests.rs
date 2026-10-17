@@ -1,6 +1,7 @@
 //! PRX module syscalls: id resolution, module list walking, and p_opt/p_info gates.
 
 use super::*;
+use cellgov_ps3_abi::lv2::prx::return_code;
 
 #[test]
 fn syscall_494_flags_without_bit2_returns_ok_no_effects() {
@@ -603,7 +604,8 @@ fn prx_start_module_cmd2_echoes_a_sign_extended_negative_res_as_its_low_word() {
 }
 
 /// A nonzero high word over a zero low word is not a sign-extended
-/// `s32`, so the break is the only record of the collapse.
+/// `s32`, so the break is the only record of the collapse. The report
+/// is not `SYS_PRX_RESIDENT`, so the module is withdrawn.
 #[test]
 fn prx_start_module_cmd2_res_with_only_a_high_word_collapses_to_ok_with_a_break() {
     let (mut host, id) = host_with_one_prx();
@@ -615,10 +617,9 @@ fn prx_start_module_cmd2_res_with_only_a_high_word_collapses_to_ok_with_a_break(
         Lv2Dispatch::immediate(0)
     );
     assert_eq!(host.observability().invariant_break_count - before, 1);
-    assert_eq!(
-        host.prx_registry().lookup_by_id(id).unwrap().state(),
-        crate::prx_registry::PrxState::Initialized,
-        "only res == SYS_PRX_RESIDENT marks the module started"
+    assert!(
+        host.prx_registry().lookup_by_id(id).is_none(),
+        "only res == SYS_PRX_RESIDENT keeps the module"
     );
 }
 
@@ -633,7 +634,7 @@ fn prx_start_module_unknown_cmd_returns_prx_error_and_logs_break() {
     let before = host.observability().invariant_break_count;
     assert_eq!(
         start_module(&mut host, id, p_opt, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
+        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_ERROR))
     );
     assert_eq!(host.observability().invariant_break_count - before, 1);
 }
@@ -684,7 +685,7 @@ fn prx_unload_module_started_returns_not_removable_and_counts() {
     let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         unload_module(&mut host, id, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
+        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_NOT_REMOVABLE))
     );
     assert_eq!(host.observability().prx_unload_rejections, 1);
     assert_eq!(
@@ -698,7 +699,6 @@ fn prx_unload_module_started_returns_not_removable_and_counts() {
 /// freed for a later lookup to miss.
 #[test]
 fn prx_unload_module_unstarted_withdraws_with_ok() {
-    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
     let (mut host, id) = host_with_one_prx();
     let rt = FakeRuntime::new(0x1000);
     assert_eq!(unload_module(&mut host, id, &rt), Lv2Dispatch::immediate(0));
@@ -709,7 +709,7 @@ fn prx_unload_module_unstarted_withdraws_with_ok() {
     );
     assert_eq!(
         unload_module(&mut host, id, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into()),
+        Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
         "the withdrawn id must be gone"
     );
 }
@@ -728,18 +728,17 @@ fn prx_start_handshake_marks_started_and_blocks_unload() {
     );
     assert_eq!(
         unload_module(&mut host, id, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
+        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_NOT_REMOVABLE))
     );
 }
 
 #[test]
-fn prx_unload_module_unknown_id_returns_unknown_module() {
-    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
+fn prx_unload_module_unknown_id_returns_esrch() {
     let (mut host, _id) = host_with_one_prx();
     let rt = FakeRuntime::new(0x1000);
     assert_eq!(
         unload_module(&mut host, 0xDEAD_BEEF, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into())
+        Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
     );
     assert_eq!(
         host.observability().prx_unload_rejections,
@@ -917,7 +916,7 @@ fn syscall_482_cmd1_wrong_states_report_their_codes() {
     let rt = runtime_with(p_opt, &image);
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_STARTED.into()),
+        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_NOT_STARTED)),
         "Initialized reports NOT_STARTED"
     );
 
@@ -929,13 +928,13 @@ fn syscall_482_cmd1_wrong_states_report_their_codes() {
     ));
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_ALREADY_STOPPING.into()),
+        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_ALREADY_STOPPING)),
         "a second phase 1 reports ALREADY_STOPPING"
     );
     host.prx_registry_mut().finish_stop(id);
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_ALREADY_STOPPED.into()),
+        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_ALREADY_STOPPED)),
         "a stop after completion reports ALREADY_STOPPED"
     );
 }
@@ -944,7 +943,6 @@ fn syscall_482_cmd1_wrong_states_report_their_codes() {
 /// the two phases.
 #[test]
 fn syscall_482_full_handshake_unblocks_unload() {
-    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
     let (mut host, id) = host_with_one_started_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
@@ -966,7 +964,7 @@ fn syscall_482_full_handshake_unblocks_unload() {
     assert_eq!(unload_module(&mut host, id, &rt), Lv2Dispatch::immediate(0));
     assert_eq!(
         unload_module(&mut host, id, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into()),
+        Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
         "the withdrawn id must be gone"
     );
 }
@@ -983,7 +981,7 @@ fn syscall_482_stopping_module_still_refuses_unload() {
     ));
     assert_eq!(
         unload_module(&mut host, id, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
+        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_NOT_REMOVABLE))
     );
 }
 
@@ -1019,7 +1017,7 @@ fn syscall_482_cmd2_res1_returns_can_not_stop_and_logs_break() {
     let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_CAN_NOT_STOP.into())
+        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_CAN_NOT_STOP))
     );
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
@@ -1077,12 +1075,11 @@ fn syscall_482_cmd4_writes_entries_and_keeps_started() {
 }
 
 /// cmd=8 is the teardown handshake's report phase, which CellGov does
-/// not consume. Any nibble-4/8 value other than exactly 4 (e.g. 0x14)
-/// takes the same arm.
+/// not consume. Any nibble-8 value takes the same arm.
 #[test]
 fn syscall_482_cmd8_is_a_no_op_stub_that_logs_break() {
     use crate::prx_registry::PrxState;
-    for cmd in [8u64, 0x14, 0x18] {
+    for cmd in [8u64, 0x18] {
         let (mut host, id) = host_with_one_started_prx();
         let p_opt: u32 = 0x4000;
         let rt = runtime_with(p_opt, &start_stop_option(0x20, cmd, 0));
@@ -1111,7 +1108,7 @@ fn syscall_482_cmd4_wrong_state_reports_not_started() {
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 4, 0));
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_STARTED.into())
+        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_NOT_STARTED))
     );
 }
 
@@ -1124,7 +1121,7 @@ fn syscall_482_unknown_cmd_returns_prx_error_and_logs_break() {
     let before = host.observability().invariant_break_count;
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
-        Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
+        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_ERROR))
     );
     assert_eq!(host.observability().invariant_break_count - before, 1);
 }

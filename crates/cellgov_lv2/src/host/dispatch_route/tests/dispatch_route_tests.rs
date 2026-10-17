@@ -34,6 +34,8 @@ mod prx_console;
 mod prx_module_id_by_name;
 #[path = "prx_module_list_fill_tests.rs"]
 mod prx_module_list_fill;
+#[path = "prx_states_console_tests.rs"]
+mod prx_states_console;
 #[path = "route_stub_tests.rs"]
 mod stub;
 #[path = "syscall_bound_console_tests.rs"]

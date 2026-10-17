@@ -118,10 +118,13 @@ impl LaneValue for LoadedPrxEntry {
 /// `entries` row. [`register`](Self::register),
 /// [`mark_started`](Self::mark_started),
 /// [`begin_stop`](Self::begin_stop),
-/// [`finish_stop`](Self::finish_stop), and
-/// [`withdraw_removable`](Self::withdraw_removable) are the mutating
-/// surface; [`lookup_by_path`](Self::lookup_by_path) debug-asserts
-/// the invariant.
+/// [`finish_stop`](Self::finish_stop),
+/// [`stop_unstarted`](Self::stop_unstarted),
+/// [`cancel_stop`](Self::cancel_stop),
+/// [`withdraw_removable`](Self::withdraw_removable), and
+/// [`withdraw`](Self::withdraw) are the mutating surface;
+/// [`lookup_by_path`](Self::lookup_by_path) debug-asserts the
+/// invariant.
 #[derive(Debug, Clone)]
 pub struct LoadedPrxRegistry {
     entries: LaneMap<u32, LoadedPrxEntry>,
@@ -256,6 +259,43 @@ impl LoadedPrxRegistry {
         }
     }
 
+    /// A stop report to a module that never started:
+    /// `Initialized -> Stopped`.
+    ///
+    /// Returns whether the transition applied; `false` for an unknown
+    /// id or any other state.
+    pub fn stop_unstarted(&mut self, id: u32) -> bool {
+        match self.entries.get_mut(id) {
+            Some(mut e) if e.state == PrxState::Initialized => {
+                e.state = PrxState::Stopped;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// A stop report the module refused: `Stopping -> Started`.
+    ///
+    /// Returns whether the transition applied; `false` for an unknown
+    /// id or any other state.
+    pub fn cancel_stop(&mut self, id: u32) -> bool {
+        match self.entries.get_mut(id) {
+            Some(mut e) if e.state == PrxState::Stopping => {
+                e.state = PrxState::Started;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Withdraw `id`'s module in any state, freeing its id. Returns the
+    /// removed entry, or `None` when `id` is unknown.
+    pub fn withdraw(&mut self, id: u32) -> Option<LoadedPrxEntry> {
+        let entry = self.entries.remove(id)?;
+        self.stem_to_id.remove(&entry.stem);
+        Some(entry)
+    }
+
     /// Withdraw an `Initialized` or `Stopped` module, freeing its id.
     /// Returns the removed entry, or `None` when `id` is unknown or
     /// the module is `Started` / `Stopping` (LV2 withdraws only
@@ -265,9 +305,7 @@ impl LoadedPrxRegistry {
             PrxState::Initialized | PrxState::Stopped => {}
             PrxState::Started | PrxState::Stopping => return None,
         }
-        let entry = self.entries.remove(id)?;
-        self.stem_to_id.remove(&entry.stem);
-        Some(entry)
+        self.withdraw(id)
     }
 
     /// Look up an entry by guest-supplied path; matched on the

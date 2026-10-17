@@ -4,10 +4,9 @@
 //! errors are `0x8001_1xxx`, LV2 errnos are `0x8001_0xxx` -- so the two
 //! tables never collide.
 //!
-//! Only the codes CellGov answers with appear here. Installed firmware
-//! materialises four of the eight in its own code or data; the other
-//! four carry the symbol-to-value pairing alone, with no firmware
-//! witness.
+//! Only the codes CellGov answers with appear here. Each one names
+//! what shows its value: a capture from the reference console, or the
+//! firmware code that builds or compares it.
 //!
 //! liblv2.sprx issues sc 481 and 482 and builds the option struct on
 //! its own stack, so the offsets, the declared size and the command
@@ -16,7 +15,8 @@
 /// The module id does not name a loaded module.
 ///
 /// libfiber.sprx and libsre.sprx build this constant with `lis` / `ori`
-/// before returning it.
+/// before returning it, and the `lv2_prx_module_id_by_name` capture
+/// answers it for a name no module carries.
 pub const CELL_PRX_ERROR_UNKNOWN_MODULE: u32 = 0x8001_112E;
 
 /// The most bytes of a module name `_sys_prx_get_module_id_by_name`
@@ -24,22 +24,48 @@ pub const CELL_PRX_ERROR_UNKNOWN_MODULE: u32 = 0x8001_112E;
 // The oracle's prx module reads and compares this many.
 pub const MODULE_NAME_MAX: usize = 28;
 /// The module is not started.
+///
+/// The `lv2_prx_states` capture answers it to a stop of a module that
+/// never started.
 pub const CELL_PRX_ERROR_NOT_STARTED: u32 = 0x8001_1134;
 /// The module cannot be unloaded from its current state.
+///
+/// The `lv2_prx_states` capture answers it to an unload between the
+/// two start phases, and `lv2_prx_states_last` to an unload of a
+/// started module.
 pub const CELL_PRX_ERROR_NOT_REMOVABLE: u32 = 0x8001_1138;
 /// The module is already stopping.
+///
+/// The `lv2_prx_states_more` capture answers it to a second stop of a
+/// stopping module.
 pub const CELL_PRX_ERROR_ALREADY_STOPPING: u32 = 0x8001_113F;
 /// Unspecified PRX error; the start/stop handlers answer it for a
 /// command word they do not recognise.
+///
+/// The `lv2_prx_states` capture answers it to start commands 3, 0x10
+/// and 0.
 pub const CELL_PRX_ERROR_ERROR: u32 = 0x8001_1001;
 /// The module is already stopped.
+///
+/// The `lv2_prx_states_more` capture answers it to a stop of a stopped
+/// module.
 pub const CELL_PRX_ERROR_ALREADY_STOPPED: u32 = 0x8001_1135;
 /// The module refused to stop.
+///
+/// The `lv2_prx_states_more` capture answers it to a stop report of 1.
 pub const CELL_PRX_ERROR_CAN_NOT_STOP: u32 = 0x8001_1136;
 /// The ELF is already registered.
 ///
-/// liblv2.sprx's own import-bind call takes this answer as success.
+/// liblv2.sprx's own import-bind call compares its answer against this
+/// value and takes it as success.
 pub const CELL_PRX_ERROR_ELF_IS_REGISTERED: u32 = 0x8001_1910;
+
+/// A `CellPrxError` code as a syscall returns it in r3: sign-extended
+/// to 64 bits, as every error code is. The `lv2_prx_states` capture
+/// reads `0xFFFF_FFFF_8001_1134` for `CELL_PRX_ERROR_NOT_STARTED`.
+pub const fn return_code(code: u32) -> u64 {
+    code as i32 as i64 as u64
+}
 
 /// The bit of a module id `_sys_prx_start_module` refuses with
 /// `CELL_EINVAL` before the lookup: the id read as a signed 32-bit value
@@ -220,7 +246,10 @@ pub mod start_cmd {
     pub const REPORT_RESULT: u64 = 2;
     /// Phase-selector mask. The `lv2_prx_load_cycle` capture sends
     /// `cmd = 0x11` to a started module's stop and gets phase 1's
-    /// answer, so the kernel masks rather than matching the value.
+    /// answer. The `lv2_prx_states` capture answers start commands
+    /// 0x11 and 0x21 as 1, start commands 3, 0x10 and 0 as unknown,
+    /// and stop command 0x14 as 4, so the kernel masks rather than
+    /// matching the value.
     pub const MASK: u64 = 0xF;
 }
 
@@ -238,4 +267,8 @@ pub mod stop_cmd {
 }
 
 /// `res` value meaning the started module stays resident.
+///
+/// The `lv2_prx_states_more` and `lv2_prx_states_last` captures keep a
+/// module whose start report is 0, and withdraw one whose report is 1
+/// or 5, answering the report itself.
 pub const SYS_PRX_RESIDENT: u64 = 0;

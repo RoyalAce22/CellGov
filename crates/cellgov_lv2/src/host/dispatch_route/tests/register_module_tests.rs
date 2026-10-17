@@ -10,7 +10,7 @@ const SLOTS: u32 = 0x3200;
 const LIB_NAME: u32 = 0x3300;
 /// Library name the fixture's import entry asks for.
 const LIB: &str = "testlib";
-const ELF_IS_REGISTERED: u64 = 0x8001_1910;
+const ELF_IS_REGISTERED: u64 = 0xFFFF_FFFF_8001_1910;
 /// A CoreOS authority id: `>> 36 == 0x0107_0000`.
 const COREOS_AUTHID: u64 = 0x1070_0005_FF00_0001;
 

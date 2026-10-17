@@ -5,6 +5,8 @@ use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
+use cellgov_ps3_abi::lv2::prx::return_code;
+
 use crate::host::guest_struct::read_be_u64;
 use crate::host::{Lv2Host, Lv2Runtime};
 
@@ -18,7 +20,12 @@ impl Lv2Host {
     ///    this phase reports `NO_ENTRY`.
     /// 2. Phase 2 reports what that entry returned. A report of
     ///    `SYS_PRX_RESIDENT` marks the module started, and a later
-    ///    unload then answers `NOT_REMOVABLE`.
+    ///    unload then answers `NOT_REMOVABLE`. Any other report
+    ///    withdraws the module.
+    ///
+    /// The `lv2_prx_states` capture reads the phase from the low
+    /// nibble: 0x11 and 0x21 answer as 1, and 3, 0x10 and 0 answer
+    /// `CELL_PRX_ERROR_ERROR` with nothing written.
     ///
     /// `pOpt->size` is never validated. The arm compares it against
     /// `MIN_SIZE` only to decide whether `entry2` exists. liblv2.sprx
@@ -38,8 +45,8 @@ impl Lv2Host {
     /// - `CELL_EINVAL` when `id` or `pOpt` carries high bits, per
     ///   [`Lv2Host::narrow_u32_args`].
     /// - The low word of `pOpt->res` when a phase-2 report carries a
-    ///   value other than `SYS_PRX_RESIDENT`. A zero low word answers
-    ///   CELL_OK.
+    ///   value other than `SYS_PRX_RESIDENT`, as the console answers 1
+    ///   and 5. A zero low word answers CELL_OK.
     pub(in crate::host::dispatch_route) fn dispatch_prx_start_module(
         &mut self,
         args: [u64; 8],
@@ -150,15 +157,19 @@ impl Lv2Host {
                 // res = 0 when it finds neither entry callable, so no
                 // firmware caller arrives here with another value.
                 // `res` carries the sign-extended s32 a module_start
-                // returned, so its low 32 bits are that code.
+                // returned, so its low 32 bits are that code. The
+                // console answers a report of 1 or 5 with that value
+                // and withdraws the module (`lv2_prx_states_more`,
+                // `lv2_prx_states_last`).
                 self.log_invariant_break(
                     "dispatch.prx_start_module_unexpected_res",
                     format_args!(
                         "_sys_prx_start_module id={id:#010x} cmd=2 reported res={res:#018x} \
-                         after phase 1 returned NO_ENTRY; returning res & 0xFFFF_FFFF \
-                         (CELL_OK when the low word is zero)"
+                         after phase 1 returned NO_ENTRY; withdrawing the module and returning \
+                         res & 0xFFFF_FFFF (CELL_OK when the low word is zero)"
                     ),
                 );
+                self.state.prx_registry.withdraw(id);
                 Lv2Dispatch::immediate(res & 0xFFFF_FFFF)
             }
             other => {
@@ -169,7 +180,7 @@ impl Lv2Host {
                          GET_ENTRY(1) or REPORT_RESULT(2); returning CELL_PRX_ERROR_ERROR"
                     ),
                 );
-                Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
+                Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_ERROR))
             }
         }
     }
@@ -182,12 +193,14 @@ impl Lv2Host {
     ///    the caller the entry to invoke. CellGov never runs guest
     ///    `module_stop`, so this phase reports `NO_ENTRY`. liblv2
     ///    then skips the call and reports zero.
-    /// 2. Phase 2 with `res == 0` completes `Stopping -> Stopped`,
-    ///    and a later unload withdraws the module. `res == 1` is
-    ///    `CELL_PRX_ERROR_CAN_NOT_STOP`; any other value answers
-    ///    CELL_OK with no transition.
+    /// 2. Phase 2 with `res == 0` completes `Stopping -> Stopped`, or
+    ///    stops a module that never started, and a later unload
+    ///    withdraws the module. `res == 1` is
+    ///    `CELL_PRX_ERROR_CAN_NOT_STOP` and puts a stopping module
+    ///    back to started; any other value answers CELL_OK with no
+    ///    transition.
     ///
-    /// cmd 4 and cmd 8 are the pair the teardown helper runs: 4 hands
+    /// Nibbles 4 and 8 are the pair the teardown helper runs: 4 hands
     /// back the entries, 8 reports what they returned. Neither moves
     /// the module's state.
     ///
@@ -201,7 +214,8 @@ impl Lv2Host {
     /// - `CELL_ESRCH` when `id` names no loaded module.
     /// - `CELL_PRX_ERROR_NOT_STARTED` / `ALREADY_STOPPED` /
     ///   `ALREADY_STOPPING` when cmd 1 / 4 / 8 finds the module in
-    ///   the wrong state.
+    ///   the wrong state. Nibble 4 answers a stopped module
+    ///   `ALREADY_STOPPING`.
     /// - `CELL_PRX_ERROR_CAN_NOT_STOP` when phase 2 reports `res == 1`.
     /// - `CELL_PRX_ERROR_ERROR` for a command nibble outside
     ///   1 / 2 / 4 / 8.
@@ -311,7 +325,7 @@ impl Lv2Host {
                     .begin_stop(id)
                     .expect("id lookup succeeded above");
                 if let Some(err) = wrong_state(old) {
-                    return Lv2Dispatch::immediate(err.into());
+                    return Lv2Dispatch::immediate(return_code(err));
                 }
                 Lv2Dispatch::Immediate {
                     code: 0,
@@ -331,19 +345,25 @@ impl Lv2Host {
                 };
                 match res {
                     0 => {
-                        if !self.state.prx_registry.finish_stop(id) {
+                        // A report to a module that never started
+                        // stops it: the console answers CELL_OK and
+                        // then ALREADY_STOPPED (`lv2_prx_states_more`).
+                        if !self.state.prx_registry.finish_stop(id)
+                            && !self.state.prx_registry.stop_unstarted(id)
+                        {
                             // liblv2.sprx issues phase 2 only straight
                             // after an accepted phase 1, so no
                             // firmware caller produces this and the
-                            // kernel's answer is unknown. CELL_OK
-                            // without a transition leaves the registry
+                            // kernel's answer for a started or stopped
+                            // module is unknown. CELL_OK without a
+                            // transition leaves the registry
                             // consistent.
                             self.log_invariant_break(
                                 "dispatch.prx_stop_module_unexpected_state",
                                 format_args!(
                                     "_sys_prx_stop_module id={id:#010x} cmd=2 res=0 but the \
-                                     module is not in the Stopping state; returning CELL_OK \
-                                     without a transition"
+                                     module is neither Stopping nor Initialized; returning \
+                                     CELL_OK without a transition"
                                 ),
                             );
                         }
@@ -353,6 +373,8 @@ impl Lv2Host {
                         // Phase 1 handed back NO_ENTRY, so the guest
                         // called nothing; a can-not-stop report is a
                         // gap signal even though the code is faithful.
+                        // The console puts a stopping module back to
+                        // started (`lv2_prx_states_more`).
                         self.log_invariant_break(
                             "dispatch.prx_stop_module_unexpected_res",
                             format_args!(
@@ -361,7 +383,8 @@ impl Lv2Host {
                                  CELL_PRX_ERROR_CAN_NOT_STOP"
                             ),
                         );
-                        Lv2Dispatch::immediate(CELL_PRX_ERROR_CAN_NOT_STOP.into())
+                        self.state.prx_registry.cancel_stop(id);
+                        Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_CAN_NOT_STOP))
                     }
                     other => {
                         // `res` carries the sign-extended s32 a
@@ -381,7 +404,29 @@ impl Lv2Host {
                     }
                 }
             }
-            stop_cmd::GET_ENTRIES | stop_cmd::REPORT_ENTRIES_RESULT => {
+            stop_cmd::GET_ENTRIES => {
+                let state = self
+                    .state
+                    .prx_registry
+                    .lookup_by_id(id)
+                    .expect("id lookup succeeded above")
+                    .state();
+                // The console answers a stopped module ALREADY_STOPPING
+                // here, not ALREADY_STOPPED (`lv2_prx_states_more`).
+                if state == PrxState::Stopped {
+                    return Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_ALREADY_STOPPING));
+                }
+                if let Some(err) = wrong_state(state) {
+                    return Lv2Dispatch::immediate(return_code(err));
+                }
+                // The nibble selects the arm: the console answers 0x14
+                // as it answers 4 (`lv2_prx_states`).
+                Lv2Dispatch::Immediate {
+                    code: 0,
+                    effects: no_entry_effects(self),
+                }
+            }
+            stop_cmd::REPORT_ENTRIES_RESULT => {
                 let state = self
                     .state
                     .prx_registry
@@ -389,25 +434,16 @@ impl Lv2Host {
                     .expect("id lookup succeeded above")
                     .state();
                 if let Some(err) = wrong_state(state) {
-                    return Lv2Dispatch::immediate(err.into());
+                    return Lv2Dispatch::immediate(return_code(err));
                 }
-                // The nibble selects this arm, but the branch below
-                // tests the FULL cmd value: only exactly 4 hands back
-                // the entries. 8, 0x14, 0x18, ... all fall through.
-                // liblv2.sprx writes only 4 and 8.
-                if cmd == stop_cmd::GET_ENTRIES {
-                    return Lv2Dispatch::Immediate {
-                        code: 0,
-                        effects: no_entry_effects(self),
-                    };
-                }
+                // The console answers cmd 8 to a started module with
+                // CELL_OK and writes neither entry (`lv2_prx_states`).
                 self.log_invariant_break(
                     "dispatch.prx_stop_module_teardown_report_unmodelled",
                     format_args!(
-                        "_sys_prx_stop_module id={id:#010x} cmd={cmd:#x} is not exactly \
-                         GET_ENTRIES(4); cmd 8 is the teardown handshake's report phase \
-                         and any other nibble-4/8 value has no known meaning. Returning \
-                         CELL_OK without reading res or completing Stopping -> Stopped"
+                        "_sys_prx_stop_module id={id:#010x} cmd={cmd:#x} is the teardown \
+                         handshake's report phase. Returning CELL_OK without reading res or \
+                         completing Stopping -> Stopped"
                     ),
                 );
                 Lv2Dispatch::immediate(0)
@@ -420,7 +456,7 @@ impl Lv2Host {
                          4, or 8; returning CELL_PRX_ERROR_ERROR"
                     ),
                 );
-                Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
+                Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_ERROR))
             }
         }
     }
@@ -436,7 +472,8 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_PRX_ERROR_UNKNOWN_MODULE` when `id` names no loaded module.
+    /// - `CELL_ESRCH` when `id` names no loaded module, as the
+    ///   `lv2_prx_states` capture answers an id already unloaded.
     /// - `CELL_PRX_ERROR_NOT_REMOVABLE` for a started or stopping
     ///   resident module.
     /// - `CELL_EINVAL` when `id` carries high bits, per
@@ -446,9 +483,7 @@ impl Lv2Host {
         args: [u64; 8],
     ) -> Lv2Dispatch {
         use crate::prx_registry::PrxState;
-        use cellgov_ps3_abi::lv2::prx::{
-            CELL_PRX_ERROR_NOT_REMOVABLE, CELL_PRX_ERROR_UNKNOWN_MODULE,
-        };
+        use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_NOT_REMOVABLE;
         use cellgov_ps3_abi::lv2::syscall;
 
         let Some([id]) = self.narrow_u32_args(syscall::SYS_PRX_UNLOAD_MODULE, [("id", args[0])])
@@ -456,7 +491,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
         match self.state.prx_registry.lookup_by_id(id) {
-            None => Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into()),
+            None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
             Some(entry) => match entry.state() {
                 PrxState::Initialized | PrxState::Stopped => {
                     let removed = self.state.prx_registry.withdraw_removable(id);
@@ -473,7 +508,7 @@ impl Lv2Host {
                              resident module; returning CELL_PRX_ERROR_NOT_REMOVABLE"
                         ),
                     );
-                    Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
+                    Lv2Dispatch::immediate(return_code(CELL_PRX_ERROR_NOT_REMOVABLE))
                 }
             },
         }

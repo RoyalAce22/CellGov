@@ -244,7 +244,9 @@ impl Lv2Host {
         });
         match found {
             Some(id) => Lv2Dispatch::immediate(u64::from(id)),
-            None => Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE as i32 as i64 as u64),
+            None => Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::prx::return_code(
+                CELL_PRX_ERROR_UNKNOWN_MODULE,
+            )),
         }
     }
 }

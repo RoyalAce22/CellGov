@@ -1,0 +1,15 @@
+[test]
+name = "lv2_prx_states"
+
+# A hardware probe: what the PRX start, stop and unload calls answer
+# for each module state, and how they read the command word. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 71 big-endian u64 in the order ppu/main.c lists: 568 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 568 },
+]
+
+[expect]
+outcome = "completed"

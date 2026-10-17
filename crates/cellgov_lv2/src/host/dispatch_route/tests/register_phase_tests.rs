@@ -4,7 +4,7 @@
 use super::*;
 
 const OPT: u32 = 0x2000;
-const ELF_IS_REGISTERED: u64 = 0x8001_1910;
+const ELF_IS_REGISTERED: u64 = 0xFFFF_FFFF_8001_1910;
 /// A CoreOS authority id: `>> 36 == 0x0107_0000`.
 const COREOS_AUTHID: u64 = 0x1070_0005_FF00_0001;
 /// The register calls liblv2.sprx's start makes, in its order: the

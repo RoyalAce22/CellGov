@@ -148,7 +148,9 @@ impl Lv2Host {
         }
         if !coreos {
             // Only a CoreOS process may hand the kernel its own tables.
-            return Lv2Dispatch::immediate(CELL_PRX_ERROR_ELF_IS_REGISTERED.into());
+            return Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::prx::return_code(
+                CELL_PRX_ERROR_ELF_IS_REGISTERED,
+            ));
         }
         self.obs.prx_register_module_manual_count += 1;
         let effects = self.link_manual_imports(stub_ea, stub_size, requester, rt, tick);

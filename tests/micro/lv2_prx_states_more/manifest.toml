@@ -1,0 +1,15 @@
+[test]
+name = "lv2_prx_states_more"
+
+# A hardware probe: the PRX start, stop and unload answers the
+# lv2_prx_states capture left open. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 37 big-endian u64 in the order ppu/main.c lists: 296 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 296 },
+]
+
+[expect]
+outcome = "completed"

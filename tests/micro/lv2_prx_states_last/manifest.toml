@@ -1,0 +1,15 @@
+[test]
+name = "lv2_prx_states_last"
+
+# A hardware probe: which call removed a started PRX, and what a start
+# report other than 0 and 1 answers. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 23 big-endian u64 in the order ppu/main.c lists: 184 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 184 },
+]
+
+[expect]
+outcome = "completed"
