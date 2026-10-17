@@ -56,8 +56,10 @@ impl Lv2Host {
     }
 
     /// `sys_rsx_attribute` (677): returns CELL_OK without state change
-    /// and logs an invariant break per call. Nothing establishes the
-    /// kernel's answer.
+    /// and logs an invariant break per call. The `lv2_rsx_attribute`
+    /// capture refuses a first argument of 0 or `0xDEAD` with
+    /// `CELL_EINVAL`; what the kernel answers the packages firmware
+    /// sends is unprobed, so CellGov keeps CELL_OK for every call.
     pub(in crate::host::dispatch_route) fn dispatch_rsx_attribute(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.rsx_attribute_stub",

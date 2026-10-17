@@ -28,10 +28,12 @@ impl Lv2Host {
     /// fills go out as effects in the same batch as the four out-pointer
     /// writes.
     ///
-    /// `lpar_dma_control` is `control_register::DMA_CONTROL_BASE`. A
-    /// console capture places the same block at `0x4010_0000`, one
-    /// megabyte above the device base; the field offsets inside it
-    /// agree and only the window base differs.
+    /// `lpar_dma_control` is `control_register::DMA_CONTROL_BASE`. On the
+    /// console the block opens the context's own window: the
+    /// `lv2_rsx_answers` capture reads it at `0x6010_0000`, with the
+    /// driver-info block one megabyte above it and the reports block two.
+    /// The field offsets inside it agree and only the window base
+    /// differs.
     ///
     /// # Errors
     ///
@@ -156,7 +158,18 @@ impl Lv2Host {
 
     /// `sys_rsx_context_free` (671): no-op in the single-context model;
     /// logs an invariant break so a free-then-realloc caller is traceable.
-    pub(in crate::host) fn dispatch_sys_rsx_context_free_noop(&mut self) -> Lv2Dispatch {
+    ///
+    /// # Errors
+    ///
+    /// `CELL_EINVAL` for an id that names no allocated context, as the
+    /// `lv2_rsx_answers` capture reads for `0xDEAD`.
+    pub(in crate::host) fn dispatch_sys_rsx_context_free(
+        &mut self,
+        context_id: u32,
+    ) -> Lv2Dispatch {
+        if !self.state.rsx_context.allocated || context_id != self.state.rsx_context.context_id {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
         self.log_invariant_break(
             "dispatch.sys_rsx_context_free_noop",
             format_args!("sys_rsx_context_free is a no-op in the single-context model"),

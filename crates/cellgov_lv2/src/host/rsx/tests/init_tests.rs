@@ -3,8 +3,12 @@
 use super::*;
 
 #[test]
-fn reports_init_zeroes_the_semaphore_block_and_stamps_the_timestamps() {
+fn reports_init_fills_the_semaphore_block_and_stamps_the_timestamps() {
     let mut expected = vec![0u8; reports::SIZE];
+    let fill: [u32; 4] = [0x1337_C0D3, 0x1337_BABE, 0x1337_BEEF, 0x1337_F001];
+    for (k, word) in expected[..0x1000].chunks_exact_mut(4).enumerate() {
+        word.copy_from_slice(&fill[k % 4].to_be_bytes());
+    }
     for i in 0..64 {
         let offset = 0x1000 + i * 16;
         expected[offset..offset + 8].copy_from_slice(&u64::MAX.to_be_bytes());

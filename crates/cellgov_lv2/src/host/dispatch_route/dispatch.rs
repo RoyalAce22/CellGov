@@ -597,7 +597,9 @@ impl Lv2Host {
                 requester,
                 tick,
             ),
-            Lv2Request::SysRsxMemoryFree { .. } => self.dispatch_sys_rsx_memory_free_noop(),
+            Lv2Request::SysRsxMemoryFree { mem_handle } => {
+                self.dispatch_sys_rsx_memory_free(mem_handle)
+            }
             Lv2Request::SysRsxContextAllocate {
                 context_id_ptr,
                 lpar_dma_control_ptr,
@@ -615,7 +617,9 @@ impl Lv2Host {
                 requester,
                 tick,
             ),
-            Lv2Request::SysRsxContextFree { .. } => self.dispatch_sys_rsx_context_free_noop(),
+            Lv2Request::SysRsxContextFree { context_id } => {
+                self.dispatch_sys_rsx_context_free(context_id)
+            }
             Lv2Request::SysRsxContextAttribute {
                 context_id,
                 package_id,

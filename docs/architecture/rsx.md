@@ -219,11 +219,12 @@ The init-time fill:
 1. zeroes the whole region;
 2. stamps every notify and report entry's timestamp field with
    `u64::MAX`;
-3. stamps each report entry's trailing word with `u32::MAX`.
+3. stamps each report entry's trailing word with `u32::MAX`;
+4. fills the semaphore block with four marker words, repeated every
+   16 bytes.
 
-The semaphore block keeps the zero fill.
-
-*Why:* what hardware leaves in the semaphore block is undocumented.
+*Why:* the reference console leaves those markers in every label a
+caller has not set.
 
 **Archive rows.** Each of these ordinals has a row in the
 [LV2 archive](../lv2/README.md) (`route.tsv`, `arm.tsv`,

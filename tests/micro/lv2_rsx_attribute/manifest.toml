@@ -1,0 +1,15 @@
+[test]
+name = "lv2_rsx_attribute"
+
+# A hardware probe: what sys_rsx_attribute answers a game once libgcm
+# has brought up an RSX context. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# three big-endian u64: rsxInit rc, then r3 of each case: 24 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 24 },
+]
+
+[expect]
+outcome = "completed"

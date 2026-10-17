@@ -1,0 +1,17 @@
+[test]
+name = "lv2_rsx_answers"
+
+# A hardware probe: what the RSX context calls hand a game through
+# libgcm (configuration, DMA control block, label / notify / report
+# addresses, the label block and the driver-info block), and what the
+# raw RSX calls answer on paths no libgcm caller takes. The console
+# capture is the answer; no emulator runs it.
+
+[observe]
+# 9208 bytes; the header of ppu/main.c names every field.
+memory_regions = [
+  { name = "result", addr = 0, size = 9208 },
+]
+
+[expect]
+outcome = "completed"

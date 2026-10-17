@@ -64,9 +64,8 @@ pub fn write_rsx_driver_info_init(
 /// Fill `buf` with the bytes `sys_rsx_context_allocate` writes into
 /// the reports region.
 ///
-/// The semaphore block keeps the zero fill. No public source states
-/// what the kernel leaves there, so CellGov synthesises nothing for
-/// it.
+/// The semaphore block holds [`reports::SEMAPHORE_FILL`], one copy per
+/// 16 bytes.
 ///
 /// # Panics
 ///
@@ -80,6 +79,10 @@ pub fn write_rsx_reports_init(buf: &mut [u8]) {
     buf.fill(0);
 
     let notify_base = driver_info_init::REPORTS_NOTIFY_OFFSET as usize;
+    for (k, word) in buf[..notify_base].chunks_exact_mut(4).enumerate() {
+        word.copy_from_slice(&reports::SEMAPHORE_FILL[k % 4].to_be_bytes());
+    }
+
     let report_base = driver_info_init::REPORTS_REPORT_OFFSET as usize;
     let ts_be = u64::MAX.to_be_bytes();
     for i in 0..reports::NOTIFY_COUNT {

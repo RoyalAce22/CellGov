@@ -68,7 +68,10 @@ pub mod control_register {
 /// the report array follow at the two offsets `driver_info` publishes
 /// to the guest. Those two offsets and [`reports::SIZE`] fix each
 /// array's byte span, and [`reports::ENTRY_SIZE`] fixes its count.
-/// What the kernel leaves in the semaphore block is unestablished.
+///
+/// The kernel fills the semaphore block with [`reports::SEMAPHORE_FILL`],
+/// one copy per 16 bytes, as the `lv2_rsx_answers` capture reads it
+/// after libgcm has set its first labels.
 pub mod reports {
     /// `sizeof(RsxReports)`.
     pub const SIZE: usize = 0x9400;
@@ -87,6 +90,9 @@ pub mod reports {
     pub const REPORT_PAD_OFFSET: usize = 12;
     /// Width of that pad word.
     pub const REPORT_PAD_SIZE: usize = 4;
+    /// The four words each 16 bytes of the semaphore block hold when
+    /// the context is allocated.
+    pub const SEMAPHORE_FILL: [u32; 4] = [0x1337_C0D3, 0x1337_BABE, 0x1337_BEEF, 0x1337_F001];
 
     // A wrong count or stride fails the build rather than shifting
     // the arrays inside the region.
@@ -104,11 +110,13 @@ pub mod reports {
 /// `RsxDriverInfo` substructure.
 ///
 /// `sys_rsx_context_allocate` (670) writes every field below as a
-/// 32-bit big-endian word. The offsets are unestablished: no trace in
-/// a capture records a guest read of this region. The field order
-/// alone pins each word to its offset. A libgcm read of the
-/// driver-info region would witness them. The words the kernel leaves
-/// zero carry no constant here.
+/// 32-bit big-endian word. The `lv2_rsx_answers` capture reads the block
+/// after libgcm's context bring-up and fixes each offset below. It also
+/// holds words CellGov does not write: `0xF`, `8`, `0x80000`,
+/// `0x300000` and `0x0818_0200` at 0x18 to 0x28, `0x200` at 0x54, and
+/// head and flip state from 0x58 on, which libgcm's later attribute
+/// calls change. The words the kernel leaves zero carry no constant
+/// here.
 pub mod driver_info {
     /// `sizeof(RsxDriverInfo)`.
     pub const SIZE: usize = 0x12F8;
@@ -142,8 +150,8 @@ pub mod driver_info {
 pub mod driver_info_init {
     /// Driver version word.
     pub const VERSION_DRIVER: u32 = 0x211;
-    /// GPU version word.
-    pub const VERSION_GPU: u32 = 0x5c;
+    /// GPU version word, as the `lv2_rsx_answers` capture reads it.
+    pub const VERSION_GPU: u32 = 0x34;
     /// nvcore frequency in Hz.
     pub const NVCORE_FREQUENCY: u32 = 500_000_000;
     /// Memory frequency in Hz.
@@ -156,8 +164,10 @@ pub mod driver_info_init {
     pub const REPORTS_REPORT_OFFSET: u32 = 0x1400;
     /// Hardware channel (games = 1, VSH = 0).
     pub const HARDWARE_CHANNEL: u32 = 1;
-    /// Default local RSX memory exposed to games.
-    pub const MEMORY_SIZE: u32 = 0x0F90_0000;
+    /// Local RSX memory exposed to a game, as the `lv2_rsx_answers`
+    /// capture reads it; libgcm reports the same value as its local
+    /// size.
+    pub const MEMORY_SIZE: u32 = 0x0EA0_0000;
 }
 
 /// Default event-queue parameters for the RSX handler queue.

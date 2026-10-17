@@ -48,7 +48,13 @@ fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     );
     let b = bytes.bytes();
     assert_eq!(b.len(), reports::SIZE);
-    assert_eq!(&b[0x0FF0..0x1000], &[0x00; 16]);
+    assert_eq!(
+        &b[0x0FF0..0x1000],
+        &[
+            0x13, 0x37, 0xC0, 0xD3, 0x13, 0x37, 0xBA, 0xBE, 0x13, 0x37, 0xBE, 0xEF, 0x13, 0x37,
+            0xF0, 0x01
+        ]
+    );
     assert_eq!(&b[0x1000..0x1008], &[0xFF; 8]);
     assert_eq!(&b[0x140C..0x1410], &[0xFF; 4]);
 
@@ -124,20 +130,54 @@ fn sys_rsx_context_allocate_second_call_rejects_with_einval() {
 }
 
 #[test]
-fn sys_rsx_context_free_returns_ok() {
+fn sys_rsx_context_free_of_the_live_context_returns_ok() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x1_0000);
+    let source = UnitId::new(0);
+    let _ = host.dispatch(
+        context_allocate_request(0x1000, 0x1008, 0x1010, 0x1018, 0xA001),
+        source,
+        &rt,
+    );
     let d = host.dispatch(
         Lv2Request::SysRsxContextFree {
             context_id: RSX_CONTEXT_ID,
         },
-        UnitId::new(0),
+        source,
         &rt,
     );
     assert!(matches!(
         d,
         Lv2Dispatch::Immediate { code: 0, effects } if effects.is_empty()
     ));
+}
+
+#[test]
+fn sys_rsx_context_free_of_an_id_no_context_holds_is_einval() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x1_0000);
+    let free = |host: &mut Lv2Host, context_id| {
+        host.dispatch(
+            Lv2Request::SysRsxContextFree { context_id },
+            UnitId::new(0),
+            &rt,
+        )
+    };
+    assert_eq!(
+        free(&mut host, RSX_CONTEXT_ID),
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+        "no context allocated yet"
+    );
+    let _ = host.dispatch(
+        context_allocate_request(0x1000, 0x1008, 0x1010, 0x1018, 0xA001),
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        free(&mut host, 0xDEAD),
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+        "an id that is not the live context's"
+    );
 }
 
 #[test]

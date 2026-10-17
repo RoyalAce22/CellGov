@@ -90,16 +90,29 @@ fn sys_rsx_memory_allocate_rejects_beyond_region_end() {
 }
 
 #[test]
-fn sys_rsx_memory_free_returns_ok() {
+fn sys_rsx_memory_free_of_an_allocated_handle_returns_ok() {
     let mut host = Lv2Host::new();
+    let source = UnitId::new(0);
+    let _ = allocate_rsx(&mut host, 0x10_0000, source);
     let rt = FakeRuntime::new(0x1_0000);
-    let d = host.dispatch(
-        Lv2Request::SysRsxMemoryFree { mem_handle: 0xA001 },
-        UnitId::new(0),
-        &rt,
-    );
+    let d = host.dispatch(Lv2Request::SysRsxMemoryFree { mem_handle: 1 }, source, &rt);
     assert!(matches!(
         d,
         Lv2Dispatch::Immediate { code: 0, effects } if effects.is_empty()
     ));
+}
+
+#[test]
+fn sys_rsx_memory_free_of_a_handle_never_handed_out_is_einval() {
+    let mut host = Lv2Host::new();
+    let source = UnitId::new(0);
+    let _ = allocate_rsx(&mut host, 0x10_0000, source);
+    let rt = FakeRuntime::new(0x1_0000);
+    for mem_handle in [0, 2, 0xDEAD] {
+        assert_eq!(
+            host.dispatch(Lv2Request::SysRsxMemoryFree { mem_handle }, source, &rt),
+            Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            "handle {mem_handle:#x}"
+        );
+    }
 }

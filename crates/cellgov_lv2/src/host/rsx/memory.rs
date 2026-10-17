@@ -70,7 +70,15 @@ impl Lv2Host {
 
     /// `sys_rsx_memory_free` (669): no-op against the bump allocator; logs an
     /// invariant break so a free-then-realloc caller is traceable.
-    pub(in crate::host) fn dispatch_sys_rsx_memory_free_noop(&mut self) -> Lv2Dispatch {
+    ///
+    /// # Errors
+    ///
+    /// `CELL_EINVAL` for a handle no `sys_rsx_memory_allocate` handed
+    /// out, as the `lv2_rsx_answers` capture reads for `0xDEAD`.
+    pub(in crate::host) fn dispatch_sys_rsx_memory_free(&mut self, mem_handle: u32) -> Lv2Dispatch {
+        if mem_handle == 0 || mem_handle >= self.state.rsx_mem_handle_counter {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
         self.log_invariant_break(
             "dispatch.sys_rsx_memory_free_noop",
             format_args!("sys_rsx_memory_free is a no-op against the bump allocator"),
