@@ -1,0 +1,16 @@
+[test]
+name = "ppu_granule_nan"
+
+# A hardware probe: the NaNs the PPU FPU generates and propagates, how
+# many bytes one dcbz zeroes, and how far another thread's store must
+# land from a reserved address to leave the reservation standing. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 45 big-endian u32 words, as ppu/main.c lists: 180 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 180 },
+]
+
+[expect]
+outcome = "completed"

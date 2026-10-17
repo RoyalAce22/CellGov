@@ -283,3 +283,7 @@ fn negate_unless_nan_f32(r: f32) -> f32 {
 #[cfg(test)]
 #[path = "tests/fp_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/fp_console_tests.rs"]
+mod fp_console_tests;

@@ -80,6 +80,10 @@ mod kernel_id_classes_console_tests;
 mod timer_time_tty_console_tests;
 
 #[cfg(test)]
+#[path = "tests/timebase_console_tests.rs"]
+mod timebase_console_tests;
+
+#[cfg(test)]
 #[path = "tests/arg_high_bits_console_tests.rs"]
 mod arg_high_bits_console_tests;
 

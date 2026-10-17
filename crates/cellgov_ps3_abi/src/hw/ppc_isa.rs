@@ -120,9 +120,19 @@ pub const PPC_STORAGE_HINT_XOS: [u32; 8] = [54, 86, 246, 278, 342, 374, 822, 982
 /// double format; setting it quiets a propagated SNaN.
 ///
 /// [PPC-Book1 p:91 s:4.3.2] An SNaN becomes a QNaN by setting the high-order fraction bit.
+///
+/// The reference console agrees (`ppu_granule_nan`): `fadd` and `fmadd`
+/// on an SNaN return it with this bit set and its sign and payload kept.
 pub const PPC_F64_QUIET_BIT: u64 = 0x0008_0000_0000_0000;
 
 /// The single QNaN every disabled Invalid Operation Exception yields.
 ///
 /// [PPC-Book1 p:91 s:4.3.2] Generated QNaN: sign 0, exponent all 1s, high-order fraction bit 1, rest 0.
+///
+/// The reference console agrees (`ppu_granule_nan`). Under the
+/// process's default FPSCR, the console returns this value for:
+///
+/// - double precision: 0/0, inf/inf, inf-inf, inf+-inf, 0*inf, the
+///   square root of -1, inf*0+1;
+/// - single precision: 0/0, inf+-inf, the square root of -1.
 pub const PPC_GENERATED_QNAN_F64: u64 = 0x7FF8_0000_0000_0000;

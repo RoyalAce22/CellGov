@@ -18,6 +18,8 @@ use cellgov_sync::ReservedLine;
 mod altivec;
 #[path = "mem_atomic_tests.rs"]
 mod atomics;
+#[path = "mem_dcbz_console_tests.rs"]
+mod dcbz_console;
 #[path = "mem_float_tests.rs"]
 mod floats;
 #[path = "mem_lmw_form_tests.rs"]

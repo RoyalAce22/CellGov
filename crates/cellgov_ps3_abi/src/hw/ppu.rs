@@ -9,6 +9,11 @@
 /// PPU timebase register frequency in Hz. Reported by
 /// `sys_time_get_timebase_frequency` and used to convert between
 /// guest-visible timebase ticks and microseconds.
+///
+/// The reference console's `sys_time_get_timebase_frequency` returns
+/// this value, and a one-second `sys_timer_sleep` there takes 79,802,891
+/// timebase ticks, which measures the same frequency
+/// (`lv2_timer_time_tty`).
 pub const CELL_PPU_TIMEBASE_HZ: u64 = 79_800_000;
 
 /// Gives the effective-address offset of the PowerPC System Call interrupt vector.
@@ -22,6 +27,10 @@ pub const SYSTEM_CALL_VECTOR_OFFSET: u64 = 0xC00;
 ///
 /// [CBE-Handbook p:135 s:6.1] The coherence block equals the 128-byte cache-line
 /// size for every PPE cache, so the reservation granule is 128 bytes.
+///
+/// The reference console agrees (`ppu_granule_nan`). Another thread's
+/// store 64 bytes past a reserved line's start broke the reservation in
+/// each of 32 trials, and a store 128 bytes past it in none.
 pub const RESERVATION_LINE_BYTES: u64 = 128;
 
 /// `dcbz` block size on the Cell PPU: the implementation's data cache
@@ -29,6 +38,9 @@ pub const RESERVATION_LINE_BYTES: u64 = 128;
 ///
 /// [PPC-Book2 p:20 s:3.2 Cache Management Instructions] dcbz block is implementation-defined.
 /// [CBE-Handbook p:135 s:6.1] PPE L1 DCache cache-line size is 128 bytes; coherence block matches.
+///
+/// The reference console agrees (`ppu_granule_nan`): one `dcbz` 40 bytes
+/// into a 128-byte-aligned block zeroes exactly that block's 128 bytes.
 pub const DCBZ_BLOCK_BYTES: usize = 128;
 
 /// Number of PPU general-purpose registers (r0..r31).

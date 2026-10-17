@@ -210,3 +210,7 @@ impl ReservationTable {
 #[cfg(test)]
 #[path = "tests/reservation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/reservation_console_tests.rs"]
+mod reservation_console_tests;
