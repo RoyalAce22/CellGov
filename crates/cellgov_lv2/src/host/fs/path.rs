@@ -1,7 +1,9 @@
 //! Guest-path scanning and disambiguation.
 
 use cellgov_ps3_abi::lv2::errno;
-use cellgov_ps3_abi::lv2::fs::{CELL_FS_MAX_FS_FILE_NAME_LENGTH, CELL_FS_MAX_PATH_LENGTH};
+use cellgov_ps3_abi::lv2::fs::{
+    CELL_FS_MAX_FS_FILE_NAME_LENGTH, CELL_FS_MAX_PATH_LENGTH, GAME_PROCESS_MOUNTED_ROOTS,
+};
 
 use crate::host::Lv2Runtime;
 
@@ -53,6 +55,26 @@ pub(super) fn read_path_bytes(
         return Err(errno::CELL_ENAMETOOLONG);
     }
     Ok(path.to_vec())
+}
+
+/// What `sys_fs_open` and `sys_fs_opendir` answer for a path no mount
+/// in CellGov's table holds: `CELL_ENOENT` when its root is one a game
+/// process finds mounted, when it has no leading `/`, or for `/`
+/// itself; `CELL_ENOTMOUNTED` for any other root. The console answers
+/// `/` with `CELL_EISDIR` from `sys_fs_open` and lists it from
+/// `sys_fs_opendir` (`lv2_fs_unmounted_paths`); CellGov mounts no `/`.
+pub(super) fn unmounted_answer(path: &str) -> cellgov_ps3_abi::lv2::errno::Lv2ErrCode {
+    let root = &path.as_bytes()[..device_len(path.as_bytes())];
+    // `/` alone names the root itself, which is no device's mount.
+    if root.len() <= 1
+        || GAME_PROCESS_MOUNTED_ROOTS
+            .iter()
+            .any(|r| r.as_bytes() == root)
+    {
+        errno::CELL_ENOENT
+    } else {
+        errno::CELL_ENOTMOUNTED
+    }
 }
 
 /// The bytes of `path`'s first component with its leading `/`

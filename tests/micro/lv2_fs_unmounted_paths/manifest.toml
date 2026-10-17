@@ -1,0 +1,15 @@
+[test]
+name = "lv2_fs_unmounted_paths"
+
+# A hardware probe: what sys_fs_open and sys_fs_opendir answer for a path on a mounted device,
+# an unmounted device, a root no device has, and the process-relative roots.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 14 big-endian u64 words, in the order ppu/main.c lists: 112 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 112 },
+]
+
+[expect]
+outcome = "completed"

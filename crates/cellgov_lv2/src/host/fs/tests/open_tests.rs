@@ -85,7 +85,7 @@ fn fs_open_bad_fd_out_ptr_takes_precedence_over_bad_path() {
 #[test]
 fn o_creat_for_missing_path_returns_enoent_no_effects() {
     let mut host = Lv2Host::new();
-    let rt = PathRuntime::empty(0x40000).write(0x10000, b"/save\0");
+    let rt = PathRuntime::empty(0x40000).write(0x10000, b"/dev_hdd0/save\0");
     assert_immediate(
         run(
             &mut host,
@@ -139,7 +139,7 @@ fn unknown_path_still_enoents_when_other_paths_are_registered() {
     host.fs_store_mut()
         .register_blob("/registered".into(), b"x".to_vec())
         .unwrap();
-    let rt = PathRuntime::empty(0x40000).write(0x10000, b"/missing\0");
+    let rt = PathRuntime::empty(0x40000).write(0x10000, b"/dev_hdd0/missing\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
         errno::CELL_ENOENT.code,

@@ -12,11 +12,42 @@
 /// three create-and-close pairs, so the console hands a closed fd's
 /// number out again.
 ///
-/// File fds are small ints in `[3, 255)` on real PS3. Titles encode
-/// the fd into narrow struct fields and load it with `lbz`/`lhz`/
-/// `lwz` semantics that truncate high bits; returning fds in the
-/// billions corrupts the fd in the title's internal table.
+/// File fds are small ints in `[3, 255]` on real PS3 (see
+/// [`LV2_FS_OBJECT_ID_LAST`]). Titles encode the fd into narrow struct
+/// fields and load it with `lbz`/`lhz`/`lwz` semantics that truncate
+/// high bits; returning fds in the billions corrupts the fd in the
+/// title's internal table.
 pub const LV2_FS_OBJECT_ID_BASE: u32 = 3;
+
+/// The last fd the kernel hands out. One more open while every fd from
+/// [`LV2_FS_OBJECT_ID_BASE`] to this one is held is `CELL_EMFILE`.
+// The console capture of tests/micro/lv2_error_codes_fs_more opens one
+// file under /dev_hdd0/tmp 253 times, on fds 3 to 255, and the 254th
+// open answers EMFILE.
+pub const LV2_FS_OBJECT_ID_LAST: u32 = 255;
+
+/// The roots a game process finds mounted. An absolute path under any
+/// other root is `CELL_ENOTMOUNTED` from `sys_fs_open` and
+/// `sys_fs_opendir`; a missing name under one of these is `CELL_ENOENT`.
+// The console capture of tests/micro/lv2_fs_unmounted_paths: a missing
+// name under /dev_hdd0, /app_home and /host_root answers ENOENT, as does
+// a path with no leading slash. /dev_usb007 (nothing plugged in),
+// /dev_hdd1, /dev_cgov and /cgov_nodev answer ENOTMOUNTED. The
+// tests/micro/lv2_error_codes_fs_more capture answers ENOTMOUNTED for
+// /dev_bdvd with no disc inserted. The flash mounts follow the firmware
+// flash layout (format::dev_flash); the lv2_fs_blksize and
+// lv2_fs_constants captures read under /dev_flash, and no capture reads
+// under /dev_flash2 or /dev_flash3. CellGov models no
+// USB device, so /dev_usb000 is not listed although the reference
+// console has one plugged in.
+pub const GAME_PROCESS_MOUNTED_ROOTS: [&str; 6] = [
+    "/dev_flash",
+    "/dev_flash2",
+    "/dev_flash3",
+    "/dev_hdd0",
+    "/app_home",
+    "/host_root",
+];
 
 // -- sys_fs_open flag bits --
 //

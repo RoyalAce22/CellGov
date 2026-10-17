@@ -88,7 +88,8 @@ errno_table! {
     CELL_EFAULT       = 0x8001_000D, "Invalid memory access";
     // No syscall or file-system call documents it; no probe can name a call that gives it.
     CELL_ENOCHILD     = 0x8001_000E, "Process has no child(s)";
-    // Not captured: the SPU thread-group and interrupt-thread state checks give it.
+    // Console capture: spu_group_control (terminate of a group not yet started) and
+    // spu_group_suspend.
     CELL_ESTAT        = 0x8001_000F, "State of the target thread is invalid";
     // Console capture: lv2_error_codes_sync.
     CELL_EALIGN       = 0x8001_0010, "Alignment is invalid.";
@@ -135,19 +136,19 @@ errno_table! {
     // No syscall or file-system call documents it; no probe can name a call that gives it.
     CELL_EPIPE        = 0x8001_0025, "Broken pipe";
     // Not captured: the console gave it for a create under /dev_flash, in a run that ended in a
-    // system-software error.
+    // system-software error. No other read-only file system is mounted without a disc.
     CELL_EROFS        = 0x8001_0026, "Read-only filesystem (write fail)";
     // No syscall or file-system call documents it; no probe can name a call that gives it.
     CELL_ESPIPE       = 0x8001_0027, "Illegal seek (e.g. seek on pipe)";
     // No syscall or file-system call documents it; no probe can name a call that gives it.
     CELL_E2BIG        = 0x8001_0028, "Arg list too long";
-    // Not captured: a write the file system refuses for permission gives it.
+    // Console capture: lv2_error_codes_fs_more (a write-only open of a file chmod'ed to 0400).
     CELL_EACCES       = 0x8001_0029, "Access violation";
     // Console capture: lv2_error_codes_fs.
     CELL_EBADF        = 0x8001_002A, "Invalid file descriptor";
     // Not captured: a device I/O failure gives it; no call can force one.
     CELL_EIO          = 0x8001_002B, "Input/output error";
-    // Not captured: it takes more open files than the process limit to force.
+    // Console capture: lv2_error_codes_fs_more (the 254th open, with fds 3 to 255 held).
     CELL_EMFILE       = 0x8001_002C, "Too many files open";
     // No syscall or file-system call documents it; no probe can name a call that gives it.
     CELL_ENODEV       = 0x8001_002D, "No device";
@@ -155,7 +156,9 @@ errno_table! {
     CELL_ENOTDIR      = 0x8001_002E, "Not a directory";
     // Not captured: only the file-system stream and async calls give it.
     CELL_ENXIO        = 0x8001_002F, "No such device or IO";
-    // Not captured: a rename across two file systems gives it.
+    // Not captured: a rename across two file systems gives it. The lv2_error_codes_fs_more
+    // rename to /dev_hdd1 answered ENOTMOUNTED; the only other mounted writable device is the
+    // operator's USB stick.
     CELL_EXDEV        = 0x8001_0030, "Cross-device link error";
     // No syscall or file-system call documents it; no probe can name a call that gives it.
     CELL_EBADMSG      = 0x8001_0031, "Bad Message";
@@ -175,7 +178,8 @@ errno_table! {
     CELL_EFSSPECIFIC  = 0x8001_0038, "File-system specific error";
     // No syscall or file-system call documents it; no probe can name a call that gives it.
     CELL_EOVERFLOW    = 0x8001_0039, "Overflow occured";
-    // Not captured: a path on a device that is not mounted gives it.
+    // Console capture: lv2_fs_unmounted_paths and lv2_error_codes_fs_more (a path under any root
+    // a game process finds unmounted).
     CELL_ENOTMOUNTED  = 0x8001_003A, "Filesystem not mounted";
     // Not captured: an SDATA open of a file that is not one gives it.
     CELL_ENOTSDATA    = 0x8001_003B, "Not SData";

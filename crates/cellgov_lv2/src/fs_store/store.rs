@@ -1,5 +1,5 @@
 use cellgov_mem::lanes::{self, object_digest, source, LaneMap, LaneValue, ObjectLanes};
-use cellgov_ps3_abi::lv2::fs::LV2_FS_OBJECT_ID_BASE;
+use cellgov_ps3_abi::lv2::fs::{LV2_FS_OBJECT_ID_BASE, LV2_FS_OBJECT_ID_LAST};
 use num_enum::TryFromPrimitive;
 
 use super::FsError;
@@ -96,8 +96,9 @@ impl LaneValue for DirSnapshot {
 ///
 /// File and directory fds share one allocator, which hands out the
 /// lowest fd from [`LV2_FS_OBJECT_ID_BASE`] that no open file or
-/// directory holds. The two open-tables stay distinct so `close_fd`
-/// on a dir fd (and vice versa) surfaces as CELL_EBADF.
+/// directory holds, up to [`LV2_FS_OBJECT_ID_LAST`]. The two
+/// open-tables stay distinct so `close_fd` on a dir fd (and vice
+/// versa) surfaces as CELL_EBADF.
 ///
 /// The `lv2_fs_answers` capture shows the console reusing a closed
 /// fd: three opens that each close come before opens that read 3, 4
@@ -112,7 +113,8 @@ pub struct FsStore {
     blobs: LaneMap<String, BlobEntry>,
     open_fds: LaneMap<u32, FdEntry>,
     open_dirs: LaneMap<u32, DirSnapshot>,
-    /// The fd the next open takes: the lowest free one.
+    /// The fd the next open takes: the lowest free one, or one past
+    /// [`LV2_FS_OBJECT_ID_LAST`] when every fd is held.
     next_fd: u32,
 }
 
@@ -197,13 +199,16 @@ impl FsStore {
     ///
     /// # Errors
     ///
-    /// - [`FsError::FdExhausted`] if no fd above the one taken is free.
+    /// - [`FsError::FdExhausted`] if every fd up to
+    ///   [`LV2_FS_OBJECT_ID_LAST`] is held.
     fn take_fd(&mut self) -> Result<u32, FsError> {
         let fd = self.next_fd;
-        let after = fd.checked_add(1).ok_or(FsError::FdExhausted)?;
-        self.next_fd = (after..=u32::MAX)
+        if fd > LV2_FS_OBJECT_ID_LAST {
+            return Err(FsError::FdExhausted);
+        }
+        self.next_fd = (fd + 1..=LV2_FS_OBJECT_ID_LAST)
             .find(|&f| !self.open_fds.contains_key(f) && !self.open_dirs.contains_key(f))
-            .ok_or(FsError::FdExhausted)?;
+            .unwrap_or(LV2_FS_OBJECT_ID_LAST + 1);
         Ok(fd)
     }
 

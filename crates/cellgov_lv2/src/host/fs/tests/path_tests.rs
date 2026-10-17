@@ -62,8 +62,8 @@ fn out_of_range_path_ptr_returns_efault() {
 #[test]
 fn path_at_region_end_succeeds() {
     let mut host = Lv2Host::new();
-    let path_ptr: u32 = 0x40000 - 5;
-    let rt = PathRuntime::empty(0x40000).write(path_ptr, b"/foo\0");
+    let path_ptr: u32 = 0x40000 - 14;
+    let rt = PathRuntime::empty(0x40000).write(path_ptr, b"/dev_hdd0/foo\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(path_ptr, 0x20000, 0, 0)),
         errno::CELL_ENOENT.code,
@@ -88,7 +88,7 @@ fn path_crossing_unmapped_returns_efault_not_einval() {
 #[test]
 fn high_bit_bytes_in_path_succeed() {
     let mut host = Lv2Host::new();
-    let rt = PathRuntime::empty(0x40000).write(0x10000, b"/foo\xe6\x97\xa5\0");
+    let rt = PathRuntime::empty(0x40000).write(0x10000, b"/dev_hdd0/foo\xe6\x97\xa5\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
         errno::CELL_ENOENT.code,
@@ -110,7 +110,7 @@ fn empty_path_returns_enoent() {
 #[test]
 fn first_null_terminator_wins() {
     let mut host = Lv2Host::new();
-    let rt = PathRuntime::empty(0x40000).write(0x10000, b"/foo\0/bar\0");
+    let rt = PathRuntime::empty(0x40000).write(0x10000, b"/dev_hdd0/foo\0/bar\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
         errno::CELL_ENOENT.code,

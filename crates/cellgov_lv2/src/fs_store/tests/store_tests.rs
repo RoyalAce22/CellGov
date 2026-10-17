@@ -179,11 +179,11 @@ fn duplicate_register_returns_path_already_registered() {
 }
 
 #[test]
-fn fd_exhaustion_at_u32_max_is_explicit() {
+fn fd_exhaustion_after_the_last_fd_is_explicit() {
     let mut s = fs_with("/foo", b"x");
-    s.next_fd = u32::MAX - 1;
+    s.next_fd = LV2_FS_OBJECT_ID_LAST;
     let last = s.open_fd("/foo").unwrap();
-    assert_eq!(last, u32::MAX - 1);
+    assert_eq!(last, LV2_FS_OBJECT_ID_LAST);
     assert_eq!(s.open_fd("/foo"), Err(FsError::FdExhausted));
     assert_eq!(s.open_fd_count(), 1);
 }

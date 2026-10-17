@@ -8,7 +8,7 @@ use crate::fs_store::{DirEntry, FsError};
 use crate::host::{Lv2Host, Lv2Runtime};
 
 use super::mount::DirMountResolution;
-use super::path::read_path_bytes;
+use super::path::{read_path_bytes, unmounted_answer};
 use super::ptr::out_ptr_writable;
 use cellgov_time::GuestTicks;
 
@@ -32,7 +32,9 @@ impl Lv2Host {
     /// 2. `path_ptr` unmapped -> CELL_EFAULT; a path or a name in it
     ///    over the limit -> CELL_ENAMETOOLONG.
     /// 3. Non-UTF-8 path -> CELL_ENOENT.
-    /// 4. No matching mount prefix -> CELL_ENOENT.
+    /// 4. No matching mount prefix -> CELL_ENOTMOUNTED, or CELL_ENOENT
+    ///    when the root is one a game process finds mounted
+    ///    (`unmounted_answer`).
     /// 5. Host path not-a-directory -> CELL_ENOTDIR; missing ->
     ///    CELL_ENOENT; IO error -> CELL_EIO; `..` traversal ->
     ///    CELL_EACCES.
@@ -71,7 +73,7 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(err.into());
             }
             DirMountResolution::Unmounted => {
-                return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
+                return Lv2Dispatch::immediate(unmounted_answer(&path_owned).into());
             }
         };
 

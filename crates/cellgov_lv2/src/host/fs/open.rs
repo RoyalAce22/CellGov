@@ -9,7 +9,7 @@ use crate::host::{Lv2Host, Lv2Runtime};
 
 use super::flags::validate_open_flags;
 use super::mount::MountResolution;
-use super::path::read_path_bytes;
+use super::path::{read_path_bytes, unmounted_answer};
 use super::ptr::out_ptr_writable;
 use cellgov_time::GuestTicks;
 
@@ -32,7 +32,9 @@ impl Lv2Host {
     ///    path exists AND flags request write semantics -> CELL_EROFS.
     /// 4. Path exists, flags OK -> CELL_OK with one fd-write effect,
     ///    or CELL_EMFILE when the fd allocator is exhausted.
-    /// 5. Path missing or non-UTF-8 -> CELL_ENOENT. A `..` traversal
+    /// 5. Path missing or non-UTF-8 -> CELL_ENOENT; a path no mount
+    ///    holds -> CELL_ENOTMOUNTED unless its root is one a game
+    ///    process finds mounted (`unmounted_answer`). A `..` traversal
     ///    under a mount is CELL_EACCES. A mount root the host declines
     ///    to read stops the lookup with CELL_EACCES or CELL_EIO.
     #[allow(
@@ -83,7 +85,7 @@ impl Lv2Host {
                 self.open_existing_blob(p, fd_out_ptr, requester, tick)
             }
             MountResolution::Failed(err) => Lv2Dispatch::immediate(err.into()),
-            MountResolution::Unmounted => Lv2Dispatch::immediate(errno::CELL_ENOENT.into()),
+            MountResolution::Unmounted => Lv2Dispatch::immediate(unmounted_answer(p).into()),
         }
     }
 

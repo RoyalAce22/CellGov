@@ -1,0 +1,15 @@
+[test]
+name = "lv2_error_codes_fs_more"
+
+# A hardware probe: the CellError codes the file-system calls give for an unmounted device,
+# a cross-device rename, a mode change and the per-process open-file limit.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 19 big-endian u64 words, in the order ppu/main.c lists: 152 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 152 },
+]
+
+[expect]
+outcome = "completed"

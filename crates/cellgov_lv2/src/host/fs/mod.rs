@@ -38,3 +38,7 @@ mod fs_constants_console_tests;
 #[cfg(test)]
 #[path = "tests/fs_blksize_console_tests.rs"]
 mod fs_blksize_console_tests;
+
+#[cfg(test)]
+#[path = "tests/fs_unmounted_console_tests.rs"]
+mod fs_unmounted_console_tests;

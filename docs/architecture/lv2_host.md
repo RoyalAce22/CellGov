@@ -535,12 +535,12 @@ flowchart TD
   open["sys_fs_open / sys_fs_stat path"] --> blob{"path registered in FsStore?"}
   blob -->|yes| fd["lowest free fd (starts at 3, a closed fd is reused)"]
   blob -->|no| mount{"a mount prefix matches?"}
-  mount -->|no| enoent["CELL_FS_ENOENT"]
+  mount -->|no| unmounted["sys_fs_open: CELL_FS_ENOENT under a root a game process finds mounted, else CELL_FS_ENOTMOUNTED; sys_fs_stat: CELL_FS_ENOENT"]
   mount -->|yes| canon["canonicalize segments: drop empty and dot, refuse dot-dot and host separators"]
   canon --> probe["probe each host root in order"]
   probe -->|first root holding the name| host["read the bytes there"]
   host --> cache["insert into FsStore for the rest of the boot"] --> fd
-  probe -->|no root holds it| enoent
+  probe -->|no root holds it| enoent["CELL_FS_ENOENT"]
   probe -->|a root will not be read| refuse["named refusal: CELL_FS_EACCES or CELL_FS_EIO"]
 ```
 
