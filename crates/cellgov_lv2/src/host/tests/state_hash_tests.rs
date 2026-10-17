@@ -140,6 +140,7 @@ fn fingerprint_changes_when_a_child_process_is_inserted() {
             authority_id: 0x1070_0000_5600_0001,
             control_flags1: 0,
             exit_status: None,
+            module_registered: false,
         },
     );
     host.state.processes = table;
@@ -160,6 +161,7 @@ fn fingerprint_differs_between_two_child_authority_ids() {
                 authority_id: authid,
                 control_flags1: 0,
                 exit_status: None,
+                module_registered: false,
             },
         );
         host.state.processes = table;
@@ -390,6 +392,7 @@ fn fingerprint_changes_when_a_child_exit_status_is_recorded() {
             authority_id: 0,
             control_flags1: 0,
             exit_status: None,
+            module_registered: false,
         },
     );
     let alive = host.fingerprint();

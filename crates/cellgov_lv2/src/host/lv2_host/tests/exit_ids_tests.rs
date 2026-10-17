@@ -35,6 +35,7 @@ fn host_with_child() -> Lv2Host {
             authority_id: 0,
             control_flags1: 0,
             exit_status: None,
+            module_registered: false,
         },
     ));
     host.ppu_threads_mut()

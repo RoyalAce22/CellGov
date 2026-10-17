@@ -100,6 +100,7 @@ fn an_option_pointer_whose_struct_wraps_is_a_named_efault() {
     // sibling sc 481 / 482 / 494 arms bound theirs the same way.
     use cellgov_ps3_abi::lv2::prx::register_module_option as layout;
     let mut host = Lv2Host::new();
+    host.set_program_authority_id(COREOS_AUTHID);
     let rt = FakeRuntime::with_memory(cellgov_mem::GuestMemory::new(0x10000));
     let opt = u64::from(u32::MAX - layout::TOUCHED_LEN + 1);
     assert_eq!(
@@ -119,6 +120,7 @@ fn an_option_pointer_one_byte_below_the_wrap_clears_the_gate() {
     // there. A gate that refused one address too many fails here.
     use cellgov_ps3_abi::lv2::prx::register_module_option as layout;
     let mut host = Lv2Host::new();
+    host.set_program_authority_id(COREOS_AUTHID);
     let rt = FakeRuntime::with_memory(cellgov_mem::GuestMemory::new(0x10000));
     let opt = u64::from(u32::MAX - layout::TOUCHED_LEN);
     assert_eq!(
@@ -134,6 +136,7 @@ fn an_option_pointer_one_byte_below_the_wrap_clears_the_gate() {
 #[test]
 fn unrecognised_option_size_is_einval() {
     let mut host = Lv2Host::new();
+    host.set_program_authority_id(COREOS_AUTHID);
     let rt = FakeRuntime::with_memory(memory_with(1, 0x28, &[]));
     assert_eq!(
         call(&mut host, &rt, OPT.into()),
@@ -178,12 +181,14 @@ fn legacy_option_sizes_skip_the_branch() {
 #[test]
 fn a_non_coreos_caller_keeps_elf_is_registered() {
     let mut host = Lv2Host::new();
+    host.set_firmware_exports(exports_under(LIB, &[(0xDEAD_BEEF, 0x0080_1234)]));
     let rt = FakeRuntime::with_memory(memory_with(1, 0x30, &[0xDEAD_BEEF]));
     assert_eq!(
         call(&mut host, &rt, OPT.into()),
         Lv2Dispatch::immediate(ELF_IS_REGISTERED)
     );
-    assert_eq!(host.observability().prx_register_module_witness().1, 0);
+    let (calls, manual, linked, _) = host.observability().prx_register_module_witness();
+    assert_eq!((calls, manual, linked), (1, 0, 0));
 }
 
 #[test]
@@ -201,6 +206,7 @@ fn a_retail_child_of_a_coreos_process_keeps_elf_is_registered() {
             authority_id: cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
             control_flags1: 0,
             exit_status: None,
+            module_registered: false,
         },
     ));
     host.bind_unit_process(child_unit, child_pid);

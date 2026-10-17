@@ -879,6 +879,7 @@ mod process_identity_bookkeeping {
                     authority_id: 0,
                     control_flags1: 0,
                     exit_status: None,
+                    module_registered: false,
                 },
             );
         }
@@ -1004,6 +1005,7 @@ mod privilege_predicates {
                 authority_id: cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
                 control_flags1: 0,
                 exit_status: None,
+                module_registered: false,
             },
         ));
         host.bind_unit_process(CHILD_UNIT, CHILD_PID);
@@ -1089,6 +1091,7 @@ mod process_exit_waiter_purge {
                 authority_id: 0,
                 control_flags1: 0,
                 exit_status: None,
+                module_registered: false,
             }
         ));
         let t1 = host

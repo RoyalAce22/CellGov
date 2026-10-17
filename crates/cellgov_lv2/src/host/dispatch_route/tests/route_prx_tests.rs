@@ -411,6 +411,10 @@ fn syscall_484_null_option_pointer_is_einval() {
 #[path = "register_module_tests.rs"]
 mod register_module;
 
+#[cfg(test)]
+#[path = "register_phase_tests.rs"]
+mod register_phase;
+
 #[test]
 fn syscall_462_returns_enosys() {
     let mut host = Lv2Host::new();

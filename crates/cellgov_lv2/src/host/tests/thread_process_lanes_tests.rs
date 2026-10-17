@@ -29,6 +29,7 @@ fn child(exit_status: Option<i32>) -> ProcessEntry {
         authority_id: 0x1070_0000_5600_0001,
         control_flags1: 0,
         exit_status,
+        module_registered: false,
     }
 }
 
@@ -164,6 +165,9 @@ fn every_thread_process_and_identity_change_moves_the_partial() {
     );
     step!(host, h, "boot exit", {
         host.state.processes.boot_mut().exit_status = Some(0);
+    });
+    step!(host, h, "boot module registered", {
+        host.state.processes.boot_mut().module_registered = true;
     });
     step!(
         host,

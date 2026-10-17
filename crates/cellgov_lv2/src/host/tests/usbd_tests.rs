@@ -355,6 +355,7 @@ fn a_child_exit_purges_its_parked_reader() {
             authority_id: 0,
             control_flags1: 0,
             exit_status: None,
+            module_registered: false,
         }
     ));
     host.ppu_threads_mut()

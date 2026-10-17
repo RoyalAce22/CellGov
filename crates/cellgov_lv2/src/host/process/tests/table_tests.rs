@@ -31,6 +31,7 @@ fn insert_child_refuses_existing_pid() {
         authority_id: 0,
         control_flags1: 0,
         exit_status: None,
+        module_registered: false,
     };
     assert!(!t.insert_child(BOOT_PROCESS_PID, entry.clone()));
     assert!(t.insert_child(BOOT_PROCESS_PID + 1, entry));
@@ -43,6 +44,7 @@ fn child_entry() -> ProcessEntry {
         authority_id: 0,
         control_flags1: 0,
         exit_status: None,
+        module_registered: false,
     }
 }
 
@@ -128,6 +130,7 @@ fn iter_yields_pid_order() {
             authority_id: 1,
             control_flags1: 0,
             exit_status: None,
+            module_registered: false,
         },
     );
     let pids: Vec<u32> = t.iter().map(|(pid, _)| pid).collect();

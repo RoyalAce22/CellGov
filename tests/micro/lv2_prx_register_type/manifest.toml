@@ -1,0 +1,16 @@
+[test]
+name = "lv2_prx_register_type"
+
+# A hardware probe: what _sys_prx_register_module answers a game
+# process for each module type, with a 0x30-byte option and no stub
+# table. The console capture is the answer; no emulator runs it.
+
+[observe]
+# one big-endian u64 r3 per case in the order ppu/main.c lists: 40
+# bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 40 },
+]
+
+[expect]
+outcome = "completed"

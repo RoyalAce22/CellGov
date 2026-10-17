@@ -28,6 +28,7 @@ fn a_childs_exit_tears_down_the_context_it_allocated() {
             authority_id: 0,
             control_flags1: 0,
             exit_status: None,
+            module_registered: false,
         },
     ));
     host.bind_unit_process(CHILD_UNIT, CHILD);
@@ -65,6 +66,7 @@ fn a_childs_exit_leaves_a_context_the_parent_allocated() {
             authority_id: 0,
             control_flags1: 0,
             exit_status: None,
+            module_registered: false,
         },
     ));
     host.bind_unit_process(CHILD_UNIT, CHILD);

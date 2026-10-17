@@ -24,6 +24,10 @@ pub struct ProcessEntry {
     /// in the table so `sys_process_get_status` polls resolve
     /// deterministically after the exit.
     pub exit_status: Option<i32>,
+    /// Set by the process's first `_sys_prx_register_module` call that
+    /// asks for no import bind and gets CELL_OK. A process that is not
+    /// CoreOS gets CELL_EAGAIN from every later call.
+    pub module_registered: bool,
 }
 
 impl LaneValue for ProcessEntry {
@@ -38,6 +42,7 @@ impl LaneValue for ProcessEntry {
             self.exit_status
                 .map_or(0, |status| u64::from(status as u32)),
         );
+        lanes.lane(6, 0, u64::from(self.module_registered));
     }
 }
 
@@ -61,6 +66,7 @@ impl ProcessTable {
                 authority_id: cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
                 control_flags1: 0,
                 exit_status: None,
+                module_registered: false,
             },
         );
         Self {

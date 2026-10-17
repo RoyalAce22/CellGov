@@ -37,6 +37,8 @@ pub const CELL_PRX_ERROR_ALREADY_STOPPED: u32 = 0x8001_1135;
 /// The module refused to stop.
 pub const CELL_PRX_ERROR_CAN_NOT_STOP: u32 = 0x8001_1136;
 /// The ELF is already registered.
+///
+/// liblv2.sprx's own import-bind call takes this answer as success.
 pub const CELL_PRX_ERROR_ELF_IS_REGISTERED: u32 = 0x8001_1910;
 
 /// The bit of a module id `_sys_prx_start_module` refuses with

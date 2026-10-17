@@ -53,6 +53,7 @@ fn host_with_child_reader_in_front() -> (Lv2Host, FakeRuntime, PpuThreadId) {
             authority_id: 0,
             control_flags1: ROOT,
             exit_status: None,
+            module_registered: false,
         }
     ));
     let child_thread = host

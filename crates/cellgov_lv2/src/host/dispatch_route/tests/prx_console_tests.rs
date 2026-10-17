@@ -264,45 +264,71 @@ fn the_console_lists_ids_in_the_kernel_table_form_cellgov_does_not_keep() {
     assert_ne!(id >> 24, 0x23, "CellGov's own id form");
 }
 
-/// A running game process gets `CELL_EAGAIN` from the console for any
-/// non-null option. CellGov keeps its own answers, because every
-/// game's liblv2.sprx makes its register calls during process start,
-/// and what the console answers those is unprobed: refusing them would
-/// change every game's boot on a guess.
-#[test]
-fn the_console_refuses_a_running_game_process_that_cellgov_answers() {
-    let payload = console_payload("lv2_prx_register");
-    let sizes: [u64; 11] = [
-        0x18, 0x1C, 0x20, 0x24, 0x28, 0x2C, 0x30, 0x34, 0x38, 0x3C, 0x40,
-    ];
-    assert_eq!(payload.len(), 8 * (1 + sizes.len()));
-    // Case 0 puts the option in r3, leaving pOpt (r4) null: the two
-    // agree on that refusal.
+/// A game process that has run liblv2.sprx's start: its bind call (type
+/// 3), then its one call with no binding (type 2).
+fn started_game() -> Lv2Host {
     let mut host = Lv2Host::new();
+    for module_type in [3u64, 2] {
+        let mut image = vec![0u8; 0x40];
+        image[0..8].copy_from_slice(&0x30u64.to_be_bytes());
+        image[8..16].copy_from_slice(&module_type.to_be_bytes());
+        let rt = runtime_with(&image, &[]);
+        call(&mut host, &rt, 484, [0, OPT.into(), 0, 0, 0, 0, 0, 0]);
+    }
+    host
+}
+
+/// Replay each `(size, type)` option against a started game process and
+/// compare every answer with the `probe` capture's, case `first` on.
+fn replay_register(probe: &str, first: usize, cases: &[(u64, u64)]) {
+    let payload = console_payload(probe);
+    assert_eq!(payload.len(), 8 * (first + cases.len()));
+    let mut host = started_game();
+    for (k, &(size, module_type)) in cases.iter().enumerate() {
+        let mut image = vec![0u8; 0x40];
+        image[0..8].copy_from_slice(&size.to_be_bytes());
+        image[8..16].copy_from_slice(&module_type.to_be_bytes());
+        let rt = runtime_with(&image, &[]);
+        let (code, effects) = call(&mut host, &rt, 484, [0, OPT.into(), 0, 0, 0, 0, 0, 0]);
+        let case = first + k;
+        assert_eq!(
+            code,
+            word(&payload, 8 * case),
+            "case {case}: size {size:#x}, type {module_type}"
+        );
+        assert!(effects.is_empty(), "case {case}: a refusal writes nothing");
+    }
+}
+
+/// A running game process gets `CELL_EAGAIN` from the console for any
+/// non-null option, whatever size it declares; only the null option is
+/// refused ahead of that.
+#[test]
+fn the_register_call_answers_each_size_as_the_console_does() {
+    let payload = console_payload("lv2_prx_register");
+    // Case 0 puts the option in r3, leaving pOpt (r4) null.
+    let mut host = started_game();
     let mut image = vec![0u8; 0x40];
     image[0..8].copy_from_slice(&0x30u64.to_be_bytes());
     let rt = runtime_with(&image, &[]);
     let (code, _) = call(&mut host, &rt, 484, [OPT.into(), 0, 0, 0, 0, 0, 0, 0]);
     assert_eq!(code, word(&payload, 0), "null pOpt");
-    let eagain: u64 = errno::CELL_EAGAIN.into();
-    for (k, &size) in sizes.iter().enumerate() {
-        assert_eq!(
-            word(&payload, 8 * (k + 1)),
-            eagain,
-            "console, size {size:#x}"
-        );
-        let mut host = Lv2Host::new();
-        let mut image = vec![0u8; 0x40];
-        image[0..8].copy_from_slice(&size.to_be_bytes());
-        let rt = runtime_with(&image, &[]);
-        let (code, _) = call(&mut host, &rt, 484, [0, OPT.into(), 0, 0, 0, 0, 0, 0]);
-        // CellGov reads the size: the two forms it knows pass with no
-        // binding, every other size is refused as malformed.
-        let cellgov = if [0x1C, 0x20, 0x30].contains(&size) {
-            0
-        } else {
-            errno::CELL_EINVAL.into()
-        };
-        assert_eq!(code, cellgov, "CellGov, size {size:#x}");
-    }
+    let cases: Vec<(u64, u64)> = [
+        0x18, 0x1C, 0x20, 0x24, 0x28, 0x2C, 0x30, 0x34, 0x38, 0x3C, 0x40,
+    ]
+    .into_iter()
+    .map(|size| (size, 0))
+    .collect();
+    replay_register("lv2_prx_register", 1, &cases);
+}
+
+/// The same refusal for every module type, the bind liblv2.sprx's start
+/// makes among them.
+#[test]
+fn the_register_call_answers_each_type_as_the_console_does() {
+    replay_register(
+        "lv2_prx_register_type",
+        0,
+        &[(0x30, 0), (0x30, 1), (0x30, 2), (0x30, 3), (0x30, 3)],
+    );
 }

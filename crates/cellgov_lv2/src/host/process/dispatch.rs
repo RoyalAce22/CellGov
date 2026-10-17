@@ -243,6 +243,7 @@ impl Lv2Host {
                 authority_id: cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
                 control_flags1: 0,
                 exit_status: None,
+                module_registered: false,
             },
         );
         if !inserted {

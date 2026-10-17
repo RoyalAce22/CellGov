@@ -15,8 +15,19 @@ impl Lv2Host {
     /// import tables against the firmware export map.
     ///
     /// A caller that clears `type` bit 0 asks for no binding and gets
-    /// CELL_OK. Any other process that asks for one gets
-    /// CELL_PRX_ERROR_ELF_IS_REGISTERED.
+    /// CELL_OK. A process that is not CoreOS and asks for one gets
+    /// CELL_PRX_ERROR_ELF_IS_REGISTERED, the one refusal liblv2.sprx's
+    /// own bind call during process start accepts as success.
+    ///
+    /// The first CELL_OK with no binding marks a process that is not
+    /// CoreOS as registered, and every later call it makes gets
+    /// CELL_EAGAIN. A running game process gets CELL_EAGAIN from the
+    /// reference console for any non-null option, whatever its size or
+    /// type (the `lv2_prx_register` and `lv2_prx_register_type`
+    /// captures). liblv2.sprx's start makes its bind call and then its
+    /// one call with no binding, and no other register call comes
+    /// before the game's code runs. The answers during start are
+    /// unprobed: no probe code runs before liblv2.sprx's start.
     ///
     /// The struct layout is
     /// [`cellgov_ps3_abi::lv2::prx::register_module_option`]. `size`
@@ -36,8 +47,10 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` for a null `pOpt` or a `size` naming none of
-    ///   the three modelled forms.
+    /// - `CELL_EINVAL` for a null `pOpt`, ahead of every other check.
+    /// - `CELL_EAGAIN` for a registered process that is not CoreOS.
+    /// - `CELL_EINVAL` for a `size` naming none of the three modelled
+    ///   forms.
     /// - `CELL_EFAULT` when `pOpt` is unreadable or the struct would
     ///   not fit inside the 32-bit guest address space.
     /// - `CELL_EINVAL` when `pOpt` carries high bits, per
@@ -61,6 +74,18 @@ impl Lv2Host {
         };
         if opt == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        let coreos = self.is_coreos_process_of(requester);
+        let pid = self.state.processes.process_of_unit(requester);
+        if !coreos
+            && self
+                .state
+                .processes
+                .get(pid)
+                .is_some_and(|entry| entry.module_registered)
+        {
+            self.obs.prx_register_module_count += 1;
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         }
         // The gate covers the whole read reach, so every field address
         // below is sound without a per-field check. The sc 481 / 482 /
@@ -114,9 +139,14 @@ impl Lv2Host {
         self.obs.prx_register_module_count += 1;
 
         if module_type & opt_layout::TYPE_MANUAL_IMPORTS == 0 {
+            if !coreos {
+                if let Some(mut entry) = self.state.processes.get_mut(pid) {
+                    entry.module_registered = true;
+                }
+            }
             return Lv2Dispatch::immediate(0);
         }
-        if !self.is_coreos_process_of(requester) {
+        if !coreos {
             // Only a CoreOS process may hand the kernel its own tables.
             return Lv2Dispatch::immediate(CELL_PRX_ERROR_ELF_IS_REGISTERED.into());
         }

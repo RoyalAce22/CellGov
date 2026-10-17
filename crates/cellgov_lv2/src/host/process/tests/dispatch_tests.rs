@@ -109,6 +109,7 @@ fn child_entry() -> ProcessEntry {
         authority_id: 0,
         control_flags1: 0,
         exit_status: None,
+        module_registered: false,
     }
 }
 
