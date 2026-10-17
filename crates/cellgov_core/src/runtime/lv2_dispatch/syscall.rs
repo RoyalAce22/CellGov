@@ -282,6 +282,33 @@ impl Runtime {
                 }
             }
         }
+        // A 1 MiB-page area appears in the caller's space, where its
+        // process's blocks are read and written.
+        let area_installs: Vec<(u64, usize)> =
+            self.lv2_host.drain_pending_area_installs().collect();
+        if !area_installs.is_empty() {
+            let caller_space = self.spaces.space_of(source);
+            for (addr, size) in area_installs {
+                let mem = crate::runtime::spaces::resolve_space_memory_for_write(
+                    &mut self.memory,
+                    &mut self.spaces,
+                    caller_space,
+                );
+                if let Err(err) =
+                    mem.install_region(addr, size, "large_pages", cellgov_mem::PageSize::Page1M)
+                {
+                    self.lv2_host.log_invariant_break(
+                        "dispatch.large_page_area_install_overlap",
+                        format_args!(
+                            "1 MiB-page area at 0x{addr:08x}+0x{size:x} overlaps the caller's \
+                             existing layout in space {}: {err}; area not installed, the \
+                             guest already holds a block in it",
+                            caller_space.raw(),
+                        ),
+                    );
+                }
+            }
+        }
         // A 335 takes its window out of the caller's space, which is
         // where its 334 / 337 put it.
         let region_removals: Vec<(u64, usize, Option<u64>, Option<u32>)> =

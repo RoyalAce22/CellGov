@@ -1165,7 +1165,7 @@ fn a_keyed_view_of_a_different_size_is_refused_against_a_live_mapping() {
     rt.dispatch_lv2_request(
         classify(
             cellgov_ps3_abi::lv2::syscall::MMAPPER_MAP_SHARED_MEMORY,
-            &[0x6000_0000, mem_id, 0, 0, 0, 0, 0, 0],
+            &[0x7000_0000, mem_id, 0, 0, 0, 0, 0, 0],
         ),
         UnitId::new(0),
     );

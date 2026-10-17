@@ -108,6 +108,7 @@ impl Lv2Host {
             .derived
             .mem_alloc_base
             .saturating_add(USER_MEMORY_TOTAL);
+        let in_region = self.derived.mem_alloc_base..region_end;
         let fits = |start: u32| start.checked_add(size).filter(|&end| end <= region_end);
         let align_up = |at: u32| at.checked_add(align - 1).map(|p| p & !(align - 1));
         if let Some(start) = align_up(self.state.mem_alloc_ptr) {
@@ -116,7 +117,12 @@ impl Lv2Host {
             }
         }
         let mut cursor = self.derived.mem_alloc_base;
-        for (addr, block) in self.state.memory_blocks.iter() {
+        for (addr, block) in self
+            .state
+            .memory_blocks
+            .iter()
+            .filter(|&(addr, _)| in_region.contains(&addr))
+        {
             let start = align_up(cursor)?;
             if fits(start).is_some_and(|end| end <= addr) {
                 return Some(start);
@@ -127,29 +133,69 @@ impl Lv2Host {
         fits(start).map(|_| start)
     }
 
-    /// Records a block at `addr` and moves the cursor past it.
+    /// Records a block at `addr` and, for a block in the user region,
+    /// moves the cursor past it.
     fn commit_memory_block(&mut self, addr: u32, size: u32, container: Option<u32>) {
         self.state
             .memory_blocks
             .insert(addr, MemoryBlock { size, container });
+        let region_end = self
+            .derived
+            .mem_alloc_base
+            .saturating_add(USER_MEMORY_TOTAL);
         let end = addr.saturating_add(size);
-        if end > self.state.mem_alloc_ptr {
+        if end <= region_end && end > self.state.mem_alloc_ptr {
             self.state.mem_alloc_ptr = end;
         }
     }
 
-    /// `sys_memory_allocate` (348): places a block in the user region
-    /// above the loaded image, aligned to the page size `flags` names,
-    /// and writes its base to `*alloc_addr_ptr`.
+    /// Where a 1 MiB-page block of `size` bytes goes for process `pid`:
+    /// the lowest place in its 1 MiB-page area no live block holds,
+    /// with the area's base when the process has none yet.
+    ///
+    /// The `lv2_memory_1m_area` capture places the first such block at
+    /// the lowest free area granule (`0x5000_0000`), the next ones
+    /// above it, and a block after a free at the freed base. The area
+    /// stays the process's after its blocks are freed: a later 330
+    /// still skips it, and a later block lands at its base again.
+    fn place_large_page_block(&self, pid: u32, size: u32) -> Option<(u32, bool)> {
+        let granule = u32::try_from(cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE).ok()?;
+        if size > granule {
+            return None;
+        }
+        let (area, new) = match self.state.large_page_areas.get(pid) {
+            Some(&area) => (area, false),
+            None => (self.free_area_base(pid, granule)?, true),
+        };
+        let area_end = area.checked_add(granule)?;
+        let mut cursor = area;
+        for (addr, block) in self
+            .state
+            .memory_blocks
+            .iter()
+            .filter(|&(addr, _)| (area..area_end).contains(&addr))
+        {
+            if cursor.checked_add(size)? <= addr {
+                break;
+            }
+            cursor = cursor.max(addr.saturating_add(block.size));
+        }
+        (cursor.checked_add(size)? <= area_end).then_some((cursor, new))
+    }
+
+    /// `sys_memory_allocate` (348): places a block aligned to the page
+    /// size `flags` names and writes its base to `*alloc_addr_ptr`.
     ///
     /// The page size is the granule of `flags`: 64 KiB for
     /// `SYS_MEMORY_PAGE_SIZE_64K`, 1 MiB for `SYS_MEMORY_PAGE_SIZE_1M`
-    /// or a word naming none. The reference console returns a 1 MiB
-    /// allocation on a 1 MiB boundary, and libgcm's init refuses an IO
-    /// area that is not on one. The placement is CellGov's own: the base
-    /// differs from the console's, and the console reuses a freed base
-    /// at once where CellGov reuses one only when the region past the
-    /// cursor is full.
+    /// or a word naming none. A 1 MiB-page block goes in the process's
+    /// 1 MiB-page area, where the `lv2_memory_1m_area` capture places
+    /// it; a word naming no page size goes there too, as the
+    /// `lv2_memory_default_page` capture shows. A 64 KiB-page block goes in the user region above the
+    /// loaded image. That placement is CellGov's own: the base differs
+    /// from the console's, and the console reuses a freed base at once
+    /// where CellGov reuses one only when the region past the cursor is
+    /// full.
     ///
     /// # Errors
     ///
@@ -185,7 +231,14 @@ impl Lv2Host {
         if size > self.user_memory_available() {
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
-        let Some(addr) = self.place_memory_block(size, align) else {
+        let pid = self.state.processes.process_of_unit(requester);
+        let placed = if align == page_size::GRANULE_1M {
+            self.place_large_page_block(pid, size)
+        } else {
+            self.place_memory_block(size, align)
+                .map(|addr| (addr, false))
+        };
+        let Some((addr, new_area)) = placed else {
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         if size == 0 || !size.is_multiple_of(align) {
@@ -193,6 +246,13 @@ impl Lv2Host {
         }
         if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
             return d;
+        }
+        if new_area {
+            self.state.large_page_areas.insert(pid, addr);
+            self.derived.pending_area_installs.push((
+                u64::from(addr),
+                cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE as usize,
+            ));
         }
         self.commit_memory_block(addr, size, None);
         self.immediate_write_u32(addr, alloc_addr_ptr, requester, tick)
@@ -328,3 +388,7 @@ mod user_memory_console_tests;
 #[cfg(test)]
 #[path = "tests/memory_free_tests.rs"]
 mod free_tests;
+
+#[cfg(test)]
+#[path = "tests/memory_1m_area_console_tests.rs"]
+mod memory_1m_area_console_tests;

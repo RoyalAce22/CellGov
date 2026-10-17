@@ -140,6 +140,10 @@ impl Lv2Host {
                     cellgov_mem::lanes::source::MEMORY_BLOCK,
                     u64::from,
                 ),
+                large_page_areas: cellgov_mem::lanes::LaneMap::new(
+                    cellgov_mem::lanes::source::LARGE_PAGE_AREA,
+                    u64::from,
+                ),
                 lwmutexes: LwMutexTable::new(),
                 mutexes: MutexTable::new(),
                 semaphores: SemaphoreTable::new(),
@@ -168,6 +172,7 @@ impl Lv2Host {
                 event_queue_ipc: BTreeMap::new(),
                 pending_region_installs: Vec::new(),
                 pending_region_removals: Vec::new(),
+                pending_area_installs: Vec::new(),
                 released_process_windows: Vec::new(),
                 fs_mounts: FsMountTable::new(),
                 sdk_version: SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,

@@ -738,7 +738,8 @@ fn syscall_330_writes_monotonic_256mib_aligned_address() {
         }
         other => panic!("expected Immediate, got {other:?}"),
     };
-    assert_eq!(second_addr, first_addr + 0x1000_0000);
+    // The granule between them holds the RSX context window.
+    assert_eq!(second_addr, first_addr + 0x2000_0000);
 }
 
 #[test]
@@ -749,7 +750,8 @@ fn syscall_330_returns_enomem_when_cursor_would_cross_mmio_region() {
         number: 330,
         args: [0x1000_0000, 0, 0, 0x9000, 0, 0, 0, 0],
     };
-    for i in 0..7 {
+    // Seven granules, less the one holding the RSX context window.
+    for i in 0..6 {
         let result = host.dispatch(req(), UnitId::new(0), &rt);
         match result {
             Lv2Dispatch::Immediate { code, effects } => {
@@ -763,7 +765,7 @@ fn syscall_330_returns_enomem_when_cursor_would_cross_mmio_region() {
     assert_eq!(
         exhausted,
         Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
-        "the 8th 256 MiB allocation must cap-fail and surface CELL_ENOMEM"
+        "the 7th 256 MiB allocation must cap-fail and surface CELL_ENOMEM"
     );
 }
 

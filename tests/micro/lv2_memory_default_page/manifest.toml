@@ -1,0 +1,17 @@
+[test]
+name = "lv2_memory_default_page"
+
+# A hardware probe: where sys_memory_allocate places a block whose flags
+# name no page size, beside a 1 MiB-page block.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 4 records of (u64 r3, u64 address), big-endian: 64 bytes.
+#   0  N = 1 MiB, flags 0         1  P = 1 MiB, 1 MiB pages
+#   2  free N                     3  free P
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"

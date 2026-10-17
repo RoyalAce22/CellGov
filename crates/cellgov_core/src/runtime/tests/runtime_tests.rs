@@ -28,6 +28,8 @@ mod fast_path;
 mod flip_flags;
 #[path = "runtime_invariant_channel_tests.rs"]
 mod invariant_channel;
+#[path = "runtime_large_page_area_tests.rs"]
+mod large_page_area;
 #[path = "runtime_lv2_apply_tests.rs"]
 mod lv2_apply;
 #[path = "runtime_mmapper_unmap_tests.rs"]

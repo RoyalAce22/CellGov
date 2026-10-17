@@ -69,18 +69,18 @@ fn memory_allocate_aligns_to_the_page_size_its_flags_name() {
     );
     assert_eq!(
         alloc(0x400),
-        0x0090_0000,
-        "1 MiB pages land on a 1 MiB boundary"
+        Lv2Host::MMAPPER_REGION_START,
+        "1 MiB pages land in the 1 MiB-page area"
     );
     assert_eq!(
         alloc(0x200),
-        0x00A0_0000,
-        "the cursor resumes after the 1 MiB block"
+        0x008B_0000,
+        "the 64 KiB cursor does not move for a block in the area"
     );
     assert_eq!(
         alloc(0),
-        0x00B0_0000,
-        "a word naming no page size takes 1 MiB"
+        Lv2Host::MMAPPER_REGION_START + 0x10_0000,
+        "a word naming no page size takes 1 MiB pages"
     );
 }
 

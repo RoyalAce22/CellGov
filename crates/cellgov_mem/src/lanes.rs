@@ -213,6 +213,9 @@ pub mod source {
     /// The owning pid of each live kernel id a spawned process holds,
     /// keyed as `KERNEL_IDS` is.
     pub const KERNEL_ID_OWNERS: u8 = 73;
+    /// The 1 MiB-page area each process's `sys_memory_allocate` places
+    /// its 1 MiB-page blocks in, one object per pid.
+    pub const LARGE_PAGE_AREA: u8 = 74;
 }
 
 const OBJECT_BITS: u32 = 32;

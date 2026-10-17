@@ -88,7 +88,8 @@ fn a_child_reserves_its_first_area_at_the_base_a_game_process_gets() {
     let console_base = u64::from_be_bytes(console[8..16].try_into().expect("slot 1"));
     let mut host = host_with_child();
     assert_eq!(reserve(&mut host, PARENT_UNIT), console_base);
-    assert_eq!(reserve(&mut host, PARENT_UNIT), console_base + AREA);
+    // The next granule holds the RSX context window.
+    assert_eq!(reserve(&mut host, PARENT_UNIT), console_base + 2 * AREA);
     assert_eq!(
         reserve(&mut host, CHILD_UNIT),
         console_base,
@@ -222,5 +223,36 @@ fn a_childs_exit_releases_its_windows_and_areas() {
             free
         ),
         0
+    );
+}
+
+#[test]
+fn a_childs_exit_releases_its_1m_page_area() {
+    let mut host = host_with_child();
+    let (code, block) = sc(
+        &mut host,
+        CHILD_UNIT,
+        syscall::MEMORY_ALLOCATE,
+        [
+            0x10_0000,
+            cellgov_ps3_abi::lv2::memory::page_size::FLAG_1M,
+            OUT,
+            0,
+        ],
+    );
+    assert_eq!(code, 0, "348");
+    let start = u64::from(Lv2Host::MMAPPER_REGION_START);
+    assert_eq!(
+        block,
+        Some(start),
+        "the child's area takes the lowest granule"
+    );
+
+    host.mark_process_exited(CHILD, 0);
+
+    assert_eq!(
+        reserve(&mut host, PARENT_UNIT),
+        start,
+        "the exited child's area no longer holds the granule"
     );
 }

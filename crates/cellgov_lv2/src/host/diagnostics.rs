@@ -52,6 +52,18 @@ impl Lv2Host {
             .map(|p| (p.addr, p.size, p.ipc_key, p.mem_id))
     }
 
+    /// Drain the 1 MiB-page areas `sys_memory_allocate` took, as
+    /// `(base, size)`.
+    ///
+    /// # Cross-module contract
+    ///
+    /// The runtime installs each area in the caller's space via
+    /// `GuestMemory::install_region` before the dispatch's effects
+    /// commit, so the block the same dispatch hands out is backed.
+    pub fn drain_pending_area_installs(&mut self) -> impl Iterator<Item = (u64, usize)> + '_ {
+        self.derived.pending_area_installs.drain(..)
+    }
+
     /// Drain pending shared-memory region-removal requests emitted by
     /// `sys_mmapper_unmap_shared_memory` (335).
     ///

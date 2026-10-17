@@ -169,7 +169,7 @@ fn the_shm_write_witness_is_blind_to_writes_through_an_unrecorded_alias() {
     let mem_id = alloc_shm(&mut host, &rt, NS_KEY);
     map_shm(&mut host, &rt, mem_id, 0x5000_0000);
 
-    let alias_base = 0x6000_0000u32;
+    let alias_base = 0x7000_0000u32;
     host.note_committed_effects(BOOT_PROCESS_PID, &[write_effect(alias_base, 4)]);
     assert_eq!(host.observability().system_ipc_witness.shm_writes, 0);
 

@@ -34,7 +34,8 @@ region stays flat. Within it:
   PT_LOAD segments;
 - the main thread's 64 KB TLS area takes the first 64 KB page past the
   ELF, the HLE trampolines and the firmware PRX images;
-- `sys_memory_allocate` starts where the TLS area ends.
+- `sys_memory_allocate`'s 64 KB-page blocks start where the TLS area
+  ends; its 1 MB-page blocks go in a 256 MB area outside `main`.
 
 *Why:* the allocator base sits above the ELF because real PS3 LV2
 shares `0x00010000-0x0FFFFFFF` between the loaded binary and the

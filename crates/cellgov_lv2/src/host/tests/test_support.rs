@@ -168,9 +168,10 @@ pub(super) fn extract_write_u32(effect: &Effect) -> u32 {
 
 /// Reserve the whole mmapper window through 330 as 256 MiB areas of
 /// 64 KiB pages, so a 334 or 337 at any 64 KiB boundary of
-/// `[MMAPPER_REGION_START, MMAPPER_REGION_END)` has an area to land in.
+/// `[MMAPPER_REGION_START, MMAPPER_REGION_END)` outside the RSX context
+/// window's granule has an area to land in.
 pub(super) fn reserve_mmapper_areas(host: &mut Lv2Host, rt: &FakeRuntime) {
-    let areas = (Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START) / 0x1000_0000;
+    let areas = (Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START) / 0x1000_0000 - 1;
     for _ in 0..areas {
         let d = host.dispatch(
             crate::request::Lv2Request::Unsupported {

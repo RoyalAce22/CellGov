@@ -279,7 +279,9 @@ fn mmapper_alloc_rounds_up_to_256_mib_granule() {
             0x1_0000,
         )
         .expect("second grant");
-    assert_eq!(second - first, 0x1000_0000);
+    // One granule each; the second skips the RSX context window's.
+    assert_eq!(first, Lv2Host::MMAPPER_REGION_START);
+    assert_eq!(second - first, 0x2000_0000);
 }
 
 #[test]
@@ -345,9 +347,10 @@ fn mmapper_alloc_grants_ascend_across_calls() {
             0x1_0000,
         )
         .expect("third");
+    // The granule at 0x6000_0000 holds the RSX context window.
     assert_eq!(a, Lv2Host::MMAPPER_REGION_START);
-    assert_eq!(b, Lv2Host::MMAPPER_REGION_START + 0x1000_0000);
-    assert_eq!(c, Lv2Host::MMAPPER_REGION_START + 0x2000_0000);
+    assert_eq!(b, Lv2Host::MMAPPER_REGION_START + 0x2000_0000);
+    assert_eq!(c, Lv2Host::MMAPPER_REGION_START + 0x3000_0000);
 }
 
 #[test]
@@ -372,8 +375,9 @@ fn mmapper_alloc_rejects_zero_size() {
 fn mmapper_alloc_caps_at_mmapper_region_end() {
     let mut host = Lv2Host::new();
     // (MMAPPER_REGION_END - MMAPPER_REGION_START) / granule
-    //   = (0xC000_0000 - 0x5000_0000) / 0x1000_0000 = 7 grants.
-    for _ in 0..7 {
+    //   = (0xC000_0000 - 0x5000_0000) / 0x1000_0000 = 7 granules,
+    // less the one holding the RSX context window: 6 grants.
+    for _ in 0..6 {
         host.mmapper_alloc(
             cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
             0x1,
@@ -381,7 +385,7 @@ fn mmapper_alloc_caps_at_mmapper_region_end() {
         )
         .expect("within region");
     }
-    // The 8th grant would walk into the RSX region at 0xC000_0000.
+    // The 7th grant would walk into the RSX region at 0xC000_0000.
     assert_eq!(
         host.mmapper_alloc(
             cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,
@@ -674,7 +678,7 @@ fn mmapper_alloc_never_returns_address_in_reserved_rsx_window() {
     // placed in the same window) so mmapper handouts must
     // never alias it.
     let mut host = Lv2Host::new();
-    for _ in 0..7 {
+    for _ in 0..6 {
         let addr = host
             .mmapper_alloc(
                 cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,

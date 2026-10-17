@@ -15,7 +15,7 @@ const MIB: u64 = 0x10_0000;
 fn allocate(host: &mut Lv2Host, rt: &FakeRuntime) -> Result<u32, u64> {
     let request = Lv2Request::MemoryAllocate {
         size: MIB,
-        flags: page_size::FLAG_1M,
+        flags: page_size::FLAG_64K,
         alloc_addr_ptr: 0x100,
     };
     match host.dispatch(request, UnitId::new(0), rt) {

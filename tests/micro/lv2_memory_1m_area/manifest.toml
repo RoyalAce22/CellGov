@@ -1,0 +1,15 @@
+[test]
+name = "lv2_memory_1m_area"
+
+# A hardware probe: where sys_memory_allocate places 1 MiB-page blocks,
+# and how they share the area range with sys_mmapper_allocate_address.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 16 records of (u64 r3, u64 address), big-endian: 256 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 256 },
+]
+
+[expect]
+outcome = "completed"

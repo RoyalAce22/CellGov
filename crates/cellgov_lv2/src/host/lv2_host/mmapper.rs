@@ -112,11 +112,9 @@ impl Lv2Host {
     /// the next 330: the `lv2_mmapper_map_edges` capture shows a 330
     /// after a 331 getting the freed base back.
     ///
-    /// Once `sys_rsx_context_allocate` has opened the RSX context window
-    /// (`region::WINDOW_BASE`), a range never overlaps it; the search
-    /// resumes at the next granule past it. The `lv2_mmapper_rsx_window`
-    /// capture grants the window's granule before `rsxInit` and skips
-    /// it after.
+    /// A range never overlaps the RSX context window
+    /// (`region::WINDOW_BASE`) or a 1 MiB-page area, as
+    /// [`Self::free_area_base`] describes.
     ///
     /// Returns `None` for `size == 0`, when the rounding would overflow
     /// `u32`, or when no free range below
@@ -127,30 +125,7 @@ impl Lv2Host {
         }
         let granule = u32::try_from(cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE).ok()?;
         let rounded = size.checked_add(granule - 1)? & !(granule - 1);
-        use cellgov_ps3_abi::lv2::rsx::region;
-        let window_start = u64::from(region::WINDOW_BASE);
-        let window_end = window_start + u64::from(region::CONTEXT_RESERVATION);
-        let mut base = u64::from(Self::MMAPPER_REGION_START);
-        loop {
-            for (area_base, area) in self.mmapper_areas_of(pid) {
-                if u64::from(area_base) >= base + u64::from(rounded) {
-                    break;
-                }
-                base = base.max(u64::from(area_base) + u64::from(area.size));
-            }
-            if self.state.rsx_context.allocated
-                && base < window_end
-                && base + u64::from(rounded) > window_start
-            {
-                base = window_end.next_multiple_of(u64::from(granule));
-                continue;
-            }
-            break;
-        }
-        if base + u64::from(rounded) > u64::from(Self::MMAPPER_REGION_END) {
-            return None;
-        }
-        let base = u32::try_from(base).ok()?;
+        let base = self.free_area_base(pid, rounded)?;
         self.state.mmapper_areas.insert(
             (pid, base),
             crate::host::mmapper::MmapperArea {
@@ -159,6 +134,57 @@ impl Lv2Host {
             },
         );
         Some(base)
+    }
+
+    /// The lowest base in `[MMAPPER_REGION_START, MMAPPER_REGION_END)`
+    /// where `rounded` bytes (a granule multiple) overlap none of
+    /// process `pid`'s areas, no process's 1 MiB-page area, and the RSX
+    /// context window.
+    ///
+    /// The search skips the window's granule whether or not a context
+    /// is open: boot maps the window, so no area over it could be
+    /// installed. The `lv2_mmapper_rsx_window` capture shows the
+    /// console granting that granule until `rsxInit` opens a context;
+    /// where it then opens the window is unprobed.
+    ///
+    /// The `lv2_memory_1m_area` capture shows 330 skipping the granule
+    /// a process's 1 MiB-page blocks sit in. The search skips every
+    /// process's such area, not only `pid`'s, so the block table, keyed by
+    /// address alone, never holds two processes' blocks at one base.
+    pub(in crate::host) fn free_area_base(&self, pid: u32, rounded: u32) -> Option<u32> {
+        use cellgov_ps3_abi::lv2::rsx::region;
+        let granule = cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE;
+        let window_start = u64::from(region::WINDOW_BASE);
+        let window_end = window_start + u64::from(region::CONTEXT_RESERVATION);
+        let overlaps =
+            |base: u64, start: u64, end: u64| base < end && base + u64::from(rounded) > start;
+        let mut base = u64::from(Self::MMAPPER_REGION_START);
+        loop {
+            for (area_base, area) in self.mmapper_areas_of(pid) {
+                if u64::from(area_base) >= base + u64::from(rounded) {
+                    break;
+                }
+                base = base.max(u64::from(area_base) + u64::from(area.size));
+            }
+            if let Some((_, &held)) = self
+                .state
+                .large_page_areas
+                .iter()
+                .find(|&(_, &held)| overlaps(base, u64::from(held), u64::from(held) + granule))
+            {
+                base = u64::from(held) + granule;
+                continue;
+            }
+            if overlaps(base, window_start, window_end) {
+                base = window_end.next_multiple_of(granule);
+                continue;
+            }
+            break;
+        }
+        if base + u64::from(rounded) > u64::from(Self::MMAPPER_REGION_END) {
+            return None;
+        }
+        u32::try_from(base).ok()
     }
 
     /// Process `pid`'s areas, by base.
@@ -202,6 +228,7 @@ impl Lv2Host {
             .collect();
         self.derived.released_process_windows.extend(released);
         self.state.mmapper_areas.retain(|(p, _), _| p != pid);
+        self.state.large_page_areas.remove(pid);
         self.state.mmapper_windows.retain(|(p, _), _| p != pid);
         self.obs.system_ipc_mappings.retain(|&(p, _), _| p != pid);
     }

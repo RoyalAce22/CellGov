@@ -81,6 +81,11 @@ pub(in crate::host) struct Lv2State {
     /// what `sys_memory_free` returns and what the available user
     /// memory leaves out.
     pub(in crate::host) memory_blocks: cellgov_mem::lanes::LaneMap<u32, super::memory::MemoryBlock>,
+    /// The 1 MiB-page area each process's `sys_memory_allocate` places
+    /// its 1 MiB-page blocks in, by pid: the base of a 256 MiB granule
+    /// of the area range, taken on the first such block and kept after
+    /// its blocks are freed.
+    pub(in crate::host) large_page_areas: cellgov_mem::lanes::LaneMap<u32, u32>,
     pub(in crate::host) lwmutexes: LwMutexTable,
     pub(in crate::host) mutexes: MutexTable,
     pub(in crate::host) semaphores: SemaphoreTable,
