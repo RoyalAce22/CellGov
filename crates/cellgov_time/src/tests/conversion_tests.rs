@@ -25,6 +25,28 @@ fn ticks_to_tb_handles_huge_counts_without_overflow() {
 }
 
 #[test]
+fn tb_to_ticks_is_the_least_tick_that_reaches_the_time_base() {
+    for tb in [0u64, 1, 2, 79, 80, 50_001, 79_800_000] {
+        let ticks = tb_to_ticks(tb, 1);
+        assert!(ticks_to_tb(ticks) >= tb, "tb {tb}");
+        if ticks > 0 {
+            assert!(ticks_to_tb(ticks - 1) < tb, "tb {tb}: the least such tick");
+        }
+    }
+    assert_eq!(
+        tb_to_ticks(CELL_PPU_TIMEBASE_HZ, 1),
+        SIMULATED_INSTRUCTIONS_PER_SECOND
+    );
+}
+
+#[test]
+fn tb_to_ticks_rounds_a_fraction_up_and_refuses_a_zero_denominator() {
+    // 386 ticks over 32 runs: 12.0625 time-base ticks, 151.1 ns.
+    assert_eq!(tb_to_ticks(386, 32), 152);
+    assert_eq!(tb_to_ticks(1, 0), u64::MAX);
+}
+
+#[test]
 fn ticks_to_sec_nsec_splits_at_billion() {
     assert_eq!(ticks_to_sec_nsec(0), (0, 0));
     assert_eq!(ticks_to_sec_nsec(1), (0, 1));

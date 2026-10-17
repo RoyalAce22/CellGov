@@ -379,6 +379,22 @@ impl DmaQueue {
             .fold(own, GuestTicks::max)
     }
 
+    /// The latest completion time of `issuer`'s queued transfers, or
+    /// zero when it has none.
+    ///
+    /// The queue reaches a command it refuses no earlier than this: the
+    /// `spu_list_bad_size` and `spu_list_bad_ea` console captures show
+    /// a list's elements ahead of a refused element land before the
+    /// group stops.
+    pub fn issuer_latest_completion(&self, issuer: UnitId) -> GuestTicks {
+        self.entries
+            .iter()
+            .filter(|(_, e)| e.completion.issuer() == issuer)
+            .map(|((time, _), _)| time)
+            .max()
+            .unwrap_or(GuestTicks::ZERO)
+    }
+
     /// For one issuer: how many command-queue slots its queued commands
     /// hold, and the status bit of every tag group one of them holds
     /// outstanding.

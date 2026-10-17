@@ -4,16 +4,16 @@
 //!
 //! The capture pins what the console does: a transfer's time grows with
 //! its size, a get takes longer than a put of the same size, and the
-//! atomic round trips take a few time-base ticks. CellGov charges every
-//! transfer one fixed latency in guest ticks, and guest ticks are not the
-//! time base, so the model does not take the table yet; the second test
-//! names that difference.
+//! atomic round trips take a few time-base ticks. A boot's latency model
+//! charges each MFC transfer those times, converted from the time base
+//! to guest ticks, and a getllar its measured round trip.
 
 use cellgov_core::DEFAULT_DMA_LATENCY_TICKS;
-use cellgov_dma::{DmaDirection, DmaLatencyModel, DmaQueue, DmaRequest, FixedLatency};
+use cellgov_dma::{DmaDirection, DmaLatencyModel, DmaQueue, DmaRequest, MeasuredMfcLatency};
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_time::GuestTicks;
+use cellgov_ps3_abi::hw::mfc_timing;
+use cellgov_time::{tb_to_ticks, GuestTicks};
 
 const CONSOLE: &str = "../../tests/micro/spu_dma_timing/ps3/cech20-cex-493/observation.json";
 
@@ -83,35 +83,100 @@ fn dma_time_on_the_console_grows_with_size_and_a_get_outlasts_a_put() {
     }
 }
 
-fn put_of(size: u64) -> DmaRequest {
-    DmaRequest::new(
-        DmaDirection::Put,
-        ByteRange::new(GuestAddr::new(0), size).expect("source"),
-        ByteRange::new(GuestAddr::new(0x10_0000), size).expect("destination"),
-        UnitId::new(1),
-    )
-    .expect("a request")
+/// The tables CellGov's model reads are the capture's words.
+#[test]
+fn the_measured_tables_are_the_captures() {
+    let capture = Capture::load();
+    assert_eq!(capture.reps(), mfc_timing::MFC_TIMING_RUNS);
+    assert_eq!(capture.word(20), mfc_timing::MFC_TAG_WAIT_TB_SUM);
+    for (at, table) in [
+        (32, &mfc_timing::MFC_GET_LINE_TB_SUM),
+        (76, &mfc_timing::MFC_GET_OFF_LINE_TB_SUM),
+        (120, &mfc_timing::MFC_PUT_LINE_TB_SUM),
+        (164, &mfc_timing::MFC_PUT_OFF_LINE_TB_SUM),
+    ] {
+        assert_eq!(capture.table(at), table.to_vec(), "payload offset {at}");
+    }
+    assert_eq!(capture.word(220), mfc_timing::MFC_GETLLAR_TB_SUM);
+    for (i, &size) in mfc_timing::MFC_TIMING_SIZES.iter().enumerate() {
+        assert_eq!(size, 16 << i);
+    }
 }
 
-/// CellGov's model charges a 16 B and a 16 KB transfer alike, where the
-/// console's time grows with size. The fixed latency is in guest ticks,
-/// which do not yet run at the time base, so the measured table has no
-/// unit to convert into; this test fails once the model charges by size,
-/// and the model's test then takes the capture's table.
-#[test]
-fn cellgov_charges_every_size_one_fixed_latency_the_console_does_not() {
-    let capture = Capture::load();
-    let put = capture.table(120);
-    assert_ne!(put[0], put[SIZES - 1]);
+fn request(direction: DmaDirection, main: u64, ls: u64, size: u64) -> DmaRequest {
+    let main = ByteRange::new(GuestAddr::new(main), size).expect("main");
+    let ls = ByteRange::new(GuestAddr::new(ls), size).expect("local store");
+    let (source, destination) = match direction {
+        DmaDirection::Get => (main, ls),
+        DmaDirection::Put => (ls, main),
+    };
+    DmaRequest::new(direction, source, destination, UnitId::new(1))
+        .expect("a request")
+        .with_command_word(0x20)
+}
 
-    let model = FixedLatency::new(DEFAULT_DMA_LATENCY_TICKS.raw());
-    let queue = DmaQueue::new();
+/// A boot's latency model charges each transfer the capture measured:
+/// its run mean less the bare tag wait, in guest ticks at one
+/// nanosecond each.
+#[test]
+fn cellgov_charges_each_transfer_the_time_the_console_measures() {
+    let capture = Capture::load();
+    let wait = capture.word(20);
+    let runs = u64::from(capture.reps());
+    let model = MeasuredMfcLatency::new(DEFAULT_DMA_LATENCY_TICKS.raw());
     let now = GuestTicks::new(100);
-    let small = model.completion_time(&put_of(16), now, &queue);
-    let large = model.completion_time(&put_of(16384), now, &queue);
-    assert_eq!(small, large);
-    assert_eq!(
-        small,
-        GuestTicks::new(100 + DEFAULT_DMA_LATENCY_TICKS.raw())
-    );
+    for (at, direction, off) in [
+        (32, DmaDirection::Get, 0),
+        (76, DmaDirection::Get, 16),
+        (120, DmaDirection::Put, 0),
+        (164, DmaDirection::Put, 16),
+    ] {
+        for (i, sum) in capture.table(at).into_iter().enumerate() {
+            let size = 16u64 << i;
+            let req = request(direction, 0x10_0000 + off, 0x1000 + off, size);
+            let charged = model.completion_time(&req, now, &DmaQueue::new()).raw() - now.raw();
+            assert_eq!(
+                charged,
+                tb_to_ticks(u64::from(sum - wait), runs),
+                "offset {at}, {size} bytes"
+            );
+        }
+    }
+}
+
+/// A getllar charges its unit the round trip the console measures,
+/// whatever budget its step has left.
+#[test]
+fn a_getllar_takes_the_round_trip_the_console_measures() {
+    use cellgov_exec::{ExecutionContext, ExecutionUnit};
+    use cellgov_mem::GuestMemory;
+    use cellgov_ps3_abi::hw::spu::{MFC_CMD, MFC_GETLLAR};
+    use cellgov_spu::SpuExecutionUnit;
+    use cellgov_time::Budget;
+
+    let capture = Capture::load();
+    let trip = tb_to_ticks(u64::from(capture.word(220)), u64::from(capture.reps()));
+    // `wrch MFC_Cmd, r4`, then `stop`.
+    let program = [(0x10Du32 << 21) | (u32::from(MFC_CMD) << 7) | 4, 0];
+    for budget in [1_000, trip, trip - 1, 1] {
+        let mut unit = SpuExecutionUnit::new(UnitId::new(1));
+        for (i, word) in program.iter().enumerate() {
+            unit.state_mut().ls[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+        }
+        unit.state_mut().channels.mfc_lsa = 0x100;
+        unit.state_mut().channels.mfc_eal = 0x80;
+        unit.state_mut().set_reg_word_splat(4, MFC_GETLLAR);
+        let mem = GuestMemory::new(0x1000);
+        let result = unit.run_until_yield(
+            Budget::new(budget),
+            &ExecutionContext::new(&mem),
+            &mut Vec::new(),
+        );
+        assert!(
+            unit.state().reservation().is_some(),
+            "budget {budget}: the getllar ran"
+        );
+        // The stop retires no cost of its own.
+        assert_eq!(result.consumed_cost.raw(), trip, "budget {budget}");
+    }
 }

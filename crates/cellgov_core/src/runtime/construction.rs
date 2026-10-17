@@ -18,14 +18,23 @@ use super::{Runtime, RuntimeMode};
 /// workspace [`FixedLatency`] model. Folds into per-tag completion
 /// timing and the cross-runner parity verdict.
 ///
-/// The value is not a measurement. The `spu_dma_timing` console capture
-/// measures DMA time in time-base ticks, and on the console it grows with
-/// the transfer's size. An SPU's guest ticks count its instructions, not
-/// the time base, so that table has no unit here to convert into. The
-/// model takes it once SPU guest time runs at the time base.
+/// The value is not a measurement. A title's boot installs
+/// [`cellgov_dma::MeasuredMfcLatency`] through
+/// [`Runtime::use_measured_dma_latency`], which charges a transfer an MFC
+/// command issued the time the `spu_dma_timing` console capture measured
+/// and keeps this value for any other transfer.
 pub const DEFAULT_DMA_LATENCY_TICKS: GuestTicks = GuestTicks::new(10);
 
 impl Runtime {
+    /// Charge each MFC transfer the time the console measures for its
+    /// direction and size, from the next transfer enqueued on. A transfer
+    /// no MFC command issued keeps [`DEFAULT_DMA_LATENCY_TICKS`].
+    pub fn use_measured_dma_latency(&mut self) {
+        self.dma_latency = Box::new(cellgov_dma::MeasuredMfcLatency::new(
+            DEFAULT_DMA_LATENCY_TICKS.raw(),
+        ));
+    }
+
     /// Construct a runtime with a default [`TraceWriter`].
     ///
     /// # Non-obvious defaults

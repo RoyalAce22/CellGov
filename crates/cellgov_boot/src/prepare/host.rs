@@ -149,6 +149,8 @@ pub(super) fn build_runtime(
     let mut rt =
         Runtime::with_trace_writer(mem, params.step_budget, params.adjusted_max_steps, trace);
     rt.set_mode(params.mode);
+    // An MFC transfer takes the time the console measures for it.
+    rt.use_measured_dma_latency();
     rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
     // Bind the manifest-verified PUP identity so the boot's state hash
     // is a function of which firmware revision fed it.

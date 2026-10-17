@@ -11,9 +11,7 @@
 //! capture measures the rate: the decrementer and the time base agree to
 //! one part in ten thousand over 140 million ticks.
 
-use cellgov_time::{
-    ticks_to_tb, GuestTicks, CELL_PPU_TIMEBASE_HZ, SIMULATED_INSTRUCTIONS_PER_SECOND,
-};
+use cellgov_time::{tb_to_ticks, ticks_to_tb, GuestTicks};
 
 /// One SPU's decrementer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,13 +109,12 @@ impl Decrementer {
         if !self.running {
             return None;
         }
-        let tb = u128::from(self.since?) + u128::from(self.value) + 1;
-        // The least tick whose time base reaches `tb`: the inverse of
-        // `ticks_to_tb`, rounded up.
-        let hz = u128::from(CELL_PPU_TIMEBASE_HZ);
-        let ips = u128::from(SIMULATED_INSTRUCTIONS_PER_SECOND);
-        let tick = u64::try_from((tb * ips).div_ceil(hz)).unwrap_or(u64::MAX);
-        debug_assert!(tick == u64::MAX || ticks_to_tb(tick) >= tb as u64);
+        let tb = self
+            .since?
+            .saturating_add(u64::from(self.value))
+            .saturating_add(1);
+        let tick = tb_to_ticks(tb, 1);
+        debug_assert!(tick == u64::MAX || ticks_to_tb(tick) >= tb);
         Some(GuestTicks::new(tick))
     }
 }

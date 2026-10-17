@@ -209,7 +209,9 @@ fn a_successful_putllc_and_a_getllar_each_make_the_atomic_status_count_1() {
     unit.state_mut().set_reg_word_splat(4, spu::MFC_GETLLAR);
     let mem = GuestMemory::new(0x1000);
     let mut effects = Vec::new();
-    unit.run_until_yield(Budget::new(10), &ExecutionContext::new(&mem), &mut effects);
+    // A getllar takes its measured round trip, so the step needs room
+    // for it and the two instructions after.
+    unit.run_until_yield(Budget::new(100), &ExecutionContext::new(&mem), &mut effects);
     assert!(
         unit.state().reservation().is_some(),
         "the getllar completed"

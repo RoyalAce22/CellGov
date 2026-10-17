@@ -23,6 +23,26 @@ pub const fn ticks_to_tb(ticks: u64) -> u64 {
         as u64
 }
 
+/// The least guest-tick count whose time base covers `tb_num / tb_den`
+/// time-base ticks: the inverse of [`ticks_to_tb`], rounded up.
+///
+/// `tb_den` of 0 answers `u64::MAX`, as does a count past the tick
+/// range.
+#[inline]
+pub const fn tb_to_ticks(tb_num: u64, tb_den: u64) -> u64 {
+    if tb_den == 0 {
+        return u64::MAX;
+    }
+    let num = tb_num as u128 * SIMULATED_INSTRUCTIONS_PER_SECOND as u128;
+    let den = tb_den as u128 * CELL_PPU_TIMEBASE_HZ as u128;
+    let ticks = num.div_ceil(den);
+    if ticks > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        ticks as u64
+    }
+}
+
 /// Convert a guest-tick count to the `(sec, nsec)` pair
 /// `sys_time_get_current_time` writes through its out-pointers.
 ///

@@ -613,7 +613,8 @@ impl CommitPipeline {
                     // issuer's other commands.
                     let time = ctx
                         .dma_latency
-                        .invalid_command_time(ctx.now, &*ctx.dma_queue);
+                        .invalid_command_time(ctx.now, &*ctx.dma_queue)
+                        .max(ctx.dma_queue.issuer_latest_completion(*issuer));
                     ctx.dma_queue.enqueue_invalid(time, *issuer, *command);
                 }
                 Effect::MailboxPop {

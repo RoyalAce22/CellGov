@@ -22,6 +22,14 @@ use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, SPU_STATUS_R};
 use cellgov_ps3_abi::hw::spu_isa;
 use cellgov_time::{Budget, InstructionCost};
 
+/// The guest ticks a getllar takes: the round trip the `spu_dma_timing`
+/// console capture measures, a getllar and the read of its atomic
+/// status, converted from the time base.
+const GETLLAR_TICKS: u64 = cellgov_time::tb_to_ticks(
+    cellgov_ps3_abi::hw::mfc_timing::MFC_GETLLAR_TB_SUM as u64,
+    cellgov_ps3_abi::hw::mfc_timing::MFC_TIMING_RUNS as u64,
+);
+
 impl ExecutionUnit for SpuExecutionUnit {
     type Snapshot = SpuSnapshot;
 
@@ -105,8 +113,8 @@ impl ExecutionUnit for SpuExecutionUnit {
         effects.clear();
 
         loop {
-            // Each retired instruction is one guest tick, so this one runs
-            // at the step's start plus the instructions retired before it.
+            // This instruction runs at the step's start plus the ticks the
+            // instructions before it charged.
             self.state.set_clock(cellgov_time::GuestTicks::new(
                 ctx.current_tick()
                     .raw()
@@ -304,6 +312,25 @@ impl ExecutionUnit for SpuExecutionUnit {
                             line_addr,
                             source: self.id,
                         });
+                        // The getllar takes the round trip the console
+                        // measures. When the step's budget cannot hold
+                        // the trip, the step ends on the getllar and
+                        // still charges all of it.
+                        if remaining < GETLLAR_TICKS {
+                            self.state.advance_pc();
+                            self.retire(step_pc, ctx.trace_per_step());
+                            return ExecutionStepResult {
+                                yield_reason: YieldReason::BudgetExhausted,
+                                consumed_cost: InstructionCost::new(
+                                    budget.raw() - remaining + GETLLAR_TICKS,
+                                ),
+                                local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                                fault: None,
+                                syscall_args: None,
+                            };
+                        }
+                        // The retirement below charges one tick of it.
+                        remaining -= GETLLAR_TICKS - 1;
                     }
                     self.state.advance_pc();
                 }
