@@ -1,0 +1,14 @@
+[test]
+name = "lv2_fs_blksize"
+
+# A hardware probe: the block size sys_fs_stat answers for a file and a directory on each device a title reads from.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 8 paths x (r3, st_mode, st_size, st_blksize), big-endian u64, in the order ppu/main.c lists: 256 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 256 },
+]
+
+[expect]
+outcome = "completed"

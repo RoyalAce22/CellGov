@@ -60,10 +60,18 @@ pub const CELL_FS_STAT_SIZE_OFFSET: usize = 36;
 /// Offset of `CellFsStat::blksize` in the packed record.
 pub const CELL_FS_STAT_BLKSIZE_OFFSET: usize = 44;
 
-/// `CellFsStat::blksize` for a file or directory under `/dev_hdd0`,
-/// as the `lv2_fs_answers` capture reads it. Other devices are
-/// unprobed.
+/// `CellFsStat::blksize` for a file or directory, as the
+/// `lv2_fs_answers` capture reads it under `/dev_hdd0` and the
+/// `lv2_fs_blksize` capture under `/dev_hdd0/game`, `/dev_flash` and
+/// `/dev_usb000`. `/app_home` is unprobed.
 pub const CELL_FS_BLOCK_SIZE: u64 = 512;
+
+/// `CellFsStat::blksize` for a file or directory on the game disc
+/// (`/dev_bdvd`), as the `lv2_fs_blksize` capture reads it.
+pub const CELL_FS_DISC_BLOCK_SIZE: u64 = 2048;
+
+/// The mount point of the game disc.
+pub const CELL_FS_DISC_ROOT: &str = "/dev_bdvd";
 
 // -- mode bits (subset that CellGov currently emits) --
 

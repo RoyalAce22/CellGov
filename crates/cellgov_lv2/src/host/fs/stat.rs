@@ -10,15 +10,16 @@ use crate::host::{Lv2Host, Lv2Runtime};
 use super::mount::MountResolution;
 use super::path::read_path_bytes;
 use super::stat_layout::{
-    cell_fs_stat_write, is_stat_ptr_writable, CELL_FS_DIRECTORY_SIZE, CELL_FS_S_IFDIR_R_ONLY_MODE,
+    block_size_of, cell_fs_stat_write, is_stat_ptr_writable, CELL_FS_S_IFDIR_R_ONLY_MODE,
     CELL_FS_S_IFREG_R_ONLY_MODE,
 };
 
 impl Lv2Host {
     /// `sys_fs_fstat` -- populate a `CellFsStat` (52 bytes) for an
     /// open fd's backing blob. [`cell_fs_stat_write`] fixes the record:
-    /// mode `S_IFREG | 0o444`, the blob's size, a 512-byte block size,
-    /// and zero for uid, gid and the three timestamps.
+    /// mode `S_IFREG | 0o444`, the blob's size, the block size of the
+    /// device the fd was opened on ([`block_size_of`]), and zero for
+    /// uid, gid and the three timestamps.
     ///
     /// # Errors
     ///
@@ -51,11 +52,13 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
+        let blksize = block_size_of(self.fs_store().fd_path(fd).unwrap_or_default());
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![cell_fs_stat_write(
                 CELL_FS_S_IFREG_R_ONLY_MODE,
                 stat.size,
+                blksize,
                 stat_out_ptr,
                 requester,
                 rt.current_tick(),
@@ -76,7 +79,8 @@ impl Lv2Host {
     ///    The store caches a mount hit; a root the host declines to
     ///    read answers CELL_EACCES or CELL_EIO.
     /// 5. A directory under a mount -> CELL_OK with a directory record:
-    ///    mode `S_IFDIR | 0o555`, one block for its size.
+    ///    mode `S_IFDIR | 0o555`, one block of its device for its size,
+    ///    as the `lv2_fs_answers` and `lv2_fs_blksize` captures read it.
     /// 6. Otherwise CELL_OK with the same 52-byte record as
     ///    `sys_fs_fstat`.
     pub(in crate::host) fn dispatch_fs_stat(
@@ -101,6 +105,7 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
             }
         };
+        let blksize = block_size_of(path_str);
         let stat = match self.fs_store().stat_path(path_str) {
             Ok(s) => s,
             Err(FsError::UnknownPath) => {
@@ -110,7 +115,8 @@ impl Lv2Host {
                         code: 0,
                         effects: vec![cell_fs_stat_write(
                             CELL_FS_S_IFDIR_R_ONLY_MODE,
-                            CELL_FS_DIRECTORY_SIZE,
+                            blksize,
+                            blksize,
                             stat_out_ptr,
                             requester,
                             rt.current_tick(),
@@ -155,6 +161,7 @@ impl Lv2Host {
             effects: vec![cell_fs_stat_write(
                 CELL_FS_S_IFREG_R_ONLY_MODE,
                 stat.size,
+                blksize,
                 stat_out_ptr,
                 requester,
                 rt.current_tick(),

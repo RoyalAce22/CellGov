@@ -9,9 +9,9 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::fs::{
-    CELL_FS_BLOCK_SIZE, CELL_FS_STAT_BLKSIZE_OFFSET, CELL_FS_STAT_SIZE, CELL_FS_STAT_SIZE_OFFSET,
-    CELL_FS_S_IFDIR, CELL_FS_S_IFREG, CELL_FS_S_IRGRP, CELL_FS_S_IROTH, CELL_FS_S_IRUSR,
-    CELL_FS_S_IXGRP, CELL_FS_S_IXOTH, CELL_FS_S_IXUSR,
+    CELL_FS_BLOCK_SIZE, CELL_FS_DISC_BLOCK_SIZE, CELL_FS_DISC_ROOT, CELL_FS_STAT_BLKSIZE_OFFSET,
+    CELL_FS_STAT_SIZE, CELL_FS_STAT_SIZE_OFFSET, CELL_FS_S_IFDIR, CELL_FS_S_IFREG, CELL_FS_S_IRGRP,
+    CELL_FS_S_IROTH, CELL_FS_S_IRUSR, CELL_FS_S_IXGRP, CELL_FS_S_IXOTH, CELL_FS_S_IXUSR,
 };
 
 use crate::host::Lv2Runtime;
@@ -38,10 +38,18 @@ pub(super) const CELL_FS_S_IFDIR_R_ONLY_MODE: u32 = CELL_FS_S_IFDIR
     | CELL_FS_S_IROTH
     | CELL_FS_S_IXOTH;
 
-/// `CellFsStat::size` for a directory: one block, as the
-/// `lv2_fs_answers` capture reads for a directory of six entries. A
-/// directory too big for one block is unprobed.
-pub(super) const CELL_FS_DIRECTORY_SIZE: u64 = CELL_FS_BLOCK_SIZE;
+/// `CellFsStat::blksize` for an entry at guest `path`: the disc's
+/// block under [`CELL_FS_DISC_ROOT`], 512 bytes elsewhere.
+pub(super) fn block_size_of(path: &str) -> u64 {
+    let on_disc = path
+        .strip_prefix(CELL_FS_DISC_ROOT)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
+    if on_disc {
+        CELL_FS_DISC_BLOCK_SIZE
+    } else {
+        CELL_FS_BLOCK_SIZE
+    }
+}
 
 /// Whether a `CellFsStat` write at `stat_out_ptr` would land in
 /// writable guest memory, with the pointer 4-byte aligned: the packed
@@ -51,7 +59,7 @@ pub(super) fn is_stat_ptr_writable(rt: &dyn Lv2Runtime, stat_out_ptr: u32) -> bo
 }
 
 /// Build the 52-byte big-endian `CellFsStat` payload for an entry of
-/// `mode` and `size`, and wrap it
+/// `mode`, `size` and `blksize`, and wrap it
 /// in a `SharedWriteIntent` at `stat_out_ptr`. atime / mtime /
 /// ctime are deterministic zeros (the oracle has no concept of
 /// host time); blob content is immutable so a real timestamp
@@ -59,6 +67,7 @@ pub(super) fn is_stat_ptr_writable(rt: &dyn Lv2Runtime, stat_out_ptr: u32) -> bo
 pub(super) fn cell_fs_stat_write(
     mode: u32,
     size: u64,
+    blksize: u64,
     stat_out_ptr: u32,
     source: UnitId,
     source_time: cellgov_time::GuestTicks,
@@ -70,7 +79,7 @@ pub(super) fn cell_fs_stat_write(
     blob[CELL_FS_STAT_SIZE_OFFSET..CELL_FS_STAT_SIZE_OFFSET + 8]
         .copy_from_slice(&size.to_be_bytes());
     blob[CELL_FS_STAT_BLKSIZE_OFFSET..CELL_FS_STAT_BLKSIZE_OFFSET + 8]
-        .copy_from_slice(&CELL_FS_BLOCK_SIZE.to_be_bytes());
+        .copy_from_slice(&blksize.to_be_bytes());
     Effect::shared_write(
         ByteRange::contiguous_u32(stat_out_ptr, CELL_FS_STAT_SIZE as u32),
         WritePayload::from_slice(&blob),
