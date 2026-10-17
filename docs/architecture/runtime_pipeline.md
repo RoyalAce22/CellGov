@@ -158,8 +158,11 @@ The DMA queue is every SPU's MFC command queue.
 - The ordering commands (barrier, mfcsync, mfceieio) move no bytes.
   They hold a slot and their tag until they complete.
 - A command whose opcode or parameters the MFC refuses holds its
-  slot too. When the queue reaches it, its issuer's queue suspends
-  and the runtime records the MFC exception for the host to take.
+  slot too. When the queue reaches it, its issuer's queue suspends.
+  An SPU thread whose group connects an exception queue then has its
+  group stopped and the exception event sent to that queue, for the
+  causes a console capture reads; otherwise the runtime records the
+  MFC exception for the host to take.
 
 **Completion.** A completing transfer reads its source and writes
 its destination at completion:

@@ -1440,8 +1440,17 @@ impl ThreadGroupTable {
         Ok(members)
     }
 
+    /// The thread id of a registered SPU that has not finished.
+    pub fn live_thread_of(&self, unit_id: UnitId) -> Option<u32> {
+        self.live_group_of(unit_id)?;
+        self.thread_id_to_unit
+            .iter()
+            .find(|&(_, &raw)| raw == unit_id.raw())
+            .map(|(thread_id, _)| thread_id)
+    }
+
     /// The units of group `group_id` that have not finished.
-    fn live_units(&self, group_id: u32) -> Vec<UnitId> {
+    pub fn live_units(&self, group_id: u32) -> Vec<UnitId> {
         self.unit_to_group
             .iter()
             .filter(|(_, &gid)| gid == group_id)

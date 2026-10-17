@@ -35,6 +35,7 @@ mod runtime;
 mod semaphore;
 mod spu;
 mod spu_event;
+mod spu_exception;
 mod spu_group_control;
 mod spu_local_store;
 mod state;
@@ -114,4 +115,5 @@ pub use rsx::{
     PACKAGE_CELLGOV_SET_VBLANK_HANDLER,
 };
 pub use runtime::Lv2Runtime;
+pub use spu_exception::SpuGroupException;
 pub use system_ipc_witness::{is_system_ipc_key, SystemIpcWitness};

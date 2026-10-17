@@ -11,7 +11,9 @@ use cellgov_ps3_abi::hw::spu::{
     SPU_STATUS_P, SPU_STATUS_R, SPU_STATUS_W,
 };
 use cellgov_ps3_abi::lv2::errno;
-use cellgov_ps3_abi::lv2::spu::{group_join_cause, raw_spu, IMAGE_PATH_MAX, IMAGE_PATH_NAME_MAX};
+use cellgov_ps3_abi::lv2::spu::{
+    event as group_event, group_join_cause, raw_spu, IMAGE_PATH_MAX, IMAGE_PATH_NAME_MAX,
+};
 
 /// What a payload word must be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -630,6 +632,60 @@ pub const CASES: &[Case] = &[
         max_steps: 1_000_000,
         fields: &MISALIGNED_LSA_FIELDS,
     },
+    Case {
+        name: "spu_list_bad_size",
+        max_steps: 1_000_000,
+        fields: &LIST_BAD_ELEMENT_FIELDS,
+    },
+    Case {
+        name: "spu_list_bad_ea",
+        max_steps: 1_000_000,
+        fields: &LIST_BAD_ELEMENT_FIELDS,
+    },
+];
+
+/// The payload of spu_list_bad_size and spu_list_bad_ea, in the order
+/// ppu/main.c lists. The list's second element raises a DMA alignment
+/// fault, so the group's exception queue receives the exception event,
+/// the SPU never passes its tag wait, and the PPU terminates the group.
+/// Only the first element reaches the buffer.
+const LIST_BAD_ELEMENT_FIELDS: [(&str, Expect); 28] = [
+    ("failed_step", Exact(0)),
+    ("failed_rc", Exact(0)),
+    ("receive", Exact(0)),
+    ("pad0", Exact(0)),
+    (
+        "source_hi",
+        Exact((group_event::GROUP_EXCEPTION_KEY >> 32) as u32),
+    ),
+    ("source_lo", Exact(group_event::GROUP_EXCEPTION_KEY as u32)),
+    // The group and thread ids carry a system-wide serial on the console.
+    ("data1_group", Any),
+    ("data1_thread", Any),
+    // The tag wait's SPU_NPC, as the console capture holds it.
+    ("data2_npc", Exact(0x238)),
+    ("data2_cause", Exact(group_event::EXCEPTION_DMA_ALIGNMENT)),
+    // An alignment fault reports no address.
+    ("data3_hi", Exact(0)),
+    ("data3_lo", Exact(0)),
+    ("terminate", Exact(0)),
+    ("join", Exact(0)),
+    ("join_cause", Exact(group_join_cause::TERMINATED)),
+    // TERMINATE_STATUS.
+    ("join_status", Exact(0x7E57)),
+    ("disconnect", Exact(0)),
+    ("group_destroy", Exact(0)),
+    ("queue_destroy", Exact(0)),
+    ("pad1", Exact(0)),
+    ("group_id", Any),
+    ("thread_id", Any),
+    ("buffer", NonZero),
+    ("pad2", Exact(0)),
+    // Element 1's first word: the LS address of `src`.
+    ("element1", NonZero),
+    ("element2", Exact(0)),
+    ("element2_plus_4", Exact(0)),
+    ("element3", Exact(0)),
 ];
 
 /// spu_atomic_misaligned_lsa's payload: a status and the three atomic

@@ -18,5 +18,29 @@ memory_regions = [
 [expect]
 outcome = "completed"
 
+[cellgov.title]
+short_name = "spulistbadsize"
+display_name = "CellGov SPU list bad element size microtest"
+eboot_candidates = ["spu_list_bad_size.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
 [ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
 files = ["spu_main.elf"]
+# The console's group and thread ids carry a system-wide serial, in the
+# event's data1 and in the ids the probe records.
+volatile = [
+  { region = "result", offset = 24, size = 8, reason = "event data1: group and thread ids" },
+  { region = "result", offset = 80, size = 8, reason = "group and thread ids" },
+]

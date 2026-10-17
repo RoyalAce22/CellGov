@@ -8,13 +8,18 @@
 //! - class 0 for a refused command or parameter;
 //! - class 1 for an address that does not translate.
 //!
-//! CellGov keeps the first such exception for the host, which ends the
-//! run on it.
+//! An SPU thread whose group has an exception queue gets the kernel's
+//! answer for the two causes a console capture reads: a DMA alignment
+//! fault and a data-segment fault. The kernel stops the group's SPUs and
+//! sends the queue the exception event, and the process carries on (see
+//! `cellgov_lv2::host::spu_exception`). CellGov keeps the first of every
+//! other exception for the host, which ends the run on it.
 //!
 //! [CBEA p:263 s:21.4 Table 21-3] the DMA alignment and invalid DMA command interrupts are class 0; the MFC data-segment and data-storage interrupts are class 1.
 
-use cellgov_dma::{InvalidMfcCommand, RaisedMfcCommand};
+use cellgov_dma::{InvalidMfcCommand, MfcCommandError, MfcExceptionClass, RaisedMfcCommand};
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::lv2::spu::event;
 
 use super::Runtime;
 
@@ -82,6 +87,62 @@ impl Runtime {
             group: self.lv2_host.live_spu_group(raised.issuer),
             command: raised.command,
         })
+    }
+
+    /// Answer a command the queue raised: the group's exception event
+    /// when the kernel sends one, or else a record for the host.
+    pub(super) fn raise_mfc_exception(&mut self, raised: RaisedMfcCommand) {
+        if !self.send_spu_group_exception(raised) {
+            self.record_mfc_exception(raised);
+        }
+    }
+
+    /// Stop the group of the issuing SPU thread and send its exception
+    /// queue the event, which wakes a receiver parked on it. Returns
+    /// `false` and changes nothing when the issuer's group has no
+    /// exception queue or no capture reads the event's cause.
+    fn send_spu_group_exception(&mut self, raised: RaisedMfcCommand) -> bool {
+        let (cause, dar) = match raised.command.error {
+            MfcCommandError::DataSegment { ea }
+            | MfcCommandError::ListElementCrosses4Gb { ea, .. } => {
+                (event::EXCEPTION_MFC_SEGMENT, ea)
+            }
+            error if error.class() == MfcExceptionClass::Alignment => {
+                (event::EXCEPTION_DMA_ALIGNMENT, 0)
+            }
+            _ => return false,
+        };
+        let unit = raised.issuer;
+        let Some((group, _)) = self.lv2_host.spu_exception_queue(unit) else {
+            return false;
+        };
+        for member in self.lv2_host.thread_groups().live_units(group) {
+            if let Err(err) = self.request_unit_stop(member) {
+                self.lv2_host.log_invariant_break(
+                    "runtime.spu_exception_stop_refused",
+                    format_args!("group 0x{group:08x}: SPU unit {member:?} did not stop: {err:?}"),
+                );
+            }
+        }
+        let npc = self
+            .registry
+            .get(unit)
+            .and_then(|spu| spu.stop_registers())
+            .map_or(0, |stop| stop.npc);
+        let Some(exception) = self
+            .lv2_host
+            .raise_spu_group_exception(unit, npc, cause, dar)
+        else {
+            return false;
+        };
+        if let Some((woken, response)) = exception.wake {
+            self.timer_wakes.cancel(woken);
+            let _ = self.syscall_responses.try_take(woken);
+            let _ = self.syscall_responses.insert(woken, response);
+            self.resolve_sync_wakes(&[woken]);
+            self.step_woke_others = true;
+        }
+        true
     }
 
     /// Record a command the queue raised. The first one stands until the

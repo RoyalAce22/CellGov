@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "capture_id": "micro:spu_list_bad_size#3464a1dce5c5",
-  "captured_at": "2026-10-16T04:56:21Z",
+  "capture_id": "micro:spu_list_bad_size#d8777c240ea7",
+  "captured_at": "2026-10-16T23:38:48Z",
   "console": {
     "profile": "cech20-cex-493",
     "model": "CECH-2001A",
@@ -13,8 +13,8 @@
     "debugger_attached": false,
     "load_at_start": {
       "cpu_c": 67,
-      "rsx_c": 63,
-      "fan_percent": 43
+      "rsx_c": 65,
+      "fan_percent": 40
     }
   },
   "transport": {
@@ -22,30 +22,31 @@
   },
   "harness": {
     "runner": "runner_ps3",
-    "revision": "91c5ab7433544d42db191b4d15be825008f82eb0",
-    "link": "https://github.com/RoyalAce22/CellGov/commit/91c5ab7433544d42db191b4d15be825008f82eb0"
+    "revision": "7ea313cf275dd0c2f990be86f6519d0a6420fc4e",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/7ea313cf275dd0c2f990be86f6519d0a6420fc4e"
   },
   "microtest": {
     "name": "spu_list_bad_size",
-    "manifest_sha256": "f150d858d394e80ee74b04f96fa937cedbc3cef126acbb04a9ab3ea881304dc6",
+    "manifest_sha256": "fe191d276087088ac0cbe09c09d4e5e4f9cefc6ea9fc8dca5eb739ab05602b97",
     "sources": {
       "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
       "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
       "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
       "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
-      "../common/package_ps3.sh": "43a75d7835e8195d0df6a30598bbd759a09265e8a6329115d58d9710d4ddd5b3",
+      "../common/package_ps3.sh": "78e6be20e91352ffd7afa3e89e06d7ce57bc9842181c3c59e0b86670ecbd8abf",
       "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_ctrl_flags.py": "86a0ec46658144b0a50e9179ac3e2323b96532a89227612e6a640a469ea4bf4d",
       "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
       "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
       "build.sh": "f56d45f756f1870414bebad8c0bbba80e31298ab94fd438c72d4d0f198ff7ae3",
-      "ppu/main.c": "828aaa1d9461b6ca99651b38ced28d2aed15e74059951459c804eb58710c4949",
+      "ppu/main.c": "e547e3ee1de6fa4853bde49ef673a56ad08a2c492dcc50683f20cbf387e0e7df",
       "spu/main.c": "213211387d08d1878bb1985435529f0c713056a44a5475ed45889491b6baf685"
     }
   },
   "artifacts": {
-    "eboot_sha256": "5c60b6690d44ae9b074d19e7ff4afcb4972355d5244985470b5ed8d3389cac58",
-    "ps3_elf_sha256": "a9e880edd7acbdf7343a46fd4cf6f533853dabfffb4de6751321c47db208b30a",
-    "reference_elf_sha256": "b1a72db129ec323bd00628e6e3b7975385301e0d93e68b7ec9e185c779d9c9e1",
+    "eboot_sha256": "891cd6b05103df335f533335bc6df03c1ff61e1c4ec04d5086c91e2f8c96dbb9",
+    "ps3_elf_sha256": "e2754292cdf29cd305fb8e5f52eb1526480220b05a20612ddcf762067c73bf37",
+    "reference_elf_sha256": "d34055439e333497738490407c283d08d5bc25919f9b5bc47aad654d90d16380",
     "siblings": {
       "spu_main.elf": "dfff7fa73a28057e37190ed2ce32a0930d1f49143627773dd75a7ddebf77656d"
     },
@@ -53,10 +54,10 @@
   },
   "frame": {
     "file": "cgov_frame.bin",
-    "sha256": "3464a1dce5c5d8ced4054aeea29f630ebe79c7ca91e792d51538176c842d1d24",
+    "sha256": "d8777c240ea7a35e34eab64c90ed84887c1d90402e316f46953bcc987b6689fd",
     "bytes": 120,
     "result_path": "/dev_hdd0/tmp/cgov_spu_list_bad_size.bin"
   },
-  "digest": "3464a1dce5c5d8ced4054aeea29f630ebe79c7ca91e792d51538176c842d1d24  micro:spu_list_bad_size  120",
-  "recapture_reason": null
+  "digest": "d8777c240ea7a35e34eab64c90ed84887c1d90402e316f46953bcc987b6689fd  micro:spu_list_bad_size  120",
+  "recapture_reason": "the probe no longer closes its SPU image after writing its result, so CellGov can boot it"
 }

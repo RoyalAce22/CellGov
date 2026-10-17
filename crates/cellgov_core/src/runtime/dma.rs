@@ -320,7 +320,7 @@ impl Runtime {
         processed: cellgov_dma::DueCommands,
     ) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
         for raised in processed.raised {
-            self.record_mfc_exception(raised);
+            self.raise_mfc_exception(raised);
         }
         let due = processed.completions;
         for (c, payload) in &due {
