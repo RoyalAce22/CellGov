@@ -1,0 +1,21 @@
+[test]
+name = "spu_ie_branch_forms"
+
+# A hardware probe of the indirect branches with D and E both set, on a
+# raw SPU: bi, bisl, iret, biz, binz, bihz and bihnz, each taken once
+# from the interrupt-enabled state and once from the disabled one, with
+# SPU_RdMachStat stored after each. The PPU reads back SPU_Status,
+# SPU_NextPC, the class 0 interrupt status and the sixteen result slots.
+# The PPU program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

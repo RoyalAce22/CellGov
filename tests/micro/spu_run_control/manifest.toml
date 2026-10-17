@@ -1,0 +1,22 @@
+[test]
+name = "spu_run_control"
+
+# A hardware probe of SPU run control on a raw SPU: how far the SPU runs
+# past a met halt, how far ahead it fetches instructions a store can no
+# longer replace, what SPU_RdMachStat reads after a branch that sets or
+# clears the interrupt-enable bit (and after one with both D and E), and
+# what mfspr and mtspr do. The PPU reads back SPU_Status, SPU_NextPC,
+# the class 0 interrupt status and each entry's result slots. The PPU
+# program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 1696 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

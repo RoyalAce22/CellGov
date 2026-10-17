@@ -5,7 +5,7 @@
 use crate::stop::SpuStopKind;
 use crate::SpuExecutionUnit;
 use cellgov_event::UnitId;
-use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
+use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::hw::spu::{
     event::S1, MFC_RD_TAG_STAT, SPU_RD_MACH_STAT, SPU_RD_SRR0, SPU_WR_SRR0,
@@ -151,16 +151,18 @@ fn the_d_and_e_bits_act_only_on_a_taken_branch() {
     );
 }
 
-/// [SPU-ISA p:251 s:12] D = E = 1 causes undefined behavior, and CellGov refuses it on a taken branch.
+/// [SPU-ISA p:251 s:12] D = E = 1 causes undefined behavior. The
+/// `spu_run_control` console capture shows that a taken branch with both
+/// bits set disables interrupts.
 #[test]
-fn a_taken_branch_with_d_and_e_faults_and_an_untaken_one_does_not() {
-    let mut unit = unit_with(&[(0, &[biz(11, 12) | D | E, STOP])]);
-    unit.state_mut().set_reg_word_splat(11, 1);
+fn a_taken_branch_with_d_and_e_disables_interrupts() {
+    let mut unit = unit_with(&[(0, &[bi(12) | D | E, 0, 0, 0, STOP])]);
+    let state = unit.state_mut();
+    state.set_reg_word_splat(12, 0x10);
+    state.set_interrupts_enabled(true);
     assert_eq!(run(&mut unit), YieldReason::Finished);
-
-    let mut unit = unit_with(&[(0, &[bi(12) | D | E])]);
-    assert_eq!(run(&mut unit), YieldReason::Fault);
-    assert_eq!(unit.status(), UnitStatus::Faulted);
+    assert!(!unit.state().interrupts_enabled());
+    assert_eq!(unit.state().stop.map(|stop| stop.npc), Some(0x14));
 }
 
 /// [CBEA p:142 s:9.9.1], [CBEA p:142 s:9.9.2] SPU_WrSRR0 sets SRR0, SPU_RdSRR0 returns it, and neither has a count: rchcnt returns 1.

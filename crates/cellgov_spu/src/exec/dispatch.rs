@@ -9,20 +9,18 @@ use cellgov_float::{extended_magnitude_key, extended_order_key};
 use super::channel::{execute_rchcnt, execute_rdch, execute_wrch};
 use super::lanes::{from_halfwords, from_words, halfwords, words};
 use super::ls::{insertion_controls, load_quad, negated_count, rotate_mask_count, store_quad, Lsa};
-use super::outcome::{SpuFault, SpuStepOutcome};
+use super::outcome::SpuStepOutcome;
 
 /// The taken path of every indirect branch: PC <- `target`, with the
 /// D and E feature bits applied to the interrupt-enable state.
 ///
 /// [SPU-ISA p:251 s:12] a taken branch changes the interrupt-enable status before the target instruction runs, and D = E = 1 causes undefined behavior.
-/// CellGov refuses D = E = 1, as it refuses the other operand encodings
-/// whose result is undefined.
+// The `spu_run_control` and `spu_ie_branch_forms` console captures: every
+// taken form with D and E both set disables interrupts, from the enabled
+// state and from the disabled one.
 fn take_indirect(state: &mut SpuState, target: u32, d: bool, e: bool) -> SpuStepOutcome {
     match (d, e) {
-        (true, true) => {
-            return SpuStepOutcome::Fault(SpuFault::UndefinedInterruptControl(state.pc))
-        }
-        (true, false) => state.set_interrupts_enabled(false),
+        (true, _) => state.set_interrupts_enabled(false),
         (false, true) => state.set_interrupts_enabled(true),
         (false, false) => {}
     }
