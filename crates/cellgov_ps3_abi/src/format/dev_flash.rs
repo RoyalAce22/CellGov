@@ -1,4 +1,12 @@
 //! Retail firmware (`dev_flash`) content facts.
+//!
+//! The reference console (cech20-cex-493) was read over FTP:
+//!
+//! - Its root lists all three [`FLASH_MOUNTS`] beside `dev_hdd0`.
+//! - Its `vsh/etc/version.txt` opens `release:04.9300:`, followed by
+//!   `build`, `target`, and per-component source-revision records.
+//! - Its `vsh/module` holds [`VSH_SELF`].
+//! - Its `sys/internal` holds `libfs_utility2.sprx`.
 
 /// Names of the three flash mounts, flash 1 first.
 ///
@@ -101,6 +109,12 @@ pub const FIRMWARE_INTERNAL_PRX_STEMS: &[&str] = &["libfs_utility2"];
 /// `dev_flash` install checks it. The list is a union across firmware
 /// revisions: some revisions ship a module others do not, `libfs_155`
 /// for one. Sorted for binary search.
+///
+/// The reference console's `sys/external` holds every one of these
+/// 142 stems as a `.sprx`. It also holds four stems that are not in
+/// the list: `libda-mini`, `libda-vsh`, `libgcm_sys_deh` and
+/// `liblv2dbg_for_dex`. No retail firmware in the store ships these
+/// four; the console's modified firmware adds them.
 pub const FIRMWARE_MODULE_STEMS: &[&str] = &[
     "libaacenc",
     "libaacenc_spurs",

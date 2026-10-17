@@ -4,6 +4,26 @@
 //! No public specification covers the table; the layout below is the
 //! one every retail `PARAM.SFO` follows. Unlike the other PS3 container
 //! formats, every multi-byte field is little-endian.
+//!
+//! Five tables were read, named by SHA-256:
+//!
+//! - a homebrew title's `PARAM.SFO` under the reference console's
+//!   `/dev_hdd0/game`
+//!   6219c81f1465766526929929f755d9a11ff5e1ae244ccf0221ac479d31ac261e
+//! - two disc titles:
+//!   0d12f81e1752536518903ead50a25f88c5adb17980806624866da6aa5c211be8
+//!   and
+//!   c7804e6afd838a3b9bd3802294243083d599652bdff5cc6d2c543c1e94bd2d2a
+//! - two installed NPDRM titles:
+//!   79be03c21c5d51ba2184a9606dcd44c81616d9b875985ea9f383828758578849
+//!   and
+//!   3868b20bcc313050b185ff51c650911d12a2aa3c2773bc7e1a676f2ec4292c08
+//!
+//! All five open with [`SFO_MAGIC`] and version 0x0101. Their key table
+//! starts [`SFO_HEADER_LEN`] plus [`SFO_INDEX_LEN`] bytes per entry from
+//! the start. Their only format tags are 0x0204 and 0x0404.
+//! `PS3_SYSTEM_VER` is a 0x0204 string in each: `01.5000`, `01.9400`,
+//! `02.7600`, `03.4000` and `03.7000`.
 
 /// The table's filename inside a title tree.
 pub const PARAM_SFO_FILE: &str = "PARAM.SFO";

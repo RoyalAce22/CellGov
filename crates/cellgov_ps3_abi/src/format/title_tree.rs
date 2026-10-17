@@ -1,4 +1,16 @@
 //! Title-tree layout facts: where a disc or HDD title keeps its files.
+//!
+//! The reference console holds no disc and its FTP root lists no
+//! `dev_bdvd`, so the disc layout is read from the store's two retail
+//! disc trees:
+//!
+//! - Each holds `PS3_DISC.SFB`, `PS3_GAME/USRDIR/EBOOT.BIN` and
+//!   `PS3_UPDATE/PS3UPDAT.PUP`.
+//! - The console's installed titles keep `PARAM.SFO` at the tree root
+//!   and `USRDIR/EBOOT.BIN` below it.
+//!
+//! The 2048-byte block size the `lv2_fs_blksize` capture reads under
+//! `/dev_bdvd` came from a run with a disc inserted.
 
 /// The directory a disc holds its game files under, relative to the
 /// disc root. An HDD title's tree has no such level: its game files

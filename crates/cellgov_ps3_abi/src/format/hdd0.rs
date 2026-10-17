@@ -1,5 +1,11 @@
 //! Internal hard disk (`dev_hdd0`) layout facts: where installed games
 //! and the user profile's license files live.
+//!
+//! An FTP listing of the reference console (cech20-cex-493) shows
+//! `/dev_hdd0/game` holding one directory per installed title, named by
+//! title id, and `/dev_hdd0/home` holding the
+//! profile directories, each with an `exdata` directory of license
+//! files.
 
 /// The internal hard disk's mount, as a bare directory name.
 pub const HDD0_MOUNT: &str = "dev_hdd0";
@@ -16,6 +22,9 @@ pub const HOME_DIR: &str = "home";
 
 /// The one user profile CellGov models, as its directory name under
 /// [`HOME_DIR`].
+///
+/// A console numbers its profiles itself, so CellGov chooses this name.
+/// The reference console's one profile is `00000011`.
 pub const USER_DIR: &str = "00000001";
 
 /// The directory under a user profile that holds its license files.
