@@ -28,8 +28,9 @@ pub mod region {
 }
 
 /// `sys_rsx_device_map` (675) OUT-pointer value and its kernel reservation.
-/// `RESERVATION_SIZE` is the PS3 ABI reservation; `ADDR` is a deterministic
-/// pick from the range the asserts below bound.
+/// `RESERVATION_SIZE` is the PS3 ABI reservation; `ADDR` is CellGov's
+/// deterministic pick from the range the asserts below bound, not a
+/// console value.
 pub mod device_map {
     /// `dev_addr` OUT for `dev_id == 8`.
     pub const ADDR: u32 = 0x4000_0000;
@@ -46,6 +47,11 @@ pub mod device_map {
 }
 
 /// `sys_rsx_context_iomap` (672) argument-validation constants.
+///
+/// No game can check these on the console: the `lv2_rsx_answers`
+/// capture shows a game's own raw 672 refused with `CELL_EPERM` before
+/// any argument is read, so the console never shows this alignment rule
+/// or the pinned id to a game.
 pub mod iomap {
     /// `context_id` the kernel pins for the single allocated RSX context.
     pub const CONTEXT_ID: u32 = 0x5555_5555;
@@ -168,15 +174,18 @@ pub mod driver_info {
 }
 
 /// Values `sys_rsx_context_allocate` stamps into the driver-info region
-/// during init.
+/// during init. The `lv2_rsx_answers` capture reads each one from the
+/// block a game's libgcm bring-up leaves behind.
 pub mod driver_info_init {
     /// Driver version word.
     pub const VERSION_DRIVER: u32 = 0x211;
-    /// GPU version word, as the `lv2_rsx_answers` capture reads it.
+    /// GPU version word.
     pub const VERSION_GPU: u32 = 0x34;
-    /// nvcore frequency in Hz.
+    /// nvcore frequency in Hz; libgcm reports the same as its core
+    /// frequency.
     pub const NVCORE_FREQUENCY: u32 = 500_000_000;
-    /// Memory frequency in Hz.
+    /// Memory frequency in Hz; libgcm reports the same as its memory
+    /// frequency.
     pub const MEMORY_FREQUENCY: u32 = 650_000_000;
     /// Offset from reports_base to the notify array.
     pub const REPORTS_NOTIFY_OFFSET: u32 = 0x1000;
@@ -184,7 +193,7 @@ pub mod driver_info_init {
     pub const REPORTS_OFFSET_FIELD: u32 = 0;
     /// Offset from reports_base to the report entries.
     pub const REPORTS_REPORT_OFFSET: u32 = 0x1400;
-    /// Hardware channel (games = 1, VSH = 0).
+    /// Hardware channel: 1 for a game. VSH's channel 0 is not captured.
     pub const HARDWARE_CHANNEL: u32 = 1;
     /// Each head's flip-flags word after allocation: no flip pending,
     /// as the `lv2_rsx_answers` capture reads both heads.
@@ -197,11 +206,17 @@ pub mod driver_info_init {
 
 /// Default event-queue parameters for the RSX handler queue.
 pub mod event_queue {
-    /// RSX handler queue depth.
+    /// RSX handler queue depth. A game holds only the queue's id
+    /// (`handler_queue` in the driver-info block) and cannot read its
+    /// depth back, so no console capture checks this value.
     pub const SIZE: u32 = 0x20;
 }
 
 /// `sys_rsx_context_attribute` package ids (the `package_id` argument).
+///
+/// No game can check these on the console: the `lv2_rsx_answers`
+/// capture shows a game's own raw 674 refused with `CELL_EPERM`, so only
+/// the kernel's libgcm-side callers see a package id answered.
 pub mod package {
     /// FIFO setup. a3 = initial GET pointer, a4 = initial PUT pointer.
     pub const FIFO_SETUP: u32 = 0x001;
@@ -221,6 +236,9 @@ pub mod package {
 
 /// `RsxDisplayBuffer` array sizing.
 pub mod display_buffer {
-    /// Maximum number of display buffer slots per context.
+    /// Maximum number of display buffer slots per context. The slots are
+    /// filled through package [`super::package::SET_DISPLAY_BUFFER`],
+    /// which a game cannot send raw, so no console capture checks this
+    /// limit.
     pub const COUNT_MAX: usize = 8;
 }

@@ -1,0 +1,30 @@
+[test]
+name = "rsx_fifo_forms"
+
+# A hardware probe: what each RSX command header form does when a game
+# writes it into libgcm's command buffer -- a method header, a
+# non-increment header, the old and new jumps, a call and its return, a
+# semaphore acquire, a no-op and a back-end semaphore release. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 28 big-endian u32 words, as ppu/main.c lists: 112 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 112 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The poll counts depend on when the RSX gets to each command.
+volatile = [
+  { region = "result", offset = 20, size = 4, reason = "poll count" },
+  { region = "result", offset = 32, size = 4, reason = "poll count" },
+  { region = "result", offset = 44, size = 4, reason = "poll count" },
+  { region = "result", offset = 56, size = 4, reason = "poll count" },
+  { region = "result", offset = 68, size = 4, reason = "poll count" },
+  { region = "result", offset = 80, size = 4, reason = "poll count" },
+  { region = "result", offset = 92, size = 4, reason = "poll count" },
+  { region = "result", offset = 104, size = 4, reason = "poll count" },
+]

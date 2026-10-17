@@ -48,8 +48,9 @@ pub enum NvCommandKind {
         /// Absolute byte offset into the FIFO target buffer.
         offset: u32,
     },
-    /// The NV1A-and-later JUMP form; 30-bit byte offset. libgcm does
-    /// not emit this; classified defensively.
+    /// The NV1A-and-later JUMP form; 30-bit byte offset. The reference
+    /// console takes it from libgcm's command buffer
+    /// (`rsx_fifo_forms`).
     NewJump {
         /// Absolute byte offset, 30-bit range.
         offset: u32,
@@ -320,8 +321,10 @@ pub fn register_nv4097_report_handler(
 }
 
 /// Undo the inline `cellGcmSetWriteBackEndLabel` byte-0 / byte-2
-/// pre-swap. Real PS3 GPU performs the same swap on write; the
-/// oracle applies it here to land the same guest-visible bytes.
+/// pre-swap. The RSX performs the same swap on write: the reference
+/// console's `rsx_fifo_forms` capture reads a back-end release of
+/// 0x11223344 as 0x11443322. The oracle applies it here to land the
+/// same guest-visible bytes.
 /// `const fn` so tests can compute expected values without
 /// duplicating the bit math.
 pub const fn back_end_semaphore_value_swap(value: u32) -> u32 {

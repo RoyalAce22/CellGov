@@ -61,9 +61,9 @@ pub enum RsxAdvanceStop {
 pub struct RsxAdvanceOutcome {
     /// Dispatches that hit a registered handler.
     pub methods_dispatched: u32,
-    /// Counted in **dispatch attempts**, not headers: an Increment header
-    /// with `count = N` and no matching handler contributes `N`; a
-    /// NonIncrement header contributes `1` regardless of `count`.
+    /// Counted in **dispatch attempts**, not headers: a header with
+    /// `count = N` and no matching handler contributes `N`, in either
+    /// increment form.
     pub methods_unknown: u32,
     /// `NV406E_SET_REFERENCE` dispatches inside this pass; the
     /// cursor's `current_reference` slot only retains the final value.
@@ -114,10 +114,12 @@ fn dispatch_method(
 /// honoring the FIFO consumer's control-flow headers.
 ///
 /// FIFO bytes are interpreted as big-endian u32 (PS3 ABI). Emissions
-/// are appended to `emitted` in FIFO address order. Increment headers
-/// dispatch once per arg against `method + 4*i`; NonIncrement headers
-/// dispatch once with the full slice (including the empty slice for
-/// `count == 0`), so handlers must index via `args.first()` / `get`.
+/// are appended to `emitted` in FIFO address order. Every header
+/// dispatches once per arg with a one-word slice: an Increment header
+/// against `method + 4*i`, a NonIncrement header against `method` each
+/// time, and a `count == 0` header not at all. The reference console's
+/// `rsx_fifo_forms` capture shows a non-increment SET_REFERENCE of three
+/// words leaving the third in the register.
 ///
 /// Control-flow headers are honored unconditionally: `Call` pushes,
 /// `Return` pops, `Jump` / `NewJump` redirect without push.
@@ -212,23 +214,20 @@ pub fn rsx_advance(
                     emitted: &mut *emitted,
                     now,
                 };
-                match header.kind {
-                    NvCommandKind::Increment => {
-                        for (i, arg) in args.iter().enumerate() {
-                            let sub_method = header.method.wrapping_add((i as u16) * 4);
-                            dispatch_method(
-                                table,
-                                sub_method,
-                                std::slice::from_ref(arg),
-                                &mut ctx,
-                                &mut outcome,
-                            );
-                        }
-                    }
-                    NvCommandKind::NonIncrement => {
-                        dispatch_method(table, header.method, &args, &mut ctx, &mut outcome);
-                    }
-                    _ => unreachable!("outer match guards Increment / NonIncrement only"),
+                let step = if header.kind == NvCommandKind::Increment {
+                    4
+                } else {
+                    0
+                };
+                for (i, arg) in args.iter().enumerate() {
+                    let sub_method = header.method.wrapping_add((i as u16).wrapping_mul(step));
+                    dispatch_method(
+                        table,
+                        sub_method,
+                        std::slice::from_ref(arg),
+                        &mut ctx,
+                        &mut outcome,
+                    );
                 }
             }
             NvCommandKind::Jump { offset } | NvCommandKind::NewJump { offset } => {
@@ -277,3 +276,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/hardware_trace_tests.rs"]
 mod hardware_trace_tests;
+
+#[cfg(test)]
+#[path = "tests/fifo_forms_console_tests.rs"]
+mod fifo_forms_console_tests;

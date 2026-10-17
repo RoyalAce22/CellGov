@@ -15,8 +15,16 @@ pub const CELL_GCM_DISPLAY_FLIP_STATUS_DONE: u8 = 0;
 pub const CELL_GCM_DISPLAY_FLIP_STATUS_WAITING: u8 = 1;
 
 // NVIDIA RSX command header bit flags / shifts / masks.
+//
+// The reference console's `rsx_fifo_forms` capture executes each form
+// below from libgcm's command buffer: a method header, a non-increment
+// header, the old and the new JUMP, a CALL with its RETURN, and the
+// count at bit 18.
 
-/// Header bit: arguments do not increment the method register.
+/// Header bit: arguments do not increment the method register. Each
+/// argument writes the same method in turn: on the reference console
+/// (`rsx_fifo_forms`) a non-increment SET_REFERENCE of three words
+/// leaves the third.
 pub const NV_FLAG_NON_INCREMENT: u32 = 0x4000_0000;
 
 /// Header bit: this header is a JUMP (FIFO control transfer).
@@ -58,7 +66,9 @@ pub const NV406E_SET_REFERENCE: u16 = 0x0050;
 pub const NV406E_SEMAPHORE_OFFSET: u16 = 0x0064;
 
 /// `NV406E_SEMAPHORE_ACQUIRE`: blocks the FIFO until the labelled
-/// semaphore matches.
+/// semaphore matches. The reference console's `rsx_fifo_forms` capture
+/// shows an acquire at the value the label already holds letting the
+/// stream go on; it does not show the block.
 pub const NV406E_SEMAPHORE_ACQUIRE: u16 = 0x0068;
 
 /// `NV406E_SEMAPHORE_RELEASE`: writes the labelled semaphore.
@@ -66,7 +76,8 @@ pub const NV406E_SEMAPHORE_RELEASE: u16 = 0x006C;
 
 // NV4097 (3D engine) method codes.
 
-/// `NV4097_NO_OPERATION`: header-only filler.
+/// `NV4097_NO_OPERATION`: filler; the reference console runs past one
+/// with an argument of 0 (`rsx_fifo_forms`).
 pub const NV4097_NO_OPERATION: u16 = 0x0100;
 
 /// `NV4097_GET_REPORT`: writes a report record at `reports_base +
@@ -77,7 +88,9 @@ pub const NV4097_GET_REPORT: u16 = 0x1800;
 pub const NV4097_SET_SEMAPHORE_OFFSET: u16 = 0x1D6C;
 
 /// `NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE`: writes the back-end
-/// semaphore at the previously-set offset.
+/// semaphore at the previously-set offset, with bytes 0 and 2 of the
+/// argument exchanged: on the reference console (`rsx_fifo_forms`) a
+/// release of 0x11223344 reads back as 0x11443322.
 pub const NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE: u16 = 0x1D70;
 
 /// `NV4097_GET_REPORT` offset-field mask in the absolute-offset regime
@@ -104,6 +117,8 @@ pub const GCM_FLIP_HEAD: u16 = 0xE920;
 // Reports-region label addressing.
 
 /// Bytes between consecutive labels in the reports semaphore region.
+/// The reference console's `rsx_fifo_forms` capture reads it as the
+/// distance between libgcm's label 64 and label 65 addresses.
 pub const LABEL_STRIDE: u32 = 0x10;
 
 /// Number of addressable labels.

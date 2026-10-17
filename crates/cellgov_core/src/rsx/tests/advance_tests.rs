@@ -529,15 +529,13 @@ fn advance_malformed_stop_carries_raw_header() {
 }
 
 #[test]
-fn advance_non_increment_passes_full_arg_slice_to_single_handler() {
+fn advance_non_increment_dispatches_each_arg_to_the_same_method() {
     use std::sync::Mutex;
-    static LAST_ARGS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+    static CALLS: Mutex<Vec<Vec<u32>>> = Mutex::new(Vec::new());
     fn record_args(_ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
-        let mut slot = LAST_ARGS.lock().unwrap();
-        slot.clear();
-        slot.extend_from_slice(args);
+        CALLS.lock().unwrap().push(args.to_vec());
     }
-    LAST_ARGS.lock().unwrap().clear();
+    CALLS.lock().unwrap().clear();
 
     let mut memory = make_memory();
     let method: u16 = 0x0400;
@@ -567,10 +565,10 @@ fn advance_non_increment_passes_full_arg_slice_to_single_handler() {
     };
     assert!(outcome.reached_put());
     assert_eq!(
-        outcome.methods_dispatched, 1,
-        "NonIncrement dispatches once with full slice"
+        outcome.methods_dispatched, 2,
+        "NonIncrement dispatches once per arg"
     );
-    assert_eq!(*LAST_ARGS.lock().unwrap(), vec![0x11, 0x22]);
+    assert_eq!(*CALLS.lock().unwrap(), vec![vec![0x11], vec![0x22]]);
 }
 
 #[test]
@@ -627,7 +625,7 @@ fn advance_increment_dispatches_per_arg_to_sequential_methods() {
 }
 
 #[test]
-fn advance_unknown_non_increment_header_counts_as_single_attempt() {
+fn advance_unknown_non_increment_header_counts_one_attempt_per_arg() {
     let mut memory = make_memory();
     let unknown: u16 = 0x0300;
     let count: u32 = 3;
@@ -655,8 +653,8 @@ fn advance_unknown_non_increment_header_counts_as_single_attempt() {
     };
     assert!(outcome.reached_put());
     assert_eq!(
-        outcome.methods_unknown, 1,
-        "NonIncrement counts as one attempt even with count=3"
+        outcome.methods_unknown, 3,
+        "NonIncrement counts one attempt per arg"
     );
     assert_eq!(outcome.methods_dispatched, 0);
 }
