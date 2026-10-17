@@ -1,0 +1,14 @@
+[test]
+name = "lv2_user_memory_stack_1m"
+
+# A hardware probe: the user memory sizes a game process with a 1 MiB primary stack reads, and how a container moves them.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 14 big-endian u64 words, in the order ppu/main.c lists: 112 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 112 },
+]
+
+[expect]
+outcome = "completed"

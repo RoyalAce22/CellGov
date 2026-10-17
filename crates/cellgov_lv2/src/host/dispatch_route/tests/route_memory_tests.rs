@@ -33,12 +33,6 @@ fn with_containers_362(host: &mut Lv2Host) {
 }
 
 #[test]
-fn cell_ps3_user_memory_total_is_213_mib() {
-    assert_eq!(cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL, 0x0D50_0000);
-    assert_eq!(cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL, 223_346_688);
-}
-
-#[test]
 fn syscall_362_writes_fresh_mem_id_to_args4_ptr() {
     let mut host = Lv2Host::new();
     with_containers_362(&mut host);
@@ -1110,8 +1104,8 @@ fn memory_get_user_memory_size_writes_total_then_available() {
                 assert_eq!(range.length(), 8);
                 let total = u32::from_be_bytes(bytes.bytes()[0..4].try_into().unwrap());
                 let avail = u32::from_be_bytes(bytes.bytes()[4..8].try_into().unwrap());
-                assert_eq!(total, 0x0D50_0000);
-                assert_eq!(avail, 0x0D50_0000);
+                let fresh = cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL;
+                assert_eq!((total, avail), (fresh, fresh));
             } else {
                 panic!("expected SharedWriteIntent");
             }

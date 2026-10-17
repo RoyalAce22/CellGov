@@ -94,7 +94,7 @@ impl Lv2Host {
 
     /// Writes `(total, available)` to `*mem_info_ptr`; EFAULT on null.
     ///
-    /// `total` is the PS3 game-mode user-memory cap; `available` is
+    /// `total` is [`Lv2Host::user_memory_total`]; `available` is
     /// [`Lv2Host::user_memory_available`].
     ///
     /// `available` over-reports. Real LV2 charges the loaded image and
@@ -111,7 +111,7 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[mem_info_ptr]) {
             return d;
         }
-        let total = cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL;
+        let total = self.user_memory_total();
         let available = self.user_memory_available();
         let mut bytes = [0u8; 8];
         bytes[0..4].copy_from_slice(&total.to_be_bytes());

@@ -84,8 +84,18 @@ impl Lv2Host {
             .filter(|b| b.container.is_none())
             .map(|b| u64::from(b.size))
             .sum();
+        let held = u32::try_from(blocks).unwrap_or(u32::MAX);
+        self.user_memory_total().saturating_sub(held)
+    }
+
+    /// The user memory `sys_memory_get_user_memory_size` reports in
+    /// total: [`USER_MEMORY_TOTAL`] less every live container's size. The
+    /// `lv2_user_memory_stack_1m` and `lv2_user_memory_big_image`
+    /// captures show a 1 MiB container create taking 1 MiB from the
+    /// total, and its destroy giving it back.
+    pub(in crate::host) fn user_memory_total(&self) -> u32 {
         let containers: u64 = self.state.memory_containers.values().map(|c| c.size).sum();
-        let held = u32::try_from(blocks.saturating_add(containers)).unwrap_or(u32::MAX);
+        let held = u32::try_from(containers).unwrap_or(u32::MAX);
         USER_MEMORY_TOTAL.saturating_sub(held)
     }
 
@@ -310,6 +320,10 @@ mod container_tests;
 #[cfg(test)]
 #[path = "tests/memory_console_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/user_memory_console_tests.rs"]
+mod user_memory_console_tests;
 
 #[cfg(test)]
 #[path = "tests/memory_free_tests.rs"]

@@ -4,9 +4,14 @@
 //! free-region tracker) lives in `cellgov_lv2::host::memory`; this
 //! module is data only.
 
-/// Total user-memory cap (213 MiB) reported via
-/// `sys_memory_get_user_memory_size`.
-pub const USER_MEMORY_TOTAL: u32 = 0x0D50_0000;
+/// The user memory a game process holds (209 MiB) before it creates a
+/// memory container: the `total` `sys_memory_get_user_memory_size`
+/// reports while no container is live.
+// The lv2_memory_free_container, lv2_user_memory_stack_1m and
+// lv2_user_memory_big_image captures read this total for a 64 KiB and a
+// 1 MiB primary stack and for an image 8 MiB larger: neither input
+// moves it.
+pub const USER_MEMORY_TOTAL: u32 = 0x0D10_0000;
 
 /// `ipc_key` sentinel meaning "not process-shared" for
 /// `sys_mmapper_allocate_shared_memory` (332 / 362); liblv2 passes it
