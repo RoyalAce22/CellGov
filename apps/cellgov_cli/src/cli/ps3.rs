@@ -234,6 +234,7 @@ pub(crate) fn exit_code(error: &RunnerPs3Error) -> i32 {
         RunnerPs3Error::Refused { .. }
         | RunnerPs3Error::PassiveOnlySyscall { .. }
         | RunnerPs3Error::UnscannableElf { .. }
+        | RunnerPs3Error::SelfWithoutElf { .. }
         | RunnerPs3Error::Lease(LeaseError::Held { .. })
         | RunnerPs3Error::Console(ConsoleError::Contradiction { .. })
         | RunnerPs3Error::Profile(

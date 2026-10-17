@@ -9,6 +9,8 @@
 use std::path::{Path, PathBuf};
 
 use cellgov_observation::manifest::ConsoleManifest;
+use cellgov_ps3_abi::format::elf::{ELFCLASS64, ELF_EI_CLASS, ELF_MAGIC};
+use cellgov_ps3_abi::format::sce::SCE_MAGIC;
 
 use crate::error::RunnerPs3Error;
 use crate::passive;
@@ -70,21 +72,50 @@ fn read(path: &Path) -> Result<Vec<u8>, RunnerPs3Error> {
     })
 }
 
-/// Refuse a package whose PPU relink holds a passive-only syscall
-/// number. The verbs that deploy call this before anything reaches the
-/// console, ahead of the stale-result and reclaim steps.
+/// Refuse a package whose PPU code holds a passive-only syscall number:
+/// the relink, and every sibling that is a PPU program. The verbs that
+/// deploy call this before anything reaches the console, ahead of the
+/// stale-result and reclaim steps.
+///
+/// A sibling is a PPU program when it is a big-endian ELF64, or a SELF.
+/// The scan cannot read a SELF, so it reads the plain ELF that
+/// `package_ps3.sh` copies beside it under the same stem. An ELF32
+/// sibling is an SPU image, which sends no syscall, and any other
+/// sibling is data.
 ///
 /// # Errors
 ///
-/// [`RunnerPs3Error::LocalRead`] when the relink cannot be read, and
-/// [`RunnerPs3Error::PassiveOnlySyscall`] and
-/// [`RunnerPs3Error::UnscannableElf`] from the
-/// [`passive`] scan.
+/// [`RunnerPs3Error::LocalRead`] when the relink or a sibling cannot be
+/// read, [`RunnerPs3Error::SelfWithoutElf`] when a SELF sibling has no
+/// plain ELF beside it, and [`RunnerPs3Error::PassiveOnlySyscall`] and
+/// [`RunnerPs3Error::UnscannableElf`] from the [`passive`] scan.
 pub fn admit(package: &Package) -> Result<(), RunnerPs3Error> {
-    let ppu_elf = read(&package.ps3_elf)?;
-    match passive::first_passive_only_load(&ppu_elf, &package.ps3_elf)? {
+    scan(&package.ps3_elf)?;
+    for (_, path) in &package.siblings {
+        let bytes = read(path)?;
+        if bytes.starts_with(&SCE_MAGIC) {
+            let elf = path.with_extension("elf");
+            if !elf.is_file() {
+                return Err(RunnerPs3Error::SelfWithoutElf {
+                    sibling: path.clone(),
+                    elf,
+                });
+            }
+            scan(&elf)?;
+        } else if bytes.starts_with(&ELF_MAGIC) && bytes.get(ELF_EI_CLASS) == Some(&ELFCLASS64) {
+            scan(path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Refuse the PPU program at `path` if it holds a passive-only syscall
+/// number.
+fn scan(path: &Path) -> Result<(), RunnerPs3Error> {
+    let elf = read(path)?;
+    match passive::first_passive_only_load(&elf, path)? {
         Some((number, offset)) => Err(RunnerPs3Error::PassiveOnlySyscall {
-            elf: package.ps3_elf.clone(),
+            elf: path.to_path_buf(),
             number,
             offset,
         }),

@@ -22,7 +22,9 @@
 #   link.txt     which start file the ELF was linked with;
 #   siblings     each extra argument copied in, so a program the PPU
 #                loads (spu_main.elf, child.self) sits beside the EBOOT
-#                in USRDIR.
+#                in USRDIR; for a SELF sibling, its plain ELF of the
+#                same stem too, which the runner scans for the calls no
+#                probe sends and does not deploy.
 #
 # The reference build/<name>.elf is not touched: the emulator baselines
 # were recorded from it and stay valid.
@@ -113,6 +115,14 @@ sfo --fromxml "$COMMON/param_sfo.xml" "$PS3OUT/PARAM.SFO" \
 for sibling in "$@"; do
     echo "=== Copying sibling $(basename "$sibling") ==="
     cp "$sibling" "$PS3OUT/"
+    if [ "$(basename "$sibling")" = "$NAME.self" ]; then
+        echo "package_ps3.sh: sibling $sibling would overwrite the relink $NAME.elf" >&2
+        exit 1
+    fi
+    if [ "${sibling%.self}" != "$sibling" ] && [ -f "${sibling%.self}.elf" ]; then
+        echo "=== Copying its plain ELF $(basename "${sibling%.self}.elf") ==="
+        cp "${sibling%.self}.elf" "$PS3OUT/"
+    fi
 done
 
 echo "=== PS3 package complete ==="

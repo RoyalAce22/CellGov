@@ -145,28 +145,41 @@ pub enum RunnerPs3Error {
     /// The fetched bytes are not one whole CGOV frame.
     #[error("frame: {0}")]
     Frame(String),
-    /// The probe's PPU relink holds a syscall number no probe sends.
+    /// The probe's PPU relink, or a PPU program it carries as a sibling,
+    /// holds a syscall number no probe sends.
     #[error(
         "refused: {elf} holds syscall number {number} at file offset 0x{offset:08x}; the UART \
          initialize, receive and send calls and sys_gamepad_ycon_if are settled only by passive \
          capture, never by a probe"
     )]
     PassiveOnlySyscall {
-        /// The PPU relink.
+        /// The PPU program.
         elf: PathBuf,
         /// The syscall number.
         number: u64,
         /// The file offset of the `li` or data word that holds it.
         offset: u64,
     },
-    /// The probe's PPU relink is not an ELF the passive-only scan reads,
-    /// so the runner cannot scan it.
+    /// A PPU program of the probe is not an ELF the passive-only scan
+    /// reads, so the runner cannot scan it.
     #[error(
         "refused: {elf} is not a big-endian ELF64 whose program headers lie in the file; rebuild \
          the probe"
     )]
     UnscannableElf {
-        /// The PPU relink.
+        /// The PPU program.
+        elf: PathBuf,
+    },
+    /// A sibling is a SELF, which the passive-only scan cannot read, and
+    /// no plain ELF of the same program sits beside it.
+    #[error(
+        "refused: {sibling} is a SELF and {elf} is missing, so its PPU code cannot be scanned; \
+         rebuild the probe"
+    )]
+    SelfWithoutElf {
+        /// The SELF sibling.
+        sibling: PathBuf,
+        /// Where its plain ELF should be.
         elf: PathBuf,
     },
     /// Cleanup after a capture left something on the console.
@@ -190,6 +203,7 @@ impl RunnerPs3Error {
             Self::Refused { .. }
             | Self::PassiveOnlySyscall { .. }
             | Self::UnscannableElf { .. }
+            | Self::SelfWithoutElf { .. }
             | Self::Lease(LeaseError::Held { .. })
             | Self::Console(ConsoleError::Contradiction { .. }) => ExitCode::Refused,
             Self::Console(ConsoleError::PageMissing { .. }) => ExitCode::Transport,

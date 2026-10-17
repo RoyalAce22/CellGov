@@ -4,7 +4,7 @@
 //! sends may settle what they answer, never a probe.
 //!
 //! [`admit`](crate::deploy::admit) refuses, before the runner touches
-//! the console, a package whose PPU relink holds one of their numbers
+//! the console, a package whose PPU code holds one of their numbers
 //! in a shape a probe uses to send it. In an executable segment that is
 //! a `li r11, N`, the form an inlined `cgov_sc` takes, a `li rD, N`
 //! that a `mr r11, rD` copies, or a `li rA, N` into an argument register
@@ -16,8 +16,9 @@
 //! The scan is a screen, not a proof. A number computed at run time, or
 //! a table placed in the executable segment, escapes it. It does not
 //! read every `li` or raw word in code: probes load the same small
-//! constants as payload offsets and sizes. It reads only the relink, not
-//! a PPU program the package carries as a sibling.
+//! constants as payload offsets and sizes. [`admit`](crate::deploy::admit)
+//! runs it over the relink and over every PPU program the package carries
+//! as a sibling.
 
 use std::path::Path;
 
