@@ -166,7 +166,12 @@ impl Runtime {
         // reservation clears are guest-visible state.
         let batch_applied = matches!(&outcome, Ok(o) if !o.fault_discarded);
         if batch_applied {
-            self.lv2_host.note_committed_effects(effects);
+            let writer = self
+                .last_scheduled_unit
+                .map_or(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID, |unit| {
+                    self.lv2_host.process_of_unit(unit)
+                });
+            self.lv2_host.note_committed_effects(writer, effects);
             // Same batch boundary: writes landing in a shared view
             // replicate to sibling views before any checkpoint hashes.
             let fanout_cleared = self.fanout_shared_writes(source_space, effects);

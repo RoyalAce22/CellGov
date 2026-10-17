@@ -196,7 +196,7 @@ impl Lv2Host {
             self.state.mmapper_windows.contains_key((pid, addr as u32)),
             "sc 334 coherence: mmapper_windows missing entry for {addr:#x}",
         );
-        self.note_system_ipc_map(mem_id, addr as u32, handle.size);
+        self.note_system_ipc_map(pid, mem_id, addr as u32, handle.size);
         let effects = self.system_seed_effects(mem_id, addr as u32, requester, tick);
         Lv2Dispatch::Immediate { code: 0, effects }
     }
@@ -320,7 +320,7 @@ impl Lv2Host {
             self.state.mmapper_windows.contains_key((pid, found_addr)),
             "sc 337 coherence: mmapper_windows missing entry for {found_addr:#x}",
         );
-        self.note_system_ipc_map(mem_id, found_addr, handle.size);
+        self.note_system_ipc_map(pid, mem_id, found_addr, handle.size);
         let mut effects = self.system_seed_effects(mem_id, found_addr, requester, tick);
         effects.push(Effect::shared_write(
             ByteRange::contiguous_u32(alloc_addr_ptr, 4),
@@ -376,7 +376,7 @@ impl Lv2Host {
         }
         self.state.mmapper_windows.remove((pid, addr));
         // The shm-write witness counts writes into mapped ranges only.
-        self.obs.system_ipc_mappings.remove(&addr);
+        self.obs.system_ipc_mappings.remove(&(pid, addr));
         self.derived
             .pending_region_removals
             .push(PendingRegionRemoval {

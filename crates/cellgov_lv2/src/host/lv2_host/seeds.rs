@@ -38,17 +38,19 @@ impl Lv2Host {
         self.derived.event_queue_ipc.len()
     }
 
-    /// Count committed writes that land in a namespace-keyed shm.
+    /// Count committed writes of process `pid` that land in a
+    /// namespace-keyed shm that process mapped.
     ///
     /// # Cross-module contract
     ///
     /// The runtime must call this once per successful commit, with the
-    /// same effect slice the commit pipeline applied. Calling it before
-    /// the commit succeeds would count writes a fault discarded.
+    /// same effect slice the commit pipeline applied, and the process of
+    /// the unit whose batch it committed. Calling it before the commit
+    /// succeeds would count writes a fault discarded.
     ///
     /// O(writes * mappings), and returns on the first line for a boot
     /// that mapped no namespace shm at all.
-    pub fn note_committed_effects(&mut self, effects: &[cellgov_effects::Effect]) {
+    pub fn note_committed_effects(&mut self, pid: u32, effects: &[cellgov_effects::Effect]) {
         if self.obs.system_ipc_mappings.is_empty() {
             return;
         }
@@ -61,7 +63,8 @@ impl Lv2Host {
             let hit = self
                 .obs
                 .system_ipc_mappings
-                .values()
+                .range((pid, 0)..=(pid, u32::MAX))
+                .map(|(_, m)| m)
                 .find(|m| {
                     let m_start = u64::from(m.base);
                     start < m_start + u64::from(m.size) && m_start < end
@@ -74,8 +77,15 @@ impl Lv2Host {
         }
     }
 
-    /// Record a namespace-keyed shm mapping and bump the map witness.
-    pub(in crate::host) fn note_system_ipc_map(&mut self, mem_id: u32, base: u32, size: u32) {
+    /// Record process `pid`'s mapping of a namespace-keyed shm and bump
+    /// the map witness.
+    pub(in crate::host) fn note_system_ipc_map(
+        &mut self,
+        pid: u32,
+        mem_id: u32,
+        base: u32,
+        size: u32,
+    ) {
         let Some((ipc_key, _)) = self.state.mmapper_ipc.iter().find(|&(_, &id)| id == mem_id)
         else {
             return;
@@ -84,7 +94,7 @@ impl Lv2Host {
             return;
         }
         self.obs.system_ipc_mappings.insert(
-            base,
+            (pid, base),
             SystemIpcMapping {
                 ipc_key,
                 base,

@@ -184,6 +184,7 @@ impl Lv2Host {
         self.derived.released_process_windows.extend(released);
         self.state.mmapper_areas.retain(|(p, _), _| p != pid);
         self.state.mmapper_windows.retain(|(p, _), _| p != pid);
+        self.obs.system_ipc_mappings.retain(|&(p, _), _| p != pid);
     }
 
     /// Search for the first free, `align`-aligned range of `size`

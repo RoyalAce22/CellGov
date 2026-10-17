@@ -97,3 +97,7 @@ impl SystemIpcWitness {
 #[cfg(test)]
 #[path = "tests/system_ipc_witness_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/system_ipc_process_tests.rs"]
+mod process_tests;

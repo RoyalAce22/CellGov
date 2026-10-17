@@ -6,6 +6,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
@@ -132,11 +133,14 @@ fn a_committed_write_inside_the_mapping_bumps_the_shm_write_witness() {
     map_shm(&mut host, &rt, mem_id, 0x5000_0000);
 
     // Inside, straddling the low edge, and the last byte of the range.
-    host.note_committed_effects(&[
-        write_effect(0x5000_0040, 4),
-        write_effect(0x4fff_fffc, 8),
-        write_effect(0x5000_ffff, 1),
-    ]);
+    host.note_committed_effects(
+        BOOT_PROCESS_PID,
+        &[
+            write_effect(0x5000_0040, 4),
+            write_effect(0x4fff_fffc, 8),
+            write_effect(0x5000_ffff, 1),
+        ],
+    );
     assert_eq!(host.observability().system_ipc_witness.shm_writes, 3);
 }
 
@@ -148,7 +152,10 @@ fn a_committed_write_outside_the_mapping_does_not_bump_the_shm_write_witness() {
     map_shm(&mut host, &rt, mem_id, 0x5000_0000);
 
     // One byte short of the base, and one byte past the end.
-    host.note_committed_effects(&[write_effect(0x4fff_fffc, 4), write_effect(0x5001_0000, 4)]);
+    host.note_committed_effects(
+        BOOT_PROCESS_PID,
+        &[write_effect(0x4fff_fffc, 4), write_effect(0x5001_0000, 4)],
+    );
     assert_eq!(host.observability().system_ipc_witness.shm_writes, 0);
 }
 
@@ -163,12 +170,12 @@ fn the_shm_write_witness_is_blind_to_writes_through_an_unrecorded_alias() {
     map_shm(&mut host, &rt, mem_id, 0x5000_0000);
 
     let alias_base = 0x6000_0000u32;
-    host.note_committed_effects(&[write_effect(alias_base, 4)]);
+    host.note_committed_effects(BOOT_PROCESS_PID, &[write_effect(alias_base, 4)]);
     assert_eq!(host.observability().system_ipc_witness.shm_writes, 0);
 
     // Same bytes, same shm, counted once the alias is a recorded map.
     map_shm(&mut host, &rt, mem_id, u64::from(alias_base));
-    host.note_committed_effects(&[write_effect(alias_base, 4)]);
+    host.note_committed_effects(BOOT_PROCESS_PID, &[write_effect(alias_base, 4)]);
     assert_eq!(host.observability().system_ipc_witness.shm_writes, 1);
 }
 

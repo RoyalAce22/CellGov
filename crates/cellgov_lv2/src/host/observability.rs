@@ -83,11 +83,12 @@ pub struct Lv2Observability {
     /// Witness: system-IPC namespace production counters.
     pub system_ipc_witness: SystemIpcWitness,
     /// Guest ranges where a namespace-keyed shm is mapped, recorded at
-    /// 334 / 337 and tested against every committed write to feed the
-    /// shm-write witness. Keyed by mapped base so an overlapping
-    /// remap replaces its predecessor. Witness input only; no
-    /// dispatch decision reads it.
-    pub(in crate::host) system_ipc_mappings: BTreeMap<u32, SystemIpcMapping>,
+    /// 334 / 337 and tested against every committed write of the same
+    /// process to feed the shm-write witness. Keyed by the mapping
+    /// process and the mapped base, since two processes can each map at
+    /// one base; a remap at the same base replaces its predecessor. Witness
+    /// input only; no dispatch decision reads it.
+    pub(in crate::host) system_ipc_mappings: BTreeMap<(u32, u32), SystemIpcMapping>,
     /// Running count of host-invariant breaks.
     pub invariant_break_count: usize,
     /// Per-site break counts keyed by the static site string passed
