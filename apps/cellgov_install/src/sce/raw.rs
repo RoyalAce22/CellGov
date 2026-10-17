@@ -190,7 +190,9 @@ pub struct ProgramIdentification {
     /// The program type, which selects the key class that opens the
     /// SELF (`SELF_PROGRAM_TYPE_*` in `cellgov_ps3_abi::format::sce`).
     pub program_type: u32,
-    /// The firmware version word (`cellgov_ps3_abi::format::sce::self_version`).
+    /// The version word (`cellgov_ps3_abi::format::sce::self_version`):
+    /// the firmware a system SELF was built for, or an application's
+    /// own version.
     pub version: u64,
 }
 

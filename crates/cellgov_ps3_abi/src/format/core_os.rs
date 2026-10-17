@@ -11,6 +11,19 @@
 //! The layout below comes from retail update packages 1.02 through
 //! 4.93 (twelve generations); no public document describes it. The set
 //! of files the table names changes across generations.
+//!
+//! The 4.93 package (update package SHA-256
+//! 158471fd834f8ea8036136b6aab43cd86c7ba73d79ca30e0af3c0fe0001cf365)
+//! passes this parser:
+//!
+//! - It opens with the format word 1 and names 24 files.
+//! - It begins with `creserved_0` and `sdk_version` and ends with
+//!   `prog.srvk` and `pkg.srvk`.
+//! - It holds `lv1.self`, `lv0` and `lv2_kernel.self` (1586440 bytes).
+//!
+//! The layout is read from update packages only, not from a console's
+//! flash. The reference console's flash copy needs a flash dump, and a
+//! flash dump carries console identifiers.
 
 /// Name of the CoreOS package inside the `update_files` payload.
 pub const CORE_OS_PACKAGE_NAME: &str = "CORE_OS_PACKAGE.pkg";
