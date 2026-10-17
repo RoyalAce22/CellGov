@@ -427,11 +427,11 @@
       }
     },
     {
-      "name": "write-channel-is-an-invalid-channel-stop",
+      "name": "write-channel-reads-zero",
       "provenance": {
         "kind": "documented_vector",
-        "citation": "SPU-ISA p:248 s:11. Channel Instructions",
-        "vector_id": "rdch-write-channel-is-an-invalid-channel-stop"
+        "citation": "CBE-Handbook p:442 s:17.1",
+        "vector_id": "rdch-write-channel-reads-zero"
       },
       "words": [
         27266563
@@ -448,20 +448,22 @@
         "end": {
           "status": "value",
           "value": {
-            "state": "stopped"
+            "state": "step_limit"
           }
         },
         "regs_hex": {
           "status": "value",
-          "value": {}
+          "value": {
+            "3": "00000000000000000000000000000000"
+          }
         },
         "local_store": {
           "status": "value",
           "value": []
         },
         "pc": {
-          "status": "undefined",
-          "reason": "an invalid channel instruction stops the SPU on or after the instruction (SPU-ISA p:248, p:250), imprecisely (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "status": "value",
+          "value": 4
         },
         "lslr": {
           "status": "value",
@@ -472,8 +474,8 @@
           "value": "00000000000000000000000000000000"
         },
         "stop": {
-          "status": "undefined",
-          "reason": "an invalid channel instruction stops the SPU on or after the instruction (SPU-ISA p:248, p:250), imprecisely (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "status": "value",
+          "value": null
         },
         "interrupts_enabled": {
           "status": "value",

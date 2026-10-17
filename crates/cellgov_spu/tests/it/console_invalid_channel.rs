@@ -4,16 +4,22 @@
 //! the even and the odd slot, twice per case on a raw SPU.
 //!
 //! The console does not stop on either. The read returns zero, the write
-//! has no effect, the SPU runs on to its closing stop, and no class 0
-//! status is latched. CellGov stops on both with SPU_Status C. The test
-//! asserts the console's words and names CellGov's stop as the difference.
+//! has no effect, the SPU runs on to its closing stop, and the SPU
+//! latches no class 0 status.
 
 use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
 use cellgov_mem::GuestMemory;
-use cellgov_ps3_abi::hw::spu::{SPU_STATUS_C, SPU_STATUS_P};
+use cellgov_ps3_abi::hw::spu::{
+    SPU_NPC_OFFSET, SPU_RUN_CNTL_OFFSET, SPU_STATUS_OFFSET, SPU_STATUS_P,
+};
 use cellgov_ps3_abi::lv2::spu::raw_spu;
+use cellgov_ps3_abi::lv2::syscall::RAW_SPU_GET_INT_STAT;
 use cellgov_spu::SpuExecutionUnit;
 use cellgov_time::Budget;
+
+use crate::raw_spu_window::{
+    create_ops, poll_stopped, read, register, run_ops, runtime, Op, OUT_PTR, WINDOW,
+};
 
 const CONSOLE: &str = "../../tests/micro/spu_invalid_channel/ps3/cech20-cex-493/observation.json";
 
@@ -101,11 +107,6 @@ fn case_words(k: usize) -> [u32; 5] {
     }
 }
 
-/// The address of case `k`'s channel instruction.
-fn access_at(k: usize) -> u32 {
-    k as u32 * CASE_STRIDE + if k < 2 { 0x8 } else { 0xC }
-}
-
 /// Runs case `k` on a fresh SPU: (SPU_Status, SPU_NPC, mark word).
 fn run(k: usize) -> (u32, u32, u32) {
     let mut spu = SpuExecutionUnit::new(cellgov_event::UnitId::new(0));
@@ -127,12 +128,10 @@ fn run(k: usize) -> (u32, u32, u32) {
     (stop.status, stop.npc, mark)
 }
 
-/// The console runs on to its closing stop: the read returns zero, the
-/// write has no effect, and no class 0 status is latched. CellGov stops on
-/// the access with C, before it runs, and resumes at it. The store before
-/// the access runs on both.
+/// Each case runs on to its closing stop: the read returns zero, the
+/// write has no effect, and the store after the access runs.
 #[test]
-fn cellgov_stops_on_a_wrong_direction_channel_instruction_where_the_console_runs_on() {
+fn a_wrong_direction_channel_instruction_runs_on_as_on_the_console() {
     for (k, record) in console().into_iter().enumerate() {
         let base = k as u32 * CASE_STRIDE;
         assert_eq!(
@@ -141,27 +140,67 @@ fn cellgov_stops_on_a_wrong_direction_channel_instruction_where_the_console_runs
             "case {k}: the console's closing stop"
         );
         assert_eq!(record.npc, base + 0x14, "case {k}: past the closing stop");
-        assert_eq!(record.class0, 0, "case {k}: no SPU error");
-        assert_eq!(
-            record.class2,
-            raw_spu::INT_STAT_MAILBOX_THRESHOLD | raw_spu::INT_STAT_STOP_AND_SIGNAL,
-            "case {k}: B and S"
-        );
         let console_mark = match k {
             0 => 0,
             1 => R3_BEFORE,
             _ => R8,
         };
         assert_eq!(record.mark, console_mark, "case {k}: the console's mark");
-        let (status, npc, mark) = run(k);
-        assert_eq!(status, SPU_STATUS_C, "case {k}: CellGov stops on C");
-        assert_ne!(status, record.status, "case {k}");
-        assert_eq!(npc, access_at(k), "case {k}: CellGov resumes at the access");
-        if k < 2 {
-            assert_eq!(mark, UNSTORED, "case {k}: CellGov never reaches the store");
-            assert_ne!(mark, record.mark, "case {k}");
-        } else {
-            assert_eq!(mark, record.mark, "case {k}: the store before the access");
-        }
+        assert_eq!(run(k), (record.status, record.npc, record.mark), "case {k}");
+    }
+}
+
+/// A raw SPU that reads a write channel or writes a read channel latches
+/// no class 0 status, and class 2 holds B and the stop-and-signal S, as
+/// on the console.
+#[test]
+fn a_raw_spu_wrong_direction_access_latches_no_spu_error() {
+    for (k, record) in console().into_iter().enumerate() {
+        assert_eq!(
+            record.class0, 0,
+            "case {k}: the console latched no SPU error"
+        );
+        assert_eq!(
+            record.class2,
+            raw_spu::INT_STAT_MAILBOX_THRESHOLD | raw_spu::INT_STAT_STOP_AND_SIGNAL,
+            "case {k}: the console's B and S"
+        );
+        let base = u64::from(k as u32 * CASE_STRIDE);
+        let mut ops = create_ops();
+        ops.extend(
+            case_words(k)
+                .iter()
+                .enumerate()
+                .map(|(i, &w)| Op::Store(WINDOW + base + 4 * i as u64, w)),
+        );
+        ops.extend([
+            Op::Store(register(SPU_NPC_OFFSET), base as u32),
+            Op::Store(register(SPU_RUN_CNTL_OFFSET), 1),
+            poll_stopped(),
+            Op::Call([
+                RAW_SPU_GET_INT_STAT,
+                0,
+                u64::from(raw_spu::CLASS_ERROR),
+                OUT_PTR,
+            ]),
+            Op::Call([
+                RAW_SPU_GET_INT_STAT,
+                0,
+                u64::from(raw_spu::CLASS_APPLICATION),
+                OUT_PTR + 8,
+            ]),
+        ]);
+        let n = ops.len();
+        let (mut rt, ppu) = runtime(ops);
+        run_ops(&mut rt, ppu, n);
+        let dword = |at: u64| u64::from(read(&rt, at)) << 32 | u64::from(read(&rt, at + 4));
+        assert_eq!(
+            read(&rt, register(SPU_STATUS_OFFSET)),
+            record.status,
+            "case {k}"
+        );
+        assert_eq!(read(&rt, register(SPU_NPC_OFFSET)), record.npc, "case {k}");
+        assert_eq!(dword(OUT_PTR), record.class0, "case {k}: class 0");
+        assert_eq!(dword(OUT_PTR + 8), record.class2, "case {k}: class 2");
     }
 }

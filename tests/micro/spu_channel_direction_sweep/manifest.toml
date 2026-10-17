@@ -1,0 +1,21 @@
+[test]
+name = "spu_channel_direction_sweep"
+
+# A hardware probe of every channel instruction in the wrong direction on
+# a raw SPU: an rdch of each write channel and a wrch to each read
+# channel, in one run. The PPU reads back SPU_Status, SPU_NextPC, the
+# class 0 and class 2 interrupt status, what each read returned, and
+# four nonblocking read channels before and after the writes. The PPU
+# program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 136 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

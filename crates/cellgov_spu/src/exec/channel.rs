@@ -1,7 +1,6 @@
 //! The channel reads and writes and the MFC command path.
 
 use crate::state::{ListCursor, SpuState};
-use crate::stop::SpuStopKind;
 use cellgov_dma::DmaDirection::{Get, Put};
 use cellgov_dma::MfcCommandClass::{SendSignal, Transfer};
 use cellgov_dma::MfcOrdering as Order;
@@ -35,24 +34,16 @@ fn stall() -> SpuStepOutcome {
     }
 }
 
-/// The stop a channel instruction in the wrong direction takes.
-fn invalid_channel() -> SpuStepOutcome {
-    SpuStepOutcome::Stop {
-        kind: SpuStopKind::InvalidChannel,
-        signal: 0,
-    }
-}
-
 pub(super) fn execute_wrch(
     channel: u8,
     rt: u8,
     state: &mut SpuState,
     unit_id: UnitId,
 ) -> SpuStepOutcome {
-    // [CBEA p:109 s:9] a channel instruction the channel's definition does not allow raises an invalid channel instruction interrupt.
-    // [CBEA p:93 s:8.5.2] SPU_Status[C]: an invalid channel instruction was detected and the SPU stopped.
+    // [CBE-Handbook p:442 s:17.1] the CBE differs from the SPU ISA: a wrch to a valid read channel has no effect.
+    // The `spu_invalid_channel` console capture: a wrch to SPU_RdInMbox does not stop the SPU.
     if spu::channel_direction(channel) == Some(ChannelDirection::Read) {
-        return invalid_channel();
+        return SpuStepOutcome::Continue;
     }
     let val = state.reg_word(rt);
     match channel {
@@ -205,9 +196,11 @@ pub(super) fn execute_rdch(
     state: &mut SpuState,
     unit_id: UnitId,
 ) -> SpuStepOutcome {
-    // [CBEA p:109 s:9] an rdch to a write or write-blocking channel raises an invalid channel instruction interrupt.
+    // [CBE-Handbook p:442 s:17.1] the CBE differs from the SPU ISA: an rdch of a valid write channel returns zeros.
+    // The `spu_invalid_channel` console capture: an rdch of SPU_WrOutMbox reads 0 and does not stop the SPU.
     if spu::channel_direction(channel) == Some(ChannelDirection::Write) {
-        return invalid_channel();
+        state.set_reg_channel_word(rt, 0);
+        return SpuStepOutcome::Continue;
     }
     match channel {
         // [CBE-Handbook p:460 s:17.10.4] MFC_RdTagStat reports the status from the last tag-group status update request.

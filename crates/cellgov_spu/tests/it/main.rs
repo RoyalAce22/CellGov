@@ -2,6 +2,7 @@
 //! one test binary so each profile links the crate's dependencies once.
 
 mod channel_stall_through_runtime;
+mod console_channel_direction_sweep;
 mod console_double_compares;
 mod console_events;
 mod console_invalid_channel;

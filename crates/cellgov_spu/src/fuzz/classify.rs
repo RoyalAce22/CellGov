@@ -105,7 +105,7 @@ pub(super) fn effect_and_outcome(
         SpuInstruction::Rdch { channel, .. }
             if spu::channel_direction(channel) == Some(spu::ChannelDirection::Write) =>
         {
-            (NO_EFFECTS, STOP)
+            (NO_EFFECTS, CONTINUE)
         }
         SpuInstruction::Rdch { channel, .. } if spu::is_reserved_channel(channel) => {
             (NO_EFFECTS, CONTINUE)
@@ -138,7 +138,7 @@ pub(super) fn effect_and_outcome(
         SpuInstruction::Wrch { channel, .. }
             if spu::channel_direction(channel) == Some(spu::ChannelDirection::Read) =>
         {
-            (NO_EFFECTS, STOP)
+            (NO_EFFECTS, CONTINUE)
         }
         SpuInstruction::Wrch { channel, .. } if spu::is_reserved_channel(channel) => {
             (NO_EFFECTS, CONTINUE)
