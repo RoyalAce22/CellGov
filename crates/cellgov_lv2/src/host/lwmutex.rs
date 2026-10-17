@@ -8,6 +8,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::process::SYS_LWMUTEX_OBJECT;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
@@ -20,9 +21,13 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let Some(id) = self.state.lwmutexes.create() else {
-            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+        let Some(id) = self.alloc_id(SYS_LWMUTEX_OBJECT) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
+        if !self.state.lwmutexes.create_with_id(id) {
+            self.release_id(id);
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+        }
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
@@ -114,6 +119,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.state.lwmutexes.destroy(id);
+        self.release_id(id);
         Lv2Dispatch::immediate(0)
     }
 }

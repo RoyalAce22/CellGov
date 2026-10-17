@@ -13,6 +13,7 @@ use cellgov_ps3_abi::lv2::ipc::{
     CELLSYSUTIL_SLOT_COUNT, CELLSYSUTIL_SLOT_CURSOR_OFFSET, CELLSYSUTIL_SLOT_LIMIT_OFFSET,
     CELLSYSUTIL_SLOT_STRIDE,
 };
+use cellgov_ps3_abi::lv2::process::SYS_COND_OBJECT;
 use cellgov_ps3_abi::lv2::sync::SYS_SYNC_PROCESS_SHARED;
 
 use crate::dispatch::{CondMutexKind, Lv2Dispatch, PendingResponse};
@@ -55,13 +56,16 @@ impl Lv2Host {
         if id_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let id = self.alloc_id();
+        let Some(id) = self.alloc_id(SYS_COND_OBJECT) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         if self
             .state
             .conds
             .create_with_id(id, mutex_id, CondMutexKind::Mutex)
             .is_err()
         {
+            self.release_id(id);
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         // The attribute's key field carries meaning only when
@@ -87,6 +91,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.state.conds.destroy(id);
+        self.release_id(id);
         self.derived.cond_ipc_keys.remove(&id);
         Lv2Dispatch::immediate(0)
     }

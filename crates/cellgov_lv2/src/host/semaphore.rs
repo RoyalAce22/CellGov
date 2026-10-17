@@ -14,6 +14,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::process::SYS_SEMAPHORE_OBJECT;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::guest_struct::GuestStruct;
@@ -62,15 +63,19 @@ impl Lv2Host {
         if id_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let id = self.alloc_id();
+        let Some(id) = self.alloc_id(SYS_SEMAPHORE_OBJECT) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         match self.state.semaphores.create_with_id(id, initial, max) {
             Ok(()) => {}
             Err(crate::sync_primitives::SemaphoreCreateError::IdCollision(_)) => {
                 // Host-invariant break; ENOMEM is the best-effort errno
                 // (no Cell OS code maps to "allocator handed me a live id").
+                self.release_id(id);
                 return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
             }
             Err(crate::sync_primitives::SemaphoreCreateError::InvalidBounds) => {
+                self.release_id(id);
                 return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         }
@@ -85,6 +90,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.state.semaphores.destroy(id);
+        self.release_id(id);
         Lv2Dispatch::immediate(0)
     }
 

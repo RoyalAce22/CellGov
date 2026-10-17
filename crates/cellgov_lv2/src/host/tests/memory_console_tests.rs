@@ -4,10 +4,14 @@
 //! and every return code is compared with the captured word. The
 //! available user memory is compared as a change from the first read:
 //! the console's total and its first read count the loaded image, which
-//! CellGov's do not. Container ids and block bases are CellGov's own.
+//! CellGov's do not. A container id is compared by its base and by the
+//! step between two of the probe's creates: its serial comes from a
+//! counter the console shares across processes. Block bases are
+//! CellGov's own.
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::lv2::kernel_id::MEMORY_CONTAINER_SERIAL_MASK;
 use cellgov_ps3_abi::lv2::syscall;
 
 use super::*;
@@ -45,6 +49,11 @@ fn sc(host: &mut Lv2Host, rt: &FakeRuntime, number: u64, args: [u64; 4]) -> (u64
         }
         other => panic!("syscall {number}: expected Immediate, got {other:?}"),
     }
+}
+
+/// A container id without its serial.
+fn base(cid: u64) -> u64 {
+    cid & !u64::from(MEMORY_CONTAINER_SERIAL_MASK)
 }
 
 fn word(bytes: &[u8]) -> u64 {
@@ -134,6 +143,7 @@ fn memory_allocate_free_and_containers_answer_as_on_the_console() {
     let c = p
         .minted(6, CREATE_324, [CID_PTR, MIB, 0, 0])
         .expect("slot 6");
+    assert_eq!(base(c), base(p.words[7]), "slot 7: a 324 container's base");
     p.avail_at(8);
     p.rc(9, DESTROY, [c, 0, 0, 0]);
     p.avail_at(10);
@@ -147,6 +157,12 @@ fn memory_allocate_free_and_containers_answer_as_on_the_console() {
     let c = p
         .minted(14, CREATE, [CID_PTR, 0x18_0000, 0, 0])
         .expect("slot 14");
+    assert_eq!(
+        base(c),
+        base(p.words[15]),
+        "slot 15: a 341 container's base"
+    );
+    let before = c;
     p.avail_at(16);
     p.rc(17, DESTROY, [c, 0, 0, 0]);
     p.avail_at(18);
@@ -180,6 +196,11 @@ fn memory_allocate_free_and_containers_answer_as_on_the_console() {
 
     // E. 350.
     let c = p.minted(41, CREATE, [CID_PTR, MIB, 0, 0]).expect("slot 41");
+    assert_eq!(
+        c.wrapping_sub(before),
+        p.words[42].wrapping_sub(p.words[15]),
+        "slot 42: the serial step since slot 15"
+    );
     p.rc(43, FROM, [0, c, PAGE_1M, ADDR_PTR]);
     p.rc(44, FROM, [0x1000, c, 0x999, ADDR_PTR]);
     p.rc(45, FROM, [MIB, 0xDEAD_BEEF, 0x999, ADDR_PTR]);

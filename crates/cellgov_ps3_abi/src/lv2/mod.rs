@@ -7,6 +7,7 @@ pub mod config;
 pub mod errno;
 pub mod fs;
 pub mod ipc;
+pub mod kernel_id;
 pub mod memory;
 pub mod namespace;
 pub mod ppu_thread;

@@ -17,6 +17,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::process::SYS_EVENT_FLAG_OBJECT;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::guest_struct::GuestStruct;
@@ -80,8 +81,11 @@ impl Lv2Host {
         if kind != SYS_SYNC_WAITER_SINGLE && kind != SYS_SYNC_WAITER_MULTIPLE {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
-        let id = self.alloc_id();
+        let Some(id) = self.alloc_id(SYS_EVENT_FLAG_OBJECT) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         if self.state.event_flags.create_with_id(id, init).is_err() {
+            self.release_id(id);
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         self.immediate_write_u32(id, id_ptr, requester, tick)
@@ -95,6 +99,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.state.event_flags.destroy(id);
+        self.release_id(id);
         Lv2Dispatch::immediate(0)
     }
 

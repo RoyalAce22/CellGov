@@ -6,7 +6,9 @@
 //! replayed to the handle's queue as a service event, and the guest
 //! reads the record behind an event with
 //! `sys_config_get_service_event`. Ids for handles, listeners, and
-//! services come from the shared kernel-id allocator. Event ids count
+//! services come from the shared kernel-id table, except the two
+//! seeded pad-manager services, which live in another process on the
+//! console. Event ids count
 //! from zero, which is CellGov's own scheme; the kernel's own
 //! numbering is guest-visible and nothing in dev_flash states it.
 

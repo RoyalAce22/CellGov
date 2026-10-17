@@ -421,20 +421,24 @@ fn region_with_word(addr: u64, offset: usize, word: u32) -> NamedMemoryRegion {
 /// own per-class index.
 const RUNNER_MUTEX_ID: u32 = (SYS_MUTEX_OBJECT << 24) | 0x300;
 
+/// A `sys_mutex` id as CellGov's kernel-id table mints one.
+const CELLGOV_MUTEX_ID: u32 =
+    cellgov_ps3_abi::lv2::kernel_id::compose(SYS_MUTEX_OBJECT, 0x12, 0x26);
+
 #[test]
 fn a_word_holding_each_runners_kernel_id_shape_classifies_without_a_populated_range() {
-    let a = region_with_word(0x860000, 0x40, cellgov_lv2::FIRST_KERNEL_ID + 2);
+    let a = region_with_word(0x860000, 0x40, CELLGOV_MUTEX_ID);
     let b = region_with_word(0x860000, 0x40, RUNNER_MUTEX_ID);
     let ctx = ClassifierContext::default();
-    // The bytes differ at 0x40 (CellGov's top byte against the class
-    // id), agree at 0x41 (0x00), and differ at 0x42..0x44: two runs
-    // on one word.
+    // The bytes agree at 0x40 (the class id) and at 0x43 (0x00), and
+    // differ at 0x41..0x43: the generation and slot against the
+    // runner's index.
     assert_eq!(
-        classify(&div(0x40, 1), a.addr, &ctx, &a.data, &b.data),
+        classify(&div(0x41, 2), a.addr, &ctx, &a.data, &b.data),
         DivergenceClass::SyncPrimitiveId
     );
     assert_eq!(
-        classify(&div(0x42, 2), a.addr, &ctx, &a.data, &b.data),
+        classify(&div(0x42, 1), a.addr, &ctx, &a.data, &b.data),
         DivergenceClass::SyncPrimitiveId
     );
     assert_eq!(
@@ -447,7 +451,7 @@ fn a_word_holding_each_runners_kernel_id_shape_classifies_without_a_populated_ra
 #[test]
 fn a_word_with_only_one_kernel_id_shape_stays_unclassified() {
     let ctx = ClassifierContext::default();
-    let cg = region_with_word(0x860000, 0x40, cellgov_lv2::FIRST_KERNEL_ID + 2);
+    let cg = region_with_word(0x860000, 0x40, CELLGOV_MUTEX_ID);
     let zero = region_with_word(0x860000, 0x40, 0);
     assert_eq!(
         classify(&div(0x40, 4), cg.addr, &ctx, &cg.data, &zero.data),
@@ -464,7 +468,7 @@ fn a_word_with_only_one_kernel_id_shape_stays_unclassified() {
 #[test]
 fn a_run_crossing_a_word_boundary_is_not_a_handle_pair() {
     let ctx = ClassifierContext::default();
-    let mut a = region_with_word(0x860000, 0x40, cellgov_lv2::FIRST_KERNEL_ID + 2);
+    let mut a = region_with_word(0x860000, 0x40, CELLGOV_MUTEX_ID);
     let mut b = region_with_word(0x860000, 0x40, RUNNER_MUTEX_ID);
     a.data[0x44] = 1;
     b.data[0x44] = 2;

@@ -147,6 +147,7 @@ impl Lv2Host {
     /// # Errors
     ///
     /// - `CELL_EFAULT` for a null `handle_ptr`.
+    /// - `CELL_EAGAIN` when the kernel-id table is full.
     pub(super) fn dispatch_usbd_initialize(
         &mut self,
         handle_ptr: u32,
@@ -156,7 +157,9 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[handle_ptr]) {
             return d;
         }
-        let handle = self.alloc_id();
+        let Some(handle) = self.alloc_id(cellgov_ps3_abi::lv2::kernel_id::USBD_HANDLE_CLASS) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         self.state.usbd.handles.insert(handle);
         self.immediate_write_u32(handle, handle_ptr, requester, tick)
     }
@@ -181,6 +184,7 @@ impl Lv2Host {
         if !self.state.usbd.handles.remove(&handle) {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
+        self.release_id(handle);
         let waiters: Vec<UsbdWaiter> = self.state.usbd.waiters.drain(..).collect();
         if waiters.is_empty() {
             return Lv2Dispatch::immediate(0);

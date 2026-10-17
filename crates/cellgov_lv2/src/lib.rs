@@ -34,7 +34,6 @@ pub use fs_store::{
     FileStat, FsError, FsMount, FsMountTable, FsStore, HostDirEntry, HostEntryKind, MountFiles,
     NoMountFiles, SeekWhence,
 };
-pub use host::FIRST_KERNEL_ID;
 pub use host::{
     InvariantBreakReason, Lv2Host, Lv2Observability, Lv2Runtime, ProcessEntry, ProcessTable,
     SystemStateSeed,
@@ -52,8 +51,8 @@ pub use sync_primitives::{
     EventFlagEntry, EventFlagTable, EventFlagWait, EventFlagWaiter, EventFlagWake, EventPayload,
     EventQueueEnqueueError, EventQueueEntry, EventQueueReceive, EventQueueSend, EventQueueTable,
     EventQueueWaiter, LwMutexAcquire, LwMutexAcquireOrEnqueue, LwMutexEnqueueError, LwMutexEntry,
-    LwMutexIdAllocator, LwMutexRelease, LwMutexTable, MutexAcquire, MutexAcquireOrEnqueue,
-    MutexAttrs, MutexCreateError, MutexEnqueueError, MutexEntry, MutexRelease, MutexTable,
+    LwMutexRelease, LwMutexTable, MutexAcquire, MutexAcquireOrEnqueue, MutexAttrs,
+    MutexCreateError, MutexEnqueueError, MutexEntry, MutexRelease, MutexTable,
     SemaphoreCreateError, SemaphoreEnqueueError, SemaphoreEntry, SemaphorePostN, SemaphoreTable,
     SemaphoreWait, WaiterList,
 };

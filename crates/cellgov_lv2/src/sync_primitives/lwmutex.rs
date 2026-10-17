@@ -7,12 +7,12 @@
 //! on an owner re-lock. It reaches the kernel (syscall 97) only after
 //! the contended spin fails.
 //!
-//! Ids are minted monotonically by [`LwMutexIdAllocator`]; the
-//! id space is distinct from the heavy mutex table.
+//! The host mints each id from its shared kernel-id table, as for
+//! every other sync object.
 
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::WaiterList;
-use cellgov_mem::lanes::{self, source, LaneMap, LaneValue, ObjectLanes};
+use cellgov_mem::lanes::{source, LaneMap, LaneValue, ObjectLanes};
 
 /// Outcome of a `try_acquire` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,48 +98,10 @@ impl LaneValue for LwMutexEntry {
     }
 }
 
-/// Monotonic allocator for lwmutex ids.
-///
-/// Starts at `1`; last handed-out id is `u32::MAX - 1`. Ids are
-/// never recycled.
-#[derive(Debug, Clone)]
-pub struct LwMutexIdAllocator {
-    next: u32,
-}
-
-impl Default for LwMutexIdAllocator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl LwMutexIdAllocator {
-    /// Fresh allocator; the first `allocate` returns 1.
-    pub fn new() -> Self {
-        Self { next: 1 }
-    }
-
-    /// Allocate the next id. Returns `None` once exhausted.
-    pub fn allocate(&mut self) -> Option<u32> {
-        if self.next == u32::MAX {
-            return None;
-        }
-        let id = self.next;
-        self.next += 1;
-        Some(id)
-    }
-
-    /// The allocator's term of the sync-state sum: its cursor.
-    fn sync_term(&self) -> u128 {
-        lanes::value_term(source::LWMUTEX_IDS, 0, &u64::from(self.next))
-    }
-}
-
 /// Table of lightweight mutexes.
 #[derive(Debug, Clone)]
 pub struct LwMutexTable {
     entries: LaneMap<u32, LwMutexEntry>,
-    ids: LwMutexIdAllocator,
     /// See [`Self::acquires_count`].
     acquires_count: u64,
     /// See [`Self::releases_count`].
@@ -150,7 +112,6 @@ impl Default for LwMutexTable {
     fn default() -> Self {
         Self {
             entries: LaneMap::new(source::LWMUTEX, u64::from),
-            ids: LwMutexIdAllocator::new(),
             acquires_count: 0,
             releases_count: 0,
         }
@@ -178,16 +139,17 @@ impl LwMutexTable {
         self.releases_count
     }
 
-    /// Allocate a fresh id and create the entry; `None` if the
-    /// id space is exhausted.
-    pub fn create(&mut self) -> Option<u32> {
-        let id = self.ids.allocate()?;
+    /// Create the entry for the minted `id`; `false`, with the table
+    /// unchanged, when an entry already holds it.
+    pub fn create_with_id(&mut self, id: u32) -> bool {
+        if self.entries.contains_key(id) {
+            return false;
+        }
         self.entries.insert(id, LwMutexEntry::new());
-        Some(id)
+        true
     }
 
-    /// Remove the entry; `None` if the id was unknown. Ids are
-    /// not recycled.
+    /// Remove the entry; `None` if the id was unknown.
     ///
     /// Caller contract: reject non-empty-waiters before calling
     /// (`debug_assert!` fires on violation). If bypassed in
@@ -330,17 +292,14 @@ impl LwMutexTable {
         }
     }
 
-    /// The table's partial of the sync-state sum, including the id
-    /// allocator's cursor.
+    /// The table's partial of the sync-state sum.
     pub fn sync_partial(&self) -> u128 {
-        self.entries.partial().wrapping_add(self.ids.sync_term())
+        self.entries.partial()
     }
 
     /// [`Self::sync_partial`] computed from every entry.
     pub fn sync_partial_from_scratch(&self) -> u128 {
-        self.entries
-            .partial_from_scratch()
-            .wrapping_add(self.ids.sync_term())
+        self.entries.partial_from_scratch()
     }
 }
 

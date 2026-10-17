@@ -9,15 +9,12 @@
 //! as an id, so [`kernel_handle_pair`] tells a handle from a number
 //! by the shape the minting allocator leaves on it.
 //!
-//! CellGov counts its own ids up from two separate allocators:
-//!
-//! - the shared kernel-id allocator, from [`FIRST_KERNEL_ID`];
-//! - the lwmutex table's allocator, from 1.
-//!
-//! The CellGov-side shape test therefore forks on
-//! [`KernelHandleKind::LwMutex`]. The per-kind base table recognises
-//! the values in a comparison runner's memory dump. Neither scheme is
-//! the console's.
+//! CellGov mints its ids in the console's form: the class in the top
+//! byte, a generation and a slot below it, and a zero low byte
+//! (`cellgov_ps3_abi::lv2::kernel_id`). The comparison runner puts the
+//! same class in the top byte over its own index and reuse counter, so
+//! the two shapes overlap: a word pair whose sides carry one class is
+//! a handle pair, whichever runner minted each side.
 //!
 //! See [`crate::classify::DivergenceClass::SyncPrimitiveId`] for why
 //! a differing handle is inert.
@@ -25,8 +22,8 @@
 use std::collections::BTreeSet;
 use std::ops::Range;
 
-use cellgov_lv2::FIRST_KERNEL_ID;
 use cellgov_mem::be::read_u32;
+use cellgov_ps3_abi::lv2::kernel_id::{class_of, CLASS_SHIFT, SLOT_SHIFT};
 use cellgov_ps3_abi::lv2::process::{
     ProcessObjectClassId, SYS_COND_OBJECT, SYS_EVENT_FLAG_OBJECT, SYS_EVENT_QUEUE_OBJECT,
     SYS_LWCOND_OBJECT, SYS_LWMUTEX_OBJECT, SYS_MUTEX_OBJECT, SYS_RWLOCK_OBJECT,
@@ -57,11 +54,6 @@ fn is_valid_lwmutex_attribute(attr: u32) -> bool {
     matches!(recursive, 0x10 | 0x20) && matches!(protocol, 1..=4)
 }
 
-/// Upper bound on the `sleep_queue` field's plausible value in a CG
-/// snapshot. CG's monotonic id allocator starts at 1; titles create
-/// well under 10,000 sync primitives during boot.
-const SLEEP_QUEUE_MAX_PLAUSIBLE: u32 = 0x0001_0000;
-
 /// Walk `data` for `sys_lwmutex_t` instances and return the guest-
 /// address range of each instance's `sleep_queue` field.
 ///
@@ -74,7 +66,7 @@ const SLEEP_QUEUE_MAX_PLAUSIBLE: u32 = 0x0001_0000;
 /// +0x04: 0x00000000   (lock_var.waiter)
 /// +0x08: <attribute>  (one of eight valid recursive|protocol combos)
 /// +0x0c: 0x00000000   (recursive_count = 0 at init)
-/// +0x10: <sleep_queue>  (small int, the allocator id; THE claimed range)
+/// +0x10: <sleep_queue>  (a CellGov lwmutex id; THE claimed range)
 /// +0x14: 0x00000000   (pad)
 /// ```
 pub fn find_sys_lwmutex_handle_slots(data: &[u8], data_base: u64) -> Vec<Range<u64>> {
@@ -94,7 +86,7 @@ pub fn find_sys_lwmutex_handle_slots(data: &[u8], data_base: u64) -> Vec<Range<u
             let preamble_match = w1 == 0
                 && is_valid_lwmutex_attribute(w2)
                 && w3 == 0
-                && w4 < SLEEP_QUEUE_MAX_PLAUSIBLE
+                && is_cellgov_kernel_id(w4, SYS_LWMUTEX_OBJECT)
                 && w5 == 0;
             if preamble_match {
                 let slot_addr = data_base + i as u64 + SLEEP_QUEUE_OFFSET as u64;
@@ -116,20 +108,10 @@ pub const LWCOND_QUEUE_OFFSET: usize = 0x4;
 /// Total size of `sys_lwcond_t`.
 pub const SYS_LWCOND_T_SIZE: usize = 0x8;
 
-/// Ids CellGov's shared kernel-id allocator can have handed out in a
-/// boot; titles create well under this many objects.
-const CELLGOV_KERNEL_ID_MAX_PLAUSIBLE_COUNT: u32 = 0x0001_0000;
-
-/// `true` when `w` is a handle CellGov's shared allocator minted.
-fn is_cellgov_kernel_id(w: u32) -> bool {
-    (FIRST_KERNEL_ID..FIRST_KERNEL_ID.saturating_add(CELLGOV_KERNEL_ID_MAX_PLAUSIBLE_COUNT))
-        .contains(&w)
-}
-
-/// `true` when `w` is a handle CellGov's lwmutex allocator minted
-/// (that allocator counts from 1).
-fn is_cellgov_lwmutex_id(w: u32) -> bool {
-    (1..SLEEP_QUEUE_MAX_PLAUSIBLE).contains(&w)
+/// `true` when `w` has the shape of an id of `class` CellGov's kernel-id
+/// table mints: that class in the top byte and a zero low byte.
+fn is_cellgov_kernel_id(w: u32, class: ProcessObjectClassId) -> bool {
+    class_of(w) == class && w & ((1 << SLOT_SHIFT) - 1) == 0
 }
 
 /// Walk `data` for `sys_lwcond_t` instances bound to an lwmutex the
@@ -168,7 +150,9 @@ pub fn find_sys_lwcond_handle_slots(
     let mut i = 0usize;
     while i + SYS_LWCOND_T_SIZE <= data.len() {
         let lwmutex_ptr = u64::from(read_u32(data, i));
-        if lwmutex_bases.contains(&lwmutex_ptr) && is_cellgov_kernel_id(read_u32(data, i + 4)) {
+        if lwmutex_bases.contains(&lwmutex_ptr)
+            && is_cellgov_kernel_id(read_u32(data, i + 4), SYS_LWCOND_OBJECT)
+        {
             let slot_addr = data_base + i as u64 + LWCOND_QUEUE_OFFSET as u64;
             out.push(slot_addr..slot_addr + 4);
             i += SYS_LWCOND_T_SIZE;
@@ -209,7 +193,6 @@ pub enum KernelHandleKind {
 /// (0x0e) and `SYS_TIMER_OBJECT` (0x11) put theirs at the bottom of
 /// the address space. A heap pointer there would pass as a handle and
 /// hide a real pointer divergence, so those two stay unclassified.
-/// [`FIRST_KERNEL_ID`] states the same rule for CellGov's own ids.
 const RUNNER_ID_CLASSES: &[(ProcessObjectClassId, KernelHandleKind)] = &[
     (SYS_MUTEX_OBJECT, KernelHandleKind::Mutex),
     (SYS_COND_OBJECT, KernelHandleKind::Cond),
@@ -222,7 +205,7 @@ const RUNNER_ID_CLASSES: &[(ProcessObjectClassId, KernelHandleKind)] = &[
 ];
 
 /// Bits below the class id in a handle the comparison runner minted.
-const RUNNER_ID_CLASS_SHIFT: u32 = 24;
+const RUNNER_ID_CLASS_SHIFT: u32 = CLASS_SHIFT;
 
 /// Stride between consecutive ids of one class in that runner's
 /// dumps. The bytes under it hold its allocator's reuse counter.
@@ -243,20 +226,16 @@ pub fn runner_kernel_handle_kind(w: u32) -> Option<KernelHandleKind> {
     (index < RUNNER_ID_COUNT).then_some(*kind)
 }
 
-/// The kind of LV2 object a 4-byte word holds when each allocator
-/// minted one side, in either order.
+/// The kind of LV2 object a 4-byte word holds when one side has the
+/// comparison runner's shape and the other CellGov's, for one class,
+/// in either order.
 ///
-/// Two like-shaped words are not a pair. The comparison is then
-/// between like runners: one allocator produced both values, so a
-/// difference is real.
+/// The two shapes overlap, so two ids of one class pair whichever
+/// runner minted each side.
 pub fn kernel_handle_pair(a: u32, b: u32) -> Option<KernelHandleKind> {
     let pair = |runner: u32, cellgov: u32| {
         let kind = runner_kernel_handle_kind(runner)?;
-        let cellgov_shaped = match kind {
-            KernelHandleKind::LwMutex => is_cellgov_lwmutex_id(cellgov),
-            _ => is_cellgov_kernel_id(cellgov),
-        };
-        cellgov_shaped.then_some(kind)
+        is_cellgov_kernel_id(cellgov, class_of(runner)).then_some(kind)
     };
     pair(a, b).or_else(|| pair(b, a))
 }

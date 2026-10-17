@@ -18,6 +18,7 @@ mod event_queue;
 mod expire;
 mod fs;
 pub(crate) mod guest_struct;
+mod kernel_ids;
 mod lv2_host;
 mod lwcond;
 mod lwmutex;
@@ -67,6 +68,10 @@ mod error_code_console_tests;
 mod process_queries_console_tests;
 
 #[cfg(test)]
+#[path = "tests/kernel_id_classes_console_tests.rs"]
+mod kernel_id_classes_console_tests;
+
+#[cfg(test)]
 #[path = "tests/timer_time_tty_console_tests.rs"]
 mod timer_time_tty_console_tests;
 
@@ -93,5 +98,4 @@ pub use rsx::{
     PACKAGE_CELLGOV_SET_VBLANK_HANDLER,
 };
 pub use runtime::Lv2Runtime;
-pub use state::FIRST_KERNEL_ID;
 pub use system_ipc_witness::{is_system_ipc_key, SystemIpcWitness};

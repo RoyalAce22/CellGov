@@ -1,12 +1,7 @@
 //! The lwmutex, mutex, cond and rwlock answers of the
 //! `lv2_mutex_cond_rwlock_rows` probe, held to its console capture.
 //!
-//! Every return code and wake ordering matches the console. The object
-//! ids do not: the console answers class-tagged ids (an lwmutex id
-//! carries 0x95 in its top byte, an rwlock id 0x88), and CellGov
-//! answers small integers.
-//! `object_ids_differ_from_the_consoles_class_tagged_form` names that
-//! divergence.
+//! Every return code, wake ordering and object id matches the console.
 
 use super::*;
 use crate::dispatch::PendingResponse;
@@ -320,26 +315,32 @@ fn code_or_zero(d: &Lv2Dispatch) -> u32 {
     }
 }
 
+/// The console's process already held the slots below its first
+/// lwmutex's when the probe ran; the test fills them first.
 #[test]
-fn object_ids_differ_from_the_consoles_class_tagged_form() {
+fn object_ids_match_the_consoles_and_a_freed_slot_comes_back_one_generation_up() {
     let p = console_payload(PROBE);
-    // The console: lwmutex ids carry class byte 0x95 and step by 0x100;
-    // the rwlock id carries 0x88.
-    let lw: Vec<u32> = (3..=5).map(|i| word(&p, i)).collect();
-    assert!(lw.iter().all(|id| id >> 24 == 0x95), "{lw:x?}");
-    assert_eq!(lw[1] - lw[0], 0x100);
-    assert_eq!(lw[2] - lw[1], 0x100);
-    assert_eq!(word(&p, 11) >> 24, 0x88);
-
-    // CellGov: small integers, so a guest that reads the class byte of
-    // an id sees 0. This assertion fails once ids take the console's
-    // form, which is when this test and the one above it change.
     let mut w = World::new(0);
-    let (_, first) = w.created(Lv2Request::LwMutexCreate {
+    for _ in 0..cellgov_ps3_abi::lv2::kernel_id::slot_of(word(&p, 3)) {
+        w.host.alloc_id(0x23).expect("a free slot");
+    }
+    let mut ids = Vec::new();
+    for i in 0..3usize {
+        let (_, id) = w.created(Lv2Request::LwMutexCreate {
+            id_ptr: 0x100,
+            attr_ptr: 0x200 + 0x20 * i as u32,
+        });
+        assert_eq!(id, word(&p, 3 + i), "lwmutex {i}");
+        ids.push(id);
+    }
+    for id in ids {
+        assert_eq!(w.rc(MAIN, Lv2Request::LwMutexDestroy { id }), 0);
+    }
+    let (_, rw) = w.created(Lv2Request::RwlockCreate {
         id_ptr: 0x100,
-        attr_ptr: 0x200,
+        attr_ptr: 0x300,
     });
-    assert_eq!(first >> 24, 0);
+    assert_eq!(rw, word(&p, 11), "rwlock after the three destroys");
 }
 
 const COND_PROBE: &str = "lv2_cond_create_gates";

@@ -13,7 +13,7 @@ fn every_primitive_table_moves_the_host_partial() {
         assert_ne!(now, before, "{what} did not reach the host partial");
         before = now;
     };
-    host.state.lwmutexes.create().unwrap();
+    assert!(host.state.lwmutexes.create_with_id(0x9500_0000));
     check(&host, "lwmutex");
     host.state
         .mutexes

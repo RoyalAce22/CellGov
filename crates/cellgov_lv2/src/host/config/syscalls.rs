@@ -8,6 +8,9 @@ use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_SERVICE_PADMANAGER2,
 };
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::kernel_id::{
+    self, CONFIG_HANDLE_CLASS, CONFIG_LISTENER_CLASS, CONFIG_SERVICE_CLASS,
+};
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
@@ -33,6 +36,7 @@ impl Lv2Host {
     ///
     /// - `CELL_ESRCH` for an unknown event queue.
     /// - `CELL_EFAULT` for a null out-pointer.
+    /// - `CELL_EAGAIN` when the kernel-id table is full.
     pub(in crate::host) fn dispatch_config_open(
         &mut self,
         equeue_id: u32,
@@ -46,12 +50,23 @@ impl Lv2Host {
         if out_handle_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
+        let Some(id) = self.alloc_id(CONFIG_HANDLE_CLASS) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         if !self.state.config.seeded {
-            for service_id in [
+            // The pad-manager services belong to another process on
+            // the console, so they take no entry of this process's id
+            // table: the `lv2_config_listener_shapes` capture reads the
+            // handle and the listener in consecutive entries. Their
+            // ids carry a nonzero low byte, which no table id does.
+            for (seed, service_id) in [
                 SYS_CONFIG_SERVICE_PADMANAGER,
                 SYS_CONFIG_SERVICE_PADMANAGER2,
-            ] {
-                let id = self.alloc_id();
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let id = (CONFIG_SERVICE_CLASS << kernel_id::CLASS_SHIFT) | (seed as u32 + 1);
                 self.state.config.insert_service(
                     id,
                     ServiceSpec {
@@ -66,7 +81,6 @@ impl Lv2Host {
             }
             self.state.config.seeded = true;
         }
-        let id = self.alloc_id();
         self.state.config.insert_handle(id, equeue_id);
         self.immediate_write_u32(id, out_handle_ptr, requester, tick)
     }
@@ -80,6 +94,7 @@ impl Lv2Host {
     /// `CELL_ESRCH` for an unknown handle.
     pub(in crate::host) fn dispatch_config_close(&mut self, handle: u32) -> Lv2Dispatch {
         if self.state.config.remove_handle(handle) {
+            self.release_id(handle);
             Lv2Dispatch::immediate(0)
         } else {
             Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
@@ -161,6 +176,7 @@ impl Lv2Host {
     /// - `CELL_EFAULT` for a null out-pointer or an unreadable data
     ///   buffer.
     /// - `CELL_EINVAL` when the buffer exceeds [`SYS_CONFIG_DATA_CAP`].
+    /// - `CELL_EAGAIN` when the kernel-id table is full.
     pub(in crate::host) fn dispatch_config_add_service_listener(
         &mut self,
         handle: u32,
@@ -180,7 +196,9 @@ impl Lv2Host {
             Ok(data) => data,
             Err(code) => return Lv2Dispatch::immediate(code.into()),
         };
-        let id = self.alloc_id();
+        let Some(id) = self.alloc_id(CONFIG_LISTENER_CLASS) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         self.state.config.insert_listener(
             id,
             ConfigListener {
@@ -212,6 +230,7 @@ impl Lv2Host {
         listener: u32,
     ) -> Lv2Dispatch {
         if self.state.config.remove_listener(listener) {
+            self.release_id(listener);
             Lv2Dispatch::immediate(0)
         } else {
             Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
@@ -227,6 +246,7 @@ impl Lv2Host {
     /// - `CELL_EFAULT` for a null out-pointer or an unreadable data
     ///   buffer.
     /// - `CELL_EINVAL` when the buffer exceeds [`SYS_CONFIG_DATA_CAP`].
+    /// - `CELL_EAGAIN` when the kernel-id table is full.
     pub(in crate::host) fn dispatch_config_register_service(
         &mut self,
         handle: u32,
@@ -246,7 +266,9 @@ impl Lv2Host {
             Ok(data) => data,
             Err(code) => return Lv2Dispatch::immediate(code.into()),
         };
-        let id = self.alloc_id();
+        let Some(id) = self.alloc_id(CONFIG_SERVICE_CLASS) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         self.state.config.insert_service(id, spec, data);
         let wakes = self.config_notify_listeners(id);
         self.config_complete(id, out_service_ptr, wakes, requester, tick)
@@ -266,6 +288,10 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         if !self.state.config.unregister(service) {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
+        // A seeded pad-manager service holds no table entry.
+        if self.state.kernel_ids.is_live(service) {
+            self.release_id(service);
         }
         let wakes = self.config_notify_listeners(service);
         self.state.config.collect_service(service);

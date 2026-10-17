@@ -10,6 +10,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::process::{SYS_EVENT_PORT_OBJECT, SYS_EVENT_QUEUE_OBJECT};
 use cellgov_ps3_abi::lv2::sync::{SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
@@ -30,6 +31,7 @@ impl Lv2Host {
     ///
     /// - `CELL_ENOMEM` when the queue table rejects the id.
     /// - `CELL_EEXIST` when `ipc_key` is already registered.
+    /// - `CELL_EAGAIN` when the kernel-id table is full.
     pub(super) fn dispatch_event_queue_create(
         &mut self,
         id_ptr: u32,
@@ -47,8 +49,11 @@ impl Lv2Host {
         }
         // size == 0 defaults to EQUEUE_MAX_RECV_EVENT (127).
         let effective_size = if size == 0 { 127 } else { size };
-        let id = self.alloc_id();
+        let Some(id) = self.alloc_id(SYS_EVENT_QUEUE_OBJECT) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         if !self.state.event_queues.create_with_id(id, effective_size) {
+            self.release_id(id);
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         if ipc_key != 0 {
@@ -73,6 +78,8 @@ impl Lv2Host {
     /// {`SYS_EVENT_PORT_LOCAL`, `SYS_EVENT_PORT_IPC`}. The console
     /// capture of `tests/micro/lv2_event_port_answers` creates types 1
     /// and 3 and refuses types 0 and 2.
+    ///
+    /// `CELL_EAGAIN` when the kernel-id table is full.
     pub(super) fn dispatch_event_port_create(
         &mut self,
         id_ptr: u32,
@@ -84,8 +91,10 @@ impl Lv2Host {
         if port_type != SYS_EVENT_PORT_LOCAL && port_type != SYS_EVENT_PORT_IPC {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
+        let Some(id) = self.alloc_id(SYS_EVENT_PORT_OBJECT) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         self.state.process_counts.event_port_inc();
-        let id = self.alloc_id();
         self.state.event_ports.create_with_id(id, port_type, name);
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
@@ -101,6 +110,7 @@ impl Lv2Host {
         match self.state.event_ports.destroy(id) {
             Ok(()) => {
                 self.state.process_counts.event_port_dec();
+                self.release_id(id);
                 Lv2Dispatch::immediate(0)
             }
             Err(E::UnknownPort) => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
@@ -227,6 +237,7 @@ impl Lv2Host {
             .event_queues
             .destroy_with_waiters(id)
             .unwrap_or_default();
+        self.release_id(id);
         self.state.event_ports.unbind_queue(id);
         self.state.groups.unbind_event_queue(id);
         if let Some(ipc_key) = self.derived.event_queue_ipc_keys.remove(&id) {

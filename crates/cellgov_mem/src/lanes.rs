@@ -96,8 +96,7 @@ pub mod source {
     pub const EVENT_PORT: u8 = 17;
     /// Event flags, one object per id.
     pub const EVENT_FLAG: u8 = 18;
-    /// The lightweight-mutex id allocator's cursor.
-    pub const LWMUTEX_IDS: u8 = 19;
+    // Tag 19 is unused.
     /// SPU thread groups, one object per group id.
     pub const THREAD_GROUP: u8 = 20;
     /// Live SPU units, one object per unit, valued by group.
@@ -200,6 +199,11 @@ pub mod source {
     /// The kernel SPU image ids 156 and 157 handed out, one object
     /// per id.
     pub const SPU_IMAGE_IDS: u8 = 68;
+    /// Live class-tagged kernel ids, one object per id's slot and
+    /// generation bits.
+    pub const KERNEL_IDS: u8 = 69;
+    /// Kernel-id slots that have held an id, one object per slot.
+    pub const KERNEL_ID_SLOTS: u8 = 70;
 }
 
 const OBJECT_BITS: u32 = 32;

@@ -6,10 +6,10 @@
 use cellgov_mem::lanes::{self, source, LaneMap, LaneValue, ObjectLanes};
 use std::collections::BTreeMap;
 
-/// First kernel id handed out. The range
-/// `0x4000_0001..0x4002_0000` is reserved for `Lv2Host::alloc_id`
-/// and the allocator chains it shares; this struct owns
-/// `FIRST_KERNEL_ID` and above.
+/// First module id the registry hands out. The console mints module
+/// ids from the process's kernel-id table under class 0x23, as the
+/// `lv2_process_layout` capture reads; the registry keeps its own
+/// counter.
 pub const FIRST_KERNEL_ID: u32 = 0x4002_0000;
 
 /// LV2 module lifecycle states CellGov models.

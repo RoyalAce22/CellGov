@@ -293,7 +293,9 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let id = self.alloc_id();
+        let Some(id) = self.alloc_id(cellgov_ps3_abi::lv2::process::SYS_TIMER_OBJECT) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         self.state.process_counts.timer_insert(id);
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
@@ -306,6 +308,7 @@ impl Lv2Host {
     ///   destroyed, as the `lv2_timer_time_tty` capture reads.
     pub(super) fn dispatch_timer_destroy(&mut self, id: u32) -> Lv2Dispatch {
         if self.state.process_counts.timer_remove(id) {
+            self.release_id(id);
             Lv2Dispatch::immediate(0)
         } else {
             Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
@@ -320,7 +323,9 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let id = self.alloc_id();
+        let Some(id) = self.alloc_id(cellgov_ps3_abi::lv2::process::SYS_RWLOCK_OBJECT) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         self.state.process_counts.rwlock_insert(id);
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
@@ -332,6 +337,7 @@ impl Lv2Host {
         if !self.state.process_counts.rwlock_remove(id) {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
+        self.release_id(id);
         Lv2Dispatch::immediate(0)
     }
 

@@ -4,6 +4,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::process::SYS_EVENT_QUEUE_OBJECT;
 use cellgov_ps3_abi::lv2::rsx::{
     control_register, driver_info, driver_info_init, event_queue, region, reports,
 };
@@ -35,6 +36,7 @@ impl Lv2Host {
     /// # Errors
     ///
     /// `CELL_EINVAL` on double-allocate (single-context invariant);
+    /// `CELL_EAGAIN` when the kernel-id table has no id for the queue;
     /// `CELL_ENOMEM` if the reservation does not fit in the remaining region.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::host) fn dispatch_sys_rsx_context_allocate(
@@ -51,19 +53,23 @@ impl Lv2Host {
         if self.state.rsx_context.allocated {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
+        // port_id == queue_id: single kernel id for the 1:1 port/queue
+        // binding driver_info.handler_queue exposes.
+        let Some(queue_id) = self.alloc_id(SYS_EVENT_QUEUE_OBJECT) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         let base = if self.state.rsx_context.pending_mem_addr != 0 {
             self.state.rsx_context.pending_mem_addr
         } else {
-            let Some(end) = self
+            let end = self
                 .state
                 .rsx_mem_alloc_ptr
                 .checked_add(region::CONTEXT_RESERVATION)
-            else {
+                .filter(|&end| end <= Self::SYS_RSX_MEM_END);
+            let Some(end) = end else {
+                self.release_id(queue_id);
                 return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
             };
-            if end > Self::SYS_RSX_MEM_END {
-                return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
-            }
             let start = self.state.rsx_mem_alloc_ptr;
             self.state.rsx_mem_alloc_ptr = end;
             start
@@ -72,9 +78,6 @@ impl Lv2Host {
         let driver_info_addr = base + region::DRIVER_INFO_OFFSET;
         let reports_addr = base + region::REPORTS_OFFSET;
 
-        // port_id == queue_id: single kernel id for the 1:1 port/queue
-        // binding driver_info.handler_queue exposes.
-        let queue_id = self.alloc_id();
         let queue_created = self
             .state
             .event_queues

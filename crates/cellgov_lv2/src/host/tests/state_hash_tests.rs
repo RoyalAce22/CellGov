@@ -294,13 +294,15 @@ fn fingerprint_changes_after_a_process_count_increment() {
 
 #[test]
 fn fingerprint_stays_off_baseline_after_alloc_id_backed_port_create_then_destroy() {
-    // The create used an id from next_kernel_id, whose cursor lane
-    // stays moved. The port table's term returns to its baseline.
+    // The create used an id from the kernel-id table, whose slot keeps
+    // its moved generation. The port table's term returns to its
+    // baseline.
     let pre = Lv2Host::new().fingerprint();
     let mut host = Lv2Host::new();
-    let id = host.alloc_id();
+    let id = host.alloc_id(0x0E).unwrap();
     host.state.event_ports.create_with_id(id, 1, 0);
     host.state.event_ports.destroy(id).unwrap();
+    host.release_id(id);
     assert_ne!(pre, host.fingerprint());
 }
 

@@ -22,8 +22,8 @@ const UNIT_COUNTS: [usize; 4] = [1, 8, 64, 512];
 
 fn runtime_with_lwmutexes(n: usize) -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(4096), Budget::new(1), 1);
-    for _ in 0..n {
-        rt.lv2_host_mut().lwmutexes_mut().create().unwrap();
+    for id in 1..=n as u32 {
+        assert!(rt.lv2_host_mut().lwmutexes_mut().create_with_id(id));
     }
     rt
 }

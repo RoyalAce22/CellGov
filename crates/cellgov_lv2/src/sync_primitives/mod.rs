@@ -29,8 +29,8 @@ pub use event_queue::{
 };
 pub use lwcond::{LwCondEntry, LwCondTable};
 pub use lwmutex::{
-    LwMutexAcquire, LwMutexAcquireOrEnqueue, LwMutexEnqueueError, LwMutexEntry, LwMutexIdAllocator,
-    LwMutexRelease, LwMutexTable,
+    LwMutexAcquire, LwMutexAcquireOrEnqueue, LwMutexEnqueueError, LwMutexEntry, LwMutexRelease,
+    LwMutexTable,
 };
 pub use mutex::{
     MutexAcquire, MutexAcquireOrEnqueue, MutexAttrs, MutexCreateError, MutexEnqueueError,

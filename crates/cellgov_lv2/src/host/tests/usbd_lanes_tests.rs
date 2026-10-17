@@ -36,8 +36,7 @@ fn every_usbd_field_moves_the_term() {
 }
 
 #[test]
-fn initialize_moves_the_host_partial_by_the_usbd_and_id_cursor_terms() {
-    use cellgov_mem::lanes::{source, value_term};
+fn initialize_moves_the_host_partial_by_the_usbd_and_kernel_id_terms() {
     let rt =
         crate::host::test_support::FakeRuntime::with_memory(cellgov_mem::GuestMemory::new(0x10000));
     let base = crate::host::Lv2Host::new();
@@ -47,13 +46,7 @@ fn initialize_moves_the_host_partial_by_the_usbd_and_id_cursor_terms() {
         cellgov_event::UnitId::new(0),
         &rt,
     );
-    let id_cursor = |h: &crate::host::Lv2Host| {
-        value_term(
-            source::KERNEL_CURSORS,
-            0,
-            &u64::from(h.state.next_kernel_id),
-        )
-    };
+    let ids = |h: &crate::host::Lv2Host| h.state.kernel_ids.sync_partial();
     let usbd_delta = host
         .state
         .usbd
@@ -62,7 +55,7 @@ fn initialize_moves_the_host_partial_by_the_usbd_and_id_cursor_terms() {
     assert_ne!(usbd_delta, 0);
     assert_eq!(
         host.sync_partial().wrapping_sub(base.sync_partial()),
-        usbd_delta.wrapping_add(id_cursor(&host).wrapping_sub(id_cursor(&base)))
+        usbd_delta.wrapping_add(ids(&host).wrapping_sub(ids(&base)))
     );
 }
 

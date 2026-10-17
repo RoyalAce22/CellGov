@@ -1,13 +1,15 @@
 //! The process queries held to the `lv2_process_queries` capture from
 //! the reference console: get_status, getppid, get_ppu_guid, the object
-//! counts around four creates, and the ss access control reads. For the
-//! two differences CellGov does not close yet -- the kernel-id format and
-//! the answer for an undefined object class -- a test holds the console's
-//! value and refuses CellGov's.
+//! counts around four creates, the ids those creates mint, and the ss
+//! access control reads. For the two differences CellGov does not close
+//! yet -- the answer for an undefined object class and the SPU thread
+//! group id's form -- a test holds the console's value and refuses
+//! CellGov's.
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::kernel_id;
 use cellgov_ps3_abi::lv2::process::{
     BOOT_PROCESS_PID, SYS_EVENT_FLAG_OBJECT, SYS_EVENT_QUEUE_OBJECT, SYS_MUTEX_OBJECT,
     SYS_SEMAPHORE_OBJECT,
@@ -189,18 +191,51 @@ fn an_undefined_object_class_reads_einval_on_the_console_and_a_zero_count_in_cel
     }
 }
 
+/// The console's process already held the slots below its first
+/// create's when the probe ran. CellGov's boot does not create the
+/// same objects, so the test fills those slots first.
 #[test]
-fn console_ids_carry_the_class_in_the_top_byte_and_cellgov_ids_do_not() {
+fn the_four_sync_creates_mint_the_consoles_ids() {
     let payload = console_payload(PROBE);
     let (mut host, rt) = host_and_runtime();
-    for (i, (class, create)) in creates().into_iter().enumerate() {
-        let console = word(&payload, OFF_CREATE + 16 + i * 16) as u32;
-        assert_eq!(console >> 24, class, "console id {console:#x}");
-        assert_eq!(console & 0xFF, 0, "console id {console:#x}");
-        let (_, effects) = immediate(&mut host, &rt, create);
-        let id = extract_write_u32(&effects[0]);
-        assert_ne!(id >> 24, class, "CellGov id {id:#x}");
+    let console_id = |i: usize| word(&payload, OFF_CREATE + 16 + i * 16) as u32;
+    for _ in 0..kernel_id::slot_of(console_id(0)) {
+        host.alloc_id(0x23).expect("a free slot");
     }
+    for (i, (_, create)) in creates().into_iter().enumerate() {
+        let (code, effects) = immediate(&mut host, &rt, create);
+        assert_eq!(code, 0, "create {i}");
+        assert_eq!(extract_write_u32(&effects[0]), console_id(i), "create {i}");
+    }
+}
+
+/// An SPU thread group id takes no slot of the kernel-id table. The
+/// console's has 0x04 in the top byte, 0x0100 in the low half, and a
+/// middle byte that rises from one launch to the next across the
+/// `lv2_process_stack_*` captures. CellGov counts group ids from 1.
+#[test]
+fn a_thread_group_id_has_a_form_of_its_own_on_the_console_and_counts_from_one_in_cellgov() {
+    let payload = console_payload(PROBE);
+    let console = word(&payload, OFF_CREATE + 16 + 4 * 16) as u32;
+    assert_eq!(console >> 24, 0x04, "console id {console:#x}");
+    assert_eq!(console & 0xFFFF, 0x0100, "console id {console:#x}");
+    let (mut host, rt) = host_and_runtime();
+    let (code, effects) = immediate(
+        &mut host,
+        &rt,
+        Lv2Request::SpuThreadGroupCreate {
+            id_ptr: OUT_PTR,
+            num_threads: 1,
+            priority: 100,
+            attr_ptr: 0,
+        },
+    );
+    assert_eq!(code, 0);
+    assert_eq!(
+        extract_write_u32(&effects[0]),
+        1,
+        "CellGov's first group id"
+    );
 }
 
 #[test]

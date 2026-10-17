@@ -1,9 +1,5 @@
 //! [`Lv2State`]: the hashed partition of [`super::Lv2Host`].
 
-use cellgov_ps3_abi::hw::address_space::{
-    PS3_CHILD_STACKS_BASE, PS3_CHILD_STACKS_SIZE, PS3_SPU_RESERVED_BASE,
-};
-
 use crate::fs_store::FsStore;
 use crate::image::ContentStore;
 use crate::ppu_thread::{PpuThreadId, PpuThreadTable, ThreadStackAllocator};
@@ -16,25 +12,13 @@ use crate::sync_primitives::{
 use crate::thread_group::ThreadGroupTable;
 
 use super::config::ConfigTable;
+use super::kernel_ids::KernelIdTable;
 use super::lv2_host::FirmwareIdentity;
 use super::mmapper::MmapperHandleTable;
 use super::process;
 use super::rsx::SysRsxContext;
 use super::uart::UartState;
 use super::usbd::UsbdState;
-
-/// First id the shared kernel-id allocator hands out; every id the
-/// host mints outside `lwmutexes` (mutex, cond, semaphore, rwlock,
-/// timer, event queue / port / flag, memory container, mmapper
-/// handle, RSX event queue) is this plus a count. Non-zero so an
-/// uninitialised handle reads as unknown. The fixed boot layout leaves
-/// its initial range between the child-stack arena and the SPU-reserved
-/// region.
-pub const FIRST_KERNEL_ID: u32 = 0xD100_0001;
-
-const _: () =
-    assert!(FIRST_KERNEL_ID as u64 > PS3_CHILD_STACKS_BASE + PS3_CHILD_STACKS_SIZE as u64);
-const _: () = assert!((FIRST_KERNEL_ID as u64) < PS3_SPU_RESERVED_BASE);
 
 /// Guest-visible LV2 state; every field enters the host's sync partial
 /// per the exhaustive destructure in `Lv2State::sync_partial`.
@@ -47,9 +31,10 @@ pub(in crate::host) struct Lv2State {
     pub(in crate::host) raw_spus: RawSpuTable,
     pub(in crate::host) ppu_threads: PpuThreadTable,
     pub(in crate::host) stack_allocator: ThreadStackAllocator,
-    /// Shared id allocator for mutex / semaphore / event-queue /
-    /// event-flag / cond. `lwmutexes` has its own allocator from 1.
-    pub(in crate::host) next_kernel_id: u32,
+    /// The slot table every class-tagged kernel id comes from.
+    pub(in crate::host) kernel_ids: KernelIdTable,
+    /// The serial the next memory container id carries.
+    pub(in crate::host) next_container_serial: u32,
     pub(in crate::host) mem_alloc_ptr: u32,
     pub(in crate::host) rsx_mem_alloc_ptr: u32,
     pub(in crate::host) rsx_mem_handle_counter: u32,

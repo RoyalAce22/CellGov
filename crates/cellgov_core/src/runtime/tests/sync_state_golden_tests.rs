@@ -17,8 +17,8 @@ fn fresh() -> Runtime {
 #[test]
 fn fresh_runtime_sync_state_hash_wire_format_golden() {
     let rt = fresh();
-    assert_eq!(rt.sync_state_hash(), 0x50b2_c096_c746_10bd);
-    assert_eq!(rt.sync_state_hash_from_scratch(), 0x50b2_c096_c746_10bd);
+    assert_eq!(rt.sync_state_hash(), 0xeceb_e162_fba7_1536);
+    assert_eq!(rt.sync_state_hash_from_scratch(), 0xeceb_e162_fba7_1536);
 }
 
 /// The list holds every nonzero lane of a fresh runtime.
@@ -34,8 +34,6 @@ fn fresh_runtime_sync_state_lane_vector_golden() {
         present(source::RSX_SEM_OFFSET, 0),
         present(source::RSX_LABEL_BASE, 0),
         present(source::RSX_CALL_STACK, 0),
-        present(source::LWMUTEX_IDS, 0),
-        lane(source::LWMUTEX_IDS, 0, 1, 0, 1),
         present(source::GROUP_IDS, 0),
         lane(source::GROUP_IDS, 0, 1, 0, 1),
         present(source::PPU_THREAD_IDS, 0),
@@ -64,7 +62,7 @@ fn fresh_runtime_sync_state_lane_vector_golden() {
         bytes_term(source::UART, &[0, 3, 0], &[]),
         present(source::USBD, 0),
         present(source::KERNEL_CURSORS, 0),
-        lane(source::KERNEL_CURSORS, 0, 1, 0, 0xD100_0001),
+        lane(source::KERNEL_CURSORS, 0, 1, 0, 1),
         present(source::KERNEL_CURSORS, 1),
         lane(source::KERNEL_CURSORS, 1, 1, 0, 0x0001_0000),
         present(source::KERNEL_CURSORS, 3),

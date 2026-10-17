@@ -548,19 +548,34 @@ fn mmapper_alloc_never_returns_address_in_reserved_rsx_window() {
 }
 
 #[test]
-fn alloc_id_starts_at_kernel_id_sentinel() {
+fn alloc_id_mints_the_class_in_the_top_byte_from_slot_zero() {
     let mut host = Lv2Host::new();
-    assert_eq!(host.alloc_id(), crate::FIRST_KERNEL_ID);
+    assert_eq!(host.alloc_id(0x85), Some(0x8500_0000));
+    assert_eq!(host.alloc_id(0x96), Some(0x9600_0100));
 }
 
 #[test]
-fn alloc_id_is_monotonic_across_calls() {
+fn releasing_an_id_the_table_does_not_hold_is_an_invariant_break() {
     let mut host = Lv2Host::new();
-    let a = host.alloc_id();
-    let b = host.alloc_id();
-    let c = host.alloc_id();
-    assert_eq!(b, a + 1);
-    assert_eq!(c, b + 1);
+    let id = host.alloc_id(0x85).unwrap();
+    host.release_id(id);
+    assert_eq!(
+        host.invariant_break_site_count("kernel_ids.release_unknown"),
+        0
+    );
+    host.release_id(id);
+    assert_eq!(
+        host.invariant_break_site_count("kernel_ids.release_unknown"),
+        1
+    );
+}
+
+#[test]
+fn container_ids_carry_their_syscalls_base_over_one_serial() {
+    let mut host = Lv2Host::new();
+    assert_eq!(host.alloc_container_id(false), 0x3F10_0001);
+    assert_eq!(host.alloc_container_id(true), 0x3F00_0002);
+    assert_eq!(host.alloc_container_id(false), 0x3F10_0003);
 }
 
 #[test]
@@ -952,8 +967,8 @@ mod process_exit_waiter_purge {
         host.state.semaphores.create_with_id(SEMA, 0, 4).unwrap();
         assert!(host.state.event_queues.create_with_id(EQUEUE, 4));
         host.state.event_flags.create_with_id(EFLAG, 0).unwrap();
-        let lwm = host.state.lwmutexes.create().unwrap();
-        assert_eq!(lwm, 1, "first lwmutex id");
+        let lwm = 1;
+        assert!(host.state.lwmutexes.create_with_id(lwm));
 
         host.state.mutexes.enqueue_waiter(MUTEX, t1).unwrap();
         host.state.conds.enqueue_waiter(COND, t2).unwrap();

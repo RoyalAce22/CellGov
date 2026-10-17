@@ -107,7 +107,8 @@ impl Lv2Host {
                 raw_spus: crate::raw_spu::RawSpuTable::new(),
                 ppu_threads: PpuThreadTable::new(),
                 stack_allocator: ThreadStackAllocator::new(),
-                next_kernel_id: crate::host::state::FIRST_KERNEL_ID,
+                kernel_ids: crate::host::kernel_ids::KernelIdTable::default(),
+                next_container_serial: 1,
                 mem_alloc_ptr: 0x0001_0000, // PS3 user-memory region start
                 rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
                 rsx_mem_handle_counter: 1,

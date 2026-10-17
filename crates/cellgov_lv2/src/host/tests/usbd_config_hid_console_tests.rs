@@ -4,8 +4,9 @@
 //! drives the probe's calls through dispatch and compares the return
 //! codes and written words with the capture.
 //!
-//! The tests compare handle, listener and event ids only where one
-//! echoes another: the console mints them from system-wide counters.
+//! Queue, handle and listener ids come from the process's kernel-id
+//! table and are compared outright. Event ids come from a system-wide
+//! counter, so the tests compare them only where one echoes another.
 //! The device list is the console's own bus, so `sys_usbd_get_device_list`
 //! is not compared.
 
@@ -16,6 +17,7 @@ use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_SERVICE_LISTENER_ONCE, SYS_CONFIG_SERVICE_LISTENER_REPEATING,
     SYS_CONFIG_SERVICE_PADMANAGER, SYS_CONFIG_SERVICE_PADMANAGER2, SYS_CONFIG_SERVICE_USER_LIBPAD,
 };
+use cellgov_ps3_abi::lv2::kernel_id::{self, compose, USBD_HANDLE_CLASS};
 use cellgov_ps3_abi::lv2::{errno, syscall};
 
 use super::*;
@@ -134,6 +136,72 @@ fn hid_is_root(pid: u64) -> Lv2Request {
         number: syscall::HID_IS_ROOT,
         args: [pid, 0, 0, 0, 0, 0, 0, 0],
     }
+}
+
+/// A host whose kernel-id table holds every slot below `first_id`'s, as
+/// the console's process did when the probe's first create ran.
+fn host_from(first_id: u64) -> Lv2Host {
+    let mut host = Lv2Host::new();
+    for _ in 0..kernel_id::slot_of(first_id as u32) {
+        host.alloc_id(0x23).expect("a free slot");
+    }
+    host
+}
+
+#[test]
+fn the_queue_handle_and_listener_ids_match_the_console() {
+    let w = words("lv2_config_listener_shapes");
+    let rt = runtime();
+    let mut host = host_from(w[1]);
+    let (queue, handle) = open(&mut host, &rt);
+    assert_eq!(u64::from(queue), w[1], "queue");
+    assert_eq!(u64::from(handle), w[3], "handle");
+    let listener = written_u32(
+        &mut host,
+        &rt,
+        add_listener(
+            handle,
+            SYS_CONFIG_SERVICE_PADMANAGER,
+            0,
+            0,
+            0,
+            SYS_CONFIG_SERVICE_LISTENER_REPEATING,
+        ),
+    );
+    assert_eq!(u64::from(listener), w[5], "listener");
+}
+
+/// The console's first `sys_usbd_initialize` also holds the slot above
+/// its handle until the handles are finalized: the second handle skips
+/// it, and the config handle made after the finalizes takes it at
+/// generation 1. CellGov holds no such slot, so its second handle is
+/// one slot lower; every other id matches.
+#[test]
+fn usbd_handles_and_the_ids_after_their_finalize_match_the_console_but_the_second_handle() {
+    let w = words("lv2_usbd_config_hid");
+    let rt = runtime();
+    let mut host = host_from(w[4]);
+    let init = |handle_ptr| Lv2Request::UsbdInitialize { handle_ptr };
+    let h1 = written_u32(&mut host, &rt, init(OUT_PTR));
+    assert_eq!(u64::from(h1), w[4], "first handle");
+    let h2 = written_u32(&mut host, &rt, init(OUT_PTR));
+    let slot = kernel_id::slot_of(h1);
+    assert_eq!(
+        w[6],
+        u64::from(compose(USBD_HANDLE_CLASS, 0, slot + 2)),
+        "the console"
+    );
+    assert_eq!(h2, compose(USBD_HANDLE_CLASS, 0, slot + 1), "CellGov");
+    for handle in [h2, h1] {
+        assert_eq!(code(&mut host, &rt, Lv2Request::UsbdFinalize { handle }), 0);
+    }
+    let (queue, handle) = open(&mut host, &rt);
+    assert_eq!(u64::from(queue), w[19], "queue after the finalizes");
+    assert_eq!(
+        u64::from(handle),
+        w[21],
+        "config handle after the finalizes"
+    );
 }
 
 #[test]

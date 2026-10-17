@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// Create an entry under the lowest id the table does not hold.
+fn create(t: &mut LwMutexTable) -> u32 {
+    let id = (1..).find(|&id| t.lookup(id).is_none()).expect("a free id");
+    assert!(t.create_with_id(id));
+    id
+}
+
 fn tid(raw: u64) -> PpuThreadId {
     PpuThreadId::new(raw)
 }
@@ -18,8 +25,8 @@ fn fresh_table_is_empty() {
 fn purge_waiters_of_leaves_the_signaled_flag_and_survivor_order_alone() {
     let mut t = LwMutexTable::new();
     let (dead, alive) = (tid(0x0100_0001), tid(0x0100_0002));
-    let a = t.create().unwrap();
-    let b = t.create().unwrap();
+    let a = create(&mut t);
+    let b = create(&mut t);
     t.enqueue_waiter(a, dead).unwrap();
     t.enqueue_waiter(a, alive).unwrap();
     // `b` has an empty queue, so its release leaves a pending signal
@@ -40,8 +47,8 @@ fn purge_waiters_of_leaves_the_signaled_flag_and_survivor_order_alone() {
 fn purge_waiters_of_reports_every_lwmutex_in_id_order() {
     let mut t = LwMutexTable::new();
     let (dead_a, dead_b) = (tid(0x0100_0001), tid(0x0100_0002));
-    let a = t.create().unwrap();
-    let b = t.create().unwrap();
+    let a = create(&mut t);
+    let b = create(&mut t);
     for id in [b, a] {
         t.enqueue_waiter(id, dead_b).unwrap();
         t.enqueue_waiter(id, dead_a).unwrap();
@@ -59,7 +66,7 @@ fn purge_waiters_of_reports_every_lwmutex_in_id_order() {
 fn purge_waiters_of_does_not_move_the_acquire_or_release_witnesses() {
     let mut t = LwMutexTable::new();
     let dead = tid(0x0100_0001);
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     t.enqueue_waiter(id, dead).unwrap();
     let (acquires, releases) = (t.acquires_count(), t.releases_count());
     let set: std::collections::BTreeSet<_> = [dead].into_iter().collect();
@@ -69,45 +76,17 @@ fn purge_waiters_of_does_not_move_the_acquire_or_release_witnesses() {
 }
 
 #[test]
-fn id_allocator_is_monotonic_and_starts_at_one() {
-    let mut a = LwMutexIdAllocator::new();
-    assert_eq!(a.allocate(), Some(1));
-    assert_eq!(a.allocate(), Some(2));
-    assert_eq!(a.allocate(), Some(3));
-}
-
-#[test]
-fn id_allocator_exhaustion() {
-    let mut a = LwMutexIdAllocator { next: u32::MAX };
-    assert_eq!(a.allocate(), None);
-    assert_eq!(a.allocate(), None);
-}
-
-#[test]
-fn id_allocator_last_handed_out_is_u32_max_minus_one() {
-    let mut a = LwMutexIdAllocator { next: u32::MAX - 1 };
-    assert_eq!(a.allocate(), Some(u32::MAX - 1));
-    assert_eq!(a.allocate(), None);
-}
-
-#[test]
-fn create_returns_monotonic_ids() {
+fn create_with_id_refuses_an_id_the_table_holds() {
     let mut t = LwMutexTable::new();
-    let id1 = t.create().unwrap();
-    let id2 = t.create().unwrap();
-    let id3 = t.create().unwrap();
-    assert!(id1 < id2 && id2 < id3);
-    assert_eq!(t.len(), 3);
-}
-
-#[test]
-fn destroy_removes_entry_and_does_not_recycle_id() {
-    let mut t = LwMutexTable::new();
-    let id1 = t.create().unwrap();
-    assert!(t.destroy(id1).is_some());
-    assert!(t.lookup(id1).is_none());
-    let id2 = t.create().unwrap();
-    assert!(id2 > id1);
+    assert!(t.create_with_id(0x9500_0100));
+    assert!(!t.create_with_id(0x9500_0100));
+    assert_eq!(t.len(), 1);
+    assert!(t.destroy(0x9500_0100).is_some());
+    assert!(t.lookup(0x9500_0100).is_none());
+    assert!(
+        t.create_with_id(0x9500_0100),
+        "a destroyed id may be created again"
+    );
 }
 
 #[test]
@@ -116,14 +95,14 @@ fn fresh_entry_is_unsignaled() {
     // against an empty queue sets the signal so the next
     // contender can pass.
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     assert!(!t.lookup(id).unwrap().signaled());
 }
 
 #[test]
 fn try_acquire_unsignaled_is_contended() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let caller = tid(0x0100_0001);
     assert_eq!(t.try_acquire(id, caller), Some(LwMutexAcquire::Contended));
     assert!(!t.lookup(id).unwrap().signaled());
@@ -132,7 +111,7 @@ fn try_acquire_unsignaled_is_contended() {
 #[test]
 fn try_acquire_consumes_signal_set_by_unlock() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let a = tid(0x0100_0001);
     t.release_and_wake_next(id, a);
     assert!(t.lookup(id).unwrap().signaled());
@@ -149,7 +128,7 @@ fn try_acquire_unknown_id_is_none() {
 #[test]
 fn acquire_or_enqueue_unsignaled_parks() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let a = tid(0x0100_0001);
     assert_eq!(
         t.acquire_or_enqueue(id, a),
@@ -161,7 +140,7 @@ fn acquire_or_enqueue_unsignaled_parks() {
 #[test]
 fn acquire_or_enqueue_consumes_signal_when_pending() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     t.release_and_wake_next(id, tid(0x0100_0001));
     assert_eq!(
         t.acquire_or_enqueue(id, tid(0x0100_0002)),
@@ -173,7 +152,7 @@ fn acquire_or_enqueue_consumes_signal_when_pending() {
 #[test]
 fn acquire_or_enqueue_already_parked_is_would_deadlock() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let waiter = tid(0x0100_0002);
     t.acquire_or_enqueue(id, waiter);
     assert_eq!(
@@ -195,7 +174,7 @@ fn acquire_or_enqueue_unknown_id_is_unknown() {
 #[test]
 fn enqueue_waiter_preserves_fifo_order() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     t.try_acquire(id, tid(0x0100_0001));
     t.enqueue_waiter(id, tid(0x0100_0002)).unwrap();
     t.enqueue_waiter(id, tid(0x0100_0003)).unwrap();
@@ -219,7 +198,7 @@ fn enqueue_waiter_unknown_id_returns_err() {
 #[test]
 fn remove_waiter_unqueues_only_the_named_thread() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let w1 = tid(0x0100_0001);
     let w2 = tid(0x0100_0002);
     let w3 = tid(0x0100_0003);
@@ -245,14 +224,14 @@ fn remove_waiter_unqueues_only_the_named_thread() {
 fn remove_waiter_unknown_id_or_unparked_thread_is_false() {
     let mut t = LwMutexTable::new();
     assert!(!t.remove_waiter(99, tid(0x0100_0001)));
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     assert!(!t.remove_waiter(id, tid(0x0100_0001)));
 }
 
 #[test]
 fn release_without_waiters_signals() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let a = tid(0x0100_0001);
     t.try_acquire(id, a);
     assert_eq!(t.release_and_wake_next(id, a), LwMutexRelease::Signaled);
@@ -262,7 +241,7 @@ fn release_without_waiters_signals() {
 #[test]
 fn release_with_waiters_transfers_to_head() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let owner = tid(0x0100_0001);
     let w1 = tid(0x0100_0002);
     let w2 = tid(0x0100_0003);
@@ -291,7 +270,7 @@ fn release_unknown_id_is_unknown() {
 #[test]
 fn unlock_then_acquire_via_signal() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let a = tid(0x0100_0001);
     assert_eq!(t.release_and_wake_next(id, a), LwMutexRelease::Signaled);
     let b = tid(0x0100_0002);
@@ -313,8 +292,8 @@ fn sync_partial_empty_is_stable() {
 fn sync_partial_distinguishes_signaled_state() {
     let mut a = LwMutexTable::new();
     let mut b = LwMutexTable::new();
-    let id_a = a.create().unwrap();
-    b.create().unwrap();
+    let id_a = create(&mut a);
+    create(&mut b);
     assert_eq!(a.sync_partial(), b.sync_partial());
     a.release_and_wake_next(id_a, tid(0x0100_0001));
     assert_ne!(a.sync_partial(), b.sync_partial());
@@ -324,8 +303,8 @@ fn sync_partial_distinguishes_signaled_state() {
 fn sync_partial_distinguishes_waiter_order() {
     let mut a = LwMutexTable::new();
     let mut b = LwMutexTable::new();
-    let id_a = a.create().unwrap();
-    let id_b = b.create().unwrap();
+    let id_a = create(&mut a);
+    let id_b = create(&mut b);
     a.try_acquire(id_a, tid(0x0100_0001));
     b.try_acquire(id_b, tid(0x0100_0001));
     a.enqueue_waiter(id_a, tid(0x0100_0002)).unwrap();
@@ -336,23 +315,11 @@ fn sync_partial_distinguishes_waiter_order() {
 }
 
 #[test]
-fn sync_partial_distinguishes_allocator_cursor() {
-    let mut a = LwMutexTable::new();
-    let mut b = LwMutexTable::new();
-    a.create().unwrap();
-    let a_temp = a.create().unwrap();
-    a.destroy(a_temp);
-    b.create().unwrap();
-    assert_eq!(a.len(), b.len());
-    assert_ne!(a.sync_partial(), b.sync_partial());
-}
-
-#[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "duplicate enqueue")]
 fn duplicate_enqueue_panics_in_debug() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let waiter = tid(0x0100_0002);
     t.try_acquire(id, tid(0x0100_0001));
     t.enqueue_waiter(id, waiter).unwrap();
@@ -364,7 +331,7 @@ fn duplicate_enqueue_panics_in_debug() {
 #[should_panic(expected = "destroyed with")]
 fn destroy_with_parked_waiters_panics_in_debug() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     t.try_acquire(id, tid(0x0100_0001));
     t.enqueue_waiter(id, tid(0x0100_0002)).unwrap();
     let _ = t.destroy(id);
@@ -374,7 +341,7 @@ fn destroy_with_parked_waiters_panics_in_debug() {
 #[cfg(not(debug_assertions))]
 fn duplicate_enqueue_returns_err_in_release() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let waiter = tid(0x0100_0002);
     t.try_acquire(id, tid(0x0100_0001));
     t.enqueue_waiter(id, waiter).unwrap();
@@ -389,7 +356,7 @@ fn duplicate_enqueue_returns_err_in_release() {
 #[cfg(not(debug_assertions))]
 fn destroy_with_parked_waiters_returns_entry_unchanged_in_release() {
     let mut t = LwMutexTable::new();
-    let id = t.create().unwrap();
+    let id = create(&mut t);
     let waiter1 = tid(0x0100_0002);
     let waiter2 = tid(0x0100_0003);
     t.try_acquire(id, tid(0x0100_0001));

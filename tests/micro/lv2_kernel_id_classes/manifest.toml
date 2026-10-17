@@ -1,0 +1,14 @@
+[test]
+name = "lv2_kernel_id_classes"
+
+# A hardware probe: the ids a cond, an event port and an lwcond take, and the id a mutex takes in a freed slot.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 20 big-endian u32 words, in the order ppu/main.c lists: 80 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 80 },
+]
+
+[expect]
+outcome = "completed"

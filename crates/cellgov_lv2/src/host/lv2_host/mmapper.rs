@@ -55,14 +55,45 @@ impl Lv2Host {
         self.state.rsx_context.context_id = context_id;
     }
 
-    pub(in crate::host) fn alloc_id(&mut self) -> u32 {
-        let id = self.state.next_kernel_id;
-        self.state.next_kernel_id = self
-            .state
-            .next_kernel_id
-            .checked_add(1)
-            .expect("kernel id space exhausted");
-        id
+    /// Mint a kernel id of `class` from the shared slot table; `None`
+    /// once the process holds the most ids it may, which the create
+    /// answers with `CELL_EAGAIN`.
+    pub(in crate::host) fn alloc_id(&mut self, class: u32) -> Option<u32> {
+        self.state.kernel_ids.alloc(class)
+    }
+
+    /// Return `id` to the slot table once a destroy removes its object.
+    ///
+    /// Every id a destroy path frees came from [`Self::alloc_id`], so
+    /// an unknown id is an invariant break, not a guest error.
+    pub(in crate::host) fn release_id(&mut self, id: u32) {
+        if !self.state.kernel_ids.release(id) {
+            self.log_invariant_break(
+                "kernel_ids.release_unknown",
+                format_args!("released kernel id {id:#x} that the slot table does not hold"),
+            );
+        }
+    }
+
+    /// Mint a memory container id: 324's or 341's base plus the next
+    /// serial, skipping a serial a live container still holds.
+    pub(in crate::host) fn alloc_container_id(&mut self, from_324: bool) -> u32 {
+        use cellgov_ps3_abi::lv2::kernel_id::{
+            MEMORY_CONTAINER_324_BASE, MEMORY_CONTAINER_BASE, MEMORY_CONTAINER_SERIAL_MASK,
+        };
+        let base = if from_324 {
+            MEMORY_CONTAINER_324_BASE
+        } else {
+            MEMORY_CONTAINER_BASE
+        };
+        loop {
+            let serial = self.state.next_container_serial & MEMORY_CONTAINER_SERIAL_MASK;
+            self.state.next_container_serial = (serial + 1) & MEMORY_CONTAINER_SERIAL_MASK;
+            let held = |b: u32| self.state.memory_containers.contains_key(b | serial);
+            if !held(MEMORY_CONTAINER_BASE) && !held(MEMORY_CONTAINER_324_BASE) {
+                return base | serial;
+            }
+        }
     }
 
     /// Reserve the lowest free range of `size`, rounded up to the

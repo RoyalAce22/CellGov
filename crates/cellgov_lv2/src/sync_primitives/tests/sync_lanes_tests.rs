@@ -24,11 +24,11 @@ macro_rules! step {
 }
 
 #[test]
-fn lwmutex_changes_move_the_partial_and_the_allocator_outlives_destroy() {
+fn lwmutex_changes_move_the_partial_and_destroy_returns_it_to_empty() {
     let mut t = LwMutexTable::new();
     let empty = t.sync_partial();
     let mut h = empty;
-    step!(t, h, "create", t.create().unwrap());
+    step!(t, h, "create", t.create_with_id(1));
     step!(t, h, "release signals", t.release_and_wake_next(1, A));
     step!(
         t,
@@ -41,7 +41,7 @@ fn lwmutex_changes_move_the_partial_and_the_allocator_outlives_destroy() {
     step!(t, h, "remove shifts the survivor", t.remove_waiter(1, A));
     step!(t, h, "purge", t.purge_waiters_of(&BTreeSet::from([B])));
     step!(t, h, "destroy", t.destroy(1));
-    assert_ne!(h, empty, "the id allocator keeps its cursor");
+    assert_eq!(h, empty, "the table holds no id cursor");
 }
 
 #[test]
@@ -164,8 +164,8 @@ fn event_flag_changes_move_the_partial() {
 fn two_lwmutexes_that_exchange_states_hash_differently() {
     let build = |signaled: u32| {
         let mut t = LwMutexTable::new();
-        t.create().unwrap();
-        t.create().unwrap();
+        assert!(t.create_with_id(1));
+        assert!(t.create_with_id(2));
         let _ = t.release_and_wake_next(signaled, A);
         t.sync_partial()
     };
@@ -236,12 +236,12 @@ fn every_cond_port_queue_and_flag_field_moves_the_partial() {
 #[test]
 fn lwmutex_partial_wire_format_golden() {
     let mut t = LwMutexTable::new();
-    t.create().unwrap();
-    t.create().unwrap();
+    assert!(t.create_with_id(1));
+    assert!(t.create_with_id(2));
     let _ = t.release_and_wake_next(1, A);
     t.enqueue_waiter(2, PpuThreadId::PRIMARY).unwrap();
     t.enqueue_waiter(2, A).unwrap();
-    assert_eq!(t.sync_partial(), 0x62a2_e5a4_0f46_16d0_1acf_1b05_6475_5649);
+    assert_eq!(t.sync_partial(), 0xd487_9dde_1d12_fa7d_1611_a55e_cda3_8e61);
 }
 
 /// Computed outside the crate from the SplitMix64 key stream of the

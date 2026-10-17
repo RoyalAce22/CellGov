@@ -30,7 +30,7 @@ ordinal	packet	same_as	selector_slot	provenance_kind	provenance_ref	witness	exce
 92	none	none	none	console_capture	ps3autotests:sys_semaphore	crates/cellgov_lv2/src/host/tests/semaphore_tests.rs:semaphore_wait_with_zero_count_parks_caller	none	crates/cellgov_lv2/src/host/semaphore.rs
 93	none	none	none	console_capture	ps3autotests:sys_semaphore	crates/cellgov_lv2/src/host/tests/semaphore_tests.rs:semaphore_trywait_with_zero_count_returns_ebusy	none	crates/cellgov_lv2/src/host/semaphore.rs
 94	none	none	none	console_capture	ps3autotests:sys_semaphore	crates/cellgov_lv2/src/host/tests/hardware_trace_tests.rs:semaphore_post_wakes_no_more_waiters_than_its_count	none	crates/cellgov_lv2/src/host/semaphore.rs
-95	none	none	none	console_capture	micro:lv2_mutex_cond_rwlock_rows	crates/cellgov_lv2/src/host/tests/mutex_cond_rwlock_console_tests.rs:object_ids_differ_from_the_consoles_class_tagged_form	none	crates/cellgov_lv2/src/host/lwmutex.rs
+95	none	none	none	console_capture	micro:lv2_mutex_cond_rwlock_rows	crates/cellgov_lv2/src/host/tests/mutex_cond_rwlock_console_tests.rs:object_ids_match_the_consoles_and_a_freed_slot_comes_back_one_generation_up	none	crates/cellgov_lv2/src/host/lwmutex.rs
 96	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/lwmutex_tests.rs:lwmutex_destroy_with_waiter_returns_ebusy	none	crates/cellgov_lv2/src/host/lwmutex.rs
 97	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/lwmutex_tests.rs:lwmutex_lock_contended_parks_caller_on_waiter_list	none	crates/cellgov_lv2/src/host/lwmutex.rs
 98	none	none	none	non_public	none	crates/cellgov_lv2/src/host/tests/lwmutex_tests.rs:lwmutex_unlock_with_three_waiters_wakes_head_in_fifo_order	none	crates/cellgov_lv2/src/host/lwmutex.rs

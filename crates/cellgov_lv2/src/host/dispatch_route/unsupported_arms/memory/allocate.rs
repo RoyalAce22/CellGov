@@ -4,6 +4,7 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno::{self, Lv2ErrCode};
+use cellgov_ps3_abi::lv2::kernel_id::{SHARED_MEMORY_CLASS, SHARED_MEMORY_EXT_CLASS};
 use cellgov_ps3_abi::lv2::memory::{
     ext_entry, page_size, CONTAINER_GRANULE, SYS_MMAPPER_NO_SHM_KEY, VM_AREA_ALIGNMENTS,
     VM_AREA_GRANULE,
@@ -51,7 +52,7 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[cid_ptr]) {
             return d;
         }
-        let cid = self.alloc_id();
+        let cid = self.alloc_container_id(from_324);
         let size = size & !(CONTAINER_GRANULE - 1);
         self.state.memory_containers.insert(
             cid,
@@ -155,8 +156,8 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_mmapper_allocate_shared_memory` (332): mints a monotonic
-    /// shm id and writes it to `*mem_id_ptr`.
+    /// `sys_mmapper_allocate_shared_memory` (332): mints a shm id and
+    /// writes it to `*mem_id_ptr`.
     ///
     /// An `ipc_key` (`args[0]`) other than `SYS_MMAPPER_NO_SHM_KEY`
     /// attaches: a registered key returns the existing `mem_id` with
@@ -190,6 +191,7 @@ impl Lv2Host {
     ///   `lv2_mmapper_allocate` capture shows.
     /// - `CELL_ESRCH` when a game process names a key no one created,
     ///   outside the system-IPC namespace.
+    /// - `CELL_EAGAIN` when a create finds the kernel-id table full.
     ///
     /// `CELL_EINVAL` also answers a `mem_id` register that carries high
     /// bits, per [`Lv2Host::narrow_u32_args`]. That gate precedes the
@@ -236,7 +238,9 @@ impl Lv2Host {
                 existing
             }
             _ => {
-                let mem_id = self.mint_shared_memory(handle);
+                let Some(mem_id) = self.mint_shared_memory(handle, SHARED_MEMORY_CLASS) else {
+                    return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+                };
                 if keyed {
                     self.state.mmapper_ipc.insert(ipc_key, mem_id);
                 }
@@ -294,7 +298,11 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
             return d;
         }
-        let mem_id = self.mint_shared_memory(handle);
+        // No capture reads a 362 id; it takes 332's class, the call
+        // it is the container variant of.
+        let Some(mem_id) = self.mint_shared_memory(handle, SHARED_MEMORY_CLASS) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         mem_id_written(mem_id_ptr, mem_id, requester, tick)
     }
 
@@ -332,6 +340,7 @@ impl Lv2Host {
     ///   without 64 KiB pages and debug-or-root capability.
     /// - `CELL_EFAULT` when `mem_id_ptr` is null.
     /// - `CELL_EEXIST` when a keyed `ipc_key` is already registered.
+    /// - `CELL_EAGAIN` when the kernel-id table is full.
     ///
     /// `CELL_EINVAL` when a `flags`, `entries` or `mem_id` register
     /// carries high bits, per [`Lv2Host::narrow_u32_args`], precedes
@@ -399,7 +408,9 @@ impl Lv2Host {
         if keyed && self.state.mmapper_ipc.contains_key(ipc_key) {
             return Lv2Dispatch::immediate(errno::CELL_EEXIST.into());
         }
-        let mem_id = self.mint_shared_memory(handle);
+        let Some(mem_id) = self.mint_shared_memory(handle, SHARED_MEMORY_EXT_CLASS) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         if keyed {
             self.state.mmapper_ipc.insert(ipc_key, mem_id);
             if crate::host::is_system_ipc_key(ipc_key) {
@@ -456,14 +467,16 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         self.state.mmapper_ipc.retain(|_, id| *id != mem_id);
+        self.release_id(mem_id);
         Lv2Dispatch::immediate(0)
     }
 
-    /// Mints a `mem_id` and records the handle it names.
-    fn mint_shared_memory(&mut self, handle: MmapperHandle) -> u32 {
-        let mem_id = self.alloc_id();
+    /// Mints a `mem_id` of `class` and records the handle it names;
+    /// `None` when the id table is full.
+    fn mint_shared_memory(&mut self, handle: MmapperHandle, class: u32) -> Option<u32> {
+        let mem_id = self.alloc_id(class)?;
         self.state.mmapper_handles.insert(mem_id, handle);
-        mem_id
+        Some(mem_id)
     }
 }
 

@@ -148,8 +148,8 @@ fn build_classifier_context_scans_every_region_for_lwmutex_slots() {
     let observation = obs(
         ObservedOutcome::Completed,
         vec![
-            region("data", 0x80000, lwmutex_bytes(7)),
-            region("data_hi", 0x1000_0000, lwmutex_bytes(8)),
+            region("data", 0x80000, lwmutex_bytes(0x9500_0700)),
+            region("data_hi", 0x1000_0000, lwmutex_bytes(0x9500_0800)),
         ],
     );
     let ctx = build_classifier_context(&one_slot_elf(), &observation).unwrap();

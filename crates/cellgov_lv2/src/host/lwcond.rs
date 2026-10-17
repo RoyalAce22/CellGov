@@ -7,6 +7,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::process::SYS_LWCOND_OBJECT;
 use cellgov_ps3_abi::lv2::sync::{lwcond_signal_mode, LWCOND_SIGNAL_ANY_THREAD};
 use cellgov_time::GuestTicks;
 
@@ -25,6 +26,7 @@ impl Lv2Host {
     ///
     /// - `CELL_ESRCH` when no lwmutex has the id.
     /// - `CELL_EFAULT` when `id_ptr` is null. The gate is CellGov's own.
+    /// - `CELL_EAGAIN` when the process holds the most kernel ids it may.
     pub(super) fn dispatch_lwcond_create(
         &mut self,
         id_ptr: u32,
@@ -38,7 +40,9 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[id_ptr]) {
             return d;
         }
-        let id = self.alloc_id();
+        let Some(id) = self.alloc_id(SYS_LWCOND_OBJECT) else {
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
+        };
         self.state.lwconds.create_with_id(id, lwmutex_id);
         self.state.process_counts.lwcond_inc();
         self.immediate_write_u32(id, id_ptr, requester, tick)
@@ -58,6 +62,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.state.lwconds.destroy(id);
+        self.release_id(id);
         self.state.process_counts.lwcond_dec();
         Lv2Dispatch::immediate(0)
     }

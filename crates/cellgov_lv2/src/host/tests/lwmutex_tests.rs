@@ -6,7 +6,7 @@ use crate::ppu_thread::{PpuThreadAttrs, PpuThreadId};
 use crate::request::Lv2Request;
 
 #[test]
-fn lwmutex_create_allocates_monotonic_ids_starting_at_one() {
+fn lwmutex_creates_mint_class_tagged_ids_in_consecutive_slots() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let source = UnitId::new(0);
@@ -40,8 +40,8 @@ fn lwmutex_create_allocates_monotonic_ids_starting_at_one() {
         } => extract_write_u32(&e[0]),
         other => panic!("expected Immediate(0), got {other:?}"),
     };
-    assert_eq!(id1, 1);
-    assert_eq!(id2, 2);
+    assert_eq!(id1, 0x9500_0000);
+    assert_eq!(id2, 0x9500_0100);
     assert_eq!(host.lwmutexes().len(), 2);
 }
 

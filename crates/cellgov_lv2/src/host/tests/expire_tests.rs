@@ -774,7 +774,8 @@ fn lwmutex_timeout_unqueues_without_guest_writes() {
     let mut host = Lv2Host::new();
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
-    let id = host.lwmutexes_mut().create().unwrap();
+    let id = 0x9500_0000;
+    assert!(host.lwmutexes_mut().create_with_id(id));
     let tid = host.ppu_threads().thread_id_for_unit(src).unwrap();
     host.lwmutexes_mut().enqueue_waiter(id, tid).unwrap();
 

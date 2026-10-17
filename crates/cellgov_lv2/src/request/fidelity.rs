@@ -408,8 +408,8 @@ impl Lv2RequestKind {
             // Available counts live blocks and containers but not the
             // loaded image; total is the game-mode cap constant.
             Lv2RequestKind::MemoryGetUserMemorySize => PartialState,
-            // Container ids come from the shared kernel-id allocator,
-            // not the console's ranges.
+            // Container ids carry the console's base, but their serial
+            // counts from 1 where the console's counter spans processes.
             Lv2RequestKind::MemoryContainerCreate => PartialState,
 
             // Process.

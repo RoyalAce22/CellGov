@@ -1,12 +1,13 @@
 //! The mmapper allocate calls held to the `lv2_mmapper_allocate`
 //! capture from the reference console, which a game process took: the
 //! probe's calls run through the classifier and dispatch in its order,
-//! and every return code, and every free's code, is compared with the
-//! captured word. Area bases and segment ids are CellGov's own.
+//! and every return code, every free's code and every segment id is
+//! compared with the captured word. Area bases are CellGov's own.
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_ps3_abi::lv2::kernel_id;
 use cellgov_ps3_abi::lv2::memory::ext_entry;
 use cellgov_ps3_abi::lv2::syscall;
 
@@ -87,11 +88,13 @@ impl Probe {
         }
     }
 
-    /// A segment create in `slot` and its free (or SKIP) in `slot + 2`.
+    /// A segment create in `slot`, its id in `slot + 1`, and its free
+    /// (or SKIP) in `slot + 2`.
     fn segment(&mut self, slot: usize, rt: &FakeRuntime, number: u64, args: [u64; 6]) {
         let id = self.rc(slot, rt, number, args);
         match id {
             Some(id) => {
+                assert_eq!(id, self.words[slot + 1], "slot {}: segment id", slot + 1);
                 self.rc(
                     slot + 2,
                     rt,
@@ -138,7 +141,17 @@ fn mmapper_allocate_answers_as_on_the_console_for_a_game_process() {
         }
     }
 
-    // B. 332.
+    // B. 332. The console's process held the slots below the first
+    // segment's, and that slot was at generation 1, though no create
+    // the probe sent before it minted an id. The test sets both up.
+    let first = p.words[31] as u32;
+    for _ in 0..kernel_id::slot_of(first) {
+        p.host.alloc_id(0x23).expect("a free slot");
+    }
+    for _ in 0..kernel_id::generation_of(first) {
+        let id = p.host.alloc_id(0x23).expect("a free slot");
+        p.host.release_id(id);
+    }
     p.segment(15, &rt, SHM, [KEYLESS, 0, FLAG_1M, OUT, 0, 0]);
     p.rc(18, &rt, SHM, [KEYLESS, MIB, FLAG_1M, 0, 0, 0]);
     p.segment(21, &rt, SHM, [KEYLESS, MIB, 0x300, OUT, 0, 0]);
@@ -155,6 +168,7 @@ fn mmapper_allocate_answers_as_on_the_console_for_a_game_process() {
     // C. 339; the key K stays held across slot 36.
     let zeros = runtime_with_entries(0);
     let k = p.rc(33, &zeros, EXT, [KEY_K, K64, FLAG_64K, ENTRIES, 1, OUT]);
+    assert_eq!(k, Some(p.words[34]), "slot 34: segment id");
     let again = p.rc(36, &zeros, EXT, [KEY_K, K64, FLAG_64K, ENTRIES, 1, OUT]);
     assert!(again.is_none(), "slot 36 holds the key");
     assert_eq!(p.words[67], SKIP, "slot 67");

@@ -49,7 +49,8 @@ impl Lv2State {
             raw_spus,
             ppu_threads,
             stack_allocator,
-            next_kernel_id,
+            kernel_ids,
+            next_container_serial,
             mem_alloc_ptr,
             rsx_mem_alloc_ptr,
             rsx_mem_handle_counter,
@@ -79,9 +80,9 @@ impl Lv2State {
             process_counts,
         } = self;
         // Object 2 was the mmapper address cursor, which the area
-        // table replaced; the other cursors keep their objects.
+        // table replaced. Object 0 is the container serial.
         let cursors = [
-            (next_kernel_id, 0u64),
+            (next_container_serial, 0u64),
             (mem_alloc_ptr, 1),
             (rsx_mem_alloc_ptr, 3),
             (rsx_mem_handle_counter, 4),
@@ -94,6 +95,7 @@ impl Lv2State {
             .as_ref()
             .map_or(0, |fw| lanes::value_term(source::FIRMWARE_IDENTITY, 0, fw));
         [
+            partial!(kernel_ids),
             partial!(lwmutexes),
             partial!(mutexes),
             partial!(semaphores),

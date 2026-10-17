@@ -128,8 +128,8 @@ fn syscall_324_sub_granule_size_returns_enomem_and_mints_no_id() {
         );
     }
     assert_eq!(
-        host.alloc_id(),
-        Lv2Host::new().alloc_id(),
+        host.alloc_container_id(true),
+        Lv2Host::new().alloc_container_id(true),
         "a refused create must not consume an id",
     );
 }
@@ -166,8 +166,8 @@ fn syscall_324_null_cid_with_an_accepted_size_is_efault() {
     );
     assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
     assert_eq!(
-        host.alloc_id(),
-        Lv2Host::new().alloc_id(),
+        host.alloc_container_id(true),
+        Lv2Host::new().alloc_container_id(true),
         "a refused create must not consume an id",
     );
 }
