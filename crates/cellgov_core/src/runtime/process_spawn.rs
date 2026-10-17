@@ -129,7 +129,9 @@ impl Runtime {
         // for a retail-authority caller. Whether spawn applies the same
         // check to the child's PRIMARY thread is unestablished, so this
         // path witnesses an out-of-range value instead of normalizing
-        // it.
+        // it. The reference console cannot settle it from a probe: a
+        // game process has no spawn call, only the system processes
+        // that launch titles do.
         if !(0..=3071).contains(&prio) {
             self.lv2_host.log_invariant_break(
                 "runtime.process_spawn_prio_out_of_range",

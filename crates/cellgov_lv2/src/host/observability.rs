@@ -169,7 +169,8 @@ pub struct Lv2Observability {
     /// No reference pins what one process's exit does to its waiters
     /// while sibling processes keep running, so the purge is
     /// CellGov's own rule: a purged waiter never receives a later
-    /// wake.
+    /// wake. A console probe cannot pin it either: a game process
+    /// cannot run beside a second process of its own.
     pub process_exit_waiter_purges: BTreeMap<&'static str, u64>,
     /// Witness: mutexes whose owner belonged to an exited process at
     /// purge time. Ownership is retained, so each count here is a

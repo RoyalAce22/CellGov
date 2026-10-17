@@ -139,7 +139,9 @@ impl Lv2Host {
     /// - `CELL_EFAULT` when argv is empty or `argv[0]` is unreadable.
     /// - `CELL_ENOENT` when the content store holds no image at
     ///   `argv[0]`.
-    /// - `CELL_EAGAIN` when the child pid space is exhausted.
+    /// - `CELL_EAGAIN` when the child pid space is exhausted. The code
+    ///   is CellGov's: a game process has no spawn call, so no console
+    ///   probe reaches the exhausted case.
     /// - `CELL_EFAULT` from the runtime when the spawn loader refuses
     ///   the image. The runtime unwinds the pid this arm minted and
     ///   the child space under a

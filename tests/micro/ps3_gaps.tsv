@@ -1,3 +1,4 @@
 name	class	reason	issue
 process_spawn_wait	not-portable	hangs a retail 4.93 CEX console seconds after the start, before any result is written	1538
 spu_mailbox_write	no-frame	a raw SPU image built by cellgov_mkelf; its result stays in local store and no PPU program emits a CGOV frame	-
+lv2_exitspawn	not-portable	the exitspawn under the runner's /play.ps3 launch never starts the named process; the title hangs until webMAN's exit clears it	1832

@@ -1,0 +1,21 @@
+[test]
+name = "lv2_exitspawn"
+
+# A hardware probe: what sys_game_process_exitspawn2 hands the game process it starts.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 10 big-endian u64 words, in the order ppu/main.c lists: 80 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 80 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# Under the runner's launch the parent reaches the exitspawn and the
+# process it names never starts. The same reason is the test's row in
+# tests/micro/ps3_gaps.tsv.
+portable = false
+not_portable_reason = "the exitspawn under the runner's /play.ps3 launch never starts the named process; the title hangs until webMAN's exit clears it"

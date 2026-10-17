@@ -73,7 +73,9 @@ pub const SYS_EVENT_FLAG_OBJECT: ProcessObjectClassId = 0x98;
 /// - `args@0x28`
 ///
 /// What the kernel does with the priority and the flags across the
-/// handoff is unestablished.
+/// handoff is unestablished. A probe the console runner starts hangs in
+/// the exitspawn whatever it names, its own EBOOT included, so no
+/// capture answers it yet.
 pub mod exit2_param {
     /// Bytes of header ahead of the marshalled strings.
     pub const HEADER_SIZE: u32 = 0x30;
