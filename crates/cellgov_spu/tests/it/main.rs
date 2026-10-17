@@ -3,6 +3,8 @@
 
 mod channel_stall_through_runtime;
 mod console_channel_direction_sweep;
+mod console_dma_after_exit;
+mod console_dma_after_stop;
 mod console_double_compares;
 mod console_events;
 mod console_ie_branch_forms;

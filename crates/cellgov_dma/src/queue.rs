@@ -498,20 +498,44 @@ impl DmaQueue {
     pub fn process_due_translating(
         &mut self,
         now: GuestTicks,
+        translate: impl FnMut(&DmaCompletion, bool) -> Option<MfcCommandError>,
+    ) -> DueCommands {
+        self.process_translating(now, None, translate)
+    }
+
+    /// Process every command `issuer` has queued, whatever its time, as
+    /// [`Self::process_due_translating`] would once all of them are due.
+    /// Every other issuer's commands stay queued.
+    pub fn process_issuer_translating(
+        &mut self,
+        issuer: UnitId,
+        translate: impl FnMut(&DmaCompletion, bool) -> Option<MfcCommandError>,
+    ) -> DueCommands {
+        self.process_translating(GuestTicks::new(u64::MAX), Some(issuer), translate)
+    }
+
+    fn process_translating(
+        &mut self,
+        now: GuestTicks,
+        only: Option<UnitId>,
         mut translate: impl FnMut(&DmaCompletion, bool) -> Option<MfcCommandError>,
     ) -> DueCommands {
         let mut due = DueCommands::default();
+        let in_scope = |issuer: UnitId| only.is_none_or(|only| only == issuer);
         loop {
             let transfer = self
                 .entries
                 .iter()
-                .find(|(_, e)| !self.suspended(e.completion.issuer()))
+                .find(|(_, e)| {
+                    let issuer = e.completion.issuer();
+                    in_scope(issuer) && !self.suspended(issuer)
+                })
                 .map(|(key, _)| key)
                 .filter(|(time, _)| *time <= now);
             let invalid = self
                 .invalid
                 .iter()
-                .find(|(_, e)| !e.raised && !self.suspended(e.issuer))
+                .find(|(_, e)| in_scope(e.issuer) && !e.raised && !self.suspended(e.issuer))
                 .map(|(key, _)| key)
                 .filter(|(time, _)| *time <= now);
             match (transfer, invalid) {
@@ -600,3 +624,7 @@ mod invalid_tests;
 #[cfg(test)]
 #[path = "tests/queue_ordering_tests.rs"]
 mod ordering_tests;
+
+#[cfg(test)]
+#[path = "tests/queue_issuer_tests.rs"]
+mod issuer_tests;

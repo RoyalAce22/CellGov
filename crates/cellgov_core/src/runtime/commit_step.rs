@@ -304,13 +304,7 @@ impl Runtime {
             }
         }
         self.epoch.advance();
-        let due = self.fire_dma_completions();
-        if let Ok(ref mut o) = outcome {
-            o.dma_completions_fired = due.len();
-        }
-        self.last_dma_completions.clear();
-        self.last_dma_completions
-            .extend(due.iter().map(|(c, payload)| (*c, payload.is_some())));
+        let mut due = self.fire_dma_completions();
         let timer_due = self.fire_timer_wakes();
 
         // A unit that stopped itself reports the stop it can resume from.
@@ -319,11 +313,19 @@ impl Runtime {
                 .registry
                 .get(source)
                 .and_then(|unit| unit.stop_registers());
-            self.settle_finished_unit(source, stopped);
+            // A thread exit lands the transfers the thread still had
+            // queued.
+            due.extend(self.settle_finished_unit(source, stopped));
             stopped
         } else {
             None
         };
+        if let Ok(ref mut o) = outcome {
+            o.dma_completions_fired = due.len();
+        }
+        self.last_dma_completions.clear();
+        self.last_dma_completions
+            .extend(due.iter().map(|(c, payload)| (*c, payload.is_some())));
         self.project_raw_spu_windows(source, stopped.is_some(), !due.is_empty());
 
         // RSX FIFO advance: after unit effects commit and DMA completions

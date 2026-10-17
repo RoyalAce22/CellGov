@@ -128,7 +128,8 @@ and due timer wakes:
 Step 7 then settles a finished unit. An SPU thread's stop is
 treated as an LV2 request:
 
-- an exit resolves join wakes;
+- an exit lands the transfers the thread still has queued, then
+  resolves join wakes;
 - a yield resumes the thread;
 - anything else faults it as a thread-group error.
 

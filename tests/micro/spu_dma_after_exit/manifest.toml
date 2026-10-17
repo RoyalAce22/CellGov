@@ -1,0 +1,20 @@
+[test]
+name = "spu_dma_after_exit"
+
+# A hardware probe of whether the MFC finishes the transfers an SPU
+# thread queued before it exited: sixteen 16 KB puts under one tag, then
+# sys_spu_thread_exit with no wait for the tag. The PPU reads the first
+# and the last word of each 16 KB as soon as the group join returns and
+# again later. The PPU program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 272 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

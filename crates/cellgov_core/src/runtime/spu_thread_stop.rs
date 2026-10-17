@@ -1,6 +1,7 @@
 //! LV2's reading of a stopped SPU thread: an exit, a yield, or a
 //! thread-group error.
 
+use cellgov_dma::DmaCompletion;
 use cellgov_event::UnitId;
 use cellgov_exec::{StopRegisters, UnitStatus};
 use cellgov_lv2::{SpuThreadError, SpuThreadStop};
@@ -40,16 +41,23 @@ impl Runtime {
     /// stopping itself, is a thread finish. An SPU thread's stop is a
     /// request to LV2:
     ///
-    /// - an exit records its status from the outbound mailbox and
-    ///   finishes the thread, or with a group exit every thread of the
-    ///   group;
+    /// - an exit lands the transfers the thread still has queued,
+    ///   records its status from the outbound mailbox and finishes the
+    ///   thread, or with a group exit every thread of the group;
     /// - a yield resumes the thread;
     /// - anything else leaves the thread unfinished, marks it
     ///   `Faulted`, and records a [`SpuThreadFailure`].
-    pub(super) fn settle_finished_unit(&mut self, unit: UnitId, stopped: Option<StopRegisters>) {
+    ///
+    /// Returns the transfers an exit landed, for the commit's DMA
+    /// completions.
+    pub(super) fn settle_finished_unit(
+        &mut self,
+        unit: UnitId,
+        stopped: Option<StopRegisters>,
+    ) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
         let (Some(stop), Some(_)) = (stopped, self.lv2_host.live_spu_group(unit)) else {
             self.resolve_join_wakes(unit);
-            return;
+            return Vec::new();
         };
         let code = ((stop.status >> SPU_STATUS_STOP_CODE_SHIFT) & SPU_STOP_CODE_MASK) as u16;
         match SpuThreadStop::from_status(stop.status) {
@@ -61,12 +69,14 @@ impl Runtime {
                         format_args!("the yielding SPU thread {unit:?} did not restart"),
                     );
                 }
+                Vec::new()
             }
             SpuThreadStop::ThreadExit => {
                 let Some(status) = self.take_exit_status(unit) else {
                     self.fail_spu_thread(unit, stop, SpuThreadError::ExitWithoutStatus(code));
-                    return;
+                    return Vec::new();
                 };
+                let landed = self.land_issuer_dma(unit);
                 match self.lv2_host.spu_thread_exit(unit, status) {
                     Ok(Some(group)) => self.wake_group_joiners(group),
                     Ok(None) => {}
@@ -75,12 +85,14 @@ impl Runtime {
                         format_args!("sys_spu_thread_exit from {unit:?} rejected: {err:?}"),
                     ),
                 }
+                landed
             }
             SpuThreadStop::GroupExit => {
                 let Some(status) = self.take_exit_status(unit) else {
                     self.fail_spu_thread(unit, stop, SpuThreadError::ExitWithoutStatus(code));
-                    return;
+                    return Vec::new();
                 };
+                let landed = self.land_issuer_dma(unit);
                 match self.lv2_host.spu_group_exit(unit, status) {
                     Ok((group, others)) => {
                         for other in others {
@@ -94,8 +106,12 @@ impl Runtime {
                         format_args!("sys_spu_thread_group_exit from {unit:?} rejected: {err:?}"),
                     ),
                 }
+                landed
             }
-            SpuThreadStop::Error(error) => self.fail_spu_thread(unit, stop, error),
+            SpuThreadStop::Error(error) => {
+                self.fail_spu_thread(unit, stop, error);
+                Vec::new()
+            }
         }
     }
 
@@ -123,3 +139,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/spu_group_join_null_console_tests.rs"]
 mod join_null_console_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_thread_exit_dma_tests.rs"]
+mod exit_dma_tests;

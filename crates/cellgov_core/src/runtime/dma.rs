@@ -2,6 +2,8 @@
 //! commit and wakes issuers whose modeled-latency window arrived.
 //! [`Runtime::drain_pending_dma`] runs at scenario termination and
 //! lands every outstanding transfer that no suspended queue holds.
+//! [`Runtime::land_issuer_dma`] runs at an SPU thread's exit and lands
+//! that thread's outstanding transfers.
 
 use std::borrow::Cow;
 
@@ -285,6 +287,37 @@ impl Runtime {
                 Some(target) => target.err(),
                 None => translation_fault(memory, c, payloaded),
             });
+        self.land_processed_dma(processed)
+    }
+
+    /// Land every transfer `unit` still has queued, whatever its modeled
+    /// time, and record each refused command the queue reaches; returns
+    /// the landed completions for the trace.
+    ///
+    /// An SPU thread's exit or group exit runs this before LV2 settles
+    /// the exit, so the transfers the thread queued have landed when its
+    /// group's join returns. In the `spu_dma_after_exit` and
+    /// `spu_dma_after_group_exit` captures, sixteen 16 KB puts queued just
+    /// before `sys_spu_thread_exit` or `sys_spu_thread_group_exit` have
+    /// all landed when the join returns.
+    pub(super) fn land_issuer_dma(
+        &mut self,
+        unit: cellgov_event::UnitId,
+    ) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
+        let (memory, groups) = (&self.memory, self.lv2_host.thread_groups());
+        let processed = self
+            .dma_queue
+            .process_issuer_translating(unit, |c, payloaded| match window_target(groups, c) {
+                Some(target) => target.err(),
+                None => translation_fault(memory, c, payloaded),
+            });
+        self.land_processed_dma(processed)
+    }
+
+    fn land_processed_dma(
+        &mut self,
+        processed: cellgov_dma::DueCommands,
+    ) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
         for raised in processed.raised {
             self.record_mfc_exception(raised);
         }
@@ -313,9 +346,10 @@ impl Runtime {
             //   a later DmaEnqueue from the issuer, and that mark keeps
             //   the unit off the scheduler.
             // The transfer leaves the queue either way, so an SPU that
-            // restarts sees its tag group complete. Whether the MFC
-            // continues while its SPU is stopped is unestablished; this
-            // is CellGov's choice.
+            // restarts sees its tag group complete. The MFC finishes the
+            // transfers a stopped SPU queued: in the `spu_dma_after_stop`
+            // capture, four 16 KB puts queued just before a stop all land
+            // and their tag group completes.
             // [CBEA p:92 s:8.5.1] a stop request stops the SPU's instruction issue; the page says nothing of the MFC.
             if matches!(
                 self.registry.effective_status(c.issuer()),

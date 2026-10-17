@@ -1,0 +1,20 @@
+[test]
+name = "spu_dma_after_stop"
+
+# A hardware probe of whether the MFC finishes the transfers a raw SPU
+# queued before it stopped: four 16 KB puts under one tag, then a stop
+# with no wait for the tag. The PPU reads SPU_Status, SPU_NextPC,
+# MFC_QStatus, the proxy tag status and the buffer at the stop and
+# again later. The PPU program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]
