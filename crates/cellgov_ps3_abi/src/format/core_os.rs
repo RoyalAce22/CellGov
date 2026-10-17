@@ -16,14 +16,30 @@
 //! 158471fd834f8ea8036136b6aab43cd86c7ba73d79ca30e0af3c0fe0001cf365)
 //! passes this parser:
 //!
-//! - It opens with the format word 1 and names 24 files.
+//! - It opens with the format word 1 and names 25 files.
 //! - It begins with `creserved_0` and `sdk_version` and ends with
 //!   `prog.srvk` and `pkg.srvk`.
-//! - It holds `lv1.self`, `lv0` and `lv2_kernel.self` (1586440 bytes).
+//! - It holds `lv1.self`, `lv0` and `lv2_kernel.self` (1586440 bytes,
+//!   SHA-256 e5253ec74b5fc2a05ee16c68e6b6f85dfa192482eef9fe6614eb86e92ea28a9e).
 //!
-//! The layout is read from update packages only, not from a console's
-//! flash. The reference console's flash copy needs a flash dump, and a
-//! flash dump carries console identifiers.
+//! The reference console's NOR flash holds the same layout in both
+//! banks, `ros0` at flash offset 0xC0010 and `ros1` at 0x7C0010: the
+//! format word 1, the +8 word 0, and 0x30-byte entries. Each bank
+//! declares an image length of 7340000 bytes, its 0x700000-byte region
+//! less 0x20.
+//!
+//! - Before custom firmware, both banks name the package's 25 files with
+//!   the package's sizes, and `lv2_kernel.self` carries the package's
+//!   SHA-256.
+//! - With the reference profile's custom firmware installed, `ros1`
+//!   still holds that image. `ros0` names 26 files: the package's 25
+//!   names in their order, 18 of them with other sizes, among them
+//!   `lv2_kernel.self` (1522976 bytes, SHA-256
+//!   d0b4709626b4af3ae890e70eaef9d975d9d6240325ba90e72e7e7d119eb02043),
+//!   and `lv2Pkernel.self` (1591152 bytes) after it.
+//!
+//! Only these fields come from the flash; the image itself stays out of
+//! the repository.
 
 /// Name of the CoreOS package inside the `update_files` payload.
 pub const CORE_OS_PACKAGE_NAME: &str = "CORE_OS_PACKAGE.pkg";
