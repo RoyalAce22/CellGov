@@ -40,6 +40,13 @@ pub(super) const CELL_FS_S_IFDIR_R_ONLY_MODE: u32 = CELL_FS_S_IFDIR
 
 /// `CellFsStat::blksize` for an entry at guest `path`: the disc's
 /// block under [`CELL_FS_DISC_ROOT`], 512 bytes elsewhere.
+///
+/// The `lv2_fs_blksize` capture refuses `/app_home` with `CELL_ENOENT`:
+/// a retail console gives a program no `/app_home`. CellGov answers
+/// 512 under it when a title manifest mounts it, which stands in for a
+/// development launch, and for the two files every host registers,
+/// `/app_home/PARAM.SFO` and `/app_home/output.txt`; that 512 is
+/// CellGov's choice.
 pub(super) fn block_size_of(path: &str) -> u64 {
     let on_disc = path
         .strip_prefix(CELL_FS_DISC_ROOT)

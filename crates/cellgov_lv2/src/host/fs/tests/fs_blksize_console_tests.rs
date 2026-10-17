@@ -1,8 +1,15 @@
 //! CellGov held to the `lv2_fs_blksize` capture: the block size
 //! `sys_fs_stat` answers for a file and a directory on each device the
-//! console had mounted, a game disc among them. The probe's
-//! `/app_home` paths refused on the console (a runner launch mounts no
-//! app_home), so they settle nothing and are not compared.
+//! console had mounted, a game disc among them.
+//!
+//! A retail console gives a program no `/app_home`: the probe's two
+//! `/app_home` paths answer `CELL_ENOENT`, both under the runner's
+//! launch and when webMAN mounts the game directory before the start.
+//! CellGov answers the same while no title manifest mounts
+//! `/app_home`, except for the two files every host registers,
+//! `/app_home/PARAM.SFO` and `/app_home/output.txt`. A manifest that
+//! mounts it stands in for a development launch, which has no retail
+//! block size to hold it to.
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -29,6 +36,9 @@ const PROBE_PATHS: [&str; 8] = [
 
 /// The records whose stat the console answered.
 const MOUNTED: [usize; 6] = [0, 3, 4, 5, 6, 7];
+
+/// The `/app_home` records: a file below it and its root.
+const APP_HOME: [usize; 2] = [1, 2];
 
 /// The disc's records: a file and the disc's root.
 const DISC: [usize; 2] = [5, 6];
@@ -127,6 +137,30 @@ fn stat_answers_the_console_s_block_size_on_each_mounted_device() {
             (ours.rc, ours.blksize),
             (console[i].rc, console[i].blksize),
             "{}: (r3, st_blksize)",
+            PROBE_PATHS[i]
+        );
+    }
+}
+
+/// With no `/app_home` mount, a stat under it and of it answers the
+/// console's refusal and writes no record.
+#[test]
+fn stat_under_an_unmounted_app_home_answers_the_console_s_refusal() {
+    let console = console();
+    for i in APP_HOME {
+        assert_ne!(console[i].rc, 0, "{}: the console refuses", PROBE_PATHS[i]);
+        // The probe fills a refused record with its sentinel; the
+        // replay's buffer starts zeroed, so zero words mean no write.
+        let ours = cellgov(PROBE_PATHS[i]);
+        assert_eq!(
+            ours,
+            Stat {
+                rc: console[i].rc,
+                mode: 0,
+                size: 0,
+                blksize: 0
+            },
+            "{}",
             PROBE_PATHS[i]
         );
     }

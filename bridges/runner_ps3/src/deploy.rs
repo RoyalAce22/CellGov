@@ -3,8 +3,9 @@
 //! directory of the manifest's appid.
 //!
 //! The package is what `tests/micro/common/package_ps3.sh` leaves in
-//! `build/ps3/`. The siblings go into `USRDIR` beside the EBOOT, the
-//! directory webMAN mounts as `/app_home`.
+//! `build/ps3/`. The siblings go into `USRDIR` beside the EBOOT. The
+//! started program has no `/app_home`, even when webMAN mounts the game
+//! directory first, so it reads them by their `/dev_hdd0/game` path.
 
 use std::path::{Path, PathBuf};
 
