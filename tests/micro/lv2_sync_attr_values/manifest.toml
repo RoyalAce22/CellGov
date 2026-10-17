@@ -1,0 +1,18 @@
+[test]
+name = "lv2_sync_attr_values"
+
+# A hardware probe: the enumerants of the sync attribute blocks, swept
+# one field at a time over the semaphore, mutex, event flag, cond and
+# event port creates; three field swaps that pin the block offsets; and
+# each block placed to end at a page boundary and 4 bytes past it. The
+# console capture is the answer; the CellGov gate replays it.
+
+[observe]
+# A 16-byte header and 84 16-byte case records, in the order
+# ppu/main.c lists: 1360 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1360 },
+]
+
+[expect]
+outcome = "completed"

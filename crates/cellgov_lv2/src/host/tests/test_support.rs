@@ -25,16 +25,11 @@ pub(crate) struct FakeRuntime {
 
 impl FakeRuntime {
     pub(crate) fn new(size: usize) -> Self {
-        Self {
-            memory: GuestMemory::new(size),
-            tick: GuestTicks::ZERO,
-            writable_override: None,
-            writable_at: std::collections::BTreeMap::new(),
-            local_stores: std::collections::BTreeMap::new(),
-        }
+        Self::with_memory(GuestMemory::new(size))
     }
 
-    pub(super) fn with_memory(memory: GuestMemory) -> Self {
+    pub(super) fn with_memory(mut memory: GuestMemory) -> Self {
+        seed_private_cond_attr(&mut memory);
         Self {
             memory,
             tick: GuestTicks::ZERO,
@@ -46,7 +41,12 @@ impl FakeRuntime {
 
     /// This runtime with [`valid_mutex_attr_bytes`] committed at
     /// [`VALID_MUTEX_ATTR_PTR`].
-    pub(super) fn with_valid_mutex_attr(mut self) -> Self {
+    pub(super) fn with_valid_mutex_attr(self) -> Self {
+        self.with_mutex_attr(valid_mutex_attr_bytes())
+    }
+
+    /// This runtime with `attr` committed at [`VALID_MUTEX_ATTR_PTR`].
+    fn with_mutex_attr(mut self, attr: [u8; MUTEX_ATTR_SIZE]) -> Self {
         self.memory
             .apply_commit(
                 ByteRange::new(
@@ -54,7 +54,7 @@ impl FakeRuntime {
                     MUTEX_ATTR_SIZE as u64,
                 )
                 .unwrap(),
-                &valid_mutex_attr_bytes(),
+                &attr,
             )
             .unwrap();
         self
@@ -211,23 +211,28 @@ pub(super) const SYNC_ATTR_SIZE: usize =
     cellgov_ps3_abi::lv2::sync::semaphore_attribute::SIZE as usize;
 
 /// One `sys_*_attribute_t` that both create dispatches accept:
-/// protocol = SYS_SYNC_FIFO, type = SYS_SYNC_WAITER_SINGLE, and a
-/// zeroed name.
+/// protocol = SYS_SYNC_FIFO, pshared = SYS_SYNC_NOT_PROCESS_SHARED,
+/// type = SYS_SYNC_WAITER_SINGLE, and a zeroed name.
 ///
 /// The semaphore holds padding where the event flag holds `type`, so
 /// one block with both fields set satisfies both create dispatches.
 pub(super) fn valid_sync_attr_bytes() -> [u8; SYNC_ATTR_SIZE] {
     use cellgov_ps3_abi::lv2::sync::{
-        event_flag_attribute, semaphore_attribute, SYS_SYNC_FIFO, SYS_SYNC_WAITER_SINGLE,
+        event_flag_attribute, semaphore_attribute, SYS_SYNC_FIFO, SYS_SYNC_NOT_PROCESS_SHARED,
+        SYS_SYNC_WAITER_SINGLE,
     };
-    // The one protocol write serves both create dispatches only while
-    // the two structs agree on the offset of the field.
+    // The one protocol and pshared writes serve both create dispatches
+    // only while the two structs agree on the offsets of the fields.
     const _: () =
         assert!(semaphore_attribute::PROTOCOL_OFFSET == event_flag_attribute::PROTOCOL_OFFSET);
+    const _: () =
+        assert!(semaphore_attribute::PSHARED_OFFSET == event_flag_attribute::PSHARED_OFFSET);
     const _: () = assert!(semaphore_attribute::SIZE == event_flag_attribute::SIZE);
     let mut attr = [0u8; SYNC_ATTR_SIZE];
     let protocol = semaphore_attribute::PROTOCOL_OFFSET;
     attr[protocol..protocol + 4].copy_from_slice(&SYS_SYNC_FIFO.to_be_bytes());
+    let pshared = semaphore_attribute::PSHARED_OFFSET;
+    attr[pshared..pshared + 4].copy_from_slice(&SYS_SYNC_NOT_PROCESS_SHARED.to_be_bytes());
     let kind = event_flag_attribute::TYPE_OFFSET;
     attr[kind..kind + 4].copy_from_slice(&SYS_SYNC_WAITER_SINGLE.to_be_bytes());
     attr
@@ -256,9 +261,26 @@ pub(super) fn payload_u32(payload: &[u8], at: usize) -> u32 {
 }
 
 /// A readable `sys_cond_attribute_t` address for `sys_cond_create`.
-/// Zeroed memory there reads as a process-private cond, and the block
-/// ends below `ID_PTR`-style addresses at 0x100.
+/// Every [`FakeRuntime`] whose memory reaches it seeds a process-private
+/// cond block there, and the block ends below `ID_PTR`-style addresses
+/// at 0x100.
 pub(super) const COND_ATTR_PTR: u32 = 0x70;
+
+/// Write `SYS_SYNC_NOT_PROCESS_SHARED` to the `pshared` word at
+/// [`COND_ATTR_PTR`] when `memory` maps it and the word is still zero,
+/// so a test that writes its own block there keeps it.
+fn seed_private_cond_attr(memory: &mut GuestMemory) {
+    use cellgov_ps3_abi::lv2::sync::{cond_attribute, SYS_SYNC_NOT_PROCESS_SHARED};
+    let at = u64::from(COND_ATTR_PTR) + cond_attribute::PSHARED_OFFSET as u64;
+    let Some(word) = ByteRange::new(GuestAddr::new(at), 4) else {
+        return;
+    };
+    if memory.read(word) == Some(&[0u8; 4][..]) {
+        memory
+            .apply_commit(word, &SYS_SYNC_NOT_PROCESS_SHARED.to_be_bytes())
+            .expect("the word reads, so it is mapped");
+    }
+}
 
 /// Address where [`FakeRuntime::with_valid_mutex_attr`] seeds a
 /// `sys_mutex_attribute_t` that `sys_mutex_create` accepts.
@@ -400,7 +422,29 @@ pub(super) fn connected_port(
 }
 
 pub(super) fn create_mutex_host(host: &mut Lv2Host, src: UnitId, rt: &FakeRuntime) -> u32 {
-    let rt = rt.clone().with_valid_mutex_attr();
+    create_mutex_from(host, src, rt.clone().with_valid_mutex_attr())
+}
+
+/// The key [`create_shared_mutex_host`] gives its mutex.
+pub(super) const SHARED_MUTEX_KEY: u64 = 0x4347_4F56_0000_0001;
+
+/// Create a process-shared mutex: [`valid_mutex_attr_bytes`] with
+/// pshared `SYS_SYNC_PROCESS_SHARED`, [`SHARED_MUTEX_KEY`] and attach
+/// flag 1. A process-shared cond binds only such a mutex.
+pub(super) fn create_shared_mutex_host(host: &mut Lv2Host, src: UnitId, rt: &FakeRuntime) -> u32 {
+    use cellgov_ps3_abi::lv2::sync::{mutex_attribute as layout, SYS_SYNC_PROCESS_SHARED};
+    let mut attr = valid_mutex_attr_bytes();
+    let pshared = layout::PSHARED_OFFSET;
+    attr[pshared..pshared + 4].copy_from_slice(&SYS_SYNC_PROCESS_SHARED.to_be_bytes());
+    let key = layout::IPC_KEY_OFFSET;
+    attr[key..key + 8].copy_from_slice(&SHARED_MUTEX_KEY.to_be_bytes());
+    let flags = layout::FLAGS_OFFSET;
+    attr[flags..flags + 4].copy_from_slice(&1u32.to_be_bytes());
+    create_mutex_from(host, src, rt.clone().with_mutex_attr(attr))
+}
+
+/// Create a mutex from the block `rt` holds at [`VALID_MUTEX_ATTR_PTR`].
+fn create_mutex_from(host: &mut Lv2Host, src: UnitId, rt: FakeRuntime) -> u32 {
     let created = host.dispatch(
         Lv2Request::MutexCreate {
             id_ptr: 0x100,

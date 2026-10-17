@@ -1,4 +1,4 @@
-//! PPU architectural state: register banks and SPRs mutated by `exec.rs`.
+//! PPU architectural state: the register banks and SPRs.
 
 use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;

@@ -524,6 +524,7 @@ fn attrs_round_trip() {
         priority_policy: 2,
         recursive: true,
         protocol: 0x20,
+        process_shared: true,
     };
     let mut t = MutexTable::new();
     t.create_with_id(1, attrs).unwrap();

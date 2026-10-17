@@ -1,0 +1,17 @@
+[test]
+name = "lv2_cond_pshared"
+
+# A hardware probe: which process-shared cond creates sys_cond_create
+# accepts, by whether the mutex it binds is process-shared and by the
+# attach flags it carries. The console capture is the answer; the
+# CellGov gate replays it.
+
+[observe]
+# A 16-byte header and six 16-byte case records, in the order
+# ppu/main.c lists: 112 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 112 },
+]
+
+[expect]
+outcome = "completed"

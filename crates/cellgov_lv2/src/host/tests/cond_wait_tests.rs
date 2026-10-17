@@ -224,7 +224,7 @@ fn cond_wait_ring_wake_fires_for_cond1_when_slot_ring_has_unconsumed_data() {
     // cond[1] of slot 0; slot 0 at base 0x2000: cursor 0 < limit 256.
     let rt = runtime_with_cond_attr(0x100, 0x8006_0100_0000_0040, &[(0x2004, 256), (0x2010, 0)]);
     let (mut host, rt, src) = cond_fixture_with(rt, UnitId::new(0));
-    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let mutex_id = create_shared_mutex_host(&mut host, src, &rt);
     host.dispatch(
         Lv2Request::MutexLock {
             mutex_id,
@@ -262,7 +262,7 @@ fn cond_wait_slot1_cond1_reads_slot1_ring() {
         &[(0x2004, 256), (0x2010, 256), (0xa004, 256), (0xa010, 0)],
     );
     let (mut host, rt, src) = cond_fixture_with(rt, UnitId::new(0));
-    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let mutex_id = create_shared_mutex_host(&mut host, src, &rt);
     host.dispatch(
         Lv2Request::MutexLock {
             mutex_id,
@@ -294,7 +294,7 @@ fn cond_wait_cond1_depleted_ring_parks_without_witness() {
         &[(0x2004, 256), (0x2010, 256)],
     );
     let (mut host, rt, src) = cond_fixture_with(rt, UnitId::new(0));
-    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let mutex_id = create_shared_mutex_host(&mut host, src, &rt);
     host.dispatch(
         Lv2Request::MutexLock {
             mutex_id,
@@ -327,7 +327,7 @@ fn cond_wait_cond0_parks_even_with_ring_data_and_counts_producer_wait() {
     // producer-fed and must not be satisfied by ring state.
     let rt = runtime_with_cond_attr(0x100, 0x8006_0100_0000_0030, &[(0x2004, 256), (0x2010, 0)]);
     let (mut host, rt, src) = cond_fixture_with(rt, UnitId::new(0));
-    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let mutex_id = create_shared_mutex_host(&mut host, src, &rt);
     host.dispatch(
         Lv2Request::MutexLock {
             mutex_id,

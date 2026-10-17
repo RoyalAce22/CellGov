@@ -866,7 +866,7 @@ fn event_flag_cancel_stores_the_pattern_in_the_waiters_space() {
         .unwrap();
 
     // sys_event_flag_attribute_t in boot memory: protocol@0,
-    // type@20; init pattern 0xABCD.
+    // pshared@4, type@20; init pattern 0xABCD.
     let attr_ptr: u64 = 0x300;
     let write_boot = |rt: &mut Runtime, addr: u64, bytes: &[u8]| {
         let range = ByteRange::new(GuestAddr::new(addr), bytes.len() as u64).unwrap();
@@ -876,6 +876,11 @@ fn event_flag_cancel_stores_the_pattern_in_the_waiters_space() {
         &mut rt,
         attr_ptr,
         &cellgov_ps3_abi::lv2::sync::SYS_SYNC_FIFO.to_be_bytes(),
+    );
+    write_boot(
+        &mut rt,
+        attr_ptr + 4,
+        &cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_PROCESS_SHARED.to_be_bytes(),
     );
     write_boot(
         &mut rt,

@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::host::test_support::{
-    create_mutex_host, extract_write_u32, primary_attrs, seed_primary_ppu, FakeRuntime,
+    create_mutex_host, create_shared_mutex_host, extract_write_u32, primary_attrs,
+    seed_primary_ppu, FakeRuntime,
 };
 use crate::ppu_thread::PpuThreadId;
 use crate::request::Lv2Request;
@@ -26,6 +27,10 @@ fn runtime_with_cond_attr(pshared: u32, ipc_key: u64, stamps: &[(u64, u32)]) -> 
         mem.apply_commit(range, bytes).unwrap();
     };
     commit(&mut mem, 0x800, &pshared.to_be_bytes());
+    // A process-shared cond carries an attach flag of 1 to 3.
+    if pshared == cellgov_ps3_abi::lv2::sync::SYS_SYNC_PROCESS_SHARED {
+        commit(&mut mem, 0x804, &1u32.to_be_bytes());
+    }
     commit(&mut mem, 0x808, &ipc_key.to_be_bytes());
     for &(addr, value) in stamps {
         commit(&mut mem, addr, &value.to_be_bytes());

@@ -1071,6 +1071,7 @@ mod process_exit_waiter_purge {
             priority_policy: 0,
             recursive: false,
             protocol: 0,
+            process_shared: false,
         }
     }
 

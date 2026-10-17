@@ -152,6 +152,7 @@ fn a_mutex_a_child_thread_still_holds_goes_with_the_child() {
                 priority_policy: 0,
                 recursive: false,
                 protocol: 0,
+                process_shared: false,
             },
         )
         .expect("the mutex");

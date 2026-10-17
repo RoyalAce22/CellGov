@@ -48,9 +48,17 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         let protocol = attr.u32_at(attr_layout::PROTOCOL_OFFSET);
-        use cellgov_ps3_abi::lv2::sync::{SYS_SYNC_FIFO, SYS_SYNC_PRIORITY};
+        use cellgov_ps3_abi::lv2::sync::{
+            SYS_SYNC_FIFO, SYS_SYNC_NOT_PROCESS_SHARED, SYS_SYNC_PRIORITY, SYS_SYNC_PROCESS_SHARED,
+        };
         // A memset-zero block fails this check: no protocol value is 0.
         if protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_PRIORITY {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        // The console capture of tests/micro/lv2_sync_attr_values creates
+        // a semaphore for the two pshared enumerants alone.
+        let pshared = attr.u32_at(attr_layout::PSHARED_OFFSET);
+        if pshared != SYS_SYNC_PROCESS_SHARED && pshared != SYS_SYNC_NOT_PROCESS_SHARED {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         // The hardware trace in

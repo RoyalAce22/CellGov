@@ -11,7 +11,7 @@ use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::test_support::{
-    connected_port, create_mutex_host, extract_write_u32, fake_runtime_with_valid_sync_attr,
+    connected_port, create_shared_mutex_host, extract_write_u32, fake_runtime_with_valid_sync_attr,
     reserve_mmapper_areas, seed_primary_ppu, FakeRuntime, VALID_SYNC_ATTR_PTR,
 };
 use crate::host::{is_system_ipc_key, Lv2Host};
@@ -191,6 +191,8 @@ fn cond_attr_runtime(ipc_key: u64) -> FakeRuntime {
         .unwrap();
     };
     commit(&mut mem, 0x800, &0x100u32.to_be_bytes());
+    // The attach flag a process-shared cond carries.
+    commit(&mut mem, 0x804, &1u32.to_be_bytes());
     commit(&mut mem, 0x808, &ipc_key.to_be_bytes());
     FakeRuntime::with_memory(mem)
 }
@@ -203,7 +205,7 @@ fn keyed_cond_create_and_signal(ipc_key: u64) -> Lv2Host {
     let rt = cond_attr_runtime(ipc_key);
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
-    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let mutex_id = create_shared_mutex_host(&mut host, src, &rt);
     let created = host.dispatch(
         Lv2Request::CondCreate {
             id_ptr: 0x200,
@@ -245,7 +247,7 @@ fn a_namespace_cond_wait_bumps_the_wait_witness() {
     let rt = cond_attr_runtime(NS_COND_KEY);
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
-    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let mutex_id = create_shared_mutex_host(&mut host, src, &rt);
     let created = host.dispatch(
         Lv2Request::CondCreate {
             id_ptr: 0x200,

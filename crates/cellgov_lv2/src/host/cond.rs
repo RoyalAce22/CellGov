@@ -40,18 +40,42 @@ impl Lv2Host {
         // is EFAULT, but no capture orders it against a stale mutex, so
         // its place last is unestablished.
         use cellgov_ps3_abi::lv2::sync::cond_attribute as attr_layout;
-        if attr_ptr == 0
-            || crate::host::guest_struct::GuestStruct::read(
+        let attr = match attr_ptr {
+            0 => None,
+            _ => crate::host::guest_struct::GuestStruct::read(
                 rt,
                 u64::from(attr_ptr),
                 attr_layout::SIZE as usize,
-            )
-            .is_none()
-        {
+            ),
+        };
+        let Some(attr) = attr else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        };
+        // The console capture of tests/micro/lv2_sync_attr_values refuses
+        // every pshared value outside the two enumerants. The capture of
+        // tests/micro/lv2_cond_pshared shows a process-shared cond held to
+        // the mutex's rules -- a nonzero key and an attach flag of 1 to 3
+        // -- and refused on a mutex that is not process-shared. No capture
+        // orders the key and flag checks against a stale mutex.
+        let pshared = attr.u32_at(attr_layout::PSHARED_OFFSET);
+        if pshared != SYS_SYNC_PROCESS_SHARED
+            && pshared != cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_PROCESS_SHARED
+        {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
-        if self.state.mutexes.lookup(mutex_id).is_none() {
+        let shared = pshared == SYS_SYNC_PROCESS_SHARED;
+        if shared {
+            let ipc_key = attr.u64_at(attr_layout::IPC_KEY_OFFSET);
+            let flags = attr.u32_at(attr_layout::FLAGS_OFFSET);
+            if ipc_key == 0 || !(1..=3).contains(&flags) {
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            }
+        }
+        let Some(mutex) = self.state.mutexes.lookup(mutex_id) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        };
+        if shared && !mutex.attrs().process_shared {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if id_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
@@ -471,3 +495,7 @@ fn cond_wake_dispatch(unit: UnitId, code: u64, woken: bool) -> Lv2Dispatch {
 #[cfg(test)]
 #[path = "tests/cond_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/cond_pshared_console_tests.rs"]
+mod cond_pshared_console_tests;

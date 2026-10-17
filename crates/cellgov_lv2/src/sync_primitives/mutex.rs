@@ -87,6 +87,9 @@ pub struct MutexAttrs {
     pub recursive: bool,
     /// Raw protocol bits; diagnostic only.
     pub protocol: u32,
+    /// Created process-shared. Only such a mutex binds a process-shared
+    /// cond.
+    pub process_shared: bool,
 }
 
 /// A single heavy mutex.
@@ -155,7 +158,8 @@ impl LaneValue for MutexEntry {
         lanes.lane(4, 0, u64::from(self.attrs.priority_policy));
         lanes.lane(5, 0, u64::from(self.attrs.recursive));
         lanes.lane(6, 0, u64::from(self.attrs.protocol));
-        self.waiters.push_lanes(lanes, 7);
+        let next = self.waiters.push_lanes(lanes, 7);
+        lanes.lane(next, 0, u64::from(self.attrs.process_shared));
     }
 }
 

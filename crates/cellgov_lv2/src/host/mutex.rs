@@ -95,6 +95,7 @@ impl Lv2Host {
                 priority_policy: protocol,
                 recursive: recursive_raw == cellgov_ps3_abi::lv2::sync::SYS_SYNC_RECURSIVE,
                 protocol,
+                process_shared: pshared == cellgov_ps3_abi::lv2::sync::SYS_SYNC_PROCESS_SHARED,
             }
         } else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
@@ -245,3 +246,7 @@ mod console_tests;
 #[cfg(test)]
 #[path = "tests/mutex_cond_rwlock_console_tests.rs"]
 mod cond_rwlock_console_tests;
+
+#[cfg(test)]
+#[path = "tests/sync_attr_console_tests.rs"]
+mod sync_attr_console_tests;

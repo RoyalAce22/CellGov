@@ -21,7 +21,11 @@ pub const SYS_SYNC_PRIORITY: u32 = 0x2;
 
 /// `protocol = SYS_SYNC_PRIORITY_INHERIT`: wake parked waiters in
 /// priority order, and lend the owner the highest waiter's priority.
-/// These three are the whole `protocol` vocabulary.
+/// Only `sys_mutex_create` accepts it.
+// The console capture of tests/micro/lv2_sync_attr_values sweeps
+// `protocol` 0 to 8 through the semaphore, mutex and event-flag creates:
+// FIFO and PRIORITY pass everywhere, PRIORITY_INHERIT passes the mutex
+// alone, and every other value is EINVAL.
 pub const SYS_SYNC_PRIORITY_INHERIT: u32 = 0x3;
 
 /// `pshared = SYS_SYNC_PROCESS_SHARED`: the primitive is visible
@@ -29,8 +33,11 @@ pub const SYS_SYNC_PRIORITY_INHERIT: u32 = 0x3;
 pub const SYS_SYNC_PROCESS_SHARED: u32 = 0x100;
 
 /// `pshared = SYS_SYNC_NOT_PROCESS_SHARED`: the primitive is visible
-/// to one process, and its `ipc_key` is not read. These two are the
-/// whole `pshared` vocabulary.
+/// to one process, and its `ipc_key` is not read. Any other `pshared`
+/// is EINVAL at create.
+// The console capture of tests/micro/lv2_sync_attr_values answers
+// EINVAL from the semaphore, mutex, event-flag and cond creates for
+// `pshared` 0, 0x80, 0x300 and 0x400.
 pub const SYS_SYNC_NOT_PROCESS_SHARED: u32 = 0x200;
 
 /// `recursive = SYS_SYNC_RECURSIVE`: the owner may re-lock the mutex,
@@ -38,8 +45,9 @@ pub const SYS_SYNC_NOT_PROCESS_SHARED: u32 = 0x200;
 pub const SYS_SYNC_RECURSIVE: u32 = 0x10;
 
 /// `recursive = SYS_SYNC_NOT_RECURSIVE`: an owner re-lock is EDEADLK.
-/// These two are the whole `recursive` vocabulary, so any other value
-/// is EINVAL at create.
+/// Any other `recursive` is EINVAL at create.
+// The console capture of tests/micro/lv2_sync_attr_values answers
+// EINVAL for `recursive` 0, 0x8, 0x30 and 0x40.
 pub const SYS_SYNC_NOT_RECURSIVE: u32 = 0x20;
 
 /// `adaptive = SYS_SYNC_ADAPTIVE`: the create asks that a contending
@@ -64,6 +72,10 @@ pub const SYS_SYNC_NOT_ADAPTIVE: u32 = 0x2000;
 pub const SYS_SYNC_WAITER_SINGLE: u32 = 0x10000;
 
 /// `type = SYS_SYNC_WAITER_MULTIPLE`: any number of threads may park.
+/// Any other `type` is EINVAL at create.
+// The console capture of tests/micro/lv2_sync_attr_values answers
+// EINVAL from `sys_event_flag_create` for `type` 0, 0x8000, 0x30000 and
+// 0x40000.
 pub const SYS_SYNC_WAITER_MULTIPLE: u32 = 0x20000;
 
 /// The `mode` word of `_sys_lwcond_signal` and `_sys_lwcond_signal_all`.
@@ -132,23 +144,32 @@ pub mod event_flag_wait_mode {
 /// `protocol@0` (u32), `pshared@4` (u32), `ipc_key@8` (u64),
 /// `flags@16` (s32), `pad@20` (u32), `name@24` (8 bytes), for a
 /// declared [`SIZE`](semaphore_attribute::SIZE) of 32 bytes.
-// The field order and the eight-byte name come from a non-public
-// description of the struct, so they carry no citation. The kernel
-// reads the whole declared size: the console capture of
-// tests/micro/lv2_semaphore_gates answers EFAULT from the semaphore,
-// mutex, event flag and cond creates when only a block's name bytes
-// are unmapped.
+// The console capture of tests/micro/lv2_sync_attr_values pins the
+// field order: a block with `protocol` and `recursive`, `pshared` and
+// `adaptive`, or `flags` and `type` swapped is EINVAL. It also pins the
+// size: each create passes a block that ends at the last mapped byte
+// and answers EFAULT for one that ends 4 bytes past it, as the capture
+// of tests/micro/lv2_semaphore_gates does for unmapped name bytes. No
+// create answer depends on the name's contents, so the name is
+// observable only through that mapping.
 pub mod semaphore_attribute {
     /// `sizeof(sys_semaphore_attribute_t)`.
     pub const SIZE: u32 = 0x20;
 
     /// `protocol` -- wake order for parked waiters.
     pub const PROTOCOL_OFFSET: usize = 0x00;
+    /// `pshared` -- [`SYS_SYNC_PROCESS_SHARED`] or
+    /// [`SYS_SYNC_NOT_PROCESS_SHARED`].
+    ///
+    /// [`SYS_SYNC_PROCESS_SHARED`]: super::SYS_SYNC_PROCESS_SHARED
+    /// [`SYS_SYNC_NOT_PROCESS_SHARED`]: super::SYS_SYNC_NOT_PROCESS_SHARED
+    pub const PSHARED_OFFSET: usize = 0x04;
 
     // Container coupling, as in `format::elf`: a reader that
     // bounds-checks `SIZE` reads every field below without a second
     // check.
     const _: () = assert!(PROTOCOL_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+    const _: () = assert!(PSHARED_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
 }
 
 /// `sys_mutex_attribute_t`, the block `sys_mutex_create` (100) reads.
@@ -209,6 +230,12 @@ pub mod event_flag_attribute {
 
     /// `protocol` -- wake order for parked waiters.
     pub const PROTOCOL_OFFSET: usize = 0x00;
+    /// `pshared` -- [`SYS_SYNC_PROCESS_SHARED`] or
+    /// [`SYS_SYNC_NOT_PROCESS_SHARED`].
+    ///
+    /// [`SYS_SYNC_PROCESS_SHARED`]: super::SYS_SYNC_PROCESS_SHARED
+    /// [`SYS_SYNC_NOT_PROCESS_SHARED`]: super::SYS_SYNC_NOT_PROCESS_SHARED
+    pub const PSHARED_OFFSET: usize = 0x04;
     /// `type` -- [`SYS_SYNC_WAITER_SINGLE`] or
     /// [`SYS_SYNC_WAITER_MULTIPLE`].
     ///
@@ -218,6 +245,7 @@ pub mod event_flag_attribute {
 
     // Same container coupling as `semaphore_attribute`.
     const _: () = assert!(PROTOCOL_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+    const _: () = assert!(PSHARED_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
     const _: () = assert!(TYPE_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
 }
 
@@ -237,11 +265,19 @@ pub mod cond_attribute {
     /// [`SYS_SYNC_PROCESS_SHARED`]: super::SYS_SYNC_PROCESS_SHARED
     /// [`SYS_SYNC_NOT_PROCESS_SHARED`]: super::SYS_SYNC_NOT_PROCESS_SHARED
     pub const PSHARED_OFFSET: usize = 0x00;
+    /// `flags` -- the process-shared attach policy.
+    ///
+    /// A process-shared cond needs a nonzero `ipc_key`, a `flags` of 1
+    /// to 3 and a process-shared mutex; `sys_cond_create` answers
+    /// EINVAL to any other.
+    // The console capture of tests/micro/lv2_cond_pshared shows these rules.
+    pub const FLAGS_OFFSET: usize = 0x04;
     /// `ipc_key` -- the process-shared namespace key.
     pub const IPC_KEY_OFFSET: usize = 0x08;
 
     // Same container coupling as `semaphore_attribute`.
     const _: () = assert!(PSHARED_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+    const _: () = assert!(FLAGS_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
     const _: () = assert!(IPC_KEY_OFFSET + core::mem::size_of::<u64>() <= SIZE as usize);
 }
 

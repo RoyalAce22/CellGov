@@ -128,7 +128,7 @@ fn cond_destroy_with_waiter_returns_ebusy() {
 fn cond_create_with_pshared_attr_captures_ipc_key() {
     let rt = runtime_with_cond_attr(0x100, 0x8006_0100_0000_0030, &[]);
     let (mut host, rt, src) = cond_fixture_with(rt, UnitId::new(0));
-    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let mutex_id = create_shared_mutex_host(&mut host, src, &rt);
     let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
     assert_eq!(
         host.derived.cond_ipc_keys.get(&cond_id),
@@ -149,7 +149,7 @@ fn cond_create_without_pshared_stays_keyless() {
 fn cond_destroy_drops_captured_ipc_key() {
     let rt = runtime_with_cond_attr(0x100, 0x8006_0100_0000_0030, &[]);
     let (mut host, rt, src) = cond_fixture_with(rt, UnitId::new(0));
-    let mutex_id = create_mutex_host(&mut host, src, &rt);
+    let mutex_id = create_shared_mutex_host(&mut host, src, &rt);
     let cond_id = create_cond_with_attr(&mut host, src, &rt, mutex_id);
     host.dispatch(Lv2Request::CondDestroy { id: cond_id }, src, &rt);
     assert!(!host.derived.cond_ipc_keys.contains_key(&cond_id));
