@@ -263,3 +263,7 @@ pub(super) fn check_strict_reserved_vs_rsx_mirror(
 #[cfg(test)]
 #[path = "tests/types_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/address_space_console_tests.rs"]
+mod address_space_console_tests;

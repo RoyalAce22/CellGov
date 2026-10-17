@@ -1,11 +1,20 @@
 //! PS3 LV2 user-process virtual address-space layout.
+//!
+//! The regions below are the ones CellGov's boot backs. Where a
+//! region is CellGov's own layout, its doc says so and gives what the
+//! reference console's captures show beside it. The captures are
+//! `lv2_address_space`, `lv2_process_layout` and `lv2_rsx_answers`.
 
-/// Base guest virtual address of the primary thread's stack region.
+/// Base guest virtual address of CellGov's primary-stack region. The
+/// stack itself starts one page higher, at [`PS3_PRIMARY_STACK_START`].
+/// On the reference console the page at this base is unmapped
+/// (`lv2_process_layout`).
 pub const PS3_PRIMARY_STACK_BASE: u64 = 0xD000_0000;
 
-/// Size in bytes of the primary thread's stack region: room for the
+/// Size in bytes of CellGov's primary-stack region: room for the
 /// largest stack a `sys_proc_param` (PROC_PARAM.primary_stacksize) can
-/// get, starting at [`PS3_PRIMARY_STACK_START`].
+/// get, starting at [`PS3_PRIMARY_STACK_START`]. A console maps only the
+/// stack the process gets.
 pub const PS3_PRIMARY_STACK_SIZE: usize = 0x0010_1000;
 
 /// Lowest address of the primary thread's stack, whatever its size.
@@ -31,11 +40,18 @@ pub const PS3_PRIMARY_STACK_START: u64 = 0xD000_1000;
 /// null back chain, so the top of the stack is never itself the SP.
 pub const PS3_PRIMARY_STACK_ENTRY_RESERVE: u64 = 0x230;
 
-/// Sits immediately above the primary stack so child-stack allocator
-/// addresses land in real guest memory.
+/// Base of CellGov's child-thread stack region, which sits immediately
+/// above its primary-stack region. CellGov's allocator bumps through it
+/// and reuses no stack.
+///
+/// The reference console places them differently (`lv2_address_space`).
+/// Its process has the default 64 KiB primary stack. Each of four
+/// threads, created and joined in turn, gets its stack at the same
+/// address, 0x2000 above the primary stack's end. A joined thread's
+/// stack is reused.
 pub const PS3_CHILD_STACKS_BASE: u64 = 0xD010_1000;
 
-/// Size in bytes of the child-thread stacks region.
+/// Size in bytes of CellGov's child-thread stack region.
 pub const PS3_CHILD_STACKS_SIZE: usize = 0x00EF_F000;
 
 /// Smallest stack frame a PPE 64-bit callee may be handed: the
@@ -99,29 +115,52 @@ const _: () = assert!(
 );
 const _: () = assert!(PS3_PRIMARY_STACK_START >= PS3_PRIMARY_STACK_BASE);
 
-/// Base of the iomap region `sys_rsx_context_iomap` (672) maps into;
-/// libgcm asks for an IO window starting here.
+/// Base of CellGov's iomap region, a backed region that
+/// `sys_rsx_context_iomap` (672) maps into.
+///
+/// It is CellGov's own layout. On the reference console the IO window
+/// libgcm reports is the game's own host buffer, allocated with
+/// `sys_memory_allocate` (`0x5000_0000` in `lv2_rsx_answers`), and a
+/// game's raw 672 is refused. A 64 KiB page at this base is mapped
+/// before any RSX call (`lv2_process_layout`, `lv2_address_space`); what
+/// it holds is not captured.
 pub const PS3_RSX_IOMAP_BASE: u64 = 0x4000_0000;
 
-/// Size of the backed iomap region, captured from the `size` argument
-/// of a retail title's first `sys_rsx_context_iomap` call.
+/// Size of CellGov's iomap region: a CellGov default, chosen to fit the
+/// first `sys_rsx_context_iomap` size seen from a retail title. No
+/// console capture fixes it.
 pub const PS3_RSX_IOMAP_SIZE: usize = 0x0550_0000;
 
-/// RSX video/local-memory MMIO: reads return zero, writes fault.
+/// Base of CellGov's RSX region. Reads return zero and writes fault,
+/// unless the title's manifest opts into the RSX mirror, which makes it
+/// read-write.
+///
+/// The reference console maps RSX local memory here once a context is
+/// allocated: `0xEA0_0000` bytes in 1 MiB pages, read-write, and a word
+/// written there reads back (`lv2_address_space`). Before that nothing
+/// maps here (`lv2_process_layout`).
 pub const PS3_RSX_BASE: u64 = 0xC000_0000;
 
-/// Size in bytes of the RSX MMIO region.
+/// Size in bytes of CellGov's RSX region. It holds the console's local
+/// memory with room to spare.
 pub const PS3_RSX_SIZE: usize = 0x1000_0000;
 
-/// SPU-shared MMIO: same read-zero / write-fault semantics as [`PS3_RSX_BASE`].
+/// Base of CellGov's SPU region, with the same read-zero / write-fault
+/// model as [`PS3_RSX_BASE`].
+///
+/// On the reference console the region holds two kinds of window. A
+/// raw SPU's windows sit at this base plus `id * 0x10_0000`
+/// (`spu_raw_window_modes`). SPU thread windows start at `0xF000_0000`
+/// (`spu_thread_window_slots`, `spu_ls_alias`).
 pub const PS3_SPU_RESERVED_BASE: u64 = 0xE000_0000;
 
-/// Size in bytes of the SPU-shared MMIO region.
+/// Size in bytes of CellGov's SPU region, which runs to the end of the
+/// 32-bit address space.
 pub const PS3_SPU_RESERVED_SIZE: usize = 0x2000_0000;
 
-/// Lowest plausible address for PS3 LV2 user text: the trampoline
-/// scratch zone (`0..0x10000`) sits below it, user heap and title text
-/// above. An LV2 convention with no architectural backing.
+/// Lowest address of a game's image. The reference console maps
+/// nothing at 0, 0x8000 or 0xF000, and maps the image's first page here
+/// (`lv2_address_space`).
 pub const PS3_USER_TEXT_FLOOR: u64 = 0x0001_0000;
 
 // The boot-composed regions must tile the address space without

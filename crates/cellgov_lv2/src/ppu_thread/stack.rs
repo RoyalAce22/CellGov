@@ -153,3 +153,7 @@ impl Default for ThreadStackAllocator {
 #[cfg(test)]
 #[path = "tests/stack_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/child_stack_console_tests.rs"]
+mod child_stack_console_tests;

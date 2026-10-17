@@ -1,0 +1,15 @@
+[test]
+name = "lv2_address_space"
+
+# A hardware probe: where the user address space puts the pages below
+# the image, the primary and child thread stacks, and what an RSX
+# context maps. The console capture is the answer; no emulator runs it.
+
+[observe]
+# 99 big-endian u32 words, as ppu/main.c lists: 396 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 396 },
+]
+
+[expect]
+outcome = "completed"
