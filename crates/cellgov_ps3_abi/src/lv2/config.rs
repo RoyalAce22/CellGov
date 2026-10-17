@@ -84,3 +84,11 @@ pub const SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR: [u8; 26] = [
 /// Bytes of [`SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR`] a console capture
 /// settles; the rest differ per controller.
 pub const SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR_CAPTURED: usize = 15;
+
+/// Bytes of the data buffer a pad-manager listener may carry. The
+/// reference console registers a listener on either pad-manager service
+/// with 26 bytes and answers `CELL_ENOMEM` for 25, 27 and 32
+/// (`lv2_config_listener_pad_data`) and for 1, 8 and 256
+/// (`lv2_config_listener_shapes`). vsh's pad-manager listeners carry
+/// 26 bytes, the length of [`SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR`].
+pub const SYS_CONFIG_PADMANAGER_LISTENER_DATA_LEN: usize = 26;

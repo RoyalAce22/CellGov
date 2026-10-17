@@ -18,7 +18,7 @@ use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_SERVICE_PADMANAGER, SYS_CONFIG_SERVICE_PADMANAGER2, SYS_CONFIG_SERVICE_USER_LIBPAD,
 };
 use cellgov_ps3_abi::lv2::kernel_id::{self, compose, USBD_HANDLE_CLASS};
-use cellgov_ps3_abi::lv2::{errno, syscall};
+use cellgov_ps3_abi::lv2::syscall;
 
 use super::*;
 use crate::host::test_support::{console_payload, extract_write_u32, FakeRuntime};
@@ -405,7 +405,7 @@ fn listener_shapes_without_pad_data_answer_as_the_console_does() {
 }
 
 #[test]
-fn a_pad_manager_listener_with_a_data_buffer_is_enomem_on_the_console_and_accepted_here() {
+fn a_pad_manager_listener_with_a_data_buffer_is_enomem_as_on_the_console() {
     let w = words("lv2_config_listener_shapes");
     let rt = runtime();
     let mut host = Lv2Host::new();
@@ -445,19 +445,13 @@ fn a_pad_manager_listener_with_a_data_buffer_is_enomem_on_the_console_and_accept
     for (n, (service, verbosity, size, kind)) in shapes.into_iter().enumerate() {
         let slot = 4 + 3 * (n + 1);
         assert_eq!(
-            w[slot],
-            u64::from(errno::CELL_ENOMEM),
-            "case {}: the console",
-            n + 1
-        );
-        assert_eq!(
             code(
                 &mut host,
                 &rt,
                 add_listener(handle, service, verbosity, DATA_PTR, size, kind)
             ),
-            0,
-            "case {}: CellGov accepts the buffer the console refuses",
+            w[slot],
+            "case {}",
             n + 1
         );
     }

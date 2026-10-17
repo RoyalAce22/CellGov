@@ -12,9 +12,9 @@ use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_EVENT_SOURCE_SERVICE, SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR,
-    SYS_CONFIG_SERVICE_EVENT_HEAD_LEN, SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN,
-    SYS_CONFIG_SERVICE_LISTENER_ONCE, SYS_CONFIG_SERVICE_PADMANAGER,
-    SYS_CONFIG_SERVICE_PADMANAGER2,
+    SYS_CONFIG_PADMANAGER_LISTENER_DATA_LEN, SYS_CONFIG_SERVICE_EVENT_HEAD_LEN,
+    SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN, SYS_CONFIG_SERVICE_LISTENER_ONCE,
+    SYS_CONFIG_SERVICE_PADMANAGER, SYS_CONFIG_SERVICE_PADMANAGER2,
 };
 use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_SERVICE_LISTENER_REPEATING, SYS_CONFIG_SERVICE_USER_LIBPAD,
@@ -25,10 +25,11 @@ const HANDLE_PTR: u32 = 0x104;
 const LISTENER_PTR: u32 = 0x108;
 const SERVICE_PTR: u32 = 0x10c;
 const RECORD_PTR: u32 = 0x400;
-/// Listener buffer whose first byte opens the pad-manager filter.
-const PAD_FILTER_PTR: u32 = 0x200;
-/// Listener buffer that leaves the filter closed.
-const NO_FILTER_PTR: u32 = 0x210;
+/// A pad-manager listener buffer leading with `0x01`, then zeroes.
+const LISTENER_DATA_PTR: u32 = 0x200;
+/// A pad-manager listener buffer leading with `0x02`, then zeroes.
+const OTHER_LEAD_PTR: u32 = 0x240;
+const PAD_DATA_LEN: u64 = SYS_CONFIG_PADMANAGER_LISTENER_DATA_LEN as u64;
 /// Four bytes of user-service data.
 const USER_DATA_PTR: u32 = 0x220;
 const USER_DATA: [u8; 4] = [0xde, 0xad, 0xbe, 0xef];
@@ -40,8 +41,8 @@ fn src() -> UnitId {
 fn runtime() -> FakeRuntime {
     let mut mem = GuestMemory::new(0x10000);
     for (addr, bytes) in [
-        (PAD_FILTER_PTR, &[0x01u8, 0, 0, 0][..]),
-        (NO_FILTER_PTR, &[0x00u8, 0, 0, 0][..]),
+        (LISTENER_DATA_PTR, &[0x01u8, 0, 0, 0][..]),
+        (OTHER_LEAD_PTR, &[0x02u8, 0, 0, 0][..]),
         (USER_DATA_PTR, &USER_DATA[..]),
     ] {
         mem.apply_commit(
@@ -208,7 +209,7 @@ fn a_second_open_does_not_seed_again() {
 }
 
 #[test]
-fn a_pad_manager_listener_leading_with_01_is_replayed_the_seeded_service() {
+fn a_pad_manager_listener_is_replayed_the_seeded_service() {
     let mut host = Lv2Host::new();
     let rt = runtime();
     let queue = create_queue(&mut host, &rt, 8);
@@ -218,8 +219,8 @@ fn a_pad_manager_listener_leading_with_01_is_replayed_the_seeded_service() {
         &rt,
         handle,
         SYS_CONFIG_SERVICE_PADMANAGER,
-        PAD_FILTER_PTR,
-        4,
+        0,
+        0,
         SYS_CONFIG_SERVICE_LISTENER_REPEATING,
     );
     let listener = written_u32(&d);
@@ -239,6 +240,57 @@ fn a_pad_manager_listener_leading_with_01_is_replayed_the_seeded_service() {
 }
 
 #[test]
+fn a_pad_manager_listener_with_data_of_another_length_is_enomem_and_registers_nothing() {
+    let mut host = Lv2Host::new();
+    let rt = runtime();
+    let queue = create_queue(&mut host, &rt, 8);
+    let handle = open(&mut host, &rt, queue);
+    for service in [
+        SYS_CONFIG_SERVICE_PADMANAGER,
+        SYS_CONFIG_SERVICE_PADMANAGER2,
+    ] {
+        for size in [1, PAD_DATA_LEN - 1, PAD_DATA_LEN + 1] {
+            let d = add_listener(
+                &mut host,
+                &rt,
+                handle,
+                service,
+                LISTENER_DATA_PTR,
+                size,
+                SYS_CONFIG_SERVICE_LISTENER_REPEATING,
+            );
+            assert_eq!(code_of(&d), u64::from(errno::CELL_ENOMEM), "size {size}");
+        }
+    }
+    assert!(drain(&mut host, queue).is_empty());
+    assert_eq!(host.state.config.event_count(), 0);
+}
+
+#[test]
+fn a_pad_manager_listener_whose_buffer_leads_with_01_is_replayed_the_seeded_service() {
+    let mut host = Lv2Host::new();
+    let rt = runtime();
+    let queue = create_queue(&mut host, &rt, 8);
+    let handle = open(&mut host, &rt, queue);
+    for service in [
+        SYS_CONFIG_SERVICE_PADMANAGER,
+        SYS_CONFIG_SERVICE_PADMANAGER2,
+    ] {
+        let d = add_listener(
+            &mut host,
+            &rt,
+            handle,
+            service,
+            LISTENER_DATA_PTR,
+            PAD_DATA_LEN,
+            SYS_CONFIG_SERVICE_LISTENER_REPEATING,
+        );
+        assert_eq!(code_of(&d), 0);
+        assert_eq!(drain(&mut host, queue).len(), 1, "service {service:#x}");
+    }
+}
+
+#[test]
 fn a_pad_manager_listener_whose_buffer_leads_with_another_byte_hears_nothing() {
     let mut host = Lv2Host::new();
     let rt = runtime();
@@ -249,8 +301,8 @@ fn a_pad_manager_listener_whose_buffer_leads_with_another_byte_hears_nothing() {
         &rt,
         handle,
         SYS_CONFIG_SERVICE_PADMANAGER,
-        NO_FILTER_PTR,
-        4,
+        OTHER_LEAD_PTR,
+        PAD_DATA_LEN,
         SYS_CONFIG_SERVICE_LISTENER_REPEATING,
     );
     assert_eq!(code_of(&d), 0);
@@ -310,8 +362,8 @@ fn get_service_event_writes_the_record() {
         &rt,
         handle,
         SYS_CONFIG_SERVICE_PADMANAGER,
-        PAD_FILTER_PTR,
-        4,
+        0,
+        0,
         SYS_CONFIG_SERVICE_LISTENER_REPEATING,
     ));
     let ev = drain(&mut host, queue)[0];
@@ -784,7 +836,7 @@ fn listener_data_over_the_cap_is_einval_and_an_unreadable_buffer_is_efault() {
         &rt,
         handle,
         SYS_CONFIG_SERVICE_PADMANAGER,
-        PAD_FILTER_PTR,
+        LISTENER_DATA_PTR,
         SYS_CONFIG_DATA_CAP + 1,
         SYS_CONFIG_SERVICE_LISTENER_REPEATING,
     );

@@ -96,6 +96,10 @@ mod usbd_config_hid_console_tests;
 mod config_service_records_console_tests;
 
 #[cfg(test)]
+#[path = "tests/config_listener_pad_data_console_tests.rs"]
+mod config_listener_pad_data_console_tests;
+
+#[cfg(test)]
 #[path = "tests/uart_get_params_console_tests.rs"]
 mod uart_get_params_console_tests;
 

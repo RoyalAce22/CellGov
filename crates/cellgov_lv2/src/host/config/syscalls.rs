@@ -4,8 +4,8 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::config::{
-    SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR, SYS_CONFIG_SERVICE_PADMANAGER,
-    SYS_CONFIG_SERVICE_PADMANAGER2,
+    SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR, SYS_CONFIG_PADMANAGER_LISTENER_DATA_LEN,
+    SYS_CONFIG_SERVICE_PADMANAGER, SYS_CONFIG_SERVICE_PADMANAGER2,
 };
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::kernel_id::{
@@ -165,10 +165,15 @@ impl Lv2Host {
     /// and replays every matching service already registered, oldest
     /// first, to the handle's queue.
     ///
-    /// The console answers a game process `CELL_ENOMEM` for a
-    /// pad-manager listener with any of the data buffers the
-    /// `lv2_config_listener_shapes` capture sends; CellGov accepts
-    /// them. Which buffers the kernel accepts is not captured.
+    /// A pad-manager listener carries no data buffer or one of
+    /// [`SYS_CONFIG_PADMANAGER_LISTENER_DATA_LEN`] bytes. The kernel
+    /// refuses any other length on both pad-manager services and writes
+    /// no listener id (`lv2_config_listener_shapes`,
+    /// `lv2_config_listener_pad_data`). vsh's pad-manager listeners carry
+    /// that length; libio's listeners name the user services
+    /// `0x8000000000000001` to `...03` with no buffer (the 4.93
+    /// `libio.sprx` call sites of its `sys_config_add_service_listener`
+    /// export). The kernel accepts a user-service listener with a buffer.
     ///
     /// # Errors
     ///
@@ -176,6 +181,8 @@ impl Lv2Host {
     /// - `CELL_EFAULT` for a null out-pointer or an unreadable data
     ///   buffer.
     /// - `CELL_EINVAL` when the buffer exceeds [`SYS_CONFIG_DATA_CAP`].
+    /// - `CELL_ENOMEM` for a pad-manager listener whose buffer is not
+    ///   [`SYS_CONFIG_PADMANAGER_LISTENER_DATA_LEN`] bytes.
     /// - `CELL_EAGAIN` when the kernel-id table is full.
     pub(in crate::host) fn dispatch_config_add_service_listener(
         &mut self,
@@ -196,6 +203,15 @@ impl Lv2Host {
             Ok(data) => data,
             Err(code) => return Lv2Dispatch::immediate(code.into()),
         };
+        if !data.is_empty()
+            && data.len() != SYS_CONFIG_PADMANAGER_LISTENER_DATA_LEN
+            && matches!(
+                spec.service_id,
+                SYS_CONFIG_SERVICE_PADMANAGER | SYS_CONFIG_SERVICE_PADMANAGER2
+            )
+        {
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+        }
         let Some(id) = self.alloc_id(requester, CONFIG_LISTENER_CLASS) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };

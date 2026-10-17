@@ -59,8 +59,13 @@ pub(crate) struct ConfigListener {
 impl ConfigListener {
     /// A once listener fires a single time, a listener of a type other
     /// than once or repeating never fires, and the id and verbosity must
-    /// fit. A pad-manager listener with a data buffer matches only when
-    /// the buffer leads with `0x01`; one with no buffer matches.
+    /// fit. A [`SYS_CONFIG_SERVICE_PADMANAGER`] listener with a data
+    /// buffer matches only when the buffer leads with `0x01`: on the
+    /// reference console one leading with `0x01` hears the attached
+    /// pad's service, and ones leading with `0x00`, `0x02` or `0x04`
+    /// register and hear nothing (`lv2_config_listener_pad_data`). No
+    /// capture sends the second pad-manager service a buffer leading
+    /// with another byte.
     pub(super) fn matches(&self, service: &ConfigService) -> bool {
         match self.listener_type {
             SYS_CONFIG_SERVICE_LISTENER_ONCE if self.delivered > 0 => return false,
