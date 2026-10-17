@@ -126,6 +126,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         mode: _,
         // --- left alone by a restore ---
         dma_latency: _,                   // set once at construction
+        rsx_window_access: _,             // set once by the host before the run
         last_runnable: _,                 // cleared on restore, rewritten by the next step
         last_dma_completions: _,          // cleared on restore, rewritten by the next commit
         last_host_writes: _,              // cleared on restore, rewritten by the next step

@@ -43,6 +43,18 @@ impl Lv2Host {
         self.state.rsx_context.iomap_size = size;
     }
 
+    /// Record the control block of an RSX context window at `base`
+    /// without going through 670, so its control slots resolve.
+    ///
+    /// Unvalidated seeding hook for synthetic scenarios that drive the
+    /// control slots; the caller maps the block's memory, and no
+    /// reports base is published, so a seeded label base stands.
+    /// `dispatch_sys_rsx_context_allocate` is the path that places the
+    /// whole window.
+    pub fn seed_rsx_window(&mut self, base: u32) {
+        self.state.rsx_context.dma_control_addr = base;
+    }
+
     /// Mark the sys_rsx context as allocated under `context_id`
     /// without going through 670.
     ///
@@ -112,9 +124,8 @@ impl Lv2Host {
     /// the next 330: the `lv2_mmapper_map_edges` capture shows a 330
     /// after a 331 getting the freed base back.
     ///
-    /// A range never overlaps the RSX context window
-    /// (`region::WINDOW_BASE`) or a 1 MiB-page area, as
-    /// [`Self::free_area_base`] describes.
+    /// A range never overlaps an open RSX context window or a 1 MiB-page
+    /// area, as [`Self::free_area_base`] describes.
     ///
     /// Returns `None` for `size == 0`, when the rounding would overflow
     /// `u32`, or when no free range below
@@ -138,14 +149,13 @@ impl Lv2Host {
 
     /// The lowest base in `[MMAPPER_REGION_START, MMAPPER_REGION_END)`
     /// where `rounded` bytes (a granule multiple) overlap none of
-    /// process `pid`'s areas, no process's 1 MiB-page area, and the RSX
-    /// context window.
+    /// process `pid`'s areas, no process's 1 MiB-page area, and the
+    /// granule of an open RSX context window.
     ///
-    /// The search skips the window's granule whether or not a context
-    /// is open: boot maps the window, so no area over it could be
-    /// installed. The `lv2_mmapper_rsx_window` capture shows the
-    /// console granting that granule until `rsxInit` opens a context;
-    /// where it then opens the window is unprobed.
+    /// The `lv2_mmapper_rsx_window` capture shows the console granting
+    /// every granule until `rsxInit` opens a context and skipping the
+    /// window's granule after; the `lv2_rsx_window_held` capture shows
+    /// the window opening in the lowest granule left free.
     ///
     /// The `lv2_memory_1m_area` capture shows 330 skipping the granule
     /// a process's 1 MiB-page blocks sit in. The search skips every
@@ -154,8 +164,10 @@ impl Lv2Host {
     pub(in crate::host) fn free_area_base(&self, pid: u32, rounded: u32) -> Option<u32> {
         use cellgov_ps3_abi::lv2::rsx::region;
         let granule = cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE;
-        let window_start = u64::from(region::WINDOW_BASE);
-        let window_end = window_start + u64::from(region::CONTEXT_RESERVATION);
+        let window = self.state.rsx_context.control_slot(0).map(|start| {
+            let start = u64::from(start);
+            (start, start + u64::from(region::CONTEXT_RESERVATION))
+        });
         let overlaps =
             |base: u64, start: u64, end: u64| base < end && base + u64::from(rounded) > start;
         let mut base = u64::from(Self::MMAPPER_REGION_START);
@@ -175,8 +187,8 @@ impl Lv2Host {
                 base = u64::from(held) + granule;
                 continue;
             }
-            if overlaps(base, window_start, window_end) {
-                base = window_end.next_multiple_of(granule);
+            if let Some((_, end)) = window.filter(|&(start, end)| overlaps(base, start, end)) {
+                base = end.next_multiple_of(granule);
                 continue;
             }
             break;

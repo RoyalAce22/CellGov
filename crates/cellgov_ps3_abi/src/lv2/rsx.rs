@@ -4,12 +4,14 @@
 
 /// The window `sys_rsx_context_allocate` (670) opens for a context: the
 /// DMA control block at its base, the driver-info block one megabyte
-/// above it, and the reports block two. The `lv2_rsx_answers` capture
-/// reads the window at [`region::WINDOW_BASE`].
+/// above it, and the reports block two. The window sits
+/// [`region::WINDOW_OFFSET`] into the lowest 256 MiB area granule the
+/// process holds nothing in: the `lv2_rsx_answers` capture reads it at
+/// `0x6010_0000` with `0x5000_0000` held, and the `lv2_rsx_window_held`
+/// capture at `0x8010_0000` with every granule below that held.
 pub mod region {
-    /// Guest address of the context window, as the reference console
-    /// opens it for a game's first context.
-    pub const WINDOW_BASE: u32 = 0x6010_0000;
+    /// Offset of the context window from the base of its granule.
+    pub const WINDOW_OFFSET: u32 = 0x0010_0000;
     /// Bytes of the DMA control block's part of the window.
     pub const CONTROL_SIZE: u32 = 0x0010_0000;
     /// Driver-info region offset from the window base.
@@ -21,12 +23,7 @@ pub mod region {
 
     const _: () = assert!(CONTROL_SIZE == DRIVER_INFO_OFFSET);
     const _: () = assert!(
-        WINDOW_BASE as u64 + CONTEXT_RESERVATION as u64 <= crate::hw::address_space::PS3_RSX_BASE
-    );
-    const _: () = assert!(
-        crate::hw::address_space::PS3_RSX_IOMAP_BASE
-            + crate::hw::address_space::PS3_RSX_IOMAP_SIZE as u64
-            <= WINDOW_BASE as u64
+        WINDOW_OFFSET as u64 + CONTEXT_RESERVATION as u64 <= crate::lv2::memory::VM_AREA_GRANULE
     );
 }
 
@@ -42,11 +39,10 @@ pub mod device_map {
     pub const RESERVATION_SIZE: u32 = 0x1000_0000;
 
     // ADDR sits at or above the IO window base a title's own
-    // sys_rsx_context_iomap call asks for, and clear of the control
-    // region, whose slots a guest reaches by fixed offsets.
+    // sys_rsx_context_iomap call asks for, and below the lowest area
+    // granule, where the context window can open.
     const _: () = assert!(ADDR as u64 >= crate::hw::address_space::PS3_RSX_IOMAP_BASE);
-    const _: () =
-        assert!(ADDR.saturating_add(RESERVATION_SIZE) <= super::control_register::DMA_CONTROL_BASE);
+    const _: () = assert!(ADDR.saturating_add(RESERVATION_SIZE) <= 0x5000_0000);
 }
 
 /// `sys_rsx_context_iomap` (672) argument-validation constants.
@@ -59,23 +55,18 @@ pub mod iomap {
     pub const ALIGN_MASK: u32 = 0x000F_FFFF;
 }
 
-/// RSX command-FIFO control register slots. Libgcm receives
-/// [`control_register::DMA_CONTROL_BASE`] from
-/// `sys_rsx_context_allocate` (670) and derives the put/get/ref slots by
-/// adding `+0x40 / +0x44 / +0x48`; the `lv2_rsx_answers` capture reads
-/// libgcm's control register at `0x6010_0040`.
+/// RSX command-FIFO control register slots, as offsets from the DMA
+/// control block `sys_rsx_context_allocate` (670) returns in
+/// `lpar_dma_control`. libgcm derives the put / get / ref slots by
+/// adding them; the `lv2_rsx_answers` capture reads libgcm's control
+/// register at the block's base plus [`control_register::PUT_OFFSET`].
 pub mod control_register {
-    /// DMA control block base, at the start of the context window;
-    /// `sys_rsx_context_allocate` (670) returns this in
-    /// `lpar_dma_control`.
-    pub const DMA_CONTROL_BASE: u32 = super::region::WINDOW_BASE;
-
-    /// RSX control register `put` slot (`DMA_CONTROL_BASE + 0x40`).
-    pub const PUT_ADDR: u32 = DMA_CONTROL_BASE + 0x40;
-    /// RSX control register `get` slot (`DMA_CONTROL_BASE + 0x44`).
-    pub const GET_ADDR: u32 = DMA_CONTROL_BASE + 0x44;
-    /// RSX control register `reference` slot (`DMA_CONTROL_BASE + 0x48`).
-    pub const REF_ADDR: u32 = DMA_CONTROL_BASE + 0x48;
+    /// RSX control register `put` slot.
+    pub const PUT_OFFSET: u32 = 0x40;
+    /// RSX control register `get` slot.
+    pub const GET_OFFSET: u32 = 0x44;
+    /// RSX control register `reference` slot.
+    pub const REF_OFFSET: u32 = 0x48;
 }
 
 /// `RsxReports` substructure (1024 semaphore slots + 64 notify entries

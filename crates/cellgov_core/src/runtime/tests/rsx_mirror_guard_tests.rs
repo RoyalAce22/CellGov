@@ -13,9 +13,14 @@ use cellgov_exec::{
 use cellgov_mem::{ByteRange, GuestMemory, PageSize};
 use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
-use crate::rsx::control_register::PUT_ADDR;
 use crate::runtime::spaces::AddressSpaceId;
 use crate::runtime::state::Runtime;
+
+/// Where these tests open the RSX context window.
+const WINDOW: u32 = 0x6010_0000;
+
+/// The window's put slot.
+const PUT_ADDR: u32 = WINDOW + crate::rsx::control_register::PUT_OFFSET;
 
 /// What committed memory already holds at the put slot, and what the
 /// cursor must not pick up from it.
@@ -87,6 +92,7 @@ fn runtime_with_stale_put(reason: YieldReason) -> Runtime {
     rt.place_bytes(AddressSpaceId::BOOT, put_range(), &STALE_PUT.to_be_bytes())
         .expect("the slot is mapped and writable");
     rt.set_rsx_mirror_writes(true);
+    rt.lv2_host_mut().seed_rsx_window(WINDOW);
     rt.registry_mut().register_with(|id| SlotWriter {
         id,
         reason,

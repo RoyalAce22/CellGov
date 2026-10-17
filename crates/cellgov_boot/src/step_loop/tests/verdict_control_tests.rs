@@ -3,8 +3,10 @@
 
 use super::*;
 use cellgov_mem::MemError;
-use cellgov_ps3_abi::lv2::rsx::control_register::PUT_ADDR;
 use manifest::CheckpointTrigger;
+
+/// The put slot of a window opened one megabyte into `0x6000_0000`.
+const PUT_ADDR: u32 = 0x6010_0000 + cellgov_ps3_abi::lv2::rsx::control_register::PUT_OFFSET;
 
 fn control_write() -> CommitError {
     CommitError::Memory(MemError::ReservedWrite {

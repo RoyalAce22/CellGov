@@ -456,6 +456,12 @@ impl Runtime {
         self.rsx_mirror_writes = enabled;
     }
 
+    /// Set the access mode the RSX context window's control block gets
+    /// when `sys_rsx_context_allocate` maps it. `ReadWrite` until set.
+    pub fn set_rsx_window_access(&mut self, access: cellgov_mem::RegionAccess) {
+        self.rsx_window_access = access;
+    }
+
     /// True when RSX control-register writes mirror into the cursor.
     #[inline]
     pub fn rsx_mirror_writes_enabled(&self) -> bool {

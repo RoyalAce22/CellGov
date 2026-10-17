@@ -229,6 +229,27 @@ pub enum StrictReservedConflict {
     RsxMirror,
 }
 
+/// Access of the reserved regions: strict under `--strict-reserved`,
+/// zero-readable otherwise.
+pub(super) fn reserved_access(strict_reserved: bool) -> cellgov_mem::RegionAccess {
+    if strict_reserved {
+        cellgov_mem::RegionAccess::ReservedStrict
+    } else {
+        cellgov_mem::RegionAccess::ReservedZeroReadable
+    }
+}
+
+/// Access of the RSX region and the RSX context window's control block:
+/// read-write when the title opts into the RSX mirror, reserved
+/// otherwise.
+pub(super) fn rsx_access(strict_reserved: bool, rsx_mirror: bool) -> cellgov_mem::RegionAccess {
+    if rsx_mirror && !strict_reserved {
+        cellgov_mem::RegionAccess::ReadWrite
+    } else {
+        reserved_access(strict_reserved)
+    }
+}
+
 pub(super) fn check_strict_reserved_vs_rsx_mirror(
     strict_reserved: bool,
     rsx_mirror: bool,

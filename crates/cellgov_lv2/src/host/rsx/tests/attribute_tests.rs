@@ -431,8 +431,8 @@ fn sys_rsx_context_attribute_fifo_setup_records_get_and_put() {
     let source = UnitId::new(0);
     allocate_context(&mut host, source);
 
-    // Default FakeRuntime memory is 64 KiB, so the control block at
-    // 0x6010_0040 / 0x6010_0044 reads as non-writable -- the
+    // Default FakeRuntime memory is 64 KiB, so the window's put and
+    // get slots read as non-writable -- the
     // reserved-region title path. FIFO_SETUP records the
     // pointers and emits ZERO effects.
     let rt = FakeRuntime::new(0x1_0000);
@@ -467,8 +467,8 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
     // 40F honest-consumer companion: when the MMIO control-
     // register slots ARE writable (rsx_mirror=true title that
     // re-maps the control block writable), FIFO_SETUP emits two
-    // SharedWriteIntent effects -- a4 (put) -> 0x6010_0040,
-    // a3 (get) -> 0x6010_0044 -- so the engine-side cursor
+    // SharedWriteIntent effects -- a4 (put) -> the put slot,
+    // a3 (get) -> the get slot -- so the engine-side cursor
     // sees the initial pointers from syscall return without
     // waiting for the title's first store. The effect
     // ordering (put first, then get) matches the cursor->MMIO
@@ -476,6 +476,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
     let mut host = Lv2Host::new();
     let source = UnitId::new(1);
     allocate_context(&mut host, source);
+    let (put_addr, get_addr) = control_slots(&host);
 
     let rt = FakeRuntime::new(0x1_0000).with_writable_override(true);
     let d = host.dispatch(
@@ -499,7 +500,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
         "writable MMIO path must emit exactly the put and get writebacks",
     );
 
-    // Effect 0: put -> PUT_ADDR (0x6010_0040), value = a4.
+    // Effect 0: put -> the put slot, value = a4.
     let Effect::SharedWriteIntent {
         range: range0,
         bytes: bytes0,
@@ -514,7 +515,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
     };
     assert_eq!(
         range0.start().raw(),
-        control_register::PUT_ADDR as u64,
+        put_addr,
         "effect 0 must target PUT_ADDR, not GET_ADDR (the cursor->MMIO \
          writeback in commit_step uses the same put-then-get ordering)",
     );
@@ -526,7 +527,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
         "PUT slot must carry a4 (the put pointer), not a3",
     );
 
-    // Effect 1: get -> GET_ADDR (0x6010_0044), value = a3.
+    // Effect 1: get -> the get slot, value = a3.
     let Effect::SharedWriteIntent {
         range: range1,
         bytes: bytes1,
@@ -541,7 +542,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
     };
     assert_eq!(
         range1.start().raw(),
-        control_register::GET_ADDR as u64,
+        get_addr,
         "effect 1 must target GET_ADDR; the put/get ordering swap would \
          type-check cleanly so this assertion is the catch",
     );
@@ -569,10 +570,11 @@ fn sys_rsx_context_attribute_fifo_setup_skips_emit_when_only_put_writable() {
     let mut host = Lv2Host::new();
     let source = UnitId::new(0);
     allocate_context(&mut host, source);
+    let (put_addr, get_addr) = control_slots(&host);
 
     let rt = FakeRuntime::new(0x1_0000)
-        .with_writable_at(control_register::PUT_ADDR as u64, true)
-        .with_writable_at(control_register::GET_ADDR as u64, false);
+        .with_writable_at(put_addr, true)
+        .with_writable_at(get_addr, false);
     let d = host.dispatch(
         Lv2Request::SysRsxContextAttribute {
             context_id: RSX_CONTEXT_ID,
@@ -601,10 +603,11 @@ fn sys_rsx_context_attribute_fifo_setup_skips_emit_when_only_get_writable() {
     let mut host = Lv2Host::new();
     let source = UnitId::new(0);
     allocate_context(&mut host, source);
+    let (put_addr, get_addr) = control_slots(&host);
 
     let rt = FakeRuntime::new(0x1_0000)
-        .with_writable_at(control_register::PUT_ADDR as u64, false)
-        .with_writable_at(control_register::GET_ADDR as u64, true);
+        .with_writable_at(put_addr, false)
+        .with_writable_at(get_addr, true);
     let d = host.dispatch(
         Lv2Request::SysRsxContextAttribute {
             context_id: RSX_CONTEXT_ID,
@@ -690,4 +693,14 @@ fn sys_rsx_context_attribute_rejects_wrong_context_id() {
         d,
         Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
     ));
+}
+
+/// The put and get slots of the window the context opened.
+fn control_slots(host: &Lv2Host) -> (u64, u64) {
+    let ctx = host.sys_rsx_context();
+    let slot = |offset| u64::from(ctx.control_slot(offset).expect("a window is open"));
+    (
+        slot(control_register::PUT_OFFSET),
+        slot(control_register::GET_OFFSET),
+    )
 }

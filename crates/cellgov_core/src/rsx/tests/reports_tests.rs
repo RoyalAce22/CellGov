@@ -163,14 +163,11 @@ fn reservation_region_bases_are_pinned_and_do_not_overlap() {
 }
 
 #[test]
-fn dma_control_base_plus_offset_equals_put_addr() {
-    assert_eq!(
-        u64::from(control_register::DMA_CONTROL_BASE) + 0x40,
-        u64::from(control_register::PUT_ADDR),
-        "dma_control_base + 0x40 must equal PUT_ADDR"
-    );
-    assert_eq!(control_register::DMA_CONTROL_BASE, 0x6010_0000);
-    assert_eq!(control_register::PUT_ADDR, 0x6010_0040);
+fn control_slots_are_pinned_into_the_control_block() {
+    assert_eq!(control_register::PUT_OFFSET, 0x40);
+    assert_eq!(control_register::GET_OFFSET, 0x44);
+    assert_eq!(control_register::REF_OFFSET, 0x48);
+    assert_eq!(region::WINDOW_OFFSET, 0x0010_0000);
 }
 
 #[test]
@@ -205,11 +202,11 @@ fn rsx_context_memory_then_context_allocation_records_all_fields() {
     assert_eq!(ctx.mem_handle, 0xA001);
     assert_eq!(ctx.mem_addr, 0x3000_0000);
 
-    ctx.set_context_allocated(RSX_CONTEXT_ID, 0xE001, 0xE002);
+    ctx.set_context_allocated(0x6010_0000, RSX_CONTEXT_ID, 0xE001, 0xE002);
 
     assert!(ctx.allocated);
     assert_eq!(ctx.context_id, RSX_CONTEXT_ID);
-    assert_eq!(ctx.dma_control_addr, control_register::DMA_CONTROL_BASE);
+    assert_eq!(ctx.dma_control_addr, 0x6010_0000);
     assert_eq!(ctx.driver_info_addr, 0x6020_0000);
     assert_eq!(ctx.reports_addr, 0x6030_0000);
     assert_eq!(ctx.event_queue_id, 0xE001);
@@ -223,7 +220,7 @@ fn rsx_context_memory_then_context_allocation_records_all_fields() {
 #[should_panic(expected = "set_context_allocated called before set_memory_allocated")]
 fn rsx_context_set_context_before_memory_panics() {
     let mut ctx = RsxContext::new();
-    ctx.set_context_allocated(RSX_CONTEXT_ID, 0, 0);
+    ctx.set_context_allocated(0x6010_0000, RSX_CONTEXT_ID, 0, 0);
 }
 
 #[test]
@@ -232,8 +229,8 @@ fn rsx_context_set_context_before_memory_panics() {
 fn rsx_context_double_context_allocate_panics() {
     let mut ctx = RsxContext::new();
     ctx.set_memory_allocated(0xA001, 0x3000_0000);
-    ctx.set_context_allocated(RSX_CONTEXT_ID, 0, 0);
-    ctx.set_context_allocated(RSX_CONTEXT_ID, 0, 0);
+    ctx.set_context_allocated(0x6010_0000, RSX_CONTEXT_ID, 0, 0);
+    ctx.set_context_allocated(0x6010_0000, RSX_CONTEXT_ID, 0, 0);
 }
 
 #[test]

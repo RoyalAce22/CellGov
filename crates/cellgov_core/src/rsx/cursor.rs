@@ -34,19 +34,19 @@ impl RsxFifoCursor {
         }
     }
 
-    /// Current put pointer (mirror of [`super::control_register::PUT_ADDR`]).
+    /// Current put pointer (mirror of the control block's [`super::control_register::PUT_OFFSET`] slot).
     #[inline]
     pub const fn put(self) -> u32 {
         self.put
     }
 
-    /// Current get pointer (mirror of [`super::control_register::GET_ADDR`]).
+    /// Current get pointer (mirror of the control block's [`super::control_register::GET_OFFSET`] slot).
     #[inline]
     pub const fn get(self) -> u32 {
         self.get
     }
 
-    /// Current reference value (mirror of [`super::control_register::REF_ADDR`]).
+    /// Current reference value (mirror of the control block's [`super::control_register::REF_OFFSET`] slot).
     #[inline]
     pub const fn current_reference(self) -> u32 {
         self.current_reference

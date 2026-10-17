@@ -14,6 +14,47 @@ use crate::runtime::{
 use super::checks::disposition_from_request;
 
 impl Runtime {
+    /// Map the RSX context window at `base` in `source`'s space: the
+    /// DMA control block with the host's window access mode, then the
+    /// driver-info and reports blocks read-write.
+    fn install_rsx_window(&mut self, source: UnitId, base: u32) {
+        use cellgov_ps3_abi::lv2::rsx::region;
+        let access = self.rsx_window_access;
+        let caller_space = self.spaces.space_of(source);
+        let mem = crate::runtime::spaces::resolve_space_memory_for_write(
+            &mut self.memory,
+            &mut self.spaces,
+            caller_space,
+        );
+        let installed = mem
+            .install_region_with_access(
+                u64::from(base),
+                region::CONTROL_SIZE as usize,
+                crate::rsx::CONTROL_REGION,
+                cellgov_mem::PageSize::Page64K,
+                access,
+            )
+            .and_then(|()| {
+                mem.install_region(
+                    u64::from(base + region::DRIVER_INFO_OFFSET),
+                    (region::CONTEXT_RESERVATION - region::DRIVER_INFO_OFFSET) as usize,
+                    crate::rsx::CONTEXT_REGION,
+                    cellgov_mem::PageSize::Page64K,
+                )
+            });
+        if let Err(err) = installed {
+            self.lv2_host.log_invariant_break(
+                "dispatch.rsx_window_install_overlap",
+                format_args!(
+                    "RSX context window at 0x{base:08x}+0x{:x} overlaps the caller's \
+                     existing layout in space {}: {err}; the window is not fully mapped",
+                    region::CONTEXT_RESERVATION,
+                    caller_space.raw(),
+                ),
+            );
+        }
+    }
+
     pub(in crate::runtime) fn dispatch_syscall(
         &mut self,
         result: &ExecutionStepResult,
@@ -308,6 +349,11 @@ impl Runtime {
                     );
                 }
             }
+        }
+        // A 670 maps its context window in the caller's space before the
+        // init fills and out-pointer writes it emitted commit.
+        if let Some(base) = self.lv2_host.take_pending_window_install() {
+            self.install_rsx_window(source, base);
         }
         // A 335 takes its window out of the caller's space, which is
         // where its 334 / 337 put it.

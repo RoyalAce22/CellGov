@@ -5,6 +5,10 @@ use crate::host::rsx::test_helpers::{context_allocate_request, extract_write_u64
 use crate::host::test_support::{extract_write_u32, FakeRuntime};
 use crate::request::Lv2Request;
 
+/// Where the window opens for a process holding no area: one megabyte
+/// into the lowest area granule.
+const WINDOW: u32 = Lv2Host::MMAPPER_REGION_START + region::WINDOW_OFFSET;
+
 #[test]
 fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     let mut host = Lv2Host::new();
@@ -21,22 +25,14 @@ fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     };
     assert_eq!(effects.len(), 6);
     assert_eq!(extract_write_u32(&effects[0]), RSX_CONTEXT_ID);
-    assert_eq!(
-        extract_write_u64(&effects[1]),
-        u64::from(control_register::DMA_CONTROL_BASE)
-    );
-    assert_eq!(
-        u64::from(control_register::DMA_CONTROL_BASE) + 0x40,
-        u64::from(control_register::PUT_ADDR),
-        "dma_control_base + 0x40 must equal PUT_ADDR"
-    );
+    assert_eq!(extract_write_u64(&effects[1]), u64::from(WINDOW));
     assert_eq!(
         extract_write_u64(&effects[2]),
-        (region::WINDOW_BASE + region::DRIVER_INFO_OFFSET) as u64
+        (WINDOW + region::DRIVER_INFO_OFFSET) as u64
     );
     assert_eq!(
         extract_write_u64(&effects[3]),
-        (region::WINDOW_BASE + region::REPORTS_OFFSET) as u64
+        (WINDOW + region::REPORTS_OFFSET) as u64
     );
 
     let Effect::SharedWriteIntent { range, bytes, .. } = &effects[4] else {
@@ -44,7 +40,7 @@ fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     };
     assert_eq!(
         range.start().raw(),
-        (region::WINDOW_BASE + region::REPORTS_OFFSET) as u64
+        (WINDOW + region::REPORTS_OFFSET) as u64
     );
     let b = bytes.bytes();
     assert_eq!(b.len(), reports::SIZE);
@@ -63,7 +59,7 @@ fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     };
     assert_eq!(
         range.start().raw(),
-        (region::WINDOW_BASE + region::DRIVER_INFO_OFFSET) as u64
+        (WINDOW + region::DRIVER_INFO_OFFSET) as u64
     );
     let b = bytes.bytes();
     assert_eq!(b.len(), driver_info::SIZE);
@@ -95,15 +91,9 @@ fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     let ctx = host.sys_rsx_context();
     assert!(ctx.allocated);
     assert_eq!(ctx.context_id, RSX_CONTEXT_ID);
-    assert_eq!(ctx.dma_control_addr, control_register::DMA_CONTROL_BASE);
-    assert_eq!(
-        ctx.driver_info_addr,
-        region::WINDOW_BASE + region::DRIVER_INFO_OFFSET
-    );
-    assert_eq!(
-        ctx.reports_addr,
-        region::WINDOW_BASE + region::REPORTS_OFFSET
-    );
+    assert_eq!(ctx.dma_control_addr, WINDOW);
+    assert_eq!(ctx.driver_info_addr, WINDOW + region::DRIVER_INFO_OFFSET);
+    assert_eq!(ctx.reports_addr, WINDOW + region::REPORTS_OFFSET);
     assert_eq!(ctx.mem_ctx, 0xA001);
 }
 

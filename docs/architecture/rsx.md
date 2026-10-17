@@ -15,8 +15,8 @@ reservation table and folds into `sync_state_hash`.
 
 **FIFO cursor.** `RsxFifoCursor` has three scalar fields:
 
-- `put`: set only by guest writes to the control register at
-  `0x60100040`.
+- `put`: set only by guest writes to the control block's put slot
+  (`+0x40` from the block's base).
 - `get`: advanced only by the method-advance pass.
 - `current_reference`: the last `NV406E_SET_REFERENCE` value,
   readable through `cellGcmGetCurrentReference`.
@@ -66,7 +66,7 @@ commit boundary after the reservation clear-sweep:
 2. Drain from `get` to `put`, decoding headers and invoking
    handlers in address order.
 3. On clean reach of PUT, project `(current_reference, get)`
-   back to the control block at `0x6010_0048` / `0x6010_0044` so libgcm's
+   back to the control block's ref and get slots so libgcm's
    `cellGcmGetCurrentReference` poll clears.
 
 The pass is a no-op when `get == put` and the call stack is empty.
@@ -99,7 +99,7 @@ flowchart TD
   jmp --> more
   more -->|"no, under RSX_ADVANCE_ITERATION_CAP"| hdr
   more -->|"cap tripped"| word["emit a synthetic raw stop word"]
-  more -->|yes| proj["project (current_reference, get) to 0x6010_0048 / 0x6010_0044"]
+  more -->|yes| proj["project (current_reference, get) to the ref / get slots"]
 ```
 
 **Effect variants.** The handlers emit two effect variants:
@@ -206,13 +206,17 @@ guest poll paths read:
 - `RsxDriverInfo` (0x12F8 bytes; handler-queue id at offset
   0x12D0);
 - `RsxDmaControl` (put / get / reference fields at offsets
-  0x40 / 0x44 / 0x48 from
-  `control_register::DMA_CONTROL_BASE = 0x6010_0000`).
+  0x40 / 0x44 / 0x48 from the control block's base).
 
-**Context window.** `sys_rsx_context_allocate` (670) hands libgcm a
-window at `region::WINDOW_BASE` (`0x6010_0000`): the DMA control
-block at its base, the driver-info block one megabyte above it and
-the reports block two, where the reference console opens them.
+**Context window.** `sys_rsx_context_allocate` (670) opens a window
+`region::WINDOW_OFFSET` (one megabyte) into the lowest 256 MB area
+granule the caller's process holds nothing in, and hands libgcm its
+three blocks: the DMA control block at the window's base, the
+driver-info block one megabyte above it and the reports block two,
+where the reference console opens them. The runtime maps the window
+in the caller's space when the call commits; until then nothing is
+mapped there, and the area search grants the granule like any other.
+Once the window is open, the area search skips its granule.
 
 **Iomap region.** The iomap region
 `[PS3_RSX_IOMAP_BASE, +PS3_RSX_IOMAP_SIZE)` (85 MiB from
@@ -244,8 +248,8 @@ break.
 
 **Control-block checkpoint.** Titles whose harness expects the
 [`FirstRsxWrite`](../concepts/README.md#checkpoints-where-an-observation-stops)
-checkpoint hit libgcm's put-pointer write at `0x6010_0040`, or an
-earlier write into the RSX region.
+checkpoint hit libgcm's put-pointer write into the control block, or
+an earlier write into the RSX region.
 Firmware cellGcmSys.prx's `_cellGcmInitBody` runs through the
 `sys_rsx` surface above.
 

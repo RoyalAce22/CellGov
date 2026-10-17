@@ -27,6 +27,9 @@ pub struct Runtime {
     /// straddle drains and the later RELEASE must read the earlier OFFSET.
     pub(super) rsx_sem_offset: u32,
     pub(super) rsx_mirror_writes: bool,
+    /// Access mode of the region holding the RSX context window's DMA
+    /// control block, set by the host before the run.
+    pub(super) rsx_window_access: cellgov_mem::RegionAccess,
     pub(super) rsx_flip: crate::rsx::flip::RsxFlipState,
     pub(super) rsx_methods: crate::rsx::method::NvMethodTable,
     /// Advance-pass effects produced at the end of commit batch N, queued

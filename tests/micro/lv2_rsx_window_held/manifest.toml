@@ -1,0 +1,17 @@
+[test]
+name = "lv2_rsx_window_held"
+
+# A hardware probe: where libgcm's RSX context window opens when the
+# process already holds the 256 MiB granule an unheld window takes.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 24 big-endian u64: the two held areas (r3, base) x 2, the host block
+# (r3, address), rsxInit's r3 and the control register, then 8 bases and
+# 8 r3 values of the areas granted after rsxInit: 192 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"

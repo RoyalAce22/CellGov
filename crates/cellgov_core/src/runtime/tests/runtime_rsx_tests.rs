@@ -224,7 +224,7 @@ fn rsx_mirror_writes_off_leaves_cursor_unchanged() {
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
-        slot_addr: control_register::PUT_ADDR as u64,
+        slot_addr: test_slot(control_register::PUT_OFFSET),
         value: 0x1234,
     });
     let s = rt.step().unwrap();
@@ -240,7 +240,7 @@ fn rsx_mirror_writes_on_routes_put_to_cursor() {
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
-        slot_addr: control_register::PUT_ADDR as u64,
+        slot_addr: test_slot(control_register::PUT_OFFSET),
         value: 0x0000_1000,
     });
     let s = rt.step().unwrap();
@@ -249,7 +249,7 @@ fn rsx_mirror_writes_on_routes_put_to_cursor() {
     use cellgov_mem::{ByteRange, GuestAddr};
     let mem_bytes = rt
         .memory()
-        .read(ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap())
+        .read(ByteRange::new(GuestAddr::new(test_slot(control_register::PUT_OFFSET)), 4).unwrap())
         .unwrap();
     assert_eq!(mem_bytes, &0x0000_1000u32.to_be_bytes());
 }
@@ -273,7 +273,7 @@ fn rsx_mirror_writes_does_not_route_get_to_cursor() {
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
-        slot_addr: control_register::GET_ADDR as u64,
+        slot_addr: test_slot(control_register::GET_OFFSET),
         value: 0x0000_2000,
     });
     let s = rt.step().unwrap();
@@ -293,7 +293,7 @@ fn rsx_mirror_writes_on_routes_reference_to_cursor() {
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
-        slot_addr: control_register::REF_ADDR as u64,
+        slot_addr: test_slot(control_register::REF_OFFSET),
         value: 0xCAFE_BABE,
     });
     let s = rt.step().unwrap();
@@ -386,7 +386,7 @@ fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
             Region::new(0, 0x10000, "flat", PageSize::Page4K),
             Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
             Region::new(
-                u64::from(cellgov_ps3_abi::lv2::rsx::control_register::DMA_CONTROL_BASE),
+                u64::from(TEST_WINDOW),
                 0x1000,
                 "rsx_control",
                 PageSize::Page64K,
@@ -394,6 +394,7 @@ fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
         ];
         let mem = GuestMemory::from_regions(regions).unwrap();
         let mut rt = Runtime::new(mem, Budget::new(budget), 100);
+        rt.lv2_host_mut().seed_rsx_window(TEST_WINDOW);
         rt.set_rsx_label_base(cellgov_mem::GuestAddr::new(LABEL_BASE as u64));
         rt.set_rsx_mirror_writes(true);
         rt.lv2_host_mut().seed_rsx_iomap(0, 0, 0x10000);
@@ -464,7 +465,7 @@ fn rsx_mirror_writes_fires_fifo_advance_in_same_batch() {
     rt.registry_mut().register_with(|id| RsxControlWriterUnit {
         id,
         steps: Cell::new(0),
-        slot_addr: control_register::PUT_ADDR as u64,
+        slot_addr: test_slot(control_register::PUT_OFFSET),
         value: 0x40,
     });
     let s = rt.step().unwrap();
@@ -634,21 +635,12 @@ impl ExecutionUnit for RsxLabelWriteEmitterUnit {
     }
 }
 
-/// Backs the flat low region plus the whole sys_rsx context window
-/// so `sys_rsx_context_allocate`'s driver-info and reports
+/// Backs the flat low region; `sys_rsx_context_allocate` maps the
+/// context window itself, so its driver-info and reports
 /// initialisation writes have somewhere to land.
 pub(super) fn build_with_sys_rsx_reservation() -> Runtime {
     use cellgov_mem::{PageSize, Region};
-    use cellgov_ps3_abi::lv2::rsx::region;
-    let regions = vec![
-        Region::new(0, 0x10000, "flat", PageSize::Page4K),
-        Region::new(
-            u64::from(region::WINDOW_BASE),
-            region::CONTEXT_RESERVATION as usize,
-            "rsx_window",
-            PageSize::Page64K,
-        ),
-    ];
+    let regions = vec![Region::new(0, 0x10000, "flat", PageSize::Page4K)];
     let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
     Runtime::new(mem, Budget::new(1), 100)
 }
@@ -681,7 +673,9 @@ fn a_label_write_resolves_against_the_base_sys_rsx_context_allocate_published() 
     let s = rt.step().unwrap();
     rt.commit_step(&s.result, &s.effects).unwrap();
 
-    let reports_addr = region::WINDOW_BASE + region::REPORTS_OFFSET;
+    // No area is held, so the window opens one megabyte into the
+    // lowest area granule.
+    let reports_addr = 0x5010_0000 + region::REPORTS_OFFSET;
     assert_eq!(
         rt.lv2_host().sys_rsx_context().reports_addr,
         reports_addr,

@@ -173,6 +173,7 @@ impl Lv2Host {
                 pending_region_installs: Vec::new(),
                 pending_region_removals: Vec::new(),
                 pending_area_installs: Vec::new(),
+                pending_window_install: None,
                 released_process_windows: Vec::new(),
                 fs_mounts: FsMountTable::new(),
                 sdk_version: SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,

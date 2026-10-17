@@ -114,13 +114,24 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         self.state.rsx_context.fifo_get = a3 as u32;
         self.state.rsx_context.fifo_put = a4 as u32;
-        let put_writable = rt.writable(control_register::PUT_ADDR as u64, 4);
-        let get_writable = rt.writable(control_register::GET_ADDR as u64, 4);
+        let ctx = &self.state.rsx_context;
+        let (Some(put_addr), Some(get_addr)) = (
+            ctx.control_slot(control_register::PUT_OFFSET),
+            ctx.control_slot(control_register::GET_OFFSET),
+        ) else {
+            return Lv2Dispatch::immediate(0);
+        };
+        let put_writable = rt.writable(u64::from(put_addr), 4);
+        let get_writable = rt.writable(u64::from(get_addr), 4);
         if !(put_writable && get_writable) {
             return Lv2Dispatch::immediate(0);
         }
         let now = tick;
-        let effects = mmio_init_effects(a3 as u32, a4 as u32, requester, now);
+        let effects = mmio_init_effects(
+            [(put_addr, a4 as u32), (get_addr, a3 as u32)],
+            requester,
+            now,
+        );
         Lv2Dispatch::Immediate { code: 0, effects }
     }
 
@@ -289,20 +300,15 @@ impl Lv2Host {
     }
 }
 
-/// FIFO_SETUP control-block initialiser: write `put` -> 0x6010_0040
-/// and `get` -> 0x6010_0044 so the engine-side control-register slots
-/// reflect FIFO_SETUP's a3/a4 from the moment the syscall returns.
+/// FIFO_SETUP control-block initialiser: write `put` and then `get`
+/// into the context's control slots, so the engine-side slots reflect
+/// FIFO_SETUP's a3/a4 from the moment the syscall returns.
 ///
 /// # Cross-module contract
 ///
 /// These writes retain the unit that requested FIFO setup. The commit
 /// pipeline clears reservations held by other units, not the emitter.
-fn mmio_init_effects(
-    fifo_get: u32,
-    fifo_put: u32,
-    requester: UnitId,
-    now: GuestTicks,
-) -> Vec<Effect> {
+fn mmio_init_effects(slots: [(u32, u32); 2], requester: UnitId, now: GuestTicks) -> Vec<Effect> {
     let make = |addr: u32, value: u32| {
         let range = ByteRange::new(GuestAddr::new(addr as u64), 4)
             .expect("MMIO control-register address + 4 fits in u64");
@@ -313,10 +319,10 @@ fn mmio_init_effects(
             now,
         )
     };
-    vec![
-        make(control_register::PUT_ADDR, fifo_put),
-        make(control_register::GET_ADDR, fifo_get),
-    ]
+    slots
+        .into_iter()
+        .map(|(addr, value)| make(addr, value))
+        .collect()
 }
 
 #[cfg(test)]

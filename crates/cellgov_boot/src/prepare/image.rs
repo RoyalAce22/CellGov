@@ -8,12 +8,9 @@ use cellgov_ps3_abi::hw::address_space::{
     PS3_SPU_RESERVED_SIZE,
 };
 
-use cellgov_ps3_abi::lv2::rsx::region as rsx_window;
-
 use super::types::{
     check_strict_reserved_vs_rsx_mirror, DiagnosticOptions, ExecutionOptions, TitleOptions,
 };
-use super::RSX_CONTROL_REGION;
 use crate::env::EnvBoolError;
 use crate::error::narrow_u32;
 use crate::BootError;
@@ -124,18 +121,9 @@ pub(super) fn load_image(
     }
     let mut state = cellgov_ppu::state::PpuState::new();
     check_strict_reserved_vs_rsx_mirror(execution.strict_reserved, title.manifest.rsx_mirror())?;
-    let reserved_access = if execution.strict_reserved {
-        cellgov_mem::RegionAccess::ReservedStrict
-    } else {
-        cellgov_mem::RegionAccess::ReservedZeroReadable
-    };
-    let rsx_access = if execution.strict_reserved {
-        reserved_access
-    } else if title.manifest.rsx_mirror() {
-        cellgov_mem::RegionAccess::ReadWrite
-    } else {
-        reserved_access
-    };
+    let reserved_access = super::types::reserved_access(execution.strict_reserved);
+    let rsx_access =
+        super::types::rsx_access(execution.strict_reserved, title.manifest.rsx_mirror());
     // Main must end at or below PS3_RSX_IOMAP_BASE so the iomap
     // region the title later writes through stays disjoint.
     if mem_size as u64 > PS3_RSX_IOMAP_BASE {
@@ -165,19 +153,6 @@ pub(super) fn load_image(
             PS3_CHILD_STACKS_SIZE,
             "child_stacks",
             cellgov_mem::PageSize::Page4K,
-        ),
-        cellgov_mem::Region::with_access(
-            u64::from(rsx_window::WINDOW_BASE),
-            rsx_window::CONTROL_SIZE as usize,
-            RSX_CONTROL_REGION,
-            cellgov_mem::PageSize::Page64K,
-            rsx_access,
-        ),
-        cellgov_mem::Region::new(
-            u64::from(rsx_window::WINDOW_BASE + rsx_window::DRIVER_INFO_OFFSET),
-            (rsx_window::CONTEXT_RESERVATION - rsx_window::DRIVER_INFO_OFFSET) as usize,
-            "rsx_context",
-            cellgov_mem::PageSize::Page64K,
         ),
         cellgov_mem::Region::with_access(
             PS3_RSX_BASE,

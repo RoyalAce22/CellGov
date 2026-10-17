@@ -267,16 +267,18 @@ impl RsxContext {
         self.mem_addr = mem_addr;
     }
 
-    /// Record the result of `sys_rsx_context_allocate`.
+    /// Record the result of `sys_rsx_context_allocate`, whose window
+    /// opened at `window_base`.
     ///
     /// The three region addresses are the context window's
-    /// (`region::WINDOW_BASE + *_OFFSET`).
+    /// (`window_base + *_OFFSET`).
     ///
     /// # Panics
     ///
     /// Debug-asserts `!self.allocated` and `self.memory_allocated`.
     pub fn set_context_allocated(
         &mut self,
+        window_base: u32,
         context_id: u32,
         event_queue_id: u32,
         event_port_id: u32,
@@ -292,9 +294,9 @@ impl RsxContext {
         // The three blocks sit in the context window: the DMA control
         // block at its base (libgcm adds +0x40 to derive the put-pointer
         // slot), driver info and reports one and two megabytes above.
-        let dma_control_addr = control_register::DMA_CONTROL_BASE;
-        let driver_info_addr = region::WINDOW_BASE + region::DRIVER_INFO_OFFSET;
-        let reports_addr = region::WINDOW_BASE + region::REPORTS_OFFSET;
+        let dma_control_addr = window_base;
+        let driver_info_addr = window_base + region::DRIVER_INFO_OFFSET;
+        let reports_addr = window_base + region::REPORTS_OFFSET;
         self.allocated = true;
         self.context_id = context_id;
         self.dma_control_addr = dma_control_addr;

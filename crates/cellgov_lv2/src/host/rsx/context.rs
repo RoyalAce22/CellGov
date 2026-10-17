@@ -5,9 +5,7 @@ use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::process::SYS_EVENT_QUEUE_OBJECT;
-use cellgov_ps3_abi::lv2::rsx::{
-    control_register, driver_info, driver_info_init, event_queue, region, reports,
-};
+use cellgov_ps3_abi::lv2::rsx::{driver_info, driver_info_init, event_queue, region, reports};
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -19,18 +17,24 @@ use cellgov_time::GuestTicks;
 impl Lv2Host {
     /// `sys_rsx_context_allocate` (670): open the context window, create
     /// the handler event-queue/port pair, and hand the guest the window's
-    /// three blocks (libgcm derives PUT_ADDR = dma_control + 0x40).
+    /// three blocks (libgcm adds `control_register::PUT_OFFSET` to
+    /// `dma_control` for the put slot).
     ///
-    /// The window sits at `region::WINDOW_BASE`, where the
-    /// `lv2_rsx_answers` capture reads it: the DMA control block at its
-    /// base, the driver-info block one megabyte above it and the reports
-    /// block two. The reports and driver-info init fills go out as
-    /// effects in the same batch as the four out-pointer writes.
+    /// The window opens `region::WINDOW_OFFSET` into the lowest area
+    /// granule the caller's process holds nothing in, as the
+    /// `lv2_rsx_answers` and `lv2_rsx_window_held` captures read it:
+    /// the DMA control block at its base, the driver-info block one
+    /// megabyte above it and the reports block two. The runtime maps the
+    /// window in the caller's space before the batch commits, so the
+    /// reports and driver-info init fills go out as effects in the same
+    /// batch as the four out-pointer writes.
     ///
     /// # Errors
     ///
     /// `CELL_EINVAL` on double-allocate (single-context invariant);
-    /// `CELL_EAGAIN` when the kernel-id table has no id for the queue.
+    /// `CELL_ENOMEM` when no area granule is free, which no capture
+    /// shows; `CELL_EAGAIN` when the kernel-id table has no id for the
+    /// queue.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::host) fn dispatch_sys_rsx_context_allocate(
         &mut self,
@@ -46,14 +50,20 @@ impl Lv2Host {
         if self.state.rsx_context.allocated {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
+        let granule = cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE as u32;
+        let pid = self.state.processes.process_of_unit(requester);
+        let Some(granule_base) = self.free_area_base(pid, granule) else {
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
+        };
         // port_id == queue_id: single kernel id for the 1:1 port/queue
         // binding driver_info.handler_queue exposes.
         let Some(queue_id) = self.alloc_id(requester, SYS_EVENT_QUEUE_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
-        let dma_control_addr = control_register::DMA_CONTROL_BASE;
-        let driver_info_addr = region::WINDOW_BASE + region::DRIVER_INFO_OFFSET;
-        let reports_addr = region::WINDOW_BASE + region::REPORTS_OFFSET;
+        let dma_control_addr = granule_base + region::WINDOW_OFFSET;
+        let driver_info_addr = dma_control_addr + region::DRIVER_INFO_OFFSET;
+        let reports_addr = dma_control_addr + region::REPORTS_OFFSET;
+        self.derived.pending_window_install = Some(dma_control_addr);
 
         let queue_created = self
             .state

@@ -5,19 +5,22 @@ use cellgov_time::Budget;
 
 use crate::Runtime;
 
+/// Where these tests open the RSX context window.
+const WINDOW: u32 = 0x6010_0000;
+
+/// The window's get slot.
+const GET_ADDR: u32 = WINDOW + crate::rsx::control_register::GET_OFFSET;
+
 fn make_rt_with_rsx_region() -> Runtime {
     let regions = vec![
         Region::new(0, 0x10000, "flat", PageSize::Page4K),
         Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
-        Region::new(
-            u64::from(cellgov_ps3_abi::lv2::rsx::control_register::DMA_CONTROL_BASE),
-            0x1000,
-            "rsx_control",
-            PageSize::Page64K,
-        ),
+        Region::new(u64::from(WINDOW), 0x1000, "rsx_control", PageSize::Page64K),
     ];
     let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
-    Runtime::new(mem, Budget::new(1), 100)
+    let mut rt = Runtime::new(mem, Budget::new(1), 100);
+    rt.lv2_host_mut().seed_rsx_window(WINDOW);
+    rt
 }
 
 #[test]
@@ -31,7 +34,6 @@ fn assert_ref_addr_mirrors_cursor_panics_when_writeback_was_dropped() {
 
 #[test]
 fn catch_up_advances_cursor_get_when_mmio_get_is_ahead() {
-    use crate::rsx::control_register::GET_ADDR;
     let mut rt = make_rt_with_rsx_region();
     let range = cellgov_mem::ByteRange::new(GuestAddr::new(GET_ADDR as u64), 4).unwrap();
     rt.memory_mut()
@@ -44,7 +46,6 @@ fn catch_up_advances_cursor_get_when_mmio_get_is_ahead() {
 
 #[test]
 fn catch_up_leaves_cursor_alone_when_mmio_get_is_behind() {
-    use crate::rsx::control_register::GET_ADDR;
     let mut rt = make_rt_with_rsx_region();
     let range = cellgov_mem::ByteRange::new(GuestAddr::new(GET_ADDR as u64), 4).unwrap();
     rt.memory_mut()
@@ -57,7 +58,6 @@ fn catch_up_leaves_cursor_alone_when_mmio_get_is_behind() {
 
 #[test]
 fn catch_up_leaves_cursor_alone_when_mmio_get_equals_cursor() {
-    use crate::rsx::control_register::GET_ADDR;
     let mut rt = make_rt_with_rsx_region();
     let range = cellgov_mem::ByteRange::new(GuestAddr::new(GET_ADDR as u64), 4).unwrap();
     rt.memory_mut()

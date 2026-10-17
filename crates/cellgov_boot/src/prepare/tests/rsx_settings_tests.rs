@@ -36,7 +36,7 @@ fn runtime() -> Runtime {
 fn each_rsx_flag_reaches_the_runtime_on_its_own() {
     for (mirror, consume) in [(false, false), (true, false), (false, true), (true, true)] {
         let mut rt = runtime();
-        apply_rsx_settings(&mut rt, &manifest(mirror, consume));
+        apply_rsx_settings(&mut rt, &manifest(mirror, consume), false);
         assert_eq!(
             (
                 rt.rsx_mirror_writes_enabled(),

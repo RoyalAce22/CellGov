@@ -511,8 +511,14 @@ impl Runtime {
     /// Ownership rationale on
     /// [`Self::mirror_rsx_control_register_writes`].
     fn catch_up_cursor_get_from_mmio(&mut self) {
-        use crate::rsx::control_register::GET_ADDR;
-        let range = cellgov_mem::ByteRange::contiguous_u32(GET_ADDR, 4);
+        let Some(get_addr) = self
+            .lv2_host
+            .sys_rsx_context()
+            .control_slot(crate::rsx::control_register::GET_OFFSET)
+        else {
+            return;
+        };
+        let range = cellgov_mem::ByteRange::contiguous_u32(get_addr, 4);
         let Some(bytes) = self.memory.read(range) else {
             return;
         };
@@ -526,9 +532,15 @@ impl Runtime {
     /// `cursor.current_reference()`. Debug builds panic; release
     /// builds emit a typed invariant break.
     fn assert_ref_addr_mirrors_cursor(&mut self) {
-        use crate::rsx::control_register::REF_ADDR;
+        let Some(ref_addr) = self
+            .lv2_host
+            .sys_rsx_context()
+            .control_slot(crate::rsx::control_register::REF_OFFSET)
+        else {
+            return;
+        };
         let expected = self.rsx_cursor.current_reference();
-        let range = cellgov_mem::ByteRange::contiguous_u32(REF_ADDR, 4);
+        let range = cellgov_mem::ByteRange::contiguous_u32(ref_addr, 4);
         let Some(bytes) = self.memory.read(range) else {
             self.lv2_host.log_invariant_break(
                 "dispatch.rsx_ref_addr_post_writeback_unmapped",
@@ -564,12 +576,16 @@ impl Runtime {
     /// break) and the cursor model advance stands.
     fn mirror_rsx_cursor_to_mmio(&mut self) {
         use crate::rsx::control_register;
+        let ctx = self.lv2_host.sys_rsx_context();
+        let (Some(ref_addr), Some(get_addr)) = (
+            ctx.control_slot(control_register::REF_OFFSET),
+            ctx.control_slot(control_register::GET_OFFSET),
+        ) else {
+            return;
+        };
         let writes = [
-            (
-                control_register::REF_ADDR,
-                self.rsx_cursor.current_reference(),
-            ),
-            (control_register::GET_ADDR, self.rsx_cursor.get()),
+            (ref_addr, self.rsx_cursor.current_reference()),
+            (get_addr, self.rsx_cursor.get()),
         ];
         for (addr, value) in writes {
             let range = cellgov_mem::ByteRange::contiguous_u32(addr, 4);
@@ -591,14 +607,15 @@ impl Runtime {
         }
     }
 
-    /// Mirror committed guest writes to `put` and `ref` (`0x6010_0040`,
-    /// `0x6010_0048`) into [`Self::rsx_cursor`]. Reads from committed
+    /// Mirror committed guest writes to the context window's `put` and
+    /// `ref` slots into [`Self::rsx_cursor`]; before a window opens there
+    /// are no slots to mirror. Reads from committed
     /// memory rather than the effect payload so partial-overlap writes
     /// resolve to the value the pipeline applied. Only full 4-byte slot
     /// coverage mirrors; sub-word stores still apply to memory but
     /// leave the cursor alone.
     ///
-    /// `get` (`0x6010_0044`) is not mirrored here. The walker owns
+    /// `get` is not mirrored here. The walker owns
     /// `get` in steady state. libgcm's published control structure
     /// carries `put`, `get` and `ref` as three separate words. In the
     /// NV4-family DMA pusher the envytools / nouveau project
@@ -620,17 +637,21 @@ impl Runtime {
             Put,
             Ref,
         }
-        const SLOTS: [(u32, Slot); 2] = [
-            (control_register::PUT_ADDR, Slot::Put),
-            (control_register::REF_ADDR, Slot::Ref),
-        ];
+        let ctx = self.lv2_host.sys_rsx_context();
+        let (Some(put_addr), Some(ref_addr)) = (
+            ctx.control_slot(control_register::PUT_OFFSET),
+            ctx.control_slot(control_register::REF_OFFSET),
+        ) else {
+            return;
+        };
+        let slots = [(put_addr, Slot::Put), (ref_addr, Slot::Ref)];
         for effect in effects {
             let Effect::SharedWriteIntent { range, .. } = effect else {
                 continue;
             };
             let write_start = range.start().raw();
             let write_end = write_start.saturating_add(range.length());
-            for (slot_addr, slot) in SLOTS.iter() {
+            for (slot_addr, slot) in slots.iter() {
                 let slot_start = *slot_addr as u64;
                 let slot_end = slot_start + 4;
                 if write_start <= slot_start && write_end >= slot_end {

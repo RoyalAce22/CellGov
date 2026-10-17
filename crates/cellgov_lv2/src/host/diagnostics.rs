@@ -64,6 +64,20 @@ impl Lv2Host {
         self.derived.pending_area_installs.drain(..)
     }
 
+    /// Take the base of the RSX context window
+    /// `sys_rsx_context_allocate` opened, if one opened since the last
+    /// take.
+    ///
+    /// # Cross-module contract
+    ///
+    /// The runtime maps the window in the caller's space via
+    /// `GuestMemory::install_region_with_access` before the dispatch's
+    /// effects commit: the control block (`region::CONTROL_SIZE` bytes
+    /// at the base) and the driver-info and reports blocks above it.
+    pub fn take_pending_window_install(&mut self) -> Option<u32> {
+        self.derived.pending_window_install.take()
+    }
+
     /// Drain pending shared-memory region-removal requests emitted by
     /// `sys_mmapper_unmap_shared_memory` (335).
     ///

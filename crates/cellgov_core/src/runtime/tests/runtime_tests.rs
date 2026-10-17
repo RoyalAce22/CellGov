@@ -38,6 +38,8 @@ mod mmapper_unmap;
 mod no_such_syscall_trace;
 #[path = "runtime_rsx_tests.rs"]
 mod rsx;
+#[path = "runtime_rsx_window_tests.rs"]
+mod rsx_window;
 #[path = "runtime_state_hash_tests.rs"]
 mod state_hashes;
 #[path = "runtime_step_tests.rs"]
@@ -410,7 +412,7 @@ impl ExecutionUnit for RsxFlipCommandEmitterUnit {
             GuestTicks::ZERO,
         ));
         effects.push(Effect::shared_write(
-            ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap(),
+            ByteRange::new(GuestAddr::new(test_slot(control_register::PUT_OFFSET)), 4).unwrap(),
             WritePayload::from_slice(&(self.fifo_base + 8).to_be_bytes()),
             self.id,
             GuestTicks::ZERO,
@@ -536,7 +538,7 @@ fn build_with_rsx_writable() -> Runtime {
         Region::new(0, 0x1000, "flat", PageSize::Page4K),
         Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
         Region::new(
-            u64::from(cellgov_ps3_abi::lv2::rsx::control_register::DMA_CONTROL_BASE),
+            u64::from(TEST_WINDOW),
             0x1000,
             "rsx_control",
             PageSize::Page64K,
@@ -548,6 +550,7 @@ fn build_with_rsx_writable() -> Runtime {
     // None for un-iomapped offsets, so the FIFO pass needs a seeded
     // mapping.
     rt.lv2_host_mut().seed_rsx_iomap(0, 0, 0x1000);
+    rt.lv2_host_mut().seed_rsx_window(TEST_WINDOW);
     rt
 }
 
@@ -619,7 +622,8 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
                     GuestTicks::ZERO,
                 ));
                 effects.push(Effect::shared_write(
-                    ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap(),
+                    ByteRange::new(GuestAddr::new(test_slot(control_register::PUT_OFFSET)), 4)
+                        .unwrap(),
                     WritePayload::from_slice(&self.put_target.to_be_bytes()),
                     self.id,
                     GuestTicks::ZERO,
@@ -648,7 +652,7 @@ fn build_with_rsx_and_label_region(label_base: u32) -> Runtime {
         Region::new(0, 0x10000, "flat", PageSize::Page4K),
         Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
         Region::new(
-            u64::from(cellgov_ps3_abi::lv2::rsx::control_register::DMA_CONTROL_BASE),
+            u64::from(TEST_WINDOW),
             0x1000,
             "rsx_control",
             PageSize::Page64K,
@@ -657,6 +661,7 @@ fn build_with_rsx_and_label_region(label_base: u32) -> Runtime {
     let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
     let mut rt = Runtime::new(mem, Budget::new(1), 100);
     rt.set_rsx_label_base(cellgov_mem::GuestAddr::new(label_base as u64));
+    rt.lv2_host_mut().seed_rsx_window(TEST_WINDOW);
     // Identity iomap over the flat region so the FIFO advance pass
     // can translate IO offsets back to EAs. Production records this
     // via dispatch_sys_rsx_context_iomap; tests record it directly.
@@ -858,4 +863,13 @@ fn read_guest_u32_be(rt: &Runtime, addr: u32) -> u32 {
     let mem = rt.memory().as_bytes();
     let a = addr as usize;
     u32::from_be_bytes([mem[a], mem[a + 1], mem[a + 2], mem[a + 3]])
+}
+
+/// Where these tests open the RSX context window: the control block's
+/// base, one megabyte into the granule above the lowest.
+const TEST_WINDOW: u32 = 0x6010_0000;
+
+/// The control slot `offset` bytes into [`TEST_WINDOW`].
+fn test_slot(offset: u32) -> u64 {
+    u64::from(TEST_WINDOW + offset)
 }

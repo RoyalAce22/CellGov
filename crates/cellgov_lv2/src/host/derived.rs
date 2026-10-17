@@ -59,6 +59,10 @@ pub(in crate::host) struct Lv2Derived {
     /// `(base, size)`. The runtime drains them after dispatch and
     /// installs each in the caller's space (hashed there).
     pub(in crate::host) pending_area_installs: Vec<(u64, usize)>,
+    /// The base of the RSX context window `sys_rsx_context_allocate`
+    /// opened, until the runtime takes it after dispatch and maps the
+    /// window in the caller's space (hashed there).
+    pub(in crate::host) pending_window_install: Option<u32>,
     /// The windows an exited child held, which the runtime takes out of
     /// that child's space as it does a 335's (hashed there).
     pub(in crate::host) released_process_windows: Vec<PendingRegionRemoval>,

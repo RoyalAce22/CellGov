@@ -149,7 +149,7 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
     rt.clear_unit_status_override(primary_unit_id);
 
     // 16. The RSX settings the manifest opts into, before the first step.
-    finish::apply_rsx_settings(&mut rt, title.manifest);
+    finish::apply_rsx_settings(&mut rt, title.manifest, execution.strict_reserved);
 
     Ok(PreparedBoot {
         rt,

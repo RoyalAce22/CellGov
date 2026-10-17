@@ -136,8 +136,13 @@ pub(super) fn assert_gating_state_coherent_with_host(rt: &Runtime, modules_were_
 
 /// Apply the RSX settings `title` opts into: a writable RSX region
 /// and the FIFO consumer. Both are off unless the manifest turns them
-/// on.
-pub(super) fn apply_rsx_settings(rt: &mut Runtime, title: &TitleManifest) {
+/// on. The RSX context window's control block, which the runtime maps
+/// when the title opens a context, takes the RSX region's access.
+pub(super) fn apply_rsx_settings(rt: &mut Runtime, title: &TitleManifest, strict_reserved: bool) {
+    rt.set_rsx_window_access(super::types::rsx_access(
+        strict_reserved,
+        title.rsx_mirror(),
+    ));
     if title.rsx_mirror() {
         rt.set_rsx_mirror_writes(true);
     }

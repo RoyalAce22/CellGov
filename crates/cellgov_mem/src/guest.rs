@@ -525,6 +525,22 @@ impl GuestMemory {
         label: &'static str,
         page_size: PageSize,
     ) -> Result<(), MemError> {
+        self.install_region_with_access(base, size, label, page_size, RegionAccess::ReadWrite)
+    }
+
+    /// Insert a fresh zero-filled region with access mode `access`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::install_region`].
+    pub fn install_region_with_access(
+        &mut self,
+        base: u64,
+        size: usize,
+        label: &'static str,
+        page_size: PageSize,
+        access: RegionAccess,
+    ) -> Result<(), MemError> {
         let new_end = (base as u128) + (size as u128);
         if new_end > u64::MAX as u128 {
             return Err(MemError::RegionOverflow {
@@ -545,8 +561,10 @@ impl GuestMemory {
                 return Err(MemError::OverlappingRegions);
             }
         }
-        self.regions
-            .insert(insertion, Region::new(base, size, label, page_size));
+        self.regions.insert(
+            insertion,
+            Region::with_access(base, size, label, page_size, access),
+        );
         self.page_hashes
             .get_mut()
             .insert(insertion, PageHashes::new(size.div_ceil(RESET_PAGE_SIZE)));

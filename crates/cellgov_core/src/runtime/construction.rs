@@ -67,6 +67,7 @@ impl Runtime {
             rsx_cursor: crate::rsx::RsxFifoCursor::new(),
             rsx_sem_offset: 0,
             rsx_mirror_writes: false,
+            rsx_window_access: cellgov_mem::RegionAccess::ReadWrite,
             rsx_flip: crate::rsx::flip::RsxFlipState::new(),
             rsx_methods: crate::rsx::method::NvMethodTable::with_default_handlers(),
             pending_rsx_effects: Vec::new(),

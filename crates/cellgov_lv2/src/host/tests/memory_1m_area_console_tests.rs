@@ -92,27 +92,13 @@ fn the_1m_page_area_answers_as_the_console_does() {
     assert_eq!(d, console[4], "D reuses B's base");
     let e = alloc(&mut host, &rt, 0x1_0000, page_size::FLAG_64K);
     assert_eq!(e.0, console[5].0, "E");
-    // The console grants the RSX context window's granule before any
-    // context opens; CellGov maps the window at boot and skips it, so
-    // each area CellGov grants sits one granule past the console's.
-    let window = u64::from(cellgov_ps3_abi::lv2::rsx::region::WINDOW_BASE) & !(AREA - 1);
-    let past_window =
-        |(rc, base): (u64, u64)| (rc, if base >= window { base + AREA } else { base });
     let m1 = area(&mut host, &rt);
-    assert_eq!(
-        console[6].1, window,
-        "the console's M1 is the window's granule"
-    );
-    assert_eq!(m1, past_window(console[6]), "M1 skips the 1 MiB-page area");
+    assert_eq!(m1, console[6], "M1 skips the 1 MiB-page area");
     for (k, block) in [a, c, d].into_iter().enumerate() {
         assert_eq!(free(&mut host, &rt, block.1), console[7 + k].0, "free {k}");
     }
     let m2 = area(&mut host, &rt);
-    assert_eq!(
-        m2,
-        past_window(console[10]),
-        "M2: the emptied area stays held"
-    );
+    assert_eq!(m2, console[10], "M2: the emptied area stays held");
     let f = alloc(&mut host, &rt, MIB, page_size::FLAG_1M);
     assert_eq!(f, console[11], "F lands at the area's base again");
 }

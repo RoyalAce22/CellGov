@@ -71,6 +71,17 @@ pub struct SysRsxContext {
 }
 
 impl SysRsxContext {
+    /// The guest address of the control-register slot `offset` bytes
+    /// into the DMA control block, or `None` before a window opens or
+    /// past the end of the address space.
+    #[inline]
+    pub const fn control_slot(&self, offset: u32) -> Option<u32> {
+        match self.dma_control_addr {
+            0 => None,
+            base => base.checked_add(offset),
+        }
+    }
+
     /// Zero-initialized context (`allocated == false`).
     #[inline]
     pub const fn new() -> Self {

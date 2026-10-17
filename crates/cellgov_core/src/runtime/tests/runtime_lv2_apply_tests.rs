@@ -58,21 +58,21 @@ fn apply_lv2_effects_direct_commits_shared_write_intents() {
 
     let put_bytes = rt
         .memory()
-        .read(ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap())
-        .expect("PUT_ADDR is in a registered region");
+        .read(ByteRange::new(GuestAddr::new(test_slot(control_register::PUT_OFFSET)), 4).unwrap())
+        .expect("the put slot is in a registered region");
     assert_eq!(
         u32::from_be_bytes([put_bytes[0], put_bytes[1], put_bytes[2], put_bytes[3]]),
         FIFO_PUT,
-        "PUT_ADDR slot must carry the FIFO_PUT value the syscall set",
+        "the put slot must carry the FIFO_PUT value the syscall set",
     );
     let get_bytes = rt
         .memory()
-        .read(ByteRange::new(GuestAddr::new(control_register::GET_ADDR as u64), 4).unwrap())
-        .expect("GET_ADDR is in a registered region");
+        .read(ByteRange::new(GuestAddr::new(test_slot(control_register::GET_OFFSET)), 4).unwrap())
+        .expect("the get slot is in a registered region");
     assert_eq!(
         u32::from_be_bytes([get_bytes[0], get_bytes[1], get_bytes[2], get_bytes[3]]),
         FIFO_GET,
-        "GET_ADDR slot must carry the FIFO_GET value the syscall set",
+        "the get slot must carry the FIFO_GET value the syscall set",
     );
 }
 

@@ -50,7 +50,7 @@ The checkpoint kinds:
   for titles that reach a natural shutdown during the captured
   window.
 - **`FirstRsxWrite`** -- the first PPU write to the RSX region or to
-  the RSX control register put-pointer at `0x60100040`, typically
+  the RSX control register put-pointer in the context window, typically
   inside `_cellGcmInitBody`. Used for titles that proceed past
   init into an RSX command stream.
 - **`PcReached`** -- a specific PC address. Exists for

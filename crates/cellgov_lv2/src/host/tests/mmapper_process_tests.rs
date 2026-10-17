@@ -88,8 +88,7 @@ fn a_child_reserves_its_first_area_at_the_base_a_game_process_gets() {
     let console_base = u64::from_be_bytes(console[8..16].try_into().expect("slot 1"));
     let mut host = host_with_child();
     assert_eq!(reserve(&mut host, PARENT_UNIT), console_base);
-    // The next granule holds the RSX context window.
-    assert_eq!(reserve(&mut host, PARENT_UNIT), console_base + 2 * AREA);
+    assert_eq!(reserve(&mut host, PARENT_UNIT), console_base + AREA);
     assert_eq!(
         reserve(&mut host, CHILD_UNIT),
         console_base,

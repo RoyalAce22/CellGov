@@ -201,13 +201,25 @@ fn the_free_and_allocate_refusals_answer_as_the_console_does() {
 }
 
 /// The context window: the DMA control block, driver info and reports
-/// one megabyte apart, at the addresses the console hands libgcm.
+/// one megabyte apart, at the addresses the console hands libgcm once
+/// the probe's 1 MiB-page host area holds the lowest granule.
 #[test]
 fn the_context_window_sits_where_the_console_opens_it() {
     let payload = payload();
-    let control = u32_at(&payload, CONTROL_REGISTER) - 0x40;
+    let control = u32_at(&payload, CONTROL_REGISTER)
+        - cellgov_ps3_abi::lv2::rsx::control_register::PUT_OFFSET;
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x1_0000);
+    let host_area = host.dispatch(
+        crate::request::Lv2Request::MemoryAllocate {
+            size: 0x10_0000,
+            flags: cellgov_ps3_abi::lv2::memory::page_size::FLAG_1M,
+            alloc_addr_ptr: 0x2000,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert!(matches!(host_area, Lv2Dispatch::Immediate { code: 0, .. }));
     let d = host.dispatch(
         context_allocate_request(0x1000, 0x1008, 0x1010, 0x1018, 1),
         UnitId::new(0),

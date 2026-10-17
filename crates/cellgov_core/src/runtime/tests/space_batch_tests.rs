@@ -270,8 +270,10 @@ fn a_shared_view_write_invalidates_code_at_sibling_alias_ranges() {
 
 #[test]
 fn a_child_space_write_at_the_put_register_address_leaves_the_cursor_alone() {
-    use crate::rsx::control_register::PUT_ADDR;
+    const WINDOW: u32 = 0x6010_0000;
+    const PUT_ADDR: u32 = WINDOW + crate::rsx::control_register::PUT_OFFSET;
     let mut rt = build();
+    rt.lv2_host_mut().seed_rsx_window(WINDOW);
     let mmio_base = u64::from(PUT_ADDR) & !0xFFF;
     rt.memory_mut()
         .install_region(mmio_base, 0x1000, "mmio", PageSize::Page64K)

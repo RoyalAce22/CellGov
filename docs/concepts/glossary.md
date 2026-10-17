@@ -66,7 +66,7 @@ PUP hash, the same measurement the install record carries.
 **Checkpoint.** The deterministic event at which an observation
 stops. Kinds: `ProcessExit` (the guest called `sys_process_exit`),
 `FirstRsxWrite` (first PPU write to the RSX region or the RSX
-put-pointer at `0x60100040`), and `PcReached` (a specific PC, for manifest-driven
+put-pointer in the context window), and `PcReached` (a specific PC, for manifest-driven
 exploration).
 [README.md](README.md#checkpoints-where-an-observation-stops)
 
