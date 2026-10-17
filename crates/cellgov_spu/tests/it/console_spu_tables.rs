@@ -230,9 +230,7 @@ fn cellgov_count(channel: u8) -> Result<u32, SpuFault> {
     }
 }
 
-/// Every channel counts what it counted on the console, except the two
-/// decrementer channels, which CellGov refuses by name until SPU guest
-/// time follows the console's clock.
+/// Every channel counts what it counted on the console.
 #[test]
 fn every_channel_count_at_idle_is_the_console_s() {
     let w = words();
@@ -246,17 +244,6 @@ fn every_channel_count_at_idle_is_the_console_s() {
     }
     for channel in 0..128u8 {
         let want = console[usize::from(channel)];
-        if channel == spu::SPU_WR_DEC || channel == spu::SPU_RD_DEC {
-            assert_eq!(want, 1, "channel {channel} on the console");
-            assert_eq!(
-                cellgov_count(channel),
-                Err(SpuFault::DecrementerUnmodeled {
-                    channel,
-                    is_count: true
-                })
-            );
-            continue;
-        }
         assert_eq!(cellgov_count(channel), Ok(want), "channel {channel}");
     }
 }

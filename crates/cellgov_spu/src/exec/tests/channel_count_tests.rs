@@ -1,7 +1,6 @@
 //! Each facility's `rchcnt` count moves with its state.
 
 use super::*;
-use crate::exec::SpuFault;
 use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu;
 
@@ -20,61 +19,68 @@ fn count(s: &mut SpuState, channel: u8) -> u32 {
     s.reg_word(3)
 }
 
-#[test]
-fn the_decrementer_channels_refuse_their_count_by_name() {
-    let mut s = SpuState::new();
-    for channel in [spu::SPU_WR_DEC, spu::SPU_RD_DEC] {
-        assert_eq!(
-            execute(&SpuInstruction::Rchcnt { rt: 3, channel }, &mut s, uid()),
-            SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
-                channel,
-                is_count: true
-            })
-        );
-    }
+fn wrch(s: &mut SpuState, channel: u8, value: u32) {
+    s.set_reg_word_splat(4, value);
+    let out = execute(&SpuInstruction::Wrch { channel, rt: 4 }, s, uid());
+    assert_eq!(out, SpuStepOutcome::Continue, "wrch {channel}");
 }
 
+/// The guest tick at which the time base reads `tb`.
+fn at_tb(tb: u64) -> cellgov_time::GuestTicks {
+    let ticks = (u128::from(tb) * 1_000_000_000).div_ceil(79_800_000);
+    cellgov_time::GuestTicks::new(u64::try_from(ticks).unwrap())
+}
+
+/// [CBEA p:150 s:9.11.1] the decrementer event is set when the count's most significant bit changes from 0 to 1.
 #[test]
-fn the_decrementer_channels_refuse_a_read_and_a_write_by_name() {
+fn tm_counts_once_the_loaded_decrementer_passes_zero() {
     let mut s = SpuState::new();
-    let write = execute(
-        &SpuInstruction::Wrch {
-            channel: spu::SPU_WR_DEC,
-            rt: 3,
-        },
-        &mut s,
-        uid(),
-    );
-    let read = execute(
-        &SpuInstruction::Rdch {
-            rt: 3,
-            channel: spu::SPU_RD_DEC,
-        },
-        &mut s,
-        uid(),
-    );
+    s.set_clock(at_tb(1_000));
+    wrch(&mut s, spu::SPU_WR_EVENT_MASK, spu::event::TM);
+    wrch(&mut s, spu::SPU_WR_DEC, 500);
+    s.set_clock(at_tb(1_500));
+    s.update_events();
     assert_eq!(
-        (write, read),
-        (
-            SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
-                channel: spu::SPU_WR_DEC,
-                is_count: false
-            }),
-            SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
+        count(&mut s, spu::SPU_RD_EVENT_STAT),
+        0,
+        "at zero, not past"
+    );
+    s.set_clock(at_tb(1_501));
+    s.update_events();
+    assert_eq!(count(&mut s, spu::SPU_RD_EVENT_STAT), 1, "past zero");
+}
+
+/// [CBEA p:152 s:9.11.2] acknowledging Tm while it is disabled stops the decrementer; while it is enabled the count runs on.
+#[test]
+fn a_tm_acknowledgment_stops_the_decrementer_only_while_tm_is_masked() {
+    let read = |s: &mut SpuState| {
+        let out = execute(
+            &SpuInstruction::Rdch {
+                rt: 5,
                 channel: spu::SPU_RD_DEC,
-                is_count: false
-            })
-        )
-    );
-    assert_eq!(
-        SpuFault::DecrementerUnmodeled {
-            channel: spu::SPU_WR_DEC,
-            is_count: false
-        }
-        .to_string(),
-        "SPU decrementer channel wrch 0x07: the decrementer is not modeled, \
-         since CellGov's SPU time is not the console's cycle count"
-    );
+            },
+            s,
+            uid(),
+        );
+        assert_eq!(out, SpuStepOutcome::Continue);
+        s.reg_word(5)
+    };
+    let mut s = SpuState::new();
+    s.set_clock(at_tb(0));
+    wrch(&mut s, spu::SPU_WR_DEC, 10_000);
+    wrch(&mut s, spu::SPU_WR_EVENT_MASK, spu::event::TM);
+    wrch(&mut s, spu::SPU_WR_EVENT_ACK, spu::event::TM);
+    s.set_clock(at_tb(100));
+    assert_eq!(read(&mut s), 9_900, "enabled: runs on");
+
+    wrch(&mut s, spu::SPU_WR_EVENT_MASK, 0);
+    wrch(&mut s, spu::SPU_WR_EVENT_ACK, spu::event::TM);
+    s.set_clock(at_tb(5_000));
+    assert_eq!(read(&mut s), 9_900, "masked: stopped");
+
+    wrch(&mut s, spu::SPU_WR_DEC, 0x7FFF_FFFF);
+    s.set_clock(at_tb(5_010));
+    assert_eq!(read(&mut s), 0x7FFF_FFFF - 10, "a write starts it again");
 }
 
 /// [CBEA p:128 s:9.3.6] MFC_RdTagStat counts 1 once the requested status is available, and 0 again after it is read.

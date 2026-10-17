@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::state::{SpuObservableSnapshot, SpuState};
-use cellgov_ps3_abi::hw::spu::{channel_direction, ChannelDirection, SPU_RD_DEC, SPU_WR_DEC};
+use cellgov_ps3_abi::hw::spu::{channel_direction, ChannelDirection};
 
 /// The read and read-blocking channels.
 ///
@@ -78,7 +78,6 @@ fn rdch_of_a_write_channel_reads_zero() {
 }
 
 /// [CBE-Handbook p:442 s:17.1.3] rchcnt is valid on read and write channels alike.
-/// The model refuses the decrementer channels by name, for a reason of its own.
 #[test]
 fn rchcnt_is_never_in_the_wrong_direction() {
     for channel in READ.into_iter().chain(WRITE) {
@@ -88,14 +87,7 @@ fn rchcnt_is_never_in_the_wrong_direction() {
             &mut s,
             UnitId::new(0),
         );
-        if channel == SPU_WR_DEC || channel == SPU_RD_DEC {
-            assert!(
-                matches!(out, SpuStepOutcome::Fault(_)),
-                "channel 0x{channel:02x}"
-            );
-        } else {
-            assert_eq!(out, SpuStepOutcome::Continue, "channel 0x{channel:02x}");
-        }
+        assert_eq!(out, SpuStepOutcome::Continue, "channel 0x{channel:02x}");
     }
 }
 

@@ -94,7 +94,8 @@ fn a_stop_request_leaves_a_stopped_spu_and_a_refused_one_as_they_are() {
         Some(SpuStopKind::Stop)
     );
 
-    let mut refused = unit_with(&[wrch(7, 3)]);
+    // SPU_WrOutIntrMbox with no reader connected: refused by name.
+    let mut refused = unit_with(&[wrch(0x1E, 3)]);
     assert_eq!(run(&mut refused).yield_reason, YieldReason::Fault);
     refused.request_stop(false).expect("problem state");
     assert_eq!(refused.status(), UnitStatus::Faulted);

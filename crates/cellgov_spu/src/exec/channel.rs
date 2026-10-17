@@ -142,10 +142,20 @@ pub(super) fn execute_wrch(
         // [CBEA p:155 s:9.11.4] a 1 bit resets that pending event, enabled or not.
         // [CBEA p:146 s:9.11] the count also increments if an event is still set in the status after the write.
         spu::SPU_WR_EVENT_ACK => {
+            // A crossing before the write is an event the write can
+            // acknowledge.
+            state.sample_decrementer();
+            let now = state.time_base();
             let c = &mut state.channels;
             c.set_event_state(c.pending_events & !val, c.event_mask);
             if c.pending_events & c.event_mask != 0 {
                 c.event_count = true;
+            }
+            // [CBEA p:152 s:9.11.2] acknowledging Tm while it is disabled stops the decrementer; while it is enabled the decrementer runs on.
+            // The spu_events capture: after an acknowledgment of every
+            // event with the mask clear, the count holds across a spin.
+            if val & spu::event::TM != 0 && c.event_mask & spu::event::TM == 0 {
+                c.decrementer.stop(now);
             }
             SpuStepOutcome::Continue
         }
@@ -173,15 +183,14 @@ pub(super) fn execute_wrch(
             state.set_srr0(val);
             SpuStepOutcome::Continue
         }
-        // [CBEA p:139 s:9.7] SPU_WrDec loads the decrementer, which then counts down.
-        // A console counts it at the time-base frequency (79.8 MHz, the
-        // spu_events capture), so its value tracks elapsed hardware time.
-        // CellGov's SPU time is not that clock, and the model refuses the
-        // access by name rather than return a value no console produces.
-        spu::SPU_WR_DEC => SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
-            channel,
-            is_count: false,
-        }),
+        // [CBEA p:139 s:9.7.1] SPU_WrDec loads the decrementer and starts it.
+        spu::SPU_WR_DEC => {
+            let now = state.time_base();
+            if state.channels.decrementer.write(now, val) {
+                state.raise_events(spu::event::TM);
+            }
+            SpuStepOutcome::Continue
+        }
         // [CBE-Handbook p:443 s:17.1.4] a write to a reserved channel has no effect and raises no interrupt.
         _ if spu::is_reserved_channel(channel) => SpuStepOutcome::Continue,
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
@@ -309,12 +318,16 @@ pub(super) fn execute_rdch(
             state.set_reg_channel_word(rt, state.srr0());
             SpuStepOutcome::Continue
         }
-        // [CBEA p:139 s:9.7] SPU_RdDec reads the decrementer; refused by
-        // name for the reason the SPU_WrDec arm gives.
-        spu::SPU_RD_DEC => SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
-            channel,
-            is_count: false,
-        }),
+        // [CBEA p:140 s:9.7.2] SPU_RdDec returns the current count.
+        spu::SPU_RD_DEC => {
+            let now = state.time_base();
+            let (value, crossed) = state.channels.decrementer.read(now);
+            if crossed {
+                state.raise_events(spu::event::TM);
+            }
+            state.set_reg_channel_word(rt, value);
+            SpuStepOutcome::Continue
+        }
         // [CBE-Handbook p:443 s:17.1.4] a read of a reserved channel returns zeros and raises no interrupt.
         _ if spu::is_reserved_channel(channel) => {
             state.set_reg_channel_word(rt, 0);
@@ -328,14 +341,6 @@ pub(super) fn execute_rdch(
 }
 
 pub(super) fn execute_rchcnt(rt: u8, channel: u8, state: &mut SpuState) -> SpuStepOutcome {
-    // [CBEA p:139 s:9.7] the decrementer channels; refused by name for
-    // the reason the SPU_WrDec arm of `execute_wrch` gives.
-    if channel == spu::SPU_WR_DEC || channel == spu::SPU_RD_DEC {
-        return SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
-            channel,
-            is_count: true,
-        });
-    }
     let Some(count) = channel_count(channel, state) else {
         return SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(channel));
     };
@@ -360,6 +365,8 @@ pub(super) fn channel_count(channel: u8, state: &SpuState) -> Option<u32> {
         spu::SPU_RD_MACH_STAT => 1,
         // [CBEA p:142 s:9.9.1], [CBEA p:142 s:9.9.2] the SRR0 channels have no count; rchcnt on either returns 1.
         spu::SPU_WR_SRR0 | spu::SPU_RD_SRR0 => 1,
+        // [CBEA p:140 s:9.7.2] the decrementer channels have no count; rchcnt on either returns 1.
+        spu::SPU_WR_DEC | spu::SPU_RD_DEC => 1,
         // [CBEA p:112 s:9.1] the MFC command parameter channels are nonblocking and count 1.
         spu::MFC_LSA | spu::MFC_EAH | spu::MFC_EAL | spu::MFC_SIZE | spu::MFC_TAG_ID => 1,
         // [CBEA p:113 s:9.1.1] MFC_Cmd counts the free command-queue slots.

@@ -33,6 +33,15 @@ impl Runtime {
                 TimerWakeKind::Sleep => {
                     self.resolve_sync_wakes(&[wake.unit]);
                 }
+                TimerWakeKind::UnitEvent => {
+                    // Another waker can have ended the stall first; the
+                    // unit then needs nothing from this deadline.
+                    if !self.stall_ends(wake.unit, cellgov_exec::StallWake::Event, false) {
+                        continue;
+                    }
+                    self.registry
+                        .set_status_override(wake.unit, cellgov_exec::UnitStatus::Runnable);
+                }
                 TimerWakeKind::SyncWait(reason) => {
                     let expired = self.lv2_host.expire_wait(reason, wake.unit, self.time);
                     // Expiry effects repair structs the expiring

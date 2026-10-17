@@ -132,9 +132,10 @@ fn a_refused_spu_reports_itself_stopped_and_refuses_an_npc_write() {
 #[test]
 fn an_spu_that_faulted_itself_reports_stopped_and_refuses_an_npc_write() {
     use cellgov_exec::{ExecutionContext, ExecutionUnit};
-    // `wrch 7, r3`: a channel the model does not implement.
+    // `wrch SPU_WrOutIntrMbox, r3` with no reader connected: refused by
+    // name.
     let mut spu = SpuExecutionUnit::new(UnitId::new(0));
-    spu.state_mut().ls[..4].copy_from_slice(&((0x10D_u32 << 21) | (7 << 7) | 3).to_be_bytes());
+    spu.state_mut().ls[..4].copy_from_slice(&((0x10D_u32 << 21) | (0x1E << 7) | 3).to_be_bytes());
     let mem = GuestMemory::new(0x1000);
     let mut effects = Vec::new();
     spu.run_until_yield(Budget::new(10), &ExecutionContext::new(&mem), &mut effects);

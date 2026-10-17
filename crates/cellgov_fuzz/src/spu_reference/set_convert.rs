@@ -94,6 +94,10 @@ impl From<&ChannelState> for SpuReferenceChannelState {
             event_mask,
             event_count,
             event_levels,
+            // A reference set records no clock: its vectors run one
+            // instruction each, and none reads the decrementer.
+            decrementer: _,
+            clock: _,
         } = value;
         Self {
             mfc_lsa: *mfc_lsa,

@@ -22,6 +22,10 @@ pub enum TimerWakeKind {
     /// Timed sync-primitive wait: expire via `Lv2Host::expire_wait`,
     /// which unqueues the waiter and stages `CELL_ETIMEDOUT`.
     SyncWait(Lv2BlockReason),
+    /// A unit's channel stall that an event of its own clock ends, as
+    /// the SPU decrementer's zero crossing ends a wait on Tm: make the
+    /// unit runnable when it still waits on an event.
+    UnitEvent,
 }
 
 /// A registered wake: the parked unit and its expiry action.
@@ -48,7 +52,7 @@ struct Queued {
 ///
 /// 1. the deadline
 /// 2. the unit
-/// 3. the kind: 1 for a sleep, 2 for a sync wait
+/// 3. the kind: 1 for a sleep, 2 for a sync wait, 3 for a unit event
 /// 4. and up: the block reason of a sync wait
 impl LaneValue for Queued {
     fn lanes(&self, lanes: &mut ObjectLanes) {
@@ -60,6 +64,7 @@ impl LaneValue for Queued {
                 lanes.lane(3, 0, 2);
                 reason.push_lanes(lanes, 4);
             }
+            TimerWakeKind::UnitEvent => lanes.lane(3, 0, 3),
         }
     }
 }
@@ -178,6 +183,20 @@ impl TimerWakeQueue {
             }
             None => false,
         }
+    }
+
+    /// Remove `unit`'s pending [`TimerWakeKind::UnitEvent`] wake.
+    /// Returns whether one existed. A wake of another kind stays.
+    ///
+    /// The runtime calls it as the unit runs: whatever ended the stall,
+    /// the deadline has nothing left to wake.
+    pub fn cancel_unit_event(&mut self, unit: UnitId) -> bool {
+        let is_unit_event = self
+            .by_unit
+            .get(&unit)
+            .and_then(|&key| self.entries.get(key))
+            .is_some_and(|queued| queued.wake.kind == TimerWakeKind::UnitEvent);
+        is_unit_event && self.cancel(unit)
     }
 
     /// Earliest pending deadline, if any.

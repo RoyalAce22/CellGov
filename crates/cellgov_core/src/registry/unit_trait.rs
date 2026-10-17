@@ -107,6 +107,10 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::channel_stall`].
     fn channel_stall(&self) -> Option<cellgov_exec::ChannelStall>;
 
+    /// The tick the unit's own clock ends its stall at. See
+    /// [`ExecutionUnit::event_deadline`].
+    fn event_deadline(&self) -> Option<cellgov_time::GuestTicks>;
+
     /// The line of the unit's local reservation. See
     /// [`ExecutionUnit::local_reservation`].
     fn local_reservation(&self) -> Option<u64>;
@@ -312,6 +316,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn channel_stall(&self) -> Option<cellgov_exec::ChannelStall> {
         ExecutionUnit::channel_stall(self)
+    }
+
+    #[inline]
+    fn event_deadline(&self) -> Option<cellgov_time::GuestTicks> {
+        ExecutionUnit::event_deadline(self)
     }
 
     #[inline]

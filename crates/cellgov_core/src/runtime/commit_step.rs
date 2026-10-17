@@ -307,6 +307,27 @@ impl Runtime {
             if let Ok(ref mut o) = outcome {
                 o.blocked_units.push((source, reason));
             }
+            // An event the unit's own clock raises has no producer to
+            // end the park, so a deadline does.
+            if let Some(deadline) = self
+                .registry
+                .get(source)
+                .and_then(|unit| unit.event_deadline())
+            {
+                let displaced =
+                    self.timer_wakes
+                        .insert(deadline, source, crate::TimerWakeKind::UnitEvent);
+                if let Some(prior) = displaced {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.commit_step_unit_event_timer_wake_displaced",
+                        format_args!(
+                            "{source:?} parked on its own clock's event with {prior:?} still \
+                             live, so the wake path that resolved its previous wait failed to \
+                             cancel the deadline"
+                        ),
+                    );
+                }
+            }
         }
         self.epoch.advance();
         let mut due = self.fire_dma_completions();

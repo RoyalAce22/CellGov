@@ -1,6 +1,6 @@
 //! Execution of the forms a compiler-built job's crt0 and main use.
 
-use crate::exec::{execute, SpuFault, SpuStepOutcome};
+use crate::exec::{execute, SpuStepOutcome};
 use crate::instruction::SpuInstruction;
 use crate::state::SpuState;
 use cellgov_event::UnitId;
@@ -391,55 +391,53 @@ fn rchcnt_answers_one_for_machine_status() {
     assert_eq!(s.regs[2], want);
 }
 
+/// [CBEA p:140 s:9.7.2] rchcnt on either decrementer channel returns 1.
 #[test]
-fn rchcnt_on_an_unmodeled_channel_faults_by_name() {
-    let mut s = SpuState::new();
-    s.set_reg(2, PATTERN);
-    assert!(matches!(
-        run(
-            SpuInstruction::Rchcnt {
-                rt: 2,
-                // SPU_WrDec: the decrementer is not modeled.
-                channel: 7
-            },
-            &mut s
-        ),
-        SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
-            channel: 7,
-            is_count: true
-        })
-    ));
-    assert_eq!(s.regs[2], PATTERN);
+fn rchcnt_on_a_decrementer_channel_reads_one() {
+    for channel in [spu::SPU_WR_DEC, spu::SPU_RD_DEC] {
+        let mut s = SpuState::new();
+        s.set_reg(2, PATTERN);
+        assert_eq!(
+            run(SpuInstruction::Rchcnt { rt: 2, channel }, &mut s),
+            SpuStepOutcome::Continue
+        );
+        let mut want = [0u8; 16];
+        want[3] = 1;
+        assert_eq!(s.regs[2], want, "channel {channel}");
+    }
 }
 
+/// A unit's rdch of SPU_RdDec reads the count at the instruction's own
+/// tick: the step's start plus the instructions retired before it.
 #[test]
-fn a_refused_decrementer_rchcnt_is_told_apart_from_the_rdch() {
-    use crate::fault_codes::FAULT_DECREMENTER_UNMODELED;
+fn a_unit_reads_the_decrementer_at_the_tick_of_the_read() {
     use crate::SpuExecutionUnit;
-    use cellgov_effects::FaultKind;
-    use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
+    use cellgov_exec::{ExecutionContext, ExecutionUnit};
     use cellgov_mem::GuestMemory;
-    use cellgov_time::Budget;
+    use cellgov_time::{ticks_to_tb, Budget, GuestTicks};
 
-    let fault_of = |raw: u32| {
-        let mut unit = SpuExecutionUnit::new(uid());
-        unit.state_mut().ls[0..4].copy_from_slice(&raw.to_be_bytes());
-        let mem = GuestMemory::new(16);
-        let ctx = ExecutionContext::new(&mem);
-        let result = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
-        assert_eq!(result.yield_reason, YieldReason::Fault);
-        result.fault
-    };
-    // rchcnt $2, $8 and rdch $2, $8: the decrementer is not modeled.
-    let rchcnt: u32 = (0x00Fu32 << 21) | (8u32 << 7) | 2;
-    let rdch: u32 = (0x00Du32 << 21) | (8u32 << 7) | 2;
+    const START: u64 = 1_000_000;
+    // wrch $3 to SPU_WrDec, 999 nops, rdch $2 from SPU_RdDec.
+    let wrch: u32 = (0x10Du32 << 21) | (u32::from(spu::SPU_WR_DEC) << 7) | 3;
+    let nop: u32 = 0x4020_0000;
+    let rdch: u32 = (0x00Du32 << 21) | (u32::from(spu::SPU_RD_DEC) << 7) | 2;
+    let mut unit = SpuExecutionUnit::new(uid());
+    let mut at = 0;
+    for word in std::iter::once(wrch)
+        .chain(std::iter::repeat_n(nop, 999))
+        .chain(std::iter::once(rdch))
+    {
+        unit.state_mut().ls[at..at + 4].copy_from_slice(&word.to_be_bytes());
+        at += 4;
+    }
+    unit.state_mut().set_reg_word_splat(3, 1_000_000);
+    let mem = GuestMemory::new(16);
+    let ctx = ExecutionContext::new(&mem).with_current_tick(GuestTicks::new(START));
+    unit.run_until_yield(Budget::new(1_001), &ctx, &mut Vec::new());
+    let elapsed = ticks_to_tb(START + 1_000) - ticks_to_tb(START);
     assert_eq!(
-        fault_of(rchcnt),
-        Some(FaultKind::Guest(FAULT_DECREMENTER_UNMODELED | 0x108))
-    );
-    assert_eq!(
-        fault_of(rdch),
-        Some(FaultKind::Guest(FAULT_DECREMENTER_UNMODELED | 8))
+        unit.state().reg_word(2),
+        1_000_000 - u32::try_from(elapsed).unwrap()
     );
 }
 

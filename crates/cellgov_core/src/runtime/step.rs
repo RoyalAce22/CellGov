@@ -123,6 +123,9 @@ impl Runtime {
         self.last_runnable.clear();
         self.last_runnable.extend(self.registry.runnable_ids());
         self.registry.clear_status_override(unit_id);
+        // A unit that runs again left its stall, so a deadline its own
+        // clock set for that stall wakes nothing.
+        self.timer_wakes.cancel_unit_event(unit_id);
 
         if self.mode == RuntimeMode::FullTrace {
             self.trace.record(&TraceRecord::UnitScheduled {

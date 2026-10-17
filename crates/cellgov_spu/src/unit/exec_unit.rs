@@ -86,6 +86,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         }
         channels.mssync_horizon = oldest.map(|_| ctx.dma_next_sequence());
         // Every source count the step entry refreshed can have risen.
+        self.state.set_clock(ctx.current_tick());
         self.state.update_events();
 
         // Mirror cross-unit reservation invalidation. The context view is
@@ -104,6 +105,18 @@ impl ExecutionUnit for SpuExecutionUnit {
         effects.clear();
 
         loop {
+            // Each retired instruction is one guest tick, so this one runs
+            // at the step's start plus the instructions retired before it.
+            self.state.set_clock(cellgov_time::GuestTicks::new(
+                ctx.current_tick()
+                    .raw()
+                    .saturating_add(budget.raw() - remaining),
+            ));
+            // The decrementer can pass zero between two channel accesses,
+            // and an interrupt is the one way the unit sees that there.
+            if self.state.interrupts_enabled() {
+                self.state.sample_decrementer();
+            }
             // [SPU-ISA p:251 s:12.1] an interrupt lands between instructions.
             if self.state.interrupt_pending() {
                 self.state.take_interrupt();
@@ -152,6 +165,16 @@ impl ExecutionUnit for SpuExecutionUnit {
                 }
             };
 
+            // The decrementer runs between instructions, so a channel
+            // access first looks for the zero crossing it can report.
+            if matches!(
+                insn,
+                crate::instruction::SpuInstruction::Rdch { .. }
+                    | crate::instruction::SpuInstruction::Wrch { .. }
+                    | crate::instruction::SpuInstruction::Rchcnt { .. }
+            ) {
+                self.state.sample_decrementer();
+            }
             let outcome = exec::execute(&insn, &mut self.state, self.id);
             // A channel access is the one instruction that moves an event
             // source's count within a step.
@@ -465,6 +488,14 @@ impl ExecutionUnit for SpuExecutionUnit {
 
     fn channel_stall(&self) -> Option<ChannelStall> {
         self.stall
+    }
+
+    /// The decrementer's zero crossing, for a unit parked where an event
+    /// ends its wait.
+    fn event_deadline(&self) -> Option<cellgov_time::GuestTicks> {
+        self.stall
+            .filter(|stall| stall.wake == StallWake::Event)
+            .and_then(|_| self.state.decrementer_event_tick())
     }
 
     fn local_reservation(&self) -> Option<u64> {

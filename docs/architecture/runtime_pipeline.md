@@ -122,6 +122,10 @@ and due timer wakes:
   - A parked sleep wakes with CELL_OK.
   - A timed sync wait expires with CELL_ETIMEDOUT through
     `Lv2Host::expire_wait`.
+  - A unit parked on a channel that an event of its own clock ends,
+    as an SPU's decrementer raises Tm, becomes runnable. The runtime
+    sets that deadline when the unit parks and drops it when the unit
+    next runs.
 
 ### Finished-unit settlement
 

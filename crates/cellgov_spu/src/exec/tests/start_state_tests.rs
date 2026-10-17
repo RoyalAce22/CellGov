@@ -15,12 +15,15 @@ use crate::state::{SignalNotifyMode, SpuObservableSnapshot, SpuState};
 /// [CBEA p:143 s:9.10] software initializes the MFC_WrMSSyncReq count to 1.
 /// [CBEA p:151 s:9.11.2], [CBEA p:153 s:9.11.3], [CBEA p:155 s:9.11.4] the event mask and acknowledgment channels always count 1.
 /// [CBEA p:142 s:9.9.1], [CBEA p:142 s:9.9.2] the SRR0 channels always count 1.
-const START_COUNTS: [(u8, u32); 26] = [
+/// [CBEA p:140 s:9.7.2] the decrementer channels always count 1.
+const START_COUNTS: [(u8, u32); 28] = [
     (0x00, 0),
     (0x01, 1),
     (0x02, 1),
     (0x03, 0),
     (0x04, 0),
+    (0x07, 1),
+    (0x08, 1),
     (0x09, 1),
     (0x0B, 1),
     (0x0C, 1),
@@ -75,10 +78,6 @@ fn rchcnt_on_a_fresh_unit_reads_the_start_count_of_every_channel_number() {
                 Some(s.reg_word(3))
             }
             SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(c)) if c == channel => None,
-            SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
-                channel: c,
-                is_count: true,
-            }) if c == channel => None,
             other => panic!("channel 0x{channel:02x}: {other:?}"),
         };
         assert_eq!(got, expected[channel as usize], "channel 0x{channel:02x}");

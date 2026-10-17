@@ -5,15 +5,16 @@
 //! fires once its condition holds, a pending event latches while masked
 //! and counts the moment software enables it, the decrementer runs at the
 //! time-base frequency, and acknowledging Tm with the event masked stops
-//! it. CellGov's SPU runs the phases it can run alone (Ms, and the
-//! masked latch) and must read back the same words; the decrementer is
-//! refused by name until SPU guest time follows the console's clock.
+//! it. CellGov's SPU runs the phases it can run alone (Ms, Tm, the
+//! masked latch and the decrementer's stop) and must read back the same
+//! words.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::hw::spu;
-use cellgov_spu::exec::{execute, SpuFault, SpuStepOutcome};
+use cellgov_spu::exec::{execute, SpuStepOutcome};
 use cellgov_spu::instruction::SpuInstruction;
 use cellgov_spu::state::SpuState;
+use cellgov_time::GuestTicks;
 
 const CONSOLE: &str = "../../tests/micro/spu_events/ps3/cech20-cex-493/observation.json";
 
@@ -178,14 +179,71 @@ fn cellgov_latches_a_masked_event_as_the_console_does() {
     );
 }
 
+/// The guest tick at which the time base reads `tb`.
+fn at_tb(tb: u64) -> GuestTicks {
+    GuestTicks::new(
+        u64::try_from((u128::from(tb) * 1_000_000_000).div_ceil(79_800_000)).expect("in range"),
+    )
+}
+
+/// Phase 5: the decrementer loaded with 50000 and Tm enabled. Tm fires
+/// as the count passes zero, reads back as exactly its own bit, counts
+/// no more once acknowledged, and the decrementer then reads just below
+/// zero.
+///
+/// The poll loop runs on CellGov's clock, one guest tick per instruction:
+/// the poll count the console's records hold measures the console's
+/// instruction timing, which that clock does not follow.
 #[test]
-fn the_decrementer_is_refused_by_name_until_spu_time_is_the_consoles() {
+fn cellgov_raises_tm_as_the_decrementer_passes_zero_as_the_console_does() {
+    let console = Capture::load().record(5);
     let mut s = SpuState::new();
-    assert_eq!(
-        wrch(spu::SPU_WR_DEC, 50_000, &mut s),
-        SpuStepOutcome::Fault(SpuFault::DecrementerUnmodeled {
-            channel: spu::SPU_WR_DEC,
-            is_count: false
-        })
+    let mut tick = at_tb(1_000);
+    s.set_clock(tick);
+    quiet(&mut s);
+    wrch(spu::SPU_WR_EVENT_MASK, spu::event::TM, &mut s);
+    wrch(spu::SPU_WR_DEC, 50_000, &mut s);
+    // rchcnt, compare and branch: three ticks a poll.
+    let mut polls = 0;
+    loop {
+        tick = GuestTicks::new(tick.raw() + 3);
+        s.set_clock(tick);
+        s.sample_decrementer();
+        if count(spu::SPU_RD_EVENT_STAT, &mut s) != 0 {
+            break;
+        }
+        polls += 1;
+        assert!(polls < MAX_POLLS, "Tm never fired");
+    }
+    let status = rdch(spu::SPU_RD_EVENT_STAT, &mut s);
+    wrch(spu::SPU_WR_EVENT_ACK, status, &mut s);
+    let count_after = count(spu::SPU_RD_EVENT_STAT, &mut s);
+    let after = rdch(spu::SPU_RD_DEC, &mut s);
+    assert_eq!((status, count_after), (console[0], console[2]));
+    assert!(
+        console[3] >= 0xFFFF_FFF0 && after >= 0xFFFF_FFF0,
+        "{after:#x}"
     );
+}
+
+/// Phase 10: phase 9 acknowledged every event with the mask clear, so
+/// the decrementer holds across a spin; a write of 0x7FFFFFFF reads
+/// back at once and then counts down.
+#[test]
+fn cellgov_stops_the_decrementer_on_a_masked_tm_acknowledgment_as_the_console_does() {
+    let console = Capture::load().record(10);
+    let mut s = SpuState::new();
+    s.set_clock(at_tb(1_000));
+    wrch(spu::SPU_WR_DEC, 50_000, &mut s);
+    quiet(&mut s);
+    let stopped_a = rdch(spu::SPU_RD_DEC, &mut s);
+    s.set_clock(at_tb(1_000_000));
+    let stopped_b = rdch(spu::SPU_RD_DEC, &mut s);
+    wrch(spu::SPU_WR_DEC, 0x7FFF_FFFF, &mut s);
+    let written = rdch(spu::SPU_RD_DEC, &mut s);
+    s.set_clock(at_tb(2_000_000));
+    let after = rdch(spu::SPU_RD_DEC, &mut s);
+    assert_eq!(stopped_a == stopped_b, console[0] == console[1], "stopped");
+    assert_eq!(written, console[2], "a read right after the write");
+    assert_eq!(after < written, console[3] < console[2], "counting again");
 }

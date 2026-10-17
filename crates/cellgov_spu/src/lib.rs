@@ -22,6 +22,7 @@
 pub mod capture;
 pub mod census;
 pub mod decode;
+pub mod decrementer;
 pub mod disasm;
 pub mod exec;
 mod fault_codes;

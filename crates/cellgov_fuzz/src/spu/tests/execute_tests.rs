@@ -33,9 +33,10 @@ fn an_spu_sequence_retains_terminal_effects() {
 fn a_faulting_spu_sequence_discards_prior_state() {
     let mut initial = SpuState::new();
     let il_r3_one = (0x081u32 << 23) | (1 << 7) | 3;
-    let unsupported_rchcnt = (0x00fu32 << 21) | (8 << 7) | 2;
+    // wrch SPU_WrOutIntrMbox with no reader connected: refused by name.
+    let refused_wrch = (0x10Du32 << 21) | (0x1E << 7) | 2;
     initial.ls[..4].copy_from_slice(&il_r3_one.to_be_bytes());
-    initial.ls[4..8].copy_from_slice(&unsupported_rchcnt.to_be_bytes());
+    initial.ls[4..8].copy_from_slice(&refused_wrch.to_be_bytes());
 
     let (observed, decoded, _) = run_sequence(&initial, 2);
 

@@ -261,6 +261,13 @@ pub trait ExecutionUnit {
         None
     }
 
+    /// The guest tick at which an event the unit's own clock raises ends
+    /// its channel stall, or `None`. The runtime wakes a parked unit at
+    /// that tick, since no other unit produces the event.
+    fn event_deadline(&self) -> Option<cellgov_time::GuestTicks> {
+        None
+    }
+
     /// The line address the unit's local reservation register holds, or
     /// `None` when it holds none. The runtime compares it with the
     /// committed reservation table to find a reservation another

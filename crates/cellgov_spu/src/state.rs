@@ -281,6 +281,10 @@ impl SpuObservableSnapshot {
             event_mask: _,
             event_count: _,
             event_levels: _,
+            // Instruction comparison runs no clock: no instruction it
+            // compares reads the decrementer.
+            decrementer: _,
+            clock: _,
         } = channels;
         Self {
             regs: *regs.as_array(),
@@ -697,6 +701,40 @@ impl SpuState {
         let rising = levels & !self.channels.event_levels;
         self.channels.event_levels = levels;
         self.raise_events(rising);
+        self.sample_decrementer();
+    }
+
+    /// Set the guest tick of the instruction the unit runs next.
+    pub fn set_clock(&mut self, now: cellgov_time::GuestTicks) {
+        self.channels.clock = now;
+    }
+
+    /// The time base at the unit's clock.
+    pub fn time_base(&self) -> u64 {
+        crate::decrementer::time_base_at(self.channels.clock)
+    }
+
+    /// Raise Tm when the decrementer passed zero since the unit last
+    /// looked.
+    ///
+    /// [CBEA p:150 s:9.11.1] the decrementer event is set when the most significant bit of the count changes from 0 to 1.
+    pub fn sample_decrementer(&mut self) {
+        let now = self.time_base();
+        if self.channels.decrementer.advance(now) {
+            self.raise_events(cellgov_ps3_abi::hw::spu::event::TM);
+        }
+    }
+
+    /// The guest tick at which the decrementer raises Tm, while Tm is
+    /// enabled and not already pending: the deadline a parked unit wakes
+    /// at.
+    pub fn decrementer_event_tick(&self) -> Option<cellgov_time::GuestTicks> {
+        use cellgov_ps3_abi::hw::spu::event::TM;
+        let c = &self.channels;
+        if c.event_mask & TM == 0 || c.pending_events & TM != 0 {
+            return None;
+        }
+        c.decrementer.crossing_tick()
     }
 
     /// Whether an interrupt can end a wait: interrupts are enabled and
@@ -929,6 +967,12 @@ pub struct ChannelState {
     ///
     /// [CBEA p:149 s:9.11.1] hardware determines events by detecting the channel counts that change from 0 to a nonzero value.
     pub event_levels: u32,
+    /// The decrementer `SPU_WrDec` loads and `SPU_RdDec` reads.
+    pub decrementer: crate::decrementer::Decrementer,
+    /// The guest tick of the instruction the unit runs now. The unit
+    /// sets it before each instruction, and the decrementer reads the
+    /// time base from it.
+    pub clock: cellgov_time::GuestTicks,
 }
 
 /// Where a list command resumes after its stall.
@@ -1003,6 +1047,8 @@ impl ChannelState {
             // The sources whose counts start nonzero: MFC_Cmd and
             // MFC_WrMSSyncReq.
             event_levels: cellgov_ps3_abi::hw::spu::event::QV | cellgov_ps3_abi::hw::spu::event::MS,
+            decrementer: crate::decrementer::Decrementer::new(),
+            clock: cellgov_time::GuestTicks::ZERO,
         }
     }
 }
