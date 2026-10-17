@@ -674,12 +674,16 @@ impl SpuState {
     /// bit each.
     ///
     /// [CBEA p:149 s:9.11.1] Tg follows the MFC_RdTagStat count.
+    /// [CBEA p:149 s:9.11.1] Qv is the MFC SPU command queue going from full to not full: the MFC_Cmd count rising from 0.
+    /// [CBEA p:149 s:9.11.1] Sn is the MFC meeting a list element with the stall-and-notify flag set.
     /// [CBEA p:150 s:9.11.1] Mb, S1, S2 and Ms follow the SPU_RdInMbox, signal-notification and MFC_WrMSSyncReq counts.
     fn event_source_levels(&self) -> u32 {
         use cellgov_ps3_abi::hw::spu::event;
         let c = &self.channels;
         let level = |on: bool, bit: u32| if on { bit } else { 0 };
         level(c.tag_status_read.is_some(), event::TG)
+            | level(c.cmd_queue_free > 0, event::QV)
+            | level(c.list_stall_status != 0, event::SN)
             | level(!c.in_mbox.is_empty(), event::MB)
             | level(self.signals[0].pending, event::S1)
             | level(self.signals[1].pending, event::S2)
@@ -996,8 +1000,9 @@ impl ChannelState {
             event_mask: 0,
             // x'0' count 0.
             event_count: false,
-            // The one source whose count starts nonzero.
-            event_levels: cellgov_ps3_abi::hw::spu::event::MS,
+            // The sources whose counts start nonzero: MFC_Cmd and
+            // MFC_WrMSSyncReq.
+            event_levels: cellgov_ps3_abi::hw::spu::event::QV | cellgov_ps3_abi::hw::spu::event::MS,
         }
     }
 }
