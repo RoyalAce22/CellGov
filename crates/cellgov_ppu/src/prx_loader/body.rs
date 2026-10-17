@@ -376,9 +376,10 @@ pub fn load_firmware_set(
         // that publishes the same name keeps loading but loses that one
         // export library. The installed firmware forces the choice:
         // `libfs` and `libfs_155` both publish `sys_fs`, and `libadec`,
-        // `libadec2` and `libadec_internal` all publish `cellAdec`. No
-        // public document says what LV2 does with a duplicate export
-        // library, so this shadowing is CellGov's own policy.
+        // `libadec2` and `libadec_internal` all publish `cellAdec`. The
+        // `lv2_prx_load_cycle` capture loads and starts all three without
+        // a refusal; which export a later import binds is unprobed, so
+        // keeping the first is CellGov's own policy.
         parsed.exports.retain(|lib| {
             let ns_id = graph::module_id_from_name(&lib.name);
             match provider_of_namespace.get(&ns_id) {

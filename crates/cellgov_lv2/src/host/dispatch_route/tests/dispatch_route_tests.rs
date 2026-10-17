@@ -28,6 +28,8 @@ mod no_such_syscall;
 mod process_spu;
 #[path = "route_prx_tests.rs"]
 mod prx;
+#[path = "prx_console_tests.rs"]
+mod prx_console;
 #[path = "prx_module_id_by_name_tests.rs"]
 mod prx_module_id_by_name;
 #[path = "prx_module_list_fill_tests.rs"]

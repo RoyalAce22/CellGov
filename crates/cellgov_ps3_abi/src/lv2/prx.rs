@@ -39,6 +39,12 @@ pub const CELL_PRX_ERROR_CAN_NOT_STOP: u32 = 0x8001_1136;
 /// The ELF is already registered.
 pub const CELL_PRX_ERROR_ELF_IS_REGISTERED: u32 = 0x8001_1910;
 
+/// The bit of a module id `_sys_prx_start_module` refuses with
+/// `CELL_EINVAL` before the lookup: the id read as a signed 32-bit value
+/// is negative. `_sys_prx_stop_module` looks such an id up instead (the
+/// `lv2_prx_start_gate` capture).
+pub const PRX_ID_SIGN_BIT: u32 = 0x8000_0000;
+
 /// `sys_prx_start_stop_module_option_t` field offsets.
 ///
 /// Five fields, each 8 bytes wide and big-endian. `size` is a `u64`:
@@ -100,13 +106,23 @@ pub mod start_stop_option {
 /// - `unk@0x18`
 /// - tail padding to [`get_module_list_option::SIZE`]
 ///
-/// The `pad` and `unk` words carry no name in that caller and the
-/// kernel touches neither, so what they hold is unestablished. A
-/// caller that declares a size other than that one names a layout with
-/// different offsets, which no firmware witness covers.
+/// The `pad` and `unk` words carry no name in that caller. With both
+/// zero the reference console fills the list; with `0xAA` in every byte
+/// of them and of `count`, it stopped answering
+/// (`tests/micro/console_crashes.md`), so the kernel reads at least one
+/// of them. What they hold is unestablished.
+///
+/// The `lv2_prx_module_list_sizes` capture accepts a declared size of
+/// 0x18 as well as liblv2.sprx's 0x20 and fills the same offsets: 0x18
+/// ends at the `idlist` word. It refuses 0, 0x1C, 0x24, 0x28, 0x30 and
+/// 0x40 with `CELL_EINVAL`.
 pub mod get_module_list_option {
     /// The layout liblv2.sprx declares on every call it issues.
     pub const SIZE: u64 = 0x20;
+
+    /// Every declared size the kernel accepts: [`SIZE`] and the form
+    /// that stops at the end of `idlist`.
+    pub const ACCEPTED_SIZES: [u64; 2] = [TOUCHED_LEN as u64, SIZE];
 
     /// `max` -- IN: slots the caller's `idlist` array holds.
     pub const MAX_OFFSET: u32 = 0x0C;
@@ -127,9 +143,9 @@ pub mod get_module_list_option {
 
     /// `flags` bit that asks for the module list.
     ///
-    /// liblv2.sprx passes `flags = 2` on every call, so the other bits
-    /// have no witness. A caller that clears this bit short-circuits
-    /// to CELL_OK.
+    /// liblv2.sprx passes `flags = 2` on every call. The
+    /// `lv2_prx_module_list` capture fills the list for flags 2 and 3
+    /// and answers CELL_OK without a fill for 0, 1 and 4.
     pub const FLAG_FILL_LIST: u64 = 0x2;
 
     // The sc 494 arm gates `pInfo + TOUCHED_LEN` against a 32-bit
@@ -149,9 +165,12 @@ pub mod get_module_list_option {
 /// [`register_module_option::LEGACY_SIZES`] stop short of all three.
 ///
 /// The layout is unestablished: nothing in the captures or the public
-/// documents fixes the offsets or the three accepted sizes. An sc 484
-/// caller's own code shows which fields it writes before the call, so
-/// a reading of one fixes them together.
+/// documents fixes the offsets or the three accepted sizes. Once a
+/// game process is running, the `lv2_prx_register` capture answers it
+/// `CELL_EAGAIN` for every declared size before a field is read; what
+/// liblv2.sprx's own calls during process start get is unprobed. Only
+/// a CoreOS caller's own code, which shows the fields it writes before
+/// the call, can fix the layout.
 pub mod register_module_option {
     /// The form that carries the type word and the stub-table pair.
     pub const SIZE: u64 = 0x30;
@@ -197,9 +216,9 @@ pub mod start_cmd {
     pub const GET_ENTRY: u64 = 1;
     /// Phase 2: report what the entry returned via `res`.
     pub const REPORT_RESULT: u64 = 2;
-    /// Phase-selector mask. Every `cmd` liblv2.sprx writes fits the
-    /// nibble, so no firmware caller distinguishes masking from an
-    /// exact-value match.
+    /// Phase-selector mask. The `lv2_prx_load_cycle` capture sends
+    /// `cmd = 0x11` to a started module's stop and gets phase 1's
+    /// answer, so the kernel masks rather than matching the value.
     pub const MASK: u64 = 0xF;
 }
 

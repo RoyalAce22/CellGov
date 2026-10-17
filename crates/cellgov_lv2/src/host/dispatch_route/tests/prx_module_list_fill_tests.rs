@@ -25,9 +25,9 @@ fn memory_with_pinfo(p_info: u32, max: u32, idlist_ptr: u32) -> cellgov_mem::Gue
     mem
 }
 
-/// A host holding one module the fill reports, under a registry that
-/// also holds liblv2.sprx (which the fill filters out).
-fn host_with_one_listed_module() -> Lv2Host {
+/// A host holding two modules the fill reports: liblv2.sprx and one
+/// other.
+fn host_with_two_listed_modules() -> Lv2Host {
     let mut host = Lv2Host::new();
     host.prx_registry_mut().register(
         "liblv2".into(),
@@ -66,7 +66,7 @@ fn module_list(host: &mut Lv2Host, p_info: u32, rt: &FakeRuntime) -> Lv2Dispatch
 fn an_idlist_slot_off_the_top_of_the_address_space_stops_the_fill_and_is_named() {
     // Without the gate the slot address wraps and the write lands in
     // low guest memory under a fabricated address, behind CELL_OK.
-    let mut host = host_with_one_listed_module();
+    let mut host = host_with_two_listed_modules();
     let rt = FakeRuntime::with_memory(memory_with_pinfo(0x4000, 8, u32::MAX - 1));
     let effects = match module_list(&mut host, 0x4000, &rt) {
         Lv2Dispatch::Immediate { code: 0, effects } => effects,
@@ -91,7 +91,7 @@ fn an_idlist_the_slot_fits_inside_writes_it_and_names_nothing() {
     // The control uses the same registry and the same `max`, with room
     // for the slot. A gate that refused every address passes the test
     // above and fails this one.
-    let mut host = host_with_one_listed_module();
+    let mut host = host_with_two_listed_modules();
     let rt = FakeRuntime::with_memory(memory_with_pinfo(0x4000, 8, 0x4040));
     let effects = match module_list(&mut host, 0x4000, &rt) {
         Lv2Dispatch::Immediate { code: 0, effects } => effects,
@@ -101,5 +101,5 @@ fn an_idlist_the_slot_fits_inside_writes_it_and_names_nothing() {
         host.invariant_break_site_count("dispatch.prx_module_list_idlist_slot_wraps"),
         0
     );
-    assert_eq!(effects.len(), 2, "one slot write plus the count write");
+    assert_eq!(effects.len(), 3, "two slot writes plus the count write");
 }

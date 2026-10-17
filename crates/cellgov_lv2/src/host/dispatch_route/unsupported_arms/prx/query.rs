@@ -29,7 +29,8 @@ impl Lv2Host {
     }
 
     /// `_sys_prx_get_module_list` (494): fills `pInfo->idlist` and
-    /// writes `pInfo->count`, filtering liblv2.sprx.
+    /// writes `pInfo->count`. liblv2.sprx is listed like any other
+    /// module: the `lv2_prx_module_list` capture reads its id first.
     ///
     /// The struct layout is
     /// [`cellgov_ps3_abi::lv2::prx::get_module_list_option`]. A caller
@@ -37,10 +38,19 @@ impl Lv2Host {
     /// field of `pInfo` on that path, so a null pointer gets CELL_OK
     /// too.
     ///
-    /// `size` selects the layout. A value other than the modelled one
-    /// names a struct whose `max` / `count` / `idlist` sit elsewhere,
-    /// and that layout is not modelled: the call fills nothing,
-    /// answers CELL_OK, and logs a break.
+    /// `size` must be one of
+    /// [`get_module_list_option::ACCEPTED_SIZES`], which share one
+    /// layout. Any other declared size answers `CELL_EINVAL` and fills
+    /// nothing, as the `lv2_prx_module_list_sizes` capture reads for
+    /// every other size it sends.
+    ///
+    /// [`get_module_list_option::ACCEPTED_SIZES`]:
+    ///     cellgov_ps3_abi::lv2::prx::get_module_list_option::ACCEPTED_SIZES
+    ///
+    /// On the console a null `pInfo` with the fill bit set, and a
+    /// struct whose unnamed words hold `0xAA` bytes, each stopped the
+    /// reference console (`tests/micro/console_crashes.md`). CellGov
+    /// answers the first `CELL_EFAULT` and ignores the unnamed words.
     ///
     /// The fill stops at `pInfo->max` slots, or at the first slot that
     /// leaves the 32-bit guest address space; that slot names its own
@@ -64,6 +74,8 @@ impl Lv2Host {
     /// - `CELL_EFAULT` for a null `pInfo`, for a struct that would not
     ///   fit inside the 32-bit guest address space, and for an
     ///   unreadable `size` / `max` / `idlist` field.
+    /// - `CELL_EINVAL` for a declared `size` the kernel does not
+    ///   accept.
     pub(in crate::host::dispatch_route) fn dispatch_prx_get_module_list(
         &mut self,
         args: [u64; 8],
@@ -73,7 +85,6 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         use cellgov_ps3_abi::lv2::prx::get_module_list_option as opt;
         use cellgov_ps3_abi::lv2::syscall;
-        let modelled_size = opt::SIZE;
 
         let flags = args[0];
         let Some([p_info]) =
@@ -109,17 +120,8 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        if declared_size != modelled_size {
-            self.log_invariant_break(
-                "dispatch.prx_module_list_unknown_struct_size",
-                format_args!(
-                    "sys_prx_get_module_list pInfo={p_info:#010x} declares \
-                     size={declared_size:#x}, not {modelled_size:#x}; the other \
-                     layout is not modelled, so nothing is filled in and CELL_OK is \
-                     returned"
-                ),
-            );
-            return Lv2Dispatch::immediate(0);
+        if !opt::ACCEPTED_SIZES.contains(&declared_size) {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let mut effects = Vec::new();
         let max_addr = p_info.wrapping_add(opt::MAX_OFFSET);
@@ -145,11 +147,6 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        let liblv2_id = self
-            .state
-            .prx_registry
-            .lookup_by_path("liblv2.sprx")
-            .map(|e| e.kernel_id());
         let mut count: u32 = 0;
         // `idlist` is a guest pointer read out of the option struct, so
         // an array near the top of the address space cannot hold every
@@ -157,9 +154,6 @@ impl Lv2Host {
         let mut wrapped_slot: Option<u32> = None;
         if idlist_ptr != 0 {
             for kid in self.state.prx_registry.ids() {
-                if Some(kid) == liblv2_id {
-                    continue;
-                }
                 if count >= max {
                     break;
                 }

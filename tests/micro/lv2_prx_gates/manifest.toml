@@ -1,0 +1,17 @@
+[test]
+name = "lv2_prx_gates"
+
+# A hardware probe: what the PRX start and stop gates answer for an
+# unknown id and a null or readable option, and what syscall 462
+# answers with every argument zero. Nothing is loaded or created. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# six u64 r3 values (A0-A5), then one u64 r3 (B): 56 bytes. The header
+# of ppu/main.c names every case.
+memory_regions = [
+  { name = "result", addr = 0, size = 56 },
+]
+
+[expect]
+outcome = "completed"

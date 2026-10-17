@@ -3,7 +3,7 @@
     "kind": "process_exit"
   },
   "outcome": "ProcessExit",
-  "steps": 6535,
+  "steps": 6538,
   "budget": 256,
   "host_invariant_breaks": 2,
   "witnesses": {
@@ -36,7 +36,7 @@
       "class": "at-least"
     },
     "lwarx": {
-      "value": 1552,
+      "value": 1555,
       "class": "at-least"
     },
     "lwmutex_acquires": {

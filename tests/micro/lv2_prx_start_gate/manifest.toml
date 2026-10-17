@@ -1,0 +1,18 @@
+[test]
+name = "lv2_prx_start_gate"
+
+# A hardware probe: which check _sys_prx_start_module refuses an
+# unknown id with when the option struct is readable, against
+# _sys_prx_stop_module for the same stale id. No live module is named.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# u64 r3 of the liblv2 id lookup, then fourteen cases of u64 r3 and the
+# u64 entry word after the call: 232 bytes. The header of ppu/main.c
+# names every case.
+memory_regions = [
+  { name = "result", addr = 0, size = 232 },
+]
+
+[expect]
+outcome = "completed"

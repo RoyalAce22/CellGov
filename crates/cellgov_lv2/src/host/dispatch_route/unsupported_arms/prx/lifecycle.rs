@@ -27,7 +27,9 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_EINVAL` for null `id` or null `pOpt`.
+    /// - `CELL_EINVAL` for null `id`, an `id` with bit 31 set, or null
+    ///   `pOpt`. The `lv2_prx_start_gate` capture answers EINVAL for
+    ///   such an id with a readable option, before the lookup.
     /// - `CELL_ESRCH` when `id` names no loaded module.
     /// - `CELL_PRX_ERROR_ERROR` for a command nibble that is neither
     ///   1 nor 2.
@@ -46,7 +48,8 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         use cellgov_ps3_abi::lv2::prx::{
-            start_cmd, start_stop_option as opt, CELL_PRX_ERROR_ERROR, SYS_PRX_RESIDENT,
+            start_cmd, start_stop_option as opt, CELL_PRX_ERROR_ERROR, PRX_ID_SIGN_BIT,
+            SYS_PRX_RESIDENT,
         };
         use cellgov_ps3_abi::lv2::syscall;
 
@@ -56,7 +59,7 @@ impl Lv2Host {
         ) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
-        if id == 0 || p_opt == 0 {
+        if id == 0 || id & PRX_ID_SIGN_BIT != 0 || p_opt == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if self.state.prx_registry.lookup_by_id(id).is_none() {
@@ -188,14 +191,14 @@ impl Lv2Host {
     /// back the entries, 8 reports what they returned. Neither moves
     /// the module's state.
     ///
-    /// An unknown `id` together with a null `pOpt` answers
-    /// `CELL_ESRCH`. The kernel's own precedence between the two is
-    /// unestablished.
+    /// A null `pOpt` answers `CELL_EINVAL` before the id is looked up,
+    /// as the `lv2_prx_gates` capture reads for an unknown id. Unlike
+    /// sc 481, an id with bit 31 set is only looked up.
     ///
     /// # Errors
     ///
-    /// - `CELL_ESRCH` when `id` names no loaded module.
     /// - `CELL_EINVAL` for null `pOpt`.
+    /// - `CELL_ESRCH` when `id` names no loaded module.
     /// - `CELL_PRX_ERROR_NOT_STARTED` / `ALREADY_STOPPED` /
     ///   `ALREADY_STOPPING` when cmd 1 / 4 / 8 finds the module in
     ///   the wrong state.
@@ -227,11 +230,11 @@ impl Lv2Host {
         ) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
-        if self.state.prx_registry.lookup_by_id(id).is_none() {
-            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
-        }
         if p_opt == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
+        if self.state.prx_registry.lookup_by_id(id).is_none() {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         // The base struct (through `res`) must fit below the 4 GiB
         // boundary; `entry2`'s reach is gated after `size` is known.

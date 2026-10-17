@@ -1,0 +1,18 @@
+[test]
+name = "lv2_prx_module_list_sizes"
+
+# A hardware probe: which declared sizes _sys_prx_get_module_list
+# accepts, and whether the fill flag is read before the size. Nothing
+# is loaded or created. The console capture is the answer; no emulator
+# runs it.
+
+[observe]
+# per case, 112 bytes: u64 r3, the 0x28-byte struct after the call,
+# then idlist slots 0-15 as u32. Seven cases: 784 bytes. The header of
+# ppu/main.c names every case.
+memory_regions = [
+  { name = "result", addr = 0, size = 784 },
+]
+
+[expect]
+outcome = "completed"

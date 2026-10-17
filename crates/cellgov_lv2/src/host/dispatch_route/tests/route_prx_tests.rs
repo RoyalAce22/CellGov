@@ -278,25 +278,28 @@ fn syscall_494_walks_registry_writing_ids_and_count() {
         UnitId::new(0),
         &rt,
     );
-    match result {
-        Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, 0);
-            assert_eq!(effects.len(), 2);
-            if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] {
-                assert_eq!(range.start().raw(), 0x4040);
-                assert_eq!(
-                    u32::from_be_bytes(bytes.bytes().try_into().unwrap()),
-                    audio_id
-                );
-            }
-            if let Effect::SharedWriteIntent { range, bytes, .. } = &effects[1] {
-                assert_eq!(range.start().raw(), 0x4010);
-                assert_eq!(u32::from_be_bytes(bytes.bytes().try_into().unwrap()), 1);
-            }
-            assert!(liblv2_id > 0);
-        }
-        other => panic!("expected Immediate, got {other:?}"),
-    }
+    let effects = match result {
+        Lv2Dispatch::Immediate { code: 0, effects } => effects,
+        other => panic!("expected Immediate{{code:0}}, got {other:?}"),
+    };
+    let writes: Vec<(u64, u32)> = effects
+        .iter()
+        .map(|effect| match effect {
+            Effect::SharedWriteIntent { range, bytes, .. } => (
+                range.start().raw(),
+                u32::from_be_bytes(bytes.bytes().try_into().unwrap()),
+            ),
+            other => panic!("expected SharedWriteIntent, got {other:?}"),
+        })
+        .collect();
+    // liblv2 is listed like any other module, in registry key order.
+    let mut ids = [liblv2_id, audio_id];
+    ids.sort_unstable();
+    assert_eq!(
+        writes,
+        vec![(0x4040, ids[0]), (0x4044, ids[1]), (0x4010, 2)],
+        "two slot writes, then the count"
+    );
 }
 
 /// A CoreOS 484 whose import table wraps `u32` links nothing; the
@@ -637,8 +640,24 @@ fn prx_start_module_unknown_id_returns_esrch() {
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
     assert_eq!(
-        start_module(&mut host, 0xDEAD_BEEF, p_opt, &rt),
+        start_module(&mut host, 0x5EAD_BEEF, p_opt, &rt),
         Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
+    );
+}
+
+#[test]
+fn prx_start_module_id_with_bit_31_set_is_einval_before_the_lookup() {
+    let (mut host, id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
+    assert_eq!(
+        start_module(&mut host, 0xDEAD_BEEF, p_opt, &rt),
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
+    );
+    assert_eq!(
+        start_module(&mut host, id | 0x8000_0000, p_opt, &rt),
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+        "a loaded module's id with bit 31 set is refused too"
     );
 }
 
@@ -825,16 +844,15 @@ fn host_with_one_started_prx() -> (Lv2Host, u32) {
     (host, id)
 }
 
-/// The reverse of 481's EINVAL-first order. What the kernel answers
-/// when both apply is unestablished. This pins CellGov's order.
+/// A null option is refused before the id is looked up, as on sc 481.
 #[test]
-fn syscall_482_esrch_precedes_einval() {
+fn syscall_482_null_option_precedes_the_id_lookup() {
     let (mut host, id) = host_with_one_started_prx();
     let rt = FakeRuntime::new(0x1000);
     assert_eq!(
         stop_module(&mut host, 0xDEAD_BEEF, 0, &rt),
-        Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
-        "unknown id with null pOpt reports the id miss, not EINVAL"
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+        "unknown id with null pOpt reports the null option, not the id miss"
     );
     assert_eq!(
         stop_module(&mut host, id, 0, &rt),
@@ -1212,11 +1230,12 @@ fn syscall_494_unreadable_size_field_returns_efault_and_logs_break() {
     );
 }
 
-/// `size` selects the layout, so the `0x20` offsets name real fields
-/// only in a struct that declares `0x20`.
+/// `size` selects the layout, so the offsets name real fields only in
+/// a struct that declares an accepted size. Any other size is refused,
+/// as the console refuses each it was sent.
 #[test]
-fn syscall_494_unknown_struct_size_fills_nothing_and_returns_ok() {
-    for size in [0u64, 0x18, 0x21, 0x30, u64::MAX] {
+fn syscall_494_unknown_struct_size_is_einval_and_fills_nothing() {
+    for size in [0u64, 0x1C, 0x21, 0x28, 0x30, u64::MAX] {
         let mut host = Lv2Host::new();
         host.prx_registry_mut().register(
             "libaudio".into(),
@@ -1238,16 +1257,10 @@ fn syscall_494_unknown_struct_size_fills_nothing_and_returns_ok() {
         )
         .unwrap();
         let rt = FakeRuntime::with_memory(mem);
-        let breaks_before = host.observability().invariant_break_count;
         assert_eq!(
             get_module_list(&mut host, 0x4000, &rt),
-            Lv2Dispatch::immediate(0),
+            Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             "size={size:#x} must fill nothing rather than write the 0x20 offsets"
-        );
-        assert_eq!(
-            host.observability().invariant_break_count - breaks_before,
-            1,
-            "size={size:#x}"
         );
     }
 }
