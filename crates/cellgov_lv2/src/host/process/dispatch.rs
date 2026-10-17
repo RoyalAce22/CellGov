@@ -412,8 +412,9 @@ impl Lv2Host {
     }
 
     /// `sys_process_get_number_of_object`: writes the per-class active
-    /// count as a 32-bit value (PS3 PPU64 ILP32). Unmodeled classes
-    /// report zero.
+    /// count as a 32-bit value (PS3 PPU64 ILP32). A class the console
+    /// does not count is EINVAL; a counted class CellGov keeps no count
+    /// for reports zero.
     pub(in crate::host) fn dispatch_process_get_number_of_object(
         &self,
         class_id: u32,
@@ -421,6 +422,9 @@ impl Lv2Host {
         source: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        if !cellgov_ps3_abi::lv2::process::COUNTED_PROCESS_OBJECT_CLASS_IDS.contains(&class_id) {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        }
         let count = self.state.process_counts.count_for_class(class_id, self);
         self.immediate_write_u32(count, count_out_ptr, source, tick)
     }

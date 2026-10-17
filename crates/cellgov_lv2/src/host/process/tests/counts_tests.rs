@@ -19,8 +19,6 @@ fn count_for_class_covers_every_documented_class_id() {
             "fresh host must report 0 for class 0x{class:02X}"
         );
     }
-    // Unknown class falls to zero.
-    assert_eq!(counts.count_for_class(0xFF, &host), 0);
 }
 
 #[test]

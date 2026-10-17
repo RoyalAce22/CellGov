@@ -249,3 +249,7 @@ mod primary_stack_console_tests;
 #[cfg(test)]
 #[path = "tests/primary_stack_placement_console_tests.rs"]
 mod primary_stack_placement_console_tests;
+
+#[cfg(test)]
+#[path = "tests/primary_prio_console_tests.rs"]
+mod primary_prio_console_tests;

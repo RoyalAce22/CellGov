@@ -2,6 +2,8 @@
 
 /// Smallest `prio` a non-root process may assign to a PPU thread.
 /// Priorities run 0 to 3071, with 0 the most urgent.
+// The documented range. The console runner starts every probe with
+// root authority, so no capture shows a non-root process's bounds.
 pub const PPU_THREAD_PRIORITY_MIN: i32 = 0;
 
 /// Smallest `prio` a root or debug process may assign; the kernel
@@ -14,6 +16,8 @@ pub const PPU_THREAD_PRIORITY_MIN_ROOT: i32 = -512;
 
 /// Largest `prio` a non-root process may assign to a PPU thread, and
 /// the least urgent.
+// The documented range, as for the minimum. The lv2_process_prio_3071
+// capture shows a primary thread declared at 3071 running there.
 pub const PPU_THREAD_PRIORITY_MAX: i32 = 3071;
 
 /// Largest `prio` a root or debug process may assign with

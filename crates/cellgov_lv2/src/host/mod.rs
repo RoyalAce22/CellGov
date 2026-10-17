@@ -68,6 +68,10 @@ mod error_code_console_tests;
 mod process_queries_console_tests;
 
 #[cfg(test)]
+#[path = "tests/process_classes_console_tests.rs"]
+mod process_classes_console_tests;
+
+#[cfg(test)]
 #[path = "tests/kernel_id_classes_console_tests.rs"]
 mod kernel_id_classes_console_tests;
 

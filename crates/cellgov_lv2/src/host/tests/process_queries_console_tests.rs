@@ -1,14 +1,12 @@
 //! The process queries held to the `lv2_process_queries` capture from
 //! the reference console: get_status, getppid, get_ppu_guid, the object
 //! counts around four creates, the ids those creates mint, and the ss
-//! access control reads. For the two differences CellGov does not close
-//! yet -- the answer for an undefined object class and the SPU thread
-//! group id's form -- a test holds the console's value and refuses
-//! CellGov's.
+//! access control reads. For the difference CellGov does not close yet
+//! -- the SPU thread group id's form -- a test holds the console's value
+//! and refuses CellGov's.
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::kernel_id;
 use cellgov_ps3_abi::lv2::process::{
     BOOT_PROCESS_PID, SYS_EVENT_FLAG_OBJECT, SYS_EVENT_QUEUE_OBJECT, SYS_MUTEX_OBJECT,
@@ -176,16 +174,20 @@ fn a_create_raises_its_class_count_by_one_as_on_the_console() {
 }
 
 #[test]
-fn an_undefined_object_class_reads_einval_on_the_console_and_a_zero_count_in_cellgov() {
+fn an_undefined_object_class_reads_einval_with_no_write_as_on_the_console() {
     let payload = console_payload(PROBE);
     let (mut host, rt) = host_and_runtime();
     for class in [0x25, 0x60, 0x01, 0xFF] {
-        let (rc_before, _, rc_after, _) = console_count(&payload, class);
-        assert_eq!(rc_before, errno::CELL_EINVAL.into(), "class {class:#x}");
+        let (rc_before, before, rc_after, after) = console_count(&payload, class);
         assert_eq!(rc_after, rc_before, "class {class:#x}");
         assert_eq!(
+            (before, after),
+            (0xEEEE_EEEE, 0xEEEE_EEEE),
+            "class {class:#x}"
+        );
+        assert_eq!(
             cellgov_count(&mut host, &rt, class),
-            (0, Some(0)),
+            (rc_before, None),
             "class {class:#x}"
         );
     }

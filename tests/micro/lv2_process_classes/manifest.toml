@@ -1,0 +1,16 @@
+[test]
+name = "lv2_process_classes"
+
+# A hardware probe: the process's pid and ppid, which object classes
+# sys_process_get_number_of_object answers, and what a keyed
+# sys_mmapper_allocate_shared_memory answers from a game process. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 4176 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 4176 },
+]
+
+[expect]
+outcome = "completed"

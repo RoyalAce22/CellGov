@@ -10,17 +10,18 @@
 pub type ProcessObjectClassId = u32;
 
 /// Pid CellGov gives the boot process.
-// Firmware observation: sys_process_getpid returns this to the
-// first user process on real hardware; PSL1GHT keys on the value. A
-// process launched from the
-// XMB gets a pid that depends on launch history: the
-// lv2_process_queries and lv2_process_stack_small captures read
-// 0x011D0200 and 0x011F0200.
+// CellGov's choice: no capture reads it. A game the XMB launches gets
+// a pid that depends on launch history -- the lv2_process_queries,
+// lv2_process_stack_small and lv2_process_classes captures read
+// 0x011D0200, 0x011F0200 and 0x01370200 -- and vsh's own pid, the
+// parent each of them reports, is 0x01000300.
 pub const BOOT_PROCESS_PID: u32 = 0x0100_0500;
 
-/// Ppid the boot process reports.
-// The lv2_process_queries capture reads this ppid from a process the
-// XMB launched.
+/// Ppid the boot process reports: vsh's pid, as a game the XMB launched
+/// reads it.
+// The lv2_process_queries and lv2_process_classes captures read it from
+// a process the XMB launched. It is the right parent for a game boot
+// and not for a vsh boot, which has no captured parent.
 pub const BOOT_PROCESS_PPID: u32 = 0x0100_0300;
 
 /// `sys_process_get_status` return value for a live process.
@@ -29,11 +30,12 @@ pub const BOOT_PROCESS_PPID: u32 = 0x0100_0300;
 pub const SYS_PROCESS_STATUS_LIVE: u64 = 2;
 
 /// One past the highest `sys_process_param.primary_prio` the kernel
-/// adopts; a declaration at or above it leaves the kernel default
+/// adopts; a declaration at or above it leaves the default of 1001
 /// standing rather than failing the load.
-// The bound follows from the PPU thread priority range, which ends at
-// 3071. How the loader answers an out-of-range declaration is its own
-// choice, not a stated rule.
+// The console captures of tests/micro/lv2_process_prio_3071 and
+// tests/micro/lv2_process_prio_3072: a process declaring 3071 runs its
+// primary thread at 3071, and one declaring 3072 launches and runs it
+// at 1001.
 pub const SYS_PROCESS_PARAM_PRIO_LIMIT: i32 = 3072;
 
 /// `sys_event_port` objects.
@@ -91,9 +93,43 @@ pub mod exit2_param {
     pub const DATA_BLOB_THRESHOLD: u32 = HEADER_SIZE + DATA_BLOB_SIZE;
 }
 
-/// Every documented class id, in numeric order. The class-id
-/// coverage test in `cellgov_lv2::host::process::counts` drives
-/// off this slice.
+/// Every class `sys_process_get_number_of_object` counts, in numeric
+/// order. Any other class is EINVAL.
+// The console capture of tests/micro/lv2_process_classes sweeps every
+// class from 0x00 to 0xFF: these 24 answer CELL_OK and the other 232
+// answer EINVAL. `kernel_id` names 0x08 (shared memory) and 0x41 / 0x42
+// (config handles and listeners), the lv2_prx_start_gate capture reads
+// a PRX id in class 0x23, and no capture names the others.
+pub const COUNTED_PROCESS_OBJECT_CLASS_IDS: &[ProcessObjectClassId] = &[
+    super::kernel_id::SHARED_MEMORY_CLASS,
+    0x0A,
+    0x0B,
+    SYS_EVENT_PORT_OBJECT,
+    SYS_TIMER_OBJECT,
+    0x21,
+    0x22,
+    0x23,
+    0x24,
+    super::kernel_id::CONFIG_HANDLE_CLASS,
+    super::kernel_id::CONFIG_LISTENER_CLASS,
+    0x43,
+    0x44,
+    0x45,
+    0x65,
+    SYS_FS_FD_OBJECT,
+    SYS_MUTEX_OBJECT,
+    SYS_COND_OBJECT,
+    SYS_RWLOCK_OBJECT,
+    SYS_EVENT_QUEUE_OBJECT,
+    SYS_LWMUTEX_OBJECT,
+    SYS_SEMAPHORE_OBJECT,
+    SYS_LWCOND_OBJECT,
+    SYS_EVENT_FLAG_OBJECT,
+];
+
+/// The class ids CellGov keeps a count for, in numeric order. The
+/// class-id coverage test in `cellgov_lv2::host::process::counts`
+/// drives off this slice.
 pub const ALL_PROCESS_OBJECT_CLASS_IDS: &[ProcessObjectClassId] = &[
     SYS_EVENT_PORT_OBJECT,
     SYS_TIMER_OBJECT,

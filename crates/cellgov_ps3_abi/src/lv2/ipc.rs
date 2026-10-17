@@ -7,6 +7,11 @@
 /// ipc_key of the 64 KiB cellSysutil slot-state shared memory,
 /// created via a keyed `sys_mmapper_allocate_shared_memory` during
 /// libsysutil module_start.
+// The console capture of tests/micro/lv2_process_classes shows the key
+// held when a game runs: the game's keyed 332 on it answers EEXIST, and
+// on an unused key of the namespace ESRCH. A game process's keyed 332
+// cannot attach the segment, so the slot layout below stays a reading of
+// libsysutil.prx that no capture checks.
 pub const CELLSYSUTIL_SHM_IPC_KEY: u64 = 0x8006_0100_0000_0010;
 
 /// Mask isolating the system-IPC namespace from a full ipc_key.

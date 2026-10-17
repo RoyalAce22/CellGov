@@ -1,0 +1,15 @@
+[test]
+name = "lv2_process_prio_3071"
+
+# A hardware probe: the priority the primary PPU thread runs at when the
+# process declares primary_prio 3071. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# Four big-endian u32 words, as ppu/main.c lists: 16 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"

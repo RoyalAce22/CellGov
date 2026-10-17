@@ -1,7 +1,7 @@
 ordinal	packet	same_as	selector_slot	provenance_kind	provenance_ref	witness	exception	arm_source
 1	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/process/tests/dispatch_tests.rs:getpid_and_getppid_answer_for_the_calling_process	none	crates/cellgov_lv2/src/host/process/dispatch.rs
 4	none	none	none	console_capture	micro:lv2_process_queries	crates/cellgov_lv2/src/host/tests/process_queries_console_tests.rs:get_status_reads_live_for_the_process_and_its_parent_and_esrch_otherwise	none	crates/cellgov_lv2/src/host/process/dispatch.rs
-12	none	none	none	unestablished	none	crates/cellgov_lv2/src/host/tests/hardware_trace_tests.rs:process_object_counts_rise_on_create_and_fall_on_destroy	none	crates/cellgov_lv2/src/host/process/dispatch.rs
+12	none	none	none	console_capture	micro:lv2_process_classes	crates/cellgov_lv2/src/host/tests/process_classes_console_tests.rs:every_object_class_answers_as_on_the_console	none	crates/cellgov_lv2/src/host/process/dispatch.rs
 14	none	none	none	non_public	none	crates/cellgov_lv2/src/host/dispatch_route/tests/route_process_spu_tests.rs:process_is_spu_lock_line_reservation_address_private_spu_rejects_raw_flag	none	crates/cellgov_lv2/src/host/process/dispatch.rs
 18	none	none	none	console_capture	micro:lv2_process_queries	crates/cellgov_lv2/src/host/tests/process_queries_console_tests.rs:getppid_and_the_ppu_guid_match_the_console	none	crates/cellgov_lv2/src/host/process/dispatch.rs
 21	none	none	none	citation	CBE-Handbook:p:397	crates/cellgov_core/src/runtime/tests/process_spawn_tests.rs:spawn_creates_child_space_unit_and_pid	none	crates/cellgov_lv2/src/host/process/dispatch.rs
