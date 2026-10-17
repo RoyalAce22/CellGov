@@ -9,7 +9,7 @@ use crate::host::Lv2Host;
 
 use crate::host::fs::common::{
     assert_immediate, extract_fd, extract_read, extract_readdir, fs_open, fs_opendir, fs_read,
-    fs_readdir, host_mounts, parse_dirent, run, PathRuntime, TempMountDir,
+    fs_readdir, host_mounts, parse_dirent, read_dots, run, PathRuntime, TempMountDir,
 };
 
 /// `/app_home` served from `update`, then `base`.
@@ -46,6 +46,7 @@ fn list_dir(host: &mut Lv2Host, path: &[u8]) -> Vec<(String, u8)> {
     bytes.push(0);
     let rt = PathRuntime::empty(0x40000).write(0x10000, &bytes);
     let fd = extract_fd(run(host, &rt, fs_opendir(0x10000, 0x20000)), 0x20000);
+    read_dots(host, fd);
 
     let mut entries = Vec::new();
     loop {

@@ -1,13 +1,14 @@
 //! `sys_fs_write` host dispatch.
 //!
-//! The `FsStore` model is read-only: every `sys_fs_open` returns a
-//! read-side fd, so no fd in the store could accept a write and this
-//! is the null-backend arm of the FS surface.
-//!
-//! `CELL_EBADF` is the errno a non-writable fd earns, and CellGov
-//! answers it for every write, so a guest cannot tell a read-only fd
-//! from the absent write side. A title that opens a file for writing
-//! diverges at its first write.
+//! The `FsStore` model is read-only, so no fd in the store accepts a
+//! write. The `lv2_fs_answers` capture reads what the console answers
+//! a read-only fd: `CELL_EBADF` with a zero nwrite for a write of 4
+//! bytes, and `CELL_OK` with a zero nwrite for a write of 0 bytes.
+//! CellGov answers the same. A title that opens a file for writing
+//! diverges earlier, at the open, which CellGov refuses with
+//! `CELL_EROFS`. The one exception is a TTY-sink path
+//! (`super::flags::FS_TTY_SINK_PATHS`): its open accepts write
+//! access, but a write to that fd still answers `CELL_EBADF` here.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
@@ -19,7 +20,7 @@ use crate::dispatch::Lv2Dispatch;
 use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
-    /// `sys_fs_write` -- no writable fd in the FS model.
+    /// `sys_fs_write` -- every fd in the FS model is read-only.
     ///
     /// # Errors
     ///
@@ -29,9 +30,10 @@ impl Lv2Host {
     ///    The fd gate runs before the zero-size short-circuit, so a bad
     ///    fd is EBADF even when `size == 0`.
     /// 4. fd valid, `size == 0` -> `CELL_OK`, 8-byte zero write to `nwrite_ptr`.
-    /// 5. fd valid, `size > 0` -> `CELL_EBADF`, 8-byte zero write to `nwrite_ptr`,
-    ///    plus `log_invariant_break`. This arm is the divergence the
-    ///    module docs describe.
+    /// 5. fd valid, `size > 0` -> `CELL_EBADF`, 8-byte zero write to
+    ///    `nwrite_ptr`: the answer to a fd opened without write access.
+    ///    A fd opened with write flags on a TTY-sink path also answers
+    ///    this, and the dropped write is logged as an invariant break.
     pub(in crate::host) fn dispatch_fs_write(
         &mut self,
         fd: u32,
@@ -71,15 +73,20 @@ impl Lv2Host {
                 effects: vec![nwrite_zero],
             };
         }
-        self.log_invariant_break(
-            "dispatch.fs_write.read_only_model_rejects_write",
-            format_args!(
-                "sys_fs_write(fd={fd}, buf={buf_ptr:#010x}, size={size:#x}, \
-                 nwrite={nwrite_ptr:#010x}): FsStore is read-only so no fd carries \
-                 write access; returning CELL_EBADF, the code for an fd opened \
-                 without write access"
-            ),
-        );
+        if self
+            .fs_store()
+            .fd_path(fd)
+            .is_some_and(|path| super::flags::FS_TTY_SINK_PATHS.contains(&path))
+        {
+            self.log_invariant_break(
+                "dispatch.fs_write.tty_sink_write_dropped",
+                format_args!(
+                    "sys_fs_write(fd={fd}, size={size:#x}): the fd was opened with write \
+                     flags on a TTY-sink path, and no write path carries its bytes; \
+                     returning CELL_EBADF"
+                ),
+            );
+        }
         Lv2Dispatch::Immediate {
             code: errno::CELL_EBADF.into(),
             effects: vec![nwrite_zero],
@@ -90,3 +97,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/write_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/tty_sink_write_tests.rs"]
+mod tty_sink_tests;

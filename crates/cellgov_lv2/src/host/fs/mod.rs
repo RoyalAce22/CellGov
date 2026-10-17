@@ -26,3 +26,7 @@ mod write;
 #[cfg(test)]
 #[path = "tests/common.rs"]
 mod common;
+
+#[cfg(test)]
+#[path = "tests/fs_answers_console_tests.rs"]
+mod fs_answers_console_tests;

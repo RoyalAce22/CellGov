@@ -9,18 +9,21 @@ use crate::host::{Lv2Host, Lv2Runtime};
 
 use super::mount::MountResolution;
 use super::path::read_path_bytes;
-use super::stat_layout::{cell_fs_stat_write, is_stat_ptr_writable};
+use super::stat_layout::{
+    cell_fs_stat_write, is_stat_ptr_writable, CELL_FS_DIRECTORY_SIZE, CELL_FS_S_IFDIR_R_ONLY_MODE,
+    CELL_FS_S_IFREG_R_ONLY_MODE,
+};
 
 impl Lv2Host {
-    /// `sys_fs_fstat` -- populate a `CellFsStat` (56 bytes) for an
+    /// `sys_fs_fstat` -- populate a `CellFsStat` (52 bytes) for an
     /// open fd's backing blob. [`cell_fs_stat_write`] fixes the record:
-    /// mode `S_IFREG | 0o444`, the blob's size, a 4096-byte block size,
+    /// mode `S_IFREG | 0o444`, the blob's size, a 512-byte block size,
     /// and zero for uid, gid and the three timestamps.
     ///
     /// # Errors
     ///
     /// In precedence order:
-    /// 1. `stat_out_ptr` misaligned / unwritable for 56 bytes -> CELL_EFAULT.
+    /// 1. `stat_out_ptr` misaligned / unwritable for 52 bytes -> CELL_EFAULT.
     /// 2. Unknown `fd` -> CELL_EBADF.
     pub(in crate::host) fn dispatch_fs_fstat(
         &mut self,
@@ -51,7 +54,8 @@ impl Lv2Host {
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![cell_fs_stat_write(
-                stat,
+                CELL_FS_S_IFREG_R_ONLY_MODE,
+                stat.size,
                 stat_out_ptr,
                 requester,
                 rt.current_tick(),
@@ -64,14 +68,16 @@ impl Lv2Host {
     /// # Errors
     ///
     /// In precedence order:
-    /// 1. `stat_out_ptr` misaligned / unwritable for 56 bytes -> CELL_EFAULT.
+    /// 1. `stat_out_ptr` misaligned / unwritable for 52 bytes -> CELL_EFAULT.
     /// 2. `path_ptr` unmapped or no NUL within `CELL_FS_MAX_PATH_LENGTH`
     ///    -> CELL_EFAULT or CELL_EINVAL.
     /// 3. Non-UTF-8 path -> CELL_ENOENT, with no mount probe.
     /// 4. Path in neither the store nor the mount table -> CELL_ENOENT.
     ///    The store caches a mount hit; a root the host declines to
     ///    read answers CELL_EACCES or CELL_EIO.
-    /// 5. Otherwise CELL_OK with the same 56-byte record as
+    /// 5. A directory under a mount -> CELL_OK with a directory record:
+    ///    mode `S_IFDIR | 0o555`, one block for its size.
+    /// 6. Otherwise CELL_OK with the same 52-byte record as
     ///    `sys_fs_fstat`.
     pub(in crate::host) fn dispatch_fs_stat(
         &mut self,
@@ -99,6 +105,18 @@ impl Lv2Host {
             Ok(s) => s,
             Err(FsError::UnknownPath) => {
                 let path_owned = path_str.to_string();
+                if self.mount_holds_directory(&path_owned) {
+                    return Lv2Dispatch::Immediate {
+                        code: 0,
+                        effects: vec![cell_fs_stat_write(
+                            CELL_FS_S_IFDIR_R_ONLY_MODE,
+                            CELL_FS_DIRECTORY_SIZE,
+                            stat_out_ptr,
+                            requester,
+                            rt.current_tick(),
+                        )],
+                    };
+                }
                 match self.try_mount_resolve_and_cache(&path_owned) {
                     MountResolution::Cached => match self.fs_store().stat_path(&path_owned) {
                         Ok(s) => s,
@@ -135,7 +153,8 @@ impl Lv2Host {
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![cell_fs_stat_write(
-                stat,
+                CELL_FS_S_IFREG_R_ONLY_MODE,
+                stat.size,
                 stat_out_ptr,
                 requester,
                 rt.current_tick(),

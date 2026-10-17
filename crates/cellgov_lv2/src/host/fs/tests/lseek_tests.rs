@@ -101,7 +101,7 @@ fn lseek_negative_past_zero_returns_einval() {
     assert_immediate(
         run(&mut host, &rt, fs_lseek(fd, -1, 0 /* SET */, 0x30200)),
         errno::CELL_EINVAL.code,
-        0,
+        1,
     );
 }
 
@@ -116,7 +116,7 @@ fn lseek_failed_seek_does_not_advance_offset() {
     assert_immediate(
         run(&mut host, &rt, fs_lseek(fd, -10, 1 /* CUR */, 0x30200)),
         errno::CELL_EINVAL.code,
-        0,
+        1,
     );
     let (n, b) = extract_read(
         run(&mut host, &rt, fs_read(fd, 0x30000, 5, 0x30100)),

@@ -8,7 +8,7 @@ use crate::host::Lv2Host;
 
 use crate::host::fs::common::{
     assert_immediate, extract_fd, extract_readdir, fs_opendir, fs_readdir, host_mounts,
-    parse_dirent, run, PathRuntime, TempMountDir,
+    parse_dirent, read_dots, run, PathRuntime, TempMountDir,
 };
 
 fn open_mount(label: &str) -> (Lv2Host, TempMountDir) {
@@ -71,6 +71,7 @@ fn empty_directory_eofs_immediately() {
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let fd = opendir_path(&mut host, b"/app_home/sub");
+    read_dots(&mut host, fd);
 
     let rt = PathRuntime::empty(0x40000);
     let (blob, nread) = extract_readdir(
@@ -95,6 +96,7 @@ fn readdir_walks_entries_lexicographically() {
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let fd = opendir_path(&mut host, b"/app_home");
+    read_dots(&mut host, fd);
 
     // Byte-order: 'B' (0x42) < 'a' (0x61) < 'm' (0x6d) < 'z' (0x7a).
     let expected_order = ["B.xml", "a.xml", "middle.xml", "zzz.xml"];
@@ -131,6 +133,7 @@ fn readdir_classifies_subdirs_as_directory_type() {
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let fd = opendir_path(&mut host, b"/app_home");
+    read_dots(&mut host, fd);
 
     let rt = PathRuntime::empty(0x40000);
     let (blob, _) = extract_readdir(
@@ -162,6 +165,7 @@ fn readdir_eof_then_close_clean() {
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let fd = opendir_path(&mut host, b"/app_home");
+    read_dots(&mut host, fd);
     let rt = PathRuntime::empty(0x40000);
     let (_blob, nread) = extract_readdir(
         run(&mut host, &rt, fs_readdir(fd, 0x20000, 0x21000)),

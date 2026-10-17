@@ -5,11 +5,12 @@
 //! hex risks silent transcription errors on the order-of-magnitude
 //! nibble: `O_CREAT = 0o100 = 0x40`, not `0x4`).
 
-/// Starting fd value the kernel hands out for file and directory
-/// opens.
-///
-/// The value is unestablished: no capture witnesses a real
-/// console's first fd.
+/// The first fd the kernel hands out for file and directory opens.
+/// Files and directories draw from one sequence: the
+/// `lv2_fs_answers` capture reads 3, 4 and 5 for three file opens,
+/// then 6 for a fourth and 7 for a directory. The three opens follow
+/// three create-and-close pairs, so the console hands a closed fd's
+/// number out again.
 ///
 /// File fds are small ints in `[3, 255)` on real PS3. Titles encode
 /// the fd into narrow struct fields and load it with `lbz`/`lhz`/
@@ -45,26 +46,44 @@ pub const CELL_FS_MAX_PATH_LENGTH: usize = 1024;
 
 // -- CellFsStat wire format --
 
-/// Wire size of `CellFsStat`. The PS3 struct is
-/// `{ s32 mode; s32 uid; s32 gid; <pad4>; s64 atime; s64 mtime;
-/// s64 ctime; u64 size; u64 blksize }`; 8-byte alignment of the
-/// 64-bit fields forces 4 bytes of padding between gid and atime.
-pub const CELL_FS_STAT_SIZE: u64 = 56;
+/// Wire size of the `CellFsStat` record `sys_fs_stat` and
+/// `sys_fs_fstat` write: `{ s32 mode; s32 uid; s32 gid; s64 atime;
+/// s64 mtime; s64 ctime; u64 size; u64 blksize }`, packed with no
+/// padding. The `lv2_fs_answers` capture reads the size at offset 36
+/// and the block size at offset 44, and the kernel leaves bytes 52 on
+/// untouched.
+pub const CELL_FS_STAT_SIZE: u64 = 52;
 
-/// `CellFsStat::blksize` reported on PS3. 4096 is the IO block
-/// size titles use to size their read buffers.
-pub const CELL_FS_BLOCK_SIZE: u64 = 4096;
+/// Offset of `CellFsStat::size` in the packed record.
+pub const CELL_FS_STAT_SIZE_OFFSET: usize = 36;
+
+/// Offset of `CellFsStat::blksize` in the packed record.
+pub const CELL_FS_STAT_BLKSIZE_OFFSET: usize = 44;
+
+/// `CellFsStat::blksize` for a file or directory under `/dev_hdd0`,
+/// as the `lv2_fs_answers` capture reads it. Other devices are
+/// unprobed.
+pub const CELL_FS_BLOCK_SIZE: u64 = 512;
 
 // -- mode bits (subset that CellGov currently emits) --
 
 /// `S_IFREG`: regular-file mode bit.
 pub const CELL_FS_S_IFREG: u32 = 0x8000;
+/// `S_IFDIR`: directory mode bit. The `lv2_fs_answers` capture reads
+/// `0x41C0` for a directory made with mode `0o700`.
+pub const CELL_FS_S_IFDIR: u32 = 0x4000;
 /// `S_IRUSR`: owner-read.
 pub const CELL_FS_S_IRUSR: u32 = 0x100;
 /// `S_IRGRP`: group-read.
 pub const CELL_FS_S_IRGRP: u32 = 0x020;
 /// `S_IROTH`: other-read.
 pub const CELL_FS_S_IROTH: u32 = 0x004;
+/// `S_IXUSR`: owner-execute (search, on a directory).
+pub const CELL_FS_S_IXUSR: u32 = 0x040;
+/// `S_IXGRP`: group-execute.
+pub const CELL_FS_S_IXGRP: u32 = 0x008;
+/// `S_IXOTH`: other-execute.
+pub const CELL_FS_S_IXOTH: u32 = 0x001;
 
 // -- CellFsDirent wire format --
 

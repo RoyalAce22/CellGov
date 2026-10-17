@@ -254,10 +254,28 @@ fn sync_partial_changes_on_open_close_pair() {
     assert_ne!(h0, h1);
     s.close_fd(fd).unwrap();
     let h2 = s.sync_partial();
-    // Pins the never-recycle property: next_fd advance is
-    // observable even after the fd is closed.
-    assert_ne!(h0, h2);
-    assert_ne!(h1, h2);
+    // The closed fd is free again, so the store is back where it was.
+    assert_eq!(h0, h2);
+}
+
+#[test]
+fn a_closed_fd_is_the_next_open_and_the_lowest_free_wins() {
+    let mut s = fs_with("/foo", b"x");
+    let a = s.open_fd("/foo").unwrap();
+    let b = s.open_fd("/foo").unwrap();
+    let c = s.open_dir(Vec::new()).unwrap();
+    assert_eq!((a, b, c), (3, 4, 5));
+    s.close_dir(c).unwrap();
+    s.close_fd(a).unwrap();
+    assert_eq!(
+        s.open_dir(Vec::new()),
+        Ok(3),
+        "a file's fd serves a directory"
+    );
+    assert_eq!(s.open_fd("/foo"), Ok(5));
+    assert_eq!(s.open_fd("/foo"), Ok(6));
+    s.close_fd(b).unwrap();
+    assert_eq!(s.open_fd("/foo"), Ok(4));
 }
 
 #[test]
@@ -370,7 +388,7 @@ fn sync_partial_changes_on_dir_open_and_advance() {
     s.close_dir(fd).unwrap();
     let h3 = s.sync_partial();
     assert_ne!(h2, h3);
-    assert_ne!(h0, h3);
+    assert_eq!(h0, h3, "the closed fd is free again");
 }
 
 impl FsStore {

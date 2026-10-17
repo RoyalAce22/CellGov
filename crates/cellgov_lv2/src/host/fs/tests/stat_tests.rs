@@ -177,9 +177,9 @@ fn fs_stat_resolves_via_mount_and_reports_size() {
 
     let dispatch = run(&mut host, &rt, fs_stat(0x10000, 0x20000));
     let blob = extract_stat(dispatch, 0x20000);
-    // CellFsStat size offset: 40 (mode + uid + gid + pad + 3
-    // x 8-byte timestamps).
-    let size = u64::from_be_bytes(blob[40..48].try_into().unwrap());
+    // CellFsStat size offset: 36 (mode + uid + gid + 3 x 8-byte
+    // timestamps, packed).
+    let size = u64::from_be_bytes(blob[36..44].try_into().unwrap());
     assert_eq!(size, 10);
 }
 

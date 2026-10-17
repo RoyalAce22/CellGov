@@ -6,9 +6,9 @@ use cellgov_ps3_abi::lv2::fs::{
     CELL_FS_O_WRONLY,
 };
 
-/// Paths whose `sys_fs_open` accepts write flags because the
-/// dispatcher routes `sys_fs_write` to the host TTY log regardless
-/// of fd.
+/// Paths whose `sys_fs_open` accepts write flags. No write path
+/// carries their bytes yet: `sys_fs_write` on such a fd answers
+/// `CELL_EBADF` and names the dropped write as an invariant break.
 ///
 /// # Cross-module contract
 ///

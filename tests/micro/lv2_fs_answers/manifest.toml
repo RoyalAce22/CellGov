@@ -1,0 +1,14 @@
+[test]
+name = "lv2_fs_answers"
+
+# A hardware probe: what the file-system calls answer on success paths under /dev_hdd0/tmp -- the first fds, a write, readdir order, stat words and lseek.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 64 big-endian u64 words, in the order ppu/main.c lists: 512 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 512 },
+]
+
+[expect]
+outcome = "completed"

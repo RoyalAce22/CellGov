@@ -93,6 +93,19 @@ impl Lv2Host {
         }
     }
 
+    /// Whether the earliest root that holds `path` holds a directory
+    /// there. A path no root holds, or one a root will not describe,
+    /// is not a directory; the file lookup that follows answers it.
+    pub(super) fn mount_holds_directory(&mut self, path: &str) -> bool {
+        let Ok(candidates) = resolve_candidates(self, path) else {
+            return false;
+        };
+        matches!(
+            first_existing(self.fs_mounts().files(), &candidates),
+            Ok(Some((_, HostEntryKind::Directory)))
+        )
+    }
+
     /// Try to satisfy a guest directory path via the mount table,
     /// merged across every root that holds the directory.
     ///

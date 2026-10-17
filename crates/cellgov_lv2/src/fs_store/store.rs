@@ -94,18 +94,25 @@ impl LaneValue for DirSnapshot {
 /// Path-indexed in-memory blob store with per-fd open-file and
 /// open-directory tables.
 ///
-/// File and directory fds share a single monotonic allocator; the
-/// two open-tables stay distinct so `close_fd` on a dir fd (and
-/// vice versa) surfaces as CELL_EBADF.
+/// File and directory fds share one allocator, which hands out the
+/// lowest fd from [`LV2_FS_OBJECT_ID_BASE`] that no open file or
+/// directory holds. The two open-tables stay distinct so `close_fd`
+/// on a dir fd (and vice versa) surfaces as CELL_EBADF.
+///
+/// The `lv2_fs_answers` capture shows the console reusing a closed
+/// fd: three opens that each close come before opens that read 3, 4
+/// and 5. Which free fd the console picks when several are free is
+/// unestablished; the lowest is CellGov's choice.
 ///
 /// [`Default`] is implemented manually because a derived `Default`
-/// would set `next_fd = 0`, violating the never-zero invariant.
+/// would set `next_fd = 0`, below the first fd.
 #[derive(Debug, Clone)]
 pub struct FsStore {
     /// Keyed by path; each blob's lane object is the path's digest.
     blobs: LaneMap<String, BlobEntry>,
     open_fds: LaneMap<u32, FdEntry>,
     open_dirs: LaneMap<u32, DirSnapshot>,
+    /// The fd the next open takes: the lowest free one.
     next_fd: u32,
 }
 
@@ -184,21 +191,39 @@ impl FsStore {
         self.open_dirs.len()
     }
 
-    /// Bumps the never-recycle counter only on success; `UnknownPath`
-    /// does not burn the prior `next_fd` value.
+    /// Take the lowest free fd and move `next_fd` to the free fd after
+    /// it. Every fd below `next_fd` is held, so the next free one is
+    /// above the one taken.
+    ///
+    /// # Errors
+    ///
+    /// - [`FsError::FdExhausted`] if no fd above the one taken is free.
+    fn take_fd(&mut self) -> Result<u32, FsError> {
+        let fd = self.next_fd;
+        let after = fd.checked_add(1).ok_or(FsError::FdExhausted)?;
+        self.next_fd = (after..=u32::MAX)
+            .find(|&f| !self.open_fds.contains_key(f) && !self.open_dirs.contains_key(f))
+            .ok_or(FsError::FdExhausted)?;
+        Ok(fd)
+    }
+
+    /// A freed `fd` below `next_fd` is the new lowest free one.
+    fn release_fd(&mut self, fd: u32) {
+        self.next_fd = self.next_fd.min(fd);
+    }
+
+    /// Open `path` at offset 0 under the lowest free fd. A refused
+    /// open takes no fd.
     ///
     /// # Errors
     ///
     /// - [`FsError::UnknownPath`] if the blob is not registered.
-    /// - [`FsError::FdExhausted`] if the allocator has handed out
-    ///   the full `u32::MAX - LV2_FS_OBJECT_ID_BASE` fd range.
+    /// - [`FsError::FdExhausted`] if no fd is free.
     pub fn open_fd(&mut self, path: &str) -> Result<u32, FsError> {
         if !self.blobs.contains_by(path) {
             return Err(FsError::UnknownPath);
         }
-        let fd = self.next_fd;
-        let next = fd.checked_add(1).ok_or(FsError::FdExhausted)?;
-        self.next_fd = next;
+        let fd = self.take_fd()?;
         self.open_fds.insert(
             fd,
             FdEntry {
@@ -211,10 +236,9 @@ impl FsStore {
 
     /// Release the fd; subsequent ops on it return `UnknownFd`.
     pub fn close_fd(&mut self, fd: u32) -> Result<(), FsError> {
-        self.open_fds
-            .remove(fd)
-            .map(|_| ())
-            .ok_or(FsError::UnknownFd)
+        self.open_fds.remove(fd).ok_or(FsError::UnknownFd)?;
+        self.release_fd(fd);
+        Ok(())
     }
 
     /// Read up to `max_bytes` from the fd's current offset, advancing
@@ -275,6 +299,11 @@ impl FsStore {
         })
     }
 
+    /// The path `fd` was opened on; `None` for a fd no file holds.
+    pub fn fd_path(&self, fd: u32) -> Option<&str> {
+        self.open_fds.get(fd).map(|entry| entry.path.as_str())
+    }
+
     /// Fd-based stat.
     pub fn fstat(&self, fd: u32) -> Result<FileStat, FsError> {
         let entry = self.open_fds.get(fd).ok_or(FsError::UnknownFd)?;
@@ -287,18 +316,15 @@ impl FsStore {
         })
     }
 
-    /// Allocate a fresh directory fd over `entries`. The dispatcher
-    /// owns ordering and filtering; FsStore walks entries in the
-    /// order it received them.
+    /// Allocate the lowest free fd as a directory over `entries`. The
+    /// dispatcher owns ordering and filtering; FsStore walks entries
+    /// in the order it received them.
     ///
     /// # Errors
     ///
-    /// - [`FsError::FdExhausted`] if the allocator has handed out
-    ///   the full `u32::MAX - LV2_FS_OBJECT_ID_BASE` fd range.
+    /// - [`FsError::FdExhausted`] if no fd is free.
     pub fn open_dir(&mut self, entries: Vec<DirEntry>) -> Result<u32, FsError> {
-        let fd = self.next_fd;
-        let next = fd.checked_add(1).ok_or(FsError::FdExhausted)?;
-        self.next_fd = next;
+        let fd = self.take_fd()?;
         self.open_dirs
             .insert(fd, DirSnapshot { entries, cursor: 0 });
         Ok(fd)
@@ -325,14 +351,13 @@ impl FsStore {
     /// - [`FsError::UnknownDir`] if `fd` is not an open directory,
     ///   including the case where `fd` is a file fd.
     pub fn close_dir(&mut self, fd: u32) -> Result<(), FsError> {
-        self.open_dirs
-            .remove(fd)
-            .map(|_| ())
-            .ok_or(FsError::UnknownDir)
+        self.open_dirs.remove(fd).ok_or(FsError::UnknownDir)?;
+        self.release_fd(fd);
+        Ok(())
     }
 
     /// The store's partial of the sync-state sum: the blobs, the open
-    /// file and directory fds, and the fd allocator's cursor.
+    /// file and directory fds, and the next fd.
     pub fn sync_partial(&self) -> u128 {
         self.blobs
             .partial()

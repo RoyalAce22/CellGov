@@ -135,7 +135,7 @@ fn zero_size_with_bad_fd_returns_ebadf_not_ok() {
 }
 
 #[test]
-fn nonzero_size_with_valid_fd_returns_ebadf_zeros_nwrite_and_logs_break() {
+fn nonzero_size_with_valid_fd_returns_ebadf_and_zeros_nwrite() {
     // The fd is registered, so this exercises the access-mode arm.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
@@ -155,8 +155,8 @@ fn nonzero_size_with_valid_fd_returns_ebadf_zeros_nwrite_and_logs_break() {
     extract_nwrite_zero(&effects, 0x2000);
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
-        1,
-        "the null-backend write path must log_invariant_break exactly once"
+        0,
+        "a write to a read-only fd is the console's EBADF, not a break"
     );
 }
 

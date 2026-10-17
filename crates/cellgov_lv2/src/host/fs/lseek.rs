@@ -23,7 +23,8 @@ impl Lv2Host {
     /// 2. `whence` not in `{0, 1, 2}` -> CELL_EINVAL.
     /// 3. Unknown `fd` -> CELL_EBADF.
     /// 4. Seek lands outside `[0, u64::MAX]` -> CELL_EINVAL; the fd's
-    ///    offset is unchanged.
+    ///    offset is unchanged and is written to `pos_out_ptr`, as the
+    ///    `lv2_fs_answers` capture reads after a seek to -1.
     /// 5. Otherwise CELL_OK with one effect writing the new position
     ///    as a big-endian u64 at `pos_out_ptr`.
     pub(in crate::host) fn dispatch_fs_lseek(
@@ -52,7 +53,28 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(errno::CELL_EBADF.into());
             }
             Err(FsError::SeekOutOfRange) => {
-                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+                let current = match self.fs_store_mut().seek(fd, 0, SeekWhence::Cur) {
+                    Ok(pos) => pos,
+                    Err(other) => {
+                        self.record_invariant_break(
+                            "dispatch.fs_lseek.current_offset_unreadable",
+                            format_args!(
+                                "FsStore::seek(fd={fd:#x}, 0, Cur) returned {other:?} \
+                                 after the fd answered a seek; contract violated"
+                            ),
+                        );
+                        return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+                    }
+                };
+                return Lv2Dispatch::Immediate {
+                    code: errno::CELL_EINVAL.into(),
+                    effects: vec![Effect::shared_write(
+                        ByteRange::contiguous_u32(pos_out_ptr, 8),
+                        WritePayload::from_slice(&current.to_be_bytes()),
+                        requester,
+                        rt.current_tick(),
+                    )],
+                };
             }
             Err(other) => {
                 self.record_invariant_break(

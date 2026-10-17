@@ -4,7 +4,7 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
-use crate::fs_store::FsError;
+use crate::fs_store::{DirEntry, FsError};
 use crate::host::{Lv2Host, Lv2Runtime};
 
 use super::mount::DirMountResolution;
@@ -14,12 +14,16 @@ use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// `sys_fs_opendir` -- snapshot a host-mounted directory and
-    /// allocate a directory fd over the lexicographically-sorted
-    /// entries. Directories come from the mount table alone, so a
-    /// manifest path never names one. Every root that holds the
-    /// directory contributes to one listing in lexicographic byte
-    /// order. A name several roots hold takes its entry from the
-    /// earliest root.
+    /// allocate a directory fd over its entries. Directories come from
+    /// the mount table alone, so a manifest path never names one. Every
+    /// root that holds the directory contributes to one listing. A name
+    /// several roots hold takes its entry from the earliest root.
+    ///
+    /// The listing starts with `.` and `..`, both directories, as the
+    /// `lv2_fs_answers` capture reads them. The console then lists the
+    /// other entries in the order they were created; a host directory
+    /// keeps no such order, so CellGov lists them in lexicographic
+    /// byte order.
     ///
     /// # Errors
     ///
@@ -71,7 +75,15 @@ impl Lv2Host {
             }
         };
 
-        match self.fs_store_mut().open_dir(entries) {
+        let listing = [".", ".."]
+            .into_iter()
+            .map(|name| DirEntry {
+                name: name.to_string(),
+                is_directory: true,
+            })
+            .chain(entries)
+            .collect();
+        match self.fs_store_mut().open_dir(listing) {
             Ok(fd) => {
                 self.fs_fd_count_inc();
                 self.immediate_write_u32(fd, fd_out_ptr, requester, tick)

@@ -20,9 +20,9 @@ impl Lv2Host {
     /// In precedence order:
     /// 1. `nread_out_ptr` misaligned / unwritable -> CELL_EFAULT.
     /// 2. Unknown `fd` -> CELL_EBADF.
-    /// 3. `nbytes > 0` and `buf_ptr` unwritable -> CELL_EFAULT. Checked
-    ///    before the FS layer advances the offset (POSIX: a failed
-    ///    read leaves the file position unchanged).
+    /// 3. `nbytes > 0` and `buf_ptr` unwritable -> CELL_EFAULT, with a
+    ///    zero written to `nread_out_ptr` and the offset unchanged, as
+    ///    the `lv2_fs_answers` capture reads.
     /// 4. Otherwise CELL_OK with up to two effects (buffer write only
     ///    if bytes were returned, plus the nread write).
     pub(in crate::host) fn dispatch_fs_read(
@@ -45,10 +45,18 @@ impl Lv2Host {
 
         let nbytes_usize = usize::try_from(nbytes).unwrap_or(usize::MAX);
 
-        // POSIX: a failed read must leave the file position unchanged,
-        // so the buffer check runs before read_at advances the offset.
+        // A refused read leaves the offset where it was, so the buffer
+        // check runs before read_at advances it.
         if nbytes > 0 && !rt.writable(buf_ptr as u64, nbytes_usize) {
-            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+            return Lv2Dispatch::Immediate {
+                code: errno::CELL_EFAULT.into(),
+                effects: vec![Effect::shared_write(
+                    ByteRange::contiguous_u32(nread_out_ptr, 8),
+                    WritePayload::from_slice(&0u64.to_be_bytes()),
+                    requester,
+                    rt.current_tick(),
+                )],
+            };
         }
 
         let bytes_read = match self.fs_store_mut().read_at(fd, nbytes_usize) {

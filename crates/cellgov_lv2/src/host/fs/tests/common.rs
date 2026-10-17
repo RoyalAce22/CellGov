@@ -271,7 +271,7 @@ pub(super) fn extract_read(
     }
 }
 
-/// Pull the 56-byte CellFsStat blob written by an FsFstat /
+/// Pull the 52-byte CellFsStat blob written by an FsFstat /
 /// FsStat success dispatch.
 pub(super) fn extract_stat(d: Lv2Dispatch, expected_addr: u64) -> Vec<u8> {
     let effects = match d {
@@ -295,8 +295,8 @@ pub(super) fn extract_stat(d: Lv2Dispatch, expected_addr: u64) -> Vec<u8> {
 /// Read mode / size / blksize out of a CellFsStat blob.
 pub(super) fn parse_stat(blob: &[u8]) -> (u32, u64, u64) {
     let mode = u32::from_be_bytes(blob[0..4].try_into().unwrap());
-    let size = u64::from_be_bytes(blob[40..48].try_into().unwrap());
-    let blksize = u64::from_be_bytes(blob[48..56].try_into().unwrap());
+    let size = u64::from_be_bytes(blob[36..44].try_into().unwrap());
+    let blksize = u64::from_be_bytes(blob[44..52].try_into().unwrap());
     (mode, size, blksize)
 }
 
@@ -347,6 +347,25 @@ pub(super) fn parse_dirent(blob: &[u8]) -> (u8, u8, String) {
     let n = d_namlen as usize;
     let name = String::from_utf8(blob[2..2 + n].to_vec()).expect("dirent name must be UTF-8");
     (d_type, d_namlen, name)
+}
+
+/// Read the two entries every listing starts with, `.` and `..`, and
+/// check each is a directory.
+pub(super) fn read_dots(host: &mut Lv2Host, fd: u32) {
+    for dot in [".", ".."] {
+        let rt = PathRuntime::empty(0x40000);
+        let (blob, nread) = extract_readdir(
+            run(host, &rt, fs_readdir(fd, 0x20000, 0x21000)),
+            0x20000,
+            0x21000,
+        );
+        assert_eq!(nread, cellgov_ps3_abi::lv2::fs::CELL_FS_DIRENT_SIZE);
+        let (d_type, _, name) = parse_dirent(&blob);
+        assert_eq!(
+            (name.as_str(), d_type),
+            (dot, cellgov_ps3_abi::lv2::fs::CELL_FS_TYPE_DIRECTORY)
+        );
+    }
 }
 
 /// Pull the new u64 position from a successful FsLseek dispatch.

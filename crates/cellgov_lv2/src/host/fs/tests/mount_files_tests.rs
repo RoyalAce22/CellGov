@@ -14,7 +14,7 @@ use cellgov_ps3_abi::lv2::fs::{CELL_FS_TYPE_DIRECTORY, CELL_FS_TYPE_REGULAR};
 use crate::fs_store::{FsMount, HostDirEntry, HostEntryKind, MountFiles};
 use crate::host::fs::common::{
     assert_immediate, extract_fd, extract_read, extract_readdir, fs_open, fs_opendir, fs_read,
-    fs_readdir, parse_dirent, run, PathRuntime,
+    fs_readdir, parse_dirent, read_dots, run, PathRuntime,
 };
 use crate::host::Lv2Host;
 
@@ -336,6 +336,7 @@ fn a_listing_drops_special_entries_and_names_with_no_utf8_spelling() {
     );
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data\0");
     let fd = extract_fd(run(&mut host, &rt, fs_opendir(0x10000, 0x20000)), 0x20000);
+    read_dots(&mut host, fd);
     let mut listed = Vec::new();
     loop {
         let rt = PathRuntime::empty(0x40000);

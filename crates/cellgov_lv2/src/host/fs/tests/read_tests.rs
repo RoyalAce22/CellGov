@@ -122,7 +122,7 @@ fn read_bad_buffer_pointer_returns_efault_and_does_not_advance_offset() {
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30100, 3, 0x40000)),
         errno::CELL_EFAULT.code,
-        0,
+        1,
     );
     // Invariant: EFAULT must not advance the offset.
     let (n, b) = extract_read(

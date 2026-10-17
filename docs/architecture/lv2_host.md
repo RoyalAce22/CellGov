@@ -525,14 +525,15 @@ identify.
 
 **Directory iteration (`sys_fs_opendir` / `_readdir` / `_closedir`)
 snapshots at opendir time.** The snapshot merges every root that holds
-the directory into one listing in lexicographic byte order, with a
-repeated name taken from the earliest root. Later reads are
+the directory into one listing that opens with `.` and `..`, then the
+names in lexicographic byte order, with a repeated name taken from the
+earliest root. Later reads are
 deterministic across host file system order.
 
 ```mermaid
 flowchart TD
   open["sys_fs_open / sys_fs_stat path"] --> blob{"path registered in FsStore?"}
-  blob -->|yes| fd["fresh fd from next_fd (starts at 3, never recycled)"]
+  blob -->|yes| fd["lowest free fd (starts at 3, a closed fd is reused)"]
   blob -->|no| mount{"a mount prefix matches?"}
   mount -->|no| enoent["CELL_FS_ENOENT"]
   mount -->|yes| canon["canonicalize segments: drop empty and dot, refuse dot-dot and host separators"]
