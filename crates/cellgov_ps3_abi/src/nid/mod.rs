@@ -38,6 +38,26 @@
 //! - A seventh nameless-library NID, 0x6D0F6CAE, is a variable in 131
 //!   modules; its name is not known.
 //!
+//! `exports_493.tsv` beside this file lists every export of the 177
+//! modules in the 4.93 `dev_flash/sys/external` and
+//! `dev_flash/sys/internal`, as (module stem, library, NID, kind). The
+//! nameless library is an empty field. The reference console's copies
+//! of 174 of those modules are byte-identical to the files. The other
+//! three are patched by its modified firmware, and their decrypted
+//! copies export the same rows. `exports_tests` joins the table's
+//! module column against the list:
+//!
+//! - 3522 rows name a library that exports their NID.
+//! - 113 rows name a module that no 4.93 module exports the NID from:
+//!   - 94 belong to `libsnd3`, `libmixer` and `libsynth2`, which no
+//!     firmware module exports;
+//!   - 19 are NIDs that `cellSail`, `cellLibprof`, `cellGcmSys`,
+//!     `sys_io`, `cellMic` and four decoder libraries do not export on
+//!     4.93.
+//! - 1692 rows carry no module, and none of them is exported by a named
+//!   4.93 library.
+//! - All 18 placeholder rows are exported by the module they name.
+//!
 //! The curated `nid_module!` blocks live in `modules`, listed by name
 //! in [`CURATED`]. The full table is `table.rs`; `table_gen_tests`
 //! renders it from the `table.tsv` data file beside it and fails on
@@ -79,3 +99,7 @@ mod table_gen_tests;
 #[cfg(test)]
 #[path = "tests/curated_tests.rs"]
 mod curated_tests;
+
+#[cfg(test)]
+#[path = "tests/exports_tests.rs"]
+mod exports_tests;

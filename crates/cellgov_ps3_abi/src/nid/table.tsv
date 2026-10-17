@@ -67,7 +67,7 @@ nid	module	name
 02c5417a	cellSysutilAvc2	cellSysutilAvc2GetPlayerInfo
 02c73eb6	cellSsl	BIO_free
 02dc41ee	cellSysutilAvc2	cellSysutilAvc2JoinChat
-02e20ec1		__sys_printf_basename
+02e20ec1	sysPrxForUser	__sys_printf_basename
 02e40598		_ZNSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE5_InitERKSt8_Locinfo
 02e68d44		_f_fmodf
 02e7e03e	cellGifDec	cellGifDecExtDecodeData
@@ -1435,7 +1435,7 @@ nid	module	name
 4217b4cf		difftime
 4219de31	libgem	cellGemEnableCameraPitchAngleCorrection
 42205fe0	cellHttp	cellHttpRequestGetAllHeaders
-4232b0db		_sys_panic
+4232b0db	sysPrxForUser	_sys_panic
 42332cb7	sceNpClans	sceNpClansTerm
 42439db5	cellOskExtUtility	cellOskDialogExtSendFinishMessage
 425fef23	cellSysutil	cellWebBrowserUpdatePointerDisplayPos2
@@ -1649,7 +1649,7 @@ nid	module	name
 4b9efb7a	sceNp	sceNpManagerGetCachedInfo
 4bb8e2b2		raw_spu_write_ushort
 4bbc14e6	cell_FreeType2	FT_Stroker_CubicTo
-4bbf59d0		_sys_net_eurus_post_command
+4bbf59d0	sysPrxForUser	_sys_net_eurus_post_command
 4bc193c7		_ZNSt10ostrstreamC2EPciNSt5_IosbIiE9_OpenmodeE
 4bc591d7	cell_FreeType2	FT_Vector_Transform
 4bd5073a	sys_fs	cellFsGetBlockSize2
@@ -2097,7 +2097,7 @@ nid	module	name
 6356082e	sceNp	sceNpSignalingCreateCtx
 636dc89e	cellJpgEnc	cellJpgEncEncodePicture2
 6377137f	cell_FreeType2	FTC_CMapCache_New
-637bdaae		_proc_spawn
+637bdaae	sysPrxForUser	_proc_spawn
 638c2fc1	cellL10n	SjisHan2Zen
 639abbde	cellSysconfPs1emu	cellSysconfPs1emu_639ABBDE
 63a2b2cc		_ZNKSt8messagesIcE8do_closeEi
@@ -2959,7 +2959,7 @@ nid	module	name
 8cdf8c70	cellGcmSys	cellGcmGetDefaultSegmentWordSize
 8ce4cffa	cellSpursJq	cellSpursJoinJobQueue
 8ceedd21	sceNpTrophy	sceNpTrophyUnlockTrophy
-8cfef376		__tls_get_addr
+8cfef376	sysPrxForUser	__tls_get_addr
 8d14d09b	cellPhotoUtility	cellPhotoExportFromFileWithCopy
 8d1b77fb	sys_net	sys_net_abort_socket
 8d1d096c	sceNp	sceNpCommerceInitProductCategory
@@ -3296,7 +3296,7 @@ nid	module	name
 9d11991d	libmedi	cellMediatorGetProviderUrl
 9d140351		_Destroytls
 9d14dc46	cellL10n	ToSjisKata
-9d2ec4ff		sys_process_spawn
+9d2ec4ff	sysPrxForUser	sys_process_spawn
 9d30bdce	cellSail	cellSailSourceInitialize
 9d3c0f81	sysPrxForUser	sys_mempool_destroy
 9d6a8167		_ZNSbIwSt11char_traitsIwESaIwEE5eraseEjj
@@ -3343,7 +3343,7 @@ nid	module	name
 9f03dd3e		lgammaf
 9f04f7af	sysPrxForUser	_sys_printf
 9f0efc6e		exp2l
-9f1795df	cellVpost	cellVpostOpenExt
+9f1795df	cellVpost_internal	cellVpostOpenExt
 9f18429d	sysPrxForUser	sys_prx_start_module
 9f46f5a4		tgammaf
 9f4beb25	cellSsl	SSL_write
@@ -3929,7 +3929,7 @@ ba85ce08		_ZNSt12strstreambufD2Ev
 ba8c569e	sceNpSns	sceNpSnsFbGetLongAccessToken
 ba901fe6	sys_fs	cellFsMkdir
 baa15803		_ZSt4setwi
-bab62b99		_sys_process_wait_for_game_process
+bab62b99	sysPrxForUser	_sys_process_wait_for_game_process
 bab91fc9	sceNp	sceNpBasicGetPlayersHistoryEntry
 babf714b	cellFiber	cellFiberPpuUtilWorkerControlWakeup
 baedf689	sceNpTrophy	sceNpTrophyGetTrophyIcon
@@ -4031,7 +4031,7 @@ bf5bf5ea		lseek64
 bf5f58ea	sceNpCommerce2	sceNpCommerce2GetProductInfoGetResult
 bf607ec6	sceNp	sceNpBasicGetClanMessageEntryCount
 bf6e3659	cellHttp	cellHttpClientSetRecvBufferSize
-bf8ee5bb		sys_process_spawn_with_memory_budget
+bf8ee5bb	sysPrxForUser	sys_process_spawn_with_memory_budget
 bf97b657	cell_FreeType2	FT_New_Memory
 bf9b8d72	cellSail	cellSailPlayerCloseEsAudio
 bf9c3609		_ZNKSt5ctypeIwE10do_toupperEPwPKw
@@ -4615,7 +4615,7 @@ dddabb32		remainderf
 dde35a0c	cellVoice	cellVoiceSetMuteFlag
 ddebd2a5	cellSail	cellSailAviMovieGetStreamByTypeAndIndex
 de1bb092		init_by_array_TT800
-de2f9c85		sys_process_atexit
+de2f9c85	sysPrxForUser	sys_process_atexit
 de32a334		_Exitspawn
 de509ead	cellPhotoUtility	cellPhotoExportProgress
 de54e2fc	libgem	cellGemReset
@@ -4849,7 +4849,7 @@ e93abfca		ctan
 e956bf64	cell_FreeType2	FT_Done_FreeType
 e956dc64	cellL10n	JISstoUCS2s
 e95bfc2c	cellHttp	cellHttpGetMemoryInfo
-e95ffa0a		sys_process_wait_for_game_process
+e95ffa0a	sysPrxForUser	sys_process_wait_for_game_process
 e97c9bd4	cellPngDec	cellPngDecSetParameter
 e9892674		_FGamma_big
 e9946648	sceNp2	sceNpMatching2SignalingGetCtxOpt
@@ -5292,7 +5292,7 @@ fe7d5e4f	cell_FreeType2	FT_Set_Var_Design_Coordinates
 fe88e97e		fscanf
 fe9a6dd7	cellFont	cellFontGetCharGlyphMetricsVertical
 feb4107c		_ZNSt12codecvt_baseD2Ev
-fecc05b6		__sys_time
+fecc05b6	sysPrxForUser	__sys_time
 fee11e72	sceNp2	sceNpMatching2RegisterRoomMessageCallback
 fee33481	libgem	cellGemGetStatusFlags
 fef776ee	libsnd3	cellSnd3NoteOnByTone
