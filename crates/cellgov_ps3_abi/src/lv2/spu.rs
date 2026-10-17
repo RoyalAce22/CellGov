@@ -211,14 +211,26 @@ pub mod segment {
 /// types, the user thread type, and a port number range of 0..63. The
 /// system-module group type and the queue-binding count are not in that
 /// header, and nothing here derives them. The binding count fixes the
-/// `CELL_EAGAIN` ceiling of `sys_spu_thread_bind_queue`.
+/// `CELL_EAGAIN` ceiling of `sys_spu_thread_bind_queue`. Console captures
+/// witness the exception type, its event's source and the DMA alignment
+/// cause.
 pub mod event {
     /// `SYS_SPU_THREAD_GROUP_EVENT_RUN`: the group's threads started or
     /// stopped.
     pub const GROUP_RUN: u32 = 1;
     /// `SYS_SPU_THREAD_GROUP_EVENT_EXCEPTION`: a thread of the group took
     /// an exception.
+    ///
+    /// The `spu_list_bad_size` and `spu_list_bad_ea` console captures
+    /// connect a queue with this type and receive the exception event of
+    /// an MFC DMA alignment interrupt through it.
     pub const GROUP_EXCEPTION: u32 = 2;
+    /// The source of a group's exception event, as those captures read it.
+    pub const GROUP_EXCEPTION_KEY: u64 = 0xFFFF_FFFF_5350_5503;
+    /// The cause an exception event reports for an MFC DMA alignment
+    /// interrupt, in the low word of its second data word, as those
+    /// captures read it. The high word is the thread's SPU_NPC.
+    pub const EXCEPTION_DMA_ALIGNMENT: u32 = 0x1;
     /// `SYS_SPU_THREAD_GROUP_EVENT_SYSTEM_MODULE`: a system-module event
     /// for a group created to cooperate with the system.
     pub const GROUP_SYSTEM_MODULE: u32 = 4;

@@ -749,9 +749,10 @@ fn queue_list_segment(
             });
         let main = match checked {
             Ok(main) => main,
-            // The documents name no exception for a bad element. The model
-            // raises the one a single transfer with the same parameters
-            // raises.
+            // The documents name no exception for a bad element. The
+            // spu_list_bad_size and spu_list_bad_ea console captures show
+            // the one a single transfer with the same parameters raises,
+            // with the elements before it landed and none after it.
             Err(error) => {
                 state.channels.cmd_queue_free += 1;
                 effects.push(invalid_command(cmd, params, error, state, unit_id));

@@ -1,0 +1,23 @@
+[test]
+name = "spu_list_bad_ea"
+
+# A hardware probe: an SPU thread puts a three-element list whose second
+# element is 16 bytes to an effective address 4 bytes past a 16-byte
+# boundary, in a group whose exception event goes to a
+# PPU event queue. The capture holds the event the kernel sends, how the
+# group ends, and which elements reached the buffer.
+
+[observe]
+# The failed step and the answers of receive, terminate, join,
+# disconnect and the two destroys; the event; the group and thread ids
+# and the buffer's address; the buffer's words at the elements'
+# destinations: 112 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 112 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+files = ["spu_main.elf"]
