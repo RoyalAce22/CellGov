@@ -106,6 +106,13 @@ pub mod raw_spu {
     ///
     /// [CBEA p:276 s:21.7.3] bit 63, M, is the mailbox interrupt status.
     pub const INT_STAT_MAILBOX: u64 = 0x1;
+    /// The class 0 status bit SE, set when the SPU stops at an invalid
+    /// instruction or an illegal channel access. The console latches it
+    /// with the class 0 mask at 0.
+    ///
+    /// [CBEA p:274 s:21.7.1] bit 61, SE, is the SPU error interrupt status.
+    /// [CBEA p:264 s:21.5.1] an illegal channel access and an invalid instruction each set SE.
+    pub const INT_STAT_SPU_ERROR: u64 = 0x4;
     /// The top byte of every interrupt tag the console hands back.
     pub const INTERRUPT_TAG_KIND: u32 = 0x0A00_0000;
     /// The distance between two interrupt tags created in turn.

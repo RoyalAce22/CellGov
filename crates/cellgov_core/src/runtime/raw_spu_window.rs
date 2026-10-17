@@ -30,7 +30,7 @@ use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::hw::spu::{
     SPU_IN_MBOX_DEPTH, SPU_IN_MBOX_OFFSET, SPU_LS_SIZE, SPU_MBOX_STAT_OFFSET, SPU_NPC_OFFSET,
     SPU_OUT_MBOX_OFFSET, SPU_RUN_CNTL_OFFSET, SPU_SIG_NOTIFY_1_OFFSET, SPU_SIG_NOTIFY_2_OFFSET,
-    SPU_STATUS_OFFSET, SPU_STATUS_P,
+    SPU_STATUS_C, SPU_STATUS_I, SPU_STATUS_OFFSET, SPU_STATUS_P,
 };
 use cellgov_ps3_abi::lv2::spu::{raw_spu, raw_window};
 use cellgov_sync::MailboxId;
@@ -340,8 +340,9 @@ impl Runtime {
         }
     }
 
-    /// Latch the class 2 status bits the Raw SPU's step raised: M for a
-    /// write to its interrupt mailbox, S for a stop-and-signal.
+    /// Latch the status bits the Raw SPU's step raised: class 2 M for a
+    /// write to its interrupt mailbox and S for a stop-and-signal, and
+    /// class 0 SE for a stop at an invalid instruction or channel access.
     fn latch_raw_spu_interrupts(&mut self, window: &Window, stopped: bool) {
         let mut stat = 0;
         if let Some(spu) = self.registry.get_mut(window.unit) {
@@ -349,17 +350,27 @@ impl Runtime {
                 stat |= raw_spu::INT_STAT_MAILBOX;
             }
         }
-        let signalled = self
+        let status = self
             .unit_stop_registers(window.unit)
-            .is_some_and(|StopRegisters { status, .. }| status & SPU_STATUS_P != 0);
-        if stopped && signalled {
+            .map_or(0, |StopRegisters { status, .. }| status);
+        if stopped && status & SPU_STATUS_P != 0 {
             stat |= raw_spu::INT_STAT_STOP_AND_SIGNAL;
         }
-        if stat != 0 && !self.lv2_host.raise_raw_spu_int_stat(window.id, stat) {
-            self.lv2_host.log_invariant_break(
-                "runtime.raw_spu_interrupt_lost",
-                format_args!("Raw SPU {} left the table before its interrupt", window.id),
-            );
+        let error = if stopped && status & (SPU_STATUS_I | SPU_STATUS_C) != 0 {
+            raw_spu::INT_STAT_SPU_ERROR
+        } else {
+            0
+        };
+        for (class, bits) in [
+            (raw_spu::CLASS_APPLICATION, stat),
+            (raw_spu::CLASS_ERROR, error),
+        ] {
+            if bits != 0 && !self.lv2_host.raise_raw_spu_int_stat(window.id, class, bits) {
+                self.lv2_host.log_invariant_break(
+                    "runtime.raw_spu_interrupt_lost",
+                    format_args!("Raw SPU {} left the table before its interrupt", window.id),
+                );
+            }
         }
     }
 

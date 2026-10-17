@@ -146,24 +146,26 @@ fn each_optional_compare_stops_the_spu_as_an_invalid_instruction_before_its_stor
     }
 }
 
-/// The console resumes past the invalid word, by a distance that depends
-/// on the word, and latches a class 0 status; CellGov resumes at the word
-/// itself. The capture gives no rule for the distance, so this test pins
-/// the difference.
+/// Each compare writes `$3`, which the store after it reads, so the two
+/// issue apart and the console resumes 4 bytes past the compare, as
+/// CellGov does. The unassigned word writes no register the store reads:
+/// the console issues the two together and resumes past both, and CellGov,
+/// which models no issue pairs, resumes 4 bytes past the word. Every entry
+/// latches the class 0 SPU error status.
 #[test]
-fn the_resume_address_after_an_invalid_word_differs_from_the_console() {
+fn the_resume_address_after_an_invalid_word_matches_the_console_unless_it_pairs() {
     let console = console();
     for (k, record) in console.iter().enumerate() {
         let word_at = (k * 0x40 + 8) as u32;
         let (_, npc, _) = run(k);
-        assert_eq!(npc, word_at, "entry {k}: CellGov resumes at the word");
-        assert!(
-            record.npc > word_at,
-            "entry {k}: the console resumes past it"
-        );
-        assert_ne!(
-            record.class0, 0,
-            "entry {k}: the console latched a class 0 status"
+        assert_eq!(npc, word_at + 4, "entry {k}: CellGov resumes past the word");
+        let paired = ENTRIES[k][2] == 0x9000_0000;
+        let console_npc = if paired { word_at + 8 } else { word_at + 4 };
+        assert_eq!(record.npc, console_npc, "entry {k}: the console");
+        assert_eq!(
+            record.class0,
+            cellgov_ps3_abi::lv2::spu::raw_spu::INT_STAT_SPU_ERROR,
+            "entry {k}: the console latched SE"
         );
     }
 }

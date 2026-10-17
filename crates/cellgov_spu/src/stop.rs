@@ -49,15 +49,23 @@ impl SpuStop {
     /// `signal` is the instruction's stop code; only `Stop` keeps it.
     ///
     /// A stop, stopd or halt ran, so the SPU resumes at the next word.
-    /// An invalid instruction or channel instruction did not run, so the
-    /// SPU resumes at that same word; the documents leave an SPU error's
-    /// resume address open, and this is CellGov's choice. A stop request
-    /// lands between instructions, so `pc` is the next one to run.
+    /// An invalid instruction did not run, and the SPU resumes at the
+    /// next word too. An invalid channel instruction did not run, so the
+    /// SPU resumes at that same word; the documents leave its resume
+    /// address open, and this is CellGov's choice. A stop request lands
+    /// between instructions, so `pc` is the next one to run.
+    ///
+    /// The console resumes 8 bytes past an invalid word that it issued
+    /// together with the next word. CellGov does not model issue pairs, so
+    /// it always resumes 4 bytes past the word.
     ///
     /// [SPU-ISA p:238 s:10] stop: PC <- PC + 4 & LSLR, precise stop.
     /// [SPU-ISA p:239 s:10] stopd: the same RTL.
     /// [CBEA p:93 s:8.5.2] stopd always reports code x'3FFF'.
     /// [CBEA p:95 s:8.5.3] SPU_NPC holds the next instruction to run when the SPU restarts.
+    // The `spu_invalid_npc` console capture: fifteen invalid words, each
+    // alone in its issue slot, resume 4 bytes past the word; the word before
+    // ran, the word after did not.
     pub fn new(kind: SpuStopKind, signal: u16, pc: u32, lslr: u32) -> Self {
         let code = match kind {
             SpuStopKind::Stop => signal & SPU_STOP_CODE_MASK as u16,
@@ -68,10 +76,11 @@ impl SpuStop {
             | SpuStopKind::Requested { .. } => 0,
         };
         let resume = match kind {
-            SpuStopKind::Stop | SpuStopKind::Stopd | SpuStopKind::Halt => pc.wrapping_add(4),
-            SpuStopKind::InvalidInstruction
-            | SpuStopKind::InvalidChannel
-            | SpuStopKind::Requested { .. } => pc,
+            SpuStopKind::Stop
+            | SpuStopKind::Stopd
+            | SpuStopKind::Halt
+            | SpuStopKind::InvalidInstruction => pc.wrapping_add(4),
+            SpuStopKind::InvalidChannel | SpuStopKind::Requested { .. } => pc,
         };
         Self {
             kind,

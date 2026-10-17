@@ -276,8 +276,10 @@ impl Lv2RequestKind {
             // register reads 0; the console reads the physical SPU's last word.
             | Lv2RequestKind::RawSpuReadPuintMb => Modeled,
             // A Raw SPU latches class 2 S at a stop-and-signal and M at
-            // an interrupt mailbox write. B always reads set. CellGov
-            // raises no halt, tag-group or class 0 error interrupt.
+            // an interrupt mailbox write, and class 0 SE at an invalid
+            // instruction or channel access. B always reads set. CellGov
+            // raises no halt, tag-group, DMA command or DMA alignment
+            // interrupt.
             Lv2RequestKind::RawSpuSetIntStat | Lv2RequestKind::RawSpuGetIntStat => PartialState,
             // Declared divergence: the priority is validated, stored and
             // served, and decides nothing. On the console it picks which

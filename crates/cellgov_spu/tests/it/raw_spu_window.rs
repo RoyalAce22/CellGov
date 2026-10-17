@@ -35,7 +35,7 @@ use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
 /// One step of the scripted PPU.
 #[derive(Clone, Copy, Debug)]
-enum Op {
+pub(crate) enum Op {
     Call([u64; 4]),
     Store(u64, u32),
     Load(u64),
@@ -45,7 +45,7 @@ enum Op {
 }
 
 /// The probe's poll of `SPU_Status` until R clears.
-fn poll_stopped() -> Op {
+pub(crate) fn poll_stopped() -> Op {
     Op::Poll(register(SPU_STATUS_OFFSET), 1, 0)
 }
 
@@ -126,11 +126,11 @@ fn word(addr: u64) -> ByteRange {
     ByteRange::new(GuestAddr::new(addr), 4).unwrap()
 }
 
-const OUT_PTR: u64 = 0x800;
+pub(crate) const OUT_PTR: u64 = 0x800;
 const GATE: u64 = 0x900;
-const WINDOW: u64 = raw_window::BASE;
+pub(crate) const WINDOW: u64 = raw_window::BASE;
 
-fn register(offset: u32) -> u64 {
+pub(crate) fn register(offset: u32) -> u64 {
     WINDOW + raw_window::PROBLEM_STATE + u64::from(offset)
 }
 
@@ -152,7 +152,7 @@ const PROGRAM: [u32; 7] = [
 
 /// A runtime with main memory, the reserved SPU range, and one PPU that
 /// runs `ops`.
-fn runtime(ops: Vec<Op>) -> (Runtime, UnitId) {
+pub(crate) fn runtime(ops: Vec<Op>) -> (Runtime, UnitId) {
     let memory = GuestMemory::from_regions(vec![
         Region::new(0, 0x1000, "main", PageSize::Page64K),
         Region::with_access(
@@ -181,7 +181,7 @@ fn ops_done(rt: &Runtime, ppu: UnitId) -> usize {
 }
 
 /// Step and commit until the PPU finishes `n` more ops.
-fn run_ops(rt: &mut Runtime, ppu: UnitId, n: usize) {
+pub(crate) fn run_ops(rt: &mut Runtime, ppu: UnitId, n: usize) {
     let target = ops_done(rt, ppu) + n;
     for _ in 0..200 {
         if ops_done(rt, ppu) >= target {
@@ -205,12 +205,12 @@ fn run_out(rt: &mut Runtime) {
     }
 }
 
-fn read(rt: &Runtime, addr: u64) -> u32 {
+pub(crate) fn read(rt: &Runtime, addr: u64) -> u32 {
     let bytes = rt.memory().read(word(addr)).unwrap();
     u32::from_be_bytes(bytes.try_into().unwrap())
 }
 
-fn create_ops() -> Vec<Op> {
+pub(crate) fn create_ops() -> Vec<Op> {
     vec![
         Op::Call([SPU_INITIALIZE, 6, 1, 0]),
         Op::Call([RAW_SPU_CREATE, OUT_PTR, 0, 0]),

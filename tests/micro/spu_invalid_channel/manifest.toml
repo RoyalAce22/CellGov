@@ -1,0 +1,22 @@
+[test]
+name = "spu_invalid_channel"
+
+# A hardware probe of a channel access in the wrong direction on a raw
+# SPU: a read of the write-only SPU_WrOutMbox and a write to the
+# read-only SPU_RdInMbox, each in the even and the odd slot of an
+# instruction pair beside a store. Each case runs twice. The PPU reads
+# back SPU_Status, SPU_NextPC, the class 0 and class 2 interrupt status,
+# and what the store left. The PPU program's header comment has the
+# payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 176 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

@@ -24,8 +24,10 @@ fn run_word_at_0x20(word: u32) -> (SpuExecutionUnit, ExecutionStepResult) {
 
 /// [CBEA p:33 s:2.1.2] an SPU that meets an invalid instruction halts and records it in its status register.
 /// [CBEA p:93 s:8.5.2] I (bit 26): invalid instruction detected, SPU stopped.
+// The `spu_invalid_npc` console capture resumes 4 bytes past a word that
+// issues alone.
 #[test]
-fn an_unassigned_word_stops_the_unit_as_an_invalid_instruction_at_that_word() {
+fn an_unassigned_word_stops_the_unit_as_an_invalid_instruction_resuming_past_it() {
     let (unit, result) = run_word_at_0x20(0x9000_0000);
     assert_eq!(result.yield_reason, YieldReason::Finished);
     assert_eq!(result.fault, None);
@@ -35,7 +37,7 @@ fn an_unassigned_word_stops_the_unit_as_an_invalid_instruction_at_that_word() {
         Some(SpuStop {
             kind: SpuStopKind::InvalidInstruction,
             code: 0,
-            npc: 0x20,
+            npc: 0x24,
             interrupts_enabled: false,
         })
     );
@@ -43,7 +45,7 @@ fn an_unassigned_word_stops_the_unit_as_an_invalid_instruction_at_that_word() {
         unit.stop_registers(),
         Some(StopRegisters {
             status: 0x0000_0020,
-            npc: 0x20
+            npc: 0x24
         })
     );
 }
@@ -77,7 +79,7 @@ fn each_optional_double_compare_is_an_invalid_instruction_on_the_cbe() {
             Some(SpuStop {
                 kind: SpuStopKind::InvalidInstruction,
                 code: 0,
-                npc: 0x20,
+                npc: 0x24,
                 interrupts_enabled: false,
             }),
             "{mnemonic}"
@@ -87,7 +89,7 @@ fn each_optional_double_compare_is_an_invalid_instruction_on_the_cbe() {
             unit.stop_registers(),
             Some(StopRegisters {
                 status: 0x0000_0020,
-                npc: 0x20
+                npc: 0x24
             }),
             "{mnemonic} sets I"
         );

@@ -1,0 +1,23 @@
+[test]
+name = "spu_invalid_npc"
+
+# A hardware probe of where a raw SPU resumes after an invalid word:
+# fifteen invalid words (the five optional double compares the CBE does
+# not provide and ten unassigned words), each in the even and the odd
+# slot of an instruction pair beside an even-pipe and an odd-pipe
+# neighbour, and after two loads. Each case runs twice. The PPU reads
+# back SPU_Status, SPU_NextPC, the class 0 interrupt status, and whether
+# the neighbour ran. The PPU program's header comment has the payload
+# layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 2416 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

@@ -16,7 +16,6 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno::{self, Lv2ErrCode};
-use cellgov_ps3_abi::lv2::spu::raw_spu;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
@@ -281,13 +280,11 @@ impl Lv2Host {
         self.state.raw_spus.units()
     }
 
-    /// Latch the class 2 interrupt status bits `stat` of the Raw SPU
-    /// `id`. Returns `false` when no Raw SPU has the id.
-    pub fn raise_raw_spu_int_stat(&mut self, id: u32, stat: u64) -> bool {
-        self.state
-            .raw_spus
-            .raise_int_stat(id, raw_spu::CLASS_APPLICATION, stat)
-            .is_ok()
+    /// Latch the interrupt status bits `stat` of `class` for the Raw SPU
+    /// `id`. Returns `false` when no Raw SPU has the id or the class is
+    /// not one a process may reach.
+    pub fn raise_raw_spu_int_stat(&mut self, id: u32, class: u32, stat: u64) -> bool {
+        self.state.raw_spus.raise_int_stat(id, class, stat).is_ok()
     }
 
     /// Load `word` into the PU interrupt mailbox register of Raw SPU `id`.

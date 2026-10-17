@@ -4,6 +4,8 @@
 mod channel_stall_through_runtime;
 mod console_double_compares;
 mod console_events;
+mod console_invalid_channel;
+mod console_invalid_npc;
 mod console_raw_stop;
 mod event_wait_through_runtime;
 mod local_store_through_lv2;
