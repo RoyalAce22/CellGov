@@ -5,50 +5,82 @@
 //! Behaviour lives in `cellgov_lv2::host::uart`; this module is data
 //! only.
 //!
-//! The PS3AV protocol is not a guest-facing API. The
-//! `lv2_uart_get_params` capture states the two ring sizes. The header
-//! version and the command ids below are unestablished, and only a
-//! passive capture of the packets vsh sends over this UART can settle
-//! them: no probe sends a packet.
+//! The PS3AV protocol is not a guest-facing API, and no probe sends a
+//! packet: the AV manager and the system controller sit behind it. The
+//! `lv2_uart_get_params` capture states the two ring sizes. The rest
+//! comes from a firmware reading of the code that speaks the protocol:
+//! `vsh/module/vshmw.sprx` in firmware 2.17 and `vsh/module/vsh.self`
+//! in 4.93, which link the same routines. One routine writes every
+//! command header and one queue sends them. Each command is an object
+//! that names its cid and builds its body, and one routine maps a
+//! reply's status to an error. A constant marked "firmware reading"
+//! below is a value that code stores or tests.
+//!
+//! What that reading cannot fix stays unestablished:
+//! - the bounds the AV manager accepts (see [`video_mode`]);
+//! - descriptor fields vsh copies without reading;
+//! - event bits, port bits and modes that vsh passes through from its
+//!   own callers;
+//! - the AKSV and BKSV values, which are console-private.
+//!
+//! Settling any of them needs a reply to a packet that no probe sends.
 
 /// Bytes the RX (reply) ring holds.
 pub const PS3AV_RX_BUF_SIZE: usize = 0x800;
 
 /// Bytes the TX (command) ring holds; a send larger than this cannot
-/// be accepted whole.
+/// be accepted whole. vsh gathers commands in a 4096-byte buffer and
+/// sends it with one call (firmware reading); whether it ever sends more
+/// than this ring holds at once is not traced.
 pub const PS3AV_TX_BUF_SIZE: usize = 0x800;
 
 /// Largest buffer either direction accepts in one syscall.
+/// Unestablished: vsh never calls `sys_uart_get_params` and never sends
+/// near this size.
 pub const SYS_UART_MAX_TRANSFER: u64 = 0x20000;
 
 /// Bytes a big-op transfer moves per chunk; a non-blocking send whose
 /// first chunk does not fit the TX ring reports that chunk's size.
+/// Unestablished: vsh uses no big-op send.
 pub const SYS_UART_CHUNK: u64 = 0x1000;
 
-/// Protocol version every command header must carry.
+/// Protocol version every command header must carry. Firmware reading:
+/// the header routine stores 0x0205 as the first `u16` of every
+/// command, in 2.17 and 4.93 alike.
 pub const PS3AV_VERSION: u16 = 0x205;
 
 /// `mode` for `sys_uart_receive` / `sys_uart_send`: transfer without
-/// blocking, in 4 KiB chunks.
+/// blocking, in 4 KiB chunks. vsh never passes it.
 pub const SYS_UART_MODE_NOT_BLOCKING_BIG_OP: u32 = 0;
-/// `mode`: block until the whole transfer completes.
+/// `mode`: block until the whole transfer completes. Firmware reading:
+/// vsh's reader thread receives (368) in this mode.
 pub const SYS_UART_MODE_BLOCKING_BIG_OP: u32 = 1;
-/// `mode` (send only): accept the buffer whole or refuse it.
+/// `mode` (send only): accept the buffer whole or refuse it. Firmware
+/// reading: vsh sends (369) in this mode and treats a short count as a
+/// failure.
 pub const SYS_UART_MODE_NOT_BLOCKING_OP: u32 = 2;
 
 /// Command header: `version u16, length u16, cid u32`; `length` counts
-/// the bytes after the first four.
+/// the bytes after the first four. Firmware reading: the header routine
+/// stores the cid at +4, stores `length` as the body length plus 4, and
+/// the body starts at +8. The reader sizes a packet as `length + 4`.
 pub const PS3AV_HEADER_LEN: usize = 8;
-/// Reply header: the command header plus a `status u32`.
+/// Reply header: the command header plus a `status u32`. Firmware
+/// reading: vsh reads the status at +8 and a reply body from +12.
 pub const PS3AV_REPLY_HEADER_LEN: usize = 12;
-/// Set on a reply's cid.
+/// Set on a reply's cid. Firmware reading: vsh matches a reply to its
+/// command by the cid with this bit cleared.
 pub const PS3AV_REPLY_BIT: u32 = 0x8000_0000;
 /// `length` value the AV manager treats as a corrupt packet.
+/// Unestablished: vsh neither sends nor tests it.
 pub const PS3AV_LENGTH_POISON: u16 = 0xFFFC;
-/// cid the corrupt-packet reply carries.
+/// cid the corrupt-packet reply carries. Unestablished, as
+/// [`PS3AV_LENGTH_POISON`].
 pub const PS3AV_CID_POISON_REPLY: u32 = 0xDEAD;
 
-// Command ids.
+// Command ids. Firmware reading: vsh builds a command with each id
+// below in 2.17 and 4.93, except where a line says otherwise. The names
+// are not in the firmware; each is the name the id carries elsewhere.
 /// PS3AV command id `AV_INIT`.
 pub const PS3AV_CID_AV_INIT: u32 = 0x0000_0001;
 /// PS3AV command id `AV_FIN`.
@@ -67,7 +99,7 @@ pub const PS3AV_CID_AV_DISABLE_EVENT: u32 = 0x0000_0007;
 pub const PS3AV_CID_AV_GET_PORT_STATE: u32 = 0x0000_0009;
 /// PS3AV command id `AV_TV_MUTE`.
 pub const PS3AV_CID_AV_TV_MUTE: u32 = 0x0000_000A;
-/// PS3AV command id `AV_NULL_CMD`.
+/// PS3AV command id `AV_NULL_CMD`. Unestablished: vsh never builds it.
 pub const PS3AV_CID_AV_NULL_CMD: u32 = 0x0000_000B;
 /// PS3AV command id `AV_GET_AKSV`.
 pub const PS3AV_CID_AV_GET_AKSV: u32 = 0x0000_000C;
@@ -93,13 +125,13 @@ pub const PS3AV_CID_AV_SET_CGMS_WSS: u32 = 0x0003_0003;
 pub const PS3AV_CID_AV_SET_MACROVISION: u32 = 0x0003_0004;
 /// PS3AV command id `AV_HDMI_MODE`.
 pub const PS3AV_CID_AV_HDMI_MODE: u32 = 0x0004_0001;
-/// PS3AV command id `AV_CEC_MESSAGE`.
+/// PS3AV command id `AV_CEC_MESSAGE`. 4.93 only; variable length.
 pub const PS3AV_CID_AV_CEC_MESSAGE: u32 = 0x000A_0001;
-/// PS3AV command id `AV_GET_CEC_CONFIG`.
+/// PS3AV command id `AV_GET_CEC_CONFIG`. 4.93 only; header alone.
 pub const PS3AV_CID_AV_GET_CEC_CONFIG: u32 = 0x000A_0002;
-/// PS3AV command id `AV_UNK11`.
+/// PS3AV command id `AV_UNK11`. 4.93 only; variable length.
 pub const PS3AV_CID_AV_UNK11: u32 = 0x000A_0003;
-/// PS3AV command id `AV_UNK12`.
+/// PS3AV command id `AV_UNK12`. 4.93 only; 12 bytes.
 pub const PS3AV_CID_AV_UNK12: u32 = 0x000A_0004;
 /// PS3AV command id `VIDEO_INIT`.
 pub const PS3AV_CID_VIDEO_INIT: u32 = 0x0100_0001;
@@ -113,7 +145,8 @@ pub const PS3AV_CID_VIDEO_FORMAT: u32 = 0x0100_0004;
 pub const PS3AV_CID_VIDEO_PITCH: u32 = 0x0100_0005;
 /// PS3AV command id `VIDEO_GET_HW_CONF`.
 pub const PS3AV_CID_VIDEO_GET_HW_CONF: u32 = 0x0100_0006;
-/// PS3AV command id `VIDEO_GET_REG`.
+/// PS3AV command id `VIDEO_GET_REG`. Unestablished: vsh never builds
+/// it.
 pub const PS3AV_CID_VIDEO_GET_REG: u32 = 0x0100_0008;
 /// PS3AV command id `AUDIO_INIT`.
 pub const PS3AV_CID_AUDIO_INIT: u32 = 0x0200_0001;
@@ -131,9 +164,15 @@ pub const PS3AV_CID_AUDIO_SPDIF_BIT: u32 = 0x0200_0006;
 pub const PS3AV_CID_AUDIO_CTRL: u32 = 0x0200_0007;
 /// PS3AV command id `AVB_PARAM`.
 pub const PS3AV_CID_AVB_PARAM: u32 = 0x0400_0001;
+
+// Events. Firmware reading: vsh sends any cid whose top byte is 0x10
+// down its event path, and compares only PLUGGED. The other event ids
+// are unestablished.
 /// Event the AV manager pushes into the stream: `UNPLUGGED`.
 pub const PS3AV_CID_EVENT_UNPLUGGED: u32 = 0x1000_0001;
-/// Event the AV manager pushes into the stream: `PLUGGED`.
+/// Event the AV manager pushes into the stream: `PLUGGED`. Firmware
+/// reading: vsh compares it exactly and reads the event's monitor info
+/// from +8.
 pub const PS3AV_CID_EVENT_PLUGGED: u32 = 0x1000_0002;
 /// Event the AV manager pushes into the stream: `HDCP_DONE`.
 pub const PS3AV_CID_EVENT_HDCP_DONE: u32 = 0x1000_0003;
@@ -144,9 +183,19 @@ pub const PS3AV_CID_EVENT_HDCP_REAUTH: u32 = 0x1000_0005;
 /// Event the AV manager pushes into the stream: `HDCP_ERROR`.
 pub const PS3AV_CID_EVENT_HDCP_ERROR: u32 = 0x1000_0006;
 /// OR-ed into an event cid when it concerns the second HDMI port.
+/// Unestablished: vsh compares PLUGGED exactly and ignores a descriptor
+/// whose port byte is not 0.
 pub const PS3AV_CID_EVENT_HDMI_1_BIT: u32 = 0x0001_0000;
 
-// Reply status codes.
+// Reply status codes. Firmware reading: vsh's status routine handles
+// 0 to 0x13, maps any higher status to one error, and takes SUCCESS and
+// NO_SEL both as success. It groups the rest as follows:
+// - RECEIVE_VUART_ERROR and SYSCON_COMMUNICATE_FAIL share an error;
+// - so do FAILURE and UNSUPPORTED_COMMAND;
+// - so do INVALID_VIDEO_PARAM and INVALID_AV_PARAM;
+// - so do INVALID_AUDIO_PARAM and UNSUPPORTED_HDMI_MODE;
+// - every other status has its own.
+// That fixes the range and the grouping; the names are inferred from it.
 /// Reply status `SUCCESS`.
 pub const PS3AV_STATUS_SUCCESS: u32 = 0x00;
 /// Reply status `RECEIVE_VUART_ERROR`.
@@ -188,7 +237,10 @@ pub const PS3AV_STATUS_UNSUPPORTED_HDMI_MODE: u32 = 0x12;
 /// Reply status `NO_SYNC_HEAD`.
 pub const PS3AV_STATUS_NO_SYNC_HEAD: u32 = 0x13;
 
-// AV ports as the packets name them.
+// AV ports as the packets name them. Firmware reading: vsh maps each of
+// the six to its own per-port slot, bounds the port at SPDIF_1, sends
+// ADD_SIGNAL_CTL, SET_CGMS_WSS and SET_MACROVISION for AVMULTI_0 only,
+// and sends AUDIO_MUTE only for the two S/PDIF ports.
 /// AV port `HDMI_0` as the packets name it.
 pub const PS3AV_AVPORT_HDMI_0: u16 = 0x00;
 /// AV port `HDMI_1` as the packets name it.
@@ -202,13 +254,16 @@ pub const PS3AV_AVPORT_SPDIF_0: u16 = 0x20;
 /// AV port `SPDIF_1` as the packets name it.
 pub const PS3AV_AVPORT_SPDIF_1: u16 = 0x21;
 
-// Video heads.
+// Video heads. Firmware reading: VIDEO_MODE carries head 0 or 1, and vsh
+// sends the second mode for the other head. Which head is HDMI is
+// inferred.
 /// Video head `A_HDMI`.
 pub const PS3AV_HEAD_A_HDMI: u32 = 0;
 /// Video head `B_ANALOG`.
 pub const PS3AV_HEAD_B_ANALOG: u32 = 1;
 
 // Event-enable bits carried by AV_INIT / ENABLE_EVENT / DISABLE_EVENT.
+// Unestablished: vsh copies the word from its own caller unread.
 /// Enabled-event bit `UNPLUGGED`.
 pub const PS3AV_EVENT_BIT_UNPLUGGED: u32 = 0x01;
 /// Enabled-event bit `PLUGGED`.
@@ -224,7 +279,9 @@ pub const PS3AV_EVENT_BIT_HDCP_TOPOLOGY: u32 = 0x20;
 /// AV_INIT with this bit expects a 4-byte reply body.
 pub const PS3AV_EVENT_BIT_UNK: u32 = 0x8000_0000;
 
-// HDMI behaviour modes (AV_HDMI_MODE).
+// HDMI behaviour modes (AV_HDMI_MODE). Firmware reading: the mode is
+// one byte at +8 followed by three zero bytes; the values are
+// unestablished, since vsh copies the byte from its own caller.
 /// HDMI behaviour mode `HDCP_OFF`.
 pub const PS3AV_HDMI_BEHAVIOR_HDCP_OFF: u8 = 0x01;
 /// HDMI behaviour mode `DVI`.
@@ -234,7 +291,9 @@ pub const PS3AV_HDMI_BEHAVIOR_EDID_PASS: u8 = 0x80;
 /// HDMI behaviour mode `NORMAL`.
 pub const PS3AV_HDMI_BEHAVIOR_NORMAL: u8 = 0xFF;
 
-// Monitor descriptor vocabulary.
+// Monitor descriptor vocabulary. Unestablished unless a line says
+// otherwise: vsh copies the descriptor whole to its callers, and the
+// code that reads these fields is not in the PS3AV routines.
 /// Monitor type `NONE`.
 pub const PS3AV_MONITOR_TYPE_NONE: u8 = 0;
 /// Monitor type `HDMI`.
@@ -244,8 +303,14 @@ pub const PS3AV_MONITOR_TYPE_DVI: u8 = 2;
 /// Monitor type `AVMULTI`.
 pub const PS3AV_MONITOR_TYPE_AVMULTI: u8 = 3;
 /// Resolution bit `720X480P` in a monitor descriptor.
+///
+/// It shares its value with [`PS3AV_RESBIT_720X576P`], and the firmware
+/// reading does not settle which bit either one is: no PS3AV routine
+/// tests a resolution bit. Both stay unestablished, the duplicate
+/// included.
 pub const PS3AV_RESBIT_720X480P: u32 = 0x0003;
-/// Resolution bit `720X576P` in a monitor descriptor.
+/// Resolution bit `720X576P` in a monitor descriptor. Shares its value
+/// with [`PS3AV_RESBIT_720X480P`]; see there.
 pub const PS3AV_RESBIT_720X576P: u32 = 0x0003;
 /// Resolution bit `1280X720P` in a monitor descriptor.
 pub const PS3AV_RESBIT_1280X720P: u32 = 0x0004;
@@ -253,9 +318,12 @@ pub const PS3AV_RESBIT_1280X720P: u32 = 0x0004;
 pub const PS3AV_RESBIT_1920X1080I: u32 = 0x0008;
 /// Resolution bit `1920X1080P` in a monitor descriptor.
 pub const PS3AV_RESBIT_1920X1080P: u32 = 0x4000;
-/// Colorimetry flag `XVYCC_601` in a monitor descriptor.
+/// Colorimetry flag `XVYCC_601` in a monitor descriptor. Firmware
+/// reading: vsh tests the colorimetry byte under mask 0x3, the two
+/// xvYCC flags together.
 pub const PS3AV_COLORIMETRY_XVYCC_601: u8 = 1;
-/// Colorimetry flag `XVYCC_709` in a monitor descriptor.
+/// Colorimetry flag `XVYCC_709` in a monitor descriptor; tested with
+/// [`PS3AV_COLORIMETRY_XVYCC_601`].
 pub const PS3AV_COLORIMETRY_XVYCC_709: u8 = 2;
 /// Colorimetry flag `MD0` in a monitor descriptor.
 pub const PS3AV_COLORIMETRY_MD0: u8 = 1 << 4;
@@ -263,11 +331,14 @@ pub const PS3AV_COLORIMETRY_MD0: u8 = 1 << 4;
 pub const PS3AV_COLORIMETRY_MD1: u8 = 1 << 5;
 /// Colorimetry flag `MD2` in a monitor descriptor.
 pub const PS3AV_COLORIMETRY_MD2: u8 = 1 << 6;
-/// Monitor descriptor flag `PS3AV_CS_SUPPORTED`.
+/// Monitor descriptor flag `PS3AV_CS_SUPPORTED`. Firmware reading: vsh
+/// tests this bit of the RGB and YUV 4:4:4 colour-space bytes.
 pub const PS3AV_CS_SUPPORTED: u8 = 1;
 /// Monitor descriptor flag `PS3AV_RGB_SELECTABLE_QUANTIZATION_RANGE`.
+/// Firmware reading: vsh tests this bit of the RGB colour-space byte.
 pub const PS3AV_RGB_SELECTABLE_QUANTIZATION_RANGE: u8 = 8;
-/// Monitor descriptor flag `PS3AV_12BIT_COLOR`.
+/// Monitor descriptor flag `PS3AV_12BIT_COLOR`. Firmware reading: vsh
+/// tests this bit of the RGB and YUV 4:4:4 colour-space bytes.
 pub const PS3AV_12BIT_COLOR: u8 = 16;
 /// Monitor descriptor bound `AUDIO_BLK_MAX`.
 pub const PS3AV_MON_INFO_AUDIO_BLK_MAX: usize = 16;
@@ -288,6 +359,9 @@ pub const PS3AV_MON_INFO_AUDIO_TYPE_DOLBY_THD: u8 = 12;
 
 /// `ps3av_get_monitor_info_reply` is 208 bytes; the HDMI reply and the
 /// plugged event carry it four bytes short.
+///
+/// Unestablished: vsh tests neither length. It copies the descriptor's
+/// first 88 bytes plus 4 per audio block, and keeps 256 bytes per port.
 pub const PS3AV_MONITOR_INFO_LEN: usize = 208;
 /// Bytes of monitor info the HDMI reply and the plugged event carry.
 pub const PS3AV_MONITOR_INFO_HDMI_LEN: usize = 204;
@@ -297,9 +371,19 @@ pub const PS3AV_MONITOR_INFO_HDMI_LEN: usize = 204;
 ///
 /// The system controller decides the accepted set, and its firmware is
 /// not in dev_flash. Every bound here is unestablished, so a rejection
-/// built on one is a guess. A VIDEO_MODE packet the AV manager answers
-/// with `PS3AV_STATUS_INVALID_VIDEO_PARAM` would witness the boundary
-/// it names.
+/// built on one is a guess. vsh checks none of them before it sends. A
+/// VIDEO_MODE packet the AV manager answers with
+/// `PS3AV_STATUS_INVALID_VIDEO_PARAM` would witness the boundary it
+/// names.
+///
+/// Firmware reading: vsh's VIDEO_MODE builder stores a `u32` at each
+/// offset from 8 to 40 in steps of 4. That fixes
+/// [`HEAD_OFFSET`](video_mode::HEAD_OFFSET) through
+/// [`FORMAT_OFFSET`](video_mode::FORMAT_OFFSET).
+/// [`UNK2_OFFSET`](video_mode::UNK2_OFFSET) and
+/// [`ORDER_OFFSET`](video_mode::ORDER_OFFSET) read the low `u16` of the
+/// words at 12 and 40; vsh writes those whole, so the half-word split is
+/// inferred.
 pub mod video_mode {
     /// `head` -- which output head the mode drives.
     pub const HEAD_OFFSET: usize = 8;
@@ -347,8 +431,21 @@ pub mod video_mode {
 /// `ps3av_monitor_info` field offsets, the descriptor body of a
 /// `GET_MONITOR_INFO` reply and of a plugged event.
 ///
-/// Provenance is the module's: nothing in the captured evidence states the PS3AV
-/// protocol, so every offset here is unestablished. The layout an
+/// Firmware reading: vsh reads a few of these fields:
+/// - [`AVPORT_OFFSET`](monitor_info::AVPORT_OFFSET);
+/// - [`CS_RGB_OFFSET`](monitor_info::CS_RGB_OFFSET) and
+///   [`CS_YUV444_OFFSET`](monitor_info::CS_YUV444_OFFSET), for the
+///   colour-space flags;
+/// - [`COLORIMETRY_OFFSET`](monitor_info::COLORIMETRY_OFFSET);
+/// - [`NUM_AUDIO_BLOCK_OFFSET`](monitor_info::NUM_AUDIO_BLOCK_OFFSET),
+///   which vsh reads as a big-endian `u16`;
+/// - the audio blocks at
+///   [`AUDIO_BLOCK_OFFSET`](monitor_info::AUDIO_BLOCK_OFFSET), 4 bytes
+///   each.
+///
+/// It finds the descriptor at +12 of a GET_MONITOR_INFO reply and at +8
+/// of a PLUGGED event. The other offsets are unestablished: vsh copies
+/// those bytes to its callers without reading them. The layout an
 /// AV-manager reply carries during boot would witness them.
 pub mod monitor_info {
     /// `avport` -- which port the descriptor answers for.
@@ -434,12 +531,16 @@ pub mod monitor_info {
     const _: () = assert!(RES_3D_OFFSET < super::PS3AV_MONITOR_INFO_LEN);
 }
 
-/// KSV of the HDMI transmitter, as GET_AKSV reports it.
+/// KSV of the HDMI transmitter, as GET_AKSV reports it. CellGov's own
+/// value: a console's KSVs are private to it, and no reading here sees
+/// one.
 pub const PS3AV_AKSV_VALUE: [u8; 5] = [0x00, 0x00, 0x0F, 0xFF, 0xFF];
 /// KSV of the single HDCP sink, as BKSV lists and HDCP events report it.
+/// CellGov's own value, as [`PS3AV_AKSV_VALUE`].
 pub const PS3AV_BKSV_VALUE: [u8; 5] = [0xFF, 0xFF, 0xF0, 0x00, 0x00];
 
-// Audio-mode vocabulary (AUDIO_MODE packet).
+// Audio-mode vocabulary (AUDIO_MODE packet). Unestablished: vsh copies
+// the AUDIO_MODE body from its own caller.
 /// Audio-mode value `FS_192K`.
 pub const PS3AV_AUDIO_FS_192K: u32 = 7;
 /// Audio-mode value `SOURCE_SERIAL`.
@@ -447,6 +548,7 @@ pub const PS3AV_AUDIO_SOURCE_SERIAL: u32 = 0;
 /// Audio-mode value `SOURCE_SPDIF`.
 pub const PS3AV_AUDIO_SOURCE_SPDIF: u32 = 1;
 /// Audio-port bits for AUDIO_ACTIVE / AUDIO_INACTIVE / AUDIO_SPDIF_BIT.
+/// Unestablished: vsh copies the port word from its own caller.
 pub const PS3AV_AUDIO_PORT_HDMI_0: u32 = 1 << 0;
 /// Audio-port bit `HDMI_1`.
 pub const PS3AV_AUDIO_PORT_HDMI_1: u32 = 1 << 1;
@@ -459,7 +561,8 @@ pub const PS3AV_AUDIO_PORT_SPDIF_1: u32 = 1 << 21;
 
 // Fixed packet sizes the parser checks a command against (header
 // included); a command whose size is data-dependent or unchecked is
-// absent here.
+// absent here. Firmware reading: each is the size vsh queues for that
+// command, in 2.17 and 4.93 alike, except where a line says otherwise.
 /// Size of the `AV_INIT` command packet, header included.
 pub const PS3AV_PKT_AV_INIT_LEN: usize = 12;
 /// Size of the `GET_MONITOR_INFO` command packet, header included.
@@ -471,6 +574,7 @@ pub const PS3AV_PKT_ENABLE_EVENT_LEN: usize = 12;
 /// Size of the `AV_AUDIO_MUTE` command packet, header included.
 pub const PS3AV_PKT_AV_AUDIO_MUTE_LEN: usize = 12;
 /// Size of the `NULL_CMD` command packet, header included.
+/// Unestablished: vsh never builds the command.
 pub const PS3AV_PKT_NULL_CMD_LEN: usize = 12;
 /// Size of the `VIDEO_DISABLE_SIG` command packet, header included.
 pub const PS3AV_PKT_VIDEO_DISABLE_SIG_LEN: usize = 12;
@@ -500,29 +604,45 @@ pub const PS3AV_PKT_AUDIO_SET_ACTIVE_LEN: usize = 12;
 pub const PS3AV_PKT_AUDIO_SPDIF_BIT_LEN: usize = 64;
 /// Size of the `AUDIO_CTRL` command packet, header included.
 pub const PS3AV_PKT_AUDIO_CTRL_LEN: usize = 28;
-/// Size of the `INC_AVSET` command packet, header included.
+/// Size of the `INC_AVSET` command packet, header included: the AVB_PARAM
+/// head, ahead of its sub-packets. vsh's AVB_PARAM with every count zero
+/// is this long.
 pub const PS3AV_PKT_INC_AVSET_LEN: usize = 16;
 /// Size of the `VIDEO_MODE` command packet, header included.
 pub const PS3AV_PKT_VIDEO_MODE_LEN: usize = 48;
 /// Size of the `AV_VIDEO_CS` command packet, header included.
+///
+/// Unestablished, and the firmware reading disagrees if cid 0x10001 is
+/// this command: vsh queues that cid as a 20-byte packet. No firmware
+/// string names the cid.
 pub const PS3AV_PKT_AV_VIDEO_CS_LEN: usize = 24;
-/// Size of the `AV_AUDIO_PARAM` command packet, header included.
+/// Size of the `AV_AUDIO_PARAM` command packet, header included. vsh
+/// queues cid 0x20001 at this size; that the cid is this command is
+/// inferred.
 pub const PS3AV_PKT_AV_AUDIO_PARAM_LEN: usize = 32;
 
 // Reply body sizes.
-/// Length of the `AV_INIT` reply body.
+/// Length of the `AV_INIT` reply body. Firmware reading: vsh requires
+/// exactly this length before it reads the body.
 pub const PS3AV_REPLY_AV_INIT_LEN: usize = 4;
-/// Length of the `GET_HW_CONF` reply body.
+/// Length of the `GET_HW_CONF` reply body. Unestablished: vsh checks no
+/// length and reads three `u16` from the body's first six bytes.
 pub const PS3AV_REPLY_GET_HW_CONF_LEN: usize = 8;
-/// Length of the `GET_AKSV` reply body.
+/// Length of the `GET_AKSV` reply body. Unestablished: vsh reads a size
+/// word and copies the bytes after it, and never tests this length.
 pub const PS3AV_REPLY_GET_AKSV_LEN: usize = 16;
-/// Length of the `VIDEO_GET_HW_CONF` reply body.
+/// Length of the `VIDEO_GET_HW_CONF` reply body. Unestablished: vsh
+/// reads the body's last byte only.
 pub const PS3AV_REPLY_VIDEO_GET_HW_CONF_LEN: usize = 4;
-/// Length of the `GET_CEC_CONFIG` reply body.
+/// Length of the `GET_CEC_CONFIG` reply body. Unestablished: the command
+/// is 4.93's, and its reply handler is not read.
 pub const PS3AV_REPLY_GET_CEC_CONFIG_LEN: usize = 4;
-/// `ps3av_pkt_get_bksv_reply` ahead of its KSV array.
+/// `ps3av_pkt_get_bksv_reply` ahead of its KSV array. Firmware reading:
+/// vsh reads the port at body +0 and the count at +4, refuses more than
+/// 16, and takes the 5-byte KSVs from +8.
 pub const PS3AV_REPLY_GET_BKSV_HEAD_LEN: usize = 8;
 /// `ps3av_pkt_hdmi_hdcp_done_event` ahead of its KSV array.
+/// Unestablished: vsh does not parse HDCP events.
 pub const PS3AV_EVENT_HDCP_DONE_HEAD_LEN: usize = 12;
 
 /// `sys_uart_get_params` output: `rx_buf_size u64, tx_buf_size u64`.
