@@ -26,11 +26,25 @@ impl Lv2Host {
     /// counts each kept id. What the console does with such
     /// an object is unestablished: a game process cannot run beside a
     /// second process of its own.
+    ///
+    /// The RSX context goes with the process whose id names its event
+    /// queue, which is the process that allocated it: an exit that drops
+    /// that queue tears the context down, its window closes and the
+    /// area search grants the window's granule again. No capture shows
+    /// what the console does to a context a process leaves behind.
     pub(in crate::host) fn release_process_ids(&mut self, pid: u32) {
         let threads = self.threads_of_process(pid);
+        let rsx_queue = self
+            .state
+            .rsx_context
+            .allocated
+            .then_some(self.state.rsx_context.event_queue_id);
         for id in self.state.kernel_ids.held_by_owner(pid) {
             if self.drop_exited_object(id, &threads) {
                 self.release_id(id);
+                if Some(id) == rsx_queue {
+                    self.state.rsx_context = crate::host::rsx::SysRsxContext::new();
+                }
             } else {
                 self.obs.process_exit_retained_ids += 1;
             }

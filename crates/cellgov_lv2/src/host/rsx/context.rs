@@ -166,3 +166,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/context_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/context_exit_tests.rs"]
+mod exit_tests;
