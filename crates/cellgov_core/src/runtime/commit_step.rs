@@ -381,8 +381,8 @@ impl Runtime {
             }
         }
 
-        if flip_pending_at_entry {
-            self.rsx_flip.complete_pending_flip();
+        if flip_pending_at_entry && self.rsx_flip.complete_pending_flip() {
+            self.publish_flip_done_to_driver_info();
         }
 
         // Flip-status memory mirror. `rsx_flip` is the authoritative
@@ -437,6 +437,52 @@ impl Runtime {
             .notify_yielded(source, result.yield_reason, self.step_woke_others, holds_cs);
 
         outcome
+    }
+
+    /// Set the completed-flip bit in the flip head's word of the
+    /// driver-info block, where libgcm_sys.sprx's flip-status getter
+    /// reads it. Before `sys_rsx_context_allocate` publishes a block,
+    /// there is nothing to set.
+    fn publish_flip_done_to_driver_info(&mut self) {
+        use cellgov_ps3_abi::lv2::rsx::driver_info;
+        let ctx = self.lv2_host.sys_rsx_context();
+        if !ctx.allocated {
+            return;
+        }
+        let addr = ctx.driver_info_addr
+            + (driver_info::HEAD_FLIP_FLAGS_OFFSET
+                + driver_info::FLIP_HEAD * driver_info::HEAD_STRIDE) as u32;
+        let range = cellgov_mem::ByteRange::contiguous_u32(addr, 4);
+        let Some(bytes) = self
+            .memory
+            .read(range)
+            .and_then(|b| <[u8; 4]>::try_from(b).ok())
+        else {
+            self.lv2_host.log_invariant_break(
+                "dispatch.rsx_flip_done_driver_info_unmapped",
+                format_args!(
+                    "flip completed but the driver-info head word at 0x{addr:08x} is \
+                     unmapped; the flip status libgcm reads stays WAITING",
+                ),
+            );
+            return;
+        };
+        let next = u32::from_be_bytes(bytes) | driver_info::FLIP_DONE;
+        if let Err(err) = self.host_write(
+            HostWriter::RsxMirror,
+            AddressSpaceId::BOOT,
+            range,
+            &next.to_be_bytes(),
+            None,
+        ) {
+            self.lv2_host.log_invariant_break(
+                "dispatch.rsx_flip_done_driver_info_write_failed",
+                format_args!(
+                    "flip completed but the driver-info head word write at 0x{addr:08x} \
+                     failed: {err}; the flip status libgcm reads stays WAITING",
+                ),
+            );
+        }
     }
 
     /// Base every `RsxLabelWrite` offset resolves against.

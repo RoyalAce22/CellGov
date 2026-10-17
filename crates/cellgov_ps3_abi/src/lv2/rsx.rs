@@ -143,6 +143,19 @@ pub mod driver_info {
     pub const SYSTEM_MODE_OFFSET: usize = 0x50;
     /// Offset of the `handler_queue` field within `RsxDriverInfo`.
     pub const HANDLER_QUEUE_OFFSET: usize = 0x12D0;
+    /// Head 0's flip-flags word. libgcm_sys.sprx's flip-status getter
+    /// reads `HEAD_FLIP_FLAGS_OFFSET + head * HEAD_STRIDE`.
+    pub const HEAD_FLIP_FLAGS_OFFSET: usize = 0x10C0;
+    /// Bytes between two heads' blocks.
+    pub const HEAD_STRIDE: usize = 0x40;
+    /// Display heads the block carries.
+    pub const HEAD_COUNT: usize = 2;
+    /// The head `cellGcmGetFlipStatus` asks about, and the head a
+    /// flip queued through the command buffer completes on.
+    pub const FLIP_HEAD: usize = 1;
+    /// Bit of a head's flip-flags word that reads as a completed flip:
+    /// libgcm_sys.sprx answers DONE when it is set, WAITING when clear.
+    pub const FLIP_DONE: u32 = 0x8000_0000;
 }
 
 /// Values `sys_rsx_context_allocate` stamps into the driver-info region
@@ -164,6 +177,9 @@ pub mod driver_info_init {
     pub const REPORTS_REPORT_OFFSET: u32 = 0x1400;
     /// Hardware channel (games = 1, VSH = 0).
     pub const HARDWARE_CHANNEL: u32 = 1;
+    /// Each head's flip-flags word after allocation: no flip pending,
+    /// as the `lv2_rsx_answers` capture reads both heads.
+    pub const HEAD_FLIP_FLAGS: u32 = super::driver_info::FLIP_DONE;
     /// Local RSX memory exposed to a game, as the `lv2_rsx_answers`
     /// capture reads it; libgcm reports the same value as its local
     /// size.
@@ -184,6 +200,12 @@ pub mod package {
     pub const FLIP_MODE: u32 = 0x101;
     /// Trigger a flip buffer.
     pub const FLIP_BUFFER: u32 = 0x102;
+    /// Set or clear a head's flip-flags word: `a3` is the head, and the
+    /// word becomes `(word & a4) | a5`. libgcm_sys.sprx's
+    /// `cellGcmSetFlipStatus` sends mask 0 and value
+    /// [`super::driver_info::FLIP_DONE`]; `cellGcmResetFlipStatus`
+    /// sends mask `!FLIP_DONE` and value 0.
+    pub const FLIP_STATUS: u32 = 0x10A;
     /// Record display-buffer metadata.
     pub const SET_DISPLAY_BUFFER: u32 = 0x104;
 }

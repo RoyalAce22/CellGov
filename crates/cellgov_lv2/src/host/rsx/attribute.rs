@@ -80,6 +80,9 @@ impl Lv2Host {
                 Lv2Dispatch::immediate(0)
             }
             package::FLIP_BUFFER => self.sys_rsx_attribute_flip(a3, a4),
+            package::FLIP_STATUS => {
+                self.sys_rsx_attribute_flip_status(a3, a4, a5, requester, tick, rt)
+            }
             package::SET_DISPLAY_BUFFER => self.sys_rsx_attribute_set_display_buffer(a3, a4, a5),
             PACKAGE_CELLGOV_SET_FLIP_HANDLER => {
                 self.state.rsx_context.flip_handler_addr = a3 as u32;
@@ -172,6 +175,54 @@ impl Lv2Host {
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![Effect::RsxFlipRequest { buffer_index }],
+        }
+    }
+
+    /// FLIP_STATUS (0x10A): rewrites head `a3`'s flip-flags word in the
+    /// driver-info block as `(word & a4) | a5`, the arithmetic
+    /// libgcm_sys.sprx's set and reset calls ask for.
+    ///
+    /// A head past the block's two answers `CELL_EINVAL` under a named
+    /// break: no firmware caller sends one, so the kernel's answer is
+    /// unprobed. An unreadable word answers `CELL_EFAULT`.
+    fn sys_rsx_attribute_flip_status(
+        &mut self,
+        head: u64,
+        mask: u64,
+        value: u64,
+        requester: UnitId,
+        tick: GuestTicks,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        use cellgov_ps3_abi::lv2::rsx::driver_info;
+        let Some(head) = usize::try_from(head)
+            .ok()
+            .filter(|&h| h < driver_info::HEAD_COUNT)
+        else {
+            self.log_invariant_break(
+                "dispatch.sys_rsx_context_attribute_flip_status_head_out_of_range",
+                format_args!(
+                    "FLIP_STATUS head {head:#x} names no head of the driver-info block \
+                     ({count} heads); returning CELL_EINVAL",
+                    count = driver_info::HEAD_COUNT,
+                ),
+            );
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        let addr = self.state.rsx_context.driver_info_addr
+            + (driver_info::HEAD_FLIP_FLAGS_OFFSET + head * driver_info::HEAD_STRIDE) as u32;
+        let Some(word) = crate::host::guest_struct::read_be_u32(rt, u64::from(addr)) else {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        };
+        let next = (word & mask as u32) | value as u32;
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![Effect::shared_write(
+                cellgov_mem::ByteRange::contiguous_u32(addr, 4),
+                WritePayload::from_slice(&next.to_be_bytes()),
+                requester,
+                tick,
+            )],
         }
     }
 

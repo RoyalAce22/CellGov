@@ -69,7 +69,7 @@ const FIRMWARE: &str = "4.93";
 /// owns the defect. Such a case must still fail its payload check and
 /// still differ from its console capture: once it passes, the suite
 /// fails until the entry goes, so a fixed defect cannot hide here.
-const KNOWN_DEFECTS: &[(&str, u32)] = &[("rsx_flip_status_transition", 1705)];
+const KNOWN_DEFECTS: &[(&str, u32)] = &[];
 
 /// The issue that owns `name`'s known defect, if it has one.
 fn known_defect(name: &str) -> Option<u32> {

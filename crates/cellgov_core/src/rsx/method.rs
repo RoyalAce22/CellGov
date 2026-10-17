@@ -18,9 +18,9 @@ use cellgov_time::GuestTicks;
 use std::collections::BTreeMap;
 
 pub use cellgov_ps3_abi::hw::rsx::{
-    GCM_FLIP_COMMAND, NV406E_SEMAPHORE_ACQUIRE, NV406E_SEMAPHORE_OFFSET, NV406E_SEMAPHORE_RELEASE,
-    NV406E_SET_REFERENCE, NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE, NV4097_GET_REPORT,
-    NV4097_NO_OPERATION, NV4097_REPORT_OFFSET_MASK, NV4097_SET_SEMAPHORE_OFFSET,
+    GCM_FLIP_COMMAND, GCM_FLIP_HEAD, NV406E_SEMAPHORE_ACQUIRE, NV406E_SEMAPHORE_OFFSET,
+    NV406E_SEMAPHORE_RELEASE, NV406E_SET_REFERENCE, NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE,
+    NV4097_GET_REPORT, NV4097_NO_OPERATION, NV4097_REPORT_OFFSET_MASK, NV4097_SET_SEMAPHORE_OFFSET,
     NV_CALL_OFFSET_MASK, NV_COUNT_MASK_11, NV_COUNT_SHIFT, NV_FLAG_CALL, NV_FLAG_JUMP,
     NV_FLAG_NEW_JUMP, NV_FLAG_NON_INCREMENT, NV_FLAG_RETURN, NV_METHOD_MASK,
     NV_NEW_JUMP_OFFSET_MASK, NV_OLD_JUMP_OFFSET_MASK,
@@ -243,11 +243,19 @@ pub fn nv4097_flip_buffer(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     }
 }
 
-/// Register the `GCM_FLIP_COMMAND` handler.
+/// Register the `GCM_FLIP_COMMAND` handler, and the flip method of
+/// the head a completed flip publishes to
+/// ([`FLIP_HEAD`](cellgov_ps3_abi::lv2::rsx::driver_info::FLIP_HEAD)).
+/// That method's argument carries the buffer id in its low byte, so
+/// both share [`nv4097_flip_buffer`]. Head 0's method takes the
+/// unknown-method fallback, because a flip on it would complete on
+/// head 1.
 pub fn register_nv4097_flip_handler(
     table: &mut NvMethodTable,
 ) -> Result<(), DuplicateRegistration> {
+    use cellgov_ps3_abi::lv2::rsx::driver_info::FLIP_HEAD;
     table.register_unique(GCM_FLIP_COMMAND, nv4097_flip_buffer)?;
+    table.register_unique(GCM_FLIP_HEAD + 4 * FLIP_HEAD as u16, nv4097_flip_buffer)?;
     Ok(())
 }
 

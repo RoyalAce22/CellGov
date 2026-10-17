@@ -35,6 +35,7 @@ Registered handlers:
 - `NV406E_SET_REFERENCE`
 - `NV4097_GET_REPORT`
 - `GCM_FLIP_COMMAND` (Sony extension 0xFEAC)
+- `GCM_FLIP_HEAD + 4` (head 1's flip method, 0xE924)
 - `NV4097_SET_SEMAPHORE_OFFSET`
 - `NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE`
 
@@ -107,8 +108,9 @@ flowchart TD
   write to the RSX label area through the standard
   `SharedWriteIntent` path. The reservation clear sweep and the
   state-hash contribution therefore run automatically.
-- `RsxFlipRequest { buffer_index }` has no memory side-effect. It
-  drives only the flip state machine.
+- `RsxFlipRequest { buffer_index }` drives the flip state machine.
+  Its DONE transition sets the done bit of head 1's flip-flags word
+  in the driver-info block, where libgcm reads the flip status.
 
 `RsxLabelWrite` stays a typed variant.
 

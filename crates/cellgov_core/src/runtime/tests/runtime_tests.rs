@@ -24,6 +24,8 @@ mod determinism;
 mod dma;
 #[path = "runtime_fast_path_tests.rs"]
 mod fast_path;
+#[path = "runtime_flip_flags_tests.rs"]
+mod flip_flags;
 #[path = "runtime_invariant_channel_tests.rs"]
 mod invariant_channel;
 #[path = "runtime_lv2_apply_tests.rs"]

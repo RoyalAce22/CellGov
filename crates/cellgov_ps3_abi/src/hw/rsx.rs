@@ -95,6 +95,12 @@ pub const NV4097_REPORT_RECORD_OFFSET_MASK: u32 = 0x00FF_FFFF;
 /// flip on the next commit boundary.
 pub const GCM_FLIP_COMMAND: u16 = 0xFEAC;
 
+/// Head 0's flip method. Head `n`'s sits at `GCM_FLIP_HEAD + 4 * n`.
+/// libgcm_sys.sprx's `cellGcmSetFlip` puts head 1's in the command
+/// buffer with `0x8000_0000 | buffer_id` as its argument, after a
+/// semaphore release.
+pub const GCM_FLIP_HEAD: u16 = 0xE920;
+
 // Reports-region label addressing.
 
 /// Bytes between consecutive labels in the reports semaphore region.

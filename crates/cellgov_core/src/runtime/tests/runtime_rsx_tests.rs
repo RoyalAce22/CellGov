@@ -631,7 +631,7 @@ impl ExecutionUnit for RsxLabelWriteEmitterUnit {
 /// Backs the flat low region plus the whole per-context sys_rsx
 /// reservation so `sys_rsx_context_allocate`'s driver-info and reports
 /// initialisation writes have somewhere to land.
-fn build_with_sys_rsx_reservation() -> Runtime {
+pub(super) fn build_with_sys_rsx_reservation() -> Runtime {
     use cellgov_lv2::host::Lv2Host;
     use cellgov_mem::{PageSize, Region};
     use cellgov_ps3_abi::lv2::rsx::region;

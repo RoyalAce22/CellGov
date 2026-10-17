@@ -9,6 +9,9 @@ mod memory;
 mod state;
 
 #[cfg(test)]
+#[path = "tests/flip_flags_console_tests.rs"]
+mod flip_flags_console_tests;
+#[cfg(test)]
 #[path = "tests/rsx_answers_console_tests.rs"]
 mod rsx_answers_console_tests;
 #[cfg(test)]

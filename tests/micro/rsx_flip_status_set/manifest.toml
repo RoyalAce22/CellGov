@@ -1,0 +1,16 @@
+[test]
+name = "rsx_flip_status_set"
+
+# A hardware probe: what the flip status reads after libgcm's reset and
+# set calls, with no flip queued. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# five big-endian u32: rsxInit rc, then the flip status after reset,
+# set, reset, set: 20 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 20 },
+]
+
+[expect]
+outcome = "completed"

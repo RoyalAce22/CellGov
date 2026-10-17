@@ -840,11 +840,33 @@ fn register_nv4097_back_end_semaphore_handlers_surfaces_release_collision() {
 }
 
 #[test]
-fn register_nv4097_flip_handler_inserts_address() {
+fn register_nv4097_flip_handler_inserts_the_command_and_head_one_methods() {
     let mut t = NvMethodTable::new();
     register_nv4097_flip_handler(&mut t).expect("fresh table");
     assert!(t.lookup(GCM_FLIP_COMMAND).is_some());
-    assert_eq!(t.len(), 1);
+    assert!(t.lookup(GCM_FLIP_HEAD + 4).is_some());
+    assert!(
+        t.lookup(GCM_FLIP_HEAD).is_none(),
+        "head 0 takes the fallback"
+    );
+    assert_eq!(t.len(), 2);
+}
+
+/// libgcm_sys.sprx's `cellGcmSetFlip` sends head 1's flip method with
+/// `0x8000_0000 | buffer_id`; the low byte is the buffer.
+#[test]
+fn the_head_one_flip_method_requests_a_flip_of_its_buffer() {
+    let t = NvMethodTable::with_default_handlers();
+    let handler = t.lookup(GCM_FLIP_HEAD + 4).expect("registered");
+    let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
+    handler(
+        &mut ctx_for(&mut cursor, &mut sem_offset, &mut emitted),
+        &[0x8000_0002],
+    );
+    assert!(
+        matches!(emitted[..], [Effect::RsxFlipRequest { buffer_index: 2 }]),
+        "{emitted:?}"
+    );
 }
 
 #[test]
@@ -913,7 +935,9 @@ fn register_nv406e_label_handlers_surfaces_release_collision() {
 /// NV4097 class method addresses. libgcm_sys.sprx corroborates two of
 /// them: it emits `0x0004_0064` and `0x0004_006C` headers for the
 /// NV406E semaphore offset / release pair. `GCM_FLIP_COMMAND` is
-/// libgcm's own extension method, outside the NV class set.
+/// libgcm's own extension method, outside the NV class set; the
+/// firmware's libgcm emits `0x0004_E920 + 4 * head` for a head's flip
+/// instead.
 #[test]
 fn nv_constant_values_pin_the_pusher_encoding_and_class_method_addresses() {
     assert_eq!(NV406E_SET_REFERENCE, 0x0050);
@@ -923,6 +947,7 @@ fn nv_constant_values_pin_the_pusher_encoding_and_class_method_addresses() {
     assert_eq!(NV4097_NO_OPERATION, 0x0100);
     assert_eq!(NV4097_GET_REPORT, 0x1800);
     assert_eq!(GCM_FLIP_COMMAND, 0xFEAC);
+    assert_eq!(GCM_FLIP_HEAD, 0xE920);
     assert_eq!(NV_FLAG_NON_INCREMENT, 0x4000_0000);
     assert_eq!(NV_FLAG_JUMP, 0x2000_0000);
     assert_eq!(NV_FLAG_CALL, 0x0000_0002);
@@ -937,6 +962,7 @@ fn with_default_handlers_registers_exactly_the_expected_method_ids() {
         NV406E_SEMAPHORE_RELEASE,
         NV406E_SET_REFERENCE,
         GCM_FLIP_COMMAND,
+        GCM_FLIP_HEAD + 4,
         NV4097_GET_REPORT,
         NV4097_SET_SEMAPHORE_OFFSET,
         NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE,

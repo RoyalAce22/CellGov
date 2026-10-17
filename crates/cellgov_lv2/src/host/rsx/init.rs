@@ -59,6 +59,12 @@ pub fn write_rsx_driver_info_init(
     );
     put(driver_info::SYSTEM_MODE_OFFSET, system_mode);
     put(driver_info::HANDLER_QUEUE_OFFSET, handler_queue);
+    for head in 0..driver_info::HEAD_COUNT {
+        put(
+            driver_info::HEAD_FLIP_FLAGS_OFFSET + head * driver_info::HEAD_STRIDE,
+            driver_info_init::HEAD_FLIP_FLAGS,
+        );
+    }
 }
 
 /// Fill `buf` with the bytes `sys_rsx_context_allocate` writes into
