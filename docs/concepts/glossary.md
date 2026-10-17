@@ -65,8 +65,8 @@ PUP hash, the same measurement the install record carries.
 
 **Checkpoint.** The deterministic event at which an observation
 stops. Kinds: `ProcessExit` (the guest called `sys_process_exit`),
-`FirstRsxWrite` (first PPU write to the RSX put-pointer at
-`0xC0000040`), and `PcReached` (a specific PC, for manifest-driven
+`FirstRsxWrite` (first PPU write to the RSX region or the RSX
+put-pointer at `0x60100040`), and `PcReached` (a specific PC, for manifest-driven
 exploration).
 [README.md](README.md#checkpoints-where-an-observation-stops)
 
@@ -364,7 +364,8 @@ compared field by field.
 [comparison.md](../architecture/comparison.md)
 
 **RSX mirror / consume.** Two manifest flags. `[rsx] mirror = true`
-maps RSX local memory read-write so put-pointer writes land instead
+maps RSX local memory and the control block read-write so
+put-pointer writes land instead
 of tripping `FirstRsxWrite`; `[rsx] consume = true` additionally
 runs the FIFO consumer at commit boundaries.
 [rsx.md](../architecture/rsx.md#rsx-cpu-side-completion)

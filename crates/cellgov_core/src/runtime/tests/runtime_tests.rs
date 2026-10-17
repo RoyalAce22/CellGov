@@ -533,6 +533,12 @@ fn build_with_rsx_writable() -> Runtime {
     let regions = vec![
         Region::new(0, 0x1000, "flat", PageSize::Page4K),
         Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
+        Region::new(
+            u64::from(cellgov_ps3_abi::lv2::rsx::control_register::DMA_CONTROL_BASE),
+            0x1000,
+            "rsx_control",
+            PageSize::Page64K,
+        ),
     ];
     let mem = GuestMemory::from_regions(regions).expect("regions non-overlapping");
     let mut rt = Runtime::new(mem, Budget::new(1), 100);
@@ -639,6 +645,12 @@ fn build_with_rsx_and_label_region(label_base: u32) -> Runtime {
     let regions = vec![
         Region::new(0, 0x10000, "flat", PageSize::Page4K),
         Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
+        Region::new(
+            u64::from(cellgov_ps3_abi::lv2::rsx::control_register::DMA_CONTROL_BASE),
+            0x1000,
+            "rsx_control",
+            PageSize::Page64K,
+        ),
     ];
     let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
     let mut rt = Runtime::new(mem, Budget::new(1), 100);

@@ -144,7 +144,8 @@ fn rsx_context_new_is_pristine() {
 /// `tests/ps3autotests/tests/rsx/methods_pfifo_puller` does not settle
 /// them either. Its windows are absolute lpar addresses its author
 /// hardcoded, under a standing TODO to read them back instead. These
-/// constants are offsets from a context base the model picks. The
+/// constants are offsets in the context window, which the
+/// `lv2_rsx_answers` capture places. The
 /// fixture also never reads or writes the driver-info window it
 /// declares -- only its DMA-control and reports windows produce
 /// console output -- so it does not pin that window even in its own
@@ -168,8 +169,8 @@ fn dma_control_base_plus_offset_equals_put_addr() {
         u64::from(control_register::PUT_ADDR),
         "dma_control_base + 0x40 must equal PUT_ADDR"
     );
-    assert_eq!(control_register::DMA_CONTROL_BASE, 0xC000_0000);
-    assert_eq!(control_register::PUT_ADDR, 0xC000_0040);
+    assert_eq!(control_register::DMA_CONTROL_BASE, 0x6010_0000);
+    assert_eq!(control_register::PUT_ADDR, 0x6010_0040);
 }
 
 #[test]
@@ -209,11 +210,8 @@ fn rsx_context_memory_then_context_allocation_records_all_fields() {
     assert!(ctx.allocated);
     assert_eq!(ctx.context_id, RSX_CONTEXT_ID);
     assert_eq!(ctx.dma_control_addr, control_register::DMA_CONTROL_BASE);
-    assert_eq!(
-        ctx.driver_info_addr,
-        0x3000_0000 + region::DRIVER_INFO_OFFSET
-    );
-    assert_eq!(ctx.reports_addr, 0x3000_0000 + region::REPORTS_OFFSET);
+    assert_eq!(ctx.driver_info_addr, 0x6020_0000);
+    assert_eq!(ctx.reports_addr, 0x6030_0000);
     assert_eq!(ctx.event_queue_id, 0xE001);
     assert_eq!(ctx.event_port_id, 0xE002);
     assert_eq!(ctx.mem_handle, 0xA001);
@@ -245,15 +243,6 @@ fn rsx_context_double_memory_allocate_panics() {
     let mut ctx = RsxContext::new();
     ctx.set_memory_allocated(0xA001, 0x3000_0000);
     ctx.set_memory_allocated(0xA002, 0x4000_0000);
-}
-
-#[test]
-#[cfg(debug_assertions)]
-#[should_panic(expected = "aligned")]
-fn rsx_context_set_context_rejects_unaligned_derived_address() {
-    let mut ctx = RsxContext::new();
-    ctx.set_memory_allocated(0xA001, 0x0000_0004);
-    ctx.set_context_allocated(RSX_CONTEXT_ID, 0, 0);
 }
 
 #[test]

@@ -17,29 +17,20 @@ use super::state::{SysRsxContext, RSX_CONTEXT_ID};
 use cellgov_time::GuestTicks;
 
 impl Lv2Host {
-    /// `sys_rsx_context_allocate` (670): reserve driver-info / reports region,
-    /// create the handler event-queue/port pair, and write the fixed MMIO
-    /// dma_control base into `lpar_dma_control` (libgcm derives PUT_ADDR =
-    /// base + 0x40).
+    /// `sys_rsx_context_allocate` (670): open the context window, create
+    /// the handler event-queue/port pair, and hand the guest the window's
+    /// three blocks (libgcm derives PUT_ADDR = dma_control + 0x40).
     ///
-    /// The region is the allocation a prior `sys_rsx_memory_allocate`
-    /// (668) recorded; without one, the cursor advances by
-    /// `region::CONTEXT_RESERVATION`. The reports and driver-info init
-    /// fills go out as effects in the same batch as the four out-pointer
-    /// writes.
-    ///
-    /// `lpar_dma_control` is `control_register::DMA_CONTROL_BASE`. On the
-    /// console the block opens the context's own window: the
-    /// `lv2_rsx_answers` capture reads it at `0x6010_0000`, with the
-    /// driver-info block one megabyte above it and the reports block two.
-    /// The field offsets inside it agree and only the window base
-    /// differs.
+    /// The window sits at `region::WINDOW_BASE`, where the
+    /// `lv2_rsx_answers` capture reads it: the DMA control block at its
+    /// base, the driver-info block one megabyte above it and the reports
+    /// block two. The reports and driver-info init fills go out as
+    /// effects in the same batch as the four out-pointer writes.
     ///
     /// # Errors
     ///
     /// `CELL_EINVAL` on double-allocate (single-context invariant);
-    /// `CELL_EAGAIN` when the kernel-id table has no id for the queue;
-    /// `CELL_ENOMEM` if the reservation does not fit in the remaining region.
+    /// `CELL_EAGAIN` when the kernel-id table has no id for the queue.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::host) fn dispatch_sys_rsx_context_allocate(
         &mut self,
@@ -60,25 +51,9 @@ impl Lv2Host {
         let Some(queue_id) = self.alloc_id(requester, SYS_EVENT_QUEUE_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         };
-        let base = if self.state.rsx_context.pending_mem_addr != 0 {
-            self.state.rsx_context.pending_mem_addr
-        } else {
-            let end = self
-                .state
-                .rsx_mem_alloc_ptr
-                .checked_add(region::CONTEXT_RESERVATION)
-                .filter(|&end| end <= Self::SYS_RSX_MEM_END);
-            let Some(end) = end else {
-                self.release_id(queue_id);
-                return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
-            };
-            let start = self.state.rsx_mem_alloc_ptr;
-            self.state.rsx_mem_alloc_ptr = end;
-            start
-        };
         let dma_control_addr = control_register::DMA_CONTROL_BASE;
-        let driver_info_addr = base + region::DRIVER_INFO_OFFSET;
-        let reports_addr = base + region::REPORTS_OFFSET;
+        let driver_info_addr = region::WINDOW_BASE + region::DRIVER_INFO_OFFSET;
+        let reports_addr = region::WINDOW_BASE + region::REPORTS_OFFSET;
 
         let queue_created = self
             .state

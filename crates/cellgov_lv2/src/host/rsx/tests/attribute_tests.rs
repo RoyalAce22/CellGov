@@ -431,8 +431,8 @@ fn sys_rsx_context_attribute_fifo_setup_records_get_and_put() {
     let source = UnitId::new(0);
     allocate_context(&mut host, source);
 
-    // Default FakeRuntime memory is 64 KiB, so MMIO at
-    // 0xC000_0040 / 0xC000_0044 reads as non-writable -- the
+    // Default FakeRuntime memory is 64 KiB, so the control block at
+    // 0x6010_0040 / 0x6010_0044 reads as non-writable -- the
     // reserved-region title path. FIFO_SETUP records the
     // pointers and emits ZERO effects.
     let rt = FakeRuntime::new(0x1_0000);
@@ -466,9 +466,9 @@ fn sys_rsx_context_attribute_fifo_setup_records_get_and_put() {
 fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
     // 40F honest-consumer companion: when the MMIO control-
     // register slots ARE writable (rsx_mirror=true title that
-    // re-maps the RSX region writable), FIFO_SETUP emits two
-    // SharedWriteIntent effects -- a4 (put) -> 0xC000_0040,
-    // a3 (get) -> 0xC000_0044 -- so the engine-side cursor
+    // re-maps the control block writable), FIFO_SETUP emits two
+    // SharedWriteIntent effects -- a4 (put) -> 0x6010_0040,
+    // a3 (get) -> 0x6010_0044 -- so the engine-side cursor
     // sees the initial pointers from syscall return without
     // waiting for the title's first store. The effect
     // ordering (put first, then get) matches the cursor->MMIO
@@ -499,7 +499,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
         "writable MMIO path must emit exactly the put and get writebacks",
     );
 
-    // Effect 0: put -> PUT_ADDR (0xC000_0040), value = a4.
+    // Effect 0: put -> PUT_ADDR (0x6010_0040), value = a4.
     let Effect::SharedWriteIntent {
         range: range0,
         bytes: bytes0,
@@ -526,7 +526,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
         "PUT slot must carry a4 (the put pointer), not a3",
     );
 
-    // Effect 1: get -> GET_ADDR (0xC000_0044), value = a3.
+    // Effect 1: get -> GET_ADDR (0x6010_0044), value = a3.
     let Effect::SharedWriteIntent {
         range: range1,
         bytes: bytes1,

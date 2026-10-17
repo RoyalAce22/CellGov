@@ -79,8 +79,7 @@ impl Lv2Host {
     pub const MMAPPER_REGION_START: u32 = 0x5000_0000;
 
     /// Upper bound (exclusive) of the `sys_mmapper_allocate_address`
-    /// region. Capped below the RSX dma_control MMIO region at
-    /// `control_register::DMA_CONTROL_BASE`.
+    /// region. Capped below the RSX MMIO region at `PS3_RSX_BASE`.
     pub const MMAPPER_REGION_END: u32 = 0xC000_0000;
 
     /// Construct an empty host with default tables and id allocators.

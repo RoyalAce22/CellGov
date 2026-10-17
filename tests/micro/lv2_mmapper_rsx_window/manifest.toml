@@ -1,0 +1,16 @@
+[test]
+name = "lv2_mmapper_rsx_window"
+
+# A hardware probe: where sys_mmapper_allocate_address places a game
+# process's 256 MiB areas before and after libgcm opens an RSX context.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 34 big-endian u64: rsxInit rc, the control register, then 8 bases and
+# 8 r3 values before rsxInit and 8 + 8 after it: 272 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 272 },
+]
+
+[expect]
+outcome = "completed"

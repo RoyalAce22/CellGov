@@ -49,17 +49,18 @@ The checkpoint kinds:
 - **`ProcessExit`** -- the guest called `sys_process_exit`. Used
   for titles that reach a natural shutdown during the captured
   window.
-- **`FirstRsxWrite`** -- the first PPU write to guest address
-  `0xC0000040` (the RSX control register put-pointer, typically
-  inside `_cellGcmInitBody`). Used for titles that proceed past
+- **`FirstRsxWrite`** -- the first PPU write to the RSX region or to
+  the RSX control register put-pointer at `0x60100040`, typically
+  inside `_cellGcmInitBody`. Used for titles that proceed past
   init into an RSX command stream.
 - **`PcReached`** -- a specific PC address. Exists for
   manifest-driven frontier exploration, not for the default
   compatibility matrix.
 
 The `[rsx] mirror = true` manifest flag changes what "past
-FirstRsxWrite" means for a title by mapping the RSX region read/write
-so the put-pointer write lands instead of tripping the checkpoint.
+FirstRsxWrite" means for a title by mapping the RSX region and the
+control block read/write so the put-pointer write lands instead of
+tripping the checkpoint.
 
 A title that exits its budget cap without hitting any of the above
 has no checkpoint observation; cross-runner comparison for it waits

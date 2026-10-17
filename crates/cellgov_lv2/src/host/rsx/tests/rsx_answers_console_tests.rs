@@ -6,7 +6,7 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::rsx::{driver_info, driver_info_init, reports};
 
-use super::test_helpers::context_allocate_request;
+use super::test_helpers::{context_allocate_request, extract_write_u64};
 use super::{write_rsx_driver_info_init, write_rsx_reports_init, RSX_CONTEXT_ID};
 use crate::dispatch::Lv2Dispatch;
 use crate::host::test_support::{console_payload, FakeRuntime};
@@ -200,18 +200,36 @@ fn the_free_and_allocate_refusals_answer_as_the_console_does() {
     assert!(effects.is_empty(), "CellGov writes neither");
 }
 
-/// The console opens the context's DMA control block, driver info and
-/// reports one megabyte apart in a window of their own; CellGov keeps
-/// the control block at a fixed MMIO address.
+/// The context window: the DMA control block, driver info and reports
+/// one megabyte apart, at the addresses the console hands libgcm.
 #[test]
-fn the_console_opens_the_context_window_where_cellgov_does_not() {
+fn the_context_window_sits_where_the_console_opens_it() {
     let payload = payload();
     let control = u32_at(&payload, CONTROL_REGISTER) - 0x40;
-    assert_eq!(u32_at(&payload, LABEL0), control + 0x20_0000);
-    assert_ne!(
-        control,
-        cellgov_ps3_abi::lv2::rsx::control_register::DMA_CONTROL_BASE,
-        "CellGov's fixed control block address"
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x1_0000);
+    let d = host.dispatch(
+        context_allocate_request(0x1000, 0x1008, 0x1010, 0x1018, 1),
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = d else {
+        panic!("expected Immediate(0), got {d:?}");
+    };
+    assert_eq!(
+        extract_write_u64(&effects[1]),
+        u64::from(control),
+        "dma control"
+    );
+    assert_eq!(
+        extract_write_u64(&effects[2]),
+        u64::from(u32_at(&payload, DRIVER_GUESS)),
+        "driver info"
+    );
+    assert_eq!(
+        extract_write_u64(&effects[3]),
+        u64::from(u32_at(&payload, LABEL0)),
+        "reports"
     );
 }
 

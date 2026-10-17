@@ -42,8 +42,8 @@ pub struct SysRsxContext {
     pub mem_ctx: u64,
     /// System-mode flag word passed in by the caller.
     pub system_mode: u64,
-    /// Base reserved by the most recent `sys_rsx_memory_allocate`, reused
-    /// by `sys_rsx_context_allocate`; zero means memory_allocate has not fired.
+    /// Base reserved by the most recent `sys_rsx_memory_allocate`; zero
+    /// means memory_allocate has not fired.
     pub pending_mem_addr: u32,
     /// Flip-handler callback OPD address (0 = unregistered).
     pub flip_handler_addr: u32,

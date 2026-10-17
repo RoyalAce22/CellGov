@@ -16,7 +16,7 @@ mod flip_flags_console_tests;
 mod rsx_answers_console_tests;
 #[cfg(test)]
 #[path = "tests/test_helpers.rs"]
-mod test_helpers;
+pub(in crate::host) mod test_helpers;
 
 pub use attribute::{
     PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,

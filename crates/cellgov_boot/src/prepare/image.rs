@@ -8,9 +8,12 @@ use cellgov_ps3_abi::hw::address_space::{
     PS3_SPU_RESERVED_SIZE,
 };
 
+use cellgov_ps3_abi::lv2::rsx::region as rsx_window;
+
 use super::types::{
     check_strict_reserved_vs_rsx_mirror, DiagnosticOptions, ExecutionOptions, TitleOptions,
 };
+use super::RSX_CONTROL_REGION;
 use crate::env::EnvBoolError;
 use crate::error::narrow_u32;
 use crate::BootError;
@@ -162,6 +165,19 @@ pub(super) fn load_image(
             PS3_CHILD_STACKS_SIZE,
             "child_stacks",
             cellgov_mem::PageSize::Page4K,
+        ),
+        cellgov_mem::Region::with_access(
+            u64::from(rsx_window::WINDOW_BASE),
+            rsx_window::CONTROL_SIZE as usize,
+            RSX_CONTROL_REGION,
+            cellgov_mem::PageSize::Page64K,
+            rsx_access,
+        ),
+        cellgov_mem::Region::new(
+            u64::from(rsx_window::WINDOW_BASE + rsx_window::DRIVER_INFO_OFFSET),
+            (rsx_window::CONTEXT_RESERVATION - rsx_window::DRIVER_INFO_OFFSET) as usize,
+            "rsx_context",
+            cellgov_mem::PageSize::Page64K,
         ),
         cellgov_mem::Region::with_access(
             PS3_RSX_BASE,

@@ -15,9 +15,9 @@
 //! - the byte-for-byte shape of a semaphore release.
 //!
 //! It settles nothing about `region::DRIVER_INFO_OFFSET`,
-//! `region::REPORTS_OFFSET` or `region::CONTEXT_RESERVATION`. Those
-//! constants are offsets from a context base CellGov's `sys_rsx` model
-//! picks. The fixture's windows are absolute lpar addresses its author
+//! `region::REPORTS_OFFSET` or `region::CONTEXT_RESERVATION`; the
+//! `lv2_rsx_answers` capture places the context window those constants
+//! offset into. The fixture's windows are absolute lpar addresses its author
 //! hardcoded, under a standing TODO to read them back instead. The
 //! fixture also never touches the driver-info window it declares --
 //! only the DMA-control and reports windows produce output -- so even

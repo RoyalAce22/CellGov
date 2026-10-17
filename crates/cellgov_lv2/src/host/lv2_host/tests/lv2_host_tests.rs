@@ -381,8 +381,7 @@ fn mmapper_alloc_caps_at_mmapper_region_end() {
         )
         .expect("within region");
     }
-    // The 8th grant would walk into the RSX dma_control MMIO
-    // region at 0xC000_0000.
+    // The 8th grant would walk into the RSX region at 0xC000_0000.
     assert_eq!(
         host.mmapper_alloc(
             cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID,

@@ -80,8 +80,8 @@ impl Lv2Host {
     /// Areas lie in `[MMAPPER_REGION_START, MMAPPER_REGION_END)`.
     /// The start sits 256 MiB above `SYS_RSX_MEM_END`, so the reserved
     /// rsx_context window below it cannot alias a handout. The end is
-    /// the RSX dma_control MMIO base itself; the exclusive bound keeps
-    /// it out of every handout.
+    /// the RSX region's base itself; the exclusive bound keeps it out
+    /// of every handout.
     ///
     /// # Errors
     ///

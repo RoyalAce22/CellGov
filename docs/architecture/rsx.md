@@ -16,7 +16,7 @@ reservation table and folds into `sync_state_hash`.
 **FIFO cursor.** `RsxFifoCursor` has three scalar fields:
 
 - `put`: set only by guest writes to the control register at
-  `0xC0000040`.
+  `0x60100040`.
 - `get`: advanced only by the method-advance pass.
 - `current_reference`: the last `NV406E_SET_REFERENCE` value,
   readable through `cellGcmGetCurrentReference`.
@@ -66,7 +66,7 @@ commit boundary after the reservation clear-sweep:
 2. Drain from `get` to `put`, decoding headers and invoking
    handlers in address order.
 3. On clean reach of PUT, project `(current_reference, get)`
-   back to MMIO at `0xC000_0048` / `0xC000_0044` so libgcm's
+   back to the control block at `0x6010_0048` / `0x6010_0044` so libgcm's
    `cellGcmGetCurrentReference` poll clears.
 
 The pass is a no-op when `get == put` and the call stack is empty.
@@ -99,7 +99,7 @@ flowchart TD
   jmp --> more
   more -->|"no, under RSX_ADVANCE_ITERATION_CAP"| hdr
   more -->|"cap tripped"| word["emit a synthetic raw stop word"]
-  more -->|yes| proj["project (current_reference, get) to 0xC000_0048 / 0xC000_0044"]
+  more -->|yes| proj["project (current_reference, get) to 0x6010_0048 / 0x6010_0044"]
 ```
 
 **Effect variants.** The handlers emit two effect variants:
@@ -166,8 +166,9 @@ set of Multilinear-128 lanes computed on read. The terms are:
 **Manifest flags.** Two independent manifest flags gate
 participation:
 
-- `[rsx] mirror = true` maps the RSX region ReadWrite and enables
-  the flip-status / cursor MMIO mirror. Without it, the region stays
+- `[rsx] mirror = true` maps the RSX region and the context
+  window's control block ReadWrite and enables the flip-status /
+  cursor MMIO mirror. Without it, both stay
   `ReservedZeroReadable` (see
   [Guest memory layout](guest_memory.md#region-access-modes)) and
   put-pointer writes fault as `FirstRsxWrite`.
@@ -205,8 +206,13 @@ guest poll paths read:
 - `RsxDriverInfo` (0x12F8 bytes; handler-queue id at offset
   0x12D0);
 - `RsxDmaControl` (put / get / reference fields at offsets
-  0x40 / 0x44 / 0x48 from the MMIO base
-  `control_register::DMA_CONTROL_BASE = 0xC000_0000`).
+  0x40 / 0x44 / 0x48 from
+  `control_register::DMA_CONTROL_BASE = 0x6010_0000`).
+
+**Context window.** `sys_rsx_context_allocate` (670) hands libgcm a
+window at `region::WINDOW_BASE` (`0x6010_0000`): the DMA control
+block at its base, the driver-info block one megabyte above it and
+the reports block two, where the reference console opens them.
 
 **Iomap region.** The iomap region
 `[PS3_RSX_IOMAP_BASE, +PS3_RSX_IOMAP_SIZE)` (85 MiB from
@@ -236,9 +242,10 @@ through the routed `Unsupported` table in [LV2 host](lv2_host.md),
 not a typed sys_rsx request. It returns CELL_OK with an invariant
 break.
 
-**MMIO sentinel checkpoint.** Titles whose harness expects the
+**Control-block checkpoint.** Titles whose harness expects the
 [`FirstRsxWrite`](../concepts/README.md#checkpoints-where-an-observation-stops)
-checkpoint hit the pre-sys_rsx MMIO sentinel at `0xC0000040`.
+checkpoint hit libgcm's put-pointer write at `0x6010_0040`, or an
+earlier write into the RSX region.
 Firmware cellGcmSys.prx's `_cellGcmInitBody` runs through the
 `sys_rsx` surface above.
 

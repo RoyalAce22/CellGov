@@ -17,5 +17,9 @@ pub use model::{FirmwareIdentity, Lv2Host};
 mod tests;
 
 #[cfg(test)]
+#[path = "tests/mmapper_window_tests.rs"]
+mod mmapper_window_tests;
+
+#[cfg(test)]
 #[path = "tests/child_alias_tests.rs"]
 mod child_alias_tests;

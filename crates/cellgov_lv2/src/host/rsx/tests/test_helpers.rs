@@ -15,7 +15,7 @@ pub(super) fn extract_write_u64(effect: &Effect) -> u64 {
     u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
 }
 
-pub(super) fn context_allocate_request(
+pub(in crate::host) fn context_allocate_request(
     context_id_ptr: u32,
     lpar_dma_control_ptr: u32,
     lpar_driver_info_ptr: u32,

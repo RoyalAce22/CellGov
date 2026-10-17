@@ -385,6 +385,12 @@ fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
         let regions = vec![
             Region::new(0, 0x10000, "flat", PageSize::Page4K),
             Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
+            Region::new(
+                u64::from(cellgov_ps3_abi::lv2::rsx::control_register::DMA_CONTROL_BASE),
+                0x1000,
+                "rsx_control",
+                PageSize::Page64K,
+            ),
         ];
         let mem = GuestMemory::from_regions(regions).unwrap();
         let mut rt = Runtime::new(mem, Budget::new(budget), 100);
@@ -628,19 +634,18 @@ impl ExecutionUnit for RsxLabelWriteEmitterUnit {
     }
 }
 
-/// Backs the flat low region plus the whole per-context sys_rsx
-/// reservation so `sys_rsx_context_allocate`'s driver-info and reports
+/// Backs the flat low region plus the whole sys_rsx context window
+/// so `sys_rsx_context_allocate`'s driver-info and reports
 /// initialisation writes have somewhere to land.
 pub(super) fn build_with_sys_rsx_reservation() -> Runtime {
-    use cellgov_lv2::host::Lv2Host;
     use cellgov_mem::{PageSize, Region};
     use cellgov_ps3_abi::lv2::rsx::region;
     let regions = vec![
         Region::new(0, 0x10000, "flat", PageSize::Page4K),
         Region::new(
-            Lv2Host::SYS_RSX_MEM_BASE as u64,
+            u64::from(region::WINDOW_BASE),
             region::CONTEXT_RESERVATION as usize,
-            "rsxmem",
+            "rsx_window",
             PageSize::Page64K,
         ),
     ];
@@ -650,7 +655,6 @@ pub(super) fn build_with_sys_rsx_reservation() -> Runtime {
 
 #[test]
 fn a_label_write_resolves_against_the_base_sys_rsx_context_allocate_published() {
-    use cellgov_lv2::host::Lv2Host;
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_ps3_abi::lv2::rsx::region;
     use cellgov_ps3_abi::lv2::syscall::SYS_RSX_CONTEXT_ALLOCATE;
@@ -677,7 +681,7 @@ fn a_label_write_resolves_against_the_base_sys_rsx_context_allocate_published() 
     let s = rt.step().unwrap();
     rt.commit_step(&s.result, &s.effects).unwrap();
 
-    let reports_addr = Lv2Host::SYS_RSX_MEM_BASE + region::REPORTS_OFFSET;
+    let reports_addr = region::WINDOW_BASE + region::REPORTS_OFFSET;
     assert_eq!(
         rt.lv2_host().sys_rsx_context().reports_addr,
         reports_addr,

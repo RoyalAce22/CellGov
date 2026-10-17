@@ -269,14 +269,12 @@ impl RsxContext {
 
     /// Record the result of `sys_rsx_context_allocate`.
     ///
-    /// Derives the three region addresses from `mem_addr + *_OFFSET`.
+    /// The three region addresses are the context window's
+    /// (`region::WINDOW_BASE + *_OFFSET`).
     ///
     /// # Panics
     ///
-    /// Debug-asserts `!self.allocated`, `self.memory_allocated`,
-    /// that the full reservation fits in u32 space starting at
-    /// `mem_addr`, and that each derived address meets the alignment
-    /// its struct requires.
+    /// Debug-asserts `!self.allocated` and `self.memory_allocated`.
     pub fn set_context_allocated(
         &mut self,
         context_id: u32,
@@ -291,33 +289,12 @@ impl RsxContext {
             self.memory_allocated,
             "set_context_allocated called before set_memory_allocated"
         );
-        debug_assert!(
-            self.mem_addr
-                .checked_add(region::CONTEXT_RESERVATION)
-                .is_some(),
-            "mem_addr {:#x} + reservation {:#x} wraps u32",
-            self.mem_addr,
-            region::CONTEXT_RESERVATION
-        );
-        // dma_control_addr is the fixed MMIO base 0xC0000000 (libgcm
-        // adds +0x40 internally to derive the put-pointer write at
-        // 0xC0000040). driver_info / reports are RAM-backed inside
-        // the per-context reservation.
+        // The three blocks sit in the context window: the DMA control
+        // block at its base (libgcm adds +0x40 to derive the put-pointer
+        // slot), driver info and reports one and two megabytes above.
         let dma_control_addr = control_register::DMA_CONTROL_BASE;
-        let driver_info_addr = self.mem_addr + region::DRIVER_INFO_OFFSET;
-        let reports_addr = self.mem_addr + region::REPORTS_OFFSET;
-        debug_assert!(
-            reports_addr.is_multiple_of(16),
-            "reports_addr {reports_addr:#x} must be 16-byte aligned for RsxReports"
-        );
-        debug_assert!(
-            driver_info_addr.is_multiple_of(16),
-            "driver_info_addr {driver_info_addr:#x} must be 16-byte aligned"
-        );
-        debug_assert!(
-            dma_control_addr.is_multiple_of(4),
-            "dma_control_addr {dma_control_addr:#x} must be u32-aligned"
-        );
+        let driver_info_addr = region::WINDOW_BASE + region::DRIVER_INFO_OFFSET;
+        let reports_addr = region::WINDOW_BASE + region::REPORTS_OFFSET;
         self.allocated = true;
         self.context_id = context_id;
         self.dma_control_addr = dma_control_addr;

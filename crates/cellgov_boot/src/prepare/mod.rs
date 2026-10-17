@@ -8,6 +8,11 @@ mod finish;
 mod firmware;
 mod host;
 mod image;
+
+/// Name of the guest region backing the RSX context window's DMA
+/// control block. A reserved write there under `FirstRsxWrite` is the
+/// checkpoint, as one to the `rsx` region is.
+pub(crate) const RSX_CONTROL_REGION: &str = "rsx_control";
 mod loaders;
 mod module_start;
 mod params;

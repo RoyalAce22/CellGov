@@ -28,10 +28,11 @@ pub fn rsx_checkpoint_addr(
         return None;
     }
     match error {
-        CommitError::Memory(cellgov_mem::MemError::ReservedWrite {
-            addr,
-            region: "rsx",
-        }) => Some(addr),
+        CommitError::Memory(cellgov_mem::MemError::ReservedWrite { addr, region })
+            if region == "rsx" || region == crate::prepare::RSX_CONTROL_REGION =>
+        {
+            Some(addr)
+        }
         _ => None,
     }
 }
@@ -39,7 +40,8 @@ pub fn rsx_checkpoint_addr(
 /// Precedence (high to low):
 /// 1. `CommitFault` -- non-checkpoint commit error.
 /// 2. `StepFault` -- `YieldReason::Fault`, batch discarded.
-/// 3. `RsxCheckpoint(addr)` -- `ReservedWrite("rsx")` under `FirstRsxWrite`.
+/// 3. `RsxCheckpoint(addr)` -- a reserved write to the RSX region or the
+///    context window's control block under `FirstRsxWrite`.
 /// 4. `PcReached(addr)` -- step retired the caller-supplied PC.
 /// 5. `Continue`.
 ///
@@ -81,3 +83,7 @@ pub(crate) fn classify_step_outcome(
 #[cfg(test)]
 #[path = "tests/verdict_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/verdict_control_tests.rs"]
+mod control_tests;

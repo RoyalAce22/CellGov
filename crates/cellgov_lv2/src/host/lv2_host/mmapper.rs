@@ -112,6 +112,12 @@ impl Lv2Host {
     /// the next 330: the `lv2_mmapper_map_edges` capture shows a 330
     /// after a 331 getting the freed base back.
     ///
+    /// Once `sys_rsx_context_allocate` has opened the RSX context window
+    /// (`region::WINDOW_BASE`), a range never overlaps it; the search
+    /// resumes at the next granule past it. The `lv2_mmapper_rsx_window`
+    /// capture grants the window's granule before `rsxInit` and skips
+    /// it after.
+    ///
     /// Returns `None` for `size == 0`, when the rounding would overflow
     /// `u32`, or when no free range below
     /// [`Self::MMAPPER_REGION_END`] holds the request.
@@ -121,12 +127,25 @@ impl Lv2Host {
         }
         let granule = u32::try_from(cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE).ok()?;
         let rounded = size.checked_add(granule - 1)? & !(granule - 1);
+        use cellgov_ps3_abi::lv2::rsx::region;
+        let window_start = u64::from(region::WINDOW_BASE);
+        let window_end = window_start + u64::from(region::CONTEXT_RESERVATION);
         let mut base = u64::from(Self::MMAPPER_REGION_START);
-        for (area_base, area) in self.mmapper_areas_of(pid) {
-            if u64::from(area_base) >= base + u64::from(rounded) {
-                break;
+        loop {
+            for (area_base, area) in self.mmapper_areas_of(pid) {
+                if u64::from(area_base) >= base + u64::from(rounded) {
+                    break;
+                }
+                base = base.max(u64::from(area_base) + u64::from(area.size));
             }
-            base = base.max(u64::from(area_base) + u64::from(area.size));
+            if self.state.rsx_context.allocated
+                && base < window_end
+                && base + u64::from(rounded) > window_start
+            {
+                base = window_end.next_multiple_of(u64::from(granule));
+                continue;
+            }
+            break;
         }
         if base + u64::from(rounded) > u64::from(Self::MMAPPER_REGION_END) {
             return None;

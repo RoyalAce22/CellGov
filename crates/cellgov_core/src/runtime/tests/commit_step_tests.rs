@@ -9,6 +9,12 @@ fn make_rt_with_rsx_region() -> Runtime {
     let regions = vec![
         Region::new(0, 0x10000, "flat", PageSize::Page4K),
         Region::new(0xC000_0000, 0x1000, "rsx", PageSize::Page64K),
+        Region::new(
+            u64::from(cellgov_ps3_abi::lv2::rsx::control_register::DMA_CONTROL_BASE),
+            0x1000,
+            "rsx_control",
+            PageSize::Page64K,
+        ),
     ];
     let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
     Runtime::new(mem, Budget::new(1), 100)

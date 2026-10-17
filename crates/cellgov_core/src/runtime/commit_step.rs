@@ -591,14 +591,14 @@ impl Runtime {
         }
     }
 
-    /// Mirror committed guest writes to `put` and `ref` (`0xC000_0040`,
-    /// `0xC000_0048`) into [`Self::rsx_cursor`]. Reads from committed
+    /// Mirror committed guest writes to `put` and `ref` (`0x6010_0040`,
+    /// `0x6010_0048`) into [`Self::rsx_cursor`]. Reads from committed
     /// memory rather than the effect payload so partial-overlap writes
     /// resolve to the value the pipeline applied. Only full 4-byte slot
     /// coverage mirrors; sub-word stores still apply to memory but
     /// leave the cursor alone.
     ///
-    /// `get` (`0xC000_0044`) is not mirrored here. The walker owns
+    /// `get` (`0x6010_0044`) is not mirrored here. The walker owns
     /// `get` in steady state. libgcm's published control structure
     /// carries `put`, `get` and `ref` as three separate words. In the
     /// NV4-family DMA pusher the envytools / nouveau project

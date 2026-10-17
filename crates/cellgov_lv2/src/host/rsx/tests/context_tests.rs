@@ -32,11 +32,11 @@ fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     );
     assert_eq!(
         extract_write_u64(&effects[2]),
-        (Lv2Host::SYS_RSX_MEM_BASE + region::DRIVER_INFO_OFFSET) as u64
+        (region::WINDOW_BASE + region::DRIVER_INFO_OFFSET) as u64
     );
     assert_eq!(
         extract_write_u64(&effects[3]),
-        (Lv2Host::SYS_RSX_MEM_BASE + region::REPORTS_OFFSET) as u64
+        (region::WINDOW_BASE + region::REPORTS_OFFSET) as u64
     );
 
     let Effect::SharedWriteIntent { range, bytes, .. } = &effects[4] else {
@@ -44,7 +44,7 @@ fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     };
     assert_eq!(
         range.start().raw(),
-        (Lv2Host::SYS_RSX_MEM_BASE + region::REPORTS_OFFSET) as u64
+        (region::WINDOW_BASE + region::REPORTS_OFFSET) as u64
     );
     let b = bytes.bytes();
     assert_eq!(b.len(), reports::SIZE);
@@ -63,7 +63,7 @@ fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     };
     assert_eq!(
         range.start().raw(),
-        (Lv2Host::SYS_RSX_MEM_BASE + region::DRIVER_INFO_OFFSET) as u64
+        (region::WINDOW_BASE + region::DRIVER_INFO_OFFSET) as u64
     );
     let b = bytes.bytes();
     assert_eq!(b.len(), driver_info::SIZE);
@@ -98,11 +98,11 @@ fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     assert_eq!(ctx.dma_control_addr, control_register::DMA_CONTROL_BASE);
     assert_eq!(
         ctx.driver_info_addr,
-        Lv2Host::SYS_RSX_MEM_BASE + region::DRIVER_INFO_OFFSET
+        region::WINDOW_BASE + region::DRIVER_INFO_OFFSET
     );
     assert_eq!(
         ctx.reports_addr,
-        Lv2Host::SYS_RSX_MEM_BASE + region::REPORTS_OFFSET
+        region::WINDOW_BASE + region::REPORTS_OFFSET
     );
     assert_eq!(ctx.mem_ctx, 0xA001);
 }

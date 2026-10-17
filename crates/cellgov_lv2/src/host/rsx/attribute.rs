@@ -289,8 +289,8 @@ impl Lv2Host {
     }
 }
 
-/// FIFO_SETUP MMIO initialiser: write `put` -> 0xC000_0040 and
-/// `get` -> 0xC000_0044 so the engine-side control-register slots
+/// FIFO_SETUP control-block initialiser: write `put` -> 0x6010_0040
+/// and `get` -> 0x6010_0044 so the engine-side control-register slots
 /// reflect FIFO_SETUP's a3/a4 from the moment the syscall returns.
 ///
 /// # Cross-module contract
