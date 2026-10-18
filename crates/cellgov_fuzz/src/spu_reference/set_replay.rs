@@ -449,6 +449,22 @@ impl World {
                 Ok(value) => SpuReferencePpuResult::Read { value },
                 Err(error) => done(Err(error)),
             },
+            // [CBEA p:164 s:9.12.10] the reservation is lost when another processor or device modifies the line.
+            SpuReferencePpuAction::StoreWord { ea, value } => {
+                let stored = ByteRange::new(GuestAddr::new(ea), 4).is_some_and(|range| {
+                    self.memory
+                        .apply_commit(range, &value.to_be_bytes())
+                        .is_ok()
+                });
+                if stored {
+                    self.reservations.clear_covering(ea, 4, None);
+                    SpuReferencePpuResult::Done
+                } else {
+                    SpuReferencePpuResult::Refused {
+                        reason: SpuReferencePpuRefusal::Other,
+                    }
+                }
+            }
             SpuReferencePpuAction::StopRequest => {
                 let waiting = self.unit.channel_stall().is_some();
                 done(self.unit.request_stop(waiting))

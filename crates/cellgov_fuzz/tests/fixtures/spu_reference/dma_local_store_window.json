@@ -1,0 +1,576 @@
+{
+  "schema_version": 6,
+  "unit": {
+    "kind": "facility",
+    "name": "dma_local_store_window"
+  },
+  "vectors": [
+    {
+      "name": "load-of-a-get-buffer-before-the-tag-wait",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:173 s:10.3",
+        "vector_id": "dma_local_store_window-load-of-a-get-buffer-before-the-tag-wait"
+      },
+      "words": [
+        564135946,
+        564136075,
+        564136204,
+        564136333,
+        564136462,
+        564136591,
+        813826051
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "10": "00001000000000000000000000000000",
+          "11": "00000000000000000000000000000000",
+          "12": "00020000000000000000000000000000",
+          "13": "00000010000000000000000000000000",
+          "14": "00000005000000000000000000000000",
+          "15": "00000040000000000000000000000000"
+        },
+        "local_store": [
+          {
+            "at": 4096,
+            "hex": "01080f161d242b323940474e555c636a"
+          }
+        ],
+        "pc": 12288
+      },
+      "world": {
+        "memory": [
+          {
+            "at": 131072,
+            "hex": "525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b"
+          }
+        ]
+      },
+      "step_limit": 7,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "one_of",
+          "values": [
+            {
+              "3": "01080f161d242b323940474e555c636a"
+            },
+            {
+              "3": "525960676e757c838a91989fa6adb4bb"
+            }
+          ],
+          "chosen": 1,
+          "reason": "between a command's issue and its tag completion the architecture does not say which bytes a load of the buffer sees; the world completes the command in the step that queued it, so CellGov's load sees the transferred bytes"
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 4096,
+              "hex": "525960676e757c838a91989fa6adb4bb"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12316
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "unsupported",
+          "reason": "the CBEA defines a command's result in storage and in the tag and atomic status channels, not the runtime's effect records"
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "load-after-dsync",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "SPU-ISA p:255 s:13.3",
+        "vector_id": "dma_local_store_window-load-after-dsync"
+      },
+      "words": [
+        564135946,
+        564136075,
+        564136204,
+        564136333,
+        564136462,
+        564136591,
+        6291456,
+        813826051
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "10": "00001000000000000000000000000000",
+          "11": "00000000000000000000000000000000",
+          "12": "00020000000000000000000000000000",
+          "13": "00000010000000000000000000000000",
+          "14": "00000005000000000000000000000000",
+          "15": "00000040000000000000000000000000"
+        },
+        "local_store": [
+          {
+            "at": 4096,
+            "hex": "01080f161d242b323940474e555c636a"
+          }
+        ],
+        "pc": 12288
+      },
+      "world": {
+        "memory": [
+          {
+            "at": 131072,
+            "hex": "525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b"
+          }
+        ]
+      },
+      "step_limit": 8,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "one_of",
+          "values": [
+            {
+              "3": "01080f161d242b323940474e555c636a"
+            },
+            {
+              "3": "525960676e757c838a91989fa6adb4bb"
+            }
+          ],
+          "chosen": 1,
+          "reason": "between a command's issue and its tag completion the architecture does not say which bytes a load of the buffer sees; the world completes the command in the step that queued it, so CellGov's load sees the transferred bytes"
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 4096,
+              "hex": "525960676e757c838a91989fa6adb4bb"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12320
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "unsupported",
+          "reason": "the CBEA defines a command's result in storage and in the tag and atomic status channels, not the runtime's effect records"
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "store-to-a-put-buffer-before-the-tag-wait",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:173 s:10.3",
+        "vector_id": "dma_local_store_window-store-to-a-put-buffer-before-the-tag-wait"
+      },
+      "words": [
+        564135946,
+        564136075,
+        564136204,
+        564136333,
+        564136462,
+        564136591,
+        545390596
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "4": "77777777777777777777777777777777",
+          "10": "00001000000000000000000000000000",
+          "11": "00000000000000000000000000000000",
+          "12": "00020000000000000000000000000000",
+          "13": "00000010000000000000000000000000",
+          "14": "00000005000000000000000000000000",
+          "15": "00000020000000000000000000000000"
+        },
+        "local_store": [
+          {
+            "at": 4096,
+            "hex": "01080f161d242b323940474e555c636a"
+          }
+        ],
+        "pc": 12288
+      },
+      "world": {
+        "memory": [
+          {
+            "at": 131072,
+            "hex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      },
+      "step_limit": 7,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 4096,
+              "hex": "77777777777777777777777777777777"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12316
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "unsupported",
+          "reason": "the CBEA defines a command's result in storage and in the tag and atomic status channels, not the runtime's effect records"
+        },
+        "main_memory": {
+          "status": "one_of",
+          "values": [
+            [
+              {
+                "at": 131072,
+                "hex": "01080f161d242b323940474e555c636a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+              }
+            ],
+            [
+              {
+                "at": 131072,
+                "hex": "77777777777777777777777777777777000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+              }
+            ]
+          ],
+          "chosen": 0,
+          "reason": "a store between a put's issue and its tag completion can land before or after the transfer reads the buffer; the world completes the put in the step that queued it, so CellGov's put carries the old bytes"
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "a-tag-wait-orders-the-load",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:173 s:10.3",
+        "vector_id": "dma_local_store_window-a-tag-wait-orders-the-load"
+      },
+      "words": [
+        564135946,
+        564136075,
+        564136204,
+        564136333,
+        564136462,
+        564136591,
+        564136720,
+        564136849,
+        27266053,
+        813826051
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "10": "00001000000000000000000000000000",
+          "11": "00000000000000000000000000000000",
+          "12": "00020000000000000000000000000000",
+          "13": "00000010000000000000000000000000",
+          "14": "00000005000000000000000000000000",
+          "15": "00000040000000000000000000000000",
+          "16": "00000020000000000000000000000000",
+          "17": "00000002000000000000000000000000"
+        },
+        "local_store": [
+          {
+            "at": 4096,
+            "hex": "01080f161d242b323940474e555c636a"
+          }
+        ],
+        "pc": 12288
+      },
+      "world": {
+        "memory": [
+          {
+            "at": 131072,
+            "hex": "525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b"
+          }
+        ]
+      },
+      "step_limit": 10,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "525960676e757c838a91989fa6adb4bb",
+            "5": "00000020000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 4096,
+              "hex": "525960676e757c838a91989fa6adb4bb"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12328
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "unsupported",
+          "reason": "the CBEA defines a command's result in storage and in the tag and atomic status channels, not the runtime's effect records"
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    }
+  ]
+}

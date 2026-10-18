@@ -426,6 +426,13 @@ pub enum SpuReferencePpuAction {
     ReadOutMbox,
     /// Read the outbound interrupt mailbox.
     ReadOutIntrMbox,
+    /// Store a word to main storage, as another processor does.
+    StoreWord {
+        /// The effective address of the word.
+        ea: u64,
+        /// The word.
+        value: u32,
+    },
     /// Request a stop.
     StopRequest,
     /// Write SPU_NPC.

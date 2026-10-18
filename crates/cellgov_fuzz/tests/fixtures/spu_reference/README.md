@@ -73,8 +73,8 @@ One file covers one architectural unit, named in `unit`:
     window. The replayed SPU is slot 0.
   - `ppu`: problem-state operations in step order, each landing before
     its step: an inbound-mailbox write, a signal write or mode, an
-    outbound-mailbox or outbound-interrupt-mailbox read, a stop request,
-    an SPU_NPC write, or a restart.
+    outbound-mailbox or outbound-interrupt-mailbox read, a word stored to
+    main storage, a stop request, an SPU_NPC write, or a restart.
 - `step_limit`: at most 4096 steps. A step is one instruction, or one
   attempt at a blocked channel access.
 - `expected`: every component of the end, each one a `value`, a

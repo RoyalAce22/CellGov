@@ -1,0 +1,654 @@
+{
+  "schema_version": 6,
+  "unit": {
+    "kind": "facility",
+    "name": "command_queue"
+  },
+  "vectors": [
+    {
+      "name": "a-new-queue-has-16-free-slots",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:113 s:9.1.1",
+        "vector_id": "command_queue-a-new-queue-has-16-free-slots"
+      },
+      "words": [
+        31459971
+      ],
+      "initial_state": {
+        "regs_hex": {},
+        "local_store": [],
+        "pc": 12288
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "00000010000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 12292
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "a-completed-command-frees-its-slot",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:113 s:9.1.1",
+        "vector_id": "command_queue-a-completed-command-frees-its-slot"
+      },
+      "words": [
+        564135946,
+        564136075,
+        564136204,
+        564136333,
+        564136462,
+        564136591,
+        31459971
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "10": "00001000000000000000000000000000",
+          "11": "00000000000000000000000000000000",
+          "12": "00020000000000000000000000000000",
+          "13": "00000010000000000000000000000000",
+          "14": "00000005000000000000000000000000",
+          "15": "00000040000000000000000000000000"
+        },
+        "local_store": [],
+        "pc": 12288
+      },
+      "world": {
+        "memory": [
+          {
+            "at": 131072,
+            "hex": "525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b"
+          }
+        ]
+      },
+      "step_limit": 7,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "00000010000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 4096,
+              "hex": "525960676e757c838a91989fa6adb4bb"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12316
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "unsupported",
+          "reason": "the CBEA defines a command's result in storage and in the tag and atomic status channels, not the runtime's effect records"
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "sixteen-stalled-lists-fill-the-queue",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:113 s:9.1.1",
+        "vector_id": "command_queue-sixteen-stalled-lists-fill-the-queue"
+      },
+      "words": [
+        564135946,
+        564136075,
+        564136204,
+        564136333,
+        564136462,
+        564136591,
+        486525460,
+        562036500,
+        31459971
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "10": "00001000000000000000000000000000",
+          "11": "00000000000000000000000000000000",
+          "12": "00001800000000000000000000000000",
+          "13": "00000010000000000000000000000000",
+          "14": "00000005000000000000000000000000",
+          "15": "00000044000000000000000000000000",
+          "20": "00000010000000100000001000000010"
+        },
+        "local_store": [
+          {
+            "at": 6144,
+            "hex": "80000010000200000000001000020010"
+          }
+        ],
+        "pc": 12288
+      },
+      "world": {
+        "memory": [
+          {
+            "at": 131072,
+            "hex": "525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b"
+          }
+        ]
+      },
+      "step_limit": 54,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "00000000000000000000000000000000",
+            "20": "00000000000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 4096,
+              "hex": "525960676e757c838a91989fa6adb4bb"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12324
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "unsupported",
+          "reason": "the CBEA defines a command's result in storage and in the tag and atomic status channels, not the runtime's effect records"
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "a-write-to-a-full-queue-stalls",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:113 s:9.1.1",
+        "vector_id": "command_queue-a-write-to-a-full-queue-stalls"
+      },
+      "words": [
+        564135946,
+        564136075,
+        564136204,
+        564136333,
+        564136462,
+        564136591,
+        486525460,
+        562036500,
+        564136591
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "10": "00001000000000000000000000000000",
+          "11": "00000000000000000000000000000000",
+          "12": "00001800000000000000000000000000",
+          "13": "00000010000000000000000000000000",
+          "14": "00000005000000000000000000000000",
+          "15": "00000044000000000000000000000000",
+          "20": "00000010000000100000001000000010"
+        },
+        "local_store": [
+          {
+            "at": 6144,
+            "hex": "80000010000200000000001000020010"
+          }
+        ],
+        "pc": 12288
+      },
+      "world": {
+        "memory": [
+          {
+            "at": 131072,
+            "hex": "525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b"
+          }
+        ]
+      },
+      "step_limit": 55,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stalled",
+            "channel": 21
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "20": "00000000000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 4096,
+              "hex": "525960676e757c838a91989fa6adb4bb"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12320
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "unsupported",
+          "reason": "the CBEA defines a command's result in storage and in the tag and atomic status channels, not the runtime's effect records"
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "acknowledging-the-stalls-frees-every-slot",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:130 s:9.3.8",
+        "vector_id": "command_queue-acknowledging-the-stalls-frees-every-slot"
+      },
+      "words": [
+        564135946,
+        564136075,
+        564136204,
+        564136333,
+        564136462,
+        564136591,
+        486525460,
+        562036500,
+        31459971,
+        564137232,
+        31459972
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "10": "00001000000000000000000000000000",
+          "11": "00000000000000000000000000000000",
+          "12": "00001800000000000000000000000000",
+          "13": "00000010000000000000000000000000",
+          "14": "00000005000000000000000000000000",
+          "15": "00000044000000000000000000000000",
+          "16": "00000005000000000000000000000000",
+          "20": "00000010000000100000001000000010"
+        },
+        "local_store": [
+          {
+            "at": 6144,
+            "hex": "80000010000200000000001000020010"
+          }
+        ],
+        "pc": 12288
+      },
+      "world": {
+        "memory": [
+          {
+            "at": 131072,
+            "hex": "525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b"
+          }
+        ]
+      },
+      "step_limit": 56,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "00000000000000000000000000000000",
+            "4": "00000010000000000000000000000000",
+            "20": "00000000000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": [
+            {
+              "at": 4096,
+              "hex": "525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b"
+            }
+          ]
+        },
+        "pc": {
+          "status": "value",
+          "value": 12332
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "unsupported",
+          "reason": "the CBEA defines a command's result in storage and in the tag and atomic status channels, not the runtime's effect records"
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    }
+  ]
+}
