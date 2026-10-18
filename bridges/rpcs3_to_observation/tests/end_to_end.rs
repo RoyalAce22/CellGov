@@ -1,4 +1,7 @@
-//! End-to-end tests: adapter output feeds `cellgov diff observations`.
+//! End-to-end tests: the adapter binary's output loads and compares
+//! against a CellGov observation through `cellgov_compare`, the library
+//! behind `cellgov diff observations`. The CLI's own handling of the
+//! command is `cellgov_cli`'s to test, where its binary is built.
 
 #![allow(
     clippy::unwrap_used,
@@ -7,6 +10,10 @@
 
 use cellgov_compare::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedHashes, ObservedOutcome,
+};
+use cellgov_compare::{
+    baseline, compare_observations, format_observation_compare_human, ByteDivergence,
+    ObservationCompareResult, RegionPairOutcome,
 };
 use cellgov_testkit::scratch::{scratch_labeled, ScratchDir};
 use cellgov_trace::StateHash;
@@ -34,13 +41,18 @@ fn expected_config_hash_hex() -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
-/// Locates the sibling `cellgov` binary; `CARGO_BIN_EXE_<name>` only
-/// covers binaries in the same package.
-fn cellgov_bin() -> PathBuf {
-    let me = PathBuf::from(env!("CARGO_BIN_EXE_rpcs3_to_observation"));
-    let target_dir = me.parent().expect("adapter has parent dir");
-    let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
-    target_dir.join(format!("cellgov{exe_suffix}"))
+/// Write `cellgov` as a CellGov run would, then load both files the way
+/// `cellgov diff observations` does and compare them.
+fn compare_files(
+    cellgov: &Observation,
+    cellgov_path: &Path,
+    rpcs3_path: &Path,
+) -> ObservationCompareResult {
+    fs::write(cellgov_path, serde_json::to_string_pretty(cellgov).unwrap()).unwrap();
+    let a =
+        baseline::load(cellgov_path).unwrap_or_else(|e| panic!("{}: {e}", cellgov_path.display()));
+    let b = baseline::load(rpcs3_path).unwrap_or_else(|e| panic!("{}: {e}", rpcs3_path.display()));
+    compare_observations(&a, &b)
 }
 
 #[test]
@@ -118,31 +130,27 @@ size = "0x8"
         identity: cellgov_compare::RunIdentity::default(),
         runner_firmware: None,
     };
-    let cellgov_obs_path = work.join("cellgov.json");
-    fs::write(
-        &cellgov_obs_path,
-        serde_json::to_string_pretty(&cellgov_obs).unwrap(),
-    )
-    .unwrap();
-
-    let out = Command::new(cellgov_bin())
-        .args([
-            "diff",
-            "observations",
-            cellgov_obs_path.to_str().unwrap(),
-            rpcs3_obs_path.to_str().unwrap(),
-        ])
-        .output()
-        .expect("cli runs");
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        out.status.success(),
-        "diff observations exited non-zero. stdout={stdout} stderr={}",
-        String::from_utf8_lossy(&out.stderr)
+    let result = compare_files(&cellgov_obs, &work.join("cellgov.json"), &rpcs3_obs_path);
+    assert!(!result.has_divergence(), "{result:#?}");
+    assert_eq!(
+        result.region_compare.pairs,
+        vec![
+            RegionPairOutcome::Match {
+                name: "code".into(),
+                addr: 0x10000,
+                length: 8,
+            },
+            RegionPairOutcome::Match {
+                name: "data".into(),
+                addr: 0x20000,
+                length: 8,
+            },
+        ]
     );
+    let human = format_observation_compare_human(&result);
     assert!(
-        stdout.contains("MATCH"),
-        "expected MATCH in output, got: {stdout}"
+        human.starts_with("MATCH outcome=Completed, 2 regions (16 bytes) identical"),
+        "{human}"
     );
 }
 
@@ -207,30 +215,23 @@ size = "0x4"
         identity: cellgov_compare::RunIdentity::default(),
         runner_firmware: None,
     };
-    let cellgov_obs_path = work.join("cellgov.json");
-    fs::write(
-        &cellgov_obs_path,
-        serde_json::to_string_pretty(&cellgov_obs).unwrap(),
-    )
-    .unwrap();
-
-    let out = Command::new(cellgov_bin())
-        .args([
-            "diff",
-            "observations",
-            cellgov_obs_path.to_str().unwrap(),
-            rpcs3_obs_path.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("DIVERGE"),
-        "expected DIVERGE, got: {stdout}"
-    );
-    assert!(
-        !stdout.contains("parse"),
-        "expected real divergence, not a parse/schema error: {stdout}"
+    // Both files load (no schema error), and the one differing byte is
+    // the divergence.
+    let result = compare_files(&cellgov_obs, &work.join("cellgov.json"), &rpcs3_obs_path);
+    assert!(result.has_divergence(), "{result:#?}");
+    assert_eq!(
+        result.region_compare.pairs,
+        vec![RegionPairOutcome::ByteDivergence {
+            name: "r".into(),
+            addr: 0x10000,
+            length: 4,
+            bytes: vec![ByteDivergence {
+                offset: 3,
+                length: 1,
+                a_byte: 3,
+                b_byte: 9,
+            }],
+        }]
     );
 }
 
