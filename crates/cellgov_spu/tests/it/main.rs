@@ -13,6 +13,7 @@ mod console_events;
 mod console_ie_branch_forms;
 mod console_invalid_channel;
 mod console_invalid_npc;
+mod console_issue_timing;
 mod console_list_bad_element;
 mod console_mfc_command_edges;
 mod console_opcode_sweep;

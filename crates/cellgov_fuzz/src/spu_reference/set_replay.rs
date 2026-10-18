@@ -337,6 +337,7 @@ impl World {
                 UnitStatus::Runnable
             },
             stall: None,
+            pipeline: cellgov_spu::timing::SpuPipeline::new(),
         });
         unit.connect_out_intr_mbox()
             .map_err(|_| world_error("the interrupt mailbox"))?;

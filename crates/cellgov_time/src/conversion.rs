@@ -1,5 +1,5 @@
-//! Guest ticks converted to the timebase register and to seconds and
-//! nanoseconds.
+//! Guest ticks converted to the time-base register and to seconds and
+//! nanoseconds, and SPU clock cycles converted to guest ticks.
 
 use cellgov_ps3_abi::hw::ppu::CELL_PPU_TIMEBASE_HZ;
 
@@ -41,6 +41,22 @@ pub const fn tb_to_ticks(tb_num: u64, tb_den: u64) -> u64 {
     } else {
         ticks as u64
     }
+}
+
+/// The guest ticks that `cycles` SPU clock cycles take, rounded down.
+///
+/// The SPU clock runs at [`SPU_CYCLES_PER_TB_TICK`] times the time-base
+/// frequency.
+///
+/// The caller converts a running cycle total from one fixed start. Each
+/// read then includes the partial tick that the previous read dropped.
+///
+/// [`SPU_CYCLES_PER_TB_TICK`]: cellgov_ps3_abi::hw::spu_issue::SPU_CYCLES_PER_TB_TICK
+#[inline]
+pub const fn spu_cycles_to_ticks(cycles: u64) -> u64 {
+    let den = cellgov_ps3_abi::hw::spu_issue::SPU_CYCLES_PER_TB_TICK as u128
+        * CELL_PPU_TIMEBASE_HZ as u128;
+    ((cycles as u128 * SIMULATED_INSTRUCTIONS_PER_SECOND as u128) / den) as u64
 }
 
 /// Convert a guest-tick count to the `(sec, nsec)` pair

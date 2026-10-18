@@ -225,7 +225,10 @@ fn a_seventeenth_command_waits_for_a_slot() {
     program.push(rchcnt(6, MFC_CMD));
     program.push(wrch(MFC_CMD, 2));
     program.push(0);
-    let (mut rt, unit) = runtime_with(&program, MFC_PUT, 0x1000, LSA, 16);
+    // 4 KB puts at the console's transfer time, so the first is still in
+    // flight when the sixteenth issues.
+    let (mut rt, unit) = runtime_with(&program, MFC_PUT, 0x1000, LSA, 4096);
+    rt.use_measured_dma_latency();
     for _ in 0..depth {
         let step = rt.step().expect("a put issues");
         assert_eq!(step.result.yield_reason, YieldReason::DmaSubmitted);

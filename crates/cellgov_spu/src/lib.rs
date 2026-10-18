@@ -35,6 +35,7 @@ pub mod multilinear;
 pub mod observation;
 pub mod state;
 pub mod stop;
+pub mod timing;
 mod unit;
 
 pub use fault_codes::describe_guest_fault;

@@ -20,6 +20,8 @@ pub struct SpuSnapshot {
     pub status: UnitStatus,
     /// The channel access a parked unit waits on.
     pub stall: Option<ChannelStall>,
+    /// The issue state the next instruction's cycle depends on.
+    pub pipeline: crate::timing::SpuPipeline,
 }
 
 impl SpuSnapshot {
@@ -74,6 +76,8 @@ pub struct SpuExecutionUnit {
     /// The channel access the last step stalled on; cleared at each
     /// step entry, since the woken step runs the access again.
     pub(super) stall: Option<ChannelStall>,
+    /// The issue state: the cycle the next instruction issues in.
+    pub(super) pipeline: crate::timing::SpuPipeline,
     /// Barrier instructions retired since the last drain.
     ///
     /// The unit records a barrier only while the context asks for
@@ -102,6 +106,7 @@ impl SpuExecutionUnit {
             state: state::SpuState::new(),
             status: UnitStatus::Runnable,
             stall: None,
+            pipeline: crate::timing::SpuPipeline::new(),
             barriers: Vec::new(),
             retirement_counter: 0,
             full_state_window: None,
@@ -161,10 +166,12 @@ impl SpuExecutionUnit {
             state,
             status,
             stall,
+            pipeline,
         } = snapshot;
         self.state = state;
         self.status = status;
         self.stall = stall;
+        self.pipeline = pipeline;
         self.barriers.clear();
         self.per_step_hashes.clear();
         self.per_step_full_states.clear();

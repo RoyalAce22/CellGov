@@ -65,8 +65,13 @@ fn budget_exhaustion_yields() {
     let ctx = ExecutionContext::new(&mem);
     let result = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
-    assert_eq!(result.consumed_cost, InstructionCost::new(5));
+    // The budget bounds the instructions; the five nops take one cycle
+    // each.
     assert_eq!(unit.state().pc, 20);
+    assert_eq!(
+        result.consumed_cost,
+        InstructionCost::new(cellgov_time::spu_cycles_to_ticks(5))
+    );
 }
 
 /// The mask confines every address to a full-size local store, so a

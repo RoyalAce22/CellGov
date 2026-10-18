@@ -62,3 +62,15 @@ fn ticks_to_sec_nsec_nsec_is_always_in_range() {
         assert!(nsec < SIMULATED_INSTRUCTIONS_PER_SECOND);
     }
 }
+
+#[test]
+fn forty_spu_cycles_take_one_time_base_tick() {
+    // 3.192 GHz against 1 GHz of guest ticks: 399 cycles are 125 ticks.
+    assert_eq!(spu_cycles_to_ticks(0), 0);
+    assert_eq!(spu_cycles_to_ticks(3), 0);
+    assert_eq!(spu_cycles_to_ticks(4), 1);
+    assert_eq!(spu_cycles_to_ticks(399), 125);
+    for tb in [1u64, 50_000, 140_928_623] {
+        assert_eq!(ticks_to_tb(spu_cycles_to_ticks(40 * tb) + 1), tb);
+    }
+}

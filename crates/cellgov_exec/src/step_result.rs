@@ -145,8 +145,11 @@ pub struct ExecutionStepResult {
     /// via `From<InstructionCost>` in the commit pipeline, which
     /// advances guest time by `consumed_cost`.
     ///
-    /// `InstructionCost::ZERO` is legal only on `YieldReason::Fault`.
-    /// A non-fault zero-cost yield in a loop deadlocks the schedule.
+    /// A unit that never advances guest time deadlocks the schedule. The
+    /// SPU charges its cycles in whole ticks and carries the rest of a
+    /// tick to the next step. One of its steps can therefore cost
+    /// `InstructionCost::ZERO`. Every two instructions it retires take
+    /// at least one cycle, so a run of its steps still advances time.
     pub consumed_cost: InstructionCost,
     /// Per-step local diagnostics from the execution unit.
     pub local_diagnostics: LocalDiagnostics,

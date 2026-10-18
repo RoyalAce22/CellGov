@@ -10,4 +10,5 @@ pub mod rsx;
 pub mod spu;
 pub mod spu_fpscr;
 pub mod spu_isa;
+pub mod spu_issue;
 pub mod spu_mfc;

@@ -56,7 +56,7 @@ flowchart TD
 ```
 
 Guest time advances in step 3 (`Runtime::step`) by the unit's
-consumed budget; `commit_step` only advances the epoch.
+consumed cost; `commit_step` only advances the epoch.
 
 ### Unit selection
 

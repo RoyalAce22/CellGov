@@ -20,15 +20,31 @@ use cellgov_exec::{
 use cellgov_ps3_abi::hw::spu;
 use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, SPU_STATUS_R};
 use cellgov_ps3_abi::hw::spu_isa;
-use cellgov_time::{Budget, InstructionCost};
+use cellgov_ps3_abi::hw::spu_issue::SPU_GETLLAR_CYCLES;
+use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
-/// The guest ticks a getllar takes: the round trip the `spu_dma_timing`
-/// console capture measures, a getllar and the read of its atomic
-/// status, converted from the time base.
-const GETLLAR_TICKS: u64 = cellgov_time::tb_to_ticks(
-    cellgov_ps3_abi::hw::mfc_timing::MFC_GETLLAR_TB_SUM as u64,
-    cellgov_ps3_abi::hw::mfc_timing::MFC_TIMING_RUNS as u64,
-);
+/// The guest tick at which the unit's cycle count reaches `cycles`.
+///
+/// The step starts at `start`, when the unit's cycle count is `base`
+/// ticks.
+fn tick_at(start: GuestTicks, base: u64, cycles: u64) -> GuestTicks {
+    GuestTicks::new(
+        start
+            .raw()
+            .saturating_add(cellgov_time::spu_cycles_to_ticks(cycles).saturating_sub(base)),
+    )
+}
+
+impl SpuExecutionUnit {
+    /// The guest ticks the step takes, from its start to now.
+    ///
+    /// `base` is the unit's cycle count, in ticks, when the step began.
+    fn cost(&self, base: u64) -> InstructionCost {
+        InstructionCost::new(
+            cellgov_time::spu_cycles_to_ticks(self.pipeline.elapsed()).saturating_sub(base),
+        )
+    }
+}
 
 impl ExecutionUnit for SpuExecutionUnit {
     type Snapshot = SpuSnapshot;
@@ -48,8 +64,11 @@ impl ExecutionUnit for SpuExecutionUnit {
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         // A woken stall runs its channel access again from the PC it
-        // left, so nothing of the old park carries over.
-        self.stall = None;
+        // left, so the unit drops the stall and resumes the pipeline
+        // after the park.
+        if self.stall.take().is_some() {
+            self.pipeline.resume_after_park();
+        }
 
         // A group reads complete when this unit has no outstanding
         // transfer with its tag, so a reused tag reads incomplete until its
@@ -109,17 +128,20 @@ impl ExecutionUnit for SpuExecutionUnit {
             self.state.raise_events(spu::event::LR);
         }
 
+        // The budget bounds the instructions the step retires; the step
+        // costs the guest ticks its cycles take. The step reads the ticks
+        // from the unit's whole run of cycles, so a step that ends inside
+        // a tick leaves the rest of it to the next step.
         let mut remaining = budget.raw();
+        let start = ctx.current_tick();
+        let base = cellgov_time::spu_cycles_to_ticks(self.pipeline.elapsed());
         effects.clear();
 
         loop {
-            // This instruction runs at the step's start plus the ticks the
-            // instructions before it charged.
-            self.state.set_clock(cellgov_time::GuestTicks::new(
-                ctx.current_tick()
-                    .raw()
-                    .saturating_add(budget.raw() - remaining),
-            ));
+            // An interrupt lands at the cycle the next instruction could
+            // issue in.
+            self.state
+                .set_clock(tick_at(start, base, self.pipeline.next_issue()));
             // The decrementer can pass zero between two channel accesses,
             // and an interrupt is the one way the unit sees that there.
             if self.state.interrupts_enabled() {
@@ -128,6 +150,10 @@ impl ExecutionUnit for SpuExecutionUnit {
             // [SPU-ISA p:251 s:12.1] an interrupt lands between instructions.
             if self.state.interrupt_pending() {
                 self.state.take_interrupt();
+                // Entering the handler flushes the pipeline as a
+                // mispredicted branch to address 0 does. No capture
+                // times the entry.
+                self.pipeline.redirect(self.state.pc);
             }
             let step_pc = self.state.pc as u64;
             let raw = match self.state.fetch() {
@@ -136,7 +162,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     self.status = UnitStatus::Faulted;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                        consumed_cost: self.cost(base),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(guest_fault(FAULT_LS_OUT_OF_RANGE, self.state.pc)),
                         syscall_args: None,
@@ -154,7 +180,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     self.status = UnitStatus::Finished;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Finished,
-                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                        consumed_cost: self.cost(base),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
@@ -165,7 +191,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     self.status = UnitStatus::Faulted;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                        consumed_cost: self.cost(base),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: Some(guest_fault(FAULT_UNIMPLEMENTED_INSN, row)),
                         syscall_args: None,
@@ -173,6 +199,9 @@ impl ExecutionUnit for SpuExecutionUnit {
                 }
             };
 
+            // The instruction runs at the cycle it issues in.
+            let slot = self.pipeline.plan(&self.state, raw, &insn);
+            self.state.set_clock(tick_at(start, base, slot.cycle));
             // The decrementer runs between instructions, so a channel
             // access first looks for the zero crossing it can report.
             if matches!(
@@ -201,16 +230,18 @@ impl ExecutionUnit for SpuExecutionUnit {
                                 .push(cellgov_exec::RetiredBarrier { pc: step_pc, kind });
                         }
                     }
+                    self.pipeline.retire(slot, None);
                     self.state.advance_pc();
                 }
-                SpuStepOutcome::Branch => {}
+                SpuStepOutcome::Branch => self.pipeline.retire(slot, Some(self.state.pc)),
                 SpuStepOutcome::Stop { kind, signal } => {
+                    self.pipeline.retire(slot, None);
                     self.state.record_stop(kind, signal);
                     self.retire(step_pc, ctx.trace_per_step());
                     self.status = UnitStatus::Finished;
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Finished,
-                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                        consumed_cost: self.cost(base),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
@@ -242,12 +273,13 @@ impl ExecutionUnit for SpuExecutionUnit {
                             ..stall
                         });
                     } else {
+                        self.pipeline.retire(slot, None);
                         self.state.advance_pc();
                         self.retire(step_pc, ctx.trace_per_step());
                     }
                     return ExecutionStepResult {
                         yield_reason: reason,
-                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                        consumed_cost: self.cost(base),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
@@ -289,17 +321,19 @@ impl ExecutionUnit for SpuExecutionUnit {
                             &mut self.state,
                             self.id,
                         ));
+                        self.pipeline.retire(slot, None);
                         self.state.advance_pc();
                         self.retire(step_pc, ctx.trace_per_step());
                         return ExecutionStepResult {
                             yield_reason: YieldReason::DmaSubmitted,
-                            consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                            consumed_cost: self.cost(base),
                             local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                             fault: None,
                             syscall_args: None,
                         };
                     }
                     effects.extend(shared_read(ea, size, self.id));
+                    self.pipeline.retire(slot, None);
                     if let Some(line_addr) = acquire_line {
                         // [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] the channel holds the status of the last completed immediate atomic command.
                         self.state.channels.atomic_status = MFC_ATOMIC_STAT_G;
@@ -313,24 +347,8 @@ impl ExecutionUnit for SpuExecutionUnit {
                             source: self.id,
                         });
                         // The getllar takes the round trip the console
-                        // measures. When the step's budget cannot hold
-                        // the trip, the step ends on the getllar and
-                        // still charges all of it.
-                        if remaining < GETLLAR_TICKS {
-                            self.state.advance_pc();
-                            self.retire(step_pc, ctx.trace_per_step());
-                            return ExecutionStepResult {
-                                yield_reason: YieldReason::BudgetExhausted,
-                                consumed_cost: InstructionCost::new(
-                                    budget.raw() - remaining + GETLLAR_TICKS,
-                                ),
-                                local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                                fault: None,
-                                syscall_args: None,
-                            };
-                        }
-                        // The retirement below charges one tick of it.
-                        remaining -= GETLLAR_TICKS - 1;
+                        // measures.
+                        self.pipeline.charge(SPU_GETLLAR_CYCLES);
                     }
                     self.state.advance_pc();
                 }
@@ -345,7 +363,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     let fault = guest_fault_for(f);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
-                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                        consumed_cost: self.cost(base),
                         local_diagnostics,
                         fault: Some(fault),
                         syscall_args: None,
@@ -362,7 +380,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             if remaining == 0 {
                 return ExecutionStepResult {
                     yield_reason: YieldReason::BudgetExhausted,
-                    consumed_cost: InstructionCost::new(budget.raw()),
+                    consumed_cost: self.cost(base),
                     local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                     fault: None,
                     syscall_args: None,
@@ -380,6 +398,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             state,
             status,
             stall,
+            pipeline,
             // Trace output the runtime drains, not state.
             barriers: _,
             per_step_hashes: _,
@@ -393,6 +412,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             state: state.clone(),
             status: *status,
             stall: *stall,
+            pipeline: pipeline.clone(),
         }
     }
 
@@ -407,6 +427,8 @@ impl ExecutionUnit for SpuExecutionUnit {
     /// [CBEA p:96 s:8.5.3] `SPU_NPC[IE]` is the interrupt-enable state at start.
     fn restart(&mut self) -> Result<(), RestartError> {
         let stop = self.state.stop.take().ok_or(RestartError::NotStopped)?;
+        // [CBE-Handbook p:695 s:24.3.3.4] a hint stays loaded until another hint or a synchronizing event, a sync or a start, replaces it.
+        self.pipeline.clear_hints();
         self.state.pc = stop.npc;
         self.state.set_interrupts_enabled(stop.interrupts_enabled);
         self.status = UnitStatus::Runnable;

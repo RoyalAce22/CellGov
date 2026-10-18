@@ -408,13 +408,14 @@ fn rchcnt_on_a_decrementer_channel_reads_one() {
 }
 
 /// A unit's rdch of SPU_RdDec reads the count at the instruction's own
-/// tick: the step's start plus the instructions retired before it.
+/// tick: the step's start plus the cycle it issues in, one cycle after
+/// each of the 999 nops before it.
 #[test]
 fn a_unit_reads_the_decrementer_at_the_tick_of_the_read() {
     use crate::SpuExecutionUnit;
     use cellgov_exec::{ExecutionContext, ExecutionUnit};
     use cellgov_mem::GuestMemory;
-    use cellgov_time::{ticks_to_tb, Budget, GuestTicks};
+    use cellgov_time::{spu_cycles_to_ticks, ticks_to_tb, Budget, GuestTicks};
 
     const START: u64 = 1_000_000;
     // wrch $3 to SPU_WrDec, 999 nops, rdch $2 from SPU_RdDec.
@@ -434,7 +435,7 @@ fn a_unit_reads_the_decrementer_at_the_tick_of_the_read() {
     let mem = GuestMemory::new(16);
     let ctx = ExecutionContext::new(&mem).with_current_tick(GuestTicks::new(START));
     unit.run_until_yield(Budget::new(1_001), &ctx, &mut Vec::new());
-    let elapsed = ticks_to_tb(START + 1_000) - ticks_to_tb(START);
+    let elapsed = ticks_to_tb(START + spu_cycles_to_ticks(1_000)) - ticks_to_tb(START);
     assert_eq!(
         unit.state().reg_word(2),
         1_000_000 - u32::try_from(elapsed).unwrap()

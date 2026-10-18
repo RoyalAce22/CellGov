@@ -186,40 +186,141 @@ fn at_tb(tb: u64) -> GuestTicks {
     )
 }
 
-/// Phase 5: the decrementer loaded with 50000 and Tm enabled. Tm fires
-/// as the count passes zero, reads back as exactly its own bit, counts
-/// no more once acknowledged, and the decrementer then reads just below
-/// zero.
+/// The probe's `wait_event` as the SPU compiler emits it at local-store
+/// address [`WAIT_EVENT`] (`spu-objdump` of the built image). It holds
+/// the poll loop of six instructions, then the stores of the record.
+const WAIT_EVENT_WORDS: [u32; 56] = [
+    0x01e0_0009,
+    0x2100_1589,
+    0x4100_0788,
+    0x0020_0000,
+    0x60a1_2008,
+    0x3200_0180,
+    0x7802_0496,
+    0x2100_0f96,
+    0x1c00_4489,
+    0x01e0_000a,
+    0x4020_007f,
+    0x207f_fd8a,
+    0x4080_020b,
+    0x3ec1_018c,
+    0x4100_078e,
+    0x3882_c18d,
+    0x60a1_200e,
+    0x7803_848f,
+    0xb203_448c,
+    0x2882_c190,
+    0x2100_040f,
+    0x01a0_0011,
+    0x0400_0892,
+    0x3400_0193,
+    0x3ec0_0194,
+    0xb2a4_c894,
+    0x2400_0195,
+    0x21a0_0112,
+    0x3580_0009,
+    0x4020_007f,
+    0x4020_007f,
+    0x01e0_001b,
+    0x4080_041c,
+    0x3887_019d,
+    0x3ec2_019e,
+    0xb3e7_4d9e,
+    0x2887_019f,
+    0x3500_0000,
+    0x4080_0217,
+    0x3ec1_0198,
+    0x3885_c199,
+    0xb346_4498,
+    0x2885_c19a,
+    0x327f_f880,
+    0x4020_007f,
+    0x127f_f40a,
+    0x4080_0204,
+    0x3ec1_0186,
+    0x4080_0005,
+    0x0020_0000,
+    0x4020_007f,
+    0x3881_0182,
+    0x4020_007f,
+    0xb0e0_8286,
+    0x2881_0187,
+    0x327f_ef00,
+];
+const WAIT_EVENT: usize = 0x9d0;
+
+/// Phase 5 around the call, in order:
 ///
-/// The poll loop runs on CellGov's clock, one guest tick per instruction:
-/// the poll count the console's records hold measures the console's
-/// instruction timing, which that clock does not follow.
+/// 1. `quiet()`.
+/// 2. Set the mask to Tm.
+/// 3. Write 50000 to the decrementer.
+/// 4. Call `wait_event` on the record at 0x2000.
+/// 5. Read the decrementer into the word at 0x2010.
+const PHASE_5: [u32; 13] = [
+    0x4080_0004, // il $4,0
+    0x21a0_0084, // wrch $ch1,$4
+    0x40ff_ff85, // il $5,-1
+    0x21a0_0105, // wrch $ch2,$5
+    0x4080_1006, // il $6,0x20
+    0x21a0_0086, // wrch $ch1,$6
+    0x4261_a807, // ila $7,50000
+    0x21a0_0387, // wrch $ch7,$7
+    0x4210_0003, // ila $3,0x2000
+    0x3301_3580, // brsl $0,wait_event
+    0x01a0_0408, // rdch $8,$ch8
+    0x2084_0208, // stqa $8,0x2010
+    0x0000_2000, // stop 0x2000
+];
+const RECORD: usize = 0x2000;
+
+/// Phase 5: the decrementer loaded with 50000 and Tm enabled, and the
+/// compiled poll loop run through the execution unit. Tm fires as the
+/// count passes zero, after the console's poll count to one part in a
+/// thousand. Tm reads back as exactly its own bit and counts no more
+/// once acknowledged. The decrementer then reads just below zero.
 #[test]
-fn cellgov_raises_tm_as_the_decrementer_passes_zero_as_the_console_does() {
+fn cellgov_raises_tm_after_the_consoles_poll_count() {
     let console = Capture::load().record(5);
-    let mut s = SpuState::new();
-    let mut tick = at_tb(1_000);
-    s.set_clock(tick);
-    quiet(&mut s);
-    wrch(spu::SPU_WR_EVENT_MASK, spu::event::TM, &mut s);
-    wrch(spu::SPU_WR_DEC, 50_000, &mut s);
-    // rchcnt, compare and branch: three ticks a poll.
-    let mut polls = 0;
-    loop {
-        tick = GuestTicks::new(tick.raw() + 3);
-        s.set_clock(tick);
-        s.sample_decrementer();
-        if count(spu::SPU_RD_EVENT_STAT, &mut s) != 0 {
-            break;
+    let mut rt = cellgov_core::Runtime::new(
+        cellgov_mem::GuestMemory::new(0x1000),
+        cellgov_time::Budget::new(10_000),
+        1_000,
+    );
+    let unit = rt.register_unit_with(|id| {
+        let mut spu = cellgov_spu::SpuExecutionUnit::new(id);
+        let ls = &mut spu.state_mut().ls;
+        for (base, words) in [(0, &PHASE_5[..]), (WAIT_EVENT, &WAIT_EVENT_WORDS[..])] {
+            for (i, word) in words.iter().enumerate() {
+                ls[base + 4 * i..base + 4 * i + 4].copy_from_slice(&word.to_be_bytes());
+            }
         }
-        polls += 1;
-        assert!(polls < MAX_POLLS, "Tm never fired");
+        spu
+    });
+    while rt.registry().effective_status(unit) != Some(cellgov_exec::UnitStatus::Finished) {
+        let step = rt.step().expect("the SPU runs");
+        rt.commit_step(&step.result, &step.effects)
+            .expect("the step commits");
     }
-    let status = rdch(spu::SPU_RD_EVENT_STAT, &mut s);
-    wrch(spu::SPU_WR_EVENT_ACK, status, &mut s);
-    let count_after = count(spu::SPU_RD_EVENT_STAT, &mut s);
-    let after = rdch(spu::SPU_RD_DEC, &mut s);
+    let ls = &rt
+        .registry()
+        .get(unit)
+        .and_then(|unit| {
+            unit.as_any()
+                .downcast_ref::<cellgov_spu::SpuExecutionUnit>()
+        })
+        .expect("the SPU unit")
+        .state()
+        .ls;
+    let word = |at: usize| u32::from_be_bytes(ls[at..at + 4].try_into().expect("4 bytes"));
+    let [status, polls, count_after, after] =
+        [RECORD, RECORD + 4, RECORD + 8, RECORD + 16].map(word);
     assert_eq!((status, count_after), (console[0], console[2]));
+    let off = f64::from(polls) / f64::from(console[1]) - 1.0;
+    assert!(
+        off.abs() < 1e-3,
+        "{polls} polls against the console's {}",
+        console[1]
+    );
     assert!(
         console[3] >= 0xFFFF_FFF0 && after >= 0xFFFF_FFF0,
         "{after:#x}"

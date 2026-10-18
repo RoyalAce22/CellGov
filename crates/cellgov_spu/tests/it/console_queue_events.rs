@@ -90,6 +90,9 @@ fn run(program: &[u32], setup: impl FnOnce(&mut cellgov_spu::state::SpuState)) -
         .apply_commit(source, &[0xA5; 0x40])
         .expect("writable");
     let mut rt = Runtime::new(memory, Budget::new(100), 400);
+    // The transfers take the times the console measures, against SPU
+    // instructions that take the console's cycles.
+    rt.use_measured_dma_latency();
     let unit = rt.register_unit_with(|id| {
         let mut spu = SpuExecutionUnit::new(id);
         let state = spu.state_mut();
@@ -143,7 +146,9 @@ fn cellgov_raises_qv_as_the_queue_drains_as_the_console_does() {
         let c = &mut state.channels;
         c.mfc_lsa = DATA;
         c.mfc_eal = SOURCE_EA;
-        c.mfc_size = 16;
+        // The probe's 4 KB gets: the queue fills before the first
+        // completes.
+        c.mfc_size = 4096;
         c.mfc_tag_id = TAG_QV;
         c.tag_mask = 1 << TAG_QV;
     });

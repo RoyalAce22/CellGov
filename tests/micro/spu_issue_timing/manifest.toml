@@ -1,0 +1,26 @@
+[test]
+name = "spu_issue_timing"
+
+# A hardware probe of the SPU issue rules, on a raw SPU: forty-three
+# loops of 65536 iterations, each timed with the decrementer. The loops
+# cover a hinted and an unhinted loop branch at fourteen target
+# alignments, the spu_events poll loop at two alignments and four
+# variants of it, channel-read latency
+# and the channel retry, sync, dsync and syncc, a double-precision
+# stall, hint distance, dual issue, a branch that is not taken after a
+# mispredicted one, and load, rotate, multiply and branch-operand
+# latency. The PPU reads back SPU_Status, SPU_NextPC, the class 0
+# interrupt status and forty-eight result slots. The SPU program's header
+# comment lists the cases; the PPU program's has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 224 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

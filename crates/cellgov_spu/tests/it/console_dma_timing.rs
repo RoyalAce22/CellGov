@@ -144,21 +144,32 @@ fn cellgov_charges_each_transfer_the_time_the_console_measures() {
     }
 }
 
-/// A getllar charges its unit the round trip the console measures,
-/// whatever budget its step has left.
+/// A getllar charges its unit the round trip the console measures, in
+/// SPU cycles, whatever budget its step has left.
 #[test]
 fn a_getllar_takes_the_round_trip_the_console_measures() {
     use cellgov_exec::{ExecutionContext, ExecutionUnit};
     use cellgov_mem::GuestMemory;
     use cellgov_ps3_abi::hw::spu::{MFC_CMD, MFC_GETLLAR};
+    use cellgov_ps3_abi::hw::spu_issue::{SPU_CYCLES_PER_TB_TICK, SPU_GETLLAR_CYCLES};
     use cellgov_spu::SpuExecutionUnit;
-    use cellgov_time::Budget;
+    use cellgov_time::{spu_cycles_to_ticks, Budget};
 
     let capture = Capture::load();
-    let trip = tb_to_ticks(u64::from(capture.word(220)), u64::from(capture.reps()));
+    assert_eq!(
+        SPU_GETLLAR_CYCLES * u64::from(capture.reps()),
+        u64::from(capture.word(220)) * SPU_CYCLES_PER_TB_TICK,
+        "the mean round trip, in cycles"
+    );
     // `wrch MFC_Cmd, r4`, then `stop`.
     let program = [(0x10Du32 << 21) | (u32::from(MFC_CMD) << 7) | 4, 0];
-    for budget in [1_000, trip, trip - 1, 1] {
+    // The wrch's cycle, the trip, and the stop's cycle when the budget
+    // reaches it.
+    for (budget, cycles) in [
+        (1_000, 1 + SPU_GETLLAR_CYCLES + 1),
+        (2, 1 + SPU_GETLLAR_CYCLES + 1),
+        (1, 1 + SPU_GETLLAR_CYCLES),
+    ] {
         let mut unit = SpuExecutionUnit::new(UnitId::new(1));
         for (i, word) in program.iter().enumerate() {
             unit.state_mut().ls[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
@@ -176,7 +187,10 @@ fn a_getllar_takes_the_round_trip_the_console_measures() {
             unit.state().reservation().is_some(),
             "budget {budget}: the getllar ran"
         );
-        // The stop retires no cost of its own.
-        assert_eq!(result.consumed_cost.raw(), trip, "budget {budget}");
+        assert_eq!(
+            result.consumed_cost.raw(),
+            spu_cycles_to_ticks(cycles),
+            "budget {budget}"
+        );
     }
 }
