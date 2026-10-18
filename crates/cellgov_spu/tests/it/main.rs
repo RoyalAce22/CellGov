@@ -27,6 +27,7 @@ mod console_run_control;
 mod console_spu_tables;
 mod decrementer_through_runtime;
 mod event_wait_through_runtime;
+mod facility_footprint;
 mod local_store_through_lv2;
 mod mailbox_count_through_runtime;
 mod mailbox_event_wait_through_runtime;

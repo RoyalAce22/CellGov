@@ -10,11 +10,13 @@ use cellgov_spu::fuzz::{
 use cellgov_spu::state::{SpuState, SPU_LS_SIZE, SPU_REG_COUNT};
 use cellgov_sync::{ReservedLine, RESERVATION_LINE_BYTES};
 
+use super::execute::SequenceWorld;
 use crate::boundary::call_target;
 use crate::case::CaseFeature;
 use crate::error::{FuzzError, GeneratorError, InvariantError};
 use crate::registry::spu_descriptors;
 use crate::rng::Rng;
+use crate::spu_reference::SpuReferencePpuAction;
 use crate::{FuzzConfig, GenerationStrategy, ParameterStream};
 
 const STRUCTURED_ENCODING_ATTEMPTS: usize = 64;
@@ -59,14 +61,37 @@ pub(super) fn structured_sequence(
     count: usize,
 ) -> Result<GeneratedSequence, GeneratorError> {
     // [Wang2024 p:340:9 s:3.2] Generation records which places earlier words wrote so later words can read them.
-    if count >= 3 && rng.chance(1, 8)? {
+    if count >= 3 && rng.chance(1, 2)? {
+        // [Wang2024 p:340:9 s:3.1] Choices carry hand-set weights that favour the operations judged more likely to reach a defect, so half the programs that stage an interaction wait on a facility.
+        let pool: &[SpuSequenceInteraction] = if rng.chance(1, 2)? {
+            &SpuSequenceInteraction::FACILITIES
+        } else {
+            &SpuSequenceInteraction::ALL
+        };
+        let mut fitting = Vec::new();
+        for interaction in pool {
+            let words = interaction.words(descriptors)?;
+            if words.len() <= count {
+                fitting.push((*interaction, words));
+            }
+        }
+        if fitting.is_empty() {
+            for interaction in SpuSequenceInteraction::ALL {
+                let words = interaction.words(descriptors)?;
+                if words.len() <= count {
+                    fitting.push((interaction, words));
+                }
+            }
+        }
         // [Padhye2019 p:332 s:3.1] One random draw selects a whole structured program, so every draw yields a valid input.
-        let choices = SpuSequenceInteraction::ALL.len();
-        let index = rng.below(choices as u64)? as usize;
-        let interaction = SpuSequenceInteraction::ALL[index];
+        let index = rng.below(fitting.len() as u64)? as usize;
+        let Some((interaction, mut words)) = fitting.into_iter().nth(index) else {
+            return Err(GeneratorError::EmptyDescriptorRegistry {
+                target: "SPU sequence interactions",
+            });
+        };
         let data_base =
             STRUCTURED_LS_DATA_BASE + (rng.below(16)? as u32 * RESERVATION_LINE_BYTES as u32);
-        let mut words = interaction.words(descriptors)?;
         let nop = descriptors
             .iter()
             .find(|descriptor| descriptor.kind == cellgov_spu::instruction::SpuInstructionKind::Nop)
@@ -87,7 +112,11 @@ pub(super) fn structured_sequence(
             | SpuSequenceInteraction::Dma
             | SpuSequenceInteraction::DmaGet
             | SpuSequenceInteraction::MemoryRead
-            | SpuSequenceInteraction::Reservation => BTreeSet::from([CaseFeature::ChannelState]),
+            | SpuSequenceInteraction::Reservation
+            | SpuSequenceInteraction::TagWait
+            | SpuSequenceInteraction::ReserveStore
+            | SpuSequenceInteraction::EventWait
+            | SpuSequenceInteraction::MailboxDrain => BTreeSet::from([CaseFeature::ChannelState]),
         };
         return Ok(GeneratedSequence {
             words,
@@ -337,6 +366,80 @@ pub(super) fn state_aware_state(
             CaseFeature::ChannelState,
         ]),
     ))
+}
+
+/// Bytes of the main-storage region a sequence's transfers reach.
+pub(super) const SEQUENCE_MAIN_STORAGE_BYTES: usize = 0x1_0000;
+
+/// The most problem-state operations a sequence's world draws at random.
+const SEQUENCE_WORLD_ACTIONS: u64 = 4;
+
+/// The world a sequence of `count` words runs against.
+///
+/// The world holds random main storage at the address the state-aware
+/// channels stage, and the problem-state operations the PPU performs.
+/// `interaction` adds the operations its facility waits on:
+///
+/// - An event wait gets the signal it ends on, after word 1, the
+///   event-status read.
+/// - A mailbox drain gets an outbound read after word 1, the outbound
+///   write, and an inbound message after word 3, the second inbound read.
+///
+/// Each operation lands after the run decodes the access that waits on
+/// it, so that access parks first.
+pub(super) fn sequence_world(
+    rng: &mut Rng,
+    interaction: Option<SpuSequenceInteraction>,
+    count: usize,
+) -> Result<SequenceWorld, GeneratorError> {
+    let base = u64::from(STRUCTURED_LS_DATA_BASE);
+    let mut bytes = vec![0; SEQUENCE_MAIN_STORAGE_BYTES];
+    rng.fill(&mut bytes);
+    let mut actions = match interaction {
+        Some(SpuSequenceInteraction::EventWait) => vec![(
+            2,
+            SpuReferencePpuAction::Signal {
+                register: 1,
+                value: rng.next_u32(),
+            },
+        )],
+        Some(SpuSequenceInteraction::MailboxDrain) => vec![
+            (2, SpuReferencePpuAction::ReadOutMbox),
+            (
+                4,
+                SpuReferencePpuAction::InMbox {
+                    value: rng.next_u32(),
+                },
+            ),
+        ],
+        _ => Vec::new(),
+    };
+    for _ in 0..rng.below(SEQUENCE_WORLD_ACTIONS + 1)? {
+        let after = rng.below(count as u64 + 1)?;
+        let action = match rng.below(5)? {
+            0 => SpuReferencePpuAction::InMbox {
+                value: rng.next_u32(),
+            },
+            1 => SpuReferencePpuAction::Signal {
+                register: 1 + rng.below(2)? as u8,
+                value: rng.next_u32(),
+            },
+            2 => SpuReferencePpuAction::ReadOutMbox,
+            3 => SpuReferencePpuAction::ReadOutIntrMbox,
+            _ => SpuReferencePpuAction::StoreWord {
+                ea: base + rng.below((SEQUENCE_MAIN_STORAGE_BYTES / 4) as u64)? * 4,
+                value: rng.next_u32(),
+            },
+        };
+        actions.push((after, action));
+    }
+    // A stable sort keeps the interaction's own operations ahead of a
+    // drawn one that lands with them.
+    actions.sort_by_key(|(after, _)| *after);
+    Ok(SequenceWorld {
+        memory: vec![(base, bytes)],
+        actions,
+    })
 }
 
 fn pc_for_slot(slot: u64) -> Result<u32, InvariantError> {

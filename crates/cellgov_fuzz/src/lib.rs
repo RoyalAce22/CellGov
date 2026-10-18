@@ -52,7 +52,7 @@ pub use parameters::ParameterStream;
 pub use report::{
     CheckIdentity, ComponentIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun,
     FuzzTarget, InstructionIdentity, OutcomeIdentity, ReductionOutcome, RunOutcome,
-    SemanticFingerprint,
+    SemanticFingerprint, SpuFacilityCoverage,
 };
 pub use retention::{
     BoundaryClass, CampaignDistribution, CrossReferenceAsymmetry, EvaluationDistribution,

@@ -34,43 +34,127 @@ fn declared_state_input_replaces_the_selected_register_word() {
 
 #[test]
 fn structured_generation_selects_every_interaction_with_bounded_linked_parameters() {
+    const CASES: u64 = 4_096;
+    const WORDS: usize = 6;
     let descriptors = generation_descriptors();
     let mut reached = BTreeSet::new();
-    for case in 0..4_096 {
+    let mut facilities = 0;
+    for case in 0..CASES {
         let mut rng = Rng::for_case(FuzzConfig::default().campaign_version, 7, case);
-        let generated =
-            structured_sequence(&descriptors, &mut rng, 4).expect("typed sequence must generate");
-        assert_eq!(generated.words.len(), 4);
+        let generated = structured_sequence(&descriptors, &mut rng, WORDS)
+            .expect("typed sequence must generate");
+        assert_eq!(generated.words.len(), WORDS);
         if let Some((interaction, data_base)) = generated.interaction {
             reached.insert(interaction);
+            facilities += u64::from(SpuSequenceInteraction::FACILITIES.contains(&interaction));
             assert!(data_base >= STRUCTURED_LS_DATA_BASE);
             assert!(data_base as usize + RESERVATION_LINE_BYTES as usize <= SPU_LS_SIZE);
             assert_eq!(data_base as usize % RESERVATION_LINE_BYTES as usize, 0);
-            let shorter = interaction
-                .shrink_words(&generated.words)
-                .expect("one trailing decoy is removable");
-            assert_eq!(shorter.len(), 3);
-            assert_eq!(&shorter[..], &generated.words[..3]);
-            if matches!(
-                interaction,
-                SpuSequenceInteraction::Branch | SpuSequenceInteraction::Channel
-            ) {
-                assert!(
-                    interaction.shrink_words(&shorter).is_none(),
-                    "branch target is protected"
-                );
-            } else {
-                assert_eq!(
-                    interaction
-                        .shrink_words(&shorter)
-                        .expect("second decoy is removable")
-                        .len(),
-                    2
-                );
+            // Shrinking removes the trailing decoys one at a time and stops
+            // at the interaction's own program.
+            let recipe = interaction.words(&descriptors).expect("the recipe encodes");
+            let mut words = generated.words.clone();
+            while let Some(shorter) = interaction.shrink_words(&words) {
+                assert_eq!(shorter.len() + 1, words.len());
+                words = shorter;
             }
+            assert_eq!(words, recipe, "{interaction:?}");
         }
     }
     assert_eq!(reached, BTreeSet::from(SpuSequenceInteraction::ALL));
+    // Half the cases stage an interaction, and half of those draw from the
+    // facility patterns alone, so more than a quarter of the cases wait on
+    // a facility.
+    assert!(facilities > CASES / 4, "{facilities} facility cases");
+}
+
+#[test]
+fn a_sequence_too_short_for_a_facility_pattern_draws_one_that_fits() {
+    let descriptors = generation_descriptors();
+    for case in 0..1_024 {
+        let mut rng = Rng::for_case(FuzzConfig::default().campaign_version, 7, case);
+        let generated =
+            structured_sequence(&descriptors, &mut rng, 3).expect("typed sequence must generate");
+        if let Some((interaction, _)) = generated.interaction {
+            let recipe = interaction.words(&descriptors).expect("the recipe encodes");
+            assert!(recipe.len() <= 3, "{interaction:?}");
+            assert_eq!(generated.words[..recipe.len()], recipe[..]);
+        }
+    }
+}
+
+#[test]
+fn a_facility_world_carries_the_operations_its_pattern_waits_on() {
+    let config = FuzzConfig::default();
+    let mut rng = Rng::for_case(config.campaign_version, 3, 0);
+    let world = sequence_world(&mut rng, Some(SpuSequenceInteraction::MailboxDrain), 4)
+        .expect("the world draws");
+    let ops = world
+        .actions
+        .iter()
+        .map(|(_, action)| *action)
+        .collect::<Vec<_>>();
+    let read = ops
+        .iter()
+        .position(|action| *action == SpuReferencePpuAction::ReadOutMbox)
+        .expect("the drain's outbound read is scheduled");
+    let message = ops
+        .iter()
+        .position(|action| matches!(action, SpuReferencePpuAction::InMbox { .. }))
+        .expect("the drain's inbound message is scheduled");
+    assert!(read < message);
+    assert!(world.actions.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+    assert_eq!(world.memory.len(), 1);
+    assert_eq!(world.memory[0].0, u64::from(STRUCTURED_LS_DATA_BASE));
+    assert_eq!(world.memory[0].1.len(), SEQUENCE_MAIN_STORAGE_BYTES);
+
+    let mut rng = Rng::for_case(config.campaign_version, 3, 0);
+    let world = sequence_world(&mut rng, Some(SpuSequenceInteraction::EventWait), 3)
+        .expect("the world draws");
+    assert!(world
+        .actions
+        .iter()
+        .any(|(_, action)| matches!(action, SpuReferencePpuAction::Signal { register: 1, .. })));
+}
+
+#[test]
+fn a_facility_world_lands_each_scripted_operation_after_the_access_that_waits_on_it() {
+    use cellgov_spu::instruction::SpuInstruction;
+    let descriptors = generation_descriptors();
+    // The words that block until the PPU acts: the event-status read, and
+    // the write to a full outbound mailbox and the read of a drained
+    // inbound one.
+    for (interaction, waits) in [
+        (SpuSequenceInteraction::EventWait, &[1u64][..]),
+        (SpuSequenceInteraction::MailboxDrain, &[1, 3][..]),
+    ] {
+        let recipe = interaction.words(&descriptors).expect("the recipe encodes");
+        for wait in waits {
+            assert!(matches!(
+                cellgov_spu::decode::decode(recipe[*wait as usize]),
+                Ok(SpuInstruction::Rdch { .. } | SpuInstruction::Wrch { .. })
+            ));
+        }
+        let mut rng = Rng::for_case(FuzzConfig::default().campaign_version, 3, 0);
+        // With no words to land after, every drawn operation lands first,
+        // so the scripted ones are those that land later.
+        let world = sequence_world(&mut rng, Some(interaction), 0).expect("the world draws");
+        let scripted = world
+            .actions
+            .iter()
+            .map(|(after, _)| *after)
+            .filter(|after| *after > 0)
+            .collect::<Vec<_>>();
+        assert_eq!(scripted.len(), waits.len(), "{interaction:?}");
+        // An operation lands once the run decodes `after` words, and the
+        // run decodes the word at index `wait` as word `wait + 1`.
+        for (after, wait) in scripted.iter().zip(waits) {
+            assert!(
+                after > wait,
+                "{interaction:?}: lands before word {wait} parks"
+            );
+        }
+    }
 }
 
 /// [SPU-ISA p:200 s:9.3] RN0 and RN1 each name one of four modes.

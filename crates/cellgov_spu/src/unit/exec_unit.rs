@@ -2,7 +2,7 @@
 //! with the fetch-decode-execute loop in `run_until_yield`.
 
 use super::spu_unit::{SpuExecutionUnit, SpuSnapshot};
-use super::transfer::{copy_into_local_store, shared_read};
+use super::step;
 use crate::exec::{SpuFault, SpuStepOutcome};
 use crate::fault_codes::{
     guest_fault, guest_fault_for, FAULT_LS_OUT_OF_RANGE, FAULT_UNIMPLEMENTED_INSN,
@@ -18,7 +18,7 @@ use cellgov_exec::{
     StopRegisters, UnitStatus, YieldReason,
 };
 use cellgov_ps3_abi::hw::spu;
-use cellgov_ps3_abi::hw::spu::{MFC_ATOMIC_STAT_G, SPU_STATUS_R};
+use cellgov_ps3_abi::hw::spu::SPU_STATUS_R;
 use cellgov_ps3_abi::hw::spu_isa;
 use cellgov_ps3_abi::hw::spu_issue::SPU_GETLLAR_CYCLES;
 use cellgov_time::{Budget, GuestTicks, InstructionCost};
@@ -70,63 +70,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             self.pipeline.resume_after_park();
         }
 
-        // A group reads complete when this unit has no outstanding
-        // transfer with its tag, so a reused tag reads incomplete until its
-        // new transfer lands.
-        // [CBEA p:128 s:9.3.6] a set bit means the group has no outstanding operations.
-        // A list with elements still to queue holds its tag group too.
-        let channels = &mut self.state.channels;
-        let list_tags = channels
-            .lists
-            .iter()
-            .fold(0, |tags, list| tags | list.tag.status_bit());
-        channels.tag_status = !(ctx.outstanding_dma_tags() | list_tags);
-        // Each queued command holds a slot until it completes, and a list
-        // holds its one slot until it queues its last element. A count
-        // that rises from 0 here is the Qv event's edge.
-        let held = u32::try_from(channels.lists.len()).unwrap_or(u32::MAX);
-        channels.cmd_queue_free = spu::MFC_SPU_QUEUE_DEPTH
-            .saturating_sub(ctx.dma_queue_occupancy())
-            .saturating_sub(held);
-        // A list stalls once its stall-and-notify element leaves the queue.
-        // [CBEA p:129 s:9.3.7] the stall occurs after the flagged element's transfer completes, and sets the group's bit in MFC_RdListStallStat.
-        for list in channels.lists.iter_mut().filter(|list| !list.stalled) {
-            let bit = list.tag.status_bit();
-            if ctx.list_stall_tags() & bit == 0 {
-                list.stalled = true;
-                channels.list_stall_status |= bit;
-            }
-        }
-        self.state.channels.settle_tag_update();
-        self.state.channels.in_mbox = ctx.inbound_mailbox().to_vec();
-        // A multisource synchronization request completes once the queue
-        // holds none of the transfers it tracks. A request this step makes
-        // tracks the transfers the queue holds now.
-        // [CBEA p:143 s:9.10] the count returns to 1 when the tracked transfers complete.
-        let oldest = ctx.oldest_mfc_transfer();
-        let channels = &mut self.state.channels;
-        if channels
-            .mssync_tracking
-            .is_some_and(|upto| oldest.is_none_or(|seq| seq >= upto))
-        {
-            channels.mssync_tracking = None;
-        }
-        channels.mssync_horizon = oldest.map(|_| ctx.dma_next_sequence());
-        // Every source count the step entry refreshed can have risen.
-        self.state.set_clock(ctx.current_tick());
-        self.state.update_events();
-
-        // Mirror cross-unit reservation invalidation. The context view is
-        // frozen for the step, so a single entry-time check suffices.
-        // A store from another unit, or the landing of this unit's own
-        // MFC put, drops the committed entry while the local register
-        // holds a line. putllc, putlluc and putqlluc clear the register
-        // as they issue.
-        // [CBEA p:148 s:9.11.1] Lr is set when a snoop external to the MFC resets the reservation, and never for a local action.
-        if self.state.reservation().is_some() && !ctx.reservation_held(self.id) {
-            self.state.set_reservation(None);
-            self.state.raise_events(spu::event::LR);
-        }
+        step::enter_step(&mut self.state, self.id, ctx);
 
         // The budget bounds the instructions the step retires; the step
         // costs the guest ticks its cycles take. The step reads the ticks
@@ -142,14 +86,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             // issue in.
             self.state
                 .set_clock(tick_at(start, base, self.pipeline.next_issue()));
-            // The decrementer can pass zero between two channel accesses,
-            // and an interrupt is the one way the unit sees that there.
-            if self.state.interrupts_enabled() {
-                self.state.sample_decrementer();
-            }
-            // [SPU-ISA p:251 s:12.1] an interrupt lands between instructions.
-            if self.state.interrupt_pending() {
-                self.state.take_interrupt();
+            if step::take_pending_interrupt(&mut self.state) {
                 // Entering the handler flushes the pipeline as a
                 // mispredicted branch to address 0 does. No capture
                 // times the entry.
@@ -202,26 +139,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             // The instruction runs at the cycle it issues in.
             let slot = self.pipeline.plan(&self.state, raw, &insn);
             self.state.set_clock(tick_at(start, base, slot.cycle));
-            // The decrementer runs between instructions, so a channel
-            // access first looks for the zero crossing it can report.
-            if matches!(
-                insn,
-                crate::instruction::SpuInstruction::Rdch { .. }
-                    | crate::instruction::SpuInstruction::Wrch { .. }
-                    | crate::instruction::SpuInstruction::Rchcnt { .. }
-            ) {
-                self.state.sample_decrementer();
-            }
-            let outcome = exec::execute(&insn, &mut self.state, self.id);
-            // A channel access is the one instruction that moves an event
-            // source's count within a step.
-            if matches!(
-                insn,
-                crate::instruction::SpuInstruction::Rdch { .. }
-                    | crate::instruction::SpuInstruction::Wrch { .. }
-            ) {
-                self.state.update_events();
-            }
+            let outcome = step::execute_instruction(&insn, &mut self.state, self.id);
             match outcome {
                 SpuStepOutcome::Continue => {
                     if ctx.trace_per_step() {
@@ -291,37 +209,18 @@ impl ExecutionUnit for SpuExecutionUnit {
                     size,
                     acquire_line,
                 } => {
-                    // `ea` comes from MFC_EAH and MFC_EAL, so the guest can
-                    // name an address no region backs.
-                    // [CBEA p:111 s:9 SPU Channel Map] MFC_EAL is a write channel carrying the low-order SPU effective-address command parameter.
-                    let read = copy_into_local_store(&mut self.state, ctx.memory(), ea, lsa, size);
-                    if read.is_err() {
-                        // No region backs the line: the MFC raises the
-                        // data-segment exception for the getllar, which
-                        // moves no line and never reports its status. The
-                        // spu_ea_bound console capture shows that class
-                        // for a getllar at an address nothing maps.
-                        // [CBEA p:120 s:9.1.7] a segment fault suspends the queue and raises the MFC data-segment interrupt.
-                        // The command acquires no reservation over a
-                        // line it never read. One an earlier getllar took
-                        // stands, in the register as in the committed
-                        // table that getllar's acquire reaches.
-                        // The record names the line the command moves.
-                        let params = cellgov_dma::MfcParameters {
-                            lsa,
-                            eah: (ea >> 32) as u32,
-                            eal: ea as u32,
-                            size,
-                            tag: self.state.channels.mfc_tag_id,
-                        };
-                        effects.push(crate::exec::invalid_command(
-                            spu::MFC_GETLLAR,
-                            params,
-                            cellgov_dma::MfcCommandError::DataSegment { ea },
-                            &mut self.state,
-                            self.id,
-                        ));
-                        self.pipeline.retire(slot, None);
+                    let completion = step::complete_memory_read(
+                        &mut self.state,
+                        ctx.memory(),
+                        self.id,
+                        ea,
+                        lsa,
+                        size,
+                        acquire_line,
+                        effects,
+                    );
+                    self.pipeline.retire(slot, None);
+                    if completion == step::MemoryReadCompletion::Refused {
                         self.state.advance_pc();
                         self.retire(step_pc, ctx.trace_per_step());
                         return ExecutionStepResult {
@@ -332,20 +231,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                             syscall_args: None,
                         };
                     }
-                    effects.extend(shared_read(ea, size, self.id));
-                    self.pipeline.retire(slot, None);
-                    if let Some(line_addr) = acquire_line {
-                        // [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] the channel holds the status of the last completed immediate atomic command.
-                        self.state.channels.atomic_status = MFC_ATOMIC_STAT_G;
-                        self.state.channels.atomic_status_ready = true;
-                        self.state
-                            .set_reservation(Some(cellgov_sync::ReservedLine::containing(
-                                line_addr,
-                            )));
-                        effects.push(Effect::ReservationAcquire {
-                            line_addr,
-                            source: self.id,
-                        });
+                    if completion == (step::MemoryReadCompletion::Read { acquired: true }) {
                         // The getllar takes the round trip the console
                         // measures.
                         self.pipeline.charge(SPU_GETLLAR_CYCLES);

@@ -1,8 +1,13 @@
-//! The SPU execution unit: its state, the transfer path into local
-//! store, and the `ExecutionUnit` impl.
+//! The SPU execution unit:
+//!
+//! - its state
+//! - the transfer path into local store
+//! - the pipeline-free parts of a step ([`step`])
+//! - the `ExecutionUnit` impl
 
 mod exec_unit;
 mod spu_unit;
+pub mod step;
 mod transfer;
 
 pub use spu_unit::{SpuExecutionUnit, SpuSnapshot};

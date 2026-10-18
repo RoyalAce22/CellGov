@@ -35,6 +35,10 @@ pub enum SpuChannelField {
     TagUpdate,
     /// Latched tag status not yet read.
     TagStatusRead,
+    /// The message in the outbound mailbox.
+    OutboundMailbox,
+    /// An atomic command's status that no channel read has taken yet.
+    AtomicStatusReady,
 }
 
 fn channel_differences(
@@ -76,6 +80,14 @@ fn channel_differences(
             before.tag_status_read != after.tag_status_read,
             SpuChannelField::TagStatusRead,
         ),
+        (
+            before.out_mbox != after.out_mbox,
+            SpuChannelField::OutboundMailbox,
+        ),
+        (
+            before.atomic_status_ready != after.atomic_status_ready,
+            SpuChannelField::AtomicStatusReady,
+        ),
     ] {
         if changed {
             fields.insert(field);
@@ -109,6 +121,16 @@ pub enum SpuObservationComponent {
     Signals,
     /// Interrupt-enable state and SRR0.
     Interrupts,
+    /// The event registers ([`crate::state::SpuEventSnapshot`]).
+    Events,
+    /// The decrementer.
+    Decrementer,
+    /// The outbound interrupt mailbox.
+    OutboundInterruptMailbox,
+    /// The list commands still queuing elements, and their stall status.
+    MfcLists,
+    /// The multisource synchronization request.
+    MultisourceSync,
 }
 
 /// Complete SPU state, outcome, and effect observation.
@@ -243,12 +265,35 @@ fn state_differences_with(
         stop: _,
         signals,
         channels,
+        facilities,
         reservation,
         fpscr,
         interrupts_enabled,
         srr0,
     } = a;
+    let crate::state::SpuFacilitySnapshot {
+        events,
+        decrementer,
+        out_intr_mbox,
+        lists,
+        mssync,
+    } = facilities;
+    let other = &b.facilities;
     [
+        (*events != other.events, SpuObservationComponent::Events),
+        (
+            *decrementer != other.decrementer,
+            SpuObservationComponent::Decrementer,
+        ),
+        (
+            *out_intr_mbox != other.out_intr_mbox,
+            SpuObservationComponent::OutboundInterruptMailbox,
+        ),
+        (*lists != other.lists, SpuObservationComponent::MfcLists),
+        (
+            *mssync != other.mssync,
+            SpuObservationComponent::MultisourceSync,
+        ),
         (*regs != b.regs, SpuObservationComponent::Registers),
         (local_store_differs, SpuObservationComponent::LocalStore),
         (*pc != b.pc, SpuObservationComponent::ProgramCounter),
@@ -289,6 +334,18 @@ pub struct SpuAllowedFootprint {
     /// Whether the instruction may change the interrupt-enable state or
     /// SRR0.
     pub interrupts: bool,
+    /// Whether the instruction may change the event registers.
+    pub events: bool,
+    /// Whether the instruction may change the decrementer.
+    pub decrementer: bool,
+    /// Whether the instruction may fill the outbound interrupt mailbox.
+    pub out_intr_mbox: bool,
+    /// Whether the instruction may start, acknowledge or read a list
+    /// command.
+    pub lists: bool,
+    /// Whether the instruction may make a multisource synchronization
+    /// request.
+    pub mssync: bool,
     /// Effect classes declared by the instruction descriptor.
     pub effects: BTreeSet<EffectKind>,
 }
@@ -296,12 +353,47 @@ pub struct SpuAllowedFootprint {
 impl SpuAllowedFootprint {
     /// Derives permitted writes from the decoded instruction and its effect contract.
     pub fn for_instruction(instruction: &SpuInstruction) -> Self {
+        use cellgov_ps3_abi::hw::spu as ch;
+        // Any channel access may sample the decrementer and raise an
+        // event (`step::execute_instruction`).
+        let channel_access = matches!(
+            instruction,
+            SpuInstruction::Rdch { .. }
+                | SpuInstruction::Wrch { .. }
+                | SpuInstruction::Rchcnt { .. }
+        );
         let mut footprint = Self {
             registers: BTreeSet::new(),
             local_store: false,
             channels: BTreeSet::new(),
             reservation: false,
             control_transfer: false,
+            events: channel_access,
+            decrementer: channel_access,
+            out_intr_mbox: matches!(
+                instruction,
+                SpuInstruction::Wrch {
+                    channel: ch::SPU_WR_OUT_INTR_MBOX,
+                    ..
+                }
+            ),
+            lists: matches!(
+                instruction,
+                SpuInstruction::Wrch {
+                    channel: ch::MFC_CMD | ch::MFC_WR_LIST_STALL_ACK,
+                    ..
+                } | SpuInstruction::Rdch {
+                    channel: ch::MFC_RD_LIST_STALL_STAT,
+                    ..
+                }
+            ),
+            mssync: matches!(
+                instruction,
+                SpuInstruction::Wrch {
+                    channel: ch::MFC_WR_MSSYNC_REQ,
+                    ..
+                }
+            ),
             interrupts: matches!(
                 instruction,
                 SpuInstruction::Bi { .. }
@@ -515,8 +607,14 @@ impl SpuAllowedFootprint {
                 if let Some(field) = field {
                     footprint.channels.insert(field);
                 }
+                if channel == spu::SPU_WR_OUT_MBOX {
+                    footprint.channels.insert(SpuChannelField::OutboundMailbox);
+                }
                 if channel == spu::MFC_CMD {
                     footprint.channels.insert(SpuChannelField::AtomicStatus);
+                    footprint
+                        .channels
+                        .insert(SpuChannelField::AtomicStatusReady);
                     // A command that consumed MFC_EAH takes it back to 0.
                     footprint.channels.insert(SpuChannelField::MfcEah);
                     footprint.reservation = true;
@@ -623,6 +721,21 @@ impl SpuAllowedFootprint {
             }
         ) {
             footprint.channels.insert(SpuChannelField::TagStatusRead);
+        }
+        if matches!(
+            instruction,
+            SpuInstruction::Rdch {
+                channel: cellgov_ps3_abi::hw::spu::MFC_RD_ATOMIC_STAT,
+                ..
+            }
+        ) {
+            // [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] the channel holds the status of the last completed immediate atomic command.
+            // The read takes the status, and the channel holds none until
+            // the next atomic command completes.
+            footprint.channels.insert(SpuChannelField::AtomicStatus);
+            footprint
+                .channels
+                .insert(SpuChannelField::AtomicStatusReady);
         }
         footprint
     }
@@ -735,6 +848,38 @@ impl SpuAllowedFootprint {
                 && !self.interrupts
             {
                 violations.insert(SpuObservationComponent::Interrupts);
+            }
+            let (was, now) = (&before.facilities, &observed.facilities);
+            for (changed, allowed, component) in [
+                (
+                    was.events != now.events,
+                    self.events,
+                    SpuObservationComponent::Events,
+                ),
+                (
+                    was.decrementer != now.decrementer,
+                    self.decrementer,
+                    SpuObservationComponent::Decrementer,
+                ),
+                (
+                    was.out_intr_mbox != now.out_intr_mbox,
+                    self.out_intr_mbox,
+                    SpuObservationComponent::OutboundInterruptMailbox,
+                ),
+                (
+                    was.lists != now.lists,
+                    self.lists,
+                    SpuObservationComponent::MfcLists,
+                ),
+                (
+                    was.mssync != now.mssync,
+                    self.mssync,
+                    SpuObservationComponent::MultisourceSync,
+                ),
+            ] {
+                if changed && !allowed {
+                    violations.insert(component);
+                }
             }
         }
         // A fault discards effects even when their kind is otherwise allowed.

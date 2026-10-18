@@ -58,6 +58,7 @@ pub(super) fn summary_with_findings(findings: u64) -> CampaignSummary {
         stored_reproduced: Vec::new(),
         reductions_failed: 0,
         cancelled: false,
+        spu_facilities: cellgov_fuzz::SpuFacilityCoverage::default(),
     }
 }
 

@@ -14,7 +14,8 @@ use super::execute::{
     spu_sequence_replay_asymmetry, SpuTerminalObservation,
 };
 use super::generate::{
-    case_descriptors, random_state, state_aware_state, structured_sequence, GeneratedSequence,
+    case_descriptors, random_state, sequence_world, state_aware_state, structured_sequence,
+    GeneratedSequence,
 };
 use super::record::{footprint_fingerprint, guarded_run, record, record_target_panic};
 use super::sequence_relations::{replay_stored, run_relation_check};
@@ -159,6 +160,11 @@ fn run_sequences_inner(
         if let Some((interaction, data_base)) = generated.interaction {
             interaction.prepare_state(&mut initial, data_base);
         }
+        let world = sequence_world(
+            &mut rng,
+            generated.interaction.map(|(interaction, _)| interaction),
+            config.sequence_words as usize,
+        )?;
         initial.pc = 0;
         for (index, word) in words.iter().enumerate() {
             let start = index * 4;
@@ -172,13 +178,14 @@ fn run_sequences_inner(
         let first = match call_target(|| {
             run_generated_sequence(
                 &initial,
+                &world,
                 config.sequence_words as usize,
                 program_words,
                 config.strategy,
                 &executing,
             )
         }) {
-            Ok(first) => first,
+            Ok(first) => first?,
             Err(payload) => {
                 record_target_panic(
                     report,
@@ -203,15 +210,19 @@ fn run_sequences_inner(
         );
         report.assessed(&assessment)?;
         report.executed(first.1)?;
-        report.observed_effects(
+        report.reached_facilities(&first.0.coverage);
+        // A faulting run discards every effect it committed, so the
+        // campaign counts only the effects its last step emitted.
+        let emitted = if first.0.effects.is_empty() {
             first
                 .0
                 .terminal_outcome
                 .as_ref()
-                .into_iter()
-                .flat_map(outcome_effects)
-                .map(Effect::kind),
-        )?;
+                .map_or(&[][..], outcome_effects)
+        } else {
+            first.0.effects.as_slice()
+        };
+        report.observed_effects(emitted.iter().map(Effect::kind))?;
         // The relation check is independent of the generated program, so
         // every case runs it and every row gets its turn.
         let relation_asymmetry = run_relation_check(report, &mut rng, iteration)?;
@@ -236,13 +247,15 @@ fn run_sequences_inner(
             let second = match call_target(|| {
                 run_generated_sequence(
                     &initial,
+                    &world,
                     config.sequence_words as usize,
                     program_words,
                     config.strategy,
                     &executing,
                 )
             }) {
-                Ok(mut second) => {
+                Ok(second) => {
+                    let mut second = second?;
                     seeded::spu_replayed(&mut second.0.state);
                     second
                 }
@@ -351,3 +364,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/fall_through_wrap_tests.rs"]
 mod fall_through_wrap_tests;
+
+#[cfg(test)]
+#[path = "tests/facility_tests.rs"]
+mod facility_tests;

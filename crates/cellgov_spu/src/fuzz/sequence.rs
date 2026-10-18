@@ -41,11 +41,30 @@ pub enum SpuSequenceInteraction {
     Branch,
     /// Reach a terminating STOP after a preceding instruction.
     Stop,
+    /// Issue a get, then wait for its tag group to complete.
+    TagWait,
+    /// Take a reservation with getllar, then store the line with putllc.
+    /// Read the atomic status after each command.
+    ReserveStore,
+    /// Enable signal-notification 1 as an event, wait for it, then
+    /// acknowledge it.
+    EventWait,
+    /// Write one message more than the outbound mailbox holds, then read
+    /// one message more than the inbound mailbox holds.
+    MailboxDrain,
 }
 
 impl SpuSequenceInteraction {
+    /// The interactions that wait on an MFC command, an event or a mailbox.
+    pub const FACILITIES: [Self; 4] = [
+        Self::TagWait,
+        Self::ReserveStore,
+        Self::EventWait,
+        Self::MailboxDrain,
+    ];
+
     /// Lists the interaction families in stable generator order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 14] = [
         Self::Channel,
         Self::Mailbox,
         Self::Dma,
@@ -56,14 +75,19 @@ impl SpuSequenceInteraction {
         Self::RefusedMfcCommand,
         Self::Branch,
         Self::Stop,
+        Self::TagWait,
+        Self::ReserveStore,
+        Self::EventWait,
+        Self::MailboxDrain,
     ];
 
     /// Removes one trailing decoy without deleting the interaction's required instructions.
     pub fn shrink_words(self, words: &[u32]) -> Option<Vec<u32>> {
-        let essential = if matches!(self, Self::Branch | Self::Channel) {
-            3
-        } else {
-            2
+        let essential = match self {
+            Self::TagWait | Self::ReserveStore => 5,
+            Self::MailboxDrain => 4,
+            Self::Branch | Self::Channel | Self::EventWait => 3,
+            _ => 2,
         };
         if words.len() <= essential
             || !matches!(
@@ -106,6 +130,29 @@ impl SpuSequenceInteraction {
             }
             Self::Mailbox => state.channels.in_mbox = vec![SEQUENCE_MAILBOX_MESSAGE],
             Self::Branch | Self::Stop => {}
+            Self::TagWait | Self::ReserveStore => {
+                state.set_reg_word_splat(1, data_base);
+                state.channels.mfc_lsa = data_base + cellgov_sync::RESERVATION_LINE_BYTES as u32;
+                state.channels.mfc_eah = 0;
+                state.channels.mfc_eal = data_base;
+                state.channels.mfc_size = cellgov_sync::RESERVATION_LINE_BYTES as u32;
+                state.channels.mfc_tag_id = 0;
+                if self == Self::TagWait {
+                    state.set_reg_word_splat(2, spu::MFC_GET);
+                    state.set_reg_word_splat(4, 1);
+                    state.set_reg_word_splat(5, spu::MFC_TAG_UPDATE_ALL);
+                } else {
+                    state.set_reg_word_splat(2, spu::MFC_GETLLAR);
+                    state.set_reg_word_splat(4, spu::MFC_PUTLLC);
+                    state.set_reservation(None);
+                }
+            }
+            Self::EventWait => state.set_reg_word_splat(4, spu::event::S1),
+            Self::MailboxDrain => {
+                state.set_reg_word_splat(4, SEQUENCE_MAILBOX_MESSAGE ^ 1);
+                state.set_reg_word_splat(5, SEQUENCE_MAILBOX_MESSAGE ^ 2);
+                state.channels.in_mbox = vec![SEQUENCE_MAILBOX_MESSAGE];
+            }
         }
     }
 
@@ -142,6 +189,12 @@ impl SpuSequenceInteraction {
         let channel = SpuOperandClass::Channel;
         let immediate = SpuOperandClass::Immediate;
         let wrch = |source, selector| word(K::Wrch, &[(reg, 0, source), (channel, 0, selector)]);
+        let rdch = |target, selector: u8| {
+            word(
+                K::Rdch,
+                &[(reg, 0, target), (channel, 0, u32::from(selector))],
+            )
+        };
         let program = match self {
             Self::Channel => vec![
                 wrch(1, u32::from(spu::MFC_LSA))?,
@@ -180,6 +233,32 @@ impl SpuSequenceInteraction {
                 word(K::Nop, &[])?,
             ],
             Self::Stop => vec![word(K::Nop, &[])?, word(K::Stop, &[])?],
+            Self::TagWait => vec![
+                wrch(1, u32::from(spu::MFC_LSA))?,
+                wrch(2, u32::from(spu::MFC_CMD))?,
+                wrch(4, u32::from(spu::MFC_WR_TAG_MASK))?,
+                // [CBE-Handbook p:460 s:17.10.4] Read tag status only after a tag-update request.
+                wrch(5, u32::from(spu::MFC_WR_TAG_UPDATE))?,
+                rdch(3, spu::MFC_RD_TAG_STAT)?,
+            ],
+            Self::ReserveStore => vec![
+                wrch(1, u32::from(spu::MFC_LSA))?,
+                wrch(2, u32::from(spu::MFC_CMD))?,
+                rdch(3, spu::MFC_RD_ATOMIC_STAT)?,
+                wrch(4, u32::from(spu::MFC_CMD))?,
+                rdch(5, spu::MFC_RD_ATOMIC_STAT)?,
+            ],
+            Self::EventWait => vec![
+                wrch(4, u32::from(spu::SPU_WR_EVENT_MASK))?,
+                rdch(3, spu::SPU_RD_EVENT_STAT)?,
+                wrch(3, u32::from(spu::SPU_WR_EVENT_ACK))?,
+            ],
+            Self::MailboxDrain => vec![
+                wrch(4, u32::from(spu::SPU_WR_OUT_MBOX))?,
+                wrch(5, u32::from(spu::SPU_WR_OUT_MBOX))?,
+                rdch(3, spu::SPU_RD_IN_MBOX)?,
+                rdch(6, spu::SPU_RD_IN_MBOX)?,
+            ],
         };
         Ok(program)
     }

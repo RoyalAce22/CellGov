@@ -33,10 +33,11 @@ fn an_spu_sequence_retains_terminal_effects() {
 fn a_faulting_spu_sequence_discards_prior_state() {
     let mut initial = SpuState::new();
     let il_r3_one = (0x081u32 << 23) | (1 << 7) | 3;
-    // wrch SPU_WrOutIntrMbox with no reader connected: refused by name.
-    let refused_wrch = (0x10Du32 << 21) | (0x1E << 7) | 2;
+    // rdch MFC_RdTagStat with no update request: a stall nothing can
+    // end, refused by name.
+    let refused_rdch = (0x00Du32 << 21) | (u32::from(spu::MFC_RD_TAG_STAT) << 7) | 2;
     initial.ls[..4].copy_from_slice(&il_r3_one.to_be_bytes());
-    initial.ls[4..8].copy_from_slice(&refused_wrch.to_be_bytes());
+    initial.ls[4..8].copy_from_slice(&refused_rdch.to_be_bytes());
 
     let (observed, decoded, _) = run_sequence(&initial, 2);
 
@@ -47,6 +48,42 @@ fn a_faulting_spu_sequence_discards_prior_state() {
         observed.terminal_outcome,
         Some(SpuStepOutcome::Fault(_))
     ));
+}
+
+#[test]
+fn a_faulting_spu_sequence_discards_the_stores_the_world_committed() {
+    const BASE: u64 = 0x1_0000;
+    let mut initial = SpuState::new();
+    // wrch MFC_Cmd from r2, then the refused tag-status read.
+    let wrch_cmd = (0x10Du32 << 21) | (u32::from(spu::MFC_CMD) << 7) | 2;
+    let refused_rdch = (0x00Du32 << 21) | (u32::from(spu::MFC_RD_TAG_STAT) << 7) | 2;
+    initial.ls[..4].copy_from_slice(&wrch_cmd.to_be_bytes());
+    initial.ls[4..8].copy_from_slice(&refused_rdch.to_be_bytes());
+    initial.ls[0x100..0x110].fill(0xAA);
+    initial.set_reg_word_splat(2, spu::MFC_PUT);
+    initial.channels.mfc_lsa = 0x100;
+    initial.channels.mfc_eal = BASE as u32;
+    initial.channels.mfc_size = 16;
+    let world = SequenceWorld {
+        memory: vec![(BASE, vec![0; 0x100])],
+        actions: Vec::new(),
+    };
+
+    let put_only = run_sequence_with_limit(&initial, &world, 1, None, &Cell::new(None))
+        .expect("the world builds");
+    let faulted = run_sequence_with_limit(&initial, &world, 2, None, &Cell::new(None))
+        .expect("the world builds");
+
+    // The put alone lands in main storage.
+    assert_eq!(put_only.0.memory[0].1[..16], [0xAA; 16]);
+    assert!(!put_only.0.effects.is_empty());
+    // A fault later in the batch discards it with everything else.
+    assert!(matches!(
+        faulted.0.terminal_outcome,
+        Some(SpuStepOutcome::Fault(_))
+    ));
+    assert_eq!(faulted.0.memory, world.memory);
+    assert!(faulted.0.effects.is_empty());
 }
 
 #[test]
@@ -137,10 +174,35 @@ fn spu_sequence_replay_compares_depth_and_execution_order() {
         has_undefined_operands: false,
         has_unmodeled_execution: false,
         footprint_violations: BTreeSet::new(),
+        memory: Vec::new(),
+        effects: Vec::new(),
+        ppu_results: Vec::new(),
+        mfc_exceptions: Vec::new(),
+        stalled: false,
+        parks: 0,
+        coverage: SpuFacilityCoverage::default(),
     };
     let nop = InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Nop);
     let lnop = InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Lnop);
     let first = (observed.clone(), 2, vec![nop, lnop]);
+    let mut parked = first.clone();
+    parked.0.stalled = true;
+    let mut stored = first.clone();
+    stored.0.memory = vec![(0, vec![1])];
+    let mut covered = first.clone();
+    covered.0.coverage.channels.insert(spu::SPU_RD_EVENT_STAT);
+    assert_eq!(
+        spu_sequence_replay_asymmetry(&first, &covered),
+        CrossReferenceAsymmetry::State
+    );
+    assert_eq!(
+        spu_sequence_replay_asymmetry(&first, &parked),
+        CrossReferenceAsymmetry::State
+    );
+    assert_eq!(
+        spu_sequence_replay_asymmetry(&first, &stored),
+        CrossReferenceAsymmetry::State
+    );
     let reordered = (observed.clone(), 2, vec![lnop, nop]);
     let deeper = (observed, 3, vec![nop, lnop]);
     let mut refusal = first.clone();
@@ -196,6 +258,47 @@ fn spu_observation_preserves_the_first_executed_kind() {
     assert_eq!(refusal.outcome, Some(OutcomeIdentity::SpuDecodeRefusal));
 }
 
+/// The message the recipe world delivers to a drained inbound mailbox.
+const RECIPE_MESSAGE: u32 = 0x0BAD_F00D;
+
+/// Bytes in one lock line.
+const LINE: usize = RESERVATION_LINE_BYTES as usize;
+
+/// The main-storage line the recipe world holds at the data base.
+fn recipe_line() -> Vec<u8> {
+    (0..LINE as u8).collect()
+}
+
+/// Main storage at the data base, and the operations an interaction
+/// waits on.
+fn recipe_world(interaction: SpuSequenceInteraction) -> SequenceWorld {
+    let mut bytes = vec![0; crate::spu::generate::SEQUENCE_MAIN_STORAGE_BYTES];
+    bytes[..LINE].copy_from_slice(&recipe_line());
+    let actions = match interaction {
+        SpuSequenceInteraction::EventWait => vec![(
+            2,
+            SpuReferencePpuAction::Signal {
+                register: 1,
+                value: 7,
+            },
+        )],
+        SpuSequenceInteraction::MailboxDrain => vec![
+            (2, SpuReferencePpuAction::ReadOutMbox),
+            (
+                4,
+                SpuReferencePpuAction::InMbox {
+                    value: RECIPE_MESSAGE,
+                },
+            ),
+        ],
+        _ => Vec::new(),
+    };
+    SequenceWorld {
+        memory: vec![(u64::from(STRUCTURED_LS_DATA_BASE), bytes)],
+        actions,
+    }
+}
+
 #[test]
 fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks() {
     let descriptors = generation_descriptors();
@@ -225,20 +328,25 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
         for (index, word) in words.iter().enumerate() {
             initial.ls[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
         }
+        let world = recipe_world(interaction);
         let first = run_generated_sequence(
             &initial,
+            &world,
             words.len(),
             words.len(),
             GenerationStrategy::Structured,
             &Cell::new(None),
-        );
+        )
+        .expect("the world builds");
         let replay = run_generated_sequence(
             &initial,
+            &world,
             words.len(),
             words.len(),
             GenerationStrategy::Structured,
             &Cell::new(None),
-        );
+        )
+        .expect("the world builds");
         assert_eq!(
             spu_sequence_replay_asymmetry(&first, &replay),
             CrossReferenceAsymmetry::None,
@@ -342,6 +450,72 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                     InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Nop)
                 );
             }
+            SpuSequenceInteraction::TagWait => {
+                assert_eq!(first.2.len(), 5);
+                let base = STRUCTURED_LS_DATA_BASE as usize;
+                // The get landed the main-storage line in local store.
+                assert_eq!(first.0.state.ls[base..base + LINE], recipe_line());
+                // Tag group 0 reads complete once the get lands.
+                assert_eq!(first.0.state.regs[3][..4], 1u32.to_be_bytes());
+                assert!(!first.0.stalled);
+                // Every get completes in the step that queued it, so the
+                // wait never blocks.
+                assert_eq!(first.0.parks, 0);
+                assert!(first
+                    .0
+                    .coverage
+                    .mfc_opcodes
+                    .contains(&(spu::MFC_GET as u16)));
+            }
+            SpuSequenceInteraction::ReserveStore => {
+                assert_eq!(first.2.len(), 5);
+                assert_eq!(
+                    first.0.state.regs[3][..4],
+                    spu::MFC_ATOMIC_STAT_G.to_be_bytes()
+                );
+                // [CBEA p:131 s:9.4] a putllc that kept its reservation reads 0.
+                assert_eq!(first.0.state.regs[5][..4], 0u32.to_be_bytes());
+                assert!(first
+                    .0
+                    .effects
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::ConditionalStore { .. })));
+                assert!(first.0.state.reservation.is_none());
+            }
+            SpuSequenceInteraction::EventWait => {
+                assert_eq!(first.2.len(), 3);
+                // The wait parked until the scripted signal write landed.
+                assert_eq!(
+                    first.0.ppu_results,
+                    [crate::spu_reference::SpuReferencePpuResult::Done]
+                );
+                assert_eq!(first.0.state.regs[3][..4], spu::event::S1.to_be_bytes());
+                assert_eq!(first.0.state.facilities.events.pending & spu::event::S1, 0);
+                assert!(first.0.coverage.event_sources.contains(&spu::event::S1));
+                assert!(!first.0.stalled);
+                assert_eq!(first.0.parks, 1);
+            }
+            SpuSequenceInteraction::MailboxDrain => {
+                use cellgov_spu::fuzz::SEQUENCE_MAILBOX_MESSAGE as MESSAGE;
+                assert_eq!(first.2.len(), 4);
+                assert_eq!(
+                    first.0.ppu_results,
+                    [
+                        crate::spu_reference::SpuReferencePpuResult::Read {
+                            value: Some(MESSAGE ^ 1)
+                        },
+                        crate::spu_reference::SpuReferencePpuResult::Done,
+                    ]
+                );
+                assert_eq!(first.0.state.channels.out_mbox, Some(MESSAGE ^ 2));
+                assert_eq!(first.0.state.regs[3][..4], MESSAGE.to_be_bytes());
+                // The second inbound read parked until the scripted message landed.
+                assert_eq!(first.0.state.regs[6][..4], RECIPE_MESSAGE.to_be_bytes());
+                assert!(!first.0.stalled);
+                // The second outbound write and the second inbound read each
+                // parked once.
+                assert_eq!(first.0.parks, 2);
+            }
             SpuSequenceInteraction::Stop => {
                 assert_eq!(first.2.len(), 2);
                 // STOP's outcome carries its signal, so the campaign models the case.
@@ -404,6 +578,11 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
             SpuSequenceInteraction::Stop => {
                 defective.0.terminal_outcome = Some(SpuStepOutcome::Continue)
             }
+            SpuSequenceInteraction::TagWait | SpuSequenceInteraction::EventWait => {
+                defective.0.state.regs[3][3] ^= 1
+            }
+            SpuSequenceInteraction::ReserveStore => defective.0.effects.clear(),
+            SpuSequenceInteraction::MailboxDrain => defective.0.ppu_results.clear(),
         }
         assert_ne!(
             spu_sequence_replay_asymmetry(&first, &defective),
@@ -430,11 +609,13 @@ fn an_spu_sequence_does_not_execute_beyond_its_generated_words() {
 
     let (_, decoded, _) = run_generated_sequence(
         &initial,
+        &SequenceWorld::default(),
         2,
         2,
         GenerationStrategy::Structured,
         &Cell::new(None),
-    );
+    )
+    .expect("an empty world builds");
 
     assert_eq!(decoded, 1);
 }

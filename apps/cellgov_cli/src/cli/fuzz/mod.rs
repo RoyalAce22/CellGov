@@ -52,3 +52,7 @@ mod reference_tests;
 #[cfg(test)]
 #[path = "tests/documented_tests.rs"]
 mod documented_tests;
+
+#[cfg(test)]
+#[path = "tests/reached_tests.rs"]
+mod reached_tests;

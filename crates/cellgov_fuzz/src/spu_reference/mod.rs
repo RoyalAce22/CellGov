@@ -9,6 +9,7 @@ mod set_types;
 mod set_validate;
 mod types;
 mod validate;
+pub(crate) mod world;
 
 pub use campaign::*;
 pub use compare::*;

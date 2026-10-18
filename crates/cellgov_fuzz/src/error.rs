@@ -255,6 +255,12 @@ pub enum InvariantError {
     /// The committed sequence-relation counterexample store does not parse.
     #[error("the stored sequence-relation counterexamples do not parse")]
     StoredCounterexamples,
+    /// The scripted world an SPU sequence runs against refused an operation.
+    #[error("the SPU sequence world refused {what}")]
+    SequenceWorld {
+        /// What the world refused.
+        what: &'static str,
+    },
 }
 
 /// Failure of the fuzz harness rather than the target under test.

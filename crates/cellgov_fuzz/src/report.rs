@@ -311,6 +311,8 @@ pub struct FuzzReport {
     pub distribution: CampaignDistribution,
     /// Stable instruction kinds reached.
     pub instruction_kinds: BTreeSet<InstructionIdentity>,
+    /// The SPU channels, MFC commands and event sources the run reached.
+    pub spu_facilities: SpuFacilityCoverage,
     /// Finding counts by rule.
     pub finding_counts: BTreeMap<FindingKind, u64>,
     /// First bounded set of reproducible findings.
@@ -325,6 +327,26 @@ pub struct FuzzReport {
     pub stored_replays: Vec<StoredReplay>,
     max_findings: usize,
     pub(crate) sequence_words: u32,
+}
+
+/// The SPU facilities a run reached.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SpuFacilityCoverage {
+    /// Each channel an `rdch`, `wrch` or `rchcnt` named.
+    pub channels: BTreeSet<u8>,
+    /// Each MFC command opcode a write of `MFC_Cmd` issued.
+    pub mfc_opcodes: BTreeSet<u16>,
+    /// Each event bit that was pending at some point, as its mask.
+    pub event_sources: BTreeSet<u32>,
+}
+
+impl SpuFacilityCoverage {
+    /// Adds everything `other` reached.
+    pub(crate) fn merge(&mut self, other: &Self) {
+        self.channels.extend(&other.channels);
+        self.mfc_opcodes.extend(&other.mfc_opcodes);
+        self.event_sources.extend(&other.event_sources);
+    }
 }
 
 /// How an SPU sequence and its partner differed from one start state.
@@ -386,6 +408,7 @@ impl FuzzReport {
             retained_cases: RetainedCases::from_config_unchecked(retention),
             distribution: CampaignDistribution::default(),
             instruction_kinds: BTreeSet::new(),
+            spu_facilities: SpuFacilityCoverage::default(),
             finding_counts: BTreeMap::new(),
             findings: Vec::new(),
             sequence_relation_divergences: Vec::new(),
@@ -473,6 +496,10 @@ impl FuzzReport {
             .ok_or(InvariantError::CounterOverflow { counter: "decoded" })?;
         self.instruction_kinds.extend(kinds);
         Ok(())
+    }
+
+    pub(crate) fn reached_facilities(&mut self, coverage: &SpuFacilityCoverage) {
+        self.spu_facilities.merge(coverage);
     }
 
     pub(crate) fn assessed(&mut self, assessment: &CaseAssessment) -> Result<(), InvariantError> {

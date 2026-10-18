@@ -399,6 +399,9 @@ pub struct CampaignSummary {
     /// Whether the range ended before the campaign considered every case
     /// index.
     pub cancelled: bool,
+    /// The SPU channels, MFC commands and event sources every worker run
+    /// reached.
+    pub spu_facilities: crate::SpuFacilityCoverage,
 }
 
 impl CampaignSummary {
@@ -427,6 +430,7 @@ impl CampaignSummary {
         for (kind, count) in &report.finding_counts {
             add(self.finding_counts.entry(*kind).or_insert(0), *count)?;
         }
+        self.spu_facilities.merge(&report.spu_facilities);
         self.stored_reproduced.extend(
             report
                 .stored_replays

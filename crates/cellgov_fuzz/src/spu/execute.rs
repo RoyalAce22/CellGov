@@ -7,18 +7,27 @@ use std::collections::BTreeSet;
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
+use cellgov_exec::YieldReason;
+use cellgov_ps3_abi::hw::spu;
 use cellgov_spu::exec::{execute, SpuStepOutcome};
 use cellgov_spu::fuzz::{
     encoding_execution_is_supported, encoding_has_undefined_operands, SpuMetamorphicRelation,
     SpuOutcomeClass,
 };
+use cellgov_spu::instruction::SpuInstruction;
 use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation, SpuObservationComponent};
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState};
+use cellgov_time::GuestTicks;
 
 use crate::case::CaseAssessment;
-use crate::report::{InstructionIdentity, OutcomeIdentity};
+use crate::error::InvariantError;
+use crate::report::{InstructionIdentity, OutcomeIdentity, SpuFacilityCoverage};
 use crate::retention::{CrossReferenceAsymmetry, SemanticObservation, StateTransitionClass};
 use crate::seeded;
+use crate::spu_reference::world::{World, OWN};
+use crate::spu_reference::{
+    SpuReferenceError, SpuReferenceInvalidCommand, SpuReferencePpuAction, SpuReferencePpuResult,
+};
 use crate::GenerationStrategy;
 
 const UNIT: UnitId = UnitId::new(0);
@@ -38,6 +47,30 @@ pub(super) struct ObservedSequence {
     pub(super) has_undefined_operands: bool,
     pub(super) has_unmodeled_execution: bool,
     pub(super) footprint_violations: BTreeSet<SpuObservationComponent>,
+    /// Each main-storage region's bytes at the end.
+    pub(super) memory: Vec<(u64, Vec<u8>)>,
+    /// Every effect the world committed, in emission order.
+    pub(super) effects: Vec<Effect>,
+    /// One result per problem-state operation the world carried out.
+    pub(super) ppu_results: Vec<SpuReferencePpuResult>,
+    /// Commands the MFC refused when its queue reached them.
+    pub(super) mfc_exceptions: Vec<SpuReferenceInvalidCommand>,
+    /// Whether the run ended parked on a blocked channel.
+    pub(super) stalled: bool,
+    /// How many times a blocked access parked and ran again.
+    pub(super) parks: u32,
+    /// The channels, MFC commands and event sources the run reached.
+    pub(super) coverage: SpuFacilityCoverage,
+}
+
+/// The outside world a generated sequence runs against.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct SequenceWorld {
+    /// Main storage, one region per `(base, bytes)` run.
+    pub(super) memory: Vec<(u64, Vec<u8>)>,
+    /// The problem-state operations, in order, each with the count of
+    /// decoded instructions it lands after.
+    pub(super) actions: Vec<(u64, SpuReferencePpuAction)>,
 }
 
 #[derive(Clone, Copy)]
@@ -152,6 +185,12 @@ pub(super) fn spu_sequence_replay_asymmetry(
 ) -> CrossReferenceAsymmetry {
     let decode_refusal_differs = first.0.decode_refusal != second.0.decode_refusal;
     let state_or_trajectory_differs = first.0.state != second.0.state
+        || first.0.memory != second.0.memory
+        || first.0.ppu_results != second.0.ppu_results
+        || first.0.mfc_exceptions != second.0.mfc_exceptions
+        || first.0.stalled != second.0.stalled
+        || first.0.parks != second.0.parks
+        || first.0.coverage != second.0.coverage
         || decode_refusal_differs
         || first.0.deterministic != second.0.deterministic
         || first.0.has_undefined_operands != second.0.has_undefined_operands
@@ -168,7 +207,8 @@ pub(super) fn spu_sequence_replay_asymmetry(
     replay_asymmetry(
         state_or_trajectory_differs,
         outcome_asymmetry,
-        optional_outcome_effects(first_outcome) != optional_outcome_effects(second_outcome),
+        optional_outcome_effects(first_outcome) != optional_outcome_effects(second_outcome)
+            || first.0.effects != second.0.effects,
     )
 }
 
@@ -224,35 +264,103 @@ fn run_sequence(
     initial: &SpuState,
     budget: usize,
 ) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
-    run_sequence_with_limit(initial, budget, None, &Cell::new(None))
+    run_sequence_with_limit(
+        initial,
+        &SequenceWorld::default(),
+        budget,
+        None,
+        &Cell::new(None),
+    )
+    .expect("an empty world builds")
 }
 
 pub(super) fn run_generated_sequence(
     initial: &SpuState,
+    world: &SequenceWorld,
     budget: usize,
     program_words: usize,
     strategy: GenerationStrategy,
     executing: &Cell<Option<InstructionIdentity>>,
-) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
+) -> Result<(ObservedSequence, u64, Vec<InstructionIdentity>), InvariantError> {
     match strategy {
         GenerationStrategy::Structured => {
-            run_sequence_with_limit(initial, budget, Some(program_words), executing)
+            run_sequence_with_limit(initial, world, budget, Some(program_words), executing)
         }
-        GenerationStrategy::RawWords => run_sequence_with_limit(initial, budget, None, executing),
+        GenerationStrategy::RawWords => {
+            run_sequence_with_limit(initial, world, budget, None, executing)
+        }
     }
 }
 
-/// Runs a sequence and keeps `executing` at the instruction the executor is
-/// inside. A panic that unwinds out of the run then still names the
-/// instruction that raised it.
+/// Names the part of the world that refused, as an invariant error.
+fn world_failure(error: SpuReferenceError) -> InvariantError {
+    InvariantError::SequenceWorld {
+        what: match error {
+            SpuReferenceError::World { what } => what,
+            _ => "its state",
+        },
+    }
+}
+
+/// Adds the channel `instruction` names, and the MFC command a write of
+/// `MFC_Cmd` issued, to `coverage`.
+fn record_coverage(
+    coverage: &mut SpuFacilityCoverage,
+    instruction: &SpuInstruction,
+    before: &SpuState,
+    outcome: &SpuStepOutcome,
+) {
+    let (SpuInstruction::Rdch { channel, .. }
+    | SpuInstruction::Wrch { channel, .. }
+    | SpuInstruction::Rchcnt { channel, .. }) = *instruction
+    else {
+        return;
+    };
+    coverage.channels.insert(channel);
+    let stalled = matches!(
+        outcome,
+        SpuStepOutcome::Yield {
+            reason: YieldReason::ChannelStall,
+            ..
+        }
+    );
+    if let SpuInstruction::Wrch {
+        channel: spu::MFC_CMD,
+        rt,
+    } = *instruction
+    {
+        if !stalled {
+            // [CBEA p:114 s:9.1.2 MFC Class ID Channel] the command parameter is the low 16 bits of the word written to MFC_Cmd, and the class IDs the high 16.
+            // [CBE-Handbook p:457 s:17.9.6 MFC Class ID and MFC Command Opcode Channel] bits 24:31 hold the opcode, and bit 16 set marks a reserved one, so the whole halfword is kept.
+            coverage.mfc_opcodes.insert(before.reg_word(rt) as u16);
+        }
+    }
+}
+
+/// Runs a sequence against `script`'s world and keeps `executing` at the
+/// instruction the executor is inside. A panic that unwinds out of the run
+/// then still names the instruction that raised it.
+///
+/// Each instruction runs as one step of the execution unit runs it:
+///
+/// 1. The world refreshes the SPU's view.
+/// 2. The instruction executes.
+/// 3. The world commits and completes the transfers and stores a yield
+///    emits, and lands an atomic read in local store.
+///
+/// A blocked channel access parks. It runs again when the next scripted
+/// operation lands. If no operation is left, the run ends there.
 fn run_sequence_with_limit(
     initial: &SpuState,
+    script: &SequenceWorld,
     budget: usize,
     program_words: Option<usize>,
     executing: &Cell<Option<InstructionIdentity>>,
-) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
+) -> Result<(ObservedSequence, u64, Vec<InstructionIdentity>), InvariantError> {
     seeded::executor_boundary();
-    let mut state = initial.clone();
+    let mut world = World::new(initial, &script.memory, None).map_err(world_failure)?;
+    let initial_memory = world.memory_image().map_err(world_failure)?;
+    let mut actions = script.actions.iter().peekable();
     let mut decoded = 0u64;
     let mut kinds = Vec::new();
     let mut terminal_outcome = None;
@@ -261,9 +369,27 @@ fn run_sequence_with_limit(
     let mut has_undefined_operands = false;
     let mut has_unmodeled_execution = false;
     let mut footprint_violations = BTreeSet::new();
+    let mut coverage = SpuFacilityCoverage::default();
+    let mut pending_seen = 0u32;
+    let mut effects = Vec::new();
+    let mut stalled = false;
+    let mut faulted = false;
+    // A parked access runs again without counting as a new instruction.
+    let mut parked = false;
+    let mut parks = 0u32;
+    let mut retired = 0usize;
     // Each step's pre-state, copied into one buffer the run reuses.
     let mut before = initial.clone();
-    for _ in 0..budget {
+    while retired < budget {
+        while let Some((_, action)) = actions.next_if(|(after, _)| *after <= decoded) {
+            world.apply(*action);
+        }
+        world.enter();
+        // [SPU-ISA p:251 s:12.1] an interrupt branches to address 0, so a parked access gives way to a new instruction.
+        if cellgov_spu::step::take_pending_interrupt(world.unit.state_mut()) {
+            parked = false;
+        }
+        let state = world.unit.state();
         let Some(slot) = usize::try_from(state.pc / 4).ok() else {
             break;
         };
@@ -284,40 +410,97 @@ fn run_sequence_with_limit(
         has_undefined_operands |= encoding_has_undefined_operands(raw);
         has_unmodeled_execution |= !encoding_execution_is_supported(raw);
         deterministic &= requests_replay(descriptor.relations);
-        decoded += 1;
         let identity = InstructionIdentity::Spu(descriptor.kind);
-        kinds.push(identity);
+        if !parked {
+            decoded += 1;
+            kinds.push(identity);
+        }
         executing.set(Some(identity));
-        before.clone_from(&state);
-        let outcome = execute(&instruction, &mut state, UNIT);
-        seeded::spu_observed(
-            &instruction,
-            SpuOutcomeClass::from_outcome(&outcome),
-            &mut state,
-        );
+        before.clone_from(state);
+        let state = world.unit.state_mut();
+        let outcome = cellgov_spu::step::execute_instruction(&instruction, state, OWN);
+        seeded::spu_observed(&instruction, SpuOutcomeClass::from_outcome(&outcome), state);
         footprint_violations.extend(
             SpuAllowedFootprint::for_instruction(&instruction)
-                .violations_after(&before, &state, &outcome),
+                .violations_after(&before, state, &outcome),
         );
+        record_coverage(&mut coverage, &instruction, &before, &outcome);
+        pending_seen |= state.channels.pending_events;
         terminal_outcome = Some(outcome.clone());
+        parked = false;
         match outcome {
             SpuStepOutcome::Continue => state.advance_pc(),
             SpuStepOutcome::Branch => {}
-            SpuStepOutcome::Yield { .. } | SpuStepOutcome::MemoryRead { .. } => break,
+            SpuStepOutcome::Yield {
+                effects: emitted,
+                reason,
+            } => {
+                let blocked = reason == YieldReason::ChannelStall;
+                // A blocked access did not retire, so the program counter
+                // stays on it.
+                if !blocked {
+                    state.advance_pc();
+                }
+                world.settle(&emitted).map_err(world_failure)?;
+                effects.extend(emitted);
+                if blocked {
+                    // [CBE-Handbook p:447 s:17.1.6] a blocked access stalls until the channel changes or the SPU is interrupted.
+                    let Some((_, action)) = actions.next() else {
+                        stalled = true;
+                        break;
+                    };
+                    world.apply(*action);
+                    parked = true;
+                    parks += 1;
+                    continue;
+                }
+            }
+            SpuStepOutcome::MemoryRead {
+                ea,
+                lsa,
+                size,
+                acquire_line,
+            } => {
+                let mut emitted = Vec::new();
+                world.complete_read(ea, lsa, size, acquire_line, &mut emitted);
+                world.unit.state_mut().advance_pc();
+                world.settle(&emitted).map_err(world_failure)?;
+                effects.extend(emitted);
+            }
             // [SPU-ISA p:238 s:10. Control Instructions] a stop leaves PC at the next word, masked by LSLR.
             SpuStepOutcome::Stop { kind, signal } => {
                 state.record_stop(kind, signal);
                 break;
             }
             SpuStepOutcome::Fault(_) => {
-                // The runtime fault-discard rule hides state from a faulting batch.
-                state.clone_from(initial);
+                faulted = true;
                 break;
             }
         }
+        // A store the world could not commit refuses the batch, as a fault does.
+        if world.refused {
+            faulted = true;
+            break;
+        }
+        retired += 1;
+        world.advance(GuestTicks::new(1)).map_err(world_failure)?;
     }
+    let (mut state, memory) = if faulted {
+        // The runtime fault-discard rule hides state from a faulting batch.
+        effects.clear();
+        (initial.clone(), initial_memory)
+    } else {
+        (
+            world.unit.state().clone(),
+            world.memory_image().map_err(world_failure)?,
+        )
+    };
+    coverage.event_sources = (0..32)
+        .map(|bit| 1u32 << bit)
+        .filter(|mask| pending_seen & spu::event::ALL & mask != 0)
+        .collect();
     seeded::spu_program_counter(&mut state.pc);
-    (
+    Ok((
         ObservedSequence {
             state: SpuObservableSnapshot::capture_owned(state),
             // Sequence replay retains the terminal outcome because the descriptor observes its effects.
@@ -327,10 +510,17 @@ fn run_sequence_with_limit(
             has_undefined_operands,
             has_unmodeled_execution,
             footprint_violations,
+            memory,
+            effects,
+            ppu_results: world.ppu_results,
+            mfc_exceptions: world.exceptions,
+            stalled,
+            parks,
+            coverage,
         },
         decoded,
         kinds,
-    )
+    ))
 }
 
 pub(super) fn requests_replay(relations: &[SpuMetamorphicRelation]) -> bool {

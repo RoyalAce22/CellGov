@@ -504,7 +504,12 @@ fn metamorphic_divergence(
         | SpuObservationComponent::Reservation
         | SpuObservationComponent::Fpscr
         | SpuObservationComponent::Signals
-        | SpuObservationComponent::Interrupts => CrossReferenceAsymmetry::State,
+        | SpuObservationComponent::Interrupts
+        | SpuObservationComponent::Events
+        | SpuObservationComponent::Decrementer
+        | SpuObservationComponent::OutboundInterruptMailbox
+        | SpuObservationComponent::MfcLists
+        | SpuObservationComponent::MultisourceSync => CrossReferenceAsymmetry::State,
     };
     Some((component, asymmetry))
 }

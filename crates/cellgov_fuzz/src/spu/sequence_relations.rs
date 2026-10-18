@@ -766,7 +766,12 @@ pub(crate) fn divergence_class(component: SpuObservationComponent) -> Divergence
         | SpuObservationComponent::Reservation
         | SpuObservationComponent::Fpscr
         | SpuObservationComponent::Signals
-        | SpuObservationComponent::Interrupts => DivergenceClass::ArchitecturalState,
+        | SpuObservationComponent::Interrupts
+        | SpuObservationComponent::Events
+        | SpuObservationComponent::Decrementer
+        | SpuObservationComponent::OutboundInterruptMailbox
+        | SpuObservationComponent::MfcLists
+        | SpuObservationComponent::MultisourceSync => DivergenceClass::ArchitecturalState,
     }
 }
 

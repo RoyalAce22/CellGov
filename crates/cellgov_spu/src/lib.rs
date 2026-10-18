@@ -39,7 +39,7 @@ pub mod timing;
 mod unit;
 
 pub use fault_codes::describe_guest_fault;
-pub use unit::{SpuExecutionUnit, SpuSnapshot};
+pub use unit::{step, SpuExecutionUnit, SpuSnapshot};
 
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]

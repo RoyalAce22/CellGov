@@ -133,6 +133,8 @@ pub struct SpuObservableSnapshot {
     pub signals: [SignalNotifyRegister; 2],
     /// Architectural channel state.
     pub channels: SpuChannelSnapshot,
+    /// The facilities a multi-instruction run reaches.
+    pub facilities: SpuFacilitySnapshot,
     /// Atomic reservation state.
     pub reservation: Option<ReservedLine>,
     /// Stopped state.
@@ -143,6 +145,43 @@ pub struct SpuObservableSnapshot {
     pub interrupts_enabled: bool,
     /// State save and restore register 0.
     pub srr0: u32,
+}
+
+/// The SPU facilities a multi-instruction run reaches, each compared on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpuFacilitySnapshot {
+    /// The event registers.
+    pub events: SpuEventSnapshot,
+    /// The decrementer.
+    pub decrementer: crate::decrementer::Decrementer,
+    /// The message in the outbound interrupt mailbox.
+    pub out_intr_mbox: Option<u32>,
+    /// The list commands still queuing elements.
+    pub lists: SpuListSnapshot,
+    /// The queue positions the tracked request and a new request wait for, in that order.
+    pub mssync: (Option<u64>, Option<u64>),
+}
+
+/// The event registers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpuEventSnapshot {
+    /// The pending-event register.
+    pub pending: u32,
+    /// The event mask.
+    pub mask: u32,
+    /// The `SPU_RdEventStat` count.
+    pub count: bool,
+    /// The event-source levels the last event update found.
+    pub levels: u32,
+}
+
+/// The list commands still queuing elements.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpuListSnapshot {
+    /// Where each list resumes.
+    pub cursors: Vec<ListCursor>,
+    /// The `MFC_RdListStallStat` groups.
+    pub stall_status: u32,
 }
 
 /// Channel state for instruction comparison.
@@ -214,6 +253,7 @@ impl SpuObservableSnapshot {
             lslr,
             signals,
             channels,
+            facilities,
             reservation,
             stop,
             fpscr,
@@ -225,6 +265,7 @@ impl SpuObservableSnapshot {
             && *lslr == other.lslr
             && *signals == other.signals
             && *channels == other.channels
+            && *facilities == other.facilities
             && *reservation == other.reservation
             && *stop == other.stop
             && *fpscr == other.fpscr
@@ -263,27 +304,22 @@ impl SpuObservableSnapshot {
             atomic_status_ready,
             in_mbox,
             out_mbox,
-            // Instruction comparison runs thread SPUs, whose interrupt
-            // mailbox no reader empties.
+            // The SPU's setup fixes whether a reader is connected, and
+            // the reader takes the interrupt edge.
             out_intr_mbox_connected: _,
-            out_intr_mbox: _,
+            out_intr_mbox,
             out_intr_mbox_interrupt: _,
-            // Instruction comparison runs no list command.
-            lists: _,
-            list_stall_status: _,
-            // Instruction comparison runs no DMA queue, so a request
-            // completes as it is made.
-            mssync_tracking: _,
-            mssync_horizon: _,
-            // Instruction comparison draws no event channel, and no
-            // event source changes within one instruction it runs.
-            pending_events: _,
-            event_mask: _,
-            event_count: _,
-            event_levels: _,
-            // Instruction comparison runs no clock: no instruction it
-            // compares reads the decrementer.
-            decrementer: _,
+            lists,
+            list_stall_status,
+            mssync_tracking,
+            mssync_horizon,
+            pending_events,
+            event_mask,
+            event_count,
+            event_levels,
+            decrementer,
+            // The world sets the clock for the next instruction, so the
+            // snapshot omits it.
             clock: _,
         } = channels;
         Self {
@@ -307,6 +343,21 @@ impl SpuObservableSnapshot {
                 atomic_status_ready: *atomic_status_ready,
                 in_mbox: in_mbox.clone(),
                 out_mbox: *out_mbox,
+            },
+            facilities: SpuFacilitySnapshot {
+                events: SpuEventSnapshot {
+                    pending: *pending_events,
+                    mask: *event_mask,
+                    count: *event_count,
+                    levels: *event_levels,
+                },
+                decrementer: *decrementer,
+                out_intr_mbox: *out_intr_mbox,
+                lists: SpuListSnapshot {
+                    cursors: lists.clone(),
+                    stall_status: *list_stall_status,
+                },
+                mssync: (*mssync_tracking, *mssync_horizon),
             },
             reservation: *reservation,
             stop: *stop,

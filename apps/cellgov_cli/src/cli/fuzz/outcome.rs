@@ -14,7 +14,7 @@ use cellgov_fuzz::decode_census::ClassCounts;
 use cellgov_fuzz::evaluation::{Comparison, ComparisonVerdict, EvaluationSummary};
 use cellgov_fuzz::raw_decode::{RawDecodeStatus, RawDecoder};
 use cellgov_fuzz::regression::Regression;
-use cellgov_fuzz::{FindingKind, FuzzTarget};
+use cellgov_fuzz::{FindingKind, FuzzTarget, SpuFacilityCoverage};
 
 use crate::cli::exit::CommandExitCode;
 use crate::cli::exit_codes;
@@ -559,6 +559,40 @@ pub(crate) fn render_campaign_summary(
         summary.reductions_failed,
         summary.cancelled,
     );
+    let facilities = &summary.spu_facilities;
+    if facilities != &SpuFacilityCoverage::default() {
+        let list = |values: Vec<String>| {
+            if values.is_empty() {
+                "none".to_owned()
+            } else {
+                values.join(",")
+            }
+        };
+        text.push_str(&format!(
+            "fuzz: reached channels={} mfc_opcodes={} events={}\n",
+            list(
+                facilities
+                    .channels
+                    .iter()
+                    .map(|c| format!("{c:#04x}"))
+                    .collect()
+            ),
+            list(
+                facilities
+                    .mfc_opcodes
+                    .iter()
+                    .map(|o| format!("{o:#06x}"))
+                    .collect()
+            ),
+            list(
+                facilities
+                    .event_sources
+                    .iter()
+                    .map(|e| format!("{e:#010x}"))
+                    .collect()
+            ),
+        ));
+    }
     for group in finding_groups(&summary.artifacts) {
         text.push_str(&group.render());
     }

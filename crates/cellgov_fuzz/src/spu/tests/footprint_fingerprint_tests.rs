@@ -20,6 +20,11 @@ fn sealed() -> SpuAllowedFootprint {
         fpscr: false,
         signals: false,
         interrupts: false,
+        events: false,
+        decrementer: false,
+        out_intr_mbox: false,
+        lists: false,
+        mssync: false,
         effects: BTreeSet::new(),
     }
 }

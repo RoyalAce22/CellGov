@@ -28,7 +28,7 @@ const LINE: usize = 16;
 const STORE: &str = include_str!("../../counterexamples/spu_sequence_relations.json");
 
 /// Every observation component, in comparison order, by fixture name.
-pub(crate) const COMPONENTS: [(SpuObservationComponent, &str); 11] = [
+pub(crate) const COMPONENTS: [(SpuObservationComponent, &str); 16] = [
     (SpuObservationComponent::Registers, "Registers"),
     (SpuObservationComponent::LocalStore, "LocalStore"),
     (SpuObservationComponent::ProgramCounter, "ProgramCounter"),
@@ -40,6 +40,14 @@ pub(crate) const COMPONENTS: [(SpuObservationComponent, &str); 11] = [
     (SpuObservationComponent::Fpscr, "Fpscr"),
     (SpuObservationComponent::Signals, "Signals"),
     (SpuObservationComponent::Interrupts, "Interrupts"),
+    (SpuObservationComponent::Events, "Events"),
+    (SpuObservationComponent::Decrementer, "Decrementer"),
+    (
+        SpuObservationComponent::OutboundInterruptMailbox,
+        "OutboundInterruptMailbox",
+    ),
+    (SpuObservationComponent::MfcLists, "MfcLists"),
+    (SpuObservationComponent::MultisourceSync, "MultisourceSync"),
 ];
 
 /// One stored start state that separates a row's sequence from its partner.
@@ -176,6 +184,11 @@ pub(crate) fn component_name(component: SpuObservationComponent) -> &'static str
         C::Fpscr => "Fpscr",
         C::Signals => "Signals",
         C::Interrupts => "Interrupts",
+        C::Events => "Events",
+        C::Decrementer => "Decrementer",
+        C::OutboundInterruptMailbox => "OutboundInterruptMailbox",
+        C::MfcLists => "MfcLists",
+        C::MultisourceSync => "MultisourceSync",
     }
 }
 
