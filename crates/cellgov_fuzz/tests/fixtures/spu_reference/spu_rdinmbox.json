@@ -1,0 +1,595 @@
+{
+  "schema_version": 6,
+  "unit": {
+    "kind": "channel",
+    "number": 29
+  },
+  "vectors": [
+    {
+      "name": "start-count",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:238 s:16.3.3",
+        "vector_id": "spu_rdinmbox-start-count"
+      },
+      "words": [
+        31460995
+      ],
+      "initial_state": {
+        "regs_hex": {},
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "00000000000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 4
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "read-of-an-empty-mailbox-stalls",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:135 s:9.5.3",
+        "vector_id": "spu_rdinmbox-read-of-an-empty-mailbox-stalls"
+      },
+      "words": [
+        27266691
+      ],
+      "initial_state": {
+        "regs_hex": {},
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 2,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stalled",
+            "channel": 29
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 0
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "count-follows-the-queue-and-reads-are-oldest-first",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:135 s:9.5.3",
+        "vector_id": "spu_rdinmbox-count-follows-the-queue-and-reads-are-oldest-first"
+      },
+      "words": [
+        31460995,
+        27266692,
+        31460997
+      ],
+      "initial_state": {
+        "regs_hex": {},
+        "local_store": [],
+        "pc": 0
+      },
+      "world": {
+        "ppu": [
+          {
+            "step": 0,
+            "action": {
+              "op": "in_mbox",
+              "value": 10
+            }
+          },
+          {
+            "step": 0,
+            "action": {
+              "op": "in_mbox",
+              "value": 11
+            }
+          },
+          {
+            "step": 0,
+            "action": {
+              "op": "in_mbox",
+              "value": 12
+            }
+          },
+          {
+            "step": 0,
+            "action": {
+              "op": "in_mbox",
+              "value": 13
+            }
+          }
+        ]
+      },
+      "step_limit": 3,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "00000004000000000000000000000000",
+            "4": "0000000a000000000000000000000000",
+            "5": "00000003000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 12
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": [
+            {
+              "kind": "mailbox_pop",
+              "message": 10
+            }
+          ]
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": [
+            {
+              "result": "done"
+            },
+            {
+              "result": "done"
+            },
+            {
+              "result": "done"
+            },
+            {
+              "result": "done"
+            }
+          ]
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "a-write-ends-the-stall",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBEA p:135 s:9.5.3",
+        "vector_id": "spu_rdinmbox-a-write-ends-the-stall"
+      },
+      "words": [
+        27266691
+      ],
+      "initial_state": {
+        "regs_hex": {},
+        "local_store": [],
+        "pc": 0
+      },
+      "world": {
+        "ppu": [
+          {
+            "step": 2,
+            "action": {
+              "op": "in_mbox",
+              "value": 119
+            }
+          }
+        ]
+      },
+      "step_limit": 3,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "00000077000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 4
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": [
+            {
+              "kind": "mailbox_pop",
+              "message": 119
+            }
+          ]
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": [
+            {
+              "result": "done"
+            }
+          ]
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "wrch-has-no-effect",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "CBE-Handbook p:442 s:17.1",
+        "vector_id": "spu_rdinmbox-wrch-has-no-effect"
+      },
+      "words": [
+        564137610,
+        27264515
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "10": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+        },
+        "local_store": [],
+        "pc": 0
+      },
+      "step_limit": 2,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "00000000000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 8
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the vector reads the channels it checks into registers; the whole channel state also holds model-internal event levels"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    }
+  ]
+}

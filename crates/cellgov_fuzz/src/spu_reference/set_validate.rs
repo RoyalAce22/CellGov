@@ -406,6 +406,7 @@ impl SpuReferenceWorld {
                             }
                             SpuReferencePpuAction::InMbox { .. }
                             | SpuReferencePpuAction::ReadOutMbox
+                            | SpuReferencePpuAction::ReadOutIntrMbox
                             | SpuReferencePpuAction::StopRequest
                             | SpuReferencePpuAction::WriteNpc { .. }
                             | SpuReferencePpuAction::Restart => true,

@@ -5,6 +5,10 @@
 //! The world completes each MFC command in the step that queued it, so
 //! a vector sees one legal completion order. A vector that depends on
 //! another order states the choices as a set of legal values.
+//!
+//! Guest time advances by each step's cost, as the runtime advances it.
+//! The SPU's outbound interrupt mailbox has a reader: LV2 reads it for
+//! an SPU thread, and the PPU for a raw SPU.
 
 use cellgov_dma::{DmaCompletion, DmaDirection, MfcCommandError};
 use cellgov_effects::{Effect, FaultKind};
@@ -318,6 +322,8 @@ struct World {
     /// A store the world could not commit refused the step, as the
     /// commit pipeline refuses a batch.
     refused: bool,
+    /// The guest time the next step starts at.
+    now: GuestTicks,
 }
 
 impl World {
@@ -332,6 +338,8 @@ impl World {
             },
             stall: None,
         });
+        unit.connect_out_intr_mbox()
+            .map_err(|_| world_error("the interrupt mailbox"))?;
         let mut regions = Vec::new();
         let mut layout = Vec::new();
         for run in &vector.world.memory {
@@ -377,6 +385,7 @@ impl World {
             ppu_results: Vec::new(),
             fault: None,
             refused: false,
+            now: GuestTicks::ZERO,
         })
     }
 
@@ -436,6 +445,10 @@ impl World {
                 Ok(value) => SpuReferencePpuResult::Read { value },
                 Err(error) => done(Err(error)),
             },
+            SpuReferencePpuAction::ReadOutIntrMbox => match self.unit.read_out_intr_mbox() {
+                Ok(value) => SpuReferencePpuResult::Read { value },
+                Err(error) => done(Err(error)),
+            },
             SpuReferencePpuAction::StopRequest => {
                 let waiting = self.unit.channel_stall().is_some();
                 done(self.unit.request_stop(waiting))
@@ -460,6 +473,7 @@ impl World {
         let (occupancy, tags) = self.queue.issuer_view(OWN);
         let oldest = self.queue.pending_sequenced().map(|(seq, _)| seq).min();
         let ctx = ExecutionContext::new(&self.memory)
+            .with_current_tick(self.now)
             .with_reservations(&self.reservations)
             .with_inbound_mailbox(&self.inbox)
             .with_outstanding_dma_tags(tags)
@@ -470,6 +484,10 @@ impl World {
         let result = self
             .unit
             .run_until_yield(Budget::new(1), &ctx, &mut effects);
+        self.now = self
+            .now
+            .checked_add(result.consumed_cost.into())
+            .ok_or(world_error("guest time"))?;
         // A faulting step's effects are discarded, as the commit pipeline
         // discards them.
         if result.yield_reason == YieldReason::Fault {

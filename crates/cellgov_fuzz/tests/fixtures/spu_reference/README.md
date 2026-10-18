@@ -73,7 +73,8 @@ One file covers one architectural unit, named in `unit`:
     window. The replayed SPU is slot 0.
   - `ppu`: problem-state operations in step order, each landing before
     its step: an inbound-mailbox write, a signal write or mode, an
-    outbound-mailbox read, a stop request, an SPU_NPC write, or a restart.
+    outbound-mailbox or outbound-interrupt-mailbox read, a stop request,
+    an SPU_NPC write, or a restart.
 - `step_limit`: at most 4096 steps. A step is one instruction, or one
   attempt at a blocked channel access.
 - `expected`: every component of the end, each one a `value`, a
@@ -93,7 +94,9 @@ register or byte is unchanged, and the whole bank, store or region
 compares.
 
 The world completes each MFC command in the step that queued it, so a
-vector sees one legal completion order. Where the architecture leaves a
+vector sees one legal completion order. Guest time advances by each
+step's cost, as the runtime advances it, and the outbound interrupt
+mailbox has a reader, as every SPU thread and raw SPU has. Where the architecture leaves a
 result open, write `one_of` with the legal `values` and the index of the
 one CellGov documents choosing in `chosen`. The replay reports a result
 outside the set as a difference, and a legal result other than the chosen

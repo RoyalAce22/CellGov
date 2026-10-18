@@ -424,6 +424,8 @@ pub enum SpuReferencePpuAction {
     },
     /// Read the outbound mailbox.
     ReadOutMbox,
+    /// Read the outbound interrupt mailbox.
+    ReadOutIntrMbox,
     /// Request a stop.
     StopRequest,
     /// Write SPU_NPC.
