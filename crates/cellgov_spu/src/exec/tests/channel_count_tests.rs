@@ -331,9 +331,11 @@ fn a_source_count_raises_its_event_on_the_rising_edge_alone() {
     let mut s = SpuState::new();
     s.update_events();
     assert_eq!(
-        s.channels.pending_events, 0,
-        "the Ms count starts at 1 with no edge"
+        s.channels.pending_events,
+        spu::event::LE,
+        "a new SPU starts with Le alone; the Ms count starts at 1 with no edge"
     );
+    s.channels.pending_events = 0;
     s.channels.in_mbox = vec![7];
     s.update_events();
     assert_eq!(s.channels.pending_events, spu::event::MB);
@@ -405,6 +407,9 @@ fn an_event_acknowledged_or_masked_before_the_read_leaves_a_phantom_count() {
 fn a_mailbox_read_before_the_status_read_leaves_mb_pending() {
     use spu::event::MB;
     let mut s = SpuState::new();
+    // Clear the Le a new SPU starts with.
+    s.update_events();
+    s.channels.pending_events = 0;
     write_channel(&mut s, spu::SPU_WR_EVENT_MASK, MB);
     s.channels.in_mbox = vec![7];
     s.update_events();

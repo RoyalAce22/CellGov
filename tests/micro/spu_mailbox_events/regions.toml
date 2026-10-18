@@ -1,0 +1,14 @@
+[[regions]]
+name = "setup"
+addr = "0x0"
+size = "0x10"
+
+[[regions]]
+name = "spu"
+addr = "0x10"
+size = "0x40"
+
+[[regions]]
+name = "events"
+addr = "0x50"
+size = "0x10"

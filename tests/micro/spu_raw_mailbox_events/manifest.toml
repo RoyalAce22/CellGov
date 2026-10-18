@@ -1,0 +1,18 @@
+[test]
+name = "spu_raw_mailbox_events"
+
+# A hardware probe of the Le, Me and A events on a raw SPU: the events a
+# new raw SPU starts with, and whether Le and Me rise when the PPU reads
+# a full SPU_Out_Mbox and a full SPU_Out_Intr_Mbox. The PPU program's
+# header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+files = ["spu_main.elf"]

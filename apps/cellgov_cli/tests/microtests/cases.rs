@@ -686,6 +686,41 @@ pub const CASES: &[Case] = &[
         fields: &INTR_MBOX_EVENT_FIELDS,
     },
     Case {
+        name: "spu_mailbox_events",
+        max_steps: 1_000_000,
+        fields: &[
+            ("step", Exact(0)),
+            ("rc", Exact(0)),
+            ("send_receive", Exact(0)),
+            ("throw_receive", Exact(0)),
+            ("start_mask", Exact(0)),
+            // A thread starts with Le pending and Me clear. The count
+            // under a Me-only mask is the Le count that the mask write
+            // left behind.
+            ("start_le_count", Exact(1)),
+            ("start_me_count", Exact(1)),
+            ("start_status", Exact(event::LE)),
+            // A full outbound mailbox raises nothing until LV2 reads it.
+            ("status_mbox_full", Exact(0)),
+            ("send_answer", Exact(0)),
+            ("status_after_send", Exact(event::LE | event::ME)),
+            ("out_counts", Exact(1 << 16 | 1)),
+            ("status_after_throw", Exact(event::ME)),
+            // Le rose while the mask excluded it, and stayed pending.
+            ("masked_le_count", Exact(1)),
+            ("masked_le_status", Exact(event::LE)),
+            ("out_mbox_count", Exact(1)),
+            ("start_a_count", Exact(0)),
+            ("start_a_status", Exact(0)),
+            ("end_a_count", Exact(0)),
+            ("end_a_status", Exact(0)),
+            ("send_data3", Exact(0x1111_1111)),
+            ("throw_data3", Exact(0x3333_3333)),
+            ("throw_data2_low", Exact(0x44_4444)),
+            ("pad", Exact(0)),
+        ],
+    },
+    Case {
         name: "spu_lr_event",
         max_steps: 1_000_000,
         fields: &[

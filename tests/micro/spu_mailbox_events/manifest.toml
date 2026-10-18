@@ -1,0 +1,52 @@
+[test]
+name = "spu_mailbox_events"
+
+# A hardware probe: whether the Le and Me events follow the counts of
+# the outbound mailbox and the outbound interrupt mailbox. LV2 drains
+# both when the thread sends or throws a user event, so each count goes
+# from 0 to 1. The probe also reads the events a thread starts with,
+# whether a masked Le stays pending, and whether the privileged
+# attention event A is ever pending.
+
+[rpcs3]
+binary = "build/spu_mailbox_events.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# the failed step and the two receive answers; the SPU's 16 words; the
+# two events' data
+memory_regions = [
+  { name = "setup", addr = 0, size = 16 },
+  { name = "spu", addr = 16, size = 64 },
+  { name = "events", addr = 80, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Build + run:
+#   docker run --rm #     -v "$(pwd)/tests/micro/spu_mailbox_events:/src" #     -v "$(pwd)/tests/micro/common:/common" #     -e COMMON=/common ps3dev bash /src/build.sh
+#
+#   cargo run --release -p cellgov_cli -- boot run #     --title-manifest tests/micro/spu_mailbox_events/manifest.toml #     --max-steps 1000000
+
+[cellgov.title]
+short_name = "spumbxevent"
+display_name = "CellGov SPU mailbox events microtest"
+eboot_candidates = ["spu_mailbox_events.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

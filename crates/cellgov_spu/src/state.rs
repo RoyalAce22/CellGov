@@ -681,6 +681,14 @@ impl SpuState {
     /// [CBEA p:149 s:9.11.1] Qv is the MFC SPU command queue going from full to not full: the MFC_Cmd count rising from 0.
     /// [CBEA p:149 s:9.11.1] Sn is the MFC meeting a list element with the stall-and-notify flag set.
     /// [CBEA p:150 s:9.11.1] Mb, S1, S2 and Ms follow the SPU_RdInMbox, signal-notification and MFC_WrMSSyncReq counts.
+    /// [CBEA p:161 s:9.12.6] Me is the SPU_WrOutIntrMbox count changing from 0 (full) to nonzero.
+    /// [CBEA p:162 s:9.12.7] Le is the SPU_WrOutMbox count changing from 0 (full) to nonzero.
+    ///
+    /// No source here raises A. Only privileged software raises A, with a
+    /// write to SPU_PrivCntl. The `spu_mailbox_events` console capture
+    /// shows that LV2 leaves A clear for an SPU thread.
+    ///
+    /// [CBEA p:165 s:9.12.11] the privileged attention event occurs when the A bit of SPU_PrivCntl is set to 1.
     fn event_source_levels(&self) -> u32 {
         use cellgov_ps3_abi::hw::spu::event;
         let c = &self.channels;
@@ -692,6 +700,8 @@ impl SpuState {
             | level(self.signals[0].pending, event::S1)
             | level(self.signals[1].pending, event::S2)
             | level(c.mssync_tracking.is_none(), event::MS)
+            | level(c.out_mbox.is_none(), event::LE)
+            | level(c.out_intr_mbox.is_none(), event::ME)
     }
 
     /// Record the events whose source count changed from 0 to nonzero
@@ -1044,9 +1054,14 @@ impl ChannelState {
             event_mask: 0,
             // x'0' count 0.
             event_count: false,
-            // The sources whose counts start nonzero: MFC_Cmd and
-            // MFC_WrMSSyncReq.
-            event_levels: cellgov_ps3_abi::hw::spu::event::QV | cellgov_ps3_abi::hw::spu::event::MS,
+            // The sources whose counts start nonzero without an event:
+            // MFC_Cmd, MFC_WrMSSyncReq and SPU_WrOutIntrMbox. On the
+            // reference console, an SPU thread and a raw SPU start with Le
+            // pending (`spu_mailbox_events`, `spu_raw_mailbox_events`).
+            // Le's level starts clear, so the unit's first look raises Le.
+            event_levels: cellgov_ps3_abi::hw::spu::event::QV
+                | cellgov_ps3_abi::hw::spu::event::MS
+                | cellgov_ps3_abi::hw::spu::event::ME,
             decrementer: crate::decrementer::Decrementer::new(),
             clock: cellgov_time::GuestTicks::ZERO,
         }

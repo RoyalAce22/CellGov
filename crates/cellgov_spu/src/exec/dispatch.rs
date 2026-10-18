@@ -1402,6 +1402,10 @@ mod channel_count_tests;
 mod start_state_tests;
 
 #[cfg(test)]
+#[path = "tests/mailbox_event_tests.rs"]
+mod mailbox_event_tests;
+
+#[cfg(test)]
 #[path = "tests/shufb_tests.rs"]
 mod shufb_tests;
 
