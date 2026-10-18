@@ -38,6 +38,7 @@ mod spu_event;
 mod spu_exception;
 mod spu_group_control;
 mod spu_local_store;
+mod spu_user_event;
 mod state;
 mod state_hash;
 mod system_ipc_witness;
@@ -116,4 +117,5 @@ pub use rsx::{
 };
 pub use runtime::Lv2Runtime;
 pub use spu_exception::SpuGroupException;
+pub use spu_user_event::SpuUserEvent;
 pub use system_ipc_witness::{is_system_ipc_key, SystemIpcWitness};

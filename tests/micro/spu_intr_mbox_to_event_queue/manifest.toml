@@ -1,0 +1,47 @@
+[test]
+name = "spu_intr_mbox_to_event_queue"
+
+[rpcs3]
+binary = "build/spu_intr_mbox_to_event_queue.elf"
+decoder = "interpreter"
+timeout_ms = 10000
+
+[observe]
+# the failed step and the group port; the SPU's answers and counts;
+# the two events of queue 1; queue 1's third receive and queue 2's event
+memory_regions = [
+  { name = "setup", addr = 0, size = 16 },
+  { name = "spu", addr = 16, size = 32 },
+  { name = "queue1_first", addr = 48, size = 32 },
+  { name = "queue1_second", addr = 80, size = 32 },
+  { name = "queue2", addr = 112, size = 32 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Build + run:
+#   docker run --rm #     -v "$(pwd)/tests/micro/spu_intr_mbox_to_event_queue:/src" #     -v "$(pwd)/tests/micro/common:/common" #     -e COMMON=/common ps3dev bash /src/build.sh
+#
+#   cargo run --release -p cellgov_cli -- boot run #     --title-manifest tests/micro/spu_intr_mbox_to_event_queue/manifest.toml #     --max-steps 1000000
+
+[cellgov.title]
+short_name = "spuintrmbox"
+display_name = "CellGov SPU interrupt mailbox event microtest"
+eboot_candidates = ["spu_intr_mbox_to_event_queue.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

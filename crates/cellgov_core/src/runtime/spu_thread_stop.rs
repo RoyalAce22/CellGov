@@ -125,7 +125,12 @@ impl Runtime {
         self.registry.get_mut(unit)?.read_out_mbox().ok().flatten()
     }
 
-    fn fail_spu_thread(&mut self, unit: UnitId, stop: StopRegisters, error: SpuThreadError) {
+    pub(super) fn fail_spu_thread(
+        &mut self,
+        unit: UnitId,
+        stop: StopRegisters,
+        error: SpuThreadError,
+    ) {
         self.registry.set_status_override(unit, UnitStatus::Faulted);
         self.spu_thread_failure
             .get_or_insert(SpuThreadFailure { unit, stop, error });

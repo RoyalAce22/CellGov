@@ -242,10 +242,37 @@ pub mod event {
     /// `SYS_SPU_THREAD_EVENT_USER`: the one event type a per-thread port
     /// connect accepts.
     pub const THREAD_USER: u32 = 0x1;
+    /// The source of the user event an SPU thread sends through its
+    /// outbound interrupt mailbox. The `spu_intr_mbox_to_event_queue`
+    /// console capture reads it on both a send and a throw.
+    pub const THREAD_USER_KEY: u64 = 0xFFFF_FFFF_5350_5501;
     /// Event ports per SPU thread; a port number `spup` is below it.
     pub const PORT_COUNT: u32 = 64;
     /// Queue bindings per SPU thread.
     pub const QUEUE_BINDING_COUNT: usize = 32;
+}
+
+/// The word an SPU thread writes to `SPU_WrOutIntrMbox` to ask LV2 for a
+/// user event on one of its event ports, after it writes the event's
+/// last data word to `SPU_WrOutMbox`.
+///
+/// No public document names this layout. The SPU thread library of the
+/// open PS3 toolchain builds the word this way. The
+/// `spu_intr_mbox_to_event_queue` console capture shows that LV2 reads
+/// it the same way. A send reads LV2's answer from `SPU_RdInMbox`.
+pub mod user_event {
+    /// The shift of the event port in the word.
+    pub const PORT_SHIFT: u32 = 24;
+    /// The event port's bits, after the shift.
+    pub const PORT_MASK: u32 = 0x3F;
+    /// The bits of data0 the event carries.
+    pub const DATA0_MASK: u32 = 0x00FF_FFFF;
+    /// Set for a throw: LV2 writes no answer, and drops an event it
+    /// cannot deliver.
+    pub const THROW: u32 = 0x4000_0000;
+    /// Set for a service other than a user event. The SPU thread library
+    /// of the open PS3 toolchain never sets it.
+    pub const OTHER_SERVICE: u32 = 0x8000_0000;
 }
 
 /// The physical SPUs LV2 hands to a process, which `sys_spu_initialize`

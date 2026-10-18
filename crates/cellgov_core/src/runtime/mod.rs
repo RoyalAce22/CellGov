@@ -38,6 +38,7 @@ mod raw_spu_window;
 mod snapshot;
 mod spaces;
 mod spu_thread_stop;
+mod spu_user_event;
 mod spu_window;
 mod state;
 mod state_hash;

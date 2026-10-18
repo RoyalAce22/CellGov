@@ -8,7 +8,7 @@ use cellgov_ps3_abi::hw::rsx::{
 };
 use cellgov_ps3_abi::hw::spu::{
     event, MFC_ATOMIC_STAT_G, MFC_ATOMIC_STAT_S, MFC_ATOMIC_STAT_U, SPU_IN_MBOX_DEPTH,
-    SPU_STATUS_P, SPU_STATUS_R, SPU_STATUS_W,
+    SPU_OUT_INTR_MBOX_DEPTH, SPU_STATUS_P, SPU_STATUS_R, SPU_STATUS_W,
 };
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::spu::{
@@ -60,6 +60,66 @@ const SPU_INCREMENTS: u32 = 32;
 
 /// `SIGNAL_WORD` the SPU thread window test's sender signals.
 const SPU_ALIAS_SIGNAL_WORD: u32 = 0xC0DE_0001;
+
+/// spu_intr_mbox_to_event_queue's payload, in order:
+/// - the setup;
+/// - the SPU's answers and mailbox counts;
+/// - queue 1's two events and its empty receive;
+/// - queue 2's event and its empty receive.
+const INTR_MBOX_EVENT_FIELDS: [(&str, Expect); 36] = intr_mbox_event_fields();
+
+const fn intr_mbox_event_fields() -> [(&'static str, Expect); 36] {
+    const SOURCE_HIGH: u32 = (group_event::THREAD_USER_KEY >> 32) as u32;
+    const SOURCE_LOW: u32 = group_event::THREAD_USER_KEY as u32;
+    /// spu/main.c's CONNECTED_PORT.
+    const CONNECTED_PORT: u32 = 3;
+    /// ppu/main.c's GROUP_PORT_ASKED.
+    const GROUP_PORT: u32 = 10;
+    [
+        ("step", Exact(0)),
+        ("rc", Exact(0)),
+        ("group_port", Exact(GROUP_PORT)),
+        ("setup_pad", Exact(0)),
+        // LV2 empties the interrupt mailbox it reads.
+        ("intr_count_before", Exact(SPU_OUT_INTR_MBOX_DEPTH)),
+        ("send_answer", Exact(0)),
+        ("send_full_answer", Exact(errno::CELL_EBUSY.code)),
+        ("send_unconnected_answer", Exact(errno::CELL_ENOTCONN.code)),
+        ("send_group_port_answer", Exact(0)),
+        // Neither throw left an answer in the inbound mailbox.
+        ("in_count_after", Exact(0)),
+        ("intr_count_after", Exact(SPU_OUT_INTR_MBOX_DEPTH)),
+        ("spu_pad", Exact(0)),
+        // The send: data2 holds the port and the word's data0, and data3
+        // holds the `SPU_WrOutMbox` word.
+        ("first_receive", Exact(0)),
+        ("first_source_high", Exact(SOURCE_HIGH)),
+        ("first_source_low", Exact(SOURCE_LOW)),
+        ("first_data1_is_thread", Exact(1)),
+        ("first_port", Exact(CONNECTED_PORT)),
+        ("first_data0", Exact(0x12_3456)),
+        ("first_data3_high", Exact(0)),
+        ("first_data3", Exact(0xCAFE_BABE)),
+        // The throw that filled the queue.
+        ("second_receive", Exact(0)),
+        ("second_source_high", Exact(SOURCE_HIGH)),
+        ("second_source_low", Exact(SOURCE_LOW)),
+        ("second_data1_is_thread", Exact(1)),
+        ("second_port", Exact(CONNECTED_PORT)),
+        ("second_data0", Exact(0x65_4321)),
+        ("second_data3_high", Exact(0)),
+        ("second_data3", Exact(0xDEAD_BEEF)),
+        // The send and the throw to the full queue left no event.
+        ("third_receive", Exact(errno::CELL_ETIMEDOUT.code)),
+        ("group_receive", Exact(0)),
+        ("group_data1_is_thread", Exact(1)),
+        ("group_port_word", Exact(GROUP_PORT)),
+        ("group_data0", Exact(0x99_9999)),
+        ("group_data3", Exact(0xAAAA_AAAA)),
+        ("group_second_receive", Exact(errno::CELL_ETIMEDOUT.code)),
+        ("pad", Exact(0)),
+    ]
+}
 
 /// spu_thread_window_slots's payload, in order:
 /// - the failed step and its code;
@@ -588,6 +648,42 @@ pub const CASES: &[Case] = &[
             ("srr0_set", Exact(1)),
             ("pad", Exact(0)),
         ],
+    },
+    Case {
+        name: "spu_intr_mbox_edges",
+        max_steps: 1_000_000,
+        fields: &[
+            ("step", Exact(0)),
+            ("rc", Exact(0)),
+            // A queue connected to an SPU port destroys without the force
+            // flag.
+            ("destroy", Exact(0)),
+            ("forced_destroy", Exact(0)),
+            ("in_count_before", Exact(1)),
+            // The waiting message reads first; the send's answer queues
+            // behind it.
+            ("first_read", Exact(0x5A5A_5A5A)),
+            ("count_after_spin", Exact(1)),
+            ("second_read", Exact(0)),
+            ("destroyed_port_answer", Exact(errno::CELL_ENOTCONN.code)),
+            ("in_count_after_throw", Exact(0)),
+            ("intr_count", Exact(SPU_OUT_INTR_MBOX_DEPTH)),
+            ("spu_pad", Exact(0)),
+            // The send past the occupied mailbox delivered its event.
+            ("receive", Exact(0)),
+            ("data1_is_thread", Exact(1)),
+            ("port", Exact(5)),
+            ("data0", Exact(0x77_7777)),
+            ("data3", Exact(0x8888_8888)),
+            ("second_receive", Exact(errno::CELL_ETIMEDOUT.code)),
+            ("pad0", Exact(0)),
+            ("pad1", Exact(0)),
+        ],
+    },
+    Case {
+        name: "spu_intr_mbox_to_event_queue",
+        max_steps: 1_000_000,
+        fields: &INTR_MBOX_EVENT_FIELDS,
     },
     Case {
         name: "spu_lr_event",

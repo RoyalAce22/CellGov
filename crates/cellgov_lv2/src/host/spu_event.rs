@@ -2,8 +2,9 @@
 //! one of its threads connects to, and the queues an SPU thread binds
 //! under numbers of its own.
 //!
-//! The arms keep the connections; nothing here delivers an event. The
-//! SPU-side producer of a port event is a separate capability.
+//! The arms keep the connections; nothing here delivers an event. A
+//! thread's port event comes from its outbound interrupt mailbox, which
+//! `spu_user_event` serves.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;

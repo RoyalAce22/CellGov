@@ -33,6 +33,14 @@ pub enum SpuThreadError {
     /// An exit whose outbound mailbox held no status.
     #[error("stop-and-signal code 0x{0:04x} with an empty SPU_WrOutMbox")]
     ExitWithoutStatus(u16),
+    /// A `SPU_WrOutIntrMbox` word that names no LV2 service CellGov
+    /// serves.
+    #[error("SPU_WrOutIntrMbox word 0x{0:08x} names no LV2 service CellGov serves")]
+    UnservedInterruptMailbox(u32),
+    /// A user event whose `SPU_WrOutMbox` held no data word. No capture
+    /// shows what LV2 does then.
+    #[error("SPU_WrOutIntrMbox word 0x{0:08x} with an empty SPU_WrOutMbox")]
+    InterruptMailboxWithoutData(u32),
     /// A halt instruction whose condition held.
     #[error("halt instruction")]
     Halt,

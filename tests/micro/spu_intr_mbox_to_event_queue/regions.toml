@@ -1,0 +1,24 @@
+[[regions]]
+name = "setup"
+addr = "0x0"
+size = "0x10"
+
+[[regions]]
+name = "spu"
+addr = "0x10"
+size = "0x20"
+
+[[regions]]
+name = "queue1_first"
+addr = "0x30"
+size = "0x20"
+
+[[regions]]
+name = "queue1_second"
+addr = "0x50"
+size = "0x20"
+
+[[regions]]
+name = "queue2"
+addr = "0x70"
+size = "0x20"

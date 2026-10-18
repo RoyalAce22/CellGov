@@ -60,6 +60,15 @@ impl Runtime {
             && !self.last_scheduled_unit.is_some_and(|unit| {
                 self.lv2_host.raw_spu_units().any(|(_, raw)| raw == unit)
             })
+            // A mailbox write emits no effect. LV2 serves the word an SPU
+            // thread's step left in its interrupt mailbox only on the slow
+            // path.
+            && !self.last_scheduled_unit.is_some_and(|unit| {
+                self.registry
+                    .get(unit)
+                    .and_then(|unit| unit.out_mailboxes())
+                    .is_some_and(|mailboxes| mailboxes.out_intr_mbox.is_some())
+            })
         {
             self.epoch.advance();
             // This path fires no completion, so the list this commit
@@ -332,6 +341,7 @@ impl Runtime {
         self.epoch.advance();
         let mut due = self.fire_dma_completions();
         let timer_due = self.fire_timer_wakes();
+        self.serve_spu_thread_interrupt_mailbox(source);
 
         // A unit that stopped itself reports the stop it can resume from.
         let stopped = if result.yield_reason == YieldReason::Finished {

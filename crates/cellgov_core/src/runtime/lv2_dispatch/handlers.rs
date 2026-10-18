@@ -128,6 +128,7 @@ impl Runtime {
                  corruption in the RegisterSpu path",
             );
             self.register_spu_inbound_mailbox(uid);
+            self.connect_spu_thread_interrupt_mailbox(uid);
             self.load_saved_signals(uid);
         }
         self.step_woke_others = true;
@@ -154,6 +155,21 @@ impl Runtime {
                     format_args!("SPU {uid:?} refused its kept signal {register:?}: {refusal}"),
                 );
             }
+        }
+    }
+
+    /// Make LV2 the reader of the new SPU thread `uid`'s outbound
+    /// interrupt mailbox, through which the thread asks for user events.
+    fn connect_spu_thread_interrupt_mailbox(&mut self, uid: UnitId) {
+        let connected = self
+            .registry
+            .get_mut(uid)
+            .map(|spu| spu.connect_out_intr_mbox());
+        if !matches!(connected, Some(Ok(()))) {
+            self.lv2_host.log_invariant_break(
+                "runtime.spu_thread_interrupt_mailbox_unconnected",
+                format_args!("SPU thread {uid:?} refused its interrupt mailbox: {connected:?}"),
+            );
         }
     }
 
