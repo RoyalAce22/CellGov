@@ -1,0 +1,34 @@
+{
+  "outcome": "Completed",
+  "memory_regions": [
+    {
+      "name": "setup",
+      "addr": 0,
+      "data_hex": [
+        "00000000 00000000 00000000 00000000"
+      ]
+    },
+    {
+      "name": "spu",
+      "addr": 16,
+      "data_hex": [
+        "00000001 5a5a5a5a 00000001 00000000 80010016 00000000 00000001 00000000"
+      ]
+    },
+    {
+      "name": "queue2",
+      "addr": 48,
+      "data_hex": [
+        "00000000 00000001 00000005 00777777 88888888 8001000b 00000000 00000000"
+      ]
+    }
+  ],
+  "events": [],
+  "state_hashes": null,
+  "metadata": {
+    "runner": "ps3-cex",
+    "steps": null
+  },
+  "tty_log": [],
+  "runner_firmware": "4.93"
+}

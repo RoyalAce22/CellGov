@@ -1,0 +1,47 @@
+{
+  "outcome": "Completed",
+  "memory_regions": [
+    {
+      "name": "setup",
+      "addr": 0,
+      "data_hex": [
+        "00000000 00000000 0000000a 00000000"
+      ]
+    },
+    {
+      "name": "spu",
+      "addr": 16,
+      "data_hex": [
+        "00000001 00000000 8001000a 80010016 00000000 00000000 00000001 00000000"
+      ]
+    },
+    {
+      "name": "queue1_first",
+      "addr": 48,
+      "data_hex": [
+        "00000000 ffffffff 53505501 00000001 00000003 00123456 00000000 cafebabe"
+      ]
+    },
+    {
+      "name": "queue1_second",
+      "addr": 80,
+      "data_hex": [
+        "00000000 ffffffff 53505501 00000001 00000003 00654321 00000000 deadbeef"
+      ]
+    },
+    {
+      "name": "queue2",
+      "addr": 112,
+      "data_hex": [
+        "8001000b 00000000 00000001 0000000a 00999999 aaaaaaaa 8001000b 00000000"
+      ]
+    }
+  ],
+  "events": [],
+  "state_hashes": null,
+  "metadata": {
+    "runner": "rpcs3-llvm",
+    "steps": null
+  },
+  "tty_log": []
+}
