@@ -453,6 +453,10 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         path: "dev fuzz spu-reference",
         lines: &["cellgov dev fuzz spu-reference crates/cellgov_fuzz/tests/fixtures/spu_reference"],
     },
+    Examples {
+        path: "dev fuzz spu-documented",
+        lines: &["cellgov dev fuzz spu-documented --output target/spu_documented.jsonl"],
+    },
 ];
 
 /// The block `path`'s help leads with, or `None` when it declares none.

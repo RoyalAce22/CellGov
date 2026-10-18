@@ -44,6 +44,24 @@ pub(crate) enum FuzzCommand {
     Promote(FuzzPromoteArgs),
     /// Replay every SPU reference file in a directory and name each SPU unit with no file.
     SpuReference(FuzzSpuReferenceArgs),
+    /// Generate the SPU floating-point vectors the documents define and replay them.
+    SpuDocumented(FuzzSpuDocumentedArgs),
+}
+
+/// The outcomes `dev fuzz spu-documented` has beyond the shared 0-5 contract.
+pub(crate) const SPU_DOCUMENTED_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   CellGov differs from a component the documents fix, or a vector's
+      instructions did not all run; also the shared failed-operation
+      status when --output could not be written
+  141 stdout was closed by a downstream reader";
+
+/// Where to write the documented floating-point list.
+#[derive(Debug, Args)]
+#[command(after_help = SPU_DOCUMENTED_EXIT_CODES)]
+pub(crate) struct FuzzSpuDocumentedArgs {
+    /// Write the list here as JSON lines, one vector per line.
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
 }
 
 /// The outcomes `dev fuzz spu-reference` has beyond the shared 0-5 contract.

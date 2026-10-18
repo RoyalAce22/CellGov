@@ -9,6 +9,7 @@ use cellgov_terminal::caps::RenderFlags;
 use super::artifact::run_replay;
 use super::campaign::run_campaign;
 use super::census::{run_census, run_census_merge};
+use super::documented::run_spu_documented;
 use super::error::FuzzCliError;
 use super::evaluate::{run_compare, run_evaluate};
 use super::reference::run_spu_reference;
@@ -77,6 +78,7 @@ pub(super) fn run_inner_with_render(
         FuzzCommand::Smoke(args) => run_smoke(args, quiet),
         FuzzCommand::Promote(args) => run_promote(args),
         FuzzCommand::SpuReference(args) => run_spu_reference(args),
+        FuzzCommand::SpuDocumented(args) => run_spu_documented(args),
     }
 }
 

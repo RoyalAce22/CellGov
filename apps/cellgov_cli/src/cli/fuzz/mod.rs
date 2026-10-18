@@ -5,6 +5,7 @@
 mod artifact;
 mod campaign;
 mod census;
+mod documented;
 mod entry;
 mod error;
 mod evaluate;
@@ -47,3 +48,7 @@ mod census_tests;
 #[cfg(test)]
 #[path = "tests/reference_tests.rs"]
 mod reference_tests;
+
+#[cfg(test)]
+#[path = "tests/documented_tests.rs"]
+mod documented_tests;

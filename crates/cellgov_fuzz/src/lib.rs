@@ -21,6 +21,7 @@ pub mod runner;
 pub mod semantic_sweep;
 pub mod smoke;
 pub mod spu;
+pub mod spu_documented;
 pub mod spu_reference;
 pub mod sweep;
 

@@ -100,6 +100,11 @@ pub const TO_FLOAT_SCALE_BIAS: u8 = 155;
 /// (`spu_convert_scales`).
 pub const TO_INTEGER_SCALE_BIAS: u8 = 173;
 
+/// The default QNaN of SPU double precision.
+///
+/// [SPU-ISA p:197 s:9.2] the default QNaN has a fraction whose high-order bit is 1 and every other bit 0, and sign bit 0.
+pub const SPU_DEFAULT_QNAN_F64: u64 = 0x7FF8_0000_0000_0000;
+
 /// Every SPU ISA 1.2 instruction, ordered by opcode. No row's opcode is
 /// a prefix of another's, so a word matches at most one row.
 ///
