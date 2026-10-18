@@ -12,6 +12,39 @@ tests/micro/common/crt0.S linguist-detectable=true linguist-generated=false
 # script and should contribute to the repository language statistics.
 docs/lv2/**/*.sql linguist-detectable=true linguist-generated=false
 
+# Data and generated output collapse in GitHub's diff view, so a review
+# lands on the code beside them: a new capture
+# or table is covered with no edit here. `generated_data_guard` (in
+# cellgov_testkit) fails when a data file or a large file carries no
+# decision. Collapsed files stay one click from their diff.
+*.tsv linguist-generated=true
+*.csv linguist-generated=true
+tests/micro/*/ps3/** linguist-generated=true
+tests/scenario_observations/*/* linguist-generated=true
+crates/cellgov_fuzz/tests/fixtures/spu_reference/*.json linguist-generated=true
+docs/spu_sequence_relations.json linguist-generated=true
+crates/cellgov_ps3_abi/src/lv2/census_table.rs linguist-generated=true
+crates/cellgov_ps3_abi/src/nid/table.rs linguist-generated=true
+docs/cli.md linguist-generated=true
+docs/titles.md linguist-generated=true
+docs/lv2/README.md linguist-generated=true
+
+# Tables written by hand stay expanded: a reviewer reads their edits.
+# The docs/lv2 rows are the archive's curated and attributed tables
+# (its README classes every file).
+docs/lv2/tables/behavior.tsv -linguist-generated
+docs/lv2/tables/firmware.tsv -linguist-generated
+docs/lv2/tables/pup.tsv -linguist-generated
+docs/lv2/tables/name.tsv -linguist-generated
+docs/lv2/tables/subentry_attribution.tsv -linguist-generated
+crates/cellgov_ps3_abi/src/nid/table.tsv -linguist-generated
+tests/micro/ps3_gaps.tsv -linguist-generated
+tests/micro/spu_float_edges/*.tsv -linguist-generated
+
+# Large files written by hand: decided here so the guard's size rule
+# sees a decision.
+crates/cellgov_ppu/src/unit/tests/ppu_tests.rs -linguist-generated
+
 # ps3autotests `.expected` files are real-PS3 TTY captures; their
 # bytes (including any embedded \r) must round-trip exactly. Force
 # them as binary so autocrlf cannot rewrite \n to \r\n on Windows
