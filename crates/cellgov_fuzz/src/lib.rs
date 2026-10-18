@@ -39,8 +39,9 @@ mod seeded;
 
 pub use boundary::TargetPanicPayload;
 pub use campaign::{
-    CampaignSchedule, CampaignShard, CampaignVersion, CancellationBoundary, CaseIndices, CaseRange,
-    GenerationStrategy, ReplayCoordinates, CAMPAIGN_VERSION,
+    generator_revision, CampaignSchedule, CampaignShard, CampaignVersion, CancellationBoundary,
+    CaseIndices, CaseRange, GenerationStrategy, GeneratorRevision, ReplayCoordinates,
+    CAMPAIGN_VERSION,
 };
 pub use case::{CaseAssessment, CaseEligibility, CaseFeature, EligibilityReason};
 pub(crate) use config::MAX_SEQUENCE_WORDS;

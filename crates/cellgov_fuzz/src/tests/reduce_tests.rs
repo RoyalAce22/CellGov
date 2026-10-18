@@ -431,6 +431,7 @@ fn synthetic_finding(target: FuzzTarget, words: Vec<u32>) -> Finding {
         kind: FindingKind::IllegalOutcome,
         replay: ReplayCoordinates {
             campaign_version: CAMPAIGN_VERSION,
+            generator_revision: crate::generator_revision(target, GenerationStrategy::Structured),
             target,
             strategy: GenerationStrategy::Structured,
             seed: 7,

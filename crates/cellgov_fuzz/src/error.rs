@@ -210,14 +210,32 @@ pub enum ReductionError {
     },
 }
 
-/// Replay coordinates use an unsupported campaign version.
+/// Replay coordinates name a generator this engine no longer runs.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("replay version {found} does not match supported version {supported}")]
-pub struct ReplayVersionError {
-    /// Version carried by the replay record.
-    pub found: crate::CampaignVersion,
-    /// Version understood by this engine.
-    pub supported: crate::CampaignVersion,
+pub enum ReplayVersionError {
+    /// The campaign version differs from this engine's.
+    #[error("replay version {found} does not match supported version {supported}")]
+    Campaign {
+        /// Version carried by the replay record.
+        found: crate::CampaignVersion,
+        /// Version understood by this engine.
+        supported: crate::CampaignVersion,
+    },
+    /// The generator revision of the record's target and strategy differs
+    /// from this engine's.
+    #[error(
+        "replay generator revision {found} of {target:?} {strategy:?} does not match supported revision {supported}"
+    )]
+    GeneratorRevision {
+        /// Engine the replay record names.
+        target: crate::FuzzTarget,
+        /// Strategy the replay record names.
+        strategy: crate::GenerationStrategy,
+        /// Revision carried by the replay record.
+        found: crate::GeneratorRevision,
+        /// Revision this engine's generator has.
+        supported: crate::GeneratorRevision,
+    },
 }
 
 /// The harness refused to continue after an internal invariant failed.

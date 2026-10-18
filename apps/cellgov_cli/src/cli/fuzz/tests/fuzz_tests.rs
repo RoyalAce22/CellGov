@@ -894,6 +894,7 @@ pub(super) fn synthetic_finding_artifact() -> FuzzFindingArtifact {
         original: ArtifactCase {
             replay: ReplayCoordinates {
                 campaign_version: cellgov_fuzz::CAMPAIGN_VERSION,
+                generator_revision: cellgov_fuzz::GeneratorRevision(1),
                 target: FuzzTarget::PpuInstruction,
                 strategy: GenerationStrategy::Structured,
                 seed: 1,

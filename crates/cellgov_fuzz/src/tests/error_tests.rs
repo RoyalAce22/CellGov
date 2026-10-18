@@ -302,7 +302,7 @@ fn candidate_evaluation_failures_wrap_the_engine_failure_as_their_source() {
 
 #[test]
 fn replay_version_errors_display_bare_version_numbers() {
-    let error = ReplayVersionError {
+    let error = ReplayVersionError::Campaign {
         found: CampaignVersion(1),
         supported: CampaignVersion(4),
     };
@@ -388,7 +388,7 @@ fn fuzz_errors_prefix_and_expose_every_wrapped_failure() {
             "reduction has no case words to transform",
         ),
         (
-            FuzzError::from(ReplayVersionError {
+            FuzzError::from(ReplayVersionError::Campaign {
                 found: CampaignVersion(0),
                 supported: CampaignVersion(4),
             }),

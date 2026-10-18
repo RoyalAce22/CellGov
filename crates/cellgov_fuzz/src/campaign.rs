@@ -7,6 +7,50 @@ use crate::{ConfigurationError, FuzzTarget, ReplayVersionError};
 /// Version of the deterministic case-to-input mapping.
 pub const CAMPAIGN_VERSION: CampaignVersion = CampaignVersion(4);
 
+/// Revision of one target and strategy's case-to-input mapping within a
+/// campaign version.
+///
+/// A change to one mapping raises that mapping's revision and leaves the
+/// others' replay records valid. Revision 0 is the mapping the
+/// campaign version started with, and a replay record that names no
+/// revision names 0.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct GeneratorRevision(pub u32);
+
+impl GeneratorRevision {
+    fn is_initial(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl std::fmt::Display for GeneratorRevision {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+/// The revision of the generator `target` runs under `strategy`, within
+/// [`CAMPAIGN_VERSION`].
+///
+/// Both registries grew under version 4, which moves every structured
+/// draw, and the SPU sequence engine gained its interactions and scripted
+/// world. The PPU raw-word generators draw whole words with no registry,
+/// and the committed regressions recorded from them still replay, so they
+/// keep revision 0. The SPU raw-word mappings are not shown unchanged, so
+/// they take revision 1 with the rest.
+pub const fn generator_revision(
+    target: FuzzTarget,
+    strategy: GenerationStrategy,
+) -> GeneratorRevision {
+    match (target, strategy) {
+        (FuzzTarget::PpuInstruction | FuzzTarget::PpuSequence, GenerationStrategy::RawWords) => {
+            GeneratorRevision(0)
+        }
+        _ => GeneratorRevision(1),
+    }
+}
+
 /// Specifies how a fuzz campaign constructs input.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -177,6 +221,9 @@ impl Iterator for CaseIndices {
 pub struct ReplayCoordinates {
     /// Version of the deterministic generator behavior.
     pub campaign_version: CampaignVersion,
+    /// Revision of the mapping the target runs under its strategy.
+    #[serde(skip_serializing_if = "GeneratorRevision::is_initial")]
+    pub generator_revision: GeneratorRevision,
     /// Engine that generates the case.
     pub target: FuzzTarget,
     /// Selects how this case constructs input.
@@ -193,6 +240,8 @@ pub struct ReplayCoordinates {
 #[serde(deny_unknown_fields)]
 struct ReplayCoordinatesArtifact {
     campaign_version: CampaignVersion,
+    #[serde(default)]
+    generator_revision: GeneratorRevision,
     target: FuzzTarget,
     #[serde(default)]
     strategy: Option<GenerationStrategy>,
@@ -214,6 +263,7 @@ impl<'de> Deserialize<'de> for ReplayCoordinates {
         };
         Ok(Self {
             campaign_version: artifact.campaign_version,
+            generator_revision: artifact.generator_revision,
             target: artifact.target,
             strategy,
             seed: artifact.seed,
@@ -233,6 +283,7 @@ impl ReplayCoordinates {
     ) -> Self {
         Self {
             campaign_version: CAMPAIGN_VERSION,
+            generator_revision: generator_revision(target, strategy),
             target,
             strategy,
             seed,
@@ -241,23 +292,37 @@ impl ReplayCoordinates {
         }
     }
 
-    /// Validates the campaign version.
+    /// Validates the campaign version and the target's generator revision.
     ///
     /// # Errors
     ///
-    /// Returns [`ReplayVersionError`] if the campaign version differs from [`CAMPAIGN_VERSION`].
+    /// Returns [`ReplayVersionError`] if the campaign version differs from
+    /// [`CAMPAIGN_VERSION`], or the generator revision from the one
+    /// [`generator_revision`] gives the target and strategy.
     pub fn validate(self) -> Result<(), ReplayVersionError> {
-        if self.campaign_version == CAMPAIGN_VERSION {
-            Ok(())
-        } else {
-            Err(ReplayVersionError {
+        if self.campaign_version != CAMPAIGN_VERSION {
+            return Err(ReplayVersionError::Campaign {
                 found: self.campaign_version,
                 supported: CAMPAIGN_VERSION,
-            })
+            });
         }
+        let supported = generator_revision(self.target, self.strategy);
+        if self.generator_revision != supported {
+            return Err(ReplayVersionError::GeneratorRevision {
+                target: self.target,
+                strategy: self.strategy,
+                found: self.generator_revision,
+                supported,
+            });
+        }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 #[path = "tests/campaign_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/generator_revision_tests.rs"]
+mod revision_tests;

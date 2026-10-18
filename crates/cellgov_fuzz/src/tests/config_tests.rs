@@ -45,6 +45,7 @@ fn the_maximum_case_index_is_replayable() {
 fn replay_version_mismatch_is_a_typed_refusal() {
     let coordinates = ReplayCoordinates {
         campaign_version: CampaignVersion(CAMPAIGN_VERSION.0 + 1),
+        generator_revision: crate::GeneratorRevision(0),
         target: FuzzTarget::PpuSequence,
         strategy: GenerationStrategy::Structured,
         seed: 7,
@@ -54,7 +55,7 @@ fn replay_version_mismatch_is_a_typed_refusal() {
 
     assert_eq!(
         coordinates.validate(),
-        Err(ReplayVersionError {
+        Err(ReplayVersionError::Campaign {
             found: CampaignVersion(CAMPAIGN_VERSION.0 + 1),
             supported: CAMPAIGN_VERSION,
         })
@@ -92,7 +93,10 @@ fn version_one_artifacts_parse_as_raw_words_then_receive_a_typed_refusal() {
             ConfigurationError::UnsupportedCampaignVersion { .. }
         ))
     ));
-    assert!(matches!(replay.validate(), Err(ReplayVersionError { .. })));
+    assert!(matches!(
+        replay.validate(),
+        Err(ReplayVersionError::Campaign { .. })
+    ));
 }
 
 #[test]
@@ -422,6 +426,7 @@ fn campaign_and_replay_artifacts_round_trip() {
         serde_json::to_value(replay).unwrap(),
         serde_json::json!({
             "campaign_version": 4,
+            "generator_revision": 1,
             "target": "PpuSequence",
             "strategy": "structured",
             "seed": 0x0123_4567_89ab_cdef_u64,

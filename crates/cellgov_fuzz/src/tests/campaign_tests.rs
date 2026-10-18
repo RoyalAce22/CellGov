@@ -300,6 +300,7 @@ fn new_replay_coordinates_carry_the_current_campaign_version() {
         replay,
         ReplayCoordinates {
             campaign_version: CAMPAIGN_VERSION,
+            generator_revision: GeneratorRevision(1),
             target: FuzzTarget::SpuSequence,
             strategy: GenerationStrategy::RawWords,
             seed: 9,
@@ -320,7 +321,7 @@ fn replay_coordinates_serialize_with_a_stable_key_order() {
         3,
     );
     let encoded = concat!(
-        r#"{"campaign_version":4,"target":"SpuSequence","strategy":"raw_words","#,
+        r#"{"campaign_version":4,"generator_revision":1,"target":"SpuSequence","strategy":"raw_words","#,
         r#""seed":9,"case_index":18446744073709551615,"sequence_words":3}"#
     );
 
@@ -347,7 +348,7 @@ fn replay_coordinates_refuse_unknown_fields() {
     assert_eq!(
         error.to_string(),
         concat!(
-            "unknown field `extra`, expected one of `campaign_version`, `target`, ",
+            "unknown field `extra`, expected one of `campaign_version`, `generator_revision`, `target`, ",
             "`strategy`, `seed`, `case_index`, `sequence_words`"
         )
     );
@@ -416,7 +417,7 @@ fn replay_validation_refuses_every_other_version() {
 
         assert_eq!(
             replay.validate(),
-            Err(ReplayVersionError {
+            Err(ReplayVersionError::Campaign {
                 found,
                 supported: CAMPAIGN_VERSION,
             })

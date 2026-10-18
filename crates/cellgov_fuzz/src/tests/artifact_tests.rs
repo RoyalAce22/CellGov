@@ -53,6 +53,7 @@ fn sample() -> (FuzzFindingArtifact, FuzzRun) {
             kind: FindingKind::IllegalOutcome,
             replay: ReplayCoordinates {
                 campaign_version: CampaignVersion(4),
+                generator_revision: crate::GeneratorRevision(1),
                 target: FuzzTarget::PpuInstruction,
                 strategy: GenerationStrategy::Structured,
                 seed: 7,
@@ -356,7 +357,7 @@ fn artifact_key_order_is_pinned() {
             r#""retention":{"capacity":256,"per_kind_capacity":8,"novelty_weight":8,"rarity_weight":4,"asymmetry_weight":16,"policy":"balanced"},"#,
             r#""max_findings":4,"sequence_words":32},"#,
             r#""execution":{"workers":2,"deadline_ms":500,"progress":true,"check":"all","reduction":{"kind":"none"}},"#,
-            r#""original":{"replay":{"campaign_version":4,"target":"PpuInstruction","strategy":"structured","seed":7,"case_index":12,"sequence_words":32},"#,
+            r#""original":{"replay":{"campaign_version":4,"generator_revision":1,"target":"PpuInstruction","strategy":"structured","seed":7,"case_index":12,"sequence_words":32},"#,
             r#""words":[945815559],"state_source":"versioned_generator"},"#,
             r#""finding_kind":"IllegalOutcome","#,
             r#""fingerprint":{"target":"PpuInstruction","instruction_kind":null,"check":"LegalOutcome","divergence":"Outcome","outcome":null,"effect":null,"component":null},"#,
