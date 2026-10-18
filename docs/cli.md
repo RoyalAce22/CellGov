@@ -2456,6 +2456,7 @@ Run the bounded smoke set and hold every finding to a promoted regression.
 ```console
 $ cellgov dev fuzz smoke --regressions crates/cellgov_fuzz/regressions
 $ cellgov dev fuzz smoke --artifacts-dir target/fuzz-smoke/release --regressions crates/cellgov_fuzz/regressions
+$ cellgov dev fuzz smoke --regressions crates/cellgov_fuzz/regressions --spu-references crates/cellgov_fuzz/tests/fixtures/spu_reference
 ```
 
 ```
@@ -2466,18 +2467,22 @@ Usage: cellgov dev fuzz smoke [OPTIONS]
 | --- | --- | --- |
 | `--artifacts-dir` | `DIR` | Directory that receives one minimized artifact per retained finding. Default `target/fuzz-smoke`. |
 | `--regressions` | `DIR` | Regression directory whose open entries cover known findings. |
+| `--spu-references` | `DIR` | SPU reference directory the set replays as its reference tier. |
 | `--reduction-budget` | `REDUCTION_BUDGET` | Maximum candidate evaluations spent reducing each finding. Default `4096`. |
 | `--progress` | -- | Report a line after each campaign. |
 
 ```
 Exit codes particular to this command:
   1   a campaign retained a finding no promoted regression covers; its
-      artifact names the exact replay. Also the shared failed-operation
-      status when --regressions could not be loaded
+      artifact names the exact replay. Also a reference file that does
+      not match, a reference directory with a gap, and the shared
+      failed-operation status when --regressions or --spu-references
+      could not be read
   12  an engine failed inside the harness rather than the target
   13  a finding's artifact could not be stored; its evidence was printed
   14  a retained finding's reduction failed; its original case is stored
-  17  a campaign reached less than its coverage floor
+  17  a campaign or the reference tier reached less than its coverage
+      floor, or its floor names a registry size that has changed
   141 stdout was closed by a downstream reader
 ```
 
