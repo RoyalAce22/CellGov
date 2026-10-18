@@ -37,6 +37,8 @@
 //! |                               | `BranchFallThrough`                  | compare-branch relation     |
 //! | sequence-relation partner     | `SequencePartnerWrite`,              | the row's sequence relation |
 //! |                               | `SequencePartnerLane`                |                             |
+//! | sequence replay world only    | `LateWorld`                          | deterministic replay        |
+//! | world get landing             | `MisLandedGet`                       | none: the reference tier    |
 //!
 //! [Chen2018 p:4:8 s:4.1] Faults seeded into a program measure how many a
 //! metamorphic relation detects. [JiaHarman2011 p:4 s:II.B] A seeded

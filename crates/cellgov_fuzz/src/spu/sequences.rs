@@ -11,7 +11,7 @@ use cellgov_spu::state::SPU_LS_SIZE;
 use super::assess::assess_sequence_case;
 use super::execute::{
     outcome_effects, outcome_identity, run_generated_sequence, spu_observation,
-    spu_sequence_replay_asymmetry, SpuTerminalObservation,
+    spu_sequence_replay_asymmetry, SequenceWorld, SpuTerminalObservation,
 };
 use super::generate::{
     case_descriptors, random_state, sequence_world, state_aware_state, structured_sequence,
@@ -244,10 +244,15 @@ fn run_sequences_inner(
         let mut asymmetry = CrossReferenceAsymmetry::None;
         if first.0.deterministic {
             let executing = Cell::new(None);
+            let late = seeded::spu_replay_actions(&world.actions).map(|actions| SequenceWorld {
+                memory: world.memory.clone(),
+                actions,
+            });
+            let replay_world = late.as_ref().unwrap_or(&world);
             let second = match call_target(|| {
                 run_generated_sequence(
                     &initial,
-                    &world,
+                    replay_world,
                     config.sequence_words as usize,
                     program_words,
                     config.strategy,

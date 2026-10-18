@@ -37,7 +37,8 @@ pub(crate) const EXIT_NOT_REPRODUCED: i32 = exit_codes::command_specific(15);
 /// Exit code: an evaluation regressed a validity or coverage metric against
 /// its baseline.
 pub(crate) const EXIT_REGRESSION: i32 = exit_codes::command_specific(16);
-/// Exit code: a smoke campaign reached less than its coverage floor.
+/// Exit code: a smoke campaign or the reference tier reached less than its
+/// floor.
 pub(crate) const EXIT_VACUOUS: i32 = exit_codes::command_specific(17);
 
 pub(crate) use cellgov_fuzz::runner::{ArtifactRecord, CampaignOutcome, CampaignSummary};
@@ -110,6 +111,43 @@ pub(crate) struct SmokeCampaignSummary {
     pub covered: bool,
 }
 
+/// The smoke set's reference replay, as the summary names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SmokeReferenceSummary {
+    /// Tier name from the smoke set.
+    pub name: &'static str,
+    /// Files replayed.
+    pub files: u64,
+    /// Vectors replayed.
+    pub vectors: u64,
+    /// Files that did not match or did not replay.
+    pub failing: u64,
+    /// Gaps in the reference directory
+    /// ([`cellgov_fuzz::spu_reference::SpuReferenceCompleteness::gaps`]).
+    pub gaps: u64,
+    /// Whether the replay reached its floor and the floor still matches the
+    /// unit list it was measured against.
+    pub covered: bool,
+}
+
+/// Renders the reference replay's line.
+#[must_use]
+pub(crate) fn render_smoke_reference(summary: &SmokeReferenceSummary) -> String {
+    format!(
+        "fuzz smoke: {} files={} vectors={} failing={} gaps={} coverage={}\n",
+        summary.name,
+        summary.files,
+        summary.vectors,
+        summary.failing,
+        summary.gaps,
+        if summary.covered {
+            "reached"
+        } else {
+            "under floor"
+        },
+    )
+}
+
 /// Terminal state of the smoke set, in exit precedence order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SmokeOutcome {
@@ -119,12 +157,12 @@ pub(crate) enum SmokeOutcome {
     HarnessFailure,
     /// A retained finding's reduction failed.
     ReductionFailed,
-    /// A retained finding no promoted regression covers.
+    /// A finding no promoted regression covers.
     Unpromoted,
-    /// A campaign reached less than its coverage floor.
+    /// A campaign or the reference tier reached less than its floor.
     Vacuous,
-    /// Every campaign reached its floor and a promoted regression covers
-    /// every finding.
+    /// Every campaign and any reference tier reached its floor, and a
+    /// promoted regression covers every finding.
     Clean,
 }
 

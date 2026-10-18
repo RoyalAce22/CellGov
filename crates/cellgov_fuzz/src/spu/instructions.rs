@@ -342,6 +342,17 @@ fn spu_relation_check(relation: SpuMetamorphicRelation) -> CheckIdentity {
     }
 }
 
+/// The check of every metamorphic relation a registry kind declares.
+pub(crate) fn declared_relation_checks() -> BTreeSet<CheckIdentity> {
+    spu_descriptors()
+        .iter()
+        .filter_map(|descriptor| cellgov_spu::decode::decode(descriptor.canonical_word).ok())
+        .flat_map(|instruction| instruction.fuzz_descriptor().relations.iter().copied())
+        .filter(|relation| *relation != SpuMetamorphicRelation::Deterministic)
+        .map(spu_relation_check)
+        .collect()
+}
+
 /// [Le2014 p:219 s:3.1.2] Each equivalent variant runs on the same input as the original, and any disagreement is a finding.
 /// A relation with a varied input is the other form: the partner runs
 /// the same word from a rewritten register, which the relation claims

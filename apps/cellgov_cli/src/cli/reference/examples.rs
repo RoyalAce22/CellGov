@@ -441,6 +441,7 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         lines: &[
             "cellgov dev fuzz smoke --regressions crates/cellgov_fuzz/regressions",
             "cellgov dev fuzz smoke --artifacts-dir target/fuzz-smoke/release --regressions crates/cellgov_fuzz/regressions",
+            "cellgov dev fuzz smoke --regressions crates/cellgov_fuzz/regressions --spu-references crates/cellgov_fuzz/tests/fixtures/spu_reference",
         ],
     },
     Examples {

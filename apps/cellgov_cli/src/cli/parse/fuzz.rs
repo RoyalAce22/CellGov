@@ -500,12 +500,15 @@ pub(crate) struct FuzzEvaluateArgs {
 /// The outcomes `dev fuzz smoke` has beyond the shared 0-5 contract.
 pub(crate) const SMOKE_EXIT_CODES: &str = "Exit codes particular to this command:
   1   a campaign retained a finding no promoted regression covers; its
-      artifact names the exact replay. Also the shared failed-operation
-      status when --regressions could not be loaded
+      artifact names the exact replay. Also a reference file that does
+      not match, a reference directory with a gap, and the shared
+      failed-operation status when --regressions or --spu-references
+      could not be read
   12  an engine failed inside the harness rather than the target
   13  a finding's artifact could not be stored; its evidence was printed
   14  a retained finding's reduction failed; its original case is stored
-  17  a campaign reached less than its coverage floor
+  17  a campaign or the reference tier reached less than its coverage
+      floor, or its floor names a registry size that has changed
   141 stdout was closed by a downstream reader";
 
 /// Settings for the bounded smoke set.
@@ -518,6 +521,9 @@ pub(crate) struct FuzzSmokeArgs {
     /// Regression directory whose open entries cover known findings.
     #[arg(long, value_name = "DIR")]
     pub regressions: Option<PathBuf>,
+    /// SPU reference directory the set replays as its reference tier.
+    #[arg(long, value_name = "DIR")]
+    pub spu_references: Option<PathBuf>,
     /// Maximum candidate evaluations spent reducing each finding.
     #[arg(long, default_value_t = cellgov_fuzz::reduce::DEFAULT_REDUCTION_BUDGET)]
     pub reduction_budget: u64,

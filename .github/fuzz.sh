@@ -10,6 +10,7 @@ trials="${FUZZ_TRIALS:-10}"
 raw_words="${FUZZ_RAW_WORDS:-16777216}"
 out="${FUZZ_OUT:-target/fuzz-scheduled}"
 regressions=crates/cellgov_fuzz/regressions
+spu_references=crates/cellgov_fuzz/tests/fixtures/spu_reference
 
 cellgov() {
     cargo run --release -p cellgov_cli --locked -- "$@"
@@ -60,7 +61,21 @@ reach() {
 
 smoke() {
     fresh "$out/smoke"
-    cellgov dev fuzz smoke --artifacts-dir "$out/smoke" --regressions "$regressions"
+    cellgov dev fuzz smoke --artifacts-dir "$out/smoke" --regressions "$regressions" \
+        --spu-references "$spu_references"
+}
+
+# The long SPU sweep: every SPU engine and strategy at a budget that scales
+# with the descriptor registry, held to the smoke floors and the promoted
+# regressions. A filter that matches no test passes with "0 passed", so the
+# job requires the one sweep test to have run.
+spu() {
+    local log
+    log=$(cargo test --release -p cellgov_fuzz --locked --test it -- --ignored spu_sweep:: 2>&1 | tee /dev/stderr)
+    case "$log" in
+        *"test result: ok. 1 passed"*) ;;
+        *) echo "fuzz spu: the sweep test did not run" >&2; return 1 ;;
+    esac
 }
 
 # Names a job's outcome from its exit status: clean, a timeout, killed
@@ -87,9 +102,10 @@ case "${1:-}" in
     raw) raw ;;
     evaluate) evaluate ;;
     reach) reach ;;
+    spu) spu ;;
     smoke) smoke ;;
     *)
-        echo "usage: $0 {campaigns|raw|evaluate|reach|smoke|outcome <job> <status> <artifact>}" >&2
+        echo "usage: $0 {campaigns|raw|evaluate|reach|spu|smoke|outcome <job> <status> <artifact>}" >&2
         exit 2
         ;;
 esac

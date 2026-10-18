@@ -43,11 +43,27 @@ fn the_set_names_every_engine_and_strategy_once() {
             .unwrap_or_else(|error| panic!("{}: {error}", campaign.name));
         assert_eq!(config.schedule.cases.count, campaign.cases);
         assert_eq!(config.seed, campaign.seed);
-        assert!(campaign.floor.eligible > 0 && campaign.floor.instruction_kinds > 0);
+        assert!(campaign.floor.eligible > 0);
+        assert_ne!(
+            campaign.floor.instruction_kinds,
+            KindFloor::AtLeast(0),
+            "{}",
+            campaign.name
+        );
+        let relations = match campaign.target {
+            FuzzTarget::SpuInstruction => RelationFloor::InstructionCatalog,
+            FuzzTarget::SpuSequence => RelationFloor::SequenceCatalog,
+            FuzzTarget::PpuInstruction | FuzzTarget::PpuSequence => RelationFloor::None,
+        };
         assert_eq!(
-            campaign.floor.every_relation_row,
+            campaign.floor.relations, relations,
+            "{}: each SPU engine runs its whole relation catalog",
+            campaign.name
+        );
+        assert_eq!(
+            campaign.floor.facilities != NO_FACILITIES,
             campaign.target == FuzzTarget::SpuSequence,
-            "{}: the sequence campaigns run the relation rows",
+            "{}: the sequence campaigns reach the facilities",
             campaign.name
         );
     }

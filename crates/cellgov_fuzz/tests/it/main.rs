@@ -18,3 +18,4 @@ mod spu_layered_reference_integration;
 mod spu_observation_engine;
 mod spu_reference_artifact;
 mod spu_reference_campaign;
+mod spu_sweep;

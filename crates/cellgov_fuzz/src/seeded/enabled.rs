@@ -12,6 +12,7 @@ use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation};
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState, SPU_REG_COUNT};
 
 use super::SeededDefect;
+use crate::spu_reference::SpuReferencePpuAction;
 
 thread_local! {
     static ACTIVE: Cell<Option<SeededDefect>> = const { Cell::new(None) };
@@ -253,6 +254,28 @@ pub(crate) fn ppu_partner(observation: &mut PpuObservation) {
 pub(crate) fn spu_partner(state: &mut SpuObservableSnapshot) {
     if active() == Some(SeededDefect::MetamorphicMismatch) {
         state.regs[0][15] ^= CORRUPTION;
+    }
+}
+
+/// The scripted operations of the SPU sequence replay run, when they
+/// differ from the first run's.
+pub(crate) fn spu_replay_actions(
+    actions: &[(u64, SpuReferencePpuAction)],
+) -> Option<Vec<(u64, SpuReferencePpuAction)>> {
+    (active() == Some(SeededDefect::LateWorld)).then(|| {
+        actions
+            .iter()
+            .map(|&(after, action)| (after + 1, action))
+            .collect()
+    })
+}
+
+/// The bytes the world lands in local store for a get.
+pub(crate) fn world_get(bytes: &mut [u8]) {
+    if active() == Some(SeededDefect::MisLandedGet) {
+        if let Some(first) = bytes.first_mut() {
+            *first ^= CORRUPTION;
+        }
     }
 }
 

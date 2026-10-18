@@ -535,7 +535,7 @@ impl World {
         let fail = |_| world_error("a completed transfer");
         match c.direction() {
             DmaDirection::Get => {
-                let bytes = match target {
+                let mut bytes = match target {
                     Some(Ok(WindowTarget::LocalStore { unit, lsa })) => self
                         .unit_mut(unit)?
                         .read_local_store(lsa, len as u32)
@@ -547,6 +547,7 @@ impl World {
                         .ok_or(world_error("a get's source"))?
                         .to_vec(),
                 };
+                crate::seeded::world_get(&mut bytes);
                 // The destination is a local-store offset, below 2^32.
                 let lsa = c.destination().start().raw() as u32;
                 self.unit.land_local_store(lsa, &bytes).map_err(fail)

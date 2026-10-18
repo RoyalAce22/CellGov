@@ -152,6 +152,15 @@ impl SpuReferenceCompleteness {
             && self.stale_pending.is_empty()
             && self.unknown_pending.is_empty()
     }
+
+    /// Counts the gaps that [`Self::is_complete`] checks for.
+    pub fn gaps(&self) -> usize {
+        self.missing.len()
+            + self.duplicated.len()
+            + self.unowned.len()
+            + self.stale_pending.len()
+            + self.unknown_pending.len()
+    }
 }
 
 /// A campaign over one reference directory.
@@ -167,6 +176,18 @@ impl SpuReferenceCampaign {
     /// Whether every file matched and the directory is complete.
     pub fn is_clean(&self) -> bool {
         self.completeness.is_complete() && self.files.iter().all(|run| run.outcome.is_match())
+    }
+
+    /// The vectors the files replayed. A refused file replays none.
+    pub fn vectors(&self) -> usize {
+        self.files
+            .iter()
+            .map(|run| match &run.outcome {
+                SpuReferenceFileOutcome::Single(_) => 1,
+                SpuReferenceFileOutcome::Set(replays) => replays.len(),
+                SpuReferenceFileOutcome::Refused(_) => 0,
+            })
+            .sum()
     }
 }
 

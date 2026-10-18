@@ -131,9 +131,11 @@ test_local() {
 smoke_artifacts() {
     rm -rf target/fuzz-smoke
     timed fuzz-smoke-debug cargo run -p cellgov_cli --locked -- dev fuzz smoke \
-        --artifacts-dir target/fuzz-smoke/debug --regressions crates/cellgov_fuzz/regressions
+        --artifacts-dir target/fuzz-smoke/debug --regressions crates/cellgov_fuzz/regressions \
+        --spu-references crates/cellgov_fuzz/tests/fixtures/spu_reference
     timed fuzz-smoke-release cargo run -p cellgov_cli --locked --release -- dev fuzz smoke \
-        --artifacts-dir target/fuzz-smoke/release --regressions crates/cellgov_fuzz/regressions
+        --artifacts-dir target/fuzz-smoke/release --regressions crates/cellgov_fuzz/regressions \
+        --spu-references crates/cellgov_fuzz/tests/fixtures/spu_reference
 }
 
 # The MSRV promise is that the workspace builds on it; the workflow's

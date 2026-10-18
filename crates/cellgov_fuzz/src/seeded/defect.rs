@@ -40,4 +40,9 @@ pub(crate) enum SeededDefect {
     /// One word of a sequence relation partner's last written register
     /// changes.
     SequencePartnerLane,
+    /// The replay run's world lands every scripted PPU operation one
+    /// instruction late.
+    LateWorld,
+    /// The world lands every get with its first byte wrong.
+    MisLandedGet,
 }

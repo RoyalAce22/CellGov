@@ -9,6 +9,8 @@ use cellgov_spu::instruction::SpuInstruction;
 use cellgov_spu::observation::SpuObservation;
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState};
 
+use crate::spu_reference::SpuReferencePpuAction;
+
 /// Decodes a PPU word at the decoder boundary.
 #[inline(always)]
 pub(crate) fn ppu_decode(
@@ -93,6 +95,19 @@ pub(crate) fn ppu_partner(_observation: &mut PpuObservation) {}
 /// Corrupts the SPU metamorphic partner only.
 #[inline(always)]
 pub(crate) fn spu_partner(_state: &mut SpuObservableSnapshot) {}
+
+/// The scripted operations of the SPU sequence replay run, when they
+/// differ from the first run's.
+#[inline(always)]
+pub(crate) fn spu_replay_actions(
+    _actions: &[(u64, SpuReferencePpuAction)],
+) -> Option<Vec<(u64, SpuReferencePpuAction)>> {
+    None
+}
+
+/// The bytes the world lands in local store for a get.
+#[inline(always)]
+pub(crate) fn world_get(_bytes: &mut [u8]) {}
 
 /// Corrupts an SPU sequence relation's partner only.
 #[inline(always)]

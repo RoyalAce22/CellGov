@@ -35,6 +35,14 @@ fn regressions_dir() -> PathBuf {
         .join("regressions")
 }
 
+/// The tracked SPU reference directory of the fuzz crate.
+fn references_dir() -> PathBuf {
+    regressions_dir()
+        .with_file_name("tests")
+        .join("fixtures")
+        .join("spu_reference")
+}
+
 fn smoke(
     artifacts: &Path,
     extra: &[&str],
@@ -55,6 +63,8 @@ fn the_smoke_set_parses_its_typed_settings() {
         "out",
         "--regressions",
         "regressions",
+        "--spu-references",
+        "references",
         "--reduction-budget",
         "32",
         "--progress",
@@ -65,6 +75,7 @@ fn the_smoke_set_parses_its_typed_settings() {
     };
     assert_eq!(args.artifacts_dir, PathBuf::from("out"));
     assert_eq!(args.regressions, Some(PathBuf::from("regressions")));
+    assert_eq!(args.spu_references, Some(PathBuf::from("references")));
     assert_eq!(args.reduction_budget, 32);
     assert!(args.progress);
     let defaults = parse(&["smoke"]).expect("parses with defaults");
@@ -81,6 +92,7 @@ fn the_smoke_set_parses_its_typed_settings() {
         Some("fuzz-smoke")
     );
     assert_eq!(args.regressions, None);
+    assert_eq!(args.spu_references, None);
     assert_eq!(
         args.reduction_budget,
         cellgov_fuzz::reduce::DEFAULT_REDUCTION_BUDGET
@@ -91,8 +103,47 @@ fn the_smoke_set_parses_its_typed_settings() {
 fn the_smoke_set_is_clean_against_the_tracked_regressions() {
     let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_smoke_tracked");
     let regressions = path_arg(&regressions_dir());
-    let code = smoke(&scratch, &["--regressions", regressions.as_str()]).expect("the set runs");
+    let references = path_arg(&references_dir());
+    let code = smoke(
+        &scratch,
+        &[
+            "--regressions",
+            regressions.as_str(),
+            "--spu-references",
+            references.as_str(),
+        ],
+    )
+    .expect("the set runs");
     assert_eq!(code, CommandExitCode::SUCCESS);
+}
+
+#[test]
+fn a_reference_directory_with_a_gap_fails_the_set_as_a_finding() {
+    let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_smoke_reference_gap");
+    let references = scratch.join("references");
+    std::fs::create_dir_all(&references).expect("creates");
+    let references = path_arg(&references);
+    let code = smoke(
+        &scratch.join("artifacts"),
+        &["--spu-references", references.as_str()],
+    )
+    .expect("the set runs");
+    assert_eq!(code.value(), exit_codes::FAILED as u8);
+}
+
+#[test]
+fn an_unreadable_reference_directory_is_refused() {
+    let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_smoke_reference_absent");
+    let references = path_arg(&scratch.join("absent"));
+    let error = smoke(
+        &scratch.join("artifacts"),
+        &["--spu-references", references.as_str()],
+    )
+    .expect_err("an absent directory is refused");
+    assert_eq!(
+        error.code().expect("status").value(),
+        exit_codes::FAILED as u8
+    );
 }
 
 #[test]

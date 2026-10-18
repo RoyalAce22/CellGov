@@ -1,6 +1,7 @@
 //! The bounded smoke set: every campaign the library declares, run once,
 //! every finding minimized and stored, and each held to a promoted
-//! regression.
+//! regression. With a reference directory, the set also replays the SPU
+//! reference tier.
 
 use cellgov_fuzz::artifact::{
     artifact_path, ArtifactCheckSelection, ArtifactExecutionPolicy, ArtifactFingerprint,
@@ -10,7 +11,7 @@ use cellgov_fuzz::reduce::{ReductionPolicy, ReductionRequest};
 use cellgov_fuzz::regression::{self, Regression, RegressionProfile};
 use cellgov_fuzz::report::failing_findings;
 use cellgov_fuzz::runner::reduce_retained_finding;
-use cellgov_fuzz::smoke::SMOKE_CAMPAIGNS;
+use cellgov_fuzz::smoke::{SmokeError, SMOKE_CAMPAIGNS, SMOKE_REFERENCE};
 use cellgov_fuzz::{ReductionOutcome, RunOutcome};
 
 use super::artifact::persist_finding;
@@ -18,7 +19,8 @@ use super::entry::{reports_progress, write_stdout};
 use super::error::FuzzCliError;
 use super::outcome::{
     render_promotion, render_smoke_campaign, render_smoke_finding, render_smoke_outcome,
-    ArtifactRecord, SmokeCampaignSummary, SmokeOutcome,
+    render_smoke_reference, ArtifactRecord, SmokeCampaignSummary, SmokeOutcome,
+    SmokeReferenceSummary,
 };
 use crate::cli::exit::CommandExitCode;
 use crate::cli::parse::{FuzzPromoteArgs, FuzzRegressionProfile, FuzzSmokeArgs};
@@ -48,11 +50,13 @@ pub(super) fn run_promote(args: &FuzzPromoteArgs) -> Result<CommandExitCode, Fuz
 }
 
 /// Runs the smoke set: one campaign after another, each finding reduced and
-/// stored, each held to the regressions the caller named.
+/// stored, each held to the regressions the caller named. With a reference
+/// directory, the set also replays it as its reference tier.
 ///
-/// The regressions load before the first campaign runs, so a directory that
-/// cannot stand as a witness costs no campaign. Every campaign runs whatever
-/// the earlier ones found. The outcome ranks what the set as a whole found.
+/// The set loads the regressions and replays the reference directory before
+/// the first campaign runs, so a directory that cannot stand as a witness
+/// costs no campaign. Every campaign runs whatever the earlier ones found.
+/// The outcome ranks what the set as a whole found.
 pub(super) fn run_smoke(
     args: &FuzzSmokeArgs,
     quiet: bool,
@@ -71,6 +75,11 @@ pub(super) fn run_smoke(
         Some(dir) => regression::load(dir)?,
         None => Vec::new(),
     };
+    let reference = args
+        .spu_references
+        .as_ref()
+        .map(|dir| SMOKE_REFERENCE.run(dir))
+        .transpose()?;
     let request = ReductionRequest {
         policy: ReductionPolicy::Deterministic,
         budget: args.reduction_budget,
@@ -194,6 +203,40 @@ pub(super) fn run_smoke(
         }
         write_stdout(&line)?;
     }
+    let mut campaigns = SMOKE_CAMPAIGNS.len();
+    if let Some(replay) = &reference {
+        campaigns += 1;
+        let checked = SMOKE_REFERENCE.check(replay);
+        if let Err(error) = &checked {
+            eprintln!("fuzz smoke: {error}");
+        }
+        // A replay that is not clean is a finding no regression covers,
+        // whatever error the check names first.
+        if !replay.is_clean() {
+            unpromoted_total = unpromoted_total
+                .checked_add(1)
+                .ok_or(FuzzCliError::CounterOverflow)?;
+        }
+        let covered = SMOKE_REFERENCE.reaches_floor(replay)
+            && !matches!(checked, Err(SmokeError::Unpinned { .. }));
+        vacuous |= !covered;
+        let line = render_smoke_reference(&SmokeReferenceSummary {
+            name: SMOKE_REFERENCE.name,
+            files: replay.files.len() as u64,
+            vectors: replay.vectors() as u64,
+            failing: replay
+                .files
+                .iter()
+                .filter(|run| !run.outcome.is_match())
+                .count() as u64,
+            gaps: replay.completeness.gaps() as u64,
+            covered,
+        });
+        if reports_progress(args.progress, quiet) {
+            eprint!("{line}");
+        }
+        write_stdout(&line)?;
+    }
     let outcome = SmokeOutcome::classify(
         evidence_not_stored.is_some(),
         harness_failure.is_some(),
@@ -201,7 +244,7 @@ pub(super) fn run_smoke(
         unpromoted_total,
         vacuous,
     );
-    write_stdout(&render_smoke_outcome(SMOKE_CAMPAIGNS.len(), outcome))?;
+    write_stdout(&render_smoke_outcome(campaigns, outcome))?;
     if let Some(error) = evidence_not_stored {
         return Err(error);
     }
