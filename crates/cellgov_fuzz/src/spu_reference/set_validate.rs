@@ -140,9 +140,19 @@ fn line_ok(addr: u64) -> bool {
     cellgov_sync::ReservedLine::containing(addr).addr() == addr
 }
 
-/// Whether the field is well formed: a blank reason refuses, and a set
-/// of legal values holds two or more distinct values, a chosen index
-/// inside them, and values each `ok` accepts.
+/// Whether a reason is nonblank and names no tracker issue: `#` and a
+/// digit, a pointer that goes stale once its issue closes.
+fn reason_ok(reason: &str) -> bool {
+    !reason.trim().is_empty()
+        && !reason
+            .split('#')
+            .skip(1)
+            .any(|after| after.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// Whether the field is well formed: a reason passes [`reason_ok`], and
+/// a set of legal values holds two or more distinct values, a chosen
+/// index inside them, and values each `ok` accepts.
 fn field_ok<T: PartialEq>(field: &SpuField<T>, ok: impl Fn(&T) -> bool) -> bool {
     match field {
         SpuField::Value { value } => ok(value),
@@ -153,16 +163,14 @@ fn field_ok<T: PartialEq>(field: &SpuField<T>, ok: impl Fn(&T) -> bool) -> bool 
         } => {
             values.len() >= 2
                 && *chosen < values.len()
-                && !reason.trim().is_empty()
+                && reason_ok(reason)
                 && values.iter().all(&ok)
                 && values
                     .iter()
                     .enumerate()
                     .all(|(index, value)| !values[..index].contains(value))
         }
-        SpuField::Undefined { reason } | SpuField::Unsupported { reason } => {
-            !reason.trim().is_empty()
-        }
+        SpuField::Undefined { reason } | SpuField::Unsupported { reason } => reason_ok(reason),
     }
 }
 

@@ -29,6 +29,7 @@ FIXTURES = HERE / '../../../crates/cellgov_fuzz/tests/fixtures/spu_reference'
 CAPTURE = HERE / 'ps3/cech20-cex-493'
 SUFFIX = '-console'
 OLD_REASON_TAIL = 'left to hardware capture, issue #1411'
+CHANNELS_REASON = 'the capture records no channel state, which the runtime refreshes at each step'
 
 
 def frame_words():
@@ -74,8 +75,11 @@ def main():
             console = json.loads(json.dumps(documented))
             for component in documented['expected'].values():
                 if undefined(component) and component['reason'].endswith(OLD_REASON_TAIL):
-                    component['reason'] = (component['reason'][:-len(OLD_REASON_TAIL)]
-                                           + 'the %s%s vector holds the console\'s answer' % (name, SUFFIX))
+                    # Keep the rule, the clause before '; ', and replace the
+                    # whole clause that pointed at a future capture.
+                    rule = component['reason'].rsplit('; ', 1)[0]
+                    component['reason'] = (rule + '; the %s%s vector holds the console\'s answer'
+                                           % (name, SUFFIX))
         else:
             console = json.loads(json.dumps(doc['vectors'][0]))
             start = {}
@@ -86,6 +90,8 @@ def main():
         console['name'] = name + SUFFIX
         console['provenance'] = prov
         expected = console['expected']
+        if expected['channels'].get('status') == 'unsupported':
+            expected['channels'] = {'status': 'unsupported', 'reason': CHANNELS_REASON}
         undef = {k for k, c in (documented or console)['expected'].items() if undefined(c)}
         if documented is None:
             undef = {'regs_hex', 'fpscr'}

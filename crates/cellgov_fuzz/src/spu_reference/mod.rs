@@ -35,3 +35,7 @@ mod set_tests;
 #[cfg(test)]
 #[path = "../tests/spu_reference_campaign_tests.rs"]
 mod campaign_tests;
+
+#[cfg(test)]
+#[path = "../tests/spu_reference_reason_tests.rs"]
+mod reason_tests;
