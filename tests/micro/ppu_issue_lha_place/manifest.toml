@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_lha_place"
+
+# A hardware probe of whether where a microcoded sibling's loop sits,
+# and which line its loads read, sets the stall it adds to the other
+# PPU thread: two timed chains on the main thread (dependent add, an L1
+# ld chase), alone and beside a sibling of microcoded lha whose loop head
+# sits at each 16-byte offset of a 128-byte line, and once with its
+# loads on the main thread's ld line. The console capture is the answer;
+# ppu/main.c's header lists the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 1280 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1280 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 180000

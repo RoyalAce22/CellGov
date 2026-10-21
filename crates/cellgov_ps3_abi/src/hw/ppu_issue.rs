@@ -200,6 +200,13 @@ pub const PPU_SMT_SHARED_STALL_CYCLES: u64 = 13;
 /// `ppu_issue_layout`, 3 in `ppu_issue_units` and 1 in
 /// `ppu_issue_shared`.
 ///
+/// The `ppu_issue_lha_place` capture moves the sibling's loop through
+/// every 16-byte offset of a line and puts its loads on the main
+/// thread's line once. Each held cell waits 13.0 to 14.8 cycles, at
+/// seven of the eight offsets and on either line; at +0x30 neither chain
+/// held. The level moves with the probe and stays level across the
+/// sibling's placements.
+///
 /// No capture times a sibling of `mfcr` or `mfocrf`, the other long
 /// instructions this cap covers.
 pub const PPU_SMT_MICROCODE_STALL_CYCLES: u64 = 10;
