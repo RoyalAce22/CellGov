@@ -16,7 +16,10 @@
 //! - The deadline a timer wake carries (`tests/timer_deadline.rs`,
 //!   which records that the cover stays whole anyway). The clock's
 //!   other readers reach [`StepFootprint::reads_clock`] and
-//!   [`StepFootprint::inflight_dma_ranges`].
+//!   [`StepFootprint::inflight_dma_ranges`]. A timer wake of a PPE
+//!   thread also moves the other PPE threads' sibling count, and it
+//!   fires between steps, so no [`StepFootprint::ppe_status_changes`]
+//!   records it.
 //! - The RSX FIFO advance pass's cursor and call stack, and the
 //!   `RsxLabelWrite` effects it queues. Its MMIO mirrors do reach
 //!   [`StepFootprint::note_host_writes`].
@@ -159,6 +162,19 @@ pub struct StepFootprint {
     /// reader the pair is independent, and the clause is wider than it
     /// needs to be there.
     pub reads_clock: bool,
+    /// The PPE thread that stepped, whose cost read how many other PPE
+    /// threads were runnable as the step began.
+    ///
+    /// A runnable sibling holds issue after each of the thread's
+    /// dispatch groups, so the step's ticks depend on the other PPE
+    /// threads' status. [`StepFootprint::note_commit`] sets it.
+    pub ppe_sibling_reader: Option<cellgov_event::UnitId>,
+    /// The PPE threads whose runnable status this step changed: a park,
+    /// a wake, a creation or a finish.
+    ///
+    /// [`StepFootprint::note_commit`] compares the runnable set the step
+    /// began from with each thread's status after its commit.
+    pub ppe_status_changes: Vec<cellgov_event::UnitId>,
 }
 
 impl StepFootprint {
@@ -191,6 +207,7 @@ impl StepFootprint {
         self.mailbox_counts.extend(rt.last_mailbox_read());
         self.note_inflight(rt);
         self.local_store_owner = Some(unit);
+        self.note_ppe_siblings(rt, unit);
         self.held_reservation_lines
             .extend(rt.last_entry_reservation());
         self.note_lv2_effects(rt);
@@ -200,6 +217,27 @@ impl StepFootprint {
             .extend(rt.last_problem_state_accesses());
         self.expand_aliases(rt, unit);
         self.note_host_writes(rt);
+    }
+
+    /// Record whether the stepping unit read the PPE sibling count, and
+    /// which PPE threads the step moved into or out of the runnable set.
+    ///
+    /// Call it after the step's commit and before the next step, which
+    /// may warp time and wake units no step of its own wakes.
+    fn note_ppe_siblings(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
+        let registry = rt.registry();
+        let is_ppe =
+            |id: cellgov_event::UnitId| registry.get(id).is_some_and(|u| u.shares_ppe_issue());
+        if is_ppe(unit) {
+            self.ppe_sibling_reader = Some(unit);
+        }
+        let before = rt.last_runnable();
+        for id in registry.ids().filter(|&id| is_ppe(id)) {
+            let now = registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Runnable);
+            if now != before.contains(&id) {
+                self.ppe_status_changes.push(id);
+            }
+        }
     }
 
     /// Widen every range category to the sibling views it aliases.
@@ -309,6 +347,8 @@ impl StepFootprint {
             inflight_local_stores,
             local_store_owner,
             reads_clock,
+            ppe_sibling_reader,
+            ppe_status_changes,
         } = other;
         self.shared_writes.extend(shared_writes);
         self.shared_reads.extend(shared_reads);
@@ -332,6 +372,8 @@ impl StepFootprint {
         self.inflight_local_stores.extend(inflight_local_stores);
         self.local_store_owner = self.local_store_owner.or(local_store_owner);
         self.reads_clock |= reads_clock;
+        self.ppe_sibling_reader = self.ppe_sibling_reader.or(ppe_sibling_reader);
+        self.ppe_status_changes.extend(ppe_status_changes);
     }
 
     /// Record the host writes that landed during this step.
@@ -670,6 +712,18 @@ impl StepFootprint {
             return true;
         }
 
+        // A PPE step's ticks read how many other PPE threads were
+        // runnable, which a step that parks, wakes, creates or finishes
+        // one of them decides.
+        let sibling_moved = |reader: &StepFootprint, changer: &StepFootprint| {
+            reader
+                .ppe_sibling_reader
+                .is_some_and(|r| changer.ppe_status_changes.iter().any(|&u| u != r))
+        };
+        if sibling_moved(self, other) || sibling_moved(other, self) {
+            return true;
+        }
+
         false
     }
 
@@ -699,6 +753,8 @@ impl StepFootprint {
             && self.dma_local_stores.is_empty()
             && self.inflight_local_stores.is_empty()
             && !self.reads_clock
+            && self.ppe_sibling_reader.is_none()
+            && self.ppe_status_changes.is_empty()
     }
 
     /// True when this step touches the bytes of a transfer that was in
@@ -840,3 +896,7 @@ fn lines_overlap(a: &[u64], b: &[u64]) -> bool {
 #[cfg(test)]
 #[path = "tests/dependency_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ppe_sibling_tests.rs"]
+mod ppe_sibling_tests;

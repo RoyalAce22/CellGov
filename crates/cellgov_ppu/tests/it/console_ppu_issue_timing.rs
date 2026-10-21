@@ -8,7 +8,9 @@
 //! runs loops 0 to 19 through the execution unit and its issue model. It
 //! holds each loop's cycles an iteration no farther from the fastest run
 //! than the slowest run is. Loops 20 to 22 run beside a busy second
-//! hardware thread, which the issue model does not see.
+//! hardware thread. `the_issue_model_times_each_loop_beside_a_busy_sibling_within_the_console_s_spread`
+//! replays them beside a second PPU unit that runs the probe's sibling
+//! loop.
 //!
 //! The `ppu_issue_table` probe times twenty-one more loops the same way,
 //! one per latency the model takes from the handbook's instruction table.
@@ -123,7 +125,7 @@ fn the_recorded_constants_are_the_captures() {
 
 /// Where each replay places its loop, its one data line and its rings.
 const CODE: u64 = 0x1000;
-const ONE_LINE: u64 = 0x2000;
+pub(crate) const ONE_LINE: u64 = 0x2000;
 const L1_RING: u64 = 0x1_0000;
 const L2_RING: u64 = 0x2_0000;
 const MEM_RING: u64 = 0x10_0000;
@@ -136,7 +138,7 @@ const REPLAY_ITERATIONS: u64 = 512;
 
 /// A register a replay seeds before its loop.
 #[derive(Clone, Copy)]
-enum Seed {
+pub(crate) enum Seed {
     Gpr(usize, u64),
     Fpr(usize, u64),
     /// A GPR holding the head of a ring of `bytes` at `base`, shuffled or
@@ -152,13 +154,13 @@ const ONE: u64 = 0x3FF0_0000_0000_0000;
 /// One loop of the probe: its body as `powerpc64-ps3-elf-objdump` of the
 /// built image prints it, from the aligned label through the `bdnz`, and
 /// the registers the body reads.
-struct Replay {
-    loop_index: usize,
-    words: &'static [u32],
-    seeds: &'static [Seed],
+pub(crate) struct Replay {
+    pub(crate) loop_index: usize,
+    pub(crate) words: &'static [u32],
+    pub(crate) seeds: &'static [Seed],
 }
 
-const BDNZ_8: u32 = 0x4200_ffe0;
+pub(crate) const BDNZ_8: u32 = 0x4200_ffe0;
 
 const REPLAYS: [Replay; 20] = [
     Replay {
@@ -592,12 +594,38 @@ fn build_ring(mem: &mut GuestMemory, base: u64, bytes: u64, shuffle: bool) -> u6
     base + order[0] * LINE
 }
 
+/// Where a replay places its siblings' loop.
+const SIBLING_CODE: u64 = 0x1800;
+
+/// The probe's sibling thread: sixteen independent `addi`, alternating
+/// r15 and r16, then its `bdnz`.
+const SIBLING_LOOP: [u32; 17] = [
+    0x39ef_0001,
+    0x3a10_0001,
+    0x39ef_0001,
+    0x3a10_0001,
+    0x39ef_0001,
+    0x3a10_0001,
+    0x39ef_0001,
+    0x3a10_0001,
+    0x39ef_0001,
+    0x3a10_0001,
+    0x39ef_0001,
+    0x3a10_0001,
+    0x39ef_0001,
+    0x3a10_0001,
+    0x39ef_0001,
+    0x3a10_0001,
+    0x4200_ffc0,
+];
+
 /// Run one replay's loop twice `REPLAY_ITERATIONS` times, one
-/// instruction a step.
+/// instruction a step, beside `siblings` PPU units that run the probe's
+/// sibling loop.
 ///
 /// Returns the cycles an iteration of the second half, or `None` when
 /// the unit faults.
-fn replay(r: &Replay) -> Option<f64> {
+pub(crate) fn replay(r: &Replay, siblings: usize) -> Option<f64> {
     let words = r.words;
     let ring_end = r
         .seeds
@@ -611,6 +639,10 @@ fn replay(r: &Replay) -> Option<f64> {
     let mut mem = GuestMemory::new(ring_end as usize);
     for (i, w) in words.iter().enumerate() {
         let range = ByteRange::new(GuestAddr::new(CODE + 4 * i as u64), 4).expect("range");
+        mem.apply_commit(range, &w.to_be_bytes()).expect("mapped");
+    }
+    for (i, w) in SIBLING_LOOP.iter().enumerate() {
+        let range = ByteRange::new(GuestAddr::new(SIBLING_CODE + 4 * i as u64), 4).expect("range");
         mem.apply_commit(range, &w.to_be_bytes()).expect("mapped");
     }
     let mut gprs = Vec::new();
@@ -647,6 +679,17 @@ fn replay(r: &Replay) -> Option<f64> {
         }
         ppu
     });
+    let sibling_ids: Vec<_> = (0..siblings)
+        .map(|_| {
+            rt.register_unit_with(|id| {
+                let mut ppu = PpuExecutionUnit::new(id);
+                let state = ppu.state_mut();
+                state.pc = SIBLING_CODE;
+                state.set_ctr(u64::MAX);
+                ppu
+            })
+        })
+        .collect();
 
     let state = |rt: &Runtime| -> cellgov_ppu::state::PpuState {
         rt.registry()
@@ -662,7 +705,10 @@ fn replay(r: &Replay) -> Option<f64> {
         None => s.ctr(),
     };
     let mut halfway = None;
-    let bound = 2 * REPLAY_ITERATIONS * (words.len() as u64 + 1) + 16;
+    // A sibling's instructions cost fewer cycles than most loops', so the
+    // scheduler gives it several steps for each of the loop's.
+    let bound =
+        (2 * REPLAY_ITERATIONS * (words.len() as u64 + 1) + 16) * (16 * siblings as u64 + 1);
     for _ in 0..bound {
         let s = state(&rt);
         if s.pc == exit {
@@ -681,6 +727,14 @@ fn replay(r: &Replay) -> Option<f64> {
             .expect("the step commits");
     }
     assert_eq!(state(&rt).pc, exit, "loop {} ran to its exit", r.loop_index);
+    for &s in &sibling_ids {
+        assert_eq!(
+            rt.registry().effective_status(s),
+            Some(UnitStatus::Runnable),
+            "the sibling ran beside loop {}",
+            r.loop_index,
+        );
+    }
     let halfway = halfway.expect("the loop passed its halfway count");
     Some((rt.registry().clock(unit).raw() - halfway) as f64 / REPLAY_ITERATIONS as f64)
 }
@@ -697,7 +751,7 @@ fn the_issue_model_times_each_table_loop_within_the_console_s_spread() {
     };
     let mut rows = Vec::new();
     for r in &TABLE_REPLAYS {
-        let Some(cellgov) = replay(r) else {
+        let Some(cellgov) = replay(r, 0) else {
             assert_eq!(
                 r.loop_index, TABLE_REFUSED_LOOP,
                 "table loop {} faults in the interpreter",
@@ -767,7 +821,7 @@ fn the_issue_model_times_each_loop_within_the_console_s_spread() {
     let w = console_words();
     let mut rows = Vec::new();
     for r in &REPLAYS {
-        let Some(cellgov) = replay(r) else {
+        let Some(cellgov) = replay(r, 0) else {
             assert_eq!(
                 r.loop_index, REFUSED_LOOP,
                 "loop {} faults in the interpreter",
@@ -806,5 +860,42 @@ fn the_issue_model_times_each_loop_within_the_console_s_spread() {
                  fastest {fastest:.3} with a spread of {spread:.3}: {rows:?}",
             );
         }
+    }
+}
+
+/// The loops the probe times beside its busy sibling, each with the loop
+/// whose body it repeats.
+const SIBLING_LOOPS: [(usize, usize); 3] = [(20, 1), (21, 2), (22, 11)];
+
+/// The `REPLAYS` entry for loop `k`.
+pub(crate) fn replay_of(k: usize) -> &'static Replay {
+    REPLAYS
+        .iter()
+        .find(|r| r.loop_index == k)
+        .expect("a replay of the loop")
+}
+
+#[test]
+fn the_issue_model_times_each_loop_beside_a_busy_sibling_within_the_console_s_spread() {
+    let w = console_words();
+    let mut rows = Vec::new();
+    for (k, body) in SIBLING_LOOPS {
+        let base = replay_of(body);
+        let r = Replay {
+            loop_index: k,
+            words: base.words,
+            seeds: base.seeds,
+        };
+        let cellgov = replay(&r, 1).expect("the loop replays");
+        let fastest = console_cycles(&w, k);
+        let spread = console_slowest(&w, k) - fastest;
+        rows.push((k, cellgov, fastest, spread));
+    }
+    for &(k, cellgov, fastest, spread) in &rows {
+        assert!(
+            (cellgov - fastest).abs() <= spread,
+            "loop {k}: CellGov {cellgov:.3} cycles an iteration, the console's \
+             fastest {fastest:.3} with a spread of {spread:.3}: {rows:?}",
+        );
     }
 }

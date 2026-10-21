@@ -197,6 +197,15 @@ pub trait ExecutionUnit {
         false
     }
 
+    /// Whether this unit is a PPE hardware thread, which shares the PPE's
+    /// issue slots with the other PPE threads.
+    ///
+    /// The runtime gives such a unit's step the number of other PPE
+    /// threads runnable at its start (`ExecutionContext::ppe_siblings`).
+    fn shares_ppe_issue(&self) -> bool {
+        false
+    }
+
     /// Hash of the unit's private memory the guest reads back, or `None`
     /// for a unit with none.
     ///

@@ -131,6 +131,7 @@ impl Runtime {
         // record it here.
         self.last_runnable.clear();
         self.last_runnable.extend(self.registry.runnable_ids());
+        let ppe_siblings = self.ppe_siblings(unit_id);
         self.registry.clear_status_override(unit_id);
         // A unit that runs again left its stall, so a deadline its own
         // clock set for that stall wakes nothing.
@@ -197,7 +198,8 @@ impl Runtime {
                 .with_dma_queue_occupancy(queued_commands)
                 .with_mfc_transfer_view(next_sequence, oldest_transfer)
                 .with_inbound_mailbox(&inbound_mailbox)
-                .with_mailbox_read_flag(&mailbox_read);
+                .with_mailbox_read_flag(&mailbox_read)
+                .with_ppe_siblings(ppe_siblings);
             let unit = self
                 .registry
                 .get_mut(unit_id)
@@ -361,6 +363,27 @@ impl Runtime {
             time_after,
             epoch_after: self.epoch,
         })
+    }
+
+    /// The number of PPE threads other than `unit` in the runnable set
+    /// the step starts from, or zero when `unit` is not a PPE thread.
+    ///
+    /// [CBE-Handbook p:754 s:A.6.1] the threads take dispatch in turn, a
+    /// thread every other cycle.
+    ///
+    /// [CBE-Handbook p:301 s:10.2.3.1] the threads share the issue stall
+    /// point: a stall at IS2 stalls both threads.
+    fn ppe_siblings(&self, unit: UnitId) -> u32 {
+        let is_ppe = |id: UnitId| self.registry.get(id).is_some_and(|u| u.shares_ppe_issue());
+        if !is_ppe(unit) {
+            return 0;
+        }
+        let others = self
+            .last_runnable
+            .iter()
+            .filter(|&&id| id != unit && is_ppe(id))
+            .count();
+        u32::try_from(others).unwrap_or(u32::MAX)
     }
 
     /// Trace the reserved-zero reads every address space logged since

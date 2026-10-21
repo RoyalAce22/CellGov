@@ -85,6 +85,10 @@ impl ExecutionUnit for PpuExecutionUnit {
         self.instruction_shadow.is_some()
     }
 
+    fn shares_ppe_issue(&self) -> bool {
+        true
+    }
+
     fn shadow_stats(&self) -> (u64, u64) {
         (self.shadow_hits, self.shadow_misses)
     }

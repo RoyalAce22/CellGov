@@ -113,6 +113,9 @@ impl PpuExecutionUnit {
             }
         }
 
+        // A runnable sibling shares the PPE's issue for this batch.
+        self.timing.set_siblings(ctx.ppe_siblings());
+
         // Taken after the runtime's committed inputs (syscall return,
         // register writes) are applied: a mid-batch rollback must not
         // undo state the commit pipeline already owns.

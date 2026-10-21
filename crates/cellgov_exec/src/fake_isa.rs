@@ -148,6 +148,7 @@ pub struct FakeIsaUnit {
     acc: u32,
     finished: bool,
     faulted: bool,
+    ppe: bool,
 }
 
 impl FakeIsaUnit {
@@ -160,7 +161,15 @@ impl FakeIsaUnit {
             acc: 0,
             finished: false,
             faulted: false,
+            ppe: false,
         }
+    }
+
+    /// Report the unit as a PPE hardware thread, through
+    /// [`ExecutionUnit::shares_ppe_issue`].
+    pub fn as_ppe_thread(mut self) -> Self {
+        self.ppe = true;
+        self
     }
 
     /// Current program counter.
@@ -179,6 +188,10 @@ impl ExecutionUnit for FakeIsaUnit {
 
     fn unit_id(&self) -> UnitId {
         self.id
+    }
+
+    fn shares_ppe_issue(&self) -> bool {
+        self.ppe
     }
 
     fn status(&self) -> UnitStatus {

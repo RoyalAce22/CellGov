@@ -39,6 +39,7 @@ pub struct ExecutionContext<'a> {
     /// runtime knows the step read its mailbox. It records what the
     /// unit observed and carries no guest state.
     mailbox_read: Option<&'a core::cell::Cell<bool>>,
+    ppe_siblings: u32,
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -60,6 +61,7 @@ impl<'a> ExecutionContext<'a> {
             oldest_mfc_transfer: None,
             inbound_mailbox: &[],
             mailbox_read: None,
+            ppe_siblings: 0,
         }
     }
 
@@ -82,6 +84,7 @@ impl<'a> ExecutionContext<'a> {
             oldest_mfc_transfer: None,
             inbound_mailbox: &[],
             mailbox_read: None,
+            ppe_siblings: 0,
         }
     }
 
@@ -106,6 +109,7 @@ impl<'a> ExecutionContext<'a> {
             oldest_mfc_transfer: None,
             inbound_mailbox: &[],
             mailbox_read: None,
+            ppe_siblings: 0,
         }
     }
 
@@ -134,6 +138,7 @@ impl<'a> ExecutionContext<'a> {
             oldest_mfc_transfer: None,
             inbound_mailbox: &[],
             mailbox_read: None,
+            ppe_siblings: 0,
         }
     }
 
@@ -231,6 +236,23 @@ impl<'a> ExecutionContext<'a> {
             mailbox_read: Some(flag),
             ..self
         }
+    }
+
+    /// The number of other PPE hardware threads runnable at the start of
+    /// the step, for a unit that is one.
+    #[inline]
+    pub const fn with_ppe_siblings(self, count: u32) -> Self {
+        Self {
+            ppe_siblings: count,
+            ..self
+        }
+    }
+
+    /// The number of other PPE hardware threads runnable at the start of
+    /// the step. Zero for a unit that is not a PPE thread.
+    #[inline]
+    pub const fn ppe_siblings(&self) -> u32 {
+        self.ppe_siblings
     }
 
     /// The messages waiting in the unit's own inbound mailbox at the

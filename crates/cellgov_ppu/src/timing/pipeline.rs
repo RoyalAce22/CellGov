@@ -108,6 +108,9 @@ struct Tables {
 pub(crate) struct PpeTiming {
     core: Core,
     tables: Box<Tables>,
+    /// The cycles a runnable sibling thread holds issue after each of
+    /// this thread's dispatch groups: zero with no sibling runnable.
+    hold: u64,
 }
 
 impl Default for PpeTiming {
@@ -201,7 +204,18 @@ impl PpeTiming {
                 stores: [Queued::default(); k::PPU_STORE_QUEUE_ENTRIES],
                 next_store: 0,
             }),
+            hold: 0,
         }
+    }
+
+    /// Set the number of other PPE threads runnable for the instructions
+    /// retired from here on.
+    pub(crate) fn set_siblings(&mut self, siblings: u32) {
+        self.hold = if siblings == 0 {
+            0
+        } else {
+            k::PPU_SMT_SIBLING_HOLD_CYCLES
+        };
     }
 
     /// The thread's cycle: the earliest the next instruction can issue.
@@ -247,7 +261,8 @@ impl PpeTiming {
                     || op.reads_any_of(&older.op);
                 older.issue + u64::from(alone)
             }
-            _ => c.floor,
+            // A new dispatch group: the sibling's group issues between.
+            _ => c.floor + self.hold,
         };
         let mut t = floor.max(fetched);
         for &r in &op.srcs {

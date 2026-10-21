@@ -78,6 +78,10 @@ pub trait RegisteredUnit: 'static {
     /// Whether this unit caches decoded guest code.
     fn caches_code(&self) -> bool;
 
+    /// Whether this unit is a PPE hardware thread. See
+    /// [`ExecutionUnit::shares_ppe_issue`].
+    fn shares_ppe_issue(&self) -> bool;
+
     /// Shadow hit/miss counters. See [`ExecutionUnit::shadow_stats`].
     fn shadow_stats(&self) -> (u64, u64);
 
@@ -281,6 +285,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn caches_code(&self) -> bool {
         ExecutionUnit::caches_code(self)
+    }
+
+    #[inline]
+    fn shares_ppe_issue(&self) -> bool {
+        ExecutionUnit::shares_ppe_issue(self)
     }
 
     #[inline]

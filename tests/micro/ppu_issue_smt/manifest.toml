@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_smt"
+
+# A hardware probe of the PPE's issue timing beside busy sibling threads:
+# eight loops, each timed with mftb. A microcoded lha paired with an addi
+# and a not-taken compare-and-branch body run alone and beside one busy
+# sibling; independent addi and dependent add bodies run beside two busy
+# siblings, first at a lower priority than the main thread and then at
+# its priority. The console capture is the answer; ppu/main.c's header
+# lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 320 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 320 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

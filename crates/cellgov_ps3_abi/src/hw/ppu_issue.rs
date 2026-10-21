@@ -121,6 +121,25 @@ pub const PPU_SMT_DEPENDENT_ADD_CYCLES: (u64, u64) = (16, 23);
 /// with the other hardware thread idle and then busy.
 pub const PPU_SMT_L1_CHASE_CYCLES: (u64, u64) = (40, 42);
 
+/// The cycles a runnable sibling thread holds issue after each of a
+/// thread's dispatch groups.
+///
+/// A group is the pair of instructions at one 8-byte-aligned address,
+/// whether or not the two issue together. An instruction after a
+/// microcoded one opens a group of its own: the `ppu_issue_smt`
+/// capture's loop of `lha` and `addi` pairs takes 107.66 cycles an
+/// iteration beside a busy sibling and 90.26 alone. The 17.4 between
+/// is near the nine holds, 18 cycles, that the model takes.
+///
+/// With this hold, the issue model times the three busy-sibling loops
+/// of `ppu_issue_timing` at 19, 23 and 41 cycles an iteration against
+/// the console's 19.24, 23.34 and 41.52: each inside the console's
+/// spread.
+///
+/// [CBE-Handbook p:754 s:A.6.1] the threads take dispatch in turn, a
+/// thread every other cycle.
+pub const PPU_SMT_SIBLING_HOLD_CYCLES: u64 = 2;
+
 /// The cycles between two fetches for one hardware thread.
 ///
 /// [CBE-Handbook p:299 s:10.2.3] instruction fetching strictly
