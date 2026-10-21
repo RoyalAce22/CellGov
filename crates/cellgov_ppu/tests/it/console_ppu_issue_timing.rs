@@ -802,7 +802,9 @@ fn the_issue_model_times_each_table_loop_within_the_console_s_spread() {
 ///
 /// The dependent `mulli` and `mullw` loops take 65.76 and 90.83 cycles
 /// an iteration. Like the dependent `add` loop, each multiply takes a
-/// fraction of a cycle more than its whole latency of 8 or 11. The
+/// fraction of a cycle more than its whole latency of 8 or 11, which
+/// ADR 0014 records as an accepted gap from the `ppu_issue_chain`
+/// capture (`console_ppu_issue_chain.rs`). The
 /// `stmw` and `lmw` pair to one line takes 138.8, and the model's
 /// microcode and store-queue terms give 60.
 const TABLE_RESIDUALS: [(usize, f64); 3] = [(1, 2.0), (2, 3.0), (17, 80.0)];
@@ -813,7 +815,9 @@ const REFUSED_LOOP: usize = 7;
 /// The loop the model times outside the console's spread: eight
 /// dependent `add`. The model's 16 cycles an iteration is the add's
 /// latency eight times; the console's fastest run takes 16.28 and its
-/// slowest 16.41.
+/// slowest 16.41. ADR 0014 records the excess as an accepted gap from
+/// the `ppu_issue_chain` capture, where the same loop's fastest run
+/// takes 16.51.
 const RESIDUAL_LOOP: usize = 2;
 
 #[test]
