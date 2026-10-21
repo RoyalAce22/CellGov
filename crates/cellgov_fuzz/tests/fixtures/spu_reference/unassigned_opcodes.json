@@ -39,7 +39,7 @@
         },
         "pc": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the vector of the same name ending in -console holds the console's answer"
         },
         "lslr": {
           "status": "value",
@@ -51,7 +51,7 @@
         },
         "stop": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the vector of the same name ending in -console holds the console's answer"
         },
         "interrupts_enabled": {
           "status": "value",
@@ -141,7 +141,7 @@
         },
         "pc": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the vector of the same name ending in -console holds the console's answer"
         },
         "lslr": {
           "status": "value",
@@ -153,7 +153,7 @@
         },
         "stop": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the vector of the same name ending in -console holds the console's answer"
         },
         "interrupts_enabled": {
           "status": "value",
@@ -243,7 +243,7 @@
         },
         "pc": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the vector of the same name ending in -console holds the console's answer"
         },
         "lslr": {
           "status": "value",
@@ -255,7 +255,7 @@
         },
         "stop": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the vector of the same name ending in -console holds the console's answer"
         },
         "interrupts_enabled": {
           "status": "value",
@@ -345,7 +345,7 @@
         },
         "pc": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the spu_opcode_sweep capture shows the console running on past this prefix, with every other field zero, and what it does with nonzero fields is not known"
         },
         "lslr": {
           "status": "value",
@@ -357,7 +357,7 @@
         },
         "stop": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the spu_opcode_sweep capture shows the console running on past this prefix, with every other field zero, and what it does with nonzero fields is not known"
         },
         "interrupts_enabled": {
           "status": "value",
@@ -447,7 +447,7 @@
         },
         "pc": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the vector of the same name ending in -console holds the console's answer"
         },
         "lslr": {
           "status": "value",
@@ -459,7 +459,7 @@
         },
         "stop": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the vector of the same name ending in -console holds the console's answer"
         },
         "interrupts_enabled": {
           "status": "value",
@@ -549,7 +549,7 @@
         },
         "pc": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the vector of the same name ending in -console holds the console's answer"
         },
         "lslr": {
           "status": "value",
@@ -561,7 +561,7 @@
         },
         "stop": {
           "status": "undefined",
-          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the stop and the program counter are left to hardware capture, issue #1411"
+          "reason": "an invalid instruction stops the SPU imprecisely and the stop code is not valid without P (CBEA p:93); the vector of the same name ending in -console holds the console's answer"
         },
         "interrupts_enabled": {
           "status": "value",
@@ -667,6 +667,551 @@
             "kind": "stop",
             "code": 0,
             "npc": 4,
+            "interrupts_enabled": false
+          }
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "4-bit-opcode-space-0x90000000-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_opcode_sweep/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "68e5654bc2155110533d2b2f586b21d23b36cbce2f81de5aa7b30d193717b29e"
+      },
+      "words": [
+        1082130432,
+        2415919104,
+        9344
+      ],
+      "initial_state": {
+        "regs_hex": {},
+        "local_store": [],
+        "pc": 22528
+      },
+      "step_limit": 3,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stopped"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 22536
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": {
+            "kind": "invalid_instruction",
+            "code": 0,
+            "npc": 22536,
+            "interrupts_enabled": false
+          }
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "7-bit-opcode-space-0x1a000000-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_opcode_sweep/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "68e5654bc2155110533d2b2f586b21d23b36cbce2f81de5aa7b30d193717b29e"
+      },
+      "words": [
+        1082130432,
+        436207616,
+        8400
+      ],
+      "initial_state": {
+        "regs_hex": {},
+        "local_store": [],
+        "pc": 7424
+      },
+      "step_limit": 3,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stopped"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 7432
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": {
+            "kind": "invalid_instruction",
+            "code": 0,
+            "npc": 7432,
+            "interrupts_enabled": false
+          }
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "8-bit-opcode-space-0x07000000-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_opcode_sweep/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "68e5654bc2155110533d2b2f586b21d23b36cbce2f81de5aa7b30d193717b29e"
+      },
+      "words": [
+        1082130432,
+        117440512,
+        8248
+      ],
+      "initial_state": {
+        "regs_hex": {},
+        "local_store": [],
+        "pc": 4992
+      },
+      "step_limit": 3,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stopped"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 5000
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": {
+            "kind": "invalid_instruction",
+            "code": 0,
+            "npc": 5000,
+            "interrupts_enabled": false
+          }
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "10-bit-opcode-space-0x77800000-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_opcode_sweep/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "68e5654bc2155110533d2b2f586b21d23b36cbce2f81de5aa7b30d193717b29e"
+      },
+      "words": [
+        1082130432,
+        2004877312,
+        9148
+      ],
+      "initial_state": {
+        "regs_hex": {},
+        "local_store": [],
+        "pc": 19392
+      },
+      "step_limit": 3,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stopped"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 19400
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": {
+            "kind": "invalid_instruction",
+            "code": 0,
+            "npc": 19400,
+            "interrupts_enabled": false
+          }
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "11-bit-opcode-space-0x00800000-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_opcode_sweep/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "68e5654bc2155110533d2b2f586b21d23b36cbce2f81de5aa7b30d193717b29e"
+      },
+      "words": [
+        1082130432,
+        8388608,
+        8196
+      ],
+      "initial_state": {
+        "regs_hex": {},
+        "local_store": [],
+        "pc": 4160
+      },
+      "step_limit": 3,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "stopped"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {}
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 4168
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": {
+            "kind": "invalid_instruction",
+            "code": 0,
+            "npc": 4168,
             "interrupts_enabled": false
           }
         },
