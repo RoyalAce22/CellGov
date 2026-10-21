@@ -454,7 +454,9 @@ impl PpeTiming {
         // A result still pending when the sibling's stall began comes that
         // much later: in the `ppu_issue_units` capture a dependent `fadd`
         // with an independent `addi` after each waits its latency and both
-        // stalls. No capture times a load miss's result this way.
+        // stalls. In the `ppu_issue_miss` capture an L2 miss beside an
+        // `fdiv` sibling waits out the stall of every instruction after it,
+        // about 40 cycles each there, past the model's own stall.
         if stalled != 0 {
             for r in c.ready.iter_mut().chain(c.addr_ready.iter_mut()) {
                 if *r > began {

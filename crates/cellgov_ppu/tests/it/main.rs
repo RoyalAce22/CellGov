@@ -4,6 +4,7 @@
 mod console_ppu_issue_chain;
 mod console_ppu_issue_layout;
 mod console_ppu_issue_loop_shape;
+mod console_ppu_issue_miss;
 mod console_ppu_issue_multiple;
 mod console_ppu_issue_multiply;
 mod console_ppu_issue_priority;
