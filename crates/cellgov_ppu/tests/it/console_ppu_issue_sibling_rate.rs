@@ -88,13 +88,13 @@ pub(crate) fn cellgov_kept(chain: &Replay, sibling: &Sibling) -> f64 {
 
 /// The stop flag and the round count the replayed sibling reads and
 /// writes: zero, so it never stops.
-const STOP: u64 = 0x6000;
-const COUNT: u64 = 0x6080;
+pub(crate) const STOP: u64 = 0x6000;
+pub(crate) const COUNT: u64 = 0x6080;
 
 /// The sibling's loop: `li r14,4; mtctr r14`, `body` to a `bdnz`, then
 /// the stop-flag load, the round count's increment and the branch back,
 /// with the stop flag at `ra_stop` and the count at `ra_count`.
-const fn sibling_loop(body: [u32; 8], ra_stop: u32, ra_count: u32) -> [u32; 18] {
+pub(crate) const fn sibling_loop(body: [u32; 8], ra_stop: u32, ra_count: u32) -> [u32; 18] {
     let mut w = [0u32; 18];
     w[0] = 0x39c0_0004;
     w[1] = 0x7dc9_03a6;
@@ -114,7 +114,7 @@ const fn sibling_loop(body: [u32; 8], ra_stop: u32, ra_count: u32) -> [u32; 18] 
     w
 }
 
-const fn same(word: u32) -> [u32; 8] {
+pub(crate) const fn same(word: u32) -> [u32; 8] {
     [word; 8]
 }
 

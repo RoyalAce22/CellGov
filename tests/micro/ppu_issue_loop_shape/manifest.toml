@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_loop_shape"
+
+# A hardware probe of whether the shape of a sibling's loop sets what
+# the two PPU threads cost each other: three timed chains on the main
+# thread (dependent add, dependent fadd, an L1 ld chase), alone and
+# beside a sibling of dependent divd or independent addi whose rounds
+# run in one of four loop shapes, with and without a time-base read
+# between rounds. The console capture is the answer; ppu/main.c's
+# header lists the shapes, the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 1344 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1344 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 180000

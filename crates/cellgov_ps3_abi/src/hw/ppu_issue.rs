@@ -171,6 +171,14 @@ pub const PPU_SMT_SIBLING_HOLD_CYCLES: u64 = 2;
 /// `fadd` chain beside `lha` takes 7.7 more. A dependent `mulli` takes
 /// about 16 to 25 more.
 ///
+/// The `ppu_issue_loop_shape` capture, taken twice, puts the mean wait
+/// beside a dependent `divd` sibling that holds its thread at 19 to 30
+/// cycles, and within one loop's five runs it spreads from near zero to
+/// about 36. A sibling loop in assembly puts it above a loop that returns
+/// to C between rounds in five of six cells. A time-base read between
+/// rounds puts it in no order. The 13 here is the level the other
+/// captures hold.
+///
 /// [CBE-Handbook p:301 s:10.2.3.1] a stall at IS2 stalls both threads.
 ///
 /// [CBE-Handbook p:753 s:A.5] a nonpipelined or microcoded instruction
