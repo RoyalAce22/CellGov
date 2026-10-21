@@ -400,6 +400,18 @@ pub const SPU_GETLLAR_CYCLES: u64 = super::mfc_timing::MFC_GETLLAR_TB_SUM as u64
     * SPU_CYCLES_PER_TB_TICK
     / super::mfc_timing::MFC_TIMING_RUNS as u64;
 
+/// The cycles a putllc that keeps its reservation takes with the read of
+/// its atomic status: the `spu_dma_timing` capture's mean, in SPU cycles.
+pub const SPU_PUTLLC_CYCLES: u64 = super::mfc_timing::MFC_PUTLLC_TB_SUM as u64
+    * SPU_CYCLES_PER_TB_TICK
+    / super::mfc_timing::MFC_TIMING_RUNS as u64;
+
+/// The cycles a putlluc takes with the read of its atomic status: the
+/// `spu_dma_timing` capture's mean, in SPU cycles.
+pub const SPU_PUTLLUC_CYCLES: u64 = super::mfc_timing::MFC_PUTLLUC_TB_SUM as u64
+    * SPU_CYCLES_PER_TB_TICK
+    / super::mfc_timing::MFC_TIMING_RUNS as u64;
+
 /// The branch-miss cycles to an instruction at local-store address
 /// `target`: the refetch every flush pays.
 ///

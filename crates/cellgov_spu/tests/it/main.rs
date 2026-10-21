@@ -6,6 +6,7 @@ mod clock_read_explore;
 mod console_channel_direction_sweep;
 mod console_dma_after_exit;
 mod console_dma_after_stop;
+mod console_dma_contention;
 mod console_dma_timing;
 mod console_double_compares;
 mod console_ea_bound;

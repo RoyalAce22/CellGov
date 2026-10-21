@@ -1,0 +1,21 @@
+[test]
+name = "spu_dma_contention"
+
+# A hardware probe of the SPU DMA costs the single-transfer table leaves
+# out, read from the decrementer: transfers queued back to back, list
+# transfers by element count and size, quadword loads and stores beside
+# queued transfers, and one SPU's transfers beside zero to five SPUs
+# streaming 16 KB gets. The PPU program's header comment has the
+# payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 384 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000
+files = ["spu_main.elf"]

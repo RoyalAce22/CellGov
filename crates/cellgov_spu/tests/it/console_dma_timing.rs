@@ -98,6 +98,8 @@ fn the_measured_tables_are_the_captures() {
         assert_eq!(capture.table(at), table.to_vec(), "payload offset {at}");
     }
     assert_eq!(capture.word(220), mfc_timing::MFC_GETLLAR_TB_SUM);
+    assert_eq!(capture.word(224), mfc_timing::MFC_PUTLLC_TB_SUM);
+    assert_eq!(capture.word(228), mfc_timing::MFC_PUTLLUC_TB_SUM);
     for (i, &size) in mfc_timing::MFC_TIMING_SIZES.iter().enumerate() {
         assert_eq!(size, 16 << i);
     }
@@ -141,6 +143,108 @@ fn cellgov_charges_each_transfer_the_time_the_console_measures() {
                 "offset {at}, {size} bytes"
             );
         }
+    }
+}
+
+/// A putllc that keeps its reservation and a putlluc each charge their
+/// unit the round trip the console measures, in SPU cycles.
+#[test]
+fn an_atomic_store_takes_the_round_trip_the_console_measures() {
+    use cellgov_exec::{ExecutionContext, ExecutionUnit};
+    use cellgov_mem::GuestMemory;
+    use cellgov_ps3_abi::hw::spu::{MFC_CMD, MFC_GETLLAR, MFC_PUTLLC, MFC_PUTLLUC};
+    use cellgov_ps3_abi::hw::spu_issue::{
+        SPU_CYCLES_PER_TB_TICK, SPU_GETLLAR_CYCLES, SPU_PUTLLC_CYCLES, SPU_PUTLLUC_CYCLES,
+    };
+    use cellgov_spu::SpuExecutionUnit;
+    use cellgov_time::{spu_cycles_to_ticks, Budget};
+
+    let capture = Capture::load();
+    for (cycles, at) in [(SPU_PUTLLC_CYCLES, 224), (SPU_PUTLLUC_CYCLES, 228)] {
+        assert_eq!(
+            cycles,
+            u64::from(capture.word(at)) * SPU_CYCLES_PER_TB_TICK / u64::from(capture.reps()),
+            "the mean round trip at payload offset {at}, in whole cycles"
+        );
+    }
+    // `wrch MFC_Cmd, r4`, `wrch MFC_Cmd, r5`, then `stop`. The store
+    // yields its write, so the step ends there.
+    let wrch = |rt: u32| (0x10Du32 << 21) | (u32::from(MFC_CMD) << 7) | rt;
+    let program = [wrch(4), wrch(5), 0];
+    for (first, second, cycles) in [
+        (
+            MFC_GETLLAR,
+            MFC_PUTLLC,
+            1 + SPU_GETLLAR_CYCLES + 1 + SPU_PUTLLC_CYCLES,
+        ),
+        (
+            MFC_GETLLAR,
+            MFC_PUTLLUC,
+            1 + SPU_GETLLAR_CYCLES + 1 + SPU_PUTLLUC_CYCLES,
+        ),
+    ] {
+        let mut unit = SpuExecutionUnit::new(UnitId::new(1));
+        for (i, word) in program.iter().enumerate() {
+            unit.state_mut().ls[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+        }
+        unit.state_mut().channels.mfc_lsa = 0x100;
+        unit.state_mut().channels.mfc_eal = 0x80;
+        unit.state_mut().set_reg_word_splat(4, first);
+        unit.state_mut().set_reg_word_splat(5, second);
+        let mem = GuestMemory::new(0x1000);
+        let result = unit.run_until_yield(
+            Budget::new(1_000),
+            &ExecutionContext::new(&mem),
+            &mut Vec::new(),
+        );
+        assert!(
+            unit.state().reservation().is_none(),
+            "{second:#x}: the store reset the reservation"
+        );
+        let stored = if second == MFC_PUTLLC {
+            0
+        } else {
+            cellgov_ps3_abi::hw::spu::MFC_ATOMIC_STAT_U
+        };
+        assert_eq!(
+            unit.state().channels.atomic_status,
+            stored,
+            "{second:#x}: the store succeeded"
+        );
+        assert_eq!(
+            result.consumed_cost.raw(),
+            spu_cycles_to_ticks(cycles),
+            "{second:#x}"
+        );
+    }
+
+    // A store the MFC refuses takes no round trip: an effective address
+    // past the EA limit queues an invalid command.
+    for cmd in [MFC_PUTLLC, MFC_PUTLLUC] {
+        let mut unit = SpuExecutionUnit::new(UnitId::new(1));
+        unit.state_mut().ls[0..4].copy_from_slice(&wrch(4).to_be_bytes());
+        unit.state_mut().channels.mfc_lsa = 0x100;
+        unit.state_mut().channels.mfc_eah = 0x400;
+        unit.state_mut().channels.mfc_eal = 0x80;
+        unit.state_mut().set_reg_word_splat(4, cmd);
+        let mem = GuestMemory::new(0x1000);
+        let mut effects = Vec::new();
+        let result = unit.run_until_yield(
+            Budget::new(1_000),
+            &ExecutionContext::new(&mem),
+            &mut effects,
+        );
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, cellgov_effects::Effect::MfcInvalidCommand { .. })),
+            "{cmd:#x}: the MFC refused the store"
+        );
+        assert_eq!(
+            result.consumed_cost.raw(),
+            spu_cycles_to_ticks(1),
+            "{cmd:#x}"
+        );
     }
 }
 

@@ -43,3 +43,29 @@ pub const MFC_PUT_OFF_LINE_TB_SUM: [u32; 11] =
 /// A getllar with the read of its atomic status that follows (payload
 /// offset 220). No tag wait is in it.
 pub const MFC_GETLLAR_TB_SUM: u32 = 172;
+
+/// A putllc after a getllar of its line, with the read of its atomic
+/// status that follows (payload offset 224). Every run kept its
+/// reservation.
+pub const MFC_PUTLLC_TB_SUM: u32 = 172;
+
+/// A putlluc with the read of its atomic status that follows (payload
+/// offset 228).
+pub const MFC_PUTLLUC_TB_SUM: u32 = 153;
+
+/// The bytes a time-base tick that every SPU's transfers share, fitted
+/// to the `spu_dma_contention` capture.
+///
+/// One SPU's 16 KB get beside 2 to 5 SPUs streaming 16 KB gets takes the
+/// latency of a get alone plus its share of 323 to 338 bytes a tick.
+/// This is the share beside five streamers. One SPU alone moves a get's
+/// bytes at about 177 a tick and a put's at about 286, both under it.
+pub const MFC_SHARED_BYTES_PER_TB: u64 = 327;
+
+/// The least time one transfer holds its MFC's queue, summed over
+/// [`MFC_TIMING_RUNS`] runs.
+///
+/// Each 128-byte element of a list of up to sixteen adds 1.43 ticks in
+/// the `spu_dma_contention` capture, against the 0.72 its bytes take at
+/// a get's rate.
+pub const MFC_TRANSFER_MIN_TB_SUM: u64 = 46;

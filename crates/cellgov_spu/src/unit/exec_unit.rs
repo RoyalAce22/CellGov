@@ -20,7 +20,7 @@ use cellgov_exec::{
 use cellgov_ps3_abi::hw::spu;
 use cellgov_ps3_abi::hw::spu::SPU_STATUS_R;
 use cellgov_ps3_abi::hw::spu_isa;
-use cellgov_ps3_abi::hw::spu_issue::SPU_GETLLAR_CYCLES;
+use cellgov_ps3_abi::hw::spu_issue::{SPU_GETLLAR_CYCLES, SPU_PUTLLC_CYCLES, SPU_PUTLLUC_CYCLES};
 use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
 /// The guest tick at which the unit's cycle count reaches `cycles`.
@@ -177,6 +177,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                                 .push(cellgov_exec::RetiredBarrier { pc: step_pc, kind });
                         }
                     }
+                    let atomic = atomic_store_cycles(&insn, &self.state, &step_effects);
                     effects.extend(step_effects);
                     if reason == YieldReason::ChannelStall {
                         // The access did not retire: PC stays on it, and
@@ -194,6 +195,9 @@ impl ExecutionUnit for SpuExecutionUnit {
                         });
                     } else {
                         self.pipeline.retire(slot, None);
+                        // An atomic store takes the round trip the
+                        // console measures.
+                        self.pipeline.charge(atomic);
                         self.state.advance_pc();
                         self.retire(step_pc, ctx.trace_per_step());
                     }
@@ -506,6 +510,34 @@ fn queued_mfc_barrier(
         return None;
     }
     exec::mfc_barrier_kind(state.reg_word(rt))
+}
+
+/// The cycles an instruction that yielded takes as an atomic store: a
+/// putllc that kept its reservation or a putlluc, and 0 for anything
+/// else, a store the MFC refused among them.
+fn atomic_store_cycles(
+    insn: &crate::instruction::SpuInstruction,
+    state: &crate::state::SpuState,
+    effects: &[Effect],
+) -> u64 {
+    let crate::instruction::SpuInstruction::Wrch {
+        channel: spu::MFC_CMD,
+        rt,
+    } = *insn
+    else {
+        return 0;
+    };
+    if effects
+        .iter()
+        .any(|e| matches!(e, Effect::MfcInvalidCommand { .. }))
+    {
+        return 0;
+    }
+    match spu::MfcCmd::new(state.reg_word(rt)).opcode() {
+        spu::MFC_PUTLLC => SPU_PUTLLC_CYCLES,
+        spu::MFC_PUTLLUC => SPU_PUTLLUC_CYCLES,
+        _ => 0,
+    }
 }
 
 /// The channel a stalled instruction names and the event that ends the
