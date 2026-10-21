@@ -113,8 +113,8 @@ pub mod source {
     pub const PPU_THREAD_UNIT: u8 = 26;
     /// The PPU thread id allocator's cursor.
     pub const PPU_THREAD_IDS: u8 = 27;
-    /// The child-stack allocator's cursor.
-    pub const THREAD_STACKS: u8 = 28;
+    // Tag 28 is unused: it was the child-stack allocator's cursor,
+    // which the PPU threads' own stack lanes replaced.
     /// Processes, one object per pid.
     pub const PROCESS: u8 = 29;
     /// Unit-to-process bindings, one object per unit.

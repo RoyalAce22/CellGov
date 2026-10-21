@@ -1,4 +1,5 @@
-//! Child-thread stack region and its deterministic bump allocator.
+//! Child-thread stack region and the placement of a new thread's stack
+//! in it.
 
 /// Bytes the PPC64 ELFv1 ABI reserves below the initial `r1`.
 ///
@@ -68,86 +69,55 @@ impl ThreadStack {
     }
 }
 
-/// Deterministic bump allocator for child-thread stacks.
-#[derive(Debug, Clone)]
-pub struct ThreadStackAllocator {
-    next: u64,
-}
+/// Lowest address of the child-stack arena; sits directly above the
+/// primary thread's stack region.
+pub const CHILD_STACK_BASE: u64 = cellgov_ps3_abi::hw::address_space::PS3_CHILD_STACKS_BASE;
 
-impl ThreadStackAllocator {
-    /// Lowest address the allocator will hand out; sits directly
-    /// above the primary thread's stack region.
-    pub const CHILD_STACK_BASE: u64 = cellgov_ps3_abi::hw::address_space::PS3_CHILD_STACKS_BASE;
+/// End (exclusive) of the child-stack arena: the end of the stack
+/// segment.
+pub const CHILD_STACK_END: u64 =
+    CHILD_STACK_BASE + cellgov_ps3_abi::hw::address_space::PS3_CHILD_STACKS_SIZE as u64;
 
-    /// Construct a fresh allocator.
-    pub fn new() -> Self {
-        Self {
-            next: Self::CHILD_STACK_BASE,
+/// Place a stack block of `size` bytes, aligned to `max(align, 16)`,
+/// at the lowest address of the child-stack arena where it overlaps no
+/// block of `live`.
+///
+/// `live` holds the `(base, size)` stack of every thread the kernel has
+/// not collected. A block outside the arena, such as the primary
+/// thread's, does not constrain the result. The placement depends only
+/// on `live`, so a collected thread's range is free for the next
+/// create, and two runs with the same live set place the same block.
+///
+/// `None` when no free range of the arena holds the block, or when
+/// `size < ABI_MIN_STACK_FRAME`.
+pub fn place_child_stack(
+    live: impl IntoIterator<Item = (u64, u64)>,
+    size: u64,
+    align: u64,
+) -> Option<ThreadStack> {
+    if size < ABI_MIN_STACK_FRAME {
+        return None;
+    }
+    let mask = align.max(0x10) - 1;
+    let mut held: Vec<(u64, u64)> = live
+        .into_iter()
+        .filter(|&(base, len)| len > 0 && base < CHILD_STACK_END)
+        .map(|(base, len)| (base, base.saturating_add(len)))
+        .filter(|&(_, end)| end > CHILD_STACK_BASE)
+        .collect();
+    held.sort_unstable();
+    let mut cursor = CHILD_STACK_BASE;
+    for (start, end) in held
+        .into_iter()
+        .chain(std::iter::once((CHILD_STACK_END, CHILD_STACK_END)))
+    {
+        let base = cursor.checked_add(mask)? & !mask;
+        if base.checked_add(size)? <= start {
+            return Some(ThreadStack { base, size });
         }
+        cursor = cursor.max(end);
     }
-
-    /// Allocate a stack block of `size` bytes, aligned to
-    /// `max(align, 16)`; `None` on overflow or
-    /// `size < ABI_MIN_STACK_FRAME`.
-    pub fn allocate(&mut self, size: u64, align: u64) -> Option<ThreadStack> {
-        if size < ABI_MIN_STACK_FRAME {
-            return None;
-        }
-        let align = align.max(0x10);
-        let mask = align - 1;
-        let base = self.next.checked_add(mask)? & !mask;
-        let end = base.checked_add(size)?;
-        self.next = end;
-        Some(ThreadStack { base, size })
-    }
-
-    /// Return `stack` iff it is the most recent allocation, rewinding
-    /// the bump pointer to its base so the next allocation reuses it.
-    ///
-    /// The single caller is the create-refusal path, which frees the
-    /// block it just allocated before anything else can allocate;
-    /// `false` (not the last block) means that flow was broken.
-    ///
-    /// A base below [`Self::CHILD_STACK_BASE`] or a wrapping
-    /// `base + size` draws the same `false`: rewinding under the
-    /// arena floor would hand out blocks overlapping the primary
-    /// thread's stack.
-    pub fn free_last(&mut self, stack: &ThreadStack) -> bool {
-        let Some(end) = stack.base.checked_add(stack.size) else {
-            return false;
-        };
-        if end != self.next || stack.base < Self::CHILD_STACK_BASE {
-            return false;
-        }
-        self.next = stack.base;
-        true
-    }
-
-    /// Peek the next allocation's base for the given alignment
-    /// without advancing the allocator.
-    pub fn peek_next(&self, align: u64) -> Option<u64> {
-        let align = align.max(0x10);
-        let mask = align - 1;
-        self.next.checked_add(mask).map(|n| n & !mask)
-    }
-}
-
-impl ThreadStackAllocator {
-    /// The allocator's term of the sync-state sum: its cursor XOR
-    /// [`Self::CHILD_STACK_BASE`], so a fresh allocator's lane is zero.
-    pub(crate) fn sync_term(&self) -> u128 {
-        cellgov_mem::lanes::value_term(
-            cellgov_mem::lanes::source::THREAD_STACKS,
-            0,
-            &(self.next ^ Self::CHILD_STACK_BASE),
-        )
-    }
-}
-
-impl Default for ThreadStackAllocator {
-    fn default() -> Self {
-        Self::new()
-    }
+    None
 }
 
 #[cfg(test)]

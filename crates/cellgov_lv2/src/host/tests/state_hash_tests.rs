@@ -47,19 +47,14 @@ fn fingerprint_changes_when_holds_inserted_then_returns_to_baseline() {
 }
 
 #[test]
-fn fingerprint_unchanged_when_a_child_stack_is_refused() {
-    let mut host = Lv2Host::new();
+fn placing_a_child_stack_leaves_the_fingerprint_unchanged() {
+    // The thread that holds the block carries it in its own lanes; the
+    // placement alone is no state.
+    let host = Lv2Host::new();
     let pre = host.fingerprint();
     assert!(host.allocate_child_stack(0, 0x10).is_none());
+    assert!(host.allocate_child_stack(0x10_000, 0x10).is_some());
     assert_eq!(pre, host.fingerprint());
-}
-
-#[test]
-fn fingerprint_changes_after_child_stack_allocated() {
-    let pre = Lv2Host::new().fingerprint();
-    let mut host = Lv2Host::new();
-    let _ = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    assert_ne!(pre, host.fingerprint());
 }
 
 #[test]

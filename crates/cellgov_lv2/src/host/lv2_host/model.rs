@@ -6,7 +6,7 @@ use cellgov_ps3_abi::format::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN;
 
 use crate::fs_store::{FsMountTable, FsStore};
 use crate::image::ContentStore;
-use crate::ppu_thread::{PpuThreadTable, ThreadStackAllocator};
+use crate::ppu_thread::PpuThreadTable;
 use crate::prx_registry::LoadedPrxRegistry;
 use crate::sync_primitives::{
     CondTable, EventFlagTable, EventPortTable, EventQueueTable, LwMutexTable, MutexTable,
@@ -105,7 +105,6 @@ impl Lv2Host {
                 groups: ThreadGroupTable::new(),
                 raw_spus: crate::raw_spu::RawSpuTable::new(),
                 ppu_threads: PpuThreadTable::new(),
-                stack_allocator: ThreadStackAllocator::new(),
                 kernel_ids: crate::host::kernel_ids::KernelIdTable::default(),
                 next_container_serial: 1,
                 mem_alloc_ptr: 0x0001_0000, // PS3 user-memory region start

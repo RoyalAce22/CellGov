@@ -206,29 +206,33 @@ the scheduler never does.
 
 ### Child stacks
 
-**Child stacks come from the 15 MB `child_stacks` region at
-`0xD0100000+`** (see [guest_memory.md](guest_memory.md)) via
-`ThreadStackAllocator`. `ThreadStackAllocator` is a deterministic bump
-allocator: two fresh allocators produce byte-identical sequences.
+**Child stacks come from the `child_stacks` region, `0xD0101000` to the
+end of the 256 MB stack segment** (see [guest_memory.md](guest_memory.md)).
+A new stack takes the lowest range of it that no thread in the PPU
+thread table holds. A full arena answers `CELL_ENOMEM`.
+
+**The thread table is the arena's only record.** Each thread's stack
+base and size are part of its hashed state. A thread leaves the table
+when a join collects it, or when it exits not joinable, and its range
+is free for the next create.
+*Why:* the console reuses a joined thread's stack, and a separate
+record of live blocks could drift from the threads that hold them.
+
+**A create refused after placing a block holds nothing.** The refusals
+are:
+
+- no PPU factory is installed
+- the thread-id space is exhausted
+- a stack region will not install (the runtime drops the thread it
+  just entered)
 
 **The arena is host-global; the backing memory is not.** A stack block
 installs as a region in the CREATOR's address space. A thread spawned
 by a child process therefore stacks inside that process, not the boot
-map. The boot pipeline pre-installs the whole window, so boot-process
-creates skip the install.
-
-**A create refused after taking a block returns the block.** The
-refusals that take a block are:
-
-- no PPU factory is installed
-- the thread-id space is exhausted
-- a stack region will not install
-
-*Why:* refusals cannot leak the window one allocation at a time.
-
-**The arena rewinds only its most recent block.** Returning any other
-block is refused with a named witness.
-*Why:* accepting any other block would corrupt a live stack.
+map. Before it installs, the create drops every collected thread's
+stack region the new block overlaps in that space. The boot pipeline
+pre-installs the whole window, so boot-process creates skip the
+install.
 
 ### TLS base
 

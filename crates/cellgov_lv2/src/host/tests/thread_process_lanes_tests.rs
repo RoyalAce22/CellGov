@@ -80,12 +80,6 @@ fn every_thread_process_and_identity_change_moves_the_partial() {
             .ppu_threads
             .alias_unit(UnitId::new(9), PpuThreadId::PRIMARY)
     );
-    step!(
-        host,
-        h,
-        "child stack",
-        host.allocate_child_stack(0x10_000, 0x10)
-    );
     let gid = host.state.groups.create(1).unwrap();
     assert_ne!(
         host.sync_partial(),

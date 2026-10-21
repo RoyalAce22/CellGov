@@ -10,6 +10,10 @@ use cellgov_trace::HostWriter;
 use super::spaces::AddressSpaceId;
 use super::Runtime;
 
+/// Label of the region a child thread's stack installs as in a spawned
+/// process's address space.
+const CHILD_STACK_LABEL: &str = "child_stack";
+
 impl Runtime {
     pub(super) fn handle_ppu_thread_create(&mut self, source: UnitId, dispatch: Lv2Dispatch) {
         let caller_space = self.spaces.space_of(source);
@@ -30,8 +34,8 @@ impl Runtime {
         };
 
         let Some(factory) = self.ppu_factory.as_ref() else {
-            // Foundation-title baselines pin CELL_E2BIG on this path.
-            self.lv2_host.free_child_stack(stack_base, stack_size);
+            // Foundation-title baselines pin CELL_E2BIG on this path. No
+            // thread holds the stack block, so it is free again.
             self.lv2_host.log_invariant_break(
                 "runtime.ppu_thread_create_factory_missing",
                 format_args!(
@@ -66,10 +70,9 @@ impl Runtime {
             // and pid binding are only assigned below, after this
             // point, so a failed create leaves neither behind
             // (ProcessTable contract: units_of names exactly the
-            // pid's live units).
+            // pid's live units). No thread holds the stack block.
             self.registry
                 .set_status_override(child_unit_id, UnitStatus::Finished);
-            self.lv2_host.free_child_stack(stack_base, stack_size);
             self.lv2_host.log_invariant_break(
                 "runtime.ppu_thread_create_thread_ids_exhausted",
                 format_args!(
@@ -96,10 +99,35 @@ impl Runtime {
                 &mut self.spaces,
                 caller_space,
             );
+            // A collected thread's stack region stays in the space until
+            // its range is placed again. No live thread holds any part
+            // of the new block, so every stack region it overlaps is a
+            // collected thread's.
+            let stale: Vec<(u64, usize)> = mem
+                .regions()
+                .filter(|r| {
+                    r.label() == CHILD_STACK_LABEL
+                        && r.base() < stack_base + stack_size
+                        && stack_base < r.base() + r.size()
+                })
+                .map(|r| (r.base(), r.size() as usize))
+                .collect();
+            for (base, size) in stale {
+                if let Err(err) = mem.remove_region(base, size) {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.ppu_thread_create_stale_stack_remove",
+                        format_args!(
+                            "collected stack region 0x{base:x}+0x{size:x} in space {} \
+                             would not remove: {err}",
+                            caller_space.raw(),
+                        ),
+                    );
+                }
+            }
             if let Err(err) = mem.install_region(
                 stack_base,
                 stack_size as usize,
-                "child_stack",
+                CHILD_STACK_LABEL,
                 cellgov_mem::PageSize::Page4K,
             ) {
                 // Guest-reachable only when the child's image layout
@@ -115,7 +143,9 @@ impl Runtime {
                     "a thread refused inside its own create cannot have joiners yet; \
                      {stranded:?} would never wake",
                 );
-                self.lv2_host.free_child_stack(stack_base, stack_size);
+                // The guest never gets the id, so no join collects the
+                // thread: drop it here, which frees its stack block.
+                self.lv2_host.ppu_threads_mut().reap(thread_id);
                 self.lv2_host.log_invariant_break(
                     "runtime.ppu_thread_create_stack_install_overlap",
                     format_args!(

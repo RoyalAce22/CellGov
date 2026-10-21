@@ -1,41 +1,23 @@
 //! Child-thread stacks and SPU group notes.
 
-use crate::ppu_thread::ThreadStack;
+use crate::ppu_thread::{place_child_stack, ThreadStack};
 
 use super::model::Lv2Host;
 
 impl Lv2Host {
-    /// Allocate a child-thread stack of `size` bytes at `align`.
-    pub fn allocate_child_stack(&mut self, size: u64, align: u64) -> Option<ThreadStack> {
-        self.state.stack_allocator.allocate(size, align)
-    }
-
-    /// Return the stack block a refused thread-create allocated.
+    /// Place a child-thread stack of `size` bytes at `align` in the
+    /// lowest range no thread in the table holds; `None` when no range
+    /// of the child-stack arena fits.
     ///
     /// # Cross-module contract
     ///
-    /// Must be called before anything else can allocate: the arena
-    /// only rewinds its most recent block. A mismatch is logged and
-    /// the block leaks rather than corrupting live stacks.
-    pub fn free_child_stack(&mut self, base: u64, size: u64) {
-        // `ThreadStack::new` asserts the minimum-frame floor and
-        // the arena never hands out a block below it, so a sub-floor
-        // size is the same "not the arena's block" refusal -- report
-        // it rather than aborting the run inside the assert.
-        let freed = size >= 0x10
-            && self
-                .state
-                .stack_allocator
-                .free_last(&ThreadStack::new(base, size));
-        if !freed {
-            self.log_invariant_break(
-                "ppu_thread_create.stack_free_mismatch",
-                format_args!(
-                    "free_child_stack(0x{base:x}, 0x{size:x}) is not the arena's most \
-                     recent block; refusal-path free out of order, block leaked"
-                ),
-            );
-        }
+    /// Only a thread in the thread table holds a block.
+    /// `sys_ppu_thread_create` enters the thread in the same step that
+    /// places the block, so two creates never get one block. A refused
+    /// create enters no thread, and its block is free again with no
+    /// call.
+    pub fn allocate_child_stack(&self, size: u64, align: u64) -> Option<ThreadStack> {
+        place_child_stack(self.state.ppu_threads.stacks(), size, align)
     }
 
     /// Bind an SPU `unit_id` to `(group_id, slot)`.
@@ -94,3 +76,11 @@ impl Lv2Host {
         self.state.groups.join_result(group_id)
     }
 }
+
+#[cfg(test)]
+#[path = "tests/child_stack_tests.rs"]
+mod child_stack_tests;
+
+#[cfg(test)]
+#[path = "tests/child_stack_span_console_tests.rs"]
+mod child_stack_span_console_tests;

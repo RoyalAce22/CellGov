@@ -297,3 +297,7 @@ mod exit_ids_tests;
 #[cfg(test)]
 #[path = "tests/system_ipc_commit_tests.rs"]
 mod system_ipc_commit_tests;
+
+#[cfg(test)]
+#[path = "tests/process_child_stack_reuse_tests.rs"]
+mod child_stack_reuse_tests;

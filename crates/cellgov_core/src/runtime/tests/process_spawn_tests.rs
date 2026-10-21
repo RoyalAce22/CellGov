@@ -1058,7 +1058,8 @@ fn a_refused_thread_create_returns_its_stack_block_to_the_arena() {
         rt.registry_mut().drain_syscall_return(UnitId::new(0)),
         Some(errno::CELL_E2BIG.into())
     );
-    // The arena rewound: the next block starts at the arena base.
+    // No thread holds the refused create's block: the next block
+    // starts at the arena base.
     let next = rt
         .lv2_host_mut()
         .allocate_child_stack(0x4000, 0x10)
@@ -1066,6 +1067,6 @@ fn a_refused_thread_create_returns_its_stack_block_to_the_arena() {
     assert_eq!(
         next.base(),
         cellgov_ps3_abi::hw::address_space::PS3_CHILD_STACKS_BASE,
-        "the refused create must return its block to the arena",
+        "a refused create must hold no stack block",
     );
 }

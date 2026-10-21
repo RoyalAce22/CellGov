@@ -91,60 +91,6 @@ fn unit_holds_lwmutex_unmapped_unit_is_false() {
 }
 
 #[test]
-fn allocate_child_stack_produces_non_overlapping_blocks() {
-    let mut host = Lv2Host::new();
-    let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    let s3 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    assert_eq!(s1.base, 0xD010_1000);
-    assert!(s2.base >= s1.end());
-    assert!(s3.base >= s2.end());
-}
-
-#[test]
-fn free_child_stack_rewinds_the_arena_for_the_refusal_path() {
-    let mut host = Lv2Host::new();
-    let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    host.free_child_stack(s1.base(), s1.size());
-    let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    assert_eq!(s2.base(), s1.base());
-    assert_eq!(
-        host.invariant_break_site_count("ppu_thread_create.stack_free_mismatch"),
-        0,
-    );
-}
-
-#[test]
-fn free_child_stack_out_of_order_is_loud_and_leaks_instead_of_corrupting() {
-    let mut host = Lv2Host::new();
-    let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    host.free_child_stack(s1.base(), s1.size());
-    assert_eq!(
-        host.invariant_break_site_count("ppu_thread_create.stack_free_mismatch"),
-        1,
-    );
-    // s2 stays live: the next block sits above it.
-    let s3 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    assert!(s3.base() >= s2.end());
-}
-
-#[test]
-fn free_child_stack_below_the_abi_stack_floor_is_reported_not_a_panic() {
-    let mut host = Lv2Host::new();
-    let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    host.free_child_stack(s1.base(), 0x8);
-    assert_eq!(
-        host.invariant_break_site_count("ppu_thread_create.stack_free_mismatch"),
-        1,
-    );
-    // The real block is untouched: the next allocation still sits
-    // above it.
-    let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
-    assert!(s2.base() >= s1.end());
-}
-
-#[test]
 fn is_ppu_thread_finished_for_unit_tracks_thread_state() {
     use crate::ppu_thread::{PpuThreadAttrs, PpuThreadState};
     let mut host = Lv2Host::new();

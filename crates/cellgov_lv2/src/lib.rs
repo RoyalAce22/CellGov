@@ -41,7 +41,7 @@ pub use host::{
 pub use image::{ContentStore, LsSegment, SpuImageHandle, SpuImageRecord, UserSpuImage};
 pub use ppu_thread::{
     AddJoinWaiter, EventFlagWaitMode, GuestBlockReason, PpuThread, PpuThreadAttrs, PpuThreadId,
-    PpuThreadIdAllocator, PpuThreadState, PpuThreadTable, ThreadStack, ThreadStackAllocator,
+    PpuThreadIdAllocator, PpuThreadState, PpuThreadTable, ThreadStack,
 };
 pub use prx_registry::{LoadedPrxEntry, LoadedPrxRegistry};
 pub use request::Lv2Request;

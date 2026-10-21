@@ -1,6 +1,6 @@
 //! Microbench: `GuestMemory::reset_for_reuse` vs constructing a
-//! fresh `GuestMemory` over the canonical 1.78 GiB PS3 layout
-//! (1 GiB main + 1 MiB primary stack + 15 MiB child stacks + 256
+//! fresh `GuestMemory` over the canonical 2 GiB PS3 layout
+//! (1 GiB main + 1 MiB primary stack + 255 MiB child stacks + 256
 //! MiB RSX + 512 MiB SPU reserved). The "after a small workload"
 //! measurement writes a few KiB at typical guest VAs so reset cost
 //! reflects touched-page count rather than total region size.
@@ -18,7 +18,7 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region, RegionAcc
 //   STACK_BASE         = PS3_PRIMARY_STACK_BASE  = 0xD000_0000
 //   STACK_SIZE         = PS3_PRIMARY_STACK_SIZE  = 0x0010_1000
 //   CHILD_STACKS_BASE  = PS3_CHILD_STACKS_BASE   = 0xD010_1000
-//   CHILD_STACKS_SIZE  = PS3_CHILD_STACKS_SIZE   = 0x00EF_F000
+//   CHILD_STACKS_SIZE  = PS3_CHILD_STACKS_SIZE   = 0x0FEF_F000
 //   RSX_BASE           = PS3_RSX_BASE            = 0xC000_0000
 //   RSX_SIZE           = PS3_RSX_SIZE            = 0x1000_0000
 //   SPU_RESERVED_BASE  = PS3_SPU_RESERVED_BASE   = 0xE000_0000
@@ -32,7 +32,7 @@ const MAIN_SIZE: usize = 0x4000_0000; // 1 GiB, mirrors boot.rs min_for_kernel
 const STACK_BASE: u64 = 0xD000_0000;
 const STACK_SIZE: usize = 0x0010_1000; // 1 MiB + 4 KiB
 const CHILD_STACKS_BASE: u64 = 0xD010_1000;
-const CHILD_STACKS_SIZE: usize = 0x00EF_F000; // 15 MiB - 4 KiB
+const CHILD_STACKS_SIZE: usize = 0x0FEF_F000; // 255 MiB - 4 KiB
 const RSX_BASE: u64 = 0xC000_0000;
 const RSX_SIZE: usize = 0x1000_0000; // 256 MiB
 const SPU_RESERVED_BASE: u64 = 0xE000_0000;
@@ -96,7 +96,7 @@ fn main() {
     let warmup = alloc_canonical();
     std::hint::black_box(warmup);
 
-    println!("=== Cold alloc (canonical 1.78 GiB layout) ===");
+    println!("=== Cold alloc (canonical 2 GiB layout) ===");
     let mut samples = Vec::new();
     for _ in 0..5 {
         let ms = time_ms(|| {

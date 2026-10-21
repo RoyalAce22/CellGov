@@ -91,15 +91,16 @@ impl Lv2Host {
     }
 
     /// `sys_ppu_thread_create`: reads the thread param and its entry
-    /// descriptor, takes a stack block from the child-stack arena, and
+    /// descriptor, places a stack block in the child-stack arena, and
     /// hands the runtime a seeded init state. The runtime installs the
     /// block as a region in the creator's address space and registers
-    /// the unit through the PPU factory. A create the runtime refuses
-    /// returns the block to the arena.
+    /// the unit through the PPU factory.
     ///
-    /// The arena is a deterministic bump allocator: the arm floors the
-    /// requested size at 0x4000, and two fresh hosts hand out the same
-    /// blocks in the same order.
+    /// The arm floors the requested size at 0x4000 and places the block
+    /// at the lowest range no thread in the table holds. A joined or
+    /// exited thread leaves the table, so its range is free for the next
+    /// create, as the `lv2_address_space` capture shows four threads,
+    /// created and joined in turn, getting one address.
     ///
     /// # Errors
     ///
@@ -115,7 +116,7 @@ impl Lv2Host {
     ///   `lv2_ppu_thread_priority_bounds` capture reads back 9999,
     ///   0x7FFFFFFF and -1000 as created.
     /// - `CELL_EFAULT` when the entry descriptor is unreadable.
-    /// - `CELL_ENOMEM` when the arena is exhausted.
+    /// - `CELL_ENOMEM` when no free range of the arena holds the stack.
     ///
     /// `joinable` is the create's JOINABLE flag: a join refuses a thread
     /// created without it, and the thread's exit collects it.

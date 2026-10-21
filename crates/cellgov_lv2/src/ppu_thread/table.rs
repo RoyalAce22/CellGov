@@ -408,6 +408,18 @@ impl PpuThreadTable {
         self.threads.keys()
     }
 
+    /// The `(base, size)` stack of every thread the table holds, in
+    /// thread-id order. A thread leaves the table when the kernel
+    /// collects it, so this is the set of stacks still in use.
+    pub fn stacks(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
+        self.threads.iter().map(|(_, thread)| {
+            (
+                u64::from(thread.attrs.stack_base),
+                u64::from(thread.attrs.stack_size),
+            )
+        })
+    }
+
     /// Whether any thread whose low-32-bit id matches `raw_low32` is
     /// still alive. The user-space owner field of `sys_lwmutex_t` only
     /// stores the low 32 bits of the kernel `PpuThreadId`, so the HLE

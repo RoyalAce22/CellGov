@@ -1,0 +1,16 @@
+[test]
+name = "lv2_ppu_thread_stack_span"
+
+# A hardware probe: whether a process can hold twenty 1 MiB child-thread
+# stacks at once, where they lie, and where the next stack goes once
+# every one of them is collected. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# 105 big-endian u32 words, as ppu/main.c lists: 420 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 420 },
+]
+
+[expect]
+outcome = "completed"

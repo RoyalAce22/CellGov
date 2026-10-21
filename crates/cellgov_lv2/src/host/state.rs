@@ -2,7 +2,7 @@
 
 use crate::fs_store::FsStore;
 use crate::image::ContentStore;
-use crate::ppu_thread::{PpuThreadId, PpuThreadTable, ThreadStackAllocator};
+use crate::ppu_thread::{PpuThreadId, PpuThreadTable};
 use crate::prx_registry::LoadedPrxRegistry;
 use crate::raw_spu::RawSpuTable;
 use crate::sync_primitives::{
@@ -29,8 +29,9 @@ pub(in crate::host) struct Lv2State {
     /// Raw SPUs (150-154, 160, 161, 163, 196, 197, 199); `groups` keeps
     /// the limit `sys_spu_initialize` sets for them.
     pub(in crate::host) raw_spus: RawSpuTable,
+    /// The PPU threads; their stacks are also the child-stack arena's
+    /// live set.
     pub(in crate::host) ppu_threads: PpuThreadTable,
-    pub(in crate::host) stack_allocator: ThreadStackAllocator,
     /// The slot table every class-tagged kernel id comes from.
     pub(in crate::host) kernel_ids: KernelIdTable,
     /// The serial the next memory container id carries.

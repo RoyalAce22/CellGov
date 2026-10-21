@@ -35,10 +35,9 @@ fn console_child(w: &[u32], n: usize) -> (u64, u64, u64) {
 #[test]
 fn a_child_stack_is_the_size_asked_for_and_starts_r1_one_minimum_frame_below_its_top() {
     let w = words();
-    let mut alloc = ThreadStackAllocator::new();
     for (n, &size) in SIZES.iter().enumerate() {
         let (r1, base, console_size) = console_child(&w, n);
-        let stack = alloc.allocate(size, 0x10).expect("a stack");
+        let stack = place_child_stack([], size, 0x10).expect("a stack");
         assert_eq!(stack.size(), console_size, "child {n}: size");
         assert_eq!(
             stack.end() - stack.initial_sp(),
@@ -49,11 +48,11 @@ fn a_child_stack_is_the_size_asked_for_and_starts_r1_one_minimum_frame_below_its
 }
 
 /// The console gives each of the four threads the same stack address,
-/// 0x2000 above the end of the default 64 KiB primary stack: a joined
-/// thread's stack is reused. CellGov bumps from its own child region
-/// and reuses none.
+/// 0x2000 above the end of the default 64 KiB primary stack: the next
+/// thread takes a joined thread's stack. CellGov reuses the slot too, at
+/// the base of its own child region.
 #[test]
-fn the_console_reuses_one_child_stack_slot_and_cellgov_bumps_from_its_own_region() {
+fn the_console_and_cellgov_each_reuse_one_child_stack_slot_at_different_addresses() {
     let w = words();
     let console: Vec<u64> = (0..SIZES.len()).map(|n| console_child(&w, n).1).collect();
     assert!(
@@ -63,15 +62,14 @@ fn the_console_reuses_one_child_stack_slot_and_cellgov_bumps_from_its_own_region
     let primary_end = u64::from(w[19]) + u64::from(w[20]);
     assert_eq!(console[0], primary_end + 0x2000, "the console's slot");
 
-    let mut alloc = ThreadStackAllocator::new();
+    // Each thread is joined before the next create, so no stack is live.
     let cellgov: Vec<u64> = SIZES
         .iter()
-        .map(|&size| alloc.allocate(size, 0x10).expect("a stack").base())
+        .map(|&size| place_child_stack([], size, 0x10).expect("a stack").base())
         .collect();
-    assert_eq!(cellgov[0], ThreadStackAllocator::CHILD_STACK_BASE);
-    assert_ne!(cellgov[0], console[0], "CellGov's region is its own");
     assert!(
-        cellgov.windows(2).all(|p| p[0] < p[1]),
+        cellgov.iter().all(|&base| base == CHILD_STACK_BASE),
         "CellGov: {cellgov:x?}"
     );
+    assert_ne!(cellgov[0], console[0], "CellGov's region is its own");
 }

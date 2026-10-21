@@ -74,7 +74,7 @@ mod primary_entry_sp_tests {
 
     #[test]
     fn the_entry_frame_stays_below_the_child_stack_arena() {
-        // The first block `ThreadStackAllocator` hands out starts at
+        // The lowest child-thread stack block starts at
         // PS3_CHILD_STACKS_BASE, so a callee's LR/CR/parameter-save
         // stores above the entry r1 must all land under it, even for the
         // largest stack.

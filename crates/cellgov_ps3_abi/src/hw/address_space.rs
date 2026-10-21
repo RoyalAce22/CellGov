@@ -41,18 +41,25 @@ pub const PS3_PRIMARY_STACK_START: u64 = 0xD000_1000;
 pub const PS3_PRIMARY_STACK_ENTRY_RESERVE: u64 = 0x230;
 
 /// Base of CellGov's child-thread stack region, which sits immediately
-/// above its primary-stack region. CellGov's allocator bumps through it
-/// and reuses no stack.
+/// above its primary-stack region. A new thread's stack takes the
+/// lowest range of it that no uncollected thread's stack holds.
 ///
-/// The reference console places them differently (`lv2_address_space`).
-/// Its process has the default 64 KiB primary stack. Each of four
-/// threads, created and joined in turn, gets its stack at the same
-/// address, 0x2000 above the primary stack's end. A joined thread's
-/// stack is reused.
+/// The reference console places them lower (`lv2_address_space`). Its
+/// process has the default 64 KiB primary stack. Each of four threads,
+/// created and joined in turn, gets its stack at the same address,
+/// 0x2000 above the primary stack's end. A joined thread's stack is
+/// reused.
 pub const PS3_CHILD_STACKS_BASE: u64 = 0xD010_1000;
 
-/// Size in bytes of CellGov's child-thread stack region.
-pub const PS3_CHILD_STACKS_SIZE: usize = 0x00EF_F000;
+/// Size in bytes of CellGov's child-thread stack region: the rest of
+/// the 256 MiB stack segment at [`PS3_PRIMARY_STACK_BASE`], above the
+/// primary-stack region.
+pub const PS3_CHILD_STACKS_SIZE: usize = 0x0FEF_F000;
+
+/// Size in bytes of the PPU stack segment. Every PPU thread stack, the
+/// primary one and the child ones, lies in the segment at
+/// [`PS3_PRIMARY_STACK_BASE`].
+pub const PS3_STACK_SEGMENT_SIZE: u64 = 0x1000_0000;
 
 /// Smallest stack frame a PPE 64-bit callee may be handed: the
 /// 48-byte fixed header plus the 64-byte minimum parameter save area.
@@ -172,6 +179,14 @@ const _: () = assert!(PS3_RSX_IOMAP_BASE + PS3_RSX_IOMAP_SIZE as u64 <= PS3_RSX_
 const _: () = assert!(PS3_RSX_BASE + PS3_RSX_SIZE as u64 <= PS3_PRIMARY_STACK_BASE);
 const _: () =
     assert!(PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 <= PS3_CHILD_STACKS_BASE);
+// The two stack regions fill the stack segment exactly, so no stack
+// address in it falls outside a backed region.
+const _: () =
+    assert!(PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 == PS3_CHILD_STACKS_BASE);
+const _: () = assert!(
+    PS3_CHILD_STACKS_BASE + PS3_CHILD_STACKS_SIZE as u64
+        == PS3_PRIMARY_STACK_BASE + PS3_STACK_SEGMENT_SIZE
+);
 const _: () =
     assert!(PS3_CHILD_STACKS_BASE + PS3_CHILD_STACKS_SIZE as u64 <= PS3_SPU_RESERVED_BASE);
 // The topmost region must not wrap past the end of the address space.

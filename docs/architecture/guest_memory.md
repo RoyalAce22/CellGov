@@ -16,15 +16,14 @@ gap.
 The `boot run` driver builds these regions, matching the canonical
 PS3 LV2 virtual-address layout. High addresses are at the top.
 Green regions are `ReadWrite`, grey regions are
-`ReservedZeroReadable` (the default), and dashed boxes are ranges the
+`ReservedZeroReadable` (the default), and the dashed box is a range the
 boot leaves without a region.
 
 ```mermaid
 block-beta
   columns 1
   spu["<b>spu_reserved</b><br/>0xE0000000 - 0xFFFFFFFF<br/>512 MB, ReservedZeroReadable"]
-  gap2["no region<br/>0xD1000000 - 0xDFFFFFFF"]
-  child["<b>child_stacks</b><br/>0xD0101000 - 0xD0FFFFFF<br/>15 MB - 4 KB, ReadWrite"]
+  child["<b>child_stacks</b><br/>0xD0101000 - 0xDFFFFFFF<br/>255 MB - 4 KB, ReadWrite"]
   stack["<b>stack</b><br/>0xD0000000 - 0xD0100FFF<br/>1 MB + 4 KB, ReadWrite"]
   rsx["<b>rsx</b><br/>0xC0000000 - 0xCFFFFFFF<br/>256 MB, ReservedZeroReadable"]
   gap1["no region at boot<br/>0x45500000 - 0xBFFFFFFF<br/>sys_mmapper and 1 MB-page areas from 0x50000000"]
@@ -36,7 +35,7 @@ block-beta
   classDef gap fill:none,stroke:#888,stroke-dasharray:5 5,color:#888
   class main,iomap,stack,child rw
   class rsx,spu reserved
-  class gap1,gap2 gap
+  class gap1 gap
 ```
 
 | Label          | Purpose                                                                                                                                                                  |
@@ -45,7 +44,7 @@ block-beta
 | `rsx_iomap`    | Backing for `sys_rsx_context_iomap` (672); libgcm FIFO command-buffer allocations land here                                                                              |
 | `rsx`          | Video / RSX local memory -- placeholder, reads zero and are counted                                                                                                      |
 | `stack`        | Primary-thread stack (page-4K); the stack starts at 0xD0001000 and holds the largest `PROC_PARAM.primary_stacksize` the kernel adopts                                     |
-| `child_stacks` | Stack pool for PPU threads spawned by `sys_ppu_thread_create`                                                                                                            |
+| `child_stacks` | Stacks of PPU threads spawned by `sys_ppu_thread_create`: the rest of the 256 MB stack segment. A new stack takes the lowest range no uncollected thread holds, so a joined or exited thread's range is reused |
 | `spu_reserved` | SPU-shared range -- same provisional semantics as RSX; an MFC transfer into its SPU thread window reaches the target thread, as the runtime pipeline describes; a Raw SPU's create maps its 1 MB problem-state window `ReadWrite` inside it, and its destroy returns it |
 
 `sys_rsx_context_allocate` (670) adds two more when it opens the RSX
