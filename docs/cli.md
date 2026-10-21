@@ -1899,10 +1899,10 @@ Usage: cellgov dev relations-check [OPTIONS] <FILE>
 Input:
   FILE holds result states. Each entry names a catalog row, a register
   assignment, a start state, and the state a fused form leaves from it;
-  docs/spu_sequence_relations.md gives the form. The command runs the
-  row's sequence A from each start state and compares the complete
-  observed state. It runs nothing from the file. A result state that
-  differs gives status 4.
+  docs/reference/spu_sequence_relations.md gives the form. The command
+  runs the row's sequence A from each start state and compares the
+  complete observed state. It runs nothing from the file. A result state
+  that differs gives status 4.
 ```
 
 #### `cellgov dev completions`
