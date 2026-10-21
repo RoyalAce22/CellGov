@@ -191,8 +191,10 @@ pub fn execute<C: ConsoleOps>(
         Verb::Unlock => {
             let host = command.host(context.host_env.as_deref())?;
             let mut console = connect(&host);
-            let removed = lease::unlock(&mut console, &mut Transcript::new())
-                .map_err(RunnerPs3Error::from)?;
+            let mut transcript = Transcript::new();
+            let removed = lease::unlock(&mut console, &mut transcript);
+            console.end_session(&mut transcript);
+            let removed = removed.map_err(RunnerPs3Error::from)?;
             Ok(Report::Unlock { host, removed })
         }
         Verb::Convert => Ok(convert(command, context)?),
@@ -465,14 +467,19 @@ fn on_console<C: ConsoleOps>(
         }
         .into());
     }
-    let lease = Lease::acquire(
+    let lease = match Lease::acquire(
         &mut webman,
         &host,
         &lease::holder_text(&context.who, &manifest.test.name, &context.invocation),
         &context.invocation,
         &mut transcript,
-    )
-    .map_err(RunnerPs3Error::from)?;
+    ) {
+        Ok(lease) => lease,
+        Err(refused) => {
+            webman.end_session(&mut transcript);
+            return Err(RunnerPs3Error::from(refused).into());
+        }
+    };
     let target = Target::of(&manifest);
     let clear_with = verb_line(
         &context.invocation,
@@ -579,6 +586,7 @@ fn on_console<C: ConsoleOps>(
         Err(error) => (None, Some(error)),
     };
     let released = lease.release(&mut webman, &mut transcript);
+    webman.end_session(&mut transcript);
     let report = Report::Console {
         capture,
         transcript: transcript.lines().to_vec(),

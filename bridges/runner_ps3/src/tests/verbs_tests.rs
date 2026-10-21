@@ -14,6 +14,9 @@ use crate::lease::LEASE_DIR;
 use crate::memory_console::{package_on_disk, ppu_elf, MemoryConsole, EXIT_ONLY, PACKAGED_FRAME};
 use crate::ExitCode;
 
+#[path = "verbs_session_tests.rs"]
+mod session;
+
 const PAGE: &str = include_str!("fixtures/cpursx.html");
 
 const HOST: &str = "10.77.0.2";

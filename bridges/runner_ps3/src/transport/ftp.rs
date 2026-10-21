@@ -183,6 +183,12 @@ impl<W: Wire> FtpSession<W> {
         Ok(session)
     }
 
+    /// Whether the server owes no reply, so the session can take another
+    /// command.
+    pub fn in_step(&self) -> bool {
+        !self.reply_owed
+    }
+
     fn send(
         &mut self,
         line: &str,

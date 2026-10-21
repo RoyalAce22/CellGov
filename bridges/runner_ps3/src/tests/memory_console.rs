@@ -47,6 +47,8 @@ pub(crate) struct MemoryConsole {
     pub(crate) result_path: Option<String>,
     /// Every request, in order.
     pub(crate) calls: Vec<String>,
+    /// For each session end, how many requests came before it.
+    pub(crate) session_ends: Vec<usize>,
     started: bool,
 }
 
@@ -307,5 +309,9 @@ impl ConsoleOps for MemoryConsole {
             return Err(refused(path));
         }
         Ok(())
+    }
+
+    fn end_session(&mut self, _: &mut Transcript) {
+        self.session_ends.push(self.calls.len());
     }
 }

@@ -206,9 +206,12 @@ fn a_dirty_console_is_refused_with_a_recovery_command() {
     );
     // A stale result beside the deployed package: the runner deletes it
     // once, then refuses the occupied game directory.
-    WebmanConsole::new(console())
-        .store(&target.result_path, b"stale", &mut Transcript::new())
+    let mut planter = WebmanConsole::new(console());
+    let mut planted = Transcript::new();
+    planter
+        .store(&target.result_path, b"stale", &mut planted)
         .expect("plant a stale result");
+    planter.end_session(&mut planted);
     let refused = run(
         "capture",
         &[

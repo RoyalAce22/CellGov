@@ -144,6 +144,20 @@ pub trait ConsoleOps {
     /// Any transport failure.
     fn remove_dir(&mut self, path: &str, transcript: &mut Transcript)
         -> Result<(), TransportError>;
+
+    /// Close the connection that the console keeps open between operations.
+    ///
+    /// The next operation opens a new connection. The runner ends the
+    /// session at these points:
+    ///
+    /// - before [`start`];
+    /// - before it waits on the operator;
+    /// - when a verb ends.
+    ///
+    /// A console that keeps no connection open does nothing.
+    fn end_session(&mut self, transcript: &mut Transcript) {
+        let _ = transcript;
+    }
 }
 
 /// A borrowed console is a console, so a caller that keeps its console
@@ -196,6 +210,10 @@ impl<C: ConsoleOps + ?Sized> ConsoleOps for &mut C {
         transcript: &mut Transcript,
     ) -> Result<(), TransportError> {
         (**self).remove_dir(path, transcript)
+    }
+
+    fn end_session(&mut self, transcript: &mut Transcript) {
+        (**self).end_session(transcript);
     }
 }
 
@@ -255,6 +273,8 @@ pub fn preflight<C: ConsoleOps>(
             game_dir: target.game_dir.clone(),
             contents,
         };
+        // The operator may take any time to answer.
+        console.end_session(transcript);
         if !may_reclaim(&question)? {
             transcript.decision(format!("reclaim of {} declined", target.game_dir));
             return Err(RunnerPs3Error::Refused {
@@ -347,7 +367,8 @@ pub fn cleanup<C: ConsoleOps>(
 }
 
 /// Start the deployed test with one webMAN request,
-/// `/play.ps3?<APPID>`, which must answer `200`.
+/// `/play.ps3?<APPID>`, which must answer `200`. It ends the console's
+/// session first, because webMAN reloads when the title exits.
 ///
 /// webMAN documents this form as mounting the title under
 /// `/dev_hdd0/game/<APPID>` and starting it. The path form
@@ -363,6 +384,7 @@ pub fn start<C: ConsoleOps>(
     target: &Target,
     transcript: &mut Transcript,
 ) -> Result<(), RunnerPs3Error> {
+    console.end_session(transcript);
     let path = format!("{PLAY_PATH}?{}", target.appid());
     let status = console.http_status(&path, transcript)?;
     if status != 200 {
@@ -652,17 +674,32 @@ fn base_name(entry: &str) -> &str {
         .unwrap_or(entry)
 }
 
-/// The console over webMAN's HTTP and FTP servers, one connection per
-/// operation.
-#[derive(Debug, Clone)]
+/// The console over webMAN's HTTP and FTP servers.
+///
+/// Each HTTP request uses its own connection. Every FTP operation shares
+/// one logged-in FTP session until [`ConsoleOps::end_session`]. If an
+/// exchange fails before its reply arrives, the session is out of step.
+/// The console then drops the session, and the next operation logs in
+/// again.
+///
+/// The console does not send a failed command again: a second `MKD` of
+/// the lease reads as the lease of another runner. The one exception is
+/// a `PASV` without a reply, which webMAN gives under back-to-back runs.
+/// `PASV` changes nothing on the console and comes before the transfer
+/// command, so the console sends the transfer once more on a new login.
+#[derive(Debug)]
 pub struct WebmanConsole {
     endpoint: Endpoint,
+    ftp: Option<FtpSession<TcpStream>>,
 }
 
 impl WebmanConsole {
     /// The console at `endpoint`.
     pub fn new(endpoint: Endpoint) -> Self {
-        Self { endpoint }
+        Self {
+            endpoint,
+            ftp: None,
+        }
     }
 
     fn connect(&self, address: SocketAddr) -> Result<TcpStream, TransportError> {
@@ -702,14 +739,78 @@ impl WebmanConsole {
         self.connect(address)
     }
 
-    fn ftp(&self, transcript: &mut Transcript) -> Result<FtpSession<TcpStream>, TransportError> {
+    fn log_in(&self, transcript: &mut Transcript) -> Result<FtpSession<TcpStream>, TransportError> {
         let control = self.connect_port(self.endpoint.ftp_port)?;
         let mut session = FtpSession::open(control, transcript)?;
         session.login_anonymous(transcript)?;
         session.type_binary(transcript)?;
         Ok(session)
     }
+
+    /// Run `exchange` on the FTP session, and log in first if none is open.
+    /// The console keeps the session for the next operation, unless the
+    /// exchange leaves it out of step.
+    fn ftp<T>(
+        &mut self,
+        transcript: &mut Transcript,
+        exchange: impl FnOnce(
+            &Self,
+            &mut FtpSession<TcpStream>,
+            &mut Transcript,
+        ) -> Result<T, TransportError>,
+    ) -> Result<T, TransportError> {
+        let mut session = match self.ftp.take() {
+            Some(session) => session,
+            None => self.log_in(transcript)?,
+        };
+        let result = exchange(self, &mut session, transcript);
+        if session.in_step() {
+            self.ftp = Some(session);
+        } else {
+            transcript.decision("FTP session dropped: an exchange failed with its reply unread");
+        }
+        result
+    }
+
+    /// Run `transfer` over a new data connection, with the `PASV` retry
+    /// that [`WebmanConsole`] describes.
+    fn transfer<T>(
+        &mut self,
+        transcript: &mut Transcript,
+        mut transfer: impl FnMut(
+            &mut FtpSession<TcpStream>,
+            TcpStream,
+            &mut Transcript,
+        ) -> Result<T, TransportError>,
+    ) -> Result<T, TransportError> {
+        let mut tries_left = PASV_TRIES;
+        loop {
+            tries_left -= 1;
+            let outcome = self.ftp(transcript, |console, session, transcript| {
+                let address = match session.pasv(transcript) {
+                    Ok(address) => address,
+                    Err(refused) => return Ok(Err(refused)),
+                };
+                let data = console.connect(SocketAddr::V4(address))?;
+                transfer(session, data, transcript).map(Ok)
+            })?;
+            match outcome {
+                Ok(done) => return Ok(done),
+                Err(unanswered @ (TransportError::Io { .. } | TransportError::ReplyTruncated))
+                    if tries_left > 0 =>
+                {
+                    transcript.decision(format!(
+                    "PASV unanswered ({unanswered}); sending the transfer once more on a new login"
+                ))
+                }
+                Err(refused) => return Err(refused),
+            }
+        }
+    }
 }
+
+/// How many times a transfer sends `PASV` before its failure stands.
+const PASV_TRIES: u32 = 2;
 
 impl ConsoleOps for WebmanConsole {
     fn http_status(
@@ -739,9 +840,9 @@ impl ConsoleOps for WebmanConsole {
     }
 
     fn make_dir(&mut self, path: &str, transcript: &mut Transcript) -> Result<(), TransportError> {
-        let mut session = self.ftp(transcript)?;
-        session.mkd(path, transcript)?;
-        session.quit(transcript).map(drop)
+        self.ftp(transcript, |_, session, transcript| {
+            session.mkd(path, transcript)
+        })
     }
 
     fn store(
@@ -750,10 +851,9 @@ impl ConsoleOps for WebmanConsole {
         bytes: &[u8],
         transcript: &mut Transcript,
     ) -> Result<(), TransportError> {
-        let mut session = self.ftp(transcript)?;
-        let data = self.connect(SocketAddr::V4(session.pasv(transcript)?))?;
-        session.stor(path, data, bytes, transcript)?;
-        session.quit(transcript).map(drop)
+        self.transfer(transcript, |session, data, transcript| {
+            session.stor(path, data, bytes, transcript)
+        })
     }
 
     fn list(
@@ -761,17 +861,15 @@ impl ConsoleOps for WebmanConsole {
         dir: &str,
         transcript: &mut Transcript,
     ) -> Result<Vec<String>, TransportError> {
-        let mut session = self.ftp(transcript)?;
-        let data = self.connect(SocketAddr::V4(session.pasv(transcript)?))?;
-        let names = session.nlst(dir, data, transcript)?;
-        session.quit(transcript)?;
-        Ok(names)
+        self.transfer(transcript, |session, data, transcript| {
+            session.nlst(dir, data, transcript)
+        })
     }
 
     fn delete(&mut self, path: &str, transcript: &mut Transcript) -> Result<(), TransportError> {
-        let mut session = self.ftp(transcript)?;
-        session.dele(path, transcript)?;
-        session.quit(transcript).map(drop)
+        self.ftp(transcript, |_, session, transcript| {
+            session.dele(path, transcript)
+        })
     }
 
     fn remove_dir(
@@ -779,12 +877,30 @@ impl ConsoleOps for WebmanConsole {
         path: &str,
         transcript: &mut Transcript,
     ) -> Result<(), TransportError> {
-        let mut session = self.ftp(transcript)?;
-        session.rmd(path, transcript)?;
-        session.quit(transcript).map(drop)
+        self.ftp(transcript, |_, session, transcript| {
+            session.rmd(path, transcript)
+        })
+    }
+
+    fn end_session(&mut self, transcript: &mut Transcript) {
+        if let Some(session) = self.ftp.take() {
+            if let Err(error) = session.quit(transcript) {
+                transcript.decision(format!(
+                    "FTP session closed without its QUIT reply: {error}"
+                ));
+            }
+        }
     }
 }
 
 #[cfg(test)]
 #[path = "tests/run_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/run_session_tests.rs"]
+mod run_session_tests;
+
+#[cfg(test)]
+#[path = "tests/webman_session_tests.rs"]
+mod webman_session_tests;
