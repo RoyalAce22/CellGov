@@ -130,6 +130,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         dma_latency: _,                   // set once at construction
         rsx_window_access: _,             // set once by the host before the run
         last_runnable: _,                 // cleared on restore, rewritten by the next step
+        last_ppe_pressure: _,             // cleared on restore, rewritten by the next step
         last_dma_completions: _,          // cleared on restore, rewritten by the next commit
         last_host_writes: _,              // cleared on restore, rewritten by the next step
         last_lv2_effects: _,              // cleared on restore, rewritten by the next step
@@ -260,6 +261,7 @@ impl Runtime {
         // The set belongs to a step of the execution the restore
         // leaves, and the next step rewrites it only on Ok.
         self.last_runnable.clear();
+        self.last_ppe_pressure = None;
         self.last_dma_completions.clear();
         self.last_host_writes.clear();
         self.last_lv2_effects.clear();

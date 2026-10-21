@@ -20,3 +20,7 @@ pub(crate) use pipeline::{Core, PpeTiming};
 #[cfg(test)]
 #[path = "tests/timing_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/pressure_tests.rs"]
+mod pressure_tests;

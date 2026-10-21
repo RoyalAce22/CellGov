@@ -175,6 +175,13 @@ pub struct StepFootprint {
     /// [`StepFootprint::note_commit`] compares the runnable set the step
     /// began from with each thread's status after its commit.
     pub ppe_status_changes: Vec<cellgov_event::UnitId>,
+    /// The PPE thread this step ran, when the step changed that thread's
+    /// issue pressure.
+    ///
+    /// A sibling's pressure adds cycles to each of a thread's
+    /// instructions, so a PPE thread's step reads it.
+    /// [`StepFootprint::note_commit`] sets it.
+    pub ppe_pressure_changer: Option<cellgov_event::UnitId>,
 }
 
 impl StepFootprint {
@@ -230,6 +237,12 @@ impl StepFootprint {
             |id: cellgov_event::UnitId| registry.get(id).is_some_and(|u| u.shares_ppe_issue());
         if is_ppe(unit) {
             self.ppe_sibling_reader = Some(unit);
+        }
+        if let Some((ran, before)) = rt.last_ppe_pressure() {
+            let after = registry.get(ran).map(|u| u.ppe_issue_pressure());
+            if ran == unit && after != Some(before) {
+                self.ppe_pressure_changer = Some(unit);
+            }
         }
         let before = rt.last_runnable();
         for id in registry.ids().filter(|&id| is_ppe(id)) {
@@ -349,6 +362,7 @@ impl StepFootprint {
             reads_clock,
             ppe_sibling_reader,
             ppe_status_changes,
+            ppe_pressure_changer,
         } = other;
         self.shared_writes.extend(shared_writes);
         self.shared_reads.extend(shared_reads);
@@ -374,6 +388,7 @@ impl StepFootprint {
         self.reads_clock |= reads_clock;
         self.ppe_sibling_reader = self.ppe_sibling_reader.or(ppe_sibling_reader);
         self.ppe_status_changes.extend(ppe_status_changes);
+        self.ppe_pressure_changer = self.ppe_pressure_changer.or(ppe_pressure_changer);
     }
 
     /// Record the host writes that landed during this step.
@@ -724,6 +739,17 @@ impl StepFootprint {
             return true;
         }
 
+        // A PPE thread's steps read the issue pressure of its siblings.
+        let pressure_moved = |reader: &StepFootprint, changer: &StepFootprint| {
+            reader
+                .ppe_sibling_reader
+                .zip(changer.ppe_pressure_changer)
+                .is_some_and(|(r, c)| r != c)
+        };
+        if pressure_moved(self, other) || pressure_moved(other, self) {
+            return true;
+        }
+
         // The order PPE threads become runnable in decides which of them
         // hold the PPE's two hardware threads.
         if !self.ppe_status_changes.is_empty() && !other.ppe_status_changes.is_empty() {
@@ -761,6 +787,7 @@ impl StepFootprint {
             && !self.reads_clock
             && self.ppe_sibling_reader.is_none()
             && self.ppe_status_changes.is_empty()
+            && self.ppe_pressure_changer.is_none()
     }
 
     /// True when this step touches the bytes of a transfer that was in
@@ -906,3 +933,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/ppe_sibling_tests.rs"]
 mod ppe_sibling_tests;
+
+#[cfg(test)]
+#[path = "tests/ppe_pressure_tests.rs"]
+mod ppe_pressure_tests;

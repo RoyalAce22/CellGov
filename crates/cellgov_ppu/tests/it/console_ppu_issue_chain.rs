@@ -19,7 +19,7 @@
 //! evidence. The replay holds each chain at or below the console's
 //! fastest run, by no more than the gap measured here.
 
-use crate::console_ppu_issue_timing::{replay, Replay, Seed};
+use crate::console_ppu_issue_timing::{replay, replay_beside, Replay, Seed, Sibling};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
 const CONSOLE: &str = "../../tests/micro/ppu_issue_chain/ps3/cech20-cex-493/observation.json";
@@ -79,6 +79,44 @@ const LOOP_GAP: f64 = 0.13;
 /// The largest share of a 256-long chain's console time the model may
 /// fall short by: the `add` run's 1.8%.
 const RUN_GAP: f64 = 0.02;
+
+/// The probe's sibling: one dependent `divd r15,r15,r16` and its `bdnz`.
+const DIVD_SIBLING: Sibling = Sibling {
+    words: &[0x7def_83d2, 0x4200_fffc],
+    seeds: &[Seed::Gpr(15, 0x7fff_0000), Seed::Gpr(16, 1)],
+};
+
+/// The largest share of loop 10's or 11's fastest console run the model
+/// may sit from it.
+///
+/// The `ppu_issue_shared` capture runs the same `add` chain beside a
+/// sibling of eight dependent `divd` to a `bdnz`, and its runs take
+/// between 20 and 183 cycles an iteration, so one console window does not
+/// fix the stall between 103 and 164.
+const SIBLING_GAP: f64 = 0.20;
+
+#[test]
+fn the_issue_model_times_loops_10_and_11_beside_the_divd_sibling_near_the_console() {
+    let w = console_words();
+    let loops: [(usize, u32, &'static [Seed]); 2] = [(10, ADD, ADD_SEEDS), (11, MULLI, MUL_SEEDS)];
+    for (k, word, seeds) in loops {
+        let r = Replay {
+            loop_index: k,
+            words: chain(word, 8),
+            seeds,
+        };
+        let cellgov = replay_beside(&r, 1, &DIVD_SIBLING).expect("the chain replays");
+        let per =
+            |tb: u64| (tb * PPU_CYCLES_PER_TB_TICK) as f64 / (1u64 << ITERATIONS_LOG2[k]) as f64;
+        let (fastest, slowest) = (per(w[2 * k]), per(w[2 * k + 1]));
+        assert!(
+            (fastest..=slowest).contains(&cellgov)
+                || (cellgov - fastest).abs() / fastest <= SIBLING_GAP,
+            "loop {k}: CellGov {cellgov:.2} cycles an iteration, the console {fastest:.2} \
+             to {slowest:.2}",
+        );
+    }
+}
 
 #[test]
 fn the_issue_model_times_each_chain_at_most_the_accepted_gap_below_the_console() {

@@ -87,6 +87,7 @@ impl Runtime {
             timer_wakes: crate::timer_queue::TimerWakeQueue::new(),
             dma_latency: Box::new(FixedLatency::new(DEFAULT_DMA_LATENCY_TICKS.raw())),
             last_runnable: Vec::new(),
+            last_ppe_pressure: None,
             last_dma_completions: Vec::new(),
             last_host_writes: Vec::new(),
             last_lv2_effects: Vec::new(),

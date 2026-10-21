@@ -156,6 +156,35 @@ pub const PPU_SMT_L1_CHASE_CYCLES: (u64, u64) = (40, 42);
 /// thread every other cycle.
 pub const PPU_SMT_SIBLING_HOLD_CYCLES: u64 = 2;
 
+/// The most cycles a sibling thread's stalls at the shared issue point
+/// add to each of a thread's instructions, past the cycle the
+/// instruction is ready: what a sibling of long waits or of microcoded
+/// instructions adds.
+///
+/// The `ppu_issue_shared` capture times five chains beside a sibling
+/// running dependent `divd`, independent `divd`, `divw`, `fdiv`, `fsqrt`
+/// or microcoded `lha`. Each instruction of the `add`, `addi`, `fadd` and
+/// `ld` chains takes about its own latency and 13 cycles more, whichever
+/// of the six the sibling runs and whichever unit the chain uses, though
+/// the sibling's instructions take between 24 and 94 cycles each. A
+/// dependent `mulli` takes about 17 to 25 more.
+///
+/// [CBE-Handbook p:301 s:10.2.3.1] a stall at IS2 stalls both threads.
+///
+/// [CBE-Handbook p:753 s:A.5] a nonpipelined or microcoded instruction
+/// issues alone.
+pub const PPU_SMT_SHARED_STALL_CYCLES: u64 = 13;
+
+/// The share of a sibling's mean wait past its in-order floor, for its
+/// operands or a busy unit, as a fraction numerator over denominator,
+/// that it adds to each of a thread's instructions, up to
+/// [`PPU_SMT_SHARED_STALL_CYCLES`].
+///
+/// In the `ppu_issue_shared` capture a sibling of dependent `mulld`,
+/// whose instructions each wait about 13 cycles, adds between 4 and 6
+/// cycles to each instruction of the `add`, `addi` and `mulli` chains.
+pub const PPU_SMT_DEPENDENT_STALL_SHARE: (u64, u64) = (2, 5);
+
 /// The cycles between two fetches for one hardware thread.
 ///
 /// [CBE-Handbook p:299 s:10.2.3] instruction fetching strictly

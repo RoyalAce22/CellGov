@@ -83,7 +83,27 @@ pub(crate) struct Core {
     miss: [u64; REGS],
     /// The cycle each unit is free again, indexed by unit bit.
     unit_free: [u64; 5],
+    /// The share of this thread's recent cycles, out of [`SHARE_ONE`],
+    /// spent on the instructions `stalls_both_threads` names. Each
+    /// instruction weighs by its cycles, over a window of
+    /// [`PRESSURE_WINDOW_CYCLES`].
+    long_share: u32,
+    /// This thread's recent mean wait past its in-order floor, in 1/256
+    /// cycle, over its other instructions: a wait for operands or for a
+    /// busy unit. Each instruction weighs one in
+    /// [`PRESSURE_WINDOW_INSTRUCTIONS`].
+    operand_wait: u32,
 }
+
+/// [`Core::long_share`] for a thread that spends all its cycles on
+/// the instructions `stalls_both_threads` names.
+const SHARE_ONE: u32 = 1 << 16;
+
+/// The cycles [`Core::long_share`] averages over.
+const PRESSURE_WINDOW_CYCLES: u64 = 64;
+
+/// The instructions [`Core::operand_wait`] averages over.
+const PRESSURE_WINDOW_INSTRUCTIONS: u32 = 8;
 
 /// A store still in the store queue.
 #[derive(Debug, Clone, Copy, Default)]
@@ -112,6 +132,9 @@ pub(crate) struct PpeTiming {
     /// The cycles a runnable sibling thread holds issue after each of
     /// this thread's dispatch groups: zero with no sibling runnable.
     hold: u64,
+    /// The cycles a runnable sibling's stalls at the shared issue point
+    /// add to each of this thread's instructions.
+    shared_stall: u64,
 }
 
 impl Default for PpeTiming {
@@ -198,6 +221,8 @@ impl PpeTiming {
                 addr_ready: [0; REGS],
                 miss: [0; REGS],
                 unit_free: [0; 5],
+                long_share: 0,
+                operand_wait: 0,
             },
             tables: Box::new(Tables {
                 caches: Caches::new(),
@@ -206,17 +231,35 @@ impl PpeTiming {
                 next_store: 0,
             }),
             hold: 0,
+            shared_stall: 0,
         }
     }
 
-    /// Set the number of other PPE threads runnable for the instructions
-    /// retired from here on.
-    pub(crate) fn set_siblings(&mut self, siblings: u32) {
-        self.hold = if siblings == 0 {
-            0
+    /// Set the number of other PPE threads runnable, and the
+    /// [`PpeTiming::pressure`] of the one that presses hardest, for the
+    /// instructions retired from here on.
+    pub(crate) fn set_siblings(&mut self, siblings: u32, pressure: u32) {
+        if siblings == 0 {
+            self.hold = 0;
+            self.shared_stall = 0;
         } else {
-            k::PPU_SMT_SIBLING_HOLD_CYCLES
-        };
+            self.hold = k::PPU_SMT_SIBLING_HOLD_CYCLES;
+            self.shared_stall = u64::from(pressure);
+        }
+    }
+
+    /// The cycles this thread's recent stalls at the shared issue point
+    /// add to each instruction of a sibling thread.
+    ///
+    /// [CBE-Handbook p:301 s:10.2.3.1] a stall at IS2 stalls both threads.
+    pub(crate) fn pressure(&self) -> u32 {
+        let c = &self.core;
+        let (num, den) = k::PPU_SMT_DEPENDENT_STALL_SHARE;
+        let alone =
+            k::PPU_SMT_SHARED_STALL_CYCLES * 256 * u64::from(c.long_share) / u64::from(SHARE_ONE);
+        let waits = u64::from(c.operand_wait) * num / den;
+        let cycles = ((alone + waits + 128) >> 8).min(k::PPU_SMT_SHARED_STALL_CYCLES);
+        cycles as u32
     }
 
     /// The thread's cycle: the earliest the next instruction can issue.
@@ -252,18 +295,23 @@ impl PpeTiming {
     /// before it left. For a microcoded instruction this is the cycle
     /// its first microword issues at.
     pub(crate) fn issue_cycle(&self, pc: u64, op: &Op) -> u64 {
+        self.schedule(pc, op).0
+    }
+
+    /// [`PpeTiming::issue_cycle`], and the cycles of that wait a sibling
+    /// thread added.
+    fn schedule(&self, pc: u64, op: &Op) -> (u64, u64) {
         let c = &self.core;
         let (fetched, opens) = self.fetch(pc);
-        let floor = match c.older {
+        let (floor, paired, opens_group) = match c.older {
             Some(older) if !opens && pc == older.pc + 4 => {
                 let alone = issues_alone(&older.op)
                     || issues_alone(op)
                     || !pairs(&older.op, op)
                     || op.reads_any_of(&older.op);
-                older.issue + u64::from(alone)
+                (older.issue + u64::from(alone), !alone, false)
             }
-            // A new dispatch group: the sibling's group issues between.
-            _ => c.floor + self.hold,
+            _ => (c.floor, false, true),
         };
         let mut t = floor.max(fetched);
         for &r in &op.srcs {
@@ -288,10 +336,26 @@ impl PpeTiming {
             let all = c.ready.iter().chain(c.unit_free.iter()).copied().max();
             t = t.max(all.unwrap_or(0));
         }
+        // A new dispatch group: the sibling's group issues between. Only
+        // the part of the hold no wait of this thread's own covers is the
+        // sibling's.
+        let held = if opens_group {
+            let opener = c.floor + self.hold;
+            let held = opener.saturating_sub(t);
+            t = t.max(opener);
+            held
+        } else {
+            0
+        };
+        // [CBE-Handbook p:301 s:10.2.3.1] the sibling's stalls at IS2
+        // stall this thread too. An instruction that issues beside its
+        // older one waits in the older one's place.
+        let stalled = if paired { 0 } else { self.shared_stall };
+        t += stalled;
         if op.words != 0 {
             t += k::PPU_MICROCODE_ROM_CYCLES;
         }
-        t
+        (t, held + stalled)
     }
 
     /// Issue `op` at `pc`.
@@ -299,9 +363,10 @@ impl PpeTiming {
     /// `next_pc` is the address the thread runs next. It gives the
     /// direction of a branch whose `taken` is `None`.
     pub(crate) fn retire(&mut self, pc: u64, op: &Op, next_pc: u64) {
-        let t = self.issue_cycle(pc, op);
+        let (t, sibling) = self.schedule(pc, op);
         let (fetched, opens) = self.fetch(pc);
         let c = &mut self.core;
+        let before = c.floor;
         if opens {
             c.block_open = true;
             c.block_cycle = fetched;
@@ -311,6 +376,7 @@ impl PpeTiming {
 
         let last = t + u64::from(op.span.saturating_sub(1));
         c.floor = c.floor.max(last + 1);
+        note_pressure(c, op, (c.floor - before).saturating_sub(sibling));
         c.older = (pc.is_multiple_of(8) && op.words == 0).then_some(Older {
             pc,
             issue: t,
@@ -505,6 +571,51 @@ impl PpeTiming {
         };
         self.end_block(next);
     }
+}
+
+/// Whether the cycles `op` takes count in full toward
+/// [`PPU_SMT_SHARED_STALL_CYCLES`] for a sibling: a microcoded
+/// instruction, or one that holds its unit longer than a multiply does
+/// (a divide or a square root).
+///
+/// [CBE-Handbook p:753 s:A.5] a microcoded instruction issues alone.
+///
+/// [CBE-Handbook p:301 s:10.2.3.1] an instruction dependent on a divide
+/// being computed is a very long-latency stall condition. The capture
+/// below is the evidence that the sibling waits through it.
+///
+/// The `ppu_issue_shared` capture: a sibling of microcoded `lha` adds
+/// about 13 cycles to each of a thread's instructions, as a sibling of
+/// divides does, and one of dependent `mulld` about 5. The
+/// `ppu_issue_chain` capture's sibling runs one `divd` to each `bdnz`,
+/// and still adds 13 or more: the divide's cycles count, whatever the
+/// instructions between.
+///
+/// [`PPU_SMT_SHARED_STALL_CYCLES`]: k::PPU_SMT_SHARED_STALL_CYCLES
+fn stalls_both_threads(op: &Op) -> bool {
+    match op.kind {
+        Kind::Unpipelined(cycles) => u64::from(cycles) > k::PPU_MULLD_LATENCY_CYCLES,
+        _ => op.words != 0,
+    }
+}
+
+/// Add an instruction that took `own` cycles of this thread's own to the
+/// averages [`PpeTiming::pressure`] reads.
+fn note_pressure(c: &mut Core, op: &Op, own: u64) {
+    if stalls_both_threads(op) {
+        let w = own.min(PRESSURE_WINDOW_CYCLES);
+        let share = u64::from(c.long_share);
+        let kept = share * (PRESSURE_WINDOW_CYCLES - w);
+        c.long_share = ((kept + u64::from(SHARE_ONE) * w) / PRESSURE_WINDOW_CYCLES) as u32;
+        return;
+    }
+    let w = own.min(PRESSURE_WINDOW_CYCLES);
+    let share = u64::from(c.long_share);
+    c.long_share = (share * (PRESSURE_WINDOW_CYCLES - w) / PRESSURE_WINDOW_CYCLES) as u32;
+    let wait = u32::try_from(own.saturating_sub(1).saturating_mul(256)).unwrap_or(u32::MAX);
+    let n = PRESSURE_WINDOW_INSTRUCTIONS;
+    c.operand_wait =
+        ((u64::from(c.operand_wait) * u64::from(n - 1) + u64::from(wait)) / u64::from(n)) as u32;
 }
 
 /// Whether `r` is the address register a load with update writes, which

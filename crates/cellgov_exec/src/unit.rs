@@ -206,6 +206,15 @@ pub trait ExecutionUnit {
         false
     }
 
+    /// The cycles this PPE thread's recent stalls at the issue point the
+    /// PPE's threads share add to each instruction of another one.
+    ///
+    /// The runtime gives a PPE thread's step the largest of its runnable
+    /// siblings' values (`ExecutionContext::ppe_sibling_pressure`).
+    fn ppe_issue_pressure(&self) -> u32 {
+        0
+    }
+
     /// Hash of the unit's private memory the guest reads back, or `None`
     /// for a unit with none.
     ///

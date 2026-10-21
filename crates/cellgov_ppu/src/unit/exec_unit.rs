@@ -89,6 +89,10 @@ impl ExecutionUnit for PpuExecutionUnit {
         true
     }
 
+    fn ppe_issue_pressure(&self) -> u32 {
+        self.timing.pressure()
+    }
+
     fn shadow_stats(&self) -> (u64, u64) {
         (self.shadow_hits, self.shadow_misses)
     }

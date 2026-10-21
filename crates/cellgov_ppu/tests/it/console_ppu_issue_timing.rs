@@ -619,6 +619,18 @@ const SIBLING_LOOP: [u32; 17] = [
     0x4200_ffc0,
 ];
 
+/// A loop each sibling unit runs from [`SIBLING_CODE`], and the
+/// registers it starts with.
+pub(crate) struct Sibling {
+    pub(crate) words: &'static [u32],
+    pub(crate) seeds: &'static [Seed],
+}
+
+const PROBE_SIBLING: Sibling = Sibling {
+    words: &SIBLING_LOOP,
+    seeds: &[],
+};
+
 /// Run one replay's loop twice `REPLAY_ITERATIONS` times, one
 /// instruction a step, beside `siblings` PPU units that run the probe's
 /// sibling loop.
@@ -626,6 +638,11 @@ const SIBLING_LOOP: [u32; 17] = [
 /// Returns the cycles an iteration of the second half, or `None` when
 /// the unit faults.
 pub(crate) fn replay(r: &Replay, siblings: usize) -> Option<f64> {
+    replay_beside(r, siblings, &PROBE_SIBLING)
+}
+
+/// [`replay`] beside `siblings` PPU units that each run `sibling`.
+pub(crate) fn replay_beside(r: &Replay, siblings: usize, sibling: &Sibling) -> Option<f64> {
     let words = r.words;
     let ring_end = r
         .seeds
@@ -634,14 +651,13 @@ pub(crate) fn replay(r: &Replay, siblings: usize) -> Option<f64> {
             Seed::Ring(_, base, bytes, _) => Some(base + bytes),
             _ => None,
         })
-        .max()
-        .unwrap_or(L1_RING);
+        .fold(L1_RING, u64::max);
     let mut mem = GuestMemory::new(ring_end as usize);
     for (i, w) in words.iter().enumerate() {
         let range = ByteRange::new(GuestAddr::new(CODE + 4 * i as u64), 4).expect("range");
         mem.apply_commit(range, &w.to_be_bytes()).expect("mapped");
     }
-    for (i, w) in SIBLING_LOOP.iter().enumerate() {
+    for (i, w) in sibling.words.iter().enumerate() {
         let range = ByteRange::new(GuestAddr::new(SIBLING_CODE + 4 * i as u64), 4).expect("range");
         mem.apply_commit(range, &w.to_be_bytes()).expect("mapped");
     }
@@ -686,6 +702,13 @@ pub(crate) fn replay(r: &Replay, siblings: usize) -> Option<f64> {
                 let state = ppu.state_mut();
                 state.pc = SIBLING_CODE;
                 state.set_ctr(u64::MAX);
+                for seed in sibling.seeds {
+                    match *seed {
+                        Seed::Gpr(k, v) => state.set_gpr(k, v),
+                        Seed::Fpr(k, v) => state.set_fpr(k, v),
+                        Seed::Ring(..) | Seed::Counter(_) => {}
+                    }
+                }
                 ppu
             })
         })

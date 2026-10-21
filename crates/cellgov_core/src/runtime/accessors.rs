@@ -239,6 +239,17 @@ impl Runtime {
         &self.last_runnable
     }
 
+    /// The PPE thread the last [`Runtime::step`] ran, with its issue
+    /// pressure before that step, or `None` when that unit is not a PPE
+    /// thread.
+    ///
+    /// `None` before the first step and after a restore. A step that
+    /// refuses leaves the previous step's value in place.
+    #[inline]
+    pub fn last_ppe_pressure(&self) -> Option<(UnitId, u32)> {
+        self.last_ppe_pressure
+    }
+
     /// DMA completions the last [`Runtime::commit_step`] fired, each
     /// with whether an inline payload carried its bytes.
     ///

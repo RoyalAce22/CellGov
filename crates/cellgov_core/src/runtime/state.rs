@@ -47,6 +47,10 @@ pub struct Runtime {
     /// read through [`Runtime::last_runnable`]. The buffer is reused,
     /// so a step costs no allocation for it.
     pub(super) last_runnable: Vec<UnitId>,
+    /// The PPE thread the last [`Runtime::step`] ran and its issue
+    /// pressure before that step, read through
+    /// [`Runtime::last_ppe_pressure`].
+    pub(super) last_ppe_pressure: Option<(UnitId, u32)>,
     /// DMA completions the last [`Runtime::commit_step`] fired, read
     /// through [`Runtime::last_dma_completions`].
     pub(super) last_dma_completions: Vec<(cellgov_dma::DmaCompletion, bool)>,

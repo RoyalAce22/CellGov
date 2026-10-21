@@ -141,7 +141,12 @@ impl Runtime {
         // record it here.
         self.last_runnable.clear();
         self.last_runnable.extend(self.registry.runnable_ids());
-        let ppe_siblings = self.ppe_siblings(unit_id);
+        let (ppe_siblings, ppe_sibling_pressure) = self.ppe_siblings(unit_id);
+        self.last_ppe_pressure = self
+            .registry
+            .get(unit_id)
+            .filter(|u| u.shares_ppe_issue())
+            .map(|u| (unit_id, u.ppe_issue_pressure()));
         self.registry.clear_status_override(unit_id);
         // A unit that runs again left its stall, so a deadline its own
         // clock set for that stall wakes nothing.
@@ -209,7 +214,8 @@ impl Runtime {
                 .with_mfc_transfer_view(next_sequence, oldest_transfer)
                 .with_inbound_mailbox(&inbound_mailbox)
                 .with_mailbox_read_flag(&mailbox_read)
-                .with_ppe_siblings(ppe_siblings);
+                .with_ppe_siblings(ppe_siblings)
+                .with_ppe_sibling_pressure(ppe_sibling_pressure);
             let unit = self
                 .registry
                 .get_mut(unit_id)
@@ -376,24 +382,31 @@ impl Runtime {
     }
 
     /// The number of PPE threads other than `unit` in the runnable set
-    /// the step starts from, or zero when `unit` is not a PPE thread.
+    /// the step starts from, and the largest issue pressure among them;
+    /// both zero when `unit` is not a PPE thread.
     ///
     /// [CBE-Handbook p:754 s:A.6.1] the threads take dispatch in turn, a
     /// thread every other cycle.
     ///
     /// [CBE-Handbook p:301 s:10.2.3.1] the threads share the issue stall
     /// point: a stall at IS2 stalls both threads.
-    fn ppe_siblings(&self, unit: UnitId) -> u32 {
-        let is_ppe = |id: UnitId| self.registry.get(id).is_some_and(|u| u.shares_ppe_issue());
-        if !is_ppe(unit) {
-            return 0;
+    fn ppe_siblings(&self, unit: UnitId) -> (u32, u32) {
+        let ppe = |id: UnitId| self.registry.get(id).filter(|u| u.shares_ppe_issue());
+        if ppe(unit).is_none() {
+            return (0, 0);
         }
-        let others = self
+        let mut others = 0u32;
+        let mut pressure = 0;
+        for sibling in self
             .last_runnable
             .iter()
-            .filter(|&&id| id != unit && is_ppe(id))
-            .count();
-        u32::try_from(others).unwrap_or(u32::MAX)
+            .filter(|&&id| id != unit)
+            .filter_map(|&id| ppe(id))
+        {
+            others = others.saturating_add(1);
+            pressure = pressure.max(sibling.ppe_issue_pressure());
+        }
+        (others, pressure)
     }
 
     /// Trace the reserved-zero reads every address space logged since
