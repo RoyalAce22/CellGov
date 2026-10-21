@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "capture_id": "micro:spu_dma_contention#9df75acfec60",
+  "captured_at": "2026-10-20T22:32:26Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 63,
+      "fan_percent": 42
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "a8d10a0bf38ae0c33504775dd4e5665cb51c160d",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/a8d10a0bf38ae0c33504775dd4e5665cb51c160d"
+  },
+  "microtest": {
+    "name": "spu_dma_contention",
+    "manifest_sha256": "6d81f39d425f0026d60e29572f0b994f2e99bb7ac6a493348434e008370b07e8",
+    "sources": {
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "78e6be20e91352ffd7afa3e89e06d7ce57bc9842181c3c59e0b86670ecbd8abf",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_ctrl_flags.py": "86a0ec46658144b0a50e9179ac3e2323b96532a89227612e6a640a469ea4bf4d",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "abc572122dbb60e91784619c09b26d17a5f603c73442acf79d3738f512a509f0",
+      "ppu/main.c": "ca54d45199647760340448ad2eb99ead5b84ffa97f2adf9a12a6f47631cf9e5e",
+      "spu/main.c": "d833df78424bb636bdb1a766a02529f228d5da88723c7440b3a2c20648f58036"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "c0da42f676745260b54aa6a50678ae7fe186ae7081f61a88f03d149dc2d14f44",
+    "ps3_elf_sha256": "c0529648f4a1893a87ec3db3004ba1c047f0b84adfc9dd7655ceabacb56b34b5",
+    "reference_elf_sha256": "591a25b3432c34a988e1b80a1c94a311d01c71d81cd7e363d21e61b4fa70d3c2",
+    "siblings": {
+      "spu_main.elf": "0da177e63378a00ccc492d36fda64045c9f1a3e1e867d9ef34ced409fc06715f"
+    },
+    "param_sfo_sha256": "2fef02623d50ee216784db9065c5797be4daed61e998572e334b3196aeb16d8a"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "9df75acfec6076862a6bf470b0c78375211abef0149bebc4a06b577ff9fdf80e",
+    "bytes": 392,
+    "result_path": "/dev_hdd0/tmp/cgov_spu_dma_contention.bin"
+  },
+  "digest": "9df75acfec6076862a6bf470b0c78375211abef0149bebc4a06b577ff9fdf80e  micro:spu_dma_contention  392",
+  "recapture_reason": null
+}
