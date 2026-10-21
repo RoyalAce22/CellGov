@@ -7,7 +7,7 @@ use super::*;
 use crate::spu::{check_fused_results, FusedResultVerdict};
 
 fn docs_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference")
 }
 
 fn committed(file: &str) -> String {
@@ -26,12 +26,12 @@ fn the_committed_catalog_matches_the_generator() {
     assert_eq!(
         committed(CATALOG_MARKDOWN),
         catalog.markdown,
-        "docs/{CATALOG_MARKDOWN} is stale; {REGENERATE}"
+        "docs/reference/{CATALOG_MARKDOWN} is stale; {REGENERATE}"
     );
     assert_eq!(
         committed(CATALOG_JSON),
         catalog.json,
-        "docs/{CATALOG_JSON} is stale; {REGENERATE}"
+        "docs/reference/{CATALOG_JSON} is stale; {REGENERATE}"
     );
 }
 

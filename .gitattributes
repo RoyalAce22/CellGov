@@ -22,7 +22,7 @@ docs/lv2/**/*.sql linguist-detectable=true linguist-generated=false
 tests/micro/*/ps3/** linguist-generated=true
 tests/scenario_observations/*/* linguist-generated=true
 crates/cellgov_fuzz/tests/fixtures/spu_reference/*.json linguist-generated=true
-docs/spu_sequence_relations.json linguist-generated=true
+docs/reference/spu_sequence_relations.json linguist-generated=true
 crates/cellgov_ps3_abi/src/lv2/census_table.rs linguist-generated=true
 crates/cellgov_ps3_abi/src/nid/table.rs linguist-generated=true
 docs/cli.md linguist-generated=true

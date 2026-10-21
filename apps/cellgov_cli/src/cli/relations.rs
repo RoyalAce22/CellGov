@@ -14,7 +14,7 @@ use super::exit::{CommandError, CommandExitCode};
 use super::exit_codes;
 use super::parse::{RelationsCheckArgs, RelationsGenArgs};
 
-const DEFAULT_OUTPUT_DIR: &str = "docs";
+const DEFAULT_OUTPUT_DIR: &str = "docs/reference";
 
 pub(crate) fn generate(args: &RelationsGenArgs) -> Result<(), CommandError> {
     let dir = match args.output_dir.as_deref() {
