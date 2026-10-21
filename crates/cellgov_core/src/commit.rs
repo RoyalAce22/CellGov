@@ -26,6 +26,41 @@ use cellgov_sync::{
 };
 use cellgov_time::GuestTicks;
 
+/// Queue the transfer `request` that a unit issued at `now`.
+///
+/// A fence or barrier holds the command behind the queued commands its
+/// ordering names, whatever the latency model says of the transfer
+/// alone.
+pub(crate) fn queue_transfer(
+    queue: &mut DmaQueue,
+    latency: &dyn DmaLatencyModel,
+    now: GuestTicks,
+    request: &cellgov_dma::DmaRequest,
+    payload: Option<Vec<u8>>,
+) {
+    let completion_time = latency
+        .completion_time(request, now, queue)
+        .max(queue.ordering_floor(request));
+    queue.enqueue(DmaCompletion::new(*request, completion_time), payload);
+}
+
+/// Queue `command`, which the MFC refuses, for `issuer` at `now`.
+///
+/// The queue reaches the command where a transfer issued now would
+/// complete, in queue order with the issuer's other commands.
+pub(crate) fn queue_refused(
+    queue: &mut DmaQueue,
+    latency: &dyn DmaLatencyModel,
+    now: GuestTicks,
+    issuer: UnitId,
+    command: cellgov_dma::InvalidMfcCommand,
+) {
+    let time = latency
+        .invalid_command_time(now, queue)
+        .max(queue.issuer_latest_completion(issuer));
+    queue.enqueue_invalid(time, issuer, command);
+}
+
 /// Why a commit batch could not be applied.
 ///
 /// `EnumCount` publishes the variant count for the sweep that stands
@@ -577,15 +612,13 @@ impl CommitPipeline {
                         .or_in(*value);
                 }
                 Effect::DmaEnqueue { request, payload } => {
-                    // A fence or barrier holds the command behind the
-                    // queued commands its ordering names, whatever the
-                    // latency model says of the transfer alone.
-                    let completion_time = ctx
-                        .dma_latency
-                        .completion_time(request, ctx.now, &*ctx.dma_queue)
-                        .max(ctx.dma_queue.ordering_floor(request));
-                    let completion = DmaCompletion::new(*request, completion_time);
-                    ctx.dma_queue.enqueue(completion, payload.clone());
+                    queue_transfer(
+                        ctx.dma_queue,
+                        ctx.dma_latency,
+                        ctx.now,
+                        request,
+                        payload.clone(),
+                    );
                 }
                 Effect::MailboxReceiveAttempt {
                     mailbox, source, ..
@@ -608,14 +641,7 @@ impl CommitPipeline {
                     }
                 }
                 Effect::MfcInvalidCommand { issuer, command } => {
-                    // The queue reaches the command where a transfer
-                    // issued now would complete, in queue order with the
-                    // issuer's other commands.
-                    let time = ctx
-                        .dma_latency
-                        .invalid_command_time(ctx.now, &*ctx.dma_queue)
-                        .max(ctx.dma_queue.issuer_latest_completion(*issuer));
-                    ctx.dma_queue.enqueue_invalid(time, *issuer, *command);
+                    queue_refused(ctx.dma_queue, ctx.dma_latency, ctx.now, *issuer, *command);
                 }
                 Effect::MailboxPop {
                     mailbox, message, ..

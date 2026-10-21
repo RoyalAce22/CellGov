@@ -10,7 +10,7 @@ use cellgov_dma::{
 };
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
-use cellgov_exec::{BarrierKind, YieldReason};
+use cellgov_exec::{BarrierKind, MfcOrderingView, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::hw::ppu::CELL_EA_LIMIT;
 use cellgov_ps3_abi::hw::spu;
@@ -617,12 +617,15 @@ fn issue_storage_control(
     }
 }
 
-/// Validate a list command's latched parameters, then queue its elements
-/// up to the first stall-and-notify element.
+/// Validate a list command's latched parameters, then start the list or hold it.
 ///
-/// The list takes one command-queue slot. A list that stops at a stall
-/// keeps its slot and its tag group in [`ListCursor`] until it queues
-/// its last element.
+/// [`list_waits`] decides whether the list waits behind the commands its
+/// ordering names. The list takes one command-queue slot. [`ListCursor`]
+/// keeps the slot and the tag group until the list queues its last
+/// element, while the list is one of:
+///
+/// - stopped at a stall-and-notify element;
+/// - held behind another command.
 ///
 /// [CBEA p:60 s:7.5.3] the list address is in MFC_EAL and the list size in MFC_Size; each element names the transfer size and low effective address, and every element uses MFC_EAH.
 /// [CBEA p:116 s:9.1.4] a list size may be 0; such a list names no transfer.
@@ -637,20 +640,6 @@ fn issue_list(
         Ok(tag) => tag,
         Err(queued) => return queued,
     };
-    // [CBEA p:60 s:7.5.3] the LSA must be 16-byte aligned when the first element is 16 bytes or less.
-    let c = &state.channels;
-    if c.mfc_size > 0 {
-        let head = state.read_ls_wrapped(c.mfc_eal, 4);
-        let first =
-            u32::from_be_bytes([head[0], head[1], head[2], head[3]]) & !spu::MFC_LIST_STALL_NOTIFY;
-        if first <= 16 && c.mfc_lsa & 0xF != 0 {
-            let error = MfcCommandError::LocalStoreUnaligned {
-                lsa: c.mfc_lsa,
-                size: first,
-            };
-            return queue_invalid(cmd, error, state, unit_id);
-        }
-    }
     let c = &state.channels;
     let mut list = ListCursor {
         word: cmd,
@@ -662,20 +651,174 @@ fn issue_list(
         remaining: c.mfc_size / spu::MFC_LIST_ELEMENT_BYTES,
         data: c.mfc_lsa,
         stalled: false,
+        held: false,
     };
-    state.channels.cmd_queue_free -= 1;
-    let effects = if list.remaining == 0 {
-        vec![ordered_empty_command(cmd, tag, ordering, unit_id)]
-    } else {
-        queue_list_segment(cmd, &mut list, state, unit_id)
-    };
-    if list.remaining > 0 {
+    // The list reads its elements when it starts. An earlier get in its
+    // tag group can still be in flight with those elements.
+    // In the `spu_list_ordered_read` console capture, a getlb issued
+    // straight after a get of its own list moves what the new list names.
+    // The capture leaves the getl's word volatile, because its read is
+    // unordered against the get.
+    let effects = if list_waits(&list, c.mfc_ordering, &c.lists) {
+        list.held = true;
+        state.channels.cmd_queue_free -= 1;
         state.channels.lists.push(list);
-    }
+        Vec::new()
+    } else {
+        start_list(list, state, unit_id)
+    };
     SpuStepOutcome::Yield {
         effects,
         reason: YieldReason::DmaSubmitted,
     }
+}
+
+/// Whether an earlier command orders `list` after itself, so `list` reads no element yet.
+///
+/// The earlier command is one in `queued`, or a list of the same tag
+/// group in `ahead`. `list` waits for:
+///
+/// - every earlier command of its tag group, when `list` is a fence or
+///   tag-barrier list;
+/// - a tag barrier of its tag group;
+/// - a barrier command.
+///
+/// [`cellgov_dma::DmaQueue::ordering_floor`] holds queued transfers to the
+/// same orderings.
+///
+/// [CBEA p:69 s:7.9] a fence orders the command after every preceding command in its tag group.
+/// [CBEA p:69 s:7.9] a barrier orders the command and every later command of its tag group after the preceding commands of the group.
+/// [CBEA p:72 s:7.9.3] subsequent commands in the queue begin when the barrier command completes.
+fn list_waits(list: &ListCursor, queued: MfcOrderingView, ahead: &[ListCursor]) -> bool {
+    let bit = list.tag.status_bit();
+    let mut group = ahead.iter().filter(|other| other.tag == list.tag);
+    let ordered = matches!(list.ordering, MfcOrdering::Fence | MfcOrdering::TagBarrier);
+    queued.queue_barrier
+        || queued.barrier_tags & bit != 0
+        || (ordered && queued.outstanding_tags & bit != 0)
+        || if ordered {
+            group.next().is_some()
+        } else {
+            group.any(|other| other.ordering == MfcOrdering::TagBarrier)
+        }
+}
+
+/// Read `list`'s elements and queue them up to the first stall-and-notify element.
+///
+/// The list takes its command-queue slot here. A list that stops at a
+/// stall joins the unit's lists.
+fn start_list(mut list: ListCursor, state: &mut SpuState, unit_id: UnitId) -> Vec<Effect> {
+    // [CBEA p:60 s:7.5.3] the LSA must be 16-byte aligned when the first element is 16 bytes or less.
+    if list.remaining > 0 {
+        let head = state.read_ls_wrapped(list.element, 4);
+        let first =
+            u32::from_be_bytes([head[0], head[1], head[2], head[3]]) & !spu::MFC_LIST_STALL_NOTIFY;
+        if first <= 16 && list.data & 0xF != 0 {
+            let params = MfcParameters {
+                lsa: list.data,
+                eah: list.eah,
+                eal: list.element,
+                size: list.remaining * spu::MFC_LIST_ELEMENT_BYTES,
+                tag: u32::from(list.tag.raw()),
+            };
+            let error = MfcCommandError::LocalStoreUnaligned {
+                lsa: list.data,
+                size: first,
+            };
+            return vec![invalid_command(list.word, params, error, state, unit_id)];
+        }
+    }
+    state.channels.cmd_queue_free = state.channels.cmd_queue_free.saturating_sub(1);
+    let effects = if list.remaining == 0 {
+        vec![ordered_empty_command(
+            list.word,
+            list.tag,
+            list.ordering,
+            unit_id,
+        )]
+    } else {
+        queue_list_segment(list.word, &mut list, state, unit_id)
+    };
+    if list.remaining > 0 {
+        state.channels.lists.push(list);
+    }
+    effects
+}
+
+/// Start the held lists that no earlier command still orders, oldest first.
+///
+/// The runtime calls this between the unit's steps. The step entry then
+/// recounts the free command-queue slots, so this pass leaves the count
+/// as it found it.
+pub(crate) fn start_held_lists(
+    state: &mut SpuState,
+    unit_id: UnitId,
+    mut queued: MfcOrderingView,
+) -> Vec<Effect> {
+    if !state.channels.lists.iter().any(|list| list.held) {
+        return Vec::new();
+    }
+    let free = state.channels.cmd_queue_free;
+    let mut effects = Vec::new();
+    for mut list in core::mem::take(&mut state.channels.lists) {
+        if !list.held || list_waits(&list, queued, &state.channels.lists) {
+            state.channels.lists.push(list);
+            continue;
+        }
+        list.held = false;
+        // The queue holds a list this pass starts ahead of the lists after
+        // it. `queued`, taken before the pass, does not show that list.
+        let bit = list.tag.status_bit();
+        queued.outstanding_tags |= bit;
+        if list.ordering == MfcOrdering::TagBarrier {
+            queued.barrier_tags |= bit;
+        }
+        effects.extend(start_list(list, state, unit_id));
+    }
+    state.channels.cmd_queue_free = free;
+    effects
+}
+
+/// Whether a held list orders the command word `cmd` after itself.
+///
+/// The queue orders a command only against commands it holds. A command
+/// that a held list orders waits on `MFC_Cmd` until the list starts:
+///
+/// - a fence or tag-barrier command waits for any held list of its tag
+///   group;
+/// - every command of the tag group waits for a held tag-barrier list;
+/// - the barrier command waits for every held list.
+///
+/// The queue holds no immediate atomic command, so those wait for none.
+///
+/// [CBEA p:69 s:7.9] a barrier orders the command and every later command of its tag group after the preceding commands of the group.
+fn held_list_orders(cmd: u32, state: &SpuState) -> bool {
+    let opcode = MfcCmd::new(cmd).opcode();
+    if matches!(
+        opcode,
+        spu::MFC_GETLLAR | spu::MFC_PUTLLC | spu::MFC_PUTLLUC
+    ) {
+        return false;
+    }
+    let ordering = match mfc_barrier_kind(cmd) {
+        Some(BarrierKind::MfcFence) => MfcOrdering::Fence,
+        Some(BarrierKind::MfcTagBarrier | BarrierKind::MfcSync | BarrierKind::MfcEieio) => {
+            MfcOrdering::TagBarrier
+        }
+        Some(BarrierKind::MfcBarrier) => MfcOrdering::QueueBarrier,
+        Some(_) | None => MfcOrdering::None,
+    };
+    let tag = state.channels.mfc_tag_id;
+    state
+        .channels
+        .lists
+        .iter()
+        .filter(|list| list.held)
+        .any(|list| {
+            ordering == MfcOrdering::QueueBarrier
+                || (u32::from(list.tag.raw()) == tag
+                    && (ordering != MfcOrdering::None || list.ordering == MfcOrdering::TagBarrier))
+        })
 }
 
 /// A queued command `cmd` of no length under `tag`: it holds a slot and
@@ -870,7 +1013,9 @@ pub(crate) fn invalid_command(
     state: &mut SpuState,
     unit_id: UnitId,
 ) -> Effect {
-    state.channels.cmd_queue_free -= 1;
+    // A held list that starts between steps finds the slot count the
+    // last step left, which can be 0.
+    state.channels.cmd_queue_free = state.channels.cmd_queue_free.saturating_sub(1);
     Effect::MfcInvalidCommand {
         issuer: unit_id,
         command: InvalidMfcCommand {
@@ -960,6 +1105,9 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
     // first.
     if let Some(error) = opcode_error(word) {
         return queue_invalid(cmd, error, state, unit_id);
+    }
+    if held_list_orders(cmd, state) {
+        return stall();
     }
     // The two class ids ride in the same word and steer bus bandwidth
     // and cache replacement. They change how fast a command runs, never

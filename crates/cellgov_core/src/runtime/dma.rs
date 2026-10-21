@@ -305,14 +305,25 @@ impl Runtime {
         &mut self,
         unit: cellgov_event::UnitId,
     ) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
-        let (memory, groups) = (&self.memory, self.lv2_host.thread_groups());
-        let processed = self
-            .dma_queue
-            .process_issuer_translating(unit, |c, payloaded| match window_target(groups, c) {
-                Some(target) => target.err(),
-                None => translation_fault(memory, c, payloaded),
-            });
-        self.land_processed_dma(processed)
+        // A held list the landings release queues more transfers, which
+        // land in the next pass. The loop ends on the first pass that
+        // reaches no command: every other pass removes at least one, and
+        // a list queues finitely many.
+        let mut landed = Vec::new();
+        loop {
+            let (memory, groups) = (&self.memory, self.lv2_host.thread_groups());
+            let processed = self
+                .dma_queue
+                .process_issuer_translating(unit, |c, payloaded| match window_target(groups, c) {
+                    Some(target) => target.err(),
+                    None => translation_fault(memory, c, payloaded),
+                });
+            let reached = processed.completions.len() + processed.raised.len();
+            landed.extend(self.land_processed_dma(processed));
+            if reached == 0 {
+                return landed;
+            }
+        }
     }
 
     fn land_processed_dma(
@@ -371,7 +382,63 @@ impl Runtime {
             self.registry
                 .set_status_override(c.issuer(), UnitStatus::Runnable);
         }
+        self.start_held_lists(due.iter().map(|(c, _)| c.issuer()));
         due
+    }
+
+    /// Start the lists that no queued command holds any more, and queue their commands.
+    ///
+    /// Returns whether a list queued a command. A list behind a fence or
+    /// barrier reads its elements when the commands ahead of it complete.
+    /// The runtime starts it here, between the issuer's steps, whatever
+    /// the issuer's state.
+    /// [CBEA p:69 s:7.9] a barrier orders the command and every later command of its tag group after the preceding commands of the group.
+    fn start_held_lists(
+        &mut self,
+        issuers: impl IntoIterator<Item = cellgov_event::UnitId>,
+    ) -> bool {
+        let issuers: std::collections::BTreeSet<_> = issuers.into_iter().collect();
+        let mut queued = false;
+        for issuer in issuers {
+            let view = cellgov_exec::MfcOrderingView::of_issuer(&self.dma_queue, issuer);
+            let Some(unit) = self.registry.get_mut(issuer) else {
+                continue;
+            };
+            for effect in unit.start_held_lists(view) {
+                match effect {
+                    cellgov_effects::Effect::DmaEnqueue { request, payload } => {
+                        crate::commit::queue_transfer(
+                            &mut self.dma_queue,
+                            self.dma_latency.as_ref(),
+                            self.time,
+                            &request,
+                            payload,
+                        );
+                    }
+                    cellgov_effects::Effect::MfcInvalidCommand { issuer, command } => {
+                        crate::commit::queue_refused(
+                            &mut self.dma_queue,
+                            self.dma_latency.as_ref(),
+                            self.time,
+                            issuer,
+                            command,
+                        );
+                    }
+                    other => {
+                        self.lv2_host.log_invariant_break(
+                            "runtime.held_list_effect",
+                            format_args!(
+                                "{issuer:?}: a held list started with an effect that is not an \
+                                 MFC command ({other:?})"
+                            ),
+                        );
+                        continue;
+                    }
+                }
+                queued = true;
+            }
+        }
+        queued
     }
 
     /// Each local-store range `c` reads or writes when it completes, with
@@ -437,22 +504,29 @@ impl Runtime {
     /// The drain reaches a refused command in queue order. That command
     /// suspends its issuer's queue, and the issuer's later transfers never
     /// land.
+    ///
+    /// A held list the drain releases queues more transfers, which the
+    /// next pass lands.
     pub fn drain_pending_dma(&mut self) {
-        let (memory, groups) = (&self.memory, self.lv2_host.thread_groups());
-        let processed =
-            self.dma_queue
-                .process_due_translating(GuestTicks::new(u64::MAX), |c, payloaded| {
-                    match window_target(groups, c) {
-                        Some(target) => target.err(),
-                        None => translation_fault(memory, c, payloaded),
-                    }
-                });
-        for raised in processed.raised {
-            self.record_mfc_exception(raised);
-        }
-        let due = processed.completions;
-        for (c, payload) in &due {
-            self.apply_dma_transfer(c, payload.as_deref());
+        loop {
+            let (memory, groups) = (&self.memory, self.lv2_host.thread_groups());
+            let processed = self.dma_queue.process_due_translating(
+                GuestTicks::new(u64::MAX),
+                |c, payloaded| match window_target(groups, c) {
+                    Some(target) => target.err(),
+                    None => translation_fault(memory, c, payloaded),
+                },
+            );
+            for raised in processed.raised {
+                self.record_mfc_exception(raised);
+            }
+            let due = processed.completions;
+            for (c, payload) in &due {
+                self.apply_dma_transfer(c, payload.as_deref());
+            }
+            if due.is_empty() || !self.start_held_lists(due.iter().map(|(c, _)| c.issuer())) {
+                return;
+            }
         }
     }
 }
@@ -476,3 +550,7 @@ mod dma_translation_tests;
 #[cfg(test)]
 #[path = "tests/dma_ordering_tests.rs"]
 mod dma_ordering_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_held_list_tests.rs"]
+mod dma_held_list_tests;

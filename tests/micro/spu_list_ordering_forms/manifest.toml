@@ -1,0 +1,47 @@
+[test]
+name = "spu_list_ordering_forms"
+
+# A hardware probe: an SPU thread gets list elements over the ones local
+# store holds, then at once issues a fence list get, a barrier command and
+# a list get in another tag, a barrier list get followed by a plain one in
+# its tag, and a barrier list get followed by a plain put and a putb of
+# what it gathers. The capture holds the first word each one moved.
+
+[observe]
+# The failed step and its code; the join's answer, cause and status; the
+# SPU's exit status; the block's address; the getlf's, the getl behind the
+# barrier command's, the getlb's, the getl after it, the putb's and the
+# plain put's first words: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+short_name = "spulistorderingforms"
+display_name = "CellGov SPU list ordering forms microtest"
+eboot_candidates = ["spu_list_ordering_forms.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]
+# The barrier list get orders the commands after it behind the get before
+# it. Nothing orders the plain put behind the list get itself, so the put
+# may read its buffer before or after the list get lands.
+volatile = [
+  { region = "result", offset = 52, size = 4, reason = "the plain put is unordered against the barrier list get before it" },
+]

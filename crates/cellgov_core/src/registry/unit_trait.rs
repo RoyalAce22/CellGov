@@ -139,6 +139,10 @@ pub trait RegisteredUnit: 'static {
     /// As for [`ExecutionUnit::read_local_store`].
     fn read_local_store(&self, lsa: u32, len: u32) -> Result<Vec<u8>, ProblemStateError>;
 
+    /// Start the list commands no queued command holds any more. See
+    /// [`ExecutionUnit::start_held_lists`].
+    fn start_held_lists(&mut self, view: cellgov_exec::MfcOrderingView) -> Vec<Effect>;
+
     /// An `SPU_RunCntl` stop request. See [`ExecutionUnit::request_stop`].
     ///
     /// # Errors
@@ -354,6 +358,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn read_local_store(&self, lsa: u32, len: u32) -> Result<Vec<u8>, ProblemStateError> {
         ExecutionUnit::read_local_store(self, lsa, len)
+    }
+
+    #[inline]
+    fn start_held_lists(&mut self, view: cellgov_exec::MfcOrderingView) -> Vec<Effect> {
+        ExecutionUnit::start_held_lists(self, view)
     }
 
     #[inline]

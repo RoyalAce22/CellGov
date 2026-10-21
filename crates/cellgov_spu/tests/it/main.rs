@@ -20,6 +20,8 @@ mod console_issue_retire;
 mod console_issue_runout;
 mod console_issue_timing;
 mod console_list_bad_element;
+mod console_list_ordered_read;
+mod console_list_ordering_forms;
 mod console_mfc_command_edges;
 mod console_opcode_sweep;
 mod console_own_put_reservation;

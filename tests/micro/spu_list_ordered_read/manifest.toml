@@ -1,0 +1,44 @@
+[test]
+name = "spu_list_ordered_read"
+
+# A hardware probe: an SPU thread gets a list element over the one local
+# store holds, then at once issues a list get on it in the same tag group,
+# once as getlb and once as getl. The capture holds the first word each
+# list get moved, which says which element it read.
+
+[observe]
+# The failed step and its code; the join's answer, cause and status; the
+# SPU's exit status; the block's address; the getlb's and the getl's
+# first words: 48 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 48 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+short_name = "spulistorderedread"
+display_name = "CellGov SPU list ordered element read microtest"
+eboot_candidates = ["spu_list_ordered_read.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]
+# No fence or barrier orders the getl after the get, so the MFC may read
+# its element before or after the get lands it.
+volatile = [
+  { region = "result", offset = 36, size = 4, reason = "the getl's element read is unordered against the get" },
+]

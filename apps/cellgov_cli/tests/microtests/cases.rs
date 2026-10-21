@@ -773,6 +773,54 @@ pub const CASES: &[Case] = &[
         max_steps: 1_000_000,
         fields: &LIST_BAD_ELEMENT_FIELDS,
     },
+    Case {
+        name: "spu_list_ordered_read",
+        max_steps: 1_000_000,
+        fields: &[
+            ("failed_step", Exact(0)),
+            ("failed_rc", Exact(0)),
+            ("join", Exact(0)),
+            ("join_cause", Exact(group_join_cause::ALL_THREADS_EXIT)),
+            ("join_status", Exact(0)),
+            ("exit_status", Exact(0)),
+            ("block", NonZero),
+            ("pad0", Exact(0)),
+            // The getlb waits for the get ahead of it in its tag group,
+            // so it reads the element the get brought in.
+            ("barrier_list", Exact(0xF1F1_F1F1)),
+            // No fence or barrier orders the getl after the get, so the
+            // MFC may read its element before or after the get lands it.
+            ("plain_list", Any),
+            ("pad1", Exact(0)),
+            ("pad2", Exact(0)),
+        ],
+    },
+    Case {
+        name: "spu_list_ordering_forms",
+        max_steps: 1_000_000,
+        fields: &[
+            ("failed_step", Exact(0)),
+            ("failed_rc", Exact(0)),
+            ("join", Exact(0)),
+            ("join_cause", Exact(group_join_cause::ALL_THREADS_EXIT)),
+            ("join_status", Exact(0)),
+            ("exit_status", Exact(0)),
+            ("block", NonZero),
+            ("pad0", Exact(0)),
+            // Each of these waits for the get before it, so it reads the
+            // element the get brought in.
+            ("fence_list", Exact(0xA1A1_A1A1)),
+            ("list_behind_barrier_command", Exact(0xB2B2_B2B2)),
+            ("barrier_list", Exact(0xD1D1_D1D1)),
+            ("plain_list_behind_barrier_list", Exact(0xD2D2_D2D2)),
+            ("putb_behind_barrier_list", Exact(0xC3C3_C3C3)),
+            // Nothing orders the plain put behind the barrier list get,
+            // so it may read its buffer before or after the gather.
+            ("plain_put_behind_barrier_list", Any),
+            ("pad1", Exact(0)),
+            ("pad2", Exact(0)),
+        ],
+    },
 ];
 
 /// The payload of spu_list_bad_size and spu_list_bad_ea, in the order

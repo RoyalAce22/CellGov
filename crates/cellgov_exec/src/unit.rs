@@ -368,6 +368,16 @@ pub trait ExecutionUnit {
         Err(crate::ProblemStateError::NoProblemState)
     }
 
+    /// Start each list command that `view` no longer holds behind a fence or barrier.
+    ///
+    /// Returns the effects that queue the started lists. The runtime calls
+    /// this after it lands transfers the unit issued, whatever the unit's
+    /// state: the MFC runs its queue apart from the SPU.
+    fn start_held_lists(&mut self, view: crate::MfcOrderingView) -> Vec<cellgov_effects::Effect> {
+        let _ = view;
+        Vec::new()
+    }
+
     /// An `SPU_RunCntl` stop request. `waiting` says the unit waits on a
     /// blocked channel. A stopped unit stays as it is.
     ///

@@ -33,6 +33,8 @@ pub struct ExecutionContext<'a> {
     outstanding_dma_tags: u32,
     list_stall_tags: u32,
     dma_queue_occupancy: u32,
+    dma_barrier_tags: u32,
+    dma_queue_barrier: bool,
     dma_next_sequence: u64,
     oldest_mfc_transfer: Option<u64>,
     inbound_mailbox: &'a [u32],
@@ -42,6 +44,31 @@ pub struct ExecutionContext<'a> {
     mailbox_read: Option<&'a core::cell::Cell<bool>>,
     ppe_siblings: u32,
     ppe_sibling_pressure: PpeIssuePressure,
+}
+
+/// The queued MFC commands of one unit that a new command of the unit
+/// can wait behind.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MfcOrderingView {
+    /// Tag groups with a queued command, one bit per group.
+    pub outstanding_tags: u32,
+    /// Tag groups with a queued tag barrier, one bit per group.
+    pub barrier_tags: u32,
+    /// The queue holds a barrier command.
+    pub queue_barrier: bool,
+}
+
+impl MfcOrderingView {
+    /// The view of `issuer`'s commands in `queue`.
+    pub fn of_issuer(queue: &cellgov_dma::DmaQueue, issuer: UnitId) -> Self {
+        let (_, outstanding_tags) = queue.issuer_view(issuer);
+        let (barrier_tags, queue_barrier) = queue.issuer_barriers(issuer);
+        Self {
+            outstanding_tags,
+            barrier_tags,
+            queue_barrier,
+        }
+    }
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -59,6 +86,8 @@ impl<'a> ExecutionContext<'a> {
             outstanding_dma_tags: 0,
             list_stall_tags: 0,
             dma_queue_occupancy: 0,
+            dma_barrier_tags: 0,
+            dma_queue_barrier: false,
             dma_next_sequence: 0,
             oldest_mfc_transfer: None,
             inbound_mailbox: &[],
@@ -83,6 +112,8 @@ impl<'a> ExecutionContext<'a> {
             outstanding_dma_tags: 0,
             list_stall_tags: 0,
             dma_queue_occupancy: 0,
+            dma_barrier_tags: 0,
+            dma_queue_barrier: false,
             dma_next_sequence: 0,
             oldest_mfc_transfer: None,
             inbound_mailbox: &[],
@@ -109,6 +140,8 @@ impl<'a> ExecutionContext<'a> {
             outstanding_dma_tags: 0,
             list_stall_tags: 0,
             dma_queue_occupancy: 0,
+            dma_barrier_tags: 0,
+            dma_queue_barrier: false,
             dma_next_sequence: 0,
             oldest_mfc_transfer: None,
             inbound_mailbox: &[],
@@ -139,6 +172,8 @@ impl<'a> ExecutionContext<'a> {
             outstanding_dma_tags: 0,
             list_stall_tags: 0,
             dma_queue_occupancy: 0,
+            dma_barrier_tags: 0,
+            dma_queue_barrier: false,
             dma_next_sequence: 0,
             oldest_mfc_transfer: None,
             inbound_mailbox: &[],
@@ -207,6 +242,19 @@ impl<'a> ExecutionContext<'a> {
     pub const fn with_dma_queue_occupancy(self, count: u32) -> Self {
         Self {
             dma_queue_occupancy: count,
+            ..self
+        }
+    }
+
+    /// The unit's queued barriers at the start of the step.
+    ///
+    /// `tags` and `queue_barrier` hold what [`MfcOrderingView::barrier_tags`]
+    /// and [`MfcOrderingView::queue_barrier`] hold.
+    #[inline]
+    pub const fn with_dma_barriers(self, tags: u32, queue_barrier: bool) -> Self {
+        Self {
+            dma_barrier_tags: tags,
+            dma_queue_barrier: queue_barrier,
             ..self
         }
     }
@@ -316,6 +364,16 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn dma_queue_occupancy(&self) -> u32 {
         self.dma_queue_occupancy
+    }
+
+    /// This unit's [`MfcOrderingView`] at the start of the step.
+    #[inline]
+    pub const fn mfc_ordering(&self) -> MfcOrderingView {
+        MfcOrderingView {
+            outstanding_tags: self.outstanding_dma_tags,
+            barrier_tags: self.dma_barrier_tags,
+            queue_barrier: self.dma_queue_barrier,
+        }
     }
 
     /// The sequence the DMA queue gives the next command it takes.

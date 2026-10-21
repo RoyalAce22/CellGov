@@ -158,6 +158,7 @@ fn context<'a>(
     now: GuestTicks,
 ) -> ExecutionContext<'a> {
     let (occupancy, tags) = queue.issuer_view(OWN);
+    let (barrier_tags, queue_barrier) = queue.issuer_barriers(OWN);
     let oldest = queue.pending_sequenced().map(|(seq, _)| seq).min();
     ExecutionContext::new(memory)
         .with_current_tick(now)
@@ -166,7 +167,14 @@ fn context<'a>(
         .with_outstanding_dma_tags(tags)
         .with_list_stall_tags(queue.stall_notify_tags(OWN))
         .with_dma_queue_occupancy(occupancy)
+        .with_dma_barriers(barrier_tags, queue_barrier)
         .with_mfc_transfer_view(queue.next_sequence(), oldest)
+}
+
+/// The queued commands of the SPU at slot 0 that its next command can wait
+/// behind.
+fn ordering_view(queue: &cellgov_dma::DmaQueue) -> cellgov_exec::MfcOrderingView {
+    cellgov_exec::MfcOrderingView::of_issuer(queue, OWN)
 }
 
 /// The scripted outside world around one SPU.
@@ -502,25 +510,41 @@ impl World {
             .clear_covering(range.start().raw(), range.length(), Some(source));
     }
 
-    /// Completes every queued command.
+    /// Completes every queued command, then every command that a released
+    /// held list queues.
+    ///
+    /// Each pass completes at least one command, and a list queues
+    /// finitely many, so the loop ends.
     fn drain(&mut self) -> Result<(), SpuReferenceError> {
-        let has_peer = self.peer.is_some();
-        let memory = &self.memory;
-        let due = self
-            .queue
-            .process_due_translating(GuestTicks::ZERO, |c, payloaded| {
-                match window_target(has_peer, c) {
-                    Some(target) => target.err(),
-                    None => translation_fault(memory, c, payloaded),
-                }
-            });
-        for raised in &due.raised {
-            self.exceptions.push((&raised.command).into());
+        loop {
+            let has_peer = self.peer.is_some();
+            let memory = &self.memory;
+            let due = self
+                .queue
+                .process_due_translating(GuestTicks::ZERO, |c, payloaded| {
+                    match window_target(has_peer, c) {
+                        Some(target) => target.err(),
+                        None => translation_fault(memory, c, payloaded),
+                    }
+                });
+            for raised in &due.raised {
+                self.exceptions.push((&raised.command).into());
+            }
+            for (c, payload) in &due.completions {
+                self.land(c, payload.as_deref())?;
+            }
+            if due.completions.is_empty() {
+                return Ok(());
+            }
+            let started = self.unit.start_held_lists(ordering_view(&self.queue));
+            if started.is_empty() {
+                return Ok(());
+            }
+            for effect in &started {
+                self.effects.push(effect.into());
+                self.service(effect);
+            }
         }
-        for (c, payload) in &due.completions {
-            self.land(c, payload.as_deref())?;
-        }
-        Ok(())
     }
 
     fn unit_mut(&mut self, id: UnitId) -> Result<&mut SpuExecutionUnit, SpuReferenceError> {

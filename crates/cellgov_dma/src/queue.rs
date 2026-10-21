@@ -424,6 +424,27 @@ impl DmaQueue {
     }
 
     /// For one issuer: the status bit of every tag group with a queued
+    /// tag barrier, and whether the queue holds a barrier command.
+    ///
+    /// [`DmaQueue::ordering_floor`] holds every later command, whatever
+    /// its own form:
+    /// - behind a barrier command
+    /// - behind the commands of its tag group that precede a tag barrier
+    pub fn issuer_barriers(&self, issuer: UnitId) -> (u32, bool) {
+        self.entries
+            .values()
+            .map(|e| e.completion.request())
+            .filter(|r| r.issuer() == issuer)
+            .fold((0, false), |(tags, queue), r| match r.ordering() {
+                MfcOrdering::TagBarrier => {
+                    (tags | r.tag_id().map_or(0, |tag| tag.status_bit()), queue)
+                }
+                MfcOrdering::QueueBarrier => (tags, true),
+                MfcOrdering::None | MfcOrdering::Fence => (tags, queue),
+            })
+    }
+
+    /// For one issuer: the status bit of every tag group with a queued
     /// list element that carries the stall-and-notify flag.
     ///
     /// A flagged element the queue refused stays in the view: the queue

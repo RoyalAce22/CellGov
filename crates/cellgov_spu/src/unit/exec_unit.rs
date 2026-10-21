@@ -478,6 +478,10 @@ impl ExecutionUnit for SpuExecutionUnit {
     fn local_memory_hash(&self) -> Option<u64> {
         Some(super::spu_unit::local_memory_hash(&self.state))
     }
+
+    fn start_held_lists(&mut self, view: cellgov_exec::MfcOrderingView) -> Vec<Effect> {
+        exec::start_held_lists(&mut self.state, self.id, view)
+    }
 }
 
 /// The barrier `insn` is, if it is one.

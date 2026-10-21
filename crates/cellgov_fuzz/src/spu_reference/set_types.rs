@@ -251,7 +251,7 @@ pub enum SpuReferenceOrdering {
     QueueBarrier,
 }
 
-/// A list command stopped at a stall-and-notify element.
+/// A list command stopped at a stall-and-notify element or held by its ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpuReferenceList {
@@ -273,6 +273,10 @@ pub struct SpuReferenceList {
     pub data: u32,
     /// The stall-and-notify element completed.
     pub stalled: bool,
+    /// The list waits behind the commands its ordering names and has read
+    /// no element yet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held: bool,
 }
 
 /// Every channel's data and count. A field left out takes its value in

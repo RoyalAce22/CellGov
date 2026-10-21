@@ -87,6 +87,8 @@ impl From<&ChannelState> for SpuReferenceChannelState {
             out_intr_mbox: _,
             out_intr_mbox_interrupt: _,
             lists,
+            // Each step sets it from the execution context.
+            mfc_ordering: _,
             list_stall_status,
             mssync_tracking,
             mssync_horizon,
@@ -205,6 +207,7 @@ impl From<&ListCursor> for SpuReferenceList {
             remaining: value.remaining,
             data: value.data,
             stalled: value.stalled,
+            held: value.held,
         }
     }
 }
@@ -229,6 +232,7 @@ impl SpuReferenceList {
             remaining: self.remaining,
             data: self.data,
             stalled: self.stalled,
+            held: self.held,
         })
     }
 }

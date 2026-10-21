@@ -33,7 +33,7 @@ pub mod unit;
 pub mod yield_reason;
 
 pub use barrier::{BarrierKind, RetiredBarrier};
-pub use context::ExecutionContext;
+pub use context::{ExecutionContext, MfcOrderingView};
 pub use fake_isa::{FakeIsaUnit, FakeOp};
 pub use problem_state::{OutMailboxes, ProblemStateError, SignalNotifier};
 pub use stall::{ChannelStall, StallWake};

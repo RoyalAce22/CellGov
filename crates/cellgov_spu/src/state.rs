@@ -310,6 +310,9 @@ impl SpuObservableSnapshot {
             out_intr_mbox,
             out_intr_mbox_interrupt: _,
             lists,
+            // The step entry copies it from the queue, as it builds
+            // `tag_status` from the queue.
+            mfc_ordering: _,
             list_stall_status,
             mssync_tracking,
             mssync_horizon,
@@ -1014,11 +1017,19 @@ pub struct ChannelState {
     ///
     /// [CBEA p:134 s:9.5.2] a write to the channel also sends an interrupt to a processor or other device.
     pub out_intr_mbox_interrupt: bool,
-    /// The list commands stopped at a stall-and-notify element, oldest first.
+    /// The unfinished list commands, oldest first.
+    ///
+    /// Each list here is one of:
+    ///
+    /// - stopped at a stall-and-notify element;
+    /// - held behind the commands its ordering names.
     ///
     /// Each holds its command-queue slot and its tag group until it queues
     /// its last element.
     pub lists: Vec<ListCursor>,
+    /// The unit's queued commands that a new command can wait behind, as
+    /// the step began.
+    pub mfc_ordering: cellgov_exec::MfcOrderingView,
     /// Tag groups whose list stalled since the last read of
     /// `MFC_RdListStallStat`, one bit per group. A nonzero value is a
     /// channel count of 1.
@@ -1068,7 +1079,7 @@ pub struct ChannelState {
     pub clock_read: bool,
 }
 
-/// Where a list command resumes after its stall.
+/// Where a list command starts after its hold, or resumes after its stall.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListCursor {
     /// The command word that queued the list.
@@ -1090,6 +1101,12 @@ pub struct ListCursor {
     /// The stall-and-notify element completed, so the list is stalled
     /// and an acknowledgment resumes it.
     pub stalled: bool,
+    /// An earlier command still orders the list after itself, so the list reads no element yet.
+    ///
+    /// On the console, a tag-barrier list reads its elements after an
+    /// earlier get of its tag group lands them.
+    /// [CBEA p:69 s:7.9] a fence or barrier orders the command after the preceding commands of its tag group.
+    pub held: bool,
 }
 
 impl ChannelState {
@@ -1128,6 +1145,7 @@ impl ChannelState {
             out_intr_mbox: None,
             out_intr_mbox_interrupt: false,
             lists: Vec::new(),
+            mfc_ordering: cellgov_exec::MfcOrderingView::default(),
             // x'19' count 0.
             list_stall_status: 0,
             // x'9' count 1.

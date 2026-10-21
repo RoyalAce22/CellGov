@@ -34,6 +34,7 @@ pub fn enter_step(state: &mut SpuState, unit: UnitId, ctx: &ExecutionContext<'_>
         .iter()
         .fold(0, |tags, list| tags | list.tag.status_bit());
     channels.tag_status = !(ctx.outstanding_dma_tags() | list_tags);
+    channels.mfc_ordering = ctx.mfc_ordering();
     // Each queued command holds a slot until it completes, and a list
     // holds its one slot until it queues its last element. A count
     // that rises from 0 here is the Qv event's edge.
@@ -41,9 +42,14 @@ pub fn enter_step(state: &mut SpuState, unit: UnitId, ctx: &ExecutionContext<'_>
     channels.cmd_queue_free = spu::MFC_SPU_QUEUE_DEPTH
         .saturating_sub(ctx.dma_queue_occupancy())
         .saturating_sub(held);
-    // A list stalls once its stall-and-notify element leaves the queue.
+    // A list stalls once its stall-and-notify element leaves the queue. A
+    // held list queues no element until it starts.
     // [CBEA p:129 s:9.3.7] the stall occurs after the flagged element's transfer completes, and sets the group's bit in MFC_RdListStallStat.
-    for list in channels.lists.iter_mut().filter(|list| !list.stalled) {
+    for list in channels
+        .lists
+        .iter_mut()
+        .filter(|list| !list.stalled && !list.held)
+    {
         let bit = list.tag.status_bit();
         if ctx.list_stall_tags() & bit == 0 {
             list.stalled = true;
