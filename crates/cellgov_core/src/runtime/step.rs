@@ -390,13 +390,13 @@ impl Runtime {
     ///
     /// [CBE-Handbook p:301 s:10.2.3.1] the threads share the issue stall
     /// point: a stall at IS2 stalls both threads.
-    fn ppe_siblings(&self, unit: UnitId) -> (u32, u32) {
+    fn ppe_siblings(&self, unit: UnitId) -> (u32, cellgov_exec::PpeIssuePressure) {
         let ppe = |id: UnitId| self.registry.get(id).filter(|u| u.shares_ppe_issue());
         if ppe(unit).is_none() {
-            return (0, 0);
+            return (0, cellgov_exec::PpeIssuePressure::NONE);
         }
         let mut others = 0u32;
-        let mut pressure = 0;
+        let mut pressure = cellgov_exec::PpeIssuePressure::NONE;
         for sibling in self
             .last_runnable
             .iter()

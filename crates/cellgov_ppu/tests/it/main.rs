@@ -3,6 +3,7 @@
 
 mod console_ppu_issue_chain;
 mod console_ppu_issue_multiple;
+mod console_ppu_issue_multiply;
 mod console_ppu_issue_shared;
 mod console_ppu_issue_smt;
 mod console_ppu_issue_timing;

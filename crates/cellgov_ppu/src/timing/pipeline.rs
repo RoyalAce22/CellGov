@@ -38,6 +38,7 @@
 use super::cache::{Caches, Level};
 use super::op::{unit, Kind, LoadClass, Op, Target, NO_REG, REGS};
 use super::predictor::Predictor;
+use cellgov_exec::PpeIssuePressure;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_ALWAYS;
 use cellgov_ps3_abi::hw::ppu_issue as k;
 
@@ -84,10 +85,13 @@ pub(crate) struct Core {
     /// The cycle each unit is free again, indexed by unit bit.
     unit_free: [u64; 5],
     /// The share of this thread's recent cycles, out of [`SHARE_ONE`],
-    /// spent on the instructions `stalls_both_threads` names. Each
-    /// instruction weighs by its cycles, over a window of
-    /// [`PRESSURE_WINDOW_CYCLES`].
-    long_share: u32,
+    /// spent on divides and square roots. Each instruction weighs by its
+    /// cycles, over a window of [`PRESSURE_WINDOW_CYCLES`].
+    divide_share: u32,
+    /// The share of this thread's recent cycles spent on the other
+    /// instructions that issue alone for long (`issues_alone_for_long`),
+    /// weighed as [`Core::divide_share`] is.
+    alone_share: u32,
     /// This thread's recent mean wait past its in-order floor, in 1/256
     /// cycle, over its other instructions: a wait for operands or for a
     /// busy unit. Each instruction weighs one in
@@ -95,11 +99,12 @@ pub(crate) struct Core {
     operand_wait: u32,
 }
 
-/// [`Core::long_share`] for a thread that spends all its cycles on
-/// the instructions `stalls_both_threads` names.
+/// [`Core::divide_share`] for a thread that spends all its cycles on
+/// divides and square roots.
 const SHARE_ONE: u32 = 1 << 16;
 
-/// The cycles [`Core::long_share`] averages over.
+/// The cycles [`Core::divide_share`] and [`Core::alone_share`]
+/// average over.
 const PRESSURE_WINDOW_CYCLES: u64 = 64;
 
 /// The instructions [`Core::operand_wait`] averages over.
@@ -132,9 +137,9 @@ pub(crate) struct PpeTiming {
     /// The cycles a runnable sibling thread holds issue after each of
     /// this thread's dispatch groups: zero with no sibling runnable.
     hold: u64,
-    /// The cycles a runnable sibling's stalls at the shared issue point
-    /// add to each of this thread's instructions.
-    shared_stall: u64,
+    /// What a runnable sibling's stalls at the shared issue point add to
+    /// each of this thread's instructions.
+    shared_stall: PpeIssuePressure,
 }
 
 impl Default for PpeTiming {
@@ -221,7 +226,8 @@ impl PpeTiming {
                 addr_ready: [0; REGS],
                 miss: [0; REGS],
                 unit_free: [0; 5],
-                long_share: 0,
+                divide_share: 0,
+                alone_share: 0,
                 operand_wait: 0,
             },
             tables: Box::new(Tables {
@@ -231,35 +237,40 @@ impl PpeTiming {
                 next_store: 0,
             }),
             hold: 0,
-            shared_stall: 0,
+            shared_stall: PpeIssuePressure::NONE,
         }
     }
 
-    /// Set the number of other PPE threads runnable, and the
-    /// [`PpeTiming::pressure`] of the one that presses hardest, for the
+    /// Set the number of other PPE threads runnable, and the field by
+    /// field largest [`PpeTiming::pressure`] among them, for the
     /// instructions retired from here on.
-    pub(crate) fn set_siblings(&mut self, siblings: u32, pressure: u32) {
+    pub(crate) fn set_siblings(&mut self, siblings: u32, pressure: PpeIssuePressure) {
         if siblings == 0 {
             self.hold = 0;
-            self.shared_stall = 0;
+            self.shared_stall = PpeIssuePressure::NONE;
         } else {
             self.hold = k::PPU_SMT_SIBLING_HOLD_CYCLES;
-            self.shared_stall = u64::from(pressure);
+            self.shared_stall = pressure;
         }
     }
 
-    /// The cycles this thread's recent stalls at the shared issue point
-    /// add to each instruction of a sibling thread.
+    /// What this thread's recent stalls at the shared issue point add to
+    /// each instruction of a sibling thread.
     ///
     /// [CBE-Handbook p:301 s:10.2.3.1] a stall at IS2 stalls both threads.
-    pub(crate) fn pressure(&self) -> u32 {
+    pub(crate) fn pressure(&self) -> PpeIssuePressure {
         let c = &self.core;
-        let (num, den) = k::PPU_SMT_DEPENDENT_STALL_SHARE;
-        let alone =
-            k::PPU_SMT_SHARED_STALL_CYCLES * 256 * u64::from(c.long_share) / u64::from(SHARE_ONE);
-        let waits = u64::from(c.operand_wait) * num / den;
-        let cycles = ((alone + waits + 128) >> 8).min(k::PPU_SMT_SHARED_STALL_CYCLES);
-        cycles as u32
+        let share =
+            |cycles: u64, share: u32| cycles * 256 * u64::from(share) / u64::from(SHARE_ONE);
+        let wait = |(num, den): (u64, u64)| u64::from(c.operand_wait) * num / den;
+        let whole = |sum: u64, cap: u64| ((sum + 128) >> 8).min(cap) as u32;
+        let cap = k::PPU_SMT_SHARED_STALL_CYCLES;
+        let long = share(cap, c.divide_share) + share(cap, c.alone_share);
+        PpeIssuePressure {
+            cycles: whole(long + wait(k::PPU_SMT_DEPENDENT_STALL_SHARE), cap),
+            multiply_cycles: whole(long + wait(k::PPU_SMT_MULTIPLY_DEPENDENT_STALL_SHARE), cap),
+            multiply_hold_share: (c.divide_share * 256 + SHARE_ONE / 2) / SHARE_ONE,
+        }
     }
 
     /// The thread's cycle: the earliest the next instruction can issue.
@@ -350,7 +361,14 @@ impl PpeTiming {
         // [CBE-Handbook p:301 s:10.2.3.1] the sibling's stalls at IS2
         // stall this thread too. An instruction that issues beside its
         // older one waits in the older one's place.
-        let stalled = if paired { 0 } else { self.shared_stall };
+        let s = &self.shared_stall;
+        let stalled = match multiply_hold(op) {
+            _ if paired => 0,
+            Some(hold) => {
+                u64::from(s.multiply_cycles) + (hold * u64::from(s.multiply_hold_share) + 128) / 256
+            }
+            None => u64::from(s.cycles),
+        };
         t += stalled;
         if op.words != 0 {
             t += k::PPU_MICROCODE_ROM_CYCLES;
@@ -573,45 +591,86 @@ impl PpeTiming {
     }
 }
 
-/// Whether the cycles `op` takes count in full toward
-/// [`PPU_SMT_SHARED_STALL_CYCLES`] for a sibling: a microcoded
-/// instruction, or one that holds its unit longer than a multiply does
-/// (a divide or a square root).
+/// Whether `op` holds the FXU or the VSU longer than a multiply does: a
+/// divide or a square root. Its cycles count in full toward a sibling's
+/// stall, and toward the multiply hold a sibling repeats.
 ///
-/// [CBE-Handbook p:753 s:A.5] a microcoded instruction issues alone.
+/// [CBE-Handbook p:301 s:10.2.3.1] an instruction that depends on a
+/// divide in progress is a very long-latency stall condition. The captures
+/// below are the evidence that the sibling waits through it.
 ///
-/// [CBE-Handbook p:301 s:10.2.3.1] an instruction dependent on a divide
-/// being computed is a very long-latency stall condition. The capture
-/// below is the evidence that the sibling waits through it.
+/// The `ppu_issue_shared` capture: a sibling of divides adds about 13
+/// cycles to each of a thread's instructions, and one of dependent
+/// `mulld` about 5. The `ppu_issue_chain` capture's sibling runs one
+/// `divd` to each `bdnz`, and still adds 13 or more: the divide's cycles
+/// count, whatever the instructions between.
+fn divides(op: &Op) -> bool {
+    let long = matches!(op.kind, Kind::Unpipelined(cycles) if u64::from(cycles) > k::PPU_MULLD_LATENCY_CYCLES);
+    long && op.units & (unit::FXU | unit::VSU1 | unit::VSU2) != 0
+}
+
+/// Whether `op` issues alone for long without dividing: a microcoded
+/// instruction, or a long unpipelined one on another unit (`mfcr` and
+/// `mfocrf` on the branch unit). Its cycles count in full toward a
+/// sibling's stall, and toward no repeated multiply hold.
 ///
-/// The `ppu_issue_shared` capture: a sibling of microcoded `lha` adds
-/// about 13 cycles to each of a thread's instructions, as a sibling of
-/// divides does, and one of dependent `mulld` about 5. The
-/// `ppu_issue_chain` capture's sibling runs one `divd` to each `bdnz`,
-/// and still adds 13 or more: the divide's cycles count, whatever the
-/// instructions between.
+/// [CBE-Handbook p:753 s:A.5] a nonpipelined or microcoded instruction
+/// issues alone.
+fn issues_alone_for_long(op: &Op) -> bool {
+    let long = matches!(op.kind, Kind::Unpipelined(cycles) if u64::from(cycles) > k::PPU_MULLD_LATENCY_CYCLES);
+    !divides(op) && (op.words != 0 || long)
+}
+
+/// The cycles a multiply holds the FXU, or `None` for any other
+/// instruction: a multiply is an unpipelined FXU instruction that holds
+/// it no longer than `mulld` does.
+///
+/// [CBE-Handbook p:718 s:A.1.2] the FXU does not pipeline `mulli`,
+/// `mullw`, `mulhw`, `mulld` or their non-recording forms, and each
+/// causes a stall after issue. The recording forms run as microcode.
+///
+/// Beside a sibling of divides or square roots a multiply waits
+/// [`PPU_SMT_SHARED_STALL_CYCLES`] and then this hold again. In the
+/// `ppu_issue_multiply` capture, beside dependent `divd` or `fdiv`, the
+/// slowest run of each multiply chain waits 23 to 33 cycles an
+/// instruction past the chain alone. Beside `fdiv` the means are 22 for
+/// `mulli` and 25 to 27 for `mullw`, `mulhw` and `mulld`; beside `divd`,
+/// 24 to 26 for those three, and 10 for `mulli`, whose runs spread from
+/// 1 to 27. Beside a microcoded `lha` sibling a `mulli` waits 13 or 14
+/// cycles in the `ppu_issue_shared` capture, as other instructions do.
 ///
 /// [`PPU_SMT_SHARED_STALL_CYCLES`]: k::PPU_SMT_SHARED_STALL_CYCLES
-fn stalls_both_threads(op: &Op) -> bool {
+fn multiply_hold(op: &Op) -> Option<u64> {
     match op.kind {
-        Kind::Unpipelined(cycles) => u64::from(cycles) > k::PPU_MULLD_LATENCY_CYCLES,
-        _ => op.words != 0,
+        Kind::Unpipelined(cycles)
+            if u64::from(cycles) <= k::PPU_MULLD_LATENCY_CYCLES && op.units == unit::FXU =>
+        {
+            Some(u64::from(cycles))
+        }
+        _ => None,
     }
+}
+
+/// One instruction's `w` cycles in a share averaged over
+/// [`PRESSURE_WINDOW_CYCLES`]: toward [`SHARE_ONE`] when `counts`, toward
+/// zero otherwise.
+fn weigh(share: u32, w: u64, counts: bool) -> u32 {
+    let w = w.min(PRESSURE_WINDOW_CYCLES);
+    let kept = u64::from(share) * (PRESSURE_WINDOW_CYCLES - w);
+    let added = if counts { u64::from(SHARE_ONE) * w } else { 0 };
+    ((kept + added) / PRESSURE_WINDOW_CYCLES) as u32
 }
 
 /// Add an instruction that took `own` cycles of this thread's own to the
 /// averages [`PpeTiming::pressure`] reads.
 fn note_pressure(c: &mut Core, op: &Op, own: u64) {
-    if stalls_both_threads(op) {
-        let w = own.min(PRESSURE_WINDOW_CYCLES);
-        let share = u64::from(c.long_share);
-        let kept = share * (PRESSURE_WINDOW_CYCLES - w);
-        c.long_share = ((kept + u64::from(SHARE_ONE) * w) / PRESSURE_WINDOW_CYCLES) as u32;
+    let divide = divides(op);
+    let alone = issues_alone_for_long(op);
+    c.divide_share = weigh(c.divide_share, own, divide);
+    c.alone_share = weigh(c.alone_share, own, alone);
+    if divide || alone {
         return;
     }
-    let w = own.min(PRESSURE_WINDOW_CYCLES);
-    let share = u64::from(c.long_share);
-    c.long_share = (share * (PRESSURE_WINDOW_CYCLES - w) / PRESSURE_WINDOW_CYCLES) as u32;
     let wait = u32::try_from(own.saturating_sub(1).saturating_mul(256)).unwrap_or(u32::MAX);
     let n = PRESSURE_WINDOW_INSTRUCTIONS;
     c.operand_wait =

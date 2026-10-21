@@ -6,8 +6,16 @@ use crate::dependency::StepFootprint;
 use cellgov_core::Runtime;
 use cellgov_event::UnitId;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
+use cellgov_exec::PpeIssuePressure;
 use cellgov_mem::GuestMemory;
 use cellgov_time::Budget;
+
+/// A divide sibling's pressure.
+const DIVIDES: PpeIssuePressure = PpeIssuePressure {
+    cycles: 13,
+    multiply_cycles: 13,
+    multiply_hold_share: 256,
+};
 
 /// A footprint of a step PPE thread `unit` took.
 fn read_by(unit: u64) -> StepFootprint {
@@ -61,8 +69,8 @@ fn only_the_step_that_changes_a_ppe_thread_s_pressure_records_it() {
             id,
             vec![
                 FakeOp::LoadImm(1),
-                FakeOp::SetPpePressure(13),
-                FakeOp::SetPpePressure(13),
+                FakeOp::SetPpePressure(DIVIDES),
+                FakeOp::SetPpePressure(DIVIDES),
                 FakeOp::LoadImm(1),
             ],
         )
@@ -88,7 +96,7 @@ fn only_the_step_that_changes_a_ppe_thread_s_pressure_records_it() {
     assert_eq!(
         pressing,
         [None, Some(presser), None, None],
-        "the step that sets 13 changes it, the one that sets it again does not"
+        "the step that sets a divide's pressure changes it, the one that sets it again does not"
     );
     let change = StepFootprint {
         ppe_pressure_changer: Some(presser),

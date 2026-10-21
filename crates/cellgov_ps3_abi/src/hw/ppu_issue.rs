@@ -185,6 +185,15 @@ pub const PPU_SMT_SHARED_STALL_CYCLES: u64 = 13;
 /// cycles to each instruction of the `add`, `addi` and `mulli` chains.
 pub const PPU_SMT_DEPENDENT_STALL_SHARE: (u64, u64) = (2, 5);
 
+/// The share of a sibling's mean wait past its in-order floor, as a
+/// fraction numerator over denominator, that it adds to each of a
+/// thread's multiplies, up to [`PPU_SMT_SHARED_STALL_CYCLES`].
+///
+/// In the `ppu_issue_multiply` capture a sibling of dependent `mulld`,
+/// whose instructions each wait about 13 cycles, adds 8.8 to 9.2 cycles
+/// to each multiply in the slowest of five runs.
+pub const PPU_SMT_MULTIPLY_DEPENDENT_STALL_SHARE: (u64, u64) = (2, 3);
+
 /// The cycles between two fetches for one hardware thread.
 ///
 /// [CBE-Handbook p:299 s:10.2.3] instruction fetching strictly

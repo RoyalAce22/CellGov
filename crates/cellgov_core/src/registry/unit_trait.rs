@@ -84,7 +84,7 @@ pub trait RegisteredUnit: 'static {
 
     /// The PPE thread's issue pressure. See
     /// [`ExecutionUnit::ppe_issue_pressure`].
-    fn ppe_issue_pressure(&self) -> u32;
+    fn ppe_issue_pressure(&self) -> cellgov_exec::PpeIssuePressure;
 
     /// Shadow hit/miss counters. See [`ExecutionUnit::shadow_stats`].
     fn shadow_stats(&self) -> (u64, u64);
@@ -297,7 +297,7 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     }
 
     #[inline]
-    fn ppe_issue_pressure(&self) -> u32 {
+    fn ppe_issue_pressure(&self) -> cellgov_exec::PpeIssuePressure {
         ExecutionUnit::ppe_issue_pressure(self)
     }
 

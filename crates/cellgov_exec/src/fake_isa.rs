@@ -4,7 +4,7 @@
 
 use crate::context::ExecutionContext;
 use crate::step_result::ExecutionStepResult;
-use crate::unit::{ExecutionUnit, UnitStatus};
+use crate::unit::{ExecutionUnit, PpeIssuePressure, UnitStatus};
 use crate::yield_reason::YieldReason;
 use crate::LocalDiagnostics;
 use cellgov_effects::{Effect, MailboxMessage, WaitTarget, WritePayload};
@@ -134,9 +134,9 @@ pub enum FakeOp {
         /// Byte address the fault turns on.
         addr: u64,
     },
-    /// Report `cycles` from here on as the unit's
+    /// Report the pressure from here on as the unit's
     /// [`ExecutionUnit::ppe_issue_pressure`]. No effect emitted.
-    SetPpePressure(u32),
+    SetPpePressure(PpeIssuePressure),
     /// Terminal: yield `Finished`.
     End,
 }
@@ -152,7 +152,7 @@ pub struct FakeIsaUnit {
     finished: bool,
     faulted: bool,
     ppe: bool,
-    ppe_pressure: u32,
+    ppe_pressure: PpeIssuePressure,
 }
 
 impl FakeIsaUnit {
@@ -166,7 +166,7 @@ impl FakeIsaUnit {
             finished: false,
             faulted: false,
             ppe: false,
-            ppe_pressure: 0,
+            ppe_pressure: PpeIssuePressure::NONE,
         }
     }
 
@@ -199,7 +199,7 @@ impl ExecutionUnit for FakeIsaUnit {
         self.ppe
     }
 
-    fn ppe_issue_pressure(&self) -> u32 {
+    fn ppe_issue_pressure(&self) -> PpeIssuePressure {
         self.ppe_pressure
     }
 
@@ -398,8 +398,8 @@ impl ExecutionUnit for FakeIsaUnit {
                 }
                 YieldReason::BudgetExhausted
             }
-            FakeOp::SetPpePressure(cycles) => {
-                self.ppe_pressure = cycles;
+            FakeOp::SetPpePressure(pressure) => {
+                self.ppe_pressure = pressure;
                 YieldReason::BudgetExhausted
             }
             FakeOp::End => {

@@ -5,6 +5,7 @@
 //! unit's next scheduled invocation. Enforced structurally via the
 //! immutable borrow of `GuestMemory` held by `ExecutionContext`.
 
+use crate::unit::PpeIssuePressure;
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
 use cellgov_sync::ReservationTable;
@@ -40,7 +41,7 @@ pub struct ExecutionContext<'a> {
     /// unit observed and carries no guest state.
     mailbox_read: Option<&'a core::cell::Cell<bool>>,
     ppe_siblings: u32,
-    ppe_sibling_pressure: u32,
+    ppe_sibling_pressure: PpeIssuePressure,
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -63,7 +64,7 @@ impl<'a> ExecutionContext<'a> {
             inbound_mailbox: &[],
             mailbox_read: None,
             ppe_siblings: 0,
-            ppe_sibling_pressure: 0,
+            ppe_sibling_pressure: PpeIssuePressure::NONE,
         }
     }
 
@@ -87,7 +88,7 @@ impl<'a> ExecutionContext<'a> {
             inbound_mailbox: &[],
             mailbox_read: None,
             ppe_siblings: 0,
-            ppe_sibling_pressure: 0,
+            ppe_sibling_pressure: PpeIssuePressure::NONE,
         }
     }
 
@@ -113,7 +114,7 @@ impl<'a> ExecutionContext<'a> {
             inbound_mailbox: &[],
             mailbox_read: None,
             ppe_siblings: 0,
-            ppe_sibling_pressure: 0,
+            ppe_sibling_pressure: PpeIssuePressure::NONE,
         }
     }
 
@@ -143,7 +144,7 @@ impl<'a> ExecutionContext<'a> {
             inbound_mailbox: &[],
             mailbox_read: None,
             ppe_siblings: 0,
-            ppe_sibling_pressure: 0,
+            ppe_sibling_pressure: PpeIssuePressure::NONE,
         }
     }
 
@@ -265,18 +266,18 @@ impl<'a> ExecutionContext<'a> {
     ///
     /// [`ExecutionUnit::ppe_issue_pressure`]: crate::ExecutionUnit::ppe_issue_pressure
     #[inline]
-    pub const fn with_ppe_sibling_pressure(self, cycles: u32) -> Self {
+    pub const fn with_ppe_sibling_pressure(self, pressure: PpeIssuePressure) -> Self {
         Self {
-            ppe_sibling_pressure: cycles,
+            ppe_sibling_pressure: pressure,
             ..self
         }
     }
 
     /// The largest issue pressure of the other PPE hardware threads
-    /// runnable at the start of the step. Zero for a unit that is not a
-    /// PPE thread.
+    /// runnable at the start of the step, field by field. None for a unit
+    /// that is not a PPE thread.
     #[inline]
-    pub const fn ppe_sibling_pressure(&self) -> u32 {
+    pub const fn ppe_sibling_pressure(&self) -> PpeIssuePressure {
         self.ppe_sibling_pressure
     }
 

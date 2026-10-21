@@ -246,7 +246,7 @@ impl Runtime {
     /// `None` before the first step and after a restore. A step that
     /// refuses leaves the previous step's value in place.
     #[inline]
-    pub fn last_ppe_pressure(&self) -> Option<(UnitId, u32)> {
+    pub fn last_ppe_pressure(&self) -> Option<(UnitId, cellgov_exec::PpeIssuePressure)> {
         self.last_ppe_pressure
     }
 

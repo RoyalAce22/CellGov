@@ -63,7 +63,7 @@ fn console_cycles(words: &[u64], phase: usize, chain: usize) -> (f64, f64, f64) 
 }
 
 /// Eight copies of `word`, then the loop's `bdnz`.
-const fn eight(word: u32) -> [u32; 9] {
+pub(crate) const fn eight(word: u32) -> [u32; 9] {
     [word, word, word, word, word, word, word, word, BDNZ_8]
 }
 
@@ -167,7 +167,7 @@ const SIB_LHA: [u32; 9] = [
 const INT_SEEDS: &[Seed] = &[Seed::Gpr(15, 0x7fff_0000), Seed::Gpr(16, 1)];
 
 /// The probe's siblings, phases 1 to 8.
-const SIBLINGS: [(&str, Sibling); 8] = [
+pub(crate) const SIBLINGS: [(&str, Sibling); 8] = [
     (
         "addi",
         Sibling {
@@ -233,24 +233,12 @@ const TOLERANCE: f64 = 0.20;
 /// The cells the model times outside both the console's spread and
 /// [`TOLERANCE`], as (sibling, chain):
 ///
-/// - Dependent `mulli` beside independent `divd`, `fdiv` and `fsqrt`. The
-///   console gives each `mulli` about 17 to 25 cycles past its latency,
-///   the model 13.
-/// - Dependent `mulli` beside dependent `mulld`: the console about 8
-///   cycles past its latency, the model about 5.
 /// - Independent `addi` beside `fdiv`, which the console times nearer the
 ///   `divd` sibling's cost than the model's 13 a cycle predicts.
 /// - Dependent `fadd` beside microcoded `lha`, which waits less on the
 ///   console: the VSU issue queue holds up to four more instructions
 ///   while it stalls [CBE-Handbook p:301 s:10.2.3.1].
-const RESIDUALS: [(&str, &str); 6] = [
-    ("divd independent", "mulli"),
-    ("mulld", "mulli"),
-    ("fdiv", "mulli"),
-    ("fsqrt", "mulli"),
-    ("fdiv", "addi"),
-    ("lha", "fadd"),
-];
+const RESIDUALS: [(&str, &str); 2] = [("fdiv", "addi"), ("lha", "fadd")];
 
 /// How far from the console's mean a residual may sit.
 const RESIDUAL_LIMIT: f64 = 0.35;

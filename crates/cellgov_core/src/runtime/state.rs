@@ -50,7 +50,7 @@ pub struct Runtime {
     /// The PPE thread the last [`Runtime::step`] ran and its issue
     /// pressure before that step, read through
     /// [`Runtime::last_ppe_pressure`].
-    pub(super) last_ppe_pressure: Option<(UnitId, u32)>,
+    pub(super) last_ppe_pressure: Option<(UnitId, cellgov_exec::PpeIssuePressure)>,
     /// DMA completions the last [`Runtime::commit_step`] fired, read
     /// through [`Runtime::last_dma_completions`].
     pub(super) last_dma_completions: Vec<(cellgov_dma::DmaCompletion, bool)>,

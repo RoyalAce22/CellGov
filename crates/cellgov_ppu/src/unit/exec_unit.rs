@@ -89,7 +89,7 @@ impl ExecutionUnit for PpuExecutionUnit {
         true
     }
 
-    fn ppe_issue_pressure(&self) -> u32 {
+    fn ppe_issue_pressure(&self) -> cellgov_exec::PpeIssuePressure {
         self.timing.pressure()
     }
 

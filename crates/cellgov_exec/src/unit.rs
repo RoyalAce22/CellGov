@@ -41,6 +41,39 @@ pub enum UnitStatus {
     Suspended = 4,
 }
 
+/// The cycles a PPE thread's recent stalls at the shared issue point add
+/// to each instruction of another PPE thread, past the cycle that
+/// instruction is ready.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PpeIssuePressure {
+    /// Added to each instruction other than a multiply.
+    pub cycles: u32,
+    /// Added to each multiply.
+    pub multiply_cycles: u32,
+    /// The share, out of 256, of a multiply's own unit hold that the
+    /// multiply waits again on top of [`Self::multiply_cycles`].
+    pub multiply_hold_share: u32,
+}
+
+impl PpeIssuePressure {
+    /// A thread whose stalls add nothing.
+    pub const NONE: Self = Self {
+        cycles: 0,
+        multiply_cycles: 0,
+        multiply_hold_share: 0,
+    };
+
+    /// The larger of each field.
+    #[must_use]
+    pub fn max(self, other: Self) -> Self {
+        Self {
+            cycles: self.cycles.max(other.cycles),
+            multiply_cycles: self.multiply_cycles.max(other.multiply_cycles),
+            multiply_hold_share: self.multiply_hold_share.max(other.multiply_hold_share),
+        }
+    }
+}
+
 /// Canonical PPU fingerprint input set.
 ///
 /// One field list shared by three consumers: `PpuState::state_hash`
@@ -206,13 +239,13 @@ pub trait ExecutionUnit {
         false
     }
 
-    /// The cycles this PPE thread's recent stalls at the issue point the
-    /// PPE's threads share add to each instruction of another one.
+    /// What this PPE thread's recent stalls at the issue point the PPE's
+    /// threads share add to each instruction of another one.
     ///
     /// The runtime gives a PPE thread's step the largest of its runnable
     /// siblings' values (`ExecutionContext::ppe_sibling_pressure`).
-    fn ppe_issue_pressure(&self) -> u32 {
-        0
+    fn ppe_issue_pressure(&self) -> PpeIssuePressure {
+        PpeIssuePressure::NONE
     }
 
     /// Hash of the unit's private memory the guest reads back, or `None`
@@ -427,3 +460,7 @@ pub trait ExecutionUnit {
 #[cfg(test)]
 #[path = "tests/unit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ppe_pressure_tests.rs"]
+mod ppe_pressure_tests;
