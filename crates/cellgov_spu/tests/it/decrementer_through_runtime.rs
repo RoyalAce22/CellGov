@@ -51,7 +51,7 @@ fn spu_state(rt: &Runtime, unit: UnitId) -> cellgov_spu::state::SpuState {
 #[test]
 fn a_poll_of_the_event_count_sees_tm_at_the_crossing() {
     // A step long enough to run past the crossing: 50 time-base ticks
-    // are 627 guest ticks.
+    // are 2000 guest ticks.
     let mut rt = Runtime::new(GuestMemory::new(0x1000), Budget::new(4096), 40);
     let program = [
         wrch(SPU_WR_EVENT_MASK, 10),
@@ -76,8 +76,7 @@ fn a_poll_of_the_event_count_sees_tm_at_the_crossing() {
     rt.commit_step(&step.result, &step.effects)
         .expect("the step commits");
     let after = spu_state(&rt, unit).reg_word(6);
-    // Two polls of three ticks at most past the crossing: under one
-    // time-base tick.
+    // Two polls past the crossing take under one time-base tick.
     assert!(after >= 0xFFFF_FFFE, "{after:#x}");
 }
 

@@ -381,10 +381,10 @@ fn mailbox_roundtrip_response_is_command_plus_one() {
 fn dma_block_unblock_runs_to_completion() {
     let result = run(dma_block_unblock_scenario());
     assert_eq!(result.outcome, ScenarioOutcome::Stalled);
-    // Submitter: 1 step (submit+block). Burner: 10 steps to push
-    // time from 1 to 11 (completion fires at 11). Submitter: 1
-    // step (wake+finish). Burner: 10 remaining steps. Total: 22.
-    assert_eq!(result.steps_taken, 22);
+    // Submitter: 1 step (submit+block). Burner: 32 steps to push
+    // time from 1 to 33 (completion fires at 33). Submitter: 1
+    // step (wake+finish). Burner: 8 remaining steps. Total: 42.
+    assert_eq!(result.steps_taken, 42);
 }
 
 #[test]

@@ -1175,7 +1175,8 @@ fn a_drain_under_a_label_base_emits_a_report_into_the_report_block() {
             &mut call_stack,
             &table,
             &mut emitted,
-            GuestTicks::new(0x77),
+            // 399 ticks are 125 ns.
+            GuestTicks::new(399),
         )
     };
     assert!(outcome.reached_put());
@@ -1188,7 +1189,7 @@ fn a_drain_under_a_label_base_emits_a_report_into_the_report_block() {
             },
             Effect::RsxLabelWrite {
                 offset: REPORTS_REPORT_OFFSET + 0x54,
-                value: 0x77,
+                value: 125,
             },
         ]
     );

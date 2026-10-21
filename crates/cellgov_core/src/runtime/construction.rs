@@ -18,12 +18,14 @@ use super::{Runtime, RuntimeMode};
 /// workspace [`FixedLatency`] model. Folds into per-tag completion
 /// timing and the cross-runner parity verdict.
 ///
+/// 32 ticks is 10 ns rounded up to a whole tick.
+///
 /// The value is not a measurement. A title's boot installs
 /// [`cellgov_dma::MeasuredMfcLatency`] through
 /// [`Runtime::use_measured_dma_latency`], which charges a transfer an MFC
 /// command issued the time the `spu_dma_timing` console capture measured
 /// and keeps this value for any other transfer.
-pub const DEFAULT_DMA_LATENCY_TICKS: GuestTicks = GuestTicks::new(10);
+pub const DEFAULT_DMA_LATENCY_TICKS: GuestTicks = GuestTicks::new(32);
 
 impl Runtime {
     /// Charge each MFC transfer the time the console measures for its

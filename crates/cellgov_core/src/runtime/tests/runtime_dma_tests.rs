@@ -471,7 +471,8 @@ fn dma_completion_clears_overlapping_reservation() {
         dst: 0x0,
         len: 4,
     }];
-    for _ in 0..30 {
+    // One-tick steps that outlast the transfer's latency.
+    for _ in 0..crate::DEFAULT_DMA_LATENCY_TICKS.raw() + 20 {
         ops.push(FakeOp::LoadImm(0));
     }
     ops.push(FakeOp::End);
@@ -580,12 +581,12 @@ fn dma_wait_same_commit_completion_overrides_blocked_to_runnable() {
     use cellgov_exec::UnitStatus;
     use cellgov_mem::{ByteRange, GuestAddr};
 
-    fn run() -> (UnitStatus, bool, Vec<u8>) {
-        // Budget 20 > FixedLatency(10): step-1's DmaWait yield consumes
-        // 20 ticks, so the PUT issued in step 0 (completion_time = 1 + 10)
-        // is already due at the moment step 1's commit_step runs
+    fn run() -> (UnitStatus, bool, Option<UnitStatus>, Vec<u8>) {
+        // Budget 40 > FixedLatency(32): step 1's DmaWait yield consumes
+        // 40 ticks. So the PUT that step 0 issues (completion_time = 1 + 32)
+        // is already due when step 1's commit_step runs
         // fire_dma_completions.
-        let mut rt = build(0x1000, 20, 200);
+        let mut rt = build(0x1000, 40, 200);
         rt.memory_mut()
             .apply_commit(ByteRange::new(GuestAddr::new(0x80), 4).unwrap(), &[0x11; 4])
             .unwrap();
@@ -598,15 +599,20 @@ fn dma_wait_same_commit_completion_overrides_blocked_to_runnable() {
 
         let mut final_status = UnitStatus::Runnable;
         let mut parked = false;
+        let mut after_wait = None;
         for _ in 0..50 {
             match rt.step() {
                 Ok(step) => {
-                    parked |= step.result.yield_reason == YieldReason::DmaWait;
+                    let waited = step.result.yield_reason == YieldReason::DmaWait;
+                    parked |= waited;
                     rt.commit_step(&step.result, &step.effects).unwrap();
                     final_status = rt
                         .registry()
                         .effective_status(step.unit)
                         .unwrap_or(UnitStatus::Runnable);
+                    if waited && after_wait.is_none() {
+                        after_wait = Some(final_status);
+                    }
                     if final_status == UnitStatus::Finished {
                         break;
                     }
@@ -614,17 +620,29 @@ fn dma_wait_same_commit_completion_overrides_blocked_to_runnable() {
                 Err(_) => break,
             }
         }
-        (final_status, parked, rt.trace().bytes().to_vec())
+        (
+            final_status,
+            parked,
+            after_wait,
+            rt.trace().bytes().to_vec(),
+        )
     }
 
-    let (final_a, parked_a, trace_a) = run();
-    let (final_b, _, trace_b) = run();
+    let (final_a, parked_a, after_wait, trace_a) = run();
+    let (final_b, _, _, trace_b) = run();
 
     // A transfer that never reaches the queue reads complete at once,
     // so the unit finishes with no DmaWait park.
     assert!(
         parked_a,
         "the premise is a DmaWait park on the queued transfer"
+    );
+    // A completion that came due only later would leave the unit Blocked
+    // here and reach Finished through the time warp instead.
+    assert_eq!(
+        after_wait,
+        Some(UnitStatus::Runnable),
+        "the completion fires in the wait's own commit"
     );
     assert_eq!(
         final_a,

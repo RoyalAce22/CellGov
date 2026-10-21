@@ -535,7 +535,8 @@ fn nv4097_get_report_emits_label_write_at_arg_offset() {
         &mut cursor,
         &mut sem_offset,
         &mut emitted,
-        GuestTicks::new(0x1234),
+        // 399 ticks are 125 ns.
+        GuestTicks::new(399),
     );
     let report_arg = 0x0100_0040u32;
     nv4097_get_report(&mut ctx, &[report_arg]);
@@ -543,13 +544,13 @@ fn nv4097_get_report_emits_label_write_at_arg_offset() {
         emitted.as_slice(),
         &[Effect::RsxLabelWrite {
             offset: 0x0100_0040,
-            value: 0x1234,
+            value: 125,
         }]
     );
 }
 
 #[test]
-fn nv4097_get_report_uses_guest_ticks_as_value() {
+fn nv4097_get_report_writes_guest_time_in_nanoseconds() {
     fn emit_with_time(ticks: u64) -> u32 {
         let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
         let mut ctx = ctx_with_time(
@@ -565,9 +566,13 @@ fn nv4097_get_report_uses_guest_ticks_as_value() {
         }
     }
     assert_eq!(emit_with_time(0), 0);
-    assert_eq!(emit_with_time(1_000), 1_000);
+    assert_eq!(emit_with_time(3_192), 1_000);
+    // A partial nanosecond rounds down.
+    assert_eq!(emit_with_time(3), 0);
+    assert_eq!(emit_with_time(4), 1);
     // Truncation to low 32 bits is the oracle's timestamp-slot contract.
-    assert_eq!(emit_with_time(0x1_0000_0001), 1);
+    let past_u32 = cellgov_time::nsec_to_ticks(0x1_0000_0001) + 1;
+    assert_eq!(emit_with_time(past_u32), 1);
 }
 
 #[test]
@@ -577,14 +582,14 @@ fn nv4097_get_report_passes_full_u32_as_offset() {
         &mut cursor,
         &mut sem_offset,
         &mut emitted,
-        GuestTicks::new(7),
+        GuestTicks::new(3_192),
     );
     nv4097_get_report(&mut ctx, &[0xFF12_3456u32]);
     assert_eq!(
         emitted.as_slice(),
         &[Effect::RsxLabelWrite {
             offset: 0xFF12_3456,
-            value: 7,
+            value: 1_000,
         }]
     );
 }
@@ -600,7 +605,7 @@ fn a_report_offset_lands_in_the_report_block_under_a_label_base() {
         &mut cursor,
         &mut sem_offset,
         &mut emitted,
-        GuestTicks::new(9),
+        GuestTicks::new(3_192),
         0x3020_0000,
     );
     nv4097_get_report(&mut ctx, &[0x30]);
@@ -613,7 +618,7 @@ fn a_report_offset_lands_in_the_report_block_under_a_label_base() {
             },
             Effect::RsxLabelWrite {
                 offset: REPORTS_REPORT_OFFSET + 0x34,
-                value: 9,
+                value: 1_000,
             },
         ]
     );

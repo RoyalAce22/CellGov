@@ -9,9 +9,9 @@ use core::fmt;
 
 /// Cost of a unit of work in guest ticks.
 ///
-/// A PPU step's cost is its retired instruction count, one tick each.
-/// An SPU step's cost is the ticks its instructions' pipeline cycles
-/// take.
+/// A PPU step's cost is the ticks its retired instructions take at one
+/// instruction per nanosecond ([`crate::nsec_to_ticks`]). An SPU
+/// step's cost is its instructions' pipeline cycles, one tick each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Display)]
 #[display("{_0}")]
 pub struct InstructionCost(u64);
@@ -20,7 +20,7 @@ impl InstructionCost {
     /// No cost.
     pub const ZERO: Self = Self(0);
 
-    /// One tick: the cost of one retired PPU instruction.
+    /// One tick.
     pub const ONE: Self = Self(1);
 
     /// Lift a raw count.

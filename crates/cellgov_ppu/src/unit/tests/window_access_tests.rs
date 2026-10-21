@@ -61,7 +61,7 @@ fn a_load_from_a_window_ends_the_block_after_it() {
     let mem = memory(LWZ_R6_R5, true);
     let (unit, result, effects) = run(&mem, WINDOW + 0x10);
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
-    assert_eq!(result.consumed_cost.raw(), 2);
+    assert_eq!(unit.retired_instructions(), 2);
     assert_eq!(unit.state().pc, 8, "the next instruction has not run");
     assert_eq!(unit.state().gpr[4], 0);
     assert!(effects.iter().any(|e| matches!(
@@ -73,8 +73,8 @@ fn a_load_from_a_window_ends_the_block_after_it() {
 #[test]
 fn a_store_to_a_window_ends_the_block_after_it() {
     let mem = memory(STW_R6_R5, true);
-    let (unit, result, effects) = run(&mem, WINDOW + 0x10);
-    assert_eq!(result.consumed_cost.raw(), 2);
+    let (unit, _, effects) = run(&mem, WINDOW + 0x10);
+    assert_eq!(unit.retired_instructions(), 2);
     assert_eq!(unit.state().pc, 8);
     assert!(effects.iter().any(|e| matches!(
         e,
@@ -86,9 +86,9 @@ fn a_store_to_a_window_ends_the_block_after_it() {
 fn an_access_outside_every_window_runs_the_block_on() {
     for (window, ea) in [(true, RESERVED + 0x10), (false, WINDOW + 0x10)] {
         let mem = memory(LWZ_R6_R5, window);
-        let (unit, result, _) = run(&mem, ea);
+        let (unit, _, _) = run(&mem, ea);
         assert_eq!(
-            result.consumed_cost.raw(),
+            unit.retired_instructions(),
             4,
             "window {window}, ea 0x{ea:x}"
         );

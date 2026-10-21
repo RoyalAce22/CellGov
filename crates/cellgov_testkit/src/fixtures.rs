@@ -180,8 +180,8 @@ pub fn round_robin_fairness_scenario(unit_count: usize, steps_per_unit: u64) -> 
 }
 
 /// A [`DmaSubmitter`] Put from addr 0 to addr 128 paired with a
-/// [`CountingUnit`] that burns ticks until the default
-/// `FixedLatency(10)` completion fires.
+/// [`CountingUnit`] that burns ticks past the default
+/// `FixedLatency(32)` completion.
 pub fn dma_block_unblock_scenario() -> ScenarioFixture {
     let src = ByteRange::new(GuestAddr::new(0), 4).unwrap();
     let dst = ByteRange::new(GuestAddr::new(128), 4).unwrap();
@@ -189,10 +189,10 @@ pub fn dma_block_unblock_scenario() -> ScenarioFixture {
     ScenarioFixture::builder()
         .memory_size(256)
         .budget(Budget::new(1))
-        .max_steps(30)
+        .max_steps(50)
         .register(move |rt: &mut Runtime| {
             rt.register_unit_with(|id| DmaSubmitter::new(id, src, dst, seed.clone()));
-            rt.register_unit_with(|id| CountingUnit::new(id, 20));
+            rt.register_unit_with(|id| CountingUnit::new(id, 40));
         })
         .build()
 }

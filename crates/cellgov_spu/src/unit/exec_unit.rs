@@ -76,9 +76,8 @@ impl ExecutionUnit for SpuExecutionUnit {
         step::enter_step(&mut self.state, self.id, ctx);
 
         // The budget bounds the instructions the step retires; the step
-        // costs the guest ticks its cycles take. The step reads the ticks
-        // from the unit's whole run of cycles, so a step that ends inside
-        // a tick leaves the rest of it to the next step.
+        // costs the guest ticks its cycles take, read from the unit's
+        // whole run of cycles.
         let mut remaining = budget.raw();
         let start = ctx.current_tick();
         let base = cellgov_time::spu_cycles_to_ticks(self.pipeline.elapsed());

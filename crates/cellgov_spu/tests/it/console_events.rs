@@ -181,9 +181,7 @@ fn cellgov_latches_a_masked_event_as_the_console_does() {
 
 /// The guest tick at which the time base reads `tb`.
 fn at_tb(tb: u64) -> GuestTicks {
-    GuestTicks::new(
-        u64::try_from((u128::from(tb) * 1_000_000_000).div_ceil(79_800_000)).expect("in range"),
-    )
+    GuestTicks::new(tb * cellgov_time::TICKS_PER_TB_TICK)
 }
 
 /// The probe's `wait_event` as the SPU compiler emits it at local-store

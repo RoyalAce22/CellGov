@@ -348,8 +348,9 @@ fn run_path(
         let entry = unit.state().clone();
         let mut effects = Vec::new();
         let ctx = ExecutionContext::new(&memory).with_reservations(&reservations);
+        let retired_before = unit.retired_instructions();
         let result = unit.run_until_yield(budget, &ctx, &mut effects);
-        retired = retired.saturating_add(result.consumed_cost.raw());
+        retired = retired.saturating_add(unit.retired_instructions() - retired_before);
         let observed = finish_observation(PpuObservationInput {
             initial_state: &entry,
             final_state: unit.state(),

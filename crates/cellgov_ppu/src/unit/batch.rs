@@ -39,6 +39,19 @@ impl PpuTap for NoTap {
 }
 
 impl PpuExecutionUnit {
+    /// Guest ticks for the instructions this batch retired, at one
+    /// instruction per nanosecond.
+    ///
+    /// The cost converts the unit's running retirement count, so a batch
+    /// that ends inside a tick leaves the rest of that tick to the next
+    /// batch.
+    fn cost(&self, entry: &BatchEntry) -> InstructionCost {
+        InstructionCost::new(
+            cellgov_time::nsec_to_ticks(self.retirement_counter)
+                - cellgov_time::nsec_to_ticks(entry.retired),
+        )
+    }
+
     /// Run one batch and report each dispatch to `tap`.
     ///
     /// The compiler builds one copy per tap type, so the [`NoTap`] copy
@@ -198,7 +211,7 @@ impl PpuExecutionUnit {
                     self.close_block(effects);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::BudgetExhausted,
-                        consumed_cost: InstructionCost::new(budget.raw()),
+                        consumed_cost: self.cost(&entry),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
@@ -242,7 +255,7 @@ impl PpuExecutionUnit {
                     let args = state::ppu_syscall_args(&self.state);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Syscall,
-                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                        consumed_cost: self.cost(&entry),
                         local_diagnostics: LocalDiagnostics::with_pc_lr_syscall_lev(
                             step_pc,
                             self.state.lr(),
@@ -304,7 +317,7 @@ impl PpuExecutionUnit {
                     self.close_block(effects);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::BudgetExhausted,
-                        consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                        consumed_cost: self.cost(&entry),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                         fault: None,
                         syscall_args: None,
@@ -359,7 +372,7 @@ impl PpuExecutionUnit {
                 self.close_block(effects);
                 return ExecutionStepResult {
                     yield_reason: YieldReason::BudgetExhausted,
-                    consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                    consumed_cost: self.cost(&entry),
                     local_diagnostics: LocalDiagnostics::with_pc(step_pc),
                     fault: None,
                     syscall_args: None,

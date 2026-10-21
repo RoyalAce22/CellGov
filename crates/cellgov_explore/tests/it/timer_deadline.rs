@@ -34,10 +34,12 @@ const DEPTH: usize = 7;
 
 /// Budget in ticks per step, against a one-microsecond sleep.
 ///
-/// 1 usec is 1000 ticks, so the deadline falls three to four steps after
+/// 1 usec is 3192 ticks, so the deadline falls three to four steps after
 /// the park. That puts it inside the writer's run, which is what gives
 /// the workload two outcomes.
-const BUDGET: u64 = 300;
+const BUDGET: u64 = 958;
+/// A cheap counter's step, about a fifteenth of the budget.
+const CHEAP: u64 = 64;
 
 fn destination() -> ByteRange {
     ByteRange::new(GuestAddr::new(128), 4).unwrap()
@@ -61,7 +63,7 @@ fn skewed_workload() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
     rt.register_unit_with(|id| SleepingWriter::new(id, 1, destination(), 0xbb));
     rt.register_unit_with(|id| WritingUnit::of_value(id, 2, destination(), 0xaa));
-    rt.register_unit_with(|id| CountingUnit::of_cost(id, 3, 20));
+    rt.register_unit_with(|id| CountingUnit::of_cost(id, 3, CHEAP));
     rt.register_unit_with(|id| CountingUnit::of_cost(id, 3, BUDGET));
     rt
 }
@@ -226,7 +228,7 @@ fn a_deadline_no_step_can_move_across_a_write_still_prunes() {
         let elsewhere = ByteRange::new(GuestAddr::new(0), 4).unwrap();
         rt.register_unit_with(|id| SleepingWriter::new(id, 1, elsewhere, 0xbb));
         rt.register_unit_with(|id| WritingUnit::of_value(id, 2, destination(), 0xaa));
-        rt.register_unit_with(|id| CountingUnit::of_cost(id, 3, 20));
+        rt.register_unit_with(|id| CountingUnit::of_cost(id, 3, CHEAP));
         rt
     };
     let result = explore_window(build, &ExplorationConfig::default());

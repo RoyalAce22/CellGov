@@ -482,8 +482,16 @@ fn run_sequence_with_limit(
             faulted = true;
             break;
         }
+        // One instruction per nanosecond. The conversion reads the
+        // running total, so the next instruction gets each dropped
+        // partial tick.
+        let before = cellgov_time::nsec_to_ticks(retired as u64);
         retired += 1;
-        world.advance(GuestTicks::new(1)).map_err(world_failure)?;
+        world
+            .advance(GuestTicks::new(
+                cellgov_time::nsec_to_ticks(retired as u64) - before,
+            ))
+            .map_err(world_failure)?;
     }
     let (mut state, memory) = if faulted {
         // The runtime fault-discard rule hides state from a faulting batch.

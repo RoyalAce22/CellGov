@@ -2,6 +2,9 @@
 
 /// A point in guest virtual time, in ticks since runtime start.
 ///
+/// One tick is one cycle of the 3.192 GHz core clock
+/// ([`crate::TICKS_PER_SECOND`]).
+///
 /// Totally ordered, monotonically non-decreasing, never derived from host
 /// time.
 ///

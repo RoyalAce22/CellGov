@@ -985,7 +985,8 @@ fn a_blocked_syscall_traces_its_return_at_wake_time_not_at_dispatch() {
     assert_eq!(code, 0, "usleep completes with CELL_OK");
     assert_eq!(
         time,
-        park_time.raw() + 50_000,
+        // 50 us.
+        park_time.raw() + 159_600,
         "delivered at the deadline the time-warp jumped to"
     );
 }

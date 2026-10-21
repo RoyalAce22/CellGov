@@ -127,7 +127,7 @@ fn make_runtime_with_dma_drivers() -> Runtime {
 
 #[test]
 fn dma_queue_aliasing_canary_two_directions() {
-    // DMAs complete after DEFAULT_DMA_LATENCY_TICKS (10), so
+    // DMAs complete after DEFAULT_DMA_LATENCY_TICKS (32), so
     // driving 1 step keeps the enqueued completion in queue
     // while step 2 would advance time past the completion and
     // fire it. We need the queue non-empty when we observe.

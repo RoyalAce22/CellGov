@@ -24,8 +24,8 @@ pub mod ticks;
 
 pub use budget::{Budget, Consume, InstructionCost};
 pub use conversion::{
-    spu_cycles_to_ticks, tb_to_ticks, ticks_to_sec_nsec, ticks_to_tb,
-    SIMULATED_INSTRUCTIONS_PER_SECOND,
+    nsec_to_ticks, spu_cycles_to_ticks, tb_to_ticks, ticks_to_nsec, ticks_to_sec_nsec, ticks_to_tb,
+    usec_to_ticks, TICKS_PER_SECOND, TICKS_PER_TB_TICK, TICKS_PER_USEC,
 };
 pub use epoch::Epoch;
 pub use ticks::GuestTicks;

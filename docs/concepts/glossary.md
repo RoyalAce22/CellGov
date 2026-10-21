@@ -198,9 +198,9 @@ index shows it, but it names no cell. A manifest may declare the title
 at its floor as a drift study.
 [title_harness.md](../architecture/title_harness.md#which-firmware-a-title-is-measured-against)
 
-**Guest ticks.** Guest time, advanced by each step's cost: one tick
-per retired PPU instruction, and the ticks an SPU's pipeline cycles
-take.
+**Guest ticks.** Guest time in cycles of the 3.192 GHz core clock,
+advanced by each step's cost: 3.192 ticks per retired PPU instruction,
+and one tick per SPU pipeline cycle.
 Never wall-clock time; CellGov has no host-time dependency.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#per-step-pipeline)
 

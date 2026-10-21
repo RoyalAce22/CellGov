@@ -52,8 +52,7 @@ fn each_sleep_returns_and_parks_as_on_the_console() {
 
         let s2 = rt.step().unwrap();
         rt.commit_step(&s2.result, &s2.effects).unwrap();
-        // One guest tick is one nanosecond.
-        let slept_usec = (rt.time().raw() - park_time.raw()) / 1000;
+        let slept_usec = (rt.time().raw() - park_time.raw()) / cellgov_time::TICKS_PER_USEC;
         assert!(
             slept_usec >= usec,
             "sc {num}({arg}): CellGov slept {slept_usec} us"

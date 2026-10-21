@@ -180,4 +180,10 @@ impl PpuExecutionUnit {
     pub fn shadow_stats(&self) -> (u64, u64) {
         (self.shadow_hits, self.shadow_misses)
     }
+
+    /// Instructions the unit retired since it was built. A faulted
+    /// batch retires none.
+    pub fn retired_instructions(&self) -> u64 {
+        self.retirement_counter
+    }
 }

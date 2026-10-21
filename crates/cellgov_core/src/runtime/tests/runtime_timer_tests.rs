@@ -96,8 +96,8 @@ fn usleep_parks_caller_and_time_warp_wakes_at_deadline() {
         "usleep caller must leave the runnable set"
     );
     let park_time = rt.time();
-    // 50 us = 50_000 ticks past the time at dispatch.
-    let expected_deadline = GuestTicks::new(park_time.raw() + 50_000);
+    // 50 us = 159_600 ticks past the time at dispatch.
+    let expected_deadline = GuestTicks::new(park_time.raw() + 159_600);
 
     // Everything is parked: the next step must time-warp to the
     // deadline and run the woken sleeper.
@@ -134,8 +134,8 @@ fn sleep_seconds_scale_to_microseconds() {
     rt.step().unwrap();
     assert_eq!(
         rt.time().raw(),
-        // 2 s = 2_000_000 us = 2e9 ticks, plus the woken step's cost.
-        park_time.raw() + 2_000_000_000 + 1,
+        // 2 s = 2_000_000 us = 6.384e9 ticks, plus the woken step's cost.
+        park_time.raw() + 6_384_000_000 + 1,
         "sys_timer_sleep seconds must scale through microseconds to ticks"
     );
 }
@@ -167,7 +167,7 @@ fn usleep_zero_is_a_yield_not_a_park() {
 
 #[test]
 fn timer_wake_fires_at_commit_boundary_while_others_run() {
-    // Sleeper parks for 1 us (1000 ticks); a busy peer's steps
+    // Sleeper parks for 1 us (3192 ticks); a busy peer's steps
     // advance time past the deadline, so the wake must fire at a
     // commit boundary without any time-warp.
     let budget = 300u64;
@@ -180,7 +180,7 @@ fn timer_wake_fires_at_commit_boundary_while_others_run() {
         .register_with(|id| CountingUnit::new(id, 20));
 
     let mut woke = false;
-    for _ in 0..12 {
+    for _ in 0..16 {
         let s = rt.step().unwrap();
         rt.commit_step(&s.result, &s.effects).unwrap();
         if rt.registry().effective_status(sleeper_id) == Some(UnitStatus::Runnable) {
@@ -194,7 +194,7 @@ fn timer_wake_fires_at_commit_boundary_while_others_run() {
          retirement pushes guest time past its deadline"
     );
     assert!(
-        rt.time().raw() >= 1000,
+        rt.time().raw() >= 3192,
         "wake must not fire before the deadline"
     );
 }
@@ -343,7 +343,7 @@ fn semaphore_timed_wait_expires_with_etimedout() {
         .create_with_id(SEMA_ID, 0, 8)
         .unwrap();
 
-    // 1 us deadline = 1000 ticks; the busy peer's steps push time
+    // 1 us deadline = 3192 ticks; the busy peer's steps push time
     // past it, so the expiry fires at a commit boundary.
     rt.dispatch_lv2_request(
         cellgov_lv2::Lv2Request::SemaphoreWait {
@@ -358,7 +358,7 @@ fn semaphore_timed_wait_expires_with_etimedout() {
     );
     assert_eq!(rt.timer_wakes_pending(), 1);
 
-    for _ in 0..12 {
+    for _ in 0..16 {
         let s = rt.step().unwrap();
         rt.commit_step(&s.result, &s.effects).unwrap();
     }
@@ -442,13 +442,13 @@ fn post_before_deadline_cancels_timer_entry() {
 
 #[test]
 fn process_exit_with_a_due_sleep_does_not_resurrect_the_sleeper() {
-    // The sleeper's deadline (park time 2000 + 1000 ticks) falls due
+    // The sleeper's deadline (park time 4000 + 3192 ticks) falls due
     // inside the same commit that dispatches PROCESS_EXIT: the exiter's
-    // own 2000-tick step pushes time to 4000 first. The exit sweep
+    // own 4000-tick step pushes time to 8000 first. The exit sweep
     // finishes every unit and drops the sleeper's parked response; the
     // due timer entry must be dropped, not fired -- a process exit
     // deallocates its threads, so a due sleep never resumes one.
-    let budget = 2000u64;
+    let budget = 4000u64;
     let mut rt = build(4096, budget, 100);
     let sleeper = rt
         .registry_mut()
@@ -495,7 +495,7 @@ fn all_blocked_time_warp_expires_semaphore_wait_with_etimedout() {
         .create_with_id(SEMA_ID, 0, 8)
         .unwrap();
 
-    // 5 us deadline = 5000 ticks from time 0.
+    // 5 us deadline = 15_960 ticks from time 0.
     rt.dispatch_lv2_request(
         cellgov_lv2::Lv2Request::SemaphoreWait {
             id: SEMA_ID,
@@ -513,7 +513,7 @@ fn all_blocked_time_warp_expires_semaphore_wait_with_etimedout() {
     assert_eq!(s.unit, waiter);
     assert_eq!(
         rt.time().raw(),
-        5000 + budget,
+        15_960 + budget,
         "clock must warp to the deadline before the woken waiter's own \
          step advances it"
     );
@@ -566,8 +566,9 @@ fn process_exit_drops_pending_timer_wakes() {
 
     // The exiting step itself crosses the sleeper's deadline, so
     // without the exit-sweep cancel the same commit's timer firing
-    // would wake a unit the sweep just finished.
-    let budget = 2000u64;
+    // would wake a unit the sweep just finished. A 4000-tick step
+    // passes the 3192-tick deadline of a 1 us sleep.
+    let budget = 4000u64;
     let mut rt = build(4096, budget, 100);
     let sleeper = rt
         .registry_mut()
@@ -603,7 +604,8 @@ fn contended_cond_expiry_reparks_without_phantom_timer_wake_record() {
 
     const MUTEX_ID: u32 = 21;
     const COND_ID: u32 = 22;
-    let budget = 300u64;
+    // Eight 600-tick steps pass the 3192-tick deadline of a 1 us wait.
+    let budget = 600u64;
     let mut rt = build(4096, budget, 200);
     let sleeper = rt.registry_mut().register_with(|id| RecordingUnit {
         id,
@@ -720,7 +722,7 @@ fn contended_cond_expiry_reparks_without_phantom_timer_wake_record() {
 
 #[test]
 fn a_huge_usleep_deadline_saturates_at_the_tick_ceiling() {
-    // u64::MAX usec * 1000 overflows u64; the conversion must clamp
+    // u64::MAX usec * 3192 overflows u64; the conversion must clamp
     // to the tick ceiling. Wrapping would fabricate an in-the-past
     // deadline and fire a spurious wake at this same commit.
     let budget = 16u64;
@@ -755,7 +757,7 @@ fn a_due_wake_for_a_finished_unit_is_dropped_unfired() {
     // the unit (Runnable override replaces Finished) and log the
     // missing-response invariant break. A process exit deallocates its
     // threads, so a due sleep never resumes one.
-    let budget = 2000u64;
+    let budget = 4000u64;
     let mut rt = build(4096, budget, 100);
     let finished = rt
         .registry_mut()
@@ -771,7 +773,7 @@ fn a_due_wake_for_a_finished_unit_is_dropped_unfired() {
         .set_status_override(finished, UnitStatus::Finished);
     let _ = rt.syscall_responses.try_take(finished);
 
-    // The busy peer's 2000-tick step crosses the 1000-tick deadline.
+    // The busy peer's 4000-tick step crosses the 3192-tick deadline.
     let s2 = rt.step().unwrap();
     rt.commit_step(&s2.result, &s2.effects).unwrap();
 

@@ -174,9 +174,8 @@ fn mftb_resyncs_to_ctx_current_tick_at_step_entry() {
     place_insn(&mut mem, 4, 0x4400_0002);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    let ctx = ExecutionContext::new(&mem).with_current_tick(GuestTicks::new(
-        cellgov_time::SIMULATED_INSTRUCTIONS_PER_SECOND,
-    ));
+    let ctx = ExecutionContext::new(&mem)
+        .with_current_tick(GuestTicks::new(cellgov_time::TICKS_PER_SECOND));
     let _ = unit.run_until_yield(Budget::new(2), &ctx, &mut Vec::new());
     // mftb advances TB by +1 after resync; expected = base + 1.
     assert_eq!(unit.state().gpr[3], cellgov_time::CELL_PPU_TIMEBASE_HZ + 1);
@@ -221,8 +220,33 @@ fn budget_exhaustion_yields() {
     let ctx = ExecutionContext::new(&mem);
     let result = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
-    assert_eq!(result.consumed_cost, InstructionCost::new(5));
+    assert_eq!(unit.retired_instructions(), 5);
+    // Five nanoseconds: 15.96 ticks, rounded down.
+    assert_eq!(result.consumed_cost, InstructionCost::new(15));
     assert_eq!(unit.state().pc, 20);
+}
+
+#[test]
+fn a_batch_charges_the_partial_tick_the_batch_before_it_dropped() {
+    let mut mem = GuestMemory::new(256);
+    for i in (0..64).step_by(4) {
+        place_insn(&mut mem, i, 0x6000_0000);
+    }
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    let ctx = ExecutionContext::new(&mem);
+    // One instruction is 3.192 ticks. Each batch charges the ticks the
+    // unit's whole run has reached, less what it already charged. So
+    // the sixth batch takes the tick that the first five dropped
+    // between them.
+    let costs: Vec<u64> = (0..6)
+        .map(|_| {
+            unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new())
+                .consumed_cost
+                .raw()
+        })
+        .collect();
+    assert_eq!(costs, [3, 3, 3, 3, 3, 4]);
+    assert_eq!(costs.iter().sum::<u64>(), cellgov_time::nsec_to_ticks(6));
 }
 
 #[test]

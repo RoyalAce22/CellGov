@@ -32,10 +32,9 @@ const LWZ_R6_R5: u32 = (32 << 26) | (6 << 21) | (5 << 16);
 
 const UNMAPPED_EA: u64 = 0xFFFF_0000;
 
-/// Enough ticks that the resync moves the time base off zero. The
-/// conversion scales by the time-base frequency over a simulated
-/// second, so a smaller count can leave `tb` where it was.
-const RESYNC_TICKS: u64 = cellgov_time::SIMULATED_INSTRUCTIONS_PER_SECOND;
+/// Enough ticks that the resync moves the time base off zero. A count
+/// under one time-base tick leaves `tb` where it was.
+const RESYNC_TICKS: u64 = cellgov_time::TICKS_PER_SECOND;
 
 fn memory_of(words: &[u32]) -> GuestMemory {
     let mut mem = GuestMemory::new(256);

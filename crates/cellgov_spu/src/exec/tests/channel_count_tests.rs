@@ -27,8 +27,7 @@ fn wrch(s: &mut SpuState, channel: u8, value: u32) {
 
 /// The guest tick at which the time base reads `tb`.
 fn at_tb(tb: u64) -> cellgov_time::GuestTicks {
-    let ticks = (u128::from(tb) * 1_000_000_000).div_ceil(79_800_000);
-    cellgov_time::GuestTicks::new(u64::try_from(ticks).unwrap())
+    cellgov_time::GuestTicks::new(tb * cellgov_time::TICKS_PER_TB_TICK)
 }
 
 /// [CBEA p:150 s:9.11.1] the decrementer event is set when the count's most significant bit changes from 0 to 1.

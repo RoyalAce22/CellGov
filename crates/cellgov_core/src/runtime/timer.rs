@@ -104,12 +104,8 @@ impl Runtime {
 
     /// Absolute wake deadline for a wait of `usec` microseconds from
     /// the current guest time, saturating at the tick ceiling.
-    ///
-    /// 1 tick = 1 ns per
-    /// [`cellgov_time::SIMULATED_INSTRUCTIONS_PER_SECOND`], so the
-    /// conversion is `usec * 1000`.
     pub(super) fn deadline_after_usec(&self, usec: u64) -> GuestTicks {
-        let delta_ticks = usec.saturating_mul(1_000);
+        let delta_ticks = cellgov_time::usec_to_ticks(usec);
         GuestTicks::new(self.time.raw().saturating_add(delta_ticks))
     }
 }

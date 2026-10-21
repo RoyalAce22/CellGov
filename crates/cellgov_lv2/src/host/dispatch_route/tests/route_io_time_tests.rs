@@ -149,9 +149,11 @@ fn time_get_current_time_writes_sec_and_nsec_at_zero_tick() {
 }
 
 #[test]
-fn time_get_current_time_splits_at_billion_tick() {
+fn time_get_current_time_splits_at_a_second_of_ticks() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000).with_tick(cellgov_time::GuestTicks::new(1_500_000_001));
+    // 1.5 s and 1 ns: 3_192_000_000 + 1_596_000_000 + 4 ticks.
+    let tick = cellgov_time::TICKS_PER_SECOND + 1_596_000_004;
+    let rt = FakeRuntime::new(0x10000).with_tick(cellgov_time::GuestTicks::new(tick));
     let result = host.dispatch(
         Lv2Request::TimeGetCurrentTime {
             sec_ptr: 0x1000,
@@ -206,7 +208,7 @@ fn time_get_current_time_stamps_both_effects_with_the_runtime_tick() {
 
 #[test]
 fn time_get_current_time_and_timebase_frequency_are_coherent() {
-    let tick_later = 3 * cellgov_time::SIMULATED_INSTRUCTIONS_PER_SECOND + 500_000_000;
+    let tick_later = 3 * cellgov_time::TICKS_PER_SECOND + 1_596_000_000;
     let (sec, nsec) = cellgov_time::ticks_to_sec_nsec(tick_later);
     let tb = cellgov_time::ticks_to_tb(tick_later);
     let as_nsec_from_time_syscall = sec * 1_000_000_000 + nsec;

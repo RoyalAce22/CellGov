@@ -34,10 +34,12 @@ const DEPTH: usize = 8;
 
 /// The latency the two outcomes rest on.
 ///
-/// Budget 2 and ten ticks put the landing inside the writer's run. A
-/// change to either leaves one outcome, and every case below then reads
-/// a different workload.
-const LATENCY: u64 = 10;
+/// Budget 7 and 32 ticks put the landing inside the writer's run, at
+/// the fifth step after the submitter queues the transfer. A change to either
+/// leaves one outcome, and every case below then reads a different
+/// workload.
+const LATENCY: u64 = 32;
+const BUDGET: u64 = 7;
 
 fn destination() -> ByteRange {
     ByteRange::new(GuestAddr::new(128), 4).unwrap()
@@ -50,7 +52,7 @@ fn workload() -> Runtime {
         "the workspace latency is what puts the landing between the writer's stores",
     );
     let src = ByteRange::new(GuestAddr::new(0), 4).unwrap();
-    let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(2), STEP_CAP);
+    let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
     rt.register_unit_with(|id| {
         DmaSubmitter::new(id, src, destination(), vec![0xde, 0xad, 0xbe, 0xef])
     });

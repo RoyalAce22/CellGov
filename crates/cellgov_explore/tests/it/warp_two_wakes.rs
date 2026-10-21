@@ -7,7 +7,7 @@
 //!
 //! The deadlines meet by arithmetic. A wait's deadline is the tick its
 //! syscall committed at plus its timeout, and one step costs the
-//! thousand ticks a microsecond of timeout converts to (`BUDGET`). So
+//! 3192 ticks a microsecond of timeout converts to (`BUDGET`). So
 //! the unit that parks one step later asks for one microsecond less,
 //! and the two deadlines meet.
 
@@ -31,7 +31,7 @@ use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
 /// One step costs this many ticks, which is also what one microsecond
 /// of timeout converts to.
-const BUDGET: u64 = 1_000;
+const BUDGET: u64 = cellgov_time::TICKS_PER_USEC;
 const STEP_CAP: usize = 200;
 const FLAG_ID: u32 = 1;
 /// A null result pointer, which the kernel skips.

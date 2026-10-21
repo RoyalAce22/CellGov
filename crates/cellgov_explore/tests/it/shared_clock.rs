@@ -36,10 +36,13 @@ const WRITER_STEPS: u64 = 3;
 const COUNTER_STEPS: u64 = 40;
 const TRANSFERRED: [u8; 4] = [0xde, 0xad, 0xbe, 0xef];
 
-/// The latency this witness rests on: with budget 2 it puts the
-/// completion between unit 1's last two write positions, so a change to
-/// either moves the landing.
-const LATENCY: u64 = 10;
+/// The latency this witness rests on.
+///
+/// With budget 7 it puts the completion between unit 1's last two write
+/// positions, at the fifth step after the submitter queues the transfer.
+/// A change to either moves the landing.
+const LATENCY: u64 = 32;
+const BUDGET: u64 = 7;
 
 fn destination() -> ByteRange {
     ByteRange::new(GuestAddr::new(128), 4).expect("destination range")
@@ -57,7 +60,7 @@ fn workload() -> Runtime {
     );
     let src = ByteRange::new(GuestAddr::new(0), 4).expect("source range");
     let dst = destination();
-    let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(2), STEP_CAP);
+    let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
     rt.register_unit_with(|id| DmaSubmitter::new(id, src, dst, TRANSFERRED.to_vec()));
     let writer = rt.register_unit_with(|id| WritingUnit::new(id, WRITER_STEPS, dst));
     let counter = rt.register_unit_with(|id| CountingUnit::new(id, COUNTER_STEPS));

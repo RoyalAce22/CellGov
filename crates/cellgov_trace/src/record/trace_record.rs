@@ -62,7 +62,7 @@ pub enum TraceRecord {
         unit: UnitId,
         /// Reason the unit yielded.
         yield_reason: TracedYieldReason,
-        /// Instruction cost consumed during the step.
+        /// Guest ticks the step cost.
         consumed_cost: InstructionCost,
         /// Guest-time clock after the step.
         time_after: GuestTicks,
