@@ -233,12 +233,11 @@ const TOLERANCE: f64 = 0.20;
 /// The cells the model times outside both the console's spread and
 /// [`TOLERANCE`], as (sibling, chain):
 ///
-/// - Independent `addi` beside `fdiv`, which the console times nearer the
-///   `divd` sibling's cost than the model's 13 a cycle predicts.
-/// - Dependent `fadd` beside microcoded `lha`, which waits less on the
-///   console: the VSU issue queue holds up to four more instructions
-///   while it stalls [CBE-Handbook p:301 s:10.2.3.1].
-const RESIDUALS: [(&str, &str); 2] = [("fdiv", "addi"), ("lha", "fadd")];
+/// - Independent `addi` beside `fdiv`. The model gives each `addi` 13
+///   cycles and its own one, and times the loop 22% above the console's
+///   mean. The `ppu_issue_units` capture runs the same loop beside the
+///   same sibling within 19% of the model.
+const RESIDUALS: [(&str, &str); 1] = [("fdiv", "addi")];
 
 /// How far from the console's mean a residual may sit.
 const RESIDUAL_LIMIT: f64 = 0.35;

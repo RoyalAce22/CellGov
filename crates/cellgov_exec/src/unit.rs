@@ -46,8 +46,11 @@ pub enum UnitStatus {
 /// instruction is ready.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PpeIssuePressure {
-    /// Added to each instruction other than a multiply.
+    /// Added to each instruction other than a multiply or a VSU
+    /// instruction.
     pub cycles: u32,
+    /// Added to each instruction that issues to the VSU alone.
+    pub vsu_cycles: u32,
     /// Added to each multiply.
     pub multiply_cycles: u32,
     /// The share, out of 256, of a multiply's own unit hold that the
@@ -59,6 +62,7 @@ impl PpeIssuePressure {
     /// A thread whose stalls add nothing.
     pub const NONE: Self = Self {
         cycles: 0,
+        vsu_cycles: 0,
         multiply_cycles: 0,
         multiply_hold_share: 0,
     };
@@ -68,6 +72,7 @@ impl PpeIssuePressure {
     pub fn max(self, other: Self) -> Self {
         Self {
             cycles: self.cycles.max(other.cycles),
+            vsu_cycles: self.vsu_cycles.max(other.vsu_cycles),
             multiply_cycles: self.multiply_cycles.max(other.multiply_cycles),
             multiply_hold_share: self.multiply_hold_share.max(other.multiply_hold_share),
         }

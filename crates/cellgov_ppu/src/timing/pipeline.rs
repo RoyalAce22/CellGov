@@ -46,6 +46,15 @@ use cellgov_ps3_abi::hw::ppu_issue as k;
 /// bound reads.
 const AHEAD_RING: usize = 32;
 
+/// When an instruction issues, and how much of its wait a sibling added.
+struct Scheduled {
+    issue: u64,
+    /// The cycles of the wait the sibling's hold and stall added.
+    sibling: u64,
+    /// The sibling's stall alone.
+    stalled: u64,
+}
+
 /// The older instruction of an open dispatch group.
 #[derive(Debug, Clone, Copy)]
 struct Older {
@@ -135,7 +144,8 @@ pub(crate) struct PpeTiming {
     core: Core,
     tables: Box<Tables>,
     /// The cycles a runnable sibling thread holds issue after each of
-    /// this thread's dispatch groups: zero with no sibling runnable.
+    /// this thread's dispatch groups, of which its stall covers as many
+    /// cycles as it lasts: zero with no sibling runnable.
     hold: u64,
     /// What a runnable sibling's stalls at the shared issue point add to
     /// each of this thread's instructions.
@@ -265,9 +275,13 @@ impl PpeTiming {
         let wait = |(num, den): (u64, u64)| u64::from(c.operand_wait) * num / den;
         let whole = |sum: u64, cap: u64| ((sum + 128) >> 8).min(cap) as u32;
         let cap = k::PPU_SMT_SHARED_STALL_CYCLES;
-        let long = share(cap, c.divide_share) + share(cap, c.alone_share);
+        let divide = share(cap, c.divide_share);
+        let long = divide + share(cap, c.alone_share);
+        let all = (long + wait(k::PPU_SMT_DEPENDENT_STALL_SHARE)).min(cap * 256);
+        let (num, den) = k::PPU_SMT_VSU_STALL_SHARE;
         PpeIssuePressure {
-            cycles: whole(long + wait(k::PPU_SMT_DEPENDENT_STALL_SHARE), cap),
+            cycles: whole(all, cap),
+            vsu_cycles: whole(divide + (all - divide) * num / den, cap),
             multiply_cycles: whole(long + wait(k::PPU_SMT_MULTIPLY_DEPENDENT_STALL_SHARE), cap),
             multiply_hold_share: (c.divide_share * 256 + SHARE_ONE / 2) / SHARE_ONE,
         }
@@ -306,23 +320,23 @@ impl PpeTiming {
     /// before it left. For a microcoded instruction this is the cycle
     /// its first microword issues at.
     pub(crate) fn issue_cycle(&self, pc: u64, op: &Op) -> u64 {
-        self.schedule(pc, op).0
+        self.schedule(pc, op).issue
     }
 
     /// [`PpeTiming::issue_cycle`], and the cycles of that wait a sibling
     /// thread added.
-    fn schedule(&self, pc: u64, op: &Op) -> (u64, u64) {
+    fn schedule(&self, pc: u64, op: &Op) -> Scheduled {
         let c = &self.core;
         let (fetched, opens) = self.fetch(pc);
-        let (floor, paired, opens_group) = match c.older {
+        let (floor, opens_group) = match c.older {
             Some(older) if !opens && pc == older.pc + 4 => {
                 let alone = issues_alone(&older.op)
                     || issues_alone(op)
                     || !pairs(&older.op, op)
                     || op.reads_any_of(&older.op);
-                (older.issue + u64::from(alone), !alone, false)
+                (older.issue + u64::from(alone), false)
             }
-            _ => (c.floor, false, true),
+            _ => (c.floor, true),
         };
         let mut t = floor.max(fetched);
         for &r in &op.srcs {
@@ -347,33 +361,37 @@ impl PpeTiming {
             let all = c.ready.iter().chain(c.unit_free.iter()).copied().max();
             t = t.max(all.unwrap_or(0));
         }
-        // A new dispatch group: the sibling's group issues between. Only
-        // the part of the hold no wait of this thread's own covers is the
-        // sibling's.
+        // [CBE-Handbook p:301 s:10.2.3.1] the sibling's stalls at IS2
+        // stall this thread too. In the `ppu_issue_units` capture the
+        // younger of a pair waits the stall as well.
+        let s = &self.shared_stall;
+        let stalled = match multiply_hold(op) {
+            Some(hold) => {
+                u64::from(s.multiply_cycles) + (hold * u64::from(s.multiply_hold_share) + 128) / 256
+            }
+            None if issues_to_vsu(op) => u64::from(s.vsu_cycles),
+            None => u64::from(s.cycles),
+        };
+        // A new dispatch group: the sibling's group issues between. The
+        // sibling's stall covers the hold, and so does any wait of this
+        // thread's own; only the rest of the hold is the sibling's.
         let held = if opens_group {
-            let opener = c.floor + self.hold;
+            let opener = (c.floor + self.hold).saturating_sub(stalled);
             let held = opener.saturating_sub(t);
             t = t.max(opener);
             held
         } else {
             0
         };
-        // [CBE-Handbook p:301 s:10.2.3.1] the sibling's stalls at IS2
-        // stall this thread too. An instruction that issues beside its
-        // older one waits in the older one's place.
-        let s = &self.shared_stall;
-        let stalled = match multiply_hold(op) {
-            _ if paired => 0,
-            Some(hold) => {
-                u64::from(s.multiply_cycles) + (hold * u64::from(s.multiply_hold_share) + 128) / 256
-            }
-            None => u64::from(s.cycles),
-        };
         t += stalled;
         if op.words != 0 {
             t += k::PPU_MICROCODE_ROM_CYCLES;
         }
-        (t, held + stalled)
+        Scheduled {
+            issue: t,
+            sibling: held + stalled,
+            stalled,
+        }
     }
 
     /// Issue `op` at `pc`.
@@ -381,9 +399,31 @@ impl PpeTiming {
     /// `next_pc` is the address the thread runs next. It gives the
     /// direction of a branch whose `taken` is `None`.
     pub(crate) fn retire(&mut self, pc: u64, op: &Op, next_pc: u64) {
-        let (t, sibling) = self.schedule(pc, op);
+        let Scheduled {
+            issue: t,
+            sibling,
+            stalled,
+        } = self.schedule(pc, op);
         let (fetched, opens) = self.fetch(pc);
         let c = &mut self.core;
+        // A result still pending when the sibling's stall began comes that
+        // much later: in the `ppu_issue_units` capture a dependent `fadd`
+        // with an independent `addi` after each waits its latency and both
+        // stalls. No capture times a load miss's result this way.
+        if stalled != 0 {
+            let began = t
+                - stalled
+                - if op.words != 0 {
+                    k::PPU_MICROCODE_ROM_CYCLES
+                } else {
+                    0
+                };
+            for r in c.ready.iter_mut().chain(c.addr_ready.iter_mut()) {
+                if *r > began {
+                    *r += stalled;
+                }
+            }
+        }
         let before = c.floor;
         if opens {
             c.block_open = true;
@@ -621,6 +661,13 @@ fn issues_alone_for_long(op: &Op) -> bool {
     !divides(op) && (op.words != 0 || long)
 }
 
+/// Whether `op` issues to the VSU and to no other unit: an FP or VMX
+/// instruction past the VSU issue queue.
+fn issues_to_vsu(op: &Op) -> bool {
+    let vsu = unit::VSU1 | unit::VSU2;
+    op.units != 0 && op.units & !vsu == 0
+}
+
 /// The cycles a multiply holds the FXU, or `None` for any other
 /// instruction: a multiply is an unpipelined FXU instruction that holds
 /// it no longer than `mulld` does.
@@ -671,7 +718,16 @@ fn note_pressure(c: &mut Core, op: &Op, own: u64) {
     if divide || alone {
         return;
     }
-    let wait = u32::try_from(own.saturating_sub(1).saturating_mul(256)).unwrap_or(u32::MAX);
+    let mut wait = own.saturating_sub(1).saturating_mul(256);
+    // [CBE-Handbook p:756 s:A.6.2] a VSU instruction waits for its
+    // operands in the VSU issue queue, past IS2.
+    // [CBE-Handbook p:301 s:10.2.3.1] it stalls the sibling only once the
+    // queue fills.
+    if issues_to_vsu(op) {
+        let (num, den) = k::PPU_SMT_VSU_STALL_SHARE;
+        wait = wait.saturating_mul(num) / den;
+    }
+    let wait = u32::try_from(wait).unwrap_or(u32::MAX);
     let n = PRESSURE_WINDOW_INSTRUCTIONS;
     c.operand_wait =
         ((u64::from(c.operand_wait) * u64::from(n - 1) + u64::from(wait)) / u64::from(n)) as u32;

@@ -180,10 +180,14 @@ pub const PPU_SMT_SHARED_STALL_CYCLES: u64 = 13;
 /// that it adds to each of a thread's instructions, up to
 /// [`PPU_SMT_SHARED_STALL_CYCLES`].
 ///
-/// In the `ppu_issue_shared` capture a sibling of dependent `mulld`,
-/// whose instructions each wait about 13 cycles, adds between 4 and 6
-/// cycles to each instruction of the `add`, `addi` and `mulli` chains.
-pub const PPU_SMT_DEPENDENT_STALL_SHARE: (u64, u64) = (2, 5);
+/// A sibling of dependent `mulld`, whose instructions each wait about 13
+/// cycles, adds about 6 to 7 cycles to each instruction of the `add` and
+/// `addi` chains in the `ppu_issue_shared` capture, and 8 to 9 in
+/// `ppu_issue_units`. Half the wait replays the `ppu_issue_shared`
+/// capture's `add` chain within the replay tolerance. The `ppu_issue_units`
+/// capture's `add` chain beside `mulld` waits more, and its replay keeps
+/// that cell as a residual.
+pub const PPU_SMT_DEPENDENT_STALL_SHARE: (u64, u64) = (1, 2);
 
 /// The share of a sibling's mean wait past its in-order floor, as a
 /// fraction numerator over denominator, that it adds to each of a
@@ -193,6 +197,24 @@ pub const PPU_SMT_DEPENDENT_STALL_SHARE: (u64, u64) = (2, 5);
 /// whose instructions each wait about 13 cycles, adds 8.8 to 9.2 cycles
 /// to each multiply in the slowest of five runs.
 pub const PPU_SMT_MULTIPLY_DEPENDENT_STALL_SHARE: (u64, u64) = (2, 3);
+
+/// The share, as a fraction numerator over denominator, of the stall a
+/// sibling's microcode and operand waits add that an instruction issuing
+/// to the VSU alone waits. A sibling's divides and square roots stall it
+/// in full.
+///
+/// In the `ppu_issue_units` capture each instruction of an FP chain waits
+/// 4 to 7 cycles beside a sibling of microcoded `lha` or dependent
+/// `mulld`, and each instruction of an FXU or load chain 6 to 10. Beside
+/// a sibling of `divd` or `fdiv` both wait 11 to 17, apart from the `ld`
+/// chain beside `divd`, whose runs spread from 1 to 15. In
+/// `ppu_issue_shared` a dependent `fadd` waits 7.7 beside `lha` and an
+/// `add` 14.4.
+///
+/// [CBE-Handbook p:301 s:10.2.3.1] a stall at the VSU issue queue stalls
+/// both threads only when it also stalls IS2, and the queue's 2-stage
+/// buffer accepts up to four more instructions before it does.
+pub const PPU_SMT_VSU_STALL_SHARE: (u64, u64) = (1, 2);
 
 /// The cycles between two fetches for one hardware thread.
 ///

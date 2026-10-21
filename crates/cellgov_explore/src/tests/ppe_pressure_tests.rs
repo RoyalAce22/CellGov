@@ -13,6 +13,7 @@ use cellgov_time::Budget;
 /// A divide sibling's pressure.
 const DIVIDES: PpeIssuePressure = PpeIssuePressure {
     cycles: 13,
+    vsu_cycles: 13,
     multiply_cycles: 13,
     multiply_hold_share: 256,
 };
