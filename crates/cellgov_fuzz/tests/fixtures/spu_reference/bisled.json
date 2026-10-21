@@ -594,11 +594,11 @@
       "expected": {
         "end": {
           "status": "undefined",
-          "reason": "a branch with both the E and D bits set is reserved (SPU-ISA p:180); its behaviour is left to hardware capture, issue #1411"
+          "reason": "a branch with both the E and D bits set is reserved (SPU-ISA p:180); the vectors named d-and-e-...-console hold the console's answer"
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "a branch with both the E and D bits set is reserved (SPU-ISA p:180); its behaviour is left to hardware capture, issue #1411"
+          "reason": "a branch with both the E and D bits set is reserved (SPU-ISA p:180); the vectors named d-and-e-...-console hold the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -606,7 +606,7 @@
         },
         "pc": {
           "status": "undefined",
-          "reason": "a branch with both the E and D bits set is reserved (SPU-ISA p:180); its behaviour is left to hardware capture, issue #1411"
+          "reason": "a branch with both the E and D bits set is reserved (SPU-ISA p:180); the vectors named d-and-e-...-console hold the console's answer"
         },
         "lslr": {
           "status": "value",
@@ -618,11 +618,11 @@
         },
         "stop": {
           "status": "undefined",
-          "reason": "a branch with both the E and D bits set is reserved (SPU-ISA p:180); its behaviour is left to hardware capture, issue #1411"
+          "reason": "a branch with both the E and D bits set is reserved (SPU-ISA p:180); the vectors named d-and-e-...-console hold the console's answer"
         },
         "interrupts_enabled": {
           "status": "undefined",
-          "reason": "a branch with both the E and D bits set is reserved (SPU-ISA p:180); its behaviour is left to hardware capture, issue #1411"
+          "reason": "a branch with both the E and D bits set is reserved (SPU-ISA p:180); the vectors named d-and-e-...-console hold the console's answer"
         },
         "srr0": {
           "status": "value",
@@ -753,6 +753,462 @@
         "channels": {
           "status": "unsupported",
           "reason": "the event registers the vector sets are the external condition; the runtime refreshes channel counts at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "d-and-e-masked-from-disabled-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_bisled_d_and_e/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "2bd0149689351959724ef0e6efdbf772d30921f0e597f97c629af773e2587b2d"
+      },
+      "words": [
+        896270982
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "5": "00000034111111112222222233333333",
+          "6": "cccccccccccccccccccccccccccccccc"
+        },
+        "local_store": [],
+        "pc": 40,
+        "interrupts_enabled": false,
+        "srr0": 0,
+        "channels": {
+          "pending_events": 16,
+          "event_mask": 0,
+          "event_count": false
+        }
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "6": "0000002c000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 44
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the capture records the SPU_RdEventStat count before the branch; the runtime refreshes channel state at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "d-and-e-masked-from-enabled-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_bisled_d_and_e/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "2bd0149689351959724ef0e6efdbf772d30921f0e597f97c629af773e2587b2d"
+      },
+      "words": [
+        896270982
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "5": "00000074111111112222222233333333",
+          "6": "cccccccccccccccccccccccccccccccc"
+        },
+        "local_store": [],
+        "pc": 104,
+        "interrupts_enabled": true,
+        "srr0": 0,
+        "channels": {
+          "pending_events": 16,
+          "event_mask": 0,
+          "event_count": false
+        }
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "6": "0000006c000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 108
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": true
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the capture records the SPU_RdEventStat count before the branch; the runtime refreshes channel state at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "d-and-e-event-from-disabled-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_bisled_d_and_e/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "2bd0149689351959724ef0e6efdbf772d30921f0e597f97c629af773e2587b2d"
+      },
+      "words": [
+        896270982
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "5": "000000bc111111112222222233333333",
+          "6": "cccccccccccccccccccccccccccccccc"
+        },
+        "local_store": [],
+        "pc": 176,
+        "interrupts_enabled": false,
+        "srr0": 0,
+        "channels": {
+          "pending_events": 16,
+          "event_mask": 16,
+          "event_count": true
+        }
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "6": "000000b4000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 188
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the capture records the SPU_RdEventStat count before the branch; the runtime refreshes channel state at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "d-and-e-count-after-mask-cleared-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_bisled_d_and_e/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "2bd0149689351959724ef0e6efdbf772d30921f0e597f97c629af773e2587b2d"
+      },
+      "words": [
+        896270982
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "5": "000000fc111111112222222233333333",
+          "6": "cccccccccccccccccccccccccccccccc"
+        },
+        "local_store": [],
+        "pc": 240,
+        "interrupts_enabled": false,
+        "srr0": 0,
+        "channels": {
+          "pending_events": 16,
+          "event_mask": 0,
+          "event_count": true
+        }
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "6": "000000f4000000000000000000000000"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 252
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the capture records the SPU_RdEventStat count before the branch; the runtime refreshes channel state at each step"
         },
         "reservation": {
           "status": "value",
