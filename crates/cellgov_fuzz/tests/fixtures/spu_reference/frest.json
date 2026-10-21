@@ -33,7 +33,7 @@
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "the estimate's exact bits come from an implementation table the ISA does not print (SPU-ISA p:215); they are the normal-operands-console vector holds the console's answer"
+          "reason": "the estimate's exact bits come from an implementation table the ISA does not print (SPU-ISA p:215); the normal-operands-console vector holds the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -136,7 +136,7 @@
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "the estimate's exact bits come from an implementation table the ISA does not print (SPU-ISA p:215); they are the zero-exponent-flags-divide-by-zero-console vector holds the console's answer"
+          "reason": "the estimate's exact bits come from an implementation table the ISA does not print (SPU-ISA p:215); the zero-exponent-flags-divide-by-zero-console vector holds the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -239,7 +239,7 @@
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "the estimate's exact bits come from an implementation table the ISA does not print (SPU-ISA p:215); they are the maximal-exponent-is-not-divide-by-zero-console vector holds the console's answer"
+          "reason": "the estimate's exact bits come from an implementation table the ISA does not print (SPU-ISA p:215); the maximal-exponent-is-not-divide-by-zero-console vector holds the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -342,7 +342,7 @@
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "the estimate's exact bits come from an implementation table the ISA does not print (SPU-ISA p:215); they are the each-slot-flags-its-own-bit-console vector holds the console's answer"
+          "reason": "the estimate's exact bits come from an implementation table the ISA does not print (SPU-ISA p:215); the each-slot-flags-its-own-bit-console vector holds the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -496,7 +496,7 @@
         },
         "channels": {
           "status": "unsupported",
-          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
         },
         "reservation": {
           "status": "value",
@@ -603,7 +603,7 @@
         },
         "channels": {
           "status": "unsupported",
-          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
         },
         "reservation": {
           "status": "value",
@@ -710,7 +710,7 @@
         },
         "channels": {
           "status": "unsupported",
-          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
         },
         "reservation": {
           "status": "value",
@@ -817,7 +817,7 @@
         },
         "channels": {
           "status": "unsupported",
-          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
         },
         "reservation": {
           "status": "value",

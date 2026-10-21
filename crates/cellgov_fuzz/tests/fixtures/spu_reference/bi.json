@@ -707,7 +707,7 @@
         },
         "channels": {
           "status": "unsupported",
-          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
         },
         "reservation": {
           "status": "value",
@@ -815,7 +815,7 @@
         },
         "channels": {
           "status": "unsupported",
-          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
         },
         "reservation": {
           "status": "value",

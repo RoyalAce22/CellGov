@@ -552,11 +552,11 @@
       "expected": {
         "end": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the scale-above-127-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the scale-above-127-console vector holds the console's answer"
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the scale-above-127-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the scale-above-127-console vector holds the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -564,7 +564,7 @@
         },
         "pc": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the scale-above-127-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the scale-above-127-console vector holds the console's answer"
         },
         "lslr": {
           "status": "value",
@@ -572,15 +572,15 @@
         },
         "fpscr": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the scale-above-127-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the scale-above-127-console vector holds the console's answer"
         },
         "stop": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the scale-above-127-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the scale-above-127-console vector holds the console's answer"
         },
         "interrupts_enabled": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the scale-above-127-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the scale-above-127-console vector holds the console's answer"
         },
         "srr0": {
           "status": "value",
@@ -653,11 +653,11 @@
       "expected": {
         "end": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the negative-scale-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the negative-scale-console vector holds the console's answer"
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the negative-scale-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the negative-scale-console vector holds the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -665,7 +665,7 @@
         },
         "pc": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the negative-scale-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the negative-scale-console vector holds the console's answer"
         },
         "lslr": {
           "status": "value",
@@ -673,15 +673,15 @@
         },
         "fpscr": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the negative-scale-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the negative-scale-console vector holds the console's answer"
         },
         "stop": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the negative-scale-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the negative-scale-console vector holds the console's answer"
         },
         "interrupts_enabled": {
           "status": "undefined",
-          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); how it ends is the negative-scale-console vector holds the console's answer"
+          "reason": "a scale outside 0 to 127 leaves the operation undefined (SPU-ISA p:221); the negative-scale-console vector holds the console's answer"
         },
         "srr0": {
           "status": "value",
@@ -811,7 +811,7 @@
         },
         "channels": {
           "status": "unsupported",
-          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
         },
         "reservation": {
           "status": "value",
@@ -918,7 +918,7 @@
         },
         "channels": {
           "status": "unsupported",
-          "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
         },
         "reservation": {
           "status": "value",
