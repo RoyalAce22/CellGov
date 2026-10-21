@@ -1,0 +1,21 @@
+[test]
+name = "spu_bgx_reserved_bits"
+
+# A hardware probe of bgx on a raw SPU with RA equal to RB, where the
+# borrow in bit 31 of each RT word decides the result, when the RT words
+# also set the reserved bits 0 to 30. Four input sets; the SPU stores
+# each result. The PPU reads back SPU_Status, SPU_NextPC, the class 0
+# interrupt status and the four result quadwords. The PPU program's
+# header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]
