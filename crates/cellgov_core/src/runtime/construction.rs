@@ -113,6 +113,7 @@ impl Runtime {
             trace,
             last_scheduled_unit: None,
             step_woke_others: false,
+            ppe_placement: Default::default(),
             effects_buf: Vec::new(),
             rsx_label_base: 0,
             mode: RuntimeMode::FullTrace,

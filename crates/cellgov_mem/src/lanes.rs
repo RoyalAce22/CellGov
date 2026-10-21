@@ -216,6 +216,11 @@ pub mod source {
     /// The 1 MiB-page area each process's `sys_memory_allocate` places
     /// its 1 MiB-page blocks in, one object per pid.
     pub const LARGE_PAGE_AREA: u8 = 74;
+    /// Runnable PPU threads on and off the PPE's hardware threads, one
+    /// object per unit.
+    pub const PPE_PLACEMENT: u8 = 75;
+    /// The PPE run-queue sequence counter.
+    pub const PPE_QUEUE_SEQ: u8 = 76;
 }
 
 const OBJECT_BITS: u32 = 32;

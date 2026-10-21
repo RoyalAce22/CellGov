@@ -36,7 +36,9 @@ impl Runtime {
     /// of the question that function answers, and a wake source added
     /// there has to be added here.
     pub fn can_take_another_step(&self) -> bool {
-        if self.registry.runnable_ids().next().is_some() {
+        // A PPU thread off the PPE takes a hardware thread the next step
+        // finds free.
+        if self.registry.runnable_ids().next().is_some() || self.registry.any_off_core() {
             return true;
         }
         let any_blocked = self.registry.ids().any(|id| {
@@ -73,6 +75,9 @@ impl Runtime {
         self.last_problem_state_accesses.clear();
         self.last_mailbox_read = None;
 
+        // A PPU thread woken, parked or yielding since the last commit
+        // changes which ones hold the PPE.
+        self.place_ppe_threads();
         // A unit registered or woken since the last commit takes its
         // clock from that commit's tick.
         self.registry.sync_clocks(self.time);
@@ -86,6 +91,10 @@ impl Runtime {
         if let Some(lowest) = lowest {
             let (due, timer_due) = self.fire_due_events(lowest);
             if !due.is_empty() || !timer_due.is_empty() {
+                // A PPU thread these events woke takes a hardware thread
+                // only by the placement rule.
+                self.place_ppe_threads();
+                self.registry.sync_clocks(self.time);
                 self.emit_time_warp_trace(&due, &timer_due);
             }
         }
@@ -117,6 +126,7 @@ impl Runtime {
                     self.time = next_time;
                     let (due, timer_due) = self.fire_due_events(next_time);
                     self.wake_reservation_lost_waiters();
+                    self.place_ppe_threads();
                     self.registry.sync_clocks(self.time);
                     self.emit_time_warp_trace(&due, &timer_due);
                     if let Some(id) = self.scheduler.select_next(&self.registry) {

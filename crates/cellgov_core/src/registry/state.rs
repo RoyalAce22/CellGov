@@ -30,6 +30,10 @@ pub struct UnitRegistry {
     /// step and a wake: the status underneath keeps changing, and shows
     /// again when the hold ends.
     pub(super) suspended: BTreeSet<UnitId>,
+    /// Runnable PPU threads that wait for one of the PPE's two hardware
+    /// threads. Like a suspension, the hold survives a step and a wake;
+    /// it holds only a unit that is runnable underneath.
+    pub(super) off_core: BTreeSet<UnitId>,
     /// Per-unit pending `MailboxReceiveAttempt` pops, drained into
     /// `ExecutionContext::received_messages` at next step.
     pub(super) pending_receives: BTreeMap<UnitId, Vec<u32>>,
@@ -70,6 +74,7 @@ impl Clone for UnitRegistry {
             units,
             status_overrides: self.status_overrides.clone(),
             suspended: self.suspended.clone(),
+            off_core: self.off_core.clone(),
             pending_receives: self.pending_receives.clone(),
             pending_syscall_returns: self.pending_syscall_returns.clone(),
             pending_register_writes: self.pending_register_writes.clone(),

@@ -57,7 +57,8 @@ impl Lv2Host {
     }
 
     /// `sys_ppu_thread_set_priority` (47): stores `prio` in the
-    /// target's attrs; no scheduler consults it.
+    /// target's attrs, which rank it for the PPE's hardware threads from
+    /// the next step.
     ///
     /// A PPU thread priority runs 0 (highest) through 3071, and a
     /// value outside that window is EINVAL. A debug-or-root process

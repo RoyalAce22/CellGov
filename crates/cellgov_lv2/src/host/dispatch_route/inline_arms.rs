@@ -18,9 +18,8 @@ use cellgov_time::GuestTicks;
 impl Lv2Host {
     /// `sys_ppu_thread_yield`: returns CELL_OK with no effects.
     ///
-    /// The scheduler sees a syscall that woke no other unit, so it picks
-    /// the yielding thread again until its sticky-streak limit forces a
-    /// rotation.
+    /// The runtime sees the request and sends the yielding thread to the
+    /// back of its priority's queue for the PPE's hardware threads.
     pub(super) fn dispatch_ppu_thread_yield(&self) -> Lv2Dispatch {
         Lv2Dispatch::immediate(0)
     }

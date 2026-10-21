@@ -118,12 +118,15 @@ pub(crate) fn run_pending_child_inits(
             modules_total,
         ));
 
+        // A PPU thread waiting for a PPE hardware thread is held too: the
+        // child's module_starts would otherwise free one for it.
         let held: Vec<(UnitId, Option<UnitStatus>)> = rt
             .registry()
             .ids()
             .filter(|&id| {
                 id != pending.primary_unit
-                    && rt.registry().effective_status(id) == Some(UnitStatus::Runnable)
+                    && (rt.registry().effective_status(id) == Some(UnitStatus::Runnable)
+                        || rt.registry().is_off_core(id))
             })
             .map(|id| (id, rt.registry().status_override(id)))
             .collect();

@@ -76,6 +76,7 @@ pub struct RuntimeSnapshot {
     pub(super) steps_taken: usize,
     pub(super) last_scheduled_unit: Option<UnitId>,
     pub(super) step_woke_others: bool,
+    pub(super) ppe_placement: crate::runtime::ppe_placement::PpePlacement,
     pub(super) per_step_index: u64,
     pub(super) pending_child_inits: Vec<crate::runtime::types::PendingChildInit>,
     pub(super) rsx_label_base: u32,
@@ -115,6 +116,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         steps_taken: _,
         last_scheduled_unit: _,
         step_woke_others: _,
+        ppe_placement: _,
         per_step_index: _,
         pending_child_inits: _,
         rsx_call_stack: _,
@@ -194,6 +196,7 @@ impl Runtime {
             steps_taken: self.steps_taken,
             last_scheduled_unit: self.last_scheduled_unit,
             step_woke_others: self.step_woke_others,
+            ppe_placement: self.ppe_placement.clone(),
             per_step_index: self.per_step_index,
             pending_child_inits: self.pending_child_inits.clone(),
             rsx_label_base: self.rsx_label_base,
@@ -249,6 +252,7 @@ impl Runtime {
         self.steps_taken = snap.steps_taken;
         self.last_scheduled_unit = snap.last_scheduled_unit;
         self.step_woke_others = snap.step_woke_others;
+        self.ppe_placement = snap.ppe_placement.clone();
         self.per_step_index = snap.per_step_index;
         self.pending_child_inits = snap.pending_child_inits.clone();
         self.rsx_label_base = snap.rsx_label_base;

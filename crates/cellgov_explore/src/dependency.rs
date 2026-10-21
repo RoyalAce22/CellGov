@@ -724,6 +724,12 @@ impl StepFootprint {
             return true;
         }
 
+        // The order PPE threads become runnable in decides which of them
+        // hold the PPE's two hardware threads.
+        if !self.ppe_status_changes.is_empty() && !other.ppe_status_changes.is_empty() {
+            return true;
+        }
+
         false
     }
 

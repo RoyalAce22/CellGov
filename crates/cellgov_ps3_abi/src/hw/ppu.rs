@@ -21,6 +21,11 @@ pub const CELL_PPU_TIMEBASE_HZ: u64 = 79_800_000;
 /// [PPC-Book3 p:73 s:5.5.13] A System Call interrupt resumes at effective address 0xC00.
 pub const SYSTEM_CALL_VECTOR_OFFSET: u64 = 0xC00;
 
+/// The PPE's hardware threads: how many PPU threads run at once.
+///
+/// [CBE-Handbook p:295 s:10] to software, the PPE appears to provide two independent instruction-processing units.
+pub const PPE_HARDWARE_THREADS: usize = 2;
+
 /// Cell BE PPU L1/L2 cache line size in bytes. Reservation
 /// granularity for `lwarx`/`stwcx.`, dcbz target alignment, and the
 /// stride PS3 atomic primitives assume.

@@ -12,13 +12,55 @@ use super::UnitRegistry;
 impl UnitRegistry {
     /// Effective status of a unit: runtime override if set, else the
     /// unit's self-reported `status()`; and [`UnitStatus::Suspended`]
-    /// over a Runnable or Blocked status while the unit is suspended.
+    /// over a Runnable or Blocked status while the unit is suspended,
+    /// and over a Runnable status while the unit waits for a PPE
+    /// hardware thread.
     pub fn effective_status(&self, id: UnitId) -> Option<UnitStatus> {
         let status = self.status_beneath_hold(id)?;
-        let held = !self.suspended.is_empty()
+        let held = (!self.suspended.is_empty()
             && matches!(status, UnitStatus::Runnable | UnitStatus::Blocked)
-            && self.suspended.contains(&id);
+            && self.suspended.contains(&id))
+            || (status == UnitStatus::Runnable && self.off_core.contains(&id));
         Some(if held { UnitStatus::Suspended } else { status })
+    }
+
+    /// Whether `id` is held by a suspension: its SPU thread group is
+    /// suspended or its PPU thread waits for its start.
+    pub(crate) fn is_suspended(&self, id: UnitId) -> bool {
+        self.suspended.contains(&id)
+    }
+
+    /// Hold exactly the units of `off_core` out of the runnable set as
+    /// PPU threads waiting for a PPE hardware thread, releasing every
+    /// other.
+    pub(crate) fn set_off_core(&mut self, off_core: &std::collections::BTreeSet<UnitId>) {
+        if &self.off_core == off_core {
+            return;
+        }
+        let changed: Vec<UnitId> = self
+            .off_core
+            .symmetric_difference(off_core)
+            .copied()
+            .collect();
+        self.off_core.clone_from(off_core);
+        for id in changed {
+            if self.units.contains_key(&id) {
+                self.mark_status(id);
+            }
+        }
+    }
+
+    /// Whether `id` is a runnable PPU thread waiting for a PPE hardware
+    /// thread.
+    pub fn is_off_core(&self, id: UnitId) -> bool {
+        self.off_core.contains(&id) && self.status_beneath_hold(id) == Some(UnitStatus::Runnable)
+    }
+
+    /// Whether any PPU thread waits for a PPE hardware thread.
+    pub(crate) fn any_off_core(&self) -> bool {
+        self.off_core
+            .iter()
+            .any(|&id| self.status_beneath_hold(id) == Some(UnitStatus::Runnable))
     }
 
     /// The status of a unit beneath a suspension hold: the runtime

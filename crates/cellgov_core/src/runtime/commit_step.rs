@@ -362,7 +362,10 @@ impl Runtime {
         };
         // When this commit left the issuer parked or finished, the lowest
         // runnable clock can sit past this commit's tick. An event due
-        // before that clock fires here, in this commit.
+        // before that clock fires here, in this commit. A PPU thread this
+        // commit parked, woke or saw yield changes which ones hold the
+        // PPE, and so which clock is lowest.
+        self.place_ppe_threads();
         self.registry.sync_clocks(self.time);
         let lowest = match self.next_event_time() {
             Some(_) => self.registry.lowest_runnable_clock(),
@@ -467,6 +470,9 @@ impl Runtime {
         // Every guest write of this commit has landed, and any of them
         // can have cleared the reservation of a unit waiting on an event.
         self.wake_reservation_lost_waiters();
+        // The runnable set a caller reads before the next step is the
+        // one that step chooses from.
+        self.place_ppe_threads();
         self.registry.sync_clocks(self.time);
 
         // Breaks logged after the dispatch-time drain (apply_lv2_effects

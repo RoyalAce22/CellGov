@@ -1,0 +1,22 @@
+[test]
+name = "ppu_sched_third"
+
+# A hardware probe of LV2's PPU thread scheduling with more runnable
+# threads than the PPE's two hardware threads: six phases of spinner
+# threads, at equal and graded priorities, with one spinner yielding or
+# sleeping, and beside a busy main thread. Each spinner records its
+# rounds, its first and last round and the gaps it did not run in, from
+# the time base. The console capture is the answer; ppu/main.c's header
+# lists the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 1216 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1216 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 90000

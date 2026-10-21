@@ -107,6 +107,9 @@ impl Runtime {
         }
 
         if let Some(request) = request {
+            if matches!(request, cellgov_lv2::request::Lv2Request::PpuThreadYield) {
+                self.ppe_placement.note_yield(source);
+            }
             self.dispatch_lv2_request_with_ordinal(request, source, (lev == 0).then_some(num));
             return;
         }

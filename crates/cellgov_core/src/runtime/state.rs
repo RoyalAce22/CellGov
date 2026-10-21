@@ -108,6 +108,8 @@ pub struct Runtime {
     /// `event_flag_set`) from non-waking ones (`tty_write`,
     /// `ppu_thread_get_id`).
     pub(super) step_woke_others: bool,
+    /// Which runnable PPU threads hold the PPE's hardware threads.
+    pub(super) ppe_placement: crate::runtime::ppe_placement::PpePlacement,
     /// Seed for the base `RsxLabelWrite` effects resolve against
     /// (`base + offset`), used only while the LV2 RSX context has no
     /// reports base of its own; once `sys_rsx_context_allocate` runs,

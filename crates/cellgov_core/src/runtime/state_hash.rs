@@ -95,6 +95,7 @@ impl Runtime {
             lanes::value_term(source::RSX_SEM_OFFSET, 0, &u64::from(self.rsx_sem_offset)),
             lanes::value_term(source::RSX_LABEL_BASE, 0, &u64::from(self.rsx_label_base)),
             self.rsx_call_stack.sync_term(),
+            self.ppe_placement.sync_term(),
         ] {
             sum = sum.wrapping_add(term);
         }
