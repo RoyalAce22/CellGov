@@ -7,7 +7,11 @@
 use crate::GuestTicks;
 use core::fmt;
 
-/// Cost of a unit of work in retired guest instructions.
+/// Cost of a unit of work in guest ticks.
+///
+/// A PPU step's cost is its retired instruction count, one tick each.
+/// An SPU step's cost is the ticks its instructions' pipeline cycles
+/// take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Display)]
 #[display("{_0}")]
 pub struct InstructionCost(u64);
@@ -16,7 +20,7 @@ impl InstructionCost {
     /// No cost.
     pub const ZERO: Self = Self(0);
 
-    /// Single retired instruction.
+    /// One tick: the cost of one retired PPU instruction.
     pub const ONE: Self = Self(1);
 
     /// Lift a raw count.
@@ -25,7 +29,7 @@ impl InstructionCost {
         Self(raw)
     }
 
-    /// Underlying instruction count.
+    /// Underlying tick count.
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0
@@ -33,7 +37,7 @@ impl InstructionCost {
 }
 
 impl From<InstructionCost> for GuestTicks {
-    /// One retired instruction equals one guest tick.
+    /// The cost already counts guest ticks.
     #[inline]
     fn from(cost: InstructionCost) -> Self {
         GuestTicks::new(cost.raw())

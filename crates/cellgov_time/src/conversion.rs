@@ -3,13 +3,13 @@
 
 use cellgov_ps3_abi::hw::ppu::CELL_PPU_TIMEBASE_HZ;
 
-/// Simulated rate at which the interpreted PPU "runs", in instructions
-/// per simulated wall-clock second.
+/// Guest ticks per simulated wall-clock second.
 ///
-/// `GuestTicks` increments once per retired instruction. 10^9 ticks/s
-/// makes 1 tick = 1 nanosecond of simulated time, which keeps the
-/// tick-to-(sec,nsec) conversion integer-exact. Not a cycle-accurate
-/// model; the interpreter does not simulate IPC.
+/// 10^9 ticks/s makes 1 tick = 1 nanosecond of simulated time, which
+/// keeps the tick-to-(sec,nsec) conversion integer-exact. A PPU step
+/// charges one tick per retired instruction, with no IPC model. An SPU
+/// step charges the ticks its pipeline cycles take
+/// ([`spu_cycles_to_ticks`]).
 pub const SIMULATED_INSTRUCTIONS_PER_SECOND: u64 = 1_000_000_000;
 
 /// Convert a guest-tick count to the TB register value a coherent
