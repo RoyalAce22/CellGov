@@ -43,7 +43,8 @@ pub enum UnitStatus {
 
 /// The cycles a PPE thread's recent stalls at the shared issue point add
 /// to each instruction of another PPE thread, past the cycle that
-/// instruction is ready.
+/// instruction is ready, and the interval its own issues leave a thread
+/// it outranks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PpeIssuePressure {
     /// Added to each instruction other than a multiply or a VSU
@@ -56,6 +57,11 @@ pub struct PpeIssuePressure {
     /// The share, out of 256, of a multiply's own unit hold that the
     /// multiply waits again on top of [`Self::multiply_cycles`].
     pub multiply_hold_share: u32,
+    /// The thread's mean own cycles an instruction, past what a sibling
+    /// added, in 1/256 cycle: a thread it outranks issues no more often.
+    /// The runtime passes zero from a sibling that does not outrank the
+    /// receiving thread.
+    pub issue_interval: u32,
 }
 
 impl PpeIssuePressure {
@@ -65,6 +71,7 @@ impl PpeIssuePressure {
         vsu_cycles: 0,
         multiply_cycles: 0,
         multiply_hold_share: 0,
+        issue_interval: 0,
     };
 
     /// The larger of each field.
@@ -75,6 +82,7 @@ impl PpeIssuePressure {
             vsu_cycles: self.vsu_cycles.max(other.vsu_cycles),
             multiply_cycles: self.multiply_cycles.max(other.multiply_cycles),
             multiply_hold_share: self.multiply_hold_share.max(other.multiply_hold_share),
+            issue_interval: self.issue_interval.max(other.issue_interval),
         }
     }
 }
@@ -248,7 +256,8 @@ pub trait ExecutionUnit {
     /// threads share add to each instruction of another one.
     ///
     /// The runtime gives a PPE thread's step the largest of its runnable
-    /// siblings' values (`ExecutionContext::ppe_sibling_pressure`).
+    /// siblings' values (`ExecutionContext::ppe_sibling_pressure`), with
+    /// the issue interval only from siblings that outrank it.
     fn ppe_issue_pressure(&self) -> PpeIssuePressure {
         PpeIssuePressure::NONE
     }

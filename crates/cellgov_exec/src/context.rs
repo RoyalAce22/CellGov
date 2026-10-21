@@ -274,7 +274,8 @@ impl<'a> ExecutionContext<'a> {
     }
 
     /// The largest issue pressure of the other PPE hardware threads
-    /// runnable at the start of the step, field by field. None for a unit
+    /// runnable at the start of the step, field by field, with the issue
+    /// interval only from those that outrank this one. None for a unit
     /// that is not a PPE thread.
     #[inline]
     pub const fn ppe_sibling_pressure(&self) -> PpeIssuePressure {

@@ -35,6 +35,16 @@ fn pressure(
         vsu_cycles: vsu_cycles as u32,
         multiply_cycles: multiply_cycles as u32,
         multiply_hold_share,
+        issue_interval: 0,
+    }
+}
+
+/// The stalls `timing` presses a sibling by, without the issue interval
+/// an outranking thread also passes.
+fn stalls(timing: &PpeTiming) -> PpeIssuePressure {
+    PpeIssuePressure {
+        issue_interval: 0,
+        ..timing.pressure()
     }
 }
 
@@ -114,7 +124,7 @@ fn a_thread_of_dependent_divides_presses_a_sibling_by_the_shared_stalls() {
     let mut timing = PpeTiming::new();
     run(&mut timing, &state(), &[divd(); 8], 4);
     // Every cycle of the run is a divide's, so the whole hold repeats.
-    assert_eq!(timing.pressure(), divide_sibling());
+    assert_eq!(stalls(&timing), divide_sibling());
 }
 
 #[test]
@@ -129,14 +139,14 @@ fn a_thread_of_microcoded_loads_presses_a_sibling_s_multiplies_as_its_other_inst
         &[lha(17, 0), lha(18, 2), lha(19, 4), lha(20, 6)],
         8,
     );
-    assert_eq!(timing.pressure(), microcode_sibling());
+    assert_eq!(stalls(&timing), microcode_sibling());
 }
 
 #[test]
 fn a_thread_of_mfcr_presses_by_the_microcode_stall_and_repeats_no_multiply_hold() {
     let mut timing = PpeTiming::new();
     run(&mut timing, &state(), &[I::Mfcr { rt: 9 }; 8], 4);
-    assert_eq!(timing.pressure(), microcode_sibling());
+    assert_eq!(stalls(&timing), microcode_sibling());
 }
 
 #[test]
@@ -165,7 +175,7 @@ fn a_thread_of_dependent_multiplies_presses_by_a_share_of_its_wait() {
     // to 9.
     let mut timing = PpeTiming::new();
     run(&mut timing, &state(), &[mulld(); 8], 4);
-    assert_eq!(timing.pressure(), pressure(6, 3, 9, 0));
+    assert_eq!(stalls(&timing), pressure(6, 3, 9, 0));
 }
 
 #[test]
@@ -174,7 +184,7 @@ fn a_thread_of_dependent_fadds_presses_by_half_its_wait_in_the_vsu_queue() {
     // counts half: 4.5. Half of that is 2, and half again 1.
     let mut timing = PpeTiming::new();
     run(&mut timing, &state(), &[fadd(0, 12); 8], 4);
-    assert_eq!(timing.pressure(), pressure(2, 1, 3, 0));
+    assert_eq!(stalls(&timing), pressure(2, 1, 3, 0));
 }
 
 #[test]
@@ -187,7 +197,7 @@ fn a_thread_of_independent_adds_presses_a_sibling_by_nothing() {
         &[addi(17), addi(18), addi(19), addi(20)],
         8,
     );
-    assert_eq!(timing.pressure(), PpeIssuePressure::NONE);
+    assert_eq!(stalls(&timing), PpeIssuePressure::NONE);
 }
 
 #[test]

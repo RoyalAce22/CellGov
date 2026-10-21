@@ -390,6 +390,15 @@ impl Runtime {
     ///
     /// [CBE-Handbook p:301 s:10.2.3.1] the threads share the issue stall
     /// point: a stall at IS2 stalls both threads.
+    ///
+    /// [CBE-Handbook p:310 s:10.5] with `TSCR[DISP_CNT]` = 1 and unequal
+    /// `TSRL[TP]` priorities, the higher-priority thread gets the dispatch
+    /// slot whenever it can use it. The handbook does not say which thread
+    /// LV2 gives the higher one. In the `ppu_issue_priority` capture a
+    /// thread created after the primary issues as the lower-priority one
+    /// at an LV2 priority below, equal to and above the primary's, so the
+    /// order is the threads' creation order. The issue interval of the
+    /// largest pressure comes only from siblings created before `unit`.
     fn ppe_siblings(&self, unit: UnitId) -> (u32, cellgov_exec::PpeIssuePressure) {
         let ppe = |id: UnitId| self.registry.get(id).filter(|u| u.shares_ppe_issue());
         if ppe(unit).is_none() {
@@ -397,14 +406,17 @@ impl Runtime {
         }
         let mut others = 0u32;
         let mut pressure = cellgov_exec::PpeIssuePressure::NONE;
-        for sibling in self
-            .last_runnable
-            .iter()
-            .filter(|&&id| id != unit)
-            .filter_map(|&id| ppe(id))
-        {
+        for &id in self.last_runnable.iter().filter(|&&id| id != unit) {
+            let Some(sibling) = ppe(id) else {
+                continue;
+            };
             others = others.saturating_add(1);
-            pressure = pressure.max(sibling.ppe_issue_pressure());
+            let mut p = sibling.ppe_issue_pressure();
+            // Units take ids in the order they are created.
+            if id > unit {
+                p.issue_interval = 0;
+            }
+            pressure = pressure.max(p);
         }
         (others, pressure)
     }
@@ -434,3 +446,7 @@ impl Runtime {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/ppe_order_tests.rs"]
+mod ppe_order_tests;

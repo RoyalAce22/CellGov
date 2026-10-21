@@ -53,6 +53,8 @@ struct Scheduled {
     sibling: u64,
     /// The sibling's stall alone.
     stalled: u64,
+    /// The cycle the sibling's stall began at.
+    began: u64,
 }
 
 /// The older instruction of an open dispatch group.
@@ -106,6 +108,13 @@ pub(crate) struct Core {
     /// busy unit. Each instruction weighs one in
     /// [`PRESSURE_WINDOW_INSTRUCTIONS`].
     operand_wait: u32,
+    /// This thread's recent mean cycles between its own issues, in 1/256
+    /// cycle, past what a sibling added. Each instruction weighs one in
+    /// [`PRESSURE_WINDOW_INSTRUCTIONS`].
+    interval: u32,
+    /// The earliest cycle, in 1/256 cycle, an outranking sibling leaves
+    /// this thread's next instruction a dispatch slot at.
+    gate: u64,
 }
 
 /// [`Core::divide_share`] for a thread that spends all its cycles on
@@ -116,7 +125,8 @@ const SHARE_ONE: u32 = 1 << 16;
 /// average over.
 const PRESSURE_WINDOW_CYCLES: u64 = 64;
 
-/// The instructions [`Core::operand_wait`] averages over.
+/// The instructions [`Core::operand_wait`] and [`Core::interval`] average
+/// over.
 const PRESSURE_WINDOW_INSTRUCTIONS: u32 = 8;
 
 /// A store still in the store queue.
@@ -239,6 +249,8 @@ impl PpeTiming {
                 divide_share: 0,
                 alone_share: 0,
                 operand_wait: 0,
+                interval: 0,
+                gate: 0,
             },
             tables: Box::new(Tables {
                 caches: Caches::new(),
@@ -262,10 +274,16 @@ impl PpeTiming {
             self.hold = k::PPU_SMT_SIBLING_HOLD_CYCLES;
             self.shared_stall = pressure;
         }
+        // A gate set by a sibling that no longer outranks this thread holds
+        // nothing once an outranking one returns.
+        if self.shared_stall.issue_interval == 0 {
+            let c = &mut self.core;
+            c.gate = c.gate.min(c.floor.saturating_mul(256));
+        }
     }
 
     /// What this thread's recent stalls at the shared issue point add to
-    /// each instruction of a sibling thread.
+    /// each instruction of a sibling thread, and its mean issue interval.
     ///
     /// [CBE-Handbook p:301 s:10.2.3.1] a stall at IS2 stalls both threads.
     pub(crate) fn pressure(&self) -> PpeIssuePressure {
@@ -292,6 +310,7 @@ impl PpeTiming {
                 cap,
             ),
             multiply_hold_share: (c.divide_share * 256 + SHARE_ONE / 2) / SHARE_ONE,
+            issue_interval: c.interval,
         }
     }
 
@@ -391,14 +410,29 @@ impl PpeTiming {
         } else {
             0
         };
+        let began = t;
         t += stalled;
+        // [CBE-Handbook p:310 s:10.5] with TSCR[DISP_CNT] = 1 an outranking
+        // sibling takes every dispatch slot it can use. The gate's length is
+        // the `ppu_issue_sibling` capture's: there a lower-priority thread
+        // beside a dependent chain issues about once to each of the chain's
+        // instructions, though the chain cannot use the slots between them.
+        let gated = if s.issue_interval != 0 {
+            let gate = c.gate >> 8;
+            let gated = gate.saturating_sub(t);
+            t = t.max(gate);
+            gated
+        } else {
+            0
+        };
         if op.words != 0 {
             t += k::PPU_MICROCODE_ROM_CYCLES;
         }
         Scheduled {
             issue: t,
-            sibling: held + stalled,
+            sibling: held + stalled + gated,
             stalled,
+            began,
         }
     }
 
@@ -411,21 +445,17 @@ impl PpeTiming {
             issue: t,
             sibling,
             stalled,
+            began,
         } = self.schedule(pc, op);
         let (fetched, opens) = self.fetch(pc);
+        let outranked = u64::from(self.shared_stall.issue_interval);
         let c = &mut self.core;
+        c.gate = c.gate.max(t.saturating_mul(256)).saturating_add(outranked);
         // A result still pending when the sibling's stall began comes that
         // much later: in the `ppu_issue_units` capture a dependent `fadd`
         // with an independent `addi` after each waits its latency and both
         // stalls. No capture times a load miss's result this way.
         if stalled != 0 {
-            let began = t
-                - stalled
-                - if op.words != 0 {
-                    k::PPU_MICROCODE_ROM_CYCLES
-                } else {
-                    0
-                };
             for r in c.ready.iter_mut().chain(c.addr_ready.iter_mut()) {
                 if *r > began {
                     *r += stalled;
@@ -720,6 +750,9 @@ fn weigh(share: u32, w: u64, counts: bool) -> u32 {
 /// Add an instruction that took `own` cycles of this thread's own to the
 /// averages [`PpeTiming::pressure`] reads.
 fn note_pressure(c: &mut Core, op: &Op, own: u64) {
+    let n = PRESSURE_WINDOW_INSTRUCTIONS;
+    let interval = own.saturating_mul(256).min(u64::from(u32::MAX));
+    c.interval = ((u64::from(c.interval) * u64::from(n - 1) + interval) / u64::from(n)) as u32;
     let divide = divides(op);
     let alone = issues_alone_for_long(op);
     c.divide_share = weigh(c.divide_share, own, divide);
@@ -737,7 +770,6 @@ fn note_pressure(c: &mut Core, op: &Op, own: u64) {
         wait = wait.saturating_mul(num) / den;
     }
     let wait = u32::try_from(wait).unwrap_or(u32::MAX);
-    let n = PRESSURE_WINDOW_INSTRUCTIONS;
     c.operand_wait =
         ((u64::from(c.operand_wait) * u64::from(n - 1) + u64::from(wait)) / u64::from(n)) as u32;
 }

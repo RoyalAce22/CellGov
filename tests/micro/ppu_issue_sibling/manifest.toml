@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_sibling"
+
+# A hardware probe of what each timed chain costs the sibling PPU
+# thread beside it: five chains (dependent add, mulli and fadd,
+# independent addi, an L1 ld chase), alone and beside a sibling running
+# independent addi, dependent divd, mulld, fdiv or fadd, or microcoded
+# lha, in a loop of 32 instructions that counts its rounds in memory and
+# reads no time base. The console capture is the answer; ppu/main.c's
+# header lists the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 1536 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1536 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

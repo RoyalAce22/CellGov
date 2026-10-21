@@ -643,6 +643,20 @@ pub(crate) fn replay(r: &Replay, siblings: usize) -> Option<f64> {
 
 /// [`replay`] beside `siblings` PPU units that each run `sibling`.
 pub(crate) fn replay_beside(r: &Replay, siblings: usize, sibling: &Sibling) -> Option<f64> {
+    replay_measured(r, siblings, sibling).map(|m| m.cycles)
+}
+
+/// What [`replay_measured`] times over the loop's second half.
+pub(crate) struct Measured {
+    /// The loop's cycles an iteration.
+    pub(crate) cycles: f64,
+    /// The first sibling's own cycles an iteration of its loop, or `None`
+    /// with no sibling or none of its iterations in the half.
+    pub(crate) sibling_cycles: Option<f64>,
+}
+
+/// [`replay_beside`], with the first sibling's rate over the same half.
+pub(crate) fn replay_measured(r: &Replay, siblings: usize, sibling: &Sibling) -> Option<Measured> {
     let words = r.words;
     let ring_end = r
         .seeds
@@ -727,18 +741,48 @@ pub(crate) fn replay_beside(r: &Replay, siblings: usize, sibling: &Sibling) -> O
         Some(k) => s.gpr[k],
         None => s.ctr(),
     };
+    // The first sibling's pc, and its clock and count of passes through
+    // its loop's head so far.
+    let sibling_pc = |rt: &Runtime| {
+        sibling_ids.first().map(|&id| {
+            rt.registry()
+                .get(id)
+                .and_then(|u| u.as_any().downcast_ref::<PpuExecutionUnit>())
+                .expect("the sibling PPU unit")
+                .state()
+                .pc
+        })
+    };
+    let mut sibling_rounds = 0u64;
+    let mut sibling_was_at_head = false;
+    let sibling_mark = |rt: &Runtime, rounds: u64| {
+        sibling_ids
+            .first()
+            .map(|&id| (rt.registry().clock(id).raw(), rounds))
+    };
     let mut halfway = None;
     // A sibling's instructions cost fewer cycles than most loops', so the
-    // scheduler gives it several steps for each of the loop's.
+    // scheduler gives it several steps for each of the loop's. A loop
+    // with an inner loop runs up to four times its words an iteration.
     let bound =
-        (2 * REPLAY_ITERATIONS * (words.len() as u64 + 1) + 16) * (16 * siblings as u64 + 1);
+        4 * (2 * REPLAY_ITERATIONS * (words.len() as u64 + 1) + 16) * (16 * siblings as u64 + 1);
     for _ in 0..bound {
         let s = state(&rt);
         if s.pc == exit {
             break;
         }
+        if let Some(pc) = sibling_pc(&rt) {
+            let at_head = pc == SIBLING_CODE;
+            if at_head && !sibling_was_at_head {
+                sibling_rounds += 1;
+            }
+            sibling_was_at_head = at_head;
+        }
         if halfway.is_none() && s.pc == CODE && left(&s) == REPLAY_ITERATIONS {
-            halfway = Some(rt.registry().clock(unit).raw());
+            halfway = Some((
+                rt.registry().clock(unit).raw(),
+                sibling_mark(&rt, sibling_rounds),
+            ));
         }
         if rt.registry().effective_status(unit) == Some(UnitStatus::Faulted) {
             return None;
@@ -758,8 +802,15 @@ pub(crate) fn replay_beside(r: &Replay, siblings: usize, sibling: &Sibling) -> O
             r.loop_index,
         );
     }
-    let halfway = halfway.expect("the loop passed its halfway count");
-    Some((rt.registry().clock(unit).raw() - halfway) as f64 / REPLAY_ITERATIONS as f64)
+    let (halfway, sibling_half) = halfway.expect("the loop passed its halfway count");
+    let sibling_cycles = match (sibling_half, sibling_mark(&rt, sibling_rounds)) {
+        (Some((c0, n0)), Some((c1, n1))) if n1 > n0 => Some((c1 - c0) as f64 / (n1 - n0) as f64),
+        _ => None,
+    };
+    Some(Measured {
+        cycles: (rt.registry().clock(unit).raw() - halfway) as f64 / REPLAY_ITERATIONS as f64,
+        sibling_cycles,
+    })
 }
 
 /// The `ppu_issue_table` loop whose body the interpreter refuses:

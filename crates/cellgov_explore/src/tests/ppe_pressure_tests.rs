@@ -16,6 +16,7 @@ const DIVIDES: PpeIssuePressure = PpeIssuePressure {
     vsu_cycles: 13,
     multiply_cycles: 13,
     multiply_hold_share: 256,
+    issue_interval: 0,
 };
 
 /// A footprint of a step PPE thread `unit` took.

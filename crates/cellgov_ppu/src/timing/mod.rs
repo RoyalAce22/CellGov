@@ -24,3 +24,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/pressure_tests.rs"]
 mod pressure_tests;
+
+#[cfg(test)]
+#[path = "tests/priority_tests.rs"]
+mod priority_tests;
