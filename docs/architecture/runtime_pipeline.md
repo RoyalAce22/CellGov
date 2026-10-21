@@ -195,7 +195,9 @@ The DMA queue is every SPU's MFC command queue.
 its destination at completion:
 
 - a get lands its bytes in its issuer's local store;
-- a put reads its issuer's local store.
+- a put reads its issuer's local store. A put from local store longer
+  than 128 bytes is queued as its bus requests, which complete one
+  after another across the put's time, and each reads its own bytes.
 
 A DMA completion leaves the queue at fire time.
 

@@ -1,0 +1,39 @@
+[test]
+name = "spu_put_source_timing"
+
+# A hardware probe: an SPU thread puts a buffer and then stores over it,
+# after 0 to 512 spins, before it waits for the put. A large put has its
+# first and last bytes stored over straight after its issue. The capture
+# holds what each put wrote, which says when the MFC read its source.
+
+[observe]
+# The failed step and its code; the join's answer, cause and status; the
+# SPU's exit status; the block's address; the first word of each small
+# put; the large put's first, last and middle words: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+short_name = "spuputsourcetiming"
+display_name = "CellGov SPU put source timing microtest"
+eboot_candidates = ["spu_put_source_timing.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

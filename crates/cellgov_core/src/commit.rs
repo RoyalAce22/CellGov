@@ -31,6 +31,18 @@ use cellgov_time::GuestTicks;
 /// A fence or barrier holds the command behind the queued commands its
 /// ordering names, whatever the latency model says of the transfer
 /// alone.
+///
+/// A put from local store longer than one bus request queues as its bus
+/// requests. Each bus request completes at its share of the put's time:
+/// the bytes through its end, over the put's length. The runtime reads a
+/// bus request's bytes of the source when it completes. A store the
+/// issuer makes while the put runs thus reaches only the part the MFC has
+/// not read yet.
+/// [Kistler2006 p:16 s:DMA flow] the DMAC unrolls a DMA command into bus requests of up to 128 bytes each, one block after the next, less where alignment or the remaining size requires.
+/// The `spu_put_source_progress` console capture: stores over a 16 KB
+/// put's source, made while the put runs, reach its last bytes and not
+/// its first. The `spu_putb_source_progress` capture: a put with a tag
+/// barrier reads its source the same way.
 pub(crate) fn queue_transfer(
     queue: &mut DmaQueue,
     latency: &dyn DmaLatencyModel,
@@ -38,10 +50,23 @@ pub(crate) fn queue_transfer(
     request: &cellgov_dma::DmaRequest,
     payload: Option<Vec<u8>>,
 ) {
-    let completion_time = latency
-        .completion_time(request, now, queue)
-        .max(queue.ordering_floor(request));
-    queue.enqueue(DmaCompletion::new(*request, completion_time), payload);
+    use cellgov_ps3_abi::hw::spu::MFC_BUS_REQUEST_BYTES;
+    let floor = queue.ordering_floor(request);
+    let completion_time = latency.completion_time(request, now, queue).max(floor);
+    let len = request.length();
+    if payload.is_some() || !request.local_store_source() || len <= MFC_BUS_REQUEST_BYTES {
+        queue.enqueue(DmaCompletion::new(*request, completion_time), payload);
+        return;
+    }
+    let span = completion_time.raw().saturating_sub(now.raw());
+    for (end, part) in request.bus_requests(MFC_BUS_REQUEST_BYTES) {
+        let at = if end == len {
+            completion_time
+        } else {
+            GuestTicks::new(now.raw() + (span * end).div_ceil(len)).max(floor)
+        };
+        queue.enqueue(DmaCompletion::new(part, at), None);
+    }
 }
 
 /// Queue `command`, which the MFC refuses, for `issuer` at `now`.
@@ -749,3 +774,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/dma_argument_tests.rs"]
 mod dma_argument_tests;
+
+#[cfg(test)]
+#[path = "tests/put_bus_request_tests.rs"]
+mod put_bus_request_tests;

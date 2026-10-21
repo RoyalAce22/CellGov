@@ -5,7 +5,7 @@
 //! commit pipeline.
 
 use cellgov_event::UnitId;
-use cellgov_mem::ByteRange;
+use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::hw::spu::MfcTagId;
 
 /// Direction of a modeled DMA transfer.
@@ -244,11 +244,55 @@ impl DmaRequest {
     pub const fn length(self) -> u64 {
         self.source.length()
     }
+
+    /// The transfer as its bus requests, front to back, each with the
+    /// count of the transfer's bytes through its end.
+    ///
+    /// A part moves up to `line` bytes. Every part except the last ends on
+    /// a `line` boundary of the destination. Each part keeps the issuer,
+    /// tag and command word. Of the other fields:
+    ///
+    /// - Only the first part keeps the ordering.
+    /// - Only the last part keeps the slot and the stall-and-notify flag.
+    ///
+    /// A transfer of no bytes has no parts. A `line` of 0 gives no parts.
+    ///
+    /// The first part keeps the ordering so that a tag barrier holds the
+    /// later commands of its group behind the commands queued before the
+    /// transfer. The transfer's own parts are not among those commands.
+    /// [CBEA p:69 s:7.9] a tag-specific barrier orders the command and every later command of its tag group after every preceding command in the group.
+    pub fn bus_requests(self, line: u64) -> impl Iterator<Item = (u64, Self)> {
+        let len = self.length();
+        let (src, dst) = (self.source.start().raw(), self.destination.start().raw());
+        let mut at = 0u64;
+        core::iter::from_fn(move || {
+            if at >= len || line == 0 {
+                return None;
+            }
+            let n = (line - dst.wrapping_add(at) % line).min(len - at);
+            let end = at + n;
+            let last = end == len;
+            let mut part = self;
+            part.source = ByteRange::new(GuestAddr::new(src + at), n)?;
+            part.destination = ByteRange::new(GuestAddr::new(dst + at), n)?;
+            if at > 0 {
+                part.ordering = MfcOrdering::None;
+            }
+            part.holds_slot = self.holds_slot && last;
+            part.stall_notify = self.stall_notify && last;
+            at = end;
+            Some((end, part))
+        })
+    }
 }
 
 #[cfg(test)]
 #[path = "tests/request_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/bus_request_tests.rs"]
+mod bus_request_tests;
 
 #[cfg(test)]
 #[path = "tests/tag_bound_tests.rs"]

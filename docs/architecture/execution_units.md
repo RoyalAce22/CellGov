@@ -203,10 +203,12 @@ An MFC transfer reads and writes local store when it completes,
 between two of the unit's steps [CBEA p:173 s:10.3]:
 
 - a get's bytes land then;
-- a put reads its source then.
+- a put reads its source then, one bus request of up to 128 bytes at a
+  time, front to back [Kistler2006 p:16 s:DMA flow].
 
 A load or fetch sees a get's bytes once the tag group reads
-complete. A store to a put's source before then reaches the put.
+complete. A store to a put's source before then reaches the part of
+the put the MFC has not read yet.
 
 Every channel write the unit accepts governs the next instruction.
 The channels that set execution state refuse with an

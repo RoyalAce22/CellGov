@@ -370,12 +370,18 @@ impl Runtime {
                 continue;
             }
             // A unit stalled on another channel stays parked: only that
-            // channel's producer gives it a count.
+            // channel's producer gives it a count. A unit stalled for a
+            // queue slot stays parked through a completion that frees
+            // none, such as a bus request before a put's last.
             if self
                 .registry
                 .get(c.issuer())
                 .and_then(|unit| unit.channel_stall())
-                .is_some_and(|stall| !stall.wake.ends_on_dma_completion())
+                .is_some_and(|stall| {
+                    !stall.wake.ends_on_dma_completion()
+                        || (stall.wake == cellgov_exec::StallWake::CommandQueueSlot
+                            && !c.request().holds_slot())
+                })
             {
                 continue;
             }

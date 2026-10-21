@@ -454,11 +454,13 @@ fn issue_transfer(
 
 /// A transfer between `local` in the issuer's local store and `main`.
 ///
-/// The runtime reads the source and writes the destination when the
-/// transfer completes. A store the issuer makes to a put's source while
-/// the put is in flight reaches the put, and the landing of a get
-/// replaces a store to its destination. A program that orders its own
-/// accesses against a transfer waits for the tag group first.
+/// The runtime reads a put's source and writes its destination as the
+/// put's bus requests complete, front to back. It lands a get when the
+/// whole get completes. A store the issuer makes to a put's source while
+/// the put is in flight reaches the part the MFC has not read yet. The
+/// landing of a get replaces a store to its destination. A program
+/// that orders its own accesses against a transfer waits for the tag
+/// group first.
 ///
 /// [CBEA p:173 s:10.3] the local-storage access of a queued command is complete when its tag group reads complete.
 /// [SPU-ISA p:253 s:13] an external device's local-storage accesses can expose the SPU's reordering of its own, and the section names how to order the two.

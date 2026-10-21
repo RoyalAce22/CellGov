@@ -821,7 +821,132 @@ pub const CASES: &[Case] = &[
             ("pad2", Exact(0)),
         ],
     },
+    Case {
+        name: "spu_put_source_timing",
+        max_steps: 1_000_000,
+        fields: &[
+            ("failed_step", Exact(0)),
+            ("failed_rc", Exact(0)),
+            ("join", Exact(0)),
+            ("join_cause", Exact(group_join_cause::ALL_THREADS_EXIT)),
+            ("join_status", Exact(0)),
+            ("exit_status", Exact(0)),
+            ("block", NonZero),
+            ("pad0", Exact(0)),
+            // A store within a few spins of a small put's issue reaches
+            // it; after 64 spins the MFC has read the source.
+            ("small_0_spins", Exact(0x5050_5050)),
+            ("small_1_spin", Exact(0x5151_5151)),
+            ("small_8_spins", Exact(0x5252_5252)),
+            ("small_64_spins", Exact(0xA3A3_A3A3)),
+            ("small_512_spins", Exact(0xA4A4_A4A4)),
+            // Stores straight after a 16 KB put's issue reach both ends.
+            ("large_first", Exact(0x7C7C_7C7C)),
+            ("large_last", Exact(0x7C7C_7C7C)),
+            ("large_middle", Exact(0xC7C7_C7C7)),
+        ],
+    },
+    Case {
+        name: "spu_put_source_progress",
+        max_steps: 20_000_000,
+        fields: &[
+            ("failed_step", Exact(0)),
+            ("failed_rc", Exact(0)),
+            ("join", Exact(0)),
+            ("join_cause", Exact(group_join_cause::ALL_THREADS_EXIT)),
+            ("join_status", Exact(0)),
+            ("exit_status", Exact(0)),
+            ("block", NonZero),
+            ("pad0", Exact(0)),
+            ("spins_32_first", Exact(0x7070_7070)),
+            ("spins_32_middle", Exact(0x7070_7070)),
+            ("spins_32_last", Exact(0x7070_7070)),
+            // The MFC reads a 16 KB put's source front to back: after 128
+            // spins it has read the first and middle bytes, and the store
+            // still reaches the last.
+            ("spins_128_first", Exact(0xC1C1_C1C1)),
+            ("spins_128_middle", Exact(0xC1C1_C1C1)),
+            ("spins_128_last", Exact(0x7171_7171)),
+            ("spins_512_first", Exact(0xC2C2_C2C2)),
+            ("spins_512_middle", Exact(0xC2C2_C2C2)),
+            ("spins_512_last", Exact(0xC2C2_C2C2)),
+            ("spins_2048_first", Exact(0xC3C3_C3C3)),
+            ("spins_2048_middle", Exact(0xC3C3_C3C3)),
+            ("spins_2048_last", Exact(0xC3C3_C3C3)),
+        ],
+    },
+    Case {
+        name: "spu_putb_source_progress",
+        max_steps: 20_000_000,
+        fields: &[
+            ("failed_step", Exact(0)),
+            ("failed_rc", Exact(0)),
+            ("join", Exact(0)),
+            ("join_cause", Exact(group_join_cause::ALL_THREADS_EXIT)),
+            ("join_status", Exact(0)),
+            ("exit_status", Exact(0)),
+            ("block", NonZero),
+            ("pad0", Exact(0)),
+            ("spins_32_first", Exact(0x7070_7070)),
+            ("spins_32_middle", Exact(0x7070_7070)),
+            ("spins_32_last", Exact(0x7070_7070)),
+            // A put with a tag barrier reads its source front to back, as
+            // a plain put does.
+            ("spins_128_first", Exact(0xC1C1_C1C1)),
+            ("spins_128_middle", Exact(0xC1C1_C1C1)),
+            ("spins_128_last", Exact(0x7171_7171)),
+            ("spins_512_first", Exact(0xC2C2_C2C2)),
+            ("spins_512_middle", Exact(0xC2C2_C2C2)),
+            ("spins_512_last", Exact(0xC2C2_C2C2)),
+            ("spins_2048_first", Exact(0xC3C3_C3C3)),
+            ("spins_2048_middle", Exact(0xC3C3_C3C3)),
+            ("spins_2048_last", Exact(0xC3C3_C3C3)),
+        ],
+    },
+    Case {
+        name: "spu_put_source_rate",
+        max_steps: 20_000_000,
+        fields: &PUT_SOURCE_RATE_FIELDS,
+    },
 ];
+
+/// spu_put_source_rate's payload: per stored-over offset (0x80, 0x200,
+/// 0x800, 0x2000) and spin count (0, 4, 16, 64, 256), whether the 16 KB
+/// put wrote its old bytes (0xC5) or the store's (0x5C) there.
+const PUT_SOURCE_RATE_FIELDS: [(&str, Expect); 28] = {
+    const OLD: Expect = Exact(0xC5C5_C5C5);
+    const NEW: Expect = Exact(0x5C5C_5C5C);
+    [
+        ("failed_step", Exact(0)),
+        ("failed_rc", Exact(0)),
+        ("join", Exact(0)),
+        ("join_cause", Exact(group_join_cause::ALL_THREADS_EXIT)),
+        ("join_status", Exact(0)),
+        ("exit_status", Exact(0)),
+        ("block", NonZero),
+        ("pad0", Exact(0)),
+        ("at_0x80_spins_0", NEW),
+        ("at_0x80_spins_4", NEW),
+        ("at_0x80_spins_16", NEW),
+        ("at_0x80_spins_64", OLD),
+        ("at_0x80_spins_256", OLD),
+        ("at_0x200_spins_0", NEW),
+        ("at_0x200_spins_4", NEW),
+        ("at_0x200_spins_16", NEW),
+        ("at_0x200_spins_64", OLD),
+        ("at_0x200_spins_256", OLD),
+        ("at_0x800_spins_0", NEW),
+        ("at_0x800_spins_4", NEW),
+        ("at_0x800_spins_16", NEW),
+        ("at_0x800_spins_64", OLD),
+        ("at_0x800_spins_256", OLD),
+        ("at_0x2000_spins_0", NEW),
+        ("at_0x2000_spins_4", NEW),
+        ("at_0x2000_spins_16", NEW),
+        ("at_0x2000_spins_64", NEW),
+        ("at_0x2000_spins_256", OLD),
+    ]
+};
 
 /// The payload of spu_list_bad_size and spu_list_bad_ea, in the order
 /// ppu/main.c lists. The list's second element raises a DMA alignment

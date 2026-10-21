@@ -1,0 +1,40 @@
+[test]
+name = "spu_putb_source_progress"
+
+# A hardware probe: an SPU thread puts a 16 KB buffer with a tag barrier
+# (putb), the spu_put_source_progress cases otherwise, spins 32 to 2048
+# times, then stores over the buffer's first, middle and last 16 bytes
+# before it waits for the put. The capture holds what each put wrote at
+# the three places, which says how far through its source the MFC read.
+
+[observe]
+# The failed step and its code; the join's answer, cause and status; the
+# SPU's exit status; the block's address; per case the first, middle and
+# last word its put wrote: 80 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 80 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+short_name = "spuputbsourceprogress"
+display_name = "CellGov SPU putb source progress microtest"
+eboot_candidates = ["spu_putb_source_progress.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

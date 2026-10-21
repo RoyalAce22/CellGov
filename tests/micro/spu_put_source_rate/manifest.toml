@@ -1,0 +1,40 @@
+[test]
+name = "spu_put_source_rate"
+
+# A hardware probe: an SPU thread puts a 16 KB buffer, spins 0 to 256
+# times, then stores over 16 bytes of the buffer at offset 0x80, 0x200,
+# 0x800 or 0x2000 before it waits for the put. The capture holds what each
+# put wrote at the stored-over offset, which says how soon the MFC read
+# each part of its source.
+
+[observe]
+# The failed step and its code; the join's answer, cause and status; the
+# SPU's exit status; the block's address; per case the word its put wrote
+# at the stored-over offset: 112 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 112 },
+]
+
+[expect]
+outcome = "completed"
+
+[cellgov.title]
+short_name = "spuputsourcerate"
+display_name = "CellGov SPU put source rate microtest"
+eboot_candidates = ["spu_put_source_rate.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
+
+[cellgov.checkpoint]
+kind = "process-exit"
+
+[ps3]
+# The PPU opens the SPU image under /app_home/, so it deploys
+# beside the EBOOT.
+files = ["spu_main.elf"]

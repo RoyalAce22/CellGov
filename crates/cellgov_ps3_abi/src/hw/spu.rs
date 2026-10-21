@@ -413,6 +413,10 @@ pub const MFC_GETLF: u32 = 0x46;
 ///
 /// [CBEA p:59 s:7.4] a list element is a doubleword: the stall-and-notify flag and transfer size, then the low effective-address word.
 pub const MFC_LIST_ELEMENT_BYTES: u32 = 8;
+/// The most bytes one bus request of a DMA transfer moves.
+///
+/// [Kistler2006 p:16 s:DMA flow] the DMAC unrolls a DMA command into bus requests of up to 128 bytes each, one block after the next, less where alignment or the remaining size requires.
+pub const MFC_BUS_REQUEST_BYTES: u64 = 128;
 /// The stall-and-notify flag in a list element's first word, bit 0.
 ///
 /// [CBEA p:59 s:7.4] bit 0 of a list element is the stall-and-notify flag, bits 1:16 are reserved, and bits 17:31 are the transfer size.
