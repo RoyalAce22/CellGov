@@ -359,6 +359,41 @@ pub const SPU_HINT_STALL_END_INSNS: u32 = 32;
 /// instruction issues again one branch-miss refetch later.
 pub const SPU_CHANNEL_RETRY_WINDOW_CYCLES: u64 = 5;
 
+/// The fetch lines the SPU holds past the one it issues from, after a
+/// branch or a flush.
+///
+/// [CBE-Handbook p:66 s:3.1.1.3 Table 3-1] inline fetch has the lowest local-store priority, below loads, stores and hint fetches.
+///
+/// The `spu_issue_fetch` capture times loops of 64 to 224 lqa from a
+/// 128-byte-aligned target. A loop of 88 lqa with its ai and brnz, three
+/// lines, runs without a runout; 96 lqa run out once, in the fourth line.
+pub const SPU_FETCH_LINES_HELD: u32 = 2;
+
+/// The cycles after the issue of the first instruction of a line in which
+/// inline prefetch can still find a cycle no load, store or hint takes.
+/// The issue cycle itself also counts.
+///
+/// [CBE-Handbook p:774 s:B.1.4] the prefetcher has nine cycles in which it must succeed in securing a slot; if the LS is busy for that interval, instruction runout can occur.
+///
+/// The `spu_issue_fetch` capture bounds the window between 1 and 31
+/// cycles:
+///
+/// - The loop of 64 lqa, lnop and 64 lqa runs out once, though the lnop
+///   frees a slot 32 cycles into the window.
+/// - The loop of four times 32 lqa and lnop does not run out, and one of
+///   its lnop frees a slot 1 cycle into its window.
+pub const SPU_PREFETCH_WINDOW_CYCLES: u64 = 9;
+
+/// The cycles an instruction runout costs: the issue delay of the first
+/// instruction of a line whose prefetch found no free cycle.
+///
+/// [CBE-Handbook p:774 s:B.1.4] a prefetch late enough to run out delays the next issue by one cycle for every cycle the prefetch is delayed.
+///
+/// The `spu_issue_fetch` capture times every loop of 96 to 128 lqa at
+/// 17 cycles an iteration past its instruction count, against 3 for the
+/// loops of 64 to 88; 160 and 192 lqa at 31, and 224 at 45.
+pub const SPU_RUNOUT_CYCLES: u64 = 14;
+
 /// The cycles a getllar takes with the read of its atomic status: the
 /// `spu_dma_timing` capture's mean, in SPU cycles.
 pub const SPU_GETLLAR_CYCLES: u64 = super::mfc_timing::MFC_GETLLAR_TB_SUM as u64

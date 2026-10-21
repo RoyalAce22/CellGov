@@ -12,19 +12,131 @@
 //!
 //! The model is a pure function of the instruction stream: the cycle an
 //! instruction issues in depends only on the instructions before it, so
-//! no host time and no scheduling choice enter. Two things the console
-//! has and the model leaves out are local-store contention with DMA and
-//! instruction runout [CBE-Handbook p:774 s:B.1.4]; neither shows in the
-//! loops the `spu_issue_timing` capture measures.
+//! no host time and no scheduling choice enter. One thing the console has
+//! and the model leaves out is local-store contention with DMA: the
+//! `spu_issue_runout` capture times a loop of 64 lqa at 71 cycles an
+//! iteration beside sixteen 16 KB gets, against 67 without them.
+//!
+//! [CBE-Handbook p:66 s:3.1.1.3] DMA occupies at most one of every eight local-store cycles, so its impact on loads, stores and instruction fetch can be ignored except for highly optimized code.
 
 use crate::instruction::SpuInstruction;
 use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu_isa;
 use cellgov_ps3_abi::hw::spu_issue::{
-    branch_miss_cycles, SpuIssue, SpuPipe, SPU_CHANNEL_RETRY_WINDOW_CYCLES,
-    SPU_HINTED_NOT_TAKEN_CYCLES, SPU_HINT_READY_CYCLES, SPU_HINT_STALL_END_INSNS,
-    SPU_HINT_STALL_MIN_INSNS, SPU_ISSUE_TABLE,
+    branch_miss_cycles, SpuIssue, SpuPipe, SPU_CHANNEL_RETRY_WINDOW_CYCLES, SPU_FETCH_LINES_HELD,
+    SPU_FETCH_LINE_BYTES, SPU_HINTED_NOT_TAKEN_CYCLES, SPU_HINT_READY_CYCLES,
+    SPU_HINT_STALL_END_INSNS, SPU_HINT_STALL_MIN_INSNS, SPU_ISSUE_TABLE,
+    SPU_PREFETCH_WINDOW_CYCLES, SPU_RUNOUT_CYCLES,
 };
+
+/// Inline prefetch: which fetch lines past the issuing one the SPU
+/// holds.
+///
+/// [CBE-Handbook p:774 s:B.1.4] the prefetcher uses empty slots on the LS schedule; long sequences of loads and stores can prevent it, and the SPU runs out of instructions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Fetch {
+    /// The fetch line of the last instruction issued, or `None` after a
+    /// branch or a flush.
+    line: Option<u32>,
+    /// Bit `i` set: line `line + 1 + i` is held.
+    held: u32,
+    /// The line a prefetch request is for, and the cycle its window
+    /// opened.
+    request: Option<(u32, u64)>,
+    /// The last cycle an instruction issued in, and whether a load, a
+    /// store or a hint took the local store in it.
+    last: Option<(u64, bool)>,
+}
+
+impl Fetch {
+    /// The state before the first instruction, which issues as a branch
+    /// target does.
+    const fn new() -> Self {
+        Self {
+            line: None,
+            held: 0,
+            request: None,
+            last: None,
+        }
+    }
+
+    /// Fetch again from the next instruction issued, as after a branch.
+    fn redirect(&mut self) {
+        self.line = None;
+        self.request = None;
+    }
+
+    /// The lines held once every cycle before `cycle` has run: a request
+    /// whose window holds a cycle the local store was free in is
+    /// fetched.
+    fn held_before(&self, cycle: u64) -> u32 {
+        let (Some(line), Some((want, opened))) = (self.line, self.request) else {
+            return self.held;
+        };
+        let free = match self.last {
+            // The last issue cycle has ended, and every cycle between it
+            // and `cycle` issued nothing.
+            Some((at, busy)) if at < cycle => {
+                let first = if busy { at + 1 } else { at };
+                (first < cycle).then_some(first.max(opened))
+            }
+            Some(_) => None,
+            None => (opened < cycle).then_some(opened),
+        };
+        match free {
+            Some(at) if at < cycle && at <= opened + SPU_PREFETCH_WINDOW_CYCLES => {
+                self.held | 1 << (want - line - 1)
+            }
+            _ => self.held,
+        }
+    }
+
+    /// Whether the instruction at `pc` issues from a line inline prefetch
+    /// never fetched, at `cycle`.
+    fn runs_out(&self, pc: u32, cycle: u64) -> bool {
+        self.line
+            .is_some_and(|line| pc / SPU_FETCH_LINE_BYTES == line + 1)
+            && self.held_before(cycle) & 1 == 0
+    }
+
+    /// Record an instruction at `pc` issued at `cycle`, taking the local
+    /// store if `uses_ls`.
+    fn issue(&mut self, pc: u32, cycle: u64, uses_ls: bool) {
+        let line = pc / SPU_FETCH_LINE_BYTES;
+        let held = self.held_before(cycle);
+        if self.request.is_some() && (held != self.held || self.window_closed(cycle)) {
+            self.request = None;
+        }
+        self.held = held;
+        match self.line {
+            Some(at) if at == line => {}
+            Some(at) if at + 1 == line => {
+                // A runout fetches every line it was missing.
+                if self.held & 1 == 0 {
+                    self.held = (1 << SPU_FETCH_LINES_HELD) - 1;
+                }
+                self.held >>= 1;
+                self.line = Some(line);
+                self.request = Some((line + SPU_FETCH_LINES_HELD, cycle));
+            }
+            _ => {
+                self.line = Some(line);
+                self.held = (1 << SPU_FETCH_LINES_HELD) - 1;
+                self.request = None;
+            }
+        }
+        self.last = match self.last {
+            Some((at, busy)) if at == cycle => Some((at, busy || uses_ls)),
+            _ => Some((cycle, uses_ls)),
+        };
+    }
+
+    /// Whether the open request's window ended before `cycle`.
+    fn window_closed(&self, cycle: u64) -> bool {
+        self.request
+            .is_some_and(|(_, opened)| cycle > opened + SPU_PREFETCH_WINDOW_CYCLES)
+    }
+}
 
 /// A loaded branch hint: the branch it names and where it predicts the
 /// branch goes.
@@ -72,6 +184,8 @@ pub(crate) struct IssueSlot {
     kind: Kind,
     /// The target a hint predicts, for a branch a hint names.
     predicted: Option<u32>,
+    /// Whether the instruction takes the local store as it issues.
+    uses_ls: bool,
 }
 
 /// The SPU's issue state between instructions.
@@ -92,6 +206,8 @@ pub struct SpuPipeline {
     hint: Option<Hint>,
     /// A hint issued and not yet loaded.
     pending: Option<PendingHint>,
+    /// Inline prefetch.
+    fetch: Fetch,
 }
 
 impl Default for SpuPipeline {
@@ -113,6 +229,7 @@ impl SpuPipeline {
             channel: None,
             hint: None,
             pending: None,
+            fetch: Fetch::new(),
         }
     }
 
@@ -156,6 +273,9 @@ impl SpuPipeline {
             }
             _ => self.next_issue().max(operands_ready),
         };
+        if self.fetch.runs_out(pc, cycle) {
+            cycle += SPU_RUNOUT_CYCLES;
+        }
         let kind = kind(state, insn);
         if let Kind::Channel(group) = kind {
             if let Some((last, at)) = self.channel {
@@ -188,6 +308,7 @@ impl SpuPipeline {
             dest,
             kind,
             predicted,
+            uses_ls: uses_ls(insn),
         }
     }
 
@@ -201,6 +322,10 @@ impl SpuPipeline {
         let t = slot.cycle;
         self.elapsed = self.elapsed.max(t + 1);
         self.floor = t + 1 + u64::from(slot.issue.stall);
+        self.fetch.issue(slot.pc, t, slot.uses_ls);
+        if taken.is_some() {
+            self.fetch.redirect();
+        }
         // A hint loads once it is ready; a branch that used it issued no
         // earlier.
         if let Some(p) = self.pending.filter(|p| t >= p.ready) {
@@ -261,6 +386,7 @@ impl SpuPipeline {
         let last = self.elapsed.saturating_sub(1);
         self.floor = self.floor.max(last + branch_miss_cycles(target));
         self.pair = None;
+        self.fetch.redirect();
     }
 
     /// Resume after a park on a blocking channel.
@@ -279,10 +405,12 @@ impl SpuPipeline {
         }
     }
 
-    /// Drop every hint, as a sync or a restart does.
+    /// Drop every hint and fetch again from the next instruction, as a
+    /// sync or a restart does.
     pub(crate) fn clear_hints(&mut self) {
         self.hint = None;
         self.pending = None;
+        self.fetch.redirect();
     }
 }
 
@@ -343,6 +471,30 @@ fn kind(state: &SpuState, insn: &SpuInstruction) -> Kind {
         }
         _ => Kind::Plain,
     }
+}
+
+/// Whether `insn` takes the local store as it issues: a load, a store,
+/// or a hint, which fetches its target.
+///
+/// [CBE-Handbook p:66 s:3.1.1.3 Table 3-1] SPU loads and stores and hint fetches share priority 3, above inline fetch.
+///
+/// [CBE-Handbook p:775 s:B.1.4] hbrp arbitrates for the LS as a hint does, then leaves a hole wide enough for an instruction prefetch.
+fn uses_ls(insn: &SpuInstruction) -> bool {
+    use SpuInstruction as I;
+    matches!(
+        insn,
+        I::Lqd { .. }
+            | I::Lqx { .. }
+            | I::Lqa { .. }
+            | I::Lqr { .. }
+            | I::Stqd { .. }
+            | I::Stqx { .. }
+            | I::Stqa { .. }
+            | I::Stqr { .. }
+            | I::Hbr { p: false, .. }
+            | I::Hbra { .. }
+            | I::Hbrr { .. }
+    )
 }
 
 /// The register `insn` writes and the registers it reads.
@@ -555,3 +707,7 @@ fn operands(insn: &SpuInstruction) -> (Option<u8>, [Option<u8>; 3]) {
 #[cfg(test)]
 #[path = "tests/timing_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/timing_runout_tests.rs"]
+mod runout_tests;

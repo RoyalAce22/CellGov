@@ -1,0 +1,23 @@
+[test]
+name = "spu_issue_runout"
+
+# A hardware probe of instruction runout and local-store arbitration, on
+# a raw SPU: ten loops timed with the decrementer. Six run 65536
+# iterations of lnop, lqa or stqa, alone or paired with nop, so loads and
+# stores hold the local store in every cycle; four run 512 iterations of
+# lnop or lqa with and without sixteen 16 KB gets in flight. The PPU
+# reads back SPU_Status, SPU_NextPC, the class 0 interrupt status and
+# twelve result slots. The SPU program's header comment lists the cases;
+# the PPU program's has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 80 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

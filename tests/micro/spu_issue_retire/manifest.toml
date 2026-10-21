@@ -1,0 +1,22 @@
+[test]
+name = "spu_issue_retire"
+
+# A hardware probe of in-order retirement on one SPU pipeline, on a raw
+# SPU: five loops of 65536 iterations, each timed with the decrementer.
+# Each loop puts a 2-cycle instruction 3, 4 or 5 cycles after a 6-cycle
+# one on the even pipeline; at 4 the two would complete in the same
+# cycle. The PPU reads back SPU_Status, SPU_NextPC, the class 0
+# interrupt status and eight result slots. The SPU program's header
+# comment lists the cases; the PPU program's has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]

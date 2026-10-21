@@ -1,0 +1,22 @@
+[test]
+name = "spu_issue_fetch"
+
+# A hardware probe of inline prefetch against the local store, on a raw
+# SPU: sixteen loops of 65536 iterations, each timed with the
+# decrementer. Twelve are runs of 64 to 224 lqa, one of 128 stqa, two
+# break 128 lqa with lnop, and one starts 64 bytes past a 128-byte line.
+# The PPU reads back SPU_Status, SPU_NextPC, the class 0 interrupt
+# status and sixteen result slots. The SPU program's header comment
+# lists the cases; the PPU program's has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]
