@@ -67,6 +67,9 @@ fn step(unit: &mut SpuExecutionUnit, stall_tags: u32) -> (YieldReason, Vec<Effec
     let ctx = ExecutionContext::new(&mem).with_list_stall_tags(stall_tags);
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(1), &ctx, &mut effects);
+    // The first step anchors the decrementer, a clock read the
+    // clock-read tests cover; these tests read the transfers.
+    effects.retain(|e| !matches!(e, Effect::ClockRead { .. }));
     (result.yield_reason, effects)
 }
 

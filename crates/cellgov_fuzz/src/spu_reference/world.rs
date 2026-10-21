@@ -439,7 +439,13 @@ impl World {
     /// Records and commits a step's effects, then completes every command
     /// they queued.
     pub(crate) fn settle(&mut self, effects: &[Effect]) -> Result<(), SpuReferenceError> {
-        for effect in effects {
+        // A clock read tells a scheduler which steps it cannot reorder.
+        // The world runs one unit, so the effect changes nothing here
+        // and a vector does not list it.
+        for effect in effects
+            .iter()
+            .filter(|e| !matches!(e, Effect::ClockRead { .. }))
+        {
             self.effects.push(effect.into());
             self.service(effect);
         }

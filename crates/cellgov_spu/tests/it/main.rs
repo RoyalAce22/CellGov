@@ -2,6 +2,7 @@
 //! one test binary so each profile links the crate's dependencies once.
 
 mod channel_stall_through_runtime;
+mod clock_read_explore;
 mod console_channel_direction_sweep;
 mod console_dma_after_exit;
 mod console_dma_after_stop;

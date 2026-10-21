@@ -35,6 +35,9 @@ spu-microtests = []
 [dev-dependencies]
 cellgov_compare = { path = "../cellgov_compare" }
 cellgov_core = { path = "../cellgov_core" }
+# The schedule explorer holds an SPU clock read against the steps that
+# move the clock.
+cellgov_explore = { path = "../cellgov_explore" }
 # The signal-write fixture initializes an SPU thread, which takes the
 # image handle type `sys_spu_thread_initialize` records.
 cellgov_lv2 = { path = "../cellgov_lv2" }

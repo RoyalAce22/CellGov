@@ -343,6 +343,9 @@ fn wrch_mfc_cmd_yields_dma_submitted() {
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
     assert_eq!(result.yield_reason, YieldReason::DmaSubmitted);
+    // The first step anchors the decrementer, a clock read the
+    // clock-read tests cover.
+    effects.retain(|e| !matches!(e, cellgov_effects::Effect::ClockRead { .. }));
     assert_eq!(effects.len(), 1);
     assert!(matches!(
         &effects[0],

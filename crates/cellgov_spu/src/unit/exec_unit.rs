@@ -70,6 +70,9 @@ impl ExecutionUnit for SpuExecutionUnit {
             self.pipeline.resume_after_park();
         }
 
+        // A clock read belongs to the step that took it, and the entry
+        // refresh can take one.
+        self.state.channels.clock_read = false;
         step::enter_step(&mut self.state, self.id, ctx);
 
         // The budget bounds the instructions the step retires; the step
@@ -81,7 +84,7 @@ impl ExecutionUnit for SpuExecutionUnit {
         let base = cellgov_time::spu_cycles_to_ticks(self.pipeline.elapsed());
         effects.clear();
 
-        loop {
+        let result = loop {
             // An interrupt lands at the cycle the next instruction could
             // issue in.
             self.state
@@ -97,7 +100,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                 Some(w) => w,
                 None => {
                     self.status = UnitStatus::Faulted;
-                    return ExecutionStepResult {
+                    break ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_cost: self.cost(base),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
@@ -115,7 +118,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                 Err(SpuDecodeError::Unassigned(_) | SpuDecodeError::AbsentOnCbe { .. }) => {
                     self.state.record_stop(SpuStopKind::InvalidInstruction, 0);
                     self.status = UnitStatus::Finished;
-                    return ExecutionStepResult {
+                    break ExecutionStepResult {
                         yield_reason: YieldReason::Finished,
                         consumed_cost: self.cost(base),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
@@ -126,7 +129,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                 Err(SpuDecodeError::Unimplemented { .. }) => {
                     let row = spu_isa::row_for(raw).map_or(0, |(index, _)| index as u32);
                     self.status = UnitStatus::Faulted;
-                    return ExecutionStepResult {
+                    break ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_cost: self.cost(base),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
@@ -157,7 +160,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     self.state.record_stop(kind, signal);
                     self.retire(step_pc, ctx.trace_per_step());
                     self.status = UnitStatus::Finished;
-                    return ExecutionStepResult {
+                    break ExecutionStepResult {
                         yield_reason: YieldReason::Finished,
                         consumed_cost: self.cost(base),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
@@ -195,7 +198,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         self.state.advance_pc();
                         self.retire(step_pc, ctx.trace_per_step());
                     }
-                    return ExecutionStepResult {
+                    break ExecutionStepResult {
                         yield_reason: reason,
                         consumed_cost: self.cost(base),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
@@ -223,7 +226,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     if completion == step::MemoryReadCompletion::Refused {
                         self.state.advance_pc();
                         self.retire(step_pc, ctx.trace_per_step());
-                        return ExecutionStepResult {
+                        break ExecutionStepResult {
                             yield_reason: YieldReason::DmaSubmitted,
                             consumed_cost: self.cost(base),
                             local_diagnostics: LocalDiagnostics::with_pc(step_pc),
@@ -247,7 +250,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         _ => LocalDiagnostics::with_pc(step_pc),
                     };
                     let fault = guest_fault_for(f);
-                    return ExecutionStepResult {
+                    break ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_cost: self.cost(base),
                         local_diagnostics,
@@ -264,7 +267,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             );
             remaining = remaining.saturating_sub(1);
             if remaining == 0 {
-                return ExecutionStepResult {
+                break ExecutionStepResult {
                     yield_reason: YieldReason::BudgetExhausted,
                     consumed_cost: self.cost(base),
                     local_diagnostics: LocalDiagnostics::with_pc(step_pc),
@@ -272,7 +275,13 @@ impl ExecutionUnit for SpuExecutionUnit {
                     syscall_args: None,
                 };
             }
+        };
+        // One effect names the step, whatever the number of reads in it.
+        // The PPU's block close publishes its time-base reads the same way.
+        if self.state.channels.clock_read {
+            effects.push(Effect::ClockRead { source: self.id });
         }
+        result
     }
 
     fn snapshot(&self) -> SpuSnapshot {

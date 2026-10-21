@@ -98,6 +98,7 @@ impl From<&ChannelState> for SpuReferenceChannelState {
             // instruction each, and none reads the decrementer.
             decrementer: _,
             clock: _,
+            clock_read: _,
         } = value;
         Self {
             mfc_lsa: *mfc_lsa,

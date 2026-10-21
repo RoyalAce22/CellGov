@@ -148,6 +148,9 @@ fn a_queued_get_records_its_transfer_and_no_read_at_issue() {
     let mut effects = Vec::new();
     let issuing = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
     assert_eq!(issuing.yield_reason, YieldReason::DmaSubmitted);
+    // The first step anchors the decrementer, a clock read the
+    // clock-read tests cover.
+    effects.retain(|e| !matches!(e, Effect::ClockRead { .. }));
     assert!(read_ranges(&effects).is_empty(), "{effects:?}");
     assert!(
         matches!(

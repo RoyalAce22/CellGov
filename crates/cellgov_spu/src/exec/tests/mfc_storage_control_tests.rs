@@ -46,6 +46,9 @@ fn run(unit: &mut SpuExecutionUnit) -> (YieldReason, Vec<Effect>, Vec<RetiredBar
     let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+    // The first step anchors the decrementer, a clock read the
+    // clock-read tests cover; these tests read the transfers.
+    effects.retain(|e| !matches!(e, Effect::ClockRead { .. }));
     (result.yield_reason, effects, unit.drain_barriers())
 }
 

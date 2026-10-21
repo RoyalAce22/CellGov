@@ -43,6 +43,9 @@ fn issue_in(cmd: u32, ea: u64, mem: &GuestMemory) -> (SpuExecutionUnit, YieldRea
     let ctx = ExecutionContext::new(mem);
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+    // The first step anchors the decrementer, a clock read the
+    // clock-read tests cover; these tests read the transfers.
+    effects.retain(|e| !matches!(e, cellgov_effects::Effect::ClockRead { .. }));
     (unit, result.yield_reason, effects)
 }
 

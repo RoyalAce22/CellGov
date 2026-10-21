@@ -455,6 +455,7 @@ dependencies = [
  "cellgov_effects",
  "cellgov_event",
  "cellgov_exec",
+ "cellgov_explore",
  "cellgov_float",
  "cellgov_lv2",
  "cellgov_mem",

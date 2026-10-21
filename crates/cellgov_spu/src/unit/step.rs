@@ -88,6 +88,11 @@ pub fn enter_step(state: &mut SpuState, unit: UnitId, ctx: &ExecutionContext<'_>
 /// between two channel accesses.
 pub fn take_pending_interrupt(state: &mut SpuState) -> bool {
     if state.interrupts_enabled() {
+        // A Tm interrupt still to come lands at a tick, so the check
+        // reads the clock.
+        if state.tm_can_rise() && state.channels.event_mask & spu::event::TM != 0 {
+            state.note_clock_read();
+        }
         state.sample_decrementer();
     }
     // [SPU-ISA p:251 s:12.1] an interrupt lands between instructions.
@@ -114,6 +119,7 @@ pub fn execute_instruction(
     // The decrementer runs between instructions, so a channel access
     // first looks for the zero crossing it can report.
     if channel_access {
+        note_clock_dependence(insn, state);
         state.sample_decrementer();
     }
     let outcome = exec::execute(insn, state, unit);
@@ -126,6 +132,61 @@ pub fn execute_instruction(
         state.update_events();
     }
     outcome
+}
+
+/// Marks the step as a clock reader when `insn`'s result depends on the
+/// tick it runs at.
+///
+/// The count is a function of the time base, so these accesses read the
+/// clock:
+///
+/// - a read of a running count;
+/// - a load of the count;
+/// - while Tm can still rise, a read or count of the event status with
+///   Tm enabled;
+/// - while Tm can still rise, a write of the event mask;
+/// - an acknowledgment while Tm can still rise, or one that stops the
+///   count.
+///
+/// The check runs before the access samples the decrementer, which can
+/// raise Tm and end the condition.
+fn note_clock_dependence(insn: &SpuInstruction, state: &mut SpuState) {
+    let reads = match *insn {
+        SpuInstruction::Rdch {
+            channel: spu::SPU_RD_DEC,
+            ..
+        } => state.channels.decrementer.running(),
+        SpuInstruction::Wrch {
+            channel: spu::SPU_WR_DEC,
+            ..
+        } => true,
+        SpuInstruction::Rdch {
+            channel: spu::SPU_RD_EVENT_STAT,
+            ..
+        }
+        | SpuInstruction::Rchcnt {
+            channel: spu::SPU_RD_EVENT_STAT,
+            ..
+        } => state.tm_can_rise() && state.channels.event_mask & spu::event::TM != 0,
+        SpuInstruction::Wrch {
+            channel: spu::SPU_WR_EVENT_MASK,
+            ..
+        } => state.tm_can_rise(),
+        // [CBEA p:152 s:9.11.2] an acknowledgment of Tm with Tm disabled stops the decrementer whatever the Tm status, so the frozen count is the one at this tick.
+        SpuInstruction::Wrch {
+            channel: spu::SPU_WR_EVENT_ACK,
+            rt,
+        } => {
+            state.tm_can_rise()
+                || (state.channels.decrementer.running()
+                    && state.channels.event_mask & spu::event::TM == 0
+                    && state.reg_word(rt) & spu::event::TM != 0)
+        }
+        _ => false,
+    };
+    if reads {
+        state.note_clock_read();
+    }
 }
 
 /// How an atomic read completed.

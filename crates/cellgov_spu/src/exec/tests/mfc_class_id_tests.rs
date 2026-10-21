@@ -65,6 +65,9 @@ fn run_once(unit: &mut SpuExecutionUnit) -> (cellgov_exec::ExecutionStepResult, 
     let ctx = ExecutionContext::new(&mem);
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+    // The first step anchors the decrementer, a clock read the
+    // clock-read tests cover; these tests read the transfers.
+    effects.retain(|e| !matches!(e, Effect::ClockRead { .. }));
     (result, effects)
 }
 
@@ -85,6 +88,7 @@ fn run_once_holding(
     let ctx = ExecutionContext::new(&mem).with_reservations(&table);
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+    effects.retain(|e| !matches!(e, Effect::ClockRead { .. }));
     (result, effects)
 }
 

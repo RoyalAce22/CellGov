@@ -321,6 +321,9 @@ impl SpuObservableSnapshot {
             // The world sets the clock for the next instruction, so the
             // snapshot omits it.
             clock: _,
+            // A step that read the clock tells the explorer through a
+            // `ClockRead` effect.
+            clock_read: _,
         } = channels;
         Self {
             regs: *regs.as_array(),
@@ -780,10 +783,35 @@ impl SpuState {
     ///
     /// [CBEA p:150 s:9.11.1] the decrementer event is set when the most significant bit of the count changes from 0 to 1.
     pub fn sample_decrementer(&mut self) {
+        // Every later value of the count runs down from the tick of the
+        // first look, so the step that takes it reads the clock.
+        if self.channels.decrementer.running() && !self.channels.decrementer.started() {
+            self.note_clock_read();
+        }
         let now = self.time_base();
         if self.channels.decrementer.advance(now) {
+            // A step at an earlier tick finds no crossing here, so the
+            // step that raises Tm reads the clock.
+            self.note_clock_read();
             self.raise_events(cellgov_ps3_abi::hw::spu::event::TM);
         }
+    }
+
+    /// Mark the step in flight as one whose result depends on the guest
+    /// clock.
+    pub fn note_clock_read(&mut self) {
+        self.channels.clock_read = true;
+    }
+
+    /// Whether the decrementer can still raise Tm: the count runs and Tm
+    /// is not pending yet.
+    ///
+    /// While it can, a look at the event state reads the clock: a step at
+    /// an earlier or a later tick can find the zero crossing on the other
+    /// side of it.
+    pub fn tm_can_rise(&self) -> bool {
+        self.channels.decrementer.running()
+            && self.channels.pending_events & cellgov_ps3_abi::hw::spu::event::TM == 0
     }
 
     /// The guest tick at which the decrementer raises Tm, while Tm is
@@ -1034,6 +1062,10 @@ pub struct ChannelState {
     /// sets it before each instruction, and the decrementer reads the
     /// time base from it.
     pub clock: cellgov_time::GuestTicks,
+    /// Whether the step in flight read the guest clock: its result
+    /// depends on the tick it ran at. The unit clears it at step entry
+    /// and publishes one `ClockRead` effect for a step that set it.
+    pub clock_read: bool,
 }
 
 /// Where a list command resumes after its stall.
@@ -1115,6 +1147,7 @@ impl ChannelState {
                 | cellgov_ps3_abi::hw::spu::event::ME,
             decrementer: crate::decrementer::Decrementer::new(),
             clock: cellgov_time::GuestTicks::ZERO,
+            clock_read: false,
         }
     }
 }

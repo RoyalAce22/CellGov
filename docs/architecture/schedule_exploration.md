@@ -161,7 +161,7 @@ and the relation handles each differently:
 | What reads guest time | How the dependency relation handles it |
 |---|---|
 | a transfer's landing | the ranges each transfer in flight will touch at completion conflict with another step's access to them; a step touching the bytes of a transfer in flight during itself conflicts with every step |
-| a guest read of the time base (PPU `mftb` or `mftbu`) | the step emits `ClockRead` and conflicts with every step |
+| a guest read of the time base (PPU `mftb` or `mftbu`) or an SPU decrementer access whose result depends on the tick | the step emits `ClockRead` and conflicts with every step |
 | an LV2 handler's write | conflicts with every step |
 | a timer deadline | no clause |
 
@@ -198,6 +198,12 @@ A PPU `mftb` or `mftbu` puts the clock into a guest register, which
 the guest can store anywhere. The step therefore emits `ClockRead` and
 conflicts with every step. The clause pairs on the read rather than on
 where the value went.
+
+An SPU step does the same when its result depends on the tick it ran
+at: a read of a running decrementer, a decrementer write, the first
+step of a running count, a step whose sample crosses zero, and an
+event read, mask write, acknowledgment or interrupt check while the
+decrementer event can still rise.
 
 *Why:* what would narrow it is tracking the value from the register
 that received it to a store, and nothing does.

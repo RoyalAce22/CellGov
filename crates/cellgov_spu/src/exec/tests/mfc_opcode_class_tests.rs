@@ -48,6 +48,9 @@ fn issue(word: u32) -> (SpuExecutionUnit, ExecutionStepResult, Vec<Effect>) {
     let ctx = ExecutionContext::new(&mem);
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+    // The first step anchors the decrementer, a clock read the
+    // clock-read tests cover; these tests read the transfers.
+    effects.retain(|e| !matches!(e, Effect::ClockRead { .. }));
     (unit, result, effects)
 }
 

@@ -243,11 +243,11 @@ dependencies are intentionally absent. The workspace compiles under
 | `cellgov_compare`      | serde, serde_json, strum, thiserror, toml                                  |
 | `cellgov_observation`  | serde, serde_json, sha2, strum, thiserror, toml                            |
 | `cellgov_spu`          | strum, thiserror                                                           |
+| `cellgov_explore`      | serde, serde_json, strum, thiserror                                        |
 | `cellgov_boot`         | serde, serde_json, strum, thiserror, toml                                  |
 | `cellgov_install`      | aes, cbc, ctr, flate2, hmac, serde, sha1, sha2, thiserror, toml            |
 | `cellgov_terminal`     | ctrlc, terminal_size                                                       |
 | `cellgov_lv2_archive`  | strum, thiserror                                                           |
-| `cellgov_explore`      | serde, serde_json, strum, thiserror                                        |
 | `cellgov_fuzz`         | serde, serde_json, thiserror                                               |
 | `cellgov_cli`          | clap, clap_complete, filebuffer, serde, serde_json, strum, thiserror, toml |
 | `runner_ps3`           | serde, serde_json, strum, thiserror, toml                                  |

@@ -67,3 +67,7 @@ mod interrupt_tests;
 #[cfg(test)]
 #[path = "tests/snapshot_tests.rs"]
 mod snapshot_tests;
+
+#[cfg(test)]
+#[path = "tests/clock_read_tests.rs"]
+mod clock_read_tests;

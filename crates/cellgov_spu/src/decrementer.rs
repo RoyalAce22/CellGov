@@ -47,6 +47,12 @@ impl Decrementer {
         self.running
     }
 
+    /// Whether the unit looked at the count: the first look sets the time
+    /// base that every later value runs down from.
+    pub const fn started(&self) -> bool {
+        self.since.is_some()
+    }
+
     /// Move the count to time base `now`. Returns whether the most
     /// significant bit changed from 0 to 1 on the way: the count passed
     /// zero.
