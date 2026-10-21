@@ -432,7 +432,7 @@ pub const SMOKE_REFERENCE: SmokeReference = SmokeReference {
     name: "spu-reference-replay",
     units: 276,
     files: 276,
-    vectors: 1498,
+    vectors: 1522,
 };
 
 impl SmokeReference {
