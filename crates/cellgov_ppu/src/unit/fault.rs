@@ -46,10 +46,15 @@ impl PpuExecutionUnit {
     /// Retirements discarded by the rollback never reach the trace
     /// stream: the rollback truncates their `PpuStateHash` /
     /// `PpuStateFull` entries and barrier records, and restores
-    /// `retirement_counter`.
+    /// `retirement_counter` and the issue model's scalar state. The caches
+    /// and the branch predictor keep the changes of the discarded
+    /// instructions.
     fn discard_batch(&mut self, entry: &BatchEntry, effects: &mut Vec<Effect>) {
         if let Some(snap) = entry.snapshot.as_ref() {
             self.state = snap.clone();
+        }
+        if let Some(core) = entry.timing {
+            self.timing.restore(core);
         }
         self.store_buf.clear();
         self.drop_fetch_runs();

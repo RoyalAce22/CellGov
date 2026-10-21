@@ -1,13 +1,19 @@
-//! CellGov's PPU timing against the `ppu_issue_timing` probe's console
-//! capture.
+//! CellGov's PPU timing against the `ppu_issue_timing` and
+//! `ppu_issue_table` console captures.
 //!
-//! The probe times twenty-three loops with `mftb`, five runs each. The
-//! constants of `cellgov_ps3_abi::hw::ppu_issue` are the capture's
-//! fastest runs, and the first test derives each one again. The second
-//! test runs loops 0 to 18 through the execution unit and records the
-//! gap: the PPU charges one nanosecond a retired instruction, so no loop
-//! takes the console's cycles yet. Loops 19 to 22 need the LV2 host and a
-//! second hardware thread, which the PPU model does not have.
+//! The `ppu_issue_timing` probe times twenty-three loops with `mftb`, five
+//! runs each. `the_recorded_constants_are_the_captures` derives again each
+//! constant of `cellgov_ps3_abi::hw::ppu_issue` that is a fastest run of
+//! this capture. `the_issue_model_times_each_loop_within_the_console_s_spread`
+//! runs loops 0 to 19 through the execution unit and its issue model. It
+//! holds each loop's cycles an iteration no farther from the fastest run
+//! than the slowest run is. Loops 20 to 22 run beside a busy second
+//! hardware thread, which the issue model does not see.
+//!
+//! The `ppu_issue_table` probe times twenty-one more loops the same way,
+//! one per latency the model takes from the handbook's instruction table.
+//! `the_issue_model_times_each_table_loop_within_the_console_s_spread`
+//! replays them.
 
 use cellgov_core::Runtime;
 use cellgov_exec::UnitStatus;
@@ -54,6 +60,16 @@ fn console_cycles(words: &[u64], k: usize) -> f64 {
     (words[2 * k] * PPU_CYCLES_PER_TB_TICK) as f64 / (1u64 << ITERATIONS_LOG2[k]) as f64
 }
 
+/// Loop `k`'s slowest run, in core cycles an iteration.
+fn console_slowest(words: &[u64], k: usize) -> f64 {
+    (words[2 * k + 1] * PPU_CYCLES_PER_TB_TICK) as f64 / (1u64 << ITERATIONS_LOG2[k]) as f64
+}
+
+/// The cycles the handbook's divide formula gives the probe's `divd` of
+/// `0x1_2345_6789` by 1: 32 more leading zeros in the divisor, so 17
+/// iterations, `(1 + 17 + 1) x 2`.
+const PROBE_DIVD_FORMULA_CYCLES: u64 = 38;
+
 fn round(v: f64) -> u64 {
     v.round() as u64
 }
@@ -81,10 +97,18 @@ fn the_recorded_constants_are_the_captures() {
     }
 
     let per = |k: usize, n: f64| round(console_cycles(&w, k) / n);
-    assert_eq!(per(0, 1.0), PPU_LOOP_BRANCH_CYCLES);
+    assert_eq!(per(0, 1.0), PPU_TAKEN_BRANCH_FETCH_CYCLES);
+    // Eight not-taken branches and the loop's taken one.
+    assert_eq!(
+        round((console_cycles(&w, 15) - PPU_TAKEN_BRANCH_FETCH_CYCLES as f64) / 8.0),
+        PPU_NOT_TAKEN_BRANCH_FETCH_CYCLES,
+    );
     assert_eq!(per(2, 8.0), PPU_FX_LATENCY_CYCLES);
     assert_eq!(per(3, 8.0), PPU_MULLD_LATENCY_CYCLES);
-    assert_eq!(per(4, 4.0), PPU_DIVD_LATENCY_CYCLES);
+    assert_eq!(
+        per(4, 4.0) - PROBE_DIVD_FORMULA_CYCLES,
+        PPU_DIVIDE_REFETCH_CYCLES
+    );
     assert_eq!(per(5, 8.0), PPU_FP_LATENCY_CYCLES);
     assert_eq!(per(6, 8.0), PPU_FP_LATENCY_CYCLES);
     assert_eq!(per(7, 8.0), PPU_VMX_FLOAT_LATENCY_CYCLES);
@@ -92,12 +116,6 @@ fn the_recorded_constants_are_the_captures() {
     assert_eq!(per(12, 8.0), PPU_L2_LOAD_USE_CYCLES);
     assert_eq!(per(13, 8.0), PPU_MEMORY_LOAD_USE_CYCLES);
     assert_eq!(per(14, 4.0), PPU_LOAD_HIT_STORE_CYCLES);
-    assert_eq!(per(16, 8.0), PPU_TAKEN_BRANCH_CYCLES);
-    assert_eq!(
-        round((console_cycles(&w, 18) - console_cycles(&w, 17)) * 2.0),
-        PPU_BRANCH_MISS_CYCLES,
-    );
-    assert_eq!(per(19, 1.0), PPU_SYSCALL_ROUND_TRIP_CYCLES);
     assert_eq!((per(1, 1.0), per(20, 1.0)), PPU_SMT_INDEPENDENT_ADDI_CYCLES);
     assert_eq!((per(2, 1.0), per(21, 1.0)), PPU_SMT_DEPENDENT_ADD_CYCLES);
     assert_eq!((per(11, 1.0), per(22, 1.0)), PPU_SMT_L1_CHASE_CYCLES);
@@ -111,8 +129,9 @@ const L2_RING: u64 = 0x2_0000;
 const MEM_RING: u64 = 0x10_0000;
 const LINE: u64 = 128;
 
-/// Iterations of each replay. The PPU's charge is linear in retired
-/// instructions, so a short run gives the same cycles an iteration.
+/// Iterations a replay times. It runs as many before them, which warm
+/// the caches and the branch history the way the probe's earlier runs
+/// warm the console's.
 const REPLAY_ITERATIONS: u64 = 512;
 
 /// A register a replay seeds before its loop.
@@ -123,6 +142,9 @@ enum Seed {
     /// A GPR holding the head of a ring of `bytes` at `base`, shuffled or
     /// strided as the probe builds it.
     Ring(usize, u64, u64, bool),
+    /// The GPR that counts the loop's iterations down, for a loop that
+    /// does not count in CTR.
+    Counter(usize),
 }
 
 const ONE: u64 = 0x3FF0_0000_0000_0000;
@@ -138,7 +160,7 @@ struct Replay {
 
 const BDNZ_8: u32 = 0x4200_ffe0;
 
-const REPLAYS: [Replay; 19] = [
+const REPLAYS: [Replay; 20] = [
     Replay {
         loop_index: 0,
         words: &[0x4200_0000],
@@ -334,7 +356,197 @@ const REPLAYS: [Replay; 19] = [
             Seed::Gpr(3, 1),
         ],
     },
+    // The probe's loop of calls: the eight argument registers, the
+    // syscall number, `sc`, then the count in r31.
+    Replay {
+        loop_index: 19,
+        words: &[
+            0x3860_0000,
+            0x3880_0000,
+            0x38a0_0000,
+            0x38c0_0000,
+            0x38e0_0000,
+            0x3900_0000,
+            0x3920_0000,
+            0x3940_0000,
+            0x3960_0093,
+            0x4400_0002,
+            0x2c3f_0001,
+            0x3bff_ffff,
+            0x4082_ffd0,
+        ],
+        seeds: &[Seed::Counter(31)],
+    },
 ];
+
+const TABLE: &str = "../../tests/micro/ppu_issue_table/ps3/cech20-cex-493/observation.json";
+
+/// log2 of each `ppu_issue_table` loop's iterations on the console, from
+/// the probe's header.
+const TABLE_ITERATIONS_LOG2: [u32; 21] = [
+    20, 18, 18, 16, 16, 16, 16, 16, 16, 16, 16, 16, 18, 18, 18, 18, 18, 18, 18, 16, 18,
+];
+
+/// The `ppu_issue_table` payload's word 44 when the probe wrote every
+/// word.
+const TABLE_DONE: u64 = 0x5050_5442;
+
+/// The `ppu_issue_table` capture's payload as big-endian words.
+fn table_words() -> Vec<u64> {
+    let observation = cellgov_compare::baseline::load(std::path::Path::new(TABLE))
+        .unwrap_or_else(|e| panic!("{TABLE}: {e}"));
+    let p = &observation.memory_regions[0].data;
+    assert_eq!(p.len(), 360);
+    let words: Vec<u64> = p
+        .chunks_exact(8)
+        .map(|w| u64::from_be_bytes(w.try_into().expect("8 bytes")))
+        .collect();
+    assert_eq!(words[44], TABLE_DONE, "the probe wrote every word");
+    assert_eq!(words[43], 5, "five runs a loop");
+    words
+}
+
+const BDNZ_4: u32 = 0x4200_fff0;
+
+/// The `ppu_issue_table` probe's loops, one per table latency.
+const TABLE_REPLAYS: [Replay; 21] = [
+    Replay {
+        loop_index: 0,
+        words: &[0x4200_0000],
+        seeds: &[],
+    },
+    Replay {
+        loop_index: 1,
+        words: &eight_then_bdnz(0x1d29_0001),
+        seeds: &[Seed::Gpr(9, 7)],
+    },
+    Replay {
+        loop_index: 2,
+        words: &eight_then_bdnz(0x7d29_79d6),
+        seeds: &[Seed::Gpr(9, 7), Seed::Gpr(15, 1)],
+    },
+    Replay {
+        loop_index: 3,
+        words: &four_then_bdnz(0x7d29_7bd6),
+        seeds: &[Seed::Gpr(9, 0x7fff_ffff), Seed::Gpr(15, 1)],
+    },
+    Replay {
+        loop_index: 4,
+        words: &four_then_bdnz(0x7d29_7bd2),
+        seeds: &[Seed::Gpr(9, 0x7fff_ffff_ffff_ffff), Seed::Gpr(15, 1)],
+    },
+    Replay {
+        loop_index: 5,
+        words: &four_then_bdnz(0xfc00_0024),
+        seeds: &[Seed::Fpr(0, ONE)],
+    },
+    Replay {
+        loop_index: 6,
+        words: &four_then_bdnz(0xfc00_002c),
+        seeds: &[Seed::Fpr(0, ONE)],
+    },
+    Replay {
+        loop_index: 7,
+        words: &eight_then_bdnz(0xfc00_602b),
+        seeds: &[Seed::Fpr(0, ONE), Seed::Fpr(12, 0)],
+    },
+    Replay {
+        loop_index: 8,
+        words: &eight_then_bdnz(0x5529_003f),
+        seeds: &[Seed::Gpr(9, 5)],
+    },
+    Replay {
+        loop_index: 9,
+        words: &eight_then_bdnz(0x7d20_0026),
+        seeds: &[],
+    },
+    Replay {
+        loop_index: 10,
+        words: &eight_then_bdnz(0xfc00_048e),
+        seeds: &[],
+    },
+    Replay {
+        loop_index: 11,
+        words: &eight_then_bdnz(0x7d2c_42e6),
+        seeds: &[],
+    },
+    Replay {
+        loop_index: 12,
+        words: &eight_then_bdnz(0x1042_10eb),
+        seeds: &[],
+    },
+    Replay {
+        loop_index: 13,
+        words: &eight_then_bdnz(0x1042_1880),
+        seeds: &[],
+    },
+    Replay {
+        loop_index: 14,
+        words: &eight_then_bdnz(0x1042_1848),
+        seeds: &[],
+    },
+    Replay {
+        loop_index: 15,
+        words: &eight_then_bdnz(0x1040_110a),
+        seeds: &[],
+    },
+    Replay {
+        loop_index: 16,
+        words: &[0xa9c8_0000, 0xa9e8_0008, 0xaa08_0010, 0xaa28_0018, BDNZ_4],
+        seeds: &[Seed::Gpr(8, ONE_LINE)],
+    },
+    Replay {
+        loop_index: 17,
+        words: &[0xbf08_0000, 0xbb08_0000, 0x4200_fff8],
+        seeds: &[Seed::Gpr(8, ONE_LINE)],
+    },
+    // Four calls, each to a `blr` the `b` after it skips on the way back.
+    Replay {
+        loop_index: 18,
+        words: &[
+            0x4800_0009,
+            0x4800_0008,
+            0x4e80_0020,
+            0x4800_0009,
+            0x4800_0008,
+            0x4e80_0020,
+            0x4800_0009,
+            0x4800_0008,
+            0x4e80_0020,
+            0x4800_0009,
+            0x4800_0008,
+            0x4e80_0020,
+            0x4200_ffd0,
+        ],
+        seeds: &[],
+    },
+    Replay {
+        loop_index: 19,
+        words: &eight_then_bdnz(0x7d4f_f120),
+        seeds: &[Seed::Gpr(10, 0x2222_2222)],
+    },
+    Replay {
+        loop_index: 20,
+        words: &[
+            0xc828_0040,
+            0xfc21_602a,
+            0xc828_0040,
+            0xfc21_602a,
+            0xc828_0040,
+            0xfc21_602a,
+            0xc828_0040,
+            0xfc21_602a,
+            BDNZ_8,
+        ],
+        seeds: &[Seed::Gpr(8, ONE_LINE), Seed::Fpr(12, 0)],
+    },
+];
+
+/// The body of a four-instruction loop: the word four times, then the
+/// loop's `bdnz`.
+const fn four_then_bdnz(word: u32) -> [u32; 5] {
+    [word, word, word, word, BDNZ_4]
+}
 
 const LCG_LOOP: [u32; 8] = [
     0x7dce_81d2,
@@ -380,10 +592,12 @@ fn build_ring(mem: &mut GuestMemory, base: u64, bytes: u64, shuffle: bool) -> u6
     base + order[0] * LINE
 }
 
-/// Run one replay's loop `REPLAY_ITERATIONS` times, one instruction a
-/// step, and return the unit's clock when the loop exits, in cycles, or
-/// `None` when the unit faults.
-fn replay(r: &Replay) -> Option<u64> {
+/// Run one replay's loop twice `REPLAY_ITERATIONS` times, one
+/// instruction a step.
+///
+/// Returns the cycles an iteration of the second half, or `None` when
+/// the unit faults.
+fn replay(r: &Replay) -> Option<f64> {
     let words = r.words;
     let ring_end = r
         .seeds
@@ -407,18 +621,25 @@ fn replay(r: &Replay) -> Option<u64> {
     }
     let exit = CODE + 4 * words.len() as u64;
 
+    let counter = r.seeds.iter().find_map(|s| match s {
+        Seed::Counter(k) => Some(*k),
+        _ => None,
+    });
     let mut rt = Runtime::new(mem, Budget::new(1), usize::MAX);
     let seeds = r.seeds;
     let unit = rt.register_unit_with(|id| {
         let mut ppu = PpuExecutionUnit::new(id);
         let state = ppu.state_mut();
         state.pc = CODE;
-        state.set_ctr(REPLAY_ITERATIONS);
+        match counter {
+            Some(k) => state.set_gpr(k, 2 * REPLAY_ITERATIONS),
+            None => state.set_ctr(2 * REPLAY_ITERATIONS),
+        }
         for seed in seeds {
             match *seed {
                 Seed::Gpr(k, v) => state.set_gpr(k, v),
                 Seed::Fpr(k, v) => state.set_fpr(k, v),
-                Seed::Ring(..) => {}
+                Seed::Ring(..) | Seed::Counter(_) => {}
             }
         }
         for &(k, v) in &gprs {
@@ -427,41 +648,126 @@ fn replay(r: &Replay) -> Option<u64> {
         ppu
     });
 
-    let pc = |rt: &Runtime| -> u64 {
+    let state = |rt: &Runtime| -> cellgov_ppu::state::PpuState {
         rt.registry()
             .get(unit)
             .and_then(|u| u.as_any().downcast_ref::<PpuExecutionUnit>())
             .expect("the PPU unit")
             .state()
-            .pc
+            .clone()
     };
-    let bound = REPLAY_ITERATIONS * (words.len() as u64 + 1) + 16;
+    // The count the loop's head sees after the warming half runs.
+    let left = |s: &cellgov_ppu::state::PpuState| match counter {
+        Some(k) => s.gpr[k],
+        None => s.ctr(),
+    };
+    let mut halfway = None;
+    let bound = 2 * REPLAY_ITERATIONS * (words.len() as u64 + 1) + 16;
     for _ in 0..bound {
-        if pc(&rt) == exit {
+        let s = state(&rt);
+        if s.pc == exit {
             break;
+        }
+        if halfway.is_none() && s.pc == CODE && left(&s) == REPLAY_ITERATIONS {
+            halfway = Some(rt.registry().clock(unit).raw());
         }
         if rt.registry().effective_status(unit) == Some(UnitStatus::Faulted) {
             return None;
         }
         let step = rt
             .step()
-            .unwrap_or_else(|e| panic!("loop {} at pc {:#x}: {e:?}", r.loop_index, pc(&rt)));
+            .unwrap_or_else(|e| panic!("loop {} at pc {:#x}: {e:?}", r.loop_index, s.pc));
         rt.commit_step(&step.result, &step.effects)
             .expect("the step commits");
     }
-    assert_eq!(pc(&rt), exit, "loop {} ran to its exit", r.loop_index);
-    Some(rt.registry().clock(unit).raw())
+    assert_eq!(state(&rt).pc, exit, "loop {} ran to its exit", r.loop_index);
+    let halfway = halfway.expect("the loop passed its halfway count");
+    Some((rt.registry().clock(unit).raw() - halfway) as f64 / REPLAY_ITERATIONS as f64)
 }
+
+/// The `ppu_issue_table` loop whose body the interpreter refuses:
+/// `vrefp`.
+const TABLE_REFUSED_LOOP: usize = 15;
+
+#[test]
+fn the_issue_model_times_each_table_loop_within_the_console_s_spread() {
+    let w = table_words();
+    let cycles = |k: usize, word: usize| {
+        (w[word] * PPU_CYCLES_PER_TB_TICK) as f64 / (1u64 << TABLE_ITERATIONS_LOG2[k]) as f64
+    };
+    let mut rows = Vec::new();
+    for r in &TABLE_REPLAYS {
+        let Some(cellgov) = replay(r) else {
+            assert_eq!(
+                r.loop_index, TABLE_REFUSED_LOOP,
+                "table loop {} faults in the interpreter",
+                r.loop_index,
+            );
+            continue;
+        };
+        assert_ne!(
+            r.loop_index, TABLE_REFUSED_LOOP,
+            "the interpreter now executes vrefp, so table loop 15 joins the replayed rows",
+        );
+        let fastest = cycles(r.loop_index, 2 * r.loop_index);
+        let spread = cycles(r.loop_index, 2 * r.loop_index + 1) - fastest;
+        rows.push((r.loop_index, cellgov, fastest, spread));
+    }
+    assert_eq!(
+        rows.len(),
+        20,
+        "every table loop but the refused one replays"
+    );
+    for &(k, cellgov, fastest, spread) in &rows {
+        let within = (cellgov - fastest).abs() <= spread;
+        match TABLE_RESIDUALS.iter().find(|r| r.0 == k) {
+            Some(&(_, below)) => {
+                assert!(
+                    !within,
+                    "table loop {k} now lands within the console's spread; drop it \
+                     from the residuals: {rows:?}",
+                );
+                let short = fastest - cellgov;
+                assert!(
+                    short > 0.0 && short < below,
+                    "table loop {k}: CellGov {cellgov:.3} cycles an iteration, the \
+                     console's fastest {fastest:.3}, more than {below} apart: {rows:?}",
+                );
+            }
+            None => assert!(
+                within,
+                "table loop {k}: CellGov {cellgov:.3} cycles an iteration, the \
+                 console's fastest {fastest:.3} with a spread of {spread:.3}: {rows:?}",
+            ),
+        }
+    }
+}
+
+/// The `ppu_issue_table` loops the model times below the console's
+/// spread, each with the cycles an iteration it may fall short by.
+///
+/// The dependent `mulli` and `mullw` loops take 65.76 and 90.83 cycles
+/// an iteration. Like the dependent `add` loop, each multiply takes a
+/// fraction of a cycle more than its whole latency of 8 or 11. The
+/// `stmw` and `lmw` pair to one line takes 138.8, and the model's
+/// microcode and store-queue terms give 60.
+const TABLE_RESIDUALS: [(usize, f64); 3] = [(1, 2.0), (2, 3.0), (17, 80.0)];
 
 /// The loop whose body the interpreter refuses: `vaddfp`.
 const REFUSED_LOOP: usize = 7;
 
+/// The loop the model times outside the console's spread: eight
+/// dependent `add`. The model's 16 cycles an iteration is the add's
+/// latency eight times; the console's fastest run takes 16.28 and its
+/// slowest 16.41.
+const RESIDUAL_LOOP: usize = 2;
+
 #[test]
-fn today_s_model_misses_every_loop_the_console_times() {
+fn the_issue_model_times_each_loop_within_the_console_s_spread() {
     let w = console_words();
-    let mut gaps = Vec::new();
+    let mut rows = Vec::new();
     for r in &REPLAYS {
-        let Some(clock) = replay(r) else {
+        let Some(cellgov) = replay(r) else {
             assert_eq!(
                 r.loop_index, REFUSED_LOOP,
                 "loop {} faults in the interpreter",
@@ -471,22 +777,34 @@ fn today_s_model_misses_every_loop_the_console_times() {
         };
         assert_ne!(
             r.loop_index, REFUSED_LOOP,
-            "the interpreter now executes vaddfp, so loop 7 joins the gap rows",
+            "the interpreter now executes vaddfp, so loop 7 joins the replayed rows",
         );
-        let cellgov = round(clock as f64 / REPLAY_ITERATIONS as f64);
-        let console = round(console_cycles(&w, r.loop_index));
-        gaps.push((r.loop_index, cellgov, console));
+        let fastest = console_cycles(&w, r.loop_index);
+        let spread = console_slowest(&w, r.loop_index) - fastest;
+        rows.push((r.loop_index, cellgov, fastest, spread));
     }
-    assert_eq!(
-        gaps.len(),
-        18,
-        "every replayed loop but the refused one has a row"
-    );
-    for (k, cellgov, console) in &gaps {
-        assert_ne!(
-            cellgov, console,
-            "loop {k} takes the console's {console} cycles an iteration; the PPU model \
-             now times it, so this row of the gap is closed: {gaps:?}",
-        );
+    assert_eq!(rows.len(), 19, "every loop but the refused one replays");
+    for &(k, cellgov, fastest, spread) in &rows {
+        let within = (cellgov - fastest).abs() <= spread;
+        if k == RESIDUAL_LOOP {
+            assert!(
+                !within,
+                "loop {k} now lands within the console's spread; drop it from the \
+                 residual: {rows:?}",
+            );
+            // A loop that moves farther than a cycle from the console's
+            // fastest run is a regression.
+            assert!(
+                (cellgov - fastest).abs() < 1.0,
+                "loop {k}: CellGov {cellgov:.3} cycles an iteration, the console's \
+                 fastest {fastest:.3}: {rows:?}",
+            );
+        } else {
+            assert!(
+                within,
+                "loop {k}: CellGov {cellgov:.3} cycles an iteration, the console's \
+                 fastest {fastest:.3} with a spread of {spread:.3}: {rows:?}",
+            );
+        }
     }
 }

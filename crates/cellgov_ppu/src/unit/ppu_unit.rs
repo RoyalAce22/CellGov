@@ -85,6 +85,9 @@ pub struct PpuExecutionUnit {
     /// per iteration.
     pub(super) fetch_runs: Vec<(u64, u64)>,
     pub(super) store_buf: StoreBuffer,
+    /// The issue model that prices each retired instruction in core
+    /// cycles.
+    pub(super) timing: Box<crate::timing::PpeTiming>,
     pub(super) profile_mode: bool,
     pub(super) profile_insns: std::collections::BTreeMap<&'static str, u64>,
     pub(super) profile_pairs: std::collections::BTreeMap<(&'static str, &'static str), u64>,
@@ -115,6 +118,7 @@ impl PpuExecutionUnit {
             fetch_end: NO_FETCH_RUN,
             fetch_runs: Vec::new(),
             store_buf: StoreBuffer::new(),
+            timing: Box::default(),
             profile_mode: false,
             profile_insns: std::collections::BTreeMap::new(),
             profile_pairs: std::collections::BTreeMap::new(),

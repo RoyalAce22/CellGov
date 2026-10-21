@@ -39,6 +39,7 @@ pub mod sprx;
 pub mod state;
 pub mod store_buffer;
 pub mod tap;
+mod timing;
 mod unit;
 
 pub use fault_codes::{

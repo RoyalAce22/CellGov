@@ -1,0 +1,23 @@
+[test]
+name = "ppu_issue_table"
+
+# A hardware probe of the PPE's table latencies: twenty-one loops, each
+# timed with mftb, one per latency the PPU guest-time model takes from the
+# handbook's instruction table. They cover mulli, mullw, the word and
+# doubleword divide maxima, fdiv, fsqrt, a recording FP add, a microcoded
+# recording rotate, mfcr, mffs, mftb, the VMX permute, simple, complex and
+# estimate classes, lha, stmw and lmw, a call and return, mtcrf, and an
+# FP load feeding an add. The console capture is the answer; ppu/main.c's
+# header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 360 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 360 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

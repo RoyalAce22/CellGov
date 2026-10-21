@@ -78,6 +78,11 @@ pub const PPC_ADDI_R3_R3_1: u32 = 0x3863_0001;
 /// [PPC-Book1 p:25 s:Branch Conditional to Count Register] BO2=0 invalid for bcctr.
 pub const PPC_BO_BIT2: u8 = 0b0_0100;
 
+/// The `BO` bits of a branch that tests neither CTR nor a CR bit.
+///
+/// [PPC-Book1 p:20 s:2.4.1] `BO` encoding `1z1zz`: branch always.
+pub const PPC_BO_ALWAYS: u8 = 0b1_0100;
+
 /// Extended opcode (XO) for `bcctr` (Branch Conditional to Count
 /// Register). Used inside the `19 << 26` major-opcode group.
 ///

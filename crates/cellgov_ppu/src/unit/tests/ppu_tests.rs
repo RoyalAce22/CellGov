@@ -221,32 +221,31 @@ fn budget_exhaustion_yields() {
     let result = unit.run_until_yield(Budget::new(5), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
     assert_eq!(unit.retired_instructions(), 5);
-    // Five nanoseconds: 15.96 ticks, rounded down.
-    assert_eq!(result.consumed_cost, InstructionCost::new(15));
+    // Five no-ops on the one FXU: one cycle each.
+    assert_eq!(result.consumed_cost, InstructionCost::new(5));
     assert_eq!(unit.state().pc, 20);
 }
 
 #[test]
-fn a_batch_charges_the_partial_tick_the_batch_before_it_dropped() {
+fn a_batch_charges_the_cycles_its_instruction_advances_the_issue_model() {
     let mut mem = GuestMemory::new(256);
-    for i in (0..64).step_by(4) {
-        place_insn(&mut mem, i, 0x6000_0000);
-    }
+    // addi r3,r0,1 then ld r4,0(r1), an aligned pair on the FXU and the
+    // LSU; then addi r6,r0,1 and ld r5,0(r1).
+    place_insn(&mut mem, 0, 0x3860_0001);
+    place_insn(&mut mem, 4, 0xe881_0000);
+    place_insn(&mut mem, 8, 0x38c0_0001);
+    place_insn(&mut mem, 12, 0xe8a1_0000);
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     let ctx = ExecutionContext::new(&mem);
-    // One instruction is 3.192 ticks. Each batch charges the ticks the
-    // unit's whole run has reached, less what it already charged. So
-    // the sixth batch takes the tick that the first five dropped
-    // between them.
-    let costs: Vec<u64> = (0..6)
+    let costs: Vec<u64> = (0..4)
         .map(|_| {
             unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new())
                 .consumed_cost
                 .raw()
         })
         .collect();
-    assert_eq!(costs, [3, 3, 3, 3, 3, 4]);
-    assert_eq!(costs.iter().sum::<u64>(), cellgov_time::nsec_to_ticks(6));
+    // The load issues in its pair's cycle, so its step costs nothing.
+    assert_eq!(costs, [1, 0, 1, 0]);
 }
 
 #[test]

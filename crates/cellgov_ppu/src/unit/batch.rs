@@ -22,6 +22,11 @@ pub(super) struct BatchEntry {
     pub(super) fulls: usize,
     pub(super) barriers: usize,
     pub(super) retired: u64,
+    /// The issue model's cycle at entry.
+    pub(super) cycle: u64,
+    /// The issue model's scalar state at entry, taken when a step can
+    /// retire ahead of a fault.
+    pub(super) timing: Option<crate::timing::Core>,
 }
 
 /// The tap a unit with none installed runs its batch loop with.
@@ -39,17 +44,31 @@ impl PpuTap for NoTap {
 }
 
 impl PpuExecutionUnit {
-    /// Guest ticks for the instructions this batch retired, at one
-    /// instruction per nanosecond.
+    /// Guest ticks for the instructions this batch retired: the core
+    /// cycles the issue model advanced.
     ///
-    /// The cost converts the unit's running retirement count, so a batch
-    /// that ends inside a tick leaves the rest of that tick to the next
-    /// batch.
+    /// A tick is one core cycle. The second instruction of a pair that
+    /// issues with the first costs nothing.
     fn cost(&self, entry: &BatchEntry) -> InstructionCost {
-        InstructionCost::new(
-            cellgov_time::nsec_to_ticks(self.retirement_counter)
-                - cellgov_time::nsec_to_ticks(entry.retired),
-        )
+        InstructionCost::new(self.timing.now() - entry.cycle)
+    }
+
+    /// Retires the ops of the instruction at `pc` in the issue model.
+    /// `next_pc` is the address the unit runs next.
+    ///
+    /// A fused pair's second op is the instruction at `pc + 4`. That op
+    /// falls through to `pc + 8` when the pair leaves the unit at its
+    /// placeholder slot.
+    fn retire_timing(&mut self, pc: u64, ops: &[crate::timing::Op], next_pc: u64) {
+        match ops {
+            [op] => self.timing.retire(pc, op, next_pc),
+            [first, second] => {
+                self.timing.retire(pc, first, pc + 4);
+                let after = if next_pc == pc + 4 { pc + 8 } else { next_pc };
+                self.timing.retire(pc + 4, second, after);
+            }
+            _ => {}
+        }
     }
 
     /// Run one batch and report each dispatch to `tap`.
@@ -103,6 +122,8 @@ impl PpuExecutionUnit {
             fulls: self.per_step_full_states.len(),
             barriers: self.barriers.len(),
             retired: self.retirement_counter,
+            cycle: self.timing.now(),
+            timing: (max_budget > 1).then(|| self.timing.core()),
         };
 
         let mem = ctx.memory().as_bytes();
@@ -221,6 +242,24 @@ impl PpuExecutionUnit {
             }
 
             tap.dispatch(self.id, &insn, &self.state);
+            let (ops, n_ops) = crate::timing::classify(&insn, &self.state);
+            let ops = &ops[..n_ops];
+            if let (
+                instruction::PpuInstruction::Mftb { .. }
+                | instruction::PpuInstruction::Mftbu { .. },
+                [op],
+            ) = (&insn, ops)
+            {
+                // The time base a read returns is the one at its issue
+                // cycle; the read itself adds one.
+                let issue = self.timing.issue_cycle(step_pc, op);
+                let tick = ctx
+                    .current_tick()
+                    .raw()
+                    .saturating_add(issue.saturating_sub(entry.cycle));
+                let tb = cellgov_time::ticks_to_tb(tick);
+                self.state.tb = self.state.tb.max(tb.saturating_sub(1));
+            }
             let (effects_before, stores_before) = (effects.len(), self.store_buf.len());
             match exec::execute(
                 &insn,
@@ -251,6 +290,7 @@ impl PpuExecutionUnit {
                 }
                 ExecuteVerdict::Branch => {}
                 ExecuteVerdict::Syscall { lev } => {
+                    self.retire_timing(step_pc, ops, step_pc + 4);
                     self.close_block(effects);
                     let args = state::ppu_syscall_args(&self.state);
                     return ExecutionStepResult {
@@ -324,6 +364,8 @@ impl PpuExecutionUnit {
                     };
                 }
             }
+
+            self.retire_timing(step_pc, ops, self.state.pc);
 
             if self.profile_mode {
                 // Attribute to the dispatched variant so quickenings
