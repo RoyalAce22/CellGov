@@ -1,0 +1,21 @@
+[test]
+name = "spu_carry_reserved_bits"
+
+# A hardware probe of addx, sfx, cgx and bgx on a raw SPU when the RT
+# words that carry the carry or borrow in bit 31 also set the reserved
+# bits 0 to 30. Each instruction runs on four input sets and the SPU
+# stores each result. The PPU reads back SPU_Status, SPU_NextPC, the
+# class 0 interrupt status and the sixteen result quadwords. The PPU
+# program's header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 288 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]
