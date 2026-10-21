@@ -2,6 +2,7 @@
 //! one test binary so each profile links the crate's dependencies once.
 
 mod console_ppu_issue_chain;
+mod console_ppu_issue_layout;
 mod console_ppu_issue_multiple;
 mod console_ppu_issue_multiply;
 mod console_ppu_issue_shared;

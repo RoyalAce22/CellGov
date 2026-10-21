@@ -276,13 +276,21 @@ impl PpeTiming {
         let whole = |sum: u64, cap: u64| ((sum + 128) >> 8).min(cap) as u32;
         let cap = k::PPU_SMT_SHARED_STALL_CYCLES;
         let divide = share(cap, c.divide_share);
-        let long = divide + share(cap, c.alone_share);
+        let long = divide + share(k::PPU_SMT_MICROCODE_STALL_CYCLES, c.alone_share);
         let all = (long + wait(k::PPU_SMT_DEPENDENT_STALL_SHARE)).min(cap * 256);
         let (num, den) = k::PPU_SMT_VSU_STALL_SHARE;
         PpeIssuePressure {
             cycles: whole(all, cap),
             vsu_cycles: whole(divide + (all - divide) * num / den, cap),
-            multiply_cycles: whole(long + wait(k::PPU_SMT_MULTIPLY_DEPENDENT_STALL_SHARE), cap),
+            // A multiply beside microcode waits about the divide cap: in
+            // the `ppu_issue_shared` capture each `mulli` beside `lha`
+            // waits 14.8 to 16.2 cycles, more than any other chain there.
+            multiply_cycles: whole(
+                divide
+                    + share(cap, c.alone_share)
+                    + wait(k::PPU_SMT_MULTIPLY_DEPENDENT_STALL_SHARE),
+                cap,
+            ),
             multiply_hold_share: (c.divide_share * 256 + SHARE_ONE / 2) / SHARE_ONE,
         }
     }
@@ -683,8 +691,9 @@ fn issues_to_vsu(op: &Op) -> bool {
 /// instruction past the chain alone. Beside `fdiv` the means are 22 for
 /// `mulli` and 25 to 27 for `mullw`, `mulhw` and `mulld`; beside `divd`,
 /// 24 to 26 for those three, and 10 for `mulli`, whose runs spread from
-/// 1 to 27. Beside a microcoded `lha` sibling a `mulli` waits 13 or 14
-/// cycles in the `ppu_issue_shared` capture, as other instructions do.
+/// 1 to 27. Beside a microcoded `lha` sibling a `mulli` waits 14.8 to
+/// 16.2 cycles in the `ppu_issue_shared` capture, and its `add`, `addi`
+/// and `ld` chains 12.5 to 14.4.
 ///
 /// [`PPU_SMT_SHARED_STALL_CYCLES`]: k::PPU_SMT_SHARED_STALL_CYCLES
 fn multiply_hold(op: &Op) -> Option<u64> {

@@ -158,22 +158,43 @@ pub const PPU_SMT_SIBLING_HOLD_CYCLES: u64 = 2;
 
 /// The most cycles a sibling thread's stalls at the shared issue point
 /// add to each of a thread's instructions, past the cycle the
-/// instruction is ready: what a sibling of long waits or of microcoded
-/// instructions adds.
+/// instruction is ready: what a sibling of divides, square roots or long
+/// operand waits adds. Microcode adds at most
+/// [`PPU_SMT_MICROCODE_STALL_CYCLES`].
 ///
 /// The `ppu_issue_shared` capture times five chains beside a sibling
 /// running dependent `divd`, independent `divd`, `divw`, `fdiv`, `fsqrt`
 /// or microcoded `lha`. Each instruction of the `add`, `addi`, `fadd` and
 /// `ld` chains takes about its own latency and 13 cycles more, whichever
 /// of the six the sibling runs and whichever unit the chain uses, though
-/// the sibling's instructions take between 24 and 94 cycles each. A
-/// dependent `mulli` takes about 17 to 25 more.
+/// the sibling's instructions take between 24 and 94 cycles each. The
+/// `fadd` chain beside `lha` takes 7.7 more. A dependent `mulli` takes
+/// about 16 to 25 more.
 ///
 /// [CBE-Handbook p:301 s:10.2.3.1] a stall at IS2 stalls both threads.
 ///
 /// [CBE-Handbook p:753 s:A.5] a nonpipelined or microcoded instruction
 /// issues alone.
 pub const PPU_SMT_SHARED_STALL_CYCLES: u64 = 13;
+
+/// The most cycles a sibling's microcoded and other long non-divide
+/// instructions add to each of a thread's instructions, past the cycle
+/// the instruction is ready.
+///
+/// Beside a sibling of microcoded `lha` that holds its hardware thread,
+/// each `add` of a dependent chain in the `ppu_issue_layout` capture
+/// waits 9.3 to 10.2 cycles at seven line offsets of the chain when the
+/// sibling's loop sits at +0x00, and 7.4 and 8.7 at the two held offsets
+/// when it sits at +0x40. Each instruction of an FXU or load chain waits
+/// 7.1 to 9.5 cycles in `ppu_issue_units` and 12.5 to 14.4 in
+/// `ppu_issue_shared`. With ten, 6 of the 21 cells beside `lha` that the
+/// three captures replay stay outside the replay tolerance: 2 in
+/// `ppu_issue_layout`, 3 in `ppu_issue_units` and 1 in
+/// `ppu_issue_shared`.
+///
+/// No capture times a sibling of `mfcr` or `mfocrf`, the other long
+/// instructions this cap covers.
+pub const PPU_SMT_MICROCODE_STALL_CYCLES: u64 = 10;
 
 /// The share of a sibling's mean wait past its in-order floor, for its
 /// operands or a busy unit, as a fraction numerator over denominator,

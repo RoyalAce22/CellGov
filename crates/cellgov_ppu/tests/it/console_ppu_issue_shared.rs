@@ -237,7 +237,10 @@ const TOLERANCE: f64 = 0.20;
 ///   cycles and its own one, and times the loop 22% above the console's
 ///   mean. The `ppu_issue_units` capture runs the same loop beside the
 ///   same sibling within 19% of the model.
-const RESIDUALS: [(&str, &str); 1] = [("fdiv", "addi")];
+/// - Dependent `add` beside microcoded `lha`, 20% fast. Beside `lha` each
+///   `add` waits about 14 cycles here, 9.5 in `ppu_issue_units`, 7.4 to
+///   10.2 in `ppu_issue_layout`, and about 11 in the model.
+const RESIDUALS: [(&str, &str); 2] = [("fdiv", "addi"), ("lha", "add")];
 
 /// How far from the console's mean a residual may sit.
 const RESIDUAL_LIMIT: f64 = 0.35;

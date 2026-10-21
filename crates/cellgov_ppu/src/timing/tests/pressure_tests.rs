@@ -2,7 +2,9 @@ use super::{classify, PpeTiming};
 use crate::instruction::PpuInstruction as I;
 use crate::state::PpuState;
 use cellgov_exec::PpeIssuePressure;
-use cellgov_ps3_abi::hw::ppu_issue::{PPU_MULLI_LATENCY_CYCLES, PPU_SMT_SHARED_STALL_CYCLES};
+use cellgov_ps3_abi::hw::ppu_issue::{
+    PPU_MULLI_LATENCY_CYCLES, PPU_SMT_MICROCODE_STALL_CYCLES, PPU_SMT_SHARED_STALL_CYCLES,
+};
 
 /// Retire `insns` from `pc` up as straight-line code, `times` times over,
 /// and return the issue cycle of each op of the last pass.
@@ -43,11 +45,11 @@ fn divide_sibling() -> PpeIssuePressure {
     pressure(all, all, all, 256)
 }
 
-/// A sibling of microcoded loads: the shared stall, half of it for a VSU
-/// instruction, and no multiply hold.
+/// A sibling of microcoded loads: the microcode stall, half of it for a
+/// VSU instruction, the divide cap for a multiply, and no multiply hold.
 fn microcode_sibling() -> PpeIssuePressure {
-    let all = PPU_SMT_SHARED_STALL_CYCLES;
-    pressure(all, 7, all, 0)
+    let all = PPU_SMT_MICROCODE_STALL_CYCLES;
+    pressure(all, all / 2, PPU_SMT_SHARED_STALL_CYCLES, 0)
 }
 
 fn fadd(frt: u8, frb: u8) -> I {
@@ -131,13 +133,29 @@ fn a_thread_of_microcoded_loads_presses_a_sibling_s_multiplies_as_its_other_inst
 }
 
 #[test]
-fn a_thread_of_mfcr_presses_by_the_shared_stall_and_repeats_no_multiply_hold() {
-    // The bdnz-free run of mfcr leaves the share just under one, so half
-    // of it rounds to 6.
+fn a_thread_of_mfcr_presses_by_the_microcode_stall_and_repeats_no_multiply_hold() {
     let mut timing = PpeTiming::new();
     run(&mut timing, &state(), &[I::Mfcr { rt: 9 }; 8], 4);
-    let all = PPU_SMT_SHARED_STALL_CYCLES;
-    assert_eq!(timing.pressure(), pressure(all, 6, all, 0));
+    assert_eq!(timing.pressure(), microcode_sibling());
+}
+
+#[test]
+fn a_divide_sibling_presses_harder_than_a_microcode_one_except_on_a_multiply() {
+    let lha = |rt, imm| I::Lha { rt, ra: 29, imm };
+    let mut s = state();
+    s.set_gpr(29, 0x2000);
+    let mut divides = PpeTiming::new();
+    run(&mut divides, &state(), &[divd(); 8], 4);
+    let mut microcode = PpeTiming::new();
+    run(
+        &mut microcode,
+        &s,
+        &[lha(17, 0), lha(18, 2), lha(19, 4), lha(20, 6)],
+        8,
+    );
+    let (d, m) = (divides.pressure(), microcode.pressure());
+    assert!(m.cycles < d.cycles, "{m:?} {d:?}");
+    assert_eq!(m.multiply_cycles, d.multiply_cycles, "{m:?} {d:?}");
 }
 
 #[test]
@@ -306,7 +324,10 @@ fn beside_microcode_a_vsu_instruction_waits_half_the_stall() {
     let mut beside = PpeTiming::new();
     beside.set_siblings(1, microcode_sibling());
     let cycles = run(&mut beside, &state(), &chain, 1);
-    assert_eq!(cycles[1] - cycles[0], 10 + 7);
+    assert_eq!(
+        cycles[1] - cycles[0],
+        10 + PPU_SMT_MICROCODE_STALL_CYCLES / 2
+    );
     let mut divides = PpeTiming::new();
     divides.set_siblings(1, divide_sibling());
     let cycles = run(&mut divides, &state(), &chain, 1);

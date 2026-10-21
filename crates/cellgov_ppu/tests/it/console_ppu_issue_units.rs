@@ -241,18 +241,19 @@ const TOLERANCE: f64 = 0.20;
 /// The cells the model times outside both the console's spread and
 /// [`TOLERANCE`], as (sibling, chain):
 ///
-/// - Five chains beside microcoded `lha`, which the model times 35% to
-///   66% slow. Beside `lha` each FXU instruction waits 6 to 10 cycles in
-///   this capture and 12 to 14 in `ppu_issue_shared`. The model gives 13.
+/// - Three chains beside microcoded `lha`, which the model times 21% to
+///   33% slow. Beside `lha` each instruction of an FXU or load chain
+///   waits 7.1 to 9.5 cycles in this capture, each `add` 7.4 to 10.2 in
+///   `ppu_issue_layout`, and each FXU or load instruction 12.5 to 14.4 in
+///   `ppu_issue_shared`. The model caps that stall at 10 cycles.
 /// - Four chains beside dependent `mulld`, which the model times 24% to
 ///   36% fast. Beside `mulld` each `addi` waits about 8 cycles here and
-///   about 6 in `ppu_issue_shared`.
+///   about 6 in `ppu_issue_shared`, and each `add` about 6 in
+///   `ppu_issue_layout`.
 /// - Interleaved `addi` and `fadd` beside `fdiv`, 22% slow.
-const RESIDUALS: [(&str, &str); 10] = [
+const RESIDUALS: [(&str, &str); 8] = [
     ("lha", "addi"),
-    ("lha", "add"),
     ("lha", "ld"),
-    ("lha", "addi and fadd"),
     ("lha", "fadd then addi"),
     ("mulld", "addi"),
     ("mulld", "add"),
@@ -262,8 +263,8 @@ const RESIDUALS: [(&str, &str); 10] = [
 ];
 
 /// How far from the console's mean a residual may sit: just above the
-/// worst residual, `addi` beside `lha` at 66%.
-const RESIDUAL_LIMIT: f64 = 0.70;
+/// worst residual, independent `fadd` beside `mulld` at 36%.
+const RESIDUAL_LIMIT: f64 = 0.40;
 
 #[test]
 fn the_issue_model_times_each_chain_beside_each_sibling_near_the_console() {

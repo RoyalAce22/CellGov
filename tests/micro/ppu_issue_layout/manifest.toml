@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_layout"
+
+# A hardware probe of whether a dependent add chain's cost beside a
+# sibling PPU thread moves with where the chain or the sibling's loop
+# sits in its 128-byte instruction-cache line: the chain at eight line
+# offsets, alone and beside a sibling running microcoded lha or
+# dependent mulld at two line offsets, dependent divd, or dependent
+# fdiv. The console capture is the answer; ppu/main.c's header lists
+# the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 2176 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2176 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000
