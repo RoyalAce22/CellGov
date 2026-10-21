@@ -108,8 +108,9 @@ pub(crate) enum Kind {
     Drain,
     /// Drains, then refetches the instructions after it.
     Refetch,
-    /// An `sc`.
-    Syscall,
+    /// An `sc`. `number` is r11 before the `sc` executes, or `None`
+    /// for a hypervisor call.
+    Syscall { number: Option<u64> },
 }
 
 /// One instruction as the issue model sees it.
@@ -1318,7 +1319,9 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             })
             .base(ra)
             .index(rb)),
-        I::Sc { .. } => one(Op::on(0).kind(Kind::Syscall)),
+        I::Sc { lev } => one(Op::on(0).kind(Kind::Syscall {
+            number: (lev == 0).then_some(state.gpr[11]),
+        })),
         I::Sync { .. } => one(Op::on(unit::LSU).kind(Kind::Drain)),
         I::Eieio => one(Op::on(unit::LSU)),
         I::Isync => one(Op::on(unit::LSU).kind(Kind::Refetch)),

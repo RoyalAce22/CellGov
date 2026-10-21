@@ -207,7 +207,7 @@ fn issues_alone(op: &Op) -> bool {
     op.words != 0
         || matches!(
             op.kind,
-            Kind::Unpipelined(_) | Kind::Syscall | Kind::Refetch | Kind::Drain
+            Kind::Unpipelined(_) | Kind::Syscall { .. } | Kind::Refetch | Kind::Drain
         )
 }
 
@@ -384,7 +384,7 @@ impl PpeTiming {
         for u in unit_slots(op.units) {
             t = t.max(c.unit_free[u]);
         }
-        if matches!(op.kind, Kind::Drain | Kind::Refetch | Kind::Syscall) {
+        if matches!(op.kind, Kind::Drain | Kind::Refetch | Kind::Syscall { .. }) {
             let all = c.ready.iter().chain(c.unit_free.iter()).copied().max();
             t = t.max(all.unwrap_or(0));
         }
@@ -545,8 +545,11 @@ impl PpeTiming {
                 self.end_block(t + k::PPU_BRANCH_MISS_CYCLES);
                 return;
             }
-            Kind::Syscall => {
-                let back = t + k::PPU_SYSCALL_ROUND_TRIP_CYCLES;
+            Kind::Syscall { number } => {
+                let back = t + number.map_or(
+                    k::PPU_SYSCALL_ROUND_TRIP_CYCLES,
+                    k::ppu_syscall_round_trip_cycles,
+                );
                 self.core.floor = self.core.floor.max(back);
                 self.end_block(back);
                 return;

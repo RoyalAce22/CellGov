@@ -15,6 +15,8 @@
 //! replays the loops of both probes through the issue model. The
 //! documented values carry the page that states them.
 
+use crate::lv2::syscall;
+
 /// PPE core cycles per time-base tick.
 ///
 /// At this ratio the fastest run of the empty `bdnz` loop reads 8.015
@@ -122,8 +124,50 @@ pub const PPU_BRANCH_MISS_CYCLES: u64 = 25;
 ///
 /// The probe's loop of these calls takes 949 cycles an iteration. The
 /// replay of that loop through the issue model takes the console's
-/// cycles at this round trip.
+/// cycles at this round trip. A call no capture times takes this round
+/// trip; [`PPU_SYSCALL_ROUND_TRIPS`] holds the calls a capture times.
 pub const PPU_SYSCALL_ROUND_TRIP_CYCLES: u64 = 929;
+
+/// The round trip of each call the `ppu_lv2_call_cost` capture times,
+/// as `(syscall number, cycles)`: the cycles from the `sc` to the
+/// earliest issue of the instruction after it.
+///
+/// The probe makes 4096 uncontended calls a loop, five runs each. Each
+/// entry is its loop's fastest run, less the 13 cycles the rest of the
+/// loop takes beside `sys_time_get_timebase_frequency`'s round trip.
+/// A call that writes a result to guest memory takes 5889 to 8956
+/// cycles. A call on a semaphore, event flag or mutex that writes no
+/// result takes 2161 to 2587, and `sys_ppu_thread_yield` with no other
+/// thread runnable takes 1451.
+pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 14] = [
+    (syscall::TIME_GET_TIMEBASE_FREQUENCY, 929),
+    (syscall::TIME_GET_CURRENT_TIME, 8956),
+    (syscall::MEMORY_GET_USER_MEMORY_SIZE, 8298),
+    (syscall::PPU_THREAD_YIELD, 1451),
+    (syscall::SEMAPHORE_GET_VALUE, 6040),
+    (syscall::SEMAPHORE_POST, 2473),
+    (syscall::SEMAPHORE_TRY_WAIT, 2587),
+    (syscall::EVENT_FLAG_GET, 5889),
+    (syscall::EVENT_FLAG_SET, 2545),
+    (syscall::EVENT_FLAG_CLEAR, 2474),
+    (syscall::MUTEX_LOCK, 2302),
+    (syscall::MUTEX_UNLOCK, 2161),
+    (syscall::MUTEX_TRYLOCK, 2363),
+    (syscall::EVENT_QUEUE_TRY_RECEIVE, 6391),
+];
+
+/// The round trip of the call `number` selects: its entry in
+/// [`PPU_SYSCALL_ROUND_TRIPS`], or [`PPU_SYSCALL_ROUND_TRIP_CYCLES`].
+pub const fn ppu_syscall_round_trip_cycles(number: u64) -> u64 {
+    let mut i = 0;
+    while i < PPU_SYSCALL_ROUND_TRIPS.len() {
+        if PPU_SYSCALL_ROUND_TRIPS[i].0 == number {
+            return PPU_SYSCALL_ROUND_TRIPS[i].1;
+        }
+        i += 1;
+    }
+    PPU_SYSCALL_ROUND_TRIP_CYCLES
+}
 
 /// Eight independent `addi` and their `bdnz`, in cycles an iteration, with
 /// the other hardware thread idle and then busy on independent `addi`.

@@ -1,0 +1,20 @@
+[test]
+name = "ppu_lv2_call_cost"
+
+# A hardware probe of the LV2 round trip by call class: fifteen loops,
+# each of one uncontended syscall, timed with mftb. The calls cover the
+# time, memory, thread, semaphore, event flag, mutex and event queue
+# classes; none blocks. The console capture is the answer; ppu/main.c's
+# header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 512 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 512 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

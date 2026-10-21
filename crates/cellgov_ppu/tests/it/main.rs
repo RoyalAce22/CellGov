@@ -14,6 +14,7 @@ mod console_ppu_issue_sibling_rate;
 mod console_ppu_issue_smt;
 mod console_ppu_issue_timing;
 mod console_ppu_issue_units;
+mod console_ppu_lv2_call_cost;
 mod reloc_addr16_lo_ds;
 mod reloc_addr64;
 mod reloc_rel24;
