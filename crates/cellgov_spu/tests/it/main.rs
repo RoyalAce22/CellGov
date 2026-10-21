@@ -3,6 +3,7 @@
 
 mod channel_stall_through_runtime;
 mod clock_read_explore;
+mod console_bisled_d_and_e;
 mod console_channel_direction_sweep;
 mod console_dma_after_exit;
 mod console_dma_after_stop;

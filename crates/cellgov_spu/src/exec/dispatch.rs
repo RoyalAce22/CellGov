@@ -1105,6 +1105,8 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         }
         // [SPU-ISA p:180 s:7. Compare, Branch, and Halt Instructions] Branch Indirect and Set Link if External Data: RT gets the link whether or not the branch is taken, and PC <- RA only when the external condition is true.
         // [CBEA p:147 s:9.11.1] the condition is a non-zero SPU_RdEventStat count.
+        // The `spu_bisled_d_and_e` console capture: with D and E both set, a
+        // branch not taken leaves the interrupt-enable state as it was.
         SpuInstruction::Bisled { rt, ra, d, e } => {
             let target = state.insn_addr(state.reg_word(ra));
             let link = state.ls_wrap(state.pc.wrapping_add(4));

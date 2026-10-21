@@ -1,0 +1,24 @@
+[test]
+name = "spu_bisled_d_and_e"
+
+# A hardware probe of bisled with D and E both set, on a raw SPU with
+# one word left unread in its inbound mailbox: from the disabled and the
+# enabled state with the event mask at 0, from the disabled state with
+# the mailbox event masked in, and from the disabled state with the mask
+# cleared again. Before each branch the SPU stores the SPU_RdEventStat
+# count; after it, SPU_RdMachStat, the link register and the path it
+# took. The PPU reads back SPU_Status, SPU_NextPC, SPU_Mbox_Stat, the
+# class 0 interrupt status and the result quadwords. The PPU program's
+# header comment has the payload layout.
+
+[observe]
+memory_regions = [
+  { name = "result", addr = 0, size = 296 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
+files = ["spu_main.elf"]
