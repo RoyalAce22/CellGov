@@ -68,11 +68,14 @@ smoke() {
 # The long SPU sweep: every SPU engine and strategy at a budget that scales
 # with the descriptor registry, held to the smoke floors and the promoted
 # regressions. A filter that matches no test passes with "0 passed", so the
-# job requires the one sweep test to have run.
+# job requires the one sweep test to have run. The log is a file in the
+# job's output, not /dev/stderr, which Git Bash on the Windows runner does
+# not have; the artifact then keeps the sweep's output.
 spu() {
-    local log
-    log=$(cargo test --release -p cellgov_fuzz --locked --test it -- --ignored spu_sweep:: 2>&1 | tee /dev/stderr)
-    case "$log" in
+    fresh "$out/spu"
+    cargo test --release -p cellgov_fuzz --locked --test it -- --ignored spu_sweep:: 2>&1 \
+        | tee "$out/spu/sweep.log"
+    case "$(< "$out/spu/sweep.log")" in
         *"test result: ok. 1 passed"*) ;;
         *) echo "fuzz spu: the sweep test did not run" >&2; return 1 ;;
     esac
@@ -80,7 +83,8 @@ spu() {
 
 # Names a job's outcome from its exit status: clean, a timeout, killed
 # (out of memory), or a finding with the files the uploaded artifact
-# holds for it.
+# holds for it. A job that failed before it wrote its output has no
+# output directory, and that counts as zero files, not as a second failure.
 outcome() {
     local job=$1 status=$2 artifact=$3 files
     case "$status" in
@@ -90,8 +94,11 @@ outcome() {
         127) echo "fuzz $job: did not start (exit 127, a command was not found)" ;;
         137) echo "fuzz $job: killed, most likely out of memory (exit 137)" ;;
         *)
-            files=$(find "$out" -type f -name '*.json' 2>/dev/null | wc -l | tr -d '[:space:]')
-            echo "fuzz $job: finding or refusal (exit $status); $files result file(s) in artifact $artifact"
+            files=0
+            if [ -d "$out" ]; then
+                files=$(find "$out" -type f | wc -l | tr -d '[:space:]')
+            fi
+            echo "fuzz $job: finding or refusal (exit $status); $files file(s) in artifact $artifact"
             ;;
     esac
 }
