@@ -507,7 +507,12 @@ impl Runtime {
         self.memory
     }
 
-    /// Current guest time.
+    /// The tick of the last step or warp.
+    ///
+    /// After a step, this is the clock of the unit that stepped, at the
+    /// end of its step. Each unit keeps its own clock
+    /// ([`crate::registry::UnitRegistry::clock`]). With several units,
+    /// this value can move backwards from one step to the next.
     #[inline]
     pub fn time(&self) -> GuestTicks {
         self.time

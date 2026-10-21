@@ -198,9 +198,10 @@ index shows it, but it names no cell. A manifest may declare the title
 at its floor as a drift study.
 [title_harness.md](../architecture/title_harness.md#which-firmware-a-title-is-measured-against)
 
-**Guest ticks.** Guest time in cycles of the 3.192 GHz core clock,
-advanced by each step's cost: 3.192 ticks per retired PPU instruction,
-and one tick per SPU pipeline cycle.
+**Guest ticks.** Guest time in cycles of the 3.192 GHz core clock.
+Each unit keeps its own count, advanced by its own steps' cost: 3.192
+ticks per retired PPU instruction, and one tick per SPU pipeline
+cycle.
 Never wall-clock time; CellGov has no host-time dependency.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#per-step-pipeline)
 
@@ -413,7 +414,7 @@ one commit. Step counts are the unit of anchors, checkpoints, and
 divergence localization.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#per-step-pipeline)
 
-**Sticky scheduling.** The round-robin scheduler reselecting the
+**Sticky scheduling.** The optional round-robin scheduler reselecting the
 previous unit while it holds an lwmutex or after a non-waking
 syscall, capped at 64 consecutive sticky yields.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#per-step-pipeline)

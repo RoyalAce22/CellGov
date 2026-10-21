@@ -53,7 +53,7 @@ impl UnitRegistry {
         );
         self.next_id += 1;
         let prev = self.units.insert(id, Box::new(unit));
-        self.status_lanes.get_mut().mark(id);
+        self.mark_status(id);
         debug_assert!(
             prev.is_none(),
             "UnitRegistry: next_id {id:?} already had a unit -- monotonic counter wrapped or a \
@@ -80,7 +80,7 @@ impl UnitRegistry {
         );
         self.next_id += 1;
         let prev = self.units.insert(id, unit);
-        self.status_lanes.get_mut().mark(id);
+        self.mark_status(id);
         debug_assert!(
             prev.is_none(),
             "UnitRegistry: next_id {id:?} already had a unit -- monotonic counter wrapped or a \
@@ -109,7 +109,7 @@ impl UnitRegistry {
         );
         self.next_id += 1;
         let prev = self.units.insert(id, unit);
-        self.status_lanes.get_mut().mark(id);
+        self.mark_status(id);
         debug_assert!(
             prev.is_none(),
             "UnitRegistry: next_id {id:?} already had a unit -- monotonic counter wrapped or a \

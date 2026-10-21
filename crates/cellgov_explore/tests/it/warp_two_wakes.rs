@@ -6,10 +6,9 @@
 //! choice, and the search owes an execution for it.
 //!
 //! The deadlines meet by arithmetic. A wait's deadline is the tick its
-//! syscall committed at plus its timeout, and one step costs the
-//! 3192 ticks a microsecond of timeout converts to (`BUDGET`). So
-//! the unit that parks one step later asks for one microsecond less,
-//! and the two deadlines meet.
+//! syscall committed at plus its timeout. Each unit keeps its own clock,
+//! so both park at the end of their own first step, at the tick one
+//! step costs (`BUDGET`). Equal timeouts then give equal deadlines.
 
 #![allow(
     clippy::unwrap_used,
@@ -29,9 +28,10 @@ use cellgov_lv2::PpuThreadAttrs;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
-/// One step costs this many ticks, which is also what one microsecond
-/// of timeout converts to.
+/// One step costs this many ticks: one microsecond.
 const BUDGET: u64 = cellgov_time::TICKS_PER_USEC;
+/// Both waits ask for this timeout.
+const TIMEOUT_USEC: u64 = 1;
 const STEP_CAP: usize = 200;
 const FLAG_ID: u32 = 1;
 /// A null result pointer, which the kernel skips.
@@ -121,13 +121,13 @@ fn two_waits_one_tick() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(0x1000), Budget::new(BUDGET), STEP_CAP);
     let first = rt.register_unit_with(|id| Waker {
         id,
-        timeout_usec: 2,
+        timeout_usec: TIMEOUT_USEC,
         mark: 0xA1,
         steps: Cell::new(0),
     });
     let second = rt.register_unit_with(|id| Waker {
         id,
-        timeout_usec: 1,
+        timeout_usec: TIMEOUT_USEC,
         mark: 0xB2,
         steps: Cell::new(0),
     });

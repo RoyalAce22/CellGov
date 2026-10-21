@@ -341,7 +341,11 @@ fn run_one(
         if at_cap && rt.can_take_another_step() {
             break Halt::Stopped(StopReason::StepBound);
         }
-        let runnable: Vec<UnitId> = rt.registry().runnable_ids().collect();
+        // The sort puts the units in the runtime's own order: lowest
+        // clock first, and a tie to the lower id. So a depth that takes
+        // the first unit runs the one the runtime would.
+        let mut runnable: Vec<UnitId> = rt.registry().runnable_ids().collect();
+        runnable.sort_by_key(|&unit| (rt.registry().clock(unit), unit));
         // With nothing runnable the runtime warps and picks; a depth
         // that recorded what its warp woke decides from that instead
         // (see the doc on `Frame::warp_woke`).
@@ -376,7 +380,7 @@ fn run_one(
             }
         }
         if deciding.is_empty() {
-            rt.set_scheduler(cellgov_core::RoundRobinScheduler::new());
+            rt.set_scheduler(cellgov_core::LowestClockScheduler::new());
         } else {
             // At a warp depth the first selection call finds nothing
             // runnable and advances no cursor (see the comment in

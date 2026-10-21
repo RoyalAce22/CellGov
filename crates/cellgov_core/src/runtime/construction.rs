@@ -9,7 +9,7 @@ use cellgov_trace::TraceWriter;
 
 use crate::commit::CommitPipeline;
 use crate::registry::UnitRegistry;
-use crate::scheduler::RoundRobinScheduler;
+use crate::scheduler::LowestClockScheduler;
 use crate::syscall_table::SyscallResponseTable;
 
 use super::{Runtime, RuntimeMode};
@@ -42,6 +42,7 @@ impl Runtime {
     /// # Non-obvious defaults
     ///
     /// - DMA latency: a fixed default via [`FixedLatency`].
+    /// - Scheduler: [`LowestClockScheduler`], over each unit's own clock.
     /// - Runtime mode: [`RuntimeMode::FullTrace`]; the trivial-step
     ///   fast path is `FaultDriven`-only.
     /// - NV method roster:
@@ -100,7 +101,7 @@ impl Runtime {
             ppu_factory: None,
             process_spawn_loader: None,
             pending_child_inits: Vec::new(),
-            scheduler: Box::new(RoundRobinScheduler::new()),
+            scheduler: Box::new(LowestClockScheduler::new()),
             commit_pipeline: CommitPipeline::new(),
             memory,
             spaces: Default::default(),

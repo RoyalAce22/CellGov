@@ -2,6 +2,7 @@
 //! object-safe trait, iterates in id order.
 
 mod access;
+mod clocks;
 mod hash;
 mod overrides;
 mod pending;

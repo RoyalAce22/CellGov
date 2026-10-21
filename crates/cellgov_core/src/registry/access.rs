@@ -15,12 +15,13 @@ impl UnitRegistry {
 
     /// Mutably borrow a unit by id, if present.
     ///
-    /// The unit's status lane goes stale, since the borrower can change
-    /// what `status()` reports.
+    /// The unit's status lane goes stale and the next clock sync reads
+    /// the unit, since the borrower can change what `status()` reports.
     #[inline]
     pub fn get_mut(&mut self, id: UnitId) -> Option<&mut dyn RegisteredUnit> {
         let unit = self.units.get_mut(&id)?;
         self.status_lanes.get_mut().mark(id);
+        super::clocks::watch_clock(&mut self.clock_watch, id);
         Some(unit.as_mut())
     }
 
@@ -31,12 +32,14 @@ impl UnitRegistry {
 
     /// Iterate registered units mutably in id order.
     ///
-    /// Every unit's status lane goes stale, since the borrower can change
-    /// what `status()` reports.
+    /// Every unit's status lane goes stale and the next clock sync reads
+    /// every unit, since the borrower can change what `status()` reports.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (UnitId, &mut dyn RegisteredUnit)> + '_ {
         let lanes = self.status_lanes.get_mut();
+        let clock_watch = &mut self.clock_watch;
         self.units.iter_mut().map(move |(id, u)| {
             lanes.mark(*id);
+            super::clocks::watch_clock(clock_watch, *id);
             (*id, u.as_mut())
         })
     }

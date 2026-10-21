@@ -1,12 +1,14 @@
 //! Whether a step that reads the guest clock is a dependency the
 //! relation sees.
 //!
-//! A unit that reads the time base and stores it commits a value every
-//! other unit's tick spend decided. The range it writes is the same
-//! whatever that value is, so a footprint naming ranges records the
-//! store and not what made it differ.
+//! A unit that reads the time base reads its own clock, which only its
+//! own steps and the tick of a wake move. Two counters that never wake
+//! it therefore cannot move the count it stores, whatever they spend
+//! and whichever runs first. The relation pairs on the read itself, so
+//! it still holds the reader against both counters. That is sound, and
+//! wider than this workload needs.
 //!
-//! This is the third reader of the one clock, after the DMA landing
+//! The clock's other readers have their own witnesses: the DMA landing
 //! `shared_clock.rs` covers and the timer deadline `timer_deadline.rs`
 //! covers.
 
@@ -32,7 +34,7 @@ const STEP_CAP: usize = 200;
 const DEPTH: usize = 6;
 const BUDGET: u64 = 64;
 /// Ticks the cheap counter spends per step; the expensive one spends
-/// the whole budget. The two make the outcome set below.
+/// the whole budget.
 const CHEAP_COST: u64 = 8;
 
 const READER: UnitId = UnitId::new(0);
@@ -47,8 +49,7 @@ fn destination() -> ByteRange {
 ///
 /// The counters touch no shared resource, so the relation calls them
 /// independent of each other. The clock clause alone holds either of
-/// them against the reader, and which of them runs first decides the
-/// tick count the reader stores.
+/// them against the reader.
 fn workload() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
     let reader = rt.register_unit_with(|id| ClockWriter::new(id, destination()));
@@ -159,22 +160,18 @@ fn memories_the_search_reaches() -> (BTreeSet<u64>, Option<usize>, bool) {
     (reached, result.classes_explored, result.bounds_hit)
 }
 
-/// Nine outcomes: the reader stores `8a + 64b` for `a` cheap steps and
-/// `b` expensive ones run before it, and each counter runs two.
+/// One outcome: the reader's one step starts at its own tick 0 however
+/// many counter steps run before it.
 #[test]
-fn the_reader_commits_one_memory_per_tick_count_it_can_see() {
+fn the_reader_stores_its_own_clock_whatever_the_counters_spend() {
     let reachable = every_reachable_memory();
     let ticks: BTreeSet<u64> = reachable.values().copied().collect();
     assert_eq!(
         ticks,
-        BTreeSet::from([0, 8, 16, 64, 72, 80, 128, 136, 144]),
-        "every count of cheap and expensive steps before the reader is a distinct outcome",
+        BTreeSet::from([0]),
+        "no counter step run before the reader moves the count it reads",
     );
-    assert_eq!(
-        reachable.len(),
-        ticks.len(),
-        "each tick count leaves its own committed memory",
-    );
+    assert_eq!(reachable.len(), 1, "the one count leaves the one memory");
 }
 
 #[test]
@@ -185,11 +182,11 @@ fn the_relation_holds_the_reader_against_the_counters() {
     let execution = Execution::from_log(&log);
     assert!(
         !execution.units_independent(READER, CHEAP),
-        "the cheap counter's ticks decide what the reader stores",
+        "the clause pairs the read with the cheap counter",
     );
     assert!(
         !execution.units_independent(READER, EXPENSIVE),
-        "and so do the expensive one's",
+        "and with the expensive one",
     );
     // Without this the two above pass under a relation that pairs every
     // step with every other.
@@ -200,12 +197,12 @@ fn the_relation_holds_the_reader_against_the_counters() {
 }
 
 #[test]
-fn the_verdict_reads_schedule_sensitive() {
+fn the_verdict_reads_schedule_stable() {
     let result = explore_window(workload, &ExplorationConfig::default());
     assert_eq!(
         result.outcome,
-        cellgov_explore::classify::OutcomeClass::ScheduleSensitive,
-        "the stored tick count moves with the schedule, so the memory is not stable",
+        cellgov_explore::classify::OutcomeClass::ScheduleStable,
+        "the stored tick count is the reader's own, so the memory does not move",
     );
 }
 
@@ -232,10 +229,11 @@ fn a_reader_whose_store_nothing_else_reaches_still_conflicts() {
     );
 }
 
-/// Each class here holds one committed memory, so nine outcomes need
-/// nine classes.
+/// The clause holds the reader against each counter, so the search
+/// still runs nine classes: every placement of the read among the two
+/// counters' two steps each. All nine hold the one memory.
 #[test]
-fn the_search_reaches_every_outcome_and_claims_one_class_per_outcome() {
+fn the_search_reaches_the_outcome_and_runs_every_class_the_clause_makes() {
     let reachable = every_reachable_memory();
     let (reached, classes, bounds_hit) = memories_the_search_reaches();
     assert!(!bounds_hit, "no bound stopped the search");
@@ -248,6 +246,11 @@ fn the_search_reaches_every_outcome_and_claims_one_class_per_outcome() {
     assert!(
         missed.is_empty(),
         "outcomes the search does not reach, by the tick count that makes each: {missed:?}",
+    );
+    assert_eq!(
+        reached.len(),
+        1,
+        "every class the search ran holds the one memory"
     );
     assert_eq!(
         classes,

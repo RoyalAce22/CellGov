@@ -73,6 +73,23 @@ impl Runtime {
         self.last_problem_state_accesses.clear();
         self.last_mailbox_read = None;
 
+        // A unit registered or woken since the last commit takes its
+        // clock from that commit's tick.
+        self.registry.sync_clocks(self.time);
+        // A commit leaves an event unfired while a runnable unit's clock
+        // is behind its tick. The event fires here once every runnable
+        // clock reaches that tick.
+        let lowest = match self.next_event_time() {
+            Some(_) => self.registry.lowest_runnable_clock(),
+            None => None,
+        };
+        if let Some(lowest) = lowest {
+            let (due, timer_due) = self.fire_due_events(lowest);
+            if !due.is_empty() || !timer_due.is_empty() {
+                self.emit_time_warp_trace(&due, &timer_due);
+            }
+        }
+
         let unit_id = match self.scheduler.select_next(&self.registry) {
             Some(id) => id,
             None => {
@@ -94,22 +111,13 @@ impl Runtime {
                     return Err(StepError::NoRunnableUnit);
                 }
                 loop {
-                    // A transfer a suspended queue holds never completes,
-                    // so it is no wake source.
-                    let next_dma = self.dma_queue.next_event_time();
-                    let next_timer = self.timer_wakes.peek_deadline();
-                    let next_time = match (next_dma, next_timer) {
-                        (Some(d), Some(t)) => d.min(t),
-                        (Some(d), None) => d,
-                        (None, Some(t)) => t,
-                        (None, None) => return Err(StepError::AllBlocked),
+                    let Some(next_time) = self.next_event_time() else {
+                        return Err(StepError::AllBlocked);
                     };
-                    if next_time > self.time {
-                        self.time = next_time;
-                    }
-                    let due = self.fire_dma_completions();
-                    let timer_due = self.fire_timer_wakes();
+                    self.time = next_time;
+                    let (due, timer_due) = self.fire_due_events(next_time);
                     self.wake_reservation_lost_waiters();
+                    self.registry.sync_clocks(self.time);
                     self.emit_time_warp_trace(&due, &timer_due);
                     if let Some(id) = self.scheduler.select_next(&self.registry) {
                         break id;
@@ -117,6 +125,7 @@ impl Runtime {
                 }
             }
         };
+        let start = self.registry.clock(unit_id);
 
         // A warp above can widen the set the scheduler chose from, so
         // record it here.
@@ -131,7 +140,7 @@ impl Runtime {
             self.trace.record(&TraceRecord::UnitScheduled {
                 unit: unit_id,
                 granted_budget: self.budget_per_step,
-                time: self.time,
+                time: start,
                 epoch: self.epoch,
             });
         }
@@ -181,7 +190,7 @@ impl Runtime {
                 .map_or_else(Vec::new, |mailbox| mailbox.iter().copied().collect());
             let ctx = ctx
                 .with_reservations(unit_reservations)
-                .with_current_tick(self.time)
+                .with_current_tick(start)
                 .with_trace_per_step(self.mode != RuntimeMode::FaultDriven)
                 .with_outstanding_dma_tags(outstanding_tags)
                 .with_list_stall_tags(self.dma_queue.stall_notify_tags(unit_id))
@@ -303,10 +312,10 @@ impl Runtime {
         }
 
         let advance: GuestTicks = result.consumed_cost.into();
-        let time_after = self
-            .time
-            .checked_add(advance)
-            .ok_or(StepError::TimeOverflow)?;
+        let time_after = start.checked_add(advance).ok_or(StepError::TimeOverflow)?;
+        // The commit that follows stamps this step's effects with the
+        // unit's clock at the end of the step.
+        self.registry.set_clock(unit_id, time_after);
         self.time = time_after;
         self.steps_taken += 1;
         self.last_scheduled_unit = Some(unit_id);

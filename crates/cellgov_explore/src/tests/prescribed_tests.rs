@@ -63,32 +63,6 @@ fn override_forces_specific_unit() {
     assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
 }
 
-// The stub units cannot express a syscall yield, so the test drives
-// `notify_yielded` on both schedulers directly.
-#[test]
-fn notify_yielded_reaches_fallback_stickiness() {
-    let mut r = UnitRegistry::new();
-    r.register_with(StubUnit::new);
-    r.register_with(StubUnit::new);
-
-    let mut baseline = cellgov_core::RoundRobinScheduler::new();
-    let mut prescribed = PrescribedScheduler::new(vec![]);
-
-    assert_eq!(baseline.select_next(&r), Some(UnitId::new(0)));
-    assert_eq!(prescribed.select_next(&r), Some(UnitId::new(0)));
-
-    // Non-waking syscall: round-robin re-selects the same unit.
-    baseline.notify_yielded(UnitId::new(0), YieldReason::Syscall, false, false);
-    prescribed.notify_yielded(UnitId::new(0), YieldReason::Syscall, false, false);
-
-    assert_eq!(baseline.select_next(&r), Some(UnitId::new(0)));
-    assert_eq!(
-        prescribed.select_next(&r),
-        Some(UnitId::new(0)),
-        "exhausted prescription must reproduce the baseline sticky pick"
-    );
-}
-
 fn three_runnable_units() -> UnitRegistry {
     let mut r = UnitRegistry::new();
     for _ in 0..3 {
@@ -98,36 +72,26 @@ fn three_runnable_units() -> UnitRegistry {
 }
 
 #[test]
-fn a_prescribed_prefix_of_the_baseline_continues_its_rotation_exactly() {
-    let r = three_runnable_units();
-    let mut baseline = cellgov_core::RoundRobinScheduler::new();
-    let expected: Vec<Option<UnitId>> = (0..8).map(|_| baseline.select_next(&r)).collect();
-
-    let prefix = expected[..4].to_vec();
-    let mut prescribed = PrescribedScheduler::new(prefix);
-    let actual: Vec<Option<UnitId>> = (0..8).map(|_| prescribed.select_next(&r)).collect();
-    assert_eq!(actual, expected);
-}
-
-#[test]
-fn the_rotation_resumes_after_the_overridden_unit() {
+fn past_the_prescription_the_lowest_clock_runs() {
+    // No clock moves here, so every pick past the prescription is a
+    // tie, and the tie goes to the lowest id.
     let r = three_runnable_units();
     let mut s = PrescribedScheduler::new(vec![Some(UnitId::new(2))]);
-    let picks: Vec<Option<UnitId>> = (0..4).map(|_| s.select_next(&r)).collect();
-    assert_eq!(
-        picks,
-        [2, 0, 1, 2].map(|i| Some(UnitId::new(i))),
-        "the first fallback pick rotates past the forced unit, not from a stale cursor"
-    );
+    let picks: Vec<Option<UnitId>> = (0..3).map(|_| s.select_next(&r)).collect();
+    assert_eq!(picks, [2, 0, 0].map(|i| Some(UnitId::new(i))));
 }
 
 #[test]
-fn a_non_runnable_override_leaves_the_cursor_to_the_fallback_pick() {
+fn a_non_runnable_override_spends_its_step_on_the_fallback_pick() {
     let mut r = three_runnable_units();
     r.set_status_override(UnitId::new(2), UnitStatus::Blocked);
-    let mut s = PrescribedScheduler::new(vec![Some(UnitId::new(2))]);
+    let mut s = PrescribedScheduler::new(vec![Some(UnitId::new(2)), Some(UnitId::new(1))]);
     assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
-    assert_eq!(s.select_next(&r), Some(UnitId::new(1)));
+    assert_eq!(
+        s.select_next(&r),
+        Some(UnitId::new(1)),
+        "the second pick reads the second prescription"
+    );
 }
 
 #[test]

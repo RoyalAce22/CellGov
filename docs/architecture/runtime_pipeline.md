@@ -55,14 +55,27 @@ flowchart TD
   epoch --> rec["8. emit commit records, notify scheduler"] --> sel
 ```
 
-Guest time advances in step 3 (`Runtime::step`) by the unit's
-consumed cost; `commit_step` only advances the epoch.
+Each unit keeps its own guest clock. A step starts at the unit's
+clock, and step 3 (`Runtime::step`) advances that clock by the unit's
+consumed cost; `commit_step` only advances the epoch. A unit that
+parks resumes at the tick that woke it, and no clock runs backwards.
+
+*Why:* the PPE and the SPEs run at the same time on the console. One
+clock that adds every unit's cost would give each of N busy units 1/N
+of its console progress per guest millisecond.
 
 ### Unit selection
 
-The default `RoundRobinScheduler` walks the registry in id order
-from after the last selection. It skips units whose effective
-status is `Blocked` / `Suspended` / `Faulted` / `Finished`.
+The default `LowestClockScheduler` runs the runnable unit with the
+lowest clock; a tie goes to the lower id. It skips units whose
+effective status is `Blocked` / `Suspended` / `Faulted` / `Finished`.
+
+*Why:* with steps bounded by the instruction budget, no unit runs
+ahead of the slowest runnable one by more than one step, and the order
+stays a function of guest state.
+
+`RoundRobinScheduler` remains available through `Runtime::set_scheduler`.
+It walks the registry in id order from after the last selection.
 
 **Stickiness.** Round-robin rotation has two stickiness exceptions.
 The previous unit is reselected if either holds:
@@ -115,7 +128,17 @@ result struct.
 ### DMA and timer wakes
 
 Step 7 advances the commit epoch, then fires due DMA completions
-and due timer wakes:
+and due timer wakes.
+
+A DMA completion or a timer deadline is stamped with the issuing
+unit's clock at the end of its step. An event fires once no runnable
+unit's clock is below its tick and the committing unit's clock has
+reached it. Events fire in tick order, and a unit an event wakes
+resumes at the event's tick. An event a commit cannot fire yet fires
+at a later commit or before a later step.
+
+*Why:* the event applies before any step that starts at or after its
+tick and after every step that starts before it.
 
 - A DMA completion is due when its ready tick is reached.
 - A timer wake is due when its guest-tick deadline is reached.

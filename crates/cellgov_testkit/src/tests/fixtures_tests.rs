@@ -161,8 +161,8 @@ fn write_conflict_last_writer_wins_via_hash_equivalence() {
     use cellgov_mem::GuestMemory;
     use cellgov_trace::StateHash;
 
-    // Under round-robin with matching step counts, unit 1's last
-    // commit wins: [steps_per_unit; 4] at addr 0.
+    // Under the lowest-clock order with matching step costs and counts,
+    // unit 1's last commit wins: [steps_per_unit; 4] at addr 0.
     let steps = 5u64;
     let result = run(write_conflict_scenario(steps));
 
@@ -381,8 +381,8 @@ fn mailbox_roundtrip_response_is_command_plus_one() {
 fn dma_block_unblock_runs_to_completion() {
     let result = run(dma_block_unblock_scenario());
     assert_eq!(result.outcome, ScenarioOutcome::Stalled);
-    // Submitter: 1 step (submit+block). Burner: 32 steps to push
-    // time from 1 to 33 (completion fires at 33). Submitter: 1
+    // Submitter: 1 step (submit+block). Burner: 32 steps to move
+    // its clock from 1 to 33 (completion fires at 33). Submitter: 1
     // step (wake+finish). Burner: 8 remaining steps. Total: 42.
     assert_eq!(result.steps_taken, 42);
 }
@@ -531,9 +531,8 @@ fn store_order_runs_to_completion_and_replays() {
     assert_deterministic_replay(|| store_order_scenario(2), 3);
 }
 
-/// Round-robin ends on unit 1's byte. The point of the fixture is that
-/// the byte names the unit rather than the step, so another order ends
-/// on the other one.
+/// The lowest-clock order ends on unit 1's byte. The byte names the
+/// writing unit, so another order ends on the other unit's byte.
 #[test]
 fn store_order_ends_on_the_last_writer_s_own_value() {
     use cellgov_mem::GuestMemory;
@@ -562,7 +561,7 @@ fn schedule_dependent_length_runs_to_completion_and_replays() {
     assert_eq!(result.outcome, ScenarioOutcome::Stalled);
     assert_eq!(
         result.steps_taken, 2,
-        "round-robin writes the gate first, so the poller finishes on its first read",
+        "the lowest-clock order writes the gate first, so the poller finishes on its first read",
     );
     assert_deterministic_replay(|| schedule_dependent_length_scenario(8), 3);
 }

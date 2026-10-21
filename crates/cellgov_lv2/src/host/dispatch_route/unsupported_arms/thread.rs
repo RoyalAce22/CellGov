@@ -57,7 +57,7 @@ impl Lv2Host {
     }
 
     /// `sys_ppu_thread_set_priority` (47): stores `prio` in the
-    /// target's attrs; the round-robin scheduler does not consult it.
+    /// target's attrs; no scheduler consults it.
     ///
     /// A PPU thread priority runs 0 (highest) through 3071, and a
     /// value outside that window is EINVAL. A debug-or-root process

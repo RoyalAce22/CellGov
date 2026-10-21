@@ -130,10 +130,11 @@ pub struct StepFootprint {
     /// landing: a put's destination, and the source of one no inline
     /// payload carries.
     ///
-    /// A transfer lands at the first commit whose clock passed its
-    /// enqueue tick, so a step taken during a flight moves the landing
-    /// relative to every other step. A step taken before the enqueue
-    /// moves the enqueue and the landing alike, and needs no record.
+    /// A transfer lands once no runnable unit's clock is below its
+    /// completion tick, so a step taken during a flight moves the
+    /// landing relative to every other step. A step taken before the
+    /// enqueue moves the enqueue and the landing alike, and needs no
+    /// record.
     pub inflight_dma_ranges: Vec<ByteRange>,
     /// Local-store ranges the transfers in flight during this step read
     /// or write at completion, each with the unit that owns it.
@@ -151,9 +152,12 @@ pub struct StepFootprint {
     pub local_store_owner: Option<cellgov_event::UnitId>,
     /// Whether the step read the guest clock.
     ///
-    /// One clock advances by each step's cost, so the ticks every other
-    /// unit spends decide the value this step read. A reader therefore
-    /// conflicts with every step, whatever either of them touched.
+    /// A unit's clock moves by its own steps and jumps to the tick of
+    /// whatever wakes it, so another unit's order against a wake decides
+    /// the value this step read. A reader therefore conflicts with every
+    /// step, whatever either of them touched. Where no wake reaches the
+    /// reader the pair is independent, and the clause is wider than it
+    /// needs to be there.
     pub reads_clock: bool,
 }
 
@@ -660,8 +664,8 @@ impl StepFootprint {
             return true;
         }
 
-        // The same ticks decide the value a clock reader saw, and it
-        // can store that value anywhere.
+        // A wake's tick can decide the value a clock reader saw (see
+        // `reads_clock`), and it can store that value anywhere.
         if self.reads_clock || other.reads_clock {
             return true;
         }

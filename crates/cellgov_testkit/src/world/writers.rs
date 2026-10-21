@@ -168,9 +168,9 @@ impl ExecutionUnit for ClockWriter {
 /// Parks on `sys_timer_usleep`, then writes `value` over `range` once
 /// the deadline fires and finishes.
 ///
-/// The guest clock is global, so other units' tick spend moves this
-/// unit's wake against their steps, which makes the workload
-/// schedule-sensitive.
+/// The wake waits until no runnable unit's clock is below the deadline.
+/// A unit whose clock lags holds the wake back. A store that another
+/// unit makes past the deadline can run before or after the wake.
 #[derive(Clone)]
 pub struct SleepingWriter {
     id: UnitId,

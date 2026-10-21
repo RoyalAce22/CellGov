@@ -206,10 +206,10 @@ impl PpuThreadTable {
 
     /// Remove an alias previously installed via [`Self::alias_unit`].
     ///
-    /// Has no effect on the underlying `PpuThread`. The bootstrap
-    /// loop drops aliases after the title primary takes over so
-    /// post-boot lookups against the retired transient `UnitId`s
-    /// fall through to the strict ESRCH path.
+    /// The `PpuThread` stays unchanged. The module_start loop drops the
+    /// alias of each transient unit once that unit retires. A later
+    /// lookup against that `UnitId` then falls through to the strict
+    /// ESRCH path, and [`Self::running_unit`] stops waking it.
     pub fn drop_alias(&mut self, unit_id: UnitId) -> bool {
         self.unit_to_thread.remove(unit_id).is_some()
     }
@@ -238,6 +238,24 @@ impl PpuThreadTable {
     ) -> Option<LaneEntryMut<'_, PpuThreadId, PpuThread>> {
         let id = *self.unit_to_thread.get(unit_id)?;
         self.threads.get_mut(id)
+    }
+
+    /// The unit that runs thread `id` now: the newest unit aliased to it
+    /// ([`Self::alias_unit`]), else the thread's own unit.
+    ///
+    /// The newest alias is the one with the highest `UnitId`, because the
+    /// runtime numbers units in registration order. While an alias maps
+    /// a module_start's transient unit to the thread, that unit runs the
+    /// thread, so a wake owed to the thread goes to that unit.
+    pub fn running_unit(&self, id: PpuThreadId) -> Option<UnitId> {
+        let thread = self.threads.get(id)?;
+        let alias = self
+            .unit_to_thread
+            .iter()
+            .filter(|&(unit, aliased)| *aliased == id && unit != thread.unit_id)
+            .map(|(unit, _)| unit)
+            .next_back();
+        Some(alias.unwrap_or(thread.unit_id))
     }
 
     /// Translate a runtime unit id to its guest thread id.
@@ -438,3 +456,7 @@ impl PpuThreadTable {
 #[cfg(test)]
 #[path = "tests/table_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/running_unit_tests.rs"]
+mod running_unit_tests;

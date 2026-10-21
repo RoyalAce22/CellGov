@@ -1,15 +1,18 @@
 //! Whether a pending timer deadline is a dependency the relation sees.
 //!
-//! The guest clock is global. A unit parked on `sys_timer_usleep` wakes
-//! at the first commit whose clock passed its deadline, so the ticks
-//! other units spend before a store decide whether that store lands
-//! before or after the sleeper's own. The relation still calls the
-//! sleeper and those units independent, and the cover is complete
-//! anyway. A timer wake publishes nothing. It changes which unit is
-//! runnable, and every effect the woken unit then commits is an event
-//! the relation already holds against the other writers. A DMA landing
-//! differs (`shared_clock.rs`): it writes guest memory on no unit's
-//! account, so no event carries it and the landing clause has to.
+//! Each unit keeps its own clock. A unit parked on `sys_timer_usleep`
+//! wakes once no runnable unit's clock is below its deadline, so a unit
+//! whose clock lags holds the wake back. A store another unit makes past
+//! the deadline lands before the sleeper's own when it runs ahead of the
+//! lagging unit, and after it otherwise.
+//!
+//! The relation still calls the sleeper and the lagging unit
+//! independent, and the cover is complete anyway. A timer wake publishes
+//! nothing. It changes which unit is runnable, and every effect the
+//! woken unit then commits is an event the relation already holds
+//! against the other writers. A DMA landing differs (`shared_clock.rs`):
+//! it writes guest memory on no unit's account, so no event carries it
+//! and the landing clause has to.
 
 #![allow(
     clippy::unwrap_used,
@@ -34,12 +37,19 @@ const DEPTH: usize = 7;
 
 /// Budget in ticks per step, against a one-microsecond sleep.
 ///
-/// 1 usec is 3192 ticks, so the deadline falls three to four steps after
-/// the park. That puts it inside the writer's run, which is what gives
+/// 1 usec is 3192 ticks. The sleeper parks at its tick 958, so the
+/// deadline is tick 4150, inside the writer's fifth step (ticks 3832 to
+/// 4790). The writer's sixth store starts past it, which is what gives
 /// the workload two outcomes.
 const BUDGET: u64 = 958;
+/// Stores the writer makes; the last starts at tick 4790.
+const WRITER_STEPS: u64 = 6;
 /// A cheap counter's step, about a fifteenth of the budget.
 const CHEAP: u64 = 64;
+
+const SLEEPER: UnitId = UnitId::new(0);
+const WRITER: UnitId = UnitId::new(1);
+const COUNTER: UnitId = UnitId::new(2);
 
 fn destination() -> ByteRange {
     ByteRange::new(GuestAddr::new(128), 4).unwrap()
@@ -47,24 +57,13 @@ fn destination() -> ByteRange {
 
 fn workload() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
-    rt.register_unit_with(|id| SleepingWriter::new(id, 1, destination(), 0xbb));
-    rt.register_unit_with(|id| WritingUnit::of_value(id, 3, destination(), 0xaa));
-    rt.register_unit_with(|id| CountingUnit::new(id, 5));
-    rt
-}
-
-/// `workload`'s shape where the two units that do not write differ in
-/// what they spend.
-///
-/// A cheap counter and an expensive one touch no shared resource, so a
-/// schedule that runs one before the other moves the sleeper's wake
-/// without touching any range a footprint names.
-fn skewed_workload() -> Runtime {
-    let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
-    rt.register_unit_with(|id| SleepingWriter::new(id, 1, destination(), 0xbb));
-    rt.register_unit_with(|id| WritingUnit::of_value(id, 2, destination(), 0xaa));
-    rt.register_unit_with(|id| CountingUnit::of_cost(id, 3, CHEAP));
-    rt.register_unit_with(|id| CountingUnit::of_cost(id, 3, BUDGET));
+    let sleeper = rt.register_unit_with(|id| SleepingWriter::new(id, 1, destination(), 0xbb));
+    let writer =
+        rt.register_unit_with(|id| WritingUnit::of_value(id, WRITER_STEPS, destination(), 0xaa));
+    let counter = rt.register_unit_with(|id| CountingUnit::new(id, 5));
+    assert_eq!(sleeper, SLEEPER, "registration order moved the sleeper");
+    assert_eq!(writer, WRITER, "registration order moved the writer");
+    assert_eq!(counter, COUNTER, "registration order moved the counter");
     rt
 }
 
@@ -153,11 +152,17 @@ fn search_reach_of(build: fn() -> Runtime) -> (BTreeSet<u64>, bool) {
 }
 
 #[test]
-fn the_skewed_workload_is_schedule_sensitive() {
-    assert_eq!(
-        reachable_of(skewed_workload, DEPTH).len(),
-        2,
-        "a cheap step and an expensive one move the wake against the writer's last store",
+fn a_store_run_ahead_of_the_lagging_counter_lands_under_the_sleeper() {
+    let baseline = run_prefix_of(workload, &[]);
+    // The sleeper parks first, so its deadline is pending under every
+    // store. Without it every store runs before the park, and the
+    // sleeper writes last whatever the counter's clock does.
+    let mut prefix = vec![SLEEPER];
+    prefix.extend([WRITER; WRITER_STEPS as usize]);
+    let writer_first = run_prefix_of(workload, &prefix);
+    assert_ne!(
+        baseline, writer_first,
+        "the counter's clock holds the wake back past a store run ahead of it",
     );
 }
 
@@ -165,7 +170,7 @@ fn the_skewed_workload_is_schedule_sensitive() {
 /// the module doc says why.
 #[test]
 fn the_relation_calls_the_counter_and_the_sleeper_independent() {
-    let mut rt = skewed_workload();
+    let mut rt = workload();
     let (log, stop) = observe_decisions(&mut rt);
     assert!(
         !stop.is_truncated(),
@@ -173,49 +178,19 @@ fn the_relation_calls_the_counter_and_the_sleeper_independent() {
     );
     let execution = Execution::from_log(&log);
     assert!(
-        execution.units_independent(UnitId::new(0), UnitId::new(2)),
-        "the sleeper and the cheap counter share no resource the footprint names",
+        execution.units_independent(SLEEPER, COUNTER),
+        "the sleeper and the counter share no resource the footprint names",
     );
 }
 
 #[test]
-fn the_search_answers_for_the_skewed_workload_too() {
-    let reachable = reachable_of(skewed_workload, 7);
-    let (reached, bounds_hit) = search_reach_of(skewed_workload);
-    assert!(!bounds_hit, "no bound stopped the search");
-    // Both workloads withdraw their class count: a reversal names the
-    // sleeper at a depth where it is still parked, and the drop is
-    // counted. The cover is complete regardless, which is what
-    // separates a withdrawn count from a missed outcome.
+fn the_workload_reports_schedule_sensitive() {
+    let result = explore_window(workload, &ExplorationConfig::default());
     assert_eq!(
-        (
-            explore_window(workload as fn() -> Runtime, &ExplorationConfig::default())
-                .classes_explored,
-            explore_window(
-                skewed_workload as fn() -> Runtime,
-                &ExplorationConfig::default()
-            )
-            .classes_explored,
-        ),
-        (None, None),
+        result.outcome,
+        cellgov_explore::classify::OutcomeClass::ScheduleSensitive,
+        "the wake moves against the writer's last store, so the memory is not stable",
     );
-    assert_eq!(
-        reached, reachable,
-        "the wake becomes observable only through the woken unit's own write, which the \
-         relation holds against the other writer",
-    );
-}
-
-#[test]
-fn both_workloads_report_schedule_sensitive() {
-    for build in [workload as fn() -> Runtime, skewed_workload] {
-        let result = explore_window(build, &ExplorationConfig::default());
-        assert_eq!(
-            result.outcome,
-            cellgov_explore::classify::OutcomeClass::ScheduleSensitive,
-            "the wake moves against the writer's last store, so the memory is not stable",
-        );
-    }
 }
 
 #[test]
@@ -263,6 +238,7 @@ fn the_search_answers_for_every_reachable_memory() {
     );
     assert_eq!(
         reached, reachable,
-        "the search answers for every committed memory a schedule can reach",
+        "the wake becomes observable only through the woken unit's own write, which the \
+         relation holds against the other writer",
     );
 }

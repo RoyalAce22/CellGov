@@ -3,9 +3,12 @@
 //!
 //! The SPU looks at its decrementer in one step, which anchors the
 //! count, and reads it in the next. The count it stores into local
-//! store is the time base that passed between the two, so it depends on
-//! which other units' steps ran in between. Two counter units spend
-//! that time, and they share no state with the SPU.
+//! store is the time base that passed between the two on the SPU's own
+//! clock, so no other unit's steps between them move it. Two counter
+//! units spend time and share no state with the SPU. The independence
+//! relation pairs the read itself with each counter's step, so it still
+//! holds the reader against both counters. That pairing is sound, and
+//! wider than this workload needs.
 
 // [CBEA p:139 s:9.7] the SPU decrementer runs at the time-base frequency.
 // [CBEA p:140 s:9.7.2] SPU_RdDec returns the current count.
@@ -29,8 +32,9 @@ const STEP_CAP: usize = 64;
 const DEPTH: usize = 8;
 /// Instructions per step: the SPU's first step runs this many nops.
 const BUDGET: u64 = 4096;
-/// Ticks each counter spends in its one step. Both move the time base
-/// by more than one tick, so each changes the count the SPU stores.
+/// Ticks each counter spends in its one step. Both are more than one
+/// time-base tick, so either would change the count the SPU stores if
+/// the SPU read a clock the counters share.
 const CHEAP_COST: u64 = 1000;
 const EXPENSIVE_COST: u64 = BUDGET;
 
@@ -136,10 +140,11 @@ fn every_reachable_observable() -> BTreeSet<u64> {
 }
 
 #[test]
-fn the_count_the_reader_stores_moves_with_the_counters_between_its_steps() {
-    assert!(
-        every_reachable_observable().len() > 1,
-        "the schedule decides the count, so more than one observable is reachable",
+fn the_count_the_reader_stores_is_its_own_elapsed_time() {
+    assert_eq!(
+        every_reachable_observable().len(),
+        1,
+        "no counter step between the reader's two steps moves the count it stores",
     );
 }
 
@@ -151,11 +156,11 @@ fn the_relation_holds_the_reader_against_the_counters() {
     let execution = Execution::from_log(&log);
     assert!(
         !execution.units_independent(READER, CHEAP),
-        "the cheap counter's ticks decide the count the reader stores",
+        "the clause pairs the read with the cheap counter",
     );
     assert!(
         !execution.units_independent(READER, EXPENSIVE),
-        "and so do the expensive one's",
+        "and with the expensive one",
     );
     // Without this assertion, the two above also pass under a relation
     // that pairs every step with every other.

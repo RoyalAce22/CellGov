@@ -548,7 +548,8 @@ fn a_faulted_batch_leaves_the_queued_rsx_work_for_the_next_one() {
             sem_offset: SEM_OFFSET,
             release_value: RELEASE_VALUE,
         });
-    // Unit 1 faults, and round-robin hands it the next step.
+    // Unit 1 faults. Its clock is still behind unit 0's, so it gets the
+    // next step.
     rt.registry_mut().register_with(|id| FaultingUnit {
         id,
         steps: Cell::new(0),

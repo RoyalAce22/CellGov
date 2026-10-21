@@ -174,6 +174,30 @@ impl Scheduler for RoundRobinScheduler {
     }
 }
 
+/// Selects the runnable unit whose own clock is lowest; a tie goes to the
+/// lower id.
+///
+/// Each unit keeps its own clock, so this is conservative bounded-lag
+/// simulation on one host thread: no unit runs ahead of the slowest
+/// runnable one by more than one step [Lubachevsky1989 p:112]. The tie
+/// rule keeps the order a function of guest state [Olszewski2009 p:100].
+#[derive(Debug, Default)]
+pub struct LowestClockScheduler;
+
+impl LowestClockScheduler {
+    /// Construct the scheduler.
+    #[inline]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Scheduler for LowestClockScheduler {
+    fn select_next(&mut self, registry: &UnitRegistry) -> Option<UnitId> {
+        registry.lowest_runnable().map(|(_, id)| id)
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/scheduler_tests.rs"]
 mod tests;

@@ -3,6 +3,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
+use cellgov_time::GuestTicks;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -42,6 +43,19 @@ pub struct UnitRegistry {
     /// unit's effective status marks the unit stale here; the hash read
     /// refreshes only the stale lanes.
     pub(super) status_lanes: RefCell<StatusLanes>,
+    /// Each unit's own guest clock: the tick its next step starts at.
+    pub(super) clocks: BTreeMap<UnitId, GuestTicks>,
+    /// Units that were not runnable at the last clock sync, so the next
+    /// sync can raise the clock of each one that woke or restarted.
+    pub(super) parked: BTreeSet<UnitId>,
+    /// Units marked since the last clock sync: every path that marks a
+    /// status lane stale also marks the unit here. The `Vec` keeps its
+    /// capacity across syncs, so a warmed step marks and syncs without
+    /// allocating.
+    pub(super) clock_watch: Vec<UnitId>,
+    /// The runnable units at the last clock sync, sorted by clock and
+    /// then id. It is current only while `clock_watch` is empty.
+    pub(super) runnable_clocks: Vec<(GuestTicks, UnitId)>,
 }
 
 impl Clone for UnitRegistry {
@@ -60,6 +74,10 @@ impl Clone for UnitRegistry {
             pending_syscall_returns: self.pending_syscall_returns.clone(),
             pending_register_writes: self.pending_register_writes.clone(),
             status_lanes: RefCell::new(self.status_lanes.borrow().clone()),
+            clocks: self.clocks.clone(),
+            parked: self.parked.clone(),
+            clock_watch: self.clock_watch.clone(),
+            runnable_clocks: self.runnable_clocks.clone(),
         }
     }
 }

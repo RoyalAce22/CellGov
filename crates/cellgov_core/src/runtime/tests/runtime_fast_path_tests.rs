@@ -150,6 +150,8 @@ fn rotation_holding_lwmutex(mode: RuntimeMode, steps: usize) -> Vec<UnitId> {
 
     let mut rt = build(64, 1, steps + 16);
     rt.set_mode(mode);
+    // Round-robin is the scheduler that reads the critical-section flag.
+    rt.set_scheduler(crate::scheduler::RoundRobinScheduler::new());
     for _ in 0..2 {
         rt.registry_mut().register_with(|id| SilentUnit {
             id,

@@ -31,6 +31,6 @@ pub use runtime::{
     SpawnedProcessImage, SpuFactory, SpuFactoryError, SpuThreadFailure, StepError,
     DEFAULT_DMA_LATENCY_TICKS,
 };
-pub use scheduler::{RoundRobinScheduler, Scheduler};
+pub use scheduler::{LowestClockScheduler, RoundRobinScheduler, Scheduler};
 pub use syscall_table::SyscallResponseTable;
 pub use timer_queue::{TimerWake, TimerWakeKind, TimerWakeQueue};

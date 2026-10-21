@@ -48,6 +48,8 @@ mod stepping;
 mod timers;
 #[path = "runtime_trace_tests.rs"]
 mod trace_records;
+#[path = "runtime_unit_clock_tests.rs"]
+mod unit_clocks;
 #[path = "runtime_wake_tests.rs"]
 mod wakes;
 

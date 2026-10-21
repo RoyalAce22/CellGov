@@ -8,8 +8,8 @@
 //! That is a false independence.
 //!
 //! `sys_time_get_current_time` is the smallest arm that shows it. It
-//! writes both out parameters itself and derives them from the dispatch
-//! tick, so the bytes it lands differ per schedule.
+//! writes both out parameters itself, from the caller's own clock at
+//! dispatch.
 
 #![allow(
     clippy::unwrap_used,
@@ -164,8 +164,8 @@ fn the_relation_holds_the_caller_against_the_unit_that_shares_the_bytes() {
     );
     assert!(
         !execution.units_independent(CALLER, LONER),
-        "and the loner's ticks decide the value the handler stamped, \
-         though it touches none of those bytes",
+        "and the handler-write clause pairs the caller with the loner, \
+         though the loner touches none of those bytes",
     );
     // Without this the two above pass under a relation that pairs every
     // step with every other.
@@ -232,8 +232,7 @@ fn every_reachable_memory() -> BTreeSet<u64> {
     seen
 }
 
-/// The caller's position decides the tick the handler stamps, and the
-/// peer's decides whether that stamp survives.
+/// The peer's position decides whether the handler's stamp survives.
 #[test]
 fn the_out_parameter_gives_the_workload_more_than_one_outcome() {
     assert!(
@@ -264,14 +263,15 @@ fn the_search_answers_for_every_memory_the_workload_reaches() {
     );
     assert_eq!(
         reachable.len(),
-        3,
-        "the stamp at each of two tick counts, and the peer laying over it",
+        2,
+        "the stamp at the caller's own tick, and the peer laying over it",
     );
     assert_eq!(
         result.classes_explored,
         Some(4),
-        "one more class than there are outcomes: the clock clause pairs the \
-         caller with the loner, which splits a class whose two orders leave \
-         the same memory. A false dependency costs cover, not soundness",
+        "twice as many classes as outcomes: the handler-write clause pairs \
+         the caller with the loner, which splits each class into two orders \
+         that leave the same memory. A false dependency costs cover, not \
+         soundness",
     );
 }

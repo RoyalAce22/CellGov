@@ -175,6 +175,9 @@ impl Lv2Host {
             .unwrap_or(0)
     }
 
+    /// The unit a wake owed to `thread` goes to, per
+    /// [`crate::ppu_thread::PpuThreadTable::running_unit`].
+    ///
     /// `None` means the thread table and the primitive diverged; the
     /// divergence is logged as an invariant break and the caller must
     /// skip the wake to leave surviving waiters intact.
@@ -183,8 +186,8 @@ impl Lv2Host {
         thread: PpuThreadId,
         site: &'static str,
     ) -> Option<UnitId> {
-        match self.state.ppu_threads.get(thread) {
-            Some(t) => Some(t.unit_id),
+        match self.state.ppu_threads.running_unit(thread) {
+            Some(unit) => Some(unit),
             None => {
                 self.record_invariant_break(
                     site,
@@ -202,3 +205,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/first_invariant_break_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/alias_wake_tests.rs"]
+mod alias_wake_tests;

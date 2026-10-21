@@ -773,9 +773,13 @@ fn a_due_wake_for_a_finished_unit_is_dropped_unfired() {
         .set_status_override(finished, UnitStatus::Finished);
     let _ = rt.syscall_responses.try_take(finished);
 
-    // The busy peer's 4000-tick step crosses the 3192-tick deadline.
-    let s2 = rt.step().unwrap();
-    rt.commit_step(&s2.result, &s2.effects).unwrap();
+    // The sleep began at the sleeper's tick 4000, so its deadline is
+    // 7192. The busy peer's clock reaches 8000 on its second 4000-tick
+    // step, and that commit crosses the deadline.
+    for _ in 0..2 {
+        let s2 = rt.step().unwrap();
+        rt.commit_step(&s2.result, &s2.effects).unwrap();
+    }
 
     assert_eq!(rt.timer_wakes_pending(), 0, "the due entry is consumed");
     assert_eq!(

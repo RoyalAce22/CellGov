@@ -153,7 +153,8 @@ impl ScenarioFixtureBuilder {
 }
 
 /// `unit_count` [`CountingUnit`]s, each finishing after `steps_per_unit`
-/// steps, with budget 1 and round-robin scheduling.
+/// steps, with budget 1. Equal step costs make the lowest-clock order
+/// rotate through the units in id order.
 pub fn round_robin_fairness_scenario(unit_count: usize, steps_per_unit: u64) -> ScenarioFixture {
     assert!(
         unit_count > 0,
@@ -198,7 +199,8 @@ pub fn dma_block_unblock_scenario() -> ScenarioFixture {
 }
 
 /// Two [`WritingUnit`]s writing into the same 4-byte range, each running
-/// `steps_per_unit` steps under round-robin scheduling.
+/// `steps_per_unit` steps of equal cost, so the lowest-clock order
+/// alternates between them.
 pub fn write_conflict_scenario(steps_per_unit: u64) -> ScenarioFixture {
     assert!(
         steps_per_unit > 0,

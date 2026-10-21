@@ -98,11 +98,9 @@ fn the_contending_workload_drops_only_at_choose() {
 
 #[test]
 fn no_warp_workload_gives_up_a_branch_at_its_warp_depth() {
+    // Waiters alone give up nothing: each unit keeps its own clock, so
+    // they race only at the one warp that lands every transfer.
     let cases: Vec<(&str, Vec<Vec<FakeOp>>)> = vec![
-        (
-            "two waiters",
-            vec![waiter(0, DMA_DST), waiter(1, DMA_DST + 8)],
-        ),
         (
             "two waiters and a writer",
             vec![
@@ -117,14 +115,6 @@ fn no_warp_workload_gives_up_a_branch_at_its_warp_depth() {
                 vec![store(), FakeOp::End],
                 waiter(0, DMA_DST),
                 waiter(1, DMA_DST + 8),
-            ],
-        ),
-        (
-            "three waiters",
-            vec![
-                waiter(0, DMA_DST),
-                waiter(1, DMA_DST + 8),
-                waiter(2, DMA_DST + 16),
             ],
         ),
         ("contention after a warp", warp_then_contend()),

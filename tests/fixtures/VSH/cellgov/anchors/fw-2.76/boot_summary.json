@@ -32,11 +32,11 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 47990,
+      "value": 47989,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 97736,
+      "value": 97735,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -108,11 +108,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 47990,
+      "value": 47989,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 97735,
+      "value": 97734,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -199,39 +199,39 @@
   "unsupported_syscalls": {
     "45": {
       "hits": 2,
-      "first_hit": 2107226232
+      "first_hit": 2107215719
     },
     "133": {
       "hits": 4,
-      "first_hit": 2107208290
+      "first_hit": 2107200759
     },
     "380": {
       "hits": 5,
-      "first_hit": 191942658
+      "first_hit": 191936287
     },
     "382": {
       "hits": 1,
-      "first_hit": 2107197048
+      "first_hit": 2107189517
     },
     "563": {
       "hits": 1,
-      "first_hit": 234239
+      "first_hit": 229342
     },
     "610": {
       "hits": 21,
-      "first_hit": 2107221739
+      "first_hit": 2107211962
     },
     "612": {
       "hits": 1,
-      "first_hit": 2107219320
+      "first_hit": 2107209776
     },
     "635": {
       "hits": 1,
-      "first_hit": 2210256435
+      "first_hit": 2210242528
     },
     "650": {
       "hits": 1,
-      "first_hit": 209632
+      "first_hit": 209191
     },
     "699": {
       "hits": 3,
@@ -239,23 +239,23 @@
     },
     "811": {
       "hits": 3,
-      "first_hit": 2107290678
+      "first_hit": 2107278481
     },
     "817": {
       "hits": 9,
-      "first_hit": 2107269742
+      "first_hit": 2107257545
     },
     "837": {
       "hits": 7,
-      "first_hit": 191993479
+      "first_hit": 191985948
     },
     "867": {
       "hits": 1,
-      "first_hit": 2210200139
+      "first_hit": 2210186694
     },
     "873": {
       "hits": 3,
-      "first_hit": 2107264925
+      "first_hit": 2107252728
     }
   },
   "firmware": {

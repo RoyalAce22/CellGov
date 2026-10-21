@@ -48,6 +48,7 @@ mod tap;
 mod timer;
 mod trace_bridge;
 mod types;
+mod unit_clocks;
 mod unit_stop;
 
 pub use construction::DEFAULT_DMA_LATENCY_TICKS;

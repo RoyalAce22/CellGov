@@ -7,10 +7,10 @@
 //! truncated, and that withdraws every claim measured against it. So
 //! the search reports no verdict over the orders it did reach.
 //!
-//! Two workloads are here, because which order a search reaches first
-//! is no part of the argument. Where the read commits, the relation
-//! owes the reversal that reaches the fault. Where every order the
-//! search reaches faults, the truncation carries the whole answer.
+//! Two search workloads are here, because which order a search reaches
+//! first is no part of the argument. Where the read commits, the
+//! relation owes the reversal that reaches the fault. Where every order
+//! the search reaches faults, the truncation carries the whole answer.
 
 #![allow(
     clippy::unwrap_used,
@@ -54,11 +54,41 @@ fn a_write_decides_a_fault() -> Runtime {
     rt
 }
 
+/// The faulter reads the gate one tick into its run.
+///
+/// Both units reach tick 1 together and the writer holds the lower id,
+/// so the lowest-clock order runs the writer's store before the read.
+fn the_faulter_reads_a_tick_later() -> Runtime {
+    let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(1), 200);
+    rt.register_unit_with(|id| {
+        FakeIsaUnit::new(
+            id,
+            vec![
+                FakeOp::LoadImm(1),
+                FakeOp::SharedStore { addr: GATE, len: 1 },
+                FakeOp::End,
+            ],
+        )
+    });
+    rt.register_unit_with(|id| {
+        FakeIsaUnit::new(
+            id,
+            vec![
+                FakeOp::LoadImm(0),
+                FakeOp::FaultIfZero { addr: GATE },
+                FakeOp::End,
+            ],
+        )
+    });
+    rt
+}
+
 /// The same two programs with the faulter holding the lower unit id.
 ///
-/// The search takes the lowest runnable id at each depth of its first
-/// execution, so the faulter goes first and reads the gate at zero.
-/// No order the search reaches commits the read.
+/// The search takes the runnable unit with the lowest clock at each
+/// depth of its first execution, and a tie goes to the lower id. The
+/// faulter therefore goes first and reads the gate at zero. No order the
+/// search reaches commits the read.
 fn the_faulter_holds_the_lower_id() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(1), 200);
     rt.register_unit_with(|id| {
@@ -95,7 +125,7 @@ fn the_workload_faults_under_one_order_and_not_the_other() {
     assert_eq!(
         run_to_stall(&mut faults, 200),
         StopReason::Faulted(FaultKind::Guest(FAKE_FAULT_CODE)),
-        "round-robin reaches the faulter while the gate is still zero",
+        "the faulter's read at tick 0 runs before the writer's store at tick 1",
     );
 
     let mut runs = the_same_workload_past_the_gate();
@@ -119,19 +149,22 @@ fn a_faulted_step_records_no_event() {
     assert_eq!(
         log.len(),
         1,
-        "round-robin commits the writer's first step, then the faulter's step \
+        "the lowest-clock order commits the writer's first step, then the faulter's step \
          faults and claims no point of its own",
     );
 }
 
 #[test]
 fn a_schedule_decided_fault_withdraws_the_verdict() {
-    let result = explore_optimal(a_write_decides_a_fault, &ExplorationConfig::default());
+    let result = explore_optimal(
+        the_faulter_reads_a_tick_later,
+        &ExplorationConfig::default(),
+    );
     assert_eq!(
         result.baseline_stop,
         StopReason::Stalled,
-        "the search's own first order runs the writer first, so the baseline \
-         never sees the gate at zero",
+        "the search's own first order runs the writer's store first, so the \
+         baseline never sees the gate at zero",
     );
 
     let reversal = result

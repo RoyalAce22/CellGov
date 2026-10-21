@@ -52,8 +52,7 @@ pub struct PpuThreadAttrs {
     pub stack_base: u32,
     /// Size in bytes of the child's stack region.
     pub stack_size: u32,
-    /// Scheduling priority; not consulted by the round-robin
-    /// scheduler.
+    /// Scheduling priority; no scheduler consults it.
     pub priority: u32,
     /// Host-chosen base of the child's per-thread TLS block.
     pub tls_base: u32,

@@ -10,6 +10,7 @@ mod dma_wait_park;
 mod dropped_reversals;
 mod exhaustive_cover;
 mod fault_decided_by_a_write;
+mod held_events;
 mod host_write_space;
 mod inflight_still_prunes;
 mod lv2_mailbox_wake;

@@ -33,10 +33,6 @@ impl CountingUnit {
 
     /// Like [`CountingUnit::new`], spending `cost` ticks per step
     /// instead of the whole budget.
-    ///
-    /// Two units that differ here spend different guest time for the
-    /// same number of steps, which is what moves a pending deadline
-    /// against a schedule that reorders them.
     pub fn of_cost(id: UnitId, max: u64, cost: u64) -> Self {
         Self {
             cost: Some(cost),

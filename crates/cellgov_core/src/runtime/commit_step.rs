@@ -339,8 +339,12 @@ impl Runtime {
             }
         }
         self.epoch.advance();
-        let mut due = self.fire_dma_completions();
-        let timer_due = self.fire_timer_wakes();
+        // A unit that this commit's dispatch woke, or whose reservation
+        // this commit's writes cleared, resumes at this commit's tick. A
+        // unit that a due event wakes resumes at the event's tick.
+        self.wake_reservation_lost_waiters();
+        self.registry.sync_clocks(self.time);
+        let (mut due, mut timer_due) = self.fire_due_events(self.time);
         self.serve_spu_thread_interrupt_mailbox(source);
 
         // A unit that stopped itself reports the stop it can resume from.
@@ -356,6 +360,19 @@ impl Runtime {
         } else {
             None
         };
+        // When this commit left the issuer parked or finished, the lowest
+        // runnable clock can sit past this commit's tick. An event due
+        // before that clock fires here, in this commit.
+        self.registry.sync_clocks(self.time);
+        let lowest = match self.next_event_time() {
+            Some(_) => self.registry.lowest_runnable_clock(),
+            None => None,
+        };
+        if let Some(lowest) = lowest {
+            let (later_due, later_timer_due) = self.fire_due_events(lowest);
+            due.extend(later_due);
+            timer_due.extend(later_timer_due);
+        }
         if let Ok(ref mut o) = outcome {
             o.dma_completions_fired = due.len();
         }
@@ -450,6 +467,7 @@ impl Runtime {
         // Every guest write of this commit has landed, and any of them
         // can have cleared the reservation of a unit waiting on an event.
         self.wake_reservation_lost_waiters();
+        self.registry.sync_clocks(self.time);
 
         // Breaks logged after the dispatch-time drain (apply_lv2_effects
         // inside the dispatch folds, the RSX mirror failures above) must

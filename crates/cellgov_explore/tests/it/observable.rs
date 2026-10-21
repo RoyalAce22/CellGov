@@ -31,14 +31,16 @@ fn destination() -> ByteRange {
 /// A transfer in flight, a writer over its destination, and a unit that
 /// only spends ticks; the order of the writer's last store against the
 /// landing decides the outcome. Budget 7 lands the 32-tick transfer at
-/// the fifth step after the submitter queues it, inside the writer's run.
+/// tick 39, before the writer's last store starts at tick 42. When the
+/// writer runs ahead of the counter, the counter's clock holds the
+/// landing back past that store.
 fn workload() -> Runtime {
     let src = ByteRange::new(GuestAddr::new(0), 4).unwrap();
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(7), STEP_CAP);
     rt.register_unit_with(|id| {
         DmaSubmitter::new(id, src, destination(), vec![0xde, 0xad, 0xbe, 0xef])
     });
-    rt.register_unit_with(|id| WritingUnit::new(id, 3, destination()));
+    rt.register_unit_with(|id| WritingUnit::new(id, 7, destination()));
     rt.register_unit_with(|id| CountingUnit::new(id, 8));
     rt
 }

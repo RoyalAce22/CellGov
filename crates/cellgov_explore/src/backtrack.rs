@@ -24,7 +24,7 @@ use std::collections::BTreeSet;
 /// One schedule to replay: the units to force, step by step, from step
 /// zero.
 ///
-/// The last entry is the backtrack point's choice; the round-robin
+/// The last entry is the backtrack point's choice; the lowest-clock
 /// fallback chooses every step past it, so one prefix stands for one
 /// subtree.
 type Prefix = Vec<UnitId>;

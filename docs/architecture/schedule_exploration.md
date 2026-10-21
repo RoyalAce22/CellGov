@@ -154,9 +154,12 @@ the argument that makes each domain rule sound:
 
 ## Guest time
 
-Guest time is one global clock that advances by each step's cost, so a
-step touching no shared resource still moves it. Four things read it,
-and the relation handles each differently:
+Each unit keeps its own clock, which its own steps advance and a wake
+raises to the waker's tick. An event fires once no runnable unit's
+clock is below its tick, so a step touching no shared resource still
+decides where an event falls against other units' steps: a unit whose
+clock lags holds the event back. Four things read guest time, and the
+relation handles each differently:
 
 | What reads guest time | How the dependency relation handles it |
 |---|---|
@@ -198,6 +201,10 @@ A PPU `mftb` or `mftbu` puts the clock into a guest register, which
 the guest can store anywhere. The step therefore emits `ClockRead` and
 conflicts with every step. The clause pairs on the read rather than on
 where the value went.
+
+The read returns the reader's own clock. Another unit's steps move it
+only through a wake, whose tick is the waker's, so the clause is wider
+than needed for a reader nothing wakes.
 
 An SPU step does the same when its result depends on the tick it ran
 at: a read of a running decrementer, a decrementer write, the first

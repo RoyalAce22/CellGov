@@ -7,12 +7,12 @@ engine: Studio Liverpool proprietary
 distribution: Disc ISO
 cell: fw 4.93 x base
 checkpoint: FirstRsxWrite
-steps: 37308
+steps: 37311
 convergence: Yes
 byte_parity: 975 non-semantic
 ---
 
-WipEout HD Fury converges with RPCS3 at `FirstRsxWrite` (step 37,308,
+WipEout HD Fury converges with RPCS3 at `FirstRsxWrite` (step 37,311,
 matching this cell's committed anchor) and every divergent byte
 classifies. Both runners are sampled at the same checkpoint: CG at its
 `MemError::ReservedWrite` trap on the put-store, RP at the

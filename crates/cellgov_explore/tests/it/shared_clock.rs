@@ -1,12 +1,13 @@
 //! Witness: guest time decides where an in-flight transfer lands.
 //!
-//! A step advances one global clock, and a DMA completion lands at the
-//! first commit whose clock passes the completion tick. So a step that
-//! touches no shared resource still decides where an in-flight
-//! transfer lands relative to every later step. The relation sees it:
-//! a step taken while a transfer is in flight records that transfer's
-//! ranges, and they conflict with another step's access to the bytes
-//! it lands on.
+//! Each unit keeps its own clock, and a DMA completion lands once no
+//! runnable unit's clock is below its tick. So a unit whose clock lags
+//! holds the landing back. A step that touches no shared resource then
+//! still decides whether a faster unit's store past the completion tick
+//! falls before or after the landing. The relation sees
+//! it: a step taken while a transfer is in flight records that
+//! transfer's ranges, and they conflict with another step's access to
+//! the bytes it lands on.
 //!
 //! The clock's other two readers have their own witnesses:
 //!
@@ -25,22 +26,23 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_testkit::world::{CountingUnit, DmaSubmitter, WritingUnit};
 use cellgov_time::Budget;
 
+const SUBMITTER: UnitId = UnitId::new(0);
 const WRITER: UnitId = UnitId::new(1);
 const COUNTER: UnitId = UnitId::new(2);
 const STEP_CAP: usize = 400;
 /// The last store carries `[WRITER_STEPS; 4]`, which the byte checks
-/// read.
-const WRITER_STEPS: u64 = 3;
-/// Unit 2 has to outlast the other two, so the rotation keeps offering
-/// it after they finish.
-const COUNTER_STEPS: u64 = 40;
+/// read. It starts at tick 42, past the completion at tick 39.
+const WRITER_STEPS: u64 = 7;
+/// Unit 2's clock has to pass the completion tick for the transfer to
+/// land.
+const COUNTER_STEPS: u64 = 8;
 const TRANSFERRED: [u8; 4] = [0xde, 0xad, 0xbe, 0xef];
 
 /// The latency this witness rests on.
 ///
-/// With budget 7 it puts the completion between unit 1's last two write
-/// positions, at the fifth step after the submitter queues the transfer.
-/// A change to either moves the landing.
+/// With budget 7 the submitter queues the transfer at tick 7, so it
+/// completes at tick 39: between the starts of unit 1's last two stores,
+/// at ticks 35 and 42. A change to either moves the landing.
 const LATENCY: u64 = 32;
 const BUDGET: u64 = 7;
 
@@ -49,8 +51,10 @@ fn destination() -> ByteRange {
 }
 
 /// One destination range, three units, and a schedule choice over when
-/// the transfer lands: one step of unit 2, run earlier, decides whether
-/// the transfer or unit 1's last store lands last (`LATENCY`).
+/// the transfer lands (`LATENCY`).
+///
+/// Unit 1's last store runs before or after unit 2's clock passes the
+/// completion tick, and that order decides which of the two lands last.
 fn workload() -> Runtime {
     assert_eq!(
         cellgov_core::DEFAULT_DMA_LATENCY_TICKS.raw(),
@@ -61,7 +65,12 @@ fn workload() -> Runtime {
     let src = ByteRange::new(GuestAddr::new(0), 4).expect("source range");
     let dst = destination();
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
-    rt.register_unit_with(|id| DmaSubmitter::new(id, src, dst, TRANSFERRED.to_vec()));
+    let submitter =
+        rt.register_unit_with(|id| DmaSubmitter::new(id, src, dst, TRANSFERRED.to_vec()));
+    assert_eq!(
+        submitter, SUBMITTER,
+        "registration order moved the submitter"
+    );
     let writer = rt.register_unit_with(|id| WritingUnit::new(id, WRITER_STEPS, dst));
     let counter = rt.register_unit_with(|id| CountingUnit::new(id, COUNTER_STEPS));
     assert_eq!(writer, WRITER, "registration order moved the writer");
@@ -87,18 +96,30 @@ fn run_with(overrides: Vec<Option<UnitId>>) -> (u64, Vec<u8>) {
     (rt.committed_memory_hash(), landed)
 }
 
+/// The schedule that queues the transfer, then runs every store of
+/// unit 1 before unit 2 takes a step.
+///
+/// The submitter goes first so the transfer is in flight under each
+/// store. Without it every store runs before the enqueue, and the
+/// transfer lands last whatever the counter's clock does.
+fn writer_first() -> Vec<Option<UnitId>> {
+    let mut schedule = vec![Some(SUBMITTER)];
+    schedule.extend(std::iter::repeat_n(Some(WRITER), WRITER_STEPS as usize));
+    schedule
+}
+
 #[test]
-fn a_counting_step_run_first_changes_committed_memory() {
+fn a_store_run_ahead_of_the_lagging_counter_changes_committed_memory() {
     let (default_hash, default_bytes) = run_with(Vec::new());
-    let (moved_hash, moved_bytes) = run_with(vec![None, Some(COUNTER)]);
+    let (moved_hash, moved_bytes) = run_with(writer_first());
     assert_ne!(default_hash, moved_hash);
     assert_eq!(
-        default_bytes, TRANSFERRED,
-        "by default the transfer lands after unit 1's last store",
+        default_bytes, [WRITER_STEPS as u8; 4],
+        "by default the transfer lands before unit 1's last store",
     );
     assert_eq!(
-        moved_bytes, [WRITER_STEPS as u8; 4],
-        "one counting step run earlier puts the transfer before that store",
+        moved_bytes, TRANSFERRED,
+        "the counter's clock holds the landing back past a store run ahead of it",
     );
 }
 
@@ -133,15 +154,15 @@ fn the_verdict_reads_schedule_sensitive() {
     );
 
     // The search has to reach the memory
-    // `a_counting_step_run_first_changes_committed_memory` writes by
-    // hand.
-    let (diverging, _) = run_with(vec![None, Some(COUNTER)]);
+    // `a_store_run_ahead_of_the_lagging_counter_changes_committed_memory`
+    // writes by hand.
+    let (diverging, _) = run_with(writer_first());
     assert_ne!(result.baseline_hash, diverging);
     assert!(
         result
             .schedules
             .iter()
             .any(|record| !record.truncated && record.memory_hash == diverging),
-        "the search reached the schedule that lands the transfer first",
+        "the search reached the schedule that lands the transfer last",
     );
 }

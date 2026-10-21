@@ -1,9 +1,9 @@
 //! The search's cover claim against every schedule of a small workload.
 //!
 //! `shared_clock.rs` holds the search against one hand-written
-//! schedule. This walks the choice tree of `shared_clock`'s shape with a
-//! shorter counter: a transfer in flight, a writer over its destination,
-//! and a unit that only spends ticks. Two committed memories is the
+//! schedule. This walks the choice tree of `shared_clock`'s shape: a
+//! transfer in flight, a writer over its destination, and a unit that
+//! only spends ticks. Two committed memories is the
 //! total: the destination is the only range any schedule writes twice,
 //! and it ends holding either the transfer's bytes or the writer's last
 //! store.
@@ -27,17 +27,20 @@ use std::collections::BTreeSet;
 const STEP_CAP: usize = 200;
 /// Choices the walk forces before it lets a prefix run itself out.
 ///
-/// The workload retires thirteen steps -- two, three and eight -- so
+/// The workload retires seventeen steps -- two, seven and eight -- so
 /// this is a prefix of the choice tree. Both committed memories sit
-/// inside it.
+/// inside it: the second needs the submitter, then the writer's seven
+/// stores, ahead of the counter.
 const DEPTH: usize = 8;
 
 /// The latency the two outcomes rest on.
 ///
-/// Budget 7 and 32 ticks put the landing inside the writer's run, at
-/// the fifth step after the submitter queues the transfer. A change to either
-/// leaves one outcome, and every case below then reads a different
-/// workload.
+/// Budget 7 and 32 ticks put the landing at tick 39, between the starts
+/// of the writer's last two stores at ticks 35 and 42. The counter's
+/// clock holds the landing back until it passes tick 39, so the last
+/// store lands under the transfer only when it runs ahead of the
+/// counter. A change to either leaves one outcome, and every case below
+/// then reads a different workload.
 const LATENCY: u64 = 32;
 const BUDGET: u64 = 7;
 
@@ -56,7 +59,7 @@ fn workload() -> Runtime {
     rt.register_unit_with(|id| {
         DmaSubmitter::new(id, src, destination(), vec![0xde, 0xad, 0xbe, 0xef])
     });
-    rt.register_unit_with(|id| WritingUnit::new(id, 3, destination()));
+    rt.register_unit_with(|id| WritingUnit::new(id, 7, destination()));
     rt.register_unit_with(|id| CountingUnit::new(id, 8));
     rt
 }
@@ -101,7 +104,7 @@ fn runnable_after(prefix: &[UnitId]) -> Vec<UnitId> {
 }
 
 /// Every committed memory the choice tree reaches down to `DEPTH`,
-/// each branch then run out under the round-robin fallback.
+/// each branch then run out under the lowest-clock fallback.
 fn every_reachable_memory() -> BTreeSet<u64> {
     fn walk(prefix: &mut Vec<UnitId>, depth: usize, seen: &mut BTreeSet<u64>) {
         let runnable = runnable_after(prefix);
@@ -178,12 +181,12 @@ fn the_search_answers_for_every_reachable_memory() {
         classes, None,
         "a dropped reversal withdraws the class count for the whole run",
     );
-    // The run gives up hundreds of branches and still answers for every
+    // The run gives up thousands of branches and still answers for every
     // outcome; an empty class count alone reads as one. The figure counts
     // once per lost sequence per frame, so the search's own race handling
     // moves it.
     assert_eq!(
-        dropped, 290,
+        dropped, 14_426,
         "the branches this workload's depths could not deliver",
     );
 }
