@@ -677,7 +677,7 @@
         },
         "regs_hex": {
           "status": "undefined",
-          "reason": "bits 0 to 30 of the RT input are reserved and should be zero (SPU-ISA p:69); the result with them set is left to hardware capture, issue #1411"
+          "reason": "bits 0 to 30 of the RT input are reserved and should be zero (SPU-ISA p:69); the vectors named reserved-rt-bits-set-...-console hold the console's answer"
         },
         "local_store": {
           "status": "value",
@@ -725,6 +725,438 @@
         "channels": {
           "status": "unsupported",
           "reason": "the cited rule does not constrain channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "reserved-rt-bits-set-0-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_carry_reserved_bits/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "69798c029ac418b25d9db2e68c56887d393ee422f41a670fd98623968fd4b37c"
+      },
+      "words": [
+        1747010051
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "fffffffeffffffff0000000280000001",
+          "4": "00000005000000050000000500000005",
+          "5": "00000003000000030000000300000003"
+        },
+        "local_store": [],
+        "pc": 92
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "fffffffdfffffffefffffffdfffffffe"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 96
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "reserved-rt-bits-set-1-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_carry_reserved_bits/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "69798c029ac418b25d9db2e68c56887d393ee422f41a670fd98623968fd4b37c"
+      },
+      "words": [
+        1747010051
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "fffffffeffffffff0000000280000001",
+          "4": "ffffffffffffffffffffffffffffffff",
+          "5": "00000001000000010000000100000001"
+        },
+        "local_store": [],
+        "pc": 112
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "00000001000000020000000100000002"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 116
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "reserved-rt-bits-set-2-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_carry_reserved_bits/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "69798c029ac418b25d9db2e68c56887d393ee422f41a670fd98623968fd4b37c"
+      },
+      "words": [
+        1747010051
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "fffffffeffffffff0000000280000001",
+          "4": "00000000000000000000000000000000",
+          "5": "ffffffffffffffffffffffffffffffff"
+        },
+        "local_store": [],
+        "pc": 132
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "fffffffefffffffffffffffeffffffff"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 136
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
+        },
+        "reservation": {
+          "status": "value",
+          "value": null
+        },
+        "effects": {
+          "status": "value",
+          "value": []
+        },
+        "main_memory": {
+          "status": "value",
+          "value": []
+        },
+        "peer": {
+          "status": "unsupported",
+          "reason": "the vector has no second SPU"
+        },
+        "ppu_results": {
+          "status": "value",
+          "value": []
+        },
+        "mfc_exceptions": {
+          "status": "value",
+          "value": []
+        }
+      }
+    },
+    {
+      "name": "reserved-rt-bits-set-3-console",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "spu_carry_reserved_bits/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, raw SPU",
+        "source_sha256": "69798c029ac418b25d9db2e68c56887d393ee422f41a670fd98623968fd4b37c"
+      },
+      "words": [
+        1747010051
+      ],
+      "initial_state": {
+        "regs_hex": {
+          "3": "7ffffffe7fffffffaaaaaaaa55555555",
+          "4": "00000003000000030000000300000003",
+          "5": "00000005000000050000000500000005"
+        },
+        "local_store": [],
+        "pc": 152
+      },
+      "step_limit": 1,
+      "expected": {
+        "end": {
+          "status": "value",
+          "value": {
+            "state": "step_limit"
+          }
+        },
+        "regs_hex": {
+          "status": "value",
+          "value": {
+            "3": "00000001000000020000000100000002"
+          }
+        },
+        "local_store": {
+          "status": "value",
+          "value": []
+        },
+        "pc": {
+          "status": "value",
+          "value": 156
+        },
+        "lslr": {
+          "status": "value",
+          "value": 262143
+        },
+        "fpscr": {
+          "status": "value",
+          "value": "00000000000000000000000000000000"
+        },
+        "stop": {
+          "status": "value",
+          "value": null
+        },
+        "interrupts_enabled": {
+          "status": "value",
+          "value": false
+        },
+        "srr0": {
+          "status": "value",
+          "value": 0
+        },
+        "signals": {
+          "status": "value",
+          "value": [
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            },
+            {
+              "mode": "overwrite",
+              "word": 0,
+              "pending": false
+            }
+          ]
+        },
+        "channels": {
+          "status": "unsupported",
+          "reason": "the capture records no channel state, which the runtime refreshes at each step"
         },
         "reservation": {
           "status": "value",
