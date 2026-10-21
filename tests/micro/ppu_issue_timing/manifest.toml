@@ -1,0 +1,23 @@
+[test]
+name = "ppu_issue_timing"
+
+# A hardware probe of the PPE's issue timing: twenty-three loops, each
+# timed with mftb, one per term of the PPU guest-time model. They cover
+# the loop branch alone, fixed-point issue and dual issue, the
+# fixed-point, multiply, divide, floating-point and VMX latencies, L1,
+# L2 and memory load latency, load-hit-store, taken, fall-through and
+# mispredicted branches, an LV2 syscall round trip, and three loops again with
+# the second hardware thread busy. The console capture is the answer;
+# ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 448 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 448 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
