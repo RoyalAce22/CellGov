@@ -14,16 +14,39 @@ search. It returns the region entirely containing the range, or
 gap.
 
 The `boot run` driver builds these regions, matching the canonical
-PS3 LV2 virtual-address layout:
+PS3 LV2 virtual-address layout. High addresses are at the top.
+Green regions are `ReadWrite`, grey regions are
+`ReservedZeroReadable` (the default), and dashed boxes are ranges the
+boot leaves without a region.
 
-| Guest VA                   | Size       | Label          | Access                           | Purpose                                                                                                                                                                  |
-| -------------------------- | ---------- | -------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0x00000000-(<= 0x3FFFFFFF) | up to 1 GB | `main`         | `ReadWrite`                      | User memory: EBOOT PT_LOAD segments, TLS, firmware PRX images, allocator pool. Size is `max(ELF footprint + 2 MiB PRX headroom, 1 GiB)`, capped by `PS3_RSX_IOMAP_BASE`. |
-| 0x40000000-0x454FFFFF      | 85 MB      | `rsx_iomap`    | `ReadWrite`                      | Backing for `sys_rsx_context_iomap` (672); libgcm FIFO command-buffer allocations land here                                                                              |
-| 0xC0000000-0xCFFFFFFF      | 256 MB     | `rsx`          | `ReservedZeroReadable` (default) | Video / RSX local memory -- placeholder, reads zero and are counted                                                                                                      |
-| 0xD0000000-0xD0100FFF      | 1 MB + 4 KB | `stack`       | `ReadWrite`                      | Primary-thread stack (page-4K); the stack starts at 0xD0001000 and holds the largest `PROC_PARAM.primary_stacksize` the kernel adopts                                     |
-| 0xD0101000-0xD0FFFFFF      | 15 MB - 4 KB | `child_stacks` | `ReadWrite`                    | Stack pool for PPU threads spawned by `sys_ppu_thread_create`                                                                                                            |
-| 0xE0000000-0xFFFFFFFF      | 512 MB     | `spu_reserved` | `ReservedZeroReadable` (default) | SPU-shared range -- same provisional semantics as RSX; an MFC transfer into its SPU thread window reaches the target thread, as the runtime pipeline describes; a Raw SPU's create maps its 1 MB problem-state window `ReadWrite` inside it, and its destroy returns it |
+```mermaid
+block-beta
+  columns 1
+  spu["<b>spu_reserved</b><br/>0xE0000000 - 0xFFFFFFFF<br/>512 MB, ReservedZeroReadable"]
+  gap2["no region<br/>0xD1000000 - 0xDFFFFFFF"]
+  child["<b>child_stacks</b><br/>0xD0101000 - 0xD0FFFFFF<br/>15 MB - 4 KB, ReadWrite"]
+  stack["<b>stack</b><br/>0xD0000000 - 0xD0100FFF<br/>1 MB + 4 KB, ReadWrite"]
+  rsx["<b>rsx</b><br/>0xC0000000 - 0xCFFFFFFF<br/>256 MB, ReservedZeroReadable"]
+  gap1["no region at boot<br/>0x45500000 - 0xBFFFFFFF<br/>sys_mmapper and 1 MB-page areas from 0x50000000"]
+  iomap["<b>rsx_iomap</b><br/>0x40000000 - 0x454FFFFF<br/>85 MB, ReadWrite"]
+  main["<b>main</b><br/>0x00000000 - at most 0x3FFFFFFF<br/>up to 1 GB, ReadWrite"]
+
+  classDef rw fill:#b7e4c7,stroke:#2d6a4f,color:#000
+  classDef reserved fill:#d9d9d9,stroke:#555,color:#000
+  classDef gap fill:none,stroke:#888,stroke-dasharray:5 5,color:#888
+  class main,iomap,stack,child rw
+  class rsx,spu reserved
+  class gap1,gap2 gap
+```
+
+| Label          | Purpose                                                                                                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `main`         | User memory: EBOOT PT_LOAD segments, TLS, firmware PRX images, allocator pool. Size is `max(ELF footprint + 2 MiB PRX headroom, 1 GiB)`, capped by `PS3_RSX_IOMAP_BASE`. |
+| `rsx_iomap`    | Backing for `sys_rsx_context_iomap` (672); libgcm FIFO command-buffer allocations land here                                                                              |
+| `rsx`          | Video / RSX local memory -- placeholder, reads zero and are counted                                                                                                      |
+| `stack`        | Primary-thread stack (page-4K); the stack starts at 0xD0001000 and holds the largest `PROC_PARAM.primary_stacksize` the kernel adopts                                     |
+| `child_stacks` | Stack pool for PPU threads spawned by `sys_ppu_thread_create`                                                                                                            |
+| `spu_reserved` | SPU-shared range -- same provisional semantics as RSX; an MFC transfer into its SPU thread window reaches the target thread, as the runtime pipeline describes; a Raw SPU's create maps its 1 MB problem-state window `ReadWrite` inside it, and its destroy returns it |
 
 `sys_rsx_context_allocate` (670) adds two more when it opens the RSX
 context window, one megabyte into the lowest area granule the process
