@@ -90,6 +90,22 @@ pub const PPU_MEMORY_LOAD_USE_CYCLES: u64 = 443;
 /// the `ld` before it loaded, take 194.5 cycles an iteration.
 pub const PPU_LOAD_HIT_STORE_CYCLES: u64 = 49;
 
+/// The bytes of one store-queue entry.
+///
+/// [CBE-Handbook p:134 s:6.1.2.2] the store subunit contains a store
+/// queue (STQ, 8 x 16-byte entries).
+pub const PPU_STORE_ENTRY_BYTES: u64 = 16;
+
+/// The cycles between two store-queue entries writing their bytes into
+/// the cache.
+///
+/// Fitted to the `ppu_issue_multiple` capture's `stmw` and `lmw` pairs
+/// on one line. The pairs of 4, 8 and 16 words take 85.94, 139.34 and
+/// 174.53 cycles an iteration, and with this interval the issue model
+/// gives 82, 120 and 196. No one interval fits both the 8- and 16-word
+/// pairs, and 30 stays within 22 cycles of each.
+pub const PPU_STORE_DRAIN_CYCLES: u64 = 30;
+
 /// The cycles from a mispredicted branch's issue to the earliest issue
 /// of the instruction at its correct target.
 ///

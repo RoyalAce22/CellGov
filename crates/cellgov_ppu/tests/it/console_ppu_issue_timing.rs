@@ -805,9 +805,11 @@ fn the_issue_model_times_each_table_loop_within_the_console_s_spread() {
 /// fraction of a cycle more than its whole latency of 8 or 11, which
 /// ADR 0014 records as an accepted gap from the `ppu_issue_chain`
 /// capture (`console_ppu_issue_chain.rs`). The
-/// `stmw` and `lmw` pair to one line takes 138.8, and the model's
-/// microcode and store-queue terms give 60.
-const TABLE_RESIDUALS: [(usize, f64); 3] = [(1, 2.0), (2, 3.0), (17, 80.0)];
+/// `stmw` and `lmw` pair to one line takes 138.8; the model's drain of
+/// the store queue's 16-byte entries gives 120, as it does for the same
+/// loop of the `ppu_issue_multiple` capture
+/// (`console_ppu_issue_multiple.rs`).
+const TABLE_RESIDUALS: [(usize, f64); 3] = [(1, 2.0), (2, 3.0), (17, 20.0)];
 
 /// The loop whose body the interpreter refuses: `vaddfp`.
 const REFUSED_LOOP: usize = 7;

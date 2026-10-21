@@ -90,7 +90,8 @@ pub(crate) struct Core {
 struct Queued {
     ea: u64,
     len: u8,
-    issue: u64,
+    /// The cycle this entry writes its bytes into the cache.
+    done: u64,
 }
 
 /// The tables a faulted batch keeps: the caches, the predictor and the
@@ -341,8 +342,29 @@ impl PpeTiming {
             Kind::Store { ea, len, .. } => {
                 let tables = &mut *self.tables;
                 tables.caches.store(ea);
-                tables.stores[tables.next_store] = Queued { ea, len, issue: t };
-                tables.next_store = (tables.next_store + 1) % k::PPU_STORE_QUEUE_ENTRIES;
+                // [CBE-Handbook p:134 s:6.1.2.2] the CIU store queue holds
+                // 16-byte entries. [CBE-Handbook p:144 s:6.1.5.7] the L2
+                // store queue that takes each CIU request unloads first in,
+                // first out. The interval between two entries of one store
+                // is fitted to the `ppu_issue_multiple` capture; the model
+                // does not chain it across stores.
+                let mut done =
+                    t + u64::from(op.span.saturating_sub(1)) + k::PPU_LOAD_HIT_STORE_CYCLES;
+                // [PPC-Book1 p:49 s:3.3.6] an `stswx` with a byte count of
+                // zero stores no bytes, so it takes no entry.
+                let bytes = u64::from(len);
+                let mut at = 0;
+                while at < bytes {
+                    let part = (bytes - at).min(k::PPU_STORE_ENTRY_BYTES);
+                    tables.stores[tables.next_store] = Queued {
+                        ea: ea.wrapping_add(at),
+                        len: part as u8,
+                        done,
+                    };
+                    tables.next_store = (tables.next_store + 1) % k::PPU_STORE_QUEUE_ENTRIES;
+                    at += part;
+                    done += k::PPU_STORE_DRAIN_CYCLES;
+                }
             }
             Kind::ZeroLine { ea } => self.tables.caches.zero(ea),
             Kind::Branch {
@@ -395,13 +417,24 @@ impl PpeTiming {
             Level::Memory => Some(k::PPU_MEMORY_LOAD_USE_CYCLES),
         };
         let end = ea.wrapping_add(u64::from(len.max(1)));
+        // [CBE-Handbook p:762 s:A.7.4] a load that hits a store still in
+        // the store queue waits until the store has written its data into
+        // the cache, and is then recycled.
         let forwarded = tables
             .stores
             .iter()
             .filter(|s| s.len != 0 && s.ea < end && ea < s.ea.wrapping_add(u64::from(s.len)))
-            .map(|s| s.issue + k::PPU_LOAD_HIT_STORE_CYCLES)
-            .filter(|ready| *ready > t)
-            .max();
+            .map(|s| s.done)
+            .filter(|done| *done > t)
+            .max()
+            .map(|done| {
+                // A recycled microcoded load runs its microcode again.
+                if op.words == 0 {
+                    done
+                } else {
+                    done + k::PPU_MICROCODE_ROM_CYCLES + u64::from(op.span)
+                }
+            });
         let c = &mut self.core;
         let micro = u64::from(op.span);
         let targets =

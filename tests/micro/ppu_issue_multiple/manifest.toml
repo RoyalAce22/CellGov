@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_multiple"
+
+# A hardware probe of what a store multiple and a load multiple cost:
+# eleven loops, each timed with mftb. stmw and lmw alone at 4, 8 and 16
+# words, the pair on one line at each count, the pair on two lines, and
+# an 8-word stmw followed by one load of its first word. The console
+# capture is the answer; ppu/main.c's header lists the loops and the
+# payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 200 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 200 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
