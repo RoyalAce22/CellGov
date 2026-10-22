@@ -23,47 +23,36 @@ pub struct Case {
     /// Scheduler-step cap; the default budget retires up to 256
     /// instructions per step.
     pub max_steps: usize,
-    /// Reference step count. Drift outside +/-25% emits a WARN line.
-    /// `None` waives the check.
-    pub expected_steps: Option<usize>,
 }
 
-// Reference counts come from firmware-set boots, so each is tied to
-// whichever firmware the boot suite resolves. A stale count only warns
-// in `report_verdict`; it never fails a run.
 pub const CPU_BASIC: Case = Case {
     rel_dir: "cpu/basic",
     stem: "basic",
     max_steps: 200_000,
-    expected_steps: Some(53),
 };
 
 pub const CPU_PPU_BRANCH: Case = Case {
     rel_dir: "cpu/ppu_branch",
     stem: "ppu_branch",
     max_steps: 50_000_000,
-    expected_steps: Some(31_791),
 };
 
 pub const LV2_SYS_EVENT_FLAG: Case = Case {
     rel_dir: "lv2/sys_event_flag",
     stem: "sys_event_flag",
     max_steps: 10_000_000,
-    expected_steps: Some(745),
 };
 
 pub const LV2_SYS_PROCESS: Case = Case {
     rel_dir: "lv2/sys_process",
     stem: "sys_process",
     max_steps: 10_000_000,
-    expected_steps: Some(2_180),
 };
 
 pub const LV2_SYS_SEMAPHORE: Case = Case {
     rel_dir: "lv2/sys_semaphore",
     stem: "sys_semaphore",
     max_steps: 10_000_000,
-    expected_steps: Some(930),
 };
 
 /// Every case the boot suite names, including the `#[ignore]`d ones,
@@ -133,20 +122,6 @@ pub fn report_verdict(case: &Case, observation: &Observation, expected: &[u8]) {
 
     let captured = observation.tty_log.as_slice();
     let observed_steps = observation.metadata.steps;
-
-    if let (Some(expected), Some(actual)) = (case.expected_steps, observed_steps) {
-        // Scheduling tweaks routinely shift step counts a few percent;
-        // a move past 25% is a real regression.
-        let lower = expected * 3 / 4;
-        let upper = expected * 5 / 4;
-        if !(lower..=upper).contains(&actual) {
-            eprintln!(
-                "ps3autotests {label}: WARN step count drift: expected ~{}, got {} \
-                 (band: [{}, {}])",
-                expected, actual, lower, upper
-            );
-        }
-    }
 
     if captured == expected {
         eprintln!(

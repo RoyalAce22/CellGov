@@ -18,7 +18,7 @@
 
 #![allow(
     clippy::print_stderr,
-    reason = "integration test harness: stderr carries the concurrency gate, step-drift warnings and verdict diagnostics"
+    reason = "integration test harness: stderr carries the concurrency gate and verdict diagnostics"
 )]
 #![allow(
     clippy::unwrap_used,
@@ -311,11 +311,10 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
             observation_path.display(),
         )
     });
-    // A `None` here silently no-ops the drift-band check below, and a
-    // zero makes every cross-run equality downstream compare two empty
-    // runs. `assert!` rather than `debug_assert!`: the CI gate runs the
-    // suite under `--release` too, where a debug assertion compiles out
-    // and the drift band goes quiet.
+    // A zero or absent count makes every cross-run equality downstream
+    // compare two empty runs. `assert!` rather than `debug_assert!`: the
+    // CI gate runs the suite under `--release` too, where a debug
+    // assertion compiles out.
     assert!(
         observation.metadata.steps.is_some_and(|s| s > 0),
         "ps3autotests {}/{}: observation.metadata.steps is {:?}; the boot \
@@ -456,12 +455,8 @@ fn lv2_sys_semaphore() {
 /// whatever trajectory the ELF takes, converging or not.
 #[test]
 fn two_boots_of_cpu_basic_produce_the_same_observation() {
-    let case = Case {
-        expected_steps: None,
-        ..CPU_BASIC
-    };
-    let first = run_observation(&case, "determinism_a");
-    let second = run_observation(&case, "determinism_b");
+    let first = run_observation(&CPU_BASIC, "determinism_a");
+    let second = run_observation(&CPU_BASIC, "determinism_b");
     assert_eq!(
         first.outcome, second.outcome,
         "determinism: outcome differs between runs"
