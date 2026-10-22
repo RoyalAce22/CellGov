@@ -13,11 +13,12 @@ mod integer;
 mod lanes;
 mod logical;
 mod ls;
+mod mfc;
 mod outcome;
 mod shift;
 mod slots;
 
-pub(crate) use channel::{invalid_command, mfc_barrier_kind, start_held_lists};
 pub use dispatch::execute;
 pub(crate) use float::to_integer_can_refuse;
+pub(crate) use mfc::{invalid_command, mfc_barrier_kind, start_held_lists};
 pub use outcome::{SpuFault, SpuStepOutcome};
