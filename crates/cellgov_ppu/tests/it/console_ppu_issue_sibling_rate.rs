@@ -80,10 +80,15 @@ fn cellgov_alone(sibling: &Sibling) -> f64 {
 
 /// The share of its alone rate CellGov's sibling keeps beside `chain`.
 pub(crate) fn cellgov_kept(chain: &Replay, sibling: &Sibling) -> f64 {
+    kept_of(cellgov_alone(sibling), chain, sibling)
+}
+
+/// The same share, with `alone` the sibling's cycles a round alone.
+fn kept_of(alone: f64, chain: &Replay, sibling: &Sibling) -> f64 {
     let beside = replay_measured(chain, 1, sibling)
         .and_then(|m| m.sibling_cycles)
         .expect("the sibling ran beside the chain");
-    cellgov_alone(sibling) / beside
+    alone / beside
 }
 
 /// The stop flag and the round count the replayed sibling reads and
@@ -324,11 +329,12 @@ fn each_sibling_keeps_its_console_share_of_its_rate_beside_each_chain() {
     let w = console_words();
     let mut rows = Vec::new();
     for (p, (sibling, s)) in SIBLINGS.iter().enumerate() {
+        let alone = cellgov_alone(s);
         for (c, (chain, r)) in CHAINS_TIMED.iter().enumerate() {
             rows.push((
                 *sibling,
                 *chain,
-                cellgov_kept(r, s),
+                kept_of(alone, r, s),
                 console_kept(&w, p + 1, c),
             ));
         }
@@ -368,10 +374,11 @@ fn the_addi_sibling_keeps_less_beside_a_chain_that_issues_less_often() {
     let [(_, add), _, _, (_, fadd), (_, ld)] = &CHAINS_TIMED;
     let console = |c: usize| console_kept(&w, 1, c);
     assert!(console(3) < console(4) && console(4) < console(0));
+    let alone = cellgov_alone(addi);
     let (a, l, f) = (
-        cellgov_kept(add, addi),
-        cellgov_kept(ld, addi),
-        cellgov_kept(fadd, addi),
+        kept_of(alone, add, addi),
+        kept_of(alone, ld, addi),
+        kept_of(alone, fadd, addi),
     );
     assert!(
         f < l && l < a,
