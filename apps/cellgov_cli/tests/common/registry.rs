@@ -38,6 +38,10 @@ pub struct TitleUnderTest {
     pub content_id: String,
     #[allow(dead_code, reason = "not every suite reads every field")]
     pub max_steps: u64,
+    /// The manifest's `system_ver`: the floor its PARAM.SFO states.
+    /// `None` for a title shipped inside the firmware.
+    #[allow(dead_code, reason = "not every suite reads every field")]
+    pub system_ver: Option<String>,
     /// The cell this entry boots.
     #[allow(dead_code, reason = "not every suite reads every field")]
     pub reference: ReferenceCell,
@@ -97,6 +101,7 @@ fn at_cell(m: &TitleManifest, key: CellKey, cell: Option<&MatrixCell>) -> TitleU
         short_name: m.short_name.clone(),
         content_id: m.content_id.clone(),
         max_steps: m.cell_max_steps(cell),
+        system_ver: m.system_ver.clone(),
         reference: ReferenceCell {
             fw: key.fw,
             game_ver: key.game_ver,

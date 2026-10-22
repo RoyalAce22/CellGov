@@ -29,6 +29,10 @@ use registry::{boot_anchor_path, titles, workspace_root, TitleUnderTest};
 #[path = "common/registry.rs"]
 mod registry;
 
+#[path = "common/title_suite_checks.rs"]
+mod title_suite_checks;
+use title_suite_checks::by_cost_from;
+
 /// One completed invocation.
 struct Run {
     stdout: String,
@@ -82,26 +86,6 @@ fn assert_result_stream(run: &Run, needle: &str, what: &str) {
          compare. stdout tail:\n{}",
         tail(&run.stdout)
     );
-}
-
-fn by_cost_from(
-    titles: Vec<TitleUnderTest>,
-    mut anchor_steps: impl FnMut(&TitleUnderTest) -> u64,
-) -> Vec<(u64, TitleUnderTest)> {
-    let mut out = Vec::new();
-    for title in titles {
-        if let Some(why) = &title.reference.pending {
-            eprintln!(
-                "SKIP pending: {} ({}): {why}",
-                title.short_name,
-                title.reference.label()
-            );
-            continue;
-        }
-        out.push((anchor_steps(&title), title));
-    }
-    out.sort_by_key(|(steps, _)| *steps);
-    out
 }
 
 /// Registered runnable titles, cheapest recorded trajectory first.
@@ -284,51 +268,4 @@ fn the_boot_run_bar_never_changes_what_stdout_says() {
         !with_bar.run.stdout.contains("[boot]"),
         "a threshold line landed on the result stream"
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use registry::ReferenceCell;
-
-    fn title(short_name: &str, pending: Option<&str>) -> TitleUnderTest {
-        TitleUnderTest {
-            short_name: short_name.to_string(),
-            content_id: format!("TEST-{short_name}"),
-            max_steps: 1,
-            reference: ReferenceCell {
-                fw: "1.50".to_string(),
-                game_ver: Some("base".to_string()),
-                pending: pending.map(str::to_string),
-            },
-        }
-    }
-
-    #[test]
-    fn pending_cells_are_set_aside_before_their_anchors_are_read() {
-        let titles = vec![
-            title("pending", Some("no anchor by contract")),
-            title("later", None),
-            title("earlier", None),
-        ];
-        let mut read = Vec::new();
-
-        let sorted = by_cost_from(titles, |title| {
-            read.push(title.short_name.clone());
-            if title.short_name == "earlier" {
-                10
-            } else {
-                20
-            }
-        });
-
-        assert_eq!(read, ["later", "earlier"]);
-        assert_eq!(
-            sorted
-                .iter()
-                .map(|(_, title)| title.short_name.as_str())
-                .collect::<Vec<_>>(),
-            ["earlier", "later"]
-        );
-    }
 }

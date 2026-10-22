@@ -197,6 +197,73 @@ microtests() {
         -E 'package(cellgov_ppu) & kind(lib) | package(cellgov_spu) & (kind(lib) | test(/^spu_float_edges::/)) | binary_id(cellgov_cli::microtests) | binary_id(cellgov_cli::bin/cellgov) & test(=cli::scenarios::tests::explore_micro_runs_for_elf_microtests)'
 }
 
+# The data-feature suites, on the operator's machine: every target and
+# test behind an external-data feature, through nextest's `ci-data`
+# profile, which records each test's duration in
+# target/nextest/ci-data/junit.xml. The live-console suite
+# (`runner_ps3/ps3-hardware`) is left out: it drives the PS3, so it runs
+# only when the operator asks for that.
+#
+# Each run appends one line to the operator's ledger,
+# vfs/.cellgov/data-runs.tsv (CELLGOV_DATA_LEDGER moves it): the UTC
+# time, the commit, the installed firmware and title set, and nextest's
+# summary. The line is written whether the run passed or failed, and the
+# group then exits with nextest's status.
+data_features=${external_data_features//,runner_ps3\/ps3-hardware/}
+data_targets="firmware_set_load lv2_census_firmware ps3autotests process_spawn_microtest microtests spurs_microtest title_witnesses obs_null_sink authority_id bench_stdout_purity system_ver_floor"
+install_data_targets="npdrm_oracle_vectors parity_pkg parity_disc parity_title_digests firmware_pipeline_end_to_end parity_firmware_decrypt"
+
+# The installed firmware count and newest version, and the installed
+# title ids, from `cellgov status`.
+store_summary() {
+    cargo run -q -p cellgov_cli --locked -- status --no-color --no-progress 2>/dev/null | awk '
+        /^firmware/ { section = "fw" }
+        /^titles/   { section = "titles" }
+        /^anchors/  { section = "" }
+        section == "fw" && NF {
+            version = ($1 == "firmware") ? $2 : $1
+            count++
+            newest = version
+        }
+        section == "titles" && NF {
+            id = ($1 == "titles") ? $2 : $1
+            if ($0 !~ /nothing installed/) titles = titles (titles == "" ? "" : ",") id
+        }
+        END { printf "firmware=%d newest=%s\ttitles=%s\n", count, newest, titles }'
+}
+
+data_suites() {
+    local filter target ledger log commit status=0
+    filter='package(cellgov_ppu) & kind(lib) | package(cellgov_spu) & (kind(lib) | test(/^spu_float_edges::/))'
+    filter+=' | binary_id(cellgov_cli::bin/cellgov) & test(=cli::scenarios::tests::explore_micro_runs_for_elf_microtests)'
+    filter+=' | package(cellgov_install) & kind(lib) & test(/^sce::tests::/)'
+    for target in $data_targets; do
+        filter+=" | binary_id(cellgov_cli::$target)"
+    done
+    for target in $install_data_targets; do
+        filter+=" | binary_id(cellgov_install::$target)"
+    done
+    ledger=${CELLGOV_DATA_LEDGER:-vfs/.cellgov/data-runs.tsv}
+    log=target/nextest/ci-data.log
+    mkdir -p target/nextest "$(dirname "$ledger")"
+    commit=$(git rev-parse --short=12 HEAD)
+    if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+        commit="$commit+dirty"
+    fi
+    cargo nextest run --locked --profile ci-data \
+        -p cellgov_ppu -p cellgov_spu -p cellgov_cli -p cellgov_install \
+        --features "$data_features" -E "$filter" 2>&1 | tee "$log" || status=$?
+    [ -f "$ledger" ] || printf 'utc\tcommit\tfirmware\ttitles\tnextest\n' >"$ledger"
+    printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$commit" "$(store_summary)" \
+        "$(sed -n 's/^ *Summary \[[^]]*\] *//p' "$log" | tail -1)" >>"$ledger"
+    echo "ci.sh: data run recorded in $ledger"
+    return "$status"
+}
+
+data() {
+    timed data-suites data_suites
+}
+
 case "${1:-full}" in
     lint) run_group lint lint ;;
     check) run_group check check ;;
@@ -207,6 +274,7 @@ case "${1:-full}" in
     deny) run_group deny deny ;;
     micro-build) run_group micro-build micro_build ;;
     microtests) run_group microtests microtests ;;
+    data) run_group data data ;;
     # The pre-push gate: every group the workflow runs, plus `local`.
     full)
         run_group lint lint
@@ -216,7 +284,7 @@ case "${1:-full}" in
         run_group local test_local
         ;;
     *)
-        echo "usage: $0 {lint|check|test|test-linux|local|smoke-artifacts|deny|micro-build|microtests|full}" >&2
+        echo "usage: $0 {lint|check|test|test-linux|local|smoke-artifacts|deny|micro-build|microtests|data|full}" >&2
         exit 2
         ;;
 esac

@@ -20,14 +20,11 @@ mod registry;
 use std::process::Command;
 
 use cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL;
-use cellgov_ps3_abi::format::sce::BDJ_SELF_PROGRAM_AUTHORITY_ID;
 use registry::{titles, workspace_root, TitleUnderTest};
 
-struct AuthorityWitness {
-    program_authority_id: u64,
-    authid_source: String,
-    lwmutex_unknown_locks: u64,
-}
+#[path = "common/title_suite_checks.rs"]
+mod title_suite_checks;
+use title_suite_checks::{check_titles, AuthorityWitness};
 
 fn parse_authority_witness(stderr: &str) -> Option<AuthorityWitness> {
     let rest = stderr
@@ -96,148 +93,8 @@ fn boot(title: &TitleUnderTest, force_system_authid: bool) -> Option<AuthorityWi
     }))
 }
 
-fn check_titles(
-    titles: &[TitleUnderTest],
-    mut boot_title: impl FnMut(&TitleUnderTest, bool) -> Option<AuthorityWitness>,
-) {
-    let mut checked = 0usize;
-    let mut skipped: Vec<String> = Vec::new();
-    let mut any_forced_delta = false;
-    for title in titles {
-        if let Some(why) = &title.reference.pending {
-            eprintln!(
-                "{} ({}): skipped -- declared pending ({why})",
-                title.short_name,
-                title.reference.label()
-            );
-            skipped.push(format!("{} {}", title.short_name, title.reference.label()));
-            continue;
-        }
-        let Some(normal) = boot_title(title, false) else {
-            eprintln!(
-                "{} ({}): skipped -- not installed on this machine",
-                title.short_name,
-                title.reference.label()
-            );
-            skipped.push(format!("{} {}", title.short_name, title.reference.label()));
-            continue;
-        };
-        checked += 1;
-        assert_eq!(
-            normal.authid_source, "self",
-            "{}: the served authority id must come from the SELF \
-             identification header, not the shared retail fallback -- \
-             a fallback here means the SELF parse regressed",
-            title.short_name,
-        );
-        assert_ne!(
-            normal.program_authority_id, BDJ_SELF_PROGRAM_AUTHORITY_ID,
-            "{}: normal boot served the system-class bdj.self id; \
-             titles must boot under a retail-class authority id",
-            title.short_name,
-        );
-        assert_eq!(
-            normal.lwmutex_unknown_locks, 0,
-            "{}: unknown-lwmutex lock failures under a retail-class authid",
-            title.short_name,
-        );
-        let forced = boot_title(title, true).expect("installed above; forced boot must also start");
-        assert_eq!(
-            forced.program_authority_id, BDJ_SELF_PROGRAM_AUTHORITY_ID,
-            "{}: --force-system-authid must serve the bdj.self constant",
-            title.short_name,
-        );
-        if forced.lwmutex_unknown_locks > normal.lwmutex_unknown_locks {
-            any_forced_delta = true;
-        }
-    }
-    // Anti-vacuity floor, shared with title_witnesses: the feature
-    // declares installed titles, so a run that booted nothing must not pass.
-    assert!(
-        checked > 0,
-        "installed-title-tests is enabled but none of the {} registered title(s) is \
-         installed (skipped: {})",
-        titles.len(),
-        skipped.join(", ")
-    );
-    // Negative control: the regression signature the `== 0` asserts
-    // gate must still be reproducible somewhere in the installed set.
-    assert!(
-        any_forced_delta,
-        "no installed title shows more unknown-lwmutex failures under the \
-         forced system authid than under its own id; the class pin has lost \
-         its negative control and the `== 0` assertions are unfalsifiable"
-    );
-}
-
 #[test]
 fn every_installed_title_is_served_its_own_authority_id() {
     let titles = titles();
     check_titles(&titles, boot);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use registry::ReferenceCell;
-
-    fn title(short_name: &str, pending: Option<&str>) -> TitleUnderTest {
-        TitleUnderTest {
-            short_name: short_name.to_string(),
-            content_id: format!("TEST-{short_name}"),
-            max_steps: 1,
-            reference: ReferenceCell {
-                fw: "1.50".to_string(),
-                game_ver: Some("base".to_string()),
-                pending: pending.map(str::to_string),
-            },
-        }
-    }
-
-    fn witness(force_system_authid: bool) -> AuthorityWitness {
-        AuthorityWitness {
-            program_authority_id: if force_system_authid {
-                BDJ_SELF_PROGRAM_AUTHORITY_ID
-            } else {
-                1
-            },
-            authid_source: "self".to_string(),
-            lwmutex_unknown_locks: u64::from(force_system_authid),
-        }
-    }
-
-    #[test]
-    fn pending_cell_is_set_aside_while_runnable_sibling_executes() {
-        let titles = [
-            title("pending", Some("known boot refusal")),
-            title("runnable", None),
-        ];
-        let mut calls = Vec::new();
-
-        check_titles(&titles, |title, forced| {
-            calls.push((title.short_name.clone(), forced));
-            Some(witness(forced))
-        });
-
-        assert_eq!(
-            calls,
-            [
-                ("runnable".to_string(), false),
-                ("runnable".to_string(), true)
-            ]
-        );
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "installed-title-tests is enabled but none of the 2 registered title(s) is installed"
-    )]
-    fn only_pending_or_uninstalled_cells_fail_the_anti_vacuity_floor() {
-        let titles = [
-            title("pending", Some("known boot refusal")),
-            title("uninstalled", None),
-        ];
-
-        check_titles(&titles, |_, _| None);
-    }
 }

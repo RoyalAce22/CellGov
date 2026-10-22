@@ -81,13 +81,13 @@ fn every_installed_titles_system_ver_is_the_floor_its_param_sfo_states() {
         };
         let installed = firmware_version_key(raw)
             .unwrap_or_else(|e| panic!("{}: {}: {e}", t.short_name, sfo.display()));
-        if installed != t.reference.fw {
+        if t.system_ver.as_deref() != Some(installed.as_str()) {
             failures.push(format!(
                 "{}: manifest system_ver is {:?} but {} states {PS3_SYSTEM_VER_KEY} = {raw:?} \
                  ({installed}); the manifest repeats a fact the title carries, so correct the \
                  manifest",
                 t.short_name,
-                t.reference.fw,
+                t.system_ver,
                 sfo.display()
             ));
         }

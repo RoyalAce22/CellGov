@@ -2,14 +2,8 @@
 //!
 //! The operator pins, in `vfs/.cellgov/npdrm_oracle_vectors.toml`,
 //! RAP files under the workspace `vfs/` with the klicensee each must
-//! derive to, and the NPDRM EBOOT that klicensee opens.
-//!
-//! ```toml
-//! [[vector]]
-//! rap = "dev_hdd0/home/00000001/exdata/<content-id>.rap"  # relative to vfs/
-//! klicensee = "<32 hex chars>"                            # what rap_to_klic derives
-//! eboot = "dev_hdd0/game/<title-id>/USRDIR/EBOOT.BIN"      # optional; opens under it
-//! ```
+//! derive to, and the NPDRM EBOOT that klicensee opens. The schema is
+//! in `common/npdrm_manifest.rs`.
 //!
 //! Compiled only under `npdrm-oracle-vectors`, which declares the
 //! manifest present: a missing or empty manifest fails, as does one
@@ -20,37 +14,18 @@
     reason = "integration test: unwrap on unexpected failure is correct"
 )]
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use cellgov_install::npdrm::{decrypt_self_to_elf_npdrm, rap_to_klic};
-use serde::Deserialize;
 
 #[path = "common/keys.rs"]
 mod keys;
+#[path = "common/npdrm_manifest.rs"]
+mod npdrm_manifest;
+use npdrm_manifest::{hex_to_bytes16, parse, Vector};
 
 /// Manifest location, relative to the workspace `vfs/`.
 const MANIFEST: &str = ".cellgov/npdrm_oracle_vectors.toml";
-
-/// The operator's manifest; unknown fields are refused so a misspelt
-/// `eboot` cannot silently drop a row's container proof.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Manifest {
-    vector: Vec<Vector>,
-}
-
-/// One `[[vector]]` row.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Vector {
-    /// RAP file, relative to the workspace `vfs/`.
-    rap: String,
-    /// Hex of the klicensee `rap_to_klic` derives from it.
-    klicensee: String,
-    /// NPDRM EBOOT that klicensee opens, relative to the workspace
-    /// `vfs/`.
-    eboot: Option<String>,
-}
 
 fn manifest_path() -> PathBuf {
     keys::workspace_vfs().join(MANIFEST)
@@ -71,84 +46,6 @@ fn load() -> Vec<Vector> {
         )
     });
     parse(&text, &path.display().to_string())
-}
-
-/// Parse `text`; `origin` names it in diagnostics.
-///
-/// # Panics
-///
-/// If `text` does not parse as the manifest schema, pins no vector,
-/// pins the same RAP twice, pins a path that is not relative under
-/// `vfs/`, or pins a klicensee that is not 32 hex characters.
-fn parse(text: &str, origin: &str) -> Vec<Vector> {
-    let parsed: Manifest = toml::from_str(text).unwrap_or_else(|e| panic!("parse {origin}: {e}"));
-    assert!(
-        !parsed.vector.is_empty(),
-        "{origin} pins no [[vector]], so the suite would hold nothing"
-    );
-    let mut seen: Vec<&str> = Vec::new();
-    for v in &parsed.vector {
-        assert!(
-            !seen.contains(&v.rap.as_str()),
-            "{origin} pins RAP {:?} more than once; delete the stale row rather than \
-             deriving it twice",
-            v.rap
-        );
-        seen.push(v.rap.as_str());
-        assert_under_vfs(&v.rap, "rap", &v.rap);
-        if let Some(eboot) = &v.eboot {
-            assert_under_vfs(eboot, "eboot", &v.rap);
-        }
-        hex_to_bytes16(&v.klicensee, &v.rap);
-    }
-    parsed.vector
-}
-
-/// Refuse a manifest path that is not a plain relative path under the
-/// workspace `vfs/`; `ctx` names the row in diagnostics.
-///
-/// `vfs.join` replaces the base with an absolute path and follows
-/// `..` out of it, so either would witness a file outside the
-/// installed content the suite claims to hold.
-///
-/// # Panics
-///
-/// If `path` is empty, absolute, or climbs with `..`.
-fn assert_under_vfs(path: &str, what: &str, ctx: &str) {
-    let mut named = 0usize;
-    for component in Path::new(path).components() {
-        match component {
-            Component::Normal(_) => named += 1,
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => panic!(
-                "{ctx}: {what} {path:?} leaves the workspace vfs/; pin a path relative to it"
-            ),
-        }
-    }
-    assert!(
-        named > 0,
-        "{ctx}: {what} is empty; pin a path relative to the workspace vfs/"
-    );
-}
-
-/// Decode a 32-character hex string; `ctx` names it in diagnostics.
-///
-/// # Panics
-///
-/// If the string is not exactly 32 hex characters.
-fn hex_to_bytes16(s: &str, ctx: &str) -> [u8; 16] {
-    assert_eq!(
-        s.len(),
-        32,
-        "{ctx}: klicensee hex must be 32 chars, got {}",
-        s.len()
-    );
-    let mut out = [0u8; 16];
-    for (i, byte) in out.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
-            .unwrap_or_else(|_| panic!("{ctx}: invalid hex byte at index {i} in {s:?}"));
-    }
-    out
 }
 
 fn read_rap(path: &Path) -> [u8; 16] {
@@ -229,77 +126,4 @@ fn every_pinned_eboot_decrypts_under_its_klicensee() {
         "{} pins no eboot, so no klicensee was proved against a container",
         manifest_path().display()
     );
-}
-
-/// The message [`parse`] refused `text` with.
-fn refusal_message(text: &str) -> String {
-    let payload = std::panic::catch_unwind(|| parse(text, "t"))
-        .err()
-        .unwrap_or_else(|| panic!("parse accepted {text:?}"));
-    payload
-        .downcast_ref::<String>()
-        .cloned()
-        .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
-        .unwrap_or_else(|| panic!("the refusal of {text:?} carried a non-string payload"))
-}
-
-#[test]
-fn a_manifest_with_no_vectors_is_rejected() {
-    let msg = refusal_message("vector = []\n");
-    assert!(msg.contains("pins no [[vector]]"), "got {msg:?}");
-}
-
-/// One well-formed row pinning `rap`, plus `extra` lines.
-fn row(rap: &str, extra: &str) -> String {
-    format!(
-        "[[vector]]\nrap = \"{rap}\"\nklicensee = \"{}\"\n{extra}",
-        "a".repeat(32)
-    )
-}
-
-#[test]
-fn an_unknown_field_is_named_rather_than_passed_over() {
-    let msg = refusal_message(&row("x.rap", "ebot = \"e.bin\"\n"));
-    assert!(msg.contains("unknown field"), "row level: got {msg:?}");
-    let msg = refusal_message(&format!("vectors = []\n{}", row("x.rap", "")));
-    assert!(msg.contains("unknown field"), "top level: got {msg:?}");
-}
-
-#[test]
-fn a_repeated_rap_is_named_rather_than_derived_twice() {
-    let text = format!("{}{}", row("x.rap", ""), row("x.rap", ""));
-    let msg = refusal_message(&text);
-    assert!(msg.contains("more than once"), "got {msg:?}");
-}
-
-#[test]
-fn a_path_that_is_not_relative_under_the_vfs_is_rejected() {
-    for bad in ["../x.rap", "/x.rap", "a/../../x.rap"] {
-        let msg = refusal_message(&row(bad, ""));
-        assert!(
-            msg.contains("leaves the workspace"),
-            "rap {bad:?}: got {msg:?}"
-        );
-        let msg = refusal_message(&row("x.rap", &format!("eboot = \"{bad}\"\n")));
-        assert!(
-            msg.contains("leaves the workspace"),
-            "eboot {bad:?}: got {msg:?}"
-        );
-    }
-    let msg = refusal_message(&row("", ""));
-    assert!(msg.contains("is empty"), "got {msg:?}");
-    let msg = refusal_message(&row("x.rap", "eboot = \"\"\n"));
-    assert!(msg.contains("is empty"), "got {msg:?}");
-}
-
-#[test]
-fn a_klicensee_that_is_not_32_hex_characters_is_rejected() {
-    for bad in ["deadbeef", &"a".repeat(31), &"z".repeat(32)] {
-        let text = format!("[[vector]]\nrap = \"x.rap\"\nklicensee = \"{bad}\"\n");
-        let msg = refusal_message(&text);
-        assert!(
-            msg.contains("hex must be 32 chars") || msg.contains("invalid hex byte"),
-            "klicensee {bad:?}: got {msg:?}"
-        );
-    }
 }
