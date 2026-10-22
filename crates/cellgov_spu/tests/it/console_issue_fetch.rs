@@ -1,9 +1,13 @@
 //! CellGov's SPU issue timing against the `spu_issue_fetch` probe's
 //! console capture: sixteen loops of 65536 iterations of lqa or stqa,
 //! each timed with the decrementer, run through the execution unit.
-//! Each loop must take the console's cycles an iteration.
+//! Each loop must take the console's cycles an iteration. Every build runs
+//! the loops at 1024 iterations; a release build also runs them at 8192.
 
-use crate::console_issue_runout::{console_slots, cycles_per_iteration, run_blocks, tail, Block};
+use crate::console_issue_runout::{
+    console_slots, cycles_per_iteration, run_blocks, tail, Block, CHECK_ITERATIONS,
+    SHORT_ITERATIONS,
+};
 
 /// A case's head: `ilhu`, the decrementer read, the hint and the branch
 /// into its loop.
@@ -158,24 +162,23 @@ const CONSOLE: &str = "../../tests/micro/spu_issue_fetch/ps3/cech20-cex-493/obse
 /// The loop whose target lies 64 bytes into its fetch line.
 const MID_LINE: usize = 15;
 
-/// Cycles an iteration of each case, CellGov's and the console's, run
-/// once for every test.
-fn cycles() -> (Vec<u64>, Vec<u64>) {
-    static CYCLES: std::sync::OnceLock<(Vec<u64>, Vec<u64>)> = std::sync::OnceLock::new();
-    CYCLES.get_or_init(run_cycles).clone()
+/// CellGov's cycles an iteration of each case, with each loop shortened
+/// to `short` iterations.
+fn cellgov_cycles(short: u16) -> Vec<u64> {
+    run_blocks(&BLOCKS, 0x1000, CASES, (short, CASES))
+        .into_iter()
+        .map(|delta| cycles_per_iteration(delta, u64::from(short)))
+        .collect()
 }
 
-fn run_cycles() -> (Vec<u64>, Vec<u64>) {
-    let to_cycles = |slots: Vec<u32>| -> Vec<u64> {
-        slots
-            .into_iter()
-            .map(|delta| cycles_per_iteration(delta, ITERATIONS))
-            .collect()
-    };
-    (
-        to_cycles(run_blocks(&BLOCKS, 0x1000, CASES)),
-        to_cycles(console_slots(CONSOLE, 96, CASES)),
-    )
+/// CellGov's cycles an iteration of each case in the CI run, and the
+/// console's.
+fn cycles() -> (Vec<u64>, Vec<u64>) {
+    let console = console_slots(CONSOLE, 96, CASES)
+        .into_iter()
+        .map(|delta| cycles_per_iteration(delta, ITERATIONS))
+        .collect();
+    (cellgov_cycles(SHORT_ITERATIONS), console)
 }
 
 #[test]
@@ -194,4 +197,19 @@ fn every_aligned_fetch_loop_takes_the_consoles_cycles_an_iteration() {
 fn a_runout_after_a_mid_line_target_takes_one_cycle_more_on_the_console() {
     let (cellgov, console) = cycles();
     assert_eq!(console[MID_LINE], cellgov[MID_LINE] + 1);
+}
+
+/// Eight times the short run's iterations: too slow for a debug build, so
+/// only the release run holds it.
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "the long run; the release test run holds it"
+)]
+fn a_longer_run_gives_the_short_runs_cycles_an_iteration() {
+    assert_eq!(
+        cellgov_cycles(CHECK_ITERATIONS),
+        cellgov_cycles(SHORT_ITERATIONS),
+        "long and short runs, loop by loop"
+    );
 }

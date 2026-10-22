@@ -4,6 +4,8 @@
 //! nop; four run lnop or lqa with and without sixteen 16 KB gets in
 //! flight. Each loop must take the console's cycles an iteration, except
 //! the lqa loop beside the gets, which the model times as without them.
+//! Every build runs the 65536-iteration loops at 1024 iterations; a
+//! release build also runs them at 8192.
 
 use cellgov_core::Runtime;
 use cellgov_event::UnitId;
@@ -244,25 +246,66 @@ fn run_to_stop(rt: &mut Runtime, unit: UnitId) {
     panic!("the SPU never stopped");
 }
 
+/// `ilhu r3, 1`: the probes set the count of each 65536-iteration loop
+/// with it.
+const ILHU_65536: u32 = 0x4100_0083;
+
+/// The iterations of each 65536-iteration loop in the CI run. The model
+/// takes a whole number of cycles for each iteration. A shorter loop
+/// changes a count only by the cycles outside the loop and one
+/// decrementer tick, divided by the iterations. A release build measured
+/// each loop of this file and `console_issue_fetch` against 65536
+/// iterations: each is at most 0.062 cycles from its full-length count,
+/// and at least 0.39 cycles from a rounding boundary.
+pub(crate) const SHORT_ITERATIONS: u16 = 1024;
+
+/// The iterations of the release build's check that a longer run rounds
+/// to the same cycles. The full 65536 take 10 s in a release build of
+/// `console_issue_fetch`.
+pub(crate) const CHECK_ITERATIONS: u16 = 8192;
+// `il` sign-extends its immediate.
+const _: () = assert!(SHORT_ITERATIONS < CHECK_ITERATIONS && CHECK_ITERATIONS <= 0x7fff);
+
+/// `il r3, imm`.
+const fn il_r3(imm: u16) -> u32 {
+    0x4080_0000 | ((imm as u32) << 7) | (ILHU_65536 & 0x7f)
+}
+
 /// Runs the program `blocks` on one SPU beside `memory` bytes of guest
 /// memory, and returns the word in each of `slots` result slots: the
 /// preferred slot of the quadword at `0x8000 + 16 k`.
-pub(crate) fn run_blocks(blocks: &[Block], memory: usize, slots: usize) -> Vec<u32> {
+///
+/// With `short` as `(n, loops)`, each 65536-iteration loop runs `n`
+/// iterations, and the program must hold exactly `loops` such loops.
+pub(crate) fn run_blocks(
+    blocks: &[Block],
+    memory: usize,
+    slots: usize,
+    short: (u16, usize),
+) -> Vec<u32> {
     let mut rt = Runtime::new(GuestMemory::new(memory), Budget::new(10_000), 1_000_000);
     let unit = rt.register_unit_with(|id| {
         let mut spu = SpuExecutionUnit::new(id);
         let state = spu.state_mut();
+        let mut rewritten = 0;
         for (base, runs) in blocks {
             let mut at = *base as usize;
             for (words, times) in *runs {
                 for _ in 0..*times {
-                    for word in *words {
+                    for &word in *words {
+                        let word = if word == ILHU_65536 {
+                            rewritten += 1;
+                            il_r3(short.0)
+                        } else {
+                            word
+                        };
                         state.ls[at..at + 4].copy_from_slice(&word.to_be_bytes());
                         at += 4;
                     }
                 }
             }
         }
+        assert_eq!(rewritten, short.1, "every loop's count was rewritten");
         spu
     });
     run_to_stop(&mut rt, unit);
@@ -281,27 +324,32 @@ pub(crate) fn run_blocks(blocks: &[Block], memory: usize, slots: usize) -> Vec<u
         .collect()
 }
 
-/// Cycles an iteration of each case, CellGov's and the console's, run
-/// once for every test.
-fn cycles() -> (Vec<u64>, Vec<u64>) {
-    static CYCLES: std::sync::OnceLock<(Vec<u64>, Vec<u64>)> = std::sync::OnceLock::new();
-    CYCLES.get_or_init(run_cycles).clone()
+/// The cases that run 65536 iterations on the console.
+const LONG_CASES: usize = 6;
+
+/// CellGov's cycles an iteration of each case, with each 65536-iteration
+/// loop shortened to `short` iterations.
+fn cellgov_cycles(short: u16) -> Vec<u64> {
+    // The gets read 16 KB from effective address 0, the word at 0x7F00.
+    run_blocks(&BLOCKS, 0x4000, CASES, (short, LONG_CASES))
+        .into_iter()
+        .zip(ITERATIONS)
+        .map(|(delta, iterations)| match iterations {
+            65536 => cycles_per_iteration(delta, u64::from(short)),
+            _ => cycles_per_iteration(delta, iterations),
+        })
+        .collect()
 }
 
-fn run_cycles() -> (Vec<u64>, Vec<u64>) {
-    let to_cycles = |slots: Vec<u32>| -> Vec<u64> {
-        slots
-            .into_iter()
-            .zip(ITERATIONS)
-            .map(|(delta, iterations)| cycles_per_iteration(delta, iterations))
-            .collect()
-    };
-    (
-        // The gets read 16 KB from effective address 0, the word at
-        // 0x7F00.
-        to_cycles(run_blocks(&BLOCKS, 0x4000, CASES)),
-        to_cycles(console_slots(CONSOLE, 80, CASES)),
-    )
+/// CellGov's cycles an iteration of each case in the CI run, and the
+/// console's.
+fn cycles() -> (Vec<u64>, Vec<u64>) {
+    let console = console_slots(CONSOLE, 80, CASES)
+        .into_iter()
+        .zip(ITERATIONS)
+        .map(|(delta, iterations)| cycles_per_iteration(delta, iterations))
+        .collect();
+    (cellgov_cycles(SHORT_ITERATIONS), console)
 }
 
 #[test]
@@ -342,4 +390,19 @@ fn the_model_times_loads_beside_gets_as_loads_alone() {
         "the console's gets slow the loads"
     );
     assert_eq!(cellgov[LQA_BESIDE_GETS], cellgov[LQA_ALONE]);
+}
+
+/// Eight times the short run's iterations: too slow for a debug build, so
+/// only the release run holds it.
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "the long run; the release test run holds it"
+)]
+fn a_longer_run_gives_the_short_runs_cycles_an_iteration() {
+    assert_eq!(
+        cellgov_cycles(CHECK_ITERATIONS),
+        cellgov_cycles(SHORT_ITERATIONS),
+        "long and short runs, case by case"
+    );
 }
