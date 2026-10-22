@@ -1,6 +1,11 @@
 //! SPU thread-group table tests -- group creation, slot initialization, and state-gated transitions.
 
 use super::*;
+use crate::dispatch::SpuInitState;
+use crate::image::SpuImageHandle;
+use crate::thread_group::{
+    GroupState, InitializeThreadError, NotifySpuFinishedError, RecordSpuError, MAX_SLOTS_PER_GROUP,
+};
 
 fn img(raw: u32) -> SpuImageHandle {
     SpuImageHandle::new(raw).unwrap()

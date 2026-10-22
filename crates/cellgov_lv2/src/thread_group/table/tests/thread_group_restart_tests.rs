@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::image::SpuImageHandle;
+use crate::thread_group::{GroupState, MAX_SLOTS_PER_GROUP};
 
 /// A one-thread group whose thread exited with `status`.
 fn finished_group(status: u32) -> (ThreadGroupTable, u32) {

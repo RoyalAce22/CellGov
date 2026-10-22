@@ -2,6 +2,9 @@
 //! queue removal.
 
 use super::*;
+use crate::image::SpuImageHandle;
+use crate::thread_group::{BindQueueError, UnbindQueueError, MAX_SLOTS_PER_GROUP};
+use cellgov_ps3_abi::lv2::spu::event;
 
 fn img(raw: u32) -> SpuImageHandle {
     SpuImageHandle::new(raw).unwrap()
