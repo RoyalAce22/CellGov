@@ -245,8 +245,12 @@ fn the_reciprocal_sqrt_sequence_meets_its_bound() {
     }
 }
 
+/// CI runs the bounded forms, `the_reciprocal_sequence_meets_its_bound`
+/// and `the_reciprocal_sqrt_sequence_meets_its_bound`: a fixed stride of
+/// fractions and both ends of every table segment, at the exponent
+/// edges and both signs. The scheduled `sweeps` workflow runs this one.
 #[test]
-#[ignore = "exhaustive over 2^23 fractions per exponent parity; run with --release -- --ignored"]
+#[ignore = "exhaustive over 2^23 fractions per exponent parity; the scheduled sweeps workflow runs it"]
 fn both_sequences_meet_their_bounds_for_every_fraction() {
     check_reciprocal(127, 0..1 << 23);
     check_reciprocal(128, 0..1 << 23);
@@ -299,8 +303,11 @@ fn the_frsqest_zero_threshold_falls_at_0x000ff53c() {
     check_zero_threshold((0x000F_F530..0x000F_F550).chain(sampled()));
 }
 
+/// CI runs the bounded form, `the_frsqest_zero_threshold_falls_at_0x000ff53c`:
+/// every fraction around the threshold and the fixed sample. The
+/// scheduled `sweeps` workflow runs this one.
 #[test]
-#[ignore = "exhaustive over 2^23 zero-exponent fractions; run with --release -- --ignored"]
+#[ignore = "exhaustive over 2^23 zero-exponent fractions; the scheduled sweeps workflow runs it"]
 fn the_frsqest_zero_threshold_holds_for_every_fraction() {
     check_zero_threshold(0..1 << 23);
 }

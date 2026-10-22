@@ -143,15 +143,16 @@ fn exponent_255_orders_as_a_number() {
     assert_eq!(got, [u32::MAX, u32::MAX, 0, u32::MAX]);
 }
 
-#[test]
-#[ignore = "exhaustive over 2^32 first operands; run with --release -- --ignored"]
-fn every_first_operand_orders_as_its_value() {
+/// Each of the four compares orders every first operand `firsts` yields
+/// against four fixed second operands, one per slot, as their values
+/// order, and sets no flag.
+fn orders_first_operands<I: Iterator<Item = u32>>(firsts: impl Fn() -> I) {
     let seconds = [0x0000_0000, 0x8040_0000, 0x3F80_0000, 0xFF7F_FFFF];
     for op in [FCEQ, FCMEQ, FCGT, FCMGT] {
         let insn = crate::decode::decode(rr(op, 3, 1, 2)).expect("decodes");
         let mut s = SpuState::new();
         s.set_reg(2, from_words(seconds));
-        for a in 0..=u32::MAX {
+        for a in firsts() {
             s.set_reg(1, from_words([a; 4]));
             execute(&insn, &mut s, UnitId::new(0));
             let want: [u32; 4] = std::array::from_fn(|i| {
@@ -165,4 +166,28 @@ fn every_first_operand_orders_as_its_value() {
         }
         assert_eq!(s.fpscr(), 0);
     }
+}
+
+/// 65536 first operands from a fixed-seed xorshift32: the bounded form
+/// of [`every_first_operand_orders_as_its_value`].
+/// [`every_value_pair_orders_as_its_value`] covers the operand classes.
+#[test]
+fn a_fixed_sample_of_first_operands_orders_as_its_value() {
+    orders_first_operands(|| {
+        let mut state = 0x2545_F491_u32;
+        (0..65536).map(move |_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state
+        })
+    });
+}
+
+/// CI runs [`a_fixed_sample_of_first_operands_orders_as_its_value`]; the
+/// scheduled `sweeps` workflow runs this one.
+#[test]
+#[ignore = "exhaustive over 2^32 first operands; the scheduled sweeps workflow runs it"]
+fn every_first_operand_orders_as_its_value() {
+    orders_first_operands(|| 0..=u32::MAX);
 }

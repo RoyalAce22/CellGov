@@ -303,20 +303,20 @@ fn double_precision_operands_read_denormals_as_zero_and_classify_nans() {
     assert_eq!(default_nan::<Binary32>(), 0x7FC0_0000);
 }
 
-/// Every single-precision pattern reads back to itself: `unpack` then
-/// `round_pack` is the identity on each finite value, under both policies,
-/// with DIFF exactly on the extended binade.
+/// `unpack` then `round_pack` is the identity on each finite pattern of
+/// `patterns`, under both policies, with DIFF exactly on the extended
+/// binade. Returns how many finite patterns it checked.
 ///
 /// [SPU-ISA p:195 s:9.1] every exponent from 1 to 255 is a normal single-precision binade.
-#[test]
-#[ignore = "exhaustive over 2^32 patterns; run with --release -- --ignored"]
-fn every_single_precision_pattern_round_trips() {
-    for bits in 0..=u64::from(u32::MAX) {
+fn round_trips(patterns: impl IntoIterator<Item = u64>) -> usize {
+    let mut checked = 0;
+    for bits in patterns {
         let exponent = bits >> 23 & 0xFF;
         for policy in [Policy::SpuExtended, Policy::Ieee754Cbe] {
             let Operand::Finite(x) = unpack::<Binary32>(policy, bits).0 else {
                 continue;
             };
+            checked += 1;
             let packed = round_pack::<Binary32>(policy, Rounding::NearestEven, x);
             assert_eq!(packed.bits, bits, "{policy:?} {bits:#010x}");
             let diff = policy == Policy::SpuExtended && exponent == 0xFF;
@@ -330,4 +330,40 @@ fn every_single_precision_pattern_round_trips() {
             );
         }
     }
+    checked
+}
+
+/// Each sign at every exponent edge with every fraction edge, then 65536
+/// patterns from a fixed-seed xorshift32: the bounded form of
+/// [`every_single_precision_pattern_round_trips`].
+#[test]
+fn every_edge_pattern_and_a_fixed_sample_round_trip() {
+    let mut edges = Vec::new();
+    for sign in [0u64, 1 << 31] {
+        for exponent in [0u64, 1, 2, 126, 127, 128, 253, 254, 255] {
+            for fraction in [0u64, 1, 2, 0x40_0000, 0x7F_FFFE, 0x7F_FFFF] {
+                edges.push(sign | exponent << 23 | fraction);
+            }
+        }
+    }
+    let mut state = 0x2545_F491_u32;
+    let sample = (0..65536).map(move |_| {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        u64::from(state)
+    });
+    // Finite: exponents 1 to 255 under the SPU's policy, 1 to 254 under
+    // IEEE 754, each sign and fraction edge.
+    assert_eq!(round_trips(edges.iter().copied()), 2 * 8 * 6 + 2 * 7 * 6);
+    assert!(round_trips(sample) > 65536);
+}
+
+/// Every single-precision pattern reads back to itself. CI runs
+/// [`every_edge_pattern_and_a_fixed_sample_round_trip`]; the scheduled
+/// `sweeps` workflow runs this one.
+#[test]
+#[ignore = "exhaustive over 2^32 patterns; the scheduled sweeps workflow runs it"]
+fn every_single_precision_pattern_round_trips() {
+    assert!(round_trips(0..=u64::from(u32::MAX)) > 1 << 32);
 }

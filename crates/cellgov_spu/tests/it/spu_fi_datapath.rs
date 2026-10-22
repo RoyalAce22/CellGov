@@ -163,8 +163,14 @@ fn fi_matches_the_formula_on_every_table_entry_at_sampled_y() {
     check_entries((0..1u32 << 19).step_by(4 * 127).chain(ends));
 }
 
+/// About two seconds in a release build, so the release test run holds
+/// it; a debug build runs the bounded form,
+/// `fi_matches_the_formula_on_every_table_entry_at_sampled_y`.
 #[test]
-#[ignore = "every Y against every entry, 2^25 fi; run with --release -- --ignored"]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "every Y against every entry, 2^25 fi; the release test run holds it"
+)]
 fn fi_matches_the_formula_on_every_table_entry_at_every_y() {
     check_entries((0..1u32 << 19).step_by(4));
 }
@@ -208,8 +214,14 @@ fn fi_matches_the_formula_on_the_first_random_pairs() {
     check_random_pairs(1 << 14);
 }
 
+/// About a second in a release build, so the release test run holds it;
+/// a debug build runs the bounded form,
+/// `fi_matches_the_formula_on_the_first_random_pairs`.
 #[test]
-#[ignore = "all 2^22 random pairs; run with --release -- --ignored"]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "all 2^22 random pairs; the release test run holds it"
+)]
 fn fi_matches_the_formula_on_every_random_pair() {
     check_random_pairs(usize::MAX);
 }
@@ -288,8 +300,12 @@ fn both_sequences_match_the_console_at_the_sampled_fractions() {
     }
 }
 
+/// CI runs the bounded form,
+/// `both_sequences_match_the_console_at_the_sampled_fractions`, which
+/// holds 256 fractions a sweep against the console value by value. The
+/// scheduled `sweeps` workflow runs this one.
 #[test]
-#[ignore = "both sequences over all 2^23 fractions at both parities; run with --release -- --ignored"]
+#[ignore = "both sequences over all 2^23 fractions at both parities; the scheduled sweeps workflow runs it"]
 fn both_sequences_match_the_console_digest_over_every_fraction() {
     let w = words(DATAPATH);
     let mut state = SpuState::new();

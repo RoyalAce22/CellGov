@@ -1,0 +1,101 @@
+name: sweeps
+
+# The exhaustive instruction sweeps: each one runs a float operation or
+# an SPU instruction over its whole input space, 2^23 to 2^32 inputs.
+# The continuous build runs the bounded form of each, the operand
+# classes and a fixed-seed sample; these jobs run the full spaces.
+# .github/sweeps.sh names each job's tests and their measured times.
+on:
+  schedule:
+    # Weekly, Saturday 03:47 UTC.
+    - cron: "47 3 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  # The `ci` workflow's value. The release builds here ignore it; the
+  # cache key reads every CARGO* variable, so it has to match for the
+  # restore to hit.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+
+jobs:
+  # Every sweep is deterministic, so a scheduled run on the commit the
+  # last successful scheduled run tested repeats it exactly. That run is
+  # skipped; a run started by hand always runs.
+  changed:
+    name: main moved since the last scheduled run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/sweeps.yml/runs?event=schedule&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""')
+          if [ "$EVENT" = schedule ] && [ "$last" = "$SHA" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "main is still $SHA, which the last successful scheduled run tested; skipping" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Every sweep runs on both runners: the oracles use host f64 arithmetic,
+  # so a result that depends on the platform is a finding.
+  sweep:
+    name: ${{ matrix.job }} (${{ matrix.os }})
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        job: [round-trip, conversion, estimates, compare, fesd, fm]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: stable
+
+      # Restores the dependency artifacts the `ci` workflow's stable test
+      # leg saved on this OS, and saves nothing: a weekly entry of its own
+      # would evict one the push gate needs from the 10 GB pool.
+      - name: Restore the ci cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: test
+          save-if: false
+
+      - name: ${{ matrix.job }}
+        run: timeout 170m bash .github/sweeps.sh '${{ matrix.job }}'
+
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sweeps-${{ matrix.job }}-${{ matrix.os }}
+          path: target/sweeps/
+          if-no-files-found: ignore

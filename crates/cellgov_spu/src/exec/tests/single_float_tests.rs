@@ -286,11 +286,10 @@ fn a_power_of_two_less_a_tiny_value_truncates_one_binade_down() {
     assert_eq!(words, [0x3FFF_FFFF; 4]);
 }
 
-/// Every single-precision value times four fixed second operands, one per
-/// slot, against the host `f64` product, which is exact at 48 bits.
-#[test]
-#[ignore = "exhaustive over 2^32 first operands; run with --release -- --ignored"]
-fn fm_over_every_first_operand_matches_the_exact_host_product() {
+/// Each first operand `firsts` yields times four fixed second operands,
+/// one per slot, against the host `f64` product, which is exact at 48
+/// bits.
+fn fm_matches_the_exact_host_product_on(firsts: impl IntoIterator<Item = u32>) {
     let seconds = [0x3F80_0000u32, 0x4049_0FDB, 0x0080_0000, 0xFF7F_FFFF];
     let value = |bits: u32| {
         let (negative, magnitude, exponent, _) = decode_operand(bits);
@@ -304,7 +303,7 @@ fn fm_over_every_first_operand_matches_the_exact_host_product() {
     let insn = crate::decode::decode(rr(FM, 3, 1, 2)).expect("decodes");
     let mut s = SpuState::new();
     s.set_reg(2, from_words(seconds));
-    for a in 0..=u32::MAX {
+    for a in firsts {
         s.set_reg(1, from_words([a; 4]));
         s.set_fpscr(0);
         execute(&insn, &mut s, UnitId::new(0));
@@ -341,4 +340,30 @@ fn fm_over_every_first_operand_matches_the_exact_host_product() {
             "{a:#010x}"
         );
     }
+}
+
+/// [`CLASSES`] of both signs, then 65536 first operands from a
+/// fixed-seed xorshift32: the bounded form of
+/// [`fm_over_every_first_operand_matches_the_exact_host_product`].
+#[test]
+fn fm_over_every_class_and_a_fixed_sample_matches_the_exact_host_product() {
+    fm_matches_the_exact_host_product_on(
+        CLASSES.iter().flat_map(|&bits| [bits, bits | 0x8000_0000]),
+    );
+    let mut state = 0x2545_F491_u32;
+    fm_matches_the_exact_host_product_on((0..65536).map(move |_| {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        state
+    }));
+}
+
+/// CI runs
+/// [`fm_over_every_class_and_a_fixed_sample_matches_the_exact_host_product`];
+/// the scheduled `sweeps` workflow runs this one.
+#[test]
+#[ignore = "exhaustive over 2^32 first operands; the scheduled sweeps workflow runs it"]
+fn fm_over_every_first_operand_matches_the_exact_host_product() {
+    fm_matches_the_exact_host_product_on(0..=u32::MAX);
 }

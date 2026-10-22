@@ -416,12 +416,13 @@ fn fesd_extends_the_left_word_and_ignores_the_right() {
     }
 }
 
-#[test]
-#[ignore = "exhaustive over 2^32 single inputs; run with --release -- --ignored"]
-fn fesd_matches_the_oracle_for_every_single() {
+/// fesd matches the oracle on each even single `evens` yields and the
+/// one after it, with the complement in each right word.
+fn fesd_matches_the_oracle_on(evens: impl IntoIterator<Item = u32>) {
     let insn = crate::decode::decode(rr(FESD, 3, 1)).expect("decodes");
     let mut s = SpuState::new();
-    for w in (0..=u32::MAX).step_by(2) {
+    for w in evens {
+        assert_eq!(w % 2, 0, "{w:08x} is odd");
         let pair = [w, w + 1];
         s.set_reg(
             1,
@@ -437,4 +438,36 @@ fn fesd_matches_the_oracle_for_every_single() {
         );
         assert_eq!(s.fpscr(), fpscr_of(expected.map(|(_, f)| f)), "{w:08x}");
     }
+}
+
+/// Each sign at every exponent edge with every fraction edge, then 65536
+/// singles from a fixed-seed xorshift32: the bounded form of
+/// [`fesd_matches_the_oracle_for_every_single`].
+#[test]
+fn fesd_matches_the_oracle_on_every_edge_single_and_a_fixed_sample() {
+    let mut edges = Vec::new();
+    for sign in [0u32, 1 << 31] {
+        for exponent in [0u32, 1, 2, 126, 127, 128, 253, 254, 255] {
+            // Each even fraction checks itself and the odd one above it.
+            for fraction in [0u32, 2, 0x3F_FFFE, 0x40_0000, 0x7F_FFFE] {
+                edges.push(sign | exponent << 23 | fraction);
+            }
+        }
+    }
+    fesd_matches_the_oracle_on(edges);
+    let mut state = 0x2545_F491_u32;
+    fesd_matches_the_oracle_on((0..65536).map(move |_| {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        state & !1
+    }));
+}
+
+/// CI runs [`fesd_matches_the_oracle_on_every_edge_single_and_a_fixed_sample`];
+/// the scheduled `sweeps` workflow runs this one.
+#[test]
+#[ignore = "exhaustive over 2^32 single inputs; the scheduled sweeps workflow runs it"]
+fn fesd_matches_the_oracle_for_every_single() {
+    fesd_matches_the_oracle_on((0..=u32::MAX).step_by(2));
 }

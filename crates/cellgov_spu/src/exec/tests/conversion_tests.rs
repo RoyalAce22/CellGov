@@ -316,8 +316,13 @@ fn exhaustive(op: u32) {
     }
 }
 
+/// CI runs the bounded forms: `every_defined_scale_matches_the_oracle`
+/// holds the operand classes at every scale, 0 among them, and the
+/// `spu_convert_scales` integration test holds a fixed-seed xorshift32
+/// sample against the console. The scheduled `sweeps` workflow runs
+/// this one.
 #[test]
-#[ignore = "exhaustive over 2^32 operands; run with --release -- --ignored"]
+#[ignore = "exhaustive over 2^32 operands; the scheduled sweeps workflow runs it"]
 fn every_operand_at_scale_0_matches_the_oracle() {
     for op in [CSFLT, CUFLT, CFLTS, CFLTU] {
         exhaustive(op);
