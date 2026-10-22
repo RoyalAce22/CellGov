@@ -86,6 +86,30 @@ fn a_result_names_the_mfc_exception_its_run_stalled_on() {
 }
 
 #[test]
+fn a_run_whose_unit_faults_reports_the_fault_and_not_a_stall() {
+    let clean = run(ScenarioFixture::empty());
+    assert_eq!(clean.first_fault, None);
+
+    let faulted = run(ScenarioFixture::builder()
+        .memory_size(16)
+        .max_steps(100)
+        .register(|rt: &mut Runtime| {
+            rt.register_unit_with(|id| {
+                cellgov_exec::FakeIsaUnit::new(id, vec![cellgov_exec::FakeOp::Fault])
+            });
+        })
+        .build());
+    assert_eq!(faulted.outcome, ScenarioOutcome::Faulted);
+    assert_eq!(
+        faulted.first_fault,
+        Some((
+            UnitId::new(0),
+            cellgov_effects::FaultKind::Guest(cellgov_exec::fake_isa::FAKE_FAULT_CODE)
+        ))
+    );
+}
+
+#[test]
 fn a_result_carries_the_run_s_first_invariant_break_for_its_driver_to_report() {
     let clean = run(ScenarioFixture::empty());
     assert_eq!(

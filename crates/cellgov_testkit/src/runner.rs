@@ -12,17 +12,26 @@ use std::collections::BTreeMap;
 
 use crate::fixtures::ScenarioFixture;
 use cellgov_core::{AddressSpaceId, MfcException, Runtime, StepError};
+use cellgov_effects::FaultKind;
+use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, Region, RegionAccess};
 use cellgov_trace::StateHash;
 
 /// How a scenario run terminated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScenarioOutcome {
-    /// Scheduler empty: every unit finished or blocked. Expected terminal
-    /// state for well-formed scenarios.
+    /// Scheduler empty: every unit finished or blocked, and none faulted.
+    /// Expected terminal state for well-formed scenarios.
     Stalled,
+    /// Scheduler empty after a unit faulted. A faulted unit leaves the
+    /// runnable set, so without this outcome the run would read as a
+    /// stall; [`ScenarioResult::first_fault`] names the fault.
+    Faulted,
     /// Max-steps cap fired before the scheduler emptied. Treated as failure.
     MaxStepsExceeded,
+    /// The guest clock overflowed, an invariant violation. The trace and
+    /// hashes stay available for inspection.
+    TimeOverflow,
 }
 
 /// Structured result of a scenario run; the assertion surface for tests.
@@ -50,6 +59,8 @@ pub struct ScenarioResult {
     /// `Lv2Observability::first_invariant_break_line`. The runtime ends
     /// here, so a driver that never sees it cannot report the break.
     pub first_invariant_break: Option<String>,
+    /// The unit that faulted first, and its fault.
+    pub first_fault: Option<(UnitId, FaultKind)>,
     /// The first MFC exception the run raised.
     ///
     /// A refused command suspends its SPU's command queue, and the run
@@ -146,20 +157,24 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
     let mut rt = Runtime::new(memory, fixture.budget, fixture.max_steps);
     (fixture.register)(&mut rt);
 
+    let mut first_fault = None;
     let outcome = loop {
         match rt.step() {
             Ok(mut step) => {
+                if first_fault.is_none() {
+                    first_fault = step.result.fault.map(|fault| (step.unit, fault));
+                }
                 let _ = rt.commit_step_and_recycle(&mut step);
             }
             Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
-                break ScenarioOutcome::Stalled;
+                break if first_fault.is_some() {
+                    ScenarioOutcome::Faulted
+                } else {
+                    ScenarioOutcome::Stalled
+                };
             }
             Err(StepError::MaxStepsExceeded) => break ScenarioOutcome::MaxStepsExceeded,
-            Err(StepError::TimeOverflow) => {
-                // Invariant violation; surface as stall so the trace
-                // and hashes are still available for inspection.
-                break ScenarioOutcome::Stalled;
-            }
+            Err(StepError::TimeOverflow) => break ScenarioOutcome::TimeOverflow,
             Err(StepError::SchedulerNotReinstalled) => {
                 // The runner builds a fresh runtime and never calls
                 // restore_into, so this arm is unreachable.
@@ -185,6 +200,7 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
             .map(|(id, mem)| (id, deep_copy(mem)))
             .collect(),
         first_invariant_break: rt.lv2_host().observability().first_invariant_break_line(),
+        first_fault,
         mfc_exception: rt.take_mfc_exception(),
     };
     let mem = rt.into_memory();
