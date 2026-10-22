@@ -1,7 +1,8 @@
 //! CellGov's SPU issue timing against the `spu_issue_timing` probe's
 //! console capture: forty-three loops of 65536 iterations, each timed
 //! with the decrementer, run through the execution unit. Each loop must
-//! take the console's cycles an iteration.
+//! take the console's cycles an iteration. Every build runs the loops at
+//! 2048 iterations; a release build also runs them at 65536.
 
 use cellgov_core::Runtime;
 use cellgov_event::UnitId;
@@ -753,9 +754,27 @@ const BLOCKS: [(u32, &[u32]); 94] = [
     (0x5a00, &[0x0000_2000]),
 ];
 
-/// The loops the probe times, and the iterations of each.
+/// The loops the probe times, and the iterations of each on the console.
 const CASES: usize = 43;
 const ITERATIONS: u64 = 65536;
+
+/// The iterations of each loop in the CI run. The model takes a whole
+/// number of cycles for each iteration. A shorter loop changes a count
+/// only by the cycles outside the loop and one decrementer tick, divided
+/// by the iterations. Measured: at most 0.05 cycles from the count at
+/// [`ITERATIONS`], so every loop rounds to the same cycle.
+const SHORT_ITERATIONS: u16 = 2048;
+// `il` sign-extends its immediate.
+const _: () = assert!(SHORT_ITERATIONS <= 0x7fff);
+
+/// `ilhu r3, 1` and `ilhu r8, 1`: the probe sets each loop's count to
+/// 65536 with one of these.
+const LOOP_COUNTS: [(u32, usize); 2] = [(0x4100_0083, CASES), (0x4100_0088, 6)];
+
+/// `il rt, imm`, with the register field of `ilhu`.
+fn il(ilhu: u32, imm: u16) -> u32 {
+    0x4080_0000 | (u32::from(imm) << 7) | (ilhu & 0x7f)
+}
 
 /// Where the program stores each loop's decrementer delta: the preferred
 /// slot of the quadword at `SLOTS_LS + 16 k`.
@@ -776,10 +795,10 @@ fn console_deltas() -> Vec<u32> {
     (0..CASES).map(|k| word(32 + 4 * k)).collect()
 }
 
-/// Converts a decrementer delta over a loop to cycles an iteration,
-/// rounded to the nearest cycle.
-fn cycles_per_iteration(delta: u32) -> u64 {
-    (u64::from(delta) * SPU_CYCLES_PER_TB_TICK + ITERATIONS / 2) / ITERATIONS
+/// Converts a decrementer delta over a loop of `iterations` to cycles an
+/// iteration, rounded to the nearest cycle.
+fn cycles_per_iteration(delta: u32, iterations: u64) -> u64 {
+    (u64::from(delta) * SPU_CYCLES_PER_TB_TICK + iterations / 2) / iterations
 }
 
 fn run_to_stop(rt: &mut Runtime, unit: UnitId) {
@@ -794,17 +813,33 @@ fn run_to_stop(rt: &mut Runtime, unit: UnitId) {
     panic!("the SPU never stopped");
 }
 
-#[test]
-fn every_loop_takes_the_consoles_cycles_an_iteration() {
+/// Runs the probe with each loop's count set to `iterations` (the
+/// console's when `None`), and returns each loop's cycles an iteration.
+fn cellgov_cycles(iterations: Option<u16>) -> Vec<u64> {
     let mut rt = Runtime::new(GuestMemory::new(0x1000), Budget::new(10_000), 100_000);
     let unit = rt.register_unit_with(|id| {
         let mut spu = SpuExecutionUnit::new(id);
         let state = spu.state_mut();
+        let mut rewritten = [0; LOOP_COUNTS.len()];
         for (base, words) in BLOCKS {
-            for (i, word) in words.iter().enumerate() {
+            for (i, &word) in words.iter().enumerate() {
+                let mut word = word;
+                if let (Some(n), Some(c)) =
+                    (iterations, LOOP_COUNTS.iter().position(|&(w, _)| w == word))
+                {
+                    word = il(word, n);
+                    rewritten[c] += 1;
+                }
                 let at = base as usize + i * 4;
                 state.ls[at..at + 4].copy_from_slice(&word.to_be_bytes());
             }
+        }
+        if iterations.is_some() {
+            assert_eq!(
+                rewritten.to_vec(),
+                LOOP_COUNTS.map(|(_, n)| n).to_vec(),
+                "every loop's count was rewritten"
+            );
         }
         spu
     });
@@ -816,17 +851,47 @@ fn every_loop_takes_the_consoles_cycles_an_iteration() {
         .and_then(|unit| unit.as_any().downcast_ref::<SpuExecutionUnit>())
         .expect("the SPU unit");
     let ls = &spu.state().ls;
-    let cellgov: Vec<u64> = (0..CASES)
+    let n = iterations.map_or(ITERATIONS, u64::from);
+    (0..CASES)
         .map(|k| {
             let at = SLOTS_LS + 16 * k;
-            cycles_per_iteration(u32::from_be_bytes(
-                ls[at..at + 4].try_into().expect("4 bytes"),
-            ))
+            cycles_per_iteration(
+                u32::from_be_bytes(ls[at..at + 4].try_into().expect("4 bytes")),
+                n,
+            )
         })
-        .collect();
-    let console: Vec<u64> = console_deltas()
+        .collect()
+}
+
+fn console_cycles() -> Vec<u64> {
+    console_deltas()
         .into_iter()
-        .map(cycles_per_iteration)
-        .collect();
-    assert_eq!(cellgov, console, "cycles an iteration, loop by loop");
+        .map(|delta| cycles_per_iteration(delta, ITERATIONS))
+        .collect()
+}
+
+#[test]
+fn every_loop_takes_the_consoles_cycles_an_iteration() {
+    assert_eq!(
+        cellgov_cycles(Some(SHORT_ITERATIONS)),
+        console_cycles(),
+        "cycles an iteration, loop by loop"
+    );
+}
+
+/// The probe's own iteration counts: under a second in a release build
+/// and up to 18 s in a debug one, so only the release run holds it.
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "the full-length run; the release test run holds it"
+)]
+fn the_full_length_run_gives_the_short_runs_cycles_an_iteration() {
+    let full = cellgov_cycles(None);
+    assert_eq!(
+        full,
+        cellgov_cycles(Some(SHORT_ITERATIONS)),
+        "full and short runs, loop by loop"
+    );
+    assert_eq!(full, console_cycles(), "cycles an iteration, loop by loop");
 }
