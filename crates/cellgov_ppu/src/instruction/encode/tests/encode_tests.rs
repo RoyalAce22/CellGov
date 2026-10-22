@@ -1,9 +1,11 @@
 //! Encoder totality, canonical words, reserved bits, and alias spellings.
 
-use super::*;
+use cellgov_ps3_abi::hw::ppc_isa::{PPC_EIEIO_XO, PPC_ISYNC_XO, PPC_STORAGE_HINT_XOS, PPC_SYNC_XO};
+
+use super::{alias, encode, reserved_bits, Alias, EncodeError};
 use crate::decode::decode;
 use crate::instruction::fuzz::generation_descriptors;
-use crate::instruction::{Fp63Op, PpuInstruction as I};
+use crate::instruction::{Fp63Op, PpuInstruction as I, PpuInstructionKind};
 
 const NOP: I = I::Ori {
     ra: 0,
