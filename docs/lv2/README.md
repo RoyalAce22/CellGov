@@ -1,7 +1,7 @@
 # LV2 archive
 
 <!-- Rendered from `cellgov_lv2_archive` by
-`cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate`.
+`CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator`.
 Do not edit by hand: `committed_archive_matches_generator` fails on drift. -->
 
 Text tables describing the LV2 syscall surface and CellGov's handling
@@ -43,7 +43,7 @@ the directory and this table disagree.
 
 | File | Owner class | Regenerate | Gate |
 | --- | --- | --- | --- |
-| `README.md` | generated | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `README.md` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
 | `census/fw-1.02.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `census/fw-1.10.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `census/fw-1.11.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
@@ -139,27 +139,27 @@ the directory and this table disagree.
 | `census/fw-4.91.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `census/fw-4.92.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `census/fw-4.93.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
-| `sql/build.sql` | generated | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `sql/schema.sql` | generated | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `tables/arm.tsv` | generated | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `sql/build.sql` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
+| `sql/schema.sql` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
+| `tables/arm.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
 | `tables/behavior.tsv` | curated | written by hand | `behavior_rows_cover_the_handled_surface` |
 | `tables/caller.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
 | `tables/caller_unresolved.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
-| `tables/conflicts.tsv` | generated | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `tables/coverage.tsv` | generated | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/conflicts.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
+| `tables/coverage.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
 | `tables/firmware.tsv` | curated | written by hand | `firmware_rows_are_well_formed` |
 | `tables/gate.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `tables/kernel.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
-| `tables/name.tsv` | attributed | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate_cellgov_names` (the `cellgov` rows) | `cellgov_name_rows_match_the_macro` |
-| `tables/presence.tsv` | generated | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `tables/priority.tsv` | generated | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/name.tsv` | attributed | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive cellgov_name_rows_match_the_macro` (the `cellgov` rows) | `cellgov_name_rows_match_the_macro` |
+| `tables/presence.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
+| `tables/priority.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
 | `tables/pup.tsv` | curated | written by hand | `pup_rows_are_well_formed` |
 | `tables/reach.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
-| `tables/route.tsv` | generated | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/route.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
 | `tables/stub.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `tables/subentry.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `tables/subentry_attribution.tsv` | attributed | written by hand | `kernel_census_rows_are_well_formed` |
-| `tables/transitions.tsv` | generated | `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/transitions.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
 
 ## Owner classes
 
@@ -168,7 +168,7 @@ Every table names exactly one.
 | Class | Meaning |
 | --- | --- |
 | extracted | Written only by the census emitter from firmware bytes, under anchor discipline. |
-| generated | Rendered from code by a regenerate test; a drift gate fails when the committed copy is stale. |
+| generated | Rendered from code; a drift gate fails when the committed copy is stale, and under CELLGOV_REGENERATE=1 writes it. |
 | curated | CellGov's own claims, loader-validated, with provenance on every row. |
 | attributed | Community or non-public facts, with a source on every row, never merged into extracted rows. |
 
@@ -377,7 +377,7 @@ stays and none is preferred; the disagreement is the information.
 for, or read `none` where it gives none. The `cellgov` rows are
 rendered from the name field of the `lv2_syscalls!` macro in
 `cellgov_ps3_abi::lv2::syscall`: `cellgov_name_rows_match_the_macro` fails when the
-committed rows differ, `cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate_cellgov_names` rewrites them and leaves
+committed rows differ, `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive cellgov_name_rows_match_the_macro` rewrites them and leaves
 every other row as it is, and a macro entry with no name field (462)
 renders no row. A row's `ref` has to be what its source's meaning
 promises, and a `psl1ght` name has to be the transform of the token

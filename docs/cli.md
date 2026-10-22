@@ -110,6 +110,7 @@ reserved for commands that are quiet until they report.
 | `CELLGOV_PS3_CFW` | test-only | Name the console's CFW for the live PS3 runner suite. |
 | `CELLGOV_PS3_DEBUGGER` | test-only | State none or attached for the live PS3 runner suite. |
 | `CELLGOV_RETAIN_SCRATCH` | test-only | Retain a scratch directory after a test. |
+| `CELLGOV_REGENERATE` | test-only | Set to 1: each drift test writes the generated file it checks. |
 
 
 ## JSON output

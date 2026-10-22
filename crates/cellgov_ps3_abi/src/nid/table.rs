@@ -1,8 +1,8 @@
 //! `NID_TABLE`, rendered from `table.tsv` beside this file.
 //!
 //! Generated: edit the data file, then regenerate with
-//! `cargo test -p cellgov_ps3_abi --lib -- --ignored regenerate_nid_table`.
-//! `nid::table_gen_tests::committed_table_matches_tsv` fails on drift.
+//! `CELLGOV_REGENERATE=1 cargo test -p cellgov_ps3_abi --lib committed_table_matches_tsv`;
+//! without the variable, that test fails on drift.
 
 /// `(NID, module, function)` sorted by NID for binary search.
 #[rustfmt::skip]

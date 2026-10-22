@@ -1,6 +1,6 @@
 //! `PUP_CENSUS`, rendered from the committed LV2 archive.
 //!
-//! Generated: run `cargo test -p cellgov_ps3_abi --lib -- --ignored regenerate_pup_census`.
+//! Generated: run `CELLGOV_REGENERATE=1 cargo test -p cellgov_ps3_abi --lib committed_pup_census_matches_archive`.
 
 use super::PupCensus;
 
