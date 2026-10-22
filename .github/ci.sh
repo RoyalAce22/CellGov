@@ -185,8 +185,8 @@ micro_build() {
 }
 
 # The targets that hold a microtest-gated test, with the features on: the
-# two interpreter crates' unit tests, the SPU float-edge program, and the
-# CLI's boot suite. The spawn suite, the SPURS suite and the boot cases
+# two interpreter crates' unit tests, the SPU float-edge program, the
+# CLI's exploration of the ELF microtests, and the CLI's boot suite. The spawn suite, the SPURS suite and the boot cases
 # that load a firmware or read the key vault need the operator's vfs/,
 # so they run only under `installed-firmware-tests`, which this job
 # leaves off.
@@ -194,7 +194,7 @@ microtests() {
     timed test-microtests cargo nextest run --locked --profile ci-microtests \
         -p cellgov_ppu -p cellgov_spu -p cellgov_cli \
         --features cellgov_ppu/ppu-microtests,cellgov_spu/spu-microtests,cellgov_cli/microtests \
-        -E 'package(cellgov_ppu) & kind(lib) | package(cellgov_spu) & (kind(lib) | test(/^spu_float_edges::/)) | binary_id(cellgov_cli::microtests)'
+        -E 'package(cellgov_ppu) & kind(lib) | package(cellgov_spu) & (kind(lib) | test(/^spu_float_edges::/)) | binary_id(cellgov_cli::microtests) | binary_id(cellgov_cli::bin/cellgov) & test(=cli::scenarios::tests::explore_micro_runs_for_elf_microtests)'
 }
 
 case "${1:-full}" in

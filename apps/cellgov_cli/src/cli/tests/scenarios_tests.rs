@@ -107,13 +107,17 @@ fn explore_single_unit_returns_none() {
     assert!(result.is_none(), "single-unit isa has no branching points");
 }
 
+/// The ELF microtests whose whole schedule space fits the default
+/// exploration bound. `barrier_wakeup`'s two SPUs fill all 256
+/// alternate schedules and leave the search inconclusive.
+#[cfg(feature = "microtests")]
+const WHOLLY_EXPLORED: &[&str] = &["mailbox_roundtrip", "atomic_reservation"];
+
 // The `microtests` feature is the one declaration that the ELF set
 // under tests/micro/*/build/ exists; without it this test is not
-// compiled, so no invocation can reach it and silently skip. The
-// `#[ignore]` is unrelated to the input set -- it is the ~7 min runtime.
+// compiled, so no invocation can reach it and silently skip.
 #[cfg(feature = "microtests")]
 #[test]
-#[ignore = "about seven minutes: runs three ELF microtests with full exploration"]
 fn explore_micro_runs_for_elf_microtests() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let repo_root = std::path::Path::new(&manifest_dir)
@@ -122,7 +126,11 @@ fn explore_micro_runs_for_elf_microtests() {
         .parent()
         .unwrap();
     let config = ExplorationConfig::default();
-    for name in MICROTESTS {
+    for name in WHOLLY_EXPLORED {
+        assert!(
+            MICROTESTS.contains(name),
+            "{name} is not an explore micro target"
+        );
         let base = repo_root.join(format!("tests/micro/{name}/build"));
         let ppu_path = base.join(format!("{name}.elf"));
         let spu_path = base.join("spu_main.elf");
@@ -152,6 +160,17 @@ fn explore_micro_runs_for_elf_microtests() {
             "microtest {name} should have branching points"
         );
         let r = result.unwrap();
+        assert_eq!(
+            r.baseline_stop,
+            cellgov_explore::StopReason::Stalled,
+            "microtest {name}'s baseline runs to its end"
+        );
+        assert!(!r.bounds_hit, "microtest {name} fits the default bound");
+        assert_eq!(
+            r.schedules.len(),
+            2,
+            "microtest {name}'s alternate schedules"
+        );
         assert_eq!(
             r.outcome,
             cellgov_explore::OutcomeClass::ScheduleStable,

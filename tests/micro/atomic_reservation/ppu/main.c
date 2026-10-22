@@ -101,6 +101,8 @@ int main(void)
     write_tty_tagged(buf, 16 + 128);
 
     sysSpuThreadGroupDestroy(group);
-    sysSpuImageClose(&image);
+    /* No sysSpuImageClose: it is a sysPrxForUser export reached through a
+     * stub a PRX import table would fill in, and this ELF declares no
+     * imports. The process is exiting, so the image leaks nothing. */
     return 0;
 }
