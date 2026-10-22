@@ -1,9 +1,9 @@
 # ps3autotests fixture
 
 This directory holds the [ps3autotests](https://github.com/AerialX/ps3autotests)
-test suite -- a collection of small `.ppu.elf` programs and the TTY
+test suite -- a collection of small PPU programs and the TTY
 output captured from a real PS3, used by
-[`apps/cellgov_cli/tests/ps3autotests.rs`](../../apps/cellgov_cli/tests/ps3autotests.rs)
+[`apps/cellgov_cli/tests/ps3autotests.rs`](../apps/cellgov_cli/tests/ps3autotests.rs)
 to validate that CellGov's HLE syscalls produce byte-identical TTY
 output to real hardware.
 
@@ -15,7 +15,7 @@ git clone https://github.com/AerialX/ps3autotests.git tests/ps3autotests
 ```
 
 After cloning, `tests/ps3autotests/tests/cpu/basic/basic.ppu.elf` (and
-the other whitelisted ELFs in `apps/cellgov_cli/tests/ps3autotests.rs`)
+the other whitelisted executables in `apps/cellgov_cli/tests/ps3autotests.rs`)
 should exist.
 
 ## Running the suite
@@ -34,9 +34,9 @@ to set.
 
 These ELFs import `sysPrxForUser` NIDs that no HLE module binds, so the
 harness boots them against the installed firmware and `decrypt` is
-required to open it. It resolves that tree through the firmware install
-record, and fails naming the store when it holds no firmware or holds
-several.
+required to open it. It resolves that tree through the firmware 4.93
+install record, and fails naming the installed versions when the store
+holds no 4.93.
 
 Cases that still diverge from the console capture stay `#[ignore]`d,
 one reason each, naming what the boot does instead and the condition

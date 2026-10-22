@@ -53,13 +53,13 @@ fn the_case_table_names_each_fixture_once() {
     let mut seen: std::collections::BTreeSet<(&str, &str)> = std::collections::BTreeSet::new();
     for case in CASES {
         assert!(
-            seen.insert((case.rel_dir, case.stem)),
+            seen.insert((case.rel_dir, case.executable)),
             "duplicate case {}/{}",
             case.rel_dir,
-            case.stem
+            case.executable
         );
     }
-    assert_eq!(seen.len(), 5);
+    assert_eq!(seen.len(), 10);
 }
 
 /// [`report_verdict`] reads only the outcome, the step count, and

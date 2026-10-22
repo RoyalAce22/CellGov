@@ -1,9 +1,9 @@
-//! Boots whitelisted `.ppu.elf` files from `tests/ps3autotests/` via
+//! Boots whitelisted PPU executables from `tests/ps3autotests/` via
 //! `cellgov boot run` and compares captured TTY against the
 //! real-PS3 `.expected` file.
 //!
 //! Compiled only under the `ps3autotests` feature: the input is a
-//! GPLv2 tree cloned by the developer (see tests/ps3autotests.README.md)
+//! GPLv2 tree cloned by the developer (see tests/ps3_autotests.README.md)
 //! and gitignored, so opting in declares it present and its absence is
 //! a hard error rather than a silent pass.
 //!
@@ -37,8 +37,9 @@ mod installed_firmware;
 #[path = "common/ps3autotests_cases.rs"]
 mod cases;
 use cases::{
-    manifest_content, report_verdict, Case, CASES, CPU_BASIC, CPU_PPU_BRANCH, LV2_SYS_EVENT_FLAG,
-    LV2_SYS_PROCESS, LV2_SYS_SEMAPHORE,
+    manifest_content, report_verdict, Case, CASES, CPU_BASIC, CPU_PPU_BRANCH, CPU_SPU_ALU,
+    CPU_SPU_FPU, CPU_SPU_GENERIC, LV2_SYS_EVENT_FLAG, LV2_SYS_PROCESS, LV2_SYS_SEMAPHORE,
+    RSX_METHODS_PFIFO_PULLER, RSX_METHODS_SCE_DRIVER,
 };
 
 /// Peak RSS budget per subprocess: ~1.8 GiB guest memory plus a
@@ -197,7 +198,7 @@ fn ps3autotests_root() -> PathBuf {
         "ps3autotests: the feature declares the suite present but \
          {} is missing -- clone \
          https://github.com/AerialX/ps3autotests.git into that path \
-         (see tests/ps3autotests.README.md)",
+         (see tests/ps3_autotests.README.md)",
         dir.display()
     );
     dir
@@ -217,11 +218,11 @@ fn write_manifest(path: &Path, case: &Case) {
 fn run_observation(case: &Case, run_id: &str) -> Observation {
     let autotests = ps3autotests_root();
     let test_dir = autotests.join("tests").join(case.rel_dir);
-    let elf_path = test_dir.join(format!("{}.ppu.elf", case.stem));
-    let expected_path = test_dir.join(format!("{}.expected", case.stem));
+    let elf_path = test_dir.join(case.executable);
+    let expected_path = test_dir.join(case.expected);
     assert!(
         elf_path.is_file(),
-        "ps3autotests {}/{}: ELF missing at {elf_path:?}",
+        "ps3autotests {}/{}: executable missing at {elf_path:?}",
         case.rel_dir,
         case.stem
     );
@@ -349,12 +350,16 @@ fn dump_run_output(case: &Case, output: &std::process::Output) {
 }
 
 fn run_case(case: &Case) {
-    let observation = run_observation(case, "r0");
+    hold_against_console(case, &run_observation(case, "r0"));
+}
+
+/// Compare one run of `case` against the console's `.expected`.
+fn hold_against_console(case: &Case, observation: &Observation) {
     let autotests = ps3autotests_root();
     let expected_path = autotests
         .join("tests")
         .join(case.rel_dir)
-        .join(format!("{}.expected", case.stem));
+        .join(case.expected);
     let expected = std::fs::read(&expected_path).expect("read .expected");
     // Anti-vacuity floor: `report_verdict` reports MATCH on a
     // byte-equal compare, and an empty `.expected` matches an empty
@@ -367,30 +372,28 @@ fn run_case(case: &Case) {
         case.stem,
         expected_path.display(),
     );
-    report_verdict(case, &observation, &expected);
+    report_verdict(case, observation, &expected);
 }
 
-/// Three of the five boot tests below are `#[ignore]`, so this gate is
-/// what holds their fixtures. Without it, a case could lose its ELF or
-/// `.expected` and nothing would say so. The feature declares the tree
-/// present, so a missing or empty file is a hard error here.
+/// An `#[ignore]`d boot test below reads nothing in an ordinary run, so
+/// this gate is what holds its fixtures. Without it, a case could lose its
+/// executable or `.expected` and nothing would say so. The feature
+/// declares the tree present, so a missing or empty file is a hard
+/// error here.
 #[test]
 fn every_declared_case_names_a_present_non_empty_fixture_pair() {
     assert!(!CASES.is_empty(), "the case table is empty");
     let root = ps3autotests_root().join("tests");
     for case in CASES {
         let dir = root.join(case.rel_dir);
-        for file in [
-            dir.join(format!("{}.ppu.elf", case.stem)),
-            dir.join(format!("{}.expected", case.stem)),
-        ] {
+        for file in [dir.join(case.executable), dir.join(case.expected)] {
             let len = std::fs::metadata(&file)
                 .unwrap_or_else(|e| {
                     panic!(
                         "ps3autotests {}/{}: {} ({e}); the feature declares the suite \
                          present -- clone \
                          https://github.com/AerialX/ps3autotests.git into {} \
-                         (see tests/ps3autotests.README.md)",
+                         (see tests/ps3_autotests.README.md)",
                         case.rel_dir,
                         case.stem,
                         file.display(),
@@ -411,9 +414,35 @@ fn every_declared_case_names_a_present_non_empty_fixture_pair() {
     }
 }
 
+/// Two boots of `cpu/basic` must agree whatever trajectory the ELF
+/// takes, so the test compares them before it holds the first against
+/// the console. One test does both, which keeps the suite at two boots
+/// of this ELF.
 #[test]
 fn cpu_basic() {
-    run_case(&CPU_BASIC);
+    let first = run_observation(&CPU_BASIC, "r0");
+    let second = run_observation(&CPU_BASIC, "r1");
+    assert_eq!(
+        first.outcome, second.outcome,
+        "determinism: outcome differs between runs"
+    );
+    assert_eq!(
+        first.metadata.steps, second.metadata.steps,
+        "determinism: step count differs between runs"
+    );
+    assert_eq!(
+        first.tty_log, second.tty_log,
+        "determinism: tty_log differs between runs"
+    );
+    assert_eq!(
+        first.memory_regions, second.memory_regions,
+        "determinism: memory regions differ between runs"
+    );
+    assert_eq!(
+        first, second,
+        "determinism: full observation differs between runs"
+    );
+    hold_against_console(&CPU_BASIC, &first);
 }
 
 #[test]
@@ -451,30 +480,39 @@ fn lv2_sys_semaphore() {
     run_case(&LV2_SYS_SEMAPHORE);
 }
 
-/// The whole claim is that two boots agree, so this test holds
-/// whatever trajectory the ELF takes, converging or not.
 #[test]
-fn two_boots_of_cpu_basic_produce_the_same_observation() {
-    let first = run_observation(&CPU_BASIC, "determinism_a");
-    let second = run_observation(&CPU_BASIC, "determinism_b");
-    assert_eq!(
-        first.outcome, second.outcome,
-        "determinism: outcome differs between runs"
-    );
-    assert_eq!(
-        first.metadata.steps, second.metadata.steps,
-        "determinism: step count differs between runs"
-    );
-    assert_eq!(
-        first.tty_log, second.tty_log,
-        "determinism: tty_log differs between runs"
-    );
-    assert_eq!(
-        first.memory_regions, second.memory_regions,
-        "determinism: memory regions differ between runs"
-    );
-    assert_eq!(
-        first, second,
-        "determinism: full observation differs between runs"
-    );
+#[ignore = "sys_spu_image_open answers ENOENT for /app_home/spu_alu.spu.elf, \
+            because it sees only two fixed sibling names, so the run exits \
+            0x80010006 at step 47 with no TTY (#2112)"]
+fn cpu_spu_alu() {
+    run_case(&CPU_SPU_ALU);
+}
+
+#[test]
+#[ignore = "sys_spu_image_open answers ENOENT for /app_home/spu_fpu.spu.elf, \
+            because it sees only two fixed sibling names, so the run exits \
+            0x80010006 at step 47 with no TTY (#2112)"]
+fn cpu_spu_fpu() {
+    run_case(&CPU_SPU_FPU);
+}
+
+#[test]
+#[ignore = "the PPU's first store to a Raw SPU's MFC proxy command registers \
+            (offset 0x3004) faults the run, which then reaches MAX_STEPS (#2113)"]
+fn cpu_spu_generic() {
+    run_case(&CPU_SPU_GENERIC);
+}
+
+#[test]
+#[ignore = "the suite ships this case only as a fake-signed SELF, which boot \
+            run refuses at load (#2114)"]
+fn rsx_methods_pfifo_puller() {
+    run_case(&RSX_METHODS_PFIFO_PULLER);
+}
+
+#[test]
+#[ignore = "the suite ships this case only as a fake-signed SELF, which boot \
+            run refuses at load (#2114)"]
+fn rsx_methods_sce_driver() {
+    run_case(&RSX_METHODS_SCE_DRIVER);
 }

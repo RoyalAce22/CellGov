@@ -14,12 +14,18 @@
 
 use cellgov_compare::{Observation, ObservedOutcome};
 
-/// `rel_dir` is relative to ps3autotests' `tests/` root; `stem` is
-/// shared between `<stem>.ppu.elf` and `<stem>.expected`.
+/// `rel_dir` is relative to ps3autotests' `tests/` root, and the two
+/// file names are relative to `rel_dir`. `stem` names the case in its
+/// manifest and scratch directory.
 #[derive(Clone, Copy)]
 pub struct Case {
     pub rel_dir: &'static str,
     pub stem: &'static str,
+    /// The PPU executable the case boots: an ELF, or a SELF where the
+    /// suite ships no ELF.
+    pub executable: &'static str,
+    /// The console's TTY capture.
+    pub expected: &'static str,
     /// Scheduler-step cap; the default budget retires up to 256
     /// instructions per step.
     pub max_steps: usize,
@@ -28,30 +34,80 @@ pub struct Case {
 pub const CPU_BASIC: Case = Case {
     rel_dir: "cpu/basic",
     stem: "basic",
+    executable: "basic.ppu.elf",
+    expected: "basic.expected",
     max_steps: 200_000,
 };
 
 pub const CPU_PPU_BRANCH: Case = Case {
     rel_dir: "cpu/ppu_branch",
     stem: "ppu_branch",
+    executable: "ppu_branch.ppu.elf",
+    expected: "ppu_branch.expected",
     max_steps: 50_000_000,
+};
+
+pub const CPU_SPU_ALU: Case = Case {
+    rel_dir: "cpu/spu_alu",
+    stem: "spu_alu",
+    executable: "spu_alu.ppu.elf",
+    expected: "_spu_alu.expected",
+    max_steps: 10_000_000,
+};
+
+pub const CPU_SPU_FPU: Case = Case {
+    rel_dir: "cpu/spu_fpu",
+    stem: "spu_fpu",
+    executable: "spu_fpu.ppu.elf",
+    expected: "_spu_fpu.expected",
+    max_steps: 10_000_000,
+};
+
+pub const CPU_SPU_GENERIC: Case = Case {
+    rel_dir: "cpu/spu_generic",
+    stem: "spu_test",
+    executable: "spu_test.ppu.elf",
+    expected: "spu_test.expected",
+    max_steps: 10_000_000,
 };
 
 pub const LV2_SYS_EVENT_FLAG: Case = Case {
     rel_dir: "lv2/sys_event_flag",
     stem: "sys_event_flag",
+    executable: "sys_event_flag.ppu.elf",
+    expected: "sys_event_flag.expected",
     max_steps: 10_000_000,
 };
 
 pub const LV2_SYS_PROCESS: Case = Case {
     rel_dir: "lv2/sys_process",
     stem: "sys_process",
+    executable: "sys_process.ppu.elf",
+    expected: "sys_process.expected",
     max_steps: 10_000_000,
 };
 
 pub const LV2_SYS_SEMAPHORE: Case = Case {
     rel_dir: "lv2/sys_semaphore",
     stem: "sys_semaphore",
+    executable: "sys_semaphore.ppu.elf",
+    expected: "sys_semaphore.expected",
+    max_steps: 10_000_000,
+};
+
+pub const RSX_METHODS_PFIFO_PULLER: Case = Case {
+    rel_dir: "rsx/methods_pfifo_puller",
+    stem: "methods_pfifo_puller",
+    executable: "methods_pfifo_puller.ppu.self",
+    expected: "methods_pfifo_puller.expected",
+    max_steps: 10_000_000,
+};
+
+pub const RSX_METHODS_SCE_DRIVER: Case = Case {
+    rel_dir: "rsx/methods_sce_driver",
+    stem: "methods_sce_driver",
+    executable: "methods_sce_driver.ppu.self",
+    expected: "methods_sce_driver.expected",
     max_steps: 10_000_000,
 };
 
@@ -60,9 +116,14 @@ pub const LV2_SYS_SEMAPHORE: Case = Case {
 pub const CASES: &[Case] = &[
     CPU_BASIC,
     CPU_PPU_BRANCH,
+    CPU_SPU_ALU,
+    CPU_SPU_FPU,
+    CPU_SPU_GENERIC,
     LV2_SYS_EVENT_FLAG,
     LV2_SYS_PROCESS,
     LV2_SYS_SEMAPHORE,
+    RSX_METHODS_PFIFO_PULLER,
+    RSX_METHODS_SCE_DRIVER,
 ];
 
 /// The title manifest a case boots under, naming firmware
@@ -78,7 +139,7 @@ pub fn manifest_content(case: &Case, system_ver: &str) -> String {
 content_id = "AT_{stem_upper}"
 short_name = "at_{stem}"
 display_name = "ps3autotests {rel_dir}/{stem}"
-eboot_candidates = ["{stem}.ppu.elf"]
+eboot_candidates = ["{executable}"]
 year = 2007
 developer = "ps3autotests"
 engine = "ps3autotests"
@@ -90,6 +151,7 @@ kind = "process-exit"
 "#,
         stem_upper = case.stem.to_uppercase(),
         stem = case.stem,
+        executable = case.executable,
         rel_dir = case.rel_dir,
     )
 }
@@ -149,7 +211,7 @@ pub fn report_verdict(case: &Case, observation: &Observation, expected: &[u8]) {
         eprintln!(
             "  NOTE: \\r count differs (captured={}, expected={}) -- the \
              .expected file may have been autocrlf-mangled on Windows. \
-             See tests/ps3autotests.README.md.",
+             See tests/ps3_autotests.README.md.",
             cap_cr, exp_cr,
         );
     }

@@ -91,7 +91,7 @@ installed-title-tests = ["installed-firmware-tests"]
 microtests = ["decrypt"]
 
 # Suite that boots the ps3autotests suite -- a GPLv2 tree the
-# developer clones locally (tests/ps3autotests.README.md), never
+# developer clones locally (tests/ps3_autotests.README.md), never
 # vendored, so cellgov stays MIT/Apache-2.0.
 ps3autotests = ["installed-firmware-tests"]
 
