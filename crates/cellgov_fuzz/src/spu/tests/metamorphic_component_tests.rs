@@ -1,6 +1,7 @@
 use super::*;
 use cellgov_spu::exec::SpuStepOutcome;
 
+use super::super::execute::run_once;
 use crate::report::ComponentIdentity;
 
 /// `a $3,$4,$5`: the commutative relation executes against `baseline`.
@@ -34,6 +35,7 @@ fn add_run(baseline: &ObservedStep) -> (FuzzReport, CrossReferenceAsymmetry) {
         ADD_WORD,
         InstructionIdentity::Spu(descriptor.kind),
         0,
+        &LocalStores::default(),
     )
     .unwrap();
     (report, asymmetry)

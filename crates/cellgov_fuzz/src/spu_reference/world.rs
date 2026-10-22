@@ -214,17 +214,33 @@ impl World {
         memory_runs: &[(u64, Vec<u8>)],
         peer_ls: Option<Vec<u8>>,
     ) -> Result<Self, SpuReferenceError> {
-        let mut unit = SpuExecutionUnit::new(OWN);
-        unit.restore(SpuSnapshot {
-            state: loaded.clone(),
-            status: if loaded.stop.is_some() {
-                UnitStatus::Finished
-            } else {
-                UnitStatus::Runnable
+        Self::with_local_store(loaded, Vec::new(), memory_runs, peer_ls)
+    }
+
+    /// [`Self::new`], with the SPU's local store in `ls`'s buffer.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::new`].
+    pub(crate) fn with_local_store(
+        loaded: &SpuState,
+        ls: Vec<u8>,
+        memory_runs: &[(u64, Vec<u8>)],
+        peer_ls: Option<Vec<u8>>,
+    ) -> Result<Self, SpuReferenceError> {
+        let mut unit = SpuExecutionUnit::restored(
+            OWN,
+            SpuSnapshot {
+                state: loaded.clone_with_local_store(ls),
+                status: if loaded.stop.is_some() {
+                    UnitStatus::Finished
+                } else {
+                    UnitStatus::Runnable
+                },
+                stall: None,
+                pipeline: cellgov_spu::timing::SpuPipeline::new(),
             },
-            stall: None,
-            pipeline: cellgov_spu::timing::SpuPipeline::new(),
-        });
+        );
         unit.connect_out_intr_mbox()
             .map_err(|_| world_error("the interrupt mailbox"))?;
         let mut regions = Vec::new();
@@ -275,6 +291,11 @@ impl World {
             refused: false,
             now: GuestTicks::ZERO,
         })
+    }
+
+    /// The SPU's state, which outlives the world.
+    pub(crate) fn into_state(self) -> SpuState {
+        self.unit.into_state()
     }
 
     /// Each region's bytes, in region order.

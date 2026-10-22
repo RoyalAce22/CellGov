@@ -10,13 +10,14 @@ use cellgov_spu::state::SPU_LS_SIZE;
 
 use super::assess::assess_sequence_case;
 use super::execute::{
-    outcome_effects, outcome_identity, run_generated_sequence, spu_observation,
+    outcome_effects, outcome_identity, run_generated_sequence_in, spu_observation,
     spu_sequence_replay_asymmetry, SequenceWorld, SpuTerminalObservation,
 };
 use super::generate::{
-    case_descriptors, random_state, sequence_world, state_aware_state, structured_sequence,
+    case_descriptors, random_state_in, sequence_world, state_aware_state_in, structured_sequence,
     GeneratedSequence,
 };
+use super::local_stores::LocalStores;
 use super::record::{footprint_fingerprint, guarded_run, record, record_target_panic};
 use super::sequence_relations::{replay_stored, run_relation_check};
 use crate::boundary::call_target;
@@ -105,6 +106,7 @@ fn run_sequences_inner(
         },
         (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
     };
+    let pool = LocalStores::default();
     for iteration in iterations {
         // The run that holds case 0 replays the stored counterexamples
         // before it samples a state; a reduction candidate does not.
@@ -153,10 +155,13 @@ fn run_sequences_inner(
         if words.is_empty() {
             return Err(InvariantError::EmptyGeneratedSequence.into());
         }
-        let (mut initial, state_features) = match config.strategy {
-            GenerationStrategy::Structured => state_aware_state(&mut rng, None)?,
-            GenerationStrategy::RawWords => (random_state(&mut rng)?, BTreeSet::new()),
+        let (initial, state_features) = match config.strategy {
+            GenerationStrategy::Structured => state_aware_state_in(&mut rng, None, pool.fresh())?,
+            GenerationStrategy::RawWords => {
+                (random_state_in(&mut rng, pool.fresh())?, BTreeSet::new())
+            }
         };
+        let mut initial = pool.hold(initial);
         if let Some((interaction, data_base)) = generated.interaction {
             interaction.prepare_state(&mut initial, data_base);
         }
@@ -176,13 +181,14 @@ fn run_sequences_inner(
         let program_words = words.len();
         let executing = Cell::new(None);
         let first = match call_target(|| {
-            run_generated_sequence(
+            run_generated_sequence_in(
                 &initial,
                 &world,
                 config.sequence_words as usize,
                 program_words,
                 config.strategy,
                 &executing,
+                &pool,
             )
         }) {
             Ok(first) => first?,
@@ -225,7 +231,7 @@ fn run_sequences_inner(
         report.observed_effects(emitted.iter().map(Effect::kind))?;
         // The relation check is independent of the generated program, so
         // every case runs it and every row gets its turn.
-        let relation_asymmetry = run_relation_check(report, &mut rng, iteration)?;
+        let relation_asymmetry = run_relation_check(report, &mut rng, iteration, &pool)?;
         if assessment.eligibility != CaseEligibility::Eligible {
             report.observe_case(
                 iteration,
@@ -250,13 +256,14 @@ fn run_sequences_inner(
             });
             let replay_world = late.as_ref().unwrap_or(&world);
             let second = match call_target(|| {
-                run_generated_sequence(
+                run_generated_sequence_in(
                     &initial,
                     replay_world,
                     config.sequence_words as usize,
                     program_words,
                     config.strategy,
                     &executing,
+                    &pool,
                 )
             }) {
                 Ok(second) => {

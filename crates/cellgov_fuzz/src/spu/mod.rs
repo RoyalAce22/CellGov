@@ -8,7 +8,7 @@
 //! `counterexample` keeps each relation finding's start state as a fixture
 //! the engine replays first. `catalog` writes the rows as a reference, and
 //! `fused_results` checks an external fused form's result states against
-//! them.
+//! them. Both engines take their local stores from `local_stores`.
 
 mod assess;
 mod catalog;
@@ -17,6 +17,7 @@ mod execute;
 mod fused_results;
 mod generate;
 mod instructions;
+mod local_stores;
 mod record;
 mod sequence_relations;
 mod sequences;

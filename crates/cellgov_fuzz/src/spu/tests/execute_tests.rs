@@ -69,9 +69,10 @@ fn a_faulting_spu_sequence_discards_the_stores_the_world_committed() {
         actions: Vec::new(),
     };
 
-    let put_only = run_sequence_with_limit(&initial, &world, 1, None, &Cell::new(None))
+    let pool = LocalStores::default();
+    let put_only = run_sequence_with_limit(&initial, &world, 1, None, &Cell::new(None), &pool)
         .expect("the world builds");
-    let faulted = run_sequence_with_limit(&initial, &world, 2, None, &Cell::new(None))
+    let faulted = run_sequence_with_limit(&initial, &world, 2, None, &Cell::new(None), &pool)
         .expect("the world builds");
 
     // The put alone lands in main storage.

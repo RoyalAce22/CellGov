@@ -474,8 +474,16 @@ fn every_row_catches_its_seeded_partner_defect() {
             .filter(|&index| {
                 let instance = draw(relation, index);
                 matches!(
-                    compare_under(relation, &instance, index, relation.dead, &[], &*hook)
-                        .expect("the row encodes"),
+                    compare_under(
+                        relation,
+                        &instance,
+                        index,
+                        relation.dead,
+                        &[],
+                        &*hook,
+                        &LocalStores::default(),
+                    )
+                    .expect("the row encodes"),
                     RelationVerdict::Diverged(_)
                 )
             })
@@ -575,7 +583,8 @@ fn a_turn_redraws_past_the_precondition_and_counts_each_draw_outside_it() {
     for turn in 0..TURNS {
         let mut rng = Rng::for_case(CAMPAIGN_VERSION, 1448, turn);
         let case = position + turn * rows.len() as u64;
-        run_relation_check(&mut report, &mut rng, case).expect("the turn runs");
+        run_relation_check(&mut report, &mut rng, case, &LocalStores::default())
+            .expect("the turn runs");
     }
     let check = CheckIdentity::SpuSequenceRelation(SpuSequenceRelationId::Mpy32);
     let executed = report
@@ -620,8 +629,16 @@ fn the_host_maximum_diverges_only_on_an_exponent_255_or_zero_pair_lane() {
         {
             continue;
         }
-        let verdict = compare_sides(&relation, &instance, index, relation.dead, &[], &|_, _| {})
-            .expect("the row encodes");
+        let verdict = compare_sides(
+            &relation,
+            &instance,
+            index,
+            relation.dead,
+            &[],
+            &|_, _| {},
+            &LocalStores::default(),
+        )
+        .expect("the row encodes");
         let RelationVerdict::Diverged(divergence) = verdict else {
             continue;
         };
@@ -669,8 +686,16 @@ fn the_pick_precondition_rejects_a_zero_pair_lane_the_host_maximum_breaks() {
         instance.start.set_reg(register, value);
     }
     assert!(!precondition(&instance.start, &instance.assignment));
-    let verdict = compare_sides(&relation, &instance, 0, relation.dead, &[], &|_, _| {})
-        .expect("the row encodes");
+    let verdict = compare_sides(
+        &relation,
+        &instance,
+        0,
+        relation.dead,
+        &[],
+        &|_, _| {},
+        &LocalStores::default(),
+    )
+    .expect("the row encodes");
     assert!(
         matches!(verdict, RelationVerdict::Diverged(_)),
         "{verdict:?}"
@@ -695,14 +720,15 @@ fn a_word_that_does_not_decode_errors_in_the_program_and_ends_a_run_elsewhere() 
     let mut start = SpuState::new();
     start.ls[OUTSIDE as usize..OUTSIDE as usize + 4].copy_from_slice(&garbage.to_be_bytes());
     let relation = SpuSequenceRelationId::FloatMax;
-    let observation =
-        run_side(relation, &[bra], &start, false).expect("a word outside the program ends the run");
+    let pool = LocalStores::default();
+    let observation = run_side(relation, &[bra], &start, false, &pool)
+        .expect("a word outside the program ends the run");
     assert_eq!(
         observation.state.pc,
         OUTSIDE.wrapping_sub(SEQUENCE_PROGRAM_BASE + 4)
     );
     assert!(matches!(
-        run_side(relation, &[garbage], &start, false),
+        run_side(relation, &[garbage], &start, false, &pool),
         Err(FuzzError::Invariant(
             InvariantError::UnencodableSequenceRelation { .. }
         ))
@@ -853,8 +879,16 @@ fn the_square_root_chain_leaves_a_host_square_root_exactly_on_a_negative_lane() 
             continue;
         }
         let negative = (0..4).any(|lane| start_word(&instance, 1, lane) >> 31 == 1);
-        let verdict = compare_sides(&relation, &instance, index, relation.dead, &[], &|_, _| {})
-            .expect("the row encodes");
+        let verdict = compare_sides(
+            &relation,
+            &instance,
+            index,
+            relation.dead,
+            &[],
+            &|_, _| {},
+            &LocalStores::default(),
+        )
+        .expect("the row encodes");
         let is_diverged = matches!(verdict, RelationVerdict::Diverged(_));
         assert_eq!(is_diverged, negative, "draw {index}");
         diverged += u32::from(is_diverged);

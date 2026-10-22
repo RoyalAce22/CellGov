@@ -117,8 +117,14 @@ impl SpuObservableSnapshot {
     /// Creates the snapshot of a state no caller reads again, and keeps
     /// its local store without a copy.
     pub fn capture_owned(mut state: SpuState) -> Self {
+        Self::capture_taking(&mut state)
+    }
+
+    /// Creates the snapshot of `state` and moves its local store into the
+    /// snapshot, leaving `state` with an empty one.
+    pub fn capture_taking(state: &mut SpuState) -> Self {
         let ls = std::mem::take(&mut state.ls);
-        Self::with_local_store(&state, ls)
+        Self::with_local_store(state, ls)
     }
 
     /// The snapshot of every component except the local store, which is

@@ -101,12 +101,33 @@ pub struct SpuExecutionUnit {
 impl SpuExecutionUnit {
     /// Construct a runnable SPU with zeroed architectural state.
     pub fn new(id: UnitId) -> Self {
+        Self::restored(
+            id,
+            SpuSnapshot {
+                state: state::SpuState::new(),
+                status: UnitStatus::Runnable,
+                stall: None,
+                pipeline: crate::timing::SpuPipeline::new(),
+            },
+        )
+    }
+
+    /// Construct an SPU in the context `snapshot` holds: [`Self::new`]
+    /// followed by [`Self::restore`], without the zeroed state that `new`
+    /// builds and `restore` drops.
+    pub fn restored(id: UnitId, snapshot: SpuSnapshot) -> Self {
+        let SpuSnapshot {
+            state,
+            status,
+            stall,
+            pipeline,
+        } = snapshot;
         Self {
             id,
-            state: state::SpuState::new(),
-            status: UnitStatus::Runnable,
-            stall: None,
-            pipeline: crate::timing::SpuPipeline::new(),
+            state,
+            status,
+            stall,
+            pipeline,
             barriers: Vec::new(),
             retirement_counter: 0,
             full_state_window: None,
@@ -153,6 +174,11 @@ impl SpuExecutionUnit {
     /// Read access to architectural state.
     pub fn state(&self) -> &state::SpuState {
         &self.state
+    }
+
+    /// The unit's architectural state, which outlives the unit.
+    pub fn into_state(self) -> state::SpuState {
+        self.state
     }
 
     /// Put the unit back in the context `snapshot` holds. The unit keeps

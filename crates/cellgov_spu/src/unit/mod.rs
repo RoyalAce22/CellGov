@@ -71,3 +71,7 @@ mod snapshot_tests;
 #[cfg(test)]
 #[path = "tests/clock_read_tests.rs"]
 mod clock_read_tests;
+
+#[cfg(test)]
+#[path = "tests/restored_unit_tests.rs"]
+mod restored_unit_tests;

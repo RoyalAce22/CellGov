@@ -119,10 +119,57 @@ pub struct SpuState {
 impl SpuState {
     /// The state an SPU starts a new context in.
     pub fn new() -> Self {
+        Self::with_cleared_local_store(vec![0u8; SPU_LS_SIZE])
+    }
+
+    /// The state [`Self::new`] returns, with its local store in `ls`'s
+    /// buffer, so a caller that holds a spare buffer allocates nothing.
+    pub fn with_local_store(mut ls: Vec<u8>) -> Self {
+        ls.clear();
+        ls.resize(SPU_LS_SIZE, 0);
+        Self::with_cleared_local_store(ls)
+    }
+
+    /// A copy of `self` whose local store lives in `ls`'s buffer.
+    pub fn clone_with_local_store(&self, mut ls: Vec<u8>) -> Self {
+        let Self {
+            regs,
+            ls: source,
+            pc,
+            lslr,
+            signals,
+            channels,
+            reservation,
+            stop,
+            fpscr,
+            interrupts_enabled,
+            srr0,
+            acc,
+        } = self;
+        ls.clone_from(source);
+        Self {
+            regs: RegBank(regs.0),
+            ls,
+            pc: *pc,
+            lslr: *lslr,
+            signals: *signals,
+            channels: channels.clone(),
+            reservation: *reservation,
+            stop: *stop,
+            fpscr: *fpscr,
+            interrupts_enabled: *interrupts_enabled,
+            srr0: *srr0,
+            acc: *acc,
+        }
+    }
+
+    /// [`Self::new`]'s state around `ls`, which holds `SPU_LS_SIZE` zero
+    /// bytes.
+    fn with_cleared_local_store(ls: Vec<u8>) -> Self {
         let mut state = Self {
             // [CBE-Handbook p:421 s:14.6.3.4] the loader clears the SPE's registers and local store before the program is copied in.
             regs: RegBank([[0u8; 16]; SPU_REG_COUNT]),
-            ls: vec![0u8; SPU_LS_SIZE],
+            ls,
             pc: 0,
             // The setter below writes the full limit, so the accumulator
             // takes its lane.
@@ -460,20 +507,7 @@ impl Default for SpuState {
 // Manual because `RegBank` is not `Clone` (see its doc).
 impl Clone for SpuState {
     fn clone(&self) -> Self {
-        Self {
-            regs: RegBank(self.regs.0),
-            ls: self.ls.clone(),
-            pc: self.pc,
-            lslr: self.lslr,
-            signals: self.signals,
-            channels: self.channels.clone(),
-            reservation: self.reservation,
-            stop: self.stop,
-            fpscr: self.fpscr,
-            interrupts_enabled: self.interrupts_enabled,
-            srr0: self.srr0,
-            acc: self.acc,
-        }
+        self.clone_with_local_store(Vec::new())
     }
 
     /// Copies `source` into `self` and keeps `self`'s local-store buffer,
@@ -519,3 +553,7 @@ mod accumulator_tests;
 #[cfg(test)]
 #[path = "tests/buffer_reuse_tests.rs"]
 mod buffer_reuse_tests;
+
+#[cfg(test)]
+#[path = "tests/supplied_buffer_tests.rs"]
+mod supplied_buffer_tests;

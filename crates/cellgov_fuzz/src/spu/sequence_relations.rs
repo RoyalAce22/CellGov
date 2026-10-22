@@ -17,9 +17,10 @@ use cellgov_spu::fuzz::{
 };
 use cellgov_spu::instruction::SpuInstructionKind;
 use cellgov_spu::observation::{SpuObservation, SpuObservationComponent};
-use cellgov_spu::state::{SpuState, SPU_REG_COUNT};
+use cellgov_spu::state::{SpuObservableSnapshot, SpuState, SPU_REG_COUNT};
 
 use super::counterexample::{reduce_instance, stored_counterexamples, RelationCounterexample};
+use super::local_stores::{LocalStores, Pooled};
 use super::record::record;
 use crate::error::{FuzzError, InvariantError};
 use crate::report::{
@@ -121,6 +122,16 @@ pub(crate) fn instantiate(
     relation: &SpuSequenceRelation,
     rng: &mut Rng,
 ) -> Result<RelationInstance, FuzzError> {
+    instantiate_in(relation, rng, SpuState::new())
+}
+
+/// [`instantiate`]'s draw, with the start state in `start`, which equals
+/// [`SpuState::new`].
+fn instantiate_in(
+    relation: &SpuSequenceRelation,
+    rng: &mut Rng,
+    mut start: SpuState,
+) -> Result<RelationInstance, FuzzError> {
     let count = relation.register_count();
     let mut assignment: Vec<u8> = Vec::with_capacity(count);
     while assignment.len() < count {
@@ -134,7 +145,6 @@ pub(crate) fn instantiate(
         let earlier = rng.below(later as u64)? as usize;
         assignment[later] = assignment[earlier];
     }
-    let mut start = SpuState::new();
     for register in 0..SPU_REG_COUNT {
         let mut value = [0u8; 16];
         rng.fill(&mut value);
@@ -207,6 +217,16 @@ pub(crate) fn compare_relation(
     instance: &RelationInstance,
     case_index: u64,
 ) -> Result<RelationVerdict, FuzzError> {
+    compare_relation_in(relation, instance, case_index, &LocalStores::default())
+}
+
+/// [`compare_relation`] with its local stores from `pool`.
+fn compare_relation_in(
+    relation: &SpuSequenceRelation,
+    instance: &RelationInstance,
+    case_index: u64,
+    pool: &LocalStores,
+) -> Result<RelationVerdict, FuzzError> {
     compare_under(
         relation,
         instance,
@@ -214,6 +234,7 @@ pub(crate) fn compare_relation(
         relation.dead,
         &[],
         &|_, _| {},
+        pool,
     )
 }
 
@@ -234,34 +255,36 @@ fn compare_under(
     dead: &[u8],
     tail: &[u32],
     hook: PartnerHook<'_>,
+    pool: &LocalStores,
 ) -> Result<RelationVerdict, FuzzError> {
     if let Some(precondition) = relation.precondition {
         if !precondition(&instance.start, &instance.assignment) {
             return Ok(RelationVerdict::Inapplicable);
         }
     }
-    compare_sides(relation, instance, case_index, dead, tail, hook)
+    compare_sides(relation, instance, case_index, dead, tail, hook, pool)
 }
 
 /// Runs both sides of `relation` from `instance`, with `tail` after each.
-fn run_sides(
+fn run_sides<'p>(
     relation: &SpuSequenceRelation,
     instance: &RelationInstance,
     tail: &[u32],
-) -> Result<(SpuObservation, SpuObservation), FuzzError> {
+    pool: &'p LocalStores,
+) -> Result<(Pooled<'p, SpuObservation>, Pooled<'p, SpuObservation>), FuzzError> {
     let mut words = encode(relation.id, relation.sequence, &instance.assignment)?;
     words.extend_from_slice(tail);
-    let original = run_side(relation.id, &words, &instance.start, false)?;
+    let original = run_side(relation.id, &words, &instance.start, false, pool)?;
     let partner = match relation.partner {
         SpuSequencePartner::Guest(partner) => {
             let mut partner = encode(relation.id, partner, &instance.assignment)?;
             partner.extend_from_slice(tail);
-            run_side(relation.id, &partner, &instance.start, false)?
+            run_side(relation.id, &partner, &instance.start, false, pool)?
         }
         SpuSequencePartner::Fused(fused) => {
-            let mut state = instance.start.clone();
+            let mut state = pool.hold(pool.copy(&instance.start));
             let flow = (fused.apply)(&mut state, &instance.assignment);
-            run_side(relation.id, tail, &state, flow == SpuFusedFlow::Taken)?
+            run_side(relation.id, tail, &state, flow == SpuFusedFlow::Taken, pool)?
         }
     };
     Ok((original, partner))
@@ -299,8 +322,9 @@ fn compare_sides(
     dead: &[u8],
     tail: &[u32],
     hook: PartnerHook<'_>,
+    pool: &LocalStores,
 ) -> Result<RelationVerdict, FuzzError> {
-    let (original, mut partner) = run_sides(relation, instance, tail)?;
+    let (original, mut partner) = run_sides(relation, instance, tail, pool)?;
     hook(&mut partner, instance);
     seeded::spu_sequence_partner(
         &mut partner,
@@ -309,7 +333,12 @@ fn compare_sides(
         &instance.start,
     );
     Ok(judge(
-        relation, instance, case_index, dead, &original, partner,
+        relation,
+        instance,
+        case_index,
+        dead,
+        &original,
+        &mut partner,
     ))
 }
 
@@ -331,16 +360,17 @@ pub(crate) fn compare_result_state(
             return Ok(RelationVerdict::Inapplicable);
         }
     }
+    let pool = LocalStores::default();
     let words = encode(relation.id, relation.sequence, &instance.assignment)?;
-    let original = run_side(relation.id, &words, &instance.start, false)?;
-    let partner = run_side(relation.id, &[], result, taken)?;
+    let original = run_side(relation.id, &words, &instance.start, false, &pool)?;
+    let mut partner = run_side(relation.id, &[], result, taken, &pool)?;
     Ok(judge(
         relation,
         instance,
         0,
         relation.dead,
         &original,
-        partner,
+        &mut partner,
     ))
 }
 
@@ -353,7 +383,7 @@ fn judge(
     case_index: u64,
     dead: &[u8],
     original: &SpuObservation,
-    mut partner: SpuObservation,
+    partner: &mut SpuObservation,
 ) -> RelationVerdict {
     // [Mullen2016 p:449 s:1] A dead register may hold another value; the
     // Registers comparison leaves it out, and LS, channels, PC and effects
@@ -384,7 +414,7 @@ fn judge(
     }
     // [Martignoni2009 p:127 s:2.2] The comparison covers the complete state
     // after execution.
-    let differences = original.compare(&partner).differences;
+    let differences = original.compare(partner).differences;
     let Some(&first_component) = differences.iter().next() else {
         return RelationVerdict::Match;
     };
@@ -394,8 +424,8 @@ fn judge(
         first_component,
         start_registers: Box::new(*instance.start.regs.as_array()),
         assignment: instance.assignment.clone(),
-        bit_distance: bit_distance(original, &partner),
-        differing_words: differing_words(original, &partner),
+        bit_distance: bit_distance(original, partner),
+        differing_words: differing_words(original, partner),
     }))
 }
 
@@ -415,6 +445,7 @@ pub fn measured_ulp(
     draws: u64,
 ) -> Result<Option<u32>, FuzzError> {
     let mut largest = None;
+    let pool = LocalStores::default();
     for index in 0..draws {
         let mut rng = Rng::for_case(CAMPAIGN_VERSION, seed, index);
         let instance = instantiate(relation, &mut rng)?;
@@ -424,7 +455,7 @@ pub fn measured_ulp(
         {
             continue;
         }
-        let (original, partner) = run_sides(relation, &instance, &[])?;
+        let (original, partner) = run_sides(relation, &instance, &[], &pool)?;
         for register in approximate_registers(relation, &instance) {
             let (left, right) = (
                 lanes(&original.state.regs[register]),
@@ -474,6 +505,7 @@ pub enum PreconditionFinding {
 /// [`FuzzError`] when a draw fails or a row does not encode.
 pub fn check_preconditions(seed: u64, draws: u64) -> Result<Vec<PreconditionFinding>, FuzzError> {
     let mut findings = Vec::new();
+    let pool = LocalStores::default();
     for relation in sequence_relations() {
         let Some(precondition) = relation.precondition else {
             continue;
@@ -487,8 +519,15 @@ pub fn check_preconditions(seed: u64, draws: u64) -> Result<Vec<PreconditionFind
                 continue;
             }
             outside += 1;
-            let verdict =
-                compare_sides(relation, &instance, index, relation.dead, &[], &|_, _| {})?;
+            let verdict = compare_sides(
+                relation,
+                &instance,
+                index,
+                relation.dead,
+                &[],
+                &|_, _| {},
+                &pool,
+            )?;
             diverged += u64::from(matches!(verdict, RelationVerdict::Diverged(_)));
         }
         let relation = relation.id;
@@ -513,6 +552,7 @@ pub(crate) fn unneeded_dead_registers(
     draws: u64,
 ) -> Result<Vec<u8>, FuzzError> {
     let mut unneeded = Vec::new();
+    let pool = LocalStores::default();
     for &register in relation.dead {
         let reduced: Vec<u8> = relation
             .dead
@@ -524,7 +564,8 @@ pub(crate) fn unneeded_dead_registers(
         for index in 0..draws {
             let mut rng = Rng::for_case(CAMPAIGN_VERSION, seed, index);
             let instance = instantiate(relation, &mut rng)?;
-            let verdict = compare_under(relation, &instance, index, &reduced, &[], &|_, _| {})?;
+            let verdict =
+                compare_under(relation, &instance, index, &reduced, &[], &|_, _| {}, &pool)?;
             if matches!(verdict, RelationVerdict::Diverged(_)) {
                 needed = true;
                 break;
@@ -571,7 +612,15 @@ pub(crate) fn reader_tail_reads(
         tail.extend(encode(relation.id, &[read], &assignment)?);
         reads.push((dead, scratch));
     }
-    let verdict = compare_under(relation, instance, 0, relation.dead, &tail, &|_, _| {})?;
+    let verdict = compare_under(
+        relation,
+        instance,
+        0,
+        relation.dead,
+        &tail,
+        &|_, _| {},
+        &LocalStores::default(),
+    )?;
     let RelationVerdict::Diverged(divergence) = verdict else {
         return Ok(Vec::new());
     };
@@ -661,6 +710,7 @@ pub(super) fn run_relation_check(
     report: &mut FuzzReport,
     rng: &mut Rng,
     case_index: u64,
+    pool: &LocalStores,
 ) -> Result<CrossReferenceAsymmetry, FuzzError> {
     let relations = sequence_relations();
     if relations.is_empty() {
@@ -673,14 +723,29 @@ pub(super) fn run_relation_check(
     // again, a bounded number of times.
     let mut attempt = 0;
     let (instance, verdict) = loop {
-        let instance = instantiate(relation, rng)?;
-        let verdict = compare_relation(relation, &instance, case_index)?;
+        let instance = instantiate_in(relation, rng, pool.fresh())?;
+        let verdict = compare_relation_in(relation, &instance, case_index, pool)?;
         attempt += 1;
         if verdict != RelationVerdict::Inapplicable || attempt == PRECONDITION_DRAWS {
             break (instance, verdict);
         }
+        pool.give(instance.start.ls);
         report.metamorphic_skipped(check)?;
     };
+    let result = judge_relation_check(report, relation, check, case_index, &instance, verdict);
+    pool.give(instance.start.ls);
+    result
+}
+
+/// Records what `run_relation_check`'s last draw showed.
+fn judge_relation_check(
+    report: &mut FuzzReport,
+    relation: &SpuSequenceRelation,
+    check: CheckIdentity,
+    case_index: u64,
+    instance: &RelationInstance,
+    verdict: RelationVerdict,
+) -> Result<CrossReferenceAsymmetry, FuzzError> {
     match verdict {
         RelationVerdict::Inapplicable => {
             report.metamorphic_skipped(check)?;
@@ -711,7 +776,7 @@ pub(super) fn run_relation_check(
             // Only a retained finding keeps a fixture, so only it pays for
             // the reduction.
             if report.retains_relation_counterexample() {
-                let reduced = reduce_instance(relation, &instance, divergence.first_component)?;
+                let reduced = reduce_instance(relation, instance, divergence.first_component)?;
                 report.relation_counterexample(RelationCounterexample::from_instance(
                     format!(
                         "{:?}-{:?}-{}-{case_index}",
@@ -795,13 +860,14 @@ pub(crate) fn encode(
 /// takes PC relative to the fall-through terminator, so two programs of
 /// different lengths that stop at it compare equal there; a stop at the
 /// taken landing keeps its absolute PC.
-fn run_side(
+fn run_side<'p>(
     relation: SpuSequenceRelationId,
     words: &[u32],
     start: &SpuState,
     taken: bool,
-) -> Result<SpuObservation, FuzzError> {
-    let mut state = start.clone();
+    pool: &'p LocalStores,
+) -> Result<Pooled<'p, SpuObservation>, FuzzError> {
+    let mut state = pool.hold(pool.copy(start));
     let program: Vec<u32> = words.iter().copied().chain([TERMINATOR]).collect();
     let base = SEQUENCE_PROGRAM_BASE as usize;
     let landing = SEQUENCE_TAKEN_LANDING as usize;
@@ -841,7 +907,7 @@ fn run_side(
             SpuStepOutcome::Yield { .. } | SpuStepOutcome::MemoryRead { .. } => break,
             SpuStepOutcome::Fault(_) => {
                 // The runtime fault-discard rule hides state from a faulting batch.
-                state = start.clone();
+                state.clone_from(start);
                 break;
             }
         }
@@ -853,7 +919,10 @@ fn run_side(
             .pc
             .wrapping_sub(SEQUENCE_PROGRAM_BASE + (words.len() * 4) as u32);
     }
-    Ok(SpuObservation::capture(&state, &outcome))
+    Ok(pool.hold(SpuObservation::from_parts(
+        SpuObservableSnapshot::capture_taking(&mut state),
+        outcome,
+    )))
 }
 
 /// Each word that differs, as `(register, word)`: the lanes a finding

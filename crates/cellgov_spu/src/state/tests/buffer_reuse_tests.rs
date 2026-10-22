@@ -2,7 +2,7 @@ use super::*;
 use crate::state::SpuObservableSnapshot;
 
 /// A state whose every component differs from [`SpuState::new`].
-fn varied() -> SpuState {
+pub(super) fn varied() -> SpuState {
     let mut state = SpuState::new();
     for k in 0..SPU_REG_COUNT {
         state.set_reg(k, [k as u8; 16]);

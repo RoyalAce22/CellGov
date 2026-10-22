@@ -19,6 +19,7 @@ use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation, SpuObservati
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState};
 use cellgov_time::GuestTicks;
 
+use super::local_stores::{LocalStores, Pooled};
 use crate::case::CaseAssessment;
 use crate::error::InvariantError;
 use crate::report::{InstructionIdentity, OutcomeIdentity, SpuFacilityCoverage};
@@ -95,12 +96,31 @@ impl<'a> SpuTerminalObservation<'a> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn run_once(
     instruction: &cellgov_spu::instruction::SpuInstruction,
     initial: &SpuState,
 ) -> ObservedStep {
+    observe_step(instruction, initial.clone())
+}
+
+/// Executes `instruction` once from a copy of `initial` in a local store
+/// from `pool`.
+pub(super) fn run_once_in<'p>(
+    instruction: &cellgov_spu::instruction::SpuInstruction,
+    initial: &SpuState,
+    pool: &'p LocalStores,
+) -> Pooled<'p, ObservedStep> {
+    pool.hold(observe_step(instruction, pool.copy(initial)))
+}
+
+/// Executes `instruction` once from `state`, a copy of the case's initial
+/// state.
+fn observe_step(
+    instruction: &cellgov_spu::instruction::SpuInstruction,
+    mut state: SpuState,
+) -> ObservedStep {
     seeded::executor_boundary();
-    let mut state = initial.clone();
     let outcome = execute(instruction, &mut state, UNIT);
     seeded::spu_observed(
         instruction,
@@ -270,10 +290,12 @@ fn run_sequence(
         budget,
         None,
         &Cell::new(None),
+        &LocalStores::default(),
     )
     .expect("an empty world builds")
 }
 
+#[cfg(test)]
 pub(super) fn run_generated_sequence(
     initial: &SpuState,
     world: &SequenceWorld,
@@ -282,13 +304,43 @@ pub(super) fn run_generated_sequence(
     strategy: GenerationStrategy,
     executing: &Cell<Option<InstructionIdentity>>,
 ) -> Result<(ObservedSequence, u64, Vec<InstructionIdentity>), InvariantError> {
+    run_sequence_with_limit(
+        initial,
+        world,
+        budget,
+        program_bound(strategy, program_words),
+        executing,
+        &LocalStores::default(),
+    )
+}
+
+/// Runs a generated sequence from `initial` against `world`, with its local
+/// stores from `pool`; a structured run stops at its program's end.
+pub(super) fn run_generated_sequence_in<'p>(
+    initial: &SpuState,
+    world: &SequenceWorld,
+    budget: usize,
+    program_words: usize,
+    strategy: GenerationStrategy,
+    executing: &Cell<Option<InstructionIdentity>>,
+    pool: &'p LocalStores,
+) -> Result<Pooled<'p, (ObservedSequence, u64, Vec<InstructionIdentity>)>, InvariantError> {
+    run_sequence_with_limit(
+        initial,
+        world,
+        budget,
+        program_bound(strategy, program_words),
+        executing,
+        pool,
+    )
+    .map(|run| pool.hold(run))
+}
+
+/// The word count a structured run stops at; a raw-word run has none.
+fn program_bound(strategy: GenerationStrategy, program_words: usize) -> Option<usize> {
     match strategy {
-        GenerationStrategy::Structured => {
-            run_sequence_with_limit(initial, world, budget, Some(program_words), executing)
-        }
-        GenerationStrategy::RawWords => {
-            run_sequence_with_limit(initial, world, budget, None, executing)
-        }
+        GenerationStrategy::Structured => Some(program_words),
+        GenerationStrategy::RawWords => None,
     }
 }
 
@@ -356,10 +408,11 @@ fn run_sequence_with_limit(
     budget: usize,
     program_words: Option<usize>,
     executing: &Cell<Option<InstructionIdentity>>,
+    pool: &LocalStores,
 ) -> Result<(ObservedSequence, u64, Vec<InstructionIdentity>), InvariantError> {
     seeded::executor_boundary();
-    let mut world = World::new(initial, &script.memory, None).map_err(world_failure)?;
-    let initial_memory = world.memory_image().map_err(world_failure)?;
+    let mut world = World::with_local_store(initial, pool.take(), &script.memory, None)
+        .map_err(world_failure)?;
     let mut actions = script.actions.iter().peekable();
     let mut decoded = 0u64;
     let mut kinds = Vec::new();
@@ -378,8 +431,9 @@ fn run_sequence_with_limit(
     let mut parked = false;
     let mut parks = 0u32;
     let mut retired = 0usize;
-    // Each step's pre-state, copied into one buffer the run reuses.
-    let mut before = initial.clone();
+    // Each step's pre-state, copied into one buffer the run reuses from
+    // its first step on.
+    let mut pre_state: Option<SpuState> = None;
     while retired < budget {
         while let Some((_, action)) = actions.next_if(|(after, _)| *after <= decoded) {
             world.apply(*action);
@@ -416,15 +470,19 @@ fn run_sequence_with_limit(
             kinds.push(identity);
         }
         executing.set(Some(identity));
-        before.clone_from(state);
+        let first_step = pre_state.is_none();
+        let before = pre_state.get_or_insert_with(|| pool.copy(state));
+        if !first_step {
+            before.clone_from(state);
+        }
         let state = world.unit.state_mut();
         let outcome = cellgov_spu::step::execute_instruction(&instruction, state, OWN);
         seeded::spu_observed(&instruction, SpuOutcomeClass::from_outcome(&outcome), state);
         footprint_violations.extend(
             SpuAllowedFootprint::for_instruction(&instruction)
-                .violations_after(&before, state, &outcome),
+                .violations_after(before, state, &outcome),
         );
-        record_coverage(&mut coverage, &instruction, &before, &outcome);
+        record_coverage(&mut coverage, &instruction, before, &outcome);
         pending_seen |= state.channels.pending_events;
         terminal_outcome = Some(outcome.clone());
         parked = false;
@@ -493,15 +551,21 @@ fn run_sequence_with_limit(
             ))
             .map_err(world_failure)?;
     }
+    if let Some(before) = pre_state {
+        pool.give(before.ls);
+    }
+    let ppu_results = std::mem::take(&mut world.ppu_results);
+    let mfc_exceptions = std::mem::take(&mut world.exceptions);
     let (mut state, memory) = if faulted {
         // The runtime fault-discard rule hides state from a faulting batch.
+        // Main storage is then the script's runs, which the world started
+        // from.
         effects.clear();
-        (initial.clone(), initial_memory)
+        pool.give(world.into_state().ls);
+        (pool.copy(initial), script.memory.clone())
     } else {
-        (
-            world.unit.state().clone(),
-            world.memory_image().map_err(world_failure)?,
-        )
+        let memory = world.memory_image().map_err(world_failure)?;
+        (world.into_state(), memory)
     };
     coverage.event_sources = (0..32)
         .map(|bit| 1u32 << bit)
@@ -520,8 +584,8 @@ fn run_sequence_with_limit(
             footprint_violations,
             memory,
             effects,
-            ppu_results: world.ppu_results,
-            mfc_exceptions: world.exceptions,
+            ppu_results,
+            mfc_exceptions,
             stalled,
             parks,
             coverage,

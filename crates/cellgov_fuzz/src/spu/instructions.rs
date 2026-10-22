@@ -13,12 +13,14 @@ use cellgov_spu::state::SpuState;
 
 use super::assess::assess_instruction_case;
 use super::execute::{
-    outcome_effects, outcome_identity, requests_replay, run_once, spu_observation,
+    outcome_effects, outcome_identity, requests_replay, run_once_in, spu_observation,
     spu_outcome_class_asymmetry, spu_step_replay_asymmetry, ObservedStep, SpuTerminalObservation,
 };
 use super::generate::{
-    case_descriptors, random_state, state_aware_state, structured_generated_word, GeneratedWord,
+    case_descriptors, random_state_in, state_aware_state_in, structured_generated_word,
+    GeneratedWord,
 };
+use super::local_stores::LocalStores;
 use super::record::{footprint_fingerprint, guarded_run, record, record_target_panic};
 use super::sequence_relations::divergence_class;
 use crate::boundary::call_target;
@@ -92,6 +94,7 @@ fn run_instructions_inner(
         },
         (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
     };
+    let pool = LocalStores::default();
     for iteration in iterations {
         report.considered()?;
         let mut rng = Rng::for_case(config.campaign_version, config.seed, iteration);
@@ -141,10 +144,15 @@ fn run_instructions_inner(
         let identity = InstructionIdentity::Spu(descriptor.kind);
         report.reached(identity)?;
         let (initial, state_features) = match config.strategy {
-            GenerationStrategy::Structured => state_aware_state(&mut rng, descriptor.state_input)?,
-            GenerationStrategy::RawWords => (random_state(&mut rng)?, BTreeSet::new()),
+            GenerationStrategy::Structured => {
+                state_aware_state_in(&mut rng, descriptor.state_input, pool.fresh())?
+            }
+            GenerationStrategy::RawWords => {
+                (random_state_in(&mut rng, pool.fresh())?, BTreeSet::new())
+            }
         };
-        let first = match call_target(|| run_once(&instruction, &initial)) {
+        let initial = pool.hold(initial);
+        let first = match call_target(|| run_once_in(&instruction, &initial, &pool)) {
             Ok(first) => first,
             Err(payload) => {
                 record_target_panic(
@@ -188,7 +196,7 @@ fn run_instructions_inner(
         }
         let mut asymmetry = CrossReferenceAsymmetry::None;
         if requests_replay(descriptor.relations) {
-            let second = match call_target(|| run_once(&instruction, &initial)) {
+            let second = match call_target(|| run_once_in(&instruction, &initial, &pool)) {
                 Ok(mut second) => {
                     seeded::spu_replayed(&mut second.state);
                     second
@@ -312,6 +320,7 @@ fn run_instructions_inner(
             raw,
             identity,
             iteration,
+            &pool,
         )?);
         report.observe_case(
             iteration,
@@ -367,6 +376,7 @@ fn run_metamorphic_checks(
     raw: u32,
     identity: InstructionIdentity,
     iteration: u64,
+    pool: &LocalStores,
 ) -> Result<CrossReferenceAsymmetry, FuzzError> {
     let mut strongest = CrossReferenceAsymmetry::None;
     for &relation in descriptor
@@ -412,7 +422,11 @@ fn run_metamorphic_checks(
         };
         let partner = match call_target(|| {
             let decoded = seeded::spu_decode(case.partner_word);
-            decoded.map(|instruction| run_once(&instruction, &case.partner_initial(initial)))
+            decoded.map(|instruction| {
+                let mut partner_initial = pool.hold(pool.copy(initial));
+                case.vary_inputs(initial, &mut partner_initial);
+                run_once_in(&instruction, &partner_initial, pool)
+            })
         }) {
             Ok(Ok(mut partner)) => {
                 case.settle_partner(&first.state.regs, &mut partner.state.regs);

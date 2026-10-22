@@ -54,7 +54,9 @@ evaluate() {
 
 # The engine's reach claims whose campaigns scale with the descriptor
 # registry: too long for the continuous build, so they are ignored there
-# and run here.
+# and run here. The SPU DMA-put claim runs 768 cases per SPU descriptor;
+# at 194 descriptors (149,000 cases) its release run took 20 s on Linux
+# and 25 s on Windows on one workstation (2026-10-21).
 reach() {
     cargo test --release -p cellgov_fuzz --locked --test it -- --ignored engine_tests::
 }
@@ -71,6 +73,11 @@ smoke() {
 # job requires the one sweep test to have run. The log is a file in the
 # job's output, not /dev/stderr, which Git Bash on the Windows runner does
 # not have; the artifact then keeps the sweep's output.
+#
+# The sweep runs 1024 cases per SPU descriptor on each instruction engine
+# and 256 on each sequence engine. At 194 descriptors (496,640 cases) its
+# release run took 107 s on Linux and 124 s on Windows on one workstation
+# (2026-10-21), against the step's 170 minutes.
 spu() {
     fresh "$out/spu"
     cargo test --release -p cellgov_fuzz --locked --test it -- --ignored spu_sweep:: 2>&1 \

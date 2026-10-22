@@ -278,9 +278,15 @@ fn generated_spu_parameters(
     })
 }
 
-/// [Martignoni2009 p:128 s:3.1] A test case is code plus data, and the data are the register values and the remaining memory bytes, so both are drawn at random here.
+#[cfg(test)]
 pub(super) fn random_state(rng: &mut Rng) -> Result<SpuState, FuzzError> {
-    let mut state = SpuState::new();
+    random_state_in(rng, SpuState::new())
+}
+
+/// Draws a random state into `state`, which equals [`SpuState::new`].
+///
+/// [Martignoni2009 p:128 s:3.1] A test case is code plus data, and the data are the register values and the remaining memory bytes, so both are drawn at random here.
+pub(super) fn random_state_in(rng: &mut Rng, mut state: SpuState) -> Result<SpuState, FuzzError> {
     for k in 0..SPU_REG_COUNT {
         let mut register = [0u8; 16];
         rng.fill(&mut register);
@@ -311,11 +317,23 @@ pub(super) fn random_state(rng: &mut Rng) -> Result<SpuState, FuzzError> {
     Ok(state)
 }
 
+#[cfg(test)]
 pub(super) fn state_aware_state(
     rng: &mut Rng,
     input: Option<SpuStateInput>,
 ) -> Result<(SpuState, BTreeSet<CaseFeature>), FuzzError> {
-    let mut state = random_state(rng)?;
+    state_aware_state_in(rng, input, SpuState::new())
+}
+
+/// Draws a random state into `state`, which equals [`SpuState::new`], with
+/// the channels, mailbox and reservation staged at the structured data
+/// area and `input` applied.
+pub(super) fn state_aware_state_in(
+    rng: &mut Rng,
+    input: Option<SpuStateInput>,
+    state: SpuState,
+) -> Result<(SpuState, BTreeSet<CaseFeature>), FuzzError> {
+    let mut state = random_state_in(rng, state)?;
     // Register addresses must stay after the generated program and inside local store.
     // Indexed forms add two register values.
     for register in 0u8..128 {

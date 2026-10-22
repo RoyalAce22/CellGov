@@ -356,11 +356,17 @@ impl SpuMetamorphicCase {
     /// input rewritten.
     pub fn partner_initial(&self, initial: &SpuState) -> SpuState {
         let mut partner = initial.clone();
+        self.vary_inputs(initial, &mut partner);
+        partner
+    }
+
+    /// Rewrites each varied input of `partner`, a copy of `initial`, as
+    /// [`Self::partner_initial`] does.
+    pub fn vary_inputs(&self, initial: &SpuState, partner: &mut SpuState) {
         for input in self.varied_inputs.iter().flatten() {
             let register = usize::from(input.register);
             partner.set_reg(register, input.rewrite.apply(initial.regs[register]));
         }
-        partner
     }
 
     /// Brings `partner_regs` back to the original's frame: swaps the
