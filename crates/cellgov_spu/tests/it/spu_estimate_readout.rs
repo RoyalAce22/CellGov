@@ -10,6 +10,7 @@
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::hw::spu_isa::{row_named, SPU_OPCODE_MAP};
 use cellgov_spu::exec::{execute, SpuStepOutcome};
+use cellgov_spu::instruction::SpuInstruction;
 use cellgov_spu::state::SpuState;
 
 const READOUT: &str = "../../tests/micro/spu_estimate_readout/ps3/cech20-cex-493/observation.json";
@@ -45,14 +46,6 @@ fn rr(mnemonic: &str, rt: u32, ra: u32) -> u32 {
     SPU_OPCODE_MAP[row].canonical_word() | ra << 7 | rt
 }
 
-fn step(state: &mut SpuState, raw: u32) {
-    let insn = cellgov_spu::decode::decode(raw).expect("decodes");
-    assert_eq!(
-        execute(&insn, state, UnitId::new(0)),
-        SpuStepOutcome::Continue
-    );
-}
-
 fn quad(slots: [u32; 4]) -> [u8; 16] {
     let mut bytes = [0; 16];
     for (chunk, slot) in bytes.chunks_mut(4).zip(slots) {
@@ -69,11 +62,30 @@ fn slots(bytes: [u8; 16]) -> [u32; 4] {
 /// FPSCR read back. Callers reuse one `state`, since each carries a
 /// local store.
 fn estimate(state: &mut SpuState, mnemonic: &str, x: [u32; 4]) -> ([u32; 4], [u32; 4]) {
+    run_estimate(state, &estimate_program(mnemonic), x)
+}
+
+/// The decoded instructions of one estimate: the FPSCR write, `mnemonic`,
+/// and the FPSCR read.
+fn estimate_program(mnemonic: &str) -> [SpuInstruction; 3] {
+    [rr("fscrwr", 0, 4), rr(mnemonic, 2, 1), rr("fscrrd", 3, 0)]
+        .map(|raw| cellgov_spu::decode::decode(raw).expect("decodes"))
+}
+
+/// [`estimate`] with its instructions decoded already.
+fn run_estimate(
+    state: &mut SpuState,
+    program: &[SpuInstruction; 3],
+    x: [u32; 4],
+) -> ([u32; 4], [u32; 4]) {
     state.set_reg(1, quad(x));
     state.set_reg(4, [0; 16]);
-    step(state, rr("fscrwr", 0, 4));
-    step(state, rr(mnemonic, 2, 1));
-    step(state, rr("fscrrd", 3, 0));
+    for insn in program {
+        assert_eq!(
+            execute(insn, state, UnitId::new(0)),
+            SpuStepOutcome::Continue
+        );
+    }
     (slots(state.regs[2]), slots(state.regs[3]))
 }
 
@@ -81,11 +93,12 @@ fn estimate(state: &mut SpuState, mnemonic: &str, x: [u32; 4]) -> ([u32; 4], [u3
 /// scanning all 2^23 fractions at `exponent`.
 fn transitions(mnemonic: &str, exponent: u32) -> Vec<(u32, u32)> {
     let mut state = SpuState::new();
+    let program = estimate_program(mnemonic);
     let mut out = Vec::new();
     let mut last = None;
     for f in (0..1u32 << 23).step_by(4) {
         let x = std::array::from_fn(|i| exponent << 23 | (f + i as u32));
-        let (r, _) = estimate(&mut state, mnemonic, x);
+        let (r, _) = run_estimate(&mut state, &program, x);
         for (i, r) in r.into_iter().enumerate() {
             if last != Some(r) {
                 out.push((f + i as u32, r));

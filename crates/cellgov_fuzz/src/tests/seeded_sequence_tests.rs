@@ -10,48 +10,59 @@ const SEQUENCE_DEFECTS: [SeededDefect; 2] = [
 ];
 
 #[test]
-fn each_sequence_partner_defect_is_caught_by_a_sequence_relation_and_nothing_else() {
-    for defect in SEQUENCE_DEFECTS {
-        let _guard = seed(defect);
-        for campaign in SMOKE_CAMPAIGNS
-            .iter()
-            .filter(|campaign| campaign.target == FuzzTarget::SpuSequence)
-        {
-            let run = campaign.run();
-            let report = &run.report;
+fn the_partner_write_defect_is_caught_by_a_sequence_relation_and_nothing_else() {
+    caught_by_a_sequence_relation_and_nothing_else(SeededDefect::SequencePartnerWrite);
+}
+
+#[test]
+fn the_partner_lane_defect_is_caught_by_a_sequence_relation_and_nothing_else() {
+    caught_by_a_sequence_relation_and_nothing_else(SeededDefect::SequencePartnerLane);
+}
+
+/// Runs every SPU sequence smoke campaign with `defect` seeded.
+fn caught_by_a_sequence_relation_and_nothing_else(defect: SeededDefect) {
+    let _guard = seed(defect);
+    let mut campaigns = 0;
+    for campaign in SMOKE_CAMPAIGNS
+        .iter()
+        .filter(|campaign| campaign.target == FuzzTarget::SpuSequence)
+    {
+        campaigns += 1;
+        let run = campaign.run();
+        let report = &run.report;
+        assert!(
+            report
+                .finding_counts
+                .get(&FindingKind::MetamorphicViolation)
+                .is_some_and(|&count| count > 0),
+            "{defect:?} {}: no relation caught it",
+            campaign.name
+        );
+        assert_eq!(
+            report.finding_counts.keys().collect::<Vec<_>>(),
+            [&FindingKind::MetamorphicViolation],
+            "{defect:?} {}: another check fired",
+            campaign.name
+        );
+        for finding in &report.findings {
             assert!(
-                report
-                    .finding_counts
-                    .get(&FindingKind::MetamorphicViolation)
-                    .is_some_and(|&count| count > 0),
-                "{defect:?} {}: no relation caught it",
-                campaign.name
-            );
-            assert_eq!(
-                report.finding_counts.keys().collect::<Vec<_>>(),
-                [&FindingKind::MetamorphicViolation],
-                "{defect:?} {}: another check fired",
-                campaign.name
-            );
-            for finding in &report.findings {
-                assert!(
-                    matches!(
-                        finding.fingerprint.check,
-                        CheckIdentity::SpuSequenceRelation(_)
-                    ),
-                    "{defect:?} {}: {:?}",
-                    campaign.name,
-                    finding.fingerprint.check
-                );
-            }
-            assert_eq!(
-                report.relation_counterexamples.len(),
-                report.findings.len(),
-                "{defect:?} {}: every retained relation finding keeps a fixture",
-                campaign.name
+                matches!(
+                    finding.fingerprint.check,
+                    CheckIdentity::SpuSequenceRelation(_)
+                ),
+                "{defect:?} {}: {:?}",
+                campaign.name,
+                finding.fingerprint.check
             );
         }
+        assert_eq!(
+            report.relation_counterexamples.len(),
+            report.findings.len(),
+            "{defect:?} {}: every retained relation finding keeps a fixture",
+            campaign.name
+        );
     }
+    assert_eq!(campaigns, 2, "one sequence smoke campaign per strategy");
 }
 
 #[test]

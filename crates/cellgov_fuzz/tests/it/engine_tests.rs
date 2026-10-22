@@ -23,13 +23,16 @@ fn small_config() -> FuzzConfig {
     }
 }
 
+/// At 2,048 cases the rarest typed relation, `shufb`'s control class, which
+/// one descriptor declares, runs 7 times (2026-10-21, 194 descriptors).
+/// The smoke tier and the scheduled campaigns hold the larger runs.
 #[test]
 fn structured_spu_campaign_executes_every_typed_relation() {
     let config = FuzzConfig {
         schedule: CampaignSchedule {
             cases: CaseRange {
                 first: 0,
-                count: 8_192,
+                count: 2_048,
             },
             ..CampaignSchedule::default()
         },
@@ -67,6 +70,10 @@ fn structured_spu_campaign_executes_every_typed_relation() {
     }
 }
 
+/// The claim is that 4,096 sequence cases raise no finding, so the
+/// campaign keeps its size. Its time, about 1.4 s on a workstation in a
+/// debug build, is mostly each case's draw of a random 256 KiB local
+/// store, which the campaign seeds and the stored regressions pin.
 #[test]
 fn structured_spu_sequences_keep_complete_footprints_and_fault_discard() {
     let config = FuzzConfig {

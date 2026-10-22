@@ -114,52 +114,65 @@ fn no_two_multiplier_keys_cancel_modulo_2_pow_65() {
     }
 }
 
-/// Every state that sets one bit of one hashed field, plus the two
-/// reservation states that differ only in the tag. Each state holds the
-/// full limit register of a new context.
-fn single_bit_states() -> Vec<SpuState> {
-    let mut out = Vec::new();
+/// The number of states [`for_each_single_bit_state`] visits.
+const SINGLE_BIT_STATES: usize = 128 * (SPU_REG_COUNT + 1) + 2 * 32 + 1 + (42 - 7) + 1 + 1;
+
+/// Visits every state that sets one bit of one hashed field, plus the two
+/// reservation states that differ only in the tag. Each state is a new
+/// context's with that one change, the full limit register included.
+///
+/// One state carries every change and puts the field back after the
+/// visit, so the visits share one local store.
+fn for_each_single_bit_state(mut visit: impl FnMut(&SpuState)) -> usize {
+    let mut s = SpuState::new();
+    let mut visited = 0;
+    let mut see = |s: &SpuState| {
+        visit(s);
+        visited += 1;
+    };
     for bit in 0..128 {
         let v = (1u128 << bit).to_be_bytes();
         for k in 0..SPU_REG_COUNT {
-            let mut s = SpuState::new();
             s.set_reg(k, v);
-            out.push(s);
+            see(&s);
+            s.set_reg(k, [0; 16]);
         }
-        let mut s = SpuState::new();
         s.set_fpscr(1 << bit);
-        out.push(s);
+        see(&s);
+        s.set_fpscr(0);
     }
     for bit in 0..32 {
-        let mut s = SpuState::new();
         s.set_lslr(1 << bit);
-        out.push(s);
-        let mut s = SpuState::new();
+        see(&s);
+        s.set_lslr(crate::state::SPU_LSLR_FULL);
         s.set_srr0(1 << bit);
-        out.push(s);
+        see(&s);
+        s.set_srr0(0);
     }
-    let mut s = SpuState::new();
     s.set_interrupts_enabled(true);
-    out.push(s);
+    see(&s);
+    s.set_interrupts_enabled(false);
     // Line addresses are 128-byte aligned inside the 42-bit EA space.
     for bit in 7..42 {
-        let mut s = SpuState::new();
         s.set_reservation(Some(ReservedLine::containing(1 << bit)));
-        out.push(s);
+        see(&s);
     }
-    let mut s = SpuState::new();
     s.set_reservation(Some(ReservedLine::containing(0)));
-    out.push(s);
-    out.push(SpuState::new());
-    out
+    see(&s);
+    s.set_reservation(None);
+    assert_eq!(s, SpuState::new(), "a field was not put back");
+    see(&s);
+    visited
 }
 
 #[test]
 fn lane_encoding_is_injective_over_single_bit_states() {
-    let states = single_bit_states();
-    let vectors: BTreeSet<[u64; LANE_COUNT]> =
-        states.iter().map(|s| lanes(&s.fingerprint())).collect();
-    assert_eq!(vectors.len(), states.len());
+    let mut vectors = BTreeSet::new();
+    let states = for_each_single_bit_state(|s| {
+        vectors.insert(lanes(&s.fingerprint()));
+    });
+    assert_eq!(states, SINGLE_BIT_STATES);
+    assert_eq!(vectors.len(), states);
 }
 
 #[test]
@@ -368,9 +381,10 @@ fn counter_sequences_hash_pairwise_distinct() {
 
 #[test]
 fn state_hash_is_the_multilinear_hash_of_its_lanes() {
-    for s in &single_bit_states() {
+    let states = for_each_single_bit_state(|s| {
         assert_eq!(s.state_hash(), hash(&lanes(&s.fingerprint())));
-    }
+    });
+    assert_eq!(states, SINGLE_BIT_STATES);
 }
 
 // --- The scheme id ---

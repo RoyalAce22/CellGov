@@ -533,22 +533,72 @@ fn state_base(v: &[u64; LANE_COUNT]) -> [u64; LANE_COUNT] {
     out
 }
 
+/// Feeds lane `lane` of a state's lanes into `h` as [`fnv_of_lanes`] does:
+/// lanes 0-34 as eight bytes, CR (lane 35) as four.
+fn write_lane(h: &mut cellgov_mem::Fnv1aHasher, lane: usize, value: u64) {
+    if lane < 35 {
+        h.write(&value.to_le_bytes());
+    } else {
+        h.write(&(value as u32).to_le_bytes());
+    }
+}
+
+/// The hasher's state before each lane of `l` up to CR, and after it.
+fn lane_states(l: &[u64; LANE_COUNT]) -> [cellgov_mem::Fnv1aHasher; 37] {
+    let mut out = [cellgov_mem::Fnv1aHasher::new(); 37];
+    for lane in 0..36 {
+        let mut h = out[lane];
+        write_lane(&mut h, lane, l[lane]);
+        out[lane + 1] = h;
+    }
+    out
+}
+
+/// FNV-1a's byte step `h = (h ^ byte) * P`, `P` odd, is a bijection of
+/// `h`. Two inputs that agree from lane `L + 1` on therefore hash equal
+/// exactly when their states after lane `L` are equal. Each flip compares
+/// the state after its last flipped lane with the base's. A reservation-tag
+/// flip changes the bytes that follow, so its pairs hash whole, and so does
+/// a fixed spread of the rest, which holds the comparison to the hash.
 #[test]
 fn fnv1a_baseline_separates_every_one_and_two_bit_flip() {
     let flips = state_flips();
+    let (mut compared, mut whole) = (0usize, 0usize);
     for (b, base) in bases().iter().map(state_base).enumerate() {
         let h = fnv_of_lanes(&base);
+        let before = lane_states(&base);
         for (i, &fi) in flips.iter().enumerate() {
-            assert_ne!(fnv_of_lanes(&flipped(&base, &[fi])), h, "base {b}: {fi:?}");
-            for &fj in &flips[i + 1..] {
-                assert_ne!(
-                    fnv_of_lanes(&flipped(&base, &[fi, fj])),
-                    h,
-                    "base {b}: {fi:?} + {fj:?}"
-                );
+            let one = flipped(&base, &[fi]);
+            if fi.lane == 36 {
+                assert_ne!(fnv_of_lanes(&one), h, "base {b}: {fi:?}");
+            } else {
+                let mut s = before[fi.lane];
+                write_lane(&mut s, fi.lane, one[fi.lane]);
+                assert_ne!(s, before[fi.lane + 1], "base {b}: {fi:?}");
+            }
+            let one_before = lane_states(&one);
+            for (j, &fj) in flips.iter().enumerate().skip(i + 1) {
+                compared += 1;
+                let rehash = (i * 7919 + j) % 1031 == 0;
+                if fj.lane == 36 || rehash {
+                    whole += 1;
+                    assert_ne!(
+                        fnv_of_lanes(&flipped(&base, &[fi, fj])),
+                        h,
+                        "base {b}: {fi:?} + {fj:?}"
+                    );
+                }
+                if fj.lane < 36 {
+                    let mut s = one_before[fj.lane];
+                    write_lane(&mut s, fj.lane, one[fj.lane] ^ (1 << fj.bit));
+                    assert_ne!(s, before[fj.lane + 1], "base {b}: {fi:?} + {fj:?}");
+                }
             }
         }
     }
+    let (n, bases) = (flips.len(), bases().len());
+    assert_eq!(compared, bases * n * (n - 1) / 2);
+    assert!(whole > bases * (n - 1), "the fixed spread rehashed no pair");
 }
 
 #[test]

@@ -336,6 +336,22 @@ fn the_file_scope_mark_and_the_test_body_exemption_separate_their_cases() {
     );
 }
 
+/// `(violations, conforming declarations, external test bodies)` over
+/// `files`.
+fn check_files(files: &[PathBuf]) -> (Vec<(PathBuf, usize, String)>, usize, usize) {
+    let mut violations = Vec::new();
+    let mut conforming = 0usize;
+    let mut test_bodies = 0usize;
+    for file in files {
+        let source = fs::read_to_string(file)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
+        let test_body = is_external_test_body(file);
+        test_bodies += usize::from(test_body);
+        conforming += check_source(&source, file, test_body, &mut violations);
+    }
+    (violations, conforming, test_bodies)
+}
+
 #[test]
 fn unit_test_modules_are_external_files() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -364,16 +380,25 @@ fn unit_test_modules_are_external_files() {
         "no .rs files found under crates/apps/bridges */src"
     );
 
-    let mut violations = Vec::new();
-    let mut conforming = 0usize;
-    let mut test_bodies = 0usize;
-    for file in &files {
-        let source = fs::read_to_string(file)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
-        let test_body = is_external_test_body(file);
-        test_bodies += usize::from(test_body);
-        conforming += check_source(&source, file, test_body, &mut violations);
-    }
+    // Parsing is nearly all of the guard's time, so the files split
+    // across the host's threads.
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let (mut violations, conforming, test_bodies) = std::thread::scope(|scope| {
+        let workers: Vec<_> = files
+            .chunks(files.len().div_ceil(threads))
+            .map(|chunk| scope.spawn(|| check_files(chunk)))
+            .collect();
+        workers.into_iter().fold(
+            (Vec::new(), 0usize, 0usize),
+            |(mut violations, conforming, test_bodies), worker| {
+                let (v, c, t) = worker
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+                violations.extend(v);
+                (violations, conforming + c, test_bodies + t)
+            },
+        )
+    });
     assert!(
         test_bodies >= MIN_TEST_BODIES,
         "gate went vacuous: only {test_bodies} external test body file(s) recognised \

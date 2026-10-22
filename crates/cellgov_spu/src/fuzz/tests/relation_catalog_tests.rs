@@ -16,7 +16,7 @@ use super::relations::{
 use super::types::*;
 use crate::instruction::{SpuInstruction, SpuInstructionKind};
 use crate::observation::SpuObservation;
-use crate::state::SpuState;
+use crate::state::{SpuObservableSnapshot, SpuState};
 
 use SpuMetamorphicRelation as R;
 
@@ -114,36 +114,41 @@ fn words(descriptor: &SpuGenerationDescriptor, rng: &mut Lcg) -> Vec<u32> {
     out
 }
 
-fn state(rng: &mut Lcg, zero: Option<u8>) -> SpuState {
-    let mut state = SpuState::new();
+/// Draws every register of `state`, a new context's state otherwise,
+/// and zeroes `zero`.
+fn draw_registers(rng: &mut Lcg, zero: Option<u8>, state: &mut SpuState) {
     for register in 0..128 {
         state.set_reg(register, std::array::from_fn(|_| rng.next() as u8));
     }
     if let Some(register) = zero {
         state.set_reg(usize::from(register), [0; 16]);
     }
-    state
 }
 
-fn observe(instruction: &SpuInstruction, initial: &SpuState) -> SpuObservation {
-    let mut state = initial.clone();
-    let outcome = crate::exec::execute(instruction, &mut state, UnitId::new(0));
-    SpuObservation::capture(&state, &outcome)
+/// The observation of `instruction` from `initial`, run in `run`, whose
+/// local store the observation takes.
+fn observe(instruction: &SpuInstruction, initial: &SpuState, run: &mut SpuState) -> SpuObservation {
+    run.clone_from(initial);
+    let outcome = crate::exec::execute(instruction, run, UnitId::new(0));
+    SpuObservation::from_parts(SpuObservableSnapshot::capture_taking(run), outcome)
 }
 
-/// The partner's observation, brought back to the frame of `original`.
+/// The partner's observation, brought back to the frame of `original`, run
+/// in `run`, whose local store the observation takes.
 fn observe_partner(
     case: &SpuMetamorphicCase,
     partner: &SpuInstruction,
     initial: &SpuState,
     original: &SpuObservation,
+    run: &mut SpuState,
 ) -> SpuObservation {
-    let mut state = case.partner_initial(initial);
-    let outcome = crate::exec::execute(partner, &mut state, UnitId::new(0));
-    let mut regs = *state.regs.as_array();
+    run.clone_from(initial);
+    case.vary_inputs(initial, run);
+    let outcome = crate::exec::execute(partner, run, UnitId::new(0));
+    let mut regs = *run.regs.as_array();
     case.settle_partner(&original.state.regs, &mut regs);
-    state.set_reg_all(regs);
-    SpuObservation::capture(&state, &outcome)
+    run.set_reg_all(regs);
+    SpuObservation::from_parts(SpuObservableSnapshot::capture_taking(run), outcome)
 }
 
 #[test]
@@ -152,6 +157,10 @@ fn every_declared_relation_holds_on_varied_words_and_states() {
     let mut witnessed: BTreeMap<(SpuInstructionKind, SpuMetamorphicRelation), u32> =
         BTreeMap::new();
     let mut failures = Vec::new();
+    // One initial state and two runs serve every round, each round
+    // handing the runs' local stores back, so a round allocates none.
+    let mut initial = SpuState::new();
+    let (mut first_run, mut partner_run) = (SpuState::new(), SpuState::new());
     for descriptor in generation_descriptors() {
         let declared = relations_for_kind(descriptor.kind);
         for raw in words(&descriptor, &mut rng) {
@@ -166,10 +175,13 @@ fn every_declared_relation_holds_on_varied_words_and_states() {
                     // Every other state zeroes a register, so a branch on it is
                     // taken and a compare against it can hold.
                     let zero = (round % 2 == 1).then_some((raw & 0x7F) as u8);
-                    let initial = state(&mut rng, zero);
-                    let original = observe(&instruction, &initial);
-                    let settled = observe_partner(&case, &partner, &initial, &original);
+                    draw_registers(&mut rng, zero, &mut initial);
+                    let mut original = observe(&instruction, &initial, &mut first_run);
+                    let mut settled =
+                        observe_partner(&case, &partner, &initial, &original, &mut partner_run);
                     let differences = original.compare(&settled).differences;
+                    first_run.ls = std::mem::take(&mut original.state.ls);
+                    partner_run.ls = std::mem::take(&mut settled.state.ls);
                     if differences.is_empty() {
                         *witnessed.entry((descriptor.kind, relation)).or_default() += 1;
                     } else {

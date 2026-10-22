@@ -306,6 +306,32 @@ fn the_sleep_check_flags_a_literal_duration_and_accepts_a_named_one() {
     );
 }
 
+/// `(tests seen, report lines)` for `files`.
+///
+/// The check skips a file whose text holds no `#[test]`: `is_test_fn`
+/// matches only that attribute, and `cargo fmt --check` holds every
+/// tracked file to that spelling of it.
+fn check_files(root: &Path, files: &[PathBuf]) -> (usize, Vec<String>) {
+    let mut seen = 0usize;
+    let mut report = Vec::new();
+    for file in files {
+        let source = fs::read_to_string(file)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
+        if !source.contains("#[test]") {
+            continue;
+        }
+        let ast = syn::parse_file(&source)
+            .unwrap_or_else(|e| panic!("cannot parse {}: {e}", file.display()));
+        let mut out = Vec::new();
+        seen += check_items(&source, &ast.items, &mut out);
+        let shown = file.strip_prefix(root).unwrap_or(file);
+        for (name, faults) in out {
+            report.push(format!("  {}  {name}  {faults:?}\n", shown.display()));
+        }
+    }
+    (seen, report)
+}
+
 #[test]
 fn every_test_can_fail_for_the_reason_its_name_gives() {
     let root = workspace_root();
@@ -313,24 +339,25 @@ fn every_test_can_fail_for_the_reason_its_name_gives() {
     for group in ["crates", "apps", "bridges"] {
         rs_files_under(&root.join(group), &mut files);
     }
-    files.sort();
-    let mut seen = 0usize;
-    let mut report = Vec::new();
-    for file in &files {
-        if defines_a_rule(file) {
-            continue;
-        }
-        let source = fs::read_to_string(file)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
-        let ast = syn::parse_file(&source)
-            .unwrap_or_else(|e| panic!("cannot parse {}: {e}", file.display()));
-        let mut out = Vec::new();
-        seen += check_items(&source, &ast.items, &mut out);
-        let shown = file.strip_prefix(&root).unwrap_or(file);
-        for (name, faults) in out {
-            report.push(format!("  {}  {name}  {faults:?}\n", shown.display()));
-        }
-    }
+    files.retain(|file| !defines_a_rule(file));
+    // Parsing is nearly all of the guard's time, so the files split
+    // across the host's threads.
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let (seen, mut report) = std::thread::scope(|scope| {
+        let workers: Vec<_> = files
+            .chunks(files.len().div_ceil(threads).max(1))
+            .map(|chunk| scope.spawn(|| check_files(&root, chunk)))
+            .collect();
+        workers
+            .into_iter()
+            .fold((0, Vec::new()), |(seen, mut report), worker| {
+                let (n, lines) = worker
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+                report.extend(lines);
+                (seen + n, report)
+            })
+    });
     assert!(
         seen >= MIN_TESTS,
         "gate went vacuous: only {seen} test(s) recognised across {} files",
