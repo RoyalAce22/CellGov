@@ -9,16 +9,16 @@ use super::*;
 use crate::scratch_dir::scratch;
 use crate::store::layout::{staging_sibling, tombstone_sibling, TitleId, VersionKey};
 
-/// Names the store root the spawned holder claims under, and selects
-/// the holder. Without the variable the holder returns at once, so an
-/// `--ignored` sweep cannot hang on it.
+/// Names the store root the spawned holder claims under. The parent
+/// test sets it on the copy of itself it spawns, and that copy runs as
+/// the holder.
 const HOLD_ROOT_ENV: &str = "CELLGOV_LOCK_HOLD_ROOT";
 
 /// The holder prints this once it holds the claim.
 const HELD_MARKER: &str = "cellgov-lock-held";
 
-/// Test path of the holder, as libtest filters it.
-const HOLDER_TEST: &str = "store::lock::tests::hold_lock_until_killed";
+/// Test path of the parent, as libtest filters it.
+const PARENT_TEST: &str = "store::lock::tests::a_terminated_holder_leaves_the_artifact_free";
 
 /// How long the holder waits to be killed, so a stray invocation ends
 /// on its own.
@@ -250,9 +250,14 @@ fn no_version_key_starts_with_a_dot() {
 }
 
 /// A holder killed mid-install must leave the artifact free, since no
-/// pass sweeps a lock file.
+/// pass sweeps a lock file. The holder is this test in a process of its
+/// own, run with [`HOLD_ROOT_ENV`] set.
 #[test]
 fn a_terminated_holder_leaves_the_artifact_free() {
+    if let Some(root) = std::env::var_os(HOLD_ROOT_ENV) {
+        hold_lock_until_killed(root);
+        return;
+    }
     let out = scratch();
     let vfs = out.join("vfs");
     let layout = StoreLayout::new(&vfs);
@@ -260,7 +265,7 @@ fn a_terminated_holder_leaves_the_artifact_free() {
 
     let exe = std::env::current_exe().expect("the test binary");
     let mut child = Command::new(exe)
-        .args([HOLDER_TEST, "--exact", "--ignored", "--nocapture"])
+        .args([PARENT_TEST, "--exact", "--nocapture"])
         .env(HOLD_ROOT_ENV, &vfs)
         .stdout(Stdio::piped())
         .spawn()
@@ -288,14 +293,9 @@ fn a_terminated_holder_leaves_the_artifact_free() {
     let _freed = claim_once_released(&layout, &artifact);
 }
 
-/// Claims a title base under `CELLGOV_LOCK_HOLD_ROOT` and waits to be
-/// killed. Driven by [`a_terminated_holder_leaves_the_artifact_free`].
-#[test]
-#[ignore = "a fixture process, not a test: without CELLGOV_LOCK_HOLD_ROOT it asserts nothing"]
-fn hold_lock_until_killed() {
-    let Ok(root) = std::env::var(HOLD_ROOT_ENV) else {
-        return;
-    };
+/// Claims a title base under `root` and waits to be killed: the holder
+/// half of [`a_terminated_holder_leaves_the_artifact_free`].
+fn hold_lock_until_killed(root: std::ffi::OsString) {
     let layout = StoreLayout::new(root);
     let _held = lock_artifact(&layout, &base("TEST00000")).expect("claim the base");
     println!("{HELD_MARKER}");

@@ -1,4 +1,4 @@
-# Generated from ../cases.tsv by the regenerate test in
+# Generated from ../cases.tsv by the_generated_program_matches_cases_tsv in
 # crates/cellgov_spu/tests/it/spu_float_edges.rs. Do not edit.
 	.data
 	.align 4

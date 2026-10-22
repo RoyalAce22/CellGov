@@ -1,22 +1,22 @@
 //! `docs/lv2/` drift gate.
 //!
 //! The gate renders every generated file of the archive from
-//! `cellgov_lv2_archive` and compares it to the committed copy.
-//! Regenerate with:
+//! `cellgov_lv2_archive` and compares it to the committed copy. Under
+//! `CELLGOV_REGENERATE=1` it writes them instead:
 //!
 //! ```text
-//! cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate
+//! CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator
 //! ```
 //!
-//! The `cellgov` rows of `name.tsv` have their own gate (the test
-//! [`NAME_GATE`] names) and their own regenerate:
-//!
-//! ```text
-//! cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate_cellgov_names
-//! ```
+//! The `cellgov` rows of `name.tsv` have their own gate, the test
+//! [`NAME_GATE`] names, with the same write mode. The archive gate's
+//! write mode rewrites `name.tsv` first, because the archive reads it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+#[path = "../src/tests/regenerate.rs"]
+mod regenerate;
 
 use cellgov_lv2::request::fidelity::ArmFidelity;
 use cellgov_lv2_archive::{
@@ -747,6 +747,19 @@ fn normalize_markdown(text: &str) -> String {
 #[test]
 fn committed_archive_matches_generator() {
     let dir = archive_dir();
+    if regenerate::asked() {
+        regenerate::write_if_asked(&archive_dir().join(NAME.file()), cellgov_names_tsv());
+        for (name, text) in rendered() {
+            let path = dir.join(name);
+            let parent = path
+                .parent()
+                .expect("archive output has a parent directory");
+            std::fs::create_dir_all(parent)
+                .unwrap_or_else(|e| panic!("create {}: {e}", parent.display()));
+            regenerate::write_if_asked(&path, text);
+        }
+        return;
+    }
     let mut stale = Vec::new();
     for (name, text) in rendered() {
         let committed = read(&dir.join(&name));
@@ -1318,8 +1331,20 @@ fn caller_rows_are_well_formed() {
     }
 }
 
+/// `name.tsv` with its `cellgov` rows rendered from the macro and every
+/// other row kept.
+fn cellgov_names_tsv() -> String {
+    let rows = archive::with_cellgov_rows(&committed_names());
+    archive::name_tsv(&rows).unwrap_or_else(|e| panic!("name.tsv: {e}"))
+}
+
 #[test]
 fn cellgov_name_rows_match_the_macro() {
+    let path = archive_dir().join(NAME.file());
+    let rendered_tsv = cellgov_names_tsv();
+    if regenerate::write_if_asked(&path, &rendered_tsv) {
+        return;
+    }
     let committed: Vec<NameRow> = committed_names()
         .into_iter()
         .filter(|row| row.source == NameSource::Cellgov)
@@ -1331,6 +1356,10 @@ fn cellgov_name_rows_match_the_macro() {
         missing.is_empty() && extra.is_empty(),
         "name.tsv's cellgov rows are not the macro's: missing {missing:?}, extra {extra:?}; \
          regenerate with:\n  {NAME_REGENERATE}"
+    );
+    assert!(
+        read(&path) == rendered_tsv,
+        "name.tsv is not the rendering of its rows; regenerate with:\n  {NAME_REGENERATE}"
     );
 }
 
@@ -1344,29 +1373,4 @@ fn every_name_row_fits_its_source() {
         unfit.is_empty(),
         "name.tsv rows whose reference or name is not what the source's meaning promises: {unfit:?}"
     );
-}
-
-#[test]
-#[ignore = "writes docs/lv2/; run on dispatch-surface changes"]
-fn regenerate() {
-    let dir = archive_dir();
-    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
-    for (name, text) in rendered() {
-        let path = dir.join(name);
-        let parent = path
-            .parent()
-            .expect("archive output has a parent directory");
-        std::fs::create_dir_all(parent)
-            .unwrap_or_else(|e| panic!("create {}: {e}", parent.display()));
-        std::fs::write(&path, text).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
-    }
-}
-
-#[test]
-#[ignore = "writes docs/lv2/tables/name.tsv; run when the macro's names change"]
-fn regenerate_cellgov_names() {
-    let rows = archive::with_cellgov_rows(&committed_names());
-    let text = archive::name_tsv(&rows).unwrap_or_else(|e| panic!("name.tsv: {e}"));
-    let path = archive_dir().join(NAME.file());
-    std::fs::write(&path, text).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
 }

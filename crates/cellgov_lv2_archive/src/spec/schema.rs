@@ -1,8 +1,7 @@
 //! The schema vocabulary: owner classes, column kinds, columns, tables and views, plus the shared regenerate command and gate.
 
 /// The command that rewrites every generated file of the archive.
-pub const REGENERATE: &str =
-    "cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate";
+pub const REGENERATE: &str = "CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator";
 
 /// The test that fails when a committed generated file is stale.
 pub const GATE: &str = "committed_archive_matches_generator";
@@ -15,7 +14,7 @@ pub const SCHEMA_VERSION: u32 = 7;
 pub enum OwnerClass {
     /// Only the census emitter writes it, from firmware bytes.
     Extracted,
-    /// A regenerate test renders it from code, and a drift gate holds the committed copy.
+    /// A drift gate renders it from code and holds the committed copy; its write mode rewrites it.
     Generated,
     /// CellGov's own claims, loader-validated, with provenance on every row.
     Curated,
@@ -49,7 +48,7 @@ impl OwnerClass {
                 "Written only by the census emitter from firmware bytes, under anchor discipline."
             }
             OwnerClass::Generated => {
-                "Rendered from code by a regenerate test; a drift gate fails when the committed copy is stale."
+                "Rendered from code; a drift gate fails when the committed copy is stale, and under CELLGOV_REGENERATE=1 writes it."
             }
             OwnerClass::Curated => {
                 "CellGov's own claims, loader-validated, with provenance on every row."

@@ -246,35 +246,37 @@ fn generated_seeds() -> BTreeMap<String, Vec<u8>> {
         .collect()
 }
 
+const REGENERATE_SEEDS: &str =
+    "run `CELLGOV_REGENERATE=1 cargo test -p cellgov_fuzz --lib the_committed_seeds_match_the_generator`";
+
+/// `fuzz/seeds` holds exactly the generator's images. With
+/// `CELLGOV_REGENERATE=1` the test rewrites the directory instead.
 #[test]
 fn the_committed_seeds_match_the_generator() {
-    let committed = committed_seeds();
     let generated = generated_seeds();
+    if crate::regenerate::asked() {
+        let dir = seed_dir();
+        std::fs::create_dir_all(&dir).expect("create fuzz/seeds");
+        for (name, _) in committed_seeds() {
+            std::fs::remove_file(dir.join(format!("{name}.bin"))).expect("remove stale seed");
+        }
+        for (name, bytes) in &generated {
+            crate::regenerate::write_if_asked(&dir.join(format!("{name}.bin")), bytes);
+        }
+        return;
+    }
+    let committed = committed_seeds();
     let committed_names: Vec<&String> = committed.keys().collect();
     let generated_names: Vec<&String> = generated.keys().collect();
     assert_eq!(
         committed_names, generated_names,
-        "fuzz/seeds holds a different set; run the ignored regenerate_seeds test"
+        "fuzz/seeds holds a different set; {REGENERATE_SEEDS}"
     );
     for (name, bytes) in &generated {
         assert_eq!(
             &committed[name], bytes,
-            "fuzz/seeds/{name}.bin differs; run the ignored regenerate_seeds test"
+            "fuzz/seeds/{name}.bin differs; {REGENERATE_SEEDS}"
         );
-    }
-}
-
-/// `cargo test -p cellgov_fuzz --lib -- --ignored regenerate_seeds`
-#[test]
-#[ignore = "rewrites fuzz/seeds; run it after changing the seed images"]
-fn regenerate_seeds() {
-    let dir = seed_dir();
-    std::fs::create_dir_all(&dir).expect("create fuzz/seeds");
-    for (name, _) in committed_seeds() {
-        std::fs::remove_file(dir.join(format!("{name}.bin"))).expect("remove stale seed");
-    }
-    for (name, bytes) in generated_seeds() {
-        std::fs::write(dir.join(format!("{name}.bin")), bytes).expect("write seed");
     }
 }
 

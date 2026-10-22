@@ -14,8 +14,7 @@ pub const NAME_GATE: &str = "cellgov_name_rows_match_the_macro";
 
 /// The command that rewrites the `cellgov` rows of `name.tsv` and
 /// leaves every other row as it is.
-pub const NAME_REGENERATE: &str =
-    "cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate_cellgov_names";
+pub const NAME_REGENERATE: &str = "CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive cellgov_name_rows_match_the_macro";
 
 /// `name.tsv`: every name a committed source gives an ordinal, one
 /// row per (ordinal, packet, source, name).

@@ -3,10 +3,10 @@
 //! `tests/micro/spu_float_edges/cases.tsv` is the one source: each case's
 //! instructions, inputs and expected `$3` and FPSCR. This test assembles
 //! each case, runs `fscrwr`, the case and `fscrrd` on a fresh SPU state,
-//! and compares. The ignored `regenerate` test fills the expected columns
-//! and writes the SPU program the hardware and RPCS3 runs build from.
-//! The ignored `adopt_hardware_measurements` test replaces those columns
-//! with the console capture's answers and marks each row `measured`.
+//! and compares. Under `CELLGOV_REGENERATE=1`, the drift test of the
+//! SPU program the hardware and RPCS3 runs build from writes it, and
+//! the capture test fills the expected columns with the console's
+//! answers and marks each row `measured`.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::hw::spu_isa::{
@@ -181,7 +181,8 @@ fn every_case_matches_its_expected_result_or_names_its_defect() {
     for case in &cases {
         let (want_r3, want_fpscr) = case.expect.unwrap_or_else(|| {
             panic!(
-                "{} has no expected result; run adopt_hardware_measurements",
+                "{} has no expected result; capture it on the console, then run \
+                 hardware_capture_agrees_with_every_measured_row under CELLGOV_REGENERATE=1",
                 case.name
             )
         });
@@ -247,7 +248,7 @@ fn program(cases: &[Case]) -> String {
         text.push_str(&format!("\tstqa ${FPSCR_OUT},results+{}\n", output + 16));
     }
     format!(
-        "# Generated from ../cases.tsv by the regenerate test in\n\
+        "# Generated from ../cases.tsv by the_generated_program_matches_cases_tsv in\n\
          # crates/cellgov_spu/tests/it/spu_float_edges.rs. Do not edit.\n\
          \t.data\n\t.align 4\ninputs:\n{data}\
          \t.align 4\n\t.global results\nresults:\n\t.space {}\n\
@@ -256,41 +257,42 @@ fn program(cases: &[Case]) -> String {
     )
 }
 
-#[test]
-#[ignore = "rewrites cases.tsv's expected columns and the generated SPU program"]
-fn regenerate() {
-    let text = std::fs::read_to_string(CASES).expect("cases.tsv");
-    let cases = read_cases(&text);
-    let mut out = String::new();
-    let mut rows = cases.iter();
-    for line in text.lines() {
-        if line.starts_with('#') || line.starts_with("case\t") || line.is_empty() {
-            out.push_str(line);
-        } else {
-            let case = rows.next().expect("a case per row");
-            let (r3, fpscr) = run(case);
-            let mut fields: Vec<String> = line.split('\t').map(str::to_string).collect();
-            fields[7] = format_value(r3);
-            fields[8] = format_value(fpscr);
-            out.push_str(&fields.join("\t"));
-        }
-        out.push('\n');
-    }
-    std::fs::write(CASES, out).expect("write cases.tsv");
-    std::fs::write(
-        "../../tests/micro/spu_float_edges/spu/cases.S",
-        program(&cases),
-    )
-    .expect("write cases.S");
-    std::fs::write(
-        "../../tests/micro/spu_float_edges/cases.h",
-        format!(
-            "/* Generated from cases.tsv. Do not edit. */\n#define CASE_COUNT {}\n#define RESULT_BYTES {}\n",
-            cases.len(),
-            cases.len() * 32
+/// The generated program and header the microtest builds from, by path.
+fn generated(cases: &[Case]) -> [(&'static str, String); 2] {
+    [
+        (
+            "../../tests/micro/spu_float_edges/spu/cases.S",
+            program(cases),
         ),
-    )
-    .expect("write cases.h");
+        (
+            "../../tests/micro/spu_float_edges/cases.h",
+            format!(
+                "/* Generated from cases.tsv. Do not edit. */\n#define CASE_COUNT {}\n#define RESULT_BYTES {}\n",
+                cases.len(),
+                cases.len() * 32
+            ),
+        ),
+    ]
+}
+
+/// `spu/cases.S` and `cases.h` are the rendering of `cases.tsv`.
+/// `CELLGOV_REGENERATE=1` writes them instead.
+#[test]
+fn the_generated_program_matches_cases_tsv() {
+    let cases = read_cases(&std::fs::read_to_string(CASES).expect("cases.tsv"));
+    for (path, text) in generated(&cases) {
+        if crate::regenerate::write_if_asked(std::path::Path::new(path), &text) {
+            continue;
+        }
+        let committed = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("{path}: {e}"))
+            .replace("\r\n", "\n");
+        assert!(
+            committed == text,
+            "{path} is stale; run `CELLGOV_REGENERATE=1 cargo test -p cellgov_spu --test it \
+             the_generated_program_matches_cases_tsv`"
+        );
+    }
 }
 
 /// The built program, run on CellGov's SPU from `main`, DMAs out exactly
@@ -398,10 +400,15 @@ fn console_results(cases: &[Case]) -> Vec<(u128, u128)> {
 
 /// Every row is `measured`, now that a capture exists: it holds the
 /// console's own answer, `$3` and the FPSCR both, and cites the capture
-/// it came from.
+/// it came from. `CELLGOV_REGENERATE=1` writes those columns from the
+/// capture instead.
 #[test]
 fn hardware_capture_agrees_with_every_measured_row() {
-    let cases = read_cases(&std::fs::read_to_string(CASES).expect("cases.tsv"));
+    let text = std::fs::read_to_string(CASES).expect("cases.tsv");
+    if crate::regenerate::write_if_asked(std::path::Path::new(CASES), adopted(&text)) {
+        return;
+    }
+    let cases = read_cases(&text);
     for (case, (r3, fpscr)) in cases.iter().zip(console_results(&cases)) {
         assert!(
             case.source.starts_with(MEASURED),
@@ -419,18 +426,14 @@ fn hardware_capture_agrees_with_every_measured_row() {
     }
 }
 
-/// Rewrites every row's expected columns from the console capture and
-/// its source from `documented` to [`MEASURED`], keeping the citation
-/// after it. `regenerate` fills these columns from CellGov's own run,
-/// which is the guess the table exists to check; copying the console's
-/// answer is the measurement, so this is the intended way a row leaves
-/// `documented`. A row whose value changes is then either a
-/// CellGov defect or an implementation-defined choice the console made.
-#[test]
-#[ignore = "rewrites cases.tsv's expected columns and sources from the console capture"]
-fn adopt_hardware_measurements() {
-    let text = std::fs::read_to_string(CASES).expect("cases.tsv");
-    let cases = read_cases(&text);
+/// `cases.tsv` with every row's expected columns from the console
+/// capture and its source from `documented` to [`MEASURED`], keeping the
+/// citation after it. Copying the console's answer is the measurement,
+/// so this is how a row leaves `documented`. A row whose value changes
+/// is then either a CellGov defect or an implementation-defined choice
+/// the console made.
+fn adopted(text: &str) -> String {
+    let cases = read_cases(text);
     let mut console = console_results(&cases).into_iter();
     let mut out = String::new();
     for line in text.lines() {
@@ -450,7 +453,7 @@ fn adopt_hardware_measurements() {
         }
         out.push('\n');
     }
-    std::fs::write(CASES, out).expect("write cases.tsv");
+    out
 }
 
 const PEER: &str = "../../tests/micro/spu_float_edges/peer.tsv";

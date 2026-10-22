@@ -1,9 +1,9 @@
 #!/bin/bash
 # Build the spu_float_edges microtest.
 #
-# spu/cases.S and cases.h are generated from cases.tsv by the ignored
-# `regenerate` test in crates/cellgov_spu/tests/it/spu_float_edges.rs; run it
-# after editing cases.tsv, then build.
+# spu/cases.S and cases.h are generated from cases.tsv: after editing it, run
+# `CELLGOV_REGENERATE=1 cargo test -p cellgov_spu --test it
+# the_generated_program_matches_cases_tsv`, then build.
 #
 # Requirements -- any environment providing:
 #   1. the ps3dev toolchains (powerpc64-ps3-elf-gcc and spu-gcc) and

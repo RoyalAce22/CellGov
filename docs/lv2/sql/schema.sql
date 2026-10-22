@@ -1,5 +1,5 @@
 -- Rendered from cellgov_lv2_archive by
---   cargo test -p cellgov_lv2_archive --test lv2_archive -- --ignored regenerate
+--   CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator
 -- Do not edit by hand: committed_archive_matches_generator fails on drift.
 
 PRAGMA user_version = 7;

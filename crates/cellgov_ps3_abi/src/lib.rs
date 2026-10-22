@@ -28,4 +28,8 @@ pub mod lv2;
 pub mod nid;
 pub mod sha1;
 
+#[cfg(test)]
+#[path = "tests/regenerate.rs"]
+mod regenerate;
+
 pub(crate) use nid::nid_module;

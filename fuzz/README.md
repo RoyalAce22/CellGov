@@ -68,7 +68,7 @@ job image. `loaders::tests` fails when the
 files drift from the generator; after changing a seed image, run
 
 ```bash
-cargo test -p cellgov_fuzz --lib -- --ignored regenerate_seeds
+CELLGOV_REGENERATE=1 cargo test -p cellgov_fuzz --lib the_committed_seeds_match_the_generator
 ```
 
 Real images make better seeds than synthetic ones. Copy any decrypted

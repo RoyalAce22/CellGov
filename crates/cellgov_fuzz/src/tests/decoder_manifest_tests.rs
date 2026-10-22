@@ -52,13 +52,28 @@ fn sample_manifest() -> DecoderCampaignManifest {
     manifest
 }
 
+/// The committed manifest is byte for byte the one the sample campaign
+/// serializes. `CELLGOV_REGENERATE=1` writes it instead.
 #[test]
-#[ignore = "regenerate the committed decoder coverage manifest intentionally"]
-fn regenerate_committed_decoder_manifest() {
-    let json = serde_json::to_string(&sample_manifest()).expect("manifest serializes");
+fn the_committed_decoder_manifest_matches_the_sample_campaign() {
+    let rendered = format!(
+        "{}\n",
+        serde_json::to_string(&sample_manifest()).expect("manifest serializes")
+    );
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/decoder_campaign_v2.json");
-    std::fs::write(path, format!("{json}\n")).expect("writes fixture");
+    if crate::regenerate::write_if_asked(&path, &rendered) {
+        return;
+    }
+    let committed = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+        .replace("\r\n", "\n");
+    assert!(
+        committed == rendered,
+        "{} is stale; run `CELLGOV_REGENERATE=1 cargo test -p cellgov_fuzz --lib \
+         the_committed_decoder_manifest_matches_the_sample_campaign`",
+        path.display()
+    );
 }
 
 #[test]

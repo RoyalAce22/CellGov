@@ -53,6 +53,7 @@ mod problem_state_edges_through_runtime;
 mod problem_state_through_runtime;
 mod raw_spu_lifecycle;
 mod raw_spu_window;
+mod regenerate;
 mod signal_read_through_runtime;
 mod signal_write_through_lv2;
 mod spu_convert_scales;

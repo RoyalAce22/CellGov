@@ -23,7 +23,7 @@ fn render_table() -> String {
     let mut rows = table_rows(&archive.join("tables/kernel.tsv"));
     rows.sort_by(|left, right| left[0].cmp(&right[0]));
     let mut out = String::from(
-        "//! `PUP_CENSUS`, rendered from the committed LV2 archive.\n//!\n//! Generated: run `cargo test -p cellgov_ps3_abi --lib -- --ignored regenerate_pup_census`.\n\nuse super::PupCensus;\n\n#[rustfmt::skip]\npub(super) static PUP_CENSUS: &[PupCensus] = &[\n",
+        "//! `PUP_CENSUS`, rendered from the committed LV2 archive.\n//!\n//! Generated: run `CELLGOV_REGENERATE=1 cargo test -p cellgov_ps3_abi --lib committed_pup_census_matches_archive`.\n\nuse super::PupCensus;\n\n#[rustfmt::skip]\npub(super) static PUP_CENSUS: &[PupCensus] = &[\n",
     );
     for row in rows {
         let pup = &row[0];
@@ -67,10 +67,15 @@ fn pup_digest(hex: &str) -> [u8; 32] {
 
 #[test]
 fn committed_pup_census_matches_archive() {
+    let rendered = render_table();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lv2/census_table.rs");
+    if crate::regenerate::write_if_asked(&path, &rendered) {
+        return;
+    }
     assert_eq!(
         include_str!("../census_table.rs"),
-        render_table(),
-        "generated PUP census table is stale; run `cargo test -p cellgov_ps3_abi --lib -- --ignored regenerate_pup_census`"
+        rendered,
+        "generated PUP census table is stale; run `CELLGOV_REGENERATE=1 cargo test -p cellgov_ps3_abi --lib committed_pup_census_matches_archive`"
     );
 }
 
@@ -94,14 +99,4 @@ fn provenance_pups_without_kernel_rows_are_not_extracted() {
             super::PupCensusClass::NotExtracted
         );
     }
-}
-
-#[test]
-#[ignore = "rewrites the generated PUP census table"]
-fn regenerate_pup_census() {
-    std::fs::write(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lv2/census_table.rs"),
-        render_table(),
-    )
-    .expect("write generated PUP census table");
 }

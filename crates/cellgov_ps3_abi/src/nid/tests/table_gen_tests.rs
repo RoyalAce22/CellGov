@@ -3,7 +3,7 @@
 //! Regenerate with:
 //!
 //! ```text
-//! cargo test -p cellgov_ps3_abi --lib -- --ignored regenerate_nid_table
+//! CELLGOV_REGENERATE=1 cargo test -p cellgov_ps3_abi --lib committed_table_matches_tsv
 //! ```
 
 use std::path::PathBuf;
@@ -13,8 +13,7 @@ const COMMITTED: &str = include_str!("../table.rs");
 
 const HEADER: &str = "nid\tmodule\tname";
 
-const REGENERATE: &str =
-    "regenerate with: cargo test -p cellgov_ps3_abi --lib -- --ignored regenerate_nid_table";
+const REGENERATE: &str = "regenerate with: CELLGOV_REGENERATE=1 cargo test -p cellgov_ps3_abi --lib committed_table_matches_tsv";
 
 fn table_rs_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/nid/table.rs")
@@ -80,8 +79,8 @@ fn render(rows: &[(u32, &str, &str)]) -> String {
         "//! `NID_TABLE`, rendered from `table.tsv` beside this file.\n\
          //!\n\
          //! Generated: edit the data file, then regenerate with\n\
-         //! `cargo test -p cellgov_ps3_abi --lib -- --ignored regenerate_nid_table`.\n\
-         //! `nid::table_gen_tests::committed_table_matches_tsv` fails on drift.\n\
+         //! `CELLGOV_REGENERATE=1 cargo test -p cellgov_ps3_abi --lib committed_table_matches_tsv`;\n\
+         //! without the variable, that test fails on drift.\n\
          \n\
          /// `(NID, module, function)` sorted by NID for binary search.\n\
          #[rustfmt::skip]\n\
@@ -229,18 +228,13 @@ fn a_difference_only_in_final_newlines_is_drift() {
 #[test]
 fn committed_table_matches_tsv() {
     let rendered = render(&parse(TSV));
+    if crate::regenerate::write_if_asked(&table_rs_path(), &rendered) {
+        return;
+    }
     let committed = COMMITTED.replace("\r\n", "\n");
     if let Some((line, left, right)) = first_difference(&committed, &rendered) {
         panic!(
             "src/nid/table.rs is stale at line {line}:\n  committed: {left}\n  rendered:  {right}\n{REGENERATE}"
         );
     }
-}
-
-#[test]
-#[ignore = "writes src/nid/table.rs; run after editing table.tsv"]
-fn regenerate_nid_table() {
-    let path = table_rs_path();
-    std::fs::write(&path, render(&parse(TSV)))
-        .unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
 }

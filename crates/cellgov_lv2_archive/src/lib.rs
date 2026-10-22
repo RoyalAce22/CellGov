@@ -2,8 +2,8 @@
 //! obey, and the text form of the operator-local oracle-gap overlay.
 //!
 //! Text in, text out: nothing here opens a file. The `lv2_archive`
-//! integration test does the I/O for the generated files: it writes
-//! them on `--ignored regenerate` and fails when they drift.
+//! integration test does the I/O for the generated files: it fails when
+//! they drift, and writes them under `CELLGOV_REGENERATE=1`.
 //!
 //! The runtime never calls this crate. It reads the kernel model's
 //! request classification and fidelity map from `cellgov_lv2`, and
@@ -36,6 +36,10 @@ mod sql;
 mod table;
 mod transitions;
 mod unmodelled;
+
+#[cfg(test)]
+#[path = "tests/regenerate.rs"]
+mod regenerate;
 
 pub use behavior::{
     arm_token, foldable, parse_citation, parse_witness, provenance_ref_fits, Witness, DOC_KEYS,

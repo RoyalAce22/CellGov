@@ -162,6 +162,11 @@ const ENV_VARS: &[EnvVar] = &[
         scope: Scope::TestOnly,
         purpose: "Retain a scratch directory after a test.",
     },
+    EnvVar {
+        name: "CELLGOV_REGENERATE",
+        scope: Scope::TestOnly,
+        purpose: "Set to 1: each drift test writes the generated file it checks.",
+    },
 ];
 
 pub(crate) fn all() -> &'static [EnvVar] {

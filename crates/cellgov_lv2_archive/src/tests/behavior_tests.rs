@@ -219,7 +219,8 @@ fn read_rows() -> Vec<BehaviorRow> {
     let path = behavior_path();
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         panic!(
-            "read {}: {e}; write the skeleton with the ignored add_missing_behavior_rows test",
+            "read {}: {e}; write the skeleton with behavior_rows_cover_the_handled_surface \
+             under CELLGOV_REGENERATE=1",
             path.display()
         )
     });
@@ -259,8 +260,15 @@ fn handled() -> BTreeMap<u64, &'static str> {
         .collect()
 }
 
+/// `CELLGOV_REGENERATE=1` adds a placeholder row for every missing
+/// ordinal instead, and keeps the rows the table has.
 #[test]
 fn behavior_rows_cover_the_handled_surface() {
+    if crate::regenerate::asked() {
+        let path = behavior_path();
+        crate::regenerate::write_if_asked(&path, with_placeholder_rows());
+        return;
+    }
     let rows = read_rows();
     let have: BTreeSet<u64> = rows.iter().map(|r| r.ordinal).collect();
     let want: BTreeSet<u64> = handled().keys().copied().collect();
@@ -472,11 +480,9 @@ fn a_fabricated_success_row_fabricates_a_success() {
     );
 }
 
-/// Add a placeholder row for every typed or routed ordinal
-/// `behavior.tsv` lacks, and keep the rows it has.
-#[test]
-#[ignore = "writes docs/lv2/tables/behavior.tsv; run when the handled surface grows"]
-fn add_missing_behavior_rows() {
+/// `behavior.tsv` with a placeholder row for every typed or routed
+/// ordinal it lacks, and the rows it has.
+fn with_placeholder_rows() -> String {
     let path = behavior_path();
     let mut rows: BTreeMap<u64, BehaviorRow> = if path.exists() {
         read_rows().into_iter().map(|r| (r.ordinal, r)).collect()
@@ -497,6 +503,5 @@ fn add_missing_behavior_rows() {
         });
     }
     let cells: Vec<Vec<String>> = rows.values().map(BehaviorRow::cells).collect();
-    let text = render(&BEHAVIOR, &cells).unwrap_or_else(|e| panic!("{e}"));
-    std::fs::write(&path, text).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+    render(&BEHAVIOR, &cells).unwrap_or_else(|e| panic!("{e}"))
 }
