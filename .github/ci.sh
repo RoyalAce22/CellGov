@@ -87,7 +87,9 @@ lint() {
 #   local       the pre-push gate only: the decrypt-off release tests and
 #               the decrypt-on debug tests of the two crates that declare
 #               the feature, so every pairing of profile and `decrypt`
-#               still runs before a push
+#               still runs before a push. Both run plain `cargo test`,
+#               which runs a binary's tests as threads of one process, so
+#               a race over process-global state stays visible.
 #
 # The bounded fuzz smoke set runs inside the workspace tests, in both
 # profiles (`cli::fuzz::smoke_tests`), against the tracked regressions.
@@ -275,11 +277,13 @@ case "${1:-full}" in
     micro-build) run_group micro-build micro_build ;;
     microtests) run_group microtests microtests ;;
     data) run_group data data ;;
-    # The pre-push gate: every group the workflow runs, plus `local`.
+    # The pre-push gate: every group the workflow runs, plus `local`. The
+    # test group runs through nextest as the workflow's blocking legs do,
+    # so a test over their per-test budget fails here too.
     full)
         run_group lint lint
         run_group deny deny
-        run_group test test_suite
+        CELLGOV_TEST_RUNNER=nextest run_group test test_suite
         run_group test-linux test_linux
         run_group local test_local
         ;;

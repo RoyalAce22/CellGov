@@ -1,9 +1,10 @@
-# cargo-nextest profiles. The workflow's blocking test legs run the
-# workspace tests through `ci` (debug) and `ci-release`, and its
-# microtests job runs `ci-microtests`; the operator's data-feature run
-# is `ci-data`. See .github/ci.sh. Local runs and the pre-push gate use
-# plain `cargo test`, which runs a binary's tests as threads of one
-# process, so a race over process-global state stays visible there.
+# cargo-nextest profiles. The workflow's blocking test legs and the
+# pre-push gate run the workspace tests through `ci` (debug) and
+# `ci-release`, and the workflow's microtests job runs `ci-microtests`;
+# the operator's data-feature run is `ci-data`. See .github/ci.sh. The
+# pre-push gate's `local` group uses plain `cargo test`, which runs a
+# binary's tests as threads of one process, so a race over
+# process-global state stays visible there.
 #
 # Each profile writes its JUnit report to its own
 # target/nextest/<profile>/ directory.
