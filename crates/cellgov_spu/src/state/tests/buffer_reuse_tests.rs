@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::SpuObservableSnapshot;
 
 /// A state whose every component differs from [`SpuState::new`].
 fn varied() -> SpuState {
