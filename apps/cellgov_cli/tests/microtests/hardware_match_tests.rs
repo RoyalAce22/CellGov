@@ -20,14 +20,19 @@ fn every_microtest_matches_its_hardware_capture() {
         .expect("the tracked profiles load");
     let mut problems = Vec::new();
     let mut compared = Vec::new();
-    for case in booted_cases() {
-        let capture = micro
-            .join(case.name)
-            .join(CAPTURE_DIR)
-            .join(&profiles.reference);
-        if !capture.is_dir() {
-            continue;
-        }
+    let captured: Vec<(&Case, PathBuf)> = booted_cases()
+        .map(|case| {
+            let capture = micro
+                .join(case.name)
+                .join(CAPTURE_DIR)
+                .join(&profiles.reference);
+            (case, capture)
+        })
+        .filter(|(_, capture)| capture.is_dir())
+        .collect();
+    let cases: Vec<&Case> = captured.iter().map(|(case, _)| *case).collect();
+    let boots = boot_each(&cases, &["hardware"]);
+    for ((case, capture), boots) in captured.into_iter().zip(boots) {
         let m = manifest::load_console(&manifest_path(case.name)).expect("manifest");
         let mut console = hardware_capture::load(&capture, &profiles)
             .unwrap_or_else(|e| panic!("{}: {e}", capture.display()))
@@ -43,8 +48,8 @@ fn every_microtest_matches_its_hardware_capture() {
                 guest_addr: r.addr,
             })
             .collect();
-        let booted = run_observation(case, "hardware");
-        let difference = match check_outcome(case, &booted) {
+        let booted = &boots[0];
+        let difference = match check_outcome(case, booted) {
             Some(problem) => Some(problem),
             None => match parse_tty_frame(&booted.tty_log, &regions) {
                 Err(e) => Some(e.to_string()),

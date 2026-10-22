@@ -26,12 +26,73 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use cellgov_compare::{Observation, ObservedOutcome};
+
+#[path = "common/boot_slots.rs"]
+mod boot_slots;
+use boot_slots::BootSlots;
 
 #[path = "microtests/cases.rs"]
 mod cases;
 use cases::{Case, Exact, NonZero, CASES};
+
+/// Env override for how many microtest boots run at once (floor 1).
+const OVERRIDE_ENV: &str = "CELLGOV_MICROTESTS_MAX_CONCURRENT";
+
+/// Memory budget per microtest boot: one commits about 2.2 GiB, nearly
+/// all of it guest regions it never touches.
+const PER_SLOT_BYTES: u64 = 5 * 512 * 1024 * 1024;
+
+/// The boot slots every walk in this binary shares, so walks that run
+/// as threads of one process stay inside one memory budget.
+fn boot_slots() -> &'static BootSlots {
+    static SLOTS: OnceLock<BootSlots> = OnceLock::new();
+    SLOTS.get_or_init(|| BootSlots::new(OVERRIDE_ENV, PER_SLOT_BYTES))
+}
+
+/// Boot each case once per run id, as many at a time as
+/// [`boot_slots`] allows.
+///
+/// The result holds one row per case, in the order of `cases`, and each
+/// row holds one observation per run id, in the order of `run_ids`.
+///
+/// # Panics
+///
+/// When a boot does: [`run_observation`]'s panic prints from the worker,
+/// and the walk then fails.
+fn boot_each(cases: &[&'static Case], run_ids: &[&str]) -> Vec<Vec<Observation>> {
+    let jobs: Vec<(usize, usize)> = (0..cases.len())
+        .flat_map(|c| (0..run_ids.len()).map(move |r| (c, r)))
+        .collect();
+    let results: Vec<Mutex<Option<Observation>>> = jobs.iter().map(|_| Mutex::new(None)).collect();
+    let next = AtomicUsize::new(0);
+    let workers = boot_slots().limit().min(jobs.len()).max(1);
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                let Some(&(c, r)) = jobs.get(i) else {
+                    break;
+                };
+                let _slot = boot_slots().acquire();
+                let observation = run_observation(cases[c], run_ids[r]);
+                *results[i].lock().expect("result slot poisoned") = Some(observation);
+            });
+        }
+    });
+    let mut observations = results.into_iter().map(|slot| {
+        slot.into_inner()
+            .expect("result slot poisoned")
+            .expect("every job ran")
+    });
+    cases
+        .iter()
+        .map(|_| observations.by_ref().take(run_ids.len()).collect())
+        .collect()
+}
 
 /// Walk up from `CARGO_MANIFEST_DIR` to the `[workspace]` Cargo.toml.
 fn workspace_root() -> PathBuf {

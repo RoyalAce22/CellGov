@@ -5,11 +5,12 @@ use super::*;
 #[test]
 fn every_microtest_reports_its_documented_payload() {
     let mut failures: Vec<String> = Vec::new();
-    for case in booted_cases() {
-        let observation = run_observation(case, "payload");
-        let problems = match check_outcome(case, &observation) {
+    let cases: Vec<&Case> = booted_cases().collect();
+    for (case, boots) in cases.iter().copied().zip(boot_each(&cases, &["payload"])) {
+        let observation = &boots[0];
+        let problems = match check_outcome(case, observation) {
             Some(bad) => vec![bad],
-            None => check_payload(case, &observation),
+            None => check_payload(case, observation),
         };
         if let Some(issue) = known_defect(case.name) {
             if problems.is_empty() {
@@ -48,9 +49,13 @@ fn every_microtest_reports_its_documented_payload() {
 #[test]
 fn every_microtest_boots_bit_identically_twice() {
     let mut failures: Vec<String> = Vec::new();
-    for case in booted_cases() {
-        let a = run_observation(case, "det_a");
-        let b = run_observation(case, "det_b");
+    let cases: Vec<&Case> = booted_cases().collect();
+    for (case, boots) in cases
+        .iter()
+        .copied()
+        .zip(boot_each(&cases, &["det_a", "det_b"]))
+    {
+        let (a, b) = (&boots[0], &boots[1]);
         // Anti-vacuity floor: two boots that both retired nothing and
         // printed nothing are trivially equal, so the equalities below
         // are only evidence once each run carries a payload.

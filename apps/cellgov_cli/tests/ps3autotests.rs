@@ -27,9 +27,13 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Condvar, Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use cellgov_compare::Observation;
+
+#[path = "common/boot_slots.rs"]
+mod boot_slots;
+use boot_slots::{BootSlots, Permit};
 
 #[path = "common/installed_firmware.rs"]
 mod installed_firmware;
@@ -50,73 +54,21 @@ const PER_SLOT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// Env override for the concurrency limit (floor 1).
 const OVERRIDE_ENV: &str = "CELLGOV_PS3AUTOTESTS_MAX_CONCURRENT";
 
-struct Semaphore {
-    available: Mutex<usize>,
-    cv: Condvar,
-}
-
-impl Semaphore {
-    fn new(n: usize) -> Self {
-        Self {
-            available: Mutex::new(n),
-            cv: Condvar::new(),
-        }
-    }
-
-    fn acquire(&self) -> Permit<'_> {
-        let mut g = self.available.lock().expect("semaphore mutex poisoned");
-        while *g == 0 {
-            g = self.cv.wait(g).expect("semaphore condvar wait failed");
-        }
-        *g -= 1;
-        Permit { sem: self }
-    }
-}
-
-struct Permit<'a> {
-    sem: &'a Semaphore,
-}
-
-impl Drop for Permit<'_> {
-    fn drop(&mut self) {
-        let mut g = self.sem.available.lock().expect("semaphore mutex poisoned");
-        *g += 1;
-        self.sem.cv.notify_one();
-    }
-}
-
 /// Without this gate, `nproc * peak-RSS` can exceed host RAM and OOM
 /// the suite.
 fn subprocess_permit() -> Permit<'static> {
-    static SEM: OnceLock<Semaphore> = OnceLock::new();
-    let sem = SEM.get_or_init(|| {
-        let limit = compute_limit();
+    static SLOTS: OnceLock<BootSlots> = OnceLock::new();
+    let slots = SLOTS.get_or_init(|| {
+        let slots = BootSlots::new(OVERRIDE_ENV, PER_SLOT_BYTES);
         let slot_gib = PER_SLOT_BYTES as f64 / (1024.0 * 1024.0 * 1024.0);
         eprintln!(
-            "ps3autotests: gating subprocesses at {limit} concurrent \
-             (per-slot budget {slot_gib:.1} GiB; override via {OVERRIDE_ENV})"
+            "ps3autotests: gating subprocesses at {} concurrent \
+             (per-slot budget {slot_gib:.1} GiB; override via {OVERRIDE_ENV})",
+            slots.limit()
         );
-        Semaphore::new(limit)
+        slots
     });
-    sem.acquire()
-}
-
-fn compute_limit() -> usize {
-    if let Ok(s) = std::env::var(OVERRIDE_ENV) {
-        let n: usize = s
-            .trim()
-            .parse()
-            .unwrap_or_else(|e| panic!("{OVERRIDE_ENV}={s:?}: not a non-negative integer ({e})"));
-        // 0 clamps to the documented floor rather than deadlocking on a
-        // semaphore no permit can ever be taken from.
-        return n.max(1);
-    }
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    // `available_memory` reflects what the OS will hand out;
-    // `total_memory` ignores RAM held by other processes.
-    let ram = sys.available_memory();
-    ((ram / PER_SLOT_BYTES) as usize).max(1)
+    slots.acquire()
 }
 
 const PS3AUTOTESTS_RELPATH: &str = "tests/ps3autotests";

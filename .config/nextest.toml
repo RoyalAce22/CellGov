@@ -61,9 +61,15 @@ final-status-level = "slow"
 [profile.ci-data.junit]
 path = "junit.xml"
 
-# The CLI boot suite's three table walks each boot every microtest in
-# turn, so each takes longer than the budget. They are still reported
-# SLOW; the bound only lets them finish.
+# The CLI boot suite's three table walks each boot their cases as many at
+# a time as the host's free memory allows. Each sizes that count to the
+# whole host, so each takes every test thread and runs with no other test
+# beside it.
+
 [[profile.ci-microtests.overrides]]
 filter = 'binary_id(cellgov_cli::microtests) & test(/^(tests::every_microtest_(reports_its_documented_payload|boots_bit_identically_twice)|hardware_match_tests::every_microtest_matches_its_hardware_capture)$/)'
-slow-timeout = { period = "10s", terminate-after = 18 }
+threads-required = "num-test-threads"
+
+[[profile.ci-data.overrides]]
+filter = 'binary_id(cellgov_cli::microtests) & test(/^(tests::every_microtest_(reports_its_documented_payload|boots_bit_identically_twice)|hardware_match_tests::every_microtest_matches_its_hardware_capture)$/)'
+threads-required = "num-test-threads"

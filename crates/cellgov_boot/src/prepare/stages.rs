@@ -118,7 +118,8 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
     )?;
 
     // 11. Predecode shadow over the entry state's executable code.
-    let shadow = entry::build_instruction_shadow(&rt, &placement, image.code_floor, sink)?;
+    let shadow =
+        entry::build_instruction_shadow(&rt, &elf_data, &placement, image.code_floor, sink)?;
     let entry_r1 = state.gpr[1];
 
     // 12. The primary unit, held non-runnable until module_start ends.

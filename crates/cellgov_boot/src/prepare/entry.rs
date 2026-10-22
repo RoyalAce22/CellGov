@@ -70,6 +70,14 @@ pub enum EntryError {
     /// value.
     #[error("{0}")]
     EnvBool(#[from] EnvBoolError),
+    /// The title's program headers, which bound the predecode shadow,
+    /// did not read.
+    #[error("predecode shadow: the title's program headers: {source}")]
+    ProgramHeaders {
+        /// The loader's refusal.
+        #[source]
+        source: cellgov_ppu::loader::LoadError,
+    },
 }
 
 /// Stamp the title's primary entry state into `state`, and place the
@@ -140,25 +148,63 @@ pub(super) fn seed_primary_entry_state(
     Ok(())
 }
 
-/// Build the predecode shadow the primary unit registers with.
+/// Where the predecode shadow ends: past the title's last executable
+/// segment and `prx_region_end`, the end of the firmware set's region,
+/// which holds the trampolines too.
 ///
-/// Bounded by [`MemoryPlacement::alloc_floor`], where code stops and
-/// the heap begins. Built before `module_start`, which only mutates
-/// data segments (mutex tables, allocator state), so the shadow still
-/// holds for the title's first instruction; transient `module_start`
-/// units decode on demand.
+/// A title's data segment can sit far above its text, and the shadow
+/// leaves that span out. `alloc_floor` caps the end, since the heap
+/// begins there, and so does `memory_len`. A fetch outside the shadow
+/// decodes on demand.
 ///
 /// # Errors
 ///
-/// `CELLGOV_RUNGAME_PROFILE` holds an unrecognized value.
+/// The title's program headers do not read.
+fn shadow_extent(
+    elf_data: &[u8],
+    prx_region_end: usize,
+    alloc_floor: usize,
+    memory_len: usize,
+) -> Result<usize, EntryError> {
+    let title_code_end = cellgov_ppu::loader::pt_load_segments(elf_data)
+        .map_err(|source| EntryError::ProgramHeaders { source })?
+        .iter()
+        .filter(|segment| segment.executable)
+        .map(|segment| segment.vaddr.saturating_add(segment.memsz))
+        .max()
+        .unwrap_or(0);
+    let code_end = usize::try_from(title_code_end)
+        .unwrap_or(usize::MAX)
+        .max(prx_region_end);
+    Ok(code_end.min(alloc_floor).min(memory_len))
+}
+
+/// Build the predecode shadow the primary unit registers with, over
+/// `[0, shadow_extent)`.
+///
+/// Built before `module_start`, which only mutates data segments
+/// (mutex tables, allocator state), so the shadow still holds for the
+/// title's first instruction; transient `module_start` units decode on
+/// demand.
+///
+/// # Errors
+///
+/// `CELLGOV_RUNGAME_PROFILE` holds an unrecognized value, or the
+/// title's program headers do not read.
 pub(super) fn build_instruction_shadow(
     rt: &Runtime,
+    elf_data: &[u8],
     placement: &MemoryPlacement,
     code_floor: u32,
     sink: &dyn crate::BootSink,
 ) -> Result<cellgov_ppu::shadow::PredecodedShadow, EntryError> {
     let alloc_floor = placement.alloc_floor;
-    let shadow_extent = alloc_floor.min(rt.memory().as_bytes().len());
+    let shadow_extent = shadow_extent(
+        elf_data,
+        placement.prx_region_end,
+        alloc_floor,
+        rt.memory().as_bytes().len(),
+    )?;
     let t_shadow_start = std::time::Instant::now();
     let shadow =
         cellgov_ppu::shadow::PredecodedShadow::build(0, &rt.memory().as_bytes()[..shadow_extent]);
