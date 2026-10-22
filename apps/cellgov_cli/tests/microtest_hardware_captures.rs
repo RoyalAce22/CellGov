@@ -23,6 +23,9 @@ use cellgov_compare::manifest::{self, ConsoleManifest};
 mod cases;
 use cases::{Any, Case, Exact, Expect, NonZero, CASES};
 
+#[path = "microtests/capture_gaps.rs"]
+mod capture_gaps;
+
 fn micro_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/micro")
 }
@@ -143,6 +146,7 @@ fn every_hardware_capture_satisfies_the_design_table() {
     let profiles = ConsoleProfiles::load(&micro_root().join(CONSOLE_PROFILES_FILE))
         .expect("the tracked profiles load");
     let mut problems = Vec::new();
+    let mut compared = Vec::new();
     for case in CASES {
         let capture = micro_root()
             .join(case.name)
@@ -158,7 +162,14 @@ fn every_hardware_capture_satisfies_the_design_table() {
         for miss in table_misses(case, payload) {
             problems.push(format!("{}: {miss}", case.name));
         }
+        compared.push(case.name);
     }
+    assert_eq!(
+        compared,
+        capture_gaps::expected_captures(&micro_root(), CASES),
+        "the cases with a capture under {}: every case ps3_gaps.tsv does not name",
+        profiles.reference
+    );
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 

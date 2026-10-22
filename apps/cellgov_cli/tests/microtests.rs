@@ -293,3 +293,6 @@ mod tests;
 
 #[path = "microtests/hardware_match_tests.rs"]
 mod hardware_match_tests;
+
+#[path = "microtests/capture_gaps.rs"]
+mod capture_gaps;
