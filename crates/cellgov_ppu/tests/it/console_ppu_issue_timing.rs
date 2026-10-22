@@ -136,6 +136,12 @@ const LINE: u64 = 128;
 /// warm the console's.
 const REPLAY_ITERATIONS: u64 = 512;
 
+/// Iterations a replay beside a sibling times, for a caller that reads
+/// only the loop's cycles. Over every such replay the tests run, it
+/// moves the loop's cycles an iteration by at most 0.14% from
+/// `REPLAY_ITERATIONS`.
+const BESIDE_ITERATIONS: u64 = 128;
+
 /// A register a replay seeds before its loop.
 #[derive(Clone, Copy)]
 pub(crate) enum Seed {
@@ -631,9 +637,9 @@ const PROBE_SIBLING: Sibling = Sibling {
     seeds: &[],
 };
 
-/// Run one replay's loop twice `REPLAY_ITERATIONS` times, one
-/// instruction a step, beside `siblings` PPU units that run the probe's
-/// sibling loop.
+/// Run one replay's loop twice `REPLAY_ITERATIONS` times (alone) or
+/// `BESIDE_ITERATIONS` times, one instruction a step, beside `siblings`
+/// PPU units that run the probe's sibling loop.
 ///
 /// Returns the cycles an iteration of the second half, or `None` when
 /// the unit faults.
@@ -641,9 +647,15 @@ pub(crate) fn replay(r: &Replay, siblings: usize) -> Option<f64> {
     replay_beside(r, siblings, &PROBE_SIBLING)
 }
 
-/// [`replay`] beside `siblings` PPU units that each run `sibling`.
+/// [`replay`] beside `siblings` PPU units that each run `sibling`. Beside
+/// a sibling, the loop runs twice `BESIDE_ITERATIONS` times.
 pub(crate) fn replay_beside(r: &Replay, siblings: usize, sibling: &Sibling) -> Option<f64> {
-    replay_measured(r, siblings, sibling).map(|m| m.cycles)
+    let iterations = if siblings == 0 {
+        REPLAY_ITERATIONS
+    } else {
+        BESIDE_ITERATIONS
+    };
+    replay_counted(r, siblings, sibling, iterations).map(|m| m.cycles)
 }
 
 /// What [`replay_measured`] times over the loop's second half.
@@ -655,8 +667,19 @@ pub(crate) struct Measured {
     pub(crate) sibling_cycles: Option<f64>,
 }
 
-/// [`replay_beside`], with the first sibling's rate over the same half.
+/// [`replay_beside`] at `REPLAY_ITERATIONS`, with the first sibling's
+/// rate over the same half.
 pub(crate) fn replay_measured(r: &Replay, siblings: usize, sibling: &Sibling) -> Option<Measured> {
+    replay_counted(r, siblings, sibling, REPLAY_ITERATIONS)
+}
+
+/// [`replay_measured`], with the loop run twice `iterations` times.
+fn replay_counted(
+    r: &Replay,
+    siblings: usize,
+    sibling: &Sibling,
+    iterations: u64,
+) -> Option<Measured> {
     let words = r.words;
     let ring_end = r
         .seeds
@@ -694,8 +717,8 @@ pub(crate) fn replay_measured(r: &Replay, siblings: usize, sibling: &Sibling) ->
         let state = ppu.state_mut();
         state.pc = CODE;
         match counter {
-            Some(k) => state.set_gpr(k, 2 * REPLAY_ITERATIONS),
-            None => state.set_ctr(2 * REPLAY_ITERATIONS),
+            Some(k) => state.set_gpr(k, 2 * iterations),
+            None => state.set_ctr(2 * iterations),
         }
         for seed in seeds {
             match *seed {
@@ -764,8 +787,7 @@ pub(crate) fn replay_measured(r: &Replay, siblings: usize, sibling: &Sibling) ->
     // A sibling's instructions cost fewer cycles than most loops', so the
     // scheduler gives it several steps for each of the loop's. A loop
     // with an inner loop runs up to four times its words an iteration.
-    let bound =
-        4 * (2 * REPLAY_ITERATIONS * (words.len() as u64 + 1) + 16) * (16 * siblings as u64 + 1);
+    let bound = 4 * (2 * iterations * (words.len() as u64 + 1) + 16) * (16 * siblings as u64 + 1);
     for _ in 0..bound {
         let s = state(&rt);
         if s.pc == exit {
@@ -778,7 +800,7 @@ pub(crate) fn replay_measured(r: &Replay, siblings: usize, sibling: &Sibling) ->
             }
             sibling_was_at_head = at_head;
         }
-        if halfway.is_none() && s.pc == CODE && left(&s) == REPLAY_ITERATIONS {
+        if halfway.is_none() && s.pc == CODE && left(&s) == iterations {
             halfway = Some((
                 rt.registry().clock(unit).raw(),
                 sibling_mark(&rt, sibling_rounds),
@@ -808,7 +830,7 @@ pub(crate) fn replay_measured(r: &Replay, siblings: usize, sibling: &Sibling) ->
         _ => None,
     };
     Some(Measured {
-        cycles: (rt.registry().clock(unit).raw() - halfway) as f64 / REPLAY_ITERATIONS as f64,
+        cycles: (rt.registry().clock(unit).raw() - halfway) as f64 / iterations as f64,
         sibling_cycles,
     })
 }
@@ -876,9 +898,9 @@ fn the_issue_model_times_each_table_loop_within_the_console_s_spread() {
 ///
 /// The dependent `mulli` and `mullw` loops take 65.76 and 90.83 cycles
 /// an iteration. Like the dependent `add` loop, each multiply takes a
-/// fraction of a cycle more than its whole latency of 8 or 11, which
-/// ADR 0014 records as an accepted gap from the `ppu_issue_chain`
-/// capture (`console_ppu_issue_chain.rs`). The
+/// fraction of a cycle more than its whole latency of 8 or 11, an
+/// accepted gap from the `ppu_issue_chain` capture
+/// (`console_ppu_issue_chain.rs`). The
 /// `stmw` and `lmw` pair to one line takes 138.8; the model's drain of
 /// the store queue's 16-byte entries gives 120, as it does for the same
 /// loop of the `ppu_issue_multiple` capture
@@ -891,9 +913,9 @@ const REFUSED_LOOP: usize = 7;
 /// The loop the model times outside the console's spread: eight
 /// dependent `add`. The model's 16 cycles an iteration is the add's
 /// latency eight times; the console's fastest run takes 16.28 and its
-/// slowest 16.41. ADR 0014 records the excess as an accepted gap from
-/// the `ppu_issue_chain` capture, where the same loop's fastest run
-/// takes 16.51.
+/// slowest 16.41. The excess is an accepted gap from the
+/// `ppu_issue_chain` capture, where the same loop's fastest run takes
+/// 16.51.
 const RESIDUAL_LOOP: usize = 2;
 
 #[test]

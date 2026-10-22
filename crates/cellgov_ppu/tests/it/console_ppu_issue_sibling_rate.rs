@@ -327,18 +327,35 @@ fn each_sibling_s_loop_alone_runs_near_the_console() {
 #[test]
 fn each_sibling_keeps_its_console_share_of_its_rate_beside_each_chain() {
     let w = console_words();
-    let mut rows = Vec::new();
-    for (p, (sibling, s)) in SIBLINGS.iter().enumerate() {
-        let alone = cellgov_alone(s);
-        for (c, (chain, r)) in CHAINS_TIMED.iter().enumerate() {
-            rows.push((
-                *sibling,
-                *chain,
-                kept_of(alone, r, s),
-                console_kept(&w, p + 1, c),
-            ));
-        }
-    }
+    // Each sibling's replays on a thread of their own, joined in order.
+    let rows: Vec<_> = std::thread::scope(|scope| {
+        let threads: Vec<_> = SIBLINGS
+            .iter()
+            .enumerate()
+            .map(|(p, (sibling, s))| {
+                let w = &w;
+                scope.spawn(move || {
+                    let alone = cellgov_alone(s);
+                    CHAINS_TIMED
+                        .iter()
+                        .enumerate()
+                        .map(|(c, (chain, r))| {
+                            (
+                                *sibling,
+                                *chain,
+                                kept_of(alone, r, s),
+                                console_kept(w, p + 1, c),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        threads
+            .into_iter()
+            .flat_map(|t| t.join().expect("a sibling's replays"))
+            .collect()
+    });
     assert_eq!(rows.len(), PHASES * CHAINS);
     let mut residuals = 0;
     for &(sibling, chain, cellgov, console) in &rows {

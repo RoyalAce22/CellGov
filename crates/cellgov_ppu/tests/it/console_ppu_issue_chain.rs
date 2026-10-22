@@ -14,9 +14,8 @@
 //!   capture and 16.51 in this one, farther apart than either capture's
 //!   own runs spread.
 //!
-//! The handbook's issue rules give no fraction of a cycle, so ADR 0014
-//! records the excess as an accepted gap with this capture as its
-//! evidence. The replay holds each chain at or below the console's
+//! The handbook's issue rules give no fraction of a cycle, so the excess
+//! is an accepted gap with this capture as its evidence. The replay holds each chain at or below the console's
 //! fastest run, by no more than the gap measured here.
 
 use crate::console_ppu_issue_timing::{replay, replay_beside, Replay, Seed, Sibling};
