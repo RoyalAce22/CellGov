@@ -1,11 +1,18 @@
 //! SPU image import/open and thread-group dispatch tests: handle allocation, group lifecycle through RegisterSpu, and sync-partial folding.
 
-use super::*;
+use crate::dispatch::Lv2Dispatch;
 use crate::host::test_support::FakeRuntime;
+use crate::host::Lv2Host;
 use crate::image::SpuImageHandle;
+use crate::request::Lv2Request;
+use crate::thread_group::GroupState;
 use crate::thread_group::MAX_SLOTS_PER_GROUP;
+use cellgov_effects::{Effect, WritePayload};
+use cellgov_event::UnitId;
+use cellgov_mem::ByteRange;
 use cellgov_mem::{GuestAddr, GuestMemory};
 use cellgov_ps3_abi::format::elf::{ELF32_E_ENTRY, ELF32_HEADER_SIZE};
+use cellgov_ps3_abi::lv2::{errno, spu};
 use cellgov_time::GuestTicks;
 
 /// A runtime of `size` bytes with the ELF magic at each of `at`.

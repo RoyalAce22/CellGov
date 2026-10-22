@@ -1,9 +1,14 @@
 //! The 32-byte `sys_spu_thread_argument` block: every slot takes the
 //! eight bytes at its own offset, and an unreadable block is EFAULT.
 
-use super::*;
+use crate::dispatch::Lv2Dispatch;
 use crate::host::test_support::FakeRuntime;
+use crate::host::Lv2Host;
+use crate::request::Lv2Request;
+use cellgov_event::UnitId;
+use cellgov_mem::ByteRange;
 use cellgov_mem::{GuestAddr, GuestMemory};
+use cellgov_ps3_abi::lv2::errno;
 
 /// Four values no two of which share an eight-byte window, so a slot
 /// decoded at the wrong stride cannot match.
