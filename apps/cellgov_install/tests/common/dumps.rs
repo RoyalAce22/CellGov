@@ -48,7 +48,7 @@ pub fn root() -> PathBuf {
 ///
 /// If the override is set but empty; an empty value resolves against
 /// the process working directory.
-fn root_from(overridden: Option<OsString>) -> PathBuf {
+pub fn root_from(overridden: Option<OsString>) -> PathBuf {
     match overridden {
         // A dump root outside the checkout can be a non-UTF-8 path,
         // which `var` reports as an absent override.
@@ -69,31 +69,4 @@ pub fn title_dir(content_id: &str) -> PathBuf {
 /// The console update package a firmware install reads.
 pub fn ps3updat_pup() -> PathBuf {
     root().join("firmware").join("PS3UPDAT.PUP")
-}
-
-#[test]
-fn an_unset_dump_root_falls_back_to_the_in_checkout_default() {
-    assert_eq!(root_from(None), workspace_root().join("dumps"));
-}
-
-#[test]
-fn a_dump_root_override_is_taken_verbatim() {
-    let over = OsString::from("D:/elsewhere/ps3dumps");
-    assert_eq!(
-        root_from(Some(over)),
-        PathBuf::from("D:/elsewhere/ps3dumps")
-    );
-}
-
-#[test]
-fn an_empty_dump_root_override_is_named_rather_than_resolved_against_the_cwd() {
-    let payload = std::panic::catch_unwind(|| root_from(Some(OsString::new())))
-        .err()
-        .unwrap_or_else(|| panic!("an empty {ENV_DUMPS_DIR} was accepted"));
-    let msg = payload
-        .downcast_ref::<String>()
-        .cloned()
-        .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
-        .unwrap_or_else(|| panic!("the refusal carried a non-string payload"));
-    assert!(msg.contains("set but empty"), "got {msg:?}");
 }
