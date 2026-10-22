@@ -20,6 +20,10 @@ SYS_PROCESS_PARAM(1001, 0x10000)
 #define SYS_PPU_THREAD_EXIT   41
 #define SYS_PPU_THREAD_JOIN   44
 
+/* The thread is joined below, so it is created joinable: a join of a
+ * thread created without it answers EINVAL while the thread runs. */
+#define THREAD_JOINABLE 1
+
 /* Syscall 52's param* is a ppu_thread_param_t { u32 entry_opd_ptr;
  * u32 tls }, and the OPD it names is the kernel's 8-byte
  * { u32 code; u32 toc } form; `&fn` resolves to the ELFv1 24-byte
@@ -101,7 +105,7 @@ int main(void)
         0,          /* unk (reserved; liblv2's wrapper passes 0) */
         1001,       /* prio */
         0x4000,     /* stacksize */
-        0,          /* flags */
+        THREAD_JOINABLE, /* flags */
         0);         /* threadname (none) */
     if (ret != 0)
         return 43;
