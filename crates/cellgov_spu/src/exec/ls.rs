@@ -106,6 +106,118 @@ pub(super) fn insertion_controls(addr: u32, width: usize) -> [u8; 16] {
     mask
 }
 
+/// [SPU-ISA p:32 s:3. Memory-Load/Store Instructions] Load Quadword (d-form): LSA from RA + I10<<4, force low 4 bits zero.
+pub(super) fn lqd(state: &mut SpuState, rt: u8, ra: u8, imm: i16) -> SpuStepOutcome {
+    load_quad(state, rt, Lsa::D(ra, imm))
+}
+
+/// [SPU-ISA p:33 s:3. Memory-Load/Store Instructions] Load Quadword (x-form): LSA from RA + RB, low 4 bits forced zero.
+pub(super) fn lqx(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    load_quad(state, rt, Lsa::X(ra, rb))
+}
+
+/// [SPU-ISA p:34 s:3. Memory-Load/Store Instructions] Load Quadword (a-form): LSA is I16<<2, ignoring registers.
+pub(super) fn lqa(state: &mut SpuState, rt: u8, imm: i16) -> SpuStepOutcome {
+    load_quad(state, rt, Lsa::A(imm))
+}
+
+/// [SPU-ISA p:35 s:3. Memory-Load/Store Instructions] Load Quadword Instruction Relative: LSA is PC + sign-extended I16<<2, low 4 bits forced zero.
+pub(super) fn lqr(state: &mut SpuState, rt: u8, imm: i16) -> SpuStepOutcome {
+    load_quad(state, rt, Lsa::R(imm))
+}
+
+/// [SPU-ISA p:36 s:3. Memory-Load/Store Instructions] Store Quadword (d-form): symmetric to lqd, writes register to LS.
+pub(super) fn stqd(state: &mut SpuState, rt: u8, ra: u8, imm: i16) -> SpuStepOutcome {
+    store_quad(state, rt, Lsa::D(ra, imm))
+}
+
+/// [SPU-ISA p:37 s:3. Memory-Load/Store Instructions] Store Quadword (x-form): RA + RB indexed local-store address.
+pub(super) fn stqx(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    store_quad(state, rt, Lsa::X(ra, rb))
+}
+
+/// [SPU-ISA p:38 s:3. Memory-Load/Store Instructions] Store Quadword (a-form): absolute LSA from I16<<2.
+pub(super) fn stqa(state: &mut SpuState, rt: u8, imm: i16) -> SpuStepOutcome {
+    store_quad(state, rt, Lsa::A(imm))
+}
+
+/// [SPU-ISA p:39 s:3. Memory-Load/Store Instructions] Store Quadword Instruction Relative: PC-relative LSA, symmetric to lqr.
+pub(super) fn stqr(state: &mut SpuState, rt: u8, imm: i16) -> SpuStepOutcome {
+    store_quad(state, rt, Lsa::R(imm))
+}
+
+/// [SPU-ISA p:40 s:3. Memory-Load/Store Instructions] Generate Controls for Byte Insertion (d-form): build shufb mask whose target byte position holds 0x03.
+pub(super) fn cbd(state: &mut SpuState, rt: u8, ra: u8, imm: u8) -> SpuStepOutcome {
+    state.set_reg(
+        rt as usize,
+        insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 1),
+    );
+    SpuStepOutcome::Continue
+}
+
+/// [SPU-ISA p:41 s:3. Memory-Load/Store Instructions] Generate Controls for Byte Insertion (x-form): the byte position is RA + RB.
+pub(super) fn cbx(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    state.set_reg(
+        rt as usize,
+        insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 1),
+    );
+    SpuStepOutcome::Continue
+}
+
+/// [SPU-ISA p:42 s:3. Memory-Load/Store Instructions] Generate Controls for Halfword Insertion (d-form): the aligned halfword slot holds 0x02 0x03.
+pub(super) fn chd(state: &mut SpuState, rt: u8, ra: u8, imm: u8) -> SpuStepOutcome {
+    state.set_reg(
+        rt as usize,
+        insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 2),
+    );
+    SpuStepOutcome::Continue
+}
+
+/// [SPU-ISA p:43 s:3. Memory-Load/Store Instructions] Generate Controls for Halfword Insertion (x-form): the halfword position is RA + RB.
+pub(super) fn chx(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    state.set_reg(
+        rt as usize,
+        insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 2),
+    );
+    SpuStepOutcome::Continue
+}
+
+/// [SPU-ISA p:44 s:3. Memory-Load/Store Instructions] Generate Controls for Word Insertion (d-form): build shufb mask placing 0x00..0x03 at the aligned word slot.
+pub(super) fn cwd(state: &mut SpuState, rt: u8, ra: u8, imm: u8) -> SpuStepOutcome {
+    state.set_reg(
+        rt as usize,
+        insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 4),
+    );
+    SpuStepOutcome::Continue
+}
+
+/// [SPU-ISA p:45 s:3. Memory-Load/Store Instructions] Generate Controls for Word Insertion (x-form): the word position is RA + RB.
+pub(super) fn cwx(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    state.set_reg(
+        rt as usize,
+        insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 4),
+    );
+    SpuStepOutcome::Continue
+}
+
+/// [SPU-ISA p:46 s:3. Memory-Load/Store Instructions] Generate Controls for Doubleword Insertion (d-form): the aligned doubleword slot holds 0x00..0x07.
+pub(super) fn cdd(state: &mut SpuState, rt: u8, ra: u8, imm: u8) -> SpuStepOutcome {
+    state.set_reg(
+        rt as usize,
+        insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 8),
+    );
+    SpuStepOutcome::Continue
+}
+
+/// [SPU-ISA p:47 s:3. Memory-Load/Store Instructions] Generate Controls for Doubleword Insertion (x-form): the doubleword position is RA + RB.
+pub(super) fn cdx(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    state.set_reg(
+        rt as usize,
+        insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 8),
+    );
+    SpuStepOutcome::Continue
+}
+
 #[cfg(test)]
 #[path = "tests/exec_quad_tests.rs"]
 mod quad_tests;

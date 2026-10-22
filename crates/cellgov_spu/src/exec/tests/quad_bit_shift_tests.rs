@@ -2,6 +2,7 @@
 //! and word boundaries, and only the count's low 3 bits read.
 
 use super::*;
+use crate::exec::lanes::from_words;
 use crate::state::SpuState;
 
 /// [SPU-ISA p:28 s:2.3] RR and RI7: 11-bit opcode, RB or I7, RA, RT.

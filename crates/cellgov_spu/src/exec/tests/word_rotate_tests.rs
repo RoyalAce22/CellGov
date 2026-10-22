@@ -2,6 +2,7 @@
 //! 31 / 32 / 63 edges, and the ISA's sfi + rotm idiom.
 
 use super::*;
+use crate::exec::lanes::{from_words, words};
 use crate::state::SpuState;
 
 /// [SPU-ISA p:28 s:2.3] RR and RI7: 11-bit opcode, RB or I7, RA, RT.

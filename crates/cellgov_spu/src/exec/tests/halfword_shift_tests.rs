@@ -2,6 +2,7 @@
 //! 15 / 16 edge, and the rotate-and-mask forms' two's-complement count.
 
 use super::*;
+use crate::exec::lanes::{from_halfwords, halfwords};
 use crate::state::SpuState;
 
 /// [SPU-ISA p:28 s:2.3] RR and RI7: 11-bit opcode, RB or I7, RA, RT.

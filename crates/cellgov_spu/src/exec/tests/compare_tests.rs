@@ -2,6 +2,7 @@
 //! width, and the three immediate widths.
 
 use super::*;
+use crate::exec::lanes::{from_halfwords, from_words};
 use crate::state::SpuState;
 
 /// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.

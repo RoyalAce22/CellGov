@@ -2,6 +2,7 @@
 //! and which bits of the preferred slot each form reads.
 
 use super::*;
+use crate::exec::lanes::from_words;
 use crate::state::SpuState;
 
 /// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.

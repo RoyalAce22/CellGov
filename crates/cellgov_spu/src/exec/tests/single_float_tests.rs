@@ -2,6 +2,7 @@
 //! single-precision rules, never from a host round-to-nearest result.
 
 use super::*;
+use crate::exec::lanes::{from_words, words};
 use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu_fpscr::fpscr_field;
 

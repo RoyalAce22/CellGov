@@ -3,6 +3,7 @@
 
 use super::single_float_tests::{fpscr_of, truncate, SpFlags};
 use super::*;
+use crate::exec::lanes::{from_words, words};
 use crate::state::SpuState;
 use cellgov_ps3_abi::hw::spu_fpscr::fpscr_field;
 

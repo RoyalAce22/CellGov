@@ -4,7 +4,8 @@
 //! bits. The arms hold no floating-point logic.
 
 use cellgov_float::{
-    round_pack, unpack_extended, Binary32, Exact, Flags, Format, Policy, Rounding,
+    extended_magnitude_key, extended_order_key, round_pack, unpack_extended, Binary32, Exact,
+    Flags, Format, Policy, Rounding,
 };
 
 use super::lanes::{from_words, words};
@@ -235,4 +236,120 @@ pub(super) fn sum(a: Exact, b: Exact) -> Exact {
 pub(super) fn product(a: Exact, b: Exact) -> Exact {
     cellgov_float::mul(a, b)
         .expect("invariant: decoded single-precision operands are exact and 24 bits wide")
+}
+
+/// [SPU-ISA p:202 s:9. Floating-Point Instructions] Floating Add: RA + RB per slot, extended-range single precision.
+pub(super) fn fa(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    single(state, rt, [ra, rb], |[a, b]| sum(a, b))
+}
+
+/// [SPU-ISA p:204 s:9. Floating-Point Instructions] Floating Subtract: RA - RB per slot.
+pub(super) fn fs(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    single(state, rt, [ra, rb], |[a, b]| sum(a, b.negated()))
+}
+
+/// [SPU-ISA p:206 s:9. Floating-Point Instructions] Floating Multiply: RA x RB per slot.
+/// [SPU-ISA p:196 s:9.1] OVF and UNF test the result before rounding, so the 24 x 24-bit product stays exact until truncation.
+pub(super) fn fm(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    single(state, rt, [ra, rb], |[a, b]| product(a, b))
+}
+
+/// [SPU-ISA p:208 s:9. Floating-Point Instructions] Floating Multiply and Add: RA x RB + RC per slot; the multiplication is exact and not subject to limits on its range.
+pub(super) fn fma(state: &mut SpuState, rt: u8, ra: u8, rb: u8, rc: u8) -> SpuStepOutcome {
+    single(state, rt, [ra, rb, rc], |[a, b, c]| sum(product(a, b), c))
+}
+
+/// [SPU-ISA p:212 s:9. Floating-Point Instructions] Floating Multiply and Subtract: RA x RB - RC per slot.
+pub(super) fn fms(state: &mut SpuState, rt: u8, ra: u8, rb: u8, rc: u8) -> SpuStepOutcome {
+    single(state, rt, [ra, rb, rc], |[a, b, c]| {
+        sum(product(a, b), c.negated())
+    })
+}
+
+/// [SPU-ISA p:210 s:9. Floating-Point Instructions] Floating Negative Multiply and Subtract: RC - RA x RB per slot, one exact expression truncated once, not a negated fma.
+pub(super) fn fnms(state: &mut SpuState, rt: u8, ra: u8, rb: u8, rc: u8) -> SpuStepOutcome {
+    single(state, rt, [ra, rb, rc], |[a, b, c]| {
+        sum(c, product(a, b).negated())
+    })
+}
+
+/// [SPU-ISA p:215 s:9. Floating-Point Instructions] Floating Reciprocal Estimate: a base and step for 1/RA per slot.
+pub(super) fn frest(state: &mut SpuState, rt: u8, ra: u8) -> SpuStepOutcome {
+    estimate(state, rt, ra, super::estimate::frest)
+}
+
+/// [SPU-ISA p:217 s:9. Floating-Point Instructions] Floating Reciprocal Absolute Square Root Estimate: a base and step for 1/sqrt(abs(RA)) per slot.
+pub(super) fn frsqest(state: &mut SpuState, rt: u8, ra: u8) -> SpuStepOutcome {
+    estimate(state, rt, ra, super::estimate::frsqest)
+}
+
+/// [SPU-ISA p:219 s:9. Floating-Point Instructions] Floating Interpolate: RB's base less its step times 0.`RA[13:31]` per slot.
+pub(super) fn fi(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    interpolate(state, rt, ra, rb)
+}
+
+/// [SPU-ISA p:220 s:9. Floating-Point Instructions] Convert Signed Integer to Floating: RA / 2^(155 - I8) per slot.
+pub(super) fn csflt(state: &mut SpuState, rt: u8, ra: u8, imm: u8) -> SpuStepOutcome {
+    to_float(state, rt, ra, imm, true)
+}
+
+/// [SPU-ISA p:221 s:9. Floating-Point Instructions] Convert Floating to Signed Integer: RA x 2^(173 - I8) per slot, saturated.
+pub(super) fn cflts(state: &mut SpuState, rt: u8, ra: u8, imm: u8) -> SpuStepOutcome {
+    to_integer(state, rt, ra, imm, true)
+}
+
+/// [SPU-ISA p:222 s:9. Floating-Point Instructions] Convert Unsigned Integer to Floating: RA / 2^(155 - I8) per slot.
+pub(super) fn cuflt(state: &mut SpuState, rt: u8, ra: u8, imm: u8) -> SpuStepOutcome {
+    to_float(state, rt, ra, imm, false)
+}
+
+/// [SPU-ISA p:223 s:9. Floating-Point Instructions] Convert Floating to Unsigned Integer: RA x 2^(173 - I8) per slot, saturated.
+pub(super) fn cfltu(state: &mut SpuState, rt: u8, ra: u8, imm: u8) -> SpuStepOutcome {
+    to_integer(state, rt, ra, imm, false)
+}
+
+/// [SPU-ISA p:231 s:9. Floating-Point Instructions] Floating Compare Equal: RA = RB per slot, every zero equal.
+pub(super) fn fceq(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    compare(state, rt, ra, rb, |a, b| {
+        extended_order_key(a) == extended_order_key(b)
+    })
+}
+
+/// [SPU-ISA p:232 s:9. Floating-Point Instructions] Floating Compare Magnitude Equal: |RA| = |RB| per slot.
+pub(super) fn fcmeq(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    compare(state, rt, ra, rb, |a, b| {
+        extended_magnitude_key(a) == extended_magnitude_key(b)
+    })
+}
+
+/// [SPU-ISA p:233 s:9. Floating-Point Instructions] Floating Compare Greater Than: RA > RB per slot.
+pub(super) fn fcgt(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    compare(state, rt, ra, rb, |a, b| {
+        extended_order_key(a) > extended_order_key(b)
+    })
+}
+
+/// [SPU-ISA p:234 s:9. Floating-Point Instructions] Floating Compare Magnitude Greater Than: |RA| > |RB| per slot.
+pub(super) fn fcmgt(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    compare(state, rt, ra, rb, |a, b| {
+        extended_magnitude_key(a) > extended_magnitude_key(b)
+    })
+}
+
+/// [SPU-ISA p:235 s:9. Floating-Point Instructions] FPSCR Write: RA's 128 bits enter the FPSCR; the unused bits are undefined, and CellGov keeps them zero.
+pub(super) fn fscrwr(state: &mut SpuState, ra: u8) -> SpuStepOutcome {
+    state.set_fpscr(
+        u128::from_be_bytes(state.regs[ra as usize])
+            & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED,
+    );
+    SpuStepOutcome::Continue
+}
+
+/// [SPU-ISA p:236 s:9. Floating-Point Instructions] FPSCR Read: the FPSCR with its unused bits forced to zero.
+pub(super) fn fscrrd(state: &mut SpuState, rt: u8) -> SpuStepOutcome {
+    state.set_reg(
+        rt as usize,
+        (state.fpscr() & cellgov_ps3_abi::hw::spu_fpscr::FPSCR_DEFINED).to_be_bytes(),
+    );
+    SpuStepOutcome::Continue
 }

@@ -389,3 +389,84 @@ fn convert<From: Format, To: Format>(bits: u64, rounding: Rounding, flush: bool)
     let packed = round_pack::<To>(Policy::Ieee754Cbe, rounding, exact);
     (packed.bits, packed.flags)
 }
+
+/// [SPU-ISA p:203 s:9. Floating-Point Instructions] Double Floating Add: RA + RB per doubleword slot.
+pub(super) fn dfa(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    double(state, rt, ra, rb, DoubleOp::Add)
+}
+
+/// [SPU-ISA p:205 s:9. Floating-Point Instructions] Double Floating Subtract: RA - RB per doubleword slot.
+pub(super) fn dfs(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    double(state, rt, ra, rb, DoubleOp::Subtract)
+}
+
+/// [SPU-ISA p:207 s:9. Floating-Point Instructions] Double Floating Multiply: RA x RB per doubleword slot.
+pub(super) fn dfm(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    double(state, rt, ra, rb, DoubleOp::Multiply)
+}
+
+/// [SPU-ISA p:209 s:9. Floating-Point Instructions] Double Floating Multiply and Add: RA x RB + RT per doubleword slot, rounded once.
+pub(super) fn dfma(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    fused(
+        state,
+        rt,
+        ra,
+        rb,
+        Fused {
+            subtract: false,
+            negate: false,
+        },
+    )
+}
+
+/// [SPU-ISA p:213 s:9. Floating-Point Instructions] Double Floating Multiply and Subtract: RA x RB - RT per doubleword slot, rounded once.
+pub(super) fn dfms(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    fused(
+        state,
+        rt,
+        ra,
+        rb,
+        Fused {
+            subtract: true,
+            negate: false,
+        },
+    )
+}
+
+/// [SPU-ISA p:211 s:9. Floating-Point Instructions] Double Floating Negative Multiply and Subtract: the negated rounded dfms result.
+pub(super) fn dfnms(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    fused(
+        state,
+        rt,
+        ra,
+        rb,
+        Fused {
+            subtract: true,
+            negate: true,
+        },
+    )
+}
+
+/// [SPU-ISA p:214 s:9. Floating-Point Instructions] Double Floating Negative Multiply and Add: the negated rounded dfma result.
+pub(super) fn dfnma(state: &mut SpuState, rt: u8, ra: u8, rb: u8) -> SpuStepOutcome {
+    fused(
+        state,
+        rt,
+        ra,
+        rb,
+        Fused {
+            subtract: false,
+            negate: true,
+        },
+    )
+}
+
+/// [SPU-ISA p:224 s:9. Floating-Point Instructions] Floating Round Double to Single: RA's doublewords rounded into their left words.
+pub(super) fn frds(state: &mut SpuState, rt: u8, ra: u8) -> SpuStepOutcome {
+    round_to_single(state, rt, ra)
+}
+
+/// [SPU-ISA p:225 s:9. Floating-Point Instructions] Floating Extend Single to Double: RA's left words extended.
+pub(super) fn fesd(state: &mut SpuState, rt: u8, ra: u8) -> SpuStepOutcome {
+    extend_to_double(state, rt, ra)
+}

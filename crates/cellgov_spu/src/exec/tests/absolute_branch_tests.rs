@@ -2,6 +2,7 @@
 //! the limit register to the top of local store, and brasl's link layout.
 
 use super::*;
+use crate::exec::lanes::words;
 use crate::state::SpuState;
 
 /// [SPU-ISA p:29 s:2.3] RI16: 9-bit opcode, I16, RT.

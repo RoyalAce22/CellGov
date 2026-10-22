@@ -3,6 +3,7 @@
 
 use super::single_float_tests::decode_operand;
 use super::*;
+use crate::exec::lanes::{from_words, words};
 use crate::state::SpuState;
 
 /// [SPU-ISA p:28 s:2.3] RR: 11-bit opcode, RB, RA, RT.
