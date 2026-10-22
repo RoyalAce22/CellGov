@@ -20,7 +20,7 @@ fn every_microtest_matches_its_hardware_capture() {
         .expect("the tracked profiles load");
     let mut problems = Vec::new();
     let mut compared = Vec::new();
-    for case in CASES {
+    for case in booted_cases() {
         let capture = micro
             .join(case.name)
             .join(CAPTURE_DIR)
@@ -72,9 +72,10 @@ fn every_microtest_matches_its_hardware_capture() {
         }
         compared.push(case.name);
     }
+    let mut expected = capture_gaps::expected_captures(&micro, CASES);
+    expected.retain(|name| boots_here(name));
     assert_eq!(
-        compared,
-        capture_gaps::expected_captures(&micro, CASES),
+        compared, expected,
         "the cases with a capture under {}: every case ps3_gaps.tsv does not name",
         profiles.reference
     );

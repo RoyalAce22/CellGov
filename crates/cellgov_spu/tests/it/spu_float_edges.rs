@@ -300,7 +300,7 @@ fn the_generated_program_matches_cases_tsv() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built microtest (tests/micro/spu_float_edges/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtest (tests/micro/spu_float_edges/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn the_built_program_stores_every_expected_result() {
     use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};

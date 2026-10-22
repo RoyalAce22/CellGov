@@ -359,7 +359,7 @@ fn wrch_mfc_cmd_yields_dma_submitted() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn run_spu_fixed_value_binary() {
     let elf_data = microtest_elf("../../tests/micro/spu_fixed_value/build/spu_main.elf");
@@ -445,7 +445,7 @@ fn run_spu_fixed_value_binary() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn mailbox_roundtrip_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/mailbox_roundtrip/build/spu_main.elf");
@@ -506,7 +506,7 @@ fn mailbox_roundtrip_matches_its_reference() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn spu_atomic_cross_spu_counter_is_exactly_2n() {
     const INCREMENTS_PER_THREAD: u32 = 32;
@@ -592,7 +592,7 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn atomic_reservation_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/atomic_reservation/build/spu_main.elf");
@@ -647,7 +647,7 @@ fn atomic_reservation_matches_its_reference() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn barrier_wakeup_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/barrier_wakeup/build/spu_main.elf");
@@ -713,7 +713,7 @@ fn barrier_wakeup_matches_its_reference() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn ls_to_shared_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/ls_to_shared/build/spu_main.elf");
@@ -783,7 +783,7 @@ fn completed_put(unit: &SpuExecutionUnit, effect: &cellgov_effects::Effect) -> O
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn dma_completion_payloads_are_correct() {
     let elf_data = microtest_elf("../../tests/micro/dma_completion/build/spu_main.elf");
@@ -848,7 +848,7 @@ fn dma_completion_payloads_are_correct() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn dma_completion_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/dma_completion/build/spu_main.elf");
@@ -904,7 +904,7 @@ fn dma_completion_matches_its_reference() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn spu_dma_list_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_dma_list/build/spu_main.elf");
@@ -952,7 +952,7 @@ fn spu_dma_list_matches_its_reference() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn spu_ls_alias_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_ls_alias/build/spu_main.elf");
@@ -1011,7 +1011,7 @@ fn spu_ls_alias_matches_its_reference() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn spu_lluc_publish_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_lluc_publish/build/spu_main.elf");
@@ -1073,7 +1073,7 @@ fn spu_lluc_publish_matches_its_reference() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn spu_in_mbox_overrun_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_in_mbox_overrun/build/spu_main.elf");
@@ -1140,7 +1140,7 @@ fn spu_in_mbox_overrun_matches_its_reference() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn spu_atomic_misaligned_lsa_matches_its_reference() {
     let elf_path =
@@ -1203,7 +1203,7 @@ fn spu_atomic_misaligned_lsa_matches_its_reference() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn spu_fixed_value_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
@@ -1311,7 +1311,7 @@ impl ExecutionUnit for LineStorer {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built microtests (tests/micro/*/build.sh); CI's microtests job runs it with --features spu-microtests"
 )]
 fn spu_lr_event_matches_its_reference() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_lr_event/build/spu_main.elf");

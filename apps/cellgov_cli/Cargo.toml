@@ -85,7 +85,9 @@ installed-title-tests = ["installed-firmware-tests"]
 # The C sources are committed and the toolchain instructions ship with
 # them, but the build output is gitignored, so opting in declares the
 # microtests built and a missing artifact is a hard error. The spawn suite
-# wraps a child in a real SCE container, so it needs `decrypt`.
+# wraps a child in a real SCE container, so it needs `decrypt`. The
+# spawn suite and the microtests that boot a firmware or read the key
+# vault under vfs/ run only with `installed-firmware-tests` on as well.
 microtests = ["decrypt"]
 
 # Suite that boots the ps3autotests suite -- a GPLv2 tree the
@@ -107,7 +109,7 @@ required-features = ["ps3autotests"]
 
 [[test]]
 name = "process_spawn_microtest"
-required-features = ["microtests"]
+required-features = ["microtests", "installed-firmware-tests"]
 
 [[test]]
 name = "microtests"

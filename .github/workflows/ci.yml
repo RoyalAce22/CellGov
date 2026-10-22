@@ -286,13 +286,77 @@ jobs:
       - name: repository tests
         run: bash .github/ci.sh test
 
+  # Blocking. The suites that boot the microtest ELFs, which git ignores:
+  # the job builds every tests/micro/<name>/build.sh in the pinned
+  # toolchain image, then runs the suites with their features on. The
+  # built directories are cached by the hash of tests/micro at checkout,
+  # before any build/ directory exists, so a run that changes no microtest
+  # source or capture builds nothing. As with the cargo cache, only a run
+  # on main saves an entry. Linux only: the build needs Docker
+  # with Linux containers, which the Windows runner does not run.
+  microtests:
+    name: microtests (stable, ubuntu-latest, blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: stable
+
+      # Restores the stable test leg's entry and saves nothing; see the
+      # test job's cache step.
+      - name: Restore the test cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: test
+          save-if: false
+
+      - name: Restore built microtests
+        id: micro-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tests/micro/*/build
+          key: microtests-${{ hashFiles('tests/micro/**') }}
+
+      - name: repository microtest build
+        if: steps.micro-cache.outputs.cache-hit != 'true'
+        run: bash .github/ci.sh micro-build
+
+      - name: Save built microtests
+        if: steps.micro-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tests/micro/*/build
+          key: ${{ steps.micro-cache.outputs.cache-primary-key }}
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: cargo-nextest@0.9.146
+
+      - name: repository tests (microtests)
+        run: bash .github/ci.sh microtests
+
+      - name: Upload test durations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: junit-microtests
+          path: target/nextest/ci-microtests/junit.xml
+          if-no-files-found: warn
+
   # The verdict. `needs` lists the blocking jobs and nothing else, so
   # each informational job's result, including a timeout, stays out of
   # it.
   success:
     name: CI
     if: always()
-    needs: [config, lint, deny, msrv, test]
+    needs: [config, lint, deny, msrv, test, microtests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

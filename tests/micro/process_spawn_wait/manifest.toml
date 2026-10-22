@@ -10,11 +10,12 @@ name = "process_spawn_wait"
 #
 # RPCS3 cannot run this test: it todo-stubs sc 21/27 (spawn), sc 4
 # (get_status), and sc 2/23 (wait); there is no [rpcs3] section.
-# The CellGov-side CI gate is
-# apps/cellgov_cli/tests/process_spawn_microtest.rs, which boots
-# the pair twice and requires bit-identical hash streams. It skips
-# when build/parent.elf is absent (ELFs are gitignored; build via
-# build.sh in any ps3dev+PSL1GHT toolchain container -- see the
+# apps/cellgov_cli/tests/process_spawn_microtest.rs boots the pair
+# twice and requires bit-identical hash streams. The child is an
+# SCE-wrapped SELF, so the suite and this case need the operator's key
+# vault and run only with the `microtests` and
+# `installed-firmware-tests` features on (ELFs are gitignored; build
+# via build.sh in the tests/micro/toolchain image -- see the
 # requirements comment in that script).
 
 [observe]

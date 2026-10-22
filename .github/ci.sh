@@ -150,6 +150,53 @@ deny() {
     timed deny cargo deny check advisories bans licenses sources
 }
 
+# The microtest suites read the ELFs each tests/micro/<name>/build.sh
+# writes under its build/ directory, which git ignores. The workflow's
+# microtests job runs `micro-build` in the pinned toolchain image
+# (tests/micro/toolchain) when its cache of those directories misses,
+# then `microtests`. A build's output goes to target/micro-build/<name>.log
+# and is printed only when the build fails.
+build_every_microtest() {
+    local image=$1 root dir name built=0
+    # Docker on Windows takes a drive path; Git Bash would rewrite the
+    # container paths.
+    root=$(pwd -W 2>/dev/null || pwd)
+    mkdir -p target/micro-build
+    for dir in tests/micro/*/; do
+        name=$(basename "$dir")
+        [ -f "$dir/build.sh" ] || continue
+        if ! MSYS_NO_PATHCONV=1 docker run --rm \
+            -v "$root/tests/micro/$name:/src" -v "$root/tests/micro/common:/common" \
+            -e COMMON=/common "$image" bash /src/build.sh >"target/micro-build/$name.log" 2>&1; then
+            cat "target/micro-build/$name.log"
+            echo "ci.sh: tests/micro/$name/build.sh failed" >&2
+            return 1
+        fi
+        built=$((built + 1))
+    done
+    echo "ci.sh: built $built microtests"
+    test "$built" -gt 0
+}
+
+micro_build() {
+    local image=${MICRO_IMAGE:-ps3dev}
+    timed toolchain-image docker build -q -t "$image" tests/micro/toolchain
+    timed build-microtests build_every_microtest "$image"
+}
+
+# The targets that hold a microtest-gated test, with the features on: the
+# two interpreter crates' unit tests, the SPU float-edge program, and the
+# CLI's boot suite. The spawn suite, the SPURS suite and the boot cases
+# that load a firmware or read the key vault need the operator's vfs/,
+# so they run only under `installed-firmware-tests`, which this job
+# leaves off.
+microtests() {
+    timed test-microtests cargo nextest run --locked --profile ci-microtests \
+        -p cellgov_ppu -p cellgov_spu -p cellgov_cli \
+        --features cellgov_ppu/ppu-microtests,cellgov_spu/spu-microtests,cellgov_cli/microtests \
+        -E 'package(cellgov_ppu) & kind(lib) | package(cellgov_spu) & (kind(lib) | test(/^spu_float_edges::/)) | binary_id(cellgov_cli::microtests)'
+}
+
 case "${1:-full}" in
     lint) run_group lint lint ;;
     check) run_group check check ;;
@@ -158,6 +205,8 @@ case "${1:-full}" in
     local) run_group local test_local ;;
     smoke-artifacts) run_group smoke-artifacts smoke_artifacts ;;
     deny) run_group deny deny ;;
+    micro-build) run_group micro-build micro_build ;;
+    microtests) run_group microtests microtests ;;
     # The pre-push gate: every group the workflow runs, plus `local`.
     full)
         run_group lint lint
@@ -167,7 +216,7 @@ case "${1:-full}" in
         run_group local test_local
         ;;
     *)
-        echo "usage: $0 {lint|check|test|test-linux|local|smoke-artifacts|deny|full}" >&2
+        echo "usage: $0 {lint|check|test|test-linux|local|smoke-artifacts|deny|micro-build|microtests|full}" >&2
         exit 2
         ;;
 esac

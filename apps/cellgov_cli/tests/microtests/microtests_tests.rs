@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn every_microtest_reports_its_documented_payload() {
     let mut failures: Vec<String> = Vec::new();
-    for case in CASES {
+    for case in booted_cases() {
         let observation = run_observation(case, "payload");
         let problems = match check_outcome(case, &observation) {
             Some(bad) => vec![bad],
@@ -48,7 +48,7 @@ fn every_microtest_reports_its_documented_payload() {
 #[test]
 fn every_microtest_boots_bit_identically_twice() {
     let mut failures: Vec<String> = Vec::new();
-    for case in CASES {
+    for case in booted_cases() {
         let a = run_observation(case, "det_a");
         let b = run_observation(case, "det_b");
         // Anti-vacuity floor: two boots that both retired nothing and
@@ -92,6 +92,27 @@ fn every_microtest_boots_bit_identically_twice() {
         failures.len(),
         failures.join("\n  "),
     );
+}
+
+/// A build without `installed-firmware-tests` leaves out the firmware
+/// and key-vault cases and nothing else, and each of them is in the
+/// table.
+#[test]
+fn only_the_listed_cases_depend_on_the_operators_vfs() {
+    let mut left_out: Vec<&str> = CASES
+        .iter()
+        .map(|case| case.name)
+        .filter(|name| !boots_here(name))
+        .collect();
+    assert_eq!(booted_cases().count() + left_out.len(), CASES.len());
+    let mut listed = [FIRMWARE_CASES, KEY_VAULT_CASES].concat();
+    listed.sort_unstable();
+    left_out.sort_unstable();
+    if cfg!(feature = "installed-firmware-tests") {
+        assert!(left_out.is_empty(), "{left_out:?}");
+    } else {
+        assert_eq!(left_out, listed);
+    }
 }
 
 /// A microtest that boots under `boot run` but is absent from [`CASES`]

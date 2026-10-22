@@ -52,9 +52,9 @@ fn workspace_root() -> PathBuf {
 
 /// Microtests that import firmware libraries (libgcm, for the RSX ones),
 /// and the firmware they boot against. Their boot loads the firmware's
-/// modules from the store under `vfs/`, which only a build with the
-/// `decrypt` feature can read, so without it such a case fails naming
-/// the feature; the suite never skips it.
+/// modules from the store under `vfs/`, so they boot only under the
+/// `installed-firmware-tests` feature, which declares that firmware
+/// installed; see [`boots_here`].
 const FIRMWARE_CASES: &[&str] = &[
     "rsx_flip_status_transition",
     "rsx_label_write_poll",
@@ -64,6 +64,25 @@ const FIRMWARE_CASES: &[&str] = &[
 /// The firmware a [`FIRMWARE_CASES`] microtest boots against: the
 /// reference console's.
 const FIRMWARE: &str = "4.93";
+
+/// Microtests that read the operator's key vault under `vfs/` and boot
+/// no firmware: `process_spawn_wait` spawns an SCE-wrapped
+/// `child.self`. An installed firmware implies the vault, so these boot
+/// under `installed-firmware-tests` too.
+const KEY_VAULT_CASES: &[&str] = &["process_spawn_wait"];
+
+/// Does this build boot the case `name`? Every case but a
+/// [`FIRMWARE_CASES`] or [`KEY_VAULT_CASES`] one, and those too under
+/// `installed-firmware-tests`.
+fn boots_here(name: &str) -> bool {
+    cfg!(feature = "installed-firmware-tests")
+        || !(FIRMWARE_CASES.contains(&name) || KEY_VAULT_CASES.contains(&name))
+}
+
+/// The cases this build boots, in table order.
+fn booted_cases() -> impl Iterator<Item = &'static Case> {
+    CASES.iter().filter(|case| boots_here(case.name))
+}
 
 /// Microtests CellGov runs wrong, each with the open tracker issue that
 /// owns the defect. Such a case must still fail its payload check and
@@ -120,13 +139,11 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
         .arg(&observation_path)
         .current_dir(workspace_root());
     if FIRMWARE_CASES.contains(&case.name) {
-        if !cfg!(feature = "decrypt") {
-            panic!(
-                "{} imports firmware libraries and boots against firmware {FIRMWARE}; \
-                 run the suite with --features microtests,decrypt",
-                case.name
-            );
-        }
+        assert!(
+            boots_here(case.name),
+            "{} boots against firmware {FIRMWARE}; run it with --features installed-firmware-tests",
+            case.name
+        );
         boot.args(["--fw", FIRMWARE]);
     } else {
         // The rest are freestanding PSL1GHT binaries that bind no
