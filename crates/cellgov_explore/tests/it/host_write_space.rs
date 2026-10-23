@@ -204,8 +204,8 @@ fn a_published_host_write_reaches_the_footprint_with_its_space() {
     let published = rt.last_host_writes().to_vec();
     let out_param = published
         .iter()
-        .find(|(_, _, range)| range.start().raw() == NSEC_OUT)
-        .map(|(writer, space, _)| (*writer, *space));
+        .find(|write| write.range.start().raw() == NSEC_OUT)
+        .map(|write| (write.writer, write.space));
     assert_eq!(
         out_param,
         Some((cellgov_trace::HostWriter::Lv2Effect, AddressSpaceId::BOOT)),

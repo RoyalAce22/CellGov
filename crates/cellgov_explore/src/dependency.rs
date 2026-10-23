@@ -408,13 +408,13 @@ impl StepFootprint {
     /// in-flight set's, on the argument [`StepFootprint::note_inflight`]
     /// makes.
     pub fn note_host_writes(&mut self, rt: &cellgov_core::Runtime) {
-        for (writer, space, range) in rt.last_host_writes() {
-            let record = |fp: &mut Self, range: &cellgov_mem::ByteRange| {
-                fp.shared_writes.push(*range);
+        for write in rt.last_host_writes() {
+            let record = |fp: &mut Self, write: &cellgov_core::HostWrite| {
+                fp.shared_writes.push(write.range);
                 fp.shared_writes
-                    .extend(rt.shared_alias_ranges_in(*space, *range));
+                    .extend(rt.shared_alias_ranges_in(write.space, write.range));
             };
-            match writer {
+            match write.writer {
                 // The dispatch holds the tick it ran at, and a handler
                 // can land a tick-derived value anywhere in these bytes
                 // (the `sys_time_get_current_time` out parameters are
@@ -423,7 +423,7 @@ impl StepFootprint {
                 cellgov_trace::HostWriter::Lv2Effect
                 | cellgov_trace::HostWriter::SyscallOutParam
                 | cellgov_trace::HostWriter::WakeContinuation => {
-                    record(self, range);
+                    record(self, write);
                     self.reads_clock = true;
                 }
                 // A new view's seed copy carries the segment's bytes,
@@ -437,7 +437,7 @@ impl StepFootprint {
                 cellgov_trace::HostWriter::SharedViewSeed
                 | cellgov_trace::HostWriter::RsxMirror
                 | cellgov_trace::HostWriter::SpuProblemState => {
-                    record(self, range);
+                    record(self, write);
                 }
                 // A landing is already the in-flight set's, which holds
                 // it for every step of the flight rather than for the

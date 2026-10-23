@@ -14,7 +14,7 @@ use cellgov_time::{Budget, GuestTicks, InstructionCost};
 use cellgov_trace::HostWriter;
 use strum::VariantArray;
 
-use crate::runtime::{AddressSpaceId, Runtime, StepError};
+use crate::runtime::{AddressSpaceId, HostWrite, Runtime, StepError};
 
 fn range(addr: u64, len: u64) -> ByteRange {
     ByteRange::new(GuestAddr::new(addr), len).expect("in-range test address")
@@ -72,7 +72,11 @@ fn seed_records(rt: &mut Runtime) {
     rt.last_runnable = vec![unit];
     rt.last_ppe_pressure = Some((unit, PpeIssuePressure::NONE));
     rt.last_dma_completions = vec![(DmaCompletion::new(request, GuestTicks::new(1)), false)];
-    rt.last_host_writes = vec![(HostWriter::Placement, AddressSpaceId::BOOT, range(0, 4))];
+    rt.last_host_writes = vec![HostWrite {
+        writer: HostWriter::Placement,
+        space: AddressSpaceId::BOOT,
+        range: range(0, 4),
+    }];
     rt.last_lv2_effects = vec![Effect::TraceMarker {
         marker: 1,
         source: unit,

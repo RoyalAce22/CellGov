@@ -22,6 +22,28 @@ use super::spaces::AddressSpaceId;
 use super::types::RuntimeMode;
 use super::Runtime;
 
+/// One guest write host-side code landed, as [`Runtime::last_host_writes`]
+/// publishes it.
+///
+/// - Only a write that landed has an entry; a refused write has none.
+/// - Every [`RuntimeMode`] publishes the entry. The mode gates only the
+///   [`TraceRecord::HostWrite`] record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostWrite {
+    /// The mechanism that wrote the bytes.
+    pub writer: HostWriter,
+    /// The space the write landed in.
+    ///
+    /// This is not always the space of the unit whose step the write
+    /// belongs to: a wake continuation lands in the waiter's space, and a
+    /// timer expiry's repair write in the expiring waiter's space.
+    /// Resolve [`Self::range`] against this space, through
+    /// [`Runtime::shared_alias_ranges_in`].
+    pub space: AddressSpaceId,
+    /// The bytes the write covered, in [`Self::space`].
+    pub range: ByteRange,
+}
+
 impl Runtime {
     /// Writes `bytes` to `range` in `space` on behalf of `writer`, and
     /// returns the count of reservations the clear sweep dropped.
@@ -65,7 +87,11 @@ impl Runtime {
         let cleared = reservations.clear_covering(addr, len, exempt);
         // The push precedes the mode gate below: a FaultDriven run
         // writes no trace record and still publishes this entry.
-        self.last_host_writes.push((writer, space, range));
+        self.last_host_writes.push(HostWrite {
+            writer,
+            space,
+            range,
+        });
         if let Some(tap) = self.tap.as_deref_mut() {
             tap.write(space.raw(), addr, bytes);
         }

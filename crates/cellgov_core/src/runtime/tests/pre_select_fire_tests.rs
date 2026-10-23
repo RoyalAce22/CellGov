@@ -10,7 +10,7 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_time::{Budget, InstructionCost};
 use cellgov_trace::HostWriter;
 
-use crate::runtime::{AddressSpaceId, Runtime};
+use crate::runtime::{AddressSpaceId, HostWrite, Runtime};
 
 const DMA_SRC: u64 = 0x100;
 const DMA_DST: u64 = 0x200;
@@ -142,11 +142,11 @@ fn a_pre_select_fire_lands_a_host_write_and_no_published_completion() {
         .expect("the step commits");
 
     assert!(
-        rt.last_host_writes().contains(&(
-            HostWriter::DmaCompletion,
-            AddressSpaceId::BOOT,
-            range(DMA_DST, 8),
-        )),
+        rt.last_host_writes().contains(&HostWrite {
+            writer: HostWriter::DmaCompletion,
+            space: AddressSpaceId::BOOT,
+            range: range(DMA_DST, 8),
+        }),
         "the landing reaches the host-write list: {:?}",
         rt.last_host_writes(),
     );

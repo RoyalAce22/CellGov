@@ -294,27 +294,15 @@ impl Runtime {
     ///   all-blocked time warp. What either phase writes belongs to the
     ///   step that then runs.
     /// - A restore empties the list.
-    /// - A refused write records nothing.
     /// - A [`HostWriter::Placement`] the driver makes between two steps
     ///   stands in the list until the next step clears it.
-    /// - Every [`RuntimeMode`] builds the list; the mode gates the
-    ///   `HostWrite` trace record alone.
-    /// - An entry's space is the space the write landed in, which is
-    ///   not always the space of the unit whose step it belongs to. A
-    ///   wake continuation lands in the waiter's space, and a timer
-    ///   expiry's repair write in the expiring waiter's space. Resolve
-    ///   a range against its own space, through
-    ///   [`Runtime::shared_alias_ranges_in`].
+    ///
+    /// [`HostWrite`] states what one entry means.
     ///
     /// [`HostWriter::Placement`]: cellgov_trace::HostWriter::Placement
+    /// [`HostWrite`]: super::HostWrite
     #[inline]
-    pub fn last_host_writes(
-        &self,
-    ) -> &[(
-        cellgov_trace::HostWriter,
-        crate::runtime::spaces::AddressSpaceId,
-        cellgov_mem::ByteRange,
-    )] {
+    pub fn last_host_writes(&self) -> &[super::HostWrite] {
         &self.last_host_writes
     }
 

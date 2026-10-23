@@ -39,6 +39,14 @@ fn range(addr: u64, len: u64) -> ByteRange {
     ByteRange::new(GuestAddr::new(addr), len).expect("in-range test address")
 }
 
+fn hw(writer: HostWriter, space: AddressSpaceId, range: ByteRange) -> HostWrite {
+    HostWrite {
+        writer,
+        space,
+        range,
+    }
+}
+
 fn write_intent(target: ByteRange, source: UnitId) -> Effect {
     Effect::shared_write(
         target,
@@ -76,7 +84,11 @@ fn a_placement_before_the_first_step_stands_in_the_published_host_writes() {
 
     assert_eq!(
         rt.last_host_writes().to_vec(),
-        vec![(HostWriter::Placement, AddressSpaceId::BOOT, range(MAIN, 4))],
+        vec![hw(
+            HostWriter::Placement,
+            AddressSpaceId::BOOT,
+            range(MAIN, 4)
+        )],
         "the list is emptied at step entry, so a placement made before \
          the first step is still in it",
     );
@@ -97,7 +109,11 @@ fn a_commit_keeps_the_records_and_the_next_step_clears_them() {
         .expect("a trivial step commits");
     assert_eq!(
         rt.last_host_writes().to_vec(),
-        vec![(HostWriter::Placement, AddressSpaceId::BOOT, range(MAIN, 4))],
+        vec![hw(
+            HostWriter::Placement,
+            AddressSpaceId::BOOT,
+            range(MAIN, 4)
+        )],
         "a commit clears nothing, including on the fast path: the time warp \
          runs ahead of it and what the warp wrote has to survive it",
     );
@@ -141,7 +157,7 @@ fn the_fault_driven_mode_publishes_the_record_it_does_not_trace() {
 
     assert_eq!(
         rt.last_host_writes().to_vec(),
-        vec![(
+        vec![hw(
             HostWriter::DmaCompletion,
             AddressSpaceId::BOOT,
             range(MAIN, 8),
@@ -192,7 +208,11 @@ fn an_applied_lv2_write_reaches_both_published_records() {
     assert_eq!(rt.last_lv2_effects().to_vec(), vec![effect]);
     assert_eq!(
         rt.last_host_writes().to_vec(),
-        vec![(HostWriter::Lv2Effect, AddressSpaceId::BOOT, range(MAIN, 4))],
+        vec![hw(
+            HostWriter::Lv2Effect,
+            AddressSpaceId::BOOT,
+            range(MAIN, 4)
+        )],
         "a handler's write is an LV2 effect and a host write both; the two \
          lists name the same bytes from either end",
     );
@@ -316,7 +336,7 @@ fn a_transfer_the_time_warp_fires_reaches_the_published_host_writes() {
         .expect("the woken step commits");
 
     assert!(
-        rt.last_host_writes().contains(&(
+        rt.last_host_writes().contains(&hw(
             HostWriter::DmaCompletion,
             AddressSpaceId::BOOT,
             range(DMA_DST, 8),
@@ -428,7 +448,7 @@ fn an_expiry_the_time_warp_fires_reaches_the_published_records() {
         .expect("the woken step commits");
 
     assert!(
-        rt.last_host_writes().contains(&(
+        rt.last_host_writes().contains(&hw(
             HostWriter::Lv2Effect,
             AddressSpaceId::BOOT,
             range(u64::from(RESULT_PTR), 8),
@@ -458,7 +478,7 @@ fn a_write_into_a_child_space_publishes_that_space() {
 
     assert_eq!(
         rt.last_host_writes().to_vec(),
-        vec![(HostWriter::WakeContinuation, child, range(MAIN, 4))],
+        vec![hw(HostWriter::WakeContinuation, child, range(MAIN, 4))],
         "the same numeric range in the boot space is different memory, so \
          the space is what tells them apart",
     );

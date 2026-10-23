@@ -170,7 +170,7 @@ fn both_waits_park_and_only_the_warp_ends_them() {
     assert!(
         rt.last_host_writes()
             .iter()
-            .any(|(_, _, range)| *range == shared_range()),
+            .any(|write| write.range == shared_range()),
         "the expiry wrote the shared result from inside the warp: {:?}",
         rt.last_host_writes(),
     );
