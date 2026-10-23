@@ -74,7 +74,7 @@ fn two_writers_beside_a_transfer() -> Runtime {
         step.unit, SUBMITTER,
         "registration order moved the submitter"
     );
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the enqueue commits");
     rt
 }

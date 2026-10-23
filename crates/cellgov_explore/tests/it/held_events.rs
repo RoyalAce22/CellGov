@@ -48,7 +48,7 @@ fn workload() -> Runtime {
 /// Run one step under the installed scheduler and commit it.
 fn step(rt: &mut Runtime) {
     let step = rt.step().expect("a unit of this workload is runnable");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("no step of this workload refuses its commit");
 }
 

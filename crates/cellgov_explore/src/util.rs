@@ -169,7 +169,7 @@ fn take_step(rt: &mut Runtime) -> Result<Option<u64>, DrivenStop> {
             // The commit discards the batch and counts it, so the fault
             // read comes after it. A refusal outranks a fault, as the
             // boot's own step loop ranks them.
-            if let Err(e) = rt.commit_step_and_recycle(&mut step) {
+            if let Err(e) = rt.commit_step(&mut step) {
                 return Err(stop(StopReason::CommitError(e)));
             }
             // Ahead of the fault for the same reason the commit refusal

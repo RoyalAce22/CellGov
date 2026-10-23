@@ -198,7 +198,7 @@ fn a_published_host_write_reaches_the_footprint_with_its_space() {
         "the syscall step names no write of its own: {:?}",
         step.effects,
     );
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the dispatch commits");
 
     let published = rt.observations().host_writes.to_vec();

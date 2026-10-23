@@ -36,7 +36,7 @@ fn drive(rt: &mut Runtime, n: usize) {
     for _ in 0..n {
         match rt.step() {
             Ok(step) => {
-                let _ = rt.commit_step(&step.result, &step.effects);
+                let _ = rt.commit_unchecked(&step.result, &step.effects);
             }
             Err(_) => break,
         }

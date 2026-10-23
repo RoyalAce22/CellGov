@@ -135,7 +135,7 @@ fn publish_over_a_reservation(
     for _ in 0..400 {
         let Ok(step) = rt.step() else { break };
         finished += usize::from(step.result.yield_reason == YieldReason::Finished);
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         if finished == 2 {
             break;
@@ -209,7 +209,7 @@ fn a_second_atomic_status_read_parks_the_unit_for_good() {
     for _ in 0..50 {
         let Ok(step) = rt.step() else { break };
         assert_ne!(step.result.yield_reason, YieldReason::Finished);
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     let parked = state(&rt, unit);

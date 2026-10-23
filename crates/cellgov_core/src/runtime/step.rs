@@ -65,6 +65,8 @@ impl Runtime {
     ///
     /// Emitted effects are returned verbatim in [`RuntimeStep::result`];
     /// [`Runtime::commit_step`] drives the commit pipeline over them.
+    /// Every call, a refused one included, closes the step the previous
+    /// call returned, so that step's commit refuses.
     pub fn step(&mut self) -> Result<RuntimeStep, StepError> {
         // Every record describes this step from here on, so a refusal
         // leaves no value from an earlier step. The step-entry fire and
@@ -387,8 +389,16 @@ impl Runtime {
         // Fresh empty Vec avoids allocating in the common zero-effects
         // FaultDriven case.
         self.effects_buf = Vec::new();
+        self.step_serial = self.step_serial.wrapping_add(1);
+        let token = super::StepToken::new(
+            self.observations.step,
+            unit_id,
+            self.spaces.space_of(unit_id),
+            self.step_serial,
+        );
+        self.pending_commit = Some(token);
         Ok(RuntimeStep {
-            index: self.observations.step,
+            token,
             unit: unit_id,
             result,
             effects: effects_buf,
@@ -446,9 +456,11 @@ impl Runtime {
     }
 
     /// Empty every record a step and its commit publish about that step,
-    /// and stamp them with the index of the next step.
+    /// stamp them with the index of the next step, and leave no step to
+    /// commit.
     pub(super) fn clear_step_records(&mut self) {
         self.observations.reset(self.next_step_index());
+        self.pending_commit = None;
     }
 
     /// The index the next [`Runtime::step`] that runs a unit carries.

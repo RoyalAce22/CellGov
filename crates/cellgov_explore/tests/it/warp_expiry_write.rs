@@ -144,7 +144,7 @@ fn both_waits_park_and_only_the_warp_ends_them() {
     let mut rt = workload();
     for _ in 0..2 {
         let step = rt.step().expect("a waiter is runnable");
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the wait commits");
     }
     assert_eq!(
@@ -165,7 +165,7 @@ fn both_waits_park_and_only_the_warp_ends_them() {
     );
 
     let step = rt.step().expect("the warp expires the earlier wait");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the woken step commits");
     assert!(
         rt.observations()

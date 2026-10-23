@@ -25,7 +25,7 @@ fn dma_completion_fires_and_applies_transfer() {
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 10));
     let s = rt.step().unwrap();
-    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
+    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(outcome.dma_completions_fired, 1);
     assert_eq!(
         rt.memory()
@@ -57,7 +57,7 @@ fn dma_completion_wakes_issuer() {
         .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(0));
-    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
+    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(outcome.dma_completions_fired, 1);
     assert_eq!(
         rt.registry().effective_status(UnitId::new(1)),
@@ -95,7 +95,7 @@ fn an_untagged_completion_wakes_its_issuer_with_no_tag_bit() {
     );
 
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result, &s.effects).unwrap();
+    rt.commit_unchecked(&s.result, &s.effects).unwrap();
 
     assert_eq!(
         rt.registry().effective_status(issuer),
@@ -139,7 +139,7 @@ fn a_queued_tagged_transfer_holds_that_tag_groups_bit_until_it_completes() {
     );
 
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result, &s.effects).unwrap();
+    rt.commit_unchecked(&s.result, &s.effects).unwrap();
 
     assert_eq!(
         rt.outstanding_dma_tags(issuer),
@@ -233,7 +233,7 @@ fn a_dma_completion_for_a_finished_issuer_does_not_resurrect_it() {
         .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(0));
-    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
+    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(outcome.dma_completions_fired, 1);
     // The in-flight payload still lands in the terminal memory image.
     assert_eq!(
@@ -294,7 +294,7 @@ fn a_dma_completion_for_a_faulted_issuer_does_not_resurrect_it() {
         .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(0));
-    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
+    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(outcome.dma_completions_fired, 1);
     assert_eq!(
         rt.memory()
@@ -384,7 +384,7 @@ fn dma_completion_does_not_fire_before_its_time() {
     rt.dma_queue
         .enqueue(DmaCompletion::new(req, GuestTicks::new(100)), None);
     let s = rt.step().unwrap();
-    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
+    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(outcome.dma_completions_fired, 0);
     assert_eq!(rt.dma_queue().len(), 1);
 }
@@ -428,7 +428,7 @@ fn a_put_to_a_reserved_destination_raises_and_preserves_reservation() {
             .register_with(|id| FakeIsaUnit::new(id, ops));
         for _ in 0..8 {
             let Ok(step) = rt.step() else { break };
-            rt.commit_step(&step.result, &step.effects)
+            rt.commit_unchecked(&step.result, &step.effects)
                 .expect("the enqueue is accepted");
         }
         rt.drain_pending_dma();
@@ -483,7 +483,7 @@ fn dma_completion_clears_overlapping_reservation() {
     for _ in 0..100 {
         match rt.step() {
             Ok(step) => {
-                let outcome = rt.commit_step(&step.result, &step.effects).unwrap();
+                let outcome = rt.commit_unchecked(&step.result, &step.effects).unwrap();
                 completions_fired += outcome.dma_completions_fired;
                 if completions_fired > 0 && !rt.reservations().is_held_by(UnitId::new(1)) {
                     break;
@@ -525,7 +525,7 @@ fn dma_wait_parks_spu_blocked_and_completion_wakes_it() {
         for _ in 0..200 {
             match rt.step() {
                 Ok(step) => {
-                    let outcome = rt.commit_step(&step.result, &step.effects).unwrap();
+                    let outcome = rt.commit_unchecked(&step.result, &step.effects).unwrap();
                     completions_fired += outcome.dma_completions_fired;
                     if step.result.yield_reason == YieldReason::DmaWait {
                         if let Some(status) = rt.registry().effective_status(step.unit) {
@@ -605,7 +605,7 @@ fn dma_wait_same_commit_completion_overrides_blocked_to_runnable() {
                 Ok(step) => {
                     let waited = step.result.yield_reason == YieldReason::DmaWait;
                     parked |= waited;
-                    rt.commit_step(&step.result, &step.effects).unwrap();
+                    rt.commit_unchecked(&step.result, &step.effects).unwrap();
                     final_status = rt
                         .registry()
                         .effective_status(step.unit)
@@ -695,7 +695,7 @@ fn a_raised_put_holds_its_tag_and_its_waiting_issuer_stays_parked() {
         let terminal = loop {
             match rt.step() {
                 Ok(step) => {
-                    rt.commit_step(&step.result, &step.effects)
+                    rt.commit_unchecked(&step.result, &step.effects)
                         .expect("the enqueue is accepted");
                 }
                 Err(err) => break err,
@@ -749,7 +749,7 @@ fn plain_shared_write_through_runtime_clears_reservation() {
     for _ in 0..5 {
         match rt.step() {
             Ok(step) => {
-                let _ = rt.commit_step(&step.result, &step.effects);
+                let _ = rt.commit_unchecked(&step.result, &step.effects);
             }
             Err(_) => break,
         }
@@ -785,7 +785,7 @@ fn conditional_store_through_runtime_clears_own_and_overlapping() {
     for _ in 0..5 {
         match rt.step() {
             Ok(step) => {
-                let _ = rt.commit_step(&step.result, &step.effects);
+                let _ = rt.commit_unchecked(&step.result, &step.effects);
             }
             Err(_) => break,
         }

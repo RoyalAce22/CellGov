@@ -168,7 +168,7 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
                 if first_fault.is_none() {
                     first_fault = step.result.fault.map(|fault| (step.unit, fault));
                 }
-                if let Err(e) = rt.commit_step_and_recycle(&mut step) {
+                if let Err(e) = rt.commit_step(&mut step) {
                     break ScenarioOutcome::CommitRefused(e);
                 }
             }

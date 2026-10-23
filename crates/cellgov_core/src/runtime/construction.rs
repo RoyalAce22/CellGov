@@ -88,6 +88,8 @@ impl Runtime {
             dma_latency: Box::new(FixedLatency::new(DEFAULT_DMA_LATENCY_TICKS.raw())),
             runnable_buf: Vec::new(),
             observations: crate::runtime::StepObservations::default(),
+            pending_commit: None,
+            step_serial: 0,
             spu_thread_failure: None,
             mfc_exception: None,
             lv2_host: Lv2Host::new(),

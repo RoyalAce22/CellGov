@@ -114,7 +114,7 @@ fn ppu_footprints(ops: Vec<Op>) -> (Vec<StepFootprint>, UnitId) {
     let mut footprints = Vec::new();
     while footprints.len() < count {
         let step = rt.step().unwrap();
-        rt.commit_step(&step.result, &step.effects).unwrap();
+        rt.commit_unchecked(&step.result, &step.effects).unwrap();
         if step.unit == ppu {
             let mut fp =
                 StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);

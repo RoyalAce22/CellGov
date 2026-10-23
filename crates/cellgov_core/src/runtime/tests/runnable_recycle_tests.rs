@@ -54,8 +54,7 @@ fn a_recycling_commit_hands_the_runnable_buffer_to_the_next_step() {
     let mut first = rt.step().expect("both units are runnable");
     assert_eq!(first.runnable, vec![a, b]);
     let capacity = first.runnable.capacity();
-    rt.commit_step_and_recycle(&mut first)
-        .expect("the step commits");
+    rt.commit_step(&mut first).expect("the step commits");
     assert!(first.runnable.is_empty());
     assert_eq!(rt.runnable_buf_capacity_for_tests(), capacity);
 

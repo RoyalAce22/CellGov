@@ -88,7 +88,7 @@ fn a_stalled_list_resumes_with_the_element_software_rewrote() {
     for _ in 0..400 {
         let Ok(step) = rt.step() else { break };
         reasons.push(step.result.yield_reason);
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         if step.result.yield_reason == YieldReason::Finished {
             break;

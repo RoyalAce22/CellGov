@@ -104,7 +104,7 @@ fn tapped(fault_on: u64) -> (Runtime, Rc<RefCell<Vec<Seen>>>) {
 fn run(rt: &mut Runtime, steps: usize) {
     for _ in 0..steps {
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result, &s.effects).unwrap();
+        rt.commit_unchecked(&s.result, &s.effects).unwrap();
     }
 }
 
@@ -266,7 +266,7 @@ fn a_batch_the_drain_refuses_reports_none_of_its_writes() {
     rt.set_tap(Box::new(Recorder(Rc::clone(&seen))));
     rt.registry_mut().register_with(|id| IntoReserved { id });
     let s = rt.step().unwrap();
-    let refused = rt.commit_step(&s.result, &s.effects);
+    let refused = rt.commit_unchecked(&s.result, &s.effects);
     assert!(
         matches!(
             refused,

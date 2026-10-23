@@ -103,7 +103,7 @@ fn run(src: u32, bad_size: u32, bad_offset: u32) -> (Vec<YieldReason>, Option<u6
     let mut reasons = Vec::new();
     while let Ok(step) = rt.step() {
         reasons.push(step.result.yield_reason);
-        if rt.commit_step(&step.result, &step.effects).is_err() {
+        if rt.commit_unchecked(&step.result, &step.effects).is_err() {
             break;
         }
     }

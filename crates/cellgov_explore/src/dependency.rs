@@ -241,10 +241,10 @@ impl StepFootprint {
         runnable: &[cellgov_event::UnitId],
     ) -> Result<(), StaleObservations> {
         let observed = rt.observations().step;
-        if observed != step.index {
+        if observed != step.token.index() {
             return Err(StaleObservations {
                 observed,
-                committed: step.index,
+                committed: step.token.index(),
             });
         }
         let unit = step.unit;

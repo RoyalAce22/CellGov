@@ -255,7 +255,7 @@ fn the_handler_sends_a_message_the_senders_own_step_never_names() {
 
     let park = rt.step().expect("the receiver is runnable");
     assert_eq!(park.unit, RECEIVER);
-    rt.commit_step(&park.result, &park.effects)
+    rt.commit_unchecked(&park.result, &park.effects)
         .expect("the receive attempt commits");
     assert_eq!(
         rt.registry().effective_status(RECEIVER),
@@ -270,7 +270,7 @@ fn the_handler_sends_a_message_the_senders_own_step_never_names() {
         "the syscall step emits nothing itself: {:?}",
         send.effects,
     );
-    rt.commit_step(&send.result, &send.effects)
+    rt.commit_unchecked(&send.result, &send.effects)
         .expect("the dispatch commits");
 
     assert!(
@@ -314,7 +314,7 @@ fn the_release_ends_a_park_on_a_mailbox_the_handler_never_fills() {
 
     let park = rt.step().expect("the receiver is runnable");
     assert_eq!(park.unit, RECEIVER);
-    rt.commit_step(&park.result, &park.effects)
+    rt.commit_unchecked(&park.result, &park.effects)
         .expect("the receive attempt commits");
     assert_eq!(
         rt.registry().effective_status(RECEIVER),
@@ -324,7 +324,7 @@ fn the_release_ends_a_park_on_a_mailbox_the_handler_never_fills() {
 
     let send = rt.step().expect("the sender is runnable");
     assert_eq!(send.unit, SENDER);
-    rt.commit_step(&send.result, &send.effects)
+    rt.commit_unchecked(&send.result, &send.effects)
         .expect("the dispatch commits");
 
     let sends: Vec<MailboxId> = rt

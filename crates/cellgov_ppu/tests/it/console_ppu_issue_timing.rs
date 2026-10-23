@@ -812,7 +812,7 @@ fn replay_counted(
         let step = rt
             .step()
             .unwrap_or_else(|e| panic!("loop {} at pc {:#x}: {e:?}", r.loop_index, s.pc));
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     assert_eq!(state(&rt).pc, exit, "loop {} ran to its exit", r.loop_index);

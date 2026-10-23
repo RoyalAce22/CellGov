@@ -29,7 +29,7 @@ fn a_parked_signal_read_wakes_only_on_its_own_register() {
 
     let step = rt.step().expect("the read runs");
     assert_eq!(step.result.yield_reason, YieldReason::ChannelStall);
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the step commits");
     assert_eq!(
         rt.registry().effective_status(unit),
@@ -54,7 +54,7 @@ fn a_parked_signal_read_wakes_only_on_its_own_register() {
     for _ in 0..4 {
         let Ok(step) = rt.step() else { break };
         reasons.push(step.result.yield_reason);
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     assert_eq!(

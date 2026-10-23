@@ -16,7 +16,7 @@ fn commit_fast_path_empty_loop_advances_epoch_monotonically() {
     let start_epoch = rt.epoch();
     for _ in 0..10_000 {
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result, &s.effects).unwrap();
+        rt.commit_unchecked(&s.result, &s.effects).unwrap();
     }
     assert_eq!(
         rt.epoch().raw(),
@@ -58,13 +58,13 @@ fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
     });
 
     let s = rt.step().unwrap();
-    let o1 = rt.commit_step(&s.result, &s.effects).unwrap();
+    let o1 = rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(o1.dma_completions_fired, 0);
     let s = rt.step().unwrap();
-    let o2 = rt.commit_step(&s.result, &s.effects).unwrap();
+    let o2 = rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(o2.dma_completions_fired, 0);
     let s = rt.step().unwrap();
-    let o3 = rt.commit_step(&s.result, &s.effects).unwrap();
+    let o3 = rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(
         o3.dma_completions_fired, 1,
         "DMA must fire at its scheduled tick despite silent steps"
@@ -77,7 +77,7 @@ fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
     );
     let epoch_before = rt.epoch();
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result, &s.effects).unwrap();
+    rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(rt.epoch().raw(), epoch_before.raw() + 1);
 }
 
@@ -114,7 +114,7 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
 
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(1));
-    let o = rt.commit_step(&s.result, &s.effects).unwrap();
+    let o = rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(o.dma_completions_fired, 0);
     assert_eq!(
         rt.registry().effective_status(UnitId::new(0)),
@@ -122,7 +122,7 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
     );
     let s = rt.step().unwrap();
     assert_eq!(s.unit, UnitId::new(1));
-    let o = rt.commit_step(&s.result, &s.effects).unwrap();
+    let o = rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(o.dma_completions_fired, 1);
     let wake_epoch = rt.epoch();
     assert_eq!(
@@ -131,7 +131,7 @@ fn commit_fast_path_preserves_wake_visibility_through_silent_steps() {
         "DMA completion must wake the issuer"
     );
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result, &s.effects).unwrap();
+    rt.commit_unchecked(&s.result, &s.effects).unwrap();
     assert_eq!(
         rt.epoch().raw(),
         wake_epoch.raw() + 1,
@@ -182,7 +182,7 @@ fn rotation_holding_lwmutex(mode: RuntimeMode, steps: usize) -> Vec<UnitId> {
     for _ in 0..steps {
         let s = rt.step().expect("two runnable units, budget unexhausted");
         selected.push(s.unit);
-        rt.commit_step(&s.result, &s.effects).unwrap();
+        rt.commit_unchecked(&s.result, &s.effects).unwrap();
     }
     selected
 }

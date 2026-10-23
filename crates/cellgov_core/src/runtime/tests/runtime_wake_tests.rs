@@ -393,7 +393,7 @@ fn a_break_logged_during_a_commit_traces_before_that_commits_checkpoints() {
         "test.commit_boundary_attribution",
         format_args!("buffered before commit_step"),
     );
-    rt.commit_step(&s.result, &s.effects).unwrap();
+    rt.commit_unchecked(&s.result, &s.effects).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))

@@ -448,10 +448,11 @@ fn a_refusal_of_any_shape_truncates() {
         CommitError::DmaPayloadLengthMismatch { effect_index: 0 },
         CommitError::DmaGetWithPayload { effect_index: 0 },
         CommitError::Memory(cellgov_mem::MemError::LengthMismatch),
+        CommitError::StaleStep,
     ];
     // The count stands in for exhaustiveness only over a list that
     // names each shape once: a repeat would hold the length up while a
-    // shape the pipeline can give went unlisted.
+    // commit refusal went unlisted.
     for (index, shape) in shapes.iter().enumerate() {
         assert!(
             !shapes[..index].contains(shape),

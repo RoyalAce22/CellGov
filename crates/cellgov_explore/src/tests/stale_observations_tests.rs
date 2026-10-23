@@ -13,23 +13,23 @@ fn a_footprint_refuses_the_observations_of_a_later_step() {
     rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::LoadImm(1); 4]));
 
     let first = rt.step().expect("a runnable unit");
-    rt.commit_step(&first.result, &first.effects)
+    rt.commit_unchecked(&first.result, &first.effects)
         .expect("the step commits");
     let second = rt.step().expect("a runnable unit");
-    assert_ne!(first.index, second.index);
+    assert_ne!(first.token.index(), second.token.index());
 
     let mut footprint = StepFootprint::from_effects(&first.effects);
     let untouched = format!("{footprint:?}");
     assert_eq!(
         footprint.note_commit(&rt, &first, &first.runnable),
         Err(StaleObservations {
-            observed: second.index,
-            committed: first.index,
+            observed: second.token.index(),
+            committed: first.token.index(),
         })
     );
     assert_eq!(format!("{footprint:?}"), untouched);
 
-    rt.commit_step(&second.result, &second.effects)
+    rt.commit_unchecked(&second.result, &second.effects)
         .expect("the step commits");
     let mut footprint = StepFootprint::from_effects(&second.effects);
     footprint

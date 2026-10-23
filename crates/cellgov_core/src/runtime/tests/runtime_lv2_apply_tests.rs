@@ -41,7 +41,7 @@ fn apply_lv2_effects_direct_commits_shared_write_intents() {
     );
 
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result, &s.effects).unwrap();
+    rt.commit_unchecked(&s.result, &s.effects).unwrap();
 
     assert!(
         rt.lv2_direct_committed_writes() >= 2,

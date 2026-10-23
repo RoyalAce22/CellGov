@@ -164,7 +164,7 @@ fn r3(rt: &Runtime, ppu: UnitId) -> u64 {
 
 fn step_once(rt: &mut Runtime) {
     let step = rt.step().expect("a unit is runnable");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("no step of this workload refuses its commit");
 }
 

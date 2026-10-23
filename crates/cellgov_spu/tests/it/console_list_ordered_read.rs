@@ -140,7 +140,7 @@ fn run_with_put(
         // queues a transfer or a refusal. A get that lands before the
         // list issues would leave the result right for the wrong reason.
         held |= step.result.yield_reason == YieldReason::DmaSubmitted && step.effects.is_empty();
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         if step.result.yield_reason == YieldReason::Finished {
             break;

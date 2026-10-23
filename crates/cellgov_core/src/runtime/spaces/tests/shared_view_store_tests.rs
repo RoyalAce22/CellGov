@@ -115,7 +115,7 @@ fn segment_with_writer() -> Runtime {
 
 fn commit_the_store(rt: &mut Runtime) -> CommitOutcome {
     let step = rt.step().expect("the writer runs");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the view is mapped and writable")
 }
 

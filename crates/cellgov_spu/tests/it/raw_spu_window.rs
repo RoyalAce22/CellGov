@@ -188,7 +188,7 @@ pub(crate) fn run_ops(rt: &mut Runtime, ppu: UnitId, n: usize) {
             return;
         }
         let step = rt.step().expect("a unit steps");
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     panic!("the PPU finished {} of {target} ops", ops_done(rt, ppu));
@@ -200,7 +200,7 @@ fn run_out(rt: &mut Runtime) {
         let Ok(step) = rt.step() else {
             return;
         };
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
 }
@@ -454,7 +454,7 @@ fn a_full_interrupt_mailbox_stalls_the_raw_spu_until_the_puint_read() {
             break;
         }
         let step = rt.step().unwrap();
-        rt.commit_step(&step.result, &step.effects).unwrap();
+        rt.commit_unchecked(&step.result, &step.effects).unwrap();
     }
     assert_eq!(
         rt.registry().effective_status(raw),

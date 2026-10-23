@@ -194,7 +194,7 @@ fn the_workload_stages_a_child_init_mid_run() {
     let mut steps = 0;
     while !rt.has_pending_child_init() {
         let step = rt.step().expect("the workload runs to its spawn");
-        rt.commit_step(&step.result, &step.effects).unwrap();
+        rt.commit_unchecked(&step.result, &step.effects).unwrap();
         steps += 1;
         assert!(steps < 10, "the spawn should arrive well inside this");
     }
@@ -243,7 +243,7 @@ fn staged_child_init() -> Runtime {
     let mut rt = spawns_a_child();
     while !rt.has_pending_child_init() {
         let step = rt.step().expect("the workload runs to its spawn");
-        rt.commit_step(&step.result, &step.effects).unwrap();
+        rt.commit_unchecked(&step.result, &step.effects).unwrap();
     }
     rt
 }

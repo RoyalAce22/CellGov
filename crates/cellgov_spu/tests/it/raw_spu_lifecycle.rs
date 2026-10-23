@@ -77,7 +77,7 @@ fn run_call(rt: &mut Runtime, caller: UnitId) -> Vec<UnitId> {
     let mut stepped = Vec::new();
     for _ in 0..20 {
         let step = rt.step().expect("a unit steps");
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         stepped.push(step.unit);
         if step.unit == caller {

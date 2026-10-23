@@ -149,7 +149,7 @@ fn shared_segment_with_same_space_alias() -> Runtime {
 fn run_to_completion(rt: &mut Runtime) {
     for _ in 0..4 {
         let Ok(step) = rt.step() else { break };
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("no step of this workload refuses its commit");
     }
     assert!(

@@ -75,7 +75,7 @@ fn run_out(rt: &mut Runtime) -> Vec<UnitId> {
     for _ in 0..1_000 {
         let Ok(step) = rt.step() else { break };
         order.push(step.unit);
-        rt.commit_step(&step.result, &step.effects).unwrap();
+        rt.commit_unchecked(&step.result, &step.effects).unwrap();
     }
     order
 }

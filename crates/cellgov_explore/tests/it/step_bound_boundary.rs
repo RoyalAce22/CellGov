@@ -201,7 +201,7 @@ fn the_predicate_answers_for_the_step_that_follows_it() {
             match rt.step() {
                 Ok(step) => {
                     assert!(predicted, "a step ran where the predicate saw none left");
-                    rt.commit_step(&step.result, &step.effects).unwrap();
+                    rt.commit_unchecked(&step.result, &step.effects).unwrap();
                     steps += 1;
                 }
                 Err(e) => {

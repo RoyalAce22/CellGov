@@ -177,7 +177,7 @@ fn run(commands: &[Command], elements: &[(u32, u8)], stale: [u8; 2]) -> Outcome 
         if step.result.yield_reason == YieldReason::DmaSubmitted && step.effects.is_empty() {
             held += 1;
         }
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         if step.result.yield_reason == YieldReason::Finished {
             break;

@@ -147,7 +147,7 @@ fn run(exit_code: u32) -> Answers {
                 .collect();
             return (word_at(&rt, CAUSE_AT), word_at(&rt, STATUS_AT), first, last);
         }
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     panic!("the join never returned");

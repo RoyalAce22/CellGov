@@ -17,7 +17,7 @@ fn syscall(rt: &mut Runtime, args: &[u64]) {
         syscall_args,
     });
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result, &s.effects).unwrap();
+    rt.commit_unchecked(&s.result, &s.effects).unwrap();
 }
 
 fn region_at(rt: &Runtime, addr: u64) -> (&'static str, RegionAccess) {

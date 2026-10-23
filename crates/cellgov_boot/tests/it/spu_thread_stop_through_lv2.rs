@@ -50,7 +50,7 @@ fn group_running(program: &[u32]) -> (Runtime, u32, UnitId, UnitId) {
 
 fn step(rt: &mut Runtime) {
     let step = rt.step().expect("the SPU runs");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the step commits");
 }
 

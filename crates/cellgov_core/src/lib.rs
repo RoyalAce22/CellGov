@@ -29,7 +29,7 @@ pub use runtime::{
     default_budget_for_mode, AddressSpaceId, HostWrite, MfcException, PendingChildInit,
     ProcessSpawnLoadError, ProcessSpawnLoader, Runtime, RuntimeMode, RuntimeSnapshot, RuntimeStep,
     RuntimeTap, SpaceError, SpawnedProcessImage, SpuFactory, SpuFactoryError, SpuThreadFailure,
-    StepError, StepIndex, StepObservations, DEFAULT_DMA_LATENCY_TICKS,
+    StepError, StepIndex, StepObservations, StepToken, DEFAULT_DMA_LATENCY_TICKS,
 };
 pub use scheduler::{LowestClockScheduler, RoundRobinScheduler, Scheduler};
 pub use syscall_table::SyscallResponseTable;

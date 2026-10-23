@@ -52,7 +52,7 @@ fn commit_store(rt: &mut Runtime, unit: UnitId, addr: u64) {
         unit,
         GuestTicks::ZERO,
     );
-    rt.commit_step(&result, &[store])
+    rt.commit_unchecked(&result, &[store])
         .expect("the store commits");
 }
 

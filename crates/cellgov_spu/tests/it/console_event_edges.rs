@@ -175,7 +175,7 @@ fn run(program: &Program, opcode: u32) -> Vec<u32> {
             break;
         }
         let Ok(step) = rt.step() else { break };
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     assert_eq!(

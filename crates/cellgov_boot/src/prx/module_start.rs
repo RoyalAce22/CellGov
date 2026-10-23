@@ -77,7 +77,7 @@ pub enum ModuleStartError {
         /// The fault report, already rendered.
         detail: String,
     },
-    /// `commit_step` rejected the step's effects.
+    /// `commit_step` refused the step.
     #[error("module_start: {module} commit_step failed at step {steps}: {detail}")]
     Commit {
         /// The module whose init was running.
@@ -405,7 +405,7 @@ pub fn run_module_start(
                     ));
                 }
 
-                if let Err(e) = rt.commit_step_and_recycle(&mut step) {
+                if let Err(e) = rt.commit_step(&mut step) {
                     sink.warn(&format!(
                         "  module_start commit_step FAILED at step {steps}: {e:?}"
                     ));

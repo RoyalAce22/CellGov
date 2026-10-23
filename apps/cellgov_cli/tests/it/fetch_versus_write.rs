@@ -247,6 +247,6 @@ fn the_read_intent_reaches_a_commit() {
             .any(|e| matches!(e, Effect::SharedReadIntent { .. })),
         "the block published what it fetched",
     );
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("a read intent stages nothing and cannot be refused");
 }

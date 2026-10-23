@@ -22,7 +22,7 @@ fn a_unit_that_finishes_without_stopping_itself_is_not_traced_and_refuses_a_rest
     let mut rt = Runtime::new(GuestMemory::new(4096), Budget::new(1), 1);
     let unit = rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
     let step = rt.step().expect("the unit runs");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the step commits");
     assert_eq!(step.result.yield_reason, YieldReason::Finished);
 

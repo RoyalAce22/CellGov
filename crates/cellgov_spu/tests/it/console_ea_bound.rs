@@ -88,7 +88,7 @@ fn run(access: u32, ea: u64) -> Option<MfcCommandError> {
         spu
     });
     while let Ok(step) = rt.step() {
-        if rt.commit_step(&step.result, &step.effects).is_err() {
+        if rt.commit_unchecked(&step.result, &step.effects).is_err() {
             break;
         }
     }

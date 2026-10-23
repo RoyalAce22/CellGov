@@ -131,6 +131,8 @@ fn snapshot_field_categories(rt: &Runtime) {
         rsx_window_access: _,             // set once by the host before the run
         runnable_buf: _,                  // scratch; each step clears it before use
         observations: _,                  // cleared on restore, rewritten by the next step
+        pending_commit: _,                // cleared on restore, set by the next step
+        step_serial: _,                   // never rewound, so no token repeats
         spu_thread_failure: _,            // cleared on restore, taken by the host after a commit
         mfc_exception: _,                 // cleared on restore, taken by the host after a commit
         spu_factory: _,                   // set once at construction

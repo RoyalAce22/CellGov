@@ -102,7 +102,7 @@ fn a_refused_enqueue_leaves_its_waiting_issuer_faulted() {
     let (mut rt, unit) = runtime_with_emitter(MAPPED_DST, Some(vec![1, 2, 3]));
     let step = rt.step().expect("the emitter runs");
     let err = rt
-        .commit_step(&step.result, &step.effects)
+        .commit_unchecked(&step.result, &step.effects)
         .expect_err("the payload is shorter than the destination");
     assert!(
         matches!(err, CommitError::DmaPayloadLengthMismatch { .. }),
@@ -136,7 +136,7 @@ fn a_batch_refused_after_a_valid_enqueue_does_not_park_its_issuer() {
         source: unit,
     });
     let err = rt
-        .commit_step(&step.result, &step.effects)
+        .commit_unchecked(&step.result, &step.effects)
         .expect_err("the wake names a unit the registry does not hold");
     assert!(
         matches!(err, CommitError::UnknownWakeTarget { .. }),
@@ -159,7 +159,7 @@ fn an_accepted_enqueue_still_parks_its_waiting_issuer() {
     let (mut rt, unit) = runtime_with_emitter(MAPPED_DST, None);
     let step = rt.step().expect("the emitter runs");
     let outcome = rt
-        .commit_step(&step.result, &step.effects)
+        .commit_unchecked(&step.result, &step.effects)
         .expect("the enqueue passes its checks");
     let blocked = outcome.blocked_units;
     assert!(

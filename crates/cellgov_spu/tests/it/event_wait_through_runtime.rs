@@ -64,7 +64,7 @@ fn add_spu(rt: &mut Runtime, program: &[u32], regs: &[(u8, u32)]) -> UnitId {
 
 fn step(rt: &mut Runtime) {
     let step = rt.step().expect("a unit runs");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the step commits");
 }
 
@@ -75,7 +75,7 @@ fn finish(rt: &mut Runtime, unit: UnitId) -> u32 {
             break;
         }
         let Ok(step) = rt.step() else { break };
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     assert_eq!(
@@ -122,7 +122,7 @@ fn a_signal_write_ends_a_wait_on_s1_and_a_masked_one_does_not() {
         .expect("problem state");
     for _ in 0..3 {
         let Ok(step) = rt.step() else { break };
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     assert!(
@@ -169,7 +169,7 @@ fn a_tag_status_update_ends_a_wait_on_tg() {
         }
         parked |= parked_on_an_event(&rt, unit);
         let Ok(step) = rt.step() else { break };
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     assert!(parked, "the SPU waited for the get");
@@ -188,7 +188,7 @@ fn a_multisource_request_with_nothing_in_flight_ends_a_wait_on_ms_at_once() {
     let (mut rt, unit) = runtime(&program, &[(10, event::MS)]);
     let first = rt.step().expect("the SPU runs");
     assert_ne!(first.result.yield_reason, YieldReason::ChannelStall);
-    rt.commit_step(&first.result, &first.effects)
+    rt.commit_unchecked(&first.result, &first.effects)
         .expect("the step commits");
     assert_eq!(finish(&mut rt, unit), event::MS);
 }

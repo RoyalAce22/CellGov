@@ -137,7 +137,7 @@ fn the_handler_lands_bytes_the_callers_own_step_never_names() {
         "the syscall step emits nothing itself: {:?}",
         step.effects,
     );
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the dispatch commits");
 
     let after = rt.memory().read(nsec_range()).unwrap().to_vec();
@@ -207,7 +207,7 @@ fn runnable_after(prefix: &[UnitId]) -> Vec<UnitId> {
         let step = rt
             .step()
             .expect("the walk built this prefix from runnable units");
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("no step of this workload refuses its commit");
     }
     rt.registry().runnable_ids().collect()

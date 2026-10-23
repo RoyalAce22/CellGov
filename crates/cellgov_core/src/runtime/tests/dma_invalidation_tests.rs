@@ -179,7 +179,7 @@ fn build(shared: bool) -> (Runtime, Calls) {
 fn run_to_completion(rt: &mut Runtime) {
     for _ in 0..6 {
         let Ok(step) = rt.step() else { break };
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("no step of this workload refuses its commit");
     }
     assert!(
@@ -220,7 +220,7 @@ fn a_landing_in_a_shared_view_invalidates_every_alias() {
 fn nothing_invalidates_before_the_completion_lands() {
     let (mut rt, calls) = build(false);
     let step = rt.step().expect("the emitter runs first");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the enqueue commits");
     assert!(
         step.effects

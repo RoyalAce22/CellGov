@@ -97,7 +97,7 @@ fn drive(
                 }
 
                 let t2 = Instant::now();
-                let commit_result = rt.commit_step_and_recycle(&mut step);
+                let commit_result = rt.commit_step(&mut step);
                 let t3 = Instant::now();
 
                 // Inertness gate. Commit/wake paths push invariant

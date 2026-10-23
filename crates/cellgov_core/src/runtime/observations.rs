@@ -4,6 +4,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 
+use super::spaces::AddressSpaceId;
 use super::HostWrite;
 
 /// A step's position in a run: the count of steps taken before it.
@@ -27,6 +28,52 @@ impl StepIndex {
     }
 }
 
+/// What [`crate::Runtime::commit_step`] needs to know about the step it
+/// closes: its index, the unit that ran it and that unit's space.
+///
+/// Only [`crate::Runtime::step`] makes one, so the commit takes the unit
+/// and space from the step itself. Each token also carries a serial
+/// that a restore does not rewind, so a step taken before a restore
+/// never matches one taken after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StepToken {
+    index: StepIndex,
+    unit: UnitId,
+    space: AddressSpaceId,
+    serial: u64,
+}
+
+impl StepToken {
+    pub(super) const fn new(
+        index: StepIndex,
+        unit: UnitId,
+        space: AddressSpaceId,
+        serial: u64,
+    ) -> Self {
+        Self {
+            index,
+            unit,
+            space,
+            serial,
+        }
+    }
+
+    /// The step's position in the run.
+    pub const fn index(self) -> StepIndex {
+        self.index
+    }
+
+    /// The unit the step ran.
+    pub const fn unit(self) -> UnitId {
+        self.unit
+    }
+
+    /// The space the step's batch commits into.
+    pub const fn space(self) -> AddressSpaceId {
+        self.space
+    }
+}
+
 impl std::fmt::Display for StepIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -40,8 +87,8 @@ impl std::fmt::Display for StepIndex {
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct StepObservations {
-    /// The step these records belong to; [`crate::RuntimeStep::index`]
-    /// carries the same value.
+    /// The step these records belong to; [`StepToken::index`] carries
+    /// the same value.
     pub step: StepIndex,
     /// Guest ranges host-side code wrote, in the order they landed.
     ///

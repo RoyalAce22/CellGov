@@ -100,7 +100,7 @@ fn a_put_and_a_signal_through_the_window_reach_the_peer_thread() {
         if step.result.yield_reason == YieldReason::Finished {
             finished.push(step.unit);
         }
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         if finished.len() == 2 {
             break;

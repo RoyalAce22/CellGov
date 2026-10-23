@@ -50,6 +50,12 @@ pub struct Runtime {
     /// What host-side code did during the last step, read through
     /// [`Runtime::observations`].
     pub(super) observations: crate::runtime::StepObservations,
+    /// The token of the step [`Runtime::step`] last returned, until a
+    /// commit closes it.
+    pub(super) pending_commit: Option<crate::runtime::StepToken>,
+    /// Counts the steps [`Runtime::step`] returned over the runtime's
+    /// life. A restore leaves it alone, so no token repeats.
+    pub(super) step_serial: u64,
     /// The first SPU thread-group error the host has not taken; see
     /// [`Runtime::take_spu_thread_failure`].
     pub(super) spu_thread_failure: Option<crate::runtime::spu_thread_stop::SpuThreadFailure>,
@@ -78,7 +84,8 @@ pub struct Runtime {
     pub(super) steps_taken: usize,
     pub(super) max_steps: usize,
     pub(super) trace: TraceWriter,
-    /// One commit batch per unit yield; attributes the batch to its source.
+    /// The unit the last step ran; [`Runtime::commit_unchecked`]
+    /// attributes its batch to this unit.
     pub(super) last_scheduled_unit: Option<UnitId>,
     /// True when the just-completed step's dispatch transitioned at least
     /// one other unit into `Runnable`. Surfaced via `notify_yielded` so

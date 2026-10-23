@@ -170,7 +170,8 @@ fn per_step_hashes(bytes: &[u8]) -> Vec<(u64, u64)> {
 fn drive(rt: &mut cellgov_core::Runtime, n: usize) {
     for _ in 0..n {
         let s = rt.step().expect("a step");
-        rt.commit_step(&s.result, &s.effects).expect("a commit");
+        rt.commit_unchecked(&s.result, &s.effects)
+            .expect("a commit");
     }
 }
 

@@ -105,7 +105,7 @@ fn a_depth_holds_one_runnable_unit_with_the_rest_parked() {
         if alone {
             singleton_depths += 1;
         }
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("no step of this workload refuses its commit");
     }
     assert!(

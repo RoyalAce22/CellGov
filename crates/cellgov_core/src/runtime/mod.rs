@@ -56,7 +56,7 @@ mod unit_stop;
 pub use construction::DEFAULT_DMA_LATENCY_TICKS;
 pub use host_write::HostWrite;
 pub use mfc_exception::MfcException;
-pub use observations::{StepIndex, StepObservations};
+pub use observations::{StepIndex, StepObservations, StepToken};
 pub use snapshot::RuntimeSnapshot;
 pub use spaces::{AddressSpaceId, SpaceError};
 pub use spu_thread_stop::SpuThreadFailure;

@@ -117,7 +117,7 @@ fn a_commit_keeps_the_records_and_the_next_step_clears_them() {
     )
     .expect("a writable region accepts the write");
 
-    rt.commit_step(&trivial_result(), &[])
+    rt.commit_unchecked(&trivial_result(), &[])
         .expect("a trivial step commits");
     assert_eq!(
         rt.observations().host_writes.to_vec(),
@@ -331,7 +331,7 @@ fn a_transfer_the_time_warp_fires_reaches_the_published_host_writes() {
     });
 
     let step = rt.step().expect("the waiter is runnable");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the enqueue commits");
     assert!(
         !rt.dma_queue().is_empty(),
@@ -344,7 +344,7 @@ fn a_transfer_the_time_warp_fires_reaches_the_published_host_writes() {
     );
 
     let step = rt.step().expect("the warp wakes the issuer");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the woken step commits");
 
     assert!(
@@ -447,7 +447,7 @@ fn an_expiry_the_time_warp_fires_reaches_the_published_records() {
         .expect("a fresh event-flag id");
 
     let step = rt.step().expect("the waiter is runnable");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the wait commits");
     assert_eq!(
         rt.registry().effective_status(waiter),
@@ -456,7 +456,7 @@ fn an_expiry_the_time_warp_fires_reaches_the_published_records() {
     );
 
     let step = rt.step().expect("the warp expires the wait");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the woken step commits");
 
     assert!(

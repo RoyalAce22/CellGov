@@ -12,7 +12,7 @@ fn commit_emits_state_hash_checkpoint_after_commit_applied() {
         max: 1,
     });
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result, &s.effects).unwrap();
+    rt.commit_unchecked(&s.result, &s.effects).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -40,9 +40,9 @@ fn committed_memory_state_hash_changes_after_write() {
         max: 3,
     });
     let s1 = rt.step().unwrap();
-    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
     let s2 = rt.step().unwrap();
-    rt.commit_step(&s2.result, &s2.effects).unwrap();
+    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let hashes: Vec<StateHash> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -69,7 +69,7 @@ fn sync_state_checkpoint_changes_when_a_mailbox_is_registered() {
             let _ = rt.mailbox_registry_mut().register(4);
         }
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result, &s.effects).unwrap();
+        rt.commit_unchecked(&s.result, &s.effects).unwrap();
         let bytes = rt.trace().bytes().to_vec();
         TraceReader::new(&bytes)
             .map(|r| r.expect("decode"))
@@ -102,7 +102,7 @@ fn sync_state_checkpoint_changes_when_a_signal_register_value_changes() {
                 .or_in(or_in_value);
         }
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result, &s.effects).unwrap();
+        rt.commit_unchecked(&s.result, &s.effects).unwrap();
         let bytes = rt.trace().bytes().to_vec();
         TraceReader::new(&bytes)
             .map(|r| r.expect("decode"))
@@ -133,7 +133,7 @@ fn sync_state_checkpoint_changes_when_a_message_lands_in_a_mailbox() {
                 .force_send(word);
         }
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result, &s.effects).unwrap();
+        rt.commit_unchecked(&s.result, &s.effects).unwrap();
         let bytes = rt.trace().bytes().to_vec();
         TraceReader::new(&bytes)
             .map(|r| r.expect("decode"))
@@ -157,7 +157,7 @@ fn unit_status_state_hash_changes_when_unit_finishes() {
         .register_with(|id| CountingUnit::new(id, 2));
     for _ in 0..2 {
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result, &s.effects).unwrap();
+        rt.commit_unchecked(&s.result, &s.effects).unwrap();
     }
     let bytes = rt.trace().bytes().to_vec();
     let status_hashes: Vec<StateHash> = TraceReader::new(&bytes)
@@ -196,7 +196,7 @@ fn sync_state_hash_changes_after_reservation_acquire() {
     });
     let h0 = rt.sync_state_hash();
     let s1 = rt.step().unwrap();
-    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
     let h1 = rt.sync_state_hash();
     assert_ne!(h0, h1, "reservation acquire must shift sync_state_hash");
 }
@@ -216,11 +216,11 @@ fn sync_state_hash_persists_after_same_unit_store_to_reserved_line() {
     });
     let h_empty = rt.sync_state_hash();
     let s1 = rt.step().unwrap();
-    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
     let h_after_acquire = rt.sync_state_hash();
     assert_ne!(h_empty, h_after_acquire);
     let s2 = rt.step().unwrap();
-    rt.commit_step(&s2.result, &s2.effects).unwrap();
+    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
     assert_eq!(
         h_after_acquire,
         rt.sync_state_hash(),
@@ -240,7 +240,7 @@ fn sync_state_hash_deterministic_across_identical_runs() {
         let mut hashes = vec![rt.sync_state_hash()];
         for _ in 0..2 {
             let s = rt.step().unwrap();
-            rt.commit_step(&s.result, &s.effects).unwrap();
+            rt.commit_unchecked(&s.result, &s.effects).unwrap();
             hashes.push(rt.sync_state_hash());
         }
         hashes
@@ -366,7 +366,7 @@ fn sync_state_hash_distinguishes_different_reserved_lines() {
             line_addr,
         });
         let s = rt.step().unwrap();
-        rt.commit_step(&s.result, &s.effects).unwrap();
+        rt.commit_unchecked(&s.result, &s.effects).unwrap();
         rt.sync_state_hash()
     }
     assert_ne!(

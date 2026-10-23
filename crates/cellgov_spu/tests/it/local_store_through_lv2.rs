@@ -116,7 +116,7 @@ fn a_write_lands_in_local_store_and_a_read_returns_it_zero_extended() {
     let mut calls_done = 0;
     for _ in 0..200 {
         let Ok(step) = rt.step() else { break };
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         if step.unit == caller {
             calls_done += 1;

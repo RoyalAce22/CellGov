@@ -53,11 +53,11 @@ fn each_step_and_its_observations_carry_one_index() {
 
     for expected in 0..2 {
         let step = rt.step().expect("the unit is runnable");
-        assert_eq!(step.index, StepIndex::new(expected));
-        assert_eq!(rt.observations().step, step.index);
-        rt.commit_step(&step.result, &step.effects)
+        assert_eq!(step.token.index(), StepIndex::new(expected));
+        assert_eq!(rt.observations().step, step.token.index());
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
-        assert_eq!(rt.observations().step, step.index);
+        assert_eq!(rt.observations().step, step.token.index());
     }
 
     assert_eq!(rt.step(), Err(StepError::MaxStepsExceeded));

@@ -13,34 +13,67 @@ use crate::runtime::state::Runtime;
 use crate::runtime::types::RuntimeStep;
 
 impl Runtime {
-    /// Commit a step and recycle its effect buffer for the next step.
+    /// Drive the commit pipeline for the step [`Runtime::step`] last
+    /// returned, and recycle its buffers for the next step.
     ///
-    /// This is the hot-path companion to [`Self::commit_step`]. It
-    /// leaves `step.effects` and `step.runnable` empty, and keeps the
+    /// The commit takes the unit and space from [`RuntimeStep::token`].
+    /// It leaves `step.effects` and `step.runnable` empty, and keeps the
     /// step's other fields for callers that classify the completed step.
-    pub fn commit_step_and_recycle(
-        &mut self,
-        step: &mut RuntimeStep,
-    ) -> Result<CommitOutcome, CommitError> {
+    /// A step dropped without a commit is legal. Any later call to
+    /// [`Runtime::step`], a refused one included, and a restore close it.
+    ///
+    /// Epoch advances on every commit boundary including validation
+    /// failures, so a pipeline `Err` still mutates `self.epoch`. Fault
+    /// and atomic-batch semantics: see
+    /// [`crate::commit::CommitPipeline::process`].
+    ///
+    /// # Errors
+    ///
+    /// [`CommitError::StaleStep`] when `step` is not the step
+    /// [`Runtime::step`] last returned, or that step is closed. Nothing is
+    /// committed, the epoch does not advance, and `step` is unchanged.
+    /// Any other error is the pipeline's.
+    pub fn commit_step(&mut self, step: &mut RuntimeStep) -> Result<CommitOutcome, CommitError> {
+        if self.pending_commit != Some(step.token) {
+            return Err(CommitError::StaleStep);
+        }
+        self.pending_commit = None;
         let effects = std::mem::take(&mut step.effects);
-        let outcome = self.commit_step(&step.result, &effects);
+        let ran = Some((step.token.unit(), step.token.space()));
+        let outcome = self.commit_batch(ran, &step.result, &effects);
         self.effects_buf = effects;
         self.effects_buf.clear();
         self.runnable_buf = std::mem::take(&mut step.runnable);
         outcome
     }
 
-    /// Drive the commit pipeline for a previously-returned step result.
+    /// Drive the commit pipeline for `result` and `effects` with no
+    /// step token: the unit is the one the last step ran.
     ///
-    /// Epoch advances on every commit boundary including validation
-    /// failures, so an `Err` return still mutates `self.epoch`. Fault
-    /// and atomic-batch semantics: see
-    /// [`crate::commit::CommitPipeline::process`].
-    pub fn commit_step(
+    /// It also closes the step [`Runtime::step`] last returned, so that
+    /// step's [`Runtime::commit_step`] refuses after it. The epoch and
+    /// fault semantics are [`Runtime::commit_step`]'s.
+    pub fn commit_unchecked(
         &mut self,
         result: &ExecutionStepResult,
         effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
+        self.pending_commit = None;
+        let ran = self
+            .last_scheduled_unit
+            .map(|unit| (unit, self.spaces.space_of(unit)));
+        self.commit_batch(ran, result, effects)
+    }
+
+    /// The commit both entry points share. `ran` is the unit that ran the
+    /// step and the space its batch commits into.
+    fn commit_batch(
+        &mut self,
+        ran: Option<(UnitId, AddressSpaceId)>,
+        result: &ExecutionStepResult,
+        effects: &[Effect],
+    ) -> Result<CommitOutcome, CommitError> {
+        let ran_unit = ran.map(|(unit, _)| unit);
         self.step_woke_others = false;
         // Trivial-step fast path under FaultDriven. Epoch still advances
         // to preserve the atomic-batch boundary; trace is off in this mode.
@@ -58,13 +91,13 @@ impl Runtime {
             && self.rsx_call_stack.is_empty()
             && !self.rsx_flip.pending()
             // A Raw SPU's step changes the state its window projects.
-            && !self.last_scheduled_unit.is_some_and(|unit| {
+            && !ran_unit.is_some_and(|unit| {
                 self.lv2_host.raw_spu_units().any(|(_, raw)| raw == unit)
             })
             // A mailbox write emits no effect. LV2 serves the word an SPU
             // thread's step left in its interrupt mailbox only on the slow
             // path.
-            && !self.last_scheduled_unit.is_some_and(|unit| {
+            && !ran_unit.is_some_and(|unit| {
                 self.registry
                     .get(unit)
                     .and_then(|unit| unit.out_mailboxes())
@@ -75,7 +108,7 @@ impl Runtime {
             // This path fires no completion, so the list this commit
             // publishes is empty.
             self.observations.dma_completions.clear();
-            if let Some(unit) = self.last_scheduled_unit {
+            if let Some(unit) = ran_unit {
                 debug_assert!(
                     !self.step_woke_others,
                     "fast path reached with step_woke_others=true; \
@@ -93,10 +126,7 @@ impl Runtime {
         // validates the batch's writes against the same space the unit
         // executed in. A DMA transfer's ends are the exception: the queue
         // resolves them in space 0 when it reaches the transfer.
-        let source_space = match self.last_scheduled_unit {
-            Some(unit) => self.spaces.space_of(unit),
-            None => crate::runtime::spaces::AddressSpaceId::BOOT,
-        };
+        let source_space = ran.map_or(AddressSpaceId::BOOT, |(_, space)| space);
 
         // Prepend RSX effects from the previous commit's advance pass.
         // The advance pass reads space 0 (`Runtime::memory`), so its
@@ -176,11 +206,9 @@ impl Runtime {
         // reservation clears are guest-visible state.
         let batch_applied = matches!(&outcome, Ok(o) if !o.fault_discarded);
         if batch_applied {
-            let writer = self
-                .last_scheduled_unit
-                .map_or(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID, |unit| {
-                    self.lv2_host.process_of_unit(unit)
-                });
+            let writer = ran_unit.map_or(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID, |unit| {
+                self.lv2_host.process_of_unit(unit)
+            });
             self.lv2_host.note_committed_effects(writer, effects);
             // Same batch boundary: writes landing in a shared view
             // replicate to sibling views before any checkpoint hashes.
@@ -198,7 +226,7 @@ impl Runtime {
                     // into sibling views at translated addresses, so
                     // predecoded code there is exactly as stale as at
                     // the source range.
-                    let alias_ranges = match self.last_scheduled_unit {
+                    let alias_ranges = match ran_unit {
                         Some(unit) => self.shared_alias_ranges(unit, *range),
                         None => Vec::new(),
                     };
@@ -246,12 +274,7 @@ impl Runtime {
             self.route_raw_spu_window_accesses(source_space, effects);
         }
 
-        debug_assert!(
-            self.last_scheduled_unit.is_some(),
-            "commit_step slow path reached with last_scheduled_unit=None; \
-             Runtime::step is supposed to set this before every commit_step",
-        );
-        let source = self.last_scheduled_unit.unwrap_or_else(|| UnitId::new(0));
+        let source = ran_unit.unwrap_or_else(|| UnitId::new(0));
         if result.yield_reason == YieldReason::Syscall {
             self.dispatch_syscall(result, source);
         }
@@ -751,3 +774,7 @@ mod dma_refusal_status_tests;
 #[cfg(test)]
 #[path = "tests/rsx_mirror_guard_tests.rs"]
 mod rsx_mirror_guard_tests;
+
+#[cfg(test)]
+#[path = "tests/stale_step_tests.rs"]
+mod stale_step_tests;

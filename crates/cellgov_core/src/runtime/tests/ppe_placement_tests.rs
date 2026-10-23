@@ -50,7 +50,7 @@ fn steps_taken(rt: &mut Runtime, ids: &[UnitId], steps: usize) -> Vec<usize> {
         if let Some(k) = ids.iter().position(|&id| id == step.unit) {
             taken[k] += 1;
         }
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     taken
@@ -116,7 +116,7 @@ fn every_commit_leaves_the_placement_current() {
     let (mut rt, ids) = runtime(&[Some(1500), Some(1500), Some(1500), Some(1500)], 6);
     let mut commits = 0;
     while let Ok(step) = rt.step() {
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         commits += 1;
         let runnable = ids

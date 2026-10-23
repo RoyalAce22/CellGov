@@ -149,7 +149,7 @@ fn bisled_with_d_and_e_ends_each_case_as_on_the_console() {
         steps += 1;
         assert!(steps <= 1000, "the SPU never stopped");
         let step = rt.step().expect("the SPU runs");
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
 

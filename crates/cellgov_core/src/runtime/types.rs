@@ -12,11 +12,13 @@ use cellgov_time::{Budget, Epoch, GuestTicks};
 /// [`crate::Runtime::step`] on success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeStep {
-    /// This step's position in the run, which
-    /// [`crate::StepObservations::step`] also carries while the records
-    /// are this step's.
-    pub index: super::StepIndex,
-    /// The scheduled unit.
+    /// This step's index, unit and space. [`crate::Runtime::commit_step`]
+    /// commits the step only while this is the runtime's uncommitted last
+    /// step, and [`crate::StepObservations::step`] carries the same index
+    /// while the records are this step's.
+    pub token: super::StepToken,
+    /// The scheduled unit. The commit reads [`Self::token`], so a change
+    /// here changes no commit.
     pub unit: UnitId,
     /// Execution result from `run_until_yield`.
     pub result: ExecutionStepResult,
@@ -31,7 +33,7 @@ pub struct RuntimeStep {
     ///
     /// A step that fires a due DMA completion or timer wake at entry or
     /// in the time warp widens this set before the choice.
-    /// [`crate::Runtime::commit_step_and_recycle`] takes the buffer back
+    /// [`crate::Runtime::commit_step`] takes the buffer back
     /// for the next step and leaves this empty.
     pub runnable: Vec<UnitId>,
     /// [`Self::unit`] with its issue pressure before the step, or `None`

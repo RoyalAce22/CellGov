@@ -123,7 +123,7 @@ fn refusing(refusal: StepError) -> Runtime {
                 max: 9,
             });
             let step = rt.step().expect("the first step fits");
-            rt.commit_step(&step.result, &step.effects)
+            rt.commit_unchecked(&step.result, &step.effects)
                 .expect("the step commits");
             rt
         }

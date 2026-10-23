@@ -117,7 +117,7 @@ fn a_pre_select_fire_lands_a_host_write_and_no_published_completion() {
     // behind the transfer's tick at every commit.
     for _ in 0..3 {
         let step = rt.step().expect("both units are runnable");
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     assert!(
@@ -138,7 +138,7 @@ fn a_pre_select_fire_lands_a_host_write_and_no_published_completion() {
         rt.dma_queue().is_empty(),
         "the step fired the transfer before it ran a unit",
     );
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the step commits");
 
     assert!(

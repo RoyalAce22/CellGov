@@ -47,7 +47,7 @@ fn runtime(priorities: [Option<u32>; 2]) -> (Runtime, [UnitId; 2]) {
     }
     for _ in 0..4 {
         let Ok(step) = rt.step() else { break };
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     for id in ids {

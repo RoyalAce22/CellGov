@@ -369,7 +369,7 @@ fn run_mfc() -> MfcRun {
     for _ in 0..20_000 {
         let Ok(step) = rt.step() else { break };
         finished = step.result.yield_reason == YieldReason::Finished;
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         if finished {
             break;

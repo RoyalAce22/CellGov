@@ -18,7 +18,7 @@ fn allocate_1m(rt: &mut Runtime) {
         syscall_args,
     });
     let s = rt.step().unwrap();
-    rt.commit_step(&s.result, &s.effects).unwrap();
+    rt.commit_unchecked(&s.result, &s.effects).unwrap();
 }
 
 #[test]

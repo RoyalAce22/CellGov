@@ -100,7 +100,7 @@ fn runnable_after_of(build: fn() -> Runtime, prefix: &[UnitId]) -> Vec<UnitId> {
         let step = rt
             .step()
             .expect("the walk built this prefix from runnable units");
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("no step of this workload refuses its commit");
     }
     rt.registry().runnable_ids().collect()

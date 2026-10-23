@@ -120,7 +120,7 @@ fn finish(rt: &mut Runtime, unit: UnitId) {
             break;
         }
         let Ok(step) = rt.step() else { break };
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     assert_eq!(

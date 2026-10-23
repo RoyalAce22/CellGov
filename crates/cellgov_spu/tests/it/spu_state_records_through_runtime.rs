@@ -49,7 +49,7 @@ fn run_program(
             break;
         }
         let step = rt.step().expect("the SPU runs");
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
     }
     assert_eq!(

@@ -456,7 +456,7 @@ fn run_one(
         let chosen = frames[depth].chosen;
         let mut footprint =
             StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
-        if let Err(e) = rt.commit_step_and_recycle(&mut step) {
+        if let Err(e) = rt.commit_step(&mut step) {
             break Halt::Stopped(StopReason::CommitError(e));
         }
         if let Err(e) = footprint.note_commit(rt, &step, &runnable) {

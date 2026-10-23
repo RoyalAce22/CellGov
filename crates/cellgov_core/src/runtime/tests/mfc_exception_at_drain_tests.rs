@@ -77,7 +77,7 @@ fn a_refused_command_the_queue_never_reached_is_the_exception_at_a_drain() {
     let terminal = loop {
         match rt.step() {
             Ok(step) => {
-                rt.commit_step(&step.result, &step.effects)
+                rt.commit_unchecked(&step.result, &step.effects)
                     .expect("the batch commits");
             }
             Err(err) => break err,

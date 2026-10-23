@@ -92,7 +92,7 @@ fn a_step_of_the_owner_pairs_with_another_unit_step_during_its_landing() {
 /// then return the footprint of that step.
 fn step_with(rt: &mut Runtime, effects: &[Effect]) -> (UnitId, StepFootprint) {
     let step = rt.step().expect("a runnable unit");
-    rt.commit_step(&step.result, effects)
+    rt.commit_unchecked(&step.result, effects)
         .expect("the step commits");
     let mut footprint = StepFootprint::from_effects(effects);
     footprint

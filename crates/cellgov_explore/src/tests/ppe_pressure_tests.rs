@@ -59,7 +59,7 @@ fn a_ppe_thread_s_step_carries_its_pressure_and_another_s_does_not() {
     let mut seen = Vec::new();
     for _ in 0..2 {
         let step = rt.step().expect("a runnable unit");
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         seen.push((step.unit, step.ppe_pressure.map(|(unit, _)| unit)));
     }
@@ -89,7 +89,7 @@ fn only_the_step_that_changes_a_ppe_thread_s_pressure_records_it() {
     let mut reads = Vec::new();
     for _ in 0..8 {
         let step = rt.step().expect("a runnable unit");
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         let mut footprint = StepFootprint::from_effects(&step.effects);
         footprint

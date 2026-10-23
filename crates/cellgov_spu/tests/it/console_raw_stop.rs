@@ -39,7 +39,7 @@ fn the_probe_program_stops_with_the_consoles_status_and_next_pc() {
         spu
     });
     let step = rt.step().expect("a runnable unit");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the step commits");
     assert_eq!(step.result.yield_reason, YieldReason::Finished);
     assert_eq!(rt.unit_stop_registers(unit), Some(console_stop()));

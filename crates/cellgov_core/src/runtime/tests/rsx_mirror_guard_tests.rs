@@ -119,7 +119,7 @@ fn the_put_slot_and_the_cursor_start_apart() {
 fn a_discarded_batch_leaves_the_cursor_alone() {
     let mut rt = runtime_with_stale_put(YieldReason::Fault);
     let step = rt.step().expect("the writer runs");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("a faulting batch is discarded rather than refused");
     assert_eq!(
         rt.memory().read(put_range()).map(<[u8]>::to_vec),
@@ -142,7 +142,7 @@ fn a_discarded_batch_leaves_the_cursor_alone() {
 fn an_applied_batch_moves_the_cursor() {
     let mut rt = runtime_with_stale_put(YieldReason::Finished);
     let step = rt.step().expect("the writer runs");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the slot is mapped and writable");
     assert_eq!(
         rt.rsx_cursor().put(),

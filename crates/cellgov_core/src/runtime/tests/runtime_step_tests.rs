@@ -56,7 +56,9 @@ fn the_step_predicate_answers_false_only_where_step_refuses() {
         .registry_mut()
         .register_with(|id| CountingUnit::new(id, 1));
     let step = finished.step().expect("the unit has its one step");
-    finished.commit_step(&step.result, &step.effects).unwrap();
+    finished
+        .commit_unchecked(&step.result, &step.effects)
+        .unwrap();
     assert!(!finished.can_take_another_step());
     assert_eq!(finished.step().unwrap_err(), StepError::NoRunnableUnit);
 }
@@ -201,7 +203,7 @@ fn step_then_commit_writes_become_visible() {
         max: 5,
     });
     let s1 = rt.step().unwrap();
-    let outcome1 = rt.commit_step(&s1.result, &s1.effects).unwrap();
+    let outcome1 = rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
     assert_eq!(outcome1.writes_committed, 1);
     assert!(!outcome1.fault_discarded);
     assert_eq!(
@@ -213,7 +215,7 @@ fn step_then_commit_writes_become_visible() {
     assert_eq!(rt.epoch(), Epoch::new(1));
 
     let s2 = rt.step().unwrap();
-    rt.commit_step(&s2.result, &s2.effects).unwrap();
+    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
     assert_eq!(
         rt.memory()
             .read(cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0), 4).unwrap())
@@ -238,7 +240,7 @@ fn committing_an_owned_step_reuses_its_effect_capacity() {
         capacity >= 1,
         "the writing unit must grow the effect buffer"
     );
-    rt.commit_step_and_recycle(&mut first).unwrap();
+    rt.commit_step(&mut first).unwrap();
     assert_eq!(rt.effects_buf_capacity_for_tests(), capacity);
 
     let second = rt.step().unwrap();

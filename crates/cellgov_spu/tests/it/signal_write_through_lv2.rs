@@ -129,7 +129,7 @@ fn read_after_writes(config: u64) -> (u32, u32) {
     for _ in 0..200 {
         let Ok(step) = rt.step() else { break };
         finished += usize::from(step.result.yield_reason == YieldReason::Finished);
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         if step.unit == caller {
             assert!(

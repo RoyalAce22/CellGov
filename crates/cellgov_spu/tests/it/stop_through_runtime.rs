@@ -24,7 +24,7 @@ fn stopped_records(rt: &Runtime) -> Vec<TraceRecord> {
 
 fn step_once(rt: &mut Runtime) -> YieldReason {
     let step = rt.step().expect("a runnable unit");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the step commits");
     step.result.yield_reason
 }

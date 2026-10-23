@@ -15,7 +15,7 @@ fn an_out_of_table_syscall_has_its_own_trace_disposition() {
         syscall_args: args,
     });
     let step = rt.step().unwrap();
-    rt.commit_step(&step.result, &step.effects).unwrap();
+    rt.commit_unchecked(&step.result, &step.effects).unwrap();
 
     let disposition = TraceReader::new(rt.trace().bytes())
         .map(|record| record.expect("decode"))

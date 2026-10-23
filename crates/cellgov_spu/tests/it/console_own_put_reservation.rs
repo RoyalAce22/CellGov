@@ -289,7 +289,7 @@ fn run(program: Vec<u32>, blocks: usize, slots: usize) -> (u32, u32, Vec<u32>) {
     for _ in 0..4000 {
         let Ok(step) = rt.step() else { break };
         finished = step.result.yield_reason == YieldReason::Finished;
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         if finished {
             break;

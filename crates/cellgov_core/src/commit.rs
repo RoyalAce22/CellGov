@@ -172,6 +172,13 @@ pub enum CommitError {
     /// pre-validation/drain disagreement on containment).
     #[error("memory: {0}")]
     Memory(#[source] MemError),
+    /// The step is not the one the runtime ran last, or a commit already
+    /// closed it.
+    ///
+    /// The runtime commits nothing, so guest state and the epoch are
+    /// unchanged.
+    #[error("the step is not the runtime's uncommitted last step")]
+    StaleStep,
 }
 
 /// Summary of what a commit pass accomplished.

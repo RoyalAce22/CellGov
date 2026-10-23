@@ -309,7 +309,7 @@ fn a_fault_driven_step_that_ends_after_a_throw_serves_it() {
         fault: None,
         syscall_args: None,
     };
-    rt.commit_step(&result, &[]).expect("the commit");
+    rt.commit_unchecked(&result, &[]).expect("the commit");
     let queued = rt
         .lv2_host()
         .event_queues()

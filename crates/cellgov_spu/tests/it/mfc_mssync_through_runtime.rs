@@ -68,7 +68,7 @@ fn run(rt: &mut Runtime, units: usize) -> usize {
     for _ in 0..400 {
         let Ok(step) = rt.step() else { break };
         finished += usize::from(step.result.yield_reason == YieldReason::Finished);
-        rt.commit_step(&step.result, &step.effects)
+        rt.commit_unchecked(&step.result, &step.effects)
             .expect("the step commits");
         if finished == units {
             break;

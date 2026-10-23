@@ -90,7 +90,7 @@ fn completion_times(requests: Vec<(DmaDirection, u8, MfcOrdering)>) -> Vec<u64> 
         done: false,
     });
     let step = rt.step().expect("the issuer runs");
-    rt.commit_step(&step.result, &step.effects)
+    rt.commit_unchecked(&step.result, &step.effects)
         .expect("the enqueues commit");
     let mut times: Vec<u64> = rt
         .dma_queue()

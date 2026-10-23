@@ -97,18 +97,14 @@ fn allocations_after_warmup(writes: bool) -> usize {
     // Prime every reusable buffer across a full measurement-sized run.
     for _ in 0..STEPS {
         let mut warmup = runtime.step().expect("warmup step");
-        runtime
-            .commit_step_and_recycle(&mut warmup)
-            .expect("warmup commit");
+        runtime.commit_step(&mut warmup).expect("warmup commit");
     }
 
     ALLOCATIONS.set(0);
     COUNTING.set(true);
     for _ in 0..STEPS {
         let mut step = runtime.step().expect("steady step");
-        runtime
-            .commit_step_and_recycle(&mut step)
-            .expect("steady commit");
+        runtime.commit_step(&mut step).expect("steady commit");
     }
     COUNTING.set(false);
     ALLOCATIONS.get()
