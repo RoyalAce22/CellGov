@@ -3,7 +3,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_exec::ExecutionContext;
-use cellgov_time::GuestTicks;
+use cellgov_time::{GuestTicks, InstructionCost};
 use cellgov_trace::TraceRecord;
 
 use crate::runtime::state::Runtime;
@@ -56,8 +56,12 @@ impl Runtime {
     /// - [`StepError::MaxStepsExceeded`] -- deadlock detector tripped.
     /// - [`StepError::NoRunnableUnit`] -- terminal stall (nothing can wake).
     /// - [`StepError::AllBlocked`] -- at least one unit parked, none runnable.
-    /// - [`StepError::TimeOverflow`] -- consumed budget would push guest
-    ///   time past `u64::MAX`.
+    /// - [`StepError::TimeOverflow`] -- the selected unit's clock plus
+    ///   the step budget would pass `u64::MAX`. The check runs before
+    ///   the unit runs, so the unit and the inputs queued for it are
+    ///   unchanged. A unit whose cost overruns its budget can still pass
+    ///   `u64::MAX` after it ran: the runtime drops that step and its
+    ///   effects, and the unit keeps the state the run left.
     ///
     /// Emitted effects are returned verbatim in [`RuntimeStep::result`];
     /// [`Runtime::commit_step`] drives the commit pipeline over them.
@@ -136,6 +140,14 @@ impl Runtime {
             }
         };
         let start = self.registry.clock(unit_id);
+        // A clock that cannot advance by the whole budget refuses here,
+        // before the unit or its inputs change. The budget counts
+        // instructions and the cost counts ticks, so a step can still
+        // overrun it; the check after the run catches that.
+        let budget_ticks: GuestTicks = InstructionCost::new(self.budget_per_step.raw()).into();
+        if start.checked_add(budget_ticks).is_none() {
+            return Err(StepError::TimeOverflow);
+        }
 
         // A warp above can widen the set the scheduler chose from, so
         // record it here.
@@ -452,3 +464,7 @@ impl Runtime {
 #[cfg(test)]
 #[path = "tests/ppe_order_tests.rs"]
 mod ppe_order_tests;
+
+#[cfg(test)]
+#[path = "tests/time_overflow_tests.rs"]
+mod time_overflow_tests;

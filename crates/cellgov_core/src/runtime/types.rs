@@ -43,7 +43,8 @@ pub enum StepError {
     /// Deadlock detector: `max_steps` reached. Callers must abort.
     #[error("max-steps cap exceeded")]
     MaxStepsExceeded,
-    /// Consumed budget would push guest time past `u64::MAX`.
+    /// The scheduled unit's clock plus the step budget, or plus the cost
+    /// of a step that overran its budget, would pass `u64::MAX`.
     #[error("guest time would overflow u64")]
     TimeOverflow,
     /// `Runtime::restore_into` ran without a subsequent
