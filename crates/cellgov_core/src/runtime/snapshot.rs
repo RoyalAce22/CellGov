@@ -131,7 +131,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         rsx_window_access: _,             // set once by the host before the run
         last_runnable: _,                 // cleared on restore, rewritten by the next step
         last_ppe_pressure: _,             // cleared on restore, rewritten by the next step
-        last_dma_completions: _,          // cleared on restore, rewritten by the next commit
+        last_dma_completions: _,          // cleared on restore and by a step; set by commit
         last_host_writes: _,              // cleared on restore, rewritten by the next step
         last_lv2_effects: _,              // cleared on restore, rewritten by the next step
         last_problem_state_accesses: _,   // cleared on restore, rewritten by the next step
@@ -258,16 +258,9 @@ impl Runtime {
         self.pending_child_inits = snap.pending_child_inits.clone();
         self.rsx_label_base = snap.rsx_label_base;
         self.effects_buf.clear();
-        // The set belongs to a step of the execution the restore
-        // leaves, and the next step rewrites it only on Ok.
-        self.last_runnable.clear();
-        self.last_ppe_pressure = None;
-        self.last_dma_completions.clear();
-        self.last_host_writes.clear();
-        self.last_lv2_effects.clear();
-        self.last_problem_state_accesses.clear();
-        self.last_mailbox_read = None;
-        self.last_entry_reservation = None;
+        // The records belong to a step of the execution the restore
+        // leaves.
+        self.clear_step_records();
         self.spu_thread_failure = None;
         self.mfc_exception = None;
         self.trace.clear();

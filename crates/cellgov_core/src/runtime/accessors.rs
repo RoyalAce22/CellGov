@@ -229,11 +229,12 @@ impl Runtime {
 
     /// Units runnable when the scheduler made its last choice.
     ///
-    /// Empty before the first [`Runtime::step`] and after a restore.
-    /// Read it after the call: a step that fires a due DMA completion or
-    /// timer wake at entry or in the time warp widens the set the
-    /// scheduler chose from. A step that refuses leaves the previous step's set
-    /// in place.
+    /// Empty before the first [`Runtime::step`], after a restore, and
+    /// after a step that refuses before its unit runs. A
+    /// [`crate::StepError::TimeOverflow`] after the run leaves the set
+    /// the dropped step chose from. Read it after the call: a step that
+    /// fires a due DMA completion or timer wake at entry or in the time
+    /// warp widens the set the scheduler chose from.
     #[inline]
     pub fn last_runnable(&self) -> &[UnitId] {
         &self.last_runnable
@@ -243,8 +244,10 @@ impl Runtime {
     /// pressure before that step, or `None` when that unit is not a PPE
     /// thread.
     ///
-    /// `None` before the first step and after a restore. A step that
-    /// refuses leaves the previous step's value in place.
+    /// `None` before the first step, after a restore, and after a step
+    /// that refuses before its unit runs. A
+    /// [`crate::StepError::TimeOverflow`] after the run leaves the value
+    /// of the dropped step.
     #[inline]
     pub fn last_ppe_pressure(&self) -> Option<(UnitId, cellgov_exec::PpeIssuePressure)> {
         self.last_ppe_pressure
@@ -253,7 +256,8 @@ impl Runtime {
     /// DMA completions the last [`Runtime::commit_step`] fired, each
     /// with whether an inline payload carried its bytes.
     ///
-    /// Empty before the first commit and after a restore. The commit
+    /// Empty before the first commit, after a restore, and from the
+    /// start of each [`Runtime::step`] until its commit. The commit
     /// that fires a completion applies the write outside every unit's
     /// batch, so this list is where a caller reads which bytes moved.
     /// [`Runtime::step`] also fires due completions itself, in two
@@ -283,11 +287,8 @@ impl Runtime {
     /// - [`Runtime::step`] empties the list when it starts, and
     ///   [`Runtime::commit_step`] leaves it alone. A driver reads one
     ///   step's writes after it commits that step.
-    /// - `SchedulerNotReinstalled` and `MaxStepsExceeded` are the two
-    ///   refusals `step` answers ahead of that clear, so each leaves
-    ///   the previous step's record in place. Every later refusal
-    ///   clears first and leaves whatever the step-entry fire and the
-    ///   time warp wrote.
+    /// - Every refusal comes after that clear. A refusal leaves only
+    ///   what the step-entry fire and the time warp wrote.
     /// - [`Runtime::step`] fires due DMA and timer events itself, at
     ///   step entry before the scheduler selects a unit and in the
     ///   all-blocked time warp. What either phase writes belongs to the

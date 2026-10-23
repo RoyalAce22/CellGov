@@ -66,19 +66,17 @@ impl Runtime {
     /// Emitted effects are returned verbatim in [`RuntimeStep::result`];
     /// [`Runtime::commit_step`] drives the commit pipeline over them.
     pub fn step(&mut self) -> Result<RuntimeStep, StepError> {
+        // Every record describes this step from here on, so a refusal
+        // leaves no value from an earlier step. The step-entry fire and
+        // the time warp below land guest writes, so the clear also runs
+        // ahead of both.
+        self.clear_step_records();
         if self.scheduler_dirty_after_restore {
             return Err(StepError::SchedulerNotReinstalled);
         }
         if self.steps_taken >= self.max_steps {
             return Err(StepError::MaxStepsExceeded);
         }
-        // The step-entry fire and the time warp below fire the DMA and
-        // timer wakes themselves and land their guest writes, so the
-        // clear runs ahead of both.
-        self.last_host_writes.clear();
-        self.last_lv2_effects.clear();
-        self.last_problem_state_accesses.clear();
-        self.last_mailbox_read = None;
 
         // A PPU thread woken, parked or yielding since the last commit
         // changes which ones hold the PPE.
@@ -152,7 +150,6 @@ impl Runtime {
 
         // The step-entry fire or a warp above can widen the set the
         // scheduler chose from, so record it here.
-        self.last_runnable.clear();
         self.last_runnable.extend(self.registry.runnable_ids());
         let (ppe_siblings, ppe_sibling_pressure) = self.ppe_siblings(unit_id);
         self.last_ppe_pressure = self
@@ -436,6 +433,18 @@ impl Runtime {
         (others, pressure)
     }
 
+    /// Empty every record a step and its commit publish about that step.
+    pub(super) fn clear_step_records(&mut self) {
+        self.last_runnable.clear();
+        self.last_ppe_pressure = None;
+        self.last_dma_completions.clear();
+        self.last_host_writes.clear();
+        self.last_lv2_effects.clear();
+        self.last_problem_state_accesses.clear();
+        self.last_mailbox_read = None;
+        self.last_entry_reservation = None;
+    }
+
     /// Trace the reserved-zero reads every address space logged since
     /// the previous drain, attributed to `unit` at the current step.
     ///
@@ -473,3 +482,7 @@ mod time_overflow_tests;
 #[cfg(test)]
 #[path = "tests/pre_select_fire_tests.rs"]
 mod pre_select_fire_tests;
+
+#[cfg(test)]
+#[path = "tests/step_record_clear_tests.rs"]
+mod step_record_clear_tests;

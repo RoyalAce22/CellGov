@@ -1,0 +1,150 @@
+//! Every `StepError` that comes before the unit runs leaves the
+//! per-step records empty.
+
+use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
+use cellgov_effects::Effect;
+use cellgov_event::UnitId;
+use cellgov_exec::{
+    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, PpeIssuePressure,
+    UnitStatus, YieldReason,
+};
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_sync::MailboxId;
+use cellgov_time::{Budget, GuestTicks, InstructionCost};
+use cellgov_trace::HostWriter;
+use strum::VariantArray;
+
+use crate::runtime::{AddressSpaceId, Runtime, StepError};
+
+fn range(addr: u64, len: u64) -> ByteRange {
+    ByteRange::new(GuestAddr::new(addr), len).expect("in-range test address")
+}
+
+/// Runnable until it has run `max` steps; charges its whole budget.
+#[derive(Clone)]
+struct Counter {
+    id: UnitId,
+    runs: u64,
+    max: u64,
+}
+
+impl ExecutionUnit for Counter {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.runs >= self.max {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        _effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        self.runs += 1;
+        ExecutionStepResult {
+            yield_reason: YieldReason::BudgetExhausted,
+            consumed_cost: InstructionCost::new(budget.raw()),
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.runs
+    }
+}
+
+/// Fills every record with a value no refusal writes.
+fn seed_records(rt: &mut Runtime) {
+    let unit = UnitId::new(7);
+    let request = DmaRequest::new(DmaDirection::Put, range(0x10, 8), range(0x20, 8), unit)
+        .expect("a put between two disjoint ranges");
+    rt.last_runnable = vec![unit];
+    rt.last_ppe_pressure = Some((unit, PpeIssuePressure::NONE));
+    rt.last_dma_completions = vec![(DmaCompletion::new(request, GuestTicks::new(1)), false)];
+    rt.last_host_writes = vec![(HostWriter::Placement, AddressSpaceId::BOOT, range(0, 4))];
+    rt.last_lv2_effects = vec![Effect::TraceMarker {
+        marker: 1,
+        source: unit,
+    }];
+    rt.last_problem_state_accesses = vec![(unit, range(0, 4))];
+    rt.last_mailbox_read = Some(MailboxId::new(7));
+    rt.last_entry_reservation = Some(0x80);
+}
+
+fn assert_records_empty(rt: &Runtime, refusal: StepError) {
+    assert!(rt.last_runnable().is_empty(), "{refusal:?}: runnable");
+    assert_eq!(rt.last_ppe_pressure(), None, "{refusal:?}: ppe pressure");
+    assert!(
+        rt.last_dma_completions().is_empty(),
+        "{refusal:?}: dma completions"
+    );
+    assert!(rt.last_host_writes().is_empty(), "{refusal:?}: host writes");
+    assert!(rt.last_lv2_effects().is_empty(), "{refusal:?}: lv2 effects");
+    assert!(
+        rt.last_problem_state_accesses().is_empty(),
+        "{refusal:?}: problem-state accesses"
+    );
+    assert_eq!(rt.last_mailbox_read(), None, "{refusal:?}: mailbox read");
+    assert_eq!(
+        rt.last_entry_reservation(),
+        None,
+        "{refusal:?}: entry reservation"
+    );
+}
+
+/// A runtime whose next step answers `refusal`, with no event queued.
+fn refusing(refusal: StepError) -> Runtime {
+    match refusal {
+        StepError::NoRunnableUnit => Runtime::new(GuestMemory::new(64), Budget::new(4), 100),
+        StepError::AllBlocked => {
+            let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(4), 100);
+            let id = rt.register_unit_with(|id| Counter {
+                id,
+                runs: 0,
+                max: 9,
+            });
+            rt.set_unit_status_override(id, UnitStatus::Blocked);
+            rt
+        }
+        StepError::MaxStepsExceeded => Runtime::new(GuestMemory::new(64), Budget::new(4), 0),
+        StepError::TimeOverflow => {
+            let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(u64::MAX - 5), 100);
+            rt.register_unit_with(|id| Counter {
+                id,
+                runs: 0,
+                max: 9,
+            });
+            let step = rt.step().expect("the first step fits");
+            rt.commit_step(&step.result, &step.effects)
+                .expect("the step commits");
+            rt
+        }
+        StepError::SchedulerNotReinstalled => {
+            let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(4), 100);
+            let snap = rt.snapshot();
+            rt.restore_into(&snap);
+            rt
+        }
+    }
+}
+
+#[test]
+fn every_refusal_before_the_unit_runs_leaves_the_step_records_empty() {
+    for &refusal in StepError::VARIANTS {
+        let mut rt = refusing(refusal);
+        seed_records(&mut rt);
+        assert_eq!(rt.step().unwrap_err(), refusal);
+        assert_records_empty(&rt, refusal);
+    }
+}
