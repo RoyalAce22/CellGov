@@ -53,6 +53,8 @@ impl Runtime {
     ///
     /// # Errors
     ///
+    /// - [`StepError::SchedulerNotReinstalled`] -- a restore ran and no
+    ///   [`Runtime::set_scheduler`] has followed it.
     /// - [`StepError::MaxStepsExceeded`] -- deadlock detector tripped.
     /// - [`StepError::NoRunnableUnit`] -- terminal stall (nothing can wake).
     /// - [`StepError::AllBlocked`] -- at least one unit parked, none runnable.

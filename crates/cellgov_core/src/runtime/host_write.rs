@@ -1,10 +1,18 @@
 //! The one path host-side code writes guest memory through.
 //!
 //! An execution unit reaches guest memory only through the commit
-//! pipeline. The host -- LV2 dispatch, wake resolution, DMA completion,
-//! the RSX mirrors and shared-view fanout -- has its own writes to
-//! land, outside any unit's batch. [`Runtime::host_write`] gives them
-//! the pipeline's three guest-visible steps:
+//! pipeline. The host has its own writes to land, outside any unit's
+//! batch; [`cellgov_trace::HostWriter`] names every mechanism:
+//!
+//! - LV2 dispatch, its out parameters and wake continuations;
+//! - DMA completion;
+//! - the RSX mirrors;
+//! - shared-view fanout and the seed copy of a new view;
+//! - a Raw SPU's problem-state window;
+//! - a placement by the program driving the runtime.
+//!
+//! [`Runtime::host_write`] gives them the pipeline's three
+//! guest-visible steps:
 //!
 //! - the same write validation,
 //! - the same reservation clear sweep,

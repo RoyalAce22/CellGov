@@ -244,6 +244,11 @@ impl Runtime {
     /// writes, such as [`Runtime::drain_pending_dma`], adds to the last
     /// step's records.
     ///
+    /// A timer expiry's repair write is an LV2 effect: it is tagged
+    /// [`HostWriter::Lv2Effect`] and lands in the expiring waiter's
+    /// space, whichever phase fired it.
+    ///
+    /// [`HostWriter::Lv2Effect`]: cellgov_trace::HostWriter::Lv2Effect
     /// [`StepObservations`]: super::StepObservations
     /// [`StepObservations::step`]: super::StepObservations::step
     #[inline]

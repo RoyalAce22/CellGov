@@ -108,8 +108,9 @@ pub struct Runtime {
     pub(super) per_step_index: u64,
     pub(super) zoom_trace: TraceWriter,
     /// Set by [`Runtime::restore_into`], cleared by
-    /// [`Runtime::set_scheduler`]; [`Runtime::step`] debug-panics
-    /// if it sees this set. Catches stepping with a scheduler whose
+    /// [`Runtime::set_scheduler`]; while it is set, [`Runtime::step`]
+    /// returns [`super::StepError::SchedulerNotReinstalled`] in every
+    /// build. Catches stepping with a scheduler whose
     /// internal sticky-streak / last-position state was carried over
     /// from before the restore.
     pub(super) scheduler_dirty_after_restore: bool,

@@ -23,9 +23,11 @@ impl Runtime {
     /// discard-on-fault: the syscall has already returned its result
     /// to the guest by the time the containing batch finalizes, so
     /// syscall-side state persists even when the batch's unit-staged
-    /// effects are discarded. `Runtime::commit_step` drains staged
-    /// unit effects first and calls this function second, so an LV2
-    /// write lands after any same-batch unit store to the same range.
+    /// effects are discarded. A commit drains staged unit effects first
+    /// and dispatches second, so an LV2 write lands after any same-batch
+    /// unit store to the same range. A timer expiry also calls this
+    /// function, from the due-event fire: at step entry, in the
+    /// all-blocked time warp, or after a commit's dispatch.
     ///
     /// [`StagingMemory`]: cellgov_mem::StagingMemory
     ///
