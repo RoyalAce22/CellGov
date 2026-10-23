@@ -58,15 +58,14 @@ fn runtime(priorities: [Option<u32>; 2]) -> (Runtime, [UnitId; 2]) {
             "{id:?} set its pressure"
         );
     }
-    rt.last_runnable.clear();
-    rt.last_runnable.extend(ids);
     (rt, ids)
 }
 
-/// The issue interval each of `ids` receives from the other.
+/// The issue interval each of `ids` receives from the other, with both
+/// in the runnable set.
 fn received(rt: &Runtime, ids: [UnitId; 2]) -> [u32; 2] {
     ids.map(|id| {
-        let (siblings, pressure) = rt.ppe_siblings(id);
+        let (siblings, pressure) = rt.ppe_siblings(id, &ids);
         assert_eq!(siblings, 1);
         pressure.issue_interval
     })

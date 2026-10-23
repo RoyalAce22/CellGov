@@ -149,10 +149,14 @@ impl Runtime {
         }
 
         // The step-entry fire or a warp above can widen the set the
-        // scheduler chose from, so record it here.
-        self.last_runnable.extend(self.registry.runnable_ids());
-        let (ppe_siblings, ppe_sibling_pressure) = self.ppe_siblings(unit_id);
-        self.last_ppe_pressure = self
+        // scheduler chose from, so record it here. The buffer comes back
+        // through a recycling commit, so such a step costs no allocation
+        // for it.
+        let mut runnable = std::mem::take(&mut self.runnable_buf);
+        runnable.clear();
+        runnable.extend(self.registry.runnable_ids());
+        let (ppe_siblings, ppe_sibling_pressure) = self.ppe_siblings(unit_id, &runnable);
+        let ppe_pressure = self
             .registry
             .get(unit_id)
             .filter(|u| u.shares_ppe_issue())
@@ -173,7 +177,7 @@ impl Runtime {
 
         // Memory borrow scoped to `run_until_yield` to enforce the
         // freeze-during-step rule.
-        self.last_entry_reservation = self
+        let entry_reservation = self
             .registry
             .get(unit_id)
             .and_then(|unit| unit.local_reservation());
@@ -254,9 +258,8 @@ impl Runtime {
                 barriers,
             )
         };
-        if mailbox_read.get() && self.mailbox_registry.get(own_mailbox).is_some() {
-            self.last_mailbox_read = Some(own_mailbox);
-        }
+        let mailbox_read = (mailbox_read.get() && self.mailbox_registry.get(own_mailbox).is_some())
+            .then_some(own_mailbox);
 
         // PpuStateHash and PpuStateFull pair by step index so the diff
         // printer matches a hash divergence with its full-state snapshot.
@@ -390,6 +393,10 @@ impl Runtime {
             effects: effects_buf,
             time_after,
             epoch_after: self.epoch,
+            runnable,
+            ppe_pressure,
+            entry_reservation,
+            mailbox_read,
         })
     }
 
@@ -411,14 +418,18 @@ impl Runtime {
     /// at an LV2 priority below, equal to and above the primary's, so the
     /// order is the threads' creation order. The issue interval of the
     /// largest pressure comes only from siblings created before `unit`.
-    fn ppe_siblings(&self, unit: UnitId) -> (u32, cellgov_exec::PpeIssuePressure) {
+    fn ppe_siblings(
+        &self,
+        unit: UnitId,
+        runnable: &[UnitId],
+    ) -> (u32, cellgov_exec::PpeIssuePressure) {
         let ppe = |id: UnitId| self.registry.get(id).filter(|u| u.shares_ppe_issue());
         if ppe(unit).is_none() {
             return (0, cellgov_exec::PpeIssuePressure::NONE);
         }
         let mut others = 0u32;
         let mut pressure = cellgov_exec::PpeIssuePressure::NONE;
-        for &id in self.last_runnable.iter().filter(|&&id| id != unit) {
+        for &id in runnable.iter().filter(|&&id| id != unit) {
             let Some(sibling) = ppe(id) else {
                 continue;
             };
@@ -435,14 +446,10 @@ impl Runtime {
 
     /// Empty every record a step and its commit publish about that step.
     pub(super) fn clear_step_records(&mut self) {
-        self.last_runnable.clear();
-        self.last_ppe_pressure = None;
         self.last_dma_completions.clear();
         self.last_host_writes.clear();
         self.last_lv2_effects.clear();
         self.last_problem_state_accesses.clear();
-        self.last_mailbox_read = None;
-        self.last_entry_reservation = None;
     }
 
     /// Trace the reserved-zero reads every address space logged since
@@ -486,3 +493,7 @@ mod pre_select_fire_tests;
 #[cfg(test)]
 #[path = "tests/step_record_clear_tests.rs"]
 mod step_record_clear_tests;
+
+#[cfg(test)]
+#[path = "tests/runnable_recycle_tests.rs"]
+mod runnable_recycle_tests;

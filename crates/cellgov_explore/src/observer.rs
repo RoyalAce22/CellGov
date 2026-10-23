@@ -52,13 +52,13 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
                 );
                 // A warp inside the step can widen the set the
                 // scheduler chose from, so the point reads it here.
-                let runnable: Vec<_> = rt.last_runnable().to_vec();
+                let runnable: Vec<_> = step.runnable.clone();
                 let mut footprint =
                     StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
                 if let Err(e) = rt.commit_step_and_recycle(&mut step) {
                     break StopReason::CommitError(e);
                 }
-                footprint.note_commit(rt, step.unit);
+                footprint.note_commit(rt, &step, &runnable);
                 // The pass this parks behind reaches no footprint, so
                 // the relation cannot answer for the steps after it.
                 if rt.has_pending_child_init() {

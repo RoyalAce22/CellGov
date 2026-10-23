@@ -166,7 +166,7 @@ fn an_inflight_landing_reaches_the_sibling_view() {
     let source = range(0, 4);
     // Into the first view, whose sibling sits at 0x5000.
     let destination = range(0x2010, 4);
-    let unit = rt.register_unit_with(|id| {
+    rt.register_unit_with(|id| {
         DmaSubmitter::new(id, source, destination, vec![0xde, 0xad, 0xbe, 0xef])
     });
     let step = rt.step().expect("the submitter is the only runnable unit");
@@ -174,7 +174,7 @@ fn an_inflight_landing_reaches_the_sibling_view() {
         .expect("the enqueue commits");
 
     let mut footprint = StepFootprint::from_effects(&step.effects);
-    footprint.note_commit(&rt, unit);
+    footprint.note_commit(&rt, &step, &step.runnable);
 
     let starts: Vec<u64> = footprint
         .inflight_dma_ranges

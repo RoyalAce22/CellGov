@@ -51,16 +51,20 @@ fn a_ppe_step_pairs_with_a_step_that_changes_another_ppe_thread_s_pressure_only(
 }
 
 #[test]
-fn a_restore_forgets_the_last_step_s_pressure() {
+fn a_ppe_thread_s_step_carries_its_pressure_and_another_s_does_not() {
     let mut rt = Runtime::new(GuestMemory::new(0x100), Budget::new(1), 64);
-    rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::LoadImm(1); 4]).as_ppe_thread());
-    let snap = rt.snapshot();
-    let step = rt.step().expect("a runnable unit");
-    rt.commit_step(&step.result, &step.effects)
-        .expect("the step commits");
-    assert!(rt.last_ppe_pressure().is_some());
-    rt.restore_into(&snap);
-    assert_eq!(rt.last_ppe_pressure(), None);
+    let ppe = rt
+        .register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::LoadImm(1); 4]).as_ppe_thread());
+    let other = rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::LoadImm(1); 4]));
+    let mut seen = Vec::new();
+    for _ in 0..2 {
+        let step = rt.step().expect("a runnable unit");
+        rt.commit_step(&step.result, &step.effects)
+            .expect("the step commits");
+        seen.push((step.unit, step.ppe_pressure.map(|(unit, _)| unit)));
+    }
+    seen.sort();
+    assert_eq!(seen, vec![(ppe, Some(ppe)), (other, None)]);
 }
 
 #[test]
@@ -88,7 +92,7 @@ fn only_the_step_that_changes_a_ppe_thread_s_pressure_records_it() {
         rt.commit_step(&step.result, &step.effects)
             .expect("the step commits");
         let mut footprint = StepFootprint::from_effects(&step.effects);
-        footprint.note_commit(&rt, step.unit);
+        footprint.note_commit(&rt, &step, &step.runnable);
         if step.unit == presser {
             pressing.push(footprint.ppe_pressure_changer);
         } else {

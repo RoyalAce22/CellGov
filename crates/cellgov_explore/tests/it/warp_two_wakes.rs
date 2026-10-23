@@ -165,10 +165,10 @@ fn one_warp_wakes_both_waiters() {
         if idle {
             warps += 1;
             assert_eq!(
-                rt.last_runnable().len(),
+                step.runnable.len(),
                 2,
                 "the warp woke {:?}, so the deadlines did not meet",
-                rt.last_runnable(),
+                step.runnable,
             );
         }
         rt.commit_step(&step.result, &step.effects)

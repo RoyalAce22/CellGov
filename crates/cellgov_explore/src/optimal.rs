@@ -417,9 +417,9 @@ fn run_one(
                 });
             }
             let frame = &mut frames[depth];
-            // `last_runnable` is the set the scheduler chose from, so
-            // it is the set the warp woke.
-            let before = std::mem::replace(&mut frame.warp_woke, rt.last_runnable().to_vec());
+            // `RuntimeStep::runnable` is the set the scheduler chose
+            // from, so it is the set the warp woke.
+            let before = std::mem::replace(&mut frame.warp_woke, step.runnable.clone());
             let decided = !before.is_empty();
             // The prefix below replays step for step and the warp runs
             // before the selection, so every visit reads the same set.
@@ -452,14 +452,14 @@ fn run_one(
             }
             frame.chosen = step.unit;
         }
-        let runnable = rt.last_runnable().to_vec();
+        let runnable = step.runnable.clone();
         let chosen = frames[depth].chosen;
         let mut footprint =
             StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
         if let Err(e) = rt.commit_step_and_recycle(&mut step) {
             break Halt::Stopped(StopReason::CommitError(e));
         }
-        footprint.note_commit(rt, step.unit);
+        footprint.note_commit(rt, &step, &runnable);
         // The same stop as at the top of the loop, read after the
         // commit that can make the pass pending.
         if rt.has_pending_child_init() {

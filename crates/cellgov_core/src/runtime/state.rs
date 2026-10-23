@@ -44,14 +44,9 @@ pub struct Runtime {
     /// from the all-blocked time warp.
     pub(super) timer_wakes: crate::timer_queue::TimerWakeQueue,
     pub(super) dma_latency: Box<dyn DmaLatencyModel>,
-    /// Units runnable at the moment the scheduler last made a choice,
-    /// read through [`Runtime::last_runnable`]. The buffer is reused,
-    /// so a step costs no allocation for it.
-    pub(super) last_runnable: Vec<UnitId>,
-    /// The PPE thread the last [`Runtime::step`] ran and its issue
-    /// pressure before that step, read through
-    /// [`Runtime::last_ppe_pressure`].
-    pub(super) last_ppe_pressure: Option<(UnitId, cellgov_exec::PpeIssuePressure)>,
+    /// The buffer [`crate::RuntimeStep::runnable`] travels in, back from
+    /// the last recycling commit, so a step costs no allocation for it.
+    pub(super) runnable_buf: Vec<UnitId>,
     /// DMA completions the last [`Runtime::commit_step`] fired, read
     /// through [`Runtime::last_dma_completions`].
     pub(super) last_dma_completions: Vec<(cellgov_dma::DmaCompletion, bool)>,
@@ -67,12 +62,6 @@ pub struct Runtime {
     /// [`Runtime::step`] began, read through
     /// [`Runtime::last_problem_state_accesses`].
     pub(super) last_problem_state_accesses: Vec<(UnitId, cellgov_mem::ByteRange)>,
-    /// The mailbox whose occupancy the last step's unit read; see
-    /// [`Runtime::last_mailbox_read`].
-    pub(super) last_mailbox_read: Option<cellgov_sync::MailboxId>,
-    /// The line the last step's unit held a reservation on as it
-    /// began; see [`Runtime::last_entry_reservation`].
-    pub(super) last_entry_reservation: Option<u64>,
     /// The first SPU thread-group error the host has not taken; see
     /// [`Runtime::take_spu_thread_failure`].
     pub(super) spu_thread_failure: Option<crate::runtime::spu_thread_stop::SpuThreadFailure>,

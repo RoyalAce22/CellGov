@@ -5,11 +5,9 @@ use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, PpeIssuePressure,
-    UnitStatus, YieldReason,
+    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
-use cellgov_sync::MailboxId;
 use cellgov_time::{Budget, GuestTicks, InstructionCost};
 use cellgov_trace::HostWriter;
 use strum::VariantArray;
@@ -69,8 +67,6 @@ fn seed_records(rt: &mut Runtime) {
     let unit = UnitId::new(7);
     let request = DmaRequest::new(DmaDirection::Put, range(0x10, 8), range(0x20, 8), unit)
         .expect("a put between two disjoint ranges");
-    rt.last_runnable = vec![unit];
-    rt.last_ppe_pressure = Some((unit, PpeIssuePressure::NONE));
     rt.last_dma_completions = vec![(DmaCompletion::new(request, GuestTicks::new(1)), false)];
     rt.last_host_writes = vec![HostWrite {
         writer: HostWriter::Placement,
@@ -82,13 +78,9 @@ fn seed_records(rt: &mut Runtime) {
         source: unit,
     }];
     rt.last_problem_state_accesses = vec![(unit, range(0, 4))];
-    rt.last_mailbox_read = Some(MailboxId::new(7));
-    rt.last_entry_reservation = Some(0x80);
 }
 
 fn assert_records_empty(rt: &Runtime, refusal: StepError) {
-    assert!(rt.last_runnable().is_empty(), "{refusal:?}: runnable");
-    assert_eq!(rt.last_ppe_pressure(), None, "{refusal:?}: ppe pressure");
     assert!(
         rt.last_dma_completions().is_empty(),
         "{refusal:?}: dma completions"
@@ -98,12 +90,6 @@ fn assert_records_empty(rt: &Runtime, refusal: StepError) {
     assert!(
         rt.last_problem_state_accesses().is_empty(),
         "{refusal:?}: problem-state accesses"
-    );
-    assert_eq!(rt.last_mailbox_read(), None, "{refusal:?}: mailbox read");
-    assert_eq!(
-        rt.last_entry_reservation(),
-        None,
-        "{refusal:?}: entry reservation"
     );
 }
 

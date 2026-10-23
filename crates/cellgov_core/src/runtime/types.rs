@@ -23,6 +23,37 @@ pub struct RuntimeStep {
     /// Epoch observed at step completion (unchanged within a step;
     /// advances only at commit boundaries).
     pub epoch_after: Epoch,
+    /// Units runnable when the scheduler chose [`Self::unit`].
+    ///
+    /// A step that fires a due DMA completion or timer wake at entry or
+    /// in the time warp widens this set before the choice.
+    /// [`crate::Runtime::commit_step_and_recycle`] takes the buffer back
+    /// for the next step and leaves this empty.
+    pub runnable: Vec<UnitId>,
+    /// [`Self::unit`] with its issue pressure before the step, or `None`
+    /// when that unit is not a PPE thread.
+    pub ppe_pressure: Option<(UnitId, cellgov_exec::PpeIssuePressure)>,
+    /// The line [`Self::unit`] held in its local reservation register as
+    /// the step began, or `None`.
+    ///
+    /// The step checks the committed table for that line before its
+    /// first instruction and raises the reservation lost event when the
+    /// entry is gone. So the order of this step and another unit's store
+    /// to the line decides what the step did, though the step emits no
+    /// effect naming the line.
+    ///
+    /// [CBEA p:148 s:9.11.1] Lr is set when a snoop external to the MFC resets the reservation.
+    pub entry_reservation: Option<u64>,
+    /// The mailbox whose occupancy [`Self::unit`] read: its own inbound
+    /// mailbox, which shares its id, when the registry holds one and the
+    /// unit asked for its count. An SPU asks at the start of every step.
+    ///
+    /// The order of this step and a send or receive on that mailbox
+    /// decides the count the unit saw, though the step emits no effect
+    /// naming the mailbox.
+    ///
+    /// [CBEA p:135 s:9.5.3] the SPU_RdInMbox count is the number of messages in the inbound mailbox.
+    pub mailbox_read: Option<cellgov_sync::MailboxId>,
 }
 
 /// Why a [`crate::Runtime::step`] call could not produce a step.

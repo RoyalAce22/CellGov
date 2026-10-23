@@ -95,7 +95,7 @@ fn step_with(rt: &mut Runtime, effects: &[Effect]) -> (UnitId, StepFootprint) {
     rt.commit_step(&step.result, effects)
         .expect("the step commits");
     let mut footprint = StepFootprint::from_effects(effects);
-    footprint.note_commit(rt, step.unit);
+    footprint.note_commit(rt, &step, &step.runnable);
     (step.unit, footprint)
 }
 

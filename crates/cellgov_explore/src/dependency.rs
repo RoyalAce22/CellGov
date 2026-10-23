@@ -204,19 +204,26 @@ impl StepFootprint {
 
     /// Add what the step's commit did to the footprint its effects gave.
     ///
-    /// Call it directly after `commit_step`, with the unit that ran.
+    /// Call it directly after `commit_step`, with the step that ran and
+    /// `runnable`, the set its scheduler chose from (`RuntimeStep::runnable`
+    /// before a recycling commit empties it).
     /// The order inside is fixed: [`StepFootprint::expand_aliases`]
     /// widens the ranges already recorded and no others, and
     /// [`StepFootprint::note_host_writes`] widens its own ranges through
     /// the space each landed in, which need not be the stepping unit's
     /// (see `Runtime::last_host_writes`).
-    pub fn note_commit(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
-        self.mailbox_counts.extend(rt.last_mailbox_read());
+    pub fn note_commit(
+        &mut self,
+        rt: &cellgov_core::Runtime,
+        step: &cellgov_core::RuntimeStep,
+        runnable: &[cellgov_event::UnitId],
+    ) {
+        let unit = step.unit;
+        self.mailbox_counts.extend(step.mailbox_read);
         self.note_inflight(rt);
         self.local_store_owner = Some(unit);
-        self.note_ppe_siblings(rt, unit);
-        self.held_reservation_lines
-            .extend(rt.last_entry_reservation());
+        self.note_ppe_siblings(rt, step, runnable);
+        self.held_reservation_lines.extend(step.entry_reservation);
         self.note_lv2_effects(rt);
         // A Raw SPU's state reached through its window or its PU
         // interrupt mailbox is local state its own steps read.
@@ -232,20 +239,25 @@ impl StepFootprint {
     /// Call it after the step's commit and before the next step, which
     /// may fire due events at entry or in the time warp and wake units
     /// no step of its own wakes.
-    fn note_ppe_siblings(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
+    fn note_ppe_siblings(
+        &mut self,
+        rt: &cellgov_core::Runtime,
+        step: &cellgov_core::RuntimeStep,
+        before: &[cellgov_event::UnitId],
+    ) {
+        let unit = step.unit;
         let registry = rt.registry();
         let is_ppe =
             |id: cellgov_event::UnitId| registry.get(id).is_some_and(|u| u.shares_ppe_issue());
         if is_ppe(unit) {
             self.ppe_sibling_reader = Some(unit);
         }
-        if let Some((ran, before)) = rt.last_ppe_pressure() {
+        if let Some((ran, pressure)) = step.ppe_pressure {
             let after = registry.get(ran).map(|u| u.ppe_issue_pressure());
-            if ran == unit && after != Some(before) {
+            if ran == unit && after != Some(pressure) {
                 self.ppe_pressure_changer = Some(unit);
             }
         }
-        let before = rt.last_runnable();
         for id in registry.ids().filter(|&id| is_ppe(id)) {
             let now = registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Runnable);
             if now != before.contains(&id) {

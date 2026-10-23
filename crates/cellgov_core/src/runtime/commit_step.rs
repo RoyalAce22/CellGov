@@ -16,8 +16,8 @@ impl Runtime {
     /// Commit a step and recycle its effect buffer for the next step.
     ///
     /// This is the hot-path companion to [`Self::commit_step`]. It
-    /// leaves `step.effects` empty, while preserving `step.result` for
-    /// callers that classify the completed step.
+    /// leaves `step.effects` and `step.runnable` empty, and keeps the
+    /// step's other fields for callers that classify the completed step.
     pub fn commit_step_and_recycle(
         &mut self,
         step: &mut RuntimeStep,
@@ -26,6 +26,7 @@ impl Runtime {
         let outcome = self.commit_step(&step.result, &effects);
         self.effects_buf = effects;
         self.effects_buf.clear();
+        self.runnable_buf = std::mem::take(&mut step.runnable);
         outcome
     }
 

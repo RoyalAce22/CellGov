@@ -227,32 +227,6 @@ impl Runtime {
         &self.dma_queue
     }
 
-    /// Units runnable when the scheduler made its last choice.
-    ///
-    /// Empty before the first [`Runtime::step`], after a restore, and
-    /// after a step that refuses before its unit runs. A
-    /// [`crate::StepError::TimeOverflow`] after the run leaves the set
-    /// the dropped step chose from. Read it after the call: a step that
-    /// fires a due DMA completion or timer wake at entry or in the time
-    /// warp widens the set the scheduler chose from.
-    #[inline]
-    pub fn last_runnable(&self) -> &[UnitId] {
-        &self.last_runnable
-    }
-
-    /// The PPE thread the last [`Runtime::step`] ran, with its issue
-    /// pressure before that step, or `None` when that unit is not a PPE
-    /// thread.
-    ///
-    /// `None` before the first step, after a restore, and after a step
-    /// that refuses before its unit runs. A
-    /// [`crate::StepError::TimeOverflow`] after the run leaves the value
-    /// of the dropped step.
-    #[inline]
-    pub fn last_ppe_pressure(&self) -> Option<(UnitId, cellgov_exec::PpeIssuePressure)> {
-        self.last_ppe_pressure
-    }
-
     /// DMA completions the last [`Runtime::commit_step`] fired, each
     /// with whether an inline payload carried its bytes.
     ///
@@ -331,34 +305,6 @@ impl Runtime {
     #[inline]
     pub fn last_problem_state_accesses(&self) -> &[(UnitId, cellgov_mem::ByteRange)] {
         &self.last_problem_state_accesses
-    }
-
-    /// The mailbox whose occupancy the last step's unit read: its own
-    /// inbound mailbox, which shares its id, when the registry holds one
-    /// and the unit asked for its count. An SPU asks at the start of
-    /// every step.
-    ///
-    /// The order of this step and a send or receive on that mailbox
-    /// decides the count the unit saw, though the step emits no effect
-    /// naming the mailbox.
-    ///
-    /// [CBEA p:135 s:9.5.3] the SPU_RdInMbox count is the number of messages in the inbound mailbox.
-    pub fn last_mailbox_read(&self) -> Option<cellgov_sync::MailboxId> {
-        self.last_mailbox_read
-    }
-
-    /// The line the last step's unit held in its local reservation
-    /// register as the step began, or `None`.
-    ///
-    /// The step checks the committed table for that line before its
-    /// first instruction and raises the reservation lost event when the
-    /// entry is gone. So the order of this step and another unit's store
-    /// to the line decides what the step did, though the step emits no
-    /// effect naming the line.
-    ///
-    /// [CBEA p:148 s:9.11.1] Lr is set when a snoop external to the MFC resets the reservation.
-    pub fn last_entry_reservation(&self) -> Option<u64> {
-        self.last_entry_reservation
     }
 
     // -- scheduler --
@@ -559,6 +505,11 @@ impl Runtime {
     #[cfg(test)]
     pub(crate) fn effects_buf_capacity_for_tests(&self) -> usize {
         self.effects_buf.capacity()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn runnable_buf_capacity_for_tests(&self) -> usize {
+        self.runnable_buf.capacity()
     }
 
     #[cfg(test)]
