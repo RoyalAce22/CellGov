@@ -35,9 +35,8 @@ fn rchcnt_reads_the_messages_waiting_in_the_units_mailbox() {
         spu
     });
 
-    let step = rt.step().expect("the unit runs");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the step commits");
+    let mut step = rt.step().expect("the unit runs");
+    rt.commit_step(&mut step).expect("the step commits");
 
     let spu = rt
         .registry()

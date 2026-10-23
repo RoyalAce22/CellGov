@@ -192,14 +192,13 @@ fn a_published_host_write_reaches_the_footprint_with_its_space() {
         steps: std::cell::Cell::new(0),
     });
 
-    let step = rt.step().expect("the caller is runnable");
+    let mut step = rt.step().expect("the caller is runnable");
     assert!(
         step.effects.is_empty(),
         "the syscall step names no write of its own: {:?}",
         step.effects,
     );
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the dispatch commits");
+    rt.commit_step(&mut step).expect("the dispatch commits");
 
     let published = rt.observations().host_writes.to_vec();
     let out_param = published

@@ -76,9 +76,8 @@ const ID_PTR: u64 = 0x800;
 fn run_call(rt: &mut Runtime, caller: UnitId) -> Vec<UnitId> {
     let mut stepped = Vec::new();
     for _ in 0..20 {
-        let step = rt.step().expect("a unit steps");
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let mut step = rt.step().expect("a unit steps");
+        rt.commit_step(&mut step).expect("the step commits");
         stepped.push(step.unit);
         if step.unit == caller {
             return stepped;

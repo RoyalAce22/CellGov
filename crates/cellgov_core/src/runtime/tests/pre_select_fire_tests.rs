@@ -116,9 +116,8 @@ fn a_pre_select_fire_lands_a_host_write_and_no_published_completion() {
     // The issuer enqueues and moves ahead; the idle unit's clock stays
     // behind the transfer's tick at every commit.
     for _ in 0..3 {
-        let step = rt.step().expect("both units are runnable");
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let mut step = rt.step().expect("both units are runnable");
+        rt.commit_step(&mut step).expect("the step commits");
     }
     assert!(
         rt.registry().clock(idle) < rt.registry().clock(issuer),
@@ -132,14 +131,13 @@ fn a_pre_select_fire_lands_a_host_write_and_no_published_completion() {
     // Parking the lagging unit leaves the issuer's clock past the
     // transfer's tick, so the next step fires it at entry.
     rt.set_unit_status_override(idle, UnitStatus::Blocked);
-    let step = rt.step().expect("the issuer is runnable");
+    let mut step = rt.step().expect("the issuer is runnable");
     assert_eq!(step.unit, issuer);
     assert!(
         rt.dma_queue().is_empty(),
         "the step fired the transfer before it ran a unit",
     );
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the step commits");
+    rt.commit_step(&mut step).expect("the step commits");
 
     assert!(
         rt.observations().host_writes.contains(&HostWrite {

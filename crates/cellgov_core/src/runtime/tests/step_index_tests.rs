@@ -52,11 +52,10 @@ fn each_step_and_its_observations_carry_one_index() {
     let start = rt.snapshot();
 
     for expected in 0..2 {
-        let step = rt.step().expect("the unit is runnable");
+        let mut step = rt.step().expect("the unit is runnable");
         assert_eq!(step.token.index(), StepIndex::new(expected));
         assert_eq!(rt.observations().step, step.token.index());
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
         assert_eq!(rt.observations().step, step.token.index());
     }
 

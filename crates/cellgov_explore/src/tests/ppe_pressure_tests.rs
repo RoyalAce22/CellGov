@@ -58,9 +58,8 @@ fn a_ppe_thread_s_step_carries_its_pressure_and_another_s_does_not() {
     let other = rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::LoadImm(1); 4]));
     let mut seen = Vec::new();
     for _ in 0..2 {
-        let step = rt.step().expect("a runnable unit");
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let mut step = rt.step().expect("a runnable unit");
+        rt.commit_step(&mut step).expect("the step commits");
         seen.push((step.unit, step.ppe_pressure.map(|(unit, _)| unit)));
     }
     seen.sort();
@@ -88,12 +87,12 @@ fn only_the_step_that_changes_a_ppe_thread_s_pressure_records_it() {
     let mut pressing = Vec::new();
     let mut reads = Vec::new();
     for _ in 0..8 {
-        let step = rt.step().expect("a runnable unit");
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let mut step = rt.step().expect("a runnable unit");
+        let runnable = step.runnable.clone();
         let mut footprint = StepFootprint::from_effects(&step.effects);
+        rt.commit_step(&mut step).expect("the step commits");
         footprint
-            .note_commit(&rt, &step, &step.runnable)
+            .note_commit(&rt, &step, &runnable)
             .expect("the observations are the step's");
         if step.unit == presser {
             pressing.push(footprint.ppe_pressure_changer);

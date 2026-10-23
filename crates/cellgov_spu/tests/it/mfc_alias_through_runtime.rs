@@ -96,12 +96,11 @@ fn a_put_and_a_signal_through_the_window_reach_the_peer_thread() {
 
     let mut finished = Vec::new();
     for _ in 0..200 {
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         if step.result.yield_reason == YieldReason::Finished {
             finished.push(step.unit);
         }
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
         if finished.len() == 2 {
             break;
         }

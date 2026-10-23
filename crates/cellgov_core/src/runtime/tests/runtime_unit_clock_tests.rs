@@ -73,9 +73,9 @@ fn timed(rt: &mut Runtime, cost: u64, steps: u64) -> (UnitId, Rc<RefCell<Vec<u64
 fn run_out(rt: &mut Runtime) -> Vec<UnitId> {
     let mut order = Vec::new();
     for _ in 0..1_000 {
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         order.push(step.unit);
-        rt.commit_unchecked(&step.result, &step.effects).unwrap();
+        rt.commit_step(&mut step).unwrap();
     }
     order
 }

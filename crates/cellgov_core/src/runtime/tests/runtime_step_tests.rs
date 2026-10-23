@@ -55,10 +55,8 @@ fn the_step_predicate_answers_false_only_where_step_refuses() {
     finished
         .registry_mut()
         .register_with(|id| CountingUnit::new(id, 1));
-    let step = finished.step().expect("the unit has its one step");
-    finished
-        .commit_unchecked(&step.result, &step.effects)
-        .unwrap();
+    let mut step = finished.step().expect("the unit has its one step");
+    finished.commit_step(&mut step).unwrap();
     assert!(!finished.can_take_another_step());
     assert_eq!(finished.step().unwrap_err(), StepError::NoRunnableUnit);
 }
@@ -202,8 +200,8 @@ fn step_then_commit_writes_become_visible() {
         steps: Cell::new(0),
         max: 5,
     });
-    let s1 = rt.step().unwrap();
-    let outcome1 = rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
+    let mut s1 = rt.step().unwrap();
+    let outcome1 = rt.commit_step(&mut s1).unwrap();
     assert_eq!(outcome1.writes_committed, 1);
     assert!(!outcome1.fault_discarded);
     assert_eq!(
@@ -214,8 +212,8 @@ fn step_then_commit_writes_become_visible() {
     );
     assert_eq!(rt.epoch(), Epoch::new(1));
 
-    let s2 = rt.step().unwrap();
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    let mut s2 = rt.step().unwrap();
+    rt.commit_step(&mut s2).unwrap();
     assert_eq!(
         rt.memory()
             .read(cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0), 4).unwrap())

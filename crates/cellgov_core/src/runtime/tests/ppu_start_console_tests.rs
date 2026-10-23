@@ -33,9 +33,8 @@ fn write(rt: &mut Runtime, addr: u64, bytes: &[u8]) {
 
 /// Run one step and name the unit it scheduled.
 fn step(rt: &mut Runtime) -> UnitId {
-    let step = rt.step().expect("a unit runs");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the step commits");
+    let mut step = rt.step().expect("a unit runs");
+    rt.commit_step(&mut step).expect("the step commits");
     step.unit
 }
 

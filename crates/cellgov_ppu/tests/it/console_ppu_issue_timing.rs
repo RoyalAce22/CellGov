@@ -809,11 +809,10 @@ fn replay_counted(
         if rt.registry().effective_status(unit) == Some(UnitStatus::Faulted) {
             return None;
         }
-        let step = rt
+        let mut step = rt
             .step()
             .unwrap_or_else(|e| panic!("loop {} at pc {:#x}: {e:?}", r.loop_index, s.pc));
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
     }
     assert_eq!(state(&rt).pc, exit, "loop {} ran to its exit", r.loop_index);
     for &s in &sibling_ids {

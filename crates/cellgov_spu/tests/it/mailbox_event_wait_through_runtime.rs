@@ -61,9 +61,8 @@ fn runtime(mailbox: u8, events: u32) -> (Runtime, UnitId) {
 }
 
 fn step(rt: &mut Runtime) {
-    let step = rt.step().expect("a unit runs");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the step commits");
+    let mut step = rt.step().expect("a unit runs");
+    rt.commit_step(&mut step).expect("the step commits");
 }
 
 fn parked_on_an_event(rt: &Runtime, unit: UnitId) -> bool {
@@ -82,9 +81,8 @@ fn finish(rt: &mut Runtime, unit: UnitId) -> u32 {
         if rt.registry().effective_status(unit) == Some(UnitStatus::Finished) {
             break;
         }
-        let Ok(step) = rt.step() else { break };
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let Ok(mut step) = rt.step() else { break };
+        rt.commit_step(&mut step).expect("the step commits");
     }
     assert_eq!(
         rt.registry().effective_status(unit),

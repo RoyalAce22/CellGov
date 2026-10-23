@@ -35,8 +35,8 @@ fn make_runtime_with_two_writers() -> Runtime {
 fn drive(rt: &mut Runtime, n: usize) {
     for _ in 0..n {
         match rt.step() {
-            Ok(step) => {
-                let _ = rt.commit_unchecked(&step.result, &step.effects);
+            Ok(mut step) => {
+                let _ = rt.commit_step(&mut step);
             }
             Err(_) => break,
         }

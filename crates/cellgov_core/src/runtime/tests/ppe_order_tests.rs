@@ -46,9 +46,8 @@ fn runtime(priorities: [Option<u32>; 2]) -> (Runtime, [UnitId; 2]) {
             .expect("a thread id");
     }
     for _ in 0..4 {
-        let Ok(step) = rt.step() else { break };
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let Ok(mut step) = rt.step() else { break };
+        rt.commit_step(&mut step).expect("the step commits");
     }
     for id in ids {
         let unit = rt.registry().get(id).expect("a registered unit");

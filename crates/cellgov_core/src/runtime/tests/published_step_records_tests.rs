@@ -320,9 +320,8 @@ fn a_transfer_the_time_warp_fires_reaches_the_published_host_writes() {
         steps: Cell::new(0),
     });
 
-    let step = rt.step().expect("the waiter is runnable");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the enqueue commits");
+    let mut step = rt.step().expect("the waiter is runnable");
+    rt.commit_step(&mut step).expect("the enqueue commits");
     assert!(
         !rt.dma_queue().is_empty(),
         "the premise: the transfer is still in flight, so only a warp lands it",
@@ -333,9 +332,8 @@ fn a_transfer_the_time_warp_fires_reaches_the_published_host_writes() {
         "and nothing is runnable, so the next step has to warp",
     );
 
-    let step = rt.step().expect("the warp wakes the issuer");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the woken step commits");
+    let mut step = rt.step().expect("the warp wakes the issuer");
+    rt.commit_step(&mut step).expect("the woken step commits");
 
     assert!(
         rt.observations().host_writes.contains(&hw(
@@ -436,18 +434,16 @@ fn an_expiry_the_time_warp_fires_reaches_the_published_records() {
         .create_with_id(FLAG_ID, 0)
         .expect("a fresh event-flag id");
 
-    let step = rt.step().expect("the waiter is runnable");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the wait commits");
+    let mut step = rt.step().expect("the waiter is runnable");
+    rt.commit_step(&mut step).expect("the wait commits");
     assert_eq!(
         rt.registry().effective_status(waiter),
         Some(UnitStatus::Blocked),
         "the premise: the wait parked, so only the warp reaches its deadline",
     );
 
-    let step = rt.step().expect("the warp expires the wait");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the woken step commits");
+    let mut step = rt.step().expect("the warp expires the wait");
+    rt.commit_step(&mut step).expect("the woken step commits");
 
     assert!(
         rt.observations().host_writes.contains(&hw(

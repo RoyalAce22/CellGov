@@ -240,13 +240,13 @@ fn the_read_intent_reaches_a_commit() {
         unit.state_mut().pc = TEXT;
         unit
     });
-    let step = rt.step().expect("the unit is runnable");
+    let mut step = rt.step().expect("the unit is runnable");
     assert!(
         step.effects
             .iter()
             .any(|e| matches!(e, Effect::SharedReadIntent { .. })),
         "the block published what it fetched",
     );
-    rt.commit_unchecked(&step.result, &step.effects)
+    rt.commit_step(&mut step)
         .expect("a read intent stages nothing and cannot be refused");
 }

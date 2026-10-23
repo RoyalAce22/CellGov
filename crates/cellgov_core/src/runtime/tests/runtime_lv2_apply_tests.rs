@@ -40,8 +40,8 @@ fn apply_lv2_effects_direct_commits_shared_write_intents() {
         "pre-step: counter must start at 0",
     );
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     assert!(
         rt.lv2_direct_committed_writes() >= 2,

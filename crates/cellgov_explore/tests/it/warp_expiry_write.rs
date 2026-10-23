@@ -143,9 +143,8 @@ fn workload() -> Runtime {
 fn both_waits_park_and_only_the_warp_ends_them() {
     let mut rt = workload();
     for _ in 0..2 {
-        let step = rt.step().expect("a waiter is runnable");
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the wait commits");
+        let mut step = rt.step().expect("a waiter is runnable");
+        rt.commit_step(&mut step).expect("the wait commits");
     }
     assert_eq!(
         rt.registry().effective_status(EARLY),
@@ -164,9 +163,8 @@ fn both_waits_park_and_only_the_warp_ends_them() {
         "nothing has written the shared result yet",
     );
 
-    let step = rt.step().expect("the warp expires the earlier wait");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the woken step commits");
+    let mut step = rt.step().expect("the warp expires the earlier wait");
+    rt.commit_step(&mut step).expect("the woken step commits");
     assert!(
         rt.observations()
             .host_writes

@@ -87,8 +87,8 @@ fn usleep_parks_caller_and_time_warp_wakes_at_deadline() {
         .registry_mut()
         .register_with(|id| SleepingUnit::new(id, TIMER_USLEEP, 50));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     assert_eq!(
         rt.registry().effective_status(unit_id),
@@ -101,7 +101,7 @@ fn usleep_parks_caller_and_time_warp_wakes_at_deadline() {
 
     // Everything is parked: the next step must time-warp to the
     // deadline and run the woken sleeper.
-    let s2 = rt.step().unwrap();
+    let mut s2 = rt.step().unwrap();
     assert_eq!(s2.unit, unit_id);
     assert_eq!(
         rt.time().raw(),
@@ -109,7 +109,7 @@ fn usleep_parks_caller_and_time_warp_wakes_at_deadline() {
         "clock must jump to the deadline before the woken unit's own \
          1-instruction step advances it"
     );
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    rt.commit_step(&mut s2).unwrap();
 
     let unit = rt.registry().get(unit_id).unwrap();
     let sleeper = unit.as_any().downcast_ref::<SleepingUnit>().unwrap();
@@ -127,8 +127,8 @@ fn sleep_seconds_scale_to_microseconds() {
     rt.registry_mut()
         .register_with(|id| SleepingUnit::new(id, TIMER_SLEEP, 2));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     let park_time = rt.time();
 
     rt.step().unwrap();
@@ -148,8 +148,8 @@ fn usleep_zero_is_a_yield_not_a_park() {
         .registry_mut()
         .register_with(|id| SleepingUnit::new(id, TIMER_USLEEP, 0));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     assert_ne!(
         rt.registry().effective_status(unit_id),
@@ -157,9 +157,9 @@ fn usleep_zero_is_a_yield_not_a_park() {
         "zero-interval sleep must not park"
     );
 
-    let s2 = rt.step().unwrap();
+    let mut s2 = rt.step().unwrap();
     assert_eq!(s2.unit, unit_id);
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    rt.commit_step(&mut s2).unwrap();
     let unit = rt.registry().get(unit_id).unwrap();
     let sleeper = unit.as_any().downcast_ref::<SleepingUnit>().unwrap();
     assert_eq!(sleeper.observed_r3.get(), Some(0));
@@ -181,8 +181,8 @@ fn timer_wake_fires_at_commit_boundary_while_others_run() {
 
     let mut woke = false;
     for _ in 0..16 {
-        let s = rt.step().unwrap();
-        rt.commit_unchecked(&s.result, &s.effects).unwrap();
+        let mut s = rt.step().unwrap();
+        rt.commit_step(&mut s).unwrap();
         if rt.registry().effective_status(sleeper_id) == Some(UnitStatus::Runnable) {
             woke = true;
             break;
@@ -209,10 +209,10 @@ fn usleep_wake_emits_timer_unit_woken_record() {
         .registry_mut()
         .register_with(|id| SleepingUnit::new(id, TIMER_USLEEP, 50));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
-    let s2 = rt.step().unwrap();
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
+    let mut s2 = rt.step().unwrap();
+    rt.commit_step(&mut s2).unwrap();
 
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
@@ -241,8 +241,8 @@ fn snapshot_restores_pending_timer_wake() {
         .registry_mut()
         .register_with(|id| SleepingUnit::new(id, TIMER_USLEEP, 50));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     let hash_parked = rt.sync_state_hash();
 
     let snap = rt.snapshot();
@@ -263,9 +263,9 @@ fn snapshot_restores_pending_timer_wake() {
         "restore must bring back the pending timer wake"
     );
 
-    let s2 = rt.step().unwrap();
+    let mut s2 = rt.step().unwrap();
     assert_eq!(s2.unit, unit_id);
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    rt.commit_step(&mut s2).unwrap();
     let unit = rt.registry().get(unit_id).unwrap();
     let sleeper = unit.as_any().downcast_ref::<SleepingUnit>().unwrap();
     assert_eq!(sleeper.observed_r3.get(), Some(0));
@@ -359,8 +359,8 @@ fn semaphore_timed_wait_expires_with_etimedout() {
     assert_eq!(rt.timer_wakes_pending(), 1);
 
     for _ in 0..16 {
-        let s = rt.step().unwrap();
-        rt.commit_unchecked(&s.result, &s.effects).unwrap();
+        let mut s = rt.step().unwrap();
+        rt.commit_step(&mut s).unwrap();
     }
     assert_eq!(rt.timer_wakes_pending(), 0, "deadline must have fired");
     let unit = rt.registry().get(waiter).unwrap();
@@ -427,8 +427,8 @@ fn post_before_deadline_cancels_timer_entry() {
     );
 
     for _ in 0..8 {
-        let s = rt.step().unwrap();
-        rt.commit_unchecked(&s.result, &s.effects).unwrap();
+        let mut s = rt.step().unwrap();
+        rt.commit_step(&mut s).unwrap();
     }
     let unit = rt.registry().get(waiter).unwrap();
     let recorder = unit.as_any().downcast_ref::<RecordingUnit>().unwrap();
@@ -457,12 +457,12 @@ fn process_exit_with_a_due_sleep_does_not_resurrect_the_sleeper() {
         .registry_mut()
         .register_with(|id| SleepingUnit::new(id, PROCESS_EXIT, 0));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(rt.timer_wakes_pending(), 1);
 
-    let s2 = rt.step().unwrap();
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    let mut s2 = rt.step().unwrap();
+    rt.commit_step(&mut s2).unwrap();
 
     assert_eq!(
         rt.registry().effective_status(sleeper),
@@ -509,7 +509,7 @@ fn all_blocked_time_warp_expires_semaphore_wait_with_etimedout() {
     );
     assert_eq!(rt.timer_wakes_pending(), 1);
 
-    let s = rt.step().unwrap();
+    let mut s = rt.step().unwrap();
     assert_eq!(s.unit, waiter);
     assert_eq!(
         rt.time().raw(),
@@ -517,7 +517,7 @@ fn all_blocked_time_warp_expires_semaphore_wait_with_etimedout() {
         "clock must warp to the deadline before the woken waiter's own \
          step advances it"
     );
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     let unit = rt.registry().get(waiter).unwrap();
     let recorder = unit.as_any().downcast_ref::<RecordingUnit>().unwrap();
@@ -549,8 +549,8 @@ fn sleep_seconds_argument_reads_only_the_low_32_bits() {
         .registry_mut()
         .register_with(|id| SleepingUnit::new(id, TIMER_SLEEP, 1u64 << 32));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     assert_ne!(
         rt.registry().effective_status(unit_id),
@@ -577,14 +577,14 @@ fn process_exit_drops_pending_timer_wakes() {
         .registry_mut()
         .register_with(|id| SleepingUnit::new(id, PROCESS_EXIT, 0));
 
-    let s = rt.step().unwrap();
+    let mut s = rt.step().unwrap();
     assert_eq!(s.unit, sleeper);
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(rt.timer_wakes_pending(), 1);
 
-    let s2 = rt.step().unwrap();
+    let mut s2 = rt.step().unwrap();
     assert_eq!(s2.unit, exiter);
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    rt.commit_step(&mut s2).unwrap();
 
     assert_eq!(
         rt.timer_wakes_pending(),
@@ -668,8 +668,8 @@ fn contended_cond_expiry_reparks_without_phantom_timer_wake_record() {
     );
 
     for _ in 0..8 {
-        let s = rt.step().unwrap();
-        rt.commit_unchecked(&s.result, &s.effects).unwrap();
+        let mut s = rt.step().unwrap();
+        rt.commit_step(&mut s).unwrap();
         if rt.timer_wakes_pending() == 0 {
             break;
         }
@@ -707,8 +707,8 @@ fn contended_cond_expiry_reparks_without_phantom_timer_wake_record() {
         Some(UnitStatus::Runnable)
     );
     for _ in 0..4 {
-        let s = rt.step().unwrap();
-        rt.commit_unchecked(&s.result, &s.effects).unwrap();
+        let mut s = rt.step().unwrap();
+        rt.commit_step(&mut s).unwrap();
     }
     let unit = rt.registry().get(sleeper).unwrap();
     let recorder = unit.as_any().downcast_ref::<RecordingUnit>().unwrap();
@@ -731,8 +731,8 @@ fn a_huge_usleep_deadline_saturates_at_the_tick_ceiling() {
         .registry_mut()
         .register_with(|id| SleepingUnit::new(id, TIMER_USLEEP, u64::MAX));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     assert_eq!(
         rt.registry().effective_status(unit_id),
@@ -766,8 +766,8 @@ fn a_due_wake_for_a_finished_unit_is_dropped_unfired() {
         .registry_mut()
         .register_with(|id| CountingUnit::new(id, 4));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(rt.timer_wakes_pending(), 1);
     rt.registry_mut()
         .set_status_override(finished, UnitStatus::Finished);
@@ -777,8 +777,8 @@ fn a_due_wake_for_a_finished_unit_is_dropped_unfired() {
     // 7192. The busy peer's clock reaches 8000 on its second 4000-tick
     // step, and that commit crosses the deadline.
     for _ in 0..2 {
-        let s2 = rt.step().unwrap();
-        rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+        let mut s2 = rt.step().unwrap();
+        rt.commit_step(&mut s2).unwrap();
     }
 
     assert_eq!(rt.timer_wakes_pending(), 0, "the due entry is consumed");
@@ -815,8 +815,8 @@ fn all_blocked_without_timer_or_dma_still_errors() {
         .registry_mut()
         .register_with(|id| SleepingUnit::new(id, TIMER_USLEEP, 50));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     // Cancel the timer entry out from under the parked unit; the
     // runtime now has a Blocked unit and no wake source.
@@ -913,11 +913,11 @@ fn a_no_wake_expiry_warps_again_instead_of_reporting_all_blocked() {
     );
     assert_eq!(rt.timer_wakes_pending(), 2);
 
-    let s = rt
+    let mut s = rt
         .step()
         .expect("warp must continue past a no-wake cond expiry to the semaphore deadline");
     assert_eq!(s.unit, holder, "the semaphore expiry wakes the peer");
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     assert_eq!(
         rt.registry().effective_status(cond_waiter),

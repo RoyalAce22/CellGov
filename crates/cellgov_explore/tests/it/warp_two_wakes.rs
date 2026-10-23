@@ -161,7 +161,7 @@ fn one_warp_wakes_both_waiters() {
     let mut warps = 0usize;
     for _ in 0..16 {
         let idle = rt.registry().runnable_ids().next().is_none();
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         if idle {
             warps += 1;
             assert_eq!(
@@ -171,7 +171,7 @@ fn one_warp_wakes_both_waiters() {
                 step.runnable,
             );
         }
-        rt.commit_unchecked(&step.result, &step.effects)
+        rt.commit_step(&mut step)
             .expect("no step of this workload refuses its commit");
     }
     assert_eq!(warps, 1, "one warp, and it is the branching point");

@@ -38,9 +38,8 @@ fn runtime_with_spu() -> (Runtime, UnitId) {
 }
 
 fn step(rt: &mut Runtime) {
-    let step = rt.step().expect("the SPU runs");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the step commits");
+    let mut step = rt.step().expect("the SPU runs");
+    rt.commit_step(&mut step).expect("the step commits");
 }
 
 fn spu(rt: &Runtime, unit: UnitId) -> &SpuExecutionUnit {

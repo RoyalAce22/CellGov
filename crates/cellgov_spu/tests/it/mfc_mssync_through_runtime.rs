@@ -66,10 +66,9 @@ fn state(rt: &Runtime, unit: UnitId) -> cellgov_spu::state::SpuState {
 fn run(rt: &mut Runtime, units: usize) -> usize {
     let mut finished = 0;
     for _ in 0..400 {
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         finished += usize::from(step.result.yield_reason == YieldReason::Finished);
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
         if finished == units {
             break;
         }

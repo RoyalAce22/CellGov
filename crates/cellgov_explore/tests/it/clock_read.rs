@@ -108,10 +108,10 @@ fn runnable_after(prefix: &[UnitId]) -> Vec<UnitId> {
         prefix.iter().copied().map(Some).collect(),
     ));
     for _ in 0..prefix.len() {
-        let step = rt
+        let mut step = rt
             .step()
             .expect("the walk built this prefix from runnable units");
-        rt.commit_unchecked(&step.result, &step.effects)
+        rt.commit_step(&mut step)
             .expect("no step of this workload refuses its commit");
     }
     rt.registry().runnable_ids().collect()

@@ -106,8 +106,8 @@ fn level_filter_drops_scheduling_records() {
         steps: Cell::new(0),
         max: 2,
     });
-    let s1 = rt.step().unwrap();
-    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
+    let mut s1 = rt.step().unwrap();
+    rt.commit_step(&mut s1).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -125,8 +125,8 @@ fn step_then_commit_emits_commit_applied_with_post_epoch() {
         steps: Cell::new(0),
         max: 3,
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -236,8 +236,8 @@ fn step_emits_one_effect_record_per_effect_in_emission_order() {
         id,
         done: Cell::new(false),
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let effects: Vec<(u32, TracedEffectKind)> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -324,8 +324,8 @@ fn commit_validation_failure_traces_as_fault_discarded() {
         id,
         done: Cell::new(false),
     });
-    let s = rt.step().unwrap();
-    let _ = rt.commit_unchecked(&s.result, &s.effects).unwrap_err();
+    let mut s = rt.step().unwrap();
+    let _ = rt.commit_step(&mut s).unwrap_err();
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -421,8 +421,8 @@ fn commit_reserved_write_traces_as_fault_discarded() {
         id,
         done: Cell::new(false),
     });
-    let s = rt.step().unwrap();
-    let _ = rt.commit_unchecked(&s.result, &s.effects).unwrap_err();
+    let mut s = rt.step().unwrap();
+    let _ = rt.commit_step(&mut s).unwrap_err();
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))
@@ -454,8 +454,8 @@ fn trace_is_deterministic_across_two_identical_runs() {
             max: 4,
         });
         for _ in 0..4 {
-            let s = rt.step().unwrap();
-            rt.commit_unchecked(&s.result, &s.effects).unwrap();
+            let mut s = rt.step().unwrap();
+            rt.commit_step(&mut s).unwrap();
         }
         rt.trace().bytes().to_vec()
     }
@@ -474,8 +474,8 @@ fn fault_driven_mode_skips_trace_records() {
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     let reader = TraceReader::new(rt.trace().bytes());
     let records: Vec<_> = reader.collect();
@@ -496,8 +496,8 @@ fn full_trace_mode_emits_trace_records() {
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     let reader = TraceReader::new(rt.trace().bytes());
     let records: Vec<_> = reader.collect();
@@ -782,13 +782,13 @@ fn a_host_side_read_between_step_and_commit_is_traced_at_the_commit_under_the_co
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_trace::{TraceReader, TraceRecord};
     let mut rt = reserved_runtime(RuntimeMode::FullTrace);
-    let s1 = rt.step().unwrap();
+    let mut s1 = rt.step().unwrap();
     let step_reads = reserved_reads(&rt).len();
     // An LV2 arm or the RSX model reading on the committing unit's
     // behalf goes through the same `GuestMemory::read` path.
     let host = ByteRange::new(GuestAddr::new(0xC000_0040), 16).unwrap();
     assert_eq!(rt.memory().read(host), Some(&[0u8; 16][..]));
-    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
+    rt.commit_step(&mut s1).unwrap();
     let reads = reserved_reads(&rt);
     assert_eq!(reads.len(), step_reads + 1);
     assert_eq!(
@@ -825,14 +825,14 @@ fn a_host_side_read_between_step_and_commit_is_traced_at_the_commit_under_the_co
 fn a_faulting_step_still_traces_the_reserved_reads_it_consumed_before_the_fault() {
     use cellgov_trace::{TraceReader, TraceRecord};
     let mut rt = reserved_runtime_with(RuntimeMode::FullTrace, true);
-    let s1 = rt.step().unwrap();
+    let mut s1 = rt.step().unwrap();
     assert_eq!(
         reserved_reads(&rt),
         vec![(0, 1, 0xC000_0010, 4, 2), (0, 1, 0xC000_0020, 8, 1)],
         "fault-discards-all covers the batch's effects; the zeros the unit \
          consumed before faulting are part of the run and stay located"
     );
-    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
+    rt.commit_step(&mut s1).unwrap();
     let fault_discarded = TraceReader::new(rt.trace().bytes())
         .map(|r| r.expect("decode"))
         .find_map(|r| match r {
@@ -874,12 +874,12 @@ fn an_immediate_syscall_return_is_traced_in_the_dispatching_commit() {
         steps: Cell::new(0),
         syscall_args: args,
     });
-    let s = rt.step().unwrap();
+    let mut s = rt.step().unwrap();
     assert!(
         syscall_records(&rt).iter().all(|r| r.0),
         "nothing is returned before the commit dispatches the call"
     );
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     let records = syscall_records(&rt);
     assert_eq!(records.len(), 2, "one entry and one return: {records:?}");
@@ -966,8 +966,8 @@ fn a_blocked_syscall_traces_its_return_at_wake_time_not_at_dispatch() {
         id,
         steps: Cell::new(0),
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     let park_time = rt.time();
     assert!(
         syscall_records(&rt).iter().all(|r| r.0),
@@ -1002,8 +1002,8 @@ fn fault_driven_mode_delivers_syscall_returns_without_tracing_them() {
         steps: Cell::new(0),
         syscall_args: args,
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert!(syscall_records(&rt).is_empty());
     assert!(
         rt.registry_mut().drain_syscall_return(unit_id).is_some(),

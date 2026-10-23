@@ -253,9 +253,9 @@ fn the_handler_sends_a_message_the_senders_own_step_never_names() {
     let mut rt = workload();
     rt.set_scheduler(PrescribedScheduler::new(vec![Some(RECEIVER), Some(SENDER)]));
 
-    let park = rt.step().expect("the receiver is runnable");
+    let mut park = rt.step().expect("the receiver is runnable");
     assert_eq!(park.unit, RECEIVER);
-    rt.commit_unchecked(&park.result, &park.effects)
+    rt.commit_step(&mut park)
         .expect("the receive attempt commits");
     assert_eq!(
         rt.registry().effective_status(RECEIVER),
@@ -263,15 +263,14 @@ fn the_handler_sends_a_message_the_senders_own_step_never_names() {
         "an empty mailbox parks the receiver, which is what the send releases",
     );
 
-    let send = rt.step().expect("the sender is runnable");
+    let mut send = rt.step().expect("the sender is runnable");
     assert_eq!(send.unit, SENDER);
     assert!(
         send.effects.is_empty(),
         "the syscall step emits nothing itself: {:?}",
         send.effects,
     );
-    rt.commit_unchecked(&send.result, &send.effects)
-        .expect("the dispatch commits");
+    rt.commit_step(&mut send).expect("the dispatch commits");
 
     assert!(
         rt.observations().lv2_effects.iter().any(|effect| matches!(
@@ -312,9 +311,9 @@ fn the_release_ends_a_park_on_a_mailbox_the_handler_never_fills() {
     let mut rt = workload_parked_elsewhere();
     rt.set_scheduler(PrescribedScheduler::new(vec![Some(RECEIVER), Some(SENDER)]));
 
-    let park = rt.step().expect("the receiver is runnable");
+    let mut park = rt.step().expect("the receiver is runnable");
     assert_eq!(park.unit, RECEIVER);
-    rt.commit_unchecked(&park.result, &park.effects)
+    rt.commit_step(&mut park)
         .expect("the receive attempt commits");
     assert_eq!(
         rt.registry().effective_status(RECEIVER),
@@ -322,10 +321,9 @@ fn the_release_ends_a_park_on_a_mailbox_the_handler_never_fills() {
         "the spare mailbox is empty, so the receiver parks on it",
     );
 
-    let send = rt.step().expect("the sender is runnable");
+    let mut send = rt.step().expect("the sender is runnable");
     assert_eq!(send.unit, SENDER);
-    rt.commit_unchecked(&send.result, &send.effects)
-        .expect("the dispatch commits");
+    rt.commit_step(&mut send).expect("the dispatch commits");
 
     let sends: Vec<MailboxId> = rt
         .observations()

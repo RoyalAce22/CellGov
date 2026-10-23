@@ -53,10 +53,9 @@ fn sdcrz_zeroes_the_blocks_its_range_touches_and_nothing_else() {
 
     let mut reasons = Vec::new();
     for _ in 0..100 {
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         reasons.push(step.result.yield_reason);
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
         if step.result.yield_reason == YieldReason::Finished {
             break;
         }

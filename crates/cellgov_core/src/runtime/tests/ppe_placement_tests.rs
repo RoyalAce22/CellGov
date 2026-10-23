@@ -46,12 +46,11 @@ fn runtime(threads: &[Option<i32>], ops: usize) -> (Runtime, Vec<UnitId>) {
 fn steps_taken(rt: &mut Runtime, ids: &[UnitId], steps: usize) -> Vec<usize> {
     let mut taken = vec![0; ids.len()];
     for _ in 0..steps {
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         if let Some(k) = ids.iter().position(|&id| id == step.unit) {
             taken[k] += 1;
         }
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
     }
     taken
 }
@@ -115,9 +114,8 @@ fn a_unit_with_no_lv2_thread_is_outside_the_rule() {
 fn every_commit_leaves_the_placement_current() {
     let (mut rt, ids) = runtime(&[Some(1500), Some(1500), Some(1500), Some(1500)], 6);
     let mut commits = 0;
-    while let Ok(step) = rt.step() {
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+    while let Ok(mut step) = rt.step() {
+        rt.commit_step(&mut step).expect("the step commits");
         commits += 1;
         let runnable = ids
             .iter()

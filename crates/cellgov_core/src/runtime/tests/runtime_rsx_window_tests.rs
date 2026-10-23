@@ -16,8 +16,8 @@ fn syscall(rt: &mut Runtime, args: &[u64]) {
         steps: Cell::new(0),
         syscall_args,
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 }
 
 fn region_at(rt: &Runtime, addr: u64) -> (&'static str, RegionAccess) {

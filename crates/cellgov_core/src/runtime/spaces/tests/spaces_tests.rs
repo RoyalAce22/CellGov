@@ -248,8 +248,8 @@ fn child_space_write_stays_out_of_space_zero() {
         .register_with(|id| AddrWriter::new(id, 0, 0xAB));
     rt.assign_unit_space(UnitId::new(0), S1).unwrap();
 
-    let s = rt.step().unwrap();
-    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    let outcome = rt.commit_step(&mut s).unwrap();
     assert_eq!(outcome.writes_committed, 1);
     assert_eq!(
         read4(rt.space_memory(S1).unwrap(), 0).unwrap(),
@@ -314,10 +314,10 @@ fn shared_mapping_replicates_writes_both_directions() {
         .register_with(|id| AddrWriter::new(id, 0x3020, 0xC3));
     rt.assign_unit_space(UnitId::new(1), S1).unwrap();
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     // Space-0 write visible in space 1's view.
     assert_eq!(
@@ -427,8 +427,8 @@ fn child_space_write_leaves_space_zero_reservations_alone() {
     rt.reservations_mut()
         .insert_or_replace(UnitId::new(9), ReservedLine::containing(0));
 
-    let s = rt.step().unwrap();
-    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    let outcome = rt.commit_step(&mut s).unwrap();
     assert_eq!(outcome.reservations_cleared, 0);
     assert!(rt.reservations().is_held_by(UnitId::new(9)));
 }
@@ -443,8 +443,8 @@ fn space_zero_write_leaves_child_space_reservations_alone() {
         .unwrap()
         .insert_or_replace(UnitId::new(9), ReservedLine::containing(0));
 
-    let s = rt.step().unwrap();
-    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    let outcome = rt.commit_step(&mut s).unwrap();
     assert_eq!(outcome.reservations_cleared, 0);
     assert!(rt
         .space_reservations(S1)
@@ -466,15 +466,15 @@ fn conditional_store_sweep_is_space_scoped() {
     rt.reservations_mut()
         .insert_or_replace(UnitId::new(9), ReservedLine::containing(0));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert!(rt
         .space_reservations(S1)
         .unwrap()
         .is_held_by(UnitId::new(0)));
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     // Bytes landed in the child space only; the stwcx retired its own
     // entry and swept its own space, not space 0.
     assert_eq!(
@@ -500,8 +500,8 @@ fn shared_write_clears_sibling_view_reservations() {
     rt.reservations_mut()
         .insert_or_replace(UnitId::new(9), ReservedLine::containing(0x2010));
 
-    let s = rt.step().unwrap();
-    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    let outcome = rt.commit_step(&mut s).unwrap();
     assert_eq!(read4(rt.memory(), 0x2010).unwrap(), vec![0xC3; 4]);
     assert!(!rt.reservations().is_held_by(UnitId::new(9)));
     assert_eq!(outcome.reservations_cleared, 1);
@@ -519,10 +519,10 @@ fn conditional_store_on_shared_view_is_surfaced() {
         .register_with(|id| AtomicWriter::new(id, 0x3010));
     rt.assign_unit_space(UnitId::new(0), S1).unwrap();
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 }
 
 #[test]
@@ -534,9 +534,9 @@ fn rotation_interleaves_cross_space_units() {
     rt.assign_unit_space(UnitId::new(1), S1).unwrap();
 
     let mut order = Vec::new();
-    while let Ok(s) = rt.step() {
+    while let Ok(mut s) = rt.step() {
         order.push(s.unit.raw());
-        rt.commit_unchecked(&s.result, &s.effects).unwrap();
+        rt.commit_step(&mut s).unwrap();
     }
     assert_eq!(order, vec![0, 1, 0, 1, 0, 1]);
 }
@@ -578,8 +578,8 @@ fn a_write_through_one_same_space_view_reaches_the_other() {
     rt.reservations_mut()
         .insert_or_replace(UnitId::new(9), ReservedLine::containing(0x5010));
 
-    let s = rt.step().unwrap();
-    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    let outcome = rt.commit_step(&mut s).unwrap();
     assert_eq!(read4(rt.memory(), 0x5010).unwrap(), vec![0x9D; 4]);
     assert!(!rt.reservations().is_held_by(UnitId::new(9)));
     assert_eq!(outcome.reservations_cleared, 1);
@@ -671,8 +671,8 @@ fn two_process_run_is_deterministic() {
             .register_with(|id| AddrWriter::new(id, 0x3004, 0x22));
         rt.assign_unit_space(UnitId::new(1), S1).unwrap();
         let mut hashes = Vec::new();
-        while let Ok(s) = rt.step() {
-            rt.commit_unchecked(&s.result, &s.effects).unwrap();
+        while let Ok(mut s) = rt.step() {
+            rt.commit_step(&mut s).unwrap();
             hashes.push((rt.sync_state_hash(), rt.committed_memory_hash()));
         }
         hashes
@@ -788,10 +788,10 @@ fn keyed_shm_views_cohere_across_address_spaces() {
     );
 
     // Post-attach stores replicate both directions.
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(
         read4(rt.space_memory(S1).unwrap(), CHILD_VIEW + 0x200).unwrap(),
         vec![0x5A; 4],

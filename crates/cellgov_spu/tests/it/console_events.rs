@@ -295,9 +295,8 @@ fn cellgov_raises_tm_after_the_consoles_poll_count() {
         spu
     });
     while rt.registry().effective_status(unit) != Some(cellgov_exec::UnitStatus::Finished) {
-        let step = rt.step().expect("the SPU runs");
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let mut step = rt.step().expect("the SPU runs");
+        rt.commit_step(&mut step).expect("the step commits");
     }
     let ls = &rt
         .registry()

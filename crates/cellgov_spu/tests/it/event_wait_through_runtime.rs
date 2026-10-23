@@ -63,9 +63,8 @@ fn add_spu(rt: &mut Runtime, program: &[u32], regs: &[(u8, u32)]) -> UnitId {
 }
 
 fn step(rt: &mut Runtime) {
-    let step = rt.step().expect("a unit runs");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the step commits");
+    let mut step = rt.step().expect("a unit runs");
+    rt.commit_step(&mut step).expect("the step commits");
 }
 
 /// Steps until the SPU stops and returns its register 5.
@@ -74,9 +73,8 @@ fn finish(rt: &mut Runtime, unit: UnitId) -> u32 {
         if rt.registry().effective_status(unit) == Some(UnitStatus::Finished) {
             break;
         }
-        let Ok(step) = rt.step() else { break };
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let Ok(mut step) = rt.step() else { break };
+        rt.commit_step(&mut step).expect("the step commits");
     }
     assert_eq!(
         rt.registry().effective_status(unit),
@@ -121,9 +119,8 @@ fn a_signal_write_ends_a_wait_on_s1_and_a_masked_one_does_not() {
     rt.write_unit_signal(unit, SignalNotifier::Two, 5)
         .expect("problem state");
     for _ in 0..3 {
-        let Ok(step) = rt.step() else { break };
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let Ok(mut step) = rt.step() else { break };
+        rt.commit_step(&mut step).expect("the step commits");
     }
     assert!(
         parked_on_an_event(&rt, unit),
@@ -168,9 +165,8 @@ fn a_tag_status_update_ends_a_wait_on_tg() {
             break;
         }
         parked |= parked_on_an_event(&rt, unit);
-        let Ok(step) = rt.step() else { break };
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let Ok(mut step) = rt.step() else { break };
+        rt.commit_step(&mut step).expect("the step commits");
     }
     assert!(parked, "the SPU waited for the get");
     assert_eq!(finish(&mut rt, unit), event::TG);
@@ -186,10 +182,9 @@ fn a_multisource_request_with_nothing_in_flight_ends_a_wait_on_ms_at_once() {
         0,
     ];
     let (mut rt, unit) = runtime(&program, &[(10, event::MS)]);
-    let first = rt.step().expect("the SPU runs");
+    let mut first = rt.step().expect("the SPU runs");
     assert_ne!(first.result.yield_reason, YieldReason::ChannelStall);
-    rt.commit_unchecked(&first.result, &first.effects)
-        .expect("the step commits");
+    rt.commit_step(&mut first).expect("the step commits");
     assert_eq!(finish(&mut rt, unit), event::MS);
 }
 

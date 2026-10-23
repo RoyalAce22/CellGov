@@ -98,8 +98,8 @@ fn runtime_putting_len(destinations: Vec<u64>, len: u64) -> Runtime {
 
 /// Runs every step, then drains the queue.
 fn run_out(rt: &mut Runtime) {
-    while let Ok(step) = rt.step() {
-        rt.commit_unchecked(&step.result, &step.effects)
+    while let Ok(mut step) = rt.step() {
+        rt.commit_step(&mut step)
             .expect("no step of this workload refuses its commit");
     }
     rt.drain_pending_dma();
@@ -144,9 +144,8 @@ fn a_put_with_no_backing_region_is_a_segment_fault_and_one_to_a_read_only_region
 #[test]
 fn an_address_mapped_before_the_queue_reaches_the_put_translates() {
     let mut rt = runtime_putting(vec![LATE]);
-    let step = rt.step().expect("the putter runs");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the enqueue is accepted");
+    let mut step = rt.step().expect("the putter runs");
+    rt.commit_step(&mut step).expect("the enqueue is accepted");
     assert_eq!(rt.dma_queue().len(), 1, "the put is still queued");
     rt.memory_mut()
         .install_region(LATE, 0x100, "late", PageSize::Page64K)

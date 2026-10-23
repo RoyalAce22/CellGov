@@ -1330,8 +1330,8 @@ mod insn_encode {
 fn step_n(rt: &mut cellgov_core::Runtime, n: usize) {
     for _ in 0..n {
         match rt.step() {
-            Ok(s) => {
-                let _ = rt.commit_unchecked(&s.result, &s.effects);
+            Ok(mut s) => {
+                let _ = rt.commit_step(&mut s);
             }
             Err(_) => break,
         }

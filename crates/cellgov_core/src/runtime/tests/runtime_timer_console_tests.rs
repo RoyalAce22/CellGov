@@ -44,14 +44,14 @@ fn each_sleep_returns_and_parks_as_on_the_console() {
         let unit_id = rt
             .registry_mut()
             .register_with(|id| SleepingUnit::new(id, num, arg));
-        let s = rt.step().unwrap();
-        rt.commit_unchecked(&s.result, &s.effects).unwrap();
+        let mut s = rt.step().unwrap();
+        rt.commit_step(&mut s).unwrap();
         let parked = rt.registry().effective_status(unit_id) == Some(UnitStatus::Blocked);
         let park_time = rt.time();
         assert_eq!(parked, usec != 0, "sc {num}({arg}): parked");
 
-        let s2 = rt.step().unwrap();
-        rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+        let mut s2 = rt.step().unwrap();
+        rt.commit_step(&mut s2).unwrap();
         let slept_usec = (rt.time().raw() - park_time.raw()) / cellgov_time::TICKS_PER_USEC;
         assert!(
             slept_usec >= usec,

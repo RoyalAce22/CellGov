@@ -84,9 +84,9 @@ fn runtime_with(program: &[u32], command: u32, ea: u64, lsa: u32, size: u32) -> 
 /// Steps and commits until nothing is runnable; returns every yield.
 fn run(rt: &mut Runtime) -> Vec<YieldReason> {
     let mut reasons = Vec::new();
-    while let Ok(step) = rt.step() {
+    while let Ok(mut step) = rt.step() {
         reasons.push(step.result.yield_reason);
-        if rt.commit_unchecked(&step.result, &step.effects).is_err() {
+        if rt.commit_step(&mut step).is_err() {
             break;
         }
     }
@@ -139,9 +139,8 @@ fn a_get_lands_when_it_completes_and_its_tag_reads_complete_then() {
 #[test]
 fn a_get_reads_its_source_when_it_completes() {
     let (mut rt, unit) = runtime_with(&get_and_wait(), MFC_GET, AUX_EA, LSA, TRANSFER_BYTES);
-    let step = rt.step().expect("the SPU runs");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the get queues");
+    let mut step = rt.step().expect("the SPU runs");
+    rt.commit_step(&mut step).expect("the get queues");
     let source =
         ByteRange::new(GuestAddr::new(AUX_EA), u64::from(TRANSFER_BYTES)).expect("a 64-byte range");
     rt.place_bytes(
@@ -230,15 +229,13 @@ fn a_seventeenth_command_waits_for_a_slot() {
     let (mut rt, unit) = runtime_with(&program, MFC_PUT, 0x1000, LSA, 4096);
     rt.use_measured_dma_latency();
     for _ in 0..depth {
-        let step = rt.step().expect("a put issues");
+        let mut step = rt.step().expect("a put issues");
         assert_eq!(step.result.yield_reason, YieldReason::DmaSubmitted);
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the put queues");
+        rt.commit_step(&mut step).expect("the put queues");
     }
-    let step = rt.step().expect("the SPU runs");
+    let mut step = rt.step().expect("the SPU runs");
     assert_eq!(step.result.yield_reason, YieldReason::ChannelStall);
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the park commits");
+    rt.commit_step(&mut step).expect("the park commits");
     assert_eq!(spu(&rt, unit).state().reg_word(6), 0, "no slot is free");
     assert_eq!(
         spu(&rt, unit).channel_stall().map(|stall| stall.wake),

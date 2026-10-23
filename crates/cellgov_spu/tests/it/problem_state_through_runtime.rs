@@ -38,9 +38,8 @@ fn runtime_running(program: &[u32]) -> (Runtime, UnitId) {
 }
 
 fn step(rt: &mut Runtime) -> Result<(), StepError> {
-    let step = rt.step()?;
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the step commits");
+    let mut step = rt.step()?;
+    rt.commit_step(&mut step).expect("the step commits");
     Ok(())
 }
 

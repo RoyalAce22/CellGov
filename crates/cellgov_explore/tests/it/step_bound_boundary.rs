@@ -199,9 +199,9 @@ fn the_predicate_answers_for_the_step_that_follows_it() {
         loop {
             let predicted = rt.can_take_another_step();
             match rt.step() {
-                Ok(step) => {
+                Ok(mut step) => {
                     assert!(predicted, "a step ran where the predicate saw none left");
-                    rt.commit_unchecked(&step.result, &step.effects).unwrap();
+                    rt.commit_step(&mut step).unwrap();
                     steps += 1;
                 }
                 Err(e) => {

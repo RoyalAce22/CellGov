@@ -71,10 +71,9 @@ fn a_poll_of_the_event_count_sees_tm_at_the_crossing() {
         state.set_reg_word_splat(11, 50);
         spu
     });
-    let step = rt.step().expect("a step");
+    let mut step = rt.step().expect("a step");
     assert_eq!(step.result.yield_reason, YieldReason::Finished);
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the step commits");
+    rt.commit_step(&mut step).expect("the step commits");
     let after = spu_state(&rt, unit).reg_word(6);
     // Two polls past the crossing take under one time-base tick.
     assert!(after >= 0xFFFF_FFFE, "{after:#x}");
@@ -103,10 +102,9 @@ fn an_spu_parked_on_tm_wakes_as_its_decrementer_passes_zero() {
 
     let mut stopped = false;
     for _ in 0..400 {
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         stopped = step.result.yield_reason == YieldReason::Finished;
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
         if stopped {
             break;
         }

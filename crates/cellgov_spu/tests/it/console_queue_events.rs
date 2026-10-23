@@ -119,9 +119,8 @@ fn finish(rt: &mut Runtime, unit: UnitId) {
         if rt.registry().effective_status(unit) == Some(UnitStatus::Finished) {
             break;
         }
-        let Ok(step) = rt.step() else { break };
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let Ok(mut step) = rt.step() else { break };
+        rt.commit_step(&mut step).expect("the step commits");
     }
     assert_eq!(
         rt.registry().effective_status(unit),

@@ -27,10 +27,9 @@ fn a_parked_signal_read_wakes_only_on_its_own_register() {
         spu
     });
 
-    let step = rt.step().expect("the read runs");
+    let mut step = rt.step().expect("the read runs");
     assert_eq!(step.result.yield_reason, YieldReason::ChannelStall);
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the step commits");
+    rt.commit_step(&mut step).expect("the step commits");
     assert_eq!(
         rt.registry().effective_status(unit),
         Some(UnitStatus::Blocked)
@@ -52,10 +51,9 @@ fn a_parked_signal_read_wakes_only_on_its_own_register() {
     );
     let mut reasons = Vec::new();
     for _ in 0..4 {
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         reasons.push(step.result.yield_reason);
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
     }
     assert_eq!(
         reasons.first(),

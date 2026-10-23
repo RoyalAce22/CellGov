@@ -87,8 +87,8 @@ fn run(access: u32, ea: u64) -> Option<MfcCommandError> {
         c.tag_mask = 1 << 1;
         spu
     });
-    while let Ok(step) = rt.step() {
-        if rt.commit_unchecked(&step.result, &step.effects).is_err() {
+    while let Ok(mut step) = rt.step() {
+        if rt.commit_step(&mut step).is_err() {
             break;
         }
     }

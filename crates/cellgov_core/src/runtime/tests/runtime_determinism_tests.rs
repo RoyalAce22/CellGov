@@ -50,8 +50,8 @@ fn multi_primitive_determinism_canary_with_rsx_content() {
 
         for _ in 0..500 {
             match rt.step() {
-                Ok(step) => {
-                    let _ = rt.commit_unchecked(&step.result, &step.effects);
+                Ok(mut step) => {
+                    let _ = rt.commit_step(&mut step);
                 }
                 Err(_) => break,
             }
@@ -91,8 +91,8 @@ fn multi_primitive_determinism_canary_rsx_per_step_hash_sequence_stable() {
         let mut hashes = vec![rt.sync_state_hash()];
         for _ in 0..500 {
             match rt.step() {
-                Ok(step) => {
-                    let _ = rt.commit_unchecked(&step.result, &step.effects);
+                Ok(mut step) => {
+                    let _ = rt.commit_step(&mut step);
                     hashes.push(rt.sync_state_hash());
                 }
                 Err(_) => break,
@@ -157,8 +157,8 @@ fn multi_primitive_determinism_canary_with_atomic_content() {
 
         for _ in 0..200 {
             match rt.step() {
-                Ok(step) => {
-                    let _ = rt.commit_unchecked(&step.result, &step.effects);
+                Ok(mut step) => {
+                    let _ = rt.commit_step(&mut step);
                 }
                 Err(_) => break,
             }

@@ -17,8 +17,8 @@ fn rsx_flip_waiting_observable_between_two_commits_then_done() {
             fifo_base: FIFO_BASE,
             buffer_index: 2,
         });
-    let s1 = rt.step().unwrap();
-    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
+    let mut s1 = rt.step().unwrap();
+    rt.commit_step(&mut s1).unwrap();
     assert_eq!(
         rt.rsx_flip().status(),
         CELL_GCM_DISPLAY_FLIP_STATUS_DONE,
@@ -27,8 +27,8 @@ fn rsx_flip_waiting_observable_between_two_commits_then_done() {
     assert!(!rt.rsx_flip().pending());
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
-    let s2 = rt.step().unwrap();
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    let mut s2 = rt.step().unwrap();
+    rt.commit_step(&mut s2).unwrap();
     assert_eq!(
         rt.rsx_flip().status(),
         CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
@@ -36,8 +36,8 @@ fn rsx_flip_waiting_observable_between_two_commits_then_done() {
     );
     assert!(rt.rsx_flip().pending());
     assert_eq!(rt.rsx_flip().buffer_index(), 2);
-    let s3 = rt.step().unwrap();
-    rt.commit_unchecked(&s3.result, &s3.effects).unwrap();
+    let mut s3 = rt.step().unwrap();
+    rt.commit_step(&mut s3).unwrap();
     assert_eq!(
         rt.rsx_flip().status(),
         CELL_GCM_DISPLAY_FLIP_STATUS_DONE,
@@ -74,14 +74,14 @@ fn rsx_flip_status_mirror_failure_preserves_model_and_surfaces_break() {
                 steps: Cell::new(0),
                 buffer_index: 1,
             });
-        let s1 = rt.step().unwrap();
-        rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
+        let mut s1 = rt.step().unwrap();
+        rt.commit_step(&mut s1).unwrap();
         let after_waiting_status = rt.rsx_flip().status();
         let after_waiting_breaks = rt.lv2_host().observability().invariant_break_count;
         rt.registry_mut()
             .register_with(|id| CountingUnit::new(id, 5));
-        let s2 = rt.step().unwrap();
-        rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+        let mut s2 = rt.step().unwrap();
+        rt.commit_step(&mut s2).unwrap();
         let status_after = rt.rsx_flip().status();
         let breaks_total = rt.lv2_host().observability().invariant_break_count;
         let mirror_bytes = rt
@@ -138,8 +138,8 @@ fn rsx_flip_request_applied_same_batch_does_not_immediately_transition() {
             steps: Cell::new(0),
             buffer_index: 1,
         });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(
         rt.rsx_flip().status(),
         CELL_GCM_DISPLAY_FLIP_STATUS_WAITING,
@@ -161,11 +161,11 @@ fn rsx_flip_transitions_to_done_on_next_commit_boundary() {
         });
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
-    let s1 = rt.step().unwrap();
-    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
+    let mut s1 = rt.step().unwrap();
+    rt.commit_step(&mut s1).unwrap();
     assert!(rt.rsx_flip().pending(), "batch 1: WAITING + pending");
-    let s2 = rt.step().unwrap();
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    let mut s2 = rt.step().unwrap();
+    rt.commit_step(&mut s2).unwrap();
     assert_eq!(
         rt.rsx_flip().status(),
         CELL_GCM_DISPLAY_FLIP_STATUS_DONE,
@@ -192,12 +192,12 @@ fn rsx_flip_second_request_while_pending_resolves_one_transition() {
         });
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
-    let s1 = rt.step().unwrap();
-    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
+    let mut s1 = rt.step().unwrap();
+    rt.commit_step(&mut s1).unwrap();
     assert!(rt.rsx_flip().pending());
     assert_eq!(rt.rsx_flip().buffer_index(), 1);
-    let s2 = rt.step().unwrap();
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    let mut s2 = rt.step().unwrap();
+    rt.commit_step(&mut s2).unwrap();
     assert_eq!(
         rt.rsx_flip().status(),
         CELL_GCM_DISPLAY_FLIP_STATUS_DONE,
@@ -227,8 +227,8 @@ fn rsx_mirror_writes_off_leaves_cursor_unchanged() {
         slot_addr: test_slot(control_register::PUT_OFFSET),
         value: 0x1234,
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(rt.rsx_cursor().put(), 0, "mirror off; cursor untouched");
 }
 
@@ -243,8 +243,8 @@ fn rsx_mirror_writes_on_routes_put_to_cursor() {
         slot_addr: test_slot(control_register::PUT_OFFSET),
         value: 0x0000_1000,
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(rt.rsx_cursor().put(), 0x0000_1000);
     use cellgov_mem::{ByteRange, GuestAddr};
     let mem_bytes = rt
@@ -276,8 +276,8 @@ fn rsx_mirror_writes_does_not_route_get_to_cursor() {
         slot_addr: test_slot(control_register::GET_OFFSET),
         value: 0x0000_2000,
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(
         rt.rsx_cursor().get(),
         cursor_get_before,
@@ -296,8 +296,8 @@ fn rsx_mirror_writes_on_routes_reference_to_cursor() {
         slot_addr: test_slot(control_register::REF_OFFSET),
         value: 0xCAFE_BABE,
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(rt.rsx_cursor().current_reference(), 0xCAFE_BABE);
 }
 
@@ -318,8 +318,8 @@ fn rsx_label_write_round_trip_drives_label_memory_end_to_end() {
             sem_offset: SEM_OFFSET,
             release_value: RELEASE_VALUE,
         });
-    let s1 = rt.step().unwrap();
-    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
+    let mut s1 = rt.step().unwrap();
+    rt.commit_step(&mut s1).unwrap();
     assert_eq!(rt.rsx_cursor().put(), FIFO_BASE + 16);
     assert_eq!(
         rt.rsx_cursor().get(),
@@ -333,8 +333,8 @@ fn rsx_label_write_round_trip_drives_label_memory_end_to_end() {
         .read(ByteRange::new(GuestAddr::new((LABEL_BASE + SEM_OFFSET) as u64), 4).unwrap())
         .unwrap();
     assert_eq!(pre_bytes, &[0, 0, 0, 0], "label still zero after batch 1");
-    let s2 = rt.step().unwrap();
-    rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    let mut s2 = rt.step().unwrap();
+    rt.commit_step(&mut s2).unwrap();
     let post_bytes = rt
         .memory()
         .read(ByteRange::new(GuestAddr::new((LABEL_BASE + SEM_OFFSET) as u64), 4).unwrap())
@@ -363,8 +363,8 @@ fn rsx_label_write_round_trip_is_deterministic_across_runs() {
                 release_value: 0xDEAD_F00D,
             });
         for _ in 0..2 {
-            let s = rt.step().unwrap();
-            rt.commit_unchecked(&s.result, &s.effects).unwrap();
+            let mut s = rt.step().unwrap();
+            rt.commit_step(&mut s).unwrap();
         }
         use cellgov_mem::{ByteRange, GuestAddr};
         rt.memory()
@@ -408,8 +408,8 @@ fn rsx_label_write_round_trip_same_final_state_at_two_budgets() {
                 release_value: 0x1234_5678,
             });
         for _ in 0..2 {
-            let s = rt.step().unwrap();
-            rt.commit_unchecked(&s.result, &s.effects).unwrap();
+            let mut s = rt.step().unwrap();
+            rt.commit_step(&mut s).unwrap();
         }
         use cellgov_mem::{ByteRange, GuestAddr};
         rt.memory()
@@ -445,8 +445,8 @@ fn rsx_label_writes_committed_counter_increments_on_label_write() {
         });
     assert_eq!(rt.rsx_label_writes_committed(), 0);
     for _ in 0..2 {
-        let s = rt.step().unwrap();
-        rt.commit_unchecked(&s.result, &s.effects).unwrap();
+        let mut s = rt.step().unwrap();
+        rt.commit_step(&mut s).unwrap();
     }
     assert!(
         rt.rsx_label_writes_committed() >= 1,
@@ -468,8 +468,8 @@ fn rsx_mirror_writes_fires_fifo_advance_in_same_batch() {
         slot_addr: test_slot(control_register::PUT_OFFSET),
         value: 0x40,
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(rt.rsx_cursor().put(), 0x40);
     assert_eq!(
         rt.rsx_cursor().get(),
@@ -555,18 +555,18 @@ fn a_faulted_batch_leaves_the_queued_rsx_work_for_the_next_one() {
         steps: Cell::new(0),
     });
 
-    let s1 = rt.step().unwrap();
+    let mut s1 = rt.step().unwrap();
     assert_eq!(s1.unit, UnitId::new(0));
-    rt.commit_unchecked(&s1.result, &s1.effects).unwrap();
+    rt.commit_step(&mut s1).unwrap();
     assert_eq!(
         rt.memory().read(label).unwrap(),
         &[0, 0, 0, 0],
         "the advance pass queued the write for a later batch",
     );
 
-    let s2 = rt.step().unwrap();
+    let mut s2 = rt.step().unwrap();
     assert_eq!(s2.unit, UnitId::new(1), "the faulting unit runs next");
-    let outcome = rt.commit_unchecked(&s2.result, &s2.effects).unwrap();
+    let outcome = rt.commit_step(&mut s2).unwrap();
     assert!(outcome.fault_discarded);
     assert_eq!(
         outcome.effects_discarded_on_fault, 0,
@@ -578,8 +578,8 @@ fn a_faulted_batch_leaves_the_queued_rsx_work_for_the_next_one() {
         "and the queued write did not land in the batch that faulted",
     );
 
-    let s3 = rt.step().unwrap();
-    rt.commit_unchecked(&s3.result, &s3.effects).unwrap();
+    let mut s3 = rt.step().unwrap();
+    rt.commit_step(&mut s3).unwrap();
     assert_eq!(
         rt.memory().read(label).unwrap(),
         &RELEASE_VALUE.to_be_bytes(),
@@ -671,8 +671,8 @@ fn a_label_write_resolves_against_the_base_sys_rsx_context_allocate_published() 
         steps: Cell::new(0),
         syscall_args,
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     // No area is held, so the window opens one megabyte into the
     // lowest area granule.
@@ -690,8 +690,8 @@ fn a_label_write_resolves_against_the_base_sys_rsx_context_allocate_published() 
             offset: OFFSET,
             value: VALUE,
         });
-    let s = rt.step().unwrap();
-    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    let outcome = rt.commit_step(&mut s).unwrap();
     assert_eq!(outcome.writes_committed, 1);
 
     let landed = rt
@@ -732,8 +732,8 @@ fn a_label_write_falls_back_to_the_seed_while_no_sys_rsx_context_exists() {
             offset: OFFSET,
             value: VALUE,
         });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 
     let landed = rt
         .memory()

@@ -130,15 +130,14 @@ fn the_handler_lands_bytes_the_callers_own_step_never_names() {
     rt.set_scheduler(PrescribedScheduler::new(vec![Some(CALLER)]));
     let before = rt.memory().read(nsec_range()).unwrap().to_vec();
 
-    let step = rt.step().expect("the caller is runnable");
+    let mut step = rt.step().expect("the caller is runnable");
     assert_eq!(step.unit, CALLER);
     assert!(
         step.effects.is_empty(),
         "the syscall step emits nothing itself: {:?}",
         step.effects,
     );
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the dispatch commits");
+    rt.commit_step(&mut step).expect("the dispatch commits");
 
     let after = rt.memory().read(nsec_range()).unwrap().to_vec();
     assert_ne!(
@@ -204,10 +203,10 @@ fn runnable_after(prefix: &[UnitId]) -> Vec<UnitId> {
         prefix.iter().copied().map(Some).collect(),
     ));
     for _ in 0..prefix.len() {
-        let step = rt
+        let mut step = rt
             .step()
             .expect("the walk built this prefix from runnable units");
-        rt.commit_unchecked(&step.result, &step.effects)
+        rt.commit_step(&mut step)
             .expect("no step of this workload refuses its commit");
     }
     rt.registry().runnable_ids().collect()

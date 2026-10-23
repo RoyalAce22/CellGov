@@ -187,9 +187,8 @@ pub(crate) fn run_ops(rt: &mut Runtime, ppu: UnitId, n: usize) {
         if ops_done(rt, ppu) >= target {
             return;
         }
-        let step = rt.step().expect("a unit steps");
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let mut step = rt.step().expect("a unit steps");
+        rt.commit_step(&mut step).expect("the step commits");
     }
     panic!("the PPU finished {} of {target} ops", ops_done(rt, ppu));
 }
@@ -197,11 +196,10 @@ pub(crate) fn run_ops(rt: &mut Runtime, ppu: UnitId, n: usize) {
 /// Step and commit until no unit can step.
 fn run_out(rt: &mut Runtime) {
     for _ in 0..200 {
-        let Ok(step) = rt.step() else {
+        let Ok(mut step) = rt.step() else {
             return;
         };
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
     }
 }
 
@@ -453,8 +451,8 @@ fn a_full_interrupt_mailbox_stalls_the_raw_spu_until_the_puint_read() {
         if rt.registry().effective_status(raw) == Some(UnitStatus::Blocked) {
             break;
         }
-        let step = rt.step().unwrap();
-        rt.commit_unchecked(&step.result, &step.effects).unwrap();
+        let mut step = rt.step().unwrap();
+        rt.commit_step(&mut step).unwrap();
     }
     assert_eq!(
         rt.registry().effective_status(raw),

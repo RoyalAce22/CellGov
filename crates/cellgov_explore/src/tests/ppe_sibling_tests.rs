@@ -50,12 +50,12 @@ fn the_step_that_finishes_a_ppe_thread_pairs_with_the_other_ppe_thread_only() {
 
     let mut steps = Vec::new();
     for _ in 0..12 {
-        let step = rt.step().expect("a runnable unit");
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let mut step = rt.step().expect("a runnable unit");
+        let runnable = step.runnable.clone();
         let mut footprint = StepFootprint::from_effects(&step.effects);
+        rt.commit_step(&mut step).expect("the step commits");
         footprint
-            .note_commit(&rt, &step, &step.runnable)
+            .note_commit(&rt, &step, &runnable)
             .expect("the observations are the step's");
         steps.push((step.unit, footprint));
     }
@@ -105,12 +105,12 @@ fn a_step_that_wakes_a_parked_ppe_thread_records_the_wake_though_the_waker_is_no
 
     let mut steps = Vec::new();
     for _ in 0..4 {
-        let step = rt.step().expect("a runnable unit");
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let mut step = rt.step().expect("a runnable unit");
+        let runnable = step.runnable.clone();
         let mut footprint = StepFootprint::from_effects(&step.effects);
+        rt.commit_step(&mut step).expect("the step commits");
         footprint
-            .note_commit(&rt, &step, &step.runnable)
+            .note_commit(&rt, &step, &runnable)
             .expect("the observations are the step's");
         steps.push((step.unit, footprint));
     }

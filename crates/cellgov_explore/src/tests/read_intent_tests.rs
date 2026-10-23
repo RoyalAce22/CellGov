@@ -141,11 +141,10 @@ fn an_unpayloaded_flight_records_both_of_its_ends() {
     rt.register_unit_with(|id| {
         DmaSubmitter::new(id, source, destination, vec![0xde, 0xad, 0xbe, 0xef])
     });
-    let step = rt.step().expect("the submitter is the only runnable unit");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the enqueue commits");
-
+    let mut step = rt.step().expect("the submitter is the only runnable unit");
     let mut footprint = StepFootprint::from_effects(&step.effects);
+    rt.commit_step(&mut step).expect("the enqueue commits");
+
     footprint.note_inflight(&rt);
     let starts: Vec<u64> = footprint
         .inflight_dma_ranges
@@ -169,13 +168,13 @@ fn an_inflight_landing_reaches_the_sibling_view() {
     rt.register_unit_with(|id| {
         DmaSubmitter::new(id, source, destination, vec![0xde, 0xad, 0xbe, 0xef])
     });
-    let step = rt.step().expect("the submitter is the only runnable unit");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the enqueue commits");
-
+    let mut step = rt.step().expect("the submitter is the only runnable unit");
+    let runnable = step.runnable.clone();
     let mut footprint = StepFootprint::from_effects(&step.effects);
+    rt.commit_step(&mut step).expect("the enqueue commits");
+
     footprint
-        .note_commit(&rt, &step, &step.runnable)
+        .note_commit(&rt, &step, &runnable)
         .expect("the observations are the step's");
 
     let starts: Vec<u64> = footprint

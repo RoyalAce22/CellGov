@@ -384,7 +384,7 @@ fn a_break_logged_during_a_commit_traces_before_that_commits_checkpoints() {
     let mut rt = build(256, 5, 100);
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 10));
-    let s = rt.step().unwrap();
+    let mut s = rt.step().unwrap();
     // A break buffered mid-commit (the shape apply_lv2_effects and the
     // RSX mirror paths produce) with an empty timer queue: without the
     // commit-boundary drain it would only trace at the NEXT dispatch,
@@ -393,7 +393,7 @@ fn a_break_logged_during_a_commit_traces_before_that_commits_checkpoints() {
         "test.commit_boundary_attribution",
         format_args!("buffered before commit_step"),
     );
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    rt.commit_step(&mut s).unwrap();
     let bytes = rt.trace().bytes().to_vec();
     let records: Vec<TraceRecord> = TraceReader::new(&bytes)
         .map(|r| r.expect("decode"))

@@ -47,10 +47,9 @@ fn a_reused_tag_waits_for_its_second_transfer() {
 
     let mut reasons = Vec::new();
     for _ in 0..400 {
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         reasons.push(step.result.yield_reason);
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
         if step.result.yield_reason == YieldReason::Finished {
             break;
         }

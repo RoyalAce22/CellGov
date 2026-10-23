@@ -155,8 +155,8 @@ fn a_child_space_transfer_over_space_zero_ends_is_accepted_and_completes() {
     rt.place_bytes(AddressSpaceId::BOOT, range(SPACE0_SRC), &PAYLOAD)
         .expect("space 0 maps the source");
 
-    let step = rt.step().expect("the emitter runs");
-    rt.commit_unchecked(&step.result, &step.effects)
+    let mut step = rt.step().expect("the emitter runs");
+    rt.commit_step(&mut step)
         .expect("the enqueue passes its checks");
     // The enqueue queues a completion and writes nothing, so the
     // destination is still zero here. The payload read below is
@@ -170,8 +170,8 @@ fn a_child_space_transfer_over_space_zero_ends_is_accepted_and_completes() {
 
     // Nothing is runnable now, so the runtime warps to the completion.
     for _ in 0..4 {
-        let Ok(step) = rt.step() else { break };
-        rt.commit_unchecked(&step.result, &step.effects)
+        let Ok(mut step) = rt.step() else { break };
+        rt.commit_step(&mut step)
             .expect("no later step of this workload refuses its commit");
     }
 
@@ -190,8 +190,8 @@ fn a_child_space_transfer_over_space_zero_ends_is_accepted_and_completes() {
 /// Runs every step until the runtime stops.
 fn run_out(rt: &mut Runtime) {
     for _ in 0..8 {
-        let Ok(step) = rt.step() else { break };
-        rt.commit_unchecked(&step.result, &step.effects)
+        let Ok(mut step) = rt.step() else { break };
+        rt.commit_step(&mut step)
             .expect("no step of this workload refuses its commit");
     }
 }

@@ -55,9 +55,8 @@ fn runtime_with(program: &[u32], mode: RuntimeMode) -> (Runtime, UnitId) {
 
 /// Runs one scheduled step and commits it; `None` when nothing is runnable.
 fn step(rt: &mut Runtime) -> Option<YieldReason> {
-    let step = rt.step().ok()?;
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the step commits");
+    let mut step = rt.step().ok()?;
+    rt.commit_step(&mut step).expect("the step commits");
     Some(step.result.yield_reason)
 }
 

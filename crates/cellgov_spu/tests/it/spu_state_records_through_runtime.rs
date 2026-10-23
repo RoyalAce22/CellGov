@@ -48,9 +48,8 @@ fn run_program(
         if rt.registry().effective_status(unit) == Some(UnitStatus::Finished) {
             break;
         }
-        let step = rt.step().expect("the SPU runs");
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        let mut step = rt.step().expect("the SPU runs");
+        rt.commit_step(&mut step).expect("the step commits");
     }
     assert_eq!(
         rt.registry().effective_status(unit),

@@ -101,11 +101,11 @@ fn a_depth_holds_one_runnable_unit_with_the_rest_parked() {
             }
         }
         let alone = runnable == 1 && parked == 2;
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         if alone {
             singleton_depths += 1;
         }
-        rt.commit_unchecked(&step.result, &step.effects)
+        rt.commit_step(&mut step)
             .expect("no step of this workload refuses its commit");
     }
     assert!(

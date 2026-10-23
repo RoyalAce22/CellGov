@@ -20,8 +20,8 @@ fn syscall(rt: &mut Runtime, syscall_args: [u64; 9]) {
         steps: Cell::new(0),
         syscall_args,
     });
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
 }
 
 fn allocated() -> Runtime {
@@ -106,12 +106,12 @@ fn a_completed_flip_marks_the_flip_head_done() {
         });
     rt.registry_mut()
         .register_with(|id| CountingUnit::new(id, 5));
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert!(rt.rsx_flip().pending());
     assert_eq!(head_word(&rt, driver_info::FLIP_HEAD), 0, "still WAITING");
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert!(!rt.rsx_flip().pending());
     assert_eq!(
         head_word(&rt, driver_info::FLIP_HEAD),

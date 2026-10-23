@@ -165,8 +165,8 @@ fn a_fault_discarded_batch_does_not_clear_sibling_view_reservations() {
     rt.reservations_mut()
         .insert_or_replace(UnitId::new(9), ReservedLine::containing(0x2010));
 
-    let s = rt.step().unwrap();
-    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    let outcome = rt.commit_step(&mut s).unwrap();
     assert!(outcome.fault_discarded);
     assert_eq!(
         outcome.reservations_cleared, 0,
@@ -203,8 +203,8 @@ fn pending_rsx_effects_defer_past_a_child_space_batch() {
     ));
 
     // Child-space batch: only the child's own write commits.
-    let s = rt.step().unwrap();
-    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    let outcome = rt.commit_step(&mut s).unwrap();
     assert_eq!(outcome.writes_committed, 1);
     assert_eq!(
         read4(rt.space_memory(S1).unwrap(), 0x8).unwrap(),
@@ -214,8 +214,8 @@ fn pending_rsx_effects_defer_past_a_child_space_batch() {
     assert_eq!(rt.pending_rsx_effects.len(), 1);
 
     // Next space-0 batch picks it up.
-    let s = rt.step().unwrap();
-    let outcome = rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    let outcome = rt.commit_step(&mut s).unwrap();
     assert_eq!(outcome.writes_committed, 2);
     assert_eq!(read4(rt.memory(), 0x8).unwrap(), vec![0xEE; 4]);
     assert!(rt.pending_rsx_effects.is_empty());
@@ -233,8 +233,11 @@ fn pending_rsx_effects_survive_a_refused_boot_space_batch() {
         GuestTicks::ZERO,
     ));
 
-    let step = rt.step().unwrap();
-    assert!(rt.commit_unchecked(&step.result, &step.effects).is_err());
+    let mut step = rt.step().unwrap();
+    let refusal = rt
+        .commit_step(&mut step)
+        .expect_err("the carrier batch is refused");
+    assert_ne!(refusal, crate::commit::CommitError::StaleStep);
     assert_eq!(
         rt.pending_rsx_effects.len(),
         1,
@@ -259,8 +262,8 @@ fn a_shared_view_write_invalidates_code_at_sibling_alias_ranges() {
             done: false,
         });
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     assert_eq!(
         *calls.borrow(),
         vec![(0x2010, 4), (0x3010, 4)],
@@ -294,8 +297,8 @@ fn a_child_space_write_at_the_put_register_address_leaves_the_cursor_alone() {
     rt.assign_unit_space(UnitId::new(0), S1).unwrap();
     rt.set_rsx_mirror_writes(true);
 
-    let s = rt.step().unwrap();
-    rt.commit_unchecked(&s.result, &s.effects).unwrap();
+    let mut s = rt.step().unwrap();
+    rt.commit_step(&mut s).unwrap();
     // Equal numeric addresses in different spaces never alias: the
     // child wrote its own memory, not the RSX control register.
     assert_eq!(rt.rsx_cursor().put(), 0);

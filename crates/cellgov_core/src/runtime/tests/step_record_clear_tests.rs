@@ -122,9 +122,8 @@ fn refusing(refusal: StepError) -> Runtime {
                 runs: 0,
                 max: 9,
             });
-            let step = rt.step().expect("the first step fits");
-            rt.commit_unchecked(&step.result, &step.effects)
-                .expect("the step commits");
+            let mut step = rt.step().expect("the first step fits");
+            rt.commit_step(&mut step).expect("the step commits");
             rt
         }
         StepError::SchedulerNotReinstalled => {

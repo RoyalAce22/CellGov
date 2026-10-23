@@ -69,13 +69,12 @@ fn two_writers_beside_a_transfer() -> Runtime {
         (FIRST, SECOND),
         "registration order moved the writers",
     );
-    let step = rt.step().expect("the submitter runs first");
+    let mut step = rt.step().expect("the submitter runs first");
     assert_eq!(
         step.unit, SUBMITTER,
         "registration order moved the submitter"
     );
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the enqueue commits");
+    rt.commit_step(&mut step).expect("the enqueue commits");
     rt
 }
 

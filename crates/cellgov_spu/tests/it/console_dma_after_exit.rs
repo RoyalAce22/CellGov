@@ -135,7 +135,7 @@ fn run(exit_code: u32) -> Answers {
         },
     );
     for _ in 0..2000 {
-        let step = rt.step().expect("a unit to step");
+        let mut step = rt.step().expect("a unit to step");
         if step.unit == joiner {
             // The join has returned: what the joiner reads now is what
             // its first instruction after the syscall would read.
@@ -147,8 +147,7 @@ fn run(exit_code: u32) -> Answers {
                 .collect();
             return (word_at(&rt, CAUSE_AT), word_at(&rt, STATUS_AT), first, last);
         }
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
     }
     panic!("the join never returned");
 }

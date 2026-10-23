@@ -134,14 +134,13 @@ fn run_with_put(
     let mut reasons = Vec::new();
     let mut held = false;
     for _ in 0..400 {
-        let Ok(step) = rt.step() else { break };
+        let Ok(mut step) = rt.step() else { break };
         reasons.push(step.result.yield_reason);
         // A held list's issue queues nothing; every other MFC command
         // queues a transfer or a refusal. A get that lands before the
         // list issues would leave the result right for the wrong reason.
         held |= step.result.yield_reason == YieldReason::DmaSubmitted && step.effects.is_empty();
-        rt.commit_unchecked(&step.result, &step.effects)
-            .expect("the step commits");
+        rt.commit_step(&mut step).expect("the step commits");
         if step.result.yield_reason == YieldReason::Finished {
             break;
         }

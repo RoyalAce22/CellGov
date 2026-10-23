@@ -181,13 +181,13 @@ fn run_once(parent_elf: &[u8], child_elf: &[u8]) -> RunOutcome {
     let mut first_fault: Option<String> = None;
     let terminal = loop {
         match rt.step() {
-            Ok(s) => {
+            Ok(mut s) => {
                 if first_fault.is_none() {
                     if let Some(fault) = &s.result.fault {
                         first_fault = Some(format!("step {steps} unit {:?}: {fault:?}", s.unit));
                     }
                 }
-                rt.commit_unchecked(&s.result, &s.effects)
+                rt.commit_step(&mut s)
                     .expect("microtest commits never fail validation");
                 hashes.push((rt.sync_state_hash(), rt.committed_memory_hash()));
                 steps += 1;
@@ -305,8 +305,8 @@ fn a_child_space_region_captures_the_child_image_not_the_parent() {
     let mut rt = build_runtime(&parent_elf, &child_elf);
     let terminal = loop {
         match rt.step() {
-            Ok(s) => {
-                rt.commit_unchecked(&s.result, &s.effects)
+            Ok(mut s) => {
+                rt.commit_step(&mut s)
                     .expect("microtest commits never fail validation");
             }
             Err(e) => break e,

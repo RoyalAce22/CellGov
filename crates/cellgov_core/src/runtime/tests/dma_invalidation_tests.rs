@@ -178,8 +178,8 @@ fn build(shared: bool) -> (Runtime, Calls) {
 /// Runs until the completion fires.
 fn run_to_completion(rt: &mut Runtime) {
     for _ in 0..6 {
-        let Ok(step) = rt.step() else { break };
-        rt.commit_unchecked(&step.result, &step.effects)
+        let Ok(mut step) = rt.step() else { break };
+        rt.commit_step(&mut step)
             .expect("no step of this workload refuses its commit");
     }
     assert!(
@@ -219,15 +219,14 @@ fn a_landing_in_a_shared_view_invalidates_every_alias() {
 #[test]
 fn nothing_invalidates_before_the_completion_lands() {
     let (mut rt, calls) = build(false);
-    let step = rt.step().expect("the emitter runs first");
-    rt.commit_unchecked(&step.result, &step.effects)
-        .expect("the enqueue commits");
+    let mut step = rt.step().expect("the emitter runs first");
     assert!(
         step.effects
             .iter()
             .any(|e| matches!(e, Effect::DmaEnqueue { .. })),
         "the first step is the enqueue",
     );
+    rt.commit_step(&mut step).expect("the enqueue commits");
     assert!(
         calls.borrow().is_empty(),
         "an enqueue moves no bytes, so it invalidates nothing: {:?}",
