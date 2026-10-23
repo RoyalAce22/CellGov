@@ -12,7 +12,8 @@ use cellgov_core::Runtime;
 /// A truncating stop ([`StopReason::is_truncated`]) means the log and
 /// `rt`'s memory hash both describe a prefix of the schedule. The two
 /// cover the same steps except under
-/// [`StopReason::ChildInitUnserved`], where the hash covers one step
+/// [`StopReason::ChildInitUnserved`] and
+/// [`StopReason::StaleObservations`], where the hash covers one step
 /// the log leaves out.
 pub fn observe_decisions(rt: &mut Runtime) -> (DecisionLog, StopReason) {
     observe(rt, None)
@@ -58,7 +59,9 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
                 if let Err(e) = rt.commit_step_and_recycle(&mut step) {
                     break StopReason::CommitError(e);
                 }
-                footprint.note_commit(rt, &step, &runnable);
+                if let Err(e) = footprint.note_commit(rt, &step, &runnable) {
+                    break StopReason::StaleObservations(e);
+                }
                 // The pass this parks behind reaches no footprint, so
                 // the relation cannot answer for the steps after it.
                 if rt.has_pending_child_init() {

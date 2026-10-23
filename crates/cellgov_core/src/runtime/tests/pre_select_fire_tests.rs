@@ -142,17 +142,17 @@ fn a_pre_select_fire_lands_a_host_write_and_no_published_completion() {
         .expect("the step commits");
 
     assert!(
-        rt.last_host_writes().contains(&HostWrite {
+        rt.observations().host_writes.contains(&HostWrite {
             writer: HostWriter::DmaCompletion,
             space: AddressSpaceId::BOOT,
             range: range(DMA_DST, 8),
         }),
         "the landing reaches the host-write list: {:?}",
-        rt.last_host_writes(),
+        rt.observations().host_writes,
     );
     assert!(
-        rt.last_dma_completions().is_empty(),
+        rt.observations().dma_completions.is_empty(),
         "a completion fired at step entry reaches no commit's list: {:?}",
-        rt.last_dma_completions(),
+        rt.observations().dma_completions,
     );
 }

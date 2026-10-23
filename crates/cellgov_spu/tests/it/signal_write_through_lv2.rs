@@ -133,11 +133,12 @@ fn read_after_writes(config: u64) -> (u32, u32) {
             .expect("the step commits");
         if step.unit == caller {
             assert!(
-                rt.last_lv2_effects()
+                rt.observations()
+                    .lv2_effects
                     .iter()
                     .all(|e| matches!(e, Effect::SpuSignalWrite { .. })),
                 "{:?}",
-                rt.last_lv2_effects()
+                rt.observations().lv2_effects
             );
         }
         if rt.registry().effective_status(spu) == Some(UnitStatus::Finished) {

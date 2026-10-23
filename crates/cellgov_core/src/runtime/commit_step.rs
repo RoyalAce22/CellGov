@@ -74,7 +74,7 @@ impl Runtime {
             self.epoch.advance();
             // This path fires no completion, so the list this commit
             // publishes is empty.
-            self.last_dma_completions.clear();
+            self.observations.dma_completions.clear();
             if let Some(unit) = self.last_scheduled_unit {
                 debug_assert!(
                     !self.step_woke_others,
@@ -380,8 +380,9 @@ impl Runtime {
         if let Ok(ref mut o) = outcome {
             o.dma_completions_fired = due.len();
         }
-        self.last_dma_completions.clear();
-        self.last_dma_completions
+        self.observations.dma_completions.clear();
+        self.observations
+            .dma_completions
             .extend(due.iter().map(|(c, payload)| (*c, payload.is_some())));
         self.project_raw_spu_windows(source, stopped.is_some(), !due.is_empty());
 

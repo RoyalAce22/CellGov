@@ -201,7 +201,7 @@ fn a_published_host_write_reaches_the_footprint_with_its_space() {
     rt.commit_step(&step.result, &step.effects)
         .expect("the dispatch commits");
 
-    let published = rt.last_host_writes().to_vec();
+    let published = rt.observations().host_writes.to_vec();
     let out_param = published
         .iter()
         .find(|write| write.range.start().raw() == NSEC_OUT)

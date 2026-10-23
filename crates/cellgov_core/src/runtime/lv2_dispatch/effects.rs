@@ -139,7 +139,7 @@ impl Runtime {
                     );
                     self.lv2_direct_committed_writes =
                         self.lv2_direct_committed_writes.wrapping_add(1);
-                    self.last_lv2_effects.push(effect.clone());
+                    self.observations.lv2_effects.push(effect.clone());
                     continue;
                 }
                 Effect::MailboxSend {
@@ -160,12 +160,12 @@ impl Runtime {
                             ),
                         );
                     }
-                    self.last_lv2_effects.push(effect.clone());
+                    self.observations.lv2_effects.push(effect.clone());
                     continue;
                 }
                 Effect::RsxFlipRequest { buffer_index } => {
                     self.rsx_flip.request_flip(*buffer_index);
-                    self.last_lv2_effects.push(effect.clone());
+                    self.observations.lv2_effects.push(effect.clone());
                     continue;
                 }
                 Effect::SpuSignalWrite {
@@ -193,7 +193,7 @@ impl Runtime {
                             ),
                         );
                     }
-                    self.last_lv2_effects.push(effect.clone());
+                    self.observations.lv2_effects.push(effect.clone());
                     continue;
                 }
                 Effect::SpuLocalStoreWrite {
@@ -219,13 +219,13 @@ impl Runtime {
                             ),
                         );
                     }
-                    self.last_lv2_effects.push(effect.clone());
+                    self.observations.lv2_effects.push(effect.clone());
                     continue;
                 }
                 // The handler read the local store at dispatch; the
                 // effect records the read for the dependency footprint.
                 Effect::SpuLocalStoreRead { .. } => {
-                    self.last_lv2_effects.push(effect.clone());
+                    self.observations.lv2_effects.push(effect.clone());
                     continue;
                 }
                 // Execution units and the FIFO advance pass emit these

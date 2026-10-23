@@ -67,28 +67,35 @@ fn seed_records(rt: &mut Runtime) {
     let unit = UnitId::new(7);
     let request = DmaRequest::new(DmaDirection::Put, range(0x10, 8), range(0x20, 8), unit)
         .expect("a put between two disjoint ranges");
-    rt.last_dma_completions = vec![(DmaCompletion::new(request, GuestTicks::new(1)), false)];
-    rt.last_host_writes = vec![HostWrite {
+    rt.observations.dma_completions =
+        vec![(DmaCompletion::new(request, GuestTicks::new(1)), false)];
+    rt.observations.host_writes = vec![HostWrite {
         writer: HostWriter::Placement,
         space: AddressSpaceId::BOOT,
         range: range(0, 4),
     }];
-    rt.last_lv2_effects = vec![Effect::TraceMarker {
+    rt.observations.lv2_effects = vec![Effect::TraceMarker {
         marker: 1,
         source: unit,
     }];
-    rt.last_problem_state_accesses = vec![(unit, range(0, 4))];
+    rt.observations.problem_state_accesses = vec![(unit, range(0, 4))];
 }
 
 fn assert_records_empty(rt: &Runtime, refusal: StepError) {
     assert!(
-        rt.last_dma_completions().is_empty(),
+        rt.observations().dma_completions.is_empty(),
         "{refusal:?}: dma completions"
     );
-    assert!(rt.last_host_writes().is_empty(), "{refusal:?}: host writes");
-    assert!(rt.last_lv2_effects().is_empty(), "{refusal:?}: lv2 effects");
     assert!(
-        rt.last_problem_state_accesses().is_empty(),
+        rt.observations().host_writes.is_empty(),
+        "{refusal:?}: host writes"
+    );
+    assert!(
+        rt.observations().lv2_effects.is_empty(),
+        "{refusal:?}: lv2 effects"
+    );
+    assert!(
+        rt.observations().problem_state_accesses.is_empty(),
         "{refusal:?}: problem-state accesses"
     );
 }

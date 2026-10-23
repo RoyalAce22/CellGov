@@ -48,6 +48,23 @@ use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::{BarrierId, MailboxId, SignalId, RESERVATION_LINE_BYTES};
 
+/// The runtime's observations belong to a step other than the one a
+/// footprint was asked to record.
+///
+/// A driver that steps again between a step's commit and
+/// [`StepFootprint::note_commit`] gets this refusal. The index alone
+/// does not catch a call made before the commit, or after a restore to
+/// a snapshot taken before the step: both find the step's own index
+/// over empty records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the runtime's observations are of step {observed} and the committed step is {committed}")]
+pub struct StaleObservations {
+    /// The step the runtime's observations belong to.
+    pub observed: cellgov_core::StepIndex,
+    /// The step the caller committed.
+    pub committed: cellgov_core::StepIndex,
+}
+
 /// Shared resources one execution step accessed.
 ///
 /// Build via [`StepFootprint::from_step`], which reads the whole step.
@@ -211,13 +228,25 @@ impl StepFootprint {
     /// widens the ranges already recorded and no others, and
     /// [`StepFootprint::note_host_writes`] widens its own ranges through
     /// the space each landed in, which need not be the stepping unit's
-    /// (see `Runtime::last_host_writes`).
+    /// (see `HostWrite::space`).
+    ///
+    /// # Errors
+    ///
+    /// [`StaleObservations`] when the runtime's observations belong to a
+    /// step other than `step`. The footprint is then unchanged.
     pub fn note_commit(
         &mut self,
         rt: &cellgov_core::Runtime,
         step: &cellgov_core::RuntimeStep,
         runnable: &[cellgov_event::UnitId],
-    ) {
+    ) -> Result<(), StaleObservations> {
+        let observed = rt.observations().step;
+        if observed != step.index {
+            return Err(StaleObservations {
+                observed,
+                committed: step.index,
+            });
+        }
         let unit = step.unit;
         self.mailbox_counts.extend(step.mailbox_read);
         self.note_inflight(rt);
@@ -228,9 +257,10 @@ impl StepFootprint {
         // A Raw SPU's state reached through its window or its PU
         // interrupt mailbox is local state its own steps read.
         self.local_store_accesses
-            .extend(rt.last_problem_state_accesses());
+            .extend(&rt.observations().problem_state_accesses);
         self.expand_aliases(rt, unit);
         self.note_host_writes(rt);
+        Ok(())
     }
 
     /// Record whether the stepping unit read the PPE sibling count, and
@@ -296,14 +326,15 @@ impl StepFootprint {
     /// `Runtime::step` also fires due transfers itself, in two phases:
     /// at step entry before the scheduler selects a unit, and in the
     /// all-blocked time warp. A transfer either phase fires reaches
-    /// neither list (`Runtime::last_dma_completions`) and needs to reach
-    /// neither. Every step it was in flight for read it out of the queue
+    /// neither list (`StepObservations::dma_completions`) and needs to
+    /// reach neither. Every step it was in flight for read it out of the queue
     /// at that step's commit, and the step that fires it runs after the
     /// bytes landed.
     pub fn note_inflight(&mut self, rt: &cellgov_core::Runtime) {
         let queued = rt.dma_queue().pending();
         let fired = rt
-            .last_dma_completions()
+            .observations()
+            .dma_completions
             .iter()
             .map(|(completion, payloaded)| (completion, *payloaded));
         // One queued end per transfer this step queued is its own, and
@@ -332,7 +363,7 @@ impl StepFootprint {
     ///
     /// Call it after the step's commit, which runs the dispatch. The
     /// step's own effect list names none of a handler's effects
-    /// (`Runtime::last_lv2_effects`), so without this a syscall reaches
+    /// (`StepObservations::lv2_effects`), so without this a syscall reaches
     /// the relation as a step that touched nothing.
     ///
     /// `Runtime::apply_lv2_effects` releases the target's park with a
@@ -340,9 +371,9 @@ impl StepFootprint {
     /// a receive attempt alone. So the send is also recorded as the
     /// wake it performs.
     pub fn note_lv2_effects(&mut self, rt: &cellgov_core::Runtime) {
-        let lv2 = Self::from_effects(rt.last_lv2_effects());
-        self.merge(lv2);
-        for effect in rt.last_lv2_effects() {
+        let lv2_effects = &rt.observations().lv2_effects;
+        self.merge(Self::from_effects(lv2_effects));
+        for effect in lv2_effects {
             if let Effect::MailboxSend { mailbox, .. } = effect {
                 // The target the release names: the unit whose raw id
                 // is the mailbox's. Recording the wake whatever parked
@@ -420,7 +451,7 @@ impl StepFootprint {
     /// in-flight set's, on the argument [`StepFootprint::note_inflight`]
     /// makes.
     pub fn note_host_writes(&mut self, rt: &cellgov_core::Runtime) {
-        for write in rt.last_host_writes() {
+        for write in &rt.observations().host_writes {
             let record = |fp: &mut Self, write: &cellgov_core::HostWrite| {
                 fp.shared_writes.push(write.range);
                 fp.shared_writes

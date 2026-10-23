@@ -130,10 +130,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         dma_latency: _,                   // set once at construction
         rsx_window_access: _,             // set once by the host before the run
         runnable_buf: _,                  // scratch; each step clears it before use
-        last_dma_completions: _,          // cleared on restore and by a step; set by commit
-        last_host_writes: _,              // cleared on restore, rewritten by the next step
-        last_lv2_effects: _,              // cleared on restore, rewritten by the next step
-        last_problem_state_accesses: _,   // cleared on restore, rewritten by the next step
+        observations: _,                  // cleared on restore, rewritten by the next step
         spu_thread_failure: _,            // cleared on restore, taken by the host after a commit
         mfc_exception: _,                 // cleared on restore, taken by the host after a commit
         spu_factory: _,                   // set once at construction

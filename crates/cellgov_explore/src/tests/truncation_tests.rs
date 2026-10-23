@@ -8,10 +8,11 @@
 
 use crate::classify::{BaselineRun, ExplorationResult, OutcomeClass, ScheduleRecord};
 use crate::config::ExplorationConfig;
+use crate::dependency::StaleObservations;
 use crate::optimal::explore_optimal;
 use crate::report::{format_human, format_json};
 use crate::util::{classify_iteration, AlternateIteration, StopClass, StopReason};
-use cellgov_core::{CommitError, Runtime, StepError};
+use cellgov_core::{CommitError, Runtime, StepError, StepIndex};
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp, FAKE_FAULT_CODE};
@@ -40,6 +41,12 @@ fn every_truncating_reason() -> Vec<StopReason> {
                 .map(StopReason::StepError),
         )
         .chain(std::iter::once(StopReason::CommitError(REFUSED_COMMIT)))
+        .chain(std::iter::once(StopReason::StaleObservations(
+            StaleObservations {
+                observed: StepIndex::new(1),
+                committed: StepIndex::new(0),
+            },
+        )))
         .chain(std::iter::once(StopReason::Faulted(FaultKind::Guest(
             FAKE_FAULT_CODE,
         ))))
@@ -58,6 +65,7 @@ fn declares_a_prefix(reason: StopReason) -> bool {
         | StopReason::StepBound
         | StopReason::StepError(_)
         | StopReason::CommitError(_)
+        | StopReason::StaleObservations(_)
         | StopReason::Faulted(_) => true,
     }
 }
@@ -392,9 +400,9 @@ fn the_sweep_runs_one_case_per_way_a_step_can_refuse() {
     let reasons = every_truncating_reason();
     assert_eq!(
         reasons.len(),
-        StepError::VARIANTS.len() + 4,
+        StepError::VARIANTS.len() + 5,
         "the sweep must run one case per step refusal, plus the replay bound, an \
-         unserved child init, a refused commit and a fault",
+         unserved child init, a refused commit, a refused footprint and a fault",
     );
     for (index, reason) in reasons.iter().enumerate() {
         assert!(

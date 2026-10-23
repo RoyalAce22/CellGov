@@ -388,6 +388,7 @@ impl Runtime {
         // FaultDriven case.
         self.effects_buf = Vec::new();
         Ok(RuntimeStep {
+            index: self.observations.step,
             unit: unit_id,
             result,
             effects: effects_buf,
@@ -444,12 +445,15 @@ impl Runtime {
         (others, pressure)
     }
 
-    /// Empty every record a step and its commit publish about that step.
+    /// Empty every record a step and its commit publish about that step,
+    /// and stamp them with the index of the next step.
     pub(super) fn clear_step_records(&mut self) {
-        self.last_dma_completions.clear();
-        self.last_host_writes.clear();
-        self.last_lv2_effects.clear();
-        self.last_problem_state_accesses.clear();
+        self.observations.reset(self.next_step_index());
+    }
+
+    /// The index the next [`Runtime::step`] that runs a unit carries.
+    pub(super) fn next_step_index(&self) -> super::StepIndex {
+        super::StepIndex::new(self.steps_taken as u64)
     }
 
     /// Trace the reserved-zero reads every address space logged since
@@ -497,3 +501,7 @@ mod step_record_clear_tests;
 #[cfg(test)]
 #[path = "tests/runnable_recycle_tests.rs"]
 mod runnable_recycle_tests;
+
+#[cfg(test)]
+#[path = "tests/step_index_tests.rs"]
+mod step_index_tests;

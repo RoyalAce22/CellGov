@@ -47,21 +47,9 @@ pub struct Runtime {
     /// The buffer [`crate::RuntimeStep::runnable`] travels in, back from
     /// the last recycling commit, so a step costs no allocation for it.
     pub(super) runnable_buf: Vec<UnitId>,
-    /// DMA completions the last [`Runtime::commit_step`] fired, read
-    /// through [`Runtime::last_dma_completions`].
-    pub(super) last_dma_completions: Vec<(cellgov_dma::DmaCompletion, bool)>,
-    /// Guest ranges host-side code wrote since the last
-    /// [`Runtime::step`] began, read through
-    /// [`Runtime::last_host_writes`].
-    pub(super) last_host_writes: Vec<crate::runtime::HostWrite>,
-    /// Effects an LV2 handler applied since the last
-    /// [`Runtime::step`] began, read through
-    /// [`Runtime::last_lv2_effects`].
-    pub(super) last_lv2_effects: Vec<Effect>,
-    /// The Raw SPU state another processor reached since the last
-    /// [`Runtime::step`] began, read through
-    /// [`Runtime::last_problem_state_accesses`].
-    pub(super) last_problem_state_accesses: Vec<(UnitId, cellgov_mem::ByteRange)>,
+    /// What host-side code did during the last step, read through
+    /// [`Runtime::observations`].
+    pub(super) observations: crate::runtime::StepObservations,
     /// The first SPU thread-group error the host has not taken; see
     /// [`Runtime::take_spu_thread_failure`].
     pub(super) spu_thread_failure: Option<crate::runtime::spu_thread_stop::SpuThreadFailure>,

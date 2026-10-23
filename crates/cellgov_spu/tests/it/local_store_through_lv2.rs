@@ -121,14 +121,14 @@ fn a_write_lands_in_local_store_and_a_read_returns_it_zero_extended() {
         if step.unit == caller {
             calls_done += 1;
             assert!(
-                rt.last_lv2_effects().iter().all(|e| matches!(
+                rt.observations().lv2_effects.iter().all(|e| matches!(
                     e,
                     Effect::SpuLocalStoreWrite { .. }
                         | Effect::SpuLocalStoreRead { .. }
                         | Effect::SharedWriteIntent { .. }
                 )),
                 "{:?}",
-                rt.last_lv2_effects()
+                rt.observations().lv2_effects
             );
         }
         if calls_done == 3 {

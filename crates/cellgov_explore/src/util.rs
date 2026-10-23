@@ -44,6 +44,9 @@ pub enum StopReason {
     /// `Runtime::commit_step` refused, so the step's effects never
     /// reached guest state.
     CommitError(CommitError),
+    /// The runtime's observations were of another step than the one
+    /// committed, so the step's footprint is unknown.
+    StaleObservations(crate::dependency::StaleObservations),
     /// A unit faulted and the commit discarded its batch.
     ///
     /// The faulted unit leaves the runnable set, so a run that went on
@@ -63,7 +66,8 @@ pub enum StopClass {
     /// No unit can run and nothing can wake one.
     #[strum(serialize = "blocked")]
     Blocked,
-    /// The model refused the step or its commit.
+    /// The model refused the step or its commit, or the search refused
+    /// the records the model published for it.
     #[strum(serialize = "refusal")]
     Refusal,
     /// A unit yielded because a step could not complete.
@@ -109,6 +113,8 @@ impl StopReason {
             // Guest time reaching u64::MAX is no cap anyone can raise.
             Self::StepError(StepError::TimeOverflow | StepError::SchedulerNotReinstalled)
             | Self::CommitError(_) => StopClass::Refusal,
+            // The driver read the records out of turn.
+            Self::StaleObservations(_) => StopClass::Refusal,
             Self::Faulted(_) => StopClass::Fault,
             Self::ChildInitUnserved => StopClass::Unserved,
         }
@@ -127,6 +133,7 @@ impl std::fmt::Display for StopReason {
             Self::StepBound => f.write_str("replay step bound reached"),
             Self::StepError(e) => write!(f, "step refused: {e}"),
             Self::CommitError(e) => write!(f, "commit refused: {e}"),
+            Self::StaleObservations(e) => write!(f, "footprint refused: {e}"),
             Self::Faulted(kind) => write!(f, "unit faulted: {kind:?}"),
         }
     }

@@ -227,84 +227,28 @@ impl Runtime {
         &self.dma_queue
     }
 
-    /// DMA completions the last [`Runtime::commit_step`] fired, each
-    /// with whether an inline payload carried its bytes.
+    /// What host-side code did during the step
+    /// [`StepObservations::step`] names, outside every unit's batch.
     ///
-    /// Empty before the first commit, after a restore, and from the
-    /// start of each [`Runtime::step`] until its commit. The commit
-    /// that fires a completion applies the write outside every unit's
-    /// batch, so this list is where a caller reads which bytes moved.
-    /// [`Runtime::step`] also fires due completions itself, in two
-    /// phases outside every commit, and none of them reaches this list:
+    /// The records cover three phases of that step:
     ///
-    /// - at step entry, before the scheduler selects a unit;
-    /// - in the all-blocked time warp.
+    /// - the step-entry fire of due DMA and timer events, before the
+    ///   scheduler selects a unit;
+    /// - the all-blocked time warp;
+    /// - the step's [`Runtime::commit_step`].
     ///
-    /// The flag is what [`DmaQueue::pending`] carries, and for the same
-    /// reason: a payloaded transfer reads no source at completion.
+    /// [`Runtime::step`] empties the records and stamps them as it
+    /// starts, ahead of every refusal, and a restore does the same. The
+    /// commit adds to them, so a driver reads one step's records after it
+    /// commits that step. A host call between steps that lands guest
+    /// writes, such as [`Runtime::drain_pending_dma`], adds to the last
+    /// step's records.
+    ///
+    /// [`StepObservations`]: super::StepObservations
+    /// [`StepObservations::step`]: super::StepObservations::step
     #[inline]
-    pub fn last_dma_completions(&self) -> &[(cellgov_dma::DmaCompletion, bool)] {
-        &self.last_dma_completions
-    }
-
-    /// Guest ranges host-side code wrote since the last
-    /// [`Runtime::step`] began, each tagged with the mechanism that
-    /// wrote it and the space it landed in, in the order they landed.
-    ///
-    /// These writes land outside every unit's batch, so a step's
-    /// effect list alone does not show them: an LV2 handler's out
-    /// parameter, a wake continuation, a DMA payload, the RSX mirrors
-    /// and the shared-view replications are all here.
-    ///
-    /// # Cross-module contract
-    ///
-    /// - [`Runtime::step`] empties the list when it starts, and
-    ///   [`Runtime::commit_step`] leaves it alone. A driver reads one
-    ///   step's writes after it commits that step.
-    /// - Every refusal comes after that clear. A refusal leaves only
-    ///   what the step-entry fire and the time warp wrote.
-    /// - [`Runtime::step`] fires due DMA and timer events itself, at
-    ///   step entry before the scheduler selects a unit and in the
-    ///   all-blocked time warp. What either phase writes belongs to the
-    ///   step that then runs.
-    /// - A restore empties the list.
-    /// - A [`Runtime::place_bytes`] placement never enters the list.
-    ///
-    /// [`HostWrite`] states what one entry means.
-    ///
-    /// [`HostWrite`]: super::HostWrite
-    #[inline]
-    pub fn last_host_writes(&self) -> &[super::HostWrite] {
-        &self.last_host_writes
-    }
-
-    /// Effects an LV2 handler applied since the last
-    /// [`Runtime::step`] began, in the order they landed.
-    ///
-    /// A handler applies its effects at dispatch, so no unit's effect
-    /// list holds them. The list holds the applied effects alone; a
-    /// dropped effect is absent. The guest writes among them also
-    /// reach [`Runtime::last_host_writes`], which states the contract
-    /// both lists follow.
-    #[inline]
-    pub fn last_lv2_effects(&self) -> &[cellgov_effects::Effect] {
-        &self.last_lv2_effects
-    }
-
-    /// The Raw SPUs whose state another processor reached since the last
-    /// [`Runtime::step`] began, each with the offsets of its window the
-    /// access named.
-    ///
-    /// - A local-store access names its bytes.
-    /// - A register access names the whole problem-state area.
-    /// - A `sys_raw_spu_read_puint_mb` that takes the interrupt
-    ///   mailbox's message names the whole problem-state area.
-    ///
-    /// The Raw SPU's own steps read that state, and this list records
-    /// none of them.
-    #[inline]
-    pub fn last_problem_state_accesses(&self) -> &[(UnitId, cellgov_mem::ByteRange)] {
-        &self.last_problem_state_accesses
+    pub fn observations(&self) -> &super::StepObservations {
+        &self.observations
     }
 
     // -- scheduler --

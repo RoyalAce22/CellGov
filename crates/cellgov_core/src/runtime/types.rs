@@ -12,6 +12,10 @@ use cellgov_time::{Budget, Epoch, GuestTicks};
 /// [`crate::Runtime::step`] on success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeStep {
+    /// This step's position in the run, which
+    /// [`crate::StepObservations::step`] also carries while the records
+    /// are this step's.
+    pub index: super::StepIndex,
     /// The scheduled unit.
     pub unit: UnitId,
     /// Execution result from `run_until_yield`.

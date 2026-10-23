@@ -54,7 +54,9 @@ fn the_step_that_finishes_a_ppe_thread_pairs_with_the_other_ppe_thread_only() {
         rt.commit_step(&step.result, &step.effects)
             .expect("the step commits");
         let mut footprint = StepFootprint::from_effects(&step.effects);
-        footprint.note_commit(&rt, &step, &step.runnable);
+        footprint
+            .note_commit(&rt, &step, &step.runnable)
+            .expect("the observations are the step's");
         steps.push((step.unit, footprint));
     }
 
@@ -107,7 +109,9 @@ fn a_step_that_wakes_a_parked_ppe_thread_records_the_wake_though_the_waker_is_no
         rt.commit_step(&step.result, &step.effects)
             .expect("the step commits");
         let mut footprint = StepFootprint::from_effects(&step.effects);
-        footprint.note_commit(&rt, &step, &step.runnable);
+        footprint
+            .note_commit(&rt, &step, &step.runnable)
+            .expect("the observations are the step's");
         steps.push((step.unit, footprint));
     }
 

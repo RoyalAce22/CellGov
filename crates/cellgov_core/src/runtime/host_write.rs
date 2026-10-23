@@ -22,8 +22,8 @@ use super::spaces::AddressSpaceId;
 use super::types::RuntimeMode;
 use super::Runtime;
 
-/// One guest write host-side code landed, as [`Runtime::last_host_writes`]
-/// publishes it.
+/// One guest write host-side code landed, as
+/// [`crate::StepObservations::host_writes`] publishes it.
 ///
 /// - Only a write that landed has an entry; a refused write has none.
 /// - Every [`RuntimeMode`] publishes the entry. The mode gates only the
@@ -90,7 +90,7 @@ impl Runtime {
         // placement is the driver's write between steps, so it belongs
         // to no step's record.
         if writer != HostWriter::Placement {
-            self.last_host_writes.push(HostWrite {
+            self.observations.host_writes.push(HostWrite {
                 writer,
                 space,
                 range,
@@ -127,8 +127,8 @@ impl Runtime {
     /// own account, and the trace names it
     /// [`HostWriter::Placement`]. No unit is behind it, so the clear
     /// sweep exempts nobody. The tap and the trace see it;
-    /// [`Runtime::last_host_writes`] does not, because it belongs to no
-    /// step.
+    /// [`crate::StepObservations::host_writes`] does not, because it
+    /// belongs to no step.
     ///
     /// # Errors
     ///

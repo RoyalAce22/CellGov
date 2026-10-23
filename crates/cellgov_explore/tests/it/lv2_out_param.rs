@@ -146,7 +146,7 @@ fn the_handler_lands_bytes_the_callers_own_step_never_names() {
         "the handler wrote the out parameter during a step that named no write",
     );
     assert!(
-        !rt.last_lv2_effects().is_empty(),
+        !rt.observations().lv2_effects.is_empty(),
         "and the runtime publishes what it applied",
     );
 }

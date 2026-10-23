@@ -92,7 +92,9 @@ fn only_the_step_that_changes_a_ppe_thread_s_pressure_records_it() {
         rt.commit_step(&step.result, &step.effects)
             .expect("the step commits");
         let mut footprint = StepFootprint::from_effects(&step.effects);
-        footprint.note_commit(&rt, &step, &step.runnable);
+        footprint
+            .note_commit(&rt, &step, &step.runnable)
+            .expect("the observations are the step's");
         if step.unit == presser {
             pressing.push(footprint.ppe_pressure_changer);
         } else {

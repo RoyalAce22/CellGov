@@ -459,7 +459,9 @@ fn run_one(
         if let Err(e) = rt.commit_step_and_recycle(&mut step) {
             break Halt::Stopped(StopReason::CommitError(e));
         }
-        footprint.note_commit(rt, &step, &runnable);
+        if let Err(e) = footprint.note_commit(rt, &step, &runnable) {
+            break Halt::Stopped(StopReason::StaleObservations(e));
+        }
         // The same stop as at the top of the loop, read after the
         // commit that can make the pass pending.
         if rt.has_pending_child_init() {

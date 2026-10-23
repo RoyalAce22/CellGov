@@ -174,7 +174,9 @@ fn an_inflight_landing_reaches_the_sibling_view() {
         .expect("the enqueue commits");
 
     let mut footprint = StepFootprint::from_effects(&step.effects);
-    footprint.note_commit(&rt, &step, &step.runnable);
+    footprint
+        .note_commit(&rt, &step, &step.runnable)
+        .expect("the observations are the step's");
 
     let starts: Vec<u64> = footprint
         .inflight_dma_ranges

@@ -118,7 +118,8 @@ fn ppu_footprints(ops: Vec<Op>) -> (Vec<StepFootprint>, UnitId) {
         if step.unit == ppu {
             let mut fp =
                 StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
-            fp.note_commit(&rt, &step, &step.runnable);
+            fp.note_commit(&rt, &step, &step.runnable)
+                .expect("the observations are the step's");
             footprints.push(fp);
         }
     }

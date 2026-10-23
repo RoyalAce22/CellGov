@@ -300,11 +300,12 @@ fn a_load_of_the_outbound_mailbox_takes_its_message() {
 fn assert_problem_state_reached(rt: &Runtime) {
     let raw = rt.lv2_host().raw_spu_unit(0).unwrap();
     assert!(
-        rt.last_problem_state_accesses()
+        rt.observations()
+            .problem_state_accesses
             .iter()
             .any(|(unit, range)| *unit == raw && range.start().raw() == raw_window::PROBLEM_STATE),
         "{:?}",
-        rt.last_problem_state_accesses()
+        rt.observations().problem_state_accesses
     );
 }
 

@@ -274,12 +274,12 @@ fn the_handler_sends_a_message_the_senders_own_step_never_names() {
         .expect("the dispatch commits");
 
     assert!(
-        rt.last_lv2_effects().iter().any(|effect| matches!(
+        rt.observations().lv2_effects.iter().any(|effect| matches!(
             effect,
             Effect::MailboxSend { mailbox, .. } if *mailbox == receiver_mailbox()
         )),
         "the runtime publishes the send the handler made: {:?}",
-        rt.last_lv2_effects(),
+        rt.observations().lv2_effects,
     );
     assert_ne!(
         rt.registry().effective_status(RECEIVER),
@@ -328,7 +328,8 @@ fn the_release_ends_a_park_on_a_mailbox_the_handler_never_fills() {
         .expect("the dispatch commits");
 
     let sends: Vec<MailboxId> = rt
-        .last_lv2_effects()
+        .observations()
+        .lv2_effects
         .iter()
         .filter_map(|effect| match effect {
             Effect::MailboxSend { mailbox, .. } => Some(*mailbox),

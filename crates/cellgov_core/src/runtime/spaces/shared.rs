@@ -309,8 +309,8 @@ impl Runtime {
     ///
     /// Dependency analysis reads these so two cross-space writes to the
     /// same shared bytes never prove independent. A host write names
-    /// its own space, which [`Runtime::last_host_writes`] carries
-    /// beside each range.
+    /// its own space, which [`crate::StepObservations::host_writes`]
+    /// carries beside each range.
     pub fn shared_alias_ranges_in(
         &self,
         space: AddressSpaceId,

@@ -83,9 +83,9 @@ fn a_placement_lands_and_traces_but_publishes_no_host_write() {
         .expect("a writable region accepts the placement");
 
     assert!(
-        rt.last_host_writes().is_empty(),
+        rt.observations().host_writes.is_empty(),
         "a placement belongs to no step: {:?}",
-        rt.last_host_writes(),
+        rt.observations().host_writes,
     );
     assert_eq!(
         rt.memory().read(range(MAIN, 4)).expect("mapped"),
@@ -120,7 +120,7 @@ fn a_commit_keeps_the_records_and_the_next_step_clears_them() {
     rt.commit_step(&trivial_result(), &[])
         .expect("a trivial step commits");
     assert_eq!(
-        rt.last_host_writes().to_vec(),
+        rt.observations().host_writes.to_vec(),
         vec![hw(
             HostWriter::RsxMirror,
             AddressSpaceId::BOOT,
@@ -132,7 +132,7 @@ fn a_commit_keeps_the_records_and_the_next_step_clears_them() {
 
     rt.step().expect("the waiter is runnable");
     assert!(
-        rt.last_host_writes().is_empty(),
+        rt.observations().host_writes.is_empty(),
         "the step is what opens the record",
     );
 }
@@ -150,7 +150,7 @@ fn a_refused_host_write_publishes_no_record() {
     )
     .expect_err("a write into the reserved region cannot commit");
 
-    assert!(rt.last_host_writes().is_empty());
+    assert!(rt.observations().host_writes.is_empty());
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn the_fault_driven_mode_publishes_the_record_it_does_not_trace() {
     .expect("a writable region accepts the write");
 
     assert_eq!(
-        rt.last_host_writes().to_vec(),
+        rt.observations().host_writes.to_vec(),
         vec![hw(
             HostWriter::DmaCompletion,
             AddressSpaceId::BOOT,
@@ -200,8 +200,8 @@ fn a_rolled_back_lv2_memory_subset_publishes_neither_record() {
             .invariant_break_site_count("dispatch.lv2_effect_apply_failed"),
         1,
     );
-    assert!(rt.last_lv2_effects().is_empty());
-    assert!(rt.last_host_writes().is_empty());
+    assert!(rt.observations().lv2_effects.is_empty());
+    assert!(rt.observations().host_writes.is_empty());
     assert_eq!(
         rt.memory().read(range(MAIN, 4)).expect("mapped"),
         &[0u8; 4],
@@ -217,9 +217,9 @@ fn an_applied_lv2_write_reaches_both_published_records() {
 
     rt.apply_lv2_effects(std::slice::from_ref(&effect), AddressSpaceId::BOOT);
 
-    assert_eq!(rt.last_lv2_effects().to_vec(), vec![effect]);
+    assert_eq!(rt.observations().lv2_effects.to_vec(), vec![effect]);
     assert_eq!(
-        rt.last_host_writes().to_vec(),
+        rt.observations().host_writes.to_vec(),
         vec![hw(
             HostWriter::Lv2Effect,
             AddressSpaceId::BOOT,
@@ -249,7 +249,7 @@ fn an_lv2_mailbox_send_to_an_unregistered_mailbox_names_its_break() {
     );
     assert!(rt.mailbox_registry().get(MailboxId::new(7)).is_none());
     assert_eq!(
-        rt.last_lv2_effects().to_vec(),
+        rt.observations().lv2_effects.to_vec(),
         vec![effect],
         "the wake half of the send still ran, so the effect is published \
          even though the message reached no reader",
@@ -348,14 +348,14 @@ fn a_transfer_the_time_warp_fires_reaches_the_published_host_writes() {
         .expect("the woken step commits");
 
     assert!(
-        rt.last_host_writes().contains(&hw(
+        rt.observations().host_writes.contains(&hw(
             HostWriter::DmaCompletion,
             AddressSpaceId::BOOT,
             range(DMA_DST, 8),
         )),
         "the warp landed the transfer before it picked a step, and the commit \
          that followed must not clear what it wrote: {:?}",
-        rt.last_host_writes(),
+        rt.observations().host_writes,
     );
 }
 
@@ -460,7 +460,7 @@ fn an_expiry_the_time_warp_fires_reaches_the_published_records() {
         .expect("the woken step commits");
 
     assert!(
-        rt.last_host_writes().contains(&hw(
+        rt.observations().host_writes.contains(&hw(
             HostWriter::Lv2Effect,
             AddressSpaceId::BOOT,
             range(u64::from(RESULT_PTR), 8),
@@ -468,7 +468,7 @@ fn an_expiry_the_time_warp_fires_reaches_the_published_records() {
         "the expiry wrote the observed bits through the waiter's result \
          pointer inside the warp, and the commit after it must not clear \
          what the warp wrote: {:?}",
-        rt.last_host_writes(),
+        rt.observations().host_writes,
     );
 }
 
@@ -489,7 +489,7 @@ fn a_write_into_a_child_space_publishes_that_space() {
     .expect("the child space has a writable region at MAIN");
 
     assert_eq!(
-        rt.last_host_writes().to_vec(),
+        rt.observations().host_writes.to_vec(),
         vec![hw(HostWriter::WakeContinuation, child, range(MAIN, 4))],
         "the same numeric range in the boot space is different memory, so \
          the space is what tells them apart",
@@ -509,11 +509,11 @@ fn a_restore_clears_both_published_records() {
         &[write_intent(range(MAIN, 4), UnitId::new(0))],
         AddressSpaceId::BOOT,
     );
-    assert!(!rt.last_lv2_effects().is_empty());
-    assert!(!rt.last_host_writes().is_empty());
+    assert!(!rt.observations().lv2_effects.is_empty());
+    assert!(!rt.observations().host_writes.is_empty());
 
     rt.restore_into(&snap);
 
-    assert!(rt.last_lv2_effects().is_empty());
-    assert!(rt.last_host_writes().is_empty());
+    assert!(rt.observations().lv2_effects.is_empty());
+    assert!(rt.observations().host_writes.is_empty());
 }

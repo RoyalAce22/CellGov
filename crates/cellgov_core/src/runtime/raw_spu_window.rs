@@ -189,7 +189,8 @@ impl Runtime {
             }
             // `end` is inside the local store, so both bounds fit a u32.
             let reached = ByteRange::contiguous_u32(offset as u32, bytes.len() as u32);
-            self.last_problem_state_accesses
+            self.observations
+                .problem_state_accesses
                 .push((window.unit, reached));
             return;
         }
@@ -294,14 +295,15 @@ impl Runtime {
     }
 
     /// Record that this step reached a register of `unit`'s
-    /// problem-state area, for [`Runtime::last_problem_state_accesses`].
+    /// problem-state area, for
+    /// [`crate::StepObservations::problem_state_accesses`].
     pub(super) fn note_problem_state_access(&mut self, unit: UnitId) {
         // Both bounds sit inside the 1 MiB window, so they fit a u32.
         const AREA: ByteRange = ByteRange::contiguous_u32(
             raw_window::PROBLEM_STATE as u32,
             (raw_window::STRIDE - raw_window::PROBLEM_STATE) as u32,
         );
-        self.last_problem_state_accesses.push((unit, AREA));
+        self.observations.problem_state_accesses.push((unit, AREA));
     }
 
     fn log_window_refusal(&mut self, window: &Window, offset: u64, why: std::fmt::Arguments<'_>) {

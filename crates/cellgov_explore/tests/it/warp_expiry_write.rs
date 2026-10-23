@@ -168,11 +168,12 @@ fn both_waits_park_and_only_the_warp_ends_them() {
     rt.commit_step(&step.result, &step.effects)
         .expect("the woken step commits");
     assert!(
-        rt.last_host_writes()
+        rt.observations()
+            .host_writes
             .iter()
             .any(|write| write.range == shared_range()),
         "the expiry wrote the shared result from inside the warp: {:?}",
-        rt.last_host_writes(),
+        rt.observations().host_writes,
     );
 }
 

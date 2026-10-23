@@ -23,7 +23,7 @@ pub use backtrack::explore_backtrack;
 pub use classify::{BaselineRun, ExplorationResult, OutcomeClass, ScheduleRecord};
 pub use config::ExplorationConfig;
 pub use decision::{DecisionLog, DecisionPoint};
-pub use dependency::StepFootprint;
+pub use dependency::{StaleObservations, StepFootprint};
 pub use execution::{ClockCost, ClockVector, Event, EventId, Execution, HappensBefore, Race};
 pub use explorer::{explore, explore_window};
 pub use observer::{observe_decisions, observe_decisions_bounded};
@@ -45,3 +45,7 @@ mod local_store_tests;
 #[cfg(test)]
 #[path = "tests/truncation_tests.rs"]
 mod truncation_tests;
+
+#[cfg(test)]
+#[path = "tests/stale_observations_tests.rs"]
+mod stale_observations_tests;
