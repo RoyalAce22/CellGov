@@ -294,12 +294,10 @@ impl Runtime {
     ///   all-blocked time warp. What either phase writes belongs to the
     ///   step that then runs.
     /// - A restore empties the list.
-    /// - A [`HostWriter::Placement`] the driver makes between two steps
-    ///   stands in the list until the next step clears it.
+    /// - A [`Runtime::place_bytes`] placement never enters the list.
     ///
     /// [`HostWrite`] states what one entry means.
     ///
-    /// [`HostWriter::Placement`]: cellgov_trace::HostWriter::Placement
     /// [`HostWrite`]: super::HostWrite
     #[inline]
     pub fn last_host_writes(&self) -> &[super::HostWrite] {

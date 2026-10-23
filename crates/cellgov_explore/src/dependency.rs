@@ -447,8 +447,7 @@ impl StepFootprint {
                 // views, so a fanout's target range is already paired
                 // against whatever reads or writes it.
                 cellgov_trace::HostWriter::SharedViewFanout => {}
-                // The program driving the runtime, on its own account.
-                // It makes no placement inside a step.
+                // The runtime publishes no placement.
                 cellgov_trace::HostWriter::Placement => {}
             }
         }

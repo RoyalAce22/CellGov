@@ -76,22 +76,28 @@ fn trivial_result() -> ExecutionStepResult {
 }
 
 #[test]
-fn a_placement_before_the_first_step_stands_in_the_published_host_writes() {
+fn a_placement_lands_and_traces_but_publishes_no_host_write() {
     let mut rt = build();
 
     rt.place_bytes(AddressSpaceId::BOOT, range(MAIN, 4), &[0xAB; 4])
         .expect("a writable region accepts the placement");
 
-    assert_eq!(
-        rt.last_host_writes().to_vec(),
-        vec![hw(
-            HostWriter::Placement,
-            AddressSpaceId::BOOT,
-            range(MAIN, 4)
-        )],
-        "the list is emptied at step entry, so a placement made before \
-         the first step is still in it",
+    assert!(
+        rt.last_host_writes().is_empty(),
+        "a placement belongs to no step: {:?}",
+        rt.last_host_writes(),
     );
+    assert_eq!(
+        rt.memory().read(range(MAIN, 4)).expect("mapped"),
+        &[0xAB; 4]
+    );
+    assert!(matches!(
+        traced_host_writes(&rt).as_slice(),
+        [TraceRecord::HostWrite {
+            writer: HostWriter::Placement,
+            ..
+        }]
+    ));
 }
 
 #[test]
@@ -102,15 +108,21 @@ fn a_commit_keeps_the_records_and_the_next_step_clears_them() {
         id,
         steps: Cell::new(0),
     });
-    rt.place_bytes(AddressSpaceId::BOOT, range(MAIN, 4), &[0xAB; 4])
-        .expect("a writable region accepts the placement");
+    rt.host_write(
+        HostWriter::RsxMirror,
+        AddressSpaceId::BOOT,
+        range(MAIN, 4),
+        &[0xAB; 4],
+        None,
+    )
+    .expect("a writable region accepts the write");
 
     rt.commit_step(&trivial_result(), &[])
         .expect("a trivial step commits");
     assert_eq!(
         rt.last_host_writes().to_vec(),
         vec![hw(
-            HostWriter::Placement,
+            HostWriter::RsxMirror,
             AddressSpaceId::BOOT,
             range(MAIN, 4)
         )],

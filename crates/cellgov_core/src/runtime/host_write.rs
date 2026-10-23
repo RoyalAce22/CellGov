@@ -86,12 +86,16 @@ impl Runtime {
         let (addr, len) = (range.start().raw(), range.length());
         let cleared = reservations.clear_covering(addr, len, exempt);
         // The push precedes the mode gate below: a FaultDriven run
-        // writes no trace record and still publishes this entry.
-        self.last_host_writes.push(HostWrite {
-            writer,
-            space,
-            range,
-        });
+        // writes no trace record and still publishes this entry. A
+        // placement is the driver's write between steps, so it belongs
+        // to no step's record.
+        if writer != HostWriter::Placement {
+            self.last_host_writes.push(HostWrite {
+                writer,
+                space,
+                range,
+            });
+        }
         if let Some(tap) = self.tap.as_deref_mut() {
             tap.write(space.raw(), addr, bytes);
         }
@@ -122,7 +126,9 @@ impl Runtime {
     /// This is the write the program driving the runtime makes on its
     /// own account, and the trace names it
     /// [`HostWriter::Placement`]. No unit is behind it, so the clear
-    /// sweep exempts nobody.
+    /// sweep exempts nobody. The tap and the trace see it;
+    /// [`Runtime::last_host_writes`] does not, because it belongs to no
+    /// step.
     ///
     /// # Errors
     ///
