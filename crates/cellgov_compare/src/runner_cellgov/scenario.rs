@@ -38,9 +38,11 @@ pub fn observe(
 ) -> Result<Observation, ObserveError> {
     let outcome = match result.outcome {
         ScenarioOutcome::Stalled => ObservedOutcome::Completed,
-        // A clock overflow ends the run on an invariant violation, so
-        // it reads as a fault.
-        ScenarioOutcome::Faulted | ScenarioOutcome::TimeOverflow => ObservedOutcome::Fault,
+        // A clock overflow or a refused commit ends the run on an
+        // invariant violation, so it reads as a fault.
+        ScenarioOutcome::Faulted
+        | ScenarioOutcome::TimeOverflow
+        | ScenarioOutcome::CommitRefused(_) => ObservedOutcome::Fault,
         ScenarioOutcome::MaxStepsExceeded => ObservedOutcome::Timeout,
     };
 

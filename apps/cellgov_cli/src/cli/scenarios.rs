@@ -140,10 +140,11 @@ pub(crate) fn microtest_region_defs(name: &str) -> Result<MicrotestRegionDefinit
 /// Format a [`ScenarioResult`] as a deterministic, ASCII-only summary.
 pub(crate) fn report(name: &str, result: &ScenarioResult) -> String {
     let outcome = match result.outcome {
-        ScenarioOutcome::Stalled => "Stalled",
-        ScenarioOutcome::Faulted => "Faulted",
-        ScenarioOutcome::MaxStepsExceeded => "MaxStepsExceeded",
-        ScenarioOutcome::TimeOverflow => "TimeOverflow",
+        ScenarioOutcome::Stalled => "Stalled".to_owned(),
+        ScenarioOutcome::Faulted => "Faulted".to_owned(),
+        ScenarioOutcome::MaxStepsExceeded => "MaxStepsExceeded".to_owned(),
+        ScenarioOutcome::TimeOverflow => "TimeOverflow".to_owned(),
+        ScenarioOutcome::CommitRefused(e) => format!("CommitRefused ({e})"),
     };
     format!(
         "scenario: {name}\noutcome: {outcome}\nsteps_taken: {steps}\ntrace_bytes: {bytes}\nmemory_hash: 0x{mem:016x}\nstatus_hash: 0x{status:016x}\nsync_hash: 0x{sync:016x}",

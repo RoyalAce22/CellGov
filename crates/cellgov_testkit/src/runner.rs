@@ -3,15 +3,14 @@
 //! return a [`ScenarioResult`].
 //!
 //! Tests build a fixture and hand it to [`run`]; the result is the assertion
-//! surface. The loop calls `step()` then `commit_step()` each iteration;
-//! commit failures surface as `fault_discarded` trace records and do not
-//! abort the run. Stepping ends when the scheduler returns
-//! `NoRunnableUnit`/`AllBlocked` (stall) or `MaxStepsExceeded`.
+//! surface. The loop calls `step()` then `commit_step()` each iteration.
+//! Stepping ends when the scheduler returns `NoRunnableUnit`/`AllBlocked`
+//! (stall), on `MaxStepsExceeded`, or on the first refused commit.
 
 use std::collections::BTreeMap;
 
 use crate::fixtures::ScenarioFixture;
-use cellgov_core::{AddressSpaceId, MfcException, Runtime, StepError};
+use cellgov_core::{AddressSpaceId, CommitError, MfcException, Runtime, StepError};
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, Region, RegionAccess};
@@ -32,6 +31,10 @@ pub enum ScenarioOutcome {
     /// The guest clock overflowed, an invariant violation. The trace and
     /// hashes stay available for inspection.
     TimeOverflow,
+    /// The commit pipeline refused a step's batch. Its effects never
+    /// reached guest state, so every later step would run on a state the
+    /// schedule did not produce, and the run stops here.
+    CommitRefused(CommitError),
 }
 
 /// Structured result of a scenario run; the assertion surface for tests.
@@ -40,6 +43,7 @@ pub struct ScenarioResult {
     /// How the run terminated.
     pub outcome: ScenarioOutcome,
     /// Successful `Runtime::step` calls. Excludes the final failing call.
+    /// It counts a step whose commit the pipeline refused.
     pub steps_taken: usize,
     /// Binary trace bytes. Decode with [`cellgov_trace::TraceReader`].
     pub trace_bytes: Vec<u8>,
@@ -164,7 +168,9 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
                 if first_fault.is_none() {
                     first_fault = step.result.fault.map(|fault| (step.unit, fault));
                 }
-                let _ = rt.commit_step_and_recycle(&mut step);
+                if let Err(e) = rt.commit_step_and_recycle(&mut step) {
+                    break ScenarioOutcome::CommitRefused(e);
+                }
             }
             Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
                 break if first_fault.is_some() {
@@ -214,3 +220,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/deep_copy_tests.rs"]
 mod deep_copy_tests;
+
+#[cfg(test)]
+#[path = "tests/runner_commit_refusal_tests.rs"]
+mod commit_refusal_tests;
