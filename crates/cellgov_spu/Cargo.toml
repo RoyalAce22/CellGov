@@ -34,7 +34,7 @@ spu-microtests = []
 
 [dev-dependencies]
 cellgov_compare = { path = "../cellgov_compare" }
-cellgov_core = { path = "../cellgov_core" }
+cellgov_core = { path = "../cellgov_core", features = ["test-support"] }
 # The schedule explorer holds an SPU clock read against the steps that
 # move the clock.
 cellgov_explore = { path = "../cellgov_explore" }

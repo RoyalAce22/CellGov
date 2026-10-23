@@ -179,6 +179,13 @@ pub enum CommitError {
     /// unchanged.
     #[error("the step is not the runtime's uncommitted last step")]
     StaleStep,
+    /// A commit with no step token came before any step ran, or after a
+    /// restore to before the first one.
+    ///
+    /// No unit is there to attribute the batch to, so the runtime
+    /// commits nothing.
+    #[error("no step has run, so the commit has no unit to attribute")]
+    NoStep,
 }
 
 /// Summary of what a commit pass accomplished.

@@ -84,7 +84,7 @@ pub struct Runtime {
     pub(super) steps_taken: usize,
     pub(super) max_steps: usize,
     pub(super) trace: TraceWriter,
-    /// The unit the last step ran; [`Runtime::commit_unchecked`]
+    /// The unit the last step ran; `Runtime::commit_unchecked`
     /// attributes its batch to this unit.
     pub(super) last_scheduled_unit: Option<UnitId>,
     /// True when the just-completed step's dispatch transitioned at least

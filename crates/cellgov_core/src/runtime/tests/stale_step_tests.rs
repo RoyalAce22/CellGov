@@ -124,6 +124,39 @@ fn a_refused_step_closes_the_step_before_it() {
     assert_eq!(rt.commit_step(&mut step), Err(CommitError::StaleStep));
 }
 
+/// A syscall yield, which the slow path dispatches on behalf of the unit
+/// it attributes the batch to.
+fn syscall_result() -> ExecutionStepResult {
+    ExecutionStepResult {
+        yield_reason: YieldReason::Syscall,
+        consumed_cost: InstructionCost::new(1),
+        local_diagnostics: LocalDiagnostics::empty(),
+        fault: None,
+        syscall_args: None,
+    }
+}
+
+#[test]
+fn an_unchecked_commit_with_no_step_names_no_unit() {
+    let mut rt = build();
+    let snap = rt.snapshot();
+    let epoch = rt.epoch();
+
+    assert_eq!(
+        rt.commit_unchecked(&syscall_result(), &[]),
+        Err(CommitError::NoStep)
+    );
+    assert_eq!(rt.epoch(), epoch, "nothing is committed");
+
+    rt.step().expect("both units are runnable");
+    rt.restore_into(&snap);
+    assert_eq!(
+        rt.commit_unchecked(&syscall_result(), &[]),
+        Err(CommitError::NoStep),
+        "a restore to before the first step leaves no unit either"
+    );
+}
+
 #[test]
 fn an_unchecked_commit_closes_the_step() {
     let mut rt = build();

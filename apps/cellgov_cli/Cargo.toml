@@ -59,6 +59,7 @@ thiserror = "2"
 strum = { version = "0.26", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
+cellgov_core = { path = "../../crates/cellgov_core", features = ["test-support"] }
 # The overlay-by-transfer test builds the DmaRequest its fake unit
 # enqueues; the crate's own code reaches DMA only through effects.
 cellgov_dma = { path = "../../crates/cellgov_dma" }

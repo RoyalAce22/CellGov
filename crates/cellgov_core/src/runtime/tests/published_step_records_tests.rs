@@ -63,18 +63,6 @@ fn traced_host_writes(rt: &Runtime) -> Vec<TraceRecord> {
         .collect()
 }
 
-/// A result the trivial fast path accepts: no effects, no fault, and a
-/// yield reason that needs no arbitration.
-fn trivial_result() -> ExecutionStepResult {
-    ExecutionStepResult {
-        yield_reason: YieldReason::BudgetExhausted,
-        consumed_cost: InstructionCost::new(1),
-        local_diagnostics: LocalDiagnostics::empty(),
-        fault: None,
-        syscall_args: None,
-    }
-}
-
 #[test]
 fn a_placement_lands_and_traces_but_publishes_no_host_write() {
     let mut rt = build();
@@ -104,10 +92,13 @@ fn a_placement_lands_and_traces_but_publishes_no_host_write() {
 fn a_commit_keeps_the_records_and_the_next_step_clears_them() {
     let mut rt = build();
     rt.set_mode(RuntimeMode::FaultDriven);
-    rt.register_unit_with(|id| DmaWaiter {
-        id,
-        steps: Cell::new(0),
+    rt.register_unit_with(|id| {
+        cellgov_exec::fake_isa::FakeIsaUnit::new(
+            id,
+            vec![cellgov_exec::fake_isa::FakeOp::LoadImm(1); 4],
+        )
     });
+    let mut step = rt.step().expect("the unit is runnable");
     rt.host_write(
         HostWriter::RsxMirror,
         AddressSpaceId::BOOT,
@@ -117,8 +108,7 @@ fn a_commit_keeps_the_records_and_the_next_step_clears_them() {
     )
     .expect("a writable region accepts the write");
 
-    rt.commit_unchecked(&trivial_result(), &[])
-        .expect("a trivial step commits");
+    rt.commit_step(&mut step).expect("the step commits");
     assert_eq!(
         rt.observations().host_writes.to_vec(),
         vec![hw(

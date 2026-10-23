@@ -39,8 +39,12 @@ impl Runtime {
         }
         self.pending_commit = None;
         let effects = std::mem::take(&mut step.effects);
-        let ran = Some((step.token.unit(), step.token.space()));
-        let outcome = self.commit_batch(ran, &step.result, &effects);
+        let outcome = self.commit_batch(
+            step.token.unit(),
+            step.token.space(),
+            &step.result,
+            &effects,
+        );
         self.effects_buf = effects;
         self.effects_buf.clear();
         self.runnable_buf = std::mem::take(&mut step.runnable);
@@ -52,28 +56,37 @@ impl Runtime {
     ///
     /// It also closes the step [`Runtime::step`] last returned, so that
     /// step's [`Runtime::commit_step`] refuses after it. The epoch and
-    /// fault semantics are [`Runtime::commit_step`]'s.
+    /// fault semantics are [`Runtime::commit_step`]'s. Only the
+    /// `test-support` feature builds it.
+    ///
+    /// # Errors
+    ///
+    /// [`CommitError::NoStep`] when no step has run, or a restore went
+    /// back to before the first one. Nothing is committed. Any other
+    /// error is the pipeline's.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn commit_unchecked(
         &mut self,
         result: &ExecutionStepResult,
         effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
+        let unit = self.last_scheduled_unit.ok_or(CommitError::NoStep)?;
         self.pending_commit = None;
-        let ran = self
-            .last_scheduled_unit
-            .map(|unit| (unit, self.spaces.space_of(unit)));
-        self.commit_batch(ran, result, effects)
+        let space = self.spaces.space_of(unit);
+        self.commit_batch(unit, space, result, effects)
     }
 
-    /// The commit both entry points share. `ran` is the unit that ran the
-    /// step and the space its batch commits into.
+    /// The commit both entry points share: `source` ran the step and its
+    /// batch commits into `source_space`, the space it executed in. A DMA
+    /// transfer's ends are the exception: the queue resolves them in
+    /// space 0 when it reaches the transfer.
     fn commit_batch(
         &mut self,
-        ran: Option<(UnitId, AddressSpaceId)>,
+        source: UnitId,
+        source_space: AddressSpaceId,
         result: &ExecutionStepResult,
         effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
-        let ran_unit = ran.map(|(unit, _)| unit);
         self.step_woke_others = false;
         // Trivial-step fast path under FaultDriven. Epoch still advances
         // to preserve the atomic-batch boundary; trace is off in this mode.
@@ -91,42 +104,31 @@ impl Runtime {
             && self.rsx_call_stack.is_empty()
             && !self.rsx_flip.pending()
             // A Raw SPU's step changes the state its window projects.
-            && !ran_unit.is_some_and(|unit| {
-                self.lv2_host.raw_spu_units().any(|(_, raw)| raw == unit)
-            })
+            && !self.lv2_host.raw_spu_units().any(|(_, raw)| raw == source)
             // A mailbox write emits no effect. LV2 serves the word an SPU
             // thread's step left in its interrupt mailbox only on the slow
             // path.
-            && !ran_unit.is_some_and(|unit| {
-                self.registry
-                    .get(unit)
-                    .and_then(|unit| unit.out_mailboxes())
-                    .is_some_and(|mailboxes| mailboxes.out_intr_mbox.is_some())
-            })
+            && self
+                .registry
+                .get(source)
+                .and_then(|unit| unit.out_mailboxes())
+                .is_none_or(|mailboxes| mailboxes.out_intr_mbox.is_none())
         {
             self.epoch.advance();
             // This path fires no completion, so the list this commit
             // publishes is empty.
             self.observations.dma_completions.clear();
-            if let Some(unit) = ran_unit {
-                debug_assert!(
-                    !self.step_woke_others,
-                    "fast path reached with step_woke_others=true; \
-                     allows_trivial_fast_path() must exclude every yield reason \
-                     that can set the flag (Syscall, sync wakes)",
-                );
-                let holds_cs = self.lv2_host.unit_holds_lwmutex(unit);
-                self.scheduler
-                    .notify_yielded(unit, result.yield_reason, false, holds_cs);
-            }
+            debug_assert!(
+                !self.step_woke_others,
+                "fast path reached with step_woke_others=true; \
+                 allows_trivial_fast_path() must exclude every yield reason \
+                 that can set the flag (Syscall, sync wakes)",
+            );
+            let holds_cs = self.lv2_host.unit_holds_lwmutex(source);
+            self.scheduler
+                .notify_yielded(source, result.yield_reason, false, holds_cs);
             return Ok(CommitOutcome::default());
         }
-
-        // Commit into the emitting unit's address space; the pipeline
-        // validates the batch's writes against the same space the unit
-        // executed in. A DMA transfer's ends are the exception: the queue
-        // resolves them in space 0 when it reaches the transfer.
-        let source_space = ran.map_or(AddressSpaceId::BOOT, |(_, space)| space);
 
         // Prepend RSX effects from the previous commit's advance pass.
         // The advance pass reads space 0 (`Runtime::memory`), so its
@@ -206,9 +208,7 @@ impl Runtime {
         // reservation clears are guest-visible state.
         let batch_applied = matches!(&outcome, Ok(o) if !o.fault_discarded);
         if batch_applied {
-            let writer = ran_unit.map_or(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID, |unit| {
-                self.lv2_host.process_of_unit(unit)
-            });
+            let writer = self.lv2_host.process_of_unit(source);
             self.lv2_host.note_committed_effects(writer, effects);
             // Same batch boundary: writes landing in a shared view
             // replicate to sibling views before any checkpoint hashes.
@@ -226,10 +226,7 @@ impl Runtime {
                     // into sibling views at translated addresses, so
                     // predecoded code there is exactly as stale as at
                     // the source range.
-                    let alias_ranges = match ran_unit {
-                        Some(unit) => self.shared_alias_ranges(unit, *range),
-                        None => Vec::new(),
-                    };
+                    let alias_ranges = self.shared_alias_ranges(source, *range);
                     invalidation_ranges.push(*range);
                     invalidation_ranges.extend(alias_ranges);
                 }
@@ -274,7 +271,6 @@ impl Runtime {
             self.route_raw_spu_window_accesses(source_space, effects);
         }
 
-        let source = ran_unit.unwrap_or_else(|| UnitId::new(0));
         if result.yield_reason == YieldReason::Syscall {
             self.dispatch_syscall(result, source);
         }

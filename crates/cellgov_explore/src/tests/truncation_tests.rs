@@ -449,6 +449,7 @@ fn a_refusal_of_any_shape_truncates() {
         CommitError::DmaGetWithPayload { effect_index: 0 },
         CommitError::Memory(cellgov_mem::MemError::LengthMismatch),
         CommitError::StaleStep,
+        CommitError::NoStep,
     ];
     // The count stands in for exhaustiveness only over a list that
     // names each shape once: a repeat would hold the length up while a
