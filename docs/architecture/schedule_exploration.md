@@ -239,7 +239,7 @@ unit's step emits. The table shows which of them reach a footprint:
 | Source | Reaches a footprint |
 |---|---|
 | an LV2 handler's effects | yes, folded into the category each would have had from a unit |
-| the all-blocked time warp | yes, belongs to the step the warp then picked |
+| the step-entry event fire and the all-blocked time warp | yes, belongs to the step that then runs |
 | a park the commit pipeline takes from the step result | yes, through the yield reason |
 | the RSX FIFO advance pass | no; only its MMIO mirrors are recorded |
 | a thread-group end that finishes the group's other units | no; each finish is a status override |
@@ -274,16 +274,25 @@ target.
 that emit nothing, and a register that overwrites keeps the later of
 two writes.
 
-### The all-blocked time warp
+### The step-entry event fire and the all-blocked time warp
 
-The all-blocked time warp does reach a footprint. It fires the timer
-and DMA wakes before it picks a step, so the record a footprint reads
-opens at the step's start rather than at its commit. What the warp
-wrote belongs to the step it then picked.
+A step fires due timer and DMA events itself, in two phases, before
+it runs a unit:
+
+- At step entry, before the scheduler selects a unit, it fires each
+  event that every runnable unit's clock has reached.
+- When no unit is runnable, the all-blocked time warp advances time
+  to the next event and fires it.
+
+Both reach a footprint. The record a footprint reads opens at the
+step's start rather than at its commit, so what either phase wrote
+belongs to the step that then runs.
 
 A timed wait's expiry writing through its waiter's result pointer is
 the case that needs it. The DMA half was already covered, because a
-transfer's ranges are held for every step of its flight.
+transfer's ranges are held for every step of its flight. A completion
+either phase fires therefore reaches no commit's completion list;
+`StepFootprint::note_inflight` states why none needs to.
 
 ### Parks taken from the step result
 

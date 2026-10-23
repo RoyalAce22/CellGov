@@ -72,8 +72,9 @@ impl Runtime {
         if self.steps_taken >= self.max_steps {
             return Err(StepError::MaxStepsExceeded);
         }
-        // The time warp below fires the DMA and timer wakes itself and
-        // lands their guest writes, so the clear runs ahead of it.
+        // The step-entry fire and the time warp below fire the DMA and
+        // timer wakes themselves and land their guest writes, so the
+        // clear runs ahead of both.
         self.last_host_writes.clear();
         self.last_lv2_effects.clear();
         self.last_problem_state_accesses.clear();
@@ -149,8 +150,8 @@ impl Runtime {
             return Err(StepError::TimeOverflow);
         }
 
-        // A warp above can widen the set the scheduler chose from, so
-        // record it here.
+        // The step-entry fire or a warp above can widen the set the
+        // scheduler chose from, so record it here.
         self.last_runnable.clear();
         self.last_runnable.extend(self.registry.runnable_ids());
         let (ppe_siblings, ppe_sibling_pressure) = self.ppe_siblings(unit_id);
@@ -468,3 +469,7 @@ mod ppe_order_tests;
 #[cfg(test)]
 #[path = "tests/time_overflow_tests.rs"]
 mod time_overflow_tests;
+
+#[cfg(test)]
+#[path = "tests/pre_select_fire_tests.rs"]
+mod pre_select_fire_tests;

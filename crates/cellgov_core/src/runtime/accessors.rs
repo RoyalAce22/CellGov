@@ -230,9 +230,9 @@ impl Runtime {
     /// Units runnable when the scheduler made its last choice.
     ///
     /// Empty before the first [`Runtime::step`] and after a restore.
-    /// Read it after the call: a step that warps guest time to fire a
-    /// due DMA completion or timer wake widens the set the scheduler
-    /// chose from. A step that refuses leaves the previous step's set
+    /// Read it after the call: a step that fires a due DMA completion or
+    /// timer wake at entry or in the time warp widens the set the
+    /// scheduler chose from. A step that refuses leaves the previous step's set
     /// in place.
     #[inline]
     pub fn last_runnable(&self) -> &[UnitId] {
@@ -256,9 +256,11 @@ impl Runtime {
     /// Empty before the first commit and after a restore. The commit
     /// that fires a completion applies the write outside every unit's
     /// batch, so this list is where a caller reads which bytes moved.
-    /// The all-blocked time warp inside [`Runtime::step`] fires
-    /// completions outside every commit, and none of them reaches this
-    /// list.
+    /// [`Runtime::step`] also fires due completions itself, in two
+    /// phases outside every commit, and none of them reaches this list:
+    ///
+    /// - at step entry, before the scheduler selects a unit;
+    /// - in the all-blocked time warp.
     ///
     /// The flag is what [`DmaQueue::pending`] carries, and for the same
     /// reason: a payloaded transfer reads no source at completion.
@@ -284,10 +286,12 @@ impl Runtime {
     /// - `SchedulerNotReinstalled` and `MaxStepsExceeded` are the two
     ///   refusals `step` answers ahead of that clear, so each leaves
     ///   the previous step's record in place. Every later refusal
-    ///   clears first and leaves whatever the time warp wrote.
-    /// - The all-blocked time warp inside [`Runtime::step`] fires the
-    ///   DMA and timer wakes, so what they write belongs to the step
-    ///   the warp then picked.
+    ///   clears first and leaves whatever the step-entry fire and the
+    ///   time warp wrote.
+    /// - [`Runtime::step`] fires due DMA and timer events itself, at
+    ///   step entry before the scheduler selects a unit and in the
+    ///   all-blocked time warp. What either phase writes belongs to the
+    ///   step that then runs.
     /// - A restore empties the list.
     /// - A refused write records nothing.
     /// - A [`HostWriter::Placement`] the driver makes between two steps

@@ -230,7 +230,8 @@ impl StepFootprint {
     /// which PPE threads the step moved into or out of the runnable set.
     ///
     /// Call it after the step's commit and before the next step, which
-    /// may warp time and wake units no step of its own wakes.
+    /// may fire due events at entry or in the time warp and wake units
+    /// no step of its own wakes.
     fn note_ppe_siblings(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
         let registry = rt.registry();
         let is_ppe =
@@ -278,10 +279,15 @@ impl StepFootprint {
     /// Record the transfers in flight during this step.
     ///
     /// Call it after the step's commit: that commit fires a due
-    /// transfer, and one it fired was in flight for the step. A
-    /// transfer the warp fires reaches neither list
-    /// (`Runtime::last_dma_completions`) and needs to reach neither:
-    /// every step it was in flight for already read it out of the queue.
+    /// transfer, and one it fired was in flight for the step.
+    ///
+    /// `Runtime::step` also fires due transfers itself, in two phases:
+    /// at step entry before the scheduler selects a unit, and in the
+    /// all-blocked time warp. A transfer either phase fires reaches
+    /// neither list (`Runtime::last_dma_completions`) and needs to reach
+    /// neither. Every step it was in flight for read it out of the queue
+    /// at that step's commit, and the step that fires it runs after the
+    /// bytes landed.
     pub fn note_inflight(&mut self, rt: &cellgov_core::Runtime) {
         let queued = rt.dma_queue().pending();
         let fired = rt
@@ -397,7 +403,10 @@ impl StepFootprint {
     /// own [`StepFootprint::shared_writes`], widened through the space
     /// it landed in: the bytes land at this step, and this step's
     /// position decides them. The record reaches back to the step's
-    /// start, so it also holds what the warp wrote.
+    /// start, so it also holds what the step-entry fire and the
+    /// all-blocked time warp wrote. A landing either phase fires is the
+    /// in-flight set's, on the argument [`StepFootprint::note_inflight`]
+    /// makes.
     pub fn note_host_writes(&mut self, rt: &cellgov_core::Runtime) {
         for (writer, space, range) in rt.last_host_writes() {
             let record = |fp: &mut Self, range: &cellgov_mem::ByteRange| {

@@ -1,5 +1,6 @@
-//! Timer-wake firing. [`Runtime::fire_timer_wakes`] runs per commit and
-//! in the all-blocked time-warp, resuming units whose deadline arrived.
+//! Timer-wake firing. [`Runtime::fire_timer_wakes`] runs per commit, at
+//! step entry before the scheduler selects a unit, and in the
+//! all-blocked time warp. It resumes units whose deadline arrived.
 
 use cellgov_time::GuestTicks;
 

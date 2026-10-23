@@ -1,5 +1,7 @@
 //! DMA completion handling. [`Runtime::fire_dma_completions`] runs per
-//! commit and wakes issuers whose modeled-latency window arrived.
+//! commit, at step entry before the scheduler selects a unit, and in the
+//! all-blocked time warp. It wakes issuers whose modeled-latency window
+//! arrived.
 //! [`Runtime::drain_pending_dma`] runs at scenario termination and
 //! lands every outstanding transfer that no suspended queue holds.
 //! [`Runtime::land_issuer_dma`] runs at an SPU thread's exit and lands

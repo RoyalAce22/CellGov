@@ -40,7 +40,8 @@ pub struct Runtime {
     pub(super) dma_queue: DmaQueue,
     /// Pending wake-at-guest-tick deadlines for parked units.
     /// Registered at park time, cancelled on early wake, fired by
-    /// [`Runtime::fire_timer_wakes`] and the all-blocked time-warp.
+    /// [`Runtime::fire_timer_wakes`] from a commit, from step entry, and
+    /// from the all-blocked time warp.
     pub(super) timer_wakes: crate::timer_queue::TimerWakeQueue,
     pub(super) dma_latency: Box<dyn DmaLatencyModel>,
     /// Units runnable at the moment the scheduler last made a choice,
