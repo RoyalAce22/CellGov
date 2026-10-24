@@ -48,11 +48,8 @@ impl Lv2Host {
             // ownership. There is no guest-side control block for this
             // primitive, so the whole answer is the ETIMEDOUT return.
             Lv2BlockReason::Mutex { id } => {
-                if !self.state.mutexes.remove_waiter(id, thread) {
-                    return self.expire_missing_waiter("mutex", id, requester);
-                }
-                self.note_expiry("mutex");
-                timed_out_wake(requester)
+                let removed = self.state.mutexes.remove_waiter(id, thread);
+                self.expire_unqueued(removed, "mutex", id, requester)
             }
             // Same shape, and the syscall side writes no
             // sys_lwmutex_t fields on timeout. liblv2.prx's lock
@@ -61,31 +58,22 @@ impl Lv2Host {
             // stores the owner only after a zero return. A non-zero
             // return undoes the waiter count.
             Lv2BlockReason::LwMutex { id } => {
-                if !self.state.lwmutexes.remove_waiter(id, thread) {
-                    return self.expire_missing_waiter("lwmutex", id, requester);
-                }
-                self.note_expiry("lwmutex");
-                timed_out_wake(requester)
+                let removed = self.state.lwmutexes.remove_waiter(id, thread);
+                self.expire_unqueued(removed, "lwmutex", id, requester)
             }
             // Unqueue plus ETIMEDOUT. The count never decrements for a
             // waiter here, so a timeout leaves nothing to repair.
             Lv2BlockReason::Semaphore { id } => {
-                if !self.state.semaphores.remove_waiter(id, thread) {
-                    return self.expire_missing_waiter("semaphore", id, requester);
-                }
-                self.note_expiry("semaphore");
-                timed_out_wake(requester)
+                let removed = self.state.semaphores.remove_waiter(id, thread);
+                self.expire_unqueued(removed, "semaphore", id, requester)
             }
             // Timeout writes nothing: the event payload comes back in
             // r4-r7, never through the caller's pointer. libaudio.prx's
             // receive wrapper passes a scratch pointer it ignores. It
             // builds its event record out of the returned registers.
             Lv2BlockReason::EventQueue { id } => {
-                if self.state.event_queues.remove_waiter(id, thread).is_none() {
-                    return self.expire_missing_waiter("equeue", id, requester);
-                }
-                self.note_expiry("equeue");
-                timed_out_wake(requester)
+                let removed = self.state.event_queues.remove_waiter(id, thread).is_some();
+                self.expire_unqueued(removed, "equeue", id, requester)
             }
             // Timeout writes the flag's current pattern through the
             // result pointer (cancel does the same alongside
@@ -125,13 +113,9 @@ impl Lv2Host {
             // lwmutex. liblv2.prx's wait wrapper then locks the lwmutex
             // itself before it returns ETIMEDOUT.
             Lv2BlockReason::LwCond { id, lwmutex_id } => {
-                if !self.state.lwconds.remove_waiter(id, thread)
-                    && !self.state.lwmutexes.remove_waiter(lwmutex_id, thread)
-                {
-                    return self.expire_missing_waiter("lwcond", id, requester);
-                }
-                self.note_expiry("lwcond");
-                timed_out_wake(requester)
+                let removed = self.state.lwconds.remove_waiter(id, thread)
+                    || self.state.lwmutexes.remove_waiter(lwmutex_id, thread);
+                self.expire_unqueued(removed, "lwcond", id, requester)
             }
             Lv2BlockReason::ThreadGroupJoin { .. }
             | Lv2BlockReason::PpuThreadJoin { .. }
@@ -238,6 +222,23 @@ impl Lv2Host {
 
     fn note_expiry(&mut self, primitive: &'static str) {
         *self.obs.wait_timeout_expiries.entry(primitive).or_insert(0) += 1;
+    }
+
+    /// Finish a timed wait whose expiry only unqueues the waiter:
+    /// ETIMEDOUT when `removed`, and the missing-waiter refusal
+    /// otherwise.
+    fn expire_unqueued(
+        &mut self,
+        removed: bool,
+        primitive: &'static str,
+        id: u32,
+        requester: UnitId,
+    ) -> ExpiredWait {
+        if !removed {
+            return self.expire_missing_waiter(primitive, id, requester);
+        }
+        self.note_expiry(primitive);
+        timed_out_wake(requester)
     }
 }
 
