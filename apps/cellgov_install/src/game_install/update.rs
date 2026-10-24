@@ -23,12 +23,12 @@ use std::path::{Path, PathBuf};
 
 use crate::game_install::error::GameInstallError;
 use crate::game_install::staging::{
-    build_record, commit, dir_non_empty, emit_totals, io_err, parse_identity, prefixed_entry_path,
-    prepare_staging, run_or_clean, stage_tree, validate_content_id, InstallOptions, SfoIdentity,
-    StagedData, StagedFile,
+    build_record, check_header_title_id, commit, dir_non_empty, emit_totals, io_err, pkg_identity,
+    pkg_staged_files, prepare_staging, run_or_clean, stage_tree, validate_content_id,
+    InstallOptions, SfoIdentity,
 };
 use crate::keys::KeyVault;
-use crate::pkg::{self, PkgEntryKind};
+use crate::pkg;
 use crate::progress::Phase;
 use crate::store::layout::{
     staging_sibling, Artifact, ArtifactKind, StoreLayout, TitleId, TitleTree, VersionKey,
@@ -150,29 +150,17 @@ pub fn install_update_pkg(
     progress.phase(Phase::Reading.code());
     let archive = pkg::extract(pkg_bytes, keys)?;
 
-    let sfo_file = archive
-        .files
-        .iter()
-        .find(|f| f.name == "PARAM.SFO")
-        .ok_or(GameInstallError::NoParamSfo)?;
     let SfoIdentity {
         title_id,
         category,
         title,
         version,
         system_ver,
-    } = parse_identity(archive.file_data(sfo_file))?;
+    } = pkg_identity(&archive)?;
     if !UPDATE_CATEGORIES.contains(&category.as_str()) {
         return Err(GameInstallError::NotUpdatePackage { category });
     }
-    // Same containment tie the base installer makes: the header's
-    // content-id field embeds the 9-char title-id.
-    if !archive.header.content_id.is_empty() && !archive.header.content_id.contains(&title_id) {
-        return Err(GameInstallError::TitleIdMismatch {
-            header: archive.header.content_id.clone(),
-            sfo: title_id,
-        });
-    }
+    check_header_title_id(&archive.header, &title_id)?;
     let content_id = if archive.header.content_id.is_empty() {
         title_id.clone()
     } else {
@@ -222,18 +210,7 @@ pub fn install_update_pkg(
     // The entry directory holds the tree under `game/`, so the staged
     // paths carry that prefix and the record's `[files]` keys stay
     // relative to the entry the record names.
-    let tree_dir = TitleTree::Game.dir_name();
-    let staged: Vec<StagedFile> = archive
-        .files
-        .iter()
-        .map(|f| {
-            Ok(StagedFile {
-                path: prefixed_entry_path(tree_dir, &f.name)?,
-                is_dir: f.kind == PkgEntryKind::Directory,
-                data: StagedData::Bytes(archive.file_data(f)),
-            })
-        })
-        .collect::<Result<_, GameInstallError>>()?;
+    let staged = pkg_staged_files(&archive, Some(TitleTree::Game.dir_name()))?;
     emit_totals(progress, &staged);
 
     prepare_staging(&staging_root, progress)?;

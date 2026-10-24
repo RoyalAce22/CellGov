@@ -48,6 +48,7 @@ use sha2::{Digest, Sha256};
 use crate::game_install::error::GameInstallError;
 use crate::manifest::Sha256 as HexSha256;
 use crate::param_sfo;
+use crate::pkg::{PkgArchive, PkgEntryKind, PkgHeader};
 use crate::progress::{Phase, ProgressSink};
 use crate::store::layout::is_safe_component;
 use crate::store::record::{
@@ -332,6 +333,71 @@ pub(super) fn parse_identity(sfo_bytes: &[u8]) -> Result<SfoIdentity, GameInstal
         version,
         system_ver,
     })
+}
+
+/// The identity the PKG's own `PARAM.SFO` names.
+///
+/// # Errors
+///
+/// [`GameInstallError::NoParamSfo`] for a PKG without one, and the
+/// [`parse_identity`] refusals.
+pub(super) fn pkg_identity(archive: &PkgArchive) -> Result<SfoIdentity, GameInstallError> {
+    let sfo_file = archive
+        .files
+        .iter()
+        .find(|f| f.name == "PARAM.SFO")
+        .ok_or(GameInstallError::NoParamSfo)?;
+    parse_identity(archive.file_data(sfo_file))
+}
+
+/// Refuse a PKG whose header content id does not embed `title_id`.
+///
+/// The header's content-id field embeds the 9-char title-id (e.g.
+/// `UP9000-NPUA80001_00-...` carries `NPUA80001`), so a containment
+/// check is robust to the prefix/suffix the SFO TITLE_ID omits. An empty
+/// header content id ties nothing.
+///
+/// # Errors
+///
+/// [`GameInstallError::TitleIdMismatch`].
+pub(super) fn check_header_title_id(
+    header: &PkgHeader,
+    title_id: &str,
+) -> Result<(), GameInstallError> {
+    if !header.content_id.is_empty() && !header.content_id.contains(title_id) {
+        return Err(GameInstallError::TitleIdMismatch {
+            header: header.content_id.clone(),
+            sfo: title_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Every PKG item as a file to stage, its path under `prefix` when the
+/// caller names one.
+///
+/// # Errors
+///
+/// The [`prefixed_entry_path`] refusal for an unsafe item path under a
+/// prefix.
+pub(super) fn pkg_staged_files<'a>(
+    archive: &'a PkgArchive,
+    prefix: Option<&str>,
+) -> Result<Vec<StagedFile<'a>>, GameInstallError> {
+    archive
+        .files
+        .iter()
+        .map(|f| {
+            Ok(StagedFile {
+                path: match prefix {
+                    Some(prefix) => prefixed_entry_path(prefix, &f.name)?,
+                    None => f.name.clone(),
+                },
+                is_dir: f.kind == PkgEntryKind::Directory,
+                data: StagedData::Bytes(archive.file_data(f)),
+            })
+        })
+        .collect()
 }
 
 /// Clear and recreate a staging directory, so no foreign residue

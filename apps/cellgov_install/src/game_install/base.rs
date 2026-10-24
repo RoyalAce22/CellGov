@@ -24,21 +24,22 @@ use std::path::{Path, PathBuf};
 use crate::firmware_install::{self, FirmwareInstallOutcome};
 use crate::game_install::error::GameInstallError;
 use crate::game_install::staging::{
-    build_record, commit, dir_non_empty, emit_totals, parse_identity, prepare_staging,
-    run_or_clean, sha256_of, stage_tree, validate_content_id, write_and_sync, InstallOptions,
-    SfoIdentity, StagedData, StagedFile, StagedRap,
+    build_record, check_header_title_id, commit, dir_non_empty, emit_totals, parse_identity,
+    pkg_identity, pkg_staged_files, prepare_staging, run_or_clean, sha256_of, stage_tree,
+    validate_content_id, write_and_sync, InstallOptions, SfoIdentity, StagedData, StagedFile,
+    StagedRap,
 };
 use crate::iso;
 use crate::keys::KeyVault;
 use crate::npdrm::{self, NpdHeaderInfo, NpdLicense};
 use crate::param_sfo;
-use crate::pkg::{self, PkgEntryKind};
+use crate::pkg;
 use crate::progress::{Phase, ProgressSink};
 use crate::pup;
 use crate::sce;
 use crate::self_image::is_sce_wrapped;
 use crate::store::layout::{staging_sibling, Artifact, StoreLayout, TitleId};
-use crate::store::lock::lock_artifact;
+use crate::store::lock::{lock_artifact, StoreLock};
 use crate::store::record::{
     ArtifactRecord, RapRecord, TitleRecord, DISC_DISTRIBUTION, PSN_HDD_DISTRIBUTION,
 };
@@ -293,6 +294,166 @@ fn plan_staged_rap(
     })
 }
 
+/// What a base install holds from its target gate to its commit.
+struct BaseClaim {
+    layout: StoreLayout,
+    /// The staging sibling of the target directory.
+    staging_root: PathBuf,
+    artifact: Artifact,
+    /// The target directory as a store path.
+    store_path: String,
+    /// The title's claim, held to the end of the install. The target
+    /// gate, the staging sweep, and both commit renames touch paths that
+    /// a second install or an uninstall of this title also touches.
+    _lock: StoreLock,
+}
+
+/// Resolve a title base's staging root, artifact and store path, claim
+/// it, then refuse an occupied `final_dir` unless `force`.
+///
+/// The install claims every path before staging: only `run_or_clean`
+/// discards the staging root, so a fallible step between it and
+/// `commit` would leave the staged tree behind.
+///
+/// # Errors
+///
+/// [`GameInstallError::Locked`] when another process holds the claim,
+/// [`GameInstallError::TargetExists`], and the layout refusals.
+fn claim_title_base(
+    output_dir: &Path,
+    final_dir: &Path,
+    title_id: &str,
+    force: bool,
+) -> Result<BaseClaim, GameInstallError> {
+    let layout = StoreLayout::new(output_dir);
+    let staging_root = staging_sibling(final_dir)?;
+    let artifact = Artifact::TitleBase {
+        title_id: TitleId::new(title_id)?,
+    };
+    let store_path = layout.store_path_of(final_dir)?;
+    let lock = lock_artifact(&layout, &artifact)?;
+    if dir_non_empty(final_dir)? && !force {
+        return Err(GameInstallError::TargetExists {
+            path: final_dir.to_path_buf(),
+        });
+    }
+    Ok(BaseClaim {
+        layout,
+        staging_root,
+        artifact,
+        store_path,
+        _lock: lock,
+    })
+}
+
+/// The PKG's EBOOT and its NPD header, when it carries one.
+///
+/// The EBOOT's NPD content-id must also embed the title-id, tying the
+/// executable's own identity to the PARAM.SFO / header.
+///
+/// # Errors
+///
+/// [`GameInstallError::NoEboot`], [`GameInstallError::Npd`], and
+/// [`GameInstallError::ContentIdMismatch`].
+fn eboot_npd<'a>(
+    archive: &'a pkg::PkgArchive,
+    title_id: &str,
+) -> Result<(&'a [u8], Option<NpdHeaderInfo>), GameInstallError> {
+    let eboot = archive
+        .files
+        .iter()
+        .find(|f| f.name == "USRDIR/EBOOT.BIN")
+        .ok_or(GameInstallError::NoEboot)?;
+    let eboot_data = archive.file_data(eboot);
+    let npd = npdrm::find_npd_header_info(eboot_data).map_err(GameInstallError::Npd)?;
+    if let Some(n) = &npd {
+        if !n.content_id.contains(title_id) {
+            return Err(GameInstallError::ContentIdMismatch {
+                npd: n.content_id.clone(),
+                title_id: title_id.to_string(),
+            });
+        }
+    }
+    Ok((eboot_data, npd))
+}
+
+/// Refuse a missing RAP the license consumes, and a RAP of the wrong
+/// size.
+///
+/// # Errors
+///
+/// [`GameInstallError::RapRequired`] and
+/// [`GameInstallError::RapWrongSize`].
+fn check_rap_contract(
+    rap_needed: bool,
+    rap: Option<&[u8]>,
+    content_id: &str,
+) -> Result<(), GameInstallError> {
+    if rap_needed && rap.is_none() {
+        return Err(GameInstallError::RapRequired {
+            content_id: content_id.to_string(),
+        });
+    }
+    if let Some(r) = rap {
+        if r.len() != 16 {
+            return Err(GameInstallError::RapWrongSize { len: r.len() });
+        }
+    }
+    Ok(())
+}
+
+/// The identity the disc's `PS3_GAME/PARAM.SFO` names. A file without
+/// its magic means the image still carries its disc encryption.
+///
+/// # Errors
+///
+/// [`GameInstallError::NoDiscParamSfo`],
+/// [`GameInstallError::DiscImageEncrypted`], and the [`parse_identity`]
+/// refusals.
+fn disc_identity(entries: &[iso::IsoEntry], image: &[u8]) -> Result<SfoIdentity, GameInstallError> {
+    let sfo_entry = entries
+        .iter()
+        .find(|e| e.path == "PS3_GAME/PARAM.SFO")
+        .ok_or(GameInstallError::NoDiscParamSfo)?;
+    let sfo_bytes = sfo_entry.read_data(image)?;
+    match parse_identity(&sfo_bytes) {
+        Err(GameInstallError::Sfo(param_sfo::SfoError::BadMagic(head))) => {
+            Err(GameInstallError::DiscImageEncrypted {
+                path: "PS3_GAME/PARAM.SFO",
+                head,
+            })
+        }
+        other => other,
+    }
+}
+
+/// Refuse a disc EBOOT that opens with neither the SCE nor the ELF
+/// magic: the image still carries its disc encryption.
+///
+/// Metadata files can sit in a plaintext region of an otherwise
+/// encrypted disc. ISO 9660 / ECMA-119 describes the directory
+/// structure only and says nothing about a file's contents. The EBOOT's
+/// own first bytes therefore settle whether the image is plaintext,
+/// before the tree streams to disk. Disc encryption is an unpadded
+/// per-sector block cipher and keeps every file's length, so an EBOOT
+/// too short to hold a magic reaches the proof, which refuses it by
+/// length.
+///
+/// # Errors
+///
+/// [`GameInstallError::DiscImageEncrypted`].
+fn refuse_encrypted_eboot(eboot_bytes: &[u8]) -> Result<(), GameInstallError> {
+    if let Some(&head) = eboot_bytes.first_chunk::<4>() {
+        if !is_sce_wrapped(eboot_bytes) && head != ELF_MAGIC {
+            return Err(GameInstallError::DiscImageEncrypted {
+                path: "PS3_GAME/USRDIR/EBOOT.BIN",
+                head,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Install a retail PKG (PSN/retail HDD title) into `output_dir`'s
 /// `dev_hdd0` tree, installing the RAP and writing the title-base
 /// record for that root.
@@ -321,49 +482,20 @@ pub fn install_pkg(
     let archive = pkg::extract(pkg_bytes, keys)?;
 
     // PARAM.SFO -> identity + HDD-game gate.
-    let sfo_file = archive
-        .files
-        .iter()
-        .find(|f| f.name == "PARAM.SFO")
-        .ok_or(GameInstallError::NoParamSfo)?;
     let SfoIdentity {
         title_id,
         category,
         title,
         version,
         system_ver,
-    } = parse_identity(archive.file_data(sfo_file))?;
+    } = pkg_identity(&archive)?;
     if category != "HG" {
         return Err(GameInstallError::NotHddGame { category });
     }
-    // The header's content-id field embeds the 9-char title-id (e.g.
-    // `UP9000-NPUA80001_00-...` carries `NPUA80001`), so a containment
-    // check is robust to the prefix/suffix the SFO TITLE_ID omits.
-    if !archive.header.content_id.is_empty() && !archive.header.content_id.contains(&title_id) {
-        return Err(GameInstallError::TitleIdMismatch {
-            header: archive.header.content_id.clone(),
-            sfo: title_id,
-        });
-    }
+    check_header_title_id(&archive.header, &title_id)?;
 
     // EBOOT -> license type + full content id.
-    let eboot = archive
-        .files
-        .iter()
-        .find(|f| f.name == "USRDIR/EBOOT.BIN")
-        .ok_or(GameInstallError::NoEboot)?;
-    let eboot_data = archive.file_data(eboot);
-    let npd = npdrm::find_npd_header_info(eboot_data).map_err(GameInstallError::Npd)?;
-    // The EBOOT's NPD content-id must also embed the title-id, tying
-    // the executable's own identity to the PARAM.SFO / header.
-    if let Some(n) = &npd {
-        if !n.content_id.contains(&title_id) {
-            return Err(GameInstallError::ContentIdMismatch {
-                npd: n.content_id.clone(),
-                title_id,
-            });
-        }
-    }
+    let (eboot_data, npd) = eboot_npd(&archive, &title_id)?;
     let content_id = npd
         .as_ref()
         .map(|n| n.content_id.clone())
@@ -376,48 +508,23 @@ pub fn install_pkg(
 
     // Layout. The pre-commit batch lives under one staging root:
     // `tree/` is the game tree, `rap/` holds the staged RAP.
-    let layout = StoreLayout::new(output_dir);
-    let exdata = layout.live_exdata_dir();
     let final_dir = output_dir.join(HDD0_MOUNT).join(GAME_DIR).join(&title_id);
-    let staging_root = staging_sibling(&final_dir)?;
+    let BaseClaim {
+        layout,
+        staging_root,
+        artifact,
+        store_path,
+        _lock,
+    } = claim_title_base(output_dir, &final_dir, &title_id, opts.force)?;
+    let exdata = layout.live_exdata_dir();
     let tree_staging = staging_root.join("tree");
-    // Resolved before staging: only `run_or_clean` discards the staging
-    // root, so a fallible step between it and `commit` would leave the
-    // staged tree behind.
-    let artifact = Artifact::TitleBase {
-        title_id: TitleId::new(&title_id)?,
-    };
-    let store_path = layout.store_path_of(&final_dir)?;
-    // The install holds this claim to the end. The target gate, the
-    // staging sweep, and both commit renames touch paths that a second
-    // install or an uninstall of this title also touches.
-    let _lock = lock_artifact(&layout, &artifact)?;
-
-    if dir_non_empty(&final_dir)? && !opts.force {
-        return Err(GameInstallError::TargetExists { path: final_dir });
-    }
 
     // Fail fast on the RAP contract before staging anything.
     let license = npd.as_ref().map(|n| n.license);
     let rap_needed = rap_consumed(license);
-    if rap_needed && rap.is_none() {
-        return Err(GameInstallError::RapRequired { content_id });
-    }
-    if let Some(r) = rap {
-        if r.len() != 16 {
-            return Err(GameInstallError::RapWrongSize { len: r.len() });
-        }
-    }
+    check_rap_contract(rap_needed, rap, &content_id)?;
 
-    let staged: Vec<StagedFile> = archive
-        .files
-        .iter()
-        .map(|f| StagedFile {
-            path: f.name.clone(),
-            is_dir: f.kind == PkgEntryKind::Directory,
-            data: StagedData::Bytes(archive.file_data(f)),
-        })
-        .collect();
+    let staged = pkg_staged_files(&archive, None)?;
     emit_totals(progress, &staged);
 
     // Build the whole batch (tree + RAP + proof) under the staging root.
@@ -542,26 +649,13 @@ pub fn install_iso(
     progress.phase(Phase::Reading.code());
     let entries = iso::read_iso(image)?;
 
-    let sfo_entry = entries
-        .iter()
-        .find(|e| e.path == "PS3_GAME/PARAM.SFO")
-        .ok_or(GameInstallError::NoDiscParamSfo)?;
-    let sfo_bytes = sfo_entry.read_data(image)?;
     let SfoIdentity {
         title_id,
         category,
         title,
         version,
         system_ver,
-    } = match parse_identity(&sfo_bytes) {
-        Err(GameInstallError::Sfo(param_sfo::SfoError::BadMagic(head))) => {
-            return Err(GameInstallError::DiscImageEncrypted {
-                path: "PS3_GAME/PARAM.SFO",
-                head,
-            });
-        }
-        other => other?,
-    };
+    } = disc_identity(&entries, image)?;
     if !DISC_CATEGORIES.contains(&category.as_str()) {
         return Err(GameInstallError::NotDiscGame { category });
     }
@@ -573,36 +667,16 @@ pub fn install_iso(
         .find(|e| e.path == "PS3_GAME/USRDIR/EBOOT.BIN")
         .ok_or(GameInstallError::NoDiscEboot)?
         .read_data(image)?;
-    // Metadata files can sit in a plaintext region of an otherwise
-    // encrypted disc. ISO 9660 / ECMA-119 describes the directory
-    // structure only and says nothing about a file's contents. The
-    // EBOOT's own first bytes therefore settle whether the image is
-    // decrypted, before the tree streams to disk. Disc encryption is
-    // an unpadded per-sector block cipher and keeps every file's
-    // length, so an EBOOT too short to hold a magic reaches the proof,
-    // which refuses it by length.
-    if let Some(&head) = eboot_bytes.first_chunk::<4>() {
-        if !is_sce_wrapped(&eboot_bytes) && head != ELF_MAGIC {
-            return Err(GameInstallError::DiscImageEncrypted {
-                path: "PS3_GAME/USRDIR/EBOOT.BIN",
-                head,
-            });
-        }
-    }
+    refuse_encrypted_eboot(&eboot_bytes)?;
 
-    let layout = StoreLayout::new(output_dir);
     let final_dir = output_dir.join(BDVD_MOUNT).join(&title_id);
-    let staging_dir = staging_sibling(&final_dir)?;
-    // Resolved before staging, as in `install_pkg`.
-    let artifact = Artifact::TitleBase {
-        title_id: TitleId::new(&title_id)?,
-    };
-    let store_path = layout.store_path_of(&final_dir)?;
-    let _lock = lock_artifact(&layout, &artifact)?;
-
-    if dir_non_empty(&final_dir)? && !opts.force {
-        return Err(GameInstallError::TargetExists { path: final_dir });
-    }
+    let BaseClaim {
+        layout,
+        staging_root: staging_dir,
+        artifact,
+        store_path,
+        _lock,
+    } = claim_title_base(output_dir, &final_dir, &title_id, opts.force)?;
 
     // The disc's own system software goes first: a refusal there stages
     // none of the title, and a title fault after it leaves an ordinary
