@@ -333,33 +333,13 @@ fn extract_packages(
     for entry in packages {
         let short = entry.name.rsplit('/').next().unwrap_or(&entry.name);
         progress.item_started(short);
-        match sce::decrypt_package(&entry.data, keys) {
-            Ok(inner) => match tar::parse(&inner) {
-                Ok(packaged_files) => {
-                    let packaged = packaged_files.len();
-                    let inner_files: Vec<tar::TarEntry> = packaged_files
-                        .into_iter()
-                        .filter(|f| !is_install_excluded(&f.name))
-                        .collect();
-                    let report = tar::extract_to_disk(&inner_files, staging_root);
-                    tally.files += report.written;
-                    tally.packages.push(PackageSummary {
-                        package: short.to_string(),
-                        written: report.written,
-                        pruned: packaged - inner_files.len(),
-                        skipped: report.skipped,
-                    });
-                    tally.extract_errors.extend(report.errors);
-                }
-                Err(source) => tally.failed.push(PackageFailure::InnerTar {
-                    package: short.to_string(),
-                    source,
-                }),
-            },
-            Err(source) => tally.failed.push(PackageFailure::Decrypt {
-                package: short.to_string(),
-                source,
-            }),
+        match extract_one(entry, short, staging_root, keys) {
+            Ok((summary, errors)) => {
+                tally.files += summary.written;
+                tally.packages.push(summary);
+                tally.extract_errors.extend(errors);
+            }
+            Err(failure) => tally.failed.push(failure),
         }
         // The inner file sizes are not known until a package is open,
         // so progress is denominated in the packages' payload bytes.
@@ -367,6 +347,39 @@ fn extract_packages(
         progress.item_finished();
     }
     tally
+}
+
+/// Decrypt one dev_flash package and extract its files into
+/// `staging_root`, less the install-excluded ones.
+#[cfg(feature = "decrypt")]
+fn extract_one(
+    entry: &tar::TarEntry,
+    short: &str,
+    staging_root: &Path,
+    keys: &KeyVault,
+) -> Result<(PackageSummary, Vec<tar::ExtractError>), PackageFailure> {
+    let inner =
+        sce::decrypt_package(&entry.data, keys).map_err(|source| PackageFailure::Decrypt {
+            package: short.to_string(),
+            source,
+        })?;
+    let packaged_files = tar::parse(&inner).map_err(|source| PackageFailure::InnerTar {
+        package: short.to_string(),
+        source,
+    })?;
+    let packaged = packaged_files.len();
+    let inner_files: Vec<tar::TarEntry> = packaged_files
+        .into_iter()
+        .filter(|f| !is_install_excluded(&f.name))
+        .collect();
+    let report = tar::extract_to_disk(&inner_files, staging_root);
+    let summary = PackageSummary {
+        package: short.to_string(),
+        written: report.written,
+        pruned: packaged - inner_files.len(),
+        skipped: report.skipped,
+    };
+    Ok((summary, report.errors))
 }
 
 /// What the extraction loop produced, before it is held to the

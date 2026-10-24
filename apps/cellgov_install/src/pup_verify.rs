@@ -154,62 +154,17 @@ pub fn classify<'a>(rows: &'a [ArchivePup], scanned: &[ScannedPup]) -> PupClassi
     let mut present = Vec::new();
     let mut mismatched = Vec::new();
     for found in scanned {
-        if let Some(row) = by_hash.get(found.sha256.as_str()) {
-            let first = seen.insert(row.pup_sha256.as_str());
-            match &found.identity {
-                Ok(id)
-                    if id.fw == row.fw
-                        && id.image_version == row.image_version
-                        && found.size_bytes == row.size_bytes =>
-                {
-                    if first {
-                        present.push((*row, found.path.clone()));
-                    }
-                }
-                Ok(id) => mismatched.push(PupMismatch {
-                    subject: found.path.clone(),
-                    kind: PupMismatchKind::Metadata,
-                    fw: Some(id.fw.clone()),
-                    expected: vec![format!(
-                        "fw {}, size {}, image {}",
-                        row.fw, row.size_bytes, row.image_version
-                    )],
-                    found: Some(format!(
-                        "fw {}, size {}, image {}",
-                        id.fw, found.size_bytes, id.image_version
-                    )),
-                    reason: None,
-                }),
-                Err(error) => mismatched.push(PupMismatch {
-                    subject: found.path.clone(),
-                    kind: PupMismatchKind::InvalidPup,
-                    fw: None,
-                    expected: vec![row.pup_sha256.clone()],
-                    found: Some(found.sha256.clone()),
-                    reason: Some(error.to_string()),
-                }),
-            }
+        let Some(row) = by_hash.get(found.sha256.as_str()) else {
+            mismatched.push(unknown_hash_mismatch(found, &by_fw));
             continue;
-        }
-        match &found.identity {
-            Ok(id) => mismatched.push(PupMismatch {
-                subject: found.path.clone(),
-                kind: PupMismatchKind::Sha256,
-                fw: Some(id.fw.clone()),
-                expected: by_fw.get(id.fw.as_str()).map_or_else(Vec::new, |hashes| {
-                    hashes.iter().map(|hash| (*hash).to_string()).collect()
-                }),
-                found: Some(found.sha256.clone()),
-                reason: None,
-            }),
-            Err(error) => mismatched.push(PupMismatch {
-                subject: found.path.clone(),
-                kind: PupMismatchKind::InvalidPup,
-                fw: None,
-                expected: Vec::new(),
-                found: Some(found.sha256.clone()),
-                reason: Some(error.to_string()),
-            }),
+        };
+        // A mismatched file still claims its hash, so the row is not
+        // reported missing.
+        let first = seen.insert(row.pup_sha256.as_str());
+        match known_hash_mismatch(row, found) {
+            None if first => present.push((*row, found.path.clone())),
+            None => {}
+            Some(mismatch) => mismatched.push(mismatch),
         }
     }
     let missing = rows
@@ -222,6 +177,67 @@ pub fn classify<'a>(rows: &'a [ArchivePup], scanned: &[ScannedPup]) -> PupClassi
         present,
         missing,
         mismatched,
+    }
+}
+
+/// How a file whose hash the archive knows disagrees with that row;
+/// `None` when its version, size and image version match too.
+fn known_hash_mismatch(row: &ArchivePup, found: &ScannedPup) -> Option<PupMismatch> {
+    match &found.identity {
+        Ok(id)
+            if id.fw == row.fw
+                && id.image_version == row.image_version
+                && found.size_bytes == row.size_bytes =>
+        {
+            None
+        }
+        Ok(id) => Some(PupMismatch {
+            subject: found.path.clone(),
+            kind: PupMismatchKind::Metadata,
+            fw: Some(id.fw.clone()),
+            expected: vec![format!(
+                "fw {}, size {}, image {}",
+                row.fw, row.size_bytes, row.image_version
+            )],
+            found: Some(format!(
+                "fw {}, size {}, image {}",
+                id.fw, found.size_bytes, id.image_version
+            )),
+            reason: None,
+        }),
+        Err(error) => Some(PupMismatch {
+            subject: found.path.clone(),
+            kind: PupMismatchKind::InvalidPup,
+            fw: None,
+            expected: vec![row.pup_sha256.clone()],
+            found: Some(found.sha256.clone()),
+            reason: Some(error.to_string()),
+        }),
+    }
+}
+
+/// The mismatch for a file whose hash the archive does not know. It
+/// names the archive's hashes for the version the file claims.
+fn unknown_hash_mismatch(found: &ScannedPup, by_fw: &BTreeMap<&str, Vec<&str>>) -> PupMismatch {
+    match &found.identity {
+        Ok(id) => PupMismatch {
+            subject: found.path.clone(),
+            kind: PupMismatchKind::Sha256,
+            fw: Some(id.fw.clone()),
+            expected: by_fw.get(id.fw.as_str()).map_or_else(Vec::new, |hashes| {
+                hashes.iter().map(|hash| (*hash).to_string()).collect()
+            }),
+            found: Some(found.sha256.clone()),
+            reason: None,
+        },
+        Err(error) => PupMismatch {
+            subject: found.path.clone(),
+            kind: PupMismatchKind::InvalidPup,
+            fw: None,
+            expected: Vec::new(),
+            found: Some(found.sha256.clone()),
+            reason: Some(error.to_string()),
+        },
     }
 }
 
