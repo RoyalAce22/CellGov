@@ -214,67 +214,13 @@ pub(crate) fn double_slot(op: Op, operands: [u64; 3], mode: Mode) -> DoubleOut {
         .iter()
         .map(|&b| double_operand(b))
         .collect();
-    let class = |i: usize| decoded[i].0;
-    let any = |c: IeeeClass| (0..used).any(|i| class(i) == c);
+    let any = |c: IeeeClass| decoded.iter().any(|(class, _)| *class == c);
     let negate = matches!(op, Op::Dfnms | Op::Dfnma);
     if any(IeeeClass::Quiet) || any(IeeeClass::Signaling) {
-        // [SPU-ISA p:197 s:9.2] a NaN input gives a QNaN: the default or an input NaN, the NaN flag marking the first.
-        let known_mask = if negate {
-            DOUBLE_SIGN | DEFAULT_QNAN
-        } else {
-            DEFAULT_QNAN
-        };
-        let fused_infinity_zero = used == 3 && {
-            let (p, q) = (class(0), class(1));
-            let zero_like = |c| matches!(c, IeeeClass::Zero | IeeeClass::Denormal);
-            (p == IeeeClass::Infinity && zero_like(q)) || (q == IeeeClass::Infinity && zero_like(p))
-        };
-        let invalid = if any(IeeeClass::Signaling) {
-            SET
-        } else if fused_infinity_zero {
-            if class(0) == IeeeClass::Denormal || class(1) == IeeeClass::Denormal {
-                Known::Open(Question::DoubleDenormalOperand)
-            } else {
-                Known::Open(Question::FusedInfinityZeroQnan)
-            }
-        } else if any(IeeeClass::Denormal) {
-            // [SPU-ISA p:199 s:9.2.2] an implementation that flushes a denormal input may set INV beside DENORM.
-            Known::Open(Question::DoubleDenormalOperand)
-        } else {
-            CLEAR
-        };
-        let denormal = if any(IeeeClass::Denormal) {
-            Known::Open(Question::DoubleDenormalOperand)
-        } else {
-            CLEAR
-        };
-        return DoubleOut {
-            pieces: vec![
-                ("nan", known_mask, Known::Value(DEFAULT_QNAN)),
-                (
-                    "payload",
-                    !known_mask,
-                    Known::Open(Question::DoubleNanResult),
-                ),
-            ],
-            flags: DoubleFlags::new([
-                CLEAR,
-                CLEAR,
-                CLEAR,
-                invalid,
-                Known::Open(Question::DoubleNanResult),
-                denormal,
-            ]),
-        };
+        return nan_input_out(&decoded, negate);
     }
     if any(IeeeClass::Denormal) {
-        let open = Known::Open(Question::DoubleDenormalOperand);
-        let mut flags = DoubleFlags::uniform(open);
-        flags.set(4, CLEAR);
-        return DoubleOut {
-            pieces: vec![("", u64::MAX, Known::Open(Question::DoubleDenormalOperand))],
-            flags,
-        };
+        return denormal_input_out();
     }
     let value = |i: usize| match decoded[i].0 {
         IeeeClass::Infinity => Value::Infinite(decoded[i].1.negative),
@@ -316,6 +262,73 @@ pub(crate) fn double_slot(op: Op, operands: [u64; 3], mode: Mode) -> DoubleOut {
         bits
     };
     DoubleOut::value(bits, DoubleFlags::new(flags))
+}
+
+/// The output of a slot with a NaN among its `decoded` operands.
+///
+/// [SPU-ISA p:197 s:9.2] a NaN input gives a QNaN: the default or an input NaN, the NaN flag marking the first.
+fn nan_input_out(decoded: &[(IeeeClass, Dyadic)], negate: bool) -> DoubleOut {
+    let class = |i: usize| decoded[i].0;
+    let any = |c: IeeeClass| decoded.iter().any(|(class, _)| *class == c);
+    let known_mask = if negate {
+        DOUBLE_SIGN | DEFAULT_QNAN
+    } else {
+        DEFAULT_QNAN
+    };
+    let fused_infinity_zero = decoded.len() == 3 && {
+        let (p, q) = (class(0), class(1));
+        let zero_like = |c| matches!(c, IeeeClass::Zero | IeeeClass::Denormal);
+        (p == IeeeClass::Infinity && zero_like(q)) || (q == IeeeClass::Infinity && zero_like(p))
+    };
+    let invalid = if any(IeeeClass::Signaling) {
+        SET
+    } else if fused_infinity_zero {
+        if class(0) == IeeeClass::Denormal || class(1) == IeeeClass::Denormal {
+            Known::Open(Question::DoubleDenormalOperand)
+        } else {
+            Known::Open(Question::FusedInfinityZeroQnan)
+        }
+    } else if any(IeeeClass::Denormal) {
+        // [SPU-ISA p:199 s:9.2.2] an implementation that flushes a denormal input may set INV beside DENORM.
+        Known::Open(Question::DoubleDenormalOperand)
+    } else {
+        CLEAR
+    };
+    let denormal = if any(IeeeClass::Denormal) {
+        Known::Open(Question::DoubleDenormalOperand)
+    } else {
+        CLEAR
+    };
+    DoubleOut {
+        pieces: vec![
+            ("nan", known_mask, Known::Value(DEFAULT_QNAN)),
+            (
+                "payload",
+                !known_mask,
+                Known::Open(Question::DoubleNanResult),
+            ),
+        ],
+        flags: DoubleFlags::new([
+            CLEAR,
+            CLEAR,
+            CLEAR,
+            invalid,
+            Known::Open(Question::DoubleNanResult),
+            denormal,
+        ]),
+    }
+}
+
+/// The output of a slot with a denormal operand and no NaN. The
+/// documents leave the whole result and every flag but NaN open.
+fn denormal_input_out() -> DoubleOut {
+    let open = Known::Open(Question::DoubleDenormalOperand);
+    let mut flags = DoubleFlags::uniform(open);
+    flags.set(4, CLEAR);
+    DoubleOut {
+        pieces: vec![("", u64::MAX, Known::Open(Question::DoubleDenormalOperand))],
+        flags,
+    }
 }
 
 /// frds of one doubleword.
