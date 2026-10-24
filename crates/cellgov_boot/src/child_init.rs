@@ -11,13 +11,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use cellgov_core::Runtime;
+use cellgov_core::{PendingChildInit, Runtime};
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 
-use crate::prx::{
-    run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PrxLoadInfo, TlsArea,
-};
+use crate::prx::{run_module_start_batch, ModuleStartEnv, ModuleStartError, PrxLoadInfo, TlsArea};
 use crate::BootSink;
 
 /// Why a spawned child's init pass did not finish.
@@ -105,120 +103,126 @@ pub(crate) fn run_pending_child_inits(
                 token: pending.init_token,
             });
         };
-        let modules_total = plan
-            .prx_modules
-            .iter()
-            .filter(|p| p.module_start.is_some())
-            .count();
-        sink.note(&format!(
-            "child module_start: pid=0x{:08x} space={} modules={} ({} with module_start)",
-            pending.pid,
-            pending.space.raw(),
-            plan.prx_modules.len(),
-            modules_total,
-        ));
-
-        // A PPU thread waiting for a PPE hardware thread is held too: the
-        // child's module_starts would otherwise free one for it.
-        let held: Vec<(UnitId, Option<UnitStatus>)> = rt
-            .registry()
-            .ids()
-            .filter(|&id| {
-                id != pending.primary_unit
-                    && (rt.registry().effective_status(id) == Some(UnitStatus::Runnable)
-                        || rt.registry().is_off_core(id))
-            })
-            .map(|id| (id, rt.registry().status_override(id)))
-            .collect();
-        for &(id, _) in &held {
-            rt.set_unit_status_override(id, UnitStatus::Blocked);
-        }
-
-        let env = ModuleStartEnv {
-            space: pending.space,
-            thread_owner: pending.primary_unit,
-            pid: Some(pending.pid),
-            tls: plan.tls,
-            stack_pointer: plan.stack_pointer,
-            break_pc: None,
-            dump_mem_fault_ranges: Vec::new(),
-            run_hle_stubbed: plan.run_hle_stubbed,
-            sink: Rc::clone(sink),
-            ppu_tap: plan.ppu_tap.clone(),
-        };
-        let mut completed: usize = 0;
-        let mut faulted: Vec<String> = Vec::new();
-        let mut fatal: Option<ModuleStartError> = None;
-        for info in &plan.prx_modules {
-            match run_module_start(rt, info, &env) {
-                Ok(ModuleStartOutcome::Completed { .. }) | Ok(ModuleStartOutcome::HleStubbed) => {
-                    completed += 1;
-                }
-                Ok(ModuleStartOutcome::Skipped) => {}
-                Err(ModuleStartError::Faulted { module, .. }) => faulted.push(module),
-                Err(e) => {
-                    fatal = Some(e);
-                    break;
-                }
-            }
-        }
-
-        for (id, prior) in held {
-            match prior {
-                Some(status) => rt.set_unit_status_override(id, status),
-                None => rt.clear_unit_status_override(id),
-            }
-        }
-        if let Some(source) = fatal {
-            return Err(ChildInitError::ModuleStart {
-                pid: pending.pid,
-                source: Box::new(source),
-            });
-        }
-        rt.release_child_init(pending.primary_unit);
-
-        if !faulted.is_empty() {
-            sink.warn(&format!(
-                "BENCH_CHILD_MODULE_START_FAULTS: pid=0x{:08x} count={} modules={}",
-                pending.pid,
-                faulted.len(),
-                faulted.join(","),
-            ));
-        }
-        sink.note(&format!(
-            "child module_start: pid=0x{:08x} completed={completed} faulted={} of {modules_total}",
-            pending.pid,
-            faulted.len(),
-        ));
-        debug_assert_eq!(
-            completed + faulted.len(),
-            modules_total,
-            "child module_start: completed {completed} + faulted {} of {modules_total}",
-            faulted.len(),
-        );
-
-        // The child's modules are not entered in the process-shared
-        // PRX registry (keyed by stem, already holding the boot's set),
-        // so a by-path load from inside the child resolves against
-        // the boot's modules.
-        let real_modules = plan
-            .prx_modules
-            .iter()
-            .filter(|p| !p.stem.is_empty())
-            .count();
-        if real_modules > 0 {
-            rt.lv2_host_mut().log_invariant_break(
-                "process.child_prx_registry_shared",
-                format_args!(
-                    "pid 0x{:08x} loaded {real_modules} firmware module(s) into space {} \
-                     that the process-shared PRX registry and export map do not describe",
-                    pending.pid,
-                    pending.space.raw(),
-                ),
-            );
-        }
+        run_child_init(rt, &pending, plan, sink)?;
     }
     Ok(())
+}
+
+/// Run one parked child's `module_start`s with every other unit held,
+/// then release the child's primary.
+fn run_child_init(
+    rt: &mut Runtime,
+    pending: &PendingChildInit,
+    plan: ChildInitPlan,
+    sink: &Rc<dyn BootSink>,
+) -> Result<(), ChildInitError> {
+    let modules_total = plan
+        .prx_modules
+        .iter()
+        .filter(|p| p.module_start.is_some())
+        .count();
+    sink.note(&format!(
+        "child module_start: pid=0x{:08x} space={} modules={} ({} with module_start)",
+        pending.pid,
+        pending.space.raw(),
+        plan.prx_modules.len(),
+        modules_total,
+    ));
+
+    let held = hold_other_units(rt, pending.primary_unit);
+    let env = ModuleStartEnv {
+        space: pending.space,
+        thread_owner: pending.primary_unit,
+        pid: Some(pending.pid),
+        tls: plan.tls,
+        stack_pointer: plan.stack_pointer,
+        break_pc: None,
+        dump_mem_fault_ranges: Vec::new(),
+        run_hle_stubbed: plan.run_hle_stubbed,
+        sink: Rc::clone(sink),
+        ppu_tap: plan.ppu_tap.clone(),
+    };
+    let batch = run_module_start_batch(rt, &plan.prx_modules, &env);
+    restore_units(rt, held);
+    let (completed, faulted) = batch.map_err(|source| ChildInitError::ModuleStart {
+        pid: pending.pid,
+        source: Box::new(source),
+    })?;
+    rt.release_child_init(pending.primary_unit);
+
+    if !faulted.is_empty() {
+        sink.warn(&format!(
+            "BENCH_CHILD_MODULE_START_FAULTS: pid=0x{:08x} count={} modules={}",
+            pending.pid,
+            faulted.len(),
+            faulted.join(","),
+        ));
+    }
+    sink.note(&format!(
+        "child module_start: pid=0x{:08x} completed={completed} faulted={} of {modules_total}",
+        pending.pid,
+        faulted.len(),
+    ));
+    debug_assert_eq!(
+        completed + faulted.len(),
+        modules_total,
+        "child module_start: completed {completed} + faulted {} of {modules_total}",
+        faulted.len(),
+    );
+
+    // The child's modules are not entered in the process-shared
+    // PRX registry (keyed by stem, already holding the boot's set),
+    // so a by-path load from inside the child resolves against
+    // the boot's modules.
+    let real_modules = plan
+        .prx_modules
+        .iter()
+        .filter(|p| !p.stem.is_empty())
+        .count();
+    if real_modules > 0 {
+        rt.lv2_host_mut().log_invariant_break(
+            "process.child_prx_registry_shared",
+            format_args!(
+                "pid 0x{:08x} loaded {real_modules} firmware module(s) into space {} \
+                 that the process-shared PRX registry and export map do not describe",
+                pending.pid,
+                pending.space.raw(),
+            ),
+        );
+    }
+    Ok(())
+}
+
+/// Hold every runnable unit but `primary` Blocked, and return each held
+/// unit with the status override it had.
+///
+/// A PPU thread waiting for a PPE hardware thread is held too: the
+/// child's module_starts would otherwise free one for it.
+fn hold_other_units(rt: &mut Runtime, primary: UnitId) -> Vec<(UnitId, Option<UnitStatus>)> {
+    let held: Vec<(UnitId, Option<UnitStatus>)> = rt
+        .registry()
+        .ids()
+        .filter(|&id| {
+            id != primary
+                && (rt.registry().effective_status(id) == Some(UnitStatus::Runnable)
+                    || rt.registry().is_off_core(id))
+        })
+        .map(|id| (id, rt.registry().status_override(id)))
+        .collect();
+    for &(id, _) in &held {
+        rt.set_unit_status_override(id, UnitStatus::Blocked);
+    }
+    held
+}
+
+/// Give each held unit back the status override it had.
+fn restore_units(rt: &mut Runtime, held: Vec<(UnitId, Option<UnitStatus>)>) {
+    for (id, prior) in held {
+        match prior {
+            Some(status) => rt.set_unit_status_override(id, status),
+            None => rt.clear_unit_status_override(id),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ pub use load::{
     install_unresolved_trampolines_only, load_firmware_set_bound, load_firmware_set_from,
     FirmwareCandidates, FirmwareLoadError,
 };
+pub(crate) use module_start::run_module_start_batch;
 pub use module_start::{
     run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PER_MODULE_STEP_BUDGET,
 };

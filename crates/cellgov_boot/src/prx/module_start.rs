@@ -366,6 +366,38 @@ pub fn run_module_start(
     result.map(|steps| ModuleStartOutcome::Completed { steps })
 }
 
+/// Run each module's `module_start` in order, for the boot or for a
+/// spawned child. Returns the count that completed (an HLE-stubbed one
+/// counts) and the modules whose `module_start` faulted.
+///
+/// A guest fault leaves the module un-started and the process alive:
+/// the runner already tore the transient unit down (alias dropped, unit
+/// Faulted and skipped). The other error kinds can leave a parked unit
+/// behind, so they stop the batch.
+///
+/// # Errors
+///
+/// The first [`ModuleStartError`] other than `Faulted`.
+pub(crate) fn run_module_start_batch(
+    rt: &mut Runtime,
+    modules: &[PrxLoadInfo],
+    env: &ModuleStartEnv,
+) -> Result<(usize, Vec<String>), ModuleStartError> {
+    let mut completed: usize = 0;
+    let mut faulted: Vec<String> = Vec::new();
+    for info in modules {
+        match run_module_start(rt, info, env) {
+            Ok(ModuleStartOutcome::Completed { .. }) | Ok(ModuleStartOutcome::HleStubbed) => {
+                completed += 1;
+            }
+            Ok(ModuleStartOutcome::Skipped) => {}
+            Err(ModuleStartError::Faulted { module, .. }) => faulted.push(module),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok((completed, faulted))
+}
+
 /// Build the transient unit that runs `ms`, tag it to the module's
 /// space, alias it to its process's primary thread, and bind it to the
 /// process's pid.

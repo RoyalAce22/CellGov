@@ -1,9 +1,7 @@
 //! Running every loaded PRX's `module_start`.
 
 use super::types::{BootServices, DiagnosticOptions};
-use crate::prx::{
-    run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PrxLoadInfo, TlsArea,
-};
+use crate::prx::{run_module_start_batch, ModuleStartEnv, PrxLoadInfo, TlsArea};
 use crate::BootError;
 use cellgov_compare::BootOverrides;
 use cellgov_core::Runtime;
@@ -41,7 +39,7 @@ pub(super) struct ModuleStartCounts {
 ///
 /// # Errors
 ///
-/// Every [`ModuleStartError`] but `Faulted`, which leaves the module
+/// Every [`crate::prx::ModuleStartError`] but `Faulted`, which leaves the module
 /// un-started and the boot alive.
 pub(super) fn run_module_starts(
     rt: &mut Runtime,
@@ -51,7 +49,6 @@ pub(super) fn run_module_starts(
     services: &BootServices,
     primary: PrimaryThread,
 ) -> Result<ModuleStartCounts, BootError> {
-    let sink = services.sink();
     let total = prx_modules
         .iter()
         .filter(|p| p.module_start.is_some())
@@ -69,48 +66,7 @@ pub(super) fn run_module_starts(
         sink: std::rc::Rc::clone(&services.sink),
         ppu_tap: services.taps.ppu(),
     };
-    let (started, faulted) = match (prx_modules.is_empty(), skipped) {
-        (false, false) => {
-            let mut completed: usize = 0;
-            let mut faulted: Vec<String> = Vec::new();
-            for info in prx_modules {
-                match run_module_start(rt, info, &boot_env) {
-                    Ok(ModuleStartOutcome::Completed { .. })
-                    | Ok(ModuleStartOutcome::HleStubbed) => completed += 1,
-                    Ok(ModuleStartOutcome::Skipped) => {}
-                    // A guest fault leaves the module un-started and the
-                    // boot alive: the runner already tore the transient
-                    // unit down (alias dropped, unit Faulted and
-                    // skipped). The other error kinds can leave a parked
-                    // unit behind, so they stay fatal.
-                    Err(ModuleStartError::Faulted { module, .. }) => {
-                        faulted.push(module);
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-            }
-            if !faulted.is_empty() {
-                sink.warn(&format!(
-                    "BENCH_MODULE_START_FAULTS: count={} modules={}",
-                    faulted.len(),
-                    faulted.join(",")
-                ));
-            }
-            (completed, faulted.len())
-        }
-        (false, true) => {
-            sink.warn("module_start: skipped (boot override skip_module_start)");
-            (0, 0)
-        }
-        (true, true) => {
-            sink.warn(
-                "module_start: boot override skip_module_start set, but no PRX was loaded -- \
-                 it has no effect",
-            );
-            (0, 0)
-        }
-        (true, false) => (0, 0),
-    };
+    let (started, faulted) = start_boot_modules(rt, prx_modules, &boot_env, skipped)?;
 
     // Override holds for the duration of the module_start loop: the
     // unit's own status is still Runnable, but effective_status must
@@ -127,4 +83,35 @@ pub(super) fn run_module_starts(
         faulted,
         skipped,
     })
+}
+
+/// Run the boot's `module_start` batch unless the `skip_module_start`
+/// override suppresses it. Returns the completed and faulted counts.
+fn start_boot_modules(
+    rt: &mut Runtime,
+    prx_modules: &[PrxLoadInfo],
+    env: &ModuleStartEnv,
+    skipped: bool,
+) -> Result<(usize, usize), BootError> {
+    let sink = env.sink.as_ref();
+    if skipped {
+        if prx_modules.is_empty() {
+            sink.warn(
+                "module_start: boot override skip_module_start set, but no PRX was loaded -- \
+                 it has no effect",
+            );
+        } else {
+            sink.warn("module_start: skipped (boot override skip_module_start)");
+        }
+        return Ok((0, 0));
+    }
+    let (completed, faulted) = run_module_start_batch(rt, prx_modules, env)?;
+    if !faulted.is_empty() {
+        sink.warn(&format!(
+            "BENCH_MODULE_START_FAULTS: count={} modules={}",
+            faulted.len(),
+            faulted.join(",")
+        ));
+    }
+    Ok((completed, faulted.len()))
 }
