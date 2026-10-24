@@ -203,18 +203,7 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
 
     // Every table pointer below is a relocation target, so the walk
     // reads the resolved image.
-    let image = crate::sprx::relocated_pointer_image(data).map_err(|error| match error {
-        crate::sprx::RelocatedPointerError::OutOfBounds => ImportParseError::OutOfBounds,
-        crate::sprx::RelocatedPointerError::BadPhentsize { phentsize } => {
-            ImportParseError::BadPhentsize { phentsize }
-        }
-        crate::sprx::RelocatedPointerError::RelocPatchMisaligned { offset } => {
-            ImportParseError::RelocPatchMisaligned { offset }
-        }
-        crate::sprx::RelocatedPointerError::RelocOverflow { value } => {
-            ImportParseError::RelocOverflow { value }
-        }
-    })?;
+    let image = crate::sprx::relocated_pointer_image(data).map_err(map_reloc_error)?;
     let data: &[u8] = &image;
 
     let (imports_table_start_vaddr, imports_table_end_vaddr) =
@@ -232,162 +221,29 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
     let mut modules = Vec::new();
     let mut addr_vaddr = imports_table_start_vaddr;
     while addr_vaddr < imports_table_end_vaddr {
-        let foff =
-            vaddr_to_file(&segments, addr_vaddr as usize).ok_or(ImportParseError::OutOfBounds)?;
-        if foff >= data.len() {
-            return Err(ImportParseError::OutOfBounds);
-        }
-
-        let entry_size_byte = data[foff + PRX_IMPORT_SIZE_OFFSET];
-        if entry_size_byte < PRX_IMPORT_ENTRY_MIN_SIZE {
-            return Err(ImportParseError::EntryTooSmall {
-                declared: entry_size_byte,
-            });
-        }
-        let entry_size = entry_size_byte as usize;
-        let entry_end_file = foff
-            .checked_add(entry_size)
-            .ok_or(ImportParseError::OutOfBounds)?;
-        if entry_end_file > data.len() {
-            return Err(ImportParseError::OutOfBounds);
-        }
-        let entry_end_vaddr = addr_vaddr
-            .checked_add(entry_size as u32)
-            .ok_or(ImportParseError::OutOfBounds)?;
-        if entry_end_vaddr > imports_table_end_vaddr {
-            return Err(ImportParseError::EntryPastImportsTable {
-                entry_start: addr_vaddr,
-                entry_size: entry_size as u32,
-                imports_table_end: imports_table_end_vaddr,
-            });
-        }
-
-        let function_count = loader::read_u16(data, foff + PRX_IMPORT_NUM_FUNC_OFFSET);
-        let name_ptr = loader::read_u32(data, foff + PRX_IMPORT_NAME_PTR_OFFSET);
-        let nid_ptr = loader::read_u32(data, foff + PRX_IMPORT_NIDS_PTR_OFFSET);
-        let stub_ptr = loader::read_u32(data, foff + PRX_IMPORT_STUB_PTR_OFFSET);
-
-        // Variable imports are only present when the declared entry
-        // size covers the `vstubs_ptr` field. Older 28-byte (`0x1C`)
-        // entries have function imports only.
-        let has_variables = entry_size as u8 >= PRX_IMPORT_ENTRY_VAR_MIN_SIZE;
-        let variable_count = if has_variables {
-            loader::read_u16(data, foff + PRX_IMPORT_NUM_VAR_OFFSET)
-        } else {
-            0
-        };
-        let vnid_ptr = if has_variables {
-            loader::read_u32(data, foff + PRX_IMPORT_VNIDS_PTR_OFFSET)
-        } else {
-            0
-        };
-        let vstub_ptr = if has_variables {
-            loader::read_u32(data, foff + PRX_IMPORT_VSTUBS_PTR_OFFSET)
-        } else {
-            0
-        };
-
-        let name = read_cstring(data, &segments, name_ptr)?;
-
-        let mut functions = Vec::with_capacity(function_count as usize);
-        if function_count > 0 {
-            // Both tables must lie wholly inside one PT_LOAD; the
-            // binder would otherwise patch across a segment boundary.
-            validate_stub_ptr_range(&segments, nid_ptr, function_count).ok_or(
-                ImportParseError::InvalidNidPtr {
-                    vaddr: nid_ptr,
-                    function_count,
-                },
-            )?;
-            validate_stub_ptr_range(&segments, stub_ptr, function_count).ok_or(
-                ImportParseError::InvalidStubPtr {
-                    vaddr: stub_ptr,
-                    function_count,
-                },
-            )?;
-
-            for i in 0..function_count {
-                let element_vaddr = nid_ptr
-                    .checked_add(u32::from(i).checked_mul(4).ok_or(
-                        ImportParseError::InvalidNidPtr {
-                            vaddr: nid_ptr,
-                            function_count,
-                        },
-                    )?)
-                    .ok_or(ImportParseError::InvalidNidPtr {
-                        vaddr: nid_ptr,
-                        function_count,
-                    })?;
-                let nid_foff = vaddr_to_file(&segments, element_vaddr as usize).ok_or(
-                    ImportParseError::InvalidNidPtr {
-                        vaddr: nid_ptr,
-                        function_count,
-                    },
-                )?;
-                if nid_foff.checked_add(4).is_none_or(|end| end > data.len()) {
-                    return Err(ImportParseError::InvalidNidPtr {
-                        vaddr: nid_ptr,
-                        function_count,
-                    });
-                }
-                let nid = loader::read_u32(data, nid_foff);
-                let stub_addr = stub_ptr.checked_add(u32::from(i) * 4).ok_or(
-                    ImportParseError::InvalidStubPtr {
-                        vaddr: stub_ptr,
-                        function_count,
-                    },
-                )?;
-                functions.push(ImportedFunction { nid, stub_addr });
-            }
-        }
-
-        let mut variables = Vec::with_capacity(variable_count as usize);
-        if variable_count > 0 {
-            // The vnids and vstubs tables must each lie wholly inside
-            // one PT_LOAD (same constraint as the function tables);
-            // a slot the binder writes across a segment boundary is a
-            // hard error.
-            validate_stub_ptr_range(&segments, vnid_ptr, variable_count).ok_or(
-                ImportParseError::InvalidNidPtr {
-                    vaddr: vnid_ptr,
-                    function_count: variable_count,
-                },
-            )?;
-            validate_stub_ptr_range(&segments, vstub_ptr, variable_count).ok_or(
-                ImportParseError::InvalidStubPtr {
-                    vaddr: vstub_ptr,
-                    function_count: variable_count,
-                },
-            )?;
-            for i in 0..variable_count {
-                let nid_vaddr = vnid_ptr.checked_add(u32::from(i) * 4).ok_or(
-                    ImportParseError::InvalidNidPtr {
-                        vaddr: vnid_ptr,
-                        function_count: variable_count,
-                    },
-                )?;
-                let nid_foff = vaddr_to_file(&segments, nid_vaddr as usize).ok_or(
-                    ImportParseError::InvalidNidPtr {
-                        vaddr: vnid_ptr,
-                        function_count: variable_count,
-                    },
-                )?;
-                if nid_foff.checked_add(4).is_none_or(|end| end > data.len()) {
-                    return Err(ImportParseError::InvalidNidPtr {
-                        vaddr: vnid_ptr,
-                        function_count: variable_count,
-                    });
-                }
-                let vnid = loader::read_u32(data, nid_foff);
-                let vref_addr = vstub_ptr.checked_add(u32::from(i) * 4).ok_or(
-                    ImportParseError::InvalidStubPtr {
-                        vaddr: vstub_ptr,
-                        function_count: variable_count,
-                    },
-                )?;
-                variables.push(ImportedVariable { vnid, vref_addr });
-            }
-        }
+        let (entry, entry_end_vaddr) =
+            read_import_entry(data, &segments, addr_vaddr, imports_table_end_vaddr)?;
+        let name = read_cstring(data, &segments, entry.name_ptr)?;
+        let functions = read_nid_stub_table(
+            data,
+            &segments,
+            entry.nid_ptr,
+            entry.stub_ptr,
+            entry.function_count,
+        )?
+        .into_iter()
+        .map(|(nid, stub_addr)| ImportedFunction { nid, stub_addr })
+        .collect();
+        let variables = read_nid_stub_table(
+            data,
+            &segments,
+            entry.vnid_ptr,
+            entry.vstub_ptr,
+            entry.variable_count,
+        )?
+        .into_iter()
+        .map(|(vnid, vref_addr)| ImportedVariable { vnid, vref_addr })
+        .collect();
 
         modules.push(ImportedModule {
             name,
@@ -398,6 +254,151 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
     }
 
     Ok(modules)
+}
+
+/// The import-parse error for a relocated-image failure.
+fn map_reloc_error(error: crate::sprx::RelocatedPointerError) -> ImportParseError {
+    match error {
+        crate::sprx::RelocatedPointerError::OutOfBounds => ImportParseError::OutOfBounds,
+        crate::sprx::RelocatedPointerError::BadPhentsize { phentsize } => {
+            ImportParseError::BadPhentsize { phentsize }
+        }
+        crate::sprx::RelocatedPointerError::RelocPatchMisaligned { offset } => {
+            ImportParseError::RelocPatchMisaligned { offset }
+        }
+        crate::sprx::RelocatedPointerError::RelocOverflow { value } => {
+            ImportParseError::RelocOverflow { value }
+        }
+    }
+}
+
+/// The fields of one import entry the walk reads.
+///
+/// An entry too small to cover `vstubs_ptr` has no variable section; its
+/// variable fields read zero.
+struct ImportEntryHeader {
+    function_count: u16,
+    name_ptr: u32,
+    nid_ptr: u32,
+    stub_ptr: u32,
+    variable_count: u16,
+    vnid_ptr: u32,
+    vstub_ptr: u32,
+}
+
+/// Decodes the import entry at `addr_vaddr` and returns it with the
+/// v-addr of the entry after it. The entry must end at or before
+/// `table_end`.
+fn read_import_entry(
+    data: &[u8],
+    segments: &[Segment],
+    addr_vaddr: u32,
+    table_end: u32,
+) -> Result<(ImportEntryHeader, u32), ImportParseError> {
+    let foff = vaddr_to_file(segments, addr_vaddr as usize).ok_or(ImportParseError::OutOfBounds)?;
+    if foff >= data.len() {
+        return Err(ImportParseError::OutOfBounds);
+    }
+
+    let entry_size_byte = data[foff + PRX_IMPORT_SIZE_OFFSET];
+    if entry_size_byte < PRX_IMPORT_ENTRY_MIN_SIZE {
+        return Err(ImportParseError::EntryTooSmall {
+            declared: entry_size_byte,
+        });
+    }
+    let entry_size = entry_size_byte as usize;
+    let entry_end_file = foff
+        .checked_add(entry_size)
+        .ok_or(ImportParseError::OutOfBounds)?;
+    if entry_end_file > data.len() {
+        return Err(ImportParseError::OutOfBounds);
+    }
+    let entry_end_vaddr = addr_vaddr
+        .checked_add(entry_size as u32)
+        .ok_or(ImportParseError::OutOfBounds)?;
+    if entry_end_vaddr > table_end {
+        return Err(ImportParseError::EntryPastImportsTable {
+            entry_start: addr_vaddr,
+            entry_size: entry_size as u32,
+            imports_table_end: table_end,
+        });
+    }
+
+    // Variable imports are only present when the declared entry
+    // size covers the `vstubs_ptr` field. Older 28-byte (`0x1C`)
+    // entries have function imports only.
+    let has_variables = entry_size as u8 >= PRX_IMPORT_ENTRY_VAR_MIN_SIZE;
+    let var_u16 = |offset| {
+        if has_variables {
+            loader::read_u16(data, foff + offset)
+        } else {
+            0
+        }
+    };
+    let var_u32 = |offset| {
+        if has_variables {
+            loader::read_u32(data, foff + offset)
+        } else {
+            0
+        }
+    };
+    let header = ImportEntryHeader {
+        function_count: loader::read_u16(data, foff + PRX_IMPORT_NUM_FUNC_OFFSET),
+        name_ptr: loader::read_u32(data, foff + PRX_IMPORT_NAME_PTR_OFFSET),
+        nid_ptr: loader::read_u32(data, foff + PRX_IMPORT_NIDS_PTR_OFFSET),
+        stub_ptr: loader::read_u32(data, foff + PRX_IMPORT_STUB_PTR_OFFSET),
+        variable_count: var_u16(PRX_IMPORT_NUM_VAR_OFFSET),
+        vnid_ptr: var_u32(PRX_IMPORT_VNIDS_PTR_OFFSET),
+        vstub_ptr: var_u32(PRX_IMPORT_VSTUBS_PTR_OFFSET),
+    };
+    Ok((header, entry_end_vaddr))
+}
+
+/// Reads `count` (id, slot address) pairs from an id table at `nid_ptr`
+/// and the parallel table of 4-byte slots at `stub_ptr`.
+///
+/// Function and variable imports share this shape. A failure in the id
+/// table is `InvalidNidPtr`, one in the slot table `InvalidStubPtr`, and
+/// the walk checks the id table first.
+fn read_nid_stub_table(
+    data: &[u8],
+    segments: &[Segment],
+    nid_ptr: u32,
+    stub_ptr: u32,
+    count: u16,
+) -> Result<Vec<(u32, u32)>, ImportParseError> {
+    let mut entries = Vec::with_capacity(count as usize);
+    if count == 0 {
+        return Ok(entries);
+    }
+    let bad_nid = ImportParseError::InvalidNidPtr {
+        vaddr: nid_ptr,
+        function_count: count,
+    };
+    let bad_stub = ImportParseError::InvalidStubPtr {
+        vaddr: stub_ptr,
+        function_count: count,
+    };
+    // Both tables must lie wholly inside one PT_LOAD; the binder
+    // would otherwise patch across a segment boundary.
+    validate_stub_ptr_range(segments, nid_ptr, count).ok_or_else(|| bad_nid.clone())?;
+    validate_stub_ptr_range(segments, stub_ptr, count).ok_or_else(|| bad_stub.clone())?;
+
+    for i in 0..count {
+        // A u16 index times 4 fits u32.
+        let offset = u32::from(i) * 4;
+        let nid_foff = nid_ptr
+            .checked_add(offset)
+            .and_then(|vaddr| vaddr_to_file(segments, vaddr as usize))
+            .filter(|foff| foff.checked_add(4).is_some_and(|end| end <= data.len()))
+            .ok_or_else(|| bad_nid.clone())?;
+        let nid = loader::read_u32(data, nid_foff);
+        let stub_addr = stub_ptr
+            .checked_add(offset)
+            .ok_or_else(|| bad_stub.clone())?;
+        entries.push((nid, stub_addr));
+    }
+    Ok(entries)
 }
 
 /// Human-readable one-line-per-module summary for diagnostics.
