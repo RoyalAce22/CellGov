@@ -226,75 +226,74 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
             }
         };
-        match release {
+        let new_owner = match release {
             crate::sync_primitives::MutexRelease::Unknown => {
-                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
             crate::sync_primitives::MutexRelease::NotOwner => {
-                Lv2Dispatch::immediate(errno::CELL_EPERM.into())
+                return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
             }
-            crate::sync_primitives::MutexRelease::Freed => {
-                match self.state.conds.enqueue_waiter(id, caller) {
-                    Ok(()) => {}
-                    Err(crate::sync_primitives::CondEnqueueError::UnknownId) => {
-                        return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
-                    }
-                    Err(crate::sync_primitives::CondEnqueueError::DuplicateWaiter) => {
-                        self.record_invariant_break(
-                            "cond_wait.Freed.DuplicateWaiter",
-                            format_args!("cond {id}: caller {caller:?} already on waiter list"),
-                        );
-                        return Lv2Dispatch::immediate(errno::CELL_EDEADLK.into());
-                    }
-                }
-                self.note_cond_park_after_seed(id);
-                Lv2Dispatch::Block {
-                    reason: crate::dispatch::Lv2BlockReason::Cond {
-                        id,
-                        mutex_id,
-                        mutex_kind,
-                    },
-                    pending: PendingResponse::CondWakeReacquire {
-                        mutex_id,
-                        mutex_kind,
-                    },
-                    effects: vec![],
-                }
+            crate::sync_primitives::MutexRelease::Freed => None,
+            crate::sync_primitives::MutexRelease::Transferred { new_owner } => Some(new_owner),
+        };
+        let duplicate_site = if new_owner.is_some() {
+            "cond_wait.Transferred.DuplicateWaiter"
+        } else {
+            "cond_wait.Freed.DuplicateWaiter"
+        };
+        if let Err(code) = self.cond_park_caller(id, caller, duplicate_site) {
+            return Lv2Dispatch::immediate(code);
+        }
+        self.note_cond_park_after_seed(id);
+        let reason = crate::dispatch::Lv2BlockReason::Cond {
+            id,
+            mutex_id,
+            mutex_kind,
+        };
+        let pending = PendingResponse::CondWakeReacquire {
+            mutex_id,
+            mutex_kind,
+        };
+        let Some(new_owner) = new_owner else {
+            return Lv2Dispatch::Block {
+                reason,
+                pending,
+                effects: vec![],
+            };
+        };
+        let woken_unit_ids = self
+            .resolve_wake_thread(new_owner, "cond_wait.Transferred.new_owner")
+            .into_iter()
+            .collect();
+        Lv2Dispatch::BlockAndWake {
+            reason,
+            pending,
+            woken_unit_ids,
+            response_updates: vec![],
+            effects: vec![],
+        }
+    }
+
+    /// Put `caller` on cond `id`'s waiter list, or answer the errno the
+    /// wait returns. `duplicate_site` names the invariant break for a
+    /// caller already on the list.
+    fn cond_park_caller(
+        &mut self,
+        id: u32,
+        caller: PpuThreadId,
+        duplicate_site: &'static str,
+    ) -> Result<(), u64> {
+        match self.state.conds.enqueue_waiter(id, caller) {
+            Ok(()) => Ok(()),
+            Err(crate::sync_primitives::CondEnqueueError::UnknownId) => {
+                Err(errno::CELL_ESRCH.into())
             }
-            crate::sync_primitives::MutexRelease::Transferred { new_owner } => {
-                match self.state.conds.enqueue_waiter(id, caller) {
-                    Ok(()) => {}
-                    Err(crate::sync_primitives::CondEnqueueError::UnknownId) => {
-                        return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
-                    }
-                    Err(crate::sync_primitives::CondEnqueueError::DuplicateWaiter) => {
-                        self.record_invariant_break(
-                            "cond_wait.Transferred.DuplicateWaiter",
-                            format_args!("cond {id}: caller {caller:?} already on waiter list"),
-                        );
-                        return Lv2Dispatch::immediate(errno::CELL_EDEADLK.into());
-                    }
-                }
-                self.note_cond_park_after_seed(id);
-                let woken_unit_ids =
-                    match self.resolve_wake_thread(new_owner, "cond_wait.Transferred.new_owner") {
-                        Some(unit) => vec![unit],
-                        None => vec![],
-                    };
-                Lv2Dispatch::BlockAndWake {
-                    reason: crate::dispatch::Lv2BlockReason::Cond {
-                        id,
-                        mutex_id,
-                        mutex_kind,
-                    },
-                    pending: PendingResponse::CondWakeReacquire {
-                        mutex_id,
-                        mutex_kind,
-                    },
-                    woken_unit_ids,
-                    response_updates: vec![],
-                    effects: vec![],
-                }
+            Err(crate::sync_primitives::CondEnqueueError::DuplicateWaiter) => {
+                self.record_invariant_break(
+                    duplicate_site,
+                    format_args!("cond {id}: caller {caller:?} already on waiter list"),
+                );
+                Err(errno::CELL_EDEADLK.into())
             }
         }
     }
@@ -323,43 +322,18 @@ impl Lv2Host {
             let Some(unit) = self.resolve_wake_thread(waker, "cond_signal_all.waker") else {
                 continue;
             };
-            match self.state.mutexes.try_acquire(mutex_id, waker) {
-                Some(crate::sync_primitives::MutexAcquire::Acquired) => {
-                    wake_with(unit, 0u64, &mut woken_unit_ids, &mut response_updates);
-                }
-                Some(crate::sync_primitives::MutexAcquire::Contended) => {
-                    match self.state.mutexes.enqueue_waiter(mutex_id, waker) {
-                        Ok(()) => response_updates
-                            .push((unit, PendingResponse::ReturnCode { code: 0u64 })),
-                        Err(err) => {
-                            self.record_invariant_break(
-                                "cond_signal_all.Contended.enqueue",
-                                format_args!(
-                                    "enqueue_waiter failed for mutex {mutex_id} waker \
-                                     {waker:?}: {err:?}; waking with ESRCH to avoid stranding"
-                                ),
-                            );
-                            wake_with(
-                                unit,
-                                errno::CELL_ESRCH.into(),
-                                &mut woken_unit_ids,
-                                &mut response_updates,
-                            );
-                        }
-                    }
-                }
-                None => {
-                    self.record_invariant_break(
-                        "cond_signal_all.DestroyedMutex",
-                        format_args!("cond waiter {waker:?} references destroyed mutex {mutex_id}"),
-                    );
-                    wake_with(
-                        unit,
-                        errno::CELL_ESRCH.into(),
-                        &mut woken_unit_ids,
-                        &mut response_updates,
-                    );
-                }
+            let (code, woken) = self.cond_reacquire_outcome(
+                waker,
+                mutex_id,
+                ReacquireSites {
+                    enqueue: "cond_signal_all.Contended.enqueue",
+                    destroyed: "cond_signal_all.DestroyedMutex",
+                },
+            );
+            if woken {
+                wake_with(unit, code, &mut woken_unit_ids, &mut response_updates);
+            } else {
+                response_updates.push((unit, PendingResponse::ReturnCode { code }));
             }
         }
         Lv2Dispatch::WakeAndReturn {
@@ -435,32 +409,61 @@ impl Lv2Host {
         let Some(waker_unit) = self.resolve_wake_thread(waker, "cond_reacquire_wake") else {
             return Lv2Dispatch::immediate(0u64);
         };
+        let (code, woken) = self.cond_reacquire_outcome(
+            waker,
+            mutex_id,
+            ReacquireSites {
+                enqueue: "cond_reacquire_wake.Contended.enqueue",
+                destroyed: "cond_reacquire_wake.DestroyedMutex",
+            },
+        );
+        cond_wake_dispatch(waker_unit, code, woken)
+    }
+
+    /// Re-acquire mutex `mutex_id` for the signalled cond waiter `waker`.
+    ///
+    /// Returns the code the wait returns and whether the waiter wakes
+    /// now. A waiter that does not wake waits on the mutex. A waiter
+    /// that the mutex cannot take wakes with ESRCH, so no waiter stays
+    /// asleep with no wake to come.
+    fn cond_reacquire_outcome(
+        &mut self,
+        waker: PpuThreadId,
+        mutex_id: u32,
+        sites: ReacquireSites,
+    ) -> (u64, bool) {
         match self.state.mutexes.try_acquire(mutex_id, waker) {
-            Some(crate::sync_primitives::MutexAcquire::Acquired) => {
-                cond_wake_dispatch(waker_unit, 0u64, true)
-            }
+            Some(crate::sync_primitives::MutexAcquire::Acquired) => (0, true),
             Some(crate::sync_primitives::MutexAcquire::Contended) => {
-                if let Err(err) = self.state.mutexes.enqueue_waiter(mutex_id, waker) {
-                    self.record_invariant_break(
-                        "cond_reacquire_wake.Contended.enqueue",
-                        format_args!(
-                            "enqueue_waiter failed for mutex {mutex_id} waker {waker:?}: \
-                             {err:?}; waking with ESRCH to avoid stranding"
-                        ),
-                    );
-                    return cond_wake_dispatch(waker_unit, errno::CELL_ESRCH.into(), true);
-                }
-                cond_wake_dispatch(waker_unit, 0u64, false)
+                let Err(err) = self.state.mutexes.enqueue_waiter(mutex_id, waker) else {
+                    return (0, false);
+                };
+                self.record_invariant_break(
+                    sites.enqueue,
+                    format_args!(
+                        "enqueue_waiter failed for mutex {mutex_id} waker {waker:?}: \
+                         {err:?}; waking with ESRCH to avoid stranding"
+                    ),
+                );
+                (errno::CELL_ESRCH.into(), true)
             }
             None => {
                 self.record_invariant_break(
-                    "cond_reacquire_wake.DestroyedMutex",
+                    sites.destroyed,
                     format_args!("cond waiter {waker:?} references destroyed mutex {mutex_id}"),
                 );
-                cond_wake_dispatch(waker_unit, errno::CELL_ESRCH.into(), true)
+                (errno::CELL_ESRCH.into(), true)
             }
         }
     }
+}
+
+/// The invariant-break labels one cond re-acquire site reports under.
+struct ReacquireSites {
+    /// A contended mutex that refused the waiter.
+    enqueue: &'static str,
+    /// A mutex that no longer exists.
+    destroyed: &'static str,
 }
 
 /// Effective ipc_key from a [`cond_attribute`] block: its `ipc_key`
