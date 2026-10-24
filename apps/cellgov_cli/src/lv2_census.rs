@@ -14,8 +14,10 @@ use cellgov_lv2_archive::{
     KERNEL, STUB, SUBENTRY,
 };
 use cellgov_ppu::lv2_gate::{self, Lv2Gate, Lv2GateRead};
-use cellgov_ppu::lv2_stub::Lv2OrdinalClass;
-use cellgov_ppu::lv2_subdispatch::{self, Lv2Subdispatch, Lv2SubdispatchError, Lv2SubentryClass};
+use cellgov_ppu::lv2_stub::{Lv2OrdinalClass, Lv2StubClassification};
+use cellgov_ppu::lv2_subdispatch::{
+    self, Lv2Subdispatch, Lv2SubdispatchClassification, Lv2SubdispatchError, Lv2SubentryClass,
+};
 
 use crate::cli::exit::CommandError;
 use crate::cli::parse::Lv2CensusArgs;
@@ -102,30 +104,8 @@ fn emit(args: &Lv2CensusArgs, elf: &[u8]) -> Result<EmitSummary, Lv2CensusError>
 
     let subdispatch = lv2_subdispatch::classify(elf)?;
     let classification = &subdispatch.top_level;
-    let census_rows: Vec<CensusRow> = classification
-        .ordinals
-        .iter()
-        .map(|entry| CensusRow {
-            fw: args.fw.clone(),
-            ordinal: entry.ordinal,
-            class: match entry.class {
-                Lv2OrdinalClass::Implemented => CensusClass::Implemented,
-                Lv2OrdinalClass::Stub => CensusClass::Stub,
-                Lv2OrdinalClass::Absent => CensusClass::Absent,
-            },
-            target: entry.code,
-            dispatch: match subdispatch.ordinals.get(&entry.ordinal) {
-                Some(Lv2Subdispatch::Table { .. }) => DispatchShape::Subtable,
-                Some(Lv2Subdispatch::ChainIncomplete { .. }) => DispatchShape::ChainIncomplete,
-                None => DispatchShape::Flat,
-            },
-        })
-        .collect();
-    let census_text =
-        archive::census_tsv(&census_rows).map_err(|source| Lv2CensusError::Render {
-            table: CENSUS.name,
-            source,
-        })?;
+    let census_rows = census_rows(&args.fw, &subdispatch);
+    let census_text = render(&CENSUS, archive::census_tsv(&census_rows))?;
     let census_sha256 = sha256_hex(census_text.as_bytes());
 
     let new_subentries = build_subentry_rows(&args.pup_sha256, &subdispatch.ordinals);
@@ -141,37 +121,21 @@ fn emit(args: &Lv2CensusArgs, elf: &[u8]) -> Result<EmitSummary, Lv2CensusError>
         .count();
     let mut existing = load_existing(&args.output_dir)?;
     archive::validate_existing(&existing, &pups, &sha256_hex)?;
-    let new_kernel = KernelRow {
-        pup_sha256: args.pup_sha256.clone(),
-        kernel_elf_sha256: sha256_hex(elf),
-        table_base: classification.discovery.table_vaddr,
-        entry_width: classification.discovery.entry_width,
-        entry_format: classification.discovery.entry_format.as_str().to_string(),
-        entry_count: classification.discovery.entry_count,
-        discovery_method: classification.discovery.method.as_str().to_string(),
-        confidence: classification.discovery.confidence.as_str().to_string(),
-        census_sha256,
-        subentry_sha256,
-        gate_sha256,
-    };
-    let new_stubs: Vec<StubRow> = classification
-        .stub_targets
-        .iter()
-        .map(|stub| StubRow {
-            pup_sha256: args.pup_sha256.clone(),
-            descriptor: stub.descriptor,
-            target: stub.code,
-            errno: stub.errno,
-            errno_symbol: stub.errno_symbol.to_string(),
-            references: stub.references,
-            primary: stub.descriptor == classification.primary_stub.descriptor,
-        })
-        .collect();
+    let new_kernel = kernel_row(
+        &args.pup_sha256,
+        elf,
+        classification,
+        TableDigests {
+            census_sha256,
+            subentry_sha256,
+            gate_sha256,
+        },
+    );
     let removed_pups = archive::merge_extraction(
         &mut existing,
         PupExtraction {
             kernel: new_kernel,
-            stubs: new_stubs,
+            stubs: stub_rows(&args.pup_sha256, classification),
             subentries: new_subentries,
             gates: new_gates,
         },
@@ -180,26 +144,10 @@ fn emit(args: &Lv2CensusArgs, elf: &[u8]) -> Result<EmitSummary, Lv2CensusError>
         args.replace_version,
     )
     .map_err(merge_refusal)?;
-    let kernel_text =
-        archive::kernel_tsv(&existing.kernels).map_err(|source| Lv2CensusError::Render {
-            table: KERNEL.name,
-            source,
-        })?;
-    let stub_text =
-        archive::stub_tsv(&existing.stubs).map_err(|source| Lv2CensusError::Render {
-            table: STUB.name,
-            source,
-        })?;
-    let subentry_text =
-        archive::subentry_tsv(&existing.subentries).map_err(|source| Lv2CensusError::Render {
-            table: SUBENTRY.name,
-            source,
-        })?;
-    let gate_text =
-        archive::gate_tsv(&existing.gates).map_err(|source| Lv2CensusError::Render {
-            table: CAPABILITY_GATE.name,
-            source,
-        })?;
+    let kernel_text = render(&KERNEL, archive::kernel_tsv(&existing.kernels))?;
+    let stub_text = render(&STUB, archive::stub_tsv(&existing.stubs))?;
+    let subentry_text = render(&SUBENTRY, archive::subentry_tsv(&existing.subentries))?;
+    let gate_text = render(&CAPABILITY_GATE, archive::gate_tsv(&existing.gates))?;
     write_all(
         args,
         &census_text,
@@ -215,6 +163,90 @@ fn emit(args: &Lv2CensusArgs, elf: &[u8]) -> Result<EmitSummary, Lv2CensusError>
         gated: gated_count,
         removed_pups,
     })
+}
+
+/// One table's rendered text, or the render error naming the table.
+fn render(
+    table: &archive::TableSpec,
+    rendered: Result<String, archive::ArchiveError>,
+) -> Result<String, Lv2CensusError> {
+    rendered.map_err(|source| Lv2CensusError::Render {
+        table: table.name,
+        source,
+    })
+}
+
+/// One census row per top-level ordinal, with its dispatch shape.
+fn census_rows(fw: &str, subdispatch: &Lv2SubdispatchClassification) -> Vec<CensusRow> {
+    subdispatch
+        .top_level
+        .ordinals
+        .iter()
+        .map(|entry| CensusRow {
+            fw: fw.to_string(),
+            ordinal: entry.ordinal,
+            class: match entry.class {
+                Lv2OrdinalClass::Implemented => CensusClass::Implemented,
+                Lv2OrdinalClass::Stub => CensusClass::Stub,
+                Lv2OrdinalClass::Absent => CensusClass::Absent,
+            },
+            target: entry.code,
+            dispatch: match subdispatch.ordinals.get(&entry.ordinal) {
+                Some(Lv2Subdispatch::Table { .. }) => DispatchShape::Subtable,
+                Some(Lv2Subdispatch::ChainIncomplete { .. }) => DispatchShape::ChainIncomplete,
+                None => DispatchShape::Flat,
+            },
+        })
+        .collect()
+}
+
+/// The digests of the three per-PUP tables a kernel row records.
+struct TableDigests {
+    census_sha256: String,
+    subentry_sha256: String,
+    gate_sha256: String,
+}
+
+/// The kernel row for `elf`: its table discovery and the digests of its
+/// tables.
+fn kernel_row(
+    pup_sha256: &str,
+    elf: &[u8],
+    classification: &Lv2StubClassification,
+    digests: TableDigests,
+) -> KernelRow {
+    let discovery = &classification.discovery;
+    KernelRow {
+        pup_sha256: pup_sha256.to_string(),
+        kernel_elf_sha256: sha256_hex(elf),
+        table_base: discovery.table_vaddr,
+        entry_width: discovery.entry_width,
+        entry_format: discovery.entry_format.as_str().to_string(),
+        entry_count: discovery.entry_count,
+        discovery_method: discovery.method.as_str().to_string(),
+        confidence: discovery.confidence.as_str().to_string(),
+        census_sha256: digests.census_sha256,
+        subentry_sha256: digests.subentry_sha256,
+        gate_sha256: digests.gate_sha256,
+    }
+}
+
+/// One stub row per stub target; `primary` marks the kernel's primary
+/// stub.
+fn stub_rows(pup_sha256: &str, classification: &Lv2StubClassification) -> Vec<StubRow> {
+    classification
+        .stub_targets
+        .iter()
+        .map(|stub| StubRow {
+            pup_sha256: pup_sha256.to_string(),
+            descriptor: stub.descriptor,
+            target: stub.code,
+            errno: stub.errno,
+            errno_symbol: stub.errno_symbol.to_string(),
+            references: stub.references,
+            primary: stub.descriptor == classification.primary_stub.descriptor,
+        })
+        .collect()
 }
 
 /// A merge refusal as the command reports it: a moved re-extraction
