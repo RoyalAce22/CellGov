@@ -8,6 +8,8 @@ use cellgov_ps3_abi::format::elf::{
     PT_PRX_RELOC, R_PPC64_ADDR32,
 };
 
+use std::ops::Range;
+
 use super::elf::{align_up, nops, put_u16, put_u32, put_u64, write_elf_header, Phdr};
 use super::stream::FieldStream;
 
@@ -144,8 +146,37 @@ impl PrxImage {
             buf: vec![0u8; PRX_LIB_INFO_SIZE],
             vaddr: self.data_vaddr,
         };
+        // The reservation order (exports, imports, module info) fixes
+        // every table address in the data segment.
+        let exports = self.write_exports(&mut data, toc);
+        let imports = self.write_imports(&mut data);
+        self.write_module_info(&mut data, toc, &exports, &imports);
 
-        // Export entries are contiguous; their tables follow.
+        let layout = self.layout(data.buf.len());
+        let mut out = vec![0u8; layout.param_off + layout.param_len];
+        write_elf_header(
+            &mut out,
+            self.e_type,
+            0x10,
+            ELF_PHENTSIZE as u16,
+            layout.phnum as u16,
+        );
+        for (i, phdr) in self.program_headers(&layout).iter().enumerate() {
+            phdr.write(&mut out, ELF_HEADER_SIZE + i * ELF_PHENTSIZE);
+        }
+        out[layout.text_off..layout.text_off + self.text.len()].copy_from_slice(&self.text);
+        out[layout.data_off..layout.data_off + data.buf.len()].copy_from_slice(&data.buf);
+        self.write_relocations(&mut out, layout.reloc_off);
+        if self.imports_via_param {
+            write_param_header(&mut out, layout.param_off, &imports);
+        }
+        out.extend_from_slice(&self.trailer);
+        out
+    }
+
+    /// The export entries, contiguous, then each entry's OPDs and its
+    /// NID and stub tables. Returns the guest addresses the entries span.
+    fn write_exports(&self, data: &mut DataBuilder, toc: u32) -> Range<u32> {
         let system = usize::from(self.system_entry);
         let export_count = system + self.libraries.len();
         let exports_off = data.reserve(export_count * ENTRY_SIZE, 4);
@@ -185,8 +216,13 @@ impl PrxImage {
             put_u32(&mut data.buf, at + 20, nid_table);
             put_u32(&mut data.buf, at + 24, stub_table);
         }
+        data.vaddr_of(exports_off)..exports_end
+    }
 
-        // Import entries are contiguous too, each at its declared size.
+    /// The import entries, contiguous and each at its declared size, then
+    /// each entry's name, NID and slot tables. Returns the guest
+    /// addresses the entries span.
+    fn write_imports(&self, data: &mut DataBuilder) -> Range<u32> {
         let import_bytes: usize = self
             .imports
             .iter()
@@ -215,41 +251,55 @@ impl PrxImage {
             }
             at += usize::from(size);
         }
+        imports_start..imports_end
+    }
 
-        // Module info at data offset zero, which segment 0's p_paddr
-        // names by file offset; it doubles as the library info the
-        // import walk reads.
+    /// The module info at data offset zero, which segment 0's p_paddr
+    /// names by file offset; it doubles as the library info the import
+    /// walk reads.
+    fn write_module_info(
+        &self,
+        data: &mut DataBuilder,
+        toc: u32,
+        exports: &Range<u32>,
+        imports: &Range<u32>,
+    ) {
         let name_len = self.module_name.len().min(MODULE_NAME_MAX);
         data.buf[4..4 + name_len].copy_from_slice(&self.module_name[..name_len]);
         put_u16(&mut data.buf, 0, 0x0006);
         data.buf[2] = 1;
         data.buf[3] = 1;
         put_u32(&mut data.buf, 32, toc);
-        let exports_start = data.vaddr_of(exports_off);
-        put_u32(&mut data.buf, 36, exports_start);
-        put_u32(&mut data.buf, 40, exports_end);
-        put_u32(&mut data.buf, 44, imports_start);
-        put_u32(&mut data.buf, 48, imports_end);
+        put_u32(&mut data.buf, 36, exports.start);
+        put_u32(&mut data.buf, 40, exports.end);
+        put_u32(&mut data.buf, 44, imports.start);
+        put_u32(&mut data.buf, 48, imports.end);
+    }
 
-        // File layout: header, program headers, text, data, relocations,
-        // the optional parameter header, then the trailer.
+    /// The file layout: header, program headers, text, data,
+    /// relocations, the optional parameter header, then the trailer.
+    fn layout(&self, data_len: usize) -> Layout {
         let placeholders = usize::from(self.placeholder_loads) * 2;
         let phnum = placeholders + 3 + usize::from(self.imports_via_param);
         let text_off = align_up(ELF_HEADER_SIZE + phnum * ELF_PHENTSIZE, SECTION_ALIGN);
         let data_off = align_up(text_off + self.text.len(), SECTION_ALIGN);
-        let reloc_off = align_up(data_off + data.buf.len(), 8);
+        let reloc_off = align_up(data_off + data_len, 8);
         let reloc_len = self.relocations.len() * ELF64_RELA_SIZE;
         let param_off = align_up(reloc_off + reloc_len, 4);
         let param_len = usize::from(self.imports_via_param) * PRX_PARAM_HEADER_MIN_SIZE as usize;
-        let mut out = vec![0u8; param_off + param_len];
-        write_elf_header(
-            &mut out,
-            self.e_type,
-            0x10,
-            ELF_PHENTSIZE as u16,
-            phnum as u16,
-        );
+        Layout {
+            phnum,
+            text_off,
+            data_off,
+            data_len,
+            reloc_off,
+            reloc_len,
+            param_off,
+            param_len,
+        }
+    }
 
+    fn program_headers(&self, layout: &Layout) -> Vec<Phdr> {
         let placeholder = Phdr {
             p_type: PT_LOAD,
             flags: 0,
@@ -263,9 +313,9 @@ impl PrxImage {
         let text = Phdr {
             p_type: PT_LOAD,
             flags: 0x5,
-            offset: text_off as u64,
+            offset: layout.text_off as u64,
             vaddr: 0,
-            paddr: data_off as u64,
+            paddr: layout.data_off as u64,
             filesz: self.text.len() as u64,
             memsz: self.text.len() as u64,
             align: 0x10000,
@@ -273,27 +323,27 @@ impl PrxImage {
         let data_phdr = Phdr {
             p_type: PT_LOAD,
             flags: 0x6,
-            offset: data_off as u64,
+            offset: layout.data_off as u64,
             vaddr: u64::from(self.data_vaddr),
             paddr: 0,
-            filesz: data.buf.len() as u64,
-            memsz: data.buf.len() as u64 + 0x100,
+            filesz: layout.data_len as u64,
+            memsz: layout.data_len as u64 + 0x100,
             align: 0x10000,
         };
         let reloc = Phdr {
             p_type: PT_PRX_RELOC,
             flags: 0,
-            offset: reloc_off as u64,
+            offset: layout.reloc_off as u64,
             vaddr: 0,
             paddr: 0,
-            filesz: reloc_len as u64,
+            filesz: layout.reloc_len as u64,
             memsz: 0,
             align: 8,
         };
         // Text stays at index 0. The import walk reads segment 0's
         // p_paddr for the library info, so a placeholder there hides
         // the imports from it.
-        let mut phdrs = Vec::with_capacity(phnum);
+        let mut phdrs = Vec::with_capacity(layout.phnum);
         phdrs.push(text);
         if self.placeholder_loads {
             phdrs.push(placeholder.clone());
@@ -307,39 +357,26 @@ impl PrxImage {
             phdrs.push(Phdr {
                 p_type: PT_PRX_PARAM,
                 flags: 0,
-                offset: param_off as u64,
+                offset: layout.param_off as u64,
                 vaddr: 0,
                 paddr: 0,
-                filesz: param_len as u64,
+                filesz: layout.param_len as u64,
                 memsz: 0,
                 align: 4,
             });
         }
-        for (i, phdr) in phdrs.iter().enumerate() {
-            phdr.write(&mut out, ELF_HEADER_SIZE + i * ELF_PHENTSIZE);
-        }
+        phdrs
+    }
 
-        out[text_off..text_off + self.text.len()].copy_from_slice(&self.text);
-        out[data_off..data_off + data.buf.len()].copy_from_slice(&data.buf);
+    /// One RELA entry per relocation, from `reloc_off`.
+    fn write_relocations(&self, out: &mut [u8], reloc_off: usize) {
         for (i, r) in self.relocations.iter().enumerate() {
             let at = reloc_off + i * ELF64_RELA_SIZE;
             let sym = (u32::from(r.value_segment) << 8) | u32::from(r.target_segment);
-            put_u64(&mut out, at, r.offset);
-            put_u64(
-                &mut out,
-                at + 8,
-                (u64::from(sym) << 32) | u64::from(r.rtype),
-            );
-            put_u64(&mut out, at + 16, r.addend as u64);
+            put_u64(out, at, r.offset);
+            put_u64(out, at + 8, (u64::from(sym) << 32) | u64::from(r.rtype));
+            put_u64(out, at + 16, r.addend as u64);
         }
-        if self.imports_via_param {
-            put_u32(&mut out, param_off, PRX_PARAM_HEADER_MIN_SIZE);
-            put_u32(&mut out, param_off + 4, PRX_PARAM_MAGIC);
-            put_u32(&mut out, param_off + 24, imports_start);
-            put_u32(&mut out, param_off + 28, imports_end);
-        }
-        out.extend_from_slice(&self.trailer);
-        out
     }
 
     /// Decode an image from a fuzz byte stream.
@@ -449,6 +486,26 @@ impl PrxImage {
             trailer: s.bytes(trailer_len),
         }
     }
+}
+
+/// File offsets and lengths of a rendered image's sections.
+struct Layout {
+    phnum: usize,
+    text_off: usize,
+    data_off: usize,
+    data_len: usize,
+    reloc_off: usize,
+    reloc_len: usize,
+    param_off: usize,
+    param_len: usize,
+}
+
+/// The `PT_PRX_PARAM` header, which locates the imports a second way.
+fn write_param_header(out: &mut [u8], param_off: usize, imports: &Range<u32>) {
+    put_u32(out, param_off, PRX_PARAM_HEADER_MIN_SIZE);
+    put_u32(out, param_off + 4, PRX_PARAM_MAGIC);
+    put_u32(out, param_off + 24, imports.start);
+    put_u32(out, param_off + 28, imports.end);
 }
 
 /// A name of up to `max` bytes; usually printable, sometimes the raw
