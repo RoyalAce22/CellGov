@@ -25,14 +25,10 @@ impl Lv2Host {
         let num_av_video = usize::from(rd16(pkt, 12));
         let num_av_audio = usize::from(rd16(pkt, 14));
         let mut at = av::PS3AV_PKT_INC_AVSET_LEN;
-        let sub = |at: usize| -> Vec<u8> {
-            let len = usize::from(rd16(&padded(pkt, at, 4), 2)) + 4;
-            padded(pkt, at, len.max(av::PS3AV_PKT_VIDEO_MODE_LEN))
-        };
 
         let mut video_status = av::PS3AV_STATUS_SUCCESS;
         for _ in 0..num_video {
-            let v = sub(at);
+            let v = avset_section(pkt, at);
             let status = video_mode_status(&v);
             if rd32(&v, 8) == av::PS3AV_HEAD_B_ANALOG {
                 self.state.uart.head_b_initialized = true;
@@ -47,36 +43,13 @@ impl Lv2Host {
             return;
         }
 
-        let mut syscon_ok = true;
-        let mut hdcp_done = [false; 2];
-        for _ in 0..num_av_video {
-            let v = sub(at);
-            let avport = rd16(&v, 8);
-            let av_vid = rd16(&v, 10);
-            if avport <= av::PS3AV_AVPORT_HDMI_1 {
-                if av_vid > 23 {
-                    batch.reply(false, cid, av::PS3AV_STATUS_INVALID_AV_PARAM, &[]);
-                    return;
-                }
-                if avport == av::PS3AV_AVPORT_HDMI_1 {
-                    syscon_ok = false;
-                } else if syscon_ok {
-                    hdcp_done[usize::from(avport)] = true;
-                }
-            } else {
-                if (avport != av::PS3AV_AVPORT_AVMULTI_0 && avport != av::PS3AV_AVPORT_AVMULTI_1)
-                    || av_vid > 23
-                    || (av_vid > 12 && av_vid != 18)
-                {
-                    batch.reply(false, cid, av::PS3AV_STATUS_INVALID_AV_PARAM, &[]);
-                    return;
-                }
-                if avport == av::PS3AV_AVPORT_AVMULTI_1 {
-                    syscon_ok = false;
-                }
-            }
-            at += usize::from(rd16(&v, 2)) + 4;
-        }
+        let Some((after_video, mut syscon_ok, hdcp_done)) =
+            avset_check_av_video(pkt, at, num_av_video)
+        else {
+            batch.reply(false, cid, av::PS3AV_STATUS_INVALID_AV_PARAM, &[]);
+            return;
+        };
+        at = after_video;
         self.state.uart.hdmi_res_set = hdcp_done;
         if hdcp_done[0] {
             self.uart_hdmi_script(HDMI_STATE_HDCP_DONE, HDMI_STATE_HDCP_DONE, batch);
@@ -84,7 +57,7 @@ impl Lv2Host {
 
         let mut valid_av_audio = false;
         for _ in 0..num_av_audio {
-            let a = sub(at);
+            let a = avset_section(pkt, at);
             let avport = rd16(&a, 8);
             if avport <= av::PS3AV_AVPORT_HDMI_1 {
                 valid_av_audio = true;
@@ -96,15 +69,12 @@ impl Lv2Host {
             at += usize::from(rd16(&a, 2)) + 4;
         }
 
-        if num_av_video > 0 || valid_av_audio {
-            if !syscon_ok {
-                batch.reply(true, cid, av::PS3AV_STATUS_SYSCON_COMMUNICATE_FAIL, &[]);
-            } else {
-                batch.reply(true, cid, av::PS3AV_STATUS_SUCCESS, &[]);
-            }
-        } else {
-            batch.reply(false, cid, av::PS3AV_STATUS_SUCCESS, &[]);
-        }
+        let (ack, status) = match (num_av_video > 0 || valid_av_audio, syscon_ok) {
+            (false, _) => (false, av::PS3AV_STATUS_SUCCESS),
+            (true, true) => (true, av::PS3AV_STATUS_SUCCESS),
+            (true, false) => (true, av::PS3AV_STATUS_SYSCON_COMMUNICATE_FAIL),
+        };
+        batch.reply(ack, cid, status, &[]);
     }
 
     /// Drive the HDMI 0 link from one step below `first` (or the last
@@ -130,8 +100,7 @@ impl Lv2Host {
         };
         match state {
             HDMI_STATE_UNPLUGGED => {
-                if enabled & av::PS3AV_EVENT_BIT_UNPLUGGED == 0 {
-                    self.obs.uart_events_gated += 1;
+                if !self.uart_event_enabled(enabled, av::PS3AV_EVENT_BIT_UNPLUGGED) {
                     return;
                 }
                 self.state.uart.hdcp_first_auth[0] = true;
@@ -140,8 +109,7 @@ impl Lv2Host {
                     .extend_from_slice(&header(av::PS3AV_CID_EVENT_UNPLUGGED, 4));
             }
             HDMI_STATE_PLUGGED => {
-                if enabled & av::PS3AV_EVENT_BIT_PLUGGED == 0 {
-                    self.obs.uart_events_gated += 1;
+                if !self.uart_event_enabled(enabled, av::PS3AV_EVENT_BIT_PLUGGED) {
                     return;
                 }
                 let info = hdmi_monitor_info(0, self.state.uart.hdmi_behavior);
@@ -153,20 +121,21 @@ impl Lv2Host {
                 batch.events.extend_from_slice(&p);
             }
             HDMI_STATE_HDCP_DONE => {
-                let cid = if self.state.uart.hdcp_first_auth[0] {
-                    if enabled & av::PS3AV_EVENT_BIT_HDCP_DONE == 0 {
-                        self.obs.uart_events_gated += 1;
-                        return;
-                    }
-                    self.state.uart.hdcp_first_auth[0] = false;
-                    av::PS3AV_CID_EVENT_HDCP_DONE
+                let first_auth = self.state.uart.hdcp_first_auth[0];
+                let (bit, cid) = if first_auth {
+                    (av::PS3AV_EVENT_BIT_HDCP_DONE, av::PS3AV_CID_EVENT_HDCP_DONE)
                 } else {
-                    if enabled & av::PS3AV_EVENT_BIT_HDCP_REAUTH == 0 {
-                        self.obs.uart_events_gated += 1;
-                        return;
-                    }
-                    av::PS3AV_CID_EVENT_HDCP_REAUTH
+                    (
+                        av::PS3AV_EVENT_BIT_HDCP_REAUTH,
+                        av::PS3AV_CID_EVENT_HDCP_REAUTH,
+                    )
                 };
+                if !self.uart_event_enabled(enabled, bit) {
+                    return;
+                }
+                if first_auth {
+                    self.state.uart.hdcp_first_auth[0] = false;
+                }
                 let body = ksv_list_body(self.state.uart.hdmi_behavior);
                 let mut p = header(cid, (av::PS3AV_HEADER_LEN + body.len() - 4) as u16);
                 p.extend_from_slice(&body);
@@ -175,4 +144,58 @@ impl Lv2Host {
             _ => {}
         }
     }
+
+    /// Whether the guest enabled the event `bit` names in `enabled`;
+    /// a gated event counts in the observability record.
+    fn uart_event_enabled(&mut self, enabled: u32, bit: u32) -> bool {
+        if enabled & bit == 0 {
+            self.obs.uart_events_gated += 1;
+            return false;
+        }
+        true
+    }
+}
+
+/// The AVB_PARAM section at `at`, padded to its declared length and at
+/// least a video-mode section's length.
+fn avset_section(pkt: &[u8], at: usize) -> Vec<u8> {
+    let len = usize::from(rd16(&padded(pkt, at, 4), 2)) + 4;
+    padded(pkt, at, len.max(av::PS3AV_PKT_VIDEO_MODE_LEN))
+}
+
+/// Validate the `n` AV-video sections from `at`.
+///
+/// Returns the offset after them, whether syscon still answers, and
+/// which HDMI ports finished HDCP; `None` when a section names an
+/// invalid port or video id.
+fn avset_check_av_video(pkt: &[u8], mut at: usize, n: usize) -> Option<(usize, bool, [bool; 2])> {
+    let mut syscon_ok = true;
+    let mut hdcp_done = [false; 2];
+    for _ in 0..n {
+        let v = avset_section(pkt, at);
+        let avport = rd16(&v, 8);
+        let av_vid = rd16(&v, 10);
+        if avport <= av::PS3AV_AVPORT_HDMI_1 {
+            if av_vid > 23 {
+                return None;
+            }
+            if avport == av::PS3AV_AVPORT_HDMI_1 {
+                syscon_ok = false;
+            } else if syscon_ok {
+                hdcp_done[usize::from(avport)] = true;
+            }
+        } else {
+            if (avport != av::PS3AV_AVPORT_AVMULTI_0 && avport != av::PS3AV_AVPORT_AVMULTI_1)
+                || av_vid > 23
+                || (av_vid > 12 && av_vid != 18)
+            {
+                return None;
+            }
+            if avport == av::PS3AV_AVPORT_AVMULTI_1 {
+                syscon_ok = false;
+            }
+        }
+        at += usize::from(rd16(&v, 2)) + 4;
+    }
+    Some((at, syscon_ok, hdcp_done))
 }
