@@ -2,7 +2,7 @@
 //! arithmetic forms.
 
 use super::builder::{single_insn, Builder, SplitMix, RA, RB, RT};
-use super::classes::{signed, single_cell, SINGLE_CLASSES};
+use super::classes::{signed, single_cell, SingleClass, SINGLE_CLASSES};
 use crate::spu_documented::model::{extended_operand, extended_result, Insn, Known, Op};
 use crate::spu_documented::question::VectorClass;
 
@@ -106,142 +106,170 @@ fn band_product(rng: &mut SplitMix) -> (u32, u32) {
 pub(super) fn single_arithmetic(b: &mut Builder) {
     let classes = signed(&SINGLE_CLASSES);
     for op in [Op::Fa, Op::Fs, Op::Fm] {
-        let mut slots = Vec::new();
-        for &x in &classes {
-            for &y in &classes {
-                let words = [x, y].map(|(c, s)| c.draw(&mut b.rng) | u32::from(s) << 31);
-                slots.push((single_cell(op, &[x, y]), [words[0], words[1], 0]));
-            }
-        }
-        b.single_vectors(
-            "cell",
-            VectorClass::SingleArithmetic,
-            single_insn(op),
-            slots,
-        );
+        cell_sweep(b, op, &classes);
     }
     for op in [Op::Fma, Op::Fms, Op::Fnms] {
-        let mut slots = Vec::new();
-        for &x in &classes {
-            for &y in &classes {
-                for &z in &classes {
-                    let words = [x, y, z].map(|(c, s)| c.draw(&mut b.rng) | u32::from(s) << 31);
-                    slots.push((single_cell(op, &[x, y, z]), words));
-                }
-            }
-        }
-        b.single_vectors(
-            "cell",
-            VectorClass::SingleArithmetic,
-            single_insn(op),
-            slots,
-        );
+        fused_cell_sweep(b, op, &classes);
     }
     for op in [Op::Fa, Op::Fs, Op::Fm, Op::Fma, Op::Fms, Op::Fnms] {
-        let mut slots = Vec::new();
-        for n in 0..16 {
-            let negative = b.rng.bit();
-            let sign = u32::from(negative) << 31;
-            // Below 2^104, half the spacing of the numbers next to Smax.
-            let small = sign | (b.rng.range(200, 230) as u32) << 23 | b.rng.below(1 << 23) as u32;
-            // A product near 2^46, far below 2^104.
-            let tiny = 150 << 23 | b.rng.below(1 << 23) as u32;
-            let (p, q) = band_product(&mut b.rng);
-            let smax = sign | 0x7FFF_FFFF;
-            let words = match (op, n % 2) {
-                (Op::Fa, _) => [smax, small, 0],
-                (Op::Fs, _) => [smax, small ^ 0x8000_0000, 0],
-                (Op::Fm, _) => [p | sign, q, 0],
-                // fma: RA x RB + RC.
-                (Op::Fma, 0) => [p | sign, q, 0],
-                (Op::Fma, _) => [tiny | sign, tiny, smax],
-                // fms: RA x RB - RC.
-                (Op::Fms, 0) => [p | sign, q, 0],
-                (Op::Fms, _) => [tiny | sign, tiny, smax ^ 0x8000_0000],
-                // fnms: RC - RA x RB.
-                (_, 0) => [p | sign, q, 0],
-                (_, _) => [tiny | sign, tiny, smax ^ 0x8000_0000],
-            };
-            slots.push((format!("{}:overflow-band", op.mnemonic()), words));
-        }
-        b.single_vectors(
-            "band",
-            VectorClass::SingleArithmetic,
-            single_insn(op),
-            slots,
-        );
+        overflow_band_sweep(b, op);
     }
     for op in [Op::Fma, Op::Fms, Op::Fnms] {
-        let mut slots = Vec::new();
-        for difference in -60i64..=60 {
-            let operand = |exponent: i64, rng: &mut SplitMix| {
-                u32::from(rng.bit()) << 31 | (exponent as u32) << 23 | rng.below(1 << 23) as u32
-            };
-            let words = [
-                operand(127, &mut b.rng),
-                operand(127, &mut b.rng),
-                operand(127 - difference, &mut b.rng),
-            ];
-            slots.push((
-                format!("{}:exponent-difference{difference:+03}", op.mnemonic()),
-                words,
-            ));
-        }
-        b.single_vectors(
-            "difference",
-            VectorClass::SingleArithmetic,
-            single_insn(op),
-            slots,
-        );
+        exponent_difference_sweep(b, op);
     }
     for op in [Op::Fa, Op::Fs, Op::Fma, Op::Fms, Op::Fnms] {
-        let mut slots = Vec::new();
-        for _ in 0..8 {
-            // Twelve-bit significands keep the product exact in 24 bits.
-            let short = |rng: &mut SplitMix| {
-                u32::from(rng.bit()) << 31
-                    | (rng.range(100, 154) as u32) << 23
-                    | (rng.below(1 << 11) as u32) << 12
-            };
-            let (x, y) = (short(&mut b.rng), short(&mut b.rng));
-            let product =
-                match extended_result(&extended_operand(x).0.mul(&extended_operand(y).0), false)
-                    .bits
-                {
-                    Known::Value(bits) => bits,
-                    Known::Open(_) => 0,
-                };
-            let words = match op {
-                Op::Fa => [x, x ^ 0x8000_0000, 0],
-                Op::Fs => [x, x, 0],
-                Op::Fma => [x, y, product ^ 0x8000_0000],
-                _ => [x, y, product],
-            };
-            slots.push((format!("{}:exact-zero", op.mnemonic()), words));
-        }
-        b.single_vectors(
-            "exact-zero",
-            VectorClass::SingleArithmetic,
-            single_insn(op),
-            slots,
-        );
+        exact_zero_sweep(b, op);
     }
     for op in [Op::Fa, Op::Fs, Op::Fm, Op::Fma, Op::Fms, Op::Fnms] {
-        let slots = (0..100)
-            .map(|_| {
-                let words = [
-                    b.rng.next() as u32,
-                    b.rng.next() as u32,
-                    b.rng.next() as u32,
-                ];
-                (format!("{}:random", op.mnemonic()), words)
-            })
-            .collect();
-        b.single_vectors(
-            "random",
-            VectorClass::SingleArithmetic,
-            single_insn(op),
-            slots,
-        );
+        random_sweep(b, op);
     }
+}
+
+/// One vector per ordered pair of signed classes for a two-operand `op`.
+fn cell_sweep(b: &mut Builder, op: Op, classes: &[(SingleClass, bool)]) {
+    let mut slots = Vec::new();
+    for &x in classes {
+        for &y in classes {
+            let words = [x, y].map(|(c, s)| c.draw(&mut b.rng) | u32::from(s) << 31);
+            slots.push((single_cell(op, &[x, y]), [words[0], words[1], 0]));
+        }
+    }
+    b.single_vectors(
+        "cell",
+        VectorClass::SingleArithmetic,
+        single_insn(op),
+        slots,
+    );
+}
+
+/// One vector per ordered triple of signed classes for a fused `op`.
+fn fused_cell_sweep(b: &mut Builder, op: Op, classes: &[(SingleClass, bool)]) {
+    let mut slots = Vec::new();
+    for &x in classes {
+        for &y in classes {
+            for &z in classes {
+                let words = [x, y, z].map(|(c, s)| c.draw(&mut b.rng) | u32::from(s) << 31);
+                slots.push((single_cell(op, &[x, y, z]), words));
+            }
+        }
+    }
+    b.single_vectors(
+        "cell",
+        VectorClass::SingleArithmetic,
+        single_insn(op),
+        slots,
+    );
+}
+
+/// Results just past Smax, where the extended range saturates.
+fn overflow_band_sweep(b: &mut Builder, op: Op) {
+    let mut slots = Vec::new();
+    for n in 0..16 {
+        let negative = b.rng.bit();
+        let sign = u32::from(negative) << 31;
+        // Below 2^104, half the spacing of the numbers next to Smax.
+        let small = sign | (b.rng.range(200, 230) as u32) << 23 | b.rng.below(1 << 23) as u32;
+        // A product near 2^46, far below 2^104.
+        let tiny = 150 << 23 | b.rng.below(1 << 23) as u32;
+        let (p, q) = band_product(&mut b.rng);
+        let smax = sign | 0x7FFF_FFFF;
+        let words = match (op, n % 2) {
+            (Op::Fa, _) => [smax, small, 0],
+            (Op::Fs, _) => [smax, small ^ 0x8000_0000, 0],
+            (Op::Fm, _) => [p | sign, q, 0],
+            // fma: RA x RB + RC.
+            (Op::Fma, 0) => [p | sign, q, 0],
+            (Op::Fma, _) => [tiny | sign, tiny, smax],
+            // fms: RA x RB - RC.
+            (Op::Fms, 0) => [p | sign, q, 0],
+            (Op::Fms, _) => [tiny | sign, tiny, smax ^ 0x8000_0000],
+            // fnms: RC - RA x RB.
+            (_, 0) => [p | sign, q, 0],
+            (_, _) => [tiny | sign, tiny, smax ^ 0x8000_0000],
+        };
+        slots.push((format!("{}:overflow-band", op.mnemonic()), words));
+    }
+    b.single_vectors(
+        "band",
+        VectorClass::SingleArithmetic,
+        single_insn(op),
+        slots,
+    );
+}
+
+/// The addend's exponent from 60 below to 60 above the product's.
+fn exponent_difference_sweep(b: &mut Builder, op: Op) {
+    let mut slots = Vec::new();
+    for difference in -60i64..=60 {
+        let operand = |exponent: i64, rng: &mut SplitMix| {
+            u32::from(rng.bit()) << 31 | (exponent as u32) << 23 | rng.below(1 << 23) as u32
+        };
+        let words = [
+            operand(127, &mut b.rng),
+            operand(127, &mut b.rng),
+            operand(127 - difference, &mut b.rng),
+        ];
+        slots.push((
+            format!("{}:exponent-difference{difference:+03}", op.mnemonic()),
+            words,
+        ));
+    }
+    b.single_vectors(
+        "difference",
+        VectorClass::SingleArithmetic,
+        single_insn(op),
+        slots,
+    );
+}
+
+/// Operands whose exact result is zero.
+fn exact_zero_sweep(b: &mut Builder, op: Op) {
+    let mut slots = Vec::new();
+    for _ in 0..8 {
+        // Twelve-bit significands keep the product exact in 24 bits.
+        let short = |rng: &mut SplitMix| {
+            u32::from(rng.bit()) << 31
+                | (rng.range(100, 154) as u32) << 23
+                | (rng.below(1 << 11) as u32) << 12
+        };
+        let (x, y) = (short(&mut b.rng), short(&mut b.rng));
+        let product =
+            match extended_result(&extended_operand(x).0.mul(&extended_operand(y).0), false).bits {
+                Known::Value(bits) => bits,
+                Known::Open(_) => 0,
+            };
+        let words = match op {
+            Op::Fa => [x, x ^ 0x8000_0000, 0],
+            Op::Fs => [x, x, 0],
+            Op::Fma => [x, y, product ^ 0x8000_0000],
+            _ => [x, y, product],
+        };
+        slots.push((format!("{}:exact-zero", op.mnemonic()), words));
+    }
+    b.single_vectors(
+        "exact-zero",
+        VectorClass::SingleArithmetic,
+        single_insn(op),
+        slots,
+    );
+}
+
+/// Uniformly random operand words.
+fn random_sweep(b: &mut Builder, op: Op) {
+    let slots = (0..100)
+        .map(|_| {
+            let words = [
+                b.rng.next() as u32,
+                b.rng.next() as u32,
+                b.rng.next() as u32,
+            ];
+            (format!("{}:random", op.mnemonic()), words)
+        })
+        .collect();
+    b.single_vectors(
+        "random",
+        VectorClass::SingleArithmetic,
+        single_insn(op),
+        slots,
+    );
 }
