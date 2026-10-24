@@ -60,6 +60,86 @@ pub(super) enum UserImageRefusal {
     Invalid(&'static str),
 }
 
+/// One row of a user image's segment table.
+struct SegRow {
+    seg_type: u32,
+    ls: u32,
+    size: u32,
+    addr: u32,
+}
+
+/// Row `i` of the segment table at `segs_ptr`.
+///
+/// The field addresses use u64 arithmetic: a row at the top of the
+/// 32-bit space reads as unmapped instead of wrapping the guest pointer.
+fn read_segment_row(
+    rt: &dyn Lv2Runtime,
+    segs_ptr: u32,
+    i: u32,
+) -> Result<SegRow, UserImageRefusal> {
+    use spu::segment;
+    let word = |addr: u64| read_be_u32(rt, addr).ok_or(UserImageRefusal::Unreadable);
+    let base = segs_ptr
+        .checked_add(i * segment::LEN)
+        .ok_or(UserImageRefusal::Invalid(
+            "dispatch.spu_user_image_table_wraps",
+        ))?;
+    let row = u64::from(base);
+    Ok(SegRow {
+        seg_type: word(row + u64::from(segment::TYPE_OFFSET))?,
+        ls: word(row + u64::from(segment::LS_OFFSET))?,
+        size: word(row + u64::from(segment::SIZE_OFFSET))?,
+        addr: word(row + u64::from(segment::ADDR_OFFSET))?,
+    })
+}
+
+/// Refuse a segment of `size` bytes at `ls` that breaks the
+/// local-store bounds or overlaps a segment in `placed`.
+fn check_segment_placement(
+    ls: u32,
+    size: u32,
+    placed: &[(u32, u32)],
+) -> Result<(), UserImageRefusal> {
+    use spu::{segment, LS_SIZE};
+    // `ls + size > LS_SIZE` is this model's own end check: bounding
+    // `ls` and `size` separately still admits a segment that runs off
+    // the end of local store. Group start has no way to answer the
+    // guest.
+    if size == 0
+        || !(ls | size).is_multiple_of(segment::LOAD_ALIGN)
+        || ls >= LS_SIZE
+        || size > LS_SIZE
+        || ls + size > LS_SIZE
+    {
+        return Err(UserImageRefusal::Invalid(
+            "dispatch.spu_user_image_segment_bounds",
+        ));
+    }
+    if placed
+        .iter()
+        .any(|&(p_ls, p_size)| ls + size > p_ls && p_ls + p_size > ls)
+    {
+        return Err(UserImageRefusal::Invalid(
+            "dispatch.spu_user_image_segment_overlap",
+        ));
+    }
+    Ok(())
+}
+
+/// The bytes a COPY or FILL segment loads into local store.
+///
+/// A FILL range reads zero on the console whatever its `value` word
+/// holds.
+fn snapshot_segment(rt: &dyn Lv2Runtime, row: &SegRow) -> Result<Vec<u8>, UserImageRefusal> {
+    if row.seg_type != spu::segment::TYPE_COPY {
+        return Ok(vec![0; row.size as usize]);
+    }
+    Ok(rt
+        .read_committed(u64::from(row.addr), row.size as usize)
+        .ok_or(UserImageRefusal::Unreadable)?
+        .to_vec())
+}
+
 impl Lv2Host {
     /// Parse a user-type `sys_spu_image` into its entry and local-store segments.
     ///
@@ -70,7 +150,7 @@ impl Lv2Host {
         img_ptr: u32,
         rt: &dyn Lv2Runtime,
     ) -> Result<(u32, Vec<LsSegment>), UserImageRefusal> {
-        use spu::{image, segment, LS_SIZE};
+        use spu::{image, segment};
         // Field addresses are formed in u64: a record or table row at
         // the top of the 32-bit space reads as unmapped (CELL_EFAULT)
         // instead of wrapping the guest pointer.
@@ -89,19 +169,10 @@ impl Lv2Host {
         let mut found_info = false;
         let mut found_copy = false;
         for i in 0..nsegs as u32 {
-            let base = segs_ptr
-                .checked_add(i * segment::LEN)
-                .ok_or(UserImageRefusal::Invalid(
-                    "dispatch.spu_user_image_table_wraps",
-                ))?;
-            let row = u64::from(base);
-            let seg_type = word(row + u64::from(segment::TYPE_OFFSET))?;
-            let ls = word(row + u64::from(segment::LS_OFFSET))?;
-            let size = word(row + u64::from(segment::SIZE_OFFSET))?;
-            let addr = word(row + u64::from(segment::ADDR_OFFSET))?;
-            match seg_type {
+            let row = read_segment_row(rt, segs_ptr, i)?;
+            match row.seg_type {
                 segment::TYPE_INFO => {
-                    if size > segment::INFO_SIZE_MAX || found_info {
+                    if row.size > segment::INFO_SIZE_MAX || found_info {
                         return Err(UserImageRefusal::Invalid(
                             "dispatch.spu_user_image_info_segment",
                         ));
@@ -110,7 +181,7 @@ impl Lv2Host {
                     continue;
                 }
                 segment::TYPE_COPY => {
-                    if !addr.is_multiple_of(4) {
+                    if !row.addr.is_multiple_of(4) {
                         return Err(UserImageRefusal::Invalid(
                             "dispatch.spu_user_image_copy_source_unaligned",
                         ));
@@ -124,41 +195,11 @@ impl Lv2Host {
                     ))
                 }
             }
-            // `ls + size > LS_SIZE` is this model's own end check:
-            // bounding `ls` and `size` separately still admits a
-            // segment that runs off the end of local store. Group
-            // start has no way to answer the guest.
-            if size == 0
-                || !(ls | size).is_multiple_of(segment::LOAD_ALIGN)
-                || ls >= LS_SIZE
-                || size > LS_SIZE
-                || ls + size > LS_SIZE
-            {
-                return Err(UserImageRefusal::Invalid(
-                    "dispatch.spu_user_image_segment_bounds",
-                ));
-            }
-            if placed
-                .iter()
-                .any(|&(p_ls, p_size)| ls + size > p_ls && p_ls + p_size > ls)
-            {
-                return Err(UserImageRefusal::Invalid(
-                    "dispatch.spu_user_image_segment_overlap",
-                ));
-            }
-            placed.push((ls, size));
-            // A FILL range reads zero on the console whatever its
-            // `value` word holds.
-            let bytes = if seg_type == segment::TYPE_COPY {
-                rt.read_committed(u64::from(addr), size as usize)
-                    .ok_or(UserImageRefusal::Unreadable)?
-                    .to_vec()
-            } else {
-                vec![0; size as usize]
-            };
+            check_segment_placement(row.ls, row.size, &placed)?;
+            placed.push((row.ls, row.size));
             segments.push(LsSegment {
-                ls_start: ls,
-                bytes,
+                ls_start: row.ls,
+                bytes: snapshot_segment(rt, &row)?,
             });
         }
         if !found_copy {
