@@ -23,6 +23,36 @@ struct Block {
     props: BTreeMap<String, (String, usize)>,
 }
 
+impl Block {
+    /// Record `line` as a property of this block; `false` when the line
+    /// is not a property. A property given again with another value is
+    /// a conflict naming both lines.
+    fn merge_prop(
+        &mut self,
+        path: &Path,
+        line: &str,
+        line_no: usize,
+        at: &Provenance,
+    ) -> Result<bool, KeyVaultError> {
+        let Some((prop, value)) = split_property(line) else {
+            return Ok(false);
+        };
+        let prop = prop.to_ascii_lowercase();
+        if let Some((existing, first_line)) = self.props.get(&prop) {
+            if !existing.eq_ignore_ascii_case(value) {
+                return Err(KeyVaultError::Conflict {
+                    what: format!("[{}] {prop}", redacted_name(&self.name)),
+                    first: Provenance::at(path, *first_line),
+                    second: at.clone(),
+                });
+            }
+            return Ok(true);
+        }
+        self.props.insert(prop, (value.to_string(), line_no));
+        Ok(true)
+    }
+}
+
 impl Loader {
     pub(super) fn ingest_text(&mut self, path: &Path, text: &str) -> Result<(), KeyVaultError> {
         if self.ingest_constructor_catalog(path, text)? {
@@ -51,19 +81,7 @@ impl Loader {
                 continue;
             }
             if let Some(b) = block.as_mut() {
-                if let Some((prop, value)) = split_property(line) {
-                    let prop = prop.to_ascii_lowercase();
-                    if let Some((existing, first_line)) = b.props.get(&prop) {
-                        if !existing.eq_ignore_ascii_case(value) {
-                            return Err(KeyVaultError::Conflict {
-                                what: format!("[{}] {prop}", redacted_name(&b.name)),
-                                first: Provenance::at(path, *first_line),
-                                second: at,
-                            });
-                        }
-                        continue;
-                    }
-                    b.props.insert(prop, (value.to_string(), line_no));
+                if b.merge_prop(path, line, line_no, &at)? {
                     continue;
                 }
                 // Anything else ends the block: the wiki interleaves
@@ -130,45 +148,25 @@ impl Loader {
         let mut found = false;
         while let Some((index, raw)) = lines.next() {
             let line = raw.trim();
-            if let Some(start) = line.find("LoadSelf") {
-                let rest = &line[start + "LoadSelf".len()..];
-                if let Some(end) = rest.find("Keys") {
-                    kind = rest[..end].to_ascii_lowercase();
-                }
+            if let Some(hint) = constructor_kind_hint(line) {
+                kind = hint;
             }
             if !line.contains(".emplace_back(") {
                 continue;
             }
-            if let Some(receiver) = line.split(".emplace_back(").next() {
-                let receiver = receiver.trim();
-                if let Some(name) = receiver
-                    .strip_prefix("sk_")
-                    .and_then(|v| v.strip_suffix("_arr"))
-                {
-                    kind = name.to_ascii_lowercase();
-                }
+            if let Some(receiver) = constructor_receiver_kind(line) {
+                kind = receiver;
             }
-            let mut row = line.to_string();
-            while !row.contains(");") {
-                let Some((_, next)) = lines.next() else { break };
-                row.push(' ');
-                row.push_str(next.trim());
-            }
+            let row = join_constructor_row(line, &mut lines);
             let strings = quoted_hex_values(&row);
             if strings.is_empty() {
                 continue;
             }
-            let names = ["erk", "riv", "pub", "priv"];
             let components = strings
                 .into_iter()
                 .enumerate()
                 .map(|(component, value)| {
-                    let name = names.get(component).copied().unwrap_or("component");
-                    let name = if component < names.len() {
-                        name.to_string()
-                    } else {
-                        format!("{name}_{component}")
-                    };
+                    let name = component_name(component);
                     Ok((
                         name.clone(),
                         decode_named_hex(&Provenance::at(path, index + 1), &name, &value)?,
@@ -267,37 +265,8 @@ impl Loader {
         let ty = prop(&["type"]).map(|(v, _)| v.to_ascii_uppercase());
         let revision = prop(&["revision", "key_revision", "sdk_type"]).map(|(v, _)| v);
         let version = prop(&["version"]).map(|(v, _)| v);
-        let name_words = words(&block.name);
-        let has_word = |w: &str| name_words.iter().any(|n| n == w);
         let shown = redacted_name(&block.name);
-
-        let by_name = || {
-            if has_word("npdrm") || has_word("np") || has_word("drm") {
-                Some(Kind::Class(SelfClass::Npdrm))
-            } else if has_word("app") || has_word("appldr") {
-                Some(Kind::Class(SelfClass::App))
-            } else if has_word("lv2") {
-                Some(Kind::Class(SelfClass::Lv2))
-            } else if has_word("pkg") || has_word("scepkg") || has_word("spkg") {
-                Some(Kind::Scepkg)
-            } else {
-                None
-            }
-        };
-        // scetool files its loose keys (klicensees, the NP title-id
-        // key) as `type=OTHER`; only a SELF or PKG block is a keyset,
-        // so an OTHER block is never read as one by its name.
-        let kind = match self_type.as_deref() {
-            Some("APP") => Some(Kind::Class(SelfClass::App)),
-            Some("NPDRM") => Some(Kind::Class(SelfClass::Npdrm)),
-            Some("LV2") => Some(Kind::Class(SelfClass::Lv2)),
-            Some(_) => None,
-            None => match ty.as_deref() {
-                Some("PKG") => Some(Kind::Scepkg),
-                Some("RVK" | "SPP" | "OTHER") => None,
-                _ => by_name(),
-            },
-        };
+        let kind = block_kind(self_type.as_deref(), ty.as_deref(), &block.name);
         let half_reason = |present: Part| {
             if kind.is_some() {
                 IgnoreReason::UnpairedHalf {
@@ -312,22 +281,8 @@ impl Loader {
             }
         };
 
-        let erk = match erk {
-            Some((text, line)) => {
-                let erk_at = Provenance::at(path, line);
-                let bytes = decode_named_hex(&erk_at, &format!("[{shown}] erk"), &text)?;
-                Some((bytes, erk_at))
-            }
-            None => None,
-        };
-        let riv = match riv {
-            Some((text, line)) => {
-                let riv_at = Provenance::at(path, line);
-                let bytes = decode_named_hex(&riv_at, &format!("[{shown}] riv"), &text)?;
-                Some((bytes, riv_at))
-            }
-            None => None,
-        };
+        let erk = decode_prop(path, &format!("[{shown}] erk"), erk)?;
+        let riv = decode_prop(path, &format!("[{shown}] riv"), riv)?;
         let ((erk_bytes, erk_at), (riv_bytes, riv_at)) = match (erk, riv) {
             (Some(erk), Some(riv)) => (erk, riv),
             (Some((bytes, erk_at)), None) => {
@@ -356,52 +311,156 @@ impl Loader {
             return Ok(());
         };
         let key = SelfKey {
-            erk: erk_bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| KeyVaultError::WrongLength {
-                    at: erk_at.clone(),
-                    what: format!("[{shown}] erk"),
-                    got: erk_bytes.len(),
-                    want: 0x20,
-                })?,
-            riv: riv_bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| KeyVaultError::WrongLength {
-                    at: riv_at,
-                    what: format!("[{shown}] riv"),
-                    got: riv_bytes.len(),
-                    want: 0x10,
-                })?,
+            erk: fixed_key(&erk_bytes, &erk_at, &format!("[{shown}] erk"))?,
+            riv: fixed_key(&riv_bytes, &riv_at, &format!("[{shown}] riv"))?,
         };
-        let label = match (kind, revision, version) {
-            // The firmware versions an LV2 keyset opens label it: the
-            // `version=` word, or the block's own name (`[lv2-3.55]`);
-            // its `revision=` names no key.
-            (Kind::Class(SelfClass::Lv2), _, Some(v)) => match Lv2Versions::parse(&v) {
-                Some(_) => v,
-                None => return Err(KeyVaultError::BadVersion { at, value: v }),
-            },
-            (Kind::Class(SelfClass::Lv2), _, None) => block.name.clone(),
-            (_, Some(r), _) => match parse_revision(&r) {
-                Some(_) => r,
-                // scetool keeps a `revision=8000` keyset for debug
-                // SELFs. Bit 15 of the SCE header's revision word marks
-                // an unencrypted debug image, which
-                // `sce::decrypt_self_to_elf` refuses before the vault is
-                // consulted, so the keyset is never used.
-                None if is_debug_revision(&r) => {
-                    self.vault
-                        .ignore(at, IgnoreReason::UnusedKeyset { name: shown });
-                    return Ok(());
-                }
-                None => return Err(KeyVaultError::BadRevision { at, value: r }),
-            },
-            (_, None, _) => block.name.clone(),
+        let Some(label) = block_label(kind, revision, version, &block.name, &at)? else {
+            self.vault
+                .ignore(at, IgnoreReason::UnusedKeyset { name: shown });
+            return Ok(());
         };
         self.add_keyset(kind, Some(&label), key, at)
     }
+}
+
+/// The keyset class a block names: its `self_type=`, else its `type=`,
+/// else a class word in its name.
+///
+/// scetool files its loose keys (klicensees, the NP title-id key) as
+/// `type=OTHER`; only a SELF or PKG block is a keyset, so an OTHER block
+/// is never read as one by its name.
+fn block_kind(self_type: Option<&str>, ty: Option<&str>, name: &str) -> Option<Kind> {
+    match self_type {
+        Some("APP") => return Some(Kind::Class(SelfClass::App)),
+        Some("NPDRM") => return Some(Kind::Class(SelfClass::Npdrm)),
+        Some("LV2") => return Some(Kind::Class(SelfClass::Lv2)),
+        Some(_) => return None,
+        None => {}
+    }
+    match ty {
+        Some("PKG") => return Some(Kind::Scepkg),
+        Some("RVK" | "SPP" | "OTHER") => return None,
+        _ => {}
+    }
+    let name_words = words(name);
+    let has_word = |w: &str| name_words.iter().any(|n| n == w);
+    if has_word("npdrm") || has_word("np") || has_word("drm") {
+        Some(Kind::Class(SelfClass::Npdrm))
+    } else if has_word("app") || has_word("appldr") {
+        Some(Kind::Class(SelfClass::App))
+    } else if has_word("lv2") {
+        Some(Kind::Class(SelfClass::Lv2))
+    } else if has_word("pkg") || has_word("scepkg") || has_word("spkg") {
+        Some(Kind::Scepkg)
+    } else {
+        None
+    }
+}
+
+/// A block property's value decoded as hex, with the line it is on.
+fn decode_prop(
+    path: &Path,
+    what: &str,
+    prop: Option<(String, usize)>,
+) -> Result<Option<(Vec<u8>, Provenance)>, KeyVaultError> {
+    let Some((text, line)) = prop else {
+        return Ok(None);
+    };
+    let at = Provenance::at(path, line);
+    let bytes = decode_named_hex(&at, what, &text)?;
+    Ok(Some((bytes, at)))
+}
+
+/// `bytes` as an `N`-byte key, or the length refusal naming `what`.
+fn fixed_key<const N: usize>(
+    bytes: &[u8],
+    at: &Provenance,
+    what: &str,
+) -> Result<[u8; N], KeyVaultError> {
+    bytes.try_into().map_err(|_| KeyVaultError::WrongLength {
+        at: at.clone(),
+        what: what.to_string(),
+        got: bytes.len(),
+        want: N,
+    })
+}
+
+/// The label a keyset block files its key under, or `None` for a debug
+/// revision's keyset, which no decrypt path uses.
+fn block_label(
+    kind: Kind,
+    revision: Option<String>,
+    version: Option<String>,
+    name: &str,
+    at: &Provenance,
+) -> Result<Option<String>, KeyVaultError> {
+    match (kind, revision, version) {
+        // The firmware versions an LV2 keyset opens label it: the
+        // `version=` word, or the block's own name (`[lv2-3.55]`); its
+        // `revision=` names no key.
+        (Kind::Class(SelfClass::Lv2), _, Some(v)) => match Lv2Versions::parse(&v) {
+            Some(_) => Ok(Some(v)),
+            None => Err(KeyVaultError::BadVersion {
+                at: at.clone(),
+                value: v,
+            }),
+        },
+        (Kind::Class(SelfClass::Lv2), _, None) => Ok(Some(name.to_string())),
+        (_, Some(r), _) => match parse_revision(&r) {
+            Some(_) => Ok(Some(r)),
+            // scetool keeps a `revision=8000` keyset for debug SELFs. Bit
+            // 15 of the SCE header's revision word marks an unencrypted
+            // debug image, which `sce::decrypt_self_to_elf` refuses before
+            // the vault is consulted, so the keyset is never used.
+            None if is_debug_revision(&r) => Ok(None),
+            None => Err(KeyVaultError::BadRevision {
+                at: at.clone(),
+                value: r,
+            }),
+        },
+        (_, None, _) => Ok(Some(name.to_string())),
+    }
+}
+
+/// The key class a `LoadSelf<Class>Keys` function name on `line`
+/// announces, lowercased.
+fn constructor_kind_hint(line: &str) -> Option<String> {
+    let start = line.find("LoadSelf")?;
+    let rest = &line[start + "LoadSelf".len()..];
+    let end = rest.find("Keys")?;
+    Some(rest[..end].to_ascii_lowercase())
+}
+
+/// The key class an `sk_<class>_arr.emplace_back(` receiver names,
+/// lowercased.
+fn constructor_receiver_kind(line: &str) -> Option<String> {
+    let receiver = line.split(".emplace_back(").next()?.trim();
+    let name = receiver.strip_prefix("sk_")?.strip_suffix("_arr")?;
+    Some(name.to_ascii_lowercase())
+}
+
+/// `line` joined with the lines after it, up to the one that closes the
+/// call, or to the end of the text.
+fn join_constructor_row<'a>(
+    line: &str,
+    lines: &mut impl Iterator<Item = (usize, &'a str)>,
+) -> String {
+    let mut row = line.to_string();
+    while !row.contains(");") {
+        let Some((_, next)) = lines.next() else { break };
+        row.push(' ');
+        row.push_str(next.trim());
+    }
+    row
+}
+
+/// The name of a constructor row's `index`th hex string: `erk`, `riv`,
+/// `pub`, `priv`, then `component_<index>`.
+fn component_name(index: usize) -> String {
+    const NAMES: [&str; 4] = ["erk", "riv", "pub", "priv"];
+    NAMES
+        .get(index)
+        .map_or_else(|| format!("component_{index}"), |name| name.to_string())
 }
 
 /// The firmware versions an LV2 label names: the label itself
