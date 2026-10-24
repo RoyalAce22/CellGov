@@ -22,12 +22,7 @@ pub(crate) fn run(
             }),
             _,
         ) => {
-            if !MICROTESTS.contains(&name.as_str()) {
-                return Err(CommandError::failed(format!(
-                    "unknown microtest: {name}\navailable: {}",
-                    MICROTESTS.join(", ")
-                )));
-            }
+            require_microtest(name)?;
             match observations_dir {
                 Some(dir) => {
                     scenario::run_explore_micro_oracle(name, &dir.display().to_string(), format)
@@ -48,4 +43,15 @@ pub(crate) fn run(
             "explore: no scenario, micro-test or title named",
         )),
     }
+}
+
+/// Refuse a name the microtest registry does not hold.
+fn require_microtest(name: &str) -> Result<(), CommandError> {
+    if MICROTESTS.contains(&name) {
+        return Ok(());
+    }
+    Err(CommandError::failed(format!(
+        "unknown microtest: {name}\navailable: {}",
+        MICROTESTS.join(", ")
+    )))
 }
