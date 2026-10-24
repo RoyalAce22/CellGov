@@ -168,13 +168,31 @@ pub fn build(data: &[u8]) -> Result<FunctionMap, FuncMapError> {
     // reads below only ever see the ELF64-BE layout.
     let segments = pt_load_segments(data)?;
 
+    let (anchors, toc_set) = collect_anchors(data, &segments, e_type)?;
+    let mut starts = Starts::seeded(&segments, &anchors);
+    grow_scan(data, &segments, &toc_set, &anchors, &mut starts);
+    sweep_scan(data, &segments, &toc_set, &mut starts);
+    Ok(FunctionMap {
+        functions: spans(&segments, starts.map),
+        truncated: starts.truncated,
+    })
+}
+
+/// The anchor OPDs for an image of type `e_type`, and the TOC values
+/// they carry: the entry descriptor of a main ELF, or every export
+/// descriptor of a PRX.
+fn collect_anchors(
+    data: &[u8],
+    segments: &[LoadSegment],
+    e_type: u16,
+) -> Result<(Vec<Anchor>, BTreeSet<u32>), FuncMapError> {
     let mut anchors: Vec<Anchor> = Vec::new();
     let mut toc_set: BTreeSet<u32> = BTreeSet::new();
 
     match e_type {
         ET_EXEC => {
             let e_entry = u64::from_be_bytes(data[24..32].try_into().expect("8 bytes"));
-            if let Some((code, toc)) = deref_opd(data, &segments, e_entry) {
+            if let Some((code, toc)) = deref_opd(data, segments, e_entry) {
                 // Corrupt-OPD rule carried over from the PRX parser:
                 // toc == 0 rejects; code == 0 is legal.
                 if toc != 0 {
@@ -209,7 +227,7 @@ pub fn build(data: &[u8]) -> Result<FunctionMap, FuncMapError> {
             }
             for lib in &prx.exports {
                 for export in &lib.functions {
-                    let Some((code, toc)) = deref_opd(data, &segments, export.vaddr as u64) else {
+                    let Some((code, toc)) = deref_opd(data, segments, export.vaddr as u64) else {
                         continue;
                     };
                     if toc == 0 {
@@ -227,54 +245,82 @@ pub fn build(data: &[u8]) -> Result<FunctionMap, FuncMapError> {
         }
         other => return Err(FuncMapError::UnsupportedElfType(other)),
     }
+    Ok((anchors, toc_set))
+}
 
-    // First writer wins: anchors carry names, scan hits do not.
-    let mut starts: BTreeMap<u32, (FunctionName, FunctionOrigin)> = BTreeMap::new();
-    for anchor in &anchors {
-        if code_in_exec(&segments, anchor.code) {
-            starts
-                .entry(anchor.code)
-                .or_insert((anchor.name, anchor.origin));
+/// The function starts found so far, keyed by code address.
+///
+/// First writer wins: anchors carry names, scan hits do not.
+struct Starts {
+    map: BTreeMap<u32, (FunctionName, FunctionOrigin)>,
+    /// Set once a scan hit arrives with [`MAX_FUNCTIONS`] starts held.
+    truncated: bool,
+}
+
+impl Starts {
+    /// The starts of every anchor whose code lies in an executable
+    /// segment.
+    fn seeded(segments: &[LoadSegment], anchors: &[Anchor]) -> Self {
+        let mut map = BTreeMap::new();
+        for anchor in anchors {
+            if code_in_exec(segments, anchor.code) {
+                map.entry(anchor.code)
+                    .or_insert((anchor.name, anchor.origin));
+            }
+        }
+        Self {
+            map,
+            truncated: false,
         }
     }
 
-    let mut truncated = false;
-    let mut insert_scanned = |starts: &mut BTreeMap<u32, (FunctionName, FunctionOrigin)>,
-                              code: u32| {
-        if starts.len() >= MAX_FUNCTIONS {
-            truncated = true;
+    /// Adds a scan-discovered start; `false` once the map holds
+    /// [`MAX_FUNCTIONS`] starts.
+    fn insert_scanned(&mut self, code: u32) -> bool {
+        if self.map.len() >= MAX_FUNCTIONS {
+            self.truncated = true;
             return false;
         }
-        starts
+        self.map
             .entry(code)
             .or_insert((FunctionName::Synthetic, FunctionOrigin::OpdScan));
         true
-    };
+    }
+}
 
-    // Grow scan: the `.opd` data is a contiguous run of descriptors;
-    // seed at each anchor and extend in 8-byte steps while entries
-    // validate.
-    for anchor in &anchors {
+/// Grow scan: the `.opd` data is a contiguous run of descriptors;
+/// seed at each anchor and extend in 8-byte steps while entries
+/// validate.
+fn grow_scan(
+    data: &[u8],
+    segments: &[LoadSegment],
+    toc_set: &BTreeSet<u32>,
+    anchors: &[Anchor],
+    starts: &mut Starts,
+) {
+    for anchor in anchors {
         for step in [8i64, -8] {
             let mut vaddr = anchor.opd_vaddr;
             loop {
                 vaddr = vaddr.wrapping_add(step as u64);
-                let Some(code) = validate_descriptor(data, &segments, &toc_set, vaddr) else {
+                let Some(code) = validate_descriptor(data, segments, toc_set, vaddr) else {
                     break;
                 };
-                if !insert_scanned(&mut starts, code) {
+                if !starts.insert_scanned(code) {
                     break;
                 }
             }
         }
     }
+}
 
-    // Fallback sweep over all non-executable file-backed bytes;
-    // the TOC-set check does the false-positive filtering. The walk
-    // ends at the file end: nothing validates `p_filesz`, and a
-    // claim far past the file would cost this loop one step per
-    // claimed word.
-    'sweep: for seg in segments.iter().filter(|s| !s.executable) {
+/// Fallback sweep over all non-executable file-backed bytes;
+/// the TOC-set check does the false-positive filtering. The walk
+/// ends at the file end: nothing validates `p_filesz`, and a
+/// claim far past the file would cost this loop one step per
+/// claimed word.
+fn sweep_scan(data: &[u8], segments: &[LoadSegment], toc_set: &BTreeSet<u32>, starts: &mut Starts) {
+    for seg in segments.iter().filter(|s| !s.executable) {
         let backed = (data.len() as u64)
             .saturating_sub(seg.file_offset)
             .min(seg.filesz);
@@ -285,17 +331,23 @@ pub fn build(data: &[u8]) -> Result<FunctionMap, FuncMapError> {
             let Some(vaddr) = seg.vaddr.checked_add(offset) else {
                 break;
             };
-            if let Some(code) = validate_descriptor(data, &segments, &toc_set, vaddr) {
-                if !insert_scanned(&mut starts, code) {
-                    break 'sweep;
-                }
-            }
             offset += 4;
+            let Some(code) = validate_descriptor(data, segments, toc_set, vaddr) else {
+                continue;
+            };
+            if !starts.insert_scanned(code) {
+                return;
+            }
         }
     }
+}
 
-    // Spans: end = next start, clamped to the containing executable
-    // segment's file-backed range.
+/// Spans: end = next start, clamped to the containing executable
+/// segment's file-backed range.
+fn spans(
+    segments: &[LoadSegment],
+    starts: BTreeMap<u32, (FunctionName, FunctionOrigin)>,
+) -> Vec<FunctionSpan> {
     let ordered: Vec<(u32, FunctionName, FunctionOrigin)> = starts
         .into_iter()
         .map(|(start, (name, origin))| (start, name, origin))
@@ -322,11 +374,7 @@ pub fn build(data: &[u8]) -> Result<FunctionMap, FuncMapError> {
             origin,
         });
     }
-
-    Ok(FunctionMap {
-        functions,
-        truncated,
-    })
+    functions
 }
 
 /// Read the `{ code, toc }` pair at `vaddr` if the full 8 bytes are
