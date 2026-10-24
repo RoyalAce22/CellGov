@@ -199,13 +199,19 @@ pub fn run_one_path(
     if data.is_empty() {
         return Err(PpuPathError::EmptyData);
     }
-    let code = words
+    let code = path_code(words);
+    run_path(path, &code, &code, words.len(), initial, data, None)
+}
+
+/// The code region for `words`: the words, then as many `ori r0,r0,0`
+/// no-ops after them.
+fn path_code(words: &[u32]) -> Vec<u8> {
+    words
         .iter()
         .copied()
         .chain(std::iter::repeat_n(24 << 26, words.len()))
         .flat_map(u32::to_be_bytes)
-        .collect::<Vec<_>>();
-    run_path(path, &code, &code, words.len(), initial, data, None)
+        .collect()
 }
 
 /// Compares internal paths after rewriting one word and invalidating any cached shadow slots.
@@ -237,12 +243,7 @@ fn run_paths(
     if data.is_empty() {
         return Err(PpuPathError::EmptyData);
     }
-    let shadow_code = words
-        .iter()
-        .copied()
-        .chain(std::iter::repeat_n(24 << 26, words.len()))
-        .flat_map(u32::to_be_bytes)
-        .collect::<Vec<_>>();
+    let shadow_code = path_code(words);
     let mut code = shadow_code.clone();
     if let Some((word_index, replacement)) = mutation {
         let start = word_index * 4;
@@ -318,75 +319,56 @@ fn run_path(
     *unit.state_mut() = initial.clone();
     let trace = Rc::new(DispatchTrace::default());
     unit.set_tap(trace.clone());
-    match path {
-        PpuExecutionPath::Quickened => {
-            let mut shadow = PredecodedShadow::build_quickened(0, shadow_code);
-            if let Some(pc) = invalidated_pc {
-                shadow.invalidate_range(pc, 4);
-            }
-            unit.set_instruction_shadow(shadow);
+    let shadow = match path {
+        PpuExecutionPath::Quickened => Some(PredecodedShadow::build_quickened(0, shadow_code)),
+        PpuExecutionPath::Fused => Some(PredecodedShadow::build(0, shadow_code)),
+        PpuExecutionPath::Plain | PpuExecutionPath::Forwarded => None,
+    };
+    if let Some(mut shadow) = shadow {
+        if let Some(pc) = invalidated_pc {
+            shadow.invalidate_range(pc, 4);
         }
-        PpuExecutionPath::Fused => {
-            let mut shadow = PredecodedShadow::build(0, shadow_code);
-            if let Some(pc) = invalidated_pc {
-                shadow.invalidate_range(pc, 4);
-            }
-            unit.set_instruction_shadow(shadow);
-        }
-        PpuExecutionPath::Plain | PpuExecutionPath::Forwarded => {}
+        unit.set_instruction_shadow(shadow);
     }
 
-    let mut data = initial_data.to_vec();
-    let mut reservations = initial_reservations(initial);
-    let mut effects_all = Vec::new();
-    let mut committed_data_reads = Vec::new();
-    let mut retired = 0u64;
-    let mut final_result = None;
-    let batches = 1;
-    for _ in 0..batches {
-        let memory = make_memory(code, &data)?;
-        let entry = unit.state().clone();
-        let mut effects = Vec::new();
-        let ctx = ExecutionContext::new(&memory).with_reservations(&reservations);
-        let retired_before = unit.retired_instructions();
-        let result = unit.run_until_yield(budget, &ctx, &mut effects);
-        retired = retired.saturating_add(unit.retired_instructions() - retired_before);
-        let observed = finish_observation(PpuObservationInput {
-            initial_state: &entry,
-            final_state: unit.state(),
-            memory_base: DATA_BASE,
-            initial_memory: &data,
-            outcome: PpuObservedOutcome::RuntimeStep(Box::new(result.clone())),
-            effects,
-            stores: StoreBuffer::new(),
-            unit: UNIT,
-        })?;
-        refuse_commit(path, &observed)?;
-        committed_data_reads.extend(observed.committed_effects.iter().filter_map(|effect| {
-            match effect {
-                cellgov_effects::Effect::SharedReadIntent { range, .. }
-                    if range.start().raw() >= DATA_BASE =>
-                {
-                    Some(*range)
-                }
-                _ => None,
+    let memory = make_memory(code, initial_data)?;
+    let entry = unit.state().clone();
+    let mut effects = Vec::new();
+    let reservations = initial_reservations(initial);
+    let ctx = ExecutionContext::new(&memory).with_reservations(&reservations);
+    let retired_before = unit.retired_instructions();
+    let result = unit.run_until_yield(budget, &ctx, &mut effects);
+    let retired = unit.retired_instructions() - retired_before;
+    let observed = finish_observation(PpuObservationInput {
+        initial_state: &entry,
+        final_state: unit.state(),
+        memory_base: DATA_BASE,
+        initial_memory: initial_data,
+        outcome: PpuObservedOutcome::RuntimeStep(Box::new(result.clone())),
+        effects,
+        stores: StoreBuffer::new(),
+        unit: UNIT,
+    })?;
+    refuse_commit(path, &observed)?;
+    let committed_data_reads = observed
+        .committed_effects
+        .iter()
+        .filter_map(|effect| match effect {
+            cellgov_effects::Effect::SharedReadIntent { range, .. }
+                if range.start().raw() >= DATA_BASE =>
+            {
+                Some(*range)
             }
-        }));
-        data = observed.memory;
-        reservations = reservation_table(&observed.reservations);
-        effects_all.extend(
-            observed
-                .committed_effects
-                .into_iter()
-                .filter(|effect| !is_read_intent(effect)),
-        );
-        let reason = result.yield_reason;
-        final_result = Some(result);
-        if reason != YieldReason::BudgetExhausted {
-            break;
-        }
-    }
-    let result = final_result.ok_or(PpuPathError::EmptySequence)?;
+            _ => None,
+        })
+        .collect();
+    let data = observed.memory;
+    let reservations = reservation_table(&observed.reservations);
+    let effects_all: Vec<_> = observed
+        .committed_effects
+        .into_iter()
+        .filter(|effect| !is_read_intent(effect))
+        .collect();
     let stop = PpuPathStop {
         reason: result.yield_reason,
         fault: result.fault,
@@ -423,68 +405,33 @@ fn run_plain(
     initial: &PpuState,
     initial_data: &[u8],
 ) -> Result<PpuPathRun, PpuPathError> {
-    let mut state = initial.clone();
-    let mut data = initial_data.to_vec();
-    let mut reservations = initial_reservations(initial);
-    let mut effects_all = Vec::new();
-    let mut committed_data_reads = Vec::new();
-    let mut forwarding = StoreBuffer::new();
-    let mut executed_pcs = Vec::new();
-    let mut retired = 0u64;
-    let mut stop = PpuPathStop {
-        reason: YieldReason::BudgetExhausted,
-        fault: None,
-        pc: Some(0),
-        diagnostics: LocalDiagnostics::with_pc(0),
-        syscall_args: None,
-    };
+    let mut run = PlainRun::new(initial, initial_data);
     for _ in 0..words {
-        let step_pc = state.pc;
-        let Some(index) = step_pc
-            .checked_div(4)
-            .and_then(|value| usize::try_from(value).ok())
-        else {
+        let step_pc = run.state.pc;
+        let Some(raw) = fetch_word(code, step_pc) else {
             break;
         };
-        let Some(start) = index.checked_mul(4) else {
-            break;
-        };
-        let Some(end) = start.checked_add(4) else {
-            break;
-        };
-        let Some(bytes) = code.get(start..end) else {
-            break;
-        };
-        let raw = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         let Ok(instruction) = decode(raw) else {
-            let diagnostics = fault_diagnostics(&state, step_pc, None);
-            state = initial.clone();
-            data.copy_from_slice(initial_data);
-            reservations = initial_reservations(initial);
-            effects_all.clear();
-            committed_data_reads.clear();
-            forwarding.clear();
-            retired = 0;
-            stop = PpuPathStop {
-                reason: YieldReason::Fault,
-                fault: Some(FaultKind::Guest(cellgov_ppu::FAULT_DECODE_ERROR)),
-                pc: Some(step_pc),
-                diagnostics,
-                syscall_args: None,
-            };
+            run.discard_on_fault(
+                initial,
+                initial_data,
+                step_pc,
+                cellgov_ppu::FAULT_DECODE_ERROR,
+                None,
+            );
             break;
         };
-        let entry = state.clone();
-        executed_pcs.push(step_pc);
+        let entry = run.state.clone();
+        run.executed_pcs.push(step_pc);
         let mut effects = Vec::new();
         let mut stores = StoreBuffer::new();
         let views = [
             RegionView::plain(0, code),
-            RegionView::plain(DATA_BASE, &data),
+            RegionView::plain(DATA_BASE, &run.data),
         ];
         let verdict = execute(
             &instruction,
-            &mut state,
+            &mut run.state,
             UNIT,
             &views,
             &mut effects,
@@ -492,163 +439,247 @@ fn run_plain(
         );
         stores.flush(&mut effects, UNIT);
         match &verdict {
-            ExecuteVerdict::Continue => state.pc = state.pc.wrapping_add(4),
+            ExecuteVerdict::Continue => run.state.pc = run.state.pc.wrapping_add(4),
             ExecuteVerdict::Branch => {}
             ExecuteVerdict::Fault(fault) => {
-                let ea = match fault {
-                    cellgov_ppu::exec::PpuFault::PcOutOfRange(addr)
-                    | cellgov_ppu::exec::PpuFault::InvalidAddress(addr)
-                    | cellgov_ppu::exec::PpuFault::AlignmentInterrupt(addr) => Some(*addr),
-                    cellgov_ppu::exec::PpuFault::UnsupportedSyscall(_)
-                    | cellgov_ppu::exec::PpuFault::UnimplementedInstruction(_)
-                    | cellgov_ppu::exec::PpuFault::ProgramTrap(_)
-                    | cellgov_ppu::exec::PpuFault::InvalidForm(_) => None,
-                };
-                let diagnostics = fault_diagnostics(&state, step_pc, ea);
-                state = initial.clone();
-                data.copy_from_slice(initial_data);
-                reservations = initial_reservations(initial);
-                effects_all.clear();
-                committed_data_reads.clear();
-                forwarding.clear();
-                retired = 0;
-                stop = PpuPathStop {
-                    reason: YieldReason::Fault,
-                    fault: Some(FaultKind::Guest(fault.guest_code())),
-                    pc: Some(step_pc),
-                    diagnostics,
-                    syscall_args: None,
-                };
+                let ea = ppu_fault_ea(fault);
+                run.discard_on_fault(initial, initial_data, step_pc, fault.guest_code(), ea);
                 break;
             }
             ExecuteVerdict::MemFault(error) => {
-                let ea = match error {
-                    MemError::Unmapped(context) => Some(context.addr),
-                    MemError::ReservedWrite { addr, .. }
-                    | MemError::ReservedStrictRead { addr, .. } => Some(*addr),
-                    MemError::LengthMismatch
-                    | MemError::OverlappingRegions
-                    | MemError::RegionOverflow { .. }
-                    | MemError::NoSuchRegion { .. } => None,
-                };
-                let diagnostics = fault_diagnostics(&state, step_pc, ea);
-                state = initial.clone();
-                data.copy_from_slice(initial_data);
-                reservations = initial_reservations(initial);
-                effects_all.clear();
-                committed_data_reads.clear();
-                forwarding.clear();
-                retired = 0;
-                stop = PpuPathStop {
-                    reason: YieldReason::Fault,
-                    fault: Some(FaultKind::Guest(cellgov_ppu::FAULT_INVALID_ADDRESS)),
-                    pc: Some(step_pc),
-                    diagnostics,
-                    syscall_args: None,
-                };
+                let code = cellgov_ppu::FAULT_INVALID_ADDRESS;
+                let ea = mem_fault_ea(error);
+                run.discard_on_fault(initial, initial_data, step_pc, code, ea);
                 break;
             }
             ExecuteVerdict::Syscall { lev } => {
-                stop = PpuPathStop {
+                run.stop = PpuPathStop {
                     reason: YieldReason::Syscall,
                     fault: None,
                     pc: Some(step_pc),
                     diagnostics: LocalDiagnostics::with_pc_lr_syscall_lev(
                         step_pc,
-                        state.lr(),
+                        run.state.lr(),
                         *lev,
                     ),
-                    syscall_args: Some(cellgov_ppu::state::ppu_syscall_args(&state)),
+                    syscall_args: Some(cellgov_ppu::state::ppu_syscall_args(&run.state)),
                 };
                 break;
             }
             ExecuteVerdict::BufferFull => {
-                stop.pc = Some(step_pc);
-                stop.diagnostics = LocalDiagnostics::with_pc(step_pc);
+                run.stop.pc = Some(step_pc);
+                run.stop.diagnostics = LocalDiagnostics::with_pc(step_pc);
                 break;
             }
         }
-        retired = retired.saturating_add(1);
+        run.retired = run.retired.saturating_add(1);
         let observed = finish_observation(PpuObservationInput {
             initial_state: &entry,
-            final_state: &state,
+            final_state: &run.state,
             memory_base: DATA_BASE,
-            initial_memory: &data,
+            initial_memory: &run.data,
             outcome: PpuObservedOutcome::Execution(verdict),
             effects,
             stores: StoreBuffer::new(),
             unit: UNIT,
         })?;
         refuse_commit(PpuExecutionPath::Plain, &observed)?;
-        committed_data_reads.extend(observed.committed_effects.iter().filter_map(|effect| {
-            match effect {
-                cellgov_effects::Effect::SharedReadIntent { range, .. }
-                    if u8::try_from(range.length()).ok().is_none_or(|len| {
-                        forwarding.forward(range.start().raw(), len).is_none()
-                    }) =>
-                {
-                    Some(*range)
-                }
-                _ => None,
-            }
-        }));
-        for effect in &observed.committed_effects {
-            let (range, bytes) = match effect {
-                cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. }
-                | cellgov_effects::Effect::ConditionalStore { range, bytes, .. } => (range, bytes),
-                _ => continue,
-            };
-            let len = u8::try_from(range.length())
-                .ok()
-                .filter(|len| (1..=16).contains(len))
-                .ok_or(PpuPathError::ForwardingWidth {
-                    length: range.length(),
-                })?;
-            let value = bytes
-                .bytes()
-                .iter()
-                .fold(0u128, |value, byte| (value << 8) | u128::from(*byte));
-            match forwarding.insert(range.start().raw(), len, value) {
-                Ok(()) => {}
-                Err(cellgov_ppu::store_buffer::StoreRefusal::Full) => {
-                    return Err(PpuPathError::ForwardingCapacity {
-                        addr: range.start().raw(),
-                    });
-                }
-                Err(source) => return Err(PpuPathError::ForwardingRefused { source }),
-            }
+        run.absorb(observed, step_pc)?;
+    }
+    Ok(run.finish())
+}
+
+/// The mutable state of one plain run, which retires one instruction
+/// per step.
+struct PlainRun {
+    state: PpuState,
+    data: Vec<u8>,
+    reservations: ReservationTable,
+    effects_all: Vec<cellgov_effects::Effect>,
+    committed_data_reads: Vec<ByteRange>,
+    forwarding: StoreBuffer,
+    executed_pcs: Vec<u64>,
+    retired: u64,
+    stop: PpuPathStop,
+}
+
+impl PlainRun {
+    fn new(initial: &PpuState, initial_data: &[u8]) -> Self {
+        Self {
+            state: initial.clone(),
+            data: initial_data.to_vec(),
+            reservations: initial_reservations(initial),
+            effects_all: Vec::new(),
+            committed_data_reads: Vec::new(),
+            forwarding: StoreBuffer::new(),
+            executed_pcs: Vec::new(),
+            retired: 0,
+            stop: PpuPathStop {
+                reason: YieldReason::BudgetExhausted,
+                fault: None,
+                pc: Some(0),
+                diagnostics: LocalDiagnostics::with_pc(0),
+                syscall_args: None,
+            },
         }
-        data = observed.memory;
-        reservations = reservation_table(&observed.reservations);
-        effects_all.extend(
+    }
+
+    /// Record a guest fault at `step_pc` and discard every commit, the
+    /// same as a batch fault. The diagnostics capture the state at the
+    /// fault before the reset; `executed_pcs` keeps every PC the run
+    /// reached.
+    fn discard_on_fault(
+        &mut self,
+        initial: &PpuState,
+        initial_data: &[u8],
+        step_pc: u64,
+        code: u32,
+        ea: Option<u64>,
+    ) {
+        let diagnostics = fault_diagnostics(&self.state, step_pc, ea);
+        self.state = initial.clone();
+        self.data.copy_from_slice(initial_data);
+        self.reservations = initial_reservations(initial);
+        self.effects_all.clear();
+        self.committed_data_reads.clear();
+        self.forwarding.clear();
+        self.retired = 0;
+        self.stop = PpuPathStop {
+            reason: YieldReason::Fault,
+            fault: Some(FaultKind::Guest(code)),
+            pc: Some(step_pc),
+            diagnostics,
+            syscall_args: None,
+        };
+    }
+
+    /// Take one committed step into the run. A data read counts only
+    /// when the forwarding buffer cannot serve it, so the filter runs
+    /// before this step's stores enter the buffer.
+    fn absorb(&mut self, observed: PpuObservation, step_pc: u64) -> Result<(), PpuPathError> {
+        let forwarding = &self.forwarding;
+        self.committed_data_reads
+            .extend(
+                observed
+                    .committed_effects
+                    .iter()
+                    .filter_map(|effect| match effect {
+                        cellgov_effects::Effect::SharedReadIntent { range, .. }
+                            if u8::try_from(range.length()).ok().is_none_or(|len| {
+                                forwarding.forward(range.start().raw(), len).is_none()
+                            }) =>
+                        {
+                            Some(*range)
+                        }
+                        _ => None,
+                    }),
+            );
+        forward_committed_stores(&mut self.forwarding, &observed.committed_effects)?;
+        self.data = observed.memory;
+        self.reservations = reservation_table(&observed.reservations);
+        self.effects_all.extend(
             observed
                 .committed_effects
                 .into_iter()
                 .filter(|effect| !is_read_intent(effect)),
         );
-        stop.pc = Some(step_pc);
-        stop.diagnostics = LocalDiagnostics::with_pc(step_pc);
+        self.stop.pc = Some(step_pc);
+        self.stop.diagnostics = LocalDiagnostics::with_pc(step_pc);
+        Ok(())
     }
-    let mut observation = PpuObservation {
-        state: PpuArchitecturalState::capture(&state),
-        memory: data,
-        outcome: PpuObservedOutcome::NoInstruction,
-        staged_effects: effects_all.clone(),
-        committed_effects: effects_all,
-        commit_error: None,
-        reservations: reservations.iter().collect(),
-        store_buffer: Vec::new(),
-        fault_discarded: stop.reason == YieldReason::Fault,
-    };
-    crate::seeded::ppu_observed(&mut observation);
-    Ok(PpuPathRun {
-        path: PpuExecutionPath::Plain,
-        observation,
-        stop,
-        retired,
-        executed_pcs,
-        committed_data_reads,
-    })
+
+    fn finish(self) -> PpuPathRun {
+        let mut observation = PpuObservation {
+            state: PpuArchitecturalState::capture(&self.state),
+            memory: self.data,
+            outcome: PpuObservedOutcome::NoInstruction,
+            staged_effects: self.effects_all.clone(),
+            committed_effects: self.effects_all,
+            commit_error: None,
+            reservations: self.reservations.iter().collect(),
+            store_buffer: Vec::new(),
+            fault_discarded: self.stop.reason == YieldReason::Fault,
+        };
+        crate::seeded::ppu_observed(&mut observation);
+        PpuPathRun {
+            path: PpuExecutionPath::Plain,
+            observation,
+            stop: self.stop,
+            retired: self.retired,
+            executed_pcs: self.executed_pcs,
+            committed_data_reads: self.committed_data_reads,
+        }
+    }
+}
+
+/// The big-endian word at `pc`, or `None` past the code region.
+fn fetch_word(code: &[u8], pc: u64) -> Option<u32> {
+    let index = usize::try_from(pc.checked_div(4)?).ok()?;
+    let start = index.checked_mul(4)?;
+    let end = start.checked_add(4)?;
+    let bytes = code.get(start..end)?;
+    Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+/// Insert every committed store into the forwarding buffer.
+fn forward_committed_stores(
+    forwarding: &mut StoreBuffer,
+    effects: &[cellgov_effects::Effect],
+) -> Result<(), PpuPathError> {
+    for effect in effects {
+        let (range, bytes) = match effect {
+            cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. }
+            | cellgov_effects::Effect::ConditionalStore { range, bytes, .. } => (range, bytes),
+            _ => continue,
+        };
+        let len = u8::try_from(range.length())
+            .ok()
+            .filter(|len| (1..=16).contains(len))
+            .ok_or(PpuPathError::ForwardingWidth {
+                length: range.length(),
+            })?;
+        let value = bytes
+            .bytes()
+            .iter()
+            .fold(0u128, |value, byte| (value << 8) | u128::from(*byte));
+        match forwarding.insert(range.start().raw(), len, value) {
+            Ok(()) => {}
+            Err(cellgov_ppu::store_buffer::StoreRefusal::Full) => {
+                return Err(PpuPathError::ForwardingCapacity {
+                    addr: range.start().raw(),
+                });
+            }
+            Err(source) => return Err(PpuPathError::ForwardingRefused { source }),
+        }
+    }
+    Ok(())
+}
+
+/// The effective address a PPU fault names, if it names one.
+fn ppu_fault_ea(fault: &cellgov_ppu::exec::PpuFault) -> Option<u64> {
+    match fault {
+        cellgov_ppu::exec::PpuFault::PcOutOfRange(addr)
+        | cellgov_ppu::exec::PpuFault::InvalidAddress(addr)
+        | cellgov_ppu::exec::PpuFault::AlignmentInterrupt(addr) => Some(*addr),
+        cellgov_ppu::exec::PpuFault::UnsupportedSyscall(_)
+        | cellgov_ppu::exec::PpuFault::UnimplementedInstruction(_)
+        | cellgov_ppu::exec::PpuFault::ProgramTrap(_)
+        | cellgov_ppu::exec::PpuFault::InvalidForm(_) => None,
+    }
+}
+
+/// The address a memory fault names, if it names one.
+fn mem_fault_ea(error: &MemError) -> Option<u64> {
+    match error {
+        MemError::Unmapped(context) => Some(context.addr),
+        MemError::ReservedWrite { addr, .. } | MemError::ReservedStrictRead { addr, .. } => {
+            Some(*addr)
+        }
+        MemError::LengthMismatch
+        | MemError::OverlappingRegions
+        | MemError::RegionOverflow { .. }
+        | MemError::NoSuchRegion { .. } => None,
+    }
 }
 
 fn is_read_intent(effect: &cellgov_effects::Effect) -> bool {
