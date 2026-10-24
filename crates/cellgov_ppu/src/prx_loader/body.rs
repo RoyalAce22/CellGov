@@ -349,18 +349,55 @@ pub fn load_firmware_set(
     memory: &mut cellgov_mem::GuestMemory,
     base: u64,
 ) -> Result<FirmwareImage, PrxLoaderError> {
+    let set = parse_firmware_modules(&bytes_by_path)?;
+    let import_targets_by_id =
+        resolve_import_targets(&set.imports_by_id, &set.provider_of_namespace)?;
+    let dep_graph = graph::topological_sort(&dependency_edges(&import_targets_by_id))?;
+    let loaded = place_modules(&set.parsed_by_id, memory, base, &dep_graph.order)?;
+    let export_table = FirmwareExportTable::build(&loaded, &dep_graph.order)?;
+    patch_firmware_imports(
+        &set.imports_by_id,
+        &loaded,
+        &export_table,
+        &dep_graph.order,
+        memory,
+    )?;
+
+    Ok(FirmwareImage {
+        loaded,
+        export_table,
+        topological_order: dep_graph.order,
+        imports_by_id: import_targets_by_id,
+        shadowed_export_libraries: set.shadowed_export_libraries,
+    })
+}
+
+/// The parsed modules of one firmware set, with their imports and the
+/// namespace each one provides.
+struct ParsedSet {
+    parsed_by_id: BTreeMap<PrxModuleId, (crate::sprx::ParsedPrx, Vec<u8>)>,
+    imports_by_id: BTreeMap<PrxModuleId, Vec<crate::prx::ImportedModule>>,
+    /// namespace_id (hash of an export-table module name like
+    /// "sysPrxForUser") -> the parsed module that publishes it. A
+    /// PRX's file-level identity (`parsed.module_id`) is distinct
+    /// from the names it exports under.
+    provider_of_namespace: BTreeMap<PrxModuleId, PrxModuleId>,
+    shadowed_export_libraries: Vec<(String, PrxModuleId, PrxModuleId)>,
+}
+
+/// Parses every module in path order and assigns each exported
+/// namespace to its first publisher.
+fn parse_firmware_modules(
+    bytes_by_path: &BTreeMap<String, Vec<u8>>,
+) -> Result<ParsedSet, PrxLoaderError> {
     let mut parsed_by_id: BTreeMap<PrxModuleId, (crate::sprx::ParsedPrx, Vec<u8>)> =
         BTreeMap::new();
     let mut path_by_id: BTreeMap<PrxModuleId, String> = BTreeMap::new();
     let mut imports_by_id: BTreeMap<PrxModuleId, Vec<crate::prx::ImportedModule>> = BTreeMap::new();
-    // namespace_id (hash of an export-table module name like
-    // "sysPrxForUser") -> the parsed module that publishes it. A
-    // PRX's file-level identity (`parsed.module_id`) is distinct
-    // from the names it exports under.
     let mut provider_of_namespace: BTreeMap<PrxModuleId, PrxModuleId> = BTreeMap::new();
     let mut shadowed_export_libraries: Vec<(String, PrxModuleId, PrxModuleId)> = Vec::new();
 
-    for (path, bytes) in &bytes_by_path {
+    for (path, bytes) in bytes_by_path {
         let parsed = crate::sprx::parse_prx(bytes).map_err(PrxLoaderError::Parse)?;
         let id = parsed.module_id;
         if let Some(first_path) = path_by_id.get(&id) {
@@ -398,13 +435,24 @@ pub fn load_firmware_set(
         path_by_id.insert(id, path.clone());
         parsed_by_id.insert(id, (parsed, bytes.clone()));
     }
+    Ok(ParsedSet {
+        parsed_by_id,
+        imports_by_id,
+        provider_of_namespace,
+        shadowed_export_libraries,
+    })
+}
 
-    // Translate each import's namespace name to the providing
-    // module's id. A namespace with no provider in this closure
-    // surfaces as MissingDependency unless it is on the
-    // PERMITTED_MISSING_NAMESPACES allowlist.
+/// Translates each import's namespace name to the providing module's
+/// id. A namespace with no provider in this closure surfaces as
+/// MissingDependency unless it is on the PERMITTED_MISSING_NAMESPACES
+/// allowlist.
+fn resolve_import_targets(
+    imports_by_id: &BTreeMap<PrxModuleId, Vec<crate::prx::ImportedModule>>,
+    provider_of_namespace: &BTreeMap<PrxModuleId, PrxModuleId>,
+) -> Result<BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>>, PrxLoaderError> {
     let mut import_targets_by_id: BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>> = BTreeMap::new();
-    for (importer, imports) in &imports_by_id {
+    for (importer, imports) in imports_by_id {
         let mut targets: BTreeSet<PrxModuleId> = BTreeSet::new();
         for imp in imports {
             let ns_id = graph::module_id_from_name(&imp.name);
@@ -424,25 +472,39 @@ pub fn load_firmware_set(
         }
         import_targets_by_id.insert(*importer, targets);
     }
+    Ok(import_targets_by_id)
+}
 
-    // Self-imports are dropped here so they never reach
-    // topological_sort, which treats a self-edge as a cycle. The
-    // `entry(*importer).or_default()` outside the inner loop
-    // ensures every parsed module is a graph key even if it has
-    // zero imports.
+/// The reversed dependency edges: provider -> the modules importing it.
+///
+/// Self-imports are already gone, so they never reach
+/// topological_sort, which treats a self-edge as a cycle. The
+/// `entry(*importer).or_default()` outside the inner loop ensures
+/// every parsed module is a graph key even if it has zero imports.
+fn dependency_edges(
+    import_targets_by_id: &BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>>,
+) -> BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>> {
     let mut edges: BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>> = BTreeMap::new();
-    for (importer, targets) in &import_targets_by_id {
+    for (importer, targets) in import_targets_by_id {
         edges.entry(*importer).or_default();
         for &target in targets {
             edges.entry(target).or_default().insert(*importer);
         }
     }
+    edges
+}
 
-    let dep_graph = graph::topological_sort(&edges)?;
-
+/// Loads the modules in `order` at successive 64K-aligned bases from
+/// `base`.
+fn place_modules(
+    parsed_by_id: &BTreeMap<PrxModuleId, (crate::sprx::ParsedPrx, Vec<u8>)>,
+    memory: &mut cellgov_mem::GuestMemory,
+    base: u64,
+    order: &[PrxModuleId],
+) -> Result<BTreeMap<PrxModuleId, LoadedPrx>, PrxLoaderError> {
     let mut loaded: BTreeMap<PrxModuleId, LoadedPrx> = BTreeMap::new();
     let mut cursor = base;
-    for id in &dep_graph.order {
+    for id in order {
         let Some((parsed, _)) = parsed_by_id.get(id) else {
             continue;
         };
@@ -451,10 +513,19 @@ pub fn load_firmware_set(
         cursor = l.resident_end();
         loaded.insert(*id, l);
     }
+    Ok(loaded)
+}
 
-    let export_table = FirmwareExportTable::build(&loaded, &dep_graph.order)?;
-
-    for id in &dep_graph.order {
+/// Patches each loaded module's import GOT slots against the set's
+/// export table, in load order.
+fn patch_firmware_imports(
+    imports_by_id: &BTreeMap<PrxModuleId, Vec<crate::prx::ImportedModule>>,
+    loaded: &BTreeMap<PrxModuleId, LoadedPrx>,
+    export_table: &FirmwareExportTable,
+    order: &[PrxModuleId],
+    memory: &mut cellgov_mem::GuestMemory,
+) -> Result<(), PrxLoaderError> {
+    for id in order {
         let Some(imports) = imports_by_id.get(id) else {
             continue;
         };
@@ -475,16 +546,9 @@ pub fn load_firmware_set(
             .get(id)
             .map(|l| l.base)
             .expect("dep_graph.order id present in loaded");
-        patch_imports_against(&filtered, &export_table, load_base, memory)?;
+        patch_imports_against(&filtered, export_table, load_base, memory)?;
     }
-
-    Ok(FirmwareImage {
-        loaded,
-        export_table,
-        topological_order: dep_graph.order,
-        imports_by_id: import_targets_by_id,
-        shadowed_export_libraries,
-    })
+    Ok(())
 }
 
 /// Patch the game ELF's import GOT slots against
