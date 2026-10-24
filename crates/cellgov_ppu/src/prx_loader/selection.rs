@@ -96,8 +96,42 @@ pub fn select_import_closure(
     candidates: &BTreeMap<String, Vec<u8>>,
     roots: Option<&BTreeSet<String>>,
 ) -> Result<ClosureSelection, PrxLoaderError> {
-    let mut parsed: BTreeMap<&str, Candidate> = BTreeMap::new();
     let mut pruned: Vec<(String, PruneReason)> = Vec::new();
+    let parsed = parse_candidates(candidates, &mut pruned)?;
+    let viable = prune_unprovided(&parsed, &mut pruned);
+    let provider = provider_index(&parsed, &viable);
+    let selected: BTreeSet<String> = match roots {
+        None => viable.iter().map(|p| (*p).to_string()).collect(),
+        Some(roots) => provider_closure(&parsed, &provider, roots)
+            .iter()
+            .map(|p| (*p).to_string())
+            .collect(),
+    };
+
+    let unprovided_roots = roots
+        .map(|roots| {
+            roots
+                .iter()
+                .filter(|ns| !provider.contains_key(ns.as_str()))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(ClosureSelection {
+        selected,
+        pruned,
+        unprovided_roots,
+    })
+}
+
+/// Parses every candidate, pruning a duplicate module identity and a
+/// known-deferred loader gap into `pruned`.
+fn parse_candidates<'a>(
+    candidates: &'a BTreeMap<String, Vec<u8>>,
+    pruned: &mut Vec<(String, PruneReason)>,
+) -> Result<BTreeMap<&'a str, Candidate>, PrxLoaderError> {
+    let mut parsed: BTreeMap<&str, Candidate> = BTreeMap::new();
     let mut id_owner: BTreeMap<super::PrxModuleId, &str> = BTreeMap::new();
     for (path, bytes) in candidates {
         let prx = crate::sprx::parse_prx(bytes).map_err(|source| {
@@ -119,44 +153,9 @@ pub fn select_import_closure(
         // parses but the loader would reject it, so it is dropped the
         // same way an unsatisfiable import drops a module. Any other
         // loadability failure stays a hard error.
-        match super::body::check_loadable(bytes) {
-            Ok(()) => {}
-            Err(PrxLoaderError::RelocSegmentOutOfRange {
-                segment_idx,
-                segment_count,
-                ..
-            }) => {
-                pruned.push((
-                    path.clone(),
-                    PruneReason::RelocSegmentOutOfRange {
-                        segment_idx,
-                        segment_count,
-                    },
-                ));
-                continue;
-            }
-            Err(PrxLoaderError::RelocWithoutValueSegment { rtype, .. }) => {
-                pruned.push((
-                    path.clone(),
-                    PruneReason::RelocWithoutValueSegment { rtype },
-                ));
-                continue;
-            }
-            Err(PrxLoaderError::RelocTargetSegmentEmpty { segment_idx, .. }) => {
-                pruned.push((
-                    path.clone(),
-                    PruneReason::RelocTargetSegmentEmpty { segment_idx },
-                ));
-                continue;
-            }
-            Err(PrxLoaderError::RelocValueSegmentEmpty { segment_idx, .. }) => {
-                pruned.push((
-                    path.clone(),
-                    PruneReason::RelocValueSegmentEmpty { segment_idx },
-                ));
-                continue;
-            }
-            Err(e) => return Err(e),
+        if let Err(error) = super::body::check_loadable(bytes) {
+            pruned.push((path.clone(), prune_reason_for(error)?));
+            continue;
         }
         let imports = match crate::prx::parse_imports(bytes) {
             Ok(v) => v.into_iter().map(|m| m.name).collect(),
@@ -177,14 +176,47 @@ pub fn select_import_closure(
             },
         );
     }
+    Ok(parsed)
+}
 
+/// The prune reason for a loader gap selection drops, or the error
+/// itself when the failure is a hard error.
+fn prune_reason_for(error: PrxLoaderError) -> Result<PruneReason, PrxLoaderError> {
+    match error {
+        PrxLoaderError::RelocSegmentOutOfRange {
+            segment_idx,
+            segment_count,
+            ..
+        } => Ok(PruneReason::RelocSegmentOutOfRange {
+            segment_idx,
+            segment_count,
+        }),
+        PrxLoaderError::RelocWithoutValueSegment { rtype, .. } => {
+            Ok(PruneReason::RelocWithoutValueSegment { rtype })
+        }
+        PrxLoaderError::RelocTargetSegmentEmpty { segment_idx, .. } => {
+            Ok(PruneReason::RelocTargetSegmentEmpty { segment_idx })
+        }
+        PrxLoaderError::RelocValueSegmentEmpty { segment_idx, .. } => {
+            Ok(PruneReason::RelocValueSegmentEmpty { segment_idx })
+        }
+        error => Err(error),
+    }
+}
+
+/// The viable candidates: the fixpoint that drops each module with an
+/// import no surviving provider exports, recording each drop in `pruned`.
+fn prune_unprovided<'a>(
+    parsed: &'a BTreeMap<&'a str, Candidate>,
+    pruned: &mut Vec<(String, PruneReason)>,
+) -> BTreeSet<&'a str> {
     // Viability fixpoint. Providers are recomputed per round so a
     // pruned provider hands the namespace to the next exporter in
     // path order, mirroring what load-order shadowing would have done
     // had the pruned module never been present.
     let mut viable: BTreeSet<&str> = parsed.keys().copied().collect();
     loop {
-        let provider = provider_index(&parsed, &viable);
+        let provider = provider_index(parsed, &viable);
         let mut dropped = false;
         for path in viable.clone() {
             let unsatisfied = parsed[path]
@@ -198,50 +230,34 @@ pub fn select_import_closure(
             }
         }
         if !dropped {
-            break;
+            return viable;
         }
     }
+}
 
-    let provider = provider_index(&parsed, &viable);
-    let selected: BTreeSet<String> = match roots {
-        None => viable.iter().map(|p| (*p).to_string()).collect(),
-        Some(roots) => {
-            let mut selected: BTreeSet<&str> = BTreeSet::new();
-            let mut queue: Vec<&str> = roots
-                .iter()
-                .filter_map(|ns| provider.get(ns.as_str()).copied())
-                .collect();
-            while let Some(path) = queue.pop() {
-                if !selected.insert(path) {
-                    continue;
-                }
-                for ns in &parsed[path].imports {
-                    if let Some(&dep) = provider.get(ns.as_str()) {
-                        if !selected.contains(dep) {
-                            queue.push(dep);
-                        }
-                    }
-                }
-            }
-            selected.iter().map(|p| (*p).to_string()).collect()
+/// The providers of `roots` and every provider their imports reach.
+fn provider_closure<'a>(
+    parsed: &BTreeMap<&'a str, Candidate>,
+    provider: &BTreeMap<&str, &'a str>,
+    roots: &BTreeSet<String>,
+) -> BTreeSet<&'a str> {
+    let mut selected: BTreeSet<&str> = BTreeSet::new();
+    let mut queue: Vec<&str> = roots
+        .iter()
+        .filter_map(|ns| provider.get(ns.as_str()).copied())
+        .collect();
+    while let Some(path) = queue.pop() {
+        if !selected.insert(path) {
+            continue;
         }
-    };
-
-    let unprovided_roots = roots
-        .map(|roots| {
-            roots
-                .iter()
-                .filter(|ns| !provider.contains_key(ns.as_str()))
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(ClosureSelection {
-        selected,
-        pruned,
-        unprovided_roots,
-    })
+        for ns in &parsed[path].imports {
+            let Some(&dep) = provider.get(ns.as_str()) else {
+                continue;
+            };
+            queue.push(dep);
+        }
+    }
+    selected
 }
 
 /// namespace -> first viable path exporting it, in sorted path order.
