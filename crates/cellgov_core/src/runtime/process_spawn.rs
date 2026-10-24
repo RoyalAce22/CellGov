@@ -259,15 +259,10 @@ impl Runtime {
                      unit set {units:?}; finishing the caller anyway",
                 ),
             );
-            self.registry
-                .set_status_override(source, UnitStatus::Finished);
-            self.timer_wakes.cancel(source);
-            let _ = self.syscall_responses.try_take(source);
+            self.retire_unit(source);
         }
         for uid in units {
-            self.registry.set_status_override(uid, UnitStatus::Finished);
-            self.timer_wakes.cancel(uid);
-            let _ = self.syscall_responses.try_take(uid);
+            self.retire_unit(uid);
         }
         self.lv2_host.mark_process_exited(pid, code);
         let windows: Vec<(u64, usize, Option<u64>, Option<u32>)> =

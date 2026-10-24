@@ -21,44 +21,53 @@ impl Runtime {
     ) {
         let caller_space = self.spaces.space_of(source);
         self.apply_lv2_effects(&effects, caller_space);
-        if is_process_exit {
-            let all_ids: Vec<UnitId> = self.registry.ids().collect();
-            for uid in &all_ids {
-                self.registry
-                    .set_status_override(*uid, UnitStatus::Finished);
-                // UnknownUnit (non-SPU) and AlreadyFinished are
-                // expected during the per-unit sweep.
-                let notified = self.lv2_host.notify_spu_finished(*uid);
-                match notified {
-                    Ok(_)
-                    | Err(cellgov_lv2::thread_group::NotifySpuFinishedError::UnknownUnit)
-                    | Err(cellgov_lv2::thread_group::NotifySpuFinishedError::AlreadyFinished {
-                        ..
-                    }) => {}
-                    Err(err) => {
-                        self.lv2_host.log_invariant_break(
-                            "runtime.process_exit_notify_spu_finished_failed",
-                            format_args!(
-                                "notify_spu_finished rejected {uid:?} during the process-exit \
-                                 sweep: {err:?}; the thread table and the SPU group state \
-                                 disagree about this unit"
-                            ),
-                        );
-                    }
-                }
-                // The parked response is dropped, so the unit's timer
-                // entry must go with it: fire_timer_wakes runs later
-                // in this same commit, and a deadline the exiting
-                // step just crossed would otherwise wake a unit this
-                // sweep finished (dropping a response without
-                // cancelling its deadline is the invariant break
-                // `Lv2Host::expire_wait` names).
-                self.timer_wakes.cancel(*uid);
-                let _ = self.syscall_responses.try_take(*uid);
-            }
-        } else {
-            self.deliver_syscall_return(source, code);
+        if !is_process_exit {
+            return self.deliver_syscall_return(source, code);
         }
+        self.finish_all_units_for_process_exit();
+    }
+
+    /// Retire every unit at a process exit, and tell the LV2 host each
+    /// one finished.
+    fn finish_all_units_for_process_exit(&mut self) {
+        let all_ids: Vec<UnitId> = self.registry.ids().collect();
+        for uid in all_ids {
+            self.retire_unit(uid);
+            // UnknownUnit (non-SPU) and AlreadyFinished are
+            // expected during the per-unit sweep.
+            let notified = self.lv2_host.notify_spu_finished(uid);
+            match notified {
+                Ok(_)
+                | Err(cellgov_lv2::thread_group::NotifySpuFinishedError::UnknownUnit)
+                | Err(cellgov_lv2::thread_group::NotifySpuFinishedError::AlreadyFinished {
+                    ..
+                }) => {}
+                Err(err) => {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.process_exit_notify_spu_finished_failed",
+                        format_args!(
+                            "notify_spu_finished rejected {uid:?} during the process-exit \
+                             sweep: {err:?}; the thread table and the SPU group state \
+                             disagree about this unit"
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Mark `unit` Finished and drop its parked response and its timer
+    /// deadline.
+    ///
+    /// The deadline goes with the response: fire_timer_wakes runs later
+    /// in the same commit, and a deadline the step just crossed would
+    /// otherwise wake a finished unit. `Lv2Host::expire_wait` names that
+    /// invariant break: a dropped response whose deadline stays queued.
+    pub(in crate::runtime) fn retire_unit(&mut self, unit: UnitId) {
+        self.registry
+            .set_status_override(unit, UnitStatus::Finished);
+        self.timer_wakes.cancel(unit);
+        let _ = self.syscall_responses.try_take(unit);
     }
 
     /// `BTreeMap` iteration keeps registration order byte-stable.
@@ -259,11 +268,7 @@ impl Runtime {
     /// Finishes the SPU of a destroyed Raw SPU and unmaps its window.
     pub(super) fn handle_raw_spu_destroy(&mut self, source: UnitId, id: u32, unit: UnitId) {
         self.close_raw_spu_window(id, unit);
-        self.registry
-            .set_status_override(unit, UnitStatus::Finished);
-        // A deadline left behind would wake a finished unit.
-        self.timer_wakes.cancel(unit);
-        let _ = self.syscall_responses.try_take(unit);
+        self.retire_unit(unit);
         self.deliver_syscall_return(source, 0);
     }
 
@@ -321,13 +326,9 @@ impl Runtime {
         finished_units: Vec<UnitId>,
     ) {
         for unit in finished_units {
-            self.registry
-                .set_status_override(unit, UnitStatus::Finished);
+            self.retire_unit(unit);
             // A terminate ends a suspended group too; the hold goes with it.
             self.registry.set_suspended(unit, false);
-            // A deadline left behind would wake a finished unit.
-            self.timer_wakes.cancel(unit);
-            let _ = self.syscall_responses.try_take(unit);
         }
         self.wake_group_joiners(group_id);
         self.deliver_syscall_return(source, 0);
