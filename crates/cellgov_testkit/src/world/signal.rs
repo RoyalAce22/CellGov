@@ -2,12 +2,12 @@
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
-};
+use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_sync::SignalId;
-use cellgov_time::{Budget, InstructionCost};
+use cellgov_time::Budget;
 use std::cell::Cell;
+
+use super::step::step;
 
 /// Emits one [`Effect::SignalUpdate`] per step into `target`, OR-ing in
 /// `1 << (step - 1)`; finishes after `bit_count` steps leaving
@@ -71,13 +71,7 @@ impl ExecutionUnit for SignalEmitter {
             value,
             source: self.id,
         });
-        ExecutionStepResult {
-            yield_reason,
-            consumed_cost: InstructionCost::new(budget.raw()),
-            local_diagnostics: LocalDiagnostics::empty(),
-            fault: None,
-            syscall_args: None,
-        }
+        step(yield_reason, budget)
     }
     fn snapshot(&self) -> u64 {
         self.steps.get()

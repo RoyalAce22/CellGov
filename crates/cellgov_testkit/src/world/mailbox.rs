@@ -2,12 +2,12 @@
 
 use cellgov_effects::{Effect, MailboxMessage};
 use cellgov_event::UnitId;
-use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
-};
+use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_sync::MailboxId;
-use cellgov_time::{Budget, InstructionCost};
+use cellgov_time::Budget;
 use std::cell::Cell;
+
+use super::step::step;
 
 /// Emits one [`Effect::MailboxSend`] per step into `target` with message
 /// words `1..=max`; finishes after `max` steps.
@@ -61,13 +61,7 @@ impl ExecutionUnit for MailboxProducer {
             message: MailboxMessage::new(n as u32),
             source: self.id,
         });
-        ExecutionStepResult {
-            yield_reason,
-            consumed_cost: InstructionCost::new(budget.raw()),
-            local_diagnostics: LocalDiagnostics::empty(),
-            fault: None,
-            syscall_args: None,
-        }
+        step(yield_reason, budget)
     }
     fn snapshot(&self) -> u64 {
         self.steps.get()
@@ -144,26 +138,14 @@ impl ExecutionUnit for MailboxSender {
                     target: cellgov_effects::WaitTarget::Mailbox(self.resp_mailbox),
                     source: self.id,
                 });
-                ExecutionStepResult {
-                    yield_reason: YieldReason::MailboxAccess,
-                    consumed_cost: InstructionCost::new(budget.raw()),
-                    local_diagnostics: LocalDiagnostics::empty(),
-                    fault: None,
-                    syscall_args: None,
-                }
+                step(YieldReason::MailboxAccess, budget)
             }
             1 => {
                 effects.push(Effect::MailboxReceiveAttempt {
                     mailbox: self.resp_mailbox,
                     source: self.id,
                 });
-                ExecutionStepResult {
-                    yield_reason: YieldReason::MailboxAccess,
-                    consumed_cost: InstructionCost::new(budget.raw()),
-                    local_diagnostics: LocalDiagnostics::empty(),
-                    fault: None,
-                    syscall_args: None,
-                }
+                step(YieldReason::MailboxAccess, budget)
             }
             _ => {
                 let response = ctx.received_messages().first().copied().unwrap_or(0);
@@ -171,13 +153,7 @@ impl ExecutionUnit for MailboxSender {
                     marker: response,
                     source: self.id,
                 });
-                ExecutionStepResult {
-                    yield_reason: YieldReason::Finished,
-                    consumed_cost: InstructionCost::new(budget.raw()),
-                    local_diagnostics: LocalDiagnostics::empty(),
-                    fault: None,
-                    syscall_args: None,
-                }
+                step(YieldReason::Finished, budget)
             }
         }
     }
@@ -241,13 +217,7 @@ impl ExecutionUnit for MailboxResponder {
                     mailbox: self.cmd_mailbox,
                     source: self.id,
                 });
-                ExecutionStepResult {
-                    yield_reason: YieldReason::MailboxAccess,
-                    consumed_cost: InstructionCost::new(budget.raw()),
-                    local_diagnostics: LocalDiagnostics::empty(),
-                    fault: None,
-                    syscall_args: None,
-                }
+                step(YieldReason::MailboxAccess, budget)
             }
             _ => {
                 let cmd = ctx.received_messages().first().copied().unwrap_or(0);
@@ -261,13 +231,7 @@ impl ExecutionUnit for MailboxResponder {
                     target: self.sender,
                     source: self.id,
                 });
-                ExecutionStepResult {
-                    yield_reason: YieldReason::Finished,
-                    consumed_cost: InstructionCost::new(budget.raw()),
-                    local_diagnostics: LocalDiagnostics::empty(),
-                    fault: None,
-                    syscall_args: None,
-                }
+                step(YieldReason::Finished, budget)
             }
         }
     }

@@ -2,12 +2,12 @@
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
-};
+use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::ByteRange;
 use cellgov_time::{Budget, InstructionCost};
 use std::cell::Cell;
+
+use super::step::step;
 
 /// Consumes its full budget each step, emits one `TraceMarker`, finishes
 /// after `max` steps.
@@ -86,11 +86,8 @@ impl ExecutionUnit for CountingUnit {
             budget.raw(),
         );
         ExecutionStepResult {
-            yield_reason,
             consumed_cost: InstructionCost::new(self.cost.unwrap_or(budget.raw())),
-            local_diagnostics: LocalDiagnostics::empty(),
-            fault: None,
-            syscall_args: None,
+            ..step(yield_reason, budget)
         }
     }
     fn snapshot(&self) -> u64 {
@@ -170,13 +167,7 @@ impl ExecutionUnit for PollingUnit {
         } else {
             YieldReason::BudgetExhausted
         };
-        ExecutionStepResult {
-            yield_reason,
-            consumed_cost: InstructionCost::new(budget.raw()),
-            local_diagnostics: LocalDiagnostics::empty(),
-            fault: None,
-            syscall_args: None,
-        }
+        step(yield_reason, budget)
     }
     fn snapshot(&self) -> (u64, bool) {
         (self.steps.get(), self.done.get())

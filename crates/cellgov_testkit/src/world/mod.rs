@@ -7,6 +7,7 @@ mod basic;
 mod dma;
 mod mailbox;
 mod signal;
+mod step;
 mod writers;
 
 pub use basic::*;

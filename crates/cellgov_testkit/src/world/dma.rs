@@ -3,12 +3,12 @@
 use cellgov_dma::{DmaDirection, DmaRequest};
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
-use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
-};
+use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::ByteRange;
-use cellgov_time::{Budget, GuestTicks, InstructionCost};
+use cellgov_time::{Budget, GuestTicks};
 use std::cell::Cell;
+
+use super::step::step;
 
 /// Two-stage DMA block/unblock probe: seed source, submit Put, block;
 /// then on wake emit a `TraceMarker` and finish.
@@ -83,26 +83,14 @@ impl ExecutionUnit for DmaSubmitter {
                     target: cellgov_effects::WaitTarget::Barrier(cellgov_sync::BarrierId::new(0)),
                     source: self.id,
                 });
-                ExecutionStepResult {
-                    yield_reason: YieldReason::DmaSubmitted,
-                    consumed_cost: InstructionCost::new(budget.raw()),
-                    local_diagnostics: LocalDiagnostics::empty(),
-                    fault: None,
-                    syscall_args: None,
-                }
+                step(YieldReason::DmaSubmitted, budget)
             }
             _ => {
                 effects.push(Effect::TraceMarker {
                     marker: 0xd0d0,
                     source: self.id,
                 });
-                ExecutionStepResult {
-                    yield_reason: YieldReason::Finished,
-                    consumed_cost: InstructionCost::new(budget.raw()),
-                    local_diagnostics: LocalDiagnostics::empty(),
-                    fault: None,
-                    syscall_args: None,
-                }
+                step(YieldReason::Finished, budget)
             }
         }
     }

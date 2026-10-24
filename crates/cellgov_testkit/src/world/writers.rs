@@ -6,8 +6,10 @@ use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_time::{Budget, GuestTicks, InstructionCost};
+use cellgov_time::{Budget, GuestTicks};
 use std::cell::Cell;
+
+use super::step::step;
 
 /// Emits one `SharedWriteIntent` per step against `range`; finishes
 /// after `max` steps.
@@ -85,13 +87,7 @@ impl ExecutionUnit for WritingUnit {
             self.id,
             GuestTicks::ZERO,
         ));
-        ExecutionStepResult {
-            yield_reason,
-            consumed_cost: InstructionCost::new(budget.raw()),
-            local_diagnostics: LocalDiagnostics::empty(),
-            fault: None,
-            syscall_args: None,
-        }
+        step(yield_reason, budget)
     }
     fn snapshot(&self) -> u64 {
         self.steps.get()
@@ -152,13 +148,7 @@ impl ExecutionUnit for ClockWriter {
             self.id,
             GuestTicks::ZERO,
         ));
-        ExecutionStepResult {
-            yield_reason: YieldReason::Finished,
-            consumed_cost: InstructionCost::new(budget.raw()),
-            local_diagnostics: LocalDiagnostics::empty(),
-            fault: None,
-            syscall_args: None,
-        }
+        step(YieldReason::Finished, budget)
     }
     fn snapshot(&self) -> u64 {
         self.steps.get()
@@ -219,11 +209,9 @@ impl ExecutionUnit for SleepingWriter {
             args[0] = cellgov_ps3_abi::lv2::syscall::TIMER_USLEEP;
             args[1] = self.usec;
             return ExecutionStepResult {
-                yield_reason: YieldReason::Syscall,
-                consumed_cost: InstructionCost::new(budget.raw()),
                 local_diagnostics: LocalDiagnostics::with_pc(0x1000),
-                fault: None,
                 syscall_args: Some(args),
+                ..step(YieldReason::Syscall, budget)
             };
         }
         let bytes = vec![self.value; self.range.length() as usize];
@@ -233,13 +221,7 @@ impl ExecutionUnit for SleepingWriter {
             self.id,
             GuestTicks::ZERO,
         ));
-        ExecutionStepResult {
-            yield_reason: YieldReason::Finished,
-            consumed_cost: InstructionCost::new(budget.raw()),
-            local_diagnostics: LocalDiagnostics::empty(),
-            fault: None,
-            syscall_args: None,
-        }
+        step(YieldReason::Finished, budget)
     }
     fn snapshot(&self) -> u64 {
         self.steps.get()
