@@ -11,6 +11,8 @@ use cellgov_ps3_abi::format::elf::{
     SHF_ALLOC, SHF_EXECINSTR, SHN_UNDEF, SHT_PROGBITS, SHT_STRTAB,
 };
 
+use std::ops::Range;
+
 use super::error::PrescanError;
 
 // Range guarantee: the caller's runtime bounds checks combine with
@@ -42,43 +44,13 @@ fn is_executable_progbits(sh_type: u32, sh_flags: u64, sh_size: u64) -> bool {
 /// A stripped binary (`e_shoff == 0`) returns `Ok(vec![])`; callers
 /// then fall back to the segment walk.
 pub fn executable_progbits_ranges(elf_data: &[u8]) -> Result<Vec<(usize, usize)>, PrescanError> {
-    if elf_data.len() < ELF_HEADER_SIZE {
+    let Some(table) = SectionTable::read(elf_data)? else {
         return Ok(Vec::new());
-    }
-
-    let e_shoff = read_u64(elf_data, ELF64_E_SHOFF);
-    if e_shoff == 0 {
-        return Ok(Vec::new());
-    }
-
-    let e_shentsize = read_u16(elf_data, ELF64_E_SHENTSIZE);
-    let e_shnum = read_u16(elf_data, ELF64_E_SHNUM);
-
-    let shentsize = usize::from(e_shentsize);
-    if shentsize < ELF64_SHENT_SIZE {
-        return Err(PrescanError::MalformedSectionTable);
-    }
-
-    let shnum = usize::from(e_shnum);
-    let Ok(shoff) = usize::try_from(e_shoff) else {
-        return Err(PrescanError::MalformedSectionTable);
     };
 
     let mut ranges = Vec::new();
-    for i in 0..shnum {
-        let base = shoff
-            .checked_add(
-                i.checked_mul(shentsize)
-                    .ok_or(PrescanError::MalformedSectionTable)?,
-            )
-            .ok_or(PrescanError::MalformedSectionTable)?;
-        let end = base
-            .checked_add(shentsize)
-            .ok_or(PrescanError::MalformedSectionTable)?;
-        if end > elf_data.len() {
-            return Err(PrescanError::MalformedSectionTable);
-        }
-
+    for i in 0..table.shnum {
+        let base = table.header(i)?;
         let sh_type = read_u32(elf_data, base + ELF64_SH_TYPE);
         let sh_flags = read_u64(elf_data, base + ELF64_SH_FLAGS);
         let sh_offset = read_u64(elf_data, base + ELF64_SH_OFFSET);
@@ -87,20 +59,8 @@ pub fn executable_progbits_ranges(elf_data: &[u8]) -> Result<Vec<(usize, usize)>
         if !is_executable_progbits(sh_type, sh_flags, sh_size) {
             continue;
         }
-
-        let Ok(lo) = usize::try_from(sh_offset) else {
-            return Err(PrescanError::MalformedSectionTable);
-        };
-        let Ok(sz) = usize::try_from(sh_size) else {
-            return Err(PrescanError::MalformedSectionTable);
-        };
-        let hi = lo
-            .checked_add(sz)
-            .ok_or(PrescanError::MalformedSectionTable)?;
-        if hi > elf_data.len() {
-            return Err(PrescanError::MalformedSectionTable);
-        }
-        ranges.push((lo, hi));
+        let payload = table.payload(sh_offset, sh_size)?;
+        ranges.push((payload.start, payload.end));
     }
 
     ranges.sort_unstable();
@@ -124,51 +84,21 @@ pub fn executable_progbits_ranges(elf_data: &[u8]) -> Result<Vec<(usize, usize)>
 /// `SegmentFallback` decision in [`super::scan::scan_elf_text`]
 /// stays the single source of truth.
 pub fn executable_sections_anonymous(elf_data: &[u8]) -> Result<bool, PrescanError> {
-    if elf_data.len() < ELF_HEADER_SIZE {
+    let Some(table) = SectionTable::read(elf_data)? else {
         return Ok(false);
-    }
-
-    let e_shoff = read_u64(elf_data, ELF64_E_SHOFF);
-    if e_shoff == 0 {
-        return Ok(false);
-    }
-
-    let e_shentsize = read_u16(elf_data, ELF64_E_SHENTSIZE);
-    let e_shnum = read_u16(elf_data, ELF64_E_SHNUM);
-    let e_shstrndx = read_u16(elf_data, ELF64_E_SHSTRNDX);
-
-    let shentsize = usize::from(e_shentsize);
-    if shentsize < ELF64_SHENT_SIZE {
-        return Err(PrescanError::MalformedSectionTable);
-    }
-
-    let shnum = usize::from(e_shnum);
-    let Ok(shoff) = usize::try_from(e_shoff) else {
-        return Err(PrescanError::MalformedSectionTable);
     };
 
+    let e_shstrndx = read_u16(elf_data, ELF64_E_SHSTRNDX);
     if e_shstrndx == SHN_UNDEF {
         return Ok(true);
     }
     let strndx = usize::from(e_shstrndx);
-    if strndx >= shnum {
+    if strndx >= table.shnum {
         return Err(PrescanError::MalformedSectionTable);
     }
 
     // Resolve the .shstrtab entry's payload range.
-    let str_base = shoff
-        .checked_add(
-            strndx
-                .checked_mul(shentsize)
-                .ok_or(PrescanError::MalformedSectionTable)?,
-        )
-        .ok_or(PrescanError::MalformedSectionTable)?;
-    let str_end_hdr = str_base
-        .checked_add(shentsize)
-        .ok_or(PrescanError::MalformedSectionTable)?;
-    if str_end_hdr > elf_data.len() {
-        return Err(PrescanError::MalformedSectionTable);
-    }
+    let str_base = table.header(strndx)?;
     let str_sh_type = read_u32(elf_data, str_base + ELF64_SH_TYPE);
     let str_sh_offset = read_u64(elf_data, str_base + ELF64_SH_OFFSET);
     let str_sh_size = read_u64(elf_data, str_base + ELF64_SH_SIZE);
@@ -176,38 +106,14 @@ pub fn executable_sections_anonymous(elf_data: &[u8]) -> Result<bool, PrescanErr
     if str_sh_type != SHT_STRTAB || str_sh_size == 0 {
         return Ok(true);
     }
-    let Ok(strtab_off) = usize::try_from(str_sh_offset) else {
-        return Err(PrescanError::MalformedSectionTable);
-    };
-    let Ok(strtab_sz) = usize::try_from(str_sh_size) else {
-        return Err(PrescanError::MalformedSectionTable);
-    };
-    let strtab_hi = strtab_off
-        .checked_add(strtab_sz)
-        .ok_or(PrescanError::MalformedSectionTable)?;
-    if strtab_hi > elf_data.len() {
-        return Err(PrescanError::MalformedSectionTable);
-    }
-    let strtab = &elf_data[strtab_off..strtab_hi];
+    let strtab = &elf_data[table.payload(str_sh_offset, str_sh_size)?];
 
     // Walk every qualifying executable section; return false the
     // first time we find a non-empty name. If we scan every
     // qualifying section without finding one, anonymous.
     let mut saw_qualifying = false;
-    for i in 0..shnum {
-        let base = shoff
-            .checked_add(
-                i.checked_mul(shentsize)
-                    .ok_or(PrescanError::MalformedSectionTable)?,
-            )
-            .ok_or(PrescanError::MalformedSectionTable)?;
-        let end = base
-            .checked_add(shentsize)
-            .ok_or(PrescanError::MalformedSectionTable)?;
-        if end > elf_data.len() {
-            return Err(PrescanError::MalformedSectionTable);
-        }
-
+    for i in 0..table.shnum {
+        let base = table.header(i)?;
         let sh_type = read_u32(elf_data, base + ELF64_SH_TYPE);
         let sh_flags = read_u64(elf_data, base + ELF64_SH_FLAGS);
         let sh_size = read_u64(elf_data, base + ELF64_SH_SIZE);
@@ -234,6 +140,75 @@ pub fn executable_sections_anonymous(elf_data: &[u8]) -> Result<bool, PrescanErr
     // caller is already in the `sections.is_empty()` SegmentFallback
     // branch by then so this fallback is unreachable in practice.
     Ok(saw_qualifying)
+}
+
+/// A present section-header table whose header fields passed their
+/// checks: `e_shentsize` covers an ELF64 entry and `e_shoff` fits a
+/// file offset.
+struct SectionTable<'a> {
+    elf_data: &'a [u8],
+    shoff: usize,
+    shentsize: usize,
+    shnum: usize,
+}
+
+impl<'a> SectionTable<'a> {
+    /// The table, or `None` for a file shorter than the ELF header or a
+    /// stripped one (`e_shoff == 0`).
+    fn read(elf_data: &'a [u8]) -> Result<Option<Self>, PrescanError> {
+        if elf_data.len() < ELF_HEADER_SIZE {
+            return Ok(None);
+        }
+        let e_shoff = read_u64(elf_data, ELF64_E_SHOFF);
+        if e_shoff == 0 {
+            return Ok(None);
+        }
+        let shentsize = usize::from(read_u16(elf_data, ELF64_E_SHENTSIZE));
+        if shentsize < ELF64_SHENT_SIZE {
+            return Err(PrescanError::MalformedSectionTable);
+        }
+        let shnum = usize::from(read_u16(elf_data, ELF64_E_SHNUM));
+        let Ok(shoff) = usize::try_from(e_shoff) else {
+            return Err(PrescanError::MalformedSectionTable);
+        };
+        Ok(Some(Self {
+            elf_data,
+            shoff,
+            shentsize,
+            shnum,
+        }))
+    }
+
+    /// The file offset of section header `i`, whose whole entry lies in
+    /// the file.
+    fn header(&self, i: usize) -> Result<usize, PrescanError> {
+        let base = i
+            .checked_mul(self.shentsize)
+            .and_then(|delta| self.shoff.checked_add(delta))
+            .ok_or(PrescanError::MalformedSectionTable)?;
+        let end = base
+            .checked_add(self.shentsize)
+            .ok_or(PrescanError::MalformedSectionTable)?;
+        if end > self.elf_data.len() {
+            return Err(PrescanError::MalformedSectionTable);
+        }
+        Ok(base)
+    }
+
+    /// The file range `[offset, offset + size)` of a section's payload,
+    /// which must lie in the file.
+    fn payload(&self, offset: u64, size: u64) -> Result<Range<usize>, PrescanError> {
+        let (Ok(lo), Ok(sz)) = (usize::try_from(offset), usize::try_from(size)) else {
+            return Err(PrescanError::MalformedSectionTable);
+        };
+        let hi = lo
+            .checked_add(sz)
+            .ok_or(PrescanError::MalformedSectionTable)?;
+        if hi > self.elf_data.len() {
+            return Err(PrescanError::MalformedSectionTable);
+        }
+        Ok(lo..hi)
+    }
 }
 
 /// Merge a list of `[lo, hi)` ranges into a deduped, overlap-coalesced
