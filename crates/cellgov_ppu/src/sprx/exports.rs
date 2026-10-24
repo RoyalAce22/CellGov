@@ -201,65 +201,73 @@ pub(super) fn find_system_opd(
         if pos + entry_size > data.len() {
             break;
         }
-
-        let attrs = loader::read_u16(data, pos + 4);
-        if (attrs & EXPORT_ATTR_SYSTEM) != 0 {
-            let num_func = loader::read_u16(data, pos + 6) as usize;
-            let nid_table_ptr = loader::read_u32(data, pos + 20);
-            let stub_table_ptr = loader::read_u32(data, pos + 24);
-
-            // Same hole as `read_export_entries`: a system export
-            // entry with stub_table_ptr = 0 would resolve stub_foff
-            // to the text segment's file offset and read instruction
-            // bytes as OPD vaddrs.
-            if nid_table_ptr != 0 && stub_table_ptr != 0 {
-                let nid_foff =
-                    v2f(seg_map, nid_table_ptr as usize).ok_or(PrxParseError::OutOfBounds)?;
-                let stub_foff =
-                    v2f(seg_map, stub_table_ptr as usize).ok_or(PrxParseError::OutOfBounds)?;
-
-                for i in 0..num_func {
-                    let n_off = nid_foff + i * 4;
-                    if n_off + 4 > data.len() {
-                        break;
-                    }
-                    let nid = loader::read_u32(data, n_off);
-                    if nid == target_nid {
-                        let s_off = stub_foff + i * 4;
-                        if s_off + 4 > data.len() {
-                            return Err(PrxParseError::OutOfBounds);
-                        }
-                        let opd_vaddr = loader::read_u32(data, s_off) as usize;
-                        let opd_foff = v2f(seg_map, opd_vaddr).ok_or(PrxParseError::OutOfBounds)?;
-                        if opd_foff + 8 > data.len() {
-                            return Err(PrxParseError::OutOfBounds);
-                        }
-                        let code = loader::read_u32(data, opd_foff);
-                        let toc = loader::read_u32(data, opd_foff + 4);
-                        // Shipping firmware allows code = 0 (entry at
-                        // start of text) but always sets toc. toc = 0
-                        // is the corrupt-OPD signature; accepting it
-                        // would publish an entry whose first
-                        // GOT-relative load faults. `parse_real_liblv2`
-                        // (code=0, toc=0x1c620) is the regression
-                        // anchor for this branch.
-                        if toc == 0 {
-                            return Ok(None);
-                        }
-                        return Ok(Some(PrxOpd {
-                            opd_vaddr: opd_vaddr as u32,
-                            code,
-                            toc,
-                        }));
-                    }
-                }
-            }
-        }
-
+        let entry = pos;
         pos += entry_size;
+
+        let attrs = loader::read_u16(data, entry + 4);
+        let num_func = loader::read_u16(data, entry + 6) as usize;
+        let nid_table_ptr = loader::read_u32(data, entry + 20);
+        let stub_table_ptr = loader::read_u32(data, entry + 24);
+        // Same hole as `read_export_entries`: a system export
+        // entry with stub_table_ptr = 0 would resolve stub_foff
+        // to the text segment's file offset and read instruction
+        // bytes as OPD vaddrs.
+        if attrs & EXPORT_ATTR_SYSTEM == 0 || nid_table_ptr == 0 || stub_table_ptr == 0 {
+            continue;
+        }
+        let nid_foff = v2f(seg_map, nid_table_ptr as usize).ok_or(PrxParseError::OutOfBounds)?;
+        let stub_foff = v2f(seg_map, stub_table_ptr as usize).ok_or(PrxParseError::OutOfBounds)?;
+        let Some(slot) = find_nid_slot(data, nid_foff, num_func, target_nid) else {
+            continue;
+        };
+        return read_system_opd(data, seg_map, stub_foff + slot * 4);
     }
 
     Ok(None)
+}
+
+/// The index of `target_nid` in the NID table at `nid_foff`, searching
+/// at most `num_func` entries and stopping at the end of `data`.
+fn find_nid_slot(data: &[u8], nid_foff: usize, num_func: usize, target_nid: u32) -> Option<usize> {
+    (0..num_func)
+        .map_while(|i| {
+            let n_off = nid_foff + i * 4;
+            (n_off + 4 <= data.len()).then(|| loader::read_u32(data, n_off))
+        })
+        .position(|nid| nid == target_nid)
+}
+
+/// The OPD whose address sits in the stub slot at file offset `s_off`.
+fn read_system_opd(
+    data: &[u8],
+    seg_map: &[SegEntry],
+    s_off: usize,
+) -> Result<Option<PrxOpd>, PrxParseError> {
+    if s_off + 4 > data.len() {
+        return Err(PrxParseError::OutOfBounds);
+    }
+    let opd_vaddr = loader::read_u32(data, s_off) as usize;
+    let opd_foff = v2f(seg_map, opd_vaddr).ok_or(PrxParseError::OutOfBounds)?;
+    if opd_foff + 8 > data.len() {
+        return Err(PrxParseError::OutOfBounds);
+    }
+    let code = loader::read_u32(data, opd_foff);
+    let toc = loader::read_u32(data, opd_foff + 4);
+    // Shipping firmware allows code = 0 (entry at
+    // start of text) but always sets toc. toc = 0
+    // is the corrupt-OPD signature; accepting it
+    // would publish an entry whose first
+    // GOT-relative load faults. `parse_real_liblv2`
+    // (code=0, toc=0x1c620) is the regression
+    // anchor for this branch.
+    if toc == 0 {
+        return Ok(None);
+    }
+    Ok(Some(PrxOpd {
+        opd_vaddr: opd_vaddr as u32,
+        code,
+        toc,
+    }))
 }
 
 #[cfg(test)]
