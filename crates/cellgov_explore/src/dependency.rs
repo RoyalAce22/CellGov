@@ -605,104 +605,89 @@ impl StepFootprint {
     /// O(n*m) over each category's populated vectors, and a step
     /// usually populates one or two.
     pub fn conflicts(&self, other: &StepFootprint) -> bool {
-        for a in &self.shared_writes {
-            for b in &other.shared_writes {
-                if a.overlaps(*b) {
-                    return true;
-                }
-            }
-        }
+        self.memory_conflict(other)
+            || self.mailbox_conflict(other)
+            || self.signal_conflict(other)
+            || self.local_store_conflict(other)
+            || self.reservation_conflict(other)
+            || self.timing_conflict(other)
+    }
 
-        // Bernstein's other two intersections.
-        if ranges_overlap(&self.shared_reads, &other.shared_writes)
+    /// Bernstein's conditions over main storage, for accesses now and
+    /// for transfers at completion.
+    #[inline]
+    fn memory_conflict(&self, other: &StepFootprint) -> bool {
+        // Bernstein's three intersections; two reads are the one pairing
+        // left out.
+        ranges_overlap(&self.shared_writes, &other.shared_writes)
+            || ranges_overlap(&self.shared_reads, &other.shared_writes)
             || ranges_overlap(&other.shared_reads, &self.shared_writes)
-        {
-            return true;
-        }
-
-        // Bernstein again, over what a transfer does at completion
-        // against what the other step does now. Two reads are the one
-        // pairing left out, here as above.
-        if ranges_overlap(&self.shared_writes, &other.dma_writes)
+            // Bernstein again, over what a transfer does at completion
+            // against what the other step does now. Two reads are the
+            // one pairing left out, here as above.
+            || ranges_overlap(&self.shared_writes, &other.dma_writes)
             || ranges_overlap(&other.shared_writes, &self.dma_writes)
             || ranges_overlap(&self.shared_writes, &other.dma_reads)
             || ranges_overlap(&other.shared_writes, &self.dma_reads)
             || ranges_overlap(&self.shared_reads, &other.dma_writes)
             || ranges_overlap(&other.shared_reads, &self.dma_writes)
-        {
-            return true;
-        }
-
-        if ranges_overlap(&self.dma_writes, &other.dma_writes)
+            || ranges_overlap(&self.dma_writes, &other.dma_writes)
             || ranges_overlap(&self.dma_writes, &other.dma_reads)
             || ranges_overlap(&other.dma_writes, &self.dma_reads)
-        {
-            return true;
-        }
+    }
 
-        if ids_overlap(&self.mailbox_sends, &other.mailbox_receives)
+    #[inline]
+    fn mailbox_conflict(&self, other: &StepFootprint) -> bool {
+        ids_overlap(&self.mailbox_sends, &other.mailbox_receives)
             || ids_overlap(&other.mailbox_sends, &self.mailbox_receives)
-        {
-            return true;
-        }
-
-        if ids_overlap(&self.mailbox_sends, &other.mailbox_sends) {
-            return true;
-        }
-
-        // A send or a receive moves the occupancy a count read reports.
-        if ids_overlap(&self.mailbox_counts, &other.mailbox_sends)
+            || ids_overlap(&self.mailbox_sends, &other.mailbox_sends)
+            // A send or a receive moves the occupancy a count read
+            // reports.
+            || ids_overlap(&self.mailbox_counts, &other.mailbox_sends)
             || ids_overlap(&other.mailbox_counts, &self.mailbox_sends)
             || ids_overlap(&self.mailbox_counts, &other.mailbox_receives)
             || ids_overlap(&other.mailbox_counts, &self.mailbox_receives)
-        {
-            return true;
-        }
+            // Two receive attempts on one mailbox are order-dependent
+            // with no step sending: the pipeline pops the FIFO for
+            // whichever commits first and blocks the other, so the swap
+            // decides which unit takes the message.
+            || ids_overlap(&self.mailbox_receives, &other.mailbox_receives)
+    }
 
-        // Two receive attempts on one mailbox are order-dependent with
-        // no step sending: the pipeline pops the FIFO for whichever
-        // commits first and blocks the other, so the swap decides which
-        // unit takes the message.
-        if ids_overlap(&self.mailbox_receives, &other.mailbox_receives) {
-            return true;
-        }
-
-        if ids_overlap(&self.signal_updates, &other.signal_updates) {
-            return true;
-        }
-        if ids_overlap(&self.signal_updates, &other.wait_signals)
+    /// Signals, wakes, signal-register writes and barrier waits.
+    #[inline]
+    fn signal_conflict(&self, other: &StepFootprint) -> bool {
+        ids_overlap(&self.signal_updates, &other.signal_updates)
+            || ids_overlap(&self.signal_updates, &other.wait_signals)
             || ids_overlap(&other.signal_updates, &self.wait_signals)
-        {
-            return true;
-        }
-
-        // A wake enables only the unit it names: `WaitOnEvent` blocks
-        // its source and reads no target, and the one path back to
-        // runnable is a `WakeUnit` naming that unit.
-        if ids_overlap(&self.wake_targets, &other.wait_units)
+            // A wake enables only the unit it names: `WaitOnEvent`
+            // blocks its source and reads no target, and the one path
+            // back to runnable is a `WakeUnit` naming that unit.
+            || ids_overlap(&self.wake_targets, &other.wait_units)
             || ids_overlap(&other.wake_targets, &self.wait_units)
-        {
-            return true;
-        }
-
-        // A signal write reaches every step of its target, whose reads
-        // of the register emit nothing.
-        if ids_overlap(&self.signal_writes, &other.signal_writes)
+            // A signal write reaches every step of its target, whose
+            // reads of the register emit nothing.
+            || ids_overlap(&self.signal_writes, &other.signal_writes)
             || other
                 .local_store_owner
                 .is_some_and(|unit| self.signal_writes.contains(&unit))
             || self
                 .local_store_owner
                 .is_some_and(|unit| other.signal_writes.contains(&unit))
-        {
-            return true;
-        }
+            // A false dependency: no registry holds barrier state, so a
+            // barrier wait's one consequence is its own unit's status.
+            || ids_overlap(&self.wait_barriers, &other.wait_barriers)
+    }
 
-        // Another processor's access to a local store reaches every step
-        // of its owner, whose loads and stores emit nothing, and any
-        // other access to the same bytes. A transfer's end in that local
-        // store is the issuer's own, so the owner clause covers a
-        // transfer queued there, and the in-flight clauses one landing.
+    /// Another processor's access to a local store reaches every step
+    /// of its owner, whose loads and stores emit nothing, and any other
+    /// access to the same bytes.
+    ///
+    /// A transfer's end in that local store is the issuer's own, so the
+    /// owner clause covers a transfer queued there, and the in-flight
+    /// clauses one landing.
+    #[inline]
+    fn local_store_conflict(&self, other: &StepFootprint) -> bool {
         let reaches_owner = |access: &StepFootprint, stepper: &StepFootprint| {
             stepper.local_store_owner.is_some_and(|unit| {
                 access
@@ -711,44 +696,13 @@ impl StepFootprint {
                     .any(|(owner, _)| *owner == unit)
             })
         };
-        if reaches_owner(self, other)
+        reaches_owner(self, other)
             || reaches_owner(other, self)
             || local_stores_overlap(&self.local_store_accesses, &other.local_store_accesses)
-        {
-            return true;
-        }
+    }
 
-        // A false dependency: no registry holds barrier state, so a
-        // barrier wait's one consequence is its own unit's status.
-        if ids_overlap(&self.wait_barriers, &other.wait_barriers) {
-            return true;
-        }
-
-        // No read-against-reservation clause: what loses a reservation
-        // is a store or another modification of the granule, or an act
-        // of the holder itself [PPC-Book2 p:10 s:1.7.3.1]. Another
-        // unit's load leaves the entry, and the verdict of its later
-        // conditional store, alone.
-        if write_covers_any_line(&self.shared_writes, &other.reservation_lines)
-            || write_covers_any_line(&other.shared_writes, &self.reservation_lines)
-        {
-            return true;
-        }
-
-        // A landing clears every other unit's reservation whose line its
-        // destination touches, even where the bytes miss the store's own
-        // range (`Runtime::host_write` sweeps the write's range and
-        // exempts the issuer alone). A source read clears nothing.
-        if write_covers_any_line(&self.dma_writes, &other.reservation_lines)
-            || write_covers_any_line(&other.dma_writes, &self.reservation_lines)
-        {
-            return true;
-        }
-
-        if lines_overlap(&self.reservation_lines, &other.reservation_lines) {
-            return true;
-        }
-
+    #[inline]
+    fn reservation_conflict(&self, other: &StepFootprint) -> bool {
         // A write before the step clears the entry the step checks as
         // it begins, and a write after it clears the entry in a later
         // step. Two holders of one line do not conflict for holding it.
@@ -756,28 +710,29 @@ impl StepFootprint {
             write_covers_any_line(&writer.shared_writes, &holder.held_reservation_lines)
                 || write_covers_any_line(&writer.dma_writes, &holder.held_reservation_lines)
         };
-        if clears_held(self, other) || clears_held(other, self) {
-            return true;
-        }
+        // No read-against-reservation clause: what loses a reservation
+        // is a store or another modification of the granule, or an act
+        // of the holder itself [PPC-Book2 p:10 s:1.7.3.1]. Another
+        // unit's load leaves the entry, and the verdict of its later
+        // conditional store, alone.
+        write_covers_any_line(&self.shared_writes, &other.reservation_lines)
+            || write_covers_any_line(&other.shared_writes, &self.reservation_lines)
+            // A landing clears every other unit's reservation whose line
+            // its destination touches, even where the bytes miss the
+            // store's own range (`Runtime::host_write` sweeps the
+            // write's range and exempts the issuer alone). A source read
+            // clears nothing.
+            || write_covers_any_line(&self.dma_writes, &other.reservation_lines)
+            || write_covers_any_line(&other.dma_writes, &self.reservation_lines)
+            || lines_overlap(&self.reservation_lines, &other.reservation_lines)
+            || clears_held(self, other)
+            || clears_held(other, self)
+    }
 
-        // One step's cost decides where an in-flight transfer lands,
-        // and the other step reads or writes the bytes it lands on.
-        if touches_inflight(self, other) || touches_inflight(other, self) {
-            return true;
-        }
-
-        // Every step carries ticks, so every step decides which side of
-        // a landing the step that rides it falls on.
-        if self.rides_a_landing() || other.rides_a_landing() {
-            return true;
-        }
-
-        // A wake's tick can decide the value a clock reader saw (see
-        // `reads_clock`), and it can store that value anywhere.
-        if self.reads_clock || other.reads_clock {
-            return true;
-        }
-
+    /// Where ticks decide the outcome: in-flight landings, clock reads,
+    /// and the PPE's thread scheduling.
+    #[inline]
+    fn timing_conflict(&self, other: &StepFootprint) -> bool {
         // A PPE step's ticks read how many other PPE threads were
         // runnable, which a step that parks, wakes, creates or finishes
         // one of them decides.
@@ -786,10 +741,6 @@ impl StepFootprint {
                 .ppe_sibling_reader
                 .is_some_and(|r| changer.ppe_status_changes.iter().any(|&u| u != r))
         };
-        if sibling_moved(self, other) || sibling_moved(other, self) {
-            return true;
-        }
-
         // A PPE thread's steps read the issue pressure of its siblings.
         let pressure_moved = |reader: &StepFootprint, changer: &StepFootprint| {
             reader
@@ -797,17 +748,25 @@ impl StepFootprint {
                 .zip(changer.ppe_pressure_changer)
                 .is_some_and(|(r, c)| r != c)
         };
-        if pressure_moved(self, other) || pressure_moved(other, self) {
-            return true;
-        }
-
-        // The order PPE threads become runnable in decides which of them
-        // hold the PPE's two hardware threads.
-        if !self.ppe_status_changes.is_empty() && !other.ppe_status_changes.is_empty() {
-            return true;
-        }
-
-        false
+        // One step's cost decides where an in-flight transfer lands,
+        // and the other step reads or writes the bytes it lands on.
+        touches_inflight(self, other)
+            || touches_inflight(other, self)
+            // Every step carries ticks, so every step decides which side
+            // of a landing the step that rides it falls on.
+            || self.rides_a_landing()
+            || other.rides_a_landing()
+            // A wake's tick can decide the value a clock reader saw (see
+            // `reads_clock`), and it can store that value anywhere.
+            || self.reads_clock
+            || other.reads_clock
+            || sibling_moved(self, other)
+            || sibling_moved(other, self)
+            || pressure_moved(self, other)
+            || pressure_moved(other, self)
+            // The order PPE threads become runnable in decides which of
+            // them hold the PPE's two hardware threads.
+            || (!self.ppe_status_changes.is_empty() && !other.ppe_status_changes.is_empty())
     }
 
     /// True when the step accessed no shared resources.
