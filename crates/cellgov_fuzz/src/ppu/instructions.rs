@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use cellgov_effects::Effect;
+use cellgov_effects::{Effect, EffectKind};
 use cellgov_ppu::exec::ExecuteVerdict;
 use cellgov_ppu::instruction::fuzz::{PpuMetamorphicRelation, PpuOutcomeClass, PpuRelationRefusal};
 use cellgov_ppu::instruction::PpuInstruction;
@@ -19,11 +19,10 @@ use super::generate::{
     case_descriptors, random_state, state_aware_state_for_instruction, structured_generated_word,
     GeneratedWord, DATA_LEN,
 };
-use super::record::{guarded_run, record, record_target_panic};
+use super::record::{guarded_run, load_descriptors, record, record_target_panic};
 use crate::boundary::call_target;
-use crate::case::CaseEligibility;
+use crate::case::{CaseAssessment, CaseEligibility};
 use crate::error::{FuzzError, InvariantError};
-use crate::registry::ppu_descriptors;
 use crate::report::{
     CheckIdentity, ComponentIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzRun,
     FuzzTarget, InstructionIdentity, OutcomeIdentity, SemanticFingerprint,
@@ -73,23 +72,9 @@ fn run_instructions_inner(
 ) -> Result<(), FuzzError> {
     config.validate(None)?;
     let iterations = config.case_indices()?;
-    let descriptors = match (config.strategy, iterations.clone().next()) {
-        (GenerationStrategy::Structured, Some(first)) => match call_target(ppu_descriptors) {
-            Ok(descriptors) => descriptors,
-            Err(payload) => {
-                report.considered()?;
-                record_target_panic(
-                    report,
-                    CheckIdentity::PpuDecoder,
-                    None,
-                    Vec::new(),
-                    first,
-                    payload,
-                )?;
-                return Ok(());
-            }
-        },
-        (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
+    let Some(descriptors) = load_descriptors(config.strategy, iterations.clone().next(), report)?
+    else {
+        return Ok(());
     };
     for iteration in iterations {
         report.considered()?;
@@ -175,124 +160,8 @@ fn run_instructions_inner(
         report.assessed(&assessment)?;
         report.executed(1)?;
         report.observed_effects(first.observation.committed_effects.iter().map(Effect::kind))?;
-        // An unsupported or undefined case enters no check, so it produces no finding.
-        if assessment.eligibility != CaseEligibility::Eligible {
-            report.observe_case(
-                iteration,
-                ppu_observation(
-                    [identity],
-                    &assessment,
-                    PpuTerminalObservation::from_step(&first),
-                    &first.observation.committed_effects,
-                    1,
-                    ppu_step_changed(&initial, &first),
-                    CrossReferenceAsymmetry::None,
-                ),
-            )?;
-            continue;
-        }
-        let outcome = seeded::ppu_outcome(
-            PpuOutcomeClass::from_verdict(&first.verdict),
-            descriptor.outcomes,
-        );
-        let mut asymmetry = CrossReferenceAsymmetry::None;
-        if !descriptor.outcomes.contains(&outcome) {
-            asymmetry = ppu_outcome_asymmetry(outcome);
-            record(
-                report,
-                FindingKind::IllegalOutcome,
-                SemanticFingerprint {
-                    target: FuzzTarget::PpuInstruction,
-                    instruction_kind: Some(identity),
-                    check: CheckIdentity::LegalOutcome,
-                    divergence: DivergenceClass::Outcome,
-                    outcome: Some(outcome_identity(outcome)),
-                    effect: None,
-                    component: None,
-                },
-                vec![raw],
-                iteration,
-            )?;
-        }
-        if let Some(effect) = first
-            .observation
-            .staged_effects
-            .iter()
-            .map(Effect::kind)
-            .chain(seeded::extra_effect(descriptor.effects))
-            .find(|effect| !descriptor.effects.contains(effect))
-        {
-            asymmetry = asymmetry.max(CrossReferenceAsymmetry::Effect);
-            record(
-                report,
-                FindingKind::IllegalEffect,
-                SemanticFingerprint {
-                    target: FuzzTarget::PpuInstruction,
-                    instruction_kind: Some(identity),
-                    check: CheckIdentity::LegalEffect,
-                    divergence: DivergenceClass::Effect,
-                    outcome: None,
-                    effect: Some(effect),
-                    component: None,
-                },
-                vec![raw],
-                iteration,
-            )?;
-        }
-        if requests_replay(descriptor.relations) {
-            let second = match call_target(|| run_once(&instruction, &initial, &memory)) {
-                Ok(Ok(mut second)) => {
-                    seeded::ppu_replayed(&mut second.observation);
-                    second
-                }
-                Ok(Err(error)) => return Err(error.into()),
-                Err(payload) => {
-                    record_target_panic(
-                        report,
-                        CheckIdentity::PpuExecutor,
-                        Some(identity),
-                        vec![raw],
-                        iteration,
-                        payload,
-                    )?;
-                    report.observe_case(
-                        iteration,
-                        ppu_observation(
-                            [identity],
-                            &assessment,
-                            PpuTerminalObservation::from_step(&first),
-                            &first.observation.committed_effects,
-                            1,
-                            ppu_step_changed(&initial, &first),
-                            CrossReferenceAsymmetry::TargetPanic,
-                        ),
-                    )?;
-                    continue;
-                }
-            };
-            let replay_asymmetry = ppu_step_replay_asymmetry(&first, &second);
-            if replay_asymmetry != CrossReferenceAsymmetry::None {
-                asymmetry = asymmetry.max(replay_asymmetry);
-                record(
-                    report,
-                    FindingKind::Nondeterministic,
-                    SemanticFingerprint {
-                        target: FuzzTarget::PpuInstruction,
-                        instruction_kind: Some(identity),
-                        check: CheckIdentity::DeterministicReplay,
-                        divergence: DivergenceClass::ArchitecturalState,
-                        outcome: None,
-                        effect: None,
-                        component: None,
-                    },
-                    vec![raw],
-                    iteration,
-                )?;
-            }
-        }
-        let relation_asymmetry = run_metamorphic_checks(
-            report,
-            MetamorphicRun {
+        let case = InstructionCase {
+            run: MetamorphicRun {
                 instruction: &instruction,
                 descriptor,
                 initial: &initial,
@@ -302,24 +171,180 @@ fn run_instructions_inner(
                 iteration,
                 baseline: &first,
             },
-        )?;
-        asymmetry = asymmetry.max(relation_asymmetry);
-        report.observe_case(
-            iteration,
-            ppu_observation(
-                [identity],
-                &assessment,
-                PpuTerminalObservation::from_step(&first),
-                &first.observation.committed_effects,
-                1,
-                ppu_step_changed(&initial, &first),
-                asymmetry,
-            ),
-        )?;
+            assessment: &assessment,
+        };
+        // An unsupported or undefined case enters no check, so it produces no finding.
+        if assessment.eligibility != CaseEligibility::Eligible {
+            case.observe(report, CrossReferenceAsymmetry::None)?;
+            continue;
+        }
+        let mut asymmetry = case.check_legal_outcome(report)?;
+        asymmetry = asymmetry.max(case.check_legal_effect(report)?);
+        let Some(replay_asymmetry) = case.check_replay(report)? else {
+            case.observe(report, CrossReferenceAsymmetry::TargetPanic)?;
+            continue;
+        };
+        asymmetry = asymmetry.max(replay_asymmetry);
+        asymmetry = asymmetry.max(run_metamorphic_checks(report, case.run)?);
+        case.observe(report, asymmetry)?;
     }
     Ok(())
 }
 
+/// One decoded instruction case after its first run, and the checks an
+/// eligible case enters. Each check records its finding and returns the
+/// asymmetry the case's observation takes.
+struct InstructionCase<'a> {
+    run: MetamorphicRun<'a>,
+    assessment: &'a CaseAssessment,
+}
+
+impl InstructionCase<'_> {
+    fn observe(
+        &self,
+        report: &mut FuzzReport,
+        asymmetry: CrossReferenceAsymmetry,
+    ) -> Result<(), InvariantError> {
+        let run = &self.run;
+        report.observe_case(
+            run.iteration,
+            ppu_observation(
+                [run.identity],
+                self.assessment,
+                PpuTerminalObservation::from_step(run.baseline),
+                &run.baseline.observation.committed_effects,
+                1,
+                ppu_step_changed(run.initial, run.baseline),
+                asymmetry,
+            ),
+        )?;
+        Ok(())
+    }
+
+    fn fingerprint(
+        &self,
+        check: CheckIdentity,
+        divergence: DivergenceClass,
+        outcome: Option<OutcomeIdentity>,
+        effect: Option<EffectKind>,
+    ) -> SemanticFingerprint {
+        SemanticFingerprint {
+            target: FuzzTarget::PpuInstruction,
+            instruction_kind: Some(self.run.identity),
+            check,
+            divergence,
+            outcome,
+            effect,
+            component: None,
+        }
+    }
+
+    fn check_legal_outcome(
+        &self,
+        report: &mut FuzzReport,
+    ) -> Result<CrossReferenceAsymmetry, InvariantError> {
+        let run = &self.run;
+        let outcome = seeded::ppu_outcome(
+            PpuOutcomeClass::from_verdict(&run.baseline.verdict),
+            run.descriptor.outcomes,
+        );
+        if run.descriptor.outcomes.contains(&outcome) {
+            return Ok(CrossReferenceAsymmetry::None);
+        }
+        record(
+            report,
+            FindingKind::IllegalOutcome,
+            self.fingerprint(
+                CheckIdentity::LegalOutcome,
+                DivergenceClass::Outcome,
+                Some(outcome_identity(outcome)),
+                None,
+            ),
+            vec![run.raw],
+            run.iteration,
+        )?;
+        Ok(ppu_outcome_asymmetry(outcome))
+    }
+
+    fn check_legal_effect(
+        &self,
+        report: &mut FuzzReport,
+    ) -> Result<CrossReferenceAsymmetry, InvariantError> {
+        let run = &self.run;
+        let Some(effect) = run
+            .baseline
+            .observation
+            .staged_effects
+            .iter()
+            .map(Effect::kind)
+            .chain(seeded::extra_effect(run.descriptor.effects))
+            .find(|effect| !run.descriptor.effects.contains(effect))
+        else {
+            return Ok(CrossReferenceAsymmetry::None);
+        };
+        record(
+            report,
+            FindingKind::IllegalEffect,
+            self.fingerprint(
+                CheckIdentity::LegalEffect,
+                DivergenceClass::Effect,
+                None,
+                Some(effect),
+            ),
+            vec![run.raw],
+            run.iteration,
+        )?;
+        Ok(CrossReferenceAsymmetry::Effect)
+    }
+
+    /// The replay's asymmetry, `None` asymmetry for a kind that asks for
+    /// no replay; `Ok(None)` when the replay panicked, recorded here.
+    fn check_replay(
+        &self,
+        report: &mut FuzzReport,
+    ) -> Result<Option<CrossReferenceAsymmetry>, FuzzError> {
+        let run = &self.run;
+        if !requests_replay(run.descriptor.relations) {
+            return Ok(Some(CrossReferenceAsymmetry::None));
+        }
+        let second = match call_target(|| run_once(run.instruction, run.initial, run.memory)) {
+            Ok(Ok(mut second)) => {
+                seeded::ppu_replayed(&mut second.observation);
+                second
+            }
+            Ok(Err(error)) => return Err(error.into()),
+            Err(payload) => {
+                record_target_panic(
+                    report,
+                    CheckIdentity::PpuExecutor,
+                    Some(run.identity),
+                    vec![run.raw],
+                    run.iteration,
+                    payload,
+                )?;
+                return Ok(None);
+            }
+        };
+        let replay_asymmetry = ppu_step_replay_asymmetry(run.baseline, &second);
+        if replay_asymmetry != CrossReferenceAsymmetry::None {
+            record(
+                report,
+                FindingKind::Nondeterministic,
+                self.fingerprint(
+                    CheckIdentity::DeterministicReplay,
+                    DivergenceClass::ArchitecturalState,
+                    None,
+                    None,
+                ),
+                vec![run.raw],
+                run.iteration,
+            )?;
+        }
+        Ok(Some(replay_asymmetry))
+    }
+}
+
+#[derive(Clone, Copy)]
 struct MetamorphicRun<'a> {
     instruction: &'a PpuInstruction,
     descriptor: cellgov_ppu::instruction::fuzz::PpuFuzzDescriptor,

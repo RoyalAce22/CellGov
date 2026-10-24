@@ -13,8 +13,7 @@ use std::ops::{Deref, DerefMut};
 use cellgov_spu::observation::SpuObservation;
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState, SPU_LS_SIZE};
 
-use super::execute::{ObservedSequence, ObservedStep};
-use crate::report::InstructionIdentity;
+use super::execute::{ObservedSequenceRun, ObservedStep};
 
 /// The spare local-store buffers of one campaign.
 #[derive(Debug, Default)]
@@ -82,9 +81,9 @@ impl HoldsLocalStore for ObservedStep {
     }
 }
 
-impl HoldsLocalStore for (ObservedSequence, u64, Vec<InstructionIdentity>) {
+impl HoldsLocalStore for ObservedSequenceRun {
     fn local_store(&mut self) -> &mut Vec<u8> {
-        &mut self.0.state.ls
+        &mut self.observed.state.ls
     }
 }
 

@@ -3,11 +3,12 @@
 
 use std::collections::BTreeSet;
 
-use cellgov_effects::Effect;
+use cellgov_effects::{Effect, EffectKind};
 use cellgov_spu::fuzz::{
     encoding_execution_is_supported, encoding_has_undefined_operands, SpuFuzzDescriptor,
     SpuMetamorphicRelation, SpuOutcomeClass, SpuRelationRefusal,
 };
+use cellgov_spu::instruction::SpuInstruction;
 use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation, SpuObservationComponent};
 use cellgov_spu::state::SpuState;
 
@@ -21,15 +22,17 @@ use super::generate::{
     GeneratedWord,
 };
 use super::local_stores::LocalStores;
-use super::record::{footprint_fingerprint, guarded_run, record, record_target_panic};
+use super::record::{
+    footprint_fingerprint, guarded_run, load_descriptors, record, record_target_panic,
+};
 use super::sequence_relations::divergence_class;
 use crate::boundary::call_target;
-use crate::case::CaseEligibility;
+use crate::case::{CaseAssessment, CaseEligibility};
 use crate::error::{FuzzError, InvariantError};
 use crate::registry::spu_descriptors;
 use crate::report::{
     CheckIdentity, ComponentIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzRun,
-    FuzzTarget, InstructionIdentity, SemanticFingerprint,
+    FuzzTarget, InstructionIdentity, OutcomeIdentity, SemanticFingerprint,
 };
 use crate::retention::CrossReferenceAsymmetry;
 use crate::rng::Rng;
@@ -76,23 +79,9 @@ fn run_instructions_inner(
 ) -> Result<(), FuzzError> {
     config.validate(None)?;
     let iterations = config.case_indices()?;
-    let descriptors = match (config.strategy, iterations.clone().next()) {
-        (GenerationStrategy::Structured, Some(first)) => match call_target(spu_descriptors) {
-            Ok(descriptors) => descriptors,
-            Err(payload) => {
-                report.considered()?;
-                record_target_panic(
-                    report,
-                    CheckIdentity::SpuDecoder,
-                    None,
-                    Vec::new(),
-                    first,
-                    payload,
-                )?;
-                return Ok(());
-            }
-        },
-        (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
+    let Some(descriptors) = load_descriptors(config.strategy, iterations.clone().next(), report)?
+    else {
+        return Ok(());
     };
     let pool = LocalStores::default();
     for iteration in iterations {
@@ -179,138 +168,28 @@ fn run_instructions_inner(
         report.assessed(&assessment)?;
         report.executed(1)?;
         report.observed_effects(outcome_effects(&first.outcome).iter().map(Effect::kind))?;
+        let case = InstructionCase {
+            iteration,
+            raw,
+            identity,
+            instruction: &instruction,
+            descriptor,
+            initial: &initial,
+            first: &first,
+            assessment: &assessment,
+            pool: &pool,
+        };
         if assessment.eligibility != CaseEligibility::Eligible {
-            report.observe_case(
-                iteration,
-                spu_observation(
-                    [identity],
-                    &assessment,
-                    SpuTerminalObservation::Execution(Some(&first.outcome)),
-                    &first.state,
-                    &initial,
-                    1,
-                    CrossReferenceAsymmetry::None,
-                ),
-            )?;
+            case.observe(report, CrossReferenceAsymmetry::None)?;
             continue;
         }
-        let mut asymmetry = CrossReferenceAsymmetry::None;
-        if requests_replay(descriptor.relations) {
-            let second = match call_target(|| run_once_in(&instruction, &initial, &pool)) {
-                Ok(mut second) => {
-                    seeded::spu_replayed(&mut second.state);
-                    second
-                }
-                Err(payload) => {
-                    record_target_panic(
-                        report,
-                        CheckIdentity::SpuExecutor,
-                        Some(identity),
-                        vec![raw],
-                        iteration,
-                        payload,
-                    )?;
-                    report.observe_case(
-                        iteration,
-                        spu_observation(
-                            [identity],
-                            &assessment,
-                            SpuTerminalObservation::Execution(Some(&first.outcome)),
-                            &first.state,
-                            &initial,
-                            1,
-                            CrossReferenceAsymmetry::TargetPanic,
-                        ),
-                    )?;
-                    continue;
-                }
-            };
-            let replay_asymmetry = spu_step_replay_asymmetry(&first, &second);
-            if replay_asymmetry != CrossReferenceAsymmetry::None {
-                asymmetry = asymmetry.max(replay_asymmetry);
-                record(
-                    report,
-                    FindingKind::Nondeterministic,
-                    SemanticFingerprint {
-                        target: FuzzTarget::SpuInstruction,
-                        instruction_kind: Some(identity),
-                        check: CheckIdentity::DeterministicReplay,
-                        divergence: DivergenceClass::ArchitecturalState,
-                        outcome: None,
-                        effect: None,
-                        component: None,
-                    },
-                    vec![raw],
-                    iteration,
-                )?;
-            }
-        }
-        let outcome = seeded::spu_outcome(
-            SpuOutcomeClass::from_outcome(&first.outcome),
-            descriptor.outcomes,
-        );
-        if !descriptor.outcomes.contains(&outcome) {
-            asymmetry = asymmetry.max(spu_outcome_class_asymmetry(outcome));
-            record(
-                report,
-                FindingKind::IllegalOutcome,
-                SemanticFingerprint {
-                    target: FuzzTarget::SpuInstruction,
-                    instruction_kind: Some(identity),
-                    check: CheckIdentity::LegalOutcome,
-                    divergence: DivergenceClass::Outcome,
-                    outcome: Some(outcome_identity(outcome)),
-                    effect: None,
-                    component: None,
-                },
-                vec![raw],
-                iteration,
-            )?;
-        }
-        if let Some(effect) = outcome_effects(&first.outcome)
-            .iter()
-            .map(Effect::kind)
-            .chain(seeded::extra_effect(descriptor.effects))
-            .find(|effect| !descriptor.effects.contains(effect))
-        {
-            asymmetry = asymmetry.max(CrossReferenceAsymmetry::Effect);
-            record(
-                report,
-                FindingKind::IllegalEffect,
-                SemanticFingerprint {
-                    target: FuzzTarget::SpuInstruction,
-                    instruction_kind: Some(identity),
-                    check: CheckIdentity::LegalEffect,
-                    divergence: DivergenceClass::Effect,
-                    outcome: None,
-                    effect: Some(effect),
-                    component: None,
-                },
-                vec![raw],
-                iteration,
-            )?;
-        }
-        for component in SpuAllowedFootprint::for_instruction(&instruction).violations_of(
-            &initial,
-            &first.state,
-            &first.outcome,
-        ) {
-            asymmetry = asymmetry.max(CrossReferenceAsymmetry::State);
-            record(
-                report,
-                FindingKind::IllegalFootprint,
-                footprint_fingerprint(
-                    FuzzTarget::SpuInstruction,
-                    Some(identity),
-                    component,
-                    Some(outcome_identity(SpuOutcomeClass::from_outcome(
-                        &first.outcome,
-                    ))),
-                ),
-                vec![raw],
-                iteration,
-            )?;
-        }
+        let Some(mut asymmetry) = case.check_replay(report)? else {
+            case.observe(report, CrossReferenceAsymmetry::TargetPanic)?;
+            continue;
+        };
+        asymmetry = asymmetry.max(case.check_legal_outcome(report)?);
+        asymmetry = asymmetry.max(case.check_legal_effect(report)?);
+        asymmetry = asymmetry.max(case.check_footprint(report)?);
         asymmetry = asymmetry.max(run_metamorphic_checks(
             report,
             &instruction,
@@ -322,20 +201,192 @@ fn run_instructions_inner(
             iteration,
             &pool,
         )?);
+        case.observe(report, asymmetry)?;
+    }
+    Ok(())
+}
+
+/// One decoded instruction case after its first run, and the checks an
+/// eligible case enters. Each check records its findings and returns the
+/// asymmetry the case's observation takes.
+struct InstructionCase<'a> {
+    iteration: u64,
+    raw: u32,
+    identity: InstructionIdentity,
+    instruction: &'a SpuInstruction,
+    descriptor: SpuFuzzDescriptor,
+    initial: &'a SpuState,
+    first: &'a ObservedStep,
+    assessment: &'a CaseAssessment,
+    pool: &'a LocalStores,
+}
+
+impl InstructionCase<'_> {
+    fn observe(
+        &self,
+        report: &mut FuzzReport,
+        asymmetry: CrossReferenceAsymmetry,
+    ) -> Result<(), InvariantError> {
         report.observe_case(
-            iteration,
+            self.iteration,
             spu_observation(
-                [identity],
-                &assessment,
-                SpuTerminalObservation::Execution(Some(&first.outcome)),
-                &first.state,
-                &initial,
+                [self.identity],
+                self.assessment,
+                SpuTerminalObservation::Execution(Some(&self.first.outcome)),
+                &self.first.state,
+                self.initial,
                 1,
                 asymmetry,
             ),
         )?;
+        Ok(())
     }
-    Ok(())
+
+    fn fingerprint(
+        &self,
+        check: CheckIdentity,
+        divergence: DivergenceClass,
+        outcome: Option<OutcomeIdentity>,
+        effect: Option<EffectKind>,
+    ) -> SemanticFingerprint {
+        SemanticFingerprint {
+            target: FuzzTarget::SpuInstruction,
+            instruction_kind: Some(self.identity),
+            check,
+            divergence,
+            outcome,
+            effect,
+            component: None,
+        }
+    }
+
+    /// The replay's asymmetry, `None` asymmetry for a kind that asks for
+    /// no replay; `Ok(None)` when the replay panicked, recorded here.
+    fn check_replay(
+        &self,
+        report: &mut FuzzReport,
+    ) -> Result<Option<CrossReferenceAsymmetry>, InvariantError> {
+        if !requests_replay(self.descriptor.relations) {
+            return Ok(Some(CrossReferenceAsymmetry::None));
+        }
+        let second = match call_target(|| run_once_in(self.instruction, self.initial, self.pool)) {
+            Ok(mut second) => {
+                seeded::spu_replayed(&mut second.state);
+                second
+            }
+            Err(payload) => {
+                record_target_panic(
+                    report,
+                    CheckIdentity::SpuExecutor,
+                    Some(self.identity),
+                    vec![self.raw],
+                    self.iteration,
+                    payload,
+                )?;
+                return Ok(None);
+            }
+        };
+        let replay_asymmetry = spu_step_replay_asymmetry(self.first, &second);
+        if replay_asymmetry != CrossReferenceAsymmetry::None {
+            record(
+                report,
+                FindingKind::Nondeterministic,
+                self.fingerprint(
+                    CheckIdentity::DeterministicReplay,
+                    DivergenceClass::ArchitecturalState,
+                    None,
+                    None,
+                ),
+                vec![self.raw],
+                self.iteration,
+            )?;
+        }
+        Ok(Some(replay_asymmetry))
+    }
+
+    fn check_legal_outcome(
+        &self,
+        report: &mut FuzzReport,
+    ) -> Result<CrossReferenceAsymmetry, InvariantError> {
+        let outcome = seeded::spu_outcome(
+            SpuOutcomeClass::from_outcome(&self.first.outcome),
+            self.descriptor.outcomes,
+        );
+        if self.descriptor.outcomes.contains(&outcome) {
+            return Ok(CrossReferenceAsymmetry::None);
+        }
+        record(
+            report,
+            FindingKind::IllegalOutcome,
+            self.fingerprint(
+                CheckIdentity::LegalOutcome,
+                DivergenceClass::Outcome,
+                Some(outcome_identity(outcome)),
+                None,
+            ),
+            vec![self.raw],
+            self.iteration,
+        )?;
+        Ok(spu_outcome_class_asymmetry(outcome))
+    }
+
+    fn check_legal_effect(
+        &self,
+        report: &mut FuzzReport,
+    ) -> Result<CrossReferenceAsymmetry, InvariantError> {
+        let Some(effect) = outcome_effects(&self.first.outcome)
+            .iter()
+            .map(Effect::kind)
+            .chain(seeded::extra_effect(self.descriptor.effects))
+            .find(|effect| !self.descriptor.effects.contains(effect))
+        else {
+            return Ok(CrossReferenceAsymmetry::None);
+        };
+        record(
+            report,
+            FindingKind::IllegalEffect,
+            self.fingerprint(
+                CheckIdentity::LegalEffect,
+                DivergenceClass::Effect,
+                None,
+                Some(effect),
+            ),
+            vec![self.raw],
+            self.iteration,
+        )?;
+        Ok(CrossReferenceAsymmetry::Effect)
+    }
+
+    /// One finding per component written outside the instruction's
+    /// allowed footprint.
+    fn check_footprint(
+        &self,
+        report: &mut FuzzReport,
+    ) -> Result<CrossReferenceAsymmetry, InvariantError> {
+        let mut asymmetry = CrossReferenceAsymmetry::None;
+        for component in SpuAllowedFootprint::for_instruction(self.instruction).violations_of(
+            self.initial,
+            &self.first.state,
+            &self.first.outcome,
+        ) {
+            asymmetry = CrossReferenceAsymmetry::State;
+            record(
+                report,
+                FindingKind::IllegalFootprint,
+                footprint_fingerprint(
+                    FuzzTarget::SpuInstruction,
+                    Some(self.identity),
+                    component,
+                    Some(outcome_identity(SpuOutcomeClass::from_outcome(
+                        &self.first.outcome,
+                    ))),
+                ),
+                vec![self.raw],
+                self.iteration,
+            )?;
+        }
+        Ok(asymmetry)
+    }
 }
 
 fn spu_relation_check(relation: SpuMetamorphicRelation) -> CheckIdentity {

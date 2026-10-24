@@ -1,13 +1,45 @@
 //! The findings an engine records when a contract check fails or the target
 //! panics, and the guarded run that wraps every PPU engine.
 
-use crate::boundary::call_harness;
+use cellgov_ppu::instruction::fuzz::PpuGenerationDescriptor;
+
+use crate::boundary::{call_harness, call_target};
 use crate::error::{FuzzError, InvariantError};
+use crate::registry::ppu_descriptors;
 use crate::report::{
     CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
     InstructionIdentity, ReductionOutcome, SemanticFingerprint,
 };
-use crate::{FuzzConfig, ReplayCoordinates, TargetPanicPayload};
+use crate::{FuzzConfig, GenerationStrategy, ReplayCoordinates, TargetPanicPayload};
+
+/// The descriptor registry a campaign generates from: the registry for
+/// a structured campaign with a first case, otherwise an empty list.
+/// `None` when the registry panicked. The report then holds one
+/// target-panic finding for `first_case`, and the campaign runs no case.
+pub(super) fn load_descriptors(
+    strategy: GenerationStrategy,
+    first_case: Option<u64>,
+    report: &mut FuzzReport,
+) -> Result<Option<Vec<PpuGenerationDescriptor>>, InvariantError> {
+    let (GenerationStrategy::Structured, Some(first)) = (strategy, first_case) else {
+        return Ok(Some(Vec::new()));
+    };
+    match call_target(ppu_descriptors) {
+        Ok(descriptors) => Ok(Some(descriptors)),
+        Err(payload) => {
+            report.considered()?;
+            record_target_panic(
+                report,
+                CheckIdentity::PpuDecoder,
+                None,
+                Vec::new(),
+                first,
+                payload,
+            )?;
+            Ok(None)
+        }
+    }
+}
 
 pub(super) fn record(
     report: &mut FuzzReport,

@@ -64,6 +64,16 @@ pub(super) struct ObservedSequence {
     pub(super) coverage: SpuFacilityCoverage,
 }
 
+/// One run of a generated sequence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ObservedSequenceRun {
+    pub(super) observed: ObservedSequence,
+    /// Instructions decoded; a parked access that runs again counts once.
+    pub(super) decoded: u64,
+    /// The kind of each decoded instruction, in order.
+    pub(super) decoded_kinds: Vec<InstructionIdentity>,
+}
+
 /// The outside world a generated sequence runs against.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct SequenceWorld {
@@ -200,35 +210,36 @@ pub(super) fn spu_step_replay_asymmetry(
 }
 
 pub(super) fn spu_sequence_replay_asymmetry(
-    first: &(ObservedSequence, u64, Vec<InstructionIdentity>),
-    second: &(ObservedSequence, u64, Vec<InstructionIdentity>),
+    first_run: &ObservedSequenceRun,
+    second_run: &ObservedSequenceRun,
 ) -> CrossReferenceAsymmetry {
-    let decode_refusal_differs = first.0.decode_refusal != second.0.decode_refusal;
-    let state_or_trajectory_differs = first.0.state != second.0.state
-        || first.0.memory != second.0.memory
-        || first.0.ppu_results != second.0.ppu_results
-        || first.0.mfc_exceptions != second.0.mfc_exceptions
-        || first.0.stalled != second.0.stalled
-        || first.0.parks != second.0.parks
-        || first.0.coverage != second.0.coverage
+    let (first, second) = (&first_run.observed, &second_run.observed);
+    let decode_refusal_differs = first.decode_refusal != second.decode_refusal;
+    let state_or_trajectory_differs = first.state != second.state
+        || first.memory != second.memory
+        || first.ppu_results != second.ppu_results
+        || first.mfc_exceptions != second.mfc_exceptions
+        || first.stalled != second.stalled
+        || first.parks != second.parks
+        || first.coverage != second.coverage
         || decode_refusal_differs
-        || first.0.deterministic != second.0.deterministic
-        || first.0.has_undefined_operands != second.0.has_undefined_operands
-        || first.0.has_unmodeled_execution != second.0.has_unmodeled_execution
-        || first.0.footprint_violations != second.0.footprint_violations
-        || first.1 != second.1
-        || first.2 != second.2;
-    let first_outcome = first.0.terminal_outcome.as_ref();
-    let second_outcome = second.0.terminal_outcome.as_ref();
+        || first.deterministic != second.deterministic
+        || first.has_undefined_operands != second.has_undefined_operands
+        || first.has_unmodeled_execution != second.has_unmodeled_execution
+        || first.footprint_violations != second.footprint_violations
+        || first_run.decoded != second_run.decoded
+        || first_run.decoded_kinds != second_run.decoded_kinds;
+    let first_outcome = first.terminal_outcome.as_ref();
+    let second_outcome = second.terminal_outcome.as_ref();
     let mut outcome_asymmetry = spu_outcome_asymmetry(first_outcome, second_outcome);
-    if first.0.decode_refusal.is_some() != second.0.decode_refusal.is_some() {
+    if first.decode_refusal.is_some() != second.decode_refusal.is_some() {
         outcome_asymmetry = outcome_asymmetry.max(CrossReferenceAsymmetry::Outcome);
     }
     replay_asymmetry(
         state_or_trajectory_differs,
         outcome_asymmetry,
         optional_outcome_effects(first_outcome) != optional_outcome_effects(second_outcome)
-            || first.0.effects != second.0.effects,
+            || first.effects != second.effects,
     )
 }
 
@@ -280,10 +291,7 @@ fn optional_outcome_effects(outcome: Option<&SpuStepOutcome>) -> &[Effect] {
 }
 
 #[cfg(test)]
-fn run_sequence(
-    initial: &SpuState,
-    budget: usize,
-) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
+fn run_sequence(initial: &SpuState, budget: usize) -> ObservedSequenceRun {
     run_sequence_with_limit(
         initial,
         &SequenceWorld::default(),
@@ -303,7 +311,7 @@ pub(super) fn run_generated_sequence(
     program_words: usize,
     strategy: GenerationStrategy,
     executing: &Cell<Option<InstructionIdentity>>,
-) -> Result<(ObservedSequence, u64, Vec<InstructionIdentity>), InvariantError> {
+) -> Result<ObservedSequenceRun, InvariantError> {
     run_sequence_with_limit(
         initial,
         world,
@@ -324,7 +332,7 @@ pub(super) fn run_generated_sequence_in<'p>(
     strategy: GenerationStrategy,
     executing: &Cell<Option<InstructionIdentity>>,
     pool: &'p LocalStores,
-) -> Result<Pooled<'p, (ObservedSequence, u64, Vec<InstructionIdentity>)>, InvariantError> {
+) -> Result<Pooled<'p, ObservedSequenceRun>, InvariantError> {
     run_sequence_with_limit(
         initial,
         world,
@@ -409,7 +417,7 @@ fn run_sequence_with_limit(
     program_words: Option<usize>,
     executing: &Cell<Option<InstructionIdentity>>,
     pool: &LocalStores,
-) -> Result<(ObservedSequence, u64, Vec<InstructionIdentity>), InvariantError> {
+) -> Result<ObservedSequenceRun, InvariantError> {
     seeded::executor_boundary();
     let mut world = World::with_local_store(initial, pool.take(), &script.memory, None)
         .map_err(world_failure)?;
@@ -572,8 +580,8 @@ fn run_sequence_with_limit(
         .filter(|mask| pending_seen & spu::event::ALL & mask != 0)
         .collect();
     seeded::spu_program_counter(&mut state.pc);
-    Ok((
-        ObservedSequence {
+    Ok(ObservedSequenceRun {
+        observed: ObservedSequence {
             state: SpuObservableSnapshot::capture_owned(state),
             // Sequence replay retains the terminal outcome because the descriptor observes its effects.
             terminal_outcome,
@@ -591,8 +599,8 @@ fn run_sequence_with_limit(
             coverage,
         },
         decoded,
-        kinds,
-    ))
+        decoded_kinds: kinds,
+    })
 }
 
 pub(super) fn requests_replay(relations: &[SpuMetamorphicRelation]) -> bool {

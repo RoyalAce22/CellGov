@@ -1,16 +1,47 @@
 //! The findings an engine records when a contract check fails or the target
 //! panics, and the guarded run that wraps every SPU engine.
 
+use cellgov_spu::fuzz::SpuGenerationDescriptor;
 use cellgov_spu::observation::SpuObservationComponent;
 
 use super::sequence_relations::divergence_class;
-use crate::boundary::call_harness;
+use crate::boundary::{call_harness, call_target};
 use crate::error::{FuzzError, InvariantError};
+use crate::registry::spu_descriptors;
 use crate::report::{
     CheckIdentity, ComponentIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun,
     FuzzTarget, InstructionIdentity, OutcomeIdentity, ReductionOutcome, SemanticFingerprint,
 };
-use crate::{FuzzConfig, ReplayCoordinates, TargetPanicPayload};
+use crate::{FuzzConfig, GenerationStrategy, ReplayCoordinates, TargetPanicPayload};
+
+/// The descriptor registry a campaign generates from: the registry for
+/// a structured campaign with a first case, otherwise an empty list.
+/// `None` when the registry panicked. The report then holds one
+/// target-panic finding for `first_case`, and the campaign runs no case.
+pub(super) fn load_descriptors(
+    strategy: GenerationStrategy,
+    first_case: Option<u64>,
+    report: &mut FuzzReport,
+) -> Result<Option<Vec<SpuGenerationDescriptor>>, InvariantError> {
+    let (GenerationStrategy::Structured, Some(first)) = (strategy, first_case) else {
+        return Ok(Some(Vec::new()));
+    };
+    match call_target(spu_descriptors) {
+        Ok(descriptors) => Ok(Some(descriptors)),
+        Err(payload) => {
+            report.considered()?;
+            record_target_panic(
+                report,
+                CheckIdentity::SpuDecoder,
+                None,
+                Vec::new(),
+                first,
+                payload,
+            )?;
+            Ok(None)
+        }
+    }
+}
 
 /// The identity of a write outside the allowed footprint, in `component`;
 /// see [`ComponentIdentity`] for why the component is part of it.

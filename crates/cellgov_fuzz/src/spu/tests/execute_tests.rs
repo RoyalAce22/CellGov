@@ -20,7 +20,9 @@ fn an_spu_sequence_retains_terminal_effects() {
     initial.ls[..4].copy_from_slice(&rd_in_mbox.to_be_bytes());
     initial.channels.in_mbox = vec![0x0000_0042];
 
-    let (observed, decoded, _) = run_sequence(&initial, 1);
+    let ObservedSequenceRun {
+        observed, decoded, ..
+    } = run_sequence(&initial, 1);
 
     assert_eq!(decoded, 1);
     assert!(matches!(
@@ -39,7 +41,9 @@ fn a_faulting_spu_sequence_discards_prior_state() {
     initial.ls[..4].copy_from_slice(&il_r3_one.to_be_bytes());
     initial.ls[4..8].copy_from_slice(&refused_rdch.to_be_bytes());
 
-    let (observed, decoded, _) = run_sequence(&initial, 2);
+    let ObservedSequenceRun {
+        observed, decoded, ..
+    } = run_sequence(&initial, 2);
 
     assert_eq!(decoded, 2);
     assert_eq!(observed.state.regs[3], [0; 16]);
@@ -76,15 +80,15 @@ fn a_faulting_spu_sequence_discards_the_stores_the_world_committed() {
         .expect("the world builds");
 
     // The put alone lands in main storage.
-    assert_eq!(put_only.0.memory[0].1[..16], [0xAA; 16]);
-    assert!(!put_only.0.effects.is_empty());
+    assert_eq!(put_only.observed.memory[0].1[..16], [0xAA; 16]);
+    assert!(!put_only.observed.effects.is_empty());
     // A fault later in the batch discards it with everything else.
     assert!(matches!(
-        faulted.0.terminal_outcome,
+        faulted.observed.terminal_outcome,
         Some(SpuStepOutcome::Fault(_))
     ));
-    assert_eq!(faulted.0.memory, world.memory);
-    assert!(faulted.0.effects.is_empty());
+    assert_eq!(faulted.observed.memory, world.memory);
+    assert!(faulted.observed.effects.is_empty());
 }
 
 #[test]
@@ -105,7 +109,9 @@ fn self_modified_decode_refusal_is_a_terminal_observation() {
         initial.ls[start..start + 4].copy_from_slice(&word.to_be_bytes());
     }
 
-    let (observed, decoded, _) = run_sequence(&initial, 5);
+    let ObservedSequenceRun {
+        observed, decoded, ..
+    } = run_sequence(&initial, 5);
 
     assert_eq!(decoded, 4);
     assert_eq!(observed.decode_refusal, Some((16, 0x0080_0000)));
@@ -185,13 +191,22 @@ fn spu_sequence_replay_compares_depth_and_execution_order() {
     };
     let nop = InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Nop);
     let lnop = InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Lnop);
-    let first = (observed.clone(), 2, vec![nop, lnop]);
+    let run = |observed: ObservedSequence, decoded, decoded_kinds| ObservedSequenceRun {
+        observed,
+        decoded,
+        decoded_kinds,
+    };
+    let first = run(observed.clone(), 2, vec![nop, lnop]);
     let mut parked = first.clone();
-    parked.0.stalled = true;
+    parked.observed.stalled = true;
     let mut stored = first.clone();
-    stored.0.memory = vec![(0, vec![1])];
+    stored.observed.memory = vec![(0, vec![1])];
     let mut covered = first.clone();
-    covered.0.coverage.channels.insert(spu::SPU_RD_EVENT_STAT);
+    covered
+        .observed
+        .coverage
+        .channels
+        .insert(spu::SPU_RD_EVENT_STAT);
     assert_eq!(
         spu_sequence_replay_asymmetry(&first, &covered),
         CrossReferenceAsymmetry::State
@@ -204,10 +219,10 @@ fn spu_sequence_replay_compares_depth_and_execution_order() {
         spu_sequence_replay_asymmetry(&first, &stored),
         CrossReferenceAsymmetry::State
     );
-    let reordered = (observed.clone(), 2, vec![lnop, nop]);
-    let deeper = (observed, 3, vec![nop, lnop]);
+    let reordered = run(observed.clone(), 2, vec![lnop, nop]);
+    let deeper = run(observed, 3, vec![nop, lnop]);
     let mut refusal = first.clone();
-    refusal.0.decode_refusal = Some((8, u32::MAX));
+    refusal.observed.decode_refusal = Some((8, u32::MAX));
 
     assert_eq!(
         spu_sequence_replay_asymmetry(&first, &reordered),
@@ -360,48 +375,58 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                 InstructionIdentity::Spu(decoded.fuzz_descriptor().kind)
             })
             .collect::<Vec<_>>();
-        assert_eq!(first.2.first(), intended.first(), "{interaction:?}");
-        assert!(
-            first.1 >= 2 || interaction == SpuSequenceInteraction::Branch,
+        assert_eq!(
+            first.decoded_kinds.first(),
+            intended.first(),
             "{interaction:?}"
         );
-        assert!(first.1 <= words.len() as u64, "{interaction:?}");
-        assert!(first.0.decode_refusal.is_none(), "{interaction:?}");
+        assert!(
+            first.decoded >= 2 || interaction == SpuSequenceInteraction::Branch,
+            "{interaction:?}"
+        );
+        assert!(first.decoded <= words.len() as u64, "{interaction:?}");
+        assert!(first.observed.decode_refusal.is_none(), "{interaction:?}");
         match interaction {
             SpuSequenceInteraction::Channel => {
-                assert_eq!(first.2.len(), 3);
-                assert_eq!(first.0.state.channels.mfc_lsa, STRUCTURED_LS_DATA_BASE);
+                assert_eq!(first.decoded_kinds.len(), 3);
+                assert_eq!(
+                    first.observed.state.channels.mfc_lsa,
+                    STRUCTURED_LS_DATA_BASE
+                );
                 assert!(matches!(
-                    first.0.terminal_outcome,
+                    first.observed.terminal_outcome,
                     Some(SpuStepOutcome::Continue)
                 ));
             }
             SpuSequenceInteraction::Mailbox => {
-                assert_eq!(first.2.len(), 2);
+                assert_eq!(first.decoded_kinds.len(), 2);
                 assert_eq!(
-                    first.0.state.regs[3][..4],
+                    first.observed.state.regs[3][..4],
                     cellgov_spu::fuzz::SEQUENCE_MAILBOX_MESSAGE.to_be_bytes()
                 );
-                assert!(first.0.state.channels.in_mbox.is_empty());
+                assert!(first.observed.state.channels.in_mbox.is_empty());
                 assert!(matches!(
-                    first.0.terminal_outcome,
+                    first.observed.terminal_outcome,
                     Some(SpuStepOutcome::Yield { .. })
                 ));
             }
             SpuSequenceInteraction::Dma
             | SpuSequenceInteraction::DmaGet
             | SpuSequenceInteraction::Reservation => {
-                assert_eq!(first.2.len(), 2);
+                assert_eq!(first.decoded_kinds.len(), 2);
                 assert!(
-                    matches!(first.0.terminal_outcome, Some(SpuStepOutcome::Yield { .. })),
+                    matches!(
+                        first.observed.terminal_outcome,
+                        Some(SpuStepOutcome::Yield { .. })
+                    ),
                     "{interaction:?}: {:?}",
-                    first.0.terminal_outcome
+                    first.observed.terminal_outcome
                 );
                 if interaction == SpuSequenceInteraction::Reservation {
-                    assert!(first.0.state.reservation.is_none());
+                    assert!(first.observed.state.reservation.is_none());
                 } else if interaction == SpuSequenceInteraction::DmaGet {
                     assert!(matches!(
-                        &first.0.terminal_outcome,
+                        &first.observed.terminal_outcome,
                         Some(SpuStepOutcome::Yield { effects, .. }) if matches!(
                             effects.first(),
                             Some(cellgov_effects::Effect::DmaEnqueue { request, payload: None })
@@ -411,24 +436,24 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                 }
             }
             SpuSequenceInteraction::MemoryRead => {
-                assert_eq!(first.2.len(), 2);
+                assert_eq!(first.decoded_kinds.len(), 2);
                 assert!(matches!(
-                    first.0.terminal_outcome,
+                    first.observed.terminal_outcome,
                     Some(SpuStepOutcome::MemoryRead { .. })
                 ));
             }
             SpuSequenceInteraction::LocalStore => {
-                assert_eq!(first.2.len(), 2);
+                assert_eq!(first.decoded_kinds.len(), 2);
                 assert_eq!(
-                    first.0.state.regs[3],
+                    first.observed.state.regs[3],
                     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
                 );
             }
             SpuSequenceInteraction::RefusedMfcCommand => {
-                assert_eq!(first.2.len(), 2);
+                assert_eq!(first.decoded_kinds.len(), 2);
                 assert!(
                     matches!(
-                        &first.0.terminal_outcome,
+                        &first.observed.terminal_outcome,
                         Some(SpuStepOutcome::Yield { effects, .. })
                             if matches!(
                                 effects.as_slice(),
@@ -438,69 +463,82 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                             )
                     ),
                     "{:?}",
-                    first.0.terminal_outcome
+                    first.observed.terminal_outcome
                 );
-                assert!(first.0.footprint_violations.is_empty());
+                assert!(first.observed.footprint_violations.is_empty());
             }
             SpuSequenceInteraction::Branch => {
-                assert_eq!(first.2.len(), 2);
-                assert_eq!(first.0.state.pc, 12);
-                assert_eq!(first.0.state.regs[5], initial.regs[5], "decoy must not run");
+                assert_eq!(first.decoded_kinds.len(), 2);
+                assert_eq!(first.observed.state.pc, 12);
                 assert_eq!(
-                    first.2[1],
+                    first.observed.state.regs[5], initial.regs[5],
+                    "decoy must not run"
+                );
+                assert_eq!(
+                    first.decoded_kinds[1],
                     InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Nop)
                 );
             }
             SpuSequenceInteraction::TagWait => {
-                assert_eq!(first.2.len(), 5);
+                assert_eq!(first.decoded_kinds.len(), 5);
                 let base = STRUCTURED_LS_DATA_BASE as usize;
                 // The get landed the main-storage line in local store.
-                assert_eq!(first.0.state.ls[base..base + LINE], recipe_line());
+                assert_eq!(first.observed.state.ls[base..base + LINE], recipe_line());
                 // Tag group 0 reads complete once the get lands.
-                assert_eq!(first.0.state.regs[3][..4], 1u32.to_be_bytes());
-                assert!(!first.0.stalled);
+                assert_eq!(first.observed.state.regs[3][..4], 1u32.to_be_bytes());
+                assert!(!first.observed.stalled);
                 // Every get completes in the step that queued it, so the
                 // wait never blocks.
-                assert_eq!(first.0.parks, 0);
+                assert_eq!(first.observed.parks, 0);
                 assert!(first
-                    .0
+                    .observed
                     .coverage
                     .mfc_opcodes
                     .contains(&(spu::MFC_GET as u16)));
             }
             SpuSequenceInteraction::ReserveStore => {
-                assert_eq!(first.2.len(), 5);
+                assert_eq!(first.decoded_kinds.len(), 5);
                 assert_eq!(
-                    first.0.state.regs[3][..4],
+                    first.observed.state.regs[3][..4],
                     spu::MFC_ATOMIC_STAT_G.to_be_bytes()
                 );
                 // [CBEA p:131 s:9.4] a putllc that kept its reservation reads 0.
-                assert_eq!(first.0.state.regs[5][..4], 0u32.to_be_bytes());
+                assert_eq!(first.observed.state.regs[5][..4], 0u32.to_be_bytes());
                 assert!(first
-                    .0
+                    .observed
                     .effects
                     .iter()
                     .any(|effect| matches!(effect, Effect::ConditionalStore { .. })));
-                assert!(first.0.state.reservation.is_none());
+                assert!(first.observed.state.reservation.is_none());
             }
             SpuSequenceInteraction::EventWait => {
-                assert_eq!(first.2.len(), 3);
+                assert_eq!(first.decoded_kinds.len(), 3);
                 // The wait parked until the scripted signal write landed.
                 assert_eq!(
-                    first.0.ppu_results,
+                    first.observed.ppu_results,
                     [crate::spu_reference::SpuReferencePpuResult::Done]
                 );
-                assert_eq!(first.0.state.regs[3][..4], spu::event::S1.to_be_bytes());
-                assert_eq!(first.0.state.facilities.events.pending & spu::event::S1, 0);
-                assert!(first.0.coverage.event_sources.contains(&spu::event::S1));
-                assert!(!first.0.stalled);
-                assert_eq!(first.0.parks, 1);
+                assert_eq!(
+                    first.observed.state.regs[3][..4],
+                    spu::event::S1.to_be_bytes()
+                );
+                assert_eq!(
+                    first.observed.state.facilities.events.pending & spu::event::S1,
+                    0
+                );
+                assert!(first
+                    .observed
+                    .coverage
+                    .event_sources
+                    .contains(&spu::event::S1));
+                assert!(!first.observed.stalled);
+                assert_eq!(first.observed.parks, 1);
             }
             SpuSequenceInteraction::MailboxDrain => {
                 use cellgov_spu::fuzz::SEQUENCE_MAILBOX_MESSAGE as MESSAGE;
-                assert_eq!(first.2.len(), 4);
+                assert_eq!(first.decoded_kinds.len(), 4);
                 assert_eq!(
-                    first.0.ppu_results,
+                    first.observed.ppu_results,
                     [
                         crate::spu_reference::SpuReferencePpuResult::Read {
                             value: Some(MESSAGE ^ 1)
@@ -508,38 +546,41 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
                         crate::spu_reference::SpuReferencePpuResult::Done,
                     ]
                 );
-                assert_eq!(first.0.state.channels.out_mbox, Some(MESSAGE ^ 2));
-                assert_eq!(first.0.state.regs[3][..4], MESSAGE.to_be_bytes());
+                assert_eq!(first.observed.state.channels.out_mbox, Some(MESSAGE ^ 2));
+                assert_eq!(first.observed.state.regs[3][..4], MESSAGE.to_be_bytes());
                 // The second inbound read parked until the scripted message landed.
-                assert_eq!(first.0.state.regs[6][..4], RECIPE_MESSAGE.to_be_bytes());
-                assert!(!first.0.stalled);
+                assert_eq!(
+                    first.observed.state.regs[6][..4],
+                    RECIPE_MESSAGE.to_be_bytes()
+                );
+                assert!(!first.observed.stalled);
                 // The second outbound write and the second inbound read each
                 // parked once.
-                assert_eq!(first.0.parks, 2);
+                assert_eq!(first.observed.parks, 2);
             }
             SpuSequenceInteraction::Stop => {
-                assert_eq!(first.2.len(), 2);
+                assert_eq!(first.decoded_kinds.len(), 2);
                 // STOP's outcome carries its signal, so the campaign models the case.
-                assert!(!first.0.has_unmodeled_execution);
+                assert!(!first.observed.has_unmodeled_execution);
                 assert_eq!(
                     assess_sequence_case(
                         GenerationStrategy::Structured,
-                        first.1,
+                        first.decoded,
                         false,
-                        first.0.has_unmodeled_execution,
+                        first.observed.has_unmodeled_execution,
                         BTreeSet::new()
                     )
                     .eligibility,
                     CaseEligibility::Eligible
                 );
                 // [SPU-ISA p:238 s:10. Control Instructions] the stop at 4 leaves PC at 8.
-                assert_eq!(first.0.state.pc, 8);
+                assert_eq!(first.observed.state.pc, 8);
                 assert_eq!(
-                    first.0.state.stop.map(|stop| (stop.kind, stop.npc)),
+                    first.observed.state.stop.map(|stop| (stop.kind, stop.npc)),
                     Some((cellgov_spu::stop::SpuStopKind::Stop, 8))
                 );
                 assert!(matches!(
-                    first.0.terminal_outcome,
+                    first.observed.terminal_outcome,
                     Some(SpuStepOutcome::Stop {
                         kind: cellgov_spu::stop::SpuStopKind::Stop,
                         ..
@@ -549,41 +590,41 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
         }
         let mut defective = replay;
         match interaction {
-            SpuSequenceInteraction::Channel => defective.0.state.channels.mfc_lsa ^= 16,
-            SpuSequenceInteraction::Mailbox => defective.0.state.regs[3] = initial.regs[3],
+            SpuSequenceInteraction::Channel => defective.observed.state.channels.mfc_lsa ^= 16,
+            SpuSequenceInteraction::Mailbox => defective.observed.state.regs[3] = initial.regs[3],
             SpuSequenceInteraction::Dma => {
                 if let Some(SpuStepOutcome::Yield { effects, .. }) =
-                    &mut defective.0.terminal_outcome
+                    &mut defective.observed.terminal_outcome
                 {
                     effects.clear();
                 }
             }
             SpuSequenceInteraction::DmaGet => {
                 if let Some(SpuStepOutcome::Yield { effects, .. }) =
-                    &mut defective.0.terminal_outcome
+                    &mut defective.observed.terminal_outcome
                 {
                     effects.clear();
                 }
             }
             SpuSequenceInteraction::MemoryRead => {
-                defective.0.terminal_outcome = Some(SpuStepOutcome::Continue)
+                defective.observed.terminal_outcome = Some(SpuStepOutcome::Continue)
             }
             SpuSequenceInteraction::Reservation => {
-                defective.0.state.reservation = initial.reservation()
+                defective.observed.state.reservation = initial.reservation()
             }
             SpuSequenceInteraction::LocalStore => {
-                defective.0.state.ls[STRUCTURED_LS_DATA_BASE as usize] ^= 1
+                defective.observed.state.ls[STRUCTURED_LS_DATA_BASE as usize] ^= 1
             }
-            SpuSequenceInteraction::RefusedMfcCommand => defective.0.state.pc ^= 4,
-            SpuSequenceInteraction::Branch => defective.0.state.pc ^= 4,
+            SpuSequenceInteraction::RefusedMfcCommand => defective.observed.state.pc ^= 4,
+            SpuSequenceInteraction::Branch => defective.observed.state.pc ^= 4,
             SpuSequenceInteraction::Stop => {
-                defective.0.terminal_outcome = Some(SpuStepOutcome::Continue)
+                defective.observed.terminal_outcome = Some(SpuStepOutcome::Continue)
             }
             SpuSequenceInteraction::TagWait | SpuSequenceInteraction::EventWait => {
-                defective.0.state.regs[3][3] ^= 1
+                defective.observed.state.regs[3][3] ^= 1
             }
-            SpuSequenceInteraction::ReserveStore => defective.0.effects.clear(),
-            SpuSequenceInteraction::MailboxDrain => defective.0.ppu_results.clear(),
+            SpuSequenceInteraction::ReserveStore => defective.observed.effects.clear(),
+            SpuSequenceInteraction::MailboxDrain => defective.observed.ppu_results.clear(),
         }
         assert_ne!(
             spu_sequence_replay_asymmetry(&first, &defective),
@@ -608,7 +649,7 @@ fn an_spu_sequence_does_not_execute_beyond_its_generated_words() {
     initial.ls[..4].copy_from_slice(&branch_to_third_word.to_be_bytes());
     initial.ls[8..12].copy_from_slice(&branch.canonical_word.to_be_bytes());
 
-    let (_, decoded, _) = run_generated_sequence(
+    let ObservedSequenceRun { decoded, .. } = run_generated_sequence(
         &initial,
         &SequenceWorld::default(),
         2,

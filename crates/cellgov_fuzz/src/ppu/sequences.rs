@@ -7,19 +7,21 @@ use std::collections::BTreeSet;
 use cellgov_effects::Effect;
 
 use super::assess::assess_sequence_case;
+use cellgov_ppu::instruction::fuzz::PpuGenerationDescriptor;
+use cellgov_ppu::state::PpuState;
+
 use super::execute::{
     ppu_observation, ppu_sequence_changed, ppu_sequence_replay_asymmetry, run_sequence_tracked,
-    PpuTerminalObservation,
+    ObservedSequenceRun, PpuTerminalObservation,
 };
 use super::generate::{
     case_descriptors, state_aware_state_for_sequence, structured_sequence, GeneratedSequence,
     DATA_LEN,
 };
-use super::record::{guarded_run, record, record_target_panic};
+use super::record::{guarded_run, load_descriptors, record, record_target_panic};
 use crate::boundary::call_target;
-use crate::case::CaseEligibility;
+use crate::case::{CaseAssessment, CaseEligibility};
 use crate::error::{FuzzError, InvariantError};
-use crate::registry::ppu_descriptors;
 use crate::report::{
     CheckIdentity, DivergenceClass, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
     SemanticFingerprint,
@@ -49,13 +51,36 @@ pub(crate) fn sequence_case_words(
     config.validate(Some(crate::MAX_SEQUENCE_WORDS))?;
     let descriptors = case_descriptors(config)?;
     let mut rng = Rng::for_case(config.campaign_version, config.seed, case_index);
-    let generated = match config.strategy {
-        GenerationStrategy::Structured => call_target(|| {
-            structured_sequence(&descriptors, &mut rng, config.sequence_words as usize)
-        })
-        .map_err(|_| InvariantError::UnexpectedPanic {
-            stage: "PPU case generation",
-        })??,
+    let generated =
+        generate_sequence(config, &descriptors, &mut rng).map_err(|failure| match failure {
+            WordGenerationFailure::DecoderPanic(_, _) => {
+                FuzzError::from(InvariantError::UnexpectedPanic {
+                    stage: "PPU case generation",
+                })
+            }
+            WordGenerationFailure::Exhausted(error) => error.into(),
+        })?;
+    Ok(generated.words)
+}
+
+/// The case's generated words: a structured program from `descriptors`,
+/// or decoder-accepted raw words. A generator panic is a decoder panic
+/// at word 0.
+fn generate_sequence(
+    config: FuzzConfig,
+    descriptors: &[PpuGenerationDescriptor],
+    rng: &mut Rng,
+) -> Result<GeneratedSequence, WordGenerationFailure> {
+    match config.strategy {
+        GenerationStrategy::Structured => {
+            match call_target(|| {
+                structured_sequence(descriptors, rng, config.sequence_words as usize)
+            }) {
+                Ok(Ok(generated)) => Ok(generated),
+                Ok(Err(error)) => Err(WordGenerationFailure::Exhausted(error)),
+                Err(payload) => Err(WordGenerationFailure::DecoderPanic(0, payload)),
+            }
+        }
         GenerationStrategy::RawWords => rng
             .decoder_accepted_words(config.sequence_words as usize, |raw| {
                 call_target(|| seeded::ppu_decode(raw)).map(|decoded| decoded.is_ok())
@@ -63,17 +88,8 @@ pub(crate) fn sequence_case_words(
             .map(|words| GeneratedSequence {
                 words,
                 features: BTreeSet::new(),
-            })
-            .map_err(|failure| match failure {
-                WordGenerationFailure::DecoderPanic(_, _) => {
-                    FuzzError::from(InvariantError::UnexpectedPanic {
-                        stage: "PPU case generation",
-                    })
-                }
-                WordGenerationFailure::Exhausted(error) => error.into(),
-            })?,
-    };
-    Ok(generated.words)
+            }),
+    }
 }
 
 fn run_sequences_inner(
@@ -83,47 +99,14 @@ fn run_sequences_inner(
 ) -> Result<(), FuzzError> {
     config.validate(Some(crate::MAX_SEQUENCE_WORDS))?;
     let iterations = config.case_indices()?;
-    let descriptors = match (config.strategy, iterations.clone().next()) {
-        (GenerationStrategy::Structured, Some(first)) => match call_target(ppu_descriptors) {
-            Ok(descriptors) => descriptors,
-            Err(payload) => {
-                report.considered()?;
-                record_target_panic(
-                    report,
-                    CheckIdentity::PpuDecoder,
-                    None,
-                    Vec::new(),
-                    first,
-                    payload,
-                )?;
-                return Ok(());
-            }
-        },
-        (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
+    let Some(descriptors) = load_descriptors(config.strategy, iterations.clone().next(), report)?
+    else {
+        return Ok(());
     };
     for iteration in iterations {
         report.considered()?;
         let mut rng = Rng::for_case(config.campaign_version, config.seed, iteration);
-        let generated = match config.strategy {
-            GenerationStrategy::Structured => {
-                match call_target(|| {
-                    structured_sequence(&descriptors, &mut rng, config.sequence_words as usize)
-                }) {
-                    Ok(Ok(generated)) => Ok(generated),
-                    Ok(Err(error)) => Err(WordGenerationFailure::Exhausted(error)),
-                    Err(payload) => Err(WordGenerationFailure::DecoderPanic(0, payload)),
-                }
-            }
-            GenerationStrategy::RawWords => rng
-                .decoder_accepted_words(config.sequence_words as usize, |raw| {
-                    call_target(|| seeded::ppu_decode(raw)).map(|decoded| decoded.is_ok())
-                })
-                .map(|words| GeneratedSequence {
-                    words,
-                    features: BTreeSet::new(),
-                }),
-        };
-        let generated = match generated {
+        let generated = match generate_sequence(config, &descriptors, &mut rng) {
             Ok(generated) => generated,
             Err(WordGenerationFailure::DecoderPanic(raw, payload)) => {
                 record_target_panic(
@@ -179,89 +162,109 @@ fn run_sequences_inner(
                 .iter()
                 .map(Effect::kind),
         )?;
+        let case = SequenceCase {
+            iteration,
+            words: &words,
+            initial: &initial,
+            memory: &memory,
+            first: &first,
+            assessment: &assessment,
+        };
         if assessment.eligibility != CaseEligibility::Eligible {
-            report.observe_case(
-                iteration,
-                ppu_observation(
-                    first.executed_kinds.iter().copied(),
-                    &assessment,
-                    PpuTerminalObservation::from_sequence(&first.observed),
-                    &first.observed.observation.committed_effects,
-                    first.executed,
-                    ppu_sequence_changed(&initial, &first.observed),
-                    CrossReferenceAsymmetry::None,
-                ),
-            )?;
+            case.observe(report, CrossReferenceAsymmetry::None)?;
             continue;
         }
-        let mut asymmetry = CrossReferenceAsymmetry::None;
-        if first.observed.deterministic {
-            let executing = Cell::new(None);
-            let second =
-                match call_target(|| run_sequence_tracked(&words, &initial, &memory, &executing)) {
-                    Ok(Ok(mut second)) => {
-                        seeded::ppu_replayed(&mut second.observed.observation);
-                        second
-                    }
-                    Ok(Err(error)) => return Err(error.into()),
-                    Err(payload) => {
-                        record_target_panic(
-                            report,
-                            CheckIdentity::PpuExecutor,
-                            executing.get(),
-                            words.clone(),
-                            iteration,
-                            payload,
-                        )?;
-                        report.observe_case(
-                            iteration,
-                            ppu_observation(
-                                first.executed_kinds.iter().copied(),
-                                &assessment,
-                                PpuTerminalObservation::from_sequence(&first.observed),
-                                &first.observed.observation.committed_effects,
-                                first.executed,
-                                ppu_sequence_changed(&initial, &first.observed),
-                                CrossReferenceAsymmetry::TargetPanic,
-                            ),
-                        )?;
-                        continue;
-                    }
-                };
-            let replay_asymmetry = ppu_sequence_replay_asymmetry(&first, &second);
-            if replay_asymmetry != CrossReferenceAsymmetry::None {
-                asymmetry = asymmetry.max(replay_asymmetry);
-                record(
-                    report,
-                    FindingKind::Nondeterministic,
-                    SemanticFingerprint {
-                        target: FuzzTarget::PpuSequence,
-                        instruction_kind: None,
-                        check: CheckIdentity::DeterministicReplay,
-                        divergence: DivergenceClass::ArchitecturalState,
-                        outcome: None,
-                        effect: None,
-                        component: None,
-                    },
-                    words.clone(),
-                    iteration,
-                )?;
-            }
-        }
+        let Some(asymmetry) = case.check_replay(report)? else {
+            case.observe(report, CrossReferenceAsymmetry::TargetPanic)?;
+            continue;
+        };
+        case.observe(report, asymmetry)?;
+    }
+    Ok(())
+}
+
+/// One generated sequence case after its first run.
+struct SequenceCase<'a> {
+    iteration: u64,
+    words: &'a [u32],
+    initial: &'a PpuState,
+    memory: &'a [u8],
+    first: &'a ObservedSequenceRun,
+    assessment: &'a CaseAssessment,
+}
+
+impl SequenceCase<'_> {
+    fn observe(
+        &self,
+        report: &mut FuzzReport,
+        asymmetry: CrossReferenceAsymmetry,
+    ) -> Result<(), InvariantError> {
+        let first = self.first;
         report.observe_case(
-            iteration,
+            self.iteration,
             ppu_observation(
                 first.executed_kinds.iter().copied(),
-                &assessment,
+                self.assessment,
                 PpuTerminalObservation::from_sequence(&first.observed),
                 &first.observed.observation.committed_effects,
                 first.executed,
-                ppu_sequence_changed(&initial, &first.observed),
+                ppu_sequence_changed(self.initial, &first.observed),
                 asymmetry,
             ),
         )?;
+        Ok(())
     }
-    Ok(())
+
+    /// The replay's asymmetry, `None` asymmetry for a sequence that asks
+    /// for no replay; `Ok(None)` when the replay panicked, recorded here.
+    fn check_replay(
+        &self,
+        report: &mut FuzzReport,
+    ) -> Result<Option<CrossReferenceAsymmetry>, FuzzError> {
+        if !self.first.observed.deterministic {
+            return Ok(Some(CrossReferenceAsymmetry::None));
+        }
+        let executing = Cell::new(None);
+        let second = match call_target(|| {
+            run_sequence_tracked(self.words, self.initial, self.memory, &executing)
+        }) {
+            Ok(Ok(mut second)) => {
+                seeded::ppu_replayed(&mut second.observed.observation);
+                second
+            }
+            Ok(Err(error)) => return Err(error.into()),
+            Err(payload) => {
+                record_target_panic(
+                    report,
+                    CheckIdentity::PpuExecutor,
+                    executing.get(),
+                    self.words.to_vec(),
+                    self.iteration,
+                    payload,
+                )?;
+                return Ok(None);
+            }
+        };
+        let replay_asymmetry = ppu_sequence_replay_asymmetry(self.first, &second);
+        if replay_asymmetry != CrossReferenceAsymmetry::None {
+            record(
+                report,
+                FindingKind::Nondeterministic,
+                SemanticFingerprint {
+                    target: FuzzTarget::PpuSequence,
+                    instruction_kind: None,
+                    check: CheckIdentity::DeterministicReplay,
+                    divergence: DivergenceClass::ArchitecturalState,
+                    outcome: None,
+                    effect: None,
+                    component: None,
+                },
+                self.words.to_vec(),
+                self.iteration,
+            )?;
+        }
+        Ok(Some(replay_asymmetry))
+    }
 }
 
 #[cfg(test)]
