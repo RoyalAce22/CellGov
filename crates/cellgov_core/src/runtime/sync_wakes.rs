@@ -114,7 +114,7 @@ impl Runtime {
     }
 
     /// Drop the wake of a Finished waiter. A Finished waiter is
-    /// process-exit residue (see the `runtime` module docs). The release
+    /// process-exit residue (see [`crate::runtime`]). The release
     /// side spent a waiter slot on it. That can skew guest-visible
     /// primitive state, so the resolver logs the drop.
     fn drop_finished_wake(&mut self, waiter: UnitId) {

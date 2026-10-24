@@ -352,8 +352,8 @@ impl Runtime {
             // The transfer still commits, so the terminal memory
             // snapshot holds the payload. The `Runnable` override below
             // would replace either of these issuer states:
-            // - `Finished`: process-exit residue (see the `runtime`
-            //   module docs), or an SPU that stopped before its
+            // - `Finished`: process-exit residue (see the module doc in
+            //   runtime/mod.rs), or an SPU that stopped before its
             //   transfer completed. An MFC put does not block the
             //   issuer.
             // - `Faulted`: the commit pipeline's `pre_validate` refused

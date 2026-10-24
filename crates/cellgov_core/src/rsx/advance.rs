@@ -6,7 +6,9 @@
 //! pass cannot observe its own emissions within the same batch.
 
 use crate::rsx::call_stack::CALL_STACK_OVERFLOW_RAW;
-use crate::rsx::method::{decode_header, NvCommandKind, NvDispatchContext, NvMethodTable};
+use crate::rsx::method::{
+    decode_header, NvCommandKind, NvDispatchContext, NvMethodHeader, NvMethodTable,
+};
 use crate::rsx::{IoMap, RsxCallStack, RsxFifoCursor};
 use cellgov_effects::Effect;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
@@ -144,129 +146,184 @@ pub fn rsx_advance(
     emitted: &mut Vec<Effect>,
     now: GuestTicks,
 ) -> RsxAdvanceOutcome {
+    let mut walk = FifoWalk {
+        memory,
+        iomap,
+        cursor,
+        sem_offset,
+        label_base,
+        call_stack,
+        table,
+        emitted,
+        now,
+        iterations: 0,
+    };
     let mut outcome = RsxAdvanceOutcome {
         methods_dispatched: 0,
         methods_unknown: 0,
         set_references_dispatched: 0,
         stop: RsxAdvanceStop::Reached,
     };
-    let mut iterations: u32 = 0;
     loop {
-        let get = cursor.get();
-        if get == cursor.put() && call_stack.is_empty() {
+        let get = walk.cursor.get();
+        if get == walk.cursor.put() && walk.call_stack.is_empty() {
             break;
         }
+        if let Err(stop) = walk.advance_one(get, &mut outcome) {
+            outcome.stop = stop;
+            return outcome;
+        }
+    }
+    outcome
+}
+
+/// The state one `rsx_advance` call walks the FIFO with.
+struct FifoWalk<'a> {
+    memory: &'a GuestMemory,
+    iomap: &'a IoMap,
+    cursor: &'a mut RsxFifoCursor,
+    sem_offset: &'a mut u32,
+    label_base: u32,
+    call_stack: &'a mut RsxCallStack,
+    table: &'a NvMethodTable,
+    emitted: &'a mut Vec<Effect>,
+    now: GuestTicks,
+    iterations: u32,
+}
+
+impl FifoWalk<'_> {
+    /// Run the header at `get`. Dispatch counts land in `outcome` before
+    /// a later header's refusal, so the error path keeps them.
+    #[inline]
+    fn advance_one(
+        &mut self,
+        get: u32,
+        outcome: &mut RsxAdvanceOutcome,
+    ) -> Result<(), RsxAdvanceStop> {
         // Per-iteration `get > put` check catches a redirect that
         // lands past the tail; an entry-only check would let the
         // walker keep reading until malformed or the iteration cap.
-        if get > cursor.put() {
-            outcome.stop = RsxAdvanceStop::WrappedCursor;
-            return outcome;
+        if get > self.cursor.put() {
+            return Err(RsxAdvanceStop::WrappedCursor);
         }
-        if iterations >= RSX_ADVANCE_ITERATION_CAP {
-            outcome.stop = RsxAdvanceStop::Malformed {
+        if self.iterations >= RSX_ADVANCE_ITERATION_CAP {
+            return Err(RsxAdvanceStop::Malformed {
                 raw: RSX_ADVANCE_ITERATION_CAP_RAW,
-            };
-            return outcome;
+            });
         }
-        iterations += 1;
-        let header_word = match read_fifo_word(memory, iomap, get) {
-            Some(w) => w,
-            None => {
-                outcome.stop = RsxAdvanceStop::HeaderOutOfRange;
-                return outcome;
-            }
-        };
+        self.iterations += 1;
+        let header_word =
+            read_fifo_word(self.memory, self.iomap, get).ok_or(RsxAdvanceStop::HeaderOutOfRange)?;
         let header = decode_header(header_word);
         match header.kind {
             NvCommandKind::Increment | NvCommandKind::NonIncrement => {
-                let count = header.count as u32;
-                let Some(total_bytes_u32) = count.checked_mul(4).and_then(|b| b.checked_add(4))
-                else {
-                    outcome.stop = RsxAdvanceStop::AddressOverflow;
-                    return outcome;
-                };
-                let Some(next_get) = get.checked_add(total_bytes_u32) else {
-                    outcome.stop = RsxAdvanceStop::AddressOverflow;
-                    return outcome;
-                };
-                if next_get > cursor.put() {
-                    outcome.stop = RsxAdvanceStop::TruncatedMethod;
-                    return outcome;
-                }
-                let args_start = get.wrapping_add(4);
-                let mut args: Vec<u32> = Vec::with_capacity(count as usize);
-                for i in 0..count {
-                    let arg_addr = args_start.wrapping_add(i.wrapping_mul(4));
-                    match read_fifo_word(memory, iomap, arg_addr) {
-                        Some(w) => args.push(w),
-                        None => {
-                            outcome.stop = RsxAdvanceStop::ArgOutOfRange;
-                            return outcome;
-                        }
-                    }
-                }
-                cursor.set_get(next_get);
-                let mut ctx = NvDispatchContext {
-                    cursor: &mut *cursor,
-                    sem_offset: &mut *sem_offset,
-                    label_base,
-                    emitted: &mut *emitted,
-                    now,
-                };
-                let step = if header.kind == NvCommandKind::Increment {
-                    4
-                } else {
-                    0
-                };
-                for (i, arg) in args.iter().enumerate() {
-                    let sub_method = header.method.wrapping_add((i as u16).wrapping_mul(step));
-                    dispatch_method(
-                        table,
-                        sub_method,
-                        std::slice::from_ref(arg),
-                        &mut ctx,
-                        &mut outcome,
-                    );
-                }
+                self.run_method(get, header, outcome)
             }
             NvCommandKind::Jump { offset } | NvCommandKind::NewJump { offset } => {
                 // Unconditional jump; no return-address push.
                 // `decode_header` normalizes the offset masks for
                 // both Jump and NewJump.
-                cursor.set_get(offset);
+                self.cursor.set_get(offset);
+                Ok(())
             }
             NvCommandKind::Call { offset } => {
-                let Some(return_addr) = get.checked_add(4) else {
-                    outcome.stop = RsxAdvanceStop::AddressOverflow;
-                    return outcome;
-                };
-                if call_stack.push(return_addr).is_err() {
-                    outcome.stop = RsxAdvanceStop::Malformed {
+                let return_addr = get.checked_add(4).ok_or(RsxAdvanceStop::AddressOverflow)?;
+                if self.call_stack.push(return_addr).is_err() {
+                    return Err(RsxAdvanceStop::Malformed {
                         raw: CALL_STACK_OVERFLOW_RAW,
-                    };
-                    return outcome;
+                    });
                 }
-                cursor.set_get(offset);
+                self.cursor.set_get(offset);
+                Ok(())
             }
-            NvCommandKind::Return => match call_stack.pop() {
-                Ok(return_addr) => {
-                    cursor.set_get(return_addr);
-                }
-                Err(_) => {
-                    outcome.stop = RsxAdvanceStop::Malformed {
+            NvCommandKind::Return => {
+                let return_addr = self
+                    .call_stack
+                    .pop()
+                    .map_err(|_| RsxAdvanceStop::Malformed {
                         raw: RSX_ADVANCE_UNDERFLOW_RAW,
-                    };
-                    return outcome;
-                }
-            },
-            NvCommandKind::Malformed { raw } => {
-                outcome.stop = RsxAdvanceStop::Malformed { raw };
-                return outcome;
+                    })?;
+                self.cursor.set_get(return_addr);
+                Ok(())
             }
+            NvCommandKind::Malformed { raw } => Err(RsxAdvanceStop::Malformed { raw }),
         }
     }
-    outcome
+
+    /// Read an Increment or NonIncrement header's arguments, move `get`
+    /// past them, then dispatch each one.
+    #[inline]
+    fn run_method(
+        &mut self,
+        get: u32,
+        header: NvMethodHeader,
+        outcome: &mut RsxAdvanceOutcome,
+    ) -> Result<(), RsxAdvanceStop> {
+        let count = header.count as u32;
+        let next_get = method_span(get, count, self.cursor.put())?;
+        let args = read_method_args(self.memory, self.iomap, get, count)?;
+        self.cursor.set_get(next_get);
+        let mut ctx = NvDispatchContext {
+            cursor: &mut *self.cursor,
+            sem_offset: &mut *self.sem_offset,
+            label_base: self.label_base,
+            emitted: &mut *self.emitted,
+            now: self.now,
+        };
+        let step = if header.kind == NvCommandKind::Increment {
+            4
+        } else {
+            0
+        };
+        for (i, arg) in args.iter().enumerate() {
+            let sub_method = header.method.wrapping_add((i as u16).wrapping_mul(step));
+            dispatch_method(
+                self.table,
+                sub_method,
+                std::slice::from_ref(arg),
+                &mut ctx,
+                outcome,
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Return the `get` past a method header at `get` and its `count`
+/// argument words, refusing a span that overflows u32 or runs past
+/// `put`.
+#[inline]
+fn method_span(get: u32, count: u32, put: u32) -> Result<u32, RsxAdvanceStop> {
+    let total_bytes = count
+        .checked_mul(4)
+        .and_then(|b| b.checked_add(4))
+        .ok_or(RsxAdvanceStop::AddressOverflow)?;
+    let next_get = get
+        .checked_add(total_bytes)
+        .ok_or(RsxAdvanceStop::AddressOverflow)?;
+    if next_get > put {
+        return Err(RsxAdvanceStop::TruncatedMethod);
+    }
+    Ok(next_get)
+}
+
+/// Read the `count` argument words that follow the method header at
+/// `get`.
+#[inline]
+fn read_method_args(
+    memory: &GuestMemory,
+    iomap: &IoMap,
+    get: u32,
+    count: u32,
+) -> Result<Vec<u32>, RsxAdvanceStop> {
+    let args_start = get.wrapping_add(4);
+    let mut args: Vec<u32> = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let arg_addr = args_start.wrapping_add(i.wrapping_mul(4));
+        let word = read_fifo_word(memory, iomap, arg_addr).ok_or(RsxAdvanceStop::ArgOutOfRange)?;
+        args.push(word);
+    }
+    Ok(args)
 }
 
 #[cfg(test)]
