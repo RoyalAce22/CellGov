@@ -204,58 +204,70 @@ pub fn is_version_key(fw: &str) -> bool {
 pub fn check_firmware_rows(rows: &[FirmwareRow]) -> Result<(), FirmwareTableError> {
     let mut previous: Option<u64> = None;
     for row in rows {
-        if !is_version_key(&row.fw) {
-            return Err(FirmwareTableError::NotAVersionKey { fw: row.fw.clone() });
-        }
-        if !PRIORITIES.contains(&row.priority) {
-            return Err(FirmwareTableError::Priority {
-                fw: row.fw.clone(),
-                priority: row.priority,
-                expected: "1, 2 or 3",
-            });
-        }
-        if row.role == FirmwareRole::CensusReference && row.priority != 1 {
-            return Err(FirmwareTableError::Priority {
-                fw: row.fw.clone(),
-                priority: row.priority,
-                expected: "1, which the census reference carries",
-            });
-        }
-        let opens_era = matches!(row.fw.as_str(), "3.60" | "4.00");
-        if row.priority == 2 && !opens_era {
-            return Err(FirmwareTableError::Priority {
-                fw: row.fw.clone(),
-                priority: row.priority,
-                expected: "1 or 3; priority 2 belongs to 3.60 and 4.00",
-            });
-        }
-        if opens_era && row.priority == 3 {
-            return Err(FirmwareTableError::Priority {
-                fw: row.fw.clone(),
-                priority: row.priority,
-                expected: "1 or 2; 3.60 and 4.00 have raised priority",
-            });
-        }
-        if let Some(previous) = previous {
-            if row.order <= previous {
-                return Err(FirmwareTableError::OrderNotRising {
-                    fw: row.fw.clone(),
-                    order: row.order,
-                    previous,
-                });
-            }
-        }
+        check_row(row, previous)?;
         previous = Some(row.order);
-        if let Some(date) = &row.release_date {
-            if !is_date(date) {
-                return Err(FirmwareTableError::BadDate {
-                    fw: row.fw.clone(),
-                    date: date.clone(),
-                });
-            }
+    }
+    check_era_rows(rows)?;
+    // `check_role_rows` expects each unique role on exactly one row, so
+    // the count check must run first.
+    check_role_counts(rows)?;
+    check_role_rows(rows)
+}
+
+/// The per-row rules: version key, priority, rising order, then date.
+fn check_row(row: &FirmwareRow, previous: Option<u64>) -> Result<(), FirmwareTableError> {
+    if !is_version_key(&row.fw) {
+        return Err(FirmwareTableError::NotAVersionKey { fw: row.fw.clone() });
+    }
+    check_priority(row)?;
+    if let Some(previous) = previous {
+        if row.order <= previous {
+            return Err(FirmwareTableError::OrderNotRising {
+                fw: row.fw.clone(),
+                order: row.order,
+                previous,
+            });
         }
     }
-    // The archive's priority contract names both era-opening rows.
+    if let Some(date) = &row.release_date {
+        if !is_date(date) {
+            return Err(FirmwareTableError::BadDate {
+                fw: row.fw.clone(),
+                date: date.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The priority rules: the range, the census reference at `1`, and
+/// priority `2` on exactly the era-opening rows.
+fn check_priority(row: &FirmwareRow) -> Result<(), FirmwareTableError> {
+    let refuse = |expected| {
+        Err(FirmwareTableError::Priority {
+            fw: row.fw.clone(),
+            priority: row.priority,
+            expected,
+        })
+    };
+    if !PRIORITIES.contains(&row.priority) {
+        return refuse("1, 2 or 3");
+    }
+    if row.role == FirmwareRole::CensusReference && row.priority != 1 {
+        return refuse("1, which the census reference carries");
+    }
+    let opens_era = matches!(row.fw.as_str(), "3.60" | "4.00");
+    if row.priority == 2 && !opens_era {
+        return refuse("1 or 3; priority 2 belongs to 3.60 and 4.00");
+    }
+    if opens_era && row.priority == 3 {
+        return refuse("1 or 2; 3.60 and 4.00 have raised priority");
+    }
+    Ok(())
+}
+
+/// The archive's priority contract names both era-opening rows.
+fn check_era_rows(rows: &[FirmwareRow]) -> Result<(), FirmwareTableError> {
     for fw in ["3.60", "4.00"] {
         if !rows.iter().any(|row| row.fw == fw) {
             return Err(FirmwareTableError::RequiredRow {
@@ -264,6 +276,11 @@ pub fn check_firmware_rows(rows: &[FirmwareRow]) -> Result<(), FirmwareTableErro
             });
         }
     }
+    Ok(())
+}
+
+/// Each unique role sits on exactly one row.
+fn check_role_counts(rows: &[FirmwareRow]) -> Result<(), FirmwareTableError> {
     for role in [
         FirmwareRole::Baseline,
         FirmwareRole::CensusReference,
@@ -277,6 +294,16 @@ pub fn check_firmware_rows(rows: &[FirmwareRow]) -> Result<(), FirmwareTableErro
             });
         }
     }
+    Ok(())
+}
+
+/// Each unique role sits on the row its definition names.
+///
+/// # Panics
+///
+/// Panics if a unique role is on no row; [`check_role_counts`] refuses
+/// that first.
+fn check_role_rows(rows: &[FirmwareRow]) -> Result<(), FirmwareTableError> {
     // The archive's role contract fixes the first two versions and
     // defines final as the last retail release in the 4.9x line.
     for (role, expected) in [
