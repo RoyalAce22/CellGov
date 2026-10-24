@@ -328,6 +328,126 @@ fn common_files(test_dir: &Path) -> Result<Vec<(String, PathBuf)>, RunnerPs3Erro
         .collect())
 }
 
+/// What the provenance record names: the test, its build inputs and
+/// package, the result path, the console and the harness.
+fn capture_inputs(
+    plan: &CapturePlan,
+    package: &Package,
+    facts: &ConsoleFacts,
+    target: &Target,
+) -> Result<CaptureInputs, RunnerPs3Error> {
+    Ok(CaptureInputs {
+        name: plan.manifest.test.name.clone(),
+        manifest: plan.manifest_path.clone(),
+        sources: [
+            source_files(&package.test_dir)?,
+            common_files(&package.test_dir)?,
+        ]
+        .concat(),
+        eboot: package.eboot.clone(),
+        ps3_elf: package.ps3_elf.clone(),
+        reference_elf: package.reference_elf.clone(),
+        siblings: package.siblings.clone(),
+        param_sfo: package.param_sfo.clone(),
+        result_path: target.result_path.clone(),
+        console: facts.clone(),
+        harness_revision: plan.harness_revision.clone(),
+        recapture_reason: plan.recapture_reason.clone(),
+    })
+}
+
+/// A capture written to the staging directory, ready to commit.
+struct Staged {
+    frame: Vec<u8>,
+    /// The observation as JSON.
+    observation: String,
+    record: CaptureProvenance,
+    /// The provenance record as JSON.
+    record_json: String,
+}
+
+/// Stamp the capture with `now()`, write the frame to `staging`, and
+/// build the observation and the provenance from it.
+fn stage(
+    frame: Vec<u8>,
+    staging: &Path,
+    plan: &CapturePlan,
+    facts: &ConsoleFacts,
+    inputs: &CaptureInputs,
+    now: &mut dyn FnMut() -> Result<String, RunnerPs3Error>,
+) -> Result<Staged, RunnerPs3Error> {
+    let captured_at = now()?;
+    std::fs::create_dir_all(staging).map_err(|source| RunnerPs3Error::LocalWrite {
+        path: staging.to_path_buf(),
+        source,
+    })?;
+    let staged = staging.join(FRAME_FILE);
+    write(&staged, &frame)?;
+    let observation = frame_to_observation(&staged, &plan.manifest, &facts.firmware)?;
+    let record = provenance::build(inputs, &frame, captured_at)?;
+    let record_json = serde_json::to_string_pretty(&record)?;
+    Ok(Staged {
+        frame,
+        observation: observation_json(&observation)?,
+        record,
+        record_json,
+    })
+}
+
+/// After a failure before the commit: remove the staging directory,
+/// then clean the console up unless the title still runs or the plan
+/// keeps the package. Returns `error`.
+fn abandon<C: ConsoleOps>(
+    console: &mut C,
+    staging: &Path,
+    error: RunnerPs3Error,
+    plan: &CapturePlan,
+    target: &Target,
+    transcript: &mut Transcript,
+) -> RunnerPs3Error {
+    if staging.exists() {
+        if let Err(e) = std::fs::remove_dir_all(staging) {
+            transcript.decision(format!("{} remains: {e}", staging.display()));
+        }
+    }
+    if matches!(error, RunnerPs3Error::StillRunning { .. }) {
+        // A running title holds the package and the result open; the
+        // operator exits it first.
+        transcript.decision("no cleanup while the title still runs");
+    } else if !plan.keep_deployed {
+        if let Err(cleanup) = run::cleanup(console, target, transcript) {
+            transcript.decision(format!("after the failure, {cleanup}"));
+        }
+    }
+    error
+}
+
+/// Write the staged capture's three files to `plan.out`, then remove
+/// the staging directory.
+fn commit_capture(
+    plan: &CapturePlan,
+    staging: &Path,
+    staged: &Staged,
+) -> Result<(), RunnerPs3Error> {
+    std::fs::create_dir_all(&plan.out).map_err(|source| RunnerPs3Error::LocalWrite {
+        path: plan.out.clone(),
+        source,
+    })?;
+    write(&plan.out.join(FRAME_FILE), &staged.frame)?;
+    write(
+        &plan.out.join(OBSERVATION_FILE),
+        staged.observation.as_bytes(),
+    )?;
+    write(
+        &plan.out.join(PROVENANCE_FILE),
+        staged.record_json.as_bytes(),
+    )?;
+    std::fs::remove_dir_all(staging).map_err(|source| RunnerPs3Error::LocalWrite {
+        path: staging.to_path_buf(),
+        source,
+    })
+}
+
 /// The capture loop on a console whose identity is `facts`: preflight,
 /// deploy, start, wait for the result and then for the XMB, fetch, then
 /// the frame, observation and provenance written to `plan.out`, cleanup,
@@ -361,24 +481,7 @@ pub fn capture<C: ConsoleOps>(
     }
     let target = plan.target();
     let package = Package::of(&plan.manifest_path, &plan.manifest);
-    let inputs = CaptureInputs {
-        name: plan.manifest.test.name.clone(),
-        manifest: plan.manifest_path.clone(),
-        sources: [
-            source_files(&package.test_dir)?,
-            common_files(&package.test_dir)?,
-        ]
-        .concat(),
-        eboot: package.eboot.clone(),
-        ps3_elf: package.ps3_elf.clone(),
-        reference_elf: package.reference_elf.clone(),
-        siblings: package.siblings.clone(),
-        param_sfo: package.param_sfo.clone(),
-        result_path: target.result_path.clone(),
-        console: facts.clone(),
-        harness_revision: plan.harness_revision.clone(),
-        recapture_reason: plan.recapture_reason.clone(),
-    };
+    let inputs = capture_inputs(plan, &package, facts, &target)?;
     deploy::admit(&package)?;
     run::preflight(
         console,
@@ -406,50 +509,12 @@ pub fn capture<C: ConsoleOps>(
     // beside `out`, so a conversion that fails leaves `out` (and a
     // capture a recapture would replace) untouched.
     let staging = staging_dir(&plan.out);
-    let prepared = fetched.and_then(|frame| {
-        let captured_at = now()?;
-        std::fs::create_dir_all(&staging).map_err(|source| RunnerPs3Error::LocalWrite {
-            path: staging.clone(),
-            source,
-        })?;
-        let staged = staging.join(FRAME_FILE);
-        write(&staged, &frame)?;
-        let observation = frame_to_observation(&staged, &plan.manifest, &facts.firmware)?;
-        let record = provenance::build(&inputs, &frame, captured_at)?;
-        let record_json = serde_json::to_string_pretty(&record)?;
-        Ok((frame, observation_json(&observation)?, record, record_json))
-    });
-    let (frame, observation, record, record_json) = match prepared {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            if staging.exists() {
-                if let Err(e) = std::fs::remove_dir_all(&staging) {
-                    transcript.decision(format!("{} remains: {e}", staging.display()));
-                }
-            }
-            if matches!(error, RunnerPs3Error::StillRunning { .. }) {
-                // A running title holds the package and the result open;
-                // the operator exits it first.
-                transcript.decision("no cleanup while the title still runs");
-            } else if !plan.keep_deployed {
-                if let Err(cleanup) = run::cleanup(console, &target, transcript) {
-                    transcript.decision(format!("after the failure, {cleanup}"));
-                }
-            }
-            return Err(error);
-        }
+    let staged = match fetched.and_then(|frame| stage(frame, &staging, plan, facts, &inputs, now)) {
+        Ok(staged) => staged,
+        Err(error) => return Err(abandon(console, &staging, error, plan, &target, transcript)),
     };
-    std::fs::create_dir_all(&plan.out).map_err(|source| RunnerPs3Error::LocalWrite {
-        path: plan.out.clone(),
-        source,
-    })?;
-    write(&plan.out.join(FRAME_FILE), &frame)?;
-    write(&plan.out.join(OBSERVATION_FILE), observation.as_bytes())?;
-    write(&plan.out.join(PROVENANCE_FILE), record_json.as_bytes())?;
-    std::fs::remove_dir_all(&staging).map_err(|source| RunnerPs3Error::LocalWrite {
-        path: staging.clone(),
-        source,
-    })?;
+    commit_capture(plan, &staging, &staged)?;
+    let record = staged.record;
     transcript.decision(format!("captured {}", record.capture_id));
     let cleaned = if plan.keep_deployed {
         transcript.decision("the package stays deployed (--keep-deployed)");
