@@ -11,12 +11,11 @@ use std::path::Path;
 
 use cellgov_terminal::caps::RenderFlags;
 use cellgov_terminal::progress::ProgressBar;
-use cellgov_time::Budget;
 
 use super::boot_cmd::{
-    anchor_plan, firmware_module_dir, plan_max_steps, selection_args, separate_spawn_command_error,
-    try_resolve_cell_inputs, try_resolve_composition, CompositionResolutionError,
-    EXIT_SPREAD_EXCEEDED,
+    bench_options, firmware_module_dir, resolve_max_steps, selection_args,
+    separate_spawn_command_error, try_resolve_cell_inputs, try_resolve_composition,
+    CompositionResolutionError, RunRole, EXIT_SPREAD_EXCEEDED,
 };
 use super::declared_cells::{
     declared_cells, filter_declared, read_registry, refuse_undeclared, DeclaredCell,
@@ -370,34 +369,25 @@ fn gate_cell(
                 .map_or_else(|| "no cell".to_string(), |c| c.label()),
         )));
     }
-    let max_steps = match args.max_steps {
-        Some(max_steps) => max_steps,
-        None => plan_max_steps(&plan, &inputs.title)?,
-    };
+    let max_steps = resolve_max_steps(args, &plan, &inputs)?;
     let firmware_dir = firmware_module_dir(&inputs.composition)?;
     let owned = selection_args(&selection, vfs_flag)?;
     let bar = ProgressBar::start(render.caps(), &BENCH_PAIR_TASK, inputs.title.name());
     let sink = bar.sink();
     let outcome = game::bench_boot_runs(
-        game::BenchOptions {
-            title: &inputs.title,
-            elf_path: &inputs.elf_path,
+        bench_options(
+            args,
+            &inputs,
+            &plan,
             max_steps,
-            plan: anchor_plan(&plan),
-            firmware_dir: firmware_dir.as_deref(),
-            composed_mounts: &inputs.composition.mounts,
-            eboot_dirs: &inputs.composition.eboot_dirs,
-            identity: &inputs.composition.identity,
-            selection: owned.as_args(),
-            strict_reserved: args.strict_reserved,
-            checkpoint_override: args.checkpoint,
-            budget_override: args.budget.map(Budget::new),
-            prescan: args.prescan,
-            guest_args: &args.guest_arg,
-            check_anchor: !gate_args.no_anchor_check,
-            // The set overwrites this with each child's own index.
-            run_index: 0,
-        },
+            firmware_dir.as_deref(),
+            owned.as_args(),
+            RunRole {
+                check_anchor: !gate_args.no_anchor_check,
+                // The set overwrites this with each child's own index.
+                run_index: 0,
+            },
+        ),
         game::ThroughputPolicy {
             runs: gate_args.runs,
             strict: gate_args.strict_perf,

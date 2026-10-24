@@ -7,7 +7,9 @@ mod inputs;
 mod run;
 
 pub(crate) use bench::{bench_boot, bench_boot_once};
-pub(super) use bench::{separate_spawn_command_error, EXIT_SPREAD_EXCEEDED};
+pub(super) use bench::{
+    bench_options, resolve_max_steps, separate_spawn_command_error, RunRole, EXIT_SPREAD_EXCEEDED,
+};
 pub(super) use compose::{
     anchor_plan, firmware_module_dir, plan_max_steps, resolve_composition, selection_args,
     try_resolve_composition, CompositionResolutionError,
