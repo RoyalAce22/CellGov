@@ -56,7 +56,7 @@ use crate::store::record::{
     tree_rel_path_is_safe, ArtifactRecord, InstallRecord, RapRecord, SourceRecord, TitleRecord,
     INSTALL_RECORD_FORMAT_VERSION,
 };
-use crate::store::rename::rename_with_retry;
+use crate::store::rename::{rename_with_retry, RenameRefused};
 use cellgov_ps3_abi::format::param_sfo::PS3_SYSTEM_VER_KEY;
 
 /// Knobs shared by every installer.
@@ -513,6 +513,37 @@ pub(super) fn commit(
     record: &InstallRecord,
     progress: &dyn ProgressSink,
 ) -> Result<Committed, GameInstallError> {
+    commit_with(
+        staging_root,
+        tree_staging,
+        final_dir,
+        staged_rap,
+        record_path,
+        record,
+        progress,
+        rename_with_retry,
+    )
+}
+
+/// [`commit`] over an injected rename.
+///
+/// A test drives it with a rename that releases a held handle only
+/// after the host refuses the tree rename, so the refusal does not
+/// depend on host timing.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "commit's call sequence plus its rename seam"
+)]
+pub(super) fn commit_with(
+    staging_root: &Path,
+    tree_staging: &Path,
+    final_dir: &Path,
+    staged_rap: Option<&StagedRap>,
+    record_path: &Path,
+    record: &InstallRecord,
+    progress: &dyn ProgressSink,
+    mut rename: impl FnMut(&Path, &Path) -> Result<u32, RenameRefused>,
+) -> Result<Committed, GameInstallError> {
     progress.phase(Phase::Committing.code());
     if let Some(parent) = final_dir.parent() {
         std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
@@ -525,12 +556,11 @@ pub(super) fn commit(
         if let Some(parent) = sr.final_path.parent() {
             std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
         }
-        rename_retries += rename_with_retry(&sr.staged_path, &sr.final_path).map_err(|source| {
-            GameInstallError::Rename {
+        rename_retries +=
+            rename(&sr.staged_path, &sr.final_path).map_err(|source| GameInstallError::Rename {
                 path: sr.final_path.clone(),
                 source,
-            }
-        })?;
+            })?;
     }
 
     // The record goes before the tree it names, so nothing between here
@@ -547,7 +577,7 @@ pub(super) fn commit(
         progress.phase(Phase::Committing.code());
     }
     rename_retries +=
-        rename_with_retry(tree_staging, final_dir).map_err(|source| GameInstallError::Rename {
+        rename(tree_staging, final_dir).map_err(|source| GameInstallError::Rename {
             path: final_dir.to_path_buf(),
             source,
         })?;

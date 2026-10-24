@@ -113,16 +113,14 @@ fn a_rap_rename_that_is_refused_leaves_the_record_and_the_target_untouched() {
     assert!(!staged_rap.final_path.exists(), "nothing reached exdata");
 }
 
-/// How long the other thread keeps the handle open: past the first
-/// backoff, so at least one refusal is outwaited, and well inside the
-/// eleven seconds the whole backoff spans, so the commit still lands.
-#[cfg(windows)]
-const HANDLE_HOLD: std::time::Duration = std::time::Duration::from_millis(350);
-
+/// The test holds the handle until the tree rename's first wait, so
+/// the host refuses the tree's first attempt however soon it runs. The wait
+/// still sleeps, so the test outwaits a scanner's own handle as the
+/// policy would in service.
 #[cfg(windows)]
 #[test]
 fn a_handle_held_under_the_staged_tree_is_outwaited_and_the_sequence_lands_whole() {
-    use crate::store::rename::RENAME_ATTEMPTS;
+    use crate::store::rename::{rename_with_retry_waiting, RENAME_ATTEMPTS};
 
     let out = scratch();
     let layout = StoreLayout::new(&*out);
@@ -142,13 +140,9 @@ fn a_handle_held_under_the_staged_tree_is_outwaited_and_the_sequence_lands_whole
     let record_path = layout.record_path(&artifact);
     let final_dir = out.join("dev_hdd0").join("game").join(SYNTHETIC_TITLE_ID);
 
-    let held = std::fs::File::open(tree.join("USRDIR").join("EBOOT.BIN")).unwrap();
-    let releaser = std::thread::spawn(move || {
-        std::thread::sleep(HANDLE_HOLD);
-        drop(held);
-    });
-
-    let committed = commit(
+    let mut held = Some(std::fs::File::open(tree.join("USRDIR").join("EBOOT.BIN")).unwrap());
+    let mut tree_retries = None;
+    let committed = commit_with(
         &staging,
         &tree,
         &final_dir,
@@ -156,13 +150,30 @@ fn a_handle_held_under_the_staged_tree_is_outwaited_and_the_sequence_lands_whole
         &record_path,
         &record,
         &(),
+        |from, to| {
+            let is_tree = from == tree;
+            let outcome = rename_with_retry_waiting(from, to, |d| {
+                if is_tree {
+                    drop(held.take());
+                }
+                std::thread::sleep(d);
+            });
+            if is_tree {
+                tree_retries = outcome.as_ref().ok().copied();
+            }
+            outcome
+        },
     )
     .expect("lands once the handle closes");
-    releaser.join().unwrap();
 
+    let tree_retries = tree_retries.expect("the tree rename ran and landed");
     assert!(
-        committed.rename_retries >= 1,
+        tree_retries >= 1,
         "the held tree refused at least the first attempt"
+    );
+    assert!(
+        committed.rename_retries >= tree_retries,
+        "the commit reports the tree's outwaited refusals"
     );
     assert!(
         committed.rename_retries < RENAME_ATTEMPTS,

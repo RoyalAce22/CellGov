@@ -83,11 +83,19 @@ fn is_transient(_: &io::Error) -> bool {
 /// [`RenameRefused`] when the host refused the last attempt too. It
 /// carries that refusal and the attempt count.
 pub fn rename_with_retry(from: &Path, to: &Path) -> Result<u32, RenameRefused> {
-    retry(
-        || std::fs::rename(from, to),
-        std::thread::sleep,
-        is_transient,
-    )
+    rename_with_retry_waiting(from, to, std::thread::sleep)
+}
+
+/// [`rename_with_retry`] over an injected wait.
+///
+/// A test releases a held handle in the first wait, so the refusal it
+/// outwaits does not depend on how soon the rename runs.
+pub(crate) fn rename_with_retry_waiting(
+    from: &Path,
+    to: &Path,
+    wait: impl FnMut(Duration),
+) -> Result<u32, RenameRefused> {
+    retry(|| std::fs::rename(from, to), wait, is_transient)
 }
 
 /// The policy over an injected operation, wait, and transient class.
