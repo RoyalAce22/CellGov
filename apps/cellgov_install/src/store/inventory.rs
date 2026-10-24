@@ -22,7 +22,7 @@ use crate::store::layout::{
 use crate::store::pre_store::{preflight, PreStoreError};
 use crate::store::record::{
     stored_kernel, CoreOsRecord, InstallRecord, InstallRecordParseError, KernelAbsence,
-    KernelRecord,
+    KernelRecord, TitleRecord,
 };
 
 /// Why the store's install records could not be read.
@@ -302,89 +302,12 @@ impl StoreInventory {
     pub fn read(root: &Path) -> Result<Self, InventoryError> {
         preflight(root)?;
         let layout = StoreLayout::new(root);
-        let mut firmware = BTreeMap::new();
-        for path in record_files(&layout.firmware_records_dir())? {
-            let record = load_record(&path)?;
-            expect_kind(&path, ArtifactKind::Firmware, record.artifact.kind)?;
-            expect_record_name(&path, &firmware_record_file(&record.artifact.version))?;
-            firmware.insert(
-                record.artifact.version.clone(),
-                FirmwareEntry {
-                    version: record.artifact.version,
-                    entry_dir: layout.resolve_store_path(&record.artifact.store_path),
-                    pup_sha256: record.source.sha256.to_hex(),
-                    core_os: record.core_os,
-                },
-            );
-        }
+        let firmware = read_firmware(&layout)?;
         let base_record = base_record_file();
         let mut titles = BTreeMap::new();
         for title_dir in title_record_dirs(&layout.title_records_root())? {
-            let title_id = file_name(&title_dir);
-            let key = TitleId::new(&title_id).map_err(|source| InventoryError::UnsafeTitleId {
-                dir: title_dir.clone(),
-                source,
-            })?;
-            let mut entry = TitleEntry {
-                title_id: title_id.clone(),
-                base: None,
-                updates: BTreeMap::new(),
-                exdata_dir: layout.title_exdata_dir(&key),
-            };
-            for path in record_files(&title_dir)? {
-                let is_base = file_name(&path) == base_record;
-                let record = load_record(&path)?;
-                let expected = if is_base {
-                    ArtifactKind::TitleBase
-                } else {
-                    ArtifactKind::TitleUpdate
-                };
-                expect_kind(&path, expected, record.artifact.kind)?;
-                let title = record.title.as_ref().ok_or_else(|| {
-                    // `InstallRecord::parse` refuses a title record with
-                    // no `[title]` block, so this arm means the record
-                    // gate and this reader disagree.
-                    InventoryError::TitleIdMismatch {
-                        path: path.clone(),
-                        expected: title_id.clone(),
-                        found: String::new(),
-                    }
-                })?;
-                if title.title_id != title_id {
-                    return Err(InventoryError::TitleIdMismatch {
-                        path,
-                        expected: title_id,
-                        found: title.title_id.clone(),
-                    });
-                }
-                let entry_dir = layout.resolve_store_path(&record.artifact.store_path);
-                if is_base {
-                    entry.base = Some(BaseEntry {
-                        version: record.artifact.version.clone(),
-                        dir: entry_dir,
-                        tree: title.tree(),
-                        distribution: title.distribution.clone(),
-                        source_sha256: record.source.sha256.to_hex(),
-                        system_ver: title.system_ver.clone(),
-                        shipped_firmware: title.shipped_firmware.clone(),
-                    });
-                } else {
-                    expect_record_name(&path, &update_record_file(&record.artifact.version))?;
-                    // The installer stages the patch tree under the
-                    // `game/` child of the entry directory.
-                    entry.updates.insert(
-                        record.artifact.version.clone(),
-                        UpdateEntry {
-                            version: record.artifact.version.clone(),
-                            dir: entry_dir.join(TitleTree::Game.dir_name()),
-                            source_sha256: record.source.sha256.to_hex(),
-                            min_system_ver: record.source.min_system_ver.clone(),
-                            system_ver: title.system_ver.clone(),
-                        },
-                    );
-                }
-            }
-            titles.insert(title_id, entry);
+            let entry = read_title(&layout, &title_dir, &base_record)?;
+            titles.insert(entry.title_id.clone(), entry);
         }
         Ok(Self {
             root: root.to_path_buf(),
@@ -570,6 +493,112 @@ pub fn dir_exists(dir: &Path) -> Result<bool, std::io::Error> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(e),
     }
+}
+
+/// Every firmware entry, keyed by version.
+fn read_firmware(layout: &StoreLayout) -> Result<BTreeMap<String, FirmwareEntry>, InventoryError> {
+    let mut firmware = BTreeMap::new();
+    for path in record_files(&layout.firmware_records_dir())? {
+        let record = load_record(&path)?;
+        expect_kind(&path, ArtifactKind::Firmware, record.artifact.kind)?;
+        expect_record_name(&path, &firmware_record_file(&record.artifact.version))?;
+        firmware.insert(
+            record.artifact.version.clone(),
+            FirmwareEntry {
+                version: record.artifact.version,
+                entry_dir: layout.resolve_store_path(&record.artifact.store_path),
+                pup_sha256: record.source.sha256.to_hex(),
+                core_os: record.core_os,
+            },
+        );
+    }
+    Ok(firmware)
+}
+
+/// The base and updates recorded under one title's record directory.
+///
+/// `base_record` is the file name the base record uses; every other
+/// record is an update.
+fn read_title(
+    layout: &StoreLayout,
+    title_dir: &Path,
+    base_record: &str,
+) -> Result<TitleEntry, InventoryError> {
+    let title_id = file_name(title_dir);
+    let key = TitleId::new(&title_id).map_err(|source| InventoryError::UnsafeTitleId {
+        dir: title_dir.to_path_buf(),
+        source,
+    })?;
+    let mut entry = TitleEntry {
+        title_id: title_id.clone(),
+        base: None,
+        updates: BTreeMap::new(),
+        exdata_dir: layout.title_exdata_dir(&key),
+    };
+    for path in record_files(title_dir)? {
+        let is_base = file_name(&path) == base_record;
+        let record = load_record(&path)?;
+        let expected = if is_base {
+            ArtifactKind::TitleBase
+        } else {
+            ArtifactKind::TitleUpdate
+        };
+        expect_kind(&path, expected, record.artifact.kind)?;
+        let title = title_block(&record, &path, &title_id)?;
+        let entry_dir = layout.resolve_store_path(&record.artifact.store_path);
+        if is_base {
+            entry.base = Some(BaseEntry {
+                version: record.artifact.version.clone(),
+                dir: entry_dir,
+                tree: title.tree(),
+                distribution: title.distribution.clone(),
+                source_sha256: record.source.sha256.to_hex(),
+                system_ver: title.system_ver.clone(),
+                shipped_firmware: title.shipped_firmware.clone(),
+            });
+        } else {
+            expect_record_name(&path, &update_record_file(&record.artifact.version))?;
+            // The installer stages the patch tree under the `game/` child
+            // of the entry directory.
+            entry.updates.insert(
+                record.artifact.version.clone(),
+                UpdateEntry {
+                    version: record.artifact.version.clone(),
+                    dir: entry_dir.join(TitleTree::Game.dir_name()),
+                    source_sha256: record.source.sha256.to_hex(),
+                    min_system_ver: record.source.min_system_ver.clone(),
+                    system_ver: title.system_ver.clone(),
+                },
+            );
+        }
+    }
+    Ok(entry)
+}
+
+/// The record's `[title]` block, refused unless it names `title_id`.
+fn title_block<'a>(
+    record: &'a InstallRecord,
+    path: &Path,
+    title_id: &str,
+) -> Result<&'a TitleRecord, InventoryError> {
+    let title = record.title.as_ref().ok_or_else(|| {
+        // `InstallRecord::parse` refuses a title record with no `[title]`
+        // block, so this arm means the record gate and this reader
+        // disagree.
+        InventoryError::TitleIdMismatch {
+            path: path.to_path_buf(),
+            expected: title_id.to_string(),
+            found: String::new(),
+        }
+    })?;
+    if title.title_id != title_id {
+        return Err(InventoryError::TitleIdMismatch {
+            path: path.to_path_buf(),
+            expected: title_id.to_string(),
+            found: title.title_id.clone(),
+        });
+    }
+    Ok(title)
 }
 
 fn load_record(path: &Path) -> Result<InstallRecord, InventoryError> {
