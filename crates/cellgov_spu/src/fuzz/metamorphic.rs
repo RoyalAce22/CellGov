@@ -181,128 +181,17 @@ impl SpuInstruction {
         if encoding_has_undefined_operands(raw) || !encoding_execution_is_supported(raw) {
             return Err(SpuRelationRefusal::Ineligible { relation });
         }
-        let undeclared = SpuRelationRefusal::Undeclared { relation };
-        let no_partner = SpuRelationRefusal::NoPartner { relation };
         let (case, partner_kind) = match relation {
-            R::Deterministic => return Err(undeclared),
+            R::Deterministic => return Err(SpuRelationRefusal::Undeclared { relation }),
             R::ShufbControlClass => return self.shufb_control_case(raw, relation),
-            R::IgnoredField => {
-                let mask = ignored_field_mask(kind).ok_or(undeclared)?;
-                (word_case(relation, raw ^ mask), kind)
-            }
-            R::CountMasking => {
-                if let Some(mask) = count_immediate_mask(kind) {
-                    (word_case(relation, raw ^ mask), kind)
-                } else {
-                    let bits = count_register_bits(kind).ok_or(undeclared)?;
-                    let (rt, ra, rb) = (rt_field(raw), ra_field(raw), rb_field(raw));
-                    // An RB that is also RA is a data input as well as the count.
-                    if rb == ra {
-                        return Err(no_partner);
-                    }
-                    let mut case = word_case(relation, raw);
-                    case.varied_inputs[0] =
-                        Some(varied(rb, SpuInputRewrite::Flip(bits.unread()), Some(rt)));
-                    (case, kind)
-                }
-            }
-            R::ImmediateRegister => {
-                let (register_kind, splat) = immediate_register_pair(kind).ok_or(undeclared)?;
-                let opcode = opcode_word(register_kind).ok_or(undeclared)?;
-                let (rt, ra) = (rt_field(raw), ra_field(raw));
-                let rb = (0..SPU_REG_COUNT as u8)
-                    .find(|&register| register != ra && register != rt)
-                    .ok_or(no_partner)?;
-                let partner = opcode | u32::from(rb) << 14 | u32::from(ra) << 7 | u32::from(rt);
-                let mut case = word_case(relation, partner);
-                case.varied_inputs[0] = Some(varied(
-                    rb,
-                    SpuInputRewrite::Replace(splat.value(raw)),
-                    Some(rt),
-                ));
-                (case, register_kind)
-            }
-            R::Commutative => {
-                let (ra, rb) = (ra_field(raw), rb_field(raw));
-                if ra == rb {
-                    return Err(no_partner);
-                }
-                let fields = raw & !0x001F_FF80;
-                let partner = fields | u32::from(ra) << 14 | u32::from(rb) << 7;
-                (word_case(relation, partner), kind)
-            }
-            R::SlotPermutation => {
-                let reads_rt = slot_permutation_reads_rt(kind).ok_or(undeclared)?;
-                let (rt, inputs) = match form_for_kind(kind) {
-                    SpuEncodingForm::Rrrr => (
-                        ((raw >> 21) & 0x7F) as u8,
-                        [
-                            Some(ra_field(raw)),
-                            Some(rb_field(raw)),
-                            Some(rt_field(raw)),
-                        ],
-                    ),
-                    SpuEncodingForm::Rrr => (
-                        rt_field(raw),
-                        [
-                            Some(ra_field(raw)),
-                            Some(rb_field(raw)),
-                            reads_rt.then_some(rt_field(raw)),
-                        ],
-                    ),
-                    _ => (rt_field(raw), [Some(ra_field(raw)), None, None]),
-                };
-                let mut case = word_case(relation, raw);
-                let mut slot = 0;
-                for register in inputs.into_iter().flatten() {
-                    let named = case.varied_inputs[..slot]
-                        .iter()
-                        .flatten()
-                        .any(|input| input.register == register);
-                    if !named {
-                        case.varied_inputs[slot] =
-                            Some(varied(register, SpuInputRewrite::SwapDoublewords, Some(rt)));
-                        slot += 1;
-                    }
-                }
-                case.permuted_output = Some(rt);
-                (case, kind)
-            }
-            R::CompareBranch => {
-                let (partner_kind, halfword) = branch_complement(kind).ok_or(undeclared)?;
-                let own = opcode_word(kind).ok_or(undeclared)?;
-                let other = opcode_word(partner_kind).ok_or(undeclared)?;
-                let rt = rt_field(raw);
-                // An indirect branch whose target register is also the tested
-                // register would take its target from the rewritten value.
-                let indirect = matches!(
-                    kind,
-                    SpuInstructionKind::Biz
-                        | SpuInstructionKind::Binz
-                        | SpuInstructionKind::Bihz
-                        | SpuInstructionKind::Bihnz
-                );
-                if indirect && rt == ra_field(raw) {
-                    return Err(no_partner);
-                }
-                let mut case = word_case(relation, raw ^ own ^ other);
-                case.varied_inputs[0] =
-                    Some(varied(rt, SpuInputRewrite::ZeroCompare { halfword }, None));
-                (case, partner_kind)
-            }
+            R::IgnoredField => ignored_field_case(kind, raw, relation)?,
+            R::CountMasking => count_masking_case(kind, raw, relation)?,
+            R::ImmediateRegister => immediate_register_case(kind, raw, relation)?,
+            R::Commutative => commutative_case(kind, raw, relation)?,
+            R::SlotPermutation => slot_permutation_case(kind, raw, relation)?,
+            R::CompareBranch => compare_branch_case(kind, raw, relation)?,
         };
-        if case.partner_word != raw {
-            let partner = case.partner_word;
-            if encoding_has_undefined_operands(partner) || !encoding_execution_is_supported(partner)
-            {
-                return Err(SpuRelationRefusal::Ineligible { relation });
-            }
-            let decoded = crate::decode::decode(partner)
-                .map_err(|_| SpuRelationRefusal::InvalidPartner { relation })?;
-            if SpuInstructionKind::from(decoded) != partner_kind {
-                return Err(SpuRelationRefusal::InvalidPartner { relation });
-            }
-        }
+        check_partner(case.partner_word, raw, partner_kind, relation)?;
         Ok(case)
     }
 
@@ -325,6 +214,176 @@ impl SpuInstruction {
         case.varied_inputs[0] = Some(varied(rc, SpuInputRewrite::ShufbControlClass, Some(rt)));
         Ok(case)
     }
+}
+
+/// A built case and the kind its partner word must decode to.
+type CaseAndKind = (SpuMetamorphicCase, SpuInstructionKind);
+
+/// The ignored-field case: the word with its ignored bits flipped.
+fn ignored_field_case(
+    kind: SpuInstructionKind,
+    raw: u32,
+    relation: SpuMetamorphicRelation,
+) -> Result<CaseAndKind, SpuRelationRefusal> {
+    let mask = ignored_field_mask(kind).ok_or(SpuRelationRefusal::Undeclared { relation })?;
+    Ok((word_case(relation, raw ^ mask), kind))
+}
+
+/// The count-masking case: an immediate count with its unread bits
+/// flipped, or the same word with the unread bits of RB flipped.
+fn count_masking_case(
+    kind: SpuInstructionKind,
+    raw: u32,
+    relation: SpuMetamorphicRelation,
+) -> Result<CaseAndKind, SpuRelationRefusal> {
+    if let Some(mask) = count_immediate_mask(kind) {
+        return Ok((word_case(relation, raw ^ mask), kind));
+    }
+    let bits = count_register_bits(kind).ok_or(SpuRelationRefusal::Undeclared { relation })?;
+    let (rt, ra, rb) = (rt_field(raw), ra_field(raw), rb_field(raw));
+    // An RB that is also RA is a data input as well as the count.
+    if rb == ra {
+        return Err(SpuRelationRefusal::NoPartner { relation });
+    }
+    let mut case = word_case(relation, raw);
+    case.varied_inputs[0] = Some(varied(rb, SpuInputRewrite::Flip(bits.unread()), Some(rt)));
+    Ok((case, kind))
+}
+
+/// The immediate-register case: the register form, with a free RB that
+/// holds the immediate.
+fn immediate_register_case(
+    kind: SpuInstructionKind,
+    raw: u32,
+    relation: SpuMetamorphicRelation,
+) -> Result<CaseAndKind, SpuRelationRefusal> {
+    let undeclared = SpuRelationRefusal::Undeclared { relation };
+    let (register_kind, splat) = immediate_register_pair(kind).ok_or(undeclared)?;
+    let opcode = opcode_word(register_kind).ok_or(undeclared)?;
+    let (rt, ra) = (rt_field(raw), ra_field(raw));
+    let rb = (0..SPU_REG_COUNT as u8)
+        .find(|&register| register != ra && register != rt)
+        .ok_or(SpuRelationRefusal::NoPartner { relation })?;
+    let partner = opcode | u32::from(rb) << 14 | u32::from(ra) << 7 | u32::from(rt);
+    let mut case = word_case(relation, partner);
+    case.varied_inputs[0] = Some(varied(
+        rb,
+        SpuInputRewrite::Replace(splat.value(raw)),
+        Some(rt),
+    ));
+    Ok((case, register_kind))
+}
+
+/// The commutative case: the word with RA and RB traded.
+fn commutative_case(
+    kind: SpuInstructionKind,
+    raw: u32,
+    relation: SpuMetamorphicRelation,
+) -> Result<CaseAndKind, SpuRelationRefusal> {
+    let (ra, rb) = (ra_field(raw), rb_field(raw));
+    if ra == rb {
+        return Err(SpuRelationRefusal::NoPartner { relation });
+    }
+    let fields = raw & !0x001F_FF80;
+    let partner = fields | u32::from(ra) << 14 | u32::from(rb) << 7;
+    Ok((word_case(relation, partner), kind))
+}
+
+/// The slot-permutation case: the same word, with the doublewords of
+/// each distinct input and of the output traded.
+fn slot_permutation_case(
+    kind: SpuInstructionKind,
+    raw: u32,
+    relation: SpuMetamorphicRelation,
+) -> Result<CaseAndKind, SpuRelationRefusal> {
+    let reads_rt =
+        slot_permutation_reads_rt(kind).ok_or(SpuRelationRefusal::Undeclared { relation })?;
+    let (rt, inputs) = match form_for_kind(kind) {
+        SpuEncodingForm::Rrrr => (
+            ((raw >> 21) & 0x7F) as u8,
+            [
+                Some(ra_field(raw)),
+                Some(rb_field(raw)),
+                Some(rt_field(raw)),
+            ],
+        ),
+        SpuEncodingForm::Rrr => (
+            rt_field(raw),
+            [
+                Some(ra_field(raw)),
+                Some(rb_field(raw)),
+                reads_rt.then_some(rt_field(raw)),
+            ],
+        ),
+        _ => (rt_field(raw), [Some(ra_field(raw)), None, None]),
+    };
+    let mut case = word_case(relation, raw);
+    let mut slot = 0;
+    for register in inputs.into_iter().flatten() {
+        let named = case.varied_inputs[..slot]
+            .iter()
+            .flatten()
+            .any(|input| input.register == register);
+        if named {
+            continue;
+        }
+        case.varied_inputs[slot] =
+            Some(varied(register, SpuInputRewrite::SwapDoublewords, Some(rt)));
+        slot += 1;
+    }
+    case.permuted_output = Some(rt);
+    Ok((case, kind))
+}
+
+/// The compare-branch case: the complementary branch, with the tested
+/// register's zero test inverted.
+fn compare_branch_case(
+    kind: SpuInstructionKind,
+    raw: u32,
+    relation: SpuMetamorphicRelation,
+) -> Result<CaseAndKind, SpuRelationRefusal> {
+    let undeclared = SpuRelationRefusal::Undeclared { relation };
+    let (partner_kind, halfword) = branch_complement(kind).ok_or(undeclared)?;
+    let own = opcode_word(kind).ok_or(undeclared)?;
+    let other = opcode_word(partner_kind).ok_or(undeclared)?;
+    let rt = rt_field(raw);
+    // An indirect branch whose target register is also the tested
+    // register would take its target from the rewritten value.
+    let indirect = matches!(
+        kind,
+        SpuInstructionKind::Biz
+            | SpuInstructionKind::Binz
+            | SpuInstructionKind::Bihz
+            | SpuInstructionKind::Bihnz
+    );
+    if indirect && rt == ra_field(raw) {
+        return Err(SpuRelationRefusal::NoPartner { relation });
+    }
+    let mut case = word_case(relation, raw ^ own ^ other);
+    case.varied_inputs[0] = Some(varied(rt, SpuInputRewrite::ZeroCompare { halfword }, None));
+    Ok((case, partner_kind))
+}
+
+/// Refuses a `partner` word other than `raw` that is ineligible or does
+/// not decode to `partner_kind`.
+fn check_partner(
+    partner: u32,
+    raw: u32,
+    partner_kind: SpuInstructionKind,
+    relation: SpuMetamorphicRelation,
+) -> Result<(), SpuRelationRefusal> {
+    if partner == raw {
+        return Ok(());
+    }
+    if encoding_has_undefined_operands(partner) || !encoding_execution_is_supported(partner) {
+        return Err(SpuRelationRefusal::Ineligible { relation });
+    }
+    let decoded = crate::decode::decode(partner)
+        .map_err(|_| SpuRelationRefusal::InvalidPartner { relation })?;
+    if SpuInstructionKind::from(decoded) != partner_kind {
+        return Err(SpuRelationRefusal::InvalidPartner { relation });
+    }
+    Ok(())
 }
 
 /// `value` with its two doublewords traded.
