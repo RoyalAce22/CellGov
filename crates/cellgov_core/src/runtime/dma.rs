@@ -11,6 +11,7 @@ use std::borrow::Cow;
 
 use cellgov_dma::{DmaCompletion, MfcCommandError};
 use cellgov_exec::UnitStatus;
+use cellgov_lv2::thread_group::ThreadGroupTable;
 use cellgov_mem::{ByteRange, GuestMemory};
 use cellgov_ps3_abi::hw::ppu::CELL_EA_LIMIT;
 use cellgov_time::GuestTicks;
@@ -34,6 +35,21 @@ use super::Runtime;
 /// at raising the data-segment interrupt, below 4 GB as above it, so an
 /// unbacked range is one that no segment names.
 /// [CBEA p:120 s:9.1.7] a segment fault raises the MFC data-segment interrupt; a mapping fault or a protection violation raises the MFC data-storage interrupt.
+/// Return the refusal the queue records for transfer `c` when it reaches it: an
+/// SPU thread window's refusal for a transfer through one, else the
+/// main-memory translation fault.
+fn transfer_refusal(
+    memory: &GuestMemory,
+    groups: &ThreadGroupTable,
+    c: &DmaCompletion,
+    payloaded: bool,
+) -> Option<MfcCommandError> {
+    match window_target(groups, c) {
+        Some(target) => target.err(),
+        None => translation_fault(memory, c, payloaded),
+    }
+}
+
 pub(super) fn translation_fault(
     memory: &GuestMemory,
     c: &DmaCompletion,
@@ -286,9 +302,8 @@ impl Runtime {
         let (memory, groups) = (&self.memory, self.lv2_host.thread_groups());
         let processed = self
             .dma_queue
-            .process_due_translating(self.time, |c, payloaded| match window_target(groups, c) {
-                Some(target) => target.err(),
-                None => translation_fault(memory, c, payloaded),
+            .process_due_translating(self.time, |c, payloaded| {
+                transfer_refusal(memory, groups, c, payloaded)
             });
         self.land_processed_dma(processed)
     }
@@ -316,9 +331,8 @@ impl Runtime {
             let (memory, groups) = (&self.memory, self.lv2_host.thread_groups());
             let processed = self
                 .dma_queue
-                .process_issuer_translating(unit, |c, payloaded| match window_target(groups, c) {
-                    Some(target) => target.err(),
-                    None => translation_fault(memory, c, payloaded),
+                .process_issuer_translating(unit, |c, payloaded| {
+                    transfer_refusal(memory, groups, c, payloaded)
                 });
             let reached = processed.completions.len() + processed.raised.len();
             landed.extend(self.land_processed_dma(processed));
@@ -365,33 +379,36 @@ impl Runtime {
             // capture, four 16 KB puts queued just before a stop all land
             // and their tag group completes.
             // [CBEA p:92 s:8.5.1] a stop request stops the SPU's instruction issue; the page says nothing of the MFC.
-            if matches!(
-                self.registry.effective_status(c.issuer()),
-                Some(UnitStatus::Finished | UnitStatus::Faulted)
-            ) {
-                continue;
+            if self.completion_wakes_issuer(c) {
+                self.registry
+                    .set_status_override(c.issuer(), UnitStatus::Runnable);
             }
-            // A unit stalled on another channel stays parked: only that
-            // channel's producer gives it a count. A unit stalled for a
-            // queue slot stays parked through a completion that frees
-            // none, such as a bus request before a put's last.
-            if self
-                .registry
-                .get(c.issuer())
-                .and_then(|unit| unit.channel_stall())
-                .is_some_and(|stall| {
-                    !stall.wake.ends_on_dma_completion()
-                        || (stall.wake == cellgov_exec::StallWake::CommandQueueSlot
-                            && !c.request().holds_slot())
-                })
-            {
-                continue;
-            }
-            self.registry
-                .set_status_override(c.issuer(), UnitStatus::Runnable);
         }
         self.start_held_lists(due.iter().map(|(c, _)| c.issuer()));
         due
+    }
+
+    /// Whether completion `c` wakes its issuer. A Finished or Faulted
+    /// issuer stays as it is. A unit stalled on another channel stays
+    /// parked: only that channel's producer gives it a count. A unit
+    /// stalled for a queue slot stays parked through a completion that
+    /// frees none, such as a bus request before a put's last.
+    fn completion_wakes_issuer(&self, c: &DmaCompletion) -> bool {
+        if matches!(
+            self.registry.effective_status(c.issuer()),
+            Some(UnitStatus::Finished | UnitStatus::Faulted)
+        ) {
+            return false;
+        }
+        !self
+            .registry
+            .get(c.issuer())
+            .and_then(|unit| unit.channel_stall())
+            .is_some_and(|stall| {
+                !stall.wake.ends_on_dma_completion()
+                    || (stall.wake == cellgov_exec::StallWake::CommandQueueSlot
+                        && !c.request().holds_slot())
+            })
     }
 
     /// Start the lists that no queued command holds any more, and queue their commands.
@@ -518,13 +535,11 @@ impl Runtime {
     pub fn drain_pending_dma(&mut self) {
         loop {
             let (memory, groups) = (&self.memory, self.lv2_host.thread_groups());
-            let processed = self.dma_queue.process_due_translating(
-                GuestTicks::new(u64::MAX),
-                |c, payloaded| match window_target(groups, c) {
-                    Some(target) => target.err(),
-                    None => translation_fault(memory, c, payloaded),
-                },
-            );
+            let processed = self
+                .dma_queue
+                .process_due_translating(GuestTicks::new(u64::MAX), |c, payloaded| {
+                    transfer_refusal(memory, groups, c, payloaded)
+                });
             for raised in processed.raised {
                 self.record_mfc_exception(raised);
             }
