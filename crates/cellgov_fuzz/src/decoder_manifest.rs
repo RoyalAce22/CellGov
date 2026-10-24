@@ -405,10 +405,7 @@ impl DecoderCampaignManifest {
         // [Jiang2022 p:4 s:2.2.3 Differential Testing] A word executed on a real
         // device is a comparison tier independent of the emulator. Only that
         // kind of record counts as external evidence here.
-        let canonical = match decoder {
-            RawDecoder::Ppu => serde_json::to_string(&parse_ppu_reference(json)?)?,
-            RawDecoder::Spu => serde_json::to_string(&parse_spu_reference(json)?)?,
-        };
+        let canonical = canonical_reference(decoder, json)?;
         if self
             .authoritative_references
             .iter()
@@ -439,81 +436,124 @@ impl DecoderCampaignManifest {
         if merged_totals(&self.raw_partitions)? != self.raw_totals {
             return Err(DecoderManifestError::RawPartitions);
         }
-        if !self.expected_kinds.windows(2).all(|pair| pair[0] < pair[1])
-            || !self.witnesses.windows(2).all(|pair| {
-                (
-                    pair[0].kind.as_str(),
-                    decoder_order(pair[0].replay.decoder),
-                    pair[0].replay.raw,
-                ) < (
-                    pair[1].kind.as_str(),
-                    decoder_order(pair[1].replay.decoder),
-                    pair[1].replay.raw,
-                )
-            })
-            || rank_failures(self.failures.clone()) != self.failures
-            || self.witnesses.iter().any(|witness| {
-                !self.expected_kinds.contains(&witness.kind)
-                    || witness.classes.is_empty()
-                    || !witness.classes.windows(2).all(|pair| pair[0] < pair[1])
-            })
-            || self.expected_kinds.iter().any(|kind| {
-                !self.witnesses.iter().any(|witness| &witness.kind == kind)
-                    && !self.failures.iter().any(|failure| {
-                        failure.fingerprint.kind.as_ref() == Some(kind)
-                            && matches!(
-                                failure.fingerprint.class,
-                                DecoderFailureClass::MissingKind
-                                    | DecoderFailureClass::UnwitnessedKind
-                            )
-                    })
-            })
-            || self.failures.iter().any(|failure| {
-                failure.minimized.is_some_and(|minimized| {
-                    failure
-                        .original
-                        .is_none_or(|original| minimized.decoder != original.decoder)
-                })
-            })
-            || self.failures.iter().any(|failure| {
-                failure.original.is_none() == failure.descriptor_replay.is_none()
-                    || failure.descriptor_replay.as_ref().is_some_and(|replay| {
-                        failure.fingerprint.kind.as_ref() != Some(&replay.kind)
-                    })
-            })
-            || !self.authoritative_references.windows(2).all(|pair| {
-                (
-                    decoder_order(pair[0].decoder),
-                    pair[0].artifact_json.as_str(),
-                ) < (
-                    decoder_order(pair[1].decoder),
-                    pair[1].artifact_json.as_str(),
-                )
-            })
-        {
-            return Err(DecoderManifestError::SemanticCoverage);
-        }
-        if !self.spu_rows_are_complete() {
+        if !SEMANTIC_CHECKS.iter().all(|check| check(self)) {
             return Err(DecoderManifestError::SemanticCoverage);
         }
         for reference in &self.authoritative_references {
-            match reference.decoder {
-                RawDecoder::Ppu => {
-                    let artifact = parse_ppu_reference(&reference.artifact_json)?;
-                    if serde_json::to_string(&artifact)? != reference.artifact_json {
-                        return Err(DecoderManifestError::SemanticCoverage);
-                    }
-                }
-                RawDecoder::Spu => {
-                    let artifact = parse_spu_reference(&reference.artifact_json)?;
-                    if serde_json::to_string(&artifact)? != reference.artifact_json {
-                        return Err(DecoderManifestError::SemanticCoverage);
-                    }
-                }
+            if canonical_reference(reference.decoder, &reference.artifact_json)?
+                != reference.artifact_json
+            {
+                return Err(DecoderManifestError::SemanticCoverage);
             }
         }
         Ok(())
     }
+}
+
+/// The semantic half of [`DecoderCampaignManifest::validate`]: each
+/// check names one property a well-formed manifest holds.
+const SEMANTIC_CHECKS: [fn(&DecoderCampaignManifest) -> bool; 9] = [
+    DecoderCampaignManifest::expected_kinds_sorted,
+    DecoderCampaignManifest::witnesses_sorted,
+    DecoderCampaignManifest::failures_ranked,
+    DecoderCampaignManifest::witness_classes_valid,
+    DecoderCampaignManifest::every_kind_witnessed_or_failed,
+    DecoderCampaignManifest::minimized_on_original_decoder,
+    DecoderCampaignManifest::replay_shape_consistent,
+    DecoderCampaignManifest::references_sorted,
+    DecoderCampaignManifest::spu_rows_are_complete,
+];
+
+impl DecoderCampaignManifest {
+    fn expected_kinds_sorted(&self) -> bool {
+        self.expected_kinds.windows(2).all(|pair| pair[0] < pair[1])
+    }
+
+    /// Witnesses in kind, decoder, word order, with no repeat.
+    fn witnesses_sorted(&self) -> bool {
+        fn key(witness: &DecoderWitness) -> (&str, u8, u32) {
+            (
+                witness.kind.as_str(),
+                decoder_order(witness.replay.decoder),
+                witness.replay.raw,
+            )
+        }
+        self.witnesses
+            .windows(2)
+            .all(|pair| key(&pair[0]) < key(&pair[1]))
+    }
+
+    fn failures_ranked(&self) -> bool {
+        rank_failures(self.failures.clone()) == self.failures
+    }
+
+    /// Each witness names an expected kind and carries a nonempty,
+    /// strictly sorted class list.
+    fn witness_classes_valid(&self) -> bool {
+        self.witnesses.iter().all(|witness| {
+            self.expected_kinds.contains(&witness.kind)
+                && !witness.classes.is_empty()
+                && witness.classes.windows(2).all(|pair| pair[0] < pair[1])
+        })
+    }
+
+    /// Each expected kind has a witness or a missing-kind or
+    /// unwitnessed-kind failure.
+    fn every_kind_witnessed_or_failed(&self) -> bool {
+        self.expected_kinds.iter().all(|kind| {
+            self.witnesses.iter().any(|witness| &witness.kind == kind)
+                || self.failures.iter().any(|failure| {
+                    failure.fingerprint.kind.as_ref() == Some(kind)
+                        && matches!(
+                            failure.fingerprint.class,
+                            DecoderFailureClass::MissingKind | DecoderFailureClass::UnwitnessedKind
+                        )
+                })
+        })
+    }
+
+    /// A minimized replay runs on the decoder of its original word.
+    fn minimized_on_original_decoder(&self) -> bool {
+        self.failures.iter().all(|failure| {
+            failure.minimized.is_none_or(|minimized| {
+                failure
+                    .original
+                    .is_some_and(|original| minimized.decoder == original.decoder)
+            })
+        })
+    }
+
+    /// Each failure has exactly one of an original word and a descriptor
+    /// replay, and a descriptor replay names the fingerprint's kind.
+    fn replay_shape_consistent(&self) -> bool {
+        self.failures.iter().all(|failure| {
+            failure.original.is_none() != failure.descriptor_replay.is_none()
+                && failure
+                    .descriptor_replay
+                    .as_ref()
+                    .is_none_or(|replay| failure.fingerprint.kind.as_ref() == Some(&replay.kind))
+        })
+    }
+
+    fn references_sorted(&self) -> bool {
+        self.authoritative_references.windows(2).all(|pair| {
+            (
+                decoder_order(pair[0].decoder),
+                pair[0].artifact_json.as_str(),
+            ) < (
+                decoder_order(pair[1].decoder),
+                pair[1].artifact_json.as_str(),
+            )
+        })
+    }
+}
+
+/// `json` parsed as `decoder`'s reference artifact and serialized again.
+fn canonical_reference(decoder: RawDecoder, json: &str) -> Result<String, DecoderManifestError> {
+    Ok(match decoder {
+        RawDecoder::Ppu => serde_json::to_string(&parse_ppu_reference(json)?)?,
+        RawDecoder::Spu => serde_json::to_string(&parse_spu_reference(json)?)?,
+    })
 }
 
 impl DecoderCampaignManifest {
@@ -661,6 +701,74 @@ fn rank_failures(failures: Vec<DecoderFailure>) -> Vec<DecoderFailure> {
     ranked
 }
 
+/// Whether one complete raw partition is internally consistent: its
+/// counts add up, its domain fits the 32-bit word space, and its panic
+/// and disagreement samples are the right number, strictly sorted and
+/// inside the domain.
+fn raw_artifact_is_well_formed(artifact: &RawDecodeArtifact) -> bool {
+    use crate::raw_decode::{MAX_RAW_DECODE_DISAGREEMENT_SAMPLES, MAX_RAW_DECODE_PANIC_SAMPLES};
+    let domain = &artifact.domain;
+    let in_domain = |raw: u32| {
+        u64::from(raw)
+            .checked_sub(u64::from(domain.first))
+            .is_some_and(|offset| offset < domain.count)
+    };
+    let counts_add_up = artifact.schema_version == RAW_DECODE_SCHEMA_VERSION
+        && artifact.status == RawDecodeStatus::Complete
+        && artifact.processed == domain.count
+        && artifact
+            .accepted
+            .checked_add(artifact.refused)
+            .and_then(|count| count.checked_add(artifact.panics))
+            == Some(domain.count)
+        && artifact.disagreements <= artifact.accepted;
+    // RawDecodeDomain::new requires a nonempty interval.
+    let domain_fits = domain.count != 0
+        && u64::from(domain.first)
+            .checked_add(domain.count)
+            .is_some_and(|end| end <= u64::from(u32::MAX) + 1);
+    let panics_sampled = artifact.panic_samples.len() as u64
+        == artifact.panics.min(MAX_RAW_DECODE_PANIC_SAMPLES as u64)
+        && artifact
+            .panic_samples
+            .windows(2)
+            .all(|pair| pair[0].raw < pair[1].raw)
+        && artifact
+            .panic_samples
+            .iter()
+            .all(|sample| in_domain(sample.raw));
+    let disagreements_sampled = artifact.disagreement_samples.len() as u64
+        == artifact
+            .disagreements
+            .min(MAX_RAW_DECODE_DISAGREEMENT_SAMPLES as u64)
+        && artifact
+            .disagreement_samples
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+        && artifact
+            .disagreement_samples
+            .iter()
+            .all(|&raw| in_domain(raw));
+    counts_add_up && domain_fits && panics_sampled && disagreements_sampled
+}
+
+impl DecoderRawTotals {
+    /// Add the next partition of the same decoder, which starts where
+    /// these totals end. `None` on a gap, an overlap or an overflow.
+    fn absorb(&mut self, artifact: &RawDecodeArtifact) -> Option<()> {
+        let next = u64::from(self.first).checked_add(self.words)?;
+        if next != u64::from(artifact.domain.first) {
+            return None;
+        }
+        self.words = self.words.checked_add(artifact.domain.count)?;
+        self.accepted = self.accepted.checked_add(artifact.accepted)?;
+        self.refused = self.refused.checked_add(artifact.refused)?;
+        self.panics = self.panics.checked_add(artifact.panics)?;
+        self.disagreements = self.disagreements.checked_add(artifact.disagreements)?;
+        Some(())
+    }
+}
+
 fn merged_totals(
     artifacts: &[RawDecodeArtifact],
 ) -> Result<Vec<DecoderRawTotals>, DecoderManifestError> {
@@ -668,77 +776,12 @@ fn merged_totals(
     let mut last_key = None;
     for artifact in artifacts {
         let key = (decoder_order(artifact.decoder), artifact.domain.first);
-        // RawDecodeDomain::new requires a nonempty interval.
-        if last_key.is_some_and(|last| key <= last)
-            || artifact.domain.count == 0
-            || artifact.schema_version != RAW_DECODE_SCHEMA_VERSION
-            || artifact.status != RawDecodeStatus::Complete
-            || artifact.processed != artifact.domain.count
-            || artifact
-                .accepted
-                .checked_add(artifact.refused)
-                .and_then(|count| count.checked_add(artifact.panics))
-                != Some(artifact.domain.count)
-            || artifact.panic_samples.len() as u64
-                != artifact
-                    .panics
-                    .min(crate::raw_decode::MAX_RAW_DECODE_PANIC_SAMPLES as u64)
-            || !artifact
-                .panic_samples
-                .windows(2)
-                .all(|pair| pair[0].raw < pair[1].raw)
-            || artifact.panic_samples.iter().any(|sample| {
-                u64::from(sample.raw)
-                    .checked_sub(u64::from(artifact.domain.first))
-                    .is_none_or(|offset| offset >= artifact.domain.count)
-            })
-            || u64::from(artifact.domain.first)
-                .checked_add(artifact.domain.count)
-                .is_none_or(|end| end > u64::from(u32::MAX) + 1)
-            || artifact.disagreements > artifact.accepted
-            || artifact.disagreement_samples.len() as u64
-                != artifact
-                    .disagreements
-                    .min(crate::raw_decode::MAX_RAW_DECODE_DISAGREEMENT_SAMPLES as u64)
-            || !artifact
-                .disagreement_samples
-                .windows(2)
-                .all(|pair| pair[0] < pair[1])
-            || artifact.disagreement_samples.iter().any(|&raw| {
-                u64::from(raw)
-                    .checked_sub(u64::from(artifact.domain.first))
-                    .is_none_or(|offset| offset >= artifact.domain.count)
-            })
-        {
+        if last_key.is_some_and(|last| key <= last) || !raw_artifact_is_well_formed(artifact) {
             return Err(DecoderManifestError::RawPartitions);
         }
-        let previous = totals.get_mut(&key.0);
-        if let Some(total) = previous {
-            let next = u64::from(total.first)
-                .checked_add(total.words)
-                .ok_or(DecoderManifestError::RawPartitions)?;
-            if next != u64::from(artifact.domain.first) {
-                return Err(DecoderManifestError::RawPartitions);
-            }
-            total.words = total
-                .words
-                .checked_add(artifact.domain.count)
-                .ok_or(DecoderManifestError::RawPartitions)?;
-            total.accepted = total
-                .accepted
-                .checked_add(artifact.accepted)
-                .ok_or(DecoderManifestError::RawPartitions)?;
-            total.refused = total
-                .refused
-                .checked_add(artifact.refused)
-                .ok_or(DecoderManifestError::RawPartitions)?;
-            total.panics = total
-                .panics
-                .checked_add(artifact.panics)
-                .ok_or(DecoderManifestError::RawPartitions)?;
-            total.disagreements = total
-                .disagreements
-                .checked_add(artifact.disagreements)
+        if let Some(total) = totals.get_mut(&key.0) {
+            total
+                .absorb(artifact)
                 .ok_or(DecoderManifestError::RawPartitions)?;
         } else {
             totals.insert(
@@ -760,143 +803,92 @@ fn merged_totals(
 }
 
 fn semantic_failure(decoder: RawDecoder, finding: &SemanticSweepFinding) -> DecoderFailure {
+    use DecoderFailureClass as C;
     use SemanticSweepFinding as F;
-    let stage = match finding {
-        F::TargetPanic { stage, .. } => Some(*stage),
-        _ => None,
-    };
-    let (class, kind, other_kind, raw, field, payload, case_class) = match finding {
-        F::UnexpectedKind { kind } => (
-            DecoderFailureClass::UnexpectedKind,
-            Some(format!("{kind:?}")),
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
-        F::DescriptorMismatch { kind, raw } => (
-            DecoderFailureClass::DescriptorMismatch,
-            Some(format!("{kind:?}")),
-            None,
-            Some(*raw),
-            None,
-            None,
-            None,
-        ),
-        F::GenerationPanic { kind, payload } => (
-            DecoderFailureClass::GenerationPanic,
-            Some(format!("{kind:?}")),
-            None,
-            None,
-            None,
-            Some(payload.clone()),
-            None,
-        ),
+    let fingerprint = match finding {
+        F::UnexpectedKind { kind } => base_fingerprint(C::UnexpectedKind, kind),
+        F::DescriptorMismatch { kind, .. } => base_fingerprint(C::DescriptorMismatch, kind),
+        F::GenerationPanic { kind, payload } => DecoderFailureFingerprint {
+            payload: Some(payload.clone()),
+            ..base_fingerprint(C::GenerationPanic, kind)
+        },
         F::TargetPanic {
-            kind, raw, payload, ..
-        } => (
-            DecoderFailureClass::TargetPanic,
-            Some(format!("{kind:?}")),
-            None,
-            Some(*raw),
-            None,
-            Some(payload.clone()),
-            None,
-        ),
-        F::MissingKind { kind } => (
-            DecoderFailureClass::MissingKind,
-            Some(format!("{kind:?}")),
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
-        F::DuplicateKind { kind } => (
-            DecoderFailureClass::DuplicateKind,
-            Some(format!("{kind:?}")),
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
-        F::UnwitnessedKind { kind } => (
-            DecoderFailureClass::UnwitnessedKind,
-            Some(format!("{kind:?}")),
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
-        F::AmbiguousWord { raw, first, second } => (
-            DecoderFailureClass::AmbiguousWord,
-            Some(format!("{first:?}")),
-            Some(format!("{second:?}")),
-            Some(*raw),
-            None,
-            None,
-            None,
-        ),
-        F::UnexpectedRejection { kind, raw, class } => (
-            DecoderFailureClass::UnexpectedRejection,
-            Some(format!("{kind:?}")),
-            None,
-            Some(*raw),
-            None,
-            None,
-            Some(*class),
-        ),
-        F::UnexpectedAcceptance { kind, raw, field } => (
-            DecoderFailureClass::UnexpectedAcceptance,
-            Some(format!("{kind:?}")),
-            None,
-            Some(*raw),
-            Some(*field),
-            None,
-            None,
-        ),
-        F::Misclassified {
-            expected,
-            actual,
-            raw,
-        } => (
-            DecoderFailureClass::Misclassified,
-            Some(format!("{expected:?}")),
-            Some(format!("{actual:?}")),
-            Some(*raw),
-            None,
-            None,
-            None,
-        ),
-        F::RoundTripFailure { kind, raw, .. } => (
-            DecoderFailureClass::RoundTripFailure,
-            Some(format!("{kind:?}")),
-            None,
-            Some(*raw),
-            None,
-            None,
-            None,
-        ),
-    };
-    DecoderFailure {
-        fingerprint: DecoderFailureFingerprint {
-            class,
-            kind: kind.clone(),
-            other_kind,
-            field,
+            kind,
             payload,
             stage,
-            case_class,
+            ..
+        } => DecoderFailureFingerprint {
+            payload: Some(payload.clone()),
+            stage: Some(*stage),
+            ..base_fingerprint(C::TargetPanic, kind)
         },
+        F::MissingKind { kind } => base_fingerprint(C::MissingKind, kind),
+        F::DuplicateKind { kind } => base_fingerprint(C::DuplicateKind, kind),
+        F::UnwitnessedKind { kind } => base_fingerprint(C::UnwitnessedKind, kind),
+        F::AmbiguousWord { first, second, .. } => DecoderFailureFingerprint {
+            other_kind: Some(format!("{second:?}")),
+            ..base_fingerprint(C::AmbiguousWord, first)
+        },
+        F::UnexpectedRejection { kind, class, .. } => DecoderFailureFingerprint {
+            case_class: Some(*class),
+            ..base_fingerprint(C::UnexpectedRejection, kind)
+        },
+        F::UnexpectedAcceptance { kind, field, .. } => DecoderFailureFingerprint {
+            field: Some(*field),
+            ..base_fingerprint(C::UnexpectedAcceptance, kind)
+        },
+        F::Misclassified {
+            expected, actual, ..
+        } => DecoderFailureFingerprint {
+            other_kind: Some(format!("{actual:?}")),
+            ..base_fingerprint(C::Misclassified, expected)
+        },
+        F::RoundTripFailure { kind, .. } => base_fingerprint(C::RoundTripFailure, kind),
+    };
+    let raw = finding_word(finding);
+    DecoderFailure {
         original: raw.map(|raw| DecoderReplay { decoder, raw }),
         descriptor_replay: raw.is_none().then(|| DecoderDescriptorReplay {
             decoder,
-            kind: kind.clone().unwrap_or_default(),
+            kind: fingerprint.kind.clone().unwrap_or_default(),
         }),
+        fingerprint,
         minimized: None,
+    }
+}
+
+/// A fingerprint of `class` for `kind` with every optional field empty.
+fn base_fingerprint(
+    class: DecoderFailureClass,
+    kind: &InstructionIdentity,
+) -> DecoderFailureFingerprint {
+    DecoderFailureFingerprint {
+        class,
+        kind: Some(format!("{kind:?}")),
+        other_kind: None,
+        field: None,
+        payload: None,
+        stage: None,
+        case_class: None,
+    }
+}
+
+/// The word a finding names, if it names one.
+fn finding_word(finding: &SemanticSweepFinding) -> Option<u32> {
+    use SemanticSweepFinding as F;
+    match finding {
+        F::DescriptorMismatch { raw, .. }
+        | F::TargetPanic { raw, .. }
+        | F::AmbiguousWord { raw, .. }
+        | F::UnexpectedRejection { raw, .. }
+        | F::UnexpectedAcceptance { raw, .. }
+        | F::Misclassified { raw, .. }
+        | F::RoundTripFailure { raw, .. } => Some(*raw),
+        F::UnexpectedKind { .. }
+        | F::GenerationPanic { .. }
+        | F::MissingKind { .. }
+        | F::DuplicateKind { .. }
+        | F::UnwitnessedKind { .. } => None,
     }
 }
 
