@@ -299,30 +299,12 @@ pub fn parse(data: &[u8]) -> Result<ParamSfo, SfoError> {
         // Unknown format tags are skipped rather than errored.
         let value = match param_fmt {
             FMT_INTEGER if param_max == 4 && param_len == 4 => {
-                let start = data_table_start.saturating_add(usize_from_u32(data_off));
-                let end = start.saturating_add(4);
-                if end > data.len() {
-                    return Err(SfoError::DataOutOfRange {
-                        key,
-                        start,
-                        end,
-                        len: data.len(),
-                    });
-                }
-                SfoValue::Integer(read_le_u32(data, start))
+                let raw = data_slice(data, data_table_start, data_off, 4, &key)?;
+                SfoValue::Integer(read_le_u32(raw, 0))
             }
             FMT_STRING | FMT_ARRAY => {
-                let start = data_table_start.saturating_add(usize_from_u32(data_off));
-                let end = start.saturating_add(usize_from_u32(param_len));
-                if end > data.len() {
-                    return Err(SfoError::DataOutOfRange {
-                        key,
-                        start,
-                        end,
-                        len: data.len(),
-                    });
-                }
-                let raw = &data[start..end];
+                let len = usize_from_u32(param_len);
+                let raw = data_slice(data, data_table_start, data_off, len, &key)?;
                 if param_fmt == FMT_STRING {
                     let nul = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
                     SfoValue::Text(String::from_utf8_lossy(&raw[..nul]).into_owned())
@@ -339,6 +321,26 @@ pub fn parse(data: &[u8]) -> Result<ParamSfo, SfoError> {
     }
 
     Ok(ParamSfo { entries })
+}
+
+/// The `len` bytes of `key`'s data at `data_off` into the data table
+/// that starts at `table_start`.
+fn data_slice<'a>(
+    data: &'a [u8],
+    table_start: usize,
+    data_off: u32,
+    len: usize,
+    key: &str,
+) -> Result<&'a [u8], SfoError> {
+    let start = table_start.saturating_add(usize_from_u32(data_off));
+    let end = start.saturating_add(len);
+    data.get(start..end)
+        .ok_or_else(|| SfoError::DataOutOfRange {
+            key: key.to_string(),
+            start,
+            end,
+            len: data.len(),
+        })
 }
 
 #[cfg(test)]

@@ -157,7 +157,6 @@ pub(crate) fn assemble_elf_from_sections(
         segments,
     } = parse_inner_elf(data)?;
     let shdr_offset_in_self = read_be_u64(data, 0x40);
-    let e_phnum = segments.len();
 
     let mut elf_size: usize =
         checked_add_oob(ELF_HEADER_SIZE, phdrs.len(), "reconstructed ELF size")?;
@@ -167,29 +166,10 @@ pub(crate) fn assemble_elf_from_sections(
             elf_size = end;
         }
     }
-    let shdr_table_bytes = checked_mul_oob(e_shnum, ELF64_SHENT_SIZE, "SELF section headers")?;
-    // A null `e_shoff` with a non-zero `e_shnum` leaves the
-    // section-header table nowhere to land. The table is no part of
-    // the run image (see [`mask_non_semantic_elf_bytes`]), so the
-    // shape is dropped. `shdr_table` is `(destination, source)`.
-    let shdr_table = if shdr_offset_in_self != 0 && e_shnum > 0 && e_shoff != 0 {
-        let shdrs_out_of_range = || SceError::HeaderOffsetOutOfRange {
-            what: "SELF section headers",
-        };
-        let dst_start = usize_from_header(e_shoff).ok_or_else(shdrs_out_of_range)?;
-        let src_start = usize_from_header(shdr_offset_in_self).ok_or_else(shdrs_out_of_range)?;
-        let dst_end = checked_add_oob(dst_start, shdr_table_bytes, "SELF section headers")?;
-        let src_end = checked_add_oob(src_start, shdr_table_bytes, "SELF section headers")?;
-        if src_end > data.len() {
-            return Err(shdrs_out_of_range());
-        }
-        if dst_end > elf_size {
-            elf_size = dst_end;
-        }
-        Some((dst_start..dst_end, src_start..src_end))
-    } else {
-        None
-    };
+    let shdr_table = shdr_table_placement(data, e_shoff, e_shnum, shdr_offset_in_self)?;
+    if let Some(shdrs) = &shdr_table {
+        elf_size = elf_size.max(shdrs.dst.end);
+    }
 
     // `elf_size` is the maximum of file-derived `p_offset + p_filesz`
     // extents, so a corrupt program header can name an image far larger
@@ -206,6 +186,75 @@ pub(crate) fn assemble_elf_from_sections(
     // original value may differ from 0x40.
     elf[0x20..0x28].copy_from_slice(&0x40u64.to_be_bytes());
 
+    copy_phdr_sections(&mut elf, sections, &segments)?;
+
+    // Placed after the segment payloads, so a section-header table
+    // whose `e_shoff` falls inside a segment's
+    // `[p_offset, p_offset + p_filesz)` overwrites that part of the
+    // payload.
+    if let Some(ShdrPlacement { dst, src }) = shdr_table {
+        elf[dst].copy_from_slice(&data[src]);
+    }
+
+    let magic = u32::from_be_bytes([elf[0], elf[1], elf[2], elf[3]]);
+    if magic != ELF_MAGIC_U32 {
+        return Err(SceError::ReconstructedBadMagic { got: magic });
+    }
+
+    Ok(elf)
+}
+
+/// Where the section-header table goes in the reconstructed ELF, and
+/// where it comes from in the SELF.
+#[cfg(feature = "decrypt")]
+struct ShdrPlacement {
+    /// The table's bytes in the reconstructed ELF.
+    dst: Range<usize>,
+    /// The table's bytes in the SELF.
+    src: Range<usize>,
+}
+
+/// The section-header table's [`ShdrPlacement`].
+///
+/// A null `e_shoff` with a non-zero `e_shnum` leaves the table nowhere
+/// to land. The table is no part of the run image (see
+/// [`mask_non_semantic_elf_bytes`]), so the function drops the shape
+/// and returns `None`.
+#[cfg(feature = "decrypt")]
+fn shdr_table_placement(
+    data: &[u8],
+    e_shoff: u64,
+    e_shnum: usize,
+    shdr_offset_in_self: u64,
+) -> Result<Option<ShdrPlacement>, SceError> {
+    let shdr_table_bytes = checked_mul_oob(e_shnum, ELF64_SHENT_SIZE, "SELF section headers")?;
+    if shdr_offset_in_self == 0 || e_shnum == 0 || e_shoff == 0 {
+        return Ok(None);
+    }
+    let shdrs_out_of_range = || SceError::HeaderOffsetOutOfRange {
+        what: "SELF section headers",
+    };
+    let dst_start = usize_from_header(e_shoff).ok_or_else(shdrs_out_of_range)?;
+    let src_start = usize_from_header(shdr_offset_in_self).ok_or_else(shdrs_out_of_range)?;
+    let dst_end = checked_add_oob(dst_start, shdr_table_bytes, "SELF section headers")?;
+    let src_end = checked_add_oob(src_start, shdr_table_bytes, "SELF section headers")?;
+    if src_end > data.len() {
+        return Err(shdrs_out_of_range());
+    }
+    Ok(Some(ShdrPlacement {
+        dst: dst_start..dst_end,
+        src: src_start..src_end,
+    }))
+}
+
+/// Copy each PHDR-kind section to its segment's `p_offset` in `elf`.
+#[cfg(feature = "decrypt")]
+fn copy_phdr_sections(
+    elf: &mut [u8],
+    sections: &[(EncryptedSectionDescriptor, Vec<u8>)],
+    segments: &[(usize, usize)],
+) -> Result<(), SceError> {
+    let e_phnum = segments.len();
     for (sec, sec_data) in sections {
         if sec.section_kind != SCE_SECTION_KIND_PHDR {
             continue;
@@ -225,40 +274,18 @@ pub(crate) fn assemble_elf_from_sections(
                 expected: p_filesz,
             });
         }
-        let write_end =
-            p_offset
-                .checked_add(p_filesz)
-                .ok_or(SceError::SectionPastReconstructedElf {
-                    prog_idx,
-                    offset: p_offset,
-                    size: p_filesz,
-                    elf_size: elf.len(),
-                })?;
-        if write_end > elf.len() {
-            return Err(SceError::SectionPastReconstructedElf {
+        let write_end = p_offset
+            .checked_add(p_filesz)
+            .filter(|&end| end <= elf.len())
+            .ok_or(SceError::SectionPastReconstructedElf {
                 prog_idx,
                 offset: p_offset,
                 size: p_filesz,
                 elf_size: elf.len(),
-            });
-        }
+            })?;
         elf[p_offset..write_end].copy_from_slice(sec_data);
     }
-
-    // Placed after the segment payloads, so a section-header table
-    // whose `e_shoff` falls inside a segment's
-    // `[p_offset, p_offset + p_filesz)` overwrites that part of the
-    // payload.
-    if let Some((dst, src)) = shdr_table {
-        elf[dst].copy_from_slice(&data[src]);
-    }
-
-    let magic = u32::from_be_bytes([elf[0], elf[1], elf[2], elf[3]]);
-    if magic != ELF_MAGIC_U32 {
-        return Err(SceError::ReconstructedBadMagic { got: magic });
-    }
-
-    Ok(elf)
+    Ok(())
 }
 
 /// Zero `e_shoff`, `e_shnum`, and `e_shstrndx` so a reconstructed

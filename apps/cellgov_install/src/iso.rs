@@ -491,32 +491,66 @@ fn walk_directory(
     if depth > MAX_DEPTH {
         return Err(IsoError::DepthExceeded);
     }
+    let oob = || IsoError::ExtentOutOfBounds {
+        path: if prefix.is_empty() { "/" } else { prefix }.to_string(),
+        sector: dir_sector,
+        size: dir_size,
+        len: image.len(),
+    };
     let base = usize_from_u32(dir_sector)
         .checked_mul(SECTOR)
-        .ok_or_else(|| IsoError::ExtentOutOfBounds {
-            path: if prefix.is_empty() {
-                "/".to_string()
-            } else {
-                prefix.to_string()
-            },
-            sector: dir_sector,
-            size: dir_size,
-            len: image.len(),
-        })?;
+        .ok_or_else(oob)?;
     let end = base
         .checked_add(usize_from_u32(dir_size))
         .filter(|&e| e <= image.len())
-        .ok_or_else(|| IsoError::ExtentOutOfBounds {
-            path: if prefix.is_empty() {
-                "/".to_string()
-            } else {
-                prefix.to_string()
-            },
-            sector: dir_sector,
-            size: dir_size,
-            len: image.len(),
-        })?;
+        .ok_or_else(oob)?;
 
+    for rec in read_dir_records(image, base, end, ucs2, prefix)? {
+        let path = join_path(prefix, &rec.name);
+        if rec.is_dir {
+            if rec.extents.len() != 1 {
+                return Err(IsoError::MultiExtentDirectory { path });
+            }
+            out.push(IsoEntry {
+                path: path.clone(),
+                kind: IsoEntryKind::Directory,
+                extents: Vec::new(),
+            });
+            let (sector, size) = rec.extents[0];
+            let next_depth = depth.checked_add(1).ok_or(IsoError::DepthExceeded)?;
+            walk_directory(image, sector, size, ucs2, &path, out, next_depth)?;
+        } else {
+            // Validate every extent here so the entry's bounds are
+            // proven against this image before any consumer resolves it.
+            for &(start, size) in &rec.extents {
+                extent_range(start, size, image.len()).ok_or_else(|| {
+                    IsoError::ExtentOutOfBounds {
+                        path: path.clone(),
+                        sector: start,
+                        size,
+                        len: image.len(),
+                    }
+                })?;
+            }
+            out.push(IsoEntry {
+                path,
+                kind: IsoEntryKind::File,
+                extents: rec.extents,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The named records of the directory extent `[base, end)`, with each
+/// multi-extent file's continuations merged into its first record.
+fn read_dir_records(
+    image: &[u8],
+    base: usize,
+    end: usize,
+    ucs2: bool,
+    prefix: &str,
+) -> Result<Vec<DirRecord>, IsoError> {
     let mut records: Vec<DirRecord> = Vec::new();
     let mut pos = base;
     while pos < end {
@@ -558,42 +592,7 @@ fn walk_directory(
         }
         records.push(rec);
     }
-
-    for rec in records {
-        let path = join_path(prefix, &rec.name);
-        if rec.is_dir {
-            if rec.extents.len() != 1 {
-                return Err(IsoError::MultiExtentDirectory { path });
-            }
-            out.push(IsoEntry {
-                path: path.clone(),
-                kind: IsoEntryKind::Directory,
-                extents: Vec::new(),
-            });
-            let (sector, size) = rec.extents[0];
-            let next_depth = depth.checked_add(1).ok_or(IsoError::DepthExceeded)?;
-            walk_directory(image, sector, size, ucs2, &path, out, next_depth)?;
-        } else {
-            // Validate every extent here so the entry's bounds are
-            // proven against this image before any consumer resolves it.
-            for &(start, size) in &rec.extents {
-                extent_range(start, size, image.len()).ok_or_else(|| {
-                    IsoError::ExtentOutOfBounds {
-                        path: path.clone(),
-                        sector: start,
-                        size,
-                        len: image.len(),
-                    }
-                })?;
-            }
-            out.push(IsoEntry {
-                path,
-                kind: IsoEntryKind::File,
-                extents: rec.extents,
-            });
-        }
-    }
-    Ok(())
+    Ok(records)
 }
 
 #[cfg(test)]
