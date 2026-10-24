@@ -4,7 +4,8 @@
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_exec::{ExecutionStepResult, UnitStatus, YieldReason};
+use cellgov_exec::{ExecutionStepResult, StallWake, UnitStatus, YieldReason};
+use cellgov_mem::ByteRange;
 use cellgov_trace::HostWriter;
 
 use crate::commit::{BlockReason, CommitContext, CommitError, CommitOutcome};
@@ -88,32 +89,7 @@ impl Runtime {
         effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
         self.step_woke_others = false;
-        // Trivial-step fast path under FaultDriven. Epoch still advances
-        // to preserve the atomic-batch boundary; trace is off in this mode.
-        // The RSX half of the predicate must be the exact negation of the
-        // slow-path advance trigger (`get != put || !call_stack.is_empty()`),
-        // or a mid-CALL state with `get == put` would skip the drain.
-        if self.mode == crate::runtime::types::RuntimeMode::FaultDriven
-            && effects.is_empty()
-            && result.fault.is_none()
-            && result.yield_reason.allows_trivial_fast_path()
-            && self.dma_queue.is_empty()
-            && self.timer_wakes.is_empty()
-            && self.pending_rsx_effects.is_empty()
-            && self.rsx_cursor.get() == self.rsx_cursor.put()
-            && self.rsx_call_stack.is_empty()
-            && !self.rsx_flip.pending()
-            // A Raw SPU's step changes the state its window projects.
-            && !self.lv2_host.raw_spu_units().any(|(_, raw)| raw == source)
-            // A mailbox write emits no effect. LV2 serves the word an SPU
-            // thread's step left in its interrupt mailbox only on the slow
-            // path.
-            && self
-                .registry
-                .get(source)
-                .and_then(|unit| unit.out_mailboxes())
-                .is_none_or(|mailboxes| mailboxes.out_intr_mbox.is_none())
-        {
+        if self.trivial_commit_eligible(source, result, effects) {
             self.epoch.advance();
             // This path fires no completion, so the list this commit
             // publishes is empty.
@@ -130,35 +106,9 @@ impl Runtime {
             return Ok(CommitOutcome::default());
         }
 
-        // Prepend RSX effects from the previous commit's advance pass.
-        // The advance pass reads space 0 (`Runtime::memory`), so its
-        // deferred effects target space-0 addresses and may only join
-        // a space-0 batch; a child-space batch leaves them queued for
-        // the next space-0 commit. Allocates only when prepending.
-        //
-        // A faulting batch is no carrier either. Hard rule 4 discards
-        // the faulting unit's own effects, and the advance pass's are
-        // not that unit's: which batch carries them is a scheduling
-        // accident, so riding on one that faults would lose guest work
-        // the pipeline had already accepted. They stay queued.
-        let mut combined_storage: Option<Vec<Effect>> = None;
-        let deferred_rsx_effect_count: usize;
-        let effects: &[Effect] = if self.pending_rsx_effects.is_empty()
-            || source_space != crate::runtime::spaces::AddressSpaceId::BOOT
-            || result.yield_reason == YieldReason::Fault
-        {
-            deferred_rsx_effect_count = 0;
-            effects
-        } else {
-            deferred_rsx_effect_count = self.pending_rsx_effects.len();
-            combined_storage = Some(
-                self.pending_rsx_effects
-                    .drain(..)
-                    .chain(effects.iter().cloned())
-                    .collect(),
-            );
-            combined_storage.as_deref().expect("combined RSX effects")
-        };
+        let (combined_storage, deferred_rsx_effect_count) =
+            self.take_deferred_rsx_effects(source_space, result, effects);
+        let effects: &[Effect] = combined_storage.as_deref().unwrap_or(effects);
 
         // Snapshot so the post-apply DONE transition fires only for flips
         // pending at entry; a flip queued in this batch must be observable
@@ -192,12 +142,8 @@ impl Runtime {
         };
         let mut outcome = self.commit_pipeline.process(result, effects, &mut ctx);
         if outcome.is_err() && deferred_rsx_effect_count != 0 {
-            self.pending_rsx_effects.extend(
-                combined_storage.as_ref().expect("combined RSX effects")
-                    [..deferred_rsx_effect_count]
-                    .iter()
-                    .cloned(),
-            );
+            self.pending_rsx_effects
+                .extend(effects[..deferred_rsx_effect_count].iter().cloned());
         }
 
         // A fault-closed batch returns Ok with `fault_discarded` set
@@ -216,43 +162,7 @@ impl Runtime {
             if let Ok(ref mut o) = outcome {
                 o.reservations_cleared += fanout_cleared;
             }
-        }
-
-        if batch_applied {
-            let mut invalidation_ranges = Vec::new();
-            for effect in effects {
-                if let cellgov_effects::Effect::SharedWriteIntent { range, .. } = effect {
-                    // The fanout above replicated shared-view writes
-                    // into sibling views at translated addresses, so
-                    // predecoded code there is exactly as stale as at
-                    // the source range.
-                    let alias_ranges = self.shared_alias_ranges(source, *range);
-                    invalidation_ranges.push(*range);
-                    invalidation_ranges.extend(alias_ranges);
-                }
-            }
-            invalidation_ranges.sort_by_key(|range| range.start().raw());
-            let mut merged = Vec::with_capacity(invalidation_ranges.len());
-            for range in invalidation_ranges {
-                let can_merge = merged.last().is_some_and(|prior: &cellgov_mem::ByteRange| {
-                    prior.end().raw() >= range.start().raw()
-                });
-                if can_merge {
-                    let prior = merged.pop().expect("range checked above");
-                    let end = prior.end().raw().max(range.end().raw());
-                    let combined =
-                        cellgov_mem::ByteRange::new(prior.start(), end - prior.start().raw())
-                            .expect("merged committed ranges remain addressable");
-                    merged.push(combined);
-                } else {
-                    merged.push(range);
-                }
-            }
-            for unit in self.registry.code_caches_mut() {
-                for range in &merged {
-                    unit.invalidate_code(range.start().raw(), range.length());
-                }
-            }
+            self.invalidate_committed_code(source, effects);
         }
 
         // The RSX control registers live in space 0; a child-space
@@ -297,66 +207,9 @@ impl Runtime {
                 o.blocked_units.push((source, BlockReason::DmaWait));
             }
         }
-        // A channel stall parks the same way. The unit names the event
-        // that ends the park, and the trace keeps the block reasons the
-        // mailbox and tag-status parks have always had.
+        // A channel stall parks the same way.
         if result.yield_reason == YieldReason::ChannelStall && batch_applied {
-            let reason = match self
-                .registry
-                .get(source)
-                .and_then(|unit| unit.channel_stall())
-            {
-                Some(stall) => match stall.wake {
-                    cellgov_exec::StallWake::MailboxDelivery => BlockReason::MailboxEmpty,
-                    cellgov_exec::StallWake::DmaCompletion
-                    | cellgov_exec::StallWake::CommandQueueSlot
-                    | cellgov_exec::StallWake::MultisourceSync => BlockReason::DmaWait,
-                    cellgov_exec::StallWake::OutboundMailboxRead => {
-                        BlockReason::OutboundMailboxFull
-                    }
-                    cellgov_exec::StallWake::SignalWrite(_) => BlockReason::SignalEmpty,
-                    cellgov_exec::StallWake::AtomicCommandCompletion => {
-                        BlockReason::AtomicStatusEmpty
-                    }
-                    cellgov_exec::StallWake::Event => BlockReason::EventWait,
-                },
-                None => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.channel_stall_unnamed",
-                        format_args!(
-                            "{source:?} yielded ChannelStall without naming the channel; \
-                             it parks until any waker reaches it"
-                        ),
-                    );
-                    BlockReason::MailboxEmpty
-                }
-            };
-            self.registry
-                .set_status_override(source, UnitStatus::Blocked);
-            if let Ok(ref mut o) = outcome {
-                o.blocked_units.push((source, reason));
-            }
-            // An event the unit's own clock raises has no producer to
-            // end the park, so a deadline does.
-            if let Some(deadline) = self
-                .registry
-                .get(source)
-                .and_then(|unit| unit.event_deadline())
-            {
-                let displaced =
-                    self.timer_wakes
-                        .insert(deadline, source, crate::TimerWakeKind::UnitEvent);
-                if let Some(prior) = displaced {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.commit_step_unit_event_timer_wake_displaced",
-                        format_args!(
-                            "{source:?} parked on its own clock's event with {prior:?} still \
-                             live, so the wake path that resolved its previous wait failed to \
-                             cancel the deadline"
-                        ),
-                    );
-                }
-            }
+            self.park_channel_stall(source, &mut outcome);
         }
         self.epoch.advance();
         // A unit that this commit's dispatch woke, or whose reservation
@@ -405,87 +258,13 @@ impl Runtime {
             .extend(due.iter().map(|(c, payload)| (*c, payload.is_some())));
         self.project_raw_spu_windows(source, stopped.is_some(), !due.is_empty());
 
-        // RSX FIFO advance: after unit effects commit and DMA completions
-        // fire, before state-hash checkpoints emit. Emitted effects land
-        // in `pending_rsx_effects` and commit with the next batch
-        // (atomic-batch contract); cursor mutations land in THIS batch's
-        // state-hash checkpoint.
-        //
-        // Bring-up GET catch-up: reconcile `cursor.get` with the title's
-        // MMIO GET before invoking the walker, so the walker starts from
-        // the read position libgcm staged at FIFO bring-up. Ownership
-        // rationale on [`Self::mirror_rsx_control_register_writes`].
-        if self.rsx_consume_fifo {
-            self.catch_up_cursor_get_from_mmio();
-        }
-        if self.rsx_cursor.get() != self.rsx_cursor.put() || !self.rsx_call_stack.is_empty() {
-            // Re-resolved rather than reusing the value the commit
-            // pipeline ran under: a `sys_rsx_context_allocate` in this
-            // same batch dispatched above, and the drain that follows
-            // it is already in the base-relative regime.
-            let advance_label_base = self.resolved_rsx_label_base();
-            let rsx_ctx = self.lv2_host.sys_rsx_context();
-            let iomap = crate::rsx::IoMap {
-                ea: rsx_ctx.iomap_ea,
-                io: rsx_ctx.iomap_io,
-                size: rsx_ctx.iomap_size,
-            };
-            let advance_outcome = crate::rsx::advance::rsx_advance(
-                &self.memory,
-                &iomap,
-                &mut self.rsx_cursor,
-                &mut self.rsx_sem_offset,
-                advance_label_base,
-                &mut self.rsx_call_stack,
-                &self.rsx_methods,
-                &mut self.pending_rsx_effects,
-                self.time,
-            );
-            self.rsx_set_reference_dispatches = self
-                .rsx_set_reference_dispatches
-                .wrapping_add(u64::from(advance_outcome.set_references_dispatched));
-
-            // Gated on rsx_consume_fifo so reserved-region titles keep
-            // their MMIO slots untouched when the consumer is off.
-            if self.rsx_consume_fifo && advance_outcome.reached_put() {
-                self.mirror_rsx_cursor_to_mmio();
-                self.assert_ref_addr_mirrors_cursor();
-            }
-        }
+        self.run_rsx_advance_pass();
 
         if flip_pending_at_entry && self.rsx_flip.complete_pending_flip() {
             self.publish_flip_done_to_driver_info();
         }
-
-        // Flip-status memory mirror. `rsx_flip` is the authoritative
-        // model; the mirror at `RSX_FLIP_STATUS_MIRROR_ADDR` is a
-        // best-effort projection for titles that poll the address.
-        // On failure the projection is dropped (typed invariant break)
-        // but the model advance stands.
         if self.rsx_mirror_writes {
-            let flip_status_now = self.rsx_flip.status();
-            if flip_status_now != flip_status_at_entry {
-                let addr = crate::rsx::RSX_FLIP_STATUS_MIRROR_ADDR;
-                let range = cellgov_mem::ByteRange::contiguous_u32(addr, 4);
-                let value = flip_status_now as u32;
-                if let Err(err) = self.host_write(
-                    HostWriter::RsxMirror,
-                    AddressSpaceId::BOOT,
-                    range,
-                    &value.to_be_bytes(),
-                    None,
-                ) {
-                    self.lv2_host.log_invariant_break(
-                        "dispatch.rsx_flip_status_mirror_failed",
-                        format_args!(
-                            "RSX flip-status mirror write failed at \
-                             addr=0x{addr:016x} length=4: {err}; \
-                             rsx_flip model advance retained, guest-visible \
-                             mirror byte stale",
-                        ),
-                    );
-                }
-            }
+            self.mirror_flip_status(flip_status_at_entry);
         }
 
         // Every guest write of this commit has landed, and any of them
@@ -513,6 +292,248 @@ impl Runtime {
             .notify_yielded(source, result.yield_reason, self.step_woke_others, holds_cs);
 
         outcome
+    }
+
+    /// Trivial-step fast path under FaultDriven: the step left nothing
+    /// for the slow path to commit, fire or advance. Trace is off in
+    /// this mode.
+    ///
+    /// The RSX half of the predicate must be the exact negation of the
+    /// slow-path advance trigger (`get != put || !call_stack.is_empty()`),
+    /// or a mid-CALL state with `get == put` would skip the drain.
+    #[inline]
+    fn trivial_commit_eligible(
+        &self,
+        source: UnitId,
+        result: &ExecutionStepResult,
+        effects: &[Effect],
+    ) -> bool {
+        self.mode == crate::runtime::types::RuntimeMode::FaultDriven
+            && effects.is_empty()
+            && result.fault.is_none()
+            && result.yield_reason.allows_trivial_fast_path()
+            && self.dma_queue.is_empty()
+            && self.timer_wakes.is_empty()
+            && self.pending_rsx_effects.is_empty()
+            && self.rsx_cursor.get() == self.rsx_cursor.put()
+            && self.rsx_call_stack.is_empty()
+            && !self.rsx_flip.pending()
+            // A Raw SPU's step changes the state its window projects.
+            && !self.lv2_host.raw_spu_units().any(|(_, raw)| raw == source)
+            // A mailbox write emits no effect. LV2 serves the word an SPU
+            // thread's step left in its interrupt mailbox only on the slow
+            // path.
+            && self
+                .registry
+                .get(source)
+                .and_then(|unit| unit.out_mailboxes())
+                .is_none_or(|mailboxes| mailboxes.out_intr_mbox.is_none())
+    }
+
+    /// Prepend the RSX effects that the previous commit's advance pass
+    /// deferred to this batch. Returns the combined batch, or `None`
+    /// when the batch carries no deferred effects, and the count of
+    /// deferred effects at its front.
+    ///
+    /// The advance pass reads space 0 (`Runtime::memory`), so its
+    /// deferred effects target space-0 addresses and may only join
+    /// a space-0 batch; a child-space batch leaves them queued for
+    /// the next space-0 commit. Allocates only when prepending.
+    ///
+    /// A faulting batch is no carrier either. Hard rule 4 discards
+    /// the faulting unit's own effects, and the advance pass's are
+    /// not that unit's: which batch carries them is a scheduling
+    /// accident, so riding on one that faults would lose guest work
+    /// the pipeline had already accepted. They stay queued.
+    fn take_deferred_rsx_effects(
+        &mut self,
+        source_space: AddressSpaceId,
+        result: &ExecutionStepResult,
+        effects: &[Effect],
+    ) -> (Option<Vec<Effect>>, usize) {
+        if self.pending_rsx_effects.is_empty()
+            || source_space != AddressSpaceId::BOOT
+            || result.yield_reason == YieldReason::Fault
+        {
+            return (None, 0);
+        }
+        let count = self.pending_rsx_effects.len();
+        let combined = self
+            .pending_rsx_effects
+            .drain(..)
+            .chain(effects.iter().cloned())
+            .collect();
+        (Some(combined), count)
+    }
+
+    /// Drop every unit's predecoded code over the ranges `source`'s
+    /// batch wrote, and over the sibling-view ranges the fanout
+    /// replicated them to: predecoded code there is exactly as stale as
+    /// at the source range.
+    fn invalidate_committed_code(&mut self, source: UnitId, effects: &[Effect]) {
+        let mut invalidation_ranges = Vec::new();
+        for effect in effects {
+            if let Effect::SharedWriteIntent { range, .. } = effect {
+                let alias_ranges = self.shared_alias_ranges(source, *range);
+                invalidation_ranges.push(*range);
+                invalidation_ranges.extend(alias_ranges);
+            }
+        }
+        let merged = merge_ranges(invalidation_ranges);
+        for unit in self.registry.code_caches_mut() {
+            for range in &merged {
+                unit.invalidate_code(range.start().raw(), range.length());
+            }
+        }
+    }
+
+    /// Return the block reason a channel-stalled unit parks under. The unit names
+    /// the event that ends the park, and the trace keeps the block
+    /// reasons the mailbox and tag-status parks have always had.
+    fn stall_block_reason(&mut self, source: UnitId) -> BlockReason {
+        let Some(stall) = self
+            .registry
+            .get(source)
+            .and_then(|unit| unit.channel_stall())
+        else {
+            self.lv2_host.log_invariant_break(
+                "runtime.channel_stall_unnamed",
+                format_args!(
+                    "{source:?} yielded ChannelStall without naming the channel; \
+                     it parks until any waker reaches it"
+                ),
+            );
+            return BlockReason::MailboxEmpty;
+        };
+        match stall.wake {
+            StallWake::MailboxDelivery => BlockReason::MailboxEmpty,
+            StallWake::DmaCompletion | StallWake::CommandQueueSlot | StallWake::MultisourceSync => {
+                BlockReason::DmaWait
+            }
+            StallWake::OutboundMailboxRead => BlockReason::OutboundMailboxFull,
+            StallWake::SignalWrite(_) => BlockReason::SignalEmpty,
+            StallWake::AtomicCommandCompletion => BlockReason::AtomicStatusEmpty,
+            StallWake::Event => BlockReason::EventWait,
+        }
+    }
+
+    /// Park a channel-stalled unit and record its block reason. An
+    /// event the unit's own clock raises has no producer to end the
+    /// park, so a deadline does.
+    fn park_channel_stall(
+        &mut self,
+        source: UnitId,
+        outcome: &mut Result<CommitOutcome, CommitError>,
+    ) {
+        let reason = self.stall_block_reason(source);
+        self.registry
+            .set_status_override(source, UnitStatus::Blocked);
+        if let Ok(o) = outcome {
+            o.blocked_units.push((source, reason));
+        }
+        let Some(deadline) = self
+            .registry
+            .get(source)
+            .and_then(|unit| unit.event_deadline())
+        else {
+            return;
+        };
+        let displaced = self
+            .timer_wakes
+            .insert(deadline, source, crate::TimerWakeKind::UnitEvent);
+        if let Some(prior) = displaced {
+            self.lv2_host.log_invariant_break(
+                "runtime.commit_step_unit_event_timer_wake_displaced",
+                format_args!(
+                    "{source:?} parked on its own clock's event with {prior:?} still \
+                     live, so the wake path that resolved its previous wait failed to \
+                     cancel the deadline"
+                ),
+            );
+        }
+    }
+
+    /// Advance the RSX FIFO after unit effects commit and DMA completions
+    /// fire, and before state-hash checkpoints emit. Emitted effects land
+    /// in `pending_rsx_effects` and commit with the next batch
+    /// (atomic-batch contract); cursor mutations land in THIS batch's
+    /// state-hash checkpoint.
+    ///
+    /// Before the walker runs, the bring-up GET catch-up reconciles
+    /// `cursor.get` with the title's MMIO GET, so the walker starts from
+    /// the read position libgcm staged at FIFO bring-up. Ownership
+    /// rationale on [`Self::mirror_rsx_control_register_writes`].
+    fn run_rsx_advance_pass(&mut self) {
+        if self.rsx_consume_fifo {
+            self.catch_up_cursor_get_from_mmio();
+        }
+        if self.rsx_cursor.get() == self.rsx_cursor.put() && self.rsx_call_stack.is_empty() {
+            return;
+        }
+        // Re-resolved rather than reusing the value the commit
+        // pipeline ran under: a `sys_rsx_context_allocate` in this
+        // same batch dispatched above, and the drain that follows
+        // it is already in the base-relative regime.
+        let advance_label_base = self.resolved_rsx_label_base();
+        let rsx_ctx = self.lv2_host.sys_rsx_context();
+        let iomap = crate::rsx::IoMap {
+            ea: rsx_ctx.iomap_ea,
+            io: rsx_ctx.iomap_io,
+            size: rsx_ctx.iomap_size,
+        };
+        let advance_outcome = crate::rsx::advance::rsx_advance(
+            &self.memory,
+            &iomap,
+            &mut self.rsx_cursor,
+            &mut self.rsx_sem_offset,
+            advance_label_base,
+            &mut self.rsx_call_stack,
+            &self.rsx_methods,
+            &mut self.pending_rsx_effects,
+            self.time,
+        );
+        self.rsx_set_reference_dispatches = self
+            .rsx_set_reference_dispatches
+            .wrapping_add(u64::from(advance_outcome.set_references_dispatched));
+
+        // Gated on rsx_consume_fifo so reserved-region titles keep
+        // their MMIO slots untouched when the consumer is off.
+        if self.rsx_consume_fifo && advance_outcome.reached_put() {
+            self.mirror_rsx_cursor_to_mmio();
+            self.assert_ref_addr_mirrors_cursor();
+        }
+    }
+
+    /// Project a changed flip status into its guest-memory mirror.
+    /// `rsx_flip` is the authoritative model; the mirror at
+    /// `RSX_FLIP_STATUS_MIRROR_ADDR` is a best-effort projection for
+    /// titles that poll the address. A failed write drops the
+    /// projection (typed invariant break), and the model advance stands.
+    fn mirror_flip_status(&mut self, status_at_entry: u8) {
+        let flip_status_now = self.rsx_flip.status();
+        if flip_status_now == status_at_entry {
+            return;
+        }
+        let addr = crate::rsx::RSX_FLIP_STATUS_MIRROR_ADDR;
+        let range = cellgov_mem::ByteRange::contiguous_u32(addr, 4);
+        let value = flip_status_now as u32;
+        if let Err(err) = self.host_write(
+            HostWriter::RsxMirror,
+            AddressSpaceId::BOOT,
+            range,
+            &value.to_be_bytes(),
+            None,
+        ) {
+            self.lv2_host.log_invariant_break(
+                "dispatch.rsx_flip_status_mirror_failed",
+                format_args!(
+                    "RSX flip-status mirror write failed at \
+                     addr=0x{addr:016x} length=4: {err}; \
+                     rsx_flip model advance retained, guest-visible \
+                     mirror byte stale",
+                ),
+            );
+        }
     }
 
     /// Set the completed-flip bit in the flip head's word of the
@@ -730,15 +751,18 @@ impl Runtime {
             for (slot_addr, slot) in slots.iter() {
                 let slot_start = *slot_addr as u64;
                 let slot_end = slot_start + 4;
-                if write_start <= slot_start && write_end >= slot_end {
-                    let slot_range = cellgov_mem::ByteRange::contiguous_u32(*slot_addr, 4);
-                    if let Some(bytes) = self.memory.read(slot_range) {
-                        let value = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                        match slot {
-                            Slot::Put => self.rsx_cursor.set_put(value),
-                            Slot::Ref => self.rsx_cursor.set_reference(value),
-                        }
-                    }
+                let covers = write_start <= slot_start && write_end >= slot_end;
+                if !covers {
+                    continue;
+                }
+                let slot_range = ByteRange::contiguous_u32(*slot_addr, 4);
+                let Some(bytes) = self.memory.read(slot_range) else {
+                    continue;
+                };
+                let value = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                match slot {
+                    Slot::Put => self.rsx_cursor.set_put(value),
+                    Slot::Ref => self.rsx_cursor.set_reference(value),
                 }
             }
         }
@@ -753,6 +777,27 @@ impl Runtime {
     pub(crate) fn test_only_catch_up_cursor_get_from_mmio(&mut self) {
         self.catch_up_cursor_get_from_mmio();
     }
+}
+
+/// Sort `ranges` by start and merge each range that overlaps or touches
+/// the one before it.
+fn merge_ranges(mut ranges: Vec<ByteRange>) -> Vec<ByteRange> {
+    ranges.sort_by_key(|range| range.start().raw());
+    let mut merged: Vec<ByteRange> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        let Some(prior) = merged.last_mut() else {
+            merged.push(range);
+            continue;
+        };
+        if prior.end().raw() < range.start().raw() {
+            merged.push(range);
+            continue;
+        }
+        let end = prior.end().raw().max(range.end().raw());
+        *prior = ByteRange::new(prior.start(), end - prior.start().raw())
+            .expect("merged committed ranges remain addressable");
+    }
+    merged
 }
 
 #[cfg(test)]
