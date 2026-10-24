@@ -28,6 +28,9 @@ impl Extra {
     }
 }
 
+/// The line whose untracked keys carry `ordinal=hits@first_hit`.
+const UNSUPPORTED_SYSCALL_LINE: &str = "BENCH_UNSUPPORTED_SYSCALL_WITNESS:";
+
 /// One `BENCH_*` line: `(prefix, tracked (key, witness) pairs, extra keys)`.
 type LineSpec = (&'static str, &'static [(&'static str, &'static str)], Extra);
 
@@ -143,7 +146,7 @@ const LINE_TABLE: &[LineSpec] = &[
     ),
     (
         // The tail is the per-syscall inventory, `<number>=<hits>`.
-        "BENCH_UNSUPPORTED_SYSCALL_WITNESS:",
+        UNSUPPORTED_SYSCALL_LINE,
         &[("distinct", "unsupported_syscalls_distinct")],
         Extra::IntegerKeys,
     ),
@@ -275,6 +278,16 @@ pub struct WitnessParseError {
     pub reason: String,
 }
 
+impl WitnessParseError {
+    fn new(line_prefix: &str, token: &str, reason: impl Into<String>) -> Self {
+        Self {
+            line_prefix: line_prefix.to_string(),
+            token: token.to_string(),
+            reason: reason.into(),
+        }
+    }
+}
+
 /// Everything one boot's stderr said through its witness lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedWitnesses {
@@ -324,77 +337,18 @@ pub fn parse_witness_lines(stderr: &str) -> Result<ParsedWitnesses, Vec<WitnessP
             continue;
         };
         if !out.seen_lines.insert(prefix) {
-            errors.push(WitnessParseError {
-                line_prefix: prefix.to_string(),
-                token: String::new(),
-                reason: "line emitted more than once; a duplicate silently \
-                         overwriting the first would hide which boot the \
-                         values came from"
-                    .to_string(),
-            });
+            errors.push(WitnessParseError::new(
+                prefix,
+                "",
+                "line emitted more than once; a duplicate silently \
+                 overwriting the first would hide which boot the \
+                 values came from",
+            ));
             continue;
         }
         for token in line[prefix.len()..].split_whitespace() {
-            let Some((key, raw)) = token.split_once('=') else {
-                errors.push(WitnessParseError {
-                    line_prefix: prefix.to_string(),
-                    token: token.to_string(),
-                    reason: "expected name=value".to_string(),
-                });
-                continue;
-            };
-            let Some((_, witness)) = fields.iter().find(|(k, _)| *k == key) else {
-                if prefix == "BENCH_UNSUPPORTED_SYSCALL_WITNESS:" {
-                    let Some((hits, first_hit)) = raw.split_once('@') else {
-                        if key.parse::<u64>().is_ok() && raw.parse::<u64>().is_ok() {
-                            continue;
-                        }
-                        errors.push(WitnessParseError {
-                            line_prefix: prefix.to_string(),
-                            token: token.to_string(),
-                            reason: "expected hits@first_hit".to_string(),
-                        });
-                        continue;
-                    };
-                    match (key.parse(), hits.parse(), first_hit.parse()) {
-                        (Ok(ordinal), Ok(hits), Ok(first_hit)) => {
-                            out.unsupported_syscalls
-                                .insert(ordinal, UnsupportedSyscallWitness { hits, first_hit });
-                        }
-                        _ => errors.push(WitnessParseError {
-                            line_prefix: prefix.to_string(),
-                            token: token.to_string(),
-                            reason: "expected ordinal=hits@first_hit".to_string(),
-                        }),
-                    }
-                    continue;
-                }
-                if !extra.admits(key) {
-                    errors.push(WitnessParseError {
-                        line_prefix: prefix.to_string(),
-                        token: token.to_string(),
-                        reason: format!(
-                            "key {key:?} is neither tracked nor admitted as extra; \
-                             if the emitter grew a field, add it to the line table"
-                        ),
-                    });
-                }
-                continue;
-            };
-            let value = match raw {
-                "true" => Some(1),
-                "false" => Some(0),
-                _ => raw.parse::<u64>().ok(),
-            };
-            match value {
-                Some(v) => {
-                    out.values.insert((*witness).to_string(), v);
-                }
-                None => errors.push(WitnessParseError {
-                    line_prefix: prefix.to_string(),
-                    token: token.to_string(),
-                    reason: format!("value {raw:?} is neither a u64 nor a bool"),
-                }),
+            if let Err(error) = parse_token(prefix, fields, extra, token, &mut out) {
+                errors.push(error);
             }
         }
     }
@@ -403,6 +357,79 @@ pub fn parse_witness_lines(stderr: &str) -> Result<ParsedWitnesses, Vec<WitnessP
         Ok(out)
     } else {
         Err(errors)
+    }
+}
+
+/// Record one `name=value` token of the `prefix` line in `out`.
+fn parse_token(
+    prefix: &'static str,
+    fields: &[(&str, &str)],
+    extra: Extra,
+    token: &str,
+    out: &mut ParsedWitnesses,
+) -> Result<(), WitnessParseError> {
+    let Some((key, raw)) = token.split_once('=') else {
+        return Err(WitnessParseError::new(prefix, token, "expected name=value"));
+    };
+    let Some((_, witness)) = fields.iter().find(|(k, _)| *k == key) else {
+        if prefix == UNSUPPORTED_SYSCALL_LINE {
+            let parsed = parse_unsupported_syscall_token(key, raw)
+                .map_err(|reason| WitnessParseError::new(prefix, token, reason))?;
+            if let Some((ordinal, witness)) = parsed {
+                out.unsupported_syscalls.insert(ordinal, witness);
+            }
+            return Ok(());
+        }
+        if !extra.admits(key) {
+            return Err(WitnessParseError::new(
+                prefix,
+                token,
+                format!(
+                    "key {key:?} is neither tracked nor admitted as extra; \
+                     if the emitter grew a field, add it to the line table"
+                ),
+            ));
+        }
+        return Ok(());
+    };
+    let Some(value) = parse_witness_value(raw) else {
+        return Err(WitnessParseError::new(
+            prefix,
+            token,
+            format!("value {raw:?} is neither a u64 nor a bool"),
+        ));
+    };
+    out.values.insert((*witness).to_string(), value);
+    Ok(())
+}
+
+/// One `ordinal=hits@first_hit` inventory token; `Ok(None)` is a bare
+/// `n=n` pair, which carries no first hit, so the caller records nothing.
+fn parse_unsupported_syscall_token(
+    key: &str,
+    raw: &str,
+) -> Result<Option<(u64, UnsupportedSyscallWitness)>, &'static str> {
+    let Some((hits, first_hit)) = raw.split_once('@') else {
+        if key.parse::<u64>().is_ok() && raw.parse::<u64>().is_ok() {
+            return Ok(None);
+        }
+        return Err("expected hits@first_hit");
+    };
+    match (key.parse(), hits.parse(), first_hit.parse()) {
+        (Ok(ordinal), Ok(hits), Ok(first_hit)) => Ok(Some((
+            ordinal,
+            UnsupportedSyscallWitness { hits, first_hit },
+        ))),
+        _ => Err("expected ordinal=hits@first_hit"),
+    }
+}
+
+/// A witness value: `true` and `false` as 1 and 0, else a `u64`.
+fn parse_witness_value(raw: &str) -> Option<u64> {
+    match raw {
+        "true" => Some(1),
+        "false" => Some(0),
+        _ => raw.parse::<u64>().ok(),
     }
 }
 
