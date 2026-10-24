@@ -121,6 +121,23 @@ pub struct PrxRelocation {
     pub addend: i64,
 }
 
+impl PrxRelocation {
+    /// PT_LOAD index the patch lands in: the low byte of `sym`.
+    ///
+    /// PS3 PRX RELA r_sym packs target / value PT_LOAD indices in the
+    /// low two bytes. The format gives bits 16:31 no meaning, and the
+    /// loader ignores them.
+    pub fn target_segment(&self) -> usize {
+        (self.sym & 0xFF) as usize
+    }
+
+    /// PT_LOAD index whose address the value adds: the second byte of
+    /// `sym`, or `PRX_RELOC_NO_VALUE_SEGMENT` for none.
+    pub fn value_segment(&self) -> u32 {
+        (self.sym >> 8) & 0xFF
+    }
+}
+
 /// Failure mode while parsing a decrypted PRX.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PrxParseError {

@@ -281,8 +281,8 @@ fn check_relocations_addressable(parsed: &crate::sprx::ParsedPrx) -> Result<(), 
     // vaddr but holds no bytes.
     let with_content = [parsed.text.index, parsed.data.index];
     for r in &parsed.relocations {
-        let target_seg = (r.sym & 0xFF) as usize;
-        let value_seg = (r.sym >> 8) & 0xFF;
+        let target_seg = r.target_segment();
+        let value_seg = r.value_segment();
         if value_seg == cellgov_ps3_abi::format::elf::PRX_RELOC_NO_VALUE_SEGMENT {
             return Err(PrxLoaderError::RelocWithoutValueSegment {
                 module: parsed.module_id,

@@ -528,166 +528,16 @@ fn apply_relocations(
 ) -> Result<usize, PrxLoadError> {
     let mut staged_ranges: Vec<cellgov_mem::ByteRange> = Vec::with_capacity(relocs.len());
     for r in relocs {
-        // PS3 PRX RELA r_sym packs target / value PT_LOAD indices
-        // in the low two bytes; bits 16:31 are unspecified and
-        // ignored.
-        let target_seg = (r.sym & 0xFF) as usize;
-        let value_seg = (r.sym >> 8) & 0xFF;
-
-        if value_seg == PRX_RELOC_NO_VALUE_SEGMENT {
-            return Err(PrxLoadError::RelocWithoutValueSegment {
-                rtype: r.rtype,
-                offset: r.offset,
-            });
-        }
-        let Some(target) = segments.get(target_seg) else {
-            return Err(PrxLoadError::RelocSegmentOutOfRange {
-                sym: r.sym,
-                seg: target_seg,
-            });
-        };
-        let Some(value) = segments.get(value_seg as usize) else {
-            return Err(PrxLoadError::RelocSegmentOutOfRange {
-                sym: r.sym,
-                seg: value_seg as usize,
-            });
-        };
-        // A zero-sized PT_LOAD holds nothing to patch.
-        let Some(target_content) = target.content else {
-            return Err(PrxLoadError::RelocOffsetOutOfSegment {
-                rtype: r.rtype,
-                offset: r.offset,
-                seg_size: 0,
-            });
-        };
-        // The loader never allocates a zero-sized PT_LOAD, so its
-        // declared vaddr is not an address the addend can offset.
-        if value.content.is_none() {
-            return Err(PrxLoadError::RelocEmptyValueSegment {
-                sym: r.sym,
-                seg: value_seg as usize,
-            });
-        }
-        let target_base = target.vaddr;
-        let value_base = value.vaddr;
-        let target_seg_size = target_content.memsz;
-
+        let (target_base, target_content, value_base) = resolve_reloc_segments(r, segments)?;
         // Reject unsupported types up front so the bound check has
         // a known write width.
         let write_size =
             reloc_write_size(r.rtype).ok_or(PrxLoadError::UnsupportedReloc(r.rtype))?;
-
-        // [PPC-Book1 p:11 s:1.7] PowerPC instructions are 4-byte
-        // aligned; ADDR16 halfwords and ADDR64 pointer-slots inherit
-        // the natural alignment of their width. A misaligned patch
-        // straddles two architectural slots.
-        if r.offset & (write_size - 1) != 0 {
-            return Err(PrxLoadError::RelocMisaligned {
-                rtype: r.rtype,
-                kind: RelocMisalignedKind::PatchOffset,
-                value: r.offset as i64,
-            });
-        }
-
-        // Offset + write_size must fit inside the target segment.
-        // The spill case (aligned offset + write_size > memsz) is
-        // only reachable with non-write-width-aligned memsz --
-        // synthetic PRXes; real segments are page-aligned.
-        let offset_end =
-            r.offset
-                .checked_add(write_size)
-                .ok_or(PrxLoadError::RelocOffsetOutOfSegment {
-                    rtype: r.rtype,
-                    offset: r.offset,
-                    seg_size: target_seg_size,
-                })?;
-        if offset_end > target_seg_size {
-            return Err(PrxLoadError::RelocOffsetOutOfSegment {
-                rtype: r.rtype,
-                offset: r.offset,
-                seg_size: target_seg_size,
-            });
-        }
+        check_patch_bounds(r, write_size, target_content.memsz)?;
 
         let target = base + target_base + r.offset;
         let value = (base + value_base).wrapping_add(r.addend as u64);
-
-        // ADDR32 / ADDR16 family encode the bottom 32 bits of the
-        // resolved value; `value >> 32 != 0` means the `as u32`
-        // truncation below would silently drop bits 32..63.
-        if matches!(
-            r.rtype,
-            R_PPC64_ADDR32
-                | R_PPC64_ADDR16_LO
-                | R_PPC64_ADDR16_LO_DS
-                | R_PPC64_ADDR16_HI
-                | R_PPC64_ADDR16_HA
-        ) && value >> 32 != 0
-        {
-            return Err(PrxLoadError::RelocOverflow {
-                rtype: r.rtype,
-                delta: value as i64,
-            });
-        }
-        // PRX ADDR16_{LO,HI,HA} are PPC32-style halves.
-        let value32 = value as u32;
-
-        let bytes: Vec<u8> = match r.rtype {
-            R_PPC64_ADDR32 => value32.to_be_bytes().to_vec(),
-            R_PPC64_ADDR64 => value.to_be_bytes().to_vec(),
-            R_PPC64_ADDR16_LO => (value32 as u16).to_be_bytes().to_vec(),
-            R_PPC64_ADDR16_LO_DS => {
-                // ELFv1 PPC64 ABI: ADDR16_LO_DS computes `(S+A) &
-                // 0xFFFC`; the encoded DS field requires the value
-                // be 4-byte-aligned, so the low two bits of (S+A)
-                // must be zero.
-                if value32 & 0x3 != 0 {
-                    return Err(PrxLoadError::RelocMisaligned {
-                        rtype: r.rtype,
-                        kind: RelocMisalignedKind::EncodedValue,
-                        value: value as i64,
-                    });
-                }
-                // DS-form instructions reserve the low 2 bits of
-                // the 16-bit halfword for the XO subfield; the
-                // relocation must not disturb them.
-                let existing = read_seg_u16(target_content, r.offset);
-                let patched = ((value32 as u16) & 0xFFFC) | (existing & 0x0003);
-                patched.to_be_bytes().to_vec()
-            }
-            R_PPC64_ADDR16_HI => ((value32 >> 16) as u16).to_be_bytes().to_vec(),
-            R_PPC64_ADDR16_HA => {
-                // +0x8000 cancels sign-extension of the paired LO.
-                let ha = (value32.wrapping_add(0x8000) >> 16) as u16;
-                ha.to_be_bytes().to_vec()
-            }
-            R_PPC64_REL24 => {
-                // [PPC-Book1 p:8 s:1.7.1] I-form: OPCD | LI | AA |
-                // LK with LI at IBM bits 6:29 (24 bits). The branch
-                // target is EXTS(LI || 0b00), so the displacement
-                // is forced 4-byte aligned; AA at IBM bit 30, LK at
-                // IBM bit 31 must be preserved.
-                let delta = (value as i64).wrapping_sub(target as i64);
-                if delta & 0x3 != 0 {
-                    return Err(PrxLoadError::RelocMisaligned {
-                        rtype: r.rtype,
-                        kind: RelocMisalignedKind::Displacement,
-                        value: delta,
-                    });
-                }
-                if !(-0x0200_0000..0x0200_0000).contains(&delta) {
-                    return Err(PrxLoadError::RelocOverflow {
-                        rtype: R_PPC64_REL24,
-                        delta,
-                    });
-                }
-                let mask: u32 = 0x03FF_FFFC;
-                let insn = read_seg_u32(target_content, r.offset);
-                let patched = (insn & !mask) | ((delta as u32) & mask);
-                patched.to_be_bytes().to_vec()
-            }
-            other => unreachable!("reloc_write_size accepted type {other} but match arm missing"),
-        };
+        let bytes = encode_reloc_patch(r, value, target, target_content)?;
 
         let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(target), write_size)
             .ok_or(PrxLoadError::MemoryRangeInvalid {
@@ -715,6 +565,183 @@ fn apply_relocations(
     }
 
     Ok(relocs.len())
+}
+
+/// The target segment's base and content, and the value segment's base,
+/// that relocation `r` names.
+fn resolve_reloc_segments<'a>(
+    r: &PrxRelocation,
+    segments: &[SegmentView<'a>],
+) -> Result<(u64, &'a PrxSegment, u64), PrxLoadError> {
+    let target_seg = r.target_segment();
+    let value_seg = r.value_segment();
+
+    if value_seg == PRX_RELOC_NO_VALUE_SEGMENT {
+        return Err(PrxLoadError::RelocWithoutValueSegment {
+            rtype: r.rtype,
+            offset: r.offset,
+        });
+    }
+    let Some(target) = segments.get(target_seg) else {
+        return Err(PrxLoadError::RelocSegmentOutOfRange {
+            sym: r.sym,
+            seg: target_seg,
+        });
+    };
+    let Some(value) = segments.get(value_seg as usize) else {
+        return Err(PrxLoadError::RelocSegmentOutOfRange {
+            sym: r.sym,
+            seg: value_seg as usize,
+        });
+    };
+    // A zero-sized PT_LOAD holds nothing to patch.
+    let Some(target_content) = target.content else {
+        return Err(PrxLoadError::RelocOffsetOutOfSegment {
+            rtype: r.rtype,
+            offset: r.offset,
+            seg_size: 0,
+        });
+    };
+    // The loader never allocates a zero-sized PT_LOAD, so its
+    // declared vaddr is not an address the addend can offset.
+    if value.content.is_none() {
+        return Err(PrxLoadError::RelocEmptyValueSegment {
+            sym: r.sym,
+            seg: value_seg as usize,
+        });
+    }
+    Ok((target.vaddr, target_content, value.vaddr))
+}
+
+/// Refuses a patch of `write_size` bytes at `r.offset` that is
+/// misaligned or does not fit a target segment of `seg_size` bytes.
+fn check_patch_bounds(
+    r: &PrxRelocation,
+    write_size: u64,
+    seg_size: u64,
+) -> Result<(), PrxLoadError> {
+    // [PPC-Book1 p:11 s:1.7] PowerPC instructions are 4-byte
+    // aligned; ADDR16 halfwords and ADDR64 pointer-slots inherit
+    // the natural alignment of their width. A misaligned patch
+    // straddles two architectural slots.
+    if r.offset & (write_size - 1) != 0 {
+        return Err(PrxLoadError::RelocMisaligned {
+            rtype: r.rtype,
+            kind: RelocMisalignedKind::PatchOffset,
+            value: r.offset as i64,
+        });
+    }
+
+    // Offset + write_size must fit inside the target segment.
+    // The spill case (aligned offset + write_size > memsz) is
+    // only reachable with non-write-width-aligned memsz --
+    // synthetic PRXes; real segments are page-aligned.
+    let out_of_segment = PrxLoadError::RelocOffsetOutOfSegment {
+        rtype: r.rtype,
+        offset: r.offset,
+        seg_size,
+    };
+    match r.offset.checked_add(write_size) {
+        Some(offset_end) if offset_end <= seg_size => Ok(()),
+        _ => Err(out_of_segment),
+    }
+}
+
+/// The patch bytes relocation `r` writes at guest address `target` for
+/// the resolved `value`; RMW types read the existing bytes from
+/// `target_content`.
+fn encode_reloc_patch(
+    r: &PrxRelocation,
+    value: u64,
+    target: u64,
+    target_content: &PrxSegment,
+) -> Result<Vec<u8>, PrxLoadError> {
+    // ADDR32 / ADDR16 family encode the bottom 32 bits of the
+    // resolved value; `value >> 32 != 0` means the `as u32`
+    // truncation below would silently drop bits 32..63.
+    if matches!(
+        r.rtype,
+        R_PPC64_ADDR32
+            | R_PPC64_ADDR16_LO
+            | R_PPC64_ADDR16_LO_DS
+            | R_PPC64_ADDR16_HI
+            | R_PPC64_ADDR16_HA
+    ) && value >> 32 != 0
+    {
+        return Err(PrxLoadError::RelocOverflow {
+            rtype: r.rtype,
+            delta: value as i64,
+        });
+    }
+    // PRX ADDR16_{LO,HI,HA} are PPC32-style halves.
+    let value32 = value as u32;
+
+    let bytes: Vec<u8> = match r.rtype {
+        R_PPC64_ADDR32 => value32.to_be_bytes().to_vec(),
+        R_PPC64_ADDR64 => value.to_be_bytes().to_vec(),
+        R_PPC64_ADDR16_LO => (value32 as u16).to_be_bytes().to_vec(),
+        R_PPC64_ADDR16_LO_DS => {
+            // ELFv1 PPC64 ABI: ADDR16_LO_DS computes `(S+A) &
+            // 0xFFFC`; the encoded DS field requires the value
+            // be 4-byte-aligned, so the low two bits of (S+A)
+            // must be zero.
+            if value32 & 0x3 != 0 {
+                return Err(PrxLoadError::RelocMisaligned {
+                    rtype: r.rtype,
+                    kind: RelocMisalignedKind::EncodedValue,
+                    value: value as i64,
+                });
+            }
+            // DS-form instructions reserve the low 2 bits of
+            // the 16-bit halfword for the XO subfield; the
+            // relocation must not disturb them.
+            let existing = read_seg_u16(target_content, r.offset);
+            let patched = ((value32 as u16) & 0xFFFC) | (existing & 0x0003);
+            patched.to_be_bytes().to_vec()
+        }
+        R_PPC64_ADDR16_HI => ((value32 >> 16) as u16).to_be_bytes().to_vec(),
+        R_PPC64_ADDR16_HA => {
+            // +0x8000 cancels sign-extension of the paired LO.
+            let ha = (value32.wrapping_add(0x8000) >> 16) as u16;
+            ha.to_be_bytes().to_vec()
+        }
+        R_PPC64_REL24 => encode_rel24(r, value, target, target_content)?,
+        other => unreachable!("reloc_write_size accepted type {other} but match arm missing"),
+    };
+    Ok(bytes)
+}
+
+/// The REL24 patch: the branch displacement from `target` to `value`
+/// written into the LI field of the existing I-form instruction.
+fn encode_rel24(
+    r: &PrxRelocation,
+    value: u64,
+    target: u64,
+    target_content: &PrxSegment,
+) -> Result<Vec<u8>, PrxLoadError> {
+    // [PPC-Book1 p:8 s:1.7.1] I-form: OPCD | LI | AA |
+    // LK with LI at IBM bits 6:29 (24 bits). The branch
+    // target is EXTS(LI || 0b00), so the displacement
+    // is forced 4-byte aligned; AA at IBM bit 30, LK at
+    // IBM bit 31 must be preserved.
+    let delta = (value as i64).wrapping_sub(target as i64);
+    if delta & 0x3 != 0 {
+        return Err(PrxLoadError::RelocMisaligned {
+            rtype: r.rtype,
+            kind: RelocMisalignedKind::Displacement,
+            value: delta,
+        });
+    }
+    if !(-0x0200_0000..0x0200_0000).contains(&delta) {
+        return Err(PrxLoadError::RelocOverflow {
+            rtype: R_PPC64_REL24,
+            delta,
+        });
+    }
+    let mask: u32 = 0x03FF_FFFC;
+    let insn = read_seg_u32(target_content, r.offset);
+    let patched = (insn & !mask) | ((delta as u32) & mask);
+    Ok(patched.to_be_bytes().to_vec())
 }
 
 /// Read 4 bytes from a parsed PRX segment at `seg_offset`. Reads
