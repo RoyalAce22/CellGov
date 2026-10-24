@@ -6,6 +6,7 @@ use cellgov_exec::ExecutionContext;
 use cellgov_time::{GuestTicks, InstructionCost};
 use cellgov_trace::TraceRecord;
 
+use crate::registry::RegisteredUnit;
 use crate::runtime::state::Runtime;
 use crate::runtime::trace_bridge::traced_barrier_kind;
 use crate::runtime::trace_bridge::traced_effect_kind;
@@ -106,42 +107,7 @@ impl Runtime {
             }
         }
 
-        let unit_id = match self.scheduler.select_next(&self.registry) {
-            Some(id) => id,
-            None => {
-                // All units blocked: time-warp to the earlier of the
-                // next pending DMA completion and the next timer-wake
-                // deadline. Both firing paths wake their unit via
-                // set_status_override(Runnable) so the retry can
-                // schedule it. A fired deadline can wake nobody (a
-                // contended cond expiry re-parks its waiter on the
-                // mutex untimed), so the warp loops while a wake
-                // source remains instead of reporting a terminal
-                // AllBlocked with live future deadlines still queued.
-                // Each pass pops at least the queue head it warped
-                // to, so the loop terminates.
-                let any_blocked = self.registry.ids().any(|id| {
-                    self.registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Blocked)
-                });
-                if !any_blocked {
-                    return Err(StepError::NoRunnableUnit);
-                }
-                loop {
-                    let Some(next_time) = self.next_event_time() else {
-                        return Err(StepError::AllBlocked);
-                    };
-                    self.time = next_time;
-                    let (due, timer_due) = self.fire_due_events(next_time);
-                    self.wake_reservation_lost_waiters();
-                    self.place_ppe_threads();
-                    self.registry.sync_clocks(self.time);
-                    self.emit_time_warp_trace(&due, &timer_due);
-                    if let Some(id) = self.scheduler.select_next(&self.registry) {
-                        break id;
-                    }
-                }
-            }
-        };
+        let unit_id = self.select_or_warp()?;
         let start = self.registry.clock(unit_id);
         // A clock that cannot advance by the whole budget refuses here,
         // before the unit or its inputs change. The budget counts
@@ -192,7 +158,7 @@ impl Runtime {
         effects_buf.clear();
         let mailbox_read = core::cell::Cell::new(false);
         let own_mailbox = cellgov_sync::MailboxId::new(unit_id.raw());
-        let (result, retired_hashes, retired_full, spu_hashes, spu_full, barriers) = {
+        let (result, retired) = {
             let unit_mem =
                 crate::runtime::spaces::resolve_unit_memory(&self.memory, &self.spaces, unit_id);
             let ctx = if let Some(code) = syscall_ret {
@@ -241,33 +207,136 @@ impl Runtime {
                 .get_mut(unit_id)
                 .expect("scheduler returned an id that is not in the registry");
             let res = unit.run_until_yield(self.budget_per_step, &ctx, &mut effects_buf);
-            let (retired_hashes, retired_full, spu_hashes, spu_full, barriers) =
-                if self.mode == RuntimeMode::FaultDriven {
-                    (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
-                } else {
-                    (
-                        unit.drain_retired_state_hashes(),
-                        unit.drain_retired_state_full(),
-                        unit.drain_retired_spu_state_hashes(),
-                        unit.drain_retired_spu_state_full(),
-                        unit.drain_barriers(),
-                    )
-                };
-            (
-                res,
-                retired_hashes,
-                retired_full,
-                spu_hashes,
-                spu_full,
-                barriers,
-            )
+            let retired = if self.mode == RuntimeMode::FaultDriven {
+                RetiredState::default()
+            } else {
+                RetiredState::drain(unit)
+            };
+            (res, retired)
         };
         let mailbox_read = (mailbox_read.get() && self.mailbox_registry.get(own_mailbox).is_some())
             .then_some(own_mailbox);
+        self.record_retired_state(unit_id, retired);
 
+        let advance: GuestTicks = result.consumed_cost.into();
+        let time_after = start.checked_add(advance).ok_or(StepError::TimeOverflow)?;
+        // The commit that follows stamps this step's effects with the
+        // unit's clock at the end of the step.
+        self.registry.set_clock(unit_id, time_after);
+        self.time = time_after;
+        self.steps_taken += 1;
+        self.last_scheduled_unit = Some(unit_id);
+        self.drain_provisional_reads_to_trace(unit_id);
+
+        if let Some(tap) = self.tap.as_deref_mut() {
+            // The drain above emptied the provisional-read log. A
+            // reserved-region read by the observer would otherwise trace
+            // at the next commit as a read by this step's unit. It would
+            // also raise the run's provisional-read count.
+            let step = self.steps_taken as u64;
+            self.memory
+                .with_reads_unlogged(|memory| tap.step(step, memory));
+        }
+
+        if self.mode == RuntimeMode::FullTrace {
+            self.trace.record(&TraceRecord::StepCompleted {
+                unit: unit_id,
+                yield_reason: traced_yield_reason(
+                    result.yield_reason,
+                    result.local_diagnostics.syscall_lev,
+                ),
+                consumed_cost: result.consumed_cost,
+                time_after,
+            });
+
+            for (sequence, effect) in effects_buf.iter().enumerate() {
+                self.trace.record(&TraceRecord::EffectEmitted {
+                    unit: unit_id,
+                    sequence: sequence as u32,
+                    kind: traced_effect_kind(effect),
+                });
+            }
+        }
+
+        // Fresh empty Vec avoids allocating in the common zero-effects
+        // FaultDriven case.
+        self.effects_buf = Vec::new();
+        self.step_serial = self.step_serial.wrapping_add(1);
+        let token = super::StepToken::new(
+            self.observations.step,
+            unit_id,
+            self.spaces.space_of(unit_id),
+            self.step_serial,
+        );
+        self.pending_commit = Some(token);
+        Ok(RuntimeStep {
+            token,
+            unit: unit_id,
+            result,
+            effects: effects_buf,
+            time_after,
+            epoch_after: self.epoch,
+            runnable,
+            ppe_pressure,
+            entry_reservation,
+            mailbox_read,
+        })
+    }
+
+    /// Return the unit the scheduler selects. When every unit is
+    /// blocked, warp time forward until a wake makes one runnable.
+    ///
+    /// The warp goes to the earlier of the next pending DMA completion
+    /// and the next timer-wake deadline. Both firing paths wake their
+    /// unit via set_status_override(Runnable) so the retry can schedule
+    /// it. A fired deadline can wake nobody (a contended cond expiry
+    /// re-parks its waiter on the mutex untimed), so the warp loops
+    /// while a wake source remains instead of reporting a terminal
+    /// AllBlocked with live future deadlines still queued. Each pass
+    /// pops at least the queue head it warped to, so the loop
+    /// terminates.
+    #[inline]
+    fn select_or_warp(&mut self) -> Result<UnitId, StepError> {
+        if let Some(id) = self.scheduler.select_next(&self.registry) {
+            return Ok(id);
+        }
+        let any_blocked = self.registry.ids().any(|id| {
+            self.registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Blocked)
+        });
+        if !any_blocked {
+            return Err(StepError::NoRunnableUnit);
+        }
+        loop {
+            let Some(next_time) = self.next_event_time() else {
+                return Err(StepError::AllBlocked);
+            };
+            self.time = next_time;
+            let (due, timer_due) = self.fire_due_events(next_time);
+            self.wake_reservation_lost_waiters();
+            self.place_ppe_threads();
+            self.registry.sync_clocks(self.time);
+            self.emit_time_warp_trace(&due, &timer_due);
+            if let Some(id) = self.scheduler.select_next(&self.registry) {
+                return Ok(id);
+            }
+        }
+    }
+
+    /// Turn the retired state a traced step drained from `unit_id` into
+    /// trace records, in the order PpuStateHash, PpuStateFull,
+    /// SpuStateHash, SpuStateFull with its SpuRegisters, Barrier.
+    #[inline]
+    fn record_retired_state(&mut self, unit_id: UnitId, retired: RetiredState) {
+        let RetiredState {
+            ppu_hashes,
+            ppu_full,
+            spu_hashes,
+            spu_full,
+            barriers,
+        } = retired;
         // PpuStateHash and PpuStateFull pair by step index so the diff
         // printer matches a hash divergence with its full-state snapshot.
-        for (pc, hash) in retired_hashes {
+        for (pc, hash) in ppu_hashes {
             self.trace.record(&TraceRecord::PpuStateHash {
                 step: self.per_step_index,
                 pc,
@@ -280,7 +349,7 @@ impl Runtime {
         // single unit traced from boot this equals the hash stream's
         // step index; with multiple traced units the hash stream
         // interleaves globally and snapshots match by (step, pc).
-        for (step, pc, fingerprint) in retired_full {
+        for (step, pc, fingerprint) in ppu_full {
             let cellgov_exec::PpuFingerprint {
                 gpr,
                 lr,
@@ -347,70 +416,6 @@ impl Runtime {
                 kind: traced_barrier_kind(barrier.kind),
             });
         }
-
-        let advance: GuestTicks = result.consumed_cost.into();
-        let time_after = start.checked_add(advance).ok_or(StepError::TimeOverflow)?;
-        // The commit that follows stamps this step's effects with the
-        // unit's clock at the end of the step.
-        self.registry.set_clock(unit_id, time_after);
-        self.time = time_after;
-        self.steps_taken += 1;
-        self.last_scheduled_unit = Some(unit_id);
-        self.drain_provisional_reads_to_trace(unit_id);
-
-        if let Some(tap) = self.tap.as_deref_mut() {
-            // The drain above emptied the provisional-read log. A
-            // reserved-region read by the observer would otherwise trace
-            // at the next commit as a read by this step's unit. It would
-            // also raise the run's provisional-read count.
-            let step = self.steps_taken as u64;
-            self.memory
-                .with_reads_unlogged(|memory| tap.step(step, memory));
-        }
-
-        if self.mode == RuntimeMode::FullTrace {
-            self.trace.record(&TraceRecord::StepCompleted {
-                unit: unit_id,
-                yield_reason: traced_yield_reason(
-                    result.yield_reason,
-                    result.local_diagnostics.syscall_lev,
-                ),
-                consumed_cost: result.consumed_cost,
-                time_after,
-            });
-
-            for (sequence, effect) in effects_buf.iter().enumerate() {
-                self.trace.record(&TraceRecord::EffectEmitted {
-                    unit: unit_id,
-                    sequence: sequence as u32,
-                    kind: traced_effect_kind(effect),
-                });
-            }
-        }
-
-        // Fresh empty Vec avoids allocating in the common zero-effects
-        // FaultDriven case.
-        self.effects_buf = Vec::new();
-        self.step_serial = self.step_serial.wrapping_add(1);
-        let token = super::StepToken::new(
-            self.observations.step,
-            unit_id,
-            self.spaces.space_of(unit_id),
-            self.step_serial,
-        );
-        self.pending_commit = Some(token);
-        Ok(RuntimeStep {
-            token,
-            unit: unit_id,
-            result,
-            effects: effects_buf,
-            time_after,
-            epoch_after: self.epoch,
-            runnable,
-            ppe_pressure,
-            entry_reservation,
-            mailbox_read,
-        })
     }
 
     /// The number of PPE threads other than `unit` in the runnable set
@@ -492,6 +497,30 @@ impl Runtime {
                 len: read.len,
                 hits: read.hits,
             });
+        }
+    }
+}
+
+/// The retired state a traced step drains from its unit.
+#[derive(Default)]
+struct RetiredState {
+    ppu_hashes: Vec<(u64, u64)>,
+    ppu_full: Vec<(u64, u64, cellgov_exec::PpuFingerprint)>,
+    spu_hashes: Vec<(u64, u64, u64)>,
+    spu_full: Vec<(u64, u64, cellgov_exec::SpuFingerprint)>,
+    barriers: Vec<cellgov_exec::RetiredBarrier>,
+}
+
+impl RetiredState {
+    /// Drain every retired-state log of `unit`.
+    #[inline]
+    fn drain(unit: &mut dyn RegisteredUnit) -> Self {
+        Self {
+            ppu_hashes: unit.drain_retired_state_hashes(),
+            ppu_full: unit.drain_retired_state_full(),
+            spu_hashes: unit.drain_retired_spu_state_hashes(),
+            spu_full: unit.drain_retired_spu_state_full(),
+            barriers: unit.drain_barriers(),
         }
     }
 }
