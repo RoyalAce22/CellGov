@@ -7,10 +7,11 @@ use crate::exec::{SpuFault, SpuStepOutcome};
 use crate::fault_codes::{
     guest_fault, guest_fault_for, FAULT_LS_OUT_OF_RANGE, FAULT_UNIMPLEMENTED_INSN,
 };
-use crate::instruction::SpuDecodeError;
+use crate::instruction::{SpuDecodeError, SpuInstruction};
 use crate::stop::SpuStopKind;
+use crate::timing::IssueSlot;
 use crate::{decode, exec};
-use cellgov_effects::Effect;
+use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
 use cellgov_exec::{
     BarrierKind, ChannelStall, ExecutionContext, ExecutionStepResult, ExecutionUnit,
@@ -43,6 +44,121 @@ impl SpuExecutionUnit {
         InstructionCost::new(
             cellgov_time::spu_cycles_to_ticks(self.pipeline.elapsed()).saturating_sub(base),
         )
+    }
+
+    /// The step's result, costed from `base` to now.
+    #[inline]
+    fn step_result(
+        &self,
+        base: u64,
+        yield_reason: YieldReason,
+        local_diagnostics: LocalDiagnostics,
+        fault: Option<FaultKind>,
+    ) -> ExecutionStepResult {
+        ExecutionStepResult {
+            yield_reason,
+            consumed_cost: self.cost(base),
+            local_diagnostics,
+            fault,
+            syscall_args: None,
+        }
+    }
+
+    /// Ends the step on `raw`, a word that does not decode.
+    #[inline]
+    fn end_on_decode_error(
+        &mut self,
+        error: SpuDecodeError,
+        raw: u32,
+        step_pc: u64,
+        base: u64,
+    ) -> ExecutionStepResult {
+        let diagnostics = LocalDiagnostics::with_pc(step_pc);
+        match error {
+            // [CBEA p:33 s:2.1.2] an SPU that meets an invalid instruction halts and records the event in its status register.
+            // [CBEA p:93 s:8.5.2] I: invalid instruction detected, SPU stopped imprecisely.
+            // [CBEA p:34 s:2.2.3] an optional instruction the implementation lacks is an illegal instruction.
+            SpuDecodeError::Unassigned(_) | SpuDecodeError::AbsentOnCbe { .. } => {
+                self.state.record_stop(SpuStopKind::InvalidInstruction, 0);
+                self.status = UnitStatus::Finished;
+                self.step_result(base, YieldReason::Finished, diagnostics, None)
+            }
+            SpuDecodeError::Unimplemented { .. } => {
+                let row = spu_isa::row_for(raw).map_or(0, |(index, _)| index as u32);
+                self.status = UnitStatus::Faulted;
+                let fault = guest_fault(FAULT_UNIMPLEMENTED_INSN, row);
+                self.step_result(base, YieldReason::Fault, diagnostics, Some(fault))
+            }
+        }
+    }
+
+    /// Records a barrier retired at `step_pc`, if the instruction is one.
+    #[inline]
+    fn note_barrier(&mut self, step_pc: u64, kind: Option<BarrierKind>) {
+        if let Some(kind) = kind {
+            self.barriers
+                .push(cellgov_exec::RetiredBarrier { pc: step_pc, kind });
+        }
+    }
+
+    /// Parks a stalled channel access, or retires any other yielding
+    /// instruction and charges `atomic` cycles for an atomic store.
+    #[inline]
+    fn finish_yield(
+        &mut self,
+        insn: &SpuInstruction,
+        slot: IssueSlot,
+        step_pc: u64,
+        trace: bool,
+        reason: YieldReason,
+        atomic: u64,
+    ) {
+        if reason == YieldReason::ChannelStall {
+            // The access did not retire: PC stays on it, and the unit
+            // names the channel for its waker. Any enabled event can
+            // interrupt the wait, so every producer ends it.
+            // [CBE-Handbook p:447 s:17.1.6] a blocked access stalls until the channel changes or the SPU is interrupted.
+            self.stall = channel_stall(insn).map(|stall| ChannelStall {
+                wake: if self.state.interruptible() {
+                    StallWake::Event
+                } else {
+                    stall.wake
+                },
+                ..stall
+            });
+            return;
+        }
+        self.pipeline.retire(slot, None);
+        // An atomic store takes the round trip the console measures.
+        self.pipeline.charge(atomic);
+        self.state.advance_pc();
+        self.retire(step_pc, trace);
+    }
+
+    /// Retires a memory read; a refused read ends the step as a
+    /// submitted DMA.
+    #[inline]
+    fn finish_memory_read(
+        &mut self,
+        completion: step::MemoryReadCompletion,
+        slot: IssueSlot,
+        step_pc: u64,
+        trace: bool,
+        base: u64,
+    ) -> Option<ExecutionStepResult> {
+        self.pipeline.retire(slot, None);
+        if completion == step::MemoryReadCompletion::Refused {
+            self.state.advance_pc();
+            self.retire(step_pc, trace);
+            let diagnostics = LocalDiagnostics::with_pc(step_pc);
+            return Some(self.step_result(base, YieldReason::DmaSubmitted, diagnostics, None));
+        }
+        if completion == (step::MemoryReadCompletion::Read { acquired: true }) {
+            // The getllar takes the round trip the console measures.
+            self.pipeline.charge(SPU_GETLLAR_CYCLES);
+        }
+        self.state.advance_pc();
+        None
     }
 }
 
@@ -95,47 +211,19 @@ impl ExecutionUnit for SpuExecutionUnit {
                 self.pipeline.redirect(self.state.pc);
             }
             let step_pc = self.state.pc as u64;
-            let raw = match self.state.fetch() {
-                Some(w) => w,
-                None => {
-                    self.status = UnitStatus::Faulted;
-                    break ExecutionStepResult {
-                        yield_reason: YieldReason::Fault,
-                        consumed_cost: self.cost(base),
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: Some(guest_fault(FAULT_LS_OUT_OF_RANGE, self.state.pc)),
-                        syscall_args: None,
-                    };
-                }
+            let Some(raw) = self.state.fetch() else {
+                self.status = UnitStatus::Faulted;
+                let fault = guest_fault(FAULT_LS_OUT_OF_RANGE, self.state.pc);
+                break self.step_result(
+                    base,
+                    YieldReason::Fault,
+                    LocalDiagnostics::with_pc(step_pc),
+                    Some(fault),
+                );
             };
-
             let insn = match decode::decode(raw) {
                 Ok(i) => i,
-                // [CBEA p:33 s:2.1.2] an SPU that meets an invalid instruction halts and records the event in its status register.
-                // [CBEA p:93 s:8.5.2] I: invalid instruction detected, SPU stopped imprecisely.
-                // [CBEA p:34 s:2.2.3] an optional instruction the implementation lacks is an illegal instruction.
-                Err(SpuDecodeError::Unassigned(_) | SpuDecodeError::AbsentOnCbe { .. }) => {
-                    self.state.record_stop(SpuStopKind::InvalidInstruction, 0);
-                    self.status = UnitStatus::Finished;
-                    break ExecutionStepResult {
-                        yield_reason: YieldReason::Finished,
-                        consumed_cost: self.cost(base),
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: None,
-                        syscall_args: None,
-                    };
-                }
-                Err(SpuDecodeError::Unimplemented { .. }) => {
-                    let row = spu_isa::row_for(raw).map_or(0, |(index, _)| index as u32);
-                    self.status = UnitStatus::Faulted;
-                    break ExecutionStepResult {
-                        yield_reason: YieldReason::Fault,
-                        consumed_cost: self.cost(base),
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: Some(guest_fault(FAULT_UNIMPLEMENTED_INSN, row)),
-                        syscall_args: None,
-                    };
-                }
+                Err(e) => break self.end_on_decode_error(e, raw, step_pc, base),
             };
 
             // The instruction runs at the cycle it issues in.
@@ -145,10 +233,7 @@ impl ExecutionUnit for SpuExecutionUnit {
             match outcome {
                 SpuStepOutcome::Continue => {
                     if ctx.trace_per_step() {
-                        if let Some(kind) = barrier_kind(&insn) {
-                            self.barriers
-                                .push(cellgov_exec::RetiredBarrier { pc: step_pc, kind });
-                        }
+                        self.note_barrier(step_pc, barrier_kind(&insn));
                     }
                     self.pipeline.retire(slot, None);
                     self.state.advance_pc();
@@ -159,55 +244,26 @@ impl ExecutionUnit for SpuExecutionUnit {
                     self.state.record_stop(kind, signal);
                     self.retire(step_pc, ctx.trace_per_step());
                     self.status = UnitStatus::Finished;
-                    break ExecutionStepResult {
-                        yield_reason: YieldReason::Finished,
-                        consumed_cost: self.cost(base),
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: None,
-                        syscall_args: None,
-                    };
+                    break self.step_result(
+                        base,
+                        YieldReason::Finished,
+                        LocalDiagnostics::with_pc(step_pc),
+                        None,
+                    );
                 }
                 SpuStepOutcome::Yield {
                     effects: step_effects,
                     reason,
                 } => {
-                    if ctx.trace_per_step() {
-                        if let Some(kind) = queued_mfc_barrier(&insn, &self.state, &step_effects) {
-                            self.barriers
-                                .push(cellgov_exec::RetiredBarrier { pc: step_pc, kind });
-                        }
+                    let trace = ctx.trace_per_step();
+                    if trace {
+                        let kind = queued_mfc_barrier(&insn, &self.state, &step_effects);
+                        self.note_barrier(step_pc, kind);
                     }
                     let atomic = atomic_store_cycles(&insn, &self.state, &step_effects);
                     effects.extend(step_effects);
-                    if reason == YieldReason::ChannelStall {
-                        // The access did not retire: PC stays on it, and
-                        // the unit names the channel for its waker. Any
-                        // enabled event can interrupt the wait, so every
-                        // producer ends it.
-                        // [CBE-Handbook p:447 s:17.1.6] a blocked access stalls until the channel changes or the SPU is interrupted.
-                        self.stall = channel_stall(&insn).map(|stall| ChannelStall {
-                            wake: if self.state.interruptible() {
-                                StallWake::Event
-                            } else {
-                                stall.wake
-                            },
-                            ..stall
-                        });
-                    } else {
-                        self.pipeline.retire(slot, None);
-                        // An atomic store takes the round trip the
-                        // console measures.
-                        self.pipeline.charge(atomic);
-                        self.state.advance_pc();
-                        self.retire(step_pc, ctx.trace_per_step());
-                    }
-                    break ExecutionStepResult {
-                        yield_reason: reason,
-                        consumed_cost: self.cost(base),
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: None,
-                        syscall_args: None,
-                    };
+                    self.finish_yield(&insn, slot, step_pc, trace, reason, atomic);
+                    break self.step_result(base, reason, LocalDiagnostics::with_pc(step_pc), None);
                 }
                 SpuStepOutcome::MemoryRead {
                     ea,
@@ -225,24 +281,11 @@ impl ExecutionUnit for SpuExecutionUnit {
                         acquire_line,
                         effects,
                     );
-                    self.pipeline.retire(slot, None);
-                    if completion == step::MemoryReadCompletion::Refused {
-                        self.state.advance_pc();
-                        self.retire(step_pc, ctx.trace_per_step());
-                        break ExecutionStepResult {
-                            yield_reason: YieldReason::DmaSubmitted,
-                            consumed_cost: self.cost(base),
-                            local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                            fault: None,
-                            syscall_args: None,
-                        };
+                    let trace = ctx.trace_per_step();
+                    if let Some(r) = self.finish_memory_read(completion, slot, step_pc, trace, base)
+                    {
+                        break r;
                     }
-                    if completion == (step::MemoryReadCompletion::Read { acquired: true }) {
-                        // The getllar takes the round trip the console
-                        // measures.
-                        self.pipeline.charge(SPU_GETLLAR_CYCLES);
-                    }
-                    self.state.advance_pc();
                 }
                 SpuStepOutcome::Fault(f) => {
                     self.status = UnitStatus::Faulted;
@@ -253,13 +296,12 @@ impl ExecutionUnit for SpuExecutionUnit {
                         _ => LocalDiagnostics::with_pc(step_pc),
                     };
                     let fault = guest_fault_for(f);
-                    break ExecutionStepResult {
-                        yield_reason: YieldReason::Fault,
-                        consumed_cost: self.cost(base),
+                    break self.step_result(
+                        base,
+                        YieldReason::Fault,
                         local_diagnostics,
-                        fault: Some(fault),
-                        syscall_args: None,
-                    };
+                        Some(fault),
+                    );
                 }
             }
 
@@ -270,13 +312,12 @@ impl ExecutionUnit for SpuExecutionUnit {
             );
             remaining = remaining.saturating_sub(1);
             if remaining == 0 {
-                break ExecutionStepResult {
-                    yield_reason: YieldReason::BudgetExhausted,
-                    consumed_cost: self.cost(base),
-                    local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                    fault: None,
-                    syscall_args: None,
-                };
+                break self.step_result(
+                    base,
+                    YieldReason::BudgetExhausted,
+                    LocalDiagnostics::with_pc(step_pc),
+                    None,
+                );
             }
         };
         // One effect names the step, whatever the number of reads in it.
