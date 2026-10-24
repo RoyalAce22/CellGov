@@ -1,16 +1,23 @@
 //! Loading and binding a firmware set, and the trampoline-only path when none loads.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_mem::GuestMemory;
+use cellgov_ppu::prx_loader::{ClosureSelection, FirmwareExportTable, FirmwareImage, PrxModuleId};
 
-use crate::prx::got::patch_got_atomic;
+use crate::prx::got::{patch_got_atomic, GotPatchStats};
 use crate::prx::types::{HostLinkMaps, PrxLoadInfo, UnresolvedRequesters, VerifiedFirmware};
 use crate::{BootSink, KeyVaultSource};
 
 use super::base::{page_align_up_u64, resolve_prx_base};
 use super::discover::{verify_against_manifest, FirmwareCandidates};
 use super::error::FirmwareLoadError;
+
+/// Each selected module's verified bytes, by candidate path.
+type BytesByPath = BTreeMap<String, Vec<u8>>;
+
+/// Each loaded module's file stem, by module id.
+type StemById = BTreeMap<PrxModuleId, String>;
 
 /// Install unresolved-import trampolines for every game import when
 /// no firmware was loaded. Returns a synthetic [`PrxLoadInfo`]
@@ -128,14 +135,59 @@ pub fn load_firmware_set_from(
     prx_base: Option<u64>,
     sink: &dyn BootSink,
 ) -> Result<(Vec<PrxLoadInfo>, VerifiedFirmware, HostLinkMaps), FirmwareLoadError> {
-    let fw_root = &candidates.root;
-    let fw_manifest = &candidates.manifest;
+    let selection = select_and_report(candidates, modules, sink)?;
+    let (bytes_by_path, id_to_stem) = read_selected(candidates, &selection)?;
+    let prx_base = resolve_prx_base(prx_base, code_floor)?;
+    let image = cellgov_ppu::prx_loader::load_firmware_set(bytes_by_path, mem, prx_base).map_err(
+        |source| FirmwareLoadError::LoadSet {
+            base: prx_base,
+            source,
+        },
+    )?;
 
-    // A game names its roots in its own import table; a firmware
-    // executable builds its import tables at runtime and names none,
-    // so its load set is every viable candidate.
-    let root_namespaces: Option<std::collections::BTreeSet<String>> = if candidates.include_internal
-    {
+    // Empty image (selection chose no module): fall back to prx_base,
+    // not 0, so trampolines never land in the null page where a call
+    // through a null OPD would reach them.
+    let prx_high_water = image
+        .loaded
+        .values()
+        .map(cellgov_ppu::sprx::LoadedPrx::resident_end)
+        .max()
+        .unwrap_or(prx_base);
+    let tramp_base = page_align_up_u64(prx_high_water)?;
+    let stats = patch_got_atomic(modules, mem, tramp_base, |ns, nid| {
+        image.export_table.get(ns, nid)
+    })
+    .map_err(|source| FirmwareLoadError::GotPatch { source })?;
+    report_load(sink, &image, &stats, tramp_base);
+
+    let tramp_region = (stats.trampolined > 0).then_some((tramp_base, stats.tramp_region_end));
+    let host_link = HostLinkMaps {
+        exports: host_link_exports(&image.export_table)?,
+        unresolved_requesters: stats.unresolved_requesters,
+    };
+    let out = assemble_load_infos(&image, &id_to_stem, tramp_region)?;
+    let identity = VerifiedFirmware {
+        image_version: candidates.manifest.firmware.image_version.clone(),
+        pup_sha256: candidates.manifest.firmware.pup_sha256.0,
+    };
+    Ok((out, identity, host_link))
+}
+
+/// Select the import closure to load from `candidates` and report the
+/// selection, its prunes and the roots no module provides.
+///
+/// A game names its roots in its own import table; a firmware
+/// executable builds its import tables at runtime and names none, so
+/// its load set is every viable candidate. An internal stem that
+/// selection dropped leaves the shell's runtime load-by-path unbacked,
+/// so it is fatal like an absent stem.
+fn select_and_report(
+    candidates: &FirmwareCandidates,
+    modules: &[cellgov_ppu::prx::ImportedModule],
+    sink: &dyn BootSink,
+) -> Result<ClosureSelection, FirmwareLoadError> {
+    let root_namespaces: Option<BTreeSet<String>> = if candidates.include_internal {
         None
     } else {
         Some(modules.iter().map(|m| m.name.clone()).collect())
@@ -158,9 +210,6 @@ pub fn load_firmware_set_from(
             "prx: title imports namespace {ns:?}: no firmware module provides it"
         ));
     }
-    // A stem present but dropped by selection leaves the shell's
-    // runtime load-by-path unbacked, so it is fatal like an absent
-    // stem.
     for (stem, path) in &candidates.internal_paths {
         if selection.selected.contains(path) {
             continue;
@@ -173,13 +222,22 @@ pub fn load_firmware_set_from(
             .unwrap_or_else(|| "viable but not selected".to_string());
         return Err(FirmwareLoadError::InternalStemDropped { stem, reason });
     }
+    Ok(selection)
+}
 
-    // id_to_stem feeds the boot-side Lv2Host PRX registry so
-    // firmware-side `_sys_prx_load_module(path)` can resolve guest
-    // paths back to a kernel id (the registry is keyed by stem since
-    // cellSysmoduleLoadModule passes guest paths).
-    let mut bytes_by_path: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    let mut id_to_stem: BTreeMap<cellgov_ppu::prx_loader::PrxModuleId, String> = BTreeMap::new();
+/// Read and verify each selected module. Returns the bytes by path and
+/// the stem of each module id.
+///
+/// id_to_stem feeds the boot-side Lv2Host PRX registry so
+/// firmware-side `_sys_prx_load_module(path)` can resolve guest
+/// paths back to a kernel id (the registry keys by stem because
+/// cellSysmoduleLoadModule passes guest paths).
+fn read_selected(
+    candidates: &FirmwareCandidates,
+    selection: &ClosureSelection,
+) -> Result<(BytesByPath, StemById), FirmwareLoadError> {
+    let mut bytes_by_path = BytesByPath::new();
+    let mut id_to_stem = StemById::new();
     for path_str in &selection.selected {
         let elf = candidates
             .modules
@@ -187,7 +245,7 @@ pub fn load_firmware_set_from(
             .expect("invariant: selection only returns candidate paths")
             .clone();
         let path = std::path::Path::new(path_str);
-        verify_against_manifest(fw_manifest, fw_root, path, &elf)?;
+        verify_against_manifest(&candidates.manifest, &candidates.root, path, &elf)?;
         let stem = match path.file_stem().and_then(|s| s.to_str()) {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => {
@@ -205,30 +263,12 @@ pub fn load_firmware_set_from(
         id_to_stem.insert(parsed.module_id, stem);
         bytes_by_path.insert(path_str.clone(), elf);
     }
+    Ok((bytes_by_path, id_to_stem))
+}
 
-    let prx_base = resolve_prx_base(prx_base, code_floor)?;
-
-    let image = cellgov_ppu::prx_loader::load_firmware_set(bytes_by_path, mem, prx_base).map_err(
-        |source| FirmwareLoadError::LoadSet {
-            base: prx_base,
-            source,
-        },
-    )?;
-
-    // Empty image (selection chose no module): fall back to prx_base,
-    // not 0, so trampolines never land in the null page where a call
-    // through a null OPD would reach them.
-    let prx_high_water = image
-        .loaded
-        .values()
-        .map(cellgov_ppu::sprx::LoadedPrx::resident_end)
-        .max()
-        .unwrap_or(prx_base);
-    let tramp_base = page_align_up_u64(prx_high_water)?;
-    let stats = patch_got_atomic(modules, mem, tramp_base, |ns, nid| {
-        image.export_table.get(ns, nid)
-    })
-    .map_err(|source| FirmwareLoadError::GotPatch { source })?;
+/// Report the loaded set, the variable imports left unbound, and each
+/// export namespace two libraries published.
+fn report_load(sink: &dyn BootSink, image: &FirmwareImage, stats: &GotPatchStats, tramp_base: u64) {
     sink.note(&format!(
         "prx: firmware-set loaded {} module(s), {} (namespace, NID) pairs in export table, \
          {}/{} game imports resolved to firmware OPDs, \
@@ -255,22 +295,23 @@ pub fn load_firmware_set_from(
              kept {first:?}, dropped the later library"
         ));
     }
+}
 
-    // Pure-data library -> NID -> OPD view for the sc 484 CoreOS
-    // manual link; the host cannot reach the loader's export table
-    // itself. Same key as the table -- the arm reads each guest
-    // import entry's library-name pointer and resolves under it.
-    let mut exports: std::collections::BTreeMap<String, std::collections::BTreeMap<u32, u32>> =
-        std::collections::BTreeMap::new();
-    for (ns, nid) in image.export_table.keys() {
-        let opd =
-            image
-                .export_table
-                .get(ns, nid)
-                .ok_or_else(|| FirmwareLoadError::ExportVanished {
-                    namespace: ns.to_string(),
-                    nid,
-                })?;
+/// Return the pure-data library -> NID -> OPD view for the sc 484
+/// CoreOS manual link; the host cannot reach the loader's export table
+/// itself. Same key as the table -- the arm reads each guest import
+/// entry's library-name pointer and resolves under it.
+fn host_link_exports(
+    export_table: &FirmwareExportTable,
+) -> Result<BTreeMap<String, BTreeMap<u32, u32>>, FirmwareLoadError> {
+    let mut exports: BTreeMap<String, BTreeMap<u32, u32>> = BTreeMap::new();
+    for (ns, nid) in export_table.keys() {
+        let opd = export_table
+            .get(ns, nid)
+            .ok_or_else(|| FirmwareLoadError::ExportVanished {
+                namespace: ns.to_string(),
+                nid,
+            })?;
         let opd = u32::try_from(opd).map_err(|_| FirmwareLoadError::ExportBeyondU32 {
             namespace: ns.to_string(),
             nid,
@@ -278,21 +319,25 @@ pub fn load_firmware_set_from(
         })?;
         exports.entry(ns.to_string()).or_default().insert(nid, opd);
     }
-    let host_link = HostLinkMaps {
-        exports,
-        unresolved_requesters: stats.unresolved_requesters,
-    };
+    Ok(exports)
+}
 
+/// Build one [`PrxLoadInfo`] per loaded module in topological order,
+/// led by a synthetic entry for the trampoline region `(base, end)`
+/// when the GOT patch routed any import there, so the alloc_base computation
+/// accounts for it via `prx_region_end`.
+fn assemble_load_infos(
+    image: &FirmwareImage,
+    id_to_stem: &StemById,
+    tramp_region: Option<(u64, u64)>,
+) -> Result<Vec<PrxLoadInfo>, FirmwareLoadError> {
     let mut out: Vec<PrxLoadInfo> = Vec::with_capacity(image.loaded.len());
-    // Park the trampoline region as a synthetic PrxLoadInfo entry so
-    // the alloc_base computation accounts for it via
-    // `prx_region_end`.
-    if stats.trampolined > 0 {
+    if let Some((tramp_base, tramp_region_end)) = tramp_region {
         out.push(PrxLoadInfo {
             name: "<unresolved-import-trampolines>".to_string(),
             stem: String::new(),
             base: tramp_base,
-            data_end: stats.tramp_region_end,
+            data_end: tramp_region_end,
             toc: 0,
             relocs_applied: 0,
             module_start: None,
@@ -328,9 +373,5 @@ pub fn load_firmware_set_from(
             module_stop: prx.module_stop,
         });
     }
-    let identity = VerifiedFirmware {
-        image_version: fw_manifest.firmware.image_version.clone(),
-        pup_sha256: fw_manifest.firmware.pup_sha256.0,
-    };
-    Ok((out, identity, host_link))
+    Ok(out)
 }
