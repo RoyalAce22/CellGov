@@ -124,68 +124,65 @@ impl Lv2Host {
         };
         // Every non-park exit stores through a non-null result
         // pointer: an error exit stores 0, and only a satisfied wait
-        // stores the observed pattern. The arm checks the id before the
-        // mode, so an unknown id answers ESRCH whatever the mode; the
-        // console capture of tests/micro/lv2_event_flag_check_order
-        // shows this order.
+        // stores the observed pattern.
+        let mode = match self.event_flag_poll(id, bits, mode_raw) {
+            Ok(mode) => mode,
+            Err(answer) => return answer.dispatch(result_ptr, requester, tick),
+        };
+        // A finite timeout parks like any wait; the runtime's
+        // timer-wake queue expires it with ETIMEDOUT at the deadline.
+        match self
+            .state
+            .event_flags
+            .enqueue_waiter(id, caller, bits, mode, result_ptr)
+        {
+            Ok(()) => {}
+            Err(crate::sync_primitives::EventFlagEnqueueError::UnknownId) => {
+                return flag_refusal(errno::CELL_ESRCH.into(), result_ptr, requester, tick);
+            }
+            Err(crate::sync_primitives::EventFlagEnqueueError::DuplicateWaiter) => {
+                // Host-side refusal, but the store-result contract
+                // above covers every non-park exit, so this one zeroes
+                // the result too.
+                return flag_refusal(errno::CELL_EFAULT.into(), result_ptr, requester, tick);
+            }
+        }
+        Lv2Dispatch::Block {
+            reason: crate::dispatch::Lv2BlockReason::EventFlag { id },
+            pending: PendingResponse::EventFlagWake {
+                result_ptr,
+                observed: 0,
+            },
+            effects: vec![],
+        }
+    }
+
+    /// The part of a wait that does not park: the id and mode checks and
+    /// one match attempt.
+    ///
+    /// Returns the decoded mode when the pattern does not match yet, and
+    /// otherwise the call's answer: ESRCH, EINVAL, or the match with its
+    /// observed pattern. The id comes before the mode, so an unknown id
+    /// answers ESRCH whatever the mode; the console capture of
+    /// tests/micro/lv2_event_flag_check_order shows this order.
+    fn event_flag_poll(
+        &mut self,
+        id: u32,
+        bits: u64,
+        mode_raw: u32,
+    ) -> Result<crate::ppu_thread::EventFlagWaitMode, FlagAnswer> {
         if self.state.event_flags.lookup(id).is_none() {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ESRCH.into(),
-                effects: event_flag_result_write(result_ptr, 0, requester, tick),
-            };
+            return Err(FlagAnswer::refusal(errno::CELL_ESRCH.into()));
         }
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: event_flag_result_write(result_ptr, 0, requester, tick),
-            };
+            return Err(FlagAnswer::refusal(errno::CELL_EINVAL.into()));
         };
         match self.state.event_flags.try_wait(id, bits, mode) {
-            None => Lv2Dispatch::Immediate {
-                code: errno::CELL_ESRCH.into(),
-                effects: event_flag_result_write(result_ptr, 0, requester, tick),
-            },
+            None => Err(FlagAnswer::refusal(errno::CELL_ESRCH.into())),
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
-                Lv2Dispatch::Immediate {
-                    code: 0,
-                    effects: event_flag_result_write(result_ptr, observed, requester, tick),
-                }
+                Err(FlagAnswer { code: 0, observed })
             }
-            Some(crate::sync_primitives::EventFlagWait::NoMatch) => {
-                // A finite timeout parks like any wait; the runtime's
-                // timer-wake queue expires it with ETIMEDOUT at the
-                // deadline.
-                match self
-                    .state
-                    .event_flags
-                    .enqueue_waiter(id, caller, bits, mode, result_ptr)
-                {
-                    Ok(()) => {}
-                    Err(crate::sync_primitives::EventFlagEnqueueError::UnknownId) => {
-                        return Lv2Dispatch::Immediate {
-                            code: errno::CELL_ESRCH.into(),
-                            effects: event_flag_result_write(result_ptr, 0, requester, tick),
-                        };
-                    }
-                    Err(crate::sync_primitives::EventFlagEnqueueError::DuplicateWaiter) => {
-                        // Host-side refusal, but the store-result
-                        // contract above covers every non-park exit,
-                        // so this one zeroes the result too.
-                        return Lv2Dispatch::Immediate {
-                            code: errno::CELL_EFAULT.into(),
-                            effects: event_flag_result_write(result_ptr, 0, requester, tick),
-                        };
-                    }
-                }
-                Lv2Dispatch::Block {
-                    reason: crate::dispatch::Lv2BlockReason::EventFlag { id },
-                    pending: PendingResponse::EventFlagWake {
-                        result_ptr,
-                        observed: 0,
-                    },
-                    effects: vec![],
-                }
-            }
+            Some(crate::sync_primitives::EventFlagWait::NoMatch) => Ok(mode),
         }
     }
 
@@ -200,36 +197,12 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         // Every exit stores through a non-null result pointer:
         // EINVAL, ESRCH, and the no-match EBUSY all store 0; only a
-        // match stores the observed pattern. As in the wait arm, this
-        // arm checks the id before the mode.
-        if self.state.event_flags.lookup(id).is_none() {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_ESRCH.into(),
-                effects: event_flag_result_write(result_ptr, 0, requester, tick),
-            };
-        }
-        let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
-            return Lv2Dispatch::Immediate {
-                code: errno::CELL_EINVAL.into(),
-                effects: event_flag_result_write(result_ptr, 0, requester, tick),
-            };
+        // match stores the observed pattern.
+        let answer = match self.event_flag_poll(id, bits, mode_raw) {
+            Ok(_) => FlagAnswer::refusal(errno::CELL_EBUSY.into()),
+            Err(answer) => answer,
         };
-        match self.state.event_flags.try_wait(id, bits, mode) {
-            None => Lv2Dispatch::Immediate {
-                code: errno::CELL_ESRCH.into(),
-                effects: event_flag_result_write(result_ptr, 0, requester, tick),
-            },
-            Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
-                Lv2Dispatch::Immediate {
-                    code: 0,
-                    effects: event_flag_result_write(result_ptr, observed, requester, tick),
-                }
-            }
-            Some(crate::sync_primitives::EventFlagWait::NoMatch) => Lv2Dispatch::Immediate {
-                code: errno::CELL_EBUSY.into(),
-                effects: event_flag_result_write(result_ptr, 0, requester, tick),
-            },
-        }
+        answer.dispatch(result_ptr, requester, tick)
     }
 
     pub(super) fn dispatch_event_flag_set(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
@@ -361,6 +334,34 @@ impl Lv2Host {
             effects: vec![write],
         }
     }
+}
+
+/// A wait or trywait answer that does not park: the return code and
+/// the pattern the call stores as its result.
+struct FlagAnswer {
+    code: u64,
+    observed: u64,
+}
+
+impl FlagAnswer {
+    /// A refusal: `code`, with 0 stored as the result.
+    fn refusal(code: u64) -> Self {
+        Self { code, observed: 0 }
+    }
+
+    /// The dispatch that returns the code and stores the pattern
+    /// through `result_ptr`.
+    fn dispatch(self, result_ptr: u32, requester: UnitId, tick: GuestTicks) -> Lv2Dispatch {
+        Lv2Dispatch::Immediate {
+            code: self.code,
+            effects: event_flag_result_write(result_ptr, self.observed, requester, tick),
+        }
+    }
+}
+
+/// A wait or trywait that returns `code` and stores 0 as the result.
+fn flag_refusal(code: u64, result_ptr: u32, requester: UnitId, tick: GuestTicks) -> Lv2Dispatch {
+    FlagAnswer::refusal(code).dispatch(result_ptr, requester, tick)
 }
 
 /// The observed-pattern write for a satisfied wait/trywait.
