@@ -367,7 +367,25 @@ impl SpuAllowedFootprint {
             local_store: false,
             channels: BTreeSet::new(),
             reservation: false,
-            control_transfer: false,
+            control_transfer: matches!(
+                instruction,
+                SpuInstruction::Br { .. }
+                    | SpuInstruction::Brsl { .. }
+                    | SpuInstruction::Bra { .. }
+                    | SpuInstruction::Brasl { .. }
+                    | SpuInstruction::Brz { .. }
+                    | SpuInstruction::Brnz { .. }
+                    | SpuInstruction::Bi { .. }
+                    | SpuInstruction::Bisl { .. }
+                    | SpuInstruction::Bisled { .. }
+                    | SpuInstruction::Brhnz { .. }
+                    | SpuInstruction::Brhz { .. }
+                    | SpuInstruction::Biz { .. }
+                    | SpuInstruction::Binz { .. }
+                    | SpuInstruction::Bihz { .. }
+                    | SpuInstruction::Bihnz { .. }
+                    | SpuInstruction::Iret { .. }
+            ),
             events: channel_access,
             decrementer: channel_access,
             out_intr_mbox: matches!(
@@ -581,7 +599,12 @@ impl SpuAllowedFootprint {
             | SpuInstruction::Bisled { rt, .. }
             | SpuInstruction::Rchcnt { rt, .. }
             | SpuInstruction::Mfspr { rt, .. } => Some(rt),
-            SpuInstruction::Rdch { rt, .. } => Some(rt),
+            SpuInstruction::Rdch { rt, channel } => {
+                footprint
+                    .channels
+                    .extend(rdch_channel_fields(channel).iter().copied());
+                Some(rt)
+            }
             SpuInstruction::Stqd { .. }
             | SpuInstruction::Stqx { .. }
             | SpuInstruction::Stqa { .. }
@@ -590,39 +613,10 @@ impl SpuAllowedFootprint {
                 None
             }
             SpuInstruction::Wrch { channel, .. } => {
-                use cellgov_ps3_abi::hw::spu;
-                let field = match channel {
-                    spu::MFC_LSA => Some(SpuChannelField::MfcLsa),
-                    spu::MFC_EAH => Some(SpuChannelField::MfcEah),
-                    spu::MFC_EAL => Some(SpuChannelField::MfcEal),
-                    spu::MFC_SIZE => Some(SpuChannelField::MfcSize),
-                    spu::MFC_TAG_ID => Some(SpuChannelField::MfcTagId),
-                    spu::MFC_WR_TAG_MASK => Some(SpuChannelField::TagMask),
-                    spu::MFC_CMD => Some(SpuChannelField::CommandQueue),
-                    spu::MFC_WR_TAG_UPDATE | spu::SPU_WR_OUT_MBOX | spu::SPU_WR_OUT_INTR_MBOX => {
-                        None
-                    }
-                    _ => None,
-                };
-                if let Some(field) = field {
-                    footprint.channels.insert(field);
-                }
-                if channel == spu::SPU_WR_OUT_MBOX {
-                    footprint.channels.insert(SpuChannelField::OutboundMailbox);
-                }
-                if channel == spu::MFC_CMD {
-                    footprint.channels.insert(SpuChannelField::AtomicStatus);
-                    footprint
-                        .channels
-                        .insert(SpuChannelField::AtomicStatusReady);
-                    // A command that consumed MFC_EAH takes it back to 0.
-                    footprint.channels.insert(SpuChannelField::MfcEah);
-                    footprint.reservation = true;
-                }
-                if channel == spu::MFC_WR_TAG_UPDATE {
-                    footprint.channels.insert(SpuChannelField::TagUpdate);
-                    footprint.channels.insert(SpuChannelField::TagStatusRead);
-                }
+                footprint
+                    .channels
+                    .extend(wrch_channel_fields(channel).iter().copied());
+                footprint.reservation = channel == ch::MFC_CMD;
                 None
             }
             SpuInstruction::Br { .. }
@@ -684,58 +678,6 @@ impl SpuAllowedFootprint {
         };
         if let Some(register) = register {
             footprint.registers.insert(register);
-        }
-        footprint.control_transfer = matches!(
-            instruction,
-            SpuInstruction::Br { .. }
-                | SpuInstruction::Brsl { .. }
-                | SpuInstruction::Bra { .. }
-                | SpuInstruction::Brasl { .. }
-                | SpuInstruction::Brz { .. }
-                | SpuInstruction::Brnz { .. }
-                | SpuInstruction::Bi { .. }
-                | SpuInstruction::Bisl { .. }
-                | SpuInstruction::Bisled { .. }
-                | SpuInstruction::Brhnz { .. }
-                | SpuInstruction::Brhz { .. }
-                | SpuInstruction::Biz { .. }
-                | SpuInstruction::Binz { .. }
-                | SpuInstruction::Bihz { .. }
-                | SpuInstruction::Bihnz { .. }
-                | SpuInstruction::Iret { .. }
-        );
-        if matches!(
-            instruction,
-            SpuInstruction::Rdch {
-                channel: cellgov_ps3_abi::hw::spu::SPU_RD_IN_MBOX,
-                ..
-            }
-        ) {
-            footprint.channels.insert(SpuChannelField::InboundMailbox);
-        }
-        if matches!(
-            instruction,
-            SpuInstruction::Rdch {
-                channel: cellgov_ps3_abi::hw::spu::MFC_RD_TAG_STAT,
-                ..
-            }
-        ) {
-            footprint.channels.insert(SpuChannelField::TagStatusRead);
-        }
-        if matches!(
-            instruction,
-            SpuInstruction::Rdch {
-                channel: cellgov_ps3_abi::hw::spu::MFC_RD_ATOMIC_STAT,
-                ..
-            }
-        ) {
-            // [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] the channel holds the status of the last completed immediate atomic command.
-            // The read takes the status, and the channel holds none until
-            // the next atomic command completes.
-            footprint.channels.insert(SpuChannelField::AtomicStatus);
-            footprint
-                .channels
-                .insert(SpuChannelField::AtomicStatusReady);
         }
         footprint
     }
@@ -804,84 +746,12 @@ impl SpuAllowedFootprint {
         local_store_differs: bool,
     ) -> BTreeSet<SpuObservationComponent> {
         let before = SpuObservableSnapshot::capture_without_local_store(initial);
-        let mut violations = BTreeSet::new();
         // [Martignoni2009 p:127 s:2.2] After an exception the program counter, the registers and the memory stay as they were, so a discarded step may change none of them.
-        if fault_discarded {
-            violations = state_differences_with(&before, observed, local_store_differs);
+        let mut violations = if fault_discarded {
+            state_differences_with(&before, observed, local_store_differs)
         } else {
-            for (index, (previous, current)) in before.regs.iter().zip(&observed.regs).enumerate() {
-                // A stalled access did not retire, so it writes no register.
-                // [CBE-Handbook p:542 s:19.6.6.3 SPU Side] An empty inbound mailbox stalls the read.
-                if previous != current
-                    && (matches!(
-                        outcome,
-                        SpuStepOutcome::Yield {
-                            reason: cellgov_exec::YieldReason::ChannelStall,
-                            ..
-                        }
-                    ) || !self.registers.contains(&(index as u8)))
-                {
-                    violations.insert(SpuObservationComponent::Registers);
-                }
-            }
-            if local_store_differs && !self.local_store {
-                violations.insert(SpuObservationComponent::LocalStore);
-            }
-            if before.pc != observed.pc && !self.control_transfer {
-                violations.insert(SpuObservationComponent::ProgramCounter);
-            }
-            if !channel_differences(&before.channels, &observed.channels).is_subset(&self.channels)
-            {
-                violations.insert(SpuObservationComponent::Channels);
-            }
-            if before.reservation != observed.reservation && !self.reservation {
-                violations.insert(SpuObservationComponent::Reservation);
-            }
-            if before.fpscr != observed.fpscr && !self.fpscr {
-                violations.insert(SpuObservationComponent::Fpscr);
-            }
-            if before.signals != observed.signals && !self.signals {
-                violations.insert(SpuObservationComponent::Signals);
-            }
-            if (before.interrupts_enabled, before.srr0)
-                != (observed.interrupts_enabled, observed.srr0)
-                && !self.interrupts
-            {
-                violations.insert(SpuObservationComponent::Interrupts);
-            }
-            let (was, now) = (&before.facilities, &observed.facilities);
-            for (changed, allowed, component) in [
-                (
-                    was.events != now.events,
-                    self.events,
-                    SpuObservationComponent::Events,
-                ),
-                (
-                    was.decrementer != now.decrementer,
-                    self.decrementer,
-                    SpuObservationComponent::Decrementer,
-                ),
-                (
-                    was.out_intr_mbox != now.out_intr_mbox,
-                    self.out_intr_mbox,
-                    SpuObservationComponent::OutboundInterruptMailbox,
-                ),
-                (
-                    was.lists != now.lists,
-                    self.lists,
-                    SpuObservationComponent::MfcLists,
-                ),
-                (
-                    was.mssync != now.mssync,
-                    self.mssync,
-                    SpuObservationComponent::MultisourceSync,
-                ),
-            ] {
-                if changed && !allowed {
-                    violations.insert(component);
-                }
-            }
-        }
+            self.retired_violations(&before, observed, outcome, local_store_differs)
+        };
         // A fault discards effects even when their kind is otherwise allowed.
         if (fault_discarded && !effects.is_empty())
             || effects
@@ -891,5 +761,127 @@ impl SpuAllowedFootprint {
             violations.insert(SpuObservationComponent::Effects);
         }
         violations
+    }
+
+    /// The state changes outside the footprint of a step that kept its
+    /// result.
+    fn retired_violations(
+        &self,
+        before: &SpuObservableSnapshot,
+        observed: &SpuObservableSnapshot,
+        outcome: &SpuStepOutcome,
+        local_store_differs: bool,
+    ) -> BTreeSet<SpuObservationComponent> {
+        let mut violations = BTreeSet::new();
+        // A stalled access did not retire, so it writes no register.
+        // [CBE-Handbook p:542 s:19.6.6.3 SPU Side] An empty inbound mailbox stalls the read.
+        let stalled = matches!(
+            outcome,
+            SpuStepOutcome::Yield {
+                reason: cellgov_exec::YieldReason::ChannelStall,
+                ..
+            }
+        );
+        for (index, (previous, current)) in before.regs.iter().zip(&observed.regs).enumerate() {
+            if previous != current && (stalled || !self.registers.contains(&(index as u8))) {
+                violations.insert(SpuObservationComponent::Registers);
+            }
+        }
+        if local_store_differs && !self.local_store {
+            violations.insert(SpuObservationComponent::LocalStore);
+        }
+        if before.pc != observed.pc && !self.control_transfer {
+            violations.insert(SpuObservationComponent::ProgramCounter);
+        }
+        if !channel_differences(&before.channels, &observed.channels).is_subset(&self.channels) {
+            violations.insert(SpuObservationComponent::Channels);
+        }
+        if before.reservation != observed.reservation && !self.reservation {
+            violations.insert(SpuObservationComponent::Reservation);
+        }
+        if before.fpscr != observed.fpscr && !self.fpscr {
+            violations.insert(SpuObservationComponent::Fpscr);
+        }
+        if before.signals != observed.signals && !self.signals {
+            violations.insert(SpuObservationComponent::Signals);
+        }
+        if (before.interrupts_enabled, before.srr0) != (observed.interrupts_enabled, observed.srr0)
+            && !self.interrupts
+        {
+            violations.insert(SpuObservationComponent::Interrupts);
+        }
+        let (was, now) = (&before.facilities, &observed.facilities);
+        for (changed, allowed, component) in [
+            (
+                was.events != now.events,
+                self.events,
+                SpuObservationComponent::Events,
+            ),
+            (
+                was.decrementer != now.decrementer,
+                self.decrementer,
+                SpuObservationComponent::Decrementer,
+            ),
+            (
+                was.out_intr_mbox != now.out_intr_mbox,
+                self.out_intr_mbox,
+                SpuObservationComponent::OutboundInterruptMailbox,
+            ),
+            (
+                was.lists != now.lists,
+                self.lists,
+                SpuObservationComponent::MfcLists,
+            ),
+            (
+                was.mssync != now.mssync,
+                self.mssync,
+                SpuObservationComponent::MultisourceSync,
+            ),
+        ] {
+            if changed && !allowed {
+                violations.insert(component);
+            }
+        }
+        violations
+    }
+}
+
+/// The channel-state fields a write to `channel` may replace.
+fn wrch_channel_fields(channel: u8) -> &'static [SpuChannelField] {
+    use cellgov_ps3_abi::hw::spu;
+    match channel {
+        spu::MFC_LSA => &[SpuChannelField::MfcLsa],
+        spu::MFC_EAH => &[SpuChannelField::MfcEah],
+        spu::MFC_EAL => &[SpuChannelField::MfcEal],
+        spu::MFC_SIZE => &[SpuChannelField::MfcSize],
+        spu::MFC_TAG_ID => &[SpuChannelField::MfcTagId],
+        spu::MFC_WR_TAG_MASK => &[SpuChannelField::TagMask],
+        // A command that consumed MFC_EAH takes it back to 0.
+        spu::MFC_CMD => &[
+            SpuChannelField::CommandQueue,
+            SpuChannelField::AtomicStatus,
+            SpuChannelField::AtomicStatusReady,
+            SpuChannelField::MfcEah,
+        ],
+        spu::SPU_WR_OUT_MBOX => &[SpuChannelField::OutboundMailbox],
+        spu::MFC_WR_TAG_UPDATE => &[SpuChannelField::TagUpdate, SpuChannelField::TagStatusRead],
+        _ => &[],
+    }
+}
+
+/// The channel-state fields a read of `channel` may replace.
+fn rdch_channel_fields(channel: u8) -> &'static [SpuChannelField] {
+    use cellgov_ps3_abi::hw::spu;
+    match channel {
+        spu::SPU_RD_IN_MBOX => &[SpuChannelField::InboundMailbox],
+        spu::MFC_RD_TAG_STAT => &[SpuChannelField::TagStatusRead],
+        // [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] the channel holds the status of the last completed immediate atomic command.
+        // The read takes the status, and the channel holds none until
+        // the next atomic command completes.
+        spu::MFC_RD_ATOMIC_STAT => &[
+            SpuChannelField::AtomicStatus,
+            SpuChannelField::AtomicStatusReady,
+        ],
+        _ => &[],
     }
 }
