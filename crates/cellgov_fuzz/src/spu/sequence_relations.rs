@@ -125,6 +125,31 @@ pub(crate) fn instantiate(
     instantiate_in(relation, rng, SpuState::new())
 }
 
+/// One 32-bit lane of an input register: for a float row mostly a
+/// normal single, else a boundary word half the time.
+fn draw_lane_word(rng: &mut Rng, float_row: bool) -> Result<u32, FuzzError> {
+    if !float_row {
+        return Ok(if rng.chance(1, 2)? {
+            BOUNDARY_WORDS[rng.below(BOUNDARY_WORDS.len() as u64)? as usize]
+        } else {
+            rng.next_u32()
+        });
+    }
+    // Mostly normal operands, so a float row's precondition holds; the
+    // boundary classes still come often enough to fall outside it.
+    if rng.chance(1, 8)? {
+        return Ok(BOUNDARY_WORDS[rng.below(BOUNDARY_WORDS.len() as u64)? as usize]);
+    }
+    let exponent = FLOAT_EXPONENTS.start()
+        + rng.below(u64::from(
+            FLOAT_EXPONENTS.end() - FLOAT_EXPONENTS.start() + 1,
+        ))? as u32;
+    // Three in four positive, so a row that needs a positive operand in
+    // every lane still compares.
+    let sign = u32::from(rng.chance(1, 4)?) << 31;
+    Ok(rng.next_u32() & 0x007F_FFFF | exponent << 23 | sign)
+}
+
 /// [`instantiate`]'s draw, with the start state in `start`, which equals
 /// [`SpuState::new`].
 fn instantiate_in(
@@ -154,27 +179,7 @@ fn instantiate_in(
     for &register in &assignment {
         let mut value = [0u8; 16];
         for lane in value.chunks_exact_mut(4) {
-            let word = if float_row {
-                // Mostly normal operands, so a float row's precondition
-                // holds; the boundary classes still come often enough to
-                // fall outside it.
-                if rng.chance(1, 8)? {
-                    BOUNDARY_WORDS[rng.below(BOUNDARY_WORDS.len() as u64)? as usize]
-                } else {
-                    let exponent = FLOAT_EXPONENTS.start()
-                        + rng.below(u64::from(
-                            FLOAT_EXPONENTS.end() - FLOAT_EXPONENTS.start() + 1,
-                        ))? as u32;
-                    // Three in four positive, so a row that needs a
-                    // positive operand in every lane still compares.
-                    let sign = u32::from(rng.chance(1, 4)?) << 31;
-                    rng.next_u32() & 0x007F_FFFF | exponent << 23 | sign
-                }
-            } else if rng.chance(1, 2)? {
-                BOUNDARY_WORDS[rng.below(BOUNDARY_WORDS.len() as u64)? as usize]
-            } else {
-                rng.next_u32()
-            };
+            let word = draw_lane_word(rng, float_row)?;
             lane.copy_from_slice(&word.to_be_bytes());
         }
         start.set_reg(usize::from(register), value);

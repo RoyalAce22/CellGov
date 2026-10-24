@@ -62,67 +62,7 @@ pub(super) fn structured_sequence(
 ) -> Result<GeneratedSequence, GeneratorError> {
     // [Wang2024 p:340:9 s:3.2] Generation records which places earlier words wrote so later words can read them.
     if count >= 3 && rng.chance(1, 2)? {
-        // [Wang2024 p:340:9 s:3.1] Choices carry hand-set weights that favour the operations judged more likely to reach a defect, so half the programs that stage an interaction wait on a facility.
-        let pool: &[SpuSequenceInteraction] = if rng.chance(1, 2)? {
-            &SpuSequenceInteraction::FACILITIES
-        } else {
-            &SpuSequenceInteraction::ALL
-        };
-        let mut fitting = Vec::new();
-        for interaction in pool {
-            let words = interaction.words(descriptors)?;
-            if words.len() <= count {
-                fitting.push((*interaction, words));
-            }
-        }
-        if fitting.is_empty() {
-            for interaction in SpuSequenceInteraction::ALL {
-                let words = interaction.words(descriptors)?;
-                if words.len() <= count {
-                    fitting.push((interaction, words));
-                }
-            }
-        }
-        // [Padhye2019 p:332 s:3.1] One random draw selects a whole structured program, so every draw yields a valid input.
-        let index = rng.below(fitting.len() as u64)? as usize;
-        let Some((interaction, mut words)) = fitting.into_iter().nth(index) else {
-            return Err(GeneratorError::EmptyDescriptorRegistry {
-                target: "SPU sequence interactions",
-            });
-        };
-        let data_base =
-            STRUCTURED_LS_DATA_BASE + (rng.below(16)? as u32 * RESERVATION_LINE_BYTES as u32);
-        let nop = descriptors
-            .iter()
-            .find(|descriptor| descriptor.kind == cellgov_spu::instruction::SpuInstructionKind::Nop)
-            .ok_or(SpuGenerationError::MissingSequenceKind {
-                kind: cellgov_spu::instruction::SpuInstructionKind::Nop,
-            })?
-            .canonical_word;
-        words.resize(count, nop);
-        // [Feng2026 p:32 s:4.3.3] An expected termination keeps its own code so it is not confused with a behavioural divergence; a refusal the RefusedMfcCommand family intends is ordinary channel state.
-        let features = match interaction {
-            SpuSequenceInteraction::Branch | SpuSequenceInteraction::Stop => {
-                BTreeSet::from([CaseFeature::ControlledFlow])
-            }
-            SpuSequenceInteraction::LocalStore => BTreeSet::from([CaseFeature::MappedMemory]),
-            SpuSequenceInteraction::Channel
-            | SpuSequenceInteraction::RefusedMfcCommand
-            | SpuSequenceInteraction::Mailbox
-            | SpuSequenceInteraction::Dma
-            | SpuSequenceInteraction::DmaGet
-            | SpuSequenceInteraction::MemoryRead
-            | SpuSequenceInteraction::Reservation
-            | SpuSequenceInteraction::TagWait
-            | SpuSequenceInteraction::ReserveStore
-            | SpuSequenceInteraction::EventWait
-            | SpuSequenceInteraction::MailboxDrain => BTreeSet::from([CaseFeature::ChannelState]),
-        };
-        return Ok(GeneratedSequence {
-            words,
-            features,
-            interaction: Some((interaction, data_base)),
-        });
+        return structured_interaction_sequence(descriptors, rng, count);
     }
     let chain_register = rng.chance(3, 4)?.then(|| rng.next_u32());
     let mut words = Vec::with_capacity(count);
@@ -146,6 +86,82 @@ pub(super) fn structured_sequence(
     })
 }
 
+/// A program that stages one interaction, padded with `nop` to `count`
+/// words.
+fn structured_interaction_sequence(
+    descriptors: &[SpuGenerationDescriptor],
+    rng: &mut Rng,
+    count: usize,
+) -> Result<GeneratedSequence, GeneratorError> {
+    // [Wang2024 p:340:9 s:3.1] Choices carry hand-set weights that favour the operations judged more likely to reach a defect, so half the programs that stage an interaction wait on a facility.
+    let pool: &[SpuSequenceInteraction] = if rng.chance(1, 2)? {
+        &SpuSequenceInteraction::FACILITIES
+    } else {
+        &SpuSequenceInteraction::ALL
+    };
+    let mut fitting = fitting_interactions(pool, descriptors, count)?;
+    if fitting.is_empty() {
+        fitting = fitting_interactions(&SpuSequenceInteraction::ALL, descriptors, count)?;
+    }
+    // [Padhye2019 p:332 s:3.1] One random draw selects a whole structured program, so every draw yields a valid input.
+    let index = rng.below(fitting.len() as u64)? as usize;
+    let Some((interaction, mut words)) = fitting.into_iter().nth(index) else {
+        return Err(GeneratorError::EmptyDescriptorRegistry {
+            target: "SPU sequence interactions",
+        });
+    };
+    let data_base =
+        STRUCTURED_LS_DATA_BASE + (rng.below(16)? as u32 * RESERVATION_LINE_BYTES as u32);
+    let nop = descriptors
+        .iter()
+        .find(|descriptor| descriptor.kind == cellgov_spu::instruction::SpuInstructionKind::Nop)
+        .ok_or(SpuGenerationError::MissingSequenceKind {
+            kind: cellgov_spu::instruction::SpuInstructionKind::Nop,
+        })?
+        .canonical_word;
+    words.resize(count, nop);
+    // [Feng2026 p:32 s:4.3.3] An expected termination keeps its own code so it is not confused with a behavioural divergence; a refusal the RefusedMfcCommand family intends is ordinary channel state.
+    let features = match interaction {
+        SpuSequenceInteraction::Branch | SpuSequenceInteraction::Stop => {
+            BTreeSet::from([CaseFeature::ControlledFlow])
+        }
+        SpuSequenceInteraction::LocalStore => BTreeSet::from([CaseFeature::MappedMemory]),
+        SpuSequenceInteraction::Channel
+        | SpuSequenceInteraction::RefusedMfcCommand
+        | SpuSequenceInteraction::Mailbox
+        | SpuSequenceInteraction::Dma
+        | SpuSequenceInteraction::DmaGet
+        | SpuSequenceInteraction::MemoryRead
+        | SpuSequenceInteraction::Reservation
+        | SpuSequenceInteraction::TagWait
+        | SpuSequenceInteraction::ReserveStore
+        | SpuSequenceInteraction::EventWait
+        | SpuSequenceInteraction::MailboxDrain => BTreeSet::from([CaseFeature::ChannelState]),
+    };
+    Ok(GeneratedSequence {
+        words,
+        features,
+        interaction: Some((interaction, data_base)),
+    })
+}
+
+/// The interactions in `pool` whose words fit in `count`, with those
+/// words, in pool order.
+fn fitting_interactions(
+    pool: &[SpuSequenceInteraction],
+    descriptors: &[SpuGenerationDescriptor],
+    count: usize,
+) -> Result<Vec<(SpuSequenceInteraction, Vec<u32>)>, GeneratorError> {
+    let mut fitting = Vec::new();
+    for interaction in pool {
+        let words = interaction.words(descriptors)?;
+        if words.len() <= count {
+            fitting.push((*interaction, words));
+        }
+    }
+    Ok(fitting)
+}
+
 fn structured_generated_word_for_flow(
     descriptors: &[SpuGenerationDescriptor],
     rng: &mut Rng,
@@ -160,20 +176,21 @@ fn structured_generated_word_for_flow(
         let Some(descriptor) = descriptors.get(index) else {
             return Err(GeneratorError::EmptyDescriptorRegistry { target: "SPU" });
         };
-        if descriptor.sequence_flow == SpuSequenceFlow::Linear
-            || (!linear_only && descriptor.sequence_flow == SpuSequenceFlow::ControlTransfer)
-        {
-            let mut generated =
-                match structured_generated_word_for_descriptor(descriptor, rng, forced_alias) {
-                    Ok(generated) => generated,
-                    Err(GeneratorError::ConstraintAttemptsExhausted { .. }) => continue,
-                    Err(error) => return Err(error),
-                };
-            if descriptor.sequence_flow == SpuSequenceFlow::ControlTransfer {
-                generated.features.insert(CaseFeature::ControlledFlow);
-            }
-            return Ok(generated);
+        let eligible = descriptor.sequence_flow == SpuSequenceFlow::Linear
+            || (!linear_only && descriptor.sequence_flow == SpuSequenceFlow::ControlTransfer);
+        if !eligible {
+            continue;
         }
+        let mut generated =
+            match structured_generated_word_for_descriptor(descriptor, rng, forced_alias) {
+                Ok(generated) => generated,
+                Err(GeneratorError::ConstraintAttemptsExhausted { .. }) => continue,
+                Err(error) => return Err(error),
+            };
+        if descriptor.sequence_flow == SpuSequenceFlow::ControlTransfer {
+            generated.features.insert(CaseFeature::ControlledFlow);
+        }
+        return Ok(generated);
     }
     Err(GeneratorError::ConstraintAttemptsExhausted {
         target: "SPU sequence descriptor",
