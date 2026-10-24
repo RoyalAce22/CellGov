@@ -387,6 +387,25 @@ fn rejects_truncated_record() {
 }
 
 #[test]
+fn a_record_length_below_the_fixed_fields_is_refused() {
+    let base = build_iso(vec![Node::File("X.BIN", b"hi".to_vec())]);
+    let root = 18 * SEC;
+    let dot = base[root] as usize;
+    let dotdot = base[root + dot] as usize;
+    let child = root + dot + dotdot;
+    let pvd_root = 16 * SEC + 156;
+    for (pos, length) in [(child, 1u8), (child, 32), (pvd_root, 1), (pvd_root, 32)] {
+        let mut image = base.clone();
+        image[pos] = length;
+        let err = read_iso(&image).unwrap_err();
+        assert!(
+            matches!(err, IsoError::RecordTruncated { pos: at } if at == pos),
+            "length {length} at 0x{pos:x}: got {err:?}"
+        );
+    }
+}
+
+#[test]
 fn rejects_excessive_nesting() {
     // A chain of dirs deeper than MAX_DEPTH (64) -- each dir's only
     // child is the next dir.

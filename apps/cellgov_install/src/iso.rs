@@ -125,7 +125,8 @@ pub enum IsoError {
     /// No Primary or Joliet descriptor before the terminator.
     #[error("ISO has no primary/Joliet volume descriptor")]
     NoRootDescriptor,
-    /// A directory record was truncated against the image bounds.
+    /// A directory record is shorter than its fixed fields or its name,
+    /// or runs past the image.
     #[error("ISO directory record at 0x{pos:x} is truncated")]
     RecordTruncated {
         /// Absolute byte offset of the record.
@@ -349,6 +350,10 @@ fn parse_dir_record(image: &[u8], pos: usize, ucs2: bool) -> Result<Option<DirRe
     let entry_length = usize::from(image[pos]);
     if entry_length == 0 {
         return Ok(None);
+    }
+    // The fixed fields read below lie inside the record's own length.
+    if entry_length < DIR_RECORD_FIXED {
+        return Err(IsoError::RecordTruncated { pos });
     }
     let fixed_end = pos.checked_add(DIR_RECORD_FIXED);
     let entry_end = pos.checked_add(entry_length);
