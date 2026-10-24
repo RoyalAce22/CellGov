@@ -14,6 +14,7 @@ use cellgov_ps3_abi::lv2::process::SYS_MUTEX_OBJECT;
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::guest_struct::GuestStruct;
 use crate::host::{Lv2Host, Lv2Runtime};
+use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::MutexAttrs;
 use cellgov_time::GuestTicks;
 
@@ -37,68 +38,12 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         use cellgov_ps3_abi::lv2::sync::mutex_attribute as attr_layout;
-        let attrs = if let Some(attr) =
-            GuestStruct::read(rt, attr_ptr as u64, attr_layout::SIZE as usize)
-        {
-            let protocol = attr.u32_at(attr_layout::PROTOCOL_OFFSET);
-            let recursive_raw = attr.u32_at(attr_layout::RECURSIVE_OFFSET);
-            let pshared = attr.u32_at(attr_layout::PSHARED_OFFSET);
-            // Protocol, recursive and pshared are enumerations, and an
-            // unknown enumerant in any of them is EINVAL. Every refusal
-            // here is EINVAL, so the order of the three checks is not
-            // visible to a guest. Dispatch does not check the adaptive
-            // word: the console creates the mutex for every adaptive
-            // value tried.
-            match protocol {
-                cellgov_ps3_abi::lv2::sync::SYS_SYNC_FIFO
-                | cellgov_ps3_abi::lv2::sync::SYS_SYNC_PRIORITY => {}
-                cellgov_ps3_abi::lv2::sync::SYS_SYNC_PRIORITY_INHERIT => {}
-                _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-            }
-            // Only the RECURSIVE enumerant enables re-locking;
-            // SYS_SYNC_NOT_RECURSIVE (0x20) is nonzero but means
-            // not recursive, and no third value is defined.
-            match recursive_raw {
-                cellgov_ps3_abi::lv2::sync::SYS_SYNC_RECURSIVE
-                | cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_RECURSIVE => {}
-                _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-            }
-            match pshared {
-                cellgov_ps3_abi::lv2::sync::SYS_SYNC_PROCESS_SHARED => {
-                    // Process-shared creates carry an ipc_key and an
-                    // attach policy. A zero key, or an attach flag
-                    // other than NEWLY_CREATED / NOT_CREATE / NOT_CARE
-                    // (1 / 2 / 3), is EINVAL. A create that is not
-                    // process-shared ignores both fields.
-                    let ipc_key = attr.u64_at(attr_layout::IPC_KEY_OFFSET);
-                    let flags = attr.u32_at(attr_layout::FLAGS_OFFSET);
-                    if ipc_key == 0 || !(1..=3).contains(&flags) {
-                        return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
-                    }
-                    // No mutex ipc-key registry exists yet, so the key
-                    // is not published and NOT_CREATE cannot attach; the
-                    // entry is created process-local instead of silently
-                    // pretending the namespace exists.
-                    self.log_invariant_break(
-                        "mutex.pshared_attach_unmodeled",
-                        format_args!(
-                            "sys_mutex_create with pshared ipc_key {ipc_key:#x} \
-                             flags {flags}: cross-process attach not modeled; \
-                             created process-local"
-                        ),
-                    );
-                }
-                cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_PROCESS_SHARED => {}
-                _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-            }
-            MutexAttrs {
-                priority_policy: protocol,
-                recursive: recursive_raw == cellgov_ps3_abi::lv2::sync::SYS_SYNC_RECURSIVE,
-                protocol,
-                process_shared: pshared == cellgov_ps3_abi::lv2::sync::SYS_SYNC_PROCESS_SHARED,
-            }
-        } else {
+        let Some(attr) = GuestStruct::read(rt, attr_ptr as u64, attr_layout::SIZE as usize) else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        };
+        let attrs = match self.mutex_attrs_from(&attr) {
+            Ok(attrs) => attrs,
+            Err(code) => return Lv2Dispatch::immediate(code),
         };
         let Some(id) = self.alloc_id(requester, SYS_MUTEX_OBJECT) else {
             return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
@@ -108,6 +53,84 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         self.immediate_write_u32(id, id_ptr, requester, tick)
+    }
+
+    /// The attributes a `sys_mutex_attribute` block names, or the errno
+    /// the create returns.
+    fn mutex_attrs_from(&mut self, attr: &GuestStruct<'_>) -> Result<MutexAttrs, u64> {
+        use cellgov_ps3_abi::lv2::sync::mutex_attribute as attr_layout;
+        let protocol = attr.u32_at(attr_layout::PROTOCOL_OFFSET);
+        let recursive_raw = attr.u32_at(attr_layout::RECURSIVE_OFFSET);
+        let pshared = attr.u32_at(attr_layout::PSHARED_OFFSET);
+        // Protocol, recursive and pshared are enumerations, and an
+        // unknown enumerant in any of them is EINVAL. Every refusal
+        // here is EINVAL, so the order of the three checks is not
+        // visible to a guest. Dispatch does not check the adaptive
+        // word: the console creates the mutex for every adaptive
+        // value tried.
+        match protocol {
+            cellgov_ps3_abi::lv2::sync::SYS_SYNC_FIFO
+            | cellgov_ps3_abi::lv2::sync::SYS_SYNC_PRIORITY => {}
+            cellgov_ps3_abi::lv2::sync::SYS_SYNC_PRIORITY_INHERIT => {}
+            _ => return Err(errno::CELL_EINVAL.into()),
+        }
+        // Only the RECURSIVE enumerant enables re-locking;
+        // SYS_SYNC_NOT_RECURSIVE (0x20) is nonzero but means
+        // not recursive, and no third value is defined.
+        match recursive_raw {
+            cellgov_ps3_abi::lv2::sync::SYS_SYNC_RECURSIVE
+            | cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_RECURSIVE => {}
+            _ => return Err(errno::CELL_EINVAL.into()),
+        }
+        match pshared {
+            cellgov_ps3_abi::lv2::sync::SYS_SYNC_PROCESS_SHARED => {
+                // Process-shared creates carry an ipc_key and an
+                // attach policy. A zero key, or an attach flag
+                // other than NEWLY_CREATED / NOT_CREATE / NOT_CARE
+                // (1 / 2 / 3), is EINVAL. A create that is not
+                // process-shared ignores both fields.
+                let ipc_key = attr.u64_at(attr_layout::IPC_KEY_OFFSET);
+                let flags = attr.u32_at(attr_layout::FLAGS_OFFSET);
+                if ipc_key == 0 || !(1..=3).contains(&flags) {
+                    return Err(errno::CELL_EINVAL.into());
+                }
+                // No mutex ipc-key registry exists yet, so the key
+                // is not published and NOT_CREATE cannot attach; the
+                // entry is created process-local instead of silently
+                // pretending the namespace exists.
+                self.log_invariant_break(
+                    "mutex.pshared_attach_unmodeled",
+                    format_args!(
+                        "sys_mutex_create with pshared ipc_key {ipc_key:#x} \
+                         flags {flags}: cross-process attach not modeled; \
+                         created process-local"
+                    ),
+                );
+            }
+            cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_PROCESS_SHARED => {}
+            _ => return Err(errno::CELL_EINVAL.into()),
+        }
+        Ok(MutexAttrs {
+            priority_policy: protocol,
+            recursive: recursive_raw == cellgov_ps3_abi::lv2::sync::SYS_SYNC_RECURSIVE,
+            protocol,
+            process_shared: pshared == cellgov_ps3_abi::lv2::sync::SYS_SYNC_PROCESS_SHARED,
+        })
+    }
+
+    /// The PPU thread behind `requester`, for a call on mutex `id`.
+    ///
+    /// A unit with no thread record is an invariant break; the call
+    /// returns ESRCH.
+    fn mutex_caller(&mut self, id: u32, requester: UnitId) -> Option<PpuThreadId> {
+        let caller = self.state.ppu_threads.thread_id_for_unit(requester);
+        if caller.is_none() {
+            self.log_invariant_break(
+                "dispatch.mutex_caller_without_thread_record",
+                format_args!("mutex 0x{id:08x}: unit {requester:?} has no PPU thread record"),
+            );
+        }
+        caller
     }
 
     /// `sys_mutex_destroy` (101).
@@ -137,11 +160,7 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_mutex_lock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
-        let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
-            self.log_invariant_break(
-                "dispatch.mutex_caller_without_thread_record",
-                format_args!("mutex 0x{id:08x}: unit {requester:?} has no PPU thread record"),
-            );
+        let Some(caller) = self.mutex_caller(id, requester) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         match self.state.mutexes.acquire_or_enqueue(id, caller) {
@@ -175,11 +194,7 @@ impl Lv2Host {
     ///   mutex, as the `lv2_error_codes_sync` capture shows.
     /// - `CELL_EBUSY` while another thread holds it.
     pub(super) fn dispatch_mutex_trylock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
-        let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
-            self.log_invariant_break(
-                "dispatch.mutex_caller_without_thread_record",
-                format_args!("mutex 0x{id:08x}: unit {requester:?} has no PPU thread record"),
-            );
+        let Some(caller) = self.mutex_caller(id, requester) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if self
@@ -200,11 +215,7 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_mutex_unlock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
-        let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
-            self.log_invariant_break(
-                "dispatch.mutex_caller_without_thread_record",
-                format_args!("mutex 0x{id:08x}: unit {requester:?} has no PPU thread record"),
-            );
+        let Some(caller) = self.mutex_caller(id, requester) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         // A recursive hold is counted, so it needs a matching unlock:
