@@ -247,44 +247,50 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         match pkg_id {
             1 | 3 => Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()),
-            2 => match u32::try_from(a2) {
-                Err(_) => Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
-                Ok(0) => Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
-                Ok(addr) => {
-                    let pid = self.state.processes.process_of_unit(requester);
-                    let authority_id = match self.state.processes.get(pid) {
-                        Some(entry) => entry.authority_id,
-                        None => {
-                            // Reachable only through a unit binding
-                            // naming a pid the table never held.
-                            self.log_invariant_break(
-                                "process.authority_of_unknown_pid",
-                                format_args!(
-                                    "access-control pkg 2 from {requester:?} bound to \
-                                     pid {pid:#x} with no table entry; serving the \
-                                     boot authority id"
-                                ),
-                            );
-                            self.state.processes.boot().authority_id
-                        }
-                    };
-                    let authid_be = authority_id.to_be_bytes();
-                    let write = Effect::shared_write(
-                        ByteRange::contiguous_u32(addr, 8),
-                        WritePayload::from_slice(&authid_be),
-                        requester,
-                        tick,
-                    );
-                    Lv2Dispatch::Immediate {
-                        code: 0,
-                        effects: vec![write],
-                    }
-                }
-            },
+            2 => self.write_authority_id(a2, requester, tick),
             _ => Lv2Dispatch::immediate(
                 cellgov_ps3_abi::lv2::ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID as i32 as i64 as u64,
             ),
         }
+    }
+
+    /// Access-control `pkg_id` 2: write the caller's program authority
+    /// id to `a2`, or EFAULT when `a2` is zero or exceeds `u32`.
+    fn write_authority_id(&mut self, a2: u64, requester: UnitId, tick: GuestTicks) -> Lv2Dispatch {
+        let Ok(addr @ 1..) = u32::try_from(a2) else {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        };
+        let authid_be = self.authority_id_of(requester).to_be_bytes();
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(addr, 8),
+            WritePayload::from_slice(&authid_be),
+            requester,
+            tick,
+        );
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![write],
+        }
+    }
+
+    /// The program authority id of `requester`'s process.
+    ///
+    /// A unit bound to a pid the process table never held is an
+    /// invariant break; the boot process's id answers for it.
+    fn authority_id_of(&mut self, requester: UnitId) -> u64 {
+        let pid = self.state.processes.process_of_unit(requester);
+        if let Some(entry) = self.state.processes.get(pid) {
+            return entry.authority_id;
+        }
+        self.log_invariant_break(
+            "process.authority_of_unknown_pid",
+            format_args!(
+                "access-control pkg 2 from {requester:?} bound to \
+                 pid {pid:#x} with no table entry; serving the \
+                 boot authority id"
+            ),
+        );
+        self.state.processes.boot().authority_id
     }
 
     /// `sys_timer_create` stub: records the new id as live, with no
