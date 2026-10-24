@@ -212,64 +212,80 @@ impl<R: Read> Iterator for HleTraceReader<R> {
         if self.done {
             return None;
         }
+        match self.step() {
+            Ok(item) => item,
+            Err(error) => {
+                self.done = true;
+                Some(Err(HleTraceError::Io(error)))
+            }
+        }
+    }
+}
+
+impl<R: Read> HleTraceReader<R> {
+    /// The next item; an `Err` is a read failure the caller reports.
+    fn step(&mut self) -> std::io::Result<Option<Result<HleTraceEvent, HleTraceError>>> {
         loop {
             if !self.have_window {
-                // Read up to 4 bytes, looping on partial reads, so a
-                // buffer boundary in the reader cannot pass for EOF; a
-                // real EOF returns 0 from the first read.
-                let mut filled = 0usize;
-                while filled < 4 {
-                    let n = match self.reader.read(&mut self.window[filled..]) {
-                        Ok(n) => n,
-                        Err(error) => {
-                            self.done = true;
-                            return Some(Err(HleTraceError::Io(error)));
-                        }
-                    };
-                    if n == 0 {
-                        break;
-                    }
-                    filled += n;
-                }
-                if filled < 4 {
+                if !self.fill_window()? {
                     // A clean end on a record boundary, or trailing
                     // bytes too short for a magic.
-                    return self.finish();
+                    return Ok(self.finish());
                 }
                 self.have_window = true;
             }
             if u32::from_le_bytes(self.window) != RECORD_MAGIC {
-                // Slide the window left by one byte and read one fresh.
-                self.window.copy_within(1.., 0);
-                let mut one = [0u8; 1];
-                match self.reader.read(&mut one) {
-                    Ok(0) => return self.finish(),
-                    Ok(_) => {}
-                    Err(error) => {
-                        self.done = true;
-                        return Some(Err(HleTraceError::Io(error)));
-                    }
+                if !self.slide_one()? {
+                    return Ok(self.finish());
                 }
-                self.window[3] = one[0];
-                self.skipped += 1;
                 continue;
             }
             if self.skipped > 0 {
                 // Report the skipped run first; the window still holds
                 // the magic, so the next call decodes its record.
                 let skipped = std::mem::take(&mut self.skipped);
-                return Some(Ok(HleTraceEvent::SkippedBytes(skipped)));
+                return Ok(Some(Ok(HleTraceEvent::SkippedBytes(skipped))));
             }
             self.have_window = false;
-            return Some(match parse_one_record(&mut self.reader) {
+            return Ok(Some(match parse_one_record(&mut self.reader) {
                 Ok(record) => Ok(HleTraceEvent::Record(record)),
                 Err(error) if error.is_fatal() => {
                     self.done = true;
                     Err(error)
                 }
                 Err(error) => Ok(HleTraceEvent::DroppedRecord(error)),
-            });
+            }));
         }
+    }
+
+    /// Reads the 4-byte window; `false` when the input ends first.
+    ///
+    /// Reads up to 4 bytes, looping on partial reads, so a buffer
+    /// boundary in the reader cannot pass for EOF; a real EOF returns 0
+    /// from the first read.
+    fn fill_window(&mut self) -> std::io::Result<bool> {
+        let mut filled = 0usize;
+        while filled < 4 {
+            let n = self.reader.read(&mut self.window[filled..])?;
+            if n == 0 {
+                break;
+            }
+            filled += n;
+        }
+        Ok(filled == 4)
+    }
+
+    /// Slides the window left by one byte and reads one fresh, counting
+    /// the byte it drops; `false` when the input ends.
+    fn slide_one(&mut self) -> std::io::Result<bool> {
+        self.window.copy_within(1.., 0);
+        let mut one = [0u8; 1];
+        if self.reader.read(&mut one)? == 0 {
+            return Ok(false);
+        }
+        self.window[3] = one[0];
+        self.skipped += 1;
+        Ok(true)
     }
 }
 
