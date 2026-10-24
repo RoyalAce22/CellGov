@@ -141,19 +141,7 @@ pub(crate) fn run_zoom(
             b_pc,
             diffs,
         } => {
-            if diffs.is_empty() {
-                // PC is outside the fingerprint, so `diff diverge` can name
-                // a Pc divergence whose zoom diff is empty -- that is
-                // a real control-flow divergence, not harness skew.
-                if a_pc != b_pc {
-                    println!(
-                        "PC_DIFF step={step} a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  registers agree but control flow diverged; the PC split is the divergence"
-                    );
-                    return Ok(CommandExitCode::new(exit_codes::FAILED));
-                }
-                println!("NO_FIELD_DIFF step={step} pc=0x{a_pc:x}  snapshots agree on every fingerprint field and PC; if the hash stream diverged at this step, the harness is skewing snapshots against hashes -- investigate, do not resume the scan");
-                Ok(CommandExitCode::SUCCESS)
-            } else {
+            if !diffs.is_empty() {
                 println!(
                     "ZOOM step={step} a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  {} field(s) differ:",
                     diffs.len()
@@ -161,31 +149,54 @@ pub(crate) fn run_zoom(
                 for d in &diffs {
                     println!("  {:<5}  a=0x{:016x}  b=0x{:016x}", d.field, d.a, d.b);
                 }
-                Ok(CommandExitCode::new(exit_codes::FAILED))
+                return Ok(CommandExitCode::new(exit_codes::FAILED));
             }
+            // PC is outside the fingerprint, so `diff diverge` can name
+            // a Pc divergence whose zoom diff is empty. That is a real
+            // control-flow divergence in the guest.
+            if a_pc != b_pc {
+                println!(
+                    "PC_DIFF step={step} a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  registers agree but control flow diverged; the PC split is the divergence"
+                );
+                return Ok(CommandExitCode::new(exit_codes::FAILED));
+            }
+            println!("NO_FIELD_DIFF step={step} pc=0x{a_pc:x}  snapshots agree on every fingerprint field and PC; if the hash stream diverged at this step, the harness is skewing snapshots against hashes -- investigate, do not resume the scan");
+            Ok(CommandExitCode::SUCCESS)
         }
         ZoomLookup::MissingStep {
             step,
             a_missing,
             b_missing,
-        } => {
-            let a_has_step = !a_missing;
-            let b_has_step = !b_missing;
-            println!(
-                "MISSING_STEP step={step}  a_has_step={a_has_step}  b_has_step={b_has_step}  (zoom window did not cover this step on at least one side)"
-            );
-            Ok(CommandExitCode::new(EXIT_MISSING_STEP))
-        }
-        ZoomLookup::CorruptTrace { a_error, b_error } => {
-            let describe = |e: Option<String>| e.unwrap_or_else(|| "ok".into());
-            println!(
-                "CORRUPT_TRACE  a: {}  b: {}  (zoom file damaged; widening the window will not help)",
-                describe(a_error),
-                describe(b_error)
-            );
-            Ok(CommandExitCode::new(EXIT_CORRUPT_TRACE))
-        }
+        } => Ok(print_missing_step("", step, a_missing, b_missing)),
+        ZoomLookup::CorruptTrace { a_error, b_error } => Ok(print_corrupt_zoom(a_error, b_error)),
     }
+}
+
+/// The MISSING_STEP line; `prefix` names the SPU unit, or is empty for
+/// the PPU.
+fn print_missing_step(
+    prefix: &str,
+    step: u64,
+    a_missing: bool,
+    b_missing: bool,
+) -> CommandExitCode {
+    let a_has_step = !a_missing;
+    let b_has_step = !b_missing;
+    println!(
+        "MISSING_STEP {prefix}step={step}  a_has_step={a_has_step}  b_has_step={b_has_step}  (zoom window did not cover this step on at least one side)"
+    );
+    CommandExitCode::new(EXIT_MISSING_STEP)
+}
+
+/// The CORRUPT_TRACE line for a zoom trace that failed to decode.
+fn print_corrupt_zoom(a_error: Option<String>, b_error: Option<String>) -> CommandExitCode {
+    let describe = |e: Option<String>| e.unwrap_or_else(|| "ok".into());
+    println!(
+        "CORRUPT_TRACE  a: {}  b: {}  (zoom file damaged; widening the window will not help)",
+        describe(a_error),
+        describe(b_error)
+    );
+    CommandExitCode::new(EXIT_CORRUPT_TRACE)
 }
 
 /// `diff zoom --unit`: the SPU snapshot diff, rendered as the PPU one is.
@@ -230,22 +241,7 @@ fn spu_zoom(
             a_missing,
             b_missing,
             ..
-        } => {
-            let a_has_step = !a_missing;
-            let b_has_step = !b_missing;
-            println!(
-                "MISSING_STEP unit={name} step={step}  a_has_step={a_has_step}  b_has_step={b_has_step}  (zoom window did not cover this step on at least one side)"
-            );
-            CommandExitCode::new(EXIT_MISSING_STEP)
-        }
-        SpuZoomLookup::CorruptTrace { a_error, b_error } => {
-            let describe = |e: Option<String>| e.unwrap_or_else(|| "ok".into());
-            println!(
-                "CORRUPT_TRACE  a: {}  b: {}  (zoom file damaged; widening the window will not help)",
-                describe(a_error),
-                describe(b_error)
-            );
-            CommandExitCode::new(EXIT_CORRUPT_TRACE)
-        }
+        } => print_missing_step(&format!("unit={name} "), step, a_missing, b_missing),
+        SpuZoomLookup::CorruptTrace { a_error, b_error } => print_corrupt_zoom(a_error, b_error),
     }
 }
