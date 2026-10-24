@@ -107,40 +107,61 @@ pub(crate) fn run(
 ) -> Result<(), CommandError> {
     let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag)?;
     let (elf_bytes, source_kind) = load_elf_bytes(&parsed.path, &vfs_root)?;
-
     if let Some(out) = &parsed.save_elf {
-        std::fs::write(out, &elf_bytes).map_err(|error| {
-            CommandError::failed(format!(
-                "prx-imports: --save-elf write {}: {error}",
-                out.display()
-            ))
-        })?;
-        println!(
-            "prx-imports: wrote {} byte(s) of plaintext ELF to {}",
-            elf_bytes.len(),
-            out.display()
-        );
+        save_plaintext_elf(out, &elf_bytes)?;
     }
+    let identity = module_identity_or_note(&elf_bytes, &parsed.path);
+    let modules = cellgov_ppu::prx::parse_imports(&elf_bytes).map_err(|error| {
+        CommandError::failed(format!("prx-imports: parse_imports failed: {error}"))
+    })?;
+    print_header(parsed, &source_kind, identity.as_ref(), &modules);
+    let table = print_module_table(parsed, &modules);
+    report_filter_misses(parsed, &modules, &table);
+    report_empty_modules(parsed, &table.empty_modules);
+    Ok(())
+}
 
-    // A module-info refusal is named, since the import table below is
-    // printed as authoritative.
-    let sprx_parsed = match cellgov_ppu::sprx::module_identity(&elf_bytes) {
+fn save_plaintext_elf(out: &std::path::Path, elf_bytes: &[u8]) -> Result<(), CommandError> {
+    std::fs::write(out, elf_bytes).map_err(|error| {
+        CommandError::failed(format!(
+            "prx-imports: --save-elf write {}: {error}",
+            out.display()
+        ))
+    })?;
+    println!(
+        "prx-imports: wrote {} byte(s) of plaintext ELF to {}",
+        elf_bytes.len(),
+        out.display()
+    );
+    Ok(())
+}
+
+/// The module's identity, or `None` with a note on stderr: the import
+/// table prints as authoritative, so the listing names what it omits.
+fn module_identity_or_note(
+    elf_bytes: &[u8],
+    path: &std::path::Path,
+) -> Option<cellgov_ppu::sprx::ParsedPrx> {
+    match cellgov_ppu::sprx::module_identity(elf_bytes) {
         Ok(p) => p,
         Err(e) => {
             eprintln!(
                 "prx-imports: {}: PRX module info: {e}; \
                  module name, export namespaces, segment geometry, module TOC \
                  and entry-point OPDs omitted from the listing",
-                parsed.path.display(),
+                path.display(),
             );
             None
         }
-    };
+    }
+}
 
-    let modules = cellgov_ppu::prx::parse_imports(&elf_bytes).map_err(|error| {
-        CommandError::failed(format!("prx-imports: parse_imports failed: {error}"))
-    })?;
-
+fn print_header(
+    parsed: &PrxImportsArgs,
+    source_kind: &SourceKind,
+    identity: Option<&cellgov_ppu::sprx::ParsedPrx>,
+    modules: &[cellgov_ppu::prx::ImportedModule],
+) {
     let total_funcs: usize = modules.iter().map(|m| m.functions.len()).sum();
     let path_str = parsed.path.to_string_lossy().replace('\\', "/");
 
@@ -148,29 +169,8 @@ pub(crate) fn run(
     println!();
     println!("- File: `{path_str}`");
     println!("- Source: {}", source_kind.as_label());
-    if let Some(p) = &sprx_parsed {
-        println!("- Module name: `{}`", p.name);
-        let ns_names: Vec<&str> = p.exports.iter().map(|e| e.name.as_str()).collect();
-        if ns_names.is_empty() {
-            println!("- Exports under: <none>");
-        } else {
-            println!("- Exports under: {}", ns_names.join(", "));
-        }
-        // Every vaddr below is unrelocated PRX-space, the frame the
-        // import table prints stub addresses in. `sprx::load_prx` adds
-        // the load base, so none of these matches a fault PC from a
-        // booted run.
-        println!(
-            "- Text segment: vaddr 0x{:08x} (unrelocated), 0x{:x} byte(s)",
-            p.text.vaddr, p.text.memsz
-        );
-        println!(
-            "- Data segment: vaddr 0x{:08x} (unrelocated), 0x{:x} byte(s)",
-            p.data.vaddr, p.data.memsz
-        );
-        println!("- Module TOC: 0x{:08x} (unrelocated)", p.toc);
-        println!("- module_start: {}", describe_opd(p.module_start));
-        println!("- module_stop: {}", describe_opd(p.module_stop));
+    if let Some(p) = identity {
+        print_identity(p);
     }
     println!("- Modules imported: {}", modules.len());
     println!("- Functions imported: {total_funcs}");
@@ -181,23 +181,64 @@ pub(crate) fn run(
         println!("- Filter: --module {m}");
     }
     println!();
+}
 
-    let mut matched = 0usize;
-    let mut filter_module_seen = parsed.module.is_none();
-    let mut empty_modules: Vec<String> = Vec::new();
+fn print_identity(p: &cellgov_ppu::sprx::ParsedPrx) {
+    println!("- Module name: `{}`", p.name);
+    let ns_names: Vec<&str> = p.exports.iter().map(|e| e.name.as_str()).collect();
+    if ns_names.is_empty() {
+        println!("- Exports under: <none>");
+    } else {
+        println!("- Exports under: {}", ns_names.join(", "));
+    }
+    // Every vaddr below is unrelocated PRX-space, the frame the import
+    // table prints stub addresses in. `sprx::load_prx` adds the load
+    // base, so none of these matches a fault PC from a booted run.
+    println!(
+        "- Text segment: vaddr 0x{:08x} (unrelocated), 0x{:x} byte(s)",
+        p.text.vaddr, p.text.memsz
+    );
+    println!(
+        "- Data segment: vaddr 0x{:08x} (unrelocated), 0x{:x} byte(s)",
+        p.data.vaddr, p.data.memsz
+    );
+    println!("- Module TOC: 0x{:08x} (unrelocated)", p.toc);
+    println!("- module_start: {}", describe_opd(p.module_start));
+    println!("- module_stop: {}", describe_opd(p.module_stop));
+}
 
-    for module in &modules {
+/// What the table pass found, for the diagnostics after it.
+struct ModuleTable {
+    /// Imports printed.
+    matched: usize,
+    /// `--module` named a module the table holds, or no `--module`.
+    module_seen: bool,
+    /// Modules in the filter that declare no functions.
+    empty_modules: Vec<String>,
+}
+
+/// Print one table per module the filters keep, then the match count
+/// on a filtered run.
+fn print_module_table(
+    parsed: &PrxImportsArgs,
+    modules: &[cellgov_ppu::prx::ImportedModule],
+) -> ModuleTable {
+    let mut table = ModuleTable {
+        matched: 0,
+        module_seen: parsed.module.is_none(),
+        empty_modules: Vec::new(),
+    };
+    for module in modules {
         if let Some(want) = &parsed.module {
             if module.name != *want {
                 continue;
             }
-            filter_module_seen = true;
+            table.module_seen = true;
         }
         if module.functions.is_empty() {
-            empty_modules.push(module.name.clone());
+            table.empty_modules.push(module.name.clone());
             continue;
         }
-
         let matches: Vec<_> = module
             .functions
             .iter()
@@ -206,78 +247,90 @@ pub(crate) fn run(
         if matches.is_empty() {
             continue;
         }
-
-        println!(
-            "## {} ({} function{})",
-            module.name,
-            matches.len(),
-            if matches.len() == 1 { "" } else { "s" }
-        );
-        println!();
-        println!(
-            "| NID        | Stub addr   | Name                                              | Class           |"
-        );
-        println!(
-            "|------------|-------------|---------------------------------------------------|-----------------|"
-        );
-        for f in matches {
-            let name = cellgov_ps3_abi::nid::lookup(f.nid)
-                .map(|(_m, n)| n)
-                .unwrap_or("<unknown>");
-            let class_cell = cellgov_ppu::prx::stub_classification(f.nid).as_str();
-            println!(
-                "| 0x{:08x} | 0x{:08x}  | {:<width$} | {:<15} |",
-                f.nid,
-                f.stub_addr,
-                fit_name_column(name),
-                class_cell,
-                width = NAME_COLUMN_WIDTH,
-            );
-            matched += 1;
-        }
-        println!();
+        table.matched += print_functions(&module.name, &matches);
     }
-
     if parsed.at.is_some() || parsed.module.is_some() {
-        println!("Matched {matched} import(s).");
+        println!("Matched {} import(s).", table.matched);
     }
+    table
+}
 
+/// Print one module's table of `matches`; returns the row count.
+fn print_functions(module: &str, matches: &[&cellgov_ppu::prx::ImportedFunction]) -> usize {
+    println!(
+        "## {} ({} function{})",
+        module,
+        matches.len(),
+        if matches.len() == 1 { "" } else { "s" }
+    );
+    println!();
+    println!(
+        "| NID        | Stub addr   | Name                                              | Class           |"
+    );
+    println!(
+        "|------------|-------------|---------------------------------------------------|-----------------|"
+    );
+    for f in matches {
+        let name = cellgov_ps3_abi::nid::lookup(f.nid)
+            .map(|(_m, n)| n)
+            .unwrap_or("<unknown>");
+        let class_cell = cellgov_ppu::prx::stub_classification(f.nid).as_str();
+        println!(
+            "| 0x{:08x} | 0x{:08x}  | {:<width$} | {:<15} |",
+            f.nid,
+            f.stub_addr,
+            fit_name_column(name),
+            class_cell,
+            width = NAME_COLUMN_WIDTH,
+        );
+    }
+    println!();
+    matches.len()
+}
+
+/// Say on stderr why a filter matched nothing: a `--module` absent or
+/// empty, and the stub nearest an `--at` that hit none.
+fn report_filter_misses(
+    parsed: &PrxImportsArgs,
+    modules: &[cellgov_ppu::prx::ImportedModule],
+    table: &ModuleTable,
+) {
     if let Some(want) = &parsed.module {
-        if !filter_module_seen {
+        if !table.module_seen {
             eprintln!(
                 "prx-imports: --module {want:?} not found in {} imported module(s)",
                 modules.len()
             );
-        } else if empty_modules.iter().any(|n| n == want) {
+        } else if table.empty_modules.iter().any(|n| n == want) {
             eprintln!("prx-imports: --module {want:?} declares no functions");
         }
     }
-
-    if let Some(target) = parsed.at {
-        if matched == 0 {
-            let scope: Vec<&cellgov_ppu::prx::ImportedModule> = match &parsed.module {
-                Some(want) => modules.iter().filter(|m| m.name == *want).collect(),
-                None => modules.iter().collect(),
-            };
-            if let Some(hint) = nearest_stub_hint(scope, target) {
-                eprintln!("prx-imports: {hint}");
-            }
+    if let (Some(target), 0) = (parsed.at, table.matched) {
+        let scope: Vec<&cellgov_ppu::prx::ImportedModule> = match &parsed.module {
+            Some(want) => modules.iter().filter(|m| m.name == *want).collect(),
+            None => modules.iter().collect(),
+        };
+        if let Some(hint) = nearest_stub_hint(scope, target) {
+            eprintln!("prx-imports: {hint}");
         }
     }
+}
 
-    // Skip the empty-modules trailer on filtered runs; the count
-    // would misleadingly read as file-wide.
-    if parsed.is_unfiltered() && !empty_modules.is_empty() {
-        eprintln!(
-            "prx-imports: {} module(s) declared in the import table have no functions; \
-             omitted from the listing:",
-            empty_modules.len()
-        );
-        for name in &empty_modules {
-            eprintln!("  {name}");
-        }
+/// The trailer naming modules that declare no functions.
+///
+/// A filtered run skips it: its count would read as file-wide.
+fn report_empty_modules(parsed: &PrxImportsArgs, empty_modules: &[String]) {
+    if !parsed.is_unfiltered() || empty_modules.is_empty() {
+        return;
     }
-    Ok(())
+    eprintln!(
+        "prx-imports: {} module(s) declared in the import table have no functions; \
+         omitted from the listing:",
+        empty_modules.len()
+    );
+    for name in empty_modules {
+        eprintln!("  {name}");
+    }
 }
 
 /// Render an entry-point OPD, in the listing's unrelocated PRX-space vaddrs.
