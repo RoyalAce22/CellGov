@@ -451,19 +451,7 @@ impl PpeTiming {
         let outranked = u64::from(self.shared_stall.issue_interval);
         let c = &mut self.core;
         c.gate = c.gate.max(t.saturating_mul(256)).saturating_add(outranked);
-        // A result still pending when the sibling's stall began comes that
-        // much later: in the `ppu_issue_units` capture a dependent `fadd`
-        // with an independent `addi` after each waits its latency and both
-        // stalls. In the `ppu_issue_miss` capture an L2 miss beside an
-        // `fdiv` sibling waits out the stall of every instruction after it,
-        // about 40 cycles each there, past the model's own stall.
-        if stalled != 0 {
-            for r in c.ready.iter_mut().chain(c.addr_ready.iter_mut()) {
-                if *r > began {
-                    *r += stalled;
-                }
-            }
-        }
+        stretch_pending(c, began, stalled);
         let before = c.floor;
         if opens {
             c.block_open = true;
@@ -483,18 +471,7 @@ impl PpeTiming {
         c.ahead[(c.retired % AHEAD_RING as u64) as usize] = t;
         c.retired += 1;
 
-        for &(r, lat) in &op.dsts {
-            if r != NO_REG {
-                c.ready[r as usize] = t + u64::from(lat);
-                c.addr_ready[r as usize] = t + u64::from(lat);
-            }
-        }
-        if let Some((first, n, lat)) = op.range {
-            for r in (first..first.saturating_add(n)).filter(|r| *r < 32) {
-                c.ready[r as usize] = t + u64::from(lat);
-                c.addr_ready[r as usize] = t + u64::from(lat);
-            }
-        }
+        mark_destinations(c, op, t);
         if let Kind::Unpipelined(cycles) = op.kind {
             for u in unit_slots(op.units) {
                 c.unit_free[u] = t + u64::from(cycles);
@@ -503,33 +480,7 @@ impl PpeTiming {
 
         match op.kind {
             Kind::Load { ea, len, class } => self.load(t, op, ea, len, class),
-            Kind::Store { ea, len, .. } => {
-                let tables = &mut *self.tables;
-                tables.caches.store(ea);
-                // [CBE-Handbook p:134 s:6.1.2.2] the CIU store queue holds
-                // 16-byte entries. [CBE-Handbook p:144 s:6.1.5.7] the L2
-                // store queue that takes each CIU request unloads first in,
-                // first out. The interval between two entries of one store
-                // is fitted to the `ppu_issue_multiple` capture; the model
-                // does not chain it across stores.
-                let mut done =
-                    t + u64::from(op.span.saturating_sub(1)) + k::PPU_LOAD_HIT_STORE_CYCLES;
-                // [PPC-Book1 p:49 s:3.3.6] an `stswx` with a byte count of
-                // zero stores no bytes, so it takes no entry.
-                let bytes = u64::from(len);
-                let mut at = 0;
-                while at < bytes {
-                    let part = (bytes - at).min(k::PPU_STORE_ENTRY_BYTES);
-                    tables.stores[tables.next_store] = Queued {
-                        ea: ea.wrapping_add(at),
-                        len: part as u8,
-                        done,
-                    };
-                    tables.next_store = (tables.next_store + 1) % k::PPU_STORE_QUEUE_ENTRIES;
-                    at += part;
-                    done += k::PPU_STORE_DRAIN_CYCLES;
-                }
-            }
+            Kind::Store { ea, len, .. } => queue_store(&mut self.tables, t, op, ea, len),
             Kind::ZeroLine { ea } => self.tables.caches.zero(ea),
             Kind::Branch {
                 bo,
@@ -612,22 +563,22 @@ impl PpeTiming {
                 .chain(op.range.into_iter().flat_map(|(first, n, _)| {
                     (first..first.saturating_add(n)).filter(|r| *r < 32)
                 }));
+        let (data, addr) = match miss_lat {
+            None => {
+                let addr = if class == LoadClass::Fixed {
+                    k::PPU_L1_LOAD_USE_CYCLES
+                } else {
+                    hit_lat
+                };
+                (t + micro + hit_lat, t + micro + addr)
+            }
+            Some(lat) => (t + micro + lat, t + micro + lat),
+        };
+        let (data, addr) = match forwarded {
+            Some(f) => (data.max(f), addr.max(f)),
+            None => (data, addr),
+        };
         for r in targets {
-            let (data, addr) = match miss_lat {
-                None => {
-                    let addr = if class == LoadClass::Fixed {
-                        k::PPU_L1_LOAD_USE_CYCLES
-                    } else {
-                        hit_lat
-                    };
-                    (t + micro + hit_lat, t + micro + addr)
-                }
-                Some(lat) => (t + micro + lat, t + micro + lat),
-            };
-            let (data, addr) = match forwarded {
-                Some(f) => (data.max(f), addr.max(f)),
-                None => (data, addr),
-            };
             c.ready[r as usize] = data;
             c.addr_ready[r as usize] = addr;
             if miss_lat.is_some() {
@@ -754,6 +705,73 @@ fn weigh(share: u32, w: u64, counts: bool) -> u32 {
 
 /// Add an instruction that took `own` cycles of this thread's own to the
 /// averages [`PpeTiming::pressure`] reads.
+/// Pushes back every result still pending when the sibling's stall
+/// began by the length of that stall.
+///
+/// In the `ppu_issue_units` capture a dependent `fadd` with an
+/// independent `addi` after each waits its latency and both stalls. In
+/// the `ppu_issue_miss` capture an L2 miss beside an `fdiv` sibling
+/// waits out the stall of every instruction after it, about 40 cycles
+/// each there, past the model's own stall.
+#[inline]
+fn stretch_pending(c: &mut Core, began: u64, stalled: u64) {
+    if stalled == 0 {
+        return;
+    }
+    for r in c.ready.iter_mut().chain(c.addr_ready.iter_mut()) {
+        if *r > began {
+            *r += stalled;
+        }
+    }
+}
+
+/// Marks the data and address of every register `op` writes ready
+/// at `t` plus its latency.
+#[inline]
+fn mark_destinations(c: &mut Core, op: &Op, t: u64) {
+    for &(r, lat) in &op.dsts {
+        if r != NO_REG {
+            c.ready[r as usize] = t + u64::from(lat);
+            c.addr_ready[r as usize] = t + u64::from(lat);
+        }
+    }
+    if let Some((first, n, lat)) = op.range {
+        for r in (first..first.saturating_add(n)).filter(|r| *r < 32) {
+            c.ready[r as usize] = t + u64::from(lat);
+            c.addr_ready[r as usize] = t + u64::from(lat);
+        }
+    }
+}
+
+/// Puts a store of `len` bytes at `ea`, issued at `t`, into the store
+/// queue, one entry per 16 bytes.
+#[inline]
+fn queue_store(tables: &mut Tables, t: u64, op: &Op, ea: u64, len: u8) {
+    tables.caches.store(ea);
+    // [CBE-Handbook p:134 s:6.1.2.2] the CIU store queue holds
+    // 16-byte entries. [CBE-Handbook p:144 s:6.1.5.7] the L2
+    // store queue that takes each CIU request unloads first in,
+    // first out. The interval between two entries of one store
+    // is fitted to the `ppu_issue_multiple` capture; the model
+    // does not chain it across stores.
+    let mut done = t + u64::from(op.span.saturating_sub(1)) + k::PPU_LOAD_HIT_STORE_CYCLES;
+    // [PPC-Book1 p:49 s:3.3.6] an `stswx` with a byte count of
+    // zero stores no bytes, so it takes no entry.
+    let bytes = u64::from(len);
+    let mut at = 0;
+    while at < bytes {
+        let part = (bytes - at).min(k::PPU_STORE_ENTRY_BYTES);
+        tables.stores[tables.next_store] = Queued {
+            ea: ea.wrapping_add(at),
+            len: part as u8,
+            done,
+        };
+        tables.next_store = (tables.next_store + 1) % k::PPU_STORE_QUEUE_ENTRIES;
+        at += part;
+        done += k::PPU_STORE_DRAIN_CYCLES;
+    }
+}
+
 fn note_pressure(c: &mut Core, op: &Op, own: u64) {
     let n = PRESSURE_WINDOW_INSTRUCTIONS;
     let interval = own.saturating_mul(256).min(u64::from(u32::MAX));
