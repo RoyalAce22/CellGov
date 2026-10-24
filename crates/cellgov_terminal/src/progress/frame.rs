@@ -167,19 +167,27 @@ pub(crate) fn counting(snap: &Snapshot, task: &Task) -> bool {
 /// three then lands one row low, leaving a stale row behind on every
 /// tick; the label and item-name budgets exist for that reason.
 pub(crate) fn compose_frame(snap: &Snapshot, ctx: &FrameCtx<'_>) -> String {
-    let task = ctx.task;
-    let width = ctx.width;
     let st = Style { on: ctx.color };
     let mut out = String::with_capacity(256);
     out.push_str("\x1b[?2026h");
     if !ctx.first {
         out.push_str("\x1b[3A");
     }
+    push_status_line(&mut out, snap, ctx, &st);
+    push_bar_line(&mut out, snap, ctx);
+    push_detail_line(&mut out, snap, ctx, &st);
+    out.push_str("\x1b[?2026l");
+    out
+}
 
-    // Line 1: verb + label + phase. It carries SGR sequences, so it
-    // cannot be clipped after the fact the way lines 2 and 3 are --
-    // the cut would land inside an escape. Every part is budgeted
-    // instead, the label taking whatever the longest status leaves.
+/// Line 1: verb + label + phase.
+///
+/// It carries SGR sequences, so a cut after the fact, as on lines 2 and
+/// 3, would land inside an escape. Each part gets a budget instead, and
+/// the label takes whatever the longest status leaves.
+fn push_status_line(out: &mut String, snap: &Snapshot, ctx: &FrameCtx<'_>, st: &Style) {
+    let task = ctx.task;
+    let width = ctx.width;
     let status = if ctx.done {
         DONE_STATUS
     } else {
@@ -199,9 +207,13 @@ pub(crate) fn compose_frame(snap: &Snapshot, ctx: &FrameCtx<'_>) -> String {
         st.dim(),
         st.reset(),
     ));
+}
 
-    // Line 2: bar or spinner. The done amount stays unclipped: a run
-    // past its finish line reads as past it, at a percent that clamps.
+/// Line 2: bar or spinner. The done amount stays unclipped: a run past
+/// its finish line reads as past it, at a percent that clamps.
+fn push_bar_line(out: &mut String, snap: &Snapshot, ctx: &FrameCtx<'_>) {
+    let task = ctx.task;
+    let width = ctx.width;
     out.push_str("\x1b[2K");
     if ctx.measured(snap) {
         let stats = format!(
@@ -223,9 +235,13 @@ pub(crate) fn compose_frame(snap: &Snapshot, ctx: &FrameCtx<'_>) -> String {
         out.push_str(&line);
         out.push('\n');
     }
+}
 
-    // Line 3: item counter, rate, ETA, current item. A counting phase
-    // has no ETA, so it shows its tally and its elapsed time.
+/// Line 3: item counter, rate, ETA, current item. A counting phase has
+/// no ETA, so it shows its tally and its elapsed time.
+fn push_detail_line(out: &mut String, snap: &Snapshot, ctx: &FrameCtx<'_>, st: &Style) {
+    let task = ctx.task;
+    let width = ctx.width;
     out.push_str("\x1b[2K");
     let mut line = String::new();
     if !task.items.is_empty() {
@@ -234,27 +250,12 @@ pub(crate) fn compose_frame(snap: &Snapshot, ctx: &FrameCtx<'_>) -> String {
             &format!("{}/{} {}", snap.done_items, snap.total_items, task.items),
         );
     }
-    if snap.phase == task.measured {
-        if counting(snap, task) {
-            // The tally and the time are what a counting line is for.
-            // At the 40-column floor the three fields together can pass
-            // the width, and a clip would cut the time mid-field. So
-            // the rate joins only when all three fit, as the item name
-            // does below.
-            let elapsed = format!("elapsed {}", fmt_secs(ctx.elapsed_secs));
-            push_field(&mut line, &task.unit.tally(snap.done_amount));
-            if ctx.rate > 1.0 {
-                let rate = task.unit.rate(ctx.rate);
-                if line.len() + FIELD_SEP + rate.len() + FIELD_SEP + elapsed.len() <= width {
-                    push_field(&mut line, &rate);
-                }
-            }
-            push_field(&mut line, &elapsed);
-        } else if ctx.rate > 1.0 {
-            push_field(&mut line, &task.unit.rate(ctx.rate));
-            if let Some(e) = ctx.eta {
-                push_field(&mut line, &format!("ETA {}", fmt_secs(e)));
-            }
+    if counting(snap, task) {
+        push_counting_fields(&mut line, snap, ctx);
+    } else if snap.phase == task.measured && ctx.rate > 1.0 {
+        push_field(&mut line, &task.unit.rate(ctx.rate));
+        if let Some(e) = ctx.eta {
+            push_field(&mut line, &format!("ETA {}", fmt_secs(e)));
         }
     }
     // The item name joins only when it and its separator fit; at width
@@ -266,9 +267,25 @@ pub(crate) fn compose_frame(snap: &Snapshot, ctx: &FrameCtx<'_>) -> String {
     }
     clip_columns(&mut line, width);
     out.push_str(&format!("{}{line}{}\n", st.dim(), st.reset()));
+}
 
-    out.push_str("\x1b[?2026l");
-    out
+/// A counting phase's tally, rate and elapsed time.
+///
+/// The tally and the time are what a counting line is for. At the
+/// 40-column floor the three fields together can pass the width, and a
+/// clip would cut the time mid-field. So the rate joins only when all
+/// three fit, as the item name does.
+fn push_counting_fields(line: &mut String, snap: &Snapshot, ctx: &FrameCtx<'_>) {
+    let task = ctx.task;
+    let elapsed = format!("elapsed {}", fmt_secs(ctx.elapsed_secs));
+    push_field(line, &task.unit.tally(snap.done_amount));
+    if ctx.rate > 1.0 {
+        let rate = task.unit.rate(ctx.rate);
+        if line.len() + FIELD_SEP + rate.len() + FIELD_SEP + elapsed.len() <= ctx.width {
+            push_field(line, &rate);
+        }
+    }
+    push_field(line, &elapsed);
 }
 
 /// Longest item name a plain line carries before it middle-elides.

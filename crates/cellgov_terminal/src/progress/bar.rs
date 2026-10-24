@@ -5,7 +5,7 @@ use super::frame::{
     compose_frame, counting, osc_progress, plain_counting_line, plain_indeterminate_line,
     plain_line, FrameCtx,
 };
-use super::state::ProgressState;
+use super::state::{ProgressState, Snapshot};
 use super::task::Task;
 use crate::caps::{RenderMode, TermCaps};
 use std::io::Write;
@@ -402,18 +402,7 @@ fn eta_secs(elapsed: Duration, rate: f64, floor: f64, done: u64, total: u64) -> 
 
 fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Task, label: &str) {
     let mut err = std::io::stderr();
-    let start = Instant::now();
-    let mut first = true;
-    let mut hi_ratio = 0.0f64;
-    let mut rate = 0.0f64;
-    let mut prev_advanced = 0u64;
-    let mut prev_t = start;
-    let mut last_osc: Option<(u8, Option<u8>)> = None;
-    let mut last_plain = Instant::now();
-    let mut last_plain_decile = 0u64;
-    let mut first_plain = true;
-    let spinner_frames = ['|', '/', '-', '\\'];
-    let mut tick_n = 0usize;
+    let mut lp = RenderLoop::new(caps, task, label);
 
     loop {
         let stopped = stop.wait_tick();
@@ -423,17 +412,86 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
         let ending = stopped || state.finished.load(Ordering::Relaxed);
         let snap = state.snapshot();
         let now = Instant::now();
+        let (elapsed, eta) = lp.sample(&snap, now);
+        match caps.mode {
+            RenderMode::Ansi => lp.write_ansi_tick(&mut err, &snap, elapsed, eta),
+            RenderMode::Plain | RenderMode::Off => {
+                lp.write_plain_tick(&mut err, &snap, now, ending, elapsed);
+            }
+        }
+        lp.tick_n += 1;
+        if ending {
+            break;
+        }
+    }
 
+    // Final frame so a finished bar reads 100%, then leave the lines.
+    if caps.mode == RenderMode::Ansi && state.finished.load(Ordering::Relaxed) {
+        lp.write_final_frame(&mut err, &state.snapshot());
+    }
+
+    stop.mark_exited();
+}
+
+/// The spinner's frames, one per tick.
+const SPINNER_FRAMES: [char; 4] = ['|', '/', '-', '\\'];
+
+/// What the render loop carries from one tick to the next.
+struct RenderLoop<'a> {
+    caps: TermCaps,
+    task: &'a Task,
+    label: &'a str,
+    start: Instant,
+    /// True until a frame allocates its lines.
+    first: bool,
+    /// Monotonic high-water fill ratio.
+    hi_ratio: f64,
+    /// Smoothed amount per second.
+    rate: f64,
+    prev_advanced: u64,
+    prev_t: Instant,
+    /// The OSC progress state the last tick wrote.
+    last_osc: Option<(u8, Option<u8>)>,
+    last_plain: Instant,
+    last_plain_decile: u64,
+    first_plain: bool,
+    tick_n: usize,
+}
+
+impl<'a> RenderLoop<'a> {
+    fn new(caps: TermCaps, task: &'a Task, label: &'a str) -> Self {
+        let start = Instant::now();
+        Self {
+            caps,
+            task,
+            label,
+            start,
+            first: true,
+            hi_ratio: 0.0,
+            rate: 0.0,
+            prev_advanced: 0,
+            prev_t: start,
+            last_osc: None,
+            last_plain: Instant::now(),
+            last_plain_decile: 0,
+            first_plain: true,
+            tick_n: 0,
+        }
+    }
+
+    /// Fold this tick's snapshot into the rate and the ratio; returns the
+    /// time since the bar started and the ETA.
+    fn sample(&mut self, snap: &Snapshot, now: Instant) -> (Duration, Option<u64>) {
         // Time-based EWMA over the deltas the ticks observe, measured
         // on what this run moved so a resumed transfer's preset does
         // not register as an opening burst.
-        let dt = now.duration_since(prev_t).as_secs_f64().max(1e-3);
+        let dt = now.duration_since(self.prev_t).as_secs_f64().max(1e-3);
         let advanced = snap.advanced();
-        let inst = (advanced.saturating_sub(prev_advanced)) as f64 / dt;
+        let inst = (advanced.saturating_sub(self.prev_advanced)) as f64 / dt;
         let alpha = (dt / RATE_TAU_SECS).min(1.0);
-        rate = alpha * inst + (1.0 - alpha) * rate;
-        prev_advanced = advanced;
-        prev_t = now;
+        self.rate = alpha * inst + (1.0 - alpha) * self.rate;
+        self.prev_advanced = advanced;
+        self.prev_t = now;
 
         // Monotonic ratio: totals are a ceiling, never render backwards.
         let ratio = if snap.total_amount > 0 {
@@ -441,98 +499,104 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
         } else {
             0.0
         };
-        hi_ratio = hi_ratio.max(ratio);
+        self.hi_ratio = self.hi_ratio.max(ratio);
 
-        let elapsed = start.elapsed();
+        let elapsed = self.start.elapsed();
         let eta = eta_secs(
             elapsed,
-            rate,
-            task.unit.eta_rate_floor(),
+            self.rate,
+            self.task.unit.eta_rate_floor(),
             snap.done_amount,
             snap.total_amount,
         );
-
-        match caps.mode {
-            RenderMode::Ansi => {
-                let frame = compose_frame(
-                    &snap,
-                    &FrameCtx {
-                        task,
-                        label,
-                        width: caps.width,
-                        color: caps.color,
-                        first,
-                        ratio: hi_ratio,
-                        rate,
-                        eta,
-                        elapsed_secs: elapsed.as_secs(),
-                        spinner: spinner_frames[tick_n % spinner_frames.len()],
-                        done: false,
-                    },
-                );
-                let _ = err.write_all(frame.as_bytes());
-                let osc = if snap.phase == task.measured && snap.total_amount > 0 {
-                    (1u8, Some((hi_ratio * 100.0).floor() as u8))
-                } else {
-                    (3u8, None)
-                };
-                if last_osc != Some(osc) {
-                    let _ = err.write_all(osc_progress(osc.0, osc.1).as_bytes());
-                    last_osc = Some(osc);
-                }
-                let _ = err.flush();
-                first = false;
-            }
-            RenderMode::Plain | RenderMode::Off => {
-                let decile = (hi_ratio * 10.0).floor() as u64;
-                if caps.mode == RenderMode::Plain
-                    && plain_due(&PlainDue {
-                        total_amount: snap.total_amount,
-                        first: first_plain,
-                        ending,
-                        decile,
-                        last_decile: last_plain_decile,
-                        since_last: now.duration_since(last_plain),
-                    })
-                {
-                    let line = if snap.total_amount > 0 {
-                        plain_line(&snap, task, hi_ratio)
-                    } else if counting(&snap, task) {
-                        plain_counting_line(&snap, task, rate, elapsed.as_secs())
-                    } else {
-                        plain_indeterminate_line(&snap, task)
-                    };
-                    let _ = writeln!(err, "{line}");
-                    first_plain = false;
-                    last_plain = now;
-                    last_plain_decile = decile;
-                }
-            }
-        }
-
-        tick_n += 1;
-        if ending {
-            break;
-        }
+        (elapsed, eta)
     }
 
-    // Final frame so a finished bar reads 100%, then leave the lines.
-    // The phase is past the measured one by now, so `done` is what
-    // keeps line 2 a bar.
-    if caps.mode == RenderMode::Ansi && state.finished.load(Ordering::Relaxed) {
-        let snap = state.snapshot();
+    fn write_ansi_tick(
+        &mut self,
+        err: &mut std::io::Stderr,
+        snap: &Snapshot,
+        elapsed: Duration,
+        eta: Option<u64>,
+    ) {
         let frame = compose_frame(
-            &snap,
+            snap,
             &FrameCtx {
-                task,
-                label,
-                width: caps.width,
-                color: caps.color,
-                first,
+                task: self.task,
+                label: self.label,
+                width: self.caps.width,
+                color: self.caps.color,
+                first: self.first,
+                ratio: self.hi_ratio,
+                rate: self.rate,
+                eta,
+                elapsed_secs: elapsed.as_secs(),
+                spinner: SPINNER_FRAMES[self.tick_n % SPINNER_FRAMES.len()],
+                done: false,
+            },
+        );
+        let _ = err.write_all(frame.as_bytes());
+        let osc = if snap.phase == self.task.measured && snap.total_amount > 0 {
+            (1u8, Some((self.hi_ratio * 100.0).floor() as u8))
+        } else {
+            (3u8, None)
+        };
+        if self.last_osc != Some(osc) {
+            let _ = err.write_all(osc_progress(osc.0, osc.1).as_bytes());
+            self.last_osc = Some(osc);
+        }
+        let _ = err.flush();
+        self.first = false;
+    }
+
+    fn write_plain_tick(
+        &mut self,
+        err: &mut std::io::Stderr,
+        snap: &Snapshot,
+        now: Instant,
+        ending: bool,
+        elapsed: Duration,
+    ) {
+        let decile = (self.hi_ratio * 10.0).floor() as u64;
+        let due = plain_due(&PlainDue {
+            total_amount: snap.total_amount,
+            first: self.first_plain,
+            ending,
+            decile,
+            last_decile: self.last_plain_decile,
+            since_last: now.duration_since(self.last_plain),
+        });
+        if self.caps.mode != RenderMode::Plain || !due {
+            return;
+        }
+        let line = if snap.total_amount > 0 {
+            plain_line(snap, self.task, self.hi_ratio)
+        } else if counting(snap, self.task) {
+            plain_counting_line(snap, self.task, self.rate, elapsed.as_secs())
+        } else {
+            plain_indeterminate_line(snap, self.task)
+        };
+        let _ = writeln!(err, "{line}");
+        self.first_plain = false;
+        self.last_plain = now;
+        self.last_plain_decile = decile;
+    }
+
+    /// The frame that leaves a finished bar at 100%. The phase is past
+    /// the measured one by now, so `done` is what keeps line 2 a bar.
+    fn write_final_frame(&self, err: &mut std::io::Stderr, snap: &Snapshot) {
+        let frame = compose_frame(
+            snap,
+            &FrameCtx {
+                task: self.task,
+                label: self.label,
+                width: self.caps.width,
+                color: self.caps.color,
+                first: self.first,
                 ratio: 1.0,
-                rate,
+                rate: self.rate,
                 eta: None,
-                elapsed_secs: start.elapsed().as_secs(),
+                elapsed_secs: self.start.elapsed().as_secs(),
                 spinner: '=',
                 done: true,
             },
@@ -540,8 +604,6 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
         let _ = err.write_all(frame.as_bytes());
         let _ = err.flush();
     }
-
-    stop.mark_exited();
 }
 
 #[cfg(test)]
