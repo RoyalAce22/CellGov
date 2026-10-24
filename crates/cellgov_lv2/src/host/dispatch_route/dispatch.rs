@@ -56,18 +56,7 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         ordinal: Option<usize>,
     ) -> Lv2Dispatch {
-        let census_refuses = if !matches!(request, Lv2Request::Hypercall { .. }) {
-            if let (Some(ordinal), Some(identity)) = (ordinal, self.firmware_identity()) {
-                matches!(
-                    lookup_census(&identity.pup_sha256_bytes, ordinal),
-                    PupCensusClass::Absent | PupCensusClass::OutOfRange
-                )
-            } else {
-                false
-            }
-        } else {
-            false
-        };
+        let census_refuses = self.census_refuses(&request, ordinal);
         let arm: &'static str = crate::request::Lv2RequestKind::from(&request).into();
         let wait_timeout = request.wait_timeout_usec();
         // Census refusals still pass the common observation point below:
@@ -100,6 +89,22 @@ impl Lv2Host {
             _ => {}
         }
         out
+    }
+
+    /// Whether the firmware's syscall census has no entry at `ordinal`,
+    /// so the call answers `CELL_ENOSYS`. A hypercall, a call with no
+    /// ordinal, and a host with no firmware identity are never refused.
+    fn census_refuses(&self, request: &Lv2Request, ordinal: Option<usize>) -> bool {
+        if matches!(request, Lv2Request::Hypercall { .. }) {
+            return false;
+        }
+        let (Some(ordinal), Some(identity)) = (ordinal, self.firmware_identity()) else {
+            return false;
+        };
+        matches!(
+            lookup_census(&identity.pup_sha256_bytes, ordinal),
+            PupCensusClass::Absent | PupCensusClass::OutOfRange
+        )
     }
 
     /// Split from [`Self::dispatch`] so every arm's return passes one
@@ -705,34 +710,15 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::EVENT_PORT_CONNECT_LOCAL,
                 args,
-            } => match self.narrow_u32_args(
-                syscall::EVENT_PORT_CONNECT_LOCAL,
-                [("event_port_id", args[0]), ("event_queue_id", args[1])],
-            ) {
-                Some([port_id, queue_id]) => {
-                    self.dispatch_event_port_connect_local(port_id, queue_id)
-                }
-                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-            },
+            } => self.dispatch_event_port_connect_local(args),
             Lv2Request::Unsupported {
                 number: syscall::EVENT_PORT_CONNECT_IPC,
                 args,
-            } => match self.narrow_u32_args(
-                syscall::EVENT_PORT_CONNECT_IPC,
-                [("event_port_id", args[0])],
-            ) {
-                Some([port_id]) => self.dispatch_event_port_connect_ipc(port_id, args[1]),
-                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-            },
+            } => self.dispatch_event_port_connect_ipc(args),
             Lv2Request::Unsupported {
                 number: syscall::EVENT_PORT_DISCONNECT,
                 args,
-            } => match self
-                .narrow_u32_args(syscall::EVENT_PORT_DISCONNECT, [("event_port_id", args[0])])
-            {
-                Some([port_id]) => self.dispatch_event_port_disconnect(port_id),
-                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-            },
+            } => self.dispatch_event_port_disconnect(args),
             Lv2Request::Unsupported {
                 number: syscall::GAMEPAD_YCON_IF,
                 ..
@@ -748,32 +734,15 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::MEMORY_CONTAINER_CREATE_324,
                 args,
-            } => {
-                match self.narrow_u32_args(syscall::MEMORY_CONTAINER_CREATE_324, [("cid", args[0])])
-                {
-                    Some([cid_ptr]) => self
-                        .dispatch_memory_container_create(cid_ptr, args[1], true, requester, tick),
-                    None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-                }
-            }
+            } => self.dispatch_memory_container_create_324(args, requester, tick),
             Lv2Request::Unsupported {
                 number: syscall::MEMORY_CONTAINER_DESTROY,
                 args,
-            } => {
-                match self.narrow_u32_args(syscall::MEMORY_CONTAINER_DESTROY, [("cid", args[0])]) {
-                    Some([cid]) => self.dispatch_memory_container_destroy(cid),
-                    None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-                }
-            }
+            } => self.dispatch_memory_container_destroy(args),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_FREE_SHARED_MEMORY,
                 args,
-            } => match self
-                .narrow_u32_args(syscall::MMAPPER_FREE_SHARED_MEMORY, [("mem_id", args[0])])
-            {
-                Some([mem_id]) => self.dispatch_mmapper_free_shared_memory(mem_id),
-                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-            },
+            } => self.dispatch_mmapper_free_shared_memory(args),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_ALLOCATE_ADDRESS,
                 args,
@@ -781,17 +750,11 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::SPU_IMAGE_CLOSE,
                 args,
-            } => match self.narrow_u32_args(syscall::SPU_IMAGE_CLOSE, [("img", args[0])]) {
-                Some([img]) => self.dispatch_spu_image_close(img, rt),
-                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-            },
+            } => self.dispatch_spu_image_close(args, rt),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_FREE_ADDRESS,
                 args,
-            } => match self.narrow_u32_args(syscall::MMAPPER_FREE_ADDRESS, [("addr", args[0])]) {
-                Some([addr]) => self.dispatch_mmapper_free_address(addr, requester),
-                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
-            },
+            } => self.dispatch_mmapper_free_address(args, requester),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_MAP_SHARED_MEMORY,
                 args,
@@ -822,18 +785,7 @@ impl Lv2Host {
                 arg_ptr,
                 arg_size,
                 arg4,
-            } => {
-                if arg4 != 0 {
-                    self.log_invariant_break(
-                        "process.exit2_unconsumed_arg4",
-                        format_args!(
-                            "process exit2 carried nonzero fourth arg \
-                             {arg4:#x}; not consumed",
-                        ),
-                    );
-                }
-                self.dispatch_process_exit2(code, arg_ptr, arg_size, requester, rt)
-            }
+            } => self.dispatch_process_exit2(code, arg_ptr, arg_size, arg4, requester, rt),
             Lv2Request::ProcessSpawn {
                 pid_out_ptr,
                 prio,
@@ -842,30 +794,17 @@ impl Lv2Host {
                 block_size,
                 data_word,
                 unconsumed,
-            } => {
-                if unconsumed != [0; 2] {
-                    self.log_invariant_break(
-                        "process.spawn_unconsumed_args",
-                        format_args!(
-                            "process spawn carried nonzero trailing args \
-                             [{:#x}, {:#x}] (sc 21: r8/r9 pair values; \
-                             sc 27: r9 config block / r10 pair block); \
-                             not consumed",
-                            unconsumed[0], unconsumed[1],
-                        ),
-                    );
-                }
-                self.dispatch_process_spawn(
-                    pid_out_ptr,
-                    prio,
-                    flags,
-                    block_ptr,
-                    block_size,
-                    data_word,
-                    requester,
-                    rt,
-                )
-            }
+            } => self.dispatch_process_spawn(
+                pid_out_ptr,
+                prio,
+                flags,
+                block_ptr,
+                block_size,
+                data_word,
+                unconsumed,
+                requester,
+                rt,
+            ),
             Lv2Request::ProcessGetStatus { pid } => self.dispatch_process_get_status(pid),
             Lv2Request::ProcessGetPid => self.dispatch_process_get_pid(requester),
             Lv2Request::ProcessGetPpid => self.dispatch_process_get_ppid(requester),

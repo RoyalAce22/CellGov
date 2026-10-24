@@ -98,6 +98,7 @@ fn do_spawn(host: &mut Lv2Host, rt: &FakeRuntime, block_ptr: u32, block_size: u3
         block_ptr,
         block_size,
         0,
+        [0; 2],
         UnitId::new(0),
         rt,
     )
@@ -276,7 +277,7 @@ fn exit2_with_empty_argv_is_a_plain_exit_with_no_witness() {
     // args array pointer at param +0x28 -> 0x300; entry[0] stays 0.
     commit(&mut mem, 0x128, &0x300u64.to_be_bytes());
     let rt = FakeRuntime::with_memory(mem);
-    let d = host.dispatch_process_exit2(0, 0x100, 0x30, UnitId::new(0), &rt);
+    let d = host.dispatch_process_exit2(0, 0x100, 0x30, 0, UnitId::new(0), &rt);
     assert_eq!(d, Lv2Dispatch::immediate(0));
     assert_eq!(
         host.invariant_break_site_count("process.exitspawn_not_modeled"),
@@ -296,7 +297,7 @@ fn exit2_with_non_empty_argv_witnesses_the_unmodeled_exitspawn() {
     commit(&mut mem, 0x300, &0x400u64.to_be_bytes());
     commit(&mut mem, 0x400, b"/test/next.self\0");
     let rt = FakeRuntime::with_memory(mem);
-    let d = host.dispatch_process_exit2(0, 0x100, 0x30, UnitId::new(0), &rt);
+    let d = host.dispatch_process_exit2(0, 0x100, 0x30, 0, UnitId::new(0), &rt);
     assert_eq!(d, Lv2Dispatch::immediate(0));
     assert_eq!(
         host.invariant_break_site_count("process.exitspawn_not_modeled"),
@@ -309,7 +310,7 @@ fn exit2_with_an_unreadable_param_block_exits_but_is_not_silent() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x1000);
     // Param block entirely outside guest memory.
-    let d = host.dispatch_process_exit2(0, 0x2000, 0x30, UnitId::new(0), &rt);
+    let d = host.dispatch_process_exit2(0, 0x2000, 0x30, 0, UnitId::new(0), &rt);
     assert_eq!(d, Lv2Dispatch::immediate(0));
     assert_eq!(
         host.invariant_break_site_count("process.exit2_param_unreadable"),
@@ -423,6 +424,7 @@ fn spawn_with_nonzero_flags_is_witnessed_and_still_spawns() {
         BLOCK,
         0x60,
         0,
+        [0; 2],
         UnitId::new(0),
         &rt,
     );
@@ -444,6 +446,7 @@ fn spawn_with_nonzero_data_word_is_witnessed_and_still_spawns() {
         BLOCK,
         0x60,
         0xDEAD_BEEF,
+        [0; 2],
         UnitId::new(0),
         &rt,
     );
@@ -479,7 +482,17 @@ fn spawn_from_a_child_bound_unit_records_the_child_as_ppid() {
         .insert_child(FIRST_CHILD_PID, child_entry()));
     host.bind_unit_process(UnitId::new(9), FIRST_CHILD_PID);
     let rt = FakeRuntime::with_memory(spawn_memory());
-    let d = host.dispatch_process_spawn(PID_OUT, 1000, 0, BLOCK, 0x60, 0, UnitId::new(9), &rt);
+    let d = host.dispatch_process_spawn(
+        PID_OUT,
+        1000,
+        0,
+        BLOCK,
+        0x60,
+        0,
+        [0; 2],
+        UnitId::new(9),
+        &rt,
+    );
     let Lv2Dispatch::ProcessSpawn { pid, .. } = d else {
         panic!("expected ProcessSpawn, got {d:?}");
     };

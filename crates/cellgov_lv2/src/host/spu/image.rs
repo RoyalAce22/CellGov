@@ -6,8 +6,8 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::format::elf::ELF32_E_ENTRY;
-use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::spu;
+use cellgov_ps3_abi::lv2::{errno, syscall};
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::{Lv2Dispatch, SpuLoadImage};
@@ -282,7 +282,7 @@ impl Lv2Host {
     }
 
     /// `sys_spu_image_close` (158): close the kernel image id the
-    /// record at `img_ptr` names.
+    /// record at `args[0]` names.
     ///
     /// The id stays in the table, closed, and the image's bytes stay in
     /// the content store: a later open of the same path finds them
@@ -300,9 +300,13 @@ impl Lv2Host {
     ///   second close of one record is this case.
     pub(in crate::host) fn dispatch_spu_image_close(
         &mut self,
-        img_ptr: u32,
+        args: [u64; 8],
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
+        let Some([img_ptr]) = self.narrow_u32_args(syscall::SPU_IMAGE_CLOSE, [("img", args[0])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         let word = |offset: u32| read_be_u32(rt, u64::from(img_ptr) + u64::from(offset));
         let (Some(image_type), Some(handle)) = (
             word(spu::image::TYPE_OFFSET),

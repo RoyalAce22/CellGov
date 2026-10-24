@@ -4,8 +4,8 @@
 
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
-use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::memory::{page_size, USER_MEMORY_TOTAL};
+use cellgov_ps3_abi::lv2::{errno, syscall};
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -356,7 +356,12 @@ impl Lv2Host {
     /// - `CELL_EBUSY` while an allocation or an SPU thread group holds
     ///   memory from the container. The capture shows the allocation;
     ///   the thread group is CellGov's reading of the same rule.
-    pub(super) fn dispatch_memory_container_destroy(&mut self, cid: u32) -> Lv2Dispatch {
+    pub(super) fn dispatch_memory_container_destroy(&mut self, args: [u64; 8]) -> Lv2Dispatch {
+        let Some([cid]) =
+            self.narrow_u32_args(syscall::MEMORY_CONTAINER_DESTROY, [("cid", args[0])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         match self.state.memory_containers.get(cid) {
             None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
             Some(c) if c.from_324 => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),

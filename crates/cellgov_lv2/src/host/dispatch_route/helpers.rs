@@ -34,7 +34,7 @@ impl Lv2Host {
     /// A caller answers `None` with `CELL_EINVAL`, the answer the
     /// classifier gives a malformed request. This method records each
     /// occurrence under `dispatch.arg_high_bits`.
-    pub(in crate::host::dispatch_route) fn narrow_u32_args<const N: usize>(
+    pub(in crate::host) fn narrow_u32_args<const N: usize>(
         &mut self,
         number: u64,
         fields: [(&'static str, u64); N],

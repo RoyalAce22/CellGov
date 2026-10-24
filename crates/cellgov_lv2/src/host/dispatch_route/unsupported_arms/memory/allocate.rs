@@ -9,6 +9,7 @@ use cellgov_ps3_abi::lv2::memory::{
     ext_entry, page_size, CONTAINER_GRANULE, SYS_MMAPPER_NO_SHM_KEY, VM_AREA_ALIGNMENTS,
     VM_AREA_GRANULE,
 };
+use cellgov_ps3_abi::lv2::syscall;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
@@ -17,6 +18,22 @@ use crate::host::mmapper::MmapperHandle;
 use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
+    /// Syscall 324: [`Self::dispatch_memory_container_create`] for a
+    /// `cid` register with no high bits, and `CELL_EINVAL` otherwise.
+    pub(in crate::host::dispatch_route) fn dispatch_memory_container_create_324(
+        &mut self,
+        args: [u64; 8],
+        requester: UnitId,
+        tick: GuestTicks,
+    ) -> Lv2Dispatch {
+        let Some([cid_ptr]) =
+            self.narrow_u32_args(syscall::MEMORY_CONTAINER_CREATE_324, [("cid", args[0])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        self.dispatch_memory_container_create(cid_ptr, args[1], true, requester, tick)
+    }
+
     /// `sys_memory_container_create`: mints a container id and writes
     /// it to `*cid`.
     ///
@@ -442,9 +459,13 @@ impl Lv2Host {
     ///   `lv2_mmapper_map_64k` capture shows.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_free_address(
         &mut self,
-        addr: u32,
+        args: [u64; 8],
         requester: UnitId,
     ) -> Lv2Dispatch {
+        let Some([addr]) = self.narrow_u32_args(syscall::MMAPPER_FREE_ADDRESS, [("addr", args[0])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         let pid = self.state.processes.process_of_unit(requester);
         let Some(&area) = self.state.mmapper_areas.get((pid, addr)) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
@@ -474,8 +495,13 @@ impl Lv2Host {
     /// list above.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_free_shared_memory(
         &mut self,
-        mem_id: u32,
+        args: [u64; 8],
     ) -> Lv2Dispatch {
+        let Some([mem_id]) =
+            self.narrow_u32_args(syscall::MMAPPER_FREE_SHARED_MEMORY, [("mem_id", args[0])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         let Some(handle) = self.state.mmapper_handles.get(mem_id) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };

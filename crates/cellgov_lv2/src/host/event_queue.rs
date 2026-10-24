@@ -9,9 +9,9 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::process::{SYS_EVENT_PORT_OBJECT, SYS_EVENT_QUEUE_OBJECT};
 use cellgov_ps3_abi::lv2::sync::{SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
+use cellgov_ps3_abi::lv2::{errno, syscall};
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
@@ -158,21 +158,26 @@ impl Lv2Host {
         }
     }
 
-    pub(super) fn dispatch_event_port_connect_local(
-        &mut self,
-        port_id: u32,
-        queue_id: u32,
-    ) -> Lv2Dispatch {
+    pub(super) fn dispatch_event_port_connect_local(&mut self, args: [u64; 8]) -> Lv2Dispatch {
+        let Some([port_id, queue_id]) = self.narrow_u32_args(
+            syscall::EVENT_PORT_CONNECT_LOCAL,
+            [("event_port_id", args[0]), ("event_queue_id", args[1])],
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         self.dispatch_event_port_connect(port_id, Some(queue_id), SYS_EVENT_PORT_LOCAL)
     }
 
-    /// Resolves `ipc_key` through the keyed-queue registry a keyed
-    /// `sys_event_queue_create` populated.
-    pub(super) fn dispatch_event_port_connect_ipc(
-        &mut self,
-        port_id: u32,
-        ipc_key: u64,
-    ) -> Lv2Dispatch {
+    /// Resolves the key in `args[1]` through the keyed-queue registry a
+    /// keyed `sys_event_queue_create` populated.
+    pub(super) fn dispatch_event_port_connect_ipc(&mut self, args: [u64; 8]) -> Lv2Dispatch {
+        let Some([port_id]) = self.narrow_u32_args(
+            syscall::EVENT_PORT_CONNECT_IPC,
+            [("event_port_id", args[0])],
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        let ipc_key = args[1];
         if ipc_key == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
@@ -194,8 +199,13 @@ impl Lv2Host {
     ///
     /// - `CELL_ESRCH` for an unknown port.
     /// - `CELL_ENOTCONN` when the port has no binding.
-    pub(super) fn dispatch_event_port_disconnect(&mut self, port_id: u32) -> Lv2Dispatch {
+    pub(super) fn dispatch_event_port_disconnect(&mut self, args: [u64; 8]) -> Lv2Dispatch {
         use crate::sync_primitives::EventPortDisconnectError as E;
+        let Some([port_id]) =
+            self.narrow_u32_args(syscall::EVENT_PORT_DISCONNECT, [("event_port_id", args[0])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         match self.state.event_ports.disconnect(port_id) {
             Ok(()) => Lv2Dispatch::immediate(0),
             Err(E::UnknownPort) => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),

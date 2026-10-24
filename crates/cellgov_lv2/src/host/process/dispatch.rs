@@ -57,14 +57,23 @@ impl Lv2Host {
     /// is released on an ordinary exit but survives an exitspawn. How
     /// the default container's capacity is renegotiated across the
     /// handoff is unestablished.
+    ///
+    /// The call reads no fourth argument; it logs a nonzero `arg4`.
     pub(in crate::host) fn dispatch_process_exit2(
         &mut self,
         code: i32,
         arg_ptr: u32,
         arg_size: u32,
+        arg4: u64,
         source: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
+        if arg4 != 0 {
+            self.log_invariant_break(
+                "process.exit2_unconsumed_arg4",
+                format_args!("process exit2 carried nonzero fourth arg {arg4:#x}; not consumed",),
+            );
+        }
         let argv_slot = u64::from(arg_ptr)
             + u64::from(cellgov_ps3_abi::lv2::process::exit2_param::ARGV_ARRAY_OFFSET);
         let argv0 = read_be_u64(rt, argv_slot).and_then(|args_array| read_be_u64(rt, args_array));
@@ -150,6 +159,9 @@ impl Lv2Host {
     ///   factory is installed.
     /// - `CELL_ENOMEM` from the runtime when no address-space id is
     ///   free for the child.
+    ///
+    /// The call reads neither trailing argument in `unconsumed`; it logs
+    /// a nonzero one.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::host) fn dispatch_process_spawn(
         &mut self,
@@ -159,9 +171,22 @@ impl Lv2Host {
         block_ptr: u32,
         block_size: u32,
         data_word: u64,
+        unconsumed: [u64; 2],
         source: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
+        if unconsumed != [0; 2] {
+            self.log_invariant_break(
+                "process.spawn_unconsumed_args",
+                format_args!(
+                    "process spawn carried nonzero trailing args \
+                     [{:#x}, {:#x}] (sc 21: r8/r9 pair values; \
+                     sc 27: r9 config block / r10 pair block); \
+                     not consumed",
+                    unconsumed[0], unconsumed[1],
+                ),
+            );
+        }
         if flags != 0 {
             // The spawn flags word carries the child's
             // primary-stack-size selection; the spawn loader currently
