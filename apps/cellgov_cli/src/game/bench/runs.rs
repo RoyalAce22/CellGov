@@ -32,52 +32,15 @@ pub fn bench_boot_runs(
             "boot bench: a run set requires at least one measurement",
         )));
     }
-    // Optional trailing tokens, each carrying its own leading space
-    // so the banner has no gap when none is present.
-    let mut overrides = String::new();
-    if let Some(cp) = opts.checkpoint_override {
-        overrides.push_str(&format!(" checkpoint={}", cp.as_cli_str()));
-    }
-    if let Some(b) = opts.budget_override {
-        overrides.push_str(&format!(" budget={b}"));
-    }
-    if !opts.guest_args.is_empty() {
-        // Debug quoting: guest argv entries may contain spaces.
-        overrides.push_str(&format!(" guest_args={:?}", opts.guest_args));
-    }
-    for name in opts.identity.overrides.names() {
-        overrides.push_str(&format!(" {name}"));
-    }
     println!(
-        "boot bench: title={} elf={} max_steps={} runs={}{overrides}",
+        "boot bench: title={} elf={} max_steps={} runs={}{}",
         opts.title.name(),
         opts.elf_path,
         opts.max_steps,
         policy.runs,
+        override_tokens(&opts),
     );
-    progress.phase(crate::progress::BenchPairPhase::Measuring.code());
-    // Both counters track the same set of runs.
-    progress.totals(policy.runs, policy.runs as u64);
-    let mut runs: Vec<BenchBootResult> = Vec::with_capacity(policy.runs);
-    let mut streams: Vec<String> = Vec::with_capacity(policy.runs);
-    for index in 0..policy.runs {
-        progress.item_started(&format!("run {} of {}", index + 1, policy.runs));
-        let mut this_run = opts;
-        this_run.run_index = index;
-        let (result, stderr) = spawn_one_run(this_run)?;
-        progress.advanced(1);
-        progress.item_finished();
-        println!(
-            "  run {}: steps={} wall_ms={:.3} steps_per_sec={} outcome={}",
-            index + 1,
-            result.steps,
-            result.wall.as_secs_f64() * 1e3,
-            result.steps_per_sec(),
-            result.outcome,
-        );
-        runs.push(result);
-        streams.push(stderr);
-    }
+    let (runs, streams) = measure_runs(opts, policy.runs, progress)?;
     progress.phase(crate::progress::BenchPairPhase::Comparing.code());
 
     let determinism_failures = determinism_disagreements(&runs, &streams);
@@ -96,35 +59,122 @@ pub fn bench_boot_runs(
     {
         eprintln!("{line}");
     }
-    let anchor = if !opts.check_anchor {
-        AnchorVerdict::Skipped
-    } else {
-        let reasons = incomparable_reasons(&opts);
-        match (reasons.is_empty(), opts.plan.cell) {
-            // `incomparable_reasons` names a missing cell as one of its
-            // reasons, so an empty list implies a cell.
-            (true, Some(cell)) => check_anchor(
-                &opts.title.content_id,
-                cell,
-                &MeasuredRun {
-                    checkpoint: opts
-                        .checkpoint_override
-                        .unwrap_or(opts.plan.checkpoint)
-                        .kind(),
-                    steps: first.steps as u64,
-                    budget: first.budget,
-                    outcome: first.outcome,
-                    stderr: &streams[0],
-                },
-            ),
-            (true, None) => {
-                debug_assert!(false, "an unnameable cell had no incomparable reason");
-                AnchorVerdict::NotComparable(vec!["the run has no cell identity".to_string()])
-            }
-            (false, _) => AnchorVerdict::NotComparable(reasons),
+    let anchor = anchor_verdict(&opts, &first, &streams[0]);
+    print_anchor_line(&anchor, &opts);
+
+    let throughput = throughput_verdict(&runs);
+    print_throughput(throughput, policy);
+    let gate = classify_runs(
+        &determinism_failures,
+        &anchor,
+        throughput.is_measured(),
+        policy.strict,
+    );
+    progress.finished();
+    if gate == BenchGate::DeterminismBreak {
+        println!("  determinism: BREAK");
+        for failure in &determinism_failures {
+            println!("    {failure}");
         }
+        for line in locate_divergence(opts, &runs)? {
+            println!("    {line}");
+        }
+    }
+    Ok(BenchRunsOutcome {
+        runs,
+        throughput,
+        gate,
+        anchor,
+        determinism_failures,
+    })
+}
+
+/// The banner's optional trailing tokens, each carrying its own leading
+/// space so the banner has no gap when none is present.
+fn override_tokens(opts: &BenchOptions<'_>) -> String {
+    let mut overrides = String::new();
+    if let Some(cp) = opts.checkpoint_override {
+        overrides.push_str(&format!(" checkpoint={}", cp.as_cli_str()));
+    }
+    if let Some(b) = opts.budget_override {
+        overrides.push_str(&format!(" budget={b}"));
+    }
+    if !opts.guest_args.is_empty() {
+        // Debug quoting: guest argv entries may contain spaces.
+        overrides.push_str(&format!(" guest_args={:?}", opts.guest_args));
+    }
+    for name in opts.identity.overrides.names() {
+        overrides.push_str(&format!(" {name}"));
+    }
+    overrides
+}
+
+/// Spawn `runs` measurements, printing a line for each; returns each
+/// run's result and its stderr.
+fn measure_runs(
+    opts: BenchOptions<'_>,
+    runs: usize,
+    progress: &dyn crate::progress::ProgressSink,
+) -> Result<(Vec<BenchBootResult>, Vec<String>), SpawnError> {
+    progress.phase(crate::progress::BenchPairPhase::Measuring.code());
+    // Both counters track the same set of runs.
+    progress.totals(runs, runs as u64);
+    let mut results: Vec<BenchBootResult> = Vec::with_capacity(runs);
+    let mut streams: Vec<String> = Vec::with_capacity(runs);
+    for index in 0..runs {
+        progress.item_started(&format!("run {} of {}", index + 1, runs));
+        let mut this_run = opts;
+        this_run.run_index = index;
+        let (result, stderr) = spawn_one_run(this_run)?;
+        progress.advanced(1);
+        progress.item_finished();
+        println!(
+            "  run {}: steps={} wall_ms={:.3} steps_per_sec={} outcome={}",
+            index + 1,
+            result.steps,
+            result.wall.as_secs_f64() * 1e3,
+            result.steps_per_sec(),
+            result.outcome,
+        );
+        results.push(result);
+        streams.push(stderr);
+    }
+    Ok((results, streams))
+}
+
+/// What run 1 says against the cell's committed anchor.
+fn anchor_verdict(opts: &BenchOptions<'_>, first: &BenchBootResult, stream: &str) -> AnchorVerdict {
+    if !opts.check_anchor {
+        return AnchorVerdict::Skipped;
+    }
+    let reasons = incomparable_reasons(opts);
+    if !reasons.is_empty() {
+        return AnchorVerdict::NotComparable(reasons);
+    }
+    // `incomparable_reasons` names a missing cell as one of its
+    // reasons, so an empty list implies a cell.
+    let Some(cell) = opts.plan.cell else {
+        debug_assert!(false, "an unnameable cell had no incomparable reason");
+        return AnchorVerdict::NotComparable(vec!["the run has no cell identity".to_string()]);
     };
-    match &anchor {
+    check_anchor(
+        &opts.title.content_id,
+        cell,
+        &MeasuredRun {
+            checkpoint: opts
+                .checkpoint_override
+                .unwrap_or(opts.plan.checkpoint)
+                .kind(),
+            steps: first.steps as u64,
+            budget: first.budget,
+            outcome: first.outcome,
+            stderr: stream,
+        },
+    )
+}
+
+fn print_anchor_line(anchor: &AnchorVerdict, opts: &BenchOptions<'_>) {
+    match anchor {
         AnchorVerdict::Skipped => {}
         AnchorVerdict::NotComparable(reasons) => {
             println!(
@@ -152,30 +202,4 @@ pub fn bench_boot_runs(
             )
         }
     }
-
-    let throughput = throughput_verdict(&runs);
-    print_throughput(throughput, policy);
-    let gate = classify_runs(
-        &determinism_failures,
-        &anchor,
-        throughput.is_measured(),
-        policy.strict,
-    );
-    progress.finished();
-    if gate == BenchGate::DeterminismBreak {
-        println!("  determinism: BREAK");
-        for failure in &determinism_failures {
-            println!("    {failure}");
-        }
-        for line in locate_divergence(opts, &runs)? {
-            println!("    {line}");
-        }
-    }
-    Ok(BenchRunsOutcome {
-        runs,
-        throughput,
-        gate,
-        anchor,
-        determinism_failures,
-    })
 }
