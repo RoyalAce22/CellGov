@@ -422,28 +422,15 @@ fn run_sequence_with_limit(
     let mut world = World::with_local_store(initial, pool.take(), &script.memory, None)
         .map_err(world_failure)?;
     let mut actions = script.actions.iter().peekable();
-    let mut decoded = 0u64;
-    let mut kinds = Vec::new();
-    let mut terminal_outcome = None;
-    let mut decode_refusal = None;
-    let mut deterministic = true;
-    let mut has_undefined_operands = false;
-    let mut has_unmodeled_execution = false;
-    let mut footprint_violations = BTreeSet::new();
-    let mut coverage = SpuFacilityCoverage::default();
-    let mut pending_seen = 0u32;
-    let mut effects = Vec::new();
-    let mut stalled = false;
-    let mut faulted = false;
+    let mut run = SequenceRun::new();
     // A parked access runs again without counting as a new instruction.
     let mut parked = false;
-    let mut parks = 0u32;
     let mut retired = 0usize;
     // Each step's pre-state, copied into one buffer the run reuses from
     // its first step on.
     let mut pre_state: Option<SpuState> = None;
     while retired < budget {
-        while let Some((_, action)) = actions.next_if(|(after, _)| *after <= decoded) {
+        while let Some((_, action)) = actions.next_if(|(after, _)| *after <= run.decoded) {
             world.apply(*action);
         }
         world.enter();
@@ -465,17 +452,17 @@ fn run_sequence_with_limit(
         };
         executing.set(None);
         let Ok(instruction) = seeded::spu_decode(raw) else {
-            decode_refusal = Some((state.pc, raw));
+            run.decode_refusal = Some((state.pc, raw));
             break;
         };
         let descriptor = instruction.fuzz_descriptor();
-        has_undefined_operands |= encoding_has_undefined_operands(raw);
-        has_unmodeled_execution |= !encoding_execution_is_supported(raw);
-        deterministic &= requests_replay(descriptor.relations);
+        run.has_undefined_operands |= encoding_has_undefined_operands(raw);
+        run.has_unmodeled_execution |= !encoding_execution_is_supported(raw);
+        run.deterministic &= requests_replay(descriptor.relations);
         let identity = InstructionIdentity::Spu(descriptor.kind);
         if !parked {
-            decoded += 1;
-            kinds.push(identity);
+            run.decoded += 1;
+            run.kinds.push(identity);
         }
         executing.set(Some(identity));
         let first_step = pre_state.is_none();
@@ -486,40 +473,27 @@ fn run_sequence_with_limit(
         let state = world.unit.state_mut();
         let outcome = cellgov_spu::step::execute_instruction(&instruction, state, OWN);
         seeded::spu_observed(&instruction, SpuOutcomeClass::from_outcome(&outcome), state);
-        footprint_violations.extend(
+        run.footprint_violations.extend(
             SpuAllowedFootprint::for_instruction(&instruction)
                 .violations_after(before, state, &outcome),
         );
-        record_coverage(&mut coverage, &instruction, before, &outcome);
-        pending_seen |= state.channels.pending_events;
-        terminal_outcome = Some(outcome.clone());
+        record_coverage(&mut run.coverage, &instruction, before, &outcome);
+        run.pending_seen |= state.channels.pending_events;
+        run.terminal_outcome = Some(outcome.clone());
         parked = false;
-        match outcome {
-            SpuStepOutcome::Continue => state.advance_pc(),
-            SpuStepOutcome::Branch => {}
+        let blocked = match outcome {
+            SpuStepOutcome::Continue => {
+                state.advance_pc();
+                false
+            }
+            SpuStepOutcome::Branch => false,
             SpuStepOutcome::Yield {
                 effects: emitted,
                 reason,
             } => {
                 let blocked = reason == YieldReason::ChannelStall;
-                // A blocked access did not retire, so the program counter
-                // stays on it.
-                if !blocked {
-                    state.advance_pc();
-                }
-                world.settle(&emitted).map_err(world_failure)?;
-                effects.extend(emitted);
-                if blocked {
-                    // [CBE-Handbook p:447 s:17.1.6] a blocked access stalls until the channel changes or the SPU is interrupted.
-                    let Some((_, action)) = actions.next() else {
-                        stalled = true;
-                        break;
-                    };
-                    world.apply(*action);
-                    parked = true;
-                    parks += 1;
-                    continue;
-                }
+                settle_yield(&mut world, emitted, blocked, &mut run.effects)?;
+                blocked
             }
             SpuStepOutcome::MemoryRead {
                 ea,
@@ -529,9 +503,8 @@ fn run_sequence_with_limit(
             } => {
                 let mut emitted = Vec::new();
                 world.complete_read(ea, lsa, size, acquire_line, &mut emitted);
-                world.unit.state_mut().advance_pc();
-                world.settle(&emitted).map_err(world_failure)?;
-                effects.extend(emitted);
+                settle_yield(&mut world, emitted, false, &mut run.effects)?;
+                false
             }
             // [SPU-ISA p:238 s:10. Control Instructions] a stop leaves PC at the next word, masked by LSLR.
             SpuStepOutcome::Stop { kind, signal } => {
@@ -539,13 +512,24 @@ fn run_sequence_with_limit(
                 break;
             }
             SpuStepOutcome::Fault(_) => {
-                faulted = true;
+                run.faulted = true;
                 break;
             }
+        };
+        if blocked {
+            // [CBE-Handbook p:447 s:17.1.6] a blocked access stalls until the channel changes or the SPU is interrupted.
+            let Some((_, action)) = actions.next() else {
+                run.stalled = true;
+                break;
+            };
+            world.apply(*action);
+            parked = true;
+            run.parks += 1;
+            continue;
         }
         // A store the world could not commit refuses the batch, as a fault does.
         if world.refused {
-            faulted = true;
+            run.faulted = true;
             break;
         }
         // One instruction per nanosecond. The conversion reads the
@@ -562,45 +546,113 @@ fn run_sequence_with_limit(
     if let Some(before) = pre_state {
         pool.give(before.ls);
     }
-    let ppu_results = std::mem::take(&mut world.ppu_results);
-    let mfc_exceptions = std::mem::take(&mut world.exceptions);
-    let (mut state, memory) = if faulted {
-        // The runtime fault-discard rule hides state from a faulting batch.
-        // Main storage is then the script's runs, which the world started
-        // from.
-        effects.clear();
-        pool.give(world.into_state().ls);
-        (pool.copy(initial), script.memory.clone())
-    } else {
-        let memory = world.memory_image().map_err(world_failure)?;
-        (world.into_state(), memory)
-    };
-    coverage.event_sources = (0..32)
-        .map(|bit| 1u32 << bit)
-        .filter(|mask| pending_seen & spu::event::ALL & mask != 0)
-        .collect();
-    seeded::spu_program_counter(&mut state.pc);
-    Ok(ObservedSequenceRun {
-        observed: ObservedSequence {
-            state: SpuObservableSnapshot::capture_owned(state),
-            // Sequence replay retains the terminal outcome because the descriptor observes its effects.
-            terminal_outcome,
-            decode_refusal,
-            deterministic,
-            has_undefined_operands,
-            has_unmodeled_execution,
-            footprint_violations,
-            memory,
-            effects,
-            ppu_results,
-            mfc_exceptions,
-            stalled,
-            parks,
-            coverage,
-        },
-        decoded,
-        decoded_kinds: kinds,
-    })
+    run.finish(world, initial, script, pool)
+}
+
+/// Settle a yield's effects with the world and keep them. A blocked
+/// access did not retire, so the program counter stays on it.
+#[inline]
+fn settle_yield(
+    world: &mut World,
+    emitted: Vec<Effect>,
+    blocked: bool,
+    effects: &mut Vec<Effect>,
+) -> Result<(), InvariantError> {
+    if !blocked {
+        world.unit.state_mut().advance_pc();
+    }
+    world.settle(&emitted).map_err(world_failure)?;
+    effects.extend(emitted);
+    Ok(())
+}
+
+/// What one sequence run gathers while it steps.
+struct SequenceRun {
+    decoded: u64,
+    kinds: Vec<InstructionIdentity>,
+    terminal_outcome: Option<SpuStepOutcome>,
+    decode_refusal: Option<(u32, u32)>,
+    deterministic: bool,
+    has_undefined_operands: bool,
+    has_unmodeled_execution: bool,
+    footprint_violations: BTreeSet<SpuObservationComponent>,
+    coverage: SpuFacilityCoverage,
+    pending_seen: u32,
+    effects: Vec<Effect>,
+    stalled: bool,
+    faulted: bool,
+    parks: u32,
+}
+
+impl SequenceRun {
+    fn new() -> Self {
+        Self {
+            decoded: 0,
+            kinds: Vec::new(),
+            terminal_outcome: None,
+            decode_refusal: None,
+            deterministic: true,
+            has_undefined_operands: false,
+            has_unmodeled_execution: false,
+            footprint_violations: BTreeSet::new(),
+            coverage: SpuFacilityCoverage::default(),
+            pending_seen: 0,
+            effects: Vec::new(),
+            stalled: false,
+            faulted: false,
+            parks: 0,
+        }
+    }
+
+    /// The observation of the finished run. A faulting run discards its
+    /// effects, state and stores first: the runtime fault-discard rule
+    /// hides state from a faulting batch, and main storage then holds the
+    /// script's runs, the world's start.
+    fn finish(
+        mut self,
+        mut world: World,
+        initial: &SpuState,
+        script: &SequenceWorld,
+        pool: &LocalStores,
+    ) -> Result<ObservedSequenceRun, InvariantError> {
+        let ppu_results = std::mem::take(&mut world.ppu_results);
+        let mfc_exceptions = std::mem::take(&mut world.exceptions);
+        let (mut state, memory) = if self.faulted {
+            self.effects.clear();
+            pool.give(world.into_state().ls);
+            (pool.copy(initial), script.memory.clone())
+        } else {
+            let memory = world.memory_image().map_err(world_failure)?;
+            (world.into_state(), memory)
+        };
+        let pending_seen = self.pending_seen;
+        self.coverage.event_sources = (0..32)
+            .map(|bit| 1u32 << bit)
+            .filter(|mask| pending_seen & spu::event::ALL & mask != 0)
+            .collect();
+        seeded::spu_program_counter(&mut state.pc);
+        Ok(ObservedSequenceRun {
+            observed: ObservedSequence {
+                state: SpuObservableSnapshot::capture_owned(state),
+                // Sequence replay retains the terminal outcome because the descriptor observes its effects.
+                terminal_outcome: self.terminal_outcome,
+                decode_refusal: self.decode_refusal,
+                deterministic: self.deterministic,
+                has_undefined_operands: self.has_undefined_operands,
+                has_unmodeled_execution: self.has_unmodeled_execution,
+                footprint_violations: self.footprint_violations,
+                memory,
+                effects: self.effects,
+                ppu_results,
+                mfc_exceptions,
+                stalled: self.stalled,
+                parks: self.parks,
+                coverage: self.coverage,
+            },
+            decoded: self.decoded,
+            decoded_kinds: self.kinds,
+        })
+    }
 }
 
 pub(super) fn requests_replay(relations: &[SpuMetamorphicRelation]) -> bool {
