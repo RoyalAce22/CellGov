@@ -87,35 +87,7 @@ impl PpuExecutionUnit {
         effects.clear();
         self.store_buf.clear();
         self.drop_fetch_runs();
-
-        // Cross-unit reservation clear: committed table is authoritative.
-        if self.state.reservation().is_some() && !ctx.reservation_held(self.id) {
-            self.state.set_reservation(None);
-        }
-
-        // `max` preserves strict TB monotonicity when a prior step's
-        // mftb advances outran the inter-step tick delta.
-        let tb_from_tick = cellgov_time::ticks_to_tb(ctx.current_tick().raw());
-        if tb_from_tick > self.state.tb {
-            self.state.tb = tb_from_tick;
-        }
-        // The resync reaches no guest register, so it is no clock read:
-        // `mftb` and `mftbu` set the flag, and each step starts clear.
-        self.state.clock_read = false;
-
-        if let Some(code) = ctx.syscall_return() {
-            self.state.set_gpr(3, code);
-            self.state.pc += 4;
-        }
-        for &(reg, val) in ctx.register_writes() {
-            if (reg as usize) < 32 {
-                self.state.set_gpr(reg as usize, val);
-            }
-        }
-
-        // A runnable sibling shares the PPE's issue for this batch.
-        self.timing
-            .set_siblings(ctx.ppe_siblings(), ctx.ppe_sibling_pressure());
+        self.apply_committed_inputs(ctx);
 
         // Taken after the runtime's committed inputs (syscall return,
         // register writes) are applied: a mid-batch rollback must not
@@ -131,32 +103,8 @@ impl PpuExecutionUnit {
         };
 
         let mem = ctx.memory().as_bytes();
-        // Stack-allocated region table avoids per-call heap alloc on the
-        // Budget=1 hot path. Boot installs six regions, each
-        // shared-memory mapping adds one and each window adds up to two;
-        // a larger layout spills to the heap. Nothing guest-visible turns
-        // on the cutoff.
-        const MAX_REGIONS: usize = 8;
-        let mut region_views_storage: [cellgov_mem::RegionView<'_>; MAX_REGIONS] =
-            [cellgov_mem::RegionView::plain(0, &[]); MAX_REGIONS];
-        let mut region_views_spill: Vec<cellgov_mem::RegionView<'_>> = Vec::new();
-        let mut n_regions = 0usize;
-        for view in ctx.memory().region_views() {
-            if n_regions < MAX_REGIONS {
-                region_views_storage[n_regions] = view;
-            } else {
-                if region_views_spill.is_empty() {
-                    region_views_spill.extend_from_slice(&region_views_storage);
-                }
-                region_views_spill.push(view);
-            }
-            n_regions += 1;
-        }
-        let region_views: &[cellgov_mem::RegionView<'_>] = if n_regions <= MAX_REGIONS {
-            &region_views_storage[..n_regions]
-        } else {
-            &region_views_spill
-        };
+        let regions = RegionTable::new(ctx.memory().region_views());
+        let region_views = regions.as_slice();
         // A window's bytes are another unit's state, which the runtime
         // updates only between batches. The batch ends at the instruction
         // that reaches a window, so the next instruction sees the update.
@@ -173,39 +121,14 @@ impl PpuExecutionUnit {
                     self.break_skip -= 1;
                 } else {
                     self.break_pc = None;
-                    let diag = self.fault_diag(step_pc);
-                    return self.fault_yield(&entry, effects, diag, FAULT_DEBUG_BREAK);
+                    return self.fault_at(&entry, effects, step_pc, FAULT_DEBUG_BREAK);
                 }
             }
 
             self.note_fetch(step_pc);
-            let insn = if let Some(cached) = self
-                .instruction_shadow
-                .as_ref()
-                .and_then(|s| s.get(step_pc))
-            {
-                self.shadow_hits += 1;
-                cached
-            } else {
-                self.shadow_misses += 1;
-                let pc = step_pc as usize;
-                if pc + 4 > mem.len() {
-                    let diag = self.fault_diag(step_pc);
-                    return self.fault_yield(&entry, effects, diag, FAULT_PC_OUT_OF_RANGE);
-                }
-                let raw = u32::from_be_bytes([mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3]]);
-                match decode::decode(raw) {
-                    Ok(i) => {
-                        if let Some(s) = self.instruction_shadow.as_mut() {
-                            let _ = s.refresh(step_pc, raw);
-                        }
-                        i
-                    }
-                    Err(_) => {
-                        let diag = self.fault_diag(step_pc);
-                        return self.fault_yield(&entry, effects, diag, FAULT_DECODE_ERROR);
-                    }
-                }
+            let insn = match self.fetch_decode(step_pc, mem) {
+                Ok(insn) => insn,
+                Err(code) => return self.fault_at(&entry, effects, step_pc, code),
             };
 
             // `Consumed` is the second slot of a fused super-pair; it
@@ -217,30 +140,10 @@ impl PpuExecutionUnit {
                     self.per_step_hashes
                         .push((step_pc, self.state.state_hash()));
                 }
-                if let Some((lo, hi)) = self.full_state_window {
-                    if self.retirement_counter >= lo && self.retirement_counter <= hi {
-                        self.per_step_full_states.push((
-                            self.retirement_counter,
-                            step_pc,
-                            self.state.fingerprint(),
-                        ));
-                    }
-                }
-                debug_assert!(
-                    self.state.hash_is_current(),
-                    "state-hash accumulator out of date after retirement at 0x{step_pc:x}"
-                );
-                self.retirement_counter += 1;
+                self.record_retirement(step_pc);
                 remaining = remaining.saturating_sub(1);
                 if remaining == 0 {
-                    self.close_block(effects);
-                    return ExecutionStepResult {
-                        yield_reason: YieldReason::BudgetExhausted,
-                        consumed_cost: self.cost(&entry),
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: None,
-                        syscall_args: None,
-                    };
+                    return self.budget_yield(&entry, effects, step_pc);
                 }
                 continue;
             }
@@ -248,22 +151,7 @@ impl PpuExecutionUnit {
             tap.dispatch(self.id, &insn, &self.state);
             let (ops, n_ops) = crate::timing::classify(&insn, &self.state);
             let ops = &ops[..n_ops];
-            if let (
-                instruction::PpuInstruction::Mftb { .. }
-                | instruction::PpuInstruction::Mftbu { .. },
-                [op],
-            ) = (&insn, ops)
-            {
-                // The time base a read returns is the one at its issue
-                // cycle; the read itself adds one.
-                let issue = self.timing.issue_cycle(step_pc, op);
-                let tick = ctx
-                    .current_tick()
-                    .raw()
-                    .saturating_add(issue.saturating_sub(entry.cycle));
-                let tb = cellgov_time::ticks_to_tb(tick);
-                self.state.tb = self.state.tb.max(tb.saturating_sub(1));
-            }
+            self.align_clock_read_to_issue(ctx, &entry, step_pc, &insn, ops);
             let (effects_before, stores_before) = (effects.len(), self.store_buf.len());
             match exec::execute(
                 &insn,
@@ -310,45 +198,10 @@ impl PpuExecutionUnit {
                     };
                 }
                 ExecuteVerdict::Fault(f) => {
-                    // Diag captured before rollback so registers
-                    // reflect the fault site. Address-bearing variants
-                    // route the address through `faulting_ea` to keep
-                    // the low 16 bits free for the category-prefix
-                    // contract with cellgov_core.
-                    let diag = match f {
-                        PpuFault::InvalidAddress(a) => self.fault_diag_ea(step_pc, a),
-                        PpuFault::PcOutOfRange(a) => self.fault_diag_ea(step_pc, a),
-                        PpuFault::AlignmentInterrupt(a) => self.fault_diag_ea(step_pc, a),
-                        _ => self.fault_diag(step_pc),
-                    };
-                    // Mask guards against upper-bit collision with the category prefix.
-                    let code = f.guest_code();
-                    return self.fault_yield(&entry, effects, diag, code);
+                    return self.fault_verdict_yield(&entry, effects, step_pc, f);
                 }
                 ExecuteVerdict::MemFault(e) => {
-                    let (ea, unmapped) = match &e {
-                        cellgov_mem::MemError::Unmapped(ctx) => (ctx.addr, true),
-                        // Only Unmapped is reachable on this path.
-                        _ => {
-                            debug_assert!(
-                                false,
-                                "ExecuteVerdict::MemFault carrying non-Unmapped MemError: {e:?}"
-                            );
-                            (0, false)
-                        }
-                    };
-                    let diag = self.fault_diag_ea(step_pc, ea);
-                    let result = self.fault_yield(&entry, effects, diag, FAULT_INVALID_ADDRESS);
-                    // Incremented after the rollback: the counters are
-                    // hash-excluded instruments, and restoring the entry
-                    // snapshot must not erase the record of this fault.
-                    self.state.mem_fault_arm_entries =
-                        self.state.mem_fault_arm_entries.wrapping_add(1);
-                    if unmapped {
-                        self.state.mem_fault_unmapped_routed =
-                            self.state.mem_fault_unmapped_routed.wrapping_add(1);
-                    }
-                    return result;
+                    return self.mem_fault_yield(&entry, effects, step_pc, e);
                 }
                 ExecuteVerdict::BufferFull => {
                     // PC stays at the failing store; retries next step.
@@ -358,28 +211,14 @@ impl PpuExecutionUnit {
                     if self.break_pc == Some(step_pc) {
                         self.break_skip += 1;
                     }
-                    self.close_block(effects);
-                    return ExecutionStepResult {
-                        yield_reason: YieldReason::BudgetExhausted,
-                        consumed_cost: self.cost(&entry),
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: None,
-                        syscall_args: None,
-                    };
+                    return self.budget_yield(&entry, effects, step_pc);
                 }
             }
 
             self.retire_timing(step_pc, ops, self.state.pc);
 
             if self.profile_mode {
-                // Attribute to the dispatched variant so quickenings
-                // and super-pairs show up in the profile.
-                let name: &'static str = (&insn).into();
-                *self.profile_insns.entry(name).or_insert(0) += 1;
-                if let Some(prev) = self.profile_prev {
-                    *self.profile_pairs.entry((prev, name)).or_insert(0) += 1;
-                }
-                self.profile_prev = Some(name);
+                self.profile_dispatch(&insn);
             }
 
             if ctx.trace_per_step() {
@@ -390,21 +229,7 @@ impl PpuExecutionUnit {
                         .push(cellgov_exec::RetiredBarrier { pc: step_pc, kind });
                 }
             }
-
-            if let Some((lo, hi)) = self.full_state_window {
-                if self.retirement_counter >= lo && self.retirement_counter <= hi {
-                    self.per_step_full_states.push((
-                        self.retirement_counter,
-                        step_pc,
-                        self.state.fingerprint(),
-                    ));
-                }
-            }
-            debug_assert!(
-                self.state.hash_is_current(),
-                "state-hash accumulator out of date after retirement at 0x{step_pc:x}"
-            );
-            self.retirement_counter += 1;
+            self.record_retirement(step_pc);
 
             remaining = remaining.saturating_sub(1);
             let reached_window = window_span.is_some_and(|span| {
@@ -415,15 +240,267 @@ impl PpuExecutionUnit {
                 )
             });
             if remaining == 0 || reached_window {
-                self.close_block(effects);
-                return ExecutionStepResult {
-                    yield_reason: YieldReason::BudgetExhausted,
-                    consumed_cost: self.cost(&entry),
-                    local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                    fault: None,
-                    syscall_args: None,
-                };
+                return self.budget_yield(&entry, effects, step_pc);
             }
+        }
+    }
+
+    /// Applies what the runtime committed since the last batch: the
+    /// reservation clear, the time-base resync, a syscall return,
+    /// register writes, and the PPE sibling count.
+    #[inline]
+    fn apply_committed_inputs(&mut self, ctx: &ExecutionContext<'_>) {
+        // Cross-unit reservation clear: committed table is authoritative.
+        if self.state.reservation().is_some() && !ctx.reservation_held(self.id) {
+            self.state.set_reservation(None);
+        }
+
+        // `max` preserves strict TB monotonicity when a prior step's
+        // mftb advances outran the inter-step tick delta.
+        let tb_from_tick = cellgov_time::ticks_to_tb(ctx.current_tick().raw());
+        if tb_from_tick > self.state.tb {
+            self.state.tb = tb_from_tick;
+        }
+        // The resync reaches no guest register, so it is no clock read:
+        // `mftb` and `mftbu` set the flag, and each step starts clear.
+        self.state.clock_read = false;
+
+        if let Some(code) = ctx.syscall_return() {
+            self.state.set_gpr(3, code);
+            self.state.pc += 4;
+        }
+        for &(reg, val) in ctx.register_writes() {
+            if (reg as usize) < 32 {
+                self.state.set_gpr(reg as usize, val);
+            }
+        }
+
+        // A runnable sibling shares the PPE's issue for this batch.
+        self.timing
+            .set_siblings(ctx.ppe_siblings(), ctx.ppe_sibling_pressure());
+    }
+
+    /// The instruction at `step_pc`: the shadow's copy, or a fresh decode
+    /// that refreshes the shadow. `Err` is the fault code.
+    #[inline]
+    fn fetch_decode(
+        &mut self,
+        step_pc: u64,
+        mem: &[u8],
+    ) -> Result<instruction::PpuInstruction, u32> {
+        if let Some(cached) = self
+            .instruction_shadow
+            .as_ref()
+            .and_then(|s| s.get(step_pc))
+        {
+            self.shadow_hits += 1;
+            return Ok(cached);
+        }
+        self.shadow_misses += 1;
+        let pc = step_pc as usize;
+        if pc + 4 > mem.len() {
+            return Err(FAULT_PC_OUT_OF_RANGE);
+        }
+        let raw = u32::from_be_bytes([mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3]]);
+        let insn = decode::decode(raw).map_err(|_| FAULT_DECODE_ERROR)?;
+        if let Some(s) = self.instruction_shadow.as_mut() {
+            let _ = s.refresh(step_pc, raw);
+        }
+        Ok(insn)
+    }
+
+    /// Gives an `mftb` / `mftbu` the time base at its issue cycle; the
+    /// read itself adds one.
+    #[inline]
+    fn align_clock_read_to_issue(
+        &mut self,
+        ctx: &ExecutionContext<'_>,
+        entry: &BatchEntry,
+        step_pc: u64,
+        insn: &instruction::PpuInstruction,
+        ops: &[crate::timing::Op],
+    ) {
+        let (
+            instruction::PpuInstruction::Mftb { .. } | instruction::PpuInstruction::Mftbu { .. },
+            [op],
+        ) = (insn, ops)
+        else {
+            return;
+        };
+        let issue = self.timing.issue_cycle(step_pc, op);
+        let tick = ctx
+            .current_tick()
+            .raw()
+            .saturating_add(issue.saturating_sub(entry.cycle));
+        let tb = cellgov_time::ticks_to_tb(tick);
+        self.state.tb = self.state.tb.max(tb.saturating_sub(1));
+    }
+
+    /// Records one retirement at `step_pc`: the full-state window entry,
+    /// then the retirement count.
+    #[inline]
+    fn record_retirement(&mut self, step_pc: u64) {
+        if let Some((lo, hi)) = self.full_state_window {
+            if self.retirement_counter >= lo && self.retirement_counter <= hi {
+                self.per_step_full_states.push((
+                    self.retirement_counter,
+                    step_pc,
+                    self.state.fingerprint(),
+                ));
+            }
+        }
+        debug_assert!(
+            self.state.hash_is_current(),
+            "state-hash accumulator out of date after retirement at 0x{step_pc:x}"
+        );
+        self.retirement_counter += 1;
+    }
+
+    /// Counts the dispatched variant, and the pair it forms with the one
+    /// before, so quickenings and super-pairs show in the profile.
+    #[inline]
+    fn profile_dispatch(&mut self, insn: &instruction::PpuInstruction) {
+        let name: &'static str = insn.into();
+        *self.profile_insns.entry(name).or_insert(0) += 1;
+        if let Some(prev) = self.profile_prev {
+            *self.profile_pairs.entry((prev, name)).or_insert(0) += 1;
+        }
+        self.profile_prev = Some(name);
+    }
+
+    /// Closes the block and yields with the budget spent at `pc`.
+    #[inline]
+    fn budget_yield(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        pc: u64,
+    ) -> ExecutionStepResult {
+        self.close_block(effects);
+        ExecutionStepResult {
+            yield_reason: YieldReason::BudgetExhausted,
+            consumed_cost: self.cost(entry),
+            local_diagnostics: LocalDiagnostics::with_pc(pc),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    /// Faults at `step_pc` with `code` and the registers at that point.
+    #[inline]
+    fn fault_at(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        step_pc: u64,
+        code: u32,
+    ) -> ExecutionStepResult {
+        let diag = self.fault_diag(step_pc);
+        self.fault_yield(entry, effects, diag, code)
+    }
+
+    /// Yields the fault an instruction reported.
+    #[inline]
+    fn fault_verdict_yield(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        step_pc: u64,
+        f: PpuFault,
+    ) -> ExecutionStepResult {
+        // Diag captured before rollback so registers
+        // reflect the fault site. Address-bearing variants
+        // route the address through `faulting_ea` to keep
+        // the low 16 bits free for the category-prefix
+        // contract with cellgov_core.
+        let diag = match f {
+            PpuFault::InvalidAddress(a) => self.fault_diag_ea(step_pc, a),
+            PpuFault::PcOutOfRange(a) => self.fault_diag_ea(step_pc, a),
+            PpuFault::AlignmentInterrupt(a) => self.fault_diag_ea(step_pc, a),
+            _ => self.fault_diag(step_pc),
+        };
+        // Mask guards against upper-bit collision with the category prefix.
+        let code = f.guest_code();
+        self.fault_yield(entry, effects, diag, code)
+    }
+
+    /// Yields the memory fault an instruction reported, then counts it.
+    #[inline]
+    fn mem_fault_yield(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        step_pc: u64,
+        e: cellgov_mem::MemError,
+    ) -> ExecutionStepResult {
+        let (ea, unmapped) = match &e {
+            cellgov_mem::MemError::Unmapped(ctx) => (ctx.addr, true),
+            // Only Unmapped is reachable on this path.
+            _ => {
+                debug_assert!(
+                    false,
+                    "ExecuteVerdict::MemFault carrying non-Unmapped MemError: {e:?}"
+                );
+                (0, false)
+            }
+        };
+        let diag = self.fault_diag_ea(step_pc, ea);
+        let result = self.fault_yield(entry, effects, diag, FAULT_INVALID_ADDRESS);
+        // Incremented after the rollback: the counters are
+        // hash-excluded instruments, and restoring the entry
+        // snapshot must not erase the record of this fault.
+        self.state.mem_fault_arm_entries = self.state.mem_fault_arm_entries.wrapping_add(1);
+        if unmapped {
+            self.state.mem_fault_unmapped_routed =
+                self.state.mem_fault_unmapped_routed.wrapping_add(1);
+        }
+        result
+    }
+}
+
+/// The batch's region views, on the stack while they fit.
+///
+/// The stack table avoids a heap allocation on the Budget=1 hot path.
+/// Boot installs six regions, each shared-memory mapping adds one and
+/// each window adds up to two; a larger layout spills to the heap.
+/// Nothing guest-visible turns on the cutoff.
+struct RegionTable<'a> {
+    storage: [cellgov_mem::RegionView<'a>; MAX_REGIONS],
+    spill: Vec<cellgov_mem::RegionView<'a>>,
+    len: usize,
+}
+
+/// How many region views [`RegionTable`] holds before it spills.
+const MAX_REGIONS: usize = 8;
+
+impl<'a> RegionTable<'a> {
+    #[inline]
+    fn new(views: impl Iterator<Item = cellgov_mem::RegionView<'a>>) -> Self {
+        let mut table = Self {
+            storage: [cellgov_mem::RegionView::plain(0, &[]); MAX_REGIONS],
+            spill: Vec::new(),
+            len: 0,
+        };
+        for view in views {
+            if table.len < MAX_REGIONS {
+                table.storage[table.len] = view;
+            } else {
+                if table.spill.is_empty() {
+                    table.spill.extend_from_slice(&table.storage);
+                }
+                table.spill.push(view);
+            }
+            table.len += 1;
+        }
+        table
+    }
+
+    #[inline]
+    fn as_slice(&self) -> &[cellgov_mem::RegionView<'a>] {
+        if self.len <= MAX_REGIONS {
+            &self.storage[..self.len]
+        } else {
+            &self.spill
         }
     }
 }
