@@ -3,7 +3,7 @@
 
 use crate::decision::{DecisionLog, DecisionPoint};
 use crate::dependency::StepFootprint;
-use crate::util::StopReason;
+use crate::util::{post_commit_stop, StopReason};
 use cellgov_core::Runtime;
 
 /// Drive `rt` until it stops and return the recorded [`DecisionLog`]
@@ -42,48 +42,42 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
             break StopReason::StepBound;
         }
         let step_idx = rt.steps_taken();
-        match rt.step() {
-            Ok(mut step) => {
-                // The predicate re-reads the question `Runtime::step`
-                // answers; a step past the cap means the two disagree,
-                // and the cap then bounds nothing.
-                debug_assert!(
-                    !at_cap,
-                    "the cap was reached, the predicate saw no step left, and one ran",
-                );
-                // A warp inside the step can widen the set the
-                // scheduler chose from, so the point reads it here.
-                let runnable: Vec<_> = step.runnable.clone();
-                let mut footprint =
-                    StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
-                if let Err(e) = rt.commit_step(&mut step) {
-                    break StopReason::CommitError(e);
-                }
-                if let Err(e) = footprint.note_commit(rt, &step, &runnable) {
-                    break StopReason::StaleObservations(e);
-                }
-                // The pass this parks behind reaches no footprint, so
-                // the relation cannot answer for the steps after it.
-                if rt.has_pending_child_init() {
-                    break StopReason::ChildInitUnserved;
-                }
-                // A discarded batch reached no guest state, so the step
-                // gets no point, as a refused commit gets none.
-                if let Some(kind) = step.result.fault {
-                    break StopReason::Faulted(kind);
-                }
-                log.push(DecisionPoint {
-                    step: step_idx,
-                    runnable,
-                    chosen: step.unit,
-                    footprint,
-                });
-                committed += 1;
-            }
-            Err(cellgov_core::StepError::NoRunnableUnit) => break StopReason::Stalled,
-            Err(cellgov_core::StepError::AllBlocked) => break StopReason::Deadlocked,
-            Err(e) => break StopReason::StepError(e),
+        let mut step = match rt.step() {
+            Ok(step) => step,
+            Err(e) => break StopReason::from_step_error(e),
+        };
+        // The predicate re-reads the question `Runtime::step` answers; a
+        // step past the cap means the two disagree, and the cap then
+        // bounds nothing.
+        debug_assert!(
+            !at_cap,
+            "the cap was reached, the predicate saw no step left, and one ran",
+        );
+        // A warp inside the step can widen the set the scheduler chose
+        // from, so the point reads it here.
+        let runnable: Vec<_> = step.runnable.clone();
+        let mut footprint =
+            StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
+        if let Err(e) = rt.commit_step(&mut step) {
+            break StopReason::CommitError(e);
         }
+        if let Err(e) = footprint.note_commit(rt, &step, &runnable) {
+            break StopReason::StaleObservations(e);
+        }
+        // The pass a pending child init parks behind reaches no
+        // footprint, so the relation cannot answer for the steps after
+        // it. A discarded batch reached no guest state, so a faulted
+        // step gets no point, as a refused commit gets none.
+        if let Some(stop) = post_commit_stop(rt, step.result.fault) {
+            break stop;
+        }
+        log.push(DecisionPoint {
+            step: step_idx,
+            runnable,
+            chosen: step.unit,
+            footprint,
+        });
+        committed += 1;
     };
     (log, stop)
 }

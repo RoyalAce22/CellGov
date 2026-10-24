@@ -119,6 +119,29 @@ impl StopReason {
             Self::ChildInitUnserved => StopClass::Unserved,
         }
     }
+
+    /// The stop a refused `Runtime::step` ends the run with.
+    pub(crate) fn from_step_error(error: StepError) -> Self {
+        match error {
+            StepError::NoRunnableUnit => Self::Stalled,
+            StepError::AllBlocked => Self::Deadlocked,
+            e => Self::StepError(e),
+        }
+    }
+}
+
+/// The stop a committed step ends the run with, if any: a staged
+/// child-init pass, then a fault.
+///
+/// A caller checks the commit refusal first. The pending pass outranks
+/// the fault for the same reason the refusal does, as the boot's own
+/// step loop ranks them. The commit discards a faulted batch and counts
+/// it, so the fault read comes after the commit.
+pub(crate) fn post_commit_stop(rt: &Runtime, fault: Option<FaultKind>) -> Option<StopReason> {
+    if rt.has_pending_child_init() {
+        return Some(StopReason::ChildInitUnserved);
+    }
+    fault.map(StopReason::Faulted)
 }
 
 impl std::fmt::Display for StopReason {
@@ -162,30 +185,19 @@ impl DrivenStop {
 /// search keep their own loops and rank the ways a step ends the same
 /// way.
 fn take_step(rt: &mut Runtime) -> Result<Option<u64>, DrivenStop> {
-    match rt.step() {
-        Ok(mut step) => {
-            let pc = step.result.local_diagnostics.pc;
-            let stop = |reason| DrivenStop { reason, pc };
-            // The commit discards the batch and counts it, so the fault
-            // read comes after it. A refusal outranks a fault, as the
-            // boot's own step loop ranks them.
-            if let Err(e) = rt.commit_step(&mut step) {
-                return Err(stop(StopReason::CommitError(e)));
-            }
-            // Ahead of the fault for the same reason the commit refusal
-            // above is.
-            if rt.has_pending_child_init() {
-                return Err(stop(StopReason::ChildInitUnserved));
-            }
-            if let Some(kind) = step.result.fault {
-                return Err(stop(StopReason::Faulted(kind)));
-            }
-            Ok(pc)
-        }
-        Err(StepError::NoRunnableUnit) => Err(DrivenStop::before_a_step(StopReason::Stalled)),
-        Err(StepError::AllBlocked) => Err(DrivenStop::before_a_step(StopReason::Deadlocked)),
-        Err(e) => Err(DrivenStop::before_a_step(StopReason::StepError(e))),
+    let mut step = rt
+        .step()
+        .map_err(|e| DrivenStop::before_a_step(StopReason::from_step_error(e)))?;
+    let pc = step.result.local_diagnostics.pc;
+    let stop = |reason| DrivenStop { reason, pc };
+    // A refusal outranks a fault, as the boot's own step loop ranks them.
+    if let Err(e) = rt.commit_step(&mut step) {
+        return Err(stop(StopReason::CommitError(e)));
     }
+    if let Some(reason) = post_commit_stop(rt, step.result.fault) {
+        return Err(stop(reason));
+    }
+    Ok(pc)
 }
 
 /// Drive `rt` until it stops, committing each step immediately.

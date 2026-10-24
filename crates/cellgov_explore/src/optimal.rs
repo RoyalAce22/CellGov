@@ -18,7 +18,9 @@ use crate::decision::{DecisionLog, DecisionPoint};
 use crate::dependency::StepFootprint;
 use crate::execution::Execution;
 use crate::prescribed::PrescribedScheduler;
-use crate::util::{classify_iteration, AlternateIteration, StopClass, StopReason};
+use crate::util::{
+    classify_iteration, post_commit_stop, AlternateIteration, StopClass, StopReason,
+};
 use crate::wakeup::{initials, SeqEvent, WakeupTree};
 use cellgov_core::{Runtime, RuntimeSnapshot};
 use cellgov_event::UnitId;
@@ -412,7 +414,7 @@ fn run_one(
         }
         let mut step = match rt.step() {
             Ok(step) => step,
-            Err(e) => break Halt::Stopped(step_stop(e)),
+            Err(e) => break Halt::Stopped(StopReason::from_step_error(e)),
         };
         // `can_take_another_step` and `Runtime::step` answer the same
         // question, so a step past the cap is the two disagreeing.
@@ -437,16 +439,11 @@ fn run_one(
         if let Err(e) = footprint.note_commit(rt, &step, &chosen_from) {
             break Halt::Stopped(StopReason::StaleObservations(e));
         }
-        // The same stop as at the top of the loop, read after the
-        // commit that can make the pass pending.
-        if rt.has_pending_child_init() {
-            break Halt::Stopped(StopReason::ChildInitUnserved);
-        }
-        // The commit discards and counts a faulted batch, so the fault
-        // is read after it; a faulted step gets no decision point, like
-        // a refused commit.
-        if let Some(kind) = step.result.fault {
-            break Halt::Stopped(StopReason::Faulted(kind));
+        // The pending pass is the same stop as at the top of the loop,
+        // read after the commit that can make it pending; a faulted step
+        // gets no decision point, like a refused commit.
+        if let Some(stop) = post_commit_stop(rt, step.result.fault) {
+            break Halt::Stopped(stop);
         }
         debug_assert_eq!(
             step.unit, chosen,
@@ -494,15 +491,6 @@ fn deciding_set<'r>(frames: &[Frame], depth: usize, runnable: &'r [UnitId]) -> C
             .map(|frame| frame.warp_woke.clone())
             .unwrap_or_default(),
     )
-}
-
-/// The stop a step error ends the execution with.
-fn step_stop(error: cellgov_core::StepError) -> StopReason {
-    match error {
-        cellgov_core::StepError::NoRunnableUnit => StopReason::Stalled,
-        cellgov_core::StepError::AllBlocked => StopReason::Deadlocked,
-        e => StopReason::StepError(e),
-    }
 }
 
 /// Record at a warp depth the set the warp `woke` and the unit it
