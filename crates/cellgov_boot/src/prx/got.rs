@@ -116,6 +116,85 @@ pub(super) fn patch_got_atomic(
     result
 }
 
+/// The unresolved-import trampoline region: one slot per distinct NID,
+/// allocated upward from `base`.
+struct TrampolineSlots {
+    base: u64,
+    next_offset: u64,
+    /// Keyed by NID alone even though lookup is namespaced: the
+    /// trampoline's only payload is the NID, so two libraries with the
+    /// same unresolved NID would stage byte-identical slots. Sharing
+    /// one keeps the region size independent of how imports are
+    /// grouped.
+    by_nid: BTreeMap<u32, u64>,
+}
+
+impl TrampolineSlots {
+    fn new(base: u64) -> Self {
+        Self {
+            base,
+            next_offset: 0,
+            by_nid: BTreeMap::new(),
+        }
+    }
+
+    /// The slot for `nid`. The first request stages the slot's OPD and
+    /// body; a later one returns the same address.
+    fn slot(&mut self, nid: u32, staging: &mut StagingMemory) -> Result<u64, PrxLoadStageError> {
+        if let Some(&existing) = self.by_nid.get(&nid) {
+            return Ok(existing);
+        }
+        let slot_base = self.base + self.next_offset;
+        // The OPD word and the body pointer inside the slot are 4-byte
+        // guest addresses; reject a slot whose end does not fit rather
+        // than truncate.
+        if slot_base
+            .checked_add(u64::from(UNRESOLVED_TRAMP_SLOT_BYTES))
+            .and_then(|end| u32::try_from(end).ok())
+            .is_none()
+        {
+            return Err(PrxLoadStageError::GotSlotValueBeyondU32 {
+                nid,
+                addr: slot_base,
+            });
+        }
+        self.next_offset += UNRESOLVED_TRAMP_SLOT_BYTES as u64;
+        stage_unresolved_trampoline(staging, slot_base, nid);
+        self.by_nid.insert(nid, slot_base);
+        Ok(slot_base)
+    }
+
+    /// One past the last allocated slot.
+    fn end(&self) -> u64 {
+        self.base + self.next_offset
+    }
+}
+
+/// The 4-byte GOT value for one import: the resolved OPD address, or
+/// the address of its trampoline slot. The trampoline's OPD and body
+/// enter the batch before the GOT write that names them.
+fn resolve_got_value(
+    resolved: Option<u64>,
+    module_name: &str,
+    nid: u32,
+    stats: &mut GotPatchStats,
+    slots: &mut TrampolineSlots,
+    staging: &mut StagingMemory,
+) -> Result<u32, PrxLoadStageError> {
+    if let Some(addr) = resolved {
+        stats.resolved += 1;
+        return u32::try_from(addr)
+            .map_err(|_| PrxLoadStageError::GotSlotValueBeyondU32 { nid, addr });
+    }
+    stats.trampolined += 1;
+    stats
+        .unresolved_requesters
+        .entry(nid)
+        .or_default()
+        .insert(module_name.to_string());
+    Ok(slots.slot(nid, staging)? as u32)
+}
+
 /// The staging half of [`patch_got_atomic`], which owns the buffer.
 fn stage_got_batch(
     modules: &[cellgov_ppu::prx::ImportedModule],
@@ -128,13 +207,7 @@ fn stage_got_batch(
         tramp_region_end: tramp_base,
         ..GotPatchStats::default()
     };
-    // Keyed by NID alone even though lookup is namespaced: the
-    // trampoline's only payload is the NID, so two libraries with the
-    // same unresolved NID would stage byte-identical slots. Sharing
-    // one keeps the region size independent of how imports are
-    // grouped.
-    let mut nid_to_tramp_opd: BTreeMap<u32, u64> = BTreeMap::new();
-    let mut next_tramp_offset: u64 = 0;
+    let mut slots = TrampolineSlots::new(tramp_base);
 
     // Iterated per module rather than flat_mapped over functions so
     // the library name reaches `lookup`; an import names the library
@@ -146,45 +219,14 @@ fn stage_got_batch(
         stats.variables_unbound += module.variables.len();
         for func in &module.functions {
             stats.total += 1;
-
-            let opd_u32 = if let Some(addr) = lookup(&module.name, func.nid) {
-                stats.resolved += 1;
-                u32::try_from(addr).map_err(|_| PrxLoadStageError::GotSlotValueBeyondU32 {
-                    nid: func.nid,
-                    addr,
-                })?
-            } else {
-                stats.trampolined += 1;
-                stats
-                    .unresolved_requesters
-                    .entry(func.nid)
-                    .or_default()
-                    .insert(module.name.clone());
-                let slot_base = if let Some(&existing) = nid_to_tramp_opd.get(&func.nid) {
-                    existing
-                } else {
-                    let slot_base = tramp_base + next_tramp_offset;
-                    // The OPD word and the body pointer inside the
-                    // slot are 4-byte guest addresses; reject a slot
-                    // whose end does not fit rather than truncate.
-                    if slot_base
-                        .checked_add(u64::from(UNRESOLVED_TRAMP_SLOT_BYTES))
-                        .and_then(|end| u32::try_from(end).ok())
-                        .is_none()
-                    {
-                        return Err(PrxLoadStageError::GotSlotValueBeyondU32 {
-                            nid: func.nid,
-                            addr: slot_base,
-                        });
-                    }
-                    next_tramp_offset += UNRESOLVED_TRAMP_SLOT_BYTES as u64;
-                    stage_unresolved_trampoline(staging, slot_base, func.nid);
-                    nid_to_tramp_opd.insert(func.nid, slot_base);
-                    slot_base
-                };
-                slot_base as u32
-            };
-
+            let opd_u32 = resolve_got_value(
+                lookup(&module.name, func.nid),
+                &module.name,
+                func.nid,
+                &mut stats,
+                &mut slots,
+                staging,
+            )?;
             let range = ByteRange::new(GuestAddr::new(func.stub_addr as u64), 4).ok_or(
                 PrxLoadStageError::GotSlotBadRange {
                     stub_addr: func.stub_addr,
@@ -195,7 +237,7 @@ fn stage_got_batch(
         }
     }
 
-    stats.tramp_region_end = tramp_base + next_tramp_offset;
+    stats.tramp_region_end = slots.end();
 
     // The batch holds one GOT write per import, plus an OPD and a body
     // per distinct trampoline. The import counts therefore undercount
