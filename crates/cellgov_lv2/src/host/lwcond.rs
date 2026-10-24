@@ -245,21 +245,17 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         let waiters = self.state.lwconds.drain_all(id).unwrap_or_default();
-        let mut units = Vec::with_capacity(waiters.len());
-        for waiter in waiters {
-            if let Some(unit) = self.resolve_wake_thread(waiter, "lwcond_signal_all.waiter") {
-                units.push((waiter, unit));
-            }
-        }
+        let waiters = waiters.into_iter().map(|waiter| (waiter, waiter));
+        let units = self.collect_wakes("lwcond_signal_all.waiter", waiters);
         if mode == lwcond_signal_mode::NOT_OWNED {
-            let units = units.into_iter().map(|(_, unit)| unit).collect();
+            let units = units.into_iter().map(|(unit, _)| unit).collect();
             return coded_wake(units, errno::CELL_EBUSY.into(), 0);
         }
         let moved = units.len() as u64;
         let stranded: Vec<UnitId> = units
             .into_iter()
-            .filter(|&(waiter, _)| !self.lwcond_move_to_lwmutex(waiter, lwmutex_id))
-            .map(|(_, unit)| unit)
+            .filter(|&(_, waiter)| !self.lwcond_move_to_lwmutex(waiter, lwmutex_id))
+            .map(|(unit, _)| unit)
             .collect();
         if stranded.is_empty() {
             return Lv2Dispatch::immediate(moved);

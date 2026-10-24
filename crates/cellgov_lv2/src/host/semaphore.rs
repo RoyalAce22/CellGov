@@ -17,6 +17,7 @@ use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::process::SYS_SEMAPHORE_OBJECT;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
+use crate::host::diagnostics::wake_or_ok;
 use crate::host::guest_struct::GuestStruct;
 use crate::host::{Lv2Host, Lv2Runtime};
 use cellgov_time::GuestTicks;
@@ -195,25 +196,8 @@ impl Lv2Host {
                 Lv2Dispatch::immediate(errno::CELL_EBUSY.into())
             }
             crate::sync_primitives::SemaphorePostN::Posted { woken, .. } => {
-                if woken.is_empty() {
-                    return Lv2Dispatch::immediate(0);
-                }
-                let mut units = Vec::with_capacity(woken.len());
-                for tid in woken {
-                    if let Some(unit) = self.resolve_wake_thread(tid, "semaphore_post.Woke") {
-                        units.push(unit);
-                    }
-                }
-                if units.is_empty() {
-                    Lv2Dispatch::immediate(0)
-                } else {
-                    Lv2Dispatch::WakeAndReturn {
-                        code: 0,
-                        woken_unit_ids: units,
-                        response_updates: vec![],
-                        effects: vec![],
-                    }
-                }
+                let woken = woken.into_iter().map(|tid| (tid, None));
+                wake_or_ok(self.collect_wakes("semaphore_post.Woke", woken), vec![])
             }
         }
     }

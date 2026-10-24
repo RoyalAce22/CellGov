@@ -20,6 +20,7 @@ use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::process::SYS_EVENT_FLAG_OBJECT;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
+use crate::host::diagnostics::{wake_and_return, wake_or_ok};
 use crate::host::guest_struct::GuestStruct;
 use crate::host::{Lv2Host, Lv2Runtime};
 use cellgov_time::GuestTicks;
@@ -212,26 +213,16 @@ impl Lv2Host {
         if woken.is_empty() {
             return Lv2Dispatch::immediate(0);
         }
-        let mut unit_ids: Vec<UnitId> = Vec::new();
-        let mut updates: Vec<(UnitId, PendingResponse)> = Vec::new();
-        for wake in woken {
-            if let Some(unit) = self.resolve_wake_thread(wake.thread, "event_flag_set.waker") {
-                unit_ids.push(unit);
-                updates.push((
-                    unit,
-                    PendingResponse::EventFlagWake {
-                        result_ptr: wake.result_ptr,
-                        observed: wake.observed,
-                    },
-                ));
-            }
-        }
-        Lv2Dispatch::WakeAndReturn {
-            code: 0,
-            woken_unit_ids: unit_ids,
-            response_updates: updates,
-            effects: vec![],
-        }
+        let woken = woken.into_iter().map(|wake| {
+            let pending = PendingResponse::EventFlagWake {
+                result_ptr: wake.result_ptr,
+                observed: wake.observed,
+            };
+            (wake.thread, Some(pending))
+        });
+        // A set whose wakers all fail to resolve still answers through
+        // the wake path, with no unit to wake.
+        wake_and_return(self.collect_wakes("event_flag_set.waker", woken), vec![])
     }
 
     /// `sys_event_flag_clear` (118).
@@ -270,36 +261,20 @@ impl Lv2Host {
             };
         };
         let count = waiters.len() as u32;
-        let mut unit_ids: Vec<UnitId> = Vec::new();
-        let mut updates: Vec<(UnitId, PendingResponse)> = Vec::new();
-        let mut effects: Vec<Effect> = Vec::new();
-        for w in waiters {
-            if let Some(unit) = self.resolve_wake_thread(w.thread, "event_flag_cancel.waker") {
-                unit_ids.push(unit);
-                // Each result_ptr was decoded from the WAITER's
-                // park-time syscall, so it must resolve in the
-                // waiter's space; the canceller's effects commit into
-                // the canceller's. Hence the store rides the wake
-                // channel.
-                updates.push((
-                    unit,
-                    PendingResponse::EventFlagCancelWake {
-                        result_ptr: w.result_ptr,
-                        observed: bits,
-                    },
-                ));
-            }
-        }
-        effects.extend(event_flag_count_write(num_ptr, count, requester, tick));
-        if unit_ids.is_empty() {
-            return Lv2Dispatch::Immediate { code: 0, effects };
-        }
-        Lv2Dispatch::WakeAndReturn {
-            code: 0,
-            woken_unit_ids: unit_ids,
-            response_updates: updates,
-            effects,
-        }
+        // Each result_ptr was decoded from the WAITER's park-time
+        // syscall, so it must resolve in the waiter's space; the
+        // canceller's effects commit into the canceller's. Hence the
+        // store rides the wake channel.
+        let waiters = waiters.into_iter().map(|w| {
+            let pending = PendingResponse::EventFlagCancelWake {
+                result_ptr: w.result_ptr,
+                observed: bits,
+            };
+            (w.thread, Some(pending))
+        });
+        let woken = self.collect_wakes("event_flag_cancel.waker", waiters);
+        let effects = event_flag_count_write(num_ptr, count, requester, tick);
+        wake_or_ok(woken, effects)
     }
 
     /// `sys_event_flag_get` (139): writes the flag's current bits

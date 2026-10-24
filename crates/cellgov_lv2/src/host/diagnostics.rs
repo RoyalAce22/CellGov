@@ -9,8 +9,10 @@
 //! `cellgov_core::runtime::trace_bridge`; the lv2 crate does not
 //! depend on `cellgov_trace`.
 
+use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 
+use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::ppu_thread::PpuThreadId;
 
 use super::Lv2Host;
@@ -200,6 +202,54 @@ impl Lv2Host {
             }
         }
     }
+
+    /// Resolve the unit of each waiter in `waiters`, in order, keeping
+    /// what rides with it. A waiter [`Self::resolve_wake_thread`] cannot
+    /// resolve under `site` drops out.
+    pub(super) fn collect_wakes<T>(
+        &mut self,
+        site: &'static str,
+        waiters: impl IntoIterator<Item = (PpuThreadId, T)>,
+    ) -> Vec<(UnitId, T)> {
+        let mut woken = Vec::new();
+        for (thread, rides) in waiters {
+            if let Some(unit) = self.resolve_wake_thread(thread, site) {
+                woken.push((unit, rides));
+            }
+        }
+        woken
+    }
+}
+
+/// A code-0 return that wakes each unit in `woken`, in order, with its
+/// pending response if it has one.
+pub(super) fn wake_and_return(
+    woken: Vec<(UnitId, Option<PendingResponse>)>,
+    effects: Vec<Effect>,
+) -> Lv2Dispatch {
+    let woken_unit_ids = woken.iter().map(|&(unit, _)| unit).collect();
+    let response_updates = woken
+        .into_iter()
+        .filter_map(|(unit, pending)| pending.map(|pending| (unit, pending)))
+        .collect();
+    Lv2Dispatch::WakeAndReturn {
+        code: 0,
+        woken_unit_ids,
+        response_updates,
+        effects,
+    }
+}
+
+/// [`wake_and_return`], or a code-0 return with `effects` alone when
+/// `woken` is empty.
+pub(super) fn wake_or_ok(
+    woken: Vec<(UnitId, Option<PendingResponse>)>,
+    effects: Vec<Effect>,
+) -> Lv2Dispatch {
+    if woken.is_empty() {
+        return Lv2Dispatch::Immediate { code: 0, effects };
+    }
+    wake_and_return(woken, effects)
 }
 
 #[cfg(test)]

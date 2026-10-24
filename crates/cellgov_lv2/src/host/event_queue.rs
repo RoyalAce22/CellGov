@@ -14,6 +14,7 @@ use cellgov_ps3_abi::lv2::sync::{SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
 use cellgov_ps3_abi::lv2::{errno, syscall};
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
+use crate::host::diagnostics::wake_or_ok;
 use crate::host::Lv2Host;
 use crate::sync_primitives::EventPayload;
 use cellgov_time::GuestTicks;
@@ -256,24 +257,12 @@ impl Lv2Host {
             }
         }
         let canceled = u64::from(errno::CELL_ECANCELED);
-        let mut woken_unit_ids = Vec::new();
-        let mut response_updates = Vec::new();
-        for waiter in waiters {
-            if let Some(unit) = self.resolve_wake_thread(waiter.thread, "event_queue_destroy.force")
-            {
-                woken_unit_ids.push(unit);
-                response_updates.push((unit, PendingResponse::ReturnCode { code: canceled }));
-            }
-        }
-        if woken_unit_ids.is_empty() {
-            return Lv2Dispatch::immediate(0);
-        }
-        Lv2Dispatch::WakeAndReturn {
-            code: 0,
-            woken_unit_ids,
-            response_updates,
-            effects: vec![],
-        }
+        let waiters = waiters.into_iter().map(|waiter| {
+            let pending = PendingResponse::ReturnCode { code: canceled };
+            (waiter.thread, Some(pending))
+        });
+        let woken = self.collect_wakes("event_queue_destroy.force", waiters);
+        wake_or_ok(woken, vec![])
     }
 
     /// Log an invariant break if queue `id` holds payloads and parked waiters at once.
