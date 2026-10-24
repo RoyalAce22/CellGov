@@ -22,6 +22,7 @@ use crate::util::{classify_iteration, AlternateIteration, StopClass, StopReason}
 use crate::wakeup::{initials, SeqEvent, WakeupTree};
 use cellgov_core::{Runtime, RuntimeSnapshot};
 use cellgov_event::UnitId;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// What one execution of the search produced.
@@ -111,6 +112,23 @@ struct Frame {
 }
 
 impl Frame {
+    /// Push the frame for `depth`, with `chosen` and what it inherits,
+    /// when the stack ends just above that depth.
+    fn push_at(frames: &mut Vec<Frame>, depth: usize, chosen: UnitId) {
+        if depth != frames.len() {
+            return;
+        }
+        let (sleep, wut) = inherit(frames);
+        frames.push(Frame {
+            chosen,
+            sleep,
+            wut,
+            footprints: BTreeMap::new(),
+            dropped: BTreeSet::new(),
+            warp_woke: Vec::new(),
+        });
+    }
+
     /// What a drop of the branch through `head`, with `below` under it,
     /// costs the reversal count: one per sequence the branch carried
     /// that no sequence this frame already lost covers.
@@ -204,69 +222,22 @@ where
     let mut rt = make_runtime();
     let start = rt.snapshot();
     let mut frames: Vec<Frame> = Vec::new();
-    let mut schedules: Vec<ScheduleRecord> = Vec::new();
-    let mut baseline: Option<BaselineRun> = None;
-    let mut baseline_branching = 0usize;
-    let mut first_invariant_break: Option<String> = None;
-    let mut first_mfc_exception: Option<String> = None;
-    let mut bounds_hit = false;
-    let mut truncated_runs = 0usize;
-    let mut refused_runs = 0usize;
-    let mut sleep_blocked = 0usize;
-    let mut dropped = Drops::default();
+    let mut tally = Tally::default();
     // The depth the next execution re-decides at; the backtrack below
     // names it and `run_one` picks the unit there.
     let mut resume: Option<usize> = None;
 
     loop {
-        let (run, halt) = run_one(&mut rt, &start, &mut frames, resume, config);
+        let (mut run, halt) = run_one(&mut rt, &start, &mut frames, resume, config);
         let branch_step = resume;
-        let alternate_choice = run.alternate_choice;
-        dropped.add(run.dropped);
-        if first_invariant_break.is_none() {
-            first_invariant_break = run.invariant_break;
-        }
-        if first_mfc_exception.is_none() {
-            first_mfc_exception = run.mfc_exception;
-        }
+        tally.absorb(&mut run);
 
         match halt {
-            Halt::SleepBlocked => sleep_blocked += 1,
+            Halt::SleepBlocked => tally.sleep_blocked += 1,
             Halt::Stopped(stop) => {
                 let truncated = stop.is_truncated();
-                // The two tallies below count alternates alone;
-                // `mark_baseline_truncated` answers for the baseline.
-                if truncated {
-                    bounds_hit = true;
-                }
                 observe(&rt, branch_step.is_none());
-                match branch_step {
-                    Some(step) => {
-                        let unit = alternate_choice
-                            .expect("a resumed execution names the unit it re-decided with");
-                        if truncated {
-                            truncated_runs += 1;
-                            if stop.class() == StopClass::Refusal {
-                                refused_runs += 1;
-                            }
-                        }
-                        schedules.push(ScheduleRecord {
-                            branch_step: step,
-                            alternate_choice: unit,
-                            memory_hash: run.hash,
-                            stop,
-                            truncated,
-                        });
-                    }
-                    None => {
-                        baseline_branching = run.log.branching_count();
-                        baseline = Some(BaselineRun {
-                            hash: run.hash,
-                            steps: run.log.len(),
-                            stop,
-                        });
-                    }
-                }
+                tally.record_stop(stop, branch_step, &run);
                 // A truncated execution's race set covers a prefix of
                 // the workload, so it owes nothing.
                 if !truncated {
@@ -275,8 +246,8 @@ where
             }
         }
 
-        if schedules.len() >= config.max_schedules {
-            bounds_hit = true;
+        if tally.schedules.len() >= config.max_schedules {
+            tally.bounds_hit = true;
             break;
         }
         match backtrack(&mut frames) {
@@ -285,6 +256,18 @@ where
         }
     }
 
+    let Tally {
+        schedules,
+        baseline,
+        baseline_branching,
+        first_invariant_break,
+        first_mfc_exception,
+        bounds_hit,
+        truncated_runs,
+        refused_runs,
+        sleep_blocked,
+        dropped,
+    } = tally;
     let baseline = baseline.expect("the first execution is the baseline");
     let found_divergence = schedules
         .iter()
@@ -311,6 +294,70 @@ where
     result.reversals_dropped = dropped.total();
     result.first_mfc_exception = first_mfc_exception;
     (result, dropped)
+}
+
+/// What [`search`] gathers across its executions.
+#[derive(Default)]
+struct Tally {
+    schedules: Vec<ScheduleRecord>,
+    baseline: Option<BaselineRun>,
+    baseline_branching: usize,
+    first_invariant_break: Option<String>,
+    first_mfc_exception: Option<String>,
+    bounds_hit: bool,
+    truncated_runs: usize,
+    refused_runs: usize,
+    sleep_blocked: usize,
+    dropped: Drops,
+}
+
+impl Tally {
+    /// Take the drops and the first-seen diagnostics of `run`.
+    fn absorb(&mut self, run: &mut Run) {
+        self.dropped.add(run.dropped);
+        if self.first_invariant_break.is_none() {
+            self.first_invariant_break = run.invariant_break.take();
+        }
+        if self.first_mfc_exception.is_none() {
+            self.first_mfc_exception = run.mfc_exception.take();
+        }
+    }
+
+    /// Record an execution that stopped with `stop`: the baseline when
+    /// `branch_step` is `None`, else an alternate schedule.
+    fn record_stop(&mut self, stop: StopReason, branch_step: Option<usize>, run: &Run) {
+        let truncated = stop.is_truncated();
+        // The two tallies below count alternates alone;
+        // `mark_baseline_truncated` answers for the baseline.
+        if truncated {
+            self.bounds_hit = true;
+        }
+        let Some(step) = branch_step else {
+            self.baseline_branching = run.log.branching_count();
+            self.baseline = Some(BaselineRun {
+                hash: run.hash,
+                steps: run.log.len(),
+                stop,
+            });
+            return;
+        };
+        let unit = run
+            .alternate_choice
+            .expect("a resumed execution names the unit it re-decided with");
+        if truncated {
+            self.truncated_runs += 1;
+            if stop.class() == StopClass::Refusal {
+                self.refused_runs += 1;
+            }
+        }
+        self.schedules.push(ScheduleRecord {
+            branch_step: step,
+            alternate_choice: unit,
+            memory_hash: run.hash,
+            stop,
+            truncated,
+        });
+    }
 }
 
 /// Run one execution and extend `frames` past the prefix they already
@@ -346,35 +393,10 @@ fn run_one(
         // the first unit runs the one the runtime would.
         let mut runnable: Vec<UnitId> = rt.registry().runnable_ids().collect();
         runnable.sort_by_key(|&unit| (rt.registry().clock(unit), unit));
-        // With nothing runnable the runtime warps and picks; a depth
-        // that recorded what its warp woke decides from that instead
-        // (see the doc on `Frame::warp_woke`).
-        let warp_woke: Vec<UnitId> = if runnable.is_empty() {
-            frames
-                .get(depth)
-                .map(|frame| frame.warp_woke.clone())
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        let deciding: &[UnitId] = if runnable.is_empty() {
-            &warp_woke
-        } else {
-            &runnable
-        };
+        let deciding = deciding_set(frames, depth, &runnable);
         if !deciding.is_empty() && depth >= fixed {
-            if depth == frames.len() {
-                let (sleep, wut) = inherit(frames);
-                frames.push(Frame {
-                    chosen: deciding[0],
-                    sleep,
-                    wut,
-                    footprints: BTreeMap::new(),
-                    dropped: BTreeSet::new(),
-                    warp_woke: Vec::new(),
-                });
-            }
-            match choose(&mut frames[depth], deciding, &mut dropped.by_choose) {
+            Frame::push_at(frames, depth, deciding[0]);
+            match choose(&mut frames[depth], &deciding, &mut dropped.by_choose) {
                 Some(unit) => frames[depth].chosen = unit,
                 None => break Halt::SleepBlocked,
             }
@@ -390,13 +412,7 @@ fn run_one(
         }
         let mut step = match rt.step() {
             Ok(step) => step,
-            Err(cellgov_core::StepError::NoRunnableUnit) => {
-                break Halt::Stopped(StopReason::Stalled)
-            }
-            Err(cellgov_core::StepError::AllBlocked) => {
-                break Halt::Stopped(StopReason::Deadlocked)
-            }
-            Err(e) => break Halt::Stopped(StopReason::StepError(e)),
+            Err(e) => break Halt::Stopped(step_stop(e)),
         };
         // `can_take_another_step` and `Runtime::step` answer the same
         // question, so a step past the cap is the two disagreeing.
@@ -405,61 +421,20 @@ fn run_one(
             "the cap was reached, the predicate saw no step left, and one ran",
         );
         if runnable.is_empty() {
-            if depth == frames.len() {
-                let (sleep, wut) = inherit(frames);
-                frames.push(Frame {
-                    chosen: step.unit,
-                    sleep,
-                    wut,
-                    footprints: BTreeMap::new(),
-                    dropped: BTreeSet::new(),
-                    warp_woke: Vec::new(),
-                });
-            }
-            let frame = &mut frames[depth];
+            Frame::push_at(frames, depth, step.unit);
             // `RuntimeStep::runnable` is the set the scheduler chose
             // from, so it is the set the warp woke.
-            let before = std::mem::replace(&mut frame.warp_woke, step.runnable.clone());
-            let decided = !before.is_empty();
-            // The prefix below replays step for step and the warp runs
-            // before the selection, so every visit reads the same set.
-            debug_assert!(
-                !decided || before == frame.warp_woke,
-                "a replayed prefix reached the same warp and it woke {:?}, not {before:?}",
-                frame.warp_woke,
-            );
-            // A decided visit prescribed `chosen` from the recorded
-            // set, and a warp that delivered another unit would retire
-            // a branch the frame still owes.
-            debug_assert!(
-                !decided || frame.chosen == step.unit,
-                "the depth prescribed {:?} and the warp delivered {:?}",
-                frame.chosen,
-                step.unit,
-            );
-            // `inherit` hands almost every warp depth an empty tree: a
-            // grafted branch names a second runnable unit, and a depth
-            // holding one is no warp depth. A step that stops a unit it
-            // does not name (`Runtime::handle_process_exit_child`
-            // finishes every unit of the exiting pid) can leave a
-            // branch here, and this loop retires what the warp cannot
-            // deliver.
-            if !decided || frame.chosen != step.unit {
-                dropped.at_warp_visits += 1;
-                for (head, below) in frame.wut.retain_branch(step.unit) {
-                    dropped.at_warp += frame.drop_cost(head, &below);
-                }
-            }
-            frame.chosen = step.unit;
+            let woke = step.runnable.clone();
+            reconcile_warp_frame(&mut frames[depth], step.unit, woke, &mut dropped);
         }
-        let runnable = step.runnable.clone();
+        let chosen_from = step.runnable.clone();
         let chosen = frames[depth].chosen;
         let mut footprint =
             StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
         if let Err(e) = rt.commit_step(&mut step) {
             break Halt::Stopped(StopReason::CommitError(e));
         }
-        if let Err(e) = footprint.note_commit(rt, &step, &runnable) {
+        if let Err(e) = footprint.note_commit(rt, &step, &chosen_from) {
             break Halt::Stopped(StopReason::StaleObservations(e));
         }
         // The same stop as at the top of the loop, read after the
@@ -482,7 +457,7 @@ fn run_one(
             .insert(step.unit, footprint.clone());
         log.push(DecisionPoint {
             step: depth,
-            runnable,
+            runnable: chosen_from,
             chosen: step.unit,
             footprint,
         });
@@ -501,6 +476,74 @@ fn run_one(
         dropped,
     };
     (run, halt)
+}
+
+/// The units the step at `depth` decides from: `runnable`, or the set
+/// a recorded warp woke there when no unit can run.
+///
+/// With nothing runnable the runtime warps and picks; a depth that
+/// recorded what its warp woke decides from that instead (see the doc
+/// on [`Frame::warp_woke`]).
+fn deciding_set<'r>(frames: &[Frame], depth: usize, runnable: &'r [UnitId]) -> Cow<'r, [UnitId]> {
+    if !runnable.is_empty() {
+        return Cow::Borrowed(runnable);
+    }
+    Cow::Owned(
+        frames
+            .get(depth)
+            .map(|frame| frame.warp_woke.clone())
+            .unwrap_or_default(),
+    )
+}
+
+/// The stop a step error ends the execution with.
+fn step_stop(error: cellgov_core::StepError) -> StopReason {
+    match error {
+        cellgov_core::StepError::NoRunnableUnit => StopReason::Stalled,
+        cellgov_core::StepError::AllBlocked => StopReason::Deadlocked,
+        e => StopReason::StepError(e),
+    }
+}
+
+/// Record at a warp depth the set the warp `woke` and the unit it
+/// `delivered`, and drop the branches the warp cannot deliver.
+fn reconcile_warp_frame(
+    frame: &mut Frame,
+    delivered: UnitId,
+    woke: Vec<UnitId>,
+    dropped: &mut Drops,
+) {
+    let before = std::mem::replace(&mut frame.warp_woke, woke);
+    let decided = !before.is_empty();
+    // The prefix below replays step for step and the warp runs before
+    // the selection, so every visit reads the same set.
+    debug_assert!(
+        !decided || before == frame.warp_woke,
+        "a replayed prefix reached the same warp and it woke {:?}, not {before:?}",
+        frame.warp_woke,
+    );
+    // A decided visit prescribed `chosen` from the recorded set, and a
+    // warp that delivered another unit would retire a branch the frame
+    // still owes.
+    debug_assert!(
+        !decided || frame.chosen == delivered,
+        "the depth prescribed {:?} and the warp delivered {:?}",
+        frame.chosen,
+        delivered,
+    );
+    // `inherit` hands almost every warp depth an empty tree: a grafted
+    // branch names a second runnable unit, and a depth holding one is no
+    // warp depth. A step that stops a unit it does not name
+    // (`Runtime::handle_process_exit_child` finishes every unit of the
+    // exiting pid) can leave a branch here, and this loop retires what
+    // the warp cannot deliver.
+    if !decided || frame.chosen != delivered {
+        dropped.at_warp_visits += 1;
+        for (head, below) in frame.wut.retain_branch(delivered) {
+            dropped.at_warp += frame.drop_cost(head, &below);
+        }
+    }
+    frame.chosen = delivered;
 }
 
 /// The sleep set and wakeup tree one depth inherits from the one above
