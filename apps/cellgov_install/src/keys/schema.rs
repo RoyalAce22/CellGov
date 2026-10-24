@@ -96,47 +96,7 @@ impl Loader {
             source: Box::new(source),
         })?;
         for (name, value) in parsed.scalars {
-            let raw = match value {
-                toml::Value::String(s) => super::loader::decode_named_hex(&at, &name, &s)?,
-                toml::Value::Array(items) => {
-                    let mut raw = Vec::with_capacity(items.len());
-                    for (index, item) in items.iter().enumerate() {
-                        match item {
-                            toml::Value::Integer(i) if (0..=255).contains(i) => raw.push(*i as u8),
-                            toml::Value::Integer(_) => {
-                                return Err(toml_refusal(
-                                    &at,
-                                    format!(
-                                        "field {name:?}: byte array element {index} is outside 0..=255"
-                                    ),
-                                ))
-                            }
-                            other => {
-                                return Err(toml_refusal(
-                                    &at,
-                                    format!(
-                                        "field {name:?}: byte array element {index} is {}, not an integer",
-                                        other.type_str()
-                                    ),
-                                ))
-                            }
-                        }
-                    }
-                    raw
-                }
-                _ if classify_name(&name, None) == NameClass::Unknown => {
-                    return Err(KeyVaultError::UnknownName { at, name })
-                }
-                other => {
-                    return Err(toml_refusal(
-                        &at,
-                        format!(
-                            "field {name:?} must be a hex string or byte array, not {}",
-                            other.type_str()
-                        ),
-                    ))
-                }
-            };
+            let raw = toml_scalar_bytes(&at, &name, value)?;
             match classify_name(&name, Some(raw.len())) {
                 NameClass::Scalar(slot) => self.add_scalar(slot, raw, &name, at.clone())?,
                 NameClass::Half { kind, part, label } => self.add_half(
@@ -164,102 +124,171 @@ impl Loader {
                     erk: fixed(&at, &format!("[[{kind}]] erk"), &entry.erk)?,
                     riv: fixed(&at, &format!("[[{kind}]] riv"), &entry.riv)?,
                 };
-                // The `[[scepkg]]` schema has no `version`, so the loader
-                // refuses one the way the parser refuses a field it does
-                // not know.
-                let wrong_label = |expected, found| match kind {
-                    Kind::Class(class) => KeyVaultError::WrongLabelKind {
-                        at: at.clone(),
-                        class,
-                        expected,
-                        found,
-                    },
-                    Kind::Scepkg => toml_refusal(
-                        &at,
-                        format!("[[scepkg]] takes no {found}; the field applies to [[lv2]] only"),
-                    ),
-                };
-                let label = match (kind, entry.revision, entry.version) {
-                    (Kind::Class(SelfClass::Lv2), Some(_), _) => {
-                        return Err(wrong_label("version", "revision"))
-                    }
-                    (Kind::Class(SelfClass::Lv2), None, Some(v)) => {
-                        if Lv2Versions::parse(&v).is_none() {
-                            return Err(KeyVaultError::BadVersion { at, value: v });
-                        }
-                        v
-                    }
-                    (_, _, Some(_)) => return Err(wrong_label("revision", "version")),
-                    (_, Some(TomlRevision::Int(i)), None) => {
-                        let revision =
-                            u16::try_from(i)
-                                .ok()
-                                .filter(|r| *r <= 0x7FFF)
-                                .ok_or_else(|| KeyVaultError::BadRevision {
-                                    at: at.clone(),
-                                    value: i.to_string(),
-                                })?;
-                        format!("0x{revision:04x}")
-                    }
-                    (_, Some(TomlRevision::Text(s)), None) => {
-                        if parse_revision(&s).is_none() {
-                            return Err(KeyVaultError::BadRevision { at, value: s });
-                        }
-                        s
-                    }
-                    (_, None, None) => entry.label.unwrap_or_default(),
-                };
+                let label = keyset_label(&at, kind, entry)?;
                 self.add_keyset(kind, Some(&label), key, at.clone())?;
             }
         }
         for entry in parsed.material {
-            if entry.kind.trim().is_empty()
-                || !entry
-                    .kind
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-            {
-                return Err(toml_refusal(
-                    &at,
-                    "[[material]] kind must be an ASCII identifier".to_string(),
-                ));
-            }
-            let mut components = Vec::new();
-            for (name, value) in entry.components {
-                if name == "kind" || name == "label" {
-                    continue;
-                }
-                if !name
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-                {
-                    return Err(toml_refusal(
-                        &at,
-                        format!("[[material]] component {name:?} must be an ASCII identifier"),
-                    ));
-                }
-                components.push((
-                    name.clone(),
-                    super::loader::decode_named_hex(&at, &name, &value)?,
-                ));
-            }
-            if components.is_empty() {
-                return Err(toml_refusal(
-                    &at,
-                    "[[material]] needs at least one component".to_string(),
-                ));
-            }
-            self.vault.material.push((
-                CryptoMaterial {
-                    kind: entry.kind,
-                    label: entry.label,
-                    components,
-                },
-                at.clone(),
-            ));
+            self.ingest_material(&at, entry)?;
         }
         Ok(())
     }
+
+    /// Validate one `[[material]]` table and add it to the vault.
+    fn ingest_material(
+        &mut self,
+        at: &Provenance,
+        entry: TomlMaterial,
+    ) -> Result<(), KeyVaultError> {
+        if entry.kind.trim().is_empty() || !is_ascii_ident(&entry.kind) {
+            return Err(toml_refusal(
+                at,
+                "[[material]] kind must be an ASCII identifier".to_string(),
+            ));
+        }
+        let mut components = Vec::new();
+        for (name, value) in entry.components {
+            if name == "kind" || name == "label" {
+                continue;
+            }
+            if !is_ascii_ident(&name) {
+                return Err(toml_refusal(
+                    at,
+                    format!("[[material]] component {name:?} must be an ASCII identifier"),
+                ));
+            }
+            components.push((
+                name.clone(),
+                super::loader::decode_named_hex(at, &name, &value)?,
+            ));
+        }
+        if components.is_empty() {
+            return Err(toml_refusal(
+                at,
+                "[[material]] needs at least one component".to_string(),
+            ));
+        }
+        self.vault.material.push((
+            CryptoMaterial {
+                kind: entry.kind,
+                label: entry.label,
+                components,
+            },
+            at.clone(),
+        ));
+        Ok(())
+    }
+}
+
+/// The bytes of a top-level scalar: a hex string or a byte array.
+fn toml_scalar_bytes(
+    at: &Provenance,
+    name: &str,
+    value: toml::Value,
+) -> Result<Vec<u8>, KeyVaultError> {
+    match value {
+        toml::Value::String(s) => super::loader::decode_named_hex(at, name, &s),
+        toml::Value::Array(items) => toml_byte_array(at, name, &items),
+        _ if classify_name(name, None) == NameClass::Unknown => Err(KeyVaultError::UnknownName {
+            at: at.clone(),
+            name: name.to_string(),
+        }),
+        other => Err(toml_refusal(
+            at,
+            format!(
+                "field {name:?} must be a hex string or byte array, not {}",
+                other.type_str()
+            ),
+        )),
+    }
+}
+
+/// A byte array of integers in `0..=255`.
+fn toml_byte_array(
+    at: &Provenance,
+    name: &str,
+    items: &[toml::Value],
+) -> Result<Vec<u8>, KeyVaultError> {
+    let mut raw = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        match item {
+            toml::Value::Integer(i) if (0..=255).contains(i) => raw.push(*i as u8),
+            toml::Value::Integer(_) => {
+                return Err(toml_refusal(
+                    at,
+                    format!("field {name:?}: byte array element {index} is outside 0..=255"),
+                ))
+            }
+            other => {
+                return Err(toml_refusal(
+                    at,
+                    format!(
+                        "field {name:?}: byte array element {index} is {}, not an integer",
+                        other.type_str()
+                    ),
+                ))
+            }
+        }
+    }
+    Ok(raw)
+}
+
+/// The label a keyset table names: an LV2 `version`, an APP or NPDRM
+/// `revision`, or else its free `label`.
+fn keyset_label(at: &Provenance, kind: Kind, entry: TomlSelfKey) -> Result<String, KeyVaultError> {
+    // The `[[scepkg]]` schema has no `version`, so the loader refuses one
+    // the way the parser refuses a field it does not know.
+    let wrong_label = |expected, found| match kind {
+        Kind::Class(class) => KeyVaultError::WrongLabelKind {
+            at: at.clone(),
+            class,
+            expected,
+            found,
+        },
+        Kind::Scepkg => toml_refusal(
+            at,
+            format!("[[scepkg]] takes no {found}; the field applies to [[lv2]] only"),
+        ),
+    };
+    match (kind, entry.revision, entry.version) {
+        (Kind::Class(SelfClass::Lv2), Some(_), _) => Err(wrong_label("version", "revision")),
+        (Kind::Class(SelfClass::Lv2), None, Some(v)) => {
+            if Lv2Versions::parse(&v).is_none() {
+                return Err(KeyVaultError::BadVersion {
+                    at: at.clone(),
+                    value: v,
+                });
+            }
+            Ok(v)
+        }
+        (_, _, Some(_)) => Err(wrong_label("revision", "version")),
+        (_, Some(TomlRevision::Int(i)), None) => {
+            let revision = u16::try_from(i)
+                .ok()
+                .filter(|r| *r <= 0x7FFF)
+                .ok_or_else(|| KeyVaultError::BadRevision {
+                    at: at.clone(),
+                    value: i.to_string(),
+                })?;
+            Ok(format!("0x{revision:04x}"))
+        }
+        (_, Some(TomlRevision::Text(s)), None) => {
+            if parse_revision(&s).is_none() {
+                return Err(KeyVaultError::BadRevision {
+                    at: at.clone(),
+                    value: s,
+                });
+            }
+            Ok(s)
+        }
+        (_, None, None) => Ok(entry.label.unwrap_or_default()),
+    }
+}
+
+/// Whether every byte of `s` is an ASCII letter, digit or underscore.
+fn is_ascii_ident(s: &str) -> bool {
+    s.bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 /// A `keys.toml` refusal the parser itself would not raise.
