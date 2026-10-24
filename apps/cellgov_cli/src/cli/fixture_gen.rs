@@ -16,6 +16,7 @@ use super::exit::{CommandError, CommandExitCode};
 use super::exit_codes;
 use super::parse::FixtureGenArgs;
 use super::self_load::{load_file, load_ppu_image_with_title};
+use crate::composition::BootComposition;
 use cellgov_boot::manifest::{CellKey, TitleManifest};
 
 const COMPARE_REPORT_TEMPLATE: &str =
@@ -130,56 +131,17 @@ pub(crate) fn run(
     let rpcs3_path = args.rpcs3.clone();
     let allow_divergence = args.allow_divergence;
 
-    let manifest = TitleManifest::load_from_path(&args.manifest)
-        .map_err(|error| CommandError::failed(format!("fixture-gen: load manifest: {error}")))?;
-    let vfs_root = super::title::resolve_ps3_vfs_root(vfs_flag)?;
-    // The fixture must name the EBOOT a boot run picks, so the
-    // selection goes through the boot family's resolver.
-    let composition = super::boot_cmd::resolve_composition(
-        &args.selection,
-        &vfs_root,
-        &manifest,
-        BootOverrides::default(),
-    )?;
-    let cell = cellgov_boot::compose::composed_cell(&composition).ok_or_else(|| {
-        CommandError::failed(format!(
-            "fixture-gen: {} composed no cell: a cross-runner result is filed under \
-             (content id, firmware, game version), and this composition names none. An \
-             unmanaged or absent firmware carries no version, a title the store does not \
-             hold has no game-version axis, and an executable named by an absolute path \
-             belongs to no firmware entry",
-            manifest.name()
-        ))
-    })?;
-    let fixtures = args
-        .fixtures_dir
-        .clone()
-        .unwrap_or_else(|| PathBuf::from(crate::paths::DEFAULT_FIXTURES_DIR));
-    let out_dir = crate::paths::cell_cross_runner_dir_in(&fixtures, &manifest.content_id, &cell);
-    if !is_committed_tree(&fixtures) {
-        eprintln!(
-            "fixture-gen: --fixtures-dir {} is not the committed tree {}; REPRODUCTION.md's \
-             links to the workspace root count the levels of the committed tree, so they \
-             will not resolve from here",
-            fixtures.display(),
-            crate::paths::DEFAULT_FIXTURES_DIR,
-        );
-    }
-    let eboot_path = manifest
-        .resolve_eboot_in(&composition.eboot_dirs)
-        .map_err(|error| CommandError::failed(format!("fixture-gen: resolve EBOOT: {error}")))?;
-    let eboot_path = eboot_path.to_str().ok_or_else(|| {
-        CommandError::failed(format!(
-            "fixture-gen: EBOOT path {} has invalid UTF-8",
-            eboot_path.display()
-        ))
-    })?;
-    let eboot_bytes = load_ppu_image_with_title(eboot_path, &manifest, &vfs_root)?.elf_data;
+    let FixtureInputs {
+        manifest,
+        vfs_root,
+        composition,
+        cell,
+        fixtures,
+        out_dir,
+        eboot_bytes,
+    } = resolve_fixture_inputs(args, vfs_flag)?;
 
-    let cellgov_bytes = load_file(&cellgov_path)?;
-    let cellgov: Observation = serde_json::from_slice(&cellgov_bytes).map_err(|error| {
-        CommandError::failed(format!("fixture-gen: parse {cellgov_path}: {error}"))
-    })?;
+    let cellgov = load_observation(&cellgov_path)?;
     if let Some(refusal) = overridden_capture_refusal(&cellgov_path, &cellgov.identity.overrides) {
         return Err(CommandError::failed(refusal));
     }
@@ -188,30 +150,21 @@ pub(crate) fn run(
     {
         return Err(CommandError::failed(refusal));
     }
-    let rpcs3_bytes = load_file(&rpcs3_path)?;
-    let rpcs3: Observation = serde_json::from_slice(&rpcs3_bytes).map_err(|error| {
-        CommandError::failed(format!("fixture-gen: parse {rpcs3_path}: {error}"))
-    })?;
+    let rpcs3 = load_observation(&rpcs3_path)?;
 
-    // A zero-region non-Timeout observation would let the comparator
-    // emit a confident verdict against empty data.
-    if cellgov.memory_regions.is_empty() && !matches!(cellgov.outcome, ObservedOutcome::Timeout) {
-        return Err(CommandError::failed(format!(
-            "fixture-gen: CellGov observation at {cellgov_path} has zero \
-             memory regions but reports outcome={}; the dump is incomplete. \
-             Re-capture via `boot run --save-observation`.",
-            cellgov.outcome,
-        )));
-    }
-    if rpcs3.memory_regions.is_empty() && !matches!(rpcs3.outcome, ObservedOutcome::Timeout) {
-        return Err(CommandError::failed(format!(
-            "fixture-gen: RPCS3 observation at {rpcs3_path} has zero \
-             memory regions but reports outcome={}; the dump is incomplete. \
-             Re-capture per REPRODUCTION.md, or pass --outcome timeout to \
-             the bridge if the RPCS3 run was actually capped.",
-            rpcs3.outcome,
-        )));
-    }
+    refuse_empty_regions(
+        &cellgov,
+        &cellgov_path,
+        "CellGov",
+        "Re-capture via `boot run --save-observation`.",
+    )?;
+    refuse_empty_regions(
+        &rpcs3,
+        &rpcs3_path,
+        "RPCS3",
+        "Re-capture per REPRODUCTION.md, or pass --outcome timeout to the bridge if the \
+         RPCS3 run was actually capped.",
+    )?;
 
     // The other runner's firmware comes from the capture, stamped when
     // the dump was converted. This command can run long after that
@@ -280,6 +233,107 @@ pub(crate) fn run(
         }
     }
     Ok(CommandExitCode::SUCCESS)
+}
+
+/// What the selection and the title manifest resolve to before either
+/// observation is read.
+struct FixtureInputs {
+    manifest: TitleManifest,
+    vfs_root: PathBuf,
+    composition: BootComposition,
+    cell: CellKey,
+    fixtures: PathBuf,
+    out_dir: PathBuf,
+    eboot_bytes: Vec<u8>,
+}
+
+/// Load the manifest, compose the selected cell, and load the EBOOT the
+/// classifier reads; warns when `--fixtures-dir` is not the committed
+/// tree.
+fn resolve_fixture_inputs(
+    args: &FixtureGenArgs,
+    vfs_flag: Option<&Path>,
+) -> Result<FixtureInputs, CommandError> {
+    let manifest = TitleManifest::load_from_path(&args.manifest)
+        .map_err(|error| CommandError::failed(format!("fixture-gen: load manifest: {error}")))?;
+    let vfs_root = super::title::resolve_ps3_vfs_root(vfs_flag)?;
+    // The fixture must name the EBOOT a boot run picks, so the
+    // selection goes through the boot family's resolver.
+    let composition = super::boot_cmd::resolve_composition(
+        &args.selection,
+        &vfs_root,
+        &manifest,
+        BootOverrides::default(),
+    )?;
+    let cell = cellgov_boot::compose::composed_cell(&composition).ok_or_else(|| {
+        CommandError::failed(format!(
+            "fixture-gen: {} composed no cell: a cross-runner result is filed under \
+             (content id, firmware, game version), and this composition names none. An \
+             unmanaged or absent firmware carries no version, a title the store does not \
+             hold has no game-version axis, and an executable named by an absolute path \
+             belongs to no firmware entry",
+            manifest.name()
+        ))
+    })?;
+    let fixtures = args
+        .fixtures_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(crate::paths::DEFAULT_FIXTURES_DIR));
+    let out_dir = crate::paths::cell_cross_runner_dir_in(&fixtures, &manifest.content_id, &cell);
+    if !is_committed_tree(&fixtures) {
+        eprintln!(
+            "fixture-gen: --fixtures-dir {} is not the committed tree {}; REPRODUCTION.md's \
+             links to the workspace root count the levels of the committed tree, so they \
+             will not resolve from here",
+            fixtures.display(),
+            crate::paths::DEFAULT_FIXTURES_DIR,
+        );
+    }
+    let eboot_path = manifest
+        .resolve_eboot_in(&composition.eboot_dirs)
+        .map_err(|error| CommandError::failed(format!("fixture-gen: resolve EBOOT: {error}")))?;
+    let eboot_path = eboot_path.to_str().ok_or_else(|| {
+        CommandError::failed(format!(
+            "fixture-gen: EBOOT path {} has invalid UTF-8",
+            eboot_path.display()
+        ))
+    })?;
+    let eboot_bytes = load_ppu_image_with_title(eboot_path, &manifest, &vfs_root)?.elf_data;
+    Ok(FixtureInputs {
+        manifest,
+        vfs_root,
+        composition,
+        cell,
+        fixtures,
+        out_dir,
+        eboot_bytes,
+    })
+}
+
+/// Read and parse one runner's observation.
+fn load_observation(path: &str) -> Result<Observation, CommandError> {
+    let bytes = load_file(path)?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| CommandError::failed(format!("fixture-gen: parse {path}: {error}")))
+}
+
+/// Refuse an observation with zero memory regions whose outcome is not
+/// Timeout: the comparator would emit a confident verdict against
+/// empty data.
+fn refuse_empty_regions(
+    obs: &Observation,
+    path: &str,
+    runner_label: &str,
+    remedy: &str,
+) -> Result<(), CommandError> {
+    if obs.memory_regions.is_empty() && !matches!(obs.outcome, ObservedOutcome::Timeout) {
+        return Err(CommandError::failed(format!(
+            "fixture-gen: {runner_label} observation at {path} has zero memory regions but \
+             reports outcome={}; the dump is incomplete. {remedy}",
+            obs.outcome,
+        )));
+    }
+    Ok(())
 }
 
 /// How many of the cell's unsupported syscalls the oracle's dispatch
