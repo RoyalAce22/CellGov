@@ -13,6 +13,15 @@ use crate::ppu_thread::PpuThreadId;
 
 use super::model::Lv2Host;
 
+/// Whether sync table `$table` holds `$id` with a thread waiting on it.
+macro_rules! has_waiters {
+    ($table:expr, $id:expr) => {
+        $table
+            .lookup($id)
+            .is_some_and(|entry| !entry.waiters().is_empty())
+    };
+}
+
 impl Lv2Host {
     /// Release the kernel ids process `pid` held, which exited, and
     /// drop the object behind each. The console keeps one id table per
@@ -71,32 +80,19 @@ impl Lv2Host {
                 state.mutexes.destroy_abandoned(id).is_some()
             }
             SYS_COND_OBJECT => {
-                if derived.cond_ipc_keys.contains_key(&id)
-                    || state
-                        .conds
-                        .lookup(id)
-                        .is_some_and(|c| !c.waiters().is_empty())
-                {
+                if derived.cond_ipc_keys.contains_key(&id) || has_waiters!(state.conds, id) {
                     return false;
                 }
                 state.conds.destroy(id).is_some()
             }
             SYS_LWMUTEX_OBJECT => {
-                if state
-                    .lwmutexes
-                    .lookup(id)
-                    .is_some_and(|m| !m.waiters().is_empty())
-                {
+                if has_waiters!(state.lwmutexes, id) {
                     return false;
                 }
                 state.lwmutexes.destroy(id).is_some()
             }
             SYS_LWCOND_OBJECT => {
-                if state
-                    .lwconds
-                    .lookup(id)
-                    .is_some_and(|c| !c.waiters().is_empty())
-                {
+                if has_waiters!(state.lwconds, id) {
                     return false;
                 }
                 let found = state.lwconds.destroy(id).is_some();
@@ -106,31 +102,20 @@ impl Lv2Host {
                 found
             }
             SYS_SEMAPHORE_OBJECT => {
-                if state
-                    .semaphores
-                    .lookup(id)
-                    .is_some_and(|s| !s.waiters().is_empty())
-                {
+                if has_waiters!(state.semaphores, id) {
                     return false;
                 }
                 state.semaphores.destroy(id).is_some()
             }
             SYS_EVENT_FLAG_OBJECT => {
-                if state
-                    .event_flags
-                    .lookup(id)
-                    .is_some_and(|f| !f.waiters().is_empty())
-                {
+                if has_waiters!(state.event_flags, id) {
                     return false;
                 }
                 state.event_flags.destroy(id).is_some()
             }
             SYS_EVENT_QUEUE_OBJECT => {
                 if derived.event_queue_ipc_keys.contains_key(&id)
-                    || state
-                        .event_queues
-                        .lookup(id)
-                        .is_some_and(|q| !q.waiters().is_empty())
+                    || has_waiters!(state.event_queues, id)
                 {
                     return false;
                 }
@@ -157,19 +142,10 @@ impl Lv2Host {
             SYS_TIMER_OBJECT => state.process_counts.timer_remove(id),
             SYS_RWLOCK_OBJECT => state.process_counts.rwlock_remove(id),
             SHARED_MEMORY_CLASS | SHARED_MEMORY_EXT_CLASS => {
-                if state.mmapper_ipc.iter().any(|(_, &mem_id)| mem_id == id) {
+                let Some(found) = self.drop_exited_shared_memory(id) else {
                     return false;
-                }
-                match state.mmapper_handles.get(id) {
-                    Some(handle) => {
-                        if self.mmapper_segment_busy(id, handle) {
-                            return false;
-                        }
-                        self.state.mmapper_handles.remove(id);
-                        true
-                    }
-                    None => false,
-                }
+                };
+                found
             }
             _ => return false,
         };
@@ -183,6 +159,30 @@ impl Lv2Host {
             );
         }
         true
+    }
+
+    /// Drop the shared-memory handle `id` names.
+    ///
+    /// Returns `None` when the handle stays: an ipc key still names it,
+    /// or its segment is busy. Otherwise returns whether a handle was
+    /// there to drop.
+    fn drop_exited_shared_memory(&mut self, id: u32) -> Option<bool> {
+        if self
+            .state
+            .mmapper_ipc
+            .iter()
+            .any(|(_, &mem_id)| mem_id == id)
+        {
+            return None;
+        }
+        let Some(handle) = self.state.mmapper_handles.get(id) else {
+            return Some(false);
+        };
+        if self.mmapper_segment_busy(id, handle) {
+            return None;
+        }
+        self.state.mmapper_handles.remove(id);
+        Some(true)
     }
 }
 
