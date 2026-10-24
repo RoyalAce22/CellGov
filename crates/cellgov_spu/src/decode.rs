@@ -35,6 +35,9 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
 struct Fields {
     raw: u32,
     rt: u8,
+    /// The RRR form's target, which takes the top register field; that
+    /// form's RC is [`Self::rt`].
+    rrrr_rt: u8,
     ra: u8,
     rb: u8,
     i7: u8,
@@ -56,6 +59,7 @@ impl Fields {
         Fields {
             raw,
             rt: (raw & 0x7F) as u8,
+            rrrr_rt: ((raw >> 21) & 0x7F) as u8,
             ra: ((raw >> 7) & 0x7F) as u8,
             rb,
             // RI7: the 7-bit immediate shares its bit position with RB.
@@ -85,24 +89,24 @@ const DECODERS: &[(&str, Builder)] = &[
     // RRR: OP[0:3] RT[4:10] RB[11:17] RA[18:24] RC[25:31].
     // [SPU-ISA p:116 s:5 Shufb] RRR opcode 0xB; RC at bits [25:31].
     ("shufb", |f| SpuInstruction::Shufb {
-        rt: ((f.raw >> 21) & 0x7F) as u8,
-        ra: ((f.raw >> 7) & 0x7F) as u8,
-        rb: ((f.raw >> 14) & 0x7F) as u8,
-        rc: (f.raw & 0x7F) as u8,
+        rt: f.rrrr_rt,
+        ra: f.ra,
+        rb: f.rb,
+        rc: f.rt,
     }),
     // [SPU-ISA p:76 s:5 Mpya] RRR opcode 0xC.
     ("mpya", |f| SpuInstruction::Mpya {
-        rt: ((f.raw >> 21) & 0x7F) as u8,
-        ra: ((f.raw >> 7) & 0x7F) as u8,
-        rb: ((f.raw >> 14) & 0x7F) as u8,
-        rc: (f.raw & 0x7F) as u8,
+        rt: f.rrrr_rt,
+        ra: f.ra,
+        rb: f.rb,
+        rc: f.rt,
     }),
     // [SPU-ISA p:115 s:5 Selb] RRR opcode 0x8.
     ("selb", |f| SpuInstruction::Selb {
-        rt: ((f.raw >> 21) & 0x7F) as u8,
-        ra: ((f.raw >> 7) & 0x7F) as u8,
-        rb: ((f.raw >> 14) & 0x7F) as u8,
-        rc: (f.raw & 0x7F) as u8,
+        rt: f.rrrr_rt,
+        ra: f.ra,
+        rb: f.rb,
+        rc: f.rt,
     }),
     ("rdch", |f| SpuInstruction::Rdch {
         rt: f.rt,
@@ -142,24 +146,24 @@ const DECODERS: &[(&str, Builder)] = &[
     }),
     // [SPU-ISA p:208 s:9 Fma] RRR opcode 0xE.
     ("fma", |f| SpuInstruction::Fma {
-        rt: ((f.raw >> 21) & 0x7F) as u8,
-        ra: ((f.raw >> 7) & 0x7F) as u8,
-        rb: ((f.raw >> 14) & 0x7F) as u8,
-        rc: (f.raw & 0x7F) as u8,
+        rt: f.rrrr_rt,
+        ra: f.ra,
+        rb: f.rb,
+        rc: f.rt,
     }),
     // [SPU-ISA p:212 s:9 Fms] RRR opcode 0xF.
     ("fms", |f| SpuInstruction::Fms {
-        rt: ((f.raw >> 21) & 0x7F) as u8,
-        ra: ((f.raw >> 7) & 0x7F) as u8,
-        rb: ((f.raw >> 14) & 0x7F) as u8,
-        rc: (f.raw & 0x7F) as u8,
+        rt: f.rrrr_rt,
+        ra: f.ra,
+        rb: f.rb,
+        rc: f.rt,
     }),
     // [SPU-ISA p:210 s:9 Fnms] RRR opcode 0xD.
     ("fnms", |f| SpuInstruction::Fnms {
-        rt: ((f.raw >> 21) & 0x7F) as u8,
-        ra: ((f.raw >> 7) & 0x7F) as u8,
-        rb: ((f.raw >> 14) & 0x7F) as u8,
-        rc: (f.raw & 0x7F) as u8,
+        rt: f.rrrr_rt,
+        ra: f.ra,
+        rb: f.rb,
+        rc: f.rt,
     }),
     // [SPU-ISA p:215 s:9 Frest] RR opcode 0x1B8; RB is unused.
     ("frest", |f| SpuInstruction::Frest { rt: f.rt, ra: f.ra }),
