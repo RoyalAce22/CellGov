@@ -26,31 +26,37 @@ pub(crate) fn report_trace_line(
             result.yield_reason
         ));
     }
-    if let Some(args) = &result.syscall_args {
-        if args[0] >= 0x10000 {
-            let idx = (args[0] - 0x10000) as u32;
-            sink.note(&format!("       -> HLE #{idx}: {}", format_hle_idx(idx)));
-        } else if args[0] == 403 {
-            let buf = args[2];
-            let len = args[3];
-            let full = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(buf), len)
-                .and_then(|r| mem.read(r));
-            match full {
-                Some(slice) => {
-                    let text = String::from_utf8_lossy(slice);
-                    let terminator = if text.ends_with('\n') { "" } else { "\n" };
-                    sink.guest_text(&format!("       -> tty: {text}{terminator}"));
-                }
-                None => match longest_readable_prefix(mem, buf, len) {
-                    Some((n, bytes)) => {
-                        let text = ascii_safe_preview(&bytes);
-                        sink.note(&format!("       -> tty (partial {n}/{len}): {text}"));
-                    }
-                    None => sink.note(&format!("       -> LV2 tty_write (oob, 0/{len} readable)")),
-                },
-            }
-        } else {
-            sink.note(&format!("       -> LV2 syscall {}", args[0]));
+    let Some(args) = &result.syscall_args else {
+        return;
+    };
+    if args[0] >= 0x10000 {
+        let idx = (args[0] - 0x10000) as u32;
+        sink.note(&format!("       -> HLE #{idx}: {}", format_hle_idx(idx)));
+    } else if args[0] == cellgov_ps3_abi::lv2::syscall::TTY_WRITE {
+        report_trace_tty(mem, args, sink);
+    } else {
+        sink.note(&format!("       -> LV2 syscall {}", args[0]));
+    }
+}
+
+/// Report the text a `sys_tty_write` asked to write: whole when its
+/// buffer reads, else the readable prefix, else the refusal.
+fn report_trace_tty(mem: &cellgov_mem::GuestMemory, args: &[u64; 9], sink: &dyn BootSink) {
+    let buf = args[2];
+    let len = args[3];
+    let full = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(buf), len)
+        .and_then(|r| mem.read(r));
+    if let Some(slice) = full {
+        let text = String::from_utf8_lossy(slice);
+        let terminator = if text.ends_with('\n') { "" } else { "\n" };
+        sink.guest_text(&format!("       -> tty: {text}{terminator}"));
+        return;
+    }
+    match longest_readable_prefix(mem, buf, len) {
+        Some((n, bytes)) => {
+            let text = ascii_safe_preview(&bytes);
+            sink.note(&format!("       -> tty (partial {n}/{len}): {text}"));
         }
+        None => sink.note(&format!("       -> LV2 tty_write (oob, 0/{len} readable)")),
     }
 }

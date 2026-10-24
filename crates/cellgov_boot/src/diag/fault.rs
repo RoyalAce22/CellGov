@@ -97,19 +97,7 @@ pub(crate) fn format_fault(
     let mut out = format!("FAULT at step {steps}: {detail}");
 
     if let Some(regs) = &result.local_diagnostics.fault_regs {
-        out.push_str("\n  registers:");
-        for (i, &val) in regs.gprs.iter().enumerate() {
-            if i % 4 == 0 {
-                out.push_str("\n    ");
-            }
-            out.push_str(&format!("r{i:<2}=0x{val:016x}  "));
-        }
-        out.push_str(&format!(
-            "\n    LR=0x{:016x}  CTR=0x{:016x}  XER=0x{:016x}  CR=0x{:08x}",
-            regs.lr, regs.ctr, regs.xer, regs.cr
-        ));
-        append_register_pointer_dump(&mut out, mem, regs);
-        append_stack_walk(&mut out, mem, regs);
+        append_register_block(&mut out, mem, regs);
     }
 
     append_explicit_mem_dump(&mut out, mem, dump_mem_fault_ranges);
@@ -131,32 +119,51 @@ pub(crate) fn unit_memory(rt: &Runtime, unit: cellgov_event::UnitId) -> &GuestMe
     })
 }
 
+/// Append the registers section of a fault report: the GPR grid, the
+/// special registers, the pointer dump and the stack walk.
+fn append_register_block(
+    out: &mut String,
+    mem: &GuestMemory,
+    regs: &cellgov_exec::FaultRegisterDump,
+) {
+    out.push_str("\n  registers:");
+    for (i, &val) in regs.gprs.iter().enumerate() {
+        if i % 4 == 0 {
+            out.push_str("\n    ");
+        }
+        out.push_str(&format!("r{i:<2}=0x{val:016x}  "));
+    }
+    out.push_str(&format!(
+        "\n    LR=0x{:016x}  CTR=0x{:016x}  XER=0x{:016x}  CR=0x{:08x}",
+        regs.lr, regs.ctr, regs.xer, regs.cr
+    ));
+    append_register_pointer_dump(out, mem, regs);
+    append_stack_walk(out, mem, regs);
+}
+
 /// Dump 64 bytes at any GPR/LR/CTR value >= 0x1000 (plausible pointer).
 pub(crate) fn append_register_pointer_dump(
     out: &mut String,
     mem: &GuestMemory,
     regs: &cellgov_exec::FaultRegisterDump,
 ) {
-    let mut emitted = false;
-    for (i, &val) in regs.gprs.iter().enumerate() {
-        if val < 0x1000 {
-            continue;
-        }
-        if !emitted {
-            out.push_str("\n  register pointers:");
-            emitted = true;
-        }
-        append_register_pointer_line(out, mem, &format!("r{i}"), val);
+    let gprs = regs
+        .gprs
+        .iter()
+        .enumerate()
+        .map(|(i, &val)| (format!("r{i}"), val));
+    let specials =
+        [("LR", regs.lr), ("CTR", regs.ctr)].map(|(label, val)| (label.to_string(), val));
+    let mut pointers = gprs
+        .chain(specials)
+        .filter(|&(_, val)| val >= 0x1000)
+        .peekable();
+    if pointers.peek().is_none() {
+        return;
     }
-    for (label, val) in [("LR", regs.lr), ("CTR", regs.ctr)] {
-        if val < 0x1000 {
-            continue;
-        }
-        if !emitted {
-            out.push_str("\n  register pointers:");
-            emitted = true;
-        }
-        append_register_pointer_line(out, mem, label, val);
+    out.push_str("\n  register pointers:");
+    for (label, val) in pointers {
+        append_register_pointer_line(out, mem, &label, val);
     }
 }
 
@@ -266,19 +273,7 @@ pub(crate) fn format_commit_fault(
     // the source unit's post-step state via `RegisteredUnit::register_dump`.
     if let Some(regs) = rt.registry().get(source).and_then(|u| u.register_dump()) {
         out.push_str(&format!("\n  source unit: {}", source.raw()));
-        out.push_str("\n  registers:");
-        for (i, &val) in regs.gprs.iter().enumerate() {
-            if i % 4 == 0 {
-                out.push_str("\n    ");
-            }
-            out.push_str(&format!("r{i:<2}=0x{val:016x}  "));
-        }
-        out.push_str(&format!(
-            "\n    LR=0x{:016x}  CTR=0x{:016x}  XER=0x{:016x}  CR=0x{:08x}",
-            regs.lr, regs.ctr, regs.xer, regs.cr
-        ));
-        append_register_pointer_dump(&mut out, mem, &regs);
-        append_stack_walk(&mut out, mem, &regs);
+        append_register_block(&mut out, mem, &regs);
     }
     append_pc_ring_with_decode(&mut out, rt, pc_ring);
     out
