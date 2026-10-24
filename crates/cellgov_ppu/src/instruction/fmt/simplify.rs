@@ -149,6 +149,88 @@ fn ctr_stem(nz: bool, cond: Option<bool>) -> Mn {
     m
 }
 
+/// Appends the `l` (LK) and then the `a` (AA) suffix that are set.
+fn push_link_aa(mn: &mut Mn, link: bool, aa: bool) {
+    if link {
+        mn.push("l");
+    }
+    if aa {
+        mn.push("a");
+    }
+}
+
+/// The extended form of a `bc` to `target`.
+///
+/// [PPC-Book1 p:152 s:B.2.2] Table 3: there is no extended
+/// mnemonic for an unconditional or CTR-decrementing `bc`
+/// beyond bdnz/bdz; branch-always via bc renders canonically.
+fn simplify_bc(bo: u8, bi: u8, target: u64, aa: bool, link: bool) -> Option<Simplified> {
+    let (mut mn, ops) = match branch_kind(bo, bi)? {
+        BranchKind::Always => return None,
+        BranchKind::Ctr { nz } => (ctr_stem(nz, None), SimpleOps::Target { target }),
+        // [PPC-Book1 p:153 s:B.2.3] b<cond> [crF,] target;
+        // the crF operand is omitted for CR field 0.
+        BranchKind::Cond { wanted } => {
+            let mut mn = Mn::new("b");
+            mn.push(cond_code(bi, wanted));
+            let ops = SimpleOps::CrTarget {
+                crf: bi >> 2,
+                target,
+            };
+            (mn, ops)
+        }
+        // [PPC-Book1 p:152 s:B.2.2] bdnzt/bdnzf/bdzt/bdzf
+        // take the tested CR bit as the first operand.
+        BranchKind::CtrCond { nz, wanted } => (
+            ctr_stem(nz, Some(wanted)),
+            SimpleOps::CrBitTarget { bi, target },
+        ),
+    };
+    push_link_aa(&mut mn, link, aa);
+    Some(Simplified { mn, ops })
+}
+
+/// The extended form of a `bclr`.
+fn simplify_bclr(bo: u8, bi: u8, link: bool) -> Option<Simplified> {
+    let (mut mn, ops) = match branch_kind(bo, bi)? {
+        BranchKind::Always => (Mn::new("blr"), SimpleOps::None),
+        BranchKind::Ctr { nz } => {
+            let mut m = ctr_stem(nz, None);
+            m.push("lr");
+            (m, SimpleOps::None)
+        }
+        BranchKind::Cond { wanted } => {
+            let mut m = Mn::new("b");
+            m.push(cond_code(bi, wanted));
+            m.push("lr");
+            (m, SimpleOps::CrOnly { crf: bi >> 2 })
+        }
+        BranchKind::CtrCond { nz, wanted } => {
+            let mut m = ctr_stem(nz, Some(wanted));
+            m.push("lr");
+            (m, SimpleOps::CrBitOnly { bi })
+        }
+    };
+    push_link_aa(&mut mn, link, false);
+    Some(Simplified { mn, ops })
+}
+
+/// The extended form of a `bcctr`; the CTR-decrement forms have none.
+fn simplify_bcctr(bo: u8, bi: u8, link: bool) -> Option<Simplified> {
+    let (mut mn, ops) = match branch_kind(bo, bi)? {
+        BranchKind::Always => (Mn::new("bctr"), SimpleOps::None),
+        BranchKind::Cond { wanted } => {
+            let mut m = Mn::new("b");
+            m.push(cond_code(bi, wanted));
+            m.push("ctr");
+            (m, SimpleOps::CrOnly { crf: bi >> 2 })
+        }
+        BranchKind::Ctr { .. } | BranchKind::CtrCond { .. } => return None,
+    };
+    push_link_aa(&mut mn, link, false);
+    Some(Simplified { mn, ops })
+}
+
 /// Extended-mnemonic table, consulted before canonical rendering.
 /// Each arm's gate is exact; anything outside the table returns
 /// `None` and renders canonically. Quickened variants (`Li`, `Mr`,
@@ -279,110 +361,14 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
             offset,
             aa,
             link,
-        } => {
-            let target = shown_target(addr, i32::from(offset), aa);
-            match branch_kind(bo, bi)? {
-                BranchKind::Always => None,
-                BranchKind::Ctr { nz } => {
-                    let mut mn = ctr_stem(nz, None);
-                    if link {
-                        mn.push("l");
-                    }
-                    if aa {
-                        mn.push("a");
-                    }
-                    Some(Simplified {
-                        mn,
-                        ops: SimpleOps::Target { target },
-                    })
-                }
-                // [PPC-Book1 p:153 s:B.2.3] b<cond> [crF,] target;
-                // the crF operand is omitted for CR field 0.
-                BranchKind::Cond { wanted } => {
-                    let mut mn = Mn::new("b");
-                    mn.push(cond_code(bi, wanted));
-                    if link {
-                        mn.push("l");
-                    }
-                    if aa {
-                        mn.push("a");
-                    }
-                    Some(Simplified {
-                        mn,
-                        ops: SimpleOps::CrTarget {
-                            crf: bi >> 2,
-                            target,
-                        },
-                    })
-                }
-                // [PPC-Book1 p:152 s:B.2.2] bdnzt/bdnzf/bdzt/bdzf
-                // take the tested CR bit as the first operand.
-                BranchKind::CtrCond { nz, wanted } => {
-                    let mut mn = ctr_stem(nz, Some(wanted));
-                    if link {
-                        mn.push("l");
-                    }
-                    if aa {
-                        mn.push("a");
-                    }
-                    Some(Simplified {
-                        mn,
-                        ops: SimpleOps::CrBitTarget { bi, target },
-                    })
-                }
-            }
-        }
+        } => simplify_bc(bo, bi, shown_target(addr, i32::from(offset), aa), aa, link),
         // [PPC-Book1 p:152 s:B.2.2] Table 3, bclr column: blr, bdnzlr,
         // bdztlr, ... plus [p:153 s:B.2.3] b<cond>lr forms.
-        I::Bclr { bo, bi, link } => {
-            let mut mn = match branch_kind(bo, bi)? {
-                BranchKind::Always => Mn::new("blr"),
-                BranchKind::Ctr { nz } => {
-                    let mut m = ctr_stem(nz, None);
-                    m.push("lr");
-                    m
-                }
-                BranchKind::Cond { wanted } => {
-                    let mut m = Mn::new("b");
-                    m.push(cond_code(bi, wanted));
-                    m.push("lr");
-                    m
-                }
-                BranchKind::CtrCond { nz, wanted } => {
-                    let mut m = ctr_stem(nz, Some(wanted));
-                    m.push("lr");
-                    m
-                }
-            };
-            if link {
-                mn.push("l");
-            }
-            let ops = match branch_kind(bo, bi)? {
-                BranchKind::Always | BranchKind::Ctr { .. } => SimpleOps::None,
-                BranchKind::Cond { .. } => SimpleOps::CrOnly { crf: bi >> 2 },
-                BranchKind::CtrCond { .. } => SimpleOps::CrBitOnly { bi },
-            };
-            Some(Simplified { mn, ops })
-        }
+        I::Bclr { bo, bi, link } => simplify_bclr(bo, bi, link),
         // [PPC-Book1 p:152 s:B.2.2] Table 3, bcctr column: bctr and
         // b<cond>ctr only; CTR-decrement forms have no bcctr
         // mnemonic (and are architecturally invalid).
-        I::Bcctr { bo, bi, link } => {
-            let (mut mn, ops) = match branch_kind(bo, bi)? {
-                BranchKind::Always => (Mn::new("bctr"), SimpleOps::None),
-                BranchKind::Cond { wanted } => {
-                    let mut m = Mn::new("b");
-                    m.push(cond_code(bi, wanted));
-                    m.push("ctr");
-                    (m, SimpleOps::CrOnly { crf: bi >> 2 })
-                }
-                BranchKind::Ctr { .. } | BranchKind::CtrCond { .. } => return None,
-            };
-            if link {
-                mn.push("l");
-            }
-            Some(Simplified { mn, ops })
-        }
+        I::Bcctr { bo, bi, link } => simplify_bcctr(bo, bi, link),
 
         I::Lwz { .. }
         | I::Lbz { .. }

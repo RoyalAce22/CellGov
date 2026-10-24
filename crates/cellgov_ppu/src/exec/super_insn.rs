@@ -13,7 +13,7 @@ use crate::exec::branch::branch_condition;
 use crate::exec::memory_helpers::{buffer_store, load_ze, LoadPort, Width};
 use crate::exec::ExecuteVerdict;
 use crate::instruction::PpuInstruction;
-use crate::state::PpuState;
+use crate::state::{cmp_cr_field, PpuState};
 use crate::store_buffer::StoreBuffer;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -54,18 +54,10 @@ pub(crate) fn execute(
         }
         PpuInstruction::Nop => ExecuteVerdict::Continue,
         PpuInstruction::CmpwZero { bf, ra } => {
-            let a = state.gpr[ra as usize] as i32;
-            let cr_val = if a < 0 {
-                0b1000
-            } else if a > 0 {
-                0b0100
-            } else {
-                0b0010
-            };
             // [PPC-Book1 p:60 s:3.3.9] CR[4*BF .. 4*BF+3] <- c ||
             // XER[SO]. The SO bit is sticky and must be reflected in
             // every compare result.
-            state.set_cr_field(bf, cr_val | u8::from(state.xer_so()));
+            cmpw(state, bf, state.gpr[ra as usize] as i32, 0);
             ExecuteVerdict::Continue
         }
         PpuInstruction::Clrldi { ra, rs, n } => {
@@ -100,16 +92,7 @@ pub(crate) fn execute(
             ) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
-                    let a = val as i32;
-                    let b = cmp_imm as i32;
-                    let cr_val = if a < b {
-                        0b1000
-                    } else if a > b {
-                        0b0100
-                    } else {
-                        0b0010
-                    };
-                    state.set_cr_field(bf, cr_val | u8::from(state.xer_so()));
+                    cmpw(state, bf, val as i32, cmp_imm as i32);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -225,24 +208,8 @@ pub(crate) fn execute(
             bi,
             target_offset,
         } => {
-            let a = state.gpr[ra as usize] as i32;
-            let b = imm as i32;
-            let cr_val = if a < b {
-                0b1000
-            } else if a > b {
-                0b0100
-            } else {
-                0b0010
-            };
-            state.set_cr_field(bf, cr_val | u8::from(state.xer_so()));
-            // target_offset is relative to the bc slot (super + 4).
-            if branch_condition(state, bo, bi) {
-                state.pc =
-                    (state.pc.wrapping_add(4) as i64).wrapping_add(target_offset as i64) as u64;
-                ExecuteVerdict::Branch
-            } else {
-                ExecuteVerdict::Continue
-            }
+            cmpw(state, bf, state.gpr[ra as usize] as i32, imm as i32);
+            take_bc(state, bo, bi, target_offset)
         }
         // [PPC-Book1 p:60 s:3.3.9 Compare] cmp (cmpw when L=0): signed 32-bit register compare, CR field <- c || XER[SO].
         // [PPC-Book1 p:18 s:2.3.1 Condition Register] CR field bits LT/GT/EQ/SO occupy positions 0/1/2/3 within the 4-bit field.
@@ -256,30 +223,38 @@ pub(crate) fn execute(
             bi,
             target_offset,
         } => {
-            let a = state.gpr[ra as usize] as i32;
-            let b = state.gpr[rb as usize] as i32;
-            let cr_val = if a < b {
-                0b1000
-            } else if a > b {
-                0b0100
-            } else {
-                0b0010
-            };
-            state.set_cr_field(bf, cr_val | u8::from(state.xer_so()));
-            // target_offset is relative to the bc slot (super + 4).
-            if branch_condition(state, bo, bi) {
-                state.pc =
-                    (state.pc.wrapping_add(4) as i64).wrapping_add(target_offset as i64) as u64;
-                ExecuteVerdict::Branch
-            } else {
-                ExecuteVerdict::Continue
-            }
+            cmpw(
+                state,
+                bf,
+                state.gpr[ra as usize] as i32,
+                state.gpr[rb as usize] as i32,
+            );
+            take_bc(state, bo, bi, target_offset)
         }
         PpuInstruction::Consumed => {
             unreachable!("Consumed slots should be skipped by the fetch loop")
         }
 
         _ => unreachable!("super_insn::execute called with non-super variant"),
+    }
+}
+
+/// Signed 32-bit compare of `a` with `b` into CR field `bf`, with SO
+/// from XER.
+#[inline]
+fn cmpw(state: &mut PpuState, bf: u8, a: i32, b: i32) {
+    state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
+}
+
+/// The fused bc slot: branch to `target_offset` bytes past the bc slot
+/// (super + 4) when BO/BI hold.
+#[inline]
+fn take_bc(state: &mut PpuState, bo: u8, bi: u8, target_offset: i16) -> ExecuteVerdict {
+    if branch_condition(state, bo, bi) {
+        state.pc = (state.pc.wrapping_add(4) as i64).wrapping_add(target_offset as i64) as u64;
+        ExecuteVerdict::Branch
+    } else {
+        ExecuteVerdict::Continue
     }
 }
 

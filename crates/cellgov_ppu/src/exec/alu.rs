@@ -4,7 +4,7 @@
 
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
-use crate::state::PpuState;
+use crate::state::{cmp_cr_field, PpuState};
 
 pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVerdict {
     match *insn {
@@ -820,25 +820,6 @@ fn trap_condition_matches(
         || ((to >> 2) & 1 != 0 && a_signed == b_signed)
         || ((to >> 1) & 1 != 0 && a_unsigned < b_unsigned)
         || (to & 1 != 0 && a_unsigned > b_unsigned)
-}
-
-/// Build a 4-bit CR field for compare instructions: `LT|GT|EQ|SO`.
-/// Exactly one of `lt`/`gt`/`eq` is set; `so` is the sticky overflow
-/// bit copied unchanged from XER.
-///
-/// [PPC-Book1 p:60 s:3.3.9] CR field encoding c||`XER[SO]` -> {LT,GT,EQ,SO} nibble.
-fn cmp_cr_field(lt: bool, gt: bool, so: bool) -> u8 {
-    let mut nib = if lt {
-        0b1000
-    } else if gt {
-        0b0100
-    } else {
-        0b0010
-    };
-    if so {
-        nib |= 0b0001;
-    }
-    nib
 }
 
 /// [PPC-Book1 p:71 s:3.3.12] ROTL32 duplicates the rotated word in both halves.

@@ -8,6 +8,26 @@ use crate::multilinear::{
     LANE_RESERVATION_TAG, LANE_XER,
 };
 
+/// Build a 4-bit CR field for compare instructions: `LT|GT|EQ|SO`.
+/// Exactly one of `lt`/`gt`/`eq` is set; `so` is the sticky overflow
+/// bit copied unchanged from XER.
+///
+/// [PPC-Book1 p:60 s:3.3.9] CR field encoding c||`XER[SO]` -> {LT,GT,EQ,SO} nibble.
+#[inline]
+pub(crate) fn cmp_cr_field(lt: bool, gt: bool, so: bool) -> u8 {
+    let mut nib = if lt {
+        0b1000
+    } else if gt {
+        0b0100
+    } else {
+        0b0010
+    };
+    if so {
+        nib |= 0b0001;
+    }
+    nib
+}
+
 /// The id of the FNV-1a scheme: FNV-1a over its domain tag.
 ///
 /// A trace or an observation without a scheme id holds hashes of this
@@ -467,17 +487,7 @@ impl PpuState {
     /// [PPC-Book1 p:18 s:2.3.1] CR0 = c || `XER[SO]` for fixed-point Rc=1 instructions.
     pub fn set_cr0_from_result(&mut self, result: u64) {
         let signed = result as i64;
-        let mut nib = if signed < 0 {
-            0b1000
-        } else if signed > 0 {
-            0b0100
-        } else {
-            0b0010
-        };
-        if (self.xer >> 31) & 1 != 0 {
-            nib |= 0b0001;
-        }
-        self.set_cr_field(0, nib);
+        self.set_cr_field(0, cmp_cr_field(signed < 0, signed > 0, self.xer_so()));
     }
 
     /// The `(ra|0)` base operand: zero when `ra` is 0, else GPR `ra`.
