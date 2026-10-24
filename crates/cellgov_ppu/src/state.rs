@@ -480,16 +480,24 @@ impl PpuState {
         self.set_cr_field(0, nib);
     }
 
+    /// The `(ra|0)` base operand: zero when `ra` is 0, else GPR `ra`.
+    #[inline]
+    pub fn ra_or_zero(&self, ra: u8) -> u64 {
+        if ra == 0 {
+            0
+        } else {
+            self.gpr[ra as usize]
+        }
+    }
+
     /// D-form effective address `(ra|0) + sign_extend(imm)`.
     pub fn ea_d_form(&self, ra: u8, imm: i16) -> u64 {
-        let base = if ra == 0 { 0 } else { self.gpr[ra as usize] };
-        base.wrapping_add(imm as i64 as u64)
+        self.ra_or_zero(ra).wrapping_add(imm as i64 as u64)
     }
 
     /// X-form effective address `(ra|0) + rb`.
     pub fn ea_x_form(&self, ra: u8, rb: u8) -> u64 {
-        let base = if ra == 0 { 0 } else { self.gpr[ra as usize] };
-        base.wrapping_add(self.gpr[rb as usize])
+        self.ra_or_zero(ra).wrapping_add(self.gpr[rb as usize])
     }
 
     /// The canonical fingerprint input set for this state.

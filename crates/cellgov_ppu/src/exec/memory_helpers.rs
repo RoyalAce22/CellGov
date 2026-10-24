@@ -101,7 +101,7 @@ impl<'v, 'e> LoadPort<'v, 'e> {
 /// labels populated; the helper does not have a `GuestMemory`
 /// reference to walk, only the flat region-view slice.
 #[inline]
-fn unmapped(ea: u64) -> cellgov_mem::MemError {
+pub(crate) fn unmapped(ea: u64) -> cellgov_mem::MemError {
     cellgov_mem::MemError::Unmapped(cellgov_mem::FaultContext {
         addr: ea,
         nearest_below: None,
