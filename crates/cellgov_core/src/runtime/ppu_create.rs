@@ -14,6 +14,14 @@ use super::Runtime;
 /// process's address space.
 const CHILD_STACK_LABEL: &str = "child_stack";
 
+/// A child thread's stack block, in the space of the process it runs in.
+#[derive(Clone, Copy)]
+struct ChildStack {
+    space: AddressSpaceId,
+    base: u64,
+    size: u64,
+}
+
 impl Runtime {
     pub(super) fn handle_ppu_thread_create(&mut self, source: UnitId, dispatch: Lv2Dispatch) {
         let caller_space = self.spaces.space_of(source);
@@ -89,73 +97,13 @@ impl Runtime {
         // binds every unit it registers for a spawned child). Boot
         // callers keep the untagged default.
         if caller_space != AddressSpaceId::BOOT {
-            // The arena hands out addresses inside the boot layout's
-            // child-stacks window; a child space has no region there
-            // until this install, so without it the new thread's
-            // first stack store faults. Boot callers skip it: the
-            // boot pipeline pre-installs the whole window.
-            let mem = super::spaces::resolve_space_memory_for_write(
-                &mut self.memory,
-                &mut self.spaces,
-                caller_space,
-            );
-            // A collected thread's stack region stays in the space until
-            // its range is placed again. No live thread holds any part
-            // of the new block, so every stack region it overlaps is a
-            // collected thread's.
-            let stale: Vec<(u64, usize)> = mem
-                .regions()
-                .filter(|r| {
-                    r.label() == CHILD_STACK_LABEL
-                        && r.base() < stack_base + stack_size
-                        && stack_base < r.base() + r.size()
-                })
-                .map(|r| (r.base(), r.size() as usize))
-                .collect();
-            for (base, size) in stale {
-                if let Err(err) = mem.remove_region(base, size) {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.ppu_thread_create_stale_stack_remove",
-                        format_args!(
-                            "collected stack region 0x{base:x}+0x{size:x} in space {} \
-                             would not remove: {err}",
-                            caller_space.raw(),
-                        ),
-                    );
-                }
-            }
-            if let Err(err) = mem.install_region(
-                stack_base,
-                stack_size as usize,
-                CHILD_STACK_LABEL,
-                cellgov_mem::PageSize::Page4K,
-            ) {
-                // Guest-reachable only when the child's image layout
-                // occupies the child-stacks window; the kernel would
-                // have failed the stack allocation itself. PPU thread
-                // creation reports CELL_ENOMEM when it cannot get the
-                // user stack area, which is the case here.
-                self.registry
-                    .set_status_override(child_unit_id, UnitStatus::Finished);
-                let stranded = self.lv2_host.ppu_threads_mut().mark_finished(thread_id, 0);
-                debug_assert!(
-                    stranded.is_empty(),
-                    "a thread refused inside its own create cannot have joiners yet; \
-                     {stranded:?} would never wake",
-                );
-                // The guest never gets the id, so no join collects the
-                // thread: drop it here, which frees its stack block.
-                self.lv2_host.ppu_threads_mut().reap(thread_id);
-                self.lv2_host.log_invariant_break(
-                    "runtime.ppu_thread_create_stack_install_overlap",
-                    format_args!(
-                        "child stack region 0x{stack_base:x}+0x{stack_size:x} overlaps \
-                         space {}'s existing layout: {err}; thread refused with ENOMEM",
-                        caller_space.raw(),
-                    ),
-                );
-                self.deliver_syscall_return(source, CELL_ENOMEM.into());
-                return;
+            let stack = ChildStack {
+                space: caller_space,
+                base: stack_base,
+                size: stack_size,
+            };
+            if let Err(err) = self.install_child_stack(stack) {
+                return self.refuse_thread_create(source, child_unit_id, thread_id, stack, err);
             }
             self.assign_unit_space(child_unit_id, caller_space)
                 .expect("caller's space exists while the caller runs in it");
@@ -176,6 +124,92 @@ impl Runtime {
             &thread_id.raw().to_be_bytes(),
         );
         self.deliver_syscall_return(source, 0);
+    }
+
+    /// Install a child thread's stack region in its process's space,
+    /// first removing the collected threads' stack regions it overlaps.
+    ///
+    /// The arena hands out addresses inside the boot layout's
+    /// child-stacks window; a child space has no region there until this
+    /// install, so without it the new thread's first stack store faults.
+    /// Boot callers skip it: the boot pipeline pre-installs the whole
+    /// window.
+    fn install_child_stack(&mut self, stack: ChildStack) -> Result<(), cellgov_mem::MemError> {
+        let ChildStack { space, base, size } = stack;
+        let mem = super::spaces::resolve_space_memory_for_write(
+            &mut self.memory,
+            &mut self.spaces,
+            space,
+        );
+        // A collected thread's stack region stays in the space until
+        // its range is placed again. No live thread holds any part
+        // of the new block, so every stack region it overlaps is a
+        // collected thread's.
+        let stale: Vec<(u64, usize)> = mem
+            .regions()
+            .filter(|r| {
+                r.label() == CHILD_STACK_LABEL
+                    && r.base() < base + size
+                    && base < r.base() + r.size()
+            })
+            .map(|r| (r.base(), r.size() as usize))
+            .collect();
+        for (stale_base, stale_size) in stale {
+            if let Err(err) = mem.remove_region(stale_base, stale_size) {
+                self.lv2_host.log_invariant_break(
+                    "runtime.ppu_thread_create_stale_stack_remove",
+                    format_args!(
+                        "collected stack region 0x{stale_base:x}+0x{stale_size:x} in space {} \
+                         would not remove: {err}",
+                        space.raw(),
+                    ),
+                );
+            }
+        }
+        mem.install_region(
+            base,
+            size as usize,
+            CHILD_STACK_LABEL,
+            cellgov_mem::PageSize::Page4K,
+        )
+    }
+
+    /// Undo a thread create whose stack would not install, and answer
+    /// the caller CELL_ENOMEM.
+    ///
+    /// Guest-reachable only when the child's image layout occupies the
+    /// child-stacks window, where the kernel fails the stack allocation
+    /// itself. PPU thread creation reports CELL_ENOMEM when
+    /// it cannot get the user stack area, which is the case here.
+    fn refuse_thread_create(
+        &mut self,
+        source: UnitId,
+        child_unit_id: UnitId,
+        thread_id: cellgov_lv2::PpuThreadId,
+        stack: ChildStack,
+        err: cellgov_mem::MemError,
+    ) {
+        let ChildStack { space, base, size } = stack;
+        self.registry
+            .set_status_override(child_unit_id, UnitStatus::Finished);
+        let stranded = self.lv2_host.ppu_threads_mut().mark_finished(thread_id, 0);
+        debug_assert!(
+            stranded.is_empty(),
+            "a thread refused inside its own create cannot have joiners yet; \
+             {stranded:?} would never wake",
+        );
+        // The guest never gets the id, so no join collects the
+        // thread: drop it here, which frees its stack block.
+        self.lv2_host.ppu_threads_mut().reap(thread_id);
+        self.lv2_host.log_invariant_break(
+            "runtime.ppu_thread_create_stack_install_overlap",
+            format_args!(
+                "child stack region 0x{base:x}+0x{size:x} overlaps \
+                 space {}'s existing layout: {err}; thread refused with ENOMEM",
+                space.raw(),
+            ),
+        );
+        self.deliver_syscall_return(source, CELL_ENOMEM.into());
     }
 
     /// Release the unit of a thread the host just marked started.
