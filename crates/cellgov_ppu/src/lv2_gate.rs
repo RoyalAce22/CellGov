@@ -6,9 +6,11 @@ use cellgov_ps3_abi::lv2::errno;
 
 use crate::instruction::PpuInstruction;
 use crate::loader::{file_offset_at, pt_load_segments, LoadError, LoadSegment};
+use crate::local_cfg::{
+    add_signed, decode_function, function_extent, is_unconditional, local_branch_index,
+};
 use crate::lv2_stub::{Lv2OrdinalClass, Lv2StubClassification};
 
-const MAX_FUNCTION_WORDS: usize = 384;
 const MAX_ENTRY_THUNKS: usize = 4;
 const PERMISSION_RECORD_BYTES: usize = 32;
 
@@ -68,13 +70,9 @@ enum Candidate {
 fn scan_target(elf: &[u8], segments: &[LoadSegment], toc: u64, target: u64) -> Lv2Gate {
     let mut target = target;
     for _ in 0..MAX_ENTRY_THUNKS {
-        let Some(words) = words_at(elf, segments, target, MAX_FUNCTION_WORDS) else {
+        let Some(decoded) = decode_function(elf, segments, target) else {
             return Lv2Gate::NotAnalysed;
         };
-        let decoded: Vec<Option<PpuInstruction>> = words
-            .iter()
-            .map(|word| crate::decode::decode(*word).ok())
-            .collect();
         if let Some(next) = decoded
             .first()
             .and_then(|instruction| instruction.as_ref())
@@ -286,18 +284,8 @@ fn error_path_returns(
     else {
         return false;
     };
-    let instruction_address = match base.checked_add((branch_index as u64).saturating_mul(4)) {
-        Some(address) => address,
-        None => return false,
-    };
-    let branch_target = if aa {
-        u64::try_from(i64::from(offset)).ok()
-    } else {
-        add_signed(instruction_address, i64::from(offset))
-    }
-    .and_then(|address| address.checked_sub(base))
-    .filter(|relative| relative % 4 == 0)
-    .and_then(|relative| usize::try_from(relative / 4).ok());
+    let branch_target =
+        local_branch_index(base, branch_index, i64::from(offset), aa, decoded.len());
     [Some(branch_index + 1), branch_target]
         .into_iter()
         .flatten()
@@ -328,25 +316,14 @@ fn straight_path_returns(
             } if rs == error_register && rb == error_register => result_ready = true,
             PpuInstruction::Bclr {
                 bo, link: false, ..
-            } if bo & 0b10100 == 0b10100 => return result_ready,
+            } if is_unconditional(bo) => return result_ready,
             PpuInstruction::B {
                 offset,
                 aa,
                 link: false,
             } => {
-                let instruction_address = match base.checked_add((index as u64).saturating_mul(4)) {
-                    Some(address) => address,
-                    None => return false,
-                };
-                let target = if aa {
-                    u64::try_from(i64::from(offset)).ok()
-                } else {
-                    add_signed(instruction_address, i64::from(offset))
-                };
-                let Some(next) = target
-                    .and_then(|address| address.checked_sub(base))
-                    .filter(|relative| relative % 4 == 0)
-                    .and_then(|relative| usize::try_from(relative / 4).ok())
+                let Some(next) =
+                    local_branch_index(base, index, i64::from(offset), aa, decoded.len())
                 else {
                     return false;
                 };
@@ -370,67 +347,11 @@ fn permission_record_mask(elf: &[u8], segments: &[LoadSegment], address: u64) ->
     record[4..].iter().all(|byte| *byte == 0).then_some(mask)
 }
 
-fn function_extent(decoded: &[Option<PpuInstruction>]) -> usize {
-    let mut saw_prologue = false;
-    for (index, instruction) in decoded.iter().enumerate() {
-        if matches!(
-            instruction,
-            Some(PpuInstruction::Stdu {
-                rs: 1,
-                ra: 1,
-                imm,
-            }) if *imm < 0
-        ) {
-            if saw_prologue {
-                return index.saturating_sub(1);
-            }
-            saw_prologue = true;
-        }
-    }
-    decoded.len().saturating_sub(1)
-}
-
-fn words_at(
-    elf: &[u8],
-    segments: &[LoadSegment],
-    address: u64,
-    maximum: usize,
-) -> Option<Vec<u32>> {
-    let segment = segments.iter().find(|segment| {
-        segment.executable
-            && address >= segment.vaddr
-            && segment
-                .vaddr
-                .checked_add(segment.filesz)
-                .is_some_and(|end| address < end)
-    })?;
-    let available = segment
-        .vaddr
-        .checked_add(segment.filesz)?
-        .checked_sub(address)? as usize;
-    let count = maximum.min(available / 4);
-    let offset = file_offset_at(segments, address, count.checked_mul(4)?)?;
-    Some(
-        elf.get(offset..offset.checked_add(count.checked_mul(4)?)?)?
-            .chunks_exact(4)
-            .map(|bytes| u32::from_be_bytes(bytes.try_into().expect("four-byte chunk")))
-            .collect(),
-    )
-}
-
 fn read_u64_at(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option<u64> {
     let offset = file_offset_at(segments, address, 8)?;
     Some(u64::from_be_bytes(
         elf.get(offset..offset + 8)?.try_into().ok()?,
     ))
-}
-
-fn add_signed(base: u64, displacement: i64) -> Option<u64> {
-    if displacement >= 0 {
-        base.checked_add(displacement as u64)
-    } else {
-        base.checked_sub(displacement.unsigned_abs())
-    }
 }
 
 #[cfg(test)]

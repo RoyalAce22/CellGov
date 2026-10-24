@@ -2,6 +2,7 @@
 
 use crate::instruction::PpuInstruction;
 use crate::loader::LoadSegment;
+use crate::local_cfg::{falls_through, is_unconditional, local_branch_index};
 
 use super::discover::MAX_DISCOVERED_SLOTS;
 use super::read::words_at;
@@ -159,7 +160,7 @@ pub(super) fn index_shapes(words: &[u32], base: u64) -> Vec<(usize, usize)> {
             || !matches!(
                 decoded[branch_index],
                 // [PPC-Book1 p:20 s:2.4.1] BO=1z1zz is unconditional.
-                Ok(PpuInstruction::Bclr { bo, link: true, .. }) if bo & 0b10100 == 0b10100
+                Ok(PpuInstruction::Bclr { bo, link: true, .. }) if is_unconditional(bo)
             )
         {
             continue;
@@ -208,7 +209,7 @@ fn reachable_instructions(words: &[u32], base: u64) -> Vec<bool> {
                 link,
                 ..
             }) => {
-                if link || bo & 0b10100 != 0b10100 {
+                if falls_through(bo, link) {
                     push_fallthrough(&mut pending, index, words.len());
                 }
                 if !link {
@@ -221,7 +222,7 @@ fn reachable_instructions(words: &[u32], base: u64) -> Vec<bool> {
             }
             Ok(PpuInstruction::Bclr { bo, link, .. })
             | Ok(PpuInstruction::Bcctr { bo, link, .. }) => {
-                if link || bo & 0b10100 != 0b10100 {
+                if falls_through(bo, link) {
                     push_fallthrough(&mut pending, index, words.len());
                 }
             }
@@ -235,29 +236,6 @@ fn push_fallthrough(pending: &mut Vec<usize>, index: usize, word_count: usize) {
     if index + 1 < word_count {
         pending.push(index + 1);
     }
-}
-
-fn local_branch_index(
-    base: u64,
-    index: usize,
-    offset: i64,
-    absolute: bool,
-    word_count: usize,
-) -> Option<usize> {
-    let current = base.checked_add((index * 4) as u64)?;
-    let target = if absolute {
-        u64::try_from(offset).ok()?
-    } else if offset >= 0 {
-        current.checked_add(offset as u64)?
-    } else {
-        current.checked_sub(offset.unsigned_abs())?
-    };
-    let delta = target.checked_sub(base)?;
-    if !delta.is_multiple_of(4) {
-        return None;
-    }
-    let target_index = usize::try_from(delta / 4).ok()?;
-    (target_index < word_count).then_some(target_index)
 }
 
 pub(crate) fn constant_return(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option<u32> {
@@ -284,7 +262,7 @@ pub(crate) fn constant_return(elf: &[u8], segments: &[LoadSegment], address: u64
     if !matches!(
         crate::decode::decode(*third),
         // [PPC-Book1 p:20 s:2.4.1] BO=1z1zz is unconditional.
-        Ok(PpuInstruction::Bclr { bo, link: false, .. }) if bo & 0b10100 == 0b10100
+        Ok(PpuInstruction::Bclr { bo, link: false, .. }) if is_unconditional(bo)
     ) {
         return None;
     }

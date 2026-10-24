@@ -25,6 +25,7 @@ mod fp;
 pub mod funcmap;
 pub mod instruction;
 pub mod loader;
+mod local_cfg;
 pub mod lv2_gate;
 pub mod lv2_stub;
 pub mod lv2_subdispatch;

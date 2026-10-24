@@ -6,9 +6,12 @@ use cellgov_ps3_abi::lv2::syscall;
 
 use crate::instruction::PpuInstruction;
 use crate::loader::{file_offset_at, pt_load_segments, LoadError, LoadSegment};
+use crate::local_cfg::{
+    add_signed, decode_function, falls_through, function_extent, is_unconditional,
+    local_branch_index,
+};
 use crate::lv2_stub::{self, Lv2StubClassification, Lv2StubClassificationError};
 
-const MAX_FUNCTION_WORDS: usize = 384;
 const MAX_SUBENTRIES: usize = 256;
 
 /// Records how packet discovery interprets one code target.
@@ -118,11 +121,7 @@ fn scan_target(
     toc: u64,
     target: u64,
 ) -> Option<Lv2Subdispatch> {
-    let words = words_at(elf, segments, target, MAX_FUNCTION_WORDS)?;
-    let decoded: Vec<Option<PpuInstruction>> = words
-        .iter()
-        .map(|word| crate::decode::decode(*word).ok())
-        .collect();
+    let decoded = decode_function(elf, segments, target)?;
     let reachable = reachable_indices(&decoded, target);
     let extent = function_extent(&decoded);
     let mut linear = [None; 32];
@@ -137,17 +136,21 @@ fn scan_target(
         let Some(instruction) = instruction else {
             continue;
         };
-        if let Some((bf, register, bound)) = unsigned_compare(instruction) {
-            if let Some(selector) = linear[register as usize] {
-                if let Some(table) = jump_table_after(
-                    elf, segments, toc, &decoded, &reachable, index, register, selector, bound,
-                ) {
-                    return Some(table);
-                }
-                if branches_on_equal_after(&decoded, index, bf) {
-                    compared.entry(selector.slot).or_default().insert(bound);
-                }
-            }
+        let Some((bf, register, bound)) = unsigned_compare(instruction) else {
+            update_linear(&mut linear, instruction);
+            continue;
+        };
+        let Some(selector) = linear[register as usize] else {
+            update_linear(&mut linear, instruction);
+            continue;
+        };
+        if let Some(table) = jump_table_after(
+            elf, segments, toc, &decoded, &reachable, index, register, selector, bound,
+        ) {
+            return Some(table);
+        }
+        if branches_on_equal_after(&decoded, index, bf) {
+            compared.entry(selector.slot).or_default().insert(bound);
         }
         update_linear(&mut linear, instruction);
     }
@@ -156,26 +159,6 @@ fn scan_target(
         .filter(|(_, values)| values.len() >= 3)
         .max_by_key(|(slot, values)| (values.len(), std::cmp::Reverse(*slot)))
         .map(|(selector_slot, _)| Lv2Subdispatch::ChainIncomplete { selector_slot })
-}
-
-fn function_extent(decoded: &[Option<PpuInstruction>]) -> usize {
-    let mut saw_prologue = false;
-    for (index, instruction) in decoded.iter().enumerate() {
-        if matches!(
-            instruction,
-            Some(PpuInstruction::Stdu {
-                rs: 1,
-                ra: 1,
-                imm,
-            }) if *imm < 0
-        ) {
-            if saw_prologue {
-                return index.saturating_sub(1);
-            }
-            saw_prologue = true;
-        }
-    }
-    decoded.len().saturating_sub(1)
 }
 
 fn unsigned_compare(instruction: &PpuInstruction) -> Option<(u8, u8, i64)> {
@@ -272,7 +255,7 @@ fn jump_table_after(
             || add_left != offset
             || add_right != table_register
             || ctr_source != offset
-            || bo & 0b10100 != 0b10100
+            || !is_unconditional(bo)
         {
             continue;
         }
@@ -342,7 +325,7 @@ fn reachable_indices(decoded: &[Option<PpuInstruction>], base: u64) -> BTreeSet<
                     link,
                     ..
                 }) => {
-                    if link || bo & 0b10100 != 0b10100 {
+                    if falls_through(bo, link) {
                         pending.push(index + 1);
                     }
                     if !link {
@@ -358,7 +341,7 @@ fn reachable_indices(decoded: &[Option<PpuInstruction>], base: u64) -> BTreeSet<
                     PpuInstruction::Bclr { bo, link, .. } | PpuInstruction::Bcctr { bo, link, .. },
                 ) => {
                     // [PPC-Book1 p:25 s:2.4] A conditional indirect branch falls through when its BO/BI condition is false; LK also records its return site.
-                    if link || bo & 0b10100 != 0b10100 {
+                    if falls_through(bo, link) {
                         index += 1;
                     } else {
                         break;
@@ -369,27 +352,6 @@ fn reachable_indices(decoded: &[Option<PpuInstruction>], base: u64) -> BTreeSet<
         }
     }
     reachable
-}
-
-fn local_branch_index(
-    base: u64,
-    index: usize,
-    displacement: i64,
-    absolute: bool,
-    word_count: usize,
-) -> Option<usize> {
-    let instruction = base.checked_add(u64::try_from(index.checked_mul(4)?).ok()?)?;
-    let target = if absolute {
-        u64::try_from(displacement).ok()?
-    } else {
-        add_signed(instruction, displacement)?
-    };
-    let relative = target.checked_sub(base)?;
-    if relative % 4 != 0 {
-        return None;
-    }
-    let index = usize::try_from(relative / 4).ok()?;
-    (index < word_count).then_some(index)
 }
 
 fn shift_by_two(instruction: Option<PpuInstruction>) -> Option<(u8, u8)> {
@@ -449,34 +411,6 @@ fn update_linear(linear: &mut [Option<Linear>; 32], instruction: &PpuInstruction
     }
 }
 
-fn words_at(
-    elf: &[u8],
-    segments: &[LoadSegment],
-    address: u64,
-    maximum: usize,
-) -> Option<Vec<u32>> {
-    let segment = segments.iter().find(|segment| {
-        segment.executable
-            && address >= segment.vaddr
-            && segment
-                .vaddr
-                .checked_add(segment.filesz)
-                .is_some_and(|end| address < end)
-    })?;
-    let available = segment
-        .vaddr
-        .checked_add(segment.filesz)?
-        .checked_sub(address)? as usize;
-    let count = maximum.min(available / 4);
-    let offset = file_offset_at(segments, address, count.checked_mul(4)?)?;
-    Some(
-        elf.get(offset..offset.checked_add(count.checked_mul(4)?)?)?
-            .chunks_exact(4)
-            .map(|bytes| u32::from_be_bytes(bytes.try_into().expect("four-byte chunk")))
-            .collect(),
-    )
-}
-
 fn read_u64_at(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option<u64> {
     let offset = file_offset_at(segments, address, 8)?;
     Some(u64::from_be_bytes(
@@ -489,14 +423,6 @@ fn read_i32_at(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option<i32
     Some(i32::from_be_bytes(
         elf.get(offset..offset + 4)?.try_into().ok()?,
     ))
-}
-
-fn add_signed(base: u64, displacement: i64) -> Option<u64> {
-    if displacement >= 0 {
-        base.checked_add(displacement as u64)
-    } else {
-        base.checked_sub(displacement.unsigned_abs())
-    }
 }
 
 #[cfg(test)]
