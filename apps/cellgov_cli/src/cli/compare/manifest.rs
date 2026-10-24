@@ -2,7 +2,7 @@
 
 use cellgov_compare::{
     compare, compare_multi, format_human, format_json, format_multi_human, format_multi_json,
-    region_descriptors, CompareMode, Observation, RegionDescriptor,
+    region_descriptors, Classification, CompareMode, Observation, RegionDescriptor,
 };
 
 use crate::cli::exit::{CommandError, CommandExitCode};
@@ -68,34 +68,28 @@ pub(super) fn run_manifest_compare(
 
     let regions: Vec<RegionDescriptor> = region_descriptors(&manifest.observe);
 
-    let cellgov_section = match &manifest.cellgov {
-        Some(cg) => cg,
-        None => {
-            unsupported_manifest(
-                manifest_path,
-                test_name,
-                "no [cellgov] section in manifest",
-                baseline_flag,
-            )?;
-            return Ok(CommandExitCode::SUCCESS);
-        }
+    let Some(cellgov_section) = &manifest.cellgov else {
+        unsupported_manifest(
+            manifest_path,
+            test_name,
+            "no [cellgov] section in manifest",
+            baseline_flag,
+        )?;
+        return Ok(CommandExitCode::SUCCESS);
     };
 
-    let factory = match scenario_factory(&cellgov_section.scenario) {
-        Some(f) => f,
-        None => {
-            unsupported_manifest(
-                manifest_path,
-                test_name,
-                &format!(
-                    "unknown CellGov scenario \"{}\" (available: {})",
-                    cellgov_section.scenario,
-                    scenarios_list.join(", ")
-                ),
-                baseline_flag,
-            )?;
-            return Ok(CommandExitCode::SUCCESS);
-        }
+    let Some(factory) = scenario_factory(&cellgov_section.scenario) else {
+        unsupported_manifest(
+            manifest_path,
+            test_name,
+            &format!(
+                "unknown CellGov scenario \"{}\" (available: {})",
+                cellgov_section.scenario,
+                scenarios_list.join(", ")
+            ),
+            baseline_flag,
+        )?;
+        return Ok(CommandExitCode::SUCCESS);
     };
 
     if let Some(path) = save_path {
@@ -104,104 +98,142 @@ pub(super) fn run_manifest_compare(
     }
 
     let obs = require_determinism(&factory, test_name, &regions)?;
+    let shown = Shown {
+        manifest_path,
+        test_name,
+        format,
+    };
 
     if let Some(dir) = observations_dir {
-        let (baseline_paths, baselines): (Vec<std::path::PathBuf>, Vec<Observation>) =
-            load_observations_with_paths(&dir)?.into_iter().unzip();
-        if baselines.is_empty() {
-            return Err(CommandError::failed(format!(
-                "no observation .json files found in {dir}"
-            )));
-        }
-        for (path, baseline) in baseline_paths.iter().zip(&baselines) {
-            report_identity(baseline, &path.display().to_string(), &obs, test_name);
-        }
-        let result = compare_multi(&baselines, &obs, mode);
-        match format {
-            OutputFormat::Human => {
-                println!("test: {test_name}");
-                println!("manifest: {manifest_path}");
-                println!("observations-dir: {dir}");
-                print!("{}", format_multi_human(&result, baselines.len()));
-            }
-            OutputFormat::Json => {
-                println!(
-                    "{}",
-                    format_multi_json(&result, &baselines, &obs).map_err(|error| {
-                        CommandError::failed(format!(
-                            "compare: encode multi-baseline JSON: {error}"
-                        ))
-                    })?
-                );
-            }
-        }
-        if result.classification.exits_failure() {
-            return Ok(CommandExitCode::new(classification_exit(
-                result.classification,
-            )));
-        }
+        compare_observations_dir(&shown, &dir, &obs, mode)
     } else if let Some(path) = against_path {
-        let baseline =
-            cellgov_compare::baseline::load(std::path::Path::new(&path)).map_err(|error| {
-                CommandError::failed(format!("failed to load baseline from {path}: {error:?}"))
-            })?;
-
-        report_identity(&baseline, &path, &obs, test_name);
-        let result = compare(&baseline, &obs, mode);
-        match format {
-            OutputFormat::Human => {
-                println!("test: {test_name}");
-                println!("manifest: {manifest_path}");
-                println!("baseline: {path}");
-                print!("{}", format_human(&result));
-            }
-            OutputFormat::Json => {
-                println!(
-                    "{}",
-                    format_json(&result, &baseline, &obs).map_err(|error| {
-                        CommandError::failed(format!("compare: encode JSON: {error}"))
-                    })?
-                );
-            }
-        }
-        if result.classification.exits_failure() {
-            return Ok(CommandExitCode::new(classification_exit(
-                result.classification,
-            )));
-        }
+        compare_against_file(&shown, &path, &obs, mode)
     } else {
-        match format {
-            OutputFormat::Human => {
-                println!("test: {test_name}");
-                println!("manifest: {manifest_path}");
-                println!("determinism: ok");
-                println!("outcome: {:?}", obs.outcome);
-                println!("events: {}", obs.events.len());
-                println!("regions: {}", obs.memory_regions.len());
-                for region in &obs.memory_regions {
-                    println!(
-                        "  {} addr=0x{:x} size={}",
-                        region.name,
-                        region.addr,
-                        region.data.len()
-                    );
-                }
-                if let Some(hashes) = &obs.state_hashes {
-                    println!("memory_hash: 0x{:016x}", hashes.memory.raw());
-                    println!("status_hash: 0x{:016x}", hashes.unit_status.raw());
-                    println!("sync_hash: 0x{:016x}", hashes.sync.raw());
-                }
-                println!("steps: {}", obs.metadata.steps.unwrap_or(0));
-            }
-            OutputFormat::Json => {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&obs).map_err(|error| {
-                        CommandError::failed(format!("compare: encode observation JSON: {error}"))
-                    })?
-                );
-            }
+        print_determinism_observation(&shown, &obs)?;
+        Ok(CommandExitCode::SUCCESS)
+    }
+}
+
+/// What every manifest-compare report names, and how it renders.
+struct Shown<'a> {
+    manifest_path: &'a str,
+    test_name: &'a str,
+    format: OutputFormat,
+}
+
+/// Compare `obs` against every observation in `dir`.
+fn compare_observations_dir(
+    shown: &Shown<'_>,
+    dir: &str,
+    obs: &Observation,
+    mode: CompareMode,
+) -> Result<CommandExitCode, CommandError> {
+    let (baseline_paths, baselines): (Vec<std::path::PathBuf>, Vec<Observation>) =
+        load_observations_with_paths(dir)?.into_iter().unzip();
+    if baselines.is_empty() {
+        return Err(CommandError::failed(format!(
+            "no observation .json files found in {dir}"
+        )));
+    }
+    for (path, baseline) in baseline_paths.iter().zip(&baselines) {
+        report_identity(baseline, &path.display().to_string(), obs, shown.test_name);
+    }
+    let result = compare_multi(&baselines, obs, mode);
+    match shown.format {
+        OutputFormat::Human => {
+            println!("test: {}", shown.test_name);
+            println!("manifest: {}", shown.manifest_path);
+            println!("observations-dir: {dir}");
+            print!("{}", format_multi_human(&result, baselines.len()));
+        }
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                format_multi_json(&result, &baselines, obs).map_err(|error| {
+                    CommandError::failed(format!("compare: encode multi-baseline JSON: {error}"))
+                })?
+            );
         }
     }
-    Ok(CommandExitCode::SUCCESS)
+    Ok(classification_exit_code(result.classification))
+}
+
+/// Compare `obs` against the baseline file at `path`.
+fn compare_against_file(
+    shown: &Shown<'_>,
+    path: &str,
+    obs: &Observation,
+    mode: CompareMode,
+) -> Result<CommandExitCode, CommandError> {
+    let baseline =
+        cellgov_compare::baseline::load(std::path::Path::new(path)).map_err(|error| {
+            CommandError::failed(format!("failed to load baseline from {path}: {error:?}"))
+        })?;
+
+    report_identity(&baseline, path, obs, shown.test_name);
+    let result = compare(&baseline, obs, mode);
+    match shown.format {
+        OutputFormat::Human => {
+            println!("test: {}", shown.test_name);
+            println!("manifest: {}", shown.manifest_path);
+            println!("baseline: {path}");
+            print!("{}", format_human(&result));
+        }
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                format_json(&result, &baseline, obs).map_err(|error| {
+                    CommandError::failed(format!("compare: encode JSON: {error}"))
+                })?
+            );
+        }
+    }
+    Ok(classification_exit_code(result.classification))
+}
+
+/// Print the deterministic observation itself, with no baseline.
+fn print_determinism_observation(shown: &Shown<'_>, obs: &Observation) -> Result<(), CommandError> {
+    match shown.format {
+        OutputFormat::Human => {
+            println!("test: {}", shown.test_name);
+            println!("manifest: {}", shown.manifest_path);
+            println!("determinism: ok");
+            println!("outcome: {:?}", obs.outcome);
+            println!("events: {}", obs.events.len());
+            println!("regions: {}", obs.memory_regions.len());
+            for region in &obs.memory_regions {
+                println!(
+                    "  {} addr=0x{:x} size={}",
+                    region.name,
+                    region.addr,
+                    region.data.len()
+                );
+            }
+            if let Some(hashes) = &obs.state_hashes {
+                println!("memory_hash: 0x{:016x}", hashes.memory.raw());
+                println!("status_hash: 0x{:016x}", hashes.unit_status.raw());
+                println!("sync_hash: 0x{:016x}", hashes.sync.raw());
+            }
+            println!("steps: {}", obs.metadata.steps.unwrap_or(0));
+        }
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(obs).map_err(|error| {
+                    CommandError::failed(format!("compare: encode observation JSON: {error}"))
+                })?
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The exit a comparison classification gives: success unless the
+/// classification exits as a failure.
+fn classification_exit_code(classification: Classification) -> CommandExitCode {
+    if classification.exits_failure() {
+        CommandExitCode::new(classification_exit(classification))
+    } else {
+        CommandExitCode::SUCCESS
+    }
 }
