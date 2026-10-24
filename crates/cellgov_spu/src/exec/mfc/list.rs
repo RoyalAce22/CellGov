@@ -2,7 +2,9 @@
 //! the stall acknowledgement.
 
 use crate::state::{ListCursor, SpuState};
-use cellgov_dma::{DmaDirection, MfcCommandClass, MfcCommandError, MfcOrdering, MfcParameters};
+use cellgov_dma::{
+    DmaDirection, DmaRequest, MfcCommandClass, MfcCommandError, MfcOrdering, MfcParameters,
+};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{BarrierKind, MfcOrderingView, YieldReason};
@@ -239,18 +241,10 @@ fn queue_list_segment(
 ) -> Vec<Effect> {
     let mut effects = Vec::new();
     while list.remaining > 0 {
-        let raw = state.read_ls_wrapped(list.element, spu::MFC_LIST_ELEMENT_BYTES);
-        let word = |i: usize| u32::from_be_bytes([raw[i], raw[i + 1], raw[i + 2], raw[i + 3]]);
-        let (head, eal) = (word(0), word(4));
-        list.element = list.element.wrapping_add(spu::MFC_LIST_ELEMENT_BYTES);
-        list.remaining -= 1;
+        let (head, eal) = read_list_element(state, list);
         let stall = head & spu::MFC_LIST_STALL_NOTIFY != 0 && list.remaining > 0;
         let size = head & !spu::MFC_LIST_STALL_NOTIFY;
-        let lsa = if size < 16 {
-            (list.data & !0xF) | (eal & 0xF)
-        } else {
-            list.data
-        };
+        let lsa = element_lsa(list.data, eal, size);
         let params = MfcParameters {
             lsa,
             eah: list.eah,
@@ -258,26 +252,7 @@ fn queue_list_segment(
             size,
             tag: u32::from(list.tag.raw()),
         };
-        // [CBE-Handbook p:531 s:19.4.4.2] a list element transfer cannot cross the 4 GB area the list's EAH names; the DMA halts at the boundary and an MFC exception is signalled.
-        // The model moves none of the element's bytes, as for an address
-        // that does not translate.
-        let crosses = u64::from(eal) + u64::from(size) > 1 << 32;
-        let checked = cellgov_dma::validate(MfcCommandClass::Transfer, params)
-            .and_then(|()| {
-                if crosses {
-                    Err(MfcCommandError::ListElementCrosses4Gb {
-                        ea: params.ea(),
-                        size,
-                    })
-                } else {
-                    Ok(())
-                }
-            })
-            .and_then(|()| {
-                ByteRange::new(GuestAddr::new(params.ea()), u64::from(size))
-                    .ok_or(MfcCommandError::DataSegment { ea: params.ea() })
-            });
-        let main = match checked {
+        let main = match check_list_element(params) {
             Ok(main) => main,
             // The documents name no exception for a bad element. The
             // spu_list_bad_size and spu_list_bad_ea console captures show
@@ -296,17 +271,7 @@ fn queue_list_segment(
         if size > 0 {
             list.data = lsa.wrapping_add(size).wrapping_add(15) & !15;
         }
-        let local = ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size))
-            .expect("valid LS range");
-        let mut request = local_store_transfer(list.direction, local, main, unit_id)
-            .with_tag_id(list.tag)
-            .with_ordering(list.ordering)
-            .with_command_word(list.word);
-        if stall {
-            request = request.with_stall_notify().without_slot();
-        } else if list.remaining > 0 {
-            request = request.without_slot();
-        }
+        let request = element_request(list, lsa, size, main, stall, unit_id);
         effects.push(Effect::DmaEnqueue {
             request,
             payload: None,
@@ -316,6 +281,70 @@ fn queue_list_segment(
         }
     }
     effects
+}
+
+/// Read the element at `list`'s cursor and move the cursor past it.
+///
+/// Returns the element's size word, with its stall-and-notify flag, and
+/// its low effective address.
+fn read_list_element(state: &SpuState, list: &mut ListCursor) -> (u32, u32) {
+    let raw = state.read_ls_wrapped(list.element, spu::MFC_LIST_ELEMENT_BYTES);
+    let word = |i: usize| u32::from_be_bytes([raw[i], raw[i + 1], raw[i + 2], raw[i + 3]]);
+    list.element = list.element.wrapping_add(spu::MFC_LIST_ELEMENT_BYTES);
+    list.remaining -= 1;
+    (word(0), word(4))
+}
+
+/// The local-store address of an element of `size` bytes at `eal`, when
+/// the list's next transfer starts at `data`.
+fn element_lsa(data: u32, eal: u32, size: u32) -> u32 {
+    if size < 16 {
+        (data & !0xF) | (eal & 0xF)
+    } else {
+        data
+    }
+}
+
+/// The main-storage range of one list element, or the error the MFC
+/// raises for it.
+fn check_list_element(params: MfcParameters) -> Result<ByteRange, MfcCommandError> {
+    cellgov_dma::validate(MfcCommandClass::Transfer, params)?;
+    // [CBE-Handbook p:531 s:19.4.4.2] a list element transfer cannot cross the 4 GB area the list's EAH names; the DMA halts at the boundary and an MFC exception is signalled.
+    // The model moves none of the element's bytes, as for an address
+    // that does not translate.
+    if u64::from(params.eal) + u64::from(params.size) > 1 << 32 {
+        return Err(MfcCommandError::ListElementCrosses4Gb {
+            ea: params.ea(),
+            size: params.size,
+        });
+    }
+    ByteRange::new(GuestAddr::new(params.ea()), u64::from(params.size))
+        .ok_or(MfcCommandError::DataSegment { ea: params.ea() })
+}
+
+/// The transfer request for one list element. A stall-and-notify element
+/// and every element before the list's last leave the slot to the list.
+fn element_request(
+    list: &ListCursor,
+    lsa: u32,
+    size: u32,
+    main: ByteRange,
+    stall: bool,
+    unit_id: UnitId,
+) -> DmaRequest {
+    let local =
+        ByteRange::new(GuestAddr::new(u64::from(lsa)), u64::from(size)).expect("valid LS range");
+    let request = local_store_transfer(list.direction, local, main, unit_id)
+        .with_tag_id(list.tag)
+        .with_ordering(list.ordering)
+        .with_command_word(list.word);
+    if stall {
+        request.with_stall_notify().without_slot()
+    } else if list.remaining > 0 {
+        request.without_slot()
+    } else {
+        request
+    }
 }
 
 /// Restart the stalled lists of the tag group `value` names.
