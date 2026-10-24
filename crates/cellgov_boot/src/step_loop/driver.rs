@@ -4,7 +4,8 @@
 
 use std::time::Instant;
 
-use cellgov_core::{Runtime, StepError};
+use cellgov_compare::BootOutcome;
+use cellgov_core::{Runtime, RuntimeStep, StepError};
 
 use crate::diag::{
     append_orphan_exit_info, fetch_raw_at, format_commit_fault, format_deadlock, format_fault,
@@ -57,11 +58,7 @@ pub fn step_loop(
 }
 
 /// Split from the wrapper so every exit passes the tail report.
-fn drive(
-    rt: &mut Runtime,
-    ctx: &mut StepLoopCtx<'_>,
-) -> Result<(String, cellgov_compare::BootOutcome), BootError> {
-    use cellgov_compare::BootOutcome;
+fn drive(rt: &mut Runtime, ctx: &mut StepLoopCtx<'_>) -> Result<(String, BootOutcome), BootError> {
     loop {
         // A parked child's staged init pass runs before the scheduler
         // sees it: an entry still pending at `rt.step()` reads as
@@ -78,182 +75,24 @@ fn drive(
         let step_result = rt.step();
         let t1 = Instant::now();
 
-        match step_result {
-            Ok(mut step) => {
-                *ctx.steps += 1;
-
-                // The PC ring tracks attempted execution; it advances
-                // before commit (kept on a discarded batch).
-                if let Some(pc) = step.result.local_diagnostics.pc {
-                    ctx.pc_ring.push((rt.unit_space(step.unit), pc));
-                }
-
-                if (*ctx.steps).is_multiple_of(STEP_REPORT_BATCH) {
-                    ctx.progress.advanced(STEP_REPORT_BATCH as u64);
-                }
-
-                if ctx.trace {
-                    report_trace_line(rt, step.unit, &step.result, *ctx.steps, ctx.sink.as_ref());
-                }
-
-                let t2 = Instant::now();
-                let commit_result = rt.commit_step(&mut step);
-                let t3 = Instant::now();
-
-                // Inertness gate. Commit/wake paths push invariant
-                // breaks AFTER the dispatch-time drain, so entries can
-                // be pending here; `clear_observability` carries them
-                // across the reset for the next dispatch's trace drain.
-                if ctx.obs_null_sink {
-                    rt.lv2_host_mut().clear_observability();
-                }
-
-                match classify_step_outcome(&step.result, &commit_result, ctx.checkpoint, None) {
-                    StepVerdict::RsxCheckpoint(addr) => {
-                        return Ok((
-                            format!(
-                                "RSX_WRITE_CHECKPOINT at 0x{addr:x} after {} steps",
-                                ctx.steps
-                            ),
-                            BootOutcome::RsxWriteCheckpoint,
-                        ));
-                    }
-                    StepVerdict::CommitFault => {
-                        let err = commit_result
-                            .as_ref()
-                            .expect_err("classified as CommitFault implies Err");
-                        let mut diag =
-                            format_commit_fault(rt, err, *ctx.steps, step.unit, &ctx.pc_ring);
-                        append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
-                        return Ok((diag, BootOutcome::Fault));
-                    }
-                    StepVerdict::StepFault => {
-                        let fault = step
-                            .result
-                            .fault
-                            .as_ref()
-                            .expect("classified as StepFault implies Some");
-                        let mut diag = format_fault(
-                            rt,
-                            step.unit,
-                            &step.result,
-                            fault,
-                            *ctx.steps,
-                            &ctx.pc_ring,
-                            ctx.dump_mem_fault_ranges,
-                        );
-                        append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
-                        return Ok((diag, BootOutcome::Fault));
-                    }
-                    StepVerdict::PcReached(_) => {
-                        unreachable!("step_loop never sets target_pc")
-                    }
-                    StepVerdict::Continue => {}
-                }
-                if let Some(failure) = rt.take_spu_thread_failure() {
-                    let mut diag = format!("SPU_THREAD_ERROR at step {}: {failure}", ctx.steps);
-                    append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
-                    return Ok((diag, BootOutcome::Fault));
-                }
-                if let Some(exception) = rt.take_mfc_exception() {
-                    let mut diag = format!("SPU_MFC_EXCEPTION at step {}: {exception}", ctx.steps);
-                    append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
-                    return Ok((diag, BootOutcome::Fault));
-                }
-
-                // Post-commit counters: only advance when the batch was applied.
-                if let Some(pc) = step.result.local_diagnostics.pc {
-                    *ctx.pc_hits
-                        .entry((rt.unit_space(step.unit), pc))
-                        .or_insert(0) += 1;
-                }
-
-                let t_cov_start = Instant::now();
-                if let Some(pc) = step.result.local_diagnostics.pc {
-                    if let Some(raw) = fetch_raw_at(unit_memory(rt, step.unit), pc) {
-                        let name = match cellgov_ppu::decode::decode(raw) {
-                            Ok(insn) => <&'static str>::from(&insn),
-                            Err(_) => "DECODE_ERROR",
-                        };
-                        *ctx.insn_coverage.entry(name).or_insert(0) += 1;
-                    }
-                }
-                let t_cov_end = Instant::now();
-
-                if let Some(args) = &step.result.syscall_args {
-                    let pc = step.result.local_diagnostics.pc.unwrap_or(0);
-                    // The buffer is read through the caller's own space:
-                    // a child process passes child-space addresses.
-                    let mem = rt
-                        .space_memory(rt.unit_space(step.unit))
-                        .expect("a unit that just stepped executes in a live space");
-                    handle_syscall_args(args, ctx, pc, mem);
-                }
-
-                if let Some(t) = ctx.timing.as_mut() {
-                    t.step_time += t1 - t0;
-                    t.commit_time += t3 - t2;
-                    t.coverage_time += t_cov_end - t_cov_start;
-                    // Monotonic clock + disjoint regions imply tracked <= loop_start.elapsed().
-                    debug_assert!(
-                        compute_untracked(
-                            ctx.loop_start.elapsed(),
-                            t.step_time,
-                            t.commit_time,
-                            t.coverage_time,
-                        )
-                        .is_ok(),
-                        "tracked timing buckets exceed loop total -- bucket overlap or non-monotonic clock"
-                    );
-                }
-            }
+        let exit = match step_result {
+            Ok(step) => on_step(rt, ctx, step, t0, t1),
             Err(StepError::NoRunnableUnit) => {
-                if let Some(exception) = rt.take_mfc_exception() {
-                    let mut diag = format!("SPU_MFC_EXCEPTION at step {}: {exception}", ctx.steps);
-                    append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
-                    return Ok((diag, BootOutcome::Fault));
-                }
-                if let Some(ref exit) = ctx.last_exit {
-                    return Ok((
-                        format_process_exit(
-                            exit,
-                            ctx.last_tty.as_ref(),
-                            *ctx.steps,
-                            &ctx.pc_ring,
-                            &ctx.syscall_ring,
-                        ),
-                        BootOutcome::ProcessExit,
-                    ));
-                }
-                return Ok((
-                    format!(
-                        "ALL_UNITS_FINISHED after {} steps without sys_process_exit",
-                        ctx.steps
-                    ),
-                    BootOutcome::Fault,
-                ));
+                Some(mfc_exit(rt, ctx).unwrap_or_else(|| finished_exit(ctx)))
             }
-            Err(StepError::AllBlocked) => {
-                // The time warp can raise an MFC exception and then find
-                // nothing runnable, so the exception names the stop.
-                if let Some(exception) = rt.take_mfc_exception() {
-                    let mut diag = format!("SPU_MFC_EXCEPTION at step {}: {exception}", ctx.steps);
-                    append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
-                    return Ok((diag, BootOutcome::Fault));
-                }
-                let mut diag = format_deadlock(rt, *ctx.steps, &ctx.pc_ring);
-                append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
-                return Ok((diag, BootOutcome::Fault));
-            }
+            // The time warp can raise an MFC exception and then find
+            // nothing runnable, so the exception names the stop.
+            Err(StepError::AllBlocked) => Some(mfc_exit(rt, ctx).unwrap_or_else(|| {
+                let diag = format_deadlock(rt, *ctx.steps, &ctx.pc_ring);
+                fault_exit(ctx, diag, BootOutcome::Fault)
+            })),
             Err(StepError::MaxStepsExceeded) => {
-                let mut diag = format_max_steps(rt, *ctx.steps, &ctx.pc_ring, &ctx.syscall_ring);
-                append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
-                return Ok((diag, BootOutcome::MaxSteps));
+                let diag = format_max_steps(rt, *ctx.steps, &ctx.pc_ring, &ctx.syscall_ring);
+                Some(fault_exit(ctx, diag, BootOutcome::MaxSteps))
             }
             Err(StepError::TimeOverflow) => {
-                let mut diag = format!("TIME_OVERFLOW after {} steps", ctx.steps);
-                append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
-                return Ok((diag, BootOutcome::TimeOverflow));
+                let diag = format!("TIME_OVERFLOW after {} steps", ctx.steps);
+                Some(fault_exit(ctx, diag, BootOutcome::TimeOverflow))
             }
             Err(StepError::SchedulerNotReinstalled) => {
                 unreachable!(
@@ -262,8 +101,201 @@ fn drive(
                      restore path without rethinking the dispatch."
                 );
             }
+        };
+        if let Some(exit) = exit {
+            return Ok(exit);
         }
     }
+}
+
+/// Run the per-step body for a step the runtime took: rings, progress,
+/// trace, commit, verdict, the SPU failure and MFC checks, counters,
+/// coverage, syscall handling and timing. Returns the run's terminal
+/// report when the step ends it.
+#[inline]
+fn on_step(
+    rt: &mut Runtime,
+    ctx: &mut StepLoopCtx<'_>,
+    mut step: RuntimeStep,
+    t0: Instant,
+    t1: Instant,
+) -> Option<(String, BootOutcome)> {
+    *ctx.steps += 1;
+
+    // The PC ring tracks attempted execution; it advances
+    // before commit (kept on a discarded batch).
+    if let Some(pc) = step.result.local_diagnostics.pc {
+        ctx.pc_ring.push((rt.unit_space(step.unit), pc));
+    }
+
+    if (*ctx.steps).is_multiple_of(STEP_REPORT_BATCH) {
+        ctx.progress.advanced(STEP_REPORT_BATCH as u64);
+    }
+
+    if ctx.trace {
+        report_trace_line(rt, step.unit, &step.result, *ctx.steps, ctx.sink.as_ref());
+    }
+
+    let t2 = Instant::now();
+    let commit_result = rt.commit_step(&mut step);
+    let t3 = Instant::now();
+
+    // Inertness gate. Commit/wake paths push invariant
+    // breaks AFTER the dispatch-time drain, so entries can
+    // be pending here; `clear_observability` carries them
+    // across the reset for the next dispatch's trace drain.
+    if ctx.obs_null_sink {
+        rt.lv2_host_mut().clear_observability();
+    }
+
+    match classify_step_outcome(&step.result, &commit_result, ctx.checkpoint, None) {
+        StepVerdict::RsxCheckpoint(addr) => {
+            return Some((
+                format!(
+                    "RSX_WRITE_CHECKPOINT at 0x{addr:x} after {} steps",
+                    ctx.steps
+                ),
+                BootOutcome::RsxWriteCheckpoint,
+            ));
+        }
+        StepVerdict::CommitFault => {
+            let err = commit_result
+                .as_ref()
+                .expect_err("classified as CommitFault implies Err");
+            let diag = format_commit_fault(rt, err, *ctx.steps, step.unit, &ctx.pc_ring);
+            return Some(fault_exit(ctx, diag, BootOutcome::Fault));
+        }
+        StepVerdict::StepFault => {
+            let fault = step
+                .result
+                .fault
+                .as_ref()
+                .expect("classified as StepFault implies Some");
+            let diag = format_fault(
+                rt,
+                step.unit,
+                &step.result,
+                fault,
+                *ctx.steps,
+                &ctx.pc_ring,
+                ctx.dump_mem_fault_ranges,
+            );
+            return Some(fault_exit(ctx, diag, BootOutcome::Fault));
+        }
+        StepVerdict::PcReached(_) => {
+            unreachable!("step_loop never sets target_pc")
+        }
+        StepVerdict::Continue => {}
+    }
+    if let Some(failure) = rt.take_spu_thread_failure() {
+        let diag = format!("SPU_THREAD_ERROR at step {}: {failure}", ctx.steps);
+        return Some(fault_exit(ctx, diag, BootOutcome::Fault));
+    }
+    if let Some(exit) = mfc_exit(rt, ctx) {
+        return Some(exit);
+    }
+
+    // Post-commit counters: only advance when the batch was applied.
+    if let Some(pc) = step.result.local_diagnostics.pc {
+        *ctx.pc_hits
+            .entry((rt.unit_space(step.unit), pc))
+            .or_insert(0) += 1;
+    }
+
+    let t_cov_start = Instant::now();
+    record_insn_coverage(rt, step.unit, step.result.local_diagnostics.pc, ctx);
+    let t_cov_end = Instant::now();
+
+    if let Some(args) = &step.result.syscall_args {
+        let pc = step.result.local_diagnostics.pc.unwrap_or(0);
+        // The buffer is read through the caller's own space:
+        // a child process passes child-space addresses.
+        let mem = rt
+            .space_memory(rt.unit_space(step.unit))
+            .expect("a unit that just stepped executes in a live space");
+        handle_syscall_args(args, ctx, pc, mem);
+    }
+
+    if let Some(t) = ctx.timing.as_mut() {
+        t.step_time += t1 - t0;
+        t.commit_time += t3 - t2;
+        t.coverage_time += t_cov_end - t_cov_start;
+        // Monotonic clock + disjoint regions imply tracked <= loop_start.elapsed().
+        debug_assert!(
+            compute_untracked(
+                ctx.loop_start.elapsed(),
+                t.step_time,
+                t.commit_time,
+                t.coverage_time,
+            )
+            .is_ok(),
+            "tracked timing buckets exceed loop total -- bucket overlap or non-monotonic clock"
+        );
+    }
+    None
+}
+
+/// Append the orphaned exit's account to a terminal report.
+#[inline]
+fn fault_exit(
+    ctx: &StepLoopCtx<'_>,
+    mut diag: String,
+    outcome: BootOutcome,
+) -> (String, BootOutcome) {
+    append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
+    (diag, outcome)
+}
+
+/// Return the terminal report for an MFC exception the runtime holds.
+fn mfc_exit(rt: &mut Runtime, ctx: &StepLoopCtx<'_>) -> Option<(String, BootOutcome)> {
+    let exception = rt.take_mfc_exception()?;
+    let diag = format!("SPU_MFC_EXCEPTION at step {}: {exception}", ctx.steps);
+    Some(fault_exit(ctx, diag, BootOutcome::Fault))
+}
+
+/// Return the terminal report for a run in which every unit finished:
+/// the process exit when the loop saw one, else a fault.
+fn finished_exit(ctx: &StepLoopCtx<'_>) -> (String, BootOutcome) {
+    if let Some(ref exit) = ctx.last_exit {
+        return (
+            format_process_exit(
+                exit,
+                ctx.last_tty.as_ref(),
+                *ctx.steps,
+                &ctx.pc_ring,
+                &ctx.syscall_ring,
+            ),
+            BootOutcome::ProcessExit,
+        );
+    }
+    (
+        format!(
+            "ALL_UNITS_FINISHED after {} steps without sys_process_exit",
+            ctx.steps
+        ),
+        BootOutcome::Fault,
+    )
+}
+
+/// Count the instruction `unit` retired at `pc` by its decoded name.
+#[inline]
+fn record_insn_coverage(
+    rt: &Runtime,
+    unit: cellgov_event::UnitId,
+    pc: Option<u64>,
+    ctx: &mut StepLoopCtx<'_>,
+) {
+    let Some(pc) = pc else {
+        return;
+    };
+    let Some(raw) = fetch_raw_at(unit_memory(rt, unit), pc) else {
+        return;
+    };
+    let name = match cellgov_ppu::decode::decode(raw) {
+        Ok(insn) => <&'static str>::from(&insn),
+        Err(_) => "DECODE_ERROR",
+    };
+    *ctx.insn_coverage.entry(name).or_insert(0) += 1;
 }
 
 fn handle_syscall_args(
