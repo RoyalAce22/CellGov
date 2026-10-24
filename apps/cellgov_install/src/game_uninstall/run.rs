@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::fs_util::{remove_dir_all_if_present, remove_file_if_present};
 use crate::store::layout::tombstone_sibling;
 use crate::store::lock::lock_artifact;
 use crate::store::record::InstallRecord;
@@ -80,11 +81,8 @@ impl GameUninstallOutcome {
 }
 
 fn remove_dir_if_present(path: &Path) -> Result<(), GameUninstallError> {
-    match std::fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(uio_err("remove", path)(e)),
-    }
+    remove_dir_all_if_present(path).map_err(uio_err("remove", path))?;
+    Ok(())
 }
 
 /// Re-hash one entry's tree, and for the base its RAP, against the
@@ -242,22 +240,19 @@ pub(super) fn execute_with(
         // RAP: removed with the base, after its tombstone rename, unless
         // `keep_rap`. An already-absent RAP is not reported as removed:
         // the outcome names what this call removed.
-        if entry.version == EntryVersion::Base && !opts.keep_rap {
-            if let Some(rap) = &plan.rap {
-                match std::fs::remove_file(rap) {
-                    Ok(()) => rap_removed = Some(rap.clone()),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(uio_err("remove", rap)(e)),
-                }
+        if let Some(rap) = plan
+            .rap
+            .as_ref()
+            .filter(|_| entry.version == EntryVersion::Base && !opts.keep_rap)
+        {
+            if remove_file_if_present(rap).map_err(uio_err("remove", rap))? {
+                rap_removed = Some(rap.clone());
             }
         }
 
         // Record before tombstone (see the module ordering).
-        match std::fs::remove_file(&entry.record_path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(uio_err("remove", &entry.record_path)(e)),
-        }
+        remove_file_if_present(&entry.record_path)
+            .map_err(uio_err("remove", &entry.record_path))?;
 
         // Tombstone last. An orphan tombstone is acceptable residue.
         remove_dir_if_present(tombstone)?;

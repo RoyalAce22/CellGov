@@ -48,6 +48,7 @@ use super::manifest_build::build_manifest;
 use super::manifest_build::ManifestOmission;
 use super::prune::is_install_excluded;
 use super::version_txt::read_version;
+use crate::fs_util::{remove_dir_all_if_present, remove_file_if_present};
 use crate::keys::KeyVault;
 use crate::manifest::{self, serialize_manifest, MANIFEST_FILE};
 use crate::progress::{FirmwarePhase, ProgressSink};
@@ -177,11 +178,7 @@ fn prepare_staging(
     if staging_dir.exists() {
         progress.phase(FirmwarePhase::ClearingStaging.code());
     }
-    match std::fs::remove_dir_all(staging_dir) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(io_err("remove", staging_dir)(e)),
-    }
+    remove_dir_all_if_present(staging_dir).map_err(io_err("remove", staging_dir))?;
     std::fs::create_dir_all(staging_dir).map_err(io_err("create dir", staging_dir))
 }
 
@@ -196,9 +193,8 @@ fn run_or_clean<T>(
 ) -> Result<T, FirmwareInstallError> {
     match f() {
         Ok(v) => Ok(v),
-        Err(e) => match std::fs::remove_dir_all(staging_dir) {
-            Ok(()) => Err(e),
-            Err(c) if c.kind() == std::io::ErrorKind::NotFound => Err(e),
+        Err(e) => match remove_dir_all_if_present(staging_dir) {
+            Ok(_) => Err(e),
             Err(c) => Err(FirmwareInstallError::StagingResidue {
                 path: staging_dir.to_path_buf(),
                 source: c,
@@ -571,11 +567,8 @@ struct Staged {
 
 /// An absent record is success; every other failure is named.
 fn remove_record(record_path: &Path) -> Result<(), FirmwareInstallError> {
-    match std::fs::remove_file(record_path) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(io_err("remove", record_path)(e)),
-    }
+    remove_file_if_present(record_path).map_err(io_err("remove", record_path))?;
+    Ok(())
 }
 
 /// Drop the entry's record, rename the staged tree onto it, then write

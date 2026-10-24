@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::fs_util::{remove_dir_all_if_present, remove_file_if_present};
 use crate::store::inventory::{firmware_record_versions, RecordDirError};
 use crate::store::layout::{tombstone_sibling, Artifact, ArtifactKind, StoreLayout, VersionKey};
 use crate::store::lock::lock_artifact;
@@ -328,11 +329,7 @@ pub fn execute(
         })?;
     }
 
-    match std::fs::remove_file(&plan.record_path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(io_err("remove", &plan.record_path)(e)),
-    }
+    remove_file_if_present(&plan.record_path).map_err(io_err("remove", &plan.record_path))?;
 
     remove_dir_if_present(&tombstone)?;
 
@@ -345,11 +342,8 @@ pub fn execute(
 }
 
 fn remove_dir_if_present(path: &Path) -> Result<(), FirmwareUninstallError> {
-    match std::fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(io_err("remove", path)(e)),
-    }
+    remove_dir_all_if_present(path).map_err(io_err("remove", path))?;
+    Ok(())
 }
 
 #[cfg(test)]

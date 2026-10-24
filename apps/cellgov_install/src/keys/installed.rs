@@ -119,11 +119,8 @@ pub fn import_into(
 /// [`KeyRemoveError`] for any refusal other than absence.
 pub fn remove_installed(vfs_root: &Path) -> Result<bool, KeyRemoveError> {
     let dir = installed_keys_dir(vfs_root);
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => Ok(true),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(KeyRemoveError { path: dir, source }),
-    }
+    crate::fs_util::remove_dir_all_if_present(&dir)
+        .map_err(|source| KeyRemoveError { path: dir, source })
 }
 
 #[cfg(test)]
