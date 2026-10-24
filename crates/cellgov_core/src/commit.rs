@@ -16,11 +16,11 @@
 //!   label base before it stages the write.
 
 use crate::registry::UnitRegistry;
-use cellgov_dma::{DmaCompletion, DmaDirection, DmaLatencyModel, DmaQueue};
+use cellgov_dma::{DmaCompletion, DmaDirection, DmaLatencyModel, DmaQueue, DmaRequest};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus, YieldReason};
-use cellgov_mem::{GuestMemory, MemError, StagedWrite, StagingMemory};
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, StagedWrite, StagingMemory};
 use cellgov_sync::{
     MailboxId, MailboxRegistry, ReservationTable, ReservedLine, SignalId, SignalRegistry,
 };
@@ -351,268 +351,10 @@ impl CommitPipeline {
         }
 
         let mut staging = StagingMemory::new();
-        let mut writes = 0usize;
-        let mut sends = 0usize;
-        let mut receives = 0usize;
-        let mut receives_blocked = 0usize;
-        let mut signal_updates = 0usize;
-        let mut dma_count = 0usize;
-        let mut wakes = 0usize;
-        let mut waits = 0usize;
-        let mut reservation_acquires = 0usize;
-        let mut conditional_stores = 0usize;
-        let mut conditional_stores_without_prior_reservation = 0usize;
-        let mut reservations_cleared = 0usize;
-        let mut blocked_units = Vec::new();
-        let mut woken_units = Vec::new();
-        let mut deferred = 0usize;
-        // Pops this batch takes from each mailbox so far; the next pop
-        // from the same mailbox names the message after them.
-        let mut pops: Vec<(MailboxId, usize)> = Vec::new();
-
-        // The IIFE routes every validation failure through
-        // `staging.clear()`; `StagingMemory`'s Drop debug-asserts an
-        // empty buffer.
-        let pre_validate: Result<(), CommitError> = (|| {
-            for (idx, effect) in effects.iter().enumerate() {
-                match effect {
-                    Effect::SharedWriteIntent { range, bytes, .. } => {
-                        if bytes.len() as u64 != range.length() {
-                            return Err(CommitError::PayloadLengthMismatch { effect_index: idx });
-                        }
-                        let start = range.start().raw();
-                        let length = range.length();
-                        let _end = start
-                            .checked_add(length)
-                            .ok_or(CommitError::OutOfRange { effect_index: idx })?;
-                        if ctx.memory.containing_region(start, length).is_none() {
-                            return Err(CommitError::OutOfRange { effect_index: idx });
-                        }
-                        staging.stage(StagedWrite::new(*range, bytes.bytes()));
-                        writes += 1;
-                    }
-                    Effect::MailboxSend { mailbox, .. } => {
-                        if ctx.mailboxes.get(*mailbox).is_none() {
-                            return Err(CommitError::UnknownMailbox {
-                                effect_index: idx,
-                                mailbox: *mailbox,
-                            });
-                        }
-                        sends += 1;
-                    }
-                    Effect::MailboxReceiveAttempt {
-                        mailbox, source, ..
-                    } => {
-                        if ctx.mailboxes.get(*mailbox).is_none() {
-                            return Err(CommitError::UnknownMailbox {
-                                effect_index: idx,
-                                mailbox: *mailbox,
-                            });
-                        }
-                        if ctx.units.get(*source).is_none() {
-                            return Err(CommitError::UnknownSourceUnit {
-                                effect_index: idx,
-                                source_unit: *source,
-                            });
-                        }
-                        // An attempt takes the next message when there is
-                        // one, so a later pop names the message after it.
-                        match pops.iter_mut().find(|(id, _)| id == mailbox) {
-                            Some((_, taken)) => *taken += 1,
-                            None => pops.push((*mailbox, 1)),
-                        }
-                    }
-                    Effect::MailboxPop {
-                        mailbox,
-                        message,
-                        source,
-                    } => {
-                        let Some(queue) = ctx.mailboxes.get(*mailbox) else {
-                            return Err(CommitError::UnknownMailbox {
-                                effect_index: idx,
-                                mailbox: *mailbox,
-                            });
-                        };
-                        if ctx.units.get(*source).is_none() {
-                            return Err(CommitError::UnknownSourceUnit {
-                                effect_index: idx,
-                                source_unit: *source,
-                            });
-                        }
-                        let taken = match pops.iter_mut().find(|(id, _)| id == mailbox) {
-                            Some((_, taken)) => taken,
-                            None => {
-                                pops.push((*mailbox, 0));
-                                &mut pops.last_mut().expect("just pushed").1
-                            }
-                        };
-                        if queue.iter().nth(*taken) != Some(&message.raw()) {
-                            return Err(CommitError::MailboxPopMismatch {
-                                effect_index: idx,
-                                mailbox: *mailbox,
-                            });
-                        }
-                        *taken += 1;
-                    }
-                    Effect::SignalUpdate { signal, .. } => {
-                        if ctx.signals.get(*signal).is_none() {
-                            return Err(CommitError::UnknownSignal {
-                                effect_index: idx,
-                                signal: *signal,
-                            });
-                        }
-                        signal_updates += 1;
-                    }
-                    Effect::DmaEnqueue { request, payload } => {
-                        // A get writes its issuer's local store and a put
-                        // from local store reads it, both at completion, so
-                        // the issuer must exist.
-                        let get = request.direction() == DmaDirection::Get;
-                        if request.local_store_range().is_some()
-                            && ctx.units.get(request.issuer()).is_none()
-                        {
-                            return Err(CommitError::UnknownSourceUnit {
-                                effect_index: idx,
-                                source_unit: request.issuer(),
-                            });
-                        }
-                        if get && payload.is_some() {
-                            ctx.units
-                                .set_status_override(request.issuer(), UnitStatus::Faulted);
-                            return Err(CommitError::DmaGetWithPayload { effect_index: idx });
-                        }
-                        if let Some(bytes) = payload {
-                            if bytes.len() as u64 != request.destination().length() {
-                                ctx.units
-                                    .set_status_override(request.issuer(), UnitStatus::Faulted);
-                                return Err(CommitError::DmaPayloadLengthMismatch {
-                                    effect_index: idx,
-                                });
-                            }
-                        }
-                        // The pipeline checks no main-storage address. The
-                        // queue raises one that does not translate when it
-                        // reaches the transfer.
-                        // [CBEA p:118 s:9.1.6] the address's validity is checked asynchronous to the instruction stream, and an invalid one suspends the queue.
-                        dma_count += 1;
-                    }
-                    Effect::MfcInvalidCommand { issuer, .. } => {
-                        if ctx.units.get(*issuer).is_none() {
-                            return Err(CommitError::UnknownSourceUnit {
-                                effect_index: idx,
-                                source_unit: *issuer,
-                            });
-                        }
-                        dma_count += 1;
-                    }
-                    Effect::WakeUnit { target, .. } => {
-                        if ctx.units.get(*target).is_none() {
-                            return Err(CommitError::UnknownWakeTarget {
-                                effect_index: idx,
-                                target: *target,
-                            });
-                        }
-                        wakes += 1;
-                    }
-                    Effect::WaitOnEvent { source, .. } => {
-                        if ctx.units.get(*source).is_none() {
-                            return Err(CommitError::UnknownSourceUnit {
-                                effect_index: idx,
-                                source_unit: *source,
-                            });
-                        }
-                        waits += 1;
-                    }
-                    Effect::ConditionalStore {
-                        range,
-                        bytes,
-                        source,
-                        ..
-                    } => {
-                        if bytes.len() as u64 != range.length() {
-                            return Err(CommitError::PayloadLengthMismatch { effect_index: idx });
-                        }
-                        let start = range.start().raw();
-                        let length = range.length();
-                        let _end = start
-                            .checked_add(length)
-                            .ok_or(CommitError::OutOfRange { effect_index: idx })?;
-                        if ctx.memory.containing_region(start, length).is_none() {
-                            return Err(CommitError::OutOfRange { effect_index: idx });
-                        }
-                        if ctx.units.get(*source).is_none() {
-                            return Err(CommitError::UnknownSourceUnit {
-                                effect_index: idx,
-                                source_unit: *source,
-                            });
-                        }
-                        staging.stage(StagedWrite::new(*range, bytes.bytes()));
-                        conditional_stores += 1;
-                    }
-                    Effect::ReservationAcquire { source, .. } => {
-                        if ctx.units.get(*source).is_none() {
-                            return Err(CommitError::UnknownSourceUnit {
-                                effect_index: idx,
-                                source_unit: *source,
-                            });
-                        }
-                    }
-                    Effect::RsxLabelWrite { offset, value } => {
-                        // Semaphore, notify and report slots all resolve
-                        // against one base, so a correct guest stays inside
-                        // the whole area. With a zero base, `offset` is
-                        // absolute.
-                        debug_assert!(
-                            ctx.rsx_label_base == 0
-                                || (*offset as usize) < cellgov_ps3_abi::lv2::rsx::reports::SIZE,
-                            "RsxLabelWrite offset {:#x} escapes the {:#x}-byte RSX label area \
-                         under label base {:#x} (guest bug? semaphores 0..0x1000, notify at \
-                         0x1000, reports at 0x1400)",
-                            *offset,
-                            cellgov_ps3_abi::lv2::rsx::reports::SIZE,
-                            ctx.rsx_label_base,
-                        );
-                        *ctx.rsx_label_writes_committed =
-                            ctx.rsx_label_writes_committed.wrapping_add(1);
-                        // Two u32s widened to u64: the sum cannot wrap.
-                        let start = (ctx.rsx_label_base as u64).wrapping_add(*offset as u64);
-                        let Some(_end) = start.checked_add(4) else {
-                            return Err(CommitError::OutOfRange { effect_index: idx });
-                        };
-                        if ctx.memory.containing_region(start, 4).is_none() {
-                            return Err(CommitError::OutOfRange { effect_index: idx });
-                        }
-                        let Ok(range) =
-                            cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(start), 4)
-                                .ok_or(CommitError::OutOfRange { effect_index: idx })
-                        else {
-                            return Err(CommitError::OutOfRange { effect_index: idx });
-                        };
-                        staging.stage(StagedWrite::new(range, &value.to_be_bytes()));
-                        writes += 1;
-                    }
-                    Effect::FaultRaised { kind, source } => {
-                        // The discard runs off `YieldReason::Fault`, which
-                        // returned above, so an emitter that reaches here
-                        // raised a fault without yielding one.
-                        debug_assert!(
-                            result.yield_reason == YieldReason::Fault,
-                            "FaultRaised({kind:?}) from unit {} in a batch that yielded {:?}; \
-                         the discard contract is driven by the yield reason, so the batch \
-                         commits instead",
-                            source.raw(),
-                            result.yield_reason,
-                        );
-                        deferred += 1;
-                    }
-                    _ => {
-                        deferred += 1;
-                    }
-                }
-            }
-            Ok(())
-        })();
-        if let Err(e) = pre_validate {
+        let mut outcome = CommitOutcome::default();
+        // Every validation failure clears the staged writes;
+        // `StagingMemory`'s Drop debug-asserts an empty buffer.
+        if let Err(e) = validate_batch(result, effects, ctx, &mut staging, &mut outcome) {
             staging.clear();
             return Err(e);
         }
@@ -632,153 +374,391 @@ impl CommitPipeline {
             staging.clear();
             return Err(CommitError::Memory(e));
         }
-        for effect in effects {
-            match effect {
-                Effect::MailboxSend {
-                    mailbox, message, ..
-                } => {
-                    // force_send: PPE-overrun semantics
-                    // [CBE-Handbook p:541 s:19.6.6.2].
-                    ctx.mailboxes
-                        .get_mut(*mailbox)
-                        .expect("pre-validated mailbox id")
-                        .force_send(message.raw());
+        apply_batch(effects, ctx, &mut outcome);
+        Ok(outcome)
+    }
+}
+
+/// The validation pass: check each effect of the batch in order, stage
+/// its memory writes, and count what it validates into `outcome`.
+///
+/// The first refused effect ends the pass; the caller clears `staging`.
+fn validate_batch(
+    result: &ExecutionStepResult,
+    effects: &[Effect],
+    ctx: &mut CommitContext<'_>,
+    staging: &mut StagingMemory,
+    outcome: &mut CommitOutcome,
+) -> Result<(), CommitError> {
+    // Pops this batch takes from each mailbox so far; the next pop
+    // from the same mailbox names the message after them.
+    let mut pops: Vec<(MailboxId, usize)> = Vec::new();
+    for (idx, effect) in effects.iter().enumerate() {
+        match effect {
+            Effect::SharedWriteIntent { range, bytes, .. } => {
+                check_write_target(ctx.memory, range, bytes.len(), idx)?;
+                staging.stage(StagedWrite::new(*range, bytes.bytes()));
+                outcome.writes_committed += 1;
+            }
+            Effect::MailboxSend { mailbox, .. } => {
+                require_mailbox(ctx.mailboxes, *mailbox, idx)?;
+                outcome.mailbox_sends_committed += 1;
+            }
+            Effect::MailboxReceiveAttempt {
+                mailbox, source, ..
+            } => {
+                require_mailbox(ctx.mailboxes, *mailbox, idx)?;
+                require_unit(ctx.units, *source, idx)?;
+                // An attempt takes the next message when there is one, so
+                // a later pop names the message after it.
+                *pop_slot(&mut pops, *mailbox) += 1;
+            }
+            Effect::MailboxPop {
+                mailbox,
+                message,
+                source,
+            } => {
+                let Some(queue) = ctx.mailboxes.get(*mailbox) else {
+                    return Err(CommitError::UnknownMailbox {
+                        effect_index: idx,
+                        mailbox: *mailbox,
+                    });
+                };
+                require_unit(ctx.units, *source, idx)?;
+                let taken = pop_slot(&mut pops, *mailbox);
+                if queue.iter().nth(*taken) != Some(&message.raw()) {
+                    return Err(CommitError::MailboxPopMismatch {
+                        effect_index: idx,
+                        mailbox: *mailbox,
+                    });
                 }
-                Effect::SignalUpdate { signal, value, .. } => {
-                    ctx.signals
-                        .get_mut(*signal)
-                        .expect("pre-validated signal id")
-                        .or_in(*value);
+                *taken += 1;
+            }
+            Effect::SignalUpdate { signal, .. } => {
+                if ctx.signals.get(*signal).is_none() {
+                    return Err(CommitError::UnknownSignal {
+                        effect_index: idx,
+                        signal: *signal,
+                    });
                 }
-                Effect::DmaEnqueue { request, payload } => {
-                    queue_transfer(
-                        ctx.dma_queue,
-                        ctx.dma_latency,
-                        ctx.now,
-                        request,
-                        payload.clone(),
-                    );
+                outcome.signal_updates_committed += 1;
+            }
+            Effect::DmaEnqueue { request, payload } => {
+                validate_dma_enqueue(ctx.units, request, payload.as_deref(), idx)?;
+                outcome.dma_enqueued += 1;
+            }
+            Effect::MfcInvalidCommand { issuer, .. } => {
+                require_unit(ctx.units, *issuer, idx)?;
+                outcome.dma_enqueued += 1;
+            }
+            Effect::WakeUnit { target, .. } => {
+                if ctx.units.get(*target).is_none() {
+                    return Err(CommitError::UnknownWakeTarget {
+                        effect_index: idx,
+                        target: *target,
+                    });
                 }
-                Effect::MailboxReceiveAttempt {
-                    mailbox, source, ..
-                } => {
-                    let received = ctx
-                        .mailboxes
-                        .get_mut(*mailbox)
-                        .expect("pre-validated mailbox id")
-                        .try_receive();
-                    match received {
-                        Some(msg) => {
-                            ctx.units.push_receive(*source, msg);
-                            receives += 1;
-                        }
-                        None => {
-                            ctx.units.set_status_override(*source, UnitStatus::Blocked);
-                            blocked_units.push((*source, BlockReason::MailboxEmpty));
-                            receives_blocked += 1;
-                        }
-                    }
-                }
-                Effect::MfcInvalidCommand { issuer, command } => {
-                    queue_refused(ctx.dma_queue, ctx.dma_latency, ctx.now, *issuer, *command);
-                }
-                Effect::MailboxPop {
-                    mailbox, message, ..
-                } => {
-                    let taken = ctx
-                        .mailboxes
-                        .get_mut(*mailbox)
-                        .expect("pre-validated mailbox id")
-                        .try_receive();
-                    // Validation read the mailbox before this batch's
-                    // sends; a send into a full mailbox in the same batch
-                    // would drop the message the pop names.
-                    debug_assert_eq!(
-                        taken,
-                        Some(message.raw()),
-                        "MailboxPop took a message other than the one it names"
-                    );
-                    receives += 1;
-                }
-                Effect::WakeUnit { target, .. } => {
-                    ctx.units.set_status_override(*target, UnitStatus::Runnable);
-                    woken_units.push(*target);
-                }
-                Effect::WaitOnEvent { source, .. } => {
-                    ctx.units.set_status_override(*source, UnitStatus::Blocked);
-                    blocked_units.push((*source, BlockReason::WaitOnEvent));
-                }
-                Effect::SharedWriteIntent { range, source, .. } => {
-                    // Emitter's own reservation preserved: PPC invalidates
-                    // only on stores from another processor
-                    // [PPC-Book2 p:10 s:1.7.3.1].
-                    reservations_cleared += ctx.reservations.clear_covering(
-                        range.start().raw(),
-                        range.length(),
-                        Some(*source),
-                    );
-                }
-                Effect::ReservationAcquire { line_addr, source } => {
-                    // Canonicalize to 128-byte line at insert; callers may
-                    // pass a raw EA. A clobbered prior entry on the same
-                    // unit is counted as cleared.
-                    let prior = ctx
-                        .reservations
-                        .insert_or_replace(*source, ReservedLine::containing(*line_addr));
-                    if prior.is_some() {
-                        reservations_cleared += 1;
-                    }
-                    reservation_acquires += 1;
-                }
-                Effect::ConditionalStore { range, source, .. } => {
-                    // The emitter's own entry goes first, so the
-                    // cross-unit sweep below cannot double-count it.
-                    if ctx.reservations.remove_if_present(*source).is_some() {
-                        reservations_cleared += 1;
-                    } else {
-                        conditional_stores_without_prior_reservation += 1;
-                    }
-                    reservations_cleared +=
-                        ctx.reservations
-                            .clear_covering(range.start().raw(), range.length(), None);
-                }
-                Effect::RsxLabelWrite { offset, .. } => {
-                    // The RSX is a bus master with no `UnitId`, so no
-                    // entry is exempt: every reservation covering the four
-                    // bytes it lands on is dropped.
-                    // [PPC-Book2 p:10 s:1.7.3.1] a store by some other
-                    // mechanism into the granule loses the reservation.
-                    let start = (ctx.rsx_label_base as u64).wrapping_add(*offset as u64);
-                    reservations_cleared += ctx.reservations.clear_covering(start, 4, None);
-                }
-                Effect::RsxFlipRequest { buffer_index } => {
-                    ctx.rsx_flip.request_flip(*buffer_index);
-                }
-                _ => {}
+                outcome.wakes_committed += 1;
+            }
+            Effect::WaitOnEvent { source, .. } => {
+                require_unit(ctx.units, *source, idx)?;
+                outcome.waits_committed += 1;
+            }
+            Effect::ConditionalStore {
+                range,
+                bytes,
+                source,
+                ..
+            } => {
+                check_write_target(ctx.memory, range, bytes.len(), idx)?;
+                require_unit(ctx.units, *source, idx)?;
+                staging.stage(StagedWrite::new(*range, bytes.bytes()));
+                outcome.conditional_stores_committed += 1;
+            }
+            Effect::ReservationAcquire { source, .. } => {
+                require_unit(ctx.units, *source, idx)?;
+            }
+            Effect::RsxLabelWrite { offset, value } => {
+                let range = validate_rsx_label_write(ctx, *offset, idx)?;
+                staging.stage(StagedWrite::new(range, &value.to_be_bytes()));
+                outcome.writes_committed += 1;
+            }
+            Effect::FaultRaised { kind, source } => {
+                // The discard runs off `YieldReason::Fault`, which
+                // returned in `process`, so an emitter that reaches here
+                // raised a fault without yielding one.
+                debug_assert!(
+                    result.yield_reason == YieldReason::Fault,
+                    "FaultRaised({kind:?}) from unit {} in a batch that yielded {:?}; \
+                     the discard contract is driven by the yield reason, so the batch \
+                     commits instead",
+                    source.raw(),
+                    result.yield_reason,
+                );
+                outcome.effects_deferred += 1;
+            }
+            _ => {
+                outcome.effects_deferred += 1;
             }
         }
-
-        Ok(CommitOutcome {
-            writes_committed: writes,
-            mailbox_sends_committed: sends,
-            mailbox_receives_committed: receives,
-            mailbox_receives_blocked: receives_blocked,
-            signal_updates_committed: signal_updates,
-            dma_enqueued: dma_count,
-            wakes_committed: wakes,
-            waits_committed: waits,
-            dma_completions_fired: 0, // set by Runtime::commit_step
-            reservation_acquires_committed: reservation_acquires,
-            conditional_stores_committed: conditional_stores,
-            conditional_stores_without_prior_reservation,
-            reservations_cleared,
-            effects_deferred: deferred,
-            fault_discarded: false,
-            effects_discarded_on_fault: 0,
-            blocked_units,
-            woken_units,
-        })
     }
+    Ok(())
+}
+
+/// The apply pass, after the drain: act on each effect of the batch in
+/// order and count the outcomes into `outcome`.
+fn apply_batch(effects: &[Effect], ctx: &mut CommitContext<'_>, outcome: &mut CommitOutcome) {
+    for effect in effects {
+        match effect {
+            Effect::MailboxSend {
+                mailbox, message, ..
+            } => {
+                // force_send: PPE-overrun semantics
+                // [CBE-Handbook p:541 s:19.6.6.2].
+                ctx.mailboxes
+                    .get_mut(*mailbox)
+                    .expect("pre-validated mailbox id")
+                    .force_send(message.raw());
+            }
+            Effect::SignalUpdate { signal, value, .. } => {
+                ctx.signals
+                    .get_mut(*signal)
+                    .expect("pre-validated signal id")
+                    .or_in(*value);
+            }
+            Effect::DmaEnqueue { request, payload } => {
+                queue_transfer(
+                    ctx.dma_queue,
+                    ctx.dma_latency,
+                    ctx.now,
+                    request,
+                    payload.clone(),
+                );
+            }
+            Effect::MailboxReceiveAttempt {
+                mailbox, source, ..
+            } => {
+                let received = ctx
+                    .mailboxes
+                    .get_mut(*mailbox)
+                    .expect("pre-validated mailbox id")
+                    .try_receive();
+                match received {
+                    Some(msg) => {
+                        ctx.units.push_receive(*source, msg);
+                        outcome.mailbox_receives_committed += 1;
+                    }
+                    None => {
+                        ctx.units.set_status_override(*source, UnitStatus::Blocked);
+                        outcome
+                            .blocked_units
+                            .push((*source, BlockReason::MailboxEmpty));
+                        outcome.mailbox_receives_blocked += 1;
+                    }
+                }
+            }
+            Effect::MfcInvalidCommand { issuer, command } => {
+                queue_refused(ctx.dma_queue, ctx.dma_latency, ctx.now, *issuer, *command);
+            }
+            Effect::MailboxPop {
+                mailbox, message, ..
+            } => {
+                let taken = ctx
+                    .mailboxes
+                    .get_mut(*mailbox)
+                    .expect("pre-validated mailbox id")
+                    .try_receive();
+                // Validation read the mailbox before this batch's sends; a
+                // send into a full mailbox in the same batch would drop
+                // the message the pop names.
+                debug_assert_eq!(
+                    taken,
+                    Some(message.raw()),
+                    "MailboxPop took a message other than the one it names"
+                );
+                outcome.mailbox_receives_committed += 1;
+            }
+            Effect::WakeUnit { target, .. } => {
+                ctx.units.set_status_override(*target, UnitStatus::Runnable);
+                outcome.woken_units.push(*target);
+            }
+            Effect::WaitOnEvent { source, .. } => {
+                ctx.units.set_status_override(*source, UnitStatus::Blocked);
+                outcome
+                    .blocked_units
+                    .push((*source, BlockReason::WaitOnEvent));
+            }
+            Effect::SharedWriteIntent { range, source, .. } => {
+                // Emitter's own reservation preserved: PPC invalidates
+                // only on stores from another processor
+                // [PPC-Book2 p:10 s:1.7.3.1].
+                outcome.reservations_cleared += ctx.reservations.clear_covering(
+                    range.start().raw(),
+                    range.length(),
+                    Some(*source),
+                );
+            }
+            Effect::ReservationAcquire { line_addr, source } => {
+                // Canonicalize to 128-byte line at insert; callers may
+                // pass a raw EA. A clobbered prior entry on the same unit
+                // is counted as cleared.
+                let prior = ctx
+                    .reservations
+                    .insert_or_replace(*source, ReservedLine::containing(*line_addr));
+                if prior.is_some() {
+                    outcome.reservations_cleared += 1;
+                }
+                outcome.reservation_acquires_committed += 1;
+            }
+            Effect::ConditionalStore { range, source, .. } => {
+                // The emitter's own entry goes first, so the cross-unit
+                // sweep below cannot double-count it.
+                if ctx.reservations.remove_if_present(*source).is_some() {
+                    outcome.reservations_cleared += 1;
+                } else {
+                    outcome.conditional_stores_without_prior_reservation += 1;
+                }
+                outcome.reservations_cleared +=
+                    ctx.reservations
+                        .clear_covering(range.start().raw(), range.length(), None);
+            }
+            Effect::RsxLabelWrite { offset, .. } => {
+                // The RSX is a bus master with no `UnitId`, so no entry is
+                // exempt: every reservation covering the four bytes it
+                // lands on is dropped.
+                // [PPC-Book2 p:10 s:1.7.3.1] a store by some other
+                // mechanism into the granule loses the reservation.
+                let start = (ctx.rsx_label_base as u64).wrapping_add(*offset as u64);
+                outcome.reservations_cleared += ctx.reservations.clear_covering(start, 4, None);
+            }
+            Effect::RsxFlipRequest { buffer_index } => {
+                ctx.rsx_flip.request_flip(*buffer_index);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Refuse effect `idx` when `source` names no registered unit.
+fn require_unit(units: &UnitRegistry, source: UnitId, idx: usize) -> Result<(), CommitError> {
+    if units.get(source).is_none() {
+        return Err(CommitError::UnknownSourceUnit {
+            effect_index: idx,
+            source_unit: source,
+        });
+    }
+    Ok(())
+}
+
+/// Refuse effect `idx` when `mailbox` names no registered mailbox.
+fn require_mailbox(
+    mailboxes: &MailboxRegistry,
+    mailbox: MailboxId,
+    idx: usize,
+) -> Result<(), CommitError> {
+    if mailboxes.get(mailbox).is_none() {
+        return Err(CommitError::UnknownMailbox {
+            effect_index: idx,
+            mailbox,
+        });
+    }
+    Ok(())
+}
+
+/// Refuse a write of `len` bytes over `range` whose length disagrees,
+/// whose end overflows, or that no memory region contains.
+fn check_write_target(
+    memory: &GuestMemory,
+    range: &ByteRange,
+    len: usize,
+    idx: usize,
+) -> Result<(), CommitError> {
+    if len as u64 != range.length() {
+        return Err(CommitError::PayloadLengthMismatch { effect_index: idx });
+    }
+    let start = range.start().raw();
+    let length = range.length();
+    start
+        .checked_add(length)
+        .ok_or(CommitError::OutOfRange { effect_index: idx })?;
+    if memory.containing_region(start, length).is_none() {
+        return Err(CommitError::OutOfRange { effect_index: idx });
+    }
+    Ok(())
+}
+
+/// The number of pops this batch takes from `mailbox` before the
+/// current effect.
+fn pop_slot(pops: &mut Vec<(MailboxId, usize)>, mailbox: MailboxId) -> &mut usize {
+    let at = match pops.iter().position(|(id, _)| *id == mailbox) {
+        Some(at) => at,
+        None => {
+            pops.push((mailbox, 0));
+            pops.len() - 1
+        }
+    };
+    &mut pops[at].1
+}
+
+/// Refuse a `DmaEnqueue` whose issuer is missing or whose inline
+/// `payload` cannot land. A payload refusal marks the issuer faulted.
+fn validate_dma_enqueue(
+    units: &mut UnitRegistry,
+    request: &DmaRequest,
+    payload: Option<&[u8]>,
+    idx: usize,
+) -> Result<(), CommitError> {
+    // A get writes its issuer's local store and a put from local store
+    // reads it, both at completion, so the issuer must exist.
+    if request.local_store_range().is_some() {
+        require_unit(units, request.issuer(), idx)?;
+    }
+    if request.direction() == DmaDirection::Get && payload.is_some() {
+        units.set_status_override(request.issuer(), UnitStatus::Faulted);
+        return Err(CommitError::DmaGetWithPayload { effect_index: idx });
+    }
+    if payload.is_some_and(|bytes| bytes.len() as u64 != request.destination().length()) {
+        units.set_status_override(request.issuer(), UnitStatus::Faulted);
+        return Err(CommitError::DmaPayloadLengthMismatch { effect_index: idx });
+    }
+    // The pipeline checks no main-storage address. The queue raises one
+    // that does not translate when it reaches the transfer.
+    // [CBEA p:118 s:9.1.6] the address's validity is checked asynchronous to the instruction stream, and an invalid one suspends the queue.
+    Ok(())
+}
+
+/// The 4-byte range an `RsxLabelWrite` at `offset` lands on, or the
+/// refusal when it falls outside guest memory.
+///
+/// The write counts in `rsx_label_writes_committed` before the range
+/// checks, so a batch that a later effect refuses still counts it.
+fn validate_rsx_label_write(
+    ctx: &mut CommitContext<'_>,
+    offset: u32,
+    idx: usize,
+) -> Result<ByteRange, CommitError> {
+    // Semaphore, notify and report slots all resolve against one base,
+    // so a correct guest stays inside the whole area. With a zero base,
+    // `offset` is absolute.
+    debug_assert!(
+        ctx.rsx_label_base == 0 || (offset as usize) < cellgov_ps3_abi::lv2::rsx::reports::SIZE,
+        "RsxLabelWrite offset {:#x} escapes the {:#x}-byte RSX label area \
+         under label base {:#x} (guest bug? semaphores 0..0x1000, notify at \
+         0x1000, reports at 0x1400)",
+        offset,
+        cellgov_ps3_abi::lv2::rsx::reports::SIZE,
+        ctx.rsx_label_base,
+    );
+    *ctx.rsx_label_writes_committed = ctx.rsx_label_writes_committed.wrapping_add(1);
+    // Two u32s widened to u64: the sum cannot wrap.
+    let start = (ctx.rsx_label_base as u64).wrapping_add(offset as u64);
+    start
+        .checked_add(4)
+        .ok_or(CommitError::OutOfRange { effect_index: idx })?;
+    if ctx.memory.containing_region(start, 4).is_none() {
+        return Err(CommitError::OutOfRange { effect_index: idx });
+    }
+    ByteRange::new(GuestAddr::new(start), 4).ok_or(CommitError::OutOfRange { effect_index: idx })
 }
 
 #[cfg(test)]
