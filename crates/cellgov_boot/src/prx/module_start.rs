@@ -15,7 +15,7 @@ use cellgov_ppu::PpuExecutionUnit;
 
 use crate::diag::{append_pc_ring_with_decode, append_syscall_ring, fetch_raw_at, format_fault};
 use crate::step_loop::tty::{classify_tty_capture, TtyCaptureDecision};
-use crate::step_loop::{PcRing, SyscallRing};
+use crate::step_loop::{system_ipc_fields, system_ipc_keys, PcRing, SyscallRing};
 use crate::BootSink;
 
 use super::tls::TlsArea;
@@ -697,40 +697,20 @@ fn report_top10<K: Ord>(
 
 /// Report the system IPC namespace witness, as well as at bench close
 /// because a module_start that stalls never reaches the step loop.
-/// Counters are cumulative across every module_start so far. Field
-/// order mirrors the bench-close line, which owns the grammar.
+/// Counters are cumulative across every module_start so far. The
+/// fields come from the same formatter as the bench-close line.
 fn report_ipc_witness(rt: &Runtime, sink: &dyn BootSink, module: &str) {
     let ipc = &rt.lv2_host().observability().system_ipc_witness;
     if ipc.is_silent() {
         return;
     }
     sink.warn(&format!(
-        "BENCH_SYSTEM_IPC_WITNESS_AT_MODULE_START: module={} shm_creates={} \
-         shm_attaches={} shm_maps={} shm_writes={} cond_creates={} cond_waits={} \
-         cond_signals={} event_queue_creates={} event_queue_references={} \
-         event_queue_enqueues={} event_port_connects={} distinct_keys={}",
-        module,
-        ipc.shm_creates,
-        ipc.shm_attaches,
-        ipc.shm_maps,
-        ipc.shm_writes,
-        ipc.cond_creates,
-        ipc.cond_waits,
-        ipc.cond_signals,
-        ipc.event_queue_creates,
-        ipc.event_queue_references,
-        ipc.event_queue_enqueues,
-        ipc.event_port_connects,
-        ipc.keys_touched.len(),
+        "BENCH_SYSTEM_IPC_WITNESS_AT_MODULE_START: module={module} {}",
+        system_ipc_fields(ipc)
     ));
-    let inventory: Vec<String> = ipc
-        .keys_touched
-        .iter()
-        .map(|(key, events)| format!("0x{key:016x}={events}"))
-        .collect();
     sink.warn(&format!(
         "BENCH_SYSTEM_IPC_KEYS_AT_MODULE_START: {}",
-        inventory.join(" ")
+        system_ipc_keys(ipc).join(" ")
     ));
 }
 

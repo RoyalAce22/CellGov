@@ -223,17 +223,13 @@ impl BenchWitnesses {
             "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count={}",
             self.host_invariant_breaks
         ));
-        let break_sites: Vec<String> = self
-            .invariant_break_sites
-            .iter()
-            .map(|(site, hits)| format!("{site}={hits}"))
-            .collect();
-        if !break_sites.is_empty() {
-            out.push(format!(
-                "BENCH_HOST_INVARIANT_BREAK_SITES: {}",
-                break_sites.join(" ")
-            ));
-        }
+        push_joined(
+            &mut out,
+            "BENCH_HOST_INVARIANT_BREAK_SITES:",
+            self.invariant_break_sites
+                .iter()
+                .map(|(site, hits)| format!("{site}={hits}")),
+        );
         out.push(format!(
             "BENCH_ATOMIC_WITNESS: ldarx={} stdcx={} lwarx={} stwcx={}",
             self.ldarx, self.stdcx, self.lwarx, self.stwcx
@@ -275,41 +271,34 @@ impl BenchWitnesses {
             "BENCH_MUTEX_UNLOCK_WITNESS: not_owner={}",
             self.mutex_unlock_not_owner
         ));
-        let codes: Vec<String> = self
-            .dispatch_returns
-            .iter()
-            .map(|(code, hits)| format!("0x{code:08x}={hits}"))
-            .collect();
-        if !codes.is_empty() {
-            out.push(format!(
-                "BENCH_DISPATCH_RETURN_WITNESS: {}",
-                codes.join(" ")
-            ));
-        }
-        let pairs: Vec<String> = self
-            .dispatch_return_pairs
-            .iter()
-            .map(|((arm, code), hits)| format!("{arm}:0x{code:08x}={hits}"))
-            .collect();
-        if !pairs.is_empty() {
-            out.push(format!("BENCH_DISPATCH_RETURN_PAIRS: {}", pairs.join(" ")));
-        }
-        let parks: Vec<String> = self
-            .park_timeouts
-            .iter()
-            .map(|((arm, timeout), hits)| format!("{arm}:t={timeout}us={hits}"))
-            .collect();
-        if !parks.is_empty() {
-            out.push(format!("BENCH_PARK_TIMEOUT_WITNESS: {}", parks.join(" ")));
-        }
-        let expiries: Vec<String> = self
-            .wait_expiries
-            .iter()
-            .map(|(primitive, hits)| format!("{primitive}={hits}"))
-            .collect();
-        if !expiries.is_empty() {
-            out.push(format!("BENCH_WAIT_EXPIRY_WITNESS: {}", expiries.join(" ")));
-        }
+        push_joined(
+            &mut out,
+            "BENCH_DISPATCH_RETURN_WITNESS:",
+            self.dispatch_returns
+                .iter()
+                .map(|(code, hits)| format!("0x{code:08x}={hits}")),
+        );
+        push_joined(
+            &mut out,
+            "BENCH_DISPATCH_RETURN_PAIRS:",
+            self.dispatch_return_pairs
+                .iter()
+                .map(|((arm, code), hits)| format!("{arm}:0x{code:08x}={hits}")),
+        );
+        push_joined(
+            &mut out,
+            "BENCH_PARK_TIMEOUT_WITNESS:",
+            self.park_timeouts
+                .iter()
+                .map(|((arm, timeout), hits)| format!("{arm}:t={timeout}us={hits}")),
+        );
+        push_joined(
+            &mut out,
+            "BENCH_WAIT_EXPIRY_WITNESS:",
+            self.wait_expiries
+                .iter()
+                .map(|(primitive, hits)| format!("{primitive}={hits}")),
+        );
         let (reg_calls, reg_manual, reg_linked, reg_unresolved) = self.register_module;
         out.push(format!(
             "BENCH_REGISTER_MODULE_WITNESS: calls={reg_calls} manual={reg_manual} linked_slots={reg_linked} unresolved_nids={reg_unresolved}"
@@ -335,33 +324,15 @@ impl BenchWitnesses {
                 unsupported.join(" "),
             ));
         }
-        let ipc = &self.system_ipc;
         out.push(format!(
-            "BENCH_SYSTEM_IPC_WITNESS: shm_creates={} shm_attaches={} shm_maps={} shm_writes={} \
-             cond_creates={} cond_waits={} cond_signals={} event_queue_creates={} \
-             event_queue_references={} event_queue_enqueues={} event_port_connects={} \
-             distinct_keys={}",
-            ipc.shm_creates,
-            ipc.shm_attaches,
-            ipc.shm_maps,
-            ipc.shm_writes,
-            ipc.cond_creates,
-            ipc.cond_waits,
-            ipc.cond_signals,
-            ipc.event_queue_creates,
-            ipc.event_queue_references,
-            ipc.event_queue_enqueues,
-            ipc.event_port_connects,
-            ipc.keys_touched.len(),
+            "BENCH_SYSTEM_IPC_WITNESS: {}",
+            system_ipc_fields(&self.system_ipc)
         ));
-        if !ipc.keys_touched.is_empty() {
-            let inventory: Vec<String> = ipc
-                .keys_touched
-                .iter()
-                .map(|(key, events)| format!("0x{key:016x}={events}"))
-                .collect();
-            out.push(format!("BENCH_SYSTEM_IPC_KEYS: {}", inventory.join(" ")));
-        }
+        push_joined(
+            &mut out,
+            "BENCH_SYSTEM_IPC_KEYS:",
+            system_ipc_keys(&self.system_ipc),
+        );
         if !self.uart_cids.is_empty() {
             let sent: Vec<String> = self
                 .uart_cids
@@ -395,14 +366,13 @@ impl BenchWitnesses {
         // with the '=' before the count -- but spaces inside the quotes
         // stay literal, so a consumer must extract the quoted run first;
         // whitespace-splitting alone misparses a path containing spaces.
-        let prx_misses: Vec<String> = self
-            .prx_load_misses
-            .iter()
-            .map(|(path, hits)| format!("{path:?}={hits}"))
-            .collect();
-        if !prx_misses.is_empty() {
-            out.push(format!("BENCH_PRX_LOAD_MISSES: {}", prx_misses.join(" ")));
-        }
+        push_joined(
+            &mut out,
+            "BENCH_PRX_LOAD_MISSES:",
+            self.prx_load_misses
+                .iter()
+                .map(|(path, hits)| format!("{path:?}={hits}")),
+        );
         for u in &self.final_units {
             out.push(format!(
                 "BENCH_FINAL_UNIT_WITNESS: unit={} pc=0x{:08x} lr=0x{:08x} status={} ldarx={} lwarx={}",
@@ -448,6 +418,47 @@ impl PpuTotals {
             .mem_fault_unmapped_routed
             .wrapping_add(s.mem_fault_unmapped_routed);
         self.dcbz = self.dcbz.wrapping_add(s.dcbz_executed);
+    }
+}
+
+/// Render the system-IPC production counters as the `k=v` fields both
+/// IPC witness lines carry, in the one order their parser reads.
+pub(crate) fn system_ipc_fields(ipc: &SystemIpcWitness) -> String {
+    format!(
+        "shm_creates={} shm_attaches={} shm_maps={} shm_writes={} \
+         cond_creates={} cond_waits={} cond_signals={} event_queue_creates={} \
+         event_queue_references={} event_queue_enqueues={} event_port_connects={} \
+         distinct_keys={}",
+        ipc.shm_creates,
+        ipc.shm_attaches,
+        ipc.shm_maps,
+        ipc.shm_writes,
+        ipc.cond_creates,
+        ipc.cond_waits,
+        ipc.cond_signals,
+        ipc.event_queue_creates,
+        ipc.event_queue_references,
+        ipc.event_queue_enqueues,
+        ipc.event_port_connects,
+        ipc.keys_touched.len(),
+    )
+}
+
+/// Render each IPC key the namespace touched as `0x<key>=<events>`.
+pub(crate) fn system_ipc_keys(ipc: &SystemIpcWitness) -> Vec<String> {
+    ipc.keys_touched
+        .iter()
+        .map(|(key, events)| format!("0x{key:016x}={events}"))
+        .collect()
+}
+
+/// Push `tag a b c` for a non-empty inventory; an empty one prints no
+/// line. The tag carries its own colon, so the line-table test finds
+/// each `"BENCH_<NAME>:` literal at its call site.
+fn push_joined(out: &mut Vec<String>, tag: &str, items: impl IntoIterator<Item = String>) {
+    let items: Vec<String> = items.into_iter().collect();
+    if !items.is_empty() {
+        out.push(format!("{tag} {}", items.join(" ")));
     }
 }
 

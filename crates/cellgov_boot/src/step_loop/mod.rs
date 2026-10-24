@@ -35,4 +35,5 @@ pub use driver::{step_loop, step_loop_ends_at};
 pub use ring::{PcRing, Ring, SyscallRing};
 pub use timing::{compute_untracked, pct, StepTiming};
 pub use verdict::rsx_checkpoint_addr;
+pub(crate) use witnesses::{system_ipc_fields, system_ipc_keys};
 pub use witnesses::{BenchWitnesses, FinalUnit};
