@@ -7,7 +7,9 @@ use super::matrix;
 use super::model::{
     ContentEntry, ContentManifest, Distribution, GameSource, MountEntry, TitleManifest,
 };
-use super::schema::{ManifestCheckpoint, ManifestFile};
+use super::schema::{
+    ManifestCheckpoint, ManifestContent, ManifestFile, ManifestFs, ManifestRsx, ManifestSource,
+};
 
 /// Why a title manifest did not load.
 #[derive(Debug, thiserror::Error)]
@@ -130,14 +132,14 @@ fn discards_its_base(raw: &str) -> bool {
 /// instead of resolving a directory the manifest never declared.
 fn reject_empty_source_path(origin: &Path, kind: &str, raw: &str) -> Result<(), ManifestError> {
     if raw.is_empty() {
-        return Err(ManifestError::Parse {
-            path: origin.to_path_buf(),
-            message: format!(
+        return Err(parse_err(
+            origin,
+            format!(
                 "source kind '{kind}' has an empty 'path'; an empty path names no \
                  directory and would leave the executable to be resolved against the \
                  process's current directory. State the directory holding it."
             ),
-        });
+        ));
     }
     Ok(())
 }
@@ -225,248 +227,28 @@ impl TitleManifest {
     /// Accepts tables either at root level or under `[cellgov]`
     /// (microtests co-locate CellGov and RPCS3 config in one file).
     pub fn load_from_text(text: &str, origin: &Path) -> Result<Self, ManifestError> {
-        let raw: toml::Value = toml::from_str(text).map_err(|e| ManifestError::Parse {
-            path: origin.to_path_buf(),
-            message: e.to_string(),
-        })?;
-        let file_value = if let Some(nested) = raw.get("cellgov") {
-            if !nested.is_table() {
-                return Err(ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: "`cellgov` key must be a table (the nested manifest layout); \
-                              got a scalar or array"
-                        .to_string(),
-                });
-            }
-            if let Some(table) = raw.as_table() {
-                let conflicting: Vec<&str> = ROOT_TABLE_KEYS
-                    .iter()
-                    .copied()
-                    .filter(|k| table.contains_key(*k))
-                    .collect();
-                if !conflicting.is_empty() {
-                    return Err(ManifestError::Parse {
-                        path: origin.to_path_buf(),
-                        message: format!(
-                            "ambiguous layout: `[cellgov]` is present, but root-level \
-                             manifest tables were also found ({}). Pick one layout.",
-                            conflicting.join(", ")
-                        ),
-                    });
-                }
-            }
-            nested.clone()
-        } else {
-            raw
-        };
-        let file: ManifestFile =
-            file_value
-                .try_into()
-                .map_err(|e: toml::de::Error| ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: e.to_string(),
-                })?;
+        let raw: toml::Value =
+            toml::from_str(text).map_err(|e| parse_err(origin, e.to_string()))?;
+        let file: ManifestFile = select_layout(raw, origin)?
+            .try_into()
+            .map_err(|e: toml::de::Error| parse_err(origin, e.to_string()))?;
         let checkpoint = parse_checkpoint(&file.checkpoint, origin)?;
-        let source_path = file.source.as_ref().and_then(|s| s.path.clone());
-        let source = match file.source.as_ref().map(|s| s.kind.as_str()) {
-            Some("disc") => GameSource::Disc,
-            Some("hdd") => GameSource::Hdd,
-            Some("firmware-exec") => {
-                let dir = source_path.clone().ok_or_else(|| ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: "source kind 'firmware-exec' requires a 'path = \"...\"' \
-                              directory: a firmware executable is not installed under \
-                              /dev_hdd0/game/, so there is no content-id directory to \
-                              derive it from"
-                        .to_string(),
-                })?;
-                reject_empty_source_path(origin, "firmware-exec", &dir)?;
-                GameSource::FirmwareExec {
-                    dir: PathBuf::from(dir),
-                }
-            }
-            Some("manifest-relative") => {
-                let rel = source_path.clone().ok_or_else(|| ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: "source kind 'manifest-relative' requires a 'path = \"...\"' \
-                              directory holding the executable, named relative to this \
-                              manifest"
-                        .to_string(),
-                })?;
-                reject_empty_source_path(origin, "manifest-relative", &rel)?;
-                if discards_its_base(&rel) {
-                    return Err(ManifestError::Parse {
-                        path: origin.to_path_buf(),
-                        message: format!(
-                            "source kind 'manifest-relative' path {rel:?} is rooted or \
-                             carries a drive prefix, so joining it onto the manifest's \
-                             directory would discard that directory and the reference \
-                             would not be manifest-relative at all. Name the directory \
-                             relative to this manifest, or use kind = \"firmware-exec\" \
-                             for a host-absolute one."
-                        ),
-                    });
-                }
-                GameSource::ManifestRelative {
-                    dir: manifest_dir(origin).join(rel),
-                }
-            }
-            Some(other) => {
-                return Err(ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: format!(
-                        "unknown source kind '{other}' \
-                         (accepted: disc, hdd, firmware-exec, manifest-relative)"
-                    ),
-                });
-            }
-            None => GameSource::Hdd,
-        };
-        if source_path.is_some()
-            && !matches!(
-                source,
-                GameSource::FirmwareExec { .. } | GameSource::ManifestRelative { .. }
-            )
-        {
-            return Err(ManifestError::Parse {
-                path: origin.to_path_buf(),
-                message: "[source] path is only meaningful for kind = \"firmware-exec\" \
-                          or kind = \"manifest-relative\"; hdd and disc titles derive \
-                          their directory from content_id"
-                    .to_string(),
-            });
-        }
-        let content_id = match file.title.content_id {
-            Some(id) => id,
-            None if matches!(source, GameSource::ManifestRelative { .. }) => {
-                derive_content_id(origin).ok_or_else(|| ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: "[title] content_id omitted and no directory name to derive \
-                              it from; give the manifest a parent directory or state a \
-                              content_id"
-                        .to_string(),
-                })?
-            }
-            None => {
-                return Err(ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: "[title] content_id is required: it keys the registry and \
-                              names the directory an hdd or disc title boots from. Only a \
-                              manifest-relative title, which has no PSN identity, may omit it."
-                        .to_string(),
-                });
-            }
-        };
-        let (rsx_mirror, rsx_consume) = file
-            .rsx
-            .as_ref()
-            .map(|r| (r.mirror, r.consume))
-            .unwrap_or((false, false));
-        if mirror_makes_checkpoint_unreachable(rsx_mirror, checkpoint) {
-            return Err(ManifestError::Parse {
-                path: origin.to_path_buf(),
-                message: "`[rsx] mirror = true` is incompatible with \
-                          `checkpoint.kind = \"first-rsx-write\"`: the mirror \
-                          makes the RSX region writable, so the put-pointer \
-                          write that FirstRsxWrite watches for cannot fault."
-                    .to_string(),
-            });
-        }
-        if rsx_consume && !rsx_mirror {
-            return Err(ManifestError::Parse {
-                path: origin.to_path_buf(),
-                message: "`[rsx] consume = true` requires `[rsx] mirror = true`: \
-                          without the mirror the cursor never observes the guest's \
-                          put-pointer stores, so the 40F honest consumer has nothing \
-                          to walk. Enable mirror or remove consume."
-                    .to_string(),
-            });
-        }
-        let content = file.content.map(|c| ContentManifest {
-            override_base_env: c.override_base_env,
-            files: c
-                .files
-                .into_iter()
-                .map(|f| ContentEntry {
-                    guest_path: f.guest_path,
-                    host_path: f.host_path,
-                })
-                .collect(),
-        });
-        // A block with no files registers nothing, yet the provider
-        // would still select a base for it and refuse a boot that has
-        // none.
-        if content.as_ref().is_some_and(|c| c.files.is_empty()) {
-            return Err(ManifestError::Parse {
-                path: origin.to_path_buf(),
-                message: "[content] lists no files; drop the block or name the files it \
-                          registers"
-                    .to_string(),
-            });
-        }
-        let mounts: Vec<MountEntry> = file
-            .fs
-            .map(|f| f.mounts)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|m| MountEntry {
-                prefix: m.prefix,
-                host: m.host,
-                override_env: m.override_env,
-            })
-            .collect();
-        // Validate at load time so the error carries the manifest path.
-        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-        for m in &mounts {
-            if !m.prefix.starts_with('/') {
-                return Err(ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: format!("[[fs.mounts]] prefix {:?} must start with '/'", m.prefix),
-                });
-            }
-            if !seen.insert(m.prefix.as_str()) {
-                return Err(ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: format!(
-                        "[[fs.mounts]] duplicate prefix {:?}; each prefix must \
-                         be declared at most once",
-                        m.prefix
-                    ),
-                });
-            }
-        }
+        let source = parse_source(file.source.as_ref(), origin)?;
+        let content_id = resolve_content_id(file.title.content_id, &source, origin)?;
+        let (rsx_mirror, rsx_consume) = validate_rsx(file.rsx.as_ref(), checkpoint, origin)?;
+        let content = parse_content(file.content, origin)?;
+        let mounts = parse_mounts(file.fs, origin)?;
         let distribution = Distribution::from_kebab(&file.title.distribution).ok_or_else(|| {
-            ManifestError::Parse {
-                path: origin.to_path_buf(),
-                message: format!(
+            parse_err(
+                origin,
+                format!(
                     "unknown distribution {:?} \
                      (accepted: psn-hdd, retail-hdd, disc-iso, firmware-exec, microtest)",
                     file.title.distribution
                 ),
-            }
+            )
         })?;
-        // A stale plaintext EBOOT.elf can drift from the on-disk SELF; force
-        // the SCE-wrapped EBOOT.BIN ahead of EBOOT.elf when both are listed.
-        if let (Some(elf_pos), Some(bin_pos)) = (
-            file.title
-                .eboot_candidates
-                .iter()
-                .position(|c| c == "EBOOT.elf"),
-            file.title
-                .eboot_candidates
-                .iter()
-                .position(|c| c == "EBOOT.BIN"),
-        ) {
-            if elf_pos < bin_pos {
-                return Err(ManifestError::Parse {
-                    path: origin.to_path_buf(),
-                    message: "eboot_candidates lists EBOOT.elf before EBOOT.BIN; reorder so the \
-                         SCE-wrapped EBOOT.BIN is tried first. A stale plaintext .elf in the \
-                         USRDIR would otherwise shadow the canonical SELF."
-                        .to_string(),
-                });
-            }
-        }
+        check_eboot_order(&file.title.eboot_candidates, origin)?;
         let matrix = matrix::build(
             file.bench.map(|b| b.matrix).unwrap_or_default(),
             file.title.system_ver.as_deref(),
@@ -495,6 +277,267 @@ impl TitleManifest {
             matrix,
         })
     }
+}
+
+/// Return the parse refusal for the manifest at `origin`.
+fn parse_err(origin: &Path, message: impl Into<String>) -> ManifestError {
+    ManifestError::Parse {
+        path: origin.to_path_buf(),
+        message: message.into(),
+    }
+}
+
+/// Return the table the manifest's sections live in: `[cellgov]` when
+/// present, else the root. A `[cellgov]` beside root-level manifest
+/// tables is ambiguous and refused.
+fn select_layout(raw: toml::Value, origin: &Path) -> Result<toml::Value, ManifestError> {
+    let Some(nested) = raw.get("cellgov") else {
+        return Ok(raw);
+    };
+    if !nested.is_table() {
+        return Err(parse_err(
+            origin,
+            "`cellgov` key must be a table (the nested manifest layout); \
+             got a scalar or array",
+        ));
+    }
+    if let Some(table) = raw.as_table() {
+        let conflicting: Vec<&str> = ROOT_TABLE_KEYS
+            .iter()
+            .copied()
+            .filter(|k| table.contains_key(*k))
+            .collect();
+        if !conflicting.is_empty() {
+            return Err(parse_err(
+                origin,
+                format!(
+                    "ambiguous layout: `[cellgov]` is present, but root-level \
+                     manifest tables were also found ({}). Pick one layout.",
+                    conflicting.join(", ")
+                ),
+            ));
+        }
+    }
+    Ok(nested.clone())
+}
+
+/// Translate the `[source]` table into where the title boots from. The
+/// kinds that derive their directory from the content id refuse a
+/// `path`.
+fn parse_source(
+    source: Option<&ManifestSource>,
+    origin: &Path,
+) -> Result<GameSource, ManifestError> {
+    let source_path = source.and_then(|s| s.path.clone());
+    let parsed = match source.map(|s| s.kind.as_str()) {
+        Some("disc") => GameSource::Disc,
+        Some("hdd") => GameSource::Hdd,
+        Some("firmware-exec") => {
+            let dir = source_path.clone().ok_or_else(|| {
+                parse_err(
+                    origin,
+                    "source kind 'firmware-exec' requires a 'path = \"...\"' \
+                     directory: a firmware executable is not installed under \
+                     /dev_hdd0/game/, so there is no content-id directory to \
+                     derive it from",
+                )
+            })?;
+            reject_empty_source_path(origin, "firmware-exec", &dir)?;
+            GameSource::FirmwareExec {
+                dir: PathBuf::from(dir),
+            }
+        }
+        Some("manifest-relative") => {
+            let rel = source_path.clone().ok_or_else(|| {
+                parse_err(
+                    origin,
+                    "source kind 'manifest-relative' requires a 'path = \"...\"' \
+                     directory holding the executable, named relative to this \
+                     manifest",
+                )
+            })?;
+            reject_empty_source_path(origin, "manifest-relative", &rel)?;
+            if discards_its_base(&rel) {
+                return Err(parse_err(
+                    origin,
+                    format!(
+                        "source kind 'manifest-relative' path {rel:?} is rooted or \
+                         carries a drive prefix, so joining it onto the manifest's \
+                         directory would discard that directory and the reference \
+                         would not be manifest-relative at all. Name the directory \
+                         relative to this manifest, or use kind = \"firmware-exec\" \
+                         for a host-absolute one."
+                    ),
+                ));
+            }
+            GameSource::ManifestRelative {
+                dir: manifest_dir(origin).join(rel),
+            }
+        }
+        Some(other) => {
+            return Err(parse_err(
+                origin,
+                format!(
+                    "unknown source kind '{other}' \
+                     (accepted: disc, hdd, firmware-exec, manifest-relative)"
+                ),
+            ));
+        }
+        None => GameSource::Hdd,
+    };
+    if source_path.is_some()
+        && !matches!(
+            parsed,
+            GameSource::FirmwareExec { .. } | GameSource::ManifestRelative { .. }
+        )
+    {
+        return Err(parse_err(
+            origin,
+            "[source] path is only meaningful for kind = \"firmware-exec\" \
+             or kind = \"manifest-relative\"; hdd and disc titles derive \
+             their directory from content_id",
+        ));
+    }
+    Ok(parsed)
+}
+
+/// Return the title's content id: the declared one, or for a
+/// manifest-relative title the name of the manifest's directory.
+fn resolve_content_id(
+    declared: Option<String>,
+    source: &GameSource,
+    origin: &Path,
+) -> Result<String, ManifestError> {
+    match declared {
+        Some(id) => Ok(id),
+        None if matches!(source, GameSource::ManifestRelative { .. }) => derive_content_id(origin)
+            .ok_or_else(|| {
+                parse_err(
+                    origin,
+                    "[title] content_id omitted and no directory name to derive \
+                     it from; give the manifest a parent directory or state a \
+                     content_id",
+                )
+            }),
+        None => Err(parse_err(
+            origin,
+            "[title] content_id is required: it keys the registry and \
+             names the directory an hdd or disc title boots from. Only a \
+             manifest-relative title, which has no PSN identity, may omit it.",
+        )),
+    }
+}
+
+/// Return the `[rsx]` mirror and consume flags, refusing the pairings
+/// that cannot work.
+fn validate_rsx(
+    rsx: Option<&ManifestRsx>,
+    checkpoint: CheckpointTrigger,
+    origin: &Path,
+) -> Result<(bool, bool), ManifestError> {
+    let (rsx_mirror, rsx_consume) = rsx.map(|r| (r.mirror, r.consume)).unwrap_or((false, false));
+    if mirror_makes_checkpoint_unreachable(rsx_mirror, checkpoint) {
+        return Err(parse_err(
+            origin,
+            "`[rsx] mirror = true` is incompatible with \
+             `checkpoint.kind = \"first-rsx-write\"`: the mirror \
+             makes the RSX region writable, so the put-pointer \
+             write that FirstRsxWrite watches for cannot fault.",
+        ));
+    }
+    if rsx_consume && !rsx_mirror {
+        return Err(parse_err(
+            origin,
+            "`[rsx] consume = true` requires `[rsx] mirror = true`: \
+             without the mirror the cursor never observes the guest's \
+             put-pointer stores, so the 40F honest consumer has nothing \
+             to walk. Enable mirror or remove consume.",
+        ));
+    }
+    Ok((rsx_mirror, rsx_consume))
+}
+
+/// Translate the `[content]` block. A block with no files registers
+/// nothing, yet the provider would still select a base for it and
+/// refuse a boot that has none.
+fn parse_content(
+    content: Option<ManifestContent>,
+    origin: &Path,
+) -> Result<Option<ContentManifest>, ManifestError> {
+    let content = content.map(|c| ContentManifest {
+        override_base_env: c.override_base_env,
+        files: c
+            .files
+            .into_iter()
+            .map(|f| ContentEntry {
+                guest_path: f.guest_path,
+                host_path: f.host_path,
+            })
+            .collect(),
+    });
+    if content.as_ref().is_some_and(|c| c.files.is_empty()) {
+        return Err(parse_err(
+            origin,
+            "[content] lists no files; drop the block or name the files it \
+             registers",
+        ));
+    }
+    Ok(content)
+}
+
+/// Translate the `[[fs.mounts]]` entries. Validation runs at load time
+/// so the error carries the manifest path.
+fn parse_mounts(fs: Option<ManifestFs>, origin: &Path) -> Result<Vec<MountEntry>, ManifestError> {
+    let mounts: Vec<MountEntry> = fs
+        .map(|f| f.mounts)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| MountEntry {
+            prefix: m.prefix,
+            host: m.host,
+            override_env: m.override_env,
+        })
+        .collect();
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for m in &mounts {
+        if !m.prefix.starts_with('/') {
+            return Err(parse_err(
+                origin,
+                format!("[[fs.mounts]] prefix {:?} must start with '/'", m.prefix),
+            ));
+        }
+        if !seen.insert(m.prefix.as_str()) {
+            return Err(parse_err(
+                origin,
+                format!(
+                    "[[fs.mounts]] duplicate prefix {:?}; each prefix must \
+                     be declared at most once",
+                    m.prefix
+                ),
+            ));
+        }
+    }
+    Ok(mounts)
+}
+
+/// Refuse an EBOOT candidate list that tries EBOOT.elf before EBOOT.BIN.
+/// A stale plaintext EBOOT.elf can drift from the on-disk SELF, so when
+/// the list names both, the SCE-wrapped EBOOT.BIN goes first.
+fn check_eboot_order(candidates: &[String], origin: &Path) -> Result<(), ManifestError> {
+    let elf_pos = candidates.iter().position(|c| c == "EBOOT.elf");
+    let bin_pos = candidates.iter().position(|c| c == "EBOOT.BIN");
+    let (Some(elf_pos), Some(bin_pos)) = (elf_pos, bin_pos) else {
+        return Ok(());
+    };
+    if elf_pos < bin_pos {
+        return Err(parse_err(
+            origin,
+            "eboot_candidates lists EBOOT.elf before EBOOT.BIN; reorder so the \
+             SCE-wrapped EBOOT.BIN is tried first. A stale plaintext .elf in the \
+             USRDIR would otherwise shadow the canonical SELF.",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
