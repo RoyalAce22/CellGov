@@ -354,36 +354,8 @@ fn scan_stream(a: &[u8], b: &[u8], stream: StateStream) -> StreamOutcome {
         };
         match (a_next, b_next) {
             (None, None) => return StreamOutcome::Identical { matched: step },
-            (Some(_), None) => {
-                return match remaining(ai) {
-                    Ok(rest) => StreamOutcome::LengthDiffers(DivergeReport::LengthDiffers {
-                        stream,
-                        common_count: step,
-                        a_count: step + 1 + rest,
-                        b_count: step,
-                    }),
-                    Err(error) => StreamOutcome::Corrupt {
-                        matched: step,
-                        a_error: Some(error),
-                        b_error: None,
-                    },
-                };
-            }
-            (None, Some(_)) => {
-                return match remaining(bi) {
-                    Ok(rest) => StreamOutcome::LengthDiffers(DivergeReport::LengthDiffers {
-                        stream,
-                        common_count: step,
-                        a_count: step,
-                        b_count: step + 1 + rest,
-                    }),
-                    Err(error) => StreamOutcome::Corrupt {
-                        matched: step,
-                        a_error: None,
-                        b_error: Some(error),
-                    },
-                };
-            }
+            (Some(_), None) => return one_side_ended(stream, step, remaining(ai), true),
+            (None, Some(_)) => return one_side_ended(stream, step, remaining(bi), false),
             (Some(a_rec), Some(b_rec)) => {
                 let field = if a_rec.pc != b_rec.pc {
                     Some(DivergeField::Pc)
@@ -407,6 +379,45 @@ fn scan_stream(a: &[u8], b: &[u8], stream: StateStream) -> StreamOutcome {
                     };
                 }
                 step += 1;
+            }
+        }
+    }
+}
+
+/// The outcome when one side's `stream` ended after `step` matched
+/// records and the other held one more record plus `rest`; `a_longer`
+/// names side A as the one that went on.
+fn one_side_ended(
+    stream: StateStream,
+    step: u64,
+    rest: Result<u64, TraceDecodeError>,
+    a_longer: bool,
+) -> StreamOutcome {
+    match rest {
+        Ok(rest) => {
+            let longer = step + 1 + rest;
+            let (a_count, b_count) = if a_longer {
+                (longer, step)
+            } else {
+                (step, longer)
+            };
+            StreamOutcome::LengthDiffers(DivergeReport::LengthDiffers {
+                stream,
+                common_count: step,
+                a_count,
+                b_count,
+            })
+        }
+        Err(error) => {
+            let (a_error, b_error) = if a_longer {
+                (Some(error), None)
+            } else {
+                (None, Some(error))
+            };
+            StreamOutcome::Corrupt {
+                matched: step,
+                a_error,
+                b_error,
             }
         }
     }
@@ -448,10 +459,8 @@ fn state_hash_iter(
             Ok(record) => {
                 let ordinal = index;
                 index += 1;
-                if let Some((s, pc, hash)) = stream_of(&record) {
-                    if s == stream {
-                        return Some(Ok(HashRecord { ordinal, pc, hash }));
-                    }
+                if let Some((_, pc, hash)) = stream_of(&record).filter(|(s, ..)| *s == stream) {
+                    return Some(Ok(HashRecord { ordinal, pc, hash }));
                 }
             }
             Err(source) => {

@@ -16,48 +16,17 @@ pub(super) fn find_memory_divergence(
     actual: &[NamedMemoryRegion],
 ) -> Option<MemoryDivergence> {
     for exp in expected {
-        let act = actual.iter().find(|r| r.name == exp.name);
-        match act {
-            None => {
-                return Some(MemoryDivergence {
-                    region: exp.name.clone(),
-                    offset: 0,
-                    expected: exp.data.first().copied().unwrap_or(0),
-                    actual: 0,
-                    lengths: None,
-                });
-            }
-            Some(act) => {
-                let lengths =
-                    (exp.data.len() != act.data.len()).then_some((exp.data.len(), act.data.len()));
-                let len = exp.data.len().max(act.data.len());
-                for i in 0..len {
-                    let e = exp.data.get(i).copied().unwrap_or(0);
-                    let a = act.data.get(i).copied().unwrap_or(0);
-                    if e != a {
-                        return Some(MemoryDivergence {
-                            region: exp.name.clone(),
-                            offset: i,
-                            expected: e,
-                            actual: a,
-                            lengths,
-                        });
-                    }
-                }
-                if let Some((exp_len, act_len)) = lengths {
-                    // Every byte agreed under zero padding, so the only
-                    // thing left to report is where the shorter side ran
-                    // out.
-                    let offset = exp_len.min(act_len);
-                    return Some(MemoryDivergence {
-                        region: exp.name.clone(),
-                        offset,
-                        expected: exp.data.get(offset).copied().unwrap_or(0),
-                        actual: act.data.get(offset).copied().unwrap_or(0),
-                        lengths,
-                    });
-                }
-            }
+        let Some(act) = actual.iter().find(|r| r.name == exp.name) else {
+            return Some(MemoryDivergence {
+                region: exp.name.clone(),
+                offset: 0,
+                expected: exp.data.first().copied().unwrap_or(0),
+                actual: 0,
+                lengths: None,
+            });
+        };
+        if let Some(divergence) = region_divergence(exp, act) {
+            return Some(divergence);
         }
     }
     for act in actual {
@@ -72,6 +41,37 @@ pub(super) fn find_memory_divergence(
         }
     }
     None
+}
+
+/// The first divergence between two regions of one name: a differing
+/// byte under zero padding, else the end of the shorter side.
+fn region_divergence(exp: &NamedMemoryRegion, act: &NamedMemoryRegion) -> Option<MemoryDivergence> {
+    let lengths = (exp.data.len() != act.data.len()).then_some((exp.data.len(), act.data.len()));
+    let len = exp.data.len().max(act.data.len());
+    for i in 0..len {
+        let e = exp.data.get(i).copied().unwrap_or(0);
+        let a = act.data.get(i).copied().unwrap_or(0);
+        if e != a {
+            return Some(MemoryDivergence {
+                region: exp.name.clone(),
+                offset: i,
+                expected: e,
+                actual: a,
+                lengths,
+            });
+        }
+    }
+    // Every byte agreed under zero padding, so the only thing left to
+    // report is where the shorter side ran out.
+    let (exp_len, act_len) = lengths?;
+    let offset = exp_len.min(act_len);
+    Some(MemoryDivergence {
+        region: exp.name.clone(),
+        offset,
+        expected: exp.data.get(offset).copied().unwrap_or(0),
+        actual: act.data.get(offset).copied().unwrap_or(0),
+        lengths,
+    })
 }
 
 #[cfg(test)]
