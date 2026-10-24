@@ -1,7 +1,9 @@
 //! The closures the runtime calls back into -- the PPU and SPU
 //! execution-unit factories, and the spawned-child image loader.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use cellgov_core::Runtime;
@@ -12,8 +14,11 @@ use super::types::{BootDebugOptions, BootServices, TitleOptions};
 use crate::child_init::{ChildInitPlan, ChildInitPlans};
 use crate::prx::{
     install_kernel_context_opd, install_unresolved_trampolines_only, load_firmware_set_from,
-    pre_init_tls, FirmwareCandidates, TlsArea,
+    pre_init_tls, FirmwareCandidates, PrxLoadInfo, TlsArea,
 };
+
+/// Library name -> NID -> OPD of a loaded firmware set.
+type ExportMap = BTreeMap<String, BTreeMap<u32, u32>>;
 
 /// Install the factories the runtime materializes execution units from.
 ///
@@ -120,146 +125,48 @@ pub(super) fn install_spawn_loader(
     services: &BootServices,
 ) -> ChildInitPlans {
     let child_init = ChildInitPlans::default();
-    let spawn_firmware_dir: Option<String> = title.firmware_dir.map(str::to_string);
     let overrides = title.identity.overrides;
-    // Scanned and decrypted on the first spawn; a boot that never
-    // spawns pays nothing.
-    let spawn_candidates: RefCell<Option<FirmwareCandidates>> = RefCell::new(None);
+    let firmware = SpawnFirmware {
+        dir: title.firmware_dir.map(str::to_string),
+        // Scanned and decrypted on the first spawn; a boot that never
+        // spawns pays nothing.
+        candidates: RefCell::new(None),
+        prx_base: overrides.prx_base,
+    };
     let loader_plans = child_init.clone();
     let sink: Rc<dyn crate::BootSink> = Rc::clone(&services.sink);
     let keys: Rc<dyn crate::KeyVaultSource> = Rc::clone(&services.keys);
     let taps: Rc<dyn crate::DebugTaps> = Rc::clone(&services.taps);
     rt.set_process_spawn_loader(move |elf_bytes, mem, space| {
-        // A child image may arrive SCE-wrapped (vsh spawns SELFs, not
-        // raw ELFs). The spawn loader is APP-keyed: klicensee
-        // resolution belongs to the title-install layer, which is not
-        // reachable from inside the runtime.
-        let vault = keys.vault_for(elf_bytes).map_err(|e| {
-            cellgov_core::ProcessSpawnLoadError::ImageParse {
-                detail: format!("child SELF: key vault: {e}"),
-            }
-        })?;
-        let plaintext = cellgov_install::self_image::to_plaintext_elf(
-            elf_bytes,
-            vault,
-            cellgov_install::self_image::KeyPolicy::AppOnly,
-        )
-        .map_err(|e| cellgov_core::ProcessSpawnLoadError::ImageParse {
-            detail: format!("child SELF: {e}"),
-        })?;
+        let plaintext = decrypt_child_self(keys.as_ref(), elf_bytes)?;
         let elf_bytes: &[u8] = &plaintext;
-        let required = cellgov_ppu::loader::required_memory_size(elf_bytes).map_err(|e| {
-            cellgov_core::ProcessSpawnLoadError::ImageParse {
-                detail: e.to_string(),
-            }
-        })?;
-        let child_mem_size = spawned_child_region_size(required)?;
-        mem.install_region(0, child_mem_size, "spawned", cellgov_mem::PageSize::Page64K)
-            .map_err(|source| cellgov_core::ProcessSpawnLoadError::RegionInstall { source })?;
-        let exit_stub_addr = child_exit_stub_addr(required);
-        // li r11, 22; sc -- the child enters this when its entry
-        // returns. r11 is the LV2 syscall number, and 22 is
-        // `cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT`. The exit status is
-        // whatever the entry left in r3.
-        let stub: [u8; 8] = [0x39, 0x60, 0x00, 0x16, 0x44, 0x00, 0x00, 0x02];
-        let range = cellgov_mem::ByteRange::new(
-            cellgov_mem::GuestAddr::new(exit_stub_addr),
-            stub.len() as u64,
-        )
-        .ok_or_else(|| cellgov_core::ProcessSpawnLoadError::RegionSize {
-            detail: format!("exit-stub range at 0x{exit_stub_addr:x} is not addressable"),
-        })?;
-        mem.apply_commit(range, &stub)
-            .map_err(|source| cellgov_core::ProcessSpawnLoadError::ExitStubWrite { source })?;
+        let required = cellgov_ppu::loader::required_memory_size(elf_bytes)
+            .map_err(|e| image_parse(e.to_string()))?;
+        let (child_mem_size, exit_stub_addr) = install_child_region_and_exit_stub(mem, required)?;
         let mut state = cellgov_ppu::state::PpuState::new();
-        cellgov_ppu::loader::load_ppu_elf(elf_bytes, mem, &mut state).map_err(|e| {
-            cellgov_core::ProcessSpawnLoadError::ImageLoad {
-                detail: e.to_string(),
-            }
-        })?;
-
-        let imports = cellgov_ppu::prx::parse_imports(elf_bytes).map_err(|e| {
-            cellgov_core::ProcessSpawnLoadError::ImageParse {
-                detail: format!("child imports: {e:?}"),
-            }
-        })?;
+        cellgov_ppu::loader::load_ppu_elf(elf_bytes, mem, &mut state)
+            .map_err(|e| image_load(e.to_string()))?;
+        let imports = cellgov_ppu::prx::parse_imports(elf_bytes)
+            .map_err(|e| image_parse(format!("child imports: {e:?}")))?;
         let code_floor = u32::try_from(spawned_child_code_floor(required)).map_err(|_| {
             cellgov_core::ProcessSpawnLoadError::RegionSize {
                 detail: format!("required_size=0x{required:x} leaves no 32-bit code floor"),
             }
         })?;
-        let (mut prx_modules, child_exports) = match spawn_firmware_dir.as_deref() {
-            Some(dir) => {
-                let mut cache = spawn_candidates.borrow_mut();
-                let candidates =
-                    match cache.as_ref() {
-                        Some(c) => c,
-                        None => {
-                            let scanned = FirmwareCandidates::scan(dir, false, keys.as_ref())
-                                .map_err(|e| cellgov_core::ProcessSpawnLoadError::ImageLoad {
-                                    detail: format!("child firmware set: {e}"),
-                                })?;
-                            cache.insert(scanned)
-                        }
-                    };
-                let (modules, _identity, host_link) = load_firmware_set_from(
-                    candidates,
-                    &imports,
-                    mem,
-                    code_floor,
-                    overrides.prx_base,
-                    sink.as_ref(),
-                )
-                .map_err(|e| cellgov_core::ProcessSpawnLoadError::ImageLoad {
-                    detail: format!("child firmware set: {e}"),
-                })?;
-                (modules, Some(host_link.exports))
-            }
-            None => (Vec::new(), None),
+        let (prx_modules, child_exports) = load_child_firmware(
+            &firmware,
+            keys.as_ref(),
+            &imports,
+            mem,
+            code_floor,
+            sink.as_ref(),
+        )?;
+        let resident = ChildResident {
+            image_end: required as u64,
+            exit_stub_addr,
+            region_size: child_mem_size as u64,
         };
-        if prx_modules.is_empty() {
-            let (info, _requesters) = install_unresolved_trampolines_only(
-                &imports,
-                mem,
-                u64::from(code_floor),
-                sink.as_ref(),
-            )
-            .map_err(|e| cellgov_core::ProcessSpawnLoadError::ImageLoad {
-                detail: format!("child trampolines: {e}"),
-            })?;
-            if let Some(info) = info {
-                prx_modules.push(info);
-            }
-        }
-        // The child's TLS area takes the first 64 KB page at or above
-        // the end of everything resident, as the boot's does. The exit
-        // stub counts as resident: `sys_initialize_tls` writes the
-        // per-thread TLS header over the first 0x30 bytes of the area.
-        let resident_end = prx_modules
-            .iter()
-            .map(|p| p.data_end)
-            .max()
-            .unwrap_or(0)
-            .max(required as u64)
-            .max(exit_stub_addr + 8);
-        let tls = TlsArea::above(resident_end)
-            .filter(|area| area.end() <= child_mem_size as u64)
-            .ok_or_else(|| cellgov_core::ProcessSpawnLoadError::RegionSize {
-                detail: format!(
-                    "child image and firmware set end at 0x{resident_end:x}, leaving no TLS \
-                     area inside the 0x{child_mem_size:x}-byte region",
-                ),
-            })?;
-        pre_init_tls(elf_bytes, mem, tls, sink.as_ref()).map_err(|e| {
-            cellgov_core::ProcessSpawnLoadError::ImageLoad {
-                detail: format!("child TLS: {e}"),
-            }
-        })?;
-        install_kernel_context_opd(mem, tls).map_err(|e| {
-            cellgov_core::ProcessSpawnLoadError::ImageLoad {
-                detail: format!("child kernel-context OPD: {e}"),
-            }
-        })?;
+        let tls = place_child_tls(elf_bytes, mem, &prx_modules, resident, sink.as_ref())?;
         // This report follows the last refusal above. On a refusal the
         // runtime removes the child's address space (`cellgov_core`
         // `process_spawn.rs` `handle_process_spawn`). An earlier report
@@ -288,6 +195,172 @@ pub(super) fn install_spawn_loader(
         })
     });
     child_init
+}
+
+/// Where a spawned child's firmware set comes from: the firmware
+/// directory, its candidates once scanned, and the PRX base override.
+struct SpawnFirmware {
+    dir: Option<String>,
+    candidates: RefCell<Option<FirmwareCandidates>>,
+    prx_base: Option<u64>,
+}
+
+/// The ends a spawned child's TLS area must sit above, and the region it
+/// must fit inside.
+#[derive(Clone, Copy)]
+struct ChildResident {
+    image_end: u64,
+    exit_stub_addr: u64,
+    region_size: u64,
+}
+
+/// Return a spawn refusal for an image that would not load.
+fn image_load(detail: String) -> cellgov_core::ProcessSpawnLoadError {
+    cellgov_core::ProcessSpawnLoadError::ImageLoad { detail }
+}
+
+/// Return a spawn refusal for an image that would not parse.
+fn image_parse(detail: String) -> cellgov_core::ProcessSpawnLoadError {
+    cellgov_core::ProcessSpawnLoadError::ImageParse { detail }
+}
+
+/// Unwrap a child image to its plaintext ELF.
+///
+/// A child image may arrive SCE-wrapped (vsh spawns SELFs, not raw
+/// ELFs). The spawn loader is APP-keyed: klicensee resolution belongs to
+/// the title-install layer, which is not reachable from inside the
+/// runtime.
+fn decrypt_child_self<'a>(
+    keys: &dyn crate::KeyVaultSource,
+    bytes: &'a [u8],
+) -> Result<Cow<'a, [u8]>, cellgov_core::ProcessSpawnLoadError> {
+    let vault = keys
+        .vault_for(bytes)
+        .map_err(|e| image_parse(format!("child SELF: key vault: {e}")))?;
+    cellgov_install::self_image::to_plaintext_elf(
+        bytes,
+        vault,
+        cellgov_install::self_image::KeyPolicy::AppOnly,
+    )
+    .map_err(|e| image_parse(format!("child SELF: {e}")))
+}
+
+/// Install a child's region in its space and write the exit stub the
+/// child enters when its entry returns. Returns the region size and the
+/// stub address.
+fn install_child_region_and_exit_stub(
+    mem: &mut cellgov_mem::GuestMemory,
+    required: usize,
+) -> Result<(usize, u64), cellgov_core::ProcessSpawnLoadError> {
+    let child_mem_size = spawned_child_region_size(required)?;
+    mem.install_region(0, child_mem_size, "spawned", cellgov_mem::PageSize::Page64K)
+        .map_err(|source| cellgov_core::ProcessSpawnLoadError::RegionInstall { source })?;
+    let exit_stub_addr = child_exit_stub_addr(required);
+    // li r11, 22; sc -- the child enters this when its entry
+    // returns. r11 is the LV2 syscall number, and 22 is
+    // `cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT`. The exit status is
+    // whatever the entry left in r3.
+    let stub: [u8; 8] = [0x39, 0x60, 0x00, 0x16, 0x44, 0x00, 0x00, 0x02];
+    let range = cellgov_mem::ByteRange::new(
+        cellgov_mem::GuestAddr::new(exit_stub_addr),
+        stub.len() as u64,
+    )
+    .ok_or_else(|| cellgov_core::ProcessSpawnLoadError::RegionSize {
+        detail: format!("exit-stub range at 0x{exit_stub_addr:x} is not addressable"),
+    })?;
+    mem.apply_commit(range, &stub)
+        .map_err(|source| cellgov_core::ProcessSpawnLoadError::ExitStubWrite { source })?;
+    Ok((child_mem_size, exit_stub_addr))
+}
+
+/// Return the firmware candidates in `cache`, scanning `dir` into it on
+/// the first call.
+fn get_or_scan<'c>(
+    cache: &'c mut Option<FirmwareCandidates>,
+    dir: &str,
+    keys: &dyn crate::KeyVaultSource,
+) -> Result<&'c FirmwareCandidates, cellgov_core::ProcessSpawnLoadError> {
+    let candidates = match cache.take() {
+        Some(candidates) => candidates,
+        None => FirmwareCandidates::scan(dir, false, keys)
+            .map_err(|e| image_load(format!("child firmware set: {e}")))?,
+    };
+    Ok(cache.insert(candidates))
+}
+
+/// Load a child's firmware set into its space, or, with no firmware
+/// directory or an empty set, its unresolved-import trampolines.
+/// Returns the loaded modules and the set's export map.
+fn load_child_firmware(
+    firmware: &SpawnFirmware,
+    keys: &dyn crate::KeyVaultSource,
+    imports: &[cellgov_ppu::prx::ImportedModule],
+    mem: &mut cellgov_mem::GuestMemory,
+    code_floor: u32,
+    sink: &dyn crate::BootSink,
+) -> Result<(Vec<PrxLoadInfo>, Option<ExportMap>), cellgov_core::ProcessSpawnLoadError> {
+    let (mut prx_modules, child_exports) = match firmware.dir.as_deref() {
+        Some(dir) => {
+            let mut cache = firmware.candidates.borrow_mut();
+            let candidates = get_or_scan(&mut cache, dir, keys)?;
+            let (modules, _identity, host_link) = load_firmware_set_from(
+                candidates,
+                imports,
+                mem,
+                code_floor,
+                firmware.prx_base,
+                sink,
+            )
+            .map_err(|e| image_load(format!("child firmware set: {e}")))?;
+            (modules, Some(host_link.exports))
+        }
+        None => (Vec::new(), None),
+    };
+    if prx_modules.is_empty() {
+        let (info, _requesters) =
+            install_unresolved_trampolines_only(imports, mem, u64::from(code_floor), sink)
+                .map_err(|e| image_load(format!("child trampolines: {e}")))?;
+        if let Some(info) = info {
+            prx_modules.push(info);
+        }
+    }
+    Ok((prx_modules, child_exports))
+}
+
+/// Place a child's TLS area, initialize it, and install the
+/// kernel-context OPD at its end.
+///
+/// The area takes the first 64 KB page at or above the end of
+/// everything resident, as the boot's does. The exit stub counts as
+/// resident: `sys_initialize_tls` writes the per-thread TLS header over
+/// the first 0x30 bytes of the area.
+fn place_child_tls(
+    elf_bytes: &[u8],
+    mem: &mut cellgov_mem::GuestMemory,
+    prx_modules: &[PrxLoadInfo],
+    resident: ChildResident,
+    sink: &dyn crate::BootSink,
+) -> Result<TlsArea, cellgov_core::ProcessSpawnLoadError> {
+    let resident_end = prx_modules
+        .iter()
+        .map(|p| p.data_end)
+        .max()
+        .unwrap_or(0)
+        .max(resident.image_end)
+        .max(resident.exit_stub_addr + 8);
+    let child_mem_size = resident.region_size;
+    let tls = TlsArea::above(resident_end)
+        .filter(|area| area.end() <= child_mem_size)
+        .ok_or_else(|| cellgov_core::ProcessSpawnLoadError::RegionSize {
+            detail: format!(
+                "child image and firmware set end at 0x{resident_end:x}, leaving no TLS \
+                 area inside the 0x{child_mem_size:x}-byte region",
+            ),
+        })?;
+    pre_init_tls(elf_bytes, mem, tls, sink).map_err(|e| image_load(format!("child TLS: {e}")))?;
+    install_kernel_context_opd(mem, tls)
+        .map_err(|e| image_load(format!("child kernel-context OPD: {e}")))?;
+    Ok(tls)
 }
 
 /// Address of a spawned child's exit stub: the landing site a child
