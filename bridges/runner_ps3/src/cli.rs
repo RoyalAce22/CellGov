@@ -228,18 +228,7 @@ fn set_flag(slot: &mut bool, flag: &str) -> Result<(), RunnerPs3Error> {
 /// UTF-8, an unknown verb or flag, a flag the verb does not take, a
 /// flag given twice or with no value, or a value that does not parse.
 pub fn parse(args: &[OsString]) -> Result<Command, RunnerPs3Error> {
-    let mut words = Vec::with_capacity(args.len());
-    for (position, arg) in args.iter().enumerate() {
-        let word = arg.to_str().ok_or_else(|| {
-            usage(format!(
-                "argument {} is not UTF-8: {}",
-                position + 1,
-                arg.to_string_lossy()
-            ))
-        })?;
-        words.push(word);
-    }
-    let mut words = words.into_iter();
+    let mut words = utf8_words(args)?.into_iter();
     let verb_word = words
         .next()
         .ok_or_else(|| usage("no verb given".to_string()))?;
@@ -272,41 +261,7 @@ pub fn parse(args: &[OsString]) -> Result<Command, RunnerPs3Error> {
                 if value.starts_with("--") {
                     return Err(usage(format!("{flag} needs a value, not the flag {value}")));
                 }
-                let text = value.to_string();
-                match flag {
-                    "--host" => set_once(&mut command.host, flag, text)?,
-                    "--profile" => set_once(&mut command.profile, flag, text)?,
-                    "--profiles" => set_once(&mut command.profiles, flag, PathBuf::from(value))?,
-                    "--model" => set_once(&mut command.model, flag, text)?,
-                    "--cfw" => set_once(&mut command.cfw, flag, text)?,
-                    "--debugger" => {
-                        let attached = match value {
-                            "none" => false,
-                            "attached" => true,
-                            other => {
-                                return Err(usage(format!(
-                                    "--debugger takes none or attached, not {other:?}"
-                                )))
-                            }
-                        };
-                        set_once(&mut command.debugger, flag, attached)?;
-                    }
-                    "--manifest" => set_once(&mut command.manifest, flag, PathBuf::from(value))?,
-                    "--out" => set_once(&mut command.out, flag, PathBuf::from(value))?,
-                    "--frame" => set_once(&mut command.frame, flag, PathBuf::from(value))?,
-                    "--harness-revision" => set_once(&mut command.harness_revision, flag, text)?,
-                    "--poll-ms" => {
-                        let ms: u64 = value.parse().map_err(|_| {
-                            usage(format!("--poll-ms {value:?} is not a millisecond count"))
-                        })?;
-                        if ms == 0 {
-                            return Err(usage("--poll-ms must be greater than zero".to_string()));
-                        }
-                        set_once(&mut command.poll_ms, flag, ms)?;
-                    }
-                    "--reason" => set_once(&mut command.reason, flag, text)?,
-                    _ => return Err(usage(format!("unknown flag {flag}"))),
-                }
+                set_valued_flag(&mut command, flag, value)?;
             }
         }
     }
@@ -316,6 +271,66 @@ pub fn parse(args: &[OsString]) -> Result<Command, RunnerPs3Error> {
         ));
     }
     Ok(command)
+}
+
+/// Borrow each argument as UTF-8, refusing the first that is not.
+fn utf8_words(args: &[OsString]) -> Result<Vec<&str>, RunnerPs3Error> {
+    args.iter()
+        .enumerate()
+        .map(|(position, arg)| {
+            arg.to_str().ok_or_else(|| {
+                usage(format!(
+                    "argument {} is not UTF-8: {}",
+                    position + 1,
+                    arg.to_string_lossy()
+                ))
+            })
+        })
+        .collect()
+}
+
+/// Store `value` for the flag that takes one.
+///
+/// A value that does not parse refuses before a repeated flag does.
+fn set_valued_flag(command: &mut Command, flag: &str, value: &str) -> Result<(), RunnerPs3Error> {
+    let text = value.to_string();
+    match flag {
+        "--host" => set_once(&mut command.host, flag, text),
+        "--profile" => set_once(&mut command.profile, flag, text),
+        "--profiles" => set_once(&mut command.profiles, flag, PathBuf::from(value)),
+        "--model" => set_once(&mut command.model, flag, text),
+        "--cfw" => set_once(&mut command.cfw, flag, text),
+        "--debugger" => set_once(&mut command.debugger, flag, parse_debugger(value)?),
+        "--manifest" => set_once(&mut command.manifest, flag, PathBuf::from(value)),
+        "--out" => set_once(&mut command.out, flag, PathBuf::from(value)),
+        "--frame" => set_once(&mut command.frame, flag, PathBuf::from(value)),
+        "--harness-revision" => set_once(&mut command.harness_revision, flag, text),
+        "--poll-ms" => set_once(&mut command.poll_ms, flag, parse_poll_ms(value)?),
+        "--reason" => set_once(&mut command.reason, flag, text),
+        _ => Err(usage(format!("unknown flag {flag}"))),
+    }
+}
+
+/// `--debugger`: `true` for `attached`, `false` for `none`.
+fn parse_debugger(value: &str) -> Result<bool, RunnerPs3Error> {
+    match value {
+        "none" => Ok(false),
+        "attached" => Ok(true),
+        other => Err(usage(format!(
+            "--debugger takes none or attached, not {other:?}"
+        ))),
+    }
+}
+
+/// `--poll-ms`: a millisecond count above zero.
+fn parse_poll_ms(value: &str) -> Result<u64, RunnerPs3Error> {
+    let ms: u64 = value
+        .parse()
+        .map_err(|_| usage(format!("--poll-ms {value:?} is not a millisecond count")))?;
+    if ms == 0 {
+        return Err(usage("--poll-ms must be greater than zero".to_string()));
+    }
+    Ok(ms)
 }
 
 impl Command {
