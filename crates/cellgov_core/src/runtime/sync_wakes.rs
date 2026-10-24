@@ -19,23 +19,8 @@ impl Runtime {
     pub(super) fn resolve_sync_wakes(&mut self, woken_unit_ids: &[UnitId]) {
         for waiter in woken_unit_ids {
             let waiter = *waiter;
-            // A Finished waiter is process-exit residue (see the
-            // `runtime` module docs). The release side spent a waiter
-            // slot on it. That can skew guest-visible primitive state,
-            // so the resolver logs the drop.
             if self.registry.effective_status(waiter) == Some(UnitStatus::Finished) {
-                self.timer_wakes.cancel(waiter);
-                // The pending response (already drained by the exit
-                // sweep in the ordinary flow) can never be consumed.
-                let _ = self.syscall_responses.try_take(waiter);
-                self.lv2_host.log_invariant_break(
-                    "runtime.resolve_sync_wakes_waiter_finished",
-                    format_args!(
-                        "wake for {waiter:?} which is already Finished (exited-process \
-                         residue on a host-side waiter list); wake dropped, unit stays \
-                         Finished",
-                    ),
-                );
+                self.drop_finished_wake(waiter);
                 continue;
             }
             // Continuation payloads land through pointers the WAITER
@@ -51,38 +36,17 @@ impl Runtime {
                     self.deliver_syscall_return(waiter, code);
                 }
                 Some(PendingResponse::EventQueueReceive { out_ptr, payload }) => {
-                    let payload = payload.unwrap_or_else(|| {
-                        panic!(
-                            "EventQueueReceive wake for {waiter:?} with unfilled payload \
-                             (release-side dispatch forgot response_updates)"
-                        )
-                    });
                     // The event returns in r4..=r7; `out_ptr` is the
                     // dummy pointer the kernel never writes.
                     let _ = out_ptr;
-                    for (reg, value) in cellgov_lv2::event_registers(&payload) {
-                        self.registry.push_register_write(waiter, reg, value);
-                    }
+                    self.push_event_registers(waiter, payload);
                     self.deliver_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::EventFlagWake {
                     result_ptr,
                     observed,
                 }) => {
-                    // The kernel stores the observed pattern only
-                    // through a non-null result pointer; a waiter that
-                    // passed NULL wakes with r3 alone. A console
-                    // traces this in
-                    // tests/ps3autotests/tests/lv2/sys_event_flag,
-                    // whose wait helpers pass 0 and complete cleanly.
-                    if result_ptr != 0 {
-                        self.commit_bytes_at(
-                            HostWriter::WakeContinuation,
-                            waiter,
-                            result_ptr as u64,
-                            &observed.to_be_bytes(),
-                        );
-                    }
+                    self.store_event_flag_observed(waiter, result_ptr, observed);
                     self.deliver_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::EventFlagCancelWake {
@@ -90,82 +54,16 @@ impl Runtime {
                     observed,
                 }) => {
                     // On cancel each drained waiter stores the pattern
-                    // captured at the cancel call through its own
-                    // non-null result pointer and returns
+                    // captured at the cancel call and returns
                     // CELL_ECANCELED.
-                    if result_ptr != 0 {
-                        self.commit_bytes_at(
-                            HostWriter::WakeContinuation,
-                            waiter,
-                            result_ptr as u64,
-                            &observed.to_be_bytes(),
-                        );
-                    }
+                    self.store_event_flag_observed(waiter, result_ptr, observed);
                     self.deliver_syscall_return(
                         waiter,
                         cellgov_ps3_abi::lv2::errno::CELL_ECANCELED.into(),
                     );
                 }
                 Some(PendingResponse::LwMutexWake { mutex_ptr, caller }) => {
-                    // `mutex_ptr == 0` is the raw LV2-syscall path with
-                    // no user-space struct.
-                    if mutex_ptr != 0 {
-                        let base = mutex_ptr as u64;
-                        // sys_lwmutex_t (24 bytes; see sys_lwmutex_create):
-                        //   offset 0  : owner (u32 BE)
-                        //   offset 4  : waiter count (u32 BE)
-                        //   offset 12 : recursive_count (u32 BE)
-                        self.commit_bytes_at(
-                            HostWriter::WakeContinuation,
-                            waiter,
-                            base,
-                            &caller.to_be_bytes(),
-                        );
-                        self.commit_bytes_at(
-                            HostWriter::WakeContinuation,
-                            waiter,
-                            base + 12,
-                            &1u32.to_be_bytes(),
-                        );
-                        let waiter_addr = base + 4;
-                        // The user-space struct lives in the waking
-                        // unit's space; read it back from there.
-                        let bytes = super::spaces::resolve_space_memory(
-                            &self.memory,
-                            &self.spaces,
-                            waiter_space,
-                        )
-                        .read(
-                            cellgov_mem::ByteRange::new(
-                                cellgov_mem::GuestAddr::new(waiter_addr),
-                                4,
-                            )
-                            .expect("lwmutex_wake: bad waiter ByteRange"),
-                        );
-                        let current = u32::from_be_bytes(
-                            bytes
-                                .expect(
-                                    "lwmutex wake: waiter slot read failed after owner \
-                                     write succeeded; lwmutex_t crosses an unmapped \
-                                     boundary or park-side validation regressed",
-                                )
-                                .first_chunk::<4>()
-                                .copied()
-                                .expect("4-byte read returned <4 bytes"),
-                        );
-                        debug_assert!(
-                            current > 0,
-                            "lwmutex wake: user-space waiter count already 0 at {waiter_addr:#x} \
-                             (host waiter list diverged from guest struct)",
-                        );
-                        let next = current.saturating_sub(1);
-                        self.commit_bytes_at(
-                            HostWriter::WakeContinuation,
-                            waiter,
-                            waiter_addr,
-                            &next.to_be_bytes(),
-                        );
-                    }
+                    self.repair_lwmutex_struct(waiter, waiter_space, mutex_ptr, caller);
                     if let Some(tid) = self.lv2_host.ppu_thread_id_for_unit(waiter) {
                         self.lv2_host.lwmutex_holds_inc(tid);
                     }
@@ -213,6 +111,127 @@ impl Runtime {
             self.registry
                 .set_status_override(waiter, UnitStatus::Runnable);
         }
+    }
+
+    /// Drop the wake of a Finished waiter. A Finished waiter is
+    /// process-exit residue (see the `runtime` module docs). The release
+    /// side spent a waiter slot on it. That can skew guest-visible
+    /// primitive state, so the resolver logs the drop.
+    fn drop_finished_wake(&mut self, waiter: UnitId) {
+        self.timer_wakes.cancel(waiter);
+        // The pending response (already drained by the exit
+        // sweep in the ordinary flow) can never be consumed.
+        let _ = self.syscall_responses.try_take(waiter);
+        self.lv2_host.log_invariant_break(
+            "runtime.resolve_sync_wakes_waiter_finished",
+            format_args!(
+                "wake for {waiter:?} which is already Finished (exited-process \
+                 residue on a host-side waiter list); wake dropped, unit stays \
+                 Finished",
+            ),
+        );
+    }
+
+    /// Queue the received event's registers for `waiter`.
+    ///
+    /// # Panics
+    ///
+    /// `payload` is `None`: four zero u64s would be indistinguishable
+    /// from a real event.
+    fn push_event_registers(&mut self, waiter: UnitId, payload: Option<cellgov_lv2::EventPayload>) {
+        let payload = payload.unwrap_or_else(|| {
+            panic!(
+                "EventQueueReceive wake for {waiter:?} with unfilled payload \
+                 (release-side dispatch forgot response_updates)"
+            )
+        });
+        for (reg, value) in cellgov_lv2::event_registers(&payload) {
+            self.registry.push_register_write(waiter, reg, value);
+        }
+    }
+
+    /// Store an event flag's observed pattern through `waiter`'s result
+    /// pointer.
+    ///
+    /// The kernel stores the observed pattern only through a non-null
+    /// result pointer; a waiter that passed NULL wakes with r3 alone. A
+    /// console traces this in tests/ps3autotests/tests/lv2/sys_event_flag,
+    /// whose wait helpers pass 0 and complete cleanly.
+    fn store_event_flag_observed(&mut self, waiter: UnitId, result_ptr: u32, observed: u64) {
+        if result_ptr == 0 {
+            return;
+        }
+        self.commit_bytes_at(
+            HostWriter::WakeContinuation,
+            waiter,
+            result_ptr as u64,
+            &observed.to_be_bytes(),
+        );
+    }
+
+    /// Hand the user-space `sys_lwmutex_t` at `mutex_ptr` to `caller`:
+    /// write the owner, set recursive_count to 1, then take one waiter
+    /// off the waiter count. A zero `mutex_ptr` is the raw LV2-syscall
+    /// path with no user-space struct.
+    ///
+    /// sys_lwmutex_t (24 bytes; see sys_lwmutex_create):
+    ///   offset 0  : owner (u32 BE)
+    ///   offset 4  : waiter count (u32 BE)
+    ///   offset 12 : recursive_count (u32 BE)
+    fn repair_lwmutex_struct(
+        &mut self,
+        waiter: UnitId,
+        waiter_space: super::spaces::AddressSpaceId,
+        mutex_ptr: u32,
+        caller: u32,
+    ) {
+        if mutex_ptr == 0 {
+            return;
+        }
+        let base = mutex_ptr as u64;
+        self.commit_bytes_at(
+            HostWriter::WakeContinuation,
+            waiter,
+            base,
+            &caller.to_be_bytes(),
+        );
+        self.commit_bytes_at(
+            HostWriter::WakeContinuation,
+            waiter,
+            base + 12,
+            &1u32.to_be_bytes(),
+        );
+        let waiter_addr = base + 4;
+        // The user-space struct lives in the waking
+        // unit's space; read it back from there.
+        let bytes = super::spaces::resolve_space_memory(&self.memory, &self.spaces, waiter_space)
+            .read(
+                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(waiter_addr), 4)
+                    .expect("lwmutex_wake: bad waiter ByteRange"),
+            );
+        let current = u32::from_be_bytes(
+            bytes
+                .expect(
+                    "lwmutex wake: waiter slot read failed after owner \
+                     write succeeded; lwmutex_t crosses an unmapped \
+                     boundary or park-side validation regressed",
+                )
+                .first_chunk::<4>()
+                .copied()
+                .expect("4-byte read returned <4 bytes"),
+        );
+        debug_assert!(
+            current > 0,
+            "lwmutex wake: user-space waiter count already 0 at {waiter_addr:#x} \
+             (host waiter list diverged from guest struct)",
+        );
+        let next = current.saturating_sub(1);
+        self.commit_bytes_at(
+            HostWriter::WakeContinuation,
+            waiter,
+            waiter_addr,
+            &next.to_be_bytes(),
+        );
     }
 
     #[cfg(test)]
