@@ -39,17 +39,88 @@ pub fn run(args: &Rpcs3AttributeArgs) -> Result<(), CommandError> {
         )));
     }
 
-    let want_list = args.list;
-    let want_ranked = args.ranked;
-    let name_filter = args.name.clone();
-    let addr_filter: Option<(u64, u64)> = args.addr.map(|addr| (addr, args.len.unwrap_or(1)));
+    let filters = Filters {
+        list: args.list,
+        ranked: args.ranked,
+        addr: args.addr.map(|addr| (addr, args.len.unwrap_or(1))),
+        name: args.name.as_deref(),
+    };
+    let scan = scan_trace(path, &filters)?;
+    if scan.resyncs > 0 {
+        eprintln!(
+            "rpcs3-attribute: skipped {} byte(s) of corrupted/partial trace data while resyncing",
+            scan.resyncs,
+        );
+    }
 
-    let mut total_records = 0usize;
-    let mut hits: Vec<HleCallRecord> = Vec::new();
-    let mut name_hits: Vec<HleCallRecord> = Vec::new();
-    let mut tally = HleWriteTally::default();
-    let mut resyncs = 0usize;
+    eprintln!(
+        "rpcs3-attribute: streamed {} record(s) from {trace_path}",
+        scan.total
+    );
 
+    if filters.ranked {
+        println!("{:>8}  {:>8}  name", "writes", "calls");
+        for row in scan.tally.ranked() {
+            println!("{:>8}  {:>8}  {}", row.writes, row.calls, row.name);
+        }
+    }
+
+    if let Some((addr, len)) = filters.addr {
+        let end = addr.saturating_add(len);
+        print_hits(
+            &scan.hits,
+            &format!(
+                "no records wrote to [0x{addr:016x}, 0x{end:016x}). Address may be untouched, or the watch list the trace was captured under did not cover it."
+            ),
+            &format!(
+                "{} record(s) wrote into [0x{addr:016x}, 0x{end:016x}) in chronological order:",
+                scan.hits.len(),
+            ),
+        );
+    }
+
+    if let Some(needle) = filters.name {
+        print_hits(
+            &scan.name_hits,
+            &format!("no records matched name substring {needle:?}"),
+            &format!(
+                "{} record(s) matched name substring {needle:?} in chronological order:",
+                scan.name_hits.len(),
+            ),
+        );
+    }
+    Ok(())
+}
+
+/// The query modes the scan serves.
+struct Filters<'a> {
+    list: bool,
+    ranked: bool,
+    /// Start and length of the queried address range.
+    addr: Option<(u64, u64)>,
+    name: Option<&'a str>,
+}
+
+/// What one pass over the trace collected.
+struct Scan {
+    total: usize,
+    hits: Vec<HleCallRecord>,
+    name_hits: Vec<HleCallRecord>,
+    tally: HleWriteTally,
+    /// Bytes skipped plus records dropped while resyncing.
+    resyncs: usize,
+}
+
+/// Stream the trace at `path` once, printing each record under `--list`
+/// and collecting what the other modes report.
+fn scan_trace(path: &Path, filters: &Filters<'_>) -> Result<Scan, CommandError> {
+    let mut scan = Scan {
+        total: 0,
+        hits: Vec::new(),
+        name_hits: Vec::new(),
+        tally: HleWriteTally::default(),
+        resyncs: 0,
+    };
     let parse_failed = |error| CommandError::failed(format!("failed to parse trace: {error}"));
     let file = File::open(path).map_err(|error| {
         parse_failed(cellgov_ppu::differential::rpcs3_hle_trace::HleTraceError::Io(error))
@@ -60,82 +131,48 @@ pub fn run(args: &Rpcs3AttributeArgs) -> Result<(), CommandError> {
         let rec = match event.map_err(parse_failed)? {
             HleTraceEvent::Record(rec) => rec,
             HleTraceEvent::SkippedBytes(n) => {
-                resyncs += n;
+                scan.resyncs += n;
                 continue;
             }
             HleTraceEvent::DroppedRecord(_) => {
-                resyncs += 1;
+                scan.resyncs += 1;
                 continue;
             }
         };
-        total_records += 1;
-        if total_records.is_multiple_of(1_000_000) {
-            eprintln!("rpcs3-attribute: streamed {total_records} records...");
+        scan.total += 1;
+        if scan.total.is_multiple_of(1_000_000) {
+            eprintln!("rpcs3-attribute: streamed {} records...", scan.total);
         }
-        if want_list {
+        if filters.list {
             print_record(&rec, "");
         }
-        if want_ranked {
-            tally.add(&rec);
+        if filters.ranked {
+            scan.tally.add(&rec);
         }
-        if let Some((addr, len)) = addr_filter {
-            if rec.writes_into(addr, len) {
-                hits.push(rec.clone());
-            }
+        if filters
+            .addr
+            .is_some_and(|(addr, len)| rec.writes_into(addr, len))
+        {
+            scan.hits.push(rec.clone());
         }
-        if let Some(needle) = name_filter.as_deref() {
-            if rec.name.contains(needle) {
-                name_hits.push(rec);
-            }
+        if filters.name.is_some_and(|needle| rec.name.contains(needle)) {
+            scan.name_hits.push(rec);
         }
     }
-    if resyncs > 0 {
-        eprintln!(
-            "rpcs3-attribute: skipped {resyncs} byte(s) of corrupted/partial trace data while resyncing",
-        );
-    }
+    Ok(scan)
+}
 
-    eprintln!("rpcs3-attribute: streamed {total_records} record(s) from {trace_path}",);
-
-    if want_ranked {
-        println!("{:>8}  {:>8}  name", "writes", "calls");
-        for row in tally.ranked() {
-            println!("{:>8}  {:>8}  {}", row.writes, row.calls, row.name);
-        }
+/// Print `empty` when no record matched, else `header` and each record
+/// indented.
+fn print_hits(hits: &[HleCallRecord], empty: &str, header: &str) {
+    if hits.is_empty() {
+        println!("{empty}");
+        return;
     }
-
-    if let Some((addr, len)) = addr_filter {
-        if hits.is_empty() {
-            println!(
-                "no records wrote to [0x{addr:016x}, 0x{:016x}). Address may be untouched, or the watch list the trace was captured under did not cover it.",
-                addr.saturating_add(len),
-            );
-        } else {
-            println!(
-                "{} record(s) wrote into [0x{addr:016x}, 0x{:016x}) in chronological order:",
-                hits.len(),
-                addr.saturating_add(len),
-            );
-            for rec in &hits {
-                print_record(rec, "  ");
-            }
-        }
+    println!("{header}");
+    for rec in hits {
+        print_record(rec, "  ");
     }
-
-    if let Some(needle) = name_filter.as_deref() {
-        if name_hits.is_empty() {
-            println!("no records matched name substring {needle:?}");
-        } else {
-            println!(
-                "{} record(s) matched name substring {needle:?} in chronological order:",
-                name_hits.len(),
-            );
-            for rec in &name_hits {
-                print_record(rec, "  ");
-            }
-        }
-    }
-    Ok(())
 }
 
 fn print_record(rec: &HleCallRecord, indent: &str) {
