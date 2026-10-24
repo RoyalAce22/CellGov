@@ -529,6 +529,26 @@ pub fn wait_for_result<C: ConsoleOps>(
     })
 }
 
+/// [`start`] the title, then [`wait_for_launch`], [`wait_for_result`]
+/// and [`wait_for_xmb`], each under `timeout_ms` and `poll_ms`.
+///
+/// # Errors
+///
+/// The first error of those steps.
+pub fn start_and_wait<C: ConsoleOps>(
+    console: &mut C,
+    target: &Target,
+    timeout_ms: u64,
+    poll_ms: u64,
+    sleep: &mut dyn FnMut(Duration),
+    transcript: &mut Transcript,
+) -> Result<(), RunnerPs3Error> {
+    start(console, target, transcript)?;
+    wait_for_launch(console, target, timeout_ms, poll_ms, sleep, transcript)?;
+    wait_for_result(console, target, timeout_ms, poll_ms, sleep, transcript)?;
+    wait_for_xmb(console, timeout_ms, poll_ms, sleep, transcript)
+}
+
 /// The result file's bytes.
 ///
 /// # Errors

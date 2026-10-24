@@ -10,8 +10,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cellgov_observation::console_profile::ConsoleProfiles;
-use cellgov_observation::hardware_capture::CAPTURE_DIR;
+use cellgov_observation::console_profile::{ConsoleProfiles, LoadLimits};
+use cellgov_observation::hardware_capture::{ConsoleFacts, LoadReading, CAPTURE_DIR};
 use cellgov_observation::manifest::{self, ConsoleManifest};
 use serde::{Deserialize, Serialize};
 
@@ -365,37 +365,17 @@ fn on_console<C: ConsoleOps>(
             deploy::admit(&Package::of(&job.manifest_path, &job.manifest))?;
         }
     }
+    let session = Session {
+        command,
+        context,
+        host: &host,
+        claimed: &claimed,
+    };
     let mut webman = connect(&host);
     let mut transcript = Transcript::new();
     let html = load::status_page(&mut webman, &mut transcript)?;
     let Some(job) = job else {
-        let facts = console::identify(
-            &console::parse_status_page(&html),
-            &command.operator(),
-            &claimed,
-        )
-        .map_err(RunnerPs3Error::from)?;
-        let load = load::parse_load(&html);
-        let thermal = match load.reading() {
-            Ok(reading) => Some(load::assess(
-                reading,
-                &profiles.load,
-                &context.marker_dir,
-                &host,
-            )?),
-            Err(_) => None,
-        };
-        let (status, verdict) = console::status_report(&facts, &profiles, &claimed, load, thermal)
-            .map_err(RunnerPs3Error::from)?;
-        let report = Report::Status(Box::new(status));
-        return match verdict {
-            Ok(()) => Ok(report),
-            Err(mismatch) => Err(Box::new(Failure {
-                error: mismatch.into(),
-                report: Some(report),
-                lease: None,
-            })),
-        };
+        return status_only(&session, &profiles, &html);
     };
     let mut facts = console::establish(
         &html,
@@ -410,63 +390,19 @@ fn on_console<C: ConsoleOps>(
         manifest,
     } = job;
     let manifest_path = manifest_path.as_path();
-    // A test its manifest calls not portable cannot run on the console as
-    // written, and one of them hangs it outright.
-    if matches!(
-        action,
-        Action::Deploy | Action::Run | Action::Capture { .. }
-    ) && !manifest.ps3.portable
-    {
-        return Err(RunnerPs3Error::Refused {
-            reason: format!(
-                "{} is not portable: {}",
-                manifest.test.name,
-                manifest
-                    .ps3
-                    .not_portable_reason
-                    .as_deref()
-                    .unwrap_or("its manifest gives no reason")
-            ),
-            clear_with: format!(
-                "make the test portable and set [ps3] portable = true in {}",
-                manifest_path.display()
-            ),
-        }
-        .into());
+    refuse_not_portable(&action, &manifest, manifest_path)?;
+    if let Some(reading) = admit_load(
+        &action,
+        &session,
+        profiles.load,
+        &mut webman,
+        &html,
+        sleep,
+        &mut transcript,
+    )? {
+        facts.load_at_start = Some(reading);
     }
-    if !matches!(action, Action::Cleanup) {
-        let interlock = Interlock {
-            limits: profiles.load,
-            marker_dir: &context.marker_dir,
-            host: &host,
-            wait_cool: command.wait_cool,
-            needs_space: matches!(action, Action::Deploy | Action::Capture { .. }),
-            poll_with: verb_line(
-                &context.invocation,
-                Verb::Status,
-                &host,
-                &claimed,
-                command,
-                None,
-            ),
-        };
-        let reading = load::admit(&mut webman, &html, &interlock, sleep, &mut transcript)?;
-        if matches!(action, Action::Capture { .. }) {
-            facts.load_at_start = Some(reading);
-        }
-    }
-    // A start lands on whatever runs: a title left running by an earlier
-    // test would take the start, and its exit would read as this test's.
-    if matches!(action, Action::Run | Action::Capture { .. })
-        && console::at_xmb(&html) != Some(true)
-    {
-        return Err(RunnerPs3Error::Refused {
-            reason: "the status page does not show the console at the XMB, so a title still runs"
-                .to_string(),
-            clear_with: "exit the title (webMAN /xmb.ps3$exit, or the controller)".to_string(),
-        }
-        .into());
-    }
+    refuse_unless_at_xmb(&action, &html)?;
     let lease = match Lease::acquire(
         &mut webman,
         &host,
@@ -480,112 +416,268 @@ fn on_console<C: ConsoleOps>(
             return Err(RunnerPs3Error::from(refused).into());
         }
     };
-    let target = Target::of(&manifest);
-    let clear_with = verb_line(
-        &context.invocation,
-        Verb::Cleanup,
-        &host,
-        &claimed,
-        command,
-        Some(manifest_path),
+    let site = Site {
+        session: &session,
+        manifest_path,
+        manifest: &manifest,
+        target: Target::of(&manifest),
+        clear_with: session.verb_line(Verb::Cleanup, Some(manifest_path)),
+        facts: &facts,
+    };
+    let result = dispatch(
+        action,
+        site,
+        &mut webman,
+        sleep,
+        now,
+        may_reclaim,
+        &mut transcript,
     );
-    let result = match action {
+    finish(lease, result, &mut webman, transcript)
+}
+
+/// What every step of a console verb names: the command, the front
+/// end, and the console and profile the operator gave.
+struct Session<'a> {
+    command: &'a Command,
+    context: &'a Context,
+    host: &'a str,
+    claimed: &'a str,
+}
+
+impl Session<'_> {
+    /// The [`verb_line`] for `verb` on this session's console.
+    fn verb_line(&self, verb: Verb, manifest_path: Option<&Path>) -> String {
+        verb_line(
+            &self.context.invocation,
+            verb,
+            self.host,
+            self.claimed,
+            self.command,
+            manifest_path,
+        )
+    }
+}
+
+/// `status`: the facts, the load and the claim's verdict. A claim the
+/// console fails is a failure that still carries the report.
+fn status_only(
+    session: &Session<'_>,
+    profiles: &ConsoleProfiles,
+    html: &str,
+) -> Result<Report, Box<Failure>> {
+    let facts = console::identify(
+        &console::parse_status_page(html),
+        &session.command.operator(),
+        session.claimed,
+    )
+    .map_err(RunnerPs3Error::from)?;
+    let load = load::parse_load(html);
+    let thermal = match load.reading() {
+        Ok(reading) => Some(load::assess(
+            reading,
+            &profiles.load,
+            &session.context.marker_dir,
+            session.host,
+        )?),
+        Err(_) => None,
+    };
+    let (status, verdict) =
+        console::status_report(&facts, profiles, session.claimed, load, thermal)
+            .map_err(RunnerPs3Error::from)?;
+    let report = Report::Status(Box::new(status));
+    match verdict {
+        Ok(()) => Ok(report),
+        Err(mismatch) => Err(Box::new(Failure {
+            error: mismatch.into(),
+            report: Some(report),
+            lease: None,
+        })),
+    }
+}
+
+/// Refuse a deploy, run or capture of a test its manifest calls not
+/// portable: it cannot run on the console as written, and one of them
+/// hangs it outright.
+fn refuse_not_portable(
+    action: &Action,
+    manifest: &ConsoleManifest,
+    manifest_path: &Path,
+) -> Result<(), RunnerPs3Error> {
+    if !matches!(
+        action,
+        Action::Deploy | Action::Run | Action::Capture { .. }
+    ) || manifest.ps3.portable
+    {
+        return Ok(());
+    }
+    Err(RunnerPs3Error::Refused {
+        reason: format!(
+            "{} is not portable: {}",
+            manifest.test.name,
+            manifest
+                .ps3
+                .not_portable_reason
+                .as_deref()
+                .unwrap_or("its manifest gives no reason")
+        ),
+        clear_with: format!(
+            "make the test portable and set [ps3] portable = true in {}",
+            manifest_path.display()
+        ),
+    })
+}
+
+/// Hold every verb but `cleanup` to the load interlock; for a capture,
+/// returns the load the capture starts from.
+fn admit_load<C: ConsoleOps>(
+    action: &Action,
+    session: &Session<'_>,
+    limits: LoadLimits,
+    webman: &mut C,
+    html: &str,
+    sleep: &mut dyn FnMut(Duration),
+    transcript: &mut Transcript,
+) -> Result<Option<LoadReading>, RunnerPs3Error> {
+    if matches!(action, Action::Cleanup) {
+        return Ok(None);
+    }
+    let interlock = Interlock {
+        limits,
+        marker_dir: &session.context.marker_dir,
+        host: session.host,
+        wait_cool: session.command.wait_cool,
+        needs_space: matches!(action, Action::Deploy | Action::Capture { .. }),
+        poll_with: session.verb_line(Verb::Status, None),
+    };
+    let reading = load::admit(webman, html, &interlock, sleep, transcript)?;
+    Ok(matches!(action, Action::Capture { .. }).then_some(reading))
+}
+
+/// Refuse a run or capture unless the console is at the XMB: a start
+/// lands on whatever runs, so a title left running by an earlier test
+/// would take the start, and its exit would read as this test's.
+fn refuse_unless_at_xmb(action: &Action, html: &str) -> Result<(), RunnerPs3Error> {
+    if matches!(action, Action::Run | Action::Capture { .. }) && console::at_xmb(html) != Some(true)
+    {
+        return Err(RunnerPs3Error::Refused {
+            reason: "the status page does not show the console at the XMB, so a title still runs"
+                .to_string(),
+            clear_with: "exit the title (webMAN /xmb.ps3$exit, or the controller)".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// What a console verb's action reads once the lease is held.
+struct Site<'a> {
+    session: &'a Session<'a>,
+    manifest_path: &'a Path,
+    manifest: &'a ConsoleManifest,
+    target: Target,
+    /// The `cleanup` line a refusal names.
+    clear_with: String,
+    facts: &'a ConsoleFacts,
+}
+
+/// Run `action` under the lease; returns the capture a `capture` wrote.
+fn dispatch<C: ConsoleOps>(
+    action: Action,
+    site: Site<'_>,
+    webman: &mut C,
+    sleep: &mut dyn FnMut(Duration),
+    now: &mut dyn FnMut() -> Result<String, RunnerPs3Error>,
+    may_reclaim: &mut dyn FnMut(&Reclaim) -> Result<bool, RunnerPs3Error>,
+    transcript: &mut Transcript,
+) -> Result<Option<CaptureReport>, RunnerPs3Error> {
+    let command = site.session.command;
+    let target = &site.target;
+    let timeout_ms = site.manifest.ps3.timeout_ms;
+    match action {
         Action::Deploy => {
-            let package = Package::of(manifest_path, &manifest);
+            let package = Package::of(site.manifest_path, site.manifest);
             run::preflight(
-                &mut webman,
-                &target,
+                webman,
+                target,
                 command.reclaim,
                 may_reclaim,
-                &clear_with,
-                &mut transcript,
-            )
-            .and_then(|()| deploy::deploy(&mut webman, &target, &package, &mut transcript))
-            .map(|()| None)
+                &site.clear_with,
+                transcript,
+            )?;
+            deploy::deploy(webman, target, &package, transcript)?;
+            Ok(None)
         }
-        Action::Run => run::clear_stale_result(&mut webman, &target, &clear_with, &mut transcript)
-            .and_then(|()| run::start(&mut webman, &target, &mut transcript))
-            .and_then(|()| {
-                run::wait_for_launch(
-                    &mut webman,
-                    &target,
-                    manifest.ps3.timeout_ms,
-                    command.poll_ms(),
-                    sleep,
-                    &mut transcript,
-                )
-            })
-            .and_then(|()| {
-                run::wait_for_result(
-                    &mut webman,
-                    &target,
-                    manifest.ps3.timeout_ms,
-                    command.poll_ms(),
-                    sleep,
-                    &mut transcript,
-                )
-            })
-            .and_then(|()| {
-                run::wait_for_xmb(
-                    &mut webman,
-                    manifest.ps3.timeout_ms,
-                    command.poll_ms(),
-                    sleep,
-                    &mut transcript,
-                )
-            })
-            .map(|()| None),
-        Action::Fetch { out } => run::fetch_result(
-            &mut webman,
-            &target,
-            manifest.ps3.timeout_ms,
-            &mut transcript,
-        )
-        .and_then(|bytes| write(&out, &bytes))
-        .map(|()| None),
-        Action::Cleanup => run::cleanup(&mut webman, &target, &mut transcript).map(|()| None),
+        Action::Run => {
+            run::clear_stale_result(webman, target, &site.clear_with, transcript)?;
+            run::start_and_wait(
+                webman,
+                target,
+                timeout_ms,
+                command.poll_ms(),
+                sleep,
+                transcript,
+            )?;
+            Ok(None)
+        }
+        Action::Fetch { out } => {
+            let bytes = run::fetch_result(webman, target, timeout_ms, transcript)?;
+            write(&out, &bytes)?;
+            Ok(None)
+        }
+        Action::Cleanup => {
+            run::cleanup(webman, target, transcript)?;
+            Ok(None)
+        }
         Action::Capture { harness_revision } => {
             let out = command.out.clone().unwrap_or_else(|| {
-                manifest_path
+                site.manifest_path
                     .parent()
                     .map_or_else(PathBuf::new, Path::to_path_buf)
                     .join(CAPTURE_DIR)
-                    .join(&claimed)
+                    .join(site.session.claimed)
             });
             let plan = CapturePlan {
-                manifest_path: manifest_path.to_path_buf(),
-                manifest: manifest.clone(),
+                manifest_path: site.manifest_path.to_path_buf(),
+                manifest: site.manifest.clone(),
                 out,
                 harness_revision,
                 poll_ms: command.poll_ms(),
                 reclaim: command.reclaim,
                 keep_deployed: command.keep_deployed,
                 recapture_reason: command.reason.clone(),
-                clear_with,
+                clear_with: site.clear_with,
             };
-            capture::capture(
-                &mut webman,
+            let record = capture::capture(
+                webman,
                 &plan,
-                &facts,
+                site.facts,
                 sleep,
                 now,
                 may_reclaim,
-                &mut transcript,
-            )
-            .map(|record| {
-                Some(CaptureReport {
-                    capture_id: record.capture_id,
-                    out: plan.out.clone(),
-                    replaced: plan.recapture_reason.clone(),
-                })
-            })
+                transcript,
+            )?;
+            Ok(Some(CaptureReport {
+                capture_id: record.capture_id,
+                out: plan.out,
+                replaced: plan.recapture_reason,
+            }))
         }
-    };
+    }
+}
+
+/// Release the lease, end the session, and fold the verb's result and
+/// the release into the report or the failure.
+fn finish<C: ConsoleOps>(
+    lease: Lease,
+    result: Result<Option<CaptureReport>, RunnerPs3Error>,
+    webman: &mut C,
+    mut transcript: Transcript,
+) -> Result<Report, Box<Failure>> {
     let (capture, failed) = match result {
         Ok(capture) => (capture, None),
         Err(error) => (None, Some(error)),
     };
-    let released = lease.release(&mut webman, &mut transcript);
+    let released = lease.release(webman, &mut transcript);
     webman.end_session(&mut transcript);
     let report = Report::Console {
         capture,

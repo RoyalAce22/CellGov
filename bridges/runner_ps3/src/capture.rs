@@ -390,9 +390,8 @@ pub fn capture<C: ConsoleOps>(
     )?;
     let timeout_ms = plan.manifest.ps3.timeout_ms;
     let fetched = deploy::deploy(console, &target, &package, transcript)
-        .and_then(|()| run::start(console, &target, transcript))
         .and_then(|()| {
-            run::wait_for_launch(
+            run::start_and_wait(
                 console,
                 &target,
                 timeout_ms,
@@ -401,17 +400,6 @@ pub fn capture<C: ConsoleOps>(
                 transcript,
             )
         })
-        .and_then(|()| {
-            run::wait_for_result(
-                console,
-                &target,
-                timeout_ms,
-                plan.poll_ms,
-                sleep,
-                transcript,
-            )
-        })
-        .and_then(|()| run::wait_for_xmb(console, timeout_ms, plan.poll_ms, sleep, transcript))
         .and_then(|()| run::fetch_result(console, &target, timeout_ms, transcript))
         .and_then(|frame| check_frame(&frame).map(|()| frame));
     // Everything that can still fail runs against a staging directory
