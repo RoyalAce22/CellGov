@@ -1,5 +1,7 @@
 //! The ELF load path: the header check, memory sizing, and the copy of every PT_LOAD into guest memory.
 
+use std::ops::Range;
+
 use crate::state::PpuState;
 use cellgov_mem::be::{read_u16, read_u64};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
@@ -10,6 +12,7 @@ use cellgov_ps3_abi::format::elf::{
 
 use super::phdr::{checked_pt_loads, read_pt_loads};
 use super::process_param::find_sys_process_param;
+use super::LoadSegment;
 
 /// `(addr, size)` pair describing where a rejected segment would have
 /// been placed.
@@ -191,102 +194,24 @@ pub fn load_ppu_elf(
     // descriptor is only read from one of these: guest memory outside
     // them is zero-filled, and eight zero bytes there would otherwise
     // read back as a perfectly plausible descriptor naming pc 0.
-    let mut loaded: Vec<std::ops::Range<u64>> = Vec::new();
+    let mut loaded: Vec<Range<u64>> = Vec::new();
 
     for seg in segments {
-        let i = seg.index;
-        let p_offset = seg.file_offset as usize;
-        let p_vaddr = seg.vaddr;
-        let p_filesz = seg.filesz;
-        let p_memsz = seg.memsz;
-
-        // `checked_pt_loads` refused p_filesz > p_memsz, which the ELF format
-        // forbids for loadable segments: the bounds check below is
-        // memsz-derived, so a header claiming extra file bytes would
-        // route an oversized copy into apply_commit and panic instead
-        // of erroring. It also refused file bytes past the end of the
-        // file.
-        if p_memsz == 0 {
+        let Some(range) = commit_segment(memory, data, &seg, mem_size)? else {
             continue;
-        }
-
-        // PS3 effective addresses are 32-bit; reject anything that would
-        // wrap on add or land above the 4 GiB EA ceiling before we cast
-        // to usize for the apply_commit call below.
-        let placement = SegmentPlacement {
-            addr: p_vaddr,
-            size: p_memsz,
         };
-        let end = p_vaddr
-            .checked_add(p_memsz)
-            .ok_or(LoadError::SegmentOutOfRange {
-                placement,
-                segment_index: i,
-            })?;
-        if end > u64::from(u32::MAX) + 1 || end > mem_size as u64 {
-            return Err(LoadError::SegmentOutOfRange {
-                placement,
-                segment_index: i,
-            });
+        if range.end > max_addr {
+            max_addr = range.end;
         }
-
-        let p_filesz_usz = p_filesz as usize;
-        if p_filesz > 0 {
-            let range = ByteRange::new(GuestAddr::new(p_vaddr), p_filesz).expect("valid range");
-            memory
-                .apply_commit(range, &data[p_offset..p_offset + p_filesz_usz])
-                .expect("segment fits in memory");
-        }
-
-        if p_memsz > p_filesz {
-            let bss_start = p_vaddr + p_filesz;
-            let bss_size = p_memsz - p_filesz;
-            let range = ByteRange::new(GuestAddr::new(bss_start), bss_size).expect("valid range");
-            memory
-                .apply_commit(range, &vec![0u8; bss_size as usize])
-                .expect("BSS fits in memory");
-        }
-
-        if end > max_addr {
-            max_addr = end;
-        }
-        loaded.push(p_vaddr..end);
+        loaded.push(range);
     }
 
-    // e_entry names a `function_descriptor` in .opd.
-    use cellgov_ps3_abi::format::elf::function_descriptor;
-    let entry_off = entry as usize;
-    let mem_bytes = memory.as_bytes();
-    // checked_add: a hostile e_entry near u64::MAX would wrap the
-    // end-of-descriptor sum and either panic (debug) or index out of
-    // bounds (release); an out-of-range entry takes the raw-entry
-    // fallback below instead. The descriptor must also lie inside a
-    // segment this call committed -- an e_entry that merely fits in
-    // guest memory reads eight zero bytes and would set pc 0 with no
-    // TOC, which is indistinguishable from a successful load.
-    let descriptor_loaded = entry
-        .checked_add(function_descriptor::SIZE as u64)
-        .is_some_and(|end| loaded.iter().any(|r| r.start <= entry && end <= r.end));
-    if descriptor_loaded
-        && entry_off
-            .checked_add(function_descriptor::SIZE)
-            .is_some_and(|end| end <= mem_bytes.len())
-    {
-        let word_at = |field: usize| {
-            let at = entry_off + field;
-            u32::from_be_bytes([
-                mem_bytes[at],
-                mem_bytes[at + 1],
-                mem_bytes[at + 2],
-                mem_bytes[at + 3],
-            ])
-        };
-        let code_addr = word_at(function_descriptor::CODE_OFFSET);
-        let toc = word_at(function_descriptor::TOC_OFFSET);
-        state.pc = code_addr as u64;
-        state.set_gpr(2, toc as u64);
-    } else {
-        state.pc = entry;
+    match entry_from_descriptor(memory, entry, &loaded) {
+        Some((code_addr, toc)) => {
+            state.pc = code_addr as u64;
+            state.set_gpr(2, toc as u64);
+        }
+        None => state.pc = entry,
     }
 
     // A wrapping end would invert the range into an empty one, and an
@@ -303,6 +228,112 @@ pub fn load_ppu_elf(
         min_memory_size: max_addr as usize,
         sys_proc_param_range,
     })
+}
+
+/// Copies one PT_LOAD into `memory` and zero-fills its `.bss`, returning
+/// the address range it committed; `None` for a segment with no memory
+/// size.
+fn commit_segment(
+    memory: &mut GuestMemory,
+    data: &[u8],
+    seg: &LoadSegment,
+    mem_size: usize,
+) -> Result<Option<Range<u64>>, LoadError> {
+    let i = seg.index;
+    let p_offset = seg.file_offset as usize;
+    let p_vaddr = seg.vaddr;
+    let p_filesz = seg.filesz;
+    let p_memsz = seg.memsz;
+
+    // `checked_pt_loads` refused p_filesz > p_memsz, which the ELF format
+    // forbids for loadable segments: the bounds check below is
+    // memsz-derived, so a header claiming extra file bytes would
+    // route an oversized copy into apply_commit and panic instead
+    // of erroring. It also refused file bytes past the end of the
+    // file.
+    if p_memsz == 0 {
+        return Ok(None);
+    }
+
+    // PS3 effective addresses are 32-bit; reject anything that would
+    // wrap on add or land above the 4 GiB EA ceiling before we cast
+    // to usize for the apply_commit call below.
+    let placement = SegmentPlacement {
+        addr: p_vaddr,
+        size: p_memsz,
+    };
+    let end = p_vaddr
+        .checked_add(p_memsz)
+        .ok_or(LoadError::SegmentOutOfRange {
+            placement,
+            segment_index: i,
+        })?;
+    if end > u64::from(u32::MAX) + 1 || end > mem_size as u64 {
+        return Err(LoadError::SegmentOutOfRange {
+            placement,
+            segment_index: i,
+        });
+    }
+
+    let p_filesz_usz = p_filesz as usize;
+    if p_filesz > 0 {
+        let range = ByteRange::new(GuestAddr::new(p_vaddr), p_filesz).expect("valid range");
+        memory
+            .apply_commit(range, &data[p_offset..p_offset + p_filesz_usz])
+            .expect("segment fits in memory");
+    }
+
+    if p_memsz > p_filesz {
+        let bss_start = p_vaddr + p_filesz;
+        let bss_size = p_memsz - p_filesz;
+        let range = ByteRange::new(GuestAddr::new(bss_start), bss_size).expect("valid range");
+        memory
+            .apply_commit(range, &vec![0u8; bss_size as usize])
+            .expect("BSS fits in memory");
+    }
+    Ok(Some(p_vaddr..end))
+}
+
+/// The `(code, toc)` of the function descriptor `e_entry` names, when
+/// the whole descriptor lies inside a segment in `loaded`.
+fn entry_from_descriptor(
+    memory: &GuestMemory,
+    entry: u64,
+    loaded: &[Range<u64>],
+) -> Option<(u32, u32)> {
+    // e_entry names a `function_descriptor` in .opd.
+    use cellgov_ps3_abi::format::elf::function_descriptor;
+    let entry_off = entry as usize;
+    let mem_bytes = memory.as_bytes();
+    // checked_add: a hostile e_entry near u64::MAX would wrap the
+    // end-of-descriptor sum and either panic (debug) or index out of
+    // bounds (release); an out-of-range entry takes the raw-entry
+    // fallback instead. The descriptor must also lie inside a
+    // segment this call committed -- an e_entry that merely fits in
+    // guest memory reads eight zero bytes and would set pc 0 with no
+    // TOC, which is indistinguishable from a successful load.
+    let descriptor_loaded = entry
+        .checked_add(function_descriptor::SIZE as u64)
+        .is_some_and(|end| loaded.iter().any(|r| r.start <= entry && end <= r.end));
+    let in_memory = entry_off
+        .checked_add(function_descriptor::SIZE)
+        .is_some_and(|end| end <= mem_bytes.len());
+    if !descriptor_loaded || !in_memory {
+        return None;
+    }
+    let word_at = |field: usize| {
+        let at = entry_off + field;
+        u32::from_be_bytes([
+            mem_bytes[at],
+            mem_bytes[at + 1],
+            mem_bytes[at + 2],
+            mem_bytes[at + 3],
+        ])
+    };
+    Some((
+        word_at(function_descriptor::CODE_OFFSET),
+        word_at(function_descriptor::TOC_OFFSET),
+    ))
 }
 
 /// Refuse a file that is not a big-endian ELF64 PPU object: too short
