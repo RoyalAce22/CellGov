@@ -74,85 +74,68 @@ const GPR_FIELD_NAMES: [&str; 32] = [
 ///
 /// O(n) linear scan of each zoom stream.
 pub fn zoom_lookup(a_zoom: &[u8], b_zoom: &[u8], step: u64) -> ZoomLookup {
-    let a = find_full_at(a_zoom, step);
-    let b = find_full_at(b_zoom, step);
-    if a.is_err() || b.is_err() {
-        return ZoomLookup::CorruptTrace {
-            a_error: a.err().map(|e| e.to_string()),
-            b_error: b.err().map(|e| e.to_string()),
-        };
-    }
-    match (a.expect("checked"), b.expect("checked")) {
-        (Some(a), Some(b)) => {
-            let mut diffs = Vec::new();
-            for (i, (av, bv)) in a.gpr.iter().zip(b.gpr.iter()).enumerate() {
-                if av != bv {
-                    diffs.push(RegDiff {
-                        field: GPR_FIELD_NAMES[i],
-                        a: *av,
-                        b: *bv,
-                    });
-                }
-            }
-            if a.lr != b.lr {
-                diffs.push(RegDiff {
-                    field: "lr",
-                    a: a.lr,
-                    b: b.lr,
-                });
-            }
-            if a.ctr != b.ctr {
-                diffs.push(RegDiff {
-                    field: "ctr",
-                    a: a.ctr,
-                    b: b.ctr,
-                });
-            }
-            if a.xer != b.xer {
-                diffs.push(RegDiff {
-                    field: "xer",
-                    a: a.xer,
-                    b: b.xer,
-                });
-            }
-            if a.cr != b.cr {
-                diffs.push(RegDiff {
-                    field: "cr",
-                    a: a.cr as u64,
-                    b: b.cr as u64,
-                });
-            }
-            match (a.reservation_line, b.reservation_line) {
-                (None, None) => {}
-                (Some(al), Some(bl)) => {
-                    if al != bl {
-                        diffs.push(RegDiff {
-                            field: "resv_line",
-                            a: al,
-                            b: bl,
-                        });
-                    }
-                }
-                (a_line, b_line) => {
-                    diffs.push(RegDiff {
-                        field: "resv_held",
-                        a: a_line.is_some() as u64,
-                        b: b_line.is_some() as u64,
-                    });
-                }
-            }
-            ZoomLookup::Found {
-                step,
-                a_pc: a.pc,
-                b_pc: b.pc,
-                diffs,
+    let (a, b) = match (find_full_at(a_zoom, step), find_full_at(b_zoom, step)) {
+        (Ok(a), Ok(b)) => (a, b),
+        (a, b) => {
+            return ZoomLookup::CorruptTrace {
+                a_error: a.err().map(|e| e.to_string()),
+                b_error: b.err().map(|e| e.to_string()),
             }
         }
-        (a, b) => ZoomLookup::MissingStep {
+    };
+    let (Some(a), Some(b)) = (a, b) else {
+        return ZoomLookup::MissingStep {
             step,
             a_missing: a.is_none(),
             b_missing: b.is_none(),
-        },
+        };
+    };
+    let mut diffs: Vec<RegDiff> = GPR_FIELD_NAMES
+        .iter()
+        .zip(a.gpr.iter().zip(b.gpr.iter()))
+        .filter(|(_, (av, bv))| av != bv)
+        .map(|(field, (av, bv))| RegDiff {
+            field,
+            a: *av,
+            b: *bv,
+        })
+        .collect();
+    for (field, av, bv) in [
+        ("lr", a.lr, b.lr),
+        ("ctr", a.ctr, b.ctr),
+        ("xer", a.xer, b.xer),
+        ("cr", u64::from(a.cr), u64::from(b.cr)),
+    ] {
+        if av != bv {
+            diffs.push(RegDiff {
+                field,
+                a: av,
+                b: bv,
+            });
+        }
+    }
+    match (a.reservation_line, b.reservation_line) {
+        (None, None) => {}
+        (Some(al), Some(bl)) => {
+            if al != bl {
+                diffs.push(RegDiff {
+                    field: "resv_line",
+                    a: al,
+                    b: bl,
+                });
+            }
+        }
+        (a_line, b_line) => diffs.push(RegDiff {
+            field: "resv_held",
+            a: u64::from(a_line.is_some()),
+            b: u64::from(b_line.is_some()),
+        }),
+    }
+    ZoomLookup::Found {
+        step,
+        a_pc: a.pc,
+        b_pc: b.pc,
+        diffs,
     }
 }
 
