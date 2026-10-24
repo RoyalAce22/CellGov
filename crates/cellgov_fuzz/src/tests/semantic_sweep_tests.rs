@@ -153,7 +153,7 @@ fn every_bounded_operand_is_probed_and_decoder_filtering_cannot_hide_a_boundary(
         .into_iter()
         .find(|descriptor| descriptor.operands.len() >= 2)
         .expect("SPU has a multi-operand descriptor");
-    let probes = out_of_range_spu(&descriptor);
+    let probes = out_of_range_probes(&descriptor);
     assert_eq!(
         probes.len(),
         descriptor
@@ -165,7 +165,7 @@ fn every_bounded_operand_is_probed_and_decoder_filtering_cannot_hide_a_boundary(
     assert!(probes.iter().all(|probe| *probe == InvalidProbe::Refused));
 
     let kind = InstructionIdentity::Spu(descriptor.kind);
-    let cases = spu_cases(&descriptor);
+    let cases = classified_cases(&descriptor);
     let boundary = *cases
         .iter()
         .find(|(_, classes)| classes.contains(&SemanticCaseClass::OperandBoundary))

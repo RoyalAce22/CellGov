@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use cellgov_exec::operand::{OperandClass, OperandField};
 use cellgov_ppu::instruction::fuzz::{
     expected_generation_kinds as expected_ppu_kinds, generation_descriptor as ppu_descriptor,
     generation_descriptors as ppu_descriptors, PpuGenerationDescriptor, PpuOperandClass,
@@ -201,48 +202,11 @@ pub fn sweep_ppu(descriptors: &[PpuGenerationDescriptor]) -> SemanticSweepReport
         .into_iter()
         .map(InstructionIdentity::Ppu)
         .collect();
-    let mut report = sweep_descriptors(
-        expected,
-        descriptors.iter().map(|descriptor| {
-            let kind = InstructionIdentity::Ppu(descriptor.kind);
-            call_target(|| (ppu_cases(descriptor), out_of_range_ppu(descriptor)))
-                .map(|(cases, rejected)| (kind, cases, rejected))
-                .map_err(|payload| (kind, payload))
-        }),
-        |raw| {
-            crate::seeded::ppu_decode(raw)
-                .ok()
-                .map(|instruction| InstructionIdentity::Ppu(instruction.fuzz_descriptor(raw).kind))
-        },
-        |raw| {
-            ppu_descriptor(raw)
-                .and_then(|descriptor| descriptor.encode(&descriptor.canonical_parameters()).ok())
-        },
-    );
-    for descriptor in descriptors {
-        let kind = InstructionIdentity::Ppu(descriptor.kind);
-        let raw = descriptor.canonical_word;
-        match call_target(|| ppu_descriptor(raw)) {
-            Ok(Some(actual))
-                if actual.kind == descriptor.kind
-                    && actual.form == descriptor.form
-                    && actual.operands == descriptor.operands => {}
-            Ok(_) => {
-                report
-                    .findings
-                    .insert(SemanticSweepFinding::DescriptorMismatch { kind, raw });
-            }
-            Err(payload) => {
-                report.findings.insert(SemanticSweepFinding::TargetPanic {
-                    kind,
-                    raw,
-                    stage: SemanticTargetStage::DescriptorMetadata,
-                    payload,
-                });
-            }
-        }
-    }
-    report
+    sweep_registry(expected, descriptors, |raw| {
+        crate::seeded::ppu_decode(raw)
+            .ok()
+            .map(|instruction| InstructionIdentity::Ppu(instruction.fuzz_descriptor(raw).kind))
+    })
 }
 
 /// Compares SPU recipes with their decoder and interpreter-owned kind set.
@@ -251,32 +215,55 @@ pub fn sweep_spu(descriptors: &[SpuGenerationDescriptor]) -> SemanticSweepReport
         .into_iter()
         .map(InstructionIdentity::Spu)
         .collect();
+    sweep_registry(expected, descriptors, |raw| {
+        crate::seeded::spu_decode(raw)
+            .ok()
+            .map(|instruction| InstructionIdentity::Spu(instruction.into()))
+    })
+}
+
+/// The sweep of one registry: every recipe's cases and out-of-range
+/// probes against `decode` and the descriptor re-encoder, then each
+/// recipe against the descriptor its canonical word derives.
+fn sweep_registry<D: SweepDescriptor>(
+    expected: BTreeSet<InstructionIdentity>,
+    descriptors: &[D],
+    decode: impl Fn(u32) -> Option<InstructionIdentity>,
+) -> SemanticSweepReport {
     let mut report = sweep_descriptors(
         expected,
         descriptors.iter().map(|descriptor| {
-            let kind = InstructionIdentity::Spu(descriptor.kind);
-            call_target(|| (spu_cases(descriptor), out_of_range_spu(descriptor)))
-                .map(|(cases, rejected)| (kind, cases, rejected))
-                .map_err(|payload| (kind, payload))
+            let kind = descriptor.identity();
+            call_target(|| {
+                (
+                    classified_cases(descriptor),
+                    out_of_range_probes(descriptor),
+                )
+            })
+            .map(|(cases, rejected)| (kind, cases, rejected))
+            .map_err(|payload| (kind, payload))
         }),
+        decode,
         |raw| {
-            crate::seeded::spu_decode(raw)
-                .ok()
-                .map(|instruction| InstructionIdentity::Spu(instruction.into()))
-        },
-        |raw| {
-            spu_descriptor(raw)
-                .and_then(|descriptor| descriptor.encode(&descriptor.canonical_parameters()).ok())
+            D::derive(raw)
+                .and_then(|descriptor| descriptor.encode(&descriptor.canonical_parameters()))
         },
     );
+    check_descriptor_metadata(descriptors, &mut report);
+    report
+}
+
+/// Record a finding for each recipe whose canonical word derives a
+/// different recipe, or whose derivation panics.
+fn check_descriptor_metadata<D: SweepDescriptor>(
+    descriptors: &[D],
+    report: &mut SemanticSweepReport,
+) {
     for descriptor in descriptors {
-        let kind = InstructionIdentity::Spu(descriptor.kind);
-        let raw = descriptor.canonical_word;
-        match call_target(|| spu_descriptor(raw)) {
-            Ok(Some(actual))
-                if actual.kind == descriptor.kind
-                    && actual.form == descriptor.form
-                    && actual.operands == descriptor.operands => {}
+        let kind = descriptor.identity();
+        let raw = descriptor.canonical_word();
+        match call_target(|| D::derive(raw)) {
+            Ok(Some(actual)) if descriptor.same_recipe(&actual) => {}
             Ok(_) => {
                 report
                     .findings
@@ -292,7 +279,98 @@ pub fn sweep_spu(descriptors: &[SpuGenerationDescriptor]) -> SemanticSweepReport
             }
         }
     }
-    report
+}
+
+/// The descriptor surface the sweep reads. The PPU and SPU generation
+/// descriptors differ only in their kind and operand-class types.
+trait SweepDescriptor: Sized {
+    /// Operand class of this descriptor's fields.
+    type Class: OperandClass;
+
+    fn identity(&self) -> InstructionIdentity;
+    fn canonical_word(&self) -> u32;
+    fn operands(&self) -> &[OperandField<Self::Class>];
+    fn canonical_parameters(&self) -> Vec<u32>;
+    fn reserved_bit_words(&self) -> Vec<u32>;
+    /// Pack `values` into the canonical word; `None` on a refusal.
+    fn pack_operands(&self, values: &[u32]) -> Option<u32>;
+    fn operands_are_defined(&self, word: u32) -> bool;
+    /// Encode `values` as a valid word of this kind; `None` on a refusal.
+    fn encode(&self, values: &[u32]) -> Option<u32>;
+    /// The descriptor the decoder derives from `raw`.
+    fn derive(raw: u32) -> Option<Self>;
+    /// Whether `other` has this recipe's kind, form and operands.
+    fn same_recipe(&self, other: &Self) -> bool;
+}
+
+impl SweepDescriptor for PpuGenerationDescriptor {
+    type Class = PpuOperandClass;
+
+    fn identity(&self) -> InstructionIdentity {
+        InstructionIdentity::Ppu(self.kind)
+    }
+    fn canonical_word(&self) -> u32 {
+        self.canonical_word
+    }
+    fn operands(&self) -> &[OperandField<PpuOperandClass>] {
+        &self.operands
+    }
+    fn canonical_parameters(&self) -> Vec<u32> {
+        PpuGenerationDescriptor::canonical_parameters(self)
+    }
+    fn reserved_bit_words(&self) -> Vec<u32> {
+        PpuGenerationDescriptor::reserved_bit_words(self)
+    }
+    fn pack_operands(&self, values: &[u32]) -> Option<u32> {
+        PpuGenerationDescriptor::pack_operands(self, values).ok()
+    }
+    fn operands_are_defined(&self, word: u32) -> bool {
+        PpuGenerationDescriptor::operands_are_defined(self, word)
+    }
+    fn encode(&self, values: &[u32]) -> Option<u32> {
+        PpuGenerationDescriptor::encode(self, values).ok()
+    }
+    fn derive(raw: u32) -> Option<Self> {
+        ppu_descriptor(raw)
+    }
+    fn same_recipe(&self, other: &Self) -> bool {
+        other.kind == self.kind && other.form == self.form && other.operands == self.operands
+    }
+}
+
+impl SweepDescriptor for SpuGenerationDescriptor {
+    type Class = SpuOperandClass;
+
+    fn identity(&self) -> InstructionIdentity {
+        InstructionIdentity::Spu(self.kind)
+    }
+    fn canonical_word(&self) -> u32 {
+        self.canonical_word
+    }
+    fn operands(&self) -> &[OperandField<SpuOperandClass>] {
+        &self.operands
+    }
+    fn canonical_parameters(&self) -> Vec<u32> {
+        SpuGenerationDescriptor::canonical_parameters(self)
+    }
+    fn reserved_bit_words(&self) -> Vec<u32> {
+        SpuGenerationDescriptor::reserved_bit_words(self)
+    }
+    fn pack_operands(&self, values: &[u32]) -> Option<u32> {
+        SpuGenerationDescriptor::pack_operands(self, values).ok()
+    }
+    fn operands_are_defined(&self, word: u32) -> bool {
+        SpuGenerationDescriptor::operands_are_defined(self, word)
+    }
+    fn encode(&self, values: &[u32]) -> Option<u32> {
+        SpuGenerationDescriptor::encode(self, values).ok()
+    }
+    fn derive(raw: u32) -> Option<Self> {
+        spu_descriptor(raw)
+    }
+    fn same_recipe(&self, other: &Self) -> bool {
+        other.kind == self.kind && other.form == self.form && other.operands == self.operands
+    }
 }
 
 /// Runs both descriptor registries without inventing opcode patterns.
@@ -306,94 +384,61 @@ fn insert(words: &mut ClassifiedWords, raw: u32, class: SemanticCaseClass) {
     words.entry(raw).or_default().insert(class);
 }
 
-fn ppu_cases(descriptor: &PpuGenerationDescriptor) -> ClassifiedWords {
+fn classified_cases<D: SweepDescriptor>(descriptor: &D) -> ClassifiedWords {
     let mut words = ClassifiedWords::new();
     insert(
         &mut words,
-        descriptor.canonical_word,
+        descriptor.canonical_word(),
         SemanticCaseClass::Canonical,
     );
     for word in descriptor.reserved_bit_words() {
         insert(&mut words, word, SemanticCaseClass::ReservedField);
     }
-    for value in [0, 7, 127] {
-        let mut params = descriptor.canonical_parameters();
-        let mut changed = false;
-        for (param, field) in params.iter_mut().zip(&descriptor.operands) {
-            if field.class == PpuOperandClass::Register {
-                *param = value & field.maximum();
-                changed = true;
-            }
-        }
-        if changed {
-            if let Ok(word) = descriptor.pack_operands(&params) {
-                if descriptor.operands_are_defined(word) {
-                    insert(&mut words, word, SemanticCaseClass::RegisterAlias);
-                }
-            }
-        }
-    }
+    insert_register_aliases(descriptor, &mut words);
     let canonical = descriptor.canonical_parameters();
-    for (index, field) in descriptor.operands.iter().enumerate() {
+    for (index, field) in descriptor.operands().iter().enumerate() {
         for value in field.boundary_values() {
             let mut params = canonical.clone();
             params[index] = value;
-            if let Ok(word) = descriptor.pack_operands(&params) {
-                if descriptor.operands_are_defined(word) {
-                    insert(&mut words, word, SemanticCaseClass::OperandBoundary);
-                    if field.class == PpuOperandClass::Immediate {
-                        insert(&mut words, word, SemanticCaseClass::ImmediateBoundary);
-                    }
-                }
+            let Some(word) = descriptor.pack_operands(&params) else {
+                continue;
+            };
+            if !descriptor.operands_are_defined(word) {
+                continue;
+            }
+            insert(&mut words, word, SemanticCaseClass::OperandBoundary);
+            if field.class == D::Class::IMMEDIATE {
+                insert(&mut words, word, SemanticCaseClass::ImmediateBoundary);
             }
         }
     }
     words
 }
 
-fn spu_cases(descriptor: &SpuGenerationDescriptor) -> ClassifiedWords {
-    let mut words = ClassifiedWords::new();
-    insert(
-        &mut words,
-        descriptor.canonical_word,
-        SemanticCaseClass::Canonical,
-    );
-    for word in descriptor.reserved_bit_words() {
-        insert(&mut words, word, SemanticCaseClass::ReservedField);
+/// Every register field set to one shared value, for each of a few
+/// values. A recipe with no register field has no alias case.
+fn insert_register_aliases<D: SweepDescriptor>(descriptor: &D, words: &mut ClassifiedWords) {
+    let has_register = descriptor
+        .operands()
+        .iter()
+        .any(|field| field.class == D::Class::REGISTER);
+    if !has_register {
+        return;
     }
     for value in [0, 7, 127] {
         let mut params = descriptor.canonical_parameters();
-        let mut changed = false;
-        for (param, field) in params.iter_mut().zip(&descriptor.operands) {
-            if field.class == SpuOperandClass::Register {
+        for (param, field) in params.iter_mut().zip(descriptor.operands()) {
+            if field.class == D::Class::REGISTER {
                 *param = value & field.maximum();
-                changed = true;
             }
         }
-        if changed {
-            if let Ok(word) = descriptor.pack_operands(&params) {
-                if descriptor.operands_are_defined(word) {
-                    insert(&mut words, word, SemanticCaseClass::RegisterAlias);
-                }
-            }
+        let Some(word) = descriptor.pack_operands(&params) else {
+            continue;
+        };
+        if descriptor.operands_are_defined(word) {
+            insert(words, word, SemanticCaseClass::RegisterAlias);
         }
     }
-    let canonical = descriptor.canonical_parameters();
-    for (index, field) in descriptor.operands.iter().enumerate() {
-        for value in field.boundary_values() {
-            let mut params = canonical.clone();
-            params[index] = value;
-            if let Ok(word) = descriptor.pack_operands(&params) {
-                if descriptor.operands_are_defined(word) {
-                    insert(&mut words, word, SemanticCaseClass::OperandBoundary);
-                    if field.class == SpuOperandClass::Immediate {
-                        insert(&mut words, word, SemanticCaseClass::ImmediateBoundary);
-                    }
-                }
-            }
-        }
-    }
-    words
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -402,9 +447,9 @@ enum InvalidProbe {
     Accepted { field: usize, raw: u32 },
 }
 
-fn out_of_range_ppu(descriptor: &PpuGenerationDescriptor) -> Vec<InvalidProbe> {
+fn out_of_range_probes<D: SweepDescriptor>(descriptor: &D) -> Vec<InvalidProbe> {
     descriptor
-        .operands
+        .operands()
         .iter()
         .enumerate()
         .filter(|(_, field)| field.maximum() < u32::MAX)
@@ -412,25 +457,8 @@ fn out_of_range_ppu(descriptor: &PpuGenerationDescriptor) -> Vec<InvalidProbe> {
             let mut params = descriptor.canonical_parameters();
             params[index] = field.maximum() + 1;
             match descriptor.encode(&params) {
-                Ok(raw) => InvalidProbe::Accepted { field: index, raw },
-                Err(_) => InvalidProbe::Refused,
-            }
-        })
-        .collect()
-}
-
-fn out_of_range_spu(descriptor: &SpuGenerationDescriptor) -> Vec<InvalidProbe> {
-    descriptor
-        .operands
-        .iter()
-        .enumerate()
-        .filter(|(_, field)| field.maximum() < u32::MAX)
-        .map(|(index, field)| {
-            let mut params = descriptor.canonical_parameters();
-            params[index] = field.maximum() + 1;
-            match descriptor.encode(&params) {
-                Ok(raw) => InvalidProbe::Accepted { field: index, raw },
-                Err(_) => InvalidProbe::Refused,
+                Some(raw) => InvalidProbe::Accepted { field: index, raw },
+                None => InvalidProbe::Refused,
             }
         })
         .collect()
