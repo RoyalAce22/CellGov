@@ -253,119 +253,14 @@ impl Runtime {
             None => self.lv2_host.dispatch(request, source, &memory),
         };
         self.drain_invariant_breaks_to_trace();
-        // Apply shm region-install requests before the dispatch's effects
-        // commit: a 334 that mints a fresh region and an effect targeting
-        // that region in the same dispatch would otherwise hit
-        // `CommitError::OutOfRange` at pre-validation. Collect into a
-        // local so the borrow on `self.lv2_host` releases before
-        // touching `self.memory`.
-        let region_installs: Vec<(u64, usize, Option<u64>, u32)> =
-            self.lv2_host.drain_pending_region_installs().collect();
-        if !region_installs.is_empty() {
-            // The mapping appears in the CALLER's address space. The
-            // syscall takes no process argument, so the caller's space
-            // is the only one it can name. The handler validated the
-            // window against the caller's view, and the caller's own
-            // loads/stores resolve through that space.
-            let caller_space = self.spaces.space_of(source);
-            for (addr, size, ipc_key, mem_id) in region_installs {
-                let mem = crate::runtime::spaces::resolve_space_memory_for_write(
-                    &mut self.memory,
-                    &mut self.spaces,
-                    caller_space,
-                );
-                if let Err(err) =
-                    mem.install_region(addr, size, "shm", cellgov_mem::PageSize::Page64K)
-                {
-                    // Guest-reachable, but no longer expected: sc 334
-                    // now refuses an occupied window with CELL_EBUSY
-                    // up front, consulting both the host window table and
-                    // the caller's committed layout, and sc 337's
-                    // search skips both. Reaching this arm means a
-                    // window passed those gates and still failed to
-                    // install, so the break names a gap between the
-                    // gates and the caller's real layout. The window
-                    // stays unmapped, so the caller's next access to
-                    // it faults instead of aliasing.
-                    self.lv2_host.log_invariant_break(
-                        "dispatch.mmapper_region_install_overlap",
-                        format_args!(
-                            "shm region install at 0x{addr:08x}+0x{size:x} overlaps the \
-                             caller's existing layout in space {}: {err}; window not \
-                             installed, the guest already observed success where the \
-                             kernel would return CELL_EBUSY",
-                            caller_space.raw(),
-                        ),
-                    );
-                    continue;
-                }
-                // The window shows what the segment held when its last
-                // window was unmapped.
-                if let Some(bytes) = self.lv2_host.take_segment_contents(mem_id) {
-                    let restored = cellgov_mem::ByteRange::new(
-                        cellgov_mem::GuestAddr::new(addr),
-                        bytes.len() as u64,
-                    )
-                    .ok_or(cellgov_mem::MemError::LengthMismatch)
-                    .and_then(|range| mem.apply_commit(range, &bytes));
-                    if let Err(err) = restored {
-                        self.lv2_host.log_invariant_break(
-                            "dispatch.mmapper_contents_restore",
-                            format_args!(
-                                "shm contents of mem_id {mem_id:#x} not restored at \
-                                 0x{addr:08x}+0x{size:x}: {err}",
-                            ),
-                        );
-                    }
-                }
-                // A keyed window is a view of a process-shared
-                // segment; record it so views stay coherent across
-                // address spaces once a second space attaches.
-                if let Some(key) = ipc_key {
-                    self.attach_keyed_shm_view(key, size as u64, caller_space, addr);
-                }
-            }
-        }
-        // A 1 MiB-page area appears in the caller's space, where its
-        // process's blocks are read and written.
-        let area_installs: Vec<(u64, usize)> =
-            self.lv2_host.drain_pending_area_installs().collect();
-        if !area_installs.is_empty() {
-            let caller_space = self.spaces.space_of(source);
-            for (addr, size) in area_installs {
-                let mem = crate::runtime::spaces::resolve_space_memory_for_write(
-                    &mut self.memory,
-                    &mut self.spaces,
-                    caller_space,
-                );
-                if let Err(err) =
-                    mem.install_region(addr, size, "large_pages", cellgov_mem::PageSize::Page1M)
-                {
-                    self.lv2_host.log_invariant_break(
-                        "dispatch.large_page_area_install_overlap",
-                        format_args!(
-                            "1 MiB-page area at 0x{addr:08x}+0x{size:x} overlaps the caller's \
-                             existing layout in space {}: {err}; area not installed, the \
-                             guest already holds a block in it",
-                            caller_space.raw(),
-                        ),
-                    );
-                }
-            }
-        }
+        self.install_pending_shm_regions(source);
+        self.install_pending_large_page_areas(source);
         // A 670 maps its context window in the caller's space before the
         // init fills and out-pointer writes it emitted commit.
         if let Some(base) = self.lv2_host.take_pending_window_install() {
             self.install_rsx_window(source, base);
         }
-        // A 335 takes its window out of the caller's space, which is
-        // where its 334 / 337 put it.
-        let region_removals: Vec<(u64, usize, Option<u64>, Option<u32>)> =
-            self.lv2_host.drain_pending_region_removals().collect();
-        if !region_removals.is_empty() {
-            let caller_space = self.spaces.space_of(source);
-            self.remove_shm_windows(caller_space, region_removals);
-        }
+        self.remove_pending_shm_windows(source);
         match dispatch {
             Lv2Dispatch::Immediate { code, effects } => {
                 if is_process_exit {
@@ -496,6 +391,110 @@ impl Runtime {
 }
 
 impl Runtime {
+    /// Install the shared-memory regions the dispatch queued, before the
+    /// dispatch's effects commit: a 334 that mints a fresh region and an
+    /// effect targeting that region in the same dispatch would otherwise
+    /// hit `CommitError::OutOfRange` at pre-validation. The installs
+    /// collect into a local first, so the borrow on `self.lv2_host`
+    /// releases before the loop touches `self.memory`.
+    ///
+    /// The mapping appears in the CALLER's address space. The syscall
+    /// takes no process argument, so the caller's space is the only one
+    /// it can name. The handler validated the window against the
+    /// caller's view, and the caller's own loads/stores resolve through
+    /// that space.
+    fn install_pending_shm_regions(&mut self, source: UnitId) {
+        let region_installs: Vec<(u64, usize, Option<u64>, u32)> =
+            self.lv2_host.drain_pending_region_installs().collect();
+        if region_installs.is_empty() {
+            return;
+        }
+        let caller_space = self.spaces.space_of(source);
+        for (addr, size, ipc_key, mem_id) in region_installs {
+            let mem = crate::runtime::spaces::resolve_space_memory_for_write(
+                &mut self.memory,
+                &mut self.spaces,
+                caller_space,
+            );
+            if let Err(err) = mem.install_region(addr, size, "shm", cellgov_mem::PageSize::Page64K)
+            {
+                // Guest-reachable, but no longer expected: sc 334
+                // now refuses an occupied window with CELL_EBUSY
+                // up front, consulting both the host window table and
+                // the caller's committed layout, and sc 337's
+                // search skips both. Reaching this arm means a
+                // window passed those gates and still failed to
+                // install, so the break names a gap between the
+                // gates and the caller's real layout. The window
+                // stays unmapped, so the caller's next access to
+                // it faults instead of aliasing.
+                self.lv2_host.log_invariant_break(
+                    "dispatch.mmapper_region_install_overlap",
+                    format_args!(
+                        "shm region install at 0x{addr:08x}+0x{size:x} overlaps the \
+                         caller's existing layout in space {}: {err}; window not \
+                         installed, the guest already observed success where the \
+                         kernel would return CELL_EBUSY",
+                        caller_space.raw(),
+                    ),
+                );
+                continue;
+            }
+            restore_segment_contents(&mut self.lv2_host, mem, mem_id, addr, size);
+            // A keyed window is a view of a process-shared
+            // segment; record it so views stay coherent across
+            // address spaces once a second space attaches.
+            if let Some(key) = ipc_key {
+                self.attach_keyed_shm_view(key, size as u64, caller_space, addr);
+            }
+        }
+    }
+
+    /// Install the 1 MiB-page areas the dispatch queued. An area appears
+    /// in the caller's space, where its process's blocks are read and
+    /// written.
+    fn install_pending_large_page_areas(&mut self, source: UnitId) {
+        let area_installs: Vec<(u64, usize)> =
+            self.lv2_host.drain_pending_area_installs().collect();
+        if area_installs.is_empty() {
+            return;
+        }
+        let caller_space = self.spaces.space_of(source);
+        for (addr, size) in area_installs {
+            let mem = crate::runtime::spaces::resolve_space_memory_for_write(
+                &mut self.memory,
+                &mut self.spaces,
+                caller_space,
+            );
+            if let Err(err) =
+                mem.install_region(addr, size, "large_pages", cellgov_mem::PageSize::Page1M)
+            {
+                self.lv2_host.log_invariant_break(
+                    "dispatch.large_page_area_install_overlap",
+                    format_args!(
+                        "1 MiB-page area at 0x{addr:08x}+0x{size:x} overlaps the caller's \
+                         existing layout in space {}: {err}; area not installed, the \
+                         guest already holds a block in it",
+                        caller_space.raw(),
+                    ),
+                );
+            }
+        }
+    }
+
+    /// Remove the shared-memory windows the dispatch queued. A 335 takes
+    /// its window out of the caller's space, which is where its 334 / 337
+    /// put it.
+    fn remove_pending_shm_windows(&mut self, source: UnitId) {
+        let region_removals: Vec<(u64, usize, Option<u64>, Option<u32>)> =
+            self.lv2_host.drain_pending_region_removals().collect();
+        if region_removals.is_empty() {
+            return;
+        }
+        let caller_space = self.spaces.space_of(source);
+        self.remove_shm_windows(caller_space, region_removals);
+    }
+
     /// Take each shared-memory window `(addr, size, ipc_key, mem_id)` out
     /// of `space`: its bytes stay with the segment for its next map, its
     /// region leaves the space, and a keyed window's view leaves the
@@ -536,5 +535,33 @@ impl Runtime {
                 self.detach_keyed_shm_view(key, space, addr);
             }
         }
+    }
+}
+
+/// Write back into a freshly installed window at `addr` what segment
+/// `mem_id` held when the guest last unmapped one of its windows. A segment with no
+/// parked contents leaves the window as installed.
+fn restore_segment_contents(
+    lv2_host: &mut cellgov_lv2::Lv2Host,
+    mem: &mut cellgov_mem::GuestMemory,
+    mem_id: u32,
+    addr: u64,
+    size: usize,
+) {
+    let Some(bytes) = lv2_host.take_segment_contents(mem_id) else {
+        return;
+    };
+    let restored =
+        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), bytes.len() as u64)
+            .ok_or(cellgov_mem::MemError::LengthMismatch)
+            .and_then(|range| mem.apply_commit(range, &bytes));
+    if let Err(err) = restored {
+        lv2_host.log_invariant_break(
+            "dispatch.mmapper_contents_restore",
+            format_args!(
+                "shm contents of mem_id {mem_id:#x} not restored at \
+                 0x{addr:08x}+0x{size:x}: {err}",
+            ),
+        );
     }
 }
