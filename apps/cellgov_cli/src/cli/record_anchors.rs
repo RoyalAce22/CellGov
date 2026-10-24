@@ -7,7 +7,7 @@
 //! and every `[[bench.matrix]]` row -- and refuses a cell it does not.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use cellgov_compare::bench::{
@@ -19,7 +19,7 @@ use cellgov_compare::runner_cellgov::BootOutcome;
 use cellgov_compare::witness_parse::parse_witness_lines;
 use cellgov_compare::witness_parse::UnsupportedSyscallWitness;
 use cellgov_compare::witnesses::{BOOT_STARTED_SENTINEL, TITLE_NOT_INSTALLED_SENTINEL};
-use cellgov_compare::{BootSummary, RunIdentity, RUN_IDENTITY_SENTINEL};
+use cellgov_compare::{BootSummary, CheckpointKind, RunIdentity, RUN_IDENTITY_SENTINEL};
 use cellgov_terminal::caps::RenderFlags;
 use cellgov_terminal::progress::{ProgressBar, ProgressSink as _};
 use cellgov_time::Budget;
@@ -47,6 +47,21 @@ struct Measurement {
     budget: Budget,
     outcome: BootOutcome,
     identity: RunIdentity,
+}
+
+impl Measurement {
+    /// The anchor input for this measurement at `checkpoint`.
+    fn into_anchor(self, checkpoint: CheckpointKind) -> AnchorMeasurement {
+        AnchorMeasurement {
+            checkpoint,
+            outcome: self.outcome,
+            steps: self.steps,
+            budget: self.budget,
+            witnesses: self.witnesses,
+            unsupported_syscalls: self.unsupported_syscalls,
+            identity: self.identity,
+        }
+    }
 }
 
 /// Every way the run's own identity contradicts the cell that would
@@ -97,26 +112,7 @@ fn cell_disagreements(identity: &RunIdentity, cell: &CellKey) -> Vec<String> {
 fn measure(job: &Job) -> Result<Option<Measurement>, CommandError> {
     let exe = std::env::current_exe()
         .map_err(|error| CommandError::failed(format!("current_exe: {error}")))?;
-    let mut cmd = Command::new(exe);
-    cmd.arg("boot")
-        .arg("bench-once")
-        // Both of the child's streams are captured and parsed here, so
-        // a child bar would render into a pipe rather than a terminal.
-        .arg("--no-progress")
-        .arg("--title")
-        .arg(&job.short_name)
-        .arg("--fw")
-        .arg(&job.cell.fw)
-        .arg("--max-steps")
-        .arg(job.max_steps.to_string())
-        .arg("--checkpoint")
-        .arg(job.checkpoint.as_cli_str());
-    // A firmware-shipped title has no game-version axis, and the
-    // composition refuses the flag for one.
-    if let Some(v) = &job.cell.game_ver {
-        cmd.arg("--game-ver").arg(v);
-    }
-    let output = cmd
+    let output = bench_once_command(exe, job)
         .current_dir(workspace_root())
         .output()
         .map_err(|error| CommandError::failed(format!("spawn boot bench-once: {error}")))?;
@@ -139,8 +135,37 @@ fn measure(job: &Job) -> Result<Option<Measurement>, CommandError> {
             stderr.lines().rev().take(8).collect::<Vec<_>>().join("\n")
         )));
     }
+    parse_measurement(job, &stdout, &stderr).map(Some)
+}
 
-    let witnesses = parse_witness_lines(&stderr).map_err(|errors| {
+/// The `boot bench-once` re-entry that measures one cell.
+fn bench_once_command(exe: PathBuf, job: &Job) -> Command {
+    let mut cmd = Command::new(exe);
+    cmd.arg("boot")
+        .arg("bench-once")
+        // Both of the child's streams are captured and parsed here, so
+        // a child bar would render into a pipe rather than a terminal.
+        .arg("--no-progress")
+        .arg("--title")
+        .arg(&job.short_name)
+        .arg("--fw")
+        .arg(&job.cell.fw)
+        .arg("--max-steps")
+        .arg(job.max_steps.to_string())
+        .arg("--checkpoint")
+        .arg(job.checkpoint.as_cli_str());
+    // A firmware-shipped title has no game-version axis, and the
+    // composition refuses the flag for one.
+    if let Some(v) = &job.cell.game_ver {
+        cmd.arg("--game-ver").arg(v);
+    }
+    cmd
+}
+
+/// The measurement in a successful child's output, or an error when the
+/// output does not parse or names another cell.
+fn parse_measurement(job: &Job, stdout: &str, stderr: &str) -> Result<Measurement, CommandError> {
+    let witnesses = parse_witness_lines(stderr).map_err(|errors| {
         let lines: Vec<String> = errors.iter().map(ToString::to_string).collect();
         CommandError::failed(format!(
             "{}: malformed witness lines:\n  {}",
@@ -149,7 +174,7 @@ fn measure(job: &Job) -> Result<Option<Measurement>, CommandError> {
         ))
     })?;
 
-    let parsed = parse_bench_result(&stdout).map_err(|error| match error {
+    let parsed = parse_bench_result(stdout).map_err(|error| match error {
         // One boot prints the line once. Two lines mean two runs'
         // output reached one pipe, and neither can be attributed -- the
         // same reason a repeated RUN_IDENTITY line is refused.
@@ -167,7 +192,7 @@ fn measure(job: &Job) -> Result<Option<Measurement>, CommandError> {
     // The boot prints the line even when the store names nothing, with
     // an empty payload. A missing line therefore means the child was
     // not this binary, or its stderr never arrived.
-    let identity = RunIdentity::parse_sentinel_lines(&stderr)
+    let identity = RunIdentity::parse_sentinel_lines(stderr)
         .map_err(|error| CommandError::failed(format!("{}: {error}", job.label())))?
         .ok_or_else(|| {
             CommandError::failed(format!(
@@ -187,14 +212,14 @@ fn measure(job: &Job) -> Result<Option<Measurement>, CommandError> {
             disagreements.join(", and ")
         )));
     }
-    Ok(Some(Measurement {
+    Ok(Measurement {
         witnesses: witnesses.values,
         unsupported_syscalls: witnesses.unsupported_syscalls,
         steps: result.steps as u64,
         budget: result.budget,
         outcome: result.outcome,
         identity,
-    }))
+    })
 }
 
 /// Reads the existing append-only history.
@@ -235,15 +260,7 @@ fn read_previous_anchor(job: &Job, path: &Path) -> Result<Option<BootSummary>, C
 ///
 /// With `--all`, an uninstalled title returns `Ok(false)`. A named title returns an error.
 fn record_one(job: &Job, strict: bool) -> Result<bool, CommandError> {
-    let Some(Measurement {
-        witnesses,
-        unsupported_syscalls,
-        steps,
-        budget,
-        outcome: measured_outcome,
-        identity,
-    }) = measure(job)?
-    else {
+    let Some(measured) = measure(job)? else {
         if strict {
             return Err(CommandError::failed(format!(
                 "{}: the title's dump is not installed",
@@ -257,10 +274,6 @@ fn record_one(job: &Job, strict: bool) -> Result<bool, CommandError> {
     let root = workspace_root();
     let path = boot_anchor_path(&root, &job.content_id, &job.cell);
     let previous = read_previous_anchor(job, &path)?;
-    let previous_identity = previous
-        .as_ref()
-        .map(|p| p.identity.clone())
-        .unwrap_or_default();
 
     // History is parsed before the baseline is written: a malformed
     // history line must abort while the anchor is still untouched,
@@ -271,61 +284,33 @@ fn record_one(job: &Job, strict: bool) -> Result<bool, CommandError> {
         .map_err(|error| CommandError::failed(format!("parse {}: {error}", hist_path.display())))?;
     // The history spells an outcome the way `BootOutcome`'s `FromStr`
     // reads it back: its Display form.
-    let outcome = measured_outcome.to_string();
+    let outcome = measured.outcome.to_string();
+    let steps = measured.steps;
     let history_entry = BootHistoryEntry::new_if_changed(
         history_entries.last(),
         steps,
         &outcome,
-        witnesses.clone(),
-        identity.clone(),
+        measured.witnesses.clone(),
+        measured.identity.clone(),
     );
 
     let summary = anchor_from_measurement(
         previous.as_ref(),
-        AnchorMeasurement {
-            checkpoint: job.checkpoint.kind(),
-            outcome: measured_outcome,
-            steps,
-            budget,
-            witnesses,
-            unsupported_syscalls,
-            identity,
-        },
+        measured.into_anchor(job.checkpoint.kind()),
     )
     .map_err(|error| {
         CommandError::failed(format!(
-            "{}: recorded summary is invalid: {e}",
-            job.label(),
-            e = error,
+            "{}: recorded summary is invalid: {error}",
+            job.label()
         ))
     })?;
 
-    let dir = path.parent().ok_or_else(|| {
-        CommandError::failed(format!("{} has no parent directory", path.display()))
-    })?;
-    std::fs::create_dir_all(dir)
-        .map_err(|error| CommandError::failed(format!("create {}: {error}", dir.display())))?;
-    let json = serde_json::to_string_pretty(&summary)
-        .map_err(|error| CommandError::failed(format!("serialize {}: {error}", path.display())))?;
-    std::fs::write(&path, json + "\n")
-        .map_err(|error| CommandError::failed(format!("write {}: {error}", path.display())))?;
-
-    // The history's move rule compares against the previous history
-    // line, which can carry no identity triple. The anchor's own
-    // previous identity triple is the only record that can say the
-    // measurement basis moved.
-    if !previous_identity.is_empty() && previous_identity != summary.identity {
-        println!(
-            "{}: measured against a different identity triple than the previous anchor named",
-            job.label()
-        );
-        for line in previous_identity.render_lines() {
-            println!("  was  {line}");
-        }
-        for line in summary.identity.render_lines() {
-            println!("  now  {line}");
-        }
-    }
+    write_anchor(&path, &summary)?;
+    report_identity_move(
+        job,
+        previous.as_ref().map(|p| &p.identity),
+        &summary.identity,
+    );
 
     match history_entry {
         None => println!(
@@ -334,17 +319,7 @@ fn record_one(job: &Job, strict: bool) -> Result<bool, CommandError> {
             summary.witnesses.len()
         ),
         Some(entry_line) => {
-            let line = boot_history::render_line(&entry_line).map_err(|error| {
-                CommandError::failed(format!("serialize history entry: {error}"))
-            })?;
-            let mut text = existing_history;
-            if !text.is_empty() && !text.ends_with('\n') {
-                text.push('\n');
-            }
-            text.push_str(&line);
-            std::fs::write(&hist_path, text).map_err(|error| {
-                CommandError::failed(format!("write {}: {error}", hist_path.display()))
-            })?;
+            append_history(&hist_path, existing_history, &entry_line)?;
             println!(
                 "{}: moved ({outcome}, {steps} steps) -- {}",
                 job.label(),
@@ -353,6 +328,60 @@ fn record_one(job: &Job, strict: bool) -> Result<bool, CommandError> {
         }
     }
     Ok(true)
+}
+
+/// Write `summary` as the anchor at `path`, creating its directory.
+fn write_anchor(path: &Path, summary: &BootSummary) -> Result<(), CommandError> {
+    let dir = path.parent().ok_or_else(|| {
+        CommandError::failed(format!("{} has no parent directory", path.display()))
+    })?;
+    std::fs::create_dir_all(dir)
+        .map_err(|error| CommandError::failed(format!("create {}: {error}", dir.display())))?;
+    let json = serde_json::to_string_pretty(summary)
+        .map_err(|error| CommandError::failed(format!("serialize {}: {error}", path.display())))?;
+    std::fs::write(path, json + "\n")
+        .map_err(|error| CommandError::failed(format!("write {}: {error}", path.display())))
+}
+
+/// Name a run measured against another identity triple than the
+/// previous anchor named.
+///
+/// The history's move rule compares against the previous history
+/// line, which can carry no identity triple. The anchor's own previous
+/// identity triple is the only record that can say the measurement
+/// basis moved.
+fn report_identity_move(job: &Job, previous: Option<&RunIdentity>, current: &RunIdentity) {
+    let Some(previous) = previous.filter(|p| !p.is_empty() && *p != current) else {
+        return;
+    };
+    println!(
+        "{}: measured against a different identity triple than the previous anchor named",
+        job.label()
+    );
+    for line in previous.render_lines() {
+        println!("  was  {line}");
+    }
+    for line in current.render_lines() {
+        println!("  now  {line}");
+    }
+}
+
+/// Append `entry` to the history text read from `path` and write it
+/// back.
+fn append_history(
+    path: &Path,
+    existing: String,
+    entry: &BootHistoryEntry,
+) -> Result<(), CommandError> {
+    let line = boot_history::render_line(entry)
+        .map_err(|error| CommandError::failed(format!("serialize history entry: {error}")))?;
+    let mut text = existing;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(&line);
+    std::fs::write(path, text)
+        .map_err(|error| CommandError::failed(format!("write {}: {error}", path.display())))
 }
 
 /// Refuse a `--registry` the spawned measurement cannot honour.
