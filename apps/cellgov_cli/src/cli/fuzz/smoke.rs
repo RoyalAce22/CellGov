@@ -9,10 +9,11 @@ use cellgov_fuzz::artifact::{
 };
 use cellgov_fuzz::reduce::{ReductionPolicy, ReductionRequest};
 use cellgov_fuzz::regression::{self, Regression, RegressionProfile};
-use cellgov_fuzz::report::failing_findings;
+use cellgov_fuzz::report::{failing_findings, Finding, FuzzRun};
 use cellgov_fuzz::runner::reduce_retained_finding;
-use cellgov_fuzz::smoke::{SmokeError, SMOKE_CAMPAIGNS, SMOKE_REFERENCE};
-use cellgov_fuzz::{ReductionOutcome, RunOutcome};
+use cellgov_fuzz::smoke::{SmokeCampaign, SmokeError, SMOKE_CAMPAIGNS, SMOKE_REFERENCE};
+use cellgov_fuzz::spu_reference::SpuReferenceCampaign;
+use cellgov_fuzz::{FuzzConfig, FuzzError, ReductionOutcome, RunOutcome};
 
 use super::artifact::persist_finding;
 use super::entry::{reports_progress, write_stdout};
@@ -80,123 +81,24 @@ pub(super) fn run_smoke(
         .as_ref()
         .map(|dir| SMOKE_REFERENCE.run(dir))
         .transpose()?;
-    let request = ReductionRequest {
-        policy: ReductionPolicy::Deterministic,
-        budget: args.reduction_budget,
+    let store = FindingStore {
+        artifacts_dir,
+        progress: args.progress,
+        request: ReductionRequest {
+            policy: ReductionPolicy::Deterministic,
+            budget: args.reduction_budget,
+        },
+        regressions: &regressions,
     };
-    let mut evidence_not_stored = None;
-    let mut harness_failure = None;
-    let mut reductions_failed = 0u64;
-    let mut unpromoted_total = 0u64;
-    let mut vacuous = false;
+    let mut tally = SmokeTally::default();
     for campaign in &SMOKE_CAMPAIGNS {
         let config = campaign.config();
         let run = campaign.run();
         let mut promoted = 0u64;
-        let mut unpromoted = 0u64;
         for (index, finding) in run.report.findings.iter().enumerate() {
-            let mut finding = finding.clone();
-            finding.reduction = reduce_retained_finding(config, &finding, request);
-            if let ReductionOutcome::Failed(error) = &finding.reduction {
-                reductions_failed = reductions_failed
-                    .checked_add(1)
-                    .ok_or(FuzzCliError::CounterOverflow)?;
-                eprintln!(
-                    "fuzz smoke: reduction of {} case {} failed: {error}; original case kept",
-                    campaign.name, finding.replay.case_index
-                );
-            }
-            let path = artifact_path(
-                artifacts_dir,
-                campaign.name,
-                finding.replay.case_index,
-                index as u64,
-            );
-            let mut record = ArtifactRecord {
-                path: path.clone(),
-                campaign_version: finding.replay.campaign_version.0,
-                seed: finding.replay.seed,
-                case_index: finding.replay.case_index,
-                finding_kind: finding.kind,
-                fingerprint: ArtifactFingerprint::from(&finding.fingerprint),
-                reduction: ArtifactReduction::from(&finding.reduction),
-                stored: false,
-            };
-            let stored = FuzzFindingArtifact::from_finding(
-                config,
-                ArtifactExecutionPolicy {
-                    workers: 1,
-                    deadline_ms: None,
-                    progress: args.progress,
-                    check: ArtifactCheckSelection::All,
-                    reduction: ArtifactReductionRequest::OnFinding {
-                        policy: request.policy,
-                        budget: request.budget,
-                    },
-                },
-                &run.report,
-                &finding,
-                ArtifactReference::Local,
-                &path,
-            )
-            .map_err(FuzzCliError::from)
-            .and_then(|artifact| persist_finding(&path, artifact));
-            match stored {
-                Ok(()) => record.stored = true,
-                Err(error) => {
-                    eprintln!("fuzz smoke: {error}");
-                    if evidence_not_stored.is_none() {
-                        evidence_not_stored = Some(error);
-                    }
-                }
-            }
-            let covering = regression::promoted(&regressions, &finding);
-            match covering {
-                Some(_) => promoted += 1,
-                None => unpromoted += 1,
-            }
-            write_stdout(&render_smoke_finding(
-                campaign.name,
-                &record,
-                covering.map(|regression| regression.entry.name.as_str()),
-            ))?;
+            promoted += u64::from(store.store(campaign, config, &run, index, finding, &mut tally)?);
         }
-        let covered = campaign.check_coverage(&run.report);
-        if let Err(error) = &covered {
-            vacuous = true;
-            eprintln!("fuzz smoke: {error}");
-        }
-        if let RunOutcome::HarnessFailure(source) = &run.outcome {
-            eprintln!(
-                "fuzz smoke: {} failed inside the harness: {source}",
-                campaign.name
-            );
-            if harness_failure.is_none() {
-                harness_failure = Some(source.clone());
-            }
-        }
-        // The engine retains a bounded number of findings and counts the
-        // rest. A counted finding the engine did not retain met no
-        // regression, so it ranks as unpromoted.
-        let retained = run.report.findings.len() as u64;
-        let findings = failing_findings(&run.report.finding_counts);
-        unpromoted = unpromoted.saturating_add(findings.saturating_sub(retained));
-        unpromoted_total = unpromoted_total
-            .checked_add(unpromoted)
-            .ok_or(FuzzCliError::CounterOverflow)?;
-        let summary = SmokeCampaignSummary {
-            name: campaign.name,
-            campaign_version: config.campaign_version.0,
-            seed: campaign.seed,
-            cases: run.report.cases,
-            eligible: run.report.eligible_cases,
-            instruction_kinds: run.report.instruction_kinds.len() as u64,
-            findings,
-            retained,
-            promoted,
-            unpromoted,
-            covered: covered.is_ok(),
-        };
+        let summary = summarize_campaign(campaign, config, &run, promoted, &mut tally)?;
         let line = render_smoke_campaign(&summary);
         if reports_progress(args.progress, quiet) {
             eprint!("{line}");
@@ -206,50 +108,205 @@ pub(super) fn run_smoke(
     let mut campaigns = SMOKE_CAMPAIGNS.len();
     if let Some(replay) = &reference {
         campaigns += 1;
-        let checked = SMOKE_REFERENCE.check(replay);
-        if let Err(error) = &checked {
-            eprintln!("fuzz smoke: {error}");
-        }
-        // A replay that is not clean is a finding no regression covers,
-        // whatever error the check names first.
-        if !replay.is_clean() {
-            unpromoted_total = unpromoted_total
-                .checked_add(1)
-                .ok_or(FuzzCliError::CounterOverflow)?;
-        }
-        let covered = SMOKE_REFERENCE.reaches_floor(replay)
-            && !matches!(checked, Err(SmokeError::Unpinned { .. }));
-        vacuous |= !covered;
-        let line = render_smoke_reference(&SmokeReferenceSummary {
-            name: SMOKE_REFERENCE.name,
-            files: replay.files.len() as u64,
-            vectors: replay.vectors() as u64,
-            failing: replay
-                .files
-                .iter()
-                .filter(|run| !run.outcome.is_match())
-                .count() as u64,
-            gaps: replay.completeness.gaps() as u64,
-            covered,
-        });
+        let line = render_smoke_reference(&replay_reference_tier(replay, &mut tally)?);
         if reports_progress(args.progress, quiet) {
             eprint!("{line}");
         }
         write_stdout(&line)?;
     }
     let outcome = SmokeOutcome::classify(
-        evidence_not_stored.is_some(),
-        harness_failure.is_some(),
-        reductions_failed,
-        unpromoted_total,
-        vacuous,
+        tally.evidence_not_stored.is_some(),
+        tally.harness_failure.is_some(),
+        tally.reductions_failed,
+        tally.unpromoted_total,
+        tally.vacuous,
     );
     write_stdout(&render_smoke_outcome(campaigns, outcome))?;
-    if let Some(error) = evidence_not_stored {
+    if let Some(error) = tally.evidence_not_stored {
         return Err(error);
     }
-    if let Some(source) = harness_failure {
+    if let Some(source) = tally.harness_failure {
         return Err(FuzzCliError::Harness(source));
     }
     Ok(outcome.exit_code())
+}
+
+/// What the smoke set counts across its campaigns and its reference tier.
+#[derive(Default)]
+struct SmokeTally {
+    /// The first finding whose evidence the set could not store.
+    evidence_not_stored: Option<FuzzCliError>,
+    /// The first campaign that failed inside the harness.
+    harness_failure: Option<FuzzError>,
+    reductions_failed: u64,
+    unpromoted_total: u64,
+    vacuous: bool,
+}
+
+impl SmokeTally {
+    fn add_unpromoted(&mut self, count: u64) -> Result<(), FuzzCliError> {
+        self.unpromoted_total = self
+            .unpromoted_total
+            .checked_add(count)
+            .ok_or(FuzzCliError::CounterOverflow)?;
+        Ok(())
+    }
+}
+
+/// Where and how the smoke set reduces, stores and ranks each finding.
+struct FindingStore<'a> {
+    artifacts_dir: &'a str,
+    progress: bool,
+    request: ReductionRequest,
+    regressions: &'a [Regression],
+}
+
+impl FindingStore<'_> {
+    /// Reduce the `index`th finding of `run`, store it, and print its
+    /// line; returns whether a regression covers it.
+    fn store(
+        &self,
+        campaign: &SmokeCampaign,
+        config: FuzzConfig,
+        run: &FuzzRun,
+        index: usize,
+        finding: &Finding,
+        tally: &mut SmokeTally,
+    ) -> Result<bool, FuzzCliError> {
+        let mut finding = finding.clone();
+        finding.reduction = reduce_retained_finding(config, &finding, self.request);
+        if let ReductionOutcome::Failed(error) = &finding.reduction {
+            tally.reductions_failed = tally
+                .reductions_failed
+                .checked_add(1)
+                .ok_or(FuzzCliError::CounterOverflow)?;
+            eprintln!(
+                "fuzz smoke: reduction of {} case {} failed: {error}; original case kept",
+                campaign.name, finding.replay.case_index
+            );
+        }
+        let path = artifact_path(
+            self.artifacts_dir,
+            campaign.name,
+            finding.replay.case_index,
+            index as u64,
+        );
+        let mut record = ArtifactRecord {
+            path: path.clone(),
+            campaign_version: finding.replay.campaign_version.0,
+            seed: finding.replay.seed,
+            case_index: finding.replay.case_index,
+            finding_kind: finding.kind,
+            fingerprint: ArtifactFingerprint::from(&finding.fingerprint),
+            reduction: ArtifactReduction::from(&finding.reduction),
+            stored: false,
+        };
+        let stored = FuzzFindingArtifact::from_finding(
+            config,
+            ArtifactExecutionPolicy {
+                workers: 1,
+                deadline_ms: None,
+                progress: self.progress,
+                check: ArtifactCheckSelection::All,
+                reduction: ArtifactReductionRequest::OnFinding {
+                    policy: self.request.policy,
+                    budget: self.request.budget,
+                },
+            },
+            &run.report,
+            &finding,
+            ArtifactReference::Local,
+            &path,
+        )
+        .map_err(FuzzCliError::from)
+        .and_then(|artifact| persist_finding(&path, artifact));
+        match stored {
+            Ok(()) => record.stored = true,
+            Err(error) => {
+                eprintln!("fuzz smoke: {error}");
+                tally.evidence_not_stored.get_or_insert(error);
+            }
+        }
+        let covering = regression::promoted(self.regressions, &finding);
+        write_stdout(&render_smoke_finding(
+            campaign.name,
+            &record,
+            covering.map(|regression| regression.entry.name.as_str()),
+        ))?;
+        Ok(covering.is_some())
+    }
+}
+
+/// The summary line of one campaign whose retained findings `promoted`
+/// regressions cover, after its coverage and harness checks.
+fn summarize_campaign(
+    campaign: &SmokeCampaign,
+    config: FuzzConfig,
+    run: &FuzzRun,
+    promoted: u64,
+    tally: &mut SmokeTally,
+) -> Result<SmokeCampaignSummary, FuzzCliError> {
+    let covered = campaign.check_coverage(&run.report);
+    if let Err(error) = &covered {
+        tally.vacuous = true;
+        eprintln!("fuzz smoke: {error}");
+    }
+    if let RunOutcome::HarnessFailure(source) = &run.outcome {
+        eprintln!(
+            "fuzz smoke: {} failed inside the harness: {source}",
+            campaign.name
+        );
+        tally.harness_failure.get_or_insert_with(|| source.clone());
+    }
+    // The engine retains a bounded number of findings and counts the
+    // rest. A counted finding the engine did not retain met no
+    // regression, so it ranks as unpromoted.
+    let retained = run.report.findings.len() as u64;
+    let findings = failing_findings(&run.report.finding_counts);
+    let unpromoted = (retained - promoted).saturating_add(findings.saturating_sub(retained));
+    tally.add_unpromoted(unpromoted)?;
+    Ok(SmokeCampaignSummary {
+        name: campaign.name,
+        campaign_version: config.campaign_version.0,
+        seed: campaign.seed,
+        cases: run.report.cases,
+        eligible: run.report.eligible_cases,
+        instruction_kinds: run.report.instruction_kinds.len() as u64,
+        findings,
+        retained,
+        promoted,
+        unpromoted,
+        covered: covered.is_ok(),
+    })
+}
+
+/// Check the reference tier's replay and tally what it found.
+fn replay_reference_tier(
+    replay: &SpuReferenceCampaign,
+    tally: &mut SmokeTally,
+) -> Result<SmokeReferenceSummary, FuzzCliError> {
+    let checked = SMOKE_REFERENCE.check(replay);
+    if let Err(error) = &checked {
+        eprintln!("fuzz smoke: {error}");
+    }
+    // A replay that is not clean is a finding no regression covers,
+    // whatever error the check names first.
+    if !replay.is_clean() {
+        tally.add_unpromoted(1)?;
+    }
+    let covered = SMOKE_REFERENCE.reaches_floor(replay)
+        && !matches!(checked, Err(SmokeError::Unpinned { .. }));
+    tally.vacuous |= !covered;
+    Ok(SmokeReferenceSummary {
+        name: SMOKE_REFERENCE.name,
+        files: replay.files.len() as u64,
+        vectors: replay.vectors() as u64,
+        failing: replay
+            .files
+            .iter()
+            .filter(|run| !run.outcome.is_match())
+            .count() as u64,
+        gaps: replay.completeness.gaps() as u64,
+        covered,
+    })
 }
