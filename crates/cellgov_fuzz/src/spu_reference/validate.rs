@@ -9,7 +9,8 @@ use cellgov_spu::state::{SpuState, TagUpdateCondition, SPU_LS_SIZE, SPU_REG_COUN
 use crate::reference::is_lower_hex;
 
 use super::types::{
-    SpuReferenceArtifact, SpuReferenceError, SpuReferenceInput, SPU_REFERENCE_SCHEMA_VERSION,
+    SpuReferenceArtifact, SpuReferenceChannels, SpuReferenceError, SpuReferenceInput,
+    SPU_REFERENCE_SCHEMA_VERSION,
 };
 
 /// Parses and validates a bounded repository reference artifact.
@@ -139,102 +140,56 @@ impl SpuReferenceArtifact {
                 return Err(invalid(field));
             }
         }
-        if self
-            .initial_state
-            .local_store
-            .keys()
-            .any(|offset| parse_index(offset, SPU_LS_SIZE).is_none())
-        {
-            return Err(invalid("initial_state.local_store"));
+        for (field, ls) in [
+            (
+                "initial_state.local_store",
+                Some(&self.initial_state.local_store),
+            ),
+            ("expected.local_store", self.expected.local_store.as_value()),
+        ] {
+            if ls.is_some_and(|ls| {
+                ls.keys()
+                    .any(|offset| parse_index(offset, SPU_LS_SIZE).is_none())
+            }) {
+                return Err(invalid(field));
+            }
         }
-        if self.expected.local_store.as_value().is_some_and(|ls| {
-            ls.keys()
-                .any(|offset| parse_index(offset, SPU_LS_SIZE).is_none())
-        }) {
-            return Err(invalid("expected.local_store"));
+        for (field, fpscr) in [
+            ("initial_state.fpscr", self.initial_state.fpscr.as_ref()),
+            ("expected.fpscr", self.expected.fpscr.as_value()),
+        ] {
+            if fpscr.is_some_and(|hex| parse_fpscr(hex).is_none()) {
+                return Err(invalid(field));
+            }
         }
-        if self
-            .initial_state
-            .fpscr
-            .as_deref()
-            .is_some_and(|hex| parse_fpscr(hex).is_none())
-        {
-            return Err(invalid("initial_state.fpscr"));
+        for (field, reservation) in [
+            ("initial_state.reservation", self.initial_state.reservation),
+            (
+                "expected.reservation",
+                self.expected.reservation.as_value().copied().flatten(),
+            ),
+        ] {
+            if reservation.is_some_and(reservation_is_misaligned) {
+                return Err(invalid(field));
+            }
         }
-        if self
-            .expected
-            .fpscr
-            .as_value()
-            .is_some_and(|hex| parse_fpscr(hex).is_none())
-        {
-            return Err(invalid("expected.fpscr"));
-        }
-        if self
-            .initial_state
-            .reservation
-            .is_some_and(|addr| cellgov_sync::ReservedLine::containing(addr).addr() != addr)
-        {
-            return Err(invalid("initial_state.reservation"));
-        }
-        if self
-            .expected
-            .reservation
-            .as_value()
-            .is_some_and(|reservation| {
-                reservation
-                    .is_some_and(|addr| cellgov_sync::ReservedLine::containing(addr).addr() != addr)
-            })
-        {
-            return Err(invalid("expected.reservation"));
-        }
-        // [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_RdInMbox has 4 maximum entries.
-        let overfull = |channels: &super::types::SpuReferenceChannels| {
-            channels.in_mbox.len() > SPU_IN_MBOX_DEPTH as usize
-        };
-        if self.initial_state.channels.as_ref().is_some_and(overfull) {
-            return Err(invalid("initial_state.channels.in_mbox"));
-        }
-        if self.expected.channels.as_value().is_some_and(overfull) {
-            return Err(invalid("expected.channels.in_mbox"));
-        }
-        // [CBE-Handbook p:528 s:19.4.3.2] the MFC SPU command queue has 16 entries.
-        let too_many_slots = |channels: &super::types::SpuReferenceChannels| {
-            channels.mfc_cmd_count > MFC_SPU_QUEUE_DEPTH
-        };
-        if self
-            .initial_state
-            .channels
-            .as_ref()
-            .is_some_and(too_many_slots)
-        {
-            return Err(invalid("initial_state.channels.mfc_cmd_count"));
-        }
-        if self
-            .expected
-            .channels
-            .as_value()
-            .is_some_and(too_many_slots)
-        {
-            return Err(invalid("expected.channels.mfc_cmd_count"));
-        }
-        let bad_update = |update: Option<u32>| {
-            update.is_some_and(|ts| ts != MFC_TAG_UPDATE_ANY && ts != MFC_TAG_UPDATE_ALL)
-        };
-        if self
-            .initial_state
-            .channels
-            .as_ref()
-            .is_some_and(|channels| bad_update(channels.tag_update))
-        {
-            return Err(invalid("initial_state.channels.tag_update"));
-        }
-        if self
-            .expected
-            .channels
-            .as_value()
-            .is_some_and(|channels| bad_update(channels.tag_update))
-        {
-            return Err(invalid("expected.channels.tag_update"));
+        for (initial_field, expected_field, invalid_channels) in CHANNEL_CHECKS {
+            if self
+                .initial_state
+                .channels
+                .as_ref()
+                .is_some_and(invalid_channels)
+            {
+                return Err(invalid(initial_field));
+            }
+            if self
+                .expected
+                .channels
+                .as_value()
+                .is_some_and(invalid_channels)
+            {
+                return Err(invalid(expected_field));
+            }
         }
         if self
             .expected
@@ -272,6 +227,56 @@ impl SpuReferenceArtifact {
             .check(valid_spu_citation)
             .map_err(|_| invalid("provenance"))
     }
+}
+
+/// The channel checks [`SpuReferenceArtifact::validate`] runs on each
+/// side, in report order: the field each side reports, and whether a
+/// channel block is invalid.
+const CHANNEL_CHECKS: [ChannelCheck; 3] = [
+    (
+        "initial_state.channels.in_mbox",
+        "expected.channels.in_mbox",
+        in_mbox_overfull,
+    ),
+    (
+        "initial_state.channels.mfc_cmd_count",
+        "expected.channels.mfc_cmd_count",
+        too_many_queue_slots,
+    ),
+    (
+        "initial_state.channels.tag_update",
+        "expected.channels.tag_update",
+        bad_tag_update,
+    ),
+];
+
+/// The initial-side field, the expected-side field, and the predicate.
+type ChannelCheck = (
+    &'static str,
+    &'static str,
+    fn(&SpuReferenceChannels) -> bool,
+);
+
+/// [CBE-Handbook p:445 s:17.1 Table 17-2] SPU_RdInMbox has 4 maximum entries.
+fn in_mbox_overfull(channels: &SpuReferenceChannels) -> bool {
+    channels.in_mbox.len() > SPU_IN_MBOX_DEPTH as usize
+}
+
+/// [CBE-Handbook p:528 s:19.4.3.2] the MFC SPU command queue has 16 entries.
+fn too_many_queue_slots(channels: &SpuReferenceChannels) -> bool {
+    channels.mfc_cmd_count > MFC_SPU_QUEUE_DEPTH
+}
+
+/// A tag update other than any or all.
+fn bad_tag_update(channels: &SpuReferenceChannels) -> bool {
+    channels
+        .tag_update
+        .is_some_and(|ts| ts != MFC_TAG_UPDATE_ANY && ts != MFC_TAG_UPDATE_ALL)
+}
+
+/// Whether `addr` is not the start of its reservation line.
+fn reservation_is_misaligned(addr: u64) -> bool {
+    cellgov_sync::ReservedLine::containing(addr).addr() != addr
 }
 
 pub(super) fn valid_spu_citation(citation: &str) -> bool {

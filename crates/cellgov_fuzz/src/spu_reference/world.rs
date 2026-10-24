@@ -583,68 +583,95 @@ impl World {
             return Ok(());
         }
         let target = window_target(self.peer.is_some(), c);
-        let fail = |_| world_error("a completed transfer");
         match c.direction() {
-            DmaDirection::Get => {
-                let mut bytes = match target {
-                    Some(Ok(WindowTarget::LocalStore { unit, lsa })) => self
-                        .unit_mut(unit)?
-                        .read_local_store(lsa, len as u32)
-                        .map_err(fail)?,
-                    Some(_) => return Ok(()),
-                    None => self
-                        .memory
-                        .read(c.source())
-                        .ok_or(world_error("a get's source"))?
-                        .to_vec(),
-                };
-                crate::seeded::world_get(&mut bytes);
-                // The destination is a local-store offset, below 2^32.
-                let lsa = c.destination().start().raw() as u32;
-                self.unit.land_local_store(lsa, &bytes).map_err(fail)
+            DmaDirection::Get => self.land_get(c, target, len),
+            DmaDirection::Put => self.land_put(c, target, payload, len),
+        }
+    }
+
+    /// Lands a get in the issuer's local store, from main storage or a
+    /// window onto a unit's local store; a get from any other window
+    /// lands nothing.
+    fn land_get(
+        &mut self,
+        c: &DmaCompletion,
+        target: Option<Result<WindowTarget, MfcCommandError>>,
+        len: u64,
+    ) -> Result<(), SpuReferenceError> {
+        let mut bytes = match target {
+            Some(Ok(WindowTarget::LocalStore { unit, lsa })) => self
+                .unit_mut(unit)?
+                .read_local_store(lsa, len as u32)
+                .map_err(transfer_failed)?,
+            Some(_) => return Ok(()),
+            None => self
+                .memory
+                .read(c.source())
+                .ok_or(world_error("a get's source"))?
+                .to_vec(),
+        };
+        crate::seeded::world_get(&mut bytes);
+        // The destination is a local-store offset, below 2^32.
+        let lsa = c.destination().start().raw() as u32;
+        self.unit
+            .land_local_store(lsa, &bytes)
+            .map_err(transfer_failed)
+    }
+
+    /// Lands a put's bytes in main storage or in the window it targets:
+    /// a unit's local store, a signal register or an inbound mailbox,
+    /// which take the bytes' first word.
+    fn land_put(
+        &mut self,
+        c: &DmaCompletion,
+        target: Option<Result<WindowTarget, MfcCommandError>>,
+        payload: Option<&[u8]>,
+        len: u64,
+    ) -> Result<(), SpuReferenceError> {
+        let bytes = match payload {
+            Some(bytes) => bytes.to_vec(),
+            None if c.request().local_store_source() => self
+                .unit
+                .read_local_store(c.source().start().raw() as u32, len as u32)
+                .map_err(transfer_failed)?,
+            None => self
+                .memory
+                .read(c.source())
+                .ok_or(world_error("a put's source"))?
+                .to_vec(),
+        };
+        let mut word = [0; 4];
+        for (slot, byte) in word.iter_mut().zip(&bytes) {
+            *slot = *byte;
+        }
+        let word = u32::from_be_bytes(word);
+        match target {
+            Some(Ok(WindowTarget::LocalStore { unit, lsa })) => self
+                .unit_mut(unit)?
+                .land_local_store(lsa, &bytes)
+                .map_err(transfer_failed),
+            Some(Ok(WindowTarget::Signal { unit, register })) => self
+                .unit_mut(unit)?
+                .write_signal(register, word)
+                .map_err(transfer_failed),
+            Some(Ok(WindowTarget::InboundMailbox { unit })) => {
+                if unit == OWN {
+                    self.inbox.push(word);
+                } else {
+                    self.peer_inbox.push(word);
+                }
+                Ok(())
             }
-            DmaDirection::Put => {
-                let bytes = match payload {
-                    Some(bytes) => bytes.to_vec(),
-                    None if c.request().local_store_source() => self
-                        .unit
-                        .read_local_store(c.source().start().raw() as u32, len as u32)
-                        .map_err(fail)?,
-                    None => self
-                        .memory
-                        .read(c.source())
-                        .ok_or(world_error("a put's source"))?
-                        .to_vec(),
-                };
-                let mut word = [0; 4];
-                for (slot, byte) in word.iter_mut().zip(&bytes) {
-                    *slot = *byte;
-                }
-                let word = u32::from_be_bytes(word);
-                match target {
-                    Some(Ok(WindowTarget::LocalStore { unit, lsa })) => self
-                        .unit_mut(unit)?
-                        .land_local_store(lsa, &bytes)
-                        .map_err(fail),
-                    Some(Ok(WindowTarget::Signal { unit, register })) => self
-                        .unit_mut(unit)?
-                        .write_signal(register, word)
-                        .map_err(fail),
-                    Some(Ok(WindowTarget::InboundMailbox { unit })) => {
-                        if unit == OWN {
-                            self.inbox.push(word);
-                        } else {
-                            self.peer_inbox.push(word);
-                        }
-                        Ok(())
-                    }
-                    Some(Err(_)) => Ok(()),
-                    None => {
-                        self.commit(c.destination(), &bytes, c.issuer());
-                        Ok(())
-                    }
-                }
+            Some(Err(_)) => Ok(()),
+            None => {
+                self.commit(c.destination(), &bytes, c.issuer());
+                Ok(())
             }
         }
     }
+}
+
+/// The error for a completed transfer the world could not land.
+fn transfer_failed<E>(_: E) -> SpuReferenceError {
+    world_error("a completed transfer")
 }

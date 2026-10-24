@@ -106,27 +106,7 @@ fn replay_vector(vector: &SpuReferenceVector) -> Result<SpuVectorReplay, SpuRefe
         steps += 1;
         world.step()?;
     }
-    let end = if world.refused {
-        SpuReferenceEnd::Faulted { code: None }
-    } else {
-        match world.unit.status() {
-            UnitStatus::Finished => SpuReferenceEnd::Stopped,
-            UnitStatus::Faulted => SpuReferenceEnd::Faulted {
-                code: match world.fault {
-                    Some(FaultKind::Guest(code)) => Some(code),
-                    Some(FaultKind::Validation) | None => None,
-                },
-            },
-            UnitStatus::Runnable | UnitStatus::Blocked | UnitStatus::Suspended => {
-                match world.unit.channel_stall() {
-                    Some(stall) => SpuReferenceEnd::Stalled {
-                        channel: stall.channel,
-                    },
-                    None => SpuReferenceEnd::StepLimit,
-                }
-            }
-        }
-    };
+    let end = reference_end(&world);
     let snapshot = world.unit.snapshot();
     let observation = SpuVectorObservation {
         loaded: &loaded,
@@ -154,6 +134,32 @@ fn replay_vector(vector: &SpuReferenceVector) -> Result<SpuVectorReplay, SpuRefe
         steps,
         comparison,
     })
+}
+
+/// How the replay ended: a refused store is a fault with no code, and a
+/// unit that neither stopped nor faulted ended on a channel stall or at
+/// the step limit.
+fn reference_end(world: &World) -> SpuReferenceEnd {
+    if world.refused {
+        return SpuReferenceEnd::Faulted { code: None };
+    }
+    match world.unit.status() {
+        UnitStatus::Finished => SpuReferenceEnd::Stopped,
+        UnitStatus::Faulted => SpuReferenceEnd::Faulted {
+            code: match world.fault {
+                Some(FaultKind::Guest(code)) => Some(code),
+                Some(FaultKind::Validation) | None => None,
+            },
+        },
+        UnitStatus::Runnable | UnitStatus::Blocked | UnitStatus::Suspended => {
+            match world.unit.channel_stall() {
+                Some(stall) => SpuReferenceEnd::Stalled {
+                    channel: stall.channel,
+                },
+                None => SpuReferenceEnd::StepLimit,
+            }
+        }
+    }
 }
 
 /// The start state, with the instruction words loaded.
