@@ -27,19 +27,9 @@ pub(super) fn locate_divergence(
     opts: BenchOptions<'_>,
     runs: &[BenchBootResult],
 ) -> Result<Vec<String>, crate::cli::exit::CommandError> {
-    let mut out = Vec::new();
     let steps = runs.iter().map(|r| r.steps).max().unwrap_or(0);
     if steps > LOCALIZE_MAX_STEPS {
-        out.push(format!(
-            "diverge: not run automatically -- the boot retires {steps} steps, past the \
-             {LOCALIZE_MAX_STEPS} a traced re-run is affordable at. Localize it by hand:"
-        ));
-        for i in 0..2 {
-            let argv = localization_command_argv(opts, i, &format!("run{i}.state"));
-            out.push(format!("  {}", render_command(&argv)));
-        }
-        out.push("  cellgov diff diverge run0.state run1.state".to_string());
-        return Ok(out);
+        return Ok(manual_localization_lines(opts, steps));
     }
     // This prints before the two boots below, which run in
     // DeterminismCheck mode with no progress bar and take far longer
@@ -54,59 +44,94 @@ pub(super) fn locate_divergence(
         .collect();
     let mut traces = Vec::with_capacity(paths.len());
     for (i, path) in paths.iter().enumerate() {
-        let Some(text) = path.to_str() else {
-            out.push(format!(
-                "cannot localize: the temporary trace path {} is not valid UTF-8",
-                path.display()
-            ));
-            cleanup_traces(&paths);
-            return Ok(out);
-        };
-        let exe = match std::env::current_exe() {
-            Ok(e) => e,
-            Err(e) => {
-                out.push(format!("cannot localize: current_exe: {e}"));
-                cleanup_traces(&paths);
-                return Ok(out);
-            }
-        };
-        let mut cmd = std::process::Command::new(exe);
-        let argv = localization_command_argv(opts, i, text);
-        cmd.args(&argv[1..]);
-        match cmd.output() {
-            Ok(o) if o.status.success() => {}
-            Ok(o) => {
-                cleanup_traces(&paths);
-                crate::cli::exit::propagate_interrupt(o.status)?;
-                out.push(format!(
-                    "cannot localize: the traced re-run exited {:?}",
-                    o.status.code()
-                ));
-                // The child's own stderr is the only account of why it
-                // refused.
-                out.extend(stderr_tail(&o.stderr));
-                return Ok(out);
-            }
-            Err(e) => {
-                out.push(format!("cannot localize: spawning the traced re-run: {e}"));
-                cleanup_traces(&paths);
-                return Ok(out);
-            }
-        }
-        match std::fs::read(path) {
+        match traced_rerun(opts, i, path) {
             Ok(bytes) => traces.push(bytes),
-            Err(e) => {
-                out.push(format!("cannot localize: reading {}: {e}", path.display()));
+            Err(refusal) => {
+                // Ahead of the interrupt check, so an interrupted run
+                // still deletes its traces.
                 cleanup_traces(&paths);
-                return Ok(out);
+                if let Some(status) = refusal.status {
+                    crate::cli::exit::propagate_interrupt(status)?;
+                }
+                return Ok(refusal.lines);
             }
         }
     }
     cleanup_traces(&paths);
-    out.push(format_diverge(&cellgov_compare::diverge(
+    Ok(vec![format_diverge(&cellgov_compare::diverge(
         &traces[0], &traces[1],
-    )));
-    Ok(out)
+    ))])
+}
+
+/// The report for a boot past the cap: the two traced commands and the
+/// comparison, for the operator to run.
+fn manual_localization_lines(opts: BenchOptions<'_>, steps: usize) -> Vec<String> {
+    let mut out = vec![format!(
+        "diverge: not run automatically -- the boot retires {steps} steps, past the \
+         {LOCALIZE_MAX_STEPS} a traced re-run is affordable at. Localize it by hand:"
+    )];
+    for i in 0..2 {
+        let argv = localization_command_argv(opts, i, &format!("run{i}.state"));
+        out.push(format!("  {}", render_command(&argv)));
+    }
+    out.push("  cellgov diff diverge run0.state run1.state".to_string());
+    out
+}
+
+/// Why a traced re-run produced no trace.
+struct RerunRefusal {
+    /// The report lines that say why.
+    lines: Vec<String>,
+    /// The child's exit status when it ran and failed, which may carry
+    /// an interrupt to pass on.
+    status: Option<std::process::ExitStatus>,
+}
+
+impl RerunRefusal {
+    fn line(line: String) -> Self {
+        Self {
+            lines: vec![line],
+            status: None,
+        }
+    }
+}
+
+/// Run diagnostic boot `i` under `--save-state-trace path` and read the
+/// trace back.
+fn traced_rerun(
+    opts: BenchOptions<'_>,
+    i: usize,
+    path: &std::path::Path,
+) -> Result<Vec<u8>, RerunRefusal> {
+    let Some(text) = path.to_str() else {
+        return Err(RerunRefusal::line(format!(
+            "cannot localize: the temporary trace path {} is not valid UTF-8",
+            path.display()
+        )));
+    };
+    let exe = std::env::current_exe()
+        .map_err(|e| RerunRefusal::line(format!("cannot localize: current_exe: {e}")))?;
+    let mut cmd = std::process::Command::new(exe);
+    let argv = localization_command_argv(opts, i, text);
+    cmd.args(&argv[1..]);
+    let o = cmd.output().map_err(|e| {
+        RerunRefusal::line(format!("cannot localize: spawning the traced re-run: {e}"))
+    })?;
+    if !o.status.success() {
+        let mut lines = vec![format!(
+            "cannot localize: the traced re-run exited {:?}",
+            o.status.code()
+        )];
+        // The child's own stderr is the only account of why it refused.
+        lines.extend(stderr_tail(&o.stderr));
+        return Err(RerunRefusal {
+            lines,
+            status: Some(o.status),
+        });
+    }
+    std::fs::read(path).map_err(|e| {
+        RerunRefusal::line(format!("cannot localize: reading {}: {e}", path.display()))
+    })
 }
 
 fn localization_command_argv(
