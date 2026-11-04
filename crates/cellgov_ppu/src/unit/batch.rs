@@ -29,6 +29,16 @@ pub(super) struct BatchEntry {
     pub(super) timing: Option<crate::timing::Core>,
 }
 
+/// How an instruction faulted.
+enum FaultExit {
+    /// A fetch or decode fault, as its fault code.
+    Code(u32),
+    /// A fault the instruction reported.
+    Verdict(PpuFault),
+    /// A memory fault the instruction reported.
+    Mem(cellgov_mem::MemError),
+}
+
 /// The tap a unit with none installed runs its batch loop with.
 pub(super) struct NoTap;
 
@@ -107,8 +117,14 @@ impl PpuExecutionUnit {
         // that reaches a window, so the next instruction sees the update.
         let window_span = ctx.memory().window_span();
 
+        // The pc of the last instruction the batch retired.
+        let mut last_retired = self.state.pc;
+        // A fused pair that faulted runs again split, at this pc.
+        let mut force_split = None;
+
         loop {
             let step_pc = self.state.pc;
+            let forced = force_split.take() == Some(step_pc);
 
             // Diagnostics are taken before the rollback so they carry
             // the registers at the break; the window's effects are
@@ -116,16 +132,30 @@ impl PpuExecutionUnit {
             if self.break_pc == Some(step_pc) {
                 if self.break_skip > 0 {
                     self.break_skip -= 1;
+                } else if self.retirement_counter > entry.retired {
+                    // The retired instructions commit first; the next
+                    // batch stops here with nothing ahead of the break.
+                    return self.budget_yield(&entry, effects, last_retired);
                 } else {
                     self.break_pc = None;
                     return self.fault_at(&entry, effects, step_pc, FAULT_DEBUG_BREAK);
                 }
             }
 
-            self.note_fetch(step_pc);
+            let boundary = (effects.len(), self.store_buf.len());
             let mut insn = match self.fetch_decode(step_pc, mem) {
                 Ok(insn) => insn,
-                Err(code) => return self.fault_at(&entry, effects, step_pc, code),
+                Err(code) => {
+                    let exit = FaultExit::Code(code);
+                    return self.end_at_fault(
+                        &entry,
+                        effects,
+                        step_pc,
+                        last_retired,
+                        boundary,
+                        exit,
+                    );
+                }
             };
 
             // A fused head retires both of its slots. The loop reaches a
@@ -134,15 +164,29 @@ impl PpuExecutionUnit {
             // A head splits and runs as its first instruction alone when:
             // - the budget cannot retire both slots, or
             // - a break is set on the second slot.
+            // A head that faulted fused also runs split, so its first
+            // instruction retires before the fault.
             let split = match insn {
                 instruction::PpuInstruction::Consumed => true,
-                _ if insn.is_super_pair() => remaining < 2 || self.break_pc == Some(step_pc + 4),
+                _ if insn.is_super_pair() => {
+                    forced || remaining < 2 || self.break_pc == Some(step_pc + 4)
+                }
                 _ => false,
             };
             if split {
                 insn = match decode_stored(step_pc, mem) {
                     Ok((_, insn)) => insn,
-                    Err(code) => return self.fault_at(&entry, effects, step_pc, code),
+                    Err(code) => {
+                        let exit = FaultExit::Code(code);
+                        return self.end_at_fault(
+                            &entry,
+                            effects,
+                            step_pc,
+                            last_retired,
+                            boundary,
+                            exit,
+                        );
+                    }
                 };
             }
             let pair = insn.is_super_pair();
@@ -152,7 +196,7 @@ impl PpuExecutionUnit {
             let ops = &ops[..n_ops];
             self.align_clock_read_to_issue(ctx, &entry, step_pc, &insn, ops);
             let (effects_before, stores_before) = (effects.len(), self.store_buf.len());
-            match exec::execute(
+            let fault = match exec::execute(
                 &insn,
                 &mut self.state,
                 self.id,
@@ -162,9 +206,11 @@ impl PpuExecutionUnit {
             ) {
                 ExecuteVerdict::Continue => {
                     self.state.pc += if pair { 8 } else { 4 };
+                    None
                 }
-                ExecuteVerdict::Branch => {}
+                ExecuteVerdict::Branch => None,
                 ExecuteVerdict::Syscall { lev } => {
+                    self.note_fetch(step_pc);
                     self.retire_timing(step_pc, ops, step_pc + 4);
                     self.close_block(effects);
                     let args = state::ppu_syscall_args(&self.state);
@@ -180,12 +226,8 @@ impl PpuExecutionUnit {
                         syscall_args: Some(args),
                     };
                 }
-                ExecuteVerdict::Fault(f) => {
-                    return self.fault_verdict_yield(&entry, effects, step_pc, f);
-                }
-                ExecuteVerdict::MemFault(e) => {
-                    return self.mem_fault_yield(&entry, effects, step_pc, e);
-                }
+                ExecuteVerdict::Fault(f) => Some(FaultExit::Verdict(f)),
+                ExecuteVerdict::MemFault(e) => Some(FaultExit::Mem(e)),
                 ExecuteVerdict::BufferFull => {
                     // PC stays at the failing store; retries next step.
                     // Break skips count retirements, and nothing retired,
@@ -194,10 +236,32 @@ impl PpuExecutionUnit {
                     if self.break_pc == Some(step_pc) {
                         self.break_skip += 1;
                     }
+                    self.note_fetch(step_pc);
                     return self.budget_yield(&entry, effects, step_pc);
                 }
+            };
+            if let Some(exit) = fault {
+                if pair {
+                    // A fused instruction may have applied its first half.
+                    // That half reruns alone and leaves the same state. A
+                    // first half that can write a register it reads
+                    // (`lwz rT,d(rT)`) is a load, and faults before it
+                    // writes. No other first half reads what it writes.
+                    effects.truncate(effects_before);
+                    self.store_buf.truncate(stores_before);
+                    if self.break_pc == Some(step_pc) {
+                        self.break_skip += 1;
+                    }
+                    force_split = Some(step_pc);
+                    continue;
+                }
+                let boundary = (effects_before, stores_before);
+                return self.end_at_fault(&entry, effects, step_pc, last_retired, boundary, exit);
             }
 
+            // The unit publishes a fetch once its instruction retires, so
+            // a block that ends at a fault names no text it did not run.
+            self.note_fetch(step_pc);
             self.retire_timing(step_pc, ops, self.state.pc);
 
             if self.profile_mode {
@@ -231,9 +295,48 @@ impl PpuExecutionUnit {
                     self.store_buf.stores_from(stores_before),
                 )
             });
+            last_retired = last_pc;
             if remaining == 0 || reached_window {
                 return self.budget_yield(&entry, effects, last_pc);
             }
+        }
+    }
+
+    /// Ends the batch at the instruction at `step_pc`, which faulted.
+    ///
+    /// When an earlier instruction of the batch retired, the batch ends
+    /// as an exhausted budget does:
+    /// - the retired instructions commit;
+    /// - the unit drops the effects from `effects_len` on and the staged
+    ///   stores from `stores_len` on;
+    /// - PC stays on the faulting instruction.
+    ///
+    /// The next batch runs that instruction with no retired instruction
+    /// ahead of it. Its fault then discards no instruction that completed
+    /// before it [PPC-Book3 p:61 s:5.2].
+    fn end_at_fault(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        step_pc: u64,
+        last_retired: u64,
+        (effects_len, stores_len): (usize, usize),
+        exit: FaultExit,
+    ) -> ExecutionStepResult {
+        if self.retirement_counter > entry.retired {
+            effects.truncate(effects_len);
+            self.store_buf.truncate(stores_len);
+            // The next batch visits this pc again, so the unit hands back
+            // a skip it spent at the top of this iteration.
+            if self.break_pc == Some(step_pc) {
+                self.break_skip += 1;
+            }
+            return self.budget_yield(entry, effects, last_retired);
+        }
+        match exit {
+            FaultExit::Code(code) => self.fault_at(entry, effects, step_pc, code),
+            FaultExit::Verdict(f) => self.fault_verdict_yield(entry, effects, step_pc, f),
+            FaultExit::Mem(e) => self.mem_fault_yield(entry, effects, step_pc, e),
         }
     }
 

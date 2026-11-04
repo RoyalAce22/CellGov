@@ -45,16 +45,20 @@ pub(crate) fn execute(
             if ra == 0 || ra >= rt {
                 return ExecuteVerdict::Fault(PpuFault::InvalidForm("lmw"));
             }
-            let mut ea = state.ea_d_form(ra, imm);
+            // The loop loads every word before it writes a register, so
+            // a fault part way writes none.
+            let ea = state.ea_d_form(ra, imm);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
-            for r in (rt as usize)..32 {
-                match load_ze(&mut port, ea, Width::B4) {
-                    Ok(val) => {
-                        state.set_gpr(r, val);
-                        ea = ea.wrapping_add(4);
-                    }
+            let mut words = [0u64; 32];
+            for (i, word) in words.iter_mut().enumerate().skip(rt as usize) {
+                let at = ea.wrapping_add(4 * (i - rt as usize) as u64);
+                match load_ze(&mut port, at, Width::B4) {
+                    Ok(val) => *word = val,
                     Err(ea) => return ExecuteVerdict::MemFault(ea),
                 }
+            }
+            for (r, &word) in words.iter().enumerate().skip(rt as usize) {
+                state.set_gpr(r, word);
             }
             ExecuteVerdict::Continue
         }

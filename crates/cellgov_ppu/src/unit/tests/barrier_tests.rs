@@ -76,9 +76,15 @@ fn a_step_without_per_step_tracing_records_no_barrier() {
 }
 
 #[test]
-fn a_batch_that_faults_drops_the_barriers_it_retired() {
+fn a_barrier_that_retires_before_a_fault_is_kept() {
     let lwz_r6_r5 = (32 << 26) | (6 << 21) | (5 << 16);
     let (unit, _, barriers) = run(&[LWSYNC, lwz_r6_r5], true);
-    assert_eq!(unit.status(), cellgov_exec::UnitStatus::Faulted);
-    assert!(barriers.is_empty(), "{barriers:?}");
+    assert_eq!(unit.state().pc, 4, "the batch ends at the faulting load");
+    assert_eq!(
+        barriers,
+        [RetiredBarrier {
+            pc: 0,
+            kind: BarrierKind::Lwsync
+        }]
+    );
 }

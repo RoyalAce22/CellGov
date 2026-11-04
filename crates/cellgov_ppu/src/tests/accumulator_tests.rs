@@ -144,15 +144,18 @@ fn a_rolled_back_batch_leaves_the_accumulator_current() {
     let mut mem = GuestMemory::new(256);
     place_insn(&mut mem, 0, addi_inc(3));
     place_insn(&mut mem, 4, addi_inc(4));
-    // The all-zero word at 8 fails to decode, so the batch rewinds.
+    // The all-zero word at 8 fails to decode: the first batch ends
+    // before it, and the second batch faults on it and rewinds to its
+    // entry snapshot.
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     unit.state_mut().set_gpr(3, 10);
-    let entry_hash = unit.state().state_hash();
     let ctx = ExecutionContext::new(&mem);
-    let mut effects = Vec::new();
-    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
+    let prefix = unit.run_until_yield(Budget::new(64), &ctx, &mut Vec::new());
+    assert_eq!(prefix.yield_reason, YieldReason::BudgetExhausted);
+    let entry_hash = unit.state().state_hash();
+    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(unit.state().gpr[3], 10, "the batch rewound");
+    assert_eq!(unit.state().gpr[3], 11, "the retired addi stays");
     assert_current(unit.state(), "after rollback");
     assert_eq!(unit.state().state_hash(), entry_hash);
 }

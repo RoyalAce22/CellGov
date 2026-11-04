@@ -258,7 +258,7 @@ fn plain_path_pads_the_sequence_with_no_ops_so_a_skip_branch_stays_in_code() {
 }
 
 #[test]
-fn plain_path_decode_fault_rolls_back_and_names_the_word() {
+fn plain_path_decode_fault_keeps_the_retired_prefix_and_names_the_word() {
     let undecodable = 0;
     assert!(decode(undecodable).is_err());
     let mut state = PpuState::new();
@@ -272,8 +272,8 @@ fn plain_path_decode_fault_rolls_back_and_names_the_word() {
     );
     assert_eq!(plain.stop.pc, Some(4));
     assert_eq!(plain.executed_pcs, [0]);
-    assert_eq!(plain.retired, 0);
-    assert_eq!(plain.observation.state.gpr[3], 0);
+    assert_eq!(plain.retired, 1);
+    assert_eq!(plain.observation.state.gpr[3], 7);
     assert!(plain.observation.fault_discarded);
     assert_eq!(plain.stop.diagnostics.faulting_ea, None);
     assert_eq!(plain.stop.diagnostics.lr, Some(0x77));
@@ -305,8 +305,9 @@ fn unmapped_load_reports_the_invalid_address_fault_code_on_every_path() {
         );
         assert_eq!(run.stop.pc, Some(4));
         assert_eq!(run.stop.diagnostics.faulting_ea, Some(0x2000_0000));
-        assert_eq!(run.retired, 0);
-        assert_eq!(run.observation.state.gpr[3], 0);
+        assert_eq!(run.retired, 1);
+        assert_eq!(run.observation.state.gpr[3], 7);
+        assert_eq!(run.observation.state.pc, 4);
         assert!(run.committed_data_reads.is_empty());
     }
     assert_eq!(runs[0].executed_pcs, [0, 4]);

@@ -331,44 +331,59 @@ fn run_path(
         unit.set_instruction_shadow(shadow);
     }
 
-    let memory = make_memory(code, initial_data)?;
-    let entry = unit.state().clone();
-    let mut effects = Vec::new();
-    let reservations = initial_reservations(initial);
-    let ctx = ExecutionContext::new(&memory).with_reservations(&reservations);
-    let retired_before = unit.retired_instructions();
-    let result = unit.run_until_yield(budget, &ctx, &mut effects);
-    let retired = unit.retired_instructions() - retired_before;
-    let observed = finish_observation(PpuObservationInput {
-        initial_state: &entry,
-        final_state: unit.state(),
-        memory_base: DATA_BASE,
-        initial_memory: initial_data,
-        outcome: PpuObservedOutcome::RuntimeStep(Box::new(result.clone())),
-        effects,
-        stores: StoreBuffer::new(),
-        unit: UNIT,
-    })?;
-    refuse_commit(path, &observed)?;
-    let committed_data_reads = observed
-        .committed_effects
-        .iter()
-        .filter_map(|effect| match effect {
-            cellgov_effects::Effect::SharedReadIntent { range, .. }
-                if range.start().raw() >= DATA_BASE =>
-            {
-                Some(*range)
+    // A batch that ends before a fault commits what retired; the next
+    // batch runs the instruction that faults alone.
+    let mut data = initial_data.to_vec();
+    let mut reservations = initial_reservations(initial);
+    let mut committed_data_reads = Vec::new();
+    let mut effects_all = Vec::new();
+    let mut retired = 0;
+    let mut result;
+    loop {
+        let memory = make_memory(code, &data)?;
+        let entry = unit.state().clone();
+        let mut effects = Vec::new();
+        let ctx = ExecutionContext::new(&memory).with_reservations(&reservations);
+        let retired_before = unit.retired_instructions();
+        result = unit.run_until_yield(Budget::new(budget.raw() - retired), &ctx, &mut effects);
+        let batch_retired = unit.retired_instructions() - retired_before;
+        retired += batch_retired;
+        let observed = finish_observation(PpuObservationInput {
+            initial_state: &entry,
+            final_state: unit.state(),
+            memory_base: DATA_BASE,
+            initial_memory: &data,
+            outcome: PpuObservedOutcome::RuntimeStep(Box::new(result.clone())),
+            effects,
+            stores: StoreBuffer::new(),
+            unit: UNIT,
+        })?;
+        refuse_commit(path, &observed)?;
+        committed_data_reads.extend(observed.committed_effects.iter().filter_map(|effect| {
+            match effect {
+                cellgov_effects::Effect::SharedReadIntent { range, .. }
+                    if range.start().raw() >= DATA_BASE =>
+                {
+                    Some(*range)
+                }
+                _ => None,
             }
-            _ => None,
-        })
-        .collect();
-    let data = observed.memory;
-    let reservations = reservation_table(&observed.reservations);
-    let effects_all: Vec<_> = observed
-        .committed_effects
-        .into_iter()
-        .filter(|effect| !is_read_intent(effect))
-        .collect();
+        }));
+        data = observed.memory;
+        reservations = reservation_table(&observed.reservations);
+        effects_all.extend(
+            observed
+                .committed_effects
+                .into_iter()
+                .filter(|effect| !is_read_intent(effect)),
+        );
+        if result.yield_reason != YieldReason::BudgetExhausted
+            || batch_retired == 0
+            || retired >= budget.raw()
+        {
+            break;
+        }
+    }
     let stop = PpuPathStop {
         reason: result.yield_reason,
         fault: result.fault,
@@ -412,13 +427,7 @@ fn run_plain(
             break;
         };
         let Ok(instruction) = decode(raw) else {
-            run.discard_on_fault(
-                initial,
-                initial_data,
-                step_pc,
-                cellgov_ppu::FAULT_DECODE_ERROR,
-                None,
-            );
+            run.stop_on_fault(step_pc, cellgov_ppu::FAULT_DECODE_ERROR, None);
             break;
         };
         let entry = run.state.clone();
@@ -443,13 +452,13 @@ fn run_plain(
             ExecuteVerdict::Branch => {}
             ExecuteVerdict::Fault(fault) => {
                 let ea = ppu_fault_ea(fault);
-                run.discard_on_fault(initial, initial_data, step_pc, fault.guest_code(), ea);
+                run.stop_on_fault(step_pc, fault.guest_code(), ea);
                 break;
             }
             ExecuteVerdict::MemFault(error) => {
                 let code = cellgov_ppu::FAULT_INVALID_ADDRESS;
                 let ea = mem_fault_ea(error);
-                run.discard_on_fault(initial, initial_data, step_pc, code, ea);
+                run.stop_on_fault(step_pc, code, ea);
                 break;
             }
             ExecuteVerdict::Syscall { lev } => {
@@ -524,26 +533,10 @@ impl PlainRun {
         }
     }
 
-    /// Record a guest fault at `step_pc` and discard every commit, the
-    /// same as a batch fault. The diagnostics capture the state at the
-    /// fault before the reset; `executed_pcs` keeps every PC the run
-    /// reached.
-    fn discard_on_fault(
-        &mut self,
-        initial: &PpuState,
-        initial_data: &[u8],
-        step_pc: u64,
-        code: u32,
-        ea: Option<u64>,
-    ) {
+    /// Record a guest fault at `step_pc`. Every step before it stays
+    /// committed, and the step that faults leaves nothing behind.
+    fn stop_on_fault(&mut self, step_pc: u64, code: u32, ea: Option<u64>) {
         let diagnostics = fault_diagnostics(&self.state, step_pc, ea);
-        self.state = initial.clone();
-        self.data.copy_from_slice(initial_data);
-        self.reservations = initial_reservations(initial);
-        self.effects_all.clear();
-        self.committed_data_reads.clear();
-        self.forwarding.clear();
-        self.retired = 0;
         self.stop = PpuPathStop {
             reason: YieldReason::Fault,
             fault: Some(FaultKind::Guest(code)),

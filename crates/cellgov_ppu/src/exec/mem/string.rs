@@ -7,7 +7,8 @@ use crate::store_buffer::StoreBuffer;
 
 /// `lswi` / `lswx` core: read `n` bytes from `base` and pack
 /// MSB-first four-per-register into successive GPRs starting at
-/// `rt_start`, wrapping at r31 -> r0. Zero-length is a no-op.
+/// `rt_start`, wrapping at r31 -> r0. Zero-length is a no-op. The core
+/// loads every byte before it writes a register, so a fault writes none.
 pub(super) fn string_load(
     state: &mut PpuState,
     port: &mut LoadPort<'_, '_>,
@@ -15,26 +16,22 @@ pub(super) fn string_load(
     base: u64,
     n: usize,
 ) -> ExecuteVerdict {
-    if n == 0 {
-        return ExecuteVerdict::Continue;
-    }
-    let mut reg = rt_start % 32;
-    let mut byte_idx = 0usize;
-    state.set_gpr(reg, 0);
-    for i in 0..n {
-        let ea = base.wrapping_add(i as u64);
-        let byte = match load_ze(port, ea, Width::B1) {
-            Ok(v) => v as u8,
+    let mut bytes = [0u8; 128];
+    let Some(bytes) = bytes.get_mut(..n) else {
+        return ExecuteVerdict::Fault(crate::exec::PpuFault::InvalidForm("string length"));
+    };
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        match load_ze(port, base.wrapping_add(i as u64), Width::B1) {
+            Ok(v) => *byte = v as u8,
             Err(e) => return ExecuteVerdict::MemFault(e),
-        };
-        let shift = (3 - byte_idx) * 8;
-        state.set_gpr(reg, state.gpr[reg] | ((byte as u64) << shift));
-        byte_idx += 1;
-        if byte_idx == 4 && i + 1 < n {
-            byte_idx = 0;
-            reg = (reg + 1) % 32;
-            state.set_gpr(reg, 0);
         }
+    }
+    for (i, word) in bytes.chunks(4).enumerate() {
+        let value = word
+            .iter()
+            .enumerate()
+            .fold(0u64, |acc, (j, &b)| acc | (u64::from(b) << ((3 - j) * 8)));
+        state.set_gpr((rt_start + i) % 32, value);
     }
     ExecuteVerdict::Continue
 }

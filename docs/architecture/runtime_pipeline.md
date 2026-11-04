@@ -273,19 +273,23 @@ come through any of the four fault exits:
 - decode failure;
 - PC past the mapped image.
 
-On a mid-batch fault the PPU:
+When a PPU instruction faults after earlier instructions of the
+batch retired, the batch ends as an exhausted budget does: the
+retired instructions commit, the faulting instruction's effects and
+staged stores are dropped, and the PC stays on it. The next batch
+runs the faulting instruction with nothing retired ahead of it, so a
+fault never discards an instruction that completed before it. A
+faulting instruction writes no register before it faults.
+
+On a fault with nothing retired the PPU:
 
 - restores the full architectural-state snapshot, reservation
   included, taken at step entry after the runtime's committed
   inputs (syscall return, register writes) were applied;
 - clears the store buffer and the staged effects;
-- rewinds the per-step trace so discarded retirements never reach
-  the hash or zoom streams;
 - reports the fault with zero consumed cost.
 
-Pre-fault instructions are discarded, never re-executed. The
-diagnostic still reports the faulting PC and captures fault-site
-registers before the rollback.
+The diagnostic reports the faulting PC and the fault-site registers.
 
 ### Refused DMA enqueue
 

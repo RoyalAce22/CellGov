@@ -52,3 +52,7 @@ mod top_of_address_space_tests;
 #[cfg(test)]
 #[path = "tests/fused_entry_console_tests.rs"]
 mod fused_entry_console_tests;
+
+#[cfg(test)]
+#[path = "tests/fault_prefix_tests.rs"]
+mod fault_prefix_tests;

@@ -1,4 +1,5 @@
-//! Fault diagnostics and the rollback a mid-batch fault takes.
+//! Fault diagnostics and the rollback of a batch that faults with
+//! nothing retired.
 
 use super::batch::BatchEntry;
 use super::ppu_unit::PpuExecutionUnit;

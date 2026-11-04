@@ -14,12 +14,14 @@ pub trait PpuTap {
     ///
     /// The unit calls this once per dispatch, before the instruction
     /// runs. The number of calls differs from the number of
-    /// retirements in three cases:
+    /// retirements in four cases:
     ///
     /// - A store finds the store buffer full: the unit calls again when
     ///   the store retries.
     /// - The second slot of a fused pair retires: the unit makes no call.
-    /// - A step faults: the unit rewinds to its batch entry and retracts
-    ///   no call.
+    /// - A fused pair faults: the unit calls again when its first
+    ///   instruction runs alone.
+    /// - A step faults behind retired instructions: the unit calls again
+    ///   when the next batch runs it. The unit retracts no call.
     fn dispatch(&self, unit: UnitId, insn: &PpuInstruction, state: &PpuState);
 }

@@ -1,5 +1,5 @@
 //! The per-step guest-clock flag: what sets it, which yield publishes
-//! it, and what a discarded batch leaves behind.
+//! it, and what a fault leaves behind.
 
 use crate::*;
 use cellgov_effects::Effect;
@@ -152,18 +152,19 @@ fn the_flag_is_excluded_from_the_state_hash() {
 }
 
 #[test]
-fn a_discarded_batch_publishes_no_clock_read_and_clears_the_flag() {
+fn a_read_before_a_fault_is_published_by_the_batch_that_retired_it() {
     let mem = memory_of(&[mftb(3), LWZ_R6_R5]);
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     unit.state_mut().set_gpr(5, UNMAPPED_EA);
     let ctx = ExecutionContext::new(&mem);
     let mut effects = Vec::new();
-    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
+    let prefix = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
+    assert_eq!(prefix.yield_reason, YieldReason::BudgetExhausted);
+    assert_eq!(clock_reads(&effects), 1, "the retired mftb is published");
 
+    let mut effects = Vec::new();
+    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert!(effects.is_empty(), "leaked effects: {effects:?}");
-    assert!(
-        !unit.state().clock_read,
-        "the batch-entry snapshot carries the flag back with the rest of the state",
-    );
+    assert!(!unit.state().clock_read);
 }

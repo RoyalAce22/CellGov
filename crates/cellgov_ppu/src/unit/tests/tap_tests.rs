@@ -81,7 +81,7 @@ fn addi_inc(rt: u32) -> u32 {
 }
 
 #[test]
-fn a_fault_rolls_back_the_batch_but_not_its_reports() {
+fn a_faulting_instruction_is_reported_on_each_visit() {
     let mut mem = GuestMemory::new(0x1000);
     place_insn(&mut mem, 0, addi_inc(3));
     place_insn(&mut mem, 4, addi_inc(3));
@@ -93,9 +93,11 @@ fn a_fault_rolls_back_the_batch_but_not_its_reports() {
 
     let ctx = ExecutionContext::new(&mem);
     let r = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
+    assert_eq!(r.yield_reason, YieldReason::BudgetExhausted);
+    assert_eq!(unit.state().pc, 8, "the batch ends at the faulting load");
+    let r = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
     assert_eq!(r.yield_reason, YieldReason::Fault);
-    assert_eq!(unit.state().pc, 0, "the unit rewinds to batch entry");
-    assert_eq!(*pcs.0.borrow(), vec![0, 4, 8]);
+    assert_eq!(*pcs.0.borrow(), vec![0, 4, 8, 8]);
 }
 
 #[test]

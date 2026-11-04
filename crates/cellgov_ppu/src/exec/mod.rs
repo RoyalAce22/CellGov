@@ -26,6 +26,10 @@ mod test_support;
 #[path = "tests/exec_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "tests/fault_leaves_state_tests.rs"]
+mod fault_leaves_state_tests;
+
 pub use dispatch::execute;
 pub use fault::PpuFault;
 pub use verdict::ExecuteVerdict;

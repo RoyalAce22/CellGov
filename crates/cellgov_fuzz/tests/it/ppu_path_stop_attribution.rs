@@ -16,7 +16,7 @@ fn lwz(rt: u32, ra: u32) -> u32 {
 }
 
 #[test]
-fn fault_site_registers_and_effective_address_survive_batch_rollback() {
+fn fault_site_registers_and_effective_address_agree_after_a_retired_prefix() {
     let mut state = PpuState::new();
     state.set_gpr(6, 0x2000_0000);
     state.set_lr(0x1234);
@@ -25,7 +25,7 @@ fn fault_site_registers_and_effective_address_survive_batch_rollback() {
 
     assert!(first_path_divergence(&runs).is_none(), "{runs:#?}");
     for run in &runs {
-        assert_eq!(run.observation.state.gpr[3], 0);
+        assert_eq!(run.observation.state.gpr[3], 7);
         assert_eq!(run.stop.diagnostics.faulting_ea, Some(0x2000_0000));
         assert_eq!(run.stop.diagnostics.lr, Some(0x1234));
         assert_eq!(

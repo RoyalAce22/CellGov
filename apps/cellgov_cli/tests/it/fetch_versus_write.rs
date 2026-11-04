@@ -144,9 +144,9 @@ fn a_branching_block_records_each_run_it_fetched() {
     );
 }
 
-/// A block the fault rolls back retired nothing, so the text it
-/// fetched belongs to no effect list -- neither its own, which the
-/// rollback clears, nor the next block's.
+/// A block that faults retired nothing, so the text it fetched belongs
+/// to no effect list -- neither its own, which the fault clears, nor
+/// the next block's.
 #[test]
 fn a_faulted_block_leaves_no_run_for_the_next_one() {
     // A second stretch of text, far enough from TEXT that a leaked
@@ -158,17 +158,16 @@ fn a_faulted_block_leaves_no_run_for_the_next_one() {
         place(&mut mem, TEXT + offset * 4, NOP);
         place(&mut mem, OTHER + offset * 4, NOP);
     }
+    // The block fetches this word and faults on it.
+    place(&mut mem, TEXT, 0);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     unit.state_mut().pc = TEXT;
-    // The break fires at the third instruction, after two fetches the
-    // rollback discards.
-    unit.set_break_pc(TEXT + 8, 0);
     let ctx = ExecutionContext::new(&mem);
     let mut effects = Vec::new();
     let faulted = unit.run_until_yield(Budget::new(4), &ctx, &mut effects);
     assert_eq!(faulted.yield_reason, cellgov_exec::YieldReason::Fault);
-    assert!(effects.is_empty(), "the break discards its block");
+    assert!(effects.is_empty(), "the fault discards its block");
 
     unit.state_mut().pc = OTHER;
     let mut effects = Vec::new();

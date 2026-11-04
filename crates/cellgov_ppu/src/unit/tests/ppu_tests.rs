@@ -184,7 +184,7 @@ fn mftb_resyncs_to_ctx_current_tick_at_step_entry() {
 #[test]
 fn decode_failure_faults() {
     for &(label, raw) in &[
-        ("all-ones", 0xFFFF_FFFFu32),
+        ("opcode-1", 0x0400_0000u32),
         ("opcode-0", 0x0000_0000u32),
         ("opcode-31-xo-1023", (31u32 << 26) | (1023 << 1)),
     ] {
@@ -197,6 +197,11 @@ fn decode_failure_faults() {
             result.yield_reason,
             YieldReason::Fault,
             "{label}: 0x{raw:08X} did not fault",
+        );
+        assert_eq!(
+            result.local_diagnostics.pc,
+            Some(0),
+            "{label}: 0x{raw:08X} decoded and retired",
         );
         assert_eq!(
             unit.status(),
@@ -1461,205 +1466,6 @@ fn shadow_inv_partial_word_write() {
 
     step_n(&mut rt, 2);
     assert_eq!(read_mem_u32(&rt, 0x80), 42);
-}
-
-#[test]
-fn mid_block_fault_rolls_back_and_propagates_directly() {
-    let mut mem = GuestMemory::new(256);
-    let addi_r3: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
-    let lwz_bad: u32 = (32 << 26) | (4 << 21) | (5 << 16);
-    place_insn(&mut mem, 0, addi_r3);
-    place_insn(&mut mem, 4, lwz_bad);
-
-    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.state_mut().set_gpr(3, 10);
-    unit.state_mut().set_gpr(5, 0xFFFF_0000);
-
-    let ctx = ExecutionContext::new(&mem);
-    let mut effects = Vec::new();
-    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert!(result.fault.is_some());
-    assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert_eq!(unit.state().gpr[3], 10);
-    assert_eq!(unit.state().pc, 0);
-    assert!(effects.is_empty());
-    // Diagnostic PC is the faulting insn (4), not the batch start (0).
-    assert_eq!(result.local_diagnostics.pc, Some(4));
-}
-
-#[test]
-fn mid_block_fault_rolls_back_lr_ctr_cr_xer() {
-    // Each pre-fault insn mutates exactly one of LR/CTR/CR/XER so
-    // each restored register is observable independently:
-    //   mtlr r5; mtctr r6; addic. r7,r7,1; lwz r4,0(r1) -- faults.
-    let mut mem = GuestMemory::new(256);
-    let mtlr: u32 = (31 << 26) | (5 << 21) | (8 << 16) | (467 << 1);
-    let mtctr: u32 = (31 << 26) | (6 << 21) | (9 << 16) | (467 << 1);
-    let addic_dot: u32 = (13 << 26) | (7 << 21) | (7 << 16) | 1;
-    let lwz_bad: u32 = (32 << 26) | (4 << 21) | (1 << 16);
-    place_insn(&mut mem, 0, mtlr);
-    place_insn(&mut mem, 4, mtctr);
-    place_insn(&mut mem, 8, addic_dot);
-    place_insn(&mut mem, 12, lwz_bad);
-
-    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.state_mut().set_lr(0xAAAA_AAAA_AAAA_AAAA);
-    unit.state_mut().set_ctr(0xBBBB_BBBB_BBBB_BBBB);
-    unit.state_mut().set_cr(0x1234_5678);
-    unit.state_mut().set_xer(0xDEAD_BEEF_CAFE_BABE);
-    unit.state_mut().set_gpr(5, 0x1111_1111_1111_1111);
-    unit.state_mut().set_gpr(6, 0x2222_2222_2222_2222);
-    unit.state_mut().set_gpr(7, 0x7FFF_FFFF);
-    unit.state_mut().set_gpr(1, 0xFFFF_0000);
-
-    let ctx = ExecutionContext::new(&mem);
-    let mut effects = Vec::new();
-    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert_eq!(unit.state().lr(), 0xAAAA_AAAA_AAAA_AAAA);
-    assert_eq!(unit.state().ctr(), 0xBBBB_BBBB_BBBB_BBBB);
-    assert_eq!(unit.state().cr(), 0x1234_5678);
-    assert_eq!(unit.state().xer(), 0xDEAD_BEEF_CAFE_BABE);
-    assert_eq!(unit.state().pc, 0);
-}
-
-#[test]
-fn mid_block_fault_discards_buffered_stores_from_pre_fault_instructions() {
-    let mut mem = GuestMemory::new(256);
-    let stw: u32 = (36 << 26) | (3 << 21) | 0x80;
-    let lwz_bad: u32 = (32 << 26) | (4 << 21) | (5 << 16);
-    place_insn(&mut mem, 0, stw);
-    place_insn(&mut mem, 4, lwz_bad);
-
-    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.state_mut().set_gpr(3, 0xCAFE_BABE);
-    unit.state_mut().set_gpr(5, 0xFFFF_0000);
-
-    let ctx = ExecutionContext::new(&mem);
-    let mut effects = Vec::new();
-    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert!(effects.is_empty(), "leaked effects: {effects:?}");
-}
-
-#[test]
-fn mid_block_decode_fault_rolls_back_state_and_reports_zero_cost() {
-    // addi retires, then the all-zero word at 4 fails to decode.
-    let mut mem = GuestMemory::new(256);
-    let addi_r3: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
-    place_insn(&mut mem, 0, addi_r3);
-
-    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.state_mut().set_gpr(3, 10);
-
-    let ctx = ExecutionContext::new(&mem);
-    let mut effects = Vec::new();
-    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert_eq!(unit.state().gpr[3], 10, "retired addi must be discarded");
-    assert_eq!(unit.state().pc, 0, "pc must rewind to batch entry");
-    assert_eq!(result.consumed_cost.raw(), 0);
-    assert!(effects.is_empty());
-    assert_eq!(result.local_diagnostics.pc, Some(4));
-}
-
-#[test]
-fn mid_block_decode_fault_discards_buffered_stores() {
-    // stw buffers a store, then the all-zero word at 4 fails to decode.
-    let mut mem = GuestMemory::new(256);
-    let stw: u32 = (36 << 26) | (3 << 21) | 0x80;
-    place_insn(&mut mem, 0, stw);
-
-    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.state_mut().set_gpr(3, 0xCAFE_BABE);
-
-    let ctx = ExecutionContext::new(&mem);
-    let mut effects = Vec::new();
-    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert!(effects.is_empty(), "leaked effects: {effects:?}");
-}
-
-#[test]
-fn mid_block_pc_out_of_range_rolls_back_state_and_reports_zero_cost() {
-    // Two addis fill an 8-byte text; the fetch at 8 runs off the end.
-    let mut mem = GuestMemory::new(8);
-    let addi_r3: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
-    let addi_r4: u32 = (14 << 26) | (4 << 21) | (4 << 16) | 1;
-    place_insn(&mut mem, 0, addi_r3);
-    place_insn(&mut mem, 4, addi_r4);
-
-    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.state_mut().set_gpr(3, 10);
-    unit.state_mut().set_gpr(4, 20);
-
-    let ctx = ExecutionContext::new(&mem);
-    let mut effects = Vec::new();
-    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert_eq!(unit.state().gpr[3], 10);
-    assert_eq!(unit.state().gpr[4], 20);
-    assert_eq!(unit.state().pc, 0);
-    assert_eq!(result.consumed_cost.raw(), 0);
-    assert_eq!(result.local_diagnostics.pc, Some(8));
-}
-
-#[test]
-fn mid_block_mem_fault_keeps_instrument_counters_across_rollback() {
-    let mut mem = GuestMemory::new(256);
-    let addi_r3: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
-    let lwz_bad: u32 = (32 << 26) | (4 << 21) | (5 << 16);
-    place_insn(&mut mem, 0, addi_r3);
-    place_insn(&mut mem, 4, lwz_bad);
-
-    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.state_mut().set_gpr(5, 0xFFFF_0000);
-
-    let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut Vec::new());
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(
-        unit.state().mem_fault_arm_entries,
-        1,
-        "rollback must not erase the fault-arm liveness witness"
-    );
-    assert_eq!(unit.state().mem_fault_unmapped_routed, 1);
-}
-
-#[test]
-fn mid_block_fault_rewinds_per_step_trace() {
-    use cellgov_exec::ExecutionUnit;
-    let mut mem = GuestMemory::new(256);
-    let addi_r3: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;
-    let lwz_bad: u32 = (32 << 26) | (4 << 21) | (5 << 16);
-    place_insn(&mut mem, 0, addi_r3);
-    place_insn(&mut mem, 4, lwz_bad);
-
-    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    unit.set_full_state_window(Some((0, 10)));
-    unit.state_mut().set_gpr(5, 0xFFFF_0000);
-
-    let ctx = ExecutionContext::new(&mem).with_trace_per_step(true);
-    let result = unit.run_until_yield(Budget::new(64), &ctx, &mut Vec::new());
-
-    assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert!(
-        unit.drain_retired_state_hashes().is_empty(),
-        "discarded retirements must not reach the hash stream"
-    );
-    assert!(unit.drain_retired_state_full().is_empty());
 }
 
 #[test]

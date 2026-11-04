@@ -194,7 +194,7 @@ fn a_conditional_store_retires_the_seeded_reservation_on_every_path() {
 }
 
 #[test]
-fn a_later_fault_discards_the_whole_logical_batch_on_every_path() {
+fn a_later_fault_keeps_the_instructions_before_it_on_every_path() {
     let li_r3_one = li(3, 1);
     let lwz_r4_unmapped = lwz(4, 6, 0);
     let mut state = PpuState::new();
@@ -204,12 +204,13 @@ fn a_later_fault_discards_the_whole_logical_batch_on_every_path() {
         .expect("fault case must run");
 
     assert!(first_path_divergence(&runs).is_none(), "{runs:#?}");
-    assert!(runs.iter().all(|run| run.observation.state.gpr[3] == 0));
+    assert!(runs.iter().all(|run| run.observation.state.gpr[3] == 1));
+    assert!(runs.iter().all(|run| run.observation.state.pc == 4));
     assert!(runs.iter().all(|run| run.observation.fault_discarded));
 }
 
 #[test]
-fn a_later_fault_restores_the_seeded_reservation_on_every_path() {
+fn a_later_fault_keeps_the_conditional_store_before_it_on_every_path() {
     let mut state = PpuState::new();
     state.set_gpr(3, 0x5566_7788);
     state.set_gpr(4, DATA_BASE);
@@ -218,16 +219,15 @@ fn a_later_fault_restores_the_seeded_reservation_on_every_path() {
     state.set_reservation(Some(cellgov_sync::ReservedLine::containing(DATA_BASE)));
 
     let runs = run_all_paths(&[stwcx(3, 4, 5), lwz(7, 6, 0)], &state, &[0; 64])
-        .expect("reservation rollback case must run");
+        .expect("conditional store before a fault must run");
 
     assert!(first_path_divergence(&runs).is_none(), "{runs:#?}");
-    assert!(runs.iter().all(|run| {
-        run.observation.reservations
-            == vec![(
-                cellgov_event::UnitId::new(0),
-                cellgov_sync::ReservedLine::containing(DATA_BASE),
-            )]
-    }));
+    assert!(runs
+        .iter()
+        .all(|run| run.observation.reservations.is_empty()));
+    assert!(runs
+        .iter()
+        .all(|run| run.observation.memory[..4] == 0x5566_7788u32.to_be_bytes()));
 }
 
 #[test]

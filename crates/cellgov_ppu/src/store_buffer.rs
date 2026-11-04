@@ -174,6 +174,12 @@ impl StoreBuffer {
         self.entries.clear();
     }
 
+    /// Drop every entry from position `len` on.
+    #[inline]
+    pub(crate) fn truncate(&mut self, len: usize) {
+        self.entries.truncate(len);
+    }
+
     /// Insert a pending store.
     ///
     /// # Errors
@@ -292,7 +298,8 @@ impl StoreBuffer {
     /// If `effects` was truncated below a recorded `emit_at` since
     /// the conditional store executed. The caller keeps the vector
     /// append-only between execute and flush; a fault clears both
-    /// the vector and this buffer together.
+    /// the vector and this buffer together, or truncates both back to
+    /// the same instruction boundary.
     pub fn flush(&mut self, effects: &mut Vec<Effect>, source: UnitId) {
         let mut next = 0usize;
         let mut inserted = 0usize;

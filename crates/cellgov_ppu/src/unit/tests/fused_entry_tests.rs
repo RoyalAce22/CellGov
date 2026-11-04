@@ -80,6 +80,9 @@ fn a_break_on_the_second_slot_stops_before_it_runs() {
     let ctx = ExecutionContext::new(&mem);
 
     let r = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
+    assert_eq!(r.yield_reason, YieldReason::BudgetExhausted);
+    assert_eq!(unit.state().pc, 4);
+    let r = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
     assert_eq!(r.yield_reason, YieldReason::Fault);
     assert_eq!(r.fault, Some(FaultKind::Guest(FAULT_DEBUG_BREAK)));
     assert_eq!(r.local_diagnostics.pc, Some(4));

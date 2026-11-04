@@ -1,5 +1,6 @@
-//! A mid-batch fault yields the fault site's registers while the unit
-//! rewinds to batch entry.
+//! A fault behind retired instructions yields the fault site's
+//! registers, and the unit keeps the results of the retired
+//! instructions.
 
 use crate::*;
 use cellgov_event::UnitId;
@@ -19,7 +20,9 @@ fn addi_inc(rt: u32) -> u32 {
 
 const UNMAPPED_EA: u64 = 0xFFFF_0000;
 
-/// Two increments retire, then `third` runs with r5 aimed at `UNMAPPED_EA`.
+/// Two increments retire, then `third` runs with r5 aimed at
+/// `UNMAPPED_EA`. The first batch ends before `third`; the second
+/// faults on it.
 fn unit_after_two_retired_then_fault(third: u32) -> (PpuExecutionUnit, ExecutionStepResult) {
     let mut mem = GuestMemory::new(256);
     place_insn(&mut mem, 0, addi_inc(3));
@@ -33,6 +36,9 @@ fn unit_after_two_retired_then_fault(third: u32) -> (PpuExecutionUnit, Execution
     unit.state_mut().set_lr(0x1000);
 
     let ctx = ExecutionContext::new(&mem);
+    let prefix = unit.run_until_yield(Budget::new(64), &ctx, &mut Vec::new());
+    assert_eq!(prefix.yield_reason, YieldReason::BudgetExhausted);
+    assert_eq!(unit.state().pc, 8, "the prefix batch stops at the fault");
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
     assert!(effects.is_empty(), "leaked effects: {effects:?}");
@@ -40,7 +46,7 @@ fn unit_after_two_retired_then_fault(third: u32) -> (PpuExecutionUnit, Execution
 }
 
 #[test]
-fn mem_fault_diagnostics_carry_the_fault_site_registers_not_the_entry_snapshot() {
+fn mem_fault_diagnostics_carry_the_fault_site_registers() {
     let lwz_r6_r5: u32 = (32 << 26) | (6 << 21) | (5 << 16);
     let (unit, result) = unit_after_two_retired_then_fault(lwz_r6_r5);
 
@@ -58,15 +64,15 @@ fn mem_fault_diagnostics_carry_the_fault_site_registers_not_the_entry_snapshot()
     assert_eq!(regs.lr, 0x1000);
 
     assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert_eq!(unit.state().gpr[3], 10, "unit rewinds to batch entry");
-    assert_eq!(unit.state().gpr[4], 20, "unit rewinds to batch entry");
-    assert_eq!(unit.state().pc, 0);
+    assert_eq!(unit.state().gpr[3], 11, "the unit keeps the retired addi");
+    assert_eq!(unit.state().gpr[4], 21, "the unit keeps the retired addi");
+    assert_eq!(unit.state().pc, 8);
     assert_eq!(unit.state().mem_fault_arm_entries, 1);
     assert_eq!(unit.state().mem_fault_unmapped_routed, 1);
 }
 
 #[test]
-fn decode_fault_diagnostics_carry_the_fault_site_registers_not_the_entry_snapshot() {
+fn decode_fault_diagnostics_carry_the_fault_site_registers() {
     // The all-zero word at 8 fails to decode.
     let (unit, result) = unit_after_two_retired_then_fault(0);
 
@@ -82,7 +88,7 @@ fn decode_fault_diagnostics_carry_the_fault_site_registers_not_the_entry_snapsho
     assert_eq!(regs.gprs[4], 21);
 
     assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert_eq!(unit.state().gpr[3], 10);
-    assert_eq!(unit.state().gpr[4], 20);
-    assert_eq!(unit.state().pc, 0);
+    assert_eq!(unit.state().gpr[3], 11);
+    assert_eq!(unit.state().gpr[4], 21);
+    assert_eq!(unit.state().pc, 8);
 }
