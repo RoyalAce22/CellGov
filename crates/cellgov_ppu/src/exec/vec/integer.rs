@@ -89,7 +89,7 @@ pub(super) fn vsub_ubytes_sat(a: u128, b: u128) -> (u128, bool) {
 /// set when it clamps.
 ///
 /// [AltiVec-PEM p:4-4 s:4.2.1.1] A result equal to the bound without clamping is not saturation.
-fn clamp_unsigned(v: i64, w: u32) -> (u64, bool) {
+pub(super) fn clamp_unsigned(v: i64, w: u32) -> (u64, bool) {
     let max = (1i64 << w) - 1;
     if v < 0 {
         (0, true)
@@ -102,7 +102,7 @@ fn clamp_unsigned(v: i64, w: u32) -> (u64, bool) {
 
 /// `v` clamped to the signed range of a `w`-bit element, as the element's
 /// bits; the flag is set when it clamps.
-fn clamp_signed(v: i64, w: u32) -> (u64, bool) {
+pub(super) fn clamp_signed(v: i64, w: u32) -> (u64, bool) {
     let (min, max) = (-(1i64 << (w - 1)), (1i64 << (w - 1)) - 1);
     let (r, sat) = if v < min {
         (min, true)

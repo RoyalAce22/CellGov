@@ -47,6 +47,50 @@ pub(super) fn map_u16_sat(a: u128, b: u128, f: impl Fn(u16, u16) -> (u16, bool))
     (r, sat)
 }
 
+/// Apply `f` to each triple of halfword elements; the flag is set when
+/// `f` reports saturation for any element.
+pub(super) fn map3_u16_sat(
+    a: u128,
+    b: u128,
+    c: u128,
+    f: impl Fn(u16, u16, u16) -> (u16, bool),
+) -> (u128, bool) {
+    let mut r = 0u128;
+    let mut sat = false;
+    for shift in (0..128).step_by(16).rev() {
+        let (v, s) = f(
+            (a >> shift) as u16,
+            (b >> shift) as u16,
+            (c >> shift) as u16,
+        );
+        r |= u128::from(v) << shift;
+        sat |= s;
+    }
+    (r, sat)
+}
+
+/// Apply `f` to each triple of word elements; the flag is set when `f`
+/// reports saturation for any element.
+pub(super) fn map3_u32_sat(
+    a: u128,
+    b: u128,
+    c: u128,
+    f: impl Fn(u32, u32, u32) -> (u32, bool),
+) -> (u128, bool) {
+    let mut r = 0u128;
+    let mut sat = false;
+    for shift in (0..128).step_by(32).rev() {
+        let (v, s) = f(
+            (a >> shift) as u32,
+            (b >> shift) as u32,
+            (c >> shift) as u32,
+        );
+        r |= u128::from(v) << shift;
+        sat |= s;
+    }
+    (r, sat)
+}
+
 /// Apply `f` to each pair of word elements; the flag is set when `f`
 /// reports saturation for any element.
 pub(super) fn map_u32_sat(a: u128, b: u128, f: impl Fn(u32, u32) -> (u32, bool)) -> (u128, bool) {

@@ -1,0 +1,22 @@
+[test]
+name = "ppu_vmul_add_sum"
+
+# A hardware probe of the nine integer vector multiply-add and
+# multiply-sum instructions and the VSCR each leaves. Each case clears
+# VSCR with mtvscr, runs the op as vD=v3, vA=v1, vB=v2, vC=v4, then
+# copies VSCR to v5 with mfvscr. Cases cover operand classes, a clamp
+# and a result on the bound for the high multiply-add, mixed-sign
+# bytes, the unsigned top clamp, and signed products that cancel. The
+# last case cancels in every lane, so its SAT shows whether vmsumshs
+# saturates after the first product or only the final sum.
+# cases.tsv names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (16 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 2064 },
+]
+
+[expect]
+outcome = "completed"

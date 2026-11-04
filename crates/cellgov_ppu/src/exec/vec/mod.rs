@@ -8,6 +8,7 @@ mod integer;
 mod lanes;
 mod merge;
 mod minmax;
+mod multiply_add;
 mod permute;
 mod shift;
 mod splat;
@@ -72,3 +73,7 @@ mod unpack_tests;
 #[cfg(test)]
 #[path = "tests/sat_add_sub_tests.rs"]
 mod sat_add_sub_tests;
+
+#[cfg(test)]
+#[path = "tests/multiply_add_tests.rs"]
+mod multiply_add_tests;

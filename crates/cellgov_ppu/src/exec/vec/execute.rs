@@ -13,6 +13,9 @@ use super::minmax::{
     vavgsb, vavgsh, vavgsw, vavgub, vavguh, vavguw, vmaxsb, vmaxsh, vmaxsw, vmaxub, vmaxuh, vmaxuw,
     vminsb, vminsh, vminsw, vminub, vminuh, vminuw,
 };
+use super::multiply_add::{
+    vmhaddshs, vmhraddshs, vmladduhm, vmsummbm, vmsumshm, vmsumshs, vmsumubm, vmsumuhm, vmsumuhs,
+};
 use super::permute::{vperm, vsel, vsldoi};
 use super::shift::{vrlb, vrlh, vrlw, vslb, vslh, vslw, vsrab, vsrah, vsraw, vsrb, vsrh, vsrw};
 use super::splat::{vspltb, vsplth, vspltisb, vspltish, vspltisw, vspltw};
@@ -340,7 +343,8 @@ pub(super) fn record_cr6(op: VxOp, result: u128) -> u8 {
     all_true | all_false
 }
 
-/// Execute a VA-form VMX instruction (primary=4, 6-bit sub-opcode, 4 registers).
+/// Execute a VA-form VMX instruction (primary=4, 6-bit sub-opcode, 4
+/// registers). A saturating op that saturates sets `VSCR[SAT]`.
 pub(crate) fn execute_va(
     state: &mut PpuState,
     op: VaOp,
@@ -353,25 +357,36 @@ pub(crate) fn execute_va(
     let b = state.vr[vb as usize];
     let c = state.vr[vc as usize];
 
-    let result = match op {
+    let (result, saturated) = match op {
         // [AltiVec-PEM p:6-133 s:6.2] vsel: Vector Select
-        VaOp::Vsel => vsel(a, b, c),
+        VaOp::Vsel => (vsel(a, b, c), false),
         // [AltiVec-PEM p:6-112 s:6.2] vperm: Vector Permute
-        VaOp::Vperm => vperm(a, b, c),
+        VaOp::Vperm => (vperm(a, b, c), false),
         // Decode routes vsldoi to the typed variant; this arm keeps
         // the match total for hand-built instructions.
-        VaOp::Vsldoi => vsldoi(a, b, vc & 0xF),
-        VaOp::Vmhaddshs
-        | VaOp::Vmhraddshs
-        | VaOp::Vmladduhm
-        | VaOp::Vmsumubm
-        | VaOp::Vmsummbm
-        | VaOp::Vmsumuhm
-        | VaOp::Vmsumuhs
-        | VaOp::Vmsumshm
-        | VaOp::Vmsumshs
-        | VaOp::Vmaddfp
-        | VaOp::Vnmsubfp => {
+        VaOp::Vsldoi => (vsldoi(a, b, vc & 0xF), false),
+
+        // -- Integer multiply-add and multiply-sum (vD, vA, vB, vC) --
+        // [AltiVec-PEM p:6-79 s:6.2] vmhaddshs: bits 0:16 of the signed product vA x vB, plus vC sign-extended to 17 bits, saturated to a signed half word.
+        VaOp::Vmhaddshs => vmhaddshs(a, b, c),
+        // [AltiVec-PEM p:6-80 s:6.2] vmhraddshs: as vmhaddshs with 0x0000_4000 added to the product first; the pseudocode adds vC.
+        VaOp::Vmhraddshs => vmhraddshs(a, b, c),
+        // [AltiVec-PEM p:6-88 s:6.2] vmladduhm: the low half word of vA x vB + vC.
+        VaOp::Vmladduhm => vmladduhm(a, b, c),
+        // [AltiVec-PEM p:6-98 s:6.2] vmsumubm: each vC word plus the four unsigned byte products, modulo.
+        VaOp::Vmsumubm => vmsumubm(a, b, c),
+        // [AltiVec-PEM p:6-95 s:6.2] vmsummbm: each vC word plus the four signed vA byte x unsigned vB byte products, modulo.
+        VaOp::Vmsummbm => vmsummbm(a, b, c),
+        // [AltiVec-PEM p:6-99 s:6.2] vmsumuhm: each vC word plus the two unsigned half-word products, modulo.
+        VaOp::Vmsumuhm => vmsumuhm(a, b, c),
+        // [AltiVec-PEM p:6-100 s:6.2] vmsumuhs: each vC word plus the two unsigned half-word products in 34 bits, saturated to an unsigned word.
+        VaOp::Vmsumuhs => vmsumuhs(a, b, c),
+        // [AltiVec-PEM p:6-96 s:6.2] vmsumshm: each vC word plus the two signed half-word products, modulo.
+        VaOp::Vmsumshm => vmsumshm(a, b, c),
+        // [AltiVec-PEM p:6-97 s:6.2] vmsumshs: each vC word plus the two signed half-word products in 34 bits, saturated to a signed word.
+        // The page's pseudocode saturates inside the product loop and its prose saturates the final sum once; the ppu_vmul_add_sum console capture settles it as the final sum.
+        VaOp::Vmsumshs => vmsumshs(a, b, c),
+        VaOp::Vmaddfp | VaOp::Vnmsubfp => {
             return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction {
                 kind: PpuInstructionKind::Va,
                 mnemonic: op.into(),
@@ -380,6 +395,9 @@ pub(crate) fn execute_va(
     };
 
     state.set_vr(vt as usize, result);
+    if saturated {
+        state.set_sat();
+    }
     ExecuteVerdict::Continue
 }
 
