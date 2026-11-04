@@ -63,18 +63,18 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
         }
         PpuInstruction::Bcctr { bo, bi, link } => {
-            // bcctr's pseudocode has no CTR decrement step. BO_2=0
-            // is an invalid form (assemblers reject bdnzctr); we
-            // treat BO_2 as don't-care here so the invalid form runs
-            // deterministically without corrupting CTR. Only the
-            // CR-test path matters for the condition.
             // [PPC-Book1 p:25 s:2.4] bcctr XL-form: NIA <- CTR[0:61]||0b00; specifying BO_2=0 yields an invalid form.
-            let cond_ok = (bo & 0x10) != 0 || (state.cr_bit(bi) == ((bo & 0x08) != 0));
+            // [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for bcctr[l] with BO[2] = 0.
+            // The reference console takes no interrupt for BO_2=0. It
+            // decrements and tests CTR as bc does, and branches to the
+            // CTR value it read before the decrement.
+            let target = state.ctr() & !3;
+            let cond = branch_condition(state, bo, bi);
             if link {
                 state.set_lr(state.pc + 4);
             }
-            if cond_ok {
-                state.pc = state.ctr() & !3;
+            if cond {
+                state.pc = target;
                 ExecuteVerdict::Branch
             } else {
                 ExecuteVerdict::Continue
@@ -89,9 +89,6 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
 ///
 /// BO bits (MSB->LSB): 0x10 skip CR test, 0x08 CR polarity,
 /// 0x04 skip CTR decrement, 0x02 CTR-zero polarity, 0x01 hint.
-///
-/// `bcctr` is the only branch whose spec pseudocode lacks a CTR
-/// decrement -- it does not call this helper.
 pub(crate) fn branch_condition(state: &mut PpuState, bo: u8, bi: u8) -> bool {
     // [PPC-Book1 p:24 s:2.4] BO encoding: ctr_ok = BO_2 | ((CTR!=0) XOR BO_3); cond_ok = BO_0 | (CR_BI == BO_1).
     // [PPC-Book1 p:20 s:2.4.1 Figure 21] BO field encodings table; the "a"/"t" hint bits in BO_4 (0x01) are software hints only and do not affect results.

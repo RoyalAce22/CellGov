@@ -314,29 +314,31 @@ fn bcctr_not_taken_when_cr_false() {
 }
 
 #[test]
-fn bcctr_does_not_decrement_ctr_even_with_bo_2_clear() {
-    // BO=0x00 has the "decrement CTR" bit clear, which would be
-    // the bdnzctr invalid form. We treat BO_2 as don't-care for
-    // bcctr so CTR is not corrupted before being used as target.
-    let mut s = PpuState::new();
-    s.pc = 0x2000;
-    s.set_ctr(0x4000);
-    s.set_cr_field(0, 0b0010); // EQ, so EQ test passes
-    let result = exec_no_mem(
-        &PpuInstruction::Bcctr {
-            bo: 0x08, // CR polarity=true, EQ test
-            bi: 2,
-            link: false,
-        },
-        &mut s,
-    );
-    assert!(matches!(result, ExecuteVerdict::Branch));
-    assert_eq!(
-        s.ctr(),
-        0x4000,
-        "CTR untouched even when BO_2=0 (invalid form)"
-    );
-    assert_eq!(s.pc, 0x4000);
+fn bcctr_with_bo_2_clear_decrements_ctr_and_branches_to_the_old_ctr() {
+    // (bo, CR0 EQ, link, taken): BO 0x08 branches on EQ while CTR != 0,
+    // BO 0x0a on EQ while CTR == 0, BO 0x10 on CTR != 0 alone.
+    for (bo, eq, link, taken) in [
+        (0x08, true, false, true),
+        (0x08, false, false, false),
+        (0x0a, true, false, false),
+        (0x10, false, true, true),
+    ] {
+        let mut s = PpuState::new();
+        s.pc = 0x2000;
+        s.set_ctr(0x4008);
+        s.set_lr(0x6000);
+        s.set_cr_field(0, if eq { 0b0010 } else { 0b0100 });
+        let result = exec_no_mem(&PpuInstruction::Bcctr { bo, bi: 2, link }, &mut s);
+        let (verdict, pc) = if taken {
+            (ExecuteVerdict::Branch, 0x4008)
+        } else {
+            (ExecuteVerdict::Continue, 0x2000)
+        };
+        assert_eq!(result, verdict, "bo {bo:#x} eq {eq}");
+        assert_eq!(s.pc, pc, "bo {bo:#x} eq {eq}");
+        assert_eq!(s.ctr(), 0x4007, "bo {bo:#x} eq {eq}");
+        assert_eq!(s.lr(), if link { 0x2004 } else { 0x6000 }, "bo {bo:#x}");
+    }
 }
 
 #[test]

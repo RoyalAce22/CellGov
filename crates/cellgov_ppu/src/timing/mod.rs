@@ -28,3 +28,7 @@ mod pressure_tests;
 #[cfg(test)]
 #[path = "tests/priority_tests.rs"]
 mod priority_tests;
+
+#[cfg(test)]
+#[path = "tests/branch_prediction_tests.rs"]
+mod branch_prediction_tests;

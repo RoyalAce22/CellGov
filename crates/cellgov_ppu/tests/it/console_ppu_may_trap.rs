@@ -1,11 +1,15 @@
 //! CellGov against the may-trap console captures: one instruction per
-//! probe, each alone in its run because the PPE may end the process on
-//! it.
+//! probe under test, each alone in its run because the PPE may end the
+//! process on it.
 
-use crate::console_cases::{capture, cellgov_after, table, Capture};
+use crate::console_cases::{capture, cellgov_after, table, Capture, Case};
+use cellgov_event::UnitId;
 use cellgov_ppu::decode::decode;
 use cellgov_ppu::differential::CaseOutcome;
+use cellgov_ppu::exec::{execute, ExecuteVerdict};
 use cellgov_ppu::instruction::PpuInstruction;
+use cellgov_ppu::state::PpuState;
+use cellgov_ppu::store_buffer::StoreBuffer;
 
 /// The probe's one case, CellGov's answer for it, and the capture.
 fn probe(name: &str) -> (Result<(), CaseOutcome>, Capture, u32) {
@@ -32,6 +36,68 @@ fn popcntb_and_mcrxr_end_the_process_on_the_console_and_refuse_in_cellgov() {
             ),
             "{name}: CellGov runs it: {cellgov:?}"
         );
+    }
+}
+
+/// The state after the case's words run from `BASE`. Each branch moves
+/// the PC, and the run stops when the PC leaves the words.
+fn run_with_branches(case: &Case) -> PpuState {
+    const BASE: u64 = 0x1_0000;
+    let mut s = PpuState::new();
+    case.initial(0, 0).apply(&mut s);
+    s.pc = BASE;
+    let end = BASE + 4 * case.words.len() as u64;
+    for _ in 0..4 * case.words.len() {
+        if !(BASE..end).contains(&s.pc) {
+            return s;
+        }
+        let word = case.words[((s.pc - BASE) / 4) as usize];
+        let insn = decode(word).unwrap_or_else(|e| panic!("{}: {e}", case.id));
+        let verdict = execute(
+            &insn,
+            &mut s,
+            UnitId::new(0),
+            &[],
+            &mut Vec::new(),
+            &mut StoreBuffer::new(),
+        );
+        match verdict {
+            ExecuteVerdict::Continue => s.pc += 4,
+            ExecuteVerdict::Branch => {}
+            other => panic!("{}: {other:?} at {:#x}", case.id, s.pc),
+        }
+    }
+    panic!("{}: the words did not run to their end", case.id)
+}
+
+#[test]
+fn bcctr_with_bo_2_clear_decrements_ctr_and_branches_to_the_old_ctr_on_both() {
+    // (probe, r3 after, or None for the r3 input): li r3,1 runs only when
+    // bcctr falls through. The _taken and _ctr probes record CTR in r5
+    // once bcctr has run.
+    for (name, r3) in [
+        ("ppu_may_trap_bcctr_bo2", None),
+        ("ppu_may_trap_bcctr_bo2_taken", None),
+        ("ppu_may_trap_bcctr_bo2_ctr", Some(1)),
+    ] {
+        let cases = table(name);
+        let r3 = r3.unwrap_or(cases[0].initial(0, 0).gpr[3]);
+        let Capture::Done(runs) = capture(name, 1) else {
+            panic!("{name}: the console ended the run");
+        };
+        let cellgov = run_with_branches(&cases[0]);
+        for run in &runs[0] {
+            assert_eq!(run.slots[0], r3, "{name}: console r3");
+        }
+        assert_eq!(cellgov.gpr[3], r3, "{name}: CellGov r3");
+        if cases[0].words.len() > 1 {
+            // CTR held the word-aligned address of mfctr, so a decrement
+            // by one leaves its low two bits set.
+            for run in &runs[0] {
+                assert_eq!(run.slots[1] & 3, 3, "{name}: console r5");
+            }
+            assert_eq!(cellgov.gpr[5] & 3, 3, "{name}: CellGov r5");
+        }
     }
 }
 

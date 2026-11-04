@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+bcctr_bo2_taken	mflr r7; bcl 20, 31, 0x4; mflr r4; addi r4, r4, 20; mtctr r4; bcctr 8, 2; li r3, 1; mfctr r5; mtlr r7	0x7ce802a6,0x429f0005,0x7c8802a6,0x38840014,0x7c8903a6,0x4d020420,0x38600001,0x7ca902a6,0x7ce803a6	cr=0x20000000,r3=0x5a5a	r3,r5	1

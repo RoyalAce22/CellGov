@@ -869,7 +869,7 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             bi,
             link,
             Target::Count,
-            Some(branches(state, bo | 0x04, bi)),
+            Some(branches(state, bo, bi)),
         )),
         I::Mcrf { crfd, crfs } => one(Op::on(unit::BRU)
             .src(crf(crfs))
