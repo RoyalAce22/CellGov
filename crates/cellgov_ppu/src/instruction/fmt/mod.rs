@@ -30,3 +30,7 @@ pub use text::AsmText;
 #[cfg(test)]
 #[path = "tests/fmt_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/fmt_guard_tests.rs"]
+mod guard_tests;
