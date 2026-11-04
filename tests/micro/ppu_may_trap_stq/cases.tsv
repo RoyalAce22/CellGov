@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+stq	stq r4, 0(r10)	0xf88a0002	mem=0x0123456789abcdeffedcba9876543210,r4=0x1111222233334444,r5=0x5555666677778888	m0,m8	1

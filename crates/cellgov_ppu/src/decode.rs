@@ -242,6 +242,7 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             match sub {
                 0 => Ok(PpuInstruction::Std { rs, ra, imm }),
                 1 => Ok(PpuInstruction::Stdu { rs, ra, imm }),
+                2 => Ok(PpuInstruction::PpePrivileged { raw }),
                 _ => Err(reject_opcode(raw, 62, sub as u16)),
             }
         }
@@ -476,6 +477,14 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let lev = ((raw >> 5) & 0x7F) as u8;
             Ok(PpuInstruction::Sc { lev })
         }
+
+        // [PPC-Book3 p:92 s:8.4] lq: DQ-form, privileged; RT = RA is an invalid form.
+        // A problem-state process cannot tell a privileged interrupt from an illegal one
+        // (probes ppu_may_trap_lq and ppu_may_trap_lq_rt_ra end the process).
+        // Book III gives only RT = RA its own handler: an odd RT (or odd stq RS) is an invalid
+        // form left privileged, and lq bits 28:31 are reserved and ignored on read.
+        56 if ppe_illegal_mnemonic(raw).is_some() => Ok(PpuInstruction::PpeIllegal { raw }),
+        56 => Ok(PpuInstruction::PpePrivileged { raw }),
 
         // Top-level primary opcode unhandled. Use xo=0 as the lookup
         // key for primaries whose D / I / B forms have no extended

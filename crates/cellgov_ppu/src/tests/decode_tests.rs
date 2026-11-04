@@ -15,6 +15,8 @@ mod branch_sc;
 mod families;
 #[path = "decode_gap_tests.rs"]
 mod gaps;
+#[path = "decode_quadword_tests.rs"]
+mod quadword;
 #[path = "decode_round_trip_tests.rs"]
 mod round_trip;
 #[path = "decode_scalar_tests.rs"]

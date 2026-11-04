@@ -27,6 +27,8 @@ pub const fn ppe_illegal_mnemonic(raw: u32) -> Option<&'static str> {
         },
         63 if xo_5 == 24 => Some("fre"),
         59 if xo_5 == 26 => Some("frsqrtes"),
+        // [PPC-Book3 p:92 s:8.4] An lq with RT = RA invokes the illegal instruction error handler.
+        56 if (raw >> 21) & 0x1F == (raw >> 16) & 0x1F => Some("lq"),
         _ => None,
     }
 }
@@ -58,6 +60,9 @@ pub const fn ppe_privileged_mnemonic(raw: u32) -> Option<&'static str> {
             }
             _ => None,
         },
+        // [PPC-Book3 p:92 s:8.4] lq and stq are privileged.
+        56 if (raw >> 21) & 0x1F != (raw >> 16) & 0x1F => Some("lq"),
+        62 if raw & 0x3 == 2 => Some("stq"),
         _ => None,
     }
 }

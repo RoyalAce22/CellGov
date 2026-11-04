@@ -234,13 +234,17 @@ fn scan_words(base: u64, words: &[u32]) -> Vec<CallerSite> {
             candidate = None;
             continue;
         }
+        // A refused word has no arm that names its registers, so the
+        // lookback drops the candidate as it does for a word with no decode.
         if candidate.is_some()
             && (maybe_clobbers_r11(raw)
                 || matches!(
                     decoded,
                     Ok(PpuInstruction::Lmw { .. }
                         | PpuInstruction::Lswi { .. }
-                        | PpuInstruction::Lswx { .. })
+                        | PpuInstruction::Lswx { .. }
+                        | PpuInstruction::PpeIllegal { .. }
+                        | PpuInstruction::PpePrivileged { .. })
                 )
                 || decoded.is_err())
         {
@@ -271,3 +275,7 @@ fn maybe_clobbers_r11(raw: u32) -> bool {
 #[cfg(test)]
 #[path = "tests/caller_census_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_refused_tests.rs"]
+mod refused_tests;

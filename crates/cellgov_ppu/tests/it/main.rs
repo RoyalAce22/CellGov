@@ -25,6 +25,7 @@ mod console_ppu_issue_vscr_mem_forms;
 mod console_ppu_lv2_call_cost;
 mod console_ppu_may_trap;
 mod console_ppu_ocrf_fxm;
+mod console_ppu_quadword;
 mod console_ppu_trap_immediate;
 mod reloc_addr16_lo_ds;
 mod reloc_addr64;

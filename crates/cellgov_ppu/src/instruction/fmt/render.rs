@@ -809,6 +809,7 @@ fn ppe_illegal(f: &mut fmt::Formatter<'_>, raw: u32) -> fmt::Result {
         Some(mn @ ("fre" | "frsqrtes")) => {
             op(f, mn_rc(mn, rc).as_str(), format_args!("f{t}, f{b}"))
         }
+        Some("lq") => mem_d(f, "lq", 'r', t as u8, (raw & 0xFFF0) as i16, a as u8),
         Some(mn) => spr_move(f, mn, raw).unwrap_or_else(|| op0(f, mn)),
         None => op(f, ".long", format_args!("0x{raw:08x}")),
     }
@@ -817,6 +818,7 @@ fn ppe_illegal(f: &mut fmt::Formatter<'_>, raw: u32) -> fmt::Result {
 /// A privileged word, with the operands its form names.
 fn ppe_privileged(f: &mut fmt::Formatter<'_>, raw: u32) -> fmt::Result {
     let t = (raw >> 21) & 0x1F;
+    let a = (raw >> 16) & 0x1F;
     let b = (raw >> 11) & 0x1F;
     match crate::instruction::ppe_privileged_mnemonic(raw) {
         Some("mfmsr") => op(f, "mfmsr", format_args!("r{t}")),
@@ -824,6 +826,8 @@ fn ppe_privileged(f: &mut fmt::Formatter<'_>, raw: u32) -> fmt::Result {
         Some("slbie") => op(f, "slbie", format_args!("r{b}")),
         Some(mn @ ("slbmte" | "slbmfev" | "slbmfee")) => op(f, mn, format_args!("r{t}, r{b}")),
         Some(mn @ ("tlbie" | "tlbiel")) => op(f, mn, format_args!("r{b}, {}", (raw >> 21) & 1)),
+        Some("lq") => mem_d(f, "lq", 'r', t as u8, (raw & 0xFFF0) as i16, a as u8),
+        Some("stq") => mem_d(f, "stq", 'r', t as u8, (raw & 0xFFFC) as i16, a as u8),
         Some(mn) => spr_move(f, mn, raw).unwrap_or_else(|| op0(f, mn)),
         None => op(f, ".long", format_args!("0x{raw:08x}")),
     }
