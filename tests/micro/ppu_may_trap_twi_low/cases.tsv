@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+twi_eq_low_word	twi 4, r3, 5	0x0c830005	r3=0x100000005	r3	1

@@ -4,11 +4,10 @@ use super::*;
 
 #[test]
 fn unknown_primary_reports_encoding_not_recognized() {
-    // Primary 2 (`tdi`, trap-dword-immediate) has no top-level
-    // arm in CellGov and no opcode-gap row, so the top-level
-    // fall-through surfaces it as EncodingNotRecognized with
-    // only the raw word in the Display.
-    let raw = 0x0800_0000;
+    // [PPC-Book1 p:187 s:Appendix G] Primary 1 is one of the illegal primary opcodes.
+    // It has no opcode-gap row, so the top-level fall-through surfaces
+    // it as EncodingNotRecognized with only the raw word in the Display.
+    let raw = 0x0400_0000;
     let err = decode(raw).unwrap_err();
     match err {
         PpuDecodeError::EncodingNotRecognized { raw: r } => assert_eq!(r, raw),

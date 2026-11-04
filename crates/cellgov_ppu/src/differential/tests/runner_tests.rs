@@ -46,12 +46,12 @@ fn injected_state_divergence_is_reported() {
 
 #[test]
 fn decoder_rejection_surfaces_as_decode_error() {
-    // 0x0800_0000 = `tdi` (primary 2), unhandled by the decoder.
+    // [PPC-Book1 p:187 s:Appendix G] 0x0400_0000 is primary 1, an illegal primary opcode.
     let case = InstructionCase {
-        label: "tdi_unhandled".to_string(),
+        label: "primary_1_unhandled".to_string(),
         initial_state: nop_state(),
         initial_memory: MemorySnapshot::empty(),
-        raw_instruction: 0x0800_0000,
+        raw_instruction: 0x0400_0000,
         expected_state: nop_state(),
         expected_memory: MemorySnapshot::empty(),
         source: OracleSource::Manual,

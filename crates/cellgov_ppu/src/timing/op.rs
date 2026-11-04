@@ -849,6 +849,7 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         I::Tw { ra, rb, .. } | I::Td { ra, rb, .. } => {
             one(Op::on(unit::FXU).src(gpr(ra)).src(gpr(rb)))
         }
+        I::Twi { ra, .. } | I::Tdi { ra, .. } => one(Op::on(unit::FXU).src(gpr(ra))),
         I::Cmpwi { bf, ra, .. }
         | I::Cmplwi { bf, ra, .. }
         | I::Cmpdi { bf, ra, .. }

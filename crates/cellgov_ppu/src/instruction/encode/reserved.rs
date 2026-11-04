@@ -170,6 +170,8 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         | I::Addi { .. }
         | I::Addis { .. }
         | I::Subfic { .. }
+        | I::Twi { .. }
+        | I::Tdi { .. }
         | I::Mulli { .. }
         | I::Addic { .. }
         | I::AddicDot { .. }

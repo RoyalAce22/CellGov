@@ -121,6 +121,15 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     match primary {
         4 => decode_vx(raw),
 
+        // [PPC-Book1 p:63 s:3.3.10] tdi (2) and twi (3): TO(6:10) RA(11:15) SI(16:31).
+        2 => {
+            let (to, ra, imm) = d_form(raw);
+            Ok(PpuInstruction::Tdi { to, ra, imm })
+        }
+        3 => {
+            let (to, ra, imm) = d_form(raw);
+            Ok(PpuInstruction::Twi { to, ra, imm })
+        }
         7 => {
             let (rt, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Mulli { rt, ra, imm })

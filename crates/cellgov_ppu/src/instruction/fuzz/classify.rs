@@ -262,7 +262,9 @@ pub(super) fn effect_and_outcome(
         K::Popcntb | K::Mcrxr | K::PpeIllegal => (NO_EFFECTS, FAULT),
         // [CBE-Handbook p:254 s:9.5.9] Each raises a privileged-instruction exception in problem state.
         K::PpePrivileged => (NO_EFFECTS, FAULT),
-        K::Tw | K::Td | K::Mfocrf | K::Mtocrf | K::Vx | K::Va => (NO_EFFECTS, CONTINUE_OR_FAULT),
+        K::Tw | K::Td | K::Twi | K::Tdi | K::Mfocrf | K::Mtocrf | K::Vx | K::Va => {
+            (NO_EFFECTS, CONTINUE_OR_FAULT)
+        }
         _ => (NO_EFFECTS, CONTINUE),
     }
 }
@@ -346,6 +348,8 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::Popcntb
         | PpuInstructionKind::Tw
         | PpuInstructionKind::Td
+        | PpuInstructionKind::Twi
+        | PpuInstructionKind::Tdi
         | PpuInstructionKind::Mcrxr
         | PpuInstructionKind::PpeIllegal
         | PpuInstructionKind::PpePrivileged

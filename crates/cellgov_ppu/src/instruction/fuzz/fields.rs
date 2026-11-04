@@ -63,6 +63,11 @@ fn field_candidates(descriptor: PpuFuzzDescriptor) -> Vec<(u32, PpuOperandClass)
                 (BITS_16_20, C::Register),
                 (BITS_21_25, C::Condition),
             ],
+            K::Ordinary(I::Twi | I::Tdi) => vec![
+                (0x0000_ffff, C::Immediate),
+                (BITS_16_20, C::Register),
+                (BITS_21_25, C::Selector),
+            ],
             _ => vec![
                 (0x0000_ffff, C::Immediate),
                 (BITS_16_20, C::Register),

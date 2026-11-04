@@ -428,6 +428,26 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
                 ExecuteVerdict::Continue
             }
         }
+        // [PPC-Book1 p:63 s:3.3.10] twi: EXTS((RA)32:63) against EXTS(SI), signed and unsigned.
+        PpuInstruction::Twi { to, ra, imm } => {
+            let a = state.gpr[ra as usize] as u32 as i32 as i64;
+            let b = i64::from(imm);
+            if trap_condition_matches(to, a, b, a as u64, b as u64) {
+                ExecuteVerdict::Fault(PpuFault::ProgramTrap(to))
+            } else {
+                ExecuteVerdict::Continue
+            }
+        }
+        // [PPC-Book1 p:63 s:3.3.10] tdi: (RA) against EXTS(SI), signed and unsigned.
+        PpuInstruction::Tdi { to, ra, imm } => {
+            let a = state.gpr[ra as usize] as i64;
+            let b = i64::from(imm);
+            if trap_condition_matches(to, a, b, a as u64, b as u64) {
+                ExecuteVerdict::Fault(PpuFault::ProgramTrap(to))
+            } else {
+                ExecuteVerdict::Continue
+            }
+        }
         // [CBE-Handbook p:739 s:A.2.4.1] The PPE does not implement mcrxr.
         PpuInstruction::Mcrxr { bf: _ } => {
             ExecuteVerdict::Fault(PpuFault::IllegalInstruction("mcrxr"))

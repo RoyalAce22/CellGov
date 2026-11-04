@@ -188,6 +188,8 @@ pub fn execute(
         | PpuInstruction::Popcntb { .. }
         | PpuInstruction::Tw { .. }
         | PpuInstruction::Td { .. }
+        | PpuInstruction::Twi { .. }
+        | PpuInstruction::Tdi { .. }
         | PpuInstruction::Mcrxr { .. }
         | PpuInstruction::PpeIllegal { .. }
         | PpuInstruction::PpePrivileged { .. }

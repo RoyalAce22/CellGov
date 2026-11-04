@@ -26,3 +26,5 @@ mod rotate_word_wrap;
 mod shift_rotate;
 #[path = "alu_spr_trap_tests.rs"]
 mod spr_trap;
+#[path = "trap_immediate_tests.rs"]
+mod trap_immediate;

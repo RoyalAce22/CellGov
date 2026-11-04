@@ -58,6 +58,8 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         I::Stdu { rs, ra: a, imm } => ds(62, rs, a, imm, 1),
 
         // D-form arithmetic and logical immediates.
+        I::Tdi { to, ra: a, imm } => d(2, to, a, imm as u16),
+        I::Twi { to, ra: a, imm } => d(3, to, a, imm as u16),
         I::Mulli { rt: t, ra: a, imm } => d(7, t, a, imm as u16),
         I::Subfic { rt: t, ra: a, imm } => d(8, t, a, imm as u16),
         I::Addic { rt: t, ra: a, imm } => d(12, t, a, imm as u16),

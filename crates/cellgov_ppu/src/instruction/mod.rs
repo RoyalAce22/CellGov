@@ -7,6 +7,7 @@
 //! [`PpuDecodeError::EncodingNotRecognized`].
 
 mod branch;
+mod classes;
 mod decode_error;
 pub mod encode;
 pub mod fmt;

@@ -23,6 +23,7 @@ mod console_ppu_issue_vscr_mem;
 mod console_ppu_issue_vscr_mem_forms;
 mod console_ppu_lv2_call_cost;
 mod console_ppu_may_trap;
+mod console_ppu_trap_immediate;
 mod reloc_addr16_lo_ds;
 mod reloc_addr64;
 mod reloc_rel24;

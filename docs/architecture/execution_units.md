@@ -21,7 +21,7 @@ The `PpuInstruction` set covers:
 - byte-reversed indexed loads/stores (`ldbrx`, `lwbrx`, `lhbrx`,
   `sdbrx`, `stwbrx`, `sthbrx`);
 - string moves (`lswi`, `lswx`, `stswi`, `stswx`);
-- trap (`tw`, `td`);
+- trap (`tw`, `td`, `twi`, `tdi`);
 - `dcbz`;
 - `sc`;
 - the VMX unaligned and element-indexed load/store family (`lvlx`,

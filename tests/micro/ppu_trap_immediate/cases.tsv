@@ -1,0 +1,6 @@
+id	asm	words	inputs	record	may_end_process
+tdi_eq_high_word	tdi 4, r3, 5	0x08830005	r3=0x100000005	r3	0
+twi_ltu_m1	twi 2, r3, -1	0x0c43ffff	r3=0xffffffff	r3	0
+tdi_ltu_m1	tdi 2, r3, -1	0x0843ffff	r3=0xffffffffffffffff	r3	0
+twi_not_eq_low_word	twi 27, r3, 5	0x0f630005	r3=0xaaaaaaaa00000005	r3	0
+twi_to0	twi 0, r3, 0	0x0c030000	r3=0x0	r3	0

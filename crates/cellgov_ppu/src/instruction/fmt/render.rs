@@ -285,6 +285,8 @@ pub(super) fn render(
         // -- Traps / system-ish X-forms --
         I::Tw { to, ra, rb } => op(f, "tw", format_args!("{to}, r{ra}, r{rb}")),
         I::Td { to, ra, rb } => op(f, "td", format_args!("{to}, r{ra}, r{rb}")),
+        I::Twi { to, ra, imm } => op(f, "twi", format_args!("{to}, r{ra}, {imm}")),
+        I::Tdi { to, ra, imm } => op(f, "tdi", format_args!("{to}, r{ra}, {imm}")),
         I::Mcrxr { bf } => op(f, "mcrxr", format_args!("cr{bf}")),
         I::PpeIllegal { raw } => ppe_illegal(f, raw),
         I::PpePrivileged { raw } => ppe_privileged(f, raw),
