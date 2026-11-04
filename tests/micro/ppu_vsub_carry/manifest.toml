@@ -1,0 +1,17 @@
+[test]
+name = "ppu_vsub_carry"
+
+# A hardware probe of vaddcuw, vsububm, vsubuhm, vsubuwm and vsubcuw
+# over 0, 1, unsigned max, both sides of the sign boundary and an
+# arbitrary value per lane. cases.tsv names each case. The console
+# capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (6 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 784 },
+]
+
+[expect]
+outcome = "completed"

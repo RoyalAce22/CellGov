@@ -14,6 +14,29 @@ pub(super) fn vadd_words(a: u128, b: u128) -> u128 {
     map_u32(a, b, u32::wrapping_add)
 }
 
+/// `vaddcuw`: the carry out of each unsigned word sum, as 0 or 1.
+pub(super) fn vaddcuw(a: u128, b: u128) -> u128 {
+    map_u32(a, b, |x, y| u32::from(x.overflowing_add(y).1))
+}
+
+pub(super) fn vsub_bytes(a: u128, b: u128) -> u128 {
+    map_u8(a, b, u8::wrapping_sub)
+}
+
+pub(super) fn vsub_halfs(a: u128, b: u128) -> u128 {
+    map_u16(a, b, u16::wrapping_sub)
+}
+
+pub(super) fn vsub_words(a: u128, b: u128) -> u128 {
+    map_u32(a, b, u32::wrapping_sub)
+}
+
+/// `vsubcuw`: the complement of the borrow out of each unsigned word
+/// difference: 1 when the vA word is not less than the vB word, else 0.
+pub(super) fn vsubcuw(a: u128, b: u128) -> u128 {
+    map_u32(a, b, |x, y| u32::from(x >= y))
+}
+
 pub(super) fn vcmpequw(a: u128, b: u128) -> u128 {
     map_u32(a, b, |x, y| if x == y { u32::MAX } else { 0 })
 }

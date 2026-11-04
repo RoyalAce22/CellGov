@@ -42,3 +42,7 @@ mod vscr_console_tests;
 #[cfg(test)]
 #[path = "tests/unimplemented_tests.rs"]
 mod unimplemented_tests;
+
+#[cfg(test)]
+#[path = "tests/sub_carry_tests.rs"]
+mod sub_carry_tests;

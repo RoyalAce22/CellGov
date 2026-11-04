@@ -1,7 +1,10 @@
 //! The VX-form and VA-form dispatchers and the `vsldoi` entry.
 
 use super::convert::{vcfsx, vcfux};
-use super::integer::{vadd_bytes, vadd_halfs, vadd_words, vcmpequw, vmulouh, vsub_ubytes_sat};
+use super::integer::{
+    vadd_bytes, vadd_halfs, vadd_words, vaddcuw, vcmpequw, vmulouh, vsub_bytes, vsub_halfs,
+    vsub_ubytes_sat, vsub_words, vsubcuw,
+};
 use super::merge::{vmrghb, vmrghh, vmrghw, vmrglb, vmrglh, vmrglw};
 use super::permute::{vperm, vsel, vsldoi};
 use super::shift::{vslw, vsrab, vsrah, vsraw, vsrw};
@@ -45,6 +48,16 @@ pub(crate) fn execute_vx(
         VxOp::Vadduhm => (vadd_halfs(a, b), false),
         // [AltiVec-PEM p:6-39 s:6.2] vadduwm: Vector Add Unsigned Word Modulo
         VxOp::Vadduwm => (vadd_words(a, b), false),
+        // [AltiVec-PEM p:6-30 s:6.2] vaddcuw: each vD word is the carry out of bit 0 of the unsigned word sum, zero-extended.
+        VxOp::Vaddcuw => (vaddcuw(a, b), false),
+        // [AltiVec-PEM p:6-160 s:6.2] vsububm: Vector Subtract Byte Modulo
+        VxOp::Vsububm => (vsub_bytes(a, b), false),
+        // [AltiVec-PEM p:6-162 s:6.2] vsubuhm: Vector Subtract Half Word Modulo
+        VxOp::Vsubuhm => (vsub_halfs(a, b), false),
+        // [AltiVec-PEM p:6-164 s:6.2] vsubuwm: Vector Subtract Word Modulo
+        VxOp::Vsubuwm => (vsub_words(a, b), false),
+        // [AltiVec-PEM p:6-155 s:6.2] vsubcuw: each vD word is the complement of the borrow out of bit 0 of the unsigned word difference, zero-extended.
+        VxOp::Vsubcuw => (vsubcuw(a, b), false),
 
         // -- Integer compare --
         // [AltiVec-PEM p:6-56 s:6.2] vcmpequw: Vector Compare Equal-to Unsigned Word
@@ -142,7 +155,6 @@ pub(crate) fn execute_vx(
         | VxOp::Vmulosh
         | VxOp::Vrsqrtefp
         | VxOp::Vpkswus
-        | VxOp::Vaddcuw
         | VxOp::Vmaxsw
         | VxOp::Vexptefp
         | VxOp::Vpkshss
@@ -190,19 +202,15 @@ pub(crate) fn execute_vx(
         | VxOp::Vcmpbfp
         | VxOp::Vctsxs
         | VxOp::Vupklpx
-        | VxOp::Vsububm
         | VxOp::Vavgub
         | VxOp::Vmaxfp
         | VxOp::Vslo
-        | VxOp::Vsubuhm
         | VxOp::Vavguh
         | VxOp::Vminfp
         | VxOp::Vsro
-        | VxOp::Vsubuwm
         | VxOp::Vavguw
         | VxOp::Vavgsb
         | VxOp::Vavgsh
-        | VxOp::Vsubcuw
         | VxOp::Vavgsw
         | VxOp::Vsum4ubs
         | VxOp::Vsubuhs

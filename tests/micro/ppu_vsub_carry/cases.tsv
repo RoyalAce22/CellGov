@@ -1,0 +1,7 @@
+id	asm	words	inputs	record	may_end_process
+vaddcuw_carries	vaddcuw v3, v1, v2	0x10611180	cr=0x0,xer=0x0,v1=0xffffffff_ffffffff_80000000_7fffffff,v2=0x00000001_00000000_80000000_80000000	v3	0
+vsubcuw_borrows	vsubcuw v3, v1, v2	0x10611580	cr=0x0,xer=0x0,v1=0x00000007_00000006_00000000_ffffffff,v2=0x00000007_00000007_00000000_00000000	v3	0
+vsububm_classes	vsububm v3, v1, v2	0x10611400	cr=0x0,xer=0x0,v1=0x00017f80_ff80007f_9e3779b9_ff01807f,v2=0xff01807f_01017f80_b979379e_ffff0001	v3	0
+vsubuhm_classes	vsubuhm v3, v1, v2	0x10611440	cr=0x0,xer=0x0,v1=0x00000001_7fff8000_ffff8000_9e370000,v2=0xffff0002_80007fff_00010001_79b90001	v3	0
+vsubuwm_signs	vsubuwm v3, v1, v2	0x10611480	cr=0x0,xer=0x0,v1=0x00000000_00000001_7fffffff_80000000,v2=0x00000001_ffffffff_80000000_7fffffff	v3	0
+vsubuwm_equal_and_max	vsubuwm v3, v1, v2	0x10611480	cr=0x0,xer=0x0,v1=0xffffffff_9e3779b9_00000000_80000000,v2=0xffffffff_12345678_00000000_00000001	v3	0
