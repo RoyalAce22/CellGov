@@ -405,7 +405,7 @@ fn lfsux_load_fault_does_not_write_ra() {
     let mem = vec![0u8; 0x100];
     let mut s = PpuState::new();
     s.set_gpr(4, 0x1000_0000); // far outside the 0x100-byte region
-    s.set_gpr(5, 0);
+    s.set_gpr(5, 0x40);
     let original_ra = s.gpr[4];
     let mut effects = Vec::new();
     let out = exec_with_mem(
@@ -499,7 +499,7 @@ fn lfdux_load_fault_does_not_write_ra() {
     let mem = vec![0u8; 0x100];
     let mut s = PpuState::new();
     s.set_gpr(2, 0x2000_0000);
-    s.set_gpr(3, 0);
+    s.set_gpr(3, 0x40);
     let original_ra = s.gpr[2];
     let mut effects = Vec::new();
     let out = exec_with_mem(

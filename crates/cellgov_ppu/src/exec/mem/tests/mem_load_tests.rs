@@ -483,7 +483,7 @@ fn lfault_lhau_does_not_update_ra() {
         &PpuInstruction::Lhau {
             rt: 3,
             ra: 1,
-            imm: 0,
+            imm: 0x40,
         },
         &mut s,
         0,
@@ -682,7 +682,7 @@ fn lwzux_fault_leaves_ra_unchanged() {
     let mem = vec![0u8; 0x40];
     let mut s = PpuState::new();
     s.set_gpr(4, 0x1000_0000);
-    s.set_gpr(5, 0);
+    s.set_gpr(5, 0x40);
     let original = s.gpr[4];
     let mut effects = Vec::new();
     let v = exec_with_mem(
