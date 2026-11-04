@@ -91,3 +91,7 @@ mod pack_tests;
 #[cfg(test)]
 #[path = "tests/whole_shift_tests.rs"]
 mod whole_shift_tests;
+
+#[cfg(test)]
+#[path = "tests/shipped_ops_tests.rs"]
+mod shipped_ops_tests;

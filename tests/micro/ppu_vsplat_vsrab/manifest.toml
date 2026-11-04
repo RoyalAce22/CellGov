@@ -1,0 +1,20 @@
+[test]
+name = "ppu_vsplat_vsrab"
+
+# A hardware probe of two results the PEM leaves open, and one permute
+# edge. vsrab (with vsrah beside it) runs with count bytes 0x08..0x3F,
+# where the page's pseudocode reads six count bits and its prose three,
+# and with low counts that have the high bits set. vspltb, vsplth and
+# vspltw run with UIMM past the last element. Two negative vspltis
+# immediates, and vperm with index bytes whose high bits are set.
+# cases.tsv names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (9 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 1168 },
+]
+
+[expect]
+outcome = "completed"

@@ -1,0 +1,24 @@
+[test]
+name = "ppu_vmx_int_edges"
+
+# A hardware probe over every vector integer family on one edge table:
+# lane-distinct operands built from 0, 1, all ones, the signed maximum
+# and minimum and their neighbours, at byte, half-word and word width.
+# Modulo, carry and saturating add and subtract; maximum, minimum and
+# average; multiply even and odd; multiply-add and multiply-sum;
+# sum-across; the compares, with CR seeded for the recording forms;
+# rotates and element shifts; the whole-register shifts; pack and
+# unpack; logical, merge, splat, select, permute and vsldoi. Each
+# saturating case clears VSCR with mtvscr first and reads it back with
+# mfvscr after. cases.tsv names each case. The console capture is the
+# answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (86 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 11024 },
+]
+
+[expect]
+outcome = "completed"

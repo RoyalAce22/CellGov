@@ -6,6 +6,21 @@
 //! The saturating forms return, beside the result, whether any element
 //! saturated. The caller sets `VSCR[SAT]` from that flag.
 
+/// Element `i` of `v` with `w`-bit elements.
+pub(super) fn element(v: u128, w: u32, i: u32) -> u64 {
+    let n = 128 / w;
+    (v >> (w * (n - 1 - i))) as u64 & (u64::MAX >> (64 - w))
+}
+
+/// The vector of `w`-bit elements whose element `i` is the low `w` bits
+/// of `f(i)`.
+pub(super) fn build(w: u32, f: impl Fn(u32) -> u64) -> u128 {
+    let n = 128 / w;
+    (0..n).fold(0u128, |r, i| {
+        r | u128::from(f(i) & (u64::MAX >> (64 - w))) << (w * (n - 1 - i))
+    })
+}
+
 /// Apply `f` to each pair of byte elements.
 pub(super) fn map_u8(a: u128, b: u128, f: impl Fn(u8, u8) -> u8) -> u128 {
     map_u8_sat(a, b, |x, y| (f(x, y), false)).0

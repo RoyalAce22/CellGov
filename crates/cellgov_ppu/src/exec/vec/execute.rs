@@ -115,7 +115,8 @@ pub(crate) fn execute_vx(
         VxOp::Vsraw => (vsraw(a, b), false),
         // [AltiVec-PEM p:6-149 s:6.2] vsrah
         VxOp::Vsrah => (vsrah(a, b), false),
-        // [AltiVec-PEM p:6-148 s:6.2] vsrab
+        // [AltiVec-PEM p:6-148 s:6.2] vsrab: shift each signed byte right by the low 3 bits of its vB byte.
+        // The page's pseudocode reads six count bits and its prose three; the ppu_vsplat_vsrab console capture settles it as three.
         VxOp::Vsrab => (vsrab(a, b), false),
         // [AltiVec-PEM p:6-135 s:6.2] vslb: shift each byte left by the low 3 bits of its vB byte, zero fill.
         VxOp::Vslb => (vslb(a, b), false),
@@ -133,6 +134,7 @@ pub(crate) fn execute_vx(
         VxOp::Vrlw => (vrlw(a, b), false),
 
         // -- Splat --
+        // The PEM leaves a UIMM past the last element open; the ppu_vsplat_vsrab console capture shows it taken modulo the element count.
         // [AltiVec-PEM p:6-140 s:6.2] vspltb (va is byte index)
         VxOp::Vspltb => (vspltb(b, va), false),
         // [AltiVec-PEM p:6-141 s:6.2] vsplth (va is halfword index)
