@@ -15,7 +15,11 @@ const MODES: [VmxMode; 2] = [VmxMode::Java, VmxMode::NonJava];
 
 /// The result `mode` gives `x`, from an oracle: the oracle's rounding in
 /// Java mode; a zero of the sign of `x` for a tiny `x` in non-Java mode.
-fn expected<F: Format>(mode: VmxMode, x: Exact, oracle: fn(Policy, Rounding, Exact) -> u64) -> u64 {
+pub(crate) fn expected<F: Format>(
+    mode: VmxMode,
+    x: Exact,
+    oracle: fn(Policy, Rounding, Exact) -> u64,
+) -> u64 {
     if mode == VmxMode::NonJava && below_smallest_normal::<F>(x) {
         u64::from(x.negative) << F::SIGN_SHIFT
     } else {
@@ -27,7 +31,7 @@ fn enumerated<F: Format>(policy: Policy, rounding: Rounding, x: Exact) -> u64 {
     enumerate::<F>(policy, rounding, x).bits
 }
 
-fn defined<F: Format>(policy: Policy, rounding: Rounding, x: Exact) -> u64 {
+pub(crate) fn defined<F: Format>(policy: Policy, rounding: Rounding, x: Exact) -> u64 {
     define::<F>(policy, rounding, x).bits
 }
 

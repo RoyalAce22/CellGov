@@ -4,6 +4,7 @@
 
 mod convert;
 mod execute;
+mod float_arith;
 mod float_compare;
 mod float_minmax;
 mod integer;
@@ -19,7 +20,7 @@ mod sum_across;
 mod unpack;
 mod vscr;
 
-pub(crate) use execute::{execute_va, execute_vsldoi, execute_vx};
+pub(crate) use execute::{execute_va, execute_vsldoi, execute_vx, vx_executes};
 pub(crate) use vscr::{execute_mfvscr, execute_mtvscr};
 
 #[cfg(test)]
@@ -105,3 +106,15 @@ mod float_compare_tests;
 #[cfg(test)]
 #[path = "tests/float_minmax_tests.rs"]
 mod float_minmax_tests;
+
+#[cfg(test)]
+#[path = "tests/float_arith_tests.rs"]
+mod float_arith_tests;
+
+#[cfg(test)]
+#[path = "tests/vx_executes_tests.rs"]
+mod vx_executes_tests;
+
+#[cfg(test)]
+#[path = "tests/float_arith_console_tests.rs"]
+mod float_arith_console_tests;

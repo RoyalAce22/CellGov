@@ -267,6 +267,18 @@ pub(super) fn effect_and_outcome(
     }
 }
 
+/// The outcomes of `instruction` given its kind's `outcomes`: a VX op
+/// the interpreter executes always continues.
+pub(super) fn instruction_outcomes(
+    instruction: PpuInstruction,
+    outcomes: &'static [PpuOutcomeClass],
+) -> &'static [PpuOutcomeClass] {
+    match instruction {
+        PpuInstruction::Vx { op, rc, .. } if crate::exec::vx_executes(op, rc) => CONTINUE,
+        _ => outcomes,
+    }
+}
+
 pub(super) fn classify_kind(kind: PpuInstructionKind) {
     match kind {
         PpuInstructionKind::B

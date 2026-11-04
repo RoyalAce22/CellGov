@@ -71,8 +71,8 @@ pub fn add(a: Exact, b: Exact) -> Option<Exact> {
     Some(sum(a, b))
 }
 
-/// The sum of two operands `add` has checked.
-fn sum(a: Exact, b: Exact) -> Exact {
+/// The sum of two operands that `add` checks or `unpack` decodes.
+pub(crate) fn sum(a: Exact, b: Exact) -> Exact {
     if a.significand == 0 && b.significand == 0 {
         return Exact::from_parts(
             a.negative && b.negative,

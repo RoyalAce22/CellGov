@@ -4,7 +4,9 @@ use crate::instruction::ops::Fp63Op;
 use crate::instruction::{PpuInstruction, PpuInstructionKind};
 use crate::state::PpuState;
 
-use super::classify::{classify_kind, effect_and_outcome, form_for_word, fuzz_kind};
+use super::classify::{
+    classify_kind, effect_and_outcome, form_for_word, fuzz_kind, instruction_outcomes,
+};
 use super::fields::generation_operands_are_valid;
 use super::types::{
     PpuFuzzDescriptor, PpuMetamorphicCase, PpuMetamorphicRelation, PpuObservableState,
@@ -42,7 +44,7 @@ impl PpuInstruction {
             form: form_for_word(instruction_kind, raw),
             observable_state: PpuObservableState::Complete,
             effects,
-            outcomes,
+            outcomes: instruction_outcomes(*self, outcomes),
             relations: relations_for_instruction(*self),
         }
     }

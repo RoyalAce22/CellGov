@@ -4,6 +4,7 @@
 //! The vector unit keeps no floating-point status, so these functions
 //! return bits only.
 
+use crate::arith::sum;
 use crate::format::{Binary32, Format};
 use crate::operand::{unpack, Operand};
 use crate::round::{binade, round_pack, Exact, Policy, Rounding};
@@ -101,6 +102,43 @@ pub fn vmx_compare(mode: VmxMode, a: u32, b: u32) -> Option<Ordering> {
         }
     };
     Some(key(a)?.cmp(&key(b)?))
+}
+
+/// `a + b` on binary32 words in `mode`, rounded to nearest.
+///
+/// [AltiVec-PEM p:3-12 s:3.2.3] every vector float arithmetic instruction rounds to nearest.
+/// [AltiVec-PEM p:3-12 s:3.2.2] operations on infinities follow IEEE.
+pub fn vmx_add(mode: VmxMode, a: u32, b: u32) -> u32 {
+    vmx_nan(&[a, b]).unwrap_or_else(|| add_in(mode, a, b))
+}
+
+/// `a - b` on binary32 words in `mode`, rounded to nearest. A NaN in `b`
+/// keeps its sign.
+pub fn vmx_sub(mode: VmxMode, a: u32, b: u32) -> u32 {
+    vmx_nan(&[a, b]).unwrap_or_else(|| add_in(mode, a, b ^ 0x8000_0000))
+}
+
+/// The sum of two words neither of which is a NaN.
+///
+/// [AltiVec-PEM p:3-13 s:3.2.4.2] a magnitude subtraction of infinities is invalid and gives the default QNaN.
+fn add_in(mode: VmxMode, a: u32, b: u32) -> u32 {
+    let exact = |x: Operand| match x {
+        Operand::Zero { negative } => Some(Exact::from_parts(negative, 0, 0, false)),
+        Operand::Finite(x) => Some(x),
+        _ => None,
+    };
+    match (vmx_unpack(mode, a), vmx_unpack(mode, b)) {
+        (Operand::Infinity { negative: x }, Operand::Infinity { negative: y }) if x != y => {
+            VMX_DEFAULT_NAN
+        }
+        (Operand::Infinity { negative }, _) | (_, Operand::Infinity { negative }) => {
+            0x7F80_0000 | u32::from(negative) << 31
+        }
+        (x, y) => match (exact(x), exact(y)) {
+            (Some(x), Some(y)) => vmx_round(mode, Rounding::NearestEven, sum(x, y)),
+            _ => VMX_DEFAULT_NAN,
+        },
+    }
 }
 
 /// Rounds `exact` to binary32 in `mode`.

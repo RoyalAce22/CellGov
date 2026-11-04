@@ -906,9 +906,6 @@ fn the_issue_model_times_each_table_loop_within_the_console_s_spread() {
 /// (`console_ppu_issue_multiple.rs`).
 const TABLE_RESIDUALS: [(usize, f64); 3] = [(1, 2.0), (2, 3.0), (17, 20.0)];
 
-/// The loop whose body the interpreter refuses: `vaddfp`.
-const REFUSED_LOOP: usize = 7;
-
 /// The loop the model times outside the console's spread: eight
 /// dependent `add`. The model's 16 cycles an iteration is the add's
 /// latency eight times; the console's fastest run takes 16.28 and its
@@ -923,22 +920,13 @@ fn the_issue_model_times_each_loop_within_the_console_s_spread() {
     let mut rows = Vec::new();
     for r in &REPLAYS {
         let Some(cellgov) = replay(r, 0) else {
-            assert_eq!(
-                r.loop_index, REFUSED_LOOP,
-                "loop {} faults in the interpreter",
-                r.loop_index,
-            );
-            continue;
+            panic!("loop {} faults in the interpreter", r.loop_index);
         };
-        assert_ne!(
-            r.loop_index, REFUSED_LOOP,
-            "the interpreter now executes vaddfp, so loop 7 joins the replayed rows",
-        );
         let fastest = console_cycles(&w, r.loop_index);
         let spread = console_slowest(&w, r.loop_index) - fastest;
         rows.push((r.loop_index, cellgov, fastest, spread));
     }
-    assert_eq!(rows.len(), 19, "every loop but the refused one replays");
+    assert_eq!(rows.len(), 20, "every loop replays");
     for &(k, cellgov, fastest, spread) in &rows {
         let within = (cellgov - fastest).abs() <= spread;
         if k == RESIDUAL_LOOP {

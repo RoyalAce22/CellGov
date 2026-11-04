@@ -1,0 +1,20 @@
+[test]
+name = "ppu_vfp_addsub"
+
+# A hardware probe of vaddfp and vsubfp, four different slots a case,
+# each case under NJ = 0 and NJ = 1. It settles the rounding to nearest
+# (ties to even, the sticky bit below a tie, a carry into the exponent),
+# overflow and the tie at the largest finite value, the NaN vsubfp
+# writes for a NaN in vB, infinities, the sign of each zero sum, and
+# results and operands below 2^-126. Each case sets VSCR with mtvscr
+# first. cases.tsv names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (14 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 1808 },
+]
+
+[expect]
+outcome = "completed"

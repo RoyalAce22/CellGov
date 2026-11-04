@@ -1,6 +1,7 @@
 //! The VX-form and VA-form dispatchers and the `vsldoi` entry.
 
 use super::convert::{vcfsx, vcfux};
+use super::float_arith::{vaddfp, vsubfp};
 use super::float_compare::{vcmpbfp, vcmpeqfp, vcmpgefp, vcmpgtfp};
 use super::float_minmax::{vmaxfp, vminfp};
 use super::integer::{
@@ -55,8 +56,7 @@ pub(crate) fn execute_vx(
         mnemonic: op.into(),
     };
 
-    // Only a VXR compare has a record form.
-    if rc && !op.is_vxr_compare() {
+    if !vx_executes(op, rc) {
         return ExecuteVerdict::Fault(unimplemented);
     }
 
@@ -333,9 +333,14 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-81 s:6.2] vminfp: the smaller slot; the minimum of +0 and -0 is -0; a NaN operand gives a QNaN.
         VxOp::Vminfp => (vminfp(mode, a, b), false),
 
-        VxOp::Vaddfp
-        | VxOp::Vsubfp
-        | VxOp::Vrefp
+        // -- Single-precision add and subtract --
+        // [AltiVec-PEM p:6-31 s:6.2] vaddfp: vA + vB rounded to nearest; NJ = 1 truncates a denormal operand or result to a zero of its sign.
+        VxOp::Vaddfp => (vaddfp(mode, a, b), false),
+        // [AltiVec-PEM p:6-156 s:6.2] vsubfp: vA - vB rounded to nearest, under the same NJ rule.
+        VxOp::Vsubfp => (vsubfp(mode, a, b), false),
+
+        // `vx_executes` refuses these before the match.
+        VxOp::Vrefp
         | VxOp::Vrsqrtefp
         | VxOp::Vexptefp
         | VxOp::Vlogefp
@@ -357,6 +362,25 @@ pub(crate) fn execute_vx(
         state.set_cr_field(6, record_cr6(op, result));
     }
     ExecuteVerdict::Continue
+}
+
+/// Whether `execute_vx` executes `op` with record bit `rc`. Every other
+/// pair faults as unimplemented, and only a VXR compare has a record form.
+pub(crate) fn vx_executes(op: VxOp, rc: bool) -> bool {
+    let unimplemented = matches!(
+        op,
+        VxOp::Vrefp
+            | VxOp::Vrsqrtefp
+            | VxOp::Vexptefp
+            | VxOp::Vlogefp
+            | VxOp::Vrfin
+            | VxOp::Vrfiz
+            | VxOp::Vrfip
+            | VxOp::Vrfim
+            | VxOp::Vctuxs
+            | VxOp::Vctsxs
+    );
+    !unimplemented && (!rc || op.is_vxr_compare())
 }
 
 /// CR6 of a recording vector compare, from its result vector.

@@ -49,4 +49,5 @@ mod cache_block_console_tests;
 pub use dispatch::execute;
 pub use fault::PpuFault;
 pub(crate) use mem::string_loads_into;
+pub(crate) use vec::vx_executes;
 pub use verdict::ExecuteVerdict;
