@@ -42,7 +42,7 @@ pub use operand::{
     default_nan, extended_magnitude_key, extended_order_key, unpack, unpack_extended, Operand,
 };
 pub use round::{round_pack, Exact, Flags, Packed, Policy, Rounding};
-pub use vmx::{vmx_compare, vmx_nan, vmx_round, vmx_unpack, VmxMode, VMX_DEFAULT_NAN};
+pub use vmx::{vmx_compare, vmx_flush, vmx_nan, vmx_round, vmx_unpack, VmxMode, VMX_DEFAULT_NAN};
 
 #[cfg(test)]
 #[path = "tests/oracle.rs"]

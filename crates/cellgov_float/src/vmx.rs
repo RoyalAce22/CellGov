@@ -70,6 +70,17 @@ pub fn vmx_nan(operands: &[u32]) -> Option<u32> {
         .map(|&x| x | 0x0040_0000)
 }
 
+/// The binary32 word `bits` as `mode` reads it: a denormal becomes a
+/// zero of its sign in non-Java mode, and every other word stays as it is.
+///
+/// [AltiVec-PEM p:3-11 s:3.2.1] non-Java mode flushes a denormalized operand to the correctly signed zero before use; the ppu_vfp_maxmin console capture shows vmaxfp and vminfp writing that zero.
+pub fn vmx_flush(mode: VmxMode, bits: u32) -> u32 {
+    match vmx_unpack(mode, bits) {
+        Operand::Zero { negative } => u32::from(negative) << 31,
+        _ => bits,
+    }
+}
+
 /// The order of the binary32 words `a` and `b` in `mode`, or `None`
 /// when either is a NaN. +0 and -0 are equal, and non-Java mode compares
 /// a denormal as a zero of its sign.

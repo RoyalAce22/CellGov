@@ -1,0 +1,20 @@
+[test]
+name = "ppu_vfp_maxmin"
+
+# A hardware probe of vmaxfp and vminfp, both on the same operands into
+# v3 and v4, under NJ = 0 and NJ = 1. It settles what the PEM leaves
+# open or states two ways: the result for each order of +0 and -0, the
+# NaN chosen when one or both operands are NaNs, and the bits written
+# for a denormal operand under NJ = 1. Also infinities and denormals
+# against normals. Each case sets VSCR with mtvscr first. cases.tsv
+# names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (10 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 1296 },
+]
+
+[expect]
+outcome = "completed"

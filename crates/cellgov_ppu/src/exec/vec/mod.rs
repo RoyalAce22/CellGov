@@ -5,6 +5,7 @@
 mod convert;
 mod execute;
 mod float_compare;
+mod float_minmax;
 mod integer;
 mod lanes;
 mod merge;
@@ -100,3 +101,7 @@ mod shipped_ops_tests;
 #[cfg(test)]
 #[path = "tests/float_compare_tests.rs"]
 mod float_compare_tests;
+
+#[cfg(test)]
+#[path = "tests/float_minmax_tests.rs"]
+mod float_minmax_tests;

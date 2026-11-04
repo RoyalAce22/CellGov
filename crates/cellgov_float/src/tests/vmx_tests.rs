@@ -7,7 +7,9 @@ use super::round_tests::{coverage, finite, product, sum};
 use crate::format::{Binary32, Format};
 use crate::operand::Operand;
 use crate::round::{Exact, Policy, Rounding};
-use crate::vmx::{round_in, unpack_in, vmx_nan, vmx_round, vmx_unpack, VmxMode, VMX_DEFAULT_NAN};
+use crate::vmx::{
+    round_in, unpack_in, vmx_flush, vmx_nan, vmx_round, vmx_unpack, VmxMode, VMX_DEFAULT_NAN,
+};
 
 const MODES: [VmxMode; 2] = [VmxMode::Java, VmxMode::NonJava];
 
@@ -222,6 +224,32 @@ fn the_first_nan_is_the_result_quieted() {
     assert_eq!(vmx_nan(&[0xFFC1_2345]), Some(0xFFC1_2345));
     assert_eq!(vmx_nan(&[0x7F80_0001]), Some(0x7FC0_0001));
     assert_eq!(VMX_DEFAULT_NAN, 0x7FC0_0000);
+}
+
+/// [AltiVec-PEM p:3-11 s:3.2.1] NJ = 1 reads a denormal as a zero of its sign.
+#[test]
+fn a_denormal_flushes_to_a_signed_zero_only_in_non_java_mode() {
+    let words = [
+        0x0000_0001,
+        0x807F_FFFF,
+        0x0080_0000,
+        0x8000_0000,
+        0x7F80_0001,
+        0x3F80_0000,
+    ];
+    let flushed = words.map(|w| vmx_flush(VmxMode::NonJava, w));
+    assert_eq!(
+        flushed,
+        [
+            0,
+            0x8000_0000,
+            0x0080_0000,
+            0x8000_0000,
+            0x7F80_0001,
+            0x3F80_0000
+        ]
+    );
+    assert_eq!(words.map(|w| vmx_flush(VmxMode::Java, w)), words);
 }
 
 #[test]

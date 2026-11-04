@@ -2,6 +2,7 @@
 
 use super::convert::{vcfsx, vcfux};
 use super::float_compare::{vcmpbfp, vcmpeqfp, vcmpgefp, vcmpgtfp};
+use super::float_minmax::{vmaxfp, vminfp};
 use super::integer::{
     vadd_bytes, vadd_halfs, vadd_sbytes_sat, vadd_shalfs_sat, vadd_swords_sat, vadd_ubytes_sat,
     vadd_uhalfs_sat, vadd_uwords_sat, vadd_words, vaddcuw, vcmpequb, vcmpequh, vcmpequw, vcmpgtsb,
@@ -325,6 +326,13 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:3-13 s:3.2.4.1] a NaN operand gives 0xC000_0000.
         VxOp::Vcmpbfp => (vcmpbfp(mode, a, b), false),
 
+        // -- Single-precision maximum and minimum (no rounding) --
+        // [AltiVec-PEM p:6-72 s:6.2] vmaxfp: the larger slot; the maximum of +0 and -0 is +0; a NaN operand gives a QNaN.
+        // The page's pseudocode returns vA for vmaxfp(-0, +0) and vB for a NaN in vA; the ppu_vfp_maxmin console capture follows the text in both orders and the vA-first NaN rule.
+        VxOp::Vmaxfp => (vmaxfp(mode, a, b), false),
+        // [AltiVec-PEM p:6-81 s:6.2] vminfp: the smaller slot; the minimum of +0 and -0 is -0; a NaN operand gives a QNaN.
+        VxOp::Vminfp => (vminfp(mode, a, b), false),
+
         VxOp::Vaddfp
         | VxOp::Vsubfp
         | VxOp::Vrefp
@@ -336,9 +344,7 @@ pub(crate) fn execute_vx(
         | VxOp::Vrfip
         | VxOp::Vrfim
         | VxOp::Vctuxs
-        | VxOp::Vctsxs
-        | VxOp::Vmaxfp
-        | VxOp::Vminfp => {
+        | VxOp::Vctsxs => {
             return ExecuteVerdict::Fault(unimplemented);
         }
     };

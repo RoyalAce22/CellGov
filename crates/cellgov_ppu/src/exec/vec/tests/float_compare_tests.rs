@@ -81,7 +81,7 @@ fn magnitude_order((m1, e1): (u64, i32), (m2, e2): (u64, i32)) -> Ordering {
 }
 
 /// The order of two binary32 words, or `None` when either is a NaN.
-fn order(x: u32, y: u32, nj: bool) -> Option<Ordering> {
+pub(super) fn order(x: u32, y: u32, nj: bool) -> Option<Ordering> {
     let (sx, mx, ex) = decode(x, nj)?;
     let (sy, my, ey) = decode(y, nj)?;
     let signed = |negative: bool, ord: Ordering| if negative { ord.reverse() } else { ord };
@@ -115,7 +115,7 @@ fn reference(op: VxOp, nj: bool, x: u32, y: u32) -> u32 {
 /// Binary32 classes in both signs: zero, the smallest and largest
 /// denormal, the smallest normal, 1.0, 1.5, the largest finite, infinity,
 /// a QNaN and an SNaN.
-fn classes() -> Vec<u32> {
+pub(super) fn classes() -> Vec<u32> {
     [
         0x0000_0000,
         0x0000_0001,
