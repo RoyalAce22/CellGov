@@ -44,6 +44,7 @@ pub struct ExecutionContext<'a> {
     mailbox_read: Option<&'a core::cell::Cell<bool>>,
     ppe_siblings: u32,
     ppe_sibling_pressure: PpeIssuePressure,
+    ppe_older_sibling: bool,
 }
 
 /// The queued MFC commands of one unit that a new command of the unit
@@ -94,6 +95,7 @@ impl<'a> ExecutionContext<'a> {
             mailbox_read: None,
             ppe_siblings: 0,
             ppe_sibling_pressure: PpeIssuePressure::NONE,
+            ppe_older_sibling: false,
         }
     }
 
@@ -120,6 +122,7 @@ impl<'a> ExecutionContext<'a> {
             mailbox_read: None,
             ppe_siblings: 0,
             ppe_sibling_pressure: PpeIssuePressure::NONE,
+            ppe_older_sibling: false,
         }
     }
 
@@ -148,6 +151,7 @@ impl<'a> ExecutionContext<'a> {
             mailbox_read: None,
             ppe_siblings: 0,
             ppe_sibling_pressure: PpeIssuePressure::NONE,
+            ppe_older_sibling: false,
         }
     }
 
@@ -180,6 +184,7 @@ impl<'a> ExecutionContext<'a> {
             mailbox_read: None,
             ppe_siblings: 0,
             ppe_sibling_pressure: PpeIssuePressure::NONE,
+            ppe_older_sibling: false,
         }
     }
 
@@ -328,6 +333,23 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn ppe_sibling_pressure(&self) -> PpeIssuePressure {
         self.ppe_sibling_pressure
+    }
+
+    /// Record whether a PPE thread created before this unit is runnable
+    /// at the start of the step.
+    #[inline]
+    pub const fn with_ppe_older_sibling(self, older: bool) -> Self {
+        Self {
+            ppe_older_sibling: older,
+            ..self
+        }
+    }
+
+    /// Whether a PPE thread created before this unit is runnable at the
+    /// start of the step. False for a unit that is not a PPE thread.
+    #[inline]
+    pub const fn ppe_older_sibling(&self) -> bool {
+        self.ppe_older_sibling
     }
 
     /// The messages waiting in the unit's own inbound mailbox at the

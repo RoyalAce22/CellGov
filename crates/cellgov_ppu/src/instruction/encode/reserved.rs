@@ -134,6 +134,8 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         | I::Mflr { .. }
         | I::Mfctr { .. }
         | I::Mfvrsave { .. }
+        | I::Mfctrl { .. }
+        | I::Mfsprg3 { .. }
         | I::Mftb { .. }
         | I::Mftbu { .. }
         | I::Mtxer { .. }

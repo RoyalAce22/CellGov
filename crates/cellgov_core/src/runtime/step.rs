@@ -125,7 +125,8 @@ impl Runtime {
         let mut runnable = std::mem::take(&mut self.runnable_buf);
         runnable.clear();
         runnable.extend(self.registry.runnable_ids());
-        let (ppe_siblings, ppe_sibling_pressure) = self.ppe_siblings(unit_id, &runnable);
+        let (ppe_siblings, ppe_sibling_pressure, ppe_older_sibling) =
+            self.ppe_siblings(unit_id, &runnable);
         let ppe_pressure = self
             .registry
             .get(unit_id)
@@ -201,7 +202,8 @@ impl Runtime {
                 .with_inbound_mailbox(&inbound_mailbox)
                 .with_mailbox_read_flag(&mailbox_read)
                 .with_ppe_siblings(ppe_siblings)
-                .with_ppe_sibling_pressure(ppe_sibling_pressure);
+                .with_ppe_sibling_pressure(ppe_sibling_pressure)
+                .with_ppe_older_sibling(ppe_older_sibling);
             let unit = self
                 .registry
                 .get_mut(unit_id)
@@ -429,8 +431,9 @@ impl Runtime {
     }
 
     /// The number of PPE threads other than `unit` in the runnable set
-    /// the step starts from, and the largest issue pressure among them;
-    /// both zero when `unit` is not a PPE thread.
+    /// the step starts from, the largest issue pressure among them, and
+    /// whether one of them was created before `unit`; zero, `NONE` and
+    /// `false` when `unit` is not a PPE thread.
     ///
     /// [CBE-Handbook p:754 s:A.6.1] the threads take dispatch in turn, a
     /// thread every other cycle.
@@ -450,13 +453,14 @@ impl Runtime {
         &self,
         unit: UnitId,
         runnable: &[UnitId],
-    ) -> (u32, cellgov_exec::PpeIssuePressure) {
+    ) -> (u32, cellgov_exec::PpeIssuePressure, bool) {
         let ppe = |id: UnitId| self.registry.get(id).filter(|u| u.shares_ppe_issue());
         if ppe(unit).is_none() {
-            return (0, cellgov_exec::PpeIssuePressure::NONE);
+            return (0, cellgov_exec::PpeIssuePressure::NONE, false);
         }
         let mut others = 0u32;
         let mut pressure = cellgov_exec::PpeIssuePressure::NONE;
+        let mut older = false;
         for &id in runnable.iter().filter(|&&id| id != unit) {
             let Some(sibling) = ppe(id) else {
                 continue;
@@ -466,10 +470,12 @@ impl Runtime {
             // Units take ids in the order they are created.
             if id > unit {
                 p.issue_interval = 0;
+            } else {
+                older = true;
             }
             pressure = pressure.max(p);
         }
-        (others, pressure)
+        (others, pressure, older)
     }
 
     /// Empty every record a step and its commit publish about that step,
@@ -538,6 +544,10 @@ impl RetiredState {
 #[cfg(test)]
 #[path = "tests/ppe_order_tests.rs"]
 mod ppe_order_tests;
+
+#[cfg(test)]
+#[path = "tests/ppe_older_sibling_tests.rs"]
+mod ppe_older_sibling_tests;
 
 #[cfg(test)]
 #[path = "tests/time_overflow_tests.rs"]

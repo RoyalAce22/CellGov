@@ -15,28 +15,6 @@ fn unknown_primary_reports_encoding_not_recognized() {
     }
 }
 
-#[test]
-fn mfspr_with_unsupported_spr_reports_named_spr_locator() {
-    // SPR 136 is CTRL, a user SPR with no arm yet. The `ra` slot holds
-    // its low half (8) and the `rb` slot its high half (4); see
-    // `crate::instruction::spr_number`.
-    let raw: u32 = (31u32 << 26) | (3u32 << 21) | (8u32 << 16) | (4u32 << 11) | (339u32 << 1);
-    let err = decode(raw).unwrap_err();
-    match err {
-        PpuDecodeError::DecoderArmUnimplemented {
-            locator: Locator::Spr { op_mnemonic, spr },
-            mnemonic,
-            ..
-        } => {
-            assert_eq!(op_mnemonic, "mfspr");
-            assert_eq!(spr, 136);
-            assert_eq!(mnemonic, "mfctrl");
-        }
-        other => panic!("expected DecoderArmUnimplemented (Spr), got {other:?}"),
-    }
-    assert_eq!(err.to_string(), "missing mfctrl (mfspr, SPR 136)");
-}
-
 /// Synthesize a raw 32-bit word that should hit `(primary, xo)`
 /// in the appropriate decoder path, respecting the form's bit
 /// placement. The bottom of this file holds the per-form

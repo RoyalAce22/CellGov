@@ -177,6 +177,8 @@ impl PpuInstruction {
             | PpuInstruction::Mfxer { .. }
             | PpuInstruction::Mtxer { .. }
             | PpuInstruction::Mfvrsave { .. }
+            | PpuInstruction::Mfctrl { .. }
+            | PpuInstruction::Mfsprg3 { .. }
             | PpuInstruction::Mtvrsave { .. }
             | PpuInstruction::Rlwinm { .. }
             | PpuInstruction::Rlwimi { .. }

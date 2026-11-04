@@ -221,20 +221,19 @@ fn mfspr_268_and_269_run_on_the_console_and_read_the_time_base_in_cellgov() {
 }
 
 #[test]
-fn ctrl_and_sprg3_reads_run_on_the_console_and_cellgov_does_not_decode_them_yet() {
-    for (name, value) in [
-        ("ppu_may_trap_mfspr136", 0x4040_0000u64),
-        ("ppu_may_trap_mfspr259", 0),
+fn ctrl_and_sprg3_reads_match_the_console() {
+    for (name, read) in [
+        ("ppu_may_trap_mfspr136", PpuInstruction::Mfctrl { rt: 5 }),
+        ("ppu_may_trap_mfspr259", PpuInstruction::Mfsprg3 { rt: 5 }),
     ] {
-        let (cellgov, console, _) = probe(name);
+        let (_, console, word) = probe(name);
         let Capture::Done(runs) = console else {
             panic!("{name}: the console ended the run");
         };
-        assert_eq!(runs[0][0].slots[0], value, "{name}: run 1");
-        assert_eq!(runs[0][1].slots[0], value, "{name}: run 2");
-        assert!(
-            matches!(cellgov, Err(CaseOutcome::DecodeError(_))),
-            "{name} decodes now: compare it with the console: {cellgov:?}"
-        );
+        assert_eq!(decode(word), Ok(read), "{name}");
+        let cellgov = cellgov_after(&table(name)[0], 0).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        for run in &runs[0] {
+            assert_eq!(run.slots[0], cellgov.gpr[5], "{name}");
+        }
     }
 }

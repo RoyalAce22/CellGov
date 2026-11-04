@@ -28,3 +28,5 @@ mod shift_rotate;
 mod spr_trap;
 #[path = "trap_immediate_tests.rs"]
 mod trap_immediate;
+#[path = "user_spr_read_tests.rs"]
+mod user_spr_read;

@@ -2,6 +2,8 @@
 //! Every arm here is a pure register-to-register or register-to-CR
 //! operation; nothing in this module touches memory or emits effects.
 
+use cellgov_ps3_abi::hw::ppu_spr::PS3_PROCESS_SPRG3;
+
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
 use crate::state::{cmp_cr_field, PpuState};
@@ -675,6 +677,17 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         PpuInstruction::Mfvrsave { rt } => {
             state.mfvrsave_executed = state.mfvrsave_executed.wrapping_add(1);
             state.set_gpr(rt as usize, u64::from(state.vrsave()));
+            ExecuteVerdict::Continue
+        }
+        // CTRL names the reading hardware thread; the unit sets it from the
+        // PPE placement for each batch. SPRG3 reads as the reference console
+        // reads it from a process's main thread.
+        PpuInstruction::Mfctrl { rt } => {
+            state.set_gpr(rt as usize, u64::from(state.ctrl));
+            ExecuteVerdict::Continue
+        }
+        PpuInstruction::Mfsprg3 { rt } => {
+            state.set_gpr(rt as usize, PS3_PROCESS_SPRG3);
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] mtvrsave:

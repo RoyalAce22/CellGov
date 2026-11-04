@@ -20,13 +20,13 @@ fn reparse(artifact: &DecodeCensusArtifact) -> Result<DecodeCensusArtifact, Deco
 }
 
 #[test]
-fn classify_separates_the_canonical_reserved_alias_gap_and_unknown_words() {
+fn classify_separates_the_canonical_reserved_alias_and_unknown_words() {
     assert_eq!(classify(NOP), WordClass::Canonical);
     assert_eq!(classify(MFLR_R0_WITH_RC), WordClass::ReservedBits);
     assert_eq!(classify(MFSPR_R3_TBL), WordClass::Alias);
     assert_eq!(classify(SYNC), WordClass::Canonical);
     assert_eq!(classify(MFSPR_R3_DSISR), WordClass::Canonical);
-    assert_eq!(classify(MFSPR_R3_CTRL), WordClass::ArmUnimplemented);
+    assert_eq!(classify(MFSPR_R3_CTRL), WordClass::Canonical);
     assert_eq!(classify(0), WordClass::NotRecognized);
     assert_eq!(classify(1 << 26), WordClass::NotRecognized);
     // Every bit set is fnmadd. f31,f31,f31,f31 with Rc, a valid A-form word.
@@ -40,7 +40,7 @@ fn a_rejection_whose_mnemonic_the_gap_tables_do_not_carry_is_unlisted() {
             op_mnemonic: "mfspr",
             spr: 136
         }),
-        Some("mfctrl")
+        None
     );
     assert_eq!(
         gap_mnemonic(Locator::Spr {

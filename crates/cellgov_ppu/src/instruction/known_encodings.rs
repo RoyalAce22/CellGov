@@ -105,16 +105,7 @@ pub const OPCODE_GAPS: &[OpcodeGap] = &[];
 /// because it decodes to the instruction the PPE refuses.
 ///
 /// Sorted by `spr`; [`spr_gap`] is a binary search.
-pub const MFSPR_GAPS: &[SprGap] = &[
-    SprGap {
-        spr: 136,
-        mnemonic: "mfctrl",
-    },
-    SprGap {
-        spr: 259,
-        mnemonic: "mfsprg3",
-    },
-];
+pub const MFSPR_GAPS: &[SprGap] = &[];
 
 /// Table 2 (`mftb` direction). Currently empty: the only defined
 /// TBRs (268 TB, 269 TBU) are already implemented; any other

@@ -518,6 +518,8 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
         | I::Mfxer { .. }
         | I::Mtxer { .. }
         | I::Mfvrsave { .. }
+        | I::Mfctrl { .. }
+        | I::Mfsprg3 { .. }
         | I::Mtvrsave { .. }
         | I::Rlwinm { .. }
         | I::Rlwimi { .. }

@@ -422,6 +422,8 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::Mfxer
         | PpuInstructionKind::Mtxer
         | PpuInstructionKind::Mfvrsave
+        | PpuInstructionKind::Mfctrl
+        | PpuInstructionKind::Mfsprg3
         | PpuInstructionKind::Mtvrsave
         | PpuInstructionKind::Rlwinm
         | PpuInstructionKind::Rlwimi

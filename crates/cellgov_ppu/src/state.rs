@@ -3,6 +3,7 @@
 use cellgov_ps3_abi::hw::ppu::{
     FPR_COUNT, GPR_COUNT, PPU_THREAD_ENTRY_VSCR, VR_COUNT, VSCR_DEFINED_BITS, VSCR_SAT,
 };
+use cellgov_ps3_abi::hw::ppu_spr::PS3_PROCESS_CTRL;
 use cellgov_sync::ReservedLine;
 
 use crate::multilinear::{
@@ -171,6 +172,9 @@ pub struct PpuState {
     /// Instrument counter (hash-excluded): `dcbz` execution witness
     /// for the RSX-MMIO-window `debug_assert!`.
     pub dcbz_executed: u64,
+    /// The CTRL value an `mfspr 136` returns (hash-excluded): the unit
+    /// sets it from the PPE placement at the start of each batch.
+    pub ctrl: u32,
     /// Time base register.
     ///
     /// [PPC-Book2 p:37 s:4] Time Base (TB) is a 64-bit register, increments periodically.
@@ -242,6 +246,7 @@ impl PpuState {
             mem_fault_arm_entries: _,
             mem_fault_unmapped_routed: _,
             dcbz_executed: _,
+            ctrl: _,
             tb: _,
             reservation,
             acc: _,
@@ -284,6 +289,8 @@ impl PpuState {
             mem_fault_arm_entries: _,
             mem_fault_unmapped_routed: _,
             dcbz_executed: _,
+            // The PPE placement sets it; no guest write reaches it.
+            ctrl: _,
             tb,
             reservation,
             acc: _,
@@ -330,6 +337,7 @@ impl PpuState {
             mem_fault_arm_entries: 0,
             mem_fault_unmapped_routed: 0,
             dcbz_executed: 0,
+            ctrl: PS3_PROCESS_CTRL,
             tb: 0,
             reservation: None,
             acc: crate::multilinear::KEYS[0].wrapping_add(lane_delta(
@@ -744,6 +752,7 @@ impl Clone for PpuState {
             mem_fault_arm_entries: self.mem_fault_arm_entries,
             mem_fault_unmapped_routed: self.mem_fault_unmapped_routed,
             dcbz_executed: self.dcbz_executed,
+            ctrl: self.ctrl,
             tb: self.tb,
             reservation: self.reservation,
             acc: self.acc,

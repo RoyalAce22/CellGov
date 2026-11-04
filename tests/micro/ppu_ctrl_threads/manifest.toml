@@ -1,0 +1,20 @@
+[test]
+name = "ppu_ctrl_threads"
+
+# A hardware probe of the CTRL value (mfspr 136) that each of three PPU
+# threads reads while all three run at once on the PPE's two hardware
+# threads. Each thread records every distinct value it reads and how
+# often. The console capture is the answer; ppu/main.c's header lists the
+# payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 304 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 304 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

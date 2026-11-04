@@ -64,7 +64,7 @@ fn runtime(priorities: [Option<u32>; 2]) -> (Runtime, [UnitId; 2]) {
 /// in the runnable set.
 fn received(rt: &Runtime, ids: [UnitId; 2]) -> [u32; 2] {
     ids.map(|id| {
-        let (siblings, pressure) = rt.ppe_siblings(id, &ids);
+        let (siblings, pressure, _) = rt.ppe_siblings(id, &ids);
         assert_eq!(siblings, 1);
         pressure.issue_interval
     })

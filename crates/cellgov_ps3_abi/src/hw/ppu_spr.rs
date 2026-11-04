@@ -150,6 +150,42 @@ pub const fn spr_write_class(spr: u16) -> SprClass {
     }
 }
 
+/// CTRL CT for a read on hardware thread 0: bits 0:1 = 0b10.
+///
+/// [CBE-Handbook p:307 s:10.4.4] CTRL bits 0:1 (CT) name the reading thread, 8:9 (TE) enable the threads, 31 is RUN.
+pub const CTRL_CT_THREAD0: u32 = 0x8000_0000;
+
+/// CTRL CT for a read on hardware thread 1: bits 0:1 = 0b01.
+///
+/// [CBE-Handbook p:307 s:10.4.4] See [`CTRL_CT_THREAD0`].
+pub const CTRL_CT_THREAD1: u32 = 0x4000_0000;
+
+/// CTRL TE bit 8: hardware thread 0 is enabled.
+///
+/// [CBE-Handbook p:307 s:10.4.4] See [`CTRL_CT_THREAD0`].
+pub const CTRL_TE_THREAD0: u32 = 0x0080_0000;
+
+/// CTRL TE bit 9: hardware thread 1 is enabled.
+///
+/// [CBE-Handbook p:307 s:10.4.4] See [`CTRL_CT_THREAD0`].
+pub const CTRL_TE_THREAD1: u32 = 0x0040_0000;
+
+/// The CTRL value a PS3 process's only running thread reads: thread 1
+/// reads it, and only thread 1 is enabled.
+///
+/// The reference console reads it from `main()` in both runs of the
+/// probe `ppu_may_trap_mfspr136`. In the `ppu_ctrl_threads` capture,
+/// three concurrent threads read all four combinations of CT and TE.
+pub const PS3_PROCESS_CTRL: u32 = CTRL_CT_THREAD1 | CTRL_TE_THREAD1;
+
+/// The SPRG3 value a problem-state PS3 process reads.
+///
+/// [PPC-Book3 p:16 s:3.3.3] Problem-state software may read SPRG3; its content is the operating system's.
+///
+/// The reference console reads 0 in both runs of the probe
+/// `ppu_may_trap_mfspr259`.
+pub const PS3_PROCESS_SPRG3: u64 = 0;
+
 #[cfg(test)]
 #[path = "tests/ppu_spr_tests.rs"]
 mod tests;

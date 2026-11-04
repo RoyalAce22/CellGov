@@ -375,6 +375,7 @@ impl PpuExecutionUnit {
         // A runnable sibling shares the PPE's issue for this batch.
         self.timing
             .set_siblings(ctx.ppe_siblings(), ctx.ppe_sibling_pressure());
+        self.state.ctrl = ctrl_for_placement(ctx.ppe_siblings(), ctx.ppe_older_sibling());
     }
 
     /// The instruction at `step_pc`: the shadow's copy, or a fresh decode
@@ -547,6 +548,26 @@ impl PpuExecutionUnit {
                 self.state.mem_fault_unmapped_routed.wrapping_add(1);
         }
         result
+    }
+}
+
+/// The CTRL value a thread reads, from the number of PPE siblings that
+/// run beside it and whether one of them was created first.
+///
+/// In the `ppu_ctrl_threads` capture, TE enables both hardware threads
+/// while a sibling runs, and only the reader's own when it runs alone.
+/// CT moves with the reader between the hardware threads. CellGov gives
+/// hardware thread 1 to the thread created first, and thread 0 to the
+/// other one.
+#[inline]
+fn ctrl_for_placement(siblings: u32, older_sibling: bool) -> u32 {
+    use cellgov_ps3_abi::hw::ppu_spr::{
+        CTRL_CT_THREAD0, CTRL_CT_THREAD1, CTRL_TE_THREAD0, CTRL_TE_THREAD1, PS3_PROCESS_CTRL,
+    };
+    match (siblings, older_sibling) {
+        (0, _) => PS3_PROCESS_CTRL,
+        (_, false) => CTRL_CT_THREAD1 | CTRL_TE_THREAD0 | CTRL_TE_THREAD1,
+        (_, true) => CTRL_CT_THREAD0 | CTRL_TE_THREAD0 | CTRL_TE_THREAD1,
     }
 }
 

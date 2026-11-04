@@ -37,30 +37,24 @@ fn stub_variants_counted_separately_from_accepted() {
     assert_eq!(report.words_rejected, 0);
 }
 
-/// `mfspr r3, 136`, the CTRL read: a user SPR with no arm yet.
-const MFCTRL: u32 = (31u32 << 26) | (3u32 << 21) | (8u32 << 16) | (4u32 << 11) | (339u32 << 1);
-
 #[test]
-fn mfctrl_appears_named_in_gap_report() {
-    let report = scan_words([MFCTRL, MFCTRL, MFCTRL].iter().copied());
-    assert_eq!(report.words_rejected, 3);
-    assert_eq!(report.gaps.len(), 1);
-    let gap = &report.gaps[0];
-    assert_eq!(gap.occurrences, 3);
-    let text = gap.error.to_string();
-    assert_eq!(text, "missing mfctrl (mfspr, SPR 136)");
-    assert!(!text.contains("p:TBD"));
-    assert!(!text.contains("PPC-Book"));
-}
-
-#[test]
-fn distinct_spr_gaps_dedupe_separately() {
-    let mfsprg3: u32 = (31u32 << 26) | (3u32 << 21) | (3u32 << 16) | (8u32 << 11) | (339u32 << 1);
-    let report = scan_words([MFCTRL, mfsprg3, MFCTRL, mfsprg3].iter().copied());
-    assert_eq!(report.words_rejected, 4);
+fn distinct_rejected_words_dedupe_separately() {
+    // [PPC-Book1 p:187 s:Appendix G] Primaries 1 and 5 are illegal.
+    let (p1, p5) = (0x0400_0000u32, 0x1400_0000u32);
+    let report = scan_words([p1, p5, p1, p5, p1].iter().copied());
+    assert_eq!(report.words_rejected, 5);
     assert_eq!(report.gaps.len(), 2);
-    assert!(report.gaps[0].error.to_string().contains("mfctrl"));
-    assert!(report.gaps[1].error.to_string().contains("mfsprg3"));
+    assert_eq!(
+        report
+            .gaps
+            .iter()
+            .map(|g| (g.error, g.occurrences))
+            .collect::<Vec<_>>(),
+        vec![
+            (PpuDecodeError::EncodingNotRecognized { raw: p1 }, 3),
+            (PpuDecodeError::EncodingNotRecognized { raw: p5 }, 2),
+        ]
+    );
 }
 
 // -- ELF builder for scan_elf_text tests --
@@ -565,7 +559,7 @@ fn scan_elf_text_named_text_section_reports_section_filtered() {
 fn scan_be_bytes_handles_unaligned_trailing_bytes() {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&0x6000_0000u32.to_be_bytes());
-    bytes.extend_from_slice(&MFCTRL.to_be_bytes());
+    bytes.extend_from_slice(&PRIM1.to_be_bytes());
     bytes.extend_from_slice(&0x6000_0000u32.to_be_bytes());
     bytes.extend_from_slice(&[0x12, 0x34, 0x56]);
     let report = scan_be_bytes(&bytes);

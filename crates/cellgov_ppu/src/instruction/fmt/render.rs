@@ -434,6 +434,8 @@ pub(super) fn render(
         I::Mfxer { rt } => op(f, "mfxer", format_args!("r{rt}")),
         I::Mtxer { rs } => op(f, "mtxer", format_args!("r{rs}")),
         I::Mfvrsave { rt } => op(f, "mfvrsave", format_args!("r{rt}")),
+        I::Mfctrl { rt } => op(f, "mfctrl", format_args!("r{rt}")),
+        I::Mfsprg3 { rt } => op(f, "mfsprg3", format_args!("r{rt}")),
         I::Mtvrsave { rs } => op(f, "mtvrsave", format_args!("r{rs}")),
 
         // -- Rotates --

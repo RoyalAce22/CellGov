@@ -1051,7 +1051,7 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         I::Mtxer { rs } => one(Op::on(unit::FXU)
             .src(gpr(rs))
             .dst(XER, k::PPU_FX_LATENCY_CYCLES)),
-        I::Mfvrsave { rt } => one(fx(gpr(rt))),
+        I::Mfvrsave { rt } | I::Mfctrl { rt } | I::Mfsprg3 { rt } => one(fx(gpr(rt))),
         I::Mtvrsave { rs } => one(Op::on(unit::FXU).src(gpr(rs))),
         I::Rlwinm { ra, rs, rc, .. }
         | I::Rldicl { ra, rs, rc, .. }

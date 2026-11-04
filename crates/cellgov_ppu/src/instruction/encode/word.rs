@@ -542,6 +542,8 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         I::Mflr { rt: t } => xfx_spr(t, 8, 339),
         I::Mfctr { rt: t } => xfx_spr(t, 9, 339),
         I::Mfvrsave { rt: t } => xfx_spr(t, 256, 339),
+        I::Mfctrl { rt: t } => xfx_spr(t, 136, 339),
+        I::Mfsprg3 { rt: t } => xfx_spr(t, 259, 339),
         // [PPC-Book2 p:30 s:4.2 Reading the Time Base] mftb is the canonical spelling of TBR 268 and 269.
         I::Mftb { rt: t } => xfx_spr(t, 268, 371),
         I::Mftbu { rt: t } => xfx_spr(t, 269, 371),

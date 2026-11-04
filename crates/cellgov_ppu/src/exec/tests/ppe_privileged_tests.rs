@@ -119,10 +119,10 @@ fn every_spr_number_decodes_by_its_class_in_both_directions() {
             }
         }
     }
-    // XER, LR, CTR, VRSAVE, TB and TBU read; XER, LR, CTR and VRSAVE write.
-    assert_eq!(user, [6, 4]);
-    // The CTRL read and the SPRG3 read alias still want an arm.
-    assert_eq!(gaps, 2);
+    // XER, LR, CTR, CTRL, VRSAVE, the SPRG3 alias, TB and TBU read;
+    // XER, LR, CTR and VRSAVE write.
+    assert_eq!(user, [8, 4]);
+    assert_eq!(gaps, 0);
 }
 
 #[test]

@@ -918,13 +918,12 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                 1 => Ok(PpuInstruction::Mfxer { rt }),
                 8 => Ok(PpuInstruction::Mflr { rt }),
                 9 => Ok(PpuInstruction::Mfctr { rt }),
-                // [PPC-Book2 p:30 s:4.2 Reading the Time Base] mfspr
-                // RT, 268/269 is the equivalent of mftb / mftbu;
-                // Power ISA defines them as alternate spellings of
-                // the same TB read. Cell PPE supports both. Route
-                // SPR 268/269 here so a producer that emits the
-                // mfspr spelling decodes correctly rather than
-                // surfacing as a spurious EncodingNotRecognized.
+                // [PPC-Book3 p:17 s:3.3.4] CTRL; [PPC-Book3 p:16 s:3.3.3] the SPRG3 read alias.
+                136 => Ok(PpuInstruction::Mfctrl { rt }),
+                259 => Ok(PpuInstruction::Mfsprg3 { rt }),
+                // [PPC-Book2 p:30 s:4.1] mftb names the time base as TBR 268 and 269; the
+                // v2.02 mfspr table does not list them. The reference console runs
+                // mfspr 268 and 269 as mftb and mftbu (probes ppu_may_trap_mfspr268, _269).
                 268 => Ok(PpuInstruction::Mftb { rt }),
                 269 => Ok(PpuInstruction::Mftbu { rt }),
                 // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] VRSAVE

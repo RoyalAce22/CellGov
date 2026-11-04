@@ -1048,6 +1048,18 @@ pub enum PpuInstruction {
     Mtvrsave {
         rs: u8,
     },
+    /// Move From CTRL (`mfspr rT, 136`).
+    ///
+    /// [PPC-Book3 p:17 s:3.3.4] Problem-state software may read CTRL.
+    Mfctrl {
+        rt: u8,
+    },
+    /// Move From SPRG3 (`mfspr rT, 259`).
+    ///
+    /// [PPC-Book3 p:16 s:3.3.3] Problem-state software may copy SPRG3 to a GPR.
+    Mfsprg3 {
+        rt: u8,
+    },
 
     // -- Rotate/shift (subset) --
     // [PPC-Book1 p:73 s:3.3.12.1 Fixed-Point Rotate Instructions] rlwinm / rlwnm M-form (32-bit rotate w/ mask); rlwimi at p:72.

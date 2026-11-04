@@ -112,12 +112,12 @@ fn unknown_opcode_returns_none() {
 }
 
 #[test]
-fn spr_136_is_a_read_gap_and_no_write_gap() {
-    // CTRL reads at 136 and writes at 152, so the lookup is
-    // direction-keyed.
-    let read = spr_gap(SprDirection::MfSpr, 136).expect("mfctrl must be present");
-    assert_eq!(read.mnemonic, "mfctrl");
-    assert!(spr_gap(SprDirection::MtSpr, 136).is_none());
+fn every_user_spr_read_and_write_decodes() {
+    assert!(MFSPR_GAPS.is_empty());
+    assert!(MTSPR_GAPS.is_empty());
+    for spr in [136, 259] {
+        assert!(spr_gap(SprDirection::MfSpr, spr).is_none(), "{spr}");
+    }
 }
 
 #[test]
