@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "capture_id": "micro:ppu_may_trap_mcrxr#d77f38ff265d",
-  "captured_at": "2026-10-25T03:59:45Z",
+  "captured_at": "2026-10-31T16:53:48Z",
   "console": {
     "profile": "cech20-cex-493",
     "model": "CECH-2001A",
@@ -13,8 +13,8 @@
     "debugger_attached": false,
     "load_at_start": {
       "cpu_c": 67,
-      "rsx_c": 61,
-      "fan_percent": 38
+      "rsx_c": 60,
+      "fan_percent": 43
     }
   },
   "transport": {
@@ -22,14 +22,14 @@
   },
   "harness": {
     "runner": "runner_ps3",
-    "revision": "3153da7af5c78bb71ea45dd06bb31c73cb499af8",
-    "link": "https://github.com/RoyalAce22/CellGov/commit/3153da7af5c78bb71ea45dd06bb31c73cb499af8"
+    "revision": "7ce1b66cfbc23be628884b94a29128d58dba8930",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/7ce1b66cfbc23be628884b94a29128d58dba8930"
   },
   "microtest": {
     "name": "ppu_may_trap_mcrxr",
     "manifest_sha256": "480d51f56076e7244ff7e6bdc35e18413a0173d86868ec28b2fad51f127f8fea",
     "sources": {
-      "../common/cgov_cases.h": "720934cedafeaca58f41b1bfbfbfa46376590324a8b1b032184a2f3e7d57abcf",
+      "../common/cgov_cases.h": "2cc9df4e06e27071ec36fd32a33acdec781c8ed863f2871ccc1b31e8b30b3f78",
       "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
       "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
       "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
@@ -46,7 +46,7 @@
     }
   },
   "artifacts": {
-    "eboot_sha256": "e20668a9bfc80a61978de4e8cacb7f12234441ad771f233c87c7c58ddc08bb23",
+    "eboot_sha256": "254b4df3eb30c3f851274cc2b0b9bbef3b1fca62d6dafba9898f0691faccd5d5",
     "ps3_elf_sha256": "899fa9f3f384dffff823d25d1716b820d1b5e88de9c6dd1d0eb9f44b412337fe",
     "reference_elf_sha256": "4cdfaca88031b1f41f232dcb9034a0ba64df1f1a8afbd3037eb74170d2fc9dcf",
     "siblings": {},
@@ -59,5 +59,5 @@
     "result_path": "/dev_hdd0/tmp/cgov_ppu_may_trap_mcrxr.bin"
   },
   "digest": "d77f38ff265d23696ee2566058526d2e0222530295f4aed9505395ebf924d35f  micro:ppu_may_trap_mcrxr  152",
-  "recapture_reason": null
+  "recapture_reason": "the case driver's frame-header comment now says word 3 holds the memory buffer address, which changes the cgov_cases.h source hash"
 }
