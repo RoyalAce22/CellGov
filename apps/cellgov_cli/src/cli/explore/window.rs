@@ -6,15 +6,15 @@
 //! refusal.
 
 use cellgov_boot::manifest::CheckpointTrigger;
-use cellgov_boot::step_loop::rsx_checkpoint_addr;
+use cellgov_boot::step_loop::{rsx_checkpoint_addr, rsx_reserved_write};
 use cellgov_effects::FaultKind;
 use cellgov_explore::{DrivenStop, StopReason, WindowNeverOpened, WindowStart};
 
 /// The refusal line for a window that never opened, under the cell
 /// whose anchor stops the boot at `checkpoint`.
 ///
-/// A `first-rsx-write` checkpoint arrives as a refused commit; see
-/// [`rsx_checkpoint_addr`].
+/// A `first-rsx-write` checkpoint arrives as a refused store or
+/// commit; see [`rsx_reserved_write`].
 pub(super) fn never_opened(e: &WindowNeverOpened, checkpoint: CheckpointTrigger) -> String {
     format!(
         "explore title: the window never opened at {}: {}",
@@ -24,15 +24,18 @@ pub(super) fn never_opened(e: &WindowNeverOpened, checkpoint: CheckpointTrigger)
 }
 
 fn detail(e: &WindowNeverOpened, checkpoint: CheckpointTrigger) -> String {
-    if let StopReason::CommitError(err) = e.stop.reason {
-        if let Some(addr) = rsx_checkpoint_addr(checkpoint, err) {
-            return format!(
-                "after {} step(s) the boot reached the cell's {} checkpoint at \
-                 0x{addr:08x}, which is where it stops. Open the window earlier.",
-                e.steps,
-                checkpoint.as_cli_str(),
-            );
-        }
+    let checkpoint_addr = match e.stop.reason {
+        StopReason::CommitError(err) => rsx_checkpoint_addr(checkpoint, err),
+        StopReason::ReservedStore { addr, region } => rsx_reserved_write(checkpoint, addr, region),
+        _ => None,
+    };
+    if let Some(addr) = checkpoint_addr {
+        return format!(
+            "after {} step(s) the boot reached the cell's {} checkpoint at \
+             0x{addr:08x}, which is where it stops. Open the window earlier.",
+            e.steps,
+            checkpoint.as_cli_str(),
+        );
     }
     format!(
         "the boot stopped after {} step(s) -- {} ({})",

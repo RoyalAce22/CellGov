@@ -320,6 +320,8 @@ pub struct RegionView<'a> {
     pub bytes: &'a [u8],
     /// Where a read of this view is logged, if it is provisional.
     pub provisional: Option<&'a GuestMemory>,
+    /// The region's label when its access mode refuses writes.
+    pub write_refused_by: Option<&'static str>,
 }
 
 impl<'a> RegionView<'a> {
@@ -330,6 +332,7 @@ impl<'a> RegionView<'a> {
             base,
             bytes,
             provisional: None,
+            write_refused_by: None,
         }
     }
 
@@ -660,6 +663,7 @@ impl GuestMemory {
             base: r.base(),
             bytes: r.bytes(),
             provisional: (r.access() == RegionAccess::ReservedZeroReadable).then_some(self),
+            write_refused_by: (r.access() != RegionAccess::ReadWrite).then_some(r.label()),
         })
     }
 

@@ -442,7 +442,7 @@ fn run_one(
         // The pending pass is the same stop as at the top of the loop,
         // read after the commit that can make it pending; a faulted step
         // gets no decision point, like a refused commit.
-        if let Some(stop) = post_commit_stop(rt, step.result.fault) {
+        if let Some(stop) = post_commit_stop(rt, &step.result) {
             break Halt::Stopped(stop);
         }
         debug_assert_eq!(

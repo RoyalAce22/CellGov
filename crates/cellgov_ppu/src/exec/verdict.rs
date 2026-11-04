@@ -27,6 +27,12 @@ pub enum ExecuteVerdict {
     /// effective address is reachable via
     /// `MemError::Unmapped(FaultContext).addr`.
     MemFault(cellgov_mem::MemError),
+    /// A store, `dcbz` or conditional store to a byte no region holds,
+    /// or that a region refuses writes to. The error's address is the
+    /// first refused byte.
+    ///
+    /// [CBE-Handbook p:249 s:9.5.3] A data storage exception occurs when a byte a store names cannot be translated, and the interrupt is precise.
+    StoreFault(cellgov_mem::MemError),
     /// Store buffer full; caller flushes, yields, then retries the
     /// same instruction.
     BufferFull,
@@ -45,6 +51,7 @@ impl ExecuteVerdict {
             | ExecuteVerdict::Syscall { .. }
             | ExecuteVerdict::Fault(_)
             | ExecuteVerdict::MemFault(_)
+            | ExecuteVerdict::StoreFault(_)
             | ExecuteVerdict::BufferFull => false,
         }
     }

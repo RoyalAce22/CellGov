@@ -68,7 +68,7 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
         // footprint, so the relation cannot answer for the steps after
         // it. A discarded batch reached no guest state, so a faulted
         // step gets no point, as a refused commit gets none.
-        if let Some(stop) = post_commit_stop(rt, step.result.fault) {
+        if let Some(stop) = post_commit_stop(rt, &step.result) {
             break stop;
         }
         log.push(DecisionPoint {

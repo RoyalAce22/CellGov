@@ -81,7 +81,11 @@ pub enum PpuObservedOutcome {
 impl PpuObservedOutcome {
     fn discards_batch(&self) -> bool {
         match self {
-            Self::Execution(ExecuteVerdict::Fault(_) | ExecuteVerdict::MemFault(_)) => true,
+            Self::Execution(
+                ExecuteVerdict::Fault(_)
+                | ExecuteVerdict::MemFault(_)
+                | ExecuteVerdict::StoreFault(_),
+            ) => true,
             Self::Execution(
                 ExecuteVerdict::Continue
                 | ExecuteVerdict::Branch

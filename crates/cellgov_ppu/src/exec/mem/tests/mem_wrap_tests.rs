@@ -9,7 +9,7 @@ const TOP_LINE: u64 = 0xFFFF_FFFF_FFFF_FF80;
 
 fn fault_addr(verdict: &ExecuteVerdict) -> Option<u64> {
     match verdict {
-        ExecuteVerdict::MemFault(MemError::Unmapped(context)) => Some(context.addr),
+        ExecuteVerdict::StoreFault(MemError::Unmapped(context)) => Some(context.addr),
         _ => None,
     }
 }
@@ -31,10 +31,11 @@ fn a_dcbz_whose_block_ends_past_the_address_space_faults_as_unmapped() {
         &mut effects,
         &mut store_buf,
     );
-    assert_eq!(fault_addr(&v), Some(0xFFFF_FFFF_FFFF_FFF8), "{v:?}");
-    // The dcbz staged the fifteen doublewords below the last one, then
-    // faulted. The runtime's fault discard clears them with the batch.
-    assert_eq!(store_buf.len(), 15);
+    assert_eq!(fault_addr(&v), Some(TOP_LINE), "{v:?}");
+    assert!(
+        store_buf.is_empty(),
+        "the block is checked before any part is staged"
+    );
 }
 
 #[test]
@@ -64,7 +65,7 @@ fn a_word_store_at_the_last_bytes_of_the_address_space_faults_as_unmapped() {
 }
 
 #[test]
-fn a_vector_store_on_the_last_line_stages_its_first_half_then_faults() {
+fn a_vector_store_on_the_last_line_faults_with_nothing_staged() {
     let mut s = PpuState::new();
     s.set_gpr(1, 0xFFFF_FFFF_FFFF_FFF0);
     s.set_gpr(2, 0);
@@ -85,6 +86,6 @@ fn a_vector_store_on_the_last_line_stages_its_first_half_then_faults() {
         &mut effects,
         &mut store_buf,
     );
-    assert_eq!(fault_addr(&v), Some(0xFFFF_FFFF_FFFF_FFF8), "{v:?}");
-    assert_eq!(store_buf.len(), 1);
+    assert_eq!(fault_addr(&v), Some(0xFFFF_FFFF_FFFF_FFF0), "{v:?}");
+    assert!(store_buf.is_empty());
 }

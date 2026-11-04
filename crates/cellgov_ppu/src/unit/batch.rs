@@ -35,8 +35,9 @@ enum FaultExit {
     Code(u32),
     /// A fault the instruction reported.
     Verdict(PpuFault),
-    /// A memory fault the instruction reported.
-    Mem(cellgov_mem::MemError),
+    /// A memory fault the instruction reported, and whether its access
+    /// was a store.
+    Mem(cellgov_mem::MemError, bool),
 }
 
 /// The tap a unit with none installed runs its batch loop with.
@@ -227,7 +228,8 @@ impl PpuExecutionUnit {
                     };
                 }
                 ExecuteVerdict::Fault(f) => Some(FaultExit::Verdict(f)),
-                ExecuteVerdict::MemFault(e) => Some(FaultExit::Mem(e)),
+                ExecuteVerdict::MemFault(e) => Some(FaultExit::Mem(e, false)),
+                ExecuteVerdict::StoreFault(e) => Some(FaultExit::Mem(e, true)),
                 ExecuteVerdict::BufferFull => {
                     // PC stays at the failing store; retries next step.
                     // Break skips count retirements, and nothing retired,
@@ -336,7 +338,7 @@ impl PpuExecutionUnit {
         match exit {
             FaultExit::Code(code) => self.fault_at(entry, effects, step_pc, code),
             FaultExit::Verdict(f) => self.fault_verdict_yield(entry, effects, step_pc, f),
-            FaultExit::Mem(e) => self.mem_fault_yield(entry, effects, step_pc, e),
+            FaultExit::Mem(e, store) => self.mem_fault_yield(entry, effects, step_pc, e, store),
         }
     }
 
@@ -522,19 +524,19 @@ impl PpuExecutionUnit {
         effects: &mut Vec<Effect>,
         step_pc: u64,
         e: cellgov_mem::MemError,
+        store: bool,
     ) -> ExecutionStepResult {
-        let (ea, unmapped) = match &e {
-            cellgov_mem::MemError::Unmapped(ctx) => (ctx.addr, true),
-            // Only Unmapped is reachable on this path.
+        let (ea, refused_by, unmapped) = match &e {
+            cellgov_mem::MemError::Unmapped(ctx) => (ctx.addr, None, true),
+            cellgov_mem::MemError::ReservedWrite { addr, region } => (*addr, Some(*region), false),
+            // A load or store refusal is one of the two above.
             _ => {
-                debug_assert!(
-                    false,
-                    "ExecuteVerdict::MemFault carrying non-Unmapped MemError: {e:?}"
-                );
-                (0, false)
+                debug_assert!(false, "a memory fault carrying {e:?}");
+                (0, None, false)
             }
         };
-        let diag = self.fault_diag_ea(step_pc, ea);
+        let mut diag = self.fault_diag_ea(step_pc, ea);
+        diag.data_access = Some(cellgov_exec::DataAccessFault { store, refused_by });
         let result = self.fault_yield(entry, effects, diag, FAULT_INVALID_ADDRESS);
         // Incremented after the rollback: the counters are
         // hash-excluded instruments, and restoring the entry

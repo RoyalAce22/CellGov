@@ -52,6 +52,17 @@ pub enum StopReason {
     /// The faulted unit leaves the runnable set, so a run that went on
     /// past the fault would report a stall two steps later.
     Faulted(FaultKind),
+    /// A unit stored to a region whose access refuses writes, and the
+    /// commit discarded its batch.
+    ///
+    /// Such a region stands for memory the model does not hold, so the
+    /// stop is the model declining the write.
+    ReservedStore {
+        /// The first refused byte.
+        addr: u64,
+        /// The label of the refusing region.
+        region: &'static str,
+    },
 }
 
 /// What a [`StopReason`] says about the run that reported it.
@@ -112,7 +123,8 @@ impl StopReason {
             }
             // Guest time reaching u64::MAX is no cap anyone can raise.
             Self::StepError(StepError::TimeOverflow | StepError::SchedulerNotReinstalled)
-            | Self::CommitError(_) => StopClass::Refusal,
+            | Self::CommitError(_)
+            | Self::ReservedStore { .. } => StopClass::Refusal,
             // The driver read the records out of turn.
             Self::StaleObservations(_) => StopClass::Refusal,
             Self::Faulted(_) => StopClass::Fault,
@@ -131,17 +143,31 @@ impl StopReason {
 }
 
 /// The stop a committed step ends the run with, if any: a staged
-/// child-init pass, then a fault.
+/// child-init pass, then a refused store or a fault.
 ///
 /// A caller checks the commit refusal first. The pending pass outranks
 /// the fault for the same reason the refusal does, as the boot's own
 /// step loop ranks them. The commit discards a faulted batch and counts
 /// it, so the fault read comes after the commit.
-pub(crate) fn post_commit_stop(rt: &Runtime, fault: Option<FaultKind>) -> Option<StopReason> {
+pub(crate) fn post_commit_stop(
+    rt: &Runtime,
+    result: &cellgov_exec::ExecutionStepResult,
+) -> Option<StopReason> {
     if rt.has_pending_child_init() {
         return Some(StopReason::ChildInitUnserved);
     }
-    fault.map(StopReason::Faulted)
+    let fault = result.fault?;
+    let diag = &result.local_diagnostics;
+    match (diag.data_access, diag.faulting_ea) {
+        (
+            Some(cellgov_exec::DataAccessFault {
+                store: true,
+                refused_by: Some(region),
+            }),
+            Some(addr),
+        ) => Some(StopReason::ReservedStore { addr, region }),
+        _ => Some(StopReason::Faulted(fault)),
+    }
 }
 
 impl std::fmt::Display for StopReason {
@@ -158,6 +184,12 @@ impl std::fmt::Display for StopReason {
             Self::CommitError(e) => write!(f, "commit refused: {e}"),
             Self::StaleObservations(e) => write!(f, "footprint refused: {e}"),
             Self::Faulted(kind) => write!(f, "unit faulted: {kind:?}"),
+            Self::ReservedStore { addr, region } => {
+                write!(
+                    f,
+                    "store refused: 0x{addr:016x} is in reserved region {region}"
+                )
+            }
         }
     }
 }
@@ -194,7 +226,7 @@ fn take_step(rt: &mut Runtime) -> Result<Option<u64>, DrivenStop> {
     if let Err(e) = rt.commit_step(&mut step) {
         return Err(stop(StopReason::CommitError(e)));
     }
-    if let Some(reason) = post_commit_stop(rt, step.result.fault) {
+    if let Some(reason) = post_commit_stop(rt, &step.result) {
         return Err(stop(reason));
     }
     Ok(pc)
@@ -395,3 +427,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/open_window_tests.rs"]
 mod open_window_tests;
+
+#[cfg(test)]
+#[path = "tests/post_commit_stop_tests.rs"]
+mod post_commit_stop_tests;

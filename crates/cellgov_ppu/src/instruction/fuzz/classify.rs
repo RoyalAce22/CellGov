@@ -21,7 +21,8 @@ const CONTINUE: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue];
 const FAULT: &[PpuOutcomeClass] = &[PpuOutcomeClass::Fault];
 const CONTINUE_OR_FAULT: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue, PpuOutcomeClass::Fault];
 const LOAD: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue, PpuOutcomeClass::MemoryFault];
-// A store whose last byte passes 2^64 faults at execute.
+// A store to a byte no region holds, or that a region refuses,
+// faults at execute.
 const STORE: &[PpuOutcomeClass] = &[
     PpuOutcomeClass::Continue,
     PpuOutcomeClass::MemoryFault,

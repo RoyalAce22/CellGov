@@ -3,7 +3,7 @@
     "kind": "first_rsx_write"
   },
   "outcome": "RsxWriteCheckpoint",
-  "steps": 4181,
+  "steps": 4182,
   "budget": 256,
   "host_invariant_breaks": 0,
   "witnesses": {
@@ -52,8 +52,8 @@
       "class": "absent"
     },
     "mem_fault_arm_entries": {
-      "value": 0,
-      "class": "absent"
+      "value": 1,
+      "class": "at-least"
     },
     "mem_fault_unmapped_routed": {
       "value": 0,

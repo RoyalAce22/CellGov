@@ -32,6 +32,8 @@ mod read_intent;
 mod reservation_ea;
 #[path = "mem_scalar_tests.rs"]
 mod scalar;
+#[path = "mem_store_conditional_unmapped_tests.rs"]
+mod store_conditional_unmapped;
 #[path = "mem_store_order_tests.rs"]
 mod store_order;
 #[path = "mem_store_tests.rs"]

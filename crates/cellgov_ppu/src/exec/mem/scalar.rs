@@ -262,6 +262,7 @@ pub(super) fn load(
 #[inline]
 pub(super) fn store(
     state: &mut PpuState,
+    region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &mut StoreBuffer,
     ea: Ea,
     width: Width,
@@ -284,7 +285,7 @@ pub(super) fn store(
         },
         Src::FprBits(frs) => state.fpr[frs as usize],
     };
-    let verdict = buffer_store(store_buf, state, addr, width.bytes(), value);
+    let verdict = buffer_store(store_buf, region_views, addr, width.bytes(), value);
     if let Update::Ra(_) = update {
         if verdict.allows_writeback() {
             state.set_gpr(ea.ra() as usize, addr);

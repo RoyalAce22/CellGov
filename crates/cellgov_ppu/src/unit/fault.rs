@@ -27,6 +27,7 @@ impl PpuExecutionUnit {
             syscall_lev: None,
             faulting_ea: None,
             fault_regs: Some(self.capture_regs()),
+            data_access: None,
         }
     }
 
@@ -37,6 +38,7 @@ impl PpuExecutionUnit {
             syscall_lev: None,
             faulting_ea: Some(ea),
             fault_regs: Some(self.capture_regs()),
+            data_access: None,
         }
     }
 

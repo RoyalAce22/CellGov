@@ -1,7 +1,7 @@
 //! The memory-instruction dispatch: one match over every load, store, atomic and cache-block form.
 
 use crate::exec::memory_helpers::{
-    buffer_conditional_store, buffer_store, load_ze, unmapped, LoadPort, Width,
+    buffer_conditional_store, buffer_store, check_store, load_ze, LoadPort, Width,
 };
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
@@ -9,7 +9,6 @@ use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::ReservedLine;
 
 use cellgov_ps3_abi::hw::ppu::DCBZ_BLOCK_BYTES;
@@ -32,7 +31,7 @@ pub(crate) fn execute(
             return load(state, &mut port, ea, width, dest, update);
         }
         Some(Scalar::Store(ea, width, src, update)) => {
-            return store(state, store_buf, ea, width, src, update);
+            return store(state, region_views, store_buf, ea, width, src, update);
         }
         None => {}
     }
@@ -71,7 +70,7 @@ pub(crate) fn execute(
             let ea = state.ea_d_form(ra, imm);
             let gpr = *state.gpr.as_array();
             let words = (first..32).map(|r| (ea.wrapping_add(4 * (r - first) as u64), 4, gpr[r]));
-            store_prechecked(store_buf, state, 32 - first, words, "stmw word")
+            store_prechecked(store_buf, region_views, 32 - first, words, "stmw word")
         }
 
         // [PPC-Book1 p:55 s:3.3.5] String moves transfer N bytes
@@ -95,12 +94,12 @@ pub(crate) fn execute(
         PpuInstruction::Stswi { rs, ra, nb } => {
             let n = if nb == 0 { 32usize } else { nb as usize };
             let base = state.ra_or_zero(ra);
-            string_store(state, store_buf, rs as usize, base, n)
+            string_store(state, region_views, store_buf, rs as usize, base, n)
         }
         PpuInstruction::Stswx { rs, ra, rb } => {
             let base = state.ea_x_form(ra, rb);
             let n = state.xer_tbc() as usize;
-            string_store(state, store_buf, rs as usize, base, n)
+            string_store(state, region_views, store_buf, rs as usize, base, n)
         }
 
         // Atomic load-reserve / store-conditional
@@ -137,12 +136,12 @@ pub(crate) fn execute(
         PpuInstruction::Stdcx { rs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             state.stdcx_executed = state.stdcx_executed.wrapping_add(1);
-            store_conditional(state, store_buf, effects, rs, ea, Width::B8)
+            store_conditional(state, region_views, store_buf, effects, rs, ea, Width::B8)
         }
         PpuInstruction::Stwcx { rs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             state.stwcx_executed = state.stwcx_executed.wrapping_add(1);
-            store_conditional(state, store_buf, effects, rs, ea, Width::B4)
+            store_conditional(state, region_views, store_buf, effects, rs, ea, Width::B4)
         }
 
         // Vector loads / stores
@@ -276,7 +275,7 @@ pub(crate) fn execute(
             let ea = state.ea_x_form(ra, rb);
             let m = (ea & 0xF) as usize;
             let byte = state.vr[vs as usize].to_be_bytes()[m];
-            buffer_store(store_buf, state, ea, 1, byte as u64)
+            buffer_store(store_buf, region_views, ea, 1, byte as u64)
         }
         // [AltiVec-PEM p:6-30 s:6.2] stvehx: halfword at lane (EA & 0xE) of VS -> MEM(EA & ~1, 2).
         PpuInstruction::Stvehx { vs, ra, rb } => {
@@ -284,7 +283,7 @@ pub(crate) fn execute(
             let m = (ea & 0xF) as usize;
             let bytes = state.vr[vs as usize].to_be_bytes();
             let val = u16::from_be_bytes([bytes[m], bytes[m + 1]]);
-            buffer_store(store_buf, state, ea, 2, val as u64)
+            buffer_store(store_buf, region_views, ea, 2, val as u64)
         }
         // [AltiVec-PEM p:6-31 s:6.2] stvewx: word at lane (EA & 0xC) of VS -> MEM(EA & ~3, 4).
         PpuInstruction::Stvewx { vs, ra, rb } => {
@@ -292,7 +291,7 @@ pub(crate) fn execute(
             let m = (ea & 0xF) as usize;
             let bytes = state.vr[vs as usize].to_be_bytes();
             let val = u32::from_be_bytes([bytes[m], bytes[m + 1], bytes[m + 2], bytes[m + 3]]);
-            buffer_store(store_buf, state, ea, 4, val as u64)
+            buffer_store(store_buf, region_views, ea, 4, val as u64)
         }
         // [CBE-Handbook p:744 s:A.3.3] stvlx / stvrx: partial-vector stores. stvlx writes
         // the high `16 - (EA & 0xF)` bytes at EA; stvrx writes the low `EA & 0xF` bytes
@@ -305,7 +304,7 @@ pub(crate) fn execute(
             let count = 16 - (ea & 0xF) as usize;
             let bytes = state.vr[vs as usize].to_be_bytes();
             let stores = (0..count).map(|i| (ea + i as u64, 1, u64::from(bytes[i])));
-            store_prechecked(store_buf, state, count, stores, "stvlx byte")
+            store_prechecked(store_buf, region_views, count, stores, "stvlx byte")
         }
         PpuInstruction::Stvrx { vs, ra, rb } | PpuInstruction::Stvrxl { vs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
@@ -316,7 +315,7 @@ pub(crate) fn execute(
             let aligned = ea & !15u64;
             let bytes = state.vr[vs as usize].to_be_bytes();
             let stores = (0..m).map(|i| (aligned + i as u64, 1, u64::from(bytes[16 - m + i])));
-            store_prechecked(store_buf, state, m, stores, "stvrx byte")
+            store_prechecked(store_buf, region_views, m, stores, "stvrx byte")
         }
         // [AltiVec-PEM p:6-28 s:6.2] Store Vector Indexed (stvx, X-form): EA = ((RA|0)+(RB)) & ~0xF; vS -> MEM(EA,16).
         // [AltiVec-PEM p:6-33 s:6.2] stvxl: identical to stvx; the LRU "Last" suffix is a cache
@@ -328,7 +327,7 @@ pub(crate) fn execute(
             // pre-check prevents partial commit on `BufferFull`.
             let v = state.vr[vs as usize];
             let halves = [(ea, 8, (v >> 64) as u64), (ea + 8, 8, v as u64)];
-            store_prechecked(store_buf, state, 2, halves.into_iter(), "stvx half")
+            store_prechecked(store_buf, region_views, 2, halves.into_iter(), "stvx half")
         }
 
         // Cache control
@@ -344,7 +343,7 @@ pub(crate) fn execute(
             // committing on `BufferFull` mid-loop.
             const DCBZ_STORES: usize = DCBZ_BLOCK_BYTES / 8;
             let zeros = (0..DCBZ_STORES).map(|i| (ea + (i as u64) * 8, 8, 0));
-            store_prechecked(store_buf, state, DCBZ_STORES, zeros, "dcbz")
+            store_prechecked(store_buf, region_views, DCBZ_STORES, zeros, "dcbz")
         }
 
         _ => unreachable!("mem::execute called with non-memory variant"),
@@ -395,6 +394,7 @@ fn load_reserve(
 #[inline]
 fn store_conditional(
     state: &mut PpuState,
+    region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &mut StoreBuffer,
     effects: &[Effect],
     rs: u8,
@@ -405,13 +405,15 @@ fn store_conditional(
     if ea & u64::from(size - 1) != 0 {
         return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
     }
+    // [CBE-Handbook p:249 s:9.5.3] The PPE raises the data storage
+    // interrupt whether or not the store would update storage.
+    if let Err(e) = check_store(region_views, ea, u64::from(size)) {
+        return ExecuteVerdict::StoreFault(e);
+    }
     let success = holds_reservation_for(state, ea);
     // [PPC-Book2 p:25 s:3.3.2 Atomic Update Primitives] CR0 = 0b00 || n || XER[SO].
     let so = u8::from(state.xer_so());
     if success {
-        if ByteRange::new(GuestAddr::new(ea), u64::from(size)).is_none() {
-            return ExecuteVerdict::MemFault(unmapped(ea));
-        }
         // Buffered so the `ConditionalStore` lands in program
         // order (see `StoreBuffer::insert_conditional`); the
         // capacity check comes before CR0 so a full buffer
@@ -440,21 +442,27 @@ fn store_conditional(
 }
 
 /// Stage `count` stores of `(ea, size, value)` behind one capacity
-/// check, so a `BufferFull` never leaves part of the instruction
-/// staged; a retry would duplicate the earlier writes.
+/// check and one address check, so neither a `BufferFull` nor a fault
+/// leaves part of the instruction staged; a retry would duplicate the
+/// earlier writes.
 #[inline]
 fn store_prechecked(
     store_buf: &mut StoreBuffer,
-    state: &mut PpuState,
+    region_views: &[cellgov_mem::RegionView<'_>],
     count: usize,
-    stores: impl Iterator<Item = (u64, u8, u64)>,
+    stores: impl Iterator<Item = (u64, u8, u64)> + Clone,
     what: &str,
 ) -> ExecuteVerdict {
+    for (ea, size, _) in stores.clone() {
+        if let Err(e) = check_store(region_views, ea, u64::from(size)) {
+            return ExecuteVerdict::StoreFault(e);
+        }
+    }
     if !store_buf.has_capacity_for(count) {
         return ExecuteVerdict::BufferFull;
     }
     for (ea, size, value) in stores {
-        let v = buffer_store(store_buf, state, ea, size, value);
+        let v = buffer_store(store_buf, region_views, ea, size, value);
         debug_assert!(
             v != ExecuteVerdict::BufferFull,
             "{what} store failed after capacity pre-check"

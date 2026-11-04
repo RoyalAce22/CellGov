@@ -290,6 +290,8 @@ On a fault with nothing retired the PPU:
 - reports the fault with zero consumed cost.
 
 The diagnostic reports the faulting PC and the fault-site registers.
+A memory fault also reports the first refused byte, whether the
+access was a load or a store, and the region that refused a store.
 
 ### Refused DMA enqueue
 

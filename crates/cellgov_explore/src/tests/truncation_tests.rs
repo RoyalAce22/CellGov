@@ -50,6 +50,10 @@ fn every_truncating_reason() -> Vec<StopReason> {
         .chain(std::iter::once(StopReason::Faulted(FaultKind::Guest(
             FAKE_FAULT_CODE,
         ))))
+        .chain(std::iter::once(StopReason::ReservedStore {
+            addr: 0xC000_0000,
+            region: "rsx",
+        }))
         .collect()
 }
 
@@ -66,7 +70,8 @@ fn declares_a_prefix(reason: StopReason) -> bool {
         | StopReason::StepError(_)
         | StopReason::CommitError(_)
         | StopReason::StaleObservations(_)
-        | StopReason::Faulted(_) => true,
+        | StopReason::Faulted(_)
+        | StopReason::ReservedStore { .. } => true,
     }
 }
 
@@ -400,9 +405,10 @@ fn the_sweep_runs_one_case_per_way_a_step_can_refuse() {
     let reasons = every_truncating_reason();
     assert_eq!(
         reasons.len(),
-        StepError::VARIANTS.len() + 5,
+        StepError::VARIANTS.len() + 6,
         "the sweep must run one case per step refusal, plus the replay bound, an \
-         unserved child init, a refused commit, a refused footprint and a fault",
+         unserved child init, a refused commit, a refused footprint, a fault and a \
+         refused store",
     );
     for (index, reason) in reasons.iter().enumerate() {
         assert!(

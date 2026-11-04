@@ -15,7 +15,7 @@ use cellgov_boot::prepare::{
     prepare, BootServices, DiagnosticOptions, ExecutionOptions, PrepareOptions, PreparedBoot,
     TitleOptions,
 };
-use cellgov_boot::step_loop::rsx_checkpoint_addr;
+use cellgov_boot::step_loop::{rsx_checkpoint_addr, rsx_reserved_write};
 use cellgov_boot::BootSink;
 use cellgov_compare::BootOverrides;
 use cellgov_core::Runtime;
@@ -208,11 +208,14 @@ impl Window {
     /// The step the window ends at, given what the baseline did inside
     /// it.
     ///
-    /// `baseline_steps` counts committed steps. A refused commit is one
-    /// more step the runtime took, so the window reaches one past the
-    /// hash.
+    /// `baseline_steps` counts committed steps. A refused commit or a
+    /// refused store is one more step the runtime took, so the window
+    /// reaches one past the hash.
     fn closed_at(&self, result: &ExplorationResult) -> usize {
-        let uncommitted = usize::from(matches!(result.baseline_stop, StopReason::CommitError(_)));
+        let uncommitted = usize::from(matches!(
+            result.baseline_stop,
+            StopReason::CommitError(_) | StopReason::ReservedStore { .. }
+        ));
         self.opened_at
             .saturating_add(result.baseline_steps)
             .saturating_add(uncommitted)
@@ -222,10 +225,14 @@ impl Window {
     /// when it is some other stop.
     ///
     /// A `first-rsx-write` checkpoint reaches this driver as a refused
-    /// commit, so only the cell's trigger separates it from a refusal.
+    /// store or commit, so only the cell's trigger separates it from a
+    /// refusal.
     fn checkpoint_addr(&self, stop: StopReason) -> Option<u64> {
         match stop {
             StopReason::CommitError(e) => rsx_checkpoint_addr(self.checkpoint, e),
+            StopReason::ReservedStore { addr, region } => {
+                rsx_reserved_write(self.checkpoint, addr, region)
+            }
             _ => None,
         }
     }

@@ -555,6 +555,7 @@ fn stfsu_buffer_full_does_not_update_ra() {
         store_buf.insert(0, 1, 0).expect("staged");
     }
     let mut effects = Vec::new();
+    let mem = [0u8; 0x4000];
     let v = execute(
         &PpuInstruction::Stfsu {
             frs: 5,
@@ -563,7 +564,7 @@ fn stfsu_buffer_full_does_not_update_ra() {
         },
         &mut s,
         uid(),
-        &[],
+        &[cellgov_mem::RegionView::plain(0, &mem)],
         &mut effects,
         &mut store_buf,
     );
@@ -584,6 +585,7 @@ fn stfdu_buffer_full_does_not_update_ra() {
         store_buf.insert(0, 1, 0).expect("staged");
     }
     let mut effects = Vec::new();
+    let mem = [0u8; 0x4000];
     let v = execute(
         &PpuInstruction::Stfdu {
             frs: 6,
@@ -592,7 +594,7 @@ fn stfdu_buffer_full_does_not_update_ra() {
         },
         &mut s,
         uid(),
-        &[],
+        &[cellgov_mem::RegionView::plain(0, &mem)],
         &mut effects,
         &mut store_buf,
     );

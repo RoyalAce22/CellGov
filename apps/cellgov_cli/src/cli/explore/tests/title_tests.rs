@@ -96,6 +96,26 @@ fn the_step_a_refused_commit_took_is_inside_the_window_it_did_not_commit_to() {
 }
 
 #[test]
+fn a_store_refused_at_the_rsx_region_closes_the_window_at_the_checkpoint() {
+    let w = window(CheckpointTrigger::FirstRsxWrite);
+    let store = StopReason::ReservedStore {
+        addr: 0x0C00_0000,
+        region: "rsx",
+    };
+    let r = result(store, vec![]);
+    assert_eq!(w.closed_at(&r), 1_701);
+    assert_eq!(w.checkpoint_addr(store), Some(0x0C00_0000));
+    assert!(!w.is_model_refusal(store));
+
+    let other = StopReason::ReservedStore {
+        addr: 0xE000_0000,
+        region: "spu_reserved",
+    };
+    assert_eq!(w.checkpoint_addr(other), None);
+    assert!(w.is_model_refusal(other));
+}
+
+#[test]
 fn a_step_count_start_is_not_repeated_back_as_the_step_it_opened_at() {
     let r = result(StopReason::Stalled, vec![]);
     let w = Window {

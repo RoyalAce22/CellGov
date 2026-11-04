@@ -90,7 +90,8 @@ pub enum PpuOutcomeClass {
     Syscall,
     /// Architectural fault.
     Fault,
-    /// Unmapped-memory fault.
+    /// A load or store to a byte no region holds, or a store a region
+    /// refuses.
     MemoryFault,
     /// Caller must flush the store buffer and retry.
     BufferFull,
@@ -104,7 +105,8 @@ impl PpuOutcomeClass {
             crate::exec::ExecuteVerdict::Branch => Self::Branch,
             crate::exec::ExecuteVerdict::Syscall { .. } => Self::Syscall,
             crate::exec::ExecuteVerdict::Fault(_) => Self::Fault,
-            crate::exec::ExecuteVerdict::MemFault(_) => Self::MemoryFault,
+            crate::exec::ExecuteVerdict::MemFault(_)
+            | crate::exec::ExecuteVerdict::StoreFault(_) => Self::MemoryFault,
             crate::exec::ExecuteVerdict::BufferFull => Self::BufferFull,
         }
     }

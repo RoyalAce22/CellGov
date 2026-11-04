@@ -406,7 +406,9 @@ pub(super) fn run_sequence_tracked(
         match verdict {
             ExecuteVerdict::Continue => state.pc = state.pc.wrapping_add(4),
             ExecuteVerdict::Branch => {}
-            ExecuteVerdict::Fault(_) | ExecuteVerdict::MemFault(_) => {
+            ExecuteVerdict::Fault(_)
+            | ExecuteVerdict::MemFault(_)
+            | ExecuteVerdict::StoreFault(_) => {
                 break;
             }
             ExecuteVerdict::Syscall { .. } | ExecuteVerdict::BufferFull => break,

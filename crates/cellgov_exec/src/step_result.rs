@@ -34,6 +34,27 @@ pub struct LocalDiagnostics {
     /// Register snapshot at fault time. PPU units populate it on every
     /// fault. SPU units and synthetic units leave it `None`.
     pub fault_regs: Option<FaultRegisterDump>,
+    /// What a PPU data storage fault records about its access. Its
+    /// `faulting_ea` is then the first byte of the access the memory
+    /// refused, which is where the DAR points.
+    pub data_access: Option<DataAccessFault>,
+}
+
+/// The access a PPU data storage fault took.
+///
+/// An address no region holds takes the data storage interrupt with no
+/// translation found. The console can take the data segment interrupt
+/// there instead. That choice depends on LV2's segment table, and
+/// CellGov does not model it.
+///
+/// [PPC-Book3 p:67 s:5.5.3] DSISR bit 1 is set when no translation is found, bit 4 when storage protection refuses the access, and bit 6 for a store or `dcbz`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DataAccessFault {
+    /// The access was a store, `dcbz` or conditional store.
+    pub store: bool,
+    /// The label of the region that refused a store, or `None` when no
+    /// region holds the refused byte.
+    pub refused_by: Option<&'static str>,
 }
 
 /// PPU register snapshot at fault time.
@@ -64,6 +85,7 @@ impl LocalDiagnostics {
             syscall_lev: None,
             faulting_ea: None,
             fault_regs: None,
+            data_access: None,
         }
     }
 
@@ -76,6 +98,7 @@ impl LocalDiagnostics {
             syscall_lev: None,
             faulting_ea: None,
             fault_regs: None,
+            data_access: None,
         }
     }
 
@@ -88,6 +111,7 @@ impl LocalDiagnostics {
             syscall_lev: None,
             faulting_ea: Some(ea),
             fault_regs: None,
+            data_access: None,
         }
     }
 
@@ -100,6 +124,7 @@ impl LocalDiagnostics {
             syscall_lev: None,
             faulting_ea: None,
             fault_regs: None,
+            data_access: None,
         }
     }
 
@@ -112,6 +137,7 @@ impl LocalDiagnostics {
             syscall_lev: Some(syscall_lev),
             faulting_ea: None,
             fault_regs: None,
+            data_access: None,
         }
     }
 
@@ -124,6 +150,7 @@ impl LocalDiagnostics {
             syscall_lev: None,
             faulting_ea: Some(ea),
             fault_regs: Some(regs),
+            data_access: None,
         }
     }
 }

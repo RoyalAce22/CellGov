@@ -109,7 +109,7 @@ pub(crate) fn execute(
             let val = imm as i64 as u64;
             state.set_gpr(rt as usize, val);
             let ea = state.ea_d_form(ra_store, store_offset);
-            buffer_store(store_buf, state, ea, 4, val)
+            buffer_store(store_buf, region_views, ea, 4, val)
         }
         // [PPC-Book1 p:81 s:3.3.13 Move From Special Purpose Register] mfspr (mflr when SPR=8): RS <- LR.
         // [PPC-Book1 p:42 s:3.3.3 Store Word] stw: MEM(EA,4) <- (RS)32:63; low 32 bits stored.
@@ -120,7 +120,7 @@ pub(crate) fn execute(
         } => {
             state.set_gpr(rt as usize, state.lr());
             let ea = state.ea_d_form(ra_store, store_offset);
-            buffer_store(store_buf, state, ea, 4, state.gpr[rt as usize])
+            buffer_store(store_buf, region_views, ea, 4, state.gpr[rt as usize])
         }
         // [PPC-Book1 p:37 s:3.3.2 Load Word and Zero] lwz: RT <- 32 zeros || MEM(EA,4).
         // [PPC-Book1 p:81 s:3.3.13 Move To Special Purpose Register] mtspr (mtlr when SPR=8): LR <- (RS).
@@ -152,7 +152,7 @@ pub(crate) fn execute(
         } => {
             state.set_gpr(rt as usize, state.lr());
             let ea = state.ea_d_form(ra_store, store_offset);
-            buffer_store(store_buf, state, ea, 8, state.gpr[rt as usize])
+            buffer_store(store_buf, region_views, ea, 8, state.gpr[rt as usize])
         }
         // [PPC-Book1 p:39 s:3.3.2 Load Doubleword] ld: RT <- MEM(EA,8); EA = (RA|0)+EXTS(DS||0b00).
         // [PPC-Book1 p:81 s:3.3.13 Move To Special Purpose Register] mtspr (mtlr when SPR=8): LR <- (RS).
@@ -188,12 +188,12 @@ pub(crate) fn execute(
             // construction; if that constraint is ever relaxed,
             // StdStd needs an `offset2` field.
             let ea1 = state.ea_d_form(ra, offset1);
-            let v1 = buffer_store(store_buf, state, ea1, 8, state.gpr[rs1 as usize]);
+            let v1 = buffer_store(store_buf, region_views, ea1, 8, state.gpr[rs1 as usize]);
             if !v1.allows_writeback() {
                 return v1;
             }
             let ea2 = ea1.wrapping_add(8);
-            buffer_store(store_buf, state, ea2, 8, state.gpr[rs2 as usize])
+            buffer_store(store_buf, region_views, ea2, 8, state.gpr[rs2 as usize])
         }
         // [PPC-Book1 p:60 s:3.3.9 Compare Immediate] cmpi (cmpwi when L=0): signed 32-bit compare against EXTS(SI), CR field <- c || XER[SO].
         // [PPC-Book1 p:18 s:2.3.1 Condition Register] CR field bits LT/GT/EQ/SO occupy positions 0/1/2/3 within the 4-bit field.

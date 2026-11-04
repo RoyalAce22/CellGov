@@ -5,7 +5,6 @@
 //! overlaps with pre-block memory both resolve correctly.
 
 use crate::exec::verdict::ExecuteVerdict;
-use crate::state::PpuState;
 use crate::store_buffer::{StoreBuffer, StoreRefusal};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -95,6 +94,26 @@ impl<'v, 'e> LoadPort<'v, 'e> {
         });
         true
     }
+
+    /// The fault for a read at `ea` that no view holds whole.
+    ///
+    /// Its address is the first byte no view holds: the end of the view
+    /// the read starts in, when no view holds that byte. Otherwise `ea`:
+    /// the read crosses from one view into another, which no single
+    /// view can serve.
+    #[inline]
+    fn refusal(&self, ea: u64) -> cellgov_mem::MemError {
+        let holds = |addr: u64| {
+            self.views
+                .iter()
+                .find(|v| v.base <= addr && addr < v.base + v.bytes.len() as u64)
+        };
+        let first_unheld = holds(ea)
+            .map(|v| v.base + v.bytes.len() as u64)
+            .filter(|&end| holds(end).is_none())
+            .unwrap_or(ea);
+        unmapped(first_unheld)
+    }
 }
 
 /// Synthesize a `MemError::Unmapped` for `ea` with no nearest-region
@@ -151,7 +170,7 @@ pub(crate) fn load_ze(
     let mut bytes = [0u8; 8];
     let n = size as usize;
     if !port.read_committed(ea, &mut bytes[..n]) {
-        return Err(unmapped(ea));
+        return Err(port.refusal(ea));
     }
     port.overlay(ea, &mut bytes[..n]);
     Ok(match width {
@@ -183,7 +202,7 @@ pub(crate) fn load_se(
     let mut bytes = [0u8; 8];
     let n = size as usize;
     if !port.read_committed(ea, &mut bytes[..n]) {
-        return Err(unmapped(ea));
+        return Err(port.refusal(ea));
     }
     port.overlay(ea, &mut bytes[..n]);
     Ok(match width {
@@ -194,31 +213,71 @@ pub(crate) fn load_se(
     })
 }
 
+/// Refuse a store of `len` bytes at `ea` that no one view holds, or
+/// that reaches a view whose region refuses writes.
+///
+/// The error's address is the first refused byte: `ea`, or the end of
+/// the writable view the store starts in. That byte lies in the first
+/// doubleword the store accesses in the refusing page, which is where
+/// the architecture puts the DAR [PPC-Book3 p:67 s:5.5.3]. For a store
+/// that runs from one writable view into another, the error names `ea`:
+/// no single view can take it.
+#[inline]
+pub(crate) fn check_store(
+    views: &[RegionView<'_>],
+    ea: u64,
+    len: u64,
+) -> Result<(), cellgov_mem::MemError> {
+    let end = ea.checked_add(len).ok_or_else(|| unmapped(ea))?;
+    for view in views {
+        let view_end = view.base + view.bytes.len() as u64;
+        if ea < view.base || ea >= view_end {
+            continue;
+        }
+        if let Some(region) = view.write_refused_by {
+            return Err(cellgov_mem::MemError::ReservedWrite { addr: ea, region });
+        }
+        if end <= view_end {
+            return Ok(());
+        }
+        // The rest lies past this view, in a region that refuses it,
+        // in no region, or in another writable view.
+        return Err(match check_store(views, view_end, end - view_end) {
+            Err(e) => e,
+            Ok(()) => unmapped(ea),
+        });
+    }
+    Err(unmapped(ea))
+}
+
 /// Stage a store. The unit's own reservation survives it: only a
 /// store from another processor or mechanism to the granule clears
 /// a reservation, so `lwarx; stw <neighbour>; stwcx.` succeeds.
 ///
-/// A store whose last byte lies past the end of the address space
-/// faults as unmapped: no region can hold it.
+/// A store that [`check_store`] refuses faults here, and nothing goes
+/// to the buffer.
 ///
 /// [PPC-Book2 p:10 s:1.7.3.1] a reservation is lost to another processor's store or dcbz to the granule, not to the holder's own stores.
 #[inline]
 pub(crate) fn buffer_store(
     store_buf: &mut StoreBuffer,
-    _state: &mut PpuState,
+    views: &[RegionView<'_>],
     ea: u64,
     size: u8,
     value: u64,
 ) -> ExecuteVerdict {
+    if let Err(e) = check_store(views, ea, u64::from(size)) {
+        return ExecuteVerdict::StoreFault(e);
+    }
     match store_buf.insert(ea, size, value as u128) {
         Ok(()) => ExecuteVerdict::Continue,
         Err(StoreRefusal::Full) => ExecuteVerdict::BufferFull,
-        Err(StoreRefusal::AddressWraps { .. }) => ExecuteVerdict::MemFault(unmapped(ea)),
+        Err(StoreRefusal::AddressWraps { .. }) => ExecuteVerdict::StoreFault(unmapped(ea)),
     }
 }
 
-/// Stage a successful `stwcx.` / `stdcx.`; see [`buffer_store`] for
-/// the wrap refusal.
+/// Stage a successful `stwcx.` / `stdcx.`; the caller first passes it
+/// through [`check_store`].
 #[inline]
 pub(crate) fn buffer_conditional_store(
     store_buf: &mut StoreBuffer,
@@ -230,6 +289,6 @@ pub(crate) fn buffer_conditional_store(
     match store_buf.insert_conditional(ea, size, value as u128, emit_at) {
         Ok(()) => ExecuteVerdict::Continue,
         Err(StoreRefusal::Full) => ExecuteVerdict::BufferFull,
-        Err(StoreRefusal::AddressWraps { .. }) => ExecuteVerdict::MemFault(unmapped(ea)),
+        Err(StoreRefusal::AddressWraps { .. }) => ExecuteVerdict::StoreFault(unmapped(ea)),
     }
 }

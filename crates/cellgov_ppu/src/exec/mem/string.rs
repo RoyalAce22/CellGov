@@ -1,6 +1,6 @@
 //! The `lswi` / `lswx` / `stswi` / `stswx` string cores.
 
-use crate::exec::memory_helpers::{buffer_store, load_ze, LoadPort, Width};
+use crate::exec::memory_helpers::{buffer_store, check_store, load_ze, LoadPort, Width};
 use crate::exec::ExecuteVerdict;
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
@@ -38,10 +38,12 @@ pub(super) fn string_load(
 
 /// `stswi` / `stswx` core: store `n` bytes from `base`, extracting
 /// MSB-first four-per-register from successive GPRs starting at
-/// `rs_start` and wrapping at r31 -> r0. Capacity pre-check
-/// prevents partial commit on `BufferFull`.
+/// `rs_start` and wrapping at r31 -> r0. The address and capacity
+/// checks run before the first byte goes to the buffer, so neither a
+/// fault nor a `BufferFull` leaves part of the string staged.
 pub(super) fn string_store(
     state: &mut PpuState,
+    region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &mut StoreBuffer,
     rs_start: usize,
     base: u64,
@@ -49,6 +51,11 @@ pub(super) fn string_store(
 ) -> ExecuteVerdict {
     if n == 0 {
         return ExecuteVerdict::Continue;
+    }
+    for i in 0..n {
+        if let Err(e) = check_store(region_views, base.wrapping_add(i as u64), 1) {
+            return ExecuteVerdict::StoreFault(e);
+        }
     }
     if !store_buf.has_capacity_for(n) {
         return ExecuteVerdict::BufferFull;
@@ -60,7 +67,7 @@ pub(super) fn string_store(
         let byte = ((state.gpr[reg] >> shift) & 0xFF) as u8;
         let v = buffer_store(
             store_buf,
-            state,
+            region_views,
             base.wrapping_add(i as u64),
             1,
             byte as u64,

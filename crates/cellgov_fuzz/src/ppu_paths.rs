@@ -455,10 +455,17 @@ fn run_plain(
                 run.stop_on_fault(step_pc, fault.guest_code(), ea);
                 break;
             }
-            ExecuteVerdict::MemFault(error) => {
+            ExecuteVerdict::MemFault(error) | ExecuteVerdict::StoreFault(error) => {
                 let code = cellgov_ppu::FAULT_INVALID_ADDRESS;
                 let ea = mem_fault_ea(error);
                 run.stop_on_fault(step_pc, code, ea);
+                run.stop.diagnostics.data_access = Some(cellgov_exec::DataAccessFault {
+                    store: matches!(verdict, ExecuteVerdict::StoreFault(_)),
+                    refused_by: match error {
+                        MemError::ReservedWrite { region, .. } => Some(*region),
+                        _ => None,
+                    },
+                });
                 break;
             }
             ExecuteVerdict::Syscall { lev } => {
@@ -693,6 +700,7 @@ fn fault_diagnostics(state: &PpuState, pc: u64, ea: Option<u64>) -> LocalDiagnos
             xer: fields.xer,
             cr: fields.cr,
         }),
+        data_access: None,
     }
 }
 

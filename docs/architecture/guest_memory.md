@@ -102,9 +102,11 @@ different paths:
   because code always lives in `main`.
 - **Loads** (`ld`, `lwz`, `lfs`, `lvx`, etc.) use the `load_slice`
   helper, which scans a region-view table.
-- **Stores** go through `Effect::SharedWriteIntent`. The commit
-  pipeline's `apply_commit` is region-aware, so stores to any
-  mapped region land correctly.
+- **Stores** check the region-view table, then go through
+  `Effect::SharedWriteIntent`. A store to a byte no region holds, or
+  into a region that refuses writes, faults at the store with nothing
+  staged. The commit pipeline's `apply_commit` is region-aware, so
+  stores to any mapped region land correctly.
 
 The region-view table is built at the top of `run_until_yield` from
 `GuestMemory::region_views()`. It has one `RegionView` per region,
