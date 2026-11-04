@@ -5,7 +5,7 @@ use super::lane_support::pack_u32x4 as words;
 use crate::exec::test_support::exec_no_mem;
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::ops::VxOp;
-use crate::instruction::PpuInstruction;
+use crate::instruction::{PpuInstruction, PpuInstructionKind};
 use crate::state::PpuState;
 
 // Field 6 starts at 0b0101, which no recording compare can produce.
@@ -74,7 +74,10 @@ fn an_unimplemented_recording_compare_faults_without_writing_cr() {
     );
     assert_eq!(
         v,
-        ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(0x406))
+        ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction {
+            kind: PpuInstructionKind::Vx,
+            mnemonic: "vcmpequb.",
+        })
     );
     assert_eq!(s.cr(), CR_SEED);
 }

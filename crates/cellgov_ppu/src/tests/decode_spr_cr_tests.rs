@@ -106,10 +106,7 @@ fn mfspr_268_and_269_decode_as_mftb_and_mftbu() {
 #[test]
 fn mfocrf_form_decodes_to_typed_variant_not_mfcr() {
     // mfocrf shares XO 19 with mfcr, distinguished by PPC bit 11
-    // (raw bit 20) being set. mfocrf reads one CR field; mfcr
-    // reads all eight. The bit-11 marker routes to a typed
-    // Mfocrf variant so the executor applies the one-field
-    // semantic rather than masquerading as mfcr.
+    // (raw bit 20) being set.
     let raw: u32 = (31u32 << 26)
         | (3u32 << 21)
         | (1u32 << 20) // bit 20 set => mfocrf

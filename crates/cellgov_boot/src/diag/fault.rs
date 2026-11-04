@@ -72,8 +72,18 @@ pub(crate) fn format_fault(
                     format!("UNSUPPORTED_SYSCALL (nr={nr}) at PC={pc_str}")
                 }
                 FAULT_UNIMPLEMENTED_INSN => {
-                    let xo = code & 0x0000_FFFF;
-                    format!("UNIMPLEMENTED_INSN (xo=0x{xo:x}) at PC={pc_str}")
+                    let kind = cellgov_ppu::unimplemented_kind(*code).map_or_else(
+                        || format!("<unknown kind 0x{:04x}>", code & 0x0000_FFFF),
+                        |kind| <&'static str>::from(kind).to_string(),
+                    );
+                    let raw_str = match pc {
+                        None => "<no-pc>".to_string(),
+                        Some(a) => match fetch_raw_at(mem, a) {
+                            Some(w) => format!("0x{w:08x}"),
+                            None => "<unmapped>".to_string(),
+                        },
+                    };
+                    format!("UNIMPLEMENTED_INSN {kind} at PC={pc_str} (raw={raw_str})")
                 }
                 FAULT_PROGRAM_TRAP => {
                     let to = code & 0x0000_FFFF;

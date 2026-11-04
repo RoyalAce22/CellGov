@@ -182,7 +182,14 @@ fn a_ppe_unimplemented_word_disassembles_with_its_operands() {
 fn the_illegal_instruction_fault_has_its_own_guest_code() {
     let code = PpuFault::IllegalInstruction("mcrxr").guest_code();
     assert_eq!(code, crate::FAULT_ILLEGAL_INSTRUCTION);
-    assert_ne!(code, PpuFault::UnimplementedInstruction(0).guest_code());
+    assert_ne!(
+        code,
+        PpuFault::UnimplementedInstruction {
+            kind: crate::instruction::PpuInstructionKind::Vx,
+            mnemonic: "vx",
+        }
+        .guest_code()
+    );
     assert_ne!(code, PpuFault::InvalidForm("x").guest_code());
     assert!(!crate::is_decode_error(code));
 }

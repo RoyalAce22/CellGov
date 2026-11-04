@@ -136,7 +136,7 @@ fn mtcrf_reads_low_32_bits_of_rs() {
 }
 
 #[test]
-fn mtocrf_with_multi_bit_crm_faults_where_mtcrf_writes_both_fields() {
+fn mtocrf_with_multi_bit_crm_writes_only_the_leftmost_field_where_mtcrf_writes_both() {
     let mut s_mtcrf = PpuState::new();
     s_mtcrf.set_gpr(3, 0xAAAA_AAAA_1234_5678);
     s_mtcrf.set_cr(0xAAAA_AAAA);
@@ -151,22 +151,17 @@ fn mtocrf_with_multi_bit_crm_faults_where_mtcrf_writes_both_fields() {
     s_mtocrf.set_gpr(3, 0xAAAA_AAAA_1234_5678);
     s_mtocrf.set_cr(0xAAAA_AAAA);
     let v = exec_no_mem(&PpuInstruction::Mtocrf { rs: 3, crm: 0xC0 }, &mut s_mtocrf);
-    assert!(matches!(
-        v,
-        ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(144))
-    ));
-    assert_eq!(s_mtocrf.cr(), 0xAAAA_AAAA, "CR untouched on the fault");
+    assert_eq!(v, ExecuteVerdict::Continue);
+    assert_eq!(s_mtocrf.cr(), 0x1AAA_AAAA);
 }
 
 #[test]
-fn mtocrf_with_empty_crm_faults() {
+fn mtocrf_with_empty_crm_leaves_cr_unchanged() {
     let mut s = PpuState::new();
+    s.set_gpr(3, 0x1234_5678);
     s.set_cr(0xAAAA_AAAA);
     let v = exec_no_mem(&PpuInstruction::Mtocrf { rs: 3, crm: 0 }, &mut s);
-    assert!(matches!(
-        v,
-        ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(144))
-    ));
+    assert_eq!(v, ExecuteVerdict::Continue);
     assert_eq!(s.cr(), 0xAAAA_AAAA);
 }
 
@@ -185,37 +180,15 @@ fn mtocrf_one_hot_crm_updates_only_selected_field() {
 }
 
 #[test]
-fn mfocrf_with_multi_bit_crm_faults() {
-    let mut s = PpuState::new();
-    s.set_cr(0x1234_5678);
-    let v = exec_no_mem(&PpuInstruction::Mfocrf { rt: 3, crm: 0xC0 }, &mut s);
-    assert!(matches!(
-        v,
-        ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(19))
-    ));
-    // RT must be untouched (effect-discard for fault).
-    assert_eq!(s.gpr[3], 0);
-}
-
-#[test]
-fn mfocrf_with_one_hot_crm_extracts_one_field_distinct_from_mfcr() {
-    let mut s_mfcr = PpuState::new();
-    s_mfcr.set_cr(0x1234_5678);
-    exec_no_mem(&PpuInstruction::Mfcr { rt: 3 }, &mut s_mfcr);
-    // mfcr: full CR into low 32 bits of RT.
-    assert_eq!(s_mfcr.gpr[3], 0x1234_5678);
-
-    let mut s_mfocrf = PpuState::new();
-    s_mfocrf.set_cr(0x1234_5678);
-    exec_no_mem(&PpuInstruction::Mfocrf { rt: 3, crm: 0x80 }, &mut s_mfocrf);
-    // mfocrf: field 0 (= 0x1) at position (7-0)*4 = 28, zero
-    // elsewhere -> 0x1000_0000.
-    assert_eq!(s_mfocrf.gpr[3], 0x1000_0000);
-    // Final discriminator: the RT values diverge.
-    assert_ne!(
-        s_mfcr.gpr[3], s_mfocrf.gpr[3],
-        "Mfocrf must NOT be a passthrough to Mfcr semantics"
-    );
+fn mfocrf_reads_the_whole_cr_for_every_crm() {
+    for crm in [0x00, 0x03, 0x10, 0x80, 0xC0, 0xFF] {
+        let mut s = PpuState::new();
+        s.set_gpr(3, u64::MAX);
+        s.set_cr(0x1234_5678);
+        let v = exec_no_mem(&PpuInstruction::Mfocrf { rt: 3, crm }, &mut s);
+        assert_eq!(v, ExecuteVerdict::Continue, "crm 0x{crm:02x}");
+        assert_eq!(s.gpr[3], 0x1234_5678, "crm 0x{crm:02x}");
+    }
 }
 
 // -- Compare SO propagation: Cmplwi / Cmpdi / Cmpldi / Cmplw / Cmpd / Cmpld --

@@ -995,22 +995,20 @@ pub enum PpuInstruction {
         rs: u8,
         crm: u8,
     },
-    /// Move From One Condition Register Field. `crm` is one-hot; the
-    /// set bit selects which CR field gets copied into the
-    /// corresponding 4 bits of RT (other bits boundedly undefined per
-    /// spec; CellGov produces the same nibble layout as mfcr for the
-    /// selected field and zero elsewhere). Non-one-hot `crm` leaves RT
-    /// undefined, and CellGov faults.
+    /// Move From One Condition Register Field. A one-hot `crm` selects
+    /// the CR field the documents define; CellGov puts the whole CR in
+    /// `RT[32:63]` and clears `RT[0:31]` for every `crm`, as the reference
+    /// console does for each `crm` it ran.
     ///
     /// [CBE-Handbook p:738 s:A.2.3.1 Book I Optional Instructions Implemented] mfocrf / mtocrf share XOs 19 / 144 with mfcr / mtcrf; bit 11 = 1 selects the one-field form. Cell PPE implements both.
     Mfocrf {
         rt: u8,
         crm: u8,
     },
-    /// Move To One Condition Register Field. `crm` is one-hot; the
-    /// set bit selects which CR field gets RS[32+4*field..+4] copied
-    /// in. Non-one-hot `crm` leaves the CR undefined, and CellGov
-    /// faults.
+    /// Move To One Condition Register Field. The leftmost set bit of
+    /// `crm` selects the CR field that gets RS[32+4*field..+4]; a zero
+    /// `crm` writes nothing, as the reference console does for each
+    /// `crm` it ran.
     Mtocrf {
         rs: u8,
         crm: u8,

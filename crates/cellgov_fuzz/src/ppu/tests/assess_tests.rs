@@ -54,7 +54,10 @@ fn an_unexpected_fault_remains_eligible_for_contract_checks() {
         &instruction,
         &PpuState::new(),
         descriptor,
-        &ExecuteVerdict::Fault(cellgov_ppu::exec::PpuFault::UnimplementedInstruction(14)),
+        &ExecuteVerdict::Fault(cellgov_ppu::exec::PpuFault::UnimplementedInstruction {
+            kind: cellgov_ppu::instruction::PpuInstructionKind::Addi,
+            mnemonic: "addi",
+        }),
         BTreeSet::new(),
     );
 

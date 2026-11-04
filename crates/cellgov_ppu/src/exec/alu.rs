@@ -603,34 +603,23 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             }
             ExecuteVerdict::Continue
         }
-        // [CBE-Handbook p:738 s:A.2.3.1] mfocrf reads ONE CR field.
-        // The CRM (FXM) must be one-hot; the set bit selects the
-        // field. RT gets that 4-bit field placed at its canonical
-        // PowerPC position (CR field N -> RT bits 32+4N..35+4N in
-        // PPC numbering = LSB-0 bits (7-N)*4..(7-N)*4+3) and zeros
-        // elsewhere. Non-one-hot CRM leaves RT undefined, so CellGov
-        // faults via UnimplementedInstruction(19) rather than
-        // inventing a value or silently masquerading as mfcr.
-        // [PowerISA-3.1 p:I128 s:3.3 Fixed-Point Facility Instructions] mfocrf: when FXM is not exactly one-hot the contents of RT are undefined.
-        PpuInstruction::Mfocrf { rt, crm } => {
-            if crm == 0 || crm.count_ones() != 1 {
-                return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(19));
-            }
-            // One-hot CRM: the single set bit's position (MSB-first,
-            // 0..=7) selects the CR field index.
-            let n = crm.leading_zeros() as u8;
-            let field = state.cr_field(n) as u32;
-            let shift = (7 - n) * 4;
-            state.set_gpr(rt as usize, (field << shift) as u64);
+        // [CBE-Handbook p:738 s:A.2.3.1] The PPE implements mfocrf as an optional Book I instruction.
+        // [PowerISA-3.1 p:I128 s:3.3 Fixed-Point Facility Instructions] mfocrf with a one-hot FXM copies that CR field; the rest of RT is 0 from version 2.08 on and may not be 0 on an earlier processor; any other FXM leaves RT undefined.
+        // The reference console fills RT[32:63] with the whole CR and RT[0:31] with 0 for
+        // every FXM it ran, one-hot, zero or multi-bit, as mfcr does (probes
+        // ppu_reference_vectors and ppu_ocrf_fxm).
+        PpuInstruction::Mfocrf { rt, crm: _ } => {
+            state.set_gpr(rt as usize, u64::from(state.cr()));
             ExecuteVerdict::Continue
         }
-        // [CBE-Handbook p:738 s:A.2.3.1] mtocrf writes ONE CR field.
-        // A non-one-hot CRM leaves the whole CR undefined, so CellGov
-        // faults, as the mfocrf arm above does.
-        // [PPC-Book1 p:124 s:5.1.1] mtocrf: when FXM is not exactly one-hot the whole Condition Register is undefined.
+        // [CBE-Handbook p:738 s:A.2.3.1] The PPE implements mtocrf as an optional Book I instruction.
+        // [PPC-Book1 p:124 s:5.1.1] mtocrf with a one-hot FXM writes that CR field; any other FXM leaves the whole CR undefined.
+        // The reference console writes only the field of the leftmost FXM bit for every
+        // multi-bit FXM it ran, with or without field 0, and leaves the CR unchanged for
+        // FXM 0 (probes ppu_reference_vectors and ppu_ocrf_fxm).
         PpuInstruction::Mtocrf { rs, crm } => {
-            if crm.count_ones() != 1 {
-                return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(144));
+            if crm == 0 {
+                return ExecuteVerdict::Continue;
             }
             let n = crm.leading_zeros() as u8;
             let val = state.gpr[rs as usize] as u32;

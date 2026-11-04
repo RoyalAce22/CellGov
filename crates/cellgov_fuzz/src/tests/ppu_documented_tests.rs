@@ -109,20 +109,7 @@ fn the_replay_against_the_documents_finds_only_the_known_gaps() {
 }
 
 /// Vectors CellGov does not run, by id prefix, and why.
-const KNOWN_STOPPED: &[(&str, &str)] = &[
-    (
-        "move-undef/mtocrf/fxm-00",
-        "mtocrf with an FXM other than one field faults as unimplemented",
-    ),
-    ("move-undef/mtocrf/fxm-81", "as above"),
-    ("move-undef/mtocrf/fxm-ff", "as above"),
-    (
-        "move-undef/mfocrf/fxm-00",
-        "mfocrf with an FXM other than one field faults as unimplemented",
-    ),
-    ("move-undef/mfocrf/fxm-81", "as above"),
-    ("vshift-nonuniform/", "vsl and vsr are not implemented"),
-];
+const KNOWN_STOPPED: &[(&str, &str)] = &[("vshift-nonuniform/", "vsl and vsr are not implemented")];
 
 /// Documented components CellGov does not reproduce, as a vector id
 /// prefix and a component name, and why.
@@ -258,11 +245,6 @@ const KNOWN_CONTRADICTED: &[(&str, &str, &str)] = &[
         "muldiv-undef/divw/normal/",
         "cr.cr0-lt-gt-eq",
         "CR0 then compares the zero-extended quotient",
-    ),
-    (
-        "move-undef/mfocrf/fxm-10",
-        "r3.rest",
-        "mfocrf copies the whole CR into RT[32:63], as mfcr does",
     ),
     (
         "move-undef/lswx/count-0",

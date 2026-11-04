@@ -877,15 +877,11 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         }
 
         19 => {
-            // PPC bit 11 (raw bit 20) distinguishes `mfcr` (=0,
-            // copy all 8 CR fields) from `mfocrf` (=1, copy one
-            // selected CR field). The latter is optional in
+            // PPC bit 11 (raw bit 20) distinguishes `mfcr` (=0)
+            // from `mfocrf` (=1). The latter is optional in
             // PowerPC and per CBE-Handbook p:738 s:A.2.3.1 it IS
             // implemented on the Cell PPE (cellSync2 and friends).
-            // The CRM field at bits 12..19 selects the CR field for
-            // the one-hot form; route to a typed `Mfocrf` variant so
-            // the executor can apply the one-field-only semantic
-            // distinct from `mfcr`.
+            // The CRM field sits at bits 12..19.
             if (raw >> 20) & 1 == 1 {
                 let crm = ((raw >> 12) & 0xFF) as u8;
                 return Ok(PpuInstruction::Mfocrf { rt, crm });

@@ -38,3 +38,7 @@ mod vscr_tests;
 #[cfg(test)]
 #[path = "tests/vscr_console_tests.rs"]
 mod vscr_console_tests;
+
+#[cfg(test)]
+#[path = "tests/unimplemented_tests.rs"]
+mod unimplemented_tests;

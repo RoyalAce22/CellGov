@@ -8,6 +8,7 @@ use super::shift::{vslw, vsrab, vsrah, vsraw, vsrw};
 use super::splat::{vspltb, vsplth, vspltisb, vspltish, vspltisw, vspltw};
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::ops::{VaOp, VxOp};
+use crate::instruction::PpuInstructionKind;
 use crate::state::PpuState;
 
 /// Execute a VX-form VMX instruction. `rc` is the VXR record bit; a
@@ -26,11 +27,14 @@ pub(crate) fn execute_vx(
 ) -> ExecuteVerdict {
     let a = state.vr[va as usize];
     let b = state.vr[vb as usize];
-    let fault_code = op as u64 + if rc { 1024 } else { 0 };
+    let unimplemented = PpuFault::UnimplementedInstruction {
+        kind: PpuInstructionKind::Vx,
+        mnemonic: if rc { record_mnemonic(op) } else { op.into() },
+    };
 
     // Only a VXR compare has a record form.
     if rc && !op.is_vxr_compare() {
-        return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(fault_code));
+        return ExecuteVerdict::Fault(unimplemented);
     }
 
     let (result, saturated) = match op {
@@ -210,7 +214,7 @@ pub(crate) fn execute_vx(
         | VxOp::Vsubshs
         | VxOp::Vsubsws
         | VxOp::Vsumsws => {
-            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(fault_code));
+            return ExecuteVerdict::Fault(unimplemented);
         }
     };
 
@@ -222,6 +226,27 @@ pub(crate) fn execute_vx(
         state.set_cr_field(6, record_cr6(op, result));
     }
     ExecuteVerdict::Continue
+}
+
+/// The mnemonic of the record form of `op`, or of `op` itself when it has
+/// no record form.
+fn record_mnemonic(op: VxOp) -> &'static str {
+    match op {
+        VxOp::Vcmpequb => "vcmpequb.",
+        VxOp::Vcmpequh => "vcmpequh.",
+        VxOp::Vcmpequw => "vcmpequw.",
+        VxOp::Vcmpeqfp => "vcmpeqfp.",
+        VxOp::Vcmpgefp => "vcmpgefp.",
+        VxOp::Vcmpgtub => "vcmpgtub.",
+        VxOp::Vcmpgtuh => "vcmpgtuh.",
+        VxOp::Vcmpgtuw => "vcmpgtuw.",
+        VxOp::Vcmpgtfp => "vcmpgtfp.",
+        VxOp::Vcmpgtsb => "vcmpgtsb.",
+        VxOp::Vcmpgtsh => "vcmpgtsh.",
+        VxOp::Vcmpgtsw => "vcmpgtsw.",
+        VxOp::Vcmpbfp => "vcmpbfp.",
+        _ => op.into(),
+    }
 }
 
 /// CR6 of a recording vector compare, from its result vector.
@@ -268,7 +293,10 @@ pub(crate) fn execute_va(
         | VaOp::Vmsumshs
         | VaOp::Vmaddfp
         | VaOp::Vnmsubfp => {
-            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(op as u64));
+            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction {
+                kind: PpuInstructionKind::Va,
+                mnemonic: op.into(),
+            });
         }
     };
 

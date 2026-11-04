@@ -1,5 +1,7 @@
 //! PPU-specific architectural fault categories.
 
+use crate::instruction::PpuInstructionKind;
+
 /// PPU-specific fault categories.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PpuFault {
@@ -12,10 +14,14 @@ pub enum PpuFault {
     /// Unsupported syscall number.
     #[error("PPU unsupported syscall {0}")]
     UnsupportedSyscall(u64),
-    /// Decoded instruction had no execution arm; payload is the
-    /// offending sub-opcode.
-    #[error("PPU unimplemented instruction sub-opcode 0x{0:x}")]
-    UnimplementedInstruction(u64),
+    /// Decoded instruction with no execution arm.
+    #[error("PPU unimplemented instruction: {mnemonic}")]
+    UnimplementedInstruction {
+        /// The decoded instruction's kind; the guest code carries its index.
+        kind: PpuInstructionKind,
+        /// The decoded instruction's mnemonic.
+        mnemonic: &'static str,
+    },
     /// Program trap fired (e.g. `tw` / `td` with a TO-selected
     /// condition met). Payload is the TO field.
     ///
@@ -64,8 +70,8 @@ impl PpuFault {
             Self::UnsupportedSyscall(number) => {
                 crate::FAULT_UNSUPPORTED_SYSCALL | (number as u32 & 0xffff)
             }
-            Self::UnimplementedInstruction(opcode) => {
-                crate::FAULT_UNIMPLEMENTED_INSN | (opcode as u32 & 0xffff)
+            Self::UnimplementedInstruction { kind, .. } => {
+                crate::FAULT_UNIMPLEMENTED_INSN | u32::from(crate::fault_codes::kind_index(kind))
             }
             Self::ProgramTrap(to) => crate::FAULT_PROGRAM_TRAP | (u32::from(to) & 0xffff),
             Self::AlignmentInterrupt(_) => crate::FAULT_ALIGNMENT_INTERRUPT,

@@ -1,0 +1,17 @@
+[test]
+name = "ppu_ocrf_fxm"
+
+# A hardware probe of mtocrf and mfocrf with FXM values other than one
+# field: mtocrf with several bits that leave field 0 clear, and mfocrf
+# with one-hot and multi-bit FXMs. cases.tsv names each case. The
+# console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (11 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 1424 },
+]
+
+[expect]
+outcome = "completed"

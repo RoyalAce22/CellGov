@@ -1,5 +1,9 @@
 //! Guest fault codes the PPU unit yields in `FaultKind::Guest`.
 
+use strum::VariantArray;
+
+use crate::instruction::PpuInstructionKind;
+
 /// PPU tried to fetch at an address beyond guest memory.
 pub const FAULT_PC_OUT_OF_RANGE: u32 = 0x0102_0000;
 /// Instruction word did not match any implemented encoding.
@@ -10,7 +14,8 @@ pub const FAULT_INVALID_ADDRESS: u32 = 0x0106_0000;
 pub const FAULT_UNSUPPORTED_SYSCALL: u32 = 0x0107_0000;
 /// Debug breakpoint fired at a user-requested PC.
 pub const FAULT_DEBUG_BREAK: u32 = 0x0108_0000;
-/// Decoded instruction (typically a VMX sub-opcode) had no exec arm.
+/// Decoded instruction with no exec arm. The detail half names its kind
+/// ([`unimplemented_kind`]).
 pub const FAULT_UNIMPLEMENTED_INSN: u32 = 0x0109_0000;
 /// Program trap fired (e.g. `tw` / `td` with a TO-selected
 /// condition met).
@@ -29,3 +34,24 @@ pub const FAULT_PRIVILEGED_INSTRUCTION: u32 = 0x010E_0000;
 pub fn is_decode_error(code: u32) -> bool {
     (code & 0xFFFF_0000) == FAULT_DECODE_ERROR
 }
+
+/// The index a [`FAULT_UNIMPLEMENTED_INSN`] code carries for `kind`: its
+/// position in [`PpuInstructionKind::VARIANTS`].
+pub(crate) fn kind_index(kind: PpuInstructionKind) -> u16 {
+    kind as u16
+}
+
+/// The instruction kind a [`FAULT_UNIMPLEMENTED_INSN`] code names, or
+/// `None` for a code of another class or an index past the last kind.
+pub fn unimplemented_kind(code: u32) -> Option<PpuInstructionKind> {
+    if code & 0xFFFF_0000 != FAULT_UNIMPLEMENTED_INSN {
+        return None;
+    }
+    PpuInstructionKind::VARIANTS
+        .get((code & 0xFFFF) as usize)
+        .copied()
+}
+
+#[cfg(test)]
+#[path = "tests/fault_codes_tests.rs"]
+mod tests;
