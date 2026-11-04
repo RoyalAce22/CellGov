@@ -1,0 +1,16 @@
+[test]
+name = "ppu_vscr_mode"
+
+# A hardware probe: the vector float mode a PPU thread runs under --
+# VSCR[NJ] at thread start, whether NJ is writable and per thread, and
+# whether the graphics rounding mode is on. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# 19 big-endian u32 words, as ppu/main.c lists: 76 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 76 },
+]
+
+[expect]
+outcome = "completed"
