@@ -2,9 +2,11 @@
 
 use super::convert::{vcfsx, vcfux};
 use super::integer::{
-    vadd_bytes, vadd_halfs, vadd_words, vaddcuw, vcmpequb, vcmpequh, vcmpequw, vcmpgtsb, vcmpgtsh,
-    vcmpgtsw, vcmpgtub, vcmpgtuh, vcmpgtuw, vmulesb, vmulesh, vmuleub, vmuleuh, vmulosb, vmulosh,
-    vmuloub, vmulouh, vsub_bytes, vsub_halfs, vsub_ubytes_sat, vsub_words, vsubcuw,
+    vadd_bytes, vadd_halfs, vadd_sbytes_sat, vadd_shalfs_sat, vadd_swords_sat, vadd_ubytes_sat,
+    vadd_uhalfs_sat, vadd_uwords_sat, vadd_words, vaddcuw, vcmpequb, vcmpequh, vcmpequw, vcmpgtsb,
+    vcmpgtsh, vcmpgtsw, vcmpgtub, vcmpgtuh, vcmpgtuw, vmulesb, vmulesh, vmuleub, vmuleuh, vmulosb,
+    vmulosh, vmuloub, vmulouh, vsub_bytes, vsub_halfs, vsub_sbytes_sat, vsub_shalfs_sat,
+    vsub_swords_sat, vsub_ubytes_sat, vsub_uhalfs_sat, vsub_uwords_sat, vsub_words, vsubcuw,
 };
 use super::merge::{vmrghb, vmrghh, vmrghw, vmrglb, vmrglh, vmrglw};
 use super::minmax::{
@@ -173,6 +175,30 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-161 s:6.2] vsububs
         VxOp::Vsububs => vsub_ubytes_sat(a, b),
 
+        // -- Saturating add and subtract (each sets SAT when an element clamps) --
+        // [AltiVec-PEM p:6-36 s:6.2] vaddubs: each byte sum clamps to [0, 2^8 - 1].
+        VxOp::Vaddubs => vadd_ubytes_sat(a, b),
+        // [AltiVec-PEM p:6-38 s:6.2] vadduhs: each half-word sum clamps to [0, 2^16 - 1].
+        VxOp::Vadduhs => vadd_uhalfs_sat(a, b),
+        // [AltiVec-PEM p:6-40 s:6.2] vadduws: each word sum clamps to [0, 2^32 - 1].
+        VxOp::Vadduws => vadd_uwords_sat(a, b),
+        // [AltiVec-PEM p:6-32 s:6.2] vaddsbs: each signed byte sum clamps to [-2^7, 2^7 - 1].
+        VxOp::Vaddsbs => vadd_sbytes_sat(a, b),
+        // [AltiVec-PEM p:6-33 s:6.2] vaddshs: each signed half-word sum clamps to [-2^15, 2^15 - 1].
+        VxOp::Vaddshs => vadd_shalfs_sat(a, b),
+        // [AltiVec-PEM p:6-34 s:6.2] vaddsws: each signed word sum clamps to [-2^31, 2^31 - 1].
+        VxOp::Vaddsws => vadd_swords_sat(a, b),
+        // [AltiVec-PEM p:6-163 s:6.2] vsubuhs: each half-word difference clamps at 0.
+        VxOp::Vsubuhs => vsub_uhalfs_sat(a, b),
+        // [AltiVec-PEM p:6-165 s:6.2] vsubuws: each word difference clamps at 0.
+        VxOp::Vsubuws => vsub_uwords_sat(a, b),
+        // [AltiVec-PEM p:6-157 s:6.2] vsubsbs: each signed byte difference clamps to [-2^7, 2^7 - 1].
+        VxOp::Vsubsbs => vsub_sbytes_sat(a, b),
+        // [AltiVec-PEM p:6-158 s:6.2] vsubshs: each signed half-word difference clamps to [-2^15, 2^15 - 1].
+        VxOp::Vsubshs => vsub_shalfs_sat(a, b),
+        // [AltiVec-PEM p:6-159 s:6.2] vsubsws: each signed word difference clamps to [-2^31, 2^31 - 1].
+        VxOp::Vsubsws => vsub_swords_sat(a, b),
+
         // -- Maximum, minimum, average --
         // [AltiVec-PEM p:6-76 s:6.2] vmaxub: Vector Maximum Unsigned Byte
         VxOp::Vmaxub => (vmaxub(a, b), false),
@@ -248,19 +274,13 @@ pub(crate) fn execute_vx(
         | VxOp::Vcmpgefp
         | VxOp::Vlogefp
         | VxOp::Vpkswss
-        | VxOp::Vaddubs
         | VxOp::Vrfin
-        | VxOp::Vadduhs
         | VxOp::Vrfiz
-        | VxOp::Vadduws
         | VxOp::Vrfip
         | VxOp::Vsr
         | VxOp::Vcmpgtfp
         | VxOp::Vrfim
-        | VxOp::Vaddsbs
         | VxOp::Vpkpx
-        | VxOp::Vaddshs
-        | VxOp::Vaddsws
         | VxOp::Vctuxs
         | VxOp::Vcmpbfp
         | VxOp::Vctsxs
@@ -269,14 +289,9 @@ pub(crate) fn execute_vx(
         | VxOp::Vminfp
         | VxOp::Vsro
         | VxOp::Vsum4ubs
-        | VxOp::Vsubuhs
         | VxOp::Vsum4shs
-        | VxOp::Vsubuws
         | VxOp::Vsum2sws
-        | VxOp::Vsubsbs
         | VxOp::Vsum4sbs
-        | VxOp::Vsubshs
-        | VxOp::Vsubsws
         | VxOp::Vsumsws => {
             return ExecuteVerdict::Fault(unimplemented);
         }

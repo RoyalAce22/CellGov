@@ -68,3 +68,7 @@ mod shift_rotate_tests;
 #[cfg(test)]
 #[path = "tests/unpack_tests.rs"]
 mod unpack_tests;
+
+#[cfg(test)]
+#[path = "tests/sat_add_sub_tests.rs"]
+mod sat_add_sub_tests;

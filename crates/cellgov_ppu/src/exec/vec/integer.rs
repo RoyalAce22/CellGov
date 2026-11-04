@@ -1,6 +1,6 @@
 //! Integer add, subtract, multiply and compare.
 
-use super::lanes::{map_u16, map_u32, map_u8, map_u8_sat};
+use super::lanes::{map_u16, map_u16_sat, map_u32, map_u32_sat, map_u8, map_u8_sat};
 
 pub(super) fn vadd_bytes(a: u128, b: u128) -> u128 {
     map_u8(a, b, u8::wrapping_add)
@@ -82,6 +82,124 @@ pub(super) fn vsub_ubytes_sat(a: u128, b: u128) -> (u128, bool) {
     map_u8_sat(a, b, |x, y| match x.checked_sub(y) {
         Some(v) => (v, false),
         None => (0, true),
+    })
+}
+
+/// `v` clamped to the unsigned range of a `w`-bit element; the flag is
+/// set when it clamps.
+///
+/// [AltiVec-PEM p:4-4 s:4.2.1.1] A result equal to the bound without clamping is not saturation.
+fn clamp_unsigned(v: i64, w: u32) -> (u64, bool) {
+    let max = (1i64 << w) - 1;
+    if v < 0 {
+        (0, true)
+    } else if v > max {
+        (max as u64, true)
+    } else {
+        (v as u64, false)
+    }
+}
+
+/// `v` clamped to the signed range of a `w`-bit element, as the element's
+/// bits; the flag is set when it clamps.
+fn clamp_signed(v: i64, w: u32) -> (u64, bool) {
+    let (min, max) = (-(1i64 << (w - 1)), (1i64 << (w - 1)) - 1);
+    let (r, sat) = if v < min {
+        (min, true)
+    } else if v > max {
+        (max, true)
+    } else {
+        (v, false)
+    };
+    ((r as u64) & ((1u64 << w) - 1), sat)
+}
+
+/// `vaddubs`: each byte sum, clamped to [0, 255].
+pub(super) fn vadd_ubytes_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u8_sat(a, b, |x, y| {
+        let (r, s) = clamp_unsigned(i64::from(x) + i64::from(y), 8);
+        (r as u8, s)
+    })
+}
+
+/// `vadduhs`: each half-word sum, clamped to [0, 65535].
+pub(super) fn vadd_uhalfs_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u16_sat(a, b, |x, y| {
+        let (r, s) = clamp_unsigned(i64::from(x) + i64::from(y), 16);
+        (r as u16, s)
+    })
+}
+
+/// `vadduws`: each word sum, clamped to [0, 2^32 - 1].
+pub(super) fn vadd_uwords_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u32_sat(a, b, |x, y| {
+        let (r, s) = clamp_unsigned(i64::from(x) + i64::from(y), 32);
+        (r as u32, s)
+    })
+}
+
+/// `vaddsbs`: each signed byte sum, clamped to [-128, 127].
+pub(super) fn vadd_sbytes_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u8_sat(a, b, |x, y| {
+        let (r, s) = clamp_signed(i64::from(x as i8) + i64::from(y as i8), 8);
+        (r as u8, s)
+    })
+}
+
+/// `vaddshs`: each signed half-word sum, clamped to the signed range.
+pub(super) fn vadd_shalfs_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u16_sat(a, b, |x, y| {
+        let (r, s) = clamp_signed(i64::from(x as i16) + i64::from(y as i16), 16);
+        (r as u16, s)
+    })
+}
+
+/// `vaddsws`: each signed word sum, clamped to the signed range.
+pub(super) fn vadd_swords_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u32_sat(a, b, |x, y| {
+        let (r, s) = clamp_signed(i64::from(x as i32) + i64::from(y as i32), 32);
+        (r as u32, s)
+    })
+}
+
+/// `vsubuhs`: each half-word difference, clamped at 0.
+pub(super) fn vsub_uhalfs_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u16_sat(a, b, |x, y| {
+        let (r, s) = clamp_unsigned(i64::from(x) - i64::from(y), 16);
+        (r as u16, s)
+    })
+}
+
+/// `vsubuws`: each word difference, clamped at 0.
+pub(super) fn vsub_uwords_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u32_sat(a, b, |x, y| {
+        let (r, s) = clamp_unsigned(i64::from(x) - i64::from(y), 32);
+        (r as u32, s)
+    })
+}
+
+/// `vsubsbs`: each signed byte difference, clamped to [-128, 127].
+pub(super) fn vsub_sbytes_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u8_sat(a, b, |x, y| {
+        let (r, s) = clamp_signed(i64::from(x as i8) - i64::from(y as i8), 8);
+        (r as u8, s)
+    })
+}
+
+/// `vsubshs`: each signed half-word difference, clamped to the signed
+/// range.
+pub(super) fn vsub_shalfs_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u16_sat(a, b, |x, y| {
+        let (r, s) = clamp_signed(i64::from(x as i16) - i64::from(y as i16), 16);
+        (r as u16, s)
+    })
+}
+
+/// `vsubsws`: each signed word difference, clamped to the signed range.
+pub(super) fn vsub_swords_sat(a: u128, b: u128) -> (u128, bool) {
+    map_u32_sat(a, b, |x, y| {
+        let (r, s) = clamp_signed(i64::from(x as i32) - i64::from(y as i32), 32);
+        (r as u32, s)
     })
 }
 

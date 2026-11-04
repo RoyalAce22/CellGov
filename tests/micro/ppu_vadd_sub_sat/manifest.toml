@@ -1,0 +1,19 @@
+[test]
+name = "ppu_vadd_sub_sat"
+
+# A hardware probe of the twelve saturating vector adds and subtracts
+# and the VSCR each leaves. Each case sets VSCR with mtvscr (0, or SAT
+# alone), runs the op, then copies VSCR to v4 with mfvscr. Cases cover
+# operand classes, results that land on a bound, and a SAT that is
+# already set. cases.tsv names each case. The console capture is the
+# answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (19 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 2448 },
+]
+
+[expect]
+outcome = "completed"
