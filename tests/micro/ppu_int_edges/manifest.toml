@@ -1,0 +1,22 @@
+[test]
+name = "ppu_int_edges"
+
+# A hardware probe of the integer instruction family at its edges:
+# carries, overflow and SO, multiply and divide, shift counts at and past
+# the operand width, wrapping rotate masks, record forms on 64-bit
+# results, compares with nonzero high words, and the CR moves and logic.
+# cases.tsv lists the 1917 cases. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case.
+memory_regions = [
+  { name = "result", addr = 0, size = 245392 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

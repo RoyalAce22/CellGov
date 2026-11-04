@@ -132,6 +132,11 @@ pub enum OracleSource {
         /// Capture identifier (e.g. dump filename or run tag).
         capture_id: &'static str,
     },
+    /// Expectations read from a committed console capture.
+    ConsoleCapture {
+        /// The capture's probe and profile, `<probe>/<profile>`.
+        capture_id: &'static str,
+    },
     /// Hand-authored sanity case, not tied to a spec page.
     Manual,
 }

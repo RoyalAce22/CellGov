@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+mfspr136	mfspr r5, 136	0x7ca822a6	-	r5	1

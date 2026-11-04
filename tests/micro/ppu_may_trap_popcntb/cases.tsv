@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+popcntb	popcntb r5, r3	0x7c6500f4	r3=0x0123456789abcdef	r5	1

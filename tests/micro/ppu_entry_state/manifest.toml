@@ -1,0 +1,16 @@
+[test]
+name = "ppu_entry_state"
+
+# A hardware probe: every register the main thread and a child thread
+# start with, stored before any compiled code runs on either. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# A 16-byte header, then the main and the child save areas of 1088
+# bytes each, as ppu/main.c lists: 2192 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2192 },
+]
+
+[expect]
+outcome = "completed"

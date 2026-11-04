@@ -28,6 +28,7 @@ crates/cellgov_ps3_abi/src/nid/table.rs linguist-generated=true
 docs/cli.md linguist-generated=true
 docs/titles.md linguist-generated=true
 docs/lv2/README.md linguist-generated=true
+tests/micro/*/ppu/cases.h linguist-generated=true
 
 # Tables written by hand stay expanded: a reviewer reads their edits.
 # The docs/lv2 rows are the archive's curated and attributed tables
@@ -40,6 +41,7 @@ docs/lv2/tables/subentry_attribution.tsv -linguist-generated
 crates/cellgov_ps3_abi/src/nid/table.tsv -linguist-generated
 tests/micro/ps3_gaps.tsv -linguist-generated
 tests/micro/spu_float_edges/*.tsv -linguist-generated
+tests/micro/*/cases.tsv -linguist-generated
 
 # Large files written by hand: decided here so the guard's size rule
 # sees a decision.

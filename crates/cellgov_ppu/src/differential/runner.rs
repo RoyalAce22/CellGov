@@ -168,6 +168,26 @@ pub fn execute_into_memory(
     }
 }
 
+/// Execute `raw` from `initial` with no memory mapped and return the
+/// post-state.
+///
+/// Callers compose a multi-instruction sequence by threading the
+/// returned state into the next call; the last word goes through
+/// [`run_case`] so its diff carries the case's provenance.
+///
+/// # Errors
+///
+/// [`CaseOutcome::DecodeError`] if the decoder rejects `raw`, and
+/// [`CaseOutcome::UnexpectedVerdict`] for any non-`Continue` verdict.
+pub fn execute_state(
+    raw: u32,
+    initial: &PpuStateSnapshot,
+) -> Result<PpuStateSnapshot, Box<CaseOutcome>> {
+    execute_snapshot(raw, initial, 0, Vec::new())
+        .map(|(state, _)| state)
+        .map_err(|e| Box::new(CaseOutcome::from(e)))
+}
+
 /// Run one case and return the [`CaseOutcome`].
 ///
 /// Staged [`Effect::SharedWriteIntent`]s are applied to a private

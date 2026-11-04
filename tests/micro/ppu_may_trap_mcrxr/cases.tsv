@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+mcrxr	mcrxr cr1	0x7c800400	xer=0xe0000000,cr=0x12345678	-	1
