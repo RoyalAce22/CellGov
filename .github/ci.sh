@@ -10,7 +10,8 @@
 # rust-cache sets CARGO_INCREMENTAL=0. Neither changes what a command
 # checks. Apart from the toolchain each job installs and the test runner
 # the blocking test legs select (see test_suite), they are the only
-# differences from a local run.
+# differences from a local run, except that the pre-push gate runs the
+# rustdoc lints through `rustdoc --check` (see rustdoc_lint).
 
 set -euo pipefail
 
@@ -68,8 +69,30 @@ lint() {
     timed clippy-compare-no-default cargo clippy -p cellgov_compare --all-targets --locked --no-default-features -- -D warnings
     # Private items too: a broken link in a private doc comment is as
     # misleading as a public one, and the public build never resolves it.
-    timed doc env RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --document-private-items --locked
-    timed doc-external-data env RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --document-private-items --locked --features "$external_data_features"
+    rustdoc_lint doc
+    rustdoc_lint doc-external-data --features "$external_data_features"
+}
+
+# rustdoc_lint <label> [cargo doc args...]: the workspace rustdoc lints.
+# CELLGOV_RUSTDOC_CHECK=1 (the pre-push gate) runs them through
+# `rustdoc --check`, the same lint passes with no HTML written. The HTML
+# build re-reads and re-merges the whole private-items search index for
+# every crate it documents, most of a minute of one core each here, so
+# a local run checks and the workflow keeps the full build. `--check` is
+# unstable: RUSTC_BOOTSTRAP=1 enables it on the pinned toolchain for this
+# command only, and a target dir of its own keeps those fingerprints
+# apart from every other build.
+rustdoc_lint() {
+    local label=$1
+    shift
+    if [ "${CELLGOV_RUSTDOC_CHECK:-0}" = 1 ]; then
+        timed "$label" env RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS='-D warnings -Z unstable-options --check' \
+            CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/rustdoc-check" \
+            cargo doc --workspace --no-deps --document-private-items --locked "$@"
+    else
+        timed "$label" env RUSTDOCFLAGS='-D warnings' \
+            cargo doc --workspace --no-deps --document-private-items --locked "$@"
+    fi
 }
 
 # Every test group runs cargo under a feature and package selection of its
