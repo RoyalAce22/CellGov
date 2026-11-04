@@ -1,0 +1,7 @@
+id	asm	words	inputs	record	may_end_process
+upk_sb	vupkhsb v3, v2; vupklsb v4, v2	0x1060120e,0x1080128e	cr=0x0,xer=0x0,v2=0x0001ff80_7f9e3779_80ff7f01_00c35a9e	v3,v4	0
+upk_sb_2	vupkhsb v3, v2; vupklsb v4, v2	0x1060120e,0x1080128e	cr=0x0,xer=0x0,v2=0x7f80ff00_01fe8102_c3a55a3c_0f1ef0e1	v3,v4	0
+upk_sh	vupkhsh v3, v2; vupklsh v4, v2	0x1060124e,0x108012ce	cr=0x0,xer=0x0,v2=0x00000001_ffff8000_7fff9e37_79b95ac3	v3,v4	0
+upk_sh_2	vupkhsh v3, v2; vupklsh v4, v2	0x1060124e,0x108012ce	cr=0x0,xer=0x0,v2=0x8001fffe_00027ffe_c3a55a3c_0f1ef0e1	v3,v4	0
+upk_px	vupkhpx v3, v2; vupklpx v4, v2	0x1060134e,0x108013ce	cr=0x0,xer=0x0,v2=0x80007fff_42100001_00000400_7c0003e0	v3,v4	0
+upk_px_2	vupkhpx v3, v2; vupklpx v4, v2	0x1060134e,0x108013ce	cr=0x0,xer=0x0,v2=0x001f83e0_fc00ffff_55552aaa_80010421	v3,v4	0

@@ -11,6 +11,7 @@ mod minmax;
 mod permute;
 mod shift;
 mod splat;
+mod unpack;
 mod vscr;
 
 pub(crate) use execute::{execute_va, execute_vsldoi, execute_vx};
@@ -63,3 +64,7 @@ mod compare_tests;
 #[cfg(test)]
 #[path = "tests/shift_rotate_tests.rs"]
 mod shift_rotate_tests;
+
+#[cfg(test)]
+#[path = "tests/unpack_tests.rs"]
+mod unpack_tests;

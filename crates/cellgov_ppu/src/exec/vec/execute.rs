@@ -14,6 +14,7 @@ use super::minmax::{
 use super::permute::{vperm, vsel, vsldoi};
 use super::shift::{vrlb, vrlh, vrlw, vslb, vslh, vslw, vsrab, vsrah, vsraw, vsrb, vsrh, vsrw};
 use super::splat::{vspltb, vsplth, vspltisb, vspltish, vspltisw, vspltw};
+use super::unpack::{vupkhpx, vupkhsb, vupkhsh, vupklpx, vupklsb, vupklsh};
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::ops::{VaOp, VxOp};
 use crate::instruction::PpuInstructionKind;
@@ -210,6 +211,20 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-45 s:6.2] vavgsw: sign-extend to 33 bits, add with 1, keep the high 32 bits.
         VxOp::Vavgsw => (vavgsw(a, b), false),
 
+        // -- Unpack (vA is a reserved field; only vB is read) --
+        // [AltiVec-PEM p:6-172 s:6.2] vupkhsb: sign-extend each byte of the high half of vB to a half word.
+        VxOp::Vupkhsb => (vupkhsb(b), false),
+        // [AltiVec-PEM p:6-175 s:6.2] vupklsb: sign-extend each byte of the low half of vB to a half word.
+        VxOp::Vupklsb => (vupklsb(b), false),
+        // [AltiVec-PEM p:6-173 s:6.2] vupkhsh: sign-extend each half word of the high half of vB to a word.
+        VxOp::Vupkhsh => (vupkhsh(b), false),
+        // [AltiVec-PEM p:6-176 s:6.2] vupklsh: sign-extend each half word of the low half of vB to a word.
+        VxOp::Vupklsh => (vupklsh(b), false),
+        // [AltiVec-PEM p:6-171 s:6.2] vupkhpx: each high-half pixel becomes bit 0 sign-extended to 8 bits, then bits 1:5, 6:10 and 11:15 each zero-extended to 8 bits.
+        VxOp::Vupkhpx => (vupkhpx(b), false),
+        // [AltiVec-PEM p:6-174 s:6.2] vupklpx: the same for each low-half pixel.
+        VxOp::Vupklpx => (vupklpx(b), false),
+
         // -- Int <-> Float conversions (va field is uimm scale) --
         // [AltiVec-PEM p:6-49 s:6.2] vcfsx
         VxOp::Vcfsx => (vcfsx(b, va), false),
@@ -235,26 +250,20 @@ pub(crate) fn execute_vx(
         | VxOp::Vpkswss
         | VxOp::Vaddubs
         | VxOp::Vrfin
-        | VxOp::Vupkhsb
         | VxOp::Vadduhs
         | VxOp::Vrfiz
-        | VxOp::Vupkhsh
         | VxOp::Vadduws
         | VxOp::Vrfip
-        | VxOp::Vupklsb
         | VxOp::Vsr
         | VxOp::Vcmpgtfp
         | VxOp::Vrfim
-        | VxOp::Vupklsh
         | VxOp::Vaddsbs
         | VxOp::Vpkpx
         | VxOp::Vaddshs
-        | VxOp::Vupkhpx
         | VxOp::Vaddsws
         | VxOp::Vctuxs
         | VxOp::Vcmpbfp
         | VxOp::Vctsxs
-        | VxOp::Vupklpx
         | VxOp::Vmaxfp
         | VxOp::Vslo
         | VxOp::Vminfp

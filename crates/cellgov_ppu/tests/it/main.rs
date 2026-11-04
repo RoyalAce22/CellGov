@@ -35,6 +35,7 @@ mod console_ppu_vminmax_avg;
 mod console_ppu_vmul_even_odd;
 mod console_ppu_vrotate_shift;
 mod console_ppu_vsub_carry;
+mod console_ppu_vunpack;
 mod reloc_addr16_lo_ds;
 mod reloc_addr64;
 mod reloc_rel24;
