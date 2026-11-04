@@ -11,7 +11,8 @@
  *           a progress record
  *   word 1  the number of cases
  *   word 2  the case a progress record names (0 otherwise)
- *   word 3  0
+ *   word 3  the memory buffer's address when the table names memory, 0
+ *           otherwise
  *   then, per case, two runs of CGOV_CASE_RUN_BYTES each:
  *     +0   four 8-byte slots: the recorded registers in table order
  *     +32  XER (mfxer)

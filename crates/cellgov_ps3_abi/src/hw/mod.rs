@@ -7,6 +7,7 @@ pub mod mfc_timing;
 pub mod ppc_isa;
 pub mod ppu;
 pub mod ppu_issue;
+pub mod ppu_status;
 pub mod rsx;
 pub mod spu;
 pub mod spu_fpscr;

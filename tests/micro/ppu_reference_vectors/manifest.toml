@@ -1,0 +1,26 @@
+[test]
+name = "ppu_reference_vectors"
+
+# A hardware probe of the PPU results the documents leave undefined:
+# the word multiply and divide high words and undefined divides, the CR
+# field moves with other than one field, lswx with a zero count, the XER
+# reserved bits, the fctiw and mffs high words, single-precision
+# operations on wide operands, FR after an overflow, stfs below the
+# single denormal range, non-IEEE mode, store conditionals to another
+# address, dcbf under a reservation, the vector element loads and the
+# vector shifts. cases.tsv lists the 241 vectors; the cellgov_fuzz
+# module ppu_documented writes it and holds each component's verdict.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header whose word 3 is the memory
+# buffer's address, then two 64-byte runs per vector.
+memory_regions = [
+  { name = "result", addr = 0, size = 30864 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

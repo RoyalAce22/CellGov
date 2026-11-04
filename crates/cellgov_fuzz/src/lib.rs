@@ -9,6 +9,7 @@ pub mod evaluation;
 pub mod loader_images;
 pub mod loaders;
 pub mod ppu;
+pub mod ppu_documented;
 pub mod ppu_paths;
 pub mod ppu_reference;
 pub mod ppu_sequences;

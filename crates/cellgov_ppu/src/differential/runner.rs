@@ -183,9 +183,21 @@ pub fn execute_state(
     raw: u32,
     initial: &PpuStateSnapshot,
 ) -> Result<PpuStateSnapshot, Box<CaseOutcome>> {
-    execute_snapshot(raw, initial, 0, Vec::new())
-        .map(|(state, _)| state)
-        .map_err(|e| Box::new(CaseOutcome::from(e)))
+    execute_state_in(raw, initial, 0, Vec::new()).map(|(state, _)| state)
+}
+
+/// [`execute_state`] on a memory image at `base`; also returns the image after the stores.
+///
+/// # Errors
+///
+/// As [`execute_state`].
+pub fn execute_state_in(
+    raw: u32,
+    initial: &PpuStateSnapshot,
+    base: u64,
+    memory: Vec<u8>,
+) -> Result<(PpuStateSnapshot, Vec<u8>), Box<CaseOutcome>> {
+    execute_snapshot(raw, initial, base, memory).map_err(|e| Box::new(CaseOutcome::from(e)))
 }
 
 /// Run one case and return the [`CaseOutcome`].
