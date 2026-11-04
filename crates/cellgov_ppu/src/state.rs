@@ -70,6 +70,42 @@ impl<T, const N: usize> std::ops::Index<usize> for RegBank<T, N> {
     }
 }
 
+/// The GPR bank and its share of the state-hash accumulator.
+///
+/// The bank carries the sum of its own lanes, so a whole-bank move or
+/// swap between two states takes that sum with it and both hashes stay
+/// current. There is no `IndexMut` and no `Clone`: every element write
+/// lands in [`PpuState::set_gpr`].
+pub struct GprBank {
+    regs: [u64; GPR_COUNT],
+    acc: u128,
+}
+
+impl GprBank {
+    fn new() -> Self {
+        Self {
+            regs: [0; GPR_COUNT],
+            acc: 0,
+        }
+    }
+
+    /// Borrow the whole bank, e.g. for snapshotting or hashing.
+    #[inline]
+    pub fn as_array(&self) -> &[u64; GPR_COUNT] {
+        &self.regs
+    }
+}
+
+impl std::ops::Index<usize> for GprBank {
+    type Output = u64;
+
+    #[inline]
+    #[track_caller]
+    fn index(&self, i: usize) -> &u64 {
+        &self.regs[i]
+    }
+}
+
 /// PPU architectural register file and SPRs.
 ///
 /// Hash-covered fields (register banks, CR, LR, CTR, XER, FPSCR,
@@ -80,7 +116,7 @@ pub struct PpuState {
     /// General-purpose registers r0..r31.
     ///
     /// [PPC-Book1 p:41 s:3.2.1] 64-bit GPRs.
-    pub gpr: RegBank<u64, GPR_COUNT>,
+    pub gpr: GprBank,
     /// Floating-point registers f0..f31 as raw f64 bit patterns.
     ///
     /// [PPC-Book1 p:97 s:4.2] FPRs hold floating-point values in double format.
@@ -160,9 +196,10 @@ pub struct PpuState {
     ///
     /// [PPC-Book2 p:10 s:1.7.3.1] Reservation state: lwarx/ldarx sets, stwcx./stdcx. tests + clears.
     reservation: Option<ReservedLine>,
-    /// The Multilinear-128 accumulator of the hashed lanes. Each setter
-    /// of a hashed lane adds that lane's change, so [`Self::state_hash`]
-    /// reads it without a rehash.
+    /// The Multilinear-128 accumulator of the hashed lanes outside the
+    /// GPR bank, which keeps its own. Each setter of a hashed lane adds
+    /// that lane's change, so [`Self::state_hash`] reads the two sums
+    /// without a rehash.
     acc: u128,
 }
 
@@ -288,7 +325,7 @@ impl PpuState {
     /// register zero except the VSCR, and no active reservation.
     pub fn new() -> Self {
         Self {
-            gpr: RegBank([0u64; GPR_COUNT]),
+            gpr: GprBank::new(),
             fpr: RegBank([0u64; FPR_COUNT]),
             vr: RegBank([0u128; VR_COUNT]),
             pc: 0,
@@ -319,9 +356,9 @@ impl PpuState {
     #[inline]
     #[track_caller]
     pub fn set_gpr(&mut self, k: usize, v: u64) {
-        let old = self.gpr.0[k];
-        self.acc = self.acc.wrapping_add(lane_delta(k, old, v));
-        self.gpr.0[k] = v;
+        let old = self.gpr.regs[k];
+        self.gpr.acc = self.gpr.acc.wrapping_add(lane_delta(k, old, v));
+        self.gpr.regs[k] = v;
     }
 
     /// Write FPR `k` (raw f64 bit pattern).
@@ -591,7 +628,7 @@ impl PpuState {
     /// a field in the zoom diff.
     pub fn fingerprint(&self) -> cellgov_exec::PpuFingerprint {
         cellgov_exec::PpuFingerprint {
-            gpr: self.gpr.0,
+            gpr: self.gpr.regs,
             lr: self.lr,
             ctr: self.ctr,
             xer: self.xer,
@@ -609,7 +646,7 @@ impl PpuState {
     /// setters keep current, so reading it costs a shift.
     #[inline]
     pub fn state_hash(&self) -> u64 {
-        crate::multilinear::finish(self.acc)
+        crate::multilinear::finish(self.accumulator())
     }
 
     /// [`Self::state_hash`] computed from every lane, without the
@@ -620,7 +657,13 @@ impl PpuState {
 
     /// Whether the accumulator equals the one every lane gives now.
     pub fn hash_is_current(&self) -> bool {
-        self.acc == self.accumulate_from_scratch()
+        self.accumulator() == self.accumulate_from_scratch()
+    }
+
+    /// The kept accumulator: the GPR bank's sum plus every other lane's.
+    #[inline]
+    fn accumulator(&self) -> u128 {
+        self.acc.wrapping_add(self.gpr.acc)
     }
 
     /// The Multilinear-128 accumulator of every lane, read from `self`
@@ -659,7 +702,10 @@ impl Default for PpuState {
 impl Clone for PpuState {
     fn clone(&self) -> Self {
         Self {
-            gpr: RegBank(self.gpr.0),
+            gpr: GprBank {
+                regs: self.gpr.regs,
+                acc: self.gpr.acc,
+            },
             fpr: RegBank(self.fpr.0),
             vr: RegBank(self.vr.0),
             pc: self.pc,
@@ -722,3 +768,7 @@ mod scheme_tests;
 #[cfg(test)]
 #[path = "tests/accumulator_tests.rs"]
 mod accumulator_tests;
+
+#[cfg(test)]
+#[path = "tests/gpr_bank_tests.rs"]
+mod gpr_bank_tests;
