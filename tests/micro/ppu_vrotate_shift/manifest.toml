@@ -1,0 +1,18 @@
+[test]
+name = "ppu_vrotate_shift"
+
+# A hardware probe of vrlb, vrlh, vrlw, vslb, vslh, vsrb and vsrh over
+# every count for each element width, with and without the high bits
+# of the count element set, a different count in every lane. vrlw is
+# paired with the shipped vslw and vsrw. cases.tsv names each case.
+# The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (8 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 1040 },
+]
+
+[expect]
+outcome = "completed"

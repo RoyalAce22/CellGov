@@ -12,7 +12,7 @@ use super::minmax::{
     vminsb, vminsh, vminsw, vminub, vminuh, vminuw,
 };
 use super::permute::{vperm, vsel, vsldoi};
-use super::shift::{vslw, vsrab, vsrah, vsraw, vsrw};
+use super::shift::{vrlb, vrlh, vrlw, vslb, vslh, vslw, vsrab, vsrah, vsraw, vsrb, vsrh, vsrw};
 use super::splat::{vspltb, vsplth, vspltisb, vspltish, vspltisw, vspltw};
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::ops::{VaOp, VxOp};
@@ -107,6 +107,20 @@ pub(crate) fn execute_vx(
         VxOp::Vsrah => (vsrah(a, b), false),
         // [AltiVec-PEM p:6-148 s:6.2] vsrab
         VxOp::Vsrab => (vsrab(a, b), false),
+        // [AltiVec-PEM p:6-135 s:6.2] vslb: shift each byte left by the low 3 bits of its vB byte, zero fill.
+        VxOp::Vslb => (vslb(a, b), false),
+        // [AltiVec-PEM p:6-137 s:6.2] vslh: shift each half word left by the low 4 bits of its vB half word, zero fill.
+        VxOp::Vslh => (vslh(a, b), false),
+        // [AltiVec-PEM p:6-151 s:6.2] vsrb: shift each byte right by the low 3 bits of its vB byte, zero fill.
+        VxOp::Vsrb => (vsrb(a, b), false),
+        // [AltiVec-PEM p:6-152 s:6.2] vsrh: shift each half word right by the low 4 bits of its vB half word, zero fill.
+        VxOp::Vsrh => (vsrh(a, b), false),
+        // [AltiVec-PEM p:6-129 s:6.2] vrlb: rotate each byte left by the low 3 bits of its vB byte.
+        VxOp::Vrlb => (vrlb(a, b), false),
+        // [AltiVec-PEM p:6-130 s:6.2] vrlh: rotate each half word left by the low 4 bits of its vB half word.
+        VxOp::Vrlh => (vrlh(a, b), false),
+        // [AltiVec-PEM p:6-131 s:6.2] vrlw: rotate each word left by the low 5 bits of its vB word.
+        VxOp::Vrlw => (vrlw(a, b), false),
 
         // -- Splat --
         // [AltiVec-PEM p:6-140 s:6.2] vspltb (va is byte index)
@@ -202,20 +216,15 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-50 s:6.2] vcfux
         VxOp::Vcfux => (vcfux(b, va), false),
 
-        VxOp::Vrlb
-        | VxOp::Vaddfp
+        VxOp::Vaddfp
         | VxOp::Vpkuhum
-        | VxOp::Vrlh
         | VxOp::Vsubfp
         | VxOp::Vpkuwum
-        | VxOp::Vrlw
         | VxOp::Vpkuhus
         | VxOp::Vcmpeqfp
         | VxOp::Vpkuwus
-        | VxOp::Vslb
         | VxOp::Vrefp
         | VxOp::Vpkshus
-        | VxOp::Vslh
         | VxOp::Vrsqrtefp
         | VxOp::Vpkswus
         | VxOp::Vexptefp
@@ -225,11 +234,9 @@ pub(crate) fn execute_vx(
         | VxOp::Vlogefp
         | VxOp::Vpkswss
         | VxOp::Vaddubs
-        | VxOp::Vsrb
         | VxOp::Vrfin
         | VxOp::Vupkhsb
         | VxOp::Vadduhs
-        | VxOp::Vsrh
         | VxOp::Vrfiz
         | VxOp::Vupkhsh
         | VxOp::Vadduws

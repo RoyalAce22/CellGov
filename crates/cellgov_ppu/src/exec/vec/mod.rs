@@ -59,3 +59,7 @@ mod mul_even_odd_tests;
 #[cfg(test)]
 #[path = "tests/compare_tests.rs"]
 mod compare_tests;
+
+#[cfg(test)]
+#[path = "tests/shift_rotate_tests.rs"]
+mod shift_rotate_tests;

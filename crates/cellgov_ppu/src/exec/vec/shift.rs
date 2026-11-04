@@ -22,3 +22,31 @@ pub(super) fn vsrah(a: u128, b: u128) -> u128 {
 pub(super) fn vsrab(a: u128, b: u128) -> u128 {
     map_u8(a, b, |x, y| ((x as i8) >> (y & 0x7)) as u8)
 }
+
+pub(super) fn vslb(a: u128, b: u128) -> u128 {
+    map_u8(a, b, |x, y| x << (y & 0x7))
+}
+
+pub(super) fn vslh(a: u128, b: u128) -> u128 {
+    map_u16(a, b, |x, y| x << (y & 0xF))
+}
+
+pub(super) fn vsrb(a: u128, b: u128) -> u128 {
+    map_u8(a, b, |x, y| x >> (y & 0x7))
+}
+
+pub(super) fn vsrh(a: u128, b: u128) -> u128 {
+    map_u16(a, b, |x, y| x >> (y & 0xF))
+}
+
+pub(super) fn vrlb(a: u128, b: u128) -> u128 {
+    map_u8(a, b, |x, y| x.rotate_left(u32::from(y & 0x7)))
+}
+
+pub(super) fn vrlh(a: u128, b: u128) -> u128 {
+    map_u16(a, b, |x, y| x.rotate_left(u32::from(y & 0xF)))
+}
+
+pub(super) fn vrlw(a: u128, b: u128) -> u128 {
+    map_u32(a, b, |x, y| x.rotate_left(y & 0x1F))
+}
