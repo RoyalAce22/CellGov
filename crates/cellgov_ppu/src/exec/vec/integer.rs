@@ -58,3 +58,49 @@ pub(super) fn vsub_ubytes_sat(a: u128, b: u128) -> (u128, bool) {
 pub(super) fn vmulouh(a: u128, b: u128) -> u128 {
     map_u32(a, b, |x, y| (x & 0xFFFF) * (y & 0xFFFF))
 }
+
+/// `vmuleuh`: the even halfword of each word of vA times that of vB,
+/// as a word.
+pub(super) fn vmuleuh(a: u128, b: u128) -> u128 {
+    map_u32(a, b, |x, y| (x >> 16) * (y >> 16))
+}
+
+/// `vmulosh`: the odd halfwords, signed, as a word.
+pub(super) fn vmulosh(a: u128, b: u128) -> u128 {
+    map_u32(a, b, |x, y| {
+        (i32::from(x as i16) * i32::from(y as i16)) as u32
+    })
+}
+
+/// `vmulesh`: the even halfwords, signed, as a word.
+pub(super) fn vmulesh(a: u128, b: u128) -> u128 {
+    map_u32(a, b, |x, y| {
+        (i32::from((x >> 16) as i16) * i32::from((y >> 16) as i16)) as u32
+    })
+}
+
+/// `vmuloub`: the odd byte of each halfword of vA times that of vB, as
+/// a halfword.
+pub(super) fn vmuloub(a: u128, b: u128) -> u128 {
+    map_u16(a, b, |x, y| (x & 0xFF) * (y & 0xFF))
+}
+
+/// `vmuleub`: the even byte of each halfword of vA times that of vB, as
+/// a halfword.
+pub(super) fn vmuleub(a: u128, b: u128) -> u128 {
+    map_u16(a, b, |x, y| (x >> 8) * (y >> 8))
+}
+
+/// `vmulosb`: the odd bytes, signed, as a halfword.
+pub(super) fn vmulosb(a: u128, b: u128) -> u128 {
+    map_u16(a, b, |x, y| {
+        (i16::from(x as i8) * i16::from(y as i8)) as u16
+    })
+}
+
+/// `vmulesb`: the even bytes, signed, as a halfword.
+pub(super) fn vmulesb(a: u128, b: u128) -> u128 {
+    map_u16(a, b, |x, y| {
+        (i16::from((x >> 8) as i8) * i16::from((y >> 8) as i8)) as u16
+    })
+}

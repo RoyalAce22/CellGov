@@ -51,3 +51,7 @@ mod sub_carry_tests;
 #[cfg(test)]
 #[path = "tests/minmax_tests.rs"]
 mod minmax_tests;
+
+#[cfg(test)]
+#[path = "tests/mul_even_odd_tests.rs"]
+mod mul_even_odd_tests;

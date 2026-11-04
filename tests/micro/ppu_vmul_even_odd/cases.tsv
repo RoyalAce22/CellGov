@@ -1,0 +1,9 @@
+id	asm	words	inputs	record	may_end_process
+mul_ub	vmuleub v3, v1, v2; vmuloub v4, v1, v2	0x10611208,0x10811008	cr=0x0,xer=0x0,v1=0x00017f80_ff9e00ff_807f0137_ff807f00,v2=0xff01807f_003701fe_8080029e_ff7f7f80	v3,v4	0
+mul_sb	vmulesb v3, v1, v2; vmulosb v4, v1, v2	0x10611308,0x10811108	cr=0x0,xer=0x0,v1=0x00017f80_ff9e00ff_807f0137_ff807f00,v2=0xff01807f_003701fe_8080029e_ff7f7f80	v3,v4	0
+mul_ub_edges	vmuleub v3, v1, v2; vmuloub v4, v1, v2	0x10611208,0x10811008	cr=0x0,xer=0x0,v1=0x8080ffff_7f7f01ff_80017f80_ff7f0180,v2=0x8080ff01_7f8001ff_7f80807f_ffff7f80	v3,v4	0
+mul_sb_edges	vmulesb v3, v1, v2; vmulosb v4, v1, v2	0x10611308,0x10811108	cr=0x0,xer=0x0,v1=0x8080ffff_7f7f01ff_80017f80_ff7f0180,v2=0x8080ff01_7f8001ff_7f80807f_ffff7f80	v3,v4	0
+mul_uh	vmuleuh v3, v1, v2; vmulouh v4, v1, v2	0x10611248,0x10811048	cr=0x0,xer=0x0,v1=0x00000001_7fff8000_ffff9e37_8000fffe,v2=0xffff0002_80007fff_000079b9_8000ffff	v3,v4	0
+mul_sh	vmulesh v3, v1, v2; vmulosh v4, v1, v2	0x10611348,0x10811148	cr=0x0,xer=0x0,v1=0x00000001_7fff8000_ffff9e37_8000fffe,v2=0xffff0002_80007fff_000079b9_8000ffff	v3,v4	0
+mul_uh_edges	vmuleuh v3, v1, v2; vmulouh v4, v1, v2	0x10611248,0x10811048	cr=0x0,xer=0x0,v1=0x80008000_ffffffff_7fff7fff_00018000,v2=0x80008000_ffff0001_80007fff_7fffffff	v3,v4	0
+mul_sh_edges	vmulesh v3, v1, v2; vmulosh v4, v1, v2	0x10611348,0x10811148	cr=0x0,xer=0x0,v1=0x80008000_ffffffff_7fff7fff_00018000,v2=0x80008000_ffff0001_80007fff_7fffffff	v3,v4	0

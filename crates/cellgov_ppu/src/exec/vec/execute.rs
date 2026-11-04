@@ -2,8 +2,9 @@
 
 use super::convert::{vcfsx, vcfux};
 use super::integer::{
-    vadd_bytes, vadd_halfs, vadd_words, vaddcuw, vcmpequw, vmulouh, vsub_bytes, vsub_halfs,
-    vsub_ubytes_sat, vsub_words, vsubcuw,
+    vadd_bytes, vadd_halfs, vadd_words, vaddcuw, vcmpequw, vmulesb, vmulesh, vmuleub, vmuleuh,
+    vmulosb, vmulosh, vmuloub, vmulouh, vsub_bytes, vsub_halfs, vsub_ubytes_sat, vsub_words,
+    vsubcuw,
 };
 use super::merge::{vmrghb, vmrghh, vmrghw, vmrglb, vmrglh, vmrglw};
 use super::minmax::{
@@ -122,6 +123,20 @@ pub(crate) fn execute_vx(
         // -- Multiply --
         // [AltiVec-PEM p:6-108 s:6.2] vmulouh
         VxOp::Vmulouh => (vmulouh(a, b), false),
+        // [AltiVec-PEM p:6-104 s:6.2] vmuleuh: Vector Multiply Even Unsigned Half Word
+        VxOp::Vmuleuh => (vmuleuh(a, b), false),
+        // [AltiVec-PEM p:6-106 s:6.2] vmulosh: Vector Multiply Odd Signed Half Word
+        VxOp::Vmulosh => (vmulosh(a, b), false),
+        // [AltiVec-PEM p:6-102 s:6.2] vmulesh: Vector Multiply Even Signed Half Word
+        VxOp::Vmulesh => (vmulesh(a, b), false),
+        // [AltiVec-PEM p:6-107 s:6.2] vmuloub: Vector Multiply Odd Unsigned Byte
+        VxOp::Vmuloub => (vmuloub(a, b), false),
+        // [AltiVec-PEM p:6-103 s:6.2] vmuleub: Vector Multiply Even Unsigned Byte
+        VxOp::Vmuleub => (vmuleub(a, b), false),
+        // [AltiVec-PEM p:6-105 s:6.2] vmulosb: Vector Multiply Odd Signed Byte
+        VxOp::Vmulosb => (vmulosb(a, b), false),
+        // [AltiVec-PEM p:6-101 s:6.2] vmulesb: Vector Multiply Even Signed Byte
+        VxOp::Vmulesb => (vmulesb(a, b), false),
 
         // -- Subtract --
         // [AltiVec-PEM p:6-161 s:6.2] vsububs
@@ -173,7 +188,6 @@ pub(crate) fn execute_vx(
 
         VxOp::Vrlb
         | VxOp::Vcmpequb
-        | VxOp::Vmuloub
         | VxOp::Vaddfp
         | VxOp::Vpkuhum
         | VxOp::Vrlh
@@ -185,11 +199,9 @@ pub(crate) fn execute_vx(
         | VxOp::Vcmpeqfp
         | VxOp::Vpkuwus
         | VxOp::Vslb
-        | VxOp::Vmulosb
         | VxOp::Vrefp
         | VxOp::Vpkshus
         | VxOp::Vslh
-        | VxOp::Vmulosh
         | VxOp::Vrsqrtefp
         | VxOp::Vpkswus
         | VxOp::Vexptefp
@@ -201,13 +213,11 @@ pub(crate) fn execute_vx(
         | VxOp::Vaddubs
         | VxOp::Vsrb
         | VxOp::Vcmpgtub
-        | VxOp::Vmuleub
         | VxOp::Vrfin
         | VxOp::Vupkhsb
         | VxOp::Vadduhs
         | VxOp::Vsrh
         | VxOp::Vcmpgtuh
-        | VxOp::Vmuleuh
         | VxOp::Vrfiz
         | VxOp::Vupkhsh
         | VxOp::Vadduws
@@ -220,11 +230,9 @@ pub(crate) fn execute_vx(
         | VxOp::Vupklsh
         | VxOp::Vaddsbs
         | VxOp::Vcmpgtsb
-        | VxOp::Vmulesb
         | VxOp::Vpkpx
         | VxOp::Vaddshs
         | VxOp::Vcmpgtsh
-        | VxOp::Vmulesh
         | VxOp::Vupkhpx
         | VxOp::Vaddsws
         | VxOp::Vcmpgtsw
