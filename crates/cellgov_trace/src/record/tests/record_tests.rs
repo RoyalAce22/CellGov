@@ -450,6 +450,7 @@ fn ppu_state_full_roundtrip() {
         cr: 0xa5a5_a5a5,
         reservation_line: Some(0x3000_1080),
         fpscr: 0x8200_40f8,
+        vrsave: 0xc000_0001,
     });
 }
 
@@ -465,6 +466,7 @@ fn ppu_state_full_zero_state_roundtrip() {
         cr: 0,
         reservation_line: None,
         fpscr: 0,
+        vrsave: 0,
     });
 }
 
@@ -480,6 +482,7 @@ fn ppu_state_full_reservation_none_and_some_zero_are_distinct() {
         cr: 0,
         reservation_line: None,
         fpscr: 0,
+        vrsave: 0,
     };
     let some_zero = TraceRecord::PpuStateFull {
         step: 0,
@@ -491,6 +494,7 @@ fn ppu_state_full_reservation_none_and_some_zero_are_distinct() {
         cr: 0,
         reservation_line: Some(0),
         fpscr: 0,
+        vrsave: 0,
     };
     let (mut a, mut b) = (Vec::new(), Vec::new());
     none.encode(&mut a);
@@ -512,9 +516,10 @@ fn ppu_state_full_truncated_input_is_rejected() {
         cr: 7,
         reservation_line: Some(8),
         fpscr: 9,
+        vrsave: 10,
     }
     .encode(&mut buf);
-    assert_eq!(buf.len(), 314, "documented wire size");
+    assert_eq!(buf.len(), 318, "documented wire size");
     let truncated = &buf[..buf.len() - 1];
     assert_eq!(TraceRecord::decode(truncated), Err(DecodeError::Truncated));
 }
@@ -531,6 +536,7 @@ fn ppu_state_full_tag_is_0x08() {
         cr: 0,
         reservation_line: None,
         fpscr: 0,
+        vrsave: 0,
     };
     let mut buf = Vec::new();
     r.encode(&mut buf);
@@ -549,6 +555,7 @@ fn ppu_state_full_level_is_hashes() {
         cr: 0,
         reservation_line: None,
         fpscr: 0,
+        vrsave: 0,
     };
     assert_eq!(r.level(), TraceLevel::Hashes);
 }

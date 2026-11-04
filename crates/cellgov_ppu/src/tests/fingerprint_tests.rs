@@ -17,6 +17,7 @@ fn zoom_bytes(state: &PpuState) -> Vec<u8> {
         cr,
         reservation_line,
         fpscr,
+        vrsave,
     } = state.fingerprint();
     let mut w = TraceWriter::new();
     w.record(&TraceRecord::PpuStateFull {
@@ -29,6 +30,7 @@ fn zoom_bytes(state: &PpuState) -> Vec<u8> {
         cr,
         reservation_line,
         fpscr,
+        vrsave,
     });
     w.take_bytes()
 }

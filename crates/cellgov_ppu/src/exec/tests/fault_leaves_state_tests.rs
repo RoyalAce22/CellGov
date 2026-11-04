@@ -33,7 +33,6 @@ fn a_faulting_instruction_changes_no_architectural_state() {
                 let mut state = PpuState::new();
                 state.set_gpr_all([seed; 32]);
                 state.set_xer(32);
-                state.vrsave_written = true;
                 let before = PpuArchitecturalState::capture(&state);
                 let hash = state.state_hash();
                 let mut effects = Vec::new();

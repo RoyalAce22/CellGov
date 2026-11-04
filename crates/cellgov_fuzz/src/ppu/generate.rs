@@ -262,9 +262,7 @@ pub(super) fn random_state(rng: &mut Rng) -> Result<PpuState, GeneratorError> {
     state.set_lr(rng.next_u64());
     state.set_ctr(rng.next_u64());
     state.set_xer(rng.next_u64());
-    state.vrsave = rng.next_u32();
-    // The executor treats a seeded VRSAVE value as initialized, as after `mtvrsave`.
-    state.vrsave_written = true;
+    state.set_vrsave(rng.next_u32());
     state.tb = rng.next_u64();
     state.set_reservation(if rng.chance(1, 2)? {
         Some(ReservedLine::containing(

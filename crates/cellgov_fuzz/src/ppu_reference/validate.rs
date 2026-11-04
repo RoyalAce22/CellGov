@@ -125,7 +125,7 @@ impl PpuReferenceInputState {
         state.set_lr(self.lr);
         state.set_ctr(self.ctr);
         state.set_xer(self.xer);
-        state.vrsave = self.vrsave;
+        state.set_vrsave(self.vrsave);
         state.tb = self.tb;
         state.set_reservation(self.reservation.map(cellgov_sync::ReservedLine::containing));
         Ok(state)

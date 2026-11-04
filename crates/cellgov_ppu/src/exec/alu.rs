@@ -636,43 +636,18 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         // extended mnemonic for mfspr RT, VRSAVE (SPR 256). Reads
         // the 32-bit VR-usage mask into rT; the upper 32 bits of
         // rT are zero (standard widening for a 32-bit SPR read).
-        //
-        // Tripwire: this read guards the sync_state_hash exclusion
-        // of VRSAVE. The exclusion is sound only while VRSAVE is
-        // write-only-then-read-back -- a cold read consumes the
-        // seed (0) as architectural state, and a divergent seed
-        // would not have surfaced through any prior GPR diff. If
-        // this assert ever trips, reopen the exclusion decision
-        // (see the VRSAVE note in state.rs) before trusting the
-        // title's differential results. This is not a fault: reading
-        // VRSAVE before writing is legal PPC; faulting would
-        // impersonate a non-existent architectural error.
-        //
-        // The counter increments *before* the assert so the
-        // witness records the read even on a run that trips.
+        // A read before any write is legal and returns the reset value.
         PpuInstruction::Mfvrsave { rt } => {
             state.mfvrsave_executed = state.mfvrsave_executed.wrapping_add(1);
-            debug_assert!(
-                state.vrsave_written,
-                "mfvrsave of never-written VRSAVE: title consumes seed VRSAVE (0) as \
-                 architectural state. The sync_state_hash exclusion of VRSAVE assumes it \
-                 is write-only-then-read-back (inert save/restore idiom); a cold read \
-                 breaks that precondition because a divergent seed would not surface \
-                 through any prior GPR diff. Reopen the VRSAVE hash-inclusion decision \
-                 (see the VRSAVE exclusion note in state.rs) before trusting this title's \
-                 differential results."
-            );
-            state.set_gpr(rt as usize, state.vrsave as u64);
+            state.set_gpr(rt as usize, u64::from(state.vrsave()));
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] mtvrsave:
         // extended mnemonic for mtspr VRSAVE, RS (SPR 256). Writes
         // the low 32 bits of rS into VRSAVE; the upper 32 bits of
-        // rS are architecturally ignored (VRSAVE is 32-bit). Marks
-        // vrsave_written so the Mfvrsave tripwire can tell write-
-        // before-read from cold read.
+        // rS are architecturally ignored (VRSAVE is 32-bit).
         PpuInstruction::Mtvrsave { rs } => {
-            state.vrsave = state.gpr[rs as usize] as u32;
+            state.set_vrsave(state.gpr[rs as usize] as u32);
             state.vrsave_written = true;
             ExecuteVerdict::Continue
         }

@@ -45,6 +45,7 @@ impl ExecutionUnit for PpuExecutionUnit {
             ctr: self.state.ctr(),
             xer: self.state.xer(),
             fpscr: self.state.fpscr(),
+            vrsave: self.state.vrsave(),
             tb: self.state.tb,
             reservation_line: self.state.reservation().map(|l| l.addr()),
         }

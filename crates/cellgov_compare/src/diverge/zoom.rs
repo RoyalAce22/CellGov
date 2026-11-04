@@ -26,7 +26,7 @@ pub enum ZoomLookup {
         /// PC on side B.
         b_pc: u64,
         /// Per-field diffs in canonical order: `gpr0..gpr31`, `lr`,
-        /// `ctr`, `xer`, `cr`, `resv_held`, `resv_line`, `fpscr`.
+        /// `ctr`, `xer`, `cr`, `resv_held`, `resv_line`, `fpscr`, `vrsave`.
         diffs: Vec<RegDiff>,
     },
     /// The target step was absent from one or both zoom traces.
@@ -55,7 +55,7 @@ pub enum ZoomLookup {
 pub struct RegDiff {
     /// Canonical field name: `gpr0..gpr31`, `lr`, `ctr`, `xer`, `cr`,
     /// `resv_held` (0/1), `resv_line` (line address; emitted only when
-    /// both sides hold a reservation), `fpscr`.
+    /// both sides hold a reservation), `fpscr`, `vrsave`.
     pub field: &'static str,
     /// Value from side A.
     pub a: u64,
@@ -131,12 +131,14 @@ pub fn zoom_lookup(a_zoom: &[u8], b_zoom: &[u8], step: u64) -> ZoomLookup {
             b: u64::from(b_line.is_some()),
         }),
     }
-    if a.fpscr != b.fpscr {
-        diffs.push(RegDiff {
-            field: "fpscr",
-            a: u64::from(a.fpscr),
-            b: u64::from(b.fpscr),
-        });
+    for (field, av, bv) in [("fpscr", a.fpscr, b.fpscr), ("vrsave", a.vrsave, b.vrsave)] {
+        if av != bv {
+            diffs.push(RegDiff {
+                field,
+                a: u64::from(av),
+                b: u64::from(bv),
+            });
+        }
     }
     ZoomLookup::Found {
         step,
@@ -156,6 +158,7 @@ struct FullSnapshot {
     cr: u32,
     reservation_line: Option<u64>,
     fpscr: u32,
+    vrsave: u32,
 }
 
 fn find_full_at(
@@ -173,6 +176,7 @@ fn find_full_at(
             cr,
             reservation_line,
             fpscr,
+            vrsave,
         } = r?
         {
             if step == target_step {
@@ -185,6 +189,7 @@ fn find_full_at(
                     cr,
                     reservation_line,
                     fpscr,
+                    vrsave,
                 }));
             }
         }

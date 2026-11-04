@@ -583,6 +583,7 @@ fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
                 cr: 0x4000_0000,
                 reservation_line: None,
                 fpscr: 0x8200_40f8,
+                vrsave: 0xc000_0001,
             },
         )]],
         step_idx: Cell::new(0),

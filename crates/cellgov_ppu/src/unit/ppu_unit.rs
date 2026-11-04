@@ -30,6 +30,8 @@ pub struct PpuSnapshot {
     pub xer: u64,
     /// Floating-point status and control register.
     pub fpscr: u32,
+    /// AltiVec VR-usage mask.
+    pub vrsave: u32,
     /// Time base register.
     ///
     /// [PPC-Book2 p:29 s:Chapter 4. Time Base] TB is a 64-bit unsigned counter incremented monotonically.

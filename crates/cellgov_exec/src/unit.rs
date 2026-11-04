@@ -108,6 +108,8 @@ pub struct PpuFingerprint {
     pub reservation_line: Option<u64>,
     /// Floating-point status and control register.
     pub fpscr: u32,
+    /// AltiVec VR-usage mask.
+    pub vrsave: u32,
 }
 
 /// Canonical SPU fingerprint input set.

@@ -44,8 +44,8 @@ fn patterned() -> [u64; LANE_COUNT] {
 
 /// Lane vectors of PPU states that a title boot passed through, as
 /// `boot run --state-hash-census` sampled them at dispatches 2^20,
-/// 40 * 2^20 and 100 * 2^20. The FPSCR lane is 0: the state held no
-/// FPSCR when the boot ran.
+/// 40 * 2^20 and 100 * 2^20. The FPSCR and VRSAVE lanes are 0: the
+/// state hashed neither when the boot ran.
 const TITLE_STATES: [[u64; LANE_COUNT]; 3] = [
     [
         0x73,
@@ -84,6 +84,7 @@ const TITLE_STATES: [[u64; LANE_COUNT]; 3] = [
         0x69a178,
         0x0,
         0x24000044,
+        0x0,
         0x0,
         0x0,
         0x0,
@@ -128,6 +129,7 @@ const TITLE_STATES: [[u64; LANE_COUNT]; 3] = [
         0x0,
         0x0,
         0x0,
+        0x0,
     ],
     [
         0x5f5f706c725f7368,
@@ -166,6 +168,7 @@ const TITLE_STATES: [[u64; LANE_COUNT]; 3] = [
         0x69a178,
         0x0,
         0x28000042,
+        0x0,
         0x0,
         0x0,
         0x0,
@@ -242,6 +245,9 @@ fn single_bit_states() -> Vec<PpuState> {
         let mut s = PpuState::new();
         s.set_fpscr(1 << bit);
         out.push(s);
+        let mut s = PpuState::new();
+        s.set_vrsave(1 << bit);
+        out.push(s);
     }
     // Line addresses are 128-byte aligned inside the 42-bit EA space.
     for bit in 7..42 {
@@ -286,11 +292,15 @@ fn lanes_place_each_field_at_its_index() {
     s.set_cr(0xffff_ffff);
     s.set_reservation(Some(ReservedLine::containing(0x3000_1080)));
     s.set_fpscr(203);
+    s.set_vrsave(204);
     let l = lanes(&s.fingerprint());
     for (k, &lane) in l[..32].iter().enumerate() {
         assert_eq!(lane, 100 + k as u64);
     }
-    assert_eq!(l[32..], [200, 201, 202, 0xffff_ffff, 1, 0x3000_1080, 203]);
+    assert_eq!(
+        l[32..],
+        [200, 201, 202, 0xffff_ffff, 1, 0x3000_1080, 203, 204]
+    );
 }
 
 // --- Part 2: structural tests over every base ---
@@ -441,7 +451,7 @@ fn nearly_zero_vectors_hash_pairwise_distinct() {
             hashes.push(finish(acc_i.wrapping_add(*dj)));
         }
     }
-    assert_eq!(hashes.len(), 1 + 2496 + 2496 * 2495 / 2);
+    assert_eq!(hashes.len(), 1 + 2560 + 2560 * 2559 / 2);
     assert_pairwise_distinct(hashes, "vectors with at most two bits set");
 }
 
@@ -512,9 +522,10 @@ fn state_hash_is_the_multilinear_hash_of_its_lanes() {
         s.set_xer(base[34]);
         s.set_cr(base[35] as u32);
         s.set_fpscr(base[38] as u32);
+        s.set_vrsave(base[39] as u32);
         states.push(s);
     }
-    assert_eq!(states.len(), 2347);
+    assert_eq!(states.len(), 2379);
     for s in &states {
         assert_eq!(s.state_hash(), hash(&lanes(&s.fingerprint())));
     }

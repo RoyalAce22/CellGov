@@ -26,7 +26,10 @@ fn seeded_vrsave_is_valid_for_an_immediate_read() {
     )
     .unwrap();
 
-    assert_eq!(observed.observation.state.gpr[0], u64::from(initial.vrsave));
+    assert_eq!(
+        observed.observation.state.gpr[0],
+        u64::from(initial.vrsave())
+    );
 }
 
 #[test]

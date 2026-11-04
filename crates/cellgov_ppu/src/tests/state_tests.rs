@@ -24,6 +24,7 @@ fn pinned_state() -> PpuState {
     s.set_cr(0xA5A5_5A5A);
     s.set_reservation(Some(ReservedLine::containing(0x3000_1080)));
     s.set_fpscr(0x8200_40F8);
+    s.set_vrsave(0xC000_0001);
     s
 }
 
@@ -42,7 +43,8 @@ fn state_hash_lane_vector_golden() {
             0xA5A5_5A5A,
             1,
             0x3000_1080,
-            0x8200_40F8
+            0x8200_40F8,
+            0xC000_0001
         ],
         "the lane order is part of the hash scheme"
     );
@@ -52,7 +54,7 @@ fn state_hash_lane_vector_golden() {
 fn state_hash_wire_format_golden() {
     assert_eq!(
         pinned_state().state_hash(),
-        0x2C8A_E2B4_1E5E_D63F,
+        0x0A91_E7CC_07E0_6B68,
         "written by hand in the same commit as the change that moves it"
     );
 }
@@ -208,10 +210,6 @@ fn state_hash_ignores_pc_fpr_vr() {
 fn state_hash_ignores_instrument_counters() {
     let base = PpuState::new();
     let baseline = base.state_hash();
-
-    let mut s = base.clone();
-    s.vrsave = 0xffff_ffff;
-    assert_eq!(s.state_hash(), baseline, "VRSAVE is excluded");
 
     let mut s = base.clone();
     s.vrsave_written = true;

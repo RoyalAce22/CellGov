@@ -5,7 +5,7 @@ use cellgov_sync::ReservedLine;
 
 use crate::multilinear::{
     lane_delta, reservation_lanes, LANE_CR, LANE_CTR, LANE_FPSCR, LANE_LR, LANE_RESERVATION_LINE,
-    LANE_RESERVATION_TAG, LANE_XER,
+    LANE_RESERVATION_TAG, LANE_VRSAVE, LANE_XER,
 };
 
 /// Build a 4-bit CR field for compare instructions: `LT|GT|EQ|SO`.
@@ -70,10 +70,10 @@ impl<T, const N: usize> std::ops::Index<usize> for RegBank<T, N> {
 
 /// PPU architectural register file and SPRs.
 ///
-/// Hash-covered fields (register banks, CR, LR, CTR, XER, FPSCR, the
-/// reservation) accept writes only through their setters;
-/// hash-excluded fields (PC, TB, VRSAVE, instrument counters)
-/// stay directly assignable.
+/// Hash-covered fields (register banks, CR, LR, CTR, XER, FPSCR,
+/// VRSAVE, the reservation) accept writes only through their setters;
+/// hash-excluded fields (PC, TB, instrument counters) stay directly
+/// assignable.
 pub struct PpuState {
     /// General-purpose registers r0..r31.
     ///
@@ -109,17 +109,11 @@ pub struct PpuState {
     ///
     /// [PPC-Book1 p:87 s:4.2.2] Bits 0:23 are status bits, bits 24:31 control bits.
     fpscr: u32,
-    /// AltiVec VR-usage mask (SPR 256). Excluded from
-    /// [`Self::state_hash`]; divergences surface via the GPR holding
-    /// the `mfvrsave` result. Exclusion is sound only while VRSAVE is
-    /// write-only-then-read-back -- enforced by the `Mfvrsave` arm's
-    /// `debug_assert!` with [`Self::mfvrsave_executed`] as liveness
-    /// witness.
+    /// AltiVec VR-usage mask.
     ///
     /// [AltiVec-PEM p:2-6 s:2.3.3] VRSAVE is SPR 256, 32 bits.
-    pub vrsave: u32,
-    /// Instrument flag (hash-excluded): set by `mtvrsave`. Guards the
-    /// read-before-write tripwire in `Mfvrsave`.
+    vrsave: u32,
+    /// Instrument flag (hash-excluded): set by `mtvrsave`.
     pub vrsave_written: bool,
     /// Per-step flag (hash-excluded): set by `mftb` and `mftbu`, read
     /// and cleared once per step.
@@ -127,8 +121,7 @@ pub struct PpuState {
     /// The step that set it emits one `ClockRead` effect, which the
     /// schedule explorer pairs against every other step.
     pub clock_read: bool,
-    /// Instrument counter (hash-excluded): `mfvrsave` execution
-    /// witness; non-zero proves the tripwire's silence is non-vacuous.
+    /// Instrument counter (hash-excluded): `mfvrsave` executions.
     pub mfvrsave_executed: u64,
     /// Instrument counter (hash-excluded): `ldarx` execution witness
     /// for its EA-alignment `debug_assert!`.
@@ -175,6 +168,7 @@ pub(crate) struct PpuSnapshotFields {
     pub ctr: u64,
     pub xer: u64,
     pub fpscr: u32,
+    pub vrsave: u32,
     pub reservation: Option<ReservedLine>,
 }
 
@@ -206,7 +200,7 @@ impl PpuState {
             ctr,
             xer,
             fpscr,
-            vrsave: _,
+            vrsave,
             vrsave_written: _,
             clock_read: _,
             mfvrsave_executed: _,
@@ -230,6 +224,7 @@ impl PpuState {
             ctr: *ctr,
             xer: *xer,
             fpscr: *fpscr,
+            vrsave: *vrsave,
             reservation: *reservation,
         }
     }
@@ -417,6 +412,23 @@ impl PpuState {
         self.fpscr = v;
     }
 
+    /// AltiVec VR-usage mask.
+    #[inline]
+    pub fn vrsave(&self) -> u32 {
+        self.vrsave
+    }
+
+    /// Write VRSAVE.
+    #[inline]
+    pub fn set_vrsave(&mut self, v: u32) {
+        self.acc = self.acc.wrapping_add(lane_delta(
+            LANE_VRSAVE,
+            u64::from(self.vrsave),
+            u64::from(v),
+        ));
+        self.vrsave = v;
+    }
+
     /// Active reservation, if any.
     #[inline]
     pub fn reservation(&self) -> Option<ReservedLine> {
@@ -550,6 +562,7 @@ impl PpuState {
             cr: self.cr,
             reservation_line: self.reservation.map(|l| l.addr()),
             fpscr: self.fpscr,
+            vrsave: self.vrsave,
         }
     }
 
@@ -591,6 +604,7 @@ impl PpuState {
             tag,
             line,
             u64::from(self.fpscr),
+            u64::from(self.vrsave),
         ];
         for (key, &lane) in KEYS[GPR_COUNT + 1..].iter().zip(&rest) {
             acc = acc.wrapping_add(key.wrapping_mul(u128::from(lane)));
@@ -659,6 +673,10 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/fingerprint_tests.rs"]
 mod fingerprint_tests;
+
+#[cfg(test)]
+#[path = "tests/vrsave_hash_tests.rs"]
+mod vrsave_hash_tests;
 
 #[cfg(test)]
 #[path = "tests/scheme_tests.rs"]

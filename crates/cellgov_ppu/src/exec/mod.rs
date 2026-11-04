@@ -31,6 +31,14 @@ mod tests;
 mod fault_leaves_state_tests;
 
 #[cfg(test)]
+#[path = "tests/vrsave_exec_tests.rs"]
+mod vrsave_exec_tests;
+
+#[cfg(test)]
+#[path = "tests/vrsave_console_tests.rs"]
+mod vrsave_console_tests;
+
+#[cfg(test)]
 #[path = "tests/cache_block_tests.rs"]
 mod cache_block_tests;
 

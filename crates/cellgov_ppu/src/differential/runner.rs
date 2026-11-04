@@ -42,6 +42,8 @@ pub struct StateDiff {
     pub xer: Option<(u64, u64)>,
     /// `(expected, observed)` if FPSCR diverged.
     pub fpscr: Option<(u32, u32)>,
+    /// `(expected, observed)` if VRSAVE diverged.
+    pub vrsave: Option<(u32, u32)>,
     /// `(expected, observed)` if reservation state diverged. Each
     /// side renders as the reserved line address (`u64`) or `None`.
     pub reservation: Option<(Option<u64>, Option<u64>)>,
@@ -58,6 +60,7 @@ impl StateDiff {
             && self.ctr.is_none()
             && self.xer.is_none()
             && self.fpscr.is_none()
+            && self.vrsave.is_none()
             && self.reservation.is_none()
     }
 }
@@ -324,6 +327,9 @@ fn diff_state(expected: &PpuStateSnapshot, observed: &PpuStateSnapshot) -> State
     if expected.fpscr != observed.fpscr {
         diff.fpscr = Some((expected.fpscr, observed.fpscr));
     }
+    if expected.vrsave != observed.vrsave {
+        diff.vrsave = Some((expected.vrsave, observed.vrsave));
+    }
     if expected.reservation != observed.reservation {
         diff.reservation = Some((
             expected.reservation.map(|r| r.addr()),
@@ -400,6 +406,11 @@ fn format_state_diff(diff: &StateDiff) -> String {
     if let Some((exp, obs)) = diff.fpscr {
         lines.push(format!(
             "    fpscr: expected 0x{exp:08x}, observed 0x{obs:08x}"
+        ));
+    }
+    if let Some((exp, obs)) = diff.vrsave {
+        lines.push(format!(
+            "   vrsave: expected 0x{exp:08x}, observed 0x{obs:08x}"
         ));
     }
     if let Some((exp, obs)) = diff.reservation {

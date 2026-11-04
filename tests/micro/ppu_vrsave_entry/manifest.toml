@@ -1,0 +1,15 @@
+[test]
+name = "ppu_vrsave_entry"
+
+# A hardware probe: the VRSAVE value a PPU thread sees at entry, and
+# the mfvrsave widening. The console capture is the answer; no emulator
+# runs it.
+
+[observe]
+# 7 big-endian u32 words, as ppu/main.c lists: 28 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 28 },
+]
+
+[expect]
+outcome = "completed"

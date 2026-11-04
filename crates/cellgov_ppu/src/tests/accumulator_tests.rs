@@ -49,6 +49,8 @@ fn every_hashed_setter_keeps_the_accumulator_current() {
     assert_current(&s, "set_cr0_from_result");
     s.set_fpscr(0xffff_ffff);
     assert_current(&s, "set_fpscr");
+    s.set_vrsave(0xffff_ffff);
+    assert_current(&s, "set_vrsave");
     s.set_reservation(Some(ReservedLine::containing(0x3000_1080)));
     assert_current(&s, "set_reservation Some");
     s.set_reservation(Some(ReservedLine::containing(0)));
@@ -77,7 +79,6 @@ fn unhashed_writes_leave_the_accumulator_alone() {
     let h = s.state_hash();
     s.pc = 0x1000;
     s.tb = 77;
-    s.vrsave = 1;
     s.set_fpr(1, 2);
     s.set_vr(1, 3);
     s.set_fpr_all([4; 32]);
@@ -112,7 +113,7 @@ fn a_long_random_sequence_of_writes_stays_current() {
     let mut s = PpuState::new();
     for i in 0..20_000 {
         let v = next(&mut rng);
-        match v % 12 {
+        match v % 13 {
             0..=3 => s.set_gpr((v >> 8) as usize % GPR_COUNT, next(&mut rng)),
             4 => s.set_lr(next(&mut rng)),
             5 => s.set_ctr(next(&mut rng)),
@@ -121,6 +122,7 @@ fn a_long_random_sequence_of_writes_stays_current() {
             8 => s.set_cr_field((v >> 8) as u8 % 8, (v >> 16) as u8),
             9 => s.set_xer_ca(v & 0x100 != 0),
             10 => s.set_fpscr(next(&mut rng) as u32),
+            11 => s.set_vrsave(next(&mut rng) as u32),
             _ => s.set_reservation(
                 (v & 0x100 != 0)
                     .then(|| ReservedLine::containing(next(&mut rng) % 0x400_0000_0000)),
