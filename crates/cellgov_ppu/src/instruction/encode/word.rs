@@ -139,6 +139,13 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
             oe,
             rc,
         } => xo(t, a, b, 8, oe, rc),
+        I::Addc {
+            rt: t,
+            ra: a,
+            rb: b,
+            oe,
+            rc,
+        } => xo(t, a, b, 10, oe, rc),
         I::Subfe {
             rt: t,
             ra: a,

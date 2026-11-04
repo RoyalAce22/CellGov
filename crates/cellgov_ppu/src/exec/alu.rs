@@ -81,6 +81,15 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let ov = oe.then_some(((b ^ a) & (b ^ result)) as i64 >> 63 != 0);
             retire(state, rt, result, ov, rc)
         }
+        // [PPC-Book1 p:53 s:3.3.8] addc: (RA) + (RB); sets CA from the carry out.
+        PpuInstruction::Addc { rt, ra, rb, oe, rc } => {
+            let a = state.gpr[ra as usize];
+            let b = state.gpr[rb as usize];
+            let (result, carry) = a.overflowing_add(b);
+            state.set_xer_ca(carry);
+            let ov = oe.then_some(((a ^ result) & (b ^ result)) as i64 >> 63 != 0);
+            retire(state, rt, result, ov, rc)
+        }
         // [PPC-Book1 p:54 s:3.3.8] subfe: ~(RA) + (RB) + CA; carry-in from XER[CA].
         PpuInstruction::Subfe { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];

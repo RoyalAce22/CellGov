@@ -301,6 +301,7 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::Or
         | PpuInstructionKind::Subf
         | PpuInstructionKind::Subfc
+        | PpuInstructionKind::Addc
         | PpuInstructionKind::Subfe
         | PpuInstructionKind::Neg
         | PpuInstructionKind::Mullw

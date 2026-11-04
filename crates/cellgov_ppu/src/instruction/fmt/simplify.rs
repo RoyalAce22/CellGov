@@ -401,6 +401,7 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
         | I::Or { .. }
         | I::Subf { .. }
         | I::Subfc { .. }
+        | I::Addc { .. }
         | I::Subfe { .. }
         | I::Neg { .. }
         | I::Mullw { .. }

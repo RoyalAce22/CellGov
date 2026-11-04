@@ -177,6 +177,7 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         | I::Or { .. }
         | I::Subf { .. }
         | I::Subfc { .. }
+        | I::Addc { .. }
         | I::Subfe { .. }
         | I::Mullw { .. }
         | I::Adde { .. }

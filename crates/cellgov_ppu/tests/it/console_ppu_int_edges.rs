@@ -1,15 +1,11 @@
 //! CellGov's integer instructions against the `ppu_int_edges` console
 //! capture, case by case through the differential harness.
 //!
-//! Two classes of row leave the bit-for-bit comparison:
-//!
-//! - `addc` and its forms, which CellGov does not decode yet. Their
-//!   console answers wait in the capture.
-//! - `divw` and `divwo`: [PPC-Book1 p:58 s:3.3.8] RT bits 0:31 are
-//!   undefined, and so are the LT, GT and EQ bits of CR0 in 64-bit mode.
-//!   The console leaves bits 0:31 zero and sets CR0 from that 64-bit
-//!   value; CellGov sign-extends the quotient. The defined parts are
-//!   compared.
+//! `divw` and `divwo` leave the bit-for-bit comparison:
+//! [PPC-Book1 p:58 s:3.3.8] RT bits 0:31 are undefined, and so are the
+//! LT, GT and EQ bits of CR0 in 64-bit mode. The console leaves bits
+//! 0:31 zero and sets CR0 from that 64-bit value; CellGov sign-extends
+//! the quotient. The defined parts are compared.
 
 use crate::console_cases::{capture, cellgov_after, replay, table, varies, Capture, Case, Run};
 use cellgov_ppu::differential::CaseOutcome;
@@ -37,10 +33,6 @@ fn mnemonic(case: &Case) -> &str {
     case.asm.split([' ', '.']).next().unwrap_or_default()
 }
 
-fn is_addc(case: &Case) -> bool {
-    matches!(mnemonic(case), "addc" | "addco")
-}
-
 fn is_divw(case: &Case) -> bool {
     matches!(mnemonic(case), "divw" | "divwo")
 }
@@ -60,44 +52,27 @@ fn the_two_console_runs_of_every_case_agree() {
 #[test]
 fn every_integer_edge_case_matches_the_console() {
     let mut compared = 0;
+    let mut addc = 0;
     let mut wrong = Vec::new();
     for (index, case, runs) in rows() {
-        if is_addc(&case) || is_divw(&case) {
+        if is_divw(&case) {
             continue;
         }
         compared += 1;
+        addc += u32::from(matches!(mnemonic(&case), "addc" | "addco"));
         match replay(PROBE, &case, index, &runs[0]) {
             CaseOutcome::Pass => {}
             other => wrong.push(format!("{} [{}]: {other:?}", case.id, case.asm)),
         }
     }
-    assert_eq!(compared, 1917 - 98 - 41);
+    assert_eq!(compared, 1917 - 41);
+    assert_eq!(addc, 98, "the addc and addco rows");
     assert!(
         wrong.is_empty(),
         "{} case(s):\n{}",
         wrong.len(),
         wrong.join("\n")
     );
-}
-
-#[test]
-fn cellgov_does_not_decode_the_addc_rows_yet() {
-    let mut rows_seen = 0;
-    for (index, case, runs) in rows() {
-        if !is_addc(&case) {
-            continue;
-        }
-        rows_seen += 1;
-        assert!(
-            matches!(
-                replay(PROBE, &case, index, &runs[0]),
-                CaseOutcome::DecodeError(_)
-            ),
-            "{} decodes now: compare it with the console",
-            case.id
-        );
-    }
-    assert_eq!(rows_seen, 98);
 }
 
 #[test]

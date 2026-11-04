@@ -4,6 +4,8 @@ use super::*;
 
 use crate::exec::test_support::exec_no_mem;
 
+#[path = "addc_tests.rs"]
+mod addc;
 #[path = "alu_arith_tests.rs"]
 mod arith;
 #[path = "alu_cmp_cr_tests.rs"]

@@ -91,6 +91,11 @@ pub(super) fn render(
             mn_oe_rc("subfc", oe, rc).as_str(),
             format_args!("r{rt}, r{ra}, r{rb}"),
         ),
+        I::Addc { rt, ra, rb, oe, rc } => op(
+            f,
+            mn_oe_rc("addc", oe, rc).as_str(),
+            format_args!("r{rt}, r{ra}, r{rb}"),
+        ),
         I::Subfe { rt, ra, rb, oe, rc } => op(
             f,
             mn_oe_rc("subfe", oe, rc).as_str(),

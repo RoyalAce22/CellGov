@@ -147,6 +147,7 @@ pub fn execute(
         | PpuInstruction::Add { .. }
         | PpuInstruction::Subf { .. }
         | PpuInstruction::Subfc { .. }
+        | PpuInstruction::Addc { .. }
         | PpuInstruction::Subfe { .. }
         | PpuInstruction::Neg { .. }
         | PpuInstruction::Mullw { .. }

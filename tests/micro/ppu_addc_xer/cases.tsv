@@ -1,0 +1,6 @@
+id	asm	words	inputs	record	may_end_process
+addcdot_ca1_5_3	addc. r5, r3, r4	0x7ca32015	r3=0x5,r4=0x3,xer=0x20000000	r5	0
+addcdot_ca1_m1_1	addc. r5, r3, r4	0x7ca32015	r3=0xffffffffffffffff,r4=0x1,xer=0x20000000	r5	0
+addcdot_so_0_0	addc. r5, r3, r4	0x7ca32015	r3=0x0,r4=0x0,xer=0x80000000	r5	0
+addcodot_soov_1_1	addco. r5, r3, r4	0x7ca32415	r3=0x1,r4=0x1,xer=0xc0000000	r5	0
+addcodot_so_max_1	addco. r5, r3, r4	0x7ca32415	r3=0x7fffffffffffffff,r4=0x1,xer=0xa0000000	r5	0

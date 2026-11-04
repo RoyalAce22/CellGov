@@ -237,6 +237,14 @@ pub enum PpuInstruction {
         oe: bool,
         rc: bool,
     },
+    /// [PPC-Book1 p:53 s:3.3.8 Fixed-Point Arithmetic Instructions] addc XO-form.
+    Addc {
+        rt: u8,
+        ra: u8,
+        rb: u8,
+        oe: bool,
+        rc: bool,
+    },
     /// [PPC-Book1 p:54 s:3.3.8 Fixed-Point Arithmetic Instructions] subfe (Subtract From Extended).
     Subfe {
         rt: u8,
@@ -1758,6 +1766,7 @@ impl PpuInstruction {
             | PpuInstruction::Or { .. }
             | PpuInstruction::Subf { .. }
             | PpuInstruction::Subfc { .. }
+            | PpuInstruction::Addc { .. }
             | PpuInstruction::Subfe { .. }
             | PpuInstruction::Neg { .. }
             | PpuInstruction::Mullw { .. }

@@ -675,6 +675,7 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         266 => return Ok(PpuInstruction::Add { rt, ra, rb, oe, rc }),
         40 => return Ok(PpuInstruction::Subf { rt, ra, rb, oe, rc }),
         8 => return Ok(PpuInstruction::Subfc { rt, ra, rb, oe, rc }),
+        10 => return Ok(PpuInstruction::Addc { rt, ra, rb, oe, rc }),
         136 => return Ok(PpuInstruction::Subfe { rt, ra, rb, oe, rc }),
         104 => return Ok(PpuInstruction::Neg { rt, ra, oe, rc }),
         235 => return Ok(PpuInstruction::Mullw { rt, ra, rb, oe, rc }),

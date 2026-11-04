@@ -727,6 +727,13 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             rb,
             oe: _,
             rc,
+        }
+        | I::Addc {
+            rt,
+            ra,
+            rb,
+            oe: _,
+            rc,
         } => one(add_form(rt, &[ra, rb], true, rc)),
         I::Subfe {
             rt,

@@ -7,11 +7,6 @@ use cellgov_ppu::instruction::AsmText;
 
 use super::{parse_table, probe_dir, render, table, PROBES};
 
-/// Mnemonics a table may name that CellGov does not decode yet. `addc`
-/// is a fixed-point add carrying [PPC-Book1 p:53 s:3.3.8]; its console
-/// answers wait here for the decoder.
-const UNDECODED: [&str; 1] = ["addc"];
-
 /// The probe's assembly text for each word, as CellGov renders it.
 fn rendered(words: &[u32]) -> String {
     words
@@ -68,10 +63,6 @@ fn each_row_asm_text_is_its_words() {
                 .collect::<Vec<_>>()
                 .join("; ");
             let have = rendered(&case.words);
-            let mnemonic = want.split([' ', '.']).next().unwrap_or_default();
-            if have.starts_with('<') && UNDECODED.contains(&mnemonic.trim_end_matches('o')) {
-                continue;
-            }
             if have != want {
                 wrong.push(format!(
                     "{probe} {}: table {want:?}, words {have:?}",

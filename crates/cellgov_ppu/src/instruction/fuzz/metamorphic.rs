@@ -132,6 +132,7 @@ fn relations_for_instruction(instruction: PpuInstruction) -> &'static [PpuMetamo
         I::Add { .. }
         | I::Subf { .. }
         | I::Subfc { .. }
+        | I::Addc { .. }
         | I::Subfe { .. }
         | I::Neg { .. }
         | I::Mullw { .. }
