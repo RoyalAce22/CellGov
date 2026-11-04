@@ -427,6 +427,12 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             Some(mnemonic) => ExecuteVerdict::Fault(PpuFault::IllegalInstruction(mnemonic)),
             None => ExecuteVerdict::Fault(PpuFault::InvalidForm("ppe-illegal word")),
         },
+        PpuInstruction::PpePrivileged { raw } => {
+            match crate::instruction::ppe_privileged_mnemonic(raw) {
+                Some(mnemonic) => ExecuteVerdict::Fault(PpuFault::PrivilegedInstruction(mnemonic)),
+                None => ExecuteVerdict::Fault(PpuFault::InvalidForm("ppe-privileged word")),
+            }
+        }
         // [PPC-Book1 p:69 s:3.3.11] extsh: sign-extend halfword RS[48:63] into RA.
         PpuInstruction::Extsh { ra, rs, rc } => {
             let result = state.gpr[rs as usize] as i16 as i64 as u64;

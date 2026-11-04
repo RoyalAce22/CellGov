@@ -14,10 +14,12 @@ pub mod fuzz;
 mod insn;
 pub mod known_encodings;
 pub mod ops;
+mod refused_words;
 
 pub use branch::branch_target;
 pub use decode_error::{Locator, PpuDecodeError};
 pub use fmt::AsmText;
-pub use insn::{ppe_illegal_mnemonic, PpuInstruction, PpuInstructionKind};
+pub use insn::{PpuInstruction, PpuInstructionKind};
 pub use known_encodings::{OpcodeGap, SprDirection, SprGap};
 pub use ops::{Fp59Op, Fp63Op, VaOp, VxOp};
+pub use refused_words::{ppe_illegal_mnemonic, ppe_privileged_mnemonic, spr_number};

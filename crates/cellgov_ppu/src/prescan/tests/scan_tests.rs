@@ -37,31 +37,30 @@ fn stub_variants_counted_separately_from_accepted() {
     assert_eq!(report.words_rejected, 0);
 }
 
+/// `mfspr r3, 136`, the CTRL read: a user SPR with no arm yet.
+const MFCTRL: u32 = (31u32 << 26) | (3u32 << 21) | (8u32 << 16) | (4u32 << 11) | (339u32 << 1);
+
 #[test]
-#[allow(clippy::identity_op)] // `0u32 << 11` documents rb=0 (SPR-high half).
-fn mfdsisr_appears_named_in_gap_report() {
-    let mfdsisr: u32 = (31u32 << 26) | (3u32 << 21) | (18u32 << 16) | (0u32 << 11) | (339u32 << 1);
-    let report = scan_words([mfdsisr, mfdsisr, mfdsisr].iter().copied());
+fn mfctrl_appears_named_in_gap_report() {
+    let report = scan_words([MFCTRL, MFCTRL, MFCTRL].iter().copied());
     assert_eq!(report.words_rejected, 3);
     assert_eq!(report.gaps.len(), 1);
     let gap = &report.gaps[0];
     assert_eq!(gap.occurrences, 3);
     let text = gap.error.to_string();
-    assert_eq!(text, "missing mfdsisr (mfspr, SPR 18)");
+    assert_eq!(text, "missing mfctrl (mfspr, SPR 136)");
     assert!(!text.contains("p:TBD"));
     assert!(!text.contains("PPC-Book"));
 }
 
 #[test]
-#[allow(clippy::identity_op)] // `0u32 << 11` documents the unused SPR-high half.
 fn distinct_spr_gaps_dedupe_separately() {
-    let mfdsisr: u32 = (31u32 << 26) | (3u32 << 21) | (18u32 << 16) | (0u32 << 11) | (339u32 << 1);
-    let mfdar: u32 = (31u32 << 26) | (3u32 << 21) | (19u32 << 16) | (0u32 << 11) | (339u32 << 1);
-    let report = scan_words([mfdsisr, mfdar, mfdsisr, mfdar].iter().copied());
+    let mfsprg3: u32 = (31u32 << 26) | (3u32 << 21) | (3u32 << 16) | (8u32 << 11) | (339u32 << 1);
+    let report = scan_words([MFCTRL, mfsprg3, MFCTRL, mfsprg3].iter().copied());
     assert_eq!(report.words_rejected, 4);
     assert_eq!(report.gaps.len(), 2);
-    assert!(report.gaps[0].error.to_string().contains("mfdsisr"));
-    assert!(report.gaps[1].error.to_string().contains("mfdar"));
+    assert!(report.gaps[0].error.to_string().contains("mfctrl"));
+    assert!(report.gaps[1].error.to_string().contains("mfsprg3"));
 }
 
 // -- ELF builder for scan_elf_text tests --
@@ -563,12 +562,10 @@ fn scan_elf_text_named_text_section_reports_section_filtered() {
 }
 
 #[test]
-#[allow(clippy::identity_op)] // `0u32 << 11` documents the unused SPR-high half.
 fn scan_be_bytes_handles_unaligned_trailing_bytes() {
-    let mfdsisr: u32 = (31u32 << 26) | (3u32 << 21) | (18u32 << 16) | (0u32 << 11) | (339u32 << 1);
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&0x6000_0000u32.to_be_bytes());
-    bytes.extend_from_slice(&mfdsisr.to_be_bytes());
+    bytes.extend_from_slice(&MFCTRL.to_be_bytes());
     bytes.extend_from_slice(&0x6000_0000u32.to_be_bytes());
     bytes.extend_from_slice(&[0x12, 0x34, 0x56]);
     let report = scan_be_bytes(&bytes);

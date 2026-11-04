@@ -42,7 +42,12 @@ The `PpuInstruction` set covers:
 - the defined PowerPC instructions the PPE does not implement
   (`popcntb`, `mcrxr`, `fre`, `frsqrtes`, `eciwx`, `ecowx`, `tlbia`,
   `mtsr`, `mtsrin`, `mfsr`, `mfsrin`), which execute to an
-  illegal-instruction fault.
+  illegal-instruction fault, as does an `mfspr` or `mtspr` of a
+  reserved SPR;
+- the supervisor and hypervisor instructions (`rfid`, `hrfid`,
+  `mfmsr`, `mtmsr`, `mtmsrd`, the `slb` and `tlb` families) and an
+  `mfspr` or `mtspr` of a privileged SPR, which execute to a
+  privileged-instruction fault.
 
 The variant count also includes:
 

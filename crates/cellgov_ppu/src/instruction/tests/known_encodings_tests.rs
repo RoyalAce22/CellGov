@@ -112,14 +112,20 @@ fn unknown_opcode_returns_none() {
 }
 
 #[test]
-fn spr_18_resolves_differently_by_direction() {
-    // The MfSpr / MtSpr directories share most SPR rows; the
-    // direction-keyed lookup must still pick the right mnemonic.
-    // SPR 1 (xer) decodes, so SPR 18 (dsisr) is the exemplar.
-    let read = spr_gap(SprDirection::MfSpr, 18).expect("mfdsisr must be present");
-    assert_eq!(read.mnemonic, "mfdsisr");
-    let write = spr_gap(SprDirection::MtSpr, 18).expect("mtdsisr must be present");
-    assert_eq!(write.mnemonic, "mtdsisr");
+fn spr_136_is_a_read_gap_and_no_write_gap() {
+    // CTRL reads at 136 and writes at 152, so the lookup is
+    // direction-keyed.
+    let read = spr_gap(SprDirection::MfSpr, 136).expect("mfctrl must be present");
+    assert_eq!(read.mnemonic, "mfctrl");
+    assert!(spr_gap(SprDirection::MtSpr, 136).is_none());
+}
+
+#[test]
+fn a_privileged_spr_is_no_gap() {
+    for spr in [18, 22, 272, 287] {
+        assert!(spr_gap(SprDirection::MfSpr, spr).is_none(), "{spr}");
+        assert!(spr_gap(SprDirection::MtSpr, spr).is_none(), "{spr}");
+    }
 }
 
 #[test]

@@ -8,6 +8,8 @@ const MFLR_R0_WITH_RC: u32 = 0x7c08_02a7;
 const MFSPR_R3_TBL: u32 = (31 << 26) | (3 << 21) | (12 << 16) | (8 << 11) | (339 << 1);
 const SYNC: u32 = 0x7c00_04ac;
 const MFSPR_R3_DSISR: u32 = (31 << 26) | (3 << 21) | (18 << 16) | (339 << 1);
+// SPR 136 splits as 8 in the RA slot and 4 in the RB slot.
+const MFSPR_R3_CTRL: u32 = (31 << 26) | (3 << 21) | (8 << 16) | (4 << 11) | (339 << 1);
 
 fn domain(first: u32, count: u64) -> RawDecodeDomain {
     RawDecodeDomain { first, count }
@@ -23,7 +25,8 @@ fn classify_separates_the_canonical_reserved_alias_gap_and_unknown_words() {
     assert_eq!(classify(MFLR_R0_WITH_RC), WordClass::ReservedBits);
     assert_eq!(classify(MFSPR_R3_TBL), WordClass::Alias);
     assert_eq!(classify(SYNC), WordClass::Canonical);
-    assert_eq!(classify(MFSPR_R3_DSISR), WordClass::ArmUnimplemented);
+    assert_eq!(classify(MFSPR_R3_DSISR), WordClass::Canonical);
+    assert_eq!(classify(MFSPR_R3_CTRL), WordClass::ArmUnimplemented);
     assert_eq!(classify(0), WordClass::NotRecognized);
     assert_eq!(classify(1 << 26), WordClass::NotRecognized);
     // Every bit set is fnmadd. f31,f31,f31,f31 with Rc, a valid A-form word.
@@ -35,16 +38,16 @@ fn a_rejection_whose_mnemonic_the_gap_tables_do_not_carry_is_unlisted() {
     assert_eq!(
         gap_mnemonic(Locator::Spr {
             op_mnemonic: "mfspr",
-            spr: 18
+            spr: 136
         }),
-        Some("mfdsisr")
+        Some("mfctrl")
     );
     assert_eq!(
         gap_mnemonic(Locator::Spr {
             op_mnemonic: "mtspr",
-            spr: 18
+            spr: 136
         }),
-        Some("mtdsisr")
+        None
     );
     assert_eq!(
         gap_mnemonic(Locator::Spr {

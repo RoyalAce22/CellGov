@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+mfspr284	mfspr r3, 284	0x7c7c42a6	r3=0x5a5a	r3	1

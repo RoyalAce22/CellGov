@@ -100,59 +100,19 @@ pub const OPCODE_GAPS: &[OpcodeGap] = &[];
 // [`crate::instruction::ops::VaOp`], whose discriminants carry the
 // same transcription with compiler-enforced consumer coverage.
 
-/// Table 2 (`mfspr` direction). SPRs CellGov does not yet implement
-/// the read for. The XFX opcode itself is decoded (XO 339); the
-/// SPR selector is what's missing.
+/// Table 2 (`mfspr` direction). User SPRs CellGov does not yet
+/// implement the read for. A privileged or reserved SPR has no row,
+/// because it decodes to the instruction the PPE refuses.
 ///
 /// Sorted by `spr`; [`spr_gap`] is a binary search.
 pub const MFSPR_GAPS: &[SprGap] = &[
     SprGap {
-        spr: 18,
-        mnemonic: "mfdsisr",
+        spr: 136,
+        mnemonic: "mfctrl",
     },
     SprGap {
-        spr: 19,
-        mnemonic: "mfdar",
-    },
-    SprGap {
-        spr: 22,
-        mnemonic: "mfdec",
-    },
-    SprGap {
-        spr: 26,
-        mnemonic: "mfsrr0",
-    },
-    SprGap {
-        spr: 27,
-        mnemonic: "mfsrr1",
-    },
-    SprGap {
-        spr: 272,
-        mnemonic: "mfsprg0",
-    },
-    SprGap {
-        spr: 273,
-        mnemonic: "mfsprg1",
-    },
-    SprGap {
-        spr: 274,
-        mnemonic: "mfsprg2",
-    },
-    SprGap {
-        spr: 275,
+        spr: 259,
         mnemonic: "mfsprg3",
-    },
-    SprGap {
-        spr: 280,
-        mnemonic: "mfasr",
-    },
-    SprGap {
-        spr: 282,
-        mnemonic: "mfear",
-    },
-    SprGap {
-        spr: 287,
-        mnemonic: "mfpvr",
     },
 ];
 
@@ -162,53 +122,11 @@ pub const MFSPR_GAPS: &[SprGap] = &[
 /// `EncodingNotRecognized`.
 pub const MFTB_GAPS: &[SprGap] = &[];
 
-/// Table 2 (`mtspr` direction). SPRs CellGov does not yet
-/// implement the write for. Mirrors [`MFSPR_GAPS`]'s structure;
-/// the entries differ because some SPRs are read-only.
+/// Table 2 (`mtspr` direction). User SPRs CellGov does not yet
+/// implement the write for.
 ///
 /// Sorted by `spr`; [`spr_gap`] is a binary search.
-pub const MTSPR_GAPS: &[SprGap] = &[
-    SprGap {
-        spr: 18,
-        mnemonic: "mtdsisr",
-    },
-    SprGap {
-        spr: 19,
-        mnemonic: "mtdar",
-    },
-    SprGap {
-        spr: 22,
-        mnemonic: "mtdec",
-    },
-    SprGap {
-        spr: 26,
-        mnemonic: "mtsrr0",
-    },
-    SprGap {
-        spr: 27,
-        mnemonic: "mtsrr1",
-    },
-    SprGap {
-        spr: 272,
-        mnemonic: "mtsprg0",
-    },
-    SprGap {
-        spr: 273,
-        mnemonic: "mtsprg1",
-    },
-    SprGap {
-        spr: 274,
-        mnemonic: "mtsprg2",
-    },
-    SprGap {
-        spr: 275,
-        mnemonic: "mtsprg3",
-    },
-    SprGap {
-        spr: 282,
-        mnemonic: "mtear",
-    },
-];
+pub const MTSPR_GAPS: &[SprGap] = &[];
 
 #[cfg(test)]
 #[path = "tests/known_encodings_tests.rs"]

@@ -22,10 +22,10 @@ fn case(strategy: GenerationStrategy, index: u64) -> FuzzConfig {
 #[test]
 fn a_store_that_wraps_the_address_space_is_no_finding() {
     for (strategy, index, kind) in [
-        (GenerationStrategy::Structured, 83, PpuInstructionKind::Stw),
+        (GenerationStrategy::Structured, 672, PpuInstructionKind::Stw),
         (
             GenerationStrategy::Structured,
-            100_997,
+            2_825,
             PpuInstructionKind::Stmw,
         ),
         (

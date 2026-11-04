@@ -11,25 +11,10 @@ fn mfspr_at_spr_1_decodes_to_mfxer() {
 }
 
 #[test]
-fn mtspr_at_supervisor_spr_names_correct_mtspr_mnemonic() {
-    // Same encoding pattern as the mfspr test above, but with
-    // XO 467 (mtspr direction). SPR=18 routes to mtdsisr; SPR 1
-    // (mtxer) decodes, so it is no longer the gap exemplar.
+fn mtspr_at_supervisor_spr_decodes_to_the_privileged_word() {
+    // SPR=18 (DSISR) is privileged both ways.
     let raw: u32 = (31u32 << 26) | (3u32 << 21) | (18u32 << 16) | (0u32 << 11) | (467u32 << 1);
-    let err = decode(raw).unwrap_err();
-    match err {
-        PpuDecodeError::DecoderArmUnimplemented {
-            locator: Locator::Spr { op_mnemonic, spr },
-            mnemonic,
-            ..
-        } => {
-            assert_eq!(op_mnemonic, "mtspr");
-            assert_eq!(spr, 18);
-            assert_eq!(mnemonic, "mtdsisr");
-        }
-        other => panic!("expected DecoderArmUnimplemented (Spr), got {other:?}"),
-    }
-    assert_eq!(err.to_string(), "missing mtdsisr (mtspr, SPR 18)");
+    assert_eq!(decode(raw).unwrap(), PpuInstruction::PpePrivileged { raw });
 }
 
 #[test]

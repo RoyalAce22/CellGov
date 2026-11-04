@@ -54,7 +54,7 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         // [PPC-Book1 p:135 s:6.1] mcrxr reads BF only.
         I::Mcrxr { .. } => 0x0060_0000 | RA | RB | RC,
         // The variant keeps the whole word.
-        I::PpeIllegal { .. } => 0,
+        I::PpeIllegal { .. } | I::PpePrivileged { .. } => 0,
         I::Dcbz { .. } => RT | RC,
         // [PPC-Book2 p:18 s:3.2.1], [PPC-Book2 p:21 s:3.2.2] icbi and dcbst read RA and RB only.
         I::Dcbst { .. } | I::Icbi { .. } => RT | RC,

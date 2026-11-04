@@ -282,6 +282,7 @@ pub(super) fn render(
         I::Td { to, ra, rb } => op(f, "td", format_args!("{to}, r{ra}, r{rb}")),
         I::Mcrxr { bf } => op(f, "mcrxr", format_args!("cr{bf}")),
         I::PpeIllegal { raw } => ppe_illegal(f, raw),
+        I::PpePrivileged { raw } => ppe_privileged(f, raw),
 
         // -- Compares (cr0 field omitted per convention) --
         I::Cmpwi { bf, ra, imm } => cmp!(f, "cmpwi", bf, "r{}, {}", ra, imm),
@@ -799,7 +800,33 @@ fn ppe_illegal(f: &mut fmt::Formatter<'_>, raw: u32) -> fmt::Result {
         Some(mn @ ("fre" | "frsqrtes")) => {
             op(f, mn_rc(mn, rc).as_str(), format_args!("f{t}, f{b}"))
         }
-        Some(mn) => op0(f, mn),
+        Some(mn) => spr_move(f, mn, raw).unwrap_or_else(|| op0(f, mn)),
         None => op(f, ".long", format_args!("0x{raw:08x}")),
+    }
+}
+
+/// A privileged word, with the operands its form names.
+fn ppe_privileged(f: &mut fmt::Formatter<'_>, raw: u32) -> fmt::Result {
+    let t = (raw >> 21) & 0x1F;
+    let b = (raw >> 11) & 0x1F;
+    match crate::instruction::ppe_privileged_mnemonic(raw) {
+        Some("mfmsr") => op(f, "mfmsr", format_args!("r{t}")),
+        Some(mn @ ("mtmsr" | "mtmsrd")) => op(f, mn, format_args!("r{t}, {}", (raw >> 16) & 1)),
+        Some("slbie") => op(f, "slbie", format_args!("r{b}")),
+        Some(mn @ ("slbmte" | "slbmfev" | "slbmfee")) => op(f, mn, format_args!("r{t}, r{b}")),
+        Some(mn @ ("tlbie" | "tlbiel")) => op(f, mn, format_args!("r{b}, {}", (raw >> 21) & 1)),
+        Some(mn) => spr_move(f, mn, raw).unwrap_or_else(|| op0(f, mn)),
+        None => op(f, ".long", format_args!("0x{raw:08x}")),
+    }
+}
+
+/// `mfspr rT, SPR` or `mtspr SPR, rS`; `None` for any other mnemonic.
+fn spr_move(f: &mut fmt::Formatter<'_>, mn: &str, raw: u32) -> Option<fmt::Result> {
+    let t = (raw >> 21) & 0x1F;
+    let spr = crate::instruction::spr_number(raw);
+    match mn {
+        "mfspr" => Some(op(f, "mfspr", format_args!("r{t}, {spr}"))),
+        "mtspr" => Some(op(f, "mtspr", format_args!("{spr}, r{t}"))),
+        _ => None,
     }
 }

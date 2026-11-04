@@ -47,6 +47,12 @@ pub enum PpuFault {
     /// [CBE-Handbook p:255 s:9.5.9] A program interrupt alters only SRR0, SRR1 and the MSR.
     #[error("PPU illegal instruction: {0} is not implemented by the PPE")]
     IllegalInstruction(&'static str),
+    /// An instruction that needs privileged or hypervisor state, run in problem state.
+    /// The payload is the mnemonic.
+    ///
+    /// [CBE-Handbook p:254 s:9.5.9] The PPE takes the privileged-instruction type of program interrupt.
+    #[error("PPU privileged instruction: {0} in problem state")]
+    PrivilegedInstruction(&'static str),
 }
 
 impl PpuFault {
@@ -65,6 +71,7 @@ impl PpuFault {
             Self::AlignmentInterrupt(_) => crate::FAULT_ALIGNMENT_INTERRUPT,
             Self::InvalidForm(_) => crate::FAULT_INVALID_FORM,
             Self::IllegalInstruction(_) => crate::FAULT_ILLEGAL_INSTRUCTION,
+            Self::PrivilegedInstruction(_) => crate::FAULT_PRIVILEGED_INSTRUCTION,
         }
     }
 }

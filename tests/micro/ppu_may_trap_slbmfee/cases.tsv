@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+slbmfee	slbmfee r3, r4	0x7c602726	r3=0x5a5a,r4=0x0	r3	1

@@ -26,7 +26,7 @@ pub use table::{parse_table, probe_dir, table, Case};
 /// The table-driven probes, each with its own `cases.tsv`.
 /// `ppu_reference_vectors` takes its table from the `cellgov_fuzz`
 /// module `ppu_documented`, which replays its capture.
-pub const PROBES: [&str; 16] = [
+pub const PROBES: [&str; 25] = [
     "ppu_int_edges",
     "ppu_reference_vectors",
     "ppu_may_trap_mcrxr",
@@ -43,4 +43,13 @@ pub const PROBES: [&str; 16] = [
     "ppu_may_trap_mfspr259",
     "ppu_may_trap_mfspr268",
     "ppu_may_trap_mfspr269",
+    "ppu_may_trap_mfspr272",
+    "ppu_may_trap_mfspr280",
+    "ppu_may_trap_mfspr287",
+    "ppu_may_trap_mfspr1022",
+    "ppu_may_trap_mfmsr",
+    "ppu_may_trap_mfspr284",
+    "ppu_may_trap_mfspr152",
+    "ppu_may_trap_slbmfee",
+    "ppu_may_trap_slbmfev",
 ];

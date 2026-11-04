@@ -559,14 +559,31 @@ pub enum PpuInstruction {
     },
     /// A defined PowerPC instruction the PPE does not implement and
     /// CellGov has no other variant for. `raw` is the whole word, and
-    /// [`ppe_illegal_mnemonic`] names it. Execution faults as an
+    /// [`super::ppe_illegal_mnemonic`] names it. Execution faults as an
     /// illegal instruction.
     ///
     /// [CBE-Handbook p:738 s:A.2.4.1] fre(.) is a Book I instruction the PPE does not implement.
     /// [CBE-Handbook p:739 s:A.2.4.1] frsqrtes(.) is a Book I instruction the PPE does not implement.
     /// [CBE-Handbook p:739 s:A.2.4.2] eciwx and ecowx are Book II instructions the PPE does not implement.
     /// [CBE-Handbook p:739 s:A.2.4.3] tlbia, mtsr, mtsrin, mfsr and mfsrin are Book III instructions the PPE does not implement.
+    /// [CBE-Handbook p:254 s:9.5.9] An mfspr or mtspr of a reserved SPR takes the illegal-instruction interrupt.
     PpeIllegal {
+        raw: u32,
+    },
+    /// An instruction the PPE runs only in privileged or hypervisor state.
+    ///
+    /// The word is one of these:
+    /// - a Book III instruction;
+    /// - an `mfspr` or `mtspr` of a privileged SPR.
+    ///
+    /// `raw` is the whole word, and [`super::ppe_privileged_mnemonic`]
+    /// names it. Execution faults as a privileged instruction.
+    ///
+    /// [PPC-Book3 p:119 s:Appendix G] rfid, mfmsr, mtmsr, mtmsrd and the slb instructions are privileged; hrfid, tlbie and tlbsync are hypervisor-only; mfspr and mtspr depend on the SPR number.
+    /// [PPC-Book3 p:54 s:4.11.3.2] tlbiel is privileged and hypervisor-only.
+    /// [CBE-Handbook p:738 s:A.2.3.2] The PPE implements tlbie, tlbiel, tlbsync and mtmsr.
+    /// [CBE-Handbook p:254 s:9.5.9] The PPE takes the privileged-instruction interrupt for these in problem state.
+    PpePrivileged {
         raw: u32,
     },
     /// [PPC-Book1 p:68 s:3.3.13 Fixed-Point Logical Instructions] orc / nand / equivalent X-form.
@@ -1709,6 +1726,7 @@ impl PpuInstruction {
             | PpuInstruction::CmpwiBc { .. }
             | PpuInstruction::CmpwBc { .. } => true,
             PpuInstruction::PpeIllegal { .. }
+            | PpuInstruction::PpePrivileged { .. }
             | PpuInstruction::Lwz { .. }
             | PpuInstruction::Lbz { .. }
             | PpuInstruction::Lhz { .. }
@@ -1967,30 +1985,6 @@ impl PpuInstruction {
                 | PpuInstruction::Fp59 { .. }
                 | PpuInstruction::Fp63 { .. }
         )
-    }
-}
-
-/// The mnemonic of a [`PpuInstruction::PpeIllegal`] word, or `None`
-/// for any other word.
-/// `fre` and `frsqrtes` key on the 5-bit A-form XO, so FRC and Rc do
-/// not change the answer.
-pub const fn ppe_illegal_mnemonic(raw: u32) -> Option<&'static str> {
-    let xo_10 = (raw >> 1) & 0x3FF;
-    let xo_5 = xo_10 & 0x1F;
-    match raw >> 26 {
-        31 => match xo_10 {
-            310 => Some("eciwx"),
-            438 => Some("ecowx"),
-            370 => Some("tlbia"),
-            210 => Some("mtsr"),
-            242 => Some("mtsrin"),
-            595 => Some("mfsr"),
-            659 => Some("mfsrin"),
-            _ => None,
-        },
-        63 if xo_5 == 24 => Some("fre"),
-        59 if xo_5 == 26 => Some("frsqrtes"),
-        _ => None,
     }
 }
 

@@ -31,8 +31,8 @@ pub(crate) fn format_fault(
     use cellgov_ppu::{
         FAULT_ALIGNMENT_INTERRUPT, FAULT_DEBUG_BREAK, FAULT_DECODE_ERROR,
         FAULT_ILLEGAL_INSTRUCTION, FAULT_INVALID_ADDRESS, FAULT_INVALID_FORM,
-        FAULT_PC_OUT_OF_RANGE, FAULT_PROGRAM_TRAP, FAULT_UNIMPLEMENTED_INSN,
-        FAULT_UNSUPPORTED_SYSCALL,
+        FAULT_PC_OUT_OF_RANGE, FAULT_PRIVILEGED_INSTRUCTION, FAULT_PROGRAM_TRAP,
+        FAULT_UNIMPLEMENTED_INSN, FAULT_UNSUPPORTED_SYSCALL,
     };
     let ea_str = result
         .local_diagnostics
@@ -46,7 +46,7 @@ pub(crate) fn format_fault(
                 FAULT_PC_OUT_OF_RANGE => {
                     format!("PC_OUT_OF_RANGE at PC={pc_str} (code=0x{code:08x})")
                 }
-                FAULT_DECODE_ERROR | FAULT_ILLEGAL_INSTRUCTION => {
+                FAULT_DECODE_ERROR | FAULT_ILLEGAL_INSTRUCTION | FAULT_PRIVILEGED_INSTRUCTION => {
                     let raw_str = match pc {
                         None => "<no-pc>".to_string(),
                         Some(a) => match fetch_raw_at(mem, a) {
@@ -54,10 +54,10 @@ pub(crate) fn format_fault(
                             None => "<unmapped>".to_string(),
                         },
                     };
-                    let class = if fault_type == FAULT_DECODE_ERROR {
-                        "DECODE_ERROR"
-                    } else {
-                        "ILLEGAL_INSTRUCTION"
+                    let class = match fault_type {
+                        FAULT_DECODE_ERROR => "DECODE_ERROR",
+                        FAULT_ILLEGAL_INSTRUCTION => "ILLEGAL_INSTRUCTION",
+                        _ => "PRIVILEGED_INSTRUCTION",
                     };
                     format!("{class} at PC={pc_str} (raw={raw_str})")
                 }
@@ -342,3 +342,7 @@ mod fallback_arm_tests;
 #[cfg(test)]
 #[path = "tests/fault_illegal_tests.rs"]
 mod illegal_arm_tests;
+
+#[cfg(test)]
+#[path = "tests/fault_privileged_tests.rs"]
+mod privileged_arm_tests;

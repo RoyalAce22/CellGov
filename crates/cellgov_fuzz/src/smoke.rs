@@ -52,7 +52,7 @@ const SMOKE_SEQUENCE_WORDS: u32 = 32;
 
 /// Generation descriptors the PPU registry held when a run measured the PPU
 /// floors.
-const PPU_REGISTRY_KINDS: u64 = 390;
+const PPU_REGISTRY_KINDS: u64 = 391;
 
 /// Generation descriptors the SPU registry held when a run measured the SPU
 /// floors.

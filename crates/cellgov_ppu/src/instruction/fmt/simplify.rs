@@ -447,6 +447,7 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
         | I::Td { .. }
         | I::Mcrxr { .. }
         | I::PpeIllegal { .. }
+        | I::PpePrivileged { .. }
         | I::Orc { .. }
         | I::Extsh { .. }
         | I::Extsb { .. }

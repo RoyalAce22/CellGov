@@ -355,7 +355,7 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         I::Tw { to, ra: a, rb: b } => x(to, a, b, 4, false),
         I::Td { to, ra: a, rb: b } => x(to, a, b, 68, false),
         I::Mcrxr { bf } => x(bf << 2, 0, 0, 512, false),
-        I::PpeIllegal { raw } => raw,
+        I::PpeIllegal { raw } | I::PpePrivileged { raw } => raw,
 
         // X-form indexed loads and stores.
         I::Lwzx {

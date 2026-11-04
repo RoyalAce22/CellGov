@@ -18,13 +18,10 @@ fn unknown_primary_reports_encoding_not_recognized() {
 
 #[test]
 fn mfspr_with_unsupported_spr_reports_named_spr_locator() {
-    // mfspr rT, SPR=18 reads DSISR (supervisor). The XFX SPR field
-    // is split: LSB-0 bits 16..20 (the decoder's `ra` slot) hold
-    // SPR LOW 5 bits; LSB-0 bits 11..15 (`rb` slot) hold SPR HIGH
-    // 5 bits; the decoder reassembles `spr = (rb << 5) | ra`. For
-    // SPR=18: low=18, high=0. (SPR 1 decodes as `mfxer`, so the
-    // smoke test uses the next named gap.)
-    let raw: u32 = (31u32 << 26) | (3u32 << 21) | (18u32 << 16) | (0u32 << 11) | (339u32 << 1);
+    // SPR 136 is CTRL, a user SPR with no arm yet. The `ra` slot holds
+    // its low half (8) and the `rb` slot its high half (4); see
+    // `crate::instruction::spr_number`.
+    let raw: u32 = (31u32 << 26) | (3u32 << 21) | (8u32 << 16) | (4u32 << 11) | (339u32 << 1);
     let err = decode(raw).unwrap_err();
     match err {
         PpuDecodeError::DecoderArmUnimplemented {
@@ -33,12 +30,12 @@ fn mfspr_with_unsupported_spr_reports_named_spr_locator() {
             ..
         } => {
             assert_eq!(op_mnemonic, "mfspr");
-            assert_eq!(spr, 18);
-            assert_eq!(mnemonic, "mfdsisr");
+            assert_eq!(spr, 136);
+            assert_eq!(mnemonic, "mfctrl");
         }
         other => panic!("expected DecoderArmUnimplemented (Spr), got {other:?}"),
     }
-    assert_eq!(err.to_string(), "missing mfdsisr (mfspr, SPR 18)");
+    assert_eq!(err.to_string(), "missing mfctrl (mfspr, SPR 136)");
 }
 
 /// Synthesize a raw 32-bit word that should hit `(primary, xo)`

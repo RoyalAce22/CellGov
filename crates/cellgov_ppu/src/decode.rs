@@ -14,6 +14,7 @@
 use crate::instruction::known_encodings::{self, SprDirection};
 use crate::instruction::ops::{Fp59Op, Fp63Op, VaOp, VxOp};
 use crate::instruction::{ppe_illegal_mnemonic, Locator, PpuDecodeError, PpuInstruction};
+use cellgov_ps3_abi::hw::ppu_spr::{spr_read_class, spr_write_class, SprClass};
 
 /// Construct the appropriate `PpuDecodeError` for a `(primary, xo)`
 /// the decoder could not handle. Hits in [`known_encodings::opcode_gap`]
@@ -45,6 +46,25 @@ fn reject_spr(raw: u32, direction: SprDirection, spr: u16) -> PpuDecodeError {
             raw,
         },
         None => PpuDecodeError::EncodingNotRecognized { raw },
+    }
+}
+
+/// Decodes an `mfspr` or `mtspr` of an SPR with no variant of its own, by the SPR's class.
+#[cold]
+fn other_spr(
+    raw: u32,
+    direction: SprDirection,
+    spr: u16,
+) -> Result<PpuInstruction, PpuDecodeError> {
+    let class = match direction {
+        SprDirection::MfSpr => spr_read_class(spr),
+        SprDirection::MtSpr => spr_write_class(spr),
+        SprDirection::MfTb => return Err(reject_spr(raw, direction, spr)),
+    };
+    match class {
+        SprClass::Privileged => Ok(PpuInstruction::PpePrivileged { raw }),
+        SprClass::Reserved => Ok(PpuInstruction::PpeIllegal { raw }),
+        SprClass::User => Err(reject_spr(raw, direction, spr)),
     }
 }
 
@@ -630,6 +650,8 @@ fn decode_xl(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         417 => Ok(PpuInstruction::Crorc { bt, ba, bb }),
         449 => Ok(PpuInstruction::Cror { bt, ba, bb }),
         528 => Ok(PpuInstruction::Bcctr { bo, bi, link }),
+        // [PPC-Book3 p:119 s:Appendix G] rfid (18) is privileged; hrfid (274) is hypervisor-only.
+        18 | 274 => Ok(PpuInstruction::PpePrivileged { raw }),
         _ => Err(reject_opcode(raw, 19, xo as u16)),
     }
 }
@@ -719,6 +741,11 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         512 => return Ok(PpuInstruction::Mcrxr { bf: rt >> 2 }),
         // [CBE-Handbook p:739 s:A.2.4.2] eciwx / ecowx and [CBE-Handbook p:739 s:A.2.4.3] tlbia, mtsr, mtsrin, mfsr, mfsrin: the PPE does not implement them.
         310 | 438 | 370 | 210 | 242 | 595 | 659 => return Ok(PpuInstruction::PpeIllegal { raw }),
+        // [PPC-Book3 p:119 s:Appendix G] mfmsr, mtmsr, mtmsrd, slbia, slbie, slbmte, slbmfev, slbmfee, tlbie and tlbsync are privileged or hypervisor-only.
+        // [PPC-Book3 p:54 s:4.11.3.2] tlbiel (274) is privileged and hypervisor-only.
+        83 | 146 | 178 | 498 | 434 | 402 | 851 | 915 | 306 | 274 | 566 => {
+            return Ok(PpuInstruction::PpePrivileged { raw })
+        }
 
         922 => return Ok(PpuInstruction::Extsh { ra, rs: rt, rc }),
         954 => return Ok(PpuInstruction::Extsb { ra, rs: rt, rc }),
@@ -873,10 +900,8 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         // [PPC-Book1 p:9 s:1.7.8 XFX-Form] OPCD RT/RS spr(11:20) XO(21:30) /(31).
         // SPR / TBR half-swap. The encoded register number is split
         // across the RA and RB slots, and the halves are reversed:
-        //   rb (bits 11..=15) = SPR/TBR low 5 bits
-        //   ra (bits 16..=20) = SPR/TBR high 5 bits
-        // So `spr_raw = (rb << 5) | ra`. Do not "simplify" the
-        // shift direction; the apparent reversal is the encoding.
+        //   ra (bits 11..=15) = SPR/TBR low 5 bits
+        //   rb (bits 16..=20) = SPR/TBR high 5 bits
         339 => {
             let spr_raw = ((rb as u16) << 5) | (ra as u16);
             return match spr_raw {
@@ -900,7 +925,7 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                 // producing the raw word 0x7c0042a6 observed in
                 // retail EBOOTs.
                 256 => Ok(PpuInstruction::Mfvrsave { rt }),
-                _ => Err(reject_spr(raw, SprDirection::MfSpr, spr_raw)),
+                _ => other_spr(raw, SprDirection::MfSpr, spr_raw),
             };
         }
         371 => {
@@ -922,7 +947,7 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                 // Raw word 0x7c0043a6 observed in retail EBOOTs
                 // is mtvrsave with rS=0.
                 256 => Ok(PpuInstruction::Mtvrsave { rs: rt }),
-                _ => Err(reject_spr(raw, SprDirection::MtSpr, spr_raw)),
+                _ => other_spr(raw, SprDirection::MtSpr, spr_raw),
             };
         }
 

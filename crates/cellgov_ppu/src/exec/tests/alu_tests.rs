@@ -14,6 +14,8 @@ mod logical;
 mod muldiv;
 #[path = "ppe_illegal_tests.rs"]
 mod ppe_illegal;
+#[path = "ppe_privileged_tests.rs"]
+mod ppe_privileged;
 #[path = "alu_retire_tests.rs"]
 mod retire;
 #[path = "alu_rotate_word_wrap_tests.rs"]
