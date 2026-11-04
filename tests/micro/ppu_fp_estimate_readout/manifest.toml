@@ -1,0 +1,21 @@
+[test]
+name = "ppu_fp_estimate_readout"
+
+# A hardware probe that reads back the PPE's scalar estimates, fres and
+# frsqrte: a 12-bit fraction grid and 4096 random inputs per
+# instruction, both exponent parities for frsqrte, every biased double
+# exponent at the smallest and largest fraction, 1024 inputs under each
+# of the four FPSCR[RN] values, and the FPSCR each special input leaves.
+# The documents give only error bounds; the console capture is the
+# answer.
+
+[observe]
+# Seven series of 4096 result doublewords, the rounding series (4 x 2 x
+# 1024), then 16 specials of four doublewords; ppu/main.c gives the
+# input of every doubleword.
+memory_regions = [
+  { name = "result", addr = 0, size = 295424 },
+]
+
+[expect]
+outcome = "completed"

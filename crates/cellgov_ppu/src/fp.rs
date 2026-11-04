@@ -154,14 +154,9 @@ pub fn execute_fp63(
         // the architecture does not allow.
         // [PPC-Book1 p:125 s:5.2.1.1] fsqrt: FRT <- square root of FRB.
         Fp63Op::Fsqrt => nan_resolved_bits(b.sqrt(), &[b]),
-        // The host answers every special row of the table: -0 and +0
-        // give -inf and +inf, +inf gives +0, and a negative operand
-        // gives a NaN that becomes the generated QNaN. A normal operand
-        // gets the reciprocal of the rounded square root, which is
-        // inside the bound; the PPE's own estimate table is not read
-        // back yet.
         // [PPC-Book1 p:126 s:5.2.1.1] frsqrte: an estimate within one part in 32 of 1/sqrt(FRB); the special-operand table fixes -inf and < 0 to QNaN, -0 to -inf, +0 to +inf, +inf to +0.
-        Fp63Op::Frsqrte => nan_resolved_bits(1.0 / b.sqrt(), &[b]),
+        // The PPE's own table, read back by the ppu_fp_estimate_readout capture.
+        Fp63Op::Frsqrte => cellgov_float::frsqrte_estimate(state.fpr[frb as usize]),
         Fp63Op::Mffs => {
             fpscr::mffs(state, frt);
             return ExecuteVerdict::Continue;
@@ -241,11 +236,13 @@ pub fn execute_fp59(
         Fp59Op::Fsubs => a - b,
         // [PPC-Book1 p:125 s:5.2.1.1] fsqrts: FRT <- square root of FRB, single precision.
         Fp59Op::Fsqrts => b.sqrt(),
-        // FRB is a double, so the value is the reciprocal of the double,
-        // rounded to single precision. It is inside the bound; the PPE's
-        // own estimate table is not read back yet.
         // [PPC-Book1 p:125 s:5.2.1.1] fres: an estimate within one part in 256 of 1/FRB; the special-operand table fixes -inf to -0, -0 to -inf, +0 to +inf, +inf to +0.
-        Fp59Op::Fres => (1.0 / b64) as f32,
+        // The PPE's own table, read back by the ppu_fp_estimate_readout capture.
+        Fp59Op::Fres => {
+            let bits = cellgov_float::fres_estimate(state.fpr[frb as usize]);
+            state.set_fpr(frt as usize, bits);
+            return ExecuteVerdict::Continue;
+        }
     };
     // `result as f64` is only reached on a non-NaN result: a NaN one is
     // answered from the operands or by the generated QNaN, so widening

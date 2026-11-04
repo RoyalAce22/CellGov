@@ -5,7 +5,9 @@
 //! An operation decodes its operands with [`unpack`], computes its exact
 //! result as an [`Exact`], and hands it to [`round_pack`] with a
 //! [`Policy`] and a [`Rounding`] mode. The rounding mode is an argument
-//! and the flags are a return value; the crate holds no state.
+//! and the flags are a return value; the crate holds no state. The
+//! estimate operations, such as [`fres_estimate`] and
+//! [`vmx_reciprocal_estimate`], read the PPE's tables instead.
 //!
 //! [`Policy::SpuExtended`] is the SPU's single-precision format: truncation
 //! only, zero for a denormal operand or result, exponent 255 an ordinary
@@ -32,12 +34,15 @@
 
 mod arith;
 mod format;
+mod fp_estimate;
 mod operand;
 mod round;
 mod vmx;
+mod vmx_estimate;
 
 pub use arith::{add, mul};
 pub use format::{Binary32, Binary64, Format};
+pub use fp_estimate::{fres_estimate, frsqrte_estimate};
 pub use operand::{
     default_nan, extended_magnitude_key, extended_order_key, unpack, unpack_extended, Operand,
 };
@@ -46,6 +51,9 @@ pub use vmx::{
     vmx_add, vmx_compare, vmx_flush, vmx_from_integer, vmx_madd, vmx_nan, vmx_nmsub, vmx_round,
     vmx_round_integer, vmx_sub, vmx_to_signed, vmx_to_unsigned, vmx_unpack, VmxMode,
     VMX_DEFAULT_NAN,
+};
+pub use vmx_estimate::{
+    vmx_exp2_estimate, vmx_log2_estimate, vmx_reciprocal_estimate, vmx_rsqrt_estimate,
 };
 
 #[cfg(test)]
@@ -83,3 +91,15 @@ mod vmx_round_integer_tests;
 #[cfg(test)]
 #[path = "tests/vmx_convert_tests.rs"]
 mod vmx_convert_tests;
+
+#[cfg(test)]
+#[path = "tests/vmx_estimate_console_tests.rs"]
+mod vmx_estimate_console_tests;
+
+#[cfg(test)]
+#[path = "tests/vmx_estimate_tests.rs"]
+mod vmx_estimate_tests;
+
+#[cfg(test)]
+#[path = "tests/fp_estimate_console_tests.rs"]
+mod fp_estimate_console_tests;

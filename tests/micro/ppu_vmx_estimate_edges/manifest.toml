@@ -1,0 +1,20 @@
+[test]
+name = "ppu_vmx_estimate_edges"
+
+# A hardware probe of the edges of the PPE's four vector estimates that
+# ppu_vmx_estimate_readout leaves open: vrefp results at and below the
+# smallest normal, vexptefp results in the denormal range, at overflow
+# and at every integer from -1024 to 1023, and every biased exponent of
+# a negative input for all four. Each series runs under VSCR[NJ] = 0
+# and NJ = 1. The console capture is the answer.
+
+[observe]
+# The NJ = 0 results, then the NJ = 1 results: eight series of 2048
+# words and four exponent maps of 512 words each; ppu/main.c gives the
+# input of every word.
+memory_regions = [
+  { name = "result", addr = 0, size = 147456 },
+]
+
+[expect]
+outcome = "completed"

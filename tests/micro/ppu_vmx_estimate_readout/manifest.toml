@@ -1,0 +1,19 @@
+[test]
+name = "ppu_vmx_estimate_readout"
+
+# A hardware probe that reads back the PPE's four vector estimates,
+# vrefp, vrsqrtefp, vexptefp and vlogefp: a 12-bit fraction grid and
+# 4096 random inputs per instruction, both exponent parities for
+# vrsqrtefp, and every biased exponent at the smallest and largest
+# fraction under VSCR[NJ] = 0 and NJ = 1. The documents give only error
+# bounds; the console capture is the answer.
+
+[observe]
+# Ten series of 4096 result words, then eight exponent maps of 512
+# words; ppu/main.c gives the input of every word.
+memory_regions = [
+  { name = "result", addr = 0, size = 180224 },
+]
+
+[expect]
+outcome = "completed"

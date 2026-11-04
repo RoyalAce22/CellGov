@@ -86,32 +86,19 @@ fn every_special_operand_gives_the_frt_the_console_stored() {
     assert_eq!(special, 15);
 }
 
-/// The PPE's estimate for an ordinary operand comes from a table the
-/// console has not been read for. CellGov's value differs from the
-/// console's. Both are inside the bound.
 #[test]
-fn an_ordinary_operand_differs_from_the_console_until_the_estimate_table_is_read_back() {
+fn every_ordinary_operand_gives_the_frt_the_console_stored() {
     let w = words();
     let mut ordinary = 0;
     for (c, (op, frb, fixed)) in CASES.iter().enumerate() {
         if *fixed {
             continue;
         }
-        let console = console_frt(&w, c);
-        let cellgov = run(*op, *frb);
-        assert_ne!(cellgov, console, "case {c}: {op:?} 0x{frb:016x}");
-        let x = f64::from_bits(*frb);
-        let (exact, bound) = match op {
-            Op::Fres => (1.0 / x, 1.0 / 256.0),
-            Op::Frsqrte => (1.0 / x.sqrt(), 1.0 / 32.0),
-        };
-        for value in [console, cellgov] {
-            let value = f64::from_bits(value);
-            assert!(
-                ((value - exact) / exact).abs() <= bound,
-                "case {c}: {value}"
-            );
-        }
+        assert_eq!(
+            run(*op, *frb),
+            console_frt(&w, c),
+            "case {c}: {op:?} 0x{frb:016x}"
+        );
         ordinary += 1;
     }
     assert_eq!(ordinary, 9);
