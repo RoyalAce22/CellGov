@@ -281,6 +281,7 @@ pub(super) fn render(
         I::Tw { to, ra, rb } => op(f, "tw", format_args!("{to}, r{ra}, r{rb}")),
         I::Td { to, ra, rb } => op(f, "td", format_args!("{to}, r{ra}, r{rb}")),
         I::Mcrxr { bf } => op(f, "mcrxr", format_args!("cr{bf}")),
+        I::PpeIllegal { raw } => ppe_illegal(f, raw),
 
         // -- Compares (cr0 field omitted per convention) --
         I::Cmpwi { bf, ra, imm } => cmp!(f, "cmpwi", bf, "r{}, {}", ra, imm),
@@ -757,5 +758,25 @@ pub(super) fn render(
         },
         I::Eieio => op0(f, "eieio"),
         I::Isync => op0(f, "isync"),
+    }
+}
+
+/// A PPE-unimplemented word, with the operands its form names.
+fn ppe_illegal(f: &mut fmt::Formatter<'_>, raw: u32) -> fmt::Result {
+    let t = (raw >> 21) & 0x1F;
+    let a = (raw >> 16) & 0x1F;
+    let b = (raw >> 11) & 0x1F;
+    let sr = (raw >> 16) & 0xF;
+    let rc = raw & 1 != 0;
+    match crate::instruction::ppe_illegal_mnemonic(raw) {
+        Some(mn @ ("eciwx" | "ecowx")) => op(f, mn, format_args!("r{t}, r{a}, r{b}")),
+        Some("mtsr") => op(f, "mtsr", format_args!("{sr}, r{t}")),
+        Some("mfsr") => op(f, "mfsr", format_args!("r{t}, {sr}")),
+        Some(mn @ ("mtsrin" | "mfsrin")) => op(f, mn, format_args!("r{t}, r{b}")),
+        Some(mn @ ("fre" | "frsqrtes")) => {
+            op(f, mn_rc(mn, rc).as_str(), format_args!("f{t}, f{b}"))
+        }
+        Some(mn) => op0(f, mn),
+        None => op(f, ".long", format_args!("0x{raw:08x}")),
     }
 }

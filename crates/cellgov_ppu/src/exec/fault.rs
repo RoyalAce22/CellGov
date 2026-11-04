@@ -37,6 +37,16 @@ pub enum PpuFault {
     /// [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update in an invalid form.
     #[error("PPU invalid instruction form: {0}")]
     InvalidForm(&'static str),
+    /// A defined PowerPC instruction the PPE does not implement.
+    /// The payload is the mnemonic.
+    /// [`Self::UnimplementedInstruction`] is the fault for an
+    /// instruction that CellGov has no arm for.
+    ///
+    /// [PPC-Book1 p:14 s:1.10] An optional instruction the implementation does not provide invokes the system illegal instruction error handler.
+    /// [CBE-Handbook p:254 s:9.5.9] On the PPE that is the illegal-instruction type of program interrupt.
+    /// [CBE-Handbook p:255 s:9.5.9] A program interrupt alters only SRR0, SRR1 and the MSR.
+    #[error("PPU illegal instruction: {0} is not implemented by the PPE")]
+    IllegalInstruction(&'static str),
 }
 
 impl PpuFault {
@@ -54,6 +64,7 @@ impl PpuFault {
             Self::ProgramTrap(to) => crate::FAULT_PROGRAM_TRAP | (u32::from(to) & 0xffff),
             Self::AlignmentInterrupt(_) => crate::FAULT_ALIGNMENT_INTERRUPT,
             Self::InvalidForm(_) => crate::FAULT_INVALID_FORM,
+            Self::IllegalInstruction(_) => crate::FAULT_ILLEGAL_INSTRUCTION,
         }
     }
 }

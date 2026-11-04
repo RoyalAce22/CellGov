@@ -29,11 +29,14 @@ The `PpuInstruction` set covers:
 - floating-point arithmetic and conversion (`fmadd`, `fmul`, `fdiv`,
   `fcmp`, `fsel`, `frsp`, `fctiwz`, `fcfid`);
 - VMX VX-form and VA-form vector ops;
-- SPR/CR moves (including `mcrxr`);
+- SPR/CR moves;
 - atomic load-reserve / store-conditional pairs;
 - count-leading-zero (`cntlzd`);
-- popcount (`popcntb`);
-- record-form variants (`addic.`, `andis.`).
+- record-form variants (`addic.`, `andis.`);
+- the defined PowerPC instructions the PPE does not implement
+  (`popcntb`, `mcrxr`, `fre`, `frsqrtes`, `eciwx`, `ecowx`, `tlbia`,
+  `mtsr`, `mtsrin`, `mfsr`, `mfsrin`), which execute to an
+  illegal-instruction fault.
 
 The variant count also includes:
 

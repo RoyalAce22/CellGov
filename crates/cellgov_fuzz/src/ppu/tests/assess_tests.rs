@@ -70,7 +70,7 @@ fn raw_words_do_not_claim_an_intentional_fault_boundary() {
         &instruction,
         &PpuState::new(),
         descriptor,
-        &ExecuteVerdict::Fault(cellgov_ppu::exec::PpuFault::UnimplementedInstruction(122)),
+        &ExecuteVerdict::Fault(cellgov_ppu::exec::PpuFault::IllegalInstruction("popcntb")),
         BTreeSet::new(),
     );
 

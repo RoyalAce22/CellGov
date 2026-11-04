@@ -121,21 +121,6 @@ fn cmpw_propagates_xer_so_with_lt_result() {
 }
 
 #[test]
-fn mcrxr_copies_xer_status_nibble_and_clears_it() {
-    let mut s = PpuState::new();
-    // XER bits 32 (SO) and 34 (CA) set; bit 33 (OV) and bit 35 (reserved) clear.
-    // Rust positions: SO = bit 31, OV = bit 30, CA = bit 29, reserved = bit 28.
-    s.set_xer((1u64 << 31) | (1u64 << 29));
-    // Pre-seed the target CR field with a sentinel to confirm overwrite.
-    s.set_cr_field(5, 0b1111);
-    exec_no_mem(&PpuInstruction::Mcrxr { bf: 5 }, &mut s);
-    // Expected CR field = SO|OV|CA|res = 1010.
-    assert_eq!(s.cr_field(5), 0b1010);
-    // XER[32..35] cleared, rest preserved.
-    assert_eq!(s.xer() & (0xFu64 << 28), 0);
-}
-
-#[test]
 fn mtcrf_reads_low_32_bits_of_rs() {
     let mut s = PpuState::new();
     s.set_gpr(3, 0xAAAA_AAAA_5555_5555);

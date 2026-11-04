@@ -830,14 +830,12 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         | I::Extsh { ra, rs, rc }
         | I::Extsb { ra, rs, rc }
         | I::Extsw { ra, rs, rc } => one(logical(Op::on(unit::FXU).src(gpr(rs)), ra, rc)),
-        I::Popcntb { ra, rs } => one(fx(gpr(ra)).src(gpr(rs))),
+        // The PPE raises an illegal-instruction interrupt for these. The
+        // instruction never retires, so it reads and writes nothing.
+        I::Popcntb { .. } | I::Mcrxr { .. } | I::PpeIllegal { .. } => one(Op::on(unit::FXU)),
         I::Tw { ra, rb, .. } | I::Td { ra, rb, .. } => {
             one(Op::on(unit::FXU).src(gpr(ra)).src(gpr(rb)))
         }
-        I::Mcrxr { bf } => one(Op::on(unit::BRU)
-            .src(XER)
-            .dst(crf(bf), k::PPU_BRANCH_UNIT_LATENCY_CYCLES)
-            .dst(XER, k::PPU_BRANCH_UNIT_LATENCY_CYCLES)),
         I::Cmpwi { bf, ra, .. }
         | I::Cmplwi { bf, ra, .. }
         | I::Cmpdi { bf, ra, .. }

@@ -664,7 +664,8 @@ fn ppu_fault_ea(fault: &cellgov_ppu::exec::PpuFault) -> Option<u64> {
         cellgov_ppu::exec::PpuFault::UnsupportedSyscall(_)
         | cellgov_ppu::exec::PpuFault::UnimplementedInstruction(_)
         | cellgov_ppu::exec::PpuFault::ProgramTrap(_)
-        | cellgov_ppu::exec::PpuFault::InvalidForm(_) => None,
+        | cellgov_ppu::exec::PpuFault::InvalidForm(_)
+        | cellgov_ppu::exec::PpuFault::IllegalInstruction(_) => None,
     }
 }
 

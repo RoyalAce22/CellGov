@@ -184,6 +184,7 @@ pub fn execute(
         | PpuInstruction::Tw { .. }
         | PpuInstruction::Td { .. }
         | PpuInstruction::Mcrxr { .. }
+        | PpuInstruction::PpeIllegal { .. }
         | PpuInstruction::Extsh { .. }
         | PpuInstruction::Extsb { .. }
         | PpuInstruction::Extsw { .. }

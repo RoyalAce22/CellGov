@@ -248,7 +248,8 @@ pub(super) fn effect_and_outcome(
         K::B => (NO_EFFECTS, UNCONDITIONAL_BRANCH),
         K::Bc | K::Bclr | K::Bcctr | K::CmpwiBc | K::CmpwBc => (NO_EFFECTS, BRANCH),
         K::Sc => (NO_EFFECTS, SYSCALL),
-        K::Popcntb => (NO_EFFECTS, FAULT),
+        // [CBE-Handbook p:739 s:A.2.4] The PPE does not implement these; each raises an illegal-instruction exception.
+        K::Popcntb | K::Mcrxr | K::PpeIllegal => (NO_EFFECTS, FAULT),
         K::Tw | K::Td | K::Mfocrf | K::Mtocrf | K::Vx | K::Va => (NO_EFFECTS, CONTINUE_OR_FAULT),
         _ => (NO_EFFECTS, CONTINUE),
     }
@@ -333,6 +334,7 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::Tw
         | PpuInstructionKind::Td
         | PpuInstructionKind::Mcrxr
+        | PpuInstructionKind::PpeIllegal
         | PpuInstructionKind::Orc
         | PpuInstructionKind::Extsh
         | PpuInstructionKind::Extsb

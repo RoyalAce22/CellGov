@@ -190,20 +190,6 @@ fn andis_dot_zero_result_sets_eq() {
     assert_eq!(s.cr_field(0), 0b0010); // EQ
 }
 
-#[test]
-fn popcntb_faults_on_cell_ppe() {
-    // [CBE-Handbook p:738 s:A.2.4.1] Cell PPE does not implement popcntb.
-    let mut s = PpuState::new();
-    s.set_gpr(5, 0x3f1f_0f07_0301_ff00u64);
-    let v = exec_no_mem(&PpuInstruction::Popcntb { ra: 3, rs: 5 }, &mut s);
-    assert!(matches!(
-        v,
-        ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(122))
-    ));
-    // RA must be left untouched -- a fault discards all effects.
-    assert_eq!(s.gpr[3], 0);
-}
-
 // -- Logical Rc=1 fillers (skipping And, Or which exist) --
 
 #[test]

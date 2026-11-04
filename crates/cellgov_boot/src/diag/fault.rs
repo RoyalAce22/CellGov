@@ -29,8 +29,9 @@ pub(crate) fn format_fault(
         .map(|a| format!("0x{a:08x}"))
         .unwrap_or_else(|| "?".to_string());
     use cellgov_ppu::{
-        FAULT_ALIGNMENT_INTERRUPT, FAULT_DEBUG_BREAK, FAULT_DECODE_ERROR, FAULT_INVALID_ADDRESS,
-        FAULT_INVALID_FORM, FAULT_PC_OUT_OF_RANGE, FAULT_PROGRAM_TRAP, FAULT_UNIMPLEMENTED_INSN,
+        FAULT_ALIGNMENT_INTERRUPT, FAULT_DEBUG_BREAK, FAULT_DECODE_ERROR,
+        FAULT_ILLEGAL_INSTRUCTION, FAULT_INVALID_ADDRESS, FAULT_INVALID_FORM,
+        FAULT_PC_OUT_OF_RANGE, FAULT_PROGRAM_TRAP, FAULT_UNIMPLEMENTED_INSN,
         FAULT_UNSUPPORTED_SYSCALL,
     };
     let ea_str = result
@@ -45,7 +46,7 @@ pub(crate) fn format_fault(
                 FAULT_PC_OUT_OF_RANGE => {
                     format!("PC_OUT_OF_RANGE at PC={pc_str} (code=0x{code:08x})")
                 }
-                FAULT_DECODE_ERROR => {
+                FAULT_DECODE_ERROR | FAULT_ILLEGAL_INSTRUCTION => {
                     let raw_str = match pc {
                         None => "<no-pc>".to_string(),
                         Some(a) => match fetch_raw_at(mem, a) {
@@ -53,7 +54,12 @@ pub(crate) fn format_fault(
                             None => "<unmapped>".to_string(),
                         },
                     };
-                    format!("DECODE_ERROR at PC={pc_str} (raw={raw_str})")
+                    let class = if fault_type == FAULT_DECODE_ERROR {
+                        "DECODE_ERROR"
+                    } else {
+                        "ILLEGAL_INSTRUCTION"
+                    };
+                    format!("{class} at PC={pc_str} (raw={raw_str})")
                 }
                 FAULT_INVALID_ADDRESS => {
                     format!("INVALID_ADDRESS at PC={pc_str} (ea={ea_str})")
@@ -332,3 +338,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/fault_fallback_tests.rs"]
 mod fallback_arm_tests;
+
+#[cfg(test)]
+#[path = "tests/fault_illegal_tests.rs"]
+mod illegal_arm_tests;

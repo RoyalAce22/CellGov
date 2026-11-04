@@ -13,7 +13,7 @@
 
 use crate::instruction::known_encodings::{self, SprDirection};
 use crate::instruction::ops::{Fp59Op, Fp63Op, VaOp, VxOp};
-use crate::instruction::{Locator, PpuDecodeError, PpuInstruction};
+use crate::instruction::{ppe_illegal_mnemonic, Locator, PpuDecodeError, PpuInstruction};
 
 /// Construct the appropriate `PpuDecodeError` for a `(primary, xo)`
 /// the decoder could not handle. Hits in [`known_encodings::opcode_gap`]
@@ -412,6 +412,9 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                         frc,
                         rc,
                     }),
+                    None if ppe_illegal_mnemonic(raw).is_some() => {
+                        Ok(PpuInstruction::PpeIllegal { raw })
+                    }
                     None => Err(reject_opcode(raw, 63, xo)),
                 }
             } else {
@@ -424,6 +427,9 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                         frc,
                         rc,
                     }),
+                    None if ppe_illegal_mnemonic(raw).is_some() => {
+                        Ok(PpuInstruction::PpeIllegal { raw })
+                    }
                     None => Err(reject_opcode(raw, 59, xo)),
                 }
             }
@@ -707,6 +713,8 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         68 => return Ok(PpuInstruction::Td { to: rt, ra, rb }),
         // [PPC-Book1 p:135 s:6.1] mcrxr: BF occupies bits 6..8; bits 9..10 reserved.
         512 => return Ok(PpuInstruction::Mcrxr { bf: rt >> 2 }),
+        // [CBE-Handbook p:739 s:A.2.4.2] eciwx / ecowx and [CBE-Handbook p:739 s:A.2.4.3] tlbia, mtsr, mtsrin, mfsr, mfsrin: the PPE does not implement them.
+        310 | 438 | 370 | 210 | 242 | 595 | 659 => return Ok(PpuInstruction::PpeIllegal { raw }),
 
         922 => return Ok(PpuInstruction::Extsh { ra, rs: rt, rc }),
         954 => return Ok(PpuInstruction::Extsb { ra, rs: rt, rc }),

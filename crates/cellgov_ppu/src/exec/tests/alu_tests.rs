@@ -12,6 +12,8 @@ mod cmp_cr;
 mod logical;
 #[path = "alu_muldiv_tests.rs"]
 mod muldiv;
+#[path = "ppe_illegal_tests.rs"]
+mod ppe_illegal;
 #[path = "alu_retire_tests.rs"]
 mod retire;
 #[path = "alu_rotate_word_wrap_tests.rs"]

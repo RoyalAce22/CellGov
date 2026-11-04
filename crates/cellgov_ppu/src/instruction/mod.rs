@@ -18,6 +18,6 @@ pub mod ops;
 pub use branch::branch_target;
 pub use decode_error::{Locator, PpuDecodeError};
 pub use fmt::AsmText;
-pub use insn::{PpuInstruction, PpuInstructionKind};
+pub use insn::{ppe_illegal_mnemonic, PpuInstruction, PpuInstructionKind};
 pub use known_encodings::{OpcodeGap, SprDirection, SprGap};
 pub use ops::{Fp59Op, Fp63Op, VaOp, VxOp};

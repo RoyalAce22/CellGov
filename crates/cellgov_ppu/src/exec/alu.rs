@@ -395,13 +395,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let result = state.gpr[rs as usize].leading_zeros() as u64;
             retire(state, ra, result, None, rc)
         }
-        // [PPC-Book1 p:70 s:3.3.13] popcntb is defined by Book I, but
-        // [CBE-Handbook p:738 s:A.2.4.1] lists it as one of the Book-I
-        // instructions the Cell PPE does not implement; real hardware
-        // traps. The oracle mirrors the PPE by faulting rather than
-        // computing a per-byte popcount.
+        // [CBE-Handbook p:738 s:A.2.4.1] The PPE does not implement popcntb.
         PpuInstruction::Popcntb { ra: _, rs: _ } => {
-            ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(122))
+            ExecuteVerdict::Fault(PpuFault::IllegalInstruction("popcntb"))
         }
         // [PPC-Book1 p:64 s:3.3.10] tw: signed/unsigned 32-bit compare RA[32:63] vs RB[32:63], trap if any TO-selected condition holds.
         PpuInstruction::Tw { to, ra, rb } => {
@@ -423,13 +419,14 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
                 ExecuteVerdict::Continue
             }
         }
-        // [PPC-Book1 p:135 s:6.1] mcrxr: copy XER[32:35] (SO, OV, CA, reserved) into CR field BF, then clear XER[32:35].
-        PpuInstruction::Mcrxr { bf } => {
-            let nib = ((state.xer() >> 28) & 0xF) as u8;
-            state.set_cr_field(bf, nib);
-            state.set_xer(state.xer() & (!(0xFu64 << 28)));
-            ExecuteVerdict::Continue
+        // [CBE-Handbook p:739 s:A.2.4.1] The PPE does not implement mcrxr.
+        PpuInstruction::Mcrxr { bf: _ } => {
+            ExecuteVerdict::Fault(PpuFault::IllegalInstruction("mcrxr"))
         }
+        PpuInstruction::PpeIllegal { raw } => match crate::instruction::ppe_illegal_mnemonic(raw) {
+            Some(mnemonic) => ExecuteVerdict::Fault(PpuFault::IllegalInstruction(mnemonic)),
+            None => ExecuteVerdict::Fault(PpuFault::InvalidForm("ppe-illegal word")),
+        },
         // [PPC-Book1 p:69 s:3.3.11] extsh: sign-extend halfword RS[48:63] into RA.
         PpuInstruction::Extsh { ra, rs, rc } => {
             let result = state.gpr[rs as usize] as i16 as i64 as u64;

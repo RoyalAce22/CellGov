@@ -19,6 +19,8 @@ pub const FAULT_PROGRAM_TRAP: u32 = 0x010A_0000;
 pub const FAULT_ALIGNMENT_INTERRUPT: u32 = 0x010B_0000;
 /// Instruction encoded in an invalid form.
 pub const FAULT_INVALID_FORM: u32 = 0x010C_0000;
+/// Defined PowerPC instruction the PPE does not implement.
+pub const FAULT_ILLEGAL_INSTRUCTION: u32 = 0x010D_0000;
 
 /// True when `code` belongs to the [`FAULT_DECODE_ERROR`] class.
 #[inline]

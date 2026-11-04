@@ -549,14 +549,25 @@ pub enum PpuInstruction {
         ra: u8,
         rb: u8,
     },
-    /// Move to Condition Register from XER. Copies `XER[32:35]`
-    /// (SO, OV, CA, reserved) into CR field `BF`, then zeroes
-    /// `XER[32:35]`. Phased out in later ISAs but defined for
-    /// PPC v2.02 (Cell PPU).
+    /// Move to Condition Register from XER. The PPE does not
+    /// implement it, so execution faults as an illegal instruction.
     ///
     /// [PPC-Book1 p:135 s:6.1 Move To Condition Register from XER] mcrxr X-form, primary 31 XO 512; phased out of the architecture.
+    /// [CBE-Handbook p:739 s:A.2.4.1] An attempt to execute mcrxr on the PPE results in an illegal instruction-type exception.
     Mcrxr {
         bf: u8,
+    },
+    /// A defined PowerPC instruction the PPE does not implement and
+    /// CellGov has no other variant for. `raw` is the whole word, and
+    /// [`ppe_illegal_mnemonic`] names it. Execution faults as an
+    /// illegal instruction.
+    ///
+    /// [CBE-Handbook p:738 s:A.2.4.1] fre(.) is a Book I instruction the PPE does not implement.
+    /// [CBE-Handbook p:739 s:A.2.4.1] frsqrtes(.) is a Book I instruction the PPE does not implement.
+    /// [CBE-Handbook p:739 s:A.2.4.2] eciwx and ecowx are Book II instructions the PPE does not implement.
+    /// [CBE-Handbook p:739 s:A.2.4.3] tlbia, mtsr, mtsrin, mfsr and mfsrin are Book III instructions the PPE does not implement.
+    PpeIllegal {
+        raw: u32,
     },
     /// [PPC-Book1 p:68 s:3.3.13 Fixed-Point Logical Instructions] orc / nand / equivalent X-form.
     Orc {
@@ -1611,7 +1622,8 @@ impl PpuInstruction {
             | PpuInstruction::StdStd { .. }
             | PpuInstruction::CmpwiBc { .. }
             | PpuInstruction::CmpwBc { .. } => true,
-            PpuInstruction::Lwz { .. }
+            PpuInstruction::PpeIllegal { .. }
+            | PpuInstruction::Lwz { .. }
             | PpuInstruction::Lbz { .. }
             | PpuInstruction::Lhz { .. }
             | PpuInstruction::Lha { .. }
@@ -1859,6 +1871,30 @@ impl PpuInstruction {
                 | PpuInstruction::Fp59 { .. }
                 | PpuInstruction::Fp63 { .. }
         )
+    }
+}
+
+/// The mnemonic of a [`PpuInstruction::PpeIllegal`] word, or `None`
+/// for any other word.
+/// `fre` and `frsqrtes` key on the 5-bit A-form XO, so FRC and Rc do
+/// not change the answer.
+pub const fn ppe_illegal_mnemonic(raw: u32) -> Option<&'static str> {
+    let xo_10 = (raw >> 1) & 0x3FF;
+    let xo_5 = xo_10 & 0x1F;
+    match raw >> 26 {
+        31 => match xo_10 {
+            310 => Some("eciwx"),
+            438 => Some("ecowx"),
+            370 => Some("tlbia"),
+            210 => Some("mtsr"),
+            242 => Some("mtsrin"),
+            595 => Some("mfsr"),
+            659 => Some("mfsrin"),
+            _ => None,
+        },
+        63 if xo_5 == 24 => Some("fre"),
+        59 if xo_5 == 26 => Some("frsqrtes"),
+        _ => None,
     }
 }
 
