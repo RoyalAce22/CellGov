@@ -5,6 +5,12 @@ use crate::exec::ExecuteVerdict;
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
 
+/// Whether GPR `r` is one of the registers an `n`-byte load string fills
+/// from `rt`: four bytes to a register, wrapping at r31 -> r0.
+pub(crate) fn string_loads_into(rt: u8, n: usize, r: u8) -> bool {
+    (usize::from(r) + 32 - usize::from(rt)) % 32 < n.div_ceil(4)
+}
+
 /// `lswi` / `lswx` core: read `n` bytes from `base` and pack
 /// MSB-first four-per-register into successive GPRs starting at
 /// `rt_start`, wrapping at r31 -> r0. Zero-length is a no-op. The core

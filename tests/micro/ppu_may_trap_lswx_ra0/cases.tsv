@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+lswx_ra0	mr r6, r10; lswx r4, r0, r6	0x7d465378,0x7c80342a	mem=0x1122334455667788,xer=0x8	r4,r5	1

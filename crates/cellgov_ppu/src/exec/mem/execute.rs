@@ -16,7 +16,7 @@ use cellgov_ps3_abi::hw::ppu::DCBZ_BLOCK_BYTES;
 
 use super::helpers::{holds_reservation_for, read_aligned_16};
 use super::scalar::{load, scalar, store, Scalar};
-use super::string::{string_load, string_store};
+use super::string::{string_load, string_loads_into, string_store};
 
 pub(crate) fn execute(
     insn: &PpuInstruction,
@@ -80,15 +80,26 @@ pub(crate) fn execute(
         // sequence wraps at r31 -> r0. lswi / stswi use NB from the
         // encoding (0 means 32); lswx / stswx use the byte count
         // from XER[57:63] (0 is a no-op).
+        // [PPC-Book1 p:48 s:3.3.6] A load string with RA in the range of registers it loads, RA=0 included, is invalid; for lswx so is RB in the range, or RT=RA or RT=RB.
+        // [CBE-Handbook p:254 s:9.5.9] The PPE takes the illegal-instruction interrupt for a load string invalid form.
+        // The reference console ends the process on lswi with RA in the
+        // range and on lswx with RA or RB in the range.
         PpuInstruction::Lswi { rt, ra, nb } => {
             let n = if nb == 0 { 32usize } else { nb as usize };
+            if string_loads_into(rt, n, ra) {
+                return ExecuteVerdict::Fault(PpuFault::InvalidForm("lswi"));
+            }
             let base = state.ra_or_zero(ra);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             string_load(state, &mut port, rt as usize, base, n)
         }
         PpuInstruction::Lswx { rt, ra, rb } => {
-            let base = state.ea_x_form(ra, rb);
             let n = state.xer_tbc() as usize;
+            if rt == ra || rt == rb || string_loads_into(rt, n, ra) || string_loads_into(rt, n, rb)
+            {
+                return ExecuteVerdict::Fault(PpuFault::InvalidForm("lswx"));
+            }
+            let base = state.ea_x_form(ra, rb);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             string_load(state, &mut port, rt as usize, base, n)
         }

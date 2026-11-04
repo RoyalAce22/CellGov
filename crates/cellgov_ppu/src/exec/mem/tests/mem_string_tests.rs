@@ -34,12 +34,12 @@ fn lswi_nb_zero_means_32_bytes_and_wraps_at_r31() {
         *slot = i as u8;
     }
     let mut s = PpuState::new();
-    s.set_gpr(5, 0);
+    s.set_gpr(6, 0);
     let mut effects = Vec::new();
     let result = exec_with_mem(
         &PpuInstruction::Lswi {
             rt: 30,
-            ra: 5,
+            ra: 6,
             nb: 0,
         },
         &mut s,

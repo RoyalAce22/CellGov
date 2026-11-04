@@ -21,6 +21,11 @@ const CONTINUE: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue];
 const FAULT: &[PpuOutcomeClass] = &[PpuOutcomeClass::Fault];
 const CONTINUE_OR_FAULT: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue, PpuOutcomeClass::Fault];
 const LOAD: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue, PpuOutcomeClass::MemoryFault];
+const LOAD_OR_FAULT: &[PpuOutcomeClass] = &[
+    PpuOutcomeClass::Continue,
+    PpuOutcomeClass::Fault,
+    PpuOutcomeClass::MemoryFault,
+];
 // A store to a byte no region holds, or that a region refuses,
 // faults at execute.
 const STORE: &[PpuOutcomeClass] = &[
@@ -139,7 +144,7 @@ pub(super) fn effect_and_outcome(
     valid_form: bool,
 ) -> (&'static [EffectKind], &'static [PpuOutcomeClass]) {
     use PpuInstructionKind as K;
-    // [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update, or an lmw, in an invalid form, so only the encoding decides whether the form faults.
+    // [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update, an lmw, or a load string in an invalid form, so only the encoding decides whether the form faults.
     let (checked_load, checked_store) = if valid_form {
         ((READ_EFFECTS, LOAD), (WRITE_EFFECTS, STORE))
     } else {
@@ -161,7 +166,12 @@ pub(super) fn effect_and_outcome(
         | K::Lfsu
         | K::Lfdu
         | K::Lfsux
-        | K::Lfdux => checked_load,
+        | K::Lfdux
+        | K::Lswi => checked_load,
+        // The XER byte count decides whether RA or RB falls in the range,
+        // so a word that passes the RT check may still fault.
+        K::Lswx if valid_form => (READ_EFFECTS, LOAD_OR_FAULT),
+        K::Lswx => (NO_EFFECTS, FAULT),
         K::Stwu
         | K::Stdu
         | K::Stbu
@@ -186,8 +196,6 @@ pub(super) fn effect_and_outcome(
         | K::Lhzx
         | K::Lhax
         | K::Lwax
-        | K::Lswi
-        | K::Lswx
         | K::Ldbrx
         | K::Lwbrx
         | K::Lhbrx

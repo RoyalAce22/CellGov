@@ -38,6 +38,8 @@ mod store_conditional_unmapped;
 mod store_order;
 #[path = "mem_store_tests.rs"]
 mod stores;
+#[path = "mem_string_form_tests.rs"]
+mod string_form;
 #[path = "mem_string_tests.rs"]
 mod strings;
 #[path = "mem_wrap_tests.rs"]

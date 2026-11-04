@@ -380,7 +380,7 @@ fn structural_encoding_rejects_architecturally_invalid_register_relations() {
     let lswi = generation_descriptor((31 << 26) | (30 << 21) | (1 << 16) | (8 << 11) | (597 << 1))
         .expect("lswi must have a generation descriptor");
     assert_eq!(
-        lswi.encode(&[8, 0, 30]),
+        lswi.encode(&[12, 0, 30]),
         Err(PpuGenerationError::InvalidOperands)
     );
     assert_eq!(
@@ -388,6 +388,7 @@ fn structural_encoding_rejects_architecturally_invalid_register_relations() {
         Err(PpuGenerationError::InvalidOperands)
     );
     assert!(lswi.encode(&[8, 1, 30]).is_ok());
+    assert!(lswi.encode(&[8, 0, 30]).is_ok());
 
     let lswx = generation_descriptor((31 << 26) | (3 << 21) | (4 << 16) | (5 << 11) | (533 << 1))
         .expect("lswx must have a generation descriptor");

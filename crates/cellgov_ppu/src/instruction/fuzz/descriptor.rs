@@ -62,8 +62,8 @@ impl PpuGenerationDescriptor {
             PpuFuzzKind::Ordinary(K::Lmw) => ra != 0 && ra < rt,
             // [PPC-Book1 p:48 s:3.3.6] LSWI may not overwrite its address register.
             PpuFuzzKind::Ordinary(K::Lswi) => {
-                let nb = if rb == 0 { 32 } else { rb };
-                ra != 0 && !(0..nb.div_ceil(4)).any(|index| (rt + index) & 31 == ra)
+                let nb = if rb == 0 { 32 } else { rb as usize };
+                !crate::exec::string_loads_into(rt as u8, nb, ra as u8)
             }
             // [PPC-Book1 p:48 s:3.3.6] LSWX cannot overwrite either address register first.
             PpuFuzzKind::Ordinary(K::Lswx) => rt != ra && rt != rb,

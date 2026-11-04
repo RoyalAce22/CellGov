@@ -389,15 +389,15 @@ pub(super) fn generation_operands_are_valid(instruction: PpuInstruction) -> bool
         // [PPC-Book1 p:46 s:3.3.5] lmw is invalid when RA is zero or
         // names any register in the RT..=31 load range.
         I::Lmw { rt, ra, .. } => ra != 0 && ra < rt,
-        // [PPC-Book1 p:48 s:3.3.6] lswi is invalid when RA is zero or
-        // names one of the wrapping destination registers.
+        // [PPC-Book1 p:48 s:3.3.6] lswi is invalid when RA names one of
+        // the wrapping destination registers, RA=0 included.
         I::Lswi { rt, ra, nb } => {
-            let bytes = if nb == 0 { 32 } else { nb };
-            let registers = bytes.div_ceil(4);
-            ra != 0 && !(0..registers).any(|index| rt.wrapping_add(index) & 31 == ra)
+            let bytes = if nb == 0 { 32 } else { usize::from(nb) };
+            !crate::exec::string_loads_into(rt, bytes, ra)
         }
         // [PPC-Book1 p:48 s:3.3.6] lswx is always invalid when the
-        // first destination names either address register.
+        // first destination names either address register. Whether RA
+        // or RB falls in the range depends on the XER byte count.
         I::Lswx { rt, ra, rb } => rt != ra && rt != rb,
         // [PPC-Book1 p:104 s:4.6.2] Single-precision load-update requires nonzero RA.
         // [PPC-Book1 p:105 s:4.6.2] Double-precision load-update requires nonzero RA.

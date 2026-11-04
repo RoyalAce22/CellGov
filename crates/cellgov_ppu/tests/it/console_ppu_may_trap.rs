@@ -6,7 +6,7 @@ use crate::console_cases::{capture, cellgov_after, table, Capture, Case};
 use cellgov_event::UnitId;
 use cellgov_ppu::decode::decode;
 use cellgov_ppu::differential::CaseOutcome;
-use cellgov_ppu::exec::{execute, ExecuteVerdict};
+use cellgov_ppu::exec::{execute, ExecuteVerdict, PpuFault};
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::state::PpuState;
 use cellgov_ppu::store_buffer::StoreBuffer;
@@ -98,6 +98,44 @@ fn bcctr_with_bo_2_clear_decrements_ctr_and_branches_to_the_old_ctr_on_both() {
             }
             assert_eq!(cellgov.gpr[5] & 3, 3, "{name}: CellGov r5");
         }
+    }
+}
+
+#[test]
+fn a_load_string_with_an_address_register_in_range_ends_the_process_on_the_console_and_refuses_in_cellgov(
+) {
+    for (name, insn) in [
+        ("ppu_may_trap_lswi_ra", "lswi"),
+        ("ppu_may_trap_lswx_ra", "lswx"),
+        ("ppu_may_trap_lswx_rb", "lswx"),
+        ("ppu_may_trap_lswx_rt_ra_n0", "lswx"),
+    ] {
+        let (cellgov, console, _) = probe(name);
+        assert!(
+            matches!(console, Capture::Ended { case: 0 }),
+            "{name}: the console ran it: {console:?}"
+        );
+        assert_eq!(
+            cellgov,
+            Err(CaseOutcome::UnexpectedVerdict(ExecuteVerdict::Fault(
+                PpuFault::InvalidForm(insn)
+            ))),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn lswx_with_ra_0_outside_the_range_loads_on_the_console_and_in_cellgov() {
+    let name = "ppu_may_trap_lswx_ra0";
+    let (_, console, _) = probe(name);
+    let Capture::Done(runs) = console else {
+        panic!("{name}: the console ended the run");
+    };
+    let cellgov = cellgov_after(&table(name)[0], 0).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+    for run in &runs[0] {
+        assert_eq!(run.slots[0], cellgov.gpr[4], "{name}: r4");
+        assert_eq!(run.slots[1], cellgov.gpr[5], "{name}: r5");
     }
 }
 

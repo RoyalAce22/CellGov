@@ -15,6 +15,7 @@ mod scalar;
 mod string;
 
 pub(crate) use execute::execute;
+pub(crate) use string::string_loads_into;
 
 #[cfg(test)]
 #[path = "tests/mem_tests.rs"]
