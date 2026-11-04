@@ -395,6 +395,80 @@ data() {
     timed data-suites data_suites
 }
 
+# The pre-push gate, local only: every group the workflow runs plus
+# `local` on the pushed commit, the `check` group on the MSRV, and the
+# Linux allocation gate in Docker. It runs on the commit's files alone,
+# in one persistent detached worktree beside the repository: a forced
+# checkout moves it, so only changed files get new mtimes, and a clean
+# then removes every untracked and ignored file, so an operator input
+# never satisfies a check. Its builds go to target/push and stay
+# incremental from one push to the next. A tree that passes is recorded
+# under target/push/passed with the toolchains it passed on; a later
+# push of the same tree on the same toolchains runs only `deny`, whose
+# advisory database moves without the tree.
+push_gate_key() {
+    printf '%s\n' "$1" "$(rustc --version)" "$(rustup run "$2" rustc --version)" \
+        "$(cargo nextest --version | head -n 1)" \
+        "$(docker image inspect "rust:$2" --format '{{.Id}}' 2>/dev/null || true)" |
+        sha256sum | cut -c1-16
+}
+
+push_gate() {
+    local commit=$1 repo wt td msrv tree record docker_toolchain
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+    repo=$(git rev-parse --show-toplevel)
+    wt=${CELLGOV_PUSH_WORKTREE:-$repo-push}
+    td=$repo/target/push
+    git worktree prune
+    if [ -f "$wt/.git" ]; then
+        git -C "$wt" checkout -q --detach --force "$commit"
+        git -C "$wt" clean -q -fdx
+    elif [ -e "$wt" ]; then
+        # Only a linked worktree has a .git file; the clean above must
+        # never reach the main checkout or any other directory.
+        echo "ci.sh: push-gate: $wt exists and is not a linked worktree" >&2
+        return 1
+    else
+        git worktree add -q --detach "$wt" "$commit"
+    fi
+    cd "$wt"
+    msrv=$(sed -n 's/^rust-version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+    test -n "$msrv"
+    case "$msrv" in
+        *.*.*) docker_toolchain=$msrv ;;
+        *) docker_toolchain=$msrv.0 ;;
+    esac
+    docker info >/dev/null
+    tree=$(git rev-parse "$commit^{tree}")
+    record=$td/passed/$tree-$(push_gate_key "$tree" "$msrv")
+    # No debuginfo, as the workflow builds: debug test builds link
+    # several times faster without it.
+    export CARGO_TARGET_DIR=$td CELLGOV_RUSTDOC_CHECK=1 CARGO_PROFILE_DEV_DEBUG=0
+    if [ -f "$record" ]; then
+        echo "ci.sh: push-gate: tree $tree passed $(cat "$record") on these toolchains; deny only"
+        bash .github/ci.sh deny
+        return
+    fi
+    bash .github/ci.sh full
+    # The workflow's msrv job runs this group on the same toolchain. An
+    # unavailable toolchain fails here rather than in the workflow.
+    RUSTUP_TOOLCHAIN=$msrv bash .github/ci.sh check
+    # Windows cannot show Linux-only allocator or filesystem behavior.
+    echo "ci.sh: push-gate: Linux MSRV allocation gate"
+    MSYS_NO_PATHCONV=1 docker run --rm \
+        --mount "type=bind,source=$(pwd -W 2>/dev/null || pwd),target=/workspace" \
+        --mount "type=volume,source=cellgov-cargo-registry,target=/usr/local/cargo/registry" \
+        --workdir /workspace \
+        --env CARGO_TARGET_DIR=/tmp/cellgov-target \
+        --env "RUSTUP_TOOLCHAIN=$docker_toolchain" \
+        "rust:$msrv" \
+        cargo test -p cellgov_core --release --locked --test allocation_counts
+    # Keyed after the run: the run pulls the image when it is missing.
+    record=$td/passed/$tree-$(push_gate_key "$tree" "$msrv")
+    mkdir -p "$td/passed"
+    echo "at $(date -u +%Y-%m-%dT%H:%M:%SZ) as $commit" >"$record"
+}
+
 case "${1:-full}" in
     lint) run_group lint lint ;;
     check) run_group check check ;;
@@ -406,6 +480,7 @@ case "${1:-full}" in
     micro-build) run_group micro-build micro_build ;;
     microtests) run_group microtests microtests ;;
     data) run_group data data ;;
+    push-gate) push_gate "${2:?usage: $0 push-gate <commit>}" ;;
     gate-tests | gate-docs | gate-full)
         gate_mode=${1#gate-}
         run_group "$1" gate
@@ -421,7 +496,7 @@ case "${1:-full}" in
         run_group local test_local
         ;;
     *)
-        echo "usage: $0 {lint|check|test|test-linux|local|smoke-artifacts|deny|micro-build|microtests|data|full|gate-tests|gate-docs|gate-full}" >&2
+        echo "usage: $0 {lint|check|test|test-linux|local|smoke-artifacts|deny|micro-build|microtests|data|full|gate-tests|gate-docs|gate-full|push-gate <commit>}" >&2
         exit 2
         ;;
 esac
