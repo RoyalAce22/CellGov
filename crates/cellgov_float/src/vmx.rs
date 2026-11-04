@@ -1,8 +1,9 @@
 //! The vector single-precision rules: binary32 under [`Policy::PowerPc`],
 //! with the non-Java mode that `VSCR[NJ]` selects.
 //!
-//! The vector unit keeps no floating-point status, so these functions
-//! return bits only.
+//! The vector unit keeps no floating-point exception status. The
+//! float-to-integer conversions return whether the result saturated;
+//! every other function returns bits only.
 
 use crate::arith::{product, sum};
 use crate::format::{Binary32, Format};
@@ -186,6 +187,92 @@ pub fn vmx_round_integer(mode: VmxMode, rounding: Rounding, b: u32) -> u32 {
         Rounding::NearestEven,
         Exact::from_parts(x.negative(), magnitude, 0, false),
     )
+}
+
+/// The integer `value` divided by 2^`scale`, rounded once to nearest
+/// binary32. `value` holds a signed or an unsigned word.
+///
+/// [AltiVec-PEM p:6-49 s:6.2] vcfsx converts each signed word to the nearest single-precision value, then divides it by 2^UIMM.
+/// [AltiVec-PEM p:6-4 s:6.1.2] ties go to even.
+pub fn vmx_from_integer(value: i64, scale: u32) -> u32 {
+    if value == 0 {
+        return 0;
+    }
+    // The division by a power of two is exact. The smallest nonzero
+    // magnitude, 2^-31, is normal, so both modes give the same result.
+    let exact = Exact::from_parts(
+        value < 0,
+        u128::from(value.unsigned_abs()),
+        -(scale as i32),
+        false,
+    );
+    vmx_round(VmxMode::Java, Rounding::NearestEven, exact)
+}
+
+/// The binary32 word `b` times 2^`scale`, converted to a signed word
+/// toward zero, and whether the result saturated.
+///
+/// [AltiVec-PEM p:6-65 s:6.2] vctsxs rounds toward zero and saturates to [-2^31, 2^31 - 1].
+pub fn vmx_to_signed(mode: VmxMode, b: u32, scale: u32) -> (u32, bool) {
+    let Some(value) = scaled_toward_zero(mode, b, scale) else {
+        return (0, false);
+    };
+    let clamped = value.clamp(i32::MIN.into(), i32::MAX.into());
+    (clamped as i32 as u32, clamped != value)
+}
+
+/// The binary32 word `b` times 2^`scale`, converted to an unsigned word
+/// toward zero, and whether the result saturated.
+///
+/// [AltiVec-PEM p:6-66 s:6.2] vctuxs rounds toward zero and saturates to [0, 2^32 - 1].
+/// The page leaves open whether a product in (-1, 0) saturates. The
+/// ppu_vfp_convert_frac console capture shows that it truncates to 0 and
+/// does not saturate.
+pub fn vmx_to_unsigned(mode: VmxMode, b: u32, scale: u32) -> (u32, bool) {
+    let Some(value) = scaled_toward_zero(mode, b, scale) else {
+        return (0, false);
+    };
+    let clamped = value.clamp(0, u32::MAX.into());
+    (clamped as u32, clamped != value)
+}
+
+/// `b` times 2^`scale` truncated to an integer, or `None` for a NaN. A
+/// magnitude past 2^64 becomes 2^64, which is outside the range of every
+/// word.
+///
+/// [AltiVec-PEM p:3-15 s:3.2.5.4] every NaN converts to zero; the ppu_vfp_convert console capture shows it leaves SAT unchanged.
+/// [AltiVec-PEM p:3-14 s:3.2.4.5] an infinity saturates by its sign.
+fn scaled_toward_zero(mode: VmxMode, b: u32, scale: u32) -> Option<i128> {
+    let (negative, magnitude) = match vmx_unpack(mode, b) {
+        Operand::NaN { .. } => return None,
+        Operand::Zero { .. } => return Some(0),
+        Operand::Infinity { negative } => (negative, BEYOND),
+        Operand::Finite(x) => (
+            x.negative(),
+            truncated_magnitude(x.significand(), x.exponent() + scale as i32),
+        ),
+    };
+    let magnitude = magnitude as i128;
+    Some(if negative { -magnitude } else { magnitude })
+}
+
+/// The magnitude that stands for every product past 2^64.
+const BEYOND: u128 = 1 << 64;
+
+/// `significand` x 2^`exponent` truncated toward zero, or [`BEYOND`] when
+/// the product passes 2^64.
+fn truncated_magnitude(significand: u128, exponent: i32) -> u128 {
+    let width = (u128::BITS - significand.leading_zeros()) as i32;
+    if exponent >= 0 && width + exponent > 64 {
+        return BEYOND;
+    }
+    if exponent >= 0 {
+        return significand << exponent;
+    }
+    if -exponent >= width {
+        return 0;
+    }
+    significand >> -exponent
 }
 
 /// An operand or product other than a NaN.

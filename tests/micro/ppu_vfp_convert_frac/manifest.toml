@@ -1,0 +1,20 @@
+[test]
+name = "ppu_vfp_convert_frac"
+
+# A hardware probe of vctsxs and vctuxs on negative values whose product
+# truncates to zero: -0.5, just above -1, the same products reached
+# through a scale, negative denormals at the largest scale, and -0. No
+# slot in a case saturates for another reason, so VSCR[SAT] read back
+# with mfvscr answers whether a product in (-1, 0) saturates vctuxs.
+# Each case runs under NJ = 0 and NJ = 1. cases.tsv names each case. The
+# console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (20 cases). Each run records v3 (the result) and v4 (VSCR).
+memory_regions = [
+  { name = "result", addr = 0, size = 2576 },
+]
+
+[expect]
+outcome = "completed"

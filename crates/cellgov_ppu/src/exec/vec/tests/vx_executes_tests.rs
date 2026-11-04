@@ -33,10 +33,10 @@ fn every_vx_op_continues_exactly_when_vx_executes_says_so() {
             continuing += usize::from(continues);
         }
     }
-    // Every implemented op continues without Rc, and each compare also
-    // continues with Rc.
+    // Every op but the four estimates continues without Rc, and each
+    // compare also continues with Rc.
     let compares = VxOp::iter().filter(|op| op.is_vxr_compare()).count();
-    assert_eq!(continuing, VxOp::iter().count() - 6 + compares);
+    assert_eq!(continuing, VxOp::iter().count() - 4 + compares);
 }
 
 #[test]

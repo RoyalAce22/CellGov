@@ -1,0 +1,22 @@
+[test]
+name = "ppu_vfp_convert"
+
+# A hardware probe of vcfsx, vcfux, vctsxs and vctuxs, four different
+# slots a case, each case under NJ = 0 and NJ = 1. It settles ties to
+# even in the integer-to-float direction, truncation and saturation at
+# each word's edges in the float-to-integer direction, infinities,
+# denormals and the overflow branch, and two open results: whether a
+# NaN sets SAT, and whether vctuxs sets SAT for a value in (-1, 0). Each
+# case sets VSCR with mtvscr first and reads it back with mfvscr; the
+# sticky cases start with SAT set. cases.tsv names each case. The
+# console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (46 cases). Each run records v3 (the result) and v4 (VSCR).
+memory_regions = [
+  { name = "result", addr = 0, size = 5904 },
+]
+
+[expect]
+outcome = "completed"

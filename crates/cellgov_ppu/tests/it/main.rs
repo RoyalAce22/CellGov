@@ -34,6 +34,8 @@ mod console_ppu_vadd_sub_sat;
 mod console_ppu_vcmp_int_record;
 mod console_ppu_vfp_addsub;
 mod console_ppu_vfp_compare;
+mod console_ppu_vfp_convert;
+mod console_ppu_vfp_convert_frac;
 mod console_ppu_vfp_madd;
 mod console_ppu_vfp_madd_tiny;
 mod console_ppu_vfp_maxmin;

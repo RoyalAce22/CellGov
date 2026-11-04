@@ -164,17 +164,29 @@ fn vcfsx_converts_signed_ints_with_scale() {
 
     let lanes2 = unpack_f32x4(vcfsx(v, 10));
     assert_eq!(lanes2, [1.0 / 1024.0, -1.0 / 1024.0, 1.0, -1.0]);
+
+    // 2^24 + 1 and 2^24 + 3 tie to even; the extremes round to +-2^31.
+    let ties = pack_u32x4([0x0100_0001, 0x0100_0003, 0x7FFF_FFFF, 0x8000_0000]);
+    assert_eq!(
+        vcfsx(ties, 0),
+        pack_u32x4([0x4B80_0000, 0x4B80_0002, 0x4F00_0000, 0xCF00_0000])
+    );
 }
 
 #[test]
 fn vcfux_converts_unsigned_ints_with_scale() {
-    let v = pack_u32x4([0, 1, 0xFFFF_FFFF, 0x8000_0000]);
-    let lanes = unpack_f32x4(vcfux(v, 0));
-    assert_eq!(lanes[0], 0.0);
-    assert_eq!(lanes[1], 1.0);
-    // 0xFFFF_FFFF as u32 as f32 rounds to 2^32.
-    assert!((lanes[2] - 4294967296.0).abs() < 1.0);
-    assert!((lanes[3] - 2147483648.0).abs() < 1.0);
+    // 0xFFFF_FFFF rounds up to 2^32, 0xFFFF_FF80 ties up to the even
+    // 2^32, and 0xFFFF_FF7F rounds down.
+    let v = pack_u32x4([0xFFFF_FFFF, 0xFFFF_FF80, 0xFFFF_FF7F, 0x8000_0000]);
+    assert_eq!(
+        vcfux(v, 0),
+        pack_u32x4([0x4F80_0000, 0x4F80_0000, 0x4F7F_FFFF, 0x4F00_0000])
+    );
+    // 1 / 2^31 is the smallest nonzero result.
+    assert_eq!(
+        vcfux(pack_u32x4([0, 1, 2, 3]), 31),
+        pack_u32x4([0, 0x3000_0000, 0x3080_0000, 0x30C0_0000])
+    );
 }
 
 #[test]

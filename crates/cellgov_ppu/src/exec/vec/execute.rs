@@ -1,6 +1,6 @@
 //! The VX-form and VA-form dispatchers and the `vsldoi` entry.
 
-use super::convert::{vcfsx, vcfux};
+use super::convert::{vcfsx, vcfux, vctsxs, vctuxs};
 use super::float_arith::{vaddfp, vmaddfp, vnmsubfp, vrfi, vsubfp};
 use super::float_compare::{vcmpbfp, vcmpeqfp, vcmpgefp, vcmpgtfp};
 use super::float_minmax::{vmaxfp, vminfp};
@@ -309,11 +309,15 @@ pub(crate) fn execute_vx(
         // The ppu_reference_vectors capture settles the undefined case as for vsl.
         VxOp::Vsr => (vsr(a, b), false),
 
-        // -- Int <-> Float conversions (va field is uimm scale) --
-        // [AltiVec-PEM p:6-49 s:6.2] vcfsx
+        // -- Fixed-point <-> single-precision conversions (the vA field is the UIMM scale) --
+        // [AltiVec-PEM p:6-49 s:6.2] vcfsx: each signed word to the nearest single-precision value, divided by 2^UIMM.
         VxOp::Vcfsx => (vcfsx(b, va), false),
-        // [AltiVec-PEM p:6-50 s:6.2] vcfux
+        // [AltiVec-PEM p:6-50 s:6.2] vcfux: the same for each unsigned word.
         VxOp::Vcfux => (vcfux(b, va), false),
+        // [AltiVec-PEM p:6-65 s:6.2] vctsxs: each slot x 2^UIMM toward zero, saturated to a signed word; saturation sets SAT.
+        VxOp::Vctsxs => vctsxs(mode, b, va),
+        // [AltiVec-PEM p:6-66 s:6.2] vctuxs: the same, saturated to an unsigned word.
+        VxOp::Vctuxs => vctuxs(mode, b, va),
 
         // -- Single-precision compares (the engine orders the slots; NJ flushes denormals) --
         // [AltiVec-PEM p:6-53 s:6.2] vcmpeqfp: all ones where vA = vB, 0 where not or where either is a NaN.
@@ -350,12 +354,7 @@ pub(crate) fn execute_vx(
         VxOp::Vrfim => (vrfi(mode, Rounding::TowardNegative, b), false),
 
         // `vx_executes` refuses these before the match.
-        VxOp::Vrefp
-        | VxOp::Vrsqrtefp
-        | VxOp::Vexptefp
-        | VxOp::Vlogefp
-        | VxOp::Vctuxs
-        | VxOp::Vctsxs => {
+        VxOp::Vrefp | VxOp::Vrsqrtefp | VxOp::Vexptefp | VxOp::Vlogefp => {
             return ExecuteVerdict::Fault(unimplemented);
         }
     };
@@ -375,12 +374,7 @@ pub(crate) fn execute_vx(
 pub(crate) fn vx_executes(op: VxOp, rc: bool) -> bool {
     let unimplemented = matches!(
         op,
-        VxOp::Vrefp
-            | VxOp::Vrsqrtefp
-            | VxOp::Vexptefp
-            | VxOp::Vlogefp
-            | VxOp::Vctuxs
-            | VxOp::Vctsxs
+        VxOp::Vrefp | VxOp::Vrsqrtefp | VxOp::Vexptefp | VxOp::Vlogefp
     );
     !unimplemented && (!rc || op.is_vxr_compare())
 }

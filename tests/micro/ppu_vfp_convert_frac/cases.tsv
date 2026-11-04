@@ -1,0 +1,21 @@
+id	asm	words	inputs	record	may_end_process
+vctsxs_below_one_nj0	vspltisw v5, 0; mtvscr v5; vctsxs v3, v2, 0; mfvscr v4	0x10a0038c,0x10002e44,0x106013ca,0x10800604	cr=0x0,xer=0x0,v2=0xbf000000_bf7fffff_3f000000_00000000	v3,v4	0
+vctsxs_below_one_nj1	vspltish v5, 1; mtvscr v5; vctsxs v3, v2, 0; mfvscr v4	0x10a1034c,0x10002e44,0x106013ca,0x10800604	cr=0x0,xer=0x0,v2=0xbf000000_bf7fffff_3f000000_00000000	v3,v4	0
+vctuxs_below_one_nj0	vspltisw v5, 0; mtvscr v5; vctuxs v3, v2, 0; mfvscr v4	0x10a0038c,0x10002e44,0x1060138a,0x10800604	cr=0x0,xer=0x0,v2=0xbf000000_bf7fffff_3f000000_00000000	v3,v4	0
+vctuxs_below_one_nj1	vspltish v5, 1; mtvscr v5; vctuxs v3, v2, 0; mfvscr v4	0x10a1034c,0x10002e44,0x1060138a,0x10800604	cr=0x0,xer=0x0,v2=0xbf000000_bf7fffff_3f000000_00000000	v3,v4	0
+vctsxs_scaled_quarter_nj0	vspltisw v5, 0; mtvscr v5; vctsxs v3, v2, 1; mfvscr v4	0x10a0038c,0x10002e44,0x106113ca,0x10800604	cr=0x0,xer=0x0,v2=0xbe800000_be800000_be800000_be800000	v3,v4	0
+vctsxs_scaled_quarter_nj1	vspltish v5, 1; mtvscr v5; vctsxs v3, v2, 1; mfvscr v4	0x10a1034c,0x10002e44,0x106113ca,0x10800604	cr=0x0,xer=0x0,v2=0xbe800000_be800000_be800000_be800000	v3,v4	0
+vctuxs_scaled_quarter_nj0	vspltisw v5, 0; mtvscr v5; vctuxs v3, v2, 1; mfvscr v4	0x10a0038c,0x10002e44,0x1061138a,0x10800604	cr=0x0,xer=0x0,v2=0xbe800000_be800000_be800000_be800000	v3,v4	0
+vctuxs_scaled_quarter_nj1	vspltish v5, 1; mtvscr v5; vctuxs v3, v2, 1; mfvscr v4	0x10a1034c,0x10002e44,0x1061138a,0x10800604	cr=0x0,xer=0x0,v2=0xbe800000_be800000_be800000_be800000	v3,v4	0
+vctsxs_scaled_tiny_nj0	vspltisw v5, 0; mtvscr v5; vctsxs v3, v2, 30; mfvscr v4	0x10a0038c,0x10002e44,0x107e13ca,0x10800604	cr=0x0,xer=0x0,v2=0xb0000000_b0000000_b0000000_b0000000	v3,v4	0
+vctsxs_scaled_tiny_nj1	vspltish v5, 1; mtvscr v5; vctsxs v3, v2, 30; mfvscr v4	0x10a1034c,0x10002e44,0x107e13ca,0x10800604	cr=0x0,xer=0x0,v2=0xb0000000_b0000000_b0000000_b0000000	v3,v4	0
+vctuxs_scaled_tiny_nj0	vspltisw v5, 0; mtvscr v5; vctuxs v3, v2, 30; mfvscr v4	0x10a0038c,0x10002e44,0x107e138a,0x10800604	cr=0x0,xer=0x0,v2=0xb0000000_b0000000_b0000000_b0000000	v3,v4	0
+vctuxs_scaled_tiny_nj1	vspltish v5, 1; mtvscr v5; vctuxs v3, v2, 30; mfvscr v4	0x10a1034c,0x10002e44,0x107e138a,0x10800604	cr=0x0,xer=0x0,v2=0xb0000000_b0000000_b0000000_b0000000	v3,v4	0
+vctsxs_negative_denormals_nj0	vspltisw v5, 0; mtvscr v5; vctsxs v3, v2, 31; mfvscr v4	0x10a0038c,0x10002e44,0x107f13ca,0x10800604	cr=0x0,xer=0x0,v2=0x80000001_807fffff_80000000_00000000	v3,v4	0
+vctsxs_negative_denormals_nj1	vspltish v5, 1; mtvscr v5; vctsxs v3, v2, 31; mfvscr v4	0x10a1034c,0x10002e44,0x107f13ca,0x10800604	cr=0x0,xer=0x0,v2=0x80000001_807fffff_80000000_00000000	v3,v4	0
+vctuxs_negative_denormals_nj0	vspltisw v5, 0; mtvscr v5; vctuxs v3, v2, 31; mfvscr v4	0x10a0038c,0x10002e44,0x107f138a,0x10800604	cr=0x0,xer=0x0,v2=0x80000001_807fffff_80000000_00000000	v3,v4	0
+vctuxs_negative_denormals_nj1	vspltish v5, 1; mtvscr v5; vctuxs v3, v2, 31; mfvscr v4	0x10a1034c,0x10002e44,0x107f138a,0x10800604	cr=0x0,xer=0x0,v2=0x80000001_807fffff_80000000_00000000	v3,v4	0
+vctsxs_negative_zero_nj0	vspltisw v5, 0; mtvscr v5; vctsxs v3, v2, 0; mfvscr v4	0x10a0038c,0x10002e44,0x106013ca,0x10800604	cr=0x0,xer=0x0,v2=0x80000000_80000000_80000000_80000000	v3,v4	0
+vctsxs_negative_zero_nj1	vspltish v5, 1; mtvscr v5; vctsxs v3, v2, 0; mfvscr v4	0x10a1034c,0x10002e44,0x106013ca,0x10800604	cr=0x0,xer=0x0,v2=0x80000000_80000000_80000000_80000000	v3,v4	0
+vctuxs_negative_zero_nj0	vspltisw v5, 0; mtvscr v5; vctuxs v3, v2, 0; mfvscr v4	0x10a0038c,0x10002e44,0x1060138a,0x10800604	cr=0x0,xer=0x0,v2=0x80000000_80000000_80000000_80000000	v3,v4	0
+vctuxs_negative_zero_nj1	vspltish v5, 1; mtvscr v5; vctuxs v3, v2, 0; mfvscr v4	0x10a1034c,0x10002e44,0x1060138a,0x10800604	cr=0x0,xer=0x0,v2=0x80000000_80000000_80000000_80000000	v3,v4	0
