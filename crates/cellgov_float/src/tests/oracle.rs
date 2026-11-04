@@ -101,6 +101,15 @@ fn pick<F: Format>(x: Exact, rounding: Rounding, patterns: &[u64]) -> (u64, bool
     (patterns[chosen], true, overflow)
 }
 
+/// Whether `|x|` lies below the smallest normal magnitude of `F`.
+///
+/// `|x| = significand + f` units of `2^exponent` with `0 <= f < 1`, so
+/// `|x| < 2^emin` exactly when `significand < 2^(emin - exponent)`.
+pub(crate) fn below_smallest_normal<F: Format>(x: Exact) -> bool {
+    let k = 1 - F::BIAS - x.exponent;
+    x.significand != 0 && (k > 127 || (k > 0 && x.significand < 1u128 << k))
+}
+
 /// Rounds `x` by enumerating every result pattern of `F`. `F` must be small.
 pub(crate) fn enumerate<F: Format>(policy: Policy, rounding: Rounding, x: Exact) -> Packed {
     let sign = u64::from(x.negative) << F::SIGN_SHIFT;
@@ -154,7 +163,7 @@ pub(crate) fn enumerate<F: Format>(policy: Policy, rounding: Rounding, x: Exact)
                 },
             }
         }
-        Policy::Ieee754Cbe => {
+        Policy::Ieee754Cbe | Policy::PowerPc => {
             // Every finite magnitude, then the infinity pattern as the
             // overflow point: 2^(emax + 1), the next binade after the largest.
             let patterns: Vec<u64> = (0..=exp_max << F::FRAC_BITS).collect();
@@ -310,7 +319,7 @@ pub(crate) fn define<F: Format>(policy: Policy, rounding: Rounding, x: Exact) ->
                 },
             };
         }
-        Policy::Ieee754Cbe => {
+        Policy::Ieee754Cbe | Policy::PowerPc => {
             if biased >= F::EXP_MAX as i32 {
                 let toward_zero = match rounding {
                     Rounding::NearestEven => false,

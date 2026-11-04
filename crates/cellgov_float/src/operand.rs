@@ -31,7 +31,8 @@ pub enum Operand {
 /// Under [`Policy::SpuExtended`] an exponent-0 operand is zero whatever its
 /// fraction, and one with a nonzero fraction or with exponent 255 raises
 /// DIFF. Under [`Policy::Ieee754Cbe`] a denormal operand is a zero of its
-/// sign and raises DENORM, and a NaN raises NaN.
+/// sign and raises DENORM, and a NaN raises NaN. Under [`Policy::PowerPc`]
+/// a denormal operand keeps its value, and reading raises no flag.
 ///
 /// [SPU-ISA p:195 s:9.1] a zero exponent is zero and exponent 255 is a normal binade in single precision.
 /// [SPU-ISA p:196 s:9.1] a denormal single operand reads as zero; DIFF marks an input with a maximal exponent or a zero exponent and nonzero fraction.
@@ -70,10 +71,20 @@ pub fn unpack<F: Format>(policy: Policy, bits: u64) -> (Operand, Flags) {
                 ..Flags::default()
             },
         ),
-        (Policy::Ieee754Cbe, e) if e == F::EXP_MAX && fraction == 0 => {
+        (Policy::PowerPc, 0) if fraction == 0 => (Operand::Zero { negative }, Flags::default()),
+        (Policy::PowerPc, 0) => (
+            Operand::Finite(Exact {
+                negative,
+                significand: u128::from(fraction),
+                exponent: 1 - F::BIAS - F::FRAC_BITS as i32,
+                sticky: false,
+            }),
+            Flags::default(),
+        ),
+        (Policy::Ieee754Cbe | Policy::PowerPc, e) if e == F::EXP_MAX && fraction == 0 => {
             (Operand::Infinity { negative }, Flags::default())
         }
-        (Policy::Ieee754Cbe, e) if e == F::EXP_MAX => (
+        (Policy::Ieee754Cbe | Policy::PowerPc, e) if e == F::EXP_MAX => (
             Operand::NaN {
                 quiet: fraction >> (F::FRAC_BITS - 1) & 1 == 1,
             },
@@ -82,7 +93,7 @@ pub fn unpack<F: Format>(policy: Policy, bits: u64) -> (Operand, Flags) {
                 ..Flags::default()
             },
         ),
-        (Policy::Ieee754Cbe, e) => (normal(e), Flags::default()),
+        (Policy::Ieee754Cbe | Policy::PowerPc, e) => (normal(e), Flags::default()),
     }
 }
 

@@ -112,6 +112,13 @@ pub enum Policy {
     ///
     /// [SPU-ISA p:199 s:9.2.2] UNF is tininess before rounding together with inexactness. [SPU-ISA p:198 s:9.2] an implementation may support denormals only as results; the `spu_double_policy` capture shows the CBE producing them from dfm and dfs in all four modes, with UNF and INX only when inexact.
     Ieee754Cbe,
+    /// The PowerPC binary formats: rounding per the requested mode,
+    /// denormal operands read at their value, denormal results with
+    /// tininess detected before rounding, and overflow per the mode.
+    ///
+    /// [PPC-Book1 p:91 s:4.3.2] a denormalized number is (-1)^s x 2^Emin x (0.fraction).
+    /// [AltiVec-PEM p:3-14 s:3.2.4.6] underflow is detected before rounding; the result is the intermediate value denormalized and rounded.
+    PowerPc,
 }
 
 /// Exception conditions an operation raises.
@@ -169,7 +176,7 @@ pub fn round_pack<F: Format>(policy: Policy, rounding: Rounding, exact: Exact) -
     );
     match policy {
         Policy::SpuExtended => round_spu_extended::<F>(exact),
-        Policy::Ieee754Cbe => round_ieee::<F>(rounding, exact),
+        Policy::Ieee754Cbe | Policy::PowerPc => round_ieee::<F>(rounding, exact),
     }
 }
 
@@ -180,7 +187,7 @@ fn significant_bits(x: u128) -> u32 {
 
 /// The unbiased exponent `e` with `2^e <= |value| < 2^(e+1)`, for a nonzero
 /// significand.
-fn binade(exact: Exact) -> i32 {
+pub(crate) fn binade(exact: Exact) -> i32 {
     exact.exponent + significant_bits(exact.significand) as i32 - 1
 }
 

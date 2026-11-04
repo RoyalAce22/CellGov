@@ -13,7 +13,9 @@
 //! [SPU-ISA p:195 s:9.1], [SPU-ISA p:196 s:9.1]. [`Policy::Ieee754Cbe`] is
 //! IEEE 754 as the CBE implements it: four rounding modes, a denormal
 //! operand read as a zero of its sign, and the default NaN for every NaN
-//! result [SPU-ISA p:197 s:9.2], [SPU-ISA p:199 s:9.2.2].
+//! result [SPU-ISA p:197 s:9.2], [SPU-ISA p:199 s:9.2.2]. [`Policy::PowerPc`]
+//! honours denormal operands and results; the vector unit's Java and
+//! non-Java modes build on it ([`VmxMode`]).
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 #![cfg_attr(
@@ -32,6 +34,7 @@ mod arith;
 mod format;
 mod operand;
 mod round;
+mod vmx;
 
 pub use arith::{add, mul};
 pub use format::{Binary32, Binary64, Format};
@@ -39,6 +42,7 @@ pub use operand::{
     default_nan, extended_magnitude_key, extended_order_key, unpack, unpack_extended, Operand,
 };
 pub use round::{round_pack, Exact, Flags, Packed, Policy, Rounding};
+pub use vmx::{vmx_nan, vmx_round, vmx_unpack, VmxMode, VMX_DEFAULT_NAN};
 
 #[cfg(test)]
 #[path = "tests/oracle.rs"]
@@ -51,3 +55,11 @@ mod round_tests;
 #[cfg(test)]
 #[path = "tests/arith_tests.rs"]
 mod arith_tests;
+
+#[cfg(test)]
+#[path = "tests/vmx_tests.rs"]
+mod vmx_tests;
+
+#[cfg(test)]
+#[path = "tests/vmx_console_tests.rs"]
+mod vmx_console_tests;

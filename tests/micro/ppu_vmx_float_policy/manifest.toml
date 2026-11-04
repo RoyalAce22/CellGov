@@ -1,0 +1,23 @@
+[test]
+name = "ppu_vmx_float_policy"
+
+# A hardware probe of the vector single-precision rules the float
+# engine's VMX policies follow, each case under NJ = 0 and NJ = 1. The
+# PEM says both that non-Java mode replaces a result Java mode would
+# deliver denormalized and that underflow is detected before rounding;
+# a product half a denormal step below 2^-126, which rounds up to
+# 2^-126, tells the two apart. Also: exact and inexact tiny results,
+# NaN precedence and quieting, generated NaNs, the signs of zero
+# results, denormal operands and overflow. Each case sets VSCR with
+# mtvscr before the operation. cases.tsv names each case. The console
+# capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (36 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 4624 },
+]
+
+[expect]
+outcome = "completed"

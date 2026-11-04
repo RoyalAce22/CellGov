@@ -17,12 +17,12 @@ const MODES: [Rounding; 4] = [
 fn modes(policy: Policy) -> &'static [Rounding] {
     match policy {
         Policy::SpuExtended => &MODES[1..2],
-        Policy::Ieee754Cbe => &MODES,
+        Policy::Ieee754Cbe | Policy::PowerPc => &MODES,
     }
 }
 
 /// The exact product of two finite operands.
-fn product(a: Exact, b: Exact) -> Exact {
+pub(crate) fn product(a: Exact, b: Exact) -> Exact {
     Exact {
         negative: a.negative != b.negative,
         significand: a.significand * b.significand,
@@ -32,7 +32,7 @@ fn product(a: Exact, b: Exact) -> Exact {
 }
 
 /// The exact sum of two finite operands whose exponents lie within 100.
-fn sum(a: Exact, b: Exact) -> Exact {
+pub(crate) fn sum(a: Exact, b: Exact) -> Exact {
     let e = a.exponent.min(b.exponent);
     let (x, y) = (
         a.significand << (a.exponent - e),
@@ -53,7 +53,7 @@ fn sum(a: Exact, b: Exact) -> Exact {
     }
 }
 
-fn finite<F: Format>(policy: Policy, bits: u64) -> Option<Exact> {
+pub(crate) fn finite<F: Format>(policy: Policy, bits: u64) -> Option<Exact> {
     match unpack::<F>(policy, bits).0 {
         Operand::Finite(exact) => Some(exact),
         _ => None,
@@ -72,7 +72,7 @@ fn check<F: Format>(policy: Policy, x: Exact, oracle: fn(Policy, Rounding, Exact
 
 #[test]
 fn every_tiny_operand_pair_rounds_like_the_enumeration_oracle() {
-    for policy in [Policy::SpuExtended, Policy::Ieee754Cbe] {
+    for policy in [Policy::SpuExtended, Policy::Ieee754Cbe, Policy::PowerPc] {
         let operands: Vec<Exact> = (0..256)
             .filter_map(|bits| finite::<Tiny>(policy, bits))
             .collect();
@@ -90,7 +90,7 @@ fn every_tiny_operand_pair_rounds_like_the_enumeration_oracle() {
 #[test]
 fn every_tiny_sticky_value_rounds_like_the_enumeration_oracle() {
     // Six significant bits is the least a sticky value may carry: FRAC_BITS + 3.
-    for policy in [Policy::SpuExtended, Policy::Ieee754Cbe] {
+    for policy in [Policy::SpuExtended, Policy::Ieee754Cbe, Policy::PowerPc] {
         for significand in 32..1024u128 {
             for exponent in -20..=6 {
                 for sticky in [false, true] {
@@ -121,7 +121,7 @@ fn lcg(state: &mut u64) -> u64 {
 /// Exact values that drive every truncation, round and sticky combination,
 /// with and without a carry into the exponent, at each exponent boundary,
 /// and the products of every pair of operand classes.
-fn coverage<F: Format>(policy: Policy) -> Vec<Exact> {
+pub(crate) fn coverage<F: Format>(policy: Policy) -> Vec<Exact> {
     let frac = F::FRAC_BITS;
     let lead = 1u128 << frac;
     let mask = lead - 1;
@@ -200,6 +200,12 @@ fn the_coverage_model_rounds_like_the_definitional_oracle() {
     }
     for x in coverage::<Binary64>(Policy::Ieee754Cbe) {
         check::<Binary64>(Policy::Ieee754Cbe, x, define::<Binary64>);
+    }
+    for x in coverage::<Binary32>(Policy::PowerPc) {
+        check::<Binary32>(Policy::PowerPc, x, define::<Binary32>);
+    }
+    for x in coverage::<Binary64>(Policy::PowerPc) {
+        check::<Binary64>(Policy::PowerPc, x, define::<Binary64>);
     }
 }
 
