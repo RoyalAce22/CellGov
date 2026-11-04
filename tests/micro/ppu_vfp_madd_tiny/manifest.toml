@@ -1,0 +1,20 @@
+[test]
+name = "ppu_vfp_madd_tiny"
+
+# A hardware probe of vmaddfp and vnmsubfp results near 2^-126, four
+# different slots a case, each case under NJ = 0 and NJ = 1. It settles
+# a sum whose exact value lies just below 2^-126 and rounds up to it
+# (vnmsubfp and vmaddfp, both signs), the vnmsubfp sign of a tiny result
+# NJ = 1 replaces with zero, and denormal vA and vB operands NJ = 1
+# truncates to zero. Each case sets VSCR with mtvscr first. cases.tsv
+# names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (6 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 784 },
+]
+
+[expect]
+outcome = "completed"

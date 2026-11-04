@@ -1,10 +1,11 @@
-//! `vaddfp` and `vsubfp` through `execute_vx`: four independent slots,
-//! the mode from `VSCR[NJ]`, and no status written.
+//! `vaddfp` and `vsubfp` through `execute_vx`, and `vmaddfp` and
+//! `vnmsubfp` through `execute_va`: four independent slots, the mode from
+//! `VSCR[NJ]`, and no status written.
 
 use super::lane_support::pack_u32x4;
 use crate::exec::test_support::exec_no_mem;
 use crate::exec::ExecuteVerdict;
-use crate::instruction::ops::VxOp;
+use crate::instruction::ops::{VaOp, VxOp};
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
 use cellgov_ps3_abi::hw::ppu::{VSCR_NJ, VSCR_SAT};
@@ -53,6 +54,64 @@ fn vsubfp_takes_vb_from_va() {
     assert_eq!(
         run(VxOp::Vsubfp, false, a, b),
         pack_u32x4([0xBF80_0000, 0x8000_0000, 0x7FC0_0000, 0xFFC0_0007])
+    );
+}
+
+/// vD after VA `op` on vA, vB, vC = `a`, `b`, `c` in registers 1, 2, 4
+/// with `VSCR[NJ]` = `nj`; checks that SAT does not change.
+fn run_va(op: VaOp, nj: bool, a: u128, b: u128, c: u128) -> u128 {
+    let mut s = PpuState::new();
+    s.set_vscr(if nj { VSCR_NJ } else { 0 });
+    s.set_vr(1, a);
+    s.set_vr(2, b);
+    s.set_vr(4, c);
+    s.set_vr(3, u128::MAX);
+    let insn = PpuInstruction::Va {
+        op,
+        vt: 3,
+        va: 1,
+        vb: 2,
+        vc: 4,
+    };
+    assert_eq!(
+        exec_no_mem(&insn, &mut s),
+        ExecuteVerdict::Continue,
+        "{op:?}"
+    );
+    assert_eq!(s.vscr() & VSCR_SAT, 0, "{op:?}");
+    s.vr[3]
+}
+
+/// [AltiVec-PEM p:6-71 s:6.2] vmaddfp vD, vA, vC, vB: vC multiplies and
+/// vB adds.
+#[test]
+fn vmaddfp_multiplies_by_vc_and_adds_vb() {
+    // 2 x 3 + 1, -1 x 0 + -0, inf x 0 + 1, 1 x QNaN(vC) + SNaN(vB).
+    let a = pack_u32x4([0x4000_0000, 0xBF80_0000, 0x7F80_0000, 0x3F80_0000]);
+    let b = pack_u32x4([0x3F80_0000, 0x8000_0000, 0x3F80_0000, 0x7F80_0005]);
+    let c = pack_u32x4([0x4040_0000, 0, 0, 0x7FC0_0007]);
+    assert_eq!(
+        run_va(VaOp::Vmaddfp, false, a, b, c),
+        pack_u32x4([0x40E0_0000, 0x8000_0000, 0x7FC0_0000, 0x7FC0_0005])
+    );
+    // -(2 x 3 - 1); -(-0 - -0) = -(+0); the default NaN; vB's NaN unnegated.
+    assert_eq!(
+        run_va(VaOp::Vnmsubfp, false, a, b, c),
+        pack_u32x4([0xC0A0_0000, 0x8000_0000, 0x7FC0_0000, 0x7FC0_0005])
+    );
+}
+
+#[test]
+fn the_multiply_add_takes_nj_from_vscr() {
+    // 1 x denormal + 0: the denormal under NJ = 0, +0 under NJ = 1, and
+    // -0 from vnmsubfp under NJ = 1.
+    let (one, d) = (pack_u32x4([0x3F80_0000; 4]), pack_u32x4([0x0000_0003; 4]));
+    let zero = pack_u32x4([0; 4]);
+    assert_eq!(run_va(VaOp::Vmaddfp, false, one, zero, d), d);
+    assert_eq!(run_va(VaOp::Vmaddfp, true, one, zero, d), zero);
+    assert_eq!(
+        run_va(VaOp::Vnmsubfp, true, one, zero, d),
+        pack_u32x4([0x8000_0000; 4])
     );
 }
 

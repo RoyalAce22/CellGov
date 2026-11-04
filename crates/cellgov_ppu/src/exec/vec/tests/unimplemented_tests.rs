@@ -1,4 +1,5 @@
-//! Each VX and VA op that has no arm faults with its own mnemonic.
+//! Each VX op that has no arm faults with its own mnemonic, and every VA
+//! op executes.
 
 use strum::IntoEnumIterator;
 
@@ -74,8 +75,9 @@ fn a_record_form_of_a_vx_op_with_no_record_form_names_the_op() {
 }
 
 #[test]
-fn an_unimplemented_va_op_names_itself() {
-    let mut faulted = 0;
+fn every_va_op_executes_and_its_descriptor_admits_no_fault() {
+    use crate::instruction::fuzz::PpuOutcomeClass;
+    let mut executed = 0;
     for op in VaOp::iter() {
         let insn = PpuInstruction::Va {
             op,
@@ -84,10 +86,19 @@ fn an_unimplemented_va_op_names_itself() {
             vb: 2,
             vc: 4,
         };
-        if let Some(named) = unimplemented(exec_no_mem(&insn, &mut PpuState::new())) {
-            assert_eq!(named, (PpuInstructionKind::Va, op.into()), "{op:?}");
-            faulted += 1;
-        }
+        assert_eq!(
+            exec_no_mem(&insn, &mut PpuState::new()),
+            ExecuteVerdict::Continue,
+            "{op:?}"
+        );
+        let raw = 0x1061_1100 | op as u32;
+        assert_eq!(
+            insn.fuzz_descriptor(raw).outcomes,
+            [PpuOutcomeClass::Continue],
+            "{op:?}"
+        );
+        executed += 1;
     }
-    assert!(faulted > 0);
+    assert_eq!(executed, VaOp::iter().count());
+    assert!(executed > 0);
 }

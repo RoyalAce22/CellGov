@@ -1,0 +1,20 @@
+[test]
+name = "ppu_vfp_madd"
+
+# A hardware probe of vmaddfp and vnmsubfp, four different slots a
+# case, each case under NJ = 0 and NJ = 1. It settles the NaN chosen
+# from vA, vB and vC (the PEM gives only an order), the single rounding
+# of the exact product plus addend, the sign of each zero result, the
+# vnmsubfp negation and the NaNs it leaves alone, infinity times zero,
+# and results and operands below 2^-126. Each case sets VSCR with mtvscr
+# first. cases.tsv names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (16 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 2064 },
+]
+
+[expect]
+outcome = "completed"

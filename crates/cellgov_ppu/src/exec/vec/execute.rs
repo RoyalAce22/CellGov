@@ -1,7 +1,7 @@
 //! The VX-form and VA-form dispatchers and the `vsldoi` entry.
 
 use super::convert::{vcfsx, vcfux};
-use super::float_arith::{vaddfp, vsubfp};
+use super::float_arith::{vaddfp, vmaddfp, vnmsubfp, vsubfp};
 use super::float_compare::{vcmpbfp, vcmpeqfp, vcmpgefp, vcmpgtfp};
 use super::float_minmax::{vmaxfp, vminfp};
 use super::integer::{
@@ -408,6 +408,7 @@ pub(crate) fn execute_va(
     let a = state.vr[va as usize];
     let b = state.vr[vb as usize];
     let c = state.vr[vc as usize];
+    let mode = VmxMode::from_nj(state.vscr() & VSCR_NJ != 0);
 
     let (result, saturated) = match op {
         // [AltiVec-PEM p:6-133 s:6.2] vsel: Vector Select
@@ -438,12 +439,13 @@ pub(crate) fn execute_va(
         // [AltiVec-PEM p:6-97 s:6.2] vmsumshs: each vC word plus the two signed half-word products in 34 bits, saturated to a signed word.
         // The page's pseudocode saturates inside the product loop and its prose saturates the final sum once; the ppu_vmul_add_sum console capture settles it as the final sum.
         VaOp::Vmsumshs => vmsumshs(a, b, c),
-        VaOp::Vmaddfp | VaOp::Vnmsubfp => {
-            return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction {
-                kind: PpuInstructionKind::Va,
-                mnemonic: op.into(),
-            });
-        }
+
+        // -- Single-precision multiply-add (vD, vA, vC, vB) --
+        // [AltiVec-PEM p:6-71 s:6.2] vmaddfp: (vA x vC) + vB rounded once to nearest; NJ = 1 truncates a denormal operand or result to a zero of its sign.
+        // [AltiVec-PEM p:3-15 s:3.2.5.1] a NaN result takes vA's NaN, then vB's, then vC's.
+        VaOp::Vmaddfp => (vmaddfp(mode, a, b, c), false),
+        // [AltiVec-PEM p:6-109 s:6.2] vnmsubfp: -((vA x vC) - vB) with one rounding; a QNaN result is not negated.
+        VaOp::Vnmsubfp => (vnmsubfp(mode, a, b, c), false),
     };
 
     state.set_vr(vt as usize, result);

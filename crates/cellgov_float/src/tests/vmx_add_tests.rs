@@ -9,12 +9,12 @@ use crate::vmx::{vmx_add, vmx_sub, VmxMode};
 
 const MODES: [VmxMode; 2] = [VmxMode::Java, VmxMode::NonJava];
 
-fn is_nan(x: u32) -> bool {
+pub(crate) fn is_nan(x: u32) -> bool {
     x & 0x7F80_0000 == 0x7F80_0000 && x & 0x7F_FFFF != 0
 }
 
 /// The exact value of the finite word `x` as `mode` reads it.
-fn value(mode: VmxMode, x: u32) -> Exact {
+pub(crate) fn value(mode: VmxMode, x: u32) -> Exact {
     let negative = x >> 31 == 1;
     let (exponent, fraction) = ((x >> 23 & 0xFF) as i32, u128::from(x & 0x7F_FFFF));
     match exponent {

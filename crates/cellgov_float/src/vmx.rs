@@ -4,7 +4,7 @@
 //! The vector unit keeps no floating-point status, so these functions
 //! return bits only.
 
-use crate::arith::sum;
+use crate::arith::{product, sum};
 use crate::format::{Binary32, Format};
 use crate::operand::{unpack, Operand};
 use crate::round::{binade, round_pack, Exact, Policy, Rounding};
@@ -118,26 +118,87 @@ pub fn vmx_sub(mode: VmxMode, a: u32, b: u32) -> u32 {
     vmx_nan(&[a, b]).unwrap_or_else(|| add_in(mode, a, b ^ 0x8000_0000))
 }
 
-/// The sum of two words neither of which is a NaN.
+/// `a * c + b` on binary32 words in `mode`, rounded once to nearest. NaN
+/// precedence is `a`, `b`, `c`: the vA, vB, vC order of `vmaddfp`.
+///
+/// [AltiVec-PEM p:6-71 s:6.2] vmaddfp rounds the exact (vA x vC) + vB once; vB = -0.0 makes it a multiply.
+pub fn vmx_madd(mode: VmxMode, a: u32, b: u32, c: u32) -> u32 {
+    vmx_nan(&[a, b, c]).unwrap_or_else(|| madd_in(mode, a, b, c))
+}
+
+/// `-(a * c - b)` on binary32 words in `mode`, rounded once to nearest.
+/// A NaN result keeps its sign.
+///
+/// [AltiVec-PEM p:6-109 s:6.2] vnmsubfp inverts the sign of the rounded difference, and a QNaN result is not negated.
+pub fn vmx_nmsub(mode: VmxMode, a: u32, b: u32, c: u32) -> u32 {
+    vmx_nan(&[a, b, c]).unwrap_or_else(|| {
+        let difference = madd_in(mode, a, b ^ 0x8000_0000, c);
+        if vmx_nan(&[difference]).is_some() {
+            difference
+        } else {
+            difference ^ 0x8000_0000
+        }
+    })
+}
+
+/// An operand or product other than a NaN.
+#[derive(Clone, Copy)]
+enum Term {
+    Infinity(bool),
+    Exact(Exact),
+}
+
+fn term(operand: Operand) -> Option<Term> {
+    match operand {
+        Operand::Zero { negative } => Some(Term::Exact(Exact::from_parts(negative, 0, 0, false))),
+        Operand::Finite(x) => Some(Term::Exact(x)),
+        Operand::Infinity { negative } => Some(Term::Infinity(negative)),
+        Operand::NaN { .. } => None,
+    }
+}
+
+/// The product of two terms, or `None` for infinity times zero.
+///
+/// [AltiVec-PEM p:3-13 s:3.2.4.2] infinity times zero is invalid.
+fn product_term(x: Term, y: Term) -> Option<Term> {
+    match (x, y) {
+        (Term::Infinity(p), Term::Infinity(q)) => Some(Term::Infinity(p != q)),
+        (Term::Infinity(p), Term::Exact(z)) | (Term::Exact(z), Term::Infinity(p)) => {
+            (z.significand() != 0).then_some(Term::Infinity(p != z.negative()))
+        }
+        (Term::Exact(x), Term::Exact(y)) => Some(Term::Exact(product(x, y))),
+    }
+}
+
+/// The sum of two terms, rounded in `mode`.
 ///
 /// [AltiVec-PEM p:3-13 s:3.2.4.2] a magnitude subtraction of infinities is invalid and gives the default QNaN.
-fn add_in(mode: VmxMode, a: u32, b: u32) -> u32 {
-    let exact = |x: Operand| match x {
-        Operand::Zero { negative } => Some(Exact::from_parts(negative, 0, 0, false)),
-        Operand::Finite(x) => Some(x),
-        _ => None,
-    };
-    match (vmx_unpack(mode, a), vmx_unpack(mode, b)) {
-        (Operand::Infinity { negative: x }, Operand::Infinity { negative: y }) if x != y => {
-            VMX_DEFAULT_NAN
-        }
-        (Operand::Infinity { negative }, _) | (_, Operand::Infinity { negative }) => {
+fn sum_terms(mode: VmxMode, x: Term, y: Term) -> u32 {
+    match (x, y) {
+        (Term::Infinity(p), Term::Infinity(q)) if p != q => VMX_DEFAULT_NAN,
+        (Term::Infinity(negative), _) | (_, Term::Infinity(negative)) => {
             0x7F80_0000 | u32::from(negative) << 31
         }
-        (x, y) => match (exact(x), exact(y)) {
-            (Some(x), Some(y)) => vmx_round(mode, Rounding::NearestEven, sum(x, y)),
-            _ => VMX_DEFAULT_NAN,
-        },
+        (Term::Exact(x), Term::Exact(y)) => vmx_round(mode, Rounding::NearestEven, sum(x, y)),
+    }
+}
+
+/// The sum of two words neither of which is a NaN.
+fn add_in(mode: VmxMode, a: u32, b: u32) -> u32 {
+    match (term(vmx_unpack(mode, a)), term(vmx_unpack(mode, b))) {
+        (Some(x), Some(y)) => sum_terms(mode, x, y),
+        _ => VMX_DEFAULT_NAN,
+    }
+}
+
+/// `a * c + b` on three words none of which is a NaN.
+fn madd_in(mode: VmxMode, a: u32, b: u32, c: u32) -> u32 {
+    let unpacked = |x: u32| term(vmx_unpack(mode, x));
+    match (unpacked(a), unpacked(b), unpacked(c)) {
+        (Some(x), Some(y), Some(z)) => {
+            product_term(x, z).map_or(VMX_DEFAULT_NAN, |p| sum_terms(mode, p, y))
+        }
+        _ => VMX_DEFAULT_NAN,
     }
 }
 

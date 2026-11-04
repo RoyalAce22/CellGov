@@ -55,6 +55,22 @@ pub fn mul(a: Exact, b: Exact) -> Option<Exact> {
     )
 }
 
+/// The exact product of two operands that `unpack` decodes: at most 106
+/// significant bits, so the product always fits.
+pub(crate) fn product(a: Exact, b: Exact) -> Exact {
+    debug_assert!(
+        operand(a)
+            && operand(b)
+            && significant_bits(a.significand) + significant_bits(b.significand) <= OPERAND_BITS
+    );
+    Exact::from_parts(
+        a.negative != b.negative,
+        a.significand * b.significand,
+        a.exponent + b.exponent,
+        false,
+    )
+}
+
 /// The sum of two exact values: exact, or sticky when the smaller operand
 /// lies partly below the larger's 126-bit precision.
 ///
