@@ -101,6 +101,25 @@ fn pick<F: Format>(x: Exact, rounding: Rounding, patterns: &[u64]) -> (u64, bool
     (patterns[chosen], true, overflow)
 }
 
+/// Whether the finite pattern `bits` of `F` holds a magnitude above `|x|`:
+/// the rounding that chose it incremented the fraction.
+pub(crate) fn rounds_up<F: Format>(x: Exact, bits: u64) -> bool {
+    let pattern = bits & ((1 << F::SIGN_SHIFT) - 1);
+    if pattern == 0 || x.significand == 0 {
+        return false;
+    }
+    let value = magnitude::<F>(pattern);
+    // Values in different binades order by binade; within one binade the
+    // exponents differ by less than 128, which `compare` shifts by.
+    let binade = |significand: u128, exponent: i32| {
+        exponent + (u128::BITS - significand.leading_zeros()) as i32
+    };
+    match binade(x.significand, x.exponent).cmp(&binade(value.significand, value.exponent)) {
+        Ordering::Equal => compare_exact(x, value) == Ordering::Less,
+        other => other == Ordering::Less,
+    }
+}
+
 /// Whether `|x|` lies below the smallest normal magnitude of `F`.
 ///
 /// `|x| = significand + f` units of `2^exponent` with `0 <= f < 1`, so

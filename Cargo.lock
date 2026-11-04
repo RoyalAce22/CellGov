@@ -312,6 +312,9 @@ dependencies = [
 [[package]]
 name = "cellgov_float"
 version = "0.0.0"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "cellgov_fuzz"

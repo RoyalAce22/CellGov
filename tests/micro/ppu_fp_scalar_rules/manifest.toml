@@ -1,0 +1,21 @@
+[test]
+name = "ppu_fp_scalar_rules"
+
+# A hardware probe of the PowerPC scalar floating-point rules one
+# instruction shows: FR, FI and UX after a rounding, single results in
+# double format, frsp of a NaN, the sign of an exact zero sum per
+# rounding mode, the VX bit each invalid operation sets, and which NaN
+# operand of fmadd is the result. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, RN,
+# FRA, FRB, FRC and FRT as high/low pairs, FPSCR low word): 51 cases,
+# 564 words, 2256 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2256 },
+]
+
+[expect]
+outcome = "completed"

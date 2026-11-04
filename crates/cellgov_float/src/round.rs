@@ -255,11 +255,32 @@ fn round_spu_extended<F: Format>(exact: Exact) -> Packed {
 }
 
 fn round_ieee<F: Format>(rounding: Rounding, exact: Exact) -> Packed {
+    round_ieee_traced::<F>(rounding, exact).packed
+}
+
+/// An IEEE rounding with what the PowerPC status bits read from it.
+pub(crate) struct Traced {
+    /// The packed result and its flags.
+    pub(crate) packed: Packed,
+    /// Rounding incremented the kept fraction.
+    pub(crate) incremented: bool,
+    /// The value lies below the smallest normal magnitude, before rounding.
+    pub(crate) tiny: bool,
+}
+
+/// Rounds `exact` into format `F` as [`Policy::Ieee754Cbe`] and
+/// [`Policy::PowerPc`] do, and reports whether rounding incremented the
+/// fraction and whether the value is tiny.
+pub(crate) fn round_ieee_traced<F: Format>(rounding: Rounding, exact: Exact) -> Traced {
     let sign = sign_bit::<F>(exact.negative);
     if exact.significand == 0 {
-        return Packed {
-            bits: sign,
-            flags: Flags::default(),
+        return Traced {
+            packed: Packed {
+                bits: sign,
+                flags: Flags::default(),
+            },
+            incremented: false,
+            tiny: false,
         };
     }
     let emin = 1 - F::BIAS;
@@ -315,13 +336,17 @@ fn round_ieee<F: Format>(rounding: Rounding, exact: Exact) -> Packed {
         } else {
             (F::EXP_MAX as u64) << F::FRAC_BITS
         };
-        return Packed {
-            bits: sign | magnitude,
-            flags: Flags {
-                overflow: true,
-                inexact: true,
-                ..flags
+        return Traced {
+            packed: Packed {
+                bits: sign | magnitude,
+                flags: Flags {
+                    overflow: true,
+                    inexact: true,
+                    ..flags
+                },
             },
+            incremented: increment,
+            tiny,
         };
     }
     let field = if tiny {
@@ -329,8 +354,12 @@ fn round_ieee<F: Format>(rounding: Rounding, exact: Exact) -> Packed {
     } else {
         (biased as u64) << F::FRAC_BITS | (kept as u64 & F::FRAC_MASK)
     };
-    Packed {
-        bits: sign | field,
-        flags,
+    Traced {
+        packed: Packed {
+            bits: sign | field,
+            flags,
+        },
+        incremented: increment,
+        tiny,
     }
 }

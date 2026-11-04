@@ -229,7 +229,7 @@ dependencies are intentionally absent. The workspace compiles under
 | ---------------------- | -------------------------------------------------------------------------- |
 | `cellgov_ps3_abi`      | none                                                                       |
 | `cellgov_time`         | derive_more, serde                                                         |
-| `cellgov_float`        | none                                                                       |
+| `cellgov_float`        | thiserror                                                                  |
 | `cellgov_event`        | strum                                                                      |
 | `cellgov_mem`          | derive_more, serde, thiserror                                              |
 | `cellgov_effects`      | none                                                                       |

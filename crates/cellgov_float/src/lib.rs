@@ -17,7 +17,9 @@
 //! operand read as a zero of its sign, and the default NaN for every NaN
 //! result [SPU-ISA p:197 s:9.2], [SPU-ISA p:199 s:9.2.2]. [`Policy::PowerPc`]
 //! honours denormal operands and results; the vector unit's Java and
-//! non-Java modes build on it ([`VmxMode`]).
+//! non-Java modes build on it ([`VmxMode`]). [`ppc_round`] adds the scalar
+//! unit's FR and FI bits, its exception enables and its single-precision
+//! results in double format.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 #![cfg_attr(
@@ -36,6 +38,7 @@ mod arith;
 mod format;
 mod fp_estimate;
 mod operand;
+mod ppc;
 mod round;
 mod vmx;
 mod vmx_estimate;
@@ -45,6 +48,11 @@ pub use format::{Binary32, Binary64, Format};
 pub use fp_estimate::{fres_estimate, frsqrte_estimate};
 pub use operand::{
     default_nan, extended_magnitude_key, extended_order_key, unpack, unpack_extended, Operand,
+};
+pub use ppc::{
+    ppc_frsp_nan, ppc_invalid_product, ppc_invalid_quotient, ppc_invalid_sqrt, ppc_invalid_sum,
+    ppc_is_nan, ppc_is_snan, ppc_nan_result, ppc_round, ppc_sum, PpcEnabled, PpcEnables,
+    PpcInvalid, PpcPrecision, PpcResult, PpcStatus, PPC_GENERATED_NAN,
 };
 pub use round::{round_pack, Exact, Flags, Packed, Policy, Rounding};
 pub use vmx::{
@@ -103,3 +111,11 @@ mod vmx_estimate_tests;
 #[cfg(test)]
 #[path = "tests/fp_estimate_console_tests.rs"]
 mod fp_estimate_console_tests;
+
+#[cfg(test)]
+#[path = "tests/ppc_tests.rs"]
+mod ppc_tests;
+
+#[cfg(test)]
+#[path = "tests/ppc_console_tests.rs"]
+mod ppc_console_tests;
