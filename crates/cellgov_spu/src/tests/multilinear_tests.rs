@@ -6,7 +6,7 @@
 //! - the lane and register swaps
 //! - the structured input shapes
 //!
-//! The PPU's tests flip every pair of bits over its 38 lanes. The SPU
+//! The PPU's tests flip every pair of bits over its 39 lanes. The SPU
 //! has 263 lanes, about 1.4 * 10^8 bit pairs, so the pairwise tests run
 //! over [`PAIR_LANES`]: the first and last registers, which hold every
 //! position a register lane takes, and every lane that is not a register.

@@ -11,6 +11,7 @@
 //! | 35     | `cr`, zero-extended                            |
 //! | 36     | reservation tag: 0 for none, 1 for a held line |
 //! | 37     | reservation line address, 0 for none           |
+//! | 38     | `fpscr`, zero-extended                         |
 //!
 //! It then computes
 //!
@@ -65,7 +66,7 @@ use cellgov_exec::PpuFingerprint;
 use cellgov_ps3_abi::hw::ppu::GPR_COUNT;
 
 /// Number of 64-bit lanes the hash reads from one state.
-pub const LANE_COUNT: usize = 38;
+pub const LANE_COUNT: usize = 39;
 
 /// Lane of the link register; GPR `k` is lane `k`.
 pub const LANE_LR: usize = GPR_COUNT;
@@ -79,6 +80,8 @@ pub const LANE_CR: usize = GPR_COUNT + 3;
 pub const LANE_RESERVATION_TAG: usize = GPR_COUNT + 4;
 /// Lane of the reservation line address, 0 for none.
 pub const LANE_RESERVATION_LINE: usize = GPR_COUNT + 5;
+/// Lane of the floating-point status and control register, zero-extended.
+pub const LANE_FPSCR: usize = GPR_COUNT + 6;
 
 /// Number of keys: one additive key and one multiplier per lane.
 pub const KEY_COUNT: usize = LANE_COUNT + 1;
@@ -134,6 +137,7 @@ pub const KEYS: [u128; KEY_COUNT] = [
     0x5ccd_e782_03c3_67a8_f1bc_bc6a_1ec1_1786,
     0xef05_4fce_ee95_4551_df82_012d_0555_c6df,
     0x2925_66ff_7240_3c08_c4dd_302a_1bfa_1137,
+    0xd85f_219d_b5c5_54e1_6a27_ff80_7441_bcd2,
 ];
 
 /// The domain tag [`SCHEME_ID`] starts from.
@@ -195,6 +199,7 @@ pub fn lanes(fp: &PpuFingerprint) -> [u64; LANE_COUNT] {
     out[LANE_CR] = u64::from(fp.cr);
     (out[LANE_RESERVATION_TAG], out[LANE_RESERVATION_LINE]) =
         reservation_lanes(fp.reservation_line);
+    out[LANE_FPSCR] = u64::from(fp.fpscr);
     out
 }
 

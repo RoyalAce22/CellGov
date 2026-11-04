@@ -4,7 +4,7 @@ use super::*;
 fn the_census_block_names_each_count_and_each_sample() {
     let mut lanes = [0u64; cellgov_ppu::multilinear::LANE_COUNT];
     lanes[0] = 0x10;
-    lanes[37] = 0x80;
+    lanes[cellgov_ppu::multilinear::LANE_COUNT - 1] = 0x80;
     let report = CensusReport {
         dispatches: 9,
         distinct_states: 7,

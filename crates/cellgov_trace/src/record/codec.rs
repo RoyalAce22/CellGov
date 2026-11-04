@@ -120,6 +120,7 @@ impl TraceRecord {
                 xer,
                 cr,
                 reservation_line,
+                fpscr,
             } => {
                 write_u64(buf, *step);
                 write_u64(buf, *pc);
@@ -140,6 +141,7 @@ impl TraceRecord {
                         write_u64(buf, *addr);
                     }
                 }
+                write_u32(buf, *fpscr);
             }
             TraceRecord::HostInvariantBreak { reason } => {
                 buf.push(u8::from(*reason));
@@ -400,6 +402,7 @@ impl TraceRecord {
                     1 => Some(resv_addr),
                     other => return Err(DecodeError::InvalidBool(other)),
                 };
+                let fpscr = read_u32(bytes, &mut pos)?;
                 TraceRecord::PpuStateFull {
                     step,
                     pc,
@@ -409,6 +412,7 @@ impl TraceRecord {
                     xer,
                     cr,
                     reservation_line,
+                    fpscr,
                 }
             }
             TAG_HOST_INVARIANT_BREAK => {

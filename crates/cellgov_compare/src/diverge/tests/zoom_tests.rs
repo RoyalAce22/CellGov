@@ -31,6 +31,7 @@ fn full(step: u64, pc: u64, gpr: [u64; 32]) -> TraceRecord {
         xer: 0,
         cr: 0,
         reservation_line: None,
+        fpscr: 0,
     }
 }
 
@@ -44,6 +45,7 @@ fn full_resv(step: u64, reservation_line: Option<u64>) -> TraceRecord {
         xer: 0,
         cr: 0,
         reservation_line,
+        fpscr: 0,
     }
 }
 
@@ -118,7 +120,7 @@ fn zoom_lookup_missing_step_on_both_sides_reports_both_missing() {
 }
 
 #[test]
-fn zoom_lookup_diffs_include_lr_ctr_xer_cr() {
+fn zoom_lookup_diffs_include_lr_ctr_xer_cr_fpscr() {
     let gpr = [0u64; 32];
     let a = encode(&[TraceRecord::PpuStateFull {
         step: 0,
@@ -129,6 +131,7 @@ fn zoom_lookup_diffs_include_lr_ctr_xer_cr() {
         xer: 3,
         cr: 4,
         reservation_line: None,
+        fpscr: 5,
     }]);
     let b = encode(&[TraceRecord::PpuStateFull {
         step: 0,
@@ -139,11 +142,13 @@ fn zoom_lookup_diffs_include_lr_ctr_xer_cr() {
         xer: 300,
         cr: 400,
         reservation_line: None,
+        fpscr: 500,
     }]);
     match zoom_lookup(&a, &b, 0) {
         ZoomLookup::Found { diffs, .. } => {
             let names: Vec<&str> = diffs.iter().map(|d| d.field).collect();
-            assert_eq!(names, vec!["lr", "ctr", "xer", "cr"]);
+            assert_eq!(names, vec!["lr", "ctr", "xer", "cr", "fpscr"]);
+            assert_eq!((diffs[4].a, diffs[4].b), (5, 500));
         }
         other => panic!("expected Found, got {other:?}"),
     }

@@ -4,7 +4,7 @@ use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;
 
 use crate::multilinear::{
-    lane_delta, reservation_lanes, LANE_CR, LANE_CTR, LANE_LR, LANE_RESERVATION_LINE,
+    lane_delta, reservation_lanes, LANE_CR, LANE_CTR, LANE_FPSCR, LANE_LR, LANE_RESERVATION_LINE,
     LANE_RESERVATION_TAG, LANE_XER,
 };
 
@@ -70,7 +70,7 @@ impl<T, const N: usize> std::ops::Index<usize> for RegBank<T, N> {
 
 /// PPU architectural register file and SPRs.
 ///
-/// Hash-covered fields (register banks, CR, LR, CTR, XER, the
+/// Hash-covered fields (register banks, CR, LR, CTR, XER, FPSCR, the
 /// reservation) accept writes only through their setters;
 /// hash-excluded fields (PC, TB, VRSAVE, instrument counters)
 /// stay directly assignable.
@@ -105,6 +105,10 @@ pub struct PpuState {
     ///
     /// [PPC-Book1 p:42 s:3.2.2] XER is a 64-bit register.
     xer: u64,
+    /// Floating-point status and control register.
+    ///
+    /// [PPC-Book1 p:87 s:4.2.2] Bits 0:23 are status bits, bits 24:31 control bits.
+    fpscr: u32,
     /// AltiVec VR-usage mask (SPR 256). Excluded from
     /// [`Self::state_hash`]; divergences surface via the GPR holding
     /// the `mfvrsave` result. Exclusion is sound only while VRSAVE is
@@ -170,6 +174,7 @@ pub(crate) struct PpuSnapshotFields {
     pub lr: u64,
     pub ctr: u64,
     pub xer: u64,
+    pub fpscr: u32,
     pub reservation: Option<ReservedLine>,
 }
 
@@ -182,6 +187,7 @@ pub(crate) struct PpuObservationFields {
     pub lr: u64,
     pub ctr: u64,
     pub xer: u64,
+    pub fpscr: u32,
     pub vrsave: u32,
     pub tb: u64,
     pub reservation: Option<ReservedLine>,
@@ -199,6 +205,7 @@ impl PpuState {
             lr,
             ctr,
             xer,
+            fpscr,
             vrsave: _,
             vrsave_written: _,
             clock_read: _,
@@ -222,6 +229,7 @@ impl PpuState {
             lr: *lr,
             ctr: *ctr,
             xer: *xer,
+            fpscr: *fpscr,
             reservation: *reservation,
         }
     }
@@ -236,6 +244,7 @@ impl PpuState {
             lr,
             ctr,
             xer,
+            fpscr,
             vrsave,
             vrsave_written: _,
             clock_read: _,
@@ -260,6 +269,7 @@ impl PpuState {
             lr: *lr,
             ctr: *ctr,
             xer: *xer,
+            fpscr: *fpscr,
             vrsave: *vrsave,
             tb: *tb,
             reservation: *reservation,
@@ -277,6 +287,7 @@ impl PpuState {
             lr: 0,
             ctr: 0,
             xer: 0,
+            fpscr: 0,
             vrsave: 0,
             vrsave_written: false,
             clock_read: false,
@@ -389,6 +400,21 @@ impl PpuState {
     pub fn set_xer(&mut self, v: u64) {
         self.acc = self.acc.wrapping_add(lane_delta(LANE_XER, self.xer, v));
         self.xer = v;
+    }
+
+    /// Floating-point status and control register.
+    #[inline]
+    pub fn fpscr(&self) -> u32 {
+        self.fpscr
+    }
+
+    /// Write the full FPSCR.
+    #[inline]
+    pub fn set_fpscr(&mut self, v: u32) {
+        self.acc =
+            self.acc
+                .wrapping_add(lane_delta(LANE_FPSCR, u64::from(self.fpscr), u64::from(v)));
+        self.fpscr = v;
     }
 
     /// Active reservation, if any.
@@ -523,6 +549,7 @@ impl PpuState {
             xer: self.xer,
             cr: self.cr,
             reservation_line: self.reservation.map(|l| l.addr()),
+            fpscr: self.fpscr,
         }
     }
 
@@ -556,7 +583,15 @@ impl PpuState {
             acc = acc.wrapping_add(key.wrapping_mul(u128::from(r)));
         }
         let (tag, line) = reservation_lanes(self.reservation.map(|l| l.addr()));
-        let rest = [self.lr, self.ctr, self.xer, u64::from(self.cr), tag, line];
+        let rest = [
+            self.lr,
+            self.ctr,
+            self.xer,
+            u64::from(self.cr),
+            tag,
+            line,
+            u64::from(self.fpscr),
+        ];
         for (key, &lane) in KEYS[GPR_COUNT + 1..].iter().zip(&rest) {
             acc = acc.wrapping_add(key.wrapping_mul(u128::from(lane)));
         }
@@ -582,6 +617,7 @@ impl Clone for PpuState {
             lr: self.lr,
             ctr: self.ctr,
             xer: self.xer,
+            fpscr: self.fpscr,
             vrsave: self.vrsave,
             vrsave_written: self.vrsave_written,
             clock_read: self.clock_read,

@@ -194,6 +194,7 @@ fn ppu_zoom_bytes(mem: &GuestMemory, n: usize, window: (u64, u64)) -> Vec<u8> {
             xer,
             cr,
             reservation_line,
+            fpscr,
         } = fingerprint;
         writer.record(&TraceRecord::PpuStateFull {
             step,
@@ -204,6 +205,7 @@ fn ppu_zoom_bytes(mem: &GuestMemory, n: usize, window: (u64, u64)) -> Vec<u8> {
             xer,
             cr,
             reservation_line,
+            fpscr,
         });
     }
     writer.take_bytes()

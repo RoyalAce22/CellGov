@@ -5,7 +5,8 @@
 ### PPU
 
 **PPU (`cellgov_ppu`)**: PPC64 interpreter with 32 GPRs, 32 FPRs, PC,
-CR, LR, CTR, XER (carry tracked), TB, and 32 vector registers.
+CR, LR, CTR, XER (carry tracked), FPSCR, TB, and 32 vector registers.
+FPSCR holds its reset value 0: no instruction reads or writes it yet.
 
 The `PpuInstruction` set covers:
 

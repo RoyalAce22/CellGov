@@ -357,6 +357,7 @@ impl Runtime {
                 xer,
                 cr,
                 reservation_line,
+                fpscr,
             } = fingerprint;
             self.zoom_trace.record(&TraceRecord::PpuStateFull {
                 step,
@@ -367,6 +368,7 @@ impl Runtime {
                 xer,
                 cr,
                 reservation_line,
+                fpscr,
             });
         }
         // An SPU record names its unit and counts steps per unit, so a

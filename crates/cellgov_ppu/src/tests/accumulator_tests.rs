@@ -47,6 +47,8 @@ fn every_hashed_setter_keeps_the_accumulator_current() {
     assert_current(&s, "set_xer_ov");
     s.set_cr0_from_result(0);
     assert_current(&s, "set_cr0_from_result");
+    s.set_fpscr(0xffff_ffff);
+    assert_current(&s, "set_fpscr");
     s.set_reservation(Some(ReservedLine::containing(0x3000_1080)));
     assert_current(&s, "set_reservation Some");
     s.set_reservation(Some(ReservedLine::containing(0)));
@@ -89,6 +91,7 @@ fn a_clone_carries_the_accumulator() {
     let mut s = PpuState::new();
     s.set_gpr(5, 0xabc);
     s.set_cr(0x2400_0042);
+    s.set_fpscr(0x0000_00f8);
     let c = s.clone();
     assert_current(&c, "clone");
     assert_eq!(c.state_hash(), s.state_hash());
@@ -109,7 +112,7 @@ fn a_long_random_sequence_of_writes_stays_current() {
     let mut s = PpuState::new();
     for i in 0..20_000 {
         let v = next(&mut rng);
-        match v % 11 {
+        match v % 12 {
             0..=3 => s.set_gpr((v >> 8) as usize % GPR_COUNT, next(&mut rng)),
             4 => s.set_lr(next(&mut rng)),
             5 => s.set_ctr(next(&mut rng)),
@@ -117,6 +120,7 @@ fn a_long_random_sequence_of_writes_stays_current() {
             7 => s.set_cr(next(&mut rng) as u32),
             8 => s.set_cr_field((v >> 8) as u8 % 8, (v >> 16) as u8),
             9 => s.set_xer_ca(v & 0x100 != 0),
+            10 => s.set_fpscr(next(&mut rng) as u32),
             _ => s.set_reservation(
                 (v & 0x100 != 0)
                     .then(|| ReservedLine::containing(next(&mut rng) % 0x400_0000_0000)),

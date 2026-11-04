@@ -16,6 +16,7 @@ fn zoom_bytes(state: &PpuState) -> Vec<u8> {
         xer,
         cr,
         reservation_line,
+        fpscr,
     } = state.fingerprint();
     let mut w = TraceWriter::new();
     w.record(&TraceRecord::PpuStateFull {
@@ -27,6 +28,7 @@ fn zoom_bytes(state: &PpuState) -> Vec<u8> {
         xer,
         cr,
         reservation_line,
+        fpscr,
     });
     w.take_bytes()
 }
@@ -110,6 +112,17 @@ fn reservation_line_divergence_is_hash_visible_and_diff_nameable() {
     let mut b = PpuState::new();
     b.set_reservation(Some(ReservedLine::containing(0x2000)));
     assert_hash_and_diff_agree(&a, &b, "resv_line");
+}
+
+#[test]
+fn fpscr_divergence_is_hash_visible_and_diff_nameable() {
+    let a = PpuState::new();
+    let mut b = PpuState::new();
+    b.set_fpscr(1);
+    assert_hash_and_diff_agree(&a, &b, "fpscr");
+    let mut b = PpuState::new();
+    b.set_fpscr(1 << 31);
+    assert_hash_and_diff_agree(&a, &b, "fpscr");
 }
 
 #[test]

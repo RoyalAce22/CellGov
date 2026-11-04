@@ -580,8 +580,9 @@ fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
                 lr: 0,
                 ctr: 0,
                 xer: 0,
-                cr: 0,
+                cr: 0x4000_0000,
                 reservation_line: None,
+                fpscr: 0x8200_40f8,
             },
         )]],
         step_idx: Cell::new(0),
@@ -609,8 +610,15 @@ fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
         .collect();
     assert_eq!(zoom_records.len(), 1);
     match &zoom_records[0] {
-        TraceRecord::PpuStateFull { step, pc, .. } => {
+        TraceRecord::PpuStateFull {
+            step,
+            pc,
+            cr,
+            fpscr,
+            ..
+        } => {
             assert_eq!(*pc, 0x104);
+            assert_eq!((*cr, *fpscr), (0x4000_0000, 0x8200_40f8));
             assert_eq!(
                 *step, 1,
                 "snapshot must carry the unit's retirement counter, \

@@ -147,6 +147,7 @@ fn read_state(cursor: &mut Cursor<'_>) -> Result<(PpuStateSnapshot, u64), Rpcs3C
     state.lr = cursor.read_u64("lr")?;
     state.ctr = cursor.read_u64("ctr")?;
     state.xer = cursor.read_u64("xer")?;
+    // The capture format carries no FPSCR, so `fpscr` keeps its zero value.
     // `ppu_thread::raddr` is a u32; 0 means no reservation. The
     // reserved line is the 128-byte-aligned line containing it.
     let raddr = cursor.read_u32("raddr")?;

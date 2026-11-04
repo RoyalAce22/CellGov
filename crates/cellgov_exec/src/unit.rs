@@ -106,6 +106,8 @@ pub struct PpuFingerprint {
     pub cr: u32,
     /// Active reservation's 128-byte line address, if held.
     pub reservation_line: Option<u64>,
+    /// Floating-point status and control register.
+    pub fpscr: u32,
 }
 
 /// Canonical SPU fingerprint input set.

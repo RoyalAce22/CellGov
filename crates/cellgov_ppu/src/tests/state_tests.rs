@@ -23,6 +23,7 @@ fn pinned_state() -> PpuState {
     s.set_xer((1 << 29) | (1 << 31));
     s.set_cr(0xA5A5_5A5A);
     s.set_reservation(Some(ReservedLine::containing(0x3000_1080)));
+    s.set_fpscr(0x8200_40F8);
     s
 }
 
@@ -40,7 +41,8 @@ fn state_hash_lane_vector_golden() {
             (1 << 29) | (1 << 31),
             0xA5A5_5A5A,
             1,
-            0x3000_1080
+            0x3000_1080,
+            0x8200_40F8
         ],
         "the lane order is part of the hash scheme"
     );
@@ -50,7 +52,7 @@ fn state_hash_lane_vector_golden() {
 fn state_hash_wire_format_golden() {
     assert_eq!(
         pinned_state().state_hash(),
-        0xB1AC_AF60_3A13_F197,
+        0x2C8A_E2B4_1E5E_D63F,
         "written by hand in the same commit as the change that moves it"
     );
 }

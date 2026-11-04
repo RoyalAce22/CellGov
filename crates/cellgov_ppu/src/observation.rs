@@ -30,6 +30,8 @@ pub struct PpuArchitecturalState {
     pub ctr: u64,
     /// Fixed-point exception register.
     pub xer: u64,
+    /// Floating-point status and control register.
+    pub fpscr: u32,
     /// AltiVec usage mask.
     pub vrsave: u32,
     /// Time-base register.
@@ -51,6 +53,7 @@ impl PpuArchitecturalState {
             lr: fields.lr,
             ctr: fields.ctr,
             xer: fields.xer,
+            fpscr: fields.fpscr,
             vrsave: fields.vrsave,
             tb: fields.tb,
             reservation: fields.reservation,
@@ -289,6 +292,7 @@ fn state_differs_outside(
         || first.lr != second.lr
         || first.ctr != second.ctr
         || first_xer != second_xer
+        || first.fpscr != second.fpscr
         || first.vrsave != second.vrsave
         || first.tb != second.tb
         || first.reservation != second.reservation

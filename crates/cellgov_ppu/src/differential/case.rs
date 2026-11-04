@@ -30,6 +30,8 @@ pub struct PpuStateSnapshot {
     pub ctr: u64,
     /// Fixed-point exception register.
     pub xer: u64,
+    /// Floating-point status and control register.
+    pub fpscr: u32,
     /// Active reservation. `Some(line)` means a prior `lwarx` /
     /// `ldarx` claimed the 128-byte-aligned line; a subsequent
     /// `stwcx` / `stdcx` targeting that line will succeed.
@@ -47,6 +49,7 @@ impl PpuStateSnapshot {
             lr: 0,
             ctr: 0,
             xer: 0,
+            fpscr: 0,
             reservation: None,
         }
     }
@@ -62,6 +65,7 @@ impl PpuStateSnapshot {
             lr: fields.lr,
             ctr: fields.ctr,
             xer: fields.xer,
+            fpscr: fields.fpscr,
             reservation: fields.reservation,
         }
     }
@@ -75,6 +79,7 @@ impl PpuStateSnapshot {
         state.set_lr(self.lr);
         state.set_ctr(self.ctr);
         state.set_xer(self.xer);
+        state.set_fpscr(self.fpscr);
         state.set_reservation(self.reservation);
     }
 }
