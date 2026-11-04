@@ -1,0 +1,14 @@
+[test]
+name = "ppu_stfs_select"
+
+# A hardware probe: the word stfs writes for doubles a single cannot
+# hold. The console capture is the answer; no emulator runs it.
+
+[observe]
+# 14 big-endian u32 words, as ppu/main.c lists: 56 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 56 },
+]
+
+[expect]
+outcome = "completed"

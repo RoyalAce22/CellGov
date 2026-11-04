@@ -71,19 +71,36 @@ pub(super) fn double_word(w: u32) -> u64 {
     (f32::from_bits(w) as f64).to_bits()
 }
 
-/// PPC `SINGLE(FRS)`: 64-bit double -> 32-bit single; preserves NaN
-/// payloads bit-exactly.
+/// PPC `SINGLE(FRS)`: the word a single-precision store writes. A bit
+/// selection with no rounding: a double above the single range stores
+/// a finite word unequal to it, and fraction bits below single
+/// precision drop.
 ///
 /// [PPC-Book1 p:106 s:4.6.3] SINGLE(FRS): double-precision to single-precision conversion pseudocode (No Denormalization Required vs Denormalization Required branches).
 pub(super) fn single_frs(d: u64) -> u32 {
     let exp = ((d >> 52) & 0x7FF) as u32;
-    let frac52 = d & 0x000F_FFFF_FFFF_FFFF;
-    if exp == 0x7FF && frac52 != 0 {
-        // NaN: WORD0:1 <- FRS0:1 (sign + first exp bit = 1);
-        // WORD2:31 <- FRS5:34 (rest of exp = 1s + top 23 fraction bits).
-        let sign = ((d >> 63) & 1) as u32;
-        let frac23 = ((d >> 29) & 0x007F_FFFF) as u32;
-        return (sign << 31) | (0xFFu32 << 23) | frac23;
+    let sign = (d >> 63) as u32;
+    if exp > 896 || d & !(1 << 63) == 0 {
+        // WORD0:1 <- FRS0:1; WORD2:31 <- FRS5:34.
+        return (((d >> 62) as u32) << 30) | ((d >> 29) as u32 & 0x3FFF_FFFF);
     }
-    (f64::from_bits(d) as f32).to_bits()
+    if exp >= 874 {
+        // frac <- 0b1 || FRS12:63, shifted right until exp = -126;
+        // WORD9:31 <- frac1:23.
+        let frac = (1u64 << 52) | (d & 0x000F_FFFF_FFFF_FFFF);
+        let shifted = frac >> (897 - exp);
+        return (sign << 31) | ((shifted >> 29) as u32 & 0x007F_FFFF);
+    }
+    // The book leaves WORD undefined for a nonzero double below biased
+    // exponent 874. The reference console stores the signed zero
+    // (`ppu_stfs_select`).
+    sign << 31
 }
+
+#[cfg(test)]
+#[path = "tests/single_frs_tests.rs"]
+mod single_frs_tests;
+
+#[cfg(test)]
+#[path = "tests/single_frs_console_tests.rs"]
+mod single_frs_console_tests;
