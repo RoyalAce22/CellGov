@@ -32,6 +32,9 @@ group_line() {
 # timed <label> <command...>: runs one command and prints its wall time.
 # A failing command prints its line and its group's line, then ends the
 # script with the command's status, as `set -e` would.
+#
+# CELLGOV_TIMING_RECORD=<file> also appends one tab-separated row per
+# command: `<group>/<label>`, seconds, exit status, the command.
 timed() {
     local label=$1 start=$SECONDS status=0
     shift
@@ -40,6 +43,9 @@ timed() {
         echo "ci.sh: $group/$label $((SECONDS - start))s"
     else
         echo "ci.sh: $group/$label $((SECONDS - start))s (exit $status)"
+    fi
+    if [ -n "${CELLGOV_TIMING_RECORD:-}" ]; then
+        printf '%s\t%s\t%s\t%s\n' "$group/$label" "$((SECONDS - start))" "$status" "$*" >>"$CELLGOV_TIMING_RECORD"
     fi
     summary "| \`$group/$label\` | $((SECONDS - start)) | $status |"
     if [ "$status" -ne 0 ]; then
@@ -146,6 +152,106 @@ test_linux() {
 test_local() {
     timed test-release cargo test --workspace --release --locked
     timed test-decrypt-debug cargo test -p cellgov_cli -p cellgov_install --locked --features cellgov_cli/decrypt
+}
+
+# The operator's per-branch gate, local only. `gate-tests` is the
+# compiled-output checkpoint, `gate-docs` the closing proof when only
+# comments and prose changed since it, and `gate-full` both. The
+# commands are the workspace gate's: rustfmt, clippy with and without
+# `cellgov_cli/decrypt`, the rustdoc lints through `rustdoc --check`
+# (see rustdoc_lint), nextest's `ci` and `ci-release` profiles, the
+# doctests, and plain `cargo test` of the two crates that declare
+# `decrypt` in both profiles, which keeps a race over process-global
+# state visible.
+#
+# The gate builds in target dirs of its own, so it never invalidates
+# the operator's interactive builds and they never invalidate it. The
+# debug lane builds with no debuginfo, the workflow's setting, and links
+# with rust-lld (the variable is read on the MSVC target only): its
+# test builds are link-bound, and after an edit to cellgov_core the
+# workspace's took 12 s that way against 136 s with link.exe and full
+# debuginfo. The release lane is compile-bound and builds as the
+# workflow does, incremental compilation off: that changes how code is
+# split for codegen, and with it which allocations LLVM removes, which
+# cellgov_core's allocation_counts test reads.
+#
+# The two lanes build side by side, the release lane in a second target
+# dir: its tail is a few crates at opt-level 3 that leave most cores
+# idle. The tests run after both builds end, one suite at a time. Test
+# processes started while the release build held 35 GB of commit on a
+# 32 GB host stalled for 20 s and hit the per-test timeout.
+gate_root=${CARGO_TARGET_DIR:-target}
+
+gate_debug_env() {
+    export CARGO_TARGET_DIR=$gate_root/gate-debug CARGO_PROFILE_DEV_DEBUG=0 \
+        CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld
+}
+
+gate_release_env() {
+    export CARGO_TARGET_DIR=$gate_root/gate-release
+}
+
+gate_debug_build() {
+    gate_debug_env
+    timed clippy cargo clippy --workspace --all-targets --locked -- -D warnings
+    timed clippy-decrypt cargo clippy --workspace --all-targets --locked --features cellgov_cli/decrypt -- -D warnings
+    if [ "$gate_mode" != tests ]; then
+        CELLGOV_RUSTDOC_CHECK=1 rustdoc_lint doc
+        CELLGOV_RUSTDOC_CHECK=1 rustdoc_lint doc-decrypt --features cellgov_cli/decrypt
+    fi
+    if [ "$gate_mode" != docs ]; then
+        timed build-debug cargo nextest run --workspace --locked --profile ci --no-run
+        timed build-decrypt-debug cargo test -p cellgov_cli -p cellgov_install --locked \
+            --features cellgov_cli/decrypt --no-run
+    fi
+}
+
+gate_release_build() {
+    gate_release_env
+    timed build-release cargo nextest run --workspace --release --locked --profile ci-release --no-run
+    timed build-decrypt-release cargo test -p cellgov_cli -p cellgov_install --release --locked \
+        --features cellgov_cli/decrypt --no-run
+}
+
+gate_debug_tests() {
+    gate_debug_env
+    timed test-debug cargo nextest run --workspace --locked --profile ci
+    timed test-doc cargo test --workspace --locked --doc
+    timed test-decrypt-debug cargo test -p cellgov_cli -p cellgov_install --locked --features cellgov_cli/decrypt
+}
+
+gate_release_tests() {
+    gate_release_env
+    timed test-release cargo nextest run --workspace --release --locked --profile ci-release
+    timed test-decrypt-release cargo test -p cellgov_cli -p cellgov_install --release --locked \
+        --features cellgov_cli/decrypt
+}
+
+# Each lane builds in a background subshell, where a failing command
+# ends that lane alone; the gate waits for both, prints the release
+# lane's output, and fails with the first failure before any test runs.
+gate() {
+    local release_log=$gate_root/gate-release.log debug_pid release_pid status=0 release_status=0
+    timed fmt cargo fmt --check
+    if [ "$gate_mode" = docs ]; then
+        gate_debug_build
+        return
+    fi
+    mkdir -p "$gate_root"
+    gate_release_build >"$release_log" 2>&1 &
+    release_pid=$!
+    gate_debug_build &
+    debug_pid=$!
+    wait "$debug_pid" || status=$?
+    wait "$release_pid" || release_status=$?
+    [ "$status" -ne 0 ] || status=$release_status
+    cat "$release_log"
+    if [ "$status" -ne 0 ]; then
+        group_line " (failed)" "$status"
+        exit "$status"
+    fi
+    (gate_debug_tests)
+    (gate_release_tests)
 }
 
 # The smoke set's finding artifacts, written where the workflow uploads
@@ -300,6 +406,10 @@ case "${1:-full}" in
     micro-build) run_group micro-build micro_build ;;
     microtests) run_group microtests microtests ;;
     data) run_group data data ;;
+    gate-tests | gate-docs | gate-full)
+        gate_mode=${1#gate-}
+        run_group "$1" gate
+        ;;
     # The pre-push gate: every group the workflow runs, plus `local`. The
     # test group runs through nextest as the workflow's blocking legs do,
     # so a test over their per-test budget fails here too.
@@ -311,7 +421,7 @@ case "${1:-full}" in
         run_group local test_local
         ;;
     *)
-        echo "usage: $0 {lint|check|test|test-linux|local|smoke-artifacts|deny|micro-build|microtests|data|full}" >&2
+        echo "usage: $0 {lint|check|test|test-linux|local|smoke-artifacts|deny|micro-build|microtests|data|full|gate-tests|gate-docs|gate-full}" >&2
         exit 2
         ;;
 esac
