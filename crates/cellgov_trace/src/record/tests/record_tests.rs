@@ -440,6 +440,14 @@ fn ppu_state_full_roundtrip() {
     for (i, r) in gpr.iter_mut().enumerate() {
         *r = 0x1000 + i as u64;
     }
+    let mut fpr = [0u64; 32];
+    for (i, r) in fpr.iter_mut().enumerate() {
+        *r = 0x3ff0_0000_0000_0000 + i as u64;
+    }
+    let mut vr = [0u128; 32];
+    for (i, r) in vr.iter_mut().enumerate() {
+        *r = (u128::from(0xaaaa_0000 + i as u32) << 96) | (0x5555_0000 + i as u128);
+    }
     roundtrip(TraceRecord::PpuStateFull {
         step: 99,
         pc: 0x0084_6ae0,
@@ -451,6 +459,9 @@ fn ppu_state_full_roundtrip() {
         reservation_line: Some(0x3000_1080),
         fpscr: 0x8200_40f8,
         vrsave: 0xc000_0001,
+        fpr,
+        vr,
+        vscr: 0x0001_0001,
     });
 }
 
@@ -467,6 +478,9 @@ fn ppu_state_full_zero_state_roundtrip() {
         reservation_line: None,
         fpscr: 0,
         vrsave: 0,
+        fpr: [0u64; 32],
+        vr: [0u128; 32],
+        vscr: 0,
     });
 }
 
@@ -483,6 +497,9 @@ fn ppu_state_full_reservation_none_and_some_zero_are_distinct() {
         reservation_line: None,
         fpscr: 0,
         vrsave: 0,
+        fpr: [0u64; 32],
+        vr: [0u128; 32],
+        vscr: 0,
     };
     let some_zero = TraceRecord::PpuStateFull {
         step: 0,
@@ -495,6 +512,9 @@ fn ppu_state_full_reservation_none_and_some_zero_are_distinct() {
         reservation_line: Some(0),
         fpscr: 0,
         vrsave: 0,
+        fpr: [0u64; 32],
+        vr: [0u128; 32],
+        vscr: 0,
     };
     let (mut a, mut b) = (Vec::new(), Vec::new());
     none.encode(&mut a);
@@ -517,9 +537,12 @@ fn ppu_state_full_truncated_input_is_rejected() {
         reservation_line: Some(8),
         fpscr: 9,
         vrsave: 10,
+        fpr: [11u64; 32],
+        vr: [12u128; 32],
+        vscr: 13,
     }
     .encode(&mut buf);
-    assert_eq!(buf.len(), 318, "documented wire size");
+    assert_eq!(buf.len(), 1090, "documented wire size");
     let truncated = &buf[..buf.len() - 1];
     assert_eq!(TraceRecord::decode(truncated), Err(DecodeError::Truncated));
 }
@@ -537,6 +560,9 @@ fn ppu_state_full_tag_is_0x08() {
         reservation_line: None,
         fpscr: 0,
         vrsave: 0,
+        fpr: [0u64; 32],
+        vr: [0u128; 32],
+        vscr: 0,
     };
     let mut buf = Vec::new();
     r.encode(&mut buf);
@@ -556,6 +582,9 @@ fn ppu_state_full_level_is_hashes() {
         reservation_line: None,
         fpscr: 0,
         vrsave: 0,
+        fpr: [0u64; 32],
+        vr: [0u128; 32],
+        vscr: 0,
     };
     assert_eq!(r.level(), TraceLevel::Hashes);
 }

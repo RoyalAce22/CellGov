@@ -122,6 +122,9 @@ impl TraceRecord {
                 reservation_line,
                 fpscr,
                 vrsave,
+                fpr,
+                vr,
+                vscr,
             } => {
                 write_u64(buf, *step);
                 write_u64(buf, *pc);
@@ -144,6 +147,13 @@ impl TraceRecord {
                 }
                 write_u32(buf, *fpscr);
                 write_u32(buf, *vrsave);
+                for r in fpr.iter() {
+                    write_u64(buf, *r);
+                }
+                for r in vr.iter() {
+                    write_u128(buf, *r);
+                }
+                write_u32(buf, *vscr);
             }
             TraceRecord::HostInvariantBreak { reason } => {
                 buf.push(u8::from(*reason));
@@ -406,6 +416,15 @@ impl TraceRecord {
                 };
                 let fpscr = read_u32(bytes, &mut pos)?;
                 let vrsave = read_u32(bytes, &mut pos)?;
+                let mut fpr = [0u64; 32];
+                for r in fpr.iter_mut() {
+                    *r = read_u64(bytes, &mut pos)?;
+                }
+                let mut vr = [0u128; 32];
+                for r in vr.iter_mut() {
+                    *r = read_u128(bytes, &mut pos)?;
+                }
+                let vscr = read_u32(bytes, &mut pos)?;
                 TraceRecord::PpuStateFull {
                     step,
                     pc,
@@ -417,6 +436,9 @@ impl TraceRecord {
                     reservation_line,
                     fpscr,
                     vrsave,
+                    fpr,
+                    vr,
+                    vscr,
                 }
             }
             TAG_HOST_INVARIANT_BREAK => {

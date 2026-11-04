@@ -26,7 +26,8 @@ pub enum ZoomLookup {
         /// PC on side B.
         b_pc: u64,
         /// Per-field diffs in canonical order: `gpr0..gpr31`, `lr`,
-        /// `ctr`, `xer`, `cr`, `resv_held`, `resv_line`, `fpscr`, `vrsave`.
+        /// `ctr`, `xer`, `cr`, `resv_held`, `resv_line`, `fpscr`, `vrsave`,
+        /// `fpr0..fpr31`, `vr0..vr31`, `vscr`.
         diffs: Vec<RegDiff>,
     },
     /// The target step was absent from one or both zoom traces.
@@ -55,12 +56,13 @@ pub enum ZoomLookup {
 pub struct RegDiff {
     /// Canonical field name: `gpr0..gpr31`, `lr`, `ctr`, `xer`, `cr`,
     /// `resv_held` (0/1), `resv_line` (line address; emitted only when
-    /// both sides hold a reservation), `fpscr`, `vrsave`.
+    /// both sides hold a reservation), `fpscr`, `vrsave`, `fpr0..fpr31`,
+    /// `vr0..vr31`, `vscr`.
     pub field: &'static str,
     /// Value from side A.
-    pub a: u64,
+    pub a: u128,
     /// Value from side B.
-    pub b: u64,
+    pub b: u128,
 }
 
 const GPR_FIELD_NAMES: [&str; 32] = [
@@ -69,6 +71,37 @@ const GPR_FIELD_NAMES: [&str; 32] = [
     "gpr21", "gpr22", "gpr23", "gpr24", "gpr25", "gpr26", "gpr27", "gpr28", "gpr29", "gpr30",
     "gpr31",
 ];
+
+const FPR_FIELD_NAMES: [&str; 32] = [
+    "fpr0", "fpr1", "fpr2", "fpr3", "fpr4", "fpr5", "fpr6", "fpr7", "fpr8", "fpr9", "fpr10",
+    "fpr11", "fpr12", "fpr13", "fpr14", "fpr15", "fpr16", "fpr17", "fpr18", "fpr19", "fpr20",
+    "fpr21", "fpr22", "fpr23", "fpr24", "fpr25", "fpr26", "fpr27", "fpr28", "fpr29", "fpr30",
+    "fpr31",
+];
+
+const VR_FIELD_NAMES: [&str; 32] = [
+    "vr0", "vr1", "vr2", "vr3", "vr4", "vr5", "vr6", "vr7", "vr8", "vr9", "vr10", "vr11", "vr12",
+    "vr13", "vr14", "vr15", "vr16", "vr17", "vr18", "vr19", "vr20", "vr21", "vr22", "vr23", "vr24",
+    "vr25", "vr26", "vr27", "vr28", "vr29", "vr30", "vr31",
+];
+
+/// Push a diff for each position where `a` and `b` disagree.
+fn push_bank_diffs<T: Copy + PartialEq + Into<u128>>(
+    diffs: &mut Vec<RegDiff>,
+    names: &[&'static str; 32],
+    a: &[T; 32],
+    b: &[T; 32],
+) {
+    for (field, (&av, &bv)) in names.iter().zip(a.iter().zip(b.iter())) {
+        if av != bv {
+            diffs.push(RegDiff {
+                field,
+                a: av.into(),
+                b: bv.into(),
+            });
+        }
+    }
+}
 
 /// Look up the `PpuStateFull` snapshot at `step` in both zoom traces and diff each field.
 ///
@@ -90,16 +123,8 @@ pub fn zoom_lookup(a_zoom: &[u8], b_zoom: &[u8], step: u64) -> ZoomLookup {
             b_missing: b.is_none(),
         };
     };
-    let mut diffs: Vec<RegDiff> = GPR_FIELD_NAMES
-        .iter()
-        .zip(a.gpr.iter().zip(b.gpr.iter()))
-        .filter(|(_, (av, bv))| av != bv)
-        .map(|(field, (av, bv))| RegDiff {
-            field,
-            a: *av,
-            b: *bv,
-        })
-        .collect();
+    let mut diffs: Vec<RegDiff> = Vec::new();
+    push_bank_diffs(&mut diffs, &GPR_FIELD_NAMES, &a.gpr, &b.gpr);
     for (field, av, bv) in [
         ("lr", a.lr, b.lr),
         ("ctr", a.ctr, b.ctr),
@@ -109,8 +134,8 @@ pub fn zoom_lookup(a_zoom: &[u8], b_zoom: &[u8], step: u64) -> ZoomLookup {
         if av != bv {
             diffs.push(RegDiff {
                 field,
-                a: av,
-                b: bv,
+                a: av.into(),
+                b: bv.into(),
             });
         }
     }
@@ -120,25 +145,34 @@ pub fn zoom_lookup(a_zoom: &[u8], b_zoom: &[u8], step: u64) -> ZoomLookup {
             if al != bl {
                 diffs.push(RegDiff {
                     field: "resv_line",
-                    a: al,
-                    b: bl,
+                    a: al.into(),
+                    b: bl.into(),
                 });
             }
         }
         (a_line, b_line) => diffs.push(RegDiff {
             field: "resv_held",
-            a: u64::from(a_line.is_some()),
-            b: u64::from(b_line.is_some()),
+            a: u128::from(a_line.is_some()),
+            b: u128::from(b_line.is_some()),
         }),
     }
     for (field, av, bv) in [("fpscr", a.fpscr, b.fpscr), ("vrsave", a.vrsave, b.vrsave)] {
         if av != bv {
             diffs.push(RegDiff {
                 field,
-                a: u64::from(av),
-                b: u64::from(bv),
+                a: av.into(),
+                b: bv.into(),
             });
         }
+    }
+    push_bank_diffs(&mut diffs, &FPR_FIELD_NAMES, &a.fpr, &b.fpr);
+    push_bank_diffs(&mut diffs, &VR_FIELD_NAMES, &a.vr, &b.vr);
+    if a.vscr != b.vscr {
+        diffs.push(RegDiff {
+            field: "vscr",
+            a: a.vscr.into(),
+            b: b.vscr.into(),
+        });
     }
     ZoomLookup::Found {
         step,
@@ -159,6 +193,9 @@ struct FullSnapshot {
     reservation_line: Option<u64>,
     fpscr: u32,
     vrsave: u32,
+    fpr: [u64; 32],
+    vr: [u128; 32],
+    vscr: u32,
 }
 
 fn find_full_at(
@@ -177,6 +214,9 @@ fn find_full_at(
             reservation_line,
             fpscr,
             vrsave,
+            fpr,
+            vr,
+            vscr,
         } = r?
         {
             if step == target_step {
@@ -190,6 +230,9 @@ fn find_full_at(
                     reservation_line,
                     fpscr,
                     vrsave,
+                    fpr,
+                    vr,
+                    vscr,
                 }));
             }
         }

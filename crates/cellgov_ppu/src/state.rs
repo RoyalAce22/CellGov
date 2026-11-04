@@ -6,8 +6,8 @@ use cellgov_ps3_abi::hw::ppu::{
 use cellgov_sync::ReservedLine;
 
 use crate::multilinear::{
-    lane_delta, reservation_lanes, LANE_CR, LANE_CTR, LANE_FPSCR, LANE_LR, LANE_RESERVATION_LINE,
-    LANE_RESERVATION_TAG, LANE_VRSAVE, LANE_XER,
+    lane_delta, reservation_lanes, vr_lanes, LANE_CR, LANE_CTR, LANE_FPR0, LANE_FPSCR, LANE_LR,
+    LANE_RESERVATION_LINE, LANE_RESERVATION_TAG, LANE_VR0, LANE_VRSAVE, LANE_VSCR, LANE_XER,
 };
 
 /// Build a 4-bit CR field for compare instructions: `LT|GT|EQ|SO`.
@@ -46,62 +46,47 @@ pub const FNV1A_SCHEME_ID: u64 = {
 /// reports a scheme mismatch in place of a divergence.
 pub const STATE_HASH_SCHEME: u64 = crate::multilinear::SCHEME_ID;
 
-/// Register-bank storage with read-only indexing.
+/// A register bank and its share of the state-hash accumulator.
 ///
-/// There is no `IndexMut` and no `Clone`: every write lands in an
-/// owning [`PpuState`] setter.
-pub struct RegBank<T, const N: usize>([T; N]);
+/// The bank carries the sum of its own lanes, so a whole-bank move or
+/// swap between two states takes that sum with it and both hashes stay
+/// current. There is no `IndexMut` and no `Clone`: every element write
+/// lands in an owning [`PpuState`] setter.
+pub struct LaneBank<T, const N: usize> {
+    regs: [T; N],
+    acc: u128,
+}
 
-impl<T, const N: usize> RegBank<T, N> {
-    /// Borrow the whole bank, e.g. for snapshotting or hashing.
-    #[inline]
-    pub fn as_array(&self) -> &[T; N] {
-        &self.0
+impl<T: Copy + Default, const N: usize> LaneBank<T, N> {
+    fn new() -> Self {
+        Self {
+            regs: [T::default(); N],
+            acc: 0,
+        }
+    }
+
+    fn duplicate(&self) -> Self {
+        Self {
+            regs: self.regs,
+            acc: self.acc,
+        }
     }
 }
 
-impl<T, const N: usize> std::ops::Index<usize> for RegBank<T, N> {
+impl<T, const N: usize> LaneBank<T, N> {
+    /// Borrow the whole bank, e.g. for snapshotting or hashing.
+    #[inline]
+    pub fn as_array(&self) -> &[T; N] {
+        &self.regs
+    }
+}
+
+impl<T, const N: usize> std::ops::Index<usize> for LaneBank<T, N> {
     type Output = T;
 
     #[inline]
     #[track_caller]
     fn index(&self, i: usize) -> &T {
-        &self.0[i]
-    }
-}
-
-/// The GPR bank and its share of the state-hash accumulator.
-///
-/// The bank carries the sum of its own lanes, so a whole-bank move or
-/// swap between two states takes that sum with it and both hashes stay
-/// current. There is no `IndexMut` and no `Clone`: every element write
-/// lands in [`PpuState::set_gpr`].
-pub struct GprBank {
-    regs: [u64; GPR_COUNT],
-    acc: u128,
-}
-
-impl GprBank {
-    fn new() -> Self {
-        Self {
-            regs: [0; GPR_COUNT],
-            acc: 0,
-        }
-    }
-
-    /// Borrow the whole bank, e.g. for snapshotting or hashing.
-    #[inline]
-    pub fn as_array(&self) -> &[u64; GPR_COUNT] {
-        &self.regs
-    }
-}
-
-impl std::ops::Index<usize> for GprBank {
-    type Output = u64;
-
-    #[inline]
-    #[track_caller]
-    fn index(&self, i: usize) -> &u64 {
         &self.regs[i]
     }
 }
@@ -109,22 +94,22 @@ impl std::ops::Index<usize> for GprBank {
 /// PPU architectural register file and SPRs.
 ///
 /// Hash-covered fields (register banks, CR, LR, CTR, XER, FPSCR,
-/// VRSAVE, the reservation) accept writes only through their setters;
-/// hash-excluded fields (PC, TB, instrument counters) stay directly
-/// assignable.
+/// VRSAVE, VSCR, the reservation) accept writes only through their
+/// setters; hash-excluded fields (PC, TB, instrument counters) stay
+/// directly assignable.
 pub struct PpuState {
     /// General-purpose registers r0..r31.
     ///
     /// [PPC-Book1 p:41 s:3.2.1] 64-bit GPRs.
-    pub gpr: GprBank,
+    pub gpr: LaneBank<u64, GPR_COUNT>,
     /// Floating-point registers f0..f31 as raw f64 bit patterns.
     ///
     /// [PPC-Book1 p:97 s:4.2] FPRs hold floating-point values in double format.
-    pub fpr: RegBank<u64, FPR_COUNT>,
+    pub fpr: LaneBank<u64, FPR_COUNT>,
     /// Vector registers v0..v31; big-endian (byte 0 is MSB).
     ///
     /// [AltiVec-PEM p:2-4 s:2.3.1] 128-bit vector registers.
-    pub vr: RegBank<u128, VR_COUNT>,
+    pub vr: LaneBank<u128, VR_COUNT>,
     /// Program counter.
     pub pc: u64,
     /// Condition register: 8 x 4-bit fields packed into the low 32 bits.
@@ -151,8 +136,7 @@ pub struct PpuState {
     ///
     /// [AltiVec-PEM p:2-6 s:2.3.3] VRSAVE is SPR 256, 32 bits.
     vrsave: u32,
-    /// Vector status and control register. Hash-excluded, like the
-    /// vector registers.
+    /// Vector status and control register.
     ///
     /// [AltiVec-PEM p:2-5 s:2.3.2] The VSCR is 32 bits: NJ is bit 15 and SAT is bit 31.
     vscr: u32,
@@ -197,9 +181,9 @@ pub struct PpuState {
     /// [PPC-Book2 p:10 s:1.7.3.1] Reservation state: lwarx/ldarx sets, stwcx./stdcx. tests + clears.
     reservation: Option<ReservedLine>,
     /// The Multilinear-128 accumulator of the hashed lanes outside the
-    /// GPR bank, which keeps its own. Each setter of a hashed lane adds
-    /// that lane's change, so [`Self::state_hash`] reads the two sums
-    /// without a rehash.
+    /// register banks, which keep their own. Each setter of a hashed lane adds
+    /// that lane's change, so [`Self::state_hash`] reads the bank sums
+    /// and this one without a rehash.
     acc: u128,
 }
 
@@ -325,9 +309,9 @@ impl PpuState {
     /// register zero except the VSCR, and no active reservation.
     pub fn new() -> Self {
         Self {
-            gpr: GprBank::new(),
-            fpr: RegBank([0u64; FPR_COUNT]),
-            vr: RegBank([0u128; VR_COUNT]),
+            gpr: LaneBank::new(),
+            fpr: LaneBank::new(),
+            vr: LaneBank::new(),
             pc: 0,
             cr: 0,
             lr: 0,
@@ -348,7 +332,11 @@ impl PpuState {
             dcbz_executed: 0,
             tb: 0,
             reservation: None,
-            acc: crate::multilinear::KEYS[0],
+            acc: crate::multilinear::KEYS[0].wrapping_add(lane_delta(
+                LANE_VSCR,
+                0,
+                u64::from(PPU_THREAD_ENTRY_VSCR),
+            )),
         }
     }
 
@@ -365,14 +353,23 @@ impl PpuState {
     #[inline]
     #[track_caller]
     pub fn set_fpr(&mut self, k: usize, v: u64) {
-        self.fpr.0[k] = v;
+        let old = self.fpr.regs[k];
+        self.fpr.acc = self.fpr.acc.wrapping_add(lane_delta(LANE_FPR0 + k, old, v));
+        self.fpr.regs[k] = v;
     }
 
     /// Write VR `k`.
     #[inline]
     #[track_caller]
     pub fn set_vr(&mut self, k: usize, v: u128) {
-        self.vr.0[k] = v;
+        let (old_hi, old_lo) = vr_lanes(self.vr.regs[k]);
+        let (hi, lo) = vr_lanes(v);
+        self.vr.acc = self
+            .vr
+            .acc
+            .wrapping_add(lane_delta(LANE_VR0 + 2 * k, old_hi, hi))
+            .wrapping_add(lane_delta(LANE_VR0 + 2 * k + 1, old_lo, lo));
+        self.vr.regs[k] = v;
     }
 
     /// Replace the whole GPR bank (snapshot restore).
@@ -386,13 +383,17 @@ impl PpuState {
     /// Replace the whole FPR bank (snapshot restore).
     #[inline]
     pub fn set_fpr_all(&mut self, regs: [u64; FPR_COUNT]) {
-        self.fpr.0 = regs;
+        for (k, &v) in regs.iter().enumerate() {
+            self.set_fpr(k, v);
+        }
     }
 
     /// Replace the whole VR bank (snapshot restore).
     #[inline]
     pub fn set_vr_all(&mut self, regs: [u128; VR_COUNT]) {
-        self.vr.0 = regs;
+        for (k, &v) in regs.iter().enumerate() {
+            self.set_vr(k, v);
+        }
     }
 
     /// Condition register.
@@ -491,7 +492,11 @@ impl PpuState {
     /// console drops them.
     #[inline]
     pub fn set_vscr(&mut self, v: u32) {
-        self.vscr = v & VSCR_DEFINED_BITS;
+        let v = v & VSCR_DEFINED_BITS;
+        self.acc = self
+            .acc
+            .wrapping_add(lane_delta(LANE_VSCR, u64::from(self.vscr), u64::from(v)));
+        self.vscr = v;
     }
 
     /// Set the sticky `VSCR[SAT]` bit.
@@ -499,7 +504,7 @@ impl PpuState {
     /// [AltiVec-PEM p:2-5 s:2.3.2] A saturating instruction sets SAT; only mtvscr clears it.
     #[inline]
     pub fn set_sat(&mut self) {
-        self.vscr |= VSCR_SAT;
+        self.set_vscr(self.vscr | VSCR_SAT);
     }
 
     /// Active reservation, if any.
@@ -636,6 +641,9 @@ impl PpuState {
             reservation_line: self.reservation.map(|l| l.addr()),
             fpscr: self.fpscr,
             vrsave: self.vrsave,
+            fpr: self.fpr.regs,
+            vr: self.vr.regs,
+            vscr: self.vscr,
         }
     }
 
@@ -660,10 +668,14 @@ impl PpuState {
         self.accumulator() == self.accumulate_from_scratch()
     }
 
-    /// The kept accumulator: the GPR bank's sum plus every other lane's.
+    /// The kept accumulator: each register bank's sum plus every other
+    /// lane's.
     #[inline]
     fn accumulator(&self) -> u128 {
-        self.acc.wrapping_add(self.gpr.acc)
+        self.acc
+            .wrapping_add(self.gpr.acc)
+            .wrapping_add(self.fpr.acc)
+            .wrapping_add(self.vr.acc)
     }
 
     /// The Multilinear-128 accumulator of every lane, read from `self`
@@ -688,7 +700,16 @@ impl PpuState {
         for (key, &lane) in KEYS[GPR_COUNT + 1..].iter().zip(&rest) {
             acc = acc.wrapping_add(key.wrapping_mul(u128::from(lane)));
         }
-        acc
+        for (k, &r) in self.fpr.as_array().iter().enumerate() {
+            acc = acc.wrapping_add(KEYS[LANE_FPR0 + k + 1].wrapping_mul(u128::from(r)));
+        }
+        for (k, &v) in self.vr.as_array().iter().enumerate() {
+            let (hi, lo) = vr_lanes(v);
+            acc = acc
+                .wrapping_add(KEYS[LANE_VR0 + 2 * k + 1].wrapping_mul(u128::from(hi)))
+                .wrapping_add(KEYS[LANE_VR0 + 2 * k + 2].wrapping_mul(u128::from(lo)));
+        }
+        acc.wrapping_add(KEYS[LANE_VSCR + 1].wrapping_mul(u128::from(self.vscr)))
     }
 }
 
@@ -698,16 +719,13 @@ impl Default for PpuState {
     }
 }
 
-// Manual because `RegBank` is not `Clone` (see its doc).
+// Manual because `LaneBank` is not `Clone` (see its doc).
 impl Clone for PpuState {
     fn clone(&self) -> Self {
         Self {
-            gpr: GprBank {
-                regs: self.gpr.regs,
-                acc: self.gpr.acc,
-            },
-            fpr: RegBank(self.fpr.0),
-            vr: RegBank(self.vr.0),
+            gpr: self.gpr.duplicate(),
+            fpr: self.fpr.duplicate(),
+            vr: self.vr.duplicate(),
             pc: self.pc,
             cr: self.cr,
             lr: self.lr,
@@ -770,5 +788,5 @@ mod scheme_tests;
 mod accumulator_tests;
 
 #[cfg(test)]
-#[path = "tests/gpr_bank_tests.rs"]
-mod gpr_bank_tests;
+#[path = "tests/lane_bank_tests.rs"]
+mod lane_bank_tests;

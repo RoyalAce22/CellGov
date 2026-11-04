@@ -6,7 +6,7 @@ use crate::multilinear::{scheme_id, KEYS, KEY_COUNT, SCHEME_ID, SCHEME_TAG};
 #[test]
 fn scheme_id_wire_format_golden() {
     assert_eq!(FNV1A_SCHEME_ID, 0x3cab_a2a8_eabe_81d0);
-    assert_eq!(SCHEME_ID, 0x9632_7895_ee74_ca4c);
+    assert_eq!(SCHEME_ID, 0x5589_f043_f18c_3ad6);
 }
 
 #[test]

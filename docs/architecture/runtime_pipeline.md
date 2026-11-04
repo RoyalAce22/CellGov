@@ -425,8 +425,8 @@ The runtime drains a step's barriers through
 
 When `trace_per_step` is set, the unit emits one `PpuStateHash` per
 retired instruction: 25 bytes, step + pc + 64-bit Multilinear-128
-hash of GPR + LR + CTR + XER + CR + reservation + FPSCR + VRSAVE
-(`cellgov_ppu::multilinear`).
+hash of GPR + LR + CTR + XER + CR + reservation + FPSCR + VRSAVE +
+FPR + VR + VSCR (`cellgov_ppu::multilinear`).
 
 The fingerprint input set is one field list,
 `cellgov_exec::PpuFingerprint`. The hash, the `PpuStateFull`
@@ -455,7 +455,7 @@ the unit.
 ### Zoom window
 
 `set_full_state_window(Some((lo, hi)))` enables a bounded-window
-second stream of `PpuStateFull` records. Each is 318 bytes, the
+second stream of `PpuStateFull` records. Each is 1090 bytes, the
 same fingerprint input set uncompressed. They go to a separate
 `zoom_trace` sink so the main per-step stream stays homogeneous.
 The off branch costs one predicted-away test in the hot loop.
@@ -470,23 +470,10 @@ reads.
 ### Per-step coverage caveat
 
 Both per-step instruments cover only the fingerprint input set.
-Outside it are:
-
-- FPR (256 bytes);
-- VMX (512 bytes);
-- the time base, whose divergence surfaces only once an `mftb`
-  lands the value in a GPR.
-
-`PpuStateFull`'s name predates the distinction between full state
-and the fingerprint input set.
-
-So every per-step localization result has a scoping qualifier: the
-step `diverge` reports is the first **scalar-visible** divergence,
-not necessarily the first divergence. Byte-identical reruns are
-unaffected, and memory comparison still catches vector
-nondeterminism once it propagates to a store. But for vector-heavy
-code the localized step can sit arbitrarily far downstream of the
-true one.
+The PC and the time base are outside it. A time-base divergence
+surfaces only once an `mftb` lands the value in a register the set
+holds, so the step `diverge` reports can sit downstream of the step
+where the time base first differed.
 
 Widening the covered set requires the digest to become
 incrementally maintained state to stay affordable.

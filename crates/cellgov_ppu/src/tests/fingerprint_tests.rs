@@ -18,6 +18,9 @@ fn zoom_bytes(state: &PpuState) -> Vec<u8> {
         reservation_line,
         fpscr,
         vrsave,
+        fpr,
+        vr,
+        vscr,
     } = state.fingerprint();
     let mut w = TraceWriter::new();
     w.record(&TraceRecord::PpuStateFull {
@@ -31,6 +34,9 @@ fn zoom_bytes(state: &PpuState) -> Vec<u8> {
         reservation_line,
         fpscr,
         vrsave,
+        fpr,
+        vr,
+        vscr,
     });
     w.take_bytes()
 }
@@ -125,6 +131,36 @@ fn fpscr_divergence_is_hash_visible_and_diff_nameable() {
     let mut b = PpuState::new();
     b.set_fpscr(1 << 31);
     assert_hash_and_diff_agree(&a, &b, "fpscr");
+}
+
+#[test]
+fn fpr_divergence_is_hash_visible_and_diff_nameable() {
+    let a = PpuState::new();
+    let mut b = PpuState::new();
+    b.set_fpr(0, 1);
+    assert_hash_and_diff_agree(&a, &b, "fpr0");
+    let mut b = PpuState::new();
+    b.set_fpr(31, 1 << 63);
+    assert_hash_and_diff_agree(&a, &b, "fpr31");
+}
+
+#[test]
+fn vr_divergence_in_either_half_is_hash_visible_and_diff_nameable() {
+    let a = PpuState::new();
+    let mut b = PpuState::new();
+    b.set_vr(0, 1);
+    assert_hash_and_diff_agree(&a, &b, "vr0");
+    let mut b = PpuState::new();
+    b.set_vr(31, 1 << 127);
+    assert_hash_and_diff_agree(&a, &b, "vr31");
+}
+
+#[test]
+fn vscr_divergence_is_hash_visible_and_diff_nameable() {
+    let a = PpuState::new();
+    let mut b = PpuState::new();
+    b.set_sat();
+    assert_hash_and_diff_agree(&a, &b, "vscr");
 }
 
 #[test]

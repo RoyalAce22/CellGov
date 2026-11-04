@@ -183,9 +183,9 @@ module in the install. Derived by `select_import_closure`.
 [execution_units.md](../architecture/execution_units.md#execution-units)
 
 **Fingerprint.** The field list (`cellgov_exec::PpuFingerprint`:
-GPR, LR, CTR, XER, CR, reservation, FPSCR, VRSAVE) that `PpuStateHash`
-digests and `PpuStateFull` snapshots. FPR, VMX, and TB are outside
-it, so per-step localization is scalar-visible only. The SPU's list,
+GPR, LR, CTR, XER, CR, reservation, FPSCR, VRSAVE, FPR, VR, VSCR)
+that `PpuStateHash` digests and `PpuStateFull` snapshots. The PC and
+TB are outside it. The SPU's list,
 `cellgov_exec::SpuFingerprint` (registers, FPSCR, LSLR, IE, SRR0,
 reservation), is what `SpuStateHash` digests and `SpuStateFull` with
 `SpuRegisters` snapshots.

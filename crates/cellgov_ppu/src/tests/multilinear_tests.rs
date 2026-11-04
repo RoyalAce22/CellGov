@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::state::PpuState;
+use cellgov_ps3_abi::hw::ppu::{VSCR_NJ, VSCR_SAT};
 use cellgov_sync::ReservedLine;
 use std::collections::BTreeSet;
 
@@ -25,8 +26,38 @@ fn flipped(base: &[u64; LANE_COUNT], flips: &[Flip]) -> [u64; LANE_COUNT] {
     out
 }
 
+/// Every bit of every lane.
 fn all_flips() -> Vec<Flip> {
-    (0..LANE_COUNT)
+    flips_over((0..LANE_COUNT).collect())
+}
+
+/// The lanes the pairwise tests cover: every scalar lane, and the first
+/// and last lane of the FPR, VR and VSCR groups. Pairs over all 137 lanes
+/// would be 38 million hashes held at once; the keys of the lanes left
+/// out are drawn from the same stream and checked by the single-bit,
+/// lane-swap and key tests.
+fn pair_lanes() -> Vec<usize> {
+    let mut lanes: Vec<usize> = (0..LANE_FPR0).collect();
+    lanes.extend([
+        LANE_FPR0,
+        LANE_VR0 - 1,
+        LANE_VR0,
+        LANE_VR0 + 1,
+        LANE_VSCR - 2,
+        LANE_VSCR - 1,
+        LANE_VSCR,
+    ]);
+    lanes
+}
+
+/// Every bit of each lane [`pair_lanes`] names.
+fn pair_flips() -> Vec<Flip> {
+    flips_over(pair_lanes())
+}
+
+fn flips_over(lanes: Vec<usize>) -> Vec<Flip> {
+    lanes
+        .into_iter()
         .flat_map(|lane| (0..64).map(move |bit| Flip { lane, bit }))
         .collect()
 }
@@ -42,11 +73,12 @@ fn patterned() -> [u64; LANE_COUNT] {
     out
 }
 
-/// Lane vectors of PPU states that a title boot passed through, as
-/// `boot run --state-hash-census` sampled them at dispatches 2^20,
-/// 40 * 2^20 and 100 * 2^20. The FPSCR and VRSAVE lanes are 0: the
-/// state hashed neither when the boot ran.
-const TITLE_STATES: [[u64; LANE_COUNT]; 3] = [
+/// The scalar lanes (0 to 39) of PPU states that a title boot passed
+/// through, as `boot run --state-hash-census` sampled them at dispatches
+/// 2^20, 40 * 2^20 and 100 * 2^20. The FPSCR and VRSAVE lanes are 0, and
+/// [`bases`] leaves the FPR, VR and VSCR lanes 0: the state hashed none
+/// of them when the boot ran.
+const TITLE_STATES: [[u64; LANE_FPR0]; 3] = [
     [
         0x73,
         0xd00ff860,
@@ -177,7 +209,11 @@ const TITLE_STATES: [[u64; LANE_COUNT]; 3] = [
 
 fn bases() -> Vec<[u64; LANE_COUNT]> {
     let mut out = vec![[0u64; LANE_COUNT], [u64::MAX; LANE_COUNT], patterned()];
-    out.extend_from_slice(&TITLE_STATES);
+    out.extend(TITLE_STATES.iter().map(|scalar| {
+        let mut v = [0u64; LANE_COUNT];
+        v[..LANE_FPR0].copy_from_slice(scalar);
+        v
+    }));
     out
 }
 
@@ -249,6 +285,26 @@ fn single_bit_states() -> Vec<PpuState> {
         s.set_vrsave(1 << bit);
         out.push(s);
     }
+    for bit in 0..64 {
+        for k in 0..32 {
+            let mut s = PpuState::new();
+            s.set_fpr(k, 1 << bit);
+            out.push(s);
+        }
+    }
+    for bit in 0..128 {
+        for k in 0..32 {
+            let mut s = PpuState::new();
+            s.set_vr(k, 1 << bit);
+            out.push(s);
+        }
+    }
+    // A new state holds NJ; these are the other three VSCR values.
+    for vscr in [0, VSCR_SAT, VSCR_NJ | VSCR_SAT] {
+        let mut s = PpuState::new();
+        s.set_vscr(vscr);
+        out.push(s);
+    }
     // Line addresses are 128-byte aligned inside the 42-bit EA space.
     for bit in 7..42 {
         let mut s = PpuState::new();
@@ -293,14 +349,29 @@ fn lanes_place_each_field_at_its_index() {
     s.set_reservation(Some(ReservedLine::containing(0x3000_1080)));
     s.set_fpscr(203);
     s.set_vrsave(204);
+    for k in 0..32 {
+        s.set_fpr(k, 300 + k as u64);
+        s.set_vr(
+            k,
+            (u128::from(400 + k as u64) << 64) | u128::from(500 + k as u64),
+        );
+    }
+    s.set_vscr(VSCR_NJ | VSCR_SAT);
     let l = lanes(&s.fingerprint());
     for (k, &lane) in l[..32].iter().enumerate() {
         assert_eq!(lane, 100 + k as u64);
     }
     assert_eq!(
-        l[32..],
+        l[32..40],
         [200, 201, 202, 0xffff_ffff, 1, 0x3000_1080, 203, 204]
     );
+    for k in 0..32 {
+        assert_eq!(l[40 + k], 300 + k as u64, "fpr{k}");
+        assert_eq!(l[72 + 2 * k], 400 + k as u64, "vr{k} high half");
+        assert_eq!(l[73 + 2 * k], 500 + k as u64, "vr{k} low half");
+    }
+    assert_eq!(l[136], u64::from(VSCR_NJ | VSCR_SAT));
+    assert_eq!(LANE_COUNT, 137);
 }
 
 // --- Part 2: structural tests over every base ---
@@ -343,8 +414,8 @@ fn rehashed_pairs(flips: &[Flip]) -> Vec<(usize, usize)> {
 }
 
 #[test]
-fn every_two_bit_flip_changes_the_hash() {
-    let flips = all_flips();
+fn every_two_bit_flip_over_the_pair_lanes_changes_the_hash() {
+    let flips = pair_flips();
     for (b, base) in bases().iter().enumerate() {
         let acc = accumulate(base);
         let h = finish(acc);
@@ -385,12 +456,13 @@ fn every_two_bit_flip_changes_the_hash() {
 
 #[test]
 fn bit_63_of_two_lanes_is_a_named_case() {
-    let pairs = rehashed_pairs(&all_flips());
+    let pairs = rehashed_pairs(&pair_flips());
     let named = pairs
         .iter()
         .filter(|&&(i, j)| i % 64 == 63 && j % 64 == 63)
         .count();
-    assert_eq!(named, LANE_COUNT * (LANE_COUNT - 1) / 2);
+    let n = pair_lanes().len();
+    assert_eq!(named, n * (n - 1) / 2);
 }
 
 #[test]
@@ -438,10 +510,10 @@ fn assert_pairwise_distinct(mut hashes: Vec<u64>, what: &str) {
 }
 
 #[test]
-fn nearly_zero_vectors_hash_pairwise_distinct() {
+fn nearly_zero_vectors_over_the_pair_lanes_hash_pairwise_distinct() {
     let zero = [0u64; LANE_COUNT];
     let acc = accumulate(&zero);
-    let flips = all_flips();
+    let flips = pair_flips();
     let d = deltas(&zero, &flips);
     let mut hashes = vec![finish(acc)];
     for i in 0..flips.len() {
@@ -451,7 +523,8 @@ fn nearly_zero_vectors_hash_pairwise_distinct() {
             hashes.push(finish(acc_i.wrapping_add(*dj)));
         }
     }
-    assert_eq!(hashes.len(), 1 + 2560 + 2560 * 2559 / 2);
+    // 47 lanes of 64 bits.
+    assert_eq!(hashes.len(), 1 + 3008 + 3008 * 3007 / 2);
     assert_pairwise_distinct(hashes, "vectors with at most two bits set");
 }
 
@@ -523,9 +596,16 @@ fn state_hash_is_the_multilinear_hash_of_its_lanes() {
         s.set_cr(base[35] as u32);
         s.set_fpscr(base[38] as u32);
         s.set_vrsave(base[39] as u32);
+        for k in 0..32 {
+            s.set_fpr(k, base[LANE_FPR0 + k]);
+            let (hi, lo) = (base[LANE_VR0 + 2 * k], base[LANE_VR0 + 2 * k + 1]);
+            s.set_vr(k, (u128::from(hi) << 64) | u128::from(lo));
+        }
+        s.set_vscr(base[LANE_VSCR] as u32);
         states.push(s);
     }
-    assert_eq!(states.len(), 2379);
+    // 2373 scalar single-bit states, 2048 FPR, 4096 VR, 3 VSCR, 6 bases.
+    assert_eq!(states.len(), 8526);
     for s in &states {
         assert_eq!(s.state_hash(), hash(&lanes(&s.fingerprint())));
     }

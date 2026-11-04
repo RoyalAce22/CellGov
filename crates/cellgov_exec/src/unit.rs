@@ -110,6 +110,12 @@ pub struct PpuFingerprint {
     pub fpscr: u32,
     /// AltiVec VR-usage mask.
     pub vrsave: u32,
+    /// Floating-point registers f0..f31 as raw bit patterns.
+    pub fpr: [u64; 32],
+    /// Vector registers v0..v31, byte 0 of each the most significant.
+    pub vr: [u128; 32],
+    /// Vector status and control register.
+    pub vscr: u32,
 }
 
 /// Canonical SPU fingerprint input set.

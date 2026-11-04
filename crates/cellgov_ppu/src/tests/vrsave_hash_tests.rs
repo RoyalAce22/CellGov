@@ -16,6 +16,9 @@ fn zoom_bytes(state: &PpuState) -> Vec<u8> {
         reservation_line,
         fpscr,
         vrsave,
+        fpr,
+        vr,
+        vscr,
     } = state.fingerprint();
     let mut w = TraceWriter::new();
     w.record(&TraceRecord::PpuStateFull {
@@ -29,6 +32,9 @@ fn zoom_bytes(state: &PpuState) -> Vec<u8> {
         reservation_line,
         fpscr,
         vrsave,
+        fpr,
+        vr,
+        vscr,
     });
     w.take_bytes()
 }
@@ -44,7 +50,7 @@ fn states_that_differ_only_in_vrsave_hash_differently() {
             ZoomLookup::Found { diffs, .. } => {
                 let names: Vec<&str> = diffs.iter().map(|d| d.field).collect();
                 assert_eq!(names, ["vrsave"], "vrsave 0x{v:08x}");
-                assert_eq!((diffs[0].a, diffs[0].b), (0, u64::from(v)));
+                assert_eq!((diffs[0].a, diffs[0].b), (0, u128::from(v)));
             }
             other => panic!("expected Found, got {other:?}"),
         }

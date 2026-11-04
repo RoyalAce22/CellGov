@@ -161,7 +161,7 @@ differ:
 
 - [`cellgov_compare::diverge`](#diverge) reports the first index
   where two traces' per-step hash records disagree, stream by stream:
-  the first *scalar-visible* disagreement.
+  the first *hash-visible* disagreement.
 - [`cellgov_compare::zoom_lookup`](#zoom_lookup) and
   `spu_zoom_lookup` consume two zoom-trace files and return the
   per-field fingerprint differences at one step, or `MissingStep`.
@@ -193,7 +193,7 @@ compares them stream by stream (`StateStream`): the `PpuStateHash`
 records form one stream, and each SPU unit's `SpuStateHash` records
 form another. Two runs can interleave their units differently, so no
 stream's order depends on another's. Within a stream, the index where
-the two sides first disagree is the first *scalar-visible*
+the two sides first disagree is the first *hash-visible*
 disagreement, per the
 [per-step coverage caveat](runtime_pipeline.md#per-step-coverage-caveat).
 `diverge` has five outcomes:

@@ -1,6 +1,7 @@
 //! PpuState CR field/bit accessors and effective-address computation.
 
 use super::*;
+use cellgov_ps3_abi::hw::ppu::{VSCR_NJ, VSCR_SAT};
 
 #[test]
 fn new_state_is_zeroed() {
@@ -25,17 +26,38 @@ fn pinned_state() -> PpuState {
     s.set_reservation(Some(ReservedLine::containing(0x3000_1080)));
     s.set_fpscr(0x8200_40F8);
     s.set_vrsave(0xC000_0001);
+    for k in 0..32 {
+        s.set_fpr(k, pinned_fpr(k));
+        s.set_vr(k, pinned_vr(k));
+    }
+    s.set_vscr(VSCR_NJ | VSCR_SAT);
     s
+}
+
+fn pinned_fpr(k: usize) -> u64 {
+    0x4000_0000_0000_0000 | (k as u64 + 1)
+}
+
+fn pinned_vr(k: usize) -> u128 {
+    0x0F0E_0D0C_0B0A_0908_0706_0504_0302_0100u128.rotate_left(8 * k as u32)
 }
 
 #[test]
 fn state_hash_lane_vector_golden() {
+    use crate::multilinear::{LANE_FPR0, LANE_VR0, LANE_VSCR};
     let lanes = crate::multilinear::lanes(&pinned_state().fingerprint());
     for (i, &lane) in lanes[..32].iter().enumerate() {
         assert_eq!(lane, 0x0101_0101_0101_0101u64.wrapping_mul(i as u64 + 1));
     }
+    for k in 0..32 {
+        assert_eq!(lanes[LANE_FPR0 + k], pinned_fpr(k), "fpr{k}");
+        let v = pinned_vr(k);
+        assert_eq!(lanes[LANE_VR0 + 2 * k], (v >> 64) as u64, "vr{k} high");
+        assert_eq!(lanes[LANE_VR0 + 2 * k + 1], v as u64, "vr{k} low");
+    }
+    assert_eq!(lanes[LANE_VSCR], u64::from(VSCR_NJ | VSCR_SAT));
     assert_eq!(
-        lanes[32..],
+        lanes[32..LANE_FPR0],
         [
             0x1122_3344_5566_7788,
             0x99AA_BBCC_DDEE_FF00,
@@ -54,7 +76,7 @@ fn state_hash_lane_vector_golden() {
 fn state_hash_wire_format_golden() {
     assert_eq!(
         pinned_state().state_hash(),
-        0x0A91_E7CC_07E0_6B68,
+        0x72DF_F199_0D37_F1D4,
         "written by hand in the same commit as the change that moves it"
     );
 }
@@ -186,24 +208,40 @@ fn state_hash_distinguishes_every_covered_field() {
     let mut s = base.clone();
     s.set_cr(1);
     assert_ne!(s.state_hash(), baseline, "CR must influence state_hash");
+
+    for i in 0..FPR_COUNT {
+        let mut s = base.clone();
+        s.set_fpr(i, 1);
+        assert_ne!(
+            s.state_hash(),
+            baseline,
+            "FPR {i} must influence state_hash"
+        );
+    }
+
+    for i in 0..VR_COUNT {
+        for v in [1u128, 1 << 64] {
+            let mut s = base.clone();
+            s.set_vr(i, v);
+            assert_ne!(
+                s.state_hash(),
+                baseline,
+                "VR {i} = {v:#x} must influence state_hash"
+            );
+        }
+    }
+
+    let mut s = base.clone();
+    s.set_sat();
+    assert_ne!(s.state_hash(), baseline, "VSCR must influence state_hash");
 }
 
 #[test]
-fn state_hash_ignores_pc_fpr_vr() {
+fn state_hash_ignores_pc() {
     let base = PpuState::new();
-    let baseline = base.state_hash();
-
     let mut s = base.clone();
     s.pc = 0xdead_beef;
-    assert_eq!(s.state_hash(), baseline, "PC is excluded");
-
-    let mut s = base.clone();
-    s.set_fpr(7, 0xffff_ffff_ffff_ffff);
-    assert_eq!(s.state_hash(), baseline, "FPR is excluded");
-
-    let mut s = base.clone();
-    s.set_vr(0, u128::MAX);
-    assert_eq!(s.state_hash(), baseline, "VR is excluded");
+    assert_eq!(s.state_hash(), base.state_hash(), "PC is excluded");
 }
 
 #[test]

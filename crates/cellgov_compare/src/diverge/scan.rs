@@ -12,12 +12,11 @@
 //! simulators checks that they execute matching instructions and make
 //! matching register writes; here the PC is checked before the hash.
 //!
-//! `PpuStateHash` covers scalar integer state only, so a PPU step is
-//! the first *scalar-visible* disagreement. Two runs diverging in a
-//! float or vector register agree here until that value reaches a covered
-//! register, which can be arbitrarily far downstream. `SpuStateHash`
-//! covers the SPU's registers, so the same caveat holds for the SPU
-//! state it leaves out: channels, signals and the stopped state.
+//! A reported step is the first *hash-visible* disagreement.
+//! `PpuStateHash` leaves out the time base, so two runs diverging there
+//! agree here until an `mftb` moves the value into a covered register.
+//! `SpuStateHash` leaves out channels, signals and the stopped state,
+//! with the same result.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -106,7 +105,7 @@ pub enum DivergeReport {
     Differs {
         /// The stream that disagreed first.
         stream: StateStream,
-        /// 0-based index within `stream` of the first scalar-visible
+        /// 0-based index within `stream` of the first hash-visible
         /// disagreement; see the module docs for why that is not always
         /// the first divergence.
         step: u64,

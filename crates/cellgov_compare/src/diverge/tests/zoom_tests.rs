@@ -33,6 +33,9 @@ fn full(step: u64, pc: u64, gpr: [u64; 32]) -> TraceRecord {
         reservation_line: None,
         fpscr: 0,
         vrsave: 0,
+        fpr: [0u64; 32],
+        vr: [0u128; 32],
+        vscr: 0,
     }
 }
 
@@ -48,6 +51,9 @@ fn full_resv(step: u64, reservation_line: Option<u64>) -> TraceRecord {
         reservation_line,
         fpscr: 0,
         vrsave: 0,
+        fpr: [0u64; 32],
+        vr: [0u128; 32],
+        vscr: 0,
     }
 }
 
@@ -121,9 +127,24 @@ fn zoom_lookup_missing_step_on_both_sides_reports_both_missing() {
     ));
 }
 
+/// Trip-wire for the FPR and VR name tables, as for the GPR table.
 #[test]
-fn zoom_lookup_diffs_include_lr_ctr_xer_cr_fpscr_vrsave() {
+fn fpr_and_vr_field_names_match_index() {
+    for (i, name) in FPR_FIELD_NAMES.iter().enumerate() {
+        assert_eq!(*name, format!("fpr{i}"), "FPR_FIELD_NAMES[{i}] mismatch");
+    }
+    for (i, name) in VR_FIELD_NAMES.iter().enumerate() {
+        assert_eq!(*name, format!("vr{i}"), "VR_FIELD_NAMES[{i}] mismatch");
+    }
+}
+
+#[test]
+fn zoom_lookup_diffs_include_every_non_gpr_field_in_order() {
     let gpr = [0u64; 32];
+    let mut a_fpr = [0u64; 32];
+    a_fpr[2] = 7;
+    let mut a_vr = [0u128; 32];
+    a_vr[9] = 1 << 100;
     let a = encode(&[TraceRecord::PpuStateFull {
         step: 0,
         pc: 0,
@@ -135,6 +156,9 @@ fn zoom_lookup_diffs_include_lr_ctr_xer_cr_fpscr_vrsave() {
         reservation_line: None,
         fpscr: 5,
         vrsave: 6,
+        fpr: a_fpr,
+        vr: a_vr,
+        vscr: 0x0001_0000,
     }]);
     let b = encode(&[TraceRecord::PpuStateFull {
         step: 0,
@@ -147,13 +171,22 @@ fn zoom_lookup_diffs_include_lr_ctr_xer_cr_fpscr_vrsave() {
         reservation_line: None,
         fpscr: 500,
         vrsave: 600,
+        fpr: [0u64; 32],
+        vr: [0u128; 32],
+        vscr: 0x0001_0001,
     }]);
     match zoom_lookup(&a, &b, 0) {
         ZoomLookup::Found { diffs, .. } => {
             let names: Vec<&str> = diffs.iter().map(|d| d.field).collect();
-            assert_eq!(names, vec!["lr", "ctr", "xer", "cr", "fpscr", "vrsave"]);
+            assert_eq!(
+                names,
+                vec!["lr", "ctr", "xer", "cr", "fpscr", "vrsave", "fpr2", "vr9", "vscr"]
+            );
             assert_eq!((diffs[4].a, diffs[4].b), (5, 500));
             assert_eq!((diffs[5].a, diffs[5].b), (6, 600));
+            assert_eq!((diffs[6].a, diffs[6].b), (7, 0));
+            assert_eq!((diffs[7].a, diffs[7].b), (1 << 100, 0));
+            assert_eq!((diffs[8].a, diffs[8].b), (0x0001_0000, 0x0001_0001));
         }
         other => panic!("expected Found, got {other:?}"),
     }

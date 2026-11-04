@@ -22,7 +22,7 @@ use super::reasons::{
 ///
 /// A stream whose first record is not `RunIdentity` is version 1 and
 /// carries no run identity.
-pub const TRACE_FORMAT_VERSION: u32 = 6;
+pub const TRACE_FORMAT_VERSION: u32 = 7;
 
 /// A single structured trace record.
 #[allow(clippy::large_enum_variant)]
@@ -117,16 +117,11 @@ pub enum TraceRecord {
     },
     /// Per-step PPU state fingerprint at instruction retire.
     ///
-    /// `hash` covers GPR + LR + CTR + XER + CR + FPSCR + VRSAVE and the
-    /// reservation, under the scheme the stream's
+    /// `hash` covers GPR + LR + CTR + XER + CR + FPSCR + VRSAVE, the
+    /// reservation, FPR, VR and VSCR, under the scheme the stream's
     /// [`StateHashScheme`](Self::StateHashScheme) record names. The stream
     /// carries one per retired instruction while per-step tracing is
     /// active.
-    ///
-    /// FPR and VMX are outside the covered set. A divergence confined
-    /// to float or vector state stays invisible until it reaches a covered
-    /// register, so the step a consumer derives from these records is the
-    /// first scalar-visible divergence, not necessarily the first divergence.
     PpuStateHash {
         /// Per-thread retired-instruction counter.
         step: u64,
@@ -135,12 +130,12 @@ pub enum TraceRecord {
         /// Hash of the PPU architectural state.
         hash: StateHash,
     },
-    /// Scalar PPU register snapshot at instruction retire.
+    /// PPU register snapshot at instruction retire.
     ///
     /// Opt-in `[lo, hi]` window only, never on the hot path. Carries the
     /// full fingerprint input set of [`PpuStateHash`](Self::PpuStateHash)
-    /// uncompressed -- GPR, LR, CTR, XER, CR, FPSCR, VRSAVE, reservation;
-    /// no FPR or vector register state -- so a hash divergence always names the disagreeing
+    /// uncompressed -- GPR, LR, CTR, XER, CR, FPSCR, VRSAVE, reservation,
+    /// FPR, VR, VSCR -- so a hash divergence always names the disagreeing
     /// field in the zoom diff. `step` matches `PpuStateHash::step` for
     /// the same instruction.
     PpuStateFull {
@@ -164,6 +159,12 @@ pub enum TraceRecord {
         fpscr: u32,
         /// AltiVec VR-usage mask.
         vrsave: u32,
+        /// Floating-point registers f0..f31 as raw bit patterns.
+        fpr: [u64; 32],
+        /// Vector registers v0..v31, byte 0 of each the most significant.
+        vr: [u128; 32],
+        /// Vector status and control register.
+        vscr: u32,
     },
     /// Host-side invariant break observed during `Lv2Host::dispatch`.
     /// One record per `record_invariant_break` call in `cellgov_lv2`.
@@ -370,7 +371,9 @@ impl TraceRecord {
             TAG_UNIT_BLOCKED => 1 + 8 + 1,
             TAG_UNIT_WOKEN => 1 + 8 + 1,
             TAG_PPU_STATE_HASH => 1 + 8 * 3,
-            TAG_PPU_STATE_FULL => 1 + 8 + 8 + 8 * 32 + 8 * 3 + 4 + 1 + 8 + 4 + 4,
+            TAG_PPU_STATE_FULL => {
+                1 + 8 + 8 + 8 * 32 + 8 * 3 + 4 + 1 + 8 + 4 + 4 + 8 * 32 + 16 * 32 + 4
+            }
             TAG_HOST_INVARIANT_BREAK => 1 + 1,
             TAG_SYSCALL_ENTERED => 1 + 8 + 8 + 8 * 8 + 1,
             TAG_RESERVED_REGION_READ => 1 + 8 * 3 + 4 + 4,

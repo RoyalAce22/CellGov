@@ -72,6 +72,9 @@ fn one_of_each() -> Vec<TraceRecord> {
             reservation_line: Some(22),
             fpscr: 52,
             vrsave: 53,
+            fpr: [54; 32],
+            vr: [55; 32],
+            vscr: 56,
         },
         TraceRecord::HostInvariantBreak {
             reason: TracedInvariantBreakReason::Unspecified,
