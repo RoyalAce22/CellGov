@@ -1,0 +1,10 @@
+id	asm	words	inputs	record	may_end_process
+maxmin_ub	vmaxub v3, v1, v2; vminub v4, v1, v2	0x10611002,0x10811202	cr=0x0,xer=0x0,v1=0x00017f80_ff9e00ff_807f0137_ff807f00,v2=0xff01807f_003701fe_8080029e_ff7f7f80	v3,v4	0
+maxmin_sb	vmaxsb v3, v1, v2; vminsb v4, v1, v2	0x10611102,0x10811302	cr=0x0,xer=0x0,v1=0x00017f80_ff9e00ff_807f0137_ff807f00,v2=0xff01807f_003701fe_8080029e_ff7f7f80	v3,v4	0
+avg_b	vavgub v3, v1, v2; vavgsb v4, v1, v2	0x10611402,0x10811502	cr=0x0,xer=0x0,v1=0x00017f80_ff9e00ff_807f0137_ff807f00,v2=0xff01807f_003701fe_8080029e_ff7f7f80	v3,v4	0
+maxmin_uh	vmaxuh v3, v1, v2; vminuh v4, v1, v2	0x10611042,0x10811242	cr=0x0,xer=0x0,v1=0x00000001_7fff8000_ffff9e37_8000fffe,v2=0xffff0002_80007fff_000079b9_8000ffff	v3,v4	0
+maxmin_sh	vmaxsh v3, v1, v2; vminsh v4, v1, v2	0x10611142,0x10811342	cr=0x0,xer=0x0,v1=0x00000001_7fff8000_ffff9e37_8000fffe,v2=0xffff0002_80007fff_000079b9_8000ffff	v3,v4	0
+avg_h	vavguh v3, v1, v2; vavgsh v4, v1, v2	0x10611442,0x10811542	cr=0x0,xer=0x0,v1=0x00000001_7fff8000_ffff9e37_8000fffe,v2=0xffff0002_80007fff_000079b9_8000ffff	v3,v4	0
+maxmin_uw	vmaxuw v3, v1, v2; vminuw v4, v1, v2	0x10611082,0x10811282	cr=0x0,xer=0x0,v1=0x00000000_7fffffff_ffffffff_80000000,v2=0xffffffff_80000000_fffffffe_7fffffff	v3,v4	0
+maxmin_sw	vmaxsw v3, v1, v2; vminsw v4, v1, v2	0x10611182,0x10811382	cr=0x0,xer=0x0,v1=0x00000000_7fffffff_ffffffff_80000000,v2=0xffffffff_80000000_fffffffe_7fffffff	v3,v4	0
+avg_w	vavguw v3, v1, v2; vavgsw v4, v1, v2	0x10611482,0x10811582	cr=0x0,xer=0x0,v1=0x00000000_7fffffff_ffffffff_80000000,v2=0xffffffff_80000000_fffffffe_7fffffff	v3,v4	0

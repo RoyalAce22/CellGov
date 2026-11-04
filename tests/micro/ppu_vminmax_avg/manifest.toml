@@ -1,0 +1,18 @@
+[test]
+name = "ppu_vminmax_avg"
+
+# A hardware probe of the vector maximum, minimum and average
+# instructions, signed and unsigned, on bytes, half words and words,
+# over 0, 1, all ones, both sides of the sign boundary and arbitrary
+# values per lane. cases.tsv names each case. The console capture is
+# the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (9 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 1168 },
+]
+
+[expect]
+outcome = "completed"

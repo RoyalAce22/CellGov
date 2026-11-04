@@ -1,7 +1,7 @@
 //! `vaddcuw`, `vsububm`, `vsubuhm`, `vsubuwm` and `vsubcuw` against a
 //! wide-integer reference written from the PEM pseudocode.
 
-use super::lane_support::pack_u32x4;
+use super::lane_support::{class_pair_vectors, lane, pack_u32x4};
 use crate::exec::test_support::exec_no_mem;
 use crate::exec::ExecuteVerdict;
 use crate::instruction::ops::VxOp;
@@ -45,42 +45,13 @@ fn reference(op: VxOp, w: u32, a: u64, b: u64) -> u64 {
     }
 }
 
-fn lane(v: u128, w: u32, i: u32) -> u64 {
-    let lanes = 128 / w;
-    ((v >> ((lanes - 1 - i) * w)) as u64) & ((1u64 << w) - 1)
-}
-
-fn with_lane(v: u128, w: u32, i: u32, x: u64) -> u128 {
-    let lanes = 128 / w;
-    v | (u128::from(x) << ((lanes - 1 - i) * w))
-}
-
-/// Operand classes for `w`-bit elements: 0, 1, unsigned max (all ones),
-/// the two sides of the sign boundary, and a fixed arbitrary value.
-fn classes(w: u32) -> [u64; 6] {
-    let mask = (1u64 << w) - 1;
-    let sign = 1u64 << (w - 1);
-    [0, 1, mask, sign - 1, sign, 0x9E37_79B9 & mask]
-}
-
 #[test]
 fn every_class_pair_matches_the_reference_in_some_lane() {
     for (op, w) in OPS {
-        let classes = classes(w);
-        let pairs: Vec<(u64, u64)> = classes
-            .iter()
-            .flat_map(|&a| classes.iter().map(move |&b| (a, b)))
-            .collect();
-        let lanes = 128 / w;
         let mut checked = 0;
-        for chunk in pairs.chunks(lanes as usize) {
-            let (mut a, mut b) = (0u128, 0u128);
-            for (i, &(x, y)) in (0..).zip(chunk) {
-                a = with_lane(a, w, i, x);
-                b = with_lane(b, w, i, y);
-            }
+        for (a, b, pairs) in class_pair_vectors(w) {
             let r = vx(&mut PpuState::new(), op, a, b);
-            for (i, &(x, y)) in (0..).zip(chunk) {
+            for (i, &(x, y)) in (0..).zip(&pairs) {
                 assert_eq!(
                     lane(r, w, i),
                     reference(op, w, x, y),

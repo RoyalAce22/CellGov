@@ -6,6 +6,10 @@ use super::integer::{
     vsub_ubytes_sat, vsub_words, vsubcuw,
 };
 use super::merge::{vmrghb, vmrghh, vmrghw, vmrglb, vmrglh, vmrglw};
+use super::minmax::{
+    vavgsb, vavgsh, vavgsw, vavgub, vavguh, vavguw, vmaxsb, vmaxsh, vmaxsw, vmaxub, vmaxuh, vmaxuw,
+    vminsb, vminsh, vminsw, vminub, vminuh, vminuw,
+};
 use super::permute::{vperm, vsel, vsldoi};
 use super::shift::{vslw, vsrab, vsrah, vsraw, vsrw};
 use super::splat::{vspltb, vsplth, vspltisb, vspltish, vspltisw, vspltw};
@@ -123,39 +127,71 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-161 s:6.2] vsububs
         VxOp::Vsububs => vsub_ubytes_sat(a, b),
 
+        // -- Maximum, minimum, average --
+        // [AltiVec-PEM p:6-76 s:6.2] vmaxub: Vector Maximum Unsigned Byte
+        VxOp::Vmaxub => (vmaxub(a, b), false),
+        // [AltiVec-PEM p:6-77 s:6.2] vmaxuh: Vector Maximum Unsigned Half Word
+        VxOp::Vmaxuh => (vmaxuh(a, b), false),
+        // [AltiVec-PEM p:6-78 s:6.2] vmaxuw: Vector Maximum Unsigned Word
+        VxOp::Vmaxuw => (vmaxuw(a, b), false),
+        // [AltiVec-PEM p:6-73 s:6.2] vmaxsb: Vector Maximum Signed Byte
+        VxOp::Vmaxsb => (vmaxsb(a, b), false),
+        // [AltiVec-PEM p:6-74 s:6.2] vmaxsh: Vector Maximum Signed Half Word
+        VxOp::Vmaxsh => (vmaxsh(a, b), false),
+        // [AltiVec-PEM p:6-75 s:6.2] vmaxsw: Vector Maximum Signed Word
+        VxOp::Vmaxsw => (vmaxsw(a, b), false),
+        // [AltiVec-PEM p:6-85 s:6.2] vminub: Vector Minimum Unsigned Byte
+        VxOp::Vminub => (vminub(a, b), false),
+        // [AltiVec-PEM p:6-86 s:6.2] vminuh: Vector Minimum Unsigned Half Word
+        VxOp::Vminuh => (vminuh(a, b), false),
+        // [AltiVec-PEM p:6-87 s:6.2] vminuw: Vector Minimum Unsigned Word
+        VxOp::Vminuw => (vminuw(a, b), false),
+        // [AltiVec-PEM p:6-82 s:6.2] vminsb: Vector Minimum Signed Byte
+        VxOp::Vminsb => (vminsb(a, b), false),
+        // [AltiVec-PEM p:6-83 s:6.2] vminsh: Vector Minimum Signed Half Word
+        VxOp::Vminsh => (vminsh(a, b), false),
+        // [AltiVec-PEM p:6-84 s:6.2] vminsw: Vector Minimum Signed Word
+        VxOp::Vminsw => (vminsw(a, b), false),
+        // [AltiVec-PEM p:6-46 s:6.2] vavgub: zero-extend to 9 bits, add with 1, keep the high 8 bits.
+        VxOp::Vavgub => (vavgub(a, b), false),
+        // [AltiVec-PEM p:6-47 s:6.2] vavguh: zero-extend to 17 bits, add with 1, keep the high 16 bits.
+        VxOp::Vavguh => (vavguh(a, b), false),
+        // [AltiVec-PEM p:6-48 s:6.2] vavguw: zero-extend to 33 bits, add with 1, keep the high 32 bits.
+        VxOp::Vavguw => (vavguw(a, b), false),
+        // [AltiVec-PEM p:6-43 s:6.2] vavgsb: sign-extend to 9 bits, add with 1, keep the high 8 bits.
+        VxOp::Vavgsb => (vavgsb(a, b), false),
+        // [AltiVec-PEM p:6-44 s:6.2] vavgsh: sign-extend to 17 bits, add with 1, keep the high 16 bits.
+        VxOp::Vavgsh => (vavgsh(a, b), false),
+        // [AltiVec-PEM p:6-45 s:6.2] vavgsw: sign-extend to 33 bits, add with 1, keep the high 32 bits.
+        VxOp::Vavgsw => (vavgsw(a, b), false),
+
         // -- Int <-> Float conversions (va field is uimm scale) --
         // [AltiVec-PEM p:6-49 s:6.2] vcfsx
         VxOp::Vcfsx => (vcfsx(b, va), false),
         // [AltiVec-PEM p:6-50 s:6.2] vcfux
         VxOp::Vcfux => (vcfux(b, va), false),
 
-        VxOp::Vmaxub
-        | VxOp::Vrlb
+        VxOp::Vrlb
         | VxOp::Vcmpequb
         | VxOp::Vmuloub
         | VxOp::Vaddfp
         | VxOp::Vpkuhum
-        | VxOp::Vmaxuh
         | VxOp::Vrlh
         | VxOp::Vcmpequh
         | VxOp::Vsubfp
         | VxOp::Vpkuwum
-        | VxOp::Vmaxuw
         | VxOp::Vrlw
         | VxOp::Vpkuhus
         | VxOp::Vcmpeqfp
         | VxOp::Vpkuwus
-        | VxOp::Vmaxsb
         | VxOp::Vslb
         | VxOp::Vmulosb
         | VxOp::Vrefp
         | VxOp::Vpkshus
-        | VxOp::Vmaxsh
         | VxOp::Vslh
         | VxOp::Vmulosh
         | VxOp::Vrsqrtefp
         | VxOp::Vpkswus
-        | VxOp::Vmaxsw
         | VxOp::Vexptefp
         | VxOp::Vpkshss
         | VxOp::Vsl
@@ -163,21 +199,18 @@ pub(crate) fn execute_vx(
         | VxOp::Vlogefp
         | VxOp::Vpkswss
         | VxOp::Vaddubs
-        | VxOp::Vminub
         | VxOp::Vsrb
         | VxOp::Vcmpgtub
         | VxOp::Vmuleub
         | VxOp::Vrfin
         | VxOp::Vupkhsb
         | VxOp::Vadduhs
-        | VxOp::Vminuh
         | VxOp::Vsrh
         | VxOp::Vcmpgtuh
         | VxOp::Vmuleuh
         | VxOp::Vrfiz
         | VxOp::Vupkhsh
         | VxOp::Vadduws
-        | VxOp::Vminuw
         | VxOp::Vcmpgtuw
         | VxOp::Vrfip
         | VxOp::Vupklsb
@@ -186,32 +219,23 @@ pub(crate) fn execute_vx(
         | VxOp::Vrfim
         | VxOp::Vupklsh
         | VxOp::Vaddsbs
-        | VxOp::Vminsb
         | VxOp::Vcmpgtsb
         | VxOp::Vmulesb
         | VxOp::Vpkpx
         | VxOp::Vaddshs
-        | VxOp::Vminsh
         | VxOp::Vcmpgtsh
         | VxOp::Vmulesh
         | VxOp::Vupkhpx
         | VxOp::Vaddsws
-        | VxOp::Vminsw
         | VxOp::Vcmpgtsw
         | VxOp::Vctuxs
         | VxOp::Vcmpbfp
         | VxOp::Vctsxs
         | VxOp::Vupklpx
-        | VxOp::Vavgub
         | VxOp::Vmaxfp
         | VxOp::Vslo
-        | VxOp::Vavguh
         | VxOp::Vminfp
         | VxOp::Vsro
-        | VxOp::Vavguw
-        | VxOp::Vavgsb
-        | VxOp::Vavgsh
-        | VxOp::Vavgsw
         | VxOp::Vsum4ubs
         | VxOp::Vsubuhs
         | VxOp::Vsum4shs

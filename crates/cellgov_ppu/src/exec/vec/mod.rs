@@ -7,6 +7,7 @@ mod execute;
 mod integer;
 mod lanes;
 mod merge;
+mod minmax;
 mod permute;
 mod shift;
 mod splat;
@@ -46,3 +47,7 @@ mod unimplemented_tests;
 #[cfg(test)]
 #[path = "tests/sub_carry_tests.rs"]
 mod sub_carry_tests;
+
+#[cfg(test)]
+#[path = "tests/minmax_tests.rs"]
+mod minmax_tests;
