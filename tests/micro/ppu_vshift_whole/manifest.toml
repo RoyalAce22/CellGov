@@ -1,0 +1,20 @@
+[test]
+name = "ppu_vshift_whole"
+
+# A hardware probe of the whole-register shifts vslo, vsro, vsl and vsr.
+# vslo and vsro run at octet counts 0, 5, 8 and 15, with the vB bits
+# outside 121:124 set in two cases; vsl and vsr at uniform bit counts
+# 1, 4 and 7, with the high bits of each count byte set in two cases.
+# Two cases chain vslo into vsl and vsro into vsr with one count
+# register, and two give vsl and vsr one byte whose count differs.
+# cases.tsv names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (11 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 1424 },
+]
+
+[expect]
+outcome = "completed"

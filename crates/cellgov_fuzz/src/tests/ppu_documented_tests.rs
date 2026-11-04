@@ -109,7 +109,7 @@ fn the_replay_against_the_documents_finds_only_the_known_gaps() {
 }
 
 /// Vectors CellGov does not run, by id prefix, and why.
-const KNOWN_STOPPED: &[(&str, &str)] = &[("vshift-nonuniform/", "vsl and vsr are not implemented")];
+const KNOWN_STOPPED: &[(&str, &str)] = &[];
 
 /// Documented components CellGov does not reproduce, as a vector id
 /// prefix and a component name, and why.

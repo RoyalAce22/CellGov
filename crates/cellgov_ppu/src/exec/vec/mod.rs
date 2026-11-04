@@ -87,3 +87,7 @@ mod sum_across_tests;
 #[cfg(test)]
 #[path = "tests/pack_tests.rs"]
 mod pack_tests;
+
+#[cfg(test)]
+#[path = "tests/whole_shift_tests.rs"]
+mod whole_shift_tests;

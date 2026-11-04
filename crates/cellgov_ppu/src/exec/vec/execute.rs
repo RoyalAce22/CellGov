@@ -18,7 +18,9 @@ use super::multiply_add::{
 };
 use super::pack::{vpkpx, vpkshss, vpkshus, vpkswss, vpkswus, vpkuhum, vpkuhus, vpkuwum, vpkuwus};
 use super::permute::{vperm, vsel, vsldoi};
-use super::shift::{vrlb, vrlh, vrlw, vslb, vslh, vslw, vsrab, vsrah, vsraw, vsrb, vsrh, vsrw};
+use super::shift::{
+    vrlb, vrlh, vrlw, vsl, vslb, vslh, vslo, vslw, vsr, vsrab, vsrah, vsraw, vsrb, vsrh, vsro, vsrw,
+};
 use super::splat::{vspltb, vsplth, vspltisb, vspltish, vspltisw, vspltw};
 use super::sum_across::{vsum2sws, vsum4sbs, vsum4shs, vsum4ubs, vsumsws};
 use super::unpack::{vupkhpx, vupkhsb, vupkhsh, vupklpx, vupklsb, vupklsh};
@@ -288,6 +290,18 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-174 s:6.2] vupklpx: the same for each low-half pixel.
         VxOp::Vupklpx => (vupklpx(b), false),
 
+        // -- Whole-register shifts --
+        // [AltiVec-PEM p:6-138 s:6.2] vslo: vA shifted left by vB bits 121:124 octets, zero fill.
+        VxOp::Vslo => (vslo(a, b), false),
+        // [AltiVec-PEM p:6-153 s:6.2] vsro: vA shifted right by vB bits 121:124 octets, zero fill.
+        VxOp::Vsro => (vsro(a, b), false),
+        // [AltiVec-PEM p:6-134 s:6.2] vsl: vA shifted left by vB bits 125:127 when the low three bits of every vB byte agree; vD is undefined otherwise.
+        // The ppu_reference_vectors capture settles the undefined case: each byte shifts by the count in its own vB byte.
+        VxOp::Vsl => (vsl(a, b), false),
+        // [AltiVec-PEM p:6-146 s:6.2] vsr: vA shifted right by vB bits 125:127 when the low three bits of every vB byte agree; vD is undefined otherwise.
+        // The ppu_reference_vectors capture settles the undefined case as for vsl.
+        VxOp::Vsr => (vsr(a, b), false),
+
         // -- Int <-> Float conversions (va field is uimm scale) --
         // [AltiVec-PEM p:6-49 s:6.2] vcfsx
         VxOp::Vcfsx => (vcfsx(b, va), false),
@@ -300,22 +314,18 @@ pub(crate) fn execute_vx(
         | VxOp::Vrefp
         | VxOp::Vrsqrtefp
         | VxOp::Vexptefp
-        | VxOp::Vsl
         | VxOp::Vcmpgefp
         | VxOp::Vlogefp
         | VxOp::Vrfin
         | VxOp::Vrfiz
         | VxOp::Vrfip
-        | VxOp::Vsr
         | VxOp::Vcmpgtfp
         | VxOp::Vrfim
         | VxOp::Vctuxs
         | VxOp::Vcmpbfp
         | VxOp::Vctsxs
         | VxOp::Vmaxfp
-        | VxOp::Vslo
-        | VxOp::Vminfp
-        | VxOp::Vsro => {
+        | VxOp::Vminfp => {
             return ExecuteVerdict::Fault(unimplemented);
         }
     };
