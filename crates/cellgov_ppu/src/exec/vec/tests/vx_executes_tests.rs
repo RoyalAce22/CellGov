@@ -33,10 +33,10 @@ fn every_vx_op_continues_exactly_when_vx_executes_says_so() {
             continuing += usize::from(continues);
         }
     }
-    // Each op without Rc but the ten whose leaves are open, and each
-    // compare with it.
+    // Every implemented op continues without Rc, and each compare also
+    // continues with Rc.
     let compares = VxOp::iter().filter(|op| op.is_vxr_compare()).count();
-    assert_eq!(continuing, VxOp::iter().count() - 10 + compares);
+    assert_eq!(continuing, VxOp::iter().count() - 6 + compares);
 }
 
 #[test]

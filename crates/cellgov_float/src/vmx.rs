@@ -141,6 +141,53 @@ pub fn vmx_nmsub(mode: VmxMode, a: u32, b: u32, c: u32) -> u32 {
     })
 }
 
+/// Rounds the binary32 word `b` to an integer value by `rounding` in `mode`.
+///
+/// An integer, an infinity or a zero keeps its value and sign. A NaN
+/// gives its quiet copy.
+///
+/// [AltiVec-PEM p:3-10 s:3.2] the round-to-integer instructions use their own rounding modes.
+/// [AltiVec-PEM p:3-11 s:3.2.1] non-Java mode reads a denormal operand as a zero of its sign.
+pub fn vmx_round_integer(mode: VmxMode, rounding: Rounding, b: u32) -> u32 {
+    if let Some(nan) = vmx_nan(&[b]) {
+        return nan;
+    }
+    let x = match vmx_unpack(mode, b) {
+        Operand::Finite(x) if x.exponent() < 0 => x,
+        Operand::Zero { negative } => return u32::from(negative) << 31,
+        _ => return b,
+    };
+    let shift = x.exponent().unsigned_abs();
+    // A shift past the significand's width puts every bit below the binary
+    // point and the whole fraction below one half.
+    let width = u128::BITS - x.significand().leading_zeros();
+    let (whole, fraction, half) = if shift > width {
+        (0, x.significand(), u128::MAX)
+    } else {
+        let mask = (1u128 << shift) - 1;
+        (
+            x.significand() >> shift,
+            x.significand() & mask,
+            1u128 << (shift - 1),
+        )
+    };
+    let up = match rounding {
+        Rounding::NearestEven => fraction > half || (fraction == half && whole & 1 == 1),
+        Rounding::TowardZero => false,
+        Rounding::TowardPositive => fraction != 0 && !x.negative(),
+        Rounding::TowardNegative => fraction != 0 && x.negative(),
+    };
+    let magnitude = whole + u128::from(up);
+    if magnitude == 0 {
+        return u32::from(x.negative()) << 31;
+    }
+    vmx_round(
+        mode,
+        Rounding::NearestEven,
+        Exact::from_parts(x.negative(), magnitude, 0, false),
+    )
+}
+
 /// An operand or product other than a NaN.
 #[derive(Clone, Copy)]
 enum Term {

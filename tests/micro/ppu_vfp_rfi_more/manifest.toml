@@ -1,0 +1,19 @@
+[test]
+name = "ppu_vfp_rfi_more"
+
+# A hardware probe of vrfin, vrfiz, vrfip and vrfim on the inputs
+# ppu_vfp_rfi left out: a quiet NaN of each sign, a negative SNaN, the
+# largest quiet NaN, both zeros and the integers +1 and -1. Each case sets
+# VSCR with mtvscr, runs the op, then reads VSCR back with mfvscr, so it
+# also shows whether the op changes SAT. Each case runs under NJ = 0 and
+# NJ = 1. cases.tsv names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (16 cases). Each run records v3 (the result) and v4 (VSCR).
+memory_regions = [
+  { name = "result", addr = 0, size = 2064 },
+]
+
+[expect]
+outcome = "completed"

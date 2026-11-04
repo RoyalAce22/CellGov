@@ -43,8 +43,8 @@ pub use operand::{
 };
 pub use round::{round_pack, Exact, Flags, Packed, Policy, Rounding};
 pub use vmx::{
-    vmx_add, vmx_compare, vmx_flush, vmx_madd, vmx_nan, vmx_nmsub, vmx_round, vmx_sub, vmx_unpack,
-    VmxMode, VMX_DEFAULT_NAN,
+    vmx_add, vmx_compare, vmx_flush, vmx_madd, vmx_nan, vmx_nmsub, vmx_round, vmx_round_integer,
+    vmx_sub, vmx_unpack, VmxMode, VMX_DEFAULT_NAN,
 };
 
 #[cfg(test)]
@@ -74,3 +74,7 @@ mod vmx_add_tests;
 #[cfg(test)]
 #[path = "tests/vmx_madd_tests.rs"]
 mod vmx_madd_tests;
+
+#[cfg(test)]
+#[path = "tests/vmx_round_integer_tests.rs"]
+mod vmx_round_integer_tests;

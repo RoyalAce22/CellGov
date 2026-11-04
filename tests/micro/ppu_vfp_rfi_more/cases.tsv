@@ -1,0 +1,17 @@
+id	asm	words	inputs	record	may_end_process
+vrfin_nans_nj0	vspltisw v5, 0; mtvscr v5; vrfin v3, v2; mfvscr v4	0x10a0038c,0x10002e44,0x1060120a,0x10800604	cr=0x0,xer=0x0,v2=0x7fc00001_ffc00042_ff812345_7fffffff	v3,v4	0
+vrfin_nans_nj1	vspltish v5, 1; mtvscr v5; vrfin v3, v2; mfvscr v4	0x10a1034c,0x10002e44,0x1060120a,0x10800604	cr=0x0,xer=0x0,v2=0x7fc00001_ffc00042_ff812345_7fffffff	v3,v4	0
+vrfiz_nans_nj0	vspltisw v5, 0; mtvscr v5; vrfiz v3, v2; mfvscr v4	0x10a0038c,0x10002e44,0x1060124a,0x10800604	cr=0x0,xer=0x0,v2=0x7fc00001_ffc00042_ff812345_7fffffff	v3,v4	0
+vrfiz_nans_nj1	vspltish v5, 1; mtvscr v5; vrfiz v3, v2; mfvscr v4	0x10a1034c,0x10002e44,0x1060124a,0x10800604	cr=0x0,xer=0x0,v2=0x7fc00001_ffc00042_ff812345_7fffffff	v3,v4	0
+vrfip_nans_nj0	vspltisw v5, 0; mtvscr v5; vrfip v3, v2; mfvscr v4	0x10a0038c,0x10002e44,0x1060128a,0x10800604	cr=0x0,xer=0x0,v2=0x7fc00001_ffc00042_ff812345_7fffffff	v3,v4	0
+vrfip_nans_nj1	vspltish v5, 1; mtvscr v5; vrfip v3, v2; mfvscr v4	0x10a1034c,0x10002e44,0x1060128a,0x10800604	cr=0x0,xer=0x0,v2=0x7fc00001_ffc00042_ff812345_7fffffff	v3,v4	0
+vrfim_nans_nj0	vspltisw v5, 0; mtvscr v5; vrfim v3, v2; mfvscr v4	0x10a0038c,0x10002e44,0x106012ca,0x10800604	cr=0x0,xer=0x0,v2=0x7fc00001_ffc00042_ff812345_7fffffff	v3,v4	0
+vrfim_nans_nj1	vspltish v5, 1; mtvscr v5; vrfim v3, v2; mfvscr v4	0x10a1034c,0x10002e44,0x106012ca,0x10800604	cr=0x0,xer=0x0,v2=0x7fc00001_ffc00042_ff812345_7fffffff	v3,v4	0
+vrfin_zeros_nj0	vspltisw v5, 0; mtvscr v5; vrfin v3, v2; mfvscr v4	0x10a0038c,0x10002e44,0x1060120a,0x10800604	cr=0x0,xer=0x0,v2=0x00000000_80000000_3f800000_bf800000	v3,v4	0
+vrfin_zeros_nj1	vspltish v5, 1; mtvscr v5; vrfin v3, v2; mfvscr v4	0x10a1034c,0x10002e44,0x1060120a,0x10800604	cr=0x0,xer=0x0,v2=0x00000000_80000000_3f800000_bf800000	v3,v4	0
+vrfiz_zeros_nj0	vspltisw v5, 0; mtvscr v5; vrfiz v3, v2; mfvscr v4	0x10a0038c,0x10002e44,0x1060124a,0x10800604	cr=0x0,xer=0x0,v2=0x00000000_80000000_3f800000_bf800000	v3,v4	0
+vrfiz_zeros_nj1	vspltish v5, 1; mtvscr v5; vrfiz v3, v2; mfvscr v4	0x10a1034c,0x10002e44,0x1060124a,0x10800604	cr=0x0,xer=0x0,v2=0x00000000_80000000_3f800000_bf800000	v3,v4	0
+vrfip_zeros_nj0	vspltisw v5, 0; mtvscr v5; vrfip v3, v2; mfvscr v4	0x10a0038c,0x10002e44,0x1060128a,0x10800604	cr=0x0,xer=0x0,v2=0x00000000_80000000_3f800000_bf800000	v3,v4	0
+vrfip_zeros_nj1	vspltish v5, 1; mtvscr v5; vrfip v3, v2; mfvscr v4	0x10a1034c,0x10002e44,0x1060128a,0x10800604	cr=0x0,xer=0x0,v2=0x00000000_80000000_3f800000_bf800000	v3,v4	0
+vrfim_zeros_nj0	vspltisw v5, 0; mtvscr v5; vrfim v3, v2; mfvscr v4	0x10a0038c,0x10002e44,0x106012ca,0x10800604	cr=0x0,xer=0x0,v2=0x00000000_80000000_3f800000_bf800000	v3,v4	0
+vrfim_zeros_nj1	vspltish v5, 1; mtvscr v5; vrfim v3, v2; mfvscr v4	0x10a1034c,0x10002e44,0x106012ca,0x10800604	cr=0x0,xer=0x0,v2=0x00000000_80000000_3f800000_bf800000	v3,v4	0

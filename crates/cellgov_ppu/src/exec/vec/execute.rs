@@ -1,7 +1,7 @@
 //! The VX-form and VA-form dispatchers and the `vsldoi` entry.
 
 use super::convert::{vcfsx, vcfux};
-use super::float_arith::{vaddfp, vmaddfp, vnmsubfp, vsubfp};
+use super::float_arith::{vaddfp, vmaddfp, vnmsubfp, vrfi, vsubfp};
 use super::float_compare::{vcmpbfp, vcmpeqfp, vcmpgefp, vcmpgtfp};
 use super::float_minmax::{vmaxfp, vminfp};
 use super::integer::{
@@ -31,7 +31,7 @@ use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::ops::{VaOp, VxOp};
 use crate::instruction::PpuInstructionKind;
 use crate::state::PpuState;
-use cellgov_float::VmxMode;
+use cellgov_float::{Rounding, VmxMode};
 use cellgov_ps3_abi::hw::ppu::VSCR_NJ;
 
 /// Execute a VX-form VMX instruction. `rc` is the VXR record bit; a
@@ -339,15 +339,21 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-156 s:6.2] vsubfp: vA - vB rounded to nearest, under the same NJ rule.
         VxOp::Vsubfp => (vsubfp(mode, a, b), false),
 
+        // -- Single-precision round to integer (vD, vB) --
+        // [AltiVec-PEM p:6-126 s:6.2] vrfin: each vB slot rounded to the nearest integer value; the result is independent of NJ.
+        VxOp::Vrfin => (vrfi(mode, Rounding::NearestEven, b), false),
+        // [AltiVec-PEM p:6-128 s:6.2] vrfiz: rounded toward zero; the result is independent of NJ.
+        VxOp::Vrfiz => (vrfi(mode, Rounding::TowardZero, b), false),
+        // [AltiVec-PEM p:6-127 s:6.2] vrfip: rounded toward plus infinity; NJ = 1 truncates a denormal operand to 0 first.
+        VxOp::Vrfip => (vrfi(mode, Rounding::TowardPositive, b), false),
+        // [AltiVec-PEM p:6-125 s:6.2] vrfim: rounded toward minus infinity; the page names no NJ rule, so the chapter 3 rule flushes a denormal operand under NJ = 1.
+        VxOp::Vrfim => (vrfi(mode, Rounding::TowardNegative, b), false),
+
         // `vx_executes` refuses these before the match.
         VxOp::Vrefp
         | VxOp::Vrsqrtefp
         | VxOp::Vexptefp
         | VxOp::Vlogefp
-        | VxOp::Vrfin
-        | VxOp::Vrfiz
-        | VxOp::Vrfip
-        | VxOp::Vrfim
         | VxOp::Vctuxs
         | VxOp::Vctsxs => {
             return ExecuteVerdict::Fault(unimplemented);
@@ -373,10 +379,6 @@ pub(crate) fn vx_executes(op: VxOp, rc: bool) -> bool {
             | VxOp::Vrsqrtefp
             | VxOp::Vexptefp
             | VxOp::Vlogefp
-            | VxOp::Vrfin
-            | VxOp::Vrfiz
-            | VxOp::Vrfip
-            | VxOp::Vrfim
             | VxOp::Vctuxs
             | VxOp::Vctsxs
     );
