@@ -42,6 +42,11 @@ impl PpuExecutionUnit {
     }
 
     /// Extend the run in flight, or start another.
+    ///
+    /// `pc` names a word the unit fetched from guest memory, so `pc + 4`
+    /// is at most the memory's length and cannot overflow here or in
+    /// [`Self::start_fetch_run`]. A pc that names no word faults in the
+    /// fetch, before any run records it.
     #[inline(always)]
     pub(super) fn note_fetch(&mut self, pc: u64) {
         // Every branch form writes a target with the low two bits

@@ -663,8 +663,8 @@ fn snapshot_captures_fpr_vr_xer_tb() {
 
 #[test]
 fn consumed_slot_records_per_step_hash_and_full_state() {
-    // Invariant: a Consumed placeholder counts as a retirement for
-    // both per-step trace and full-state-window.
+    // Invariant: a fused pair's second slot counts as a retirement for
+    // both the per-step trace and the full-state window.
     let mut mem = GuestMemory::new(256);
     let lwz: u32 = (32 << 26) | (3 << 21) | 128;
     let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;
@@ -687,7 +687,7 @@ fn consumed_slot_records_per_step_hash_and_full_state() {
 
     let full = unit.drain_retired_state_full();
     assert_eq!(full.len(), 2);
-    // (step, pc) pairs: the Consumed placeholder retires as step 1.
+    // (step, pc) pairs: the second slot retires as step 1.
     assert_eq!((full[0].0, full[0].1), (0, 0));
     assert_eq!((full[1].0, full[1].1), (1, 4));
 }
@@ -1872,7 +1872,7 @@ fn fetch_loop_advances_past_consumed_after_super_pair() {
 }
 
 #[test]
-fn fetch_loop_super_pair_taken_branch_uses_target_not_consumed_skip() {
+fn a_fused_pair_whose_branch_is_taken_lands_on_the_target() {
     // CmpwiBc super-pair with branch taken: PC must land at the
     // branch target (super_pc + 4 + 20 = 24).
     let mut mem = GuestMemory::new(256);
@@ -1889,9 +1889,14 @@ fn fetch_loop_super_pair_taken_branch_uses_target_not_consumed_skip() {
     unit.state_mut().set_gpr(3, 5);
 
     let ctx = ExecutionContext::new(&mem);
-    let result = unit.run_until_yield(Budget::new(1), &ctx, &mut Vec::new());
+    let result = unit.run_until_yield(Budget::new(2), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::BudgetExhausted);
     assert_eq!(unit.state().pc, 24);
+    assert_eq!(
+        unit.retired_instructions(),
+        2,
+        "the pair retires both slots"
+    );
 }
 
 #[test]

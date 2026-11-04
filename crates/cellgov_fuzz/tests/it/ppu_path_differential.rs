@@ -231,7 +231,7 @@ fn a_later_fault_restores_the_seeded_reservation_on_every_path() {
 }
 
 #[test]
-fn branch_entry_into_a_consumed_pair_is_a_visible_fused_path_divergence() {
+fn branch_entry_into_a_consumed_pair_runs_the_second_instruction() {
     let branch_to_third_word = (18 << 26) | 8;
     let mut state = PpuState::new();
     state.set_gpr(3, 9);
@@ -252,14 +252,7 @@ fn branch_entry_into_a_consumed_pair_is_a_visible_fused_path_divergence() {
         runs.iter()
             .map(|run| run.observation.memory[3])
             .collect::<Vec<_>>(),
-        [9, 9, 9, 0]
+        [9, 9, 9, 9]
     );
-    let divergence = first_path_divergence(&[runs[1].clone(), runs[3].clone()])
-        .expect("branch entry must distinguish the fused path");
-
-    assert_eq!(divergence.left, PpuExecutionPath::Forwarded);
-    assert_eq!(divergence.right, PpuExecutionPath::Fused);
-    assert!(divergence
-        .observation
-        .contains(&cellgov_ppu::observation::PpuObservationComponent::Memory));
+    assert!(first_path_divergence(&runs).is_none(), "{runs:#?}");
 }

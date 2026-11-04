@@ -3,7 +3,7 @@
     "kind": "first_rsx_write"
   },
   "outcome": "RsxWriteCheckpoint",
-  "steps": 37320,
+  "steps": 38242,
   "budget": 256,
   "host_invariant_breaks": 0,
   "witnesses": {
@@ -112,7 +112,7 @@
       "class": "at-least"
     },
     "stwcx": {
-      "value": 9819,
+      "value": 9820,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {

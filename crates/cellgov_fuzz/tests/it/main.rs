@@ -6,6 +6,7 @@ mod engine_tests;
 mod finite_sweep;
 mod library_shape;
 mod ppu_dependency_sequences;
+mod ppu_fused_branch_entry;
 mod ppu_layered_reference_integration;
 mod ppu_path_commit_refusal;
 mod ppu_path_differential;

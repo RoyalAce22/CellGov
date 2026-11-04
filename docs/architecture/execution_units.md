@@ -277,7 +277,9 @@ Frequent 2-instruction sequences fuse into single dispatch entries:
 - `cmpwi + bc` -> `CmpwiBc`
 - `cmpw + bc` -> `CmpwBc`
 
-The second slot is marked `Consumed` and the fetch loop skips it.
+The second slot is marked `Consumed`. The fused entry retires both
+slots; a branch that reaches the second slot runs the word stored
+there.
 Candidates come from adjacent-pair profiling data (> 1% frequency
 threshold).
 

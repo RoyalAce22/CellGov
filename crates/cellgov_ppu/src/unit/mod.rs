@@ -40,3 +40,15 @@ mod barrier_tests;
 #[cfg(test)]
 #[path = "tests/window_access_tests.rs"]
 mod window_access_tests;
+
+#[cfg(test)]
+#[path = "tests/fused_entry_tests.rs"]
+mod fused_entry_tests;
+
+#[cfg(test)]
+#[path = "tests/top_of_address_space_tests.rs"]
+mod top_of_address_space_tests;
+
+#[cfg(test)]
+#[path = "tests/fused_entry_console_tests.rs"]
+mod fused_entry_console_tests;

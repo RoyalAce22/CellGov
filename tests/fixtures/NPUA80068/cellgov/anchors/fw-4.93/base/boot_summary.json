@@ -108,11 +108,11 @@
       "class": "absent"
     },
     "stdcx": {
-      "value": 774,
+      "value": 773,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 776,
+      "value": 773,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {

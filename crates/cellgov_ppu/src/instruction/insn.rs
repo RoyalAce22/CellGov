@@ -1535,7 +1535,8 @@ pub enum PpuInstruction {
         target_offset: i16,
     },
     /// Placeholder for a slot absorbed by a preceding superinstruction.
-    /// The fetch loop advances PC past this without executing.
+    /// The superinstruction retires this slot itself; a branch that
+    /// reaches the slot runs the word stored there.
     Consumed,
 
     // -- Cache block management --
@@ -1597,8 +1598,8 @@ impl PpuInstruction {
     /// at compile time. Producer side lives in
     /// `crate::shadow::superpair`; the fused variants emitted there
     /// must match the variants returning `true` here. A divergence
-    /// causes silent re-execution of the second half of the pair
-    /// (see `lib.rs:run_until_yield` `Consumed`-retirement guard).
+    /// causes silent re-execution of the second half of the pair: the
+    /// fetch loop runs the word stored at the `Consumed` slot as well.
     pub fn is_super_pair(&self) -> bool {
         match self {
             PpuInstruction::LwzCmpwi { .. }

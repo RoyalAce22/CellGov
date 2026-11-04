@@ -119,11 +119,7 @@ fn invalidate_just_consumed_widens_to_super_pair_head() {
 
 #[test]
 fn invalidate_just_super_pair_head_widens_to_consumed() {
-    // Symmetric case: invalidate only the head (slot 0) and verify
-    // the Consumed at slot 4 also goes stale. Otherwise the fetch
-    // loop would skip slot 4 forever (treating Consumed as the
-    // already-retired second half of a pair the head no longer
-    // represents).
+    // No fresh Consumed outlives the fused head it belongs to.
     let mut shadow = build_from_words(0, &[lwz_raw(3, 1, 8), cmpwi_raw(0, 3, 42)]);
     assert!(matches!(
         shadow.get(0),

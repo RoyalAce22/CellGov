@@ -102,16 +102,11 @@ impl PredecodedShadow {
 
     /// Mark every slot overlapping `[addr, addr + len)` as stale.
     ///
-    /// Super-pair partners are widened in: invalidating just the
-    /// `Consumed` half of a fused pair would leave the head's fused
-    /// operation still firing for an instruction that may have been
-    /// rewritten; invalidating just the head would leave an orphan
-    /// `Consumed` that the fetch loop skips without executing what
-    /// was actually written there. Both halves are staled as a unit
-    /// so the runtime falls back to raw fetch + decode for either
-    /// side until the caller refreshes them. Pair with
-    /// [`refresh`](Self::refresh) to repopulate once new bytes are
-    /// committed.
+    /// The range widens to both halves of each fused pair it touches.
+    /// A stale `Consumed` half beside a fresh head lets the head's fused
+    /// operation run for a rewritten second instruction. The runtime uses
+    /// a raw fetch and decode for both halves until the caller calls
+    /// [`refresh`](Self::refresh) on the new bytes.
     pub fn invalidate_range(&mut self, addr: u64, len: u64) {
         if len == 0 {
             return;

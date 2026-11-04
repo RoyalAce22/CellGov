@@ -1,0 +1,16 @@
+[test]
+name = "ppu_fused_pair_entry"
+
+# A hardware probe: a branch to the second of two adjacent instructions
+# runs the instruction at the target, for each pair an interpreter may
+# fuse into one operation. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, as ppu/main.c lists: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"

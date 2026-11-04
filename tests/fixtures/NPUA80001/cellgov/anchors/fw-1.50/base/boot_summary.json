@@ -3,7 +3,7 @@
     "kind": "process_exit"
   },
   "outcome": "ProcessExit",
-  "steps": 6768,
+  "steps": 6820,
   "budget": 256,
   "host_invariant_breaks": 0,
   "witnesses": {
@@ -12,7 +12,7 @@
       "class": "absent"
     },
     "dcbz": {
-      "value": 28,
+      "value": 29,
       "class": "at-least"
     },
     "event_port_ipc_connect_attempts": {
@@ -112,7 +112,7 @@
       "class": "at-least"
     },
     "stwcx": {
-      "value": 1538,
+      "value": 1537,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {

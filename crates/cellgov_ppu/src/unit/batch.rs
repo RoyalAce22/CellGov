@@ -56,16 +56,13 @@ impl PpuExecutionUnit {
     /// Retires the ops of the instruction at `pc` in the issue model.
     /// `next_pc` is the address the unit runs next.
     ///
-    /// A fused pair's second op is the instruction at `pc + 4`. That op
-    /// falls through to `pc + 8` when the pair leaves the unit at its
-    /// placeholder slot.
+    /// A fused pair's second op is the instruction at `pc + 4`.
     fn retire_timing(&mut self, pc: u64, ops: &[crate::timing::Op], next_pc: u64) {
         match ops {
             [op] => self.timing.retire(pc, op, next_pc),
             [first, second] => {
                 self.timing.retire(pc, first, pc + 4);
-                let after = if next_pc == pc + 4 { pc + 8 } else { next_pc };
-                self.timing.retire(pc + 4, second, after);
+                self.timing.retire(pc + 4, second, next_pc);
             }
             _ => {}
         }
@@ -126,27 +123,29 @@ impl PpuExecutionUnit {
             }
 
             self.note_fetch(step_pc);
-            let insn = match self.fetch_decode(step_pc, mem) {
+            let mut insn = match self.fetch_decode(step_pc, mem) {
                 Ok(insn) => insn,
                 Err(code) => return self.fault_at(&entry, effects, step_pc, code),
             };
 
-            // `Consumed` is the second slot of a fused super-pair; it
-            // must retire so retirement_counter and consumed_cost stay
-            // aligned.
-            if matches!(insn, instruction::PpuInstruction::Consumed) {
-                self.state.pc += 4;
-                if ctx.trace_per_step() {
-                    self.per_step_hashes
-                        .push((step_pc, self.state.state_hash()));
-                }
-                self.record_retirement(step_pc);
-                remaining = remaining.saturating_sub(1);
-                if remaining == 0 {
-                    return self.budget_yield(&entry, effects, step_pc);
-                }
-                continue;
+            // A fused head retires both of its slots. The loop reaches a
+            // `Consumed` slot only by a branch to it or after a split head.
+            // The instruction stored there then runs [PPC-Book1 p:17 s:2.2].
+            // A head splits and runs as its first instruction alone when:
+            // - the budget cannot retire both slots, or
+            // - a break is set on the second slot.
+            let split = match insn {
+                instruction::PpuInstruction::Consumed => true,
+                _ if insn.is_super_pair() => remaining < 2 || self.break_pc == Some(step_pc + 4),
+                _ => false,
+            };
+            if split {
+                insn = match decode_stored(step_pc, mem) {
+                    Ok((_, insn)) => insn,
+                    Err(code) => return self.fault_at(&entry, effects, step_pc, code),
+                };
             }
+            let pair = insn.is_super_pair();
 
             tap.dispatch(self.id, &insn, &self.state);
             let (ops, n_ops) = crate::timing::classify(&insn, &self.state);
@@ -162,23 +161,7 @@ impl PpuExecutionUnit {
                 &mut self.store_buf,
             ) {
                 ExecuteVerdict::Continue => {
-                    self.state.pc += 4;
-                    // Super-pair without `Consumed` at PC+4 would
-                    // re-execute its second half.
-                    assert!(
-                        !insn.is_super_pair()
-                            || self
-                                .instruction_shadow
-                                .as_ref()
-                                .and_then(|s| s.get(self.state.pc))
-                                .is_none_or(|next| matches!(
-                                    next,
-                                    instruction::PpuInstruction::Consumed
-                                )),
-                        "super-pair {} at 0x{step_pc:x} not followed by Consumed at 0x{:x}",
-                        <&'static str>::from(&insn),
-                        self.state.pc,
-                    );
+                    self.state.pc += if pair { 8 } else { 4 };
                 }
                 ExecuteVerdict::Branch => {}
                 ExecuteVerdict::Syscall { lev } => {
@@ -230,8 +213,17 @@ impl PpuExecutionUnit {
                 }
             }
             self.record_retirement(step_pc);
+            let mut last_pc = step_pc;
+            if pair {
+                last_pc = step_pc + 4;
+                if ctx.trace_per_step() {
+                    self.per_step_hashes
+                        .push((last_pc, self.state.state_hash()));
+                }
+                self.record_retirement(last_pc);
+            }
 
-            remaining = remaining.saturating_sub(1);
+            remaining = remaining.saturating_sub(if pair { 2 } else { 1 });
             let reached_window = window_span.is_some_and(|span| {
                 touches_window(
                     span,
@@ -240,7 +232,7 @@ impl PpuExecutionUnit {
                 )
             });
             if remaining == 0 || reached_window {
-                return self.budget_yield(&entry, effects, step_pc);
+                return self.budget_yield(&entry, effects, last_pc);
             }
         }
     }
@@ -297,12 +289,7 @@ impl PpuExecutionUnit {
             return Ok(cached);
         }
         self.shadow_misses += 1;
-        let pc = step_pc as usize;
-        if pc + 4 > mem.len() {
-            return Err(FAULT_PC_OUT_OF_RANGE);
-        }
-        let raw = u32::from_be_bytes([mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3]]);
-        let insn = decode::decode(raw).map_err(|_| FAULT_DECODE_ERROR)?;
+        let (raw, insn) = decode_stored(step_pc, mem)?;
         if let Some(s) = self.instruction_shadow.as_mut() {
             let _ = s.refresh(step_pc, raw);
         }
@@ -456,6 +443,19 @@ impl PpuExecutionUnit {
         }
         result
     }
+}
+
+/// The word stored at `pc` and its decode, without the shadow. `Err` is
+/// the fault code.
+#[inline]
+fn decode_stored(pc: u64, mem: &[u8]) -> Result<(u32, instruction::PpuInstruction), u32> {
+    let bytes = usize::try_from(pc)
+        .ok()
+        .and_then(|pc| mem.get(pc..pc.checked_add(4)?))
+        .ok_or(FAULT_PC_OUT_OF_RANGE)?;
+    let raw = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    let insn = decode::decode(raw).map_err(|_| FAULT_DECODE_ERROR)?;
+    Ok((raw, insn))
 }
 
 /// The batch's region views, on the stack while they fit.

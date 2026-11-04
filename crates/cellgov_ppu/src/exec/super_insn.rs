@@ -232,7 +232,10 @@ pub(crate) fn execute(
             take_bc(state, bo, bi, target_offset)
         }
         PpuInstruction::Consumed => {
-            unreachable!("Consumed slots should be skipped by the fetch loop")
+            // The fetch loop runs the stored word at a Consumed slot, so
+            // the placeholder reaches no execution arm.
+            debug_assert!(false, "a Consumed placeholder reached execute");
+            ExecuteVerdict::Fault(crate::exec::PpuFault::InvalidForm(".consumed"))
         }
 
         _ => unreachable!("super_insn::execute called with non-super variant"),
@@ -261,3 +264,7 @@ fn take_bc(state: &mut PpuState, bo: u8, bi: u8, target_offset: i16) -> ExecuteV
 #[cfg(test)]
 #[path = "tests/super_insn_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/consumed_tests.rs"]
+mod consumed_tests;
