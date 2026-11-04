@@ -35,6 +35,7 @@ mod console_ppu_vcmp_int_record;
 mod console_ppu_vminmax_avg;
 mod console_ppu_vmul_add_sum;
 mod console_ppu_vmul_even_odd;
+mod console_ppu_vpack;
 mod console_ppu_vrotate_shift;
 mod console_ppu_vsub_carry;
 mod console_ppu_vsum_across;

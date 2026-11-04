@@ -16,6 +16,7 @@ use super::minmax::{
 use super::multiply_add::{
     vmhaddshs, vmhraddshs, vmladduhm, vmsummbm, vmsumshm, vmsumshs, vmsumubm, vmsumuhm, vmsumuhs,
 };
+use super::pack::{vpkpx, vpkshss, vpkshus, vpkswss, vpkswus, vpkuhum, vpkuhus, vpkuwum, vpkuwus};
 use super::permute::{vperm, vsel, vsldoi};
 use super::shift::{vrlb, vrlh, vrlw, vslb, vslh, vslw, vsrab, vsrah, vsraw, vsrb, vsrh, vsrw};
 use super::splat::{vspltb, vsplth, vspltisb, vspltish, vspltisw, vspltw};
@@ -241,6 +242,26 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-45 s:6.2] vavgsw: sign-extend to 33 bits, add with 1, keep the high 32 bits.
         VxOp::Vavgsw => (vavgsw(a, b), false),
 
+        // -- Pack (vA then vB, narrowed; the saturating forms set SAT when an element clamps) --
+        // [AltiVec-PEM p:6-119 s:6.2] vpkuhum: the low-order byte of each half word.
+        VxOp::Vpkuhum => vpkuhum(a, b),
+        // [AltiVec-PEM p:6-121 s:6.2] vpkuwum: the low-order half word of each word.
+        VxOp::Vpkuwum => vpkuwum(a, b),
+        // [AltiVec-PEM p:6-120 s:6.2] vpkuhus: each unsigned half word saturated to 2^8 - 1.
+        VxOp::Vpkuhus => vpkuhus(a, b),
+        // [AltiVec-PEM p:6-122 s:6.2] vpkuwus: each unsigned word saturated to 2^16 - 1.
+        VxOp::Vpkuwus => vpkuwus(a, b),
+        // [AltiVec-PEM p:6-116 s:6.2] vpkshus: each signed half word saturated to [0, 2^8 - 1]; the prose converts the whole half word, where the pseudocode names only its high byte.
+        VxOp::Vpkshus => vpkshus(a, b),
+        // [AltiVec-PEM p:6-118 s:6.2] vpkswus: each signed word saturated to [0, 2^16 - 1].
+        VxOp::Vpkswus => vpkswus(a, b),
+        // [AltiVec-PEM p:6-115 s:6.2] vpkshss: each signed half word saturated to [-2^7, 2^7 - 1].
+        VxOp::Vpkshss => vpkshss(a, b),
+        // [AltiVec-PEM p:6-117 s:6.2] vpkswss: each signed word saturated to [-2^15, 2^15 - 1].
+        VxOp::Vpkswss => vpkswss(a, b),
+        // [AltiVec-PEM p:6-113 s:6.2] vpkpx: each word packs to its bit 7, bits 8:12, bits 16:20 and bits 24:28, in order.
+        VxOp::Vpkpx => vpkpx(a, b),
+
         // -- Sum across (each sets SAT when a word clamps) --
         // [AltiVec-PEM p:6-166 s:6.2] vsumsws: vB word 3 plus the four vA words in 35 bits, saturated to a signed word in vD word 3; vD words 0..2 are cleared.
         VxOp::Vsumsws => vsumsws(a, b),
@@ -274,29 +295,20 @@ pub(crate) fn execute_vx(
         VxOp::Vcfux => (vcfux(b, va), false),
 
         VxOp::Vaddfp
-        | VxOp::Vpkuhum
         | VxOp::Vsubfp
-        | VxOp::Vpkuwum
-        | VxOp::Vpkuhus
         | VxOp::Vcmpeqfp
-        | VxOp::Vpkuwus
         | VxOp::Vrefp
-        | VxOp::Vpkshus
         | VxOp::Vrsqrtefp
-        | VxOp::Vpkswus
         | VxOp::Vexptefp
-        | VxOp::Vpkshss
         | VxOp::Vsl
         | VxOp::Vcmpgefp
         | VxOp::Vlogefp
-        | VxOp::Vpkswss
         | VxOp::Vrfin
         | VxOp::Vrfiz
         | VxOp::Vrfip
         | VxOp::Vsr
         | VxOp::Vcmpgtfp
         | VxOp::Vrfim
-        | VxOp::Vpkpx
         | VxOp::Vctuxs
         | VxOp::Vcmpbfp
         | VxOp::Vctsxs

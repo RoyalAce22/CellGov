@@ -1,0 +1,20 @@
+[test]
+name = "ppu_vpack"
+
+# A hardware probe of the nine vector pack instructions and the VSCR
+# each leaves. Each case sets VSCR with mtvscr (SAT clear, or set to
+# show an op leaves it alone), runs the op into v3 (preset to a
+# pattern, so a cleared element shows), then copies VSCR to v4 with
+# mfvscr. Per saturating op: a case where an element clamps and one
+# where none does; the signed forms clamp at each bound alone.
+# cases.tsv names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (21 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 2704 },
+]
+
+[expect]
+outcome = "completed"

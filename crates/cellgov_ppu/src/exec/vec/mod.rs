@@ -9,6 +9,7 @@ mod lanes;
 mod merge;
 mod minmax;
 mod multiply_add;
+mod pack;
 mod permute;
 mod shift;
 mod splat;
@@ -82,3 +83,7 @@ mod multiply_add_tests;
 #[cfg(test)]
 #[path = "tests/sum_across_tests.rs"]
 mod sum_across_tests;
+
+#[cfg(test)]
+#[path = "tests/pack_tests.rs"]
+mod pack_tests;
