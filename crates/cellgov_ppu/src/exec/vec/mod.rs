@@ -6,6 +6,7 @@ mod convert;
 mod execute;
 mod float_arith;
 mod float_compare;
+mod float_estimate;
 mod float_minmax;
 mod integer;
 mod lanes;
@@ -122,3 +123,7 @@ mod float_arith_console_tests;
 #[cfg(test)]
 #[path = "tests/convert_tests.rs"]
 mod convert_tests;
+
+#[cfg(test)]
+#[path = "tests/float_estimate_console_tests.rs"]
+mod float_estimate_console_tests;

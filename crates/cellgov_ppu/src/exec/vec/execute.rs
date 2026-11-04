@@ -3,6 +3,7 @@
 use super::convert::{vcfsx, vcfux, vctsxs, vctuxs};
 use super::float_arith::{vaddfp, vmaddfp, vnmsubfp, vrfi, vsubfp};
 use super::float_compare::{vcmpbfp, vcmpeqfp, vcmpgefp, vcmpgtfp};
+use super::float_estimate::{vexptefp, vlogefp, vrefp, vrsqrtefp};
 use super::float_minmax::{vmaxfp, vminfp};
 use super::integer::{
     vadd_bytes, vadd_halfs, vadd_sbytes_sat, vadd_shalfs_sat, vadd_swords_sat, vadd_ubytes_sat,
@@ -353,10 +354,15 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-125 s:6.2] vrfim: rounded toward minus infinity; the page names no NJ rule, so the chapter 3 rule flushes a denormal operand under NJ = 1.
         VxOp::Vrfim => (vrfi(mode, Rounding::TowardNegative, b), false),
 
-        // `vx_executes` refuses these before the match.
-        VxOp::Vrefp | VxOp::Vrsqrtefp | VxOp::Vexptefp | VxOp::Vlogefp => {
-            return ExecuteVerdict::Fault(unimplemented);
-        }
+        // -- Single-precision estimates (vD, vB): the PPE's tables, read back from the console --
+        // [AltiVec-PEM p:6-123 s:6.2] vrefp: an estimate of 1/x within 1/4096; the value may differ between implementations.
+        VxOp::Vrefp => (vrefp(mode, b), false),
+        // [AltiVec-PEM p:6-132 s:6.2] vrsqrtefp: an estimate of 1/sqrt(x) within 1/4096.
+        VxOp::Vrsqrtefp => (vrsqrtefp(mode, b), false),
+        // [AltiVec-PEM p:6-67 s:6.2] vexptefp: an estimate of 2^x within 1/16; an integral x whose result is not 0 or +inf gives the exact result.
+        VxOp::Vexptefp => (vexptefp(mode, b), false),
+        // [AltiVec-PEM p:6-69 s:6.2] vlogefp: an estimate of log2(x) within 2^-5.
+        VxOp::Vlogefp => (vlogefp(mode, b), false),
     };
 
     state.set_vr(vt as usize, result);
@@ -369,14 +375,11 @@ pub(crate) fn execute_vx(
     ExecuteVerdict::Continue
 }
 
-/// Whether `execute_vx` executes `op` with record bit `rc`. Every other
-/// pair faults as unimplemented, and only a VXR compare has a record form.
+/// Whether `execute_vx` executes `op` with record bit `rc`. Only a VXR
+/// compare has a record form; `execute_vx` faults any other recording op
+/// as unimplemented.
 pub(crate) fn vx_executes(op: VxOp, rc: bool) -> bool {
-    let unimplemented = matches!(
-        op,
-        VxOp::Vrefp | VxOp::Vrsqrtefp | VxOp::Vexptefp | VxOp::Vlogefp
-    );
-    !unimplemented && (!rc || op.is_vxr_compare())
+    !rc || op.is_vxr_compare()
 }
 
 /// CR6 of a recording vector compare, from its result vector.

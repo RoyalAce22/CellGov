@@ -33,18 +33,25 @@ fn every_vx_op_continues_exactly_when_vx_executes_says_so() {
             continuing += usize::from(continues);
         }
     }
-    // Every op but the four estimates continues without Rc, and each
-    // compare also continues with Rc.
+    // Every op continues without Rc, and each compare also continues
+    // with Rc.
     let compares = VxOp::iter().filter(|op| op.is_vxr_compare()).count();
-    assert_eq!(continuing, VxOp::iter().count() - 4 + compares);
+    assert_eq!(continuing, VxOp::iter().count() + compares);
 }
 
 #[test]
-fn vaddfp_and_vsubfp_execute_without_a_record_form() {
+fn vaddfp_and_vsubfp_execute_without_a_record_form_and_vcmpeqfp_with_one() {
     for op in [VxOp::Vaddfp, VxOp::Vsubfp] {
         assert!(vx_executes(op, false), "{op:?}");
         assert!(!vx_executes(op, true), "{op:?}");
     }
     assert!(vx_executes(VxOp::Vcmpeqfp, true));
-    assert!(!vx_executes(VxOp::Vrefp, false));
+}
+
+#[test]
+fn the_four_estimates_execute_without_a_record_form() {
+    for op in [VxOp::Vrefp, VxOp::Vrsqrtefp, VxOp::Vexptefp, VxOp::Vlogefp] {
+        assert!(vx_executes(op, false), "{op:?}");
+        assert!(!vx_executes(op, true), "{op:?}");
+    }
 }

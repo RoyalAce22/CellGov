@@ -834,10 +834,6 @@ fn replay_counted(
     })
 }
 
-/// The `ppu_issue_table` loop whose body the interpreter refuses:
-/// `vrefp`.
-const TABLE_REFUSED_LOOP: usize = 15;
-
 #[test]
 fn the_issue_model_times_each_table_loop_within_the_console_s_spread() {
     let w = table_words();
@@ -846,27 +842,13 @@ fn the_issue_model_times_each_table_loop_within_the_console_s_spread() {
     };
     let mut rows = Vec::new();
     for r in &TABLE_REPLAYS {
-        let Some(cellgov) = replay(r, 0) else {
-            assert_eq!(
-                r.loop_index, TABLE_REFUSED_LOOP,
-                "table loop {} faults in the interpreter",
-                r.loop_index,
-            );
-            continue;
-        };
-        assert_ne!(
-            r.loop_index, TABLE_REFUSED_LOOP,
-            "the interpreter now executes vrefp, so table loop 15 joins the replayed rows",
-        );
+        let cellgov = replay(r, 0)
+            .unwrap_or_else(|| panic!("table loop {} faults in the interpreter", r.loop_index));
         let fastest = cycles(r.loop_index, 2 * r.loop_index);
         let spread = cycles(r.loop_index, 2 * r.loop_index + 1) - fastest;
         rows.push((r.loop_index, cellgov, fastest, spread));
     }
-    assert_eq!(
-        rows.len(),
-        20,
-        "every table loop but the refused one replays"
-    );
+    assert_eq!(rows.len(), 21, "every table loop replays");
     for &(k, cellgov, fastest, spread) in &rows {
         let within = (cellgov - fastest).abs() <= spread;
         match TABLE_RESIDUALS.iter().find(|r| r.0 == k) {

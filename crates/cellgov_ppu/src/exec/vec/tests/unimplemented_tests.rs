@@ -1,5 +1,9 @@
-//! Each VX op that has no arm faults with its own mnemonic, and every VA
-//! op executes.
+//! The execute-or-fault verdict of each VX and VA op:
+//!
+//! - Every VX op executes with the record bit clear.
+//! - A VX op with no record form faults with its own mnemonic when the
+//!   record bit is set.
+//! - Every VA op executes.
 
 use strum::IntoEnumIterator;
 
@@ -21,22 +25,33 @@ fn unimplemented(verdict: ExecuteVerdict) -> Option<(PpuInstructionKind, &'stati
 }
 
 #[test]
-fn an_unimplemented_vx_op_names_itself() {
-    let mut faulted = 0;
+fn every_vx_op_executes_and_each_unrecorded_record_form_names_itself() {
+    let mut named = 0;
     for op in VxOp::iter() {
-        let insn = PpuInstruction::Vx {
-            op,
-            rc: false,
-            vt: 3,
-            va: 1,
-            vb: 2,
+        let run = |rc| {
+            let insn = PpuInstruction::Vx {
+                op,
+                rc,
+                vt: 3,
+                va: 1,
+                vb: 2,
+            };
+            exec_no_mem(&insn, &mut PpuState::new())
         };
-        if let Some(named) = unimplemented(exec_no_mem(&insn, &mut PpuState::new())) {
-            assert_eq!(named, (PpuInstructionKind::Vx, op.into()), "{op:?}");
-            faulted += 1;
+        assert_eq!(run(false), ExecuteVerdict::Continue, "{op:?}");
+        if op.is_vxr_compare() {
+            continue;
         }
+        assert_eq!(
+            unimplemented(run(true)),
+            Some((PpuInstructionKind::Vx, op.into())),
+            "{op:?}"
+        );
+        named += 1;
     }
-    assert!(faulted > 0);
+    let compares = VxOp::iter().filter(|op| op.is_vxr_compare()).count();
+    assert_eq!(named, VxOp::iter().count() - compares);
+    assert!(named > 0);
 }
 
 #[test]
