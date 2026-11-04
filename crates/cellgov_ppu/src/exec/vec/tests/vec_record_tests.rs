@@ -59,12 +59,13 @@ fn vcmpequw_dot_partial_match_clears_cr6() {
 }
 
 #[test]
-fn an_unimplemented_recording_compare_faults_without_writing_cr() {
+fn a_record_form_of_an_op_with_none_faults_without_writing_cr_or_vd() {
     let mut s = PpuState::new();
     s.set_cr(CR_SEED);
+    s.set_vr(3, 0x1234);
     let v = exec_no_mem(
         &PpuInstruction::Vx {
-            op: VxOp::Vcmpeqfp,
+            op: VxOp::Vaddubm,
             rc: true,
             vt: 3,
             va: 1,
@@ -76,10 +77,34 @@ fn an_unimplemented_recording_compare_faults_without_writing_cr() {
         v,
         ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction {
             kind: PpuInstructionKind::Vx,
-            mnemonic: "vcmpeqfp.",
+            mnemonic: "vaddubm",
         })
     );
-    assert_eq!(s.cr(), CR_SEED);
+    assert_eq!((s.cr(), s.vr[3]), (CR_SEED, 0x1234));
+}
+
+/// [AltiVec-PEM p:6-51 s:6.2] vcmpbfp. end to end: every slot in bounds
+/// sets only the within-bounds bit; one slot out clears it.
+#[test]
+fn vcmpbfp_record_executes_and_sets_only_the_within_bounds_bit() {
+    for (b, cr6) in [(0x4000_0000, 0b0010), (0x3F00_0000, 0)] {
+        let mut s = PpuState::new();
+        s.set_cr(CR_SEED);
+        s.set_vr(1, words([0x3F80_0000, 0xBF80_0000, 0, 0x3F00_0000]));
+        s.set_vr(2, words([b; 4]));
+        let v = exec_no_mem(
+            &PpuInstruction::Vx {
+                op: VxOp::Vcmpbfp,
+                rc: true,
+                vt: 3,
+                va: 1,
+                vb: 2,
+            },
+            &mut s,
+        );
+        assert_eq!(v, ExecuteVerdict::Continue);
+        assert_eq!(s.cr(), seed_with_cr6(cr6), "{b:#x}");
+    }
 }
 
 /// [AltiVec-PEM p:6-51 s:6.2] vcmpbfp.: CR6 = 0b00 || all_within_bounds || 0.

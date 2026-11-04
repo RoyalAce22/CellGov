@@ -1,0 +1,21 @@
+[test]
+name = "ppu_vfp_compare"
+
+# A hardware probe of vcmpeqfp, vcmpgefp, vcmpgtfp and vcmpbfp. Each
+# compare runs in its record form, with CR seeded, under NJ = 0 and
+# NJ = 1, over four operand sets: signed zeros and denormals against
+# zero, NaNs in either slot, the bounds edges (a negative, a -0 and an
+# infinite vB), and denormals beside the smallest normal. Each compare
+# also runs once with Rc = 0, and the record forms run on all-true and
+# all-false operands. Each case sets VSCR with mtvscr first. cases.tsv
+# names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (44 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 5648 },
+]
+
+[expect]
+outcome = "completed"

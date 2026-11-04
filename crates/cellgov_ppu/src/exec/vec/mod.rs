@@ -4,6 +4,7 @@
 
 mod convert;
 mod execute;
+mod float_compare;
 mod integer;
 mod lanes;
 mod merge;
@@ -95,3 +96,7 @@ mod whole_shift_tests;
 #[cfg(test)]
 #[path = "tests/shipped_ops_tests.rs"]
 mod shipped_ops_tests;
+
+#[cfg(test)]
+#[path = "tests/float_compare_tests.rs"]
+mod float_compare_tests;

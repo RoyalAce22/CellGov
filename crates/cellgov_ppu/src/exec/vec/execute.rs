@@ -1,6 +1,7 @@
 //! The VX-form and VA-form dispatchers and the `vsldoi` entry.
 
 use super::convert::{vcfsx, vcfux};
+use super::float_compare::{vcmpbfp, vcmpeqfp, vcmpgefp, vcmpgtfp};
 use super::integer::{
     vadd_bytes, vadd_halfs, vadd_sbytes_sat, vadd_shalfs_sat, vadd_swords_sat, vadd_ubytes_sat,
     vadd_uhalfs_sat, vadd_uwords_sat, vadd_words, vaddcuw, vcmpequb, vcmpequh, vcmpequw, vcmpgtsb,
@@ -28,6 +29,8 @@ use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::ops::{VaOp, VxOp};
 use crate::instruction::PpuInstructionKind;
 use crate::state::PpuState;
+use cellgov_float::VmxMode;
+use cellgov_ps3_abi::hw::ppu::VSCR_NJ;
 
 /// Execute a VX-form VMX instruction. `rc` is the VXR record bit; a
 /// recording compare also sets CR6 from its result. A saturating op
@@ -45,9 +48,10 @@ pub(crate) fn execute_vx(
 ) -> ExecuteVerdict {
     let a = state.vr[va as usize];
     let b = state.vr[vb as usize];
+    let mode = VmxMode::from_nj(state.vscr() & VSCR_NJ != 0);
     let unimplemented = PpuFault::UnimplementedInstruction {
         kind: PpuInstructionKind::Vx,
-        mnemonic: if rc { record_mnemonic(op) } else { op.into() },
+        mnemonic: op.into(),
     };
 
     // Only a VXR compare has a record form.
@@ -310,21 +314,28 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-50 s:6.2] vcfux
         VxOp::Vcfux => (vcfux(b, va), false),
 
+        // -- Single-precision compares (the engine orders the slots; NJ flushes denormals) --
+        // [AltiVec-PEM p:6-53 s:6.2] vcmpeqfp: all ones where vA = vB, 0 where not or where either is a NaN.
+        VxOp::Vcmpeqfp => (vcmpeqfp(mode, a, b), false),
+        // [AltiVec-PEM p:6-57 s:6.2] vcmpgefp: all ones where vA >= vB, 0 where not or where either is a NaN.
+        VxOp::Vcmpgefp => (vcmpgefp(mode, a, b), false),
+        // [AltiVec-PEM p:6-58 s:6.2] vcmpgtfp: all ones where vA > vB, 0 where not or where either is a NaN.
+        VxOp::Vcmpgtfp => (vcmpgtfp(mode, a, b), false),
+        // [AltiVec-PEM p:6-51 s:6.2] vcmpbfp: bit 0 clear when vA <= vB, bit 1 clear when vA >= -vB, the other bits 0.
+        // [AltiVec-PEM p:3-13 s:3.2.4.1] a NaN operand gives 0xC000_0000.
+        VxOp::Vcmpbfp => (vcmpbfp(mode, a, b), false),
+
         VxOp::Vaddfp
         | VxOp::Vsubfp
-        | VxOp::Vcmpeqfp
         | VxOp::Vrefp
         | VxOp::Vrsqrtefp
         | VxOp::Vexptefp
-        | VxOp::Vcmpgefp
         | VxOp::Vlogefp
         | VxOp::Vrfin
         | VxOp::Vrfiz
         | VxOp::Vrfip
-        | VxOp::Vcmpgtfp
         | VxOp::Vrfim
         | VxOp::Vctuxs
-        | VxOp::Vcmpbfp
         | VxOp::Vctsxs
         | VxOp::Vmaxfp
         | VxOp::Vminfp => {
@@ -340,27 +351,6 @@ pub(crate) fn execute_vx(
         state.set_cr_field(6, record_cr6(op, result));
     }
     ExecuteVerdict::Continue
-}
-
-/// The mnemonic of the record form of `op`, or of `op` itself when it has
-/// no record form.
-fn record_mnemonic(op: VxOp) -> &'static str {
-    match op {
-        VxOp::Vcmpequb => "vcmpequb.",
-        VxOp::Vcmpequh => "vcmpequh.",
-        VxOp::Vcmpequw => "vcmpequw.",
-        VxOp::Vcmpeqfp => "vcmpeqfp.",
-        VxOp::Vcmpgefp => "vcmpgefp.",
-        VxOp::Vcmpgtub => "vcmpgtub.",
-        VxOp::Vcmpgtuh => "vcmpgtuh.",
-        VxOp::Vcmpgtuw => "vcmpgtuw.",
-        VxOp::Vcmpgtfp => "vcmpgtfp.",
-        VxOp::Vcmpgtsb => "vcmpgtsb.",
-        VxOp::Vcmpgtsh => "vcmpgtsh.",
-        VxOp::Vcmpgtsw => "vcmpgtsw.",
-        VxOp::Vcmpbfp => "vcmpbfp.",
-        _ => op.into(),
-    }
 }
 
 /// CR6 of a recording vector compare, from its result vector.

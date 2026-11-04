@@ -7,6 +7,7 @@
 use crate::format::{Binary32, Format};
 use crate::operand::{unpack, Operand};
 use crate::round::{binade, round_pack, Exact, Policy, Rounding};
+use std::cmp::Ordering;
 
 /// The vector floating-point mode.
 ///
@@ -67,6 +68,28 @@ pub fn vmx_nan(operands: &[u32]) -> Option<u32> {
         .iter()
         .find(|&&x| x & 0x7F80_0000 == 0x7F80_0000 && x & 0x007F_FFFF != 0)
         .map(|&x| x | 0x0040_0000)
+}
+
+/// The order of the binary32 words `a` and `b` in `mode`, or `None`
+/// when either is a NaN. +0 and -0 are equal, and non-Java mode compares
+/// a denormal as a zero of its sign.
+///
+/// [AltiVec-PEM p:3-11 s:3.2.1] NaNs compare unordered with everything; non-Java mode flushes a denormalized operand before use.
+pub fn vmx_compare(mode: VmxMode, a: u32, b: u32) -> Option<Ordering> {
+    let key = |bits: u32| match vmx_unpack(mode, bits) {
+        Operand::NaN { .. } => None,
+        Operand::Zero { .. } => Some(0),
+        // A finite or infinite binary32 orders by its magnitude bits.
+        _ => {
+            let magnitude = i64::from(bits & 0x7FFF_FFFF);
+            Some(if bits >> 31 == 1 {
+                -magnitude
+            } else {
+                magnitude
+            })
+        }
+    };
+    Some(key(a)?.cmp(&key(b)?))
 }
 
 /// Rounds `exact` to binary32 in `mode`.

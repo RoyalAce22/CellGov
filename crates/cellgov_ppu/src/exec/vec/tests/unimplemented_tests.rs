@@ -39,9 +39,10 @@ fn an_unimplemented_vx_op_names_itself() {
 }
 
 #[test]
-fn an_unimplemented_recording_compare_names_its_record_form() {
-    let mut faulted = 0;
-    for op in VxOp::iter().filter(|op| op.is_vxr_compare()) {
+fn every_recording_compare_executes() {
+    let ops: Vec<VxOp> = VxOp::iter().filter(|op| op.is_vxr_compare()).collect();
+    assert_eq!(ops.len(), 13);
+    for op in ops {
         let insn = PpuInstruction::Vx {
             op,
             rc: true,
@@ -49,14 +50,12 @@ fn an_unimplemented_recording_compare_names_its_record_form() {
             va: 1,
             vb: 2,
         };
-        if let Some((kind, mnemonic)) = unimplemented(exec_no_mem(&insn, &mut PpuState::new())) {
-            let base: &'static str = op.into();
-            assert_eq!(kind, PpuInstructionKind::Vx, "{op:?}");
-            assert_eq!(mnemonic, format!("{base}."), "{op:?}");
-            faulted += 1;
-        }
+        assert_eq!(
+            exec_no_mem(&insn, &mut PpuState::new()),
+            ExecuteVerdict::Continue,
+            "{op:?}"
+        );
     }
-    assert!(faulted > 0);
 }
 
 #[test]

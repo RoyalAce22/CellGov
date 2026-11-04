@@ -32,6 +32,7 @@ mod console_ppu_quadword;
 mod console_ppu_trap_immediate;
 mod console_ppu_vadd_sub_sat;
 mod console_ppu_vcmp_int_record;
+mod console_ppu_vfp_compare;
 mod console_ppu_vminmax_avg;
 mod console_ppu_vmul_add_sum;
 mod console_ppu_vmul_even_odd;

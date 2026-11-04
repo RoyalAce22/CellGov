@@ -15,6 +15,7 @@ workspace = true
 cellgov_effects = { path = "../cellgov_effects" }
 cellgov_event = { path = "../cellgov_event" }
 cellgov_exec = { path = "../cellgov_exec" }
+cellgov_float = { path = "../cellgov_float" }
 cellgov_mem = { path = "../cellgov_mem" }
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 cellgov_sync = { path = "../cellgov_sync" }
