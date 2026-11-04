@@ -1,0 +1,56 @@
+{
+  "outcome": "Completed",
+  "memory_regions": [
+    {
+      "name": "result",
+      "addr": 0,
+      "data_hex": [
+        "43415345 00000009 00000000 00000000 80e0ff0f ff80ff01 ffa0ffc0 ffe0ffff",
+        "ffc0ffff 8180fffe 90a0ffb0 d0e0ffff 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 80e0ff0f ff80ff01 ffa0ffc0 ffe0ffff",
+        "ffc0ffff 8180fffe 90a0ffb0 d0e0ffff 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 80e0ff0f f8fcff00 90d0ecf8 fdffffff",
+        "ffc0ffff fffcffff c850f618 fe87ffe1 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 80e0ff0f f8fcff00 90d0ecf8 fdffffff",
+        "ffc0ffff fffcffff c850f618 fe87ffe1 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 b1b1b1b1 b1b1b1b1 b1b1b1b1 b1b1b1b1",
+        "bfbfbfbf bfbfbfbf bfbfbfbf bfbfbfbf 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 b1b1b1b1 b1b1b1b1 b1b1b1b1 b1b1b1b1",
+        "bfbfbfbf bfbfbfbf bfbfbfbf bfbfbfbf 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 b0b0b0b0 b0b0b0b0 b0b0b0b0 b0b0b0b0",
+        "b4b4b4b4 b4b4b4b4 b4b4b4b4 b4b4b4b4 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 b0b0b0b0 b0b0b0b0 b0b0b0b0 b0b0b0b0",
+        "b4b4b4b4 b4b4b4b4 b4b4b4b4 b4b4b4b4 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 b0b1b0b1 b0b1b0b1 b0b1b0b1 b0b1b0b1",
+        "bebfbebf bebfbebf bebfbebf bebfbebf 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 b0b1b0b1 b0b1b0b1 b0b1b0b1 b0b1b0b1",
+        "bebfbebf bebfbebf bebfbebf bebfbebf 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 b0b1b2b3 b0b1b2b3 b0b1b2b3 b0b1b2b3",
+        "bcbdbebf bcbdbebf bcbdbebf bcbdbebf 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 b0b1b2b3 b0b1b2b3 b0b1b2b3 b0b1b2b3",
+        "bcbdbebf bcbdbebf bcbdbebf bcbdbebf 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 b8b9babb b8b9babb b8b9babb b8b9babb",
+        "bcbdbebf bcbdbebf bcbdbebf bcbdbebf 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 b8b9babb b8b9babb b8b9babb b8b9babb",
+        "bcbdbebf bcbdbebf bcbdbebf bcbdbebf 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 f0f0f0f0 f0f0f0f0 f0f0f0f0 f0f0f0f0",
+        "ffffffff ffffffff ffffffff ffffffff 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 f0f0f0f0 f0f0f0f0 f0f0f0f0 f0f0f0f0",
+        "ffffffff ffffffff ffffffff ffffffff 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 a0bfbfbf bfbfbfbf bfb0b0b0 a1a3a5ab",
+        "00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 a0bfbfbf bfbfbfbf bfb0b0b0 a1a3a5ab",
+        "00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000"
+      ]
+    }
+  ],
+  "events": [],
+  "state_hashes": null,
+  "metadata": {
+    "runner": "ps3-cex",
+    "steps": null
+  },
+  "tty_log": [],
+  "runner_firmware": "4.93"
+}
