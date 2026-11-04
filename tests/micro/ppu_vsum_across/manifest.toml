@@ -1,0 +1,19 @@
+[test]
+name = "ppu_vsum_across"
+
+# A hardware probe of vsumsws, vsum2sws, vsum4sbs, vsum4shs and
+# vsum4ubs and the VSCR each leaves. Each case clears VSCR with
+# mtvscr, runs the op into v3 (preset to a pattern, so a cleared word
+# shows), then copies VSCR to v4 with mfvscr. Per op: a case that
+# clamps and one that does not; vsum2sws also clamps in each half
+# alone. cases.tsv names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (14 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 1808 },
+]
+
+[expect]
+outcome = "completed"

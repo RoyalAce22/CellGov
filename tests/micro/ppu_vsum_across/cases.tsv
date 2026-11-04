@@ -1,0 +1,15 @@
+id	asm	words	inputs	record	may_end_process
+vsumsws_fits	vspltisw v5, 0; mtvscr v5; vsumsws v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611788,0x10800604	cr=0x0,xer=0x0,v1=0x7fffffff_80000000_9e3779b9_00000001,v2=0xffffffff_ffffffff_ffffffff_00000005	v3,v4	0
+vsumsws_max	vspltisw v5, 0; mtvscr v5; vsumsws v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611788,0x10800604	cr=0x0,xer=0x0,v1=0x7fffffff_7fffffff_7fffffff_7fffffff,v2=0x12345678_9abcdef0_0fedcba9_00000000	v3,v4	0
+vsumsws_min	vspltisw v5, 0; mtvscr v5; vsumsws v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611788,0x10800604	cr=0x0,xer=0x0,v1=0x80000000_80000000_80000000_80000000,v2=0x00000000_00000000_00000000_ffffffff	v3,v4	0
+vsum2sws_clamps	vspltisw v5, 0; mtvscr v5; vsum2sws v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611688,0x10800604	cr=0x0,xer=0x0,v1=0x7fffffff_00000001_80000000_ffffffff,v2=0x12345678_00000000_9abcdef0_00000000	v3,v4	0
+vsum2sws_fits	vspltisw v5, 0; mtvscr v5; vsum2sws v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611688,0x10800604	cr=0x0,xer=0x0,v1=0x00000001_00000002_00000003_00000004,v2=0xffffffff_00000010_ffffffff_00000020	v3,v4	0
+vsum4sbs_clamps	vspltisw v5, 0; mtvscr v5; vsum4sbs v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611708,0x10800604	cr=0x0,xer=0x0,v1=0x7f7f7f7f_80808080_ff017f80_9e3779b9,v2=0x7fffffff_80000000_00000000_ffffffff	v3,v4	0
+vsum4sbs_fits	vspltisw v5, 0; mtvscr v5; vsum4sbs v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611708,0x10800604	cr=0x0,xer=0x0,v1=0x01020304_fffefdfc_7f80017f_00000000,v2=0x00000010_00000020_7ffffe80_80000000	v3,v4	0
+vsum4shs_clamps	vspltisw v5, 0; mtvscr v5; vsum4shs v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611648,0x10800604	cr=0x0,xer=0x0,v1=0x7fff7fff_80008000_ffff0001_9e3779b9,v2=0x7fffffff_80000000_00000005_00000000	v3,v4	0
+vsum4shs_fits	vspltisw v5, 0; mtvscr v5; vsum4shs v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611648,0x10800604	cr=0x0,xer=0x0,v1=0x00010002_fffefffd_7fff8000_00000000,v2=0x00000010_00000020_7fffffff_80000000	v3,v4	0
+vsum4ubs_clamps	vspltisw v5, 0; mtvscr v5; vsum4ubs v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611608,0x10800604	cr=0x0,xer=0x0,v1=0x01000000_ffffffff_00000000_9e3779b9,v2=0xffffffff_fffffc00_ffffffff_00000000	v3,v4	0
+vsum4ubs_fits	vspltisw v5, 0; mtvscr v5; vsum4ubs v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611608,0x10800604	cr=0x0,xer=0x0,v1=0x01020304_ffffffff_00000000_80808080,v2=0x00000010_fffffc03_ffffffff_00000000	v3,v4	0
+vsum4ubs_wide	vspltisw v5, 0; mtvscr v5; vsum4ubs v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611608,0x10800604	cr=0x0,xer=0x0,v1=0xffffffff_ffffffff_ffffffff_ffffffff,v2=0xfffffc04_fffffc03_00000000_7fffffff	v3,v4	0
+vsum2sws_low_clamps_only	vspltisw v5, 0; mtvscr v5; vsum2sws v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611688,0x10800604	cr=0x0,xer=0x0,v1=0x7fffffff_00000001_00000001_00000002,v2=0x00000000_00000000_00000000_00000000	v3,v4	0
+vsum2sws_high_clamps_only	vspltisw v5, 0; mtvscr v5; vsum2sws v3, v1, v2; mfvscr v4	0x10a0038c,0x10002e44,0x10611688,0x10800604	cr=0x0,xer=0x0,v1=0x00000001_00000002_80000000_ffffffff,v2=0x00000000_00000000_00000000_00000000	v3,v4	0

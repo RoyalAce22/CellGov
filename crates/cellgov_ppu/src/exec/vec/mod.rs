@@ -12,6 +12,7 @@ mod multiply_add;
 mod permute;
 mod shift;
 mod splat;
+mod sum_across;
 mod unpack;
 mod vscr;
 
@@ -77,3 +78,7 @@ mod sat_add_sub_tests;
 #[cfg(test)]
 #[path = "tests/multiply_add_tests.rs"]
 mod multiply_add_tests;
+
+#[cfg(test)]
+#[path = "tests/sum_across_tests.rs"]
+mod sum_across_tests;

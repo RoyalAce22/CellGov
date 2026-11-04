@@ -37,6 +37,7 @@ mod console_ppu_vmul_add_sum;
 mod console_ppu_vmul_even_odd;
 mod console_ppu_vrotate_shift;
 mod console_ppu_vsub_carry;
+mod console_ppu_vsum_across;
 mod console_ppu_vunpack;
 mod reloc_addr16_lo_ds;
 mod reloc_addr64;

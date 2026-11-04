@@ -19,6 +19,7 @@ use super::multiply_add::{
 use super::permute::{vperm, vsel, vsldoi};
 use super::shift::{vrlb, vrlh, vrlw, vslb, vslh, vslw, vsrab, vsrah, vsraw, vsrb, vsrh, vsrw};
 use super::splat::{vspltb, vsplth, vspltisb, vspltish, vspltisw, vspltw};
+use super::sum_across::{vsum2sws, vsum4sbs, vsum4shs, vsum4ubs, vsumsws};
 use super::unpack::{vupkhpx, vupkhsb, vupkhsh, vupklpx, vupklsb, vupklsh};
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::ops::{VaOp, VxOp};
@@ -240,6 +241,18 @@ pub(crate) fn execute_vx(
         // [AltiVec-PEM p:6-45 s:6.2] vavgsw: sign-extend to 33 bits, add with 1, keep the high 32 bits.
         VxOp::Vavgsw => (vavgsw(a, b), false),
 
+        // -- Sum across (each sets SAT when a word clamps) --
+        // [AltiVec-PEM p:6-166 s:6.2] vsumsws: vB word 3 plus the four vA words in 35 bits, saturated to a signed word in vD word 3; vD words 0..2 are cleared.
+        VxOp::Vsumsws => vsumsws(a, b),
+        // [AltiVec-PEM p:6-167 s:6.2] vsum2sws: vA words 0 + 1 plus vB word 1 into vD word 1, vA words 2 + 3 plus vB word 3 into vD word 3, each saturated to a signed word; vD words 0 and 2 are cleared.
+        VxOp::Vsum2sws => vsum2sws(a, b),
+        // [AltiVec-PEM p:6-168 s:6.2] vsum4sbs: each vB word plus the four signed bytes of the vA word, saturated to a signed word.
+        VxOp::Vsum4sbs => vsum4sbs(a, b),
+        // [AltiVec-PEM p:6-169 s:6.2] vsum4shs: each vB word plus the two signed half words of the vA word, saturated to a signed word.
+        VxOp::Vsum4shs => vsum4shs(a, b),
+        // [AltiVec-PEM p:6-170 s:6.2] vsum4ubs: each vB word plus the four unsigned bytes of the vA word, saturated to an unsigned word.
+        VxOp::Vsum4ubs => vsum4ubs(a, b),
+
         // -- Unpack (vA is a reserved field; only vB is read) --
         // [AltiVec-PEM p:6-172 s:6.2] vupkhsb: sign-extend each byte of the high half of vB to a half word.
         VxOp::Vupkhsb => (vupkhsb(b), false),
@@ -290,12 +303,7 @@ pub(crate) fn execute_vx(
         | VxOp::Vmaxfp
         | VxOp::Vslo
         | VxOp::Vminfp
-        | VxOp::Vsro
-        | VxOp::Vsum4ubs
-        | VxOp::Vsum4shs
-        | VxOp::Vsum2sws
-        | VxOp::Vsum4sbs
-        | VxOp::Vsumsws => {
+        | VxOp::Vsro => {
             return ExecuteVerdict::Fault(unimplemented);
         }
     };
