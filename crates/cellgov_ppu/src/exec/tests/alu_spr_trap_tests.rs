@@ -133,11 +133,14 @@ fn mfxer_reads_full_64_bit_xer_into_rt() {
 }
 
 #[test]
-fn mtxer_writes_rs_into_xer() {
+fn mtxer_keeps_so_ov_ca_and_the_byte_count_and_clears_the_reserved_bits() {
     let mut s = PpuState::new();
     s.set_gpr(5, 0x1234_5678_9ABC_DEF0);
     exec_no_mem(&PpuInstruction::Mtxer { rs: 5 }, &mut s);
-    assert_eq!(s.xer(), 0x1234_5678_9ABC_DEF0);
+    assert_eq!(s.xer(), 0x8000_0070);
+    s.set_gpr(5, u64::MAX);
+    exec_no_mem(&PpuInstruction::Mtxer { rs: 5 }, &mut s);
+    assert_eq!(s.xer(), 0xE000_007F);
 }
 
 #[test]

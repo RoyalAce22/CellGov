@@ -79,7 +79,7 @@ pub(crate) fn execute(
         // of each successive GPR (high 32 bits zeroed); the register
         // sequence wraps at r31 -> r0. lswi / stswi use NB from the
         // encoding (0 means 32); lswx / stswx use the byte count
-        // from XER[57:63] (0 is a no-op).
+        // from XER[57:63] (0 is a no-op for stswx; lswx loads one byte).
         // [PPC-Book1 p:48 s:3.3.6] A load string with RA in the range of registers it loads, RA=0 included, is invalid; for lswx so is RB in the range, or RT=RA or RT=RB.
         // [CBE-Handbook p:254 s:9.5.9] The PPE takes the illegal-instruction interrupt for a load string invalid form.
         // The reference console ends the process on lswi with RA in the
@@ -101,7 +101,11 @@ pub(crate) fn execute(
             }
             let base = state.ea_x_form(ra, rb);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
-            string_load(state, &mut port, rt as usize, base, n)
+            // [PPC-Book1 p:48 s:3.3.6] With a zero count the contents of RT are undefined.
+            // The reference console loads one byte, as a count of 1 does, and an
+            // unmapped EA ends the process (probes ppu_reference_vectors and
+            // ppu_may_trap_lswx_n0_null).
+            string_load(state, &mut port, rt as usize, base, n.max(1))
         }
         PpuInstruction::Stswi { rs, ra, nb } => {
             let n = if nb == 0 { 32usize } else { nb as usize };

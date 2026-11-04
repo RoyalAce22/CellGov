@@ -127,12 +127,15 @@ fn lswx_uses_xer_tbc_byte_count() {
 }
 
 #[test]
-fn lswx_zero_byte_count_is_noop() {
+fn lswx_with_a_zero_count_loads_one_byte_as_the_console_does() {
     let mut s = PpuState::new();
     s.set_gpr(1, 0x10);
     s.set_gpr(2, 0x10);
-    s.set_gpr(3, 0xDEAD_BEEF);
+    s.set_gpr(3, 0xDEAD_BEEF_DEAD_BEEF);
+    s.set_gpr(4, 0x5A5A);
     s.set_xer(0);
+    let mut mem = [0u8; 0x100];
+    mem[0x20..0x24].copy_from_slice(&[0xAB, 0xCD, 0xEF, 0x12]);
     let mut effects = Vec::new();
     let v = exec_with_mem(
         &PpuInstruction::Lswx {
@@ -142,12 +145,12 @@ fn lswx_zero_byte_count_is_noop() {
         },
         &mut s,
         0,
-        &[0u8; 0x100],
+        &mem,
         &mut effects,
     );
     assert_eq!(v, ExecuteVerdict::Continue);
-    // No write: r3 untouched.
-    assert_eq!(s.gpr[3], 0xDEAD_BEEF);
+    assert_eq!(s.gpr[3], 0xAB00_0000);
+    assert_eq!(s.gpr[4], 0x5A5A);
 }
 
 #[test]

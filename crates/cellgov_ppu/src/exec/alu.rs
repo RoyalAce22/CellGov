@@ -2,7 +2,7 @@
 //! Every arm here is a pure register-to-register or register-to-CR
 //! operation; nothing in this module touches memory or emits effects.
 
-use cellgov_ps3_abi::hw::ppu_spr::PS3_PROCESS_SPRG3;
+use cellgov_ps3_abi::hw::ppu_spr::{PS3_PROCESS_SPRG3, XER_IMPLEMENTED_BITS};
 
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
@@ -654,8 +654,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             ExecuteVerdict::Continue
         }
         // [PPC-Book1 p:81 s:3.3.13] mtxer: extended mnemonic for mtspr XER,RS (SPR 1); writes the architecturally-defined fields of XER.
+        // The reserved bits read back 0, as on the reference console.
         PpuInstruction::Mtxer { rs } => {
-            state.set_xer(state.gpr[rs as usize]);
+            state.set_xer(state.gpr[rs as usize] & XER_IMPLEMENTED_BITS);
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] mfvrsave:

@@ -178,6 +178,17 @@ pub const CTRL_TE_THREAD1: u32 = 0x0040_0000;
 /// three concurrent threads read all four combinations of CT and TE.
 pub const PS3_PROCESS_CTRL: u32 = CTRL_CT_THREAD1 | CTRL_TE_THREAD1;
 
+/// The XER bits an `mtxer` keeps: SO, OV and CA (bits 32:34) and the
+/// byte count (bits 57:63).
+///
+/// [PPC-Book1 p:32 s:3.2.2] XER bits 0:31 and 35:56 are reserved.
+///
+/// [PPC-Book1 p:3 s:1.5.2] A reserved bit written with 1 reads back as 0 or 1, by implementation.
+///
+/// The reference console reads the reserved bits back as 0 after an
+/// `mtxer` of all ones (probe `ppu_reference_vectors`).
+pub const XER_IMPLEMENTED_BITS: u64 = !super::ppu_status::XER_RESERVED;
+
 /// The SPRG3 value a problem-state PS3 process reads.
 ///
 /// [PPC-Book3 p:16 s:3.3.3] Problem-state software may read SPRG3; its content is the operating system's.

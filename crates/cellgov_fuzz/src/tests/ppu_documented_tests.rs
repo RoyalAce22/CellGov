@@ -247,16 +247,6 @@ const KNOWN_CONTRADICTED: &[(&str, &str, &str)] = &[
         "CR0 then compares the zero-extended quotient",
     ),
     (
-        "move-undef/lswx/count-0",
-        "r5.all",
-        "lswx with a zero count loads the first byte into RT[32:39] and clears the rest",
-    ),
-    (
-        "move-undef/mtxer/all-ones",
-        "xer.reserved",
-        "the XER reserved bits read 0 after a write of 1",
-    ),
-    (
         "fctiw-high-word/",
         "f3.hi",
         "the console sign-extends the converted word into FRT[0:31]",
