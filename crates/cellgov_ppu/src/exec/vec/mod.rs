@@ -55,3 +55,7 @@ mod minmax_tests;
 #[cfg(test)]
 #[path = "tests/mul_even_odd_tests.rs"]
 mod mul_even_odd_tests;
+
+#[cfg(test)]
+#[path = "tests/compare_tests.rs"]
+mod compare_tests;

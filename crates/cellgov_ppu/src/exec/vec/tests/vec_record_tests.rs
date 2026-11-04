@@ -64,7 +64,7 @@ fn an_unimplemented_recording_compare_faults_without_writing_cr() {
     s.set_cr(CR_SEED);
     let v = exec_no_mem(
         &PpuInstruction::Vx {
-            op: VxOp::Vcmpequb,
+            op: VxOp::Vcmpeqfp,
             rc: true,
             vt: 3,
             va: 1,
@@ -76,7 +76,7 @@ fn an_unimplemented_recording_compare_faults_without_writing_cr() {
         v,
         ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction {
             kind: PpuInstructionKind::Vx,
-            mnemonic: "vcmpequb.",
+            mnemonic: "vcmpeqfp.",
         })
     );
     assert_eq!(s.cr(), CR_SEED);

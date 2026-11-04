@@ -2,9 +2,9 @@
 
 use super::convert::{vcfsx, vcfux};
 use super::integer::{
-    vadd_bytes, vadd_halfs, vadd_words, vaddcuw, vcmpequw, vmulesb, vmulesh, vmuleub, vmuleuh,
-    vmulosb, vmulosh, vmuloub, vmulouh, vsub_bytes, vsub_halfs, vsub_ubytes_sat, vsub_words,
-    vsubcuw,
+    vadd_bytes, vadd_halfs, vadd_words, vaddcuw, vcmpequb, vcmpequh, vcmpequw, vcmpgtsb, vcmpgtsh,
+    vcmpgtsw, vcmpgtub, vcmpgtuh, vcmpgtuw, vmulesb, vmulesh, vmuleub, vmuleuh, vmulosb, vmulosh,
+    vmuloub, vmulouh, vsub_bytes, vsub_halfs, vsub_ubytes_sat, vsub_words, vsubcuw,
 };
 use super::merge::{vmrghb, vmrghh, vmrghw, vmrglb, vmrglh, vmrglw};
 use super::minmax::{
@@ -67,6 +67,22 @@ pub(crate) fn execute_vx(
         // -- Integer compare --
         // [AltiVec-PEM p:6-56 s:6.2] vcmpequw: Vector Compare Equal-to Unsigned Word
         VxOp::Vcmpequw => (vcmpequw(a, b), false),
+        // [AltiVec-PEM p:6-54 s:6.2] vcmpequb: Vector Compare Equal-to Unsigned Byte
+        VxOp::Vcmpequb => (vcmpequb(a, b), false),
+        // [AltiVec-PEM p:6-55 s:6.2] vcmpequh: Vector Compare Equal-to Unsigned Half Word
+        VxOp::Vcmpequh => (vcmpequh(a, b), false),
+        // [AltiVec-PEM p:6-62 s:6.2] vcmpgtub: Vector Compare Greater-Than Unsigned Byte
+        VxOp::Vcmpgtub => (vcmpgtub(a, b), false),
+        // [AltiVec-PEM p:6-63 s:6.2] vcmpgtuh: Vector Compare Greater-Than Unsigned Half Word
+        VxOp::Vcmpgtuh => (vcmpgtuh(a, b), false),
+        // [AltiVec-PEM p:6-64 s:6.2] vcmpgtuw: Vector Compare Greater-Than Unsigned Word
+        VxOp::Vcmpgtuw => (vcmpgtuw(a, b), false),
+        // [AltiVec-PEM p:6-59 s:6.2] vcmpgtsb: Vector Compare Greater-Than Signed Byte
+        VxOp::Vcmpgtsb => (vcmpgtsb(a, b), false),
+        // [AltiVec-PEM p:6-60 s:6.2] vcmpgtsh: Vector Compare Greater-Than Signed Half Word
+        VxOp::Vcmpgtsh => (vcmpgtsh(a, b), false),
+        // [AltiVec-PEM p:6-61 s:6.2] vcmpgtsw: Vector Compare Greater-Than Signed Word
+        VxOp::Vcmpgtsw => (vcmpgtsw(a, b), false),
 
         // -- Logical --
         // [AltiVec-PEM p:6-41 s:6.2] vand
@@ -187,11 +203,9 @@ pub(crate) fn execute_vx(
         VxOp::Vcfux => (vcfux(b, va), false),
 
         VxOp::Vrlb
-        | VxOp::Vcmpequb
         | VxOp::Vaddfp
         | VxOp::Vpkuhum
         | VxOp::Vrlh
-        | VxOp::Vcmpequh
         | VxOp::Vsubfp
         | VxOp::Vpkuwum
         | VxOp::Vrlw
@@ -212,16 +226,13 @@ pub(crate) fn execute_vx(
         | VxOp::Vpkswss
         | VxOp::Vaddubs
         | VxOp::Vsrb
-        | VxOp::Vcmpgtub
         | VxOp::Vrfin
         | VxOp::Vupkhsb
         | VxOp::Vadduhs
         | VxOp::Vsrh
-        | VxOp::Vcmpgtuh
         | VxOp::Vrfiz
         | VxOp::Vupkhsh
         | VxOp::Vadduws
-        | VxOp::Vcmpgtuw
         | VxOp::Vrfip
         | VxOp::Vupklsb
         | VxOp::Vsr
@@ -229,13 +240,10 @@ pub(crate) fn execute_vx(
         | VxOp::Vrfim
         | VxOp::Vupklsh
         | VxOp::Vaddsbs
-        | VxOp::Vcmpgtsb
         | VxOp::Vpkpx
         | VxOp::Vaddshs
-        | VxOp::Vcmpgtsh
         | VxOp::Vupkhpx
         | VxOp::Vaddsws
-        | VxOp::Vcmpgtsw
         | VxOp::Vctuxs
         | VxOp::Vcmpbfp
         | VxOp::Vctsxs

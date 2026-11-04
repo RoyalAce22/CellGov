@@ -30,6 +30,7 @@ mod console_ppu_mulhwu_high_bit;
 mod console_ppu_ocrf_fxm;
 mod console_ppu_quadword;
 mod console_ppu_trap_immediate;
+mod console_ppu_vcmp_int_record;
 mod console_ppu_vminmax_avg;
 mod console_ppu_vmul_even_odd;
 mod console_ppu_vsub_carry;

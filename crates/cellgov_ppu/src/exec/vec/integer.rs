@@ -41,6 +41,38 @@ pub(super) fn vcmpequw(a: u128, b: u128) -> u128 {
     map_u32(a, b, |x, y| if x == y { u32::MAX } else { 0 })
 }
 
+pub(super) fn vcmpequb(a: u128, b: u128) -> u128 {
+    map_u8(a, b, |x, y| if x == y { u8::MAX } else { 0 })
+}
+
+pub(super) fn vcmpequh(a: u128, b: u128) -> u128 {
+    map_u16(a, b, |x, y| if x == y { u16::MAX } else { 0 })
+}
+
+pub(super) fn vcmpgtub(a: u128, b: u128) -> u128 {
+    map_u8(a, b, |x, y| if x > y { u8::MAX } else { 0 })
+}
+
+pub(super) fn vcmpgtuh(a: u128, b: u128) -> u128 {
+    map_u16(a, b, |x, y| if x > y { u16::MAX } else { 0 })
+}
+
+pub(super) fn vcmpgtuw(a: u128, b: u128) -> u128 {
+    map_u32(a, b, |x, y| if x > y { u32::MAX } else { 0 })
+}
+
+pub(super) fn vcmpgtsb(a: u128, b: u128) -> u128 {
+    map_u8(a, b, |x, y| if x as i8 > y as i8 { u8::MAX } else { 0 })
+}
+
+pub(super) fn vcmpgtsh(a: u128, b: u128) -> u128 {
+    map_u16(a, b, |x, y| if x as i16 > y as i16 { u16::MAX } else { 0 })
+}
+
+pub(super) fn vcmpgtsw(a: u128, b: u128) -> u128 {
+    map_u32(a, b, |x, y| if x as i32 > y as i32 { u32::MAX } else { 0 })
+}
+
 /// `vsububs`: each byte of vA minus vB, clamped at 0. The flag is set
 /// when an element clamps.
 ///

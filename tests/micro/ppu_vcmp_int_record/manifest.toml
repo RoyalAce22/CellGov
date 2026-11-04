@@ -1,0 +1,18 @@
+[test]
+name = "ppu_vcmp_int_record"
+
+# A hardware probe of the nine integer vector compares in their
+# recording form, over a CR seeded so that every field shows: per op
+# a mixed case over operand classes, an all-true case and an
+# all-false case. cases.tsv names each case. The console capture is
+# the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (27 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 3472 },
+]
+
+[expect]
+outcome = "completed"
