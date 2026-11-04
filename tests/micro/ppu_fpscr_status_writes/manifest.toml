@@ -1,0 +1,15 @@
+[test]
+name = "ppu_fpscr_status_writes"
+
+# A hardware probe: which FPSCR bits the move instructions can change,
+# starting from status bits an fdiv by zero sets. The console capture is
+# the answer; no emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, as ppu/main.c lists: 64 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"

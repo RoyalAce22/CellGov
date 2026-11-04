@@ -1,0 +1,16 @@
+[test]
+name = "ppu_fpscr_moves"
+
+# A hardware probe: what the FPSCR move instructions (mffs, mcrfs,
+# mtfsfi, mtfsf, mtfsb0, mtfsb1) write, and what a floating-point record
+# form copies to CR1. The console capture is the answer; no emulator
+# runs it.
+
+[observe]
+# 30 big-endian u32 words, as ppu/main.c lists: 120 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 120 },
+]
+
+[expect]
+outcome = "completed"

@@ -1,5 +1,6 @@
 //! Per-instruction differential input and its provenance tag.
 
+use cellgov_ps3_abi::hw::ppc_isa::PPE_FPSCR_UNIMPLEMENTED_BITS;
 use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;
 
@@ -71,6 +72,9 @@ impl PpuStateSnapshot {
     }
 
     /// Copy this snapshot into `state`, leaving PC and TB untouched.
+    ///
+    /// The copy clears [`PPE_FPSCR_UNIMPLEMENTED_BITS`] in the FPSCR, as
+    /// every FPSCR write does.
     pub fn apply(&self, state: &mut PpuState) {
         state.set_gpr_all(self.gpr);
         state.set_fpr_all(self.fpr);
@@ -79,7 +83,7 @@ impl PpuStateSnapshot {
         state.set_lr(self.lr);
         state.set_ctr(self.ctr);
         state.set_xer(self.xer);
-        state.set_fpscr(self.fpscr);
+        state.set_fpscr(self.fpscr & !PPE_FPSCR_UNIMPLEMENTED_BITS);
         state.set_reservation(self.reservation);
     }
 }
@@ -143,3 +147,7 @@ pub struct InstructionCase {
     /// Where the expected post-state came from.
     pub source: OracleSource,
 }
+
+#[cfg(test)]
+#[path = "tests/case_tests.rs"]
+mod tests;

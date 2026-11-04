@@ -141,3 +141,57 @@ pub const PPC_F64_QUIET_BIT: u64 = 0x0008_0000_0000_0000;
 ///   square root of -1, inf*0+1;
 /// - single precision: 0/0, inf+-inf, the square root of -1.
 pub const PPC_GENERATED_QNAN_F64: u64 = 0x7FF8_0000_0000_0000;
+
+/// The FRT high word the PPE's `mffs` writes.
+///
+/// [PPC-Book1 p:120 s:4.6.8] mffs leaves FRT bits 0:31 undefined.
+///
+/// The reference console gives this value (`ppu_fpscr_moves`,
+/// `ppu_fpscr_settle`) whatever FRT held before, with the FPSCR 0 and
+/// with it 0x8000_0003.
+pub const PPE_MFFS_HIGH_WORD: u32 = 0xFFF8_0000;
+
+/// The FPSCR bits no PPE instruction can set.
+///
+/// - bit 20, which is reserved;
+/// - bit 29, NI, the non-IEEE mode bit.
+///
+/// [PPC-Book1 p:88 s:4.2.2] FPSCR bit 20 is reserved.
+/// [PPC-Book1 p:89 s:4.2.2] non-IEEE mode (NI, bit 29) is optional, and an implementation without it treats the bit as reserved.
+///
+/// In the ppu_fpscr_ni_write console capture, mffs reads both bits as 0
+/// after mtfsf, mtfsfi or mtfsb1 writes them. In the ppu_reference_vectors
+/// capture, the console gives IEEE results with NI written 1.
+pub const PPE_FPSCR_UNIMPLEMENTED_BITS: u32 = 0x0000_0804;
+
+/// FPSCR bit 0, the floating-point exception summary (FX).
+///
+/// [PPC-Book1 p:87 s:4.2.2] FX is sticky; only mcrfs, mtfsfi, mtfsf, mtfsb0 and mtfsb1 can set it to 0.
+pub const PPC_FPSCR_FX: u32 = 1 << 31;
+
+/// FPSCR bit 1, the enabled exception summary (FEX).
+///
+/// [PPC-Book1 p:87 s:4.2.2] FEX is the OR of the exception bits masked by their enable bits.
+pub const PPC_FPSCR_FEX: u32 = 1 << 30;
+
+/// FPSCR bit 2, the invalid operation exception summary (VX).
+///
+/// [PPC-Book1 p:87 s:4.2.2] VX is the OR of the invalid operation exception bits.
+pub const PPC_FPSCR_VX: u32 = 1 << 29;
+
+/// The FPSCR exception bits, 3:12 and 21:23 (OX through VXVC, then
+/// VXSOFT, VXSQRT and VXCVI).
+///
+/// [PPC-Book1 p:87 s:4.2.2] The exception bits 3:12 and 21:23 are sticky.
+pub const PPC_FPSCR_EXCEPTION_BITS: u32 = 0x1FF8_0700;
+
+/// The invalid operation exception bits whose OR is VX: VXSNAN through
+/// VXVC (7:12) and VXSOFT, VXSQRT, VXCVI (21:23).
+///
+/// [PPC-Book1 p:88 s:4.2.2] Bits 7:12 and 21:23 are the invalid operation exception bits.
+pub const PPC_FPSCR_VX_BITS: u32 = 0x01F8_0700;
+
+/// The FPSCR exception enable bits VE, OE, UE, ZE and XE (24:28).
+///
+/// [PPC-Book1 p:89 s:4.2.2] Bits 24:28 enable the invalid operation, overflow, underflow, zero divide and inexact exceptions.
+pub const PPC_FPSCR_ENABLE_BITS: u32 = 0x0000_00F8;

@@ -1,0 +1,17 @@
+[test]
+name = "ppu_fpscr_ni_write"
+
+# A hardware probe of whether mtfsf, mtfsfi, mtfsb1 and mtfsb0 can set
+# FPSCR NI (bit 29), the non-IEEE mode bit, and the reserved bit 20,
+# read back by mffs and by mcrfs. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: words 0 and 1 are the
+# failed step and its code, then 12 result words: 14 words, 56 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 56 },
+]
+
+[expect]
+outcome = "completed"

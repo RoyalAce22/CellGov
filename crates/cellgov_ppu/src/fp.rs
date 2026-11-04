@@ -2,25 +2,20 @@
 // [PPC-Book1 p:206 s:Appendix J] Floating-point instruction set sorted by opcode, primaries 59 and 63.
 // [PPC-Book1 p:88 s:4.2.2] FPSCR bit definitions (FPRF, FR, FI, FX, OX, UX, XX, VXSNAN).
 //!
-//! FPSCR is not modeled: every arm here assumes `FPSCR[RN]` holds the
-//! round-to-nearest encoding and the FPSCR status flags (FPRF, FR, FI,
-//! FX, OX, UX, XX, VXSNAN ...) are never updated. `mffs` / `mcrfs` and
-//! dot-form CR1 updates therefore see stale state.
+//! The FPSCR move instructions read and write the register
+//! ([`crate::fpscr`]), and a record form copies FPSCR bits 0:3 to CR1.
+//! The computational arms do not read `FPSCR[RN]`: each rounds to
+//! nearest. They also leave the status flags (FPRF, FR, FI, FX, OX, UX,
+//! XX, VXSNAN ...) unchanged, so `mffs`, `mcrfs` and CR1 report only
+//! what the move instructions wrote.
 // [PPC-Book1 p:89 s:4.2.2] FPSCR[RN] encoding: 0b00 selects Round to Nearest.
-//!
-//! TODO(fpscr): Plumb FPSCR through PpuState and update it from every
-//! computational arm here, plus wire `mffs` / `mcrfs` and dot-form
-//! CR1. Until then a guest that writes `FPSCR[RN]` to a directed mode
-//! gets round-to-nearest anyway, and the `fctiw` / `fctid` arms round
-//! to nearest unconditionally rather than honouring the register.
 
 use crate::exec::ExecuteVerdict;
+use crate::fpscr;
 use crate::instruction::ops::{Fp59Op, Fp63Op};
 use crate::state::PpuState;
 
-/// Execute a primary-63 op. The FPSCR ops retire as no-ops
-/// (`Continue` without a register write), matching the
-/// not-modelled-FPSCR posture above.
+/// Execute a primary-63 op.
 pub fn execute_fp63(
     state: &mut PpuState,
     op: Fp63Op,
@@ -167,15 +162,38 @@ pub fn execute_fp63(
         // back yet.
         // [PPC-Book1 p:126 s:5.2.1.1] frsqrte: an estimate within one part in 32 of 1/sqrt(FRB); the special-operand table fixes -inf and < 0 to QNaN, -0 to -inf, +0 to +inf, +inf to +0.
         Fp63Op::Frsqrte => nan_resolved_bits(1.0 / b.sqrt(), &[b]),
-        Fp63Op::Mtfsb1
-        | Fp63Op::Mcrfs
-        | Fp63Op::Mtfsb0
-        | Fp63Op::Mtfsfi
-        | Fp63Op::Mffs
-        | Fp63Op::Mtfsf => return ExecuteVerdict::Continue,
+        Fp63Op::Mffs => {
+            fpscr::mffs(state, frt);
+            return ExecuteVerdict::Continue;
+        }
+        Fp63Op::Mcrfs => {
+            fpscr::mcrfs(state, frt, fra);
+            return ExecuteVerdict::Continue;
+        }
+        Fp63Op::Mtfsfi => {
+            fpscr::mtfsfi(state, frt, frb);
+            return ExecuteVerdict::Continue;
+        }
+        Fp63Op::Mtfsf => {
+            fpscr::mtfsf(state, frt, fra, frb);
+            return ExecuteVerdict::Continue;
+        }
+        Fp63Op::Mtfsb0 => {
+            fpscr::mtfsb0(state, frt);
+            return ExecuteVerdict::Continue;
+        }
+        Fp63Op::Mtfsb1 => {
+            fpscr::mtfsb1(state, frt);
+            return ExecuteVerdict::Continue;
+        }
     };
     state.set_fpr(frt as usize, result_bits);
     ExecuteVerdict::Continue
+}
+
+/// The CR1 update of a floating-point record form (Rc=1).
+pub fn record_cr1(state: &mut PpuState) {
+    state.set_cr_field(1, fpscr::cr1_nibble(state.fpscr()));
 }
 
 /// Execute a primary-59 op.
@@ -304,3 +322,7 @@ mod fp_estimate_tests;
 #[cfg(test)]
 #[path = "tests/fp_estimate_console_tests.rs"]
 mod fp_estimate_console_tests;
+
+#[cfg(test)]
+#[path = "tests/fp_writes_tests.rs"]
+mod fp_writes_tests;

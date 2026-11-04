@@ -6,6 +6,7 @@ use cellgov_event::UnitId;
 use crate::exec::verdict::ExecuteVerdict;
 use crate::exec::{alu, branch, cr, mem, super_insn, vec};
 use crate::fp;
+use crate::instruction::ops::Fp63Op;
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
@@ -239,24 +240,36 @@ pub fn execute(
         PpuInstruction::Va { op, vt, va, vb, vc } => vec::execute_va(state, op, vt, va, vb, vc),
         PpuInstruction::Vsldoi { vt, va, vb, shb } => vec::execute_vsldoi(state, vt, va, vb, shb),
 
-        // TODO(fp-rc): record-form CR1 update pending FPSCR plumbing;
-        // `_rc` is preserved at decode.
         PpuInstruction::Fp63 {
             op,
             frt,
             fra,
             frb,
             frc,
-            rc: _rc,
-        } => fp::execute_fp63(state, op, frt, fra, frb, frc),
+            rc,
+        } => {
+            let verdict = fp::execute_fp63(state, op, frt, fra, frb, frc);
+            // The compares and mcrfs have no Rc field: bit 31 is reserved.
+            let has_rc = !matches!(op, Fp63Op::Fcmpu | Fp63Op::Fcmpo | Fp63Op::Mcrfs);
+            if rc && has_rc {
+                fp::record_cr1(state);
+            }
+            verdict
+        }
         PpuInstruction::Fp59 {
             op,
             frt,
             fra,
             frb,
             frc,
-            rc: _rc,
-        } => fp::execute_fp59(state, op, frt, fra, frb, frc),
+            rc,
+        } => {
+            let verdict = fp::execute_fp59(state, op, frt, fra, frb, frc);
+            if rc {
+                fp::record_cr1(state);
+            }
+            verdict
+        }
 
         PpuInstruction::Li { .. }
         | PpuInstruction::Mr { .. }

@@ -6,7 +6,11 @@
 
 **PPU (`cellgov_ppu`)**: PPC64 interpreter with 32 GPRs, 32 FPRs, PC,
 CR, LR, CTR, XER (carry tracked), FPSCR, TB, and 32 vector registers.
-FPSCR holds its reset value 0: no instruction reads or writes it yet.
+The FPSCR move instructions read and write FPSCR, except the reserved
+bit 20 and NI, which the PPE does not implement and which read 0, so
+results always follow IEEE 754. A floating-point record form copies
+FPSCR bits 0:3 to CR1. The arithmetic does not read
+the rounding mode and sets no FPSCR status bit.
 
 The `PpuInstruction` set covers:
 

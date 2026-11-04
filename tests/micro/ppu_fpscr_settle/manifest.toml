@@ -1,0 +1,16 @@
+[test]
+name = "ppu_fpscr_settle"
+
+# A hardware probe: whether an FPSCR bit a move instruction writes reads
+# back at once or only after a delay, and the high word mffs writes when
+# the FPSCR is not 0. The console capture is the answer; no emulator runs
+# it.
+
+[observe]
+# 19 big-endian u32 words, as ppu/main.c lists: 76 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 76 },
+]
+
+[expect]
+outcome = "completed"
