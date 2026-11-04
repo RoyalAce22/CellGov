@@ -56,6 +56,17 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         // The variant keeps the whole word.
         I::PpeIllegal { .. } => 0,
         I::Dcbz { .. } => RT | RC,
+        // [PPC-Book2 p:18 s:3.2.1], [PPC-Book2 p:21 s:3.2.2] icbi and dcbst read RA and RB only.
+        I::Dcbst { .. } | I::Icbi { .. } => RT | RC,
+        // [PPC-Book2 p:41 s:5.2.1.1] dcbf reads L in bit 10 and reserves bits 6:9.
+        I::Dcbf { .. } => 0x03C0_0000 | RC,
+        // [PPC-Book2 p:35 s:5.2.1.1] the optional dcbt form puts TH in bits 7:10 and reserves bit 6.
+        // [CBE-Handbook p:146 s:6.1.6.3] the PPE gives dcbt and dcbtst the data-stream TH forms.
+        I::Dcbt { .. } | I::Dcbtst { .. } => 0x0200_0000 | RC,
+        // [AltiVec-PEM p:6-10 s:6.2] dst reserves bits 7:8 and 31; [AltiVec-PEM p:6-12 s:6.2] so does dstst.
+        I::Dst { .. } | I::Dstst { .. } => 0x0180_0000 | RC,
+        // [AltiVec-PEM p:6-9 s:6.2] dss reads A and STRM; bits 7:8, 11:20 and 31 are reserved.
+        I::Dss { .. } => 0x0180_0000 | RA | RB | RC,
         I::Mfcr { .. } => 0x000F_F800 | RC,
         I::Mfocrf { .. } | I::Mtcrf { .. } | I::Mtocrf { .. } => 0x0000_0800 | RC,
         I::Lwzx { .. }

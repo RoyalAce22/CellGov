@@ -923,8 +923,6 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         }
 
         // [PPC-Book2 p:20 s:3.2 Cache Management Instructions] dcbz: 128-byte zero store to the block containing EA.
-        // Unlike the cache hints below, dcbz has architecturally
-        // visible effects and needs a real variant.
         1014 => return Ok(PpuInstruction::Dcbz { ra, rb }),
 
         // [PPC-Book2 p:26 s:3.3.3] sync / lwsync / ptesync (598): the L field at bits 9:10 selects the flavor, and L=3 is reserved.
@@ -937,20 +935,50 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         // [PPC-Book2 p:28 s:3.3.3] eieio (854).
         854 => return Ok(PpuInstruction::Eieio),
 
-        // Cache hints. With no cache model these collapse to a nop:
-        //   [PPC-Book2 p:21 s:3.2.2] dcbst (54), dcbf (86).
-        //   [PPC-Book2 p:19 s:3.2.2] dcbt (278), dcbtst (246).
-        //   [PPC-Book2 p:18 s:3.2.1] icbi (982).
-        //   [AltiVec-PEM p:6-10 s:6.2] dst (342),
-        //   [AltiVec-PEM p:6-12 s:6.2] dstst (374),
-        //   [AltiVec-PEM p:6-9 s:6.2] dss (822): AltiVec data-stream
-        //                           touch hints; no cache model means
-        //                           no architectural side-effect.
-        54 | 86 | 246 | 278 | 342 | 374 | 822 | 982 => {
-            return Ok(PpuInstruction::Ori {
-                ra: 0,
-                rs: 0,
-                imm: 0,
+        // [PPC-Book2 p:21 s:3.2.2] dcbst (54), dcbf (86).
+        54 => return Ok(PpuInstruction::Dcbst { ra, rb }),
+        // [PPC-Book2 p:41 s:5.2.1.1] dcbf's L field is bit 10 alone; bits 6:9 are reserved.
+        86 => return Ok(PpuInstruction::Dcbf { ra, rb, l: rt & 1 }),
+        // [PPC-Book2 p:19 s:3.2.2] dcbt (278), dcbtst (246).
+        // [PPC-Book2 p:35 s:5.2.1.1] TH is bits 7:10; bit 6 is reserved.
+        278 => {
+            return Ok(PpuInstruction::Dcbt {
+                ra,
+                rb,
+                th: rt & 0xF,
+            })
+        }
+        246 => {
+            return Ok(PpuInstruction::Dcbtst {
+                ra,
+                rb,
+                th: rt & 0xF,
+            })
+        }
+        // [PPC-Book2 p:18 s:3.2.1] icbi (982).
+        982 => return Ok(PpuInstruction::Icbi { ra, rb }),
+        // [AltiVec-PEM p:6-10 s:6.2] dst (342); [AltiVec-PEM p:6-12 s:6.2] dstst (374): T at bit 6, STRM at bits 9:10.
+        342 => {
+            return Ok(PpuInstruction::Dst {
+                ra,
+                rb,
+                strm: rt & 3,
+                t: rt & 0x10 != 0,
+            })
+        }
+        374 => {
+            return Ok(PpuInstruction::Dstst {
+                ra,
+                rb,
+                strm: rt & 3,
+                t: rt & 0x10 != 0,
+            })
+        }
+        // [AltiVec-PEM p:6-9 s:6.2] dss (822): A at bit 6, STRM at bits 9:10.
+        822 => {
+            return Ok(PpuInstruction::Dss {
+                strm: rt & 3,
+                all: rt & 0x10 != 0,
             })
         }
 

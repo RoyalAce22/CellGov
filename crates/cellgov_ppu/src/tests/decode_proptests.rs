@@ -39,10 +39,6 @@ proptest! {
         prop_assert_eq!(decode(encoded), Ok(insn));
         match alias(raw) {
             None => prop_assert_eq!(encoded, raw & !reserved_bits(&insn)),
-            Some(Alias::NopHint { .. }) => prop_assert_eq!(
-                insn,
-                PpuInstruction::Ori { ra: 0, rs: 0, imm: 0 }
-            ),
             Some(Alias::TimeBaseThroughMfspr { tbr }) => {
                 let is_time_base_read = matches!(
                     (tbr, insn),

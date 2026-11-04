@@ -1,7 +1,8 @@
 //! The memory-instruction dispatch: one match over every load, store, atomic and cache-block form.
 
 use crate::exec::memory_helpers::{
-    buffer_conditional_store, buffer_store, check_store, load_ze, LoadPort, Width,
+    buffer_conditional_store, buffer_store, check_block_translates, check_store, load_ze, LoadPort,
+    Width,
 };
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
@@ -344,6 +345,17 @@ pub(crate) fn execute(
             const DCBZ_STORES: usize = DCBZ_BLOCK_BYTES / 8;
             let zeros = (0..DCBZ_STORES).map(|i| (ea + (i as u64) * 8, 8, 0));
             store_prechecked(store_buf, region_views, DCBZ_STORES, zeros, "dcbz")
+        }
+        // [PPC-Book2 p:18 s:3.2.1] icbi is treated as a Load for translation and protection.
+        // [PPC-Book2 p:21 s:3.2.2] dcbst and dcbf are treated as a Load.
+        // [CBE-Handbook p:249 s:9.5.3] the PPE takes a data storage interrupt for icbi, dcbst and dcbf.
+        PpuInstruction::Dcbst { ra, rb }
+        | PpuInstruction::Dcbf { ra, rb, .. }
+        | PpuInstruction::Icbi { ra, rb } => {
+            match check_block_translates(region_views, state.ea_x_form(ra, rb)) {
+                Ok(()) => ExecuteVerdict::Continue,
+                Err(e) => ExecuteVerdict::MemFault(e),
+            }
         }
 
         _ => unreachable!("mem::execute called with non-memory variant"),

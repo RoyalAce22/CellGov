@@ -2,7 +2,9 @@
 
 use cellgov_ps3_abi::hw::ppc_isa::{PPC_EIEIO_XO, PPC_ISYNC_XO, PPC_SYNC_XO};
 
-use super::fields::{a_form, d, ds, m, md, mds, p, ra, rb, rt, slot_6, x, xfx_spr, xl, xo, xo_10};
+use super::fields::{
+    a_form, d, ds, m, md, mds, p, ra, rb, rt, slot_6, stream_field, x, xfx_spr, xl, xo, xo_10,
+};
 use crate::instruction::ops::{VaOp, VxOp};
 use crate::instruction::{PpuInstruction, PpuInstructionKind};
 
@@ -463,6 +465,24 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         } => x(t, a, b, 790, false),
         I::Sthbrx { rs, ra: a, rb: b } => x(rs, a, b, 918, false),
         I::Dcbz { ra: a, rb: b } => x(0, a, b, 1014, false),
+        I::Dcbst { ra: a, rb: b } => x(0, a, b, 54, false),
+        I::Dcbf { ra: a, rb: b, l } => x(l & 1, a, b, 86, false),
+        I::Icbi { ra: a, rb: b } => x(0, a, b, 982, false),
+        I::Dcbt { ra: a, rb: b, th } => x(th, a, b, 278, false),
+        I::Dcbtst { ra: a, rb: b, th } => x(th, a, b, 246, false),
+        I::Dst {
+            ra: a,
+            rb: b,
+            strm,
+            t,
+        } => x(stream_field(strm, t), a, b, 342, false),
+        I::Dstst {
+            ra: a,
+            rb: b,
+            strm,
+            t,
+        } => x(stream_field(strm, t), a, b, 374, false),
+        I::Dss { strm, all } => x(stream_field(strm, all), 0, 0, 822, false),
 
         // X-form floating-point loads and stores.
         I::Stfiwx { frs, ra: a, rb: b } => x(frs, a, b, 983, false),

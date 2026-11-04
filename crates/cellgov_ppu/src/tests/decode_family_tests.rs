@@ -354,33 +354,6 @@ fn xo_arith_and_logical_family_decode_to_named_variants() {
 }
 
 #[test]
-fn cache_hint_family_collapses_to_nop() {
-    // The cache-hint and data-stream-touch ops at primary 31 /
-    // XOs 246 (dcbtst), 342 (dst), 374 (dstst), 822 (dss),
-    // 982 (icbi) collapse to an Ori-nop under CellGov's deterministic
-    // single-unit no-cache model. The collapse is by XO only;
-    // operand bits are irrelevant. (`dst` / `dstst` / `dss` use
-    // the AltiVec T(6) || STRM(7..8) || RA(11..15) || RB(16..20)
-    // layout, not standard X-form `(rt, ra, rb)` -- but those
-    // fields are ignored by the nop, and `dss` shares XO 822
-    // with `dssall`, distinguished by the A bit also ignored.)
-    // The XO bits in this fixture are the only thing the arm
-    // discriminates on.
-    let nop = PpuInstruction::Ori {
-        ra: 0,
-        rs: 0,
-        imm: 0,
-    };
-    let p31 = 31u32 << 26;
-    for xo in [246u32, 342, 374, 822, 982] {
-        let raw = p31 | (xo << 1);
-        let inst = decode(raw)
-            .unwrap_or_else(|e| panic!("decode failed for raw 0x{raw:08x} xo={xo}: {e:?}"));
-        assert_eq!(inst, nop, "xo {xo} did not collapse to nop");
-    }
-}
-
-#[test]
 fn d_form_scalar_gaps_decode_to_named_variants() {
     // Each row: (primary, raw, expected). RT/RS/FRT/FRS=0,
     // RA=1, imm=4 (low bits free since none of these are

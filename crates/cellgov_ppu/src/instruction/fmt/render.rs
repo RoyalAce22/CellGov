@@ -740,6 +740,27 @@ pub(super) fn render(
 
         // -- Cache / system --
         I::Dcbz { ra, rb } => op(f, "dcbz", format_args!("r{ra}, r{rb}")),
+        I::Dcbst { ra, rb } => op(f, "dcbst", format_args!("r{ra}, r{rb}")),
+        // [PPC-Book2 p:41 s:5.2.1.1] dcbf RA,RB is L = 0 and dcbfl RA,RB is L = 1.
+        // The mnemonic reads bit 0 of `l`, the bit the encoder keeps.
+        I::Dcbf { ra, rb, l } if l & 1 == 0 => op(f, "dcbf", format_args!("r{ra}, r{rb}")),
+        I::Dcbf { ra, rb, .. } => op(f, "dcbfl", format_args!("r{ra}, r{rb}")),
+        I::Icbi { ra, rb } => op(f, "icbi", format_args!("r{ra}, r{rb}")),
+        I::Dcbt { ra, rb, th: 0 } => op(f, "dcbt", format_args!("r{ra}, r{rb}")),
+        I::Dcbt { ra, rb, th } => op(f, "dcbt", format_args!("r{ra}, r{rb}, {th}")),
+        I::Dcbtst { ra, rb, th: 0 } => op(f, "dcbtst", format_args!("r{ra}, r{rb}")),
+        I::Dcbtst { ra, rb, th } => op(f, "dcbtst", format_args!("r{ra}, r{rb}, {th}")),
+        // [AltiVec-PEM p:6-10 s:6.2] dstt is dst with T = 1; [AltiVec-PEM p:6-9 s:6.2] dssall is dss with A = 1.
+        I::Dst { ra, rb, strm, t } => {
+            let m = if t { "dstt" } else { "dst" };
+            op(f, m, format_args!("r{ra}, r{rb}, {strm}"))
+        }
+        I::Dstst { ra, rb, strm, t } => {
+            let m = if t { "dststt" } else { "dstst" };
+            op(f, m, format_args!("r{ra}, r{rb}, {strm}"))
+        }
+        I::Dss { all: true, .. } => op0(f, "dssall"),
+        I::Dss { strm, all: false } => op(f, "dss", format_args!("{strm}")),
         I::Sc { lev } => {
             if lev == 0 {
                 op0(f, "sc")

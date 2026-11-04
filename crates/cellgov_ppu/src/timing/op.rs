@@ -1317,6 +1317,16 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             })
             .base(ra)
             .index(rb)),
+        // [CBE-Handbook p:145 s:6.1.6.1] the load-store unit translates the icbi address; the model
+        // issues every cache-block instruction there.
+        I::Dcbst { ra, rb }
+        | I::Dcbf { ra, rb, .. }
+        | I::Icbi { ra, rb }
+        | I::Dcbt { ra, rb, .. }
+        | I::Dcbtst { ra, rb, .. }
+        | I::Dst { ra, rb, .. }
+        | I::Dstst { ra, rb, .. } => one(Op::on(unit::LSU).base(ra).index(rb)),
+        I::Dss { .. } => one(Op::on(unit::LSU)),
         I::Sc { lev } => one(Op::on(0).kind(Kind::Syscall {
             number: (lev == 0).then_some(state.gpr[11]),
         })),

@@ -300,14 +300,6 @@ fn round_trip(raw: u32, instruction: PpuInstruction) -> WordClass {
     }
     let explained = match alias(raw) {
         None => return classify_reserved(raw, word, &instruction),
-        Some(Alias::NopHint { .. }) => {
-            instruction
-                == PpuInstruction::Ori {
-                    ra: 0,
-                    rs: 0,
-                    imm: 0,
-                }
-        }
         Some(Alias::TimeBaseThroughMfspr { tbr }) => matches!(
             (tbr, instruction),
             (268, PpuInstruction::Mftb { .. }) | (269, PpuInstruction::Mftbu { .. })

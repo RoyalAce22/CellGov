@@ -38,6 +38,13 @@ pub(super) const fn x(t: u8, a: u8, b: u8, xo: u32, rc: bool) -> u32 {
     p(31) | rt(t) | ra(a) | rb(b) | xo_10(xo, rc)
 }
 
+/// The RT slot of a data-stream instruction: the flag in bit 6, STRM in bits 9:10.
+///
+/// [AltiVec-PEM p:6-10 s:6.2] dst places T in bit 6 and STRM in bits 9:10.
+pub(super) const fn stream_field(strm: u8, flag: bool) -> u8 {
+    ((flag as u8) << 4) | (strm & 3)
+}
+
 /// [PPC-Book1 p:9 s:1.7.11 XO-Form] OPCD RT RA RB OE(21) XO(22:30) Rc(31).
 pub(super) const fn xo(t: u8, a: u8, b: u8, xo: u32, oe: bool, rc: bool) -> u32 {
     p(31) | rt(t) | ra(a) | rb(b) | xo_9(xo, oe, rc)

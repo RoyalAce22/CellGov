@@ -116,7 +116,10 @@ pub fn execute(
         | PpuInstruction::Stfsux { .. }
         | PpuInstruction::Stfdx { .. }
         | PpuInstruction::Stfdux { .. }
-        | PpuInstruction::Dcbz { .. } => {
+        | PpuInstruction::Dcbz { .. }
+        | PpuInstruction::Dcbst { .. }
+        | PpuInstruction::Dcbf { .. }
+        | PpuInstruction::Icbi { .. } => {
             mem::execute(insn, state, unit_id, region_views, effects, store_buf)
         }
 
@@ -306,5 +309,13 @@ pub fn execute(
         PpuInstruction::Sync { .. } | PpuInstruction::Eieio | PpuInstruction::Isync => {
             ExecuteVerdict::Continue
         }
+
+        // [PPC-Book2 p:19 s:3.2.2] a touch hint never invokes the data storage handler.
+        // [CBE-Handbook p:147 s:6.1.6.6] dst, dstst and dss are no-ops on the CBE.
+        PpuInstruction::Dcbt { .. }
+        | PpuInstruction::Dcbtst { .. }
+        | PpuInstruction::Dst { .. }
+        | PpuInstruction::Dstst { .. }
+        | PpuInstruction::Dss { .. } => ExecuteVerdict::Continue,
     }
 }

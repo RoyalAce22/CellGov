@@ -30,6 +30,14 @@ mod tests;
 #[path = "tests/fault_leaves_state_tests.rs"]
 mod fault_leaves_state_tests;
 
+#[cfg(test)]
+#[path = "tests/cache_block_tests.rs"]
+mod cache_block_tests;
+
+#[cfg(test)]
+#[path = "tests/cache_block_console_tests.rs"]
+mod cache_block_console_tests;
+
 pub use dispatch::execute;
 pub use fault::PpuFault;
 pub use verdict::ExecuteVerdict;

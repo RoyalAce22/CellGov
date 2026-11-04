@@ -588,6 +588,14 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
         | I::CmpwBc { .. }
         | I::Consumed
         | I::Dcbz { .. }
+        | I::Dcbst { .. }
+        | I::Dcbf { .. }
+        | I::Icbi { .. }
+        | I::Dcbt { .. }
+        | I::Dcbtst { .. }
+        | I::Dst { .. }
+        | I::Dstst { .. }
+        | I::Dss { .. }
         | I::Sc { .. }
         | I::Sync { .. }
         | I::Eieio

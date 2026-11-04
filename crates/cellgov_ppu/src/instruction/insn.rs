@@ -1561,6 +1561,80 @@ pub enum PpuInstruction {
         ra: u8,
         rb: u8,
     },
+    /// Data cache block store. Translated and protection-checked as a
+    /// load of `(RA|0)+(RB)`; no other effect under the deterministic
+    /// model.
+    ///
+    /// [PPC-Book2 p:21 s:3.2.2] dcbst X-form, treated as a Load.
+    Dcbst {
+        ra: u8,
+        rb: u8,
+    },
+    /// Data cache block flush. Translated and protection-checked as a
+    /// load of `(RA|0)+(RB)`; no other effect under the deterministic
+    /// model.
+    ///
+    /// [PPC-Book2 p:21 s:3.2.2] dcbf X-form, treated as a Load.
+    Dcbf {
+        ra: u8,
+        rb: u8,
+        /// The L field, instruction bit 10; only disassembly and encoding read it.
+        ///
+        /// [PPC-Book2 p:41 s:5.2.1.1] L = 1 is `dcbfl`, the flush of this processor's cache alone.
+        l: u8,
+    },
+    /// Instruction cache block invalidate. Translated and
+    /// protection-checked as a load of `(RA|0)+(RB)`; no other effect
+    /// under the deterministic model.
+    ///
+    /// [PPC-Book2 p:18 s:3.2.1] icbi X-form, treated as a Load.
+    Icbi {
+        ra: u8,
+        rb: u8,
+    },
+    /// Data cache block touch: a hint that never faults.
+    ///
+    /// [PPC-Book2 p:19 s:3.2.2] dcbt X-form; the data storage interrupt handler is never invoked.
+    Dcbt {
+        ra: u8,
+        rb: u8,
+        /// The TH field, instruction bits 7:10, kept for disassembly.
+        th: u8,
+    },
+    /// Data cache block touch for store: a hint that never faults.
+    ///
+    /// [PPC-Book2 p:19 s:3.2.2] dcbtst X-form; the data storage interrupt handler is never invoked.
+    Dcbtst {
+        ra: u8,
+        rb: u8,
+        /// The TH field, instruction bits 7:10, kept for disassembly.
+        th: u8,
+    },
+    /// Data stream touch: a prefetch hint, a no-op on the CBE.
+    ///
+    /// [AltiVec-PEM p:6-10 s:6.2] dst X-form: T at bit 6, STRM at bits 9:10.
+    Dst {
+        ra: u8,
+        rb: u8,
+        strm: u8,
+        t: bool,
+    },
+    /// Data stream touch for store: a prefetch hint, a no-op on the CBE.
+    ///
+    /// [AltiVec-PEM p:6-12 s:6.2] dstst X-form: T at bit 6, STRM at bits 9:10.
+    Dstst {
+        ra: u8,
+        rb: u8,
+        strm: u8,
+        t: bool,
+    },
+    /// Data stream stop: a no-op on the CBE.
+    ///
+    /// [AltiVec-PEM p:6-9 s:6.2] dss X-form: A at bit 6, STRM at bits 9:10.
+    Dss {
+        strm: u8,
+        all: bool,
+    },
 
     // -- System --
     /// System call. LV2 convention: syscall number in r11. The 7-bit
@@ -1834,6 +1908,14 @@ impl PpuInstruction {
             | PpuInstruction::Srdi { .. }
             | PpuInstruction::Consumed
             | PpuInstruction::Dcbz { .. }
+            | PpuInstruction::Dcbst { .. }
+            | PpuInstruction::Dcbf { .. }
+            | PpuInstruction::Icbi { .. }
+            | PpuInstruction::Dcbt { .. }
+            | PpuInstruction::Dcbtst { .. }
+            | PpuInstruction::Dst { .. }
+            | PpuInstruction::Dstst { .. }
+            | PpuInstruction::Dss { .. }
             | PpuInstruction::Sc { .. }
             | PpuInstruction::Sync { .. }
             | PpuInstruction::Eieio

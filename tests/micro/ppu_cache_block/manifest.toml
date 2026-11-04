@@ -1,0 +1,15 @@
+[test]
+name = "ppu_cache_block"
+
+# A hardware probe: dcbst, dcbf and icbi leave a mapped line unchanged,
+# and the touch and data-stream hints complete on an address no page
+# holds. The console capture is the answer; no emulator runs it.
+
+[observe]
+# 18 big-endian u32 words, as ppu/main.c lists: 72 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 72 },
+]
+
+[expect]
+outcome = "completed"

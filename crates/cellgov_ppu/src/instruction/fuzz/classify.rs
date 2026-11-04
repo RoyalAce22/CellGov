@@ -245,6 +245,8 @@ pub(super) fn effect_and_outcome(
         K::Ldarx | K::Lwarx => (RESERVATION_READ_EFFECTS, ATOMIC_LOAD),
         K::Stdcx | K::Stwcx => (ATOMIC_STORE_EFFECTS, ATOMIC_STORE),
         K::Mftb | K::Mftbu => (CLOCK_EFFECTS, CONTINUE),
+        // A block whose addressed byte no region holds faults; the check records no read.
+        K::Dcbst | K::Dcbf | K::Icbi => (NO_EFFECTS, LOAD),
         K::B => (NO_EFFECTS, UNCONDITIONAL_BRANCH),
         K::Bc | K::Bclr | K::Bcctr | K::CmpwiBc | K::CmpwBc => (NO_EFFECTS, BRANCH),
         K::Sc => (NO_EFFECTS, SYSCALL),
@@ -478,6 +480,14 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::CmpwBc
         | PpuInstructionKind::Consumed
         | PpuInstructionKind::Dcbz
+        | PpuInstructionKind::Dcbst
+        | PpuInstructionKind::Dcbf
+        | PpuInstructionKind::Icbi
+        | PpuInstructionKind::Dcbt
+        | PpuInstructionKind::Dcbtst
+        | PpuInstructionKind::Dst
+        | PpuInstructionKind::Dstst
+        | PpuInstructionKind::Dss
         | PpuInstructionKind::Sc
         | PpuInstructionKind::Sync
         | PpuInstructionKind::Eieio

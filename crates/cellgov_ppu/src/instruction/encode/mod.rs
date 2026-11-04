@@ -22,3 +22,7 @@ pub use word::{encode, EncodeError};
 #[cfg(test)]
 #[path = "tests/encode_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/cache_block_encode_tests.rs"]
+mod cache_block_encode_tests;

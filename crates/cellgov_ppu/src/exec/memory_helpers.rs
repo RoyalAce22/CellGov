@@ -213,6 +213,26 @@ pub(crate) fn load_se(
     })
 }
 
+/// Refuse a cache-block instruction whose byte at `ea` no view holds.
+///
+/// The check reads no byte and records no read, so the instruction
+/// leaves no dependency footprint. The error is the one a one-byte
+/// load at `ea` gives.
+#[inline]
+pub(crate) fn check_block_translates(
+    views: &[RegionView<'_>],
+    ea: u64,
+) -> Result<(), cellgov_mem::MemError> {
+    let held = views
+        .iter()
+        .any(|v| v.base <= ea && ea < v.base + v.bytes.len() as u64);
+    if held {
+        Ok(())
+    } else {
+        Err(unmapped(ea))
+    }
+}
+
 /// Refuse a store of `len` bytes at `ea` that no one view holds, or
 /// that reaches a view whose region refuses writes.
 ///

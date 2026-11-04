@@ -4,7 +4,8 @@ use crate::seeded::{seed, SeededDefect};
 
 const NOP: u32 = 0x6000_0000;
 const MFLR_R0_WITH_RC: u32 = 0x7c08_02a7;
-const DCBT: u32 = 0x7c00_022c;
+// SPR 268 splits as 12 in the RA slot and 8 in the RB slot.
+const MFSPR_R3_TBL: u32 = (31 << 26) | (3 << 21) | (12 << 16) | (8 << 11) | (339 << 1);
 const SYNC: u32 = 0x7c00_04ac;
 const MFSPR_R3_DSISR: u32 = (31 << 26) | (3 << 21) | (18 << 16) | (339 << 1);
 
@@ -20,7 +21,7 @@ fn reparse(artifact: &DecodeCensusArtifact) -> Result<DecodeCensusArtifact, Deco
 fn classify_separates_the_canonical_reserved_alias_gap_and_unknown_words() {
     assert_eq!(classify(NOP), WordClass::Canonical);
     assert_eq!(classify(MFLR_R0_WITH_RC), WordClass::ReservedBits);
-    assert_eq!(classify(DCBT), WordClass::Alias);
+    assert_eq!(classify(MFSPR_R3_TBL), WordClass::Alias);
     assert_eq!(classify(SYNC), WordClass::Canonical);
     assert_eq!(classify(MFSPR_R3_DSISR), WordClass::ArmUnimplemented);
     assert_eq!(classify(0), WordClass::NotRecognized);
@@ -104,8 +105,6 @@ fn a_seeded_encoder_mismatch_is_a_round_trip_failure_and_a_sampled_finding() {
     let _guard = seed(SeededDefect::EncoderMismatch);
     assert_eq!(classify(NOP), WordClass::RoundTripFailure);
     assert_eq!(classify(MFLR_R0_WITH_RC & !1), WordClass::RoundTripFailure);
-    // An alias spelling re-decodes its canonical word first, so it fails too.
-    assert_eq!(classify(DCBT), WordClass::RoundTripFailure);
     let artifact = census(domain(NOP, 2)).expect("census under a seeded mismatch");
     assert_eq!(artifact.classes.round_trip_failures, 2);
     assert_eq!(artifact.findings(), 2);
@@ -139,7 +138,8 @@ fn extended_keys_follow_each_primary_own_opcode_width() {
 
 #[test]
 fn a_census_counts_every_word_once_and_agrees_with_classify() {
-    let first = (31 << 26) | (5 << 21) | (6 << 16) | (7 << 11);
+    // RA 12 and RB 8 make XO 339 the mfspr alias of mftb.
+    let first = (31 << 26) | (5 << 21) | (12 << 16) | (8 << 11);
     let selected = domain(first, 2048);
     let artifact = census(selected).expect("census");
     assert_eq!(artifact.domain, selected);

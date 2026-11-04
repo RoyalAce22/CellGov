@@ -1,6 +1,6 @@
 //! Encoder totality, canonical words, reserved bits, and alias spellings.
 
-use cellgov_ps3_abi::hw::ppc_isa::{PPC_EIEIO_XO, PPC_ISYNC_XO, PPC_STORAGE_HINT_XOS, PPC_SYNC_XO};
+use cellgov_ps3_abi::hw::ppc_isa::{PPC_EIEIO_XO, PPC_ISYNC_XO, PPC_SYNC_XO};
 
 use super::{alias, encode, reserved_bits, Alias, EncodeError};
 use crate::decode::decode;
@@ -53,7 +53,6 @@ fn a_witness_re_encodes_to_itself_less_its_reserved_bits_or_is_an_alias() {
                 raw & !reserved_bits(&insn),
                 "witness {raw:#010x} {insn:?}"
             ),
-            Some(Alias::NopHint { .. }) => assert_eq!(insn, NOP, "witness {raw:#010x}"),
             Some(Alias::TimeBaseThroughMfspr { tbr }) => assert!(
                 matches!((tbr, insn), (268, I::Mftb { .. }) | (269, I::Mftbu { .. })),
                 "witness {raw:#010x} {insn:?} tbr {tbr}"
@@ -90,28 +89,6 @@ fn reserved_bits_are_exactly_the_bits_the_decoder_does_not_read() {
         }
     }
     assert!(reserved_flips > 0, "no witness carried a reserved bit");
-}
-
-#[test]
-fn every_nop_hint_decodes_to_the_preferred_nop_whatever_its_operand_bits() {
-    let operand_patterns = [0u32, (5 << 21) | (6 << 16) | (7 << 11) | 1, 0x03FF_F801];
-    let mut checked = 0;
-    for pattern in operand_patterns {
-        for xo in PPC_STORAGE_HINT_XOS {
-            let raw = (31 << 26) | pattern | (xo << 1);
-            assert_eq!(decode(raw), Ok(NOP), "hint {raw:#010x}");
-            assert_eq!(
-                alias(raw),
-                Some(Alias::NopHint {
-                    primary: 31,
-                    xo: xo as u16
-                })
-            );
-            assert_eq!(encode(&NOP), Ok(0x6000_0000));
-            checked += 1;
-        }
-    }
-    assert_eq!(checked, operand_patterns.len() * PPC_STORAGE_HINT_XOS.len());
 }
 
 /// [PPC-Book2 p:26 s:3.3.3] sync, L at bits 9:10; [PPC-Book2 p:28 s:3.3.3] eieio; [PPC-Book2 p:22 s:3.3.1] isync.
