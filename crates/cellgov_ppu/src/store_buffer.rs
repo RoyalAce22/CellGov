@@ -19,7 +19,8 @@ const CAPACITY: usize = 64;
 /// `emit_at == Some(n)` marks a successful `stwcx`/`stdcx`, with `n`
 /// the effect-vector length when it executed. [`StoreBuffer::flush`]
 /// emits it as `ConditionalStore` at that slot, ahead of any
-/// `ReservationAcquire` pushed straight into the vector afterwards:
+/// `ReservationAcquire` or `SharedReadIntent` pushed straight into the
+/// vector afterwards:
 /// the commit pipeline drops the emitter's reservation when it
 /// applies a `ConditionalStore`, so an acquire that committed first
 /// would be lost before its own `stwcx` used it.

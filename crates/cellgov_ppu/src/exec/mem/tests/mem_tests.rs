@@ -24,6 +24,8 @@ mod dcbz_console;
 mod floats;
 #[path = "mem_lmw_form_tests.rs"]
 mod lmw_form;
+#[path = "mem_load_wrap_tests.rs"]
+mod load_wrap;
 #[path = "mem_load_tests.rs"]
 mod loads;
 #[path = "mem_read_intent_tests.rs"]
