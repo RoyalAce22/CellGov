@@ -1,13 +1,12 @@
 //! CellGov's integer instructions against the `ppu_int_edges` console
 //! capture, case by case through the differential harness.
 //!
-//! `divw` and `divwo` leave the bit-for-bit comparison:
-//! [PPC-Book1 p:58 s:3.3.8] RT bits 0:31 are undefined, and so are the
-//! LT, GT and EQ bits of CR0 in 64-bit mode. The console leaves bits
-//! 0:31 zero and sets CR0 from that 64-bit value; CellGov sign-extends
-//! the quotient. The defined parts are compared.
+//! [PPC-Book1 p:58 s:3.3.8] `divw` leaves RT bits 0:31 undefined, and the LT, GT and EQ bits of CR0 in 64-bit mode.
+//! The console leaves bits 0:31 zero and sets CR0 from that 64-bit
+//! value, and CellGov does the same, so `divw` and `divwo` replay bit
+//! for bit with the other rows.
 
-use crate::console_cases::{capture, cellgov_after, replay, table, varies, Capture, Case, Run};
+use crate::console_cases::{capture, replay, table, varies, Capture, Case, Run};
 use cellgov_ppu::differential::CaseOutcome;
 
 const PROBE: &str = "ppu_int_edges";
@@ -53,52 +52,26 @@ fn the_two_console_runs_of_every_case_agree() {
 fn every_integer_edge_case_matches_the_console() {
     let mut compared = 0;
     let mut addc = 0;
+    let mut divw = 0;
     let mut wrong = Vec::new();
     for (index, case, runs) in rows() {
-        if is_divw(&case) {
-            continue;
-        }
         compared += 1;
         addc += u32::from(matches!(mnemonic(&case), "addc" | "addco"));
+        divw += u32::from(is_divw(&case));
         match replay(PROBE, &case, index, &runs[0]) {
             CaseOutcome::Pass => {}
             other => wrong.push(format!("{} [{}]: {other:?}", case.id, case.asm)),
         }
     }
-    assert_eq!(compared, 1917 - 41);
+    assert_eq!(compared, 1917);
     assert_eq!(addc, 98, "the addc and addco rows");
+    assert_eq!(divw, 41, "the divw and divwo rows");
     assert!(
         wrong.is_empty(),
         "{} case(s):\n{}",
         wrong.len(),
         wrong.join("\n")
     );
-}
-
-#[test]
-fn divw_matches_the_console_in_every_defined_part() {
-    let mut rows_seen = 0;
-    for (index, case, runs) in rows() {
-        if !is_divw(&case) {
-            continue;
-        }
-        rows_seen += 1;
-        let console = &runs[0];
-        let s = cellgov_after(&case, index).unwrap_or_else(|e| panic!("{}: {e:?}", case.id));
-        assert_eq!(
-            s.gpr[5] as u32, console.slots[0] as u32,
-            "{} quotient",
-            case.id
-        );
-        assert_eq!(s.xer, console.xer, "{} XER", case.id);
-        assert_eq!(
-            s.cr & !CR0_LT_GT_EQ,
-            console.cr & !CR0_LT_GT_EQ,
-            "{} CR outside CR0's LT, GT and EQ",
-            case.id
-        );
-    }
-    assert_eq!(rows_seen, 41);
 }
 
 #[test]

@@ -4,6 +4,7 @@
 mod console_cases;
 mod console_ppu_addc_xer;
 mod console_ppu_ctrl_threads;
+mod console_ppu_divw_quotient;
 mod console_ppu_entry_state;
 mod console_ppu_int_edges;
 mod console_ppu_issue_chain;
@@ -25,6 +26,7 @@ mod console_ppu_issue_vscr_mem_forms;
 mod console_ppu_lswx_zero_count;
 mod console_ppu_lv2_call_cost;
 mod console_ppu_may_trap;
+mod console_ppu_mulhwu_high_bit;
 mod console_ppu_ocrf_fxm;
 mod console_ppu_quadword;
 mod console_ppu_trap_immediate;

@@ -119,17 +119,19 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let ov = oe.then_some(product < i32::MIN as i64 || product > i32::MAX as i64);
             retire(state, rt, result, ov, rc)
         }
-        // [PPC-Book1 p:57 s:3.3.8] mulhwu: high 32 bits of unsigned 32x32 product, zero-extended.
+        // [PPC-Book1 p:57 s:3.3.8] mulhwu: high word of the unsigned 32x32 product into RT[32:63]; RT[0:31], and CR0 LT, GT and EQ in 64-bit mode, are undefined.
+        // CellGov writes RT[0:31] zero and CR0 compares that value, so a high-bit result is positive.
+        // The reference console does the same, for a high-bit result too (probes
+        // ppu_reference_vectors and ppu_mulhwu_high_bit).
         PpuInstruction::Mulhwu { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as u32 as u64;
             let b = state.gpr[rb as usize] as u32 as u64;
             let result = (a * b) >> 32;
-            // RT is the unsigned high half (upper 32 bits of RT
-            // are zero); CR0 reads the same value, so a high-bit
-            // result is positive, not negative.
             retire(state, rt, result, None, rc)
         }
-        // [PPC-Book1 p:57 s:3.3.8] mulhw: high 32 bits of signed 32x32 product, sign-extended.
+        // [PPC-Book1 p:57 s:3.3.8] mulhw: high word of the signed 32x32 product into RT[32:63]; RT[0:31], and CR0 LT, GT and EQ in 64-bit mode, are undefined.
+        // CellGov sign-extends the high word into RT[0:31] and CR0 compares that value; the reference
+        // console does the same for a negative high word (probe ppu_reference_vectors, mulhw rows).
         PpuInstruction::Mulhw { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as i32 as i64;
             let b = state.gpr[rb as usize] as i32 as i64;
@@ -202,27 +204,32 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let ov = oe.then_some(((a ^ sum2) & (u64::MAX ^ sum2)) as i64 >> 63 != 0);
             retire(state, rt, sum2, ov, rc)
         }
-        // [PPC-Book1 p:58 s:3.3.8] divw: signed 32-bit divide; RT undefined on overflow (we yield 0).
+        // [PPC-Book1 p:58 s:3.3.8] divw: signed 32-bit divide; RT[0:31], and CR0 LT, GT and EQ in 64-bit mode, are undefined, and so is all of RT on overflow.
+        // CellGov writes RT[0:31] zero, and 0 on overflow, and CR0 compares that zero-extended value,
+        // as the reference console does (probes ppu_reference_vectors and ppu_divw_quotient).
         PpuInstruction::Divw { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as i32;
             let b = state.gpr[rb as usize] as i32;
             let overflow = b == 0 || (a == i32::MIN && b == -1);
             let result = if overflow { 0 } else { a.wrapping_div(b) };
             let ov = oe.then_some(overflow);
-            retire(state, rt, result as i64 as u64, ov, rc)
+            retire(state, rt, u64::from(result as u32), ov, rc)
         }
-        // [PPC-Book1 p:59 s:3.3.8] divwu: unsigned 32-bit divide; sets OV on divide-by-zero.
+        // [PPC-Book1 p:59 s:3.3.8] divwu: unsigned 32-bit divide; RT[0:31], and CR0 LT, GT and EQ in 64-bit mode, are undefined, and so is all of RT on a zero divisor (OV set when OE=1).
+        // CellGov writes RT[0:31] zero, and 0 for a zero divisor, and CR0 compares that value, so a
+        // high-bit quotient is positive; the reference console does the same (probes ppu_int_edges
+        // and ppu_reference_vectors).
         PpuInstruction::Divwu { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as u32;
             let b = state.gpr[rb as usize] as u32;
             let overflow = b == 0;
             let result = if overflow { 0 } else { a / b };
             let ov = oe.then_some(overflow);
-            // RT is unsigned, zero-extended; CR0 reads the same
-            // value (a high-bit result is positive, not negative).
             retire(state, rt, result as u64, ov, rc)
         }
-        // [PPC-Book1 p:58 s:3.3.8] divd: signed 64-bit divide; OV on b=0 or i64::MIN/-1.
+        // [PPC-Book1 p:58 s:3.3.8] divd: signed 64-bit divide; on a zero divisor or i64::MIN / -1, RT and (Rc=1) CR0 LT, GT and EQ are undefined (OV set when OE=1).
+        // CellGov writes 0 there and CR0 compares it (EQ), as the reference console does
+        // (probe ppu_reference_vectors).
         PpuInstruction::Divd { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as i64;
             let b = state.gpr[rb as usize] as i64;
@@ -231,7 +238,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let ov = oe.then_some(overflow);
             retire(state, rt, result as u64, ov, rc)
         }
-        // [PPC-Book1 p:59 s:3.3.8] divdu: unsigned 64-bit divide; OV when divisor is zero.
+        // [PPC-Book1 p:59 s:3.3.8] divdu: unsigned 64-bit divide; on a zero divisor, RT and (Rc=1) CR0 LT, GT and EQ are undefined (OV set when OE=1).
+        // CellGov writes 0 there and CR0 compares it (EQ), as the reference console does
+        // (probe ppu_reference_vectors).
         PpuInstruction::Divdu { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];

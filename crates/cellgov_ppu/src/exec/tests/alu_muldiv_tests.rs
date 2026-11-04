@@ -426,9 +426,10 @@ fn mulhd_dot_sets_cr0_eq_on_small_product() {
 // -- Divw / Divd / Divdu OE / Rc --
 
 #[test]
-fn divw_dot_sets_cr0_lt_on_negative_quotient() {
+fn divw_dot_compares_the_zero_extended_negative_quotient_as_positive() {
     let mut s = PpuState::new();
     s.set_gpr(3, (-12i32) as u32 as u64);
+    s.set_gpr(5, u64::MAX);
     s.set_gpr(4, 4);
     exec_no_mem(
         &PpuInstruction::Divw {
@@ -440,8 +441,8 @@ fn divw_dot_sets_cr0_lt_on_negative_quotient() {
         },
         &mut s,
     );
-    // -3 sign-extended is negative.
-    assert_eq!(s.cr_field(0), 0b1000);
+    assert_eq!(s.gpr[5], 0x0000_0000_FFFF_FFFD);
+    assert_eq!(s.cr_field(0), 0b0100);
 }
 
 #[test]

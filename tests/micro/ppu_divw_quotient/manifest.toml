@@ -1,0 +1,17 @@
+[test]
+name = "ppu_divw_quotient"
+
+# A hardware probe of divw over the sign classes of dividend and
+# divisor, with nonzero operand high words, in the plain, record and
+# OE forms. cases.tsv names each case. The console capture is the
+# answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (6 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 784 },
+]
+
+[expect]
+outcome = "completed"

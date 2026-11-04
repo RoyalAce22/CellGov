@@ -1,0 +1,16 @@
+[test]
+name = "ppu_mulhwu_high_bit"
+
+# A hardware probe of mulhwu whose result has bit 32 set, in the plain
+# and record forms, with nonzero operand high words. cases.tsv names
+# each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (2 cases).
+memory_regions = [
+  { name = "result", addr = 0, size = 272 },
+]
+
+[expect]
+outcome = "completed"

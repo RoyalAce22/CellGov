@@ -1,0 +1,3 @@
+id	asm	words	inputs	record	may_end_process
+mulhwu_high_bit	mulhwu r5, r3, r4	0x7ca32016	cr=0x0,xer=0x0,r5=0x5a5aa5a55a5aa5a5,r3=0x12345678ffffffff,r4=0x9abcdef0ffffffff	r5	0
+mulhwudot_high_bit	mulhwu. r5, r3, r4	0x7ca32017	cr=0x0,xer=0x0,r5=0x5a5aa5a55a5aa5a5,r3=0x12345678ffffffff,r4=0x9abcdef0ffffffff	r5	0

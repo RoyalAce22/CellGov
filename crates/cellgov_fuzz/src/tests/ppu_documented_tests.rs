@@ -237,16 +237,6 @@ fn capture() -> ConsoleCapture {
 /// does.
 const KNOWN_CONTRADICTED: &[(&str, &str, &str)] = &[
     (
-        "muldiv-undef/divw/normal/",
-        "r3.hi",
-        "the console leaves the high word of a word quotient zero; CellGov sign-extends it",
-    ),
-    (
-        "muldiv-undef/divw/normal/",
-        "cr.cr0-lt-gt-eq",
-        "CR0 then compares the zero-extended quotient",
-    ),
-    (
         "fctiw-high-word/",
         "f3.hi",
         "the console sign-extends the converted word into FRT[0:31]",
