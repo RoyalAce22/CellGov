@@ -18,10 +18,9 @@ use crate::exec::ExecuteVerdict;
 use crate::instruction::ops::{Fp59Op, Fp63Op};
 use crate::state::PpuState;
 
-/// Execute a primary-63 op. The FPSCR ops and the `frsqrte` estimate
-/// retire as no-ops (`Continue` without a register write), matching
-/// the not-modelled-FPSCR posture above; a guest reading FRT after
-/// `frsqrte` therefore sees the register's prior value.
+/// Execute a primary-63 op. The FPSCR ops retire as no-ops
+/// (`Continue` without a register write), matching the
+/// not-modelled-FPSCR posture above.
 pub fn execute_fp63(
     state: &mut PpuState,
     op: Fp63Op,
@@ -160,8 +159,15 @@ pub fn execute_fp63(
         // the architecture does not allow.
         // [PPC-Book1 p:125 s:5.2.1.1] fsqrt: FRT <- square root of FRB.
         Fp63Op::Fsqrt => nan_resolved_bits(b.sqrt(), &[b]),
-        Fp63Op::Frsqrte
-        | Fp63Op::Mtfsb1
+        // The host answers every special row of the table: -0 and +0
+        // give -inf and +inf, +inf gives +0, and a negative operand
+        // gives a NaN that becomes the generated QNaN. A normal operand
+        // gets the reciprocal of the rounded square root, which is
+        // inside the bound; the PPE's own estimate table is not read
+        // back yet.
+        // [PPC-Book1 p:126 s:5.2.1.1] frsqrte: an estimate within one part in 32 of 1/sqrt(FRB); the special-operand table fixes -inf and < 0 to QNaN, -0 to -inf, +0 to +inf, +inf to +0.
+        Fp63Op::Frsqrte => nan_resolved_bits(1.0 / b.sqrt(), &[b]),
+        Fp63Op::Mtfsb1
         | Fp63Op::Mcrfs
         | Fp63Op::Mtfsb0
         | Fp63Op::Mtfsfi
@@ -172,7 +178,7 @@ pub fn execute_fp63(
     ExecuteVerdict::Continue
 }
 
-/// Execute a primary-59 op. `fres` retires as a no-op.
+/// Execute a primary-59 op.
 pub fn execute_fp59(
     state: &mut PpuState,
     op: Fp59Op,
@@ -201,8 +207,7 @@ pub fn execute_fp59(
         Fp59Op::Fmadds | Fp59Op::Fmsubs | Fp59Op::Fnmadds | Fp59Op::Fnmsubs => &[a64, b64, c64],
         Fp59Op::Fmuls => &[a64, c64],
         Fp59Op::Fdivs | Fp59Op::Fadds | Fp59Op::Fsubs => &[a64, b64],
-        Fp59Op::Fsqrts => &[b64],
-        Fp59Op::Fres => &[],
+        Fp59Op::Fsqrts | Fp59Op::Fres => &[b64],
     };
     let a = a64 as f32;
     let b = b64 as f32;
@@ -218,7 +223,11 @@ pub fn execute_fp59(
         Fp59Op::Fsubs => a - b,
         // [PPC-Book1 p:125 s:5.2.1.1] fsqrts: FRT <- square root of FRB, single precision.
         Fp59Op::Fsqrts => b.sqrt(),
-        Fp59Op::Fres => return ExecuteVerdict::Continue,
+        // FRB is a double, so the value is the reciprocal of the double,
+        // rounded to single precision. It is inside the bound; the PPE's
+        // own estimate table is not read back yet.
+        // [PPC-Book1 p:125 s:5.2.1.1] fres: an estimate within one part in 256 of 1/FRB; the special-operand table fixes -inf to -0, -0 to -inf, +0 to +inf, +inf to +0.
+        Fp59Op::Fres => (1.0 / b64) as f32,
     };
     // `result as f64` is only reached on a non-NaN result: a NaN one is
     // answered from the operands or by the generated QNaN, so widening
@@ -287,3 +296,11 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/fp_console_tests.rs"]
 mod fp_console_tests;
+
+#[cfg(test)]
+#[path = "tests/fp_estimate_tests.rs"]
+mod fp_estimate_tests;
+
+#[cfg(test)]
+#[path = "tests/fp_estimate_console_tests.rs"]
+mod fp_estimate_console_tests;
