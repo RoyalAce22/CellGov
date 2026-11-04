@@ -1,10 +1,13 @@
 //! Vector-unit execution, with typed-vs-VX-stub path equivalence.
 
-use super::*;
+use super::convert::{vcfsx, vcfux};
+use super::lane_support::{pack_u32x4, unpack_f32x4};
+use super::splat::{vspltb, vsplth, vspltisb, vspltish};
 use crate::exec::test_support::exec_no_mem;
 use crate::exec::ExecuteVerdict;
 use crate::instruction::ops::{VaOp, VxOp};
 use crate::instruction::PpuInstruction;
+use crate::state::PpuState;
 
 #[test]
 fn vxor_self_zeros_vector_register() {
@@ -151,23 +154,6 @@ fn vsldoi_shifts_by_shb_bytes() {
         0x04,
     ]);
     assert_eq!(s.vr[3], expected);
-}
-
-fn pack_u32x4(lanes: [u32; 4]) -> u128 {
-    let mut r = [0u8; 16];
-    for (i, v) in lanes.iter().enumerate() {
-        r[i * 4..i * 4 + 4].copy_from_slice(&v.to_be_bytes());
-    }
-    u128::from_be_bytes(r)
-}
-
-fn unpack_f32x4(v: u128) -> [f32; 4] {
-    let b = v.to_be_bytes();
-    let mut r = [0.0f32; 4];
-    for i in 0..4 {
-        r[i] = f32::from_be_bytes([b[i * 4], b[i * 4 + 1], b[i * 4 + 2], b[i * 4 + 3]]);
-    }
-    r
 }
 
 #[test]

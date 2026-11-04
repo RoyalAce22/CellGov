@@ -620,6 +620,8 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         I::Vsldoi { vt, va, vb, shb } => {
             p(4) | rt(vt) | ra(va) | rb(vb) | slot_6(shb & 0xF) | VaOp::Vsldoi as u32
         }
+        I::Mfvscr { vt } => p(4) | rt(vt) | 1540,
+        I::Mtvscr { vb } => p(4) | rb(vb) | 1604,
 
         // Floating-point loads and stores.
         I::Lfs { frt, ra: a, imm } => d(48, frt, a, imm as u16),

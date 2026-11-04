@@ -528,6 +528,8 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
         | I::Va { .. }
         | I::Vxor { .. }
         | I::Vsldoi { .. }
+        | I::Mfvscr { .. }
+        | I::Mtvscr { .. }
         | I::Lvlx { .. }
         | I::Lvrx { .. }
         | I::Lvlxl { .. }

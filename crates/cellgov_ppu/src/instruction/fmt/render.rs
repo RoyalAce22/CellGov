@@ -501,6 +501,8 @@ pub(super) fn render(
         I::Vsldoi { vt, va, vb, shb } => {
             op(f, "vsldoi", format_args!("v{vt}, v{va}, v{vb}, {shb}"))
         }
+        I::Mfvscr { vt } => op(f, "mfvscr", format_args!("v{vt}")),
+        I::Mtvscr { vb } => op(f, "mtvscr", format_args!("v{vb}")),
         I::Lvlx { vt, ra, rb } => mem_x(f, "lvlx", 'v', vt, ra, rb),
         I::Lvrx { vt, ra, rb } => mem_x(f, "lvrx", 'v', vt, ra, rb),
         I::Lvlxl { vt, ra, rb } => mem_x(f, "lvlxl", 'v', vt, ra, rb),

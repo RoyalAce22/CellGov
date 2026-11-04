@@ -1,21 +1,15 @@
 //! Recording (Rc=1) VXR vector compares and their CR6 result.
 
-use super::*;
+use super::execute::record_cr6;
+use super::lane_support::pack_u32x4 as words;
 use crate::exec::test_support::exec_no_mem;
-use crate::exec::ExecuteVerdict;
+use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::ops::VxOp;
 use crate::instruction::PpuInstruction;
+use crate::state::PpuState;
 
 // Field 6 starts at 0b0101, which no recording compare can produce.
 const CR_SEED: u32 = 0xABCD_EF51;
-
-fn words(lanes: [u32; 4]) -> u128 {
-    let mut r = [0u8; 16];
-    for (i, v) in lanes.iter().enumerate() {
-        r[i * 4..i * 4 + 4].copy_from_slice(&v.to_be_bytes());
-    }
-    u128::from_be_bytes(r)
-}
 
 /// Runs `vcmpequw. v3,v1,v2` over a CR seeded with `CR_SEED`.
 fn vcmpequw_dot(a: [u32; 4], b: [u32; 4]) -> PpuState {

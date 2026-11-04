@@ -242,6 +242,8 @@ pub fn execute(
         PpuInstruction::Vx { op, rc, vt, va, vb } => vec::execute_vx(state, op, rc, vt, va, vb),
         PpuInstruction::Va { op, vt, va, vb, vc } => vec::execute_va(state, op, vt, va, vb, vc),
         PpuInstruction::Vsldoi { vt, va, vb, shb } => vec::execute_vsldoi(state, vt, va, vb, shb),
+        PpuInstruction::Mfvscr { vt } => vec::execute_mfvscr(state, vt),
+        PpuInstruction::Mtvscr { vb } => vec::execute_mtvscr(state, vb),
 
         PpuInstruction::Fp63 {
             op,

@@ -25,7 +25,7 @@ fn a_store_that_wraps_the_address_space_is_no_finding() {
         (GenerationStrategy::Structured, 83, PpuInstructionKind::Stw),
         (
             GenerationStrategy::Structured,
-            113_402,
+            100_997,
             PpuInstructionKind::Stmw,
         ),
         (

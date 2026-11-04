@@ -95,6 +95,9 @@ pub(crate) struct Core {
     miss: [u64; REGS],
     /// The cycle each unit is free again, indexed by unit bit.
     unit_free: [u64; 5],
+    /// The earliest cycle a vector-scalar instruction other than an
+    /// `mtvscr` can issue at, after the last `mtvscr`.
+    vsu_fence: u64,
     /// The share of this thread's recent cycles, out of [`SHARE_ONE`],
     /// spent on divides and square roots. Each instruction weighs by its
     /// cycles, over a window of [`PRESSURE_WINDOW_CYCLES`].
@@ -207,7 +210,11 @@ fn issues_alone(op: &Op) -> bool {
     op.words != 0
         || matches!(
             op.kind,
-            Kind::Unpipelined(_) | Kind::Syscall { .. } | Kind::Refetch | Kind::Drain
+            Kind::Unpipelined(_)
+                | Kind::Syscall { .. }
+                | Kind::Refetch
+                | Kind::Drain
+                | Kind::VscrWrite
         )
 }
 
@@ -246,6 +253,7 @@ impl PpeTiming {
                 addr_ready: [0; REGS],
                 miss: [0; REGS],
                 unit_free: [0; 5],
+                vsu_fence: 0,
                 divide_share: 0,
                 alone_share: 0,
                 operand_wait: 0,
@@ -384,9 +392,15 @@ impl PpeTiming {
         for u in unit_slots(op.units) {
             t = t.max(c.unit_free[u]);
         }
-        if matches!(op.kind, Kind::Drain | Kind::Refetch | Kind::Syscall { .. }) {
+        if matches!(
+            op.kind,
+            Kind::Drain | Kind::Refetch | Kind::VscrWrite | Kind::Syscall { .. }
+        ) {
             let all = c.ready.iter().chain(c.unit_free.iter()).copied().max();
             t = t.max(all.unwrap_or(0));
+        }
+        if uses_vsu(op) && op.kind != Kind::VscrWrite {
+            t = t.max(c.vsu_fence);
         }
         // [CBE-Handbook p:301 s:10.2.3.1] the sibling's stalls at IS2
         // stall this thread too. In the `ppu_issue_units` capture the
@@ -477,6 +491,12 @@ impl PpeTiming {
                 c.unit_free[u] = t + u64::from(cycles);
             }
         }
+        if op.kind == Kind::VscrWrite {
+            for u in unit_slots(op.units) {
+                c.unit_free[u] = t + k::PPU_MTVSCR_HOLD_CYCLES;
+            }
+            c.vsu_fence = t + k::PPU_MTVSCR_YOUNGER_VSU_CYCLES;
+        }
 
         match op.kind {
             Kind::Load { ea, len, class } => self.load(t, op, ea, len, class),
@@ -505,7 +525,7 @@ impl PpeTiming {
                 self.end_block(back);
                 return;
             }
-            Kind::Plain | Kind::Unpipelined(_) | Kind::Drain => {}
+            Kind::Plain | Kind::Unpipelined(_) | Kind::Drain | Kind::VscrWrite => {}
         }
         let c = &mut self.core;
         if c.next_pc == c.block_end {
@@ -660,6 +680,15 @@ fn issues_alone_for_long(op: &Op) -> bool {
 fn issues_to_vsu(op: &Op) -> bool {
     let vsu = unit::VSU1 | unit::VSU2;
     op.units != 0 && op.units & !vsu == 0
+}
+
+/// Whether `op` uses the VSU at all: an FP or VMX instruction, a VMX or
+/// FP load or store among them.
+///
+/// [CBE-Handbook p:756 s:A.6.2] the VXU and FPU loads and stores pass
+/// through the VSU issue queue.
+fn uses_vsu(op: &Op) -> bool {
+    op.units & (unit::VSU1 | unit::VSU2) != 0
 }
 
 /// The cycles a multiply holds the FXU, or `None` for any other

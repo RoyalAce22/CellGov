@@ -208,6 +208,8 @@ fn vector_field_candidates(kind: PpuFuzzKind) -> Vec<(u32, PpuOperandClass)> {
         PpuFuzzKind::Ordinary(PpuInstructionKind::Vxor) => {
             vec![(VB, C::Register), (VA, C::Register), (VD, C::Register)]
         }
+        PpuFuzzKind::Ordinary(PpuInstructionKind::Mfvscr) => vec![(VD, C::Register)],
+        PpuFuzzKind::Ordinary(PpuInstructionKind::Mtvscr) => vec![(VB, C::Register)],
         PpuFuzzKind::Vx(op) => {
             let mut fields = Vec::new();
             if op.is_vxr_compare() {

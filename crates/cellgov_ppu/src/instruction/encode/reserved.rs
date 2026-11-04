@@ -142,6 +142,10 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         | I::Mtvrsave { .. } => RC,
         // [AltiVec-PEM p:6-136 s:6.2] vsldoi's SHB is four bits; bit 21 is reserved.
         I::Vsldoi { .. } => 0x0000_0400,
+        // [AltiVec-PEM p:6-23 s:6.2] mfvscr reads vD only.
+        I::Mfvscr { .. } => RA | RB,
+        // [AltiVec-PEM p:6-24 s:6.2] mtvscr reads vB only.
+        I::Mtvscr { .. } => RT | RA,
         I::Lwz { .. }
         | I::Lbz { .. }
         | I::Lhz { .. }

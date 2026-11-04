@@ -420,6 +420,8 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::Va
         | PpuInstructionKind::Vxor
         | PpuInstructionKind::Vsldoi
+        | PpuInstructionKind::Mfvscr
+        | PpuInstructionKind::Mtvscr
         | PpuInstructionKind::Lvlx
         | PpuInstructionKind::Lvrx
         | PpuInstructionKind::Lvlxl

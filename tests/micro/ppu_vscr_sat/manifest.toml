@@ -1,0 +1,15 @@
+[test]
+name = "ppu_vscr_sat"
+
+# A hardware probe: mfvscr and mtvscr widths, the VSCR reserved bits,
+# and when SAT is set. The console capture is the answer; no emulator
+# runs it.
+
+[observe]
+# 15 big-endian u32 words, as ppu/main.c lists: 60 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 60 },
+]
+
+[expect]
+outcome = "completed"

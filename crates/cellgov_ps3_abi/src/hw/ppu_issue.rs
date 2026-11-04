@@ -481,6 +481,34 @@ pub const PPU_VMX_PERMUTE_LATENCY_CYCLES: u64 = 4;
 /// [CBE-Handbook p:741 s:A.3.2] simple: latency 4.
 pub const PPU_VMX_SIMPLE_LATENCY_CYCLES: u64 = 4;
 
+/// The cycles from an `mfvscr` to a dependent instruction.
+///
+/// [CBE-Handbook p:742 s:A.3.2] Table A-8 gives `mfvscr` no latency.
+///
+/// In the `ppu_issue_vscr` capture a loop of one `mfvscr` takes 40.25
+/// cycles an iteration. The next `mfvscr` waits for the result at issue.
+pub const PPU_MFVSCR_LATENCY_CYCLES: u64 = 40;
+
+/// The cycles an `mtvscr` holds its unit, so the next `mtvscr` waits
+/// that long.
+///
+/// [CBE-Handbook p:742 s:A.3.2] Table A-8 gives `mtvscr` no latency.
+///
+/// In the `ppu_issue_vscr` capture a loop of one `mtvscr` takes 42.54
+/// cycles an iteration, and 42.23 with four `addi` after it.
+pub const PPU_MTVSCR_HOLD_CYCLES: u64 = 42;
+
+/// The cycles from an `mtvscr` to the first younger vector-scalar
+/// instruction that can issue.
+///
+/// [CBE-Handbook p:742 s:A.3.2] After `mtvscr` issues, every younger vector-scalar instruction stalls until it completes.
+///
+/// In the `ppu_issue_vscr` capture an `mtvscr` and four independent
+/// `vaddubm` take 63.40 cycles an iteration. The last `vaddubm`'s result
+/// is ready seven cycles after the first one issues, so the fence takes
+/// the other 56.
+pub const PPU_MTVSCR_YOUNGER_VSU_CYCLES: u64 = 56;
+
 /// The cycles from a vector reciprocal estimate to a dependent
 /// instruction.
 ///

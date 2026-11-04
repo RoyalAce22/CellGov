@@ -34,6 +34,8 @@ pub struct PpuArchitecturalState {
     pub fpscr: u32,
     /// AltiVec usage mask.
     pub vrsave: u32,
+    /// Vector status and control register.
+    pub vscr: u32,
     /// Time-base register.
     pub tb: u64,
     /// Local reservation register.
@@ -55,6 +57,7 @@ impl PpuArchitecturalState {
             xer: fields.xer,
             fpscr: fields.fpscr,
             vrsave: fields.vrsave,
+            vscr: fields.vscr,
             tb: fields.tb,
             reservation: fields.reservation,
         }
@@ -294,6 +297,7 @@ fn state_differs_outside(
         || first_xer != second_xer
         || first.fpscr != second.fpscr
         || first.vrsave != second.vrsave
+        || first.vscr != second.vscr
         || first.tb != second.tb
         || first.reservation != second.reservation
 }

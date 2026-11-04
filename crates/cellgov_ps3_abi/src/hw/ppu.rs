@@ -65,6 +65,33 @@ pub const FPR_COUNT: usize = 32;
 /// [AltiVec-PEM p:2-4 s:2.3.1] VRF: 32 vector registers, each 128 bits wide.
 pub const VR_COUNT: usize = 32;
 
+/// VSCR non-Java mode bit (VSCR bit 15).
+///
+/// [AltiVec-PEM p:2-5 s:2.3.2] The VSCR defines two bits: NJ is VSCR bit 15 and SAT is VSCR bit 31.
+pub const VSCR_NJ: u32 = 0x0001_0000;
+
+/// VSCR saturation bit (VSCR bit 31).
+///
+/// [AltiVec-PEM p:2-5 s:2.3.2] The VSCR defines two bits: NJ is VSCR bit 15 and SAT is VSCR bit 31.
+pub const VSCR_SAT: u32 = 0x0000_0001;
+
+/// The VSCR bits the PPE stores. Every other bit is reserved.
+///
+/// [AltiVec-PEM p:2-5 s:2.3.2] A reserved bit last written as 1 reads back as 0 or 1.
+///
+/// The reference console reads every reserved bit back as 0, after a
+/// write of all ones and after a write of 0xA5A5A5A5 (`ppu_vscr_sat`).
+pub const VSCR_DEFINED_BITS: u32 = VSCR_NJ | VSCR_SAT;
+
+/// The VSCR of a PPU thread at its first instruction.
+///
+/// [AltiVec-PEM p:2-4 s:2.3.2] The VSCR reset value is implementation specific.
+///
+/// The reference console starts each PPU thread at NJ = 1 and SAT = 0
+/// (`ppu_vscr_mode`). The main thread and a created thread both start
+/// at this value, and a created thread does not take its creator's NJ.
+pub const PPU_THREAD_ENTRY_VSCR: u32 = VSCR_NJ;
+
 /// Highest guest address that can be backed by real storage (2^42 - 1).
 ///
 /// Not a bound on address arithmetic: a program's effective addresses

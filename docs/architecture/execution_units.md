@@ -5,8 +5,8 @@
 ### PPU
 
 **PPU (`cellgov_ppu`)**: PPC64 interpreter with 32 GPRs, 32 FPRs, PC,
-CR, LR, CTR, XER (carry tracked), FPSCR, VRSAVE, TB, and 32 vector
-registers.
+CR, LR, CTR, XER (carry tracked), FPSCR, VRSAVE, VSCR, TB, and 32
+vector registers.
 The FPSCR move instructions read and write FPSCR, except the reserved
 bit 20 and NI, which the PPE does not implement and which read 0, so
 results always follow IEEE 754. A floating-point record form copies

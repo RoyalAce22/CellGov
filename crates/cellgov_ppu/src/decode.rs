@@ -492,6 +492,10 @@ fn decode_vx(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
     // [AltiVec-PEM p:A-21 s:A.5 Table A-6 VX-Form] OPCD vD vA vB XO(21:31).
     match xo_11 {
         0x4c4 => Ok(PpuInstruction::Vxor { vt, va, vb }),
+        // [AltiVec-PEM p:6-23 s:6.2] mfvscr reads vD; vA and vB are reserved.
+        1540 => Ok(PpuInstruction::Mfvscr { vt }),
+        // [AltiVec-PEM p:6-24 s:6.2] mtvscr reads vB; vD and vA are reserved.
+        1604 => Ok(PpuInstruction::Mtvscr { vb }),
         xo => match VxOp::decode(xo) {
             Some((op, rc)) => Ok(PpuInstruction::Vx { op, rc, vt, va, vb }),
             None => Err(reject_opcode(raw, 4, xo)),
@@ -998,3 +1002,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/decode_proptests.rs"]
 mod proptests;
+
+#[cfg(test)]
+#[path = "tests/decode_vscr_tests.rs"]
+mod vscr_tests;

@@ -1130,6 +1130,18 @@ pub enum PpuInstruction {
         vb: u8,
         shb: u8,
     },
+    /// Move from the VSCR into `vt`, right-justified.
+    ///
+    /// [AltiVec-PEM p:6-23 s:6.2 AltiVec Instruction Set] mfvscr VX-form (XO=1540): vD = 96 zero bits || VSCR.
+    Mfvscr {
+        vt: u8,
+    },
+    /// Move bits 96:127 of `vb` into the VSCR.
+    ///
+    /// [AltiVec-PEM p:6-24 s:6.2 AltiVec Instruction Set] mtvscr VX-form (XO=1604): VSCR = (vB) bits 96:127.
+    Mtvscr {
+        vb: u8,
+    },
     /// [CBE-Handbook p:744] lvlx / lvrx Cell-specific VXU misaligned vector load (left/right indexed).
     Lvlx {
         vt: u8,
@@ -1857,6 +1869,8 @@ impl PpuInstruction {
             | PpuInstruction::Va { .. }
             | PpuInstruction::Vxor { .. }
             | PpuInstruction::Vsldoi { .. }
+            | PpuInstruction::Mfvscr { .. }
+            | PpuInstruction::Mtvscr { .. }
             | PpuInstruction::Lvlx { .. }
             | PpuInstruction::Lvrx { .. }
             | PpuInstruction::Lvlxl { .. }

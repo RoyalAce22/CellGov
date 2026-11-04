@@ -35,6 +35,8 @@ pub struct PpuStateSnapshot {
     pub fpscr: u32,
     /// AltiVec VR-usage mask.
     pub vrsave: u32,
+    /// Vector status and control register.
+    pub vscr: u32,
     /// Active reservation. `Some(line)` means a prior `lwarx` /
     /// `ldarx` claimed the 128-byte-aligned line; a subsequent
     /// `stwcx` / `stdcx` targeting that line will succeed.
@@ -54,6 +56,7 @@ impl PpuStateSnapshot {
             xer: 0,
             fpscr: 0,
             vrsave: 0,
+            vscr: 0,
             reservation: None,
         }
     }
@@ -71,6 +74,7 @@ impl PpuStateSnapshot {
             xer: fields.xer,
             fpscr: fields.fpscr,
             vrsave: fields.vrsave,
+            vscr: fields.vscr,
             reservation: fields.reservation,
         }
     }
@@ -89,6 +93,7 @@ impl PpuStateSnapshot {
         state.set_xer(self.xer);
         state.set_fpscr(self.fpscr & !PPE_FPSCR_UNIMPLEMENTED_BITS);
         state.set_vrsave(self.vrsave);
+        state.set_vscr(self.vscr);
         state.set_reservation(self.reservation);
     }
 }

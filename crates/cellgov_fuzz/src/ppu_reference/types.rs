@@ -47,7 +47,8 @@ pub struct PpuReferenceInputState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PpuReferenceStateBase {
-    /// Every PPU state field starts at zero with no reservation.
+    /// A new thread's PPU state: every field zero except the VSCR, which
+    /// takes its thread-entry value, and no reservation.
     Zeroed,
 }
 

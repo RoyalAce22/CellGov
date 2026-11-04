@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_vscr"
+
+# A hardware probe of what mfvscr and mtvscr cost at issue: each alone,
+# the mfvscr result's latency, and the stall an mtvscr gives younger
+# vector and fixed-point instructions, timed with mftb against vector
+# baselines. The console capture is the answer; ppu/main.c's header lists
+# the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 152 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 152 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

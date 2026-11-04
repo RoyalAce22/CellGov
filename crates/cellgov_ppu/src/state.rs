@@ -1,6 +1,8 @@
 //! PPU architectural state: the register banks and SPRs.
 
-use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
+use cellgov_ps3_abi::hw::ppu::{
+    FPR_COUNT, GPR_COUNT, PPU_THREAD_ENTRY_VSCR, VR_COUNT, VSCR_DEFINED_BITS, VSCR_SAT,
+};
 use cellgov_sync::ReservedLine;
 
 use crate::multilinear::{
@@ -113,6 +115,11 @@ pub struct PpuState {
     ///
     /// [AltiVec-PEM p:2-6 s:2.3.3] VRSAVE is SPR 256, 32 bits.
     vrsave: u32,
+    /// Vector status and control register. Hash-excluded, like the
+    /// vector registers.
+    ///
+    /// [AltiVec-PEM p:2-5 s:2.3.2] The VSCR is 32 bits: NJ is bit 15 and SAT is bit 31.
+    vscr: u32,
     /// Instrument flag (hash-excluded): set by `mtvrsave`.
     pub vrsave_written: bool,
     /// Per-step flag (hash-excluded): set by `mftb` and `mftbu`, read
@@ -169,6 +176,7 @@ pub(crate) struct PpuSnapshotFields {
     pub xer: u64,
     pub fpscr: u32,
     pub vrsave: u32,
+    pub vscr: u32,
     pub reservation: Option<ReservedLine>,
 }
 
@@ -183,6 +191,7 @@ pub(crate) struct PpuObservationFields {
     pub xer: u64,
     pub fpscr: u32,
     pub vrsave: u32,
+    pub vscr: u32,
     pub tb: u64,
     pub reservation: Option<ReservedLine>,
 }
@@ -201,6 +210,7 @@ impl PpuState {
             xer,
             fpscr,
             vrsave,
+            vscr,
             vrsave_written: _,
             clock_read: _,
             mfvrsave_executed: _,
@@ -225,6 +235,7 @@ impl PpuState {
             xer: *xer,
             fpscr: *fpscr,
             vrsave: *vrsave,
+            vscr: *vscr,
             reservation: *reservation,
         }
     }
@@ -241,6 +252,7 @@ impl PpuState {
             xer,
             fpscr,
             vrsave,
+            vscr,
             vrsave_written: _,
             clock_read: _,
             mfvrsave_executed: _,
@@ -266,12 +278,14 @@ impl PpuState {
             xer: *xer,
             fpscr: *fpscr,
             vrsave: *vrsave,
+            vscr: *vscr,
             tb: *tb,
             reservation: *reservation,
         }
     }
 
-    /// Construct a zeroed PPU state with no active reservation.
+    /// Construct a PPU state at a thread's first instruction: every
+    /// register zero except the VSCR, and no active reservation.
     pub fn new() -> Self {
         Self {
             gpr: RegBank([0u64; GPR_COUNT]),
@@ -284,6 +298,7 @@ impl PpuState {
             xer: 0,
             fpscr: 0,
             vrsave: 0,
+            vscr: PPU_THREAD_ENTRY_VSCR,
             vrsave_written: false,
             clock_read: false,
             mfvrsave_executed: 0,
@@ -427,6 +442,27 @@ impl PpuState {
             u64::from(v),
         ));
         self.vrsave = v;
+    }
+
+    /// Vector status and control register.
+    #[inline]
+    pub fn vscr(&self) -> u32 {
+        self.vscr
+    }
+
+    /// Write the VSCR. The reserved bits are dropped, as the reference
+    /// console drops them.
+    #[inline]
+    pub fn set_vscr(&mut self, v: u32) {
+        self.vscr = v & VSCR_DEFINED_BITS;
+    }
+
+    /// Set the sticky `VSCR[SAT]` bit.
+    ///
+    /// [AltiVec-PEM p:2-5 s:2.3.2] A saturating instruction sets SAT; only mtvscr clears it.
+    #[inline]
+    pub fn set_sat(&mut self) {
+        self.vscr |= VSCR_SAT;
     }
 
     /// Active reservation, if any.
@@ -633,6 +669,7 @@ impl Clone for PpuState {
             xer: self.xer,
             fpscr: self.fpscr,
             vrsave: self.vrsave,
+            vscr: self.vscr,
             vrsave_written: self.vrsave_written,
             clock_read: self.clock_read,
             mfvrsave_executed: self.mfvrsave_executed,

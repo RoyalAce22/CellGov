@@ -44,6 +44,8 @@ pub struct StateDiff {
     pub fpscr: Option<(u32, u32)>,
     /// `(expected, observed)` if VRSAVE diverged.
     pub vrsave: Option<(u32, u32)>,
+    /// `(expected, observed)` if VSCR diverged.
+    pub vscr: Option<(u32, u32)>,
     /// `(expected, observed)` if reservation state diverged. Each
     /// side renders as the reserved line address (`u64`) or `None`.
     pub reservation: Option<(Option<u64>, Option<u64>)>,
@@ -61,6 +63,7 @@ impl StateDiff {
             && self.xer.is_none()
             && self.fpscr.is_none()
             && self.vrsave.is_none()
+            && self.vscr.is_none()
             && self.reservation.is_none()
     }
 }
@@ -330,6 +333,9 @@ fn diff_state(expected: &PpuStateSnapshot, observed: &PpuStateSnapshot) -> State
     if expected.vrsave != observed.vrsave {
         diff.vrsave = Some((expected.vrsave, observed.vrsave));
     }
+    if expected.vscr != observed.vscr {
+        diff.vscr = Some((expected.vscr, observed.vscr));
+    }
     if expected.reservation != observed.reservation {
         diff.reservation = Some((
             expected.reservation.map(|r| r.addr()),
@@ -413,6 +419,11 @@ fn format_state_diff(diff: &StateDiff) -> String {
             "   vrsave: expected 0x{exp:08x}, observed 0x{obs:08x}"
         ));
     }
+    if let Some((exp, obs)) = diff.vscr {
+        lines.push(format!(
+            "   vscr: expected 0x{exp:08x}, observed 0x{obs:08x}"
+        ));
+    }
     if let Some((exp, obs)) = diff.reservation {
         let fmt = |o: Option<u64>| match o {
             Some(a) => format!("Some(0x{a:016x})"),
@@ -443,3 +454,7 @@ fn format_memory_diff(diffs: &[MemoryByteMismatch]) -> String {
 #[cfg(test)]
 #[path = "tests/runner_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/vscr_snapshot_tests.rs"]
+mod vscr_snapshot_tests;

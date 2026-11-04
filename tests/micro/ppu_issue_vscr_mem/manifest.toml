@@ -1,0 +1,19 @@
+[test]
+name = "ppu_issue_vscr_mem"
+
+# A hardware probe of whether an mtvscr stalls the VMX and FP loads and
+# stores after it, timed with mftb against each load and store alone. The
+# console capture is the answer; ppu/main.c's header lists the loops and
+# the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 216 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 216 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

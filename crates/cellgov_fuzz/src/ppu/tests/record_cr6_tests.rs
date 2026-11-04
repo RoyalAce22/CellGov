@@ -11,7 +11,7 @@ fn a_recording_vcmpequw_changes_only_cr6() {
         strategy: GenerationStrategy::Structured,
         schedule: CampaignSchedule {
             cases: CaseRange {
-                first: 175,
+                first: 207,
                 count: 1,
             },
             ..CampaignSchedule::default()

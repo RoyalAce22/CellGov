@@ -108,6 +108,10 @@ pub(crate) enum Kind {
     Drain,
     /// Drains, then refetches the instructions after it.
     Refetch,
+    /// An `mtvscr`: drains, then holds its units for
+    /// `PPU_MTVSCR_HOLD_CYCLES` and the younger vector-scalar
+    /// instructions for `PPU_MTVSCR_YOUNGER_VSU_CYCLES`.
+    VscrWrite,
     /// An `sc`. `number` is r11 before the `sc` executes, or `None`
     /// for a hypervisor call.
     Syscall { number: Option<u64> },
@@ -1096,6 +1100,14 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             vt,
             &[va, vb],
         )),
+        // [CBE-Handbook p:742 s:A.3.2] `mfvscr` and `mtvscr` are simple
+        // and stall at issue until every older instruction completes; the
+        // younger vector-scalar instructions wait for an `mtvscr`. The
+        // `ppu_issue_vscr` capture gives the cycles the table leaves out.
+        I::Mfvscr { vt } => {
+            one(vector(unit::VSU1, false, k::PPU_MFVSCR_LATENCY_CYCLES, vt, &[]).kind(Kind::Drain))
+        }
+        I::Mtvscr { vb } => one(Op::on(unit::VSU1).src(vr(vb)).kind(Kind::VscrWrite)),
         I::Lvlx { vt, ra, rb }
         | I::Lvrx { vt, ra, rb }
         | I::Lvlxl { vt, ra, rb }
