@@ -147,6 +147,21 @@ fn pairs_are_whole(shadow: &PredecodedShadow) -> Result<(), TestCaseError> {
     Ok(())
 }
 
+/// The other half of the fused pair slot `i` belongs to, read from the
+/// slots alone.
+fn pair_partner(shadow: &PredecodedShadow, i: usize) -> Option<usize> {
+    let insn = |k: usize| shadow.slot(k).and_then(|(insn, _)| insn);
+    let head = |k: usize| insn(k).is_some_and(|x| x.is_super_pair());
+    let consumed = |k: usize| insn(k) == Some(PpuInstruction::Consumed);
+    if head(i) && consumed(i + 1) {
+        Some(i + 1)
+    } else if consumed(i) && i.checked_sub(1).is_some_and(head) {
+        Some(i - 1)
+    } else {
+        None
+    }
+}
+
 /// `get` answers exactly the fresh slots.
 fn get_matches_slots(shadow: &PredecodedShadow) -> Result<(), TestCaseError> {
     for i in 0..shadow.len() {
@@ -207,20 +222,19 @@ proptest! {
                     }
                 }
                 Op::Refresh { slot, raw } => {
+                    // The op refreshes any slot, fresh or stale. The
+                    // refresh itself keeps the pair whole.
                     let slot = slot % slots;
                     let pc = BASE + 4 * slot as u64;
-                    // The fetch loop refreshes only a slot `get` could
-                    // not answer; a refresh of a fresh fused head or
-                    // its partner would split the pair.
-                    if shadow.get(pc).is_some() {
-                        continue;
-                    }
+                    let partner = pair_partner(&shadow, slot);
                     let refreshed = shadow.refresh(pc, raw);
                     prop_assert!(refreshed.is_some());
                     let after = stale_set(&shadow);
                     for i in 0..slots {
                         if i == slot {
                             prop_assert!(!after[i]);
+                        } else if Some(i) == partner {
+                            prop_assert!(after[i], "partner slot {} of refreshed slot {} is fresh", i, slot);
                         } else {
                             prop_assert_eq!(after[i], before[i], "slot {} changed under a refresh of slot {}", i, slot);
                         }

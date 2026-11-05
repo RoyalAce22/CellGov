@@ -148,7 +148,10 @@ impl PredecodedShadow {
     ///
     /// Quickening is re-applied; super-pairing is not. Two slots
     /// whose refreshed content forms a fusable pair will run as
-    /// separate dispatches until the next full shadow rebuild.
+    /// separate dispatches until the next full shadow rebuild. When the
+    /// slot is one half of a fused pair, the other half goes stale. Thus
+    /// no fresh `Consumed` outlives its head, and no fresh head fuses a
+    /// rewritten second instruction.
     pub fn refresh(&mut self, pc: u64, raw: u32) -> Option<Option<PpuInstruction>> {
         if pc < self.base {
             return None;
@@ -161,11 +164,27 @@ impl PredecodedShadow {
         if idx >= self.slots.len() {
             return None;
         }
+        if let Some(partner) = self.pair_partner(idx) {
+            self.stale[partner] = true;
+        }
         let insn = decode::decode(raw).ok();
         let quickened = insn.map(|i| quicken_insn(i).unwrap_or(i));
         self.slots[idx] = quickened;
         self.stale[idx] = false;
         Some(quickened)
+    }
+
+    /// The other half of the fused pair slot `idx` belongs to, if any.
+    fn pair_partner(&self, idx: usize) -> Option<usize> {
+        let is_head = |i: usize| self.slots[i].is_some_and(|insn| insn.is_super_pair());
+        let is_consumed = |i: usize| matches!(self.slots[i], Some(PpuInstruction::Consumed));
+        if is_head(idx) && idx + 1 < self.slots.len() && is_consumed(idx + 1) {
+            return Some(idx + 1);
+        }
+        if is_consumed(idx) && idx > 0 && is_head(idx - 1) {
+            return Some(idx - 1);
+        }
+        None
     }
 
     /// Rewrite decoded slots in place into specialized instruction
@@ -234,3 +253,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/model_proptests.rs"]
 mod proptests;
+
+#[cfg(test)]
+#[path = "tests/refresh_pair_tests.rs"]
+mod refresh_pair_tests;
