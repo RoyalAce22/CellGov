@@ -116,9 +116,17 @@ pub(crate) struct Core {
     /// The cycle the last floating-point store completes. A drain that
     /// does not use the VSU issues no earlier.
     fp_store_done: u64,
-    /// The cycle the last `mfvscr` result is ready. A younger
+    /// The cycle the last `mfvscr` result is ready. A younger VSU op
+    /// other than a load or store runs no earlier. A younger
     /// floating-point store sends its data no earlier.
     vscr_read: u64,
+    /// The earliest cycle an instruction younger than the last `mfvscr`
+    /// issues at.
+    vscr_hold: u64,
+    /// The registers, one bit each, whose last write came from an
+    /// instruction whose writes land in issue order
+    /// ([`Op::writes_in_order`]).
+    in_order_writes: u128,
     /// The share of this thread's recent cycles, out of [`SHARE_ONE`],
     /// spent on divides and square roots. Each instruction weighs by its
     /// cycles, over a window of [`PRESSURE_WINDOW_CYCLES`].
@@ -158,6 +166,9 @@ pub(crate) struct Core {
     /// The LV2 call whose round trip the thread has yet to charge.
     syscall: Option<PendingSyscall>,
 }
+
+// `Core::in_order_writes` holds one bit for each tracked register.
+const _: () = assert!(REGS <= u128::BITS as usize);
 
 /// An `sc` the thread retired, charged when the thread resumes after it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -345,6 +356,8 @@ impl PpeTiming {
                 fp_store_data: 0,
                 fp_store_done: 0,
                 vscr_read: 0,
+                vscr_hold: 0,
+                in_order_writes: 0,
                 divide_share: 0,
                 alone_share: 0,
                 vscr_share: 0,
@@ -484,7 +497,9 @@ impl PpeTiming {
             }
             _ => (c.floor, true),
         };
-        let mut t = floor.max(fetched);
+        // An instruction younger than an `mfvscr` issues no earlier than
+        // `PPU_MFVSCR_YOUNGER_HOLD_CYCLES` after it.
+        let mut t = floor.max(fetched).max(c.vscr_hold);
         let mut queued = 0;
         for (r, after) in op.reads() {
             t = t.max(c.ready[r as usize].saturating_sub(after));
@@ -495,9 +510,15 @@ impl PpeTiming {
             }
         }
         // [CBE-Handbook p:755 s:A.6.1] decode checks for write-after-write
-        // hazards, and issue stalls at IS2 until they clear.
+        // hazards, and issue stalls at IS2 until they clear. A pipelined
+        // fixed-point write lands in issue order, so it leaves no hazard.
+        // In the `ppu_issue_mfvscr_younger` capture 32 `li` to one register
+        // take 33 cycles an iteration, as 32 `li` to eight registers do.
         for r in op.writes() {
-            t = t.max(c.miss[r as usize]).max(c.ready[r as usize]);
+            t = t.max(c.miss[r as usize]);
+            if c.in_order_writes & (1 << r) == 0 {
+                t = t.max(c.ready[r as usize]);
+            }
         }
         // [CBE-Handbook p:756 s:A.6.2] a VSU instruction leaves IS2 for the
         // VSU issue queue and waits at VQ8. So the fence holds the op past
@@ -593,6 +614,17 @@ impl PpeTiming {
             t + u64::from(s.fence_cycles)
         } else {
             t
+        };
+        // A VSU op younger than an `mfvscr` runs no earlier than its
+        // result. In the `ppu_issue_mfvscr_younger` capture an `mfvscr` and
+        // four independent `vaddubm` take 51.48 cycles an iteration.
+        // [CBE-Handbook p:756 s:A.6.2] the LSU part of a VXU or FPU load or
+        // store leaves at issue, beside the VSU issue queue, so the wait
+        // leaves it out; `retire` delays a floating-point store's data.
+        let exec = if uses_vsu(op) && !matches!(op.kind, Kind::Load { .. } | Kind::Store { .. }) {
+            exec.max(c.vscr_read)
+        } else {
+            exec
         };
         Scheduled {
             issue: t,
@@ -710,12 +742,10 @@ impl PpeTiming {
         // (`PPU_FP_STORE_COMPLETE_CYCLES`).
         //
         // The store sends its data no earlier than an older `mfvscr`'s
-        // result is ready. In the `ppu_issue_fp_store_drain` capture a loop
-        // of an `stfd` and an `mfvscr` takes 53.00 cycles an iteration, 13
-        // more than with an `std`. The `ppu_issue_fp_store_vscr` capture
-        // gives the same for each floating-point store form. With `li`
-        // between the `mfvscr` and the store, the model gives a shorter
-        // wait than the console.
+        // result is ready. In the `ppu_issue_fp_store_drain` and
+        // `ppu_issue_fp_store_vscr` captures a loop of a floating-point
+        // store and an `mfvscr` takes 53.00 cycles an iteration, 13 more
+        // than with an `std`.
         if matches!(op.kind, Kind::Store { .. }) && op.reads().any(|(r, _)| is_fpr(r)) {
             let sent = exec.max(c.vscr_read);
             c.fp_store_data = c.fp_store_data.max(sent + k::PPU_FP_STORE_DATA_CYCLES);
@@ -723,6 +753,7 @@ impl PpeTiming {
         }
         if op.is_vscr_read() {
             c.vscr_read = exec + k::PPU_MFVSCR_LATENCY_CYCLES;
+            c.vscr_hold = t + k::PPU_MFVSCR_YOUNGER_HOLD_CYCLES;
         }
 
         match op.kind {
@@ -1140,6 +1171,12 @@ fn mark_destinations(c: &mut Core, op: &Op, t: u64) {
             c.ready[r as usize] = t + u64::from(lat);
             c.addr_ready[r as usize] = t + u64::from(lat);
         }
+    }
+    let written = op.writes().fold(0u128, |bits, r| bits | 1 << r);
+    if op.writes_in_order() {
+        c.in_order_writes |= written;
+    } else {
+        c.in_order_writes &= !written;
     }
 }
 

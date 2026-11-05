@@ -60,3 +60,7 @@ mod range_registers_tests;
 #[cfg(test)]
 #[path = "tests/vsu_queue_pressure_tests.rs"]
 mod vsu_queue_pressure_tests;
+
+#[cfg(test)]
+#[path = "tests/mfvscr_younger_tests.rs"]
+mod mfvscr_younger_tests;

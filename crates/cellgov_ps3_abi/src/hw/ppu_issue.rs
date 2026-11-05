@@ -772,6 +772,17 @@ pub const PPU_VMX_SIMPLE_LATENCY_CYCLES: u64 = 4;
 /// cycles an iteration. The next `mfvscr` waits for the result at issue.
 pub const PPU_MFVSCR_LATENCY_CYCLES: u64 = 40;
 
+/// The cycles from an `mfvscr` to the first younger instruction that can
+/// issue.
+///
+/// [CBE-Handbook p:742 s:A.3.2] `mfvscr` stalls at issue until every
+/// older instruction completes.
+///
+/// In the `ppu_issue_mfvscr_younger` capture an `mfvscr` and 32, 48 and
+/// 64 independent `li` take 53.00, 70.92 and 86.17 cycles an iteration.
+/// The `li` issue one a cycle, from about 20 cycles after the `mfvscr`.
+pub const PPU_MFVSCR_YOUNGER_HOLD_CYCLES: u64 = 20;
+
 /// The cycles an `mtvscr` holds its unit, so the next `mtvscr` waits
 /// that long.
 ///

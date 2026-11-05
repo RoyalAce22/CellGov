@@ -266,6 +266,12 @@ impl Op {
             .chain(self.range_targets())
     }
 
+    /// Whether this one is a pipelined fixed-point instruction issued
+    /// whole, whose writes land in issue order.
+    pub(crate) fn writes_in_order(&self) -> bool {
+        self.units == unit::FXU && self.words == 0 && self.kind == Kind::Plain
+    }
+
     /// The registers this one reads as data, each with the cycles after
     /// issue it reads that register.
     ///

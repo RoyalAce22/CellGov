@@ -3,7 +3,7 @@
     "kind": "process_exit"
   },
   "outcome": "MaxSteps",
-  "steps": 389485,
+  "steps": 389483,
   "budget": 256,
   "host_invariant_breaks": 83,
   "witnesses": {
@@ -32,7 +32,7 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 28890,
+      "value": 28891,
       "class": "at-least"
     },
     "lwarx": {
@@ -108,7 +108,7 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 28890,
+      "value": 28891,
       "class": "at-least"
     },
     "stwcx": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 11410,
+      "value": 11411,
       "class": "at-least"
     },
     "uart_cids_distinct": {
@@ -199,15 +199,15 @@
   "unsupported_syscalls": {
     "45": {
       "hits": 2,
-      "first_hit": 2108148540
+      "first_hit": 2108148800
     },
     "133": {
       "hits": 4,
-      "first_hit": 2108068191
+      "first_hit": 2108068443
     },
     "230": {
       "hits": 1,
-      "first_hit": 192161678
+      "first_hit": 192161932
     },
     "248": {
       "hits": 1,
@@ -215,15 +215,15 @@
     },
     "380": {
       "hits": 5,
-      "first_hit": 192677052
+      "first_hit": 192677305
     },
     "382": {
       "hits": 1,
-      "first_hit": 2108032094
+      "first_hit": 2108032346
     },
     "398": {
       "hits": 1,
-      "first_hit": 65948173221
+      "first_hit": 65948173483
     },
     "465": {
       "hits": 1,
@@ -231,23 +231,23 @@
     },
     "563": {
       "hits": 1,
-      "first_hit": 559397
+      "first_hit": 559563
     },
     "610": {
       "hits": 21,
-      "first_hit": 2108124359
+      "first_hit": 2108124621
     },
     "612": {
       "hits": 1,
-      "first_hit": 2108107596
+      "first_hit": 2108107858
     },
     "635": {
       "hits": 1,
-      "first_hit": 2186131517
+      "first_hit": 2186123340
     },
     "650": {
       "hits": 1,
-      "first_hit": 529320
+      "first_hit": 529316
     },
     "699": {
       "hits": 3,
@@ -255,23 +255,23 @@
     },
     "811": {
       "hits": 3,
-      "first_hit": 2108267450
+      "first_hit": 2108267709
     },
     "817": {
       "hits": 10,
-      "first_hit": 2108028032
+      "first_hit": 2108028284
     },
     "837": {
       "hits": 7,
-      "first_hit": 192810931
+      "first_hit": 192811183
     },
     "867": {
       "hits": 4,
-      "first_hit": 2186007947
+      "first_hit": 2185999835
     },
     "873": {
       "hits": 3,
-      "first_hit": 2108236573
+      "first_hit": 2108236832
     },
     "956": {
       "hits": 1,

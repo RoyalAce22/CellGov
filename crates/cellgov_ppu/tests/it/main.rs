@@ -32,6 +32,8 @@ mod console_ppu_issue_load_hit_store;
 mod console_ppu_issue_load_hit_store_sibling;
 mod console_ppu_issue_loop_shape;
 mod console_ppu_issue_mftb;
+mod console_ppu_issue_mfvscr_lsu_waw;
+mod console_ppu_issue_mfvscr_younger;
 mod console_ppu_issue_miss;
 mod console_ppu_issue_mix_switch;
 mod console_ppu_issue_multiple;
