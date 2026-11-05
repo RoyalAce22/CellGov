@@ -150,6 +150,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         rsx_set_reference_dispatches: _,  // host-side counter only
         timer_sleep_dispatches: _,        // host-side counter only
         lv2_direct_committed_writes: _,   // staging-bypass witness, host-side only
+        code_writes: _,                   // host-side witness only
         tap: _,                           // host-installed observer, like the factories
     } = rt;
 }

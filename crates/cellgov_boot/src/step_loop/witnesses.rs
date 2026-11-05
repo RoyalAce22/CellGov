@@ -120,6 +120,8 @@ pub struct BenchWitnesses {
     pub prx_load_misses: BTreeMap<String, u64>,
     /// Where every live PPU unit stopped, in registry order.
     pub final_units: Vec<FinalUnit>,
+    /// Committed guest stores into declared code.
+    pub code_writes: cellgov_core::CodeWriteWitness,
 }
 
 /// One live PPU unit's terminal state: the parking map a `MaxSteps`
@@ -209,6 +211,7 @@ impl BenchWitnesses {
             prx_load_not_found: obs.prx_load_not_found_count,
             prx_load_misses: obs.prx_load_misses.clone(),
             final_units,
+            code_writes: rt.code_writes().clone(),
         }
     }
 
@@ -374,6 +377,24 @@ impl BenchWitnesses {
                 .iter()
                 .map(|(path, hits)| format!("{path:?}={hits}")),
         );
+        push_joined(
+            &mut out,
+            "BENCH_CODE_WRITE_LINES:",
+            self.code_writes
+                .lines()
+                .map(|(space, line, hits)| format!("{}:0x{line:08x}={hits}", space.raw())),
+        );
+        for w in self.code_writes.detail() {
+            out.push(format!(
+                "BENCH_CODE_WRITE_DETAIL: unit={} space={} step={} word=0x{:08x} before=0x{:08x} after=0x{:08x}",
+                w.unit.raw(),
+                w.space.raw(),
+                w.step,
+                w.word,
+                w.before,
+                w.after,
+            ));
+        }
         for u in &self.final_units {
             out.push(format!(
                 "BENCH_FINAL_UNIT_WITNESS: unit={} pc=0x{:08x} lr=0x{:08x} status={} ldarx={} lwarx={}",

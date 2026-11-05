@@ -119,6 +119,7 @@ impl Runtime {
         // `rsx_label_writes_committed` is threaded through CommitContext
         // so `process()` increments it adjacent to the guard it witnesses.
         let rsx_label_base = self.resolved_rsx_label_base();
+        let code_writes = self.code_writes_before(source_space, effects);
         let (space_memory, space_reservations) = crate::runtime::spaces::resolve_commit_targets(
             &mut self.memory,
             &mut self.reservations,
@@ -157,6 +158,7 @@ impl Runtime {
             let writer = self.lv2_host.process_of_unit(source);
             self.lv2_host.note_committed_effects(writer, effects);
             self.invalidate_committed_code(effects, rsx_label_base);
+            self.record_code_writes(source, source_space, &code_writes);
             // Same batch boundary: writes landing in a shared view
             // replicate to sibling views before any checkpoint hashes.
             let fanout_cleared = self.fanout_shared_writes(source_space, effects);
@@ -376,33 +378,11 @@ impl Runtime {
     /// drops the code at each alias.
     fn invalidate_committed_code(&mut self, effects: &[Effect], rsx_label_base: u32) {
         let written = effects.iter().filter_map(|effect| match effect {
-            Effect::SharedWriteIntent { range, .. } | Effect::ConditionalStore { range, .. } => {
-                Some(*range)
-            }
             Effect::RsxLabelWrite { offset, .. } => ByteRange::new(
                 cellgov_mem::GuestAddr::new(u64::from(rsx_label_base) + u64::from(*offset)),
                 4,
             ),
-            // These effects land no guest-memory bytes at commit. A DMA
-            // transfer lands at completion through `host_write`; a
-            // local-store write is outside guest memory.
-            Effect::DmaEnqueue { .. }
-            | Effect::SpuLocalStoreWrite { .. }
-            | Effect::MailboxSend { .. }
-            | Effect::MailboxReceiveAttempt { .. }
-            | Effect::MailboxPop { .. }
-            | Effect::WaitOnEvent { .. }
-            | Effect::WakeUnit { .. }
-            | Effect::SignalUpdate { .. }
-            | Effect::SpuSignalWrite { .. }
-            | Effect::FaultRaised { .. }
-            | Effect::TraceMarker { .. }
-            | Effect::ReservationAcquire { .. }
-            | Effect::RsxFlipRequest { .. }
-            | Effect::SharedReadIntent { .. }
-            | Effect::ClockRead { .. }
-            | Effect::SpuLocalStoreRead { .. }
-            | Effect::MfcInvalidCommand { .. } => None,
+            _ => committed_store_range(effect),
         });
         let merged = merge_ranges(written.collect());
         if merged.is_empty() {
@@ -827,6 +807,40 @@ fn merge_ranges(mut ranges: Vec<ByteRange>) -> Vec<ByteRange> {
             .expect("merged committed ranges remain addressable");
     }
     merged
+}
+
+/// The guest bytes a unit's store effect writes when its batch commits.
+///
+/// An RSX label write is `None` here: its address needs the RSX label
+/// base, which the caller resolves.
+#[inline]
+pub(super) fn committed_store_range(effect: &Effect) -> Option<ByteRange> {
+    match effect {
+        Effect::SharedWriteIntent { range, .. } | Effect::ConditionalStore { range, .. } => {
+            Some(*range)
+        }
+        Effect::RsxLabelWrite { .. } => None,
+        // These effects land no guest-memory bytes at commit. A DMA
+        // transfer lands at completion through `host_write`; a
+        // local-store write is outside guest memory.
+        Effect::DmaEnqueue { .. }
+        | Effect::SpuLocalStoreWrite { .. }
+        | Effect::MailboxSend { .. }
+        | Effect::MailboxReceiveAttempt { .. }
+        | Effect::MailboxPop { .. }
+        | Effect::WaitOnEvent { .. }
+        | Effect::WakeUnit { .. }
+        | Effect::SignalUpdate { .. }
+        | Effect::SpuSignalWrite { .. }
+        | Effect::FaultRaised { .. }
+        | Effect::TraceMarker { .. }
+        | Effect::ReservationAcquire { .. }
+        | Effect::RsxFlipRequest { .. }
+        | Effect::SharedReadIntent { .. }
+        | Effect::ClockRead { .. }
+        | Effect::SpuLocalStoreRead { .. }
+        | Effect::MfcInvalidCommand { .. } => None,
+    }
 }
 
 #[cfg(test)]

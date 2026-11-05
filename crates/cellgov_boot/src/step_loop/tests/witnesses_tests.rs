@@ -95,6 +95,18 @@ fn distinct_block(authid_source: AuthorityIdSource) -> BenchWitnesses {
             ldarx: 10,
             lwarx: 11,
         }],
+        code_writes: {
+            let mut w = cellgov_core::CodeWriteWitness::default();
+            w.record(cellgov_core::CodeWrite {
+                unit: cellgov_event::UnitId::new(1),
+                space: cellgov_core::AddressSpaceId::BOOT,
+                step: 143,
+                word: 0x10244,
+                before: 0x4800_0011,
+                after: 0x6000_0000,
+            });
+            w
+        },
     }
 }
 
@@ -246,6 +258,53 @@ fn read_sums_the_ppu_units_and_keeps_each_ones_parking_state() {
     );
 }
 
+#[test]
+fn read_carries_the_runtimes_record_of_stores_into_code() {
+    use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+    use cellgov_ppu::instruction::encode::encode;
+    use cellgov_ppu::instruction::PpuInstruction as I;
+    use cellgov_ppu::PpuExecutionUnit;
+
+    const PATCHED: u64 = 0x40;
+    let program = [
+        I::Addis {
+            rt: 5,
+            ra: 0,
+            imm: 0x6000,
+        },
+        I::Stw {
+            rs: 5,
+            ra: 0,
+            imm: PATCHED as i16,
+        },
+        I::Addi {
+            rt: 11,
+            ra: 0,
+            imm: cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT as i16,
+        },
+        I::Sc { lev: 0 },
+    ];
+    let mut mem = GuestMemory::new(0x100);
+    for (i, insn) in program.iter().enumerate() {
+        let w = encode(insn).expect("encodable");
+        let range = ByteRange::new(GuestAddr::new(4 * i as u64), 4).expect("range");
+        mem.apply_commit(range, &w.to_be_bytes()).expect("mapped");
+    }
+    mem.declare_code(0, PATCHED + 4);
+    let mut rt = Runtime::new(mem, cellgov_time::Budget::new(1), 100);
+    rt.register_unit_with(PpuExecutionUnit::new);
+    for _ in 0..100 {
+        let Ok(mut step) = rt.step() else { break };
+        if rt.commit_step(&mut step).is_err() {
+            break;
+        }
+    }
+    assert_eq!(rt.code_writes().stores(), 1, "the program stored into code");
+
+    let w = BenchWitnesses::read(&rt, AuthorityIdSource::Forced);
+    assert_eq!(&w.code_writes, rt.code_writes());
+}
+
 /// The reader parses back only the tracked fields, so the diagnostic
 /// lines and the authority-id extras are held to their exact text.
 #[test]
@@ -282,6 +341,8 @@ fn the_block_renders_every_line_in_its_contract_form() {
         "BENCH_UART_UNKNOWN_CIDS: 0x00010003=3",
         "BENCH_PRX_LOAD_WITNESS: hle_stubs=141 not_found=142",
         "BENCH_PRX_LOAD_MISSES: \"/dev_flash/sys/external/lib a.sprx\"=9",
+        "BENCH_CODE_WRITE_LINES: 0:0x00010200=1",
+        "BENCH_CODE_WRITE_DETAIL: unit=1 space=0 step=143 word=0x00010244 before=0x48000011 after=0x60000000",
         "BENCH_FINAL_UNIT_WITNESS: unit=1 pc=0x00010230 lr=0x00010240 status=blocked ldarx=10 lwarx=11",
     ];
     assert_eq!(distinct_block(some_authid_source()).lines(), expected);
@@ -300,6 +361,7 @@ fn a_quiet_boot_suppresses_the_inventories_and_keeps_every_count_line() {
     block.uart_cids.clear();
     block.prx_load_misses.clear();
     block.final_units.clear();
+    block.code_writes = cellgov_core::CodeWriteWitness::default();
     let lines = block.lines();
     let prefixes: BTreeSet<&str> = lines
         .iter()

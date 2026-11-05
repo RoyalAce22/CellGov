@@ -358,12 +358,19 @@ than the address resolution it removes.
 
 ### Invalidation and refresh
 
-Guest-visible code writes mark the affected slots stale via
-`invalidate_range`. These writes include:
+A write over predecoded code marks the affected slots stale via
+`invalidate_range`. Two kinds of write do this:
 
-- self-modifying code;
-- CRT0 relocations;
-- GOT slot patching during PRX import binding.
+- a guest store the commit applies: `SharedWriteIntent`,
+  `ConditionalStore` or an RSX label write. A bench boot reports each
+  `SharedWriteIntent` or `ConditionalStore` that lands in declared code
+  on its `BENCH_CODE_WRITE_LINES` and `BENCH_CODE_WRITE_DETAIL` lines;
+- a host write through `Runtime::host_write`, such as a DMA transfer
+  as it lands.
+
+The loaders' own writes are host-side. PRX relocation and import
+binding (GOT slot patching) write guest memory through the loader's
+staging while a module loads, and no unit commits them as a store.
 
 The invalidation is widened to super-pair partners so both halves
 transition together.

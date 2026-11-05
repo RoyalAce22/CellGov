@@ -140,6 +140,9 @@ pub struct Runtime {
     /// the `apply_lv2_effects` direct-commit path. Not
     /// snapshot-captured.
     pub(super) lv2_direct_committed_writes: u64,
+    /// Committed guest stores into declared code; a snapshot does not
+    /// capture it.
+    pub(super) code_writes: crate::runtime::code_writes::CodeWriteWitness,
     /// The host's debug observer; a snapshot does not capture it.
     pub(super) tap: Option<Box<dyn crate::runtime::RuntimeTap>>,
 }

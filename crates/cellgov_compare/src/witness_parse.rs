@@ -237,6 +237,14 @@ const DIAGNOSTIC_LINES: &[(&str, &str)] = &[
         "one line per live PPU unit: the terminal parking map, not a counter",
     ),
     (
+        "BENCH_CODE_WRITE_LINES:",
+        "per-(space, line) inventory of guest stores into declared code, suppressed when empty",
+    ),
+    (
+        "BENCH_CODE_WRITE_DETAIL:",
+        "one line per guest store into code, up to a fixed limit: the writer, step and word before and after",
+    ),
+    (
         "BENCH_MODULE_START_FAULTS:",
         "emitted only when a module_start faulted, so a baseline could not hold it Absent; the module list is the finding",
     ),
