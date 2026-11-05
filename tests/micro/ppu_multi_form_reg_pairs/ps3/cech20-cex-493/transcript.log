@@ -1,8 +1,8 @@
 #0001 > GET /cpursx.ps3
-#0002 < 200 (5728 bytes)
+#0002 < 200 (5725 bytes)
 #0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
 #0004 = console satisfies profile cech20-cex-493
-#0005 = load: Cell 67 C, RSX 63 C, fan 46%, /dev_hdd0 99840 MiB free; cool
+#0005 = load: Cell 67 C, RSX 61 C, fan 41%, /dev_hdd0 99840 MiB free; cool
 #0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
 #0007 > USER anonymous
 #0008 < 331 OK
@@ -13,28 +13,28 @@
 #0013 > MKD /dev_hdd0/tmp/cellgov_lease
 #0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
 #0015 > PASV
-#0016 < 227 Entering Passive Mode (10,77,0,2,134,70)
-#0017 > STOR /dev_hdd0/tmp/cellgov_lease/holder (82 bytes)
+#0016 < 227 Entering Passive Mode (10,77,0,2,252,79)
+#0017 > STOR /dev_hdd0/tmp/cellgov_lease/holder (81 bytes)
 #0018 < 150 OK
 #0019 < 226 OK
 #0020 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
 #0021 < 404 (518 bytes)
 #0022 > PASV
-#0023 < 227 Entering Passive Mode (10,77,0,2,136,37)
+#0023 < 227 Entering Passive Mode (10,77,0,2,254,17)
 #0024 > NLST /dev_hdd0/game
 #0025 < 150 OK
-#0026 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 63C]
+#0026 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 61C]
 #0027 > MKD /dev_hdd0/game/CGOV00001
 #0028 < 257 "/dev_hdd0/game/CGOV00001" OK
 #0029 > MKD /dev_hdd0/game/CGOV00001/USRDIR
 #0030 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
 #0031 > PASV
-#0032 < 227 Entering Passive Mode (10,77,0,2,136,46)
+#0032 < 227 Entering Passive Mode (10,77,0,2,254,85)
 #0033 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
 #0034 < 150 OK
 #0035 < 226 OK
 #0036 > PASV
-#0037 < 227 Entering Passive Mode (10,77,0,2,136,222)
+#0037 < 227 Entering Passive Mode (10,77,0,2,128,15)
 #0038 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (5888 bytes)
 #0039 < 150 OK
 #0040 < 226 OK
@@ -42,88 +42,82 @@
 #0042 > QUIT
 #0043 < 221 BYE
 #0044 > GET /play.ps3?CGOV00001
-#0045 < 200 (5728 bytes)
+#0045 < 200 (5725 bytes)
 #0046 = started
 #0047 > GET /cpursx.ps3
-#0048 < 200 (5728 bytes)
+#0048 < 200 (5725 bytes)
 #0049 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
 #0050 < 404 (518 bytes)
 #0051 > GET /cpursx.ps3
-#0052 < 200 (5728 bytes)
+#0052 < 200 (5725 bytes)
 #0053 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
 #0054 < 404 (518 bytes)
 #0055 > GET /cpursx.ps3
-#0056 < 200 (5728 bytes)
+#0056 < 200 (5725 bytes)
 #0057 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
 #0058 < 404 (518 bytes)
 #0059 > GET /cpursx.ps3
-#0060 < 200 (5728 bytes)
+#0060 < 200 (5725 bytes)
 #0061 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
 #0062 < 404 (518 bytes)
 #0063 > GET /cpursx.ps3
-#0064 < 200 (5728 bytes)
-#0065 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
-#0066 < 404 (518 bytes)
-#0067 > GET /cpursx.ps3
-#0068 < 200 (5936 bytes)
-#0069 = left the XMB after 6 poll(s)
+#0064 < 200 (5933 bytes)
+#0065 = left the XMB after 5 poll(s)
+#0066 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
+#0067 < 404 (518 bytes)
+#0068 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
+#0069 < 404 (518 bytes)
 #0070 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
-#0071 < 404 (518 bytes)
-#0072 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
-#0073 < 404 (518 bytes)
-#0074 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
-#0075 < 404 (518 bytes)
-#0076 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
-#0077 < 200 (304 bytes)
-#0078 = result present after 4 poll(s)
+#0071 < 200 (304 bytes)
+#0072 = result present after 3 poll(s)
+#0073 > GET /cpursx.ps3
+#0074 < 200 (6448 bytes)
+#0075 > GET /cpursx.ps3
+#0076 < 200 (6448 bytes)
+#0077 > GET /cpursx.ps3
+#0078 < 200 (5933 bytes)
 #0079 > GET /cpursx.ps3
-#0080 < 200 (6451 bytes)
+#0080 < 200 (5933 bytes)
 #0081 > GET /cpursx.ps3
-#0082 < 200 (6451 bytes)
-#0083 > GET /cpursx.ps3
-#0084 < 200 (5936 bytes)
-#0085 > GET /cpursx.ps3
-#0086 < 200 (5936 bytes)
-#0087 > GET /cpursx.ps3
-#0088 < 200 (5728 bytes)
-#0089 = back at the XMB after 5 poll(s)
-#0090 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
-#0091 < 200 (304 bytes)
-#0092 = captured micro:ppu_multi_form_reg_pairs#a379ceecb9df
-#0093 > GET /mount.ps3/unmount
-#0094 < 200 (4441 bytes)
-#0095 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
-#0096 > USER anonymous
-#0097 < 331 OK
-#0098 > PASS anonymous@
-#0099 < 230 OK
-#0100 > TYPE I
-#0101 < 200 TYPE OK
-#0102 > PASV
-#0103 < 227 Entering Passive Mode (10,77,0,2,250,155)
-#0104 > NLST /dev_hdd0/game
-#0105 < 150 OK
-#0106 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 60C]
-#0107 > PASV
-#0108 < 227 Entering Passive Mode (10,77,0,2,250,135)
-#0109 > NLST /dev_hdd0/game/CGOV00001
-#0110 < 150 OK
-#0111 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 60C]
-#0112 > PASV
-#0113 < 227 Entering Passive Mode (10,77,0,2,252,225)
-#0114 > NLST /dev_hdd0/game/CGOV00001/USRDIR
-#0115 < 150 OK
-#0116 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 60C]
-#0117 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0082 < 200 (5725 bytes)
+#0083 = back at the XMB after 5 poll(s)
+#0084 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
+#0085 < 200 (304 bytes)
+#0086 = captured micro:ppu_multi_form_reg_pairs#a379ceecb9df
+#0087 > GET /mount.ps3/unmount
+#0088 < 200 (4441 bytes)
+#0089 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0090 > USER anonymous
+#0091 < 331 OK
+#0092 > PASS anonymous@
+#0093 < 230 OK
+#0094 > TYPE I
+#0095 < 200 TYPE OK
+#0096 > PASV
+#0097 < 227 Entering Passive Mode (10,77,0,2,218,144)
+#0098 > NLST /dev_hdd0/game
+#0099 < 150 OK
+#0100 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 59C]
+#0101 > PASV
+#0102 < 227 Entering Passive Mode (10,77,0,2,222,206)
+#0103 > NLST /dev_hdd0/game/CGOV00001
+#0104 < 150 OK
+#0105 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 59C]
+#0106 > PASV
+#0107 < 227 Entering Passive Mode (10,77,0,2,224,188)
+#0108 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0109 < 150 OK
+#0110 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 59C]
+#0111 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0112 < 250 OK
+#0113 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0114 < 250 OK
+#0115 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0116 < 250 OK
+#0117 > RMD /dev_hdd0/game/CGOV00001
 #0118 < 250 OK
-#0119 > RMD /dev_hdd0/game/CGOV00001/USRDIR
-#0120 < 250 OK
-#0121 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0119 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
+#0120 < 200 (304 bytes)
+#0121 > DELE /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
 #0122 < 250 OK
-#0123 > RMD /dev_hdd0/game/CGOV00001
-#0124 < 250 OK
-#0125 > GET /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
-#0126 < 200 (304 bytes)
-#0127 > DELE /dev_hdd0/tmp/cgov_ppu_multi_form_reg_pairs.bin
-#0128 < 250 OK
-#0129 = console restored
+#0123 = console restored
