@@ -328,7 +328,7 @@ fn a_reduced_replay_names_an_engine_failure_instead_of_a_missing_finding() {
 fn an_independent_vector_retains_versioned_provenance() {
     let fixture = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/ppu_reference/li_r3_7_v1.json"
+        "/tests/fixtures/ppu_reference_single/li_r3_7_v1.json"
     ));
     let reference = ArtifactReference::ppu(fixture).expect("validated official vector");
     let (mut artifact, run) = sample();

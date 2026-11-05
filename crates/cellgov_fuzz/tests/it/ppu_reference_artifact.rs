@@ -6,13 +6,14 @@ use cellgov_fuzz::ppu_reference::{
     PpuReferenceError, PpuReferenceFieldStatus,
 };
 
-const LI_REFERENCE: &str = include_str!("../fixtures/ppu_reference/li_r3_7_v2.json");
+const LI_REFERENCE: &str = include_str!("../fixtures/ppu_reference_single/li_r3_7_v2.json");
 
 /// `mtfsb1 3` on a zero FPSCR sets OX and FX.
-const MTFSB1_REFERENCE: &str = include_str!("../fixtures/ppu_reference/mtfsb1_ox_v2.json");
+const MTFSB1_REFERENCE: &str = include_str!("../fixtures/ppu_reference_single/mtfsb1_ox_v2.json");
 
 /// `vaddsws v3, v1, v2` clamps every word and sets `VSCR[SAT]`.
-const VADDSWS_REFERENCE: &str = include_str!("../fixtures/ppu_reference/vaddsws_sat_v2.json");
+const VADDSWS_REFERENCE: &str =
+    include_str!("../fixtures/ppu_reference_single/vaddsws_sat_v2.json");
 
 #[test]
 fn committed_fpscr_and_vscr_vectors_round_trip_and_replay_clean() {

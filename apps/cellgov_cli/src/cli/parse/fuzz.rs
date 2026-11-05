@@ -44,6 +44,8 @@ pub(crate) enum FuzzCommand {
     Promote(FuzzPromoteArgs),
     /// Replay every SPU reference file in a directory and name each SPU unit with no file.
     SpuReference(FuzzSpuReferenceArgs),
+    /// Replay every PPU reference file in a directory and name each PPU unit with no file.
+    PpuReference(FuzzPpuReferenceArgs),
     /// Generate the SPU floating-point vectors the documents define and replay them.
     SpuDocumented(FuzzSpuDocumentedArgs),
 }
@@ -76,6 +78,23 @@ pub(crate) const SPU_REFERENCE_EXIT_CODES: &str = "Exit codes particular to this
 #[derive(Debug, Args)]
 #[command(after_help = SPU_REFERENCE_EXIT_CODES)]
 pub(crate) struct FuzzSpuReferenceArgs {
+    /// Directory of reference files and their pending list.
+    #[arg(value_name = "DIR")]
+    pub dir: PathBuf,
+}
+
+/// The outcomes `dev fuzz ppu-reference` has beyond the shared 0-5 contract.
+pub(crate) const PPU_REFERENCE_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   a file did not parse or replay, a vector differed from its expected
+      end, or the directory's files and pending list do not give every
+      PPU unit exactly one file or one pending entry; also the shared
+      failed-operation status when DIR could not be read
+  141 stdout was closed by a downstream reader";
+
+/// A directory of PPU reference files to replay.
+#[derive(Debug, Args)]
+#[command(after_help = PPU_REFERENCE_EXIT_CODES)]
+pub(crate) struct FuzzPpuReferenceArgs {
     /// Directory of reference files and their pending list.
     #[arg(value_name = "DIR")]
     pub dir: PathBuf,

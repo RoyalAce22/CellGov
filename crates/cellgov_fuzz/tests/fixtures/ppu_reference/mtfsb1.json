@@ -1,0 +1,262 @@
+{
+  "schema_version": 3,
+  "unit": {
+    "kind": "instruction",
+    "mnemonic": "mtfsb1"
+  },
+  "vectors": [
+    {
+      "name": "ox-from-zero",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "PPC-Book1 p:122 s:4.6.8",
+        "vector_id": "mtfsb1-ox"
+      },
+      "words": [
+        4234149964
+      ],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {},
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 0,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "vr_hex": {
+            "status": "unsupported",
+            "reason": "the documented FPSCR vector does not represent vector registers"
+          },
+          "pc": {
+            "status": "value",
+            "value": 4
+          },
+          "cr": {
+            "status": "value",
+            "value": 0
+          },
+          "lr": {
+            "status": "value",
+            "value": 0
+          },
+          "ctr": {
+            "status": "value",
+            "value": 0
+          },
+          "xer": {
+            "status": "value",
+            "value": 0
+          },
+          "fpscr": {
+            "status": "value",
+            "value": 2415919104
+          },
+          "vrsave": {
+            "status": "undefined",
+            "reason": "the documented vector does not constrain VRSAVE"
+          },
+          "vscr": {
+            "status": "unsupported",
+            "reason": "the documented FPSCR vector does not represent the VSCR"
+          },
+          "tb": {
+            "status": "undefined",
+            "reason": "the documented vector does not constrain the time base"
+          },
+          "reservation": {
+            "status": "value",
+            "value": null
+          }
+        },
+        "memory": {
+          "status": "value",
+          "value": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "stop": {
+          "reason": {
+            "status": "value",
+            "value": "budget_exhausted"
+          },
+          "fault": {
+            "status": "value",
+            "value": {
+              "kind": "none"
+            }
+          },
+          "pc": {
+            "status": "value",
+            "value": 0
+          },
+          "lr": {
+            "status": "unsupported",
+            "reason": "the documented vector does not represent runtime syscall diagnostics"
+          },
+          "syscall_lev": {
+            "status": "unsupported",
+            "reason": "the documented vector does not represent runtime syscall diagnostics"
+          },
+          "faulting_ea": {
+            "status": "unsupported",
+            "reason": "the documented vector does not represent runtime fault diagnostics"
+          },
+          "fault_registers": {
+            "status": "unsupported",
+            "reason": "the documented vector does not represent runtime fault diagnostics"
+          },
+          "syscall_args": {
+            "status": "unsupported",
+            "reason": "the documented vector does not represent runtime syscall diagnostics"
+          }
+        },
+        "retired": {
+          "status": "value",
+          "value": 1
+        },
+        "staged_effects": {
+          "status": "value",
+          "value": []
+        },
+        "committed_effects": {
+          "status": "value",
+          "value": []
+        },
+        "reservations": {
+          "status": "value",
+          "value": []
+        },
+        "store_buffer": {
+          "status": "value",
+          "value": []
+        },
+        "commit_error": {
+          "status": "value",
+          "value": null
+        },
+        "fault_discarded": {
+          "status": "value",
+          "value": false
+        }
+      }
+    }
+  ]
+}

@@ -36,7 +36,7 @@ fn sample_manifest() -> DecoderCampaignManifest {
             RawDecoder::Ppu,
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/ppu_reference/li_r3_7_v2.json"
+                "/tests/fixtures/ppu_reference_single/li_r3_7_v2.json"
             )),
         )
         .expect("versioned documented PPU vector");

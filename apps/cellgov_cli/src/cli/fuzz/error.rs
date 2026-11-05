@@ -152,6 +152,8 @@ pub(crate) enum FuzzCliError {
     Regressions(#[from] RegressionError),
     #[error("fuzz: {0}")]
     SpuReferenceCampaign(#[from] cellgov_fuzz::spu_reference::SpuReferenceCampaignError),
+    #[error("fuzz: {0}")]
+    PpuReferenceCampaign(#[from] cellgov_fuzz::ppu_reference::PpuReferenceCampaignError),
 }
 
 impl From<cellgov_fuzz::runner::CampaignError> for FuzzCliError {
@@ -209,7 +211,8 @@ impl FuzzCliError {
             | Self::EvaluationRead { .. }
             | Self::TrialHarness { .. }
             | Self::Regressions(_)
-            | Self::SpuReferenceCampaign(_) => false,
+            | Self::SpuReferenceCampaign(_)
+            | Self::PpuReferenceCampaign(_) => false,
             Self::ReferenceRead { .. }
             | Self::PpuReference(_)
             | Self::SpuReference(_)
@@ -298,6 +301,7 @@ impl FuzzCliError {
             | Self::EvaluationComparison(_)
             | Self::Regressions(_)
             | Self::SpuReferenceCampaign(_)
+            | Self::PpuReferenceCampaign(_)
             | Self::ArtifactReplay(
                 ArtifactReplayError::ReferenceMismatch
                 | ArtifactReplayError::PpuReference(_)

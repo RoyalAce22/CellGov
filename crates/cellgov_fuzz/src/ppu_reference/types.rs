@@ -458,6 +458,34 @@ pub enum PpuReferenceError {
         /// Field path.
         field: &'static str,
     },
+    /// A vector set holds no vector, or more than it may.
+    #[error("PPU reference set holds {found} vectors; expected 1 to {max}")]
+    VectorCount {
+        /// Vectors in the set.
+        found: usize,
+        /// Most vectors a set may hold.
+        max: usize,
+    },
+    /// A vector's name is blank or repeats an earlier one.
+    #[error("PPU reference vector name {name:?} is blank or repeated")]
+    VectorName {
+        /// The rejected name.
+        name: String,
+    },
+    /// A vector of a set holds no word of the set's unit.
+    #[error("PPU reference vector {name:?} holds no word of unit {unit}")]
+    VectorUnit {
+        /// The vector's name.
+        name: String,
+        /// The key of the set's unit.
+        unit: String,
+    },
+    /// A reason names a tracker issue.
+    #[error("PPU reference reason names a tracker issue: {reason}")]
+    TrackerReason {
+        /// The rejected reason.
+        reason: String,
+    },
     /// The execution-path harness refused the case.
     #[error("PPU reference replay failed: {0}")]
     Replay(#[from] crate::ppu_paths::PpuPathError),

@@ -35,9 +35,9 @@ pub(crate) use entry::try_parse;
 pub(crate) use entry::{die_usage, parse_or_exit};
 pub(crate) use fuzz::{
     FuzzArgs, FuzzCampaignArgs, FuzzCensusArgs, FuzzCensusMergeArgs, FuzzCheck, FuzzCommand,
-    FuzzCompareArgs, FuzzEvaluateArgs, FuzzPromoteArgs, FuzzRawArgs, FuzzRawDecoder, FuzzReduction,
-    FuzzRegressionProfile, FuzzReplayArgs, FuzzSemanticArgs, FuzzSemanticTarget, FuzzSmokeArgs,
-    FuzzSpuDocumentedArgs, FuzzSpuReferenceArgs,
+    FuzzCompareArgs, FuzzEvaluateArgs, FuzzPpuReferenceArgs, FuzzPromoteArgs, FuzzRawArgs,
+    FuzzRawDecoder, FuzzReduction, FuzzRegressionProfile, FuzzReplayArgs, FuzzSemanticArgs,
+    FuzzSemanticTarget, FuzzSmokeArgs, FuzzSpuDocumentedArgs, FuzzSpuReferenceArgs,
 };
 #[cfg(test)]
 pub(crate) use fuzz::{FuzzEvaluateEngine, FuzzReductionPolicy, FuzzStrategy};

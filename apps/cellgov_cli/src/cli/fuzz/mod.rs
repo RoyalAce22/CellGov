@@ -10,6 +10,7 @@ mod entry;
 mod error;
 mod evaluate;
 mod outcome;
+mod ppu_reference;
 mod reference;
 mod scan;
 mod smoke;
@@ -56,3 +57,7 @@ mod documented_tests;
 #[cfg(test)]
 #[path = "tests/reached_tests.rs"]
 mod reached_tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_reference_tests.rs"]
+mod ppu_reference_tests;

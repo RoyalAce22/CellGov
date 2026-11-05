@@ -109,6 +109,7 @@ const DISPATCHED: &[&str] = &[
     "dev fuzz smoke",
     "dev fuzz promote",
     "dev fuzz spu-reference",
+    "dev fuzz ppu-reference",
     "dev fuzz spu-documented",
 ];
 

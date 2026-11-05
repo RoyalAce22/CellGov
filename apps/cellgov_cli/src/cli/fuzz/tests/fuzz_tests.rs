@@ -465,7 +465,7 @@ fn finding_limit_holds_one_through_the_retained_maximum_and_refuses_either_side(
 fn selected_independent_references_are_replayed_and_checked() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../crates/cellgov_fuzz/tests/fixtures");
-    let ppu = root.join("ppu_reference/li_r3_7_v1.json");
+    let ppu = root.join("ppu_reference_single/li_r3_7_v1.json");
     let spu = root.join("spu_reference_single/rotqbyi_12_v1.json");
     let parsed = parse(&["ppu-instruction", "--reference", "vector.json"])
         .expect("reference selector parses");

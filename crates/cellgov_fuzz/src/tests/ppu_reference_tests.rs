@@ -12,13 +12,13 @@ use crate::ppu_paths::PpuPathRun;
 
 const FIXTURE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/ppu_reference/li_r3_7_v2.json"
+    "/tests/fixtures/ppu_reference_single/li_r3_7_v2.json"
 ));
 
 /// The same case in schema version 1, which records no FPSCR or VSCR.
 const FIXTURE_V1: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/ppu_reference/li_r3_7_v1.json"
+    "/tests/fixtures/ppu_reference_single/li_r3_7_v1.json"
 ));
 
 const ALL_COMPONENTS: [PpuReferenceComponent; 29] = [

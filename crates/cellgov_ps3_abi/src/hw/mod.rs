@@ -5,6 +5,7 @@
 pub mod address_space;
 pub mod mfc_timing;
 pub mod ppc_isa;
+pub mod ppc_mnemonics;
 pub mod ppu;
 pub mod ppu_interrupt;
 pub mod ppu_issue;

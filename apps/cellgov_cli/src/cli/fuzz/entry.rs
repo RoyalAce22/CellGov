@@ -12,6 +12,7 @@ use super::census::{run_census, run_census_merge};
 use super::documented::run_spu_documented;
 use super::error::FuzzCliError;
 use super::evaluate::{run_compare, run_evaluate};
+use super::ppu_reference::run_ppu_reference;
 use super::reference::run_spu_reference;
 use super::scan::{run_raw, run_semantic};
 use super::smoke::{run_promote, run_smoke};
@@ -78,6 +79,7 @@ pub(super) fn run_inner_with_render(
         FuzzCommand::Smoke(args) => run_smoke(args, quiet),
         FuzzCommand::Promote(args) => run_promote(args),
         FuzzCommand::SpuReference(args) => run_spu_reference(args),
+        FuzzCommand::PpuReference(args) => run_ppu_reference(args),
         FuzzCommand::SpuDocumented(args) => run_spu_documented(args),
     }
 }

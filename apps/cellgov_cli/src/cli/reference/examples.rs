@@ -455,6 +455,10 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         lines: &["cellgov dev fuzz spu-reference crates/cellgov_fuzz/tests/fixtures/spu_reference"],
     },
     Examples {
+        path: "dev fuzz ppu-reference",
+        lines: &["cellgov dev fuzz ppu-reference crates/cellgov_fuzz/tests/fixtures/ppu_reference"],
+    },
+    Examples {
         path: "dev fuzz spu-documented",
         lines: &["cellgov dev fuzz spu-documented --output target/spu_documented.jsonl"],
     },
