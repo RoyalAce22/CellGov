@@ -198,6 +198,9 @@ pub struct ModuleStartEnv {
     pub sink: Rc<dyn BootSink>,
     /// The observer the transient unit reports its dispatches to.
     pub ppu_tap: Option<Rc<dyn cellgov_ppu::PpuTap>>,
+    /// `--profile-pairs` / `--save-operand-profile`: the transient unit
+    /// counts its retirements, as a title unit does.
+    pub profile_mode: bool,
 }
 
 /// Write the id of the thread the transient unit dispatches as into
@@ -429,6 +432,7 @@ fn spawn_module_start_unit(
         if let Some(tap) = &env.ppu_tap {
             unit.set_tap(Rc::clone(tap));
         }
+        unit.set_profile_mode(env.profile_mode);
         unit
     });
     // A child's module_start executes and faults in the child's
@@ -899,3 +903,7 @@ mod override_tests;
 #[cfg(test)]
 #[path = "tests/module_start_return_tests.rs"]
 mod return_tests;
+
+#[cfg(test)]
+#[path = "tests/module_start_profile_tests.rs"]
+mod profile_tests;

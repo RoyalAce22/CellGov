@@ -89,6 +89,9 @@ pub struct PpuExecutionUnit {
     pub(super) profile_insns: std::collections::BTreeMap<&'static str, u64>,
     pub(super) profile_pairs: std::collections::BTreeMap<(&'static str, &'static str), u64>,
     pub(super) profile_prev: Option<&'static str>,
+    /// The retirements profile mode counts per address, with both
+    /// halves of a fused pair.
+    pub(super) operand_profile: crate::profile::OperandProfile,
     /// `Clone` shares the tap, so a cloned unit reports to the same
     /// observer. A runtime snapshot holds such a clone.
     pub(super) tap: Option<std::rc::Rc<dyn PpuTap>>,
@@ -120,6 +123,7 @@ impl PpuExecutionUnit {
             profile_insns: std::collections::BTreeMap::new(),
             profile_pairs: std::collections::BTreeMap::new(),
             profile_prev: None,
+            operand_profile: crate::profile::OperandProfile::default(),
             tap: None,
         }
     }
@@ -158,6 +162,16 @@ impl PpuExecutionUnit {
     /// Returns the accumulated adjacent-instruction-pair execution counts.
     pub fn profile_pairs(&self) -> &std::collections::BTreeMap<(&'static str, &'static str), u64> {
         &self.profile_pairs
+    }
+
+    /// Returns the retirements profile mode counted per address.
+    pub fn operand_profile(&self) -> &crate::profile::OperandProfile {
+        &self.operand_profile
+    }
+
+    /// Returns the shadow that [`Self::set_instruction_shadow`] installed.
+    pub fn instruction_shadow(&self) -> Option<&shadow::PredecodedShadow> {
+        self.instruction_shadow.as_ref()
     }
 
     /// Mutable access to architectural state.
@@ -231,6 +245,7 @@ impl PpuExecutionUnit {
             profile_insns: _,
             profile_pairs: _,
             profile_prev: _,
+            operand_profile: _,
             tap: _,
         } = self;
         state.apply(unit_state);

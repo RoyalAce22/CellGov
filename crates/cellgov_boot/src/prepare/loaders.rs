@@ -119,10 +119,14 @@ pub fn spu_unit(
 /// The runtime rolls the spawn back, fails the syscall and logs the
 /// cause (`cellgov_core` `process_spawn.rs`
 /// `runtime.process_spawn_image_load_failed`); it never ends the run.
+///
+/// `profile_mode` turns on retirement counting in the child's
+/// `module_start` units.
 pub(super) fn install_spawn_loader(
     rt: &mut Runtime,
     title: &TitleOptions<'_>,
     services: &BootServices,
+    profile_mode: bool,
 ) -> ChildInitPlans {
     let child_init = ChildInitPlans::default();
     let overrides = title.identity.overrides;
@@ -185,6 +189,7 @@ pub(super) fn install_spawn_loader(
             stack_pointer: stack_top - u64::from(PS3_PRIMARY_STACK_SIZE_MAX),
             run_hle_stubbed: overrides.disable_module_start_hle_stubs,
             ppu_tap: taps.ppu(),
+            profile_mode,
         });
         Ok(cellgov_core::SpawnedProcessImage {
             entry_code: state.pc,

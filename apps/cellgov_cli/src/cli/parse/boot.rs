@@ -231,6 +231,10 @@ pub(crate) struct BootRunArgs {
     /// several.
     #[arg(long, value_name = "ID", requires = "save_spu_local_store")]
     pub spu_unit: Option<u64>,
+    /// Count every retired PPU instruction by its operand classes, fused
+    /// halves included, and write the ranking JSON here.
+    #[arg(long, value_name = "PATH")]
+    pub save_operand_profile: Option<String>,
     /// One guest argv entry; repeat for more. Values may spell a flag.
     #[arg(long, value_name = "VALUE", allow_hyphen_values = true, action = clap::ArgAction::Append)]
     pub guest_arg: Vec<String>,

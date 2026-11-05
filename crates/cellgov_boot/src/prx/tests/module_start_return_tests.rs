@@ -78,6 +78,7 @@ fn run(entry_word: u32, at_zero: AtZero) -> Result<ModuleStartOutcome, ModuleSta
         run_hle_stubbed: false,
         sink: Rc::new(crate::NullSink),
         ppu_tap: None,
+        profile_mode: false,
     };
     let module = PrxLoadInfo {
         name: "sentinel_probe".to_string(),

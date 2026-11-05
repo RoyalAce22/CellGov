@@ -1,0 +1,26 @@
+//! The operand-class profile that ranks predecoded-shadow candidates.
+//!
+//! A profiled unit counts the raw words it retires, so a pair the shadow
+//! fuses still counts as its two instructions. The profile keys each count
+//! on the decoded variant and the operand classes that a quickening or a
+//! fused pair can specialize on. The profile is host-side: it reads no
+//! guest state the run does not already hold, and it is outside the state
+//! hash.
+
+mod class;
+mod counts;
+mod report;
+
+pub use class::{BaseClass, InsnClass, PairClass};
+pub use counts::OperandProfile;
+pub use report::{
+    coverage, report_units, shipped_coverage, static_counts, Coverage, ProfileReport,
+};
+
+#[cfg(test)]
+#[path = "tests/class_tests.rs"]
+mod class_tests;
+
+#[cfg(test)]
+#[path = "tests/report_tests.rs"]
+mod report_tests;

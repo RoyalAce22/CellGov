@@ -65,6 +65,7 @@ pub(super) fn run_module_starts(
         run_hle_stubbed: overrides.disable_module_start_hle_stubs,
         sink: std::rc::Rc::clone(&services.sink),
         ppu_tap: services.taps.ppu(),
+        profile_mode: diagnostics.profile_pairs,
     };
     let (started, faulted) = start_boot_modules(rt, prx_modules, &boot_env, skipped)?;
 

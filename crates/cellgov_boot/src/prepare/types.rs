@@ -171,7 +171,8 @@ pub struct DiagnosticOptions<'a> {
     /// When true, walk the title ELF's executable PT_LOAD segments
     /// through the PPU decoder before execution and report the gaps.
     pub prescan: bool,
-    /// Count adjacent instruction pairs per unit.
+    /// Turn on profile mode in every PPU unit, the `module_start` units of
+    /// the title and of a spawned child included.
     pub profile_pairs: bool,
     /// `--dump-at-pc`: the PC a unit faults with a register dump at.
     /// The fault ends the run.

@@ -4,6 +4,7 @@ use cellgov_boot::manifest::TitleManifest;
 use cellgov_boot::observation::{self, save_boot_observation};
 use cellgov_compare::BootOutcome;
 use cellgov_core::Runtime;
+use cellgov_ppu::PpuExecutionUnit;
 use cellgov_spu::capture::LocalStoreCapture;
 use cellgov_spu::state::SpuState;
 use cellgov_spu::SpuExecutionUnit;
@@ -69,6 +70,15 @@ pub enum RunError {
     /// The `--save-spu-local-store` write failed.
     #[error("save-spu-local-store: failed to write {path}: {source}")]
     SaveSpuLocalStore {
+        /// The output path the command received.
+        path: String,
+        /// The host write failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The `--save-operand-profile` write failed.
+    #[error("save-operand-profile: failed to write {path}: {source}")]
+    SaveOperandProfile {
         /// The output path the command received.
         path: String,
         /// The host write failure.
@@ -210,6 +220,21 @@ pub(super) fn save_artifacts(
         eprintln!(
             "save-spu-local-store: unit {unit} at pc 0x{:05x}: wrote {path}",
             capture.pc
+        );
+    }
+    if let Some(path) = artifacts.operand_profile {
+        let units = rt
+            .registry()
+            .iter()
+            .filter_map(|(_, unit)| unit.as_any().downcast_ref::<PpuExecutionUnit>());
+        let report = cellgov_ppu::profile::report_units(units, rt.memory().as_bytes());
+        std::fs::write(path, report.to_json()).map_err(|source| RunError::SaveOperandProfile {
+            path: path.to_string(),
+            source,
+        })?;
+        eprintln!(
+            "save-operand-profile: {} retirements: wrote {path}",
+            report.retired
         );
     }
     Ok(())

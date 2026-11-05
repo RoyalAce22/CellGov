@@ -58,6 +58,8 @@ pub(crate) struct ChildInitPlan {
     pub run_hle_stubbed: bool,
     /// The observer the child's `module_start` units report to.
     pub ppu_tap: Option<Rc<dyn cellgov_ppu::PpuTap>>,
+    /// Whether the child's `module_start` units count their retirements.
+    pub profile_mode: bool,
 }
 
 /// Plans staged by the spawn loader, keyed by the token the loader
@@ -141,6 +143,7 @@ fn run_child_init(
         run_hle_stubbed: plan.run_hle_stubbed,
         sink: Rc::clone(sink),
         ppu_tap: plan.ppu_tap.clone(),
+        profile_mode: plan.profile_mode,
     };
     let batch = run_module_start_batch(rt, &plan.prx_modules, &env);
     restore_units(rt, held);

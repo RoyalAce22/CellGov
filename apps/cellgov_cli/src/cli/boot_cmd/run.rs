@@ -106,12 +106,13 @@ pub(crate) fn run_game(
                     unit: args.spu_unit,
                 }
             }),
+            operand_profile: args.save_operand_profile.as_deref(),
         },
         game::RunReporting {
             boot: cellgov_boot::prepare::DiagnosticOptions {
                 print_banner: true,
                 prescan: args.prescan,
-                profile_pairs: args.profile_pairs,
+                profile_pairs: args.profile_pairs || args.save_operand_profile.is_some(),
                 dump_at_pc: args.dump_at_pc,
                 dump_skip: args.dump_skip,
                 dump_mem_boot_addrs: args.dump_mem_boot.as_deref().unwrap_or(&[]),

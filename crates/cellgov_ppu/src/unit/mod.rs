@@ -94,6 +94,10 @@ mod fused_refusal_tests;
 mod store_fault_tests;
 
 #[cfg(test)]
+#[path = "tests/operand_profile_tests.rs"]
+mod operand_profile_tests;
+
+#[cfg(test)]
 #[path = "tests/interrupt_record_tests.rs"]
 mod interrupt_record_tests;
 

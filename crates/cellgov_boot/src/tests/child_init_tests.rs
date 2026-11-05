@@ -10,6 +10,7 @@ fn plan(stack_pointer: u64) -> ChildInitPlan {
         stack_pointer,
         run_hle_stubbed: false,
         ppu_tap: None,
+        profile_mode: false,
     }
 }
 

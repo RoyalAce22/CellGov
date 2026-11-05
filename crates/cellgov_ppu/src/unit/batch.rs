@@ -234,6 +234,9 @@ impl PpuExecutionUnit {
                     // batch applies the return value and the step past it.
                     self.note_fetch(step_pc);
                     self.timing.retire_instruction(step_pc, ops, step_pc + 4);
+                    if self.profile_mode {
+                        self.operand_profile.record(step_pc);
+                    }
                     if ctx.trace_per_step() {
                         self.per_step_hashes
                             .push((step_pc, self.state.state_hash()));
@@ -295,6 +298,12 @@ impl PpuExecutionUnit {
 
             if self.profile_mode {
                 self.profile_dispatch(&insn);
+                self.operand_profile.record(step_pc);
+                if pair {
+                    // Both halves count, so the profile sees the
+                    // instructions the shadow fused.
+                    self.operand_profile.record(step_pc + 4);
+                }
             }
 
             if ctx.trace_per_step() {

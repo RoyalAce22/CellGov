@@ -100,7 +100,8 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
     loaders::install_unit_factories(&mut rt, debug_opts.clone());
 
     // 8. Spawned-child image loader.
-    let child_init = loaders::install_spawn_loader(&mut rt, &title, &services);
+    let child_init =
+        loaders::install_spawn_loader(&mut rt, &title, &services, diagnostics.profile_pairs);
 
     // 9. Guest-visible content, mounts last.
     providers::register_sibling_images(&mut rt, title.elf_path)?;

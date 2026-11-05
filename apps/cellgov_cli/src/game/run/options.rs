@@ -33,6 +33,9 @@ pub struct RunArtifacts<'a> {
     pub state_trace: Option<&'a str>,
     /// `--save-spu-local-store`: one SPU unit's local store and PC.
     pub spu_local_store: Option<SpuLocalStoreRequest<'a>>,
+    /// `--save-operand-profile`: the PPU operand-class ranking JSON.
+    /// Without `DiagnosticOptions::profile_pairs`, the units count nothing.
+    pub operand_profile: Option<&'a str>,
 }
 
 /// Where a local-store capture goes, and which SPU unit it captures.

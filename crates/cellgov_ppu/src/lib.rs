@@ -36,6 +36,7 @@ pub mod lv2_table;
 pub mod multilinear;
 pub mod observation;
 pub mod prescan;
+pub mod profile;
 pub mod prx;
 pub mod prx_loader;
 pub mod shadow;

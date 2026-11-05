@@ -29,6 +29,7 @@ fn env(run_hle_stubbed: bool) -> ModuleStartEnv {
         run_hle_stubbed,
         sink: Rc::new(crate::NullSink),
         ppu_tap: None,
+        profile_mode: false,
     }
 }
 
