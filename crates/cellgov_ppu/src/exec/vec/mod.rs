@@ -121,6 +121,10 @@ mod vx_executes_tests;
 mod float_arith_console_tests;
 
 #[cfg(test)]
+#[path = "tests/graphics_mode_console_tests.rs"]
+mod graphics_mode_console_tests;
+
+#[cfg(test)]
 #[path = "tests/convert_tests.rs"]
 mod convert_tests;
 
