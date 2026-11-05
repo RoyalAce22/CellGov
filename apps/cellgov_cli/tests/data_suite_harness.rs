@@ -59,7 +59,7 @@ fn the_case_table_names_each_fixture_once() {
             case.executable
         );
     }
-    assert_eq!(seen.len(), 10);
+    assert_eq!(seen.len(), 24);
 }
 
 /// [`report_verdict`] reads only the outcome, the step count, and

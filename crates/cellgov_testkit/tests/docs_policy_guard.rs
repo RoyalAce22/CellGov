@@ -3,8 +3,9 @@
 //! - The architecture and concepts documents describe mechanism. No
 //!   content id and no display name from the title registry appears in
 //!   them; per-title state lives in `docs/titles.md`.
-//! - Shipped Rust comments carry no issue-tracker reference. A `#N`
-//!   in a comment means nothing to a reader without the tracker.
+//! - Shipped Rust comments and `#[ignore = "..."]` reasons carry no
+//!   issue-tracker reference. A `#N` means nothing to a reader without
+//!   the tracker.
 //! - No tracked text file points a reader at a path git does not
 //!   track. The trees below are the ones a clone cannot populate:
 //!   nothing describes how, so a pointer into one dangles for every
@@ -33,6 +34,7 @@ const TEXT_EXTENSIONS: &[&str] = &[
 const MIN_IDENTITIES: usize = 4;
 const MIN_MECHANISM_DOCS: usize = 10;
 const MIN_COMMENT_LINES: usize = 20_000;
+const MIN_IGNORE_REASONS: usize = 25;
 const MIN_TEXT_FILES: usize = 400;
 const MIN_CRATE_MENTIONS: usize = 100;
 
@@ -316,6 +318,42 @@ fn has_issue_reference(comment: &str) -> bool {
         i = at + 1;
     }
     false
+}
+
+/// Each `ignore = "..."` reason string in `source`, with the 1-based
+/// line it opens on. A reason may span lines through `\` continuations;
+/// it ends at the first unescaped `"`. The reader skips comment lines.
+fn ignore_reasons(source: &str) -> Vec<(usize, String)> {
+    const OPEN: &str = "ignore = \"";
+    let mut found = Vec::new();
+    let mut offset = 0;
+    for (n, line) in source.split_inclusive('\n').enumerate() {
+        let line_start = offset;
+        offset += line.len();
+        if comment_body(line).is_some() {
+            continue;
+        }
+        let Some(at) = line.find(OPEN) else {
+            continue;
+        };
+        let body = &source[line_start + at + OPEN.len()..];
+        let mut end = None;
+        let mut escaped = false;
+        for (i, c) in body.char_indices() {
+            match c {
+                '\\' if !escaped => escaped = true,
+                '"' if !escaped => {
+                    end = Some(i);
+                    break;
+                }
+                _ => escaped = false,
+            }
+        }
+        if let Some(end) = end {
+            found.push((n + 1, body[..end].to_string()));
+        }
+    }
+    found
 }
 
 /// Whether a line cites one of the untracked trees. The match must
@@ -618,6 +656,61 @@ fn shipped_comments_carry_no_issue_reference() {
         violations.len(),
         violations.concat()
     );
+}
+
+#[test]
+fn ignore_reasons_carry_no_issue_reference() {
+    let root = workspace_root();
+    let files = shipped_rust(&root);
+    let mut reasons = 0usize;
+    let mut violations = Vec::new();
+    for file in &files {
+        if defines_a_rule(file) {
+            continue;
+        }
+        for (line, reason) in ignore_reasons(&read(file)) {
+            reasons += 1;
+            if has_issue_reference(&reason) {
+                let shown = file.strip_prefix(&root).unwrap_or(file);
+                violations.push(format!("  {}:{line}\n", shown.display()));
+            }
+        }
+    }
+    assert!(
+        reasons >= MIN_IGNORE_REASONS,
+        "gate went vacuous: only {reasons} ignore reason(s) scanned across {} files",
+        files.len()
+    );
+    violations.sort();
+    assert!(
+        violations.is_empty(),
+        "{} ignore reason(s) carry an issue reference:\n{}",
+        violations.len(),
+        violations.concat()
+    );
+}
+
+#[test]
+fn the_ignore_reason_reader_spans_continuations_and_skips_comments() {
+    let source = "#[test]\n\
+                  #[ignore = \"open on the gap \\\n            (#123), see the \\\"note\\\"\"]\n\
+                  fn a() {}\n\
+                  // #[ignore = \"a comment (#45)\"]\n\
+                  #[ignore = \"no reference\"]\r\n\
+                  fn b() {}\n";
+    let reasons = ignore_reasons(source);
+    assert_eq!(
+        reasons,
+        [
+            (
+                2,
+                "open on the gap \\\n            (#123), see the \\\"note\\\"".to_string()
+            ),
+            (6, "no reference".to_string()),
+        ]
+    );
+    assert!(has_issue_reference(&reasons[0].1));
+    assert!(!has_issue_reference(&reasons[1].1));
 }
 
 #[test]

@@ -47,6 +47,119 @@ pub const CPU_PPU_BRANCH: Case = Case {
     max_steps: 50_000_000,
 };
 
+pub const CPU_PPU_GPR: Case = Case {
+    rel_dir: "cpu/ppu_gpr",
+    stem: "ppu_gpr",
+    executable: "ppu_gpr.ppu.elf",
+    expected: "ppu_gpr.expected",
+    max_steps: 400_000_000,
+};
+
+pub const CPU_PPU_FPU: Case = Case {
+    rel_dir: "cpu/ppu_fpu",
+    stem: "ppu_fpu",
+    executable: "ppu_fpu.ppu.elf",
+    expected: "ppu_fpu.expected",
+    max_steps: 1_000_000_000,
+};
+
+pub const CPU_PPU_VPU: Case = Case {
+    rel_dir: "cpu/ppu_vpu",
+    stem: "ppu_vpu",
+    executable: "ppu_vpu.ppu.elf",
+    expected: "ppu_vpu.expected",
+    max_steps: 3_000_000_000,
+};
+
+pub const CPU_PPU_INTEGER_ARITHMETIC: Case = Case {
+    rel_dir: "cpu/ppu_integer_arithmetic",
+    stem: "ppu_integer_arithmetic",
+    executable: "ppu_integer_arithmetic.ppu.elf",
+    expected: "ppu_integer_arithmetic.expected",
+    max_steps: 50_000_000,
+};
+
+pub const CPU_PPU_INTEGER_COMPARE: Case = Case {
+    rel_dir: "cpu/ppu_integer_compare",
+    stem: "ppu_integer_compare",
+    executable: "ppu_integer_compare.ppu.elf",
+    expected: "ppu_integer_compare.expected",
+    max_steps: 50_000_000,
+};
+
+pub const CPU_PPU_INTEGER_LOGICAL: Case = Case {
+    rel_dir: "cpu/ppu_integer_logical",
+    stem: "ppu_integer_logical",
+    executable: "ppu_integer_logical.ppu.elf",
+    expected: "ppu_integer_logical.expected",
+    max_steps: 50_000_000,
+};
+
+pub const CPU_PPU_INTEGER_ROTATE: Case = Case {
+    rel_dir: "cpu/ppu_integer_rotate",
+    stem: "ppu_integer_rotate",
+    executable: "ppu_integer_rotate.ppu.elf",
+    expected: "ppu_integer_rotate.expected",
+    max_steps: 50_000_000,
+};
+
+pub const CPU_PPU_INTEGER_SHIFT: Case = Case {
+    rel_dir: "cpu/ppu_integer_shift",
+    stem: "ppu_integer_shift",
+    executable: "ppu_integer_shift.ppu.elf",
+    expected: "ppu_integer_shift.expected",
+    max_steps: 50_000_000,
+};
+
+pub const CPU_PPU_FLOAT_ARITHMETIC: Case = Case {
+    rel_dir: "cpu/ppu_float_arithmetic",
+    stem: "ppu_float_arithmetic",
+    executable: "ppu_float_arithmetic.ppu.elf",
+    expected: "ppu_float_arithmetic.expected",
+    max_steps: 50_000_000,
+};
+
+pub const CPU_PPU_FLOAT_COMPARE: Case = Case {
+    rel_dir: "cpu/ppu_float_compare",
+    stem: "ppu_float_compare",
+    executable: "ppu_float_compare.ppu.elf",
+    expected: "ppu_float_compare.expected",
+    max_steps: 50_000_000,
+};
+
+pub const CPU_PPU_FLOAT_CONVERSION: Case = Case {
+    rel_dir: "cpu/ppu_float_conversion",
+    stem: "ppu_float_conversion",
+    executable: "ppu_float_conversion.ppu.elf",
+    expected: "ppu_float_conversion.expected",
+    max_steps: 50_000_000,
+};
+
+pub const CPU_PPU_FLOAT_LOAD: Case = Case {
+    rel_dir: "cpu/ppu_float_load",
+    stem: "ppu_float_load",
+    executable: "ppu_float_load.ppu.elf",
+    expected: "ppu_float_load.expected",
+    max_steps: 50_000_000,
+};
+
+pub const CPU_PPU_FLOAT_STORE: Case = Case {
+    rel_dir: "cpu/ppu_float_store",
+    stem: "ppu_float_store",
+    executable: "ppu_float_store.ppu.elf",
+    expected: "ppu_float_store.expected",
+    max_steps: 50_000_000,
+};
+
+/// The suite ships this case as a SELF and no ELF.
+pub const CPU_PPU_VECTOR_INTEGER_ARITHMETIC: Case = Case {
+    rel_dir: "cpu/ppu_vector_integer_arithmetic",
+    stem: "ppu_vector_integer_arithmetic",
+    executable: "ppu_vector_integer_arithmetic.ppu.self",
+    expected: "ppu_vector_integer_arithmetic.expected",
+    max_steps: 50_000_000,
+};
+
 pub const CPU_SPU_ALU: Case = Case {
     rel_dir: "cpu/spu_alu",
     stem: "spu_alu",
@@ -116,6 +229,20 @@ pub const RSX_METHODS_SCE_DRIVER: Case = Case {
 pub const CASES: &[Case] = &[
     CPU_BASIC,
     CPU_PPU_BRANCH,
+    CPU_PPU_GPR,
+    CPU_PPU_FPU,
+    CPU_PPU_VPU,
+    CPU_PPU_INTEGER_ARITHMETIC,
+    CPU_PPU_INTEGER_COMPARE,
+    CPU_PPU_INTEGER_LOGICAL,
+    CPU_PPU_INTEGER_ROTATE,
+    CPU_PPU_INTEGER_SHIFT,
+    CPU_PPU_FLOAT_ARITHMETIC,
+    CPU_PPU_FLOAT_COMPARE,
+    CPU_PPU_FLOAT_CONVERSION,
+    CPU_PPU_FLOAT_LOAD,
+    CPU_PPU_FLOAT_STORE,
+    CPU_PPU_VECTOR_INTEGER_ARITHMETIC,
     CPU_SPU_ALU,
     CPU_SPU_FPU,
     CPU_SPU_GENERIC,

@@ -41,7 +41,11 @@ mod installed_firmware;
 #[path = "common/ps3autotests_cases.rs"]
 mod cases;
 use cases::{
-    manifest_content, report_verdict, Case, CASES, CPU_BASIC, CPU_PPU_BRANCH, CPU_SPU_ALU,
+    manifest_content, report_verdict, Case, CASES, CPU_BASIC, CPU_PPU_BRANCH,
+    CPU_PPU_FLOAT_ARITHMETIC, CPU_PPU_FLOAT_COMPARE, CPU_PPU_FLOAT_CONVERSION, CPU_PPU_FLOAT_LOAD,
+    CPU_PPU_FLOAT_STORE, CPU_PPU_FPU, CPU_PPU_GPR, CPU_PPU_INTEGER_ARITHMETIC,
+    CPU_PPU_INTEGER_COMPARE, CPU_PPU_INTEGER_LOGICAL, CPU_PPU_INTEGER_ROTATE,
+    CPU_PPU_INTEGER_SHIFT, CPU_PPU_VECTOR_INTEGER_ARITHMETIC, CPU_PPU_VPU, CPU_SPU_ALU,
     CPU_SPU_FPU, CPU_SPU_GENERIC, LV2_SYS_EVENT_FLAG, LV2_SYS_PROCESS, LV2_SYS_SEMAPHORE,
     RSX_METHODS_PFIFO_PULLER, RSX_METHODS_SCE_DRIVER,
 };
@@ -409,6 +413,119 @@ fn cpu_ppu_branch() {
 }
 
 #[test]
+fn cpu_ppu_gpr() {
+    run_case(&CPU_PPU_GPR);
+}
+
+#[test]
+fn cpu_ppu_fpu() {
+    run_case(&CPU_PPU_FPU);
+}
+
+#[test]
+fn cpu_ppu_vpu() {
+    run_case(&CPU_PPU_VPU);
+}
+
+#[test]
+#[ignore = "the run reaches PROCESS_EXIT(0) with no TTY at all; the boot \
+            reports syscall 988 unhandled, the cpu_ppu_branch shape. Un-ignore \
+            when the boot dispatches syscall 988 and the TTY matches the \
+            console capture."]
+fn cpu_ppu_integer_arithmetic() {
+    run_case(&CPU_PPU_INTEGER_ARITHMETIC);
+}
+
+#[test]
+#[ignore = "the run reaches PROCESS_EXIT(0) with no TTY at all; the boot \
+            reports syscall 988 unhandled, the cpu_ppu_branch shape. Un-ignore \
+            when the boot dispatches syscall 988 and the TTY matches the \
+            console capture."]
+fn cpu_ppu_integer_compare() {
+    run_case(&CPU_PPU_INTEGER_COMPARE);
+}
+
+#[test]
+#[ignore = "the run reaches PROCESS_EXIT(0) with no TTY at all; the boot \
+            reports syscall 988 unhandled, the cpu_ppu_branch shape. Un-ignore \
+            when the boot dispatches syscall 988 and the TTY matches the \
+            console capture."]
+fn cpu_ppu_integer_logical() {
+    run_case(&CPU_PPU_INTEGER_LOGICAL);
+}
+
+#[test]
+#[ignore = "the run reaches PROCESS_EXIT(0) with no TTY at all; the boot \
+            reports syscall 988 unhandled, the cpu_ppu_branch shape. Un-ignore \
+            when the boot dispatches syscall 988 and the TTY matches the \
+            console capture."]
+fn cpu_ppu_integer_rotate() {
+    run_case(&CPU_PPU_INTEGER_ROTATE);
+}
+
+#[test]
+#[ignore = "the run reaches PROCESS_EXIT(0) with no TTY at all; the boot \
+            reports syscall 988 unhandled, the cpu_ppu_branch shape. Un-ignore \
+            when the boot dispatches syscall 988 and the TTY matches the \
+            console capture."]
+fn cpu_ppu_integer_shift() {
+    run_case(&CPU_PPU_INTEGER_SHIFT);
+}
+
+#[test]
+#[ignore = "the run reaches PROCESS_EXIT(0) with no TTY at all; the boot \
+            reports syscall 988 unhandled, the cpu_ppu_branch shape. Un-ignore \
+            when the boot dispatches syscall 988 and the TTY matches the \
+            console capture."]
+fn cpu_ppu_float_arithmetic() {
+    run_case(&CPU_PPU_FLOAT_ARITHMETIC);
+}
+
+#[test]
+#[ignore = "the run reaches PROCESS_EXIT(0) with no TTY at all; the boot \
+            reports syscall 988 unhandled, the cpu_ppu_branch shape. Un-ignore \
+            when the boot dispatches syscall 988 and the TTY matches the \
+            console capture."]
+fn cpu_ppu_float_compare() {
+    run_case(&CPU_PPU_FLOAT_COMPARE);
+}
+
+#[test]
+#[ignore = "the run reaches PROCESS_EXIT(0) with no TTY at all; the boot \
+            reports syscall 988 unhandled, the cpu_ppu_branch shape. Un-ignore \
+            when the boot dispatches syscall 988 and the TTY matches the \
+            console capture."]
+fn cpu_ppu_float_conversion() {
+    run_case(&CPU_PPU_FLOAT_CONVERSION);
+}
+
+#[test]
+#[ignore = "the run reaches PROCESS_EXIT(0) with no TTY at all; the boot \
+            reports syscall 988 unhandled, the cpu_ppu_branch shape. Un-ignore \
+            when the boot dispatches syscall 988 and the TTY matches the \
+            console capture."]
+fn cpu_ppu_float_load() {
+    run_case(&CPU_PPU_FLOAT_LOAD);
+}
+
+#[test]
+#[ignore = "the run reaches PROCESS_EXIT(0) with no TTY at all; the boot \
+            reports syscall 988 unhandled, the cpu_ppu_branch shape. Un-ignore \
+            when the boot dispatches syscall 988 and the TTY matches the \
+            console capture."]
+fn cpu_ppu_float_store() {
+    run_case(&CPU_PPU_FLOAT_STORE);
+}
+
+#[test]
+#[ignore = "the suite ships this case only as a fake-signed SELF, which boot \
+            run refuses at load. Un-ignore when boot run loads a fake-signed \
+            SELF, whose segments need no key."]
+fn cpu_ppu_vector_integer_arithmetic() {
+    run_case(&CPU_PPU_VECTOR_INTEGER_ARITHMETIC);
+}
+
+#[test]
 #[ignore = "Known divergence: the run reproduces the console's error ladder \
             line for line, then deadlocks at the master/worker section. The \
             fixture creates the master and its five workers with \
@@ -435,7 +552,9 @@ fn lv2_sys_semaphore() {
 #[test]
 #[ignore = "sys_spu_image_open answers ENOENT for /app_home/spu_alu.spu.elf, \
             because it sees only two fixed sibling names, so the run exits \
-            0x80010006 at step 47 with no TTY (#2112)"]
+            0x80010006 at step 47 with no TTY. Un-ignore when \
+            sys_spu_image_open opens an SPU ELF under any name beside the \
+            title's ELF."]
 fn cpu_spu_alu() {
     run_case(&CPU_SPU_ALU);
 }
@@ -443,28 +562,33 @@ fn cpu_spu_alu() {
 #[test]
 #[ignore = "sys_spu_image_open answers ENOENT for /app_home/spu_fpu.spu.elf, \
             because it sees only two fixed sibling names, so the run exits \
-            0x80010006 at step 47 with no TTY (#2112)"]
+            0x80010006 at step 47 with no TTY. Un-ignore when \
+            sys_spu_image_open opens an SPU ELF under any name beside the \
+            title's ELF."]
 fn cpu_spu_fpu() {
     run_case(&CPU_SPU_FPU);
 }
 
 #[test]
 #[ignore = "the PPU's first store to a Raw SPU's MFC proxy command registers \
-            (offset 0x3004) faults the run, which then reaches MAX_STEPS (#2113)"]
+            (offset 0x3004) faults the run, which then reaches MAX_STEPS. \
+            Un-ignore when that store queues the MFC command."]
 fn cpu_spu_generic() {
     run_case(&CPU_SPU_GENERIC);
 }
 
 #[test]
 #[ignore = "the suite ships this case only as a fake-signed SELF, which boot \
-            run refuses at load (#2114)"]
+            run refuses at load. Un-ignore when boot run loads a fake-signed \
+            SELF, whose segments need no key."]
 fn rsx_methods_pfifo_puller() {
     run_case(&RSX_METHODS_PFIFO_PULLER);
 }
 
 #[test]
 #[ignore = "the suite ships this case only as a fake-signed SELF, which boot \
-            run refuses at load (#2114)"]
+            run refuses at load. Un-ignore when boot run loads a fake-signed \
+            SELF, whose segments need no key."]
 fn rsx_methods_sce_driver() {
     run_case(&RSX_METHODS_SCE_DRIVER);
 }
