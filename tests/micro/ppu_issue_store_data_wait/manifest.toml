@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_store_data_wait"
+
+# A hardware probe of whether a store, a store string or a store multiple
+# waits for a load into the first register it stores, beside an add that
+# reads the loaded register: eight timed loops of four pairs, each beside
+# a control whose load writes a register the second instruction does not
+# read. The console capture is the answer; ppu/main.c's header lists the
+# loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 160 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 160 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 90000

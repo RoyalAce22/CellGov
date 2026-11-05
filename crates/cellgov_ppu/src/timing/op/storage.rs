@@ -76,9 +76,7 @@ pub(super) fn multiple(ea: u64, first: u8, bytes: u64, store_side: bool, string:
     let len = bytes.min(u8::MAX as u64) as u8;
     if store_side {
         let mut op = store(INT_STORE, ea, len).microcode(micro, micro);
-        for r in 0..regs.min(4) {
-            op = op.src(gpr((first + r) % 32));
-        }
+        op.src_range = Some((gpr(first), regs, k::PPU_STORE_SOURCE_LEAD_MICROWORDS));
         op
     } else {
         let mut op = load(unit::LSU | unit::FXU, ea, len, LoadClass::Fixed).microcode(micro, micro);

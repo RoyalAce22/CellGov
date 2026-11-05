@@ -68,15 +68,19 @@ const LOOPS: [&[u32]; 11] = [
 /// to within 22 cycles either side: the
 /// console's 8-word pair takes 53 cycles more than the 4-word one and its
 /// 16-word pair only 35 more than the 8-word one, which no one interval
-/// gives.
-const RESIDUALS: [(usize, f64); 8] = [
+/// gives. Each pair's `stmw` waits for none of the `lmw` targets it
+/// stores, so the 4-word pair on one line runs short too. The `stmw` of
+/// the `ppu_issue_store_data_wait` capture also waits for no `lwz` of its
+/// first source.
+const RESIDUALS: [(usize, f64); 9] = [
     (0, 5.0),
     (1, 7.0),
     (2, 13.0),
     (4, 7.0),
     (5, 3.0),
-    (6, 20.0),
+    (6, 22.0),
     (7, 8.0),
+    (8, 7.0),
     (9, 22.0),
 ];
 

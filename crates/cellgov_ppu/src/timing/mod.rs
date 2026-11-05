@@ -52,3 +52,7 @@ mod cache_tag_tests;
 #[cfg(test)]
 #[path = "tests/line_cross_tests.rs"]
 mod line_cross_tests;
+
+#[cfg(test)]
+#[path = "tests/range_registers_tests.rs"]
+mod range_registers_tests;

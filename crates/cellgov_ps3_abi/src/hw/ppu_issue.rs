@@ -651,6 +651,14 @@ pub const PPU_MFTB_ISSUE_CYCLES: u64 = PPU_CYCLES_PER_TB_TICK;
 /// [CBE-Handbook p:729 s:A.1.3.1] `lha`: 7 microwords.
 pub const PPU_LHA_MICROWORDS: u8 = 10;
 
+/// The microwords a store multiple or store string runs before it reads
+/// its first source.
+///
+/// In the `ppu_issue_store_data_wait` capture neither `stmw r24` nor
+/// `stswi r24` waits for a `lwz r24` just before it, and a `stw r24`
+/// does.
+pub const PPU_STORE_SOURCE_LEAD_MICROWORDS: u8 = 2;
+
 /// The cycles before the first microword of a microcoded instruction
 /// issues.
 ///

@@ -81,12 +81,17 @@ pub(super) fn divide(
     }
 }
 
-pub(super) fn multiply(ra: u8, rb: Option<u8>, rt: u8, lat: u64, rc: bool) -> Op {
+/// A multiply of latency `lat`; with `oe` it also writes XER.
+///
+/// [CBE-Handbook p:718 s:A.1.2] lists `mullwo` and `mulldo` beside the
+/// forms that leave XER alone.
+pub(super) fn multiply(ra: u8, rb: Option<u8>, rt: u8, lat: u64, oe: bool, rc: bool) -> Op {
     let op = Op::on(unit::FXU).src(gpr(ra));
     let op = match rb {
         Some(rb) => op.src(gpr(rb)),
         None => op,
     };
+    let op = if oe { op.dst(XER, lat) } else { op };
     if rc {
         op.cr_recording(gpr(rt), lat)
     } else {

@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_range_registers"
+
+# A hardware probe of whether an instruction waits for a register a load
+# string, a store multiple or an overflow-enabled multiply touches past
+# the registers it names first: eight timed loops of four pairs (a
+# wrapped lswi target, a late stmw source and the XER of mullwo, each
+# beside a control). The console capture is the answer; ppu/main.c's
+# header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 160 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 160 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 90000

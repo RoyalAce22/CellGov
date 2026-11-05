@@ -903,10 +903,12 @@ fn the_issue_model_times_each_table_loop_within_the_console_s_spread() {
 /// accepted gap from the `ppu_issue_chain` capture
 /// (`console_ppu_issue_chain.rs`). The
 /// `stmw` and `lmw` pair to one line takes 138.8; the model's drain of
-/// the store queue's 16-byte entries gives 120, as it does for the same
+/// the store queue's 16-byte entries gives 118, as it does for the same
 /// loop of the `ppu_issue_multiple` capture
-/// (`console_ppu_issue_multiple.rs`).
-const TABLE_RESIDUALS: [(usize, f64); 3] = [(1, 2.0), (2, 3.0), (17, 20.0)];
+/// (`console_ppu_issue_multiple.rs`). The `stmw` waits for none of the
+/// `lmw` targets it stores, as it waits for no `lwz` of its first source
+/// in the `ppu_issue_store_data_wait` capture.
+const TABLE_RESIDUALS: [(usize, f64); 3] = [(1, 2.0), (2, 3.0), (17, 21.0)];
 
 /// The loop the model times outside the console's spread: eight
 /// dependent `add`. The model's 16 cycles an iteration is the add's

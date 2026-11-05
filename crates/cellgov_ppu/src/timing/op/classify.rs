@@ -89,7 +89,14 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             .src(gpr(ra))
             .dst(XER, k::PPU_FX_LATENCY_CYCLES)
             .record_cr0(true)),
-        I::Mulli { rt, ra, .. } => one(multiply(ra, None, rt, k::PPU_MULLI_LATENCY_CYCLES, false)),
+        I::Mulli { rt, ra, .. } => one(multiply(
+            ra,
+            None,
+            rt,
+            k::PPU_MULLI_LATENCY_CYCLES,
+            false,
+            false,
+        )),
         I::Add { rt, ra, rb, oe, rc } | I::Subf { rt, ra, rb, oe, rc } => {
             one(add_form(rt, &[ra, rb], oe, rc))
         }
@@ -126,16 +133,38 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         | I::Subfze { rt, ra, oe: _, rc }
         | I::Subfme { rt, ra, oe: _, rc }
         | I::Addme { rt, ra, oe: _, rc } => one(add_form(rt, &[ra], true, rc).src(XER)),
-        I::Mullw { rt, ra, rb, rc, .. }
-        | I::Mulhw { rt, ra, rb, rc }
-        | I::Mulhwu { rt, ra, rb, rc } => {
-            one(multiply(ra, Some(rb), rt, k::PPU_MULLW_LATENCY_CYCLES, rc))
-        }
-        I::Mulld { rt, ra, rb, rc, .. }
-        | I::Mulhd { rt, ra, rb, rc }
-        | I::Mulhdu { rt, ra, rb, rc } => {
-            one(multiply(ra, Some(rb), rt, k::PPU_MULLD_LATENCY_CYCLES, rc))
-        }
+        I::Mullw { rt, ra, rb, oe, rc } => one(multiply(
+            ra,
+            Some(rb),
+            rt,
+            k::PPU_MULLW_LATENCY_CYCLES,
+            oe,
+            rc,
+        )),
+        I::Mulhw { rt, ra, rb, rc } | I::Mulhwu { rt, ra, rb, rc } => one(multiply(
+            ra,
+            Some(rb),
+            rt,
+            k::PPU_MULLW_LATENCY_CYCLES,
+            false,
+            rc,
+        )),
+        I::Mulld { rt, ra, rb, oe, rc } => one(multiply(
+            ra,
+            Some(rb),
+            rt,
+            k::PPU_MULLD_LATENCY_CYCLES,
+            oe,
+            rc,
+        )),
+        I::Mulhd { rt, ra, rb, rc } | I::Mulhdu { rt, ra, rb, rc } => one(multiply(
+            ra,
+            Some(rb),
+            rt,
+            k::PPU_MULLD_LATENCY_CYCLES,
+            false,
+            rc,
+        )),
         I::Ldarx { rt, ra, rb } => one(load(unit::LSU, ea_x(state, ra, rb), 8, LoadClass::Reserve)
             .dst(gpr(rt), k::PPU_LOAD_FX_USE_CYCLES)
             .base(ra)

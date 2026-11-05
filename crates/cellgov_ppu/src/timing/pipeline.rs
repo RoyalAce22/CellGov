@@ -427,10 +427,8 @@ impl PpeTiming {
             _ => (c.floor, true),
         };
         let mut t = floor.max(fetched);
-        for &r in &op.srcs {
-            if r != NO_REG {
-                t = t.max(c.ready[r as usize]);
-            }
+        for (r, after) in op.reads() {
+            t = t.max(c.ready[r as usize].saturating_sub(after));
         }
         for &r in &op.addr {
             if r != NO_REG {
@@ -734,14 +732,12 @@ impl PpeTiming {
             }
         }
         let micro = u64::from(op.span);
-        let targets =
-            op.dsts
-                .iter()
-                .map(|d| d.0)
-                .filter(|r| *r != NO_REG && !is_update_target(op, *r))
-                .chain(op.range.into_iter().flat_map(|(first, n, _)| {
-                    (first..first.saturating_add(n)).filter(|r| *r < 32)
-                }));
+        let targets = op
+            .dsts
+            .iter()
+            .map(|d| d.0)
+            .filter(|r| *r != NO_REG && !is_update_target(op, *r))
+            .chain(op.range_targets());
         let (data, addr) = match miss_lat {
             None => {
                 let addr = if class == LoadClass::Fixed {
@@ -954,8 +950,8 @@ fn mark_destinations(c: &mut Core, op: &Op, t: u64) {
             c.addr_ready[r as usize] = t + u64::from(lat);
         }
     }
-    if let Some((first, n, lat)) = op.range {
-        for r in (first..first.saturating_add(n)).filter(|r| *r < 32) {
+    if let Some((_, _, lat)) = op.range {
+        for r in op.range_targets() {
             c.ready[r as usize] = t + u64::from(lat);
             c.addr_ready[r as usize] = t + u64::from(lat);
         }

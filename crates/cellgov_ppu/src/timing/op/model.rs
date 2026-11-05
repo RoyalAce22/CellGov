@@ -24,7 +24,7 @@ pub(super) const fn crf(n: u8) -> Reg {
 }
 pub(super) const LR: Reg = 104;
 pub(super) const CTR: Reg = 105;
-pub(super) const XER: Reg = 106;
+pub(in crate::timing) const XER: Reg = 106;
 pub(super) const FPSCR: Reg = 107;
 /// An unused slot of a register list.
 pub(crate) const NO_REG: Reg = u8::MAX;
@@ -125,9 +125,14 @@ pub(crate) struct Op {
     pub(crate) addr: [Reg; 2],
     /// Registers written, each with its latency.
     pub(crate) dsts: [(Reg, u16); 3],
-    /// GPRs written from this one up, with the count and latency: the
-    /// destinations of a load multiple or load string.
+    /// The destinations of a load multiple or load string: the first GPR,
+    /// the count and the latency. The GPRs after the first wrap from r31
+    /// to r0.
     pub(crate) range: Option<(Reg, u8, u16)>,
+    /// The data sources of a store multiple or store string: the first
+    /// GPR, the count and the microwords before the first read. The GPRs
+    /// after the first wrap from r31 to r0.
+    pub(crate) src_range: Option<(Reg, u8, u8)>,
     /// What it does beyond its registers.
     pub(crate) kind: Kind,
     /// Microwords, or zero for an instruction issued whole.
@@ -146,6 +151,7 @@ impl Op {
             addr: [NO_REG; 2],
             dsts: [(NO_REG, 0); 3],
             range: None,
+            src_range: None,
             kind: Kind::Plain,
             words: 0,
             span: 0,
@@ -238,23 +244,54 @@ impl Op {
         }
     }
 
+    /// The GPRs a load multiple or load string writes.
+    pub(crate) fn range_targets(&self) -> impl Iterator<Item = Reg> {
+        self.range
+            .into_iter()
+            .flat_map(|(first, n, _)| gpr_run(first, n))
+    }
+
     /// The registers this one writes.
     pub(crate) fn writes(&self) -> impl Iterator<Item = Reg> + '_ {
-        let range = self
-            .range
-            .into_iter()
-            .flat_map(|(first, n, _)| (first..first.saturating_add(n)).filter(|r| *r < 32));
         self.dsts
             .iter()
             .map(|d| d.0)
             .filter(|r| *r != NO_REG)
-            .chain(range)
+            .chain(self.range_targets())
+    }
+
+    /// The registers this one reads as data, each with the cycles after
+    /// issue it reads that register.
+    ///
+    /// A store multiple or store string reads its `i`th source `lead + i`
+    /// cycles after issue. Its first `lead` microwords read no source, and
+    /// each later microword reads one word.
+    ///
+    /// [CBE-Handbook p:729 s:A.1.3.1] `lmw stmw`: 2 + 1 x words microwords.
+    pub(crate) fn reads(&self) -> impl Iterator<Item = (Reg, u64)> + '_ {
+        let run = self
+            .src_range
+            .into_iter()
+            .flat_map(|(first, n, lead)| gpr_run(first, n).zip(u64::from(lead)..));
+        self.srcs
+            .iter()
+            .filter(|r| **r != NO_REG)
+            .map(|&r| (r, 0))
+            .chain(run)
     }
 
     /// Whether this one reads a register `other` writes.
     pub(crate) fn reads_any_of(&self, other: &Op) -> bool {
         other
             .writes()
-            .any(|w| self.srcs.contains(&w) || self.addr.contains(&w))
+            .any(|w| self.reads().any(|(r, _)| r == w) || self.addr.contains(&w))
     }
+}
+
+/// `n` GPRs from `first` up, with r0 after r31.
+///
+/// [PPC-Book1 p:48 s:3.3.6] a load string's target register advances as
+/// `r + 1 (mod 32)`.
+fn gpr_run(first: Reg, n: u8) -> impl Iterator<Item = Reg> {
+    (0..n.min(32)).map(move |i| (first + i) % 32)
 }

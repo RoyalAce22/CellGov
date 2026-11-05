@@ -128,10 +128,11 @@ fn cellgov_cycles() -> Vec<f64> {
 /// cycles an iteration it may stay apart by.
 ///
 /// The pair alone runs short, as it does in the `ppu_issue_multiple`
-/// capture. On the console the pair with 8 `addi` after it runs 29
+/// capture. Its `stmw` waits for none of the `lmw` targets it stores.
+/// On the console the pair with 8 `addi` after it runs 29
 /// cycles faster than the pair alone, and the model gives both the same
 /// time.
-const RESIDUALS: [(usize, f64); 2] = [(6, 18.0), (7, 13.0)];
+const RESIDUALS: [(usize, f64); 2] = [(6, 19.0), (7, 13.0)];
 
 #[test]
 fn the_issue_model_times_each_load_hit_store_loop_within_the_console_s_spread() {
