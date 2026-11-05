@@ -16,40 +16,50 @@ const CONSOLE: &str =
 /// The payload's word 566 when the probe wrote every word.
 const DONE: u64 = 0x5050_5652;
 
+/// The number of `vaddubm` after the `mtvscr` in the sibling of phases 1 and 2.
+const SIBLINGS: [u32; 2] = [1, 7];
+
 /// The thread exit value each sibling passes.
-const SIBLING_EXIT: u64 = 0x5157;
+pub(crate) const SIBLING_EXIT: u64 = 0x5157;
 
 /// The phases: none, then the two siblings.
-const PHASES: usize = 3;
+pub(crate) const PHASES: usize = 3;
 
 /// The chains a phase times.
-const CHAINS: usize = 10;
+pub(crate) const CHAINS: usize = 10;
 
 /// The runs of each chain.
 const REPS: usize = 9;
 
 /// The word each phase's record starts at.
-const META: usize = 540;
+pub(crate) const META: usize = 540;
 
 /// log2 of each chain's iterations on the console.
 const ITERATIONS_LOG2: u32 = 16;
 
-/// The console's payload as big-endian words.
-fn console_words() -> Vec<u64> {
-    let observation = cellgov_compare::baseline::load(std::path::Path::new(CONSOLE))
-        .unwrap_or_else(|e| panic!("{CONSOLE}: {e}"));
+/// The payload of the capture at `path` as big-endian words.
+///
+/// Word 566 holds `done` when the probe wrote every word.
+pub(crate) fn words_at(path: &str, done: u64) -> Vec<u64> {
+    let observation = cellgov_compare::baseline::load(std::path::Path::new(path))
+        .unwrap_or_else(|e| panic!("{path}: {e}"));
     let words: Vec<u64> = observation.memory_regions[0]
         .data
         .chunks_exact(8)
         .map(|w| u64::from_be_bytes(w.try_into().expect("8 bytes")))
         .collect();
     assert_eq!(words.len(), 567);
-    assert_eq!(words[566], DONE, "the probe wrote every word");
+    assert_eq!(words[566], done, "the probe wrote every word");
     assert_eq!(
         (words[564], words[565]),
         (REPS as u64, u64::from(ITERATIONS_LOG2))
     );
     words
+}
+
+/// The console's payload as big-endian words.
+fn console_words() -> Vec<u64> {
+    words_at(CONSOLE, DONE)
 }
 
 /// One run: its cycles an iteration, and the sibling's rounds a time-base
@@ -69,7 +79,7 @@ fn alone_rate(w: &[u64], phase: usize) -> f64 {
 
 /// The runs of the chain beside the sibling, in cycles an iteration,
 /// sorted: those in which the sibling kept at least half its rate alone.
-fn shared_runs(w: &[u64], phase: usize, chain: usize) -> Vec<f64> {
+pub(crate) fn shared_runs(w: &[u64], phase: usize, chain: usize) -> Vec<f64> {
     let floor = alone_rate(w, phase) / 2.0;
     let mut runs: Vec<f64> = (0..REPS)
         .map(|r| run(w, phase, chain, r))
@@ -81,7 +91,7 @@ fn shared_runs(w: &[u64], phase: usize, chain: usize) -> Vec<f64> {
 }
 
 /// The median of sorted `xs`.
-fn median(xs: &[f64]) -> f64 {
+pub(crate) fn median(xs: &[f64]) -> f64 {
     let n = xs.len();
     if n % 2 == 1 {
         xs[n / 2]
@@ -133,10 +143,8 @@ fn sibling(body: &[u32]) -> Sibling {
     }
 }
 
-/// The sibling of `phase`, 1 or 2: an `mtvscr` and 1 or 7 independent
-/// `vaddubm`.
-fn sibling_of(phase: usize) -> Sibling {
-    let n = [1, 7][phase - 1];
+/// A sibling of an `mtvscr` and `n` independent `vaddubm`.
+fn sibling_of(n: u32) -> Sibling {
     sibling(&[&[MTVSCR][..], &independent(n, 7)].concat())
 }
 
@@ -163,15 +171,21 @@ fn body(chain: usize) -> Vec<u32> {
     }
 }
 
-/// CellGov's cycles an iteration of chain `chain` beside the sibling of
-/// `phase`.
-fn cellgov_beside(phase: usize, chain: usize) -> f64 {
+/// CellGov's cycles an iteration of chain `chain` beside a sibling of an
+/// `mtvscr` and `n` independent `vaddubm`.
+pub(crate) fn cellgov_beside_sibling(n: u32, chain: usize) -> f64 {
     let r = Replay {
         loop_index: chain,
         words: looped(&body(chain)),
         seeds: &[],
     };
-    replay_beside(&r, 1, &sibling_of(phase)).expect("the chain replays")
+    replay_beside(&r, 1, &sibling_of(n)).expect("the chain replays")
+}
+
+/// CellGov's cycles an iteration of chain `chain` beside the sibling of
+/// `phase`.
+fn cellgov_beside(phase: usize, chain: usize) -> f64 {
+    cellgov_beside_sibling(SIBLINGS[phase - 1], chain)
 }
 
 /// The fewest runs of a chain the sibling must share for its median to

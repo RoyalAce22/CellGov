@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_vscr_smt_runs_wide"
+
+# A hardware probe of what a chain of independent vaddubm costs an
+# iteration beside a sibling thread whose vector work waits behind its own
+# mtvscr: chains of 1 to 16 vaddubm, 2 vaddubm with 8 li, and 8 li alone,
+# beside no sibling and beside an mtvscr and 3 or 15 vaddubm, with every
+# run and the sibling's rounds over it recorded. ppu/main.c's header
+# lists the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 4536 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 4536 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

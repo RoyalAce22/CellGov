@@ -9,8 +9,8 @@ CR, LR, CTR, XER (carry tracked), FPSCR, VRSAVE, VSCR, TB, and 32
 vector registers.
 The FPSCR move instructions read and write FPSCR, except the reserved
 bit 20 and NI, which the PPE does not implement and which read 0, so
-results always follow IEEE 754. A floating-point
-record form copies FPSCR bits 0:3 to CR1. The arithmetic instructions,
+results always follow IEEE 754. A floating-point record form copies
+FPSCR bits 0:3 to CR1. The arithmetic instructions,
 the multiply-add forms included, and the conversions read the rounding
 mode, except that the `z` forms round toward zero. The arithmetic, conversion and estimate instructions write their
 FPSCR status, except that a convert to integer leaves FPRF unchanged; the

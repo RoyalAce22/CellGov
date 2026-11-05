@@ -64,16 +64,16 @@ mod window_fused_pair_tests;
 mod fused_entry_tests;
 
 #[cfg(test)]
-#[path = "tests/top_of_address_space_tests.rs"]
-mod top_of_address_space_tests;
-
-#[cfg(test)]
 #[path = "tests/fused_resume_invalidation_tests.rs"]
 mod fused_resume_invalidation_tests;
 
 #[cfg(test)]
 #[path = "tests/fused_trace_hash_tests.rs"]
 mod fused_trace_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/top_of_address_space_tests.rs"]
+mod top_of_address_space_tests;
 
 #[cfg(test)]
 #[path = "tests/sc_reserved_lev_tests.rs"]

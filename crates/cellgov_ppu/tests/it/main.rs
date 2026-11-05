@@ -78,6 +78,7 @@ mod console_ppu_issue_vscr_smt_depth;
 mod console_ppu_issue_vscr_smt_drain;
 mod console_ppu_issue_vscr_smt_lsu;
 mod console_ppu_issue_vscr_smt_runs;
+mod console_ppu_issue_vscr_smt_runs_wide;
 mod console_ppu_lswx_zero_count;
 mod console_ppu_lv2_call_arg_refusals;
 mod console_ppu_lv2_call_contended;
