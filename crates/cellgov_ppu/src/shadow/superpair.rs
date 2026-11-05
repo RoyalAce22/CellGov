@@ -116,6 +116,19 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 offset1: off1,
             })
         }
+        // lbzu rT, off(rA) + cmpwi crF, rC, 0. An invalid lbzu (RA = 0 or
+        // RA = RT) does not fuse, so it refuses on its own path.
+        (PpuInstruction::Lbzu { rt, ra, imm }, PpuInstruction::CmpwZero { bf, ra: cmp_ra })
+            if ra != 0 && ra != rt =>
+        {
+            Some(PpuInstruction::LbzuCmpwi {
+                rt,
+                ra,
+                offset: imm,
+                bf,
+                cmp_ra,
+            })
+        }
         // or rA, rS, rB (or mr rA, rS) + add rT, rA2, rB2. Neither half sets
         // Rc, and the add has OE = 0.
         // [PPC-Book1 p:67 s:3.3.11 OR] or with RS = RA = RB is a priority hint;
@@ -352,3 +365,7 @@ mod ld_tests;
 #[cfg(test)]
 #[path = "tests/superpair_or_add_tests.rs"]
 mod or_add_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_lbzu_tests.rs"]
+mod lbzu_tests;

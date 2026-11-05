@@ -720,6 +720,7 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         | I::LdMtlr { .. }
         | I::StdStd { .. }
         | I::LdLd { .. }
+        | I::LbzuCmpwi { .. }
         | I::OrAdd { .. }
         | I::LisOri { .. }
         | I::CmpwiBc { .. }

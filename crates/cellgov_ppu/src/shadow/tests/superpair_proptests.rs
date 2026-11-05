@@ -198,6 +198,19 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                 },
             )
         }),
+        // An lbzu with RA = 0 or RA = RT is invalid and does not fuse, so
+        // this arm moves RA off both. The compare reads RT, RA or another
+        // register.
+        (reg(), reg(), displacement(), cr_field(), 0u8..3, reg()).prop_map(
+            |(rt, ra, imm, bf, pick, other)| {
+                let ra = if ra == 0 || ra == rt { rt % 31 + 1 } else { ra };
+                let cmp_ra = [rt, ra, other][usize::from(pick)];
+                (
+                    PpuInstruction::Lbzu { rt, ra, imm },
+                    PpuInstruction::CmpwZero { bf, ra: cmp_ra },
+                )
+            }
+        ),
     ]
 }
 
@@ -278,7 +291,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Six of the eighteen arms are compares that need an aimed
+    // Six of the nineteen arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

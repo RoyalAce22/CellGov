@@ -259,6 +259,30 @@ pub(crate) fn execute(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:34 s:3.3.2 Load Byte and Zero with Update] lbzu: RT <- 56 zeros || MEM(EA,1); RA <- EA; EA = (RA)+EXTS(D).
+        // [PPC-Book1 p:60 s:3.3.9 Compare Immediate] cmpwi: signed 32-bit compare against 0, read after the load wrote RT and RA.
+        PpuInstruction::LbzuCmpwi {
+            rt,
+            ra,
+            offset,
+            bf,
+            cmp_ra,
+        } => {
+            let ea = state.ea_d_form(ra, offset);
+            match load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B1,
+            ) {
+                Ok(val) => {
+                    state.set_gpr(rt as usize, val);
+                    state.set_gpr(ra as usize, ea);
+                    cmpw(state, bf, state.gpr[cmp_ra as usize] as i32, 0);
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
         // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB).
         // [PPC-Book1 p:52 s:3.3.8 Add] add: RT <- (RA) + (RB), read after the or wrote its RA.
         PpuInstruction::OrAdd {

@@ -97,6 +97,8 @@ mod fused_lis_entry_tests;
 #[path = "tests/fused_ld_pair_tests.rs"]
 mod fused_ld_pair_tests;
 
+#[path = "tests/fused_lbzu_cmpwi_tests.rs"]
+mod fused_lbzu_cmpwi_tests;
 #[cfg(test)]
 #[path = "tests/fused_ld_provisional_tests.rs"]
 mod fused_ld_provisional_tests;
@@ -104,6 +106,10 @@ mod fused_ld_provisional_tests;
 #[cfg(test)]
 #[path = "tests/ld_ld_console_tests.rs"]
 mod ld_ld_console_tests;
+
+#[cfg(test)]
+#[path = "tests/lbzu_cmpwi_console_tests.rs"]
+mod lbzu_cmpwi_console_tests;
 
 #[cfg(test)]
 #[path = "tests/lis_ori_console_tests.rs"]

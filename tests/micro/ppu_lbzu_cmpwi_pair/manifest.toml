@@ -1,0 +1,25 @@
+[test]
+name = "ppu_lbzu_cmpwi_pair"
+
+# A hardware probe: the loaded byte, the updated base and the compare
+# field "lbzu rT,D(rA)" then "cmpwi crF,rC,0" leave, and what a branch
+# over the lbzu into the compare leaves. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# 21 big-endian u32 words, as ppu/main.c lists: 84 bytes.
+#   0 failed step, 1 its return code; each register as a high word and
+#   a low word, each base as its distance from its start value, each CR
+#   field as its LT GT EQ SO nibble:
+#   2-3 r4, 4-5 r5 distance, 6 cr7 after the scan of "abc\0";
+#   7-8 r4, 9-10 r5 distance, 11 cr0 after a 0x80 byte with XER[SO] set;
+#   12 cr7 from a compare of the updated base, 13 that base's low-word
+#   sign bit; 14 cr1 from r6 = 0xFFFFFFFF00000000; 15 cr7 from
+#   r6 = 0x0000000080000000; 16-17 r4, 18-19 r5 distance, 20 cr7 after a
+#   branch over the lbzu into the compare.
+memory_regions = [
+  { name = "result", addr = 0, size = 84 },
+]
+
+[expect]
+outcome = "completed"

@@ -1659,6 +1659,16 @@ pub enum PpuInstruction {
         ra: u8,
         offset1: i16,
     },
+    /// `lbzu rT, D(rA)` followed by `cmpwi crF, rC, 0`, where `rC` is `cmp_ra`.
+    ///
+    /// The shadow fuses only a valid `lbzu`, with `ra` neither 0 nor `rt`.
+    LbzuCmpwi {
+        rt: u8,
+        ra: u8,
+        offset: i16,
+        bf: u8,
+        cmp_ra: u8,
+    },
     /// `or rA, rS, rB` (or its quickened `mr`) followed by
     /// `add rT, rA2, rB2`. Neither half sets Rc, and the `add` has OE = 0.
     OrAdd {

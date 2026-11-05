@@ -24,6 +24,7 @@ impl PpuInstruction {
             | PpuInstruction::LdMtlr { .. }
             | PpuInstruction::StdStd { .. }
             | PpuInstruction::LdLd { .. }
+            | PpuInstruction::LbzuCmpwi { .. }
             | PpuInstruction::OrAdd { .. }
             | PpuInstruction::LisOri { .. }
             | PpuInstruction::CmpwiBc { .. }

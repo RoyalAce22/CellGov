@@ -1354,6 +1354,16 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                 int_load(ea.wrapping_add(8), 8, rt2).base(ra),
             )
         }
+        I::LbzuCmpwi {
+            rt,
+            ra,
+            offset,
+            bf,
+            cmp_ra,
+        } => two(
+            update(int_load(ea_d(state, ra, offset), 1, rt).base(ra), ra),
+            cmp(bf, cmp_ra, None),
+        ),
         I::LisOri { rt, .. } => two(fx(gpr(rt)), fx(gpr(rt)).src(gpr(rt))),
         I::OrAdd {
             ra,

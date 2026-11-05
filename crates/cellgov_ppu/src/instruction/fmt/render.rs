@@ -748,6 +748,20 @@ pub(super) fn render(
             let offset2 = offset1 as i32 + 8;
             write!(f, "; ld r{rt2}, {offset2}(r{ra})")
         }
+        I::LbzuCmpwi {
+            rt,
+            ra,
+            offset,
+            bf,
+            cmp_ra,
+        } => {
+            op(f, "lbzu", format_args!("r{rt}, {offset}(r{ra})"))?;
+            if bf == 0 {
+                write!(f, "; cmpwi r{cmp_ra}, 0")
+            } else {
+                write!(f, "; cmpwi cr{bf}, r{cmp_ra}, 0")
+            }
+        }
         I::OrAdd {
             ra,
             rs,
