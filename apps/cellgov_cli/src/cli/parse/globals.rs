@@ -205,7 +205,9 @@ pub(super) fn reads_format(command: &Command) -> bool {
             TitleCommand::List | TitleCommand::Show { .. } | TitleCommand::Verify { .. }
         ),
         Command::Dev(dev) => match dev {
-            DevCommand::Lv2Discover(_) | DevCommand::SpuCensus(_) => true,
+            DevCommand::Lv2Discover(_)
+            | DevCommand::SpuCensus(_)
+            | DevCommand::PpuTraceReplay(_) => true,
             #[cfg(feature = "decrypt")]
             DevCommand::Lv2Extract(_) => true,
             _ => false,

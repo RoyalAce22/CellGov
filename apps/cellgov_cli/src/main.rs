@@ -228,6 +228,7 @@ fn dispatch_dev(
         DevCommand::GenManifest(args) => cli::gen_manifest::run(args, vfs_flag),
         DevCommand::RecordAnchors(args) => cli::record_anchors::run(args, globals.render()),
         DevCommand::OracleGap => oracle_gap::run(vfs_flag),
+        DevCommand::PpuTraceReplay(args) => cli::ppu_trace_replay::run(args, globals.format),
         DevCommand::Fuzz(args) => cli::fuzz::run_with_render(args, globals.render()),
     }
 }

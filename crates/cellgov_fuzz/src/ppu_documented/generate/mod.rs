@@ -2,11 +2,11 @@
 //! per family of sets, each emitting every case of its sets in a fixed
 //! order.
 
-mod draft;
-mod float;
-mod integer;
-mod storage;
-mod vmx;
+pub(super) mod draft;
+pub(super) mod float;
+pub(super) mod integer;
+pub(super) mod storage;
+pub(super) mod vmx;
 
 use super::vector::DocumentedVector;
 

@@ -5,7 +5,8 @@
 //!   with controls the documents fix beside them;
 //! - for each component, the page that fixes it or leaves it open;
 //! - the probe's case table, a replay of the list through the
-//!   interpreter, and the comparison of a console capture with both.
+//!   interpreter, and the comparison of a console capture with both;
+//! - the places one instruction leaves open from a given start state.
 //!
 //! No expected value comes from a console, an emulator or a host
 //! floating-point unit.
@@ -13,6 +14,7 @@
 mod capture;
 mod encode;
 mod generate;
+mod open;
 mod replay;
 mod set;
 mod vector;
@@ -23,6 +25,7 @@ pub use capture::{
     FrameError,
 };
 pub use generate::documented_vectors;
+pub use open::{open_places, OpenAt, OpenPlace};
 pub use replay::{
     replay_documented, run_vector, DocumentedDifference, DocumentedReplay, StoppedVector,
     MEM_BASE_GPR, MEM_BYTES, REPLAY_MEM_BASE,
@@ -35,3 +38,7 @@ pub use vector::{
 #[cfg(test)]
 #[path = "../tests/ppu_documented_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/ppu_documented_open_tests.rs"]
+mod open_tests;

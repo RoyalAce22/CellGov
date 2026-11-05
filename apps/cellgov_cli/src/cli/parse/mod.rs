@@ -21,9 +21,9 @@ pub(crate) use boot::{
 pub(crate) use dev::{CallerCensusArgs, Lv2ExtractArgs};
 pub(crate) use dev::{
     CliGenArgs, CompletionShell, CompletionsArgs, DevCommand, DisasmArgs, FixtureGenArgs,
-    FuncsArgs, GenManifestArgs, PrxImportsArgs, RecordAnchorsArgs, RelationsCheckArgs,
-    RelationsGenArgs, Rpcs3AttributeArgs, SpuCensusArgs, SpuDisasmArgs, TitlesGenArgs,
-    WorkspaceGenArgs, MAX_DISASM_COUNT,
+    FuncsArgs, GenManifestArgs, PpuTraceReplayArgs, PrxImportsArgs, RecordAnchorsArgs,
+    RelationsCheckArgs, RelationsGenArgs, Rpcs3AttributeArgs, SpuCensusArgs, SpuDisasmArgs,
+    TitlesGenArgs, WorkspaceGenArgs, MAX_DISASM_COUNT,
 };
 pub(crate) use dev::{Lv2CensusArgs, Lv2DiscoverArgs};
 pub(crate) use diff::{

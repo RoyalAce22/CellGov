@@ -6,15 +6,15 @@ use crate::ppu_documented::set::Set;
 use crate::ppu_documented::vector::{DocumentedVector, Location};
 
 /// [AltiVec-PEM p:6-14 s:6.2] lvebx loads the byte at EA into byte m of vD, m = `EA[28:31]`, and leaves the other bytes undefined.
-const LVEBX: &str = "AltiVec-PEM p:6-14 s:6.2";
+pub(crate) const LVEBX: &str = "AltiVec-PEM p:6-14 s:6.2";
 /// [AltiVec-PEM p:6-16 s:6.2] lvehx loads the halfword at EA with bit 31 cleared into halfword m/2 of vD and leaves the other halfwords undefined.
-const LVEHX: &str = "AltiVec-PEM p:6-16 s:6.2";
+pub(crate) const LVEHX: &str = "AltiVec-PEM p:6-16 s:6.2";
 /// [AltiVec-PEM p:6-17 s:6.2] lvewx loads the word at EA with bits 30:31 cleared into word m/4 of vD and leaves the other words undefined.
-const LVEWX: &str = "AltiVec-PEM p:6-17 s:6.2";
+pub(crate) const LVEWX: &str = "AltiVec-PEM p:6-17 s:6.2";
 /// [AltiVec-PEM p:6-134 s:6.2] vsl shifts vA left by `vB[125:127]` when the low three bits of every byte of vB are equal; otherwise vD is undefined.
-const VSL: &str = "AltiVec-PEM p:6-134 s:6.2";
+pub(crate) const VSL: &str = "AltiVec-PEM p:6-134 s:6.2";
 /// [AltiVec-PEM p:6-146 s:6.2] vsr shifts vA right by `vB[125:127]` when the low three bits of every byte of vB are equal; otherwise vD is undefined.
-const VSR: &str = "AltiVec-PEM p:6-146 s:6.2";
+pub(crate) const VSR: &str = "AltiVec-PEM p:6-146 s:6.2";
 
 /// `lve-other-lanes`: each element load at aligned and unaligned
 /// offsets in the quadword, into a preset vD.

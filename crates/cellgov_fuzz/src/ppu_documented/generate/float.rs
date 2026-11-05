@@ -16,27 +16,27 @@ use crate::ppu_documented::set::Set;
 use crate::ppu_documented::vector::{DocumentedVector, Location};
 
 /// [PPC-Book1 p:117 s:4.6.6] fctiw and fctiwz place the integer in `FRT[32:63]`, leave `FRT[0:31]` and FPRF undefined, set FR when the result is incremented and FI when it is inexact.
-const FCTIW: &str = "PPC-Book1 p:117 s:4.6.6";
+pub(crate) const FCTIW: &str = "PPC-Book1 p:117 s:4.6.6";
 /// [PPC-Book1 p:97 s:4.4.1] an invalid convert to a 32-bit integer with VE=0 sets `FRT[32:63]` to the most positive integer for a positive operand and the most negative for a negative operand or a NaN, and FR and FI to zero.
 const INVALID: &str = "PPC-Book1 p:97 s:4.4.1";
 /// [PPC-Book1 p:87 s:4.2.2] FX is set when an instruction changes an exception bit from 0 to 1, and VX is the OR of the invalid-operation bits.
 const SUMMARY: &str = "PPC-Book1 p:87 s:4.2.2";
 /// [PPC-Book1 p:120 s:4.6.8] mffs places the FPSCR in `FRT[32:63]` and leaves `FRT[0:31]` undefined.
-const MFFS: &str = "PPC-Book1 p:120 s:4.6.8";
+pub(crate) const MFFS: &str = "PPC-Book1 p:120 s:4.6.8";
 /// [PPC-Book1 p:93 s:4.3.5.1] a single-precision operation on an operand single format cannot hold leaves the result and the status bits undefined.
-const FP59: &str = "PPC-Book1 p:93 s:4.3.5.1";
+pub(crate) const FP59: &str = "PPC-Book1 p:93 s:4.3.5.1";
 /// [PPC-Book1 p:98 s:4.4.3] an overflow with OE=0 sets OX, XX and FI, stores the result the rounding mode gives, sets FPRF from it, and leaves FR undefined.
-const OVERFLOW: &str = "PPC-Book1 p:98 s:4.4.3";
+pub(crate) const OVERFLOW: &str = "PPC-Book1 p:98 s:4.4.3";
 /// [PPC-Book1 p:106 s:4.6.3] stfs stores a value below the single denormal range as an undefined word.
-const STFS: &str = "PPC-Book1 p:106 s:4.6.3";
+pub(crate) const STFS: &str = "PPC-Book1 p:106 s:4.6.3";
 /// [PPC-Book1 p:89 s:4.2.2] with NI=1 the results need not conform to IEEE and the other FPSCR bits may mean other things.
-const NI: &str = "PPC-Book1 p:89 s:4.2.2";
+pub(crate) const NI: &str = "PPC-Book1 p:89 s:4.2.2";
 
 /// The FPSCR status bits: 0 to 23 but the reserved bit 20.
-const STATUS: u128 = 0xffff_f700;
+pub(crate) const STATUS: u128 = 0xffff_f700;
 
 /// The whole 32-bit FPSCR.
-const WORD: u128 = 0xffff_ffff;
+pub(crate) const WORD: u128 = 0xffff_ffff;
 
 fn bits(v: u32) -> u128 {
     u128::from(v)

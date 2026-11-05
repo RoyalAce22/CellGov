@@ -131,7 +131,13 @@ impl PpuReferenceArtifact {
 
 impl PpuReferenceInputState {
     /// The base state with every field the artifact writes applied over it.
-    pub(super) fn to_state(&self) -> Result<PpuState, PpuReferenceError> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for:
+    /// - a register index outside its bank (`RegisterIndex`);
+    /// - a vector register value that is not hexadecimal (`VectorValue`).
+    pub fn to_state(&self) -> Result<PpuState, PpuReferenceError> {
         let base = match self.base {
             PpuReferenceStateBase::Zeroed => PpuArchitecturalState::capture(&PpuState::new()),
         };
@@ -144,11 +150,17 @@ impl PpuReferenceInputState {
         }
         let mut fpr = base.fpr;
         for (&index, &value) in &self.fpr {
-            fpr[usize::from(index)] = value;
+            let slot = fpr
+                .get_mut(usize::from(index))
+                .ok_or(PpuReferenceError::RegisterIndex { bank: "FPR", index })?;
+            *slot = value;
         }
         let mut vr = base.vr;
         for (&index, value) in &self.vr_hex {
-            vr[usize::from(index)] = u128::from_str_radix(value, 16)
+            let slot = vr
+                .get_mut(usize::from(index))
+                .ok_or(PpuReferenceError::RegisterIndex { bank: "VR", index })?;
+            *slot = u128::from_str_radix(value, 16)
                 .map_err(|_| PpuReferenceError::VectorValue { index })?;
         }
         let input = PpuArchitecturalState {

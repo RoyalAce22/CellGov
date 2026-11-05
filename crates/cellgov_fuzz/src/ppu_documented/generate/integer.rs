@@ -8,20 +8,20 @@ use crate::ppu_documented::set::Set;
 use crate::ppu_documented::vector::{DocumentedVector, Location};
 
 /// [PPC-Book1 p:57 s:3.3.8] mulhw and mulhwu place the high word of the product in `RT[32:63]` and leave `RT[0:31]` undefined; with Rc=1 in 64-bit mode CR0 LT, GT and EQ are undefined.
-const MULH: &str = "PPC-Book1 p:57 s:3.3.8";
+pub(crate) const MULH: &str = "PPC-Book1 p:57 s:3.3.8";
 /// [PPC-Book1 p:58 s:3.3.8] divd and divw: a divide by zero or of the most negative value by -1 leaves RT and CR0 LT, GT and EQ undefined and sets OV when OE=1; divw leaves `RT[0:31]` and, in 64-bit mode, CR0 LT, GT and EQ undefined.
-const DIV: &str = "PPC-Book1 p:58 s:3.3.8";
+pub(crate) const DIV: &str = "PPC-Book1 p:58 s:3.3.8";
 /// [PPC-Book1 p:59 s:3.3.8] divdu and divwu: as the signed forms, with only a divide by zero undefined; CR0 compares the result signed.
-const DIVU: &str = "PPC-Book1 p:59 s:3.3.8";
+pub(crate) const DIVU: &str = "PPC-Book1 p:59 s:3.3.8";
 /// [PPC-Book1 p:124 s:5.1.1] mtocrf with exactly one FXM bit set moves that CR field; any other FXM leaves the CR undefined.
-const MTOCRF: &str = "PPC-Book1 p:124 s:5.1.1";
+pub(crate) const MTOCRF: &str = "PPC-Book1 p:124 s:5.1.1";
 /// [PowerISA-3.1 p:I128 s:3.3] mfocrf with exactly one FXM bit set copies that CR field and leaves the rest of RT undefined; any other FXM leaves RT undefined.
 /// The same page zeroes the rest of RT from version 2.08 on, and warns that a processor of an earlier version, as the Cell PPE is, may not.
-const MFOCRF: &str = "PowerISA-3.1 p:I128 s:3.3";
+pub(crate) const MFOCRF: &str = "PowerISA-3.1 p:I128 s:3.3";
 /// [PPC-Book1 p:48 s:3.3.6] lswx with a zero byte count leaves RT undefined.
-const LSWX: &str = "PPC-Book1 p:48 s:3.3.6";
+pub(crate) const LSWX: &str = "PPC-Book1 p:48 s:3.3.6";
 /// [PPC-Book1 p:3 s:1.5.2] a reserved bit of a system register reads 0 when last written 0, and is undefined otherwise.
-const RESERVED: &str = "PPC-Book1 p:3 s:1.5.2";
+pub(crate) const RESERVED: &str = "PPC-Book1 p:3 s:1.5.2";
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -228,7 +228,7 @@ pub(crate) fn muldiv_undef() -> Vec<DocumentedVector> {
 const RS: u64 = 0xfedc_ba98_1234_5678;
 
 /// The bits of the 32-bit CR, or of `RT[32:63]`, that field `n` holds.
-fn field_mask(n: u32) -> u128 {
+pub(crate) fn field_mask(n: u32) -> u128 {
     0xf << (28 - 4 * n)
 }
 

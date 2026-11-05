@@ -403,12 +403,15 @@ without changing the on-disk format.
 
 ## End-to-end smoke
 
-Two Rust-side example binaries exercise the trace path.
-`parse_rpcs3_trace` parses a dump and prints record counts;
-`replay_rpcs3_trace` walks every record, runs it through CellGov's
-decoder + executor, and asserts byte-equality against the captured
-post-state -- the actual per-instruction differential against RPCS3
-ground truth.
+The example binary `parse_rpcs3_trace` parses a dump and prints record
+counts. `cellgov dev ppu-trace-replay` walks every record, runs it
+through CellGov's decoder and executor, and compares the result with
+the captured post-state. It reports each decoded kind the trace reached
+and each kind it never reached, and gives every failing record a class:
+the documents leave the differing bits undefined, a console vector
+decides for one side, the record is context-dependent, or it is left
+for triage. RPCS3 is a peer here, so a failure is not a CellGov defect
+until a console vector or the documents say so.
 
 ```bash
 # 1. Apply the patches and rebuild RPCS3 per the steps above.
@@ -423,16 +426,17 @@ CELLGOV_PPU_TRACE_PRIMARY=31 \
 cargo run --release -p cellgov_ppu --example parse_rpcs3_trace \
   -- /tmp/cellgov_trace.bin
 
-# 3b. Replay through the differential harness:
-cargo run --release -p cellgov_ppu --example replay_rpcs3_trace \
-  -- /tmp/cellgov_trace.bin flow_p31_$(date +%Y_%m_%d)
+# 3b. Replay through the differential harness, with the committed
+#     console vectors deciding the failures they cover:
+cargo run --release -p cellgov_cli -- dev ppu-trace-replay \
+  /tmp/cellgov_trace.bin \
+  --references crates/cellgov_fuzz/tests/fixtures/ppu_reference
 ```
 
 `parse_rpcs3_trace` confirms the capture path is healthy.
-`replay_rpcs3_trace` exits 0 when every record matches CellGov's
-executor and 1 otherwise; the first 10 failing records are
-printed with their full diff diagnostics so divergences surface
-as actionable executor bugs rather than opaque rejects.
+`dev ppu-trace-replay` exits 0 when no failure is a CellGov defect or
+unclassified, and 1 otherwise. `--format json` gives the same report
+as one document.
 
 A first 1000-record capture of primary=31 from flOw's boot
 landed 988 / 1000 passing in validation, with the residual

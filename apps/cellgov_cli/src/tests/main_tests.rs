@@ -95,6 +95,7 @@ const DISPATCHED: &[&str] = &[
     "dev gen-manifest",
     "dev record-anchors",
     "dev oracle-gap",
+    "dev ppu-trace-replay",
     "dev fuzz ppu-instruction",
     "dev fuzz ppu-sequence",
     "dev fuzz spu-instruction",

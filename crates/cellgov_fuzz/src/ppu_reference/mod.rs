@@ -25,6 +25,10 @@ mod tests;
 mod campaign_tests;
 
 #[cfg(test)]
+#[path = "../tests/ppu_reference_to_state_tests.rs"]
+mod to_state_tests;
+
+#[cfg(test)]
 #[path = "../tests/ppu_reference_capture.rs"]
 mod capture;
 

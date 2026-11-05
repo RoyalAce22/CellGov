@@ -10,9 +10,9 @@ use crate::ppu_documented::set::Set;
 use crate::ppu_documented::vector::{DocumentedVector, Location};
 
 /// [PPC-Book2 p:25 s:3.3.2] a store conditional to the reserved address stores and sets CR0 EQ; to another address it is undefined whether it stores, and EQ is undefined; CR0 LT and GT are 0 and SO is XER SO.
-const STCX: &str = "PPC-Book2 p:25 s:3.3.2";
+pub(crate) const STCX: &str = "PPC-Book2 p:25 s:3.3.2";
 /// [PPC-Book2 p:10 s:1.7.3.1] whether a dcbf to the reservation granule by the reserving processor clears the reservation is undefined.
-const DCBF: &str = "PPC-Book2 p:10 s:1.7.3.1";
+pub(crate) const DCBF: &str = "PPC-Book2 p:10 s:1.7.3.1";
 
 /// The value the store conditional stores.
 const RS: u64 = 0xcafe_babe_dead_beef;

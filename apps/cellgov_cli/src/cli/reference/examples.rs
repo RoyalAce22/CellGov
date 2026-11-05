@@ -455,6 +455,13 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         lines: &["cellgov dev fuzz spu-reference crates/cellgov_fuzz/tests/fixtures/spu_reference"],
     },
     Examples {
+        path: "dev ppu-trace-replay",
+        lines: &[
+            "cellgov dev ppu-trace-replay target/ppu_trace.bin --references crates/cellgov_fuzz/tests/fixtures/ppu_reference",
+            "cellgov dev ppu-trace-replay target/ppu_trace.bin --skip-context-dependent --format json",
+        ],
+    },
+    Examples {
         path: "dev fuzz ppu-reference",
         lines: &["cellgov dev fuzz ppu-reference crates/cellgov_fuzz/tests/fixtures/ppu_reference"],
     },
