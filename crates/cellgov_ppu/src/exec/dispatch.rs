@@ -294,6 +294,10 @@ pub fn execute(
         | PpuInstruction::Sldi { .. }
         | PpuInstruction::Srdi { .. }
         | PpuInstruction::Lis { .. }
+        | PpuInstruction::Bdnz { .. }
+        | PpuInstruction::BcTrue { .. }
+        | PpuInstruction::BcFalse { .. }
+        | PpuInstruction::Blr { .. }
         | PpuInstruction::LwzCmpwi { .. }
         | PpuInstruction::LiStw { .. }
         | PpuInstruction::MflrStw { .. }

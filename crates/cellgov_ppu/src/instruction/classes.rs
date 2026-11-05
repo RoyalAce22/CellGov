@@ -246,6 +246,10 @@ impl PpuInstruction {
             | PpuInstruction::Sldi { .. }
             | PpuInstruction::Srdi { .. }
             | PpuInstruction::Lis { .. }
+            | PpuInstruction::Bdnz { .. }
+            | PpuInstruction::BcTrue { .. }
+            | PpuInstruction::BcFalse { .. }
+            | PpuInstruction::Blr { .. }
             | PpuInstruction::Consumed
             | PpuInstruction::Dcbz { .. }
             | PpuInstruction::Dcbst { .. }

@@ -60,7 +60,7 @@ The variant count also includes:
 
 - the shadow's quickening rewrites (`Mr`, `Li`, `Lis`,
   `Slwi`/`Srwi`/`Sldi`/`Srdi`, `Clrlwi`/`Clrldi`, `Nop`,
-  `CmpwZero`, `CmpdZero`);
+  `CmpwZero`, `CmpdZero`, `Bdnz`, `BcTrue`, `BcFalse`, `Blr`);
 - the super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`,
   `MflrStd`, `LiStw`, `CmpwiBc`, `CmpwBc`, `LdMtlr`, `StdStd`);
 - the `Consumed` placeholder.
@@ -278,6 +278,8 @@ work:
 - `cmpwi crF, rA, 0` -> `CmpwZero`
 - `cmpdi crF, rA, 0` -> `CmpdZero`
 - `rldicl`/`rldicr` subsets -> `Clrldi`/`Sldi`/`Srdi`
+- `bc` subsets -> `Bdnz`/`BcTrue`/`BcFalse`
+- `bclr` subset -> `Blr`
 
 Candidates come from instruction profiling data (> 0.5% frequency
 threshold).

@@ -11,7 +11,7 @@ use crate::instruction::PpuInstruction;
 
 /// Fuse two adjacent instructions, or `None` if no rule applies.
 pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<PpuInstruction> {
-    match (a, b) {
+    match (a, decoded_bc(b)) {
         // lwz rT, off(rA) + cmpwi crF, rT, imm
         (
             PpuInstruction::Lwz { rt, ra, imm },
@@ -162,6 +162,24 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
             target_offset: offset,
         }),
         _ => None,
+    }
+}
+
+/// The original `bc` of a quickened branch, or any other `insn` unchanged.
+///
+/// A quickened branch then pairs as its original `bc` does.
+fn decoded_bc(insn: PpuInstruction) -> PpuInstruction {
+    match insn {
+        PpuInstruction::Bdnz { bo, bi, offset }
+        | PpuInstruction::BcTrue { bo, bi, offset }
+        | PpuInstruction::BcFalse { bo, bi, offset } => PpuInstruction::Bc {
+            bo,
+            bi,
+            offset,
+            aa: false,
+            link: false,
+        },
+        other => other,
     }
 }
 

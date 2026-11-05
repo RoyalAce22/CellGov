@@ -233,8 +233,10 @@ fn simplify_bcctr(bo: u8, bi: u8, link: bool) -> Option<Simplified> {
 
 /// Extended-mnemonic table, consulted before canonical rendering.
 /// Each arm's gate is exact; anything outside the table returns
-/// `None` and renders canonically. Quickened variants (`Li`, `Mr`,
-/// ...) never reach this: they already carry the extended form.
+/// `None` and renders canonically. Quickened variants that carry
+/// their extended form (`Li`, `Mr`, ...) return `None`. The quickened
+/// branches keep BO and BI and simplify as the `bc` or `bclr` they
+/// replace.
 pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
     use PpuInstruction as I;
     match *insn {
@@ -362,9 +364,19 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
             aa,
             link,
         } => simplify_bc(bo, bi, shown_target(addr, i32::from(offset), aa), aa, link),
+        I::Bdnz { bo, bi, offset }
+        | I::BcTrue { bo, bi, offset }
+        | I::BcFalse { bo, bi, offset } => simplify_bc(
+            bo,
+            bi,
+            shown_target(addr, i32::from(offset), false),
+            false,
+            false,
+        ),
         // [PPC-Book1 p:152 s:B.2.2] Table 3, bclr column: blr, bdnzlr,
         // bdztlr, ... plus [p:153 s:B.2.3] b<cond>lr forms.
         I::Bclr { bo, bi, link } => simplify_bclr(bo, bi, link),
+        I::Blr { bo, bi } => simplify_bclr(bo, bi, false),
         // [PPC-Book1 p:152 s:B.2.2] Table 3, bcctr column: bctr and
         // b<cond>ctr only; CTR-decrement forms have no bcctr
         // mnemonic (and are architecturally invalid).

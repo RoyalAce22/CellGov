@@ -46,12 +46,27 @@ fn gpr_value() -> impl Strategy<Value = u64> {
     ]
 }
 
+/// CTR values weighted toward the edges of a decrement-and-test.
+///
+/// - 0 wraps to `u64::MAX`.
+/// - 1 reaches 0.
+/// - 2 stays nonzero.
+fn ctr_value() -> impl Strategy<Value = u64> {
+    prop_oneof![
+        any::<u64>(),
+        Just(0u64),
+        Just(1u64),
+        Just(2u64),
+        Just(u64::MAX),
+    ]
+}
+
 pub(super) fn state_seed() -> impl Strategy<Value = StateSeed> {
     (
         proptest::collection::vec(gpr_value(), 32),
         any::<u32>(),
         any::<u64>(),
-        any::<u64>(),
+        ctr_value(),
         any::<u64>(),
         any::<u64>(),
     )

@@ -888,9 +888,13 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             Target::Direct,
             branches(state, bo, bi),
         )),
+        I::Bdnz { bo, bi, .. } | I::BcTrue { bo, bi, .. } | I::BcFalse { bo, bi, .. } => one(
+            branch(bo, bi, false, Target::Direct, branches(state, bo, bi)),
+        ),
         I::Bclr { bo, bi, link } => {
             one(branch(bo, bi, link, Target::Link, branches(state, bo, bi)))
         }
+        I::Blr { bo, bi } => one(branch(bo, bi, false, Target::Link, branches(state, bo, bi))),
         I::Bcctr { bo, bi, link } => {
             one(branch(bo, bi, link, Target::Count, branches(state, bo, bi)))
         }

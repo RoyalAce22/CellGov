@@ -1568,6 +1568,33 @@ pub enum PpuInstruction {
         rt: u8,
         imm: i16,
     },
+    /// Quickened form of `bc` with BO `1a00t`, AA = 0 and LK = 0 (`bdnz`).
+    /// BO and BI keep the original encoding.
+    Bdnz {
+        bo: u8,
+        bi: u8,
+        offset: i16,
+    },
+    /// Quickened form of `bc` with BO `011at`, AA = 0 and LK = 0: branch
+    /// when CR bit BI is set. BO keeps the original encoding.
+    BcTrue {
+        bo: u8,
+        bi: u8,
+        offset: i16,
+    },
+    /// Quickened form of `bc` with BO `001at`, AA = 0 and LK = 0: branch
+    /// when CR bit BI is clear. BO keeps the original encoding.
+    BcFalse {
+        bo: u8,
+        bi: u8,
+        offset: i16,
+    },
+    /// Quickened form of `bclr` with BO `1z1zz` and LK = 0 (`blr`). BO
+    /// and BI keep the original encoding.
+    Blr {
+        bo: u8,
+        bi: u8,
+    },
 
     // -- Superinstructions (compound 2-instruction pairs) --
     LwzCmpwi {

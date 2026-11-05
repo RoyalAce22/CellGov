@@ -113,8 +113,53 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
         // [PPC-Book1 p:162 s:B.9 Load Immediate] lis Rx,value == addis Rx,0,value.
         // [PPC-Book1 p:51 s:3.3.8] addis: RT <- (RA|0) + (SI || 0x0000).
         PpuInstruction::Addis { rt, ra: 0, imm } => Some(PpuInstruction::Lis { rt, imm }),
+        // bc with AA = 0 and LK = 0 => Bdnz, BcTrue or BcFalse by BO class.
+        // A bc with AA = 1 or LK = 1 stays generic. LK writes LR whether or
+        // not the branch is taken.
+        PpuInstruction::Bc {
+            bo,
+            bi,
+            offset,
+            aa: false,
+            link: false,
+        } => quicken_bc(bo, bi, offset),
+        // bclr with BO 1z1zz and LK = 0 => Blr
+        // [PPC-Book1 p:152 s:B.2.2] blr == bclr 20,0: branch unconditionally.
+        // [PPC-Book1 p:20 s:2.4.1] the "z" bits are ignored, so every 1z1zz
+        // encoding branches always.
+        PpuInstruction::Bclr {
+            bo,
+            bi,
+            link: false,
+        } if bo & 0b10100 == 0b10100 => Some(PpuInstruction::Blr { bo, bi }),
         _ => None,
     }
+}
+
+/// The quickened form of a `bc` with AA = 0 and LK = 0, by BO class.
+///
+/// [PPC-Book1 p:20 s:2.4.1] BO encodings: 001at branches if the CR bit
+/// is 0, 011at if it is 1, and 1a00t decrements CTR and branches if
+/// CTR != 0. The "a" and "t" bits do not change whether the branch is
+/// taken.
+///
+/// The form keeps the original BO. These classes stay generic and give
+/// `None`:
+///
+/// - the forms that test CTR and a CR bit together
+/// - `bdz`
+/// - the unconditional `bc`
+fn quicken_bc(bo: u8, bi: u8, offset: i16) -> Option<PpuInstruction> {
+    if bo & 0b11100 == 0b01100 {
+        return Some(PpuInstruction::BcTrue { bo, bi, offset });
+    }
+    if bo & 0b11100 == 0b00100 {
+        return Some(PpuInstruction::BcFalse { bo, bi, offset });
+    }
+    if bo & 0b10110 == 0b10000 {
+        return Some(PpuInstruction::Bdnz { bo, bi, offset });
+    }
+    None
 }
 
 #[cfg(test)]
@@ -132,3 +177,7 @@ mod lis_tests;
 #[cfg(test)]
 #[path = "tests/quicken_cmpd_tests.rs"]
 mod cmpd_tests;
+
+#[cfg(test)]
+#[path = "tests/quicken_branch_tests.rs"]
+mod branch_tests;

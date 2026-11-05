@@ -105,7 +105,13 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
                 | ((aa as u32) << 1)
                 | link as u32
         }
+        I::Bdnz { bo, bi, offset }
+        | I::BcTrue { bo, bi, offset }
+        | I::BcFalse { bo, bi, offset } => {
+            p(16) | rt(bo) | ra(bi) | ((offset as u16 as u32) & 0xFFFC)
+        }
         I::Bclr { bo, bi, link } => xl(bo, bi, 0, 16, link),
+        I::Blr { bo, bi } => xl(bo, bi, 0, 16, false),
         I::Bcctr { bo, bi, link } => xl(bo, bi, 0, 528, link),
 
         // XL-form condition-register operations.

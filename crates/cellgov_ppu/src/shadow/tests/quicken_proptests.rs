@@ -71,7 +71,35 @@ fn quickenable() -> impl Strategy<Value = PpuInstruction> {
             rc: false,
         }),
         (reg(), immediate()).prop_map(|(rt, imm)| PpuInstruction::Addis { rt, ra: 0, imm }),
+        (quickened_bc_bo(), reg(), any::<i16>()).prop_map(|(bo, bi, offset)| {
+            PpuInstruction::Bc {
+                bo,
+                bi,
+                offset: offset & !3,
+                aa: false,
+                link: false,
+            }
+        }),
+        (blr_bo(), reg()).prop_map(|(bo, bi)| PpuInstruction::Bclr {
+            bo,
+            bi,
+            link: false
+        }),
     ]
+}
+
+/// Every BO of the `bc` classes that quicken: 001at, 011at and 1a00t.
+fn quickened_bc_bo() -> impl Strategy<Value = u8> {
+    prop_oneof![
+        (0u8..4).prop_map(|at| 0b00100 | at),
+        (0u8..4).prop_map(|at| 0b01100 | at),
+        (0u8..4).prop_map(|at| 0b10000 | ((at & 2) << 2) | (at & 1)),
+    ]
+}
+
+/// Every BO of the 1z1zz class `bclr` quickens to `Blr`.
+fn blr_bo() -> impl Strategy<Value = u8> {
+    (0u8..8).prop_map(|z| 0b10100 | ((z & 4) << 1) | (z & 3))
 }
 
 /// A 16-bit immediate, with the sign-bit and all-ones values drawn often.

@@ -28,7 +28,9 @@ pub enum PpuSequenceFamily {
     Reservation,
     /// A branch skips one generated instruction.
     ControlledBranch,
-    /// A dependency chain runs a quickened `lis` and `cmpdi` beside words the shadow keeps as decoded.
+    /// A dependency chain runs a quickened `lis`, `cmpdi`, `bdnz` and `bne` beside words the
+    /// shadow keeps as decoded. Each branch targets the next word, so the taken path and the
+    /// fall-through path reach the same word.
     Quickening,
     /// A fusable pair exercises fusion and consumed-slot classification.
     FusionInvalidation,
@@ -200,6 +202,8 @@ pub fn generate_dependency_sequence(seed: u64, case_index: u64) -> PpuGeneratedS
                 addi(3, 3, 1),
                 lis(6, value),
                 cmpdi(1, 6, 0),
+                bc(16, 0, 4),
+                bc(4, 6, 4),
                 ori(7, 6, 0),
                 addi(8, 7, 0),
                 nor(9, 8, 8),
@@ -384,6 +388,10 @@ fn li(rt: u32, value: u16) -> u32 {
 
 fn lis(rt: u32, value: u16) -> u32 {
     (15 << 26) | (rt << 21) | u32::from(value)
+}
+
+fn bc(bo: u32, bi: u32, bytes: u16) -> u32 {
+    (16 << 26) | (bo << 21) | (bi << 16) | u32::from(bytes & 0xfffc)
 }
 
 fn cmpdi(bf: u32, ra: u32, value: u16) -> u32 {

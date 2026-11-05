@@ -324,11 +324,22 @@ pub(super) fn render(
                 format_args!("{bo}, {bi}, {}", Target { target, symbols }),
             )
         }
+        I::Bdnz { bo, bi, offset }
+        | I::BcTrue { bo, bi, offset }
+        | I::BcFalse { bo, bi, offset } => {
+            let target = shown_target(addr, i32::from(offset), false);
+            op(
+                f,
+                "bc",
+                format_args!("{bo}, {bi}, {}", Target { target, symbols }),
+            )
+        }
         I::Bclr { bo, bi, link } => op(
             f,
             mn_branch("bclr", link, false).as_str(),
             format_args!("{bo}, {bi}"),
         ),
+        I::Blr { bo, bi } => op(f, "bclr", format_args!("{bo}, {bi}")),
         I::Bcctr { bo, bi, link } => op(
             f,
             mn_branch("bcctr", link, false).as_str(),

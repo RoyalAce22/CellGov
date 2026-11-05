@@ -120,6 +120,10 @@ pub(super) fn form_for_word(kind: PpuInstructionKind, raw: u32) -> PpuEncodingFo
             | K::Sldi
             | K::Srdi
             | K::Lis
+            | K::Bdnz
+            | K::BcTrue
+            | K::BcFalse
+            | K::Blr
             | K::LwzCmpwi
             | K::LiStw
             | K::MflrStw
@@ -257,7 +261,15 @@ pub(super) fn effect_and_outcome(
         // A block whose addressed byte no region holds faults; the check records no read.
         K::Dcbst | K::Dcbf | K::Icbi => (NO_EFFECTS, LOAD),
         K::B => (NO_EFFECTS, UNCONDITIONAL_BRANCH),
-        K::Bc | K::Bclr | K::Bcctr | K::CmpwiBc | K::CmpwBc => (NO_EFFECTS, BRANCH),
+        K::Bc
+        | K::Bclr
+        | K::Bcctr
+        | K::Bdnz
+        | K::BcTrue
+        | K::BcFalse
+        | K::Blr
+        | K::CmpwiBc
+        | K::CmpwBc => (NO_EFFECTS, BRANCH),
         K::Sc => (NO_EFFECTS, SYSCALL),
         // [CBE-Handbook p:739 s:A.2.4] The PPE does not implement these; each raises an illegal-instruction exception.
         K::Popcntb | K::Mcrxr | K::PpeIllegal => (NO_EFFECTS, FAULT),
@@ -567,6 +579,10 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::Sldi
         | PpuInstructionKind::Srdi
         | PpuInstructionKind::Lis
+        | PpuInstructionKind::Bdnz
+        | PpuInstructionKind::BcTrue
+        | PpuInstructionKind::BcFalse
+        | PpuInstructionKind::Blr
         | PpuInstructionKind::LwzCmpwi
         | PpuInstructionKind::LiStw
         | PpuInstructionKind::MflrStw

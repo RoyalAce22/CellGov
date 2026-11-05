@@ -13,7 +13,7 @@ use crate::exec::branch::branch_condition;
 use crate::exec::mem::store_prechecked;
 use crate::exec::memory_helpers::{buffer_store, load_ze, LoadPort, Width};
 use crate::exec::ExecuteVerdict;
-use crate::instruction::PpuInstruction;
+use crate::instruction::{branch_target, PpuInstruction};
 use crate::state::{cmp_cr_field, PpuState};
 use crate::store_buffer::StoreBuffer;
 use cellgov_effects::Effect;
@@ -84,6 +84,26 @@ pub(crate) fn execute(
         PpuInstruction::Lis { rt, imm } => {
             state.set_gpr(rt as usize, (imm as i64 as u64) << 16);
             ExecuteVerdict::Continue
+        }
+        // [PPC-Book1 p:20 s:2.4.1] BO 1a00t: decrement the whole CTR, then
+        // branch if CTR != 0. The "a" and "t" bits do not change the result.
+        PpuInstruction::Bdnz { offset, .. } => {
+            state.set_ctr(state.ctr().wrapping_sub(1));
+            branch_relative(state, state.ctr() != 0, offset)
+        }
+        // [PPC-Book1 p:20 s:2.4.1] BO 011at branches if CR bit BI is 1, and
+        // BO 001at if it is 0. CTR does not change.
+        PpuInstruction::BcTrue { bi, offset, .. } => {
+            branch_relative(state, state.cr_bit(bi), offset)
+        }
+        PpuInstruction::BcFalse { bi, offset, .. } => {
+            branch_relative(state, !state.cr_bit(bi), offset)
+        }
+        // [PPC-Book1 p:25 s:2.4] bclr: NIA <- LR[0:61] || 0b00. BO 1z1zz
+        // branches always and leaves CTR alone.
+        PpuInstruction::Blr { .. } => {
+            state.pc = state.lr() & !3;
+            ExecuteVerdict::Branch
         }
 
         // Superinstructions (compound 2-instruction pairs)
@@ -259,6 +279,18 @@ pub(crate) fn execute(
 #[inline]
 fn cmpw(state: &mut PpuState, bf: u8, a: i32, b: i32) {
     state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
+}
+
+/// A quickened `bc` with AA = 0: branch to `offset` bytes past this
+/// instruction when `taken`.
+#[inline]
+fn branch_relative(state: &mut PpuState, taken: bool, offset: i16) -> ExecuteVerdict {
+    if taken {
+        state.pc = branch_target(state.pc, i32::from(offset), false);
+        ExecuteVerdict::Branch
+    } else {
+        ExecuteVerdict::Continue
+    }
 }
 
 /// The fused bc slot: branch to `target_offset` bytes past the bc slot
