@@ -25,6 +25,7 @@ mod console_ppu_issue_barrier_smt;
 mod console_ppu_issue_chain;
 mod console_ppu_issue_divide_forms;
 mod console_ppu_issue_divide_overflow;
+mod console_ppu_issue_fdiv_sibling_forms;
 mod console_ppu_issue_fp_store_barrier;
 mod console_ppu_issue_fp_store_drain;
 mod console_ppu_issue_fp_store_vscr;

@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_fdiv_sibling_forms"
+
+# A hardware probe of which form of the ppu_issue_mix_switch probe's
+# steady fdiv sibling and timed loop moves what the sibling costs the
+# main thread: sixteen independent addi timed in two halves or in one
+# loop, beside fdiv rounds that load a flag first or load none. The
+# console capture is the answer; ppu/main.c's header lists the phases and
+# the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 2912 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2912 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

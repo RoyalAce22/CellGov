@@ -256,7 +256,7 @@ const STEP_LIMIT: usize = 5_000_000;
 
 /// Phase `p`'s run on the runtime at `budget` instructions a step: each
 /// half's cycles an iteration.
-fn replay(p: usize, iterations: u64, budget: Budget) -> [f64; 2] {
+pub(crate) fn replay(p: usize, iterations: u64, budget: Budget) -> [f64; 2] {
     let (main, spin) = main_thread();
     let mut mem = GuestMemory::new(0x1_0000);
     load_words(&mut mem, MAIN_CODE, &main);
@@ -314,7 +314,7 @@ fn runtime_step() -> Budget {
 }
 
 /// The phases by their sibling.
-const STEADY_FDIV: usize = 1;
+pub(crate) const STEADY_FDIV: usize = 1;
 const STEADY_ADDI: usize = 2;
 const FDIV_TO_ADDI: usize = 3;
 const ADDI_TO_FDIV: usize = 4;
@@ -391,7 +391,9 @@ fn beside_a_steady_fdiv_sibling_the_model_times_the_loop_short_of_this_console_c
     // about 720 cycles an iteration, and even its fastest run about 350.
     // The model gives each `addi` the shared stall and times about 237.
     // The `ppu_issue_shared` capture times the same loop beside the same
-    // sibling at about 195 (`console_ppu_issue_shared.rs`).
+    // sibling at about 195 (`console_ppu_issue_shared.rs`). The
+    // `ppu_issue_fdiv_sibling_forms` capture takes runs at both ends in
+    // every form, so the console sets no one cost here.
     let w = console_words();
     let n = half_iterations(&w);
     let cellgov = replay(STEADY_FDIV, n, Budget::new(1));
