@@ -95,6 +95,27 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
             ra: ra1,
             offset1: off1,
         }),
+        // ld rT1, off1(rA) + ld rT2, off1+8(rA). A first load that writes a
+        // nonzero RA moves the second EA, so that shape stays split.
+        (
+            PpuInstruction::Ld {
+                rt: rt1,
+                ra: ra1,
+                imm: off1,
+            },
+            PpuInstruction::Ld {
+                rt: rt2,
+                ra: ra2,
+                imm: off2,
+            },
+        ) if ra1 == ra2 && (rt1 != ra1 || ra1 == 0) && off1.checked_add(8) == Some(off2) => {
+            Some(PpuInstruction::LdLd {
+                rt1,
+                rt2,
+                ra: ra1,
+                offset1: off1,
+            })
+        }
         // lis rT, hi + ori rT, rT, lo. The shadow quickens `ori 0, 0, 0` to
         // Nop first, so that shape never reaches this arm.
         (PpuInstruction::Lis { rt, imm: hi }, PpuInstruction::Ori { ra, rs, imm: lo })
@@ -280,3 +301,7 @@ mod compare_bc_tests;
 #[cfg(test)]
 #[path = "tests/superpair_lis_tests.rs"]
 mod lis_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_ld_tests.rs"]
+mod ld_tests;

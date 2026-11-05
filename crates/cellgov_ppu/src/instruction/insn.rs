@@ -1649,6 +1649,16 @@ pub enum PpuInstruction {
         ra: u8,
         offset1: i16,
     },
+    /// Two adjacent `ld` loads from one base with `off2 == off1 + 8`.
+    ///
+    /// The shadow fuses the pair only when `rt1` is not a nonzero `ra`, so the
+    /// first load keeps the base and EA2 is EA1 + 8.
+    LdLd {
+        rt1: u8,
+        rt2: u8,
+        ra: u8,
+        offset1: i16,
+    },
     /// `lis rT, hi` followed by `ori rT, rT, lo`. `value` is `hi || lo`.
     LisOri {
         rt: u8,

@@ -262,6 +262,7 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         | I::MflrStd { .. }
         | I::LdMtlr { .. }
         | I::StdStd { .. }
+        | I::LdLd { .. }
         | I::LisOri { .. }
         | I::CmpwiBc { .. }
         | I::CmpwBc { .. }

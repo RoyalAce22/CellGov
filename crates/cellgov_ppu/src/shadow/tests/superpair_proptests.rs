@@ -152,6 +152,28 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                 imm: if rt == 0 && lo == 0 { 1 } else { lo },
             },
         )),
+        // A first load into a nonzero base moves the second EA and does not
+        // fuse, so this arm moves rT1 off it.
+        (reg(), reg(), reg(), ds_displacement()).prop_map(|(rt1, rt2, ra, off)| {
+            let rt1 = if rt1 == ra && ra != 0 {
+                (ra + 1) & 31
+            } else {
+                rt1
+            };
+            let off1 = off.min(i16::MAX - 11);
+            (
+                PpuInstruction::Ld {
+                    rt: rt1,
+                    ra,
+                    imm: off1,
+                },
+                PpuInstruction::Ld {
+                    rt: rt2,
+                    ra,
+                    imm: off1 + 8,
+                },
+            )
+        }),
     ]
 }
 
@@ -232,7 +254,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Six of the sixteen arms are compares that need an aimed
+    // Six of the seventeen arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

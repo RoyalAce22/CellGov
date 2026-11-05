@@ -94,6 +94,18 @@ mod fused_refusal_tests;
 mod fused_lis_entry_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_ld_pair_tests.rs"]
+mod fused_ld_pair_tests;
+
+#[cfg(test)]
+#[path = "tests/fused_ld_provisional_tests.rs"]
+mod fused_ld_provisional_tests;
+
+#[cfg(test)]
+#[path = "tests/ld_ld_console_tests.rs"]
+mod ld_ld_console_tests;
+
+#[cfg(test)]
 #[path = "tests/lis_ori_console_tests.rs"]
 mod lis_ori_console_tests;
 

@@ -236,6 +236,29 @@ pub(crate) fn execute(
             ];
             store_prechecked(store_buf, region_views, 2, stores.into_iter(), "stdstd")
         }
+        // [PPC-Book1 p:39 s:3.3.2 Load Doubleword] ld (x2): RT <- MEM(EA,8); EA = (RA|0)+EXTS(DS||0b00).
+        // [PPC-Book1 p:17 s:2.2] the second load runs after the first. The fuser keeps RT1 off a nonzero RA, so EA2 = EA1 + 8.
+        PpuInstruction::LdLd {
+            rt1,
+            rt2,
+            ra,
+            offset1,
+        } => {
+            let ea1 = state.ea_d_form(ra, offset1);
+            let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
+            let first = match load_ze(&mut port, ea1, Width::B8) {
+                Ok(val) => val,
+                Err(ea) => return ExecuteVerdict::MemFault(ea),
+            };
+            state.set_gpr(rt1 as usize, first);
+            match load_ze(&mut port, ea1.wrapping_add(8), Width::B8) {
+                Ok(val) => {
+                    state.set_gpr(rt2 as usize, val);
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
         // [PPC-Book1 p:51 s:3.3.8 Add Immediate Shifted] addis (lis when RA=0): RT <- EXTS(SI || 0x0000).
         // [PPC-Book1 p:66 s:3.3.11 OR Immediate] ori: RA <- (RS) | (48 zeros || UI), so the word is hi || lo, sign-extended.
         PpuInstruction::LisOri { rt, value } => {

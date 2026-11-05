@@ -1,0 +1,22 @@
+[test]
+name = "ppu_ld_ld_pair"
+
+# A hardware probe: the 64-bit registers two adjacent "ld" loads from one
+# base at d and d+8 leave, into two registers or one, through a branch
+# into the second load, through a first load that overwrites the base,
+# and with negative displacements. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# 18 big-endian u32 words, as ppu/main.c lists: 72 bytes.
+#   0 failed step, 1 its return code; then each register as a high word
+#   and a low word: 2-3 r5 and 4-5 r6 of the plain pair, 6-7 r5 loaded
+#   twice, 8-9 r5 and 10-11 r6 after the branch into the second load,
+#   12-13 r6 after the first load overwrote the base, 14-15 r5 and
+#   16-17 r6 of the negative-displacement pair.
+memory_regions = [
+  { name = "result", addr = 0, size = 72 },
+]
+
+[expect]
+outcome = "completed"

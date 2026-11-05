@@ -132,6 +132,7 @@ pub(super) fn form_for_word(kind: PpuInstructionKind, raw: u32) -> PpuEncodingFo
             | K::MflrStd
             | K::LdMtlr
             | K::StdStd
+            | K::LdLd
             | K::LisOri
             | K::CmpwiBc
             | K::CmpwBc
@@ -227,7 +228,8 @@ pub(super) fn effect_and_outcome(
         | K::Lvxl
         | K::LwzCmpwi
         | K::LwzMtlr
-        | K::LdMtlr => (READ_EFFECTS, LOAD),
+        | K::LdMtlr
+        | K::LdLd => (READ_EFFECTS, LOAD),
         K::Lfs | K::Lfd | K::Lfsx | K::Lfdx => (READ_EFFECTS, LOAD_OR_FAULT),
         K::Stmw | K::Stfs | K::Stfd | K::Stfiwx | K::Stfsx | K::Stfdx => {
             (WRITE_EFFECTS, STORE_OR_FAULT)
@@ -599,6 +601,7 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::MflrStd
         | PpuInstructionKind::LdMtlr
         | PpuInstructionKind::StdStd
+        | PpuInstructionKind::LdLd
         | PpuInstructionKind::LisOri
         | PpuInstructionKind::CmpwiBc
         | PpuInstructionKind::CmpwBc
