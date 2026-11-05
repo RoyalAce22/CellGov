@@ -10,6 +10,12 @@
 
 #![allow(missing_docs)]
 
+/// One predecoded shadow slot costs 12 bytes per text word.
+///
+/// The runtime and every snapshot hold their own copy of the shadow, so
+/// each copy pays this size for each word.
+const _: () = assert!(core::mem::size_of::<Option<PpuInstruction>>() == 12);
+
 /// A decoded PPU instruction. Field names follow PPC ISA conventions
 /// (`rt`/`rs`/`ra`/`rb`, `imm`, `offset`, `link`).
 ///
